@@ -1302,7 +1302,12 @@ export async function bootOrchestrator(options: BootOptions = {}): Promise<BootR
 	const hookReceiptLog = createHookReceiptLog({ persistPath: join(clioStateDir(), "hook-receipts.json") });
 	const extensionHookRoots: ExtensionHookRoot[] = (extensions?.list(process.cwd()) ?? [])
 		.filter((ext) => ext.loadable)
-		.map((ext) => ({ id: ext.id, rootPath: ext.rootPath }));
+		.map((ext) => ({
+			id: ext.id,
+			rootPath: ext.rootPath,
+			scope: ext.scope,
+			installedContentDigest: ext.installedContentDigest as string,
+		}));
 	const userHooks = installUserHooks({
 		cwd: process.cwd(),
 		extensions: extensionHookRoots,

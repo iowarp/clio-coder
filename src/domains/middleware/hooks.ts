@@ -57,6 +57,10 @@ export interface UserHookSource {
 	sourcePath: string;
 	/** Extension id when origin is "extension". */
 	sourceId?: string;
+	/** Install scope when origin is "extension". */
+	extensionScope?: "user" | "project";
+	/** Verified installed tree digest when origin is "extension". */
+	installedContentDigest?: string;
 }
 
 export interface NormalizedCommandHook {
@@ -327,6 +331,8 @@ export interface HookReceipt {
 	exitCode?: number;
 	outputChars?: number;
 	toolName?: string;
+	extensionScope?: "user" | "project";
+	installedContentDigest?: string;
 }
 
 export type HookReceiptSink = (receipt: HookReceipt) => void;
@@ -380,6 +386,10 @@ export function userHookToRegistration(
 		hash: hook.hash,
 		hook: hook.on,
 		kind: hook.spec.kind,
+		...(hook.source.extensionScope !== undefined ? { extensionScope: hook.source.extensionScope } : {}),
+		...(hook.source.installedContentDigest !== undefined
+			? { installedContentDigest: hook.source.installedContentDigest }
+			: {}),
 		...(input.toolName !== undefined ? { toolName: input.toolName } : {}),
 	});
 	const registration: MiddlewareHookRegistration = {

@@ -4,6 +4,7 @@ import { safeResourceWrite } from "../../core/safe-resource-write.js";
 import { clioConfigDir } from "../../core/xdg.js";
 import { evaluateClioCompatibility } from "./compatibility.js";
 import { isRecord, loadManifestFromRoot, trimString } from "./discovery.js";
+import { extensionContentDigest } from "./integrity.js";
 import type {
 	ExtensionInstallOptions,
 	ExtensionInstallResult,
@@ -15,6 +16,11 @@ import type {
 } from "./types.js";
 
 const DEFAULT_STATE: ExtensionState = { version: 1, disabled: [], installed: {} };
+
+type StateReadResult =
+	| { status: "absent"; state: ExtensionState }
+	| { status: "valid"; state: ExtensionState }
+	| { status: "corrupt"; state: ExtensionState; message: string };
 
 export function extensionBaseDir(scope: ExtensionScope, cwd = process.cwd()): string {
 	return scope === "user"
@@ -30,28 +36,42 @@ export function scopeRank(scope: ExtensionScope): number {
 	return scope === "project" ? 2 : 1;
 }
 
-function readState(scope: ExtensionScope, cwd = process.cwd()): ExtensionState {
+function readState(scope: ExtensionScope, cwd = process.cwd()): StateReadResult {
 	const filePath = statePath(scope, cwd);
-	if (!existsSync(filePath)) return structuredClone(DEFAULT_STATE);
+	if (!existsSync(filePath)) return { status: "absent", state: structuredClone(DEFAULT_STATE) };
 	try {
 		const parsed = JSON.parse(readFileSync(filePath, "utf8")) as unknown;
-		if (!isRecord(parsed) || parsed.version !== 1) return structuredClone(DEFAULT_STATE);
-		const disabled = Array.isArray(parsed.disabled)
-			? parsed.disabled.filter((entry): entry is string => typeof entry === "string")
-			: [];
-		const installed = isRecord(parsed.installed)
-			? Object.fromEntries(
-					Object.entries(parsed.installed).flatMap(([id, raw]) => {
-						if (!isRecord(raw)) return [];
-						const installedAt = trimString(raw.installedAt) ?? new Date(0).toISOString();
-						const source = trimString(raw.source);
-						return [[id, { installedAt, ...(source ? { source } : {}) }]];
-					}),
-				)
-			: {};
-		return { version: 1, disabled, installed };
-	} catch {
-		return structuredClone(DEFAULT_STATE);
+		if (!isRecord(parsed) || parsed.version !== 1) throw new Error("state must be a version 1 object");
+		if (!Array.isArray(parsed.disabled) || !parsed.disabled.every((entry) => typeof entry === "string")) {
+			throw new Error("state.disabled must be an array of strings");
+		}
+		if (!isRecord(parsed.installed)) throw new Error("state.installed must be an object");
+		const installed: ExtensionState["installed"] = {};
+		for (const [id, raw] of Object.entries(parsed.installed)) {
+			if (!isRecord(raw)) throw new Error(`state.installed.${id} must be an object`);
+			const installedAt = trimString(raw.installedAt);
+			if (!installedAt) throw new Error(`state.installed.${id}.installedAt must be a non-empty string`);
+			const source = raw.source === undefined ? undefined : trimString(raw.source);
+			if (raw.source !== undefined && !source) {
+				throw new Error(`state.installed.${id}.source must be a non-empty string`);
+			}
+			const contentDigest = raw.contentDigest === undefined ? undefined : trimString(raw.contentDigest);
+			if (raw.contentDigest !== undefined && (!contentDigest || !/^[a-f0-9]{64}$/u.test(contentDigest))) {
+				throw new Error(`state.installed.${id}.contentDigest must be a SHA-256 digest`);
+			}
+			installed[id] = {
+				installedAt,
+				...(source ? { source } : {}),
+				...(contentDigest ? { contentDigest } : {}),
+			};
+		}
+		return { status: "valid", state: { version: 1, disabled: [...parsed.disabled], installed } };
+	} catch (error) {
+		return {
+			status: "corrupt",
+			state: structuredClone(DEFAULT_STATE),
+			message: error instanceof Error ? error.message : String(error),
+		};
 	}
 }
 
@@ -60,10 +80,63 @@ function writeState(scope: ExtensionScope, state: ExtensionState, cwd = process.
 	safeResourceWrite(filePath, `${JSON.stringify(state, null, 2)}\n`, { encoding: "utf8" });
 }
 
-function installedFromRoot(root: string, scope: ExtensionScope, state: ExtensionState): InstalledExtension | null {
+function installedFromRoot(
+	root: string,
+	scope: ExtensionScope,
+	stateResult: StateReadResult,
+	cwd: string,
+): InstalledExtension | null {
 	const candidate = loadManifestFromRoot(root);
 	const manifest = candidate.manifest;
 	if (!manifest || !candidate.manifestPath) return null;
+	const diagnostics = [...candidate.diagnostics];
+	const provenance = stateResult.state.installed[manifest.id];
+	const expectedDigest = provenance?.contentDigest;
+	let observedDigest: string | undefined;
+	let contentVerified = false;
+	if (stateResult.status === "corrupt") {
+		diagnostics.push({
+			type: "error",
+			message: `extension install state is corrupt: ${stateResult.message}`,
+			path: statePath(scope, cwd),
+		});
+	} else if (stateResult.status === "absent") {
+		diagnostics.push({
+			type: "error",
+			message: "extension install state is absent; installed content cannot be verified",
+			path: statePath(scope, cwd),
+		});
+	} else if (!provenance) {
+		diagnostics.push({
+			type: "error",
+			message: `extension ${manifest.id} is not recorded in install state`,
+			path: statePath(scope, cwd),
+		});
+	} else if (!expectedDigest) {
+		diagnostics.push({
+			type: "error",
+			message: `extension ${manifest.id} install provenance has no content digest; reinstall required`,
+			path: statePath(scope, cwd),
+		});
+	} else {
+		try {
+			observedDigest = extensionContentDigest(root);
+			contentVerified = observedDigest === expectedDigest;
+			if (!contentVerified) {
+				diagnostics.push({
+					type: "error",
+					message: `installed extension content drift detected (expected ${expectedDigest}, observed ${observedDigest})`,
+					path: root,
+				});
+			}
+		} catch (error) {
+			diagnostics.push({
+				type: "error",
+				message: `installed extension content could not be verified: ${error instanceof Error ? error.message : String(error)}`,
+				path: root,
+			});
+		}
+	}
 	const clioRange = manifest.compatibility?.clio;
 	const compatible = clioRange === undefined || evaluateClioCompatibility(clioRange).satisfied;
 	return {
@@ -74,13 +147,15 @@ function installedFromRoot(root: string, scope: ExtensionScope, state: Extension
 		scope,
 		rootPath: root,
 		manifestPath: candidate.manifestPath,
-		enabled: !state.disabled.includes(manifest.id),
-		valid: candidate.valid,
+		enabled: !stateResult.state.disabled.includes(manifest.id),
+		valid: candidate.valid && contentVerified,
 		compatible,
 		effective: false,
 		loadable: false,
+		...(expectedDigest ? { installedContentDigest: expectedDigest } : {}),
+		...(observedDigest ? { observedContentDigest: observedDigest } : {}),
 		resources: manifest.resources,
-		diagnostics: candidate.diagnostics,
+		diagnostics,
 	};
 }
 
@@ -92,7 +167,7 @@ function listScope(scope: ExtensionScope, cwd = process.cwd()): InstalledExtensi
 	for (const entry of readdirSync(base, { withFileTypes: true }).sort((a, b) => a.name.localeCompare(b.name))) {
 		if (!entry.isDirectory()) continue;
 		const root = path.join(base, entry.name);
-		const installed = installedFromRoot(root, scope, state);
+		const installed = installedFromRoot(root, scope, state, cwd);
 		if (installed) out.push(installed);
 	}
 	return out;
@@ -158,7 +233,19 @@ export function installExtension(sourcePath: string, options: ExtensionInstallOp
 	const backupRoot = path.join(parent, `.${candidate.manifest.id}.backup-${process.pid}-${Date.now()}`);
 	let installedReplacement = false;
 	let movedExisting = false;
-	const state = readState(scope, cwd);
+	const stateResult = readState(scope, cwd);
+	if (stateResult.status === "corrupt") {
+		return {
+			diagnostics: [
+				{
+					type: "error",
+					message: `extension install state is corrupt: ${stateResult.message}`,
+					path: statePath(scope, cwd),
+				},
+			],
+		};
+	}
+	const state = stateResult.state;
 	try {
 		mkdirSync(parent, { recursive: true });
 		rmSync(stagingRoot, { recursive: true, force: true });
@@ -171,16 +258,28 @@ export function installExtension(sourcePath: string, options: ExtensionInstallOp
 			// template), so exclude only a bookkeeping file at the package root.
 			filter: (src) => path.relative(source, src) !== "state.json",
 		});
+		const stagedCandidate = loadManifestFromRoot(stagingRoot);
+		if (!stagedCandidate.valid || !stagedCandidate.manifest) {
+			const reasons = stagedCandidate.diagnostics.map((diagnostic) => diagnostic.message).join("; ");
+			throw new Error(`staged extension content is invalid${reasons ? `: ${reasons}` : ""}`);
+		}
+		if (stagedCandidate.manifest.id !== candidate.manifest.id) {
+			throw new Error(`staged extension id changed from ${candidate.manifest.id} to ${stagedCandidate.manifest.id}`);
+		}
+		const contentDigest = extensionContentDigest(stagingRoot);
 		if (existsSync(targetRoot)) {
 			renameSync(targetRoot, backupRoot);
 			movedExisting = true;
 		}
 		renameSync(stagingRoot, targetRoot);
 		installedReplacement = true;
-		state.installed[candidate.manifest.id] = { installedAt: new Date().toISOString(), source };
+		state.installed[candidate.manifest.id] = {
+			installedAt: new Date().toISOString(),
+			source,
+			contentDigest,
+		};
 		state.disabled = state.disabled.filter((entry) => entry !== candidate.manifest?.id);
 		writeState(scope, state, cwd);
-		rmSync(backupRoot, { recursive: true, force: true });
 	} catch (error) {
 		rmSync(stagingRoot, { recursive: true, force: true });
 		if (installedReplacement) rmSync(targetRoot, { recursive: true, force: true });
@@ -197,10 +296,20 @@ export function installExtension(sourcePath: string, options: ExtensionInstallOp
 			],
 		};
 	}
+	const diagnostics = [...candidate.diagnostics];
+	try {
+		rmSync(backupRoot, { recursive: true, force: true });
+	} catch (error) {
+		diagnostics.push({
+			type: "warning",
+			message: `extension installed, but its backup could not be removed: ${error instanceof Error ? error.message : String(error)}`,
+			path: backupRoot,
+		});
+	}
 	const installed = findInstalled(candidate.manifest.id, cwd, scope);
 	return {
 		...(installed ? { extension: installed } : {}),
-		diagnostics: candidate.diagnostics,
+		diagnostics,
 	};
 }
 
@@ -210,7 +319,22 @@ function mutateEnabled(id: string, enabled: boolean, options: ExtensionListOptio
 	if (!target) {
 		return { diagnostics: [{ type: "error", message: `extension ${id} is not installed` }] };
 	}
-	const state = readState(target.scope, cwd);
+	const stateResult = readState(target.scope, cwd);
+	if (stateResult.status !== "valid") {
+		return {
+			diagnostics: [
+				{
+					type: "error",
+					message:
+						stateResult.status === "corrupt"
+							? `extension install state is corrupt: ${stateResult.message}`
+							: "extension install state is absent",
+					path: statePath(target.scope, cwd),
+				},
+			],
+		};
+	}
+	const state = stateResult.state;
 	if (enabled) state.disabled = state.disabled.filter((entry) => entry !== id);
 	else if (!state.disabled.includes(id)) state.disabled.push(id);
 	writeState(target.scope, state, cwd);
@@ -232,8 +356,23 @@ export function removeExtension(id: string, options: ExtensionListOptions = {}):
 	if (!target) {
 		return { diagnostics: [{ type: "error", message: `extension ${id} is not installed` }] };
 	}
+	const stateResult = readState(target.scope, cwd);
+	if (stateResult.status !== "valid") {
+		return {
+			diagnostics: [
+				{
+					type: "error",
+					message:
+						stateResult.status === "corrupt"
+							? `extension install state is corrupt: ${stateResult.message}`
+							: "extension install state is absent",
+					path: statePath(target.scope, cwd),
+				},
+			],
+		};
+	}
+	const state = stateResult.state;
 	rmSync(target.rootPath, { recursive: true, force: true });
-	const state = readState(target.scope, cwd);
 	Reflect.deleteProperty(state.installed, id);
 	state.disabled = state.disabled.filter((entry) => entry !== id);
 	writeState(target.scope, state, cwd);

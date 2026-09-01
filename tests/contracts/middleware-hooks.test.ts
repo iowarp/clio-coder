@@ -3,7 +3,8 @@ import { mkdirSync, mkdtempSync, rmSync, symlinkSync, writeFileSync } from "node
 import { tmpdir } from "node:os";
 import path from "node:path";
 import { afterEach, describe, it } from "node:test";
-import { listInstalledExtensions } from "../../src/domains/extensions/state.js";
+import { installExtension, listInstalledExtensions } from "../../src/domains/extensions/state.js";
+import { type HookReceipt, loadUserHooks, userHookToRegistration } from "../../src/domains/middleware/hooks.js";
 import { readHookSources } from "../../src/domains/middleware/hooks-io.js";
 import {
 	type MiddlewareDiagnostic,
@@ -60,9 +61,62 @@ describe("middleware hook boundary", () => {
 
 		const admitted = listInstalledExtensions(project)
 			.filter((extension) => extension.loadable)
-			.map((extension) => ({ id: extension.id, rootPath: extension.rootPath }));
+			.map((extension) => ({
+				id: extension.id,
+				rootPath: extension.rootPath,
+				scope: extension.scope,
+				installedContentDigest: extension.installedContentDigest as string,
+			}));
 		deepStrictEqual(admitted, []);
 		deepStrictEqual(readHookSources({ cwd: project, extensions: admitted }).batches, []);
+	});
+
+	it("carries verified install scope and content digest into extension hook receipts", () => {
+		const project = scratch();
+		const source = scratch();
+		writeFileSync(
+			path.join(source, "clio-coder-extension.yaml"),
+			[
+				"manifestVersion: 1",
+				"id: receipt-hooks",
+				"name: Receipt Hooks",
+				"version: 1.0.0",
+				"description: Hook receipt provenance fixture.",
+				"resources: {}",
+				"",
+			].join("\n"),
+		);
+		writeFileSync(
+			path.join(source, "hooks.yaml"),
+			"- id: receipted\n  on: before_tool\n  kind: prompt\n  message: verify\n",
+		);
+		const installed = installExtension(source, { cwd: project, scope: "project" }).extension;
+		strictEqual(installed?.loadable, true);
+		const installedContentDigest = installed?.installedContentDigest as string;
+		const { batches } = readHookSources({
+			cwd: project,
+			extensions: [
+				{
+					id: installed?.id as string,
+					rootPath: installed?.rootPath as string,
+					scope: "project",
+					installedContentDigest,
+				},
+			],
+		});
+		const loaded = loadUserHooks(batches, { workspaceRoot: project });
+		strictEqual(loaded.hooks.length, 1);
+		const [hook] = loaded.hooks;
+		if (!hook) throw new Error("expected one loaded extension hook");
+		const receipts: HookReceipt[] = [];
+		const registration = userHookToRegistration(hook, {
+			recordReceipt: (receipt) => receipts.push(receipt),
+			runCommand: () => ({ code: 0, timedOut: false, stdout: "", stderr: "" }),
+			now: () => 123,
+		});
+		registration.evaluate({ hook: "before_tool", toolName: "read" });
+		strictEqual(receipts[0]?.extensionScope, "project");
+		strictEqual(receipts[0]?.installedContentDigest, installedContentDigest);
 	});
 
 	it("evaluates matching registrations in order and exposes prior effects", () => {

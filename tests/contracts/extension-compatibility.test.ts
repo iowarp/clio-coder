@@ -154,14 +154,18 @@ describe("contracts/extension Clio compatibility", () => {
 	it("selects the effective package only from valid and compatible candidates", () => {
 		const project = scratch("valid-winner-project");
 		const userSource = scratch("valid-winner-user");
+		const projectSource = scratch("valid-winner-project-source");
 		const outside = scratch("valid-winner-outside");
 		writeManifest(userSource, "winner-contract", ">=0.0.0", "resources:\n  agents: agents\n");
 		mkdirSync(path.join(userSource, "agents"));
 		writeFileSync(path.join(userSource, "agents", "stable.md"), "# stable\n", "utf8");
 		ok(installExtension(userSource, { cwd: project, scope: "user" }).extension);
 
+		writeManifest(projectSource, "winner-contract", ">=0.0.0", "resources:\n  agents: agents\n");
+		mkdirSync(path.join(projectSource, "agents"));
+		ok(installExtension(projectSource, { cwd: project, scope: "project" }).extension);
 		const projectRoot = path.join(project, ".clio-coder", "extensions", "winner-contract");
-		writeManifest(projectRoot, "winner-contract", ">=0.0.0", "resources:\n  agents: agents\n");
+		rmSync(path.join(projectRoot, "agents"), { recursive: true });
 		mkdirSync(path.join(outside, "agents"));
 		symlinkSync(path.join(outside, "agents"), path.join(projectRoot, "agents"), "dir");
 

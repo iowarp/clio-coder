@@ -43,6 +43,10 @@ export interface InstalledExtension {
 	effective: boolean;
 	/** The single admission decision for extension-owned resources and hooks. */
 	loadable: boolean;
+	/** Digest recorded when this package was transactionally installed. */
+	installedContentDigest?: string;
+	/** Digest observed while checking installed content on this load. */
+	observedContentDigest?: string;
 	resources: ExtensionManifestResources;
 	overriddenBy?: ExtensionScope;
 	diagnostics: ExtensionDiagnostic[];
@@ -62,6 +66,7 @@ export interface ExtensionResourceRoot {
 	path: string;
 	rootPath: string;
 	source: string;
+	installedContentDigest: string;
 }
 
 export interface ExtensionListOptions {
@@ -88,5 +93,5 @@ export interface ExtensionMutationResult {
 export interface ExtensionState {
 	version: 1;
 	disabled: string[];
-	installed: Record<string, { installedAt: string; source?: string }>;
+	installed: Record<string, { installedAt: string; source?: string; contentDigest?: string }>;
 }
