@@ -3,6 +3,7 @@ import { mkdirSync, mkdtempSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { afterEach, describe, it } from "node:test";
+import { parseEditorSteerMention } from "../../src/interactive/editor-steer.js";
 import {
 	createFileReferenceCompletionSource,
 	formatInlineFileReference,
@@ -70,5 +71,12 @@ describe("contracts/file-reference completion", () => {
 		strictEqual(formatInlineFileReference("docs/operator notes.md", false), '@"docs/operator notes.md"');
 		strictEqual(formatInlineFileReference('docs/a"b.txt', false), '@"docs/a\\"b.txt"');
 		strictEqual(formatInlineFileReference("docs/a\\b", true), '@"docs/a\\\\b/"');
+	});
+
+	it("quotes picker spellings that the active-dispatch steer grammar could hijack", () => {
+		const completion = formatInlineFileReference("LICENSE", false);
+
+		strictEqual(completion, '@"LICENSE"');
+		strictEqual(parseEditorSteerMention(`${completion} explain this license`), null);
 	});
 });

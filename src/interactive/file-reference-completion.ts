@@ -4,6 +4,7 @@ import { homedir } from "node:os";
 import { basename, dirname, join, relative, resolve, sep } from "node:path";
 import { enumerateWorkspaceFilesAsync } from "../core/workspace-files.js";
 import { fuzzyFilter, stripTerminalSequences } from "../engine/tui.js";
+import { isEditorSteerTargetToken } from "./editor-steer.js";
 
 const MAX_COMPLETION_ROWS = 40;
 const PREVIEW_BYTES = 2048;
@@ -292,7 +293,7 @@ async function candidateDescription(candidate: FileCandidate): Promise<string> {
 /** Quote a completion exactly the way the inline-reference scanner accepts. */
 export function formatInlineFileReference(path: string, isDirectory: boolean): string {
 	const completionPath = isDirectory ? `${path.replace(/\/$/u, "")}/` : path;
-	if (!/[\s"'\\]/u.test(completionPath)) return `@${completionPath}`;
+	if (!/[\s"'\\]/u.test(completionPath) && !isEditorSteerTargetToken(completionPath)) return `@${completionPath}`;
 	return `@"${completionPath.replaceAll("\\", "\\\\").replaceAll('"', '\\"')}"`;
 }
 
