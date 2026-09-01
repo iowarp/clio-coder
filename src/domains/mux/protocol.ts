@@ -9,12 +9,17 @@
  * to take the documented fallback rather than to log a failure per call.
  *
  * The floors are protocol introductions checked against herdr's changelog and
- * then re-verified with `herdr api schema --json` from PATH 0.7.5/protocol 17
- * and pinned 0.8.2/protocol 21. Worktrees arrived in protocol 10; notification.show
- * and pane.zoom arrived in 17; pane.focus and the layout export/ratio pair are
- * first attested in 21 (17's schema had no pane.focus at all, which is why the
- * old design routed focus through agent authority). Lower one only after
- * checking the schema of the release you are lowering it to.
+ * then re-verified with `herdr api schema --json` on the released artifacts
+ * themselves: 0.7.5 (protocol 17) and the pinned 0.8.2, whose hash-verified
+ * binary speaks protocol 20, not 21. Both schemas carry pane.focus,
+ * layout.export, and layout.set_split_ratio as method constants, so the whole
+ * dock tier floors at 17 alongside notification.show and pane.zoom. (An
+ * earlier attestation put these at 21 after reading a stray dev build that
+ * self-reported "0.8.2" while speaking protocol 21; on the real pin that
+ * floor gated the dock tier off entirely.) Worktrees arrived in protocol 10.
+ * 17 is the oldest schema actually read, not the oldest that might work.
+ * Lower one only after checking the schema of the release you are lowering
+ * it to.
  */
 
 import type { MuxServerInfo } from "./types.js";
@@ -35,10 +40,10 @@ export type MuxGatedMethod =
 export const MUX_METHOD_MIN_PROTOCOL: Readonly<Record<MuxGatedMethod, number>> = {
 	"notification.show": 17,
 	"pane.rename": 17,
-	"pane.focus": 21,
+	"pane.focus": 17,
 	"pane.zoom": 17,
-	"layout.export": 21,
-	"layout.set_split_ratio": 21,
+	"layout.export": 17,
+	"layout.set_split_ratio": 17,
 	"worktree.list": 10,
 	"worktree.create": 10,
 	"worktree.open": 10,

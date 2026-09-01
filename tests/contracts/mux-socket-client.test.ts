@@ -448,7 +448,7 @@ describe("mux socket client", () => {
 
 describe("mux socket client layout tier", () => {
 	it("round-trips geometry, focus, zoom, and the layout tree methods", async () => {
-		const fake = await server({ protocol: 21, version: "0.8.2", area: { width: 100, height: 40 } });
+		const fake = await server({ protocol: 20, version: "0.8.2", area: { width: 100, height: 40 } });
 		const live = client(fake.socketPath);
 
 		// Dock-shaped split: the anchor keeps 70% of the width.
@@ -487,7 +487,7 @@ describe("mux socket client layout tier", () => {
 	});
 
 	it("zooming an unfocused pane reports the focus steal", async () => {
-		const fake = await server({ protocol: 21, version: "0.8.2" });
+		const fake = await server({ protocol: 20, version: "0.8.2" });
 		const live = client(fake.socketPath);
 		const dock = await live.paneSplit({ direction: "right", targetPaneId: "w1:p1", focus: false });
 		// Focus still sits on the anchor, so the zoom must both change and steal.
@@ -498,7 +498,7 @@ describe("mux socket client layout tier", () => {
 	});
 
 	it("maps a stale split path onto a typed error", async () => {
-		const fake = await server({ protocol: 21, version: "0.8.2" });
+		const fake = await server({ protocol: 20, version: "0.8.2" });
 		const live = client(fake.socketPath);
 		await rejects(
 			() => live.layoutSetSplitRatio({ tabId: "w1:t1", path: [true, true], ratio: 0.5 }),
@@ -511,7 +511,7 @@ describe("mux socket client layout tier", () => {
 	});
 
 	it("answers the layout tier with invalid_request below the protocol floor", async () => {
-		const fake = await server({ protocol: 17 });
+		const fake = await server({ protocol: 16 });
 		const live = client(fake.socketPath);
 		for (const attempt of [
 			() => live.paneFocus("w1:p1"),
@@ -527,7 +527,7 @@ describe("mux socket client layout tier", () => {
 	});
 
 	it("delivers layout_updated pushes with parsed geometry and pane_moved id rewrites", async () => {
-		const fake = await server({ protocol: 21, version: "0.8.2", area: { width: 120, height: 40 } });
+		const fake = await server({ protocol: 20, version: "0.8.2", area: { width: 120, height: 40 } });
 		const live = client(fake.socketPath);
 		const dock = await live.paneSplit({ direction: "right", targetPaneId: "w1:p1", ratio: 0.75, focus: false });
 

@@ -75,7 +75,7 @@ export interface MuxOpenUtilityPaneRequest {
 	/**
 	 * Managed placement: the pane becomes this slot's dock, split from the
 	 * anchor with the slot's direction and sized to `share` of the axis
-	 * (clamped, cell-floored). Requires the layout tier (protocol 21); below
+	 * (clamped, cell-floored). Requires the layout tier (protocol 17); below
 	 * the floor the request degrades to a plain split and `direction` applies.
 	 */
 	dock?: { slot: DockSlot; share?: number };
@@ -174,7 +174,7 @@ export function createMuxRuntime(options: MuxRuntimeOptions): MuxRuntime {
 	const registry = createPaneRegistry();
 	const anchorPaneId = detection.self.paneId;
 	/**
-	 * The managed dock tier needs an anchor to split from and the protocol-21
+	 * The managed dock tier needs an anchor to split from and the protocol-17
 	 * layout methods to converge with. Absent either, dock requests degrade to
 	 * plain utility splits and the rest of the tier answers false/empty.
 	 */
