@@ -1,144 +1,179 @@
 import { deepStrictEqual, ok, strictEqual } from "node:assert/strict";
 import { describe, it } from "node:test";
-import type { Skill } from "../../src/domains/resources/index.js";
-import type { MarketplaceSkill } from "../../src/domains/resources/skills/marketplace.js";
-import { visibleWidth } from "../../src/engine/tui.js";
-import { createSlashCommandAutocompleteProvider } from "../../src/interactive/slash-autocomplete.js";
+import type { AutocompleteProvider } from "../../src/engine/tui.js";
+import {
+	type CompletionSource,
+	type CompletionSources,
+	createSlashCommandAutocompleteProvider,
+	type SlashCompletionItem,
+} from "../../src/interactive/slash-autocomplete.js";
 import { commandReference, SLASH_COMMAND_GROUPS } from "../../src/interactive/slash-commands.js";
 
-function makeSkill(overrides: Partial<Skill> & { name: string }): Skill {
-	const base = {
-		description: `${overrides.name} description`,
-		filePath: `/repo/skills/${overrides.name}/SKILL.md`,
-		baseDir: `/repo/skills/${overrides.name}`,
-		content: `---\nname: ${overrides.name}\n---\nBody of ${overrides.name}`,
-		sourceInfo: { path: `/repo/skills/${overrides.name}/SKILL.md`, scope: "project" } as Skill["sourceInfo"],
-		disableModelInvocation: false,
-		source: "clio" as Skill["source"],
-		scope: "project" as Skill["scope"],
-		hash: "0".repeat(64),
-		pathSubject: `/repo/skills/${overrides.name}`,
-		trusted: true,
-		precedence: 0,
-		metadata: {},
-	};
-	return { ...base, ...overrides } as Skill;
+async function suggest(provider: AutocompleteProvider, text: string, cursor = text.length, force = false) {
+	return provider.getSuggestions([text], 0, cursor, { signal: new AbortController().signal, force });
 }
 
-const INSTALLED_SKILLS: Skill[] = [
-	makeSkill({
-		name: "arxiv-literature",
-		description: "Use when the user asks to search arXiv, summarize papers, or trace a scientific claim to sources",
-	}),
-	makeSkill({ name: "find-skills" }),
-];
-const MARKETPLACE_SKILLS: MarketplaceSkill[] = [];
-
-function provider() {
-	return createSlashCommandAutocompleteProvider({
-		basePath: process.cwd(),
-		fdPath: null,
-		listSkills: () => ({ installed: INSTALLED_SKILLS, marketplace: MARKETPLACE_SKILLS }),
-	});
-}
-
-async function suggestionsFor(text: string) {
-	const controller = new AbortController();
-	return provider().getSuggestions([text], 0, text.length, { signal: controller.signal });
+function provider(sources: CompletionSources = {}) {
+	return createSlashCommandAutocompleteProvider({ basePath: process.cwd(), fdPath: null, completionSources: sources });
 }
 
 describe("contracts/slash-autocomplete", () => {
-	it("does not list every skill for the bare /skill selector with nothing after it", async () => {
-		// Regression for FINDINGS.md F1: a bare "/skill" used to match the
-		// skill-name completion branch with an empty prefix, listing every
-		// installed skill with the first pre-selected. Because the editor
-		// commits the highlighted autocomplete item on the same Enter key that
-		// submits a line, pressing Enter on a bare "/skill" silently invoked
-		// whichever skill sorted first instead of opening the Skills Hub.
-		const suggestions = await suggestionsFor("/skill");
-		const skillItems = (suggestions?.items ?? []).filter(
-			(item) => item.value.startsWith("skill:") || item.value.startsWith("marketplace:"),
+	it("activates only for a leading line-one slash and uses case-insensitive canonical prefix matching", async () => {
+		const autocomplete = provider();
+		strictEqual(await suggest(autocomplete, "explain /con"), null);
+		strictEqual(
+			await autocomplete.getSuggestions(["hello", "/con"], 1, 4, { signal: new AbortController().signal }),
+			null,
 		);
-		strictEqual(skillItems.length, 0);
+		deepStrictEqual(
+			(await suggest(autocomplete, "  /CON"))?.items.map((item) => item.value),
+			["context"],
+		);
+		deepStrictEqual(
+			(await suggest(autocomplete, "/CONTEXT"))?.items.map((item) => item.value),
+			["context"],
+		);
+		strictEqual(await suggest(autocomplete, "/context"), null, "an exact submit-ready command is suppressed");
 	});
 
-	it("lists every skill once a name separator follows /skill (space)", async () => {
-		const suggestions = await suggestionsFor("/skill ");
-		const values = (suggestions?.items ?? []).map((item) => item.value);
-		ok(values.includes("skill:arxiv-literature"));
-		ok(values.includes("skill:find-skills"));
-	});
-
-	it("ellipsizes skill descriptions before the 80-column popup can hard-clip them", async () => {
-		const items = (await suggestionsFor("/skill "))?.items ?? [];
-		const description = items.find((item) => item.value === "skill:arxiv-literature")?.description;
-		ok(description);
-		ok(description.endsWith("…"), description);
-		ok(visibleWidth(description) <= 40, description);
-		ok(!description.endsWith("summ"), description);
-	});
-
-	it("filters skill-name suggestions by the typed prefix after the separator", async () => {
-		const suggestions = await suggestionsFor("/skill fi");
-		const values = (suggestions?.items ?? []).map((item) => item.value);
-		ok(values.includes("skill:find-skills"));
-		ok(!values.includes("skill:arxiv-literature"));
-	});
-
-	it("never offers retired command aliases", async () => {
-		for (const [typed, retired] of [
-			["/exi", "exit"],
-			["/ct", "ctx"],
-			["/comp", "compact"],
-			["/model", "models"],
-			["/conf", "config"],
-		] as const) {
-			const values = ((await suggestionsFor(typed))?.items ?? []).map((item) => item.value);
-			ok(!values.includes(retired), `${typed} offered retired /${retired}: ${values.join(", ")}`);
-		}
-		strictEqual(await suggestionsFor("/skill:fi"), null);
-		strictEqual(await suggestionsFor("/skills:fi"), null);
-	});
-
-	it("presents bare slash as canonical commands ordered by command group", async () => {
-		const values = ((await suggestionsFor("/"))?.items ?? []).map((item) => item.value);
+	it("keeps top-level rows in explicit group/manifest order without filtering re-sorts", async () => {
+		const rows = (await suggest(provider(), "/"))?.items as SlashCompletionItem[] | undefined;
+		const values = rows?.map((item) => item.value);
 		const expected = SLASH_COMMAND_GROUPS.flatMap((group) =>
 			commandReference()
-				.filter((command) => command.group === group)
-				.map((command) => command.name),
+				.filter((entry) => entry.group === group)
+				.map((entry) => entry.name),
 		);
-		deepStrictEqual(values, expected, "the palette contains canonical commands in group order");
-		for (const retired of ["exit", "ctx", "compact", "models", "config", "skill:", "skills:"]) {
-			ok(!values.includes(retired), `bare slash does not list retired /${retired}`);
+		deepStrictEqual(values, expected);
+		for (const retired of ["library", "prompts", "extensions", "interop", "targets", "scoped-models"]) {
+			ok(!values?.includes(retired));
 		}
+		ok(rows?.every((row) => row.effectDescription));
+		ok(rows?.find((row) => row.value === "run")?.remainingGrammar?.includes("<agent>"));
 	});
 
-	it("ellipsizes canonical command descriptions before the popup can hard-clip them", async () => {
-		const items = (await suggestionsFor("/"))?.items ?? [];
-		const descriptions = items.flatMap((item) => (item.description ? [item.description] : []));
-		ok(descriptions.length > 0);
-		for (const description of descriptions) {
-			ok(visibleWidth(description) <= 80, `description exceeds the 80-column popup budget: ${description}`);
-		}
-		const truncated = descriptions.filter((description) => description.endsWith("…"));
-		ok(truncated.length > 0, "the contract exercises composed-description truncation");
-		for (const name of ["context", "output"]) {
-			const description = items.find((item) => item.value === name)?.description;
-			ok(description?.endsWith("…"), `/${name} truncation ends in an ellipsis instead of a mid-token hard clip`);
-		}
+	it("replaces the command or argument token under the cursor and preserves suffix text", async () => {
+		const autocomplete = provider();
+		const commandLine = "/con suffix";
+		const commandSuggestions = await suggest(autocomplete, commandLine, 4);
+		const command = commandSuggestions?.items.find((item) => item.value === "context");
+		ok(command && commandSuggestions);
+		deepStrictEqual(autocomplete.applyCompletion([commandLine], 0, 4, command, commandSuggestions.prefix), {
+			lines: ["/context suffix"],
+			cursorLine: 0,
+			cursorCol: 8,
+		});
+
+		const argumentLine = "/context re suffix";
+		const argumentSuggestions = await suggest(autocomplete, argumentLine, 11);
+		const refresh = argumentSuggestions?.items.find((item) => item.value === "refresh");
+		ok(refresh && argumentSuggestions);
+		deepStrictEqual(autocomplete.applyCompletion([argumentLine], 0, 11, refresh, argumentSuggestions.prefix), {
+			lines: ["/context refresh suffix"],
+			cursorLine: 0,
+			cursorCol: 16,
+		});
 	});
 
-	it("preserves canonical subcommand argument-stem completion", async () => {
-		const canonical = ((await suggestionsFor("/context in"))?.items ?? []).map((item) => item.value);
-		deepStrictEqual(canonical, ["init"], "canonical subcommand stem completes");
-
-		strictEqual(await suggestionsFor("/ctx re"), null, "retired aliases have no argument completions");
+	it("uses the same token-under-cursor replacement for explicit path completion", async () => {
+		const autocomplete = provider();
+		const line = "pack-suffix";
+		const suggestions = await suggest(autocomplete, line, 4, true);
+		const packageJson = suggestions?.items.find((item) => item.value === "package.json");
+		ok(packageJson && suggestions);
+		deepStrictEqual(autocomplete.applyCompletion([line], 0, 4, packageJson, suggestions.prefix), {
+			lines: ["package.json"],
+			cursorLine: 0,
+			cursorCol: 12,
+		});
 	});
 
-	it("keeps retired colon skill prefixes out of the command list", async () => {
-		const values = ((await suggestionsFor("/ski"))?.items ?? []).map((item) => item.value);
-		ok(values.includes("skill"), `the canonical command is offered: ${values.join(", ")}`);
-		ok(!values.includes("skill:"), `got: ${values.join(", ")}`);
-		ok(!values.includes("skills:"), `got: ${values.join(", ")}`);
+	it("preserves quotes and advances beyond the closing quote when another slot follows", async () => {
+		const autocomplete = provider({
+			"settings-areas": async () => [{ id: "chat", value: "chat", label: "Chat", description: "Chat settings" }],
+		});
+		const line = `/settings 'ch' tail`;
+		const suggestions = await suggest(autocomplete, line, 13);
+		const chat = suggestions?.items[0];
+		ok(chat && suggestions);
+		deepStrictEqual(autocomplete.applyCompletion([line], 0, 13, chat, suggestions.prefix), {
+			lines: [`/settings 'chat' tail`],
+			cursorLine: 0,
+			cursorCol: 16,
+		});
+	});
+
+	it("models bare-valid parents as explicit structured submenus only on request", async () => {
+		const autocomplete = provider();
+		strictEqual(await suggest(autocomplete, "/context"), null);
+		const opened = await suggest(autocomplete, "/context", 8, true);
+		deepStrictEqual(
+			opened?.items.map((item) => ({ label: item.label, kind: (item as SlashCompletionItem).kind })),
+			[{ label: "Open …", kind: "open-submenu" }],
+		);
+		const submenu = await suggest(autocomplete, "/context ");
+		deepStrictEqual(
+			submenu?.items.map((item) => ({ value: item.value, kind: (item as SlashCompletionItem).kind })),
+			["compact", "recall", "init", "refresh", "reset"].map((value) => ({ value, kind: "submenu" })),
+		);
+	});
+
+	it("advances flags to values, appends a space for another slot, and suppresses exact automatic rows", async () => {
+		const autocomplete = provider();
+		const advanced = await suggest(autocomplete, "/run", 4, true);
+		ok(advanced?.items[0]);
+		deepStrictEqual(autocomplete.applyCompletion(["/run"], 0, 4, advanced.items[0], advanced.prefix).lines, ["/run "]);
+		const flagSuggestions = await suggest(autocomplete, "/run --thi");
+		const thinking = flagSuggestions?.items.find((item) => item.value === "--thinking");
+		ok(thinking && flagSuggestions);
+		strictEqual((thinking as SlashCompletionItem).appendSpace, true);
+		deepStrictEqual(autocomplete.applyCompletion(["/run --thi"], 0, 10, thinking, flagSuggestions.prefix).lines, [
+			"/run --thinking ",
+		]);
+		deepStrictEqual(
+			(await suggest(autocomplete, "/context REF"))?.items.map((item) => item.value),
+			["refresh"],
+		);
+		strictEqual(await suggest(autocomplete, "/context refresh"), null);
+	});
+
+	it("filters sensitive values, exposes disabled reasons, and refuses disabled acceptance", async () => {
+		const autocomplete = provider({
+			targets: async () => [
+				{ id: "ok", value: "online", label: "online", description: "healthy" },
+				{ id: "off", value: "offline", label: "offline", description: "saved", disabledReason: "target is down" },
+				{ id: "secret", value: "token-value", label: "token-value", description: "secret", sensitive: true },
+			],
+		});
+		const suggestions = await suggest(autocomplete, "/run --target o");
+		deepStrictEqual(
+			suggestions?.items.map((item) => item.value),
+			["online", "offline"],
+		);
+		const disabled = suggestions?.items[1] as SlashCompletionItem;
+		strictEqual(disabled.description, "target is down");
+		strictEqual(disabled.disabledReason, "target is down");
+		deepStrictEqual(autocomplete.applyCompletion(["/run --target o"], 0, 15, disabled, suggestions?.prefix ?? ""), {
+			lines: ["/run --target o"],
+			cursorLine: 0,
+			cursorCol: 15,
+		});
+	});
+
+	it("generation-checks async providers so stale results cannot overwrite a newer prefix", async () => {
+		const pending: Array<{ prefix: string; resolve: (values: Awaited<ReturnType<CompletionSource>>) => void }> = [];
+		const targets: CompletionSource = (request) =>
+			new Promise((resolve) => pending.push({ prefix: request.prefix, resolve }));
+		const autocomplete = provider({ targets });
+		const older = suggest(autocomplete, "/run --target a");
+		const newer = suggest(autocomplete, "/run --target ab");
+		strictEqual(pending.length, 2);
+		pending[1]?.resolve([{ id: "about", value: "about", label: "about", description: "new" }]);
+		deepStrictEqual(
+			(await newer)?.items.map((item) => item.value),
+			["about"],
+		);
+		pending[0]?.resolve([{ id: "alpha", value: "alpha", label: "alpha", description: "old" }]);
+		strictEqual(await older, null);
 	});
 });
