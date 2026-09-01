@@ -20,7 +20,7 @@ export interface InitReport {
 }
 
 const CONFIG_SUBDIRS = ["agents"] as const;
-const DATA_SUBDIRS = ["memory", "evidence"] as const;
+const DATA_SUBDIRS = ["memory", "evidence", "evals"] as const;
 const STATE_SUBDIRS = ["sessions", "audit", "receipts", "interviews", "scratch"] as const;
 
 interface InstallMetadata {

@@ -1,5 +1,7 @@
 export type { BuildEvidenceOptions } from "./build.js";
 export { buildEvidence } from "./build.js";
+export type { BuildEvalEvidenceOptions } from "./eval.js";
+export { buildEvalEvidence, evalEvidenceId } from "./eval.js";
 export { FINISH_CONTRACT_EVIDENCE_TAGS, finishContractEvidenceTags } from "./finish-contract-map.js";
 export type { RunEscalationCounts, RunProvenanceView } from "./provenance.js";
 export {
@@ -93,6 +95,9 @@ export type {
 	EvidenceAuditLinkedRow,
 	EvidenceBuildResult,
 	EvidenceCleanTraceRow,
+	EvidenceEvalCommandTraceRow,
+	EvidenceEvalRawTraceRow,
+	EvidenceEvalTraceRow,
 	EvidenceFinding,
 	EvidenceFindingsFile,
 	EvidenceGateDecisionsFile,
