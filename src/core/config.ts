@@ -1679,11 +1679,7 @@ export function validateSettings(raw: unknown): SettingsValidationResult {
 						if (parsed !== undefined) settings.interface.panes.notifications = parsed;
 					}
 					if ("layout" in panes) {
-						const parsed = expectEnum(issues, "interface.panes.layout", panes.layout, [
-							"off",
-							"workers",
-							"cockpit",
-						] as const);
+						const parsed = expectEnum(issues, "interface.panes.layout", panes.layout, ["off", "workers", "cockpit"] as const);
 						if (parsed !== undefined) settings.interface.panes.layout = parsed;
 					}
 					if ("workers" in panes) {

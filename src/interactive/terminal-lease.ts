@@ -127,7 +127,7 @@ class BootSubmissionPanel implements Component {
 }
 
 function stageZeroRoot(
-	mode: Readonly<ClioSettings>["terminal"]["tuiMode"],
+	mode: Readonly<ClioSettings>["interface"]["mode"],
 	editor: ClioEditor,
 	pending: Component,
 	shutdownArmed: () => boolean,
@@ -179,9 +179,8 @@ export function createProcessTerminalLease(options: CreateProcessTerminalLeaseOp
 	const keybindings = createKeybindingManager(settings);
 	let editorChrome: EditorChrome = {
 		getModelLabel: () =>
-			[settings.orchestrator.target, settings.orchestrator.model].filter((part) => part && part.length > 0).join("·") ||
-			"starting",
-		getThinkingLabel: () => settings.orchestrator.thinkingLevel ?? "off",
+			[settings.chat.target, settings.chat.model].filter((part) => part && part.length > 0).join("·") || "starting",
+		getThinkingLabel: () => settings.chat.thinkingLevel ?? "off",
 		getSubmitKeyLabel: () => keybindings.getKeys("tui.input.submit")[0] ?? "Enter",
 		getNewlineKeyLabel: () => keybindings.getKeys("tui.input.newLine")[0] ?? "Shift+Enter",
 	};
@@ -199,7 +198,7 @@ export function createProcessTerminalLease(options: CreateProcessTerminalLeaseOp
 	const shell =
 		options.testing?.shell ??
 		createProcessInteractiveShell({
-			tuiMode: settings.terminal.tuiMode,
+			tuiMode: settings.interface.mode,
 			...(options.onStage0Commit ? { onFirstFrameCommit: options.onStage0Commit } : {}),
 		});
 	const tui = shell.tui as TUI;
@@ -207,7 +206,7 @@ export function createProcessTerminalLease(options: CreateProcessTerminalLeaseOp
 	editor.focused = true;
 	const pendingPanel = new BootSubmissionPanel();
 	let shutdownArmed = false;
-	const stage0 = stageZeroRoot(settings.terminal.tuiMode, editor, pendingPanel, () => shutdownArmed);
+	const stage0 = stageZeroRoot(settings.interface.mode, editor, pendingPanel, () => shutdownArmed);
 	const host = new RootHost(stage0);
 
 	let state: TerminalLeaseState = "created";

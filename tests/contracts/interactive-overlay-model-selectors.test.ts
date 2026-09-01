@@ -1,6 +1,7 @@
 import { deepStrictEqual, strictEqual } from "node:assert/strict";
 import { describe, it } from "node:test";
 import type { ClioSettings } from "../../src/core/config.js";
+import { DEFAULT_SETTINGS } from "../../src/core/defaults.js";
 import type { ProvidersContract } from "../../src/domains/providers/index.js";
 import type { OverlayHandle, TUI } from "../../src/engine/tui.js";
 import {
@@ -42,7 +43,7 @@ function makeLifecycle(options: {
 		providers,
 		bus: { on: () => () => {}, emit: () => {} },
 		...(settings ? { getSettings: () => settings } : {}),
-		writeSettings: (next: ClioSettings) => events.push(`write:${JSON.stringify(next.modelSelector?.favorites ?? [])}`),
+		writeSettings: (next: ClioSettings) => events.push(`write:${JSON.stringify(next.chat.modelPicker?.favorites ?? [])}`),
 		onSelectModel: (ref: { target: string; model: string }, scope: string) =>
 			events.push(`select:${ref.target}/${ref.model}:${scope}`),
 		getFleetNodes: () => [],
@@ -79,7 +80,7 @@ function makeLifecycle(options: {
 describe("contracts/interactive model selector overlays", () => {
 	it("sets each selector state before constructing its overlay", () => {
 		const events: string[] = [];
-		const settings = { modelSelector: { recentLimit: 12, favorites: [] } } as unknown as ClioSettings;
+		const settings = structuredClone(DEFAULT_SETTINGS) as ClioSettings;
 		let lifecycle: ReturnType<typeof createOverlayLifecycle>;
 		const factories: SelectorFactories = {
 			model: () => {
@@ -127,7 +128,7 @@ describe("contracts/interactive model selector overlays", () => {
 	// lands, so nothing is applied between the two.
 	it("routes a picked model through the scope dialog and applies at the chosen scope", () => {
 		const events: string[] = [];
-		const settings = { modelSelector: { recentLimit: 12, favorites: [] } } as unknown as ClioSettings;
+		const settings = structuredClone(DEFAULT_SETTINGS) as ClioSettings;
 		let modelDeps: OpenModelOverlayDeps | undefined;
 		let scopeDeps: OpenModelScopeOverlayDeps | undefined;
 		const lifecycle = makeLifecycle({
@@ -165,7 +166,7 @@ describe("contracts/interactive model selector overlays", () => {
 
 	it("applies globally when the operator says so, and applies nothing when they cancel", () => {
 		const events: string[] = [];
-		const settings = { modelSelector: { recentLimit: 12, favorites: [] } } as unknown as ClioSettings;
+		const settings = structuredClone(DEFAULT_SETTINGS) as ClioSettings;
 		let modelDeps: OpenModelOverlayDeps | undefined;
 		let scopeDeps: OpenModelScopeOverlayDeps | undefined;
 		const lifecycle = makeLifecycle({

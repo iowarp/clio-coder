@@ -51,27 +51,30 @@ describe("contracts/customization", () => {
 
 		it("applies built-in < user < project < project.local precedence with per-key sources", () => {
 			const { cwd, userPath } = scratch();
-			write(userPath, "autonomy: suggest\nmodelSelector:\n  recentLimit: 5\n");
-			write(join(cwd, ".clio-coder", "settings.yaml"), "autonomy: read-only\nbudget:\n  sessionCeilingUsd: 10\n");
-			write(join(cwd, ".clio-coder", "settings.local.yaml"), "theme: midnight\n");
+			write(userPath, "safety:\n  autonomy: suggest\nchat:\n  modelPicker:\n    recentLimit: 5\n");
+			write(
+				join(cwd, ".clio-coder", "settings.yaml"),
+				"safety:\n  autonomy: read-only\n  limits:\n    sessionCostUsd: 10\n",
+			);
+			write(join(cwd, ".clio-coder", "settings.local.yaml"), "interface:\n  desktopNotifications: true\n");
 
 			const result = readLayeredSettings(cwd, { userPath });
-			strictEqual(result.settings.autonomy, "read-only");
-			strictEqual(result.settings.modelSelector.recentLimit, 5);
-			strictEqual(result.settings.budget.sessionCeilingUsd, 10);
-			strictEqual(result.settings.theme, "midnight");
+			strictEqual(result.settings.safety.autonomy, "read-only");
+			strictEqual(result.settings.chat.modelPicker.recentLimit, 5);
+			strictEqual(result.settings.safety.limits.sessionCostUsd, 10);
+			strictEqual(result.settings.interface.desktopNotifications, true);
 
-			strictEqual(settingsSourceFor(result.sources, "autonomy"), "project");
-			strictEqual(settingsSourceFor(result.sources, "modelSelector.recentLimit"), "user");
-			strictEqual(settingsSourceFor(result.sources, "budget.sessionCeilingUsd"), "project");
-			strictEqual(settingsSourceFor(result.sources, "theme"), "project.local");
+			strictEqual(settingsSourceFor(result.sources, "safety.autonomy"), "project");
+			strictEqual(settingsSourceFor(result.sources, "chat.modelPicker.recentLimit"), "user");
+			strictEqual(settingsSourceFor(result.sources, "safety.limits.sessionCostUsd"), "project");
+			strictEqual(settingsSourceFor(result.sources, "interface.desktopNotifications"), "project.local");
 			// A key no layer set falls back to built-in.
 			strictEqual(settingsSourceFor(result.sources, "version"), "built-in");
 		});
 
 		it("strips credentials from project layers and never lets them reach effective settings", () => {
 			const { cwd, userPath } = scratch();
-			write(userPath, "autonomy: suggest\n");
+			write(userPath, "safety:\n  autonomy: suggest\n");
 			write(
 				join(cwd, ".clio-coder", "settings.yaml"),
 				"targets:\n  - id: t\n    runtime: ollama\n    auth:\n      apiKey: SUPER_SECRET\n",
@@ -86,10 +89,10 @@ describe("contracts/customization", () => {
 
 		it("degrades a malformed project layer to the lower layers with an issue", () => {
 			const { cwd, userPath } = scratch();
-			write(userPath, "autonomy: suggest\n");
+			write(userPath, "safety:\n  autonomy: suggest\n");
 			write(join(cwd, ".clio-coder", "settings.yaml"), ":\n  - [bad yaml");
 			const result = readLayeredSettings(cwd, { userPath });
-			strictEqual(result.settings.autonomy, "suggest");
+			strictEqual(result.settings.safety.autonomy, "suggest");
 			ok(result.issues.length >= 1);
 		});
 
@@ -97,24 +100,24 @@ describe("contracts/customization", () => {
 			const { cwd, userPath } = scratch();
 			write(userPath, ":\n  - [bad yaml");
 			throws(() => readStrictLayeredSettings(cwd, { userPath }), SettingsValidationError);
-			write(userPath, "autonomy: definitely-invalid\n");
-			write(join(cwd, ".clio-coder", "settings.yaml"), "autonomy: suggest\n");
+			write(userPath, "safety:\n  autonomy: definitely-invalid\n");
+			write(join(cwd, ".clio-coder", "settings.yaml"), "safety:\n  autonomy: suggest\n");
 			throws(
 				() => readStrictLayeredSettings(cwd, { userPath }),
 				SettingsValidationError,
 				"a project override cannot hide an invalid user-layer value from the launch gate",
 			);
 
-			write(userPath, "autonomy: suggest\n");
+			write(userPath, "safety:\n  autonomy: suggest\n");
 			write(join(cwd, ".clio-coder", "settings.yaml"), ":\n  - [bad yaml");
 			const result = readStrictLayeredSettings(cwd, { userPath });
-			strictEqual(result.settings.autonomy, "suggest");
+			strictEqual(result.settings.safety.autonomy, "suggest");
 			ok(result.issues.some((issue) => issue.origin === "project"));
 		});
 
 		it("attributes project validation failures to the project layer", () => {
 			const { cwd, userPath } = scratch();
-			write(userPath, "autonomy: suggest\n");
+			write(userPath, "safety:\n  autonomy: suggest\n");
 			write(join(cwd, ".clio-coder", "settings.yaml"), "targets:\n  - id: 7\n    runtime: ollama\n");
 			const result = readLayeredSettings(cwd, { userPath });
 			ok(result.issues.some((issue) => issue.origin === "project" && issue.path === "targets[0].id"));
@@ -124,33 +127,30 @@ describe("contracts/customization", () => {
 			const { cwd } = scratch();
 			const userFile = settingsPath();
 			mkdirSync(dirname(userFile), { recursive: true });
-			writeFileSync(userFile, "autonomy: auto-edit\n", "utf8");
+			writeFileSync(userFile, "version: 2\nsafety:\n  autonomy: auto-edit\n", "utf8");
 			write(
 				join(cwd, ".clio-coder", "settings.yaml"),
 				"targets:\n  - id: project-target\n    runtime: openai-compat\n    url: http://127.0.0.1:1234/v1\n    defaultModel: project-model\n",
 			);
 			try {
 				const updated = updateLayeredSettings(cwd, (settings) => {
-					settings.orchestrator.target = "project-target";
-					settings.orchestrator.model = "project-model";
+					settings.chat.target = "project-target";
+					settings.chat.model = "project-model";
 				});
-				strictEqual(updated.orchestrator.target, "project-target");
-				strictEqual(updated.orchestrator.model, "project-model");
+				strictEqual(updated.chat.target, "project-target");
+				strictEqual(updated.chat.model, "project-model");
 				const saved = readFileSync(userFile, "utf8");
 				ok(saved.includes("target: project-target"));
 				ok(!saved.includes("127.0.0.1"), "the project target descriptor must not be copied into the user layer");
-				strictEqual(readLayeredSettings(cwd).settings.orchestrator.target, "project-target");
+				strictEqual(readLayeredSettings(cwd).settings.chat.target, "project-target");
 
-				write(
-					join(cwd, ".clio-coder", "settings.local.yaml"),
-					"orchestrator:\n  target: project-target\n  model: project-model\n",
-				);
+				write(join(cwd, ".clio-coder", "settings.local.yaml"), "chat:\n  target: project-target\n  model: project-model\n");
 				const beforeRefusal = readFileSync(userFile, "utf8");
 				throws(
 					() =>
 						updateLayeredSettings(cwd, (settings) => {
-							settings.orchestrator.target = null;
-							settings.orchestrator.model = null;
+							settings.chat.target = null;
+							settings.chat.model = null;
 						}),
 					/higher-precedence project setting/u,
 				);
@@ -171,7 +171,7 @@ describe("contracts/customization", () => {
 				throws(
 					() =>
 						updateLayeredSettings(cwd, (settings) => {
-							settings.autonomy = "read-only";
+							settings.safety.autonomy = "read-only";
 						}),
 					SettingsValidationError,
 				);
@@ -268,7 +268,7 @@ describe("contracts/customization", () => {
 	describe("contracts/3d config inspect graph", () => {
 		it("reports project rules, profile, hooks, and settings sources in the JSON contract", () => {
 			const { cwd } = scratch();
-			write(join(cwd, ".clio-coder", "settings.yaml"), "autonomy: read-only\n");
+			write(join(cwd, ".clio-coder", "settings.yaml"), "safety:\n  autonomy: read-only\n");
 			write(join(cwd, ".clio-coder", "rules", "r.md"), "# Rule\nbody\n");
 			write(join(cwd, ".clio-coder", "profile.yaml"), "responsePosture: concise\n");
 			write(join(cwd, ".clio-coder", "hooks.yaml"), "- on: turn_start\n  kind: prompt\n  message: hi\n");
@@ -279,7 +279,7 @@ describe("contracts/customization", () => {
 			deepStrictEqual(roundTrip.entries.length, graph.entries.length);
 
 			// The project settings key is attributed to the project layer.
-			const autonomy = graph.settings.find((entry) => entry.key === "autonomy");
+			const autonomy = graph.settings.find((entry) => entry.key === "safety.autonomy");
 			strictEqual(autonomy?.source, "project");
 
 			const categories = new Set(graph.entries.map((entry) => entry.category));

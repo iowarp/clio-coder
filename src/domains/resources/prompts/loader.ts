@@ -393,7 +393,7 @@ export function expandPromptTemplateInput(input: string, templates: PromptTempla
 		};
 	}
 	if (!template.trusted) {
-		const message = `prompt template ${template.name} comes from an untrusted project root; set skills.trustProjectCompatRoots to use it`;
+		const message = `prompt template ${template.name} comes from an untrusted project root; set integrations.projectResources.trustProjectImports to use it`;
 		return {
 			expanded: false,
 			text: input,

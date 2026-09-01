@@ -11,7 +11,7 @@ import { loadDomains } from "../core/domain-loader.js";
 import type { SafeEventBus } from "../core/event-bus.js";
 import { expandInlineFileReferencesAsync } from "../core/file-references.js";
 import { setGitCommitAttributionEnabled } from "../core/git-commit-attribution.js";
-import { configureGuardrails } from "../core/guardrails.js";
+import { configureGuardrails, guardrailValuesFromSettings } from "../core/guardrails.js";
 import { HEADLESS_PERMISSION_DENIED_REASON } from "../core/headless-permission.js";
 import { rememberRecentModel } from "../core/recent-models.js";
 import { protectedResidencyModels } from "../core/residency-protection.js";
@@ -231,11 +231,11 @@ function bannerConfigurationLine(): string {
 	}
 	// A dangling chat target normalizes to null in the schema, so a deleted
 	// target arrives here as no target at all rather than as a name to report.
-	const targetId = settings.orchestrator?.target;
+	const targetId = settings.chat?.target;
 	if (!targetId) {
 		return chalk.yellow("no model target configured. Run `clio-coder configure` to add one.");
 	}
-	const model = settings.orchestrator?.model;
+	const model = settings.chat?.model;
 	return chalk.dim(`target ${targetId}${model ? ` · model ${model}` : " · no default model"}`);
 }
 
@@ -268,17 +268,17 @@ function applyHeadlessSettingsOverlay(
 ): ClioSettings {
 	const next = structuredClone(settings);
 	if (!overrides) return next;
-	const previousTarget = next.orchestrator.target;
+	const previousTarget = next.chat.target;
 	if (overrides.target !== undefined) {
-		next.orchestrator.target = overrides.target;
-		if (overrides.model === undefined && (previousTarget !== overrides.target || !next.orchestrator.model)) {
+		next.chat.target = overrides.target;
+		if (overrides.model === undefined && (previousTarget !== overrides.target || !next.chat.model)) {
 			const target = next.targets.find((entry) => entry.id === overrides.target);
-			if (target) next.orchestrator.model = target.defaultModel ?? null;
+			if (target) next.chat.model = target.defaultModel ?? null;
 		}
 	}
-	if (overrides.model !== undefined) next.orchestrator.model = overrides.model;
-	if (overrides.thinking !== undefined) next.orchestrator.thinkingLevel = overrides.thinking;
-	if (overrides.autonomy !== undefined) next.autonomy = overrides.autonomy;
+	if (overrides.model !== undefined) next.chat.model = overrides.model;
+	if (overrides.thinking !== undefined) next.chat.thinkingLevel = overrides.thinking;
+	if (overrides.autonomy !== undefined) next.safety.autonomy = overrides.autonomy;
 	return next;
 }
 
@@ -349,8 +349,8 @@ function createBackgroundMemoryModelClient(
 	timeoutMs: number,
 	bus: Pick<SafeEventBus, "emit"> | null,
 ): BackgroundMemoryRoute | null {
-	const targetId = settings.background.target?.trim();
-	const wireModelId = settings.background.model?.trim();
+	const targetId = settings.context.memory.target?.trim();
+	const wireModelId = settings.context.memory.model?.trim();
 	if (!targetId || !wireModelId) return null;
 	// One model cannot both drive the action agent and think its way through a
 	// memory step: the memory call would contend with the agent's own decoding on
@@ -447,8 +447,8 @@ function createBackgroundMemoryModelClient(
  */
 function agentRoleToolWarnings(providers: ProvidersContract, settings: Readonly<ClioSettings>): string[] {
 	const roles: ReadonlyArray<{ label: string; target: string | null; model: string | null }> = [
-		{ label: "orchestrator", target: settings.orchestrator.target, model: settings.orchestrator.model },
-		{ label: "workers.default", target: settings.workers.default.target, model: settings.workers.default.model },
+		{ label: "orchestrator", target: settings.chat.target, model: settings.chat.model },
+		{ label: "workers.default", target: settings.fleet.default.target, model: settings.fleet.default.model },
 	];
 	const warnings: string[] = [];
 	for (const role of roles) {
@@ -480,12 +480,12 @@ function backgroundSharesReasoningModelWithOrchestrator(
 	providers: ProvidersContract,
 	settings: Readonly<ClioSettings>,
 ): boolean {
-	const backgroundModel = settings.background.model?.trim();
-	const orchestratorModel = settings.orchestrator.model?.trim();
+	const backgroundModel = settings.context.memory.model?.trim();
+	const orchestratorModel = settings.chat.model?.trim();
 	if (!backgroundModel || backgroundModel !== orchestratorModel) return false;
-	if (settings.background.target?.trim() !== settings.orchestrator.target?.trim()) return false;
+	if (settings.context.memory.target?.trim() !== settings.chat.target?.trim()) return false;
 	try {
-		const status = providers.list().find((entry) => entry.target.id === settings.background.target?.trim());
+		const status = providers.list().find((entry) => entry.target.id === settings.context.memory.target?.trim());
 		if (!status) return false;
 		return resolveModelCapabilities(status, backgroundModel, providers.knowledgeBase).reasoning === true;
 	} catch {
@@ -528,8 +528,8 @@ async function resolveCompactionModel(
 	settings: ClioSettings,
 	providers: ProvidersContract,
 ): Promise<CompactionResolution | null> {
-	const targetId = settings.orchestrator?.target ?? null;
-	const wireModelId = settings.orchestrator?.model ?? null;
+	const targetId = settings.chat?.target ?? null;
+	const wireModelId = settings.chat?.model ?? null;
 	if (!targetId || !wireModelId) return null;
 	const target = resolveTarget(providers, targetId);
 	if (!target) return null;
@@ -650,7 +650,7 @@ async function runCompactionFlow(
 	}
 	const resolved = await resolveCompactionModel(settings, providers);
 	if (!resolved) {
-		throw new Error("no model configured; set orchestrator.target + orchestrator.model");
+		throw new Error("no model configured; set chat.target + chat.model");
 	}
 	// Summarize only the active branch: after a /tree switch the raw file
 	// still holds abandoned sibling turns, and a summary that folds them in
@@ -757,7 +757,7 @@ export function advanceScopedTarget(
 	settings: Readonly<ClioSettings>,
 	direction: "forward" | "backward",
 ): { target: string; model: string | null } | null {
-	const scope = settings.scope ?? [];
+	const scope = settings.chat.modelPicker.cycleSet ?? [];
 	if (scope.length === 0) return null;
 	const registry = getRuntimeRegistry();
 	if (registry.list().length === 0) registerBuiltinRuntimes(registry);
@@ -769,8 +769,8 @@ export function advanceScopedTarget(
 		return runtime !== null && isOrchestratorEligibleRuntime(runtime);
 	});
 	if (filteredScope.length === 0) return null;
-	const activeTarget = settings.orchestrator.target ?? "";
-	const activeModel = settings.orchestrator.model ?? "";
+	const activeTarget = settings.chat.target ?? "";
+	const activeModel = settings.chat.model ?? "";
 	const activeCombinedRef = activeTarget.length > 0 && activeModel.length > 0 ? `${activeTarget}/${activeModel}` : "";
 	const idx = filteredScope.findIndex((entry) => entry === activeCombinedRef || entry === activeTarget);
 	const base = idx === -1 ? 0 : idx + (direction === "forward" ? 1 : filteredScope.length - 1);
@@ -868,7 +868,7 @@ export async function bootOrchestrator(options: BootOptions = {}): Promise<BootR
 	// is why `panes.enabled` is a restart-scoped row: the decision runs once,
 	// here. An inactive rung loads nothing: the whole extension, mux domain
 	// included, lives behind the dynamic import below.
-	const muxEnablement = resolvePanesEnablement(options.panes, options.startupSettings?.panes.enabled);
+	const muxEnablement = resolvePanesEnablement(options.panes, options.startupSettings?.interface.panes.enabled);
 	const withPanes = muxInteractive && muxEnablement !== "off" ? await import("./with-panes.js") : null;
 
 	const result = await loadDomains(
@@ -958,7 +958,7 @@ export async function bootOrchestrator(options: BootOptions = {}): Promise<BootR
 			bootStderr("Clio Coder: --api-key supplied but providers domain unavailable; ignoring.\n");
 		} else {
 			const settingsNow = applyHeadlessSettingsOverlay(config?.get() ?? readSettings(), options.headless);
-			const activeTargetId = settingsNow.orchestrator?.target;
+			const activeTargetId = settingsNow.chat?.target;
 			const target = resolveTarget(providers, activeTargetId);
 			const runtime = target ? providers.getRuntime(target.runtime) : null;
 			if (target && runtime) {
@@ -1086,12 +1086,12 @@ export async function bootOrchestrator(options: BootOptions = {}): Promise<BootR
 	// resolves settings-first with env as emergency override; install the
 	// settings section before any guard registration or tool reads it.
 	const resolvedSettings = config?.get() ?? readSettings();
-	configureGuardrails(resolvedSettings.guardrails);
+	configureGuardrails(guardrailValuesFromSettings(resolvedSettings));
 
 	// The run event journal resolves the same way for the same reason: the sink
 	// sits on the dispatch event path, where reading settings.yaml would be both
 	// a cost and a throw site, so the composition root installs the value once.
-	configureRunEventJournal(resolvedSettings.panes.journal);
+	configureRunEventJournal(resolvedSettings.fleet.history.journal);
 
 	// Guard registrations on the middleware contract, in order: loop guard,
 	// protected artifacts (last among guards so it absorbs protect_path effects
@@ -1185,7 +1185,7 @@ export async function bootOrchestrator(options: BootOptions = {}): Promise<BootR
 		taskMemoryBank.clear();
 		taskMemorySessionId = currentSessionId;
 	};
-	const memorySettings = (config?.get() ?? readSettings()).memory.intervention;
+	const memorySettings = (config?.get() ?? readSettings()).context.memory;
 	// Bound late: the registration is built here, but the buffer a deferred
 	// reminder lands in belongs to the chat loop that has not been composed yet.
 	let deferredMemoryReminderSink: ((message: string) => void) | null = null;
@@ -1254,14 +1254,21 @@ export async function bootOrchestrator(options: BootOptions = {}): Promise<BootR
 		onDeferredReminder: (message) => deferredMemoryReminderSink?.(message),
 		getSettings: () => {
 			ensureTaskMemorySession();
-			return effectiveSettingsForDispatch?.().memory.intervention ?? memorySettings;
+			const memory = effectiveSettingsForDispatch?.().context.memory ?? memorySettings;
+			return {
+				enabled: memory.enabled,
+				everyNTools: memory.cadenceToolCalls,
+				windowSteps: memory.trajectorySteps,
+				maxTokens: memory.maxOutputTokens,
+				timeoutMs: memory.timeoutMs,
+			};
 		},
 		getModelClient: () => {
 			const settings = effectiveSettingsForDispatch?.();
 			backgroundMemoryRoute =
 				settings === undefined
 					? null
-					: createBackgroundMemoryModelClient(providers, settings, settings.memory.intervention.timeoutMs, bus);
+					: createBackgroundMemoryModelClient(providers, settings, settings.context.memory.timeoutMs, bus);
 			return backgroundMemoryRoute?.client ?? null;
 		},
 		getModelMaxTokens: (configuredMaxTokens) =>
@@ -1319,9 +1326,9 @@ export async function bootOrchestrator(options: BootOptions = {}): Promise<BootR
 	// through these two functions so a fallback added to one surface cannot
 	// silently skip another.
 	const resolveBaselineAutonomy = (): AutonomyLevel =>
-		effectiveSettingsForDispatch?.().autonomy ??
+		effectiveSettingsForDispatch?.().safety.autonomy ??
 		options.headless?.autonomy ??
-		(config?.get() ?? readSettings()).autonomy ??
+		(config?.get() ?? readSettings()).safety.autonomy ??
 		"auto-edit";
 	const resolveEffectiveAutonomy = (): AutonomyLevel => activeAcpSessionAutonomy ?? resolveBaselineAutonomy();
 	// Marketplace self-promotion: coordinator-only by this wiring (never a
@@ -1485,9 +1492,9 @@ export async function bootOrchestrator(options: BootOptions = {}): Promise<BootR
 		// always refusing.
 		...(panes && mux?.mode !== "none" ? { panes } : {}),
 		getCostCeilingUsd: () => result.getContract<SchedulingContract>("scheduling")?.ceilingUsd() ?? 0,
-		...(config ? { getWorkerRosters: () => config.get().workers.rosters } : {}),
+		...(config ? { getWorkerRosters: () => config.get().fleet.rosters } : {}),
 		getSkillLoaderOptions: () => ({
-			trustProjectCompatRoots: config?.get().skills.trustProjectCompatRoots === true,
+			trustProjectCompatRoots: config?.get().integrations.projectResources.trustProjectImports === true,
 			disableDiscovery: options.noSkills === true || options.headless?.noSkills === true,
 			...(options.skillPaths && options.skillPaths.length > 0
 				? { explicitSkillPaths: options.skillPaths }
@@ -1528,7 +1535,7 @@ export async function bootOrchestrator(options: BootOptions = {}): Promise<BootR
 		sessionStateGeneration += 1;
 		// Child-process seams read the effective setting from the environment,
 		// and the session view may override the saved value.
-		setGitCommitAttributionEnabled(getCurrentSettings().attribution.gitCommits);
+		setGitCommitAttributionEnabled(getCurrentSettings().integrations.git.commitAttribution);
 	};
 	const getCurrentSettings = (): ClioSettings => {
 		// Recents live in the data dir (core/recent-models.ts), never in
@@ -1559,15 +1566,11 @@ export async function bootOrchestrator(options: BootOptions = {}): Promise<BootR
 	const unsubscribeCommitAttributionSync = bus.on(BusChannels.ConfigHotReload, () => bumpSessionState());
 	termination.onDrain(() => unsubscribeCommitAttributionSync());
 	const getTaskMemorySeedOffer = (): { source: string; count: number } | null => {
-		return taskMemoryHandoffSeedOffer(process.cwd(), getCurrentSettings().memory.intervention.enabled);
+		return taskMemoryHandoffSeedOffer(process.cwd(), getCurrentSettings().context.memory.enabled);
 	};
 	const seedCurrentTaskMemoryFromHandoff = () => {
 		ensureTaskMemorySession();
-		return seedTaskMemoryFromNewestHandoff(
-			taskMemoryBank,
-			process.cwd(),
-			getCurrentSettings().memory.intervention.enabled,
-		);
+		return seedTaskMemoryFromNewestHandoff(taskMemoryBank, process.cwd(), getCurrentSettings().context.memory.enabled);
 	};
 	if (resumedSessionAtBoot) {
 		const offer = getTaskMemorySeedOffer();
@@ -1587,7 +1590,7 @@ export async function bootOrchestrator(options: BootOptions = {}): Promise<BootR
 	// routing change updates the set on the next read.
 	setProtectedModelsProvider(() => protectedResidencyModels(getCurrentSettings()));
 
-	const validatedKeybindings = validateKeybindings((config?.get() ?? readSettings()).keybindings ?? {});
+	const validatedKeybindings = validateKeybindings((config?.get() ?? readSettings()).interface.keybindings ?? {});
 	const invalidBindings = validatedKeybindings.invalid;
 	if (invalidBindings.length > 0) {
 		const notice = formatInvalidKeybindingNotice(invalidBindings);
@@ -1646,10 +1649,10 @@ export async function bootOrchestrator(options: BootOptions = {}): Promise<BootR
 	const readAcpSafeSettings = (): AcpSafeSettingsSnapshot => {
 		const settings = getCurrentSettings();
 		return {
-			target: settings.orchestrator.target,
-			model: settings.orchestrator.model,
-			thinkingLevel: settings.orchestrator.thinkingLevel ?? "off",
-			autonomy: settings.autonomy,
+			target: settings.chat.target,
+			model: settings.chat.model,
+			thinkingLevel: settings.chat.thinkingLevel ?? "off",
+			autonomy: settings.safety.autonomy,
 		};
 	};
 	/**
@@ -1659,15 +1662,15 @@ export async function bootOrchestrator(options: BootOptions = {}): Promise<BootR
 	 */
 	const commitAcpSafeSettings = (patch: AcpSafeSettingsPatch): AcpSafeSettingsSnapshot => {
 		const orchestrator: NonNullable<RoutingPatch["orchestrator"]> = {};
-		if (patch["orchestrator.target"] !== undefined) orchestrator.target = patch["orchestrator.target"];
-		if (patch["orchestrator.model"] !== undefined) orchestrator.model = patch["orchestrator.model"];
-		if (patch["orchestrator.thinkingLevel"] !== undefined) {
-			orchestrator.thinkingLevel = patch["orchestrator.thinkingLevel"];
+		if (patch["chat.target"] !== undefined) orchestrator.target = patch["chat.target"];
+		if (patch["chat.model"] !== undefined) orchestrator.model = patch["chat.model"];
+		if (patch["chat.thinkingLevel"] !== undefined) {
+			orchestrator.thinkingLevel = patch["chat.thinkingLevel"];
 		}
 		const routingPatch: RoutingPatch | null = Object.keys(orchestrator).length > 0 ? { orchestrator } : null;
 		persistSavedMutation((saved) => {
 			if (routingPatch !== null) mergeRoutingPatchIntoSettings(saved, routingPatch);
-			if (patch.autonomy !== undefined) saved.autonomy = patch.autonomy;
+			if (patch["safety.autonomy"] !== undefined) saved.safety.autonomy = patch["safety.autonomy"];
 		});
 		if (routingPatch !== null) {
 			applyRoutingPatch(sessionRouting, routingPatch);
@@ -1766,7 +1769,7 @@ export async function bootOrchestrator(options: BootOptions = {}): Promise<BootR
 	middleware.registerHook(
 		createWatchdogRegistration({
 			firesOnThisSurface: interactive,
-			getSettings: () => (effectiveSettingsForDispatch?.() ?? getCurrentSettings()).watchdog,
+			getSettings: () => (effectiveSettingsForDispatch?.() ?? getCurrentSettings()).safety.review,
 			getScope: () => {
 				const board = taskBoard.snapshot();
 				if (board === null) return null;
@@ -1778,7 +1781,7 @@ export async function bootOrchestrator(options: BootOptions = {}): Promise<BootR
 					dispatch,
 					bus,
 					...(agents ? { getAgentRoleFacts: agentRoleFactsResolver((id: string) => agents.getSpec(id)) } : {}),
-					target: (effectiveSettingsForDispatch?.() ?? getCurrentSettings()).watchdog.target,
+					target: (effectiveSettingsForDispatch?.() ?? getCurrentSettings()).safety.review.target,
 					...(deferredWatchdogNoticeSink ? { emitNotice: deferredWatchdogNoticeSink } : {}),
 				}),
 		}),
@@ -1824,7 +1827,7 @@ export async function bootOrchestrator(options: BootOptions = {}): Promise<BootR
 			try {
 				const records = loadMemoryRecordsSync(clioDataDir());
 				const settings = getCurrentSettings();
-				const targetId = session?.current()?.target ?? settings.orchestrator?.target;
+				const targetId = session?.current()?.target ?? settings.chat?.target;
 				const runtimeId = targetId ? providers.getTarget(targetId)?.runtime : undefined;
 				return buildMemoryPromptSection(records, {
 					scopes: ["global", "repo", "runtime"],
@@ -1840,7 +1843,7 @@ export async function bootOrchestrator(options: BootOptions = {}): Promise<BootR
 			const meta = session?.current();
 			if (!meta) throw new Error("task memory handoff requires an active session");
 			const settings = getCurrentSettings();
-			const targetId = meta.target ?? settings.orchestrator?.target;
+			const targetId = meta.target ?? settings.chat?.target;
 			const runtimeId = targetId ? providers.getTarget(targetId)?.runtime : undefined;
 			return renderTaskMemoryHandoffSource(taskMemoryBank.snapshot(), {
 				sessionId: meta.id,
@@ -1983,8 +1986,8 @@ export async function bootOrchestrator(options: BootOptions = {}): Promise<BootR
 				routing: () => {
 					const settings = getCurrentSettings();
 					return {
-						target: settings.orchestrator.target,
-						model: settings.orchestrator.model,
+						target: settings.chat.target,
+						model: settings.chat.model,
 					};
 				},
 				onActiveSessionAutonomyChange: (level) => {
@@ -2000,7 +2003,7 @@ export async function bootOrchestrator(options: BootOptions = {}): Promise<BootR
 				},
 				permissionTimeoutMs:
 					options.acp.permissionTimeoutMs ??
-					config?.get().delegation.defaults.permissionTimeoutMs ??
+					config?.get().integrations.externalAgents.defaults.permissionTimeoutMs ??
 					DEFAULT_DELEGATION_PERMISSION_TIMEOUT_MS,
 			});
 			// Same ordering the termination drain hook relies on: an aborted turn's
@@ -2141,8 +2144,8 @@ export async function bootOrchestrator(options: BootOptions = {}): Promise<BootR
 			const settings = getCurrentSettings();
 			const bank = taskMemoryBank.snapshot();
 			return {
-				enabled: settings.memory.intervention.enabled,
-				tier: settings.background.target && settings.background.model ? "llm" : "rules",
+				enabled: settings.context.memory.enabled,
+				tier: settings.context.memory.target && settings.context.memory.model ? "llm" : "rules",
 				size: taskMemoryBankSize(bank),
 				lastDecision: memoryIntervention.lastDecision(),
 				bank,
@@ -2244,25 +2247,21 @@ export async function bootOrchestrator(options: BootOptions = {}): Promise<BootR
 		onSetThinkingLevel: (level, scope) => {
 			const current = getCurrentSettings();
 			const nextLevel =
-				resolveModelRuntimeCapabilitiesForProviders(
-					providers,
-					current.orchestrator.target,
-					current.orchestrator.model,
-					level,
-				)?.thinking.effectiveLevel ?? "off";
+				resolveModelRuntimeCapabilitiesForProviders(providers, current.chat.target, current.chat.model, level)?.thinking
+					.effectiveLevel ?? "off";
 			applyRoutingAtScope({ orchestrator: { thinkingLevel: nextLevel } }, scope ?? "global");
 		},
 		onCycleThinking: () => {
 			const current = getCurrentSettings();
 			const thinking = resolveModelRuntimeCapabilitiesForProviders(
 				providers,
-				current.orchestrator.target,
-				current.orchestrator.model,
-				current.orchestrator.thinkingLevel ?? "off",
+				current.chat.target,
+				current.chat.model,
+				current.chat.thinkingLevel ?? "off",
 			)?.thinking;
 			const effectiveAvailable = thinking?.supportedLevels ?? (["off"] as ThinkingLevel[]);
 			const nextLevel = advanceThinkingLevel(
-				thinking?.effectiveLevel ?? current.orchestrator.thinkingLevel ?? "off",
+				thinking?.effectiveLevel ?? current.chat.thinkingLevel ?? "off",
 				effectiveAvailable,
 			);
 			updateSessionRouting({ orchestrator: { thinkingLevel: nextLevel } });
@@ -2287,7 +2286,7 @@ export async function bootOrchestrator(options: BootOptions = {}): Promise<BootR
 			applyRoutingAtScope({ orchestrator: { target, model } }, scope);
 			// Recents live in the state dir, not settings.yaml, and are how a swap
 			// stays reachable in the picker. A session-scoped swap still earns one.
-			rememberRecentModel(`${target}/${model}`, getCurrentSettings().modelSelector.recentLimit);
+			rememberRecentModel(`${target}/${model}`, getCurrentSettings().chat.modelPicker.recentLimit);
 		},
 		writeSettings: (next) => applySettingsBlob(next),
 		commitSetting: (id, next, scope) => commitSetting(id, next, scope),
@@ -2308,8 +2307,8 @@ export async function bootOrchestrator(options: BootOptions = {}): Promise<BootR
 					onNewSession: () => {
 						const settings = getCurrentSettings();
 						const input: { cwd: string; target?: string; model?: string } = { cwd: process.cwd() };
-						if (settings.orchestrator.target) input.target = settings.orchestrator.target;
-						if (settings.orchestrator.model) input.model = settings.orchestrator.model;
+						if (settings.chat.target) input.target = settings.chat.target;
+						if (settings.chat.model) input.model = settings.chat.model;
 						session.create(input);
 						taskBoard.snapshot();
 						ensureTaskMemorySession();

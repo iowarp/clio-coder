@@ -151,7 +151,7 @@ describe("contracts/proactive memory spend", { concurrency: false }, () => {
 			60_000,
 			"the bounded default is the contract; a memory step cannot wait unboundedly",
 		);
-		strictEqual(DEFAULT_SETTINGS.memory.intervention.timeoutMs, 60_000);
+		strictEqual(DEFAULT_SETTINGS.context.memory.timeoutMs, 60_000);
 
 		const raced = await runTaskMemoryPolicy(
 			new TaskMemoryBank(),

@@ -92,8 +92,8 @@ export function createStatusController(deps: StatusControllerDeps): StatusContro
 	const currentTarget = (): { targetId: string; modelId: string } => {
 		const settings = deps.getSettings?.();
 		return {
-			targetId: settings?.orchestrator?.target ?? "",
-			modelId: settings?.orchestrator?.model ?? "",
+			targetId: settings?.chat?.target ?? "",
+			modelId: settings?.chat?.model ?? "",
 		};
 	};
 

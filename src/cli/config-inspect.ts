@@ -317,12 +317,12 @@ function inspectSafetyAndMemory(cwd: string, graph: CustomizationGraph): void {
 		const layered = readLayeredSettings(cwd);
 		graph.entries.push({
 			category: "safety",
-			id: "autonomy",
-			scope: settingsSourceFor(layered.sources, "autonomy"),
+			id: "safety.autonomy",
+			scope: settingsSourceFor(layered.sources, "safety.autonomy"),
 			reloadClass: "hot",
 			trust: "n/a",
 			precedence: "single",
-			detail: { autonomy: layered.settings.autonomy ?? "auto-edit" },
+			detail: { autonomy: layered.settings.safety.autonomy ?? "auto-edit" },
 		});
 	} catch (err) {
 		graph.issues.push(`safety: ${err instanceof Error ? err.message : String(err)}`);

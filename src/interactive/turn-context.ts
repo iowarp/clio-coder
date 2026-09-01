@@ -488,13 +488,13 @@ export function createTurnContext(deps: TurnContextDeps): TurnContext {
 
 	const resolveWindowWithoutRuntime = (): ContextWindowDetails | null => {
 		const settings = deps.getSettings();
-		const targetId = settings.orchestrator?.target?.trim();
-		const wireModelId = settings.orchestrator?.model?.trim();
+		const targetId = settings.chat?.target?.trim();
+		const wireModelId = settings.chat?.model?.trim();
 		if (!targetId || !wireModelId) return null;
 		const resolved = resolveRuntimeTarget(deps.providers, {
 			targetId,
 			wireModelId,
-			requestedThinkingLevel: settings.orchestrator?.thinkingLevel ?? "off",
+			requestedThinkingLevel: settings.chat?.thinkingLevel ?? "off",
 			use: "orchestrator",
 			requireTools: false,
 			requireOutputBudget: true,
@@ -679,7 +679,7 @@ export function createTurnContext(deps: TurnContextDeps): TurnContext {
 		const activeAutoTurnId = force ? null : state.activeUserTurnId;
 		if (activeAutoTurnId && emptyAutoCompactTurnId === activeAutoTurnId) return false;
 		const settings = deps.getSettings();
-		const cfg = settings.compaction;
+		const cfg = settings.context.compaction;
 		const autoEnabled = cfg?.auto !== false;
 		if (!force && !autoEnabled) return false;
 		let preSummaryStageActed = false;
@@ -709,7 +709,7 @@ export function createTurnContext(deps: TurnContextDeps): TurnContext {
 				if (process.env.CLIO_CODER_LEGACY_MASK === "1") {
 					let masked: ReturnType<typeof maskStaleObservations>;
 					try {
-						masked = maskStaleObservations(deps.readSessionEntries() ?? [], cfg?.excludeLastTurns ?? 6);
+						masked = maskStaleObservations(deps.readSessionEntries() ?? [], 6);
 					} catch (error) {
 						middleware.fireCompactionHook("mask_observations", trigger, estimate.tokens);
 						deps.bus?.emit(BusChannels.CompactionBegin, { trigger, at: Date.now() });
@@ -1030,7 +1030,7 @@ export function createTurnContext(deps: TurnContextDeps): TurnContext {
 		async ensureSessionPrompt(agentRuntime: AgentRuntime): Promise<CompiledSessionPrompt | null> {
 			if (!deps.prompts) return null;
 			const settings = deps.getSettings();
-			const autonomy = settings.autonomy ?? "auto-edit";
+			const autonomy = settings.safety.autonomy ?? "auto-edit";
 			const sessionId = deps.session?.current()?.id ?? "";
 			const workingContextKey = [...sessionWorkingContextPaths].sort().join("\0");
 			const key = `${agentRuntime.targetId}|${agentRuntime.wireModelId}|${autonomy}|${sessionId}|${workingContextKey}`;
@@ -1175,7 +1175,7 @@ export function createTurnContext(deps: TurnContextDeps): TurnContext {
 			if (before.contextWindow <= 0 || before.tokens <= 0) return undefined;
 
 			const settings = deps.getSettings();
-			const threshold = settings.compaction?.threshold ?? DEFAULT_COMPACTION_THRESHOLD;
+			const threshold = settings.context.compaction?.threshold ?? DEFAULT_COMPACTION_THRESHOLD;
 			const verdict = shouldCompact(before.tokens, threshold, before.contextWindow);
 			let compacted = false;
 			if (verdict.shouldCompact) {
@@ -1218,8 +1218,8 @@ export function createTurnContext(deps: TurnContextDeps): TurnContext {
 
 		contextLedger(): ContextLedger {
 			const settings = deps.getSettings();
-			const compactionThreshold = settings.compaction?.threshold ?? null;
-			const compactionAuto = settings.compaction?.auto !== false;
+			const compactionThreshold = settings.context.compaction?.threshold ?? null;
+			const compactionAuto = settings.context.compaction?.auto !== false;
 			// Without a runtime (before the first turn of this process, /resume
 			// included) the window comes from the live resolution or the resumed
 			// snapshot, and the token facts from the snapshot: the resumed
@@ -1231,8 +1231,8 @@ export function createTurnContext(deps: TurnContextDeps): TurnContext {
 						contextWindowSlots: state.runtime.runtimeResolution.contextWindowDetails.contextWindowSlots,
 					}
 				: windowWithoutRuntime();
-			const provider = state.runtime?.targetId ?? settings.orchestrator?.target ?? null;
-			const model = state.runtime?.wireModelId ?? settings.orchestrator?.model ?? null;
+			const provider = state.runtime?.targetId ?? settings.chat?.target ?? null;
+			const model = state.runtime?.wireModelId ?? settings.chat?.model ?? null;
 			const liveToolCount = state.runtime?.agent.state.tools.length ?? 0;
 
 			if (!currentContextSnapshot) {

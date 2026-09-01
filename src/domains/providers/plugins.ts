@@ -4,7 +4,7 @@
  *   1. `~/.config/clio-coder/runtimes/`: any `.js` file whose default export is a valid
  *      RuntimeDescriptor. Resolved from `clioConfigDir()` so CLIO_CODER_HOME /
  *      CLIO_CODER_CONFIG_DIR overrides flow through.
- *   2. npm packages listed under `settings.runtimePlugins` (optional field).
+ *   2. npm packages listed under `settings.integrations.runtimePlugins`.
  *      Each package must export a `clioRuntimes: RuntimeDescriptor[]` array.
  *
  * Missing directories, import failures, and descriptor conflicts are logged

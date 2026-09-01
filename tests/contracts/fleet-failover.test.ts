@@ -161,7 +161,7 @@ describe("dead-node failover", () => {
 
 	it("excludes a failed remote node and fails over to another remote node, not local", async () => {
 		const settings = structuredClone(DEFAULT_SETTINGS);
-		settings.workers.maxRetries = 1;
+		settings.fleet.retry.maxRetries = 1;
 		settings.fleet.nodes = [
 			{ id: "blade", host: "blade.lan", maxWorkers: 2 },
 			{ id: "mini", host: "mini.lan", maxWorkers: 2 },

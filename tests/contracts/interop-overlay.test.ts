@@ -205,7 +205,7 @@ describe("contracts/interop overlay", () => {
 			mounted.frame.handleInput?.("a");
 
 			ok(
-				readSettings().delegation.agents.some((agent) => agent.id === "codex"),
+				readSettings().integrations.externalAgents.entries.some((agent) => agent.id === "codex"),
 				"the accept wired the peer",
 			);
 			const after = groups(mounted.frame);

@@ -154,7 +154,8 @@ export function createPanesRuntime(deps: PanesRuntimeDeps): PanesOperations {
 	return {
 		status(): PanesStatus {
 			const detection = deps.mux.detection();
-			const panes = deps.getSettings().panes;
+			const settings = deps.getSettings();
+			const panes = settings.interface.panes;
 			return {
 				mode: deps.mux.mode,
 				available: deps.mux.available(),
@@ -164,8 +165,8 @@ export function createPanesRuntime(deps: PanesRuntimeDeps): PanesOperations {
 				settings: {
 					enabled: panes.enabled,
 					notifications: panes.notifications,
-					journal: panes.journal,
-					yazi: { ...panes.yazi },
+					journal: settings.fleet.history.journal,
+					yazi: { ...panes.files },
 				},
 				yazi: yaziController?.status() ?? closedYaziStatus(),
 				panes: [...inventory(deps.mux.list()), ...pendingOpens.values()],
@@ -186,7 +187,7 @@ export function createPanesRuntime(deps: PanesRuntimeDeps): PanesOperations {
 					return { status: "refused", reason: `unknown preset: ${request.preset}` };
 				}
 				if (preset.id === "yazi") {
-					if (!deps.getSettings().panes.yazi.enabled) {
+					if (!deps.getSettings().interface.panes.files.enabled) {
 						return { status: "refused", reason: "the files pane is disabled by panes.yazi.enabled" };
 					}
 					if (!yaziController) {

@@ -35,8 +35,8 @@ function settingsWithNode(maxWorkers = 1): typeof DEFAULT_SETTINGS {
 	settings.targets = [
 		{ id: "primary", runtime: "openai", defaultModel: "batch-model", pricing: { input: 0, output: 70 } },
 	];
-	settings.workers.default.target = "primary";
-	settings.workers.default.model = "batch-model";
+	settings.fleet.default.target = "primary";
+	settings.fleet.default.model = "batch-model";
 	settings.fleet.nodes = [{ id: "mini", host: "mini.test", maxWorkers }];
 	return settings;
 }
@@ -90,9 +90,9 @@ function twoTargetSettings(): typeof DEFAULT_SETTINGS {
 		{ id: "primary", runtime: "openai", defaultModel: "batch-model" },
 		{ id: "secondary", runtime: "openai", defaultModel: "batch-model" },
 	];
-	settings.workers.default.target = "primary";
-	settings.workers.default.model = "batch-model";
-	settings.workers.maxRetries = 1;
+	settings.fleet.default.target = "primary";
+	settings.fleet.default.model = "batch-model";
+	settings.fleet.retry.maxRetries = 1;
 	return settings;
 }
 

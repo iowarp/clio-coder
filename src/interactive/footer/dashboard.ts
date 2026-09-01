@@ -392,33 +392,31 @@ export function buildFooterDashboard(deps: FooterDashboardDeps): FooterDashboard
 		const tokensLabel = tokens || (usage?.totalTokens ? `Σ${formatFooterTokens(usage.totalTokens)}` : null);
 
 		const statuses = deps.providers.list();
-		const current = settings?.orchestrator?.target
-			? (statuses.find((s) => s.target.id === settings.orchestrator?.target) ?? null)
-			: null;
+		const current = settings?.chat?.target ? (statuses.find((s) => s.target.id === settings.chat?.target) ?? null) : null;
 
-		const target = formatTargetLabel(settings?.orchestrator?.target, settings?.orchestrator?.model);
+		const target = formatTargetLabel(settings?.chat?.target, settings?.chat?.model);
 
 		const resolution = resolveModelRuntimeCapabilitiesForProviders(
 			deps.providers,
-			settings?.orchestrator?.target,
-			settings?.orchestrator?.model,
-			settings?.orchestrator?.thinkingLevel ?? "off",
+			settings?.chat?.target,
+			settings?.chat?.model,
+			settings?.chat?.thinkingLevel ?? "off",
 		);
 
-		const thinking = resolution?.thinking.display ?? settings?.orchestrator?.thinkingLevel ?? "off";
+		const thinking = resolution?.thinking.display ?? settings?.chat?.thinkingLevel ?? "off";
 
-		const wireModelId = settings?.orchestrator?.model ?? current?.target.defaultModel ?? null;
+		const wireModelId = settings?.chat?.model ?? current?.target.defaultModel ?? null;
 		const detectedReasoning =
 			wireModelId && typeof deps.providers.getDetectedReasoning === "function"
-				? deps.providers.getDetectedReasoning(settings?.orchestrator?.target ?? "", wireModelId)
+				? deps.providers.getDetectedReasoning(settings?.chat?.target ?? "", wireModelId)
 				: null;
 		const caps = current
 			? resolveModelCapabilities(current, wireModelId, deps.providers.knowledgeBase, { detectedReasoning })
 			: null;
 		const capabilities = capabilityLabels(caps);
 
-		const safety = settings?.autonomy ?? "auto-edit";
-		const toolProfile = settings?.delegation?.defaults?.toolGovernance ?? "clio-policy";
+		const safety = settings?.safety.autonomy ?? "auto-edit";
+		const toolProfile = settings?.integrations.externalAgents?.defaults?.toolGovernance ?? "clio-policy";
 
 		return {
 			workspace: workspaceFacts(deps, branchSlot),
@@ -436,7 +434,7 @@ export function buildFooterDashboard(deps: FooterDashboardDeps): FooterDashboard
 				capabilities,
 				safety,
 				toolProfile,
-				outputVerbosity: settings?.terminal.outputVerbosity ?? "default",
+				outputVerbosity: settings?.interface.outputDetail ?? "default",
 				leaderArmed: deps.getLeaderArmed?.() ?? false,
 				shutdownArmed: deps.getShutdownArmed?.() ?? false,
 				memoryIntervention: taskMemory
@@ -454,8 +452,8 @@ export function buildFooterDashboard(deps: FooterDashboardDeps): FooterDashboard
 				used: contextUsage?.tokens ?? null,
 				contextWindow: contextUsage?.contextWindow ?? null,
 				toolSchemaTokens: contextUsage?.breakdown?.toolSchemaTokens ?? null,
-				compactionThreshold: settings?.compaction?.threshold ?? null,
-				compactionAuto: settings?.compaction?.auto ?? null,
+				compactionThreshold: settings?.context.compaction?.threshold ?? null,
+				compactionAuto: settings?.context.compaction?.auto ?? null,
 				compactionActive,
 				clioMd: formatClioMdState(contextState?.clioMd),
 				memory: formatMemoryState(contextState?.memoryCount),

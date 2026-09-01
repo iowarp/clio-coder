@@ -80,8 +80,8 @@ function enabled(input: ActivationInputs): boolean {
 			input.settings !== undefined &&
 			posture !== "manual" &&
 			input.failover === "approved" &&
-			input.settings.activePostures.includes(posture as (typeof input.settings.activePostures)[number]) &&
-			input.settings.agentAutomation.activeAgentRoles.length > 0
+			input.settings.postures.includes(posture as (typeof input.settings.postures)[number]) &&
+			input.settings.agentRoles.length > 0
 		);
 	}
 	return (

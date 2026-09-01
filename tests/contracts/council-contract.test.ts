@@ -24,7 +24,7 @@ import { councilBallot, councilSynthesisReport, researchReport, scriptedGateFabr
 const TARGET = { id: "local", runtime: "openai", defaultModel: "model" };
 
 function roster(members: unknown[]): unknown {
-	return { targets: [TARGET], workers: { rosters: { design: { members } } } };
+	return { targets: [TARGET], fleet: { rosters: { design: { members } } } };
 }
 
 /** The sealed receipt on disk, which is where the applied result contract is recorded. */
@@ -39,11 +39,11 @@ describe("council roster configuration", () => {
 		const valid = validateSettings(
 			roster([
 				{ label: "alpha", target: "local", color: "accent" },
-				{ label: "beta-2", target: "local", model: "m2", thinking: "high", color: "#12aBcD" },
+				{ label: "beta-2", target: "local", model: "m2", thinkingLevel: "high", color: "#12aBcD" },
 			]),
 		);
 		deepStrictEqual(valid.issues, []);
-		strictEqual(valid.settings.workers.rosters.design?.members.length, 2);
+		strictEqual(valid.settings.fleet.rosters.design?.members.length, 2);
 
 		for (const members of [
 			[{ label: "alpha", target: "local" }],
@@ -128,9 +128,9 @@ describe("council dispatch", () => {
 	it("runs read-only members, computes a vote, and binds roster and rounds into the plan hash", async () => {
 		const settings = structuredClone(DEFAULT_SETTINGS);
 		settings.targets = [TARGET];
-		settings.workers.default.target = "local";
-		settings.workers.default.model = "model";
-		settings.workers.rosters = {
+		settings.fleet.default.target = "local";
+		settings.fleet.default.model = "model";
+		settings.fleet.rosters = {
 			design: {
 				members: [
 					{ label: "alpha", target: "local" },
@@ -172,7 +172,7 @@ describe("council dispatch", () => {
 			const tool = createDispatchTool({
 				dispatch: bundle.contract,
 				getAgentSpecs: () => [],
-				getWorkerRosters: () => settings.workers.rosters,
+				getWorkerRosters: () => settings.fleet.rosters,
 			});
 			const run = tool.run;
 			const prepare = tool.prepareAdmissionArguments;
@@ -243,11 +243,11 @@ describe("council dispatch", () => {
 				const prepared = prepare(args);
 				return describe(prepared);
 			};
-			const base = view({ mode: "council", task: "Assess", members: settings.workers.rosters.design?.members, rounds: 1 });
+			const base = view({ mode: "council", task: "Assess", members: settings.fleet.rosters.design?.members, rounds: 1 });
 			const changedRounds = view({
 				mode: "council",
 				task: "Assess",
-				members: settings.workers.rosters.design?.members,
+				members: settings.fleet.rosters.design?.members,
 				rounds: 2,
 			});
 			const changedRoster = view({
@@ -332,8 +332,8 @@ describe("council dispatch", () => {
 			{ id: "default", runtime: "openai", defaultModel: "model" },
 			{ id: "remote-target", runtime: "openai", defaultModel: "model" },
 		];
-		settings.workers.default.target = "default";
-		settings.workers.default.model = "model";
+		settings.fleet.default.target = "default";
+		settings.fleet.default.model = "model";
 		const bundle = makeDispatchBundle(dispatchStubContext({ settings }), {
 			spawnWorker: scriptedGateFabric({}).spawn,
 			previewNode: (request) =>
@@ -382,7 +382,7 @@ describe("council dispatch", () => {
 			};
 		};
 		const settings = structuredClone(DEFAULT_SETTINGS);
-		settings.workers.maxRetries = 0;
+		settings.fleet.retry.maxRetries = 0;
 		const bundle = makeDispatchBundle(dispatchStubContext({ settings }), { spawnWorker, resilienceCooldownMs: 0 });
 		await bundle.extension.start();
 		try {

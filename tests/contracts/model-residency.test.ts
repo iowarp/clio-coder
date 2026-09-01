@@ -54,12 +54,13 @@ function configureArgs(url: string, model: string, ...extra: string[]): string[]
 
 function settingsYaml(url: string, model: string, wireModels: ReadonlyArray<string>): string {
 	const list = wireModels.length > 0 ? `\n    wireModels:\n${wireModels.map((id) => `      - ${id}`).join("\n")}` : "";
-	return `targets:
+	return `version: 2
+targets:
   - id: studio
     runtime: lmstudio
     url: ${url}
     defaultModel: ${model}${list}
-orchestrator:
+chat:
   target: studio
   model: ${model}
 `;
@@ -91,7 +92,7 @@ describe("contracts/model residency: configure", () => {
 		);
 		strictEqual(code, 2, `stderr=${stderr}`);
 		strictEqual(readSettings().targets.length, 0, "nothing was saved");
-		strictEqual(readSettings().orchestrator.target, null, "the orchestrator pointer was not moved");
+		strictEqual(readSettings().chat.target, null, "the orchestrator pointer was not moved");
 		const line = stderr.split("\n").find((entry) => entry.startsWith("error: "));
 		ok(line, `no refusal on stderr:\n${stderr}`);
 		ok(line.includes(`target 'studio' at ${server.url} does not advertise model '${PLACEHOLDER}'`), line);

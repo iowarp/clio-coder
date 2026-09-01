@@ -485,13 +485,13 @@ function setOrchestratorPointer(settings: ClioSettings, descriptor: TargetDescri
 			`cannot use target '${descriptor.id}' as orchestrator target because runtime '${runtime.id}' is not an HTTP/native runtime`,
 		);
 	}
-	settings.orchestrator.target = descriptor.id;
-	settings.orchestrator.model = model ?? descriptor.defaultModel ?? null;
+	settings.chat.target = descriptor.id;
+	settings.chat.model = model ?? descriptor.defaultModel ?? null;
 }
 
 function setWorkerDefaultPointer(settings: ClioSettings, descriptor: TargetDescriptor, model?: string | null): void {
-	settings.workers.default.target = descriptor.id;
-	settings.workers.default.model = model ?? descriptor.defaultModel ?? null;
+	settings.fleet.default.target = descriptor.id;
+	settings.fleet.default.model = model ?? descriptor.defaultModel ?? null;
 }
 
 function setBackgroundPointer(settings: ClioSettings, descriptor: TargetDescriptor, model?: string | null): void {
@@ -501,13 +501,13 @@ function setBackgroundPointer(settings: ClioSettings, descriptor: TargetDescript
 			`cannot use target '${descriptor.id}' as background target because runtime '${descriptor.runtime}' is not an HTTP/native runtime`,
 		);
 	}
-	settings.background.target = descriptor.id;
-	settings.background.model = model ?? descriptor.defaultModel ?? null;
+	settings.context.memory.target = descriptor.id;
+	settings.context.memory.model = model ?? descriptor.defaultModel ?? null;
 }
 
 function assertOrchestratorReplacementEligible(settings: ClioSettings, descriptor: TargetDescriptor): void {
-	if (settings.orchestrator.target !== descriptor.id && settings.background.target !== descriptor.id) return;
-	const role = settings.orchestrator.target === descriptor.id ? "orchestrator" : "background";
+	if (settings.chat.target !== descriptor.id && settings.context.memory.target !== descriptor.id) return;
+	const role = settings.chat.target === descriptor.id ? "orchestrator" : "background";
 	const runtime = getRuntimeRegistry().get(descriptor.runtime);
 	if (!runtime) {
 		throw new Error(
@@ -527,7 +527,7 @@ function setWorkerProfilePointer(
 ): void {
 	const trimmed = name.trim();
 	if (trimmed.length === 0) throw new Error("fleet profile name must be non-empty");
-	settings.workers.profiles[trimmed] = {
+	settings.fleet.profiles[trimmed] = {
 		target: descriptor.id,
 		model: model ?? descriptor.defaultModel ?? null,
 		thinkingLevel: "off",
@@ -607,10 +607,10 @@ function printSummary(settings: ClioSettings, descriptor: TargetDescriptor, prob
 		for (const line of probeLines(descriptor, probe)) process.stdout.write(`  ${line}\n`);
 	}
 	warnUndiscoveredContextWindow(descriptor, probe);
-	if (settings.orchestrator.target === descriptor.id) process.stdout.write("  orchestrator target\n");
-	if (settings.background.target === descriptor.id) process.stdout.write("  background memory target\n");
-	if (settings.workers.default.target === descriptor.id) process.stdout.write("  fleet default\n");
-	for (const [name, profile] of Object.entries(settings.workers.profiles)) {
+	if (settings.chat.target === descriptor.id) process.stdout.write("  orchestrator target\n");
+	if (settings.context.memory.target === descriptor.id) process.stdout.write("  background memory target\n");
+	if (settings.fleet.default.target === descriptor.id) process.stdout.write("  fleet default\n");
+	for (const [name, profile] of Object.entries(settings.fleet.profiles)) {
 		if (profile.target === descriptor.id) process.stdout.write(`  fleet profile ${name}\n`);
 	}
 	process.stdout.write(`\nsettings written to ${settingsPath()}\n`);
@@ -1413,10 +1413,10 @@ async function runInteractive(
 		? false
 		: defaults.setOrchestrator
 			? true
-			: await askYesNo(rl, "use as orchestrator (chat) target?", !settings.orchestrator.target);
+			: await askYesNo(rl, "use as orchestrator (chat) target?", !settings.chat.target);
 	const setWorkerDefault = defaults.setWorkerDefault
 		? true
-		: await askYesNo(rl, "use as fleet default?", !settings.workers.default.target);
+		: await askYesNo(rl, "use as fleet default?", !settings.fleet.default.target);
 	const setBackground = !isOrchestratorEligibleRuntime(runtime)
 		? false
 		: defaults.setBackground
@@ -1428,7 +1428,7 @@ async function runInteractive(
 				rl,
 				"Orchestrator model",
 				wireModels,
-				settings.orchestrator.target === targetId ? (settings.orchestrator.model ?? model) : model,
+				settings.chat.target === targetId ? (settings.chat.model ?? model) : model,
 			)))
 		: undefined;
 	if (orchestratorModel === null) return 0;
@@ -1438,7 +1438,7 @@ async function runInteractive(
 				rl,
 				"Fleet model",
 				wireModels,
-				settings.workers.default.target === targetId ? (settings.workers.default.model ?? model) : model,
+				settings.fleet.default.target === targetId ? (settings.fleet.default.model ?? model) : model,
 			)))
 		: undefined;
 	if (workerModel === null) return 0;
@@ -1448,7 +1448,7 @@ async function runInteractive(
 				rl,
 				"Background memory model",
 				wireModels,
-				settings.background.target === targetId ? (settings.background.model ?? model) : model,
+				settings.context.memory.target === targetId ? (settings.context.memory.model ?? model) : model,
 			)))
 		: undefined;
 	if (backgroundModel === null) return 0;
@@ -1498,13 +1498,13 @@ export function runTargetRename(oldId: string, newId: string): number {
 		const target = settings.targets.find((e) => e.id === oldId);
 		if (!target) return;
 		target.id = newId;
-		if (settings.orchestrator.target === oldId) settings.orchestrator.target = newId;
-		if (settings.background.target === oldId) settings.background.target = newId;
-		if (settings.workers.default.target === oldId) settings.workers.default.target = newId;
-		for (const profile of Object.values(settings.workers.profiles)) {
+		if (settings.chat.target === oldId) settings.chat.target = newId;
+		if (settings.context.memory.target === oldId) settings.context.memory.target = newId;
+		if (settings.fleet.default.target === oldId) settings.fleet.default.target = newId;
+		for (const profile of Object.values(settings.fleet.profiles)) {
 			if (profile.target === oldId) profile.target = newId;
 		}
-		settings.scope = settings.scope.map((entry) => {
+		settings.chat.modelPicker.cycleSet = settings.chat.modelPicker.cycleSet.map((entry) => {
 			const [head, ...rest] = entry.split("/");
 			if (head !== oldId) return entry;
 			return rest.length === 0 ? newId : `${newId}/${rest.join("/")}`;

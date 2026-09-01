@@ -15,7 +15,7 @@ export function createAgentsBundle(_context: DomainContext): DomainBundle<Agents
 		const nextDiagnostics: AgentRecipeDiagnostic[] = [];
 		const merged = discoverAgentRecipes(process.cwd(), nextDiagnostics);
 		const config = _context.getContract<ConfigContract>("config");
-		assertAgentIdNamespace(merged, config?.get()?.delegation?.agents ?? []);
+		assertAgentIdNamespace(merged, config?.get()?.integrations.externalAgents?.entries ?? []);
 		recipes = merged;
 		specs = recipes.map(normalizeAgentSpec);
 		diagnostics = nextDiagnostics;
@@ -40,7 +40,7 @@ export function createAgentsBundle(_context: DomainContext): DomainBundle<Agents
 		},
 		listSpecs() {
 			const config = _context.getContract<ConfigContract>("config");
-			const delegationAgents = config?.get()?.delegation?.agents ?? [];
+			const delegationAgents = config?.get()?.integrations.externalAgents?.entries ?? [];
 			const delegationSpecs = delegationAgents.map((agent) => ({
 				version: 1 as const,
 				id: agent.id,
@@ -67,7 +67,7 @@ export function createAgentsBundle(_context: DomainContext): DomainBundle<Agents
 			const found = specs.find((r) => r.id === id);
 			if (found) return found;
 			const config = _context.getContract<ConfigContract>("config");
-			const agent = config?.get()?.delegation?.agents?.find((entry) => entry.id === id);
+			const agent = config?.get()?.integrations.externalAgents?.entries?.find((entry) => entry.id === id);
 			if (agent) {
 				return {
 					version: 1 as const,

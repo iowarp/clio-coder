@@ -27,7 +27,7 @@ function scratch(extraEnv: Record<string, string> = {}) {
 			lifecycle: "user-managed",
 		},
 	];
-	settings.orchestrator = { target: "declared", model: "declared-model", thinkingLevel: "off" };
+	Object.assign(settings.chat, { target: "declared", model: "declared-model", thinkingLevel: "off" });
 	writeFileSync(join(configDir, "settings.yaml"), stringify(settings), "utf8");
 	const tracePath = join(dir, "render.jsonl");
 	return {

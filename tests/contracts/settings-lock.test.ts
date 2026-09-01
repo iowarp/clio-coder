@@ -21,8 +21,8 @@ function seededSettings(): ClioSettings {
 		{ id: "target-a", runtime: "openai-compat", url: "http://localhost:1111", defaultModel: "model-a" },
 		{ id: "target-b", runtime: "openai-compat", url: "http://localhost:2222", defaultModel: "model-b" },
 	];
-	settings.orchestrator = { target: "target-a", model: "model-a", thinkingLevel: "off" };
-	settings.workers.default = { target: "target-a", model: "model-a", thinkingLevel: "off" };
+	Object.assign(settings.chat, { target: "target-a", model: "model-a", thinkingLevel: "off" });
+	settings.fleet.default = { target: "target-a", model: "model-a", thinkingLevel: "off" };
 	return settings;
 }
 
@@ -47,50 +47,50 @@ describe("contracts/settings-lock", () => {
 	it("preserves a concurrent write that lands between a stale read and a locked update", () => {
 		// Simulated process A reads the file and goes off to think.
 		const staleReadByA = readSettings();
-		strictEqual(staleReadByA.retry.maxRetries, 3);
+		strictEqual(staleReadByA.chat.retry.maxRetries, 3);
 
 		// Simulated process B saves a default in the meantime.
 		updateSettings((settings) => {
-			settings.retry.maxRetries = 9;
+			settings.chat.retry.maxRetries = 9;
 		});
 
 		// Old behavior: A writes its whole stale blob back, dropping B's patch.
 		// New behavior: A's mutation runs against a re-read inside the lock, so
 		// B's change survives alongside A's.
 		updateSettings((settings) => {
-			settings.budget.sessionCeilingUsd = 7;
+			settings.safety.limits.sessionCostUsd = 7;
 		});
 
 		const merged = readSettings();
-		strictEqual(merged.retry.maxRetries, 9, "B's patch must survive A's later update");
-		strictEqual(merged.budget.sessionCeilingUsd, 7, "A's patch must apply too");
+		strictEqual(merged.chat.retry.maxRetries, 9, "B's patch must survive A's later update");
+		strictEqual(merged.safety.limits.sessionCostUsd, 7, "A's patch must apply too");
 
 		// Contrast: the naive lost-update sequence really does lose B's patch,
 		// which is exactly what updateSettings exists to prevent.
 		const naive = structuredClone(staleReadByA);
-		naive.budget.sessionCeilingUsd = 11;
+		naive.safety.limits.sessionCostUsd = 11;
 		writeFileSync(settingsPath(), stringifyYaml(naive), "utf8");
-		strictEqual(readSettings().retry.maxRetries, 3, "naive whole-blob write clobbers concurrent patches");
+		strictEqual(readSettings().chat.retry.maxRetries, 3, "naive whole-blob write clobbers concurrent patches");
 	});
 
 	it("interleaves field-level patches from two simulated sessions without losing either", () => {
 		// Mirrors the orchestrator write-through: each session re-reads under the
 		// lock and applies only its own routing fields.
 		const sessionAPatch = (settings: ClioSettings): void => {
-			settings.orchestrator.target = "target-b";
-			settings.orchestrator.model = "model-b";
+			settings.chat.target = "target-b";
+			settings.chat.model = "model-b";
 		};
 		const sessionBPatch = (settings: ClioSettings): void => {
-			settings.orchestrator.thinkingLevel = "high";
+			settings.chat.thinkingLevel = "high";
 		};
 		// Both sessions captured their pre-read before either wrote; the locked
 		// re-read makes the interleaving safe regardless of order.
 		updateSettings(sessionAPatch);
 		updateSettings(sessionBPatch);
 		const saved = readSettings();
-		strictEqual(saved.orchestrator.target, "target-b");
-		strictEqual(saved.orchestrator.model, "model-b");
-		strictEqual(saved.orchestrator.thinkingLevel, "high");
+		strictEqual(saved.chat.target, "target-b");
+		strictEqual(saved.chat.model, "model-b");
+		strictEqual(saved.chat.thinkingLevel, "high");
 	});
 
 	it("times out on a lock held by a live process instead of corrupting the file", () => {
@@ -100,14 +100,14 @@ describe("contracts/settings-lock", () => {
 			() =>
 				updateSettings(
 					(settings) => {
-						settings.retry.maxRetries = 1;
+						settings.chat.retry.maxRetries = 1;
 					},
 					{ timeoutMs: 120 },
 				),
 			/timed out .* waiting for/,
 		);
 		// The blocked writer changed nothing.
-		strictEqual(readSettings().retry.maxRetries, 3);
+		strictEqual(readSettings().chat.retry.maxRetries, 3);
 		rmSync(settingsLockPath(), { force: true });
 	});
 
@@ -125,13 +125,13 @@ describe("contracts/settings-lock", () => {
 			() =>
 				updateSettings(
 					(settings) => {
-						settings.retry.maxRetries = 1;
+						settings.chat.retry.maxRetries = 1;
 					},
 					{ timeoutMs: 120 },
 				),
 			/timed out .* waiting for/,
 		);
-		strictEqual(readSettings().retry.maxRetries, 3);
+		strictEqual(readSettings().chat.retry.maxRetries, 3);
 		ok(existsSync(lockPath), "the live holder's lock must survive the failed acquisition");
 		rmSync(lockPath, { force: true });
 	});
@@ -142,11 +142,11 @@ describe("contracts/settings-lock", () => {
 
 		updateSettings(
 			(settings) => {
-				settings.retry.maxRetries = 5;
+				settings.chat.retry.maxRetries = 5;
 			},
 			{ timeoutMs: 1_000 },
 		);
-		strictEqual(readSettings().retry.maxRetries, 5);
+		strictEqual(readSettings().chat.retry.maxRetries, 5);
 		strictEqual(existsSync(lockPath), false, "lock must be released after takeover");
 	});
 
@@ -159,19 +159,19 @@ describe("contracts/settings-lock", () => {
 		strictEqual(existsSync(settingsLockPath()), false);
 		// And the file is still usable for the next writer.
 		updateSettings((settings) => {
-			settings.retry.maxRetries = 4;
+			settings.chat.retry.maxRetries = 4;
 		});
-		strictEqual(readSettings().retry.maxRetries, 4);
+		strictEqual(readSettings().chat.retry.maxRetries, 4);
 	});
 
 	it("writes atomically: no partially written settings.yaml and no leftover temp files", () => {
 		for (let i = 0; i < 5; i += 1) {
 			updateSettings((settings) => {
-				settings.budget.sessionCeilingUsd = i;
+				settings.safety.limits.sessionCostUsd = i;
 			});
 			// Every read between writes parses a complete document.
 			const parsed = readSettings();
-			strictEqual(parsed.budget.sessionCeilingUsd, i);
+			strictEqual(parsed.safety.limits.sessionCostUsd, i);
 		}
 		const configDir = join(scratch, "config");
 		const leftovers = readdirSync(configDir).filter((name) => name.includes(".tmp-") || name.endsWith(".lock"));

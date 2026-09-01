@@ -61,8 +61,8 @@ function remoteNode(id: string): RunNodeIdentity {
 function baseSettings(): typeof DEFAULT_SETTINGS {
 	const settings = structuredClone(DEFAULT_SETTINGS);
 	settings.targets = [{ id: "primary", runtime: "openai", defaultModel: "base-model" }];
-	settings.workers.default.target = "primary";
-	settings.workers.default.model = "base-model";
+	settings.fleet.default.target = "primary";
+	settings.fleet.default.model = "base-model";
 	settings.fleet.nodes = [
 		{ id: "blade", host: "blade.example.test", maxWorkers: 2 },
 		{ id: "mini", host: "mini.example.test", maxWorkers: 2 },
@@ -327,7 +327,7 @@ describe("resolved dispatch plan admission", () => {
 			{ id: "primary", runtime: "openai", defaultModel: "base-model" },
 			{ id: "secondary", runtime: "openai", defaultModel: "base-model" },
 		];
-		settings.workers.maxRetries = 1;
+		settings.fleet.retry.maxRetries = 1;
 		settings.fleet.nodes = [];
 		const spawns: Array<{ target: string; task: string; messages: string }> = [];
 		const bundle = makeDispatchBundle(dispatchStubContext({ settings }), {
@@ -432,22 +432,22 @@ describe("resolved dispatch plan admission", () => {
 		for (const placementCase of ["explicit", "profile", "automatic"] as const) {
 			const settings = baseSettings();
 			if (placementCase === "explicit") {
-				settings.workers.profiles.pinned = {
+				settings.fleet.profiles.pinned = {
 					target: "primary",
 					model: "profile-model",
 					thinkingLevel: "off",
 					node: "mini",
 				};
-				settings.workers.agentBindings.coder = "pinned";
+				settings.fleet.agentProfiles.coder = "pinned";
 			}
 			if (placementCase === "profile") {
-				settings.workers.profiles.pinned = {
+				settings.fleet.profiles.pinned = {
 					target: "primary",
 					model: "profile-model",
 					thinkingLevel: "off",
 					node: "mini",
 				};
-				settings.workers.agentBindings.coder = "pinned";
+				settings.fleet.agentProfiles.coder = "pinned";
 			}
 			let automaticNode = "blade";
 			const expectedNode = placementCase === "profile" ? "mini" : "blade";
@@ -457,8 +457,8 @@ describe("resolved dispatch plan admission", () => {
 			const placementRequests: string[] = [];
 			const selectedNode = (request: { node?: string; agentId: string }): string => {
 				if (request.node !== undefined) return request.node;
-				const profile = settings.workers.agentBindings[request.agentId];
-				return (profile ? settings.workers.profiles[profile]?.node : undefined) ?? automaticNode;
+				const profile = settings.fleet.agentProfiles[request.agentId];
+				return (profile ? settings.fleet.profiles[profile]?.node : undefined) ?? automaticNode;
 			};
 			const resolveNode = (request: { node?: string; agentId: string }): DispatchNodePlacement => {
 				const id = selectedNode(request);
@@ -561,7 +561,7 @@ describe("resolved dispatch plan admission", () => {
 
 				if (placementCase === "automatic") {
 					automaticNode = "mini";
-					settings.workers.default.model = "drift-model";
+					settings.fleet.default.model = "drift-model";
 				}
 				// The resolved artifact is the approval authority. Even if the raw
 				// argument object is changed while parked, execution restores the task

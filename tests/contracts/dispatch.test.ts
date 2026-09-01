@@ -256,15 +256,15 @@ function stubContext(
 	const settings = structuredClone(DEFAULT_SETTINGS);
 	// Most contracts exercise one attempt. Retry-specific cases opt in so the
 	// assignment-level finalPromise does not wait through production backoff.
-	settings.workers.maxRetries = 0;
+	settings.fleet.retry.maxRetries = 0;
 	const target: TargetDescriptor = options.target ?? {
 		id: "default",
 		runtime: "openai",
 		defaultModel: "gpt-4o",
 	};
 	settings.targets = [target];
-	settings.workers.default.target = target.id;
-	settings.workers.default.model = target.defaultModel ?? "gpt-4o";
+	settings.fleet.default.target = target.id;
+	settings.fleet.default.model = target.defaultModel ?? "gpt-4o";
 
 	const runtime: RuntimeDescriptor = options.runtime ?? {
 		id: target.runtime,
@@ -433,8 +433,8 @@ async function receiptForRuntime(input: {
 	};
 	const context = stubContext({ target, runtime: input.runtime });
 	const configContract = context.getContract<ConfigContract>("config");
-	const settings = configContract?.get() as { autonomy: TestAutonomy } | undefined;
-	if (settings) settings.autonomy = input.autonomy;
+	const settings = configContract?.get();
+	if (settings) settings.safety.autonomy = input.autonomy;
 	const originalGate = process.env.CLIO_CODER_ALLOW_EXTERNAL_FULL_ACCESS;
 	if (input.allowExternalFullAccess === true) process.env.CLIO_CODER_ALLOW_EXTERNAL_FULL_ACCESS = "1";
 	else Reflect.deleteProperty(process.env, "CLIO_CODER_ALLOW_EXTERNAL_FULL_ACCESS");
@@ -1202,7 +1202,7 @@ describe("contracts/dispatch", () => {
 		// the fleet default at a different model than the shared config snapshot.
 		const sessionView = structuredClone(DEFAULT_SETTINGS);
 		sessionView.targets = [{ id: "default", runtime: "openai", defaultModel: "gpt-4o" }];
-		sessionView.workers.default = { target: "default", model: "session-model", thinkingLevel: "off" };
+		sessionView.fleet.default = { target: "default", model: "session-model", thinkingLevel: "off" };
 
 		const bundle = makeDispatchBundle(context, {
 			getSettings: () => sessionView,
@@ -1238,18 +1238,18 @@ describe("contracts/dispatch", () => {
 		const configContract = context.getContract<ConfigContract>("config");
 		if (!configContract) throw new Error("test requires config contract");
 		const persistentSettings = configContract.get() as ClioSettings;
-		persistentSettings.autonomy = "full-auto";
-		persistentSettings.workers.onPermission = "deny";
-		persistentSettings.workers.escalation = { timeoutMs: 120_000, fallback: "deny" };
-		persistentSettings.skills.trustProjectCompatRoots = false;
-		persistentSettings.attribution.gitCommits = true;
+		persistentSettings.safety.autonomy = "full-auto";
+		persistentSettings.fleet.permissions.mode = "deny";
+		persistentSettings.fleet.permissions.escalation = { timeoutMs: 120_000, fallback: "deny" };
+		persistentSettings.integrations.projectResources.trustProjectImports = false;
+		persistentSettings.integrations.git.commitAttribution = true;
 
 		const sessionView = structuredClone(persistentSettings);
-		sessionView.autonomy = "read-only";
-		sessionView.workers.onPermission = "escalate";
-		sessionView.workers.escalation = { timeoutMs: 4_321, fallback: "fail" };
-		sessionView.skills.trustProjectCompatRoots = true;
-		sessionView.attribution.gitCommits = false;
+		sessionView.safety.autonomy = "read-only";
+		sessionView.fleet.permissions.mode = "escalate";
+		sessionView.fleet.permissions.escalation = { timeoutMs: 4_321, fallback: "fail" };
+		sessionView.integrations.projectResources.trustProjectImports = true;
+		sessionView.integrations.git.commitAttribution = false;
 
 		const exit = deferred<{ exitCode: number | null; signal: NodeJS.Signals | null }>();
 		const capturedSpecs: WorkerSpec[] = [];
@@ -1315,9 +1315,9 @@ describe("contracts/dispatch", () => {
 			deepStrictEqual(receipt.autonomyEnforcement, { grade: "mediated", autonomy: "read-only" });
 
 			// A per-session view must not rewrite or leak back into persistent settings.
-			strictEqual(persistentSettings.autonomy, "full-auto");
-			strictEqual(persistentSettings.workers.onPermission, "deny");
-			strictEqual(persistentSettings.skills.trustProjectCompatRoots, false);
+			strictEqual(persistentSettings.safety.autonomy, "full-auto");
+			strictEqual(persistentSettings.fleet.permissions.mode, "deny");
+			strictEqual(persistentSettings.integrations.projectResources.trustProjectImports, false);
 		} finally {
 			await bundle.extension.stop?.();
 		}
@@ -3063,7 +3063,7 @@ describe("contracts/dispatch", () => {
 	it("fails an exit-zero worker that used tools but sealed no final assistant output", async () => {
 		const context = stubContext();
 		const configContract = context.getContract<ConfigContract>("config");
-		if (configContract) configContract.get().workers.maxRetries = 1;
+		if (configContract) configContract.get().fleet.retry.maxRetries = 1;
 		const completed: unknown[] = [];
 		const failed: unknown[] = [];
 		const unsubscribeCompleted = context.bus.on(BusChannels.DispatchCompleted, (payload) => {
@@ -3123,7 +3123,7 @@ describe("contracts/dispatch", () => {
 	it("classifies a rejected host check and suppresses retry", async () => {
 		const context = stubContext();
 		const configContract = context.getContract<ConfigContract>("config");
-		if (configContract) configContract.get().workers.maxRetries = 1;
+		if (configContract) configContract.get().fleet.retry.maxRetries = 1;
 		const failed: Array<{ hostVerification?: unknown }> = [];
 		const unsubscribe = context.bus.on(BusChannels.DispatchFailed, (payload) => {
 			failed.push(payload);
@@ -3242,7 +3242,9 @@ describe("contracts/dispatch", () => {
 		const configContract = context.getContract<ConfigContract>("config");
 		if (!configContract) throw new Error("test requires config contract");
 		const settings = configContract.get() as ClioSettings;
-		settings.delegation.agents = [{ id: "silent-acp", command: "silent-acp", args: [], toolGovernance: "clio-policy" }];
+		settings.integrations.externalAgents.entries = [
+			{ id: "silent-acp", command: "silent-acp", args: [], toolGovernance: "clio-policy" },
+		];
 		const bundle = makeDispatchBundle(context, {
 			startAcpDelegationRun: () => ({
 				pid: 4244,
@@ -3345,7 +3347,9 @@ describe("contracts/dispatch", () => {
 		const configContract = context.getContract<ConfigContract>("config");
 		if (!configContract) throw new Error("test requires config contract");
 		const settings = configContract.get() as ClioSettings;
-		settings.delegation.agents = [{ id: "fast-acp", command: "fast-acp", args: [], toolGovernance: "clio-policy" }];
+		settings.integrations.externalAgents.entries = [
+			{ id: "fast-acp", command: "fast-acp", args: [], toolGovernance: "clio-policy" },
+		];
 		const bundle = makeDispatchBundle(context, {
 			startAcpDelegationRun: () => ({
 				pid: 4243,
@@ -3409,7 +3413,7 @@ describe("contracts/dispatch", () => {
 	it("seals a cap-exhausted run with blocked telemetry, a failed outcome, and the synthesized durable output", async () => {
 		const context = stubContext();
 		const configContract = context.getContract<ConfigContract>("config");
-		if (configContract) configContract.get().workers.maxRetries = 1;
+		if (configContract) configContract.get().fleet.retry.maxRetries = 1;
 		const capReason = workerToolCallCapSynthesisReason(3);
 		const bundle = makeDispatchBundle(context, {
 			spawnWorker: () => ({
@@ -3469,8 +3473,8 @@ describe("contracts/dispatch", () => {
 		const configContract = context.getContract<ConfigContract>("config");
 		if (!configContract) throw new Error("test requires config contract");
 		const persistentSettings = configContract.get() as ClioSettings;
-		persistentSettings.autonomy = "full-auto";
-		persistentSettings.delegation.agents = [
+		persistentSettings.safety.autonomy = "full-auto";
+		persistentSettings.integrations.externalAgents.entries = [
 			{
 				id: "opencode",
 				command: "opencode",
@@ -3482,7 +3486,7 @@ describe("contracts/dispatch", () => {
 			},
 		];
 		const sessionView = structuredClone(persistentSettings);
-		sessionView.autonomy = "read-only";
+		sessionView.safety.autonomy = "read-only";
 		let capturedTask = "";
 		let capturedCommand = "";
 		let capturedAutonomy: string | undefined;
@@ -3569,7 +3573,7 @@ describe("contracts/dispatch", () => {
 				capturedSafetyPosture,
 				`Safety posture: autonomy read-only. ${safetyOneLiner("read-only")} Worker permission routing: deny.`,
 			);
-			strictEqual(persistentSettings.autonomy, "full-auto");
+			strictEqual(persistentSettings.safety.autonomy, "full-auto");
 			strictEqual(receipt.runtimeKind, "acp-delegation");
 			deepStrictEqual(receipt.autonomyEnforcement, {
 				grade: "mediated",
@@ -3606,8 +3610,8 @@ describe("contracts/dispatch", () => {
 		const configContract = context.getContract<ConfigContract>("config");
 		if (!configContract) throw new Error("test requires config contract");
 		const persistentSettings = configContract.get() as ClioSettings;
-		persistentSettings.autonomy = "full-auto";
-		persistentSettings.delegation.agents = [
+		persistentSettings.safety.autonomy = "full-auto";
+		persistentSettings.integrations.externalAgents.entries = [
 			{
 				id: "unmediated",
 				command: "unmediated-acp",
@@ -3616,7 +3620,7 @@ describe("contracts/dispatch", () => {
 			},
 		];
 		const sessionView = structuredClone(persistentSettings);
-		sessionView.autonomy = "read-only";
+		sessionView.safety.autonomy = "read-only";
 		let started = false;
 		const bundle = makeDispatchBundle(context, {
 			getSettings: () => sessionView,
@@ -3649,8 +3653,10 @@ describe("contracts/dispatch", () => {
 		const configContract = context.getContract<ConfigContract>("config");
 		if (!configContract) throw new Error("test requires config contract");
 		const settings = configContract.get() as ClioSettings;
-		settings.autonomy = "full-auto";
-		settings.delegation.agents = [{ id: "mediated", command: "mock-acp", args: [], toolGovernance: "clio-policy" }];
+		settings.safety.autonomy = "full-auto";
+		settings.integrations.externalAgents.entries = [
+			{ id: "mediated", command: "mock-acp", args: [], toolGovernance: "clio-policy" },
+		];
 		let launchedAutonomy: string | undefined;
 		const bundle = makeDispatchBundle(context, {
 			startAcpDelegationRun: (input) => {
@@ -3686,8 +3692,10 @@ describe("contracts/dispatch", () => {
 		const configContract = context.getContract<ConfigContract>("config");
 		if (!configContract) throw new Error("test requires config contract");
 		const settings = configContract.get() as ClioSettings;
-		settings.autonomy = "full-auto";
-		settings.delegation.agents = [{ id: "unmediated", command: "mock-acp", args: [], toolGovernance: "agent-managed" }];
+		settings.safety.autonomy = "full-auto";
+		settings.integrations.externalAgents.entries = [
+			{ id: "unmediated", command: "mock-acp", args: [], toolGovernance: "agent-managed" },
+		];
 		let started = false;
 		const bundle = makeDispatchBundle(context, {
 			startAcpDelegationRun: () => {
@@ -3719,7 +3727,9 @@ describe("contracts/dispatch", () => {
 		const configContract = context.getContract<ConfigContract>("config");
 		if (!configContract) throw new Error("test requires config contract");
 		const settings = configContract.get() as ClioSettings;
-		settings.delegation.agents = [{ id: "profiled", command: "mock-acp", args: [], toolGovernance: "clio-policy" }];
+		settings.integrations.externalAgents.entries = [
+			{ id: "profiled", command: "mock-acp", args: [], toolGovernance: "clio-policy" },
+		];
 		let starts = 0;
 		const bundle = makeDispatchBundle(context, {
 			startAcpDelegationRun: () => {
@@ -3782,8 +3792,8 @@ describe("contracts/dispatch", () => {
 			const configContract = context.getContract<ConfigContract>("config");
 			if (!configContract) throw new Error("test requires config contract");
 			const settings = configContract.get() as ClioSettings;
-			settings.autonomy = "suggest";
-			settings.delegation.agents = [
+			settings.safety.autonomy = "suggest";
+			settings.integrations.externalAgents.entries = [
 				{
 					id: `governance-${item.governance}`,
 					command: "mock-acp",
@@ -3813,7 +3823,7 @@ describe("contracts/dispatch", () => {
 		const context = stubContext();
 		const configContract = context.getContract<ConfigContract>("config");
 		if (configContract) {
-			configContract.get().delegation.agents = [
+			configContract.get().integrations.externalAgents.entries = [
 				{
 					id: "opencode",
 					command: "opencode",
@@ -3856,7 +3866,7 @@ describe("contracts/dispatch", () => {
 		const context = stubContext();
 		const configContract = context.getContract<ConfigContract>("config");
 		if (configContract) {
-			configContract.get().delegation.agents = [
+			configContract.get().integrations.externalAgents.entries = [
 				{
 					id: "opencode",
 					command: "opencode",
@@ -4182,7 +4192,7 @@ rl.once("line", (line) => {
 
 		const configContract = context.getContract<ConfigContract>("config");
 		if (configContract) {
-			configContract.get().skills.trustProjectCompatRoots = true;
+			configContract.get().integrations.projectResources.trustProjectImports = true;
 		}
 
 		const bundle = makeDispatchBundle(context, {
@@ -4298,7 +4308,7 @@ rl.once("line", (line) => {
 	it("kills dead workers and schedules a bounded retry", async () => {
 		const context = stubContext();
 		const configContract = context.getContract<ConfigContract>("config");
-		if (configContract) configContract.get().workers.maxRetries = 1;
+		if (configContract) configContract.get().fleet.retry.maxRetries = 1;
 		const exit = deferred<{ exitCode: number | null; signal: NodeJS.Signals | null }>();
 		let abortCalled = false;
 		const bundle = makeDispatchBundle(context, {
@@ -4386,7 +4396,7 @@ rl.once("line", (line) => {
 	it("does not retry exhausted or canceled runs", async () => {
 		const context = stubContext();
 		const configContract = context.getContract<ConfigContract>("config");
-		if (configContract) configContract.get().workers.maxRetries = 1;
+		if (configContract) configContract.get().fleet.retry.maxRetries = 1;
 		const exits = [
 			deferred<{ exitCode: number | null; signal: NodeJS.Signals | null }>(),
 			deferred<{ exitCode: number | null; signal: NodeJS.Signals | null }>(),
@@ -4434,7 +4444,7 @@ rl.once("line", (line) => {
 	it("suppresses retry from a deterministic code regardless of localized diagnostic prose", async () => {
 		const context = stubContext();
 		const configContract = context.getContract<ConfigContract>("config");
-		if (configContract) configContract.get().workers.maxRetries = 1;
+		if (configContract) configContract.get().fleet.retry.maxRetries = 1;
 		async function* outcomeEvents(): AsyncIterableIterator<unknown> {
 			yield { type: "clio_run_outcome", payload: { outcomeCode: "worker_tool_call_cap_exhausted" } };
 		}
@@ -4546,7 +4556,7 @@ rl.once("line", (line) => {
 	it("keeps deterministic-looking prose retryable when no outcome code exists", async () => {
 		const context = stubContext();
 		const configContract = context.getContract<ConfigContract>("config");
-		if (configContract) configContract.get().workers.maxRetries = 1;
+		if (configContract) configContract.get().fleet.retry.maxRetries = 1;
 		const bundle = makeDispatchBundle(context, {
 			resilienceCooldownMs: 0,
 			spawnWorker: () => ({
@@ -4641,7 +4651,7 @@ rl.once("line", (line) => {
 	it("snapshot reflects running entries and retry queue rows", async () => {
 		const context = stubContext();
 		const configContract = context.getContract<ConfigContract>("config");
-		if (configContract) configContract.get().workers.maxRetries = 1;
+		if (configContract) configContract.get().fleet.retry.maxRetries = 1;
 		const runningExits = [
 			deferred<{ exitCode: number | null; signal: NodeJS.Signals | null }>(),
 			deferred<{ exitCode: number | null; signal: NodeJS.Signals | null }>(),
@@ -5211,7 +5221,7 @@ rl.once("line", (line) => {
 		const context = stubContext();
 		const configContract = context.getContract<ConfigContract>("config");
 		if (configContract) {
-			configContract.get().delegation.agents = [
+			configContract.get().integrations.externalAgents.entries = [
 				{
 					id: "opencode",
 					command: "opencode",
@@ -5273,7 +5283,7 @@ rl.once("line", (line) => {
 		const context = stubContext();
 		const configContract = context.getContract<ConfigContract>("config");
 		if (configContract) {
-			configContract.get().delegation.agents = [
+			configContract.get().integrations.externalAgents.entries = [
 				{
 					id: "opencode",
 					command: "opencode",
@@ -5462,7 +5472,7 @@ rl.once("line", (line) => {
 	it("native workers resolve permission requests without stalling and audit the denial", async () => {
 		const context = stubContext();
 		const configContract = context.getContract<ConfigContract>("config");
-		if (configContract) configContract.get().workers.onPermission = "deny";
+		if (configContract) configContract.get().fleet.permissions.mode = "deny";
 		const permissionRequests: unknown[] = [];
 		const permissionEvents: unknown[] = [];
 		const unsubscribeRequests = context.bus.on(BusChannels.PermissionRequested, (payload) => {
@@ -5551,7 +5561,7 @@ rl.once("line", (line) => {
 	it("workers.onPermission=fail maps native permission exits to failed/permission_required", async () => {
 		const context = stubContext();
 		const configContract = context.getContract<ConfigContract>("config");
-		if (configContract) configContract.get().workers.onPermission = "fail";
+		if (configContract) configContract.get().fleet.permissions.mode = "fail";
 		let capturedSpec: WorkerSpec | null = null;
 		const bundle = makeDispatchBundle(context, {
 			spawnWorker: (spec) => {
@@ -5599,7 +5609,7 @@ rl.once("line", (line) => {
 			};
 			const context = stubContext({ target, runtime });
 			const configContract = context.getContract<ConfigContract>("config");
-			if (configContract) configContract.get().workers.onPermission = mode;
+			if (configContract) configContract.get().fleet.permissions.mode = mode;
 			let spawned = false;
 			const bundle = makeDispatchBundle(context, {
 				spawnWorker: () => {
@@ -5637,7 +5647,7 @@ rl.once("line", (line) => {
 		};
 		const context = stubContext({ target, runtime });
 		const configContract = context.getContract<ConfigContract>("config");
-		if (configContract) configContract.get().workers.onPermission = "escalate";
+		if (configContract) configContract.get().fleet.permissions.mode = "escalate";
 		let spawned = false;
 		const bundle = makeDispatchBundle(context, {
 			spawnWorker: () => {
@@ -6740,12 +6750,12 @@ describe("contracts/dispatch route admission defaults", () => {
 	 * the budget being spent.
 	 */
 	it("prices an unconfigured route against the shipped output-token default", () => {
-		strictEqual(admissionMaxOutputTokens(undefined), DEFAULT_SETTINGS.defaults.maxTokens);
+		strictEqual(admissionMaxOutputTokens(undefined), DEFAULT_SETTINGS.chat.maxOutputTokens);
 	});
 
 	it("prefers a configured output-token budget over the shipped default", () => {
 		const settings = structuredClone(DEFAULT_SETTINGS);
-		settings.defaults.maxTokens = 4096;
+		settings.chat.maxOutputTokens = 4096;
 		strictEqual(admissionMaxOutputTokens(settings), 4096);
 	});
 });

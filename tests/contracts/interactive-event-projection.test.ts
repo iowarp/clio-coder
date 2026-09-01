@@ -83,10 +83,10 @@ describe("interactive event projection", () => {
 	it("applies a hot presentation setting before refreshing the overlay", () => {
 		const log: string[] = [];
 		const harness = createHarness(log);
-		harness.deps.onConfigHotReload = (settings) => log.push(`hot:${settings.terminal.smoothStreaming}`);
+		harness.deps.onConfigHotReload = (settings) => log.push(`hot:${settings.interface.smoothStreaming}`);
 		createInteractiveEventProjection(harness.deps);
 		const settings = structuredClone(DEFAULT_SETTINGS);
-		settings.terminal.smoothStreaming = "on";
+		settings.interface.smoothStreaming = "on";
 		harness.deps.bus.emit(BusChannels.ConfigHotReload, {
 			diff: { hotReload: ["terminal.smoothStreaming"], nextTurn: [], restartRequired: [] },
 			settings,

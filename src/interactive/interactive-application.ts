@@ -244,7 +244,7 @@ export interface InteractiveDeps {
 	onForkSession?: (parentTurnId: string) => void;
 	/**
 	 * Run `/context compact` for the current session. Resolves the compaction model
-	 * (settings.compaction.model with fallback to the orchestrator target),
+	 * (settings.context.compaction.model with fallback to the chat target),
 	 * reads session entries, streams a summary via the session compaction
 	 * engine, and persists a compactionSummary entry.
 	 */
@@ -315,7 +315,7 @@ function availableInteractiveThinkingLevels(deps: InteractiveDeps): ReadonlyArra
 export interface KeyBindingDeps {
 	/**
 	 * Keybinding lookup injected by startInteractive. Defaults come from
-	 * CLIO_KEYBINDINGS; user overrides from settings.keybindings. Tests may
+	 * CLIO_KEYBINDINGS; user overrides from settings.interface.keybindings. Tests may
 	 * substitute a narrower matcher via createKeybindingManagerForTesting.
 	 */
 	matches: (data: string, id: ClioKeybinding) => boolean;
@@ -462,13 +462,13 @@ export function routeInteractiveKey(data: string, deps: KeyBindingDeps): boolean
 }
 
 export async function createInteractiveApplication(deps: InteractiveDeps): Promise<number> {
-	const initialSmoothStreaming = resolveSmoothStreamingMode(deps.getSettings?.().terminal.smoothStreaming ?? "off");
+	const initialSmoothStreaming = resolveSmoothStreamingMode(deps.getSettings?.().interface.smoothStreaming ?? "off");
 	const initialAutoPacingAllowed = processAutoPacingAllowed(false);
 	const lease = deps.terminalLease;
 	const shell =
 		lease?.shell ??
 		createProcessInteractiveShell({
-			tuiMode: deps.getSettings?.().terminal.tuiMode ?? "regular",
+			tuiMode: deps.getSettings?.().interface.mode ?? "regular",
 			streamPacingActive:
 				initialSmoothStreaming === "on" || (initialSmoothStreaming === "auto" && initialAutoPacingAllowed),
 			...(deps.onFirstFrameCommit ? { onFirstFrameCommit: deps.onFirstFrameCommit } : {}),
@@ -623,7 +623,7 @@ export async function createInteractiveApplication(deps: InteractiveDeps): Promi
 					notice: (level, text) => notify(level, text, `yazi:${level}`),
 					getCwd: () => process.cwd(),
 					getSettings: () =>
-						deps.getSettings?.().panes.yazi ?? {
+						deps.getSettings?.().interface.panes.files ?? {
 							mode: "companion",
 							profile: "managed",
 							followCwd: true,
@@ -644,7 +644,7 @@ export async function createInteractiveApplication(deps: InteractiveDeps): Promi
 	// `CLIO_CODER_INTERACTIVE=1` forced the interactive surface on.
 	const desktopNotifications = createInteractiveDesktopNotifications({
 		write: (data) => terminal.write(data),
-		enabled: () => deps.getSettings?.().terminal.notify ?? false,
+		enabled: () => deps.getSettings?.().interface.desktopNotifications ?? false,
 		interactiveTty: () => process.stdout.isTTY === true,
 		getOpenBatches: () => openDetachedBatchViews(deps.dispatch),
 	});
@@ -686,7 +686,7 @@ export async function createInteractiveApplication(deps: InteractiveDeps): Promi
 		appendTranscriptNotice: (level, text) => appendNotice(level, text, busNoticeSink),
 		refreshSettingsOverlay: () => overlayLifecycle.refreshSettingsOverlay(),
 		onConfigHotReload: (settings) => {
-			const mode = resolveSmoothStreamingMode(settings.terminal.smoothStreaming);
+			const mode = resolveSmoothStreamingMode(settings.interface.smoothStreaming);
 			const autoAllowed = processAutoPacingAllowed(shell.hasObservedBackpressure());
 			chatRenderer.setSmoothStreamingMode(mode);
 			shell.setStreamPacingActive(mode === "on" || (mode === "auto" && autoAllowed));
@@ -965,7 +965,7 @@ export async function createInteractiveApplication(deps: InteractiveDeps): Promi
 			? deps.createMuxBridge({
 					bus: deps.bus,
 					mux,
-					notificationsPolicy: () => deps.getSettings?.().panes.notifications ?? "failures",
+					notificationsPolicy: () => deps.getSettings?.().interface.panes.notifications ?? "failures",
 					log: (level, message) => {
 						if (level === "warning") notify("warning", message, "mux:bridge");
 					},

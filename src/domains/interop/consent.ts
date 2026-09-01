@@ -24,7 +24,7 @@ export const INHERITED_PROJECT_CONTEXT = "none";
 /** The delegation entry a given agent kind would be wired as. */
 export function delegationEntryForKind(
 	kind: InteropAgentKind,
-	defaults: ClioSettings["delegation"]["defaults"],
+	defaults: ClioSettings["integrations"]["externalAgents"]["defaults"],
 ): DelegationAgentConfig {
 	const recipe = kind.acp;
 	if (recipe === undefined) throw new Error(`interop kind ${kind.id} has no ACP recipe`);
@@ -45,7 +45,7 @@ export function delegationEntryForKind(
  * declined agent whose binary or version moved comes back as a fresh proposal.
  */
 export function interopProposals(report: InteropReport, settings: ClioSettings): ReadonlyArray<InteropProposal> {
-	const configured = new Set(settings.delegation.agents.map((agent) => agent.id));
+	const configured = new Set(settings.integrations.externalAgents.entries.map((agent) => agent.id));
 	const proposals: InteropProposal[] = [];
 	for (const record of report.agents) {
 		const kind = interopAgentKind(record.kind);
@@ -57,7 +57,7 @@ export function interopProposals(report: InteropReport, settings: ClioSettings):
 			kind: kind.id,
 			label: kind.label,
 			fingerprint: record.fingerprint,
-			entry: delegationEntryForKind(kind, settings.delegation.defaults),
+			entry: delegationEntryForKind(kind, settings.integrations.externalAgents.defaults),
 			needsNetworkInstall: record.adapter !== "present",
 		});
 	}
@@ -167,8 +167,8 @@ export function acceptInteropAgents(ids: ReadonlyArray<InteropAgentId>, report: 
 	const wired: string[] = [];
 	updateSettings((settings) => {
 		for (const proposal of proposals) {
-			if (settings.delegation.agents.some((agent) => agent.id === proposal.entry.id)) continue;
-			settings.delegation.agents.push({ ...proposal.entry, args: [...proposal.entry.args] });
+			if (settings.integrations.externalAgents.entries.some((agent) => agent.id === proposal.entry.id)) continue;
+			settings.integrations.externalAgents.entries.push({ ...proposal.entry, args: [...proposal.entry.args] });
 			wired.push(proposal.entry.id);
 		}
 	});

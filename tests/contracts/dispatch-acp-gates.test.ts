@@ -155,8 +155,10 @@ function nativeFabric(): {
 
 function settingsWithAcp(governance: "clio-policy" | "agent-managed", autonomy: "auto-edit" | "full-auto") {
 	const settings = structuredClone(DEFAULT_SETTINGS);
-	settings.autonomy = autonomy;
-	settings.delegation.agents = [{ id: "acp-gate", command: "mock-acp", args: [], toolGovernance: governance }];
+	settings.safety.autonomy = autonomy;
+	settings.integrations.externalAgents.entries = [
+		{ id: "acp-gate", command: "mock-acp", args: [], toolGovernance: governance },
+	];
 	return settings;
 }
 
@@ -427,10 +429,10 @@ describe("ACP gate role authority", () => {
 
 	it("wires ACP stall reconciliation to hard kill and shutdown drain to bounded abort", async () => {
 		const stalledSettings = settingsWithAcp("clio-policy", "full-auto");
-		const stalledAgent = stalledSettings.delegation.agents[0];
+		const stalledAgent = stalledSettings.integrations.externalAgents.entries[0];
 		if (stalledAgent === undefined) throw new Error("ACP fixture missing");
 		stalledAgent.stallTimeoutMs = 1;
-		stalledSettings.workers.maxRetries = 0;
+		stalledSettings.fleet.retry.maxRetries = 0;
 		const stalled = pendingAcpHandle(0);
 		const stalledBundle = makeDispatchBundle(dispatchStubContext({ settings: stalledSettings }), {
 			now: () => 1_000,

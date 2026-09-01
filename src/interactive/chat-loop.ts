@@ -372,7 +372,7 @@ export interface CreateChatLoopDeps {
 	/**
 	 * Whitelist of target ids that the chat-loop is allowed to drive. The
 	 * orchestrator composes this from `providers.list()` so an unknown
-	 * `settings.orchestrator.target` surfaces a configuration error before
+	 * `settings.chat.target` surfaces a configuration error before
 	 * the agent is constructed.
 	 */
 	knownTargets: () => ReadonlySet<string>;
@@ -547,7 +547,7 @@ export function createChatLoop(deps: CreateChatLoopDeps): ChatLoop {
 	const sideQuestionRound = deps.runSideQuestion ?? runSideQuestion;
 	const handoffRound = deps.runHandoffRound ?? runHandoffRound;
 	const middlewareToolChoice = deps.middlewareToolChoice ?? createMiddlewareToolChoiceControl();
-	const state = createTurnState(deps.getSettings().orchestrator.thinkingLevel ?? "off");
+	const state = createTurnState(deps.getSettings().chat.thinkingLevel ?? "off");
 	const toolStartTimes = new Map<string, number>();
 
 	const preparationListeners = new Set<(phase: TurnPreparationPhase) => void>();
@@ -639,13 +639,13 @@ export function createChatLoop(deps: CreateChatLoopDeps): ChatLoop {
 	 * collapsing them sent a client with a configured target to the wrong fix.
 	 */
 	const nullRuntimeAdmissionReason = (): string => {
-		const orchestrator = deps.getSettings().orchestrator;
+		const orchestrator = deps.getSettings().chat;
 		const target = orchestrator.target?.trim() ?? "";
 		const model = orchestrator.model?.trim() ?? "";
 		return target.length > 0 && model.length === 0 ? "model-not-configured" : "orchestrator-not-configured";
 	};
 
-	const retrySettings = (): RetrySettings => normalizeRetrySettings(deps.getSettings().retry);
+	const retrySettings = (): RetrySettings => normalizeRetrySettings(deps.getSettings().chat.retry);
 
 	const currentToolInvokeOptions = (): Partial<ToolInvokeOptions> => {
 		const options: Partial<ToolInvokeOptions> = {};
@@ -1088,7 +1088,7 @@ export function createChatLoop(deps: CreateChatLoopDeps): ChatLoop {
 			// 4. Preflight overflow check, before the user turn is committed.
 			// A blocked request must not leave a dangling user entry that the
 			// next replay would treat as an unanswered turn.
-			const compactionThreshold = deps.getSettings().compaction?.threshold ?? null;
+			const compactionThreshold = deps.getSettings().context.compaction?.threshold ?? null;
 			const captureTurnSnapshot = (turnId: string): ContextSnapshot =>
 				context.captureRuntimeContextSnapshot(agentRuntime, turnId, compactionThreshold, {
 					promptSegments: compiledPrompt
@@ -1179,7 +1179,7 @@ export function createChatLoop(deps: CreateChatLoopDeps): ChatLoop {
 				runtimeId: agentRuntime.runtimeId,
 				runtimeKind: agentRuntime.runtimeResolution.runtimeKind,
 				wireModelId: agentRuntime.wireModelId,
-				autonomy: deps.getSettings().autonomy,
+				autonomy: deps.getSettings().safety.autonomy,
 				compiledPromptHash: promptHash,
 				staticCompositionHash: promptHash,
 				promptSignature: promptHash,

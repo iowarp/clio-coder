@@ -79,6 +79,16 @@ function fakeMux(): FakeMux {
 			async closePane(): Promise<boolean> {
 				return false;
 			},
+			async focusPane(): Promise<boolean> {
+				return false;
+			},
+			async zoomPane(): Promise<boolean> {
+				return false;
+			},
+			async resizeDock(): Promise<boolean> {
+				return false;
+			},
+			docks: () => [],
 			async notify(): Promise<void> {},
 			async worktreeCreate(): Promise<null> {
 				return null;

@@ -396,7 +396,7 @@ export function createProvidersBundle(context: DomainContext): DomainBundle<Prov
 		}
 		if (probeResult.ok && options?.reasoning !== false && typeof desc.probeReasoning === "function") {
 			const settings = readConfig();
-			const orchestratorTarget = settings.orchestrator.target === target.id ? settings.orchestrator.model : null;
+			const orchestratorTarget = settings.chat.target === target.id ? settings.chat.model : null;
 			const candidateModelId = orchestratorTarget ?? target.defaultModel ?? null;
 			if (candidateModelId) {
 				try {
@@ -482,7 +482,7 @@ export function createProvidersBundle(context: DomainContext): DomainBundle<Prov
 			registerClioOAuthProviders();
 			registerBuiltinRuntimes(registry);
 			const settings = readConfig();
-			setGlobalDefaultMaxOutputTokens(settings.defaults.maxTokens);
+			setGlobalDefaultMaxOutputTokens(settings.chat.maxOutputTokens);
 			await loadPluginRuntimes(registry, settings);
 			await probeAll();
 			const config = context.getContract<ConfigContract>("config");

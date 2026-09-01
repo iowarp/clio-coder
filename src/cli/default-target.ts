@@ -24,7 +24,7 @@ export type DefaultTargetVerdict =
 	| { kind: "missing-credential"; targetId: string; store: string };
 
 export function classifyDefaultTarget(settings: Readonly<ClioSettings> = readSettings()): DefaultTargetVerdict {
-	const targetId = settings.orchestrator.target;
+	const targetId = settings.chat.target;
 	if (!targetId) return { kind: "no-target" };
 	// A chat target naming an id that is not in `targets` cannot arrive here:
 	// the schema normalizes dangling routing references to null so that

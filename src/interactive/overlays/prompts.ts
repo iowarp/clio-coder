@@ -31,7 +31,9 @@ export function openPromptsOverlay(tui: TUI, ctx: SlashCommandContext, onClose: 
 					lines.push(`**Unavailable:** ${template.unavailable}`);
 				}
 				if (!template.trusted) {
-					lines.push("**Untrusted:** set `skills.trustProjectCompatRoots` before this template will expand.");
+					lines.push(
+						"**Untrusted:** set `integrations.projectResources.trustProjectImports` before this template will expand.",
+					);
 				}
 				return lines;
 			},

@@ -82,7 +82,7 @@ export interface InteropInspectSnapshot {
 export async function interopInspectSnapshot(now: () => number = Date.now): Promise<InteropInspectSnapshot> {
 	const report = await detectInteropAgents({ cwd: process.cwd(), probeVersion: false });
 	const settings = readSettings();
-	const configured = new Set(settings.delegation.agents.map((agent) => agent.id));
+	const configured = new Set(settings.integrations.externalAgents.entries.map((agent) => agent.id));
 	const agents: InteropInspectAgent[] = [];
 	for (const record of report.agents) {
 		const kind = interopAgentKind(record.kind);

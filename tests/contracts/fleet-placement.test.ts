@@ -42,19 +42,19 @@ function fakeTransport(nodeId: string, host: string): WorkerTransport {
 
 function settingsWithFleet(overrides?: {
 	profiles?: Record<string, { target: string | null; model: string | null; thinkingLevel: "off"; node?: string }>;
-	agentBindings?: Record<string, string>;
+	agentProfiles?: Record<string, string>;
 }): typeof DEFAULT_SETTINGS {
 	const settings = structuredClone(DEFAULT_SETTINGS);
 	settings.fleet.nodes = [structuredClone(NODE_BLADE), structuredClone(NODE_MINI)];
-	if (overrides?.profiles) settings.workers.profiles = overrides.profiles;
-	if (overrides?.agentBindings) settings.workers.agentBindings = overrides.agentBindings;
+	if (overrides?.profiles) settings.fleet.profiles = overrides.profiles;
+	if (overrides?.agentProfiles) settings.fleet.agentProfiles = overrides.agentProfiles;
 	return settings;
 }
 
 describe("fleet settings validation", () => {
 	it("parses fleet.nodes with defaults and full fields", () => {
 		const result = validateSettings({
-			version: 1,
+			version: 2,
 			fleet: {
 				nodes: [
 					{ id: "blade", host: "blade.lan" },
@@ -64,7 +64,7 @@ describe("fleet settings validation", () => {
 						user: "ops",
 						port: 2222,
 						identityFile: "~/.ssh/id_fleet",
-						clioEntry: "/opt/clio/bin/clio worker",
+						clioCoderEntry: "/opt/clio/bin/clio worker",
 						labels: ["gpu"],
 						maxWorkers: 1,
 						residency: "observe",
@@ -89,7 +89,7 @@ describe("fleet settings validation", () => {
 
 	it("rejects the reserved local id, duplicates, and bad shapes", () => {
 		const result = validateSettings({
-			version: 1,
+			version: 2,
 			fleet: {
 				nodes: [
 					{ id: "local", host: "h" },
@@ -114,10 +114,10 @@ describe("fleet settings validation", () => {
 
 	it("keeps profile node pins that name configured nodes and drops unknown pins", () => {
 		const result = validateSettings({
-			version: 1,
+			version: 2,
 			targets: [{ id: "t1", runtime: "openai", defaultModel: "m" }],
-			fleet: { nodes: [{ id: "blade", host: "blade.lan" }] },
-			workers: {
+			fleet: {
+				nodes: [{ id: "blade", host: "blade.lan" }],
 				profiles: {
 					pinned: { target: "t1", node: "blade" },
 					localPin: { target: "t1", node: "local" },
@@ -125,9 +125,9 @@ describe("fleet settings validation", () => {
 				},
 			},
 		});
-		strictEqual(result.settings.workers.profiles.pinned?.node, "blade");
-		strictEqual(result.settings.workers.profiles.localPin?.node, "local");
-		strictEqual(result.settings.workers.profiles.stale?.node, undefined);
+		strictEqual(result.settings.fleet.profiles.pinned?.node, "blade");
+		strictEqual(result.settings.fleet.profiles.localPin?.node, "local");
+		strictEqual(result.settings.fleet.profiles.stale?.node, undefined);
 	});
 });
 
@@ -197,7 +197,7 @@ describe("fleet placement resolution order", () => {
 		const profileBound = resolver({
 			settings: settingsWithFleet({
 				profiles: { pinned: { target: null, model: null, thinkingLevel: "off", node: "mini" } },
-				agentBindings: { coder: "pinned" },
+				agentProfiles: { coder: "pinned" },
 			}),
 		});
 		strictEqual(profileBound.preview({ agentId: "coder", executionRole: "builder", task: "t" }).node.id, "mini");
@@ -216,7 +216,7 @@ describe("fleet placement resolution order", () => {
 		const { resolve } = resolver({
 			settings: settingsWithFleet({
 				profiles: { pinned: { target: null, model: null, thinkingLevel: "off", node: "blade" } },
-				agentBindings: { coder: "pinned" },
+				agentProfiles: { coder: "pinned" },
 			}),
 		});
 		const placement = resolve({ agentId: "coder", executionRole: "builder", task: "t", node: "mini" });
@@ -227,7 +227,7 @@ describe("fleet placement resolution order", () => {
 		const { resolve } = resolver({
 			settings: settingsWithFleet({
 				profiles: { pinned: { target: null, model: null, thinkingLevel: "off", node: "mini" } },
-				agentBindings: { coder: "pinned" },
+				agentProfiles: { coder: "pinned" },
 			}),
 		});
 		const placement = resolve({ agentId: "coder", executionRole: "builder", task: "t" });

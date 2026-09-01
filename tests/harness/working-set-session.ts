@@ -217,8 +217,7 @@ export interface ScenarioHarness {
 
 function scenarioSettings(options: ScenarioHarnessOptions): ClioSettings {
 	const settings = structuredClone(DEFAULT_SETTINGS) as ClioSettings;
-	settings.compaction.threshold = options.threshold ?? 0.8;
-	settings.compaction.excludeLastTurns = 1;
+	settings.context.compaction.threshold = options.threshold ?? 0.8;
 	settings.context.workingSet.enabled = options.workingSetEnabled ?? true;
 	settings.context.workingSet.policy = options.policy ?? "age-horizon";
 	if (options.protectLastTurns !== undefined) settings.context.workingSet.protectLastTurns = options.protectLastTurns;

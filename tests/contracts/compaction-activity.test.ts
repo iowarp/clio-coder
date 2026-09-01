@@ -29,10 +29,10 @@ import { isolateClioEnv } from "../harness/scratch-env.js";
 const COMPACTION_TARGET_URL = "http://127.0.0.1:18080/v1/";
 const COMPACTION_ENDPOINT_KEY = "http://127.0.0.1:18080";
 
-function settings(overrides: Partial<ClioSettings["compaction"]> = {}): ClioSettings {
+function settings(overrides: Partial<ClioSettings["context"]["compaction"]> = {}): ClioSettings {
 	const value = structuredClone(DEFAULT_SETTINGS) as ClioSettings;
-	value.orchestrator.target = "test-target";
-	value.orchestrator.model = "model";
+	value.chat.target = "test-target";
+	value.chat.model = "model";
 	value.targets = [
 		{
 			id: "test-target",
@@ -41,7 +41,7 @@ function settings(overrides: Partial<ClioSettings["compaction"]> = {}): ClioSett
 			capabilities: { contextWindow: 1000, maxTokens: 256, tools: true, chat: true },
 		},
 	];
-	value.compaction = { ...value.compaction, ...overrides };
+	value.context.compaction = { ...value.context.compaction, ...overrides };
 	return value;
 }
 
@@ -622,6 +622,14 @@ describe("contracts/compaction context-island activity (S3 Part A)", () => {
 				role: "user",
 				payload: { text: "recent protected turn" },
 			} as MessageEntry,
+			...Array.from({ length: 5 }, (_, index) => ({
+				kind: "message" as const,
+				turnId: `recent-${index + 1}`,
+				parentTurnId: index === 0 ? "03" : `recent-${index}`,
+				timestamp: `2026-06-08T00:00:${String(index + 4).padStart(2, "0")}.000Z`,
+				role: "user" as const,
+				payload: { text: `recent protected turn ${index + 2}` },
+			})),
 		];
 		const session = createSession(entries);
 		session.create({ cwd: process.cwd(), model: "model", target: "test-target" });
@@ -638,7 +646,7 @@ describe("contracts/compaction context-island activity (S3 Part A)", () => {
 			} as never,
 		];
 		const loop = createChatLoop({
-			getSettings: () => settings({ threshold: 0.5, excludeLastTurns: 1 }),
+			getSettings: () => settings({ threshold: 0.5 }),
 			providers: providers(),
 			knownTargets: () => new Set(["test-target"]),
 			session,

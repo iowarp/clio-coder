@@ -225,8 +225,8 @@ function stubContext(runtimeOverride?: RuntimeDescriptor): DomainContext {
 	const defaultModel = runtimeOverride?.knownModels?.[0] ?? "gpt-4o";
 	const target: TargetDescriptor = { id: "default", runtime: runtimeId, defaultModel };
 	settings.targets = [target];
-	settings.workers.default.target = target.id;
-	settings.workers.default.model = defaultModel;
+	settings.fleet.default.target = target.id;
+	settings.fleet.default.model = defaultModel;
 
 	const runtime: RuntimeDescriptor =
 		runtimeOverride ??

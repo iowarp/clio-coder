@@ -77,10 +77,10 @@ export interface AcpSafeSettingsSnapshot extends AcpRoutingSnapshot {
 }
 
 export type AcpSafeSettingsPatch = Partial<{
-	"orchestrator.target": string | null;
-	"orchestrator.model": string | null;
-	"orchestrator.thinkingLevel": AcpThinkingLevel;
-	autonomy: AutonomyLevel;
+	"chat.target": string | null;
+	"chat.model": string | null;
+	"chat.thinkingLevel": AcpThinkingLevel;
+	"safety.autonomy": AutonomyLevel;
 }>;
 
 export interface AcpSettingsControl {
@@ -1259,12 +1259,7 @@ function sessionResultMeta(
 	};
 }
 
-const ACP_SAFE_SETTINGS_KEYS = [
-	"orchestrator.target",
-	"orchestrator.model",
-	"orchestrator.thinkingLevel",
-	"autonomy",
-] as const;
+const ACP_SAFE_SETTINGS_KEYS = ["chat.target", "chat.model", "chat.thinkingLevel", "safety.autonomy"] as const;
 const ACP_THINKING_LEVELS = new Set<AcpThinkingLevel>(["off", "minimal", "low", "medium", "high", "xhigh", "max"]);
 const ACP_AUTONOMY_LEVELS = new Set<AutonomyLevel>(["read-only", "suggest", "auto-edit", "full-auto"]);
 const ACP_MAX_TARGETS = 64;
@@ -1288,12 +1283,12 @@ function safeSettingsProjection(snapshot: AcpSafeSettingsSnapshot): Record<strin
 	const autonomy = ACP_AUTONOMY_LEVELS.has(snapshot.autonomy) ? snapshot.autonomy : DEFAULT_AUTONOMY_LEVEL;
 	return {
 		settings: {
-			orchestrator: {
+			chat: {
 				target: safeConfiguredIdentifier(snapshot.target, ACP_MAX_TARGET_ID_BYTES),
 				model: safeConfiguredIdentifier(snapshot.model, ACP_MAX_MODEL_ID_BYTES),
 				thinkingLevel,
 			},
-			autonomy,
+			safety: { autonomy },
 		},
 		editable: [...ACP_SAFE_SETTINGS_KEYS],
 	};
@@ -2318,7 +2313,7 @@ export async function serveClioAcpAgent(options: ClioAcpServerOptions): Promise<
 				throw new AcpRequestError(-32602, "patch contains an unknown setting", { code: "invalid_params" });
 			}
 			switch (key) {
-				case "orchestrator.target": {
+				case "chat.target": {
 					if (value === null) {
 						patch[key] = null;
 						break;
@@ -2333,16 +2328,16 @@ export async function serveClioAcpAgent(options: ClioAcpServerOptions): Promise<
 					patch[key] = target;
 					break;
 				}
-				case "orchestrator.model":
+				case "chat.model":
 					patch[key] = value === null ? null : requireBoundedClientString(value, key, ACP_MAX_MODEL_ID_BYTES);
 					break;
-				case "orchestrator.thinkingLevel":
+				case "chat.thinkingLevel":
 					if (typeof value !== "string" || !ACP_THINKING_LEVELS.has(value as AcpThinkingLevel)) {
 						throw new AcpRequestError(-32602, "invalid thinking level", { code: "invalid_params" });
 					}
 					patch[key] = value as AcpThinkingLevel;
 					break;
-				case "autonomy":
+				case "safety.autonomy":
 					if (typeof value !== "string" || !ACP_AUTONOMY_LEVELS.has(value as AutonomyLevel)) {
 						throw new AcpRequestError(-32602, "invalid autonomy level", { code: "invalid_params" });
 					}
@@ -2351,8 +2346,8 @@ export async function serveClioAcpAgent(options: ClioAcpServerOptions): Promise<
 			}
 		}
 		const current = options.settings.read();
-		const nextTarget = patch["orchestrator.target"] === undefined ? current.target : patch["orchestrator.target"];
-		const nextModel = patch["orchestrator.model"] === undefined ? current.model : patch["orchestrator.model"];
+		const nextTarget = patch["chat.target"] === undefined ? current.target : patch["chat.target"];
+		const nextModel = patch["chat.model"] === undefined ? current.model : patch["chat.model"];
 		if (nextTarget === null && nextModel !== null) {
 			throw new AcpRequestError(-32602, "model requires a configured target", { code: "invalid_params" });
 		}

@@ -61,9 +61,9 @@ function completedReroutes(
 
 function requestedNodeId(req: DispatchRequest, settings: Readonly<ClioSettings> | undefined): string | null {
 	if (req.node !== undefined && req.node.trim().length > 0) return req.node.trim();
-	const workers = settings?.workers;
+	const workers = settings?.fleet;
 	if (!workers) return null;
-	const profileName = req.workerProfile ?? workers.agentBindings?.[req.agentId];
+	const profileName = req.workerProfile ?? workers.agentProfiles?.[req.agentId];
 	if (!profileName) return null;
 	const pin = workers.profiles?.[profileName]?.node;
 	return pin !== undefined && pin.trim().length > 0 ? pin.trim() : null;

@@ -148,7 +148,7 @@ describe("dispatch failure classification", () => {
 	it("keeps cancellation and permission neutral to target cooldown and retry", async () => {
 		for (const kind of ["cancel", "permission"] as const) {
 			const settings = structuredClone(DEFAULT_SETTINGS);
-			settings.workers.maxRetries = 1;
+			settings.fleet.retry.maxRetries = 1;
 			let finish!: (result: SpawnedWorkerResult) => void;
 			const pending = new Promise<SpawnedWorkerResult>((resolve) => {
 				finish = resolve;
@@ -191,7 +191,7 @@ describe("dispatch failure classification", () => {
 
 	it("attributes target breaker failures without cooling for capacity or internal", async () => {
 		const settings = structuredClone(DEFAULT_SETTINGS);
-		settings.workers.maxRetries = 0;
+		settings.fleet.retry.maxRetries = 0;
 		let spawns = 0;
 		const bundle = makeDispatchBundle(dispatchStubContext({ settings }), {
 			resilienceCooldownMs: 5_000,
@@ -218,7 +218,7 @@ describe("dispatch failure classification", () => {
 		}
 
 		const internalSettings = structuredClone(DEFAULT_SETTINGS);
-		internalSettings.workers.maxRetries = 0;
+		internalSettings.fleet.retry.maxRetries = 0;
 		let reproductionCalls = 0;
 		const internalBundle = makeDispatchBundle(dispatchStubContext({ settings: internalSettings }), {
 			resilienceCooldownMs: 5_000,
@@ -248,7 +248,7 @@ describe("dispatch failure classification", () => {
 		}
 
 		const authSettings = structuredClone(DEFAULT_SETTINGS);
-		authSettings.workers.maxRetries = 0;
+		authSettings.fleet.retry.maxRetries = 0;
 		const authBundle = makeDispatchBundle(dispatchStubContext({ settings: authSettings }), {
 			resilienceCooldownMs: 5_000,
 			spawnWorker: () => worker({ exitCode: 1, signal: null, stderrTail: "HTTP 401 Unauthorized" }),
@@ -268,7 +268,7 @@ describe("dispatch failure classification", () => {
 
 	it("moves only the node after a channel failure and retains target/model", async () => {
 		const settings = structuredClone(DEFAULT_SETTINGS);
-		settings.workers.maxRetries = 1;
+		settings.fleet.retry.maxRetries = 1;
 		const context = dispatchStubContext({ settings });
 		const targetId = settings.targets[0]?.id;
 		ok(targetId);
@@ -321,15 +321,15 @@ describe("dispatch failure classification", () => {
 
 	it("suppresses unsafe model-quality failover after mutation but retains target-auth failover", async () => {
 		const qualitySettings = structuredClone(DEFAULT_SETTINGS);
-		qualitySettings.workers.maxRetries = 1;
+		qualitySettings.fleet.retry.maxRetries = 1;
 		qualitySettings.targets[0] = {
 			...qualitySettings.targets[0],
 			id: "quality-target",
 			runtime: "openai",
 			defaultModel: "fallback-model",
 		};
-		qualitySettings.workers.default.target = "quality-target";
-		qualitySettings.workers.default.model = "fallback-model";
+		qualitySettings.fleet.default.target = "quality-target";
+		qualitySettings.fleet.default.model = "fallback-model";
 		const qualityRoutes: Array<{ targetId: string; model: string }> = [];
 		let qualitySpawns = 0;
 		const originalRigor = process.env.CLIO_CODER_RIGOR;
@@ -390,13 +390,13 @@ describe("dispatch failure classification", () => {
 		}
 
 		const authSettings = structuredClone(DEFAULT_SETTINGS);
-		authSettings.workers.maxRetries = 1;
+		authSettings.fleet.retry.maxRetries = 1;
 		authSettings.targets = [
 			{ id: "primary", runtime: "openai", defaultModel: "shared-model" },
 			{ id: "secondary", runtime: "openai", defaultModel: "shared-model" },
 		];
-		authSettings.workers.default.target = "primary";
-		authSettings.workers.default.model = "shared-model";
+		authSettings.fleet.default.target = "primary";
+		authSettings.fleet.default.model = "shared-model";
 		const authRoutes: Array<{ targetId: string; node?: string }> = [];
 		let authSpawns = 0;
 		const authBundle = makeDispatchBundle(dispatchStubContext({ settings: authSettings }), {
@@ -435,13 +435,13 @@ describe("dispatch failure classification", () => {
 
 	it("changes target after rate limiting while retaining agent/model and delaying retry", async () => {
 		const settings = structuredClone(DEFAULT_SETTINGS);
-		settings.workers.maxRetries = 1;
+		settings.fleet.retry.maxRetries = 1;
 		settings.targets = [
 			{ id: "primary", runtime: "openai", defaultModel: "shared-model" },
 			{ id: "secondary", runtime: "openai", defaultModel: "shared-model" },
 		];
-		settings.workers.default.target = "primary";
-		settings.workers.default.model = "shared-model";
+		settings.fleet.default.target = "primary";
+		settings.fleet.default.model = "shared-model";
 		const routes: Array<{ agentId: string; targetId: string; model: string }> = [];
 		let spawns = 0;
 		const bundle = makeDispatchBundle(dispatchStubContext({ settings }), {
@@ -476,7 +476,7 @@ describe("dispatch failure classification", () => {
 
 	it("spends the whole retry budget on a pinned failing target without waiting out its cooldown", async () => {
 		const settings = structuredClone(DEFAULT_SETTINGS);
-		settings.workers.maxRetries = 2;
+		settings.fleet.retry.maxRetries = 2;
 		const cooldownMs = 5_000;
 		const routes: Array<{ agentId: string; targetId: string; model: string; atMs: number }> = [];
 		const clock = (): number => Date.now();
@@ -530,7 +530,7 @@ describe("dispatch failure classification", () => {
 
 	it("settles the assignment failed with the denial reason when a retry is refused at admission", async () => {
 		const settings = structuredClone(DEFAULT_SETTINGS);
-		settings.workers.maxRetries = 1;
+		settings.fleet.retry.maxRetries = 1;
 		let placements = 0;
 		const bundle = makeDispatchBundle(dispatchStubContext({ settings }), {
 			resilienceCooldownMs: 0,

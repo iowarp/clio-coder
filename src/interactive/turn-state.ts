@@ -43,7 +43,7 @@ export interface ChatLoopRunSnapshot {
 	runtimeId: string;
 	runtimeKind: RuntimeDescriptor["kind"];
 	wireModelId: string;
-	autonomy: ClioSettings["autonomy"];
+	autonomy: ClioSettings["safety"]["autonomy"];
 	compiledPromptHash: string | null;
 	staticCompositionHash: string | null;
 	promptSignature: string | null;

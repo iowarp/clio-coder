@@ -195,7 +195,7 @@ describe("contracts/slash prompt templates", () => {
 		strictEqual(submitted.length, 0, "an untrusted body must not become a message");
 		strictEqual(notices.length, 1, notices.join(" | "));
 		ok(notices[0]?.includes("untrusted project root"), notices.join(" | "));
-		ok(notices[0]?.includes("skills.trustProjectCompatRoots"), notices.join(" | "));
+		ok(notices[0]?.includes("integrations.projectResources.trustProjectImports"), notices.join(" | "));
 		ok(!notices[0]?.includes("is not a command"), "the template exists; it refused");
 	});
 

@@ -38,8 +38,8 @@ const CAPTURED_CONVERSATIONAL_OFFER =
 
 function settings(): ClioSettings {
 	const value = structuredClone(DEFAULT_SETTINGS) as ClioSettings;
-	value.orchestrator.target = "test-target";
-	value.orchestrator.model = "model";
+	value.chat.target = "test-target";
+	value.chat.model = "model";
 	value.targets = [
 		{
 			id: "test-target",

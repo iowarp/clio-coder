@@ -56,8 +56,7 @@ function fixtureEntries(): SessionEntry[] {
 
 function testSettings(enabled = true): ClioSettings {
 	const settings = structuredClone(DEFAULT_SETTINGS) as ClioSettings;
-	settings.compaction.threshold = 0.5;
-	settings.compaction.excludeLastTurns = 1;
+	settings.context.compaction.threshold = 0.5;
 	settings.context.workingSet.enabled = enabled;
 	return settings;
 }
@@ -367,6 +366,16 @@ describe("contracts/context working-set compaction wiring", () => {
 	it("keeps the destructive mask path only behind CLIO_CODER_LEGACY_MASK=1", async () => {
 		process.env.CLIO_CODER_LEGACY_MASK = "1";
 		const h = harness(true);
+		for (let index = 0; index < 5; index += 1) {
+			h.entries.push({
+				kind: "message",
+				turnId: `recent-${index + 1}`,
+				parentTurnId: index === 0 ? "user-recent" : `recent-${index}`,
+				timestamp: `2026-08-21T00:00:${String(index + 3).padStart(2, "0")}.000Z`,
+				role: "user",
+				payload: { text: `continue ${index + 1}` },
+			} satisfies MessageEntry);
+		}
 
 		await h.context.runAutoCompact(h.runtime, false);
 

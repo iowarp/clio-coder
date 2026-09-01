@@ -108,8 +108,8 @@ describe("contracts/context ledger after resume", () => {
 		const meta = { id: "session-resumed", createdAt: "2026-08-23T00:00:00.000Z", cwd: process.cwd() } as SessionMeta;
 		appendContextSnapshot(meta, resumedSnapshot(meta));
 		const settings = structuredClone(DEFAULT_SETTINGS) as ClioSettings;
-		settings.orchestrator.target = "mini";
-		settings.orchestrator.model = "ornith";
+		settings.chat.target = "mini";
+		settings.chat.model = "ornith";
 		const state = createTurnState("off");
 		const context = createTurnContext({
 			state,
@@ -156,8 +156,8 @@ describe("contracts/context ledger after resume", () => {
 
 	it("keeps the honest unknown for a fresh session with no snapshot and no target", () => {
 		const settings = structuredClone(DEFAULT_SETTINGS) as ClioSettings;
-		settings.orchestrator.target = "";
-		settings.orchestrator.model = "";
+		settings.chat.target = "";
+		settings.chat.model = "";
 		const state = createTurnState("off");
 		const context = createTurnContext({
 			state,

@@ -58,8 +58,7 @@ describe("contracts/interactive session transcript", () => {
 					return current;
 				},
 			},
-			getSettings: () =>
-				({ orchestrator: { target: "local", model: "coder" } }) as Readonly<Pick<ClioSettings, "orchestrator">>,
+			getSettings: () => ({ chat: { target: "local", model: "coder" } }) as Readonly<Pick<ClioSettings, "chat">>,
 			getCwd: () => "/work/project",
 			chat: { resetForSession: () => {} } as Pick<ChatLoop, "resetForSession">,
 			refreshStatus: () => {},
@@ -80,7 +79,7 @@ describe("contracts/interactive session transcript", () => {
 					return sessionMeta("created", 0);
 				},
 			},
-			getSettings: () => ({ orchestrator: {} }) as Readonly<Pick<ClioSettings, "orchestrator">>,
+			getSettings: () => ({ chat: {} }) as Readonly<Pick<ClioSettings, "chat">>,
 			getCwd: () => "/work/project",
 			chat: { resetForSession: () => {} } as Pick<ChatLoop, "resetForSession">,
 			refreshStatus: () => {},

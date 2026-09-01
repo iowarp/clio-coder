@@ -457,7 +457,7 @@ function calculateUsageCostUsd(meter: RunTokenMeter, pricing: EffectivePricing["
  * that owns the default rather than restating the number here.
  */
 export function admissionMaxOutputTokens(settings: EffectiveSettings): number {
-	return settings?.defaults.maxTokens ?? DEFAULT_SETTINGS.defaults.maxTokens;
+	return settings?.chat.maxOutputTokens ?? DEFAULT_SETTINGS.chat.maxOutputTokens;
 }
 
 function conservativeRouteAdmissionEstimateUsd(pricing: EffectivePricing, maxOutputTokens: number): number {
@@ -1355,7 +1355,7 @@ interface DispatchLifecycleStage {
 interface AcpDelegationLifecycleStage {
 	admission: DispatchAdmissionStage;
 	pathScope: DispatchPathScope;
-	agentConfig: ReturnType<ConfigContract["get"]>["delegation"]["agents"][number];
+	agentConfig: ReturnType<ConfigContract["get"]>["integrations"]["externalAgents"]["entries"][number];
 	cwd: string;
 	systemPrompt: string;
 	dynamicPromptMessages: ReadonlyArray<WorkerPromptMessage>;
@@ -1607,7 +1607,7 @@ function workerToolCallHardCap(settings: EffectiveSettings): number {
 	const parsedEnvCap = rawEnvCap && /^[1-9]\d*$/.test(rawEnvCap) ? Number(rawEnvCap) : Number.NaN;
 	return Number.isSafeInteger(parsedEnvCap)
 		? parsedEnvCap
-		: (settings?.guardrails.workerToolCallCap ?? GUARDRAIL_DEFAULTS.workerToolCallCap);
+		: (settings?.fleet.limits.toolCallsPerRun ?? GUARDRAIL_DEFAULTS.workerToolCallCap);
 }
 
 function resolveEffectiveWorkerBudget(input: {
@@ -1735,15 +1735,15 @@ function acpRuntimeLimitations(): string[] {
 }
 
 function readWorkerTargets(settings: ReturnType<ConfigContract["get"]> | undefined): WorkerTargets {
-	const workerDefault = settings?.workers?.default
+	const workerDefault = settings?.fleet?.default
 		? {
-				target: settings.workers.default.target ?? null,
-				model: settings.workers.default.model ?? null,
-				thinkingLevel: (settings.workers.default.thinkingLevel ?? "off") as ThinkingLevel,
+				target: settings.fleet.default.target ?? null,
+				model: settings.fleet.default.model ?? null,
+				thinkingLevel: (settings.fleet.default.thinkingLevel ?? "off") as ThinkingLevel,
 			}
 		: null;
 	const workerProfiles: WorkerProfileMap = {};
-	for (const [name, profile] of Object.entries(settings?.workers?.profiles ?? {})) {
+	for (const [name, profile] of Object.entries(settings?.fleet?.profiles ?? {})) {
 		workerProfiles[name] = {
 			target: profile.target ?? null,
 			model: profile.model ?? null,
@@ -1751,7 +1751,7 @@ function readWorkerTargets(settings: ReturnType<ConfigContract["get"]> | undefin
 		};
 	}
 	const agentBindings: WorkerAgentBindingMap = {};
-	for (const [agentId, profileName] of Object.entries(settings?.workers?.agentBindings ?? {})) {
+	for (const [agentId, profileName] of Object.entries(settings?.fleet?.agentProfiles ?? {})) {
 		const id = agentId.trim();
 		const profile = profileName.trim();
 		if (id.length > 0 && profile.length > 0) agentBindings[id] = profile;
@@ -1928,17 +1928,17 @@ function buildDispatchWorkerSpec(input: DispatchWorkerSpecInput, config?: Config
 	if (input.req.trustProjectCompatRoots !== undefined) {
 		spec.trustProjectCompatRoots = input.req.trustProjectCompatRoots;
 	} else if (settings) {
-		spec.trustProjectCompatRoots = settings.skills.trustProjectCompatRoots === true;
+		spec.trustProjectCompatRoots = settings.integrations.projectResources.trustProjectImports === true;
 	}
-	spec.gitCommitAttribution = settings?.attribution.gitCommits ?? true;
+	spec.gitCommitAttribution = settings?.integrations.git.commitAttribution ?? true;
 	// Non-stall posture (Symphony §10.5): a dispatched worker has no operator
 	// to answer a permission prompt by default, so the resolution policy ships
 	// with the spec and the worker enforces it within bounded time. Under the
 	// escalate posture the configured timeout/fallback bounds ride along so the
 	// worker still cannot hang when no operator resolves the ask.
-	spec.onPermission = settings?.workers.onPermission ?? "deny";
+	spec.onPermission = settings?.fleet.permissions.mode ?? "deny";
 	if (spec.onPermission === "escalate") {
-		const escalation = settings?.workers.escalation;
+		const escalation = settings?.fleet.permissions.escalation;
 		if (escalation) spec.escalation = { timeoutMs: escalation.timeoutMs, fallback: escalation.fallback };
 	}
 	assertRuntimeCanHonorWorkerPermissionMode(input.target.runtime, spec.onPermission);
@@ -2426,7 +2426,7 @@ export function createDispatchBundle(
 	const heartbeatIntervalMs = options?.heartbeatIntervalMs ?? DEFAULT_HEARTBEAT_INTERVAL_MS;
 	const getResilienceCooldownMs = (): number => {
 		if (options?.resilienceCooldownMs !== undefined) return options.resilienceCooldownMs;
-		const settingsVal = getEffectiveSettings()?.workers?.resilienceCooldownMs;
+		const settingsVal = getEffectiveSettings()?.fleet?.retry.routeCooldownMs;
 		if (settingsVal !== undefined && settingsVal >= 0) return settingsVal;
 		return DEFAULT_RESILIENCE_COOLDOWN_MS;
 	};
@@ -2598,7 +2598,7 @@ export function createDispatchBundle(
 	}
 
 	function configuredGlobalCapacity(settings: EffectiveSettings): number {
-		const configured = settings?.budget.concurrency;
+		const configured = settings?.fleet.concurrency;
 		return scheduling.maxWorkers?.() ?? (configured === "auto" || configured === undefined ? 4 : Math.max(1, configured));
 	}
 
@@ -2724,7 +2724,7 @@ export function createDispatchBundle(
 	const finalizedCosts: Array<{ usd: number; provenance: import("../providers/index.js").CostProvenance }> = [];
 
 	function workersMaxRetries(settings: EffectiveSettings = getEffectiveSettings()): number {
-		const value = settings?.workers?.maxRetries;
+		const value = settings?.fleet?.retry.maxRetries;
 		return typeof value === "number" && Number.isInteger(value) && value >= 0 ? value : 2;
 	}
 
@@ -3418,11 +3418,11 @@ export function createDispatchBundle(
 			providers,
 		);
 		enforceCapabilityGate(target.target.id, target.modelCapabilities, req.requiredCapabilities);
-		assertRuntimeCanHonorWorkerPermissionMode(target.runtime, settings?.workers.onPermission ?? "deny");
+		assertRuntimeCanHonorWorkerPermissionMode(target.runtime, settings?.fleet.permissions.mode ?? "deny");
 		assertWorkerBudgetEnforceable(target.runtime, spec.budget !== null || req.budget !== undefined);
 
 		const cwd = req.cwd ?? process.cwd();
-		const sessionAutonomy = settings?.autonomy ?? "auto-edit";
+		const sessionAutonomy = settings?.safety.autonomy ?? "auto-edit";
 		const effectiveAutonomy = clampWorkerAutonomy(sessionAutonomy, req.autonomy);
 		const effectiveTools = withLedgerToolNarrowing(
 			effectiveToolNames(admission.allowedTools, target, pathScope.writeBoundaries.length > 0, deniedToolNames(req)),
@@ -3445,7 +3445,7 @@ export function createDispatchBundle(
 				recipe.skills !== undefined &&
 				recipe.skills.length > 0 &&
 				req.noSkills !== true,
-			onPermission: settings?.workers.onPermission ?? "deny",
+			onPermission: settings?.fleet.permissions.mode ?? "deny",
 			persona: {
 				id: `persona.${recipe.id}`,
 				relPath: recipe.filepath,
@@ -3473,7 +3473,7 @@ export function createDispatchBundle(
 			capabilityClass: spec.capabilityClass,
 			projectContextTier: tier,
 			autonomy: effectiveAutonomy,
-			onPermission: settings?.workers.onPermission ?? "deny",
+			onPermission: settings?.fleet.permissions.mode ?? "deny",
 			project,
 			workspace: readWorkspaceRootFacts(cwd),
 		});
@@ -3548,7 +3548,7 @@ export function createDispatchBundle(
 			}
 		}
 		if (!settings) throw new Error("dispatch: effective settings required for ACP delegation");
-		const configured = settings.delegation.agents.find((entry) => entry.id === agentId);
+		const configured = settings.integrations.externalAgents.entries.find((entry) => entry.id === agentId);
 		if (!configured) throw new Error(`dispatch: ACP delegation agent '${agentId}' not configured`);
 		const toolGovernance = configured.toolGovernance ?? "clio-policy";
 		if (options?.autonomyOverride === true && toolGovernance === "agent-managed") {
@@ -3557,7 +3557,7 @@ export function createDispatchBundle(
 			);
 		}
 		const admission = resolveDelegationAdmissionStage(req, safety);
-		const sessionAutonomy = settings.autonomy ?? "auto-edit";
+		const sessionAutonomy = settings.safety.autonomy ?? "auto-edit";
 		const autonomy = clampWorkerAutonomy(sessionAutonomy, req.autonomy);
 		if (toolGovernance === "agent-managed" && autonomy !== sessionAutonomy) {
 			throw new Error(
@@ -4354,7 +4354,7 @@ export function createDispatchBundle(
 		const requestedAt = new Date(now()).toISOString();
 		const timing: RunPhaseMarks = { requestedAt, decisionStartedAt: requestedAt };
 		const settings = getEffectiveSettings();
-		const isAcpAgent = settings?.delegation?.agents?.some((entry) => entry.id === req.agentId) ?? false;
+		const isAcpAgent = settings?.integrations.externalAgents?.entries?.some((entry) => entry.id === req.agentId) ?? false;
 		if (isAcpAgent && !req.delegationAgentId) {
 			req.delegationAgentId = req.agentId;
 		}
@@ -4374,7 +4374,7 @@ export function createDispatchBundle(
 			const recipe = agents.get(req.agentId);
 			const activation = consumeActiveRouteApproval({
 				request: req,
-				settings: settings?.routing,
+				settings: settings?.fleet.adaptiveRouting,
 				capabilityClass: recipe === null ? null : normalizeAgentSpec(recipe).capabilityClass,
 				failover: failoverModeFor(req),
 				requestedAt,
@@ -5262,7 +5262,7 @@ export function createDispatchBundle(
 				...(skillActivations.length > 0 ? { skillActivations: [...skillActivations] } : {}),
 				autonomyEnforcement: autonomyEnforcementForWorkerSpec(
 					spec,
-					lifecycle.settings?.autonomy ?? "auto-edit",
+					lifecycle.settings?.safety.autonomy ?? "auto-edit",
 					req.autonomy,
 				),
 				safety: {
@@ -5775,7 +5775,7 @@ export function createDispatchBundle(
 		req: DispatchRequest,
 		settings: EffectiveSettings = getEffectiveSettings(),
 	): DispatchPlanTaskResolution {
-		const isAcpAgent = settings?.delegation?.agents?.some((entry) => entry.id === req.agentId) ?? false;
+		const isAcpAgent = settings?.integrations.externalAgents?.entries?.some((entry) => entry.id === req.agentId) ?? false;
 		if (isAcpAgent && !req.delegationAgentId) req = { ...req, delegationAgentId: req.agentId };
 		const validation = routeValidationProjection(req, true);
 		const validated = validateJobSpec(validation.jobSpec);
@@ -5851,7 +5851,7 @@ export function createDispatchBundle(
 			req,
 		);
 		assertPostRuntimeToolCompatibility(req.agentId, agentSpec, effectiveTools, target);
-		assertRuntimeCanHonorWorkerPermissionMode(target.runtime, settings?.workers.onPermission ?? "deny");
+		assertRuntimeCanHonorWorkerPermissionMode(target.runtime, settings?.fleet.permissions.mode ?? "deny");
 		assertWorkerBudgetEnforceable(target.runtime, agentSpec.budget !== null || req.budget !== undefined);
 		assertResponseSchemaEnforceable(target.runtime, target.modelCapabilities, req.responseSchema, effectiveTools.length);
 		assertWriteRootsEnforceable(target.runtime, pathScope.writeBoundaries);
@@ -5913,7 +5913,7 @@ export function createDispatchBundle(
 			specs,
 			request: req,
 			mode,
-			activeAgentRoles: settings?.routing.agentAutomation.activeAgentRoles ?? [],
+			activeAgentRoles: settings?.fleet.adaptiveRouting.agentRoles ?? [],
 			...(agentIntent === undefined ? {} : { intentOverride: agentIntent }),
 		});
 		const settingsFingerprint = computeSettingsFingerprint(settings ?? null);
@@ -6008,7 +6008,7 @@ export function createDispatchBundle(
 		const recipe = agents.get(req.agentId);
 		return planActiveRoute({
 			request: req,
-			settings: settings?.routing,
+			settings: settings?.fleet.adaptiveRouting,
 			capabilityClass: recipe === null ? null : normalizeAgentSpec(recipe).capabilityClass,
 			failover: failoverModeFor(req),
 			fixed,

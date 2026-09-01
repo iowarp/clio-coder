@@ -117,7 +117,7 @@ function buildResult(
  *
  * Trailing `:low`/`:medium`/`:high`/`:xhigh`/`:minimal`/`:off` is parsed off
  * before matching and surfaced on the returned ref so callers can apply it
- * to settings.orchestrator.thinkingLevel.
+ * to settings.chat.thinkingLevel.
  */
 export function resolveModelReference(rawPattern: string, providers: ProvidersContract): ResolveModelResult {
 	const trimmed = rawPattern.trim();

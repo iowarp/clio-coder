@@ -76,6 +76,30 @@ export const GUARDRAIL_ENV_VARS: Readonly<Record<keyof GuardrailValues, string>>
 	internalDispatchTimeoutMs: "CLIO_CODER_INTERNAL_DISPATCH_TIMEOUT_MS",
 };
 
+/** Project canonical v2 settings leaves onto the process-local guardrail registry. */
+export function guardrailValuesFromSettings(settings: {
+	safety: {
+		limits: {
+			chatToolCallsPerTurn: number;
+			readBytesPerCall: number;
+			observationBytesPerTurn: number;
+		};
+	};
+	fleet: {
+		limits: { toolCallsPerRun: number; internalRunTimeoutMs: number };
+		history: { maxRuns: number };
+	};
+}): GuardrailValues {
+	return {
+		turnToolCallBudget: settings.safety.limits.chatToolCallsPerTurn,
+		workerToolCallCap: settings.fleet.limits.toolCallsPerRun,
+		maxDispatchRuns: settings.fleet.history.maxRuns,
+		readMaxBytes: settings.safety.limits.readBytesPerCall,
+		observationTurnBudgetBytes: settings.safety.limits.observationBytesPerTurn,
+		internalDispatchTimeoutMs: settings.fleet.limits.internalRunTimeoutMs,
+	};
+}
+
 /**
  * Older env spellings that still read. `CLIO_CODER_MAX_RUNS` was the only
  * guardrail whose variable was not the SCREAMING_SNAKE of its key, and CI

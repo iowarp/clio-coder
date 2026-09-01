@@ -323,7 +323,7 @@ async function runAttributed(
 /**
  * Dispatches /run through the dispatch contract and streams events to stdout.
  * Target + model are resolved by the dispatch domain from request overrides,
- * worker profiles, recipe hints, and `settings.workers.default`.
+ * worker profiles, recipe hints, and `settings.fleet.default`.
  */
 export async function handleRun(
 	agentId: string,

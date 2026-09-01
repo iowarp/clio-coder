@@ -104,8 +104,8 @@ function renderStatusRows(rows: ReadonlyArray<ConnectableProviderRow>): string {
 
 function defaultAuthTarget(rows: ReadonlyArray<ConnectableProviderRow>): string | undefined {
 	const settings = readSettings();
-	const activeTarget = settings.orchestrator.target
-		? settings.targets.find((entry) => entry.id === settings.orchestrator.target)
+	const activeTarget = settings.chat.target
+		? settings.targets.find((entry) => entry.id === settings.chat.target)
 		: undefined;
 	if (activeTarget && rows.some((row) => row.entry.runtimeId === activeTarget.runtime)) {
 		return activeTarget.runtime;

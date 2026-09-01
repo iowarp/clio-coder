@@ -12,7 +12,7 @@ export function createResourcesBundle(
 		...(options.cwd !== undefined ? { cwd: options.cwd } : {}),
 		...(options.reservedPromptNames !== undefined ? { reservedPromptNames: options.reservedPromptNames } : {}),
 		skills: () => ({
-			...skillOptions(config()?.get().skills.trustProjectCompatRoots === true, options),
+			...skillOptions(config()?.get().integrations.projectResources.trustProjectImports === true, options),
 		}),
 	});
 	const extension: DomainExtension = {

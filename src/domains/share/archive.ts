@@ -2,7 +2,7 @@ import { createHash } from "node:crypto";
 import { existsSync, lstatSync, readdirSync, readFileSync, realpathSync, type Stats, statSync } from "node:fs";
 import path from "node:path";
 import { parse as parseYaml, stringify as stringifyYaml } from "yaml";
-import { type ClioSettings, readSettings, settingsPath, updateSettings } from "../../core/config.js";
+import { type ClioSettings, readSettings, settingsPath, updateSettings, validateSettings } from "../../core/config.js";
 import { DEFAULT_SETTINGS } from "../../core/defaults.js";
 import { readClioVersion } from "../../core/package-root.js";
 import {
@@ -18,6 +18,7 @@ import {
 	parseAgentRecipeSchema,
 	parseFleetContract,
 } from "../agents/index.js";
+import { migrateSettingsV1Document } from "../lifecycle/migrations/2026-09-01-settings-v2.js";
 
 export type ShareScope = "project" | "user";
 export type ShareEntryType = "project-context" | "prompt" | "skill" | "agent" | "fleet" | "settings" | "extension";
@@ -194,15 +195,47 @@ function addTree(
 
 function settingsFragment(settings: Readonly<ClioSettings>): Record<string, unknown> {
 	return {
-		autonomy: settings.autonomy,
-		scope: settings.scope,
-		budget: settings.budget,
-		theme: settings.theme,
-		terminal: settings.terminal,
-		keybindings: settings.keybindings,
-		compaction: settings.compaction,
-		retry: settings.retry,
+		version: 2,
+		chat: {
+			modelPicker: { cycleSet: [...settings.chat.modelPicker.cycleSet] },
+			retry: structuredClone(settings.chat.retry),
+		},
+		fleet: { concurrency: settings.fleet.concurrency },
+		context: { compaction: structuredClone(settings.context.compaction) },
+		safety: {
+			autonomy: settings.safety.autonomy,
+			limits: { sessionCostUsd: settings.safety.limits.sessionCostUsd },
+		},
+		interface: structuredClone(settings.interface),
 	};
+}
+
+const SETTINGS_FRAGMENT_ROOTS = ["chat", "fleet", "context", "safety", "interface"] as const;
+
+function normalizedSettingsFragment(parsed: unknown): Record<string, unknown> {
+	if (!isRecord(parsed)) throw new Error("settings fragment must be a YAML object");
+	let normalized = parsed;
+	if (parsed.version === undefined || parsed.version === 1) {
+		normalized = migrateSettingsV1Document(parsed).document;
+	} else if (parsed.version !== 2) {
+		throw new Error(`settings fragment version must be 1 or 2, got ${String(parsed.version)}`);
+	}
+	const validation = validateSettings(normalized);
+	if (validation.issues.length > 0) {
+		throw new Error(
+			`invalid settings fragment: ${validation.issues.map((issue) => `${issue.path}: ${issue.message}`).join("; ")}`,
+		);
+	}
+	return normalized;
+}
+
+function mergeFragmentValue(current: unknown, fragment: unknown): unknown {
+	if (!isRecord(current) || !isRecord(fragment)) return structuredClone(fragment);
+	const merged: Record<string, unknown> = { ...current };
+	for (const [key, value] of Object.entries(fragment)) {
+		merged[key] = mergeFragmentValue(merged[key], value);
+	}
+	return merged;
 }
 
 function requestedScopes(scope: ShareExportOptions["scope"]): ShareScope[] {
@@ -571,12 +604,18 @@ function versionDiagnostics(archive: ClioShareArchive): ShareDiagnostic[] {
 }
 
 function settingsPlan(buffer: Buffer, options: ShareImportOptions): ShareDiagnostic[] {
-	const parsed = parseYaml(buffer.toString("utf8")) as unknown;
-	if (!isRecord(parsed)) return [{ type: "error", message: "settings fragment must be a YAML object" }];
+	let parsed: Record<string, unknown>;
+	try {
+		parsed = normalizedSettingsFragment(parseYaml(buffer.toString("utf8")) as unknown);
+	} catch (error) {
+		return [{ type: "error", message: error instanceof Error ? error.message : String(error) }];
+	}
 	const settingsTarget = settingsFilePath();
 	const current = settingsFragment(existsSync(settingsTarget) ? readSettings() : DEFAULT_SETTINGS);
 	const diagnostics: ShareDiagnostic[] = [];
-	for (const [key, value] of Object.entries(parsed)) {
+	for (const [key, value] of Object.entries(parsed).filter(([key]) =>
+		(SETTINGS_FRAGMENT_ROOTS as ReadonlyArray<string>).includes(key),
+	)) {
 		if (key in current && JSON.stringify(current[key]) !== JSON.stringify(value)) {
 			diagnostics.push({
 				type: "conflict",
@@ -664,25 +703,15 @@ export function planShareImport(filePath: string, options: ShareImportOptions = 
 }
 
 function mergeSettingsFragment(buffer: Buffer): string {
-	const parsed = parseYaml(buffer.toString("utf8")) as unknown;
-	if (!isRecord(parsed)) throw new Error("settings fragment must be a YAML object");
+	const parsed = normalizedSettingsFragment(parseYaml(buffer.toString("utf8")) as unknown);
 	// Single-writer rule: the merge goes through updateSettings (lock + strict
 	// re-validation), so an invalid fragment throws here instead of landing on
 	// disk. No backup sidecar: settings.yaml is machine-owned and versioned by
 	// the importer's own plan/diagnostics flow.
 	updateSettings((settings) => {
 		const next = settings as unknown as Record<string, unknown>;
-		for (const key of [
-			"autonomy",
-			"scope",
-			"budget",
-			"theme",
-			"terminal",
-			"keybindings",
-			"compaction",
-			"retry",
-		] as const) {
-			if (key in parsed) next[key] = parsed[key];
+		for (const key of SETTINGS_FRAGMENT_ROOTS) {
+			if (key in parsed) next[key] = mergeFragmentValue(next[key], parsed[key]);
 		}
 	});
 	return settingsPath();

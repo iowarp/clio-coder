@@ -41,11 +41,11 @@ function target(): TargetDescriptor {
 
 function settings(): ClioSettings {
 	const value = structuredClone(DEFAULT_SETTINGS) as ClioSettings;
-	value.orchestrator.target = "test-target";
-	value.orchestrator.model = "model";
-	value.orchestrator.thinkingLevel = "off";
+	value.chat.target = "test-target";
+	value.chat.model = "model";
+	value.chat.thinkingLevel = "off";
 	value.targets = [target()];
-	value.prewarm = { ...value.prewarm, enabled: false };
+	value.chat.prewarm = false;
 	return value;
 }
 

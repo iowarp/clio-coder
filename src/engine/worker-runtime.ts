@@ -13,6 +13,7 @@ import path from "node:path";
 import { validateSettingsFile } from "../core/config.js";
 import {
 	configureGuardrails,
+	guardrailValuesFromSettings,
 	isWorkerToolCallCapExceededReason,
 	isWorkerToolCallCapSynthesisReason,
 } from "../core/guardrails.js";
@@ -376,11 +377,11 @@ export function startWorkerRun(input: WorkerRunInput, emit: WorkerEventEmit): Wo
 	// non-throwing read: a worker must not abort over a settings issue the parent
 	// already surfaced.
 	const workerSettings = validateSettingsFile().settings;
-	setGlobalDefaultMaxOutputTokens(workerSettings.defaults.maxTokens);
+	setGlobalDefaultMaxOutputTokens(workerSettings.chat.maxOutputTokens);
 	// Same mirroring for guardrail policy: the worker's loop-guard cap and tool
 	// byte caps resolve settings-first, so the fresh process needs the section
 	// installed before any registry or tool construction reads it.
-	configureGuardrails(workerSettings.guardrails);
+	configureGuardrails(guardrailValuesFromSettings(workerSettings));
 	const fauxModel = registerFauxFromEnv();
 	// Workers are bounded runs against an admission-verified recipe surface.
 	// They have no operator to widen a missing tool, so the active surface is

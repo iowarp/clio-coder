@@ -37,7 +37,7 @@ function isRecord(value: unknown): value is Record<string, unknown> {
 }
 
 function catalogPath(): string {
-	const configured = readSettings().library.catalog;
+	const configured = readSettings().integrations.library.catalog;
 	return path.resolve(configured ?? path.join(clioConfigDir(), "library.yaml"));
 }
 
@@ -283,17 +283,17 @@ export function installLibraryPlan(plan: LibraryInstallPlan): void {
 }
 
 function confirmedRemote(): string {
-	const settings = readSettings().library;
+	const settings = readSettings().integrations.library;
 	if (!settings.remote || settings.remote !== settings.confirmedRemote) throw new Error("library_remote_unconfirmed");
 	return settings.remote;
 }
 
 export function confirmLibraryRemote(url: string): void {
-	const current = readSettings().library.remote;
+	const current = readSettings().integrations.library.remote;
 	if (current !== null && current !== url) throw new Error("library_remote_mismatch");
 	updateSettings((settings) => {
-		if (settings.library.remote === null) settings.library.remote = url;
-		settings.library.confirmedRemote = url;
+		if (settings.integrations.library.remote === null) settings.integrations.library.remote = url;
+		settings.integrations.library.confirmedRemote = url;
 	});
 }
 
@@ -307,7 +307,7 @@ export async function syncLibrary(
 	direction: "sync" | "push",
 	runner: LibraryCommandRunner = runCommandVector,
 ): Promise<void> {
-	const settings = readSettings().library;
+	const settings = readSettings().integrations.library;
 	if (!settings.sync) throw new Error("library_sync_disabled");
 	const remote = confirmedRemote();
 	const cwd = path.dirname(catalogPath());

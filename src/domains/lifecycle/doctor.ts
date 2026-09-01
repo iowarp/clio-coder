@@ -546,7 +546,7 @@ export async function runDoctorInteropChecks(projectRoot: string = process.cwd()
 		// Existing decisions are irrelevant to doctor's presence-only projection.
 		[],
 	);
-	const configured = new Set(settings.delegation.agents.map((agent) => agent.id));
+	const configured = new Set(settings.integrations.externalAgents.entries.map((agent) => agent.id));
 	const findings: DoctorFinding[] = report.agents.map((agent) => {
 		const kind = interopAgentKind(agent.kind);
 		const status = configured.has(agent.kind)
@@ -563,7 +563,7 @@ export async function runDoctorInteropChecks(projectRoot: string = process.cwd()
 					: "";
 		return { ok: true, level: "ok", name: `interop ${agent.kind}`, detail: `${head} (${status})${where}` };
 	});
-	for (const agent of settings.delegation.agents) {
+	for (const agent of settings.integrations.externalAgents.entries) {
 		if (resolveOnPath([agent.command]).presence === "present") continue;
 		findings.push({
 			ok: true,
@@ -624,14 +624,14 @@ function configuredModelRoles(
 ): ConfiguredModelRole[] {
 	const roles: ConfiguredModelRole[] = [];
 	if (target.defaultModel) roles.push({ role: "defaultModel", model: target.defaultModel });
-	if (settings.orchestrator.target === target.id && settings.orchestrator.model) {
-		roles.push({ role: "orchestrator.model", model: settings.orchestrator.model });
+	if (settings.chat.target === target.id && settings.chat.model) {
+		roles.push({ role: "orchestrator.model", model: settings.chat.model });
 	}
-	if (settings.background.target === target.id && settings.background.model) {
-		roles.push({ role: "background.model", model: settings.background.model });
+	if (settings.context.memory.target === target.id && settings.context.memory.model) {
+		roles.push({ role: "background.model", model: settings.context.memory.model });
 	}
-	if (settings.workers.default.target === target.id && settings.workers.default.model) {
-		roles.push({ role: "workers.default.model", model: settings.workers.default.model });
+	if (settings.fleet.default.target === target.id && settings.fleet.default.model) {
+		roles.push({ role: "workers.default.model", model: settings.fleet.default.model });
 	}
 	return roles;
 }

@@ -1,5 +1,6 @@
 import { performance } from "node:perf_hooks";
 import type { ClioSettings } from "../core/config.js";
+import { DEFAULT_SETTINGS } from "../core/defaults.js";
 import type { SafeEventBus } from "../core/event-bus.js";
 import type { ContextState } from "../domains/context/index.js";
 import type { DispatchContract } from "../domains/dispatch/contract.js";
@@ -209,7 +210,7 @@ export function createInteractivePresentation(deps: InteractivePresentationDeps)
 	const getCwd = deps.getCwd ?? (() => process.cwd());
 	const now = deps.now ?? performance.now.bind(performance);
 	const requestRender = (): void => deps.tui.requestRender();
-	const settings = deps.getSettings?.() ?? ({ keybindings: {} } as ClioSettings);
+	const settings = deps.getSettings?.() ?? structuredClone(DEFAULT_SETTINGS);
 	const keybindings = deps.keybindings ?? factories.createKeybindings(settings);
 	const { getExtensionStats, getLiveWorkspaceSnapshot, getWorkspaceSnapshot, refreshLiveWorkspaceGit } =
 		deps.workspaceFacts;
@@ -232,7 +233,7 @@ export function createInteractivePresentation(deps: InteractivePresentationDeps)
 			const first = keybindings.getKeys("clio.tool.expand")[0];
 			return typeof first === "string" && first.length > 0 ? first : undefined;
 		},
-		getOutputVerbosity: () => deps.getSettings?.().terminal.outputVerbosity ?? "default",
+		getOutputVerbosity: () => deps.getSettings?.().interface.outputDetail ?? "default",
 		...(renderTrace ? { onRenderMetrics: (metrics) => renderTrace.recordPanelRender(metrics) } : {}),
 	});
 	const followUpQueuePanel = factories.createFollowUpQueuePanel({
@@ -320,8 +321,8 @@ export function createInteractivePresentation(deps: InteractivePresentationDeps)
 			outputTokens,
 			durationMs,
 			ttftMs: Math.max(0, liveThroughput.firstDeltaAt - liveThroughput.startedAt),
-			providerId: settings?.orchestrator?.target ?? "",
-			modelId: settings?.orchestrator?.model ?? "",
+			providerId: settings?.chat?.target ?? "",
+			modelId: settings?.chat?.model ?? "",
 			recordedAt: Date.now(),
 		};
 	};
@@ -403,18 +404,18 @@ export function createInteractivePresentation(deps: InteractivePresentationDeps)
 		getModelLabel: () => {
 			const current = deps.getSettings?.();
 			// The rail is the narrowest of the three, so it drops the spaces.
-			return formatTargetLabel(current?.orchestrator?.target, current?.orchestrator?.model, { separator: "·" });
+			return formatTargetLabel(current?.chat?.target, current?.chat?.model, { separator: "·" });
 		},
 		getThinkingLabel: () => {
 			const current = deps.getSettings?.();
 			return (
 				resolveModelRuntimeCapabilitiesForProviders(
 					deps.providers,
-					current?.orchestrator?.target,
-					current?.orchestrator?.model,
-					current?.orchestrator?.thinkingLevel ?? "off",
+					current?.chat?.target,
+					current?.chat?.model,
+					current?.chat?.thinkingLevel ?? "off",
 				)?.thinking.display ??
-				current?.orchestrator?.thinkingLevel ??
+				current?.chat?.thinkingLevel ??
 				"off"
 			);
 		},
@@ -447,7 +448,7 @@ export function createInteractivePresentation(deps: InteractivePresentationDeps)
 			? {
 					streamIngress: deps.resolveStreamIngress,
 					getSmoothStreamingMode: () => {
-						const mode = resolveSmoothStreamingMode(deps.getSettings?.().terminal.smoothStreaming ?? "off");
+						const mode = resolveSmoothStreamingMode(deps.getSettings?.().interface.smoothStreaming ?? "off");
 						const autoAllowed = processAutoPacingAllowed(deps.hasObservedBackpressure?.() ?? false);
 						deps.onSmoothStreamingMode?.(mode, mode === "on" || (mode === "auto" && autoAllowed));
 						return mode;
@@ -487,8 +488,8 @@ export function createInteractivePresentation(deps: InteractivePresentationDeps)
 			footer: footer.view,
 		},
 		{
-			mode: settings.terminal?.tuiMode ?? "regular",
-			fullscreenScrollbar: settings.terminal?.fullscreenScrollbar ?? "auto",
+			mode: settings.interface?.mode ?? "regular",
+			fullscreenScrollbar: settings.interface?.fullscreenScrollbar ?? "auto",
 		},
 	);
 	deps.mount?.(root, editor);
