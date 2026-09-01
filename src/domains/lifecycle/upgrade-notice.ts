@@ -27,7 +27,7 @@ const KEYBOARD_FACING_CHANGES: Readonly<Record<string, string>> = Object.freeze(
  */
 export function describeUpgradeNotice(transition: UpgradeTransition): string {
 	const changes = KEYBOARD_FACING_CHANGES[transition.to];
-	const head = `clio: upgraded ${transition.from} → ${transition.to}.`;
+	const head = `clio-coder: upgraded ${transition.from} → ${transition.to}.`;
 	const tail = `Full notes: CHANGELOG.md, section ${transition.to}.`;
 	return changes === undefined
 		? `${head} What changed is in CHANGELOG.md, section ${transition.to}.`

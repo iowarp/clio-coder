@@ -32,7 +32,7 @@ let isolated: { dir: string; env: NodeJS.ProcessEnv } | null = null;
 /** Isolate the standalone driver from the operator's durable Clio state. */
 export async function isolateDispatchState(): Promise<void> {
 	restoreDispatchState();
-	const dir = mkdtempSync(join(tmpdir(), "clio-eval-dispatch-"));
+	const dir = mkdtempSync(join(tmpdir(), "clio-coder-eval-dispatch-"));
 	isolated = { dir, env: { ...process.env } };
 	Object.assign(process.env, {
 		CLIO_CODER_HOME: dir,

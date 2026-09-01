@@ -16,8 +16,8 @@ Fixture:
 ```bash
 git init -q .
 git branch -M main
-git config user.email eval@clio.local
-git config user.name "Clio Eval"
+git config user.email eval@clio-coder.local
+git config user.name "Clio Coder Eval"
 git config commit.gpgsign false
 printf 'export function clamp(v: number, min: number, max: number) {\n  return v < min ? max : v > max ? max : v;\n}\n' > mathx.ts
 printf 'import { clamp } from "./mathx";\nif (clamp(20, 5, 10) !== 10) throw new Error("upper");\nconsole.log("ok");\n' > mathx.test.ts
@@ -43,8 +43,8 @@ Fixture:
 ```bash
 git init -q .
 git branch -M main
-git config user.email eval@clio.local
-git config user.name "Clio Eval"
+git config user.email eval@clio-coder.local
+git config user.name "Clio Coder Eval"
 git config commit.gpgsign false
 printf 'export function greet(user: { name?: string }) {\n  return `hello ${user.name}`;\n}\n' > greet.ts
 printf 'import { greet } from "./greet";\nconsole.log(greet({}));\n' > main.ts

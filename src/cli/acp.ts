@@ -107,7 +107,7 @@ export async function runAcpCommand(
 				transportOptions: {
 					write: writeRawStdout,
 					diagnostics: (line) => {
-						process.stderr.write(`[clio:acp] ${line}\n`);
+						process.stderr.write(`[clio-coder:acp] ${line}\n`);
 					},
 				},
 				...(flags.permissionTimeoutMs === undefined ? {} : { permissionTimeoutMs: flags.permissionTimeoutMs }),

@@ -12,8 +12,8 @@ Fixture:
 ```bash
 git init -q .
 git branch -M main
-git config user.email eval@clio.local
-git config user.name "Clio Eval"
+git config user.email eval@clio-coder.local
+git config user.name "Clio Coder Eval"
 git config commit.gpgsign false
 printf 'function getUser(id) {\n  return db.find(id);\n}\n\nmodule.exports = { getUser };\n' > util.js
 git add util.js

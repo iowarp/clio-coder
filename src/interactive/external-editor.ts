@@ -50,7 +50,7 @@ export function resolveExternalEditor(
 
 export function editTextExternally(initialText: string, command: string | null): ExternalEditResult {
 	if (!command) return { ok: false, error: "no external editor configured; set VISUAL or EDITOR" };
-	const tmpFile = join(tmpdir(), `clio-editor-${process.pid}-${randomUUID()}.md`);
+	const tmpFile = join(tmpdir(), `clio-coder-editor-${process.pid}-${randomUUID()}.md`);
 	try {
 		writeFileSync(tmpFile, initialText, "utf8");
 		const result = runEditor(command, tmpFile);

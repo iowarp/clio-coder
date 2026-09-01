@@ -178,7 +178,11 @@ async function readBody(request: IncomingMessage): Promise<Record<string, unknow
 	for await (const chunk of request) text += chunk;
 	return JSON.parse(text) as Record<string, unknown>;
 }
-async function provider(options: { reply: string; tool?: boolean }): Promise<{ server: Server; url: string }> {
+async function provider(options: {
+	reply: string;
+	tool?: boolean;
+	toolCallId?: string;
+}): Promise<{ server: Server; url: string }> {
 	const server = createServer(async (request, response) => {
 		if (request.method === "GET" && request.url === "/v1/models") {
 			response.writeHead(200, { "content-type": "application/json" });
@@ -204,7 +208,7 @@ async function provider(options: { reply: string; tool?: boolean }): Promise<{ s
 					tool_calls: [
 						{
 							index: 0,
-							id: "call-write",
+							id: options.toolCallId ?? "call-write",
 							type: "function",
 							function: { name: "write", arguments: '{"path":"note.txt","content":"from ACP"}' },
 						},
@@ -279,7 +283,11 @@ describe("smoke/ACP stdio boundary", { concurrency: false }, () => {
 	it("mediates one write allow and one write reject", async () => {
 		for (const decision of ["allow-once", "reject-once"] as const) {
 			const target = home();
-			const fixture = await provider({ reply: `permission ${decision}`, tool: true });
+			const fixture = await provider({
+				reply: `permission ${decision}`,
+				tool: true,
+				toolCallId: decision === "allow-once" ? "x".repeat(256) : "clio-tool-7",
+			});
 			let client: AcpClient | undefined;
 			try {
 				await initialize(target);
@@ -296,6 +304,8 @@ describe("smoke/ACP stdio boundary", { concurrency: false }, () => {
 				strictEqual(permission.method, "session/request_permission");
 				const toolCall = permission.params.toolCall as Record<string, unknown>;
 				strictEqual(toolCall.status, "pending");
+				if (decision === "allow-once") match(String(toolCall.toolCallId), /^clio-coder-tool-\d+$/u);
+				else strictEqual(toolCall.toolCallId, "clio-coder-tool-7");
 				client.respond(permission.id, { outcome: { outcome: "selected", optionId: decision } });
 				strictEqual((await prompt).stopReason, "end_turn");
 				const file = join(project, "note.txt");

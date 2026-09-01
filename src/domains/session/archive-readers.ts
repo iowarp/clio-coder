@@ -42,6 +42,14 @@ export interface SessionLedgerRef {
 	path: string;
 }
 
+const ROUTING_NOTICE_CUSTOM_TYPE = "clio-coder.routing-notice";
+const LEGACY_ROUTING_NOTICE_CUSTOM_TYPE = "clio.routing-notice";
+
+function normalizeReleasedCustomType(entry: SessionEntry): SessionEntry {
+	if (entry.kind !== "custom" || entry.customType !== LEGACY_ROUTING_NOTICE_CUSTOM_TYPE) return entry;
+	return { ...entry, customType: ROUTING_NOTICE_CUSTOM_TYPE };
+}
+
 /**
  * Read every `<stateDir>/audit/<date>.jsonl` row. Malformed lines are skipped
  * and reported in `errors` instead of failing the read.
@@ -157,7 +165,7 @@ export function parseSessionEntries(raw: string, source: string): SessionReadRes
 		}
 		if (isSessionHeader(parsed)) continue;
 		if (isSessionEntry(parsed)) {
-			entries.push(parsed);
+			entries.push(normalizeReleasedCustomType(parsed));
 			continue;
 		}
 		errors.push(

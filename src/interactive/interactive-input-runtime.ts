@@ -302,7 +302,7 @@ export function createInteractiveInputRuntime(deps: InteractiveInputRuntimeDeps)
 			deps.reportShutdownFailure ??
 			((step, error) => {
 				process.stderr.write(
-					`[clio:interactive] ${step} failed: ${error instanceof Error ? error.message : String(error)}\n`,
+					`[clio-coder:interactive] ${step} failed: ${error instanceof Error ? error.message : String(error)}\n`,
 				);
 			}),
 	});

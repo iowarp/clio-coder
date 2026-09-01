@@ -26,7 +26,7 @@ const recipes = context.getContract<{ get(id: string): AgentRecipe | null }>("ag
 const recipe = recipes?.get(role);
 if (recipe === null || recipe === undefined) throw new Error(`unknown shipped role: ${role}`);
 
-const scratch = mkdtempSync(join(tmpdir(), "clio-behavior-role-"));
+const scratch = mkdtempSync(join(tmpdir(), "clio-coder-behavior-role-"));
 const validOutput = positiveOutput(recipe);
 if (validOutput.writtenPath !== undefined) mkdirSync(join(scratch, validOutput.writtenPath, ".."), { recursive: true });
 const fabric = scriptedGateFabric({

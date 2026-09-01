@@ -11,7 +11,8 @@ import {
 } from "./task-bank.js";
 
 export const TASK_MEMORY_HANDOFF_VERSION = 2;
-export const TASK_MEMORY_HANDOFF_LANGUAGE = "clio-task-memory";
+export const TASK_MEMORY_HANDOFF_LANGUAGE = "clio-coder-task-memory";
+const LEGACY_TASK_MEMORY_HANDOFF_LANGUAGE = "clio-task-memory";
 const HANDOFF_MAX_BYTES = 1_000_000;
 
 export interface TaskMemoryHandoffEntry {
@@ -134,8 +135,10 @@ export function renderTaskMemoryHandoffSource(
 
 export function parseTaskMemoryHandoffSnapshot(text: string): TaskMemoryHandoffSnapshot | null {
 	if (typeof text !== "string" || text.length === 0 || text.length > HANDOFF_MAX_BYTES) return null;
-	const escapedLanguage = TASK_MEMORY_HANDOFF_LANGUAGE.replace(/[.*+?^${}()|[\]\\]/gu, "\\$&");
-	const match = new RegExp(`(?:^|\\n)\\x60{3}${escapedLanguage}\\r?\\n([^\\r\\n]+)\\r?\\n\\x60{3}(?:$|\\n)`, "u").exec(
+	const languages = [TASK_MEMORY_HANDOFF_LANGUAGE, LEGACY_TASK_MEMORY_HANDOFF_LANGUAGE]
+		.map((language) => language.replace(/[.*+?^${}()|[\]\\]/gu, "\\$&"))
+		.join("|");
+	const match = new RegExp(`(?:^|\\n)\\x60{3}(?:${languages})\\r?\\n([^\\r\\n]+)\\r?\\n\\x60{3}(?:$|\\n)`, "u").exec(
 		text,
 	);
 	if (match?.[1] === undefined) return null;

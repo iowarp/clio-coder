@@ -102,7 +102,7 @@ export type MiddlewareDiagnosticSink = (diagnostic: MiddlewareDiagnostic) => voi
 export function writeMiddlewareDiagnosticToStderr(diagnostic: MiddlewareDiagnostic): void {
 	if (diagnostic.kind === "hook_failed") {
 		process.stderr.write(
-			`[clio:middleware] registration '${diagnostic.registrationId}' failed on '${diagnostic.hook}': ${diagnostic.message}\n`,
+			`[clio-coder:middleware] registration '${diagnostic.registrationId}' failed on '${diagnostic.hook}': ${diagnostic.message}\n`,
 		);
 		return;
 	}
@@ -115,7 +115,7 @@ export function writeMiddlewareDiagnosticToStderr(diagnostic: MiddlewareDiagnost
 			? ` (slow on ${stats.overCount}/${stats.window} recent ${diagnostic.hook} calls, p95 ${stats.p95Ms.toFixed(1)}ms)`
 			: "";
 	process.stderr.write(
-		`[clio:middleware] registration '${diagnostic.registrationId}' exceeded budget on '${diagnostic.hook}': ` +
+		`[clio-coder:middleware] registration '${diagnostic.registrationId}' exceeded budget on '${diagnostic.hook}': ` +
 			`${diagnostic.elapsedMs.toFixed(1)}ms > ${diagnostic.budgetMs}ms${trend}\n`,
 	);
 }

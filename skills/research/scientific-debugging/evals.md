@@ -42,8 +42,8 @@ if __name__ == "__main__":
     unittest.main()
 PY
 git init -q
-git config user.name "Clio Eval"
-git config user.email "clio-eval@example.invalid"
+git config user.name "Clio Coder Eval"
+git config user.email "eval@clio-coder.local"
 git add diffusion.py tests/test_diffusion.py
 git commit -q -m "add stable weighted mean reference"
 cat > diffusion.py <<'PY'

@@ -11,7 +11,7 @@ import type { SafetyPolicyDecision } from "./policy-engine.js";
  * rotation, and on a low-frequency background interval instead of once per
  * row, which kept blocking the admission hot path on disk latency. Write
  * errors never throw back to the caller because safety must not kill the hot
- * path; they are logged to stderr with a `[clio:audit]` prefix for
+ * path; they are logged to stderr with a `[clio-coder:audit]` prefix for
  * post-mortem review.
  *
  * Records are a discriminated union over `kind`:
@@ -404,7 +404,7 @@ interface OpenFile {
 function logAuditError(err: unknown, path?: string): void {
 	const msg = err instanceof Error ? err.message : String(err);
 	const where = path ? ` (${path})` : "";
-	process.stderr.write(`[clio:audit] ${msg}${where}\n`);
+	process.stderr.write(`[clio-coder:audit] ${msg}${where}\n`);
 }
 
 /** Cadence of the background safety flush that bounds how long rows can sit unfsynced. */

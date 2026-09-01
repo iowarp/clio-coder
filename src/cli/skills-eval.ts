@@ -442,7 +442,7 @@ async function runScenario(
 	// Published per-scenario figure: monotonic so a clock correction during a
 	// long sweep cannot land in one row's wall time.
 	const scenarioStart = performance.now();
-	const workspace = await mkdtemp(join(tmpdir(), "clio-skill-eval-seed-"));
+	const workspace = await mkdtemp(join(tmpdir(), "clio-coder-skill-eval-seed-"));
 	let runWorkspaces: MaterializedSkillEvalWorkspaces | null = null;
 	try {
 		if (workspaceOverride !== null) await copyWorkspace(workspaceOverride, workspace);
@@ -570,7 +570,7 @@ export interface MaterializedSkillEvalWorkspaces {
  * cooperative model, not as an isolation guarantee.
  */
 async function armWorkspace(created: string[]): Promise<string> {
-	const root = await mkdtemp(join(tmpdir(), "clio-skill-eval-"));
+	const root = await mkdtemp(join(tmpdir(), "clio-coder-skill-eval-"));
 	created.push(root);
 	const workspace = join(root, "workspace");
 	await mkdir(workspace, { recursive: true });

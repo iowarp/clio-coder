@@ -167,7 +167,7 @@ export function createObservabilityProjection(bus: SafeEventBus, deps: Projectio
 				listener(snapshot);
 			} catch (error) {
 				const message = error instanceof Error ? (error.stack ?? error.message) : String(error);
-				console.error(`[clio:observability] projection listener crashed: ${message}`);
+				console.error(`[clio-coder:observability] projection listener crashed: ${message}`);
 			}
 		}
 	}

@@ -95,8 +95,11 @@ describe("memory scope boundary", () => {
 		);
 		ok(!rendered.includes("private working state"));
 		ok(!rendered.includes("super-secret-value"));
+		ok(rendered.startsWith("```clio-coder-task-memory\n"));
+		ok(!rendered.includes("```clio-task-memory\n"));
 		const parsed = parseTaskMemoryHandoffSnapshot(rendered);
 		ok(parsed);
+		ok(parseTaskMemoryHandoffSnapshot(rendered.replace("clio-coder-task-memory", "clio-task-memory")));
 		const target = new TaskMemoryBank();
 		deepStrictEqual(seedTaskMemoryBank(target, parsed), { seeded: 2, skipped: 0 });
 		strictEqual(target.snapshot().status, null);

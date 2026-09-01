@@ -676,19 +676,24 @@ function eventTextDelta(event: AcpEventRecord): string {
 }
 
 /**
- * The next unused `clio-tool-<n>`. The counter alone is not enough: an engine
- * that names its own calls `clio-tool-1` would otherwise collide with an alias
+ * The next unused `clio-coder-tool-<n>`. The counter alone is not enough: an engine
+ * that names its own calls `clio-coder-tool-1` would otherwise collide with an alias
  * this server minted, and two different calls sharing one wire id is the exact
  * failure aliasing exists to prevent.
  */
 function nextAliasToolCallId(active: ActivePrompt): string {
 	for (;;) {
 		active.toolCallSequence += 1;
-		const alias = `clio-tool-${active.toolCallSequence}`;
+		const alias = `clio-coder-tool-${active.toolCallSequence}`;
 		if (active.usedWireIds.has(alias)) continue;
 		active.usedWireIds.add(alias);
 		return alias;
 	}
+}
+
+function normalizeReleasedAliasToolCallId(engineId: string): string {
+	const legacy = /^clio-tool-([1-9]\d*)$/u.exec(engineId);
+	return legacy === null ? engineId : `clio-coder-tool-${legacy[1]}`;
 }
 
 /** Records `wireId` as the newest wire id this engine id speaks under. */
@@ -705,9 +710,10 @@ function pushWireId(active: ActivePrompt, engineId: string, wireId: string): str
  * call travels under a per-prompt alias.
  */
 function mintWireId(active: ActivePrompt, engineId: string): string {
-	const usable = utf8Bytes(engineId) <= ACP_MAX_TOOL_CALL_ID_BYTES && !active.usedWireIds.has(engineId);
-	if (usable) active.usedWireIds.add(engineId);
-	return pushWireId(active, engineId, usable ? engineId : nextAliasToolCallId(active));
+	const candidate = normalizeReleasedAliasToolCallId(engineId);
+	const usable = utf8Bytes(candidate) <= ACP_MAX_TOOL_CALL_ID_BYTES && !active.usedWireIds.has(candidate);
+	if (usable) active.usedWireIds.add(candidate);
+	return pushWireId(active, engineId, usable ? candidate : nextAliasToolCallId(active));
 }
 
 /**
@@ -982,7 +988,7 @@ function handleChatEvent(
 	// gap applies to routing advisories (external settings divergence, active
 	// target removed): ACP v1 has no agent-initiated advisory channel, so the
 	// orchestrator records those as `custom` session-ledger entries
-	// (customType "clio.routing-notice") instead of inventing update kinds.
+	// (customType "clio-coder.routing-notice") instead of inventing update kinds.
 }
 
 const ACP_MAX_SESSION_ID_BYTES = 128;

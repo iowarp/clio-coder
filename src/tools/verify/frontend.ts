@@ -447,7 +447,7 @@ async function checkModuleJavaScript(
 	label: string,
 	options: ValidationOptions,
 ): Promise<string | null> {
-	const dir = mkdtempSync(path.join(tmpdir(), "clio-frontend-check-"));
+	const dir = mkdtempSync(path.join(tmpdir(), "clio-coder-frontend-check-"));
 	const file = path.join(dir, "module.mjs");
 	try {
 		writeFileSync(file, source, "utf8");

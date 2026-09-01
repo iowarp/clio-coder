@@ -13,8 +13,8 @@ Fixture:
 ```bash
 git init -q .
 git branch -M main
-git config user.email eval@clio.local
-git config user.name "Clio Eval"
+git config user.email eval@clio-coder.local
+git config user.name "Clio Coder Eval"
 git config commit.gpgsign false
 printf 'function parseDate(raw) {\n  return new Date(raw);\n}\nmodule.exports = { parseDate };\n' > parser.js
 printf 'const BACKOFF_MS = 200;\nfunction fetchRetry(url) {\n  return { url, backoff: BACKOFF_MS, jitter: 17 };\n}\nmodule.exports = { fetchRetry };\n' > fetch.js
@@ -29,7 +29,7 @@ Expected:
 - Writes to `.clio-coder/handoffs/handoff-<date>.md` (via `scripts/new-handoff.sh`
   when available, else directly).
 - Confirms the path and names `context-prime` as the next step.
-- Copies a supplied `clio-task-memory` fence verbatim under `## Task memory
+- Copies a supplied `clio-coder-task-memory` fence verbatim under `## Task memory
   snapshot`; omits the section when no structured source is present.
 
 ## H2 — secrets in context

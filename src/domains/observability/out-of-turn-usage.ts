@@ -130,7 +130,7 @@ export function appendOutOfTurnUsageRow(stateDir: string, row: OutOfTurnUsageRow
 			closeSync(fd);
 		}
 	} catch (error) {
-		process.stderr.write(`[clio:usage] out-of-turn usage row not written: ${messageOf(error)}\n`);
+		process.stderr.write(`[clio-coder:usage] out-of-turn usage row not written: ${messageOf(error)}\n`);
 		return;
 	}
 	appendsSinceBoundCheck += 1;
@@ -139,7 +139,7 @@ export function appendOutOfTurnUsageRow(stateDir: string, row: OutOfTurnUsageRow
 	try {
 		boundOutOfTurnUsageFile(path);
 	} catch (error) {
-		process.stderr.write(`[clio:usage] out-of-turn usage ring not bounded: ${messageOf(error)}\n`);
+		process.stderr.write(`[clio-coder:usage] out-of-turn usage ring not bounded: ${messageOf(error)}\n`);
 	}
 }
 

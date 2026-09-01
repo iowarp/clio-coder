@@ -158,7 +158,7 @@ async function runMatrixItem(
 	// state directory would mix sibling processes' runs and yesterday's sessions
 	// into the reading; pinning it here also means an item leaves nothing behind
 	// in the operator's own state.
-	const stateDir = await mkdtemp(resolve(tempCopy?.tempRoot ?? tmpdir(), "clio-eval-state-"));
+	const stateDir = await mkdtemp(resolve(tempCopy?.tempRoot ?? tmpdir(), "clio-coder-eval-state-"));
 	try {
 		workspace = await prepareWorkspace(loaded.baseDir, task, freshWorkspace, tempCopy);
 		const setup = await runCommandVerifiers(task.workspace.setup ?? [], workspace.dir, task.timeoutMs);

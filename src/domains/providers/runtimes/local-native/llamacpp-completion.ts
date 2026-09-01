@@ -100,7 +100,7 @@ async function* streamSse(body: ReadableStream<Uint8Array>): AsyncGenerator<Comp
 		}
 	} finally {
 		if (droppedFrames > 0) {
-			process.stderr.write(`[clio:llamacpp] dropped ${droppedFrames} malformed stream frame(s)\n`);
+			process.stderr.write(`[clio-coder:llamacpp] dropped ${droppedFrames} malformed stream frame(s)\n`);
 		}
 		reader.releaseLock();
 	}

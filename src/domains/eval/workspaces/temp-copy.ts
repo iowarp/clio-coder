@@ -33,7 +33,7 @@ export async function prepareTempCopyWorkspace(
 	options: PrepareTempCopyWorkspaceOptions = {},
 ): Promise<PreparedEvalWorkspace> {
 	const source = resolve(baseDir, workspace.path ?? ".");
-	const dest = await mkdtemp(resolve(options.tempRoot ?? tmpdir(), "clio-eval-workspace-"));
+	const dest = await mkdtemp(resolve(options.tempRoot ?? tmpdir(), "clio-coder-eval-workspace-"));
 	try {
 		const selection = await gitCopySelection(source);
 		const excludes = workspace.excludes ?? [];

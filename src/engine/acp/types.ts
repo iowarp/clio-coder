@@ -34,7 +34,7 @@ export const ACP_MAX_CHUNK_BYTES = 16384;
  * Upper bound on a `toolCallId` this server puts on the wire, in UTF-8 bytes
  * (CONTRACT C001 §3). Identity is one call per id in both directions: an engine
  * id over this bound, missing, or already claimed by another call this turn
- * travels under a `clio-tool-<n>` alias, and an engine id starting a second call
+ * travels under a `clio-coder-tool-<n>` alias, and an engine id starting a second call
  * mints a fresh alias rather than reusing the first call's wire id. A permission
  * request binds only to an id the client already received a `tool_call` for and
  * has not yet seen finish; nothing is minted on that path.

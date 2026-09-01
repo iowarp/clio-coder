@@ -63,7 +63,7 @@ export interface ManagedCommitAttributionEnvironment {
 export function reportCommitAttributionDiagnostic(diagnostic: string | null): void {
 	if (diagnostic === null || reportedDiagnostics.has(diagnostic)) return;
 	reportedDiagnostics.add(diagnostic);
-	process.stderr.write(`[clio:attribution] ${diagnostic}\n`);
+	process.stderr.write(`[clio-coder:attribution] ${diagnostic}\n`);
 }
 
 export function setGitCommitAttributionEnabled(enabled: boolean): void {
@@ -165,7 +165,7 @@ hook_name=$(basename "$0")
 base_count=$${CONFIG_BASE_COUNT_ENV}
 case "$base_count" in
   '' | *[!0-9]*)
-    printf '%s\\n' '[clio:attribution] invalid managed hook environment' >&2
+    printf '%s\\n' '[clio-coder:attribution] invalid managed hook environment' >&2
     exit 0
     ;;
   0) unset GIT_CONFIG_COUNT ;;
@@ -235,7 +235,7 @@ has_trailer() {
 append_trailer() {
   if has_trailer "$1"; then return 0; fi
   git interpret-trailers --in-place --if-exists=addIfDifferent --trailer "$1" "$message_file" ||
-    printf '%s\\n' '[clio:attribution] git interpret-trailers failed; commit left as written' >&2
+    printf '%s\\n' '[clio-coder:attribution] git interpret-trailers failed; commit left as written' >&2
 }
 
 if [ "$${ASSISTED_ENV}" = '1' ] || [ "$${AUTHORED_ENV}" = '1' ]; then

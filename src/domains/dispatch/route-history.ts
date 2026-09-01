@@ -137,7 +137,7 @@ function retireHistory(path: string, version: unknown): void {
 	const retired = `${path}.v${String(version)}.${stamp}.retired`;
 	renameSync(path, retired);
 	process.stderr.write(
-		`[clio:dispatch] route history v${String(version)} is retired; starting empty at v${ROUTE_HISTORY_VERSION}. Prior observations: ${retired}\n`,
+		`[clio-coder:dispatch] route history v${String(version)} is retired; starting empty at v${ROUTE_HISTORY_VERSION}. Prior observations: ${retired}\n`,
 	);
 }
 

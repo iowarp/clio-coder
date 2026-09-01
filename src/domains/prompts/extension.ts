@@ -62,7 +62,7 @@ export function createPromptsBundle(
 			table = loadFragments();
 		} catch (err) {
 			const msg = err instanceof Error ? err.message : String(err);
-			process.stderr.write(`[clio:prompts] reload failed: ${msg}\n`);
+			process.stderr.write(`[clio-coder:prompts] reload failed: ${msg}\n`);
 		}
 	}
 
@@ -147,7 +147,7 @@ export function createPromptsBundle(
 				table = loadFragments();
 			} catch (err) {
 				const msg = err instanceof Error ? err.message : String(err);
-				process.stderr.write(`[clio:prompts] initial load failed: ${msg}\n`);
+				process.stderr.write(`[clio-coder:prompts] initial load failed: ${msg}\n`);
 				table = { byId: new Map(), rootDir: "" };
 			}
 			unsubscribeHotReload = context.bus.on(BusChannels.ConfigHotReload, (payload: unknown) => {

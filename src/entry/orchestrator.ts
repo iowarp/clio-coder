@@ -309,7 +309,7 @@ function advanceThinkingLevel(current: ThinkingLevel, available: ReadonlyArray<T
  * model all send this placeholder so a local llama.cpp or LM Studio endpoint
  * works without the user inventing a credential.
  */
-const LOCAL_API_KEY_FALLBACK = "clio-local-target";
+const LOCAL_API_KEY_FALLBACK = "clio-coder-local-target";
 
 async function resolveApiKeyForTarget(
 	target: TargetDescriptor,
@@ -1078,7 +1078,7 @@ export async function bootOrchestrator(options: BootOptions = {}): Promise<BootR
 		bus.on(BusChannels.RuntimeNotice, (payload: unknown) => {
 			const notice = payload as { level?: string; message?: string } | undefined;
 			if (typeof notice?.message !== "string") return;
-			process.stderr.write(`[clio:runtime] ${notice.level ?? "info"}: ${notice.message}\n`);
+			process.stderr.write(`[clio-coder:runtime] ${notice.level ?? "info"}: ${notice.message}\n`);
 		});
 	}
 
@@ -1235,12 +1235,12 @@ export async function bootOrchestrator(options: BootOptions = {}): Promise<BootR
 		})
 			.then((result) => {
 				for (const error of result.errors) {
-					process.stderr.write(`[clio:memory] proposed record not written for ${error}\n`);
+					process.stderr.write(`[clio-coder:memory] proposed record not written for ${error}\n`);
 				}
 			})
 			.catch((error: unknown) => {
 				process.stderr.write(
-					`[clio:memory] proposed records not written: ${error instanceof Error ? error.message : String(error)}\n`,
+					`[clio-coder:memory] proposed records not written: ${error instanceof Error ? error.message : String(error)}\n`,
 				);
 			});
 	};
@@ -1311,10 +1311,10 @@ export async function bootOrchestrator(options: BootOptions = {}): Promise<BootR
 	});
 	if (!interactive) {
 		for (const issue of userHooks.fileIssues) {
-			process.stderr.write(`[clio:hooks] ${issue.message}\n`);
+			process.stderr.write(`[clio-coder:hooks] ${issue.message}\n`);
 		}
 		for (const issue of userHooks.issues) {
-			process.stderr.write(`[clio:hooks] ${issue.source.sourcePath}#${issue.index}: ${issue.issues.join("; ")}\n`);
+			process.stderr.write(`[clio-coder:hooks] ${issue.source.sourcePath}#${issue.index}: ${issue.issues.join("; ")}\n`);
 		}
 	}
 	termination.onDrain(() => hookReceiptLog.flush());
@@ -1953,7 +1953,7 @@ export async function bootOrchestrator(options: BootOptions = {}): Promise<BootR
 				try {
 					session.appendEntry({
 						kind: "custom",
-						customType: "clio.routing-notice",
+						customType: "clio-coder.routing-notice",
 						parentTurnId: null,
 						data: { kind: notice.kind, level: notice.level, text: notice.text },
 					});
@@ -2000,7 +2000,7 @@ export async function bootOrchestrator(options: BootOptions = {}): Promise<BootR
 				// as a provider's failure body, is kept off the wire and written to
 				// the unstructured stderr tail instead.
 				diagnostics: (line) => {
-					process.stderr.write(`[clio:acp] ${line}\n`);
+					process.stderr.write(`[clio-coder:acp] ${line}\n`);
 				},
 				permissionTimeoutMs:
 					options.acp.permissionTimeoutMs ??

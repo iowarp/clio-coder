@@ -40,7 +40,7 @@ type StoredListener = (payload: never) => void | Promise<void>;
 
 function reportListenerError(channel: string, error: unknown): void {
 	const message = error instanceof Error ? (error.stack ?? error.message) : String(error);
-	console.error(`[clio:event-bus] Listener crashed on ${channel}: ${message}`);
+	console.error(`[clio-coder:event-bus] Listener crashed on ${channel}: ${message}`);
 }
 
 export function createSafeEventBus(): SafeEventBus {

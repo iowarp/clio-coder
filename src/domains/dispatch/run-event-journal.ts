@@ -251,7 +251,7 @@ export interface CreateRunEventJournalOptions {
 function createRunEventJournal(options: CreateRunEventJournalOptions = {}): RunEventJournal {
 	const capBytes = options.capBytes ?? RUN_EVENT_JOURNAL_CAP_BYTES;
 	const flushBytes = options.flushBytes ?? RUN_EVENT_JOURNAL_FLUSH_BYTES;
-	const warn = options.warn ?? ((message: string) => process.stderr.write(`[clio:journal] ${message}\n`));
+	const warn = options.warn ?? ((message: string) => process.stderr.write(`[clio-coder:journal] ${message}\n`));
 	const now = options.now ?? (() => new Date());
 	const isEnabled = options.isEnabled ?? (() => runEventJournalEnabled());
 	const runs = new Map<string, RunJournalState>();

@@ -39,7 +39,7 @@ const SOURCE_CITATION =
 const INTERNAL_LINK = /\[[^\]]*\]\((?![a-z][a-z\d+.-]*:|\/\/|#)([^)\s]+\.md)(?:#[^)\s]*)?\)/gi;
 
 /** Marker line carrying a page's unrepaired references; regenerated every pass. */
-const REPAIR_NOTE = /^<!-- clio:wiki .*-->$/gm;
+const REPAIR_NOTE = /^<!-- (?:clio-coder|clio):wiki .*-->$/gm;
 
 export interface WikiPageIssue {
 	page: string;
@@ -79,7 +79,7 @@ function renderRepairNote(issues: ReadonlyArray<WikiPageIssue>): string {
 	const parts: string[] = [];
 	if (links.length > 0) parts.push(`unresolved links: ${[...new Set(links)].join(", ")}`);
 	if (citations.length > 0) parts.push(`unresolved sources: ${[...new Set(citations)].join(", ")}`);
-	return parts.length === 0 ? "" : `\n<!-- clio:wiki ${parts.join("; ")} -->\n`;
+	return parts.length === 0 ? "" : `\n<!-- clio-coder:wiki ${parts.join("; ")} -->\n`;
 }
 
 /**

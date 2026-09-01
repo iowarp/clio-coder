@@ -227,7 +227,7 @@ function fetchSource(spec: SkillSourceSpec): FetchedSource {
 	if (spec.kind === "local") {
 		return { skillDir: resolveSkillDir(spec.path), cleanup: () => {} };
 	}
-	const tmp = mkdtempSync(path.join(tmpdir(), "clio-skill-"));
+	const tmp = mkdtempSync(path.join(tmpdir(), "clio-coder-skill-"));
 	const cleanup = (): void => rmSync(tmp, { recursive: true, force: true });
 	try {
 		execFileSync("git", ["clone", "--depth", "1", "--branch", spec.branch, spec.cloneUrl, tmp], {

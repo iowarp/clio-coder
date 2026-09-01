@@ -215,7 +215,7 @@ export interface ChatSubmitOptions {
  * the turn runtime's own local fallback, so a `/btw` round against a local
  * server authenticates exactly the way a turn against it does.
  */
-const LOCAL_SIDE_QUESTION_API_KEY = "clio-local-target";
+const LOCAL_SIDE_QUESTION_API_KEY = "clio-coder-local-target";
 
 /** Closing notice an operator interrupt leaves in the transcript and the ledger. */
 const INTERRUPT_CANCEL_REASON = "[Clio Coder] run interrupted by operator; delivering the new message now.";

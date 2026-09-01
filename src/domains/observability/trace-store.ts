@@ -1311,7 +1311,7 @@ export function createDispatchTraceMirror(
 	path: string,
 	options: { warn?: (message: string) => void; now?: () => string } = {},
 ): DispatchTraceMirror {
-	const warn = options.warn ?? ((message: string) => process.stderr.write(`[clio:trace] ${message}\n`));
+	const warn = options.warn ?? ((message: string) => process.stderr.write(`[clio-coder:trace] ${message}\n`));
 	const now = options.now ?? (() => new Date().toISOString());
 	let store: TraceStore | null = null;
 	let chain: Promise<void> = Promise.resolve();
