@@ -34,6 +34,8 @@ interface GuestFixture {
 	client: MuxClient;
 	/** Wall clock the runtime reads, so the degrade cooldown is deterministic. */
 	advance(ms: number): void;
+	/** Everything the runtime logged, so a degrade's level can be asserted. */
+	logs(): ReadonlyArray<{ level: string; message: string }>;
 }
 
 async function guest(options: { selfPaneId?: string | null } = {}): Promise<GuestFixture> {
@@ -55,10 +57,12 @@ async function guest(options: { selfPaneId?: string | null } = {}): Promise<Gues
 	const client = detection.client;
 	ok(client);
 	let clock = 1_000;
+	const logged: Array<{ level: string; message: string }> = [];
 	const runtime = createMuxRuntime({
 		detection: detection.detection,
 		client,
 		now: () => clock,
+		log: (level, message) => logged.push({ level, message }),
 	});
 	runtimes.push(runtime);
 	await runtime.start();
@@ -69,6 +73,9 @@ async function guest(options: { selfPaneId?: string | null } = {}): Promise<Gues
 		client,
 		advance(ms: number): void {
 			clock += ms;
+		},
+		logs(): ReadonlyArray<{ level: string; message: string }> {
+			return [...logged];
 		},
 	};
 }
@@ -487,6 +494,60 @@ describe("mux gated wire surfaces", () => {
 		await quietRuntime.contract.notify({ title: "suppressed" });
 		strictEqual(quiet.notifications().length, 1, "the call still went out");
 		strictEqual(quietRuntime.contract.available(), true, "shown:false is an answer, not a failure");
+	});
+
+	// The toast path shipped with its failure side never driven against a live
+	// host. Verified since against herdr 0.8.2 on a real socket: a malformed
+	// request comes back `invalid request: unknown variant ...` and leaves the
+	// layer usable, while a closed client throws a transport error that degrades
+	// it. These pin both halves so the fixture keeps matching the wire.
+	it("swallows a refused toast without degrading the pane layer", async () => {
+		const { fake, runtime, logs } = await guest();
+		fake.setHandler("notification.show", () => ({
+			error: { code: "invalid_request", message: "unknown variant `chime`, expected one of `none`, `done`" },
+		}));
+
+		// The call must not throw: a dispatch's terminal event drives it, and a
+		// rejected toast can never be allowed to fail the run that earned it.
+		await runtime.contract.notify({ title: "tester failed", body: "exit 1", sound: "request" });
+
+		// A server that answered is a server that is there. Degrading on a refused
+		// method would take panes away over a request herdr simply did not like.
+		strictEqual(runtime.contract.available(), true, "a refused method is not a dead transport");
+		strictEqual(fake.requestsFor("notification.show").length, 1, "the call reached the server");
+		strictEqual(
+			logs().some((line) => line.level === "warning"),
+			false,
+			"a refused toast is the operator's business, not a warning about Clio's health",
+		);
+
+		// The layer still works for everything else.
+		fake.setHandler("notification.show", null);
+		await runtime.contract.notify({ title: "next one" });
+		strictEqual(fake.notifications().at(-1)?.title, "next one");
+	});
+
+	it("degrades once on a dead socket, then probes again after the cooldown", async () => {
+		const { fake, runtime, advance, logs } = await guest();
+		fake.dropConnections();
+		await fake.stop();
+
+		await runtime.contract.notify({ title: "tester failed", sound: "request" });
+		strictEqual(runtime.contract.available(), false, "a dead transport degrades the layer");
+		const warnings = logs().filter((line) => line.level === "warning");
+		strictEqual(warnings.length, 1, JSON.stringify(logs()));
+		ok(warnings[0]?.message.startsWith("mux notify failed:"), warnings[0]?.message);
+
+		// Inside the cooldown the layer stays down and opens no socket at all.
+		await runtime.contract.notify({ title: "second" });
+		strictEqual(logs().filter((line) => line.level === "warning").length, 1, "the cooldown silences the retry");
+
+		// Past it, the next call is allowed to try again rather than staying dark
+		// forever on one bad moment.
+		advance(5_001);
+		strictEqual(runtime.contract.available(), true, "the cooldown expires into a probe, not a permanent refusal");
+		await runtime.contract.notify({ title: "third" });
+		strictEqual(runtime.contract.available(), false, "a probe that failed degrades again");
 	});
 });
 

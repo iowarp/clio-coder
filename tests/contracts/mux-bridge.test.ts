@@ -28,11 +28,14 @@ interface FakeMux {
 	contract: MuxContract;
 	calls: Call[];
 	setAvailable(next: boolean): void;
+	/** Make the next notify calls reject, as a contract bug rather than a dead socket would. */
+	setNotifyError(next: Error | null): void;
 }
 
 function fakeMux(options: { available?: boolean } = {}): FakeMux {
 	const calls: Call[] = [];
 	let available = options.available ?? true;
+	let notifyError: Error | null = null;
 	const contract: MuxContract = {
 		mode: "guest",
 		available: () => available,
@@ -56,6 +59,7 @@ function fakeMux(options: { available?: boolean } = {}): FakeMux {
 		},
 		async notify(request: MuxNotifyRequest): Promise<void> {
 			calls.push({ kind: "notify", request });
+			if (notifyError) throw notifyError;
 		},
 		async worktreeCreate(): Promise<null> {
 			return null;
@@ -78,6 +82,9 @@ function fakeMux(options: { available?: boolean } = {}): FakeMux {
 		calls,
 		setAvailable(next: boolean): void {
 			available = next;
+		},
+		setNotifyError(next: Error | null): void {
+			notifyError = next;
 		},
 	};
 }
@@ -219,6 +226,48 @@ describe("mux bridge dispatch notifications", () => {
 		await h.bridge.flush();
 		deepStrictEqual(h.mux.calls, [], "no toast can be painted without a host");
 		deepStrictEqual(h.notices, [{ level: "error", text: "tester failed (run-1)" }]);
+	});
+
+	// The toast path shipped with its failure side never driven against a live
+	// host. The contract swallows a refused toast and a dead socket on its own
+	// (pinned in mux-contract.test.ts against the fake wire, and confirmed against
+	// a live herdr 0.8.2 socket), so anything reaching the bridge's catch is a
+	// contract bug. It still must not take the session with it: every toast and
+	// self-report shares one `draining` promise, and one unhandled rejection there
+	// would silently stop every later notification.
+	it("survives a notify that rejects and keeps the chain running", async () => {
+		const h = harness();
+		h.mux.setNotifyError(new Error("contract bug"));
+		failed(h.bus, "run-1", "tester");
+		await h.bridge.flush();
+		// The transcript line is written before the toast is attempted, so the
+		// auditable record of the failure does not depend on the toast working.
+		deepStrictEqual(h.notices, [{ level: "error", text: "tester failed (run-1): exit 1" }]);
+
+		h.mux.setNotifyError(null);
+		failed(h.bus, "run-2", "builder");
+		await h.bridge.flush();
+		const titles = h.mux.calls.flatMap((call) => (call.kind === "notify" ? [call.request.title] : []));
+		deepStrictEqual(titles, ["tester failed", "builder failed"], "a rejected toast did not poison the chain");
+
+		// The self-report rides the same chain, so it has to survive too.
+		status(h.bus, "writing");
+		await h.bridge.flush();
+		ok(
+			h.mux.calls.some((call) => call.kind === "self" && call.state === "working"),
+			"the self-report chain outlived the rejection",
+		);
+	});
+
+	it("keeps a rejected toast out of the dispatch event that raised it", async () => {
+		const h = harness();
+		h.mux.setNotifyError(new Error("contract bug"));
+		// The emit itself must stay clean: onTerminal runs inside the bus handler,
+		// and a throw there would surface as a dispatch failure rather than a
+		// missing toast.
+		failed(h.bus, "run-1", "tester");
+		await h.bridge.flush();
+		strictEqual(h.mux.calls.filter((call) => call.kind === "notify").length, 1);
 	});
 
 	it("reads the policy live, so a /settings change applies to the next terminal run", async () => {
