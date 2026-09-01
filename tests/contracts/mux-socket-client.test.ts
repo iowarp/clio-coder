@@ -239,7 +239,7 @@ describe("mux socket client", () => {
 
 		const split = await live.paneSplit({ direction: "down", targetPaneId: "w1:p1", focus: false });
 		strictEqual(split.tabId, "w1:t1");
-		ok((await live.paneLayout(split.paneId)).includes(split.paneId));
+		ok((await live.paneLayout(split.paneId)).panes.some((pane) => pane.paneId === split.paneId));
 
 		await live.paneRename(split.paneId, "clio watch");
 		await live.paneSendText(split.paneId, "echo hi\n");
@@ -443,5 +443,125 @@ describe("mux socket client", () => {
 				return true;
 			},
 		);
+	});
+});
+
+describe("mux socket client layout tier", () => {
+	it("round-trips geometry, focus, zoom, and the layout tree methods", async () => {
+		const fake = await server({ protocol: 21, version: "0.8.2", area: { width: 100, height: 40 } });
+		const live = client(fake.socketPath);
+
+		// Dock-shaped split: the anchor keeps 70% of the width.
+		const dock = await live.paneSplit({ direction: "right", targetPaneId: "w1:p1", ratio: 0.7, focus: false });
+		strictEqual(fake.requestsFor("pane.split")[0]?.params.ratio, 0.7);
+
+		const geometry = await live.paneLayout("w1:p1");
+		strictEqual(geometry.tabId, "w1:t1");
+		deepStrictEqual(geometry.area, { x: 0, y: 0, width: 100, height: 40 });
+		const anchorRect = geometry.panes.find((pane) => pane.paneId === "w1:p1")?.rect;
+		const dockRect = geometry.panes.find((pane) => pane.paneId === dock.paneId)?.rect;
+		strictEqual(anchorRect?.width, 70);
+		strictEqual(dockRect?.width, 30);
+		strictEqual(geometry.splits[0]?.ratio, 0.7);
+
+		const tree = await live.layoutExport({ tabId: "w1:t1" });
+		strictEqual(tree.tabId, "w1:t1");
+		ok(tree.root.type === "split");
+		strictEqual(tree.root.type === "split" ? tree.root.ratio : null, 0.7);
+
+		// `[]` addresses the root split; the response carries the updated tree.
+		const updated = await live.layoutSetSplitRatio({ tabId: "w1:t1", path: [], ratio: 0.55 });
+		strictEqual(updated.root.type === "split" ? updated.root.ratio : null, 0.55);
+		strictEqual((await live.paneLayout("w1:p1")).panes.find((pane) => pane.paneId === "w1:p1")?.rect.width, 55);
+
+		await live.paneFocus(dock.paneId);
+		strictEqual(fake.focusedPane(), dock.paneId);
+		strictEqual(fake.focusedTab(), "w1:t1");
+
+		const zoomed = await live.paneZoom(dock.paneId, "on");
+		strictEqual(zoomed.changed, true);
+		strictEqual(fake.zoomedPane("w1:t1"), dock.paneId);
+		const unzoomed = await live.paneZoom(dock.paneId, "off");
+		strictEqual(unzoomed.changed, true);
+		strictEqual(fake.zoomedPane("w1:t1"), null);
+	});
+
+	it("zooming an unfocused pane reports the focus steal", async () => {
+		const fake = await server({ protocol: 21, version: "0.8.2" });
+		const live = client(fake.socketPath);
+		const dock = await live.paneSplit({ direction: "right", targetPaneId: "w1:p1", focus: false });
+		// Focus still sits on the anchor, so the zoom must both change and steal.
+		const zoomed = await live.paneZoom(dock.paneId, "on");
+		strictEqual(zoomed.changed, true);
+		strictEqual(zoomed.focusChanged, true);
+		strictEqual(fake.focusedPane(), dock.paneId);
+	});
+
+	it("maps a stale split path onto a typed error", async () => {
+		const fake = await server({ protocol: 21, version: "0.8.2" });
+		const live = client(fake.socketPath);
+		await rejects(
+			() => live.layoutSetSplitRatio({ tabId: "w1:t1", path: [true, true], ratio: 0.5 }),
+			(error: unknown) => {
+				ok(error instanceof MuxError);
+				strictEqual(error.wireCode, "split_not_found");
+				return true;
+			},
+		);
+	});
+
+	it("answers the layout tier with invalid_request below the protocol floor", async () => {
+		const fake = await server({ protocol: 17 });
+		const live = client(fake.socketPath);
+		for (const attempt of [
+			() => live.paneFocus("w1:p1"),
+			() => live.layoutExport({ tabId: "w1:t1" }),
+			() => live.layoutSetSplitRatio({ tabId: "w1:t1", path: [], ratio: 0.5 }),
+		]) {
+			await rejects(attempt, (error: unknown) => {
+				ok(error instanceof MuxError);
+				strictEqual(error.kind, "invalid_params");
+				return true;
+			});
+		}
+	});
+
+	it("delivers layout_updated pushes with parsed geometry and pane_moved id rewrites", async () => {
+		const fake = await server({ protocol: 21, version: "0.8.2", area: { width: 120, height: 40 } });
+		const live = client(fake.socketPath);
+		const dock = await live.paneSplit({ direction: "right", targetPaneId: "w1:p1", ratio: 0.75, focus: false });
+
+		const events: MuxEvent[] = [];
+		const subscription = await live.subscribe(["layout.updated", "pane.moved"], (event) => events.push(event));
+		// Subscribe resolves once the request is written; wait for the server to
+		// register the stream before pushing, or the push lands on nobody.
+		await waitForCondition(() => fake.subscriptionCount() === 1, "the subscription to register");
+
+		// A user drag: the fixture's ratio changes and the push carries geometry.
+		fake.setSplitRatio("w1:t1", [], 0.5);
+		fake.pushLayoutUpdated("w1:t1");
+		await waitForCondition(
+			() => events.some((event) => event.kind === "layout.updated"),
+			"the layout_updated push to arrive",
+		);
+		const layoutEvent = events.find((event) => event.kind === "layout.updated");
+		ok(layoutEvent && layoutEvent.kind === "layout.updated");
+		strictEqual(layoutEvent.geometry.splits[0]?.ratio, 0.5);
+		strictEqual(layoutEvent.geometry.tabId, "w1:t1");
+
+		fake.pushRawEvent("pane_moved", {
+			type: "pane_moved",
+			pane: { pane_id: "w1:p9", tab_id: "w1:t2", workspace_id: "w1" },
+			previous_pane_id: dock.paneId,
+			previous_tab_id: "w1:t1",
+			previous_workspace_id: "w1",
+		});
+		await waitForCondition(() => events.some((event) => event.kind === "pane.moved"), "the pane_moved push to arrive");
+		const moved = events.find((event) => event.kind === "pane.moved");
+		ok(moved && moved.kind === "pane.moved");
+		strictEqual(moved.previousPaneId, dock.paneId);
+		strictEqual(moved.paneId, "w1:p9");
+		strictEqual(moved.tabId, "w1:t2");
+		subscription.close();
 	});
 });

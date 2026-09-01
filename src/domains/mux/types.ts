@@ -97,14 +97,57 @@ export interface MuxSnapshot {
 	tabs: ReadonlyArray<MuxTab>;
 }
 
-/** Lifecycle event kinds Phase 1 subscribes to. */
-export type MuxEventKind = "pane.closed" | "pane.exited";
+/** Lifecycle event kinds the pane layer can subscribe to. */
+export type MuxEventKind = "pane.closed" | "pane.exited" | "pane.moved" | "layout.updated";
 
-/** One pushed lifecycle event. */
-export interface MuxEvent {
-	kind: MuxEventKind;
-	paneId: string;
+/**
+ * One pushed lifecycle event. A discriminated union because the payloads
+ * differ: pane leave events carry the pane, a move carries the id rewrite
+ * herdr performs, and a layout update carries the whole tab geometry so a
+ * consumer does not have to turn around and fetch what the push already said.
+ */
+export type MuxEvent =
+	| { kind: "pane.closed" | "pane.exited"; paneId: string; workspaceId: string }
+	| { kind: "pane.moved"; paneId: string; previousPaneId: string; tabId: string; workspaceId: string }
+	| { kind: "layout.updated"; geometry: MuxTabGeometry };
+
+/** One rectangle in terminal cells, as herdr's layout snapshots report them. */
+export interface MuxRect {
+	x: number;
+	y: number;
+	width: number;
+	height: number;
+}
+
+/**
+ * Cell-precise geometry of one tab: the outer area, every pane's rect, and
+ * every split with its live ratio. This is what dock sizing converges on.
+ */
+export interface MuxTabGeometry {
 	workspaceId: string;
+	tabId: string;
+	zoomed: boolean;
+	area: MuxRect;
+	focusedPaneId: string | null;
+	panes: ReadonlyArray<{ paneId: string; focused: boolean; rect: MuxRect }>;
+	splits: ReadonlyArray<{ direction: "right" | "down"; ratio: number; rect: MuxRect }>;
+}
+
+/**
+ * One node of a portable tab layout tree, as `layout.export` describes it.
+ * Split ratio is the share of the axis the `first` child keeps.
+ */
+export type MuxLayoutNode =
+	| { type: "pane"; paneId: string | null; label: string | null }
+	| { type: "split"; direction: "right" | "down"; ratio: number; first: MuxLayoutNode; second: MuxLayoutNode };
+
+/** A whole tab's portable layout tree. */
+export interface MuxLayoutTree {
+	workspaceId: string;
+	tabId: string;
+	zoomed: boolean;
+	focusedPaneId: string | null;
+	root: MuxLayoutNode;
 }
 
 /** Where Clio's own pane lives, read from the herdr environment. */
