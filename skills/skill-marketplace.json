@@ -4,248 +4,467 @@
 		{
 			"name": "ast-grep",
 			"description": "Use when a code search needs structure, not text — \"find all async functions without error handling\", \"find calls with this argument shape\", \"find X inside Y\" — or when grep returns too much noise to filter. Writes and tests ast-grep rules, then scans the codebase. Search only; never rewrites code. Not for plain string or filename lookups; use grep or find.",
+			"triggers": [
+				"structural code search",
+				"ast-grep rule",
+				"find calls with this argument shape",
+				"find code inside a function",
+				"grep returns too much noise"
+			],
 			"sourceUrl": "https://github.com/iowarp/clio-coder/tree/main/skills/coding/ast-grep",
-			"version": "0.1.0",
+			"version": "0.1.1",
 			"audit": "pass",
 			"category": "coding"
 		},
 		{
 			"name": "coding-standards",
 			"description": "Use when writing or refactoring TypeScript and the project has not pinned its own conflicting standards — new modules, error-handling design, schema parsing, module boundaries — or when another skill needs a TypeScript standards reference. Correct-by-construction rules: errors as values, parse don't validate, illegal states unrepresentable, deep modules, functional core / imperative shell.",
+			"triggers": [
+				"TypeScript coding standards",
+				"errors as values",
+				"parse don't validate",
+				"illegal states unrepresentable",
+				"functional core imperative shell"
+			],
 			"sourceUrl": "https://github.com/iowarp/clio-coder/tree/main/skills/coding/coding-standards",
-			"version": "0.1.0",
+			"version": "0.1.1",
 			"audit": "pass",
 			"category": "coding"
 		},
 		{
 			"name": "prototype",
 			"description": "Use when a design question should be answered with throwaway code — \"does this state model feel right\", \"sanity-check this logic\", \"what should this UI look like\", \"mock something up\". Builds a clearly-marked, trivially-runnable, no-persistence prototype, then captures the verdict and discards the code. Not for pre-registered performance experiments; use experiment-protocol. Not for production implementation.",
+			"triggers": [
+				"throwaway prototype",
+				"mock up this UI",
+				"prototype this state model",
+				"sanity-check this logic",
+				"what should this UI look like"
+			],
 			"sourceUrl": "https://github.com/iowarp/clio-coder/tree/main/skills/coding/prototype",
-			"version": "0.2.0",
+			"version": "0.2.1",
 			"audit": "pass",
 			"category": "coding"
 		},
 		{
 			"name": "tdd",
 			"description": "Use when the user wants to build a feature or fix a bug test-first, says \"TDD\", \"red-green\", or \"write the test first\", or when a change to tricky logic needs its behavior pinned before implementation. Runs the red → green loop at pre-agreed public seams, one vertical slice at a time. Not for designing benchmark criteria; use experiment-protocol.",
+			"triggers": [
+				"test-driven development",
+				"write the test first",
+				"red green",
+				"build this test-first",
+				"reproduce the bug with a test"
+			],
 			"sourceUrl": "https://github.com/iowarp/clio-coder/tree/main/skills/coding/tdd",
-			"version": "0.2.0",
+			"version": "0.2.1",
 			"audit": "pass",
 			"category": "coding"
 		},
 		{
 			"name": "context-handoff",
 			"description": "Use when a session is winding down and work will continue in a new session or another agent, when context is about to be compacted or lost, or when the user asks for a handoff, brief, summary, or \"notes for the next session.\" Produces a durable, redacted, reference-not-copy handoff document the next session can pick up from.",
+			"triggers": [
+				"session handoff",
+				"notes for the next session",
+				"handoff to another agent",
+				"context is about to be lost",
+				"write a continuation brief"
+			],
 			"sourceUrl": "https://github.com/iowarp/clio-coder/tree/main/skills/context/context-handoff",
-			"version": "0.3.2",
+			"version": "0.3.3",
 			"audit": "pass",
 			"category": "context"
 		},
 		{
 			"name": "context-prime",
 			"description": "Use when a coding session begins, when resuming work after a break, or when you land in an unfamiliar or in-progress repository and need to orient before acting. Loads the last handoff, git state, the project constitution, and active-work signals so a fresh agent reconstructs intent instead of guessing. Triggers on \"prime\", \"catch me up\", \"where were we\", \"get up to speed\", or the first substantive request in a new session.",
+			"triggers": [
+				"prime this repository",
+				"catch me up",
+				"where were we",
+				"get up to speed",
+				"resume repository work after a break"
+			],
 			"sourceUrl": "https://github.com/iowarp/clio-coder/tree/main/skills/context/context-prime",
-			"version": "0.2.2",
+			"version": "0.2.3",
 			"audit": "pass",
 			"category": "context"
 		},
 		{
 			"name": "file-ticket",
 			"description": "Use when something noticed mid-session must become a tracker issue — \"file a ticket\", \"open an issue for this\", \"log this bug\", \"ticket this behavior\". Captures evidence from the live session, dedups against existing issues, composes a labeled issue with acceptance criteria, confirms, and creates it via gh. Filing only; never fixes. Not for batch ticket creation from a PRD; use backlog. Not for diagnosing an existing issue; use fix-issue.",
+			"triggers": [
+				"file a ticket",
+				"open an issue for this",
+				"log this bug",
+				"ticket this behavior",
+				"create a tracker issue"
+			],
 			"sourceUrl": "https://github.com/iowarp/clio-coder/tree/main/skills/git/file-ticket",
-			"version": "0.1.1",
+			"version": "0.1.2",
 			"audit": "pass",
 			"category": "git"
 		},
 		{
 			"name": "fix-issue",
 			"description": "Use when a tracker issue should be resolved end to end — \"fix issue 123\", \"take this ticket\", \"resolve the bug in #45\". Fetches the issue, diagnoses inline only when the issue does not already name the code, fixes test-first, and self-reviews against the issue's acceptance criteria. Ends with an uncommitted, verified change ready for ship. Not for filing; use file-ticket. Not for committing or PRs; use ship.",
+			"triggers": [
+				"fix issue 123",
+				"take this ticket",
+				"resolve the bug in issue",
+				"implement this tracker issue",
+				"fix a GitHub issue end to end"
+			],
 			"sourceUrl": "https://github.com/iowarp/clio-coder/tree/main/skills/git/fix-issue",
-			"version": "0.1.1",
+			"version": "0.1.2",
 			"audit": "pass",
 			"category": "git"
 		},
 		{
 			"name": "resolve-merge-conflicts",
 			"description": "Use when a git merge, rebase, or cherry-pick is stopped on conflicts and they need resolving — \"fix these conflicts\", \"finish the merge\", conflict markers in files. Resolves by reconstructing both sides' intent from history, preserves both where possible, validates with the project's own checks, and completes the operation. Not for planning an integration of many branches; use worktree-merge.",
+			"triggers": [
+				"merge conflict",
+				"fix these conflicts",
+				"finish the merge",
+				"finish the rebase",
+				"resolve conflict markers"
+			],
 			"sourceUrl": "https://github.com/iowarp/clio-coder/tree/main/skills/git/resolve-merge-conflicts",
-			"version": "0.2.0",
+			"version": "0.2.1",
 			"audit": "pass",
 			"category": "git"
 		},
 		{
 			"name": "ship",
 			"description": "Use when finished work should leave the machine — \"ship this\", \"commit and open the PR\", \"get this up for review\". Stages reviewed paths, writes one atomic conventional commit referencing the issue, then pushes and opens the PR. Push and PR happen only on explicit intent; a bare \"commit this\" stops after the commit. Not for producing the change; use fix-issue.",
+			"triggers": [
+				"ship this",
+				"commit this",
+				"commit and open the PR",
+				"push and open a pull request",
+				"get this up for review"
+			],
 			"sourceUrl": "https://github.com/iowarp/clio-coder/tree/main/skills/git/ship",
-			"version": "0.1.1",
+			"version": "0.1.2",
 			"audit": "pass",
 			"category": "git"
 		},
 		{
 			"name": "worktree-create",
 			"description": "Use when the user asks to set up one or more git worktrees for parallel work — \"create a worktree\", \"set up worktrees for these branches\", \"spin up parallel branches\". Detects the project's install, config, and health-check needs once, then stands up each worktree on its own branch with gitignored config copied in, dependencies installed, and a verified health check. Not for merging finished worktrees; use worktree-merge.",
+			"triggers": [
+				"create a git worktree",
+				"set up worktrees for these branches",
+				"spin up parallel branches",
+				"prepare parallel worktrees"
+			],
 			"sourceUrl": "https://github.com/iowarp/clio-coder/tree/main/skills/git/worktree-create",
-			"version": "0.2.0",
+			"version": "0.2.1",
 			"audit": "pass",
 			"category": "git"
 		},
 		{
 			"name": "worktree-merge",
 			"description": "Use when parallel worktree branches are finished and the user asks to integrate them — \"merge my worktrees\", \"integrate these branches\". Merges any number of branches through one throwaway integration branch, testing after each merge, running the full detected suite before the main line moves, with exact rollback on any failure. Not for creating worktrees; use worktree-create.",
+			"triggers": [
+				"merge my worktrees",
+				"integrate these worktree branches",
+				"combine parallel branches",
+				"land finished worktrees"
+			],
 			"sourceUrl": "https://github.com/iowarp/clio-coder/tree/main/skills/git/worktree-merge",
-			"version": "0.2.0",
+			"version": "0.2.1",
 			"audit": "pass",
 			"category": "git"
 		},
 		{
 			"name": "clio-dev",
 			"description": "Use when modifying Clio Coder's own source in this repository, evolving its harness (TUI, skills, agents, tools, prompts, domains), or deciding whether a change stays local versus becomes a contribution. Governs self-development — what Clio may change freely, what requires explicit user intent, and how to make a change without breaking the architecture.",
+			"triggers": [
+				"modify Clio Coder",
+				"change the Clio harness",
+				"edit Clio skills or agents",
+				"evolve Clio tools or prompts",
+				"Clio contribution boundary"
+			],
 			"sourceUrl": "https://github.com/iowarp/clio-coder/tree/main/skills/meta/clio-dev",
-			"version": "0.2.1",
+			"version": "0.2.2",
 			"audit": "pass",
 			"category": "meta"
 		},
 		{
 			"name": "clio-test",
 			"description": "Use when writing or modifying Clio Coder's own source under src/, or verifying a change end-to-end against the real test harness. Covers the three real layers (contracts / smoke / boundaries), choosing which to run for a given change, the mock-provider and ACP-over-stdio harness, and the hot-reload dev loop for picking up latest code. Activate on any src/ edit, before declaring a change verified, or when asked whether Clio still works.",
+			"triggers": [
+				"test Clio Coder",
+				"verify a Clio source change",
+				"run Clio contract tests",
+				"test ACP over stdio",
+				"Clio mock provider harness"
+			],
 			"sourceUrl": "https://github.com/iowarp/clio-coder/tree/main/skills/meta/clio-test",
-			"version": "0.1.4",
+			"version": "0.1.5",
 			"audit": "pass",
 			"category": "meta"
 		},
 		{
 			"name": "credentials",
 			"description": "Use before running any tool or script that needs an API key, token, or other credential, when a command fails with an auth error, when the user must supply a new secret, or when a secret may have leaked into output. Covers facility surfaces such as kerberos tickets, globus and scheduler tokens, ssh agents, and netrc. Triggers on \"API key\", \"credential\", \"token\", \"auth error\", \"permission denied\", \"add a secret\", \"leaked\". Not for provider target configuration; use clio-coder auth and target settings.",
+			"triggers": [
+				"API key",
+				"credential missing",
+				"authentication error",
+				"permission denied",
+				"add a secret",
+				"secret leaked"
+			],
 			"sourceUrl": "https://github.com/iowarp/clio-coder/tree/main/skills/meta/credentials",
-			"version": "0.1.2",
+			"version": "0.1.3",
 			"audit": "pass",
 			"category": "meta"
 		},
 		{
 			"name": "find-skills",
 			"description": "Use when the user asks \"is there a skill for X\", \"find a skill\", \"install a skill\", \"add a skill\", asks whether a capability exists as an installable skill, or wants to extend the agent with functionality that might already be published. Searches with `clio-coder skills search`, browses the ecosystem read-only, and installs only through `clio-coder skills install`. Not for authoring a new skill; use skill-craft.",
+			"triggers": [
+				"find a skill",
+				"is there a skill for this",
+				"install a skill",
+				"add an agent skill",
+				"search the skills marketplace"
+			],
 			"sourceUrl": "https://github.com/iowarp/clio-coder/tree/main/skills/meta/find-skills",
-			"version": "0.1.1",
+			"version": "0.1.2",
 			"audit": "pass",
 			"category": "meta"
 		},
 		{
 			"name": "herdr",
 			"description": "Use when the user explicitly mentions Herdr or asks to launch, drive, or inspect another agent or command in a Herdr pane, tab, or workspace — including starting a second Clio Coder instance and delegating work to it. Requires HERDR_ENV=1. Not for background work a plain shell or dispatch already covers; do not activate merely because a task could benefit from parallelism.",
+			"triggers": [
+				"use Herdr",
+				"launch an agent in a Herdr pane",
+				"inspect a Herdr agent",
+				"start a second Clio Coder instance",
+				"drive a command in a Herdr workspace"
+			],
 			"sourceUrl": "https://github.com/iowarp/clio-coder/tree/main/skills/meta/herdr",
-			"version": "0.1.0",
+			"version": "0.1.1",
 			"audit": "pass",
 			"category": "meta"
 		},
 		{
 			"name": "skill-craft",
 			"description": "Use when writing, reviewing, or pruning a SKILL.md — authoring a new skill, editing an installed one, or judging whether a skill's description, body, or length is earning its cost. Triggers on \"write a skill\", \"improve this skill\", \"why isn't this skill firing\", \"is this skill too long\".",
+			"triggers": [
+				"write a SKILL.md",
+				"create a new skill",
+				"improve this skill",
+				"why isn't this skill firing",
+				"prune a skill body"
+			],
 			"sourceUrl": "https://github.com/iowarp/clio-coder/tree/main/skills/meta/skill-craft",
-			"version": "0.1.2",
+			"version": "0.1.3",
 			"audit": "pass",
 			"category": "meta"
 		},
 		{
 			"name": "architecture",
 			"description": "Use when an intent (PRD, epic, brief, or idea) needs its engineering approach decided — \"how should we build this\", \"pick the stack\", \"architecture for this feature\". An interactive working session: investigates, proposes 2-3 genuinely different approaches with trade-offs, recommends with reasoning, lets the user decide, and writes a high-level architecture decision doc. Not a task-by-task plan; use cut-it for that. Not a multi-perspective debate; use design-council. Not product intent; use product-intent. Not a typed implementation handoff with code-shaped contracts; use tech-spec.",
+			"triggers": [
+				"how should we build this",
+				"pick the stack",
+				"architecture for this feature",
+				"decide the engineering approach",
+				"compare architecture options"
+			],
 			"sourceUrl": "https://github.com/iowarp/clio-coder/tree/main/skills/planning/architecture",
-			"version": "0.2.1",
+			"version": "0.2.2",
 			"audit": "pass",
 			"category": "planning"
 		},
 		{
 			"name": "backlog",
 			"description": "Use when a finished PRD or architecture doc must become a real ticket backlog — \"create the stories\", \"turn this PRD into issues\", \"build the backlog\". Decomposes phases and user stories into small tickets with verifiable acceptance criteria, confirms the list, then creates them as GitHub issues (or in another tracker when an integration exists). Not for local sprint slicing into a SPRINT.md; use cut-it.",
+			"triggers": [
+				"create the stories",
+				"turn this PRD into issues",
+				"build the backlog",
+				"decompose this plan into tickets",
+				"create GitHub issues from this architecture"
+			],
 			"sourceUrl": "https://github.com/iowarp/clio-coder/tree/main/skills/planning/backlog",
-			"version": "0.2.0",
+			"version": "0.2.1",
 			"audit": "pass",
 			"category": "planning"
 		},
 		{
 			"name": "prd",
 			"description": "Use when the user wants to turn an idea into a product requirements document through a phase-gated interview — each phase locks before the next opens — ending in PRD.md plus per-milestone prompt files ready to drive a coding agent. Triggers on \"write a PRD\", \"spec this out\", \"help me define this feature/product\", or a brain dump that needs structure before planning.",
+			"triggers": [
+				"write a PRD",
+				"spec this product out",
+				"define this feature",
+				"structure this product brain dump",
+				"create milestone prompts"
+			],
 			"sourceUrl": "https://github.com/iowarp/clio-coder/tree/main/skills/planning/prd",
-			"version": "0.2.1",
+			"version": "0.2.2",
 			"audit": "pass",
 			"category": "planning"
 		},
 		{
 			"name": "product-intent",
 			"description": "Use at the start of a greenfield product effort, when the user wants a problem-first product document — \"why are we building this\", \"write the product thesis\", \"PRD for this idea\". Interviews for the problem, evidence, and a falsifiable hypothesis; writes an intent-only PRD with zero engineering decisions. Not for engineering decisions; use architecture. Not for turning a locked idea into milestone build prompts; use prd.",
+			"triggers": [
+				"why are we building this",
+				"write the product thesis",
+				"problem-first PRD",
+				"define a falsifiable product hypothesis",
+				"greenfield product intent"
+			],
 			"sourceUrl": "https://github.com/iowarp/clio-coder/tree/main/skills/planning/product-intent",
-			"version": "0.2.0",
+			"version": "0.2.1",
 			"audit": "pass",
 			"category": "planning"
 		},
 		{
 			"name": "tech-spec",
 			"description": "Write a typed call-stack architecture handoff — code-shaped contracts plus execution flows, implementation-ready for another engineer. User-invoked only. Not for weighing approaches or deciding the design; use architecture first.",
+			"triggers": [
+				"write a tech spec",
+				"typed call-stack handoff",
+				"code-shaped contracts",
+				"implementation-ready technical specification",
+				"specify execution flows"
+			],
 			"sourceUrl": "https://github.com/iowarp/clio-coder/tree/main/skills/planning/tech-spec",
-			"version": "0.1.1",
+			"version": "0.1.2",
 			"audit": "pass",
 			"category": "planning"
 		},
 		{
 			"name": "arxiv-literature",
 			"description": "Use when the user asks to search arXiv, summarize an arXiv paper, compare papers, find recent research, or build a compact literature survey. Prefer the Researcher shadow agent for noisy multi-paper retrieval; return only citation-ready, source-linked paper cards.",
+			"triggers": [
+				"search arXiv",
+				"summarize an arXiv paper",
+				"compare these papers",
+				"find recent research papers",
+				"build a literature survey"
+			],
 			"sourceUrl": "https://github.com/iowarp/clio-coder/tree/main/skills/research/arxiv-literature",
-			"version": "0.3.0",
+			"version": "0.3.1",
 			"audit": "pass",
 			"category": "research"
 		},
 		{
 			"name": "experiment-protocol",
 			"description": "Use when running a performance study, numerical comparison, parameter sweep, kernel or solver benchmark, or any change justified by \"faster\" or \"more accurate\", and success criteria should be locked before results exist. Pre-registers thresholds, tolerances, environment pins, and verdict conditions into the repository validation contract before any measurement. Triggers on \"benchmark\", \"compare implementations\", \"optimize\", \"tolerance\", \"reproduce results\", \"parameter sweep\". Not for diagnosing a stalled bug; use scientific-debugging.",
+			"triggers": [
+				"benchmark these implementations",
+				"pre-register a performance experiment",
+				"run a parameter sweep",
+				"define numerical tolerances",
+				"reproduce these results",
+				"compare solver accuracy"
+			],
 			"sourceUrl": "https://github.com/iowarp/clio-coder/tree/main/skills/research/experiment-protocol",
-			"version": "0.1.2",
+			"version": "0.1.3",
 			"audit": "pass",
 			"category": "research"
 		},
 		{
 			"name": "scientific-debugging",
 			"description": "Use when debugging has stalled after the first obvious fix, when a failure spans multiple systems, when someone is about to try random changes, or when a scientific or HPC code produces wrong numbers, NaNs, nondeterministic results, or an unexplained performance regression. Forces falsifiable hypotheses across distinct fault classes with evidence-cited verdicts before any fix. Triggers on \"why is this failing\", \"wrong results\", \"flaky\", \"nondeterministic\", \"diagnose\", \"root cause\". Not for designing benchmarks or pre-registered experiments; use experiment-protocol.",
+			"triggers": [
+				"wrong scientific results",
+				"nondeterministic HPC code",
+				"unexplained performance regression",
+				"diagnose NaNs",
+				"debug with falsifiable hypotheses",
+				"scientific root cause"
+			],
 			"sourceUrl": "https://github.com/iowarp/clio-coder/tree/main/skills/research/scientific-debugging",
-			"version": "0.1.2",
+			"version": "0.1.3",
 			"audit": "pass",
 			"category": "research"
 		},
 		{
 			"name": "scientific-modernization",
 			"description": "Use when modernizing, porting, rewriting, packaging, accelerating, or replacing established scientific software, especially across languages, build systems, CPU/GPU backends, or maintained forks. Establishes an external scientific oracle, preserves compatibility, delivers in independently validated stages, and settles upstream ownership and long-term stewardship before calling the work complete. Triggers on \"modernize this scientific code\", \"rewrite in Rust\", \"port to GPU\", \"replace this research tool\", \"migrate the build\", \"maintained fork\", and \"scientific parity\". Not for an isolated benchmark; use experiment-protocol. Not for diagnosing wrong results; use scientific-debugging.",
+			"triggers": [
+				"modernize this scientific code",
+				"rewrite this scientific software in Rust",
+				"port this solver to GPU",
+				"migrate the scientific build system",
+				"create a maintained fork",
+				"preserve scientific parity"
+			],
 			"sourceUrl": "https://github.com/iowarp/clio-coder/tree/main/skills/research/scientific-modernization",
-			"version": "0.2.0",
+			"version": "0.2.1",
 			"audit": "pass",
 			"category": "research"
 		},
 		{
 			"name": "cut-it",
 			"description": "Use when a plan, PRD, or milestone must become an executable sprint — dependency-ordered vertical slices sized for one focused agent run each, with done-when verification per slice. Never fabricates a plan; if none exists or it is too vague to slice, says so and recommends an interview first. Triggers on \"cut it\", \"slice this plan\", \"make this executable\", \"turn this into a sprint\".",
+			"triggers": [
+				"cut it",
+				"slice this plan",
+				"make this plan executable",
+				"turn this milestone into a sprint",
+				"write dependency-ordered vertical slices"
+			],
 			"sourceUrl": "https://github.com/iowarp/clio-coder/tree/main/skills/workflow/cut-it",
-			"version": "0.2.2",
+			"version": "0.2.3",
 			"audit": "pass",
 			"category": "workflow"
 		},
 		{
 			"name": "design-council",
 			"description": "Use when a design decision has real tradeoffs and needs several expert perspectives that challenge each other before code is written, such as architecture choices, API shapes, storage formats, parallelization strategies, or dependency decisions. Quick mode runs a single round for a fast perspective check. Triggers on \"council\", \"debate this\", \"multiple perspectives\", \"weigh the options\", \"what would experts say\". Not for a one-question-at-a-time interrogation of a plan; use grill-me. Not for splitting implementation work across workers; use dispatch directly.",
+			"triggers": [
+				"convene a design council",
+				"debate this design",
+				"get multiple expert perspectives",
+				"weigh the architecture options",
+				"what would experts say"
+			],
 			"sourceUrl": "https://github.com/iowarp/clio-coder/tree/main/skills/workflow/design-council",
-			"version": "0.3.1",
+			"version": "0.3.2",
 			"audit": "pass",
 			"category": "workflow"
 		},
 		{
 			"name": "grill-me",
 			"description": "Use when the user wants a plan, design, or idea stress-tested through a phased one-question-at-a-time interview before any code is written, or when intent is too ambiguous to plan from. Scans available context first, reviews known facts, fills missing decisions, respects stop signals, and ends with a compact decision log. Triggers on \"grill me\", \"interview me\", \"stress-test this plan\", \"poke holes in this\".",
+			"triggers": [
+				"grill me",
+				"interview me about this plan",
+				"stress-test this design",
+				"poke holes in this idea",
+				"clarify this plan one question at a time"
+			],
 			"sourceUrl": "https://github.com/iowarp/clio-coder/tree/main/skills/workflow/grill-me",
-			"version": "0.3.2",
+			"version": "0.3.3",
 			"audit": "pass",
 			"category": "workflow"
 		},
 		{
 			"name": "workflow-distiller",
 			"description": "Use when a workflow that just happened should become reusable, when the user says \"make this a skill\", \"package what we just did\", \"turn this into a workflow\", or when the same multi-step process has been repeated across sessions. Reconstructs the workflow from the session record, interviews, checks overlap with installed skills, gates on approval, then writes the SKILL.md following skill-craft. Not for authoring a skill from scratch with no prior workflow; write the SKILL.md directly following skill-craft. Not for distilling into an agent recipe; propose that as a follow-up when the workflow is dispatch-shaped.",
+			"triggers": [
+				"make this workflow a skill",
+				"package what we just did",
+				"turn this into a reusable workflow",
+				"distill this repeated process",
+				"create a skill from this session"
+			],
 			"sourceUrl": "https://github.com/iowarp/clio-coder/tree/main/skills/workflow/workflow-distiller",
-			"version": "0.2.1",
+			"version": "0.2.2",
 			"audit": "pass",
 			"category": "workflow"
 		}
