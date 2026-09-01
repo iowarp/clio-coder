@@ -120,10 +120,26 @@ describe("mux detection ladder", () => {
 		ok(result.detection.reason.includes("turned off"));
 	});
 
-	it("degrades embedded mode to none until phase 5 lands it", async () => {
+	// Embedded used to degrade to none carrying nothing that told a caller apart
+	// from an ordinary miss, so the boot logged it at debug and an operator who
+	// configured a mode simply got no panes and no sentence about why.
+	it("refuses embedded mode out loud rather than degrading it quietly", async () => {
 		const result = await withNetworkPoisoned(async () => detectMux({ enabled: "embedded", env: { HERDR_ENV: "1" } }));
 		strictEqual(result.detection.mode, "none");
-		ok(result.detection.reason.includes("phase 5"));
+		strictEqual(result.detection.refused, true, "an unimplemented rung the operator asked for is a refusal");
+		ok(result.detection.reason.includes("phase 5"), result.detection.reason);
+		// `embedded` costs guest mode too, so the refusal names the rung that works.
+		ok(result.detection.reason.includes("panes.enabled=auto"), result.detection.reason);
+	});
+
+	// A `none` nobody asked for is not a refusal: the environment answers it, and
+	// raising every paneless boot to stderr would train the operator to ignore
+	// the line that matters.
+	it("marks an ordinary miss as unrefused", async () => {
+		const off = await withNetworkPoisoned(async () => detectMux({ enabled: "off", env: { HERDR_ENV: "1" } }));
+		strictEqual(off.detection.refused, false);
+		const noHost = await withNetworkPoisoned(async () => detectMux({ env: {} }));
+		strictEqual(noHost.detection.refused, false);
 	});
 
 	it("reaches guest mode through a connectable socket and records the server protocol", async () => {

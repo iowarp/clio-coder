@@ -604,6 +604,16 @@ const SETTINGS_VALUE_HELP_BY_ID: Partial<Record<EditableSettingId, Record<string
 		true: "compact automatically before a turn crosses the threshold",
 		false: "context is only compacted when you run /context compact",
 	},
+	// `embedded` is a declared rung with no implementation behind it, and a row
+	// that offered it beside two working values read as a third working value.
+	// It stays selectable, because refusing it outright would break a settings
+	// file that names it, but nothing here lets an operator pick it believing
+	// they will get panes.
+	"panes.enabled": {
+		auto: "detect a herdr session and join it as a guest; no pane host, no panes",
+		embedded: "NOT IMPLEMENTED (ships in phase 5): this session gets no panes at all, guest mode included",
+		off: "never detect or open a pane",
+	},
 	"retry.enabled": {
 		true: "retry transient provider errors automatically",
 		false: "surface transient errors immediately without retrying",

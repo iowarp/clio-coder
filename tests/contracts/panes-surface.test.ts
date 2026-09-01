@@ -81,6 +81,7 @@ function stubMux(options: { available?: boolean; records?: ReadonlyArray<MuxPane
 			self: { workspaceId: "w1", tabId: "w1:t1", paneId: "w1:p0" },
 			candidates: ["/tmp/h.sock"],
 			reason: "guest mode on /tmp/h.sock (herdr 0.7.5, protocol 17)",
+			refused: false,
 		}),
 		async openUtilityPane(request: MuxOpenUtilityPaneRequest): Promise<MuxPaneRef | null> {
 			opened.push({ argv: [...request.argv], cwd: request.cwd, label: request.label });

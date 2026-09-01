@@ -1,4 +1,4 @@
-import { deepStrictEqual, ok, strictEqual } from "node:assert/strict";
+import { deepStrictEqual, match, ok, strictEqual } from "node:assert/strict";
 import { spawnSync } from "node:child_process";
 import { describe, it } from "node:test";
 import type { ClioSettings } from "../../src/core/config.js";
@@ -1156,6 +1156,13 @@ describe("contracts/settings center", () => {
 			ok(row.values, id);
 		}
 		deepStrictEqual(byId.get("panes.enabled")?.values, ["auto", "embedded", "off"]);
+		// `embedded` is a declared rung with no implementation behind it. It stays
+		// selectable so a settings file naming it keeps loading, but the row has to
+		// say what picking it costs rather than presenting a third working mode.
+		const paneValueHelp = byId.get("panes.enabled")?.valueHelp;
+		ok(paneValueHelp, "panes.enabled needs per-value help");
+		match(paneValueHelp.embedded ?? "", /NOT IMPLEMENTED/u);
+		match(paneValueHelp.embedded ?? "", /no panes/u);
 		deepStrictEqual(byId.get("panes.notifications")?.values, ["failures", "all", "off"]);
 		strictEqual(byId.get("panes.enabled")?.currentValue, "off");
 		strictEqual(byId.get("panes.notifications")?.defaultValue, "failures");
