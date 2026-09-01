@@ -1,5 +1,5 @@
 /**
- * Store ids (evidence ids and session ids) are identifiers, not
+ * Store ids (evidence ids, eval ids, session ids) are identifiers, not
  * filesystem paths. A store resolves them by joining under a fixed root, so an
  * id carrying a path separator, a `.`/`..` segment, a NUL, or an absolute path
  * could escape that root and read or write an unintended file. Validate the id

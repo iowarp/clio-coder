@@ -2,6 +2,7 @@ import { InvalidIdError } from "../core/safe-id.js";
 import { clioDataDir, clioStateDir } from "../core/xdg.js";
 import type { EvidenceOverview, EvidenceRunProvenance } from "../domains/evidence/index.js";
 import {
+	buildEvalEvidence,
 	buildEvidence,
 	EvidenceNotFoundError,
 	formatTrustAxes,
@@ -17,6 +18,7 @@ import { printError, printNote, printOk } from "./shared.js";
 
 const HELP = `clio-coder evidence build --run <runId>
 clio-coder evidence build --session <sessionId>
+clio-coder evidence build --eval <evalId>
 clio-coder evidence inspect <evidenceId> [--json]
 clio-coder evidence list
 clio-coder evidence inventory --json
@@ -31,6 +33,7 @@ interface ParsedEvidenceArgs {
 	json: boolean;
 	runId?: string;
 	sessionId?: string;
+	evalId?: string;
 	evidenceId?: string;
 	help: boolean;
 }
@@ -76,6 +79,13 @@ function parseEvidenceArgs(args: ReadonlyArray<string>): ParsedEvidenceArgs {
 				index += 1;
 				continue;
 			}
+			if (arg === "--eval") {
+				const value = args[index + 1];
+				if (value === undefined || value.startsWith("-")) throw new Error("--eval requires an eval id");
+				parsed.evalId = value;
+				index += 1;
+				continue;
+			}
 			throw new Error(`unknown evidence build argument: ${arg}`);
 		}
 		if (parsed.command === "inspect" && arg === "--json" && !parsed.json) {
@@ -92,19 +102,22 @@ function parseEvidenceArgs(args: ReadonlyArray<string>): ParsedEvidenceArgs {
 	if (parsed.help) return parsed;
 	if (parsed.command === undefined) throw new Error("evidence requires build, inspect, or list");
 	if (parsed.command === "build") {
-		const selectorCount = [parsed.runId, parsed.sessionId].filter((value) => value !== undefined).length;
+		const selectorCount = [parsed.runId, parsed.sessionId, parsed.evalId].filter((value) => value !== undefined).length;
 		if (selectorCount > 1) {
-			throw new Error("build accepts only one of --run or --session");
+			throw new Error("build accepts only one of --run, --session, or --eval");
 		}
 		if (selectorCount === 0) {
-			throw new Error("build requires --run <runId> or --session <sessionId>");
+			throw new Error("build requires --run <runId>, --session <sessionId>, or --eval <evalId>");
 		}
 	}
 	if (parsed.command === "inspect" && parsed.evidenceId === undefined)
 		throw new Error("inspect requires an evidence id");
 	if (
 		parsed.command === "list" &&
-		(parsed.runId !== undefined || parsed.sessionId !== undefined || parsed.evidenceId !== undefined)
+		(parsed.runId !== undefined ||
+			parsed.sessionId !== undefined ||
+			parsed.evalId !== undefined ||
+			parsed.evidenceId !== undefined)
 	) {
 		throw new Error("list does not accept extra arguments");
 	}
@@ -136,12 +149,15 @@ export async function runEvidenceCommand(args: ReadonlyArray<string>): Promise<n
 	const stateDir = clioStateDir();
 	try {
 		if (parsed.command === "build") {
-			const result = await buildEvidence({
-				dataDir,
-				stateDir,
-				...(parsed.runId === undefined ? {} : { runId: parsed.runId }),
-				...(parsed.sessionId === undefined ? {} : { sessionId: parsed.sessionId }),
-			});
+			const result =
+				parsed.evalId === undefined
+					? await buildEvidence({
+							dataDir,
+							stateDir,
+							...(parsed.runId === undefined ? {} : { runId: parsed.runId }),
+							...(parsed.sessionId === undefined ? {} : { sessionId: parsed.sessionId }),
+						})
+					: await buildEvalEvidence({ dataDir, stateDir, evalId: parsed.evalId });
 			// The artifact is still written (the finding is part of the evidence),
 			// but the verdict line and exit code must not say ok over a receipt
 			// that failed integrity verification.
@@ -248,7 +264,8 @@ function renderEvidenceList(overviews: ReadonlyArray<EvidenceOverview>): void {
 
 function formatSource(overview: EvidenceOverview): string {
 	if (overview.source.kind === "run") return `run ${overview.source.runId}`;
-	return `session ${overview.source.sessionId}`;
+	if (overview.source.kind === "session") return `session ${overview.source.sessionId}`;
+	return `eval ${overview.source.evalId}`;
 }
 
 function formatList(values: ReadonlyArray<string>): string {
