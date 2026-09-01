@@ -229,7 +229,7 @@ const TOOL_PROFILE_NAMES = [
 	"council-read-only",
 ] as const satisfies ReadonlyArray<ToolProfileName>;
 const WORKER_PRODUCTS = ["orientation"] as const satisfies ReadonlyArray<AgentProduct>;
-const TARGET_LIFECYCLES = ["user-managed", "clio-managed"] as const;
+const TARGET_LIFECYCLES = ["user-managed", "clio-coder-managed"] as const;
 const RESIDENCY_ROLES = ["chat", "memory", "worker", "target-default"] as const satisfies ReadonlyArray<ResidencyRole>;
 const MIDDLEWARE_HOOKS = ["before_tool", "after_tool", "turn_start", "turn_end", "on_compaction"] as const;
 const MIDDLEWARE_EFFECT_KINDS = [

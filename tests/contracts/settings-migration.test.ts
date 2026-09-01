@@ -7,6 +7,10 @@ import { parse as parseYaml } from "yaml";
 
 import { readSettings, updateSettings, validateSettings } from "../../src/core/config.js";
 import { DEFAULT_SETTINGS, DEFAULT_SETTINGS_YAML } from "../../src/core/defaults.js";
+import namingMigration, {
+	CLIO_CODER_NAMING_MIGRATION_ID,
+	CLIO_CODER_NAMING_SETTINGS_BACKUP_SUFFIX,
+} from "../../src/domains/lifecycle/migrations/2026-09-01-clio-coder-naming.js";
 import settingsV2, {
 	SETTINGS_V2_MIGRATION_ID,
 	SettingsV2CollisionError,
@@ -75,11 +79,67 @@ targets:
 		strictEqual(existsSync(`${settingsFile}.v1.bak`), false);
 	});
 
+	it("migrates released naming aliases once, keeps canonical collisions, and records a backup", async () => {
+		const original = `version: 2
+targets:
+  - { id: local, runtime: lmstudio, lifecycle: clio-managed }
+interface:
+  keybindings:
+    clio.exit: ctrl+x
+    clio.status.toggle: alt+u
+    clio-coder.status.toggle: alt+s
+integrations:
+  externalAgents:
+    defaults: { toolGovernance: clio-policy }
+`;
+		writeFileSync(settingsFile, original, "utf8");
+
+		await namingMigration.up(stateDir);
+		strictEqual(readFileSync(`${settingsFile}${CLIO_CODER_NAMING_SETTINGS_BACKUP_SUFFIX}`, "utf8"), original);
+		const migrated = parseYaml(readFileSync(settingsFile, "utf8")) as Record<string, unknown>;
+		strictEqual((migrated.targets as Array<{ lifecycle: string }>)[0]?.lifecycle, "clio-coder-managed");
+		const keybindings = (migrated.interface as { keybindings: Record<string, string> }).keybindings;
+		deepStrictEqual(keybindings, {
+			"clio-coder.exit": "ctrl+x",
+			"clio-coder.status.toggle": "alt+s",
+		});
+		strictEqual(
+			(migrated.integrations as { externalAgents: { defaults: { toolGovernance: string } } }).externalAgents.defaults
+				.toolGovernance,
+			"clio-coder-policy",
+		);
+
+		const firstWrite = readFileSync(settingsFile, "utf8");
+		await namingMigration.up(stateDir);
+		strictEqual(readFileSync(settingsFile, "utf8"), firstWrite);
+		strictEqual(readFileSync(`${settingsFile}${CLIO_CODER_NAMING_SETTINGS_BACKUP_SUFFIX}`, "utf8"), original);
+	});
+
+	it("normalizes legacy naming aliases at read time during the compatibility window", () => {
+		const result = validateSettings({
+			version: 2,
+			targets: [{ id: "local", runtime: "lmstudio", lifecycle: "clio-managed" }],
+			interface: {
+				keybindings: {
+					"clio.exit": "ctrl+x",
+					"clio-coder.exit": "ctrl+d",
+				},
+			},
+			integrations: { externalAgents: { defaults: { toolGovernance: "clio-policy" } } },
+		});
+		deepStrictEqual(result.issues, []);
+		strictEqual(result.settings.targets[0]?.lifecycle, "clio-coder-managed");
+		deepStrictEqual(result.settings.interface.keybindings, { "clio-coder.exit": "ctrl+d" });
+		strictEqual(result.settings.integrations.externalAgents.defaults.toolGovernance, "clio-coder-policy");
+	});
+
 	it("orders migrations before strict readers and records each migration once", async () => {
 		const ids = listMigrations().map((migration) => migration.id);
 		const retiredPanes = "2026-09-01-retire-panes-knobs";
 		const lmstudio = "2026-08-18-lmstudio-runtime-id";
 		ok(ids.indexOf(SETTINGS_V2_MIGRATION_ID) < ids.indexOf(retiredPanes));
+		ok(ids.indexOf(SETTINGS_V2_MIGRATION_ID) < ids.indexOf(CLIO_CODER_NAMING_MIGRATION_ID));
+		ok(ids.indexOf(CLIO_CODER_NAMING_MIGRATION_ID) < ids.indexOf(retiredPanes));
 		ok(ids.indexOf(retiredPanes) < ids.indexOf(lmstudio));
 
 		writeFileSync(settingsFile, "version: 1\npanes: { agents: off, keepFailed: false }\n", "utf8");

@@ -291,7 +291,7 @@ function deriveWelcomeDashboardStats(deps: WelcomeDashboardDeps): WelcomeDashboa
 		"off";
 
 	const autonomy = settings?.safety.autonomy ?? "auto-edit";
-	const toolProfile = settings?.integrations.externalAgents?.defaults?.toolGovernance ?? "clio-policy";
+	const toolProfile = settings?.integrations.externalAgents?.defaults?.toolGovernance ?? "clio-coder-policy";
 	const threshold = settings?.context.compaction?.threshold;
 	const compactionThreshold =
 		typeof threshold === "number" && Number.isFinite(threshold) ? `${Math.round(threshold * 100)}%` : "80%";

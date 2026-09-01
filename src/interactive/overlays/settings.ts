@@ -532,7 +532,7 @@ const SETTINGS_HELP_BY_ID: Partial<Record<EditableSettingId, string>> = {
 	"workers.agentBindings":
 		"Bind base, custom, and shadow native agents such as scout, researcher, and provenance to profiles. ACP delegation agents cannot be bound.",
 	"delegation.defaults.toolGovernance":
-		"clio-policy gates the agent through Clio's safety net; agent-managed trusts the agent; deny-all blocks every tool.",
+		"clio-coder-policy gates the agent through Clio's safety net; agent-managed trusts the agent; deny-all blocks every tool.",
 	scope: "Choose target-level or exact target/model refs. Alt+J / Alt+K step the chat target through this list.",
 	runtimePlugins: "Comma-separated package names, loaded at startup. Restart Clio after changing.",
 	"terminal.notify":
@@ -585,7 +585,7 @@ const SETTINGS_VALUE_HELP_BY_ID: Partial<Record<EditableSettingId, Record<string
 		false: "refuse every library network operation",
 	},
 	"delegation.defaults.toolGovernance": {
-		"clio-policy": "Clio's safety policy gates the delegated agent's tools",
+		"clio-coder-policy": "Clio's safety policy gates the delegated agent's tools",
 		"agent-managed": "the external agent governs its own tools",
 		"deny-all": "block every tool the delegated agent requests",
 	},
@@ -775,7 +775,7 @@ function delegationAgentsAffordance(
 		submenu: selectListSubmenu(
 			"Delegation agents",
 			choices,
-			"An added peer runs under clio-policy governance and inherits projectContext: none.",
+			"An added peer runs under clio-coder-policy governance and inherits projectContext: none.",
 		),
 	};
 }
@@ -1698,7 +1698,7 @@ function buildSettingItems(settings: Readonly<ClioSettings>, options?: BuildSett
 			values: ["deny", "fail"],
 		}),
 		settingItem("delegation.defaults.toolGovernance", settings.integrations.externalAgents.defaults.toolGovernance, {
-			values: ["clio-policy", "agent-managed", "deny-all"],
+			values: ["clio-coder-policy", "agent-managed", "deny-all"],
 		}),
 		settingItem("skills.trustProjectCompatRoots", String(settings.integrations.projectResources.trustProjectImports), {
 			values: ["false", "true"],
@@ -2406,7 +2406,7 @@ function applySettingChange(settings: ClioSettings, id: string, value: string): 
 			if (value === "deny" || value === "fail" || value === "escalate") settings.fleet.permissions.mode = value;
 			return;
 		case "delegation.defaults.toolGovernance":
-			if (value === "clio-policy" || value === "agent-managed" || value === "deny-all")
+			if (value === "clio-coder-policy" || value === "agent-managed" || value === "deny-all")
 				settings.integrations.externalAgents.defaults.toolGovernance = value;
 			return;
 		case "delegation.agents":

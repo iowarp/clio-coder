@@ -32,7 +32,7 @@ export interface AcpDelegationRunInput {
 	dynamicPromptMessages?: ReadonlyArray<{ body: string }>;
 	cwd: string;
 	safety: SafetyContract;
-	/** Session autonomy level applied by the mediator under clio-policy governance. */
+	/** Session autonomy level applied by the mediator under clio-coder-policy governance. */
 	autonomy?: AutonomyLevel;
 	signal?: AbortSignal;
 	clientVersion?: string;
@@ -223,7 +223,7 @@ export function startAcpDelegationRun(input: AcpDelegationRunInput): AcpDelegati
 	const mediator = new AcpToolMediator({
 		safety: input.safety,
 		cwd: input.cwd,
-		toolGovernance: input.agent.toolGovernance ?? "clio-policy",
+		toolGovernance: input.agent.toolGovernance ?? "clio-coder-policy",
 		...(input.autonomy !== undefined ? { autonomy: input.autonomy } : {}),
 		onPermissionResolved: (event) =>
 			emit({

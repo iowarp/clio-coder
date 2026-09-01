@@ -354,71 +354,71 @@ export function resolveCtrlCAction(deps: CtrlCActionDeps): CtrlCAction {
 
 function dispatchInteractiveAction(id: ClioKeybinding, deps: KeyBindingDeps): boolean {
 	switch (id) {
-		case "clio.notifications.dismiss":
+		case "clio-coder.notifications.dismiss":
 			deps.dismissNotifications();
 			return true;
-		case "clio.tool.expand":
+		case "clio-coder.tool.expand":
 			deps.toggleToolExpansion();
 			return true;
-		case "clio.tool.expandAll":
+		case "clio-coder.tool.expandAll":
 			deps.toggleAllToolExpansion();
 			return true;
-		case "clio.tool.liveOutput":
+		case "clio-coder.tool.liveOutput":
 			deps.toggleLiveToolOutput();
 			return true;
-		case "clio.editor.external":
+		case "clio-coder.editor.external":
 			deps.openExternalEditor();
 			return true;
-		case "clio.message.followUp":
+		case "clio-coder.message.followUp":
 			deps.queueFollowUp();
 			return true;
-		case "clio.message.interrupt":
+		case "clio-coder.message.interrupt":
 			deps.interruptWithMessage();
 			return true;
-		case "clio.message.dequeue":
+		case "clio-coder.message.dequeue":
 			deps.restoreQueuedFollowUps();
 			return true;
-		case "clio.thinking.expand":
+		case "clio-coder.thinking.expand":
 			deps.toggleThinkingExpansion();
 			return true;
-		case "clio.thinking.expandAll":
+		case "clio-coder.thinking.expandAll":
 			deps.toggleAllThinkingExpansion();
 			return true;
-		case "clio.status.toggle":
+		case "clio-coder.status.toggle":
 			deps.toggleStatus();
 			return true;
-		case "clio.thinking.cycle":
+		case "clio-coder.thinking.cycle":
 			deps.cycleThinking();
 			return true;
-		case "clio.session.tree":
+		case "clio-coder.session.tree":
 			deps.openTree();
 			return true;
-		case "clio.dispatchBoard.toggle":
+		case "clio-coder.dispatchBoard.toggle":
 			deps.toggleDispatchBoard();
 			return true;
-		case "clio.tasks.open":
+		case "clio-coder.tasks.open":
 			deps.openTasks();
 			return true;
-		case "clio.decisions.open":
+		case "clio-coder.decisions.open":
 			deps.openDecisions();
 			return true;
-		case "clio.dispatch.background":
+		case "clio-coder.dispatch.background":
 			deps.backgroundDispatch();
 			return true;
-		case "clio.model.select":
+		case "clio-coder.model.select":
 			deps.openModelSelector();
 			return true;
-		case "clio.model.cycleBackward":
+		case "clio-coder.model.cycleBackward":
 			deps.cycleScopedModelBackward();
 			return true;
-		case "clio.model.cycleForward":
+		case "clio-coder.model.cycleForward":
 			deps.cycleScopedModelForward();
 			return true;
-		case "clio.exit":
+		case "clio-coder.exit":
 			if (deps.canExit && !deps.canExit()) return false;
 			deps.requestShutdown();
 			return true;
-		case "clio.leader":
+		case "clio-coder.leader":
 			return false;
 	}
 }
@@ -426,20 +426,20 @@ function dispatchInteractiveAction(id: ClioKeybinding, deps: KeyBindingDeps): bo
 /** Pure key router: returns true when the input was consumed. */
 export function routeInteractiveKey(data: string, deps: KeyBindingDeps): boolean {
 	const order: ClioKeybinding[] = [
-		"clio.status.toggle",
-		"clio.thinking.cycle",
-		"clio.session.tree",
-		"clio.dispatchBoard.toggle",
-		"clio.tasks.open",
-		"clio.decisions.open",
-		"clio.dispatch.background",
-		"clio.model.select",
+		"clio-coder.status.toggle",
+		"clio-coder.thinking.cycle",
+		"clio-coder.session.tree",
+		"clio-coder.dispatchBoard.toggle",
+		"clio-coder.tasks.open",
+		"clio-coder.decisions.open",
+		"clio-coder.dispatch.background",
+		"clio-coder.model.select",
 		// Match cycleBackward before cycleForward so a user rebind where one key
 		// is a prefix of the other resolves to the more specific binding first.
 		// The defaults (alt+k / alt+j) do not prefix-match each other.
-		"clio.model.cycleBackward",
-		"clio.model.cycleForward",
-		"clio.exit",
+		"clio-coder.model.cycleBackward",
+		"clio-coder.model.cycleForward",
+		"clio-coder.exit",
 	];
 	for (const id of order) {
 		if (deps.matches(data, id)) return dispatchInteractiveAction(id, deps);

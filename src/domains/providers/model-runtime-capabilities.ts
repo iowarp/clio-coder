@@ -114,7 +114,7 @@ interface ClioRuntimeMetadata {
 	clio?: {
 		targetId?: string;
 		runtimeId?: string;
-		lifecycle?: "user-managed" | "clio-managed";
+		lifecycle?: "user-managed" | "clio-coder-managed";
 		gateway?: boolean;
 		family?: string;
 		quirks?: LocalModelQuirks;

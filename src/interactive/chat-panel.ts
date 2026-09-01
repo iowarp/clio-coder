@@ -384,7 +384,7 @@ export interface ChatPanel extends Component {
 
 export interface ChatPanelOptions {
 	/**
-	 * Resolves the user-visible key string for the `clio.tool.expand`
+	 * Resolves the user-visible key string for the `clio-coder.tool.expand`
 	 * action, which folds and unfolds the newest tool call or worker block.
 	 * Returning a non-empty string surfaces a dim ` (<key>)` hint on the one
 	 * surface the key would act on: the latest finished collapsed tool subline,

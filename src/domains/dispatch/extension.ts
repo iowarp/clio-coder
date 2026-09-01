@@ -2032,7 +2032,7 @@ function autonomyEnforcementForAcpDelegation(
 			dangerousBypass: true,
 		};
 	}
-	// clio-policy applies the exact autonomy mapping to every permission
+	// clio-coder-policy applies the exact autonomy mapping to every permission
 	// request. deny-all is stricter than every autonomy level, but is still a
 	// Clio-mediated upper bound rather than an external approximation.
 	return { grade: "mediated", autonomy, ...authorityEvidence, externalMode: toolGovernance };
@@ -3550,10 +3550,10 @@ export function createDispatchBundle(
 		if (!settings) throw new Error("dispatch: effective settings required for ACP delegation");
 		const configured = settings.integrations.externalAgents.entries.find((entry) => entry.id === agentId);
 		if (!configured) throw new Error(`dispatch: ACP delegation agent '${agentId}' not configured`);
-		const toolGovernance = configured.toolGovernance ?? "clio-policy";
+		const toolGovernance = configured.toolGovernance ?? "clio-coder-policy";
 		if (options?.autonomyOverride === true && toolGovernance === "agent-managed") {
 			throw new Error(
-				`dispatch: ACP delegation agent '${agentId}' uses toolGovernance='agent-managed', which cannot enforce an explicit one-run autonomy override; choose clio-policy or deny-all governance, or omit --autonomy`,
+				`dispatch: ACP delegation agent '${agentId}' uses toolGovernance='agent-managed', which cannot enforce an explicit one-run autonomy override; choose clio-coder-policy or deny-all governance, or omit --autonomy`,
 			);
 		}
 		const admission = resolveDelegationAdmissionStage(req, safety);
@@ -4022,7 +4022,7 @@ export function createDispatchBundle(
 			const finalFailureMessage = result.failureMessage ?? failureMessage;
 			const finalToolStats = snapshotToolStats(toolStats);
 			const unfinished = snapshotUnfinishedTools(inFlightTools);
-			const toolGovernance = lifecycle.agentConfig.toolGovernance ?? "clio-policy";
+			const toolGovernance = lifecycle.agentConfig.toolGovernance ?? "clio-coder-policy";
 			return {
 				runId: envelope.id,
 				agentId: req.agentId,
@@ -4089,7 +4089,7 @@ export function createDispatchBundle(
 				quality: createRunReceiptQuality({ runtimeEnforceable: false, enforcementPassed: null, resultContract: null }),
 				autonomyEnforcement: autonomyEnforcementForAcpDelegation(
 					lifecycle.autonomy,
-					lifecycle.agentConfig.toolGovernance ?? "clio-policy",
+					lifecycle.agentConfig.toolGovernance ?? "clio-coder-policy",
 					lifecycle.sessionAutonomy,
 					req.autonomy,
 				),
@@ -4119,7 +4119,7 @@ export function createDispatchBundle(
 					toolCallsRequested: result.delegation.toolCallsRequested,
 					toolCallsApproved: result.delegation.toolCallsApproved,
 					toolCallsDenied: result.delegation.toolCallsDenied,
-					toolGovernance: lifecycle.agentConfig.toolGovernance ?? "clio-policy",
+					toolGovernance: lifecycle.agentConfig.toolGovernance ?? "clio-coder-policy",
 					toolCallLog: acp.toolCallLog(),
 				},
 				sessionId: result.delegation.acpSessionId,

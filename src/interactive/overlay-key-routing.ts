@@ -247,11 +247,11 @@ export function routeOverlayKey(
 ): boolean {
 	if (overlayState === "closed") return false;
 	if (
-		(overlayState === "dispatch-board" && matches(data, "clio.dispatchBoard.toggle")) ||
-		(overlayState === "tasks" && matches(data, "clio.tasks.open")) ||
-		(overlayState === "tree" && matches(data, "clio.session.tree")) ||
-		(overlayState === "model" && matches(data, "clio.model.select")) ||
-		(overlayState === "help" && matches(data, "clio.leader"))
+		(overlayState === "dispatch-board" && matches(data, "clio-coder.dispatchBoard.toggle")) ||
+		(overlayState === "tasks" && matches(data, "clio-coder.tasks.open")) ||
+		(overlayState === "tree" && matches(data, "clio-coder.session.tree")) ||
+		(overlayState === "model" && matches(data, "clio-coder.model.select")) ||
+		(overlayState === "help" && matches(data, "clio-coder.leader"))
 	) {
 		deps.closeOverlay();
 		return true;

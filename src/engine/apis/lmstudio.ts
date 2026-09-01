@@ -19,7 +19,7 @@ interface LmStudioModelMetadata {
 	clio?: {
 		targetId: string;
 		runtimeId: string;
-		lifecycle?: "user-managed" | "clio-managed";
+		lifecycle?: "user-managed" | "clio-coder-managed";
 		lmstudio?: TargetDescriptor["lmstudio"];
 		lmstudioDefaultModel?: string;
 	};

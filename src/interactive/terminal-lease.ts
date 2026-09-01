@@ -287,7 +287,7 @@ export function createProcessTerminalLease(options: CreateProcessTerminalLeaseOp
 			handleStage0CtrlC();
 			return { consume: true };
 		}
-		if (keybindings.matches(data, "clio.exit") && editor.getText().length === 0) {
+		if (keybindings.matches(data, "clio-coder.exit") && editor.getText().length === 0) {
 			requestShutdown();
 			return { consume: true };
 		}

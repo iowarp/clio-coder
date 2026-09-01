@@ -7,7 +7,7 @@ import { extractLocalModelQuirks, type LocalModelQuirks } from "../../types/loca
 import type { RuntimeApiFamily } from "../../types/runtime-descriptor.js";
 import type { TargetDescriptor } from "../../types/target-descriptor.js";
 
-export type LocalModelLifecycle = "user-managed" | "clio-managed";
+export type LocalModelLifecycle = "user-managed" | "clio-coder-managed";
 
 export interface ClioLocalModelMetadata {
 	clio?: {

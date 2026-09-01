@@ -416,7 +416,7 @@ export function buildFooterDashboard(deps: FooterDashboardDeps): FooterDashboard
 		const capabilities = capabilityLabels(caps);
 
 		const safety = settings?.safety.autonomy ?? "auto-edit";
-		const toolProfile = settings?.integrations.externalAgents?.defaults?.toolGovernance ?? "clio-policy";
+		const toolProfile = settings?.integrations.externalAgents?.defaults?.toolGovernance ?? "clio-coder-policy";
 
 		return {
 			workspace: workspaceFacts(deps, branchSlot),

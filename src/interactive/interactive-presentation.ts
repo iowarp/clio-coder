@@ -230,7 +230,7 @@ export function createInteractivePresentation(deps: InteractivePresentationDeps)
 	const renderTrace = getActiveRenderTrace();
 	const chatPanel = factories.createChatPanel({
 		getToolExpandKey: () => {
-			const first = keybindings.getKeys("clio.tool.expand")[0];
+			const first = keybindings.getKeys("clio-coder.tool.expand")[0];
 			return typeof first === "string" && first.length > 0 ? first : undefined;
 		},
 		getOutputVerbosity: () => deps.getSettings?.().interface.outputDetail ?? "default",
@@ -238,7 +238,7 @@ export function createInteractivePresentation(deps: InteractivePresentationDeps)
 	});
 	const followUpQueuePanel = factories.createFollowUpQueuePanel({
 		getDequeueKey: () => {
-			const first = keybindings.getKeys("clio.message.dequeue")[0];
+			const first = keybindings.getKeys("clio-coder.message.dequeue")[0];
 			return typeof first === "string" && first.length > 0 ? first : undefined;
 		},
 	});
@@ -391,7 +391,7 @@ export function createInteractivePresentation(deps: InteractivePresentationDeps)
 		},
 		getLastTurnSummary: () => lastTurnSummary,
 		getNotifications: () => notifications.list(),
-		dismissKeyLabel: formatKeyLabel(keybindings.getKeys("clio.notifications.dismiss")[0]),
+		dismissKeyLabel: formatKeyLabel(keybindings.getKeys("clio-coder.notifications.dismiss")[0]),
 	};
 	footer = factories.buildFooter(footerDeps);
 	const unsubscribeObservability = deps.observability.subscribe((snapshot) => {
