@@ -1386,9 +1386,19 @@ describe("contracts/settings center", () => {
 		}
 	});
 
-	it("caps the two-lane footer so the list keeps its rows", () => {
+	it("uses otherwise blank 80-column rows to show the complete selected-setting prose", () => {
+		const lines = noopSettingsCenter(26).render(76).map(stripAnsi);
+		const footer = lines.slice(lines.findIndex((line) => !line.includes("│"))).join("\n");
+		const prose = footer.replace(/\s+/g, " ");
+		ok(prose.includes("How freely Clio acts; the safety net always applies."), footer);
+		ok(prose.includes("full-auto runs except command substitution and system-level changes."), footer);
+		ok(prose.includes("A confirmation marked exposure=outward parks for you at suggest and auto-edit."), footer);
+		ok(!footer.includes("…"), `80-column Settings still truncates its selected prose:\n${footer}`);
+	});
+
+	it("lets the two-lane footer use spare rows while the list keeps six", () => {
 		for (const { bodyHeight, footerMax } of [
-			{ bodyHeight: 26, footerMax: 4 },
+			{ bodyHeight: 26, footerMax: 20 },
 			{ bodyHeight: 8, footerMax: 2 },
 			{ bodyHeight: 6, footerMax: 0 },
 		]) {
