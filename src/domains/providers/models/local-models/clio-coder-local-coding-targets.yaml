@@ -308,7 +308,7 @@
     measuredUnder:
       hardware: unknown
       runtime: lmstudio
-      build: "unknown; the host was the operator's `dynamo` LM Studio machine, whose bundled build string was not recorded on this date"
+      build: "unknown; the host was a Windows LM Studio machine whose bundled build string was not recorded on this date"
       llamaCpp: "unknown; the measurement went through LM Studio's OpenAI-compatible port, which does not expose the underlying server argv"
       date: "2026-08-08"
       source: "commit b3db3b82 (fix(providers): thinking off reaches the wire for models that reason by default)"
@@ -884,12 +884,12 @@
     measuredUnder:
       hardware: unknown
       runtime: "lmstudio and its OpenAI-compatible port for the reasoning findings; an unrecorded llama.cpp host for the presence-penalty finding"
-      build: "unknown for both dates; the operator's `dynamo` host is a Windows LM Studio machine whose bundled build string was first recorded on 2026-08-29 as llama.cpp-win-x86_64-nvidia-cuda12-avx2, which is three weeks after the reasoning measurement and cannot be backdated to it"
+      build: "unknown for both dates; the Windows LM Studio measurement host's bundled build string was first recorded on 2026-08-29 as llama.cpp-win-x86_64-nvidia-cuda12-avx2, which is three weeks after the reasoning measurement and cannot be backdated to it"
       llamaCpp: "unknown; the reasoning measurement went through LM Studio's HTTP port, which does not expose the underlying server argv, and no argv survives for the dispatch that produced the presence-penalty value"
       date: "2026-08-08 (reasoning_effort and enable_thinking), 2026-07-06 (presence penalty)"
       source: "commits b3db3b82 and f7d76bf4"
       note: |
-        Three numbers here are measurements. On 2026-08-08 on `dynamo` this
+        Three numbers here are measurements. On 2026-08-08 on that host this
         model spent 98 of 103 completion tokens reasoning on "what is 17+25"
         with no thinking field set; chat_template_kwargs enable_thinking was
         inert, re-checked with unique prompts to rule out prompt-cache hits;
@@ -1268,7 +1268,7 @@
     maxTokens: 32768
   quirks:
     measuredUnder:
-      hardware: "unknown; the host was the operator's `dynamo` LM Studio machine"
+      hardware: "unknown; the host was a Windows LM Studio machine"
       runtime: "lmstudio, SDK 1.5.0 and its OpenAI-compatible port"
       build: "unknown; LM Studio's bundled llama.cpp build string was not recorded on this date"
       llamaCpp: "unknown; the measurement went through LM Studio, which does not expose the underlying server argv"
