@@ -138,7 +138,7 @@ function makeDeps(overrides: Partial<MarketplaceOfferDeps> = {}): {
 		getAutonomy: () => "auto-edit",
 		installEntry: (skill, scope) => {
 			installs.push({ name: skill.name, scope });
-			return { path: `/tmp/${skill.name}/SKILL.md` };
+			return { path: `/tmp/${skill.name}/SKILL.md`, sourceUrl: skill.sourceUrl, installedHash: `sha256:${skill.name}` };
 		},
 		declines: {
 			readNever: () => Object.fromEntries(nevers.map((name) => [name, "2026-01-01T00:00:00Z"])),
@@ -244,6 +244,16 @@ describe("contracts/marketplace-offer registration", () => {
 		strictEqual(effects.length, 1);
 		ok(reminderText(effects).includes("full-auto"));
 		deepStrictEqual(installs, [{ name: "resolve-merge-conflicts", scope: "project" }]);
+	});
+
+	it("surfaces the source and content hash on an autonomous install (integrity is never skipped)", () => {
+		const { deps } = makeDeps({ getAutonomy: () => "full-auto" });
+		const registration = createMarketplaceOfferRegistration(deps);
+		const message = reminderText(registration.evaluate(turnStart("resolve this merge conflict")));
+		// Autonomy drops the operator's yes/no but keeps the integrity record the
+		// consent overlay would have shown: the source and the SHA-256 of the bytes.
+		ok(message.includes("/opt/clio/skills/git/resolve-merge-conflicts"), "names the install source");
+		ok(message.includes("sha256:resolve-merge-conflicts"), "surfaces the content hash");
 	});
 
 	it("falls back to a consent offer when full-auto hits the source gate", () => {

@@ -46,6 +46,10 @@ export const MARKETPLACE_OFFER_REGISTRATION_ID = "observer.marketplace-offer";
 
 export interface MarketplaceOfferInstallResult {
 	path: string;
+	/** The source the skill was fetched from; surfaced so an autonomous install stays auditable. */
+	sourceUrl: string;
+	/** Normalized content hash of what was written; the integrity record the consent overlay would have shown. */
+	installedHash: string;
 }
 
 export interface MarketplaceOfferDeps {
@@ -80,10 +84,15 @@ export function marketplaceOfferReminder(entry: MarketplaceSkill): string {
 	);
 }
 
-export function marketplaceAutoInstallReminder(entry: MarketplaceSkill, installedPath: string): string {
+export function marketplaceAutoInstallReminder(entry: MarketplaceSkill, result: MarketplaceOfferInstallResult): string {
+	// Full-auto skips the operator's yes/no, never the integrity record. The
+	// consent overlay states the source and the SHA-256 of what it writes; the
+	// autonomous path computes the same hash and must surface it here, so an
+	// install nobody was asked about is still traceable to its source and bytes.
 	return (
-		`[Marketplace] Installed skill "${entry.name}" from Clio's own local marketplace (full-auto) to ${installedPath}: ` +
-		`${entry.description} It is installed but not active — activation stays operator-gated. If it fits this task, ` +
+		`[Marketplace] Installed skill "${entry.name}" from Clio's own local marketplace (full-auto) to ${result.path}. ` +
+		`Source ${result.sourceUrl}, sha256 ${result.installedHash}. ${entry.description} ` +
+		`It is installed but not active — activation stays operator-gated. If it fits this task, ` +
 		`suggest /skill ${entry.name} to the operator; never load it yourself.`
 	);
 }
@@ -257,7 +266,7 @@ export function createMarketplaceOfferRegistration(deps: MarketplaceOfferDeps): 
 						{
 							kind: "inject_reminder",
 							severity: "info",
-							message: marketplaceAutoInstallReminder(match.entry, result.path),
+							message: marketplaceAutoInstallReminder(match.entry, result),
 						},
 					];
 				} catch {

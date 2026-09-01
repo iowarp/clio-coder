@@ -1342,9 +1342,10 @@ export async function bootOrchestrator(options: BootOptions = {}): Promise<BootR
 				listInstalledSkillNames: () => resources.skills(process.cwd()).items.map((skill) => skill.name),
 				listMarketplaceEntries: () => discoverMarketplaceSkills({ cwd: process.cwd() }).skills,
 				getAutonomy: resolveEffectiveAutonomy,
-				installEntry: (entry, scope) => ({
-					path: installSkill({ source: entry.sourceUrl, scope, name: entry.name, cwd: process.cwd() }).path,
-				}),
+				installEntry: (entry, scope) => {
+					const installed = installSkill({ source: entry.sourceUrl, scope, name: entry.name, cwd: process.cwd() });
+					return { path: installed.path, sourceUrl: installed.sourceUrl, installedHash: installed.installedHash };
+				},
 			}),
 		);
 	}
