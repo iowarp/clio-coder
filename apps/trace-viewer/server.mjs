@@ -1,7 +1,7 @@
 import { createReadStream } from "node:fs";
-import { readFile, stat } from "node:fs/promises";
+import { readFile, realpath, stat } from "node:fs/promises";
 import { createServer } from "node:http";
-import { dirname, extname, join, normalize, resolve } from "node:path";
+import { dirname, extname, join, normalize, relative, resolve } from "node:path";
 import { DatabaseSync } from "node:sqlite";
 import { fileURLToPath } from "node:url";
 
@@ -203,17 +203,27 @@ async function serveStatic(pathname, response, head, staticRoot, indexFallback =
 	} catch {
 		return json(response, 400, { error: "invalid path" }, head);
 	}
-	const relative = decoded === "/" ? "index.html" : normalize(decoded).replace(/^[/\\]+/, "");
-	const candidate = resolve(staticRoot, relative);
-	if (candidate !== resolve(staticRoot) && !candidate.startsWith(`${resolve(staticRoot)}/`)) {
+	const relativePath = decoded === "/" ? "index.html" : normalize(decoded).replace(/^[/\\]+/, "");
+	const root = await realpath(resolve(staticRoot));
+	const candidate = resolve(root, relativePath);
+	if (!isWithin(candidate, root)) {
 		return json(response, 403, { error: "forbidden" }, head);
 	}
-	let file = candidate;
+	let file;
 	try {
+		file = await realpath(candidate);
+		if (!isWithin(file, root)) return json(response, 403, { error: "forbidden" }, head);
 		if (!(await stat(file)).isFile()) throw new Error("not a file");
 	} catch {
 		if (!indexFallback) return json(response, 404, { error: "not found" }, head);
-		file = join(staticRoot, "index.html");
+		try {
+			file = await realpath(join(root, "index.html"));
+			if (!isWithin(file, root) || !(await stat(file)).isFile()) {
+				return json(response, 403, { error: "forbidden" }, head);
+			}
+		} catch {
+			return json(response, 404, { error: "not found" }, head);
+		}
 	}
 	response.statusCode = 200;
 	response.setHeader("content-type", contentType(extname(file)));
@@ -225,6 +235,11 @@ async function serveStatic(pathname, response, head, staticRoot, indexFallback =
 		response.destroy(error);
 	});
 	stream.pipe(response);
+}
+
+function isWithin(child, parent) {
+	const rel = relative(parent, child);
+	return rel === "" || (!rel.startsWith("..") && !/^([A-Za-z]:)?[/\\]/.test(rel));
 }
 
 function json(response, status, value, head = false) {

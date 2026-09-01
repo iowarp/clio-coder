@@ -1,5 +1,6 @@
 import { strict as assert } from "node:assert";
-import { mkdirSync, mkdtempSync, rmSync, writeFileSync } from "node:fs";
+import { mkdirSync, mkdtempSync, rmSync, symlinkSync, writeFileSync } from "node:fs";
+import { createServer } from "node:http";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { DatabaseSync } from "node:sqlite";
@@ -8,6 +9,7 @@ import {
 	EVENT_LIMIT,
 	EVIDENCE_INDEX_FILE,
 	RECEIPT_OMITTED_FIELDS,
+	createTraceViewerHandler,
 	readReceiptSidecars,
 	startTraceViewer,
 	ViewerDatabase,
@@ -81,6 +83,35 @@ describe("trace viewer server", () => {
 			assert.equal(traversal.status, 403);
 		} finally {
 			await viewer.close();
+		}
+	});
+
+	it("refuses symlinks that escape either static root", async () => {
+		const root = mkdtempSync(join(tmpdir(), "clio-trace-static-"));
+		const pages = join(root, "public");
+		const assets = join(root, "assets");
+		mkdirSync(pages);
+		mkdirSync(assets);
+		writeFileSync(join(pages, "index.html"), "safe page");
+		writeFileSync(join(root, "outside.txt"), "outside");
+		symlinkSync(join(root, "outside.txt"), join(pages, "escape.html"));
+		symlinkSync(join(root, "outside.txt"), join(assets, "escape.webp"));
+		const server = createServer(createTraceViewerHandler({}, pages, assets));
+		await new Promise((resolveListen, rejectListen) => {
+			server.once("error", rejectListen);
+			server.listen(0, "127.0.0.1", resolveListen);
+		});
+		const address = server.address();
+		assert.ok(address && typeof address !== "string");
+		try {
+			for (const path of ["/escape.html", "/assets/escape.webp"]) {
+				const response = await fetch(`http://127.0.0.1:${address.port}${path}`);
+				assert.equal(response.status, 403, path);
+				assert.deepEqual(await response.json(), { error: "forbidden" });
+			}
+		} finally {
+			await new Promise((resolveClose) => server.close(resolveClose));
+			rmSync(root, { recursive: true, force: true });
 		}
 	});
 });
