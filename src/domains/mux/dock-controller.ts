@@ -25,7 +25,7 @@
  */
 
 import type { MuxClient } from "./socket-client.js";
-import type { MuxLayoutNode, MuxLog, MuxPaneRef, MuxTabGeometry } from "./types.js";
+import type { MuxLayoutNode, MuxLog, MuxPaneRef, MuxRect, MuxTabGeometry } from "./types.js";
 
 /** The two managed dock positions. */
 export type DockSlot = "workers" | "files";
@@ -109,7 +109,25 @@ export function deriveSplitPath(
 	return walk(root, []);
 }
 
-/** The dock's observed share of the anchor+dock pair on the spec's axis, from live geometry. */
+/** Whether `outer` contains `inner`, cell-inclusive. */
+function containsRect(outer: MuxRect, inner: MuxRect): boolean {
+	return (
+		outer.x <= inner.x &&
+		outer.y <= inner.y &&
+		outer.x + outer.width >= inner.x + inner.width &&
+		outer.y + outer.height >= inner.y + inner.height
+	);
+}
+
+/**
+ * The dock side's observed share at the split separating it from the anchor,
+ * from live geometry. The separating split is the smallest split rect holding
+ * both panes: split rects nest, so that is their lowest common ancestor. Its
+ * live ratio is read directly rather than summing pane cells, because the
+ * anchor's rect stops standing for its whole side the moment the user splits
+ * it for something else, and a cell sum then misreads an untouched dock as a
+ * resize. A separating split on the wrong axis measures nothing.
+ */
 export function observedDockShare(
 	geometry: MuxTabGeometry,
 	spec: DockSpec,
@@ -119,9 +137,18 @@ export function observedDockShare(
 	const anchor = geometry.panes.find((pane) => pane.paneId === anchorPaneId);
 	const dock = geometry.panes.find((pane) => pane.paneId === dockPaneId);
 	if (!anchor || !dock) return null;
-	const total = axisCells(anchor.rect, spec) + axisCells(dock.rect, spec);
-	if (total <= 0) return null;
-	return axisCells(dock.rect, spec) / total;
+	let separating: MuxTabGeometry["splits"][number] | null = null;
+	for (const split of geometry.splits) {
+		if (!containsRect(split.rect, anchor.rect) || !containsRect(split.rect, dock.rect)) continue;
+		if (!separating || split.rect.width * split.rect.height < separating.rect.width * separating.rect.height) {
+			separating = split;
+		}
+	}
+	if (!separating || separating.direction !== spec.direction) return null;
+	// On opposite sides of the divider, the second child always starts past the
+	// first, so a coordinate compare says which side the dock holds.
+	const dockIsSecond = spec.direction === "right" ? dock.rect.x > anchor.rect.x : dock.rect.y > anchor.rect.y;
+	return dockIsSecond ? 1 - separating.ratio : separating.ratio;
 }
 
 export interface DockOpenPlan {
