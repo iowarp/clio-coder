@@ -47,7 +47,7 @@ import { WRITE_BOUNDARY_VIOLATION_REASON } from "../domains/dispatch/write-bound
 import { formatTrustSummaryLine } from "../domains/evidence/trust-projection.js";
 import { inspectRunReceiptTrustStatus } from "../domains/evidence/trust-status.js";
 import { sanitizeCallTargetText } from "../domains/safety/call-target.js";
-import { truncateToWidth } from "../engine/tui-primitives.js";
+import { truncateToWidth, visibleWidth, wrapTextWithAnsi } from "../engine/tui-primitives.js";
 
 const HELP = `clio-coder fleet view <runId|fleetRootId> [--follow]
 clio-coder fleet view --watch <selection-file>
@@ -268,6 +268,15 @@ function clockOf(iso: string): string {
 	return time.length === 8 ? time : iso.slice(0, 8);
 }
 
+/** Wrap a viewer value inside the columns left by its one-time field label. */
+function wrapViewerValue(prefix: string, value: string, columns: number): string[] {
+	const prefixWidth = visibleWidth(prefix);
+	const valueWidth = Math.max(1, columns - prefixWidth);
+	return wrapTextWithAnsi(value, valueWidth).map(
+		(line, index) => `${index === 0 ? prefix : " ".repeat(prefixWidth)}${line}`,
+	);
+}
+
 /**
  * The whole viewer surface as lines. Pure: given the same model and width it
  * returns the same strings, which is what lets the data-source test assert the
@@ -287,23 +296,24 @@ export function renderRunView(model: RunViewModel, width: number = DEFAULT_WIDTH
 		),
 	);
 	if (model.task !== undefined) {
-		lines.push(truncateToWidth(`task ${model.task}`, columns, "…", false));
+		lines.push(...wrapViewerValue("task ", model.task, columns));
 	}
 	lines.push(rule);
 	if (!model.journalPresent) {
 		lines.push("no event journal for this run.");
-		lines.push(`expected ${model.journalPath} (panes.journal may have been off when it ran)`);
+		lines.push(...wrapViewerValue("expected ", `${model.journalPath} (panes.journal may have been off when it ran)`, columns));
 	} else if (model.transcript.length === 0) {
 		lines.push("journal is empty; no events recorded yet.");
 	} else {
 		if (model.transcriptTruncated) lines.push("… earlier events dropped (journal truncated)");
 		for (const entry of model.transcript) {
 			const head = `${clockOf(entry.at)} ${entry.label}`;
-			lines.push(truncateToWidth(entry.detail === undefined ? head : `${head}: ${entry.detail}`, columns, "…", false));
+			if (entry.detail === undefined) lines.push(truncateToWidth(head, columns, "…", false));
+			else lines.push(...wrapViewerValue(`${head}: `, entry.detail, columns));
 		}
 	}
 	lines.push(rule);
-	lines.push(truncateToWidth(`evidence  ${model.evidence}`, columns, "…", false));
+	lines.push(...wrapViewerValue("evidence  ", model.evidence, columns));
 	if (model.receiptPath !== null) {
 		lines.push(truncateToWidth(`receipt   ${model.receiptPath}`, columns, "…", false));
 	}
@@ -315,7 +325,7 @@ export function renderRunView(model: RunViewModel, width: number = DEFAULT_WIDTH
 			: model.outcomeDetail === null || model.outcomeDetail.length === 0
 				? model.outcome
 				: `${model.outcome} (${sanitizeBounded(model.outcomeDetail, DETAIL_MAX_WIDTH)})`;
-	lines.push(truncateToWidth(`outcome   ${outcome}`, columns, "…", false));
+	lines.push(...wrapViewerValue("outcome   ", outcome, columns));
 	return lines;
 }
 

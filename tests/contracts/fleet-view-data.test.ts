@@ -25,6 +25,7 @@ import { clioStateDir } from "../../src/core/xdg.js";
 import { createRunEventJournal } from "../../src/domains/dispatch/run-event-journal.js";
 import { type Ledger, openLedger, writeFleetRun } from "../../src/domains/dispatch/state.js";
 import type { RunLineage, RunReceiptDraft } from "../../src/domains/dispatch/types.js";
+import { visibleWidth } from "../../src/engine/tui-primitives.js";
 import { isolateClioEnv } from "../harness/scratch-env.js";
 
 const lineage: RunLineage = {
@@ -192,6 +193,40 @@ function line(model: RunViewModel, prefix: string): string {
 }
 
 describe("fleet view data sources", () => {
+	it("wraps task, journal, evidence, and outcome prose at narrow widths", () => {
+		const task = "Audit every durable boundary and explain the recovery path before the worker exits.";
+		const detail = "The worker inspected the receipt and found a mismatch that requires rebuilding the evidence bundle.";
+		const evidence = "trust unavailable because the receipt digest does not match the durable ledger envelope";
+		const outcomeDetail = "Repair the ledger entry, rebuild evidence, and rerun the worker before accepting the result.";
+		const model: RunViewModel = {
+			runId: "run-123",
+			agentId: "tester",
+			model: "qwen3-coder",
+			target: "local",
+			node: "local",
+			phase: "failed",
+			startedAt: "2026-08-30T10:00:00.000Z",
+			elapsedMs: 30_000,
+			task,
+			transcript: [{ at: "2026-08-30T10:00:01.000Z", label: "message_end", detail }],
+			transcriptTruncated: false,
+			journalPresent: true,
+			journalPath: "/tmp/events.ndjson",
+			evidence,
+			receiptPath: null,
+			outcome: "failed",
+			outcomeDetail,
+			terminal: true,
+		};
+		const lines = renderRunView(model, 40);
+		const collapsed = lines.join(" ").replace(/\s+/gu, " ");
+
+		for (const prose of [task, detail, evidence, outcomeDetail]) {
+			ok(collapsed.includes(prose), `viewer cut ${JSON.stringify(prose)}: ${collapsed}`);
+		}
+		for (const rendered of lines) ok(visibleWidth(rendered) <= 40, `line overflows: ${rendered}`);
+	});
+
 	it("projects a fixed bounded recent-run window without receipt or journal paths", async () => {
 		const isolated = await isolateClioEnv("clio-fleet-inspect-");
 		try {

@@ -18,4 +18,4 @@
  * here and not in src/cli/.
  */
 
-export { ProcessTerminal, TuiAltScreen, truncateToWidth } from "@earendil-works/pi-tui";
+export { ProcessTerminal, TuiAltScreen, truncateToWidth, visibleWidth, wrapTextWithAnsi } from "@earendil-works/pi-tui";
