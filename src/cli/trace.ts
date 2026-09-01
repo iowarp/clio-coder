@@ -7,6 +7,7 @@ import {
 	DEFAULT_TRACE_RETENTION_POLICY,
 	resolveTraceRetentionPolicy,
 	TRACE_EVENT_POLL_LIMIT,
+	assertTraceSelectOnly,
 	type TraceEventRow,
 	type TracePhaseRow,
 	type TraceProcessRow,
@@ -148,6 +149,14 @@ export async function runTraceCommand(args: string[]): Promise<number> {
 	if (command === "sql" && !sqlQuery) {
 		process.stderr.write("trace sql requires a SELECT query\n");
 		return 2;
+	}
+	if (command === "sql") {
+		try {
+			assertTraceSelectOnly(sqlQuery);
+		} catch (error) {
+			process.stderr.write(`${error instanceof Error ? error.message : String(error)}\n`);
+			return 2;
+		}
 	}
 
 	if (command === "ui") return runTraceUi(parsed.db, parsed.port);
