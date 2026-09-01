@@ -1,6 +1,7 @@
 import { mkdtemp, rm, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { resolve } from "node:path";
+import { namingCompatibilityEnvironment } from "../../../core/naming-compat.js";
 import { resolveMetricAssertion } from "../compare/thresholds.js";
 import { buildEvalExecutionEnvelopeV1, type EvalExecutionObservationV1 } from "../execution-provenance.js";
 import { aggregateEvalVerdicts } from "../metrics/aggregate.js";
@@ -178,7 +179,11 @@ async function runMatrixItem(
 		// the workers it attested are still running.
 		const journalMetrics = invariantMetrics(stateDir, receiptExitCode);
 		const measurement = await measureTaskOutcome(task, workspace.dir, {
-			CLIO_EVAL_RUNNER_STDOUT_FILE: runnerStdoutFile,
+			...namingCompatibilityEnvironment(
+				"CLIO_CODER_EVAL_RUNNER_STDOUT_FILE",
+				"CLIO_EVAL_RUNNER_STDOUT_FILE",
+				runnerStdoutFile,
+			),
 		});
 		executionObservation = measurement.executionObservation;
 		const metrics: Record<string, number | string | boolean | null> = {

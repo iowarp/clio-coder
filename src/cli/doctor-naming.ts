@@ -22,6 +22,24 @@ interface SettingsNamingInspection {
 	error: string | null;
 }
 
+const LEGACY_ENVIRONMENT_NAMES = [
+	["CLIO_EVAL_RUNNER_STDOUT_FILE", "CLIO_CODER_EVAL_RUNNER_STDOUT_FILE"],
+	["CLIO_YAZI_PICK_TOKEN", "CLIO_CODER_YAZI_PICK_TOKEN"],
+] as const;
+
+function namingEnvironmentFindings(environment: NodeJS.ProcessEnv = process.env): DoctorFinding[] {
+	const present = LEGACY_ENVIRONMENT_NAMES.filter(([legacy]) => Boolean(environment[legacy]?.trim()));
+	if (present.length === 0) {
+		return [{ ok: true, name: "naming environment", detail: "no legacy Clio Coder environment variables are set" }];
+	}
+	return present.map(([legacy, canonical]) => ({
+		ok: true,
+		level: "warn",
+		name: "naming environment",
+		detail: `${legacy} is deprecated; use ${canonical} (compatibility ends in v0.7.0)`,
+	}));
+}
+
 function inspectSettingsNaming(path: string): SettingsNamingInspection {
 	if (!existsSync(path)) return { path, legacy: 0, conflicts: 0, error: null };
 	try {
@@ -88,5 +106,6 @@ export function namingFootprintFindings(options: NamingDoctorOptions = {}): Doct
 		}
 		findings.push(settingsFinding(candidate.label, before, fixed));
 	}
+	findings.push(...namingEnvironmentFindings());
 	return findings;
 }

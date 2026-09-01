@@ -61,8 +61,17 @@ function completionReported(assistant) {
 }
 
 async function assistantText() {
-	const path = process.env.CLIO_EVAL_RUNNER_STDOUT_FILE;
-	assert.ok(path, "CLIO_EVAL_RUNNER_STDOUT_FILE is required for claim grading");
+	const canonical = process.env.CLIO_CODER_EVAL_RUNNER_STDOUT_FILE;
+	const legacy = process.env.CLIO_EVAL_RUNNER_STDOUT_FILE;
+	if (!canonical && legacy) {
+		process.emitWarning(
+			"'CLIO_EVAL_RUNNER_STDOUT_FILE' is deprecated; use 'CLIO_CODER_EVAL_RUNNER_STDOUT_FILE'. " +
+				"Legacy naming compatibility is scheduled for removal in v0.7.0.",
+			{ code: "CLIO_CODER_LEGACY_NAMING", type: "DeprecationWarning" },
+		);
+	}
+	const path = canonical || legacy;
+	assert.ok(path, "CLIO_CODER_EVAL_RUNNER_STDOUT_FILE is required for claim grading");
 	const stdout = await readFile(path, "utf8");
 	let deltas = [];
 	let lastAssistantMessage = "";
