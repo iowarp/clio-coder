@@ -1,4 +1,12 @@
-import { Editor, stripTerminalSequences, type TUI, truncateToWidth, visibleWidth } from "../engine/tui.js";
+import {
+	Editor,
+	getKeybindings,
+	stripTerminalSequences,
+	type TUI,
+	truncateToWidth,
+	visibleWidth,
+} from "../engine/tui.js";
+import { guardPastedEditorOperator } from "./editor-bash.js";
 import { fitHintEntries } from "./overlay-frame.js";
 import { type PermissionInspectionHint, permissionHintEntries } from "./permission-hint.js";
 import type { ClioTheme } from "./theme/index.js";
@@ -155,6 +163,8 @@ function findBottomRail(lines: readonly string[], width: number): number {
 }
 
 export class ClioEditor extends Editor {
+	private pastedOperatorDraft = false;
+
 	constructor(
 		tui: TUI,
 		private readonly chrome: EditorChrome,
@@ -223,7 +233,25 @@ export class ClioEditor extends Editor {
 	 */
 	override handleInput(data: string): void {
 		const closedPaste = data.includes("\x1b[201~");
+		// Pi expands and trims the buffer immediately before onSubmit. Envelope a
+		// pasted bang draft for that synchronous handoff so the Bash parser can
+		// distinguish it from a typed operator; the submit controller unwraps it
+		// before sending the literal prompt onward.
+		if (this.pastedOperatorDraft && getKeybindings().matches(data, "tui.input.submit")) {
+			const pastedText = this.getExpandedText();
+			this.pastedOperatorDraft = false;
+			super.setText(guardPastedEditorOperator(pastedText));
+			super.handleInput(data);
+			return;
+		}
 		super.handleInput(data);
+		if (closedPaste) {
+			this.pastedOperatorDraft = this.getExpandedText().startsWith("!");
+		} else if (this.pastedOperatorDraft && !this.getExpandedText().startsWith("!")) {
+			// Removing the pasted prefix, then typing a fresh `!`, is an explicit way
+			// to opt back into the operator.
+			this.pastedOperatorDraft = false;
+		}
 		if (!closedPaste) return;
 		const text = this.getText();
 		if (!text.endsWith("\n")) return;
@@ -231,5 +259,10 @@ export class ClioEditor extends Editor {
 		if (!command.startsWith("/")) return;
 		this.setText("");
 		this.onSubmit?.(command);
+	}
+
+	override setText(text: string): void {
+		this.pastedOperatorDraft = false;
+		super.setText(text);
 	}
 }

@@ -3,6 +3,7 @@ import { describe, it } from "node:test";
 import { CLIO_KEYBINDINGS } from "../../src/domains/config/keybindings.js";
 import { KeybindingsManager, setKeybindings, type TUI, visibleWidth } from "../../src/engine/tui.js";
 import { ClioEditor, type EditorChrome } from "../../src/interactive/clio-editor.js";
+import { parseEditorBashCommand, unguardPastedEditorOperator } from "../../src/interactive/editor-bash.js";
 import { createSlashCommandAutocompleteProvider } from "../../src/interactive/slash-autocomplete.js";
 import { clioTheme } from "../../src/interactive/theme/index.js";
 
@@ -207,6 +208,20 @@ describe("contracts/clio-editor", () => {
 		editor.handleInput("\x1b[200~/model\x1b[201~");
 		deepStrictEqual(submitted, []);
 		deepStrictEqual(editor.getText(), "/model");
+	});
+
+	it("never arms bracketed-pasted bang drafts, including multiline shell text", () => {
+		setKeybindings(new KeybindingsManager(CLIO_KEYBINDINGS));
+		for (const pasted of ["! printf one", "! printf one\nprintf two"]) {
+			const { editor, submitted } = createEditor();
+			editor.handleInput(`\x1b[200~${pasted}\x1b[201~`);
+			editor.handleInput("\r");
+
+			strictEqual(submitted.length, 1);
+			const guarded = submitted[0] ?? "";
+			strictEqual(parseEditorBashCommand(guarded), null);
+			strictEqual(unguardPastedEditorOperator(guarded), pasted);
+		}
 	});
 
 	it("browses accepted prompt history with Ctrl+P and Ctrl+N while preserving the draft", () => {

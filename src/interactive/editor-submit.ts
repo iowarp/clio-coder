@@ -6,7 +6,7 @@ import type { SessionContract, SessionEntry } from "../domains/session/index.js"
 import { toolPresentationPolicy } from "../tools/presentation.js";
 import type { ChatLoop } from "./chat-loop.js";
 import type { ChatPanel } from "./chat-panel.js";
-import { bashExecutionEntryInput, parseEditorBashCommand } from "./editor-bash.js";
+import { bashExecutionEntryInput, parseEditorBashCommand, unguardPastedEditorOperator } from "./editor-bash.js";
 import {
 	formatSteerCandidates,
 	parseEditorSteerMention,
@@ -318,18 +318,19 @@ export function createEditorSubmitController(deps: EditorSubmitDeps): EditorSubm
 		submitEditorSteerMention(mention) !== "unhandled";
 
 	const submitEditorText = (text: string): void => {
-		const trimmed = text.trim();
+		const literalText = unguardPastedEditorOperator(text);
+		const trimmed = literalText.trim();
 		if (trimmed.length === 0) return;
 		deps.collapseLaunchpadBeforeSubmit?.();
 		if (parseEditorBashCommand(text)) {
 			if (!deps.chat.isStreaming() && !activeEditorBash) {
-				deps.editor.addToHistory(text);
+				deps.editor.addToHistory(literalText);
 				deps.editor.setText("");
 			} else {
 				// Pi Editor clears the buffer before invoking onSubmit. A command
 				// refused by either admission guard is still a draft, so put it back
 				// for the operator instead of silently discarding it.
-				deps.editor.setText(text);
+				deps.editor.setText(literalText);
 			}
 			if (runEditorBash(text)) deps.ui.requestRender();
 			return;
@@ -339,12 +340,12 @@ export function createEditorSubmitController(deps: EditorSubmitDeps): EditorSubm
 			const submission = submitEditorSteerMention(steerMention);
 			if (submission !== "unhandled") {
 				if (submission === "accepted") {
-					deps.editor.addToHistory(text);
+					deps.editor.addToHistory(literalText);
 					deps.editor.setText("");
 				} else {
 					// Resolution and dispatch failures are correctable rejections. Pi
 					// has already cleared the editor, so explicitly restore the draft.
-					deps.editor.setText(text);
+					deps.editor.setText(literalText);
 				}
 				deps.ui.requestRender();
 				return;
@@ -352,18 +353,18 @@ export function createEditorSubmitController(deps: EditorSubmitDeps): EditorSubm
 		}
 		const command = parseSlashCommand(trimmed);
 		if (isRejectedCommand(command)) {
-			deps.editor.setText(text);
+			deps.editor.setText(literalText);
 			deps.dispatchCommand(trimmed);
 		} else if (command.kind === "unknown-command") {
 			const result = deps.dispatchCommand(trimmed);
 			if (result === "rejected") {
-				deps.editor.setText(text);
+				deps.editor.setText(literalText);
 			} else {
-				deps.editor.addToHistory(text);
+				deps.editor.addToHistory(literalText);
 				deps.editor.setText("");
 			}
 		} else {
-			deps.editor.addToHistory(text);
+			deps.editor.addToHistory(literalText);
 			deps.editor.setText("");
 			deps.dispatchCommand(trimmed);
 		}
@@ -388,7 +389,8 @@ export function createEditorSubmitController(deps: EditorSubmitDeps): EditorSubm
 	};
 
 	const admitCapturedText = async (text: string, signal?: AbortSignal): Promise<void> => {
-		const trimmed = text.trim();
+		const literalText = unguardPastedEditorOperator(text);
+		const trimmed = literalText.trim();
 		if (trimmed.length === 0) return;
 		signal?.throwIfAborted();
 		deps.collapseLaunchpadBeforeSubmit?.();
@@ -396,7 +398,7 @@ export function createEditorSubmitController(deps: EditorSubmitDeps): EditorSubm
 			while (deps.chat.isStreaming()) await awaitWithAbort(deps.chat.whenSettled(), signal);
 			while (activeEditorBashSettlement) await awaitWithAbort(activeEditorBashSettlement, signal);
 			signal?.throwIfAborted();
-			deps.editor.addToHistory(text);
+			deps.editor.addToHistory(literalText);
 			runEditorBash(text);
 			deps.ui.requestRender();
 			return;
@@ -408,7 +410,7 @@ export function createEditorSubmitController(deps: EditorSubmitDeps): EditorSubm
 				if (submission === "rejected") {
 					throw new Error("queued boot steer was not admitted; preserving it for recovery");
 				}
-				deps.editor.addToHistory(text);
+				deps.editor.addToHistory(literalText);
 				deps.ui.requestRender();
 				return;
 			}
@@ -421,7 +423,7 @@ export function createEditorSubmitController(deps: EditorSubmitDeps): EditorSubm
 			deps.ui.requestRender();
 			throw new Error("queued boot command needs correction; preserving it for recovery");
 		}
-		deps.editor.addToHistory(text);
+		deps.editor.addToHistory(literalText);
 		signal?.throwIfAborted();
 		if (deps.dispatchCommandAsync) await deps.dispatchCommandAsync(trimmed, signal);
 		else deps.dispatchCommand(trimmed);
