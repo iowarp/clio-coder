@@ -916,7 +916,7 @@ function tableWidths(rows: ReadonlyArray<TargetTableRow>, width: number): Target
  * cut to its width, marked the same way. Colour is dropped on those rows because
  * the ansi bytes would sit inside the cut; a wrapped row costs more than colour.
  */
-export function formatTargetTable(
+function formatTargetTable(
 	rows: ReadonlyArray<TargetTableRow>,
 	width: number,
 	paintHealth: (cell: string, row: TargetTableRow) => string = (cell) => cell,
@@ -971,7 +971,7 @@ function renderTable(providers: ProvidersContract, entries: ReadonlyArray<Target
 	}
 }
 
-export function targetTableRow(providers: ProvidersContract, status: TargetStatus): TargetTableRow {
+function targetTableRow(providers: ProvidersContract, status: TargetStatus): TargetTableRow {
 	const diagnostic = degradedHealthDiagnostic(status);
 	return {
 		id: status.target.id,
@@ -1033,7 +1033,7 @@ function capabilityBadges(caps: CapabilityFlags): string {
  * no states (cloud targets); "resident: none" when states are known and
  * nothing is loaded, so a cold box is distinguishable from an unknown one.
  */
-export function residentModelsSummary(states: TargetStatus["discoveredModelStates"]): string | null {
+function residentModelsSummary(states: TargetStatus["discoveredModelStates"]): string | null {
 	if (!states) return null;
 	const entries = Object.entries(states);
 	if (entries.length === 0) return null;
@@ -1048,7 +1048,7 @@ export function residentModelsSummary(states: TargetStatus["discoveredModelState
  * capability the target reported. Saying so is the difference between a number
  * a user can plan against and one they cannot.
  */
-export function formatContextWindow(
+function formatContextWindow(
 	status: Pick<TargetStatus, "capabilities" | "contextWindowProvenance"> &
 		Partial<Pick<TargetStatus, "target" | "discoveredModelStates">>,
 ): string {
@@ -1064,7 +1064,7 @@ export function formatContextWindow(
 		: `ctx ${window}`;
 }
 
-export function formatNotes(status: TargetStatus): string {
+function formatNotes(status: TargetStatus): string {
 	const parts: string[] = [];
 	const diagnostic = degradedHealthDiagnostic(status);
 	// The health diagnosis leads because gateway, context, and residency facts

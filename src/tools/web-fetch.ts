@@ -256,7 +256,7 @@ function htmlToMarkdown(html: string, baseUrl: string): string {
 		.trim();
 }
 
-export function extractWebFetchContent(
+function extractWebFetchContent(
 	rawText: string,
 	contentType: string,
 	finalUrl: string,

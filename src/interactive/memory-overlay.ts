@@ -29,7 +29,7 @@ const EMPTY_MESSAGE = "no approved lessons, task-bank entries, or memory steps c
  * row of its own until it finishes, and an operator who cannot see it in flight
  * reads an unchanged bank as an idle memory agent.
  */
-export function formatMemoryStatusLine(status: TaskMemoryOperatorStatus, contentWidth: number): string {
+function formatMemoryStatusLine(status: TaskMemoryOperatorStatus, contentWidth: number): string {
 	const theme = clioTheme();
 	const width = Math.max(1, Math.floor(contentWidth));
 	const units = [
@@ -145,7 +145,7 @@ function activityItems(events: ReadonlyArray<TaskMemoryActivityEvent>, group: st
  * section titles and they are the only place a reader learns that a class is
  * empty: a group with no rows renders no header at all.
  */
-export function buildMemoryOverlayItems(
+function buildMemoryOverlayItems(
 	status: TaskMemoryOperatorStatus,
 	records: ReadonlyArray<MemoryRecord>,
 ): ListOverlayItem[] {

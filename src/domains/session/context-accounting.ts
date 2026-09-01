@@ -370,7 +370,7 @@ export function lastLoadedContextWindow(meta: SessionMeta, providerId: string, m
 	return null;
 }
 
-export function buildSnapshotCategories(inputs: {
+function buildSnapshotCategories(inputs: {
 	systemPrompt?: string | undefined;
 	promptSegments?: ReadonlyArray<{ id: string; tokenEstimate: number }> | undefined;
 	tools?: ReadonlyArray<unknown> | undefined;

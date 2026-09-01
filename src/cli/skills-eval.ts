@@ -311,7 +311,7 @@ type EvalArm = "baseline" | "treatment" | "judge";
  *
  * @internal Exported for contract tests.
  */
-export function armRunArgs(
+function armRunArgs(
 	arm: EvalArm,
 	prompt: string,
 	options: { target?: string | undefined; skillBaseDir?: string | undefined } = {},
@@ -335,7 +335,7 @@ export function armRunArgs(
  *
  * @internal Exported for contract tests.
  */
-export function permissionWallReason(arm: EvalArm, run: CapturedRun): string | null {
+function permissionWallReason(arm: EvalArm, run: CapturedRun): string | null {
 	const haystack = `${run.transcript}\n${run.finalText}`;
 	let blocked = 0;
 	let at = haystack.indexOf(HEADLESS_PERMISSION_DENIED_MARKER);
@@ -360,7 +360,7 @@ function unmeasuredBullets(scenario: SkillEvalScenario, reason: string): ScoredB
  *
  * @internal Exported for contract tests.
  */
-export function evalChildEnv(allowNetwork: boolean, env: NodeJS.ProcessEnv = process.env): NodeJS.ProcessEnv {
+function evalChildEnv(allowNetwork: boolean, env: NodeJS.ProcessEnv = process.env): NodeJS.ProcessEnv {
 	const childEnv: NodeJS.ProcessEnv = { ...env };
 	if (allowNetwork) Reflect.deleteProperty(childEnv, NO_NETWORK_TOOLS_ENV);
 	else childEnv[NO_NETWORK_TOOLS_ENV] = "1";
@@ -378,7 +378,7 @@ export function evalChildEnv(allowNetwork: boolean, env: NodeJS.ProcessEnv = pro
  * the catalog answers only for a name no root installed, which is the skill
  * author's case in this repository.
  */
-export function resolveSkillBaseDir(
+function resolveSkillBaseDir(
 	nameOrPath: string,
 	cwd: string,
 ): { baseDir: string | null; origin?: string; error?: string } {
@@ -578,7 +578,7 @@ async function armWorkspace(created: string[]): Promise<string> {
 }
 
 /** @internal Exported for contract tests. */
-export async function materializeSkillEvalWorkspaces(seedWorkspace: string): Promise<MaterializedSkillEvalWorkspaces> {
+async function materializeSkillEvalWorkspaces(seedWorkspace: string): Promise<MaterializedSkillEvalWorkspaces> {
 	const created: string[] = [];
 	try {
 		const baseline = await armWorkspace(created);
@@ -814,7 +814,7 @@ function loadsSkillBody(tool: string, args: unknown): boolean {
 }
 
 /** @internal Exported for contract tests. */
-export function parseRunStdout(stdout: string): { sessionId: string | null; transcript: string; finalText: string } {
+function parseRunStdout(stdout: string): { sessionId: string | null; transcript: string; finalText: string } {
 	let sessionId: string | null = null;
 	const lines: string[] = [];
 	let finalText = "";
@@ -938,7 +938,7 @@ function judgeVerdictAbsenceReason(judge: CapturedRun): string {
 }
 
 /** Exported for contracts tests. */
-export function parseJudgeVerdicts(scenario: SkillEvalScenario, judge: CapturedRun): ScoredBullet[] {
+function parseJudgeVerdicts(scenario: SkillEvalScenario, judge: CapturedRun): ScoredBullet[] {
 	const parsed = extractBulletsObject(judge.finalText) ?? extractBulletsObject(judge.transcript);
 	// No verdict object anywhere in the judge run. The scenario was not scored,
 	// which is a fact about the judge, so every bullet stays unmeasured rather
@@ -982,7 +982,7 @@ export function parseJudgeVerdicts(scenario: SkillEvalScenario, judge: CapturedR
  * content, so this walks candidate `{` openers around the first "bullets" key
  * and balance-scans to the matching close brace.
  */
-export function extractBulletsObject(text: string): Record<string, unknown> | null {
+function extractBulletsObject(text: string): Record<string, unknown> | null {
 	const stripped = text.replace(/```(?:json)?/g, "");
 	const bulletsAt = stripped.indexOf('"bullets"');
 	if (bulletsAt < 0) return null;

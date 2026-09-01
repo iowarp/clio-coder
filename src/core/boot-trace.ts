@@ -16,7 +16,7 @@
 const BOOT_TRACE_ENV = "CLIO_CODER_TRACE_BOOT";
 
 /** True when boot tracing is enabled for this process. */
-export function isBootTraceEnabled(): boolean {
+function isBootTraceEnabled(): boolean {
 	return process.env[BOOT_TRACE_ENV] === "1";
 }
 

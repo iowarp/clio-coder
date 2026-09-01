@@ -51,14 +51,14 @@ export interface OpenFleetRunApprovalOverlayOptions {
 }
 
 /** The declared boundary as one phrase: an empty allowlist is a claim, not an absence. */
-export function formatWriteBoundary(writes: ReadonlyArray<string> | undefined): string {
+function formatWriteBoundary(writes: ReadonlyArray<string> | undefined): string {
 	if (writes === undefined) return "writes unenforced";
 	if (writes.length === 0) return "writes nothing";
 	return `writes ${writes.join(", ")}`;
 }
 
 /** One step as its facts: kind, who runs it, where, its scope, and its boundary. */
-export function formatFleetRunPreviewStep(step: FleetRunPreviewStep): string {
+function formatFleetRunPreviewStep(step: FleetRunPreviewStep): string {
 	const loop = step.loop === undefined ? "" : ` (${step.loop.loopId} ${step.loop.role} ${step.loop.attempt})`;
 	if (step.kind === "code") {
 		const gate = step.gate === undefined ? "" : ` · gate path ${step.gate.path}`;
@@ -95,7 +95,7 @@ function formatBudgetLine(preview: FleetRunPreview): string {
  * Render the body. Waves in order, each step with its facts, then the argv a
  * code step will actually run, and last the budget the run is admitted under.
  */
-export function formatFleetRunApprovalBody(subject: FleetRunApprovalSubject, width: number, scroll: number): string[] {
+function formatFleetRunApprovalBody(subject: FleetRunApprovalSubject, width: number, scroll: number): string[] {
 	const theme = clioTheme();
 	const contentWidth = Math.max(1, Math.floor(width));
 	const rows: string[] = [];

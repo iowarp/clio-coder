@@ -83,7 +83,7 @@ function loadReceipt(envelope: RunEnvelope): RunReceipt | null {
 }
 
 /** Pure payload builder, exported so the fixed contract is testable without subprocess capture. */
-export function fleetVerifySnapshot(runId: string, now: () => number = Date.now): FleetVerifySnapshot {
+function fleetVerifySnapshot(runId: string, now: () => number = Date.now): FleetVerifySnapshot {
 	const envelope = openLedger().get(runId);
 	if (envelope === null) throw new FleetVerifyUnknownRunError(`unknown run '${runId}'`);
 	const verifiedAt = new Date(now()).toISOString();

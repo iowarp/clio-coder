@@ -255,7 +255,7 @@ export function receiptFilePath(stateDir: string, runId: string): string {
 	return join(stateDir, "receipts", `${runId}.json`);
 }
 
-export function runLedgerPath(stateDir: string): string {
+function runLedgerPath(stateDir: string): string {
 	return join(stateDir, "runs.json");
 }
 
@@ -317,7 +317,7 @@ type ReadLedgerResult = { ok: true; envelope: RunEnvelope } | { ok: false; reaso
  * the same file and ledger row, projected through the shared boundary so the
  * receipt view spells its verdict exactly as the board and the CLI do.
  */
-export function receiptTrustDetail(stateDir: string, runId: string): string {
+function receiptTrustDetail(stateDir: string, runId: string): string {
 	try {
 		const receipt = JSON.parse(readFileSync(receiptFilePath(stateDir, runId), "utf8")) as RunReceipt;
 		const ledger = readRunEnvelope(stateDir, runId);
@@ -335,7 +335,7 @@ function readRunEnvelope(stateDir: string, runId: string): ReadLedgerResult {
 	return { ok: false, reason: runs.length === 0 ? "run ledger not found" : "run not found in ledger" };
 }
 
-export function verifyReceiptFile(stateDir: string, runId: string): ReceiptVerifyResult {
+function verifyReceiptFile(stateDir: string, runId: string): ReceiptVerifyResult {
 	const target = receiptFilePath(stateDir, runId);
 	let raw: string;
 	try {
@@ -586,7 +586,7 @@ function splitLinesCapped(text: string, path?: string, maxLines = VIEW_ARTIFACT_
 	return [...lines.slice(0, maxLines), `[truncated, open file directly${path ? `: ${path}` : ""}]`];
 }
 
-export async function loadJsonFileLines(path: string): Promise<ViewArtifactLoadResult> {
+async function loadJsonFileLines(path: string): Promise<ViewArtifactLoadResult> {
 	let canPrettyPrint = false;
 	try {
 		const info = await stat(path);
@@ -1569,7 +1569,7 @@ export function createDefaultArtifactProviders(deps: ArtifactProviderDeps): Arti
 	];
 }
 
-export function sortViewArtifacts(artifacts: ReadonlyArray<ViewArtifact>): ViewArtifact[] {
+function sortViewArtifacts(artifacts: ReadonlyArray<ViewArtifact>): ViewArtifact[] {
 	return [...artifacts].sort((a, b) => {
 		const time = b.timestamp - a.timestamp;
 		if (time !== 0) return time;

@@ -39,7 +39,7 @@ export interface AutoPacingEnvironment {
  * accessibility markers always bypass pacing. Remote/multiplexed and already
  * saturated outputs keep the proven coalescer behavior.
  */
-export function autoPacingAllowed(environment: AutoPacingEnvironment): boolean {
+function autoPacingAllowed(environment: AutoPacingEnvironment): boolean {
 	if (!environment.isTTY || environment.backpressureObserved) return false;
 	const term = environment.term?.trim().toLowerCase();
 	if (!term || term === "dumb" || term === "unknown") return false;

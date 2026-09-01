@@ -63,7 +63,7 @@ export function antigravitySubprocessConfigForAutonomy(
 	return { extraArgs: [], dangerousBypass: false, externalMode: "agy-settings-default" };
 }
 
-export function buildAntigravityPrompt(input: WorkerRunInput): string {
+function buildAntigravityPrompt(input: WorkerRunInput): string {
 	const parts: string[] = [];
 	const systemPrompt = input.systemPrompt.trim();
 	if (systemPrompt.length > 0) parts.push(systemPrompt);
@@ -75,7 +75,7 @@ export function buildAntigravityPrompt(input: WorkerRunInput): string {
 	return parts.join("\n\n");
 }
 
-export function buildAgyArgs(input: WorkerRunInput): string[] {
+function buildAgyArgs(input: WorkerRunInput): string[] {
 	assertToolProfileEnforceable(input.toolProfile, "antigravity-code");
 	const permission = antigravitySubprocessConfigForAutonomy(input.autonomy);
 	const args = ["--print", ...permission.extraArgs];

@@ -47,7 +47,7 @@ export type { GateDecisionReason, GateTopologyDecision };
  * different operator states, so the flag is reported rather than inferred from
  * an empty list.
  */
-export function fleetDecisionsSnapshot(now: () => number = Date.now): FleetDecisionsSnapshot {
+function fleetDecisionsSnapshot(now: () => number = Date.now): FleetDecisionsSnapshot {
 	const topology = gateTopology();
 	return {
 		version: 1,

@@ -62,7 +62,7 @@ function confirmOverlayWidth(columns: number): number {
 }
 
 /** Render the plan: what is being installed, alongside what, and to where. */
-export function formatLibraryInstallConfirmBody(subject: LibraryInstallConfirmSubject, width: number): string[] {
+function formatLibraryInstallConfirmBody(subject: LibraryInstallConfirmSubject, width: number): string[] {
 	const theme = clioTheme();
 	const contentWidth = Math.max(1, Math.floor(width));
 	const rows: string[] = [];

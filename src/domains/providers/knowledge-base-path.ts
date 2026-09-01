@@ -72,7 +72,7 @@ function envOverlayDirs(): string[] {
 		.filter((entry) => entry.length > 0);
 }
 
-export function resolveProviderModelCatalogDirs(
+function resolveProviderModelCatalogDirs(
 	importMetaUrl: string,
 	options: { cwd?: string } = {},
 ): ProviderModelCatalogDirs {

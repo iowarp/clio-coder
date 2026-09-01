@@ -14,7 +14,7 @@ import { join } from "node:path";
 import { safeResourceWrite } from "./safe-resource-write.js";
 import { clioStateDir, stateRootRemoved } from "./xdg.js";
 
-export function recentModelsPath(): string {
+function recentModelsPath(): string {
 	return join(clioStateDir(), "recent-models.json");
 }
 
@@ -82,10 +82,4 @@ export function rememberRecentModel(ref: string, limit: number): string[] {
 		// Best-effort, as above.
 	}
 	return next;
-}
-
-/** Test hook: clear the in-process cache after CLIO_* dir overrides change. */
-export function resetRecentModelsCache(): void {
-	cache = null;
-	cachePath = null;
 }

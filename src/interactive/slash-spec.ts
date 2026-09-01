@@ -559,49 +559,6 @@ export function completeArgs(
 
 export type CompletionAcceptance = "accept" | "accept-remainder" | "submit" | "close" | "none" | "disabled";
 
-/** Keyboard contract kept pure so editor adapters can share it. */
-export function completionAcceptance(input: {
-	key: "tab" | "right" | "enter" | "escape";
-	selectionMoved: boolean;
-	syntacticallyComplete: boolean;
-	disabled?: boolean;
-}): CompletionAcceptance {
-	if (input.key === "escape") return "close";
-	if (input.disabled) return "disabled";
-	if (input.key === "tab") return "accept";
-	if (input.key === "right") return "accept-remainder";
-	if (input.selectionMoved) return "accept";
-	return input.syntacticallyComplete ? "submit" : "none";
-}
-
-/** Apply either a whole-token acceptance or only its untyped remainder. */
-export function replaceCompletionToken(input: {
-	line: string;
-	range: { start: number; end: number };
-	cursor: number;
-	value: string;
-	mode?: "token" | "remainder";
-	appendSpace?: boolean;
-}): { line: string; cursor: number } {
-	const start = Math.max(0, Math.min(input.range.start, input.line.length));
-	const end = Math.max(start, Math.min(input.range.end, input.line.length));
-	if (input.mode === "remainder") {
-		const cursor = Math.max(start, Math.min(input.cursor, end));
-		const typed = input.line.slice(start, cursor);
-		if (!input.value.toLowerCase().startsWith(typed.toLowerCase())) return { line: input.line, cursor: input.cursor };
-		const remainder = input.value.slice(typed.length);
-		return {
-			line: `${input.line.slice(0, cursor)}${remainder}${input.line.slice(end)}`,
-			cursor: cursor + remainder.length,
-		};
-	}
-	const inserted = `${input.value}${input.appendSpace ? " " : ""}`;
-	return {
-		line: `${input.line.slice(0, start)}${inserted}${input.line.slice(end)}`,
-		cursor: start + inserted.length,
-	};
-}
-
 export function matchFromSpec(
 	entry: {
 		name: string;

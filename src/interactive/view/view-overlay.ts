@@ -141,7 +141,7 @@ function isViewArtifactCategory(value: string): value is ViewArtifactCategory {
 	return VIEW_ARTIFACT_CATEGORY_SET.has(value as ViewArtifactCategory);
 }
 
-export function parseViewFilterQuery(query: string): ViewFilterQuery {
+function parseViewFilterQuery(query: string): ViewFilterQuery {
 	const text = query.trim();
 	if (text.length === 0) return { kind: "text", text };
 	const colon = text.indexOf(":");
@@ -215,7 +215,7 @@ function formatLocalTime(timestamp: number): string {
 	return !Number.isFinite(timestamp) || timestamp <= 0 ? "unknown time" : clockLocal(timestamp);
 }
 
-export function filterViewArtifacts(artifacts: ReadonlyArray<ViewArtifact>, query: string): ViewArtifact[] {
+function filterViewArtifacts(artifacts: ReadonlyArray<ViewArtifact>, query: string): ViewArtifact[] {
 	const parsed = parseViewFilterQuery(query);
 	if (parsed.kind === "category") {
 		const categoryArtifacts = artifacts.filter((artifact) => artifact.category === parsed.category);
@@ -226,11 +226,11 @@ export function filterViewArtifacts(artifacts: ReadonlyArray<ViewArtifact>, quer
 	return fuzzyFilter([...artifacts], parsed.text, broadFilterText);
 }
 
-export function artifactsInCategoryOrder(artifacts: ReadonlyArray<ViewArtifact>): ViewArtifact[] {
+function artifactsInCategoryOrder(artifacts: ReadonlyArray<ViewArtifact>): ViewArtifact[] {
 	return VIEW_ARTIFACT_CATEGORIES.flatMap((category) => artifacts.filter((artifact) => artifact.category === category));
 }
 
-export function initialViewSelection(artifacts: ReadonlyArray<ViewArtifact>, initialFilter = ""): number {
+function initialViewSelection(artifacts: ReadonlyArray<ViewArtifact>, initialFilter = ""): number {
 	const filtered = filterViewArtifacts(artifacts, initialFilter);
 	const first = filtered[0];
 	if (!first) return 0;
@@ -252,7 +252,7 @@ export function initialViewSelection(artifacts: ReadonlyArray<ViewArtifact>, ini
 	return Math.max(0, artifactsInCategoryOrder(filtered).indexOf(selected));
 }
 
-export function nextCategorySelection(
+function nextCategorySelection(
 	artifacts: ReadonlyArray<ViewArtifact>,
 	currentIndex: number,
 	direction: -1 | 1,
@@ -271,7 +271,7 @@ export function nextCategorySelection(
 	return safeCurrent;
 }
 
-export function groupedViewRows(artifacts: ReadonlyArray<ViewArtifact>): RenderedViewRow[] {
+function groupedViewRows(artifacts: ReadonlyArray<ViewArtifact>): RenderedViewRow[] {
 	const rows: RenderedViewRow[] = [];
 	for (const category of VIEW_ARTIFACT_CATEGORIES) {
 		const items = artifacts.filter((artifact) => artifact.category === category);
@@ -334,7 +334,7 @@ function verificationText(state: ViewVerificationState | undefined): string {
 	return `${GLYPH.error} verify fail ${state.detail}`;
 }
 
-export function buildArtifactHeader(
+function buildArtifactHeader(
 	artifact: ViewArtifact | undefined,
 	verification: ViewVerificationState | undefined,
 	width: number,
@@ -361,7 +361,7 @@ export function buildArtifactHeader(
 }
 
 /** Put verification on wrapped rows so a canonical receipt verdict is never reduced to a prefix. */
-export function buildArtifactHeaderLines(
+function buildArtifactHeaderLines(
 	artifact: ViewArtifact | undefined,
 	verification: ViewVerificationState | undefined,
 	width: number,
@@ -384,7 +384,7 @@ export function buildArtifactHeaderLines(
 	];
 }
 
-export function viewFooterHint(focus: ViewPaneFocus, canVerify: boolean, innerWidth?: number): string {
+function viewFooterHint(focus: ViewPaneFocus, canVerify: boolean, innerWidth?: number): string {
 	// One pane at a time means Tab is how the other one is reached, so the
 	// narrow footer states it. The generic elider drops middle entries, and Tab
 	// sits in the middle.

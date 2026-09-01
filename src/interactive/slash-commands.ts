@@ -755,7 +755,7 @@ export interface SlashCommandContext {
 type SlashReceiptVerification = ReturnType<SlashCommandContext["verifyReceipt"]>;
 
 /** Compact multiline receipt verification for the composer notice surface. */
-export function formatReceiptVerificationBlock(runId: string, result: SlashReceiptVerification): string {
+function formatReceiptVerificationBlock(runId: string, result: SlashReceiptVerification): string {
 	const status = result.ok ? (result.compromised ? "compromised" : "ok") : result.retired ? "retired" : "fail";
 	const lines = [
 		`verify ${status} ${runId}`,
@@ -841,7 +841,7 @@ function usageNotice(entry: BuiltinSlashCommand, subcommand?: string): string {
  * an operator reads rather than the object behind it, and so the registry keeps
  * its promise not to reach a renderer.
  */
-export function formatPanesStatus(status: PanesStatus): ReadonlyArray<string> {
+function formatPanesStatus(status: PanesStatus): ReadonlyArray<string> {
 	const server = status.server ? `pane host ${status.server.version}, protocol ${status.server.protocol}` : "no server";
 	const lines = [
 		`panes: mode=${status.mode} ${status.available ? "available" : "unavailable"} (${server})`,

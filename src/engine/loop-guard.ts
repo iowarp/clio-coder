@@ -352,11 +352,6 @@ export function isLoopGuardSynthesisBackstopReason(reason: string): boolean {
 	return /^loop guard: tool calls stayed disabled and .+ was called again instead of answering/.test(reason);
 }
 
-/** Worker lifetime tool-call cap: env > settings guardrails > default. */
-export function readWorkerToolCallCap(env: NodeJS.ProcessEnv = process.env): number {
-	return resolveGuardrail("workerToolCallCap", env);
-}
-
 /** Soft/hard per-turn tool-call budget for the interactive orchestrator. */
 export interface OrchTurnToolCallBudget {
 	/** Distinct calls in a turn that trigger the re-plan nudge. */

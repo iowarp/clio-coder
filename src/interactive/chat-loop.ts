@@ -527,7 +527,7 @@ export interface CreateChatLoopDeps {
 	registerPrewarmEndpointSlot?: (runtime: AgentRuntime) => (() => void) | null;
 }
 
-export function reloadProtectedArtifactsForSession(
+function reloadProtectedArtifactsForSession(
 	protectedArtifacts: NonNullable<CreateChatLoopDeps["protectedArtifacts"]>,
 	readSessionEntries: (() => ReadonlyArray<SessionEntry>) | undefined,
 ): void {

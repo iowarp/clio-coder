@@ -679,7 +679,7 @@ function hasReportedReasoningUsage(usage: Usage): boolean {
  * upstream already reported reasoning usage, because ACP consumers accept all
  * three field spellings for cross-agent compatibility.
  */
-export function applyOpenAICompatReasoningEstimate(message: AssistantMessage): void {
+function applyOpenAICompatReasoningEstimate(message: AssistantMessage): void {
 	if (hasReportedReasoningUsage(message.usage)) return;
 	const estimated = estimateReasoningTokens(message.content);
 	const reportedOutput = message.usage.output;

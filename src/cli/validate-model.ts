@@ -39,7 +39,7 @@ function describeLiveTarget(live: LiveModelInventory): string {
 }
 
 /** The refusal `configure` prints for a model the live target does not advertise. */
-export function formatUnadvertisedModelReason(modelId: string, live: LiveModelInventory): string {
+function formatUnadvertisedModelReason(modelId: string, live: LiveModelInventory): string {
 	const resident = live.resident.length > 0 ? live.resident.join(", ") : "none";
 	return (
 		`${describeLiveTarget(live)} does not advertise model '${modelId}'. ` +

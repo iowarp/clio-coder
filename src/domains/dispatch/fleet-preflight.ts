@@ -18,7 +18,6 @@ import { performance } from "node:perf_hooks";
 import { readClioVersion } from "../../core/package-root.js";
 import { shellQuote } from "../../core/shell-quote.js";
 import { clioStateDir } from "../../core/xdg.js";
-import { atomicWrite } from "../../engine/session.js";
 import {
 	evaluateRouteFacts,
 	type FactState,
@@ -90,16 +89,6 @@ export function readFleetPreflightRecords(): FleetPreflightRecord[] {
 	} catch {
 		return [];
 	}
-}
-
-/** Upsert records keyed by (nodeId, projectRoot). */
-export function recordFleetPreflight(records: ReadonlyArray<FleetPreflightRecord>): void {
-	const existing = readFleetPreflightRecords();
-	const merged = new Map<string, FleetPreflightRecord>();
-	for (const record of existing) merged.set(`${record.nodeId}\0${record.projectRoot}`, record);
-	for (const record of records) merged.set(`${record.nodeId}\0${record.projectRoot}`, record);
-	const file: FleetPreflightStoreFile = { version: 2, records: [...merged.values()] };
-	atomicWrite(storePath(), JSON.stringify(file, null, 2));
 }
 
 export interface FleetPreflightVerdict {

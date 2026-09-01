@@ -78,7 +78,7 @@ export type CouncilLayout = { mode: "grid"; columnWidth: number } | { mode: "sta
  * moment one column would fall under {@link COUNCIL_COLUMN_MIN_WIDTH}: a grid
  * where only some columns are readable is worse than no grid at all.
  */
-export function councilGridLayout(memberCount: number, contentWidth: number): CouncilLayout {
+function councilGridLayout(memberCount: number, contentWidth: number): CouncilLayout {
 	const count = Math.max(1, memberCount);
 	const usable = contentWidth - COUNCIL_COLUMN_GUTTER * (count - 1);
 	const columnWidth = Math.floor(usable / count);
@@ -124,7 +124,7 @@ function answerRows(theme: ClioTheme, member: CouncilMemberView, width: number, 
  * answer. Every line is clipped to the column so a long model id or a long
  * answer line can never push a neighbouring column out of position.
  */
-export function councilMemberLines(
+function councilMemberLines(
 	theme: ClioTheme,
 	member: CouncilMemberView,
 	width: number,

@@ -204,7 +204,7 @@ function evidenceProjection(text: string): FleetInspectRun["evidence"] {
 }
 
 /** Pure command payload builder, exported so the fixed CLI contract is testable without subprocess output capture. */
-export function fleetInspectSnapshot(now: () => number = Date.now): FleetInspectSnapshot {
+function fleetInspectSnapshot(now: () => number = Date.now): FleetInspectSnapshot {
 	const ledgerRows = openLedger().list();
 	const selected = ledgerRows.slice(0, FLEET_INSPECT_MAX_RUNS);
 	// The council window is deliberately wider than the run window. A single

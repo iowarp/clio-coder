@@ -136,7 +136,7 @@ function parseEnvFlag(raw: string | undefined): boolean | undefined {
 }
 
 /** env override > configured settings > on. */
-export function runEventJournalEnabled(env: NodeJS.ProcessEnv = process.env): boolean {
+function runEventJournalEnabled(env: NodeJS.ProcessEnv = process.env): boolean {
 	return parseEnvFlag(env[RUN_EVENT_JOURNAL_ENV_VAR]) ?? configuredEnabled ?? true;
 }
 
@@ -150,7 +150,7 @@ export function runEventJournalRoot(): string {
 }
 
 /** One run's journal directory. */
-export function runEventJournalDir(runId: string, root?: string): string {
+function runEventJournalDir(runId: string, root?: string): string {
 	return join(root ?? runEventJournalRoot(), runId);
 }
 
@@ -247,7 +247,7 @@ export interface CreateRunEventJournalOptions {
 	isEnabled?: () => boolean;
 }
 
-export function createRunEventJournal(options: CreateRunEventJournalOptions = {}): RunEventJournal {
+function createRunEventJournal(options: CreateRunEventJournalOptions = {}): RunEventJournal {
 	const capBytes = options.capBytes ?? RUN_EVENT_JOURNAL_CAP_BYTES;
 	const flushBytes = options.flushBytes ?? RUN_EVENT_JOURNAL_FLUSH_BYTES;
 	const warn = options.warn ?? ((message: string) => process.stderr.write(`[clio:journal] ${message}\n`));

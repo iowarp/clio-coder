@@ -159,7 +159,7 @@ function userToOllama(content: string | (TextContent | ImageContent)[]): OllamaM
 	return out;
 }
 
-export function assistantToOllama(content: AssistantMessage["content"]): OllamaMessage {
+function assistantToOllama(content: AssistantMessage["content"]): OllamaMessage {
 	const textParts: string[] = [];
 	const toolCalls: OllamaToolCall[] = [];
 	const thinkingParts: string[] = [];
@@ -270,7 +270,7 @@ function ollamaEvictClient(baseUrl: string, headers?: Record<string, string>): O
  * Map an Ollama `/api/ps` response to the runtime-agnostic resident shape,
  * preserving the GPU/total footprint when the server reports it.
  */
-export async function listResidentOllamaModels(client: OllamaEvictClient): Promise<ResidentModelInfo[]> {
+async function listResidentOllamaModels(client: OllamaEvictClient): Promise<ResidentModelInfo[]> {
 	const resident = await client.ps();
 	return resident.models.map((entry) => {
 		const primary = entry.model || entry.name;

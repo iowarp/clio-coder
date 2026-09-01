@@ -35,13 +35,13 @@ const KNOWN_MODELS: string[] = [
 
 type AlcfCluster = string;
 
-export function clusterFromUrl(url: string | undefined): AlcfCluster | null {
+function clusterFromUrl(url: string | undefined): AlcfCluster | null {
 	if (!url) return null;
 	const match = /\/resource_server\/([^/]+)\//.exec(url);
 	return match ? (match[1] ?? null) : null;
 }
 
-export function frameworkForCluster(cluster: AlcfCluster): string {
+function frameworkForCluster(cluster: AlcfCluster): string {
 	return cluster === "metis" ? "api" : "vllm";
 }
 
@@ -59,7 +59,7 @@ export function catalogModels(payload: CatalogPayload, cluster: string, framewor
 	return models.map((model) => String(model).trim()).filter((model) => model.length > 0);
 }
 
-export function runningModels(payload: JobsPayload): string[] {
+function runningModels(payload: JobsPayload): string[] {
 	const out: string[] = [];
 	for (const job of payload.running ?? []) {
 		for (const raw of String(job.Models ?? "").split(",")) {

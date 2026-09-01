@@ -675,7 +675,7 @@ function admissionStatus(drain: CapacityDrain | null): FleetAdmissionStatus {
 	return { state: "draining", ...drain };
 }
 
-export function statusSnapshot(): {
+function statusSnapshot(): {
 	generatedAt: string;
 	admission: FleetAdmissionStatus;
 	running: Array<Record<string, unknown>>;

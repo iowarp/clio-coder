@@ -190,7 +190,7 @@ interface WikiDispatchOutcome {
  * throws: a failed page must not take down the pages around it, and whatever
  * the run wrote before it stopped is already on disk.
  */
-export async function runWikiDispatch(input: {
+async function runWikiDispatch(input: {
 	dispatch: DispatchContract;
 	cwd: string;
 	outputDir: string;
@@ -371,7 +371,7 @@ async function runPagePhase(
 	return next;
 }
 
-export async function generateWikiWithDocumenter(
+async function generateWikiWithDocumenter(
 	dispatch: DispatchContract,
 	input: WikiGenerateInput,
 	route: WikiModelRoute = {},

@@ -311,7 +311,7 @@ function advanceThinkingLevel(current: ThinkingLevel, available: ReadonlyArray<T
  */
 const LOCAL_API_KEY_FALLBACK = "clio-local-target";
 
-export async function resolveApiKeyForTarget(
+async function resolveApiKeyForTarget(
 	target: TargetDescriptor,
 	providers: ProvidersContract,
 	signal?: AbortSignal,
@@ -495,7 +495,7 @@ function backgroundSharesReasoningModelWithOrchestrator(
 	}
 }
 
-export function synthesizeOrchestratorModel(
+function synthesizeOrchestratorModel(
 	providers: ProvidersContract,
 	target: TargetDescriptor,
 	wireModelId: string,
@@ -609,7 +609,7 @@ function appendProtectedArtifactRegistryEvent(
  * subprocess, which makes this the only recording path there is. Returns how
  * many were folded.
  */
-export function foldDispatchSkillActivations(
+function foldDispatchSkillActivations(
 	session: SessionContract | undefined,
 	payload: { runId?: unknown; skillActivations?: ReadonlyArray<unknown> } | undefined,
 ): number {
@@ -706,7 +706,7 @@ async function runCompactionFlow(
  * a thrown read/model/persistence failure from the legitimate null no-op that
  * `runCompactionFlow` returns for an empty session or an unavailable cut.
  */
-export function createProductionAutoCompact(
+function createProductionAutoCompact(
 	session: SessionContract,
 	getSettings: () => ClioSettings,
 	providers: ProvidersContract,
@@ -753,7 +753,7 @@ function estimateTokensAfterCompaction(entries: ReadonlyArray<SessionEntry>, res
  * ids or target/model refs. Absent scope is a no-op so unconfigured users
  * feel nothing.
  */
-export function advanceScopedTarget(
+function advanceScopedTarget(
 	settings: Readonly<ClioSettings>,
 	direction: "forward" | "backward",
 ): { target: string; model: string | null } | null {

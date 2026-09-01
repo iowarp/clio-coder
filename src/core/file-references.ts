@@ -125,42 +125,6 @@ function detectSupportedImageMimeType(bytes: Buffer): string | null {
 	return null;
 }
 
-function readFileReference(fileArg: string, options: FileReferenceOptions): FileReferenceResult {
-	const filePath = expandConfigPath(fileArg, options.cwd === undefined ? undefined : { cwd: options.cwd });
-	if (!existsSync(filePath)) {
-		if (options.missing === "leave") return result(`@${fileArg}`);
-		return result("", [{ type: "error", message: `file not found: ${filePath}`, path: filePath }]);
-	}
-	let stat: ReturnType<typeof statSync>;
-	try {
-		stat = statSync(filePath);
-	} catch (err) {
-		const reason = err instanceof Error ? err.message : String(err);
-		return result("", [{ type: "error", message: `file could not be stat'ed: ${reason}`, path: filePath }]);
-	}
-	if (!stat.isFile()) {
-		return result("", [{ type: "error", message: `not a file: ${filePath}`, path: filePath }]);
-	}
-	if (stat.size === 0) return result("", [], [], [filePath]);
-	try {
-		const bytes = readFileSync(filePath);
-		const imageMimeType = detectSupportedImageMimeType(bytes);
-		if (imageMimeType) {
-			if (options.includeImages !== true) return result(`@${fileArg}`);
-			return result(
-				renderImageFile(filePath),
-				[],
-				[{ type: "image", mimeType: imageMimeType, data: bytes.toString("base64") }],
-				[filePath],
-			);
-		}
-		return result(renderTextFile(filePath, bytes.toString("utf8")), [], [], [filePath]);
-	} catch (err) {
-		const reason = err instanceof Error ? err.message : String(err);
-		return result("", [{ type: "error", message: `file could not be read: ${reason}`, path: filePath }]);
-	}
-}
-
 async function readFileReferenceAsync(fileArg: string, options: FileReferenceOptions): Promise<FileReferenceResult> {
 	const filePath = expandConfigPath(fileArg, options.cwd === undefined ? undefined : { cwd: options.cwd });
 	if (!existsSync(filePath)) {
@@ -250,56 +214,6 @@ function splitTrailingPunctuation(token: string): { fileArg: string; suffix: str
 	const ext = path.extname(candidate);
 	if (ext.length === 0 && suffix.startsWith(".")) return { fileArg: token, suffix: "" };
 	return { fileArg: candidate, suffix };
-}
-
-export function expandInlineFileReferences(input: string, options: FileReferenceOptions = {}): FileReferenceResult {
-	const diagnostics: FileReferenceDiagnostic[] = [];
-	const images: ImageContent[] = [];
-	const referencedPaths: string[] = [];
-	let text = "";
-	let lastIndex = 0;
-	for (const reference of inlineFileReferences(input)) {
-		text += input.slice(lastIndex, reference.start);
-		const direct = readFileReference(reference.fileArg, {
-			...options,
-			missing: "leave",
-			includeImages: options.includeImages === true,
-		});
-		if (direct.text !== `@${reference.fileArg}`) {
-			diagnostics.push(...direct.diagnostics);
-			images.push(...direct.images);
-			referencedPaths.push(...direct.referencedPaths);
-			text += direct.text;
-			lastIndex = reference.end;
-			continue;
-		}
-
-		const { fileArg, suffix } = reference.quoted
-			? { fileArg: reference.fileArg, suffix: "" }
-			: splitTrailingPunctuation(reference.fileArg);
-		if (fileArg === reference.fileArg) {
-			text += reference.raw;
-			lastIndex = reference.end;
-			continue;
-		}
-		const stripped = readFileReference(fileArg, {
-			...options,
-			missing: "leave",
-			includeImages: options.includeImages === true,
-		});
-		if (stripped.text === `@${fileArg}`) {
-			text += reference.raw;
-			lastIndex = reference.end;
-			continue;
-		}
-		diagnostics.push(...stripped.diagnostics);
-		images.push(...stripped.images);
-		referencedPaths.push(...stripped.referencedPaths);
-		text += `${stripped.text}${suffix}`;
-		lastIndex = reference.end;
-	}
-	text += input.slice(lastIndex);
-	return { text, images, diagnostics, referencedPaths };
 }
 
 export async function expandInlineFileReferencesAsync(

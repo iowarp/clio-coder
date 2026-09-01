@@ -169,7 +169,7 @@ function reasoningOptions(capabilities: unknown): string[] | undefined {
 	return options.length > 0 ? options : undefined;
 }
 
-export function parseLmStudioV1Models(data: unknown): LmStudioModelInfo[] | null {
+function parseLmStudioV1Models(data: unknown): LmStudioModelInfo[] | null {
 	if (!isRecord(data) || !Array.isArray(data.models)) return null;
 	const models: LmStudioModelInfo[] = [];
 	for (const raw of data.models) {
@@ -283,10 +283,6 @@ export function resolveLmStudioInstance(
 		};
 	}
 	return { requestedId, wireModelId: requestedId, peerTargets: [], state: "unknown" };
-}
-
-export function resetLmStudioHostCatalogs(): void {
-	catalogsByHost.clear();
 }
 
 export function lmStudioReasoningLevels(options: ReadonlyArray<string> | undefined): ThinkingLevel[] {

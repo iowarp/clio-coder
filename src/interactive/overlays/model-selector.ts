@@ -361,10 +361,7 @@ function buildSummary(rows: ReadonlyArray<ModelRow>, targets: number, activeRef:
  * `settings.chat.modelPicker.cycleSet`: both plain `targetId` and `targetId/wireModelId` refs
  * match so a user can pin either granularity.
  */
-export function buildModelItems(deps: {
-	settings: Readonly<ClioSettings>;
-	providers: ProvidersContract;
-}): ModelItemsResult {
+function buildModelItems(deps: { settings: Readonly<ClioSettings>; providers: ProvidersContract }): ModelItemsResult {
 	const activeTarget = deps.settings.chat?.target?.trim() ?? "";
 	const activeModel = deps.settings.chat?.model?.trim() ?? "";
 	const activeRef = activeTarget && activeModel ? `${activeTarget}/${activeModel}` : activeTarget;

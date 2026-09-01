@@ -92,20 +92,6 @@ export {
 	type SlashCommandKind,
 } from "./slash-commands.js";
 
-export function shouldAnnouncePermissionRequest(
-	seenRequestIds: Set<string>,
-	requestId: string,
-	maxSize = 2048,
-): boolean {
-	if (seenRequestIds.has(requestId)) return false;
-	seenRequestIds.add(requestId);
-	if (seenRequestIds.size > maxSize) {
-		const oldest = seenRequestIds.values().next().value;
-		if (oldest !== undefined) seenRequestIds.delete(oldest);
-	}
-	return true;
-}
-
 export function isLiveWorkerEscalationRequest(payload: PermissionRequestedPayload): boolean {
 	if (typeof payload.requestId !== "string") return false;
 	if (payload.escalation !== true) return false;
@@ -283,7 +269,7 @@ export interface InteractiveSubmitExpansion {
 	pendingSkillRequests: PendingSkillRequest[];
 }
 
-export async function expandInteractiveSubmitAsync(
+async function expandInteractiveSubmitAsync(
 	text: string,
 	resources: ResourcesContract | undefined,
 	cwd = process.cwd(),
@@ -366,7 +352,7 @@ export function resolveCtrlCAction(deps: CtrlCActionDeps): CtrlCAction {
 	return "arm-shutdown";
 }
 
-export function dispatchInteractiveAction(id: ClioKeybinding, deps: KeyBindingDeps): boolean {
+function dispatchInteractiveAction(id: ClioKeybinding, deps: KeyBindingDeps): boolean {
 	switch (id) {
 		case "clio.notifications.dismiss":
 			deps.dismissNotifications();

@@ -324,7 +324,7 @@ function isCanonicalDirectoryAt(path: string): boolean {
  * `relative()` makes the decision by path segment, so `/group-a2` can never
  * be mistaken for a child of `/group-a` as it can with textual startsWith.
  */
-export function isCanonicalPathInside(parent: string, candidate: string): boolean {
+function isCanonicalPathInside(parent: string, candidate: string): boolean {
 	return isCanonicalWorktreePathInside(parent, candidate);
 }
 
@@ -549,11 +549,7 @@ export function markCompeteGroupWinnerPreserved(
  * baseline is a parameter rather than HEAD so every candidate in a compete
  * transaction starts from the same approved state.
  */
-export function createCandidateWorktree(
-	ownership: CompeteGroupOwnership,
-	index: number,
-	baseline: string,
-): CandidateWorktree {
+function createCandidateWorktree(ownership: CompeteGroupOwnership, index: number, baseline: string): CandidateWorktree {
 	assertOwnership(ownership);
 	const branch = competeBranch(ownership.group, index);
 	const path = join(ownership.directory, `candidate-${index}`);

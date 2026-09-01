@@ -100,7 +100,7 @@ function fallbackPreview(node: TreeSnapshotNode): string {
  * of turns and the discarded branch had no route back. Returns null for a
  * session that was not forked.
  */
-export function forkParentLine(snapshot: TreeSnapshot, theme: ClioTheme): string | null {
+function forkParentLine(snapshot: TreeSnapshot, theme: ClioTheme): string | null {
 	const parentSessionId = snapshot.meta.parentSessionId;
 	if (typeof parentSessionId !== "string" || parentSessionId.length === 0) return null;
 	const parentTurnId = snapshot.meta.parentTurnId;
@@ -155,7 +155,7 @@ function flattenTreeSnapshot(snapshot: TreeSnapshot): TreeRow[] {
 const ROW_PREVIEW_BUDGET = 55;
 
 /** @internal */
-export function formatTreeRow(row: TreeRow, opts: { showTimestamps: boolean; width: number }): string {
+function formatTreeRow(row: TreeRow, opts: { showTimestamps: boolean; width: number }): string {
 	const theme = clioTheme();
 	const indent = "  ".repeat(row.depth);
 	// The active tip is where the next message lands; it gets its own glyph so

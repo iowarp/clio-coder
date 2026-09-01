@@ -37,7 +37,7 @@ export interface OpenSideQuestionOverlayOptions {
 const SIDE_QUESTION_OVERLAY_MIN_WIDTH = 44;
 const SIDE_QUESTION_OVERLAY_MAX_WIDTH = 100;
 
-export function sideQuestionOverlayWidth(columns: number): number {
+function sideQuestionOverlayWidth(columns: number): number {
 	return Math.max(SIDE_QUESTION_OVERLAY_MIN_WIDTH, Math.min(SIDE_QUESTION_OVERLAY_MAX_WIDTH, columns - 4));
 }
 
@@ -46,7 +46,7 @@ export function sideQuestionOverlayWidth(columns: number): number {
  * the question in dim above a rule, then the answer, then one status line that
  * says whether the round is still running, cancelled, or failed.
  */
-export function formatSideQuestionBody(
+function formatSideQuestionBody(
 	question: string,
 	phase: SideQuestionOverlayPhase,
 	width: number,

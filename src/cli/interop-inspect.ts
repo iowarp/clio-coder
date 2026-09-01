@@ -79,7 +79,7 @@ export interface InteropInspectSnapshot {
  * have already loaded, and this command loads neither. Reporting the structural
  * zero that would result would state a fact this read did not establish.
  */
-export async function interopInspectSnapshot(now: () => number = Date.now): Promise<InteropInspectSnapshot> {
+async function interopInspectSnapshot(now: () => number = Date.now): Promise<InteropInspectSnapshot> {
 	const report = await detectInteropAgents({ cwd: process.cwd(), probeVersion: false });
 	const settings = readSettings();
 	const configured = new Set(settings.integrations.externalAgents.entries.map((agent) => agent.id));

@@ -1,5 +1,4 @@
 import type { OutputVerbosity } from "../../core/defaults.js";
-import { responseModelIdObservationLabel } from "../../core/response-model-id.js";
 import { ToolNames } from "../../core/tool-names.js";
 import {
 	type CostAggregate,
@@ -28,7 +27,6 @@ import {
 	type TurnSummary,
 } from "../status/index.js";
 import {
-	abbreviateModelId,
 	type ClioTheme,
 	type ClioToken,
 	clioTheme,
@@ -701,46 +699,6 @@ function stopReasonStyle(reason: TurnSummary["stopReason"]): { glyph: string; to
 }
 
 /**
- * Elegant single-line readout of the most recent completed turn. This is the
- * footer home for the metrics that used to print faintly under each assistant
- * reply: stop outcome, wall time, token in/out, reasoning, and tool work. The
- * model is intentionally omitted because the editor rail already carries it.
- */
-export function formatLastTurn(theme: ClioTheme, summary: TurnSummary): string {
-	const stop = stopReasonStyle(summary.stopReason);
-	const parts: string[] = [
-		theme.fg(stop.token, `${stop.glyph} ${formatCompactMs(summary.elapsedMs)}`),
-		theme.fg("muted", `${GLYPH.up}${summary.inputTokens} ${GLYPH.down}${summary.outputTokens}`),
-	];
-	// Zero suppresses the chip, the same rule the chat panel's turn line follows:
-	// a turn that spent no reasoning tokens states nothing by printing `r0`.
-	const chip = formatReasoningChip(reasoningFromSummary(summary), String);
-	if (chip !== null) parts.push(theme.fg("reason", chip));
-	if (summary.cacheReadTokens > 0 || summary.cacheWriteTokens > 0) {
-		parts.push(theme.fg("dim", `cache ${summary.cacheReadTokens}/${summary.cacheWriteTokens}`));
-	}
-	if (summary.toolCount > 0) {
-		const label = `${summary.toolCount} tool${summary.toolCount === 1 ? "" : "s"}`;
-		const errors = summary.toolErrorCount > 0 ? theme.fg("error", ` ${summary.toolErrorCount}${GLYPH.error}`) : "";
-		parts.push(`${theme.fg("muted", label)}${errors}`);
-	}
-	if (summary.watchdogPeak >= 2) parts.push(theme.fg("warning", "slow"));
-	if (summary.truncated) parts.push(theme.fg("warning", "trunc"));
-	const observation = summary.responseModelIdObservation;
-	const observedId =
-		observation.state === "reported"
-			? observation.reportedModelId
-			: observation.state === "legacy-difference-only"
-				? observation.differingModelId
-				: null;
-	const observationText = `response model id observation ${responseModelIdObservationLabel(observation)}${
-		observedId === null ? "" : ` ${abbreviateModelId(observedId)}`
-	}`;
-	parts.push(theme.fg("warning", observationText));
-	return parts.join(theme.fg("dim", " · "));
-}
-
-/**
  * One row per live worker: the origin glyph, the sub-process glyph when Clio
  * started the run for itself, the agent's own name, the fleet node it landed
  * on, its status glyph, elapsed, and the receipt id once the run has sealed
@@ -1099,7 +1057,7 @@ function outputVerbosityLabel(verbosity: OutputVerbosity): string {
 	return verbosity === "minimal" ? "min" : verbosity === "verbose" ? "verbose" : "default";
 }
 
-export function buildHarnessStatePill(
+function buildHarnessStatePill(
 	theme: ClioTheme,
 	status: AgentStatus,
 	toolCounts: ToolTallySnapshot,
@@ -1175,7 +1133,7 @@ function selectChips(
 	return surviving();
 }
 
-export function buildMetricStrip(
+function buildMetricStrip(
 	theme: ClioTheme,
 	status: AgentStatus,
 	throughput: TokenThroughputSnapshot | null | undefined,

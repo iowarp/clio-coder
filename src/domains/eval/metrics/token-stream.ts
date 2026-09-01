@@ -90,13 +90,6 @@ export function createTokenUsageFold(): EvalTokenUsageFold {
 	};
 }
 
-/** Whole-buffer form of {@link createTokenUsageFold}. */
-export function tokenUsageFromJsonl(stream: string): EvalTokenStreamUsage {
-	const fold = createTokenUsageFold();
-	fold.push(stream);
-	return fold.usage();
-}
-
 export function addTokenStreamUsage(left: EvalTokenStreamUsage, right: EvalTokenStreamUsage): EvalTokenStreamUsage {
 	return {
 		measured: left.measured || right.measured,

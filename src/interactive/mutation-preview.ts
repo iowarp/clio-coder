@@ -96,7 +96,7 @@ function canonicalJson(value: unknown): string {
  * anything else about the arguments does, which is the point: a call that
  * differs from the previewed one cannot inherit its preview.
  */
-export function callArgumentsDigest(args: Record<string, unknown> | undefined): string {
+function callArgumentsDigest(args: Record<string, unknown> | undefined): string {
 	return createHash("sha256")
 		.update(canonicalJson(args ?? {}), "utf8")
 		.digest("hex")

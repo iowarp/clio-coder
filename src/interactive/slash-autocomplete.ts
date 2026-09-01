@@ -78,7 +78,7 @@ export interface SlashAutocompleteOptions {
 }
 
 /** Complete provider surface now, deliberately inert until slice 11 wiring. */
-export function stubCompletionSources(): Record<CompletionSlotName, CompletionSource> {
+function stubCompletionSources(): Record<CompletionSlotName, CompletionSource> {
 	const sources = {} as Record<CompletionSlotName, CompletionSource>;
 	for (const slot of COMPLETION_SLOT_NAMES) sources[slot] = async () => [];
 	return sources;
@@ -180,46 +180,6 @@ function completionGrammar(command: string, args: CommandArgsSpec): CommandArgsS
 function compactDescription(description: string | undefined): string | undefined {
 	if (!description || visibleWidth(description) <= COMPLETION_DESCRIPTION_BUDGET) return description;
 	return `${truncateToWidth(description, COMPLETION_DESCRIPTION_BUDGET - 1, "", false).trimEnd()}…`;
-}
-
-function argumentCompletionItems(
-	args: CommandArgsSpec,
-	argumentText: string,
-	cursor = argumentText.length,
-	subcommandDescriptions?: Readonly<Record<string, string>>,
-): AutocompleteItem[] | null {
-	const result = completeArgs(args, argumentText, cursor);
-	if (!result) return null;
-	const items = result.completions
-		.filter((completion) => completion.completionSlot === undefined)
-		.map((completion) => {
-			const description = subcommandDescriptions?.[completion.token] ?? completion.hint;
-			return {
-				value: `${argumentText.slice(0, result.tokenStart)}${completion.token}${argumentText.slice(result.tokenEnd)}`,
-				label: completion.token,
-				...(description ? { description } : {}),
-			};
-		});
-	return items.length > 0 ? items : null;
-}
-
-export function buildSlashAutocompleteCommands(): SlashAutocompleteCommand[] {
-	const reference = commandReference();
-	return SLASH_COMMAND_GROUPS.flatMap((group) => reference.filter((ref) => ref.group === group)).map((ref) => {
-		const args = ref.args ? completionGrammar(ref.name, ref.args) : undefined;
-		const argumentHint = compactArgumentHint(args);
-		return {
-			name: ref.name,
-			description: ref.description,
-			...(argumentHint ? { argumentHint } : {}),
-			...(args
-				? {
-						getArgumentCompletions: (text: string) =>
-							argumentCompletionItems(args, text, text.length, ref.subcommandDescriptions),
-					}
-				: {}),
-		};
-	});
 }
 
 const BARE_VALID_PARENTS = new Set(["agents", "context", "memory", "panes", "resources"]);

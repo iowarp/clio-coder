@@ -283,7 +283,7 @@ function projectCheck(check: AuthoringCheck): VerifiersInspectCheck | null {
 
 const ORIGIN_RANK: Record<VerifierOrigin, number> = { "package-script": 0, catalog: 1, proposed: 2 };
 
-export function verifiersInspectSnapshot(
+function verifiersInspectSnapshot(
 	now: () => number = Date.now,
 	workspaceRoot: string = process.cwd(),
 ): VerifiersInspectSnapshot {

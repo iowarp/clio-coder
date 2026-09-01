@@ -216,7 +216,7 @@ function handoffFacts(cwd: string): { handoffCount: number; handoffFreshness: st
 	}
 }
 
-export function readWelcomeRepositoryFacts(cwd: string): WelcomeRepositoryFacts {
+function readWelcomeRepositoryFacts(cwd: string): WelcomeRepositoryFacts {
 	const codewiki = readCodewiki(cwd);
 	const wiki = codewiki ? wikiFactsFrom(cwd, wikiStaleness(cwd)) : { wikiPageCount: 0, wikiStatus: NO_WIKI_STATUS };
 	return {
@@ -255,7 +255,7 @@ async function readWelcomeRepositoryFactsAsync(cwd: string): Promise<WelcomeRepo
  * guessed, because it decides whether the Wiki row exists at all and the whole
  * point of a placeholder is that the banner never changes height.
  */
-export function placeholderRepositoryFacts(cwd: string): WelcomeRepositoryFacts {
+function placeholderRepositoryFacts(cwd: string): WelcomeRepositoryFacts {
 	return {
 		clioMdStatus: clioMdStatusFor(cwd),
 		hasCodewiki: existsSync(join(cwd, ".clio-coder", "codewiki.json")),
@@ -269,7 +269,7 @@ export function placeholderRepositoryFacts(cwd: string): WelcomeRepositoryFacts 
 	};
 }
 
-export function deriveWelcomeDashboardStats(deps: WelcomeDashboardDeps): WelcomeDashboardStats {
+function deriveWelcomeDashboardStats(deps: WelcomeDashboardDeps): WelcomeDashboardStats {
 	const settings = deps.getSettings?.();
 	const statuses = deps.providers.list();
 	const current = findCurrentStatus(statuses, settings);
@@ -376,7 +376,7 @@ function nextValue(stats: WelcomeDashboardStats): string {
  * route answers, and what the context is ready for. Maturity caveats belong
  * in the README, not in a line the operator reads on every turn.
  */
-export function buildWelcomeDashboardLines(
+function buildWelcomeDashboardLines(
 	stats: WelcomeDashboardStats,
 	width: number,
 	mode: WelcomeDashboardMode = "launchpad",

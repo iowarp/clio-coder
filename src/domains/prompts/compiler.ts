@@ -180,7 +180,7 @@ function lookupFragment(table: FragmentTable, id: string, role: string): LoadedF
  * section and the dispatch worker safety-posture message must describe the
  * same enforced behavior, so neither side duplicates this switch.
  */
-export function safetyOneLiner(level: string): string {
+function safetyOneLiner(level: string): string {
 	switch (level) {
 		case "read-only":
 			return "inspect and answer; mutating calls are auto-denied, so propose changes instead.";

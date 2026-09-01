@@ -201,7 +201,7 @@ function serializeJsonl(entries: ReadonlyArray<unknown>): string {
  * A crash or interruption before the rename leaves the original target
  * untouched; when no target exists yet, recovery readers can promote the tmp.
  */
-export function writeJsonlFileAtomic(
+function writeJsonlFileAtomic(
 	targetPath: string,
 	entries: ReadonlyArray<unknown>,
 	options: SessionJsonlWriteOptions = {},
@@ -319,7 +319,7 @@ function readExactAt(fd: number, buffer: Buffer, position: number, length: numbe
  * Behaviour matches `readSessionFileEntries` line-for-line over the tail it
  * returns: same `parseSessionJsonlLine` (torn-tail tolerant), same warning sink.
  */
-export function readSessionFileTailEntries(
+function readSessionFileTailEntries(
 	path: string,
 	maxEntries: number,
 	options: SessionJsonlReadOptions & { chunkBytes?: number } = {},

@@ -130,7 +130,7 @@ export function residentTagProtected(tags: ReadonlyArray<string> | undefined): b
 const clioLoaded = new Map<string, Set<string>>();
 
 /** Record that Clio loaded `modelId` on the target identified by `targetKey`. */
-export function markClioLoaded(targetKey: string, modelId: string): void {
+function markClioLoaded(targetKey: string, modelId: string): void {
 	let set = clioLoaded.get(targetKey);
 	if (!set) {
 		set = new Set();
@@ -155,12 +155,6 @@ function isClioLoaded(targetKey: string, entry: ResidentModelInfo): boolean {
 /** Skip the listResident round-trip for this long after a clean reconcile. */
 export const RECONCILE_TTL_MS = 60_000;
 const reconcileCache = new Map<string, { modelId: string; decision: "reconcile" | "observe"; at: number }>();
-
-/** Test-only: clear the cross-call Clio-loaded registry and TTL cache. */
-export function resetResidencyState(): void {
-	clioLoaded.clear();
-	reconcileCache.clear();
-}
 
 // --- residency decision (pure) ----------------------------------------------
 
@@ -301,7 +295,7 @@ function evictionNotice(facts: ResidencyFacts, entry: ResidentClassified): Resid
  * tiers, eviction order, and every notice case directly testable without a
  * server.
  */
-export function decideResidency(facts: ResidencyFacts): ResidencyPlan {
+function decideResidency(facts: ResidencyFacts): ResidencyPlan {
 	const notices: ResidencyNotice[] = [];
 	const keepResident = facts.resident.some((entry) => residentMatchesKeep(entry, facts.keepModelId));
 	const others = facts.resident.filter((entry) => !residentMatchesKeep(entry, facts.keepModelId));

@@ -153,7 +153,7 @@ export function parseEvalBehaviorScenarioV1(value: unknown, source = "behavioral
 	};
 }
 
-export function canonicalizeEvalBehaviorJudgeInputV1(
+function canonicalizeEvalBehaviorJudgeInputV1(
 	value: unknown,
 	scenario: EvalBehaviorScenarioV1,
 	source = "behavioral judge input",

@@ -14,10 +14,6 @@
  * publishes the real numbers on `/v1/model/info` instead, which is what this
  * probe reads.
  *
- * Second, routed-deployment attribution. Which physical model answered is a
- * per-response fact behind an alias, and LiteLLM returns it in `x-litellm-*`
- * response headers. See {@link routedDeploymentFromHeaders}.
- *
  * Structured output is the one property worth stating explicitly, because
  * getting it wrong is silent. `src/core/response-schema.ts` deliberately keys
  * the schema dialect on runtime id and not on api family, since a generic
@@ -110,7 +106,7 @@ function boolean(value: unknown): boolean | undefined {
  * so the caller can tell "the gateway says this model has no vision" apart from
  * "the gateway did not say", and merge accordingly.
  */
-export function capabilitiesFromLiteLLMModelInfo(info: Record<string, unknown>): Partial<CapabilityFlags> {
+function capabilitiesFromLiteLLMModelInfo(info: Record<string, unknown>): Partial<CapabilityFlags> {
 	const caps: Partial<CapabilityFlags> = {};
 	const contextWindow = positiveInteger(info.max_input_tokens) ?? positiveInteger(info.max_tokens);
 	if (contextWindow !== undefined) caps.contextWindow = contextWindow;
@@ -198,92 +194,6 @@ async function fetchCatalog(base: string, ctx: ProbeContext, headers: Record<str
 		.map((row) => (typeof row?.id === "string" ? row.id : null))
 		.filter((id): id is string => id !== null && id.length > 0);
 	return { models, modelCapabilities: {}, modelStates: {}, deployments: {} };
-}
-
-/**
- * The routed deployment LiteLLM reports for one response.
- *
- * Behind an alias the physical model is a per-request fact: a fallback, a
- * context-window promotion, or an ordinary load-balancing choice all change it
- * without changing what the client asked for. Reporting the alias back as the
- * model is how a gateway hides an outage, and it is exactly what an operator
- * needs to see. LiteLLM answers in headers on every completion.
- */
-export interface RoutedDeployment {
-	/** The alias the client asked for, e.g. `code`. */
-	group?: string;
-	/** The physical model that answered, e.g. `openai/katcoder2.5-35b-moe`. */
-	model?: string;
-	/** The upstream that served it. */
-	apiBase?: string;
-	/** Stable id of the specific deployment inside the group. */
-	deploymentId?: string;
-	/** Non-zero when the request did not reach its first-choice deployment. */
-	attemptedFallbacks?: number;
-	attemptedRetries?: number;
-}
-
-function headerValue(headers: { get(name: string): string | null }, name: string): string | undefined {
-	const raw = headers.get(name)?.trim();
-	return raw && raw.length > 0 ? raw : undefined;
-}
-
-function headerInteger(headers: { get(name: string): string | null }, name: string): number | undefined {
-	const raw = headerValue(headers, name);
-	if (raw === undefined) return undefined;
-	const parsed = Number.parseInt(raw, 10);
-	return Number.isFinite(parsed) ? parsed : undefined;
-}
-
-/**
- * Extract the routed deployment from a LiteLLM response, or null when the
- * headers are absent. Absent is the normal answer for every non-LiteLLM target,
- * so callers treat null as "no attribution available" rather than an error.
- */
-export function routedDeploymentFromHeaders(headers: { get(name: string): string | null }): RoutedDeployment | null {
-	const routed: RoutedDeployment = {};
-	const group = headerValue(headers, "x-litellm-model-group");
-	if (group !== undefined) routed.group = group;
-	const model = headerValue(headers, "x-litellm-model-name");
-	if (model !== undefined) routed.model = model;
-	const apiBase = headerValue(headers, "x-litellm-model-api-base");
-	if (apiBase !== undefined) routed.apiBase = apiBase;
-	const deploymentId = headerValue(headers, "x-litellm-model-id");
-	if (deploymentId !== undefined) routed.deploymentId = deploymentId;
-	const fallbacks = headerInteger(headers, "x-litellm-attempted-fallbacks");
-	if (fallbacks !== undefined) routed.attemptedFallbacks = fallbacks;
-	const retries = headerInteger(headers, "x-litellm-attempted-retries");
-	if (retries !== undefined) routed.attemptedRetries = retries;
-	return Object.keys(routed).length > 0 ? routed : null;
-}
-
-/**
- * One-line attribution for a routed response.
- *
- * A request that fell back says so. `code -> openai/qwen3.8-27b-dense @
- * mini.tail78f300.ts.net:8080 (fallback)` is the whole point of the runtime:
- * the operator asked for the coder, the coder was asleep, and something else
- * answered.
- */
-export function formatRoutedDeployment(routed: RoutedDeployment): string {
-	const parts: string[] = [];
-	if (routed.group && routed.model && routed.group !== routed.model) {
-		parts.push(`${routed.group} -> ${routed.model}`);
-	} else if (routed.model ?? routed.group) {
-		parts.push((routed.model ?? routed.group) as string);
-	}
-	if (routed.apiBase) {
-		let host = routed.apiBase;
-		try {
-			host = new URL(routed.apiBase).host;
-		} catch {
-			// A non-URL api_base is displayed verbatim.
-		}
-		parts.push(`@ ${host}`);
-	}
-	if ((routed.attemptedFallbacks ?? 0) > 0) parts.push("(fallback)");
-	else if ((routed.attemptedRetries ?? 0) > 0) parts.push("(retried)");
-	return parts.join(" ");
 }
 
 const litellmRuntime: RuntimeDescriptor = {

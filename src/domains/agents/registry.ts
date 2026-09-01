@@ -102,7 +102,7 @@ export function loadRecipesFromDir(
 	return recipes;
 }
 
-export function mergeRecipes(...sources: ReadonlyArray<ReadonlyArray<AgentRecipe>>): ReadonlyArray<AgentRecipe> {
+function mergeRecipes(...sources: ReadonlyArray<ReadonlyArray<AgentRecipe>>): ReadonlyArray<AgentRecipe> {
 	const byId = new Map<string, AgentRecipe>();
 	const builtinById = new Map<string, AgentRecipe>();
 	for (const group of sources) {

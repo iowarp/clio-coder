@@ -54,7 +54,7 @@ function buildClaudeCodePrompt(input: WorkerRunInput): string {
 	return parts.join("\n\n");
 }
 
-export function buildClaudeCodeArgs(input: WorkerRunInput): string[] {
+function buildClaudeCodeArgs(input: WorkerRunInput): string[] {
 	assertToolProfileEnforceable(input.toolProfile, "claude-code");
 	const permission = claudeSubprocessPermissionConfigForAutonomy(input.autonomy);
 	const args = [

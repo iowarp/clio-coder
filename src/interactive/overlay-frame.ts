@@ -133,7 +133,7 @@ export interface HintEntry {
  * dropped `[Enter] use`, which is the only way to commit. The commit key and
  * the way out are what a narrow footer is for.
  */
-export function isCriticalHintKey(key: string): boolean {
+function isCriticalHintKey(key: string): boolean {
 	const canonical = canonicalizeKey(key);
 	// `type` joins the commit key and the way out because on a list of a hundred
 	// models, typing is how a reader reaches the row they want at all; the
@@ -190,7 +190,7 @@ export function fitHintEntries(entries: ReadonlyArray<HintEntry>, maxWidth: numb
  */
 export const FILTER_HINT: HintEntry = { key: "type", verb: "filter" };
 
-export function canonicalizeKey(key: string): string {
+function canonicalizeKey(key: string): string {
 	const trimmed = key.trim();
 	if (trimmed === "R") return "R";
 	const lower = trimmed.toLowerCase();
@@ -240,7 +240,7 @@ export function buildResponsiveHint(
  * labels but recovers the key, which is all the critical-key classification
  * needs, so a plain-string overlay gets the same protection as a structured one.
  */
-export function elideHint(hint: string, maxCleanWidth: number): string {
+function elideHint(hint: string, maxCleanWidth: number): string {
 	const parts = hint.split(" · ");
 	if (parts.length <= 2) return hint;
 	const entries: HintEntry[] = parts.map((part) => {
@@ -305,7 +305,7 @@ export type FrameAlign = "left" | "center" | "right";
  * row and places the box itself; this is what the box would have been anchored
  * to if the engine were still doing the placing.
  */
-export function frameAlignForAnchor(anchor: OverlayOptions["anchor"]): FrameAlign {
+function frameAlignForAnchor(anchor: OverlayOptions["anchor"]): FrameAlign {
 	if (anchor === undefined) return "center";
 	if (anchor === "left-center" || anchor.endsWith("-left")) return "left";
 	if (anchor === "right-center" || anchor.endsWith("-right")) return "right";

@@ -1986,10 +1986,6 @@ export function updateSavedSettingsDocument(
 	}, options);
 }
 
-export function settingsLockPath(): string {
-	return `${settingsPath()}.lock`;
-}
-
 /**
  * Run `fn` while holding the settings.yaml advisory lock. Factored out of
  * updateSettings so the one other sanctioned settings writer (lifecycle

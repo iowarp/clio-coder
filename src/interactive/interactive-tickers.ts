@@ -34,7 +34,7 @@ export interface InteractiveTickersDeps {
 	clearScheduledInterval?: (handle: InteractiveTickerHandle) => void;
 }
 
-export function formatTaskBoardIslandLines(board: TaskBoardSnapshot): string[] {
+function formatTaskBoardIslandLines(board: TaskBoardSnapshot): string[] {
 	const theme = clioTheme();
 	const counts = taskBoardCounts(board);
 	const active = board.tasks.find((task) => task.status === "active");

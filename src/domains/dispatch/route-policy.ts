@@ -146,7 +146,7 @@ function rate(values: ReadonlyArray<boolean>, fallback = 0): number {
 }
 
 /** Conservative 95% Wilson lower confidence bound for a Bernoulli success rate. */
-export function wilsonLowerBound(successes: number, observations: number, z = 1.96): number {
+function wilsonLowerBound(successes: number, observations: number, z = 1.96): number {
 	if (observations <= 0) return 0;
 	const proportion = successes / observations;
 	const z2 = z * z;

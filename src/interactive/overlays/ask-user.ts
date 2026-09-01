@@ -110,7 +110,7 @@ const ELLIPSIS = "…";
  * should not take the screen. A round that follows an answered one has captured
  * answers to keep on screen, which is the full surface's whole job.
  */
-export function askUserSurface(questions: ReadonlyArray<AskUserQuestion>, priorRounds = 0): AskUserSurface {
+function askUserSurface(questions: ReadonlyArray<AskUserQuestion>, priorRounds = 0): AskUserSurface {
 	if (priorRounds > 0 || questions.length !== 1) return "interview";
 	const question = questions[0];
 	if (!question) return "interview";

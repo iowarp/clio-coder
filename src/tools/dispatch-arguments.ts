@@ -62,7 +62,7 @@ const AUTO_BASELINE_FALLBACK_AGENT_ID = "scout";
  * the mapped recipe is not present in this install, so a trimmed recipe set
  * can never produce a dispatch against an agent id that does not resolve.
  */
-export function autoBaselineAgentId(task: string, hasAgent?: (id: string) => boolean): string {
+function autoBaselineAgentId(task: string, hasAgent?: (id: string) => boolean): string {
 	const mapped = AUTO_BASELINE_BY_TASK_TYPE[classifyAgentTask(task).taskType] ?? AUTO_BASELINE_FALLBACK_AGENT_ID;
 	if (hasAgent === undefined) return mapped;
 	if (hasAgent(mapped)) return mapped;

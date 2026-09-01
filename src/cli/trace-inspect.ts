@@ -166,7 +166,7 @@ function processSummary(reader: TraceReader, runId: string): TraceInspectProcess
 }
 
 /** Pure payload builder, exported so the fixed contract is testable without subprocess capture. */
-export function traceInspectSnapshot(
+function traceInspectSnapshot(
 	now: () => number = Date.now,
 	databasePath: string = traceDatabasePath(clioStatePath()),
 ): TraceInspectSnapshot {

@@ -76,7 +76,7 @@ export interface JointAgentDimension {
 }
 
 /** A single truthful role-quality label retires task-feature priors for this tuple. */
-export function routePriorForAgentEvidence(
+function routePriorForAgentEvidence(
 	agent: JointAgentDimension,
 	observations: ReadonlyArray<RouteObservation>,
 ): RoutePrior {

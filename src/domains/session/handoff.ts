@@ -176,7 +176,7 @@ function isRecord(value: unknown): value is Record<string, unknown> {
  * ceiling, so the returned string is never longer than the bound, and the cut
  * lands on a whole code point rather than mid-sequence.
  */
-export function boundHandoffString(value: string): { text: string; truncated: boolean } {
+function boundHandoffString(value: string): { text: string; truncated: boolean } {
 	const text = value.trim();
 	const bytes = Buffer.byteLength(text, "utf8");
 	if (bytes <= HANDOFF_MAX_STRING_BYTES) return { text, truncated: false };
@@ -343,7 +343,7 @@ export interface HandoffReadLedgerOptions {
  * absolute form, which is what makes it fail the ledger check against paths
  * recorded relative to the workspace root.
  */
-export function normalizeHandoffPath(value: string, cwd: string | null): string {
+function normalizeHandoffPath(value: string, cwd: string | null): string {
 	const trimmed = value.trim().replace(/[\\/]+$/u, "");
 	if (trimmed.length === 0) return "";
 	const absolute = isAbsolute(trimmed) ? normalize(trimmed) : cwd === null ? normalize(trimmed) : resolve(cwd, trimmed);

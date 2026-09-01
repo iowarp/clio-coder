@@ -70,7 +70,7 @@ const MODEL_LOADING_MIN_DELAY_MS = 15000;
  * True when the error says the target is loading the model, so the wait should
  * be sized for disk and VRAM rather than for a provider backing off.
  */
-export function isModelLoadingErrorMessage(errorMessage: string | null | undefined): boolean {
+function isModelLoadingErrorMessage(errorMessage: string | null | undefined): boolean {
 	if (!errorMessage || errorMessage.length === 0) return false;
 	return MODEL_LOADING_PATTERN.test(errorMessage);
 }

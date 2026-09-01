@@ -599,31 +599,8 @@ export function getDispatchReservation(ownerId: string): DispatchReservationReco
 	return record ? copyRecord(record) : null;
 }
 
-export function listDispatchReservations(): ReadonlyArray<DispatchReservationRecord> {
-	return readStore();
-}
-
 export function reservedBudgetUsd(): number {
 	return readStore()
 		.filter((record) => record.status === "active")
 		.reduce((sum, record) => sum + outstandingBudget(record), 0);
-}
-
-export function reservedCapacity(): {
-	globalSlots: number;
-	nodeSlots: Readonly<Record<string, number>>;
-	endpointSlots: Readonly<Record<string, number>>;
-} {
-	let globalSlots = 0;
-	const nodeSlots: Record<string, number> = {};
-	const endpointSlots: Record<string, number> = {};
-	for (const record of readStore().filter((entry) => entry.status === "active")) {
-		const allocation = reservationAllocation(outstandingTasks(record));
-		globalSlots += allocation.globalSlots;
-		for (const [nodeId, count] of Object.entries(allocation.nodeSlots))
-			nodeSlots[nodeId] = (nodeSlots[nodeId] ?? 0) + count;
-		for (const [endpointKey, count] of Object.entries(allocation.endpointSlots))
-			endpointSlots[endpointKey] = (endpointSlots[endpointKey] ?? 0) + count;
-	}
-	return { globalSlots, nodeSlots, endpointSlots };
 }

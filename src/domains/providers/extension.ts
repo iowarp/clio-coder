@@ -88,7 +88,7 @@ function positiveWindow(value: unknown): number | undefined {
  * `n_ctx: 0` still discovers the window it did publish, instead of silently
  * falling back to the runtime descriptor's placeholder.
  */
-export function capabilitiesFor(
+function capabilitiesFor(
 	desc: RuntimeDescriptor,
 	target: TargetDescriptor,
 	probe: ProbeMerge,
@@ -173,7 +173,7 @@ export interface ProbeMerge {
  * `cache`, while health and availability (decided by the caller from `probe`)
  * reflect the failure. Only a successful probe replaces the catalog.
  */
-export function mergeProbeResult(
+function mergeProbeResult(
 	desc: RuntimeDescriptor,
 	target: TargetDescriptor,
 	probe: ProbeResult | null,
@@ -224,7 +224,7 @@ export function mergeProbeResult(
  * Returns the reason when the default is not served, null when it is or when
  * there is no live evidence either way.
  */
-export function unservedDefaultModelReason(
+function unservedDefaultModelReason(
 	desc: Pick<RuntimeDescriptor, "id">,
 	target: Pick<TargetDescriptor, "defaultModel">,
 	merge: Pick<ProbeMerge, "discoveredModels" | "discoveredModelsSource" | "discoveredModelStates">,

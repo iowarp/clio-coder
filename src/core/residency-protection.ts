@@ -50,7 +50,3 @@ export function protectedResidencyModels(settings: ClioSettings): ProtectedModel
 	for (const target of settings.targets) add(target.defaultModel, "target-default");
 	return [...byId].map(([modelId, role]) => ({ modelId, role }));
 }
-
-export function protectedResidencyModelIds(settings: ClioSettings): string[] {
-	return protectedResidencyModels(settings).map((ref) => ref.modelId);
-}

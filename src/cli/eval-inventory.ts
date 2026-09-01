@@ -394,7 +394,7 @@ function projectReport(
 	};
 }
 
-export async function evalInventorySnapshot(
+async function evalInventorySnapshot(
 	now: () => number = Date.now,
 	dataDir: string = clioDataDir(),
 ): Promise<EvalInventorySnapshot> {

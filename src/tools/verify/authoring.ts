@@ -234,7 +234,7 @@ function boundedId(base: string, suffix = ""): string {
 }
 
 /** Allocate the same stable suffix for the same ordered set of occupied IDs. */
-export function deterministicVerifierId(preferredId: string, occupied: ReadonlySet<string>): string {
+function deterministicVerifierId(preferredId: string, occupied: ReadonlySet<string>): string {
 	const base = boundedId(slug(preferredId, "check"));
 	if (!occupied.has(base) && base !== "frontend") return base;
 	for (let index = 2; index <= PROJECT_VERIFIER_CATALOG_CAPS.checks + 2; index += 1) {
@@ -892,7 +892,7 @@ function serializeVerifierDraft(draft: VerifierDraft): string {
 }
 
 /** Validate with the same production parser used by verify(). */
-export function validateVerifierDraft(draft: VerifierDraft): VerifierDraftValidation {
+function validateVerifierDraft(draft: VerifierDraft): VerifierDraftValidation {
 	const text = serializeVerifierDraft(draft);
 	const parsed = parseProjectVerifierCatalogText(text, draft.workspaceRoot, draft.catalogPath);
 	if (!parsed.ok) return { ok: false, reason: parsed.reason, text };
@@ -944,10 +944,7 @@ function cloneDraft(draft: VerifierDraft): VerifierDraft {
 }
 
 /** Apply edits to a copy so a collision or schema failure leaves the prior draft intact. */
-export function reviseVerifierDraft(
-	draft: VerifierDraft,
-	revisions: ReadonlyArray<VerifierRevision>,
-): VerifierRevisionResult {
+function reviseVerifierDraft(draft: VerifierDraft, revisions: ReadonlyArray<VerifierRevision>): VerifierRevisionResult {
 	const next = cloneDraft(draft);
 	const diagnostics: string[] = [];
 	for (const revision of revisions) {

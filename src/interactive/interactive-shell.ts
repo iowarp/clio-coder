@@ -70,7 +70,7 @@ const KEEP_ALIVE_INTERVAL_MS = 1 << 30;
  * before the keep-alive anchor. Keeping that seam explicit prevents an
  * extraction from silently changing initialization order.
  */
-export function createInteractiveShell<TTerminal extends Terminal, TTui extends InteractiveShellTui>(
+function createInteractiveShell<TTerminal extends Terminal, TTui extends InteractiveShellTui>(
 	deps: InteractiveShellDeps<TTerminal, TTui>,
 ): InteractiveShell<TTerminal, TTui> {
 	const terminal = deps.createTerminal();
@@ -175,7 +175,7 @@ export function getActiveRenderTrace(): RenderTrace | null {
  * model state. After the finite pre-render bound, exactly one caller-supplied
  * final frame is still issued; a post-render drain wait is likewise bounded.
  */
-export async function settleLatestInteractiveFrame(
+async function settleLatestInteractiveFrame(
 	gate: Pick<StdoutBackpressureGate, "whenWritable"> | null,
 	timeoutMs: number,
 	renderFrame: () => Promise<number>,

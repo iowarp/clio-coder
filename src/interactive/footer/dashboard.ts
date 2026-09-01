@@ -208,7 +208,7 @@ function renderFooterDashboardLines(
  * Widths from 80 to 119 columns use a two by two grid.
  * Widths below 80 columns use a vertical stack with all sections retained.
  */
-export function renderFooterStatusLines(state: FooterDashboardRenderState, width: number): string[] {
+function renderFooterStatusLines(state: FooterDashboardRenderState, width: number): string[] {
 	const theme = clioTheme();
 	const safeWidth = Math.max(1, Math.floor(width));
 	const header = headerLine(state.session, safeWidth);
@@ -297,7 +297,7 @@ export function renderFooterStatusLines(state: FooterDashboardRenderState, width
  * current work the strongest column; surplus is shared by urgency until the
  * lower-priority sections reach their caps, then spills into Activity.
  */
-export function expandedWideColumnWidths(width: number, totalSepWidth: number): [number, number, number, number] {
+function expandedWideColumnWidths(width: number, totalSepWidth: number): [number, number, number, number] {
 	const available = Math.max(0, width - totalSepWidth);
 	const widths: [number, number, number, number] = [32, 31, 27, 21];
 	let remaining = Math.max(0, available - widths.reduce((sum, item) => sum + item, 0));
