@@ -1,11 +1,11 @@
 # Clio Coder Architecture and Boundaries
 
 > [!TIP]
-> **Interactive Spec Available:** An interactive dashboard is located at [docs/html/architecture_blueprint.html](html/architecture_blueprint.html) (Version: 0.4.0).
+> **Interactive Spec Available:** An interactive dashboard is located at [docs/html/architecture_blueprint.html](html/architecture_blueprint.html).
 
 Clio Coder is an experimental, terminal-first coding harness for the CLIO ecosystem. CLIO stands for Context Layer for Input/Output; the project is named for the Greek muse of history and developed by the Gnosis Research Center at Illinois Tech. Its architecture favors small, auditable subsystems over a single monolithic agent loop: CLI entry points, the interactive TUI, provider/runtime code, worker subprocesses, tools, and feature domains are kept separate so local-model support and scientific-software workflows can evolve without collapsing safety boundaries.
 
-This page is source-code aligned for the current `v0.4.0` development line.
+This page is source-code aligned for the current source tree.
 
 ---
 
@@ -67,7 +67,7 @@ or `state` directory. Detection resolves binaries with `access(X_OK)` and no
 shell, checks install directories, and runs a bounded `--version` only when the
 caller asks and only for a binary that already resolved; a probe that cannot
 answer reports `unknown` and never `absent`. The one durable configuration write
-is an append to `delegation.agents`, and it happens only after an operator
+is an append to `integrations.externalAgents.entries`, and it happens only after an operator
 decision.
 
 ---

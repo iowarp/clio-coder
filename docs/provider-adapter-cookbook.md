@@ -1,7 +1,7 @@
 # Provider Adapter Cookbook
 
 > [!TIP]
-> **Interactive Spec Available:** An interactive runtime adapter descriptor builder and probe sequence capability checklist is located at [docs/html/provider_adapter_blueprint.html](html/provider_adapter_blueprint.html) (Version: 0.4.0).
+> **Interactive Spec Available:** An interactive runtime adapter descriptor builder and probe sequence capability checklist is located at [docs/html/provider_adapter_blueprint.html](html/provider_adapter_blueprint.html).
 
 This cookbook guides developers through implementing custom model runtimes and inference server integrations within Clio Coder. It explains the runtime descriptor interfaces, probing protocols, model synthesis, and how to configure reasoning and thinking behaviors.
 
@@ -72,7 +72,8 @@ export const myCustomRuntime: RuntimeDescriptor = {
 
 ## 2. Probing Mechanisms
 
-Probes discover the current state of a target inference server when Clio starts or when `/targets` or `/model` are refreshed.
+Probes discover the current state of a target inference server when Clio starts
+or when `/settings targets` or `/model` is refreshed.
 
 ### 2.1 Endpoint Probing (`probe`)
 The `probe` method validates endpoint reachability and collects loaded models:
@@ -198,4 +199,4 @@ export const BUILTIN_RUNTIMES = [
 ### 5.2 Dynamic Plugin Loading
 Clio's `RuntimeRegistry` can load custom runtimes dynamically at startup:
 * **Directories:** Place compiled Javascript descriptors (`.js`) inside `$CLIO_CODER_CONFIG_DIR/runtimes/` (defaulting to `~/.config/clio-coder/runtimes/`).
-* **Package exports:** Publish an npm package that exports a `clioRuntimes` array containing your runtime descriptors, then list the package name under `runtimePlugins` in your configuration settings.
+* **Package exports:** Publish an npm package that exports a `clioRuntimes` array containing your runtime descriptors, then list the package name under `integrations.runtimePlugins` in your configuration settings.

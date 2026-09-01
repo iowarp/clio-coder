@@ -1,12 +1,14 @@
 # Commands and Modes
 
 > [!TIP]
-> **Interactive Spec Available:** An interactive dashboard is located at [docs/html/commands_blueprint.html](html/commands_blueprint.html) (Version: 0.4.0).
+> **Interactive spec available:** The source checkout includes the
+> [commands blueprint](html/commands_blueprint.html).
 
 
-Clio Coder is a terminal-first alpha harness. This page keeps the command
-reference, interaction modes, dispatch surface, verification lanes, and common
-operator guidance out of the README so the release entry point stays short.
+Clio Coder is a terminal-first coding agent. This page is the detailed command
+reference for interactive sessions, headless runs, dispatch, verification, and
+common operator workflows; the README remains an approachable product and
+onboarding guide.
 
 Source of truth: `src/cli/index.ts`, `src/interactive/slash-commands.ts`,
 `src/domains/dispatch/**`, `src/tools/registry.ts`, and the current test suite.
@@ -114,8 +116,8 @@ For process exit codes, stdout deliverable guarantees, and machine-readable JSON
 | `--tool-profile <name>` | Restrict dispatched-agent tools: `minimal-local`, `science-local`, or `full-agent`. |
 | `--require <capability>` | Require a target capability for dispatch. Repeatable. |
 | `--steer-channel <path>` | Read live steering lines from a FIFO or an appended regular file to steer the active run. |
-| `--with-panes` | Activate guest pane integration for this invocation when Clio is already inside a reachable herdr session. It overrides `panes.enabled`. |
-| `--no-panes` | Disable pane integration for this invocation. It overrides `panes.enabled`. |
+| `--with-panes` | Activate guest pane integration for this invocation when Clio is already inside a reachable herdr session. It overrides `interface.panes.enabled`. |
+| `--no-panes` | Disable pane integration for this invocation. It overrides `interface.panes.enabled`. |
 
 `--with-panes` is an explicit first-class launch mode, not permission to start a
 pane server. Clio confirms `HERDR_ENV=1`, connects to an existing socket, and
@@ -123,7 +125,7 @@ pings it before registering pane tools. The fleet watch pane runs
 `fleet view --watch` against a selection file. Clio writes only the selected run
 id, while the viewer reads journals itself, so dispatch remains independent of
 the pane host and a second terminal can use the same journal surface directly.
-`panes.enabled: embedded` does not start a host: it is an accepted but
+`interface.panes.enabled: embedded` does not start a host: it is an accepted but
 unimplemented rung that resolves to no panes, prints a refusal during boot, and
 is labelled `NOT IMPLEMENTED` in Settings. Use `auto` or `--with-panes` only
 when Clio is already inside a reachable herdr session.
@@ -167,18 +169,15 @@ The registry table below lists the available interactive slash commands. On a ba
 | `/quit` | `/quit` | Exit Clio Coder |
 | `/help` | `/help [query]` | Open the interactive help center showing commands and keys |
 | `/skill` | `/skill [name] [task]` | Open the Skills Hub or invoke a skill |
-| `/library` | `/library [kind]` | Open the Skills Hub on a resource library tab |
-| `/prompts` | `/prompts` | List prompt templates |
-| `/extensions` | `/extensions` | List installed extensions |
-| `/interop` | `/interop` | Review other coding agents detected on this machine |
-| `/share` | `/share [runId] \| /share export <path> \| /share import [--dry-run] [--force] <path>` | Share a worker result with the main agent, or export and import Clio archives |
+| `/resources` | `/resources [skills\|prompts\|library [kind]\|extensions]` | Browse installed resources and private library entries |
+| `/share` | `/share [runId]` | Share a worker result with the main agent |
+| `/archive` | `/archive export <path> \| /archive import [--dry-run] [--force] <path>` | Export or import a full Clio archive |
 | `/run` | `/run [--agent-profile <profile>] [--runtime <runtimeId>] [--target <id>] [--model <id>] [--thinking <level>] [--tool-profile <minimal-local\|science-local\|full-agent>] [--require <cap>] [--share] <agent> <task>` | Run a fleet agent |
 | `/delegate` | `/delegate [--share] <agent-id> <task>` | Run an ACP delegation agent |
 | `/btw` | `/btw <question>` | Ask a side question that never enters the session transcript |
 | `/oracle` | `/oracle <question>` | Ask a read-only advisor to challenge a question against this session's settled decisions |
 | `/council` | `/council [--roster <name>] [--rounds <n>] [--synthesis <judge\|vote\|none>] <task>` | Ask a roster of read-only members the same task, with an optional vote or judge synthesis |
-| `/agents` | `/agents` | List Clio agents and ACP delegation agents |
-| `/targets` | `/targets` | Open Settings → Targets: health, use, connect, probe, remove |
+| `/agents` | `/agents [list\|connect]` | List native and external agents, or review detected external-agent proposals |
 | `/cost` | `/cost` | Show session token and cost totals |
 | `/context` | `/context compact [instructions] \| /context recall <ref> \| /context init \| /context refresh \| /context reset` | Context hub: window overlay plus compact, recall, init, refresh, and reset |
 | `/fleet` | `/fleet run [--var <key=value>] <name>` | Open Settings → Fleet, or run a fleet contract with an approval preview |
@@ -190,14 +189,19 @@ The registry table below lists the available interactive slash commands. On a ba
 | `/thinking` | `/thinking [level]` | Set the chat thinking level, or open Settings → Orchestrator |
 | `/output` | `/output [verbosity]` | Set transcript detail (minimal, default, verbose), or open Settings → Terminal |
 | `/model` | `/model [pattern]` | Open model selector or set a model |
-| `/scoped-models` | `/scoped-models` | Open Settings → Models: the Alt+J / Alt+K cycle set and favorites |
-| `/settings` | `/settings [section]` | Open interactive settings |
+| `/settings` | `/settings [chat\|fleet\|targets\|context\|safety\|interface\|integrations] [group]` | Open interactive settings, optionally at a durable area and UI group |
 | `/resume` | `/resume` | Resume a past session |
 | `/new` | `/new` | Start a fresh session |
 | `/handoff` | `/handoff <goal>` | Hand this session's working state to a fresh session for a stated goal |
 | `/tree` | `/tree` | Open session tree navigator |
 | `/fork` | `/fork` | Fork from an assistant turn |
 | `/export` | `/export [path]` | Export a self-contained HTML transcript by default; a `.md` path writes Markdown |
+
+Retired spellings fail closed and print their exact replacement. In particular,
+`/targets` points to `/settings targets`, `/scoped-models` points to
+`/settings chat model-picker`, and `/library`, `/prompts`, and `/extensions`
+point to the corresponding `/resources` subcommand. They never fall through to
+the model as prompt text.
 
 `/context` with no arguments opens the context-window ledger overlay, including
 the working-set section (policy, evicted items and tokens, events, recalls, churn).
@@ -249,8 +253,8 @@ member's label, target, model, node, round count, and synthesis mode before
 anything runs. Members are pinned to read-only autonomy and the council tool
 surface by admission, exactly as they are for a council the model asks for.
 
-`--roster` names a `workers.rosters` entry. Without it the command takes
-`workers.rosters.default` when that roster exists, and with neither it refuses
+`--roster` names a `fleet.rosters` entry. Without it the command takes
+`fleet.rosters.default` when that roster exists, and with neither it refuses
 and names the setting to declare. A roster that is the only one configured is
 still not the default: seating a council from whichever roster happens to be
 present would run models the operator never chose. `--rounds` accepts one to
@@ -297,11 +301,11 @@ The `/resume` picker accepts Page Up and Page Down to move by its 12 visible row
 Only active commands run. Typing anything command-shaped that the registry does
 not own checks the loaded prompt templates across native and foreign prompt roots.
 Built-in command names are reserved across interactive and headless modes; a
-template with the same basename is omitted from `/prompts` with a collision
+template with the same basename is omitted from `/resources prompts` with a collision
 diagnostic instead of shadowing a command on one surface and expanding on another.
 If a matching template is found in an untrusted project root, Clio prints that the
 prompt template comes from an untrusted project root and directs the operator to set
-`skills.trustProjectCompatRoots`, sending nothing to the model. If the token names
+`integrations.projectResources.trustProjectImports`, sending nothing to the model. If the token names
 neither a command nor a template, it reports `is not a command` and points at `/help`;
 it is never sent to the model. That covers spellings removed outright, such as
 `/status` and `/receipts`, as well as ordinary typos. It replaces the earlier
@@ -413,9 +417,9 @@ After `/resume`, Clio offers `/memory seed` when the newest handoff contains a
 structured snapshot. Seeding is explicit, deduplicated, and unavailable while
 `memory.intervention.enabled` is off.
 
-The `/interop` overlay lists the other coding agents Clio found on this machine,
+The `/agents connect` overlay lists the other coding agents Clio found on this machine,
 grouped `Detected`, `Configured`, and `Declined`. A detected row's detail pane
-shows the exact `delegation.agents` entry that connecting it would append, plus
+shows the exact `integrations.externalAgents.entries` entry that connecting it would append, plus
 the two facts a new peer inherits: `projectContext: none`, so the peer receives
 the task text and never the project projection, and `toolGovernance:
 clio-policy`, so its tool calls are gated by Clio safety. Press `a` to connect
@@ -424,7 +428,7 @@ at boot and never probes on a keystroke. Accepting applies to the live session,
 because `delegation` hot-reloads.
 
 Boot adds at most one line about interop, in the shape `clio: codex detected on
-PATH and not configured. Run /interop to review.` It names only agents that are
+PATH and not configured. Run /agents connect to review.` It names only agents that are
 installed, unconfigured, and undecided, it appears at most once per set of facts,
 and it is never emitted in headless or ACP mode. Declining an agent silences it
 until its binary version or path changes, at which point it becomes a fresh
@@ -464,7 +468,7 @@ editor reserves and can be rebound through `settings.yaml.keybindings`.
 | `Alt+T` | Open the session tree navigator (`/tree`). |
 | `Alt+U` | Toggle the footer dashboard between compact (quiet 2-zone) and expanded (4-zone urgency) layouts. |
 | `Alt+L` | Open the model and targets selector. |
-| `Alt+J` / `Alt+K` | Cycle forward / backward through the scoped model set (when empty, displays a notice directing the operator to `/scoped-models`). |
+| `Alt+J` / `Alt+K` | Cycle forward / backward through the configured model set (when empty, directs the operator to `/settings chat model-picker`). |
 | `Alt+W` | Toggle the Fleet Runs board (task, run ID, live telemetry, retry, and terminal history). Inside it, `Enter` opens the selected run's live worker detail, `s` steers, and `x` cancels. |
 | `Alt+B` | Open the composite session and operator task board (`/tasks`). Approved application-boundary override of editor word-back. |
 | `Alt+D` | Open the settled interview decision board (`/decisions`). Approved application-boundary override of editor word-delete. |
@@ -582,29 +586,19 @@ to execute through the existing engine worker path, the sanctioned Claude Code w
 | --- | --- |
 | `npm run ci` | Local and GitHub PR gate: typecheck, lint, skills pin check, build, the deterministic test suite, and the trace-viewer suite. |
 | `npm run ci:release` | Maintainer release gate: `npm run ci`, then the `check-release` dist and packaging audit. |
-| `npm run live:smoke -- --target <id>` | One real headless turn against a configured target. Add `--delegation` for the `opencode` and `copilot` ACP agents. The other operator-run drivers (`live:fleet-dispatch`, `live:tui`, `live:home`) are listed in `benchmarks/internal/README.md`. |
 | `npm run typecheck` | Strict TypeScript pass. |
 | `npm run lint` | Biome checks plus `scripts/check-hygiene.ts`, which runs the boundary invariants, the skills pin check, and the README and docs drift rules. |
-| `npm run test` | Contract and smoke tests through the sharded runner. |
+| `npm test` | Focused contract and smoke files through plain `node --test`. |
 | `npm run build` | Production bundle through `tsup`. |
 | `npm run dev` | `tsup --watch`. |
 | `npm run clean` | Remove `dist/`. |
 
-Live drivers pick their model with `--target <id>`, naming one of the targets
-`clio-coder targets` lists; `--model <wireId>` and `--thinking <level>`
-override that target's defaults for the run. The run happens in a scratch Clio
-home holding only that target, so nothing touches the operator's real state:
-
-```bash
-npm run build
-npm run live:smoke -- --target local-lmstudio --model qwen3.8-27b
-npm run live:smoke -- --target anthropic --delegation
-```
-
-Live checks cost tokens or local GPU time and are not deterministic CI. They
-are useful for OpenAI-compatible local gateways such as llama.cpp, LM Studio
-with Dynamo-backed workers, vLLM, and SGLang, plus cloud targets when
-credentials are configured.
+Live provider checks cost tokens or local GPU time and are deliberately not
+part of deterministic CI. Maintainers perform them explicitly against an
+isolated Clio home and a named configured target, recording the target, wire
+model id, serving configuration, and result with the release evidence. This is
+the appropriate lane for local gateways such as llama.cpp, LM Studio, vLLM,
+and SGLang, and for cloud targets with operator-provided credentials.
 
 ## Environment Variables
 
@@ -758,7 +752,11 @@ The Clio TUI has been enhanced to maximize readability, operational focus, and c
 - **Footer Notification Degradation Ladder:** The footer notification badge reserves the severity head (`glyph count noun`) and `[Alt+X] dismiss` tail first, allocating remaining width to an ellipsized message body. Under narrow terminal constraints, it degrades cleanly down the ladder without clipping action keys.
 - **Grouped Slash Command Palette:** Typing `/` opens an autocomplete command palette grouped by operational category (`Run`, `Inspect`, `Configure`, `Sessions`) with compact argument hints. Every suggestion is the command's one canonical spelling.
 - **Voice-First Transcript & Receipts:** User (`› `) and assistant (`✦ `) prose are formatted with a two-cell hanging indent, ensuring wrapped continuation lines remain visually tied to their voice prefix. Tool ledgers maintain full terminal width. Completed turn receipts honor output verbosity (`minimal` none, `default` compact dim `turn · in N · out M`, `verbose` full receipt with call counts, cache reads/writes, reasoning provenance, and verification caveats).
-- **Transactional Settings Center:** Open via `/settings` (or deep links `/targets`, `/fleet`, `/scoped-models`, `/thinking`, `/output`). Grouped into `CORE`, `ROUTING`, `RUNTIME`, and `EXPERIENCE` sections. Value edits are transactional: `Enter` opens value pickers/checklists and constructs immutable change plans offering `Apply this session`, `Apply and save globally`, or `Cancel`. Includes the Fleet entity workbench, Targets console table with in-place action drawer, scoped-model checklist, and narrow-terminal drill-down navigation below 72 columns.
+- **Transactional Settings Center:** Open `/settings` or deep-link to one of
+  `chat`, `fleet`, `targets`, `context`, `safety`, `interface`, or
+  `integrations`. Value edits construct change plans offering `Apply this
+  session`, `Apply and save globally`, or `Cancel`; narrow terminals use a
+  drill-down layout below 72 columns.
 
 ## Overlay and Presentation Conventions
 

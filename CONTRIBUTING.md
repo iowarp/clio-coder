@@ -38,10 +38,13 @@ Release gate (for maintainers before tags or release artifacts):
 npm run ci:release
 ```
 
-Live LLM smoke validation (manual/opt-in):
+Live provider validation (manual/opt-in, after `npm run build`):
 
 ```bash
-npm run live:smoke -- --target <configured-target-id>
+node dist/cli/index.js run \
+  --target <configured-target-id> \
+  --autonomy read-only \
+  "Reply with exactly: CLIO_LIVE_OK"
 ```
 
 ## Testing conventions
@@ -98,7 +101,7 @@ What `scripts/check-release.mjs` enforces, and how to respond when it fails:
   both package.json `files` and the required list in `check-release.mjs`.
   The double bookkeeping is deliberate: neither edit can silently drop a
   resource the CLI needs at runtime.
-- Size budgets: 15 MB tarball, 40 MB unpacked, set in `check-release.mjs`.
+- Size budgets: 10 MB tarball, 50 MB unpacked, set in `check-release.mjs`.
   They are a tripwire for packaging defects such as a leaked `node_modules`
   or a doubled `dist/`, not a diet. If a legitimate change exceeds them,
   raise the budget in the same PR with a justification, never as a drive-by.

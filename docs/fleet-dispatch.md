@@ -1,6 +1,7 @@
 # Fleet Dispatch
 
-> **Interactive Spec Available:** An interactive fleet node topology planner, scout router, receipt verifier, and failure taxonomy simulator is located at [docs/html/fleet_dispatch_blueprint.html](html/fleet_dispatch_blueprint.html) (Version: 0.4.0).
+> **Interactive spec available:** The source checkout includes the
+> [fleet dispatch blueprint](html/fleet_dispatch_blueprint.html).
 
 Clio Coder dispatches bounded worker agents. With a fleet configured, those
 workers run on remote machines over SSH while the orchestrator keeps every
@@ -79,7 +80,7 @@ later mutation of raw arguments cannot change either field.
 
 Recipes declare a default with `budget: {toolCalls, readReserve, synthesis}`. They may also declare `maximum: {toolCalls, readReserve}` inside that object. A recipe without `maximum` is an exact pin, which preserves the fixed behavior of existing recipes. A ranged recipe admits the optional dispatch request `budget: {toolCalls, readReserve, retryRevision?}` only when the request is inside its maximum. `retryRevision` has the same two integer fields and preauthorizes the ceiling that a later automatic retry, bounded result-contract revision, or review revision may select. The loop guard raises a result-contract revision boundary only in this case. A phase without that ceiling cannot grow and retains the existing text-only repair behavior.
 
-`toolCalls` is the admitted-call phase boundary. The final `readReserve` slots accept canonical `read` plus the agent's granted mutation tools, so a writer can still deliver inside its own reserve. Admission requires integers and `0 <= readReserve < toolCalls` for every declared phase. `synthesis: true` forces a text-only final round, while `false` stops after the admitted phase. `guardrails.workerToolCallCap` remains the operator-controlled lifetime ceiling and always wins when lower. A default may be clamped by a lower operator cap so default callers retain their prior behavior; an explicit request outside the operator cap is denied.
+`toolCalls` is the admitted-call phase boundary. The final `readReserve` slots accept canonical `read` plus the agent's granted mutation tools, so a writer can still deliver inside its own reserve. Admission requires integers and `0 <= readReserve < toolCalls` for every declared phase. `synthesis: true` forces a text-only final round, while `false` stops after the admitted phase. `fleet.limits.toolCallsPerRun` remains the operator-controlled lifetime ceiling and always wins when lower. A default may be clamped by a lower operator cap so default callers retain their prior behavior; an explicit request outside the operator cap is denied.
 
 Admission computes one immutable envelope with the recipe policy, invocation request, effective worker budget, and every clamp or escalation reason. Native workers and Claude SDK enforce the effective budget. Claude Code, Antigravity, and ACP delegation reject invocation envelopes because their black-box loops cannot provide equivalent per-call mediation. Before launch, every admitted WorkerSpec v3 still contains one concrete effective budget and a settings fingerprint. The envelope provenance is sealed in the run ledger and receipt and appears in monitor, fleet status, and the live fleet card.
 
@@ -109,7 +110,7 @@ fleet:
 `clioCoderEntry` may override the remote invocation (default `clio-coder worker`).
 Node ids must be unique and `local` is reserved.
 
-Worker profiles can pin work to a node: `workers.profiles.<name>.node` routes
+Worker profiles can pin work to a node: `fleet.profiles.<name>.node` routes
 every dispatch bound to that profile. Settings → Fleet (`/fleet`) edits the
 pin on the profile's `node` row, and the dispatch tool accepts an explicit
 `node` argument per task.
@@ -432,7 +433,7 @@ operator inspection rather than silently auto-applied after restart.
 
 Council is the read-only sibling of compete. Two to five members run the same
 singular task concurrently on local HTTP or native targets. A request selects
-exactly one configured `workers.rosters` entry or supplies inline `members`.
+exactly one configured `fleet.rosters` entry or supplies inline `members`.
 Admission pins every member to `read-only` autonomy and to the `read`, `grep`,
 `find`, `ls`, `code_nav`, and `context` tool surface. A route that resolves to
 an SSH fleet node is refused before approval. Council never creates a worktree
@@ -519,7 +520,7 @@ Fleet contracts support schema versions 1 through 5:
 
 #### Contract v5: plan, gate, and per-step target
 
-A version 5 agent step, including an agent loop check or repair, may declare either `target: <targetId>` or `profile: <workers.profiles key>`. It may never declare both. Fleet preflight resolves these values through the same worker routing used by `/run --target` and `/run --agent-profile`. An unknown value refuses before approval and names the target or profile. Versions 1 through 4 continue to refuse both fields.
+A version 5 agent step, including an agent loop check or repair, may declare either `target: <targetId>` or `profile: <fleet.profiles key>`. It may never declare both. Fleet preflight resolves these values through the same worker routing used by `/run --target` and `/run --agent-profile`. An unknown value refuses before approval and names the target or profile. Versions 1 through 4 continue to refuse both fields.
 
 A `kind: gate` step asks its validator agent to write exactly one repository-relative `path`. The contract derives the step's write boundary from that path, so a separate `writes` property is refused. Its `run` property names a command whose argv contains one whole-token `{{path}}` placeholder. After the agent writes the executable acceptance check, the coordinator runs it without a shell against the otherwise untouched tree. A red result admits the gate. A green result refuses the run as `gate_not_discriminating`. The fleet ledger records the gate path hash. A loop may use `check: {kind: gate, gate: <stepId>}`. Only the bounded output lines beginning with `FAIL` cross that failed check edge into the repair agent.
 
@@ -693,7 +694,7 @@ exact tuple with `failover: "none"`; any other planned task seals
 Validation rejects `automatic` on a request carrying plan provenance, so an
 approved dispatch can only reroute to a tuple the approval actually showed.
 
-Retries are governed by `workers.maxRetries` and backoff, and by nothing else.
+Retries are governed by `fleet.retry.maxRetries` and backoff, and by nothing else.
 A target cooldown protects new work from a known-bad target; it does not gate
 an assignment already in flight, because that assignment's own retry budget is
 the correct and sufficient bound. A retry denied at admission settles the
@@ -950,19 +951,11 @@ evicted once resident, so Clio refuses to load it by evicting a resident that
 settings still reference by role; on a one-slot router such an override
 declines with a `will-not-fit` notice instead of stranding the configured model.
 
-## Opt-in live regression
+## Manual fleet verification
 
-After `npm run build`, an operator with a configured model target can run the
-single-turn, read-only fleet lifecycle check explicitly:
-
-```bash
-npm run live:fleet-dispatch -- --target <id> [--model <wireId>] [--thinking medium]
-```
-
-It is not part of deterministic CI. The driver
-(`benchmarks/internal/live-fleet-dispatch.ts`) copies the repository into a
-committed temporary workspace, sandboxes all Clio config, state, data, and
-cache under a scratch home holding only the chosen target, exercises Scout,
-bounded spot-checking, detached Debugger briefing, steering, wait, and
-collect, and fails if any workspace content changes. A failed run retains its
-scratch tree for diagnosis.
+Use `clio-coder fleet validate <name>` and `clio-coder fleet graph <name>` for
+model-free contract checks. An operator with configured targets can then run
+the contract explicitly with `clio-coder fleet run <name>` and retain its
+receipts. The [fleet demo runbook](fleet-demo-runbook.md) provides a bounded
+end-to-end scenario, including reviewer gates and verification commands. Live
+fleet execution is not hidden inside deterministic CI.

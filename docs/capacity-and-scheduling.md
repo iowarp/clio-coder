@@ -1,6 +1,8 @@
 # Capacity Leases & Fleet Scheduling
 
-This document specifies the multi-process capacity leasing protocols, node scheduling models, cross-process transaction locks, and failure recovery mechanics implemented in Clio Coder `v0.4.0`.
+This document specifies the multi-process capacity leasing protocols, node
+scheduling models, cross-process transaction locks, and failure recovery
+mechanics in the current source tree.
 
 Source implementations: `src/domains/scheduling/` and `src/domains/dispatch/capacity-lease.ts`.
 
@@ -23,7 +25,7 @@ graph TD
 
 | Dimension | Identity | Limit resolution |
 | :--- | :--- | :--- |
-| Global | All dispatches using the state directory. | `budget.concurrency: auto` remains four. |
+| Global | All dispatches using the state directory. | `fleet.concurrency: auto` remains four. |
 | Node | The local node or one configured fleet node. | The configured node limit applies. An unset local node cap remains unbounded. |
 | Inference endpoint | A normalized scheme, host, port, and base path. | A target's `maxConcurrentRequests` override wins, then a probe in this process, then a persisted probe from an earlier process, then one slot for other local-native targets. vLLM and SGLang remain unbounded. |
 

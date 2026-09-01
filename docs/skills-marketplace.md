@@ -1,7 +1,7 @@
 # Skills Marketplace
 
 > [!TIP]
-> **Interactive Spec Available:** An interactive dashboard is located at [docs/html/skills_blueprint.html](html/skills_blueprint.html) (Version: 0.4.0).
+> **Interactive Spec Available:** An interactive dashboard is located at [docs/html/skills_blueprint.html](html/skills_blueprint.html).
 
 The Skills Hub (`/skill`) shows project skills, user skills, and the marketplace. Every marketplace row comes from the same local lookup that `clio-coder skills install <name>` and `/skill <name>` resolve through, so the hub lists nothing it cannot install.
 
@@ -45,7 +45,11 @@ Invoking an uninstalled marketplace skill with `/skill <name>` prompts before in
 
 ## Tabs
 
-The hub carries one tab per resource library kind: Skills, Agents, Prompts, and Fleets. `←` and `→` move between them, which is the key vocabulary the Settings Center already uses to move between sections. The frame title names the active tab and the footer states its row count, so the numbers on screen always describe the tab being read. `/skill` opens the hub on Skills. `/library <kind>` opens it on that kind's tab, and `/library` alone opens it on Skills.
+The hub carries one tab per resource-library kind: Skills, Agents, Prompts, and
+Fleets. `←` and `→` move between them. The frame title names the active tab and
+the footer states its row count, so the numbers on screen always describe the
+tab being read. `/skill` opens Skills; `/resources library <kind>` opens the
+requested library tab.
 
 The Skills tab is unchanged. The other three list the entries of their kind from `discoverLibrary()`, which is the same discovery `clio-coder library list --kind <kind>` reads, so the hub and the CLI never disagree about what exists. Each row carries the entry's origin and version, whether it is installed or available, the short form of its recorded pin hash, and, in the warning token, the names of any requirements it still needs. An entry the catalog refuses outright, because a requirement is missing, malformed, or cyclic, appears as a diagnostic row rather than being omitted.
 

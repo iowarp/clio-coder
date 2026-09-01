@@ -1,6 +1,6 @@
 # Agent Client Protocol (ACP) Server
 
-This document defines the architecture, transport protocols, tool mediation layers, permission handling, and error taxonomy for Clio Coder's Agent Client Protocol (ACP) server implementation in `v0.4.0`.
+This document defines the architecture, transport protocols, tool mediation layers, permission handling, and error taxonomy for Clio Coder's Agent Client Protocol (ACP) server implementation in the current source tree.
 
 Source implementations: `src/engine/acp/` and `src/cli/acp.ts`.
 
@@ -40,7 +40,7 @@ both spellings reach the same command dispatcher, option parser, stdout guard,
 and server boot path.
 
 - `--cwd PATH`: Workspace root the server boots in. The path is resolved and then canonicalized with `fs.realpath`, so a symlinked launch root, a trailing slash, and a `/.` suffix all name the same workspace. Clio changes into that canonical path before it reads settings, builds project context, or opens a session ledger, so a session opens at that root. A path that does not exist or that the process cannot enter exits 2 without starting the server. The canonical path is the server's workspace identity for its whole life: `session/new` must carry a `cwd` that canonicalizes to the same path, and nothing after boot ever changes the process directory.
-- `--permission-timeout MS`: The server-side fail-safe ceiling for one mediated permission request, as a whole number from 1 through Node's maximum schedulable timer delay (`2147483647`) milliseconds. Values outside that range are refused before the protocol server starts. If the timer wins, the approval expires, the active turn is aborted, every parked call for that turn is settled only so execution can unwind, and `session/prompt` fails with `permission_expired`. Expiry is audited as `expired`, never as a human denial, and no denial result is fed into a continuing model loop. The flag overrides `delegation.defaults.permissionTimeoutMs` for this server only, which itself defaults to `DEFAULT_DELEGATION_PERMISSION_TIMEOUT_MS = 120000` (`src/core/defaults.ts:149`). The shipped Workbench treats the remaining ACP request window as a hard ceiling on its own approval budget, projects that duration onto the Workbench clock, escalates immediately when the remaining window is shorter than its escalation delay, and cancels without publishing a card if the window has already elapsed. Other clients may enforce a shorter operator-facing policy by sending ordinary `session/cancel`.
+- `--permission-timeout MS`: The server-side fail-safe ceiling for one mediated permission request, as a whole number from 1 through Node's maximum schedulable timer delay (`2147483647`) milliseconds. Values outside that range are refused before the protocol server starts. If the timer wins, the approval expires, the active turn is aborted, every parked call for that turn is settled only so execution can unwind, and `session/prompt` fails with `permission_expired`. Expiry is audited as `expired`, never as a human denial, and no denial result is fed into a continuing model loop. The flag overrides `integrations.externalAgents.defaults.permissionTimeoutMs` for this server only, which itself defaults to `DEFAULT_DELEGATION_PERMISSION_TIMEOUT_MS = 120000` (`src/core/defaults.ts:149`). The shipped Workbench treats the remaining ACP request window as a hard ceiling on its own approval budget, projects that duration onto the Workbench clock, escalates immediately when the remaining window is shorter than its escalation delay, and cancels without publishing a card if the window has already elapsed. Other clients may enforce a shorter operator-facing policy by sending ordinary `session/cancel`.
 
 Transport frames are JSON-RPC 2.0 messages serialized over `stdin`/`stdout`. All logging and diagnostic output is strictly routed to `stderr` to preserve standard I/O framing integrity.
 
@@ -146,8 +146,8 @@ Every replay notification precedes the `session/load` response and carries `para
 `clio-coder/settings/get_safe` accepts `{}` and returns exactly:
 
 ```json
-{"settings":{"orchestrator":{"target":null,"model":null,"thinkingLevel":"off"},"autonomy":"auto-edit"},
- "editable":["orchestrator.target","orchestrator.model","orchestrator.thinkingLevel","autonomy"]}
+{"settings":{"chat":{"target":null,"model":null,"thinkingLevel":"off"},"safety":{"autonomy":"auto-edit"}},
+ "editable":["chat.target","chat.model","chat.thinkingLevel","safety.autonomy"]}
 ```
 
 The values above are illustrative. Thinking is one of `off`, `minimal`, `low`, `medium`, `high`, `xhigh`, or `max`. No other settings leaf, URL, auth fact, credential reference, path, header, provider reason, or provider error crosses the wire. The method is legal before an opener and during a prompt.
@@ -183,7 +183,7 @@ Every frame the server writes is bounded (`src/engine/acp/types.ts`). Every cap 
 
 ### Admission failure
 
-A prompt Clio cannot start fails with `prompt_not_admitted` and zero preceding `session/update` notifications. `data.reason` is one of `orchestrator-not-configured`, `target-unknown`, `target-not-configured`, `target-not-found`, `runtime-not-registered`, `model-not-configured`, `chat-unsupported`, `streaming-unsupported`, or the catch-all `admission-failed`. That list is closed and the server enforces it: the engine's runtime-resolution diagnostics are a larger and faster-moving vocabulary (`runtime-target-unsupported`, `runtime-use-unsupported`, `required-capability-missing`, and others), and any reason outside the list is reported as `admission-failed` rather than teaching clients a code the profile never promised. The two halves of an unconfigured orchestrator are distinguished: no `orchestrator.target` reports `orchestrator-not-configured`, and a configured target with no `orchestrator.model` reports `model-not-configured`, so a client is pointed at the half of the settings that is actually missing. The message is a sanitized one-line sentence and never contains the settings path. A failure after admission fails with `turn_failed` instead. Readiness before the first prompt is unchanged and lives in the CLI: `paths --json` for home identity, `doctor --json` for installation sanity, and `targets --json [--probe]` for target, auth, and health. `--probe` performs a request to the configured endpoint, so the client decides when that is allowed.
+A prompt Clio cannot start fails with `prompt_not_admitted` and zero preceding `session/update` notifications. `data.reason` is one of `orchestrator-not-configured`, `target-unknown`, `target-not-configured`, `target-not-found`, `runtime-not-registered`, `model-not-configured`, `chat-unsupported`, `streaming-unsupported`, or the catch-all `admission-failed`. That list is closed and the server enforces it: the engine's runtime-resolution diagnostics are a larger and faster-moving vocabulary (`runtime-target-unsupported`, `runtime-use-unsupported`, `required-capability-missing`, and others), and any reason outside the list is reported as `admission-failed` rather than teaching clients a code the profile never promised. The two halves of an unconfigured orchestrator are distinguished: no `chat.target` reports `orchestrator-not-configured`, and a configured target with no `chat.model` reports `model-not-configured`, so a client is pointed at the half of the settings that is actually missing. The message is a sanitized one-line sentence and never contains the settings path. A failure after admission fails with `turn_failed` instead. Readiness before the first prompt is unchanged and lives in the CLI: `paths --json` for home identity, `doctor --json` for installation sanity, and `targets --json [--probe]` for target, auth, and health. `--probe` performs a request to the configured endpoint, so the client decides when that is allowed.
 
 ### Permission requests
 
@@ -254,7 +254,7 @@ The ACP boundary enforces strict isolation rules:
 
 The sections above describe Clio as an ACP server. In the other direction, Clio
 is an ACP client: `/delegate <agent-id> <task>` and any dispatch to an agent id
-configured under `delegation.agents` run the task on an external peer such as
+configured under `integrations.externalAgents.entries` run the task on an external peer such as
 `codex` or `opencode`.
 
 A delegated peer is a worker like any other on screen. The adapter maps the

@@ -1,7 +1,8 @@
 # Internal Eval Suites
 
 > [!TIP]
-> **Interactive Spec Available:** An interactive blueprint is available at [docs/html/evals_internal_blueprint.html](html/evals_internal_blueprint.html) (Version: 0.4.0).
+> **Interactive spec available:** The source checkout includes the
+> [internal eval blueprint](html/evals_internal_blueprint.html).
 
 Private suites should live outside this repository. Keep datasets, prompts,
 live fleet coordinates, calibration outputs, and raw run artifacts in a private
@@ -15,13 +16,13 @@ clio-coder eval run --suite <external-path> --clio-coder-entry dist/cli/index.js
 ```
 
 Use `--out <dir>` when the artifact should be written outside the default Clio
-data directory. Product eval artifacts and external benchmark campaigns are
-separate: public benchmark adapters live under `benchmarks/community/` and do
-not use the eval runner.
+data directory. External benchmark campaigns should adapt their cases and
+grader observations into the same eval engine while keeping private datasets,
+credentials, endpoints, and raw artifacts outside this repository.
 
 The public behavioral corpus is the deliberate exception to the otherwise
 private Suite v2 data policy. Its reviewable, synthetic suites live under
-`benchmarks/eval/`: a model-free positive/adversarial authority pair for every
+`evals/`: a model-free positive/adversarial authority pair for every
 built-in worker recipe, four tiny main-agent model scenarios covering all eight
 behavioral categories with event- and grader-derived facts, and an intentional
 decoy negative control. The model-free driver uses the shipped recipe catalog,

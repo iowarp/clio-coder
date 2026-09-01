@@ -1,5 +1,11 @@
 # v0.4.1 Release-Cut Checklist
 
+> [!IMPORTANT]
+> Historical release record. v0.4.1 has been published, and this checklist is
+> retained to explain how that release was cut. It is not the procedure for
+> v0.4.2 or any later release; paths, gates, versions, dates, and authorization
+> state must be re-established from current source before a future cut.
+
 This is the ordered procedure for turning the prepared `v0.4.1` branch into a
 published release. Everything above the **AUTHORIZATION BOUNDARY** is local,
 repeatable, and reversible. Everything below it changes a remote ref, creates a
@@ -57,9 +63,11 @@ operator's explicit approval of the exact candidate SHA and commands.
 7. When a configured target is available, run one real built-binary turn:
 
    ```sh
-   npm run live:smoke -- --target <id>
+   node dist/cli/index.js run --target <id> --autonomy read-only \
+     "Report the active target and confirm this is a release smoke turn."
    ```
 
+   Run it with an isolated `CLIO_CODER_HOME` containing only the test target.
    Record a missing or unauthorized target as a deferred live check; never
    substitute a model-dependent result for the deterministic gate.
 8. Inspect the package twice: first with `npm pack --dry-run`, then with a real

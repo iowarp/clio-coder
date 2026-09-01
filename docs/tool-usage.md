@@ -1,11 +1,11 @@
 # Tool Usage Reference
 
 > [!TIP]
-> **Interactive Spec Available:** An interactive seven-plane tool atlas and observation envelope truncation/offload calculator is located at [docs/html/tool_usage_blueprint.html](html/tool_usage_blueprint.html) (Version: 0.4.0).
+> **Interactive Spec Available:** An interactive seven-plane tool atlas and observation envelope truncation/offload calculator is located at [docs/html/tool_usage_blueprint.html](html/tool_usage_blueprint.html).
 
 This is the deep usage reference behind the deliberately terse tool descriptions in the prompt envelope. Toolkit v2 keeps rich guidance out of tool descriptions and puts it here, where `context(scope="docs", query=...)` retrieves it section by section. Each tool below has its own self-contained `##` section covering the argument surface, defaults, truncation and continuation behavior, and concrete calls. Source of truth is `src/tools/`.
 
-In Clio Coder v0.4.0, `src/tools/agent-tools.ts` serves as the single agent-tool adapter across both orchestrator and worker runtimes. Both surfaces resolve their executable tools through the exact same `effectiveToolNames` narrowing, ensuring that attested tool schemas never drift from the tools available at runtime. Tools are keyed strictly by the `ToolName` union with no alias table. Argument leniency for weak-model callers is provided exclusively by per-tool `prepareArguments` normalizers declared on `ToolSpec`.
+In the current source tree, `src/tools/agent-tools.ts` serves as the single agent-tool adapter across both orchestrator and worker runtimes. Both surfaces resolve their executable tools through the exact same `effectiveToolNames` narrowing, ensuring that attested tool schemas never drift from the tools available at runtime. Tools are keyed strictly by the `ToolName` union with no alias table. Argument leniency for weak-model callers is provided exclusively by per-tool `prepareArguments` normalizers declared on `ToolSpec`.
 
 ## Observation envelope: truncation notices, offload, next hints, and the turn budget
 
@@ -236,7 +236,7 @@ Arguments:
 - `task` (required for the singular form unless `list:true`). One worker assignment/instruction string. It is distinct from briefing.
 - `tasks` (required for the batch form unless `list:true`). Array of task strings or `{task, agent, target, model, cwd, briefing, intent, gate}` objects. Per-item fields override the top-level defaults below. Supplying both `task` and `tasks` is an error.
 - `mode` (optional). `parallel` (default) runs items concurrently; `sequential` runs them one at a time, each completing before the next dispatches. `pipeline`, `compete`, and `council` select their named topologies. A single ordinary task always runs down the sequential path.
-- `roster` (council only). Names one `workers.rosters` entry. Supply exactly one of `roster` or `members`.
+- `roster` (council only). Names one `fleet.rosters` entry. Supply exactly one of `roster` or `members`.
 - `members` (council only). Supplies two to five inline `{label,target,model?,thinking?}` entries.
 - `synthesis` (council only). Accepts `none`, `judge`, or `vote`; the default is `none`.
 - `rounds` (council only). Accepts an integer from 1 through 3; the default is 1.

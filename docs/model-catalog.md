@@ -1,7 +1,8 @@
 # Model Catalog, Runtime Refresh, and Field Notes
 
 > [!TIP]
-> **Interactive Spec Available:** An interactive dashboard mapping capabilities, probe discovery, and target resolution is located at [docs/html/models_blueprint.html](html/models_blueprint.html) (Version: 0.4.0).
+> **Interactive spec available:** The source checkout includes the
+> [model and target blueprint](html/models_blueprint.html).
 
 Clio Coder treats a selectable model as the intersection of three sources:
 
@@ -11,7 +12,8 @@ Clio Coder treats a selectable model as the intersection of three sources:
 
 ## Runtime refresh controls
 
-- `/targets` (Settings → Targets): probes every target when it opens; a row's probe action re-probes that target.
+- `/settings targets`: probes every target when it opens; a row's probe action
+  re-probes that target.
 - `/model`: `r` refreshes the selected row's target; `R` refreshes all targets.
 - `clio-coder models`: probes live targets by default before printing the CLI model list. Use `--offline` to skip live probing. Former `--probe` and `--no-probe` flags are gone.
 
@@ -37,14 +39,14 @@ dispatch canonicalizes requested model ids against the live catalog when one is
 available, so a short alias can resolve to the canonical live id before the
 worker spec and receipt are written.
 
-## Benchmarking Models
+## Measuring models
 
-The public benchmark adapters under [benchmarks/community/](../benchmarks/community/)
-(SWE-bench Lite, Terminal-Bench, SciCode, HumanEval) drive Clio through
-`clio-coder run --json` or `clio-coder eval run`, each taking `--target` and
-`--model` from the configured targets. `benchmarks/README.md` has the
-commands. The run manifests record the target profile (runtime, model,
-thinking level) so sweeps can be compared consistently.
+Clio's evaluation engine records target, runtime, wire model, thinking level,
+serving facts, and evidence with each run. Reviewable reference suites live
+under [`evals/`](../evals/); private prompts, external benchmark adapters, raw
+campaign artifacts, credentials, and endpoint details belong outside this
+repository. Use `clio-coder eval run --suite <path> --target <id>` and retain
+the resulting execution envelope when comparing models or serving settings.
 
 ## What "sanctioned" means
 
