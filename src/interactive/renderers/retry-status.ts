@@ -1,13 +1,10 @@
 import type { RetryStatusPayload } from "../chat-loop.js";
 import { styleTaggedNotice } from "./notice.js";
 
-function shorten(value: string, limit: number): string {
-	if (value.length <= limit) return value;
-	return `${value.slice(0, Math.max(0, limit - 3))}...`;
-}
-
 function rawRetryStatus(status: RetryStatusPayload): string {
-	const suffix = status.errorMessage ? `: ${shorten(status.errorMessage, 120)}` : "";
+	// Both live and replay renderers wrap this notice to their terminal width.
+	// Capping the error here discarded the remedy before either renderer saw it.
+	const suffix = status.errorMessage ? `: ${status.errorMessage}` : "";
 	if (status.phase === "waiting") {
 		return `[retry] attempt ${status.attempt}/${status.maxAttempts} in ${status.seconds ?? 0}s${suffix}`;
 	}
