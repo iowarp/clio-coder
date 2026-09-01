@@ -231,7 +231,6 @@ export function migrateSettingsV1Document(raw: unknown): SettingsV2DocumentTrans
 		["guardrails.workerToolCallCap", "fleet.limits.toolCallsPerRun"],
 		["guardrails.internalDispatchTimeoutMs", "fleet.limits.internalRunTimeoutMs"],
 		["guardrails.maxDispatchRuns", "fleet.history.maxRuns"],
-		["panes.journal", "fleet.history.journal"],
 		["compaction.auto", "context.compaction.auto"],
 		["compaction.threshold", "context.compaction.threshold"],
 		["compaction.model", "context.compaction.model"],
@@ -254,9 +253,6 @@ export function migrateSettingsV1Document(raw: unknown): SettingsV2DocumentTrans
 		["terminal.fullscreenScrollbar", "interface.fullscreenScrollbar"],
 		["terminal.showTerminalProgress", "interface.terminalProgress"],
 		["terminal.notify", "interface.desktopNotifications"],
-		["panes.enabled", "interface.panes.enabled"],
-		["panes.notifications", "interface.panes.notifications"],
-		["panes.yazi", "interface.panes.files"],
 		["keybindings", "interface.keybindings"],
 		["skills.trustProjectCompatRoots", "integrations.projectResources.trustProjectImports"],
 		["delegation.defaults", "integrations.externalAgents.defaults"],
@@ -271,8 +267,10 @@ export function migrateSettingsV1Document(raw: unknown): SettingsV2DocumentTrans
 	drop(transform, "background.thinkingLevel", "unused; proactive memory always resolves thinking off");
 	drop(transform, "theme", "inactive; runtime rendering did not read it");
 	drop(transform, "compaction.excludeLastTurns", "legacy-mask only; context.workingSet.protectLastTurns remains");
-	drop(transform, "panes.agents", "already retired; per-agent pane opening no longer exists");
-	drop(transform, "panes.keepFailed", "already retired; pane lifetime is no longer tied to run outcome");
+	// Every panes key first shipped in v0.4.0, one day before this rework, so
+	// no home holds a value worth carrying; the pane layer starts from the v2
+	// defaults. (retire-panes-knobs still runs first for 0.3.x-lineage files.)
+	drop(transform, "panes", "panes settings were reworked immediately after shipping; v2 defaults apply");
 	migrateFleetNodeAliases(transform);
 
 	if (transform.collisions.length > 0) throw new SettingsV2CollisionError(transform.collisions);

@@ -182,7 +182,7 @@ describe("contracts/settings v2 paths", () => {
 
 	it("publishes the complete move and retirement manifest", () => {
 		const moves = new Map<string, string>(SETTINGS_V1_PATH_MOVES);
-		strictEqual(moves.size, 97, "the fixed v1-to-v2 move manifest stays complete");
+		strictEqual(moves.size, 90, "the fixed v1-to-v2 move manifest stays complete");
 		strictEqual(moves.get("orchestrator.target"), "chat.target");
 		strictEqual(moves.get("retry.streamStallMs"), "chat.retry.streamStallMs");
 		strictEqual(moves.get("workers.agentBindings.*"), "fleet.agentProfiles.*");
@@ -195,15 +195,12 @@ describe("contracts/settings v2 paths", () => {
 		strictEqual(moves.get("watchdog.cadenceToolCalls"), "safety.review.cadenceToolCalls");
 		strictEqual(moves.get("terminal.showTerminalProgress"), "interface.terminalProgress");
 		strictEqual(moves.get("delegation.agents[].env.*"), "integrations.externalAgents.entries[].env.*");
-		strictEqual(moves.get("panes.yazi.followCwd"), "interface.panes.files.followCwd");
 		strictEqual(moves.get("guardrails.observationTurnBudgetBytes"), "safety.limits.observationBytesPerTurn");
 		strictEqual(moves.get("fleet.nodes[].clioEntry"), "fleet.nodes[].clioCoderEntry");
 		deepStrictEqual(Object.keys(SETTINGS_V1_RETIRED_PATHS).sort(), [
 			"background.thinkingLevel",
 			"compaction.excludeLastTurns",
 			"identity",
-			"panes.agents",
-			"panes.keepFailed",
 			"theme",
 		]);
 	});
@@ -297,8 +294,6 @@ describe("contracts/settings v2 paths", () => {
 		const nodes = asArray(fleet.nodes, "fleet.nodes");
 		const firstNode = asRecord(nodes[0], "first fleet node");
 		const memory = asRecord(context.memory, "context.memory");
-		const panes = asRecord(ui.panes, "interface.panes");
-		const files = asRecord(panes.files, "interface.panes.files");
 		const externalAgents = asRecord(integrations.externalAgents, "integrations.externalAgents");
 		const externalEntries = asArray(externalAgents.entries, "integrations.externalAgents.entries");
 		const firstExternal = asRecord(externalEntries[0], "first external agent");
@@ -325,13 +320,14 @@ describe("contracts/settings v2 paths", () => {
 		strictEqual(asRecord(fleet.permissions, "fleet.permissions").mode, "escalate");
 		strictEqual(asRecord(fleet.retry, "fleet.retry").routeCooldownMs, 9876);
 		strictEqual(asRecord(fleet.limits, "fleet.limits").internalRunTimeoutMs, 7173);
-		strictEqual(asRecord(fleet.history, "fleet.history").journal, false);
+		// panes.journal is not carried: every panes key first shipped in v0.4.0,
+		// so the whole root is dropped and v2 defaults apply.
+		strictEqual("journal" in asRecord(fleet.history, "fleet.history"), false);
 		strictEqual(memory.maxOutputTokens, 1777);
 		strictEqual(asRecord(context.compaction, "context.compaction").systemPrompt, "prompts/compact.md");
 		strictEqual(asRecord(safety.limits, "safety.limits").sessionCostUsd, 9.5);
 		strictEqual(asRecord(safety.review, "safety.review").cadenceToolCalls, 7);
 		strictEqual(ui.outputDetail, "verbose");
-		strictEqual(files.followCwd, false);
 		strictEqual(env.SECRET_TOKEN, "exact-env-value");
 		strictEqual(firstExternal.cwd, "/tmp/external-agent");
 		strictEqual(firstExternal.connectTimeoutMs, 44444);
@@ -345,6 +341,7 @@ describe("contracts/settings v2 paths", () => {
 		strictEqual(asRecord(integrations.git, "integrations.git").commitAttribution, false);
 		strictEqual("workers" in migrated, false);
 		strictEqual("theme" in migrated, false);
+		strictEqual("panes" in migrated, false, "the panes root is dropped, not carried");
 
 		const reportFile = join(stateDir, "migration-reports", `${SETTINGS_V2_MIGRATION_ID}.json`);
 		const reportText = readFileSync(reportFile, "utf8");

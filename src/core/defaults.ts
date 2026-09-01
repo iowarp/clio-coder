@@ -183,12 +183,25 @@ export interface PanesSettings {
 	enabled: "auto" | "embedded" | "off";
 	/** Which terminal run states raise a pane-host toast. */
 	notifications: "failures" | "all" | "off";
+	/**
+	 * What composes itself at interactive boot in guest mode. `off` opens
+	 * nothing (docks still open on demand); `workers` opens the workers dock;
+	 * `cockpit` opens workers and files both.
+	 */
+	layout: "off" | "workers" | "cockpit";
+	/** Workers dock: the live run viewer split right of the Clio pane. */
+	workers: {
+		/** Share of the width the dock takes, clamped to at most half. */
+		ratio: number;
+	};
 	/** File-pane round-trip settings read live for each explicit open. */
 	files: {
 		enabled: boolean;
 		mode: "companion" | "chooser";
 		profile: "managed" | "user";
 		followCwd: boolean;
+		/** Share of the height the files dock takes, clamped to at most half. */
+		ratio: number;
 	};
 }
 
@@ -513,11 +526,14 @@ export const DEFAULT_SETTINGS = {
 		panes: {
 			enabled: "off",
 			notifications: "failures",
+			layout: "off",
+			workers: { ratio: 0.34 },
 			files: {
 				enabled: true,
 				mode: "companion",
 				profile: "managed",
 				followCwd: true,
+				ratio: 0.3,
 			},
 		} as PanesSettings,
 		keybindings: {} as Record<string, string | string[]>,
@@ -648,11 +664,15 @@ interface:
   panes:
     enabled: off
     notifications: failures
+    layout: off
+    workers:
+      ratio: 0.34
     files:
       enabled: true
       mode: companion
       profile: managed
       followCwd: true
+      ratio: 0.3
   keybindings: {}
 
 integrations:
