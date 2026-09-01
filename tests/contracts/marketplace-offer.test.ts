@@ -225,6 +225,18 @@ describe("contracts/marketplace-offer registration", () => {
 		deepStrictEqual(installs, [{ name: "resolve-merge-conflicts", scope: "user" }]);
 	});
 
+	it("still binds a deferred answer that arrives a turn after the offer", () => {
+		const { deps, installs } = makeDeps();
+		const registration = createMarketplaceOfferRegistration(deps);
+		registration.evaluate(turnStart("resolve this merge conflict"));
+		// A later turn intervenes (the model deferred its question). The offer must
+		// stay armed rather than being dropped at turn boundaries.
+		strictEqual(registration.evaluate(turnStart("keep going on the conflicts")).length, 0);
+		const effects = registration.evaluate(askUserAnswer(SKILL_INSTALL_OFFER_OPTION_PROJECT));
+		strictEqual(effects.length, 1);
+		deepStrictEqual(installs, [{ name: "resolve-merge-conflicts", scope: "project" }]);
+	});
+
 	it("treats Not now as session-only and Never as persistent", () => {
 		const { deps, installs, nevers } = makeDeps();
 		const registration = createMarketplaceOfferRegistration(deps);

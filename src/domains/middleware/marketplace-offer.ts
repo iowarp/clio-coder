@@ -261,13 +261,16 @@ export function createMarketplaceOfferRegistration(deps: MarketplaceOfferDeps): 
 		id: MARKETPLACE_OFFER_REGISTRATION_ID,
 		description:
 			"offers an uninstalled marketplace skill via ask_user when the request matches it; consented installs run gated to Clio's own marketplace, declines are remembered",
-		hooks: ["turn_start", "after_tool", "turn_end"],
+		hooks: ["turn_start", "after_tool"],
 		evaluate(input): ReadonlyArray<MiddlewareEffect> {
 			trackSession(input);
-			if (input.hook === "turn_end") {
-				pendingOffer = null;
-				return NO_EFFECTS;
-			}
+			// The offer is deliberately NOT cleared at turn_end. The reminder asks
+			// the model to put the ask_user question in the same turn, but it often
+			// defers a turn; clearing here dropped that deferred answer on the floor,
+			// so the operator's "Install" installed nothing and the model got no
+			// signal to correct a likely success claim. The offer now stays armed
+			// until a tag-carrying answer binds it, a newer offer replaces it, or the
+			// session ends — safe because only a tagged answer can bind (see H4).
 			if (input.hook === "after_tool") {
 				return input.toolName === ToolNames.AskUser ? evaluateAskUserAnswers(input) : NO_EFFECTS;
 			}
