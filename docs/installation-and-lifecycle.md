@@ -4,7 +4,7 @@ Clio Coder is designed to be self-contained and platform-compliant. This documen
 
 > [!TIP]
 > **Interactive spec available:** The source checkout includes the
-> [lifecycle blueprint](html/lifecycle_blueprint.html) with a path simulator and
+> [lifecycle blueprint](https://github.com/iowarp/clio-coder/blob/main/docs/html/lifecycle_blueprint.html) with a path simulator and
 > visual flowcharts.
 
 ### Optional dependency: the Claude Agent SDK

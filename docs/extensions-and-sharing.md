@@ -1,7 +1,7 @@
 # Extensions, Prompt Templates, Skills, and Share Archives
 
 > [!TIP]
-> **Interactive Spec Available:** An interactive dashboard is located at [docs/html/extensions_blueprint.html](html/extensions_blueprint.html).
+> **Interactive Spec Available:** A source-checkout dashboard is available at [docs/html/extensions_blueprint.html](https://github.com/iowarp/clio-coder/blob/main/docs/html/extensions_blueprint.html).
 
 Clio Coder has lightweight community-oriented resource packaging. Extensions are filesystem bundles that contribute prompts and skills. Share archives are portable JSON files for moving project/user Clio resources between machines or collaborators. Themes are built into the engine and are no longer loaded from extensions.
 

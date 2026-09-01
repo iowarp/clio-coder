@@ -2,7 +2,7 @@
 
 > [!TIP]
 > **Interactive spec available:** The source checkout includes the
-> [documentation blueprint](html/documentation_blueprint.html).
+> [documentation blueprint](https://github.com/iowarp/clio-coder/blob/main/docs/html/documentation_blueprint.html).
 
 Clio Coder is an experimental community alpha. Documentation should help contributors and early users work from the source of truth without overstating maturity. When docs drift, prefer the current source and tests over older prose or aspirational roadmap notes.
 

@@ -1,7 +1,7 @@
 # Fleet Dispatch
 
 > **Interactive spec available:** The source checkout includes the
-> [fleet dispatch blueprint](html/fleet_dispatch_blueprint.html).
+> [fleet dispatch blueprint](https://github.com/iowarp/clio-coder/blob/main/docs/html/fleet_dispatch_blueprint.html).
 
 Clio Coder dispatches bounded worker agents. With a fleet configured, those
 workers run on remote machines over SSH while the orchestrator keeps every
