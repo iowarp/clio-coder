@@ -186,6 +186,33 @@ function reminderText(effects: ReadonlyArray<MiddlewareEffect>): string {
 }
 
 describe("contracts/marketplace-offer registration", () => {
+	it("caches ordinary turns, revalidates offers, and refreshes at the session boundary", () => {
+		let installedReads = 0;
+		let marketplaceReads = 0;
+		let installedNames: string[] = [];
+		const { deps } = makeDeps({
+			listInstalledSkillNames: () => {
+				installedReads += 1;
+				return installedNames;
+			},
+			listMarketplaceEntries: () => {
+				marketplaceReads += 1;
+				return [entry()];
+			},
+		});
+		const registration = createMarketplaceOfferRegistration(deps);
+		for (let index = 0; index < 5; index += 1) {
+			strictEqual(registration.evaluate(turnStart(`rename local variable ${index} and update its callers`)).length, 0);
+		}
+		deepStrictEqual({ installedReads, marketplaceReads }, { installedReads: 1, marketplaceReads: 1 });
+		installedNames = ["resolve-merge-conflicts"];
+		strictEqual(registration.evaluate(turnStart("resolve this merge conflict safely")).length, 0);
+		deepStrictEqual({ installedReads, marketplaceReads }, { installedReads: 2, marketplaceReads: 1 });
+
+		strictEqual(registration.evaluate(turnStart("rename another local variable and its callers", "s2")).length, 0);
+		deepStrictEqual({ installedReads, marketplaceReads }, { installedReads: 3, marketplaceReads: 2 });
+	});
+
 	it("offers a matching uninstalled skill once per session, on substantive turns only", () => {
 		const { deps } = makeDeps();
 		const registration = createMarketplaceOfferRegistration(deps);
