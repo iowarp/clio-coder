@@ -34,6 +34,10 @@ override remains a read-compatible fallback for two minor releases and emits one
 upgrade, the GUI atomically moves a lone `clio-workbench` state root. If legacy and canonical roots both exist, it backs
 up both `projects.json` inputs and merges valid recent projects by canonical path and newest `lastOpenedAt`.
 
+The local host/renderer bridge emits `clio-coder.state`, `clio-coder-*` error codes, and
+`clioCoder`/`clioCoderVersion`/`clioCoderCommit` provenance fields. Its bounded readers accept and normalize the
+released `clio.state`, `clio-*`, `clio`, `clioVersion`, and `clioCommit` spellings for two minor releases.
+
 Chrome cancels every in-flight request with `net::ERR_NETWORK_CHANGED` when a network interface appears or disappears,
 which WSL2 and VPN hosts do in the first seconds after launch. The page recovers from that on its own: a cancelled
 bootstrap request is retried three times over about 2.5 s before the failure screen appears, and a cancelled stylesheet

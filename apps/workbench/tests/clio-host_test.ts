@@ -13,6 +13,7 @@ import { fileURLToPath } from "node:url";
 import type { AcpClientTiming, AcpLaunchSpec } from "../acp-client.ts";
 import { applyTurnEvent, emptyTurnProjection, type TurnEventInput, type TurnProjection } from "../src/timeline.ts";
 import {
+	ACP_CLIENT_NAME,
 	type ClioLauncher,
 	ClioProjectHost,
 	createLocalClioLauncher,
@@ -35,6 +36,10 @@ const fastTiming: AcpClientTiming = {
 	termGraceMs: 150,
 	killObservationMs: 1_500,
 };
+
+Deno.test("the ACP client registers the canonical Workbench machine identity", () => {
+	equal(ACP_CLIENT_NAME, "clio-coder-workbench");
+});
 
 type MatchingEvent<E, T extends HostEvent["type"]> = E extends { type: infer K } ? T extends K ? E & { type: T } : never
 	: never;

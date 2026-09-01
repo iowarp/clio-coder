@@ -175,7 +175,8 @@ const SAFE_SETTING_KEYS = [
 	"orchestrator.thinkingLevel",
 	"autonomy",
 ] as const;
-const CLIENT_INFO = { name: "clio-coder-workbench", title: PRODUCT_NAME, version: "0.0.1" } as const;
+export const ACP_CLIENT_NAME = "clio-coder-workbench" as const;
+const CLIENT_INFO = { name: ACP_CLIENT_NAME, title: PRODUCT_NAME, version: "0.0.1" } as const;
 /**
  * Every kind this host is prepared to project. Asking for a kind the peer does
  * not know is harmless; the peer intersects the request with its own allowlist.

@@ -74,6 +74,15 @@ function exactKeys(record: Record<string, unknown>, required: readonly string[])
 	return keys.length === required.length && required.every((key) => Object.hasOwn(record, key));
 }
 
+function requiredAndOptionalKeys(
+	record: Record<string, unknown>,
+	required: readonly string[],
+	optional: readonly string[],
+): boolean {
+	const allowed = new Set([...required, ...optional]);
+	return required.every((key) => Object.hasOwn(record, key)) && Object.keys(record).every((key) => allowed.has(key));
+}
+
 function text(value: unknown, maximumBytes: number): string | null {
 	if (typeof value !== "string" || value.length === 0 || value.trim() !== value) return null;
 	if (encoder.encode(value).byteLength > maximumBytes) return null;
@@ -350,8 +359,6 @@ function projectReport(value: unknown): WireEvalReport {
 		"startedAt",
 		"suiteId",
 		"servingGroup",
-		"clioCoderVersion",
-		"clioCoderCommit",
 		"platform",
 		"node",
 		"matrix",
@@ -364,16 +371,24 @@ function projectReport(value: unknown): WireEvalReport {
 		"scenariosTruncated",
 		"scenariosDropped",
 	] as const;
-	if (!isRecord(value) || !exactKeys(value, keys)) {
+	if (
+		!isRecord(value) ||
+		!requiredAndOptionalKeys(value, keys, ["clioCoderVersion", "clioCoderCommit", "clioVersion", "clioCommit"])
+	) {
 		return projectionError("Clio Coder returned an invalid eval report.");
+	}
+	const versionField = Object.hasOwn(value, "clioCoderVersion") ? "clioCoderVersion" : "clioVersion";
+	const commitField = Object.hasOwn(value, "clioCoderCommit") ? "clioCoderCommit" : "clioCommit";
+	if (!Object.hasOwn(value, versionField) || !Object.hasOwn(value, commitField)) {
+		return projectionError("Clio Coder returned an eval report without product provenance.");
 	}
 	const evalId = text(value.evalId, 128);
 	const startedAt = value.startedAt === null ? null : timestamp(value.startedAt);
 	const suiteId = text(value.suiteId, 128);
 	const servingGroup = counter(value.servingGroup, MAX_WIRE_EVAL_REPORTS);
 	const identity = {
-		clioCoderVersion: nullableText(value.clioCoderVersion, 64),
-		clioCoderCommit: nullableText(value.clioCoderCommit, 64),
+		clioCoderVersion: nullableText(value[versionField], 64),
+		clioCoderCommit: nullableText(value[commitField], 64),
 		platform: nullableText(value.platform, 64),
 		node: nullableText(value.node, 64),
 	};

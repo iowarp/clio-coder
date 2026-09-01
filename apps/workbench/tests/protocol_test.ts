@@ -576,11 +576,58 @@ Deno.test("clio snapshots use closed phases and never carry an engine kind", () 
 			snapshot: { ...clioSnapshot(), capabilities: {} },
 		})
 	);
+	const legacy = validateServerEvent({
+		...event,
+		kind: "clio.state",
+		payload: {
+			snapshot: {
+				...clioSnapshot("failed"),
+				lastFailure: { code: "clio-internal-error", summary: "The older GUI host reported a failure." },
+			},
+		},
+	});
+	equal(legacy.kind, "clio-coder.state");
+	if (legacy.kind !== "clio-coder.state") throw new Error("legacy event did not normalize");
+	equal(legacy.payload.snapshot.lastFailure?.code, "clio-coder-internal-error");
+	const reencoded = JSON.parse(encodeServerEvent(legacy)) as Record<string, unknown>;
+	equal(reencoded.kind, "clio-coder.state");
+	ok(!JSON.stringify(reencoded).includes('"clio-internal-error"'));
 });
 
 Deno.test("workspace payloads accept only the exact v4 workspace", () => {
 	const opened = serverEvent("project.opened", { workspace: wireWorkspace() });
 	equal(opened.payload.workspace.project.rootPath, "/tmp/workbench/alpha");
+	const canonicalWorkspace = wireWorkspace();
+	const { clioCoder, ...legacyWorkspace } = canonicalWorkspace;
+	const fromLegacy = serverEvent("project.opened", {
+		workspace: {
+			...legacyWorkspace,
+			clio: clioCoder,
+			timeline: [{
+				id: "turn-legacy-terminal",
+				kind: "failure",
+				title: "Turn failed",
+				summary: "The older host reported a failure.",
+				detail: "clio-failed",
+				status: "failed",
+				turnId: "turn-legacy",
+				origin: "live",
+				startedAt: "2026-08-18T12:00:00.000Z",
+				endedAt: "2026-08-18T12:00:01.000Z",
+				source: "reported-by-clio",
+			}],
+		},
+	});
+	deepStrictEqual(fromLegacy.payload.workspace.clioCoder, clioCoder);
+	equal(fromLegacy.payload.workspace.timeline[0]?.detail, "clio-coder-failed");
+	const canonicalWins = serverEvent("project.opened", {
+		workspace: {
+			...canonicalWorkspace,
+			clio: { ...clioSnapshot("failed"), lastFailure: { code: "clio-failed", summary: "legacy" } },
+		},
+	});
+	equal(canonicalWins.payload.workspace.clioCoder.phase, "idle");
+	ok(!Object.hasOwn(canonicalWins.payload.workspace, "clio"));
 	expectProtocolError(() => serverEvent("project.opened", { workspace: wireWorkspace({ agents: [] }) }));
 	expectProtocolError(() =>
 		serverEvent("project.opened", {
@@ -950,6 +997,12 @@ Deno.test("only terminal events are flagged terminal and usage stays exact", () 
 		source: "observed-by-workbench",
 	});
 	equal(terminal.terminal, true);
+	const legacyTerminal = validateServerEvent({
+		...terminal,
+		payload: { ...terminal.payload, code: "clio-permission-expired" },
+	});
+	if (legacyTerminal.kind !== "turn.terminal") throw new Error("terminal kind changed during normalization");
+	equal(legacyTerminal.payload.code, "clio-coder-permission-expired");
 	expectProtocolError(() =>
 		validateServerEvent({
 			protocolVersion: PROTOCOL_VERSION,
@@ -1824,6 +1877,30 @@ Deno.test("eval reports validate their own accounting, outcomes, and comparable 
 	// A suite result that passed while its behavioral judge disagreed is a real
 	// state, not a contradiction, and must survive validation.
 	equal(event.payload.inventory.reports[0]?.behaviorOutcomes.length, 2);
+	const { clioCoderVersion, clioCoderCommit, ...legacyReport } = report;
+	const legacyEvent = serverEvent("eval.state", {
+		inventory: {
+			...wire,
+			reports: [
+				{ ...legacyReport, clioVersion: clioCoderVersion, clioCommit: clioCoderCommit },
+				...wire.reports.slice(1),
+			],
+		},
+	});
+	equal(legacyEvent.payload.inventory.reports[0]?.clioCoderVersion, clioCoderVersion);
+	equal(legacyEvent.payload.inventory.reports[0]?.clioCoderCommit, clioCoderCommit);
+	ok(!Object.hasOwn(legacyEvent.payload.inventory.reports[0] ?? {}, "clioVersion"));
+	const canonicalProvenanceWins = serverEvent("eval.state", {
+		inventory: {
+			...wire,
+			reports: [
+				{ ...report, clioVersion: "0.3.2", clioCommit: "legacy-commit" },
+				...wire.reports.slice(1),
+			],
+		},
+	});
+	equal(canonicalProvenanceWins.payload.inventory.reports[0]?.clioCoderVersion, clioCoderVersion);
+	equal(canonicalProvenanceWins.payload.inventory.reports[0]?.clioCoderCommit, clioCoderCommit);
 
 	const withReport = (broken: unknown) =>
 		expectProtocolError(() => serverEvent("eval.state", { inventory: { ...wire, reports: [broken] } }));
