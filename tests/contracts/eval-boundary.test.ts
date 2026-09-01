@@ -31,7 +31,7 @@ test("eval suites fail closed at the versioned schema boundary", () => {
 	strictEqual(partialResult.issues.some((issue) => issue.path === "$.tasks"), true);
 
 	const contradictory = validSuite();
-	contradictory.tasks[0]!.runner = { kind: "external-command", agent: "coder", commands: ["true"] };
+	(contradictory.tasks[0]!.runner as { agent?: string }).agent = "coder";
 	const contradictoryResult = validateEvalSuiteV2(contradictory);
 	strictEqual(contradictoryResult.valid, false);
 	if (contradictoryResult.valid) throw new Error("contradictory suite unexpectedly passed");

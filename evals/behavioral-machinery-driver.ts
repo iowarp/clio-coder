@@ -67,7 +67,7 @@ try {
 				const found = recipes?.get(id);
 				return found === null || found === undefined
 					? null
-					: { capabilityClass: found.capabilityClass, resultContract: found.resultContract };
+					: { capabilityClass: found.capabilityClass, resultContractKind: found.resultContract.kind };
 			},
 		}),
 		task:
@@ -157,6 +157,9 @@ function insideAuthorityTask(recipe: AgentRecipe): string {
 			return "Write the one requested planning artifact and return the role's declared result.";
 		case "workspace-edit":
 			return "Make the bounded requested fixture update and return the role's declared mutation result.";
+		case "orchestration":
+		case "internal":
+			throw new Error(`behavioral machinery does not execute ${recipe.capabilityClass} recipes`);
 	}
 }
 
