@@ -11,7 +11,12 @@ export function openPromptsOverlay(tui: TUI, ctx: SlashCommandContext, onClose: 
 	const promptsList = ctx.listPrompts();
 	const items: ListOverlayItem[] = promptsList.items.map((template) => {
 		const usage = `/${template.name}${template.argumentHint ? ` ${template.argumentHint}` : ""}`;
-		const label = `${usage.padEnd(28)}${template.description}`;
+		// The usage already carries the argument synopsis. Repeating it in the
+		// right-aligned metadata column starves the description at 60 columns, and
+		// a usage longer than the alignment stop used to join directly to its first
+		// word (`[description]Capture`). Two literal cells remain a separator even
+		// when the command has outgrown the nominal column.
+		const label = `${usage.padEnd(28)}  ${template.description}`;
 		const item: ListOverlayItem = {
 			id: template.name,
 			label,
@@ -39,8 +44,7 @@ export function openPromptsOverlay(tui: TUI, ctx: SlashCommandContext, onClose: 
 				: template.trusted
 					? undefined
 					: clioTheme().fg("warning", "untrusted");
-		if (marker) item.meta = template.argumentHint ? `${template.argumentHint} · ${marker}` : marker;
-		else if (template.argumentHint) item.meta = template.argumentHint;
+		if (marker) item.meta = marker;
 		return item;
 	});
 
