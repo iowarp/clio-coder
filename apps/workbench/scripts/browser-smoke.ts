@@ -19,7 +19,6 @@ import type { ClioDispatchInspector } from "../clio-dispatch-inspector.ts";
 import type { ClioFleetInspector } from "../clio-fleet-inspector.ts";
 import type { ClioToolchainInspector } from "../clio-toolchain-inspector.ts";
 import type { ClioDecisionsInspector } from "../clio-decisions-inspector.ts";
-import type { ClioEvalInspector } from "../clio-eval-inspector.ts";
 import type { ClioInteropInspector } from "../clio-interop-inspector.ts";
 import type { ClioTraceInspector } from "../clio-trace-inspector.ts";
 import type { ClioEvidenceInspector } from "../clio-evidence-inspector.ts";
@@ -31,7 +30,6 @@ import {
 	catalogInspectionFixture,
 	configInspectionFixture,
 	dispatchInspectionFixture,
-	evalInventoryFixture,
 	evidenceDetailFixture,
 	evidenceInspectionFixture,
 	fleetInspectionFixture,
@@ -130,9 +128,6 @@ const running = await startWorkbenchServer({
 		inspect: () => Promise.resolve(evidenceInspectionFixture()),
 		read: (_cwd, evidenceId) => Promise.resolve({ ...evidenceDetailFixture(), evidenceId }),
 	} satisfies ClioEvidenceInspector,
-	evalInspector: {
-		inspect: () => Promise.resolve(evalInventoryFixture()),
-	} satisfies ClioEvalInspector,
 	acpTiming: { permissionTimeoutMs: 120_000, cancelGraceMs: 2_000, closeTimeoutMs: 1_000, exitGraceMs: 1_000 },
 });
 
@@ -677,36 +672,6 @@ try {
 	// Selecting a round drives the same run record the step index drives.
 	await councilGrid.getByRole("button", { disabled: false }).first().click();
 	await fleetJournal.getByRole("heading", { name: "builder · run-alpha" }).waitFor();
-	// Stored eval reports cross as outcomes and accounting. A report also holds
-	// the whole session transcript its runner attached, and none of that is here.
-	const evalReports = fleetJournal.getByRole("region", { name: "Completed evaluation runs" });
-	await evalReports.getByText("public-main-agent-behavior", { exact: true }).waitFor();
-	await evalReports.getByText("1 of 2 passed", { exact: true }).waitFor();
-	// The classified reason, never the grader's own output.
-	await evalReports.getByText("The grader declared the task unsolved", { exact: false }).waitFor();
-	// The suite result passed one of two and the behavioral judge disagreed on
-	// one; both are on screen because they are different questions.
-	await evalReports.getByText("Broke a declared behavior", { exact: false }).waitFor();
-	await evalReports.getByText("Behaved as declared", { exact: false }).waitFor();
-	await evalReports.getByText("main-adversarial-scope", { exact: true }).waitFor();
-	await evalReports.getByText("0/1 passed", { exact: true }).waitFor();
-	// A run that reported no provider usage has no counts, not a zero.
-	await evalReports.getByText("No run reported provider usage", { exact: true }).waitFor();
-	// The comparable set is the relation, and the fingerprint behind it is not here.
-	await evalReports.getByText("Group 1", { exact: true }).waitFor();
-	await evalReports.getByText("Group 2 · matrix only", { exact: true }).waitFor();
-	// The attachments are counted where their contents do not cross.
-	await evalReports.getByText("6 kept on the host · 106 declared metrics", { exact: true }).waitFor();
-	await evalReports.getByText(/This window holds 1 report in a format this Clio Coder no longer reads/u).waitFor();
-	await evalReports.getByText(/holds the whole session transcript its runner attached/u).waitFor();
-	// Running an evaluation is execution and this surface offers no control for it.
-	equal(await evalReports.getByRole("button").count(), 0);
-	// The run window's own task text and the trace panel's paths sit on the same
-	// canvas and are exactly the classes an eval row must never acquire.
-	for (const forbidden of ["Inspect the durable event boundary", "/home/", "stdout", "sha256", "codeword"]) {
-		equal(await evalReports.getByText(forbidden, { exact: false }).count(), 0);
-	}
-
 	const fleetAccessibility = await new AxeBuilder({ page })
 		.withTags(["wcag2a", "wcag2aa", "wcag21a", "wcag21aa"])
 		.analyze();
@@ -1675,7 +1640,6 @@ try {
 			traceAccountingCarriesNoRequestTextOrPath: true,
 			traceTailsCrossAsShapesNotRows: true,
 			evidenceInventoryCarriesShapeAndTrustOnly: true,
-			evalReportsCrossAsOutcomesWithoutTheirTranscripts: true,
 			artifactsAreReferencedOnlyByHostServedIds: true,
 			receiptVerificationIsSeparateFromTheSnapshotVerdict: true,
 			compactCatalogHasNoPageOverflow: true,

@@ -266,12 +266,6 @@ function App() {
 					dispatch({ type: "interop.inspect.submitted", requestId });
 				}
 			},
-			inspectEvalReports() {
-				const requestId = send("eval.inspect", {});
-				if (requestId !== null) {
-					dispatch({ type: "eval.inspect.submitted", requestId });
-				}
-			},
 			inspectEvidence() {
 				const requestId = send("evidence.inspect", {});
 				if (requestId !== null) {

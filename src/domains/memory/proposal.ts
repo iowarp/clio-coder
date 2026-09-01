@@ -118,7 +118,6 @@ function inferRepository(overview: EvidenceOverview): MemoryRepositoryIdentity |
 }
 
 function inferScope(overview: EvidenceOverview, repository: MemoryRepositoryIdentity | null): MemoryScope {
-	if (overview.source.kind === "eval") return "task-family";
 	if (repository !== null) return "repo";
 	if (overview.runtimeIds.length > 0) return "runtime";
 	if (overview.agentIds.length > 0) return "agent";
@@ -196,7 +195,7 @@ function avoidWhen(overview: EvidenceOverview): string[] {
 function confidenceForEvidence(overview: EvidenceOverview, findings: ReadonlyArray<EvidenceFinding>): number {
 	let value = 0.45;
 	if (overview.totals.runs > 0) value += 0.05;
-	if (overview.totals.receipts > 0 || overview.source.kind === "eval") value += 0.05;
+	if (overview.totals.receipts > 0) value += 0.05;
 	if (overview.tags.length > 0) value += 0.05;
 	if (findings.some((finding) => finding.severity === "warn")) value += 0.05;
 	if (overview.totals.linkedToolEvents > 0 || overview.totals.toolEvents > 0) value += 0.05;
@@ -205,8 +204,7 @@ function confidenceForEvidence(overview: EvidenceOverview, findings: ReadonlyArr
 
 function formatSource(overview: EvidenceOverview): string {
 	if (overview.source.kind === "run") return `run:${overview.source.runId}`;
-	if (overview.source.kind === "session") return `session:${overview.source.sessionId}`;
-	return `eval:${overview.source.evalId}`;
+	return `session:${overview.source.sessionId}`;
 }
 
 function truncateText(value: string, maxChars: number): string {
