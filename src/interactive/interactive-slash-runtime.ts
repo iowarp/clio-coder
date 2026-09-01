@@ -38,7 +38,6 @@ import { renderSessionHtml } from "./export-html/index.js";
 import { dateLocal } from "./format-time.js";
 import type { OracleDigestSources } from "./oracle.js";
 import type { PendingModelScope } from "./overlays/model-scope.js";
-import type { SettingsCenterRowId, SettingsSectionId } from "./overlays/settings.js";
 import {
 	type ContextClearCommandOptions,
 	type CouncilDispatchOutcome,
@@ -46,6 +45,7 @@ import {
 	type InitCommandOptions,
 	parseSlashCommand,
 	type RunIo,
+	type SettingsAreaId,
 	type SlashCommandContext,
 	type SlashCommandDispatchResult,
 	type TaskMemorySeedCommandResult,
@@ -145,7 +145,8 @@ export interface InteractiveSlashRuntimeDeps {
 	 * Absent on a host with no overlay layer, where the swap stays session-scoped.
 	 */
 	openModelScope?: (ref: PendingModelScope) => void;
-	openSettings: (section?: SettingsSectionId, rowId?: SettingsCenterRowId) => void;
+	openSettings: (area?: SettingsAreaId, group?: string) => void;
+	openFleetRuns?: () => void;
 	openResume: () => void;
 	startNewSession: () => void;
 	openTree: () => void;
@@ -174,11 +175,7 @@ export interface InteractiveSlashRuntime {
 }
 
 /** Owns slash-command context construction and its asynchronous command state. */
-const OUTPUT_VERBOSITIES: ReadonlyArray<ClioSettings["terminal"]["outputVerbosity"]> = [
-	"minimal",
-	"default",
-	"verbose",
-];
+const OUTPUT_VERBOSITIES: ReadonlyArray<ClioSettings["interface"]["outputDetail"]> = ["minimal", "default", "verbose"];
 
 /** Thinking capability of the active orchestrator target and model, or null when unresolved. */
 export function resolveThinkingCapability(
@@ -187,9 +184,9 @@ export function resolveThinkingCapability(
 ): ResolvedThinkingCapability | null {
 	const resolved = resolveModelRuntimeCapabilitiesForProviders(
 		providers,
-		settings.orchestrator.target,
-		settings.orchestrator.model,
-		settings.orchestrator.thinkingLevel ?? "off",
+		settings.chat.target,
+		settings.chat.model,
+		settings.chat.thinkingLevel ?? "off",
 	);
 	return resolved?.thinking ?? null;
 }
@@ -370,7 +367,8 @@ export function createInteractiveSlashRuntime(deps: InteractiveSlashRuntimeDeps)
 			deps.requestRender();
 		}
 	};
-	const context: SlashCommandContext = {
+	let context: SlashCommandContext;
+	context = {
 		io: deps.io,
 		notice: appendCommandNotice,
 		echoOperatorCommand: (text) => {
@@ -392,7 +390,7 @@ export function createInteractiveSlashRuntime(deps: InteractiveSlashRuntimeDeps)
 		openSkillsHub: deps.openSkillsHub,
 		listExtensions: () => deps.extensions?.list(cwd(), { all: true }) ?? [],
 		listAgents: () => deps.agents?.listSpecs().filter((spec) => spec.audience !== "internal") ?? [],
-		listDelegationAgents: () => deps.getSettings?.().delegation.agents ?? [],
+		listDelegationAgents: () => deps.getSettings?.().integrations.externalAgents.entries ?? [],
 		exportShareArchive: (outPath) => {
 			if (!deps.share) throw new Error("share domain is not loaded");
 			const path = resolve(outPath);
@@ -423,7 +421,8 @@ export function createInteractiveSlashRuntime(deps: InteractiveSlashRuntimeDeps)
 		oracleBriefing: oracleBriefingSources,
 		startHandoff: deps.startHandoff,
 		...(deps.startFleetRun ? { startFleetRun: deps.startFleetRun } : {}),
-		...(deps.getSettings ? { getWorkerRosters: () => deps.getSettings?.().workers.rosters ?? {} } : {}),
+		...(deps.openFleetRuns ? { openFleetRuns: deps.openFleetRuns } : {}),
+		...(deps.getSettings ? { getWorkerRosters: () => deps.getSettings?.().fleet.rosters ?? {} } : {}),
 		...(deps.runCouncilDispatch ? { runCouncilDispatch: deps.runCouncilDispatch } : {}),
 		openContextView: deps.openContextView,
 		openTasks: deps.openTasks,
@@ -467,13 +466,42 @@ export function createInteractiveSlashRuntime(deps: InteractiveSlashRuntimeDeps)
 			// has no mandate to do.
 			if (deps.commitSetting) {
 				const next = structuredClone(settings) as ClioSettings;
-				next.orchestrator.thinkingLevel = match;
-				deps.commitSetting("orchestrator.thinkingLevel", next, "session");
+				next.chat.thinkingLevel = match;
+				deps.commitSetting("chat.thinkingLevel", next, "session");
 			} else {
 				deps.onSetThinkingLevel(match);
 			}
 			deps.refreshFooter();
 			return { status: "applied", level: match, display: labelFor(match) };
+		},
+		thinkingLevelChoices: () => {
+			const settings = deps.getSettings?.();
+			if (!settings) return [];
+			const thinking = resolveThinkingCapability(deps.providers, settings);
+			return (thinking?.supportedLevels ?? (["off"] as ReadonlyArray<ThinkingLevel>)).map((value) => ({
+				value,
+				label: thinkingLevelChoiceLabel(thinking?.mechanism ?? null, value),
+			}));
+		},
+		openThinkingPicker: () => {
+			const choices = context.thinkingLevelChoices?.() ?? [];
+			if (choices.length === 0) {
+				appendCommandNotice("error", "thinking level cannot be set right now");
+				return;
+			}
+			void deps
+				.openAskUser([
+					{
+						question: "Choose the thinking level for this chat.",
+						header: "Thinking",
+						options: choices.map(({ label }) => ({ label })),
+					},
+				])
+				.then((result) => {
+					const answer = result.cancelled ? undefined : result.answers[0]?.answer;
+					const selected = choices.find(({ label }) => label === answer);
+					if (selected) dispatchSlashCommand({ kind: "thinking-set", level: selected.value }, context);
+				});
 		},
 		setOutputVerbosity: (verbosity) => {
 			if (!deps.getSettings || !(deps.commitSetting || deps.writeSettings)) return { status: "unavailable" };
@@ -481,10 +509,10 @@ export function createInteractiveSlashRuntime(deps: InteractiveSlashRuntimeDeps)
 			const match = OUTPUT_VERBOSITIES.find((candidate) => candidate === requested);
 			if (!match) return { status: "unsupported", verbosity, supported: OUTPUT_VERBOSITIES };
 			const next = structuredClone(deps.getSettings()) as ClioSettings;
-			next.terminal.outputVerbosity = match;
+			next.interface.outputDetail = match;
 			// Session scope: /output changes this session and leaves settings.yaml
 			// alone. Saving it as the default is what Settings → Terminal is for.
-			if (deps.commitSetting) deps.commitSetting("terminal.outputVerbosity", next, "session");
+			if (deps.commitSetting) deps.commitSetting("interface.outputDetail", next, "session");
 			else deps.writeSettings?.(next);
 			// `/output` is also the explicit reset action for transcript folds. Do
 			// this even when the requested level already matches the current one;
@@ -492,6 +520,24 @@ export function createInteractiveSlashRuntime(deps: InteractiveSlashRuntimeDeps)
 			deps.chatPanel.clearFoldOverrides();
 			deps.refreshFooter();
 			return { status: "applied", verbosity: match };
+		},
+		openOutputPicker: () => {
+			void deps
+				.openAskUser([
+					{
+						question: "Choose transcript detail for this session.",
+						header: "Output",
+						options: OUTPUT_VERBOSITIES.map((value) => ({
+							label: `${value[0]?.toUpperCase()}${value.slice(1)}`,
+						})),
+					},
+				])
+				.then((result) => {
+					if (result.cancelled) return;
+					const answer = result.answers[0]?.answer.toLowerCase();
+					const selected = OUTPUT_VERBOSITIES.find((value) => value === answer);
+					if (selected) dispatchSlashCommand({ kind: "output-set", verbosity: selected }, context);
+				});
 		},
 		openModel: deps.openModel,
 		providers: deps.providers,

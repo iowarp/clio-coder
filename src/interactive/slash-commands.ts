@@ -51,8 +51,6 @@ import {
 	packOracleDigest,
 } from "./oracle.js";
 import { isLibraryTab, LIBRARY_TABS } from "./overlays/library-tabs.js";
-import type { SettingsCenterRowId } from "./overlays/settings.js";
-import { SETTINGS_SECTIONS, type SettingsSectionId } from "./overlays/settings-sections.js";
 import type { CommandArgsSpec, CommandPositionalSpec, ParsedArgs } from "./slash-spec.js";
 import { matchFromSpec, usageLine } from "./slash-spec.js";
 import {
@@ -82,21 +80,31 @@ import type { WorkerEntryState } from "./worker-stream.js";
  * shell's Stage 0 closure, and a second, disjoint reacher makes esbuild split
  * it, which is a startup-latency regression rather than a style problem. The
  * parse-time data tables the registry needs live in leaves for that reason:
- * `./overlays/settings-sections.js`, `./overlays/library-tabs.js`, and
- * `COUNCIL_SYNTHESIS_LABEL` in `./council.js`. Import from those, not from the
- * overlays that re-export them.
+ * `./overlays/library-tabs.js` and `COUNCIL_SYNTHESIS_LABEL` in
+ * `./council.js`. Import from those, not from overlays that re-export them.
  *
  * Boundaries rule6 in `tests/boundaries/check-boundaries.ts` refuses a violation
  * at lint time; `tests/contracts/instant-shell-import-graph.test.ts` is the
  * measurement it protects.
  */
 
-type ShareCommandVariant =
-	| { kind: "share"; action: "export"; path: string }
-	| { kind: "share"; action: "import"; path: string; dryRun: boolean; force: boolean }
-	/** Put a finished worker run's answer into the main agent's context. Bare `/share` takes the newest one. */
-	| { kind: "share"; action: "worker-run"; runId?: string }
-	| { kind: "share"; action: "usage"; subcommand?: "export" | "import"; error?: string };
+/** Put a finished worker run's answer into the main agent's context. Bare `/share` takes the newest one. */
+type ShareCommandVariant = { kind: "share"; runId?: string };
+type ArchiveCommandVariant =
+	| { kind: "archive-export"; path: string }
+	| { kind: "archive-import"; path: string; dryRun: boolean; force: boolean }
+	| { kind: "archive-usage"; subcommand?: "export" | "import"; error?: string };
+
+export const SETTINGS_AREA_IDS = [
+	"chat",
+	"fleet",
+	"targets",
+	"context",
+	"safety",
+	"interface",
+	"integrations",
+] as const;
+export type SettingsAreaId = (typeof SETTINGS_AREA_IDS)[number];
 
 type SlashCommandVariant =
 	| { kind: "quit" }
@@ -107,12 +115,10 @@ type SlashCommandVariant =
 	/** `ref` is the turnId an `[evicted ...]` marker names. */
 	| { kind: "context-recall"; ref: string }
 	| { kind: "skill-selector" }
-	| { kind: "library"; tab?: LibraryEntryKind }
+	| { kind: "resources"; family?: "skills" | "prompts" | "extensions"; tab?: LibraryEntryKind }
 	| { kind: "skill-invocation"; text: string }
-	| { kind: "prompts" }
-	| { kind: "extensions" }
-	| { kind: "interop" }
 	| ShareCommandVariant
+	| ArchiveCommandVariant
 	/** `source` is the line the operator typed, echoed above the run's transcript block. */
 	| { kind: "run"; agentId: string; task: string; options: RunCommandOptions; source: string }
 	| { kind: "run-usage" }
@@ -131,7 +137,8 @@ type SlashCommandVariant =
 	/** `/fleet run <name>`: compile the plan, show it for approval, dispatch on accept. */
 	| { kind: "fleet-run"; name: string; vars: Record<string, string> }
 	| { kind: "fleet-run-usage"; reason?: string }
-	| { kind: "agents" }
+	| { kind: "fleet" }
+	| { kind: "agents"; connect?: boolean }
 	| { kind: "cost" }
 	| { kind: "context-view" }
 	| { kind: "tasks" }
@@ -153,10 +160,12 @@ type SlashCommandVariant =
 	| { kind: "panes-close"; target: string }
 	| { kind: "panes-usage"; reason?: string }
 	| { kind: "thinking-set"; level: string }
+	| { kind: "thinking-picker" }
 	| { kind: "output-set"; verbosity: string }
+	| { kind: "output-picker" }
 	| { kind: "model" }
 	| { kind: "model-set"; pattern: string }
-	| { kind: "settings"; section?: SettingsSectionId; rowId?: SettingsCenterRowId }
+	| { kind: "settings"; area?: SettingsAreaId; group?: string }
 	| { kind: "resume" }
 	| { kind: "new" }
 	| { kind: "tree" }
@@ -685,8 +694,11 @@ export interface SlashCommandContext {
 	 * not be one the active target supports.
 	 */
 	setThinkingLevel?: (level: string) => SetThinkingLevelResult;
+	thinkingLevelChoices?: () => ReadonlyArray<{ value: string; label: string }>;
+	openThinkingPicker?: () => void;
 	/** Apply a transcript verbosity named on the command line; refused values are reported by the caller. */
 	setOutputVerbosity?: (verbosity: string) => SetOutputVerbosityResult;
+	openOutputPicker?: () => void;
 	openModel: () => void;
 	/** Live providers contract used by `/model <pattern>` to resolve directly. */
 	providers: ProvidersContract;
@@ -696,7 +708,8 @@ export interface SlashCommandContext {
 	 * changed; the dialog reports the outcome itself.
 	 */
 	applyModelRef: (ref: ResolvedModelRef) => "applied" | "pending";
-	openSettings: (section?: SettingsSectionId, rowId?: SettingsCenterRowId) => void;
+	openSettings: (area?: SettingsAreaId, group?: string) => void;
+	openFleetRuns?: () => void;
 	openResume: () => void;
 	startNewSession: () => void;
 	openTree: () => void;
@@ -762,7 +775,7 @@ export function formatUserTaskHandoff(task: Pick<UserTask, "id" | "title" | "not
 }
 
 /** The verb a command performs, in the order /help lists the groups. */
-export const SLASH_COMMAND_GROUPS = ["Run", "Inspect", "Configure", "Sessions"] as const;
+export const SLASH_COMMAND_GROUPS = ["Work", "Inspect", "Configure", "Session"] as const;
 export type SlashCommandGroup = (typeof SLASH_COMMAND_GROUPS)[number];
 
 export interface BuiltinSlashCommand {
@@ -789,8 +802,8 @@ function isRunThinkingLevel(value: string): value is JobThinkingLevel {
 	return RUN_THINKING_LEVELS.some((level) => level === value);
 }
 
-function isSettingsSectionId(value: string): value is SettingsSectionId {
-	return SETTINGS_SECTIONS.some((section) => section.id === value);
+function isSettingsAreaId(value: string): value is SettingsAreaId {
+	return SETTINGS_AREA_IDS.some((area) => area === value);
 }
 
 /** `/context compact` alone keeps a free-form optional instruction tail. */
@@ -815,28 +828,6 @@ const RECALL_POSITIONALS: ReadonlyArray<CommandPositionalSpec> = [{ name: "ref",
  */
 function fromArgsOrUsage(name: string, command: SlashCommand): (parsed: ParsedArgs) => SlashCommand {
 	return (parsed) => (parsed.error ? { kind: "usage-error", command: name, reason: parsed.error } : command);
-}
-
-/**
- * A configuration-shaped command that is a shortcut into one settings section.
- * It parses to the same `settings` command `/settings <section>` produces, so
- * the settings entry dispatches it and this entry owns no kind of its own.
- */
-function settingsDeepLink(
-	name: string,
-	section: SettingsSectionId,
-	description: string,
-	rowId?: SettingsCenterRowId,
-): BuiltinSlashCommand {
-	return {
-		name,
-		description,
-		group: "Configure",
-		kinds: [],
-		args: {},
-		fromArgs: fromArgsOrUsage(name, { kind: "settings", section, ...(rowId ? { rowId } : {}) }),
-		handle: () => undefined,
-	};
 }
 
 function usageNotice(entry: BuiltinSlashCommand, subcommand?: string): string {
@@ -876,7 +867,7 @@ export const BUILTIN_SLASH_COMMANDS: ReadonlyArray<BuiltinSlashCommand> = [
 	{
 		name: "quit",
 		description: "Exit Clio Coder",
-		group: "Sessions",
+		group: "Session",
 		kinds: ["quit"],
 		args: {},
 		fromArgs: fromArgsOrUsage("quit", { kind: "quit" }),
@@ -902,7 +893,7 @@ export const BUILTIN_SLASH_COMMANDS: ReadonlyArray<BuiltinSlashCommand> = [
 	{
 		name: "skill",
 		description: "Open the Skills Hub or invoke a skill",
-		group: "Run",
+		group: "Work",
 		kinds: ["skill-selector", "skill-invocation"],
 		args: {
 			positionals: [
@@ -929,65 +920,74 @@ export const BUILTIN_SLASH_COMMANDS: ReadonlyArray<BuiltinSlashCommand> = [
 		},
 	},
 	{
-		name: "library",
-		description: "Open the Skills Hub on a resource library tab",
-		group: "Run",
-		kinds: ["library"],
-		args: { positionals: [{ name: "kind", required: false }] },
+		name: "resources",
+		description: "Browse skills, prompts, libraries, and extensions",
+		group: "Inspect",
+		kinds: ["resources"],
+		subcommandDescriptions: {
+			skills: "Browse installed skills",
+			prompts: "Browse prompt templates",
+			library: "Browse resource libraries",
+			extensions: "Browse installed extensions",
+		},
+		args: {
+			subcommands: {
+				skills: {},
+				prompts: {},
+				library: { positionals: [{ name: "kind", required: false }] },
+				extensions: {},
+			},
+		},
 		fromArgs(parsed) {
-			if (parsed.error) return { kind: "usage-error", command: "library", reason: parsed.error };
+			if (parsed.error) return { kind: "usage-error", command: "resources", reason: parsed.error };
+			if (parsed.subcommand === undefined || parsed.subcommand === "skills")
+				return { kind: "resources", family: "skills" };
+			if (parsed.subcommand === "prompts" || parsed.subcommand === "extensions")
+				return { kind: "resources", family: parsed.subcommand };
 			const tab = parsed.positionals[0];
-			if (tab === undefined) return { kind: "library" };
+			if (tab === undefined) return { kind: "resources" };
 			if (!isLibraryTab(tab)) {
 				const known = LIBRARY_TABS.map((entry) => entry.id).join(", ");
-				return { kind: "usage-error", command: "library", reason: `Unknown kind: ${tab} (one of ${known})` };
+				return { kind: "usage-error", command: "resources", reason: `Unknown kind: ${tab} (one of ${known})` };
 			}
-			return { kind: "library", tab };
+			return { kind: "resources", tab };
 		},
 		handle(command, ctx) {
-			if (command.kind === "library") ctx.openSkillsHub?.(command.tab);
-		},
-	},
-	{
-		name: "prompts",
-		description: "List prompt templates",
-		group: "Inspect",
-		kinds: ["prompts"],
-		args: {},
-		fromArgs: fromArgsOrUsage("prompts", { kind: "prompts" }),
-		handle(_command, ctx) {
-			ctx.openPrompts();
-		},
-	},
-	{
-		name: "extensions",
-		description: "List installed extensions",
-		group: "Inspect",
-		kinds: ["extensions"],
-		args: {},
-		fromArgs: fromArgsOrUsage("extensions", { kind: "extensions" }),
-		handle(_command, ctx) {
-			ctx.openExtensions?.();
-		},
-	},
-	{
-		name: "interop",
-		description: "Review other coding agents detected on this machine",
-		group: "Inspect",
-		kinds: ["interop"],
-		args: {},
-		fromArgs: fromArgsOrUsage("interop", { kind: "interop" }),
-		handle(_command, ctx) {
-			ctx.openInterop?.();
+			if (command.kind !== "resources") return;
+			if (command.family === "prompts") ctx.openPrompts();
+			else if (command.family === "extensions") ctx.openExtensions();
+			else ctx.openSkillsHub?.(command.tab);
 		},
 	},
 	{
 		name: "share",
-		description: "Share a worker result with the main agent, or export and import Clio archives",
-		group: "Sessions",
+		description: "Share a worker result with the main agent",
+		group: "Work",
 		kinds: ["share"],
+		args: { positionals: [{ name: "run-id", required: false }] },
+		fromArgs(parsed) {
+			const retiredArchiveVerb = parsed.positionals[0];
+			if (retiredArchiveVerb === "export" || retiredArchiveVerb === "import") {
+				return {
+					kind: "usage-error",
+					command: "share",
+					reason: `/share ${retiredArchiveVerb} is retired and did not run; use /archive ${retiredArchiveVerb}`,
+				};
+			}
+			if (parsed.error) return { kind: "usage-error", command: "share", reason: parsed.error };
+			return { kind: "share", ...(parsed.positionals[0] ? { runId: parsed.positionals[0] } : {}) };
+		},
+		handle(command, ctx) {
+			if (command.kind === "share") shareWorkerRun(command.runId, ctx);
+		},
+	},
+	{
+		name: "archive",
+		description: "Export or import a full Clio archive",
+		group: "Session",
+		kinds: ["archive-export", "archive-import", "archive-usage"],
+		subcommandDescriptions: { export: "Export a full Clio archive", import: "Import a full Clio archive" },
 		args: {
-			positionals: [{ name: "runId", required: false }],
 			subcommands: {
 				export: {
 					positionals: [{ name: "path", required: true }],
@@ -1002,56 +1002,43 @@ export const BUILTIN_SLASH_COMMANDS: ReadonlyArray<BuiltinSlashCommand> = [
 			const subcommand = parsed.subcommand === "export" || parsed.subcommand === "import" ? parsed.subcommand : undefined;
 			if (parsed.error) {
 				return {
-					kind: "share",
-					action: "usage",
+					kind: "archive-usage",
 					...(subcommand !== undefined ? { subcommand } : {}),
 					error: parsed.error,
 				};
 			}
 			const path = parsed.positionals[0];
-			if (subcommand === "export" && path !== undefined) return { kind: "share", action: "export", path };
+			if (subcommand === "export" && path !== undefined) return { kind: "archive-export", path };
 			if (subcommand === "import" && path !== undefined) {
 				return {
-					kind: "share",
-					action: "import",
+					kind: "archive-import",
 					path,
 					dryRun: parsed.flags.has("--dry-run"),
 					force: parsed.flags.has("--force"),
 				};
 			}
-			// No subcommand means the worker-result sense of the word, with or
-			// without a run id. `export` and `import` are the archive senses and are
-			// matched above, so neither reading can swallow the other.
-			if (subcommand === undefined) {
-				return { kind: "share", action: "worker-run", ...(path !== undefined ? { runId: path } : {}) };
-			}
-			return { kind: "share", action: "usage", ...(subcommand !== undefined ? { subcommand } : {}) };
+			return { kind: "archive-usage", ...(subcommand !== undefined ? { subcommand } : {}) };
 		},
 		handle(command, ctx) {
-			if (command.kind !== "share") return;
-			if (command.action === "worker-run") {
-				shareWorkerRun(command.runId, ctx);
-				return;
-			}
-			if (command.action === "usage") {
-				const entry = BUILTIN_SLASH_COMMANDS.find((candidate) => candidate.name === "share");
+			if (command.kind === "archive-usage") {
+				const entry = BUILTIN_SLASH_COMMANDS.find((candidate) => candidate.name === "archive");
 				if (!entry) return;
 				const usage = usageNotice(entry, command.subcommand);
 				ctx.notice("info", command.error ? `${command.error}\n${usage}` : usage);
 				return;
 			}
-			if (command.action === "export") {
+			if (command.kind === "archive-export") {
 				if (!ctx.exportShareArchive) {
-					ctx.notice("error", "share export is not wired");
+					ctx.notice("error", "archive export is not wired");
 					return;
 				}
 				const result = ctx.exportShareArchive(command.path);
 				ctx.notice("success", `exported ${result.fileCount} item(s) to ${result.path}`);
 				return;
 			}
-			if (command.action === "import") {
+			if (command.kind === "archive-import") {
 				if (!ctx.importShareArchive) {
-					ctx.notice("error", "share import is not wired");
+					ctx.notice("error", "archive import is not wired");
 					return;
 				}
 				const plan = ctx.importShareArchive(command.path, { dryRun: command.dryRun, force: command.force });
@@ -1072,7 +1059,7 @@ export const BUILTIN_SLASH_COMMANDS: ReadonlyArray<BuiltinSlashCommand> = [
 	{
 		name: "run",
 		description: "Run a fleet agent",
-		group: "Run",
+		group: "Work",
 		kinds: ["run", "run-usage"],
 		args: {
 			parseFlagsBeforeRest: true,
@@ -1163,7 +1150,7 @@ export const BUILTIN_SLASH_COMMANDS: ReadonlyArray<BuiltinSlashCommand> = [
 	{
 		name: "delegate",
 		description: "Run an ACP delegation agent",
-		group: "Run",
+		group: "Work",
 		kinds: ["delegate", "delegate-usage"],
 		args: {
 			parseFlagsBeforeRest: true,
@@ -1210,7 +1197,7 @@ export const BUILTIN_SLASH_COMMANDS: ReadonlyArray<BuiltinSlashCommand> = [
 	{
 		name: "btw",
 		description: "Ask a side question that never enters the session transcript",
-		group: "Run",
+		group: "Work",
 		kinds: ["btw", "btw-usage"],
 		args: {
 			positionals: [{ name: "question", required: true, rest: true }],
@@ -1233,7 +1220,7 @@ export const BUILTIN_SLASH_COMMANDS: ReadonlyArray<BuiltinSlashCommand> = [
 	{
 		name: "oracle",
 		description: "Ask a read-only advisor to challenge a question against this session's settled decisions",
-		group: "Run",
+		group: "Work",
 		kinds: ["oracle", "oracle-usage"],
 		args: {
 			positionals: [{ name: "question", required: true, rest: true }],
@@ -1259,7 +1246,7 @@ export const BUILTIN_SLASH_COMMANDS: ReadonlyArray<BuiltinSlashCommand> = [
 	{
 		name: "council",
 		description: "Ask a roster of read-only members the same task, with an optional vote or judge synthesis",
-		group: "Run",
+		group: "Work",
 		kinds: ["council", "council-usage"],
 		args: {
 			parseFlagsBeforeRest: true,
@@ -1311,16 +1298,24 @@ export const BUILTIN_SLASH_COMMANDS: ReadonlyArray<BuiltinSlashCommand> = [
 	},
 	{
 		name: "agents",
-		description: "List Clio agents and ACP delegation agents",
+		description: "List agents or connect a detected external agent",
 		group: "Inspect",
 		kinds: ["agents"],
-		args: {},
-		fromArgs: fromArgsOrUsage("agents", { kind: "agents" }),
-		handle(_command, ctx) {
-			ctx.openAgents();
+		subcommandDescriptions: {
+			list: "List native and external agents",
+			connect: "Review detected external-agent proposals",
+		},
+		args: { subcommands: { list: {}, connect: {} } },
+		fromArgs(parsed) {
+			if (parsed.error) return { kind: "usage-error", command: "agents", reason: parsed.error };
+			return { kind: "agents", ...(parsed.subcommand === "connect" ? { connect: true } : {}) };
+		},
+		handle(command, ctx) {
+			if (command.kind !== "agents") return;
+			if (command.connect) ctx.openInterop?.();
+			else ctx.openAgents();
 		},
 	},
-	settingsDeepLink("targets", "targets", "Open Settings → Targets: health, use, connect, probe, remove"),
 	{
 		name: "cost",
 		description: "Show session token and cost totals",
@@ -1405,9 +1400,9 @@ export const BUILTIN_SLASH_COMMANDS: ReadonlyArray<BuiltinSlashCommand> = [
 	},
 	{
 		name: "fleet",
-		description: "Open Settings → Fleet, or run a fleet contract with an approval preview",
-		group: "Configure",
-		kinds: ["fleet-run", "fleet-run-usage"],
+		description: "Open Fleet Runs or run a fleet contract with an approval preview",
+		group: "Work",
+		kinds: ["fleet", "fleet-run", "fleet-run-usage"],
 		subcommandDescriptions: { run: "Preview and run a repo-owned fleet contract" },
 		args: {
 			subcommands: {
@@ -1417,17 +1412,9 @@ export const BUILTIN_SLASH_COMMANDS: ReadonlyArray<BuiltinSlashCommand> = [
 				},
 			},
 		},
-		/**
-		 * `/fleet` alone keeps the settings deep link it has always been, and
-		 * only `run` parses as a command of its own, so an operator who types
-		 * `/fleet` out of habit still lands in Settings → Fleet. Anything else
-		 * on the line stays the usage error every other deep link reports.
-		 */
 		fromArgs(parsed) {
 			if (parsed.subcommand !== "run") {
-				return parsed.error
-					? { kind: "usage-error", command: "fleet", reason: parsed.error }
-					: { kind: "settings", section: "fleet" };
+				return parsed.error ? { kind: "usage-error", command: "fleet", reason: parsed.error } : { kind: "fleet" };
 			}
 			if (parsed.error) return { kind: "fleet-run-usage", reason: parsed.error };
 			const name = parsed.positionals[0] ?? "";
@@ -1442,6 +1429,11 @@ export const BUILTIN_SLASH_COMMANDS: ReadonlyArray<BuiltinSlashCommand> = [
 			return { kind: "fleet-run", name, vars };
 		},
 		handle(command, ctx) {
+			if (command.kind === "fleet") {
+				if (ctx.openFleetRuns) ctx.openFleetRuns();
+				else ctx.notice("error", "Fleet Runs is not wired in this session");
+				return;
+			}
 			if (command.kind === "fleet-run-usage") {
 				const entry = BUILTIN_SLASH_COMMANDS.find((candidate) => candidate.name === "fleet");
 				const usage = entry ? usageNotice(entry, "run") : "usage: /fleet run <name> [--var key=value ...]";
@@ -1751,18 +1743,21 @@ export const BUILTIN_SLASH_COMMANDS: ReadonlyArray<BuiltinSlashCommand> = [
 	},
 	{
 		name: "thinking",
-		description: "Set the chat thinking level, or open Settings → Orchestrator",
+		description: "Set the chat thinking level",
 		group: "Configure",
-		kinds: ["thinking-set"],
+		kinds: ["thinking-set", "thinking-picker"],
 		args: { positionals: [{ name: "level", required: false }] },
 		fromArgs(parsed) {
 			if (parsed.error) return { kind: "usage-error", command: "thinking", reason: parsed.error };
 			const level = parsed.positionals[0];
-			return level
-				? { kind: "thinking-set", level }
-				: { kind: "settings", section: "orchestrator", rowId: "orchestrator.thinkingLevel" };
+			return level ? { kind: "thinking-set", level } : { kind: "thinking-picker" };
 		},
 		handle(command, ctx) {
+			if (command.kind === "thinking-picker") {
+				if (ctx.openThinkingPicker) ctx.openThinkingPicker();
+				else ctx.notice("error", "thinking picker is not wired in this session");
+				return;
+			}
 			if (command.kind !== "thinking-set") return;
 			const result = ctx.setThinkingLevel?.(command.level) ?? { status: "unavailable" as const };
 			if (result.status === "applied") {
@@ -1777,18 +1772,21 @@ export const BUILTIN_SLASH_COMMANDS: ReadonlyArray<BuiltinSlashCommand> = [
 	},
 	{
 		name: "output",
-		description: "Set transcript detail (minimal, default, verbose), or open Settings → Terminal",
+		description: "Set transcript detail to minimal, default, or verbose",
 		group: "Configure",
-		kinds: ["output-set"],
+		kinds: ["output-set", "output-picker"],
 		args: { positionals: [{ name: "verbosity", required: false }] },
 		fromArgs(parsed) {
 			if (parsed.error) return { kind: "usage-error", command: "output", reason: parsed.error };
 			const verbosity = parsed.positionals[0];
-			return verbosity
-				? { kind: "output-set", verbosity }
-				: { kind: "settings", section: "terminal", rowId: "terminal.outputVerbosity" };
+			return verbosity ? { kind: "output-set", verbosity } : { kind: "output-picker" };
 		},
 		handle(command, ctx) {
+			if (command.kind === "output-picker") {
+				if (ctx.openOutputPicker) ctx.openOutputPicker();
+				else ctx.notice("error", "output picker is not wired in this session");
+				return;
+			}
 			if (command.kind !== "output-set") return;
 			const result = ctx.setOutputVerbosity?.(command.verbosity) ?? { status: "unavailable" as const };
 			if (result.status === "applied") {
@@ -1847,36 +1845,38 @@ export const BUILTIN_SLASH_COMMANDS: ReadonlyArray<BuiltinSlashCommand> = [
 			})();
 		},
 	},
-	settingsDeepLink(
-		"scoped-models",
-		"models",
-		"Open Settings → Models: the Alt+J / Alt+K cycle set and favorites",
-		"scope",
-	),
 	{
 		name: "settings",
 		description: "Open interactive settings",
 		group: "Configure",
 		kinds: ["settings"],
-		args: { positionals: [{ name: "section", required: false }] },
+		args: {
+			positionals: [
+				{ name: "area", required: false },
+				{ name: "group", required: false },
+			],
+		},
 		fromArgs(parsed) {
 			if (parsed.error) return { kind: "usage-error", command: "settings", reason: parsed.error };
-			const section = parsed.positionals[0];
-			if (section === undefined) return { kind: "settings" };
-			if (!isSettingsSectionId(section)) {
-				const known = SETTINGS_SECTIONS.map((entry) => entry.id).join(", ");
-				return { kind: "usage-error", command: "settings", reason: `Unknown section: ${section} (one of ${known})` };
+			const area = parsed.positionals[0];
+			if (area === undefined) return { kind: "settings" };
+			if (!isSettingsAreaId(area)) {
+				return {
+					kind: "usage-error",
+					command: "settings",
+					reason: `Unknown area: ${area} (one of ${SETTINGS_AREA_IDS.join(", ")})`,
+				};
 			}
-			return { kind: "settings", section };
+			return { kind: "settings", area, ...(parsed.positionals[1] ? { group: parsed.positionals[1] } : {}) };
 		},
 		handle(command, ctx) {
-			if (command.kind === "settings") ctx.openSettings(command.section, command.rowId);
+			if (command.kind === "settings") ctx.openSettings(command.area, command.group);
 		},
 	},
 	{
 		name: "resume",
 		description: "Resume a past session",
-		group: "Sessions",
+		group: "Session",
 		kinds: ["resume"],
 		args: {},
 		fromArgs: fromArgsOrUsage("resume", { kind: "resume" }),
@@ -1887,7 +1887,7 @@ export const BUILTIN_SLASH_COMMANDS: ReadonlyArray<BuiltinSlashCommand> = [
 	{
 		name: "new",
 		description: "Start a fresh session",
-		group: "Sessions",
+		group: "Session",
 		kinds: ["new"],
 		args: {},
 		fromArgs: fromArgsOrUsage("new", { kind: "new" }),
@@ -1898,7 +1898,7 @@ export const BUILTIN_SLASH_COMMANDS: ReadonlyArray<BuiltinSlashCommand> = [
 	{
 		name: "handoff",
 		description: "Hand this session's working state to a fresh session for a stated goal",
-		group: "Sessions",
+		group: "Session",
 		kinds: ["handoff", "handoff-usage"],
 		args: {
 			positionals: [{ name: "goal", required: true, rest: true }],
@@ -1921,7 +1921,7 @@ export const BUILTIN_SLASH_COMMANDS: ReadonlyArray<BuiltinSlashCommand> = [
 	{
 		name: "tree",
 		description: "Open session tree navigator",
-		group: "Sessions",
+		group: "Session",
 		kinds: ["tree"],
 		args: {},
 		fromArgs: fromArgsOrUsage("tree", { kind: "tree" }),
@@ -1932,7 +1932,7 @@ export const BUILTIN_SLASH_COMMANDS: ReadonlyArray<BuiltinSlashCommand> = [
 	{
 		name: "fork",
 		description: "Fork from an assistant turn",
-		group: "Sessions",
+		group: "Session",
 		kinds: ["fork"],
 		args: {},
 		fromArgs: fromArgsOrUsage("fork", { kind: "fork" }),
@@ -1943,7 +1943,7 @@ export const BUILTIN_SLASH_COMMANDS: ReadonlyArray<BuiltinSlashCommand> = [
 	{
 		name: "export",
 		description: "Export a self-contained HTML transcript by default; a .md path writes Markdown",
-		group: "Sessions",
+		group: "Session",
 		kinds: ["export"],
 		args: {
 			positionals: [{ name: "path", required: false }],
@@ -2015,6 +2015,32 @@ const COMMAND_SHAPED_TOKEN = /^[A-Za-z][A-Za-z0-9:-]*$/u;
  */
 const COMMAND_ESCAPE = "\\/";
 
+const RETIRED_COMMAND_HINTS: Readonly<Record<string, string>> = Object.freeze({
+	status: "Use the footer or Alt+U for status; /cost, /context, and /fleet inspect their own domains.",
+	receipts: "Use /view or /view verify <run-id>.",
+	"context-init": "Use /context init.",
+	"context-clear": "Use /context reset for project context or /new for a fresh session.",
+	"context-view": "Use /context.",
+	compact: "Use /context compact [instructions].",
+	skills: "Use /skill or /resources skills.",
+	exit: "Use /quit.",
+	config: "Use /settings.",
+	ctx: "Use /context.",
+	models: "Use /model.",
+	clear: "Use /new for a fresh session or /context reset for project context.",
+	library: "Use /resources library [kind].",
+	prompts: "Use /resources prompts.",
+	extensions: "Use /resources extensions.",
+	interop: "Use /agents connect.",
+	targets: "Use /settings targets.",
+	"scoped-models": "Use /settings chat model-picker.",
+});
+
+function retiredCommandHint(token: string): string | undefined {
+	if (/^skills?:[^\s]+$/u.test(token)) return "Use /skill <name> [task].";
+	return RETIRED_COMMAND_HINTS[token];
+}
+
 /** Pure slash-command parser: no I/O, no side effects. Walks the registry in order. */
 export function parseSlashCommand(input: string): SlashCommand {
 	const trimmed = input.trim();
@@ -2044,6 +2070,12 @@ export function dispatchSlashCommand(command: SlashCommand, ctx: SlashCommandCon
 		return "accepted";
 	}
 	if (command.kind === "unknown-command") {
+		const retiredHint = retiredCommandHint(command.token);
+		if (retiredHint) {
+			ctx.notice("error", `/${command.token} is retired and did not run. ${retiredHint}`);
+			ctx.render();
+			return "rejected";
+		}
 		// The registry does not own the token, but a prompt template might. The
 		// parser stays pure, so the lookup happens here, and only for a spelling
 		// that matched no command: `/name` is how every other agent invokes the
@@ -2085,18 +2117,55 @@ export interface CommandReferenceEntry {
 	subcommandDescriptions?: Readonly<Record<string, string>>;
 }
 
+const COMMAND_ORDER = [
+	"run",
+	"fleet",
+	"delegate",
+	"council",
+	"oracle",
+	"btw",
+	"share",
+	"skill",
+	"agents",
+	"tasks",
+	"context",
+	"memory",
+	"view",
+	"panes",
+	"cost",
+	"decisions",
+	"resources",
+	"help",
+	"model",
+	"thinking",
+	"output",
+	"settings",
+	"new",
+	"resume",
+	"handoff",
+	"fork",
+	"tree",
+	"export",
+	"archive",
+	"quit",
+] as const;
+const COMMAND_ORDER_INDEX = new Map<string, number>(COMMAND_ORDER.map((name, index) => [name, index]));
+
 export function commandReference(): ReadonlyArray<CommandReferenceEntry> {
-	return BUILTIN_SLASH_COMMANDS.filter((entry) => entry.hidden !== true).map((entry) => {
-		const usage = usageLine(entry)
-			.replace(/^\nusage:\s*/, "")
-			.replace(/\n$/, "");
-		return {
-			name: entry.name,
-			usage,
-			description: entry.description,
-			group: entry.group,
-			...(entry.args ? { args: entry.args } : {}),
-			...(entry.subcommandDescriptions ? { subcommandDescriptions: entry.subcommandDescriptions } : {}),
-		};
-	});
+	return BUILTIN_SLASH_COMMANDS.filter((entry) => entry.hidden !== true)
+		.slice()
+		.sort((a, b) => (COMMAND_ORDER_INDEX.get(a.name) ?? 99) - (COMMAND_ORDER_INDEX.get(b.name) ?? 99))
+		.map((entry) => {
+			const usage = usageLine(entry)
+				.replace(/^\nusage:\s*/, "")
+				.replace(/\n$/, "");
+			return {
+				name: entry.name,
+				usage,
+				description: entry.description,
+				group: entry.group,
+				...(entry.args ? { args: entry.args } : {}),
+				...(entry.subcommandDescriptions ? { subcommandDescriptions: entry.subcommandDescriptions } : {}),
+			};
+		});
 }
