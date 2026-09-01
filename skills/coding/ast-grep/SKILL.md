@@ -15,7 +15,7 @@ allowed-tools:
   - write
   - grep
   - ls
-clio:
+clio-coder:
   registry-id: iowarp/clio-coder
   source-url: https://github.com/iowarp/clio-coder/tree/main/skills/coding/ast-grep
   audit: pass

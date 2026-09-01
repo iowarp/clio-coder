@@ -22,7 +22,7 @@ allowed-tools:
   - ask_user
 requires:
   - skill:tdd
-clio:
+clio-coder:
   registry-id: iowarp/clio-coder
   source-url: https://github.com/iowarp/clio-coder/tree/main/skills/planning/tech-spec
   audit: pass

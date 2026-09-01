@@ -2,7 +2,8 @@ import { createHash } from "node:crypto";
 
 /**
  * Frontmatter keys owned by the install lifecycle, recognized both at the top
- * level (legacy flat form) and nested under the reserved `clio:` block.
+ * level (legacy flat form) and nested under the reserved `clio-coder:` or
+ * released `clio:` block.
  * Stripped before hashing so upstream and installed copies compare on
  * content, not on when or how a copy was installed. Registry identity
  * (`registry-id`, `registry-url`) is deliberately NOT here: it names which
@@ -64,7 +65,7 @@ export function frontmatterRegion(rawText: string): FrontmatterRegion | null {
 export function stripProvenanceLines(lines: ReadonlyArray<string>): string[] {
 	const kept: string[] = [];
 	let dropIndent: number | null = null;
-	let inClioBlock = false;
+	let inProductBlock = false;
 	for (const line of lines) {
 		const indent = line.length - line.trimStart().length;
 		if (dropIndent !== null && line.trim().length > 0 && indent > dropIndent) continue;
@@ -72,19 +73,19 @@ export function stripProvenanceLines(lines: ReadonlyArray<string>): string[] {
 		const keyMatch = line.match(/^([ \t]*)([A-Za-z][A-Za-z0-9-]*):/);
 		const key = keyMatch?.[2];
 		if (key !== undefined) {
-			if (indent === 0) inClioBlock = key === "clio";
-			if (PROVENANCE_KEYS.has(key) && (indent === 0 || inClioBlock)) {
+			if (indent === 0) inProductBlock = key === "clio-coder" || key === "clio";
+			if (PROVENANCE_KEYS.has(key) && (indent === 0 || inProductBlock)) {
 				dropIndent = indent;
 				continue;
 			}
 		}
 		kept.push(line);
 	}
-	// A `clio:` mapping whose children were all lifecycle keys is now empty;
+	// A product mapping whose children were all lifecycle keys is now empty;
 	// keep it and a source that never had the block reads as drifted from its
 	// own installed copy. Drop the dangling key line.
 	return kept.filter((line, index) => {
-		if (!/^clio:\s*$/.test(line)) return true;
+		if (!/^(?:clio-coder|clio):\s*$/.test(line)) return true;
 		for (let next = index + 1; next < kept.length; next += 1) {
 			const candidate = kept[next] as string;
 			if (candidate.trim().length === 0) continue;

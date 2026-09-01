@@ -28,7 +28,7 @@ import { normalizedSkillHash } from "../src/domains/resources/skills/content-has
 
 /** Top-level frontmatter every published catalog skill must carry (skills/README.md). */
 const REQUIRED_CORE_KEYS = ["name", "description", "version", "license"] as const;
-/** Keys required inside the reserved nested `clio:` block (skills/README.md). */
+/** Keys required inside the reserved nested `clio-coder:` block (skills/README.md). */
 const REQUIRED_CLIO_KEYS = ["registry-id", "source-url", "provenance", "eval-status"] as const;
 /** The provenance vocabulary skills/README.md defines; anything else is a typo, not a new category. */
 const PROVENANCE_VALUES = new Set(["designed", "adapted", "imported"]);
@@ -58,7 +58,7 @@ interface PinEntry {
 /** A pin entry plus the fields the published marketplace index carries. */
 interface CatalogEntry extends PinEntry {
 	description: string;
-	/** `clio.source-url`: where `clio-coder skills install <name>` fetches this skill from. */
+	/** `clio-coder.source-url`: where `clio-coder skills install <name>` fetches this skill from. */
 	sourceUrl: string;
 	audit: string;
 	/** Catalog category folder, or null in a flat catalog. */
@@ -168,45 +168,45 @@ function collectEntries(): { entries: CatalogEntry[]; errors: string[] } {
 				errors.push(`${skillPath}: missing required catalog frontmatter "${key}"`);
 			}
 		}
-		const clio =
-			fm.clio !== null && typeof fm.clio === "object" && !Array.isArray(fm.clio)
-				? (fm.clio as Record<string, unknown>)
+		const clioCoder =
+			fm["clio-coder"] !== null && typeof fm["clio-coder"] === "object" && !Array.isArray(fm["clio-coder"])
+				? (fm["clio-coder"] as Record<string, unknown>)
 				: null;
 		let sourceUrl = "";
-		if (!clio) {
-			errors.push(`${skillPath}: missing the required nested "clio:" frontmatter block`);
+		if (!clioCoder) {
+			errors.push(`${skillPath}: missing the required nested "clio-coder:" frontmatter block`);
 		} else {
 			for (const key of REQUIRED_CLIO_KEYS) {
-				const value = clio[key];
+				const value = clioCoder[key];
 				if (typeof value !== "string" || value.trim().length === 0) {
-					errors.push(`${skillPath}: missing required catalog frontmatter "clio.${key}"`);
+					errors.push(`${skillPath}: missing required catalog frontmatter "clio-coder.${key}"`);
 				}
 			}
-			if (typeof clio.provenance === "string" && !PROVENANCE_VALUES.has(clio.provenance)) {
+			if (typeof clioCoder.provenance === "string" && !PROVENANCE_VALUES.has(clioCoder.provenance)) {
 				errors.push(
-					`${skillPath}: clio.provenance must be one of designed|adapted|imported (found ${JSON.stringify(clio.provenance)})`,
+					`${skillPath}: clio-coder.provenance must be one of designed|adapted|imported (found ${JSON.stringify(clioCoder.provenance)})`,
 				);
 			}
 			if (
-				(clio.provenance === "adapted" || clio.provenance === "imported") &&
-				(typeof clio.origin !== "string" || clio.origin.trim().length === 0)
+				(clioCoder.provenance === "adapted" || clioCoder.provenance === "imported") &&
+				(typeof clioCoder.origin !== "string" || clioCoder.origin.trim().length === 0)
 			) {
-				errors.push(`${skillPath}: clio.provenance "${clio.provenance}" requires a clio.origin`);
+				errors.push(`${skillPath}: clio-coder.provenance "${clioCoder.provenance}" requires a clio-coder.origin`);
 			}
-			if (clio.audit !== "pass") {
+			if (clioCoder.audit !== "pass") {
 				errors.push(
-					`${skillPath}: catalog skills must carry "audit: pass" under clio: (found ${JSON.stringify(clio.audit ?? null)})`,
+					`${skillPath}: catalog skills must carry "audit: pass" under clio-coder: (found ${JSON.stringify(clioCoder.audit ?? null)})`,
 				);
 			}
-			if (typeof clio["source-url"] === "string") {
-				sourceUrl = clio["source-url"].trim();
+			if (typeof clioCoder["source-url"] === "string") {
+				sourceUrl = clioCoder["source-url"].trim();
 			}
 			// The published index installs from this URL, so a skill that moved
 			// between categories without its source-url following would publish a
 			// pointer at its old location: `clio-coder skills install <name>` would then
 			// fetch a path the repository no longer has.
 			if (sourceUrl.length > 0 && !sourceUrl.replace(/\/+$/, "").endsWith(`/${relPath}`)) {
-				errors.push(`${skillPath}: clio.source-url does not end with the catalog path "${relPath}": ${sourceUrl}`);
+				errors.push(`${skillPath}: clio-coder.source-url does not end with the catalog path "${relPath}": ${sourceUrl}`);
 			}
 		}
 		// An unquoted description containing " #" is silently cut at the # by the
@@ -241,7 +241,7 @@ function collectEntries(): { entries: CatalogEntry[]; errors: string[] } {
 			sha256: normalizedSkillHash(raw),
 			description: typeof fm.description === "string" ? fm.description.trim() : "",
 			sourceUrl,
-			audit: typeof clio?.audit === "string" ? clio.audit : "unknown",
+			audit: typeof clioCoder?.audit === "string" ? clioCoder.audit : "unknown",
 			category: category === "." ? null : category,
 			triggers,
 		});
@@ -293,7 +293,7 @@ function renderManifest(entries: ReadonlyArray<CatalogEntry>): string {
  * The published marketplace index: what a Clio install outside this repo reads
  * when `CLIO_CODER_SKILL_MARKETPLACE_INDEX` points at the file this catalog serves.
  *
- * `sourceUrl` is each skill's own `clio.source-url`, so a bare-name install
+ * `sourceUrl` is each skill's own `clio-coder.source-url`, so a bare-name install
  * resolves to the same GitHub tree the audit and the pinned hash describe.
  * No hashes here: drift is measured against registry.yaml, which is the file
  * the audit signs, and duplicating hashes into a second published artifact

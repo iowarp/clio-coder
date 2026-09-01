@@ -18,7 +18,7 @@ allowed-tools:
   - context
   - write
   - ask_user
-clio:
+clio-coder:
   registry-id: iowarp/clio-coder
   source-url: https://github.com/iowarp/clio-coder/tree/main/skills/planning/product-intent
   audit: pass

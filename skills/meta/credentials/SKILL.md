@@ -18,7 +18,7 @@ allowed-tools:
   - bash
   - ask_user
   - credential_present
-clio:
+clio-coder:
   registry-id: iowarp/clio-coder
   source-url: https://github.com/iowarp/clio-coder/tree/main/skills/meta/credentials
   audit: pass

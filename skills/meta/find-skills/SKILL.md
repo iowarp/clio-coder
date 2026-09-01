@@ -15,7 +15,7 @@ allowed-tools:
   - read
   - ls
   - ask_user
-clio:
+clio-coder:
   registry-id: iowarp/clio-coder
   source-url: https://github.com/iowarp/clio-coder/tree/main/skills/meta/find-skills
   audit: pass

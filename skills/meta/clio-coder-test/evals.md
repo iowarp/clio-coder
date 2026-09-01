@@ -1,4 +1,4 @@
-# Evals — clio-test
+# Evals — clio-coder-test
 
 Retrieval + application scenarios. Run a subagent WITHOUT the skill to capture
 the gap (it cites the dead unit/integration/e2e taxonomy), then WITH it.

@@ -17,7 +17,7 @@ allowed-tools:
   - ls
   - context
   - code_nav
-clio:
+clio-coder:
   registry-id: iowarp/clio-coder
   source-url: https://github.com/iowarp/clio-coder/tree/main/skills/workflow/design-council
   audit: pass
