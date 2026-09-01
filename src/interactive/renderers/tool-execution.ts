@@ -426,7 +426,7 @@ function ledgerTail(finished: ToolExecutionFinished): { facts: string; offload: 
 		if (details?.timedOut === true) parts.push("timed out");
 		if (details?.outputCapped === true) parts.push("output capped");
 	}
-	if (finished.excludeFromContext === true) parts.push("excluded from context");
+	if (finished.excludeFromContext === true) parts.push("not sent to model");
 	if (finished.evictedReason !== undefined) parts.push("evicted", finished.evictedReason);
 	const offloadPath = executed ? offloadPathOf(finished) : null;
 	return {
@@ -994,7 +994,7 @@ function toolUsageFact(result: unknown): string | null {
 function outputFacts(finished: ToolExecutionFinished): string[] {
 	const parts: string[] = [];
 	if (isNonExecutedOutcome(finished.outcome)) {
-		if (finished.excludeFromContext === true) parts.push("excluded from context");
+		if (finished.excludeFromContext === true) parts.push("not sent to model");
 		return parts;
 	}
 	const exitCode = structuredExitCode(finished) ?? (finished.toolName === "bash" && !finished.isError ? "0" : null);
@@ -1024,7 +1024,7 @@ function outputFacts(finished: ToolExecutionFinished): string[] {
 		if (added.length > 0) parts.push(`added ${added.join(", ")}`);
 	}
 	if (isPlainObject(finished.result) && finished.result.terminate === true) parts.push("terminal result");
-	if (finished.excludeFromContext === true) parts.push("excluded from context");
+	if (finished.excludeFromContext === true) parts.push("not sent to model");
 	if (finished.evictedReason !== undefined) parts.push("evicted", finished.evictedReason);
 	return parts;
 }
@@ -1379,7 +1379,7 @@ export function renderBashTranscriptExecution(
 	const shownBytes = Buffer.byteLength(execution.output, "utf8");
 	const totalBytes = execution.totalBytes ?? shownBytes;
 	const args: Record<string, unknown> = { command: execution.command };
-	if (execution.excludeFromContext === true) args.context = "excluded from model context";
+	if (execution.excludeFromContext === true) args.context = "not sent to model";
 	const details = {
 		resultSize: {
 			bytes: totalBytes,

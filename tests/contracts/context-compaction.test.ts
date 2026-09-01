@@ -2,9 +2,11 @@ import { deepStrictEqual, ok, strictEqual, throws } from "node:assert/strict";
 import { describe, it } from "node:test";
 import { fauxAssistantMessage } from "@earendil-works/pi-ai";
 import { DEFAULT_COMPACTION_THRESHOLD, shouldCompact } from "../../src/domains/session/compaction/auto.js";
+import { serializeConversation } from "../../src/domains/session/compaction/branch-summary.js";
 import { compact, textFromAssistant } from "../../src/domains/session/compaction/compact.js";
 import { maskStaleObservations } from "../../src/domains/session/compaction/mask-observations.js";
 import { collectSessionEntries } from "../../src/domains/session/compaction/session-entries.js";
+import { estimateTokens } from "../../src/domains/session/compaction/tokens.js";
 import { estimateAgentContextTokens } from "../../src/domains/session/context-accounting.js";
 import type { MessageEntry, SessionEntry } from "../../src/domains/session/entries.js";
 import { registerEngineFauxProvider as registerFauxProvider } from "../../src/engine/api-registry.js";
@@ -142,6 +144,48 @@ function replayText(messages: ReadonlyArray<unknown>): string {
 }
 
 describe("contracts/context compaction trigger", () => {
+	it("keeps !! command and output bytes outside replay, compaction, and context accounting", () => {
+		const visibleCommand = "printf visible-command";
+		const visibleOutput = "visible-output";
+		const privateCommand = "printf operator-private-command";
+		const privateOutput = "operator-private-output";
+		const entries: SessionEntry[] = [
+			{
+				kind: "bashExecution",
+				...entryBase("01"),
+				command: visibleCommand,
+				output: visibleOutput,
+				exitCode: 0,
+				cancelled: false,
+				truncated: false,
+				excludeFromContext: false,
+			},
+			{
+				kind: "bashExecution",
+				...entryBase("02", "01"),
+				command: privateCommand,
+				output: privateOutput,
+				exitCode: 0,
+				cancelled: false,
+				truncated: false,
+				excludeFromContext: true,
+			},
+		];
+
+		const replay = replayText(buildReplayAgentMessagesFromTurns(entries));
+		const compaction = serializeConversation(entries);
+		ok(replay.includes(visibleCommand), replay);
+		ok(replay.includes(visibleOutput), replay);
+		ok(compaction.includes(visibleCommand), compaction);
+		ok(compaction.includes(visibleOutput), compaction);
+		for (const modelInput of [replay, compaction]) {
+			ok(!modelInput.includes(privateCommand), modelInput);
+			ok(!modelInput.includes(privateOutput), modelInput);
+		}
+		strictEqual(estimateTokens(entries[1] as SessionEntry), 0);
+		ok(estimateTokens(entries[0] as SessionEntry) > 0);
+	});
+
 	it("fires on a single pressure threshold", () => {
 		strictEqual(shouldCompact(790, DEFAULT_COMPACTION_THRESHOLD, 1000).shouldCompact, false);
 		strictEqual(shouldCompact(800, DEFAULT_COMPACTION_THRESHOLD, 1000).shouldCompact, true);
