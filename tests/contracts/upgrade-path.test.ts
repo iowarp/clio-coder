@@ -151,8 +151,9 @@ describe("contracts/upgrade path from 0.3.0", () => {
 		});
 		strictEqual(result.code, 0, result.stderr);
 		ok(result.stdout.includes(`would refresh state metadata ${OLD_VERSION} -> ${readClioVersion()}`), result.stdout);
-		ok(result.stdout.includes("would consider 1 migration(s)"), result.stdout);
+		ok(result.stdout.includes("would consider 2 migration(s)"), result.stdout);
 		ok(result.stdout.includes("2026-08-18-lmstudio-runtime-id"), result.stdout);
+		ok(result.stdout.includes("2026-09-01-retire-panes-knobs"), result.stdout);
 		strictEqual(readStateInfo()?.version, OLD_VERSION, "a dry run leaves the record alone");
 		ok(!existsSync(join(scratch.dir, "state", "migrations.json")), "and writes no manifest");
 	});
@@ -163,14 +164,44 @@ describe("contracts/upgrade path from 0.3.0", () => {
 		});
 		strictEqual(result.code, 0, result.stderr);
 		ok(result.stdout.includes(`refreshed state metadata ${OLD_VERSION} -> ${readClioVersion()}`), result.stdout);
-		ok(result.stdout.includes(`ok: ${OLD_VERSION} -> ${readClioVersion()} (migrations: 1)`), result.stdout);
+		ok(result.stdout.includes(`ok: ${OLD_VERSION} -> ${readClioVersion()} (migrations: 2)`), result.stdout);
 		const manifest = JSON.parse(readFileSync(join(scratch.dir, "state", "migrations.json"), "utf8"));
-		deepStrictEqual(manifest, { applied: ["2026-08-18-lmstudio-runtime-id"] });
+		deepStrictEqual(manifest, { applied: ["2026-09-01-retire-panes-knobs", "2026-08-18-lmstudio-runtime-id"] });
 		strictEqual(readStateInfo()?.upgradedFrom, OLD_VERSION);
 		strictEqual(
 			readStateInfo()?.noticedVersion,
 			undefined,
 			"a CLI upgrade is not the interactive launch; the notice is still owed",
 		);
+	});
+
+	// The case the retired-key migration exists for, end to end. `upgrade` used
+	// to load the config domain before running migrations, so its strict reader
+	// refused the very document the migration repairs and the command died
+	// before reaching it. A runner that needs valid config to repair invalid
+	// config can never run, so it reads the state tree directly now.
+	it("repairs a settings file naming a retired pane key instead of refusing to run", async () => {
+		writeFileSync(
+			join(scratch.dir, "config", "settings.yaml"),
+			`${SETTINGS_FROM_0_3_0}panes:
+  enabled: auto
+  agents: off
+  keepFailed: false
+`,
+			"utf8",
+		);
+		ok(validateSettingsFile().issues.length > 0, "the seeded file cannot pass the strict reader");
+
+		const result = await runCli(["upgrade"], {
+			env: { ...scratchClioEnvVars(scratch.dir, { requireHomePrefix: true }), CLIO_CODER_TEST_UPGRADE_NO_NETWORK: "1" },
+		});
+		strictEqual(result.code, 0, result.stderr);
+		ok(result.stdout.includes("applied migration 2026-09-01-retire-panes-knobs"), result.stdout);
+
+		deepStrictEqual(validateSettingsFile().issues, [], "the upgraded home boots clean");
+		const saved = readFileSync(join(scratch.dir, "config", "settings.yaml"), "utf8");
+		ok(!saved.includes("agents:"), saved);
+		ok(!saved.includes("keepFailed"), saved);
+		ok(saved.includes("enabled: auto"), "the pane settings that are still real survive");
 	});
 });

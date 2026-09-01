@@ -20,12 +20,20 @@
  *    (core/safe-resource-write.ts) so readers never see a partial file.
  * 2. Migrations are authored against the shapes the code has on the day they
  *    are needed, never against stale pre-release shapes.
+ * 3. A migration that repairs settings.yaml into a shape the strict reader
+ *    accepts runs before any migration that reads settings through
+ *    `readSettings`, because that reader throws on the very document the
+ *    repair exists to fix. The registry order below is that order, and it is
+ *    deliberately not the id order: ids are stable identifiers, and the
+ *    manifest replays by id membership rather than by position, so a home that
+ *    already applied one of these is unaffected by where the other sits.
  */
 
 import { existsSync, mkdirSync, readFileSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
 
 import lmStudioRuntimeId from "./2026-08-18-lmstudio-runtime-id.js";
+import retirePanesKnobs from "./2026-09-01-retire-panes-knobs.js";
 
 export interface Migration {
 	id: string;
@@ -45,7 +53,10 @@ export interface MigrationRunResult {
 	available: string[];
 }
 
-const REGISTRY: ReadonlyArray<Migration> = Object.freeze([lmStudioRuntimeId]);
+// `retirePanesKnobs` first, per requirement 3: it strips keys the strict reader
+// refuses, and `lmStudioRuntimeId` calls `readSettings` and would throw on the
+// same document before the repair ever ran.
+const REGISTRY: ReadonlyArray<Migration> = Object.freeze([retirePanesKnobs, lmStudioRuntimeId]);
 
 export function listMigrations(): ReadonlyArray<Migration> {
 	return REGISTRY;
