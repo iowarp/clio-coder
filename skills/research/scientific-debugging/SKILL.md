@@ -1,7 +1,14 @@
 ---
 name: scientific-debugging
 description: Use when debugging has stalled after the first obvious fix, when a failure spans multiple systems, when someone is about to try random changes, or when a scientific or HPC code produces wrong numbers, NaNs, nondeterministic results, or an unexplained performance regression. Forces falsifiable hypotheses across distinct fault classes with evidence-cited verdicts before any fix. Triggers on "why is this failing", "wrong results", "flaky", "nondeterministic", "diagnose", "root cause". Not for designing benchmarks or pre-registered experiments; use experiment-protocol.
-version: 0.1.2
+triggers:
+  - wrong scientific results
+  - nondeterministic HPC code
+  - unexplained performance regression
+  - diagnose NaNs
+  - debug with falsifiable hypotheses
+  - scientific root cause
+version: 0.1.3
 license: Apache-2.0
 allowed-tools:
   - read

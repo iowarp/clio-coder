@@ -1,7 +1,13 @@
 ---
 name: fix-issue
 description: 'Use when a tracker issue should be resolved end to end — "fix issue 123", "take this ticket", "resolve the bug in #45". Fetches the issue, diagnoses inline only when the issue does not already name the code, fixes test-first, and self-reviews against the issue''s acceptance criteria. Ends with an uncommitted, verified change ready for ship. Not for filing; use file-ticket. Not for committing or PRs; use ship.'
-version: 0.1.1
+triggers:
+  - fix issue 123
+  - take this ticket
+  - resolve the bug in issue
+  - implement this tracker issue
+  - fix a GitHub issue end to end
+version: 0.1.2
 license: Apache-2.0
 allowed-tools:
   - read

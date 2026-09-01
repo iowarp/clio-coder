@@ -1,7 +1,13 @@
 ---
 name: backlog
 description: Use when a finished PRD or architecture doc must become a real ticket backlog — "create the stories", "turn this PRD into issues", "build the backlog". Decomposes phases and user stories into small tickets with verifiable acceptance criteria, confirms the list, then creates them as GitHub issues (or in another tracker when an integration exists). Not for local sprint slicing into a SPRINT.md; use cut-it.
-version: 0.2.0
+triggers:
+  - create the stories
+  - turn this PRD into issues
+  - build the backlog
+  - decompose this plan into tickets
+  - create GitHub issues from this architecture
+version: 0.2.1
 license: Apache-2.0
 allowed-tools:
   - read

@@ -63,6 +63,8 @@ interface CatalogEntry extends PinEntry {
 	audit: string;
 	/** Catalog category folder, or null in a flat catalog. */
 	category: string | null;
+	/** Trigger phrases from frontmatter `triggers`, published for promotion matching. */
+	triggers: string[] | null;
 }
 
 /**
@@ -215,6 +217,18 @@ function collectEntries(): { entries: CatalogEntry[]; errors: string[] } {
 		if (descriptionValue.length > 0 && !/^['"]/.test(descriptionValue) && descriptionValue.includes(" #")) {
 			errors.push(`${skillPath}: unquoted description contains " #", which YAML truncates as a comment; quote it`);
 		}
+		let triggers: string[] | null = null;
+		if (fm.triggers !== undefined) {
+			if (
+				!Array.isArray(fm.triggers) ||
+				fm.triggers.length === 0 ||
+				fm.triggers.some((trigger) => typeof trigger !== "string" || trigger.trim().length === 0)
+			) {
+				errors.push(`${skillPath}: optional frontmatter "triggers" must be a non-empty list of non-empty strings`);
+			} else {
+				triggers = fm.triggers.map((trigger) => (trigger as string).trim());
+			}
+		}
 		errors.push(...toolSurfaceErrors(skillPath, fm));
 		if (!existsSync(path.join(catalogDir, relPath, "evals.md"))) {
 			errors.push(`${skillPath}: catalog skills must ship an evals.md beside SKILL.md`);
@@ -229,6 +243,7 @@ function collectEntries(): { entries: CatalogEntry[]; errors: string[] } {
 			sourceUrl,
 			audit: typeof clio?.audit === "string" ? clio.audit : "unknown",
 			category: category === "." ? null : category,
+			triggers,
 		});
 	}
 	return { entries, errors };
@@ -288,6 +303,7 @@ function renderIndex(entries: ReadonlyArray<CatalogEntry>): string {
 	const skills = catalogOrder(entries).map((entry) => ({
 		name: entry.name,
 		description: entry.description,
+		...(entry.triggers ? { triggers: entry.triggers } : {}),
 		sourceUrl: entry.sourceUrl,
 		...(entry.version ? { version: entry.version } : {}),
 		audit: entry.audit,

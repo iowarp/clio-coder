@@ -1,7 +1,13 @@
 ---
 name: herdr
 description: Use when the user explicitly mentions Herdr or asks to launch, drive, or inspect another agent or command in a Herdr pane, tab, or workspace — including starting a second Clio Coder instance and delegating work to it. Requires HERDR_ENV=1. Not for background work a plain shell or dispatch already covers; do not activate merely because a task could benefit from parallelism.
-version: 0.1.0
+triggers:
+  - use Herdr
+  - launch an agent in a Herdr pane
+  - inspect a Herdr agent
+  - start a second Clio Coder instance
+  - drive a command in a Herdr workspace
+version: 0.1.1
 license: Apache-2.0
 allowed-tools:
   - bash

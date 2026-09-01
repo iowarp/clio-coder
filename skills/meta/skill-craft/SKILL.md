@@ -1,7 +1,13 @@
 ---
 name: skill-craft
 description: Use when writing, reviewing, or pruning a SKILL.md — authoring a new skill, editing an installed one, or judging whether a skill's description, body, or length is earning its cost. Triggers on "write a skill", "improve this skill", "why isn't this skill firing", "is this skill too long".
-version: 0.1.2
+triggers:
+  - write a SKILL.md
+  - create a new skill
+  - improve this skill
+  - why isn't this skill firing
+  - prune a skill body
+version: 0.1.3
 license: Apache-2.0
 allowed-tools:
   - read

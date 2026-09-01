@@ -1,7 +1,14 @@
 ---
 name: scientific-modernization
 description: Use when modernizing, porting, rewriting, packaging, accelerating, or replacing established scientific software, especially across languages, build systems, CPU/GPU backends, or maintained forks. Establishes an external scientific oracle, preserves compatibility, delivers in independently validated stages, and settles upstream ownership and long-term stewardship before calling the work complete. Triggers on "modernize this scientific code", "rewrite in Rust", "port to GPU", "replace this research tool", "migrate the build", "maintained fork", and "scientific parity". Not for an isolated benchmark; use experiment-protocol. Not for diagnosing wrong results; use scientific-debugging.
-version: 0.2.0
+triggers:
+  - modernize this scientific code
+  - rewrite this scientific software in Rust
+  - port this solver to GPU
+  - migrate the scientific build system
+  - create a maintained fork
+  - preserve scientific parity
+version: 0.2.1
 license: Apache-2.0
 allowed-tools:
   - read
