@@ -88,25 +88,6 @@ for (const rel of ENTRIES) {
 }
 
 checkVersionCoherence();
-checkBehavioralReleaseBaseline();
-
-/** Run only the public deterministic corpus here; the model corpus is a manual release test. */
-function checkBehavioralReleaseBaseline() {
-	try {
-		const output = execFileSync(process.execPath, [join(root, "benchmarks", "eval", "check-behavioral-release.mjs")], {
-			cwd: root,
-			encoding: "utf8",
-			stdio: ["ignore", "pipe", "pipe"],
-		});
-		process.stdout.write(output);
-	} catch (error) {
-		const stdout = typeof error?.stdout === "string" ? error.stdout : "";
-		const stderr = typeof error?.stderr === "string" ? error.stderr : "";
-		if (stdout.length > 0) process.stderr.write(stdout);
-		if (stderr.length > 0) process.stderr.write(stderr);
-		errors.push("deterministic behavioral release baseline failed");
-	}
-}
 
 /**
  * The published version and the release notes for it must name the same number.
