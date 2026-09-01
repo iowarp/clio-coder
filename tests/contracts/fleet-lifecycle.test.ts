@@ -1,12 +1,14 @@
 import { deepStrictEqual, strictEqual } from "node:assert/strict";
+import { execFileSync } from "node:child_process";
 import { createHash } from "node:crypto";
-import { readFileSync, writeFileSync } from "node:fs";
+import { chmodSync, mkdirSync, readFileSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
 import { afterEach, describe, it } from "node:test";
 import { DEFAULT_SETTINGS } from "../../src/core/defaults.js";
 import { capacityDrain, setCapacityDraining } from "../../src/domains/dispatch/capacity-lease.js";
 import { compileExecutionPlan } from "../../src/domains/dispatch/execution-plan.js";
 import type { ExecutionStepResult } from "../../src/domains/dispatch/execution-scheduler.js";
+import { runFleetNodePreflight } from "../../src/domains/dispatch/fleet-preflight.js";
 import { planFleetResume } from "../../src/domains/dispatch/fleet-run.js";
 import {
 	materializePendingGateDecision,
@@ -18,6 +20,15 @@ import { createFleetPlacementResolver } from "../../src/domains/dispatch/placeme
 import type { FleetRunRecord } from "../../src/domains/dispatch/state.js";
 import type { WorkerTransport } from "../../src/domains/dispatch/transport.js";
 import { createFleetRegistry } from "../../src/domains/scheduling/cluster.js";
+import {
+	claimCompeteGroup,
+	cleanupCompeteGroup,
+	createCandidateWorktreeMapped,
+	loadCompeteGroup,
+	markCompeteGroupCleanupReady,
+	removeCandidateWorktreeMapped,
+} from "../../src/tools/compete-worktrees.js";
+import { cleanupTaskWorktree, createTaskWorktree } from "../../src/tools/task-worktree.js";
 import { clearScratchClioHome, newScratchClioHome } from "../harness/scratch-env.js";
 
 const NODES = [
@@ -45,6 +56,20 @@ function result(stepId: string, succeeded = true, integrityValid = true): Execut
 		succeeded,
 		integrityValid,
 	};
+}
+
+function git(root: string, ...args: string[]): string {
+	return execFileSync("git", ["-C", root, ...args], { encoding: "utf8" }).trim();
+}
+
+function initGitRepository(root: string): void {
+	mkdirSync(root, { recursive: true });
+	git(root, "init", "-b", "main");
+	git(root, "config", "user.name", "Naming Contract");
+	git(root, "config", "user.email", "naming-contract@example.invalid");
+	writeFileSync(join(root, "tracked.txt"), "baseline\n", "utf8");
+	git(root, "add", "tracked.txt");
+	git(root, "commit", "-m", "baseline");
 }
 
 describe("fleet lifecycle boundary", () => {
@@ -198,5 +223,84 @@ describe("fleet lifecycle boundary", () => {
 		const materialized = materializePendingGateDecision(recoveredHandle);
 		strictEqual(materialized.artifact.integrity.digest, legacyDecision.integrity.digest);
 		deepStrictEqual(verifyGateDecisionArtifact(materialized.artifact), { ok: true });
+	});
+
+	it("creates canonical task and compete refs while retaining exact legacy cleanup ownership", async () => {
+		scratch = await newScratchClioHome("clio-git-naming-");
+		const root = join(scratch, "repository");
+		initGitRepository(root);
+
+		const task = createTaskWorktree(root, "naming-task");
+		strictEqual(task.branch, "clio-coder/task/naming-task");
+		const taskMarkerPath = `${task.path}.task-owner.json`;
+		const taskMarker = JSON.parse(readFileSync(taskMarkerPath, "utf8")) as Record<string, unknown>;
+		strictEqual(taskMarker.kind, "clio-coder-task-worktree");
+		const legacyTaskBranch = "clio/task/naming-task";
+		git(task.path, "branch", "-m", legacyTaskBranch);
+		writeFileSync(
+			taskMarkerPath,
+			`${JSON.stringify({ ...taskMarker, kind: "clio-task-worktree", branch: legacyTaskBranch }, null, 2)}\n`,
+			"utf8",
+		);
+		cleanupTaskWorktree({ ...task, branch: legacyTaskBranch }, true);
+		strictEqual(git(root, "branch", "--list", legacyTaskBranch), "");
+
+		const ownership = claimCompeteGroup(root, "naming-group");
+		const manifestPath = join(ownership.directory, ".clio-coder-compete-owner.json");
+		const manifest = JSON.parse(readFileSync(manifestPath, "utf8")) as Record<string, unknown>;
+		strictEqual(manifest.kind, "clio-coder-compete-group");
+		const candidate = await createCandidateWorktreeMapped(ownership, 1, git(root, "rev-parse", "HEAD"));
+		strictEqual(candidate.branch, "clio-coder/compete/naming-group/1");
+		const legacyCompeteBranch = "clio/compete/naming-group/1";
+		git(candidate.path, "branch", "-m", legacyCompeteBranch);
+		writeFileSync(manifestPath, `${JSON.stringify({ ...manifest, kind: "clio-compete-group" }, null, 2)}\n`, "utf8");
+		const legacyOwnership = loadCompeteGroup(root, "naming-group");
+		if (legacyOwnership === null) throw new Error("legacy compete ownership was not accepted");
+		await removeCandidateWorktreeMapped(legacyOwnership, { ...candidate, branch: legacyCompeteBranch }, true);
+		strictEqual(git(root, "branch", "--list", legacyCompeteBranch), "");
+		cleanupCompeteGroup(markCompeteGroupCleanupReady(legacyOwnership));
+	});
+
+	it("emits the canonical fleet preflight protocol and accepts the released spelling", async () => {
+		scratch = await newScratchClioHome("clio-preflight-naming-");
+		const canonicalSsh = join(scratch, "canonical-ssh.sh");
+		writeFileSync(
+			canonicalSsh,
+			`#!/bin/sh
+case "$*" in
+  *clio-coder-preflight/1*clioCoder=*) ;;
+  *) exit 9 ;;
+esac
+printf '%s\\n' 'clio-coder-preflight/1' 'cwd=ok' 'clioCoder=custom-entry' 'state=ok' 'cpu=1' 'memkb=1' 'gpu=unknown' 'vrammb=unknown'
+`,
+			"utf8",
+		);
+		chmodSync(canonicalSsh, 0o755);
+		const node = { id: "canonical", host: "canonical.invalid", clioCoderEntry: "/opt/custom-worker" };
+		const canonical = await runFleetNodePreflight(node, scratch, { sshBinary: canonicalSsh });
+		strictEqual(canonical.ok, true);
+		deepStrictEqual(canonical.checks, {
+			reachable: true,
+			clioPresent: true,
+			versionMatch: true,
+			pathParity: true,
+			stateDirWritable: true,
+		});
+
+		const legacySsh = join(scratch, "legacy-ssh.sh");
+		writeFileSync(
+			legacySsh,
+			"#!/bin/sh\nprintf '%s\\n' 'clio-preflight/1' 'cwd=ok' 'clio=custom-entry' 'state=ok' 'cpu=1' 'memkb=1' 'gpu=unknown' 'vrammb=unknown'\n",
+			"utf8",
+		);
+		chmodSync(legacySsh, 0o755);
+		const legacy = await runFleetNodePreflight(
+			{ id: "legacy", host: "legacy.invalid", clioCoderEntry: "/opt/custom-worker" },
+			scratch,
+			{ sshBinary: legacySsh },
+		);
+		strictEqual(legacy.ok, true);
+		strictEqual(legacy.checks.reachable, true);
+		strictEqual(legacy.checks.clioPresent, true);
 	});
 });
