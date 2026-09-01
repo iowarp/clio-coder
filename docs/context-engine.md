@@ -1,7 +1,7 @@
 # Context Engine
 
 > [!TIP]
-> **Interactive Spec Available:** An interactive dashboard is located at [docs/html/context_blueprint.html](html/context_blueprint.html).
+> **Interactive Spec Available:** A source-checkout dashboard is available at [docs/html/context_blueprint.html](https://github.com/iowarp/clio-coder/blob/main/docs/html/context_blueprint.html).
 
 Clio Coder tracks context pressure, records per-turn snapshots, and protects the provider context with bounded tool results plus single-threshold compaction.
 

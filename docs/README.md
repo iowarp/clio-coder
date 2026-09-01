@@ -156,8 +156,9 @@ the architecture guide and `CONTRIBUTING.md` are the public starting points.
 
 ## Interactive blueprints
 
-Many guides link to visual HTML blueprints under `docs/html/`. They are served
-from a source checkout with:
+Many guides link to visual HTML blueprints under `docs/html/`. Those links use
+the public repository so they still work when a guide is read from the npm
+package. From a source checkout, serve the same files locally with:
 
 ```bash
 clio-coder docs

@@ -2,7 +2,7 @@
 
 > [!TIP]
 > **Interactive spec available:** The source checkout includes the
-> [commands blueprint](html/commands_blueprint.html).
+> [commands blueprint](https://github.com/iowarp/clio-coder/blob/main/docs/html/commands_blueprint.html).
 
 
 Clio Coder is a terminal-first coding agent. This page is the detailed command

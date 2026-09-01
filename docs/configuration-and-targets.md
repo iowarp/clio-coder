@@ -3,7 +3,7 @@
 > [!TIP]
 > **Interactive spec available:** A configuration validator, target resolver,
 > and CLI command generator is available in the source checkout at
-> [configuration_blueprint.html](html/configuration_blueprint.html).
+> [configuration_blueprint.html](https://github.com/iowarp/clio-coder/blob/main/docs/html/configuration_blueprint.html).
 
 Clio Coder is target-first: chat and fleet dispatch resolve through configured targets in `settings.yaml`, not through provider-specific ad hoc flags. Chat and print targets are HTTP and native engine-backed runtimes. Fleet dispatch can also target the sanctioned Claude Code subscription runtimes described below.
 

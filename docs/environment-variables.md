@@ -5,7 +5,7 @@ Every environment variable the shipped `src/` tree reads, grouped by role. Setti
 This page is the complete inventory, and the `environment-variable-inventory` check in `scripts/check-hygiene.ts` (run by `npm run lint`) fails if `src/` reads a variable that has no row here.
 
 > [!TIP]
-> [docs/html/environment_blueprint.html](html/environment_blueprint.html) is a browsable walkthrough of the most commonly set variables with an effective-path resolver. It covers a curated subset, so use the tables below when you need the full list.
+> [docs/html/environment_blueprint.html](https://github.com/iowarp/clio-coder/blob/main/docs/html/environment_blueprint.html) is a source-checkout walkthrough of the most commonly set variables with an effective-path resolver. It covers a curated subset, so use the tables below when you need the full list.
 
 ## Guardrail overrides
 

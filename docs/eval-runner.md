@@ -2,7 +2,7 @@
 
 > [!TIP]
 > **Interactive spec available:** The source checkout includes the
-> [eval blueprint](html/eval_blueprint.html).
+> [eval blueprint](https://github.com/iowarp/clio-coder/blob/main/docs/html/eval_blueprint.html).
 
 The local evaluation runner executes repository-local YAML task suites as deterministic subprocess checks. It is useful for comparing harness changes, prompts, tools, or local workflows.
 
@@ -241,8 +241,8 @@ Suite execution adapts scalar run metrics into these observable facts at the Sui
 
 ### Public built-in behavioral corpus
 
-The repository ships corpus `public-built-in-behavior` version `1.0.0` under
-`evals/`. It contains no private prompts, endpoints, credentials, or
+The source repository carries corpus `public-built-in-behavior` version `1.0.0`
+under `evals/`. It contains no private prompts, endpoints, credentials, or
 mutable external dataset:
 
 - `behavioral-machinery.yaml` provides one positive and one adversarial
@@ -263,7 +263,10 @@ mutable external dataset:
   that the rules can reject observed model behavior rather than merely restate
   aggregate success counters.
 
-Build once, then run either focused suite from the repository root:
+These are source-checkout workflows: the npm archive keeps the inputs for
+inspection and reproducibility, but the deterministic TypeScript driver uses
+the repository development toolchain. Build once, then run either focused
+suite from the repository root:
 
 ```sh
 node dist/cli/index.js eval run --suite evals/behavioral-machinery.yaml --clio-coder-entry dist/cli/index.js

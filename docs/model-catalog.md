@@ -2,7 +2,7 @@
 
 > [!TIP]
 > **Interactive spec available:** The source checkout includes the
-> [model and target blueprint](html/models_blueprint.html).
+> [model and target blueprint](https://github.com/iowarp/clio-coder/blob/main/docs/html/models_blueprint.html).
 
 Clio Coder treats a selectable model as the intersection of three sources:
 
