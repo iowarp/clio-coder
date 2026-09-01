@@ -1,7 +1,7 @@
 ---
 name: tech-spec
-description: Write a typed call-stack architecture handoff — code-shaped contracts plus execution flows, implementation-ready for another engineer. User-invoked only.
-version: 0.1.0
+description: Write a typed call-stack architecture handoff — code-shaped contracts plus execution flows, implementation-ready for another engineer. User-invoked only. Not for weighing approaches or deciding the design; use architecture first.
+version: 0.1.1
 license: Apache-2.0
 disable-model-invocation: true
 allowed-tools:

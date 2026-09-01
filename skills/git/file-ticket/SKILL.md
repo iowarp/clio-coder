@@ -1,7 +1,7 @@
 ---
 name: file-ticket
 description: Use when something noticed mid-session must become a tracker issue — "file a ticket", "open an issue for this", "log this bug", "ticket this behavior". Captures evidence from the live session, dedups against existing issues, composes a labeled issue with acceptance criteria, confirms, and creates it via gh. Filing only; never fixes. Not for batch ticket creation from a PRD; use backlog. Not for diagnosing an existing issue; use fix-issue.
-version: 0.1.0
+version: 0.1.1
 license: Apache-2.0
 allowed-tools:
   - read
@@ -20,7 +20,6 @@ clio:
   model-size: any
   agents:
     - main
-    - git-master
 ---
 
 # File Ticket
@@ -34,7 +33,7 @@ pipeline (fix-issue picks it up from here).
 From the session that surfaced the behavior, record before anything scrolls
 away:
 
-- **Type**: bug, enhancement, docs, or question. Uncertain → ask, never
+- **Type**: bug, enhancement, documentation, or question. Uncertain → ask, never
   guess between bug and enhancement.
 - **Observed vs expected**: what actually happened, in the reporter's words,
   and what should have happened.

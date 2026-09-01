@@ -1,7 +1,7 @@
 ---
 name: clio-dev
 description: Use when modifying Clio Coder's own source in this repository, evolving its harness (TUI, skills, agents, tools, prompts, domains), or deciding whether a change stays local versus becomes a contribution. Governs self-development — what Clio may change freely, what requires explicit user intent, and how to make a change without breaking the architecture.
-version: 0.2.0
+version: 0.2.1
 license: Apache-2.0
 clio:
   registry-id: iowarp/clio-coder
@@ -81,7 +81,7 @@ Follow in order for every change:
   consumers, not just the file you edited.
 - `CLIO-CODER.md` is the audited constitution; codewiki and the `.clio-coder/state.json`
   fingerprint are mutable hints. Never trust a stale summary over source. If
-  source topology changed, refresh via `/context-init` — but a regenerated
+  source topology changed, refresh via `clio-coder context init` — but a regenerated
   `CLIO-CODER.md` is contribution-adjacent; do not commit it without intent.
 
 ## Continuity

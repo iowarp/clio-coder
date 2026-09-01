@@ -1,7 +1,7 @@
 ---
 name: cut-it
 description: Use when a plan, PRD, or milestone must become an executable sprint — dependency-ordered vertical slices sized for one focused agent run each, with done-when verification per slice. Never fabricates a plan; if none exists or it is too vague to slice, says so and recommends an interview first. Triggers on "cut it", "slice this plan", "make this executable", "turn this into a sprint".
-version: 0.2.1
+version: 0.2.2
 license: Apache-2.0
 allowed-tools:
   - read
@@ -22,6 +22,8 @@ clio:
   origin: https://github.com/TheOrcDev/skills
   eval-status: smoke-checked
   model-size: any
+  agents:
+    - architect
 ---
 
 # Cut It

@@ -1,7 +1,7 @@
 ---
 name: context-handoff
 description: Use when a session is winding down and work will continue in a new session or another agent, when context is about to be compacted or lost, or when the user asks for a handoff, brief, summary, or "notes for the next session." Produces a durable, redacted, reference-not-copy handoff document the next session can pick up from.
-version: 0.3.1
+version: 0.3.2
 license: Apache-2.0
 allowed-tools:
   - read
@@ -32,6 +32,9 @@ Distinct from two things it is often confused with:
 
 - `/context compact` summarizes *within* the current session; it is ephemeral and lost
   when the process exits. A handoff is a file that outlives the session.
+- `/handoff <goal>` is the built-in that writes a quick handoff file from the
+  live session; this skill is the fuller authored version with redaction and
+  reference-not-copy discipline.
 - `/resume` restores a session's transcript. A handoff carries *intent*:
   decisions, rationale, and blockers that a transcript alone makes expensive to
   recover.

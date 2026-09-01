@@ -1,7 +1,7 @@
 ---
 name: design-council
 description: Use when a design decision has real tradeoffs and needs several expert perspectives that challenge each other before code is written, such as architecture choices, API shapes, storage formats, parallelization strategies, or dependency decisions. Quick mode runs a single round for a fast perspective check. Triggers on "council", "debate this", "multiple perspectives", "weigh the options", "what would experts say". Not for a one-question-at-a-time interrogation of a plan; use grill-me. Not for splitting implementation work across workers; use dispatch directly.
-version: 0.3.0
+version: 0.3.1
 license: Apache-2.0
 allowed-tools:
   - dispatch
@@ -128,6 +128,9 @@ debate, no receipts).
 Stress-testing a plan by questioning its author one question at a time is
 `grill-me`, not a council. Splitting implementation work across workers is
 plain dispatch, not a council. Council workers analyze; they never build.
+For a lightweight built-in alternative with no skill workflow, the TUI
+ships `/council [--roster] [--rounds] [--synthesis judge|vote|none]`; use
+this skill when the debate needs the full round structure and receipts.
 
 ## Red Flags
 
