@@ -476,6 +476,34 @@ describe("contracts/view-overlay", () => {
 		ok(!body.includes("loading artifact..."), "loading text should use an ellipsis glyph");
 	});
 
+	it("wraps artifact load errors instead of cutting their remedies", async () => {
+		const message = "Artifact discovery failed; repair the receipt directory permissions and refresh this view.";
+		const broken = artifact({
+			id: "broken",
+			category: "receipt",
+			title: "broken receipt",
+			timestamp: Date.now(),
+			load: async () => Promise.reject(new Error(message)),
+		});
+		const view = new ViewOverlayView({
+			providers: [{ category: "receipt", list: async () => [broken] }],
+			getBodyHeight: () => 8,
+			onClose() {},
+			requestRender() {},
+		});
+
+		view.refresh();
+		await new Promise((resolve) => setImmediate(resolve));
+		view.handleInput("\t");
+		view.render(36);
+		await new Promise((resolve) => setImmediate(resolve));
+		const lines = view.render(36).map(stripAnsi);
+		const collapsed = lines.join(" ").replace(/\s+/gu, " ");
+
+		ok(collapsed.includes(message), `artifact error was cut: ${collapsed}`);
+		for (const line of lines) ok(visibleWidth(line) <= 36, `line overflows: ${line}`);
+	});
+
 	it("switches footer hints by pane focus", () => {
 		const listHint = viewFooterHint("list", true);
 		ok(listHint.includes("[←→] category"));
