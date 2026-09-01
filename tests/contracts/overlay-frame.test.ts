@@ -8,7 +8,6 @@ import {
 	ClioOverlayFrame,
 	diagnosticSeverityToken,
 	frameAlignForAnchor,
-	runtimeResolutionDiagnosticLine,
 	showClioOverlayFrame,
 } from "../../src/interactive/overlay-frame.js";
 import {
@@ -19,7 +18,6 @@ import {
 	permissionOverlayTitle,
 	permissionOverlayTone,
 } from "../../src/interactive/permission-overlay.js";
-import { clioTheme } from "../../src/interactive/theme/index.js";
 
 const ANSI = new RegExp(`${String.fromCharCode(27)}\\[[0-9;?]*[A-Za-z]`, "gu");
 
@@ -296,35 +294,6 @@ describe("contracts/overlay-frame row ownership", () => {
 });
 
 describe("contracts/overlay-frame diagnostics", () => {
-	it("colors a warning diagnostic amber, not red", () => {
-		const theme = clioTheme();
-		const line = runtimeResolutionDiagnosticLine(
-			{ severity: "warning", code: "thinking-coerced", message: "xhigh coerced to high" },
-			60,
-		);
-		const warning = theme.fgSequence("warning");
-		if (warning.length > 0) {
-			ok(line.startsWith(warning), "warning severity renders in the amber warning token");
-			ok(!line.startsWith(theme.fgSequence("error")), "warning severity must not render red");
-		} else {
-			ok(stripAnsi(line).includes("xhigh coerced to high"), "NO_COLOR keeps the warning message legible");
-		}
-	});
-
-	it("colors an error diagnostic red", () => {
-		const theme = clioTheme();
-		const line = runtimeResolutionDiagnosticLine(
-			{ severity: "error", code: "model-not-configured", message: "no model" },
-			60,
-		);
-		const error = theme.fgSequence("error");
-		if (error.length > 0) {
-			ok(line.startsWith(error), "error severity renders in the red error token");
-		} else {
-			ok(stripAnsi(line).includes("no model"), "NO_COLOR keeps the error message legible");
-		}
-	});
-
 	it("maps severity to a stable semantic token", () => {
 		strictEqual(diagnosticSeverityToken("error"), "error");
 		strictEqual(diagnosticSeverityToken("warning"), "warning");

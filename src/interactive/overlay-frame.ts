@@ -297,14 +297,6 @@ export function diagnosticSeverityToken(severity: RuntimeResolutionDiagnostic["s
 	return severity === "error" ? "error" : severity === "warning" ? "warning" : "muted";
 }
 
-export function runtimeResolutionDiagnosticLine(diagnostic: RuntimeResolutionDiagnostic, width: number): string {
-	return clioTheme().fg(diagnosticSeverityToken(diagnostic.severity), fitDiagnosticLine(diagnostic, width));
-}
-
-function fitDiagnosticLine(diagnostic: RuntimeResolutionDiagnostic, width: number): string {
-	return padAnsi(formatRuntimeResolutionDiagnostic(diagnostic), Math.max(1, width));
-}
-
 export type FrameAlign = "left" | "center" | "right";
 
 /**
