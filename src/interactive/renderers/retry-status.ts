@@ -1,10 +1,21 @@
 import type { RetryStatusPayload } from "../chat-loop.js";
 import { styleTaggedNotice } from "./notice.js";
 
+const RETRY_ERROR_MAX_CHARS = 2_000;
+const RETRY_ERROR_TRUNCATION_MARKER = "… [retry error truncated]";
+
+function boundedRetryError(value: string): string {
+	const characters = Array.from(value);
+	if (characters.length <= RETRY_ERROR_MAX_CHARS) return value;
+	return `${characters.slice(0, RETRY_ERROR_MAX_CHARS).join("").trimEnd()}${RETRY_ERROR_TRUNCATION_MARKER}`;
+}
+
 function rawRetryStatus(status: RetryStatusPayload): string {
-	// Both live and replay renderers wrap this notice to their terminal width.
-	// Capping the error here discarded the remedy before either renderer saw it.
-	const suffix = status.errorMessage ? `: ${status.errorMessage}` : "";
+	// Both live and replay renderers wrap this notice to their terminal width, so
+	// ordinary errors keep their complete remedy. Raw provider failures can also
+	// be an HTML proxy page, though; keep a generous ceiling so one retry does not
+	// turn that page into hundreds of transcript rows.
+	const suffix = status.errorMessage ? `: ${boundedRetryError(status.errorMessage)}` : "";
 	if (status.phase === "waiting") {
 		return `[retry] attempt ${status.attempt}/${status.maxAttempts} in ${status.seconds ?? 0}s${suffix}`;
 	}
