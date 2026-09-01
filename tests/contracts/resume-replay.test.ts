@@ -262,6 +262,27 @@ describe("contracts/resume replay transcript notices", () => {
 		ok(rendered.includes(errorMessage), `retry detail was cut: ${rendered}`);
 	});
 
+	it("caps a runaway provider retry body while retaining its leading remedy", () => {
+		const panel = createChatPanel();
+		const remedy = "Retry through the healthy endpoint after checking the proxy configuration.";
+		const runaway = `${remedy} ${"<html>gateway failure</html>".repeat(120)} END_OF_PROVIDER_BODY`;
+		rehydrateChatPanelFromTurns(panel, [
+			{
+				kind: "custom",
+				customType: "retryStatus",
+				turnId: "c3",
+				parentTurnId: null,
+				timestamp: ts,
+				data: { phase: "exhausted", attempt: 5, maxAttempts: 5, errorMessage: runaway },
+			},
+		]);
+		const rendered = strip(panel.render(80).join(" ")).replace(/\s+/gu, " ");
+
+		ok(rendered.includes(remedy), `retry remedy was lost: ${rendered}`);
+		ok(rendered.includes("[retry error truncated]"), `runaway body was not marked: ${rendered}`);
+		ok(!rendered.includes("END_OF_PROVIDER_BODY"), `runaway body reached the transcript tail: ${rendered}`);
+	});
+
 	// A cancelled turn is persisted `aborted` so the context estimator skips it
 	// when looking for the last usage anchor. Marking it that way used to also
 	// stamp a synthesized "request aborted" on it, so a resumed session showed a
