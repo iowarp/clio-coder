@@ -71,6 +71,7 @@ function createHarness() {
 		openCost: () => events.push("cost"),
 		openSideQuestion: (question) => events.push(`btw:${question}`),
 		startHandoff: () => {},
+		openFleetRuns: () => events.push("fleet-runs"),
 		openContextView: () => events.push("context"),
 		openTasks: () => events.push("tasks"),
 		openDecisions: () => events.push("decisions"),
@@ -511,7 +512,7 @@ describe("contracts/interactive slash runtime", () => {
 		);
 	});
 
-	it("routes only grammar-valid share imports and keeps dry-run on the planning path", () => {
+	it("routes only grammar-valid archive imports and keeps dry-run on the planning path", () => {
 		const harness = createHarness();
 		const planned: Array<{ path: string; options: unknown }> = [];
 		const imported: Array<{ path: string; options: unknown }> = [];
@@ -529,10 +530,10 @@ describe("contracts/interactive slash runtime", () => {
 		};
 		const runtime = createInteractiveSlashRuntime(harness.deps);
 
-		runtime.dispatchCommand("/share import --dry-run /tmp/preview.clio-coder-share.json");
-		runtime.dispatchCommand("/share import --dry-rnu /tmp/typo.clio-coder-share.json");
-		runtime.dispatchCommand("/share import /tmp/extra.clio-coder-share.json unexpected");
-		runtime.dispatchCommand("/share import --force /tmp/apply.clio-coder-share.json");
+		runtime.dispatchCommand("/archive import --dry-run /tmp/preview.clio-coder-share.json");
+		runtime.dispatchCommand("/archive import --dry-rnu /tmp/typo.clio-coder-share.json");
+		runtime.dispatchCommand("/archive import /tmp/extra.clio-coder-share.json unexpected");
+		runtime.dispatchCommand("/archive import --force /tmp/apply.clio-coder-share.json");
 
 		deepStrictEqual(planned, [
 			{
@@ -591,11 +592,36 @@ describe("contracts/interactive slash runtime", () => {
 		runtime.dispatchCommand("/thinking off");
 
 		deepStrictEqual(commits, [
-			{ id: "terminal.outputVerbosity", scope: "session", value: "verbose" },
-			{ id: "orchestrator.thinkingLevel", scope: "session", value: "off" },
+			{ id: "interface.outputDetail", scope: "session", value: "verbose" },
+			{ id: "chat.thinkingLevel", scope: "session", value: "off" },
 		]);
 		ok(!harness.events.includes("write-settings"), "/output wrote saved settings");
 		ok(!harness.events.includes("write-thinking"), "/thinking wrote saved settings");
+	});
+
+	it("opens small value pickers for bare /thinking and /output", async () => {
+		const harness = createHarness();
+		const settings = structuredClone(DEFAULT_SETTINGS) as ClioSettings;
+		const headers: string[] = [];
+		const commits: string[] = [];
+		harness.deps.getSettings = () => settings;
+		harness.deps.onSetThinkingLevel = () => {};
+		harness.deps.commitSetting = (id) => commits.push(id);
+		harness.deps.openAskUser = async (questions) => {
+			const question = questions[0];
+			if (!question) return { answers: [], cancelled: true };
+			headers.push(question.header ?? "");
+			const answer = question.header === "Output" ? "Verbose" : (question.options?.[0]?.label ?? "off");
+			return { answers: [{ question: question.question, answer }] };
+		};
+		const runtime = createInteractiveSlashRuntime(harness.deps);
+
+		runtime.dispatchCommand("/thinking");
+		runtime.dispatchCommand("/output");
+		await flushAsync();
+
+		deepStrictEqual(headers, ["Thinking", "Output"]);
+		deepStrictEqual(commits, ["chat.thinkingLevel", "interface.outputDetail"]);
 	});
 
 	it("clears transcript overrides when /output reapplies the current level", () => {
@@ -605,7 +631,7 @@ describe("contracts/interactive slash runtime", () => {
 		harness.deps.commitSetting = () => {};
 		const runtime = createInteractiveSlashRuntime(harness.deps);
 
-		runtime.dispatchCommand(`/output ${settings.terminal.outputVerbosity}`);
+		runtime.dispatchCommand(`/output ${settings.interface.outputDetail}`);
 
 		strictEqual(harness.events.filter((event) => event === "clear-folds").length, 1);
 		strictEqual(harness.events.filter((event) => event === "footer").length, 1, "the footer reads the new session value");

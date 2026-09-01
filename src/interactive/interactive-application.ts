@@ -53,6 +53,7 @@ import type {
 	ContextClearCommandOptions,
 	InitCommandOptions,
 	RunIo,
+	SettingsAreaId,
 	TaskMemorySeedCommandResult,
 } from "./slash-commands.js";
 import { processAutoPacingAllowed, resolveSmoothStreamingMode } from "./stream-pacing-policy.js";
@@ -742,6 +743,7 @@ export async function createInteractiveApplication(deps: InteractiveDeps): Promi
 		openSideQuestion: (question) => openSideQuestionOverlayState(question),
 		startHandoff: (goal) => startHandoffState(goal),
 		startFleetRun: (name, vars) => startFleetRunState(name, vars),
+		openFleetRuns: () => toggleDispatchBoardOverlay(),
 		...(toolRegistry ? { runCouncilDispatch: (args) => dispatchCouncilThroughRegistry(toolRegistry, args) } : {}),
 		openContextView: () => openContextViewOverlayState(),
 		openTasks: () => openTasksOverlayState(),
@@ -752,7 +754,22 @@ export async function createInteractiveApplication(deps: InteractiveDeps): Promi
 		...(deps.panes ? { panes: deps.panes } : {}),
 		openModel: () => openModelOverlayState(),
 		openModelScope: (ref) => openModelScopeState(ref),
-		openSettings: (section, rowId) => openSettingsOverlayState(section, rowId),
+		openSettings: (area, group) => {
+			if (!area) return openSettingsOverlayState();
+			// Compatibility adapter until the seven-area Settings shell replaces
+			// the legacy section ids. Slash grammar never exposes these old names.
+			if (area === "chat" && group === "model-picker") return openSettingsOverlayState("models", "scope");
+			const section = {
+				chat: "orchestrator",
+				fleet: "fleet",
+				targets: "targets",
+				context: "compaction",
+				safety: "safety",
+				interface: "terminal",
+				integrations: "advanced",
+			} satisfies Record<SettingsAreaId, Parameters<typeof openSettingsOverlayState>[0]>;
+			openSettingsOverlayState(section[area]);
+		},
 		openResume: () => openResumeOverlayState(),
 		startNewSession: () => startNewSession(),
 		openTree: () => openTreeOverlayState(),
@@ -870,6 +887,7 @@ export async function createInteractiveApplication(deps: InteractiveDeps): Promi
 		openPromptsOverlayState,
 		openExtensionsOverlayState,
 		openInteropOverlayState,
+		toggleDispatchBoardOverlay,
 	} = overlayLifecycle;
 
 	const dispatchSteering = createDispatchSteering({
