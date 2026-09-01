@@ -67,7 +67,19 @@ export interface FakeHerdrServerOptions {
 	 * herdr config disabled toasts, which the wire calls a normal answer.
 	 */
 	toastsShown?: boolean;
+	/** Outer tab area in cells, from which every pane rect is derived. */
+	area?: { width: number; height: number };
 }
+
+/**
+ * One node of a tab's split tree. The fixture keeps a real tree per tab so the
+ * geometry answers (`pane.layout`, `layout.export`, `layout_updated` pushes)
+ * are consistent with the splits a test performed, ratios included, the way a
+ * real server's are.
+ */
+export type FakeLayoutNode =
+	| { type: "pane"; paneId: string }
+	| { type: "split"; direction: "right" | "down"; ratio: number; first: FakeLayoutNode; second: FakeLayoutNode };
 
 /** One toast the fixture was asked to paint. */
 export interface FakeHerdrNotification {
@@ -101,6 +113,16 @@ export interface FakeHerdrServer {
 	removePane(paneId: string): void;
 	/** Push one lifecycle event to every open subscription connection. */
 	pushEvent(kind: "pane_closed" | "pane_exited", pane: { paneId: string; workspaceId: string }): void;
+	/** Push an arbitrary event envelope, for kinds the convenience pushers do not cover. */
+	pushRawEvent(kind: string, data: Record<string, unknown>): void;
+	/** Push a `layout_updated` carrying the tab's current geometry, as a user resize would. */
+	pushLayoutUpdated(tabId: string): void;
+	/** The split tree the fixture holds for a tab, or null when the tab is unknown. */
+	layoutTree(tabId: string): FakeLayoutNode | null;
+	/** Overwrite one split's ratio directly, as a user drag would, without an event. */
+	setSplitRatio(tabId: string, path: ReadonlyArray<boolean>, ratio: number): boolean;
+	/** Whether a pane is currently zoomed. */
+	zoomedPane(tabId: string): string | null;
 	/** Number of connections that completed an `events.subscribe`. */
 	subscriptionCount(): number;
 	connectionCount(): number;
@@ -180,8 +202,133 @@ export async function startFakeHerdrServer(options: FakeHerdrServerOptions = {})
 	let nextTab = 1;
 	let nextPane = panes.length;
 	let nextWorkspace = 1;
+	const area = options.area ?? { width: 200, height: 50 };
+	/** Per-tab split tree; every geometry answer derives from it. */
+	const tabTrees = new Map<string, FakeLayoutNode>();
+	/** Zoomed pane per tab, at most one, the way the real server keeps it. */
+	const zoomedByTab = new Map<string, string>();
+
+	// Boot panes sharing a tab become a chain of even right-splits, which is
+	// what a user opening them by hand would have.
+	for (const pane of panes) {
+		const existing = tabTrees.get(pane.tabId);
+		const leaf: FakeLayoutNode = { type: "pane", paneId: pane.paneId };
+		tabTrees.set(
+			pane.tabId,
+			existing ? { type: "split", direction: "right", ratio: 0.5, first: existing, second: leaf } : leaf,
+		);
+	}
+
+	/** Replaces the leaf for `paneId` with `replacement`; returns whether it was found. */
+	const replaceLeaf = (node: FakeLayoutNode, paneId: string, replacement: FakeLayoutNode): FakeLayoutNode | null => {
+		if (node.type === "pane") return node.paneId === paneId ? replacement : null;
+		const first = replaceLeaf(node.first, paneId, replacement);
+		if (first) return { ...node, first };
+		const second = replaceLeaf(node.second, paneId, replacement);
+		if (second) return { ...node, second };
+		return null;
+	};
+
+	/** Removes the leaf for `paneId`, collapsing its parent split to the sibling. */
+	const removeLeaf = (node: FakeLayoutNode, paneId: string): FakeLayoutNode | null | "gone" => {
+		if (node.type === "pane") return node.paneId === paneId ? "gone" : null;
+		const first = removeLeaf(node.first, paneId);
+		if (first === "gone") return node.second;
+		if (first) return { ...node, first };
+		const second = removeLeaf(node.second, paneId);
+		if (second === "gone") return node.first;
+		if (second) return { ...node, second };
+		return null;
+	};
+
+	interface FakeRect {
+		x: number;
+		y: number;
+		width: number;
+		height: number;
+	}
+
+	/** Walks a tab tree computing integer cell rects, pre-order, the way the wire reports them. */
+	const computeGeometry = (
+		node: FakeLayoutNode,
+		rect: FakeRect,
+		out: {
+			panes: { pane_id: string; focused: boolean; rect: FakeRect }[];
+			splits: { id: string; direction: string; ratio: number; rect: FakeRect }[];
+		},
+		path: string,
+	): void => {
+		if (node.type === "pane") {
+			out.panes.push({ pane_id: node.paneId, focused: node.paneId === focusedPaneId, rect });
+			return;
+		}
+		out.splits.push({ id: `split_${path || "root"}`, direction: node.direction, ratio: node.ratio, rect });
+		if (node.direction === "right") {
+			const firstWidth = Math.round(rect.width * node.ratio);
+			computeGeometry(node.first, { ...rect, width: firstWidth }, out, `${path}0`);
+			computeGeometry(node.second, { ...rect, x: rect.x + firstWidth, width: rect.width - firstWidth }, out, `${path}1`);
+		} else {
+			const firstHeight = Math.round(rect.height * node.ratio);
+			computeGeometry(node.first, { ...rect, height: firstHeight }, out, `${path}0`);
+			computeGeometry(
+				node.second,
+				{ ...rect, y: rect.y + firstHeight, height: rect.height - firstHeight },
+				out,
+				`${path}1`,
+			);
+		}
+	};
+
+	const layoutSnapshotFor = (tabId: string): Record<string, unknown> | null => {
+		const tree = tabTrees.get(tabId);
+		if (!tree) return null;
+		const workspaceId = panes.find((pane) => pane.tabId === tabId)?.workspaceId ?? "w1";
+		const out: {
+			panes: { pane_id: string; focused: boolean; rect: FakeRect }[];
+			splits: { id: string; direction: string; ratio: number; rect: FakeRect }[];
+		} = { panes: [], splits: [] };
+		computeGeometry(tree, { x: 0, y: 0, width: area.width, height: area.height }, out, "");
+		return {
+			workspace_id: workspaceId,
+			tab_id: tabId,
+			zoomed: zoomedByTab.has(tabId),
+			area: { x: 0, y: 0, width: area.width, height: area.height },
+			focused_pane_id: focusedPaneId ?? "",
+			panes: out.panes,
+			splits: out.splits,
+		};
+	};
+
+	const exportNode = (node: FakeLayoutNode): Record<string, unknown> => {
+		if (node.type === "pane") return { type: "pane", pane_id: node.paneId, cwd: "/tmp" };
+		return {
+			type: "split",
+			direction: node.direction,
+			ratio: node.ratio,
+			first: exportNode(node.first),
+			second: exportNode(node.second),
+		};
+	};
+
+	const splitAtPath = (tabId: string, path: ReadonlyArray<boolean>): FakeLayoutNode | null => {
+		let node = tabTrees.get(tabId) ?? null;
+		if (node?.type !== "split") return null;
+		for (const step of path) {
+			const next: FakeLayoutNode = step ? node.second : node.first;
+			if (next.type !== "split") return null;
+			node = next;
+		}
+		return node;
+	};
 
 	let server!: FakeHerdrServer;
+
+	/** Pushes the tab's current geometry to subscribers, as the real server does after layout changes. */
+	const emitLayoutUpdated = (tabId: string): void => {
+		const layout = layoutSnapshotFor(tabId);
+		if (!layout) return;
+		server?.pushRawEvent("layout_updated", { type: "layout_updated", layout });
+	};
 
 	const tabsInPlay = (): Record<string, unknown>[] => {
 		const ids = [...new Set(panes.map((pane) => pane.tabId))];
@@ -281,13 +428,118 @@ export async function startFakeHerdrServer(options: FakeHerdrServerOptions = {})
 					workspaceId: target.workspaceId,
 				};
 				panes.push(created);
+				const direction = params.direction === "down" ? "down" : "right";
+				// Wire semantics: ratio is the share the existing pane keeps.
+				const ratio = typeof params.ratio === "number" ? params.ratio : 0.5;
+				const tree = tabTrees.get(target.tabId);
+				if (tree) {
+					const replaced = replaceLeaf(tree, target.paneId, {
+						type: "split",
+						direction,
+						ratio,
+						first: { type: "pane", paneId: target.paneId },
+						second: { type: "pane", paneId: created.paneId },
+					});
+					if (replaced) tabTrees.set(target.tabId, replaced);
+				} else {
+					tabTrees.set(target.tabId, { type: "pane", paneId: created.paneId });
+				}
+				emitLayoutUpdated(target.tabId);
 				return { result: { type: "pane_info", pane: paneInfo(created) } };
 			}
 			case "pane.close": {
 				const index = panes.findIndex((entry) => entry.paneId === params.pane_id);
 				if (index < 0) return { error: { code: "pane_not_found", message: "pane not found" } };
-				panes.splice(index, 1);
+				const [closed] = panes.splice(index, 1);
+				if (closed) {
+					const tree = tabTrees.get(closed.tabId);
+					const pruned = tree ? removeLeaf(tree, closed.paneId) : null;
+					if (pruned === "gone") tabTrees.delete(closed.tabId);
+					else if (pruned) tabTrees.set(closed.tabId, pruned);
+					if (zoomedByTab.get(closed.tabId) === closed.paneId) zoomedByTab.delete(closed.tabId);
+					emitLayoutUpdated(closed.tabId);
+				}
 				return { result: { type: "ok" } };
+			}
+			case "pane.focus": {
+				if (protocol < 21) return { error: { code: "invalid_request", message: "unknown method pane.focus" } };
+				const pane = panes.find((entry) => entry.paneId === params.pane_id);
+				if (!pane) return { error: { code: "pane_not_found", message: "pane not found" } };
+				// The real server switches the focused tab along with the pane.
+				focusedPaneId = pane.paneId;
+				focusedTabId = pane.tabId;
+				return { result: { type: "pane_info", pane: paneInfo(pane, true, paneTokens.get(pane.paneId) ?? {}) } };
+			}
+			case "pane.zoom": {
+				if (protocol < 17) return { error: { code: "invalid_request", message: "unknown method pane.zoom" } };
+				const pane = panes.find((entry) => entry.paneId === params.pane_id);
+				if (!pane) return { error: { code: "pane_not_found", message: "pane not found" } };
+				const mode = typeof params.mode === "string" ? params.mode : "toggle";
+				const wasZoomed = zoomedByTab.get(pane.tabId) === pane.paneId;
+				const zoomOn = mode === "on" || (mode === "toggle" && !wasZoomed);
+				const changed = zoomOn !== wasZoomed;
+				// Zooming an unfocused pane steals focus, verified on 0.8.2.
+				const focusChanged = zoomOn && focusedPaneId !== pane.paneId;
+				if (zoomOn) {
+					zoomedByTab.set(pane.tabId, pane.paneId);
+					focusedPaneId = pane.paneId;
+				} else {
+					zoomedByTab.delete(pane.tabId);
+				}
+				return {
+					result: {
+						type: "pane_zoom",
+						zoom: { changed, focus_changed: focusChanged, focused_pane_id: focusedPaneId },
+					},
+				};
+			}
+			case "layout.export": {
+				if (protocol < 21) return { error: { code: "invalid_request", message: "unknown method layout.export" } };
+				const byPane = typeof params.pane_id === "string" ? panes.find((p) => p.paneId === params.pane_id) : null;
+				const tabId = byPane?.tabId ?? (typeof params.tab_id === "string" ? params.tab_id : (focusedTabId ?? "w1:t1"));
+				const tree = tabTrees.get(tabId);
+				if (!tree) return { error: { code: "tab_not_found", message: "tab not found" } };
+				const workspaceId = panes.find((pane) => pane.tabId === tabId)?.workspaceId ?? "w1";
+				return {
+					result: {
+						type: "layout_export",
+						layout: {
+							workspace_id: workspaceId,
+							tab_id: tabId,
+							zoomed: zoomedByTab.has(tabId),
+							focused_pane_id: focusedPaneId ?? "",
+							root: exportNode(tree),
+						},
+					},
+				};
+			}
+			case "layout.set_split_ratio": {
+				if (protocol < 21) {
+					return { error: { code: "invalid_request", message: "unknown method layout.set_split_ratio" } };
+				}
+				const byPane = typeof params.pane_id === "string" ? panes.find((p) => p.paneId === params.pane_id) : null;
+				const tabId = byPane?.tabId ?? (typeof params.tab_id === "string" ? params.tab_id : (focusedTabId ?? "w1:t1"));
+				const path = Array.isArray(params.path) ? params.path.map((step) => step === true) : [];
+				const split = splitAtPath(tabId, path);
+				if (split?.type !== "split") {
+					return { error: { code: "split_not_found", message: "no split at path" } };
+				}
+				if (typeof params.ratio === "number") split.ratio = params.ratio;
+				emitLayoutUpdated(tabId);
+				const tree = tabTrees.get(tabId);
+				const workspaceId = panes.find((pane) => pane.tabId === tabId)?.workspaceId ?? "w1";
+				return {
+					result: {
+						type: "layout_split_ratio_set",
+						layout: {
+							workspace_id: workspaceId,
+							tab_id: tabId,
+							zoomed: zoomedByTab.has(tabId),
+							focused_pane_id: focusedPaneId ?? "",
+							root: tree ? exportNode(tree) : { type: "pane", pane_id: null },
+						},
+					},
+				};
 			}
 			case "pane.rename": {
 				if (protocol < 17) return { error: { code: "invalid_request", message: "unknown method pane.rename" } };
@@ -298,23 +550,9 @@ export async function startFakeHerdrServer(options: FakeHerdrServerOptions = {})
 			case "pane.layout": {
 				const pane = panes.find((entry) => entry.paneId === params.pane_id) ?? panes[0];
 				if (!pane) return { error: { code: "pane_layout_unavailable", message: "pane layout unavailable" } };
-				const area = { x: 0, y: 0, width: 200, height: 50 };
-				return {
-					result: {
-						type: "pane_layout",
-						layout: {
-							workspace_id: pane.workspaceId,
-							tab_id: pane.tabId,
-							zoomed: false,
-							area,
-							focused_pane_id: pane.paneId,
-							panes: panes
-								.filter((entry) => entry.tabId === pane.tabId)
-								.map((entry) => ({ pane_id: entry.paneId, focused: entry.paneId === pane.paneId, rect: area })),
-							splits: [],
-						},
-					},
-				};
+				const layout = layoutSnapshotFor(pane.tabId);
+				if (!layout) return { error: { code: "pane_layout_unavailable", message: "pane layout unavailable" } };
+				return { result: { type: "pane_layout", layout } };
 			}
 			case "tab.create": {
 				nextTab += 1;
@@ -322,6 +560,7 @@ export async function startFakeHerdrServer(options: FakeHerdrServerOptions = {})
 				nextPane += 1;
 				const root: FakeHerdrPane = { paneId: `w1:p${nextPane}`, tabId, workspaceId: "w1" };
 				panes.push(root);
+				tabTrees.set(tabId, { type: "pane", paneId: root.paneId });
 				tabLabels.set(tabId, typeof params.label === "string" ? params.label : "shell");
 				return {
 					result: {
@@ -381,6 +620,7 @@ export async function startFakeHerdrServer(options: FakeHerdrServerOptions = {})
 				const root: FakeHerdrPane = { paneId: `${workspaceId}:p1`, tabId, workspaceId };
 				const entry: FakeHerdrWorktree = { path, branch, workspaceId };
 				panes.push(root);
+				tabTrees.set(tabId, { type: "pane", paneId: root.paneId });
 				worktrees.push(entry);
 				tabLabels.set(tabId, typeof params.label === "string" ? params.label : (branch ?? "worktree"));
 				return {
@@ -412,6 +652,7 @@ export async function startFakeHerdrServer(options: FakeHerdrServerOptions = {})
 				if (!root) {
 					root = { paneId: `${workspaceId}:p1`, tabId, workspaceId };
 					panes.push(root);
+					tabTrees.set(tabId, { type: "pane", paneId: root.paneId });
 				}
 				tabLabels.set(tabId, typeof params.label === "string" ? params.label : (entry.branch ?? "worktree"));
 				return {
@@ -625,16 +866,38 @@ export async function startFakeHerdrServer(options: FakeHerdrServerOptions = {})
 		},
 		removePane(paneId: string): void {
 			const index = panes.findIndex((entry) => entry.paneId === paneId);
-			if (index >= 0) panes.splice(index, 1);
+			if (index < 0) return;
+			const [removed] = panes.splice(index, 1);
+			if (removed) {
+				const tree = tabTrees.get(removed.tabId);
+				const pruned = tree ? removeLeaf(tree, removed.paneId) : null;
+				if (pruned === "gone") tabTrees.delete(removed.tabId);
+				else if (pruned) tabTrees.set(removed.tabId, pruned);
+			}
 		},
 		pushEvent(kind, pane): void {
+			server.pushRawEvent(kind, { type: kind, pane_id: pane.paneId, workspace_id: pane.workspaceId });
+		},
+		pushRawEvent(kind: string, data: Record<string, unknown>): void {
 			for (const connection of connections.values()) {
 				if (!connection.subscribed) continue;
-				write(connection, {
-					event: kind,
-					data: { type: kind, pane_id: pane.paneId, workspace_id: pane.workspaceId },
-				});
+				write(connection, { event: kind, data });
 			}
+		},
+		pushLayoutUpdated(tabId: string): void {
+			emitLayoutUpdated(tabId);
+		},
+		layoutTree(tabId: string): FakeLayoutNode | null {
+			return tabTrees.get(tabId) ?? null;
+		},
+		setSplitRatio(tabId: string, path: ReadonlyArray<boolean>, ratio: number): boolean {
+			const split = splitAtPath(tabId, path);
+			if (split?.type !== "split") return false;
+			split.ratio = ratio;
+			return true;
+		},
+		zoomedPane(tabId: string): string | null {
+			return zoomedByTab.get(tabId) ?? null;
 		},
 		subscriptionCount(): number {
 			let count = 0;

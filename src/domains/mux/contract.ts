@@ -206,6 +206,7 @@ export function createMuxRuntime(options: MuxRuntimeOptions): MuxRuntime {
 	};
 
 	const onEvent = (event: MuxEvent): void => {
+		if (event.kind !== "pane.closed" && event.kind !== "pane.exited") return;
 		const dropped = registry.forget(event.paneId);
 		if (dropped) {
 			log("debug", `mux pane ${event.paneId} left on ${event.kind}; dropped from the registry`);

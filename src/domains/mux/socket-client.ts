@@ -36,14 +36,18 @@ import {
 	MuxError,
 	type MuxEvent,
 	type MuxEventKind,
+	type MuxLayoutNode,
+	type MuxLayoutTree,
 	type MuxLog,
 	type MuxNotificationSound,
 	type MuxPane,
+	type MuxRect,
 	type MuxReportableAgentState,
 	MuxRequestTimeout,
 	type MuxServerInfo,
 	type MuxSnapshot,
 	type MuxTab,
+	type MuxTabGeometry,
 	type MuxWorktree,
 	type MuxWorktreeSource,
 	muxErrorKind,
@@ -192,8 +196,32 @@ export interface MuxClient {
 	/** Set the pane's operator-facing label. Available on herdr protocol 17. */
 	paneRename(paneId: string, label: string): Promise<void>;
 	paneClose(paneId: string): Promise<void>;
-	/** Pane ids sharing a tab with `paneId`, read off the tab's layout snapshot. */
-	paneLayout(paneId?: string): Promise<ReadonlyArray<string>>;
+	/**
+	 * Cell-precise geometry of the tab holding `paneId` (the server's focused
+	 * pane when omitted): outer area, pane rects, and live split ratios.
+	 */
+	paneLayout(paneId?: string): Promise<MuxTabGeometry>;
+	/**
+	 * Focus a pane. This switches the focused tab as well as the pane (verified
+	 * on 0.8.2), so it is only ever driven by an explicit "show me" request,
+	 * never by background bookkeeping.
+	 */
+	paneFocus(paneId: string): Promise<void>;
+	/** Zoom a pane. Zooming an unfocused pane steals focus; same rule as paneFocus. */
+	paneZoom(paneId: string, mode: "on" | "off" | "toggle"): Promise<{ changed: boolean; focusChanged: boolean }>;
+	/** Portable layout tree for a tab, or the tab holding `paneId`. */
+	layoutExport(request?: { tabId?: string; paneId?: string }): Promise<MuxLayoutTree>;
+	/**
+	 * Set one split's ratio, addressed by a boolean path from the root split
+	 * (`false` descends first, `true` second; `[]` is the root). Returns the
+	 * updated tree.
+	 */
+	layoutSetSplitRatio(request: {
+		tabId?: string;
+		paneId?: string;
+		path: ReadonlyArray<boolean>;
+		ratio: number;
+	}): Promise<MuxLayoutTree>;
 	worktreeList(request?: MuxWorktreeListRequest): Promise<MuxWorktreeListResult>;
 	worktreeCreate(request: MuxWorktreeCreateRequest): Promise<MuxWorktreeCreatedResult>;
 	worktreeOpen(request: MuxWorktreeOpenRequest): Promise<MuxWorktreeOpenedResult>;
@@ -410,8 +438,93 @@ function readSnapshot(value: unknown): MuxSnapshot {
 	};
 }
 
+function requireNumber(source: Record<string, unknown>, key: string, context: string): number {
+	const value = source[key];
+	if (typeof value !== "number") {
+		throw new MuxError("protocol", `mux ${context} response is missing number field ${key}`);
+	}
+	return value;
+}
+
+function readRect(value: unknown, context: string): MuxRect {
+	const source = asRecord(value);
+	if (!source) throw new MuxError("protocol", `mux ${context} rect is not an object`);
+	return {
+		x: requireNumber(source, "x", context),
+		y: requireNumber(source, "y", context),
+		width: requireNumber(source, "width", context),
+		height: requireNumber(source, "height", context),
+	};
+}
+
+function readSplitDirection(value: unknown, context: string): "right" | "down" {
+	if (value === "right" || value === "down") return value;
+	throw new MuxError("protocol", `mux ${context} split direction is not right/down`);
+}
+
+/** Parses a `PaneLayoutSnapshot`: the shape `pane.layout` and `layout_updated` both carry. */
+function readTabGeometry(value: unknown): MuxTabGeometry {
+	const source = asRecord(value);
+	if (!source) throw new MuxError("protocol", "mux layout snapshot is not an object");
+	return {
+		workspaceId: requireString(source, "workspace_id", "layout"),
+		tabId: requireString(source, "tab_id", "layout"),
+		zoomed: source.zoomed === true,
+		area: readRect(source.area, "layout"),
+		focusedPaneId: optionalString(source, "focused_pane_id"),
+		panes: readArray(source, "panes").map((entry) => {
+			const pane = asRecord(entry);
+			if (!pane) throw new MuxError("protocol", "mux layout pane entry is not an object");
+			return {
+				paneId: requireString(pane, "pane_id", "layout pane"),
+				focused: pane.focused === true,
+				rect: readRect(pane.rect, "layout pane"),
+			};
+		}),
+		splits: readArray(source, "splits").map((entry) => {
+			const split = asRecord(entry);
+			if (!split) throw new MuxError("protocol", "mux layout split entry is not an object");
+			return {
+				direction: readSplitDirection(split.direction, "layout"),
+				ratio: requireNumber(split, "ratio", "layout split"),
+				rect: readRect(split.rect, "layout split"),
+			};
+		}),
+	};
+}
+
+function readLayoutNode(value: unknown): MuxLayoutNode {
+	const source = asRecord(value);
+	if (!source) throw new MuxError("protocol", "mux layout node is not an object");
+	if (source.type === "pane") {
+		return { type: "pane", paneId: optionalString(source, "pane_id"), label: optionalString(source, "label") };
+	}
+	if (source.type === "split") {
+		return {
+			type: "split",
+			direction: readSplitDirection(source.direction, "layout tree"),
+			ratio: requireNumber(source, "ratio", "layout tree split"),
+			first: readLayoutNode(source.first),
+			second: readLayoutNode(source.second),
+		};
+	}
+	throw new MuxError("protocol", "mux layout node has an unknown type");
+}
+
+function readLayoutTree(value: unknown): MuxLayoutTree {
+	const source = asRecord(value);
+	if (!source) throw new MuxError("protocol", "mux layout tree is not an object");
+	return {
+		workspaceId: requireString(source, "workspace_id", "layout tree"),
+		tabId: requireString(source, "tab_id", "layout tree"),
+		zoomed: source.zoomed === true,
+		focusedPaneId: optionalString(source, "focused_pane_id"),
+		root: readLayoutNode(source.root),
+	};
+}
+
 /** herdr names lifecycle event kinds with underscores on the wire and dots in subscriptions. */
-const EVENT_KIND_BY_WIRE: Readonly<Record<string, MuxEventKind>> = {
+const PANE_LEAVE_KIND_BY_WIRE: Readonly<Record<string, "pane.closed" | "pane.exited">> = {
 	pane_closed: "pane.closed",
 	pane_exited: "pane.exited",
 };
@@ -419,14 +532,37 @@ const EVENT_KIND_BY_WIRE: Readonly<Record<string, MuxEventKind>> = {
 function readEvent(line: Record<string, unknown>): MuxEvent | null {
 	const wireKind = line.event;
 	if (typeof wireKind !== "string") return null;
-	const kind = EVENT_KIND_BY_WIRE[wireKind];
-	if (!kind) return null;
 	const data = asRecord(line.data);
 	if (!data) return null;
-	const paneId = data.pane_id;
-	const workspaceId = data.workspace_id;
-	if (typeof paneId !== "string" || typeof workspaceId !== "string") return null;
-	return { kind, paneId, workspaceId };
+	const leaveKind = PANE_LEAVE_KIND_BY_WIRE[wireKind];
+	if (leaveKind) {
+		const paneId = data.pane_id;
+		const workspaceId = data.workspace_id;
+		if (typeof paneId !== "string" || typeof workspaceId !== "string") return null;
+		return { kind: leaveKind, paneId, workspaceId };
+	}
+	if (wireKind === "pane_moved") {
+		// The move rewrites the pane id; the payload carries the new pane record
+		// plus the id it replaced, and consumers continue from the new one.
+		const pane = asRecord(data.pane);
+		const previousPaneId = data.previous_pane_id;
+		if (!pane || typeof previousPaneId !== "string") return null;
+		const paneId = pane.pane_id;
+		const tabId = pane.tab_id;
+		const workspaceId = pane.workspace_id;
+		if (typeof paneId !== "string" || typeof tabId !== "string" || typeof workspaceId !== "string") return null;
+		return { kind: "pane.moved", paneId, previousPaneId, tabId, workspaceId };
+	}
+	if (wireKind === "layout_updated") {
+		// The push already carries the full tab geometry, so a consumer never
+		// has to answer a layout event with a layout request.
+		try {
+			return { kind: "layout.updated", geometry: readTabGeometry(data.layout) };
+		} catch {
+			return null;
+		}
+	}
+	return null;
 }
 
 /** Drops undefined entries so an optional field is absent rather than `null` on the wire. */
@@ -693,17 +829,29 @@ export function createMuxClient(options: MuxClientOptions): MuxClient {
 		async paneClose(paneId: string): Promise<void> {
 			await call("pane.close", { pane_id: paneId });
 		},
-		async paneLayout(paneId?: string): Promise<ReadonlyArray<string>> {
+		async paneLayout(paneId?: string): Promise<MuxTabGeometry> {
 			const result = await callObject("pane.layout", params({ pane_id: paneId }));
-			const layout = asRecord(result.layout);
-			if (!layout) throw new MuxError("protocol", "mux pane.layout returned no layout");
-			const ids: string[] = [];
-			for (const entry of readArray(layout, "panes")) {
-				const pane = asRecord(entry);
-				const id = pane ? pane.pane_id : undefined;
-				if (typeof id === "string") ids.push(id);
-			}
-			return ids;
+			return readTabGeometry(result.layout);
+		},
+		async paneFocus(paneId: string): Promise<void> {
+			await call("pane.focus", { pane_id: paneId });
+		},
+		async paneZoom(paneId: string, mode: "on" | "off" | "toggle"): Promise<{ changed: boolean; focusChanged: boolean }> {
+			const result = await callObject("pane.zoom", { pane_id: paneId, mode });
+			const zoom = asRecord(result.zoom);
+			if (!zoom) throw new MuxError("protocol", "mux pane.zoom returned no zoom result");
+			return { changed: zoom.changed === true, focusChanged: zoom.focus_changed === true };
+		},
+		async layoutExport(request = {}): Promise<MuxLayoutTree> {
+			const result = await callObject("layout.export", params({ tab_id: request.tabId, pane_id: request.paneId }));
+			return readLayoutTree(result.layout);
+		},
+		async layoutSetSplitRatio(request): Promise<MuxLayoutTree> {
+			const result = await callObject(
+				"layout.set_split_ratio",
+				params({ tab_id: request.tabId, pane_id: request.paneId, path: [...request.path], ratio: request.ratio }),
+			);
+			return readLayoutTree(result.layout);
 		},
 		async worktreeList(request = {}): Promise<MuxWorktreeListResult> {
 			const result = await callObject("worktree.list", params({ workspace_id: request.workspaceId, cwd: request.cwd }));

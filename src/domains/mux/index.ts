@@ -37,12 +37,15 @@ export {
 	type MuxErrorKind,
 	type MuxEvent,
 	type MuxEventKind,
+	type MuxLayoutNode,
+	type MuxLayoutTree,
 	type MuxLog,
 	type MuxMode,
 	type MuxNotificationSound,
 	type MuxPanePurpose,
 	type MuxPaneRecord,
 	type MuxPaneRef,
+	type MuxRect,
 	type MuxReportableAgentState,
 	MuxRequestTimeout,
 	type MuxSelfLocation,
@@ -50,6 +53,7 @@ export {
 	type MuxServerInfo,
 	type MuxSnapshot,
 	type MuxTab,
+	type MuxTabGeometry,
 	muxErrorKind,
 } from "./types.js";
 export { clioCliEntryPath, type ViewerCommandOptions, watchViewerCommand } from "./viewer-command.js";
