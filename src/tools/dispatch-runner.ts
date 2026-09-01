@@ -57,6 +57,7 @@ import {
 	claimCompeteGroup,
 	cleanupCompeteGroup,
 	commitCandidateWork,
+	competeBranchForCandidate,
 	createCandidateWorktreeMapped,
 	isGitRepository,
 	loadCompeteGroup,
@@ -964,6 +965,8 @@ function recoverPendingGateEvidence(deps: DispatchToolDeps): void {
 		const pick = judged?.ok ? judged.result.winner : null;
 		const pickedSubject = pick === null ? undefined : record.subjects[pick - 1];
 		const candidateReceipt = pickedSubject === undefined ? null : readVerifiedGateReceipt(deps, pickedSubject.runId);
+		const root = record.resourceRoot ?? process.cwd();
+		const pickedBranch = pick === null ? null : competeBranchForCandidate(root, record.group, pick);
 		if (pickedSubject !== undefined && candidateReceipt === null) {
 			throw new Error(
 				`pending compete decision ${record.id} has no verified candidate receipt for ${pickedSubject.runId}`,
@@ -971,11 +974,10 @@ function recoverPendingGateEvidence(deps: DispatchToolDeps): void {
 		}
 		let blockedProtected: string[] = [];
 		if (pick !== null && pickedSubject !== undefined && candidateReceipt !== null) {
-			const root = record.resourceRoot ?? process.cwd();
 			const protectedPaths = deps.dispatch.protectedArtifactState?.().artifacts.map((artifact) => artifact.path) ?? [];
 			blockedProtected = protectedPathsChangedByCompeteBranch(
 				root,
-				`clio/compete/${record.group}/${pick}`,
+				pickedBranch ?? `clio-coder/compete/${record.group}/${pick}`,
 				protectedPaths,
 			);
 		}
@@ -985,7 +987,7 @@ function recoverPendingGateEvidence(deps: DispatchToolDeps): void {
 			candidateReceipt !== null &&
 			!isPipelineStepFailure(candidateReceipt) &&
 			blockedProtected.length === 0;
-		if (validWinner && pick !== null && pickedSubject !== undefined) {
+		if (validWinner && pick !== null && pickedSubject !== undefined && pickedBranch !== null) {
 			draft = {
 				group: record.group,
 				topology: "compete",
@@ -997,7 +999,7 @@ function recoverPendingGateEvidence(deps: DispatchToolDeps): void {
 				winner: {
 					index: pick,
 					subject: pickedSubject,
-					branch: `clio/compete/${record.group}/${pick}`,
+					branch: pickedBranch,
 				},
 			};
 		} else {
@@ -1599,9 +1601,12 @@ function runApplyWinner(
 		};
 	}
 	const branch = input.branch;
-	const match = /^clio\/compete\/([A-Za-z0-9][A-Za-z0-9._-]{0,127})\/([1-9]\d*)$/.exec(branch);
+	const match = /^(?:clio-coder|clio)\/compete\/([A-Za-z0-9][A-Za-z0-9._-]{0,127})\/([1-9]\d*)$/.exec(branch);
 	if (!match) {
-		return { kind: "error", message: "dispatch: apply_winner.branch must be a clio/compete/<group>/<n> branch" };
+		return {
+			kind: "error",
+			message: "dispatch: apply_winner.branch must be a clio-coder/compete/<group>/<n> branch",
+		};
 	}
 	const group = match[1] ?? "";
 	const winnerIndex = Number.parseInt(match[2] ?? "", 10);

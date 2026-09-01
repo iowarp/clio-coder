@@ -1,6 +1,6 @@
 import { execFileSync } from "node:child_process";
 import { createHash, randomBytes } from "node:crypto";
-import { existsSync, mkdirSync, realpathSync, rmSync, writeFileSync } from "node:fs";
+import { existsSync, mkdirSync, readFileSync, realpathSync, rmSync, writeFileSync } from "node:fs";
 import { isAbsolute, join, relative, resolve, sep } from "node:path";
 
 export type TaskWorktreeApply = "merge" | "preserve";
@@ -25,7 +25,9 @@ export interface TaskWorktreeReceipt {
 
 const SAFE_RUN_ID = /^[A-Za-z0-9][A-Za-z0-9._-]{0,127}$/u;
 const OWNER_FILE_SUFFIX = ".task-owner.json";
-const COMMIT_IDENTITY = "clio-task";
+const TASK_WORKTREE_KIND = "clio-coder-task-worktree";
+const LEGACY_TASK_WORKTREE_KIND = "clio-task-worktree";
+const COMMIT_IDENTITY = "clio-coder-task";
 
 function gitBytes(root: string, args: string[]): Buffer {
 	return execFileSync("git", ["-C", root, ...args], {
@@ -160,7 +162,7 @@ export function createTaskWorktree(root: string, runId: string, base?: string): 
 	const resolvedBase = base ?? git(canonical, ["rev-parse", "HEAD"]);
 	const parent = join(canonical, ".clio-coder", "worktrees");
 	const path = join(parent, runId);
-	const branch = `clio/task/${runId}`;
+	const branch = `clio-coder/task/${runId}`;
 	mkdirSync(parent, { recursive: true });
 	if (!isCanonicalWorktreePathInside(parent, path))
 		throw new Error(`task worktree path escapes its parent for run ${runId}`);
@@ -168,7 +170,7 @@ export function createTaskWorktree(root: string, runId: string, base?: string): 
 	const ownerToken = randomBytes(16).toString("hex");
 	writeFileSync(
 		`${path}${OWNER_FILE_SUFFIX}`,
-		`${JSON.stringify({ version: 1, kind: "clio-task-worktree", root: canonical, runId, branch, base: resolvedBase, ownerToken }, null, 2)}\n`,
+		`${JSON.stringify({ version: 1, kind: TASK_WORKTREE_KIND, root: canonical, runId, branch, base: resolvedBase, ownerToken }, null, 2)}\n`,
 		{ encoding: "utf8", flag: "wx" },
 	);
 	return { root: canonical, runId, path, branch, base: resolvedBase, ownerToken };
@@ -182,11 +184,30 @@ function assertOwnership(worktree: TaskWorktree): void {
 	) {
 		throw new Error(`task worktree ${worktree.runId} has an invalid ownership path`);
 	}
-	if (!existsSync(`${worktree.path}${OWNER_FILE_SUFFIX}`))
-		throw new Error(`task worktree ${worktree.runId} has no ownership file`);
+	const ownerPath = `${worktree.path}${OWNER_FILE_SUFFIX}`;
+	if (!existsSync(ownerPath)) throw new Error(`task worktree ${worktree.runId} has no ownership file`);
+	let marker: Record<string, unknown>;
+	try {
+		const value = JSON.parse(readFileSync(ownerPath, "utf8")) as unknown;
+		if (typeof value !== "object" || value === null || Array.isArray(value)) throw new Error("not an object");
+		marker = value as Record<string, unknown>;
+	} catch {
+		throw new Error(`task worktree ${worktree.runId} has an invalid ownership file`);
+	}
+	if (
+		marker.version !== 1 ||
+		(marker.kind !== TASK_WORKTREE_KIND && marker.kind !== LEGACY_TASK_WORKTREE_KIND) ||
+		marker.root !== worktree.root ||
+		marker.runId !== worktree.runId ||
+		marker.branch !== worktree.branch ||
+		marker.base !== worktree.base ||
+		marker.ownerToken !== worktree.ownerToken
+	) {
+		throw new Error(`task worktree ${worktree.runId} ownership facts do not match`);
+	}
 }
 
-function commitTaskWorktree(worktree: TaskWorktree, message = `Clio task ${worktree.runId}`): boolean {
+function commitTaskWorktree(worktree: TaskWorktree, message = `Clio Coder task ${worktree.runId}`): boolean {
 	assertOwnership(worktree);
 	return commitWorktreePath(worktree.path, COMMIT_IDENTITY, message);
 }

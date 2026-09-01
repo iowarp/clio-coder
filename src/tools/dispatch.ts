@@ -252,7 +252,7 @@ export function createDispatchTool(
 			apply_winner: Type.Optional(
 				Type.Object(
 					{
-						branch: Type.String({ description: "Preserved winner branch: clio/compete/<group>/<n>." }),
+						branch: Type.String({ description: "Preserved winner branch: clio-coder/compete/<group>/<n>." }),
 						cwd: Type.Optional(Type.String({ description: "Repository root (default: current directory)." })),
 					},
 					{

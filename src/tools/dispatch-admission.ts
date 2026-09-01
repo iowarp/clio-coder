@@ -456,10 +456,12 @@ export function createDispatchAdmissionController(deps: DispatchToolDeps): Dispa
 				return shapeRejection(args, "dispatch: apply_winner must be an options object");
 			}
 			const branch = stringArg(args.apply_winner, "branch");
-			const match = branch ? /^clio\/compete\/([A-Za-z0-9][A-Za-z0-9._-]{0,127})\/([1-9]\d*)$/.exec(branch) : null;
+			const match = branch
+				? /^(?:clio-coder|clio)\/compete\/([A-Za-z0-9][A-Za-z0-9._-]{0,127})\/([1-9]\d*)$/.exec(branch)
+				: null;
 			if (branch === undefined) return shapeRejection(args, "dispatch: apply_winner.branch is required");
 			if (match === null) {
-				return shapeRejection(args, "dispatch: apply_winner.branch must be a clio/compete/<group>/<n> branch");
+				return shapeRejection(args, "dispatch: apply_winner.branch must be a clio-coder/compete/<group>/<n> branch");
 			}
 			try {
 				const cwd = resolve(stringArg(args.apply_winner, "cwd") ?? process.cwd());
