@@ -1,4 +1,4 @@
-import { existsSync, lstatSync, readdirSync, readFileSync, realpathSync, statSync } from "node:fs";
+import { existsSync, readdirSync, readFileSync, realpathSync, statSync } from "node:fs";
 import path from "node:path";
 import { parse as parseYaml, stringify as stringifyYaml } from "yaml";
 import { evaluateClioCompatibility } from "./compatibility.js";
@@ -77,7 +77,7 @@ function validateResourceTree(
 	try {
 		canonicalRoot = realpathSync(resolvedRoot);
 		canonicalResource = realpathSync(resolved);
-		if (!lstatSync(resolved).isDirectory()) {
+		if (!statSync(resolved).isDirectory()) {
 			diagnostics.push({ type: "error", message: `resources.${kind} is not a directory`, path: resolved });
 			return;
 		}

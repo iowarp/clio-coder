@@ -4,8 +4,9 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { afterEach, describe, it } from "node:test";
 import { evaluateClioCompatibility } from "../../src/domains/extensions/compatibility.js";
-import { parseExtensionManifest } from "../../src/domains/extensions/discovery.js";
-import { extensionResourcePath } from "../../src/domains/extensions/resources.js";
+import { loadManifestFromRoot, parseExtensionManifest } from "../../src/domains/extensions/discovery.js";
+import { enabledExtensionResourceRoots, extensionResourcePath } from "../../src/domains/extensions/resources.js";
+import { listInstalledExtensions } from "../../src/domains/extensions/state.js";
 import { expandPromptTemplateInput, loadPromptTemplates } from "../../src/domains/resources/prompts/loader.js";
 
 const roots: string[] = [];
@@ -58,6 +59,37 @@ describe("extension resource boundary", () => {
 		symlinkSync(join(outside, "external"), join(root, "linked"), "dir");
 		strictEqual(extensionResourcePath(root, "linked"), null);
 		strictEqual(extensionResourcePath(root, "."), null);
+	});
+
+	it("keeps a package with an invalid resource tree visible but inactive", () => {
+		const project = scratch();
+		const outside = scratch();
+		const installed = join(project, ".clio-coder", "extensions", "invalid-tree");
+		mkdirSync(installed, { recursive: true });
+		mkdirSync(join(outside, "agents"));
+		writeFileSync(
+			join(installed, "clio-coder-extension.yaml"),
+			[
+				"manifestVersion: 1",
+				"id: invalid-tree",
+				"name: Invalid Tree",
+				"version: 1.0.0",
+				"description: Invalid resource fixture.",
+				"resources:",
+				"  agents: agents",
+				"",
+			].join("\n"),
+		);
+		symlinkSync(join(outside, "agents"), join(installed, "agents"), "dir");
+
+		const candidate = loadManifestFromRoot(installed);
+		strictEqual(candidate.valid, false);
+		const [entry] = listInstalledExtensions(project);
+		strictEqual(entry?.valid, false);
+		strictEqual(entry?.effective, false);
+		strictEqual(entry?.loadable, false);
+		ok(entry?.diagnostics.some((diagnostic) => diagnostic.message.includes("symbolic link")));
+		deepStrictEqual(enabledExtensionResourceRoots("agents", project), []);
 	});
 
 	it("preserves every payload byte after the command delimiter", () => {

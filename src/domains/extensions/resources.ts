@@ -33,7 +33,7 @@ export function enabledExtensionResourceRoots(
 ): ExtensionResourceRoot[] {
 	const roots: ExtensionResourceRoot[] = [];
 	for (const entry of listInstalledExtensions(cwd)) {
-		if (!entry.enabled || !entry.compatible || !entry.effective) continue;
+		if (!entry.loadable) continue;
 		const rel = entry.resources[kind];
 		if (!rel) continue;
 		const full = extensionResourcePath(entry.rootPath, rel);

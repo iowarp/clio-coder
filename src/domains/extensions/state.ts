@@ -75,8 +75,10 @@ function installedFromRoot(root: string, scope: ExtensionScope, state: Extension
 		rootPath: root,
 		manifestPath: candidate.manifestPath,
 		enabled: !state.disabled.includes(manifest.id),
+		valid: candidate.valid,
 		compatible,
 		effective: false,
+		loadable: false,
 		resources: manifest.resources,
 		diagnostics: candidate.diagnostics,
 	};
@@ -107,17 +109,19 @@ export function listInstalledExtensions(cwd = process.cwd(), options: ExtensionL
 	}
 	for (const group of byId.values()) {
 		const winner = group
-			.filter((entry) => entry.compatible)
+			.filter((entry) => entry.valid && entry.compatible)
 			.sort((a, b) => scopeRank(a.scope) - scopeRank(b.scope))
 			.at(-1);
 		for (const entry of group) {
 			entry.effective = entry === winner;
-			if (entry.compatible && !entry.effective && winner) entry.overriddenBy = winner.scope;
+			entry.loadable = entry.valid && entry.compatible && entry.enabled && entry.effective;
+			if (entry.valid && entry.compatible && !entry.effective && winner) entry.overriddenBy = winner.scope;
 		}
 	}
-	// Incompatible packages remain visible by default so the load refusal and
-	// its version diagnostic cannot disappear with the resources it suppresses.
-	const all = options.all === true ? entries : entries.filter((entry) => entry.effective || !entry.compatible);
+	// Invalid and incompatible packages remain visible by default so the load
+	// refusal and its diagnostic cannot disappear with the resources it suppresses.
+	const all =
+		options.all === true ? entries : entries.filter((entry) => entry.effective || !entry.valid || !entry.compatible);
 	return all.sort((a, b) => {
 		const id = a.id.localeCompare(b.id);
 		if (id !== 0) return id;

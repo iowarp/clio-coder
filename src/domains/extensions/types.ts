@@ -36,9 +36,13 @@ export interface InstalledExtension {
 	rootPath: string;
 	manifestPath: string;
 	enabled: boolean;
+	/** Whether the complete manifest and declared resource tree are valid. */
+	valid: boolean;
 	/** Whether this package admits the running Clio version. */
 	compatible: boolean;
 	effective: boolean;
+	/** The single admission decision for extension-owned resources and hooks. */
+	loadable: boolean;
 	resources: ExtensionManifestResources;
 	overriddenBy?: ExtensionScope;
 	diagnostics: ExtensionDiagnostic[];

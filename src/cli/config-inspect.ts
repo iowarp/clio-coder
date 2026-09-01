@@ -204,7 +204,7 @@ function inspectOperatorProfile(cwd: string, graph: CustomizationGraph): void {
 function inspectHooks(cwd: string, graph: CustomizationGraph): void {
 	try {
 		const extensions = listInstalledExtensions(cwd)
-			.filter((ext) => ext.enabled && ext.effective)
+			.filter((ext) => ext.loadable)
 			.map((ext) => ({ id: ext.id, rootPath: ext.rootPath }));
 		const { batches, fileIssues } = readHookSources({ cwd, extensions });
 		for (const issue of fileIssues) graph.issues.push(`hook ${issue.source.origin}: ${issue.message}`);
@@ -255,7 +255,13 @@ function inspectExtensions(cwd: string, graph: CustomizationGraph): void {
 				trust: "untrusted",
 				precedence: ext.effective ? "winner" : "loser",
 				reloadClass: "restart",
-				detail: { version: ext.version, enabled: ext.enabled, effective: ext.effective },
+				detail: {
+					version: ext.version,
+					enabled: ext.enabled,
+					valid: ext.valid,
+					effective: ext.effective,
+					loadable: ext.loadable,
+				},
 			});
 		}
 	} catch (err) {
