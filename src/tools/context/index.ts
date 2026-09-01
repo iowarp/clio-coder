@@ -203,6 +203,23 @@ function pendingSkillRequestFor(name: string, options: ToolInvokeOptions | undef
 	return options?.pendingSkillPolicy?.requests.find((request) => request.name === name) ?? null;
 }
 
+/**
+ * A hidden skill is intentionally absent from model discovery, but
+ * `disable-model-invocation` still promises that the operator may activate it
+ * by hand. Slash-command and selector requests are the two authenticated
+ * interactive paths for that choice. Recipe and marketplace requests do not
+ * widen visibility: neither proves that the operator selected an installed
+ * manual-only skill for this turn.
+ */
+function operatorRequestedManualSkill(skill: Skill, request: ReturnType<typeof pendingSkillRequestFor>): boolean {
+	return (
+		skill.trusted &&
+		skill.disableModelInvocation &&
+		request?.installed === true &&
+		(request.source === "slash-command" || request.source === "selector")
+	);
+}
+
 function renderPendingSkillTask(name: string, options: ToolInvokeOptions | undefined): string[] {
 	const request = pendingSkillRequestFor(name, options);
 	if (!request) return [];
@@ -407,7 +424,7 @@ function runSkillsScope(
 	if (name.length === 0) {
 		const list = loadSkills({ cwd: cwdFromDeps(deps), ...(deps.getSkillLoaderOptions?.() ?? {}) });
 		const visible = modelVisibleSkills(list.items);
-		const marketplace = marketplaceRowsFor(deps, visible, options);
+		const marketplace = marketplaceRowsFor(deps, list.items, options);
 		const rendered = renderSkillsList(visible, marketplace, deps.skillMarketplace !== false);
 		// The catalog is bounded but not small: the whole listing must fit the
 		// per-call cap like any observation, and a cut list says so instead of
@@ -437,12 +454,15 @@ function runSkillsScope(
 	if (policyError) return { kind: "error", message: policyError };
 	const list = loadSkills({ cwd: cwdFromDeps(deps), ...(deps.getSkillLoaderOptions?.() ?? {}) });
 	const visible = modelVisibleSkills(list.items);
-	const skill = visible.find((item) => item.name === name);
+	const pendingRequest = pendingSkillRequestFor(name, options);
+	const skill =
+		visible.find((item) => item.name === name) ??
+		list.items.find((item) => item.name === name && operatorRequestedManualSkill(item, pendingRequest));
 	if (!skill) {
 		// A marketplace entry is a skill that exists and is not installed. Saying
 		// "unknown skill" about it denies the operator a thing the listing just
 		// offered; name the state and the one move that changes it.
-		const installable = marketplaceRowsFor(deps, visible, options).some((entry) => entry.name === name);
+		const installable = marketplaceRowsFor(deps, list.items, options).some((entry) => entry.name === name);
 		if (installable) {
 			return {
 				kind: "error",
@@ -455,7 +475,6 @@ function runSkillsScope(
 	}
 	const includeTree = args.include_tree === true;
 	const tree = includeTree ? buildResourceTree(skill.baseDir, DEFAULT_TREE_ENTRIES) : null;
-	const pendingRequest = pendingSkillRequestFor(name, options);
 	const pendingTask = pendingRequest?.args.trim() ?? "";
 	// Provenance: the activated content is compared against whatever recorded
 	// hash can speak for it, the audited catalog's pinned manifest or the

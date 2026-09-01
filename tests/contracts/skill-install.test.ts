@@ -12,6 +12,8 @@ import {
 	parseSkillSourceSpec,
 } from "../../src/domains/resources/skills/install.js";
 import { loadSkills, parsePendingSkillRequests } from "../../src/domains/resources/skills/loader.js";
+import { createPendingSkillToolPolicy } from "../../src/interactive/chat-loop-messages.js";
+import { createContextTool } from "../../src/tools/context/index.js";
 
 const roots: string[] = [];
 
@@ -170,6 +172,46 @@ describe("skill install and activation boundary", () => {
 		strictEqual(isSkillActivation(activation), true);
 		strictEqual(activation.turnId, "turn-1");
 		strictEqual(activation.filePath, skill.filePath);
+	});
+
+	it("loads a trusted manual-only skill only after the operator names it", async () => {
+		const root = scratchRoot();
+		const manual = join(root, "manual-review");
+		mkdirSync(manual, { recursive: true });
+		writeFileSync(
+			join(manual, "SKILL.md"),
+			[
+				"---",
+				"name: manual-review",
+				"description: Review a change only when the operator explicitly requests it.",
+				"disable-model-invocation: true",
+				"---",
+				"",
+				"Run the manual review workflow.",
+				"",
+			].join("\n"),
+			"utf8",
+		);
+		const loaderOptions = { disableDiscovery: true, explicitSkillPaths: [manual] } as const;
+		const list = loadSkills({ cwd: root, ...loaderOptions });
+		strictEqual(list.items[0]?.disableModelInvocation, true);
+
+		const context = createContextTool({
+			getCwd: () => root,
+			getSkillLoaderOptions: () => loaderOptions,
+		});
+		const unsolicited = await context.run({ scope: "skills", name: "manual-review" });
+		strictEqual(unsolicited.kind, "error", "manual-only skills must remain hidden without operator activation");
+
+		const pending = parsePendingSkillRequests("/skill manual-review inspect this patch", list, { cwd: root });
+		const pendingSkillPolicy = createPendingSkillToolPolicy(pending.pendingSkillRequests);
+		ok(pendingSkillPolicy !== undefined);
+		const activated = await context.run({ scope: "skills", name: "manual-review" }, { pendingSkillPolicy });
+		strictEqual(activated.kind, "ok");
+		if (activated.kind === "ok") {
+			match(activated.output, /Run the manual review workflow\./u);
+			strictEqual((activated.details as { disableModelInvocation?: unknown } | undefined)?.disableModelInvocation, true);
+		}
 	});
 
 	it("reports missing and invalid explicit paths without falling back to discovery", () => {
