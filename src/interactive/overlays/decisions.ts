@@ -183,7 +183,9 @@ class DecisionsOverlayBody implements Component {
 					),
 			);
 		}
-		if (this.status) body.push("", fitLine(clioTheme().fg("warning", this.status), width));
+		if (this.status) {
+			body.push("", ...wrapTextWithAnsi(clioTheme().fg("warning", this.status), Math.max(1, width)));
+		}
 		return body;
 	}
 

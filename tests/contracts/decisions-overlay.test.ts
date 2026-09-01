@@ -77,6 +77,23 @@ function fakeTui(): {
 }
 
 describe("contracts/decisions-overlay", () => {
+	it("wraps a decision-ledger error instead of cutting its remedy", () => {
+		const mounted = fakeTui();
+		const message = "Decision ledger is unavailable; repair the session record and reopen this overlay.";
+		openDecisionsOverlay(
+			mounted.tui,
+			() => {
+				throw new Error(message);
+			},
+			{ onSupersede: () => {}, onCorrection: () => {}, onClose: () => {} },
+		);
+		const lines = mounted.component().render(30).map(stripAnsi);
+		const collapsed = lines.join(" ").replace(/[│\s]+/gu, " ");
+
+		ok(collapsed.includes(message), `ledger error was cut: ${collapsed}`);
+		for (const line of lines) strictEqual(visibleWidth(line) <= 30, true, `line overflows: ${line}`);
+	});
+
 	it("wraps an expanded question, answer, and correction inside the indent instead of cutting them", () => {
 		const question =
 			"Which runtime should receive this feature, given that the dispatch path and the interactive path resolve their settings differently?";
