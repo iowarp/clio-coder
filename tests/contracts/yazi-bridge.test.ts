@@ -417,6 +417,7 @@ describe("contracts/yazi mux session", () => {
 			argv: ["/tools/yazi", "--local-events", "cd,clio-pick", "--remote-events", "clio-pick"],
 			cwd: "/work",
 			label: "yazi",
+			dock: { slot: "files" },
 			env: { YAZI_CONFIG_HOME: "/cache/yazi/profile", CLIO_YAZI_PICK_TOKEN: "pick-token" },
 			stdoutPath: join(scratch, "yazi", "sessions", "companion.stream"),
 		});
@@ -455,6 +456,7 @@ describe("contracts/yazi mux session", () => {
 			argv: ["/tools/yazi", "/work", "--chooser-file", chooserPath, "--cwd-file", cwdPath],
 			cwd: "/work",
 			label: "yazi",
+			dock: { slot: "files" },
 		});
 		writeFileSync(chooserPath, "/work/a.rs\n/work/b.rs");
 		writeFileSync(cwdPath, "/work/sub");

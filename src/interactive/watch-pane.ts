@@ -21,7 +21,7 @@
 import { mkdirSync, renameSync, writeFileSync } from "node:fs";
 import { dirname, join } from "node:path";
 import { type ClioDirs, clioCacheDir, clioConfigDir, clioDataDir, clioStateDir } from "../core/xdg.js";
-import type { MuxContract } from "../domains/mux/index.js";
+import type { MuxContract, MuxPaneRef } from "../domains/mux/index.js";
 import type { PanesWatchController, PanesWatchResult } from "../domains/mux/operations.js";
 import { watchViewerCommand } from "../domains/mux/viewer-command.js";
 
@@ -38,6 +38,12 @@ function watchSelectionPath(stateDir: string = clioStateDir()): string {
 export interface WatchPaneDeps {
 	mux: MuxContract;
 	getCwd: () => string;
+	/**
+	 * Live workers-dock share, read at each open so a `/settings` edit applies
+	 * to the next pane. Absent (tests, minimal wiring) the dock spec's default
+	 * governs.
+	 */
+	getWorkersRatio?: () => number;
 	/** Selection-file override for tests. */
 	selectionPath?: string;
 	/** Resolved-layout override for tests. Production pins this process's four cached roots. */
@@ -78,7 +84,7 @@ export function createWatchPaneController(deps: WatchPaneDeps): PanesWatchContro
 		if (disposed || paneId !== null) return Promise.resolve(true);
 		if (adoptionInFlight !== null) return adoptionInFlight;
 		const attempt = Promise.resolve()
-			.then(() => deps.mux.adoptPane({ purpose: "watch", label: "watch" }))
+			.then(() => deps.mux.adoptPane({ purpose: "watch", label: "watch", dock: "workers" }))
 			.then((adopted) => {
 				if (!disposed && paneId === null && adopted !== null) paneId = adopted.paneId;
 				return true;
@@ -104,11 +110,40 @@ export function createWatchPaneController(deps: WatchPaneDeps): PanesWatchContro
 		}
 	};
 
+	/**
+	 * The one place a watch pane is created: the workers dock slot, split right
+	 * of Clio's pane at the configured share. On a host without the layout tier
+	 * the dock request degrades inside the contract to a plain right split.
+	 */
+	const openPane = (): Promise<MuxPaneRef | null> =>
+		deps.mux.openUtilityPane({
+			argv: command(selectionPath, dirs),
+			cwd: deps.getCwd(),
+			label: "watch",
+			title: "clio watch",
+			purpose: "watch",
+			dock: { slot: "workers", ...(deps.getWorkersRatio ? { share: deps.getWorkersRatio() } : {}) },
+		});
+
 	// Reclaim durable ownership for inventory and navigation immediately. The
 	// scan remains best effort and never opens a replacement pane on its own.
 	void adoptExistingPane();
 
 	return {
+		async ensureOpen(): Promise<boolean> {
+			// Boot composition: the pane exists and parks on the last selection
+			// (the viewer renders "no selection" until one is written). Adoption
+			// first, so a surviving dock is reused rather than doubled.
+			if (disposed) return false;
+			if (paneId !== null) return true;
+			await adoptExistingPane();
+			if (paneId !== null) return true;
+			const opened = await openPane();
+			if (opened === null) return false;
+			paneId = opened.paneId;
+			return true;
+		},
+
 		async watch(runId: string): Promise<PanesWatchResult> {
 			if (!writeSelection(runId)) {
 				return { status: "unavailable", reason: `cannot write the watch selection at ${selectionPath}` };
@@ -117,14 +152,7 @@ export function createWatchPaneController(deps: WatchPaneDeps): PanesWatchContro
 			const scanned = await adoptExistingPane();
 			if (!scanned) await adoptExistingPane();
 			if (paneId !== null) return { status: "watching", runId, paneId, opened: false };
-			const opened = await deps.mux.openUtilityPane({
-				argv: command(selectionPath, dirs),
-				cwd: deps.getCwd(),
-				label: "watch",
-				title: "clio watch",
-				purpose: "watch",
-				direction: "right",
-			});
+			const opened = await openPane();
 			if (opened === null) {
 				return { status: "unavailable", reason: "the pane host refused to open the watch pane" };
 			}

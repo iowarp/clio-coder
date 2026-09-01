@@ -55,6 +55,11 @@ export interface YaziSessionOptions {
 	mode: YaziSessionMode;
 	profileMode: YaziProfileMode;
 	cwd: string;
+	/**
+	 * Files-dock share of the height. Set by the interactive bridge from
+	 * `interface.panes.files.ratio`; absent it, the dock spec's default governs.
+	 */
+	dockShare?: number;
 	onEvent: (event: YaziEvent) => void;
 	onChooser: (result: YaziChooserResult) => void;
 	onStopped?: (reason: string) => void;
@@ -148,6 +153,10 @@ export async function createYaziSession(options: YaziSessionOptions): Promise<Ya
 		argv,
 		cwd: options.cwd,
 		label: "yazi",
+		// The files dock: split down from the anchor at the configured share.
+		// Degrades to a plain split inside the contract when the layout tier is
+		// absent.
+		dock: { slot: "files", ...(options.dockShare === undefined ? {} : { share: options.dockShare }) },
 		...(Object.keys(env).length > 0 ? { env } : {}),
 		...(stdoutPath ? { stdoutPath } : {}),
 	});

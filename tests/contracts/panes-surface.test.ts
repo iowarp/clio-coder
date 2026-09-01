@@ -149,6 +149,7 @@ function fakeWatch(): { controller: PanesWatchController; watched: string[] } {
 	return {
 		watched,
 		controller: {
+			ensureOpen: async () => true,
 			async watch(runId: string) {
 				watched.push(runId);
 				return { status: "watching", runId, paneId: "w1:pWatch", opened: watched.length === 1 };
@@ -273,10 +274,12 @@ describe("contracts/panes slash parsing", () => {
 			settings: {
 				enabled: "auto",
 				notifications: "failures",
+				layout: "workers",
 				journal: true,
 				yazi: { enabled: true, mode: "companion", profile: "managed", followCwd: true },
 			},
 			yazi: { mode: "companion", paneId: "w1:p8", paneCwd: "/work/src", lastLineAt: 1_700_000_000_000, droppedLines: 2 },
+			docks: [{ slot: "workers", paneId: "w1:p9", targetShare: 0.34 }],
 			panes: [
 				{
 					paneId: "w1:p9",
@@ -291,7 +294,8 @@ describe("contracts/panes slash parsing", () => {
 		match(lines, /mode=guest available/);
 		match(lines, /protocol 17/);
 		match(lines, /socket \/tmp\/h\.sock/);
-		match(lines, /enabled=auto notifications=failures journal=true/);
+		match(lines, /enabled=auto notifications=failures layout=workers journal=true/);
+		match(lines, /docks: workers=w1:p9 @34%/);
 		match(lines, /files: enabled=true mode=companion profile=managed followCwd=true/);
 		match(lines, /file pane: mode=companion pane=w1:p8 cwd=\/work\/src .* dropped=2/);
 		match(lines, /w1:p9 watch watch adopted/);

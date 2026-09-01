@@ -39,6 +39,7 @@ interface FakeMux {
 	opened: MuxOpenUtilityPaneRequest[];
 	adoptable: MuxPaneRef | null;
 	adoptions: number;
+	adoptRequests: Array<{ purpose: string; dock?: string }>;
 	paneGone(paneId: string): void;
 }
 
@@ -50,6 +51,7 @@ function fakeMux(): FakeMux {
 		opened,
 		adoptable: null,
 		adoptions: 0,
+		adoptRequests: [],
 		paneGone(paneId: string): void {
 			for (const handler of handlers) {
 				handler({ ref: { paneId, tabId: "w1:t1", workspaceId: "w1" }, purpose: "watch", label: "watch", openedAt: 0 });
@@ -72,8 +74,13 @@ function fakeMux(): FakeMux {
 				next += 1;
 				return { paneId: `w1:p${next}`, tabId: "w1:t1", workspaceId: "w1" };
 			},
-			async adoptPane(): Promise<MuxPaneRef | null> {
+			async adoptPane(request: {
+				purpose: string;
+				label: string;
+				dock?: "workers" | "files";
+			}): Promise<MuxPaneRef | null> {
 				fake.adoptions += 1;
+				fake.adoptRequests.push({ purpose: request.purpose, ...(request.dock ? { dock: request.dock } : {}) });
 				return fake.adoptable;
 			},
 			async closePane(): Promise<boolean> {
@@ -117,6 +124,7 @@ describe("watch pane controller", () => {
 		const watch = createWatchPaneController({
 			mux: mux.contract,
 			getCwd: () => "/work",
+			getWorkersRatio: () => 0.4,
 			selectionPath,
 			dirs: TEST_DIRS,
 		});
@@ -126,7 +134,10 @@ describe("watch pane controller", () => {
 		if (first.status === "watching") strictEqual(first.opened, true);
 		strictEqual(mux.opened.length, 1);
 		strictEqual(mux.opened[0]?.purpose, "watch");
-		strictEqual(mux.opened[0]?.direction, "right");
+		// The watch pane is the workers dock now; the contract owns direction
+		// and geometry from the slot spec, so no direction rides the request.
+		deepStrictEqual(mux.opened[0]?.dock, { slot: "workers", share: 0.4 });
+		strictEqual(mux.opened[0]?.direction, undefined);
 		strictEqual(mux.opened[0]?.title, "clio watch");
 		const command = mux.opened[0]?.argv ?? [];
 		ok(command.join(" ").includes(`--watch ${selectionPath}`));
@@ -172,6 +183,38 @@ describe("watch pane controller", () => {
 			strictEqual(result.opened, false);
 		}
 		deepStrictEqual(mux.opened, []);
+		// Adoption reclaims the workers dock slot, not just registry ownership,
+		// so geometry management resumes on the surviving pane.
+		deepStrictEqual(mux.adoptRequests[0], { purpose: "watch", dock: "workers" });
+	});
+
+	it("ensureOpen composes the dock at boot without touching the selection", async () => {
+		const mux = fakeMux();
+		const selectionPath = tempSelection();
+		const watch = createWatchPaneController({
+			mux: mux.contract,
+			getCwd: () => "/work",
+			selectionPath,
+			dirs: TEST_DIRS,
+		});
+
+		strictEqual(await watch.ensureOpen(), true);
+		strictEqual(mux.opened.length, 1);
+		// No ratio dep wired: the dock spec's default governs, so no share rides.
+		deepStrictEqual(mux.opened[0]?.dock, { slot: "workers" });
+		strictEqual(watch.isOpen(), true);
+		// The selection file is untouched: the viewer parks on "no selection".
+		let selection: string | null = null;
+		try {
+			selection = readFileSync(selectionPath, "utf8");
+		} catch {
+			selection = null;
+		}
+		strictEqual(selection, null);
+
+		// Idempotent: a second ensureOpen answers with the existing pane.
+		strictEqual(await watch.ensureOpen(), true);
+		strictEqual(mux.opened.length, 1);
 	});
 
 	it("eagerly reclaims a surviving pane before the first explicit watch", async () => {

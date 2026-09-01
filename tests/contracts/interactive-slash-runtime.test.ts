@@ -145,10 +145,12 @@ describe("contracts/interactive slash runtime", () => {
 			settings: {
 				enabled: "auto",
 				notifications: "failures",
+				layout: "off",
 				journal: true,
 				yazi: { enabled: true, mode: "companion", profile: "managed", followCwd: true },
 			},
 			yazi: { mode: "closed", paneId: null, paneCwd: null, lastLineAt: null, droppedLines: 0 },
+			docks: [],
 			panes,
 		});
 		harness.deps.panes = {
@@ -168,6 +170,9 @@ describe("contracts/interactive slash runtime", () => {
 					adopted: false,
 				});
 				return { status: "opened", label: "shell", paneId: "w1:p9" };
+			},
+			async zoom() {
+				return { status: "not-found", target: "watch" };
 			},
 			async close() {
 				return { status: "closed", closed: 0, labels: [] };
