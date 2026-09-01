@@ -14,6 +14,7 @@ import {
 	inspectModelOverlayNaming,
 	inspectSkillMetadataNaming,
 } from "../domains/lifecycle/naming-resources.js";
+import { inspectYaziNaming, regenerateYaziNamingProfile } from "../domains/lifecycle/naming-yazi.js";
 
 export interface NamingDoctorOptions {
 	fix?: boolean;
@@ -131,6 +132,35 @@ function settingsFinding(label: string, inspection: SettingsNamingInspection, fi
 	};
 }
 
+function yaziNamingFinding(fix: boolean): DoctorFinding {
+	const inspection = inspectYaziNaming();
+	const legacy = inspection.legacyEvents + inspection.legacyEnvironmentNames;
+	if (legacy === 0) {
+		return {
+			ok: true,
+			name: "naming yazi profile",
+			detail: inspection.present
+				? `${inspection.profileDir} uses canonical event and environment identifiers`
+				: `${inspection.profileDir} is absent; the next managed open will generate canonical identifiers`,
+		};
+	}
+	if (!fix) {
+		return {
+			ok: true,
+			level: "warn",
+			name: "naming yazi profile",
+			detail: `${inspection.profileDir}: ${inspection.legacyEvents} legacy events and ${inspection.legacyEnvironmentNames} legacy environment names (run \`clio-coder doctor --fix\`)`,
+		};
+	}
+	const report = regenerateYaziNamingProfile();
+	return {
+		ok: report.status !== "regeneration-failed",
+		...(report.status === "regeneration-failed" ? {} : { level: "ok" as const }),
+		name: "naming yazi profile",
+		detail: report.detail,
+	};
+}
+
 /** Read-only naming-footprint settings sweep plus the sanctioned deterministic fixes. */
 export function namingFootprintFindings(options: NamingDoctorOptions = {}): DoctorFinding[] {
 	const cwd = options.cwd ?? process.cwd();
@@ -162,5 +192,6 @@ export function namingFootprintFindings(options: NamingDoctorOptions = {}): Doct
 	}
 	findings.push(...namingEnvironmentFindings());
 	findings.push(...namingResourceFindings({ ...options, cwd }));
+	findings.push(yaziNamingFinding(Boolean(options.fix)));
 	return findings;
 }

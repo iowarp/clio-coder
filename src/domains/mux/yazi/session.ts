@@ -8,7 +8,14 @@ import { findPinnedTool } from "../../toolchain/registry.js";
 import { describeResolution, resolveToolBinary, toolStatus } from "../../toolchain/resolve.js";
 import type { MuxContract } from "../contract.js";
 import type { MuxPaneRef } from "../types.js";
-import { createYaziEventStream, YAZI_STREAM_POLL_MS, type YaziEvent, type YaziEventStream } from "./event-stream.js";
+import {
+	createYaziEventStream,
+	LEGACY_YAZI_PICK_EVENT,
+	YAZI_PICK_EVENT,
+	YAZI_STREAM_POLL_MS,
+	type YaziEvent,
+	type YaziEventStream,
+} from "./event-stream.js";
 import { ensureYaziProfile, type YaziProfile, yaziProfileDir } from "./profile.js";
 
 export type YaziSessionMode = "companion" | "chooser";
@@ -142,7 +149,13 @@ export async function createYaziSession(options: YaziSessionOptions): Promise<Ya
 	let stdoutPath: string | undefined;
 	if (options.mode === "companion") {
 		writeFileSync(streamPath, "");
-		argv = [binaries.yaziPath, "--local-events", "cd,clio-pick", "--remote-events", "clio-pick"];
+		argv = [
+			binaries.yaziPath,
+			"--local-events",
+			`cd,${YAZI_PICK_EVENT},${LEGACY_YAZI_PICK_EVENT}`,
+			"--remote-events",
+			`${YAZI_PICK_EVENT},${LEGACY_YAZI_PICK_EVENT}`,
+		];
 		stdoutPath = streamPath;
 	} else {
 		writeFileSync(chooserPath, "");

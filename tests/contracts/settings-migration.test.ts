@@ -8,6 +8,8 @@ import { parse as parseYaml } from "yaml";
 import { readSettings, updateSettings, validateSettings } from "../../src/core/config.js";
 import { DEFAULT_SETTINGS, DEFAULT_SETTINGS_YAML } from "../../src/core/defaults.js";
 import { namingCompatibilityEnvironment, readNamingEnvironment } from "../../src/core/naming-compat.js";
+import { namingFootprintFindings } from "../../src/cli/doctor-naming.js";
+import { regenerateYaziNamingProfile } from "../../src/domains/lifecycle/naming-yazi.js";
 import namingMigration, {
 	CLIO_CODER_NAMING_MIGRATION_ID,
 	CLIO_CODER_NAMING_SETTINGS_BACKUP_SUFFIX,
@@ -17,6 +19,7 @@ import settingsV2, {
 	SettingsV2CollisionError,
 } from "../../src/domains/lifecycle/migrations/2026-09-01-settings-v2.js";
 import { listMigrations, runPending } from "../../src/domains/lifecycle/migrations/index.js";
+import { parseYaziEventLine, renderYaziKeymap } from "../../src/domains/mux/index.js";
 import { type IsolatedClioEnv, isolateClioEnv } from "../harness/scratch-env.js";
 
 describe("settings and migration boundary", () => {
@@ -151,6 +154,48 @@ integrations:
 			CLIO_CODER_YAZI_PICK_TOKEN: "token",
 			CLIO_YAZI_PICK_TOKEN: "token",
 		});
+	});
+
+	it("emits canonical Yazi names, accepts both event spellings, and normalizes legacy events", () => {
+		const keymap = renderYaziKeymap("/opt/yazi/ya");
+		ok(keymap.includes("clio-coder-pick"));
+		ok(keymap.includes("CLIO_CODER_YAZI_PICK_TOKEN"));
+		strictEqual(keymap.includes(" clio-pick "), false);
+		strictEqual(keymap.includes("$CLIO_YAZI_PICK_TOKEN"), false);
+
+		deepStrictEqual(parseYaziEventLine('clio-coder-pick,receiver,sender,["a"]'), {
+			kind: "clio-coder-pick",
+			receiver: "receiver",
+			sender: "sender",
+			values: ["a"],
+		});
+		deepStrictEqual(parseYaziEventLine('clio-pick,receiver,sender,["legacy"]'), {
+			kind: "clio-coder-pick",
+			receiver: "receiver",
+			sender: "sender",
+			values: ["legacy"],
+		});
+	});
+
+	it("reports legacy cached Yazi names read-only and deterministically resets both spellings", () => {
+		const profileDir = join(scratch.dir, "cache", "yazi", "profile");
+		mkdirSync(profileDir, { recursive: true });
+		const legacy = 'run = "clio-pick $CLIO_YAZI_PICK_TOKEN clio-coder-pick $CLIO_CODER_YAZI_PICK_TOKEN"\n';
+		writeFileSync(join(profileDir, "keymap.toml"), legacy, "utf8");
+
+		const finding = namingFootprintFindings({ cwd: scratch.dir }).find(
+			(entry) => entry.name === "naming yazi profile",
+		);
+		strictEqual(finding?.level, "warn");
+		strictEqual(readFileSync(join(profileDir, "keymap.toml"), "utf8"), legacy, "doctor inspection is read-only");
+
+		const first = regenerateYaziNamingProfile({ cacheDir: join(scratch.dir, "cache"), yaziPath: null, yaPath: null });
+		strictEqual(first.status, "removed-unresolved");
+		strictEqual(existsSync(profileDir), false);
+		strictEqual(
+			regenerateYaziNamingProfile({ cacheDir: join(scratch.dir, "cache"), yaziPath: null, yaPath: null }).status,
+			"absent",
+		);
 	});
 
 	it("orders migrations before strict readers and records each migration once", async () => {
