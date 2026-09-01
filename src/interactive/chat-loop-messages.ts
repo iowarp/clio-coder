@@ -27,6 +27,7 @@ import type { ResolvedRuntimeTarget } from "../domains/providers/index.js";
 import { ceilChars, extractReasoningTokens } from "../domains/session/context-accounting.js";
 import type { AgentMessage } from "../engine/types.js";
 import type { AskUserToolPolicy } from "../tools/registry.js";
+import { attachedToolSchemasFromState } from "./prompt-cache-identity.js";
 
 /** Minimal structural view of the engine agent used by state-inspection helpers. */
 export interface AgentStateView {
@@ -291,18 +292,7 @@ export function pendingSkillRequestPreamble(requests: ReadonlyArray<PendingSkill
  * tool-surface change.
  */
 export function toolSignatureFromState(tools: ReadonlyArray<unknown>): string {
-	const schemas: Array<{ name: string; description: string; parameters: unknown }> = [];
-	for (const tool of tools) {
-		if (!tool || typeof tool !== "object" || Array.isArray(tool)) continue;
-		const record = tool as Record<string, unknown>;
-		schemas.push({
-			name: typeof record.name === "string" ? record.name : "",
-			description: typeof record.description === "string" ? record.description : "",
-			parameters: record.parameters ?? null,
-		});
-	}
-	schemas.sort((a, b) => a.name.localeCompare(b.name));
-	return sha256(canonicalJson(schemas));
+	return sha256(canonicalJson(attachedToolSchemasFromState(tools)));
 }
 
 /**
