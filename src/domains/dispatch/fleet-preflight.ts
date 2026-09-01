@@ -153,7 +153,8 @@ export function routeFactVerdict(
 	return evaluateRouteFacts(targets, resources, requirement, options);
 }
 
-const PREFLIGHT_MARKER = "clio-preflight/1";
+const PREFLIGHT_MARKER = "clio-coder-preflight/1";
+const LEGACY_PREFLIGHT_MARKER = "clio-preflight/1";
 const DEFAULT_PREFLIGHT_TIMEOUT_MS = 20_000;
 
 /**
@@ -176,8 +177,8 @@ function buildPreflightScript(
 	const cliBase = entry.endsWith(" worker") ? entry.slice(0, -" worker".length) : null;
 	const versionProbe =
 		cliBase !== null
-			? `v=$(${cliBase} --version 2>/dev/null | head -n 1); if [ -n "$v" ]; then echo "clio=$v"; else echo clio=missing; fi`
-			: `echo clio=custom-entry`;
+			? `v=$(${cliBase} --version 2>/dev/null | head -n 1); if [ -n "$v" ]; then echo "clioCoder=$v"; else echo clioCoder=missing; fi`
+			: `echo clioCoder=custom-entry`;
 	const lines = [
 		`echo ${shellQuote(PREFLIGHT_MARKER)}`,
 		`if cd ${shellQuote(projectRoot)} 2>/dev/null; then echo cwd=ok; else echo cwd=missing; fi`,
@@ -331,7 +332,7 @@ export async function runFleetNodePreflight(
 	// Probe latency is durable eligibility evidence compared across nodes and
 	// across passes, so it is measured on the monotonic clock.
 	const probeDurationMs = Math.round(performance.now() - probeStartedAt);
-	if (!result.stdout.includes(PREFLIGHT_MARKER)) {
+	if (!result.stdout.includes(PREFLIGHT_MARKER) && !result.stdout.includes(LEGACY_PREFLIGHT_MARKER)) {
 		const stderr = result.stderr.trim().split("\n").slice(-1)[0] ?? "";
 		record.detail = `unreachable (ssh exit ${result.code}${stderr.length > 0 ? `: ${stderr}` : ""})`;
 		return record;
@@ -353,8 +354,9 @@ export async function runFleetNodePreflight(
 	};
 	checks.pathParity = lines.includes("cwd=ok");
 	checks.stateDirWritable = lines.includes("state=ok");
-	const clioLine = lines.find((line) => line.startsWith("clio="));
-	const clioValue = clioLine?.slice("clio=".length) ?? "missing";
+	const clioCoderLine = lines.find((line) => line.startsWith("clioCoder="));
+	const legacyClioLine = lines.find((line) => line.startsWith("clio="));
+	const clioValue = clioCoderLine?.slice("clioCoder=".length) ?? legacyClioLine?.slice("clio=".length) ?? "missing";
 	if (clioValue === "custom-entry") {
 		// A custom clioCoderEntry that is not `<cli> worker` cannot be version-probed;
 		// the operator vouches for it. Presence is asserted, match is assumed.

@@ -2,7 +2,7 @@
  * Scratch git worktrees for the compete dispatch topology.
  *
  * Each candidate builds in its own worktree on its own branch
- * (`clio/compete/<group>/<n>`), created from the repository HEAD under
+ * (`clio-coder/compete/<group>/<n>`), created from the repository HEAD under
  * `<root>/.clio-coder/worktrees/<group>/candidate-<n>`. The path sits inside the
  * project root because remote fleet nodes share the filesystem and doctor
  * preflight verifies path parity only for the project root; `.clio-coder/` is
@@ -127,8 +127,9 @@ export interface CompeteRunAdmission {
 
 const COMPETE_PARENT_SEGMENTS = [".clio-coder", "worktrees"] as const;
 const COMPETE_MANIFEST_FILE = ".clio-coder-compete-owner.json";
-const COMPETE_MANIFEST_KIND = "clio-compete-group";
-const COMPETE_COMMIT_IDENTITY = "clio-compete";
+const COMPETE_MANIFEST_KIND = "clio-coder-compete-group";
+const LEGACY_COMPETE_MANIFEST_KIND = "clio-compete-group";
+const COMPETE_COMMIT_IDENTITY = "clio-coder-compete";
 
 const SAFE_GROUP = /^[A-Za-z0-9][A-Za-z0-9._-]{0,127}$/;
 const PROCESS_EXIT_GRACE_MS = 750;
@@ -333,7 +334,7 @@ function manifestFromUnknown(value: unknown): CompeteGroupManifest | null {
 	const manifest = value as Record<string, unknown>;
 	if (
 		manifest.version !== 2 ||
-		manifest.kind !== COMPETE_MANIFEST_KIND ||
+		(manifest.kind !== COMPETE_MANIFEST_KIND && manifest.kind !== LEGACY_COMPETE_MANIFEST_KIND) ||
 		typeof manifest.root !== "string" ||
 		typeof manifest.group !== "string" ||
 		typeof manifest.token !== "string" ||
@@ -417,10 +418,14 @@ export function isGitRepository(root: string): boolean {
 	}
 }
 
-function competeBranch(group: string, index: number): string {
+function competeBranch(group: string, index: number, legacy = false): string {
 	validateGroup(group);
 	if (!Number.isInteger(index) || index < 1) throw new Error(`invalid compete candidate index ${index}`);
-	return `clio/compete/${group}/${index}`;
+	return `${legacy ? "clio" : "clio-coder"}/compete/${group}/${index}`;
+}
+
+function competeBranchMatches(branch: string, group: string, index: number): boolean {
+	return branch === competeBranch(group, index) || branch === competeBranch(group, index, true);
 }
 
 /** Claim the group before creating a branch or candidate worktree. */
@@ -585,7 +590,7 @@ export async function createCandidateWorktreeMapped(
 				branch,
 				base: baseline,
 				path,
-				label: `clio compete ${ownership.group} candidate ${index}`,
+				label: `clio-coder compete ${ownership.group} candidate ${index}`,
 				focus: false,
 			})
 			.catch(() => null);
@@ -648,12 +653,22 @@ function exactGroupBranches(root: string, group: string): string[] {
 			const parts = branch.split("/");
 			return (
 				parts.length === 4 &&
-				parts[0] === "clio" &&
+				(parts[0] === "clio-coder" || parts[0] === "clio") &&
 				parts[1] === "compete" &&
 				parts[2] === group &&
 				/^\d+$/.test(parts[3] ?? "")
 			);
 		});
+}
+
+/** Resolve a current candidate branch while retaining indefinite read support for released refs. */
+export function competeBranchForCandidate(root: string, group: string, index: number): string {
+	const branches = exactGroupBranches(root, group);
+	return (
+		branches.find((branch) => branch === competeBranch(group, index)) ??
+		branches.find((branch) => branch === competeBranch(group, index, true)) ??
+		competeBranch(group, index)
+	);
 }
 
 function removeRegisteredWorktree(root: string, path: string): void {
@@ -672,10 +687,9 @@ function removeCandidateWorktree(
 ): void {
 	assertOwnership(ownership);
 	const expectedPath = join(ownership.directory, `candidate-${worktree.index}`);
-	const expectedBranch = competeBranch(ownership.group, worktree.index);
 	if (
 		resolve(worktree.path) !== resolve(expectedPath) ||
-		worktree.branch !== expectedBranch ||
+		!competeBranchMatches(worktree.branch, ownership.group, worktree.index) ||
 		!isCanonicalPathInside(ownership.directory, worktree.path)
 	) {
 		throw new Error(`candidate ${worktree.index} does not belong to compete group ${ownership.group}`);
@@ -815,8 +829,8 @@ export function settleRecoveredCompeteDecision(
 		cleanupWorktreeGroup(ownership);
 		return null;
 	}
-	const winnerBranch = competeBranch(group, winnerIndex);
 	const branches = exactGroupBranches(ownership.root, group);
+	const winnerBranch = competeBranchForCandidate(ownership.root, group, winnerIndex);
 	const winnerPath = join(ownership.directory, `candidate-${winnerIndex}`);
 	if (
 		!branches.includes(winnerBranch) ||

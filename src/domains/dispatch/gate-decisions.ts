@@ -380,7 +380,8 @@ function semanticError(value: unknown): string | null {
 			value.winner.index < 1 ||
 			!isSubjectRef(value.winner.subject) ||
 			typeof value.winner.branch !== "string" ||
-			value.winner.branch !== `clio/compete/${value.group}/${value.winner.index}`
+			(value.winner.branch !== `clio-coder/compete/${value.group}/${value.winner.index}` &&
+				value.winner.branch !== `clio/compete/${value.group}/${value.winner.index}`)
 		) {
 			return "gate decision winner invalid";
 		}
