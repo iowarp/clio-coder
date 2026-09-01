@@ -226,27 +226,22 @@ describe("contracts/overlay width — context activity island", () => {
 			.map((line) => stripAnsi(line).slice(2, -2).trimEnd());
 	}
 
-	it("marks every row it cuts, and spans exactly the width it was given", () => {
+	it("marks compact rows it cuts, wraps prose, and spans exactly the width it was given", () => {
 		for (const width of WIDTHS) {
-			for (const line of formatContextActivityIslandLines(activity, width, 2000, 1)) {
+			const rendered = formatContextActivityIslandLines(activity, width, 2000, 1);
+			for (const line of rendered) {
 				strictEqual(visibleWidth(line), width, `island line did not span ${width}: ${JSON.stringify(stripAnsi(line))}`);
 			}
-			for (const row of islandBody(width)) {
-				// A row either fits inside the body or says that it does not.
-				ok(
-					row.length < width - 4 || row.endsWith("…"),
-					`at ${width} cols a row filled the body with no cut marker: ${JSON.stringify(row)}`,
-				);
-			}
+			const collapsed = islandBody(width).join(" ").replace(/\s+/gu, " ");
+			ok(collapsed.includes(activity.message), `at ${width} cols the activity message was cut: ${collapsed}`);
 		}
 	});
 
-	it("cuts the narrow trail and message with a marker rather than mid-word", () => {
+	it("ellipsizes the narrow phase trail but wraps the message", () => {
 		const body = islandBody(40);
 		const trail = body.find((row) => row.startsWith("scan"));
-		const message = body.find((row) => row.startsWith("indexed 480"));
 		ok(trail?.endsWith("…"), `the phase trail was cut without a marker: ${JSON.stringify(trail)}`);
-		ok(message?.endsWith("…"), `the message was cut without a marker: ${JSON.stringify(message)}`);
+		ok(!body.some((row) => row.startsWith("indexed 480") && row.endsWith("…")), body.join("\n"));
 		// At 80 the same rows fit whole, so the marker is a statement about width.
 		ok(
 			islandBody(80).some((row) => row.endsWith("state")),

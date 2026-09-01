@@ -6,6 +6,7 @@ import {
 	type ContextActivityStatus,
 } from "../core/bus-events.js";
 import type { SafeEventBus } from "../core/event-bus.js";
+import { wrapTextWithAnsi } from "../engine/tui.js";
 import { type ClioTheme, clioTheme, formatCompactMs, frame, GLYPH, padAnsi, spinnerFrame } from "./theme/index.js";
 
 export interface ContextActivitySnapshot {
@@ -152,17 +153,20 @@ export function formatContextActivityIslandLines(
 	const percent = `${Math.round(activityProgress(activity) * 100)}%`.padStart(4);
 	const progressLine = `${progressBar(theme, activity, barWidth)} ${theme.fg("dim", percent)}`;
 	const message = theme.fg(activity.status === "failed" ? "error" : "muted", activity.message);
-	// Every row here can outrun a narrow island: at 40 columns the trail stopped
-	// at "sta" and the message at "refreshed pr", each reading as the whole
-	// value. padAnsi's default marker is empty, so the marker is passed
-	// explicitly. The progress bar is sized to fit and never cuts.
+	// The trail is compact navigation chrome and marks its cut. The message and
+	// detail are the only explanation of this operation, so they wrap in full.
+	// The progress bar is sized to fit and never cuts.
 	const body = [
 		padAnsi(topLine, bodyWidth, GLYPH.ellipsis),
 		padAnsi(progressLine, bodyWidth),
 		phaseTrail(theme, activity, bodyWidth),
-		padAnsi(message, bodyWidth, GLYPH.ellipsis),
+		...wrapTextWithAnsi(message, bodyWidth).map((line) => padAnsi(line, bodyWidth)),
 	];
-	if (activity.detail) body.push(padAnsi(theme.fg("dim", activity.detail), bodyWidth, GLYPH.ellipsis));
+	if (activity.detail) {
+		body.push(
+			...wrapTextWithAnsi(theme.fg("dim", activity.detail), bodyWidth).map((line) => padAnsi(line, bodyWidth)),
+		);
+	}
 	return frame(theme, "Context", body, width);
 }
 
