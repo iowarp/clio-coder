@@ -1155,7 +1155,7 @@ async function runInteractive(
 	let runtime = preselectedRuntime ?? (await pickRuntimeViaCategory(rl));
 	if (!runtime) {
 		printError("configuration cancelled");
-		return 0;
+		return 130;
 	}
 	const auth = openAuthStorage();
 	const settings = readSettings();
