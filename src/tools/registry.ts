@@ -49,6 +49,37 @@ export type ToolExecutionMode = "sequential" | "parallel";
 export type ToolSourceScope = "core" | "domain";
 export type ToolRetrySafety = "idempotent" | "retry_safe" | "not_retry_safe" | "unknown";
 export type ToolCostLatencyClass = "local_fast" | "local_medium" | "local_slow" | "network" | "agent";
+export type ToolPromptHintRole = "session" | "worker" | "bound-worker";
+
+export interface ToolPromptHintVariants {
+	session?: string;
+	worker?: string;
+	boundWorker?: string;
+}
+
+export type ToolPromptHintMetadata = string | ToolPromptHintVariants;
+
+/** Collapse registry-authored guidance to one byte-stable line. */
+function normalizeToolPromptHint(text: string | undefined): string | undefined {
+	if (!text) return undefined;
+	const normalized = text
+		.replace(/[\r\n]+/gu, " ")
+		.replace(/\s+/gu, " ")
+		.trim();
+	return normalized.length > 0 ? normalized : undefined;
+}
+
+/** Resolve one tool's guidance for the exact prompt role being compiled. */
+export function resolveToolPromptHint(
+	hint: ToolPromptHintMetadata | undefined,
+	role: ToolPromptHintRole,
+): string | undefined {
+	if (typeof hint === "string") return normalizeToolPromptHint(hint);
+	if (!hint) return undefined;
+	const selected =
+		role === "session" ? hint.session : role === "bound-worker" ? (hint.boundWorker ?? hint.worker) : hint.worker;
+	return normalizeToolPromptHint(selected);
+}
 
 export interface ToolSourceInfo {
 	path: string;
@@ -77,12 +108,11 @@ export interface ToolMetadata {
 	/** Coarse cost/latency bucket for dashboard diagnostics. */
 	costLatency: ToolCostLatencyClass;
 	/**
-	 * One sentence of usage guidance rendered into the session Tool Contract
-	 * when this tool is on the frozen surface. Hints render sorted by tool
-	 * name, so the compiled prompt stays byte-stable per surface. Most tools
-	 * need none; the schema description covers them.
+	 * One sentence of usage guidance rendered when this tool is on the frozen
+	 * surface. A string applies to every role; variants keep session consent
+	 * rules out of ordinary and recipe-bound workers. Most tools need none.
 	 */
-	promptHint?: string;
+	promptHint?: ToolPromptHintMetadata;
 	/**
 	 * How transcript surfaces present this tool's block under `/output default`.
 	 * Optional: tools that declare nothing fold like every other tool.

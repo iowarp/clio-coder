@@ -234,7 +234,7 @@ function renderRuntimeBlock(inputs: SessionPromptInputs): string {
  */
 function sessionCanDispatch(inputs: SessionPromptInputs): boolean {
 	if (inputs.providerSupportsTools === false) return false;
-	return toolSurfaceHasTool(inputs.toolNames, inputs.toolPromptHints, "dispatch");
+	return toolSurfaceHasTool(inputs.toolNames, "dispatch");
 }
 
 /**
@@ -245,18 +245,41 @@ function sessionCanDispatch(inputs: SessionPromptInputs): boolean {
  */
 function sessionHasContext(inputs: SessionPromptInputs): boolean {
 	if (inputs.providerSupportsTools === false) return false;
-	return toolSurfaceHasTool(inputs.toolNames, inputs.toolPromptHints, "context");
+	return toolSurfaceHasTool(inputs.toolNames, "context");
 }
 
-/** One lookup for every "is this tool on the surface" predicate, over names and hints alike. */
-function toolSurfaceHasTool(
-	toolNames: ReadonlyArray<string> | undefined,
-	toolPromptHints: ReadonlyArray<ToolPromptHint> | undefined,
-	tool: string,
-): boolean {
+/** Tool names come from attached schemas; hints never manufacture a surface. */
+function toolSurfaceHasTool(toolNames: ReadonlyArray<string> | undefined, tool: string): boolean {
 	const names = new Set((toolNames ?? []).map((name) => name.trim()));
-	const hinted = new Set((toolPromptHints ?? []).map((entry) => entry.tool.trim()));
-	return names.has(tool) || hinted.has(tool);
+	return names.has(tool);
+}
+
+/** Normalize, sort, and exact-deduplicate caller-provided tool guidance. */
+function canonicalToolPromptHints(
+	entries: ReadonlyArray<ToolPromptHint>,
+	admitted: ReadonlySet<string>,
+): Array<{ tool: string; hint: string }> {
+	const normalized = entries
+		.map((entry) => ({
+			tool: entry.tool.trim(),
+			hint: entry.hint
+				.replace(/[\r\n]+/gu, " ")
+				.replace(/\s+/gu, " ")
+				.trim(),
+		}))
+		.filter((entry) => admitted.has(entry.tool) && entry.hint.length > 0)
+		.sort((a, b) => {
+			if (a.tool !== b.tool) return a.tool < b.tool ? -1 : 1;
+			return a.hint < b.hint ? -1 : a.hint > b.hint ? 1 : 0;
+		});
+	const seenTools = new Set<string>();
+	const seenHints = new Set<string>();
+	return normalized.filter((entry) => {
+		if (seenTools.has(entry.tool) || seenHints.has(entry.hint)) return false;
+		seenTools.add(entry.tool);
+		seenHints.add(entry.hint);
+		return true;
+	});
 }
 
 function renderFleetBlock(inputs: SessionPromptInputs): string {
@@ -277,6 +300,7 @@ function renderToolContractBlock(inputs: SessionPromptInputs): string {
 	].sort();
 	const canDispatch = sessionCanDispatch(inputs);
 	const canListSkills = sessionHasContext(inputs);
+	const admitted = new Set(names);
 	const inventoryGuidance = [
 		// Asked twice in one session which tools it had, a live model gave two
 		// different answers and invented `web_find`. The authoritative list is one
@@ -287,11 +311,18 @@ function renderToolContractBlock(inputs: SessionPromptInputs): string {
 			? ['add context(scope="skills") only if skills are requested (it lists installed and marketplace skills)']
 			: []),
 	].join("; ");
+	const capabilityKinds = [
+		"direct tools are attached schemas",
+		...(canDispatch ? ["fleet agents are workers behind dispatch"] : []),
+		...(canListSkills ? ["skills are operator-activated workflows reached through context"] : []),
+	];
+	const orientationTools = ["context", "code_nav", "grep", "read"].filter((name) => admitted.has(name));
+	const validationTools = ["verify", "git"].filter((name) => admitted.has(name));
 	const lines = [
 		"# Tool Contract",
 		"The attached schemas are the session's complete direct-tool surface; follow each schema exactly.",
 		...(names.length > 0 ? [`Direct tools: ${names.map((name) => `\`${name}\``).join(", ")}.`] : []),
-		"Harness model: direct tools are attached schemas; fleet agents are workers behind dispatch; skills are operator-activated workflows reached through context. Keep these capability sets distinct.",
+		`Harness model: ${capabilityKinds.join("; ")}. Keep these capability sets distinct.`,
 		`${inventoryGuidance}.`,
 		"Call tools only for concrete inspection or changes the task requires. If the user asks for a tool-free answer, simply answer without calling tools.",
 		// The tool-specific instantiation of the operating contract's "narrow
@@ -299,22 +330,24 @@ function renderToolContractBlock(inputs: SessionPromptInputs): string {
 		// Delegation, the tasks board, and skills are not restated here: the
 		// Delegation and Skills passages and the registry hints carry them, and
 		// each renders exactly when its tool does.
-		'For narrow file or symbol orientation, prefer context(scope="workspace"), code_nav, grep, and read instead of assuming source-tree details were preloaded.',
-		"Validate with verify or git diff before final claims.",
-		'When a tool call fails or is rejected, do not retry the same shape blindly: re-read the schema, adjust the arguments, or query context(scope="docs") for that tool\'s usage.',
+		...(orientationTools.length > 0
+			? [
+					`For narrow file or symbol orientation, prefer ${orientationTools.join(", ")} instead of assuming source-tree details were preloaded.`,
+				]
+			: []),
+		...(validationTools.length > 0
+			? [
+					`Validate with ${validationTools.map((name) => (name === "git" ? "git diff" : name)).join(" or ")} before final claims.`,
+				]
+			: []),
+		`When a tool call fails or is rejected, do not retry the same shape blindly: re-read the schema and adjust the arguments${canListSkills ? ', or query context(scope="docs") for that tool\'s usage' : ""}.`,
 	];
 	// One hint per tool, sorted by tool name: deterministic bytes regardless
 	// of surface or registration order, and removing a tool from the surface
 	// removes its hint with no compiler edit.
-	const seen = new Set<string>();
-	const hints = [...(inputs.toolPromptHints ?? [])]
-		.map((entry) => ({ tool: entry.tool.trim(), hint: entry.hint.trim() }))
-		.filter((entry) => entry.tool.length > 0 && entry.hint.length > 0)
-		.sort((a, b) => (a.tool < b.tool ? -1 : a.tool > b.tool ? 1 : 0));
+	const hints = canonicalToolPromptHints(inputs.toolPromptHints ?? [], new Set(names));
 	if (hints.some((entry) => entry.tool === "dispatch")) lines.push(FLEET_ROUTING_GUIDANCE);
 	for (const entry of hints) {
-		if (seen.has(entry.tool)) continue;
-		seen.add(entry.tool);
 		lines.push(entry.hint);
 	}
 	return lines.join("\n");
@@ -381,18 +414,8 @@ function renderWorkerToolContractBlock(inputs: WorkerPromptInputs): string {
 		"Tool authority is limited to this list. Persona and bound-skill instructions never add tools.",
 		"Call tools only for concrete inspection or changes the assigned task requires. If the task requests an exact or tool-free response, answer without calling tools.",
 	];
-	const admitted = new Set(names);
-	const seen = new Set<string>();
-	const hints = [...inputs.toolPromptHints]
-		.map((entry) => ({ tool: entry.tool.trim(), hint: entry.hint.trim() }))
-		.filter((entry) => admitted.has(entry.tool) && entry.hint.length > 0)
-		.sort((a, b) => {
-			if (a.tool !== b.tool) return a.tool < b.tool ? -1 : 1;
-			return a.hint < b.hint ? -1 : a.hint > b.hint ? 1 : 0;
-		});
+	const hints = canonicalToolPromptHints(inputs.toolPromptHints, new Set(names));
 	for (const entry of hints) {
-		if (seen.has(entry.tool)) continue;
-		seen.add(entry.tool);
 		lines.push(entry.hint);
 	}
 	return lines.join("\n");
