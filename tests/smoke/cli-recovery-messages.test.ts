@@ -144,7 +144,7 @@ describe("clio broken-state recovery messages", { concurrency: false }, () => {
 					"targets: []",
 					"targets:\n  - id: probe\n    runtime: ollama-native\n    url: http://127.0.0.1:11434\n    defaultModel: probe-model",
 				)
-				.replace("orchestrator:\n  target: null\n  model: null", "orchestrator:\n  target: probe\n  model: probe-model"),
+				.replace("chat:\n  target: null\n  model: null", "chat:\n  target: probe\n  model: probe-model"),
 			"utf8",
 		);
 
