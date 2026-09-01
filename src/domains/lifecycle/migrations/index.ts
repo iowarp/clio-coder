@@ -34,6 +34,7 @@ import { join } from "node:path";
 
 import lmStudioRuntimeId from "./2026-08-18-lmstudio-runtime-id.js";
 import retirePanesKnobs from "./2026-09-01-retire-panes-knobs.js";
+import settingsV2 from "./2026-09-01-settings-v2.js";
 
 export interface Migration {
 	id: string;
@@ -53,10 +54,11 @@ export interface MigrationRunResult {
 	available: string[];
 }
 
-// `retirePanesKnobs` first, per requirement 3: it strips keys the strict reader
-// refuses, and `lmStudioRuntimeId` calls `readSettings` and would throw on the
-// same document before the repair ever ran.
-const REGISTRY: ReadonlyArray<Migration> = Object.freeze([retirePanesKnobs, lmStudioRuntimeId]);
+// Settings v2 owns the complete v1 rewrite, including the already-retired pane
+// keys, and must run before either older migration reaches the strict v2 reader.
+// `retirePanesKnobs` remains registered for homes that already recorded the v2
+// migration independently and for manifest continuity; it is a no-op on v2.
+const REGISTRY: ReadonlyArray<Migration> = Object.freeze([settingsV2, retirePanesKnobs, lmStudioRuntimeId]);
 
 export function listMigrations(): ReadonlyArray<Migration> {
 	return REGISTRY;

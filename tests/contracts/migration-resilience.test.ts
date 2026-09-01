@@ -132,8 +132,12 @@ targets:
 
 			const result = await runPending(stateDir);
 
-			deepStrictEqual(result.applied, ["2026-09-01-retire-panes-knobs", "2026-08-18-lmstudio-runtime-id"]);
-			deepStrictEqual(readManifest(stateDir).applied, ["2026-09-01-retire-panes-knobs", "2026-08-18-lmstudio-runtime-id"]);
+			deepStrictEqual(result.applied, [
+				"2026-09-01-settings-v2",
+				"2026-09-01-retire-panes-knobs",
+				"2026-08-18-lmstudio-runtime-id",
+			]);
+			deepStrictEqual(readManifest(stateDir).applied, result.applied);
 			// The settings half of the migration still ran.
 			match(readFileSync(join(configDir, "settings.yaml"), "utf8"), /url: http:\/\/127\.0\.0\.1:1234/u);
 			// The file it had no business touching is untouched.
@@ -147,7 +151,11 @@ targets:
 			const second = await runPending(stateDir);
 
 			deepStrictEqual(second.applied, []);
-			deepStrictEqual(second.allApplied, ["2026-09-01-retire-panes-knobs", "2026-08-18-lmstudio-runtime-id"]);
+			deepStrictEqual(second.allApplied, [
+				"2026-09-01-settings-v2",
+				"2026-09-01-retire-panes-knobs",
+				"2026-08-18-lmstudio-runtime-id",
+			]);
 		});
 	});
 

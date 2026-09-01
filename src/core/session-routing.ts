@@ -18,7 +18,7 @@
 
 import type { ClioSettings } from "./config.js";
 
-type SessionThinkingLevel = ClioSettings["orchestrator"]["thinkingLevel"];
+type SessionThinkingLevel = ClioSettings["chat"]["thinkingLevel"];
 
 export interface SessionRoutingTarget {
 	target: string | null;
@@ -28,7 +28,7 @@ export interface SessionRoutingTarget {
 
 export interface SessionRoutingState {
 	orchestrator: SessionRoutingTarget;
-	background: SessionRoutingTarget;
+	background: Pick<SessionRoutingTarget, "target" | "model">;
 	workersDefault: SessionRoutingTarget;
 	scope: string[];
 }
@@ -40,7 +40,7 @@ export interface SessionRoutingState {
  */
 export interface RoutingPatch {
 	orchestrator?: Partial<SessionRoutingTarget>;
-	background?: Partial<SessionRoutingTarget>;
+	background?: Partial<Pick<SessionRoutingTarget, "target" | "model">>;
 	workersDefault?: Partial<SessionRoutingTarget>;
 	scope?: string[];
 }
@@ -59,10 +59,10 @@ function targetFrom(source: {
 
 export function seedSessionRouting(saved: Readonly<ClioSettings>): SessionRoutingState {
 	return {
-		orchestrator: targetFrom(saved.orchestrator),
-		background: targetFrom(saved.background),
-		workersDefault: targetFrom(saved.workers.default),
-		scope: [...(saved.scope ?? [])],
+		orchestrator: targetFrom(saved.chat),
+		background: { target: saved.context.memory.target, model: saved.context.memory.model },
+		workersDefault: targetFrom(saved.fleet.default),
+		scope: [...saved.chat.modelPicker.cycleSet],
 	};
 }
 
@@ -73,16 +73,15 @@ export function seedSessionRouting(saved: Readonly<ClioSettings>): SessionRoutin
  */
 export function applySessionRouting(saved: Readonly<ClioSettings>, routing: SessionRoutingState): ClioSettings {
 	const view = structuredClone(saved) as ClioSettings;
-	view.orchestrator.target = routing.orchestrator.target;
-	view.orchestrator.model = routing.orchestrator.model;
-	view.orchestrator.thinkingLevel = routing.orchestrator.thinkingLevel;
-	view.background.target = routing.background.target;
-	view.background.model = routing.background.model;
-	view.background.thinkingLevel = routing.background.thinkingLevel;
-	view.workers.default.target = routing.workersDefault.target;
-	view.workers.default.model = routing.workersDefault.model;
-	view.workers.default.thinkingLevel = routing.workersDefault.thinkingLevel;
-	view.scope = [...routing.scope];
+	view.chat.target = routing.orchestrator.target;
+	view.chat.model = routing.orchestrator.model;
+	view.chat.thinkingLevel = routing.orchestrator.thinkingLevel;
+	view.context.memory.target = routing.background.target;
+	view.context.memory.model = routing.background.model;
+	view.fleet.default.target = routing.workersDefault.target;
+	view.fleet.default.model = routing.workersDefault.model;
+	view.fleet.default.thinkingLevel = routing.workersDefault.thinkingLevel;
+	view.chat.modelPicker.cycleSet = [...routing.scope];
 	return view;
 }
 
@@ -107,13 +106,20 @@ export type SessionOverrides = Map<string, unknown>;
 
 /** True for the dotted paths owned by the session routing state (never overrides). */
 export function isRoutingPath(path: string): boolean {
-	return (
-		path === "scope" ||
-		path.startsWith("orchestrator.") ||
-		path.startsWith("background.") ||
-		path.startsWith("workers.default.")
-	);
+	return ROUTING_PATHS.has(path);
 }
+
+const ROUTING_PATHS = new Set<string>([
+	"chat.target",
+	"chat.model",
+	"chat.thinkingLevel",
+	"context.memory.target",
+	"context.memory.model",
+	"fleet.default.target",
+	"fleet.default.model",
+	"fleet.default.thinkingLevel",
+	"chat.modelPicker.cycleSet",
+]);
 
 /** Read a leaf from a settings blob by dotted object path. Missing ⇒ undefined. */
 export function getAtPath(source: Readonly<ClioSettings>, path: string): unknown {
@@ -159,10 +165,10 @@ export function applyOverrides(base: Readonly<ClioSettings>, overrides: SessionO
 
 /** Write-through of a routing patch onto a (cloned) saved-settings blob. */
 export function mergeRoutingPatchIntoSettings(settings: ClioSettings, patch: RoutingPatch): void {
-	if (patch.orchestrator) Object.assign(settings.orchestrator, patch.orchestrator);
-	if (patch.background) Object.assign(settings.background, patch.background);
-	if (patch.workersDefault) Object.assign(settings.workers.default, patch.workersDefault);
-	if (patch.scope) settings.scope = [...patch.scope];
+	if (patch.orchestrator) Object.assign(settings.chat, patch.orchestrator);
+	if (patch.background) Object.assign(settings.context.memory, patch.background);
+	if (patch.workersDefault) Object.assign(settings.fleet.default, patch.workersDefault);
+	if (patch.scope) settings.chat.modelPicker.cycleSet = [...patch.scope];
 }
 
 /**
@@ -176,26 +182,24 @@ export function mergeRoutingPatchIntoSettings(settings: ClioSettings, patch: Rou
  */
 export function routingPatchForId(path: string, settings: Readonly<ClioSettings>): RoutingPatch | null {
 	switch (path) {
-		case "orchestrator.target":
-			return { orchestrator: { target: settings.orchestrator.target, model: settings.orchestrator.model } };
-		case "orchestrator.model":
-			return { orchestrator: { model: settings.orchestrator.model } };
-		case "orchestrator.thinkingLevel":
-			return { orchestrator: { thinkingLevel: settings.orchestrator.thinkingLevel } };
-		case "background.target":
-			return { background: { target: settings.background.target, model: settings.background.model } };
-		case "background.model":
-			return { background: { model: settings.background.model } };
-		case "background.thinkingLevel":
-			return { background: { thinkingLevel: settings.background.thinkingLevel } };
-		case "workers.default.target":
-			return { workersDefault: { target: settings.workers.default.target, model: settings.workers.default.model } };
-		case "workers.default.model":
-			return { workersDefault: { model: settings.workers.default.model } };
-		case "workers.default.thinkingLevel":
-			return { workersDefault: { thinkingLevel: settings.workers.default.thinkingLevel } };
-		case "scope":
-			return { scope: [...(settings.scope ?? [])] };
+		case "chat.target":
+			return { orchestrator: { target: settings.chat.target, model: settings.chat.model } };
+		case "chat.model":
+			return { orchestrator: { model: settings.chat.model } };
+		case "chat.thinkingLevel":
+			return { orchestrator: { thinkingLevel: settings.chat.thinkingLevel } };
+		case "context.memory.target":
+			return { background: { target: settings.context.memory.target, model: settings.context.memory.model } };
+		case "context.memory.model":
+			return { background: { model: settings.context.memory.model } };
+		case "fleet.default.target":
+			return { workersDefault: { target: settings.fleet.default.target, model: settings.fleet.default.model } };
+		case "fleet.default.model":
+			return { workersDefault: { model: settings.fleet.default.model } };
+		case "fleet.default.thinkingLevel":
+			return { workersDefault: { thinkingLevel: settings.fleet.default.thinkingLevel } };
+		case "chat.modelPicker.cycleSet":
+			return { scope: [...settings.chat.modelPicker.cycleSet] };
 		default:
 			return null;
 	}
@@ -224,13 +228,17 @@ function scopeEquals(a: ReadonlyArray<string>, b: ReadonlyArray<string>): boolea
  */
 export function diffRouting(prev: Readonly<ClioSettings>, next: Readonly<ClioSettings>): RoutingPatch | null {
 	const patch: RoutingPatch = {};
-	const orchestrator = diffTarget(prev.orchestrator, next.orchestrator);
+	const orchestrator = diffTarget(prev.chat, next.chat);
 	if (orchestrator) patch.orchestrator = orchestrator;
-	const background = diffTarget(prev.background, next.background);
+	const background = diffTarget(
+		{ ...prev.context.memory, thinkingLevel: "off" },
+		{ ...next.context.memory, thinkingLevel: "off" },
+	);
 	if (background) patch.background = background;
-	const workersDefault = diffTarget(prev.workers.default, next.workers.default);
+	const workersDefault = diffTarget(prev.fleet.default, next.fleet.default);
 	if (workersDefault) patch.workersDefault = workersDefault;
-	if (!scopeEquals(prev.scope ?? [], next.scope ?? [])) patch.scope = [...(next.scope ?? [])];
+	if (!scopeEquals(prev.chat.modelPicker.cycleSet, next.chat.modelPicker.cycleSet))
+		patch.scope = [...next.chat.modelPicker.cycleSet];
 	return Object.keys(patch).length > 0 ? patch : null;
 }
 
@@ -241,16 +249,15 @@ export function diffRouting(prev: Readonly<ClioSettings>, next: Readonly<ClioSet
  * saved routing defaults with this session's live routing.
  */
 export function restoreRoutingFields(target: ClioSettings, source: Readonly<ClioSettings>): void {
-	target.orchestrator.target = source.orchestrator.target;
-	target.orchestrator.model = source.orchestrator.model;
-	target.orchestrator.thinkingLevel = source.orchestrator.thinkingLevel;
-	target.background.target = source.background.target;
-	target.background.model = source.background.model;
-	target.background.thinkingLevel = source.background.thinkingLevel;
-	target.workers.default.target = source.workers.default.target;
-	target.workers.default.model = source.workers.default.model;
-	target.workers.default.thinkingLevel = source.workers.default.thinkingLevel;
-	target.scope = [...(source.scope ?? [])];
+	target.chat.target = source.chat.target;
+	target.chat.model = source.chat.model;
+	target.chat.thinkingLevel = source.chat.thinkingLevel;
+	target.context.memory.target = source.context.memory.target;
+	target.context.memory.model = source.context.memory.model;
+	target.fleet.default.target = source.fleet.default.target;
+	target.fleet.default.model = source.fleet.default.model;
+	target.fleet.default.thinkingLevel = source.fleet.default.thinkingLevel;
+	target.chat.modelPicker.cycleSet = [...source.chat.modelPicker.cycleSet];
 }
 
 const ROUTING_FIELD_LABELS: ReadonlyArray<{
@@ -258,20 +265,23 @@ const ROUTING_FIELD_LABELS: ReadonlyArray<{
 	label: string;
 	read: (settings: Readonly<ClioSettings>) => unknown;
 }> = [
-	{ field: "orchestrator.target", label: "chat target", read: (s) => s.orchestrator.target ?? null },
-	{ field: "orchestrator.model", label: "chat model", read: (s) => s.orchestrator.model ?? null },
-	{ field: "orchestrator.thinkingLevel", label: "chat thinking", read: (s) => s.orchestrator.thinkingLevel ?? "off" },
-	{ field: "background.target", label: "background target", read: (s) => s.background.target ?? null },
-	{ field: "background.model", label: "background model", read: (s) => s.background.model ?? null },
-	{ field: "background.thinkingLevel", label: "background thinking", read: (s) => s.background.thinkingLevel ?? "off" },
-	{ field: "workers.default.target", label: "fleet target", read: (s) => s.workers.default.target ?? null },
-	{ field: "workers.default.model", label: "fleet model", read: (s) => s.workers.default.model ?? null },
+	{ field: "chat.target", label: "chat target", read: (s) => s.chat.target ?? null },
+	{ field: "chat.model", label: "chat model", read: (s) => s.chat.model ?? null },
+	{ field: "chat.thinkingLevel", label: "chat thinking", read: (s) => s.chat.thinkingLevel ?? "off" },
+	{ field: "context.memory.target", label: "memory target", read: (s) => s.context.memory.target ?? null },
+	{ field: "context.memory.model", label: "memory model", read: (s) => s.context.memory.model ?? null },
+	{ field: "fleet.default.target", label: "fleet target", read: (s) => s.fleet.default.target ?? null },
+	{ field: "fleet.default.model", label: "fleet model", read: (s) => s.fleet.default.model ?? null },
 	{
-		field: "workers.default.thinkingLevel",
+		field: "fleet.default.thinkingLevel",
 		label: "fleet thinking",
-		read: (s) => s.workers.default.thinkingLevel ?? "off",
+		read: (s) => s.fleet.default.thinkingLevel ?? "off",
 	},
-	{ field: "scope", label: "Alt+J/Alt+K scope", read: (s) => (s.scope ?? []).join(",") },
+	{
+		field: "chat.modelPicker.cycleSet",
+		label: "Alt+J/Alt+K cycle set",
+		read: (s) => s.chat.modelPicker.cycleSet.join(","),
+	},
 ];
 
 /**
@@ -325,7 +335,7 @@ export function routingChangeNotices(
 			text: `settings.yaml changed (${diverged.join(", ")}). This session keeps its routing; new sessions use the saved defaults.${hint}`,
 		});
 	}
-	const activeTarget = effective.orchestrator.target;
+	const activeTarget = effective.chat.target;
 	const targetsTouched = changedPaths.some((path) => path === "targets" || path.startsWith("targets."));
 	if (activeTarget && targetsTouched && !saved.targets.some((entry) => entry.id === activeTarget)) {
 		const hint = options?.commandHints ? " (/model)" : "";

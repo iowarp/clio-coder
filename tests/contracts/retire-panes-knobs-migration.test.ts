@@ -30,6 +30,7 @@ import { listMigrations, runPending } from "../../src/domains/lifecycle/migratio
 import { type IsolatedClioEnv, isolateClioEnv } from "../harness/scratch-env.js";
 
 const MIGRATION_ID = "2026-09-01-retire-panes-knobs";
+const SETTINGS_V2_ID = "2026-09-01-settings-v2";
 const LMSTUDIO_ID = "2026-08-18-lmstudio-runtime-id";
 
 describe("contracts/retired pane knobs migration", () => {
@@ -58,16 +59,16 @@ panes:
 `);
 		// The file this migration is for cannot pass the strict reader; that is the
 		// whole reason it exists.
-		deepStrictEqual(
+		const retiredPaneIssues = (): string[] =>
 			validateSettingsFile()
 				.issues.map((issue) => issue.path)
-				.sort(),
-			["panes.agents", "panes.keepFailed"],
-		);
+				.filter((issuePath) => issuePath === "panes.agents" || issuePath === "panes.keepFailed")
+				.sort();
+		deepStrictEqual(retiredPaneIssues(), ["panes.agents", "panes.keepFailed"]);
 
 		await retirePanesKnobs.up(stateDir());
 
-		deepStrictEqual(validateSettingsFile().issues, []);
+		deepStrictEqual(retiredPaneIssues(), []);
 		const saved = parseYaml(read()) as { panes?: Record<string, unknown>; autonomy?: string };
 		// The keys around them survive: this removes two knobs, not a section.
 		deepStrictEqual(Object.keys(saved.panes ?? {}).sort(), ["enabled", "notifications"]);
@@ -86,7 +87,9 @@ panes:
 		const saved = parseYaml(read()) as Record<string, unknown>;
 		strictEqual("panes" in saved, false, `an empty panes map names no setting: ${read()}`);
 		strictEqual(saved.autonomy, "suggest");
-		deepStrictEqual(validateSettingsFile().issues, []);
+		ok(
+			validateSettingsFile().issues.every((issue) => issue.path !== "panes.agents" && issue.path !== "panes.keepFailed"),
+		);
 	});
 
 	it("strips one retired key without disturbing the other's absence", async () => {
@@ -96,7 +99,9 @@ panes:
 `);
 		await retirePanesKnobs.up(stateDir());
 		deepStrictEqual(Object.keys((parseYaml(read()) as { panes?: object }).panes ?? {}), ["enabled"]);
-		deepStrictEqual(validateSettingsFile().issues, []);
+		ok(
+			validateSettingsFile().issues.every((issue) => issue.path !== "panes.agents" && issue.path !== "panes.keepFailed"),
+		);
 	});
 
 	// Rewriting re-serializes from the parse, so comments and formatting do not
@@ -141,6 +146,7 @@ panes:
 		// first could never reach the repair. Pinned on the registry rather than on
 		// ids, which are stable identifiers and deliberately not the order.
 		const ids = listMigrations().map((migration) => migration.id);
+		ok(ids.indexOf(SETTINGS_V2_ID) < ids.indexOf(MIGRATION_ID), ids.join(", "));
 		ok(ids.indexOf(MIGRATION_ID) < ids.indexOf(LMSTUDIO_ID), ids.join(", "));
 
 		write(`autonomy: auto-edit
@@ -150,7 +156,11 @@ panes:
   keepFailed: false
 `);
 		const applied = await runPending(stateDir());
-		deepStrictEqual(applied.applied, [MIGRATION_ID, LMSTUDIO_ID], "the whole pending set ran, in registry order");
+		deepStrictEqual(
+			applied.applied,
+			[SETTINGS_V2_ID, MIGRATION_ID, LMSTUDIO_ID],
+			"the whole pending set ran, in registry order",
+		);
 		deepStrictEqual(validateSettingsFile().issues, []);
 	});
 
