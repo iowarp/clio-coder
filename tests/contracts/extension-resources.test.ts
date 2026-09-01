@@ -1,10 +1,14 @@
 import { deepStrictEqual, ok, strictEqual } from "node:assert/strict";
-import { mkdirSync, mkdtempSync, readFileSync, rmSync, symlinkSync, writeFileSync } from "node:fs";
+import { mkdirSync, mkdtempSync, readFileSync, realpathSync, rmSync, symlinkSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { afterEach, describe, it } from "node:test";
 import { evaluateClioCompatibility } from "../../src/domains/extensions/compatibility.js";
-import { loadManifestFromRoot, parseExtensionManifest } from "../../src/domains/extensions/discovery.js";
+import {
+	discoverExtensionPackages,
+	loadManifestFromRoot,
+	parseExtensionManifest,
+} from "../../src/domains/extensions/discovery.js";
 import { enabledExtensionResourceRoots, extensionResourcePath } from "../../src/domains/extensions/resources.js";
 import { installExtension, listInstalledExtensions } from "../../src/domains/extensions/state.js";
 import { expandPromptTemplateInput, loadPromptTemplates } from "../../src/domains/resources/prompts/loader.js";
@@ -63,6 +67,82 @@ describe("extension resource boundary", () => {
 			satisfied: true,
 			runningVersion: "0.4.1",
 		});
+	});
+
+	it("rejects unknown manifest, resource, and compatibility keys", () => {
+		const base = {
+			manifestVersion: 1,
+			id: "strict-keys",
+			name: "Strict Keys",
+			version: "1.0.0",
+			description: "Strict key fixture.",
+			resources: {},
+		};
+		for (const [value, expected] of [
+			[{ ...base, executable: "index.ts" }, "unknown manifest key 'executable'"],
+			[{ ...base, resources: { prompts: "prompts", executable: "bin" } }, "unknown resources key 'executable'"],
+			[{ ...base, compatibility: { clio: ">=0.0.0", runtime: "node" } }, "unknown compatibility key 'runtime'"],
+		] as const) {
+			const parsed = parseExtensionManifest(value, "/fixture/clio-coder-extension.yaml");
+			strictEqual(parsed.manifest, undefined);
+			ok(parsed.diagnostics.some((diagnostic) => diagnostic.message === expected));
+		}
+	});
+
+	it("rejects mixed and duplicate tools or settings arrays", () => {
+		const base = {
+			manifestVersion: 1,
+			id: "strict-arrays",
+			name: "Strict Arrays",
+			version: "1.0.0",
+			description: "Strict array fixture.",
+			resources: {},
+		};
+		for (const [value, expected] of [
+			[{ ...base, tools: ["read", 42] }, "tools must contain only non-empty strings"],
+			[{ ...base, settings: ["theme", null] }, "settings must contain only non-empty strings"],
+			[{ ...base, tools: ["read", "read"] }, "tools contains duplicate entry 'read'"],
+			[{ ...base, settings: ["theme", "theme"] }, "settings contains duplicate entry 'theme'"],
+		] as const) {
+			const parsed = parseExtensionManifest(value, "/fixture/clio-coder-extension.yaml");
+			strictEqual(parsed.manifest, undefined);
+			ok(parsed.diagnostics.some((diagnostic) => diagnostic.message === expected));
+		}
+	});
+
+	it("canonicalizes duplicate root spellings and retains a deterministic diagnostic", () => {
+		const parent = scratch();
+		const packageRoot = join(parent, "z-package");
+		writeManifest(packageRoot, "canonical-root");
+		symlinkSync(packageRoot, join(parent, "a-alias"), "dir");
+		symlinkSync(packageRoot, join(parent, "b-alias"), "dir");
+
+		const first = discoverExtensionPackages(parent);
+		const second = discoverExtensionPackages(parent);
+		deepStrictEqual(second, first);
+		strictEqual(first.length, 1);
+		strictEqual(first[0]?.path, realpathSync(packageRoot));
+		strictEqual(first[0]?.valid, true);
+		ok(
+			first[0]?.diagnostics.some(
+				(diagnostic) =>
+					diagnostic.type === "warning" && diagnostic.message.includes("duplicate canonical extension root loaded once"),
+			),
+		);
+	});
+
+	it("still rejects the same id from distinct canonical roots", () => {
+		const parent = scratch();
+		writeManifest(join(parent, "one"), "duplicate-id");
+		writeManifest(join(parent, "two"), "duplicate-id");
+		const discovered = discoverExtensionPackages(parent);
+		strictEqual(discovered.length, 2);
+		ok(discovered.every((candidate) => !candidate.valid));
+		ok(
+			discovered.every((candidate) =>
+				candidate.diagnostics.some((diagnostic) => diagnostic.message === "duplicate extension id duplicate-id"),
+			),
+		);
 	});
 
 	it("resolves only directories contained by the extension root", () => {
