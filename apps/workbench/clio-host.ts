@@ -2155,10 +2155,7 @@ export class ClioProjectHost {
 		const publicId = `permission-${crypto.randomUUID()}`;
 		const requestedAt = this.#now();
 		const escalateAt = requestedAt + this.#permissionEscalateMs;
-		// `request.expiresAt` comes from the client on the real clock, so only its
-		// remaining duration is comparable to a host clock that tests may inject.
-		const clientRemainingMs = Math.max(0, request.expiresAt - Date.now());
-		const expiresAt = requestedAt + Math.min(this.#permissionBudgetMs, clientRemainingMs);
+		const expiresAt = Math.min(request.expiresAt, requestedAt + this.#permissionBudgetMs);
 		if (escalateAt >= expiresAt) {
 			// Honest rather than clamped: a short server permission ceiling simply
 			// leaves no room to escalate before the turn is stopped.
