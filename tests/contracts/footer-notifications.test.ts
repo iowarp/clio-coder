@@ -102,17 +102,17 @@ describe("contracts/footer notification widths", () => {
 		ok(!badge.includes(ESC));
 	});
 
-	it("marks truncated rows in the expanded panel with an ellipsis", () => {
+	it("wraps complete notices in the expanded panel", () => {
 		const width = 36;
+		const message = "Tool support is unavailable for this model; Clio drives every agent role through typed tools";
 		const panel = formatNotificationPanel(
-			[notice("Tool support is unavailable for this model; Clio drives every agent role through typed tools")],
+			[notice(message)],
 			width,
 			{ theme: createClioTheme({ color: false }) },
 		);
-		const row = panel[1];
+		const collapsed = panel.slice(1, -1).join(" ").replace(/\s+/gu, " ").trim();
 
-		ok(row);
-		strictEqual(visibleWidth(row), width);
-		ok(strip(row).endsWith("…"), row);
+		ok(collapsed.includes(message), `expanded notification was cut: ${collapsed}`);
+		for (const row of panel) ok(visibleWidth(row) <= width, `row overflows: ${strip(row)}`);
 	});
 });

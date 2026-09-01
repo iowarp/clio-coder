@@ -14,7 +14,7 @@
  * color lives in `theme/**`; every emitted line is width-clamped.
  */
 
-import { truncateToWidth, visibleWidth } from "../../engine/tui.js";
+import { truncateToWidth, visibleWidth, wrapTextWithAnsi } from "../../engine/tui.js";
 import { fitFooterText } from "../footer-panel.js";
 import { type ClioTheme, type ClioToken, clioTheme, GLYPH, rule } from "../theme/index.js";
 
@@ -470,8 +470,9 @@ export function formatNotificationBadge(
 }
 
 /**
- * Expanded notices panel for the dashboard. Header rule + one styled line per
- * entry, capped so a noisy boot cannot push the dashboard off-screen.
+ * Expanded notices panel for the dashboard. The entry count is capped so a
+ * noisy boot cannot take over the dashboard, but every included notice wraps
+ * in full: this is the detail surface that the compact badge points toward.
  */
 export function formatNotificationPanel(
 	entries: ReadonlyArray<Notification>,
@@ -485,7 +486,14 @@ export function formatNotificationPanel(
 	const lines: string[] = [rule(theme, width, { left: "notices" })];
 	for (const entry of entries.slice(0, maxRows)) {
 		const glyph = theme.fg(notificationToken(entry.level), notificationGlyph(entry.level));
-		lines.push(fitFooterText(`${glyph} ${theme.fg("muted", entry.text)}`, width, GLYPH.ellipsis));
+		const prefix = `${glyph} `;
+		const prefixWidth = visibleWidth(prefix);
+		const wrapped = wrapTextWithAnsi(theme.fg("muted", entry.text), Math.max(1, width - prefixWidth));
+		lines.push(
+			...wrapped.map((line, index) =>
+				fitFooterText(`${index === 0 ? prefix : " ".repeat(prefixWidth)}${line}`, width),
+			),
+		);
 	}
 	const overflow = entries.length - maxRows;
 	const hint = overflow > 0 ? `+${overflow} more · ${dismiss} dismiss` : `${dismiss} dismiss`;
