@@ -373,10 +373,19 @@ describe("contracts/config", () => {
 			yazi: { enabled: false, mode: "chooser", profile: "user", followCwd: false },
 		});
 
-		// The retired per-dispatch pane knobs stay accepted-and-ignored so an
-		// older settings file keeps passing the strict boot gate.
+		// The retired per-dispatch pane knobs are refused by name. Accepting and
+		// ignoring them let a settings file keep naming a policy nothing reads
+		// and never hear about it, which is the silence this schema exists to
+		// prevent; `unknown key` would have been the wrong answer too, since the
+		// operator wrote a key a shipped release honored.
 		const retired = validateSettings({ panes: { agents: "off", keepFailed: false } });
-		deepStrictEqual(retired.issues, []);
+		deepStrictEqual(retired.issues.map((issue) => issue.path).sort(), ["panes.agents", "panes.keepFailed"]);
+		for (const issue of retired.issues) {
+			ok(issue.message.startsWith("retired: "), issue.message);
+			ok(issue.message.endsWith("Remove this key."), issue.message);
+			strictEqual(issue.message.includes("unknown key"), false, issue.message);
+		}
+		// A refused key still leaves the section on its shipped defaults.
 		deepStrictEqual(retired.settings.panes, DEFAULT_SETTINGS.panes);
 
 		const partial = validateSettings({ panes: { notifications: "off" } });

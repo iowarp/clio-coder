@@ -206,6 +206,20 @@ class Issues {
 			if (!knownSet.has(key)) this.add(path ? `${path}.${key}` : key, "unknown key");
 		}
 	}
+
+	/**
+	 * A key that used to be honored and is not any more. `unknown key` is the
+	 * true answer for a typo and the wrong one here: the operator wrote a real
+	 * key that a real release read, and the useful thing to tell them is what
+	 * replaced it, not that the schema has never heard of it. The keys stay
+	 * listed as known at their {@link unknownKeys} call so this message is the
+	 * one that lands.
+	 */
+	retiredKeys(path: string, raw: Record<string, unknown>, retired: Readonly<Record<string, string>>): void {
+		for (const [key, because] of Object.entries(retired)) {
+			if (key in raw) this.add(path ? `${path}.${key}` : key, `retired: ${because}. Remove this key.`);
+		}
+	}
 }
 
 function expectString(issues: Issues, path: string, value: unknown): string | undefined {
@@ -1613,9 +1627,14 @@ export function validateSettings(raw: unknown): SettingsValidationResult {
 			issues.add("panes", `expected a map, got ${describe(raw.panes)}`);
 		} else {
 			// `agents` and `keepFailed` are retired: pane-opening is no longer a
-			// per-dispatch policy (src/interactive/pane-policy.ts holds the one
-			// decision). They stay accepted-and-ignored so a settings file written
-			// against an older release keeps passing the strict boot gate.
+			// per-dispatch policy. They were accepted-and-ignored through the 0.4.0
+			// migration, which meant a settings file could keep naming a policy
+			// nothing read and never hear about it. They are refused by name now,
+			// which is what the rest of this schema does with a key it cannot honor.
+			issues.retiredKeys("panes", raw.panes, {
+				agents: "pane opening is no longer a per-dispatch policy; one operator-pulled watch pane replaced it",
+				keepFailed: "a pane's lifetime is no longer tied to its run's outcome",
+			});
 			issues.unknownKeys("panes", raw.panes, ["enabled", "agents", "keepFailed", "notifications", "journal", "yazi"]);
 			if ("enabled" in raw.panes) {
 				const v = expectEnum(issues, "panes.enabled", raw.panes.enabled, ["auto", "embedded", "off"] as const);
