@@ -462,7 +462,9 @@ export async function startFakeHerdrServer(options: FakeHerdrServerOptions = {})
 				return { result: { type: "ok" } };
 			}
 			case "pane.focus": {
-				if (protocol < 21) return { error: { code: "invalid_request", message: "unknown method pane.focus" } };
+				// Attested in the real 0.7.5 (protocol 17) schema alongside the layout
+				// pair; a sub-17 server models a release older than any actually read.
+				if (protocol < 17) return { error: { code: "invalid_request", message: "unknown method pane.focus" } };
 				const pane = panes.find((entry) => entry.paneId === params.pane_id);
 				if (!pane) return { error: { code: "pane_not_found", message: "pane not found" } };
 				// The real server switches the focused tab along with the pane.
@@ -494,7 +496,7 @@ export async function startFakeHerdrServer(options: FakeHerdrServerOptions = {})
 				};
 			}
 			case "layout.export": {
-				if (protocol < 21) return { error: { code: "invalid_request", message: "unknown method layout.export" } };
+				if (protocol < 17) return { error: { code: "invalid_request", message: "unknown method layout.export" } };
 				const byPane = typeof params.pane_id === "string" ? panes.find((p) => p.paneId === params.pane_id) : null;
 				const tabId = byPane?.tabId ?? (typeof params.tab_id === "string" ? params.tab_id : (focusedTabId ?? "w1:t1"));
 				const tree = tabTrees.get(tabId);
@@ -514,7 +516,7 @@ export async function startFakeHerdrServer(options: FakeHerdrServerOptions = {})
 				};
 			}
 			case "layout.set_split_ratio": {
-				if (protocol < 21) {
+				if (protocol < 17) {
 					return { error: { code: "invalid_request", message: "unknown method layout.set_split_ratio" } };
 				}
 				const byPane = typeof params.pane_id === "string" ? panes.find((p) => p.paneId === params.pane_id) : null;

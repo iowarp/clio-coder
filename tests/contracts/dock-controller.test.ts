@@ -8,8 +8,9 @@
  * than being fought; a user close is final; adoption returns a surviving dock
  * to its slot after a crash; a clean shutdown closes docks but leaves
  * unmanaged utility panes; and every focus/zoom path refuses panes Clio does
- * not own. Below the protocol-21 layout floor the whole tier degrades to
- * plain splits.
+ * not own. Below the protocol-17 layout floor the whole tier degrades to
+ * plain splits, and it must be live at protocol 20, which is what the
+ * pinned herdr 0.8.2 artifact actually speaks.
  */
 
 import { ok, strictEqual } from "node:assert/strict";
@@ -34,7 +35,9 @@ async function guest(
 	options: { protocol?: number; area?: { width: number; height: number }; start?: boolean } = {},
 ): Promise<DockFixture> {
 	const fake = await startFakeHerdrServer({
-		protocol: options.protocol ?? 21,
+		// The pinned 0.8.2 artifact speaks protocol 20 (hash-verified), so the
+		// default fixture models it rather than a newer build.
+		protocol: options.protocol ?? 20,
 		version: "0.8.2",
 		area: options.area ?? { width: 200, height: 60 },
 	});
@@ -165,8 +168,21 @@ describe("dock open", () => {
 		strictEqual(runtime.contract.available(), true);
 	});
 
-	it("degrades a dock request to a plain split below the layout floor", async () => {
+	it("runs the dock tier at protocol 17, the floor the 0.7.5 schema attests", async () => {
 		const { fake, runtime } = await guest({ protocol: 17 });
+		const ref = await runtime.contract.openUtilityPane({
+			argv: [],
+			cwd: "/tmp",
+			label: "workers-view",
+			dock: { slot: "workers" },
+		});
+		ok(ref);
+		strictEqual(runtime.contract.docks().length, 1);
+		strictEqual(fake.requestsFor("pane.split")[0]?.params.ratio, ratioForDockShare(DOCK_SPECS.workers.defaultShare));
+	});
+
+	it("degrades a dock request to a plain split below the layout floor", async () => {
+		const { fake, runtime } = await guest({ protocol: 16 });
 		const ref = await runtime.contract.openUtilityPane({
 			argv: [],
 			cwd: "/tmp",
