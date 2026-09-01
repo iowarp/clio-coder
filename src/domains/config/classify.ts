@@ -1,13 +1,10 @@
 import type { ClioSettings } from "../../core/config.js";
 
 /**
- * Classifies a settings change into one of three buckets per spec §13:
- *   - hotReload   : theme, keybindings, safety rules, prompt fragments,
- *                   audit verbosity. Apply immediately (≤100ms).
- *   - nextTurn    : model selection, thinking level, budget ceiling. Apply before the
- *                   next turn starts.
- *   - restartRequired : provider credentials, active provider list, runtime enable/disable,
- *                       engine settings. Needs a restart nudge.
+ * Classifies a version-2 settings change into one of three effect buckets:
+ *   - hotReload: a live reader observes the value without rebuilding runtime state.
+ *   - nextTurn: the next request, dispatch, or explicit open observes the value.
+ *   - restartRequired: process or pane-host setup must be rebuilt.
  *
  * Output is an exhaustive per-bucket list. A single patch can touch multiple buckets;
  * the caller emits the event(s) for every non-empty bucket.
@@ -22,59 +19,50 @@ export interface ConfigDiff {
 }
 
 const HOT_RELOAD_FIELDS = new Set<string>([
-	"theme",
-	"keybindings",
-	"autonomy",
-	"modelSelector",
-	"terminal.smoothStreaming",
-	"attribution.gitCommits",
+	"interface.keybindings",
+	"safety.autonomy",
+	"chat.modelPicker",
+	"interface.smoothStreaming",
+	"interface.panes.notifications",
+	"integrations.git.commitAttribution",
 	// The bridge reads these on every explicit open; no mux re-detection is
 	// needed because the host capability rung remains `panes.enabled`.
-	"panes.yazi",
+	"interface.panes.files",
 	// The watchdog registration reads its settings live on every trigger, so
 	// enabling it, retargeting it, or changing its cadence takes effect on the
 	// next turn boundary without a restart or a session-routing patch.
-	"watchdog",
+	"safety.review",
 ]);
 
 const NEXT_TURN_FIELDS = new Set<string>([
-	"identity",
 	"targets",
-	"orchestrator.target",
-	"orchestrator.model",
-	"orchestrator.thinkingLevel",
-	"background.target",
-	"background.model",
-	"background.thinkingLevel",
-	"memory",
-	"workers.default.target",
-	"workers.default.model",
-	"workers.default.thinkingLevel",
-	"workers.profiles",
-	"workers.agentBindings",
-	"workers.maxRetries",
-	"workers.onPermission",
-	"fleet",
-	"routing",
-	"scope",
-	"budget.sessionCeilingUsd",
-	"defaults",
-	"terminal",
-	"skills",
-	"delegation",
-	"compaction",
+	"chat",
+	"fleet.default",
+	"fleet.profiles",
+	"fleet.rosters",
+	"fleet.agentProfiles",
+	"fleet.adaptiveRouting",
+	"fleet.nodes",
+	"fleet.permissions",
+	"fleet.retry",
+	"fleet.limits",
+	"fleet.history",
 	"context",
-	// The pre-warm reads its setting when a trigger fires, and every trigger sits
-	// on a turn boundary, so a change takes effect before the next turn runs.
-	"prewarm",
-	"retry",
+	"safety.limits",
+	"interface.outputDetail",
+	"interface.terminalProgress",
+	"interface.desktopNotifications",
+	"integrations.projectResources",
+	"integrations.externalAgents",
+	"integrations.library",
 ]);
 
 const RESTART_REQUIRED_FIELDS = new Set<string>([
-	"budget.concurrency",
-	"runtimePlugins",
-	"terminal.tuiMode",
-	"terminal.fullscreenScrollbar",
+	"fleet.concurrency",
+	"interface.mode",
+	"interface.fullscreenScrollbar",
+	"interface.panes.enabled",
+	"integrations.runtimePlugins",
 ]);
 
 function matchesPrefix(path: string, fields: Set<string>): boolean {

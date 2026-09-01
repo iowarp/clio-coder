@@ -5,11 +5,11 @@
  * loader has finished booting.
  *
  * There is exactly one schema: the file on disk and the in-memory shape use
- * the same key names (`targets`, `orchestrator.target`, ...). Validation is
+ * the same version-2 key names (`targets`, `chat.target`, ...). Validation is
  * strict: unknown keys and type violations are errors carrying the exact key
- * path; there are no legacy readers, aliases, or migrations. Missing keys take
- * DEFAULT_SETTINGS values, which is well-defined because the file is
- * machine-owned and written whole.
+ * path. Version-1 paths are non-executing tombstones with migration hints;
+ * lifecycle owns the one-time file migration. Missing keys take
+ * DEFAULT_SETTINGS values.
  */
 
 import { existsSync, readFileSync } from "node:fs";
@@ -47,7 +47,7 @@ export function settingsPath(): string {
 export type SettingsIssueKind = "unreadable" | "syntax" | "schema";
 
 export interface SettingsIssue {
-	/** Dotted key path, e.g. `orchestrator.target` or `targets[2].runtime`. */
+	/** Dotted key path, e.g. `chat.target` or `targets[2].runtime`. */
 	path: string;
 	message: string;
 	kind?: SettingsIssueKind;
@@ -595,15 +595,228 @@ function validateTarget(issues: Issues, path: string, value: unknown): ClioSetti
  * every session that still mentions it. This is referential normalization,
  * not a legacy reader; the key names themselves are never aliased.
  */
-function validateWorkerTarget(
+type FleetRoute = ClioSettings["fleet"]["default"];
+type ExternalAgentDefaults = ClioSettings["integrations"]["externalAgents"]["defaults"];
+type ExternalAgent = ClioSettings["integrations"]["externalAgents"]["entries"][number];
+type FleetNodeConfig = ClioSettings["fleet"]["nodes"][number];
+
+/**
+ * Complete durable path manifest for the settings-v1 to settings-v2 rename.
+ * `*` denotes a map key and `[]` denotes a list element. Values are copied
+ * without reinterpretation unless a separate retired-path entry says they are
+ * deliberately dropped.
+ */
+export const SETTINGS_V1_PATH_MOVES = Object.freeze([
+	["autonomy", "safety.autonomy"],
+	["orchestrator.target", "chat.target"],
+	["orchestrator.model", "chat.model"],
+	["orchestrator.thinkingLevel", "chat.thinkingLevel"],
+	["scope[]", "chat.modelPicker.cycleSet[]"],
+	["modelSelector.favorites[]", "chat.modelPicker.favorites[]"],
+	["modelSelector.recentLimit", "chat.modelPicker.recentLimit"],
+	["defaults.maxTokens", "chat.maxOutputTokens"],
+	["prewarm.enabled", "chat.prewarm"],
+	["retry.enabled", "chat.retry.enabled"],
+	["retry.maxRetries", "chat.retry.maxRetries"],
+	["retry.baseDelayMs", "chat.retry.baseDelayMs"],
+	["retry.maxDelayMs", "chat.retry.maxDelayMs"],
+	["retry.streamStallMs", "chat.retry.streamStallMs"],
+	["workers.default.target", "fleet.default.target"],
+	["workers.default.model", "fleet.default.model"],
+	["workers.default.thinkingLevel", "fleet.default.thinkingLevel"],
+	["workers.default.node", "fleet.default.node"],
+	["workers.profiles.*.target", "fleet.profiles.*.target"],
+	["workers.profiles.*.model", "fleet.profiles.*.model"],
+	["workers.profiles.*.thinkingLevel", "fleet.profiles.*.thinkingLevel"],
+	["workers.profiles.*.node", "fleet.profiles.*.node"],
+	["workers.rosters.*.members[].label", "fleet.rosters.*.members[].label"],
+	["workers.rosters.*.members[].target", "fleet.rosters.*.members[].target"],
+	["workers.rosters.*.members[].model", "fleet.rosters.*.members[].model"],
+	["workers.rosters.*.members[].thinking", "fleet.rosters.*.members[].thinkingLevel"],
+	["workers.rosters.*.members[].color", "fleet.rosters.*.members[].color"],
+	["workers.agentBindings.*", "fleet.agentProfiles.*"],
+	["routing.activeRoles[]", "fleet.adaptiveRouting.roles[]"],
+	["routing.activePostures[]", "fleet.adaptiveRouting.postures[]"],
+	["routing.agentAutomation.activeAgentRoles[].agentId", "fleet.adaptiveRouting.agentRoles[].agentId"],
+	["routing.agentAutomation.activeAgentRoles[].executionRole", "fleet.adaptiveRouting.agentRoles[].executionRole"],
+	["budget.concurrency", "fleet.concurrency"],
+	["workers.maxRetries", "fleet.retry.maxRetries"],
+	["workers.resilienceCooldownMs", "fleet.retry.routeCooldownMs"],
+	["workers.onPermission", "fleet.permissions.mode"],
+	["workers.escalation.timeoutMs", "fleet.permissions.escalation.timeoutMs"],
+	["workers.escalation.fallback", "fleet.permissions.escalation.fallback"],
+	["guardrails.workerToolCallCap", "fleet.limits.toolCallsPerRun"],
+	["guardrails.internalDispatchTimeoutMs", "fleet.limits.internalRunTimeoutMs"],
+	["guardrails.maxDispatchRuns", "fleet.history.maxRuns"],
+	["panes.journal", "fleet.history.journal"],
+	["compaction.auto", "context.compaction.auto"],
+	["compaction.threshold", "context.compaction.threshold"],
+	["compaction.model", "context.compaction.model"],
+	["compaction.systemPrompt", "context.compaction.systemPrompt"],
+	["background.target", "context.memory.target"],
+	["background.model", "context.memory.model"],
+	["memory.intervention.enabled", "context.memory.enabled"],
+	["memory.intervention.everyNTools", "context.memory.cadenceToolCalls"],
+	["memory.intervention.windowSteps", "context.memory.trajectorySteps"],
+	["memory.intervention.maxTokens", "context.memory.maxOutputTokens"],
+	["memory.intervention.timeoutMs", "context.memory.timeoutMs"],
+	["budget.sessionCeilingUsd", "safety.limits.sessionCostUsd"],
+	["guardrails.turnToolCallBudget", "safety.limits.chatToolCallsPerTurn"],
+	["guardrails.readMaxBytes", "safety.limits.readBytesPerCall"],
+	["guardrails.observationTurnBudgetBytes", "safety.limits.observationBytesPerTurn"],
+	["watchdog.enabled", "safety.review.enabled"],
+	["watchdog.target", "safety.review.target"],
+	["watchdog.cadenceToolCalls", "safety.review.cadenceToolCalls"],
+	["terminal.outputVerbosity", "interface.outputDetail"],
+	["terminal.smoothStreaming", "interface.smoothStreaming"],
+	["terminal.tuiMode", "interface.mode"],
+	["terminal.fullscreenScrollbar", "interface.fullscreenScrollbar"],
+	["terminal.showTerminalProgress", "interface.terminalProgress"],
+	["terminal.notify", "interface.desktopNotifications"],
+	["panes.enabled", "interface.panes.enabled"],
+	["panes.notifications", "interface.panes.notifications"],
+	["panes.yazi.enabled", "interface.panes.files.enabled"],
+	["panes.yazi.mode", "interface.panes.files.mode"],
+	["panes.yazi.profile", "interface.panes.files.profile"],
+	["panes.yazi.followCwd", "interface.panes.files.followCwd"],
+	["keybindings.*", "interface.keybindings.*"],
+	["skills.trustProjectCompatRoots", "integrations.projectResources.trustProjectImports"],
+	["delegation.defaults.connectTimeoutMs", "integrations.externalAgents.defaults.connectTimeoutMs"],
+	["delegation.defaults.turnTimeoutMs", "integrations.externalAgents.defaults.turnTimeoutMs"],
+	["delegation.defaults.permissionTimeoutMs", "integrations.externalAgents.defaults.permissionTimeoutMs"],
+	["delegation.defaults.toolGovernance", "integrations.externalAgents.defaults.toolGovernance"],
+	["delegation.agents[].id", "integrations.externalAgents.entries[].id"],
+	["delegation.agents[].command", "integrations.externalAgents.entries[].command"],
+	["delegation.agents[].args[]", "integrations.externalAgents.entries[].args[]"],
+	["delegation.agents[].cwd", "integrations.externalAgents.entries[].cwd"],
+	["delegation.agents[].env.*", "integrations.externalAgents.entries[].env.*"],
+	["delegation.agents[].connectTimeoutMs", "integrations.externalAgents.entries[].connectTimeoutMs"],
+	["delegation.agents[].turnTimeoutMs", "integrations.externalAgents.entries[].turnTimeoutMs"],
+	["delegation.agents[].permissionTimeoutMs", "integrations.externalAgents.entries[].permissionTimeoutMs"],
+	["delegation.agents[].stallTimeoutMs", "integrations.externalAgents.entries[].stallTimeoutMs"],
+	["delegation.agents[].toolGovernance", "integrations.externalAgents.entries[].toolGovernance"],
+	["delegation.agents[].projectContext", "integrations.externalAgents.entries[].projectContext"],
+	["delegation.agents[].labels.*", "integrations.externalAgents.entries[].labels.*"],
+	["runtimePlugins[]", "integrations.runtimePlugins[]"],
+	["library.catalog", "integrations.library.catalog"],
+	["library.remote", "integrations.library.remote"],
+	["library.confirmedRemote", "integrations.library.confirmedRemote"],
+	["library.sync", "integrations.library.sync"],
+	["attribution.gitCommits", "integrations.git.commitAttribution"],
+	["fleet.nodes[].clioEntry", "fleet.nodes[].clioCoderEntry"],
+] as const);
+
+export const SETTINGS_V1_RETIRED_PATHS = Object.freeze({
+	identity: "it was accepted and ignored; no behavior is lost",
+	"background.thinkingLevel": "proactive memory always resolves thinking off",
+	theme: "the only registered theme was not read by runtime rendering",
+	"compaction.excludeLastTurns": "only the temporary legacy mask used it; context.workingSet.protectLastTurns remains",
+	"panes.agents": "pane opening is no longer a per-dispatch policy",
+	"panes.keepFailed": "pane lifetime is no longer tied to run outcome",
+} as const);
+
+const V1_ONLY_ROOTS = new Set([
+	"identity",
+	"autonomy",
+	"runtimePlugins",
+	"orchestrator",
+	"background",
+	"memory",
+	"watchdog",
+	"workers",
+	"routing",
+	"scope",
+	"modelSelector",
+	"budget",
+	"defaults",
+	"theme",
+	"terminal",
+	"skills",
+	"library",
+	"attribution",
+	"delegation",
+	"keybindings",
+	"compaction",
+	"prewarm",
+	"panes",
+	"retry",
+	"guardrails",
+]);
+
+interface PatternMatch {
+	path: string;
+}
+
+function pathPatternSegments(pattern: string): string[] {
+	return pattern.split(".");
+}
+
+function patternMatches(value: unknown, pattern: string): PatternMatch[] {
+	const out: PatternMatch[] = [];
+	const visit = (current: unknown, segments: ReadonlyArray<string>, path: string): void => {
+		const segment = segments[0];
+		if (segment === undefined) {
+			out.push({ path });
+			return;
+		}
+		const rest = segments.slice(1);
+		if (segment === "*") {
+			if (!isPlainObject(current)) return;
+			for (const [key, child] of Object.entries(current)) visit(child, rest, path ? `${path}.${key}` : key);
+			return;
+		}
+		const list = segment.endsWith("[]");
+		const key = list ? segment.slice(0, -2) : segment;
+		if (!isPlainObject(current) || !(key in current)) return;
+		const child = current[key];
+		const nextPath = path ? `${path}.${key}` : key;
+		if (!list) {
+			visit(child, rest, nextPath);
+			return;
+		}
+		if (!Array.isArray(child)) return;
+		for (let index = 0; index < child.length; index += 1) visit(child[index], rest, `${nextPath}[${index}]`);
+	};
+	visit(value, pathPatternSegments(pattern), "");
+	return out;
+}
+
+function reportV1Tombstones(issues: Issues, raw: Record<string, unknown>): void {
+	const reportedRoots = new Set<string>();
+	for (const [from, to] of SETTINGS_V1_PATH_MOVES) {
+		for (const match of patternMatches(raw, from)) {
+			issues.add(match.path, `retired settings-v1 path; use ${to} in version 2`);
+			reportedRoots.add(match.path.split(/[.[]/u)[0] ?? match.path);
+		}
+	}
+	for (const [path, reason] of Object.entries(SETTINGS_V1_RETIRED_PATHS)) {
+		for (const match of patternMatches(raw, path)) {
+			issues.add(match.path, `retired without replacement: ${reason}. Remove this key`);
+			reportedRoots.add(match.path.split(/[.[]/u)[0] ?? match.path);
+		}
+	}
+	for (const root of V1_ONLY_ROOTS) {
+		if (root in raw && !reportedRoots.has(root)) {
+			const replacements = new Set(
+				SETTINGS_V1_PATH_MOVES.filter(([from]) => from.split(/[.[]/u)[0] === root).map(
+					([, to]) => to.split(/[.[]/u)[0] ?? to,
+				),
+			);
+			const hint = replacements.size > 0 ? `; use ${[...replacements].join(" or ")} in version 2` : "";
+			issues.add(root, `retired settings-v1 namespace${hint}; migrate this document with \`clio-coder upgrade\``);
+		}
+	}
+}
+
+function validateRoute(
 	issues: Issues,
 	path: string,
 	value: unknown,
-	defaults: ClioSettings["orchestrator"],
+	defaults: FleetRoute,
 	targets: ReadonlyArray<ClioSettings["targets"][number]>,
 	options?: { nodeIds?: ReadonlySet<string> },
-): ClioSettings["orchestrator"] & { node?: string } {
-	const out: ClioSettings["orchestrator"] & { node?: string } = cloneValue(defaults);
+): FleetRoute {
+	const out = cloneValue(defaults);
 	if (!isPlainObject(value)) {
 		issues.add(path, `expected a map, got ${describe(value)}`);
 		return out;
@@ -614,80 +827,58 @@ function validateWorkerTarget(
 		value,
 		allowNode ? ["target", "model", "thinkingLevel", "node"] : ["target", "model", "thinkingLevel"],
 	);
-	if ("target" in value && value.target !== null) {
-		const v = expectString(issues, `${path}.target`, value.target);
-		if (v !== undefined) out.target = targets.some((entry) => entry.id === v) ? v : null;
-	}
-	if ("thinkingLevel" in value) {
-		const v = expectEnum(issues, `${path}.thinkingLevel`, value.thinkingLevel, THINKING_LEVELS);
-		if (v !== undefined) out.thinkingLevel = v;
-	}
-	if ("model" in value && value.model !== null) {
-		const v = expectString(issues, `${path}.model`, value.model);
-		if (v !== undefined) out.model = v;
-	}
-	// Node pins follow the target idiom: a pin naming a node that is not
-	// configured (and is not the implicit local node) is dropped, not fatal.
-	if (allowNode && "node" in value && value.node !== null) {
-		const v = expectString(issues, `${path}.node`, value.node);
-		if (v !== undefined) {
-			const id = v.trim();
-			if (id.length > 0 && (id === "local" || options?.nodeIds?.has(id) === true)) out.node = id;
+	if ("target" in value) {
+		if (value.target === null) out.target = null;
+		else {
+			const parsed = expectString(issues, `${path}.target`, value.target);
+			if (parsed !== undefined) out.target = targets.some((entry) => entry.id === parsed) ? parsed : null;
 		}
 	}
-	if (!out.target) {
-		out.model = null;
-	} else if (out.model === null) {
-		out.model = targets.find((entry) => entry.id === out.target)?.defaultModel ?? null;
+	if ("model" in value) {
+		if (value.model === null) out.model = null;
+		else {
+			const parsed = expectString(issues, `${path}.model`, value.model);
+			if (parsed !== undefined) out.model = parsed;
+		}
 	}
+	if ("thinkingLevel" in value) {
+		const parsed = expectEnum(issues, `${path}.thinkingLevel`, value.thinkingLevel, THINKING_LEVELS);
+		if (parsed !== undefined) out.thinkingLevel = parsed;
+	}
+	if (allowNode && "node" in value) {
+		if (value.node === null) delete out.node;
+		else {
+			const parsed = expectString(issues, `${path}.node`, value.node);
+			if (parsed !== undefined && (parsed === "local" || options.nodeIds?.has(parsed) === true)) out.node = parsed;
+		}
+	}
+	if (!out.target) out.model = null;
+	else if (out.model === null) out.model = targets.find((entry) => entry.id === out.target)?.defaultModel ?? null;
 	return out;
 }
 
-/** `targetId/wireModelId` refs filtered to configured target ids. */
 function normalizeModelRefs(
 	refs: ReadonlyArray<string>,
 	targets: ReadonlyArray<ClioSettings["targets"][number]>,
 ): string[] {
-	const byId = new Set(targets.map((target) => target.id));
-	const out: string[] = [];
-	for (const ref of refs) {
-		const [targetId, ...modelParts] = ref.split("/");
-		if (!targetId || !byId.has(targetId) || modelParts.length === 0) continue;
-		const model = modelParts.join("/").trim();
-		if (!model) continue;
-		const normalized = `${targetId}/${model}`;
-		if (!out.includes(normalized)) out.push(normalized);
-	}
-	return out;
+	const targetIds = new Set(targets.map((target) => target.id));
+	return refs.filter((ref) => {
+		const [targetId, ...model] = ref.split("/");
+		return Boolean(targetId && targetIds.has(targetId) && model.join("/").trim());
+	});
 }
 
-/**
- * Scope entries: `targetId` or `targetId/wireModelId`, deduplicated. A ref
- * whose target is not configured is kept, not dropped: a renamed or
- * temporarily removed target is the common staleness case, and silently
- * deleting the operator's cycle set at load destroys a preference they never
- * asked to change. Disclosure belongs to the presentation layer, which lists
- * unresolvable refs under "Unavailable"; the consumers that must resolve a ref
- * (advanceScopedTarget) filter it themselves.
- */
-function normalizeScope(refs: ReadonlyArray<string>): string[] {
-	const out: string[] = [];
-	for (const ref of refs) {
-		const trimmed = ref.trim();
-		const [targetId] = trimmed.split("/");
-		if (!targetId) continue;
-		if (!out.includes(trimmed)) out.push(trimmed);
-	}
-	return out;
+function normalizeCycleSet(refs: ReadonlyArray<string>): string[] {
+	return refs.filter((ref) => Boolean(ref.trim().split("/")[0]));
 }
 
-function validateDelegationAgent(
+function validateExternalAgent(
 	issues: Issues,
 	path: string,
 	value: unknown,
-	defaults: ClioSettings["delegation"]["defaults"],
+	defaults: ExternalAgentDefaults,
 	seen: Set<string>,
-): ClioSettings["delegation"]["agents"][number] | null {
+): ExternalAgent | null {
 	if (!isPlainObject(value)) {
 		issues.add(path, `expected a map, got ${describe(value)}`);
 		return null;
@@ -716,11 +907,11 @@ function validateDelegationAgent(
 		return null;
 	}
 	if (seen.has(id)) {
-		issues.add(`${path}.id`, `duplicate delegation agent id '${id}'`);
+		issues.add(`${path}.id`, `duplicate external agent id '${id}'`);
 		return null;
 	}
 	seen.add(id);
-	const agent: ClioSettings["delegation"]["agents"][number] = {
+	const agent: ExternalAgent = {
 		id,
 		command,
 		args: [],
@@ -730,88 +921,38 @@ function validateDelegationAgent(
 		toolGovernance: defaults.toolGovernance,
 	};
 	if ("args" in value) {
-		const v = expectStringArray(issues, `${path}.args`, value.args);
-		if (v !== undefined) agent.args = v;
+		const parsed = expectStringArray(issues, `${path}.args`, value.args);
+		if (parsed !== undefined) agent.args = parsed;
 	}
 	for (const key of ["connectTimeoutMs", "turnTimeoutMs", "permissionTimeoutMs"] as const) {
-		if (key in value) {
-			const v = expectInteger(issues, `${path}.${key}`, value[key], { min: 1, max: MAX_TIMER_DELAY_MS });
-			if (v !== undefined) agent[key] = v;
-		}
+		if (!(key in value)) continue;
+		const parsed = expectInteger(issues, `${path}.${key}`, value[key], { min: 1, max: MAX_TIMER_DELAY_MS });
+		if (parsed !== undefined) agent[key] = parsed;
 	}
 	if ("stallTimeoutMs" in value) {
-		const v = expectInteger(issues, `${path}.stallTimeoutMs`, value.stallTimeoutMs);
-		if (v !== undefined) agent.stallTimeoutMs = v;
+		const parsed = expectInteger(issues, `${path}.stallTimeoutMs`, value.stallTimeoutMs);
+		if (parsed !== undefined) agent.stallTimeoutMs = parsed;
 	}
 	if ("toolGovernance" in value) {
-		const v = expectEnum(issues, `${path}.toolGovernance`, value.toolGovernance, TOOL_GOVERNANCE);
-		if (v !== undefined) agent.toolGovernance = v;
+		const parsed = expectEnum(issues, `${path}.toolGovernance`, value.toolGovernance, TOOL_GOVERNANCE);
+		if (parsed !== undefined) agent.toolGovernance = parsed;
 	}
 	if ("projectContext" in value) {
-		const v = expectEnum(issues, `${path}.projectContext`, value.projectContext, ["none", "bounded"] as const);
-		if (v !== undefined) agent.projectContext = v;
+		const parsed = expectEnum(issues, `${path}.projectContext`, value.projectContext, ["none", "bounded"] as const);
+		if (parsed !== undefined) agent.projectContext = parsed;
 	}
-	if ("cwd" in value) {
-		const v = expectString(issues, `${path}.cwd`, value.cwd);
-		if (v !== undefined) agent.cwd = v;
+	for (const key of ["cwd"] as const) {
+		if (!(key in value)) continue;
+		const parsed = expectString(issues, `${path}.${key}`, value[key]);
+		if (parsed !== undefined) agent[key] = parsed;
 	}
-	if ("env" in value) {
-		const v = expectStringRecord(issues, `${path}.env`, value.env);
-		if (v !== undefined && Object.keys(v).length > 0) agent.env = v;
-	}
-	if ("labels" in value) {
-		const v = expectStringRecord(issues, `${path}.labels`, value.labels);
-		if (v !== undefined && Object.keys(v).length > 0) agent.labels = v;
+	for (const key of ["env", "labels"] as const) {
+		if (!(key in value)) continue;
+		const parsed = expectStringRecord(issues, `${path}.${key}`, value[key]);
+		if (parsed !== undefined && Object.keys(parsed).length > 0) agent[key] = parsed;
 	}
 	return agent;
 }
-
-function validateDelegation(issues: Issues, value: unknown): ClioSettings["delegation"] {
-	const out = cloneValue(DEFAULT_SETTINGS.delegation);
-	if (!isPlainObject(value)) {
-		issues.add("delegation", `expected a map, got ${describe(value)}`);
-		return out;
-	}
-	issues.unknownKeys("delegation", value, ["agents", "defaults"]);
-	if ("defaults" in value) {
-		if (!isPlainObject(value.defaults)) {
-			issues.add("delegation.defaults", `expected a map, got ${describe(value.defaults)}`);
-		} else {
-			issues.unknownKeys("delegation.defaults", value.defaults, [
-				"connectTimeoutMs",
-				"turnTimeoutMs",
-				"permissionTimeoutMs",
-				"toolGovernance",
-			]);
-			for (const key of ["connectTimeoutMs", "turnTimeoutMs", "permissionTimeoutMs"] as const) {
-				if (key in value.defaults) {
-					const v = expectInteger(issues, `delegation.defaults.${key}`, value.defaults[key], {
-						min: 1,
-						max: MAX_TIMER_DELAY_MS,
-					});
-					if (v !== undefined) out.defaults[key] = v;
-				}
-			}
-			if ("toolGovernance" in value.defaults) {
-				const v = expectEnum(issues, "delegation.defaults.toolGovernance", value.defaults.toolGovernance, TOOL_GOVERNANCE);
-				if (v !== undefined) out.defaults.toolGovernance = v;
-			}
-		}
-	}
-	if ("agents" in value) {
-		if (!Array.isArray(value.agents)) {
-			issues.add("delegation.agents", `expected a list, got ${describe(value.agents)}`);
-		} else {
-			const seen = new Set<string>();
-			out.agents = value.agents
-				.map((entry, i) => validateDelegationAgent(issues, `delegation.agents[${i}]`, entry, out.defaults, seen))
-				.filter((entry): entry is NonNullable<typeof entry> => entry !== null);
-		}
-	}
-	return out;
-}
-
-type FleetNodeConfig = ClioSettings["fleet"]["nodes"][number];
 
 function validateFleetNode(issues: Issues, path: string, value: unknown, seen: Set<string>): FleetNodeConfig | null {
 	if (!isPlainObject(value)) {
@@ -825,7 +966,6 @@ function validateFleetNode(issues: Issues, path: string, value: unknown, seen: S
 		"port",
 		"identityFile",
 		"clioCoderEntry",
-		// Pre-0.3.1 spelling, still read.
 		"clioEntry",
 		"labels",
 		"maxWorkers",
@@ -836,197 +976,73 @@ function validateFleetNode(issues: Issues, path: string, value: unknown, seen: S
 	if (!("id" in value)) issues.add(`${path}.id`, "required");
 	if (!("host" in value)) issues.add(`${path}.host`, "required");
 	if (id === undefined || host === undefined) return null;
-	const trimmedId = id.trim();
-	if (trimmedId.length === 0) {
-		issues.add(`${path}.id`, "must not be blank");
-		return null;
-	}
-	if (trimmedId === "local") {
+	if (id === "local") {
 		issues.add(`${path}.id`, "'local' is reserved for the implicit local node");
 		return null;
 	}
-	if (seen.has(trimmedId)) {
-		issues.add(`${path}.id`, `duplicate fleet node id '${trimmedId}'`);
+	if (seen.has(id)) {
+		issues.add(`${path}.id`, `duplicate fleet node id '${id}'`);
 		return null;
 	}
-	seen.add(trimmedId);
-	const node: FleetNodeConfig = { id: trimmedId, host, maxWorkers: 2 };
-	if ("user" in value) {
-		const v = expectString(issues, `${path}.user`, value.user);
-		if (v !== undefined) node.user = v;
+	seen.add(id);
+	const node: FleetNodeConfig = { id, host, maxWorkers: 2 };
+	for (const key of ["user", "identityFile", "clioCoderEntry"] as const) {
+		if (!(key in value)) continue;
+		const parsed = expectString(issues, `${path}.${key}`, value[key]);
+		if (parsed !== undefined) node[key] = parsed;
 	}
 	if ("port" in value) {
-		const v = expectInteger(issues, `${path}.port`, value.port, { min: 1 });
-		if (v !== undefined) node.port = v;
-	}
-	if ("identityFile" in value) {
-		const v = expectString(issues, `${path}.identityFile`, value.identityFile);
-		if (v !== undefined) node.identityFile = v;
-	}
-	// The key was `clioEntry` before 0.3.1. Both spellings read; the new one
-	// wins when a node carries both.
-	if ("clioEntry" in value) {
-		const v = expectString(issues, `${path}.clioEntry`, value.clioEntry);
-		if (v !== undefined) node.clioCoderEntry = v;
-	}
-	if ("clioCoderEntry" in value) {
-		const v = expectString(issues, `${path}.clioCoderEntry`, value.clioCoderEntry);
-		if (v !== undefined) node.clioCoderEntry = v;
+		const parsed = expectInteger(issues, `${path}.port`, value.port, { min: 1 });
+		if (parsed !== undefined) node.port = parsed;
 	}
 	if ("labels" in value) {
-		const v = expectStringArray(issues, `${path}.labels`, value.labels);
-		if (v !== undefined) node.labels = v;
+		const parsed = expectStringArray(issues, `${path}.labels`, value.labels);
+		if (parsed !== undefined) node.labels = parsed;
 	}
 	if ("maxWorkers" in value) {
-		const v = expectInteger(issues, `${path}.maxWorkers`, value.maxWorkers, { min: 1 });
-		if (v !== undefined) node.maxWorkers = v;
+		const parsed = expectInteger(issues, `${path}.maxWorkers`, value.maxWorkers, { min: 1 });
+		if (parsed !== undefined) node.maxWorkers = parsed;
 	}
 	if ("residency" in value) {
-		const v = expectEnum(issues, `${path}.residency`, value.residency, ["observe", "manage"] as const);
-		if (v !== undefined) node.residency = v;
+		const parsed = expectEnum(issues, `${path}.residency`, value.residency, ["observe", "manage"] as const);
+		if (parsed !== undefined) node.residency = parsed;
 	}
 	return node;
 }
 
-function validateFleet(issues: Issues, value: unknown): ClioSettings["fleet"] {
-	const out = cloneValue(DEFAULT_SETTINGS.fleet);
+function validateKeybindings(issues: Issues, path: string, value: unknown): Record<string, string | string[]> {
 	if (!isPlainObject(value)) {
-		issues.add("fleet", `expected a map, got ${describe(value)}`);
-		return out;
-	}
-	issues.unknownKeys("fleet", value, ["nodes"]);
-	if ("nodes" in value) {
-		if (!Array.isArray(value.nodes)) {
-			issues.add("fleet.nodes", `expected a list, got ${describe(value.nodes)}`);
-		} else {
-			const seen = new Set<string>();
-			out.nodes = value.nodes
-				.map((entry, i) => validateFleetNode(issues, `fleet.nodes[${i}]`, entry, seen))
-				.filter((entry): entry is NonNullable<typeof entry> => entry !== null);
-		}
-	}
-	return out;
-}
-
-function validateMemorySettings(issues: Issues, value: unknown): ClioSettings["memory"] {
-	const out = cloneValue(DEFAULT_SETTINGS.memory);
-	if (!isPlainObject(value)) {
-		issues.add("memory", `expected a map, got ${describe(value)}`);
-		return out;
-	}
-	issues.unknownKeys("memory", value, ["intervention"]);
-	if (!("intervention" in value)) return out;
-	if (!isPlainObject(value.intervention)) {
-		issues.add("memory.intervention", `expected a map, got ${describe(value.intervention)}`);
-		return out;
-	}
-	const raw = value.intervention;
-	issues.unknownKeys("memory.intervention", raw, ["enabled", "everyNTools", "windowSteps", "maxTokens", "timeoutMs"]);
-	if ("enabled" in raw) {
-		const enabled = expectBoolean(issues, "memory.intervention.enabled", raw.enabled);
-		if (enabled !== undefined) out.intervention.enabled = enabled;
-	}
-	for (const key of ["everyNTools", "windowSteps", "maxTokens", "timeoutMs"] as const) {
-		if (!(key in raw)) continue;
-		const parsed = expectInteger(issues, `memory.intervention.${key}`, raw[key], {
-			min: key === "everyNTools" ? 2 : 1,
-		});
-		if (parsed !== undefined) out.intervention[key] = parsed;
-	}
-	return out;
-}
-
-/**
- * The watchdog block. `target` and `cadenceToolCalls` stay absent rather than
- * taking sentinel values: an absent target means the session's active target,
- * and an absent cadence means the watchdog fires only at turn end. A written
- * default for either would turn "not configured" into a configuration.
- */
-function validateWatchdogSettings(issues: Issues, value: unknown): ClioSettings["watchdog"] {
-	const out = cloneValue(DEFAULT_SETTINGS.watchdog);
-	if (!isPlainObject(value)) {
-		issues.add("watchdog", `expected a map, got ${describe(value)}`);
-		return out;
-	}
-	issues.unknownKeys("watchdog", value, ["enabled", "target", "cadenceToolCalls"]);
-	if ("enabled" in value) {
-		const enabled = expectBoolean(issues, "watchdog.enabled", value.enabled);
-		if (enabled !== undefined) out.enabled = enabled;
-	}
-	if ("target" in value && value.target !== null) {
-		const target = expectString(issues, "watchdog.target", value.target);
-		if (target !== undefined) {
-			if (target.trim().length === 0) issues.add("watchdog.target", "expected a non-empty target id");
-			else out.target = target.trim();
-		}
-	}
-	if ("cadenceToolCalls" in value && value.cadenceToolCalls !== null) {
-		const cadence = expectInteger(issues, "watchdog.cadenceToolCalls", value.cadenceToolCalls, { min: 1 });
-		if (cadence !== undefined) out.cadenceToolCalls = cadence;
-	}
-	return out;
-}
-
-function validateKeybindings(issues: Issues, value: unknown): ClioSettings["keybindings"] {
-	if (!isPlainObject(value)) {
-		issues.add("keybindings", `expected a map, got ${describe(value)}`);
+		issues.add(path, `expected a map, got ${describe(value)}`);
 		return {};
 	}
 	const next: Record<string, string | string[]> = {};
 	for (const [rawKey, rawValue] of Object.entries(value)) {
 		const id = rawKey.trim();
 		if (!id) {
-			issues.add("keybindings", "empty keybinding id");
+			issues.add(path, "empty keybinding id");
 			continue;
 		}
 		if (typeof rawValue === "string") {
-			const v = expectString(issues, `keybindings.${id}`, rawValue);
-			if (v !== undefined) next[id] = v;
-			continue;
-		}
-		if (Array.isArray(rawValue)) {
-			const v = expectStringArray(issues, `keybindings.${id}`, rawValue);
-			if (v !== undefined && v.length > 0) next[id] = v;
-			continue;
-		}
-		issues.add(`keybindings.${id}`, `expected a string or list of strings, got ${describe(rawValue)}`);
+			const parsed = expectString(issues, `${path}.${id}`, rawValue);
+			if (parsed !== undefined) next[id] = parsed;
+		} else if (Array.isArray(rawValue)) {
+			const parsed = expectStringArray(issues, `${path}.${id}`, rawValue);
+			if (parsed !== undefined && parsed.length > 0) next[id] = parsed;
+		} else issues.add(`${path}.${id}`, `expected a string or list of strings, got ${describe(rawValue)}`);
 	}
 	return next;
 }
 
 const TOP_LEVEL_KEYS = [
 	"version",
-	// Accepted and ignored. Settings files generated before 0.3.1 carry an
-	// `identity:` line for a control nothing ever read; listing it here keeps
-	// those files loading without an unknown-key issue.
-	"identity",
-	"autonomy",
 	"targets",
-	"runtimePlugins",
-	"orchestrator",
-	"background",
-	"memory",
-	"watchdog",
-	"workers",
+	"chat",
 	"fleet",
-	"routing",
-	"scope",
-	"modelSelector",
-	"budget",
-	"defaults",
-	"theme",
-	"terminal",
-	"skills",
-	"library",
-	"attribution",
-	"delegation",
-	"keybindings",
-	"compaction",
 	"context",
-	"prewarm",
-	"panes",
-	"retry",
-	"guardrails",
+	"safety",
+	"interface",
+	"integrations",
+	...V1_ONLY_ROOTS,
 ] as const;
 
 export interface SettingsValidationResult {
@@ -1044,529 +1060,412 @@ export interface SettingsValidationResult {
 export function validateSettings(raw: unknown): SettingsValidationResult {
 	const issues = new Issues();
 	const settings = cloneValue(DEFAULT_SETTINGS);
-	// A genuinely missing settings file falls back to defaults before ever
-	// reaching here (validateSettingsFile returns early when the file is absent).
-	// So a null/undefined raw here means a present-but-empty or `null` document,
-	// which is malformed and must be a root-shape issue, not silent defaults.
 	if (!isPlainObject(raw)) {
 		issues.add("(root)", `expected a map, got ${describe(raw)}`);
 		return { settings, issues: issues.list };
 	}
+	reportV1Tombstones(issues, raw);
 	issues.unknownKeys("", raw, TOP_LEVEL_KEYS);
-
-	if ("version" in raw && raw.version !== 1) {
-		issues.add("version", `expected 1, got ${describe(raw.version)}`);
-	}
-	if ("autonomy" in raw) {
-		const v = expectEnum(issues, "autonomy", raw.autonomy, AUTONOMY_LEVELS);
-		if (v !== undefined) settings.autonomy = v;
+	if ("version" in raw && raw.version !== 2) {
+		issues.add("version", `expected 2, got ${describe(raw.version)}; run \`clio-coder upgrade\` for version 1`);
 	}
 
 	if ("targets" in raw) {
-		if (!Array.isArray(raw.targets)) {
-			issues.add("targets", `expected a list, got ${describe(raw.targets)}`);
-		} else {
+		if (!Array.isArray(raw.targets)) issues.add("targets", `expected a list, got ${describe(raw.targets)}`);
+		else {
 			const seen = new Set<string>();
-			const out: ClioSettings["targets"] = [];
-			for (let i = 0; i < raw.targets.length; i += 1) {
-				const target = validateTarget(issues, `targets[${i}]`, raw.targets[i]);
+			const targets: ClioSettings["targets"] = [];
+			for (let index = 0; index < raw.targets.length; index += 1) {
+				const target = validateTarget(issues, `targets[${index}]`, raw.targets[index]);
 				if (!target) continue;
 				if (seen.has(target.id)) {
-					issues.add(`targets[${i}].id`, `duplicate target id '${target.id}'`);
+					issues.add(`targets[${index}].id`, `duplicate target id '${target.id}'`);
 					continue;
 				}
 				seen.add(target.id);
-				out.push(target);
+				targets.push(target);
 			}
-			settings.targets = out;
+			settings.targets = targets;
 		}
 	}
 
-	if ("runtimePlugins" in raw) {
-		const v = expectStringArray(issues, "runtimePlugins", raw.runtimePlugins);
-		if (v !== undefined) settings.runtimePlugins = v;
-	}
-	if ("library" in raw) {
-		if (!isPlainObject(raw.library)) {
-			issues.add("library", `expected a map, got ${describe(raw.library)}`);
-		} else {
-			issues.unknownKeys("library", raw.library, ["catalog", "remote", "confirmedRemote", "sync"]);
-			for (const key of ["catalog", "remote", "confirmedRemote"] as const) {
-				const value = raw.library[key];
-				if (value === undefined) continue;
-				if (value !== null && typeof value !== "string")
-					issues.add(`library.${key}`, `expected a string or null, got ${describe(value)}`);
-				else settings.library[key] = value as string | null;
+	if ("chat" in raw) {
+		if (!isPlainObject(raw.chat)) issues.add("chat", `expected a map, got ${describe(raw.chat)}`);
+		else {
+			const chat = raw.chat;
+			issues.unknownKeys("chat", chat, [
+				"target",
+				"model",
+				"thinkingLevel",
+				"modelPicker",
+				"maxOutputTokens",
+				"prewarm",
+				"retry",
+			]);
+			const routeInput: Record<string, unknown> = {};
+			for (const key of ["target", "model", "thinkingLevel"] as const) {
+				if (key in chat) routeInput[key] = chat[key];
 			}
-			if (raw.library.sync !== undefined) {
-				if (typeof raw.library.sync !== "boolean")
-					issues.add("library.sync", `expected a boolean, got ${describe(raw.library.sync)}`);
-				else settings.library.sync = raw.library.sync;
+			const route = validateRoute(
+				issues,
+				"chat",
+				routeInput,
+				{ target: settings.chat.target, model: settings.chat.model, thinkingLevel: settings.chat.thinkingLevel },
+				settings.targets,
+			);
+			settings.chat.target = route.target;
+			settings.chat.model = route.model;
+			settings.chat.thinkingLevel = route.thinkingLevel;
+			if ("modelPicker" in chat) {
+				if (!isPlainObject(chat.modelPicker))
+					issues.add("chat.modelPicker", `expected a map, got ${describe(chat.modelPicker)}`);
+				else {
+					issues.unknownKeys("chat.modelPicker", chat.modelPicker, ["cycleSet", "favorites", "recentLimit"]);
+					if ("cycleSet" in chat.modelPicker) {
+						const parsed = expectStringArray(issues, "chat.modelPicker.cycleSet", chat.modelPicker.cycleSet);
+						if (parsed !== undefined) settings.chat.modelPicker.cycleSet = normalizeCycleSet(parsed);
+					}
+					if ("favorites" in chat.modelPicker) {
+						const parsed = expectStringArray(issues, "chat.modelPicker.favorites", chat.modelPicker.favorites);
+						if (parsed !== undefined) settings.chat.modelPicker.favorites = normalizeModelRefs(parsed, settings.targets);
+					}
+					if ("recentLimit" in chat.modelPicker) {
+						const parsed = expectInteger(issues, "chat.modelPicker.recentLimit", chat.modelPicker.recentLimit, { min: 1 });
+						if (parsed !== undefined) settings.chat.modelPicker.recentLimit = parsed;
+					}
+				}
+			}
+			if ("maxOutputTokens" in chat) {
+				const parsed = expectInteger(issues, "chat.maxOutputTokens", chat.maxOutputTokens, { min: 0 });
+				if (parsed !== undefined) settings.chat.maxOutputTokens = parsed;
+			}
+			if ("prewarm" in chat) {
+				const parsed = expectBoolean(issues, "chat.prewarm", chat.prewarm);
+				if (parsed !== undefined) settings.chat.prewarm = parsed;
+			}
+			if ("retry" in chat) {
+				if (!isPlainObject(chat.retry)) issues.add("chat.retry", `expected a map, got ${describe(chat.retry)}`);
+				else {
+					issues.unknownKeys("chat.retry", chat.retry, [
+						"enabled",
+						"maxRetries",
+						"baseDelayMs",
+						"maxDelayMs",
+						"streamStallMs",
+					]);
+					if ("enabled" in chat.retry) {
+						const parsed = expectBoolean(issues, "chat.retry.enabled", chat.retry.enabled);
+						if (parsed !== undefined) settings.chat.retry.enabled = parsed;
+					}
+					for (const key of ["maxRetries", "baseDelayMs", "maxDelayMs", "streamStallMs"] as const) {
+						if (!(key in chat.retry)) continue;
+						const parsed = expectInteger(issues, `chat.retry.${key}`, chat.retry[key], { min: 0 });
+						if (parsed !== undefined) settings.chat.retry[key] = parsed;
+					}
+				}
 			}
 		}
 	}
 
-	if ("orchestrator" in raw) {
-		settings.orchestrator = validateWorkerTarget(
-			issues,
-			"orchestrator",
-			raw.orchestrator,
-			settings.orchestrator,
-			settings.targets,
-		);
-	}
-	if ("background" in raw) {
-		settings.background = validateWorkerTarget(
-			issues,
-			"background",
-			raw.background,
-			settings.background,
-			settings.targets,
-		);
-	}
-	if ("memory" in raw) settings.memory = validateMemorySettings(issues, raw.memory);
-	if ("watchdog" in raw) settings.watchdog = validateWatchdogSettings(issues, raw.watchdog);
-
-	// Fleet nodes validate before workers so profile node pins can be checked
-	// against the configured node ids.
+	let rawFleet: Record<string, unknown> | null = null;
 	if ("fleet" in raw) {
-		settings.fleet = validateFleet(issues, raw.fleet);
-	}
-	const fleetNodeIds = new Set(settings.fleet.nodes.map((node) => node.id));
-
-	if ("routing" in raw) {
-		if (!isPlainObject(raw.routing)) {
-			issues.add("routing", `expected a map, got ${describe(raw.routing)}`);
-		} else {
-			issues.unknownKeys("routing", raw.routing, ["activeRoles", "activePostures", "agentAutomation"]);
-			const activeRoles = expectStringArray(issues, "routing.activeRoles", raw.routing.activeRoles);
-			if (activeRoles !== undefined) {
-				const allowed = new Set<string>(ACTIVE_ROUTING_ROLES);
-				const rawRoles = raw.routing.activeRoles as unknown[];
-				const stringRoles = rawRoles.filter((role): role is string => typeof role === "string");
-				const complete = activeRoles.length === rawRoles.length;
-				for (const role of activeRoles) {
-					if (!allowed.has(role)) issues.add("routing.activeRoles", `unsupported active role '${role}'`);
-				}
-				if (new Set(stringRoles).size !== stringRoles.length) {
-					issues.add("routing.activeRoles", "expected unique roles");
-				}
-				if (complete && activeRoles.every((role) => allowed.has(role))) {
-					settings.routing.activeRoles = activeRoles as typeof settings.routing.activeRoles;
-				}
-			}
-			const activePostures = expectStringArray(issues, "routing.activePostures", raw.routing.activePostures);
-			if (activePostures !== undefined) {
-				const allowed = new Set<string>(ACTIVE_ROUTING_POSTURES);
-				const rawPostures = raw.routing.activePostures as unknown[];
-				const stringPostures = rawPostures.filter((posture): posture is string => typeof posture === "string");
-				const complete = activePostures.length === rawPostures.length;
-				for (const posture of activePostures) {
-					if (!allowed.has(posture)) issues.add("routing.activePostures", `unsupported active posture '${posture}'`);
-				}
-				if (new Set(stringPostures).size !== stringPostures.length) {
-					issues.add("routing.activePostures", "expected unique postures");
-				}
-				if (complete && activePostures.every((posture) => allowed.has(posture))) {
-					settings.routing.activePostures = activePostures as typeof settings.routing.activePostures;
-				}
-			}
-			if (!isPlainObject(raw.routing.agentAutomation)) {
-				issues.add("routing.agentAutomation", "expected a map");
-			} else {
-				const automation = raw.routing.agentAutomation;
-				issues.unknownKeys("routing.agentAutomation", automation, ["activeAgentRoles"]);
-				if (!Array.isArray(automation.activeAgentRoles)) {
-					issues.add("routing.agentAutomation.activeAgentRoles", "expected a list");
-				} else {
-					const pairs: typeof settings.routing.agentAutomation.activeAgentRoles = [];
-					const seen = new Set<string>();
-					for (const [index, value] of automation.activeAgentRoles.entries()) {
-						const path = `routing.agentAutomation.activeAgentRoles[${index}]`;
-						if (!isPlainObject(value)) {
-							issues.add(path, "expected a map");
-							continue;
-						}
-						issues.unknownKeys(path, value, ["agentId", "executionRole"]);
-						const agentId = expectString(issues, `${path}.agentId`, value.agentId);
-						const executionRole = expectEnum(
-							issues,
-							`${path}.executionRole`,
-							value.executionRole,
-							ACTIVE_AGENT_AUTOMATION_ROLES,
-						);
-						if (agentId === "auto") {
-							issues.add(`${path}.agentId`, "'auto' is reserved for coordinator-owned agent selection");
-						}
-						if (agentId === undefined || agentId === "auto" || executionRole === undefined) continue;
-						const key = `${agentId}\u0000${executionRole}`;
-						if (seen.has(key)) {
-							issues.add(path, "duplicate agent and execution-role pair");
-							continue;
-						}
-						seen.add(key);
-						pairs.push({ agentId, executionRole });
-					}
-					if (pairs.length === automation.activeAgentRoles.length) {
-						settings.routing.agentAutomation.activeAgentRoles = pairs;
-					}
-				}
-			}
-		}
-	}
-
-	if ("workers" in raw) {
-		if (!isPlainObject(raw.workers)) {
-			issues.add("workers", `expected a map, got ${describe(raw.workers)}`);
-		} else {
-			issues.unknownKeys("workers", raw.workers, [
+		if (!isPlainObject(raw.fleet)) issues.add("fleet", `expected a map, got ${describe(raw.fleet)}`);
+		else {
+			rawFleet = raw.fleet;
+			issues.unknownKeys("fleet", rawFleet, [
 				"default",
 				"profiles",
 				"rosters",
-				"agentBindings",
-				"maxRetries",
-				"onPermission",
-				"escalation",
-				"resilienceCooldownMs",
+				"agentProfiles",
+				"adaptiveRouting",
+				"nodes",
+				"permissions",
+				"concurrency",
+				"retry",
+				"limits",
+				"history",
 			]);
-			if ("default" in raw.workers) {
-				settings.workers.default = validateWorkerTarget(
-					issues,
-					"workers.default",
-					raw.workers.default,
-					settings.workers.default,
-					settings.targets,
-					{ nodeIds: fleetNodeIds },
-				);
-			}
-			if ("profiles" in raw.workers) {
-				if (!isPlainObject(raw.workers.profiles)) {
-					issues.add("workers.profiles", `expected a map, got ${describe(raw.workers.profiles)}`);
-				} else {
-					const profiles: ClioSettings["workers"]["profiles"] = {};
-					for (const [rawName, rawProfile] of Object.entries(raw.workers.profiles)) {
-						const name = rawName.trim();
-						if (!name) {
-							issues.add("workers.profiles", "empty profile name");
-							continue;
-						}
-						const profile = validateWorkerTarget(
-							issues,
-							`workers.profiles.${name}`,
-							rawProfile,
-							DEFAULT_SETTINGS.workers.default,
-							settings.targets,
-							{ nodeIds: fleetNodeIds },
-						);
-						if (!profile.target) continue;
-						profiles[name] = profile;
+		}
+	}
+	if (rawFleet && "nodes" in rawFleet) {
+		if (!Array.isArray(rawFleet.nodes)) issues.add("fleet.nodes", `expected a list, got ${describe(rawFleet.nodes)}`);
+		else {
+			const seen = new Set<string>();
+			settings.fleet.nodes = rawFleet.nodes
+				.map((entry, index) => validateFleetNode(issues, `fleet.nodes[${index}]`, entry, seen))
+				.filter((entry): entry is FleetNodeConfig => entry !== null);
+		}
+	}
+	const fleetNodeIds = new Set(settings.fleet.nodes.map((node) => node.id));
+	if (rawFleet) {
+		if ("default" in rawFleet) {
+			settings.fleet.default = validateRoute(
+				issues,
+				"fleet.default",
+				rawFleet.default,
+				settings.fleet.default,
+				settings.targets,
+				{
+					nodeIds: fleetNodeIds,
+				},
+			);
+		}
+		if ("profiles" in rawFleet) {
+			if (!isPlainObject(rawFleet.profiles))
+				issues.add("fleet.profiles", `expected a map, got ${describe(rawFleet.profiles)}`);
+			else {
+				const profiles: ClioSettings["fleet"]["profiles"] = {};
+				for (const [rawName, rawProfile] of Object.entries(rawFleet.profiles)) {
+					const name = rawName.trim();
+					if (!name) {
+						issues.add("fleet.profiles", "empty profile name");
+						continue;
 					}
-					settings.workers.profiles = profiles;
+					const profile = validateRoute(
+						issues,
+						`fleet.profiles.${name}`,
+						rawProfile,
+						DEFAULT_SETTINGS.fleet.default,
+						settings.targets,
+						{
+							nodeIds: fleetNodeIds,
+						},
+					);
+					if (profile.target) profiles[name] = profile;
 				}
+				settings.fleet.profiles = profiles;
 			}
-			if ("rosters" in raw.workers) {
-				if (!isPlainObject(raw.workers.rosters)) {
-					issues.add("workers.rosters", `expected a map, got ${describe(raw.workers.rosters)}`);
-				} else {
-					const rosters: ClioSettings["workers"]["rosters"] = {};
-					for (const [rawName, rawRoster] of Object.entries(raw.workers.rosters)) {
-						const name = rawName.trim();
-						const path = `workers.rosters.${name}`;
-						if (!name) {
-							issues.add("workers.rosters", "empty roster name");
+		}
+		if ("rosters" in rawFleet) {
+			if (!isPlainObject(rawFleet.rosters))
+				issues.add("fleet.rosters", `expected a map, got ${describe(rawFleet.rosters)}`);
+			else {
+				const rosters: ClioSettings["fleet"]["rosters"] = {};
+				for (const [rawName, rawRoster] of Object.entries(rawFleet.rosters)) {
+					const name = rawName.trim();
+					const path = `fleet.rosters.${name}`;
+					if (!name) {
+						issues.add("fleet.rosters", "empty roster name");
+						continue;
+					}
+					if (!isPlainObject(rawRoster)) {
+						issues.add(path, `expected a map, got ${describe(rawRoster)}`);
+						continue;
+					}
+					issues.unknownKeys(path, rawRoster, ["members"]);
+					if (!Array.isArray(rawRoster.members)) {
+						issues.add(`${path}.members`, "expected a list");
+						continue;
+					}
+					if (rawRoster.members.length < 2 || rawRoster.members.length > 5)
+						issues.add(`${path}.members`, "expected 2 to 5 members");
+					const members: ClioSettings["fleet"]["rosters"][string]["members"] = [];
+					const labels = new Set<string>();
+					for (const [index, rawMember] of rawRoster.members.entries()) {
+						const memberPath = `${path}.members[${index}]`;
+						if (!isPlainObject(rawMember)) {
+							issues.add(memberPath, `expected a map, got ${describe(rawMember)}`);
 							continue;
 						}
-						if (!isPlainObject(rawRoster)) {
-							issues.add(path, `expected a map, got ${describe(rawRoster)}`);
-							continue;
+						issues.unknownKeys(memberPath, rawMember, ["label", "target", "model", "thinkingLevel", "color"]);
+						const label = expectString(issues, `${memberPath}.label`, rawMember.label);
+						const target = expectString(issues, `${memberPath}.target`, rawMember.target);
+						if (label !== undefined && !COUNCIL_MEMBER_LABEL_PATTERN.test(label))
+							issues.add(`${memberPath}.label`, "expected [a-z][a-z0-9_-]{0,31}");
+						if (label !== undefined && labels.has(label)) issues.add(`${memberPath}.label`, "duplicate label");
+						if (label !== undefined) labels.add(label);
+						if (target !== undefined && !settings.targets.some((entry) => entry.id === target))
+							issues.add(`${memberPath}.target`, `unknown target '${target}'`);
+						const model =
+							rawMember.model === undefined ? undefined : expectString(issues, `${memberPath}.model`, rawMember.model);
+						const thinkingLevel =
+							rawMember.thinkingLevel === undefined
+								? undefined
+								: expectEnum(issues, `${memberPath}.thinkingLevel`, rawMember.thinkingLevel, THINKING_LEVELS);
+						const color =
+							rawMember.color === undefined ? undefined : expectString(issues, `${memberPath}.color`, rawMember.color);
+						if (color !== undefined && !THEME_NAMED_COLORS.includes(color as never) && !/^#[0-9a-fA-F]{6}$/u.test(color)) {
+							issues.add(`${memberPath}.color`, "expected a theme named color or 6-digit hex color");
 						}
-						issues.unknownKeys(path, rawRoster, ["members"]);
-						if (!Array.isArray(rawRoster.members)) {
-							issues.add(`${path}.members`, "expected a list");
-							continue;
-						}
-						if (rawRoster.members.length < 2 || rawRoster.members.length > 5) {
-							issues.add(`${path}.members`, "expected 2 to 5 members");
-						}
-						const members: ClioSettings["workers"]["rosters"][string]["members"] = [];
-						const labels = new Set<string>();
-						for (const [index, rawMember] of rawRoster.members.entries()) {
-							const memberPath = `${path}.members[${index}]`;
-							if (!isPlainObject(rawMember)) {
-								issues.add(memberPath, `expected a map, got ${describe(rawMember)}`);
+						if (label === undefined || target === undefined) continue;
+						members.push({
+							label,
+							target,
+							...(model ? { model } : {}),
+							...(thinkingLevel ? { thinkingLevel } : {}),
+							...(color ? { color } : {}),
+						});
+					}
+					if (rawRoster.members.length >= 2 && rawRoster.members.length <= 5 && members.length === rawRoster.members.length)
+						rosters[name] = { members };
+				}
+				settings.fleet.rosters = rosters;
+			}
+		}
+		if ("agentProfiles" in rawFleet) {
+			if (!isPlainObject(rawFleet.agentProfiles))
+				issues.add("fleet.agentProfiles", `expected a map, got ${describe(rawFleet.agentProfiles)}`);
+			else {
+				const bindings: ClioSettings["fleet"]["agentProfiles"] = {};
+				for (const [rawAgentId, rawProfileName] of Object.entries(rawFleet.agentProfiles)) {
+					const agentId = rawAgentId.trim();
+					if (!agentId) {
+						issues.add("fleet.agentProfiles", "empty agent id");
+						continue;
+					}
+					if (agentId === "auto") {
+						issues.add("fleet.agentProfiles", "'auto' is reserved for coordinator-owned agent selection");
+						continue;
+					}
+					const profile = expectString(issues, `fleet.agentProfiles.${agentId}`, rawProfileName);
+					if (profile !== undefined) bindings[agentId] = profile;
+				}
+				settings.fleet.agentProfiles = bindings;
+			}
+		}
+		if ("adaptiveRouting" in rawFleet) {
+			if (!isPlainObject(rawFleet.adaptiveRouting))
+				issues.add("fleet.adaptiveRouting", `expected a map, got ${describe(rawFleet.adaptiveRouting)}`);
+			else {
+				const adaptive = rawFleet.adaptiveRouting;
+				issues.unknownKeys("fleet.adaptiveRouting", adaptive, ["roles", "postures", "agentRoles"]);
+				for (const [key, allowed] of [
+					["roles", ACTIVE_ROUTING_ROLES],
+					["postures", ACTIVE_ROUTING_POSTURES],
+				] as const) {
+					if (!(key in adaptive)) continue;
+					const parsed = expectStringArray(issues, `fleet.adaptiveRouting.${key}`, adaptive[key]);
+					if (parsed === undefined) continue;
+					const allowedSet = new Set<string>(allowed);
+					for (const value of parsed)
+						if (!allowedSet.has(value))
+							issues.add(`fleet.adaptiveRouting.${key}`, `unsupported ${key === "roles" ? "role" : "posture"} '${value}'`);
+					if (parsed.every((value) => allowedSet.has(value))) settings.fleet.adaptiveRouting[key] = parsed as never;
+				}
+				if ("agentRoles" in adaptive) {
+					if (!Array.isArray(adaptive.agentRoles)) issues.add("fleet.adaptiveRouting.agentRoles", "expected a list");
+					else {
+						const pairs: ClioSettings["fleet"]["adaptiveRouting"]["agentRoles"] = [];
+						const seen = new Set<string>();
+						for (const [index, value] of adaptive.agentRoles.entries()) {
+							const path = `fleet.adaptiveRouting.agentRoles[${index}]`;
+							if (!isPlainObject(value)) {
+								issues.add(path, "expected a map");
 								continue;
 							}
-							issues.unknownKeys(memberPath, rawMember, ["label", "target", "model", "thinking", "color"]);
-							const label = expectString(issues, `${memberPath}.label`, rawMember.label);
-							const target = expectString(issues, `${memberPath}.target`, rawMember.target);
-							if (label !== undefined && !COUNCIL_MEMBER_LABEL_PATTERN.test(label)) {
-								issues.add(`${memberPath}.label`, "expected [a-z][a-z0-9_-]{0,31}");
+							issues.unknownKeys(path, value, ["agentId", "executionRole"]);
+							const agentId = expectString(issues, `${path}.agentId`, value.agentId);
+							const executionRole = expectEnum(
+								issues,
+								`${path}.executionRole`,
+								value.executionRole,
+								ACTIVE_AGENT_AUTOMATION_ROLES,
+							);
+							if (agentId === "auto")
+								issues.add(`${path}.agentId`, "'auto' is reserved for coordinator-owned agent selection");
+							if (agentId === undefined || agentId === "auto" || executionRole === undefined) continue;
+							const pairKey = `${agentId}\u0000${executionRole}`;
+							if (seen.has(pairKey)) {
+								issues.add(path, "duplicate agent and execution-role pair");
+								continue;
 							}
-							if (label !== undefined && labels.has(label)) issues.add(`${memberPath}.label`, "duplicate label");
-							if (label !== undefined) labels.add(label);
-							if (target !== undefined && !settings.targets.some((entry) => entry.id === target)) {
-								issues.add(`${memberPath}.target`, `unknown target '${target}'`);
-							}
-							const model =
-								rawMember.model === undefined ? undefined : expectString(issues, `${memberPath}.model`, rawMember.model);
-							const thinking =
-								rawMember.thinking === undefined
-									? undefined
-									: expectEnum(issues, `${memberPath}.thinking`, rawMember.thinking, THINKING_LEVELS);
-							const color =
-								rawMember.color === undefined ? undefined : expectString(issues, `${memberPath}.color`, rawMember.color);
-							if (color !== undefined && !THEME_NAMED_COLORS.includes(color as never) && !/^#[0-9a-fA-F]{6}$/u.test(color)) {
-								issues.add(`${memberPath}.color`, "expected a theme named color or 6-digit hex color");
-							}
-							if (label === undefined || target === undefined) continue;
-							members.push({
-								label,
-								target,
-								...(model ? { model } : {}),
-								...(thinking ? { thinking } : {}),
-								...(color ? { color } : {}),
-							});
+							seen.add(pairKey);
+							pairs.push({ agentId, executionRole });
 						}
-						if (rawRoster.members.length >= 2 && rawRoster.members.length <= 5 && members.length === rawRoster.members.length)
-							rosters[name] = { members };
+						if (pairs.length === adaptive.agentRoles.length) settings.fleet.adaptiveRouting.agentRoles = pairs;
 					}
-					settings.workers.rosters = rosters;
 				}
 			}
-			if ("agentBindings" in raw.workers) {
-				if (!isPlainObject(raw.workers.agentBindings)) {
-					issues.add("workers.agentBindings", `expected a map, got ${describe(raw.workers.agentBindings)}`);
-				} else {
-					const agentBindings: ClioSettings["workers"]["agentBindings"] = {};
-					for (const [rawAgentId, rawProfileName] of Object.entries(raw.workers.agentBindings)) {
-						const agentId = rawAgentId.trim();
-						if (!agentId) {
-							issues.add("workers.agentBindings", "empty agent id");
-							continue;
+		}
+		if ("permissions" in rawFleet) {
+			if (!isPlainObject(rawFleet.permissions))
+				issues.add("fleet.permissions", `expected a map, got ${describe(rawFleet.permissions)}`);
+			else {
+				issues.unknownKeys("fleet.permissions", rawFleet.permissions, ["mode", "escalation"]);
+				if ("mode" in rawFleet.permissions) {
+					const parsed = expectEnum(issues, "fleet.permissions.mode", rawFleet.permissions.mode, [
+						"deny",
+						"fail",
+						"escalate",
+					] as const);
+					if (parsed !== undefined) settings.fleet.permissions.mode = parsed;
+				}
+				if ("escalation" in rawFleet.permissions) {
+					if (!isPlainObject(rawFleet.permissions.escalation))
+						issues.add("fleet.permissions.escalation", `expected a map, got ${describe(rawFleet.permissions.escalation)}`);
+					else {
+						const escalation = rawFleet.permissions.escalation;
+						issues.unknownKeys("fleet.permissions.escalation", escalation, ["timeoutMs", "fallback"]);
+						if ("timeoutMs" in escalation) {
+							const parsed = expectInteger(issues, "fleet.permissions.escalation.timeoutMs", escalation.timeoutMs, { min: 1 });
+							if (parsed !== undefined) settings.fleet.permissions.escalation.timeoutMs = parsed;
 						}
-						if (agentId === "auto") {
-							issues.add("workers.agentBindings", "'auto' is reserved for coordinator-owned agent selection");
-							continue;
+						if ("fallback" in escalation) {
+							const parsed = expectEnum(issues, "fleet.permissions.escalation.fallback", escalation.fallback, [
+								"deny",
+								"fail",
+							] as const);
+							if (parsed !== undefined) settings.fleet.permissions.escalation.fallback = parsed;
 						}
-						const profileName = expectString(issues, `workers.agentBindings.${agentId}`, rawProfileName);
-						if (profileName !== undefined) agentBindings[agentId] = profileName;
 					}
-					settings.workers.agentBindings = agentBindings;
-				}
-			}
-			if ("maxRetries" in raw.workers) {
-				const v = expectInteger(issues, "workers.maxRetries", raw.workers.maxRetries, { min: 0 });
-				if (v !== undefined) settings.workers.maxRetries = v;
-			}
-			if ("onPermission" in raw.workers) {
-				const v = expectEnum(issues, "workers.onPermission", raw.workers.onPermission, [
-					"deny",
-					"fail",
-					"escalate",
-				] as const);
-				if (v !== undefined) settings.workers.onPermission = v;
-			}
-			if ("escalation" in raw.workers) {
-				if (!isPlainObject(raw.workers.escalation)) {
-					issues.add("workers.escalation", `expected a map, got ${describe(raw.workers.escalation)}`);
-				} else {
-					const base = settings.workers.escalation ?? DEFAULT_SETTINGS.workers.escalation;
-					const escalation = { timeoutMs: base?.timeoutMs ?? 120000, fallback: base?.fallback ?? "deny" };
-					issues.unknownKeys("workers.escalation", raw.workers.escalation, ["timeoutMs", "fallback"]);
-					if ("timeoutMs" in raw.workers.escalation) {
-						const v = expectInteger(issues, "workers.escalation.timeoutMs", raw.workers.escalation.timeoutMs, {
-							min: 1,
-						});
-						if (v !== undefined) escalation.timeoutMs = v;
-					}
-					if ("fallback" in raw.workers.escalation) {
-						const v = expectEnum(issues, "workers.escalation.fallback", raw.workers.escalation.fallback, [
-							"deny",
-							"fail",
-						] as const);
-						if (v !== undefined) escalation.fallback = v;
-					}
-					settings.workers.escalation = escalation;
-				}
-			}
-			if ("resilienceCooldownMs" in raw.workers) {
-				const v = expectInteger(issues, "workers.resilienceCooldownMs", raw.workers.resilienceCooldownMs, { min: 0 });
-				if (v !== undefined) settings.workers.resilienceCooldownMs = v;
-			}
-		}
-	}
-
-	if ("scope" in raw) {
-		const v = expectStringArray(issues, "scope", raw.scope);
-		if (v !== undefined) settings.scope = normalizeScope(v);
-	}
-
-	if ("modelSelector" in raw) {
-		if (!isPlainObject(raw.modelSelector)) {
-			issues.add("modelSelector", `expected a map, got ${describe(raw.modelSelector)}`);
-		} else {
-			issues.unknownKeys("modelSelector", raw.modelSelector, ["favorites", "recentLimit"]);
-			if ("favorites" in raw.modelSelector) {
-				const v = expectStringArray(issues, "modelSelector.favorites", raw.modelSelector.favorites);
-				if (v !== undefined) settings.modelSelector.favorites = normalizeModelRefs(v, settings.targets);
-			}
-			if ("recentLimit" in raw.modelSelector) {
-				const v = expectInteger(issues, "modelSelector.recentLimit", raw.modelSelector.recentLimit, { min: 1 });
-				if (v !== undefined) settings.modelSelector.recentLimit = v;
-			}
-		}
-	}
-
-	if ("budget" in raw) {
-		if (!isPlainObject(raw.budget)) {
-			issues.add("budget", `expected a map, got ${describe(raw.budget)}`);
-		} else {
-			issues.unknownKeys("budget", raw.budget, ["sessionCeilingUsd", "concurrency"]);
-			if ("sessionCeilingUsd" in raw.budget) {
-				const v = expectNumber(issues, "budget.sessionCeilingUsd", raw.budget.sessionCeilingUsd, { min: 0 });
-				if (v !== undefined) settings.budget.sessionCeilingUsd = v;
-			}
-			if ("concurrency" in raw.budget) {
-				if (raw.budget.concurrency === "auto") {
-					settings.budget.concurrency = "auto";
-				} else {
-					const v = expectInteger(issues, "budget.concurrency", raw.budget.concurrency, { min: 1 });
-					if (v !== undefined) settings.budget.concurrency = v;
 				}
 			}
 		}
-	}
-
-	if ("defaults" in raw) {
-		if (!isPlainObject(raw.defaults)) {
-			issues.add("defaults", `expected a map, got ${describe(raw.defaults)}`);
-		} else {
-			issues.unknownKeys("defaults", raw.defaults, ["maxTokens"]);
-			if ("maxTokens" in raw.defaults) {
-				const v = expectInteger(issues, "defaults.maxTokens", raw.defaults.maxTokens, { min: 0 });
-				if (v !== undefined) settings.defaults.maxTokens = v;
+		if ("concurrency" in rawFleet) {
+			if (rawFleet.concurrency === "auto") settings.fleet.concurrency = "auto";
+			else {
+				const parsed = expectInteger(issues, "fleet.concurrency", rawFleet.concurrency, { min: 1 });
+				if (parsed !== undefined) settings.fleet.concurrency = parsed;
 			}
 		}
-	}
-
-	if ("theme" in raw) {
-		const v = expectString(issues, "theme", raw.theme);
-		if (v !== undefined) settings.theme = v;
-	}
-
-	if ("terminal" in raw) {
-		if (!isPlainObject(raw.terminal)) {
-			issues.add("terminal", `expected a map, got ${describe(raw.terminal)}`);
-		} else {
-			issues.unknownKeys("terminal", raw.terminal, [
-				"showTerminalProgress",
-				"outputVerbosity",
-				"tuiMode",
-				"fullscreenScrollbar",
-				"smoothStreaming",
-				"notify",
-			]);
-			if ("showTerminalProgress" in raw.terminal) {
-				const v = expectBoolean(issues, "terminal.showTerminalProgress", raw.terminal.showTerminalProgress);
-				if (v !== undefined) settings.terminal.showTerminalProgress = v;
+		for (const [blockName, fields] of [
+			[
+				"retry",
+				[
+					["maxRetries", 0],
+					["routeCooldownMs", 0],
+				],
+			],
+			[
+				"limits",
+				[
+					["toolCallsPerRun", 1],
+					["internalRunTimeoutMs", 1],
+				],
+			],
+			["history", [["maxRuns", 1]]],
+		] as const) {
+			if (!(blockName in rawFleet)) continue;
+			const block = rawFleet[blockName];
+			if (!isPlainObject(block)) {
+				issues.add(`fleet.${blockName}`, `expected a map, got ${describe(block)}`);
+				continue;
 			}
-			if ("outputVerbosity" in raw.terminal) {
-				const v = expectString(issues, "terminal.outputVerbosity", raw.terminal.outputVerbosity);
-				if (v === "minimal" || v === "default" || v === "verbose") settings.terminal.outputVerbosity = v;
-				else if (v !== undefined) issues.add("terminal.outputVerbosity", "expected minimal, default, or verbose");
+			const known = fields.map(([key]) => key);
+			if (blockName === "history") known.push("journal" as never);
+			issues.unknownKeys(`fleet.${blockName}`, block, known);
+			for (const [key, min] of fields) {
+				if (!(key in block)) continue;
+				const parsed = expectInteger(issues, `fleet.${blockName}.${key}`, block[key], { min });
+				if (parsed !== undefined) (settings.fleet[blockName] as unknown as Record<string, unknown>)[key] = parsed;
 			}
-			if ("tuiMode" in raw.terminal) {
-				const v = expectString(issues, "terminal.tuiMode", raw.terminal.tuiMode);
-				if (v === "regular" || v === "fullscreen") settings.terminal.tuiMode = v;
-				else if (v !== undefined) issues.add("terminal.tuiMode", "expected regular or fullscreen");
-			}
-			if ("fullscreenScrollbar" in raw.terminal) {
-				const v = expectString(issues, "terminal.fullscreenScrollbar", raw.terminal.fullscreenScrollbar);
-				if (v === "hidden" || v === "auto" || v === "always") settings.terminal.fullscreenScrollbar = v;
-				else if (v !== undefined) issues.add("terminal.fullscreenScrollbar", "expected hidden, auto, or always");
-			}
-			if ("smoothStreaming" in raw.terminal) {
-				const v = expectString(issues, "terminal.smoothStreaming", raw.terminal.smoothStreaming);
-				if (v === "off" || v === "auto" || v === "on") settings.terminal.smoothStreaming = v;
-				else if (v !== undefined) issues.add("terminal.smoothStreaming", "expected off, auto, or on");
-			}
-			if ("notify" in raw.terminal) {
-				const v = expectBoolean(issues, "terminal.notify", raw.terminal.notify);
-				if (v !== undefined) settings.terminal.notify = v;
-			}
-		}
-	}
-
-	if ("skills" in raw) {
-		if (!isPlainObject(raw.skills)) {
-			issues.add("skills", `expected a map, got ${describe(raw.skills)}`);
-		} else {
-			issues.unknownKeys("skills", raw.skills, ["trustProjectCompatRoots"]);
-			if ("trustProjectCompatRoots" in raw.skills) {
-				const v = expectBoolean(issues, "skills.trustProjectCompatRoots", raw.skills.trustProjectCompatRoots);
-				if (v !== undefined) settings.skills.trustProjectCompatRoots = v;
-			}
-		}
-	}
-
-	if ("attribution" in raw) {
-		if (!isPlainObject(raw.attribution)) {
-			issues.add("attribution", `expected a map, got ${describe(raw.attribution)}`);
-		} else {
-			issues.unknownKeys("attribution", raw.attribution, ["gitCommits"]);
-			if ("gitCommits" in raw.attribution) {
-				const v = expectBoolean(issues, "attribution.gitCommits", raw.attribution.gitCommits);
-				if (v !== undefined) settings.attribution.gitCommits = v;
-			}
-		}
-	}
-
-	if ("delegation" in raw) {
-		settings.delegation = validateDelegation(issues, raw.delegation);
-	}
-
-	if ("keybindings" in raw) {
-		settings.keybindings = validateKeybindings(issues, raw.keybindings);
-	}
-
-	if ("compaction" in raw) {
-		if (!isPlainObject(raw.compaction)) {
-			issues.add("compaction", `expected a map, got ${describe(raw.compaction)}`);
-		} else {
-			issues.unknownKeys("compaction", raw.compaction, ["auto", "threshold", "excludeLastTurns", "model", "systemPrompt"]);
-			if ("auto" in raw.compaction) {
-				const v = expectBoolean(issues, "compaction.auto", raw.compaction.auto);
-				if (v !== undefined) settings.compaction.auto = v;
-			}
-			if ("threshold" in raw.compaction) {
-				const v = expectNumber(issues, "compaction.threshold", raw.compaction.threshold, { min: 0, max: 1 });
-				if (v !== undefined) settings.compaction.threshold = v;
-			}
-			if ("excludeLastTurns" in raw.compaction) {
-				const v = expectInteger(issues, "compaction.excludeLastTurns", raw.compaction.excludeLastTurns, { min: 1 });
-				if (v !== undefined) settings.compaction.excludeLastTurns = v;
-			}
-			if ("model" in raw.compaction) {
-				const v = expectString(issues, "compaction.model", raw.compaction.model);
-				if (v !== undefined) settings.compaction.model = v;
-			}
-			if ("systemPrompt" in raw.compaction) {
-				const v = expectString(issues, "compaction.systemPrompt", raw.compaction.systemPrompt);
-				if (v !== undefined) settings.compaction.systemPrompt = v;
+			if (blockName === "history" && "journal" in block) {
+				const parsed = expectBoolean(issues, "fleet.history.journal", block.journal);
+				if (parsed !== undefined) settings.fleet.history.journal = parsed;
 			}
 		}
 	}
 
 	if ("context" in raw) {
-		if (!isPlainObject(raw.context)) {
-			issues.add("context", `expected a map, got ${describe(raw.context)}`);
-		} else {
-			issues.unknownKeys("context", raw.context, ["workingSet"]);
-			if ("workingSet" in raw.context) {
-				if (!isPlainObject(raw.context.workingSet)) {
-					issues.add("context.workingSet", `expected a map, got ${describe(raw.context.workingSet)}`);
-				} else {
-					const workingSet = raw.context.workingSet;
+		if (!isPlainObject(raw.context)) issues.add("context", `expected a map, got ${describe(raw.context)}`);
+		else {
+			const context = raw.context;
+			issues.unknownKeys("context", context, ["workingSet", "compaction", "memory"]);
+			if ("workingSet" in context) {
+				if (!isPlainObject(context.workingSet))
+					issues.add("context.workingSet", `expected a map, got ${describe(context.workingSet)}`);
+				else {
+					const workingSet = context.workingSet;
 					issues.unknownKeys("context.workingSet", workingSet, [
 						"enabled",
 						"policy",
@@ -1575,141 +1474,361 @@ export function validateSettings(raw: unknown): SettingsValidationResult {
 						"minEvictableTokens",
 					]);
 					if ("enabled" in workingSet) {
-						const v = expectBoolean(issues, "context.workingSet.enabled", workingSet.enabled);
-						if (v !== undefined) settings.context.workingSet.enabled = v;
+						const parsed = expectBoolean(issues, "context.workingSet.enabled", workingSet.enabled);
+						if (parsed !== undefined) settings.context.workingSet.enabled = parsed;
 					}
 					if ("policy" in workingSet) {
-						const v = expectEnum(issues, "context.workingSet.policy", workingSet.policy, [
+						const parsed = expectEnum(issues, "context.workingSet.policy", workingSet.policy, [
 							"age-horizon",
 							"structural-v1",
 						] as const);
-						if (v !== undefined) settings.context.workingSet.policy = v;
+						if (parsed !== undefined) settings.context.workingSet.policy = parsed;
 					}
 					if ("target" in workingSet) {
-						const v = expectNumber(issues, "context.workingSet.target", workingSet.target);
-						if (v !== undefined && (v <= 0 || v >= 1)) {
-							issues.add("context.workingSet.target", `expected a number > 0 and < 1, got ${v}`);
-						} else if (v !== undefined) {
-							settings.context.workingSet.target = v;
+						const parsed = expectNumber(issues, "context.workingSet.target", workingSet.target);
+						if (parsed !== undefined && (parsed <= 0 || parsed >= 1))
+							issues.add("context.workingSet.target", `expected a number > 0 and < 1, got ${parsed}`);
+						else if (parsed !== undefined) settings.context.workingSet.target = parsed;
+					}
+					for (const [key, min] of [
+						["protectLastTurns", 1],
+						["minEvictableTokens", 0],
+					] as const) {
+						if (!(key in workingSet)) continue;
+						const parsed = expectInteger(issues, `context.workingSet.${key}`, workingSet[key], { min });
+						if (parsed !== undefined) settings.context.workingSet[key] = parsed;
+					}
+				}
+			}
+			if ("compaction" in context) {
+				if (!isPlainObject(context.compaction))
+					issues.add("context.compaction", `expected a map, got ${describe(context.compaction)}`);
+				else {
+					const compaction = context.compaction;
+					issues.unknownKeys("context.compaction", compaction, [
+						"auto",
+						"threshold",
+						"model",
+						"systemPrompt",
+						"excludeLastTurns",
+					]);
+					if ("excludeLastTurns" in compaction)
+						issues.add(
+							"context.compaction.excludeLastTurns",
+							"retired without replacement; use context.workingSet.protectLastTurns",
+						);
+					if ("auto" in compaction) {
+						const parsed = expectBoolean(issues, "context.compaction.auto", compaction.auto);
+						if (parsed !== undefined) settings.context.compaction.auto = parsed;
+					}
+					if ("threshold" in compaction) {
+						const parsed = expectNumber(issues, "context.compaction.threshold", compaction.threshold, { min: 0, max: 1 });
+						if (parsed !== undefined) settings.context.compaction.threshold = parsed;
+					}
+					for (const key of ["model", "systemPrompt"] as const) {
+						if (!(key in compaction)) continue;
+						const parsed = expectString(issues, `context.compaction.${key}`, compaction[key]);
+						if (parsed !== undefined) settings.context.compaction[key] = parsed;
+					}
+				}
+			}
+			if ("memory" in context) {
+				if (!isPlainObject(context.memory)) issues.add("context.memory", `expected a map, got ${describe(context.memory)}`);
+				else {
+					const memory = context.memory;
+					issues.unknownKeys("context.memory", memory, [
+						"enabled",
+						"target",
+						"model",
+						"cadenceToolCalls",
+						"trajectorySteps",
+						"maxOutputTokens",
+						"timeoutMs",
+					]);
+					if ("enabled" in memory) {
+						const parsed = expectBoolean(issues, "context.memory.enabled", memory.enabled);
+						if (parsed !== undefined) settings.context.memory.enabled = parsed;
+					}
+					if ("target" in memory) {
+						if (memory.target === null) settings.context.memory.target = null;
+						else {
+							const parsed = expectString(issues, "context.memory.target", memory.target);
+							if (parsed !== undefined)
+								settings.context.memory.target = settings.targets.some((target) => target.id === parsed) ? parsed : null;
 						}
 					}
-					if ("protectLastTurns" in workingSet) {
-						const v = expectInteger(issues, "context.workingSet.protectLastTurns", workingSet.protectLastTurns, {
-							min: 1,
-						});
-						if (v !== undefined) settings.context.workingSet.protectLastTurns = v;
+					if ("model" in memory) {
+						if (memory.model === null) settings.context.memory.model = null;
+						else {
+							const parsed = expectString(issues, "context.memory.model", memory.model);
+							if (parsed !== undefined) settings.context.memory.model = parsed;
+						}
 					}
-					if ("minEvictableTokens" in workingSet) {
-						const v = expectInteger(issues, "context.workingSet.minEvictableTokens", workingSet.minEvictableTokens, {
-							min: 0,
-						});
-						if (v !== undefined) settings.context.workingSet.minEvictableTokens = v;
-					}
-				}
-			}
-		}
-	}
-
-	if ("prewarm" in raw) {
-		if (!isPlainObject(raw.prewarm)) {
-			issues.add("prewarm", `expected a map, got ${describe(raw.prewarm)}`);
-		} else {
-			issues.unknownKeys("prewarm", raw.prewarm, ["enabled"]);
-			if ("enabled" in raw.prewarm) {
-				const v = expectBoolean(issues, "prewarm.enabled", raw.prewarm.enabled);
-				if (v !== undefined) settings.prewarm.enabled = v;
-			}
-		}
-	}
-
-	if ("panes" in raw) {
-		if (!isPlainObject(raw.panes)) {
-			issues.add("panes", `expected a map, got ${describe(raw.panes)}`);
-		} else {
-			// `agents` and `keepFailed` are retired: pane-opening is no longer a
-			// per-dispatch policy. They were accepted-and-ignored through the 0.4.0
-			// migration, which meant a settings file could keep naming a policy
-			// nothing read and never hear about it. They are refused by name now,
-			// which is what the rest of this schema does with a key it cannot honor.
-			issues.retiredKeys("panes", raw.panes, {
-				agents: "pane opening is no longer a per-dispatch policy; one operator-pulled watch pane replaced it",
-				keepFailed: "a pane's lifetime is no longer tied to its run's outcome",
-			});
-			issues.unknownKeys("panes", raw.panes, ["enabled", "agents", "keepFailed", "notifications", "journal", "yazi"]);
-			if ("enabled" in raw.panes) {
-				const v = expectEnum(issues, "panes.enabled", raw.panes.enabled, ["auto", "embedded", "off"] as const);
-				if (v !== undefined) settings.panes.enabled = v;
-			}
-			if ("notifications" in raw.panes) {
-				const v = expectEnum(issues, "panes.notifications", raw.panes.notifications, ["failures", "all", "off"] as const);
-				if (v !== undefined) settings.panes.notifications = v;
-			}
-			if ("journal" in raw.panes) {
-				const v = expectBoolean(issues, "panes.journal", raw.panes.journal);
-				if (v !== undefined) settings.panes.journal = v;
-			}
-			if ("yazi" in raw.panes) {
-				if (!isPlainObject(raw.panes.yazi)) {
-					issues.add("panes.yazi", `expected a map, got ${describe(raw.panes.yazi)}`);
-				} else {
-					const yazi = raw.panes.yazi;
-					issues.unknownKeys("panes.yazi", yazi, ["enabled", "mode", "profile", "followCwd"]);
-					if ("enabled" in yazi) {
-						const v = expectBoolean(issues, "panes.yazi.enabled", yazi.enabled);
-						if (v !== undefined) settings.panes.yazi.enabled = v;
-					}
-					if ("mode" in yazi) {
-						const v = expectEnum(issues, "panes.yazi.mode", yazi.mode, ["companion", "chooser"] as const);
-						if (v !== undefined) settings.panes.yazi.mode = v;
-					}
-					if ("profile" in yazi) {
-						const v = expectEnum(issues, "panes.yazi.profile", yazi.profile, ["managed", "user"] as const);
-						if (v !== undefined) settings.panes.yazi.profile = v;
-					}
-					if ("followCwd" in yazi) {
-						const v = expectBoolean(issues, "panes.yazi.followCwd", yazi.followCwd);
-						if (v !== undefined) settings.panes.yazi.followCwd = v;
+					if (!settings.context.memory.target) settings.context.memory.model = null;
+					else if (settings.context.memory.model === null)
+						settings.context.memory.model =
+							settings.targets.find((target) => target.id === settings.context.memory.target)?.defaultModel ?? null;
+					for (const [key, min] of [
+						["cadenceToolCalls", 2],
+						["trajectorySteps", 1],
+						["maxOutputTokens", 1],
+						["timeoutMs", 1],
+					] as const) {
+						if (!(key in memory)) continue;
+						const parsed = expectInteger(issues, `context.memory.${key}`, memory[key], { min });
+						if (parsed !== undefined) settings.context.memory[key] = parsed;
 					}
 				}
 			}
 		}
 	}
 
-	if ("retry" in raw) {
-		if (!isPlainObject(raw.retry)) {
-			issues.add("retry", `expected a map, got ${describe(raw.retry)}`);
-		} else {
-			issues.unknownKeys("retry", raw.retry, ["enabled", "maxRetries", "baseDelayMs", "maxDelayMs", "streamStallMs"]);
-			if ("enabled" in raw.retry) {
-				const v = expectBoolean(issues, "retry.enabled", raw.retry.enabled);
-				if (v !== undefined) settings.retry.enabled = v;
+	if ("safety" in raw) {
+		if (!isPlainObject(raw.safety)) issues.add("safety", `expected a map, got ${describe(raw.safety)}`);
+		else {
+			const safety = raw.safety;
+			issues.unknownKeys("safety", safety, ["autonomy", "limits", "review"]);
+			if ("autonomy" in safety) {
+				const parsed = expectEnum(issues, "safety.autonomy", safety.autonomy, AUTONOMY_LEVELS);
+				if (parsed !== undefined) settings.safety.autonomy = parsed;
 			}
-			for (const key of ["maxRetries", "baseDelayMs", "maxDelayMs", "streamStallMs"] as const) {
-				if (key in raw.retry) {
-					const v = expectInteger(issues, `retry.${key}`, raw.retry[key], { min: 0 });
-					if (v !== undefined) settings.retry[key] = v;
+			if ("limits" in safety) {
+				if (!isPlainObject(safety.limits)) issues.add("safety.limits", `expected a map, got ${describe(safety.limits)}`);
+				else {
+					const limits = safety.limits;
+					issues.unknownKeys("safety.limits", limits, [
+						"sessionCostUsd",
+						"chatToolCallsPerTurn",
+						"readBytesPerCall",
+						"observationBytesPerTurn",
+					]);
+					if ("sessionCostUsd" in limits) {
+						const parsed = expectNumber(issues, "safety.limits.sessionCostUsd", limits.sessionCostUsd, { min: 0 });
+						if (parsed !== undefined) settings.safety.limits.sessionCostUsd = parsed;
+					}
+					for (const key of ["chatToolCallsPerTurn", "readBytesPerCall", "observationBytesPerTurn"] as const) {
+						if (!(key in limits)) continue;
+						const parsed = expectInteger(issues, `safety.limits.${key}`, limits[key], { min: 1 });
+						if (parsed !== undefined) settings.safety.limits[key] = parsed;
+					}
+				}
+			}
+			if ("review" in safety) {
+				if (!isPlainObject(safety.review)) issues.add("safety.review", `expected a map, got ${describe(safety.review)}`);
+				else {
+					const review = safety.review;
+					issues.unknownKeys("safety.review", review, ["enabled", "target", "cadenceToolCalls"]);
+					if ("enabled" in review) {
+						const parsed = expectBoolean(issues, "safety.review.enabled", review.enabled);
+						if (parsed !== undefined) settings.safety.review.enabled = parsed;
+					}
+					if ("target" in review && review.target !== null) {
+						const parsed = expectString(issues, "safety.review.target", review.target);
+						if (parsed !== undefined && settings.targets.some((target) => target.id === parsed))
+							settings.safety.review.target = parsed;
+						else if (parsed !== undefined) issues.add("safety.review.target", `unknown target '${parsed}'`);
+					}
+					if ("cadenceToolCalls" in review && review.cadenceToolCalls !== null) {
+						const parsed = expectInteger(issues, "safety.review.cadenceToolCalls", review.cadenceToolCalls, { min: 1 });
+						if (parsed !== undefined) settings.safety.review.cadenceToolCalls = parsed;
+					}
 				}
 			}
 		}
 	}
 
-	if ("guardrails" in raw) {
-		if (!isPlainObject(raw.guardrails)) {
-			issues.add("guardrails", `expected a map, got ${describe(raw.guardrails)}`);
-		} else {
-			const keys = [
-				"turnToolCallBudget",
-				"workerToolCallCap",
-				"maxDispatchRuns",
-				"readMaxBytes",
-				"observationTurnBudgetBytes",
-				"internalDispatchTimeoutMs",
-			] as const;
-			issues.unknownKeys("guardrails", raw.guardrails, keys);
-			for (const key of keys) {
-				if (key in raw.guardrails) {
-					const v = expectInteger(issues, `guardrails.${key}`, raw.guardrails[key], { min: 1 });
-					if (v !== undefined) settings.guardrails[key] = v;
+	if ("interface" in raw) {
+		if (!isPlainObject(raw.interface)) issues.add("interface", `expected a map, got ${describe(raw.interface)}`);
+		else {
+			const ui = raw.interface;
+			issues.unknownKeys("interface", ui, [
+				"outputDetail",
+				"smoothStreaming",
+				"mode",
+				"fullscreenScrollbar",
+				"terminalProgress",
+				"desktopNotifications",
+				"panes",
+				"keybindings",
+			]);
+			for (const key of ["terminalProgress", "desktopNotifications"] as const) {
+				if (!(key in ui)) continue;
+				const parsed = expectBoolean(issues, `interface.${key}`, ui[key]);
+				if (parsed !== undefined) (settings.interface as unknown as Record<string, unknown>)[key] = parsed;
+			}
+			for (const [key, allowed] of [
+				["outputDetail", ["minimal", "default", "verbose"]],
+				["smoothStreaming", ["off", "auto", "on"]],
+				["mode", ["regular", "fullscreen"]],
+				["fullscreenScrollbar", ["hidden", "auto", "always"]],
+			] as const) {
+				if (!(key in ui)) continue;
+				const parsed = expectEnum(issues, `interface.${key}`, ui[key], allowed);
+				if (parsed !== undefined) (settings.interface as unknown as Record<string, unknown>)[key] = parsed;
+			}
+			if ("panes" in ui) {
+				if (!isPlainObject(ui.panes)) issues.add("interface.panes", `expected a map, got ${describe(ui.panes)}`);
+				else {
+					const panes = ui.panes;
+					issues.retiredKeys("interface.panes", panes, {
+						agents: "pane opening is no longer a per-dispatch policy",
+						keepFailed: "pane lifetime is no longer tied to run outcome",
+					});
+					issues.unknownKeys("interface.panes", panes, ["enabled", "notifications", "files", "agents", "keepFailed"]);
+					if ("enabled" in panes) {
+						const parsed = expectEnum(issues, "interface.panes.enabled", panes.enabled, ["auto", "embedded", "off"] as const);
+						if (parsed !== undefined) settings.interface.panes.enabled = parsed;
+					}
+					if ("notifications" in panes) {
+						const parsed = expectEnum(issues, "interface.panes.notifications", panes.notifications, [
+							"failures",
+							"all",
+							"off",
+						] as const);
+						if (parsed !== undefined) settings.interface.panes.notifications = parsed;
+					}
+					if ("files" in panes) {
+						if (!isPlainObject(panes.files))
+							issues.add("interface.panes.files", `expected a map, got ${describe(panes.files)}`);
+						else {
+							const files = panes.files;
+							issues.unknownKeys("interface.panes.files", files, ["enabled", "mode", "profile", "followCwd"]);
+							for (const key of ["enabled", "followCwd"] as const) {
+								if (!(key in files)) continue;
+								const parsed = expectBoolean(issues, `interface.panes.files.${key}`, files[key]);
+								if (parsed !== undefined) settings.interface.panes.files[key] = parsed;
+							}
+							if ("mode" in files) {
+								const parsed = expectEnum(issues, "interface.panes.files.mode", files.mode, ["companion", "chooser"] as const);
+								if (parsed !== undefined) settings.interface.panes.files.mode = parsed;
+							}
+							if ("profile" in files) {
+								const parsed = expectEnum(issues, "interface.panes.files.profile", files.profile, ["managed", "user"] as const);
+								if (parsed !== undefined) settings.interface.panes.files.profile = parsed;
+							}
+						}
+					}
+				}
+			}
+			if ("keybindings" in ui)
+				settings.interface.keybindings = validateKeybindings(issues, "interface.keybindings", ui.keybindings);
+		}
+	}
+
+	if ("integrations" in raw) {
+		if (!isPlainObject(raw.integrations)) issues.add("integrations", `expected a map, got ${describe(raw.integrations)}`);
+		else {
+			const integrations = raw.integrations;
+			issues.unknownKeys("integrations", integrations, [
+				"projectResources",
+				"externalAgents",
+				"runtimePlugins",
+				"library",
+				"git",
+			]);
+			if ("projectResources" in integrations) {
+				if (!isPlainObject(integrations.projectResources))
+					issues.add("integrations.projectResources", `expected a map, got ${describe(integrations.projectResources)}`);
+				else {
+					issues.unknownKeys("integrations.projectResources", integrations.projectResources, ["trustProjectImports"]);
+					if ("trustProjectImports" in integrations.projectResources) {
+						const parsed = expectBoolean(
+							issues,
+							"integrations.projectResources.trustProjectImports",
+							integrations.projectResources.trustProjectImports,
+						);
+						if (parsed !== undefined) settings.integrations.projectResources.trustProjectImports = parsed;
+					}
+				}
+			}
+			if ("runtimePlugins" in integrations) {
+				const parsed = expectStringArray(issues, "integrations.runtimePlugins", integrations.runtimePlugins);
+				if (parsed !== undefined) settings.integrations.runtimePlugins = parsed;
+			}
+			if ("library" in integrations) {
+				if (!isPlainObject(integrations.library))
+					issues.add("integrations.library", `expected a map, got ${describe(integrations.library)}`);
+				else {
+					const library = integrations.library;
+					issues.unknownKeys("integrations.library", library, ["catalog", "remote", "confirmedRemote", "sync"]);
+					for (const key of ["catalog", "remote", "confirmedRemote"] as const) {
+						if (!(key in library)) continue;
+						const value = library[key];
+						if (value !== null && typeof value !== "string")
+							issues.add(`integrations.library.${key}`, `expected a string or null, got ${describe(value)}`);
+						else settings.integrations.library[key] = value as string | null;
+					}
+					if ("sync" in library) {
+						const parsed = expectBoolean(issues, "integrations.library.sync", library.sync);
+						if (parsed !== undefined) settings.integrations.library.sync = parsed;
+					}
+				}
+			}
+			if ("git" in integrations) {
+				if (!isPlainObject(integrations.git))
+					issues.add("integrations.git", `expected a map, got ${describe(integrations.git)}`);
+				else {
+					issues.unknownKeys("integrations.git", integrations.git, ["commitAttribution"]);
+					if ("commitAttribution" in integrations.git) {
+						const parsed = expectBoolean(issues, "integrations.git.commitAttribution", integrations.git.commitAttribution);
+						if (parsed !== undefined) settings.integrations.git.commitAttribution = parsed;
+					}
+				}
+			}
+			if ("externalAgents" in integrations) {
+				if (!isPlainObject(integrations.externalAgents))
+					issues.add("integrations.externalAgents", `expected a map, got ${describe(integrations.externalAgents)}`);
+				else {
+					const external = integrations.externalAgents;
+					issues.unknownKeys("integrations.externalAgents", external, ["entries", "defaults"]);
+					if ("defaults" in external) {
+						if (!isPlainObject(external.defaults))
+							issues.add("integrations.externalAgents.defaults", `expected a map, got ${describe(external.defaults)}`);
+						else {
+							const defaults = external.defaults;
+							issues.unknownKeys("integrations.externalAgents.defaults", defaults, [
+								"connectTimeoutMs",
+								"turnTimeoutMs",
+								"permissionTimeoutMs",
+								"toolGovernance",
+							]);
+							for (const key of ["connectTimeoutMs", "turnTimeoutMs", "permissionTimeoutMs"] as const) {
+								if (!(key in defaults)) continue;
+								const parsed = expectInteger(issues, `integrations.externalAgents.defaults.${key}`, defaults[key], {
+									min: 1,
+									max: MAX_TIMER_DELAY_MS,
+								});
+								if (parsed !== undefined) settings.integrations.externalAgents.defaults[key] = parsed;
+							}
+							if ("toolGovernance" in defaults) {
+								const parsed = expectEnum(
+									issues,
+									"integrations.externalAgents.defaults.toolGovernance",
+									defaults.toolGovernance,
+									TOOL_GOVERNANCE,
+								);
+								if (parsed !== undefined) settings.integrations.externalAgents.defaults.toolGovernance = parsed;
+							}
+						}
+					}
+					if ("entries" in external) {
+						if (!Array.isArray(external.entries))
+							issues.add("integrations.externalAgents.entries", `expected a list, got ${describe(external.entries)}`);
+						else {
+							const seen = new Set<string>();
+							settings.integrations.externalAgents.entries = external.entries
+								.map((entry, index) =>
+									validateExternalAgent(
+										issues,
+										`integrations.externalAgents.entries[${index}]`,
+										entry,
+										settings.integrations.externalAgents.defaults,
+										seen,
+									),
+								)
+								.filter((entry): entry is ExternalAgent => entry !== null);
+						}
+					}
 				}
 			}
 		}
@@ -1718,12 +1837,6 @@ export function validateSettings(raw: unknown): SettingsValidationResult {
 	return { settings, issues: issues.list };
 }
 
-/**
- * Validate the settings file on disk without throwing. Missing file is valid.
- * Resolves the path without the clioConfigDir mkdir side effect so read-only
- * surfaces (plain `clio-coder doctor`, readSettings on a fresh machine) never
- * create directories.
- */
 export function validateSettingsFile(): SettingsValidationResult {
 	const path = join(resolveClioDirs().config, "settings.yaml");
 	if (!existsSync(path)) return { settings: cloneValue(DEFAULT_SETTINGS), issues: [] };
@@ -1919,14 +2032,14 @@ export function useTargetInSettings(
 			: target;
 	if (!workerTarget) return null;
 	const sharedModel = options.model ?? target.defaultModel ?? null;
-	settings.orchestrator.target = target.id;
-	settings.orchestrator.model = options.orchestratorModel ?? sharedModel;
-	settings.workers.default.target = workerTarget.id;
-	settings.workers.default.model =
+	settings.chat.target = target.id;
+	settings.chat.model = options.orchestratorModel ?? sharedModel;
+	settings.fleet.default.target = workerTarget.id;
+	settings.fleet.default.model =
 		options.workerModel ?? (workerTarget === target ? sharedModel : (workerTarget.defaultModel ?? null));
 	if (options.backgroundModel !== undefined) {
-		settings.background.target = target.id;
-		settings.background.model = options.backgroundModel;
+		settings.context.memory.target = target.id;
+		settings.context.memory.model = options.backgroundModel;
 	}
 	return { workerTargetId: workerTarget.id };
 }
@@ -1935,22 +2048,25 @@ export function useTargetInSettings(
 export function removeTargetFromSettings(settings: ClioSettings, id: string): boolean {
 	if (!settings.targets.some((entry) => entry.id === id)) return false;
 	settings.targets = settings.targets.filter((entry) => entry.id !== id);
-	if (settings.orchestrator.target === id) {
-		settings.orchestrator.target = null;
-		settings.orchestrator.model = null;
+	if (settings.chat.target === id) {
+		settings.chat.target = null;
+		settings.chat.model = null;
 	}
-	if (settings.background.target === id) {
-		settings.background.target = null;
-		settings.background.model = null;
+	if (settings.context.memory.target === id) {
+		settings.context.memory.target = null;
+		settings.context.memory.model = null;
 	}
-	if (settings.workers.default.target === id) {
-		settings.workers.default.target = null;
-		settings.workers.default.model = null;
+	if (settings.fleet.default.target === id) {
+		settings.fleet.default.target = null;
+		settings.fleet.default.model = null;
 	}
-	for (const [name, profile] of Object.entries(settings.workers.profiles)) {
-		if (profile.target === id) delete settings.workers.profiles[name];
+	for (const [name, profile] of Object.entries(settings.fleet.profiles)) {
+		if (profile.target === id) delete settings.fleet.profiles[name];
 	}
-	settings.scope = settings.scope.filter((entry) => entry.split("/")[0] !== id);
+	settings.chat.modelPicker.cycleSet = settings.chat.modelPicker.cycleSet.filter((entry) => entry.split("/")[0] !== id);
+	settings.chat.modelPicker.favorites = settings.chat.modelPicker.favorites.filter(
+		(entry) => entry.split("/")[0] !== id,
+	);
 	return true;
 }
 
@@ -1963,8 +2079,8 @@ export function setFleetProfileInSettings(
 ): boolean {
 	const target = settings.targets.find((entry) => entry.id === targetId);
 	if (!target) return false;
-	const existing = settings.workers.profiles[name];
-	settings.workers.profiles[name] = {
+	const existing = settings.fleet.profiles[name];
+	settings.fleet.profiles[name] = {
 		target: target.id,
 		model: options.model ?? target.defaultModel ?? null,
 		thinkingLevel: options.thinkingLevel ?? existing?.thinkingLevel ?? "off",
@@ -1974,11 +2090,11 @@ export function setFleetProfileInSettings(
 
 /** Remove a fleet profile and its agent bindings; returns how many bindings went with it. */
 export function removeFleetProfileFromSettings(settings: ClioSettings, name: string): number {
-	delete settings.workers.profiles[name];
+	delete settings.fleet.profiles[name];
 	let removedBindings = 0;
-	for (const [agentId, profileName] of Object.entries(settings.workers.agentBindings)) {
+	for (const [agentId, profileName] of Object.entries(settings.fleet.agentProfiles)) {
 		if (profileName !== name) continue;
-		delete settings.workers.agentBindings[agentId];
+		delete settings.fleet.agentProfiles[agentId];
 		removedBindings += 1;
 	}
 	return removedBindings;
@@ -1986,7 +2102,7 @@ export function removeFleetProfileFromSettings(settings: ClioSettings, name: str
 
 /** Bind a native agent to a profile. False for an ACP delegation agent, which ignores native routing. */
 export function bindAgentProfileInSettings(settings: ClioSettings, agentId: string, profileName: string): boolean {
-	if (settings.delegation.agents.some((agent) => agent.id === agentId)) return false;
-	settings.workers.agentBindings[agentId] = profileName;
+	if (settings.integrations.externalAgents.entries.some((agent) => agent.id === agentId)) return false;
+	settings.fleet.agentProfiles[agentId] = profileName;
 	return true;
 }
