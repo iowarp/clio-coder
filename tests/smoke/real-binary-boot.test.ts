@@ -93,8 +93,8 @@ function isolatedHome(label: string): Home {
 	};
 }
 
-function launch(args: string[], env: NodeJS.ProcessEnv): RunningCli {
-	const child = spawn(process.execPath, [CLI, ...args], { cwd: ROOT, env, stdio: ["pipe", "pipe", "pipe"] });
+function launch(args: string[], env: NodeJS.ProcessEnv, cwd = ROOT): RunningCli {
+	const child = spawn(process.execPath, [CLI, ...args], { cwd, env, stdio: ["pipe", "pipe", "pipe"] });
 	let output = "";
 	let cursor = 0;
 	child.stdout.setEncoding("utf8");
@@ -154,8 +154,12 @@ function launch(args: string[], env: NodeJS.ProcessEnv): RunningCli {
 	};
 }
 
-async function run(args: string[], env: NodeJS.ProcessEnv): Promise<{ code: number | null; output: string }> {
-	const cli = launch(args, env);
+async function run(
+	args: string[],
+	env: NodeJS.ProcessEnv,
+	cwd = ROOT,
+): Promise<{ code: number | null; output: string }> {
+	const cli = launch(args, env, cwd);
 	cli.child.stdin.end();
 	const exit = await cli.waitForExit();
 	return { code: exit.code, output: cli.output() };
@@ -236,7 +240,7 @@ describe("smoke/real built binary boot", { concurrency: false }, () => {
 			// migrated v2 target at this test's isolated health endpoint so doctor
 			// does not depend on, or interfere with, a developer's live LM Studio.
 			writeFileSync(join(home.root, "config", "settings.yaml"), migrated.replace("http://127.0.0.1:1234", endpoint));
-			const doctor = await run(["doctor", "--json"], home.env);
+			const doctor = await run(["doctor", "--json"], home.env, home.root);
 			strictEqual(doctor.code, 0, doctor.output);
 			strictEqual(JSON.parse(doctor.output).ok, true);
 			await reachEditor(launch([], { ...home.env, CLIO_CODER_INTERACTIVE: "1" }));
