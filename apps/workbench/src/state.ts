@@ -14,7 +14,6 @@ import {
 	PROTOCOL_VERSION,
 	type ServerEvent,
 	validateDispatchInspection,
-	validateEvalInventory,
 	validateEvidenceInspection,
 	validateFleetInspection,
 	validateGateDecisions,
@@ -27,7 +26,6 @@ import {
 	type WireConfigInspection,
 	type WireDeleteChallenge,
 	type WireDispatchInspection,
-	type WireEvalInventory,
 	type WireEvidenceDetail,
 	type WireEvidenceInspection,
 	type WireFleetInspection,
@@ -101,7 +99,6 @@ export interface WireBootstrap {
 	readonly traceInspection: WireTraceInspection | null;
 	readonly gateDecisions: WireGateDecisions | null;
 	readonly interopInspection: WireInteropInspection | null;
-	readonly evalInventory: WireEvalInventory | null;
 	readonly evidenceInspection: WireEvidenceInspection | null;
 }
 
@@ -128,7 +125,6 @@ export interface AppState {
 	readonly traceInspection: WireTraceInspection | null;
 	readonly gateDecisions: WireGateDecisions | null;
 	readonly interopInspection: WireInteropInspection | null;
-	readonly evalInventory: WireEvalInventory | null;
 	readonly evidenceInspection: WireEvidenceInspection | null;
 	/** The one bundle the operator opened, if any. */
 	readonly evidenceDetail: WireEvidenceDetail | null;
@@ -168,8 +164,6 @@ export interface AppState {
 	readonly pendingFleetDecisions: string | null;
 	/** Request id of the external coding agent detection sweep. */
 	readonly pendingInteropInspect: string | null;
-	/** Request id of the installation-wide stored eval report window. */
-	readonly pendingEvalInspect: string | null;
 	/** Request id of the installation-wide durable evidence inventory. */
 	readonly pendingEvidenceInspect: string | null;
 	/** The bundle id whose trust record is being read, if any. */
@@ -218,7 +212,6 @@ export type AppAction =
 	| { readonly type: "trace.inspect.submitted"; readonly requestId: string }
 	| { readonly type: "fleet.decisions.submitted"; readonly requestId: string }
 	| { readonly type: "interop.inspect.submitted"; readonly requestId: string }
-	| { readonly type: "eval.inspect.submitted"; readonly requestId: string }
 	| { readonly type: "evidence.inspect.submitted"; readonly requestId: string }
 	| {
 		readonly type: "evidence.read.submitted";
@@ -257,7 +250,6 @@ export const initialAppState: AppState = {
 	traceInspection: null,
 	gateDecisions: null,
 	interopInspection: null,
-	evalInventory: null,
 	evidenceInspection: null,
 	evidenceDetail: null,
 	fleetVerification: null,
@@ -279,7 +271,6 @@ export const initialAppState: AppState = {
 	pendingTraceInspect: null,
 	pendingFleetDecisions: null,
 	pendingInteropInspect: null,
-	pendingEvalInspect: null,
 	pendingEvidenceInspect: null,
 	pendingEvidenceRead: null,
 	pendingFleetVerify: null,
@@ -307,7 +298,6 @@ const BOOTSTRAP_KEYS = [
 	"traceInspection",
 	"gateDecisions",
 	"interopInspection",
-	"evalInventory",
 	"evidenceInspection",
 ] as const;
 
@@ -563,10 +553,6 @@ export function parseBootstrapPayload(value: unknown): WireBootstrap {
 			record.interopInspection,
 			"bootstrap.interopInspection",
 		),
-		evalInventory: record.evalInventory === null ? null : validateEvalInventory(
-			record.evalInventory,
-			"bootstrap.evalInventory",
-		),
 		evidenceInspection: record.evidenceInspection === null ? null : validateEvidenceInspection(
 			record.evidenceInspection,
 			"bootstrap.evidenceInspection",
@@ -734,7 +720,6 @@ export function appReducer(state: AppState, action: AppAction): AppState {
 				traceInspection: action.payload.traceInspection,
 				gateDecisions: action.payload.gateDecisions,
 				interopInspection: action.payload.interopInspection,
-				evalInventory: action.payload.evalInventory,
 				evidenceInspection: action.payload.evidenceInspection,
 				evidenceDetail: null,
 				fleetVerification: null,
@@ -748,7 +733,6 @@ export function appReducer(state: AppState, action: AppAction): AppState {
 				pendingTraceInspect: null,
 				pendingFleetDecisions: null,
 				pendingInteropInspect: null,
-				pendingEvalInspect: null,
 				pendingEvidenceInspect: null,
 				pendingEvidenceRead: null,
 				pendingFleetVerify: null,
@@ -814,8 +798,6 @@ export function appReducer(state: AppState, action: AppAction): AppState {
 			return { ...state, pendingFleetDecisions: action.requestId };
 		case "interop.inspect.submitted":
 			return { ...state, pendingInteropInspect: action.requestId };
-		case "eval.inspect.submitted":
-			return { ...state, pendingEvalInspect: action.requestId };
 		case "evidence.inspect.submitted":
 			return { ...state, pendingEvidenceInspect: action.requestId };
 		case "evidence.read.submitted":
@@ -873,7 +855,6 @@ export function appReducer(state: AppState, action: AppAction): AppState {
 						pendingTraceInspect: null,
 						pendingFleetDecisions: null,
 						pendingInteropInspect: null,
-						pendingEvalInspect: null,
 						pendingEvidenceInspect: null,
 						pendingEvidenceRead: null,
 						pendingFleetVerify: null,
@@ -998,13 +979,6 @@ export function appReducer(state: AppState, action: AppAction): AppState {
 						interopInspection: event.payload.inspection,
 						pendingInteropInspect: null,
 						announcement: "External coding agent detection updated",
-					};
-				case "eval.state":
-					return {
-						...sequenced,
-						evalInventory: event.payload.inventory,
-						pendingEvalInspect: null,
-						announcement: "Stored eval reports updated",
 					};
 				case "evidence.state":
 					return {
