@@ -1417,6 +1417,41 @@ Deno.test("session replay rejects the 65th turn group", async () => {
 	}
 });
 
+for (const [scenario, accepted] of [["resume-8192-tools", true], ["resume-8193-tools", false]] as const) {
+	Deno.test(`${scenario} exercises the replay tool-start ceiling`, async () => {
+		const test = await harness(scenario);
+		try {
+			await test.host.listSessions();
+			const earlier = test.sink.ofType("session.list").at(-1)?.sessions.find((session) => !session.hosted);
+			ok(earlier);
+			await test.host.closeSession();
+			test.sink.events.length = 0;
+			const loading = test.host.loadSession(earlier.id);
+			if (accepted) await loading;
+			else await rejects(loading, assertHostError("not-ready"));
+			const starts = test.sink.ofType("turn.tool").filter((event) => event.payload.status === "in_progress");
+			equal(starts.length, 8_192);
+			equal(new Set(starts.map((event) => event.payload.toolCallId)).size, 8_192);
+			ok(starts.every((event) => event.payload.source === "replayed-from-clio"));
+			if (accepted) {
+				equal(test.host.phase, "idle");
+				equal(test.host.snapshot().session?.replayedTurns, 1);
+				equal(test.host.snapshot().session?.replayTruncated, true);
+				equal(
+					test.sink.ofType("turn.started").at(0)?.payload.promptSummary,
+					"Retained prompt after the dropped oldest group",
+				);
+			} else {
+				await waitFor(() => test.host.phase === "failed", "host to fail after replay tool overflow");
+				equal(test.host.snapshot().session, null);
+				equal(test.host.snapshot().lastFailure?.code, "acp-protocol-failure");
+			}
+		} finally {
+			await test.dispose();
+		}
+	});
+}
+
 Deno.test("resuming an unknown session is refused and leaves the process usable", async () => {
 	const test = await harness("conversation");
 	try {
@@ -1437,9 +1472,20 @@ Deno.test("max turn requests projects exactly 128 tool starts and suppresses the
 		const starts = test.sink.ofType("turn.tool").filter((event) =>
 			event.context.turnId === context.turnId && event.payload.status === "in_progress"
 		);
+		const swept = test.sink.ofType("turn.tool").filter((event) =>
+			event.context.turnId === context.turnId && event.payload.status === "failed"
+		);
 		equal(starts.length, 128);
 		equal(new Set(starts.map((event) => event.payload.toolCallId)).size, 128);
+		equal(swept.length, 128);
+		deepStrictEqual(
+			new Set(swept.map((event) => event.payload.toolCallId)),
+			new Set(starts.map((event) => event.payload.toolCallId)),
+		);
+		equal(test.sink.ofType("turn.tool").filter((event) => event.payload.status === "completed").length, 0);
+		equal(test.sink.ofType("turn.tool").filter((event) => event.payload.status === "canceled").length, 0);
 		ok(!starts.some((event) => event.payload.summary.includes("129")));
+		ok(test.sink.events.indexOf(swept.at(-1)!) < test.sink.events.indexOf(terminal));
 		deepStrictEqual(
 			{
 				outcome: terminal.payload.outcome,
