@@ -872,6 +872,34 @@ Deno.test("a chained permission remains awaiting approval after the preceding de
 	}
 });
 
+for (const operation of ["resolvePermission", "cancelTurn", "abandon"] as const) {
+	Deno.test(`${operation} is serialized behind an earlier close`, async () => {
+		const test = await harness("permission");
+		try {
+			const context = await test.host.startTurn("Keep this permission behind the host queue.");
+			const permission = await waitForEvent(test.sink, "turn.permission.requested");
+			const closing = test.host.close();
+			const controlled = operation === "resolvePermission"
+				? test.host.resolvePermission(context.turnId, permission.payload.permissionId, "allow_once")
+				: operation === "cancelTurn"
+				? test.host.cancelTurn(context.turnId)
+				: test.host.abandon();
+			await closing;
+			if (operation === "abandon") await controlled;
+			else await rejects(controlled, assertHostError("not-found"));
+			const terminal = await waitForEvent(
+				test.sink,
+				"turn.terminal",
+				(event) => event.context.turnId === context.turnId,
+			);
+			equal(terminal.payload.outcome, "canceled");
+			equal(terminal.payload.code, "host-shutdown");
+		} finally {
+			await test.dispose();
+		}
+	});
+}
+
 Deno.test("abandon rejects a parked permission as a disconnect and invalidates its capability", async () => {
 	const test = await harness("permission");
 	try {

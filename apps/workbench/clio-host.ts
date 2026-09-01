@@ -1180,42 +1180,48 @@ export class ClioProjectHost {
 		});
 	}
 
-	async resolvePermission(turnId: string, permissionId: string, decision: "allow_once" | "reject_once"): Promise<void> {
-		const process = this.#process;
-		const turn = process?.turn ?? null;
-		if (process === null || turn === null || turn.context.turnId !== turnId) {
-			throw new HostError("not-found", "That permission does not belong to the active turn.");
-		}
-		if (turn.permission === null || turn.permission.publicId !== permissionId) {
-			throw new HostError("not-found", "That permission is no longer waiting.");
-		}
-		try {
-			await this.#settlePermission(turn, decision === "allow_once" ? "allow-once" : "reject", decision, "running");
-		} catch {
-			await this.#failTurn(process, turn, {
-				code: "permission-settlement-failed",
-				summary: "The GUI could not deliver the permission decision to Clio Coder.",
-				source: "observed-by-workbench",
-			});
-			throw new HostError("internal", "The permission decision could not be delivered safely.");
-		}
+	resolvePermission(turnId: string, permissionId: string, decision: "allow_once" | "reject_once"): Promise<void> {
+		return this.#serialize(async () => {
+			const process = this.#process;
+			const turn = process?.turn ?? null;
+			if (process === null || turn === null || turn.context.turnId !== turnId) {
+				throw new HostError("not-found", "That permission does not belong to the active turn.");
+			}
+			if (turn.permission === null || turn.permission.publicId !== permissionId) {
+				throw new HostError("not-found", "That permission is no longer waiting.");
+			}
+			try {
+				await this.#settlePermission(turn, decision === "allow_once" ? "allow-once" : "reject", decision, "running");
+			} catch {
+				await this.#failTurn(process, turn, {
+					code: "permission-settlement-failed",
+					summary: "The GUI could not deliver the permission decision to Clio Coder.",
+					source: "observed-by-workbench",
+				});
+				throw new HostError("internal", "The permission decision could not be delivered safely.");
+			}
+		});
 	}
 
-	async cancelTurn(turnId: string, reason: CancelReason = "operator"): Promise<void> {
-		const process = this.#process;
-		const turn = process?.turn ?? null;
-		if (process === null || turn === null || turn.context.turnId !== turnId) {
-			throw new HostError("not-found", "That turn is not active.");
-		}
-		await this.#cancelTurn(process, turn, reason);
+	cancelTurn(turnId: string, reason: CancelReason = "operator"): Promise<void> {
+		return this.#serialize(async () => {
+			const process = this.#process;
+			const turn = process?.turn ?? null;
+			if (process === null || turn === null || turn.context.turnId !== turnId) {
+				throw new HostError("not-found", "That turn is not active.");
+			}
+			await this.#cancelTurn(process, turn, reason);
+		});
 	}
 
 	/** Called by the runtime when the last browser connection goes away for longer than its grace. */
-	async abandon(): Promise<void> {
-		const process = this.#process;
-		const turn = process?.turn ?? null;
-		if (process === null || turn === null) return;
-		await this.#cancelTurn(process, turn, "client-disconnected");
+	abandon(): Promise<void> {
+		return this.#serialize(async () => {
+			const process = this.#process;
+			const turn = process?.turn ?? null;
+			if (process === null || turn === null) return;
+			await this.#cancelTurn(process, turn, "client-disconnected");
+		});
 	}
 
 	// ---------------------------------------------------------------- internals
