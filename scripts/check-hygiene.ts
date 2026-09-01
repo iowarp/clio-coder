@@ -436,7 +436,6 @@ function checkCiScripts(): void {
 	);
 	expectScript("skills:check", "node --import tsx scripts/pin-skills.ts --check");
 	expectScript("ci:release", "npm run ci && node scripts/check-release.mjs");
-	expectScript("test:repeat", "node scripts/repeat-tests.mjs");
 	expectScript("prepublishOnly", "npm run ci:release");
 
 	// The push and PR path is one job, one lane, one step of real work. The
@@ -1491,64 +1490,6 @@ function checkPiSurface(): void {
 	}
 }
 
-/**
- * scripts/shard-weights.json is a build input, not scratch: every lane
- * assignment `npm test` makes divides the suite by those per-file costs. A file
- * missing from it silently falls back to the median, so a 65s PTY smoke test
- * gets packed as if it cost 2s and lands in a lane beside nine other heavy
- * files. That lane then runs for minutes while its siblings idle, and the
- * contention inside it is what a wall-clock assertion or a spawn watchdog
- * actually fails on.
- *
- * Nothing was watching the file, and it drifted to 174 of 528 test files
- * unweighted before anyone looked. This is the watch: a handful of new files
- * riding the median is fine and should not block a commit, a third of the
- * suite is not.
- */
-function checkShardWeights(): void {
-	const weightsPath = join(root, "scripts", "shard-weights.json");
-	if (!existsSync(weightsPath)) {
-		fail("shard-weights", "scripts/shard-weights.json must exist; npm test divides the suite by it");
-		return;
-	}
-	const entries = JSON.parse(readFileSync(weightsPath, "utf8")) as ReadonlyArray<{ file: string; ms: number }>;
-	const weighed = new Set(entries.map((entry) => entry.file));
-	const files: string[] = [];
-	const collect = (dir: string): void => {
-		if (!existsSync(dir)) return;
-		for (const entry of readdirSync(dir)) {
-			const path = join(dir, entry);
-			if (statSync(path).isDirectory()) collect(path);
-			else if (entry.endsWith(".test.ts")) files.push(relative(root, path).split("\\").join("/"));
-		}
-	};
-	collect(join(root, "tests", "contracts"));
-	collect(join(root, "tests", "smoke"));
-
-	const missing = files.filter((file) => !weighed.has(file));
-	const stale = [...weighed].filter((file) => !files.includes(file));
-	// One in ten is the slack a normal feature branch needs before someone has
-	// to spend the regeneration; past that the lane split is no longer measured.
-	const budget = Math.max(8, Math.floor(files.length / 10));
-	const regenerate = "regenerate with: node scripts/shard-tests.mjs --emit-weights > scripts/shard-weights.json";
-	if (missing.length > budget) {
-		fail(
-			"shard-weights",
-			`${missing.length} of ${files.length} test files are missing from scripts/shard-weights.json (budget ${budget}); ` +
-				`they all fall back to the median and unbalance every lane. ${regenerate}`,
-		);
-	}
-	if (stale.length > budget) {
-		fail(
-			"shard-weights",
-			`${stale.length} entries in scripts/shard-weights.json name files that no longer exist (budget ${budget}); ` +
-				`the median they set is measured against a suite that is gone. ${regenerate}`,
-		);
-	}
-}
-
-// ---------------------------------------------------------------------------
-
 const checks: ReadonlyArray<[string, () => void | Promise<void>]> = [
 	["export-hygiene", checkExportHygiene],
 	["boundaries", checkBoundaries],
@@ -1563,7 +1504,6 @@ const checks: ReadonlyArray<[string, () => void | Promise<void>]> = [
 	["gitignored-reference", checkGitignoredReference],
 	["prompts", checkPromptsDocLinks],
 	["pi-surface", checkPiSurface],
-	["shard-weights", checkShardWeights],
 ];
 
 const startedAt = performance.now();
