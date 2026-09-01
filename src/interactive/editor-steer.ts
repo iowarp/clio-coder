@@ -4,8 +4,8 @@
  * `!` intercept in the editor submit path.
  *
  * The target token is deliberately a bare word (letters, digits, underscore,
- * hyphen). Inline file references (`@package.json`, `@src/x.ts`) contain dots
- * or slashes and never match, so prompt file expansion keeps working.
+ * hyphen). File completion consults the same predicate and quotes an otherwise
+ * ambiguous root-level extensionless reference before it reaches this parser.
  */
 
 export interface EditorSteerMention {
@@ -23,11 +23,16 @@ export type SteerTargetResolution =
 	| { kind: "ambiguous"; candidates: RunningDispatchRef[] }
 	| { kind: "none" };
 
-const STEER_MENTION = /^@([A-Za-z0-9][A-Za-z0-9_-]*)\s+(\S[\s\S]*)$/;
+const STEER_TARGET_TOKEN = /^[A-Za-z0-9][A-Za-z0-9_-]*$/;
+const STEER_MENTION = /^@(\S+)\s+(\S[\s\S]*)$/;
+
+export function isEditorSteerTargetToken(value: string): boolean {
+	return STEER_TARGET_TOKEN.test(value);
+}
 
 export function parseEditorSteerMention(text: string): EditorSteerMention | null {
 	const match = STEER_MENTION.exec(text.trim());
-	if (!match?.[1] || !match[2]) return null;
+	if (!match?.[1] || !match[2] || !isEditorSteerTargetToken(match[1])) return null;
 	return { target: match[1], text: match[2].trim() };
 }
 
