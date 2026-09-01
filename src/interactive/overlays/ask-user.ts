@@ -632,9 +632,7 @@ class AskUserOverlayView implements Component {
 			for (let index = 0; index < this.history.length; index += 1) {
 				const answer = this.history[index];
 				if (!answer) continue;
-				lines.push(
-					...wrapLabeledValue(`${theme.fg("dim", `${index + 1}.`)} `, theme.fg("muted", answer.answer), width),
-				);
+				lines.push(...wrapLabeledValue(`${theme.fg("dim", `${index + 1}.`)} `, theme.fg("muted", answer.answer), width));
 			}
 		}
 		return lines.map((line) => fitLine(line, width)).slice(0, maxRows);
@@ -783,9 +781,7 @@ class AskUserOverlayView implements Component {
 		for (let index = 0; index < this.history.length; index += 1) {
 			const answer = this.history[index];
 			if (!answer) continue;
-			rows.push(
-				...wrapLabeledValue(`${theme.fg("dim", `${index + 1}.`)} `, theme.fg("muted", answer.answer), width),
-			);
+			rows.push(...wrapLabeledValue(`${theme.fg("dim", `${index + 1}.`)} `, theme.fg("muted", answer.answer), width));
 		}
 		// A round of one question needs no per-question roll: the strip already
 		// names the round and the question is on screen above this.

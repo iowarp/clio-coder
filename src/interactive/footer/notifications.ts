@@ -490,9 +490,7 @@ export function formatNotificationPanel(
 		const prefixWidth = visibleWidth(prefix);
 		const wrapped = wrapTextWithAnsi(theme.fg("muted", entry.text), Math.max(1, width - prefixWidth));
 		lines.push(
-			...wrapped.map((line, index) =>
-				fitFooterText(`${index === 0 ? prefix : " ".repeat(prefixWidth)}${line}`, width),
-			),
+			...wrapped.map((line, index) => fitFooterText(`${index === 0 ? prefix : " ".repeat(prefixWidth)}${line}`, width)),
 		);
 	}
 	const overflow = entries.length - maxRows;

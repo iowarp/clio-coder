@@ -163,9 +163,7 @@ export function formatContextActivityIslandLines(
 		...wrapTextWithAnsi(message, bodyWidth).map((line) => padAnsi(line, bodyWidth)),
 	];
 	if (activity.detail) {
-		body.push(
-			...wrapTextWithAnsi(theme.fg("dim", activity.detail), bodyWidth).map((line) => padAnsi(line, bodyWidth)),
-		);
+		body.push(...wrapTextWithAnsi(theme.fg("dim", activity.detail), bodyWidth).map((line) => padAnsi(line, bodyWidth)));
 	}
 	return frame(theme, "Context", body, width);
 }

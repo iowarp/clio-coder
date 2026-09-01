@@ -778,9 +778,7 @@ function renderModelOverlayLines(input: {
 	];
 	const refreshLine = refreshStatusLine(input.refreshing, input.refreshError);
 	if (refreshLine)
-		lines.push(
-			...wrapTextWithAnsi(input.refreshError ? clioError(refreshLine) : theme.fg("dim", refreshLine), width),
-		);
+		lines.push(...wrapTextWithAnsi(input.refreshError ? clioError(refreshLine) : theme.fg("dim", refreshLine), width));
 	if (input.selectionError) lines.push(...wrapTextWithAnsi(clioError(input.selectionError), width));
 	lines.push(formatModelHeader(width));
 	if (filtered.length === 0) {

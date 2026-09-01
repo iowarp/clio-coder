@@ -105,11 +105,7 @@ describe("contracts/footer notification widths", () => {
 	it("wraps complete notices in the expanded panel", () => {
 		const width = 36;
 		const message = "Tool support is unavailable for this model; Clio drives every agent role through typed tools";
-		const panel = formatNotificationPanel(
-			[notice(message)],
-			width,
-			{ theme: createClioTheme({ color: false }) },
-		);
+		const panel = formatNotificationPanel([notice(message)], width, { theme: createClioTheme({ color: false }) });
 		const collapsed = panel.slice(1, -1).join(" ").replace(/\s+/gu, " ").trim();
 
 		ok(collapsed.includes(message), `expanded notification was cut: ${collapsed}`);
