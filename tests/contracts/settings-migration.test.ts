@@ -4,12 +4,11 @@ import { join } from "node:path";
 import { afterEach, beforeEach, describe, it } from "node:test";
 
 import { parse as parseYaml } from "yaml";
-
+import { namingFootprintFindings } from "../../src/cli/doctor-naming.js";
+import { runResetCommand } from "../../src/cli/reset.js";
 import { readSettings, updateSettings, validateSettings } from "../../src/core/config.js";
 import { DEFAULT_SETTINGS, DEFAULT_SETTINGS_YAML } from "../../src/core/defaults.js";
 import { namingCompatibilityEnvironment, readNamingEnvironment } from "../../src/core/naming-compat.js";
-import { namingFootprintFindings } from "../../src/cli/doctor-naming.js";
-import { regenerateYaziNamingProfile } from "../../src/domains/lifecycle/naming-yazi.js";
 import namingMigration, {
 	CLIO_CODER_NAMING_MIGRATION_ID,
 	CLIO_CODER_NAMING_SETTINGS_BACKUP_SUFFIX,
@@ -19,6 +18,16 @@ import settingsV2, {
 	SettingsV2CollisionError,
 } from "../../src/domains/lifecycle/migrations/2026-09-01-settings-v2.js";
 import { listMigrations, runPending } from "../../src/domains/lifecycle/migrations/index.js";
+import {
+	MUTABLE_NAMING_BACKUP_SUFFIX,
+	migrateMutableNamingState,
+} from "../../src/domains/lifecycle/naming-mutable-state.js";
+import {
+	CANONICAL_TOOL_MARKER,
+	inspectToolMarkerNaming,
+	LEGACY_TOOL_MARKER,
+} from "../../src/domains/lifecycle/naming-tool-markers.js";
+import { regenerateYaziNamingProfile } from "../../src/domains/lifecycle/naming-yazi.js";
 import { parseYaziEventLine, renderYaziKeymap } from "../../src/domains/mux/index.js";
 import { type IsolatedClioEnv, isolateClioEnv } from "../harness/scratch-env.js";
 
@@ -183,9 +192,7 @@ integrations:
 		const legacy = 'run = "clio-pick $CLIO_YAZI_PICK_TOKEN clio-coder-pick $CLIO_CODER_YAZI_PICK_TOKEN"\n';
 		writeFileSync(join(profileDir, "keymap.toml"), legacy, "utf8");
 
-		const finding = namingFootprintFindings({ cwd: scratch.dir }).find(
-			(entry) => entry.name === "naming yazi profile",
-		);
+		const finding = namingFootprintFindings({ cwd: scratch.dir }).find((entry) => entry.name === "naming yazi profile");
 		strictEqual(finding?.level, "warn");
 		strictEqual(readFileSync(join(profileDir, "keymap.toml"), "utf8"), legacy, "doctor inspection is read-only");
 
@@ -196,6 +203,75 @@ integrations:
 			regenerateYaziNamingProfile({ cacheDir: join(scratch.dir, "cache"), yaziPath: null, yaPath: null }).status,
 			"absent",
 		);
+	});
+
+	it("validates and migrates tool markers while preserving conflicting facts", () => {
+		const versionDir = join(scratch.dir, "data", "tools", "yazi", "1.0.0");
+		mkdirSync(versionDir, { recursive: true });
+		const marker = { id: "yazi", version: "1.0.0", sha256: "a".repeat(64) };
+		writeFileSync(join(versionDir, LEGACY_TOOL_MARKER), `${JSON.stringify(marker)}\n`, "utf8");
+
+		strictEqual(inspectToolMarkerNaming({ dataDir: join(scratch.dir, "data") })[0]?.status, "renamable");
+		strictEqual(existsSync(join(versionDir, LEGACY_TOOL_MARKER)), true, "inspection is read-only");
+		const doctor = namingFootprintFindings({ cwd: scratch.dir, fix: true }).find(
+			(entry) => entry.name === "naming tool markers",
+		);
+		strictEqual(doctor?.level, "ok");
+		strictEqual(existsSync(join(versionDir, LEGACY_TOOL_MARKER)), false);
+		strictEqual(existsSync(join(versionDir, CANONICAL_TOOL_MARKER)), true);
+
+		writeFileSync(
+			join(versionDir, LEGACY_TOOL_MARKER),
+			`${JSON.stringify({ ...marker, sha256: "b".repeat(64) })}\n`,
+			"utf8",
+		);
+		strictEqual(
+			inspectToolMarkerNaming({ dataDir: join(scratch.dir, "data"), fix: true })[0]?.status,
+			"canonical-conflict",
+		);
+		strictEqual(existsSync(join(versionDir, LEGACY_TOOL_MARKER)), true, "disagreeing legacy facts are retained");
+	});
+
+	it("rewrites only allowlisted mutable state fields with deterministic per-file counts", () => {
+		const state = join(scratch.dir, "state");
+		const mutablePath = join(state, "interop.json");
+		const sealedPath = join(state, "receipts", "sealed.json");
+		mkdirSync(join(state, "receipts"), { recursive: true });
+		const mutable = {
+			version: 1,
+			nested: {
+				lifecycle: "clio-managed",
+				toolGovernance: "clio-policy",
+				source: "clio",
+				message: "clio-policy",
+			},
+		};
+		const sealed = JSON.stringify(mutable);
+		writeFileSync(mutablePath, `${JSON.stringify(mutable)}\n`, "utf8");
+		writeFileSync(sealedPath, sealed, "utf8");
+
+		const [report] = migrateMutableNamingState(state);
+		deepStrictEqual(report?.counts, { lifecycle: 1, toolGovernance: 1, source: 1 });
+		strictEqual(report?.changed, true);
+		strictEqual(existsSync(`${mutablePath}${MUTABLE_NAMING_BACKUP_SUFFIX}`), true);
+		deepStrictEqual((JSON.parse(readFileSync(mutablePath, "utf8")) as { nested: unknown }).nested, {
+			lifecycle: "clio-coder-managed",
+			toolGovernance: "clio-coder-policy",
+			source: "clio-coder",
+			message: "clio-policy",
+		});
+		strictEqual(readFileSync(sealedPath, "utf8"), sealed, "sealed/history roots are outside the allowlist");
+		strictEqual(migrateMutableNamingState(state)[0]?.changed, false);
+	});
+
+	it("data reset removes both tool marker spellings only with their selected root", () => {
+		const versionDir = join(scratch.dir, "data", "tools", "yazi", "1.0.0");
+		mkdirSync(versionDir, { recursive: true });
+		writeFileSync(join(versionDir, LEGACY_TOOL_MARKER), "legacy", "utf8");
+		writeFileSync(join(versionDir, CANONICAL_TOOL_MARKER), "canonical", "utf8");
+		strictEqual(runResetCommand(["--data", "--force"]), 0);
+		strictEqual(existsSync(join(versionDir, LEGACY_TOOL_MARKER)), false);
+		strictEqual(existsSync(join(versionDir, CANONICAL_TOOL_MARKER)), false);
 	});
 
 	it("orders migrations before strict readers and records each migration once", async () => {
