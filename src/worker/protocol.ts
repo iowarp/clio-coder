@@ -292,7 +292,7 @@ const HEX_64 = /^[0-9a-f]{64}$/;
  * always present and never leaks absence as an empty string.
  */
 export function endpointIdentityHash(url: string | undefined): string {
-	if (url === undefined || url.trim().length === 0) return sha256Hex("clio.endpoint:none");
+	if (url === undefined || url.trim().length === 0) return sha256Hex("clio-coder.endpoint:none");
 	const raw = url.trim();
 	let canonical: string;
 	try {
@@ -302,17 +302,17 @@ export function endpointIdentityHash(url: string | undefined): string {
 	} catch {
 		canonical = raw.replace(/\/+$/u, "");
 	}
-	return sha256Hex(`clio.endpoint:${canonical}`);
+	return sha256Hex(`clio-coder.endpoint:${canonical}`);
 }
 
 /** Digest of one WorkerSpec document, computed identically on both ends. */
 export function workerSpecDigest(spec: unknown): string {
-	return sha256Hex(`clio.workerSpec:${canonicalJson(spec)}`);
+	return sha256Hex(`clio-coder.workerSpec:${canonicalJson(spec)}`);
 }
 
 /** Stable signature of the effective tool surface a worker will expose. */
 export function toolSignatureOf(names: ReadonlyArray<string>): string {
-	return sha256Hex(`clio.tools:${[...names].sort().join(",")}`);
+	return sha256Hex(`clio-coder.tools:${[...names].sort().join(",")}`);
 }
 
 /**

@@ -1,5 +1,6 @@
 import { deepStrictEqual, match, strictEqual, throws } from "node:assert/strict";
 import test from "node:test";
+import { parseEvalArtifactV4 } from "../../src/domains/eval/artifacts/store.js";
 import { compareEvalArtifactsV4, EvalServingConfigurationDriftError } from "../../src/domains/eval/compare/compare.js";
 import type { EvalArtifactV4 } from "../../src/domains/eval/schema/artifact.js";
 import { validateEvalSuiteV2 } from "../../src/domains/eval/schema/validate.js";
@@ -41,6 +42,27 @@ test("eval suites fail closed at the versioned schema boundary", () => {
 		contradictoryResult.issues.some((issue) => issue.path === "$.tasks[0].runner.agent"),
 		true,
 	);
+});
+
+test("eval readers normalize released schema, runner, and provenance identifiers in memory", () => {
+	const legacySuite = validSuite();
+	const task = legacySuite.tasks[0];
+	if (task === undefined) throw new Error("valid suite is missing its task fixture");
+	(task as { runner: unknown }).runner = { kind: "clio-run", prompt: "legacy runner" };
+	const validated = validateEvalSuiteV2(legacySuite);
+	strictEqual(validated.valid, true);
+	if (!validated.valid) throw new Error("legacy runner was not accepted");
+	strictEqual(validated.suite.tasks[0]?.runner.kind, "clio-coder-run");
+
+	const legacyVerdict = { ...verdict(), schema: "clio.eval.verdict.v1" };
+	strictEqual(parseEvalVerdictEnvelopeV1(legacyVerdict).schema, EVAL_VERDICT_SCHEMA_V1);
+
+	const canonicalArtifact = artifact("eval-legacy", "server-a");
+	const legacyArtifact = { ...canonicalArtifact, clio: canonicalArtifact.clioCoder } as Record<string, unknown>;
+	Reflect.deleteProperty(legacyArtifact, "clioCoder");
+	const parsed = parseEvalArtifactV4(legacyArtifact, "legacy artifact");
+	deepStrictEqual(parsed.clioCoder, canonicalArtifact.clioCoder);
+	strictEqual("clio" in (parsed as unknown as Record<string, unknown>), false);
 });
 
 test("verdict envelopes preserve identity and cannot turn malformed facts into passes", () => {

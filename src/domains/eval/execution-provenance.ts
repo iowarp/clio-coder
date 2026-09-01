@@ -128,7 +128,7 @@ function promptFragmentIdentities(
 			.sort((left, right) => left.id.localeCompare(right.id));
 	}
 	if (recipe === null) return [];
-	const selected = ["identity.clioCoder-worker", "operating.contract", "operating.worker"];
+	const selected = ["identity.clio-coder-worker", "operating.contract", "operating.worker"];
 	if (autonomy !== null) selected.push(`safety.${autonomy}`);
 	const fragments: EvalPromptFragmentIdentityV1[] = [];
 	try {

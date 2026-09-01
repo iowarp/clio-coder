@@ -49,7 +49,7 @@ function metricObject(metrics: ReplayMetrics, turnsToFirstSummaryCount: number):
 export function renderReplayJson(input: ReplayReportInput): string {
 	const filtered = Object.fromEntries(Object.entries(input.cascade.filtered).sort(([a], [b]) => a.localeCompare(b)));
 	const artifact = {
-		schema: "clio-context-replay-v2",
+		schema: "clio-coder-context-replay-v2",
 		config: {
 			policies: [...input.config.policies],
 			budgets: [...input.config.budgets],

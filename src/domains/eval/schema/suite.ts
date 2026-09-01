@@ -189,7 +189,7 @@ export interface EvalRunnerV2 {
 	/** One-run headless authority used to exercise allow and deny recovery. */
 	autonomy?: "read-only" | "suggest" | "auto-edit" | "full-auto";
 	/**
-	 * Fleet agent recipe id for the clio-run runner. When set the runner
+	 * Fleet agent recipe id for the clio-coder-run runner. When set the runner
 	 * invokes `clio-coder run --agent <id> --json`, whose stream ends with the full
 	 * sealed RunReceipt, so receipt-derived evidence metrics resolve. Without
 	 * it the main-agent headless path runs and emits no receipt.

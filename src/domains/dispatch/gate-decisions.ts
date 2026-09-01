@@ -433,9 +433,12 @@ function pendingDecisionPath(id: string, stateDir = clioStateDir()): string {
 	return join(pendingDecisionsDirectory(stateDir), `${id}.json`);
 }
 
-function decisionPayload(decision: Omit<GateDecisionArtifact, "integrity">): Record<string, unknown> {
+function decisionPayload(
+	decision: Omit<GateDecisionArtifact, "integrity">,
+	legacyNaming = false,
+): Record<string, unknown> {
 	return {
-		contract: "clio.gateDecision.integrity",
+		contract: legacyNaming ? "clio.gateDecision.integrity" : "clio-coder.gateDecision.integrity",
 		version: decision.version,
 		id: decision.id,
 		group: decision.group,
@@ -467,9 +470,9 @@ function decisionPayload(decision: Omit<GateDecisionArtifact, "integrity">): Rec
 	};
 }
 
-function decisionDigest(decision: Omit<GateDecisionArtifact, "integrity">): string {
+function decisionDigest(decision: Omit<GateDecisionArtifact, "integrity">, legacyNaming = false): string {
 	return createHash("sha256")
-		.update(JSON.stringify(decisionPayload(decision)), "utf8")
+		.update(JSON.stringify(decisionPayload(decision, legacyNaming)), "utf8")
 		.digest("hex");
 }
 
@@ -502,7 +505,9 @@ export function verifyGateDecisionArtifact(artifact: GateDecisionArtifact): Gate
 	const invalid = semanticError(artifact);
 	if (invalid !== null) return { ok: false, reason: invalid };
 	if (!/^[0-9a-f]{64}$/.test(artifact.integrity.digest)) return { ok: false, reason: "gate decision integrity invalid" };
-	return decisionDigest(artifactWithoutIntegrity(artifact)) === artifact.integrity.digest
+	const withoutIntegrity = artifactWithoutIntegrity(artifact);
+	return decisionDigest(withoutIntegrity) === artifact.integrity.digest ||
+		decisionDigest(withoutIntegrity, true) === artifact.integrity.digest
 		? { ok: true }
 		: { ok: false, reason: "gate decision integrity mismatch" };
 }
@@ -597,10 +602,13 @@ function cloneGateDecisionArtifact(artifact: GateDecisionArtifact): GateDecision
 	};
 }
 
-function pendingRecordPayload(record: PendingGateRecordWithoutIntegrity): Record<string, unknown> {
+function pendingRecordPayload(
+	record: PendingGateRecordWithoutIntegrity,
+	legacyNaming = false,
+): Record<string, unknown> {
 	if (record.kind === "output") {
 		return {
-			contract: "clio.gateDecision.pending",
+			contract: legacyNaming ? "clio.gateDecision.pending" : "clio-coder.gateDecision.pending",
 			version: record.version,
 			kind: record.kind,
 			id: record.id,
@@ -617,12 +625,12 @@ function pendingRecordPayload(record: PendingGateRecordWithoutIntegrity): Record
 	}
 	const decisionWithoutIntegrity = artifactWithoutIntegrity(record.decision);
 	return {
-		contract: "clio.gateDecision.pending",
+		contract: legacyNaming ? "clio.gateDecision.pending" : "clio-coder.gateDecision.pending",
 		version: record.version,
 		kind: record.kind,
 		id: record.id,
 		decision: {
-			...decisionPayload(decisionWithoutIntegrity),
+			...decisionPayload(decisionWithoutIntegrity, legacyNaming),
 			integrity: { ...record.decision.integrity },
 		},
 		...(record.finalOutput !== undefined ? { finalOutput: record.finalOutput } : {}),
@@ -631,9 +639,9 @@ function pendingRecordPayload(record: PendingGateRecordWithoutIntegrity): Record
 	};
 }
 
-function pendingRecordDigest(record: PendingGateRecordWithoutIntegrity): string {
+function pendingRecordDigest(record: PendingGateRecordWithoutIntegrity, legacyNaming = false): string {
 	return createHash("sha256")
-		.update(JSON.stringify(pendingRecordPayload(record)), "utf8")
+		.update(JSON.stringify(pendingRecordPayload(record, legacyNaming)), "utf8")
 		.digest("hex");
 }
 
@@ -724,7 +732,9 @@ function pendingSemanticError(value: unknown): string | null {
 function verifyPendingGateDecisionRecord(record: PendingGateDecisionRecord): GateDecisionVerification {
 	const invalid = pendingSemanticError(record);
 	if (invalid !== null) return { ok: false, reason: invalid };
-	return pendingRecordDigest(pendingRecordWithoutIntegrity(record)) === record.integrity.digest
+	const withoutIntegrity = pendingRecordWithoutIntegrity(record);
+	return pendingRecordDigest(withoutIntegrity) === record.integrity.digest ||
+		pendingRecordDigest(withoutIntegrity, true) === record.integrity.digest
 		? { ok: true }
 		: { ok: false, reason: "pending gate decision integrity mismatch" };
 }

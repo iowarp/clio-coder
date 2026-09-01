@@ -258,7 +258,7 @@ function printJsonSessionHeader(meta: SessionMeta | null): Record<string, unknow
 		cwd: meta.cwd,
 		target: meta.target,
 		model: meta.model,
-		clioVersion: meta.clioVersion,
+		clioCoderVersion: meta.clioCoderVersion,
 	};
 }
 

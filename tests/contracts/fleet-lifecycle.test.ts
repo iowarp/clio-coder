@@ -1,10 +1,19 @@
 import { deepStrictEqual, strictEqual } from "node:assert/strict";
+import { createHash } from "node:crypto";
+import { readFileSync, writeFileSync } from "node:fs";
+import { join } from "node:path";
 import { afterEach, describe, it } from "node:test";
 import { DEFAULT_SETTINGS } from "../../src/core/defaults.js";
 import { capacityDrain, setCapacityDraining } from "../../src/domains/dispatch/capacity-lease.js";
 import { compileExecutionPlan } from "../../src/domains/dispatch/execution-plan.js";
 import type { ExecutionStepResult } from "../../src/domains/dispatch/execution-scheduler.js";
 import { planFleetResume } from "../../src/domains/dispatch/fleet-run.js";
+import {
+	materializePendingGateDecision,
+	readPendingGateDecisions,
+	stagePendingGateDecision,
+	verifyGateDecisionArtifact,
+} from "../../src/domains/dispatch/gate-decisions.js";
 import { createFleetPlacementResolver } from "../../src/domains/dispatch/placement.js";
 import type { FleetRunRecord } from "../../src/domains/dispatch/state.js";
 import type { WorkerTransport } from "../../src/domains/dispatch/transport.js";
@@ -124,5 +133,70 @@ describe("fleet lifecycle boundary", () => {
 			ok: false,
 			reason: "vars",
 		});
+	});
+
+	it("writes canonical gate seals and accepts released decision and pending seals", async () => {
+		scratch = await newScratchClioHome("clio-gate-naming-");
+		const stateDir = join(scratch, "state");
+		const handle = stagePendingGateDecision(
+			{
+				group: "naming-contract",
+				topology: "review",
+				cycle: 1,
+				outcome: "pass",
+				subjects: [{ runId: "subject-run", digest: "a".repeat(64) }],
+				createdAt: "2026-09-01T00:00:00.000Z",
+			},
+			{ stateDir },
+		);
+		if (handle.record.kind !== "decision") throw new Error("staged gate record did not contain a decision");
+		const decision = handle.record.decision;
+		const decisionPayload = (contract: string) => ({
+			contract,
+			version: decision.version,
+			id: decision.id,
+			group: decision.group,
+			topology: decision.topology,
+			cycle: decision.cycle,
+			outcome: decision.outcome,
+			subjects: decision.subjects.map((subject) => ({ runId: subject.runId, digest: subject.digest })),
+			createdAt: decision.createdAt,
+		});
+		const sha256 = (value: unknown): string => createHash("sha256").update(JSON.stringify(value), "utf8").digest("hex");
+		strictEqual(decision.integrity.digest, sha256(decisionPayload("clio-coder.gateDecision.integrity")));
+
+		const legacyDecision = {
+			...decision,
+			integrity: { algorithm: "sha256" as const, digest: sha256(decisionPayload("clio.gateDecision.integrity")) },
+		};
+		deepStrictEqual(verifyGateDecisionArtifact(legacyDecision), { ok: true });
+		const legacyPending = {
+			...handle.record,
+			decision: legacyDecision,
+			integrity: { ...handle.record.integrity },
+		};
+		const pendingPayload = {
+			contract: "clio.gateDecision.pending",
+			version: legacyPending.version,
+			kind: legacyPending.kind,
+			id: legacyPending.id,
+			decision: {
+				...decisionPayload("clio.gateDecision.integrity"),
+				integrity: { ...legacyDecision.integrity },
+			},
+			createdAt: legacyPending.createdAt,
+		};
+		legacyPending.integrity.digest = sha256(pendingPayload);
+		writeFileSync(handle.path, JSON.stringify(legacyPending, null, 2), "utf8");
+		const sealedBytes = readFileSync(handle.path, "utf8");
+		const recovered = readPendingGateDecisions(stateDir);
+		deepStrictEqual(recovered.errors, []);
+		strictEqual(recovered.records.length, 1);
+		strictEqual(readFileSync(handle.path, "utf8"), sealedBytes, "legacy WAL read must not rewrite its seal");
+		const recoveredHandle = recovered.records[0];
+		if (recoveredHandle === undefined) throw new Error("legacy pending gate was not recovered");
+		const materialized = materializePendingGateDecision(recoveredHandle);
+		strictEqual(materialized.artifact.integrity.digest, legacyDecision.integrity.digest);
+		deepStrictEqual(verifyGateDecisionArtifact(materialized.artifact), { ok: true });
 	});
 });

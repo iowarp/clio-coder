@@ -69,7 +69,7 @@ export {
  */
 export function computeSettingsFingerprint(settings: unknown): string {
 	return createHash("sha256")
-		.update(`clio.settings:${canonicalJson(settings)}`, "utf8")
+		.update(`clio-coder.settings:${canonicalJson(settings)}`, "utf8")
 		.digest("hex");
 }
 
@@ -151,7 +151,7 @@ export function approvedIdentityForSpec(spec: {
 
 function workerSpecDigestOf(spec: unknown): string {
 	return createHash("sha256")
-		.update(`clio.workerSpec:${canonicalJson(spec)}`, "utf8")
+		.update(`clio-coder.workerSpec:${canonicalJson(spec)}`, "utf8")
 		.digest("hex");
 }
 

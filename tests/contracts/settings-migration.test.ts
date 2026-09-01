@@ -29,6 +29,7 @@ import {
 } from "../../src/domains/lifecycle/naming-tool-markers.js";
 import { regenerateYaziNamingProfile } from "../../src/domains/lifecycle/naming-yazi.js";
 import { parseYaziEventLine, renderYaziKeymap } from "../../src/domains/mux/index.js";
+import { createShareArchive, planShareImport } from "../../src/domains/share/archive.js";
 import { type IsolatedClioEnv, isolateClioEnv } from "../harness/scratch-env.js";
 
 describe("settings and migration boundary", () => {
@@ -262,6 +263,66 @@ integrations:
 		});
 		strictEqual(readFileSync(sealedPath, "utf8"), sealed, "sealed/history roots are outside the allowlist");
 		strictEqual(migrateMutableNamingState(state)[0]?.changed, false);
+	});
+
+	it("writes canonical share archives and normalizes released archives indefinitely at read", () => {
+		const canonical = createShareArchive({
+			cwd: scratch.dir,
+			scope: "project",
+			includeContext: false,
+			includePrompts: false,
+			includeSkills: false,
+			includeAgents: false,
+			includeFleets: false,
+			includeSettings: false,
+			includeExtensions: false,
+		});
+		strictEqual(canonical.kind, "clio-coder-share-archive");
+		strictEqual(canonical.manifest.format, "clio-coder.share.v1");
+		const legacyPath = join(scratch.dir, "legacy-share.json");
+		const legacy = {
+			...canonical,
+			kind: "clio-share-archive",
+			manifest: {
+				...canonical.manifest,
+				format: "clio.share.v1",
+				clioVersion: canonical.manifest.clioCoderVersion,
+			},
+		};
+		Reflect.deleteProperty(legacy.manifest, "clioCoderVersion");
+		writeFileSync(legacyPath, `${JSON.stringify(legacy)}\n`, "utf8");
+		const before = readFileSync(legacyPath, "utf8");
+		const plan = planShareImport(legacyPath, { cwd: scratch.dir, dryRun: true });
+		strictEqual(plan.archive?.kind, "clio-coder-share-archive");
+		strictEqual(plan.archive?.manifest.format, "clio-coder.share.v1");
+		strictEqual(plan.archive?.manifest.clioCoderVersion, canonical.manifest.clioCoderVersion);
+		strictEqual(readFileSync(legacyPath, "utf8"), before);
+	});
+
+	it("doctor counts legacy immutable history without rewriting it, including under --fix", () => {
+		const sessionPath = join(stateDir, "sessions", "cwd", "session", "current.jsonl");
+		const evalPath = join(scratch.dir, "data", "evals", "legacy.json");
+		const receiptPath = join(stateDir, "receipts", "legacy.json");
+		mkdirSync(join(sessionPath, ".."), { recursive: true });
+		mkdirSync(join(evalPath, ".."), { recursive: true });
+		mkdirSync(join(receiptPath, ".."), { recursive: true });
+		writeFileSync(sessionPath, '{"type":"clio_tool_start"}\n', "utf8");
+		writeFileSync(evalPath, '{"schema":"clio.eval.verdict.v1","clio":{"version":"0.4.0"}}\n', "utf8");
+		writeFileSync(receiptPath, '{"clioVersion":"0.4.0","contract":"clio.runReceipt.integrity"}\n', "utf8");
+		const snapshots = [sessionPath, evalPath, receiptPath].map((path) => readFileSync(path, "utf8"));
+		for (const fix of [false, true]) {
+			const finding = namingFootprintFindings({ cwd: scratch.dir, fix }).find(
+				(entry) => entry.name === "naming immutable history",
+			);
+			strictEqual(finding?.level, "warn");
+			ok(finding?.detail.includes("sessions=1"));
+			ok(finding?.detail.includes("evals=2"));
+			ok(finding?.detail.includes("receipts=2"));
+			deepStrictEqual(
+				[sessionPath, evalPath, receiptPath].map((path) => readFileSync(path, "utf8")),
+				snapshots,
+			);
+		}
 	});
 
 	it("data reset removes both tool marker spellings only with their selected root", () => {

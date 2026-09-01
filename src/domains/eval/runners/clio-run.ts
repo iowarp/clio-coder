@@ -1,4 +1,5 @@
 import { isAbsolute, relative, resolve, sep } from "node:path";
+import { normalizeClioCoderEventRecord } from "../../../core/naming-events.js";
 import { shellQuote } from "../../../core/shell-quote.js";
 import { clioStateDir } from "../../../core/xdg.js";
 import {
@@ -104,7 +105,7 @@ function toolCallMetricsFromJsonl(stdout: string): ToolCallMetrics {
 		try {
 			const parsed: unknown = JSON.parse(line);
 			if (!isRecord(parsed)) continue;
-			event = parsed;
+			event = normalizeClioCoderEventRecord(parsed);
 		} catch {
 			continue;
 		}
@@ -166,7 +167,7 @@ function toolBehaviorMetricEntriesFromJsonl(
 		try {
 			const parsed: unknown = JSON.parse(line);
 			if (!isRecord(parsed)) continue;
-			event = parsed;
+			event = normalizeClioCoderEventRecord(parsed);
 		} catch {
 			continue;
 		}

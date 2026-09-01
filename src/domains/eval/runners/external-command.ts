@@ -1,5 +1,6 @@
 import { spawn } from "node:child_process";
 import { performance } from "node:perf_hooks";
+import { normalizeClioCoderEventType } from "../../../core/naming-events.js";
 import type { RunReceipt } from "../../dispatch/types.js";
 import type { SessionEntry } from "../../session/entries.js";
 import { createEvalCallLedgerFold } from "../metrics/call-ledger-stream.js";
@@ -287,7 +288,7 @@ function createJsonlMetricCapture(): JsonlMetricCapture {
 }
 
 function compactMetricEvent(event: Record<string, unknown>): Record<string, unknown> | null {
-	const type = event.type;
+	const type = typeof event.type === "string" ? normalizeClioCoderEventType(event.type) : event.type;
 	if (type === "tool_execution_start") {
 		const toolName = stringField(event, "toolName");
 		if (toolName !== "dispatch" && toolName !== "code_nav" && toolName !== "read" && toolName !== "grep") {

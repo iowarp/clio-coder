@@ -1,5 +1,5 @@
 ---
-id: identity.clio-worker
+id: identity.clio-coder-worker
 version: 1
 description: Identity for a bounded Clio fleet worker
 ---

@@ -6,7 +6,7 @@
 	},
 	"suite": {
 		"id": "public-built-in-behavior-machinery",
-		"hash": "8ec6c7970dd6bdefedd1802292c2826705ebd2609b316044ee7b503f68401e14"
+		"hash": "75588f9e97faa80f3ea1ce7e3a69338066edad3f46758ef3f971f2e25c0ec258"
 	},
 	"matrixDimensions": [],
 	"results": [
@@ -40,9 +40,9 @@
 				"prompt": {
 					"fragments": [
 						{
-							"id": "identity.clio-worker",
+							"id": "identity.clio-coder-worker",
 							"version": 1,
-							"contentHash": "d7254a7562f34246977da3fca442a61d4342f17f527c6179d34c9bea320f7931"
+							"contentHash": "37811614093e1ab7453f33c8c026f5ff6c6e5352d8d717f293ffe40284aceb6d"
 						},
 						{
 							"id": "operating.contract",
@@ -65,7 +65,7 @@
 							"contentHash": "66b2daccc652b433664275b31c3bde4a7f73f8a2d988499ac0143ff48fa7cf61"
 						}
 					],
-					"compositionHash": "93a4e03159a16e6c444dd38ed768d9a75afd1908e6891697ae7cea93b68c9904"
+					"compositionHash": "cd0ad613498791480269215f5e5bdae20cf395da5ec62a9a3206ec00469556c6"
 				},
 				"recipe": {
 					"id": "architect",
@@ -127,9 +127,9 @@
 				"prompt": {
 					"fragments": [
 						{
-							"id": "identity.clio-worker",
+							"id": "identity.clio-coder-worker",
 							"version": 1,
-							"contentHash": "d7254a7562f34246977da3fca442a61d4342f17f527c6179d34c9bea320f7931"
+							"contentHash": "37811614093e1ab7453f33c8c026f5ff6c6e5352d8d717f293ffe40284aceb6d"
 						},
 						{
 							"id": "operating.contract",
@@ -152,7 +152,7 @@
 							"contentHash": "66b2daccc652b433664275b31c3bde4a7f73f8a2d988499ac0143ff48fa7cf61"
 						}
 					],
-					"compositionHash": "93a4e03159a16e6c444dd38ed768d9a75afd1908e6891697ae7cea93b68c9904"
+					"compositionHash": "cd0ad613498791480269215f5e5bdae20cf395da5ec62a9a3206ec00469556c6"
 				},
 				"recipe": {
 					"id": "architect",
@@ -214,9 +214,9 @@
 				"prompt": {
 					"fragments": [
 						{
-							"id": "identity.clio-worker",
+							"id": "identity.clio-coder-worker",
 							"version": 1,
-							"contentHash": "d7254a7562f34246977da3fca442a61d4342f17f527c6179d34c9bea320f7931"
+							"contentHash": "37811614093e1ab7453f33c8c026f5ff6c6e5352d8d717f293ffe40284aceb6d"
 						},
 						{
 							"id": "operating.contract",
@@ -239,7 +239,7 @@
 							"contentHash": "66b2daccc652b433664275b31c3bde4a7f73f8a2d988499ac0143ff48fa7cf61"
 						}
 					],
-					"compositionHash": "0478b540c1df35b4202beed25816789fb66e989d77e69952df797c9d9fbf7dd8"
+					"compositionHash": "f2b65c683bdad13bc7cadef8a1e832c08cea747211e1bb71c6396d008a789c18"
 				},
 				"recipe": {
 					"id": "coder",
@@ -301,9 +301,9 @@
 				"prompt": {
 					"fragments": [
 						{
-							"id": "identity.clio-worker",
+							"id": "identity.clio-coder-worker",
 							"version": 1,
-							"contentHash": "d7254a7562f34246977da3fca442a61d4342f17f527c6179d34c9bea320f7931"
+							"contentHash": "37811614093e1ab7453f33c8c026f5ff6c6e5352d8d717f293ffe40284aceb6d"
 						},
 						{
 							"id": "operating.contract",
@@ -326,7 +326,7 @@
 							"contentHash": "66b2daccc652b433664275b31c3bde4a7f73f8a2d988499ac0143ff48fa7cf61"
 						}
 					],
-					"compositionHash": "0478b540c1df35b4202beed25816789fb66e989d77e69952df797c9d9fbf7dd8"
+					"compositionHash": "f2b65c683bdad13bc7cadef8a1e832c08cea747211e1bb71c6396d008a789c18"
 				},
 				"recipe": {
 					"id": "coder",
@@ -388,9 +388,9 @@
 				"prompt": {
 					"fragments": [
 						{
-							"id": "identity.clio-worker",
+							"id": "identity.clio-coder-worker",
 							"version": 1,
-							"contentHash": "d7254a7562f34246977da3fca442a61d4342f17f527c6179d34c9bea320f7931"
+							"contentHash": "37811614093e1ab7453f33c8c026f5ff6c6e5352d8d717f293ffe40284aceb6d"
 						},
 						{
 							"id": "operating.contract",
@@ -413,7 +413,7 @@
 							"contentHash": "66b2daccc652b433664275b31c3bde4a7f73f8a2d988499ac0143ff48fa7cf61"
 						}
 					],
-					"compositionHash": "3b70765f4b65bc6a54c4d0da183d4ef80e0c5f95ba5f06efb89f27c4fe6dca03"
+					"compositionHash": "57da7864d56930a236eec0287155f913dca9ee80fa58101ebf221a88ffb10657"
 				},
 				"recipe": {
 					"id": "context-bootstrap",
@@ -475,9 +475,9 @@
 				"prompt": {
 					"fragments": [
 						{
-							"id": "identity.clio-worker",
+							"id": "identity.clio-coder-worker",
 							"version": 1,
-							"contentHash": "d7254a7562f34246977da3fca442a61d4342f17f527c6179d34c9bea320f7931"
+							"contentHash": "37811614093e1ab7453f33c8c026f5ff6c6e5352d8d717f293ffe40284aceb6d"
 						},
 						{
 							"id": "operating.contract",
@@ -500,7 +500,7 @@
 							"contentHash": "66b2daccc652b433664275b31c3bde4a7f73f8a2d988499ac0143ff48fa7cf61"
 						}
 					],
-					"compositionHash": "3b70765f4b65bc6a54c4d0da183d4ef80e0c5f95ba5f06efb89f27c4fe6dca03"
+					"compositionHash": "57da7864d56930a236eec0287155f913dca9ee80fa58101ebf221a88ffb10657"
 				},
 				"recipe": {
 					"id": "context-bootstrap",
@@ -562,9 +562,9 @@
 				"prompt": {
 					"fragments": [
 						{
-							"id": "identity.clio-worker",
+							"id": "identity.clio-coder-worker",
 							"version": 1,
-							"contentHash": "d7254a7562f34246977da3fca442a61d4342f17f527c6179d34c9bea320f7931"
+							"contentHash": "37811614093e1ab7453f33c8c026f5ff6c6e5352d8d717f293ffe40284aceb6d"
 						},
 						{
 							"id": "operating.contract",
@@ -649,9 +649,9 @@
 				"prompt": {
 					"fragments": [
 						{
-							"id": "identity.clio-worker",
+							"id": "identity.clio-coder-worker",
 							"version": 1,
-							"contentHash": "d7254a7562f34246977da3fca442a61d4342f17f527c6179d34c9bea320f7931"
+							"contentHash": "37811614093e1ab7453f33c8c026f5ff6c6e5352d8d717f293ffe40284aceb6d"
 						},
 						{
 							"id": "operating.contract",
@@ -736,9 +736,9 @@
 				"prompt": {
 					"fragments": [
 						{
-							"id": "identity.clio-worker",
+							"id": "identity.clio-coder-worker",
 							"version": 1,
-							"contentHash": "d7254a7562f34246977da3fca442a61d4342f17f527c6179d34c9bea320f7931"
+							"contentHash": "37811614093e1ab7453f33c8c026f5ff6c6e5352d8d717f293ffe40284aceb6d"
 						},
 						{
 							"id": "operating.contract",
@@ -761,7 +761,7 @@
 							"contentHash": "66b2daccc652b433664275b31c3bde4a7f73f8a2d988499ac0143ff48fa7cf61"
 						}
 					],
-					"compositionHash": "8573dc5ace9ac182eb9d00842ded80458da38c1d3db961aeeb056c79e419cde8"
+					"compositionHash": "039cadb99923b2b7cb42ae1de790da06c76df1dcd58d473f18cd9f0223710102"
 				},
 				"recipe": {
 					"id": "documenter",
@@ -823,9 +823,9 @@
 				"prompt": {
 					"fragments": [
 						{
-							"id": "identity.clio-worker",
+							"id": "identity.clio-coder-worker",
 							"version": 1,
-							"contentHash": "d7254a7562f34246977da3fca442a61d4342f17f527c6179d34c9bea320f7931"
+							"contentHash": "37811614093e1ab7453f33c8c026f5ff6c6e5352d8d717f293ffe40284aceb6d"
 						},
 						{
 							"id": "operating.contract",
@@ -848,7 +848,7 @@
 							"contentHash": "66b2daccc652b433664275b31c3bde4a7f73f8a2d988499ac0143ff48fa7cf61"
 						}
 					],
-					"compositionHash": "8573dc5ace9ac182eb9d00842ded80458da38c1d3db961aeeb056c79e419cde8"
+					"compositionHash": "039cadb99923b2b7cb42ae1de790da06c76df1dcd58d473f18cd9f0223710102"
 				},
 				"recipe": {
 					"id": "documenter",
@@ -910,9 +910,9 @@
 				"prompt": {
 					"fragments": [
 						{
-							"id": "identity.clio-worker",
+							"id": "identity.clio-coder-worker",
 							"version": 1,
-							"contentHash": "d7254a7562f34246977da3fca442a61d4342f17f527c6179d34c9bea320f7931"
+							"contentHash": "37811614093e1ab7453f33c8c026f5ff6c6e5352d8d717f293ffe40284aceb6d"
 						},
 						{
 							"id": "operating.contract",
@@ -935,7 +935,7 @@
 							"contentHash": "66b2daccc652b433664275b31c3bde4a7f73f8a2d988499ac0143ff48fa7cf61"
 						}
 					],
-					"compositionHash": "b2ed0de6e0a42be5a8f960e882617afbdaec75c1e942519f77f7ab2d33b7abe6"
+					"compositionHash": "8b133a6173572002a67bfd05b137a6ad56f14de3a36cd399224fd3f10f18fedc"
 				},
 				"recipe": {
 					"id": "git-master",
@@ -997,9 +997,9 @@
 				"prompt": {
 					"fragments": [
 						{
-							"id": "identity.clio-worker",
+							"id": "identity.clio-coder-worker",
 							"version": 1,
-							"contentHash": "d7254a7562f34246977da3fca442a61d4342f17f527c6179d34c9bea320f7931"
+							"contentHash": "37811614093e1ab7453f33c8c026f5ff6c6e5352d8d717f293ffe40284aceb6d"
 						},
 						{
 							"id": "operating.contract",
@@ -1022,7 +1022,7 @@
 							"contentHash": "66b2daccc652b433664275b31c3bde4a7f73f8a2d988499ac0143ff48fa7cf61"
 						}
 					],
-					"compositionHash": "b2ed0de6e0a42be5a8f960e882617afbdaec75c1e942519f77f7ab2d33b7abe6"
+					"compositionHash": "8b133a6173572002a67bfd05b137a6ad56f14de3a36cd399224fd3f10f18fedc"
 				},
 				"recipe": {
 					"id": "git-master",
@@ -1084,9 +1084,9 @@
 				"prompt": {
 					"fragments": [
 						{
-							"id": "identity.clio-worker",
+							"id": "identity.clio-coder-worker",
 							"version": 1,
-							"contentHash": "d7254a7562f34246977da3fca442a61d4342f17f527c6179d34c9bea320f7931"
+							"contentHash": "37811614093e1ab7453f33c8c026f5ff6c6e5352d8d717f293ffe40284aceb6d"
 						},
 						{
 							"id": "operating.contract",
@@ -1109,7 +1109,7 @@
 							"contentHash": "66b2daccc652b433664275b31c3bde4a7f73f8a2d988499ac0143ff48fa7cf61"
 						}
 					],
-					"compositionHash": "1a705a238819c04824df4f9022ec712a5dc6403569ed58a15663cf47c1131178"
+					"compositionHash": "870c49a1064bb0ff033866d7ef6cf6510193b32373e0a55553c787bf643b1cc3"
 				},
 				"recipe": {
 					"id": "oracle",
@@ -1171,9 +1171,9 @@
 				"prompt": {
 					"fragments": [
 						{
-							"id": "identity.clio-worker",
+							"id": "identity.clio-coder-worker",
 							"version": 1,
-							"contentHash": "d7254a7562f34246977da3fca442a61d4342f17f527c6179d34c9bea320f7931"
+							"contentHash": "37811614093e1ab7453f33c8c026f5ff6c6e5352d8d717f293ffe40284aceb6d"
 						},
 						{
 							"id": "operating.contract",
@@ -1196,7 +1196,7 @@
 							"contentHash": "66b2daccc652b433664275b31c3bde4a7f73f8a2d988499ac0143ff48fa7cf61"
 						}
 					],
-					"compositionHash": "1a705a238819c04824df4f9022ec712a5dc6403569ed58a15663cf47c1131178"
+					"compositionHash": "870c49a1064bb0ff033866d7ef6cf6510193b32373e0a55553c787bf643b1cc3"
 				},
 				"recipe": {
 					"id": "oracle",
@@ -1258,9 +1258,9 @@
 				"prompt": {
 					"fragments": [
 						{
-							"id": "identity.clio-worker",
+							"id": "identity.clio-coder-worker",
 							"version": 1,
-							"contentHash": "d7254a7562f34246977da3fca442a61d4342f17f527c6179d34c9bea320f7931"
+							"contentHash": "37811614093e1ab7453f33c8c026f5ff6c6e5352d8d717f293ffe40284aceb6d"
 						},
 						{
 							"id": "operating.contract",
@@ -1345,9 +1345,9 @@
 				"prompt": {
 					"fragments": [
 						{
-							"id": "identity.clio-worker",
+							"id": "identity.clio-coder-worker",
 							"version": 1,
-							"contentHash": "d7254a7562f34246977da3fca442a61d4342f17f527c6179d34c9bea320f7931"
+							"contentHash": "37811614093e1ab7453f33c8c026f5ff6c6e5352d8d717f293ffe40284aceb6d"
 						},
 						{
 							"id": "operating.contract",
@@ -1432,9 +1432,9 @@
 				"prompt": {
 					"fragments": [
 						{
-							"id": "identity.clio-worker",
+							"id": "identity.clio-coder-worker",
 							"version": 1,
-							"contentHash": "d7254a7562f34246977da3fca442a61d4342f17f527c6179d34c9bea320f7931"
+							"contentHash": "37811614093e1ab7453f33c8c026f5ff6c6e5352d8d717f293ffe40284aceb6d"
 						},
 						{
 							"id": "operating.contract",
@@ -1457,7 +1457,7 @@
 							"contentHash": "66b2daccc652b433664275b31c3bde4a7f73f8a2d988499ac0143ff48fa7cf61"
 						}
 					],
-					"compositionHash": "c9eb854c2d36d8b7f5b3871926471f1d8d20102017cc8a7870bc05562821dfb7"
+					"compositionHash": "1d56e97c4418ea7a913586865b53c3b2fa3074a89e8238a99056d1de4ef009b2"
 				},
 				"recipe": {
 					"id": "researcher",
@@ -1519,9 +1519,9 @@
 				"prompt": {
 					"fragments": [
 						{
-							"id": "identity.clio-worker",
+							"id": "identity.clio-coder-worker",
 							"version": 1,
-							"contentHash": "d7254a7562f34246977da3fca442a61d4342f17f527c6179d34c9bea320f7931"
+							"contentHash": "37811614093e1ab7453f33c8c026f5ff6c6e5352d8d717f293ffe40284aceb6d"
 						},
 						{
 							"id": "operating.contract",
@@ -1544,7 +1544,7 @@
 							"contentHash": "66b2daccc652b433664275b31c3bde4a7f73f8a2d988499ac0143ff48fa7cf61"
 						}
 					],
-					"compositionHash": "c9eb854c2d36d8b7f5b3871926471f1d8d20102017cc8a7870bc05562821dfb7"
+					"compositionHash": "1d56e97c4418ea7a913586865b53c3b2fa3074a89e8238a99056d1de4ef009b2"
 				},
 				"recipe": {
 					"id": "researcher",
@@ -1606,9 +1606,9 @@
 				"prompt": {
 					"fragments": [
 						{
-							"id": "identity.clio-worker",
+							"id": "identity.clio-coder-worker",
 							"version": 1,
-							"contentHash": "d7254a7562f34246977da3fca442a61d4342f17f527c6179d34c9bea320f7931"
+							"contentHash": "37811614093e1ab7453f33c8c026f5ff6c6e5352d8d717f293ffe40284aceb6d"
 						},
 						{
 							"id": "operating.contract",
@@ -1631,7 +1631,7 @@
 							"contentHash": "66b2daccc652b433664275b31c3bde4a7f73f8a2d988499ac0143ff48fa7cf61"
 						}
 					],
-					"compositionHash": "6da1f9b2e86704c6766f3cf63f29acd42c7e0bcebd9aa54acc98aa27c3da906f"
+					"compositionHash": "f31365c018e20454d5f52a2d8cb014f83964c3942adc1e3840fe7376e6c29554"
 				},
 				"recipe": {
 					"id": "scout",
@@ -1693,9 +1693,9 @@
 				"prompt": {
 					"fragments": [
 						{
-							"id": "identity.clio-worker",
+							"id": "identity.clio-coder-worker",
 							"version": 1,
-							"contentHash": "d7254a7562f34246977da3fca442a61d4342f17f527c6179d34c9bea320f7931"
+							"contentHash": "37811614093e1ab7453f33c8c026f5ff6c6e5352d8d717f293ffe40284aceb6d"
 						},
 						{
 							"id": "operating.contract",
@@ -1718,7 +1718,7 @@
 							"contentHash": "66b2daccc652b433664275b31c3bde4a7f73f8a2d988499ac0143ff48fa7cf61"
 						}
 					],
-					"compositionHash": "6da1f9b2e86704c6766f3cf63f29acd42c7e0bcebd9aa54acc98aa27c3da906f"
+					"compositionHash": "f31365c018e20454d5f52a2d8cb014f83964c3942adc1e3840fe7376e6c29554"
 				},
 				"recipe": {
 					"id": "scout",
@@ -1780,9 +1780,9 @@
 				"prompt": {
 					"fragments": [
 						{
-							"id": "identity.clio-worker",
+							"id": "identity.clio-coder-worker",
 							"version": 1,
-							"contentHash": "d7254a7562f34246977da3fca442a61d4342f17f527c6179d34c9bea320f7931"
+							"contentHash": "37811614093e1ab7453f33c8c026f5ff6c6e5352d8d717f293ffe40284aceb6d"
 						},
 						{
 							"id": "operating.contract",
@@ -1867,9 +1867,9 @@
 				"prompt": {
 					"fragments": [
 						{
-							"id": "identity.clio-worker",
+							"id": "identity.clio-coder-worker",
 							"version": 1,
-							"contentHash": "d7254a7562f34246977da3fca442a61d4342f17f527c6179d34c9bea320f7931"
+							"contentHash": "37811614093e1ab7453f33c8c026f5ff6c6e5352d8d717f293ffe40284aceb6d"
 						},
 						{
 							"id": "operating.contract",
@@ -1954,9 +1954,9 @@
 				"prompt": {
 					"fragments": [
 						{
-							"id": "identity.clio-worker",
+							"id": "identity.clio-coder-worker",
 							"version": 1,
-							"contentHash": "d7254a7562f34246977da3fca442a61d4342f17f527c6179d34c9bea320f7931"
+							"contentHash": "37811614093e1ab7453f33c8c026f5ff6c6e5352d8d717f293ffe40284aceb6d"
 						},
 						{
 							"id": "operating.contract",
@@ -2041,9 +2041,9 @@
 				"prompt": {
 					"fragments": [
 						{
-							"id": "identity.clio-worker",
+							"id": "identity.clio-coder-worker",
 							"version": 1,
-							"contentHash": "d7254a7562f34246977da3fca442a61d4342f17f527c6179d34c9bea320f7931"
+							"contentHash": "37811614093e1ab7453f33c8c026f5ff6c6e5352d8d717f293ffe40284aceb6d"
 						},
 						{
 							"id": "operating.contract",
@@ -2128,9 +2128,9 @@
 				"prompt": {
 					"fragments": [
 						{
-							"id": "identity.clio-worker",
+							"id": "identity.clio-coder-worker",
 							"version": 1,
-							"contentHash": "d7254a7562f34246977da3fca442a61d4342f17f527c6179d34c9bea320f7931"
+							"contentHash": "37811614093e1ab7453f33c8c026f5ff6c6e5352d8d717f293ffe40284aceb6d"
 						},
 						{
 							"id": "operating.contract",
@@ -2153,7 +2153,7 @@
 							"contentHash": "66b2daccc652b433664275b31c3bde4a7f73f8a2d988499ac0143ff48fa7cf61"
 						}
 					],
-					"compositionHash": "6851bf948d653f9ddf26f8ff8edfc4f4a8f684c973a694ec7f417451a4053f45"
+					"compositionHash": "5d11491be15d4fe383d1468e096ccb72f1878371f33b75ff3b7e40bfff49a894"
 				},
 				"recipe": {
 					"id": "wiki-writer",
@@ -2215,9 +2215,9 @@
 				"prompt": {
 					"fragments": [
 						{
-							"id": "identity.clio-worker",
+							"id": "identity.clio-coder-worker",
 							"version": 1,
-							"contentHash": "d7254a7562f34246977da3fca442a61d4342f17f527c6179d34c9bea320f7931"
+							"contentHash": "37811614093e1ab7453f33c8c026f5ff6c6e5352d8d717f293ffe40284aceb6d"
 						},
 						{
 							"id": "operating.contract",
@@ -2240,7 +2240,7 @@
 							"contentHash": "66b2daccc652b433664275b31c3bde4a7f73f8a2d988499ac0143ff48fa7cf61"
 						}
 					],
-					"compositionHash": "6851bf948d653f9ddf26f8ff8edfc4f4a8f684c973a694ec7f417451a4053f45"
+					"compositionHash": "5d11491be15d4fe383d1468e096ccb72f1878371f33b75ff3b7e40bfff49a894"
 				},
 				"recipe": {
 					"id": "wiki-writer",
