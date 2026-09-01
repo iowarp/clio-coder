@@ -1,5 +1,6 @@
 import { BusChannels } from "../core/bus-events.js";
 import type { SafeEventBus } from "../core/event-bus.js";
+import { normalizeClioCoderEventRecord, normalizeClioCoderEventType } from "../core/naming-events.js";
 import type { DispatchContract } from "../domains/dispatch/contract.js";
 import { durableAssistantTextFromEvent } from "../domains/dispatch/event-pump.js";
 import { defaultRunEventJournal, type RunEventJournalSink } from "../domains/dispatch/run-event-journal.js";
@@ -61,18 +62,19 @@ function isRecord(value: unknown): value is Record<string, unknown> {
 }
 
 function eventDetail(event: unknown): string | undefined {
-	const text = assistantTextFromEvent(event);
+	const normalized = isRecord(event) ? normalizeClioCoderEventRecord(event) : event;
+	const text = assistantTextFromEvent(normalized);
 	if (text.length > 0) return truncateUtf8(text, RUN_TAIL_TEXT_LIMIT, "...");
-	if (!isRecord(event)) return undefined;
-	if (event.type === "clio_coder_tool_finish" && isRecord(event.payload)) {
-		const tool = typeof event.payload.tool === "string" ? event.payload.tool : "tool";
-		const outcome = typeof event.payload.outcome === "string" ? event.payload.outcome : "";
+	if (!isRecord(normalized)) return undefined;
+	if (normalized.type === "clio_coder_tool_finish" && isRecord(normalized.payload)) {
+		const tool = typeof normalized.payload.tool === "string" ? normalized.payload.tool : "tool";
+		const outcome = typeof normalized.payload.outcome === "string" ? normalized.payload.outcome : "";
 		return `${tool} ${outcome}`.trim();
 	}
-	if (event.type === "attempt_start") {
-		const attempt = typeof event.attempt === "number" ? event.attempt : "?";
-		const runId = typeof event.runId === "string" ? event.runId : "?";
-		const reason = typeof event.reason === "string" ? event.reason : "retry";
+	if (normalized.type === "attempt_start") {
+		const attempt = typeof normalized.attempt === "number" ? normalized.attempt : "?";
+		const runId = typeof normalized.runId === "string" ? normalized.runId : "?";
+		const reason = typeof normalized.reason === "string" ? normalized.reason : "retry";
 		return truncateUtf8(`attempt ${attempt} -> ${runId}: ${reason}`, RUN_TAIL_TEXT_LIMIT, "...");
 	}
 	return undefined;
@@ -89,7 +91,7 @@ function eventDetail(event: unknown): string | undefined {
  * (src/domains/dispatch/run-event-journal-bridge.ts) call it.
  */
 export function runTailEntryFromEvent(event: unknown, at: string = new Date().toISOString()): RunTailEntry | null {
-	const type = isRecord(event) && typeof event.type === "string" ? event.type : "unknown";
+	const type = isRecord(event) && typeof event.type === "string" ? normalizeClioCoderEventType(event.type) : "unknown";
 	if (type === "heartbeat" || type === "message_update") return null;
 	const entry: RunTailEntry = { at, type };
 	const detail = eventDetail(event);

@@ -128,7 +128,7 @@ export function migrateNamingSettingsFile(path: string): NamingSettingsFileRepor
 	};
 }
 
-export function namingMigrationReportPath(stateDir: string): string {
+function namingMigrationReportPath(stateDir: string): string {
 	return join(stateDir, "migration-reports", `${CLIO_CODER_NAMING_MIGRATION_ID}.json`);
 }
 

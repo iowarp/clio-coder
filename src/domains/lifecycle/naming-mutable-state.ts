@@ -32,7 +32,7 @@ function isRecord(value: unknown): value is Record<string, unknown> {
 }
 
 /** Field-aware transform: user text and unknown string values are never searched or replaced. */
-export function transformMutableNamingState(value: unknown): { value: unknown; counts: MutableNamingCounts } {
+function transformMutableNamingState(value: unknown): { value: unknown; counts: MutableNamingCounts } {
 	const next = structuredClone(value);
 	const counts: MutableNamingCounts = { lifecycle: 0, toolGovernance: 0, source: 0 };
 	const visit = (current: unknown): void => {

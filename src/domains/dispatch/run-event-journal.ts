@@ -40,6 +40,7 @@
 
 import { appendFileSync, mkdirSync, readdirSync, readFileSync, rmSync, statSync } from "node:fs";
 import { join } from "node:path";
+import { normalizeClioCoderEventType } from "../../core/naming-events.js";
 import { clioStateDir, stateRootRemoved } from "../../core/xdg.js";
 
 /** Directory name under the state root holding one subdirectory per run. */
@@ -494,7 +495,7 @@ function parseJournalLine(raw: string): RunEventJournalLine | null {
 				seq: record.seq,
 				at: record.at,
 				kind: "event",
-				type: record.type,
+				type: normalizeClioCoderEventType(record.type),
 				...(detail === undefined ? {} : { detail }),
 			};
 		}

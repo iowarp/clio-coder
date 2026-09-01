@@ -43,8 +43,3 @@ export function namingCompatibilityEnvironment(
 ): Record<string, string> {
 	return { [canonical]: value, [legacy]: value };
 }
-
-/** Test-only reset for assertions that need to observe one-time diagnostics. */
-export function resetLegacyNamingWarningsForTest(): void {
-	warned.clear();
-}

@@ -53,7 +53,7 @@ export interface ClioSessionMeta {
 	endedAt: string | null;
 	model: string | null;
 	target: string | null;
-	clioVersion: string;
+	clioCoderVersion: string;
 	piMonoVersion: string;
 	platform: string;
 	nodeVersion: string;
@@ -462,7 +462,7 @@ function buildMeta(input: { cwd: string; model?: string | null; target?: string 
 		endedAt: null,
 		model: input.model ?? null,
 		target: input.target ?? null,
-		clioVersion: readClioVersion(),
+		clioCoderVersion: readClioVersion(),
 		piMonoVersion: readPiMonoVersion(),
 		platform: process.platform,
 		nodeVersion: process.version,
@@ -472,7 +472,13 @@ function buildMeta(input: { cwd: string; model?: string | null; target?: string 
 
 function readMetaFile(path: string): ClioSessionMeta {
 	const raw = readFileSync(path, "utf8");
-	return JSON.parse(raw) as ClioSessionMeta;
+	const parsed = JSON.parse(raw) as Record<string, unknown>;
+	const clioCoderVersion = parsed.clioCoderVersion ?? parsed.clioVersion;
+	if (typeof clioCoderVersion !== "string" || clioCoderVersion.length === 0) {
+		throw new Error(`session metadata has no Clio Coder version: ${path}`);
+	}
+	const { clioVersion: _legacyVersion, ...canonical } = parsed;
+	return { ...canonical, clioCoderVersion } as unknown as ClioSessionMeta;
 }
 
 const TURN_KINDS: readonly ClioTurnRecord["kind"][] = [

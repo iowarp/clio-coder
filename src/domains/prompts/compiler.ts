@@ -653,7 +653,7 @@ export function compileWorker(table: FragmentTable, inputs: WorkerPromptInputs):
 	if (inputs.hasBoundSkills && !inputs.hasCanonicalContext) {
 		throw new Error("prompts/compiler: bound skills require canonical context in the final attached tool surface");
 	}
-	const identity = lookupFragment(table, "identity.clio-worker", "worker identity");
+	const identity = lookupFragment(table, "identity.clio-coder-worker", "worker identity");
 	const operatingContract = lookupFragment(table, "operating.contract", "operating contract");
 	const workerContract = lookupFragment(table, "operating.worker", "worker contract");
 	const safety = lookupFragment(table, `safety.${inputs.autonomy}`, "safety");

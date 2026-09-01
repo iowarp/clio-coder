@@ -499,7 +499,7 @@ async function persistAskUserTranscript(
 		await mkdir(dir, { recursive: true });
 		if (!policy.transcriptPath) policy.transcriptPath = path.join(dir, transcriptFileName(policy));
 		const transcript = {
-			schema: "clio.ask_user.interview.v1",
+			schema: "clio-coder.ask_user.interview.v1",
 			id: policy.id,
 			status: policy.status,
 			startedAt: policy.startedAt,

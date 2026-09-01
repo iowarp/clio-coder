@@ -251,7 +251,7 @@ export function agentLedgerContribution(id: string, runId: string): AgentLedgerC
 		.filter((entry) => entry.runId === runId)
 		.sort((left, right) => left.sequence - right.sequence);
 	const digest = createHash("sha256")
-		.update(`clio.agentLedger:${canonicalJson(mine)}`, "utf8")
+		.update(`clio-coder.agentLedger:${canonicalJson(mine)}`, "utf8")
 		.digest("hex");
 	return { posted: contribution.posted, refused: contribution.refused, digest };
 }

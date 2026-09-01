@@ -1,17 +1,26 @@
 import { deepStrictEqual, ok, strictEqual, throws } from "node:assert/strict";
+import { createHash } from "node:crypto";
 import { describe, it } from "node:test";
 import { parseAgentRecipeSchema } from "../../src/domains/agents/recipe-schema.js";
 import { parseCodeReport } from "../../src/domains/agents/result-contract.js";
 import { normalizeAgentSpec, resolveAgentToolCompatibility } from "../../src/domains/agents/spec.js";
 import {
 	approvedIdentityForSpec,
+	computeSettingsFingerprint,
 	createBoundedEventQueue,
 	verifyWorkerAttestation,
 } from "../../src/domains/dispatch/worker-protocol.js";
 import { mergeCapabilities } from "../../src/domains/providers/capabilities.js";
 import { EMPTY_CAPABILITIES } from "../../src/domains/providers/types/capability-flags.js";
 import { projectWorkerEventForStdout } from "../../src/worker/event-projection.js";
-import { WORKER_PROTOCOL_VERSION } from "../../src/worker/protocol.js";
+import {
+	canonicalJson,
+	endpointIdentityHash,
+	parseBulkFrame,
+	toolSignatureOf,
+	WORKER_PROTOCOL_VERSION,
+	workerSpecDigest,
+} from "../../src/worker/protocol.js";
 import { createOrderedSteerHandler } from "../../src/worker/stdin-demux.js";
 
 function recipe() {
@@ -97,6 +106,21 @@ describe("worker boundary", () => {
 		deepStrictEqual(verifyWorkerAttestation(attestation as never, approved), { ok: true });
 		const drift = verifyWorkerAttestation({ ...attestation, toolSignature: "changed" } as never, approved);
 		strictEqual(drift.ok, false);
+	});
+
+	it("emits canonical hash domains and normalizes released event ids at the wire read boundary", () => {
+		const sha256 = (value: string): string => createHash("sha256").update(value, "utf8").digest("hex");
+		const settings = { version: 2, chat: { target: "local" } };
+		const spec = { specVersion: 5, agentId: "coder" };
+		deepStrictEqual(parseBulkFrame('{"type":"clio_tool_finish","payload":{"tool":"read","outcome":"ok"}}'), {
+			ok: true,
+			value: { type: "clio_coder_tool_finish", payload: { tool: "read", outcome: "ok" } },
+		});
+		strictEqual(computeSettingsFingerprint(settings), sha256(`clio-coder.settings:${canonicalJson(settings)}`));
+		strictEqual(workerSpecDigest(spec), sha256(`clio-coder.workerSpec:${canonicalJson(spec)}`));
+		strictEqual(toolSignatureOf(["write", "read"]), sha256("clio-coder.tools:read,write"));
+		strictEqual(endpointIdentityHash(undefined), sha256("clio-coder.endpoint:none"));
+		strictEqual(endpointIdentityHash("https://example.test/v1/"), sha256("clio-coder.endpoint:https://example.test:/v1"));
 	});
 
 	it("projects incremental events and preserves terminal evidence under backpressure", () => {

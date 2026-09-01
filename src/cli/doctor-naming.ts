@@ -9,6 +9,7 @@ import {
 	migrateNamingSettingsFile,
 	transformNamingSettingsDocument,
 } from "../domains/lifecycle/migrations/2026-09-01-clio-coder-naming.js";
+import { inspectNamingHistory } from "../domains/lifecycle/naming-history.js";
 import {
 	inspectInstalledNamingResources,
 	inspectModelOverlayNaming,
@@ -188,6 +189,26 @@ function toolMarkerNamingFinding(fix: boolean): DoctorFinding {
 	}
 }
 
+function immutableHistoryNamingFinding(): DoctorFinding {
+	const dirs = resolveClioDirs();
+	const counts = inspectNamingHistory({ stateDir: dirs.state, dataDir: dirs.data });
+	const errors = counts.filter((entry) => entry.error !== null);
+	if (errors.length > 0) {
+		return {
+			ok: false,
+			name: "naming immutable history",
+			detail: errors.map((entry) => `${entry.area}: ${entry.error}`).join("; "),
+		};
+	}
+	const legacy = counts.reduce((sum, entry) => sum + entry.legacyIdentifiers, 0);
+	return {
+		ok: true,
+		...(legacy > 0 ? { level: "warn" as const } : {}),
+		name: "naming immutable history",
+		detail: `${counts.map((entry) => `${entry.area}=${entry.legacyIdentifiers}`).join("; ")} legacy identifiers; read-only retention, no rewrite`,
+	};
+}
+
 /** Read-only naming-footprint settings sweep plus the sanctioned deterministic fixes. */
 export function namingFootprintFindings(options: NamingDoctorOptions = {}): DoctorFinding[] {
 	const cwd = options.cwd ?? process.cwd();
@@ -221,5 +242,6 @@ export function namingFootprintFindings(options: NamingDoctorOptions = {}): Doct
 	findings.push(...namingResourceFindings({ ...options, cwd }));
 	findings.push(yaziNamingFinding(Boolean(options.fix)));
 	findings.push(toolMarkerNamingFinding(Boolean(options.fix)));
+	findings.push(immutableHistoryNamingFinding());
 	return findings;
 }

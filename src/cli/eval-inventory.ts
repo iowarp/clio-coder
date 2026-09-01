@@ -10,7 +10,7 @@
  *
  * An eval artifact is the largest single host-only payload in this harness, and
  * the reason is worth stating rather than discovering. `results[].artifacts`
- * holds whatever the runner attached, which for the `clio-run` runner is the
+ * holds whatever the runner attached, which for the `clio-coder-run` runner is the
  * entire session transcript: the operator's task text, every tool argument and
  * result, the model's replies, provider endpoint URLs, error prose, and the
  * prepared workspace path. There is no width at which a projection of that is

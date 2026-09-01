@@ -63,9 +63,12 @@ function artifactPayload(artifact: ProtectedArtifact): Record<string, unknown> {
 	};
 }
 
-function recordPayload(record: Omit<PendingProtectedArtifactRecord, "integrity">): Record<string, unknown> {
+function recordPayload(
+	record: Omit<PendingProtectedArtifactRecord, "integrity">,
+	legacyNaming = false,
+): Record<string, unknown> {
 	return {
-		contract: "clio.protectedArtifact.pending",
+		contract: legacyNaming ? "clio.protectedArtifact.pending" : "clio-coder.protectedArtifact.pending",
 		version: record.version,
 		id: record.id,
 		sessionId: record.sessionId,
@@ -81,9 +84,9 @@ function recordPayload(record: Omit<PendingProtectedArtifactRecord, "integrity">
 	};
 }
 
-function digest(record: Omit<PendingProtectedArtifactRecord, "integrity">): string {
+function digest(record: Omit<PendingProtectedArtifactRecord, "integrity">, legacyNaming = false): string {
 	return createHash("sha256")
-		.update(JSON.stringify(recordPayload(record)), "utf8")
+		.update(JSON.stringify(recordPayload(record, legacyNaming)), "utf8")
 		.digest("hex");
 }
 
@@ -153,7 +156,10 @@ function parseRecord(value: unknown, sessionId: string): PendingProtectedArtifac
 		createdAt: value.createdAt,
 		integrity: { algorithm: "sha256", digest: value.integrity.digest },
 	};
-	return digest(withoutIntegrity(parsed)) === parsed.integrity.digest ? parsed : null;
+	const without = withoutIntegrity(parsed);
+	return digest(without) === parsed.integrity.digest || digest(without, true) === parsed.integrity.digest
+		? parsed
+		: null;
 }
 
 export function stagePendingProtectedArtifact(
