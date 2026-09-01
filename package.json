@@ -1,6 +1,6 @@
 {
 	"name": "@iowarp/clio-coder",
-	"version": "0.4.1",
+	"version": "0.4.2",
 	"description": "Coding agent for HPC and scientific-software developers, part of IOWarp's CLIO ecosystem of agentic science.",
 	"keywords": [
 		"ai",
@@ -82,7 +82,7 @@
 		"ci": "npm run typecheck && npm run lint && npm run skills:check && npm run build && npm run test && npm run test:trace-viewer",
 		"ci:release": "npm run ci && node scripts/check-release.mjs",
 		"install:local": "bash scripts/install-local.sh",
-		"prepublishOnly": "npm run ci:release",
+		"prepublishOnly": "CLIO_CODER_RELEASE_CONTEXT=publish npm run ci:release",
 		"skills:pin": "node --import tsx scripts/pin-skills.ts",
 		"skills:check": "node --import tsx scripts/pin-skills.ts --check"
 	},
