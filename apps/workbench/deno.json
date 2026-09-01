@@ -1,11 +1,11 @@
 {
-	"name": "@iowarp/clio-workbench",
+	"name": "@iowarp/clio-coder-workbench",
 	"version": "0.0.1",
 	"exports": "./main.ts",
 	"nodeModulesDir": "auto",
 	"tasks": {
 		"build": "deno run -A npm:vite@8.2.1 build",
-		"start": "deno run --no-prompt --allow-env=DENO_SERVE_ADDRESS,HOME,XDG_STATE_HOME,CLIO_WORKBENCH_STATE_DIR --allow-net=127.0.0.1 --allow-read --allow-write --allow-run=clio-coder,kill,xdg-open main.ts",
+		"start": "deno run --no-prompt --allow-env=DENO_SERVE_ADDRESS,HOME,XDG_STATE_HOME,CLIO_CODER_GUI_STATE_DIR,CLIO_WORKBENCH_STATE_DIR --allow-net=127.0.0.1 --allow-read --allow-write --allow-run=clio-coder,kill,xdg-open main.ts",
 		"browser": "deno task build && deno task start",
 		"smoke:browser": "deno task build && deno run -A scripts/browser-smoke.ts",
 		"format": "deno fmt --check .",
@@ -13,14 +13,14 @@
 		"lint": "deno lint *.ts scripts src tests",
 		"check": "deno check *.ts scripts src/main.tsx tests",
 		"test": "deno test --no-prompt --allow-env=NODE_ENV --allow-read --allow-write --allow-net=127.0.0.1 --allow-run=deno,kill tests",
-		"test:clio-real": "deno test --no-prompt --allow-env=CLIO_WORKBENCH_CLI_ENTRY --allow-read --allow-write --allow-net=127.0.0.1 --allow-run=node,kill,git tests/clio-real-integration.ts",
+		"test:clio-real": "deno test --no-prompt --allow-env=CLIO_CODER_GUI_CLI_ENTRY --allow-read --allow-write --allow-net=127.0.0.1 --allow-run=node,kill,git tests/clio-real-integration.ts",
 		"verify": "deno task format && deno task lint && deno task check && deno task test && deno task build",
 		"gui:compile": "deno run -A scripts/gui-lifecycle.ts compile",
 		"gui:install": "deno run -A scripts/gui-lifecycle.ts install",
 		"gui:upgrade": "deno run -A scripts/gui-lifecycle.ts upgrade",
 		"gui:status": "deno run -A scripts/gui-lifecycle.ts status",
 		"gui:uninstall": "deno run -A scripts/gui-lifecycle.ts uninstall",
-		"desktop:windows": "deno task build && deno desktop --backend webview --target x86_64-pc-windows-msvc --allow-env=DENO_SERVE_ADDRESS,HOME,XDG_STATE_HOME,CLIO_WORKBENCH_STATE_DIR --allow-net=127.0.0.1 --allow-read --allow-write --allow-run=clio-coder,kill --include dist --output .desktop/ClioCoder main.ts"
+		"desktop:windows": "deno task build && deno desktop --backend webview --target x86_64-pc-windows-msvc --allow-env=DENO_SERVE_ADDRESS,HOME,XDG_STATE_HOME,CLIO_CODER_GUI_STATE_DIR,CLIO_WORKBENCH_STATE_DIR --allow-net=127.0.0.1 --allow-read --allow-write --allow-run=clio-coder,kill --include dist --output .desktop/clio-coder-gui main.ts"
 	},
 	"compilerOptions": {
 		"jsx": "react-jsx",
@@ -60,11 +60,11 @@
 	"desktop": {
 		"app": {
 			"name": "Clio Coder",
-			"identifier": "ai.iowarp.clio.workbench"
+			"identifier": "ai.iowarp.clio-coder.gui"
 		},
 		"backend": "webview",
 		"output": {
-			"windows": "./.desktop/ClioCoder"
+			"windows": "./.desktop/clio-coder-gui"
 		}
 	}
 }

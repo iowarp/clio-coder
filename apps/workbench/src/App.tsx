@@ -705,9 +705,9 @@ function SessionRow({ session, open, actions, busy, onDelete }: {
 }) {
 	const [editing, setEditing] = useState(false);
 	const [draft, setDraft] = useState(session.label ?? "");
-	const bound = open.clio.session?.id === session.id;
+	const bound = open.clioCoder.session?.id === session.id;
 	const unknown = session.state === "unknown";
-	const capabilities = open.clio.capabilities;
+	const capabilities = open.clioCoder.capabilities;
 	const title = session.label ??
 		(session.preview.length > 0 ? session.preview : "Untitled session");
 
@@ -1098,7 +1098,7 @@ const ProjectRail = memo(function ProjectRail({
 								This list is shortened; Clio Coder has more sessions than are shown.
 							</p>
 						)}
-						{open.clio.capabilities?.list === false && (
+						{open.clioCoder.capabilities?.list === false && (
 							<p className="tree-note">
 								This Clio Coder cannot list its earlier sessions over ACP.
 							</p>
@@ -1123,7 +1123,7 @@ function sameProjectRailProps(
 		previousOpen.treeTruncated === nextOpen.treeTruncated &&
 		previousOpen.sessions === nextOpen.sessions &&
 		previousOpen.sessionsTruncated === nextOpen.sessionsTruncated &&
-		previousOpen.clio === nextOpen.clio
+		previousOpen.clioCoder === nextOpen.clioCoder
 	);
 	return sameOpen &&
 		previous.state.recent === next.state.recent &&
@@ -1496,8 +1496,8 @@ const EvidenceRail = memo(function EvidenceRail({
 						</div>
 						{open !== null && (
 							<StatusMark
-								tone={PHASE_PRESENTATION[open.clio.phase].tone}
-								label={PHASE_PRESENTATION[open.clio.phase].label}
+								tone={PHASE_PRESENTATION[open.clioCoder.phase].tone}
+								label={PHASE_PRESENTATION[open.clioCoder.phase].label}
 							/>
 						)}
 					</div>
@@ -1547,7 +1547,7 @@ const EvidenceRail = memo(function EvidenceRail({
 					>
 						<div className="eyebrow">SESSION ROUTING</div>
 						<h3 id="observer-session-title">Bound by Clio Coder</h3>
-						{open.clio.session === null
+						{open.clioCoder.session === null
 							? (
 								<p className="observer-note">
 									No session is bound to this project.
@@ -1557,15 +1557,15 @@ const EvidenceRail = memo(function EvidenceRail({
 								<dl className="observer-facts">
 									<div>
 										<dt>Target</dt>
-										<dd>{open.clio.session.target ?? "unselected"}</dd>
+										<dd>{open.clioCoder.session.target ?? "unselected"}</dd>
 									</div>
 									<div>
 										<dt>Model</dt>
-										<dd>{open.clio.session.model ?? "unselected"}</dd>
+										<dd>{open.clioCoder.session.model ?? "unselected"}</dd>
 									</div>
 									<div>
 										<dt>Working freedom</dt>
-										<dd>{AUTONOMY_LABELS[open.clio.session.autonomy]}</dd>
+										<dd>{AUTONOMY_LABELS[open.clioCoder.session.autonomy]}</dd>
 									</div>
 								</dl>
 							)}
@@ -1893,7 +1893,7 @@ const EvidenceRail = memo(function EvidenceRail({
 									</div>
 								</div>
 								{(open?.projection.timelineTruncated === true ||
-									open?.clio.session?.replayTruncated === true) && (
+									open?.clioCoder.session?.replayTruncated === true) && (
 									<p className="observer-note">
 										This view is shortened; Clio Coder still holds the full context.
 									</p>
@@ -1997,7 +1997,7 @@ function sameEvidenceRailProps(
 	const nextOpen = next.state.open;
 	const sameOpen = previousOpen === nextOpen || (
 		previousOpen !== null && nextOpen !== null &&
-		previousOpen.clio === nextOpen.clio &&
+		previousOpen.clioCoder === nextOpen.clioCoder &&
 		previousOpen.projection.activeTurn === nextOpen.projection.activeTurn &&
 		previousOpen.projection.timelineTruncated ===
 			nextOpen.projection.timelineTruncated &&
@@ -4913,8 +4913,8 @@ export const EvalReports = memo(function EvalReports({ inventory }: { inventory:
 									<div>
 										<dt>Built by</dt>
 										<dd>
-											Clio Coder {report.clioVersion ?? "unrecorded"}
-											{report.clioCommit === null ? "" : ` · ${report.clioCommit.slice(0, 12)}`}
+											Clio Coder {report.clioCoderVersion ?? "unrecorded"}
+											{report.clioCoderCommit === null ? "" : ` · ${report.clioCoderCommit.slice(0, 12)}`}
 										</dd>
 									</div>
 									<div>
@@ -6002,8 +6002,8 @@ function ConversationCanvas({
 				<div className="conversation__telemetry">
 					{open && (
 						<StatusMark
-							tone={PHASE_PRESENTATION[open.clio.phase].tone}
-							label={PHASE_PRESENTATION[open.clio.phase].label}
+							tone={PHASE_PRESENTATION[open.clioCoder.phase].tone}
+							label={PHASE_PRESENTATION[open.clioCoder.phase].label}
 						/>
 					)}
 					{open && (
@@ -6106,11 +6106,11 @@ function ConversationCanvas({
 				{open !== null && workspaceView === "conversation"
 					? (
 						<div className="conversation__content">
-							{open.clio.lastFailure && (
+							{open.clioCoder.lastFailure && (
 								<section className="conversation__failure" role="status">
 									<div className="eyebrow">CLIO CODER REPORTED A FAILURE</div>
-									<p>{open.clio.lastFailure.summary}</p>
-									<code>{open.clio.lastFailure.code}</code>
+									<p>{open.clioCoder.lastFailure.summary}</p>
+									<code>{open.clioCoder.lastFailure.code}</code>
 								</section>
 							)}
 							{
@@ -6120,12 +6120,12 @@ function ConversationCanvas({
 							<FleetStrip runs={open.fleet} />
 							<ChatTranscript
 								turns={turns}
-								phase={open.clio.phase}
+								phase={open.clioCoder.phase}
 								pendingPermission={activeTurn === null ? null : pendingPermission}
 								nowMs={nowMs}
 								onResolve={resolvePending}
 								truncated={projection?.timelineTruncated === true ||
-									open.clio.session?.replayTruncated === true}
+									open.clioCoder.session?.replayTruncated === true}
 							>
 								{emptyTranscript}
 								{pendingPermission !== null && activeTurn !== null &&
@@ -6206,15 +6206,15 @@ function ConversationCanvas({
 					)
 					: (
 						<div className="conversation__content">
-							{open.clio.lastFailure && (
+							{open.clioCoder.lastFailure && (
 								<section className="conversation__failure" role="status">
 									<div className="eyebrow">CLIO CODER REPORTED A FAILURE</div>
-									<p>{open.clio.lastFailure.summary}</p>
-									<code>{open.clio.lastFailure.code}</code>
+									<p>{open.clioCoder.lastFailure.summary}</p>
+									<code>{open.clioCoder.lastFailure.code}</code>
 								</section>
 							)}
 							{(projection?.timelineTruncated === true ||
-								open.clio.session?.replayTruncated === true) && (
+								open.clioCoder.session?.replayTruncated === true) && (
 								<p className="timeline-note">
 									Earlier turns are not shown; Clio Coder still has the full context.
 								</p>
@@ -7422,13 +7422,13 @@ function SettingsModal({ state, actions, dispatch, onClose }: {
 					</p>
 				</div>
 				{open === null && <p>Open a project before reading Clio Coder's settings.</p>}
-				{open !== null && open.clio.capabilities?.settings !== true && (
+				{open !== null && open.clioCoder.capabilities?.settings !== true && (
 					<p className="settings__unavailable">
 						This Clio Coder does not expose settings over ACP.
 					</p>
 				)}
 				{open !== null && settings === null &&
-					open.clio.capabilities?.settings === true && (
+					open.clioCoder.capabilities?.settings === true && (
 					<button
 						type="button"
 						className="button button--quiet"
@@ -7531,7 +7531,7 @@ function SettingsModal({ state, actions, dispatch, onClose }: {
 								Health is a point-in-time probe, never an assumed green light.
 							</p>
 						</div>
-						{open.clio.capabilities?.targets !== true
+						{open.clioCoder.capabilities?.targets !== true
 							? (
 								<p className="settings__unavailable">
 									This Clio Coder does not expose targets over ACP.
@@ -7799,13 +7799,13 @@ const BottomStatus = memo(
 		{ state, actions, nowMs, obscured, approvalEscalated }: BottomStatusProps,
 	) {
 		const open = state.open;
-		const session = open?.clio.session ?? null;
+		const session = open?.clioCoder.session ?? null;
 		const activeTurn = open?.projection.activeTurn ?? null;
 		const activeTurnStartedMs = activeTurn === null ? Number.NaN : Date.parse(activeTurn.startedAt);
 		const elapsed = Number.isFinite(activeTurnStartedMs)
 			? Math.max(0, Math.floor((nowMs - activeTurnStartedMs) / 1_000))
 			: 0;
-		const phase = open?.clio.phase ?? "closed";
+		const phase = open?.clioCoder.phase ?? "closed";
 		const operation = open === null
 			? "no project"
 			: phase === "awaiting-approval"
@@ -7816,7 +7816,7 @@ const BottomStatus = memo(
 			? `running ${formatDuration(elapsed)}`
 			: "idle";
 		const autonomyEditable = open !== null && session !== null &&
-			open.clio.capabilities?.autonomy === true &&
+			open.clioCoder.capabilities?.autonomy === true &&
 			!isPromptBlocked(open);
 		// Settings describe what Clio Coder would bind next, which is a different fact from
 		// what the bound session is running on. Only show it when the two disagree.
@@ -7932,7 +7932,7 @@ function sameBottomStatusProps(
 	const sameOpen = previousOpen === nextOpen || (
 		previousOpen !== null && nextOpen !== null &&
 		previousOpen.project === nextOpen.project &&
-		previousOpen.clio === nextOpen.clio &&
+		previousOpen.clioCoder === nextOpen.clioCoder &&
 		previousOpen.settings === nextOpen.settings &&
 		previousOpen.projection.activeTurn === nextOpen.projection.activeTurn
 	);

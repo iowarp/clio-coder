@@ -82,7 +82,7 @@ export interface HostTurnContext {
 }
 
 export type HostEvent =
-	| Readonly<{ type: "clio.state"; projectId: string; snapshot: WireClioSnapshot }>
+	| Readonly<{ type: "clio-coder.state"; projectId: string; snapshot: WireClioSnapshot }>
 	| Readonly<{
 		type: "session.list";
 		projectId: string;
@@ -175,8 +175,7 @@ const SAFE_SETTING_KEYS = [
 	"orchestrator.thinkingLevel",
 	"autonomy",
 ] as const;
-// Keep the machine identifier stable for ACP compatibility. The visible title is the product name.
-const CLIENT_INFO = { name: "clio-workbench", title: PRODUCT_NAME, version: "0.0.1" } as const;
+const CLIENT_INFO = { name: "clio-coder-workbench", title: PRODUCT_NAME, version: "0.0.1" } as const;
 /**
  * Every kind this host is prepared to project. Asking for a kind the peer does
  * not know is harmless; the peer intersects the request with its own allowlist.
@@ -490,86 +489,95 @@ type PublicClioFailure = Readonly<{ code: string; summary: string }>;
 
 const CLIO_REMOTE_FAILURES: Readonly<Record<string, PublicClioFailure>> = {
 	not_initialized: {
-		code: "clio-not-initialized",
+		code: "clio-coder-not-initialized",
 		summary: "Clio Coder rejected the operation because its ACP session was not initialized.",
 	},
 	already_initialized: {
-		code: "clio-already-initialized",
+		code: "clio-coder-already-initialized",
 		summary: "Clio Coder reported that its ACP connection was already initialized.",
 	},
 	protocol_version_unsupported: {
-		code: "clio-protocol-version-unsupported",
+		code: "clio-coder-protocol-version-unsupported",
 		summary: "Clio Coder does not support the ACP protocol version required by the GUI.",
 	},
-	invalid_params: { code: "clio-invalid-params", summary: "Clio Coder rejected the bounded ACP parameters." },
+	invalid_params: { code: "clio-coder-invalid-params", summary: "Clio Coder rejected the bounded ACP parameters." },
 	session_cwd_mismatch: {
-		code: "clio-session-cwd-mismatch",
+		code: "clio-coder-session-cwd-mismatch",
 		summary: "Clio Coder rejected the session because its project root did not match the launched workspace.",
 	},
 	session_limit: {
-		code: "clio-session-limit",
+		code: "clio-coder-session-limit",
 		summary: "Clio Coder rejected an unexpected additional session on this owned process.",
 	},
-	session_unknown: { code: "clio-session-unknown", summary: "Clio Coder does not know that session for this project." },
+	session_unknown: {
+		code: "clio-coder-session-unknown",
+		summary: "Clio Coder does not know that session for this project.",
+	},
 	session_open: {
-		code: "clio-session-open",
+		code: "clio-coder-session-open",
 		summary: "Clio Coder cannot tell whether another process still holds that session, so it refused.",
 	},
-	prompt_active: { code: "clio-prompt-active", summary: "Clio Coder is still working on the previous prompt." },
-	prompt_not_admitted: { code: "clio-prompt-not-admitted", summary: "Clio Coder could not admit this turn." },
-	turn_failed: { code: "clio-turn-failed", summary: "Clio Coder reported that the admitted turn failed." },
+	prompt_active: { code: "clio-coder-prompt-active", summary: "Clio Coder is still working on the previous prompt." },
+	prompt_not_admitted: { code: "clio-coder-prompt-not-admitted", summary: "Clio Coder could not admit this turn." },
+	turn_failed: { code: "clio-coder-turn-failed", summary: "Clio Coder reported that the admitted turn failed." },
 	permission_expired: {
-		code: "clio-permission-expired",
+		code: "clio-coder-permission-expired",
 		summary: "An approval waited past Clio Coder's own ceiling. Clio Coder stopped the turn; nothing was denied.",
 	},
-	parse_error: { code: "clio-parse-error", summary: "Clio Coder rejected input that did not parse as JSON." },
-	invalid_request: { code: "clio-invalid-request", summary: "Clio Coder rejected an invalid JSON-RPC request shape." },
-	method_not_found: { code: "clio-method-not-found", summary: "This Clio Coder does not support that method." },
-	internal_error: { code: "clio-internal-error", summary: "Clio Coder reported an internal ACP handler failure." },
+	parse_error: { code: "clio-coder-parse-error", summary: "Clio Coder rejected input that did not parse as JSON." },
+	invalid_request: {
+		code: "clio-coder-invalid-request",
+		summary: "Clio Coder rejected an invalid JSON-RPC request shape.",
+	},
+	method_not_found: { code: "clio-coder-method-not-found", summary: "This Clio Coder does not support that method." },
+	internal_error: {
+		code: "clio-coder-internal-error",
+		summary: "Clio Coder reported an internal ACP handler failure.",
+	},
 	input_line_too_large: {
-		code: "clio-input-line-too-large",
+		code: "clio-coder-input-line-too-large",
 		summary: "Clio Coder rejected an ACP input line that exceeded its bound.",
 	},
 	invalid_request_id: {
-		code: "clio-invalid-request-id",
+		code: "clio-coder-invalid-request-id",
 		summary: "Clio Coder rejected an invalid JSON-RPC request identifier.",
 	},
 };
 
 const CLIO_ADMISSION_FAILURES: Readonly<Record<string, PublicClioFailure>> = {
 	"orchestrator-not-configured": {
-		code: "clio-admission-orchestrator-not-configured",
+		code: "clio-coder-admission-orchestrator-not-configured",
 		summary: "Clio Coder has no orchestrator target configured. Choose one in Settings.",
 	},
 	"target-unknown": {
-		code: "clio-admission-target-unknown",
+		code: "clio-coder-admission-target-unknown",
 		summary: "Clio Coder does not recognize the configured target for this turn.",
 	},
 	"target-not-configured": {
-		code: "clio-admission-target-not-configured",
+		code: "clio-coder-admission-target-not-configured",
 		summary: "Clio Coder requires a configured target before it can start this turn.",
 	},
 	"target-not-found": {
-		code: "clio-admission-target-not-found",
+		code: "clio-coder-admission-target-not-found",
 		summary: "Clio Coder could not locate the configured target for this turn.",
 	},
 	"runtime-not-registered": {
-		code: "clio-admission-runtime-not-registered",
+		code: "clio-coder-admission-runtime-not-registered",
 		summary: "Clio Coder requires a registered runtime for the configured target.",
 	},
 	"model-not-configured": {
-		code: "clio-admission-model-not-configured",
+		code: "clio-coder-admission-model-not-configured",
 		summary: "Clio Coder has no model configured for the orchestrator. Choose one in Settings.",
 	},
 	"chat-unsupported": {
-		code: "clio-admission-chat-unsupported",
+		code: "clio-coder-admission-chat-unsupported",
 		summary: "The configured Clio Coder target does not support chat turns.",
 	},
 	"streaming-unsupported": {
-		code: "clio-admission-streaming-unsupported",
+		code: "clio-coder-admission-streaming-unsupported",
 		summary: "The configured Clio Coder target does not support streaming turns.",
 	},
-	"admission-failed": { code: "clio-admission-failed", summary: "Clio Coder could not admit this turn." },
+	"admission-failed": { code: "clio-coder-admission-failed", summary: "Clio Coder could not admit this turn." },
 };
 
 function protocolVersionFailure(supported: readonly number[] | undefined): PublicClioFailure {
@@ -592,14 +600,14 @@ export function failureProjection(error: unknown, transportFailure: AcpFailure |
 			? CLIO_ADMISSION_FAILURES[error.remote.reason] ?? CLIO_REMOTE_FAILURES.prompt_not_admitted
 			: CLIO_REMOTE_FAILURES[error.remote.code];
 		return {
-			code: projected?.code ?? "clio-operation-rejected",
+			code: projected?.code ?? "clio-coder-operation-rejected",
 			summary: projected?.summary ?? "Clio Coder rejected the bounded ACP operation.",
 			source: "reported-by-clio",
 		};
 	}
 	if (error instanceof AcpRemoteError) {
 		return {
-			code: "clio-operation-rejected",
+			code: "clio-coder-operation-rejected",
 			summary: "Clio Coder rejected the bounded ACP operation.",
 			source: "reported-by-clio",
 		};
@@ -1252,7 +1260,7 @@ export class ClioProjectHost {
 	}
 
 	#emitState(): void {
-		this.#sink.emit({ type: "clio.state", projectId: this.project.projectId, snapshot: this.snapshot() });
+		this.#sink.emit({ type: "clio-coder.state", projectId: this.project.projectId, snapshot: this.snapshot() });
 	}
 
 	#publicSessionId(rawSessionId: string): string {
@@ -1342,7 +1350,7 @@ export class ClioProjectHost {
 			if (turn !== null && !turn.settling) {
 				await this.#finishTurn(process, turn, {
 					outcome: "canceled",
-					code: "clio-process-retired",
+					code: "clio-coder-process-retired",
 					summary: "The Clio Coder process was retired before the turn finished.",
 					stopReason: "cancelled",
 					source: "observed-by-workbench",
@@ -1788,11 +1796,11 @@ export class ClioProjectHost {
 				"host-shutdown": { code: "host-shutdown", summary: "The GUI shut down and stopped the turn." },
 			};
 			const cancel = turn.cancelReason === null
-				? { code: "clio-cancelled", summary: "Clio Coder reported that the turn was cancelled." }
+				? { code: "clio-coder-cancelled", summary: "Clio Coder reported that the turn was cancelled." }
 				: cancelSummary[turn.cancelReason];
 			await this.#finishTurn(process, turn, {
 				outcome: completed ? "completed" : cancelled ? "canceled" : "failed",
-				code: completed ? "clio-completed" : cancelled ? cancel.code : `clio-${projected.stopReason}`,
+				code: completed ? "clio-coder-completed" : cancelled ? cancel.code : `clio-coder-${projected.stopReason}`,
 				summary: completed
 					? "Clio Coder finished this turn."
 					: cancelled

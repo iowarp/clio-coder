@@ -89,7 +89,7 @@ Deno.test("a bootstrap with no open project is valid and leaves the app waiting 
 
 Deno.test("an approval that contradicts the phase is refused in both directions", () => {
 	const awaitingWithout = workspaceFixture(FIXTURE_PROJECT_ID, "Alpha", {
-		clio: clioSnapshotFixture("awaiting-approval"),
+		clioCoder: clioSnapshotFixture("awaiting-approval"),
 	});
 	ok(workspaceConsistencyError(awaitingWithout)?.includes("pendingPermission must be present exactly"));
 
@@ -106,14 +106,14 @@ Deno.test("an approval that contradicts the phase is refused in both directions"
 	ok(workspaceConsistencyError(pendingWhileIdle)?.includes("pendingPermission must be present exactly"));
 
 	const withoutTurn = workspaceFixture(FIXTURE_PROJECT_ID, "Alpha", {
-		clio: clioSnapshotFixture("awaiting-approval"),
+		clioCoder: clioSnapshotFixture("awaiting-approval"),
 		pendingPermission: pendingPermissionFixture(),
 		activeTurn: null,
 	});
 	ok(withoutTurn && workspaceConsistencyError(withoutTurn)?.includes("requires an active turn"));
 
 	const consistent = workspaceFixture(FIXTURE_PROJECT_ID, "Alpha", {
-		clio: clioSnapshotFixture("awaiting-approval"),
+		clioCoder: clioSnapshotFixture("awaiting-approval"),
 		pendingPermission: pendingPermissionFixture(),
 		activeTurn: {
 			turnId: "turn-1",
@@ -133,11 +133,11 @@ Deno.test("an approval that contradicts the phase is refused in both directions"
 Deno.test("a contradictory project.opened is refused without replacing the open project", () => {
 	const state = readyState();
 	const event = serverEventFixture("project.opened", {
-		workspace: workspaceFixture(FIXTURE_PROJECT_ID, "Alpha", { clio: clioSnapshotFixture("awaiting-approval") }),
+		workspace: workspaceFixture(FIXTURE_PROJECT_ID, "Alpha", { clioCoder: clioSnapshotFixture("awaiting-approval") }),
 	}, { sequence: 2 });
 	const next = appReducer(state, { type: "host.event", event });
 	equal(next.notice?.tone, "error");
-	deepStrictEqual(next.open?.clio, state.open?.clio);
+	deepStrictEqual(next.open?.clioCoder, state.open?.clioCoder);
 });
 
 Deno.test("turn events fold into the projection and clear the pending submission", () => {
@@ -181,7 +181,7 @@ Deno.test("turn events fold into the projection and clear the pending submission
 		type: "host.event",
 		event: serverEventFixture("turn.terminal", {
 			outcome: "completed",
-			code: "clio-completed",
+			code: "clio-coder-completed",
 			summary: "Clio Coder finished this turn.",
 			source: "reported-by-clio",
 		}, { sequence: 5 }),
@@ -221,27 +221,27 @@ Deno.test("events for another project or an older sequence are ignored", () => {
 	const state = readyState();
 	const foreign = appReducer(state, {
 		type: "host.event",
-		event: serverEventFixture("clio.state", { snapshot: clioSnapshotFixture("failed") }, {
+		event: serverEventFixture("clio-coder.state", { snapshot: clioSnapshotFixture("failed") }, {
 			sequence: 2,
 			projectId: "project-other-0002",
 		}),
 	});
-	equal(foreign.open?.clio.phase, "idle");
+	equal(foreign.open?.clioCoder.phase, "idle");
 
 	const replayed = appReducer(state, {
 		type: "host.event",
-		event: serverEventFixture("clio.state", { snapshot: clioSnapshotFixture("failed") }, { sequence: 0 }),
+		event: serverEventFixture("clio-coder.state", { snapshot: clioSnapshotFixture("failed") }, { sequence: 0 }),
 	});
-	equal(replayed.open?.clio.phase, "idle");
+	equal(replayed.open?.clioCoder.phase, "idle");
 
 	const foreignWorkspace = appReducer(state, {
 		type: "host.event",
-		event: serverEventFixture("clio.state", { snapshot: clioSnapshotFixture("failed") }, {
+		event: serverEventFixture("clio-coder.state", { snapshot: clioSnapshotFixture("failed") }, {
 			sequence: 2,
 			workspaceInstanceId: "workspace-other-0002",
 		}),
 	});
-	equal(foreignWorkspace.open?.clio.phase, "idle");
+	equal(foreignWorkspace.open?.clioCoder.phase, "idle");
 });
 
 Deno.test("a command error becomes a visible notice and releases the composer", () => {
@@ -505,17 +505,17 @@ Deno.test("a reconnected socket restarts the sequence window", () => {
 	let state = readyState();
 	state = appReducer(state, {
 		type: "host.event",
-		event: serverEventFixture("clio.state", { snapshot: clioSnapshotFixture("running") }, { sequence: 9 }),
+		event: serverEventFixture("clio-coder.state", { snapshot: clioSnapshotFixture("running") }, { sequence: 9 }),
 	});
-	equal(state.open?.clio.phase, "running");
+	equal(state.open?.clioCoder.phase, "running");
 	state = appReducer(state, { type: "connection.changed", connection: "disconnected" });
 	state = appReducer(state, { type: "connection.changed", connection: "connected" });
 	equal(state.lastSequence, 0);
 	state = appReducer(state, {
 		type: "host.event",
-		event: serverEventFixture("clio.state", { snapshot: clioSnapshotFixture("idle") }, { sequence: 1 }),
+		event: serverEventFixture("clio-coder.state", { snapshot: clioSnapshotFixture("idle") }, { sequence: 1 }),
 	});
-	equal(state.open?.clio.phase, "idle");
+	equal(state.open?.clioCoder.phase, "idle");
 });
 
 Deno.test("the composer is blocked exactly while Clio Coder is occupied", () => {
@@ -524,7 +524,7 @@ Deno.test("the composer is blocked exactly while Clio Coder is occupied", () => 
 	for (const phase of ["running", "awaiting-approval", "cancelling"] as const) {
 		const busy = appReducer(state, {
 			type: "host.event",
-			event: serverEventFixture("clio.state", { snapshot: clioSnapshotFixture(phase) }, { sequence: 2 }),
+			event: serverEventFixture("clio-coder.state", { snapshot: clioSnapshotFixture(phase) }, { sequence: 2 }),
 		});
 		equal(isPromptBlocked(busy.open), true, `expected ${phase} to block the composer`);
 	}

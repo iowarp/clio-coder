@@ -350,8 +350,8 @@ function projectReport(value: unknown): WireEvalReport {
 		"startedAt",
 		"suiteId",
 		"servingGroup",
-		"clioVersion",
-		"clioCommit",
+		"clioCoderVersion",
+		"clioCoderCommit",
 		"platform",
 		"node",
 		"matrix",
@@ -372,8 +372,8 @@ function projectReport(value: unknown): WireEvalReport {
 	const suiteId = text(value.suiteId, 128);
 	const servingGroup = counter(value.servingGroup, MAX_WIRE_EVAL_REPORTS);
 	const identity = {
-		clioVersion: nullableText(value.clioVersion, 64),
-		clioCommit: nullableText(value.clioCommit, 64),
+		clioCoderVersion: nullableText(value.clioCoderVersion, 64),
+		clioCoderCommit: nullableText(value.clioCoderCommit, 64),
 		platform: nullableText(value.platform, 64),
 		node: nullableText(value.node, 64),
 	};

@@ -100,7 +100,7 @@ function wireWorkspace(overrides: Record<string, unknown> = {}) {
 		treeTruncated: false,
 		sessions: [],
 		sessionsTruncated: false,
-		clio: clioSnapshot(),
+		clioCoder: clioSnapshot(),
 		timeline: [],
 		timelineTruncated: false,
 		activeTurn: null,
@@ -565,14 +565,14 @@ Deno.test("client frames reject malformed, inherited, unknown, and oversized inp
 });
 
 Deno.test("clio snapshots use closed phases and never carry an engine kind", () => {
-	const event = serverEvent("clio.state", {
+	const event = serverEvent("clio-coder.state", {
 		snapshot: clioSnapshot("awaiting-approval"),
 	});
-	equal(event.kind, "clio.state");
-	expectProtocolError(() => serverEvent("clio.state", { snapshot: { ...clioSnapshot(), kind: "fake" } }));
-	expectProtocolError(() => serverEvent("clio.state", { snapshot: clioSnapshot("ready") }));
+	equal(event.kind, "clio-coder.state");
+	expectProtocolError(() => serverEvent("clio-coder.state", { snapshot: { ...clioSnapshot(), kind: "fake" } }));
+	expectProtocolError(() => serverEvent("clio-coder.state", { snapshot: clioSnapshot("ready") }));
 	expectProtocolError(() =>
-		serverEvent("clio.state", {
+		serverEvent("clio-coder.state", {
 			snapshot: { ...clioSnapshot(), capabilities: {} },
 		})
 	);
@@ -956,7 +956,7 @@ Deno.test("only terminal events are flagged terminal and usage stays exact", () 
 			workspaceInstanceId: "workspace-0001",
 			sequence: 1,
 			eventId: "event-1",
-			kind: "clio.state",
+			kind: "clio-coder.state",
 			projectId: "project-alpha",
 			terminal: true,
 			payload: { snapshot: clioSnapshot() },
@@ -965,7 +965,7 @@ Deno.test("only terminal events are flagged terminal and usage stays exact", () 
 	expectProtocolError(() =>
 		serverEvent("turn.terminal", {
 			outcome: "completed",
-			code: "clio-completed",
+			code: "clio-coder-completed",
 			summary: "done",
 			usage: {
 				input: -1,
@@ -2260,14 +2260,14 @@ Deno.test("the sequence guard accepts contiguous events and only the exact lates
 	equal(guard.observe(serverEvent("connection.ready", {}, 1)), "accepted");
 	equal(guard.observe(serverEvent("connection.ready", {}, 1)), "duplicate");
 	equal(
-		guard.observe(serverEvent("clio.state", { snapshot: clioSnapshot() }, 2)),
+		guard.observe(serverEvent("clio-coder.state", { snapshot: clioSnapshot() }, 2)),
 		"accepted",
 	);
 	equal(guard.nextSequence, 3);
 	throws(
 		() =>
 			guard.observe(
-				serverEvent("clio.state", { snapshot: clioSnapshot("running") }, 2),
+				serverEvent("clio-coder.state", { snapshot: clioSnapshot("running") }, 2),
 			),
 		ProtocolValidationError,
 	);

@@ -36,7 +36,7 @@ const ICON_SOURCE = join(APP_ROOT, "public", "assets", "clio-coder-logo-128.png"
 /** The permission grants baked into the compiled binary; identical to the `start` task. */
 export const COMPILE_PERMISSIONS: readonly string[] = [
 	"--no-prompt",
-	"--allow-env=DENO_SERVE_ADDRESS,HOME,XDG_STATE_HOME,CLIO_WORKBENCH_STATE_DIR",
+	"--allow-env=DENO_SERVE_ADDRESS,HOME,XDG_STATE_HOME,CLIO_CODER_GUI_STATE_DIR,CLIO_WORKBENCH_STATE_DIR",
 	"--allow-net=127.0.0.1",
 	"--allow-read",
 	"--allow-write",

@@ -68,7 +68,7 @@ export interface OpenWorkspaceState {
 	readonly treeTruncated: boolean;
 	readonly sessions: readonly WireSessionSummary[];
 	readonly sessionsTruncated: boolean;
-	readonly clio: WireClioSnapshot;
+	readonly clioCoder: WireClioSnapshot;
 	readonly projection: TurnProjection;
 	readonly deleteChallenge: WireDeleteChallenge | null;
 	readonly settings: WireSettingsState | null;
@@ -396,7 +396,7 @@ function expectAbsolutePath(value: unknown, label: string): string {
 export function workspaceConsistencyError(
 	workspace: WireProjectWorkspace,
 ): string | null {
-	const awaiting = workspace.clio.phase === "awaiting-approval";
+	const awaiting = workspace.clioCoder.phase === "awaiting-approval";
 	if (awaiting !== (workspace.pendingPermission !== null)) {
 		return "pendingPermission must be present exactly while Clio Coder awaits approval";
 	}
@@ -583,7 +583,7 @@ export function workspaceFromWire(
 		treeTruncated: workspace.treeTruncated,
 		sessions: workspace.sessions,
 		sessionsTruncated: workspace.sessionsTruncated,
-		clio: workspace.clio,
+		clioCoder: workspace.clioCoder,
 		projection: restoreTurnProjection({
 			timeline: workspace.timeline,
 			timelineTruncated: workspace.timelineTruncated,
@@ -639,8 +639,8 @@ function applyToOpen(
 			};
 		case "fs.delete.challenge":
 			return { ...open, deleteChallenge: event.payload };
-		case "clio.state":
-			return { ...open, clio: event.payload.snapshot };
+		case "clio-coder.state":
+			return { ...open, clioCoder: event.payload.snapshot };
 		case "session.list":
 			return {
 				...open,
@@ -694,7 +694,7 @@ function announcementFor(event: ServerEvent): string | null {
 			return event.payload.outcome === "completed" ? "Clio Coder finished this turn." : event.payload.summary;
 		case "turn.loop":
 			return `Clio Coder blocked a repeated ${event.payload.tool} call`;
-		case "clio.state":
+		case "clio-coder.state":
 			return event.payload.snapshot.phase === "failed"
 				? (event.payload.snapshot.lastFailure?.summary ?? "Clio Coder failed.")
 				: null;
@@ -1128,8 +1128,8 @@ export function formatProjectPath(
 
 export function isPromptBlocked(open: OpenWorkspaceState | null): boolean {
 	if (open === null) return true;
-	return open.clio.phase === "running" ||
-		open.clio.phase === "awaiting-approval" || open.clio.phase === "cancelling";
+	return open.clioCoder.phase === "running" ||
+		open.clioCoder.phase === "awaiting-approval" || open.clioCoder.phase === "cancelling";
 }
 
 export const emptyProjection = emptyTurnProjection;

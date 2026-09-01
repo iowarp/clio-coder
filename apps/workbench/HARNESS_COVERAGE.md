@@ -72,7 +72,7 @@ GUI protocol v4 currently validates 36 client commands:
 It validates 35 server event kinds:
 
 `connection.ready`, `project.browse.listing`, `project.opened`, `project.forgotten`, `project.snapshot`, `fs.changed`,
-`fs.delete.challenge`, `clio.state`, `session.list`, `settings.state`, `targets.state`, `targets.probed`,
+`fs.delete.challenge`, `clio-coder.state`, `session.list`, `settings.state`, `targets.state`, `targets.probed`,
 `config.state`, `catalog.state`, `usage.state`, `routing.state`, `dispatch.state`, `fleet.inspection.state`,
 `toolchain.state`, `trace.state`, `evidence.state`, `evidence.detail.state`, `fleet.verification.state`,
 `recovery.state`, `turn.started`, `turn.text`, `turn.thought`, `turn.tool`, `turn.loop`, `turn.permission.requested`,
