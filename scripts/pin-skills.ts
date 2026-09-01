@@ -30,6 +30,8 @@ import { normalizedSkillHash } from "../src/domains/resources/skills/content-has
 const REQUIRED_CORE_KEYS = ["name", "description", "version", "license"] as const;
 /** Keys required inside the reserved nested `clio:` block (skills/README.md). */
 const REQUIRED_CLIO_KEYS = ["registry-id", "source-url", "provenance", "eval-status"] as const;
+/** The provenance vocabulary skills/README.md defines; anything else is a typo, not a new category. */
+const PROVENANCE_VALUES = new Set(["designed", "adapted", "imported"]);
 /** Tool-surface keys whose values must name Clio tools in canonical spelling. */
 const TOOL_SURFACE_KEYS = ["allowed-tools", "disallowed-tools"] as const;
 const CLIO_TOOL_NAMES = new Set<string>(ALL_TOOL_NAMES);
@@ -178,6 +180,17 @@ function collectEntries(): { entries: CatalogEntry[]; errors: string[] } {
 					errors.push(`${skillPath}: missing required catalog frontmatter "clio.${key}"`);
 				}
 			}
+			if (typeof clio.provenance === "string" && !PROVENANCE_VALUES.has(clio.provenance)) {
+				errors.push(
+					`${skillPath}: clio.provenance must be one of designed|adapted|imported (found ${JSON.stringify(clio.provenance)})`,
+				);
+			}
+			if (
+				(clio.provenance === "adapted" || clio.provenance === "imported") &&
+				(typeof clio.origin !== "string" || clio.origin.trim().length === 0)
+			) {
+				errors.push(`${skillPath}: clio.provenance "${clio.provenance}" requires a clio.origin`);
+			}
 			if (clio.audit !== "pass") {
 				errors.push(
 					`${skillPath}: catalog skills must carry "audit: pass" under clio: (found ${JSON.stringify(clio.audit ?? null)})`,
@@ -193,6 +206,14 @@ function collectEntries(): { entries: CatalogEntry[]; errors: string[] } {
 			if (sourceUrl.length > 0 && !sourceUrl.replace(/\/+$/, "").endsWith(`/${relPath}`)) {
 				errors.push(`${skillPath}: clio.source-url does not end with the catalog path "${relPath}": ${sourceUrl}`);
 			}
+		}
+		// An unquoted description containing " #" is silently cut at the # by the
+		// YAML parser (a plain-scalar comment), so the published index and the
+		// model's trigger surface see a fraction of the text. Require quoting.
+		const descriptionLine = fmMatch[1].split(/\r?\n/).find((line) => /^description:\s*\S/.test(line));
+		const descriptionValue = descriptionLine?.replace(/^description:\s*/, "") ?? "";
+		if (descriptionValue.length > 0 && !/^['"]/.test(descriptionValue) && descriptionValue.includes(" #")) {
+			errors.push(`${skillPath}: unquoted description contains " #", which YAML truncates as a comment; quote it`);
 		}
 		errors.push(...toolSurfaceErrors(skillPath, fm));
 		if (!existsSync(path.join(catalogDir, relPath, "evals.md"))) {

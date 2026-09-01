@@ -1,7 +1,7 @@
 ---
 name: fix-issue
-description: Use when a tracker issue should be resolved end to end — "fix issue 123", "take this ticket", "resolve the bug in #45". Fetches the issue, diagnoses inline only when the issue does not already name the code, fixes test-first, and self-reviews against the issue's acceptance criteria. Ends with an uncommitted, verified change ready for ship. Not for filing; use file-ticket. Not for committing or PRs; use ship.
-version: 0.1.0
+description: 'Use when a tracker issue should be resolved end to end — "fix issue 123", "take this ticket", "resolve the bug in #45". Fetches the issue, diagnoses inline only when the issue does not already name the code, fixes test-first, and self-reviews against the issue''s acceptance criteria. Ends with an uncommitted, verified change ready for ship. Not for filing; use file-ticket. Not for committing or PRs; use ship.'
+version: 0.1.1
 license: Apache-2.0
 allowed-tools:
   - read
@@ -20,13 +20,12 @@ clio:
   registry-id: iowarp/clio-coder
   source-url: https://github.com/iowarp/clio-coder/tree/main/skills/git/fix-issue
   audit: pass
-  provenance: original
+  provenance: designed
   eval-status: smoke-checked
   model-size: any
   agents:
     - main
     - coder
-    - git-master
 ---
 
 # Fix Issue
@@ -71,6 +70,8 @@ record the best hypothesis, mark confidence LOW, and ask before fixing.
 Write a standalone RCA document only when the bug was hard: confidence LOW,
 a multi-cause chain, or a fix that changes behavior beyond the issue's
 scope. Routine fixes carry their why-chain in the final report, not a file.
+Either way the RCA's destination is the issue: `ship` posts it as the
+closing comment under the `rca` label (see docs/development-pipeline.md).
 
 ## Step 3 — Fix test-first
 
