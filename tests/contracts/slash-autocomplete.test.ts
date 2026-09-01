@@ -88,6 +88,68 @@ describe("contracts/slash-autocomplete", () => {
 		});
 	});
 
+	it("routes @ files and directory submenus through the grammar-aware provider", async () => {
+		const autocomplete = createSlashCommandAutocompleteProvider({
+			basePath: process.cwd(),
+			fdPath: null,
+			fileReferenceSource: async ({ query }) => {
+				if (query === "src/") {
+					return [
+						{
+							id: "file:src/index.ts",
+							value: "@src/index.ts",
+							path: "src/index.ts",
+							label: "src/index.ts",
+							description: "git tracked · export const value = 1",
+							isDirectory: false,
+							tracked: true,
+						},
+					];
+				}
+				return [
+					{
+						id: "directory:src",
+						value: "@src/",
+						path: "src",
+						label: "src/",
+						description: "git tracked directory · Tab/Enter opens",
+						isDirectory: true,
+						tracked: true,
+					},
+					{
+						id: "file:notes",
+						value: '@"operator notes.md"',
+						path: "operator notes.md",
+						label: "operator notes.md",
+						description: "untracked · preview line",
+						isDirectory: false,
+						tracked: false,
+					},
+				];
+			},
+		});
+		const line = "inspect @s suffix";
+		const suggestions = await suggest(autocomplete, line, 10);
+		const directory = suggestions?.items[0] as SlashCompletionItem | undefined;
+		ok(directory && suggestions);
+		strictEqual(directory.kind, "open-submenu");
+		deepStrictEqual(autocomplete.applyCompletion([line], 0, 10, directory, suggestions.prefix), {
+			lines: ["inspect @src/ suffix"],
+			cursorLine: 0,
+			cursorCol: 13,
+		});
+
+		const quotedLine = 'inspect @"old name" suffix';
+		const quotedSuggestions = await suggest(autocomplete, quotedLine, 18);
+		const notes = quotedSuggestions?.items.find((item) => item.value === '@"operator notes.md"');
+		ok(notes && quotedSuggestions);
+		deepStrictEqual(autocomplete.applyCompletion([quotedLine], 0, 18, notes, quotedSuggestions.prefix), {
+			lines: ['inspect @"operator notes.md" suffix'],
+			cursorLine: 0,
+			cursorCol: 28,
+		});
+	});
+
 	it("preserves quotes and advances beyond the closing quote when another slot follows", async () => {
 		const autocomplete = provider({
 			"settings-areas": async () => [{ id: "chat", value: "chat", label: "Chat", description: "Chat settings" }],

@@ -25,8 +25,69 @@ export interface FileReferenceOptions {
 	autoResizeImages?: boolean;
 }
 
-const FILE_REF = /(^|\s)@(\S+)/g;
 const DEFAULT_IMAGE_MAX_BASE64_BYTES = 4.5 * 1024 * 1024;
+
+interface InlineFileReference {
+	start: number;
+	end: number;
+	raw: string;
+	fileArg: string;
+	quoted: boolean;
+}
+
+function decodeQuotedFileArg(input: string, start: number, quote: '"' | "'"): { value: string; end: number } | null {
+	let value = "";
+	let escaped = false;
+	for (let index = start; index < input.length; index += 1) {
+		const character = input[index] ?? "";
+		if (escaped) {
+			value += character;
+			escaped = false;
+			continue;
+		}
+		if (character === "\\") {
+			escaped = true;
+			continue;
+		}
+		if (character === quote) return { value, end: index + 1 };
+		value += character;
+	}
+	return null;
+}
+
+/** Scanner shared by sync and async expansion; quoted references may contain spaces. */
+function inlineFileReferences(input: string): InlineFileReference[] {
+	const references: InlineFileReference[] = [];
+	for (let start = 0; start < input.length; start += 1) {
+		if (input[start] !== "@" || (start > 0 && !/\s/u.test(input[start - 1] ?? ""))) continue;
+		const next = input[start + 1];
+		if (next === '"' || next === "'") {
+			const decoded = decodeQuotedFileArg(input, start + 2, next);
+			if (!decoded || decoded.value.length === 0) continue;
+			references.push({
+				start,
+				end: decoded.end,
+				raw: input.slice(start, decoded.end),
+				fileArg: decoded.value,
+				quoted: true,
+			});
+			start = decoded.end - 1;
+			continue;
+		}
+		let end = start + 1;
+		while (end < input.length && !/\s/u.test(input[end] ?? "")) end += 1;
+		if (end === start + 1) continue;
+		references.push({
+			start,
+			end,
+			raw: input.slice(start, end),
+			fileArg: input.slice(start + 1, end),
+			quoted: false,
+		});
+		start = end - 1;
+	}
+	return references;
+}
 
 function renderTextFile(filePath: string, content: string): string {
 	return `<file name="${filePath}">\n${content}\n</file>\n`;
@@ -195,32 +256,49 @@ export function expandInlineFileReferences(input: string, options: FileReference
 	const diagnostics: FileReferenceDiagnostic[] = [];
 	const images: ImageContent[] = [];
 	const referencedPaths: string[] = [];
-	const text = input.replace(FILE_REF, (match: string, prefix: string, token: string) => {
-		const direct = readFileReference(token, {
+	let text = "";
+	let lastIndex = 0;
+	for (const reference of inlineFileReferences(input)) {
+		text += input.slice(lastIndex, reference.start);
+		const direct = readFileReference(reference.fileArg, {
 			...options,
 			missing: "leave",
 			includeImages: options.includeImages === true,
 		});
-		if (direct.text !== `@${token}`) {
+		if (direct.text !== `@${reference.fileArg}`) {
 			diagnostics.push(...direct.diagnostics);
 			images.push(...direct.images);
 			referencedPaths.push(...direct.referencedPaths);
-			return `${prefix}${direct.text}`;
+			text += direct.text;
+			lastIndex = reference.end;
+			continue;
 		}
 
-		const { fileArg, suffix } = splitTrailingPunctuation(token);
-		if (fileArg === token) return match;
+		const { fileArg, suffix } = reference.quoted
+			? { fileArg: reference.fileArg, suffix: "" }
+			: splitTrailingPunctuation(reference.fileArg);
+		if (fileArg === reference.fileArg) {
+			text += reference.raw;
+			lastIndex = reference.end;
+			continue;
+		}
 		const stripped = readFileReference(fileArg, {
 			...options,
 			missing: "leave",
 			includeImages: options.includeImages === true,
 		});
-		if (stripped.text === `@${fileArg}`) return match;
+		if (stripped.text === `@${fileArg}`) {
+			text += reference.raw;
+			lastIndex = reference.end;
+			continue;
+		}
 		diagnostics.push(...stripped.diagnostics);
 		images.push(...stripped.images);
 		referencedPaths.push(...stripped.referencedPaths);
-		return `${prefix}${stripped.text}${suffix}`;
-	});
+		text += `${stripped.text}${suffix}`;
+		lastIndex = reference.end;
+	}
+	text += input.slice(lastIndex);
 	return { text, images, diagnostics, referencedPaths };
 }
 
@@ -233,31 +311,29 @@ export async function expandInlineFileReferencesAsync(
 	const referencedPaths: string[] = [];
 	let text = "";
 	let lastIndex = 0;
-	for (const match of input.matchAll(FILE_REF)) {
-		const index = match.index ?? 0;
-		const full = match[0] ?? "";
-		const prefix = match[1] ?? "";
-		const token = match[2] ?? "";
-		text += input.slice(lastIndex, index);
+	for (const reference of inlineFileReferences(input)) {
+		text += input.slice(lastIndex, reference.start);
 
-		const direct = await readFileReferenceAsync(token, {
+		const direct = await readFileReferenceAsync(reference.fileArg, {
 			...options,
 			missing: "leave",
 			includeImages: options.includeImages === true,
 		});
-		if (direct.text !== `@${token}`) {
+		if (direct.text !== `@${reference.fileArg}`) {
 			diagnostics.push(...direct.diagnostics);
 			images.push(...direct.images);
 			referencedPaths.push(...direct.referencedPaths);
-			text += `${prefix}${direct.text}`;
-			lastIndex = index + full.length;
+			text += direct.text;
+			lastIndex = reference.end;
 			continue;
 		}
 
-		const { fileArg, suffix } = splitTrailingPunctuation(token);
-		if (fileArg === token) {
-			text += full;
-			lastIndex = index + full.length;
+		const { fileArg, suffix } = reference.quoted
+			? { fileArg: reference.fileArg, suffix: "" }
+			: splitTrailingPunctuation(reference.fileArg);
+		if (fileArg === reference.fileArg) {
+			text += reference.raw;
+			lastIndex = reference.end;
 			continue;
 		}
 
@@ -267,15 +343,15 @@ export async function expandInlineFileReferencesAsync(
 			includeImages: options.includeImages === true,
 		});
 		if (stripped.text === `@${fileArg}`) {
-			text += full;
-			lastIndex = index + full.length;
+			text += reference.raw;
+			lastIndex = reference.end;
 			continue;
 		}
 		diagnostics.push(...stripped.diagnostics);
 		images.push(...stripped.images);
 		referencedPaths.push(...stripped.referencedPaths);
-		text += `${prefix}${stripped.text}${suffix}`;
-		lastIndex = index + full.length;
+		text += `${stripped.text}${suffix}`;
+		lastIndex = reference.end;
 	}
 	text += input.slice(lastIndex);
 	return { text, images, diagnostics, referencedPaths };

@@ -162,6 +162,12 @@ function findBottomRail(lines: readonly string[], width: number): number {
 	return -1;
 }
 
+function cursorEndsDirectoryPath(editor: Editor): boolean {
+	const cursor = editor.getCursor();
+	const line = editor.getLines()[cursor.line] ?? "";
+	return line.slice(0, cursor.col).endsWith("/");
+}
+
 export class ClioEditor extends Editor {
 	private pastedOperatorDraft = false;
 
@@ -233,18 +239,29 @@ export class ClioEditor extends Editor {
 	 */
 	override handleInput(data: string): void {
 		const closedPaste = data.includes("\x1b[201~");
+		const keybindings = getKeybindings();
 		// Pi expands and trims the buffer immediately before onSubmit. Envelope a
 		// pasted bang draft for that synchronous handoff so the Bash parser can
 		// distinguish it from a typed operator; the submit controller unwraps it
 		// before sending the literal prompt onward.
-		if (this.pastedOperatorDraft && getKeybindings().matches(data, "tui.input.submit")) {
+		if (this.pastedOperatorDraft && keybindings.matches(data, "tui.input.submit")) {
 			const pastedText = this.getExpandedText();
 			this.pastedOperatorDraft = false;
 			super.setText(guardPastedEditorOperator(pastedText));
 			super.handleInput(data);
 			return;
 		}
+		const completingDirectory =
+			this.isShowingAutocomplete() &&
+			(keybindings.matches(data, "tui.input.tab") || keybindings.matches(data, "tui.select.confirm"));
+		const textBeforeCompletion = completingDirectory ? this.getText() : "";
 		super.handleInput(data);
+		if (completingDirectory && this.getText() !== textBeforeCompletion && cursorEndsDirectoryPath(this)) {
+			// Directory rows are submenus on the same provider. Re-open immediately
+			// after acceptance so ↑/↓ continues in the child tree without requiring
+			// a second Tab. Pi's provider request remains the only completion path.
+			super.handleInput("\t");
+		}
 		if (closedPaste) {
 			this.pastedOperatorDraft = this.getExpandedText().startsWith("!");
 		} else if (this.pastedOperatorDraft && !this.getExpandedText().startsWith("!")) {
