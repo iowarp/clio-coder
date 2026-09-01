@@ -1,12 +1,8 @@
 import { spawn } from "node:child_process";
-import { loadDomains } from "../core/domain-loader.js";
 import { initializeClioHome } from "../core/init.js";
 import { clioStateDir } from "../core/xdg.js";
-import { ConfigDomainModule } from "../domains/config/index.js";
-import type { LifecycleContract } from "../domains/lifecycle/contract.js";
-import { LifecycleDomainModule } from "../domains/lifecycle/index.js";
 import { detectInstallMethod } from "../domains/lifecycle/install-method.js";
-import { listMigrations } from "../domains/lifecycle/migrations/index.js";
+import { listMigrations, runPending } from "../domains/lifecycle/migrations/index.js";
 import { readStateInfo } from "../domains/lifecycle/state.js";
 import { getVersionInfo } from "../domains/lifecycle/version.js";
 import { printError, printHeader, printOk } from "./shared.js";
@@ -229,36 +225,35 @@ export async function runUpgradeCommand(argv: ReadonlyArray<string>): Promise<nu
 	if (opts.skipMigrations) {
 		process.stdout.write("[upgrade] skipping migrations (--skip-migrations)\n");
 	} else {
-		const loaded = await loadDomains([ConfigDomainModule, LifecycleDomainModule]);
+		// Migrations run on the state tree directly rather than through the
+		// lifecycle domain. Loading that domain pulls in `config`, whose start
+		// runs the strict settings reader, and a settings-repairing migration is
+		// precisely the one that cannot get past it: `clio-coder upgrade` on a
+		// home whose settings.yaml names a retired key failed the domain load and
+		// never reached the migration that removes the key. A runner that needs
+		// valid config in order to repair invalid config can never run. The
+		// domain's `runMigrations` is a passthrough to this same function, so
+		// nothing is lost by calling it where the circularity does not exist.
+		let result: Awaited<ReturnType<typeof runPending>>;
 		try {
-			const lifecycle = loaded.getContract<LifecycleContract>("lifecycle");
-			if (!lifecycle) {
-				printError("lifecycle domain unavailable");
-				return 1;
-			}
-			let result: Awaited<ReturnType<LifecycleContract["runMigrations"]>>;
-			try {
-				result = await lifecycle.runMigrations(stateDir);
-			} catch (err) {
-				// A migration reports why it could not run, but on its own that reads
-				// as the whole upgrade being impossible. It is not: the rest of the
-				// upgrade is independent of it, and naming the flag that runs the rest
-				// is the difference between a stuck operator and a moved one.
-				printError(
-					`migration failed: ${err instanceof Error ? err.message : String(err)}`,
-					"the rest of the upgrade does not depend on it; run `clio-coder upgrade --skip-migrations` to continue, then fix the cause and re-run `clio-coder upgrade`.",
-				);
-				return 1;
-			}
-			appliedIds = [...result.applied];
-			appliedCount = appliedIds.length;
-			if (appliedCount === 0) {
-				process.stdout.write("[upgrade] no pending migrations\n");
-			} else {
-				for (const id of appliedIds) process.stdout.write(`[upgrade] applied migration ${id}\n`);
-			}
-		} finally {
-			await loaded.stop();
+			result = await runPending(stateDir);
+		} catch (err) {
+			// A migration reports why it could not run, but on its own that reads
+			// as the whole upgrade being impossible. It is not: the rest of the
+			// upgrade is independent of it, and naming the flag that runs the rest
+			// is the difference between a stuck operator and a moved one.
+			printError(
+				`migration failed: ${err instanceof Error ? err.message : String(err)}`,
+				"the rest of the upgrade does not depend on it; run `clio-coder upgrade --skip-migrations` to continue, then fix the cause and re-run `clio-coder upgrade`.",
+			);
+			return 1;
+		}
+		appliedIds = [...result.applied];
+		appliedCount = appliedIds.length;
+		if (appliedCount === 0) {
+			process.stdout.write("[upgrade] no pending migrations\n");
+		} else {
+			for (const id of appliedIds) process.stdout.write(`[upgrade] applied migration ${id}\n`);
 		}
 	}
 

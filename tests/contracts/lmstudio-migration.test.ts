@@ -53,7 +53,7 @@ entries:
 		);
 
 		const first = await runPending(join(scratch.dir, "state"));
-		deepStrictEqual(first.applied, ["2026-08-18-lmstudio-runtime-id"]);
+		deepStrictEqual(first.applied, ["2026-09-01-retire-panes-knobs", "2026-08-18-lmstudio-runtime-id"]);
 		const settings = readSettings();
 		strictEqual(settings.targets[0]?.runtime, "lmstudio");
 		strictEqual(settings.targets[0]?.url, "http://127.0.0.1:1234");
