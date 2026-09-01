@@ -509,7 +509,7 @@ function eventContainsFirstModelToken(event: Record<string, unknown>): boolean {
 }
 
 function eventStartsTool(event: Record<string, unknown>): boolean {
-	return event.type === "tool_execution_start" || event.type === "clio_tool_start";
+	return event.type === "tool_execution_start" || event.type === "clio_coder_tool_start";
 }
 
 function finitePositive(value: unknown): number | undefined {
@@ -3755,15 +3755,15 @@ export function createDispatchBundle(
 				if (eventContainsFirstModelToken(event)) markObservedPhase("firstModelTokenAt");
 				if (eventStartsTool(event)) markObservedPhase("firstToolAt");
 			}
-			if (event.type === "clio_tool_start" && event.payload && typeof event.payload.tool === "string") {
+			if (event.type === "clio_coder_tool_start" && event.payload && typeof event.payload.tool === "string") {
 				recordToolStart(inFlightTools, event.payload);
 			}
 			// ACP is an external protocol peer, never an authority for Clio's
 			// deterministic terminal taxonomy. Ignore even syntactically valid
 			// assertions; only a future coordinator-side classifier may set one.
-			if (event.type === "clio_run_outcome" && !reportedSpoofedOutcome) {
+			if (event.type === "clio_coder_run_outcome" && !reportedSpoofedOutcome) {
 				reportedSpoofedOutcome = true;
-				reportDispatchDiagnostic("ACP outcome event", new Error("ignored untrusted clio_run_outcome assertion"));
+				reportDispatchDiagnostic("ACP outcome event", new Error("ignored untrusted clio_coder_run_outcome assertion"));
 			}
 			if (isRecord(event)) {
 				const finishEntry = appendDispatchFinishContractEntry(finishContractEntries, event);
@@ -3794,7 +3794,7 @@ export function createDispatchBundle(
 					if (message !== null) failureMessage = message;
 				}
 			}
-			if (event.type === "clio_permission_resolved" && event.payload && typeof event.payload.tool === "string") {
+			if (event.type === "clio_coder_permission_resolved" && event.payload && typeof event.payload.tool === "string") {
 				const requestId =
 					typeof event.payload.requestId === "string" ? event.payload.requestId : `delegation-permission-${Date.now()}`;
 				const origin = runIdForPermissionAudit !== null ? `delegation:${runIdForPermissionAudit}` : "delegation:unknown";
@@ -3820,7 +3820,7 @@ export function createDispatchBundle(
 					...(runIdForPermissionAudit !== null ? { requestedBy: runIdForPermissionAudit } : {}),
 				});
 			}
-			if (event.type === "clio_tool_finish" && event.payload && typeof event.payload.tool === "string") {
+			if (event.type === "clio_coder_tool_finish" && event.payload && typeof event.payload.tool === "string") {
 				recordToolCompletion(inFlightTools, event.payload);
 				recordToolFinish(toolStats, event.payload);
 				if (event.payload.decision === "allowed") safetyDecisionCounts.allowed += 1;
@@ -4075,7 +4075,7 @@ export function createDispatchBundle(
 				dynamicHash: lifecycle.dynamicHash,
 				promptSignature: lifecycle.promptSignature,
 				toolSignature: lifecycle.toolSignature,
-				clioVersion: readClioVersion(),
+				clioCoderVersion: readClioVersion(),
 				piMonoVersion: readPiMonoVersion(),
 				platform: process.platform,
 				nodeVersion: process.version,
@@ -4668,7 +4668,7 @@ export function createDispatchBundle(
 				context.bus.emit(BusChannels.DispatchProgress, {
 					runId,
 					agentId: req.agentId,
-					event: { type: "clio_write_record_downgraded", payload: downgrade },
+					event: { type: "clio_coder_write_record_downgraded", payload: downgrade },
 				});
 			},
 		});
@@ -4722,8 +4722,8 @@ export function createDispatchBundle(
 					policySource?: string;
 					reason?: string;
 					skillActivation?: unknown;
-					// Worker permission-escalation fields (clio_permission_escalated /
-					// clio_permission_resolved escalate path).
+					// Worker permission-escalation fields (clio_coder_permission_escalated /
+					// clio_coder_permission_resolved escalate path).
 					requestId?: string;
 					summary?: string;
 					target?: string;
@@ -4736,12 +4736,12 @@ export function createDispatchBundle(
 				if (eventContainsFirstModelToken(event)) markObservedPhase("firstModelTokenAt");
 				if (eventStartsTool(event)) markObservedPhase("firstToolAt");
 			}
-			if (event.type === "clio_tool_start" && event.payload && typeof event.payload.tool === "string") {
+			if (event.type === "clio_coder_tool_start" && event.payload && typeof event.payload.tool === "string") {
 				recordToolStart(inFlightTools, event.payload);
 			}
-			if (event.type === "clio_steer_received") acknowledgeSteer(event.payload?.sequence);
+			if (event.type === "clio_coder_steer_received") acknowledgeSteer(event.payload?.sequence);
 			if (
-				event.type === "clio_run_outcome" &&
+				event.type === "clio_coder_run_outcome" &&
 				isRunOutcomeCode(event.payload?.outcomeCode) &&
 				event.payload.outcomeCode !== "worker_final_output_missing" &&
 				event.payload.outcomeCode !== "host_verification_rejected"
@@ -4764,7 +4764,11 @@ export function createDispatchBundle(
 				}
 				recordWorkerRunEffect(runEffects, event);
 			}
-			if (event.type === "clio_permission_escalated" && event.payload && typeof event.payload.requestId === "string") {
+			if (
+				event.type === "clio_coder_permission_escalated" &&
+				event.payload &&
+				typeof event.payload.requestId === "string"
+			) {
 				escalationCounts.requested += 1;
 				const ctx = isRecord(event.payload.decision) ? event.payload.decision : null;
 				const classification = ctx !== null && isRecord(ctx.classification) ? ctx.classification : null;
@@ -4825,7 +4829,7 @@ export function createDispatchBundle(
 					if (message !== null) failureMessage = message;
 				}
 			}
-			if (event.type === "clio_permission_resolved" && event.payload && typeof event.payload.tool === "string") {
+			if (event.type === "clio_coder_permission_resolved" && event.payload && typeof event.payload.tool === "string") {
 				// Escalation resolutions already have a request event. Policy
 				// deny/fail is non-stalling, so dispatch mints the adjacent pair.
 				const source = event.payload.source;
@@ -4878,7 +4882,7 @@ export function createDispatchBundle(
 					...(runIdForPermissionAudit !== null ? { requestedBy: runIdForPermissionAudit } : {}),
 				});
 			}
-			if (event.type === "clio_tool_finish" && event.payload && typeof event.payload.tool === "string") {
+			if (event.type === "clio_coder_tool_finish" && event.payload && typeof event.payload.tool === "string") {
 				recordToolCompletion(inFlightTools, event.payload);
 				recordToolFinish(toolStats, event.payload);
 				if (isSkillActivation(event.payload.skillActivation)) {
@@ -5237,7 +5241,7 @@ export function createDispatchBundle(
 				dynamicHash: lifecycle.dynamicHash,
 				promptSignature: lifecycle.promptSignature,
 				toolSignature: lifecycle.toolSignature,
-				clioVersion: readClioVersion(),
+				clioCoderVersion: readClioVersion(),
 				piMonoVersion: readPiMonoVersion(),
 				platform: process.platform,
 				nodeVersion: process.version,
@@ -6219,7 +6223,7 @@ export function createDispatchBundle(
 			costProvenance: "unknown",
 			compiledPromptHash: null,
 			staticCompositionHash: null,
-			clioVersion: readClioVersion(),
+			clioCoderVersion: readClioVersion(),
 			piMonoVersion: readPiMonoVersion(),
 			platform: process.platform,
 			nodeVersion: process.version,

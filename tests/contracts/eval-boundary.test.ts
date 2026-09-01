@@ -160,7 +160,7 @@ function artifact(evalId: string, serverBuild: string): EvalArtifactV4 {
 		version: 4,
 		evalId,
 		suite: { id: "boundary", hash: DIGEST },
-		clio: { version: "test", commit: null, entry: "dist/cli/index.js" },
+		clioCoder: { version: "test", commit: null, entry: "dist/cli/index.js" },
 		environment: { platform: "linux-x64", node: process.version },
 		matrix: { target: "mini", model: "qwen", thinking: "off" },
 		servingConfiguration: {

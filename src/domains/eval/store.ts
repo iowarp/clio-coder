@@ -118,7 +118,7 @@ function parseArtifact(value: unknown, source: string): EvalRunArtifact {
 		evalId: readString(value, source, "evalId"),
 		taskFile: readString(value, source, "taskFile"),
 		taskFileHash: readString(value, source, "taskFileHash"),
-		clio: parseClioProvenance(readRequiredArtifactField(value, source, "clio"), `${source}.clio`),
+		clioCoder: parseClioProvenance(readEvalProvenance(value, source), `${source}.clioCoder`),
 		environment: parseEnvironmentProvenance(
 			readRequiredArtifactField(value, source, "environment"),
 			`${source}.environment`,
@@ -235,12 +235,22 @@ function parseRunPaths(value: unknown, source: string): EvalRunPaths {
 function readRequiredArtifactField(
 	record: Record<string, unknown>,
 	source: string,
-	field: "clio" | "environment" | "paths",
+	field: "environment" | "paths",
 ): unknown {
 	const value = record[field];
 	if (value === undefined) {
 		throw new Error(
 			`eval artifact has an invalid schema: missing required field '${field}' in ${source}. Re-run the evaluation suite to generate a complete artifact.`,
+		);
+	}
+	return value;
+}
+
+function readEvalProvenance(record: Record<string, unknown>, source: string): unknown {
+	const value = record.clioCoder ?? record.clio;
+	if (value === undefined) {
+		throw new Error(
+			`eval artifact has an invalid schema: missing required field 'clioCoder' in ${source}. Re-run the evaluation suite to generate a complete artifact.`,
 		);
 	}
 	return value;

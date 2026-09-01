@@ -1628,7 +1628,7 @@ function parseRunReceipt(value: unknown, source: string): RunReceipt {
 		costUsd: readNumber(value, source, "costUsd"),
 		compiledPromptHash: readNullableString(value, source, "compiledPromptHash"),
 		staticCompositionHash: readNullableString(value, source, "staticCompositionHash"),
-		clioVersion: readString(value, source, "clioVersion"),
+		clioCoderVersion: readReceiptVersion(value, source),
 		piMonoVersion: readString(value, source, "piMonoVersion"),
 		platform: readString(value, source, "platform"),
 		nodeVersion: readString(value, source, "nodeVersion"),
@@ -1641,6 +1641,11 @@ function parseRunReceipt(value: unknown, source: string): RunReceipt {
 			digest: readString(integrity, `${source}.integrity`, "digest"),
 		},
 	};
+}
+
+function readReceiptVersion(value: Record<string, unknown>, source: string): string {
+	if (typeof value.clioCoderVersion === "string") return value.clioCoderVersion;
+	return readString(value, source, "clioVersion");
 }
 
 function readToolStats(record: Record<string, unknown>, source: string, field: string): ToolCallStat[] {

@@ -123,7 +123,7 @@ export const RECEIPT_INTEGRITY_FIELD_COVERAGE = {
 	dynamicHash: true,
 	promptSignature: true,
 	toolSignature: true,
-	clioVersion: true,
+	clioCoderVersion: true,
 	piMonoVersion: true,
 	platform: true,
 	nodeVersion: true,
@@ -172,8 +172,14 @@ function selectedReceiptFields(
 	return result;
 }
 
-function receiptDigestFields(receipt: RunReceipt | RunReceiptDraft): Record<string, unknown> {
+function receiptDigestFields(receipt: RunReceipt | RunReceiptDraft, legacyNaming = false): Record<string, unknown> {
 	const result = selectedReceiptFields(receipt, RECEIPT_FIELDS);
+	if (legacyNaming) {
+		const source = receipt as unknown as Record<string, unknown>;
+		const version = source.clioVersion ?? source.clioCoderVersion;
+		delete result.clioCoderVersion;
+		if (version !== undefined) result.clioVersion = version;
+	}
 	result.briefing = receipt.briefing ?? null;
 	result.outcomeCode = receipt.outcomeCode ?? null;
 	result.steering = receipt.steering ?? null;
@@ -227,21 +233,29 @@ function ledgerDigestFields(envelope: RunEnvelope): Record<string, unknown> {
 	};
 }
 
-function integrityPayload(receipt: RunReceipt | RunReceiptDraft, envelope: RunEnvelope): Record<string, unknown> {
+function integrityPayload(
+	receipt: RunReceipt | RunReceiptDraft,
+	envelope: RunEnvelope,
+	legacyNaming = false,
+): Record<string, unknown> {
 	return {
-		contract: "clio.runReceipt.integrity",
+		contract: legacyNaming ? "clio.runReceipt.integrity" : "clio-coder.runReceipt.integrity",
 		version: RUN_RECEIPT_INTEGRITY_VERSION,
 		sources: ["receipt", "run-ledger"],
-		receipt: receiptDigestFields(receipt),
+		receipt: receiptDigestFields(receipt, legacyNaming),
 		ledger: ledgerDigestFields(envelope),
 	};
 }
 
-function computeReceiptIntegrity(receipt: RunReceipt | RunReceiptDraft, envelope: RunEnvelope): RunReceiptIntegrity {
+function computeReceiptIntegrity(
+	receipt: RunReceipt | RunReceiptDraft,
+	envelope: RunEnvelope,
+	legacyNaming = false,
+): RunReceiptIntegrity {
 	return {
 		version: RUN_RECEIPT_INTEGRITY_VERSION,
 		algorithm: RUN_RECEIPT_INTEGRITY_ALGORITHM,
-		digest: sha256(canonicalJson(integrityPayload(receipt, envelope))),
+		digest: sha256(canonicalJson(integrityPayload(receipt, envelope, legacyNaming))),
 	};
 }
 
@@ -382,7 +396,8 @@ export function verifyReceiptIntegrity(receipt: RunReceipt, envelope: RunEnvelop
 		return { ok: false, reason: `ledger mismatch: ${mismatch}` };
 	}
 	const expected = computeReceiptIntegrity(receipt, envelope);
-	if (expected.digest !== receipt.integrity.digest) {
+	const legacyExpected = computeReceiptIntegrity(receipt, envelope, true);
+	if (expected.digest !== receipt.integrity.digest && legacyExpected.digest !== receipt.integrity.digest) {
 		return { ok: false, reason: "integrity mismatch" };
 	}
 	return { ok: true };

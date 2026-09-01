@@ -346,7 +346,7 @@ function emitToolFinish(
 	const finalReasonCode = reasonCode ?? decision.policy?.reasonCode;
 	if (finalReasonCode !== undefined) event.reasonCode = finalReasonCode;
 	if (decision.policy?.policySource !== undefined) event.policySource = decision.policy.policySource;
-	emit({ type: "clio_tool_finish", payload: event });
+	emit({ type: "clio_coder_tool_finish", payload: event });
 }
 
 export function emitClaudeToolPermissionDecision(input: EmitClaudeToolPermissionInput): ClaudeToolPermissionDecision {
@@ -366,7 +366,7 @@ export function emitClaudeToolPermissionDecision(input: EmitClaudeToolPermission
 		startedAt,
 		...(action !== null ? { action } : {}),
 	};
-	input.emit({ type: "clio_tool_start", payload: start });
+	input.emit({ type: "clio_coder_tool_start", payload: start });
 	if (decision.kind === "allow") {
 		emitToolFinish(
 			input.emit,
@@ -383,7 +383,7 @@ export function emitClaudeToolPermissionDecision(input: EmitClaudeToolPermission
 	if (decision.permissionRequired) {
 		const mode = input.onPermission ?? "deny";
 		input.emit({
-			type: "clio_permission_resolved",
+			type: "clio_coder_permission_resolved",
 			payload: {
 				tool: decision.mapped.clioToolName,
 				actionClass: decision.decision.classification.actionClass,

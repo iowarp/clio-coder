@@ -22,6 +22,7 @@
  */
 
 import { createHash } from "node:crypto";
+import { normalizeClioCoderEventRecord } from "../core/naming-events.js";
 
 /** Current wire protocol. A peer announcing anything else is not executed. */
 export const WORKER_PROTOCOL_VERSION = 1;
@@ -365,7 +366,8 @@ function parseJsonObject(line: string, maxBytes: number, lane: string): FramePar
 
 /** Parse one bulk stdout line under the bulk ceiling. */
 export function parseBulkFrame(line: string): FrameParseResult<Record<string, unknown>> {
-	return parseJsonObject(line, WORKER_BULK_FRAME_MAX_BYTES, "bulk");
+	const parsed = parseJsonObject(line, WORKER_BULK_FRAME_MAX_BYTES, "bulk");
+	return parsed.ok ? { ok: true, value: normalizeClioCoderEventRecord(parsed.value) } : parsed;
 }
 
 /** True when a raw stderr line belongs to the structured control lane. */
@@ -507,15 +509,15 @@ export function parseControlFrame(line: string): FrameParseResult<WorkerControlF
  */
 const RECEIPT_BEARING_BULK_TYPES = new Set([
 	"message_end",
-	"clio_run_outcome",
-	"clio_permission_escalated",
-	"clio_permission_resolved",
-	"clio_steer_received",
-	"clio_tool_activity",
-	"clio_skill_activation",
-	"clio_safety_decision",
-	"clio_verification",
-	"clio_usage",
+	"clio_coder_run_outcome",
+	"clio_coder_permission_escalated",
+	"clio_coder_permission_resolved",
+	"clio_coder_steer_received",
+	"clio_coder_tool_activity",
+	"clio_coder_skill_activation",
+	"clio_coder_safety_decision",
+	"clio_coder_verification",
+	"clio_coder_usage",
 	"tool_execution_end",
 	"spawn_error",
 ]);

@@ -107,8 +107,8 @@ export interface EvalInventoryReport {
 	 * needs, and the ordinal reveals nothing about the values behind it.
 	 */
 	readonly servingGroup: number;
-	readonly clioVersion: string | null;
-	readonly clioCommit: string | null;
+	readonly clioCoderVersion: string | null;
+	readonly clioCoderCommit: string | null;
 	readonly platform: string | null;
 	readonly node: string | null;
 	readonly matrix: {
@@ -348,15 +348,15 @@ function projectReport(
 	const serving = evalServingConfigurationOf(artifact);
 	const { counts, failureClasses, behaviorOutcomes } = countResults(artifact.results);
 	const { scenarios, truncated, dropped } = projectScenarios(artifact);
-	const version = artifact.clio.version;
-	const commit = artifact.clio.commit;
+	const version = artifact.clioCoder.version;
+	const commit = artifact.clioCoder.commit;
 	return {
 		evalId,
 		startedAt,
 		suiteId: identifier(artifact.suite.id) ?? "unavailable",
 		servingGroup,
-		clioVersion: VERSION_PATTERN.test(version) ? version : null,
-		clioCommit: commit !== null && COMMIT_PATTERN.test(commit) ? commit : null,
+		clioCoderVersion: VERSION_PATTERN.test(version) ? version : null,
+		clioCoderCommit: commit !== null && COMMIT_PATTERN.test(commit) ? commit : null,
 		platform: identifier(artifact.environment.platform),
 		node: identifier(artifact.environment.node),
 		matrix: {

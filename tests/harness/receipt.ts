@@ -87,7 +87,7 @@ export function fixtureReceiptDraft(envelope: RunEnvelope): RunReceiptDraft {
 		staticShellHash: null,
 		sessionShellHash: null,
 		dynamicHash: null,
-		clioVersion: "0.2.7-test",
+		clioCoderVersion: "0.2.7-test",
 		piMonoVersion: "0.79.1",
 		platform: "linux",
 		nodeVersion: "v22.19.0",

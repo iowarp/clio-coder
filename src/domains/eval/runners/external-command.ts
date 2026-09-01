@@ -315,7 +315,7 @@ function compactMetricEvent(event: Record<string, unknown>): Record<string, unkn
 			...(stringField(event, "outcome") !== undefined ? { outcome: stringField(event, "outcome") } : {}),
 		};
 	}
-	if (type !== "clio_tool_finish" || !isRecord(event.payload)) return null;
+	if (type !== "clio_coder_tool_finish" || !isRecord(event.payload)) return null;
 	return {
 		type,
 		payload: {

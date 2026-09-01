@@ -122,7 +122,7 @@ async function main(): Promise<number> {
 	setResidencyNoticeSink((notice) => {
 		process.stderr.write(`[worker] residency ${notice.kind}: ${notice.message}\n`);
 		if (notice.kind === "will-not-fit") {
-			emitEvent({ type: "clio_run_outcome", payload: { outcomeCode: "vram_capacity_fit_failure" } });
+			emitEvent({ type: "clio_coder_run_outcome", payload: { outcomeCode: "vram_capacity_fit_failure" } });
 		}
 	});
 	const demux = createWorkerStdinDemux();
@@ -227,12 +227,13 @@ async function main(): Promise<number> {
 	const handle = startWorkerRun(input, (event) => emitEvent(projectWorkerEventForStdout(event)));
 	// The demux buffers lines that landed before the runtime handle existed.
 	// Single-shot subprocesses expose no steer method, and an SDK query can race
-	// completion. The runtime emits the receipt-bearing clio_steer_received event
+	// completion. The runtime emits the receipt-bearing clio_coder_steer_received event
 	// only after it accepts the message; rejected input is diagnostic-only.
 	demux.onSteer(
 		createOrderedSteerHandler(
 			(text) => handle.steer?.(text) ?? false,
-			({ text, sequence }) => emitEvent({ type: "clio_steer_received", payload: { chars: text.trim().length, sequence } }),
+			({ text, sequence }) =>
+				emitEvent({ type: "clio_coder_steer_received", payload: { chars: text.trim().length, sequence } }),
 			(reason) => process.stderr.write(`[worker] dropped steer: ${reason}\n`),
 		),
 	);

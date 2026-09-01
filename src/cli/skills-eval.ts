@@ -1085,7 +1085,7 @@ function synthesizeArtifact(
 		evalId,
 		taskFile: evalsPath,
 		taskFileHash: contentHash,
-		clio: evalClioProvenance(),
+		clioCoder: evalClioProvenance(),
 		environment: evalEnvironmentProvenance(),
 		target: target ?? null,
 		model: null,

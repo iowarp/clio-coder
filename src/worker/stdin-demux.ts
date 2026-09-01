@@ -13,7 +13,7 @@ export interface WorkerStdinDemux {
 	/**
 	 * Register the handler for post-spec steer lines
 	 * (`{"type":"steer","text":"...","sequence":1}`). The sequence is assigned by
-	 * the parent and is what lets `clio_steer_received` acknowledge one exact
+	 * the parent and is what lets `clio_coder_steer_received` acknowledge one exact
 	 * receipt entry, so a line without a positive integer sequence is dropped
 	 * rather than delivered unattributed. Steers that arrive before registration
 	 * are buffered in order and flushed to the handler. Single handler; a second
@@ -54,7 +54,7 @@ export interface WorkerSteerMessage {
 
 /**
  * Preserve stdin order while a runtime accepts guidance asynchronously.
- * `clio_steer_received` echoes the parent-assigned sequence, so an
+ * `clio_coder_steer_received` echoes the parent-assigned sequence, so an
  * acknowledgement closes out one exact receipt entry. Ordering still matters
  * for the runtime itself: a later steer must never reach it ahead of an earlier
  * pending one, or the guidance arrives out of the order the operator sent it.

@@ -151,7 +151,6 @@ const RECEIPT_REQUIRED_KEYS = [
 	"costUsd",
 	"compiledPromptHash",
 	"staticCompositionHash",
-	"clioVersion",
 	"piMonoVersion",
 	"platform",
 	"nodeVersion",
@@ -358,6 +357,9 @@ function verifyReceiptFile(stateDir: string, runId: string): ReceiptVerifyResult
 	for (const key of RECEIPT_REQUIRED_KEYS) {
 		if (!(key in r)) return { ok: false, reason: `missing field: ${key}` };
 	}
+	if (!("clioCoderVersion" in r) && !("clioVersion" in r)) {
+		return { ok: false, reason: "missing field: clioCoderVersion" };
+	}
 	if (!isNonEmptyString(r.runId)) {
 		return { ok: false, reason: `runId invalid: ${String(r.runId)}` };
 	}
@@ -413,8 +415,9 @@ function verifyReceiptFile(stateDir: string, runId: string): ReceiptVerifyResult
 	if (!isIso8601(r.endedAt)) {
 		return { ok: false, reason: `endedAt not ISO-8601: ${String(r.endedAt)}` };
 	}
-	if (typeof r.clioVersion !== "string" || r.clioVersion.length === 0) {
-		return { ok: false, reason: "clioVersion empty" };
+	const clioCoderVersion = r.clioCoderVersion ?? r.clioVersion;
+	if (typeof clioCoderVersion !== "string" || clioCoderVersion.length === 0) {
+		return { ok: false, reason: "clioCoderVersion empty" };
 	}
 	if (!isNonEmptyString(r.piMonoVersion)) {
 		return { ok: false, reason: `piMonoVersion invalid: ${String(r.piMonoVersion)}` };
@@ -453,7 +456,7 @@ function verifyReceiptFile(stateDir: string, runId: string): ReceiptVerifyResult
 
 const RECEIPT_FILE_FAILURE = /^(?:receipt file not found|read error:)/u;
 const RECEIPT_CONTRACT_FAILURE =
-	/^(?:invalid json:|receipt is not an object|missing field:|runId invalid:|runId mismatch:|agentId invalid:|task invalid:|targetId invalid:|wireModelId invalid:|runtimeId invalid:|runtimeKind invalid:|exitCode out of range:|tokenCount out of range:|inputTokenCount out of range:|outputTokenCount out of range:|cacheReadTokenCount out of range:|cacheWriteTokenCount out of range:|costUsd out of range:|reasoningTokenCount out of range:|startedAt not ISO-8601:|endedAt not ISO-8601:|clioVersion empty|piMonoVersion invalid:|platform invalid:|nodeVersion invalid:|toolCalls out of range:|toolStats\[|compiledPromptHash invalid:|staticCompositionHash invalid:|sessionId invalid:|integrity invalid|execution role invalid|routing intent invalid|route decision invalid)/u;
+	/^(?:invalid json:|receipt is not an object|missing field:|runId invalid:|runId mismatch:|agentId invalid:|task invalid:|targetId invalid:|wireModelId invalid:|runtimeId invalid:|runtimeKind invalid:|exitCode out of range:|tokenCount out of range:|inputTokenCount out of range:|outputTokenCount out of range:|cacheReadTokenCount out of range:|cacheWriteTokenCount out of range:|costUsd out of range:|reasoningTokenCount out of range:|startedAt not ISO-8601:|endedAt not ISO-8601:|clioCoderVersion empty|piMonoVersion invalid:|platform invalid:|nodeVersion invalid:|toolCalls out of range:|toolStats\[|compiledPromptHash invalid:|staticCompositionHash invalid:|sessionId invalid:|integrity invalid|execution role invalid|routing intent invalid|route decision invalid)/u;
 const LEDGER_FAILURE = /^(?:run ledger not found|run not found in ledger|ledger mismatch:)/u;
 
 function receiptIntegrityDigest(value: unknown): string | null {

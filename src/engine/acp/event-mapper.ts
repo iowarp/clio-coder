@@ -74,7 +74,7 @@ export class AcpEventMapper {
 			return this.mapToolUpdate(update as AcpToolCallUpdate);
 		}
 		if (kind === "plan") {
-			return [{ type: "clio_plan_update", payload: update } as unknown as AgentEvent];
+			return [{ type: "clio_coder_plan_update", payload: update } as unknown as AgentEvent];
 		}
 		return [];
 	}
@@ -116,7 +116,7 @@ export class AcpEventMapper {
 			// operator surface. The descriptor composed from it here does.
 			const action = describeCallAction(update.kind ?? title, update.rawInput);
 			out.push({
-				type: "clio_tool_start",
+				type: "clio_coder_tool_start",
 				payload: {
 					tool: update.kind ?? title,
 					toolCallId,
@@ -145,7 +145,7 @@ export class AcpEventMapper {
 				isError,
 			} as unknown as AgentEvent);
 			out.push({
-				type: "clio_tool_finish",
+				type: "clio_coder_tool_finish",
 				payload: {
 					tool: update.kind ?? title,
 					toolCallId,

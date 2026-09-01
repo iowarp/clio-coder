@@ -1719,7 +1719,7 @@ export function createDispatchBoardStore(
 					entry.ttftMs = Math.round(performance.now() - entry.startedAtClockMs);
 				}
 			}
-			if (type === "clio_write_record_downgraded") {
+			if (type === "clio_coder_write_record_downgraded") {
 				const rawPayload = (workerEvent as { payload?: unknown }).payload;
 				const payload =
 					typeof rawPayload === "object" && rawPayload !== null ? (rawPayload as Record<string, unknown>) : null;
@@ -1737,7 +1737,7 @@ export function createDispatchBoardStore(
 			// board says about what a worker is saying or touching comes from here,
 			// so the board and the transcript block cannot tell two stories.
 			entry.progress.observe(payload.event);
-			if (type === "clio_steer_received") {
+			if (type === "clio_coder_steer_received") {
 				const steerPayload = (workerEvent as { payload?: { chars?: unknown } }).payload;
 				entry.steerAcknowledgement = {
 					receivedAtMs: Date.now(),

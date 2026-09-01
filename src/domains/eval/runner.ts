@@ -43,7 +43,7 @@ export async function runEvalTasks(options: RunEvalOptions): Promise<EvalRunArti
 		evalId: options.evalId,
 		taskFile: options.loadedTaskFile.path,
 		taskFileHash: options.loadedTaskFile.contentHash,
-		clio: evalClioProvenance(options.provenance),
+		clioCoder: evalClioProvenance(options.provenance),
 		environment: evalEnvironmentProvenance(),
 		target: options.provenance?.target ?? null,
 		model: options.provenance?.model ?? null,

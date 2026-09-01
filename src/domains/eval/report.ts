@@ -14,7 +14,7 @@ export function renderEvalReport(artifact: EvalRunArtifact, artifactPath?: strin
 	lines.splice(
 		2,
 		0,
-		`clio: ${artifact.clio.version} commit=${artifact.clio.commit ?? "unknown"} entry=${artifact.clio.entry}`,
+		`clioCoder: ${artifact.clioCoder.version} commit=${artifact.clioCoder.commit ?? "unknown"} entry=${artifact.clioCoder.entry}`,
 	);
 	lines.splice(3, 0, `environment: ${artifact.environment.platform} node=${artifact.environment.node}`);
 	const evidenceIds = uniqueEvidenceIds(artifact);

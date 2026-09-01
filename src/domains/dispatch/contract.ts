@@ -308,7 +308,7 @@ export interface DispatchContract {
 	 * assignment id addresses its current attempt. The text is sent as a JSON
 	 * line on the worker's open stdin and injected into its transcript at the
 	 * next loop boundary; the worker acknowledges runtime acceptance with a
-	 * `clio_steer_received` event. Throws with an operator-facing message when
+	 * `clio_coder_steer_received` event. Throws with an operator-facing message when
 	 * the run is unknown or inactive, when the runtime is a single-shot
 	 * subprocess or ACP delegation, or when the worker's stdin is already gone.
 	 */
@@ -319,7 +319,7 @@ export interface DispatchContract {
 	 * running native worker. A logical assignment id addresses its current attempt (onPermission="escalate"). Writes a
 	 * `permission_decision` JSON line on the worker's open stdin; the worker
 	 * releases or denies the parked tool call and acks with a
-	 * `clio_permission_resolved` event. Human-only: no model-facing tool can
+	 * `clio_coder_permission_resolved` event. Human-only: no model-facing tool can
 	 * reach this. Throws with an operator-facing message when the run is
 	 * unknown or no longer active, when the run kind has no stdin channel
 	 * (acp-delegation), or when the worker's stdin is already gone. Mirrors

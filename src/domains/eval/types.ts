@@ -126,7 +126,7 @@ export interface EvalRunArtifact {
 	evalId: string;
 	taskFile: string;
 	taskFileHash: string;
-	clio: EvalClioProvenance;
+	clioCoder: EvalClioProvenance;
 	environment: EvalEnvironmentProvenance;
 	target: string | null;
 	model: string | null;

@@ -88,7 +88,7 @@ export function createInteractiveSubscriptions(deps: InteractiveSubscriptionsDep
 			BusChannels.DispatchProgress,
 			folded((payload) => {
 				const workerEvent = payload.event as { type?: unknown } | null | undefined;
-				if (workerEvent?.type === "clio_steer_received") {
+				if (workerEvent?.type === "clio_coder_steer_received") {
 					deps.notify("success", `steer received by ${payload.agentId} (${payload.runId})`, `steer:${payload.runId}`);
 				}
 				return workers.progress(payload);
