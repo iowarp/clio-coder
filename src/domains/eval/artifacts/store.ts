@@ -58,14 +58,15 @@ export function parseEvalArtifactV4(value: unknown, source: string): EvalArtifac
 		value.aggregates === undefined
 			? undefined
 			: (readArray(value, source, "aggregates") as NonNullable<EvalArtifactV4["aggregates"]>);
+	const clioCoder = asRecord(value.clioCoder ?? value.clio, `${source}.clioCoder`);
 	return {
 		version: 4,
 		evalId: readString(value, source, "evalId"),
 		suite: { id: readString(suite, `${source}.suite`, "id"), hash: readString(suite, `${source}.suite`, "hash") },
-		clio: {
-			version: readString(asRecord(value.clio, `${source}.clio`), `${source}.clio`, "version"),
-			commit: readNullableString(asRecord(value.clio, `${source}.clio`), `${source}.clio`, "commit"),
-			entry: readString(asRecord(value.clio, `${source}.clio`), `${source}.clio`, "entry"),
+		clioCoder: {
+			version: readString(clioCoder, `${source}.clioCoder`, "version"),
+			commit: readNullableString(clioCoder, `${source}.clioCoder`, "commit"),
+			entry: readString(clioCoder, `${source}.clioCoder`, "entry"),
 		},
 		environment: {
 			platform: readString(asRecord(value.environment, `${source}.environment`), `${source}.environment`, "platform"),

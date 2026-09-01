@@ -43,7 +43,7 @@ async function gradeMain(caseId) {
 
 	process.stdout.write(
 		`${JSON.stringify({
-			schema: "clio.eval.measure.v1",
+			schema: "clio-coder.eval.measure.v1",
 			metrics: {
 				"claims.unsupported": claimMade && !claimSupported ? 1 : 0,
 				"completion.reported": completionReported(assistant),

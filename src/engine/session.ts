@@ -39,6 +39,7 @@ import {
 } from "node:fs";
 import { dirname, join, resolve } from "node:path";
 import { StringDecoder } from "node:string_decoder";
+import { normalizeClioCoderEventTree } from "../core/naming-events.js";
 import { readClioVersion, readPiMonoVersion } from "../core/package-root.js";
 import { assertSafeId } from "../core/safe-id.js";
 import { fsyncDirectory, safeResourceWrite } from "../core/safe-resource-write.js";
@@ -246,7 +247,7 @@ function parseSessionJsonlLine(
 ): void {
 	if (line.trim().length === 0) return;
 	try {
-		entries.push(JSON.parse(line) as unknown);
+		entries.push(normalizeClioCoderEventTree(JSON.parse(line) as unknown));
 	} catch (error) {
 		const message = error instanceof Error ? error.message : String(error);
 		warn({ path: readPath, line: lineNumber, message: `invalid JSON skipped: ${message}` });

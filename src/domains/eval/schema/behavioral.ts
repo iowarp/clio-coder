@@ -1,8 +1,9 @@
 import { createHash } from "node:crypto";
+import { normalizeEvalSchemaId } from "./naming.js";
 import { EVAL_VERDICT_SCHEMA_V1, type EvalVerdictEnvelopeV1 } from "./verdict.js";
 
-export const EVAL_BEHAVIOR_SCENARIO_SCHEMA_V1 = "clio.eval.scenario.v1" as const;
-export const EVAL_BEHAVIOR_SCHEMA_V1 = "clio.eval.behavior.v1" as const;
+export const EVAL_BEHAVIOR_SCENARIO_SCHEMA_V1 = "clio-coder.eval.scenario.v1" as const;
+export const EVAL_BEHAVIOR_SCHEMA_V1 = "clio-coder.eval.behavior.v1" as const;
 
 export const EVAL_BEHAVIOR_CATEGORIES = [
 	"tool_choice",
@@ -102,7 +103,7 @@ export interface EvalBehaviorVerdictV1 {
 
 export function parseEvalBehaviorScenarioV1(value: unknown, source = "behavioral scenario"): EvalBehaviorScenarioV1 {
 	const record = asRecord(value, source);
-	if (record.schema !== EVAL_BEHAVIOR_SCENARIO_SCHEMA_V1) {
+	if (normalizeEvalSchemaId(record.schema) !== EVAL_BEHAVIOR_SCENARIO_SCHEMA_V1) {
 		throw new Error(`${source}.schema: expected ${EVAL_BEHAVIOR_SCENARIO_SCHEMA_V1}`);
 	}
 	const corpus = asRecord(record.corpus, `${source}.corpus`);
@@ -221,10 +222,10 @@ export function judgeEvalBehaviorV1(
 
 export function parseEvalBehaviorVerdictV1(value: unknown, source = "behavioral verdict"): EvalBehaviorVerdictV1 {
 	const record = asRecord(value, source);
-	if (record.schema !== EVAL_BEHAVIOR_SCHEMA_V1)
+	if (normalizeEvalSchemaId(record.schema) !== EVAL_BEHAVIOR_SCHEMA_V1)
 		throw new Error(`${source}.schema: expected ${EVAL_BEHAVIOR_SCHEMA_V1}`);
 	const verdictRef = asRecord(record.verdictRef, `${source}.verdictRef`);
-	if (verdictRef.schema !== EVAL_VERDICT_SCHEMA_V1) {
+	if (normalizeEvalSchemaId(verdictRef.schema) !== EVAL_VERDICT_SCHEMA_V1) {
 		throw new Error(`${source}.verdictRef.schema: expected ${EVAL_VERDICT_SCHEMA_V1}`);
 	}
 	const corpus = asRecord(record.corpus, `${source}.corpus`);

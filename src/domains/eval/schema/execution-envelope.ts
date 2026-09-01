@@ -1,4 +1,6 @@
-export const EVAL_EXECUTION_ENVELOPE_SCHEMA_V1 = "clio.eval.execution-envelope.v1" as const;
+import { normalizeEvalSchemaId } from "./naming.js";
+
+export const EVAL_EXECUTION_ENVELOPE_SCHEMA_V1 = "clio-coder.eval.execution-envelope.v1" as const;
 
 export const EVAL_EXECUTION_MATRIX_DIMENSIONS_V1 = [
 	"prompt",
@@ -56,7 +58,7 @@ export interface EvalExecutionEnvelopeV1 {
 
 export function parseEvalExecutionEnvelopeV1(value: unknown, source = "execution envelope"): EvalExecutionEnvelopeV1 {
 	const record = asRecord(value, source);
-	if (record.schema !== EVAL_EXECUTION_ENVELOPE_SCHEMA_V1) {
+	if (normalizeEvalSchemaId(record.schema) !== EVAL_EXECUTION_ENVELOPE_SCHEMA_V1) {
 		throw new Error(`${source}.schema: expected ${EVAL_EXECUTION_ENVELOPE_SCHEMA_V1}`);
 	}
 	const prompt = asRecord(record.prompt, `${source}.prompt`);

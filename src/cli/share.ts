@@ -233,7 +233,7 @@ export function runShareCommand(argv: ReadonlyArray<string>): number {
 				const archive = plan.archive;
 				if (archive) {
 					process.stdout.write(
-						`archive: ${archive.manifest.format} clio=${archive.manifest.clioVersion} files=${archive.files.length} created=${archive.manifest.createdAt}\n`,
+						`archive: ${archive.manifest.format} clio-coder=${archive.manifest.clioCoderVersion} files=${archive.files.length} created=${archive.manifest.createdAt}\n`,
 					);
 				}
 			}

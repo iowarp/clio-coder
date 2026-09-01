@@ -1,7 +1,7 @@
 /**
  * Pure aggregation helpers for the per-tool stats folded into a RunReceipt.
  *
- * Sourced from the worker's ToolTelemetry stream (`clio_tool_finish` IPC
+ * Sourced from the worker's ToolTelemetry stream (`clio_coder_tool_finish` IPC
  * events). Kept as a small standalone module so receipts have a single source
  * of truth for the aggregation invariants, and so loops, retries, errors,
  * blocked admissions, and parallel-batch tool calls all flow through one

@@ -44,14 +44,14 @@ export interface ShareArchiveManifestFile {
 }
 
 export interface ShareArchiveManifest {
-	format: "clio.share.v1";
-	clioVersion: string;
+	format: "clio-coder.share.v1";
+	clioCoderVersion: string;
 	createdAt: string;
 	files: ShareArchiveManifestFile[];
 }
 
 export interface ClioShareArchive {
-	kind: "clio-share-archive";
+	kind: "clio-coder-share-archive";
 	formatVersion: 1;
 	manifest: ShareArchiveManifest;
 	files: ShareArchiveFile[];
@@ -347,11 +347,11 @@ export function createShareArchive(options: ShareExportOptions = {}): ClioShareA
 
 	const manifestFiles = files.map(({ data: _data, encoding: _encoding, ...entry }) => entry);
 	return {
-		kind: "clio-share-archive",
+		kind: "clio-coder-share-archive",
 		formatVersion: 1,
 		manifest: {
-			format: "clio.share.v1",
-			clioVersion: readClioVersion(),
+			format: "clio-coder.share.v1",
+			clioCoderVersion: readClioVersion(),
 			createdAt: new Date().toISOString(),
 			files: manifestFiles,
 		},
@@ -370,13 +370,33 @@ function decodeArchiveFile(entry: ShareArchiveFile): Buffer {
 }
 
 function parseArchive(raw: unknown): ClioShareArchive {
-	if (!isRecord(raw) || raw.kind !== "clio-share-archive" || raw.formatVersion !== 1 || !isRecord(raw.manifest)) {
+	if (
+		!isRecord(raw) ||
+		(raw.kind !== "clio-coder-share-archive" && raw.kind !== "clio-share-archive") ||
+		raw.formatVersion !== 1 ||
+		!isRecord(raw.manifest)
+	) {
 		throw new Error("not a Clio share archive v1");
 	}
-	if (raw.manifest.format !== "clio.share.v1" || !Array.isArray(raw.files)) {
+	if (
+		(raw.manifest.format !== "clio-coder.share.v1" && raw.manifest.format !== "clio.share.v1") ||
+		!Array.isArray(raw.files)
+	) {
 		throw new Error("share archive manifest is malformed");
 	}
-	const archive = raw as unknown as ClioShareArchive;
+	const clioCoderVersion = raw.manifest.clioCoderVersion ?? raw.manifest.clioVersion;
+	if (typeof clioCoderVersion !== "string") throw new Error("share archive manifest is malformed");
+	const archive: ClioShareArchive = {
+		kind: "clio-coder-share-archive",
+		formatVersion: 1,
+		manifest: {
+			format: "clio-coder.share.v1",
+			clioCoderVersion,
+			createdAt: raw.manifest.createdAt as string,
+			files: raw.manifest.files as ShareArchiveManifestFile[],
+		},
+		files: raw.files as ShareArchiveFile[],
+	};
 	const allowedTypes = new Set<ShareEntryType>([
 		"project-context",
 		"prompt",
@@ -591,12 +611,12 @@ function preflightImportTargets(
 function versionDiagnostics(archive: ClioShareArchive): ShareDiagnostic[] {
 	const current = readClioVersion();
 	const [curMajor, curMinor] = current.split(".");
-	const [arcMajor, arcMinor] = archive.manifest.clioVersion.split(".");
+	const [arcMajor, arcMinor] = archive.manifest.clioCoderVersion.split(".");
 	if (curMajor !== arcMajor || curMinor !== arcMinor) {
 		return [
 			{
 				type: "warning",
-				message: `archive was created by Clio ${archive.manifest.clioVersion}; current Clio is ${current}`,
+				message: `archive was created by Clio ${archive.manifest.clioCoderVersion}; current Clio is ${current}`,
 			},
 		];
 	}

@@ -164,9 +164,9 @@ function isThinkingEvent(event: Record<string, unknown>): boolean {
 	return assistantEvent?.type === "thinking_delta";
 }
 
-/** The action a `clio_tool_start`/`clio_tool_finish` event names, or null when it is neither. */
+/** The action a `clio_coder_tool_start`/`clio_coder_tool_finish` event names, or null when it is neither. */
 function toolEventAction(event: Record<string, unknown>): WorkerAction | null {
-	if (event.type !== "clio_tool_start" && event.type !== "clio_tool_finish") return null;
+	if (event.type !== "clio_coder_tool_start" && event.type !== "clio_coder_tool_finish") return null;
 	const payload = isRecord(event.payload) ? event.payload : null;
 	const tool = nonEmptyString(payload?.tool);
 	if (tool === undefined) return null;
@@ -363,7 +363,7 @@ export function createWorkerProgressFold(): WorkerProgressFold {
 			}
 
 			const action = toolEventAction(event);
-			if (action !== null && event.type === "clio_tool_start") {
+			if (action !== null && event.type === "clio_coder_tool_start") {
 				if (action.toolCallId !== undefined) {
 					const duplicate = pendingActionsById.get(action.toolCallId);
 					if (duplicate !== undefined) removePendingAction(duplicate);
@@ -375,7 +375,7 @@ export function createWorkerProgressFold(): WorkerProgressFold {
 				touch();
 				setPhase("tool");
 				changed = true;
-			} else if (action !== null && event.type === "clio_tool_finish") {
+			} else if (action !== null && event.type === "clio_coder_tool_finish") {
 				// An id is authoritative when both sides carry it. If either side came
 				// from an older or incomplete producer, retain the historical name match.
 				const finished =

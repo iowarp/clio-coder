@@ -129,7 +129,7 @@ export const CANONICAL_METRIC_PREFIXES = ["tools.calls.", "tools.blocked."] as c
 
 export type EvalMetricName = (typeof CANONICAL_METRICS)[number];
 export type EvalAssertionOp = "lt" | "lte" | "gt" | "gte" | "eq" | "neq";
-export type EvalRunnerKind = "clio-run" | "context-index" | "context-init" | "external-command";
+export type EvalRunnerKind = "clio-coder-run" | "context-index" | "context-init" | "external-command";
 export type EvalWorkspaceKind = "local" | "git" | "temp-copy";
 
 export interface EvalMetricAssertion {

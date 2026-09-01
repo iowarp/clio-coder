@@ -19,6 +19,7 @@ import type {
 	DispatchProgressPayload,
 	DispatchStartedPayload,
 } from "../../core/bus-events.js";
+import { normalizeClioCoderEventType } from "../../core/naming-events.js";
 import { processAlive, processBirthToken } from "../../core/process-identity.js";
 import { createRedactionTally, redactSecretsText } from "../evidence/redact.js";
 
@@ -1201,7 +1202,7 @@ export class TraceReader {
 	}
 
 	events(runId: string, afterRowid = 0, limit = TRACE_EVENT_POLL_LIMIT): TraceEventRow[] {
-		return this.db
+		const rows = this.db
 			.prepare(`SELECT rowid, event_id, run_id, phase_id, parent_id, type, name, payload_json,
         tokens, started_at, ended_at FROM events
         WHERE run_id = ? AND rowid > ? ORDER BY rowid LIMIT ?`)
@@ -1210,6 +1211,7 @@ export class TraceReader {
 				Math.max(0, Math.trunc(afterRowid)),
 				clampInt(limit, 1, TRACE_EVENT_POLL_LIMIT),
 			) as unknown as TraceEventRow[];
+		return rows.map((row) => ({ ...row, type: normalizeClioCoderEventType(row.type) }));
 	}
 
 	/**
@@ -1221,9 +1223,17 @@ export class TraceReader {
 	 * on the way to counting them.
 	 */
 	eventKindCounts(runId: string): Array<{ type: string; count: number }> {
-		return this.db
+		const rows = this.db
 			.prepare("SELECT type, COUNT(*) AS count FROM events WHERE run_id=? GROUP BY type ORDER BY count DESC, type")
 			.all(runId) as unknown as Array<{ type: string; count: number }>;
+		const counts = new Map<string, number>();
+		for (const row of rows) {
+			const type = normalizeClioCoderEventType(row.type);
+			counts.set(type, (counts.get(type) ?? 0) + row.count);
+		}
+		return [...counts]
+			.map(([type, count]) => ({ type, count }))
+			.sort((left, right) => right.count - left.count || left.type.localeCompare(right.type));
 	}
 
 	/** Total events and the wall span they cover, without reading one of them. */
@@ -1408,7 +1418,7 @@ function recordProgress(
 ): void {
 	if (!isRecord(payload.event)) return;
 	const event = payload.event;
-	const type = typeof event.type === "string" ? event.type : "progress";
+	const type = typeof event.type === "string" ? normalizeClioCoderEventType(event.type) : "progress";
 	const toolCallId = stringValue(event.toolCallId) ?? stringValue(event.tool_call_id);
 	if (
 		type === "message_end" &&
@@ -1442,7 +1452,7 @@ function recordProgress(
 			});
 		}
 	}
-	if ((type === "tool_execution_start" || type === "clio_tool_start") && toolCallId !== null) {
+	if ((type === "tool_execution_start" || type === "clio_coder_tool_start") && toolCallId !== null) {
 		starts.set(`${payload.runId}:${toolCallId}`, {
 			toolCallId,
 			tool: stringValue(event.toolName) ?? stringValue(event.tool) ?? "tool",
@@ -1451,7 +1461,7 @@ function recordProgress(
 		});
 		return;
 	}
-	if ((type === "tool_execution_end" || type === "clio_tool_finish") && toolCallId !== null) {
+	if ((type === "tool_execution_end" || type === "clio_coder_tool_finish") && toolCallId !== null) {
 		const key = `${payload.runId}:${toolCallId}`;
 		const start = starts.get(key);
 		// One clock frame per row. The worker measures `durationMs` on its own
@@ -1537,12 +1547,12 @@ function recordFailure(store: TraceStore, input: DispatchFailedPayload, at: stri
 function isCriticalTraceEvent(channel: string, raw: unknown): boolean {
 	if (channel !== "dispatch.progress") return true;
 	if (!isRecord(raw) || !isRecord(raw.event)) return false;
-	const type = raw.event.type;
+	const type = typeof raw.event.type === "string" ? normalizeClioCoderEventType(raw.event.type) : raw.event.type;
 	return (
 		type === "tool_execution_start" ||
 		type === "tool_execution_end" ||
-		type === "clio_tool_start" ||
-		type === "clio_tool_finish" ||
+		type === "clio_coder_tool_start" ||
+		type === "clio_coder_tool_finish" ||
 		type === "message_end" ||
 		type === "attempt_start"
 	);

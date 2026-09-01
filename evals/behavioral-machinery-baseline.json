@@ -1,5 +1,5 @@
 {
-	"schema": "clio.eval.behavior.release-baseline.v1",
+	"schema": "clio-coder.eval.behavior.release-baseline.v1",
 	"corpus": {
 		"id": "public-built-in-behavior",
 		"version": "1.0.0"
@@ -36,7 +36,7 @@
 				"cost.usd": null
 			},
 			"executionEnvelope": {
-				"schema": "clio.eval.execution-envelope.v1",
+				"schema": "clio-coder.eval.execution-envelope.v1",
 				"prompt": {
 					"fragments": [
 						{
@@ -123,7 +123,7 @@
 				"cost.usd": null
 			},
 			"executionEnvelope": {
-				"schema": "clio.eval.execution-envelope.v1",
+				"schema": "clio-coder.eval.execution-envelope.v1",
 				"prompt": {
 					"fragments": [
 						{
@@ -210,7 +210,7 @@
 				"cost.usd": null
 			},
 			"executionEnvelope": {
-				"schema": "clio.eval.execution-envelope.v1",
+				"schema": "clio-coder.eval.execution-envelope.v1",
 				"prompt": {
 					"fragments": [
 						{
@@ -297,7 +297,7 @@
 				"cost.usd": null
 			},
 			"executionEnvelope": {
-				"schema": "clio.eval.execution-envelope.v1",
+				"schema": "clio-coder.eval.execution-envelope.v1",
 				"prompt": {
 					"fragments": [
 						{
@@ -384,7 +384,7 @@
 				"cost.usd": null
 			},
 			"executionEnvelope": {
-				"schema": "clio.eval.execution-envelope.v1",
+				"schema": "clio-coder.eval.execution-envelope.v1",
 				"prompt": {
 					"fragments": [
 						{
@@ -471,7 +471,7 @@
 				"cost.usd": null
 			},
 			"executionEnvelope": {
-				"schema": "clio.eval.execution-envelope.v1",
+				"schema": "clio-coder.eval.execution-envelope.v1",
 				"prompt": {
 					"fragments": [
 						{
@@ -558,7 +558,7 @@
 				"cost.usd": null
 			},
 			"executionEnvelope": {
-				"schema": "clio.eval.execution-envelope.v1",
+				"schema": "clio-coder.eval.execution-envelope.v1",
 				"prompt": {
 					"fragments": [
 						{
@@ -645,7 +645,7 @@
 				"cost.usd": null
 			},
 			"executionEnvelope": {
-				"schema": "clio.eval.execution-envelope.v1",
+				"schema": "clio-coder.eval.execution-envelope.v1",
 				"prompt": {
 					"fragments": [
 						{
@@ -732,7 +732,7 @@
 				"cost.usd": null
 			},
 			"executionEnvelope": {
-				"schema": "clio.eval.execution-envelope.v1",
+				"schema": "clio-coder.eval.execution-envelope.v1",
 				"prompt": {
 					"fragments": [
 						{
@@ -819,7 +819,7 @@
 				"cost.usd": null
 			},
 			"executionEnvelope": {
-				"schema": "clio.eval.execution-envelope.v1",
+				"schema": "clio-coder.eval.execution-envelope.v1",
 				"prompt": {
 					"fragments": [
 						{
@@ -906,7 +906,7 @@
 				"cost.usd": null
 			},
 			"executionEnvelope": {
-				"schema": "clio.eval.execution-envelope.v1",
+				"schema": "clio-coder.eval.execution-envelope.v1",
 				"prompt": {
 					"fragments": [
 						{
@@ -993,7 +993,7 @@
 				"cost.usd": null
 			},
 			"executionEnvelope": {
-				"schema": "clio.eval.execution-envelope.v1",
+				"schema": "clio-coder.eval.execution-envelope.v1",
 				"prompt": {
 					"fragments": [
 						{
@@ -1080,7 +1080,7 @@
 				"cost.usd": null
 			},
 			"executionEnvelope": {
-				"schema": "clio.eval.execution-envelope.v1",
+				"schema": "clio-coder.eval.execution-envelope.v1",
 				"prompt": {
 					"fragments": [
 						{
@@ -1167,7 +1167,7 @@
 				"cost.usd": null
 			},
 			"executionEnvelope": {
-				"schema": "clio.eval.execution-envelope.v1",
+				"schema": "clio-coder.eval.execution-envelope.v1",
 				"prompt": {
 					"fragments": [
 						{
@@ -1254,7 +1254,7 @@
 				"cost.usd": null
 			},
 			"executionEnvelope": {
-				"schema": "clio.eval.execution-envelope.v1",
+				"schema": "clio-coder.eval.execution-envelope.v1",
 				"prompt": {
 					"fragments": [
 						{
@@ -1341,7 +1341,7 @@
 				"cost.usd": null
 			},
 			"executionEnvelope": {
-				"schema": "clio.eval.execution-envelope.v1",
+				"schema": "clio-coder.eval.execution-envelope.v1",
 				"prompt": {
 					"fragments": [
 						{
@@ -1428,7 +1428,7 @@
 				"cost.usd": null
 			},
 			"executionEnvelope": {
-				"schema": "clio.eval.execution-envelope.v1",
+				"schema": "clio-coder.eval.execution-envelope.v1",
 				"prompt": {
 					"fragments": [
 						{
@@ -1515,7 +1515,7 @@
 				"cost.usd": null
 			},
 			"executionEnvelope": {
-				"schema": "clio.eval.execution-envelope.v1",
+				"schema": "clio-coder.eval.execution-envelope.v1",
 				"prompt": {
 					"fragments": [
 						{
@@ -1602,7 +1602,7 @@
 				"cost.usd": null
 			},
 			"executionEnvelope": {
-				"schema": "clio.eval.execution-envelope.v1",
+				"schema": "clio-coder.eval.execution-envelope.v1",
 				"prompt": {
 					"fragments": [
 						{
@@ -1689,7 +1689,7 @@
 				"cost.usd": null
 			},
 			"executionEnvelope": {
-				"schema": "clio.eval.execution-envelope.v1",
+				"schema": "clio-coder.eval.execution-envelope.v1",
 				"prompt": {
 					"fragments": [
 						{
@@ -1776,7 +1776,7 @@
 				"cost.usd": null
 			},
 			"executionEnvelope": {
-				"schema": "clio.eval.execution-envelope.v1",
+				"schema": "clio-coder.eval.execution-envelope.v1",
 				"prompt": {
 					"fragments": [
 						{
@@ -1863,7 +1863,7 @@
 				"cost.usd": null
 			},
 			"executionEnvelope": {
-				"schema": "clio.eval.execution-envelope.v1",
+				"schema": "clio-coder.eval.execution-envelope.v1",
 				"prompt": {
 					"fragments": [
 						{
@@ -1950,7 +1950,7 @@
 				"cost.usd": null
 			},
 			"executionEnvelope": {
-				"schema": "clio.eval.execution-envelope.v1",
+				"schema": "clio-coder.eval.execution-envelope.v1",
 				"prompt": {
 					"fragments": [
 						{
@@ -2037,7 +2037,7 @@
 				"cost.usd": null
 			},
 			"executionEnvelope": {
-				"schema": "clio.eval.execution-envelope.v1",
+				"schema": "clio-coder.eval.execution-envelope.v1",
 				"prompt": {
 					"fragments": [
 						{
@@ -2124,7 +2124,7 @@
 				"cost.usd": null
 			},
 			"executionEnvelope": {
-				"schema": "clio.eval.execution-envelope.v1",
+				"schema": "clio-coder.eval.execution-envelope.v1",
 				"prompt": {
 					"fragments": [
 						{
@@ -2211,7 +2211,7 @@
 				"cost.usd": null
 			},
 			"executionEnvelope": {
-				"schema": "clio.eval.execution-envelope.v1",
+				"schema": "clio-coder.eval.execution-envelope.v1",
 				"prompt": {
 					"fragments": [
 						{

@@ -227,7 +227,7 @@ export function startAcpDelegationRun(input: AcpDelegationRunInput): AcpDelegati
 		...(input.autonomy !== undefined ? { autonomy: input.autonomy } : {}),
 		onPermissionResolved: (event) =>
 			emit({
-				type: "clio_permission_resolved",
+				type: "clio_coder_permission_resolved",
 				payload: event,
 			} as ClioWorkerEvent),
 	});

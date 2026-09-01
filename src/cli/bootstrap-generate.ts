@@ -233,7 +233,7 @@ async function collectDispatchAssistantText(
 				message: "bootstrap agent started repository exploration",
 			});
 		}
-		if (isRecord(event) && event.type === "clio_tool_start") {
+		if (isRecord(event) && event.type === "clio_coder_tool_start") {
 			const tool = toolNameFromEvent(event);
 			if (tool) {
 				input.progress?.({
@@ -244,7 +244,7 @@ async function collectDispatchAssistantText(
 				});
 			}
 		}
-		if (isRecord(event) && event.type === "clio_tool_finish") {
+		if (isRecord(event) && event.type === "clio_coder_tool_finish") {
 			const tool = toolNameFromEvent(event);
 			const outcome = toolOutcomeFromEvent(event) ?? "done";
 			if (tool) {

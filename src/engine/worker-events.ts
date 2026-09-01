@@ -9,18 +9,18 @@ import type { RunOutcomeCode } from "../domains/dispatch/types.js";
 import type { ToolFinishEvent, ToolStartEvent } from "../tools/agent-tools.js";
 
 export interface ClioToolStartEvent {
-	type: "clio_tool_start";
+	type: "clio_coder_tool_start";
 	payload: ToolStartEvent;
 }
 
 export interface ClioToolFinishEvent {
-	type: "clio_tool_finish";
+	type: "clio_coder_tool_finish";
 	payload: ToolFinishEvent;
 }
 
 /** Emitted when the worker's non-stall policy resolves a permission-requiring tool call. */
 export interface ClioPermissionResolvedEvent {
-	type: "clio_permission_resolved";
+	type: "clio_coder_permission_resolved";
 	payload: {
 		tool: string;
 		actionClass: string;
@@ -47,7 +47,7 @@ export interface ClioPermissionResolvedEvent {
  * on stdin (or the timeout fallback) resolves it.
  */
 export interface ClioPermissionEscalatedEvent {
-	type: "clio_permission_escalated";
+	type: "clio_coder_permission_escalated";
 	payload: {
 		requestId: string;
 		tool: string;
@@ -78,7 +78,7 @@ export interface ClioPermissionEscalatedEvent {
  * is the delivery ack for operator surfaces.
  */
 export interface ClioSteerReceivedEvent {
-	type: "clio_steer_received";
+	type: "clio_coder_steer_received";
 	payload: {
 		chars: number;
 		/** Exact parent-side steering provenance entry this acceptance closes. */
@@ -88,7 +88,7 @@ export interface ClioSteerReceivedEvent {
 
 /** Machine-readable terminal classification, emitted where the condition is known. */
 export interface ClioRunOutcomeEvent {
-	type: "clio_run_outcome";
+	type: "clio_coder_run_outcome";
 	payload: { outcomeCode: RunOutcomeCode };
 }
 

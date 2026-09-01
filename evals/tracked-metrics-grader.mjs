@@ -4,7 +4,7 @@ const artifact = (taskId, failureClass = null) => ({
 	version: 4,
 	evalId: "eval-grader",
 	suite: { id: "grader's-suite", hash: "a".repeat(64) },
-	clio: { version: "test", commit: null, entry: "dist/cli/index.js" },
+	clioCoder: { version: "test", commit: null, entry: "dist/cli/index.js" },
 	environment: { platform: "linux-x64", node: process.version },
 	matrix: { target: "mini", model: "qwen", thinking: "off" },
 	summary: {

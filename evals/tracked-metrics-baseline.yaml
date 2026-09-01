@@ -28,7 +28,7 @@ tasks:
         - node_modules
         - dist
     runner:
-      kind: clio-run
+      kind: clio-coder-run
       agent: coder
       prompt: >-
         Read src/domains/eval/metrics/latency.ts, src/domains/eval/suites/run.ts, and
@@ -50,7 +50,7 @@ tasks:
     tags: *baseline_tags
     workspace: *repo_workspace
     runner:
-      kind: clio-run
+      kind: clio-coder-run
       agent: coder
       prompt: >-
         Read src/core/safe-id.ts, src/domains/eval/artifacts/store.ts, and
@@ -70,7 +70,7 @@ tasks:
     tags: *baseline_tags
     workspace: *repo_workspace
     runner:
-      kind: clio-run
+      kind: clio-coder-run
       agent: coder
       prompt: >-
         Read src/core/shell-quote.ts, src/domains/eval/runners/clio-run.ts, and
@@ -90,7 +90,7 @@ tasks:
     tags: *baseline_tags
     workspace: *repo_workspace
     runner:
-      kind: clio-run
+      kind: clio-coder-run
       agent: coder
       prompt: >-
         Read src/domains/eval/reports/junit.ts, src/domains/eval/schema/artifact.ts, and
@@ -110,7 +110,7 @@ tasks:
     tags: *baseline_tags
     workspace: *repo_workspace
     runner:
-      kind: clio-run
+      kind: clio-coder-run
       agent: coder
       prompt: >-
         Read src/domains/eval/reports/markdown.ts, src/domains/eval/schema/artifact.ts, and
@@ -130,7 +130,7 @@ tasks:
     tags: *baseline_tags
     workspace: *repo_workspace
     runner:
-      kind: clio-run
+      kind: clio-coder-run
       agent: coder
       prompt: >-
         Read src/domains/eval/suites/resolve.ts, src/domains/eval/suites/matrix.ts, and
@@ -150,7 +150,7 @@ tasks:
     tags: *baseline_tags
     workspace: *repo_workspace
     runner:
-      kind: clio-run
+      kind: clio-coder-run
       agent: coder
       prompt: >-
         Read src/tools/truncate-utf8.ts, src/tools/result-shaping.ts, and src/tools/read.ts. Then make
@@ -170,7 +170,7 @@ tasks:
     tags: *baseline_tags
     workspace: *repo_workspace
     runner:
-      kind: clio-run
+      kind: clio-coder-run
       agent: coder
       prompt: >-
         Read src/core/response-model-id.ts, src/interactive/chat-loop-messages.ts, and
@@ -190,7 +190,7 @@ tasks:
     tags: *baseline_tags
     workspace: *repo_workspace
     runner:
-      kind: clio-run
+      kind: clio-coder-run
       agent: coder
       prompt: >-
         Read src/interactive/format-time.ts, src/interactive/welcome-dashboard.ts, and
@@ -211,7 +211,7 @@ tasks:
     tags: *baseline_tags
     workspace: *repo_workspace
     runner:
-      kind: clio-run
+      kind: clio-coder-run
       agent: coder
       prompt: >-
         Read src/engine/acp/errors.ts, src/engine/acp/server.ts, and src/engine/acp/transport.ts. Then

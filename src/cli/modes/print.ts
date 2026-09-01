@@ -365,7 +365,7 @@ async function recordHeadlessMainAgentReceipt(input: {
 		staticCompositionHash: snapshot.staticCompositionHash,
 		promptSignature: snapshot.promptSignature,
 		toolSignature: snapshot.toolSignature,
-		clioVersion: readClioVersion(),
+		clioCoderVersion: readClioVersion(),
 		piMonoVersion: readPiMonoVersion(),
 		platform: process.platform,
 		nodeVersion: process.version,

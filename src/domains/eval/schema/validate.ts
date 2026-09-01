@@ -1,5 +1,6 @@
 import { parseEvalBehaviorScenarioV1 } from "./behavioral.js";
 import { parseEvalExecutionMatrixDimensionsV1 } from "./execution-envelope.js";
+import { normalizeEvalRunnerKind } from "./naming.js";
 import {
 	EVAL_SUITE_V2_VERSION,
 	type EvalAssertionOp,
@@ -10,7 +11,7 @@ import {
 	type EvalWorkspaceKind,
 } from "./suite.js";
 
-const RUNNER_KINDS = new Set<EvalRunnerKind>(["clio-run", "context-index", "context-init", "external-command"]);
+const RUNNER_KINDS = new Set<EvalRunnerKind>(["clio-coder-run", "context-index", "context-init", "external-command"]);
 const WORKSPACE_KINDS = new Set<EvalWorkspaceKind>(["local", "git", "temp-copy"]);
 const OPS = new Set<EvalAssertionOp>(["lt", "lte", "gt", "gte", "eq", "neq"]);
 
@@ -203,9 +204,12 @@ function readRunner(
 		issues.push({ path, message: "expected object" });
 		return null;
 	}
-	const kind = value.kind;
+	const kind = normalizeEvalRunnerKind(value.kind);
 	if (typeof kind !== "string" || !RUNNER_KINDS.has(kind as EvalRunnerKind)) {
-		issues.push({ path: `${path}.kind`, message: "expected clio-run, context-index, context-init, or external-command" });
+		issues.push({
+			path: `${path}.kind`,
+			message: "expected clio-coder-run, context-index, context-init, or external-command",
+		});
 		return null;
 	}
 	const prompt = optionalString(value, "prompt");
@@ -214,8 +218,8 @@ function readRunner(
 	if (autonomy !== undefined && !["read-only", "suggest", "auto-edit", "full-auto"].includes(autonomy)) {
 		issues.push({ path: `${path}.autonomy`, message: "expected read-only, suggest, auto-edit, or full-auto" });
 	}
-	if (agent !== undefined && kind !== "clio-run") {
-		issues.push({ path: `${path}.agent`, message: "agent is only valid on the clio-run runner" });
+	if (agent !== undefined && kind !== "clio-coder-run") {
+		issues.push({ path: `${path}.agent`, message: "agent is only valid on the clio-coder-run runner" });
 	}
 	const command = optionalString(value, "command");
 	return {

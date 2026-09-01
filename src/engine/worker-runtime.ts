@@ -549,17 +549,17 @@ export function startWorkerRun(input: WorkerRunInput, emit: WorkerEventEmit): Wo
 		);
 	const telemetry: ToolTelemetry = {
 		onStart(event) {
-			emit({ type: "clio_tool_start", payload: event });
+			emit({ type: "clio_coder_tool_start", payload: event });
 		},
 		onFinish(event) {
-			emit({ type: "clio_tool_finish", payload: event });
+			emit({ type: "clio_coder_tool_finish", payload: event });
 			if (event.outcome !== "blocked" || typeof event.reason !== "string") return;
 			// Lifetime-cap lockout: record the bound (the run must not seal as an
 			// ordinary success) but do not abort. The loop guard has flipped the
 			// synthesis tool lock, so the next model round runs text-only and the
 			// synthesized answer still reaches message_end and the receipt.
 			if (isWorkerToolCallCapSynthesisReason(event.reason)) {
-				emit({ type: "clio_run_outcome", payload: { outcomeCode: "worker_tool_call_cap_exhausted" } });
+				emit({ type: "clio_coder_run_outcome", payload: { outcomeCode: "worker_tool_call_cap_exhausted" } });
 				if (workerBoundFailure === null) {
 					workerBoundFailure = event.reason;
 					process.stderr.write(`[worker] ${event.reason}\n`);
@@ -572,7 +572,7 @@ export function startWorkerRun(input: WorkerRunInput, emit: WorkerEventEmit): Wo
 			// receipt diagnostic.
 			if (isWorkerToolCallCapExceededReason(event.reason) || isLoopGuardSynthesisBackstopReason(event.reason)) {
 				emit({
-					type: "clio_run_outcome",
+					type: "clio_coder_run_outcome",
 					payload: {
 						outcomeCode: isLoopGuardSynthesisBackstopReason(event.reason)
 							? "loop_guard_tools_disabled_exhausted"
@@ -718,7 +718,7 @@ export function startWorkerRun(input: WorkerRunInput, emit: WorkerEventEmit): Wo
 					for (const message of repair) agent.followUp(message as unknown as AgentMessage);
 				} else if (workerBoundFailure === null) {
 					workerBoundFailure = `result contract failed after ${RESULT_CONTRACT_REPAIR_LIMIT} bounded repair rounds: ${violation}`;
-					emit({ type: "clio_run_outcome", payload: { outcomeCode: "result_contract_exhausted" } });
+					emit({ type: "clio_coder_run_outcome", payload: { outcomeCode: "result_contract_exhausted" } });
 					process.stderr.write(`[worker] ${workerBoundFailure}\n`);
 				}
 			}
@@ -803,7 +803,7 @@ export function startWorkerRun(input: WorkerRunInput, emit: WorkerEventEmit): Wo
 		answeredEscalations.set(active.callKey, { decision, requestId });
 		if (decision === "approve") {
 			emit({
-				type: "clio_permission_resolved",
+				type: "clio_coder_permission_resolved",
 				payload: {
 					tool: active.tool,
 					actionClass: active.actionClass,
@@ -832,7 +832,7 @@ export function startWorkerRun(input: WorkerRunInput, emit: WorkerEventEmit): Wo
 			? `permission required for ${active.tool} (${active.actionClass}); ${denialContext} and workers fallback=fail ends this run`
 			: `permission denied by ${source === "timeout" ? "escalation timeout fallback" : "operator"}: ${active.tool} requires ${active.actionClass} confirmation`;
 		emit({
-			type: "clio_permission_resolved",
+			type: "clio_coder_permission_resolved",
 			payload: {
 				tool: active.tool,
 				actionClass: active.actionClass,
@@ -858,7 +858,7 @@ export function startWorkerRun(input: WorkerRunInput, emit: WorkerEventEmit): Wo
 		const active = activeEscalation;
 		if (!active) return;
 		emit({
-			type: "clio_permission_resolved",
+			type: "clio_coder_permission_resolved",
 			payload: {
 				tool: active.tool,
 				actionClass: active.actionClass,
@@ -883,7 +883,7 @@ export function startWorkerRun(input: WorkerRunInput, emit: WorkerEventEmit): Wo
 					? `operator approved an identical ${call.tool} call earlier in this run (request ${remembered.requestId}); the answer stands without a new prompt`
 					: `permission denied by operator: an identical ${call.tool} call was already denied earlier in this run (request ${remembered.requestId}); the answer stands, so do not repeat this call`;
 				emit({
-					type: "clio_permission_resolved",
+					type: "clio_coder_permission_resolved",
 					payload: {
 						tool: call.tool,
 						actionClass,
@@ -917,7 +917,7 @@ export function startWorkerRun(input: WorkerRunInput, emit: WorkerEventEmit): Wo
 			// as type-and-size summaries, and the args stay inside the worker.
 			const target = describeCallTarget(call.tool, call.args);
 			emit({
-				type: "clio_permission_escalated",
+				type: "clio_coder_permission_escalated",
 				payload: {
 					requestId,
 					tool: call.tool,
@@ -938,7 +938,7 @@ export function startWorkerRun(input: WorkerRunInput, emit: WorkerEventEmit): Wo
 		}
 		const reason = onPermission === "fail" ? failReason(call.tool, actionClass) : denyReason(call.tool, actionClass);
 		emit({
-			type: "clio_permission_resolved",
+			type: "clio_coder_permission_resolved",
 			payload: {
 				tool: call.tool,
 				actionClass,

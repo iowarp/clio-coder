@@ -214,16 +214,16 @@ const TOOLS_MAX_BYTES = 8 * 1024;
 const TOOLS_ARGUMENTS_CHARS = 160;
 
 /**
- * Tail event types that describe one tool call. `clio_tool_finish` is the
+ * Tail event types that describe one tool call. `clio_coder_tool_finish` is the
  * authoritative per-call outcome (it distinguishes a permission block from a
  * command that ran and exited nonzero); the engine's own `tool_execution_end`
  * is kept only when the tail recorded a detail for it, since a bare type line
  * says nothing the finish event does not.
  */
 const TOOL_CALL_EVENT_TYPES: ReadonlySet<string> = new Set([
-	"clio_tool_finish",
-	"clio_permission_resolved",
-	"clio_permission_escalated",
+	"clio_coder_tool_finish",
+	"clio_coder_permission_resolved",
+	"clio_coder_permission_escalated",
 ]);
 
 function toolCallLines(entries: ReadonlyArray<{ at: string; type: string; detail?: string }>): string[] {

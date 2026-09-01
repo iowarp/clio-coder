@@ -506,7 +506,7 @@ export interface RunEnvelope {
 
 /**
  * Per-tool aggregates folded into a receipt at run completion. Sourced from
- * the worker's ToolTelemetry stream (`clio_tool_finish` IPC events). Sorted
+ * the worker's ToolTelemetry stream (`clio_coder_tool_finish` IPC events). Sorted
  * by tool name on write so digests are deterministic across runs.
  */
 export interface ToolCallStat {
@@ -810,7 +810,7 @@ export interface RunReceipt {
 	dynamicHash?: string | null;
 	promptSignature?: string | null;
 	toolSignature?: string | null;
-	clioVersion: string;
+	clioCoderVersion: string;
 	piMonoVersion: string;
 	platform: string;
 	nodeVersion: string;

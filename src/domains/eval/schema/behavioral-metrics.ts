@@ -1,7 +1,8 @@
 import type { EvalArtifactResultV4 } from "./artifact.js";
 import type { EvalBehaviorCategoryV1, EvalBehaviorLabelV1 } from "./behavioral.js";
+import { normalizeEvalSchemaId } from "./naming.js";
 
-export const EVAL_BEHAVIOR_METRICS_SCHEMA_V1 = "clio.eval.behavior.metrics.v1" as const;
+export const EVAL_BEHAVIOR_METRICS_SCHEMA_V1 = "clio-coder.eval.behavior.metrics.v1" as const;
 
 export const EVAL_BEHAVIOR_METRIC_DEFINITIONS_V1 = [
 	{
@@ -136,7 +137,7 @@ export function buildEvalBehaviorMetricsV1(
 
 export function parseEvalBehaviorMetricsV1(value: unknown, source = "behavioral metrics"): EvalBehaviorMetricsV1 {
 	const record = asRecord(value, source);
-	if (record.schema !== EVAL_BEHAVIOR_METRICS_SCHEMA_V1) {
+	if (normalizeEvalSchemaId(record.schema) !== EVAL_BEHAVIOR_METRICS_SCHEMA_V1) {
 		throw new Error(`${source}.schema: expected ${EVAL_BEHAVIOR_METRICS_SCHEMA_V1}`);
 	}
 	const target = asRecord(record.target, `${source}.target`);

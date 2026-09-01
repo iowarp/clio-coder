@@ -119,7 +119,7 @@ function toolCallMetricsFromJsonl(stdout: string): ToolCallMetrics {
 			continue;
 		}
 
-		if (event.type !== "clio_tool_finish" || !isRecord(event.payload)) continue;
+		if (event.type !== "clio_coder_tool_finish" || !isRecord(event.payload)) continue;
 		const outcome = toolOutcome(event.payload);
 		if (outcome === undefined) continue;
 		const callId = stringField(event.payload, "toolCallId") ?? stringField(event, "toolCallId");
@@ -188,7 +188,7 @@ function toolBehaviorMetricEntriesFromJsonl(
 			executionEnds.push({ callId, tool, outcome: toolOutcome(event) ?? (event.isError === true ? "error" : "ok") });
 			continue;
 		}
-		if (event.type !== "clio_tool_finish" || !isRecord(event.payload)) continue;
+		if (event.type !== "clio_coder_tool_finish" || !isRecord(event.payload)) continue;
 		const outcome = toolOutcome(event.payload);
 		const tool = stringField(event.payload, "tool");
 		if (outcome === undefined || tool === undefined) continue;

@@ -69,7 +69,7 @@ export interface EvalArtifactV4 {
 		id: string;
 		hash: string;
 	};
-	clio: EvalClioProvenance;
+	clioCoder: EvalClioProvenance;
 	environment: EvalEnvironmentProvenance;
 	matrix: {
 		target: string;

@@ -120,7 +120,7 @@ try {
 	);
 	process.stdout.write(
 		`${JSON.stringify({
-			schema: "clio.eval.execution-observation.v1",
+			schema: "clio-coder.eval.execution-observation.v1",
 			compositionHash: receipt.staticCompositionHash,
 			target: receipt.targetId,
 			wireModel: receipt.wireModelId,

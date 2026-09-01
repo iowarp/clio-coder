@@ -64,7 +64,7 @@ function eventDetail(event: unknown): string | undefined {
 	const text = assistantTextFromEvent(event);
 	if (text.length > 0) return truncateUtf8(text, RUN_TAIL_TEXT_LIMIT, "...");
 	if (!isRecord(event)) return undefined;
-	if (event.type === "clio_tool_finish" && isRecord(event.payload)) {
+	if (event.type === "clio_coder_tool_finish" && isRecord(event.payload)) {
 		const tool = typeof event.payload.tool === "string" ? event.payload.tool : "tool";
 		const outcome = typeof event.payload.outcome === "string" ? event.payload.outcome : "";
 		return `${tool} ${outcome}`.trim();

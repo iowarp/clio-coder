@@ -149,7 +149,7 @@ async function drainDispatchEvents(
 	let firstBlockReason: string | null = null;
 	// Every event is consumed so finalization cannot block on an unread iterator.
 	for await (const event of events) {
-		if (!isRecord(event) || event.type !== "clio_tool_finish") continue;
+		if (!isRecord(event) || event.type !== "clio_coder_tool_finish") continue;
 		const tool = eventPayloadString(event, "tool");
 		if (!tool) continue;
 		const outcome = eventPayloadString(event, "outcome") ?? "done";

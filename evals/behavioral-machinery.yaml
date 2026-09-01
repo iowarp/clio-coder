@@ -18,7 +18,7 @@ tasks:
   - id: architect-positive
     tags: [behavioral, machinery-only, worker, positive]
     behavioral:
-      schema: clio.eval.scenario.v1
+      schema: clio-coder.eval.scenario.v1
       corpus: &corpus {id: public-built-in-behavior, version: 1.0.0}
       execution:
         mode: machinery-only
@@ -43,7 +43,7 @@ tasks:
   - id: architect-adversarial
     tags: [behavioral, machinery-only, worker, adversarial]
     behavioral:
-      schema: clio.eval.scenario.v1
+      schema: clio-coder.eval.scenario.v1
       corpus: *corpus
       execution:
         mode: machinery-only
@@ -65,7 +65,7 @@ tasks:
   - id: coder-positive
     tags: [behavioral, machinery-only, worker, positive]
     behavioral:
-      schema: clio.eval.scenario.v1
+      schema: clio-coder.eval.scenario.v1
       corpus: *corpus
       execution:
         mode: machinery-only
@@ -87,7 +87,7 @@ tasks:
   - id: coder-adversarial
     tags: [behavioral, machinery-only, worker, adversarial]
     behavioral:
-      schema: clio.eval.scenario.v1
+      schema: clio-coder.eval.scenario.v1
       corpus: *corpus
       execution:
         mode: machinery-only
@@ -110,7 +110,7 @@ tasks:
   - id: context-bootstrap-positive
     tags: [behavioral, machinery-only, worker, positive]
     behavioral:
-      schema: clio.eval.scenario.v1
+      schema: clio-coder.eval.scenario.v1
       corpus: *corpus
       execution:
         mode: machinery-only
@@ -133,7 +133,7 @@ tasks:
   - id: context-bootstrap-adversarial
     tags: [behavioral, machinery-only, worker, adversarial]
     behavioral:
-      schema: clio.eval.scenario.v1
+      schema: clio-coder.eval.scenario.v1
       corpus: *corpus
       execution:
         mode: machinery-only
@@ -156,7 +156,7 @@ tasks:
   - id: debugger-positive
     tags: [behavioral, machinery-only, worker, positive]
     behavioral:
-      schema: clio.eval.scenario.v1
+      schema: clio-coder.eval.scenario.v1
       corpus: *corpus
       execution:
         mode: machinery-only
@@ -179,7 +179,7 @@ tasks:
   - id: debugger-adversarial
     tags: [behavioral, machinery-only, worker, adversarial]
     behavioral:
-      schema: clio.eval.scenario.v1
+      schema: clio-coder.eval.scenario.v1
       corpus: *corpus
       execution:
         mode: machinery-only
@@ -202,7 +202,7 @@ tasks:
   - id: documenter-positive
     tags: [behavioral, machinery-only, worker, positive]
     behavioral:
-      schema: clio.eval.scenario.v1
+      schema: clio-coder.eval.scenario.v1
       corpus: *corpus
       execution:
         mode: machinery-only
@@ -225,7 +225,7 @@ tasks:
   - id: documenter-adversarial
     tags: [behavioral, machinery-only, worker, adversarial]
     behavioral:
-      schema: clio.eval.scenario.v1
+      schema: clio-coder.eval.scenario.v1
       corpus: *corpus
       execution:
         mode: machinery-only
@@ -248,7 +248,7 @@ tasks:
   - id: git-master-positive
     tags: [behavioral, machinery-only, worker, positive]
     behavioral:
-      schema: clio.eval.scenario.v1
+      schema: clio-coder.eval.scenario.v1
       corpus: *corpus
       execution:
         mode: machinery-only
@@ -271,7 +271,7 @@ tasks:
   - id: git-master-adversarial
     tags: [behavioral, machinery-only, worker, adversarial]
     behavioral:
-      schema: clio.eval.scenario.v1
+      schema: clio-coder.eval.scenario.v1
       corpus: *corpus
       execution:
         mode: machinery-only
@@ -294,7 +294,7 @@ tasks:
   - id: oracle-positive
     tags: [behavioral, machinery-only, worker, positive]
     behavioral:
-      schema: clio.eval.scenario.v1
+      schema: clio-coder.eval.scenario.v1
       corpus: *corpus
       execution:
         mode: machinery-only
@@ -317,7 +317,7 @@ tasks:
   - id: oracle-adversarial
     tags: [behavioral, machinery-only, worker, adversarial]
     behavioral:
-      schema: clio.eval.scenario.v1
+      schema: clio-coder.eval.scenario.v1
       corpus: *corpus
       execution:
         mode: machinery-only
@@ -340,7 +340,7 @@ tasks:
   - id: provenance-positive
     tags: [behavioral, machinery-only, worker, positive]
     behavioral:
-      schema: clio.eval.scenario.v1
+      schema: clio-coder.eval.scenario.v1
       corpus: *corpus
       execution:
         mode: machinery-only
@@ -363,7 +363,7 @@ tasks:
   - id: provenance-adversarial
     tags: [behavioral, machinery-only, worker, adversarial]
     behavioral:
-      schema: clio.eval.scenario.v1
+      schema: clio-coder.eval.scenario.v1
       corpus: *corpus
       execution:
         mode: machinery-only
@@ -386,7 +386,7 @@ tasks:
   - id: researcher-positive
     tags: [behavioral, machinery-only, worker, positive]
     behavioral:
-      schema: clio.eval.scenario.v1
+      schema: clio-coder.eval.scenario.v1
       corpus: *corpus
       execution:
         mode: machinery-only
@@ -409,7 +409,7 @@ tasks:
   - id: researcher-adversarial
     tags: [behavioral, machinery-only, worker, adversarial]
     behavioral:
-      schema: clio.eval.scenario.v1
+      schema: clio-coder.eval.scenario.v1
       corpus: *corpus
       execution:
         mode: machinery-only
@@ -432,7 +432,7 @@ tasks:
   - id: scout-positive
     tags: [behavioral, machinery-only, worker, positive]
     behavioral:
-      schema: clio.eval.scenario.v1
+      schema: clio-coder.eval.scenario.v1
       corpus: *corpus
       execution:
         mode: machinery-only
@@ -455,7 +455,7 @@ tasks:
   - id: scout-adversarial
     tags: [behavioral, machinery-only, worker, adversarial]
     behavioral:
-      schema: clio.eval.scenario.v1
+      schema: clio-coder.eval.scenario.v1
       corpus: *corpus
       execution:
         mode: machinery-only
@@ -478,7 +478,7 @@ tasks:
   - id: tester-positive
     tags: [behavioral, machinery-only, worker, positive]
     behavioral:
-      schema: clio.eval.scenario.v1
+      schema: clio-coder.eval.scenario.v1
       corpus: *corpus
       execution:
         mode: machinery-only
@@ -501,7 +501,7 @@ tasks:
   - id: tester-adversarial
     tags: [behavioral, machinery-only, worker, adversarial]
     behavioral:
-      schema: clio.eval.scenario.v1
+      schema: clio-coder.eval.scenario.v1
       corpus: *corpus
       execution:
         mode: machinery-only
@@ -524,7 +524,7 @@ tasks:
   - id: verifier-positive
     tags: [behavioral, machinery-only, worker, positive]
     behavioral:
-      schema: clio.eval.scenario.v1
+      schema: clio-coder.eval.scenario.v1
       corpus: *corpus
       execution:
         mode: machinery-only
@@ -547,7 +547,7 @@ tasks:
   - id: verifier-adversarial
     tags: [behavioral, machinery-only, worker, adversarial]
     behavioral:
-      schema: clio.eval.scenario.v1
+      schema: clio-coder.eval.scenario.v1
       corpus: *corpus
       execution:
         mode: machinery-only
@@ -570,7 +570,7 @@ tasks:
   - id: wiki-writer-positive
     tags: [behavioral, machinery-only, worker, positive]
     behavioral:
-      schema: clio.eval.scenario.v1
+      schema: clio-coder.eval.scenario.v1
       corpus: *corpus
       execution:
         mode: machinery-only
@@ -593,7 +593,7 @@ tasks:
   - id: wiki-writer-adversarial
     tags: [behavioral, machinery-only, worker, adversarial]
     behavioral:
-      schema: clio.eval.scenario.v1
+      schema: clio-coder.eval.scenario.v1
       corpus: *corpus
       execution:
         mode: machinery-only

@@ -143,7 +143,7 @@ interface WorkerSpecFields {
 	 * Non-stall posture for permission-requiring tool calls. "deny" converts
 	 * the call into a structured tool denial and the run continues; "fail"
 	 * aborts the run, which then exits with WORKER_EXIT_PERMISSION_REQUIRED;
-	 * "escalate" parks the call, emits clio_permission_escalated, and waits for
+	 * "escalate" parks the call, emits clio_coder_permission_escalated, and waits for
 	 * an operator permission_decision on stdin (falling back to the configured
 	 * deny/fail on timeout). Default "deny".
 	 */

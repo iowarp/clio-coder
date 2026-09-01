@@ -536,7 +536,7 @@ export function startClaudeSdkWorkerRun(input: WorkerRunInput, emit: WorkerEvent
 				() => {},
 				() => {
 					budgetFailure = true;
-					emit({ type: "clio_run_outcome", payload: { outcomeCode: "worker_tool_call_cap_exhausted" } });
+					emit({ type: "clio_coder_run_outcome", payload: { outcomeCode: "worker_tool_call_cap_exhausted" } });
 					abort();
 				},
 				resolveDeliveryTools(allowedToolSet, input.product),
@@ -563,7 +563,7 @@ export function startClaudeSdkWorkerRun(input: WorkerRunInput, emit: WorkerEvent
 		if (hookInput.hook_event_name !== "PostToolBatch" || !budgetGate?.phaseReached()) return { continue: true };
 		if (input.budget?.synthesis === false) {
 			budgetFailure = true;
-			emit({ type: "clio_run_outcome", payload: { outcomeCode: "worker_tool_call_cap_exhausted" } });
+			emit({ type: "clio_coder_run_outcome", payload: { outcomeCode: "worker_tool_call_cap_exhausted" } });
 			return { continue: false, stopReason: `worker agent budget reached (${input.budget.toolCalls})` };
 		}
 		return {

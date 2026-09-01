@@ -1,4 +1,6 @@
-export const EVAL_VERDICT_SCHEMA_V1 = "clio.eval.verdict.v1" as const;
+import { normalizeEvalSchemaId } from "./naming.js";
+
+export const EVAL_VERDICT_SCHEMA_V1 = "clio-coder.eval.verdict.v1" as const;
 
 export const EVAL_TRACKED_METRIC_NAMES = [
 	"modelCalls",
@@ -68,7 +70,7 @@ export type EvalVerdictParseResult = { ok: true; verdict: EvalVerdictEnvelopeV1 
 /** Parse the v1 verdict and reject contradictions that could publish a false pass. */
 export function parseEvalVerdictEnvelopeV1(value: unknown, source = "verdict"): EvalVerdictEnvelopeV1 {
 	const record = asRecord(value, source);
-	if (record.schema !== EVAL_VERDICT_SCHEMA_V1) {
+	if (normalizeEvalSchemaId(record.schema) !== EVAL_VERDICT_SCHEMA_V1) {
 		throw new Error(`${source}.schema: expected ${EVAL_VERDICT_SCHEMA_V1}`);
 	}
 	const scenarioId = readNonEmptyString(record, source, "scenarioId");

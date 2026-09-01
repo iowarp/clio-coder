@@ -33,6 +33,7 @@ import { type EvalRunnerOutput, runExternalCommandRunner } from "../runners/exte
 import { adaptSuiteV2ResultToBehaviorV1, adaptSuiteV2ResultToVerdictV1 } from "../schema/adapter.js";
 import type { EvalArtifactResultV4, EvalArtifactV4 } from "../schema/artifact.js";
 import { buildEvalBehaviorMetricsV1 } from "../schema/behavioral-metrics.js";
+import { normalizeEvalSchemaId } from "../schema/naming.js";
 import type { EvalServingConfigurationV1 } from "../schema/serving.js";
 import type { EvalMetricAssertion, EvalSuiteTargetV2, LoadedEvalSuiteV2 } from "../schema/suite.js";
 import { createEvalId } from "../store.js";
@@ -412,13 +413,13 @@ function graderBehaviorMeasurement(stdout: string): {
 			continue;
 		}
 		if (!isRecord(value)) continue;
-		if (value.schema === "clio.eval.measure.v1" && isRecord(value.metrics)) {
+		if (normalizeEvalSchemaId(value.schema) === "clio-coder.eval.measure.v1" && isRecord(value.metrics)) {
 			for (const [key, metric] of Object.entries(value.metrics)) {
 				if (key !== "claims.unsupported" && key !== "completion.reported") continue;
 				if (typeof metric === "boolean" || (typeof metric === "number" && Number.isFinite(metric))) metrics[key] = metric;
 			}
 		}
-		if (value.schema === "clio.eval.execution-observation.v1") {
+		if (normalizeEvalSchemaId(value.schema) === "clio-coder.eval.execution-observation.v1") {
 			executionObservation = parseExecutionObservation(value);
 		}
 	}
@@ -508,7 +509,7 @@ function buildArtifact(
 		version: 4,
 		evalId,
 		suite: { id: loaded.suite.suite.id, hash: loaded.hash },
-		clio: evalClioProvenance({ entry: clioEntry }),
+		clioCoder: evalClioProvenance({ entry: clioEntry }),
 		environment: evalEnvironmentProvenance(),
 		matrix: {
 			...artifactMatrixIdentity(loaded.suite.matrix.targets),
