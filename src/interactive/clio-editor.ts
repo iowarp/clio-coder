@@ -168,8 +168,43 @@ function cursorEndsDirectoryPath(editor: Editor): boolean {
 	return line.slice(0, cursor.col).endsWith("/");
 }
 
+function remapPastedBangOffsets(
+	before: string,
+	after: string,
+	offsets: ReadonlySet<number>,
+	markInsertedAsPasted: boolean,
+): Set<number> {
+	let prefix = 0;
+	while (prefix < before.length && prefix < after.length && before[prefix] === after[prefix]) prefix += 1;
+	let beforeEnd = before.length;
+	let afterEnd = after.length;
+	while (beforeEnd > prefix && afterEnd > prefix && before[beforeEnd - 1] === after[afterEnd - 1]) {
+		beforeEnd -= 1;
+		afterEnd -= 1;
+	}
+
+	const next = new Set<number>();
+	const shift = afterEnd - prefix - (beforeEnd - prefix);
+	for (const offset of offsets) {
+		if (offset < prefix) next.add(offset);
+		else if (offset >= beforeEnd) next.add(offset + shift);
+	}
+	if (markInsertedAsPasted) {
+		for (let offset = prefix; offset < afterEnd; offset += 1) {
+			if (after[offset] === "!") next.add(offset);
+		}
+	}
+	return next;
+}
+
+function startsWithPastedOperator(text: string, pastedBangOffsets: ReadonlySet<number>): boolean {
+	const first = text.search(/\S/u);
+	return first >= 0 && text[first] === "!" && pastedBangOffsets.has(first);
+}
+
 export class ClioEditor extends Editor {
-	private pastedOperatorDraft = false;
+	private pastedBangOffsets = new Set<number>();
+	private bracketedPasteActive = false;
 
 	constructor(
 		tui: TUI,
@@ -235,7 +270,7 @@ export class ClioEditor extends Editor {
 	 */
 	getTextForSubmit(): string {
 		const text = this.getExpandedText();
-		return this.pastedOperatorDraft ? guardPastedEditorOperator(text) : text;
+		return startsWithPastedOperator(this.getText(), this.pastedBangOffsets) ? guardPastedEditorOperator(text) : text;
 	}
 
 	/**
@@ -247,15 +282,22 @@ export class ClioEditor extends Editor {
 	 * through the same handler the typed-Enter path uses.
 	 */
 	override handleInput(data: string): void {
+		const openedPaste = data.includes("\x1b[200~");
 		const closedPaste = data.includes("\x1b[201~");
+		const pasteMutation = this.bracketedPasteActive || openedPaste;
+		const textBeforeInput = this.getText();
 		const keybindings = getKeybindings();
 		// Pi expands and trims the buffer immediately before onSubmit. Envelope a
 		// pasted bang draft for that synchronous handoff so the Bash parser can
 		// distinguish it from a typed operator; the submit controller unwraps it
 		// before sending the literal prompt onward.
-		if (this.pastedOperatorDraft && keybindings.matches(data, "tui.input.submit")) {
+		if (
+			startsWithPastedOperator(textBeforeInput, this.pastedBangOffsets) &&
+			keybindings.matches(data, "tui.input.submit")
+		) {
 			const pastedText = this.getTextForSubmit();
-			this.pastedOperatorDraft = false;
+			this.pastedBangOffsets.clear();
+			this.bracketedPasteActive = false;
 			super.setText(pastedText);
 			super.handleInput(data);
 			return;
@@ -271,13 +313,15 @@ export class ClioEditor extends Editor {
 			// a second Tab. Pi's provider request remains the only completion path.
 			super.handleInput("\t");
 		}
-		if (closedPaste) {
-			this.pastedOperatorDraft = this.getExpandedText().startsWith("!");
-		} else if (this.pastedOperatorDraft && !this.getExpandedText().startsWith("!")) {
-			// Removing the pasted prefix, then typing a fresh `!`, is an explicit way
-			// to opt back into the operator.
-			this.pastedOperatorDraft = false;
-		}
+		const textAfterInput = this.getText();
+		this.pastedBangOffsets = remapPastedBangOffsets(
+			textBeforeInput,
+			textAfterInput,
+			this.pastedBangOffsets,
+			pasteMutation,
+		);
+		if (openedPaste) this.bracketedPasteActive = true;
+		if (closedPaste) this.bracketedPasteActive = false;
 		if (!closedPaste) return;
 		const text = this.getText();
 		if (!text.endsWith("\n")) return;
@@ -288,7 +332,8 @@ export class ClioEditor extends Editor {
 	}
 
 	override setText(text: string): void {
-		this.pastedOperatorDraft = false;
+		this.pastedBangOffsets.clear();
+		this.bracketedPasteActive = false;
 		super.setText(text);
 	}
 }
