@@ -44,6 +44,7 @@ export function enabledExtensionResourceRoots(
 			path: full,
 			rootPath: entry.rootPath,
 			source: `extension:${entry.scope}:${entry.id}`,
+			installedContentDigest: entry.installedContentDigest as string,
 		});
 	}
 	return roots;

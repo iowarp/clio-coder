@@ -46,6 +46,8 @@ export interface ReadHookSourcesResult {
 export interface ExtensionHookRoot {
 	id: string;
 	rootPath: string;
+	scope: "user" | "project";
+	installedContentDigest: string;
 }
 
 export interface ReadHookSourcesOptions {
@@ -91,6 +93,8 @@ export function readHookSources(options: ReadHookSourcesOptions): ReadHookSource
 			origin: "extension",
 			sourcePath: `${extension.id}:hooks.yaml`,
 			sourceId: extension.id,
+			extensionScope: extension.scope,
+			installedContentDigest: extension.installedContentDigest,
 		};
 		const batch = readBatch(source, join(extension.rootPath, "hooks.yaml"), fileIssues);
 		if (batch) batches.push(batch);
