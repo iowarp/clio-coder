@@ -1496,7 +1496,7 @@ Deno.test("a session list shortened by the server's byte budget is reported as t
 	}
 });
 
-Deno.test("a permission ceiling shorter than the escalation budget is reported once, not clamped", async () => {
+Deno.test("a permission ceiling shorter than the escalation budget escalates immediately", async () => {
 	const logs: string[] = [];
 	const root = await Deno.makeTempDir({ prefix: "workbench-host-escalation-" });
 	const sink = new RecordingSink();
@@ -1514,10 +1514,10 @@ Deno.test("a permission ceiling shorter than the escalation budget is reported o
 		await host.newSession();
 		const context = await host.startTurn("Raise an approval under a short ceiling.");
 		const permission = await waitForEvent(sink, "turn.permission.requested");
-		// The stamps stay honest: escalation simply lands after expiry here.
-		ok(Date.parse(permission.payload.escalateAt) >= Date.parse(permission.payload.expiresAt));
+		equal(Date.parse(permission.payload.escalateAt), Date.parse(permission.payload.requestedAt));
+		ok(Date.parse(permission.payload.escalateAt) < Date.parse(permission.payload.expiresAt));
 		equal(logs.length, 1);
-		ok(logs[0]?.includes("cannot escalate this approval"));
+		ok(logs[0]?.includes("escalated this approval immediately"));
 		ok(!logs[0]?.includes(root));
 		await host.cancelTurn(context.turnId);
 		await waitForEvent(sink, "turn.terminal", (event) => event.context.turnId === context.turnId);
