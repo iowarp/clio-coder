@@ -7,9 +7,13 @@ import { requestExecutionRole } from "../src/domains/dispatch/execution-role.js"
 import { verifyReceiptIntegrity } from "../src/domains/dispatch/receipt-integrity.js";
 import type { SpawnedWorker } from "../src/domains/dispatch/worker-spawn.js";
 import type { WorkerSpec } from "../src/worker/spec-contract.js";
-import { isolateDispatchState, makeDispatchBundle, restoreDispatchState } from "../tests/harness/dispatch.js";
-import { dispatchStubContext } from "../tests/harness/dispatch-stub-context.js";
-import { scriptedGateFabric } from "../tests/harness/gate-fabric.js";
+import {
+	dispatchStubContext,
+	isolateDispatchState,
+	makeDispatchBundle,
+	restoreDispatchState,
+	scriptedGateFabric,
+} from "./behavioral-machinery-support.js";
 
 const [role, polarity] = process.argv.slice(2);
 if (role === undefined || (polarity !== "positive" && polarity !== "adversarial")) {
