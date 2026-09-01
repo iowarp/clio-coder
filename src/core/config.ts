@@ -648,7 +648,6 @@ export const SETTINGS_V1_PATH_MOVES = Object.freeze([
 	["guardrails.workerToolCallCap", "fleet.limits.toolCallsPerRun"],
 	["guardrails.internalDispatchTimeoutMs", "fleet.limits.internalRunTimeoutMs"],
 	["guardrails.maxDispatchRuns", "fleet.history.maxRuns"],
-	["panes.journal", "fleet.history.journal"],
 	["compaction.auto", "context.compaction.auto"],
 	["compaction.threshold", "context.compaction.threshold"],
 	["compaction.model", "context.compaction.model"],
@@ -673,12 +672,10 @@ export const SETTINGS_V1_PATH_MOVES = Object.freeze([
 	["terminal.fullscreenScrollbar", "interface.fullscreenScrollbar"],
 	["terminal.showTerminalProgress", "interface.terminalProgress"],
 	["terminal.notify", "interface.desktopNotifications"],
-	["panes.enabled", "interface.panes.enabled"],
-	["panes.notifications", "interface.panes.notifications"],
-	["panes.yazi.enabled", "interface.panes.files.enabled"],
-	["panes.yazi.mode", "interface.panes.files.mode"],
-	["panes.yazi.profile", "interface.panes.files.profile"],
-	["panes.yazi.followCwd", "interface.panes.files.followCwd"],
+	// No panes.* aliases: every panes key first shipped in v0.4.0, one day
+	// before this rework, so no pre-v2 home holds one worth carrying. The
+	// `panes` root stays in V1_ONLY_ROOTS so a stray v1-era file is still
+	// recognized and stripped rather than raising an unknown-root error.
 	["keybindings.*", "interface.keybindings.*"],
 	["skills.trustProjectCompatRoots", "integrations.projectResources.trustProjectImports"],
 	["delegation.defaults.connectTimeoutMs", "integrations.externalAgents.defaults.connectTimeoutMs"],
@@ -711,8 +708,6 @@ export const SETTINGS_V1_RETIRED_PATHS = Object.freeze({
 	"background.thinkingLevel": "proactive memory always resolves thinking off",
 	theme: "the only registered theme was not read by runtime rendering",
 	"compaction.excludeLastTurns": "only the temporary legacy mask used it; context.workingSet.protectLastTurns remains",
-	"panes.agents": "pane opening is no longer a per-dispatch policy",
-	"panes.keepFailed": "pane lifetime is no longer tied to run outcome",
 } as const);
 
 const V1_ONLY_ROOTS = new Set([
@@ -1670,11 +1665,7 @@ export function validateSettings(raw: unknown): SettingsValidationResult {
 				if (!isPlainObject(ui.panes)) issues.add("interface.panes", `expected a map, got ${describe(ui.panes)}`);
 				else {
 					const panes = ui.panes;
-					issues.retiredKeys("interface.panes", panes, {
-						agents: "pane opening is no longer a per-dispatch policy",
-						keepFailed: "pane lifetime is no longer tied to run outcome",
-					});
-					issues.unknownKeys("interface.panes", panes, ["enabled", "notifications", "files", "agents", "keepFailed"]);
+					issues.unknownKeys("interface.panes", panes, ["enabled", "notifications", "layout", "workers", "files"]);
 					if ("enabled" in panes) {
 						const parsed = expectEnum(issues, "interface.panes.enabled", panes.enabled, ["auto", "embedded", "off"] as const);
 						if (parsed !== undefined) settings.interface.panes.enabled = parsed;
@@ -1687,12 +1678,35 @@ export function validateSettings(raw: unknown): SettingsValidationResult {
 						] as const);
 						if (parsed !== undefined) settings.interface.panes.notifications = parsed;
 					}
+					if ("layout" in panes) {
+						const parsed = expectEnum(issues, "interface.panes.layout", panes.layout, [
+							"off",
+							"workers",
+							"cockpit",
+						] as const);
+						if (parsed !== undefined) settings.interface.panes.layout = parsed;
+					}
+					if ("workers" in panes) {
+						if (!isPlainObject(panes.workers))
+							issues.add("interface.panes.workers", `expected a map, got ${describe(panes.workers)}`);
+						else {
+							const workers = panes.workers;
+							issues.unknownKeys("interface.panes.workers", workers, ["ratio"]);
+							if ("ratio" in workers) {
+								const parsed = expectNumber(issues, "interface.panes.workers.ratio", workers.ratio, {
+									min: 0.05,
+									max: 0.5,
+								});
+								if (parsed !== undefined) settings.interface.panes.workers.ratio = parsed;
+							}
+						}
+					}
 					if ("files" in panes) {
 						if (!isPlainObject(panes.files))
 							issues.add("interface.panes.files", `expected a map, got ${describe(panes.files)}`);
 						else {
 							const files = panes.files;
-							issues.unknownKeys("interface.panes.files", files, ["enabled", "mode", "profile", "followCwd"]);
+							issues.unknownKeys("interface.panes.files", files, ["enabled", "mode", "profile", "followCwd", "ratio"]);
 							for (const key of ["enabled", "followCwd"] as const) {
 								if (!(key in files)) continue;
 								const parsed = expectBoolean(issues, `interface.panes.files.${key}`, files[key]);
@@ -1705,6 +1719,10 @@ export function validateSettings(raw: unknown): SettingsValidationResult {
 							if ("profile" in files) {
 								const parsed = expectEnum(issues, "interface.panes.files.profile", files.profile, ["managed", "user"] as const);
 								if (parsed !== undefined) settings.interface.panes.files.profile = parsed;
+							}
+							if ("ratio" in files) {
+								const parsed = expectNumber(issues, "interface.panes.files.ratio", files.ratio, { min: 0.05, max: 0.5 });
+								if (parsed !== undefined) settings.interface.panes.files.ratio = parsed;
 							}
 						}
 					}

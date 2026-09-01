@@ -57,18 +57,19 @@ panes:
   keepFailed: false
   notifications: failures
 `);
-		// The file this migration is for cannot pass the strict reader; that is the
-		// whole reason it exists.
-		const retiredPaneIssues = (): string[] =>
+		// The v2 schema flags the whole v1 `panes` root; the per-key strip below
+		// is still what keeps this migration honest about removing two knobs and
+		// nothing else. The root itself is the settings-v2 migration's business.
+		const panesRootIssues = (): string[] =>
 			validateSettingsFile()
 				.issues.map((issue) => issue.path)
-				.filter((issuePath) => issuePath === "panes.agents" || issuePath === "panes.keepFailed")
+				.filter((issuePath) => issuePath === "panes" || issuePath.startsWith("panes."))
 				.sort();
-		deepStrictEqual(retiredPaneIssues(), ["panes.agents", "panes.keepFailed"]);
+		deepStrictEqual(panesRootIssues(), ["panes"]);
 
 		await retirePanesKnobs.up(stateDir());
 
-		deepStrictEqual(retiredPaneIssues(), []);
+		deepStrictEqual(panesRootIssues(), ["panes"]);
 		const saved = parseYaml(read()) as { panes?: Record<string, unknown>; autonomy?: string };
 		// The keys around them survive: this removes two knobs, not a section.
 		deepStrictEqual(Object.keys(saved.panes ?? {}).sort(), ["enabled", "notifications"]);
