@@ -12,6 +12,12 @@ export const codeNavToolSurface = {
 	description:
 		"Navigate the indexed codewiki: mode=symbol finds files by symbol, path finds files by glob/regex/substring, entries lists likely entry points, outline lists file symbols, deps lists imports, and dependents lists importers. mode=wiki without query lists generated Markdown wiki pages; with query it resolves a page id/title and returns its summary plus a path to open with read. For Clio's bundled product docs use context scope=docs.",
 	parameters: Type.Object({
+		source: Type.Optional(
+			StringEnum(["workspace", "clio"], {
+				description: "Code map source (default workspace).",
+				default: "workspace",
+			}),
+		),
 		mode: StringEnum(["symbol", "path", "entries", "outline", "deps", "dependents", "wiki"], {
 			description: "Lookup mode.",
 		}),

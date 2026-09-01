@@ -1,6 +1,8 @@
 import { existsSync, readFileSync } from "node:fs";
-import { join, normalize } from "node:path";
+import { isAbsolute, join, normalize, relative, resolve } from "node:path";
+import { resolvePackageRoot } from "../../core/package-root.js";
 import { ToolNames } from "../../core/tool-names.js";
+import { parseCodewikiRaw } from "../../domains/context/codewiki/artifact.js";
 import type { Codewiki, CodewikiFile, CodewikiSymbol } from "../../domains/context/codewiki/schema.js";
 import { listWikiPages } from "../../domains/context/wiki/layout.js";
 import { readWikiMeta } from "../../domains/context/wiki/meta.js";
@@ -22,6 +24,14 @@ import {
 import { loadCodewikiForTool, renderJson } from "./shared.js";
 
 const REGEX_SYNTAX_HINTS = /\.\*|\.\+|\^|\$|\\[dDwWsSbB]|\(\?:|\(\?=|\(\?!/;
+const CLIO_CODEWIKI_RELATIVE_PATH = join("dist", "assets", "codewiki.json");
+
+type CodeNavSource = "workspace" | "clio";
+
+interface LoadedNavSource {
+	codewiki: Codewiki;
+	entryRoot: string | null;
+}
 
 interface NavIndex {
 	filesById: Map<string, CodewikiFile>;
@@ -42,6 +52,62 @@ interface NavPayload {
 }
 
 const navIndexCache = new WeakMap<Codewiki, NavIndex>();
+let clioCodewikiCache: { packageRoot: string; codewiki: Codewiki } | null = null;
+
+function packageRootResolvedPath(packageRoot: string, indexedPath: string): string {
+	const resolved = resolve(packageRoot, indexedPath);
+	const rel = relative(packageRoot, resolved);
+	if (
+		rel.length === 0 ||
+		rel === ".." ||
+		rel.startsWith(`..${process.platform === "win32" ? "\\" : "/"}`) ||
+		isAbsolute(rel)
+	) {
+		throw new Error(`invalid package-root-relative path in bundled code map: ${indexedPath}`);
+	}
+	return resolved;
+}
+
+function packageRootResolvedCodewiki(packageRoot: string, codewiki: Codewiki): Codewiki {
+	return {
+		...codewiki,
+		files: codewiki.files.map((file) => ({
+			...file,
+			path: packageRootResolvedPath(packageRoot, file.path),
+		})),
+	};
+}
+
+function loadClioCodewikiForTool(): { ok: true; loaded: LoadedNavSource } | { ok: false; message: string } {
+	try {
+		const packageRoot = resolvePackageRoot();
+		if (clioCodewikiCache?.packageRoot === packageRoot) {
+			return { ok: true, loaded: { codewiki: clioCodewikiCache.codewiki, entryRoot: packageRoot } };
+		}
+		const artifactPath = join(packageRoot, CLIO_CODEWIKI_RELATIVE_PATH);
+		const parsed = parseCodewikiRaw(readFileSync(artifactPath, "utf8"));
+		if (!parsed) throw new Error("bundled artifact is not a valid codewiki");
+		const codewiki = packageRootResolvedCodewiki(packageRoot, parsed);
+		clioCodewikiCache = { packageRoot, codewiki };
+		return { ok: true, loaded: { codewiki, entryRoot: packageRoot } };
+	} catch (err) {
+		const message = err instanceof Error ? err.message : String(err);
+		return {
+			ok: false,
+			message: `code_nav: bundled Clio code map unavailable at ${CLIO_CODEWIKI_RELATIVE_PATH}: ${message}`,
+		};
+	}
+}
+
+async function loadNavSource(
+	source: CodeNavSource,
+): Promise<{ ok: true; loaded: LoadedNavSource } | { ok: false; message: string }> {
+	if (source === "clio") return loadClioCodewikiForTool();
+	const loaded = await loadCodewikiForTool();
+	return loaded.ok
+		? { ok: true, loaded: { codewiki: loaded.codewiki, entryRoot: null } }
+		: { ok: false, message: loaded.message };
+}
 
 function regexFromPattern(pattern: string): RegExp | null {
 	if (pattern.startsWith("/") && pattern.lastIndexOf("/") > 0) {
@@ -73,7 +139,7 @@ function regexFromPattern(pattern: string): RegExp | null {
 	return null;
 }
 
-function readPackageEntryPaths(cwd: string): Set<string> {
+function readPackageEntryPaths(cwd: string, resolveFromRoot: boolean): Set<string> {
 	const out = new Set<string>();
 	const pkgPath = join(cwd, "package.json");
 	if (!existsSync(pkgPath)) return out;
@@ -85,11 +151,15 @@ function readPackageEntryPaths(cwd: string): Set<string> {
 	}
 	if (typeof parsed !== "object" || parsed === null || Array.isArray(parsed)) return out;
 	const pkg = parsed as Record<string, unknown>;
-	if (typeof pkg.main === "string") out.add(normalizeEntryPath(pkg.main));
-	if (typeof pkg.bin === "string") out.add(normalizeEntryPath(pkg.bin));
+	const add = (value: string): void => {
+		const normalized = normalizeEntryPath(value);
+		out.add(resolveFromRoot ? packageRootResolvedPath(cwd, normalized) : normalized);
+	};
+	if (typeof pkg.main === "string") add(pkg.main);
+	if (typeof pkg.bin === "string") add(pkg.bin);
 	if (typeof pkg.bin === "object" && pkg.bin !== null && !Array.isArray(pkg.bin)) {
 		for (const value of Object.values(pkg.bin)) {
-			if (typeof value === "string") out.add(normalizeEntryPath(value));
+			if (typeof value === "string") add(value);
 		}
 	}
 	return out;
@@ -243,9 +313,9 @@ function runPath(index: NavIndex, query: string, limit: number): NavPayload {
 	};
 }
 
-function runEntries(index: NavIndex, limit: number): NavPayload {
-	const cwd = process.cwd();
-	const packageEntries = readPackageEntryPaths(cwd);
+function runEntries(index: NavIndex, limit: number, entryRoot: string | null): NavPayload {
+	const cwd = entryRoot ?? process.cwd();
+	const packageEntries = readPackageEntryPaths(cwd, entryRoot !== null);
 	const candidates = [...index.filesByPath.values()].filter(
 		(file) => file.lang !== "config" && (file.role === "entry" || packageEntries.has(file.path)),
 	);
@@ -488,10 +558,24 @@ function parseLimit(value: unknown, fallback: number): number {
 export const codeNavTool: ToolSpec = {
 	...codeNavToolSurface,
 	async run(args, options): Promise<ToolResult> {
+		const rawSource = args.source;
+		if (rawSource !== undefined && rawSource !== "workspace" && rawSource !== "clio") {
+			return {
+				kind: "error",
+				message: `code_nav: source must be workspace or clio; got '${String(rawSource)}'`,
+			};
+		}
+		const source: CodeNavSource = rawSource === "clio" ? "clio" : "workspace";
 		const mode = typeof args.mode === "string" ? args.mode : "";
-		const loaded = await loadCodewikiForTool();
+		if (source === "clio" && mode === "wiki") {
+			return {
+				kind: "error",
+				message: "code_nav: source=clio does not provide mode=wiki; use context scope=docs for Clio documentation",
+			};
+		}
+		const loaded = await loadNavSource(source);
 		if (!loaded.ok) return { kind: "error", message: loaded.message };
-		const index = navIndexFor(loaded.codewiki);
+		const index = navIndexFor(loaded.loaded.codewiki);
 		const query = typeof args.query === "string" ? args.query.trim() : "";
 		const limit = parseLimit(args.limit, mode === "entries" ? DEFAULT_ENTRY_LIMIT : DEFAULT_LIMIT);
 		const reservation = reserveObservation(OBSERVE_SELF_CAPS.codeNav, options);
@@ -506,15 +590,17 @@ export const codeNavTool: ToolSpec = {
 		}
 		const close = (nav: NavPayload | ToolResult): ToolResult => {
 			if ("kind" in nav) return nav;
+			const next = source === "clio" && nav.next !== undefined ? `source=clio ${nav.next}` : nav.next;
+			const payload = next === nav.next ? nav.payload : { ...nav.payload, next };
 			return finalizeObservation({
 				tool: ToolNames.CodeNav,
 				unit: "results",
 				format: "json",
-				output: renderJson(nav.payload),
+				output: renderJson(payload),
 				shownCount: nav.shownCount,
 				totalCount: nav.totalCount,
 				truncated: nav.shownCount < nav.totalCount,
-				...(nav.next !== undefined ? { next: nav.next } : {}),
+				...(next !== undefined ? { next } : {}),
 				reservation,
 				...(options ? { options } : {}),
 			});
@@ -527,7 +613,7 @@ export const codeNavTool: ToolSpec = {
 			if (query.length === 0) return { kind: "error", message: "code_nav: mode=path requires query" };
 			return close(runPath(index, query, limit));
 		}
-		if (mode === "entries") return close(runEntries(index, limit));
+		if (mode === "entries") return close(runEntries(index, limit, loaded.loaded.entryRoot));
 		if (mode === "outline") {
 			if (query.length === 0) return { kind: "error", message: "code_nav: mode=outline requires query path" };
 			return close(runOutline(index, query, limit));

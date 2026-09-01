@@ -168,7 +168,7 @@ const CALL_TARGET_FIELDS: Readonly<Record<string, ReadonlyArray<string>>> = {
 	grep: ["pattern", "path", "mode", "glob", "ignore_case", "literal", "context", "limit", "include_ignored"],
 	find: ["pattern", "path", "order", "limit", "include_ignored"],
 	ls: ["path", "limit"],
-	code_nav: ["mode", "query", "limit"],
+	code_nav: ["source", "mode", "query", "limit"],
 	context: ["scope", "query", "name", "limit", "ref", "include_tree"],
 	credential_present: ["name", "source", "file"],
 	write: ["path"],

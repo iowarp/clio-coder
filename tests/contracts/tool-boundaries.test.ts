@@ -1,4 +1,4 @@
-import { deepStrictEqual, ok, strictEqual, throws } from "node:assert/strict";
+import { deepStrictEqual, match, ok, strictEqual, throws } from "node:assert/strict";
 import { createServer } from "node:http";
 import type { AddressInfo } from "node:net";
 import { afterEach, beforeEach, describe, it } from "node:test";
@@ -13,6 +13,8 @@ import {
 } from "../../src/core/path-boundary.js";
 import { ToolNames } from "../../src/core/tool-names.js";
 import { CONFIRMED_SCOPE, READONLY_SCOPE, WORKSPACE_SCOPE } from "../../src/domains/safety/scope.js";
+import { codeNavTool } from "../../src/tools/codewiki/code-nav.js";
+import { codeNavToolSurface } from "../../src/tools/codewiki/code-nav-surface.js";
 import { createRegistry, type ToolSpec } from "../../src/tools/registry.js";
 import { toolResultContextText } from "../../src/tools/result-disposition.js";
 import { webFetchTool } from "../../src/tools/web-fetch.js";
@@ -91,6 +93,18 @@ describe("tool boundary contract", () => {
 		strictEqual(disposition.applications, 1);
 		ok((disposition.contextBytes ?? Number.POSITIVE_INFINITY) <= 320);
 		ok(Buffer.byteLength(toolResultContextText(verdict.result), "utf8") <= 320);
+	});
+
+	it("keeps the code_nav source selector closed and defaults its schema to workspace", async () => {
+		const parameters = codeNavToolSurface.parameters as {
+			properties?: { source?: { enum?: unknown; default?: unknown } };
+		};
+		deepStrictEqual(parameters.properties?.source?.enum, ["workspace", "clio"]);
+		strictEqual(parameters.properties?.source?.default, "workspace");
+
+		const arbitrary = await codeNavTool.run({ source: scratch.dir, mode: "symbol", query: "codeNavTool" });
+		strictEqual(arbitrary.kind, "error");
+		if (arbitrary.kind === "error") match(arbitrary.message, /source must be workspace or clio/u);
 	});
 
 	it("preserves web method, headers, body, and response through the transport", async () => {
