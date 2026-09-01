@@ -245,6 +245,16 @@ function fitLine(text: string, width: number): string {
 	return truncateToWidth(text, safeWidth, ELLIPSIS, true);
 }
 
+/** Wrap a prose value inside the columns left by its one-time row label. */
+function wrapLabeledValue(prefix: string, value: string, width: number): string[] {
+	const safeWidth = Math.max(1, width);
+	const prefixWidth = visibleWidth(prefix);
+	const valueWidth = Math.max(1, safeWidth - prefixWidth);
+	return wrapTextWithAnsi(value, valueWidth).map((line, index) =>
+		fitLine(`${index === 0 ? prefix : " ".repeat(prefixWidth)}${line}`, safeWidth),
+	);
+}
+
 function compactTitle(question: AskUserQuestion): string {
 	return (question.header ?? question.question).replace(/\s+/g, " ").trim();
 }
@@ -398,7 +408,8 @@ class AskUserOverlayView implements Component {
 
 		this.contentOverflows = false;
 		const controlLines = this.renderControlLines(safeWidth);
-		const statusLines = this.status.length > 0 ? ["", fitLine(clioTheme().fg("dim", this.status), safeWidth)] : [];
+		const statusLines =
+			this.status.length > 0 ? ["", ...wrapTextWithAnsi(clioTheme().fg("dim", this.status), safeWidth)] : [];
 		const headerLine = this.renderQuestionHeader(question, safeWidth);
 		const headerLines = headerLine.length > 0 ? [headerLine] : [];
 		const bottom = [...statusLines, "", ...controlLines];
@@ -426,7 +437,7 @@ class AskUserOverlayView implements Component {
 	private renderInterview(question: AskUserQuestion, width: number, maxRows: number): string[] {
 		const theme = clioTheme();
 		const controlLines = this.renderControlLines(width);
-		const statusLines = this.status.length > 0 ? ["", fitLine(theme.fg("dim", this.status), width)] : [];
+		const statusLines = this.status.length > 0 ? ["", ...wrapTextWithAnsi(theme.fg("dim", this.status), width)] : [];
 		const headerLine = this.renderQuestionHeader(question, width);
 		const headerLines = headerLine.length > 0 ? [headerLine] : [];
 		const stripLines = [this.renderQuestionStrip(width), ""];
@@ -606,11 +617,14 @@ class AskUserOverlayView implements Component {
 		const lines = [
 			screenTitle(theme, "Interview"),
 			"",
-			theme.fg(
-				"muted",
-				this.history.length > 0
-					? "Answer sent. Waiting for Clio to prepare the next interview question."
-					: "Waiting for Clio to prepare the interview.",
+			...wrapTextWithAnsi(
+				theme.fg(
+					"muted",
+					this.history.length > 0
+						? "Answer sent. Waiting for Clio to prepare the next interview question."
+						: "Waiting for Clio to prepare the interview.",
+				),
+				width,
 			),
 		];
 		if (this.history.length > 0) {
@@ -618,7 +632,9 @@ class AskUserOverlayView implements Component {
 			for (let index = 0; index < this.history.length; index += 1) {
 				const answer = this.history[index];
 				if (!answer) continue;
-				lines.push(fitLine(`${theme.fg("dim", `${index + 1}.`)} ${theme.fg("muted", answer.answer)}`, width));
+				lines.push(
+					...wrapLabeledValue(`${theme.fg("dim", `${index + 1}.`)} `, theme.fg("muted", answer.answer), width),
+				);
 			}
 		}
 		return lines.map((line) => fitLine(line, width)).slice(0, maxRows);
@@ -767,7 +783,9 @@ class AskUserOverlayView implements Component {
 		for (let index = 0; index < this.history.length; index += 1) {
 			const answer = this.history[index];
 			if (!answer) continue;
-			rows.push(fitLine(`${theme.fg("dim", `${index + 1}.`)} ${theme.fg("muted", answer.answer)}`, width));
+			rows.push(
+				...wrapLabeledValue(`${theme.fg("dim", `${index + 1}.`)} `, theme.fg("muted", answer.answer), width),
+			);
 		}
 		// A round of one question needs no per-question roll: the strip already
 		// names the round and the question is on screen above this.
@@ -775,7 +793,7 @@ class AskUserOverlayView implements Component {
 			for (let index = 0; index < this.questions.length; index += 1) {
 				const answer = this.states[index]?.answer.trim();
 				const value = answer && answer.length > 0 ? theme.fg("muted", answer) : theme.fg("dim", "pending");
-				rows.push(fitLine(`${theme.fg("dim", `Q${index + 1}`)} ${value}`, width));
+				rows.push(...wrapLabeledValue(`${theme.fg("dim", `Q${index + 1}`)} `, value, width));
 			}
 		}
 		if (rows.length === 0) return [];

@@ -743,6 +743,29 @@ describe("contracts/ask-user surfaces", () => {
 			await second;
 		}
 	});
+
+	it("wraps captured interview answers instead of cutting their sentences", async () => {
+		const mounted = askOverlay(40, 40);
+		const answerText = "Keep the complete explanation visible across every narrow terminal row";
+		const first = mounted.session.ask([
+			{ header: "Scope", question: "First root decision?", options: [{ label: answerText }] },
+		]);
+		answer(mounted);
+		await first;
+
+		const second = mounted.session.ask([
+			{ header: "Depth", question: "Second root decision?", options: [{ label: "Continue" }] },
+		]);
+		try {
+			const lines = mounted.child().render(40).map(stripAnsi);
+			const collapsed = lines.join(" ").replace(/\s+/gu, " ");
+			ok(collapsed.includes(answerText), `the answer ledger lost prose: ${collapsed}`);
+			for (const line of lines) strictEqual(visibleWidth(line) <= 40, true, `line overflows: ${line}`);
+		} finally {
+			mounted.session.cancel();
+			await second;
+		}
+	});
 });
 
 /**
