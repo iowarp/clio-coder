@@ -58,19 +58,34 @@ Deno.test("the layout follows XDG defaults without a prefix and stays inside the
 	equal(xdg.applications, "/home/researcher/data/applications");
 	equal(xdg.data, "/home/researcher/data/clio-coder-gui");
 	equal(xdg.manifest, "/home/researcher/data/clio-coder-gui/install.json");
-	equal(xdg.stateDir, "/home/researcher/.local/state/clio-workbench");
+	equal(xdg.stateDir, "/home/researcher/.local/state/clio-coder-gui");
 
 	const prefixed = resolveLayout({ prefix: "/opt/clio" }, env);
 	equal(prefixed.bin, "/opt/clio/bin");
 	equal(prefixed.applications, "/opt/clio/share/applications");
 	equal(prefixed.data, "/opt/clio/share/clio-coder-gui");
-	equal(prefixed.stateDir, "/home/researcher/.local/state/clio-workbench");
+	equal(prefixed.stateDir, "/home/researcher/.local/state/clio-coder-gui");
 
 	const explicitState = resolveLayout(
 		{},
-		(name) => ({ HOME: "/home/researcher", CLIO_WORKBENCH_STATE_DIR: "/srv/state" })[name],
+		(name) => ({ HOME: "/home/researcher", CLIO_CODER_GUI_STATE_DIR: "/srv/state" })[name],
 	);
 	equal(explicitState.stateDir, "/srv/state");
+	const legacyState = resolveLayout(
+		{},
+		(name) => ({ HOME: "/home/researcher", CLIO_WORKBENCH_STATE_DIR: "/srv/legacy-state" })[name],
+	);
+	equal(legacyState.stateDir, "/srv/legacy-state");
+	const canonicalWins = resolveLayout(
+		{},
+		(name) =>
+			({
+				HOME: "/home/researcher",
+				CLIO_CODER_GUI_STATE_DIR: "/srv/canonical-state",
+				CLIO_WORKBENCH_STATE_DIR: "/srv/legacy-state",
+			})[name],
+	);
+	equal(canonicalWins.stateDir, "/srv/canonical-state");
 });
 
 Deno.test("the installer refuses the home directory, the filesystem root, and relative paths as a prefix", () => {

@@ -14,10 +14,18 @@ import type { ProjectBrowseListingPayload, WireBrowseEntry } from "./src/protoco
 
 export const MAX_RECENT_PROJECTS = 32;
 export const MAX_BROWSE_ENTRIES = 512;
+export const CANONICAL_STATE_DIRECTORY_NAME = "clio-coder-gui";
+export const LEGACY_STATE_DIRECTORY_NAME = "clio-workbench";
+export const CANONICAL_STATE_ENV = "CLIO_CODER_GUI_STATE_DIR";
+export const LEGACY_STATE_ENV = "CLIO_WORKBENCH_STATE_DIR";
+export const LEGACY_MIGRATION_MARKER = "clio-coder-gui-migration-pending.json";
 const RECENT_FILE = "projects.json";
 const RECENT_FILE_VERSION = 1;
 const MAX_PATH_BYTES = 4 * 1024;
+const MAX_MIGRATION_INPUT_BYTES = 1024 * 1024;
+const MIGRATION_BACKUP_SUFFIX = "before-clio-coder-gui-merge.bak";
 const encoder = new TextEncoder();
+const decoder = new TextDecoder();
 
 export interface RecentProject {
 	readonly id: string;
@@ -36,6 +44,8 @@ export interface WorkbenchStateOptions {
 	readonly stateDir?: string;
 	/** Overrides `$HOME` (tests). */
 	readonly homePath?: string;
+	/** Overrides environment reads (tests). */
+	readonly env?: EnvReader;
 	readonly now?: () => number;
 	readonly log?: (message: string) => void;
 }
@@ -97,16 +107,36 @@ function envValue(name: string): string | undefined {
 	}
 }
 
+let warnedForLegacyStateEnv = false;
+
+function warnForLegacyStateEnv(log?: (message: string) => void): void {
+	if (log === undefined || warnedForLegacyStateEnv) return;
+	warnedForLegacyStateEnv = true;
+	log(
+		`${LEGACY_STATE_ENV} is deprecated; use ${CANONICAL_STATE_ENV}. The legacy override remains supported for two minor releases.`,
+	);
+}
+
 /**
- * `$CLIO_WORKBENCH_STATE_DIR`, else `$XDG_STATE_HOME/clio-workbench`, else `~/.local/state/clio-workbench`.
+ * `$CLIO_CODER_GUI_STATE_DIR`, else the deprecated `$CLIO_WORKBENCH_STATE_DIR`,
+ * else `$XDG_STATE_HOME/clio-coder-gui`, else `~/.local/state/clio-coder-gui`.
  * The installer passes its own reader so it records exactly the directory the app will use.
  */
-export function resolveStateDir(homePath: string, env: EnvReader = envValue): string {
-	const explicit = env("CLIO_WORKBENCH_STATE_DIR");
-	if (explicit !== undefined && isAbsolute(explicit)) return resolve(explicit);
+export function resolveStateDir(
+	homePath: string,
+	env: EnvReader = envValue,
+	log?: (message: string) => void,
+): string {
+	const canonical = env(CANONICAL_STATE_ENV);
+	if (canonical !== undefined && isAbsolute(canonical)) return resolve(canonical);
+	const legacy = env(LEGACY_STATE_ENV);
+	if (legacy !== undefined && isAbsolute(legacy)) {
+		warnForLegacyStateEnv(log);
+		return resolve(legacy);
+	}
 	const xdg = env("XDG_STATE_HOME");
-	if (xdg !== undefined && isAbsolute(xdg)) return join(resolve(xdg), "clio-workbench");
-	return join(homePath, ".local", "state", "clio-workbench");
+	if (xdg !== undefined && isAbsolute(xdg)) return join(resolve(xdg), CANONICAL_STATE_DIRECTORY_NAME);
+	return join(homePath, ".local", "state", CANONICAL_STATE_DIRECTORY_NAME);
 }
 
 export function resolveHomePath(): string {
@@ -141,6 +171,15 @@ function validDisplayName(value: unknown): value is string {
 		!hasControlCharacter(value);
 }
 
+function parseRecentEntry(value: unknown): RecentProject | null {
+	if (!isRecord(value)) return null;
+	const { id, canonicalPath, displayName, lastOpenedAt } = value;
+	if (!validId(id) || !validPath(canonicalPath) || !validDisplayName(displayName) || !validTimestamp(lastOpenedAt)) {
+		return null;
+	}
+	return { id, canonicalPath: resolve(canonicalPath), displayName, lastOpenedAt };
+}
+
 function parseRecentFile(text: string): RecentProject[] | null {
 	let parsed: unknown;
 	try {
@@ -154,17 +193,199 @@ function parseRecentFile(text: string): RecentProject[] | null {
 	const ids = new Set<string>();
 	const paths = new Set<string>();
 	for (const entry of parsed.projects) {
-		if (!isRecord(entry)) return null;
-		const { id, canonicalPath, displayName, lastOpenedAt } = entry;
-		if (!validId(id) || !validPath(canonicalPath) || !validDisplayName(displayName) || !validTimestamp(lastOpenedAt)) {
-			return null;
-		}
-		if (ids.has(id) || paths.has(canonicalPath)) return null;
-		ids.add(id);
-		paths.add(canonicalPath);
-		projects.push({ id, canonicalPath, displayName, lastOpenedAt });
+		const project = parseRecentEntry(entry);
+		if (project === null || ids.has(project.id) || paths.has(project.canonicalPath)) return null;
+		ids.add(project.id);
+		paths.add(project.canonicalPath);
+		projects.push(project);
 	}
 	return projects;
+}
+
+/** Migration is deliberately row-tolerant: corrupt rows are backed up, then dropped. */
+function parseMigrationRows(bytes: Uint8Array | null): RecentProject[] {
+	if (bytes === null || bytes.byteLength > MAX_MIGRATION_INPUT_BYTES) return [];
+	let parsed: unknown;
+	try {
+		parsed = JSON.parse(decoder.decode(bytes));
+	} catch {
+		return [];
+	}
+	if (!isRecord(parsed) || parsed.version !== RECENT_FILE_VERSION || !Array.isArray(parsed.projects)) return [];
+	return parsed.projects.flatMap((entry) => {
+		const project = parseRecentEntry(entry);
+		return project === null ? [] : [project];
+	});
+}
+
+function mergeRecentProjects(
+	canonicalRows: readonly RecentProject[],
+	legacyRows: readonly RecentProject[],
+): RecentProject[] {
+	type Candidate = Readonly<{ project: RecentProject; canonical: boolean }>;
+	const byPath = new Map<string, Candidate>();
+	for (
+		const candidate of [
+			...legacyRows.map((project) => ({ project, canonical: false })),
+			...canonicalRows.map((project) => ({ project, canonical: true })),
+		]
+	) {
+		const previous = byPath.get(candidate.project.canonicalPath);
+		if (
+			previous === undefined || candidate.project.lastOpenedAt > previous.project.lastOpenedAt ||
+			(candidate.project.lastOpenedAt === previous.project.lastOpenedAt && candidate.canonical && !previous.canonical)
+		) byPath.set(candidate.project.canonicalPath, candidate);
+	}
+	const ordered = [...byPath.values()].sort((left, right) =>
+		right.project.lastOpenedAt.localeCompare(left.project.lastOpenedAt) ||
+		Number(right.canonical) - Number(left.canonical) ||
+		left.project.canonicalPath.localeCompare(right.project.canonicalPath)
+	);
+	const ids = new Set<string>();
+	const merged: RecentProject[] = [];
+	for (const candidate of ordered) {
+		if (ids.has(candidate.project.id)) continue;
+		ids.add(candidate.project.id);
+		merged.push(candidate.project);
+		if (merged.length === MAX_RECENT_PROJECTS) break;
+	}
+	return merged;
+}
+
+async function lstatOrNull(path: string): Promise<Deno.FileInfo | null> {
+	try {
+		return await Deno.lstat(path);
+	} catch (error) {
+		if (error instanceof Deno.errors.NotFound) return null;
+		throw error;
+	}
+}
+
+async function readOptionalBytes(path: string): Promise<Uint8Array | null> {
+	try {
+		return await Deno.readFile(path);
+	} catch (error) {
+		if (error instanceof Deno.errors.NotFound) return null;
+		throw error;
+	}
+}
+
+async function writeBytesAtomically(path: string, bytes: Uint8Array): Promise<void> {
+	const temporary = `${path}.${crypto.randomUUID().slice(0, 8)}.tmp`;
+	try {
+		await Deno.writeFile(temporary, bytes);
+		await Deno.rename(temporary, path);
+	} catch (error) {
+		await Deno.remove(temporary).catch(() => undefined);
+		throw error;
+	}
+}
+
+async function nextBackupPath(stateDir: string): Promise<string> {
+	const base = join(stateDir, `${RECENT_FILE}.${MIGRATION_BACKUP_SUFFIX}`);
+	for (let index = 0; index < 1_000; index += 1) {
+		const candidate = index === 0 ? base : `${base}.${index}`;
+		if (await lstatOrNull(candidate) === null) return candidate;
+	}
+	throw new WorkbenchStateError("internal", "The GUI could not allocate a state-migration backup.");
+}
+
+async function backUpInput(stateDir: string, bytes: Uint8Array | null): Promise<string | null> {
+	if (bytes === null) return null;
+	const backup = await nextBackupPath(stateDir);
+	await writeBytesAtomically(backup, bytes);
+	return backup;
+}
+
+interface StateMigrationResult {
+	/** Markers from an earlier launch, removed only after this launch reads canonical state successfully. */
+	readonly cleanupMarkers: readonly string[];
+}
+
+function legacyStateCandidates(homePath: string, env: EnvReader, canonicalStateDir: string): string[] {
+	const candidates: string[] = [];
+	const xdg = env("XDG_STATE_HOME");
+	if (xdg !== undefined && isAbsolute(xdg)) {
+		candidates.push(join(resolve(xdg), LEGACY_STATE_DIRECTORY_NAME));
+	}
+	candidates.push(join(homePath, ".local", "state", LEGACY_STATE_DIRECTORY_NAME));
+	return [...new Set(candidates.map((candidate) => resolve(candidate)))].filter(
+		(candidate) => candidate !== canonicalStateDir,
+	);
+}
+
+async function mergeStateRoots(
+	canonicalStateDir: string,
+	legacyStateDir: string,
+	now: () => number,
+	log: (message: string) => void,
+): Promise<"merged" | "pending-cleanup" | "nothing"> {
+	const legacyFile = join(legacyStateDir, RECENT_FILE);
+	const marker = join(legacyStateDir, LEGACY_MIGRATION_MARKER);
+	const legacyBytes = await readOptionalBytes(legacyFile);
+	if (legacyBytes === null) return await lstatOrNull(marker) === null ? "nothing" : "pending-cleanup";
+
+	const canonicalFile = join(canonicalStateDir, RECENT_FILE);
+	const canonicalBytes = await readOptionalBytes(canonicalFile);
+	await Deno.mkdir(canonicalStateDir, { recursive: true });
+	const canonicalBackup = await backUpInput(canonicalStateDir, canonicalBytes);
+	const legacyBackup = await backUpInput(legacyStateDir, legacyBytes);
+	const projects = mergeRecentProjects(parseMigrationRows(canonicalBytes), parseMigrationRows(legacyBytes));
+	const snapshot = encoder.encode(`${JSON.stringify({ version: RECENT_FILE_VERSION, projects }, null, "\t")}\n`);
+	await writeBytesAtomically(canonicalFile, snapshot);
+	await Deno.remove(legacyFile);
+	const receipt = {
+		version: 1,
+		migratedAt: new Date(now()).toISOString(),
+		target: canonicalStateDir,
+		canonicalBackup,
+		legacyBackup,
+		projects: projects.length,
+	};
+	await writeBytesAtomically(marker, encoder.encode(`${JSON.stringify(receipt, null, "\t")}\n`));
+	log(`Merged legacy GUI state into ${canonicalStateDir}; the original inputs were backed up.`);
+	return "merged";
+}
+
+async function migrateLegacyState(
+	canonicalStateDir: string,
+	homePath: string,
+	env: EnvReader,
+	now: () => number,
+	log: (message: string) => void,
+): Promise<StateMigrationResult> {
+	const cleanupMarkers: string[] = [];
+	for (const legacyStateDir of legacyStateCandidates(homePath, env, canonicalStateDir)) {
+		const legacyInfo = await lstatOrNull(legacyStateDir);
+		if (legacyInfo === null) continue;
+		if (!legacyInfo.isDirectory || legacyInfo.isSymlink) {
+			log(`Legacy GUI state at ${legacyStateDir} is not a real directory and was left untouched.`);
+			continue;
+		}
+		let canonicalInfo = await lstatOrNull(canonicalStateDir);
+		if (canonicalInfo === null) {
+			await Deno.mkdir(dirname(canonicalStateDir), { recursive: true });
+			try {
+				await Deno.rename(legacyStateDir, canonicalStateDir);
+				log(`Moved legacy GUI state atomically to ${canonicalStateDir}.`);
+				continue;
+			} catch (error) {
+				canonicalInfo = await lstatOrNull(canonicalStateDir);
+				if (canonicalInfo === null || await lstatOrNull(legacyStateDir) === null) {
+					throw new WorkbenchStateError(
+						"internal",
+						`The GUI could not move its legacy state safely (${errorName(error)}).`,
+					);
+				}
+			}
+		}
+		if (!canonicalInfo?.isDirectory || canonicalInfo.isSymlink) {
+			throw new WorkbenchStateError("internal", "The canonical GUI state path is not a real directory.");
+		}
+		const outcome = await mergeStateRoots(canonicalStateDir, legacyStateDir, now, log);
+		if (outcome === "pending-cleanup") cleanupMarkers.push(join(legacyStateDir, LEGACY_MIGRATION_MARKER));
+	}
+	return { cleanupMarkers };
 }
 
 function compareEntryNames(left: string, right: string): number {
@@ -191,9 +412,24 @@ export class WorkbenchState {
 	static async open(options: WorkbenchStateOptions = {}): Promise<WorkbenchState> {
 		const homePath = resolve(options.homePath ?? resolveHomePath());
 		if (!isAbsolute(homePath)) throw new WorkbenchStateError("internal", "The GUI home path must be absolute.");
-		const stateDir = resolve(options.stateDir ?? resolveStateDir(homePath));
+		const log = options.log ?? ((message: string) => console.error(message));
+		const env = options.env ?? envValue;
+		const stateDir = resolve(options.stateDir ?? resolveStateDir(homePath, env, log));
+		const canonicalOverride = env(CANONICAL_STATE_ENV);
+		const legacyOverride = env(LEGACY_STATE_ENV);
+		const usingLegacyOverride = options.stateDir === undefined &&
+			(canonicalOverride === undefined || !isAbsolute(canonicalOverride)) &&
+			legacyOverride !== undefined && isAbsolute(legacyOverride);
+		const migration = options.stateDir === undefined && !usingLegacyOverride
+			? await migrateLegacyState(stateDir, homePath, env, options.now ?? Date.now, log)
+			: { cleanupMarkers: [] };
 		const state = new WorkbenchState(stateDir, homePath, options);
 		await state.#load();
+		for (const marker of migration.cleanupMarkers) {
+			await Deno.remove(marker).catch((error: unknown) => {
+				log(`The GUI could not retire its legacy state-migration marker (${errorName(error)}).`);
+			});
+		}
 		return state;
 	}
 
