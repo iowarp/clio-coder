@@ -497,6 +497,16 @@ function cardUnitsLine(theme: ClioTheme, key: string, units: ReadonlyArray<strin
 	return visibleWidth(full) <= contentWidth ? full : fitUnits(theme, prefix, units, contentWidth);
 }
 
+/** A prose card value, wrapped inside the columns left by its one-time key. */
+function cardWrappedValueLines(theme: ClioTheme, key: string, value: string, contentWidth: number): string[] {
+	const prefix = cardKvKey(theme, key);
+	const prefixWidth = visibleWidth(prefix);
+	const valueWidth = Math.max(1, contentWidth - prefixWidth);
+	return wrapTextWithAnsi(value, valueWidth).map(
+		(line, index) => `${index === 0 ? prefix : " ".repeat(prefixWidth)}${line}`,
+	);
+}
+
 // The `proof` row: the colored state marker, an optional failure reason, then
 // the dim `/view` filter an operator would type.
 function evidenceCardLine(theme: ClioTheme, evidence: RunEvidencePresentation, contentWidth: number): string | null {
@@ -715,24 +725,22 @@ export function renderDispatchCard(
 			contentWidth,
 		),
 		targetLine,
-		...(row.taskSummary
-			? [truncateToWidth(`${cardKvKey(theme, "task")}${theme.fg("muted", row.taskSummary)}`, contentWidth, "…", false)]
-			: []),
+		...(row.taskSummary ? cardWrappedValueLines(theme, "task", theme.fg("muted", row.taskSummary), contentWidth) : []),
 		cardUnitsLine(theme, "status", statusUnits, contentWidth),
 		...trustCardLines(theme, row, contentWidth),
 		...(row.budget !== undefined
 			? [
-					truncateToWidth(
-						`${cardKvKey(theme, "policy")}${theme.fg("muted", `${formatBudgetPolicy(row.budget)}; requested ${formatBudgetRequest(row.budget)}`)}`,
+					...cardWrappedValueLines(
+						theme,
+						"policy",
+						theme.fg("muted", `${formatBudgetPolicy(row.budget)}; requested ${formatBudgetRequest(row.budget)}`),
 						contentWidth,
-						"…",
-						false,
 					),
-					truncateToWidth(
-						`${cardKvKey(theme, "budget")}${theme.fg("muted", `${formatEffectiveBudget(row.budget)}; reason ${formatBudgetReasons(row.budget)}`)}`,
+					...cardWrappedValueLines(
+						theme,
+						"budget",
+						theme.fg("muted", `${formatEffectiveBudget(row.budget)}; reason ${formatBudgetReasons(row.budget)}`),
 						contentWidth,
-						"…",
-						false,
 					),
 				]
 			: []),
@@ -797,7 +805,7 @@ export function renderDispatchCard(
 		const proofLine = evidenceCardLine(theme, evidence, contentWidth);
 		if (proofLine !== null) bodyLines.push(proofLine);
 	}
-	if (detail !== null) bodyLines.push(`${cardKvKey(theme, "detail")}${theme.fg("dim", detail)}`);
+	if (detail !== null) bodyLines.push(...cardWrappedValueLines(theme, "detail", theme.fg("dim", detail), contentWidth));
 
 	return frame(theme, cardTitle, bodyLines, width, { rightMeta: elapsed });
 }
