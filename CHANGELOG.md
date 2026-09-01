@@ -2,14 +2,9 @@
 
 All notable changes to Clio Coder are documented in this file. The format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/) and versions follow Semantic Versioning; pre-1.0 minor releases may include incompatible changes.
 
-## Unreleased
-
-### Changed
-- The benchmarks tree and internal campaign harness are removed; the eval platform remains and is consolidated as the product's single evaluation system, with maintained reference suites under `evals/`. Future external-benchmark adapters enter through that engine instead of creating another evaluation stack. The release gate no longer runs an eval baseline.
-
 ## 0.4.1 - 2026-09-01
 
-This grew beyond the bug-fix-only patch originally planned. v0.4.1 is a full release led by the version-2 `settings.yaml` contract and a smaller, grammar-driven slash-command surface, followed by new editor, marketplace, and herdr workflows plus the hardening that made them releasable.
+This grew beyond the bug-fix-only patch originally planned. v0.4.1 is a full release led by the version-2 `settings.yaml` contract, its automatic migration, and a smaller grammar-driven slash-command surface. It adds editor, marketplace, and herdr workflows; fixes the release-blocking configuration, CLI, TUI, Workbench, and dock failures found in final testing; replaces the oversized test and CI machinery with one fast deterministic gate; consolidates evaluation around the shipping eval domain and `evals/` reference suites; and moves machine-facing names into the `clio-coder` namespace without changing the product persona.
 
 ### Changed
 - `settings.yaml` is now a strict version-2 document organized around `chat`, `fleet`, `targets`, `context`, `safety`, `interface`, and `integrations`. `clio-coder upgrade` automatically runs the one-time v1 transformation before the strict config domain loads, validates the complete result in memory, refuses source/destination collisions without touching the original, writes atomically, preserves a sibling `settings.yaml.v1.bak`, and records the moved and retired paths in a migration report. Version-2 files execute only canonical paths; old spellings are non-executing tombstones with replacement guidance rather than permanent aliases. The v0.4.0 pane choices under `panes.enabled`, `panes.notifications`, `panes.journal`, and `panes.yazi.*` are carried into `interface.panes.*` and `fleet.history.journal`; only the already-retired `panes.agents` and `panes.keepFailed` controls are removed.
@@ -32,6 +27,18 @@ This grew beyond the bug-fix-only patch originally planned. v0.4.1 is a full rel
 - The managed herdr dock tier now works with the pinned release: the measured floors for `pane.focus`, `layout.export`, and `layout.set_split_ratio` are protocol 17 rather than an unattainable 21. Closing a dock clears its slot synchronously; anchor-pane splits no longer masquerade as dock resizes; live share is measured at the split that actually separates the dock; and wrong-axis resize attempts leave the layout unchanged.
 - Retired `panes.agents` and `panes.keepFailed` keys can no longer parse and do nothing: upgrade removes them, while a fresh v2 occurrence refuses with a targeted explanation. `interface.panes.enabled: embedded` remains accepted for forward compatibility but now reports that embedded mode is not implemented, recommends the working `auto` guest mode, and marks the Settings row accordingly.
 - The interactive Fleet settled notice now uses the shared provenance-aware cost formatter, reporting an entirely unpriced run as `not measured` and preserving estimated or partly priced provenance instead of presenting an invented measured `$0.0000`.
+
+### Test-suite diet
+- The automated suite was rebuilt from 557 files and 183,969 physical lines into 35 behavior-focused files and 5,179 lines at the diet landing: 30 contract suites cover the boundaries, lifecycles, migrations, and integrity properties that can break the product, while five smoke suites exercise the CLI, ACP, process lifecycle, installed package, and real binary. The custom 24-lane shard runner, its timing weights and serial lane, repeat/shuffle machinery, test-only seams, and most harness scaffolding are gone; `npm test` is now a plain `node --test` invocation and the warm suite measures about 21.3 seconds. The weekly `flake-hunt` workflow retired with the timing- and order-flake machinery it existed to exercise.
+
+### CI modernization
+- Push and pull-request CI is one Node 22 job that installs once and runs `npm run ci:release`; the tag-only release workflow independently reruns that same gate before packaging. The rebuilt workflow was verified green on GitHub Actions in 1m48s, down from 7m32s for the preceding successful main-branch run. There is no shard matrix, repeat lane, weekly flake hunt, or eval baseline in either CI or the release gate.
+
+### Eval consolidation
+- Clio Coder now ships one evaluation system: the product engine under `src/domains/eval/` owns suites, execution, verdicts, artifacts, comparison, and reporting, and the maintained runnable reference suites ship under `evals/`. The parallel `benchmarks/` tree and its internal campaign harness are retired to `archive/v041-pre-diet`; future external-benchmark adapters enter through the eval engine rather than creating another stack. Evals remain explicit operator-run measurements and do not run in ordinary CI or release gates.
+
+### Clio Coder naming migration
+- Machine-facing identifiers now follow one syntax-aware Clio Coder namespace: `clio-coder` for paths, package and manifest names, schema and event identifiers, tags, and Git refs; `clio_coder` where underscores are required; and `CLIO_CODER` for environment variables. Existing homes receive one idempotent `2026-09-01-clio-coder-naming` migration recorded in `migrations.json`, with an atomic settings backup and a detailed migration report. Canonical writers use the new names immediately, while readers accept released legacy names through the two-minor v0.5/v0.6 compatibility window and preserve longer read support where sealed artifacts, exported archives, host panes, or published Git refs require it. The Clio product persona and its operator-facing identity text are unchanged.
 
 ## 0.4.0 - 2026-08-31
 

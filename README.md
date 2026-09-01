@@ -79,6 +79,16 @@ proprietary binary, taking the tree from 387MB to 143MB. Everything but the
   flow is hard-gated to Clio's own shipped catalog or the
   `iowarp/clio-coder` repository. A public registry or foreign GitHub source is
   refused before the installer runs.
+- **Evaluation and release validation each have one path.** The product eval
+  engine remains under `src/domains/eval/`, runnable reference suites ship
+  under `evals/`, and evals stay outside CI and release gates. The automated
+  gate is now 35 focused test files driven directly by `node --test` through a
+  single fast CI job.
+- **Machine-facing names use the Clio Coder namespace.** New paths, schemas,
+  tags, environment variables, Git refs, and manifests use syntax-appropriate
+  `clio-coder`, `clio_coder`, or `CLIO_CODER` forms. Upgrade records one naming
+  migration, and readers retain the released legacy spellings through v0.5 and
+  v0.6. The Clio persona and operator-facing identity text are unchanged.
 
 The release also hardens the surfaces that tend to fail outside unit tests:
 plain `doctor` is read-only again, configure cancellation exits correctly,
@@ -457,8 +467,8 @@ If you are an AI agent operating inside this repository or driving Clio as a
 tool, start here.
 
 **Orient from the index, not from a wide read.** `clio-coder context index`
-builds a codewiki over the roughly 1,200 source and test files; use `code_nav`
-in `entries`, `path`, or `symbol` mode first. The indexed entry points are
+builds a codewiki over the source and test tree; use `code_nav` in `entries`,
+`path`, or `symbol` mode first. The indexed entry points are
 `src/cli/index.ts`, `src/domains/agents/index.ts`,
 `src/domains/components/index.ts`, `src/domains/config/index.ts`,
 `src/domains/context/bootstrap.ts`, `src/domains/context/index.ts`,
@@ -538,10 +548,11 @@ Conventions worth knowing before your first PR: local imports end in `.js`,
 tests use `node:test`, `any` needs a tracking issue, and compile-time
 boundaries between domains are enforced by the hygiene lint rather than by
 convention. Read [docs/architecture.md](docs/architecture.md) before adding a
-cross-domain import. Live model validation (`npm run live:smoke -- --target <id>`) and the
-SWE-bench, SciCode, and Terminal-Bench harnesses under `benchmarks/` are
-separate and opt-in, because no deterministic suite can promise that every
-local model behaves identically.
+cross-domain import. Live model validation
+(`npm run live:smoke -- --target <id>`) and the runnable reference suites under
+`evals/` are explicit, opt-in measurements. Neither runs in CI or the release
+gate, because no deterministic suite can promise that every local model
+behaves identically.
 
 ## Documentation
 
