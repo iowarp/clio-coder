@@ -5,6 +5,7 @@ import { parse as parseYaml, stringify as stringifyYaml } from "yaml";
 import { settingsPath, withSettingsLock } from "../../../core/config.js";
 import { safeResourceWrite } from "../../../core/safe-resource-write.js";
 import { inspectInstalledNamingResources, type NamingResourceReport } from "../naming-resources.js";
+import { regenerateYaziNamingProfile, type YaziNamingRegenerationReport } from "../naming-yazi.js";
 import type { Migration } from "./index.js";
 
 export const CLIO_CODER_NAMING_MIGRATION_ID = "2026-09-01-clio-coder-naming";
@@ -30,7 +31,7 @@ export interface ClioCoderNamingMigrationReport {
 	settings: NamingSettingsFileReport[];
 	toolMarkers: unknown[];
 	resources: NamingResourceReport[];
-	yazi: unknown[];
+	yazi: YaziNamingRegenerationReport[];
 	mutableState: unknown[];
 }
 
@@ -140,7 +141,7 @@ const migration: Migration = {
 			settings,
 			toolMarkers: [],
 			resources: inspectInstalledNamingResources({ fix: true }),
-			yazi: [],
+			yazi: [regenerateYaziNamingProfile()],
 			mutableState: [],
 		};
 		const target = namingMigrationReportPath(stateDir);

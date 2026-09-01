@@ -73,7 +73,9 @@ export {
 export { clioCliEntryPath, type ViewerCommandOptions, watchViewerCommand } from "./viewer-command.js";
 export {
 	createYaziEventStream,
+	LEGACY_YAZI_PICK_EVENT,
 	parseYaziEventLine,
+	YAZI_PICK_EVENT,
 	YAZI_STREAM_MAX_BYTES,
 	YAZI_STREAM_POLL_MS,
 	type YaziCdEvent,
