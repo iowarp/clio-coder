@@ -117,6 +117,18 @@ const REFUSALS: ReadonlyArray<{ id: NumberSettingId; typed: string; reason: stri
 		reason: "Not applied: expected an integer >= 1, got 0.",
 		accepted: "300000",
 	},
+	{
+		id: "panes.workers.ratio",
+		typed: "0.01",
+		reason: "Not applied: expected a number >= 0.05, got 0.01.",
+		accepted: "0.4",
+	},
+	{
+		id: "panes.yazi.ratio",
+		typed: "0.75",
+		reason: "Not applied: expected a number <= 0.5, got 0.75.",
+		accepted: "0.25",
+	},
 ];
 
 function baseSettings(): ClioSettings {
@@ -124,7 +136,7 @@ function baseSettings(): ClioSettings {
 	settings.targets = [
 		{ id: "target-a", runtime: "openai-compat", url: "http://localhost:1111", defaultModel: "model-a" },
 	];
-	settings.orchestrator = { target: "target-a", model: "model-a", thinkingLevel: "off" };
+	settings.chat = { ...settings.chat, target: "target-a", model: "model-a", thinkingLevel: "off" };
 	return settings;
 }
 
@@ -176,6 +188,8 @@ describe("contracts/settings-center number editor refusals", () => {
 			"guardrails.readMaxBytes",
 			"guardrails.turnToolCallBudget",
 			"guardrails.workerToolCallCap",
+			"panes.workers.ratio",
+			"panes.yazi.ratio",
 			"watchdog.cadenceToolCalls",
 			"workers.escalation.timeoutMs",
 			"workers.resilienceCooldownMs",
@@ -262,12 +276,12 @@ describe("contracts/settings-center number editor refusals", () => {
 		}
 
 		const cleared = baseSettings();
-		cleared.watchdog.cadenceToolCalls = 5;
+		cleared.safety.review.cadenceToolCalls = 5;
 		applySettingChange(cleared, "watchdog.cadenceToolCalls", "");
-		strictEqual("cadenceToolCalls" in cleared.watchdog, false, "blank clears the cadence through the apply path");
+		strictEqual("cadenceToolCalls" in cleared.safety.review, false, "blank clears the cadence through the apply path");
 
 		const whole = baseSettings();
 		applySettingChange(whole, "watchdog.cadenceToolCalls", "7");
-		strictEqual(whole.watchdog.cadenceToolCalls, 7);
+		strictEqual(whole.safety.review.cadenceToolCalls, 7);
 	});
 });

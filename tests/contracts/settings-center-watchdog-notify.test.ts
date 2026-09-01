@@ -17,7 +17,7 @@ import { afterEach, beforeEach, describe, it } from "node:test";
 import { parse as parseYaml } from "yaml";
 import type { ClioSettings } from "../../src/core/config.js";
 import { readSettings, settingsPath, updateSettings } from "../../src/core/config.js";
-import { DEFAULT_SETTINGS, DEFAULT_SETTINGS_YAML } from "../../src/core/defaults.js";
+import { DEFAULT_SETTINGS } from "../../src/core/defaults.js";
 import {
 	applySettingChange,
 	buildSettingItems,
@@ -29,12 +29,13 @@ import { clearScratchClioHome, newScratchClioHome } from "../harness/scratch-env
 
 const ORIGINAL_ENV = { ...process.env };
 
-const MINIMAL_FILE = `targets:
+const MINIMAL_FILE = `version: 2
+targets:
   - id: target-a
     runtime: openai-compat
     url: http://localhost:1111
     defaultModel: model-a
-orchestrator:
+chat:
   target: target-a
   model: model-a
 `;
@@ -42,8 +43,8 @@ orchestrator:
 function baseSettings(): ClioSettings {
 	const value = structuredClone(DEFAULT_SETTINGS) as ClioSettings;
 	value.targets = [{ id: "target-a", runtime: "openai-compat", url: "http://localhost:1111", defaultModel: "model-a" }];
-	value.orchestrator.target = "target-a";
-	value.orchestrator.model = "model-a";
+	value.chat.target = "target-a";
+	value.chat.model = "model-a";
 	return value;
 }
 
@@ -105,9 +106,11 @@ describe("contracts/settings-center watchdog and notify rows", () => {
 		strictEqual(cadence?.editValue, "");
 	});
 
-	it("describes both knobs in the words the settings template already uses", () => {
+	it("keeps the established knob descriptions on the rows", () => {
+		// The v2 settings template is comment-light, so the overlay rows are now
+		// the one place this prose lives; the phrases are pinned so a rewrite is
+		// a deliberate act rather than drift.
 		const byId = itemsById(baseSettings());
-		const template = DEFAULT_SETTINGS_YAML.replace(/^\s*#\s?/gm, "").replace(/\s+/g, " ");
 		const overlaps = [
 			"Content-free desktop notification",
 			"when a turn ends, a detached batch settles, or an approval parks",
@@ -126,8 +129,7 @@ describe("contracts/settings-center watchdog and notify rows", () => {
 			.join(" ")
 			.replace(/\s+/g, " ");
 		for (const phrase of overlaps) {
-			ok(template.includes(phrase), `the settings template no longer contains: ${phrase}`);
-			ok(overlaySurface.includes(phrase), `the Settings Center wording drifted from the template: ${phrase}`);
+			ok(overlaySurface.includes(phrase), `the Settings Center wording lost: ${phrase}`);
 		}
 	});
 });
@@ -162,42 +164,46 @@ describe("contracts/settings-center watchdog and notify writes", () => {
 		commit("watchdog.enabled", "true");
 		commit("watchdog.cadenceToolCalls", "20");
 
-		const doc = parseYaml(readFileSync(settingsPath(), "utf8")) as Record<string, Record<string, unknown>>;
-		deepStrictEqual(doc.terminal, { notify: true });
-		deepStrictEqual(doc.watchdog, { enabled: true, cadenceToolCalls: 20 });
+		const doc = parseYaml(readFileSync(settingsPath(), "utf8")) as {
+			interface?: Record<string, unknown>;
+			safety?: Record<string, unknown>;
+		};
+		strictEqual(doc.interface?.desktopNotifications, true);
+		deepStrictEqual(doc.safety?.review, { enabled: true, cadenceToolCalls: 20 });
 
 		const reloaded = readSettings();
-		strictEqual(reloaded.terminal.notify, true);
-		strictEqual(reloaded.watchdog.enabled, true);
-		strictEqual(reloaded.watchdog.cadenceToolCalls, 20);
+		strictEqual(reloaded.interface.desktopNotifications, true);
+		strictEqual(reloaded.safety.review.enabled, true);
+		strictEqual(reloaded.safety.review.cadenceToolCalls, 20);
 	});
 
 	it("removes watchdog.target from the file when the row is cleared", () => {
-		commit("watchdog.target", "local-lmstudio");
-		strictEqual(readSettings().watchdog.target, "local-lmstudio");
-		ok(readFileSync(settingsPath(), "utf8").includes("local-lmstudio"));
+		commit("watchdog.target", "target-a");
+		strictEqual(readSettings().safety.review.target, "target-a");
+		ok(readFileSync(settingsPath(), "utf8").includes("target-a"));
 
 		commit("watchdog.target", "   ");
 
 		const raw = readFileSync(settingsPath(), "utf8");
-		ok(!raw.includes("local-lmstudio"), `target survived the clear:\n${raw}`);
-		const doc = parseYaml(raw) as Record<string, Record<string, unknown>>;
-		ok(!(doc.watchdog && "target" in doc.watchdog), `the key survived the clear: ${JSON.stringify(doc.watchdog)}`);
-		strictEqual("target" in readSettings().watchdog, false);
+		const doc = parseYaml(raw) as { safety?: { review?: Record<string, unknown> } };
+		const review = doc.safety?.review;
+		ok(!(review && "target" in review), `the key survived the clear: ${JSON.stringify(review)}`);
+		strictEqual("target" in readSettings().safety.review, false);
 	});
 
 	it("clears watchdog.cadenceToolCalls on an empty submission and rejects a value below one", () => {
 		commit("watchdog.cadenceToolCalls", "5");
-		strictEqual(readSettings().watchdog.cadenceToolCalls, 5);
+		strictEqual(readSettings().safety.review.cadenceToolCalls, 5);
 
 		const rejected = structuredClone(DEFAULT_SETTINGS) as ClioSettings;
-		rejected.watchdog.cadenceToolCalls = 5;
+		rejected.safety.review.cadenceToolCalls = 5;
 		applySettingChange(rejected, "watchdog.cadenceToolCalls", "0");
-		strictEqual(rejected.watchdog.cadenceToolCalls, 5, "a cadence below one leaves the previous value alone");
+		strictEqual(rejected.safety.review.cadenceToolCalls, 5, "a cadence below one leaves the previous value alone");
 
 		commit("watchdog.cadenceToolCalls", "");
-		strictEqual("cadenceToolCalls" in readSettings().watchdog, false);
-		const doc = parseYaml(readFileSync(settingsPath(), "utf8")) as Record<string, Record<string, unknown>>;
-		ok(!(doc.watchdog && "cadenceToolCalls" in doc.watchdog), JSON.stringify(doc.watchdog));
+		strictEqual("cadenceToolCalls" in readSettings().safety.review, false);
+		const doc = parseYaml(readFileSync(settingsPath(), "utf8")) as { safety?: { review?: Record<string, unknown> } };
+		const review = doc.safety?.review;
+		ok(!(review && "cadenceToolCalls" in review), JSON.stringify(review));
 	});
 });
