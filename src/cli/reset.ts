@@ -15,7 +15,7 @@ Each level clears exactly the root (or file) it names and nothing else.
 Levels (combinable except --all):
   --state       state root only (default). Holds every session transcript, so a
                 reset is the end of resume, /view, and the audit behind them.
-  --data        data root only: memory, evidence, evals, vendored tools (durable products)
+  --data        data root only: memory, evidence, vendored tools (durable products)
   --cache       cache root only
   --auth        credentials.yaml only
   --config      settings.yaml only
@@ -45,7 +45,7 @@ const ROOT_NOTES: Readonly<Record<string, string>> = {
 	// Vendored tools are named because they are the one durable product a reset
 	// cannot regenerate from anything local: getting them back is a download.
 	data:
-		"the data root holds durable products (memory, evidence, evals, and any vendored external tools, which a reinstall re-downloads)",
+		"the data root holds durable products (memory, evidence, and any vendored external tools, which a reinstall re-downloads)",
 };
 
 interface ParsedResetArgs {
