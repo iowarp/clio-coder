@@ -18,7 +18,7 @@ allowed-tools:
   - edit
   - ask_user
   - artifact
-clio:
+clio-coder:
   registry-id: iowarp/clio-coder
   source-url: https://github.com/iowarp/clio-coder/tree/main/skills/git/resolve-merge-conflicts
   audit: pass

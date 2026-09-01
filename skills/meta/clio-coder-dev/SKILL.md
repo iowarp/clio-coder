@@ -1,5 +1,5 @@
 ---
-name: clio-dev
+name: clio-coder-dev
 description: Use when modifying Clio Coder's own source in this repository, evolving its harness (TUI, skills, agents, tools, prompts, domains), or deciding whether a change stays local versus becomes a contribution. Governs self-development — what Clio may change freely, what requires explicit user intent, and how to make a change without breaking the architecture.
 triggers:
   - modify Clio Coder
@@ -9,9 +9,9 @@ triggers:
   - Clio contribution boundary
 version: 0.2.2
 license: Apache-2.0
-clio:
+clio-coder:
   registry-id: iowarp/clio-coder
-  source-url: https://github.com/iowarp/clio-coder/tree/main/skills/meta/clio-dev
+  source-url: https://github.com/iowarp/clio-coder/tree/main/skills/meta/clio-coder-dev
   audit: pass
   provenance: designed
   eval-status: scenarios-recorded
@@ -24,9 +24,9 @@ Working inside Clio Coder's own source tree is ordinary repository work with
 one extra discipline: the contribution boundary. This skill governs that
 boundary and the change workflow.
 
-**REQUIRED SUB-SKILL:** `clio-test` for test mechanics (which layer to run,
+**REQUIRED SUB-SKILL:** `clio-coder-test` for test mechanics (which layer to run,
 the hot-reload loop). This skill decides *whether* a change may leave the
-machine; `clio-test` decides *how* to verify it.
+machine; `clio-coder-test` decides *how* to verify it.
 
 ## The contribution boundary
 
@@ -76,7 +76,7 @@ Follow in order for every change:
    outside `src/engine/**`; no importing another domain's `extension.ts`; the
    worker never imports domains. Add or reuse a contract instead.
 5. **Validate narrowly, then report.** Run the narrowest meaningful layer per
-   `clio-test`, then state exactly what ran and what remains unverified. Done
+   `clio-coder-test`, then state exactly what ran and what remains unverified. Done
    when the report names both.
 
 ## Source is truth

@@ -10,7 +10,7 @@ import type { TargetDescriptor } from "../../types/target-descriptor.js";
 export type LocalModelLifecycle = "user-managed" | "clio-coder-managed";
 
 export interface ClioLocalModelMetadata {
-	clio?: {
+	clioCoder?: {
 		targetId: string;
 		runtimeId: string;
 		/**
@@ -101,7 +101,7 @@ export function synthLocalModel(input: LocalSynthesisInput): Model<Api> {
 		},
 		contextWindow: caps.contextWindow,
 		maxTokens: caps.maxTokens,
-		clio: {
+		clioCoder: {
 			targetId: target.id,
 			runtimeId: target.runtime,
 			...(target.lifecycle ? { lifecycle: target.lifecycle } : {}),

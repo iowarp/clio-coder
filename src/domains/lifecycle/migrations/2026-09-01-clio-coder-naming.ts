@@ -4,6 +4,7 @@ import { join } from "node:path";
 import { parse as parseYaml, stringify as stringifyYaml } from "yaml";
 import { settingsPath, withSettingsLock } from "../../../core/config.js";
 import { safeResourceWrite } from "../../../core/safe-resource-write.js";
+import { inspectInstalledNamingResources, type NamingResourceReport } from "../naming-resources.js";
 import type { Migration } from "./index.js";
 
 export const CLIO_CODER_NAMING_MIGRATION_ID = "2026-09-01-clio-coder-naming";
@@ -28,7 +29,7 @@ export interface ClioCoderNamingMigrationReport {
 	version: 1;
 	settings: NamingSettingsFileReport[];
 	toolMarkers: unknown[];
-	resources: unknown[];
+	resources: NamingResourceReport[];
 	yazi: unknown[];
 	mutableState: unknown[];
 }
@@ -138,7 +139,7 @@ const migration: Migration = {
 			version: 1,
 			settings,
 			toolMarkers: [],
-			resources: [],
+			resources: inspectInstalledNamingResources({ fix: true }),
 			yazi: [],
 			mutableState: [],
 		};

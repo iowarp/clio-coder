@@ -1,5 +1,6 @@
 import { existsSync, readdirSync, readFileSync } from "node:fs";
 import path from "node:path";
+import { warnLegacyNaming } from "../../../core/naming-compat.js";
 import { resolvePackageRoot } from "../../../core/package-root.js";
 import { clioConfigDir } from "../../../core/xdg.js";
 import {
@@ -327,7 +328,9 @@ export function getMarketplaceSkills(options: DiscoverMarketplaceOptions = {}): 
  * an existing install always requires an explicit `force: true`.
  */
 export function installSkill(input: InstallSkillInput): InstallSkillResult {
-	const source = input.source.trim();
+	const requested = input.source.trim();
+	const source = requested === "clio-dev" ? "clio-coder-dev" : requested === "clio-test" ? "clio-coder-test" : requested;
+	if (source !== requested) warnLegacyNaming(requested, source);
 	const spec = parseSkillSourceSpec(source);
 	if (spec?.kind === "local" && isSkillName(source) && !existsSync(spec.path)) {
 		const skill = getMarketplaceSkills({ ...(input.cwd ? { cwd: input.cwd } : {}) }).find(
@@ -338,5 +341,5 @@ export function installSkill(input: InstallSkillInput): InstallSkillResult {
 		}
 		return installSkillFromSource({ ...input, source: skill.sourceUrl });
 	}
-	return installSkillFromSource(input);
+	return installSkillFromSource({ ...input, source });
 }

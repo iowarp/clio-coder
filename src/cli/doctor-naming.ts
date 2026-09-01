@@ -9,6 +9,11 @@ import {
 	migrateNamingSettingsFile,
 	transformNamingSettingsDocument,
 } from "../domains/lifecycle/migrations/2026-09-01-clio-coder-naming.js";
+import {
+	inspectInstalledNamingResources,
+	inspectModelOverlayNaming,
+	inspectSkillMetadataNaming,
+} from "../domains/lifecycle/naming-resources.js";
 
 export interface NamingDoctorOptions {
 	fix?: boolean;
@@ -38,6 +43,55 @@ function namingEnvironmentFindings(environment: NodeJS.ProcessEnv = process.env)
 		name: "naming environment",
 		detail: `${legacy} is deprecated; use ${canonical} (compatibility ends in v0.7.0)`,
 	}));
+}
+
+function namingResourceFindings(options: NamingDoctorOptions): DoctorFinding[] {
+	try {
+		const resourceOptions = {
+			...(options.cwd ? { cwd: options.cwd } : {}),
+			...(options.fix !== undefined ? { fix: options.fix } : {}),
+		};
+		const resources = inspectInstalledNamingResources(resourceOptions);
+		const legacyResources = resources.filter((entry) => entry.status !== "absent");
+		const rootOptions = options.cwd ? { cwd: options.cwd } : {};
+		const skillMetadata = inspectSkillMetadataNaming(rootOptions).filter((entry) => entry.legacyMetadataKey);
+		const overlays = inspectModelOverlayNaming(rootOptions).filter(
+			(entry) => entry.legacyFile || entry.legacyMetadataKeys > 0,
+		);
+		if (legacyResources.length === 0 && skillMetadata.length === 0 && overlays.length === 0) {
+			return [{ ok: true, name: "naming resources", detail: "installed skills and model overlays use canonical names" }];
+		}
+		const renamed = legacyResources.filter((entry) => entry.status === "renamed").length;
+		const renamable = legacyResources.filter((entry) => entry.status === "renamable").length;
+		const conflicts = legacyResources.filter(
+			(entry) => entry.status === "modified" || entry.status === "canonical-present",
+		).length;
+		return [
+			{
+				ok: true,
+				level:
+					renamed > 0 && renamable === 0 && conflicts === 0 && skillMetadata.length === 0 && overlays.length === 0
+						? "ok"
+						: "warn",
+				name: "naming resources",
+				detail: [
+					`${renamed} proven skills renamed`,
+					`${renamable} proven skills await doctor --fix`,
+					`${conflicts} modified/conflicting skills left untouched`,
+					`${skillMetadata.length} legacy skill metadata keys`,
+					`${overlays.length} legacy model overlay files/metadata (manual migration required)`,
+				].join("; "),
+			},
+		];
+	} catch (error) {
+		return [
+			{
+				ok: false,
+				name: "naming resources",
+				detail: `resource naming inspection failed: ${error instanceof Error ? error.message : String(error)}`,
+			},
+		];
+	}
 }
 
 function inspectSettingsNaming(path: string): SettingsNamingInspection {
@@ -107,5 +161,6 @@ export function namingFootprintFindings(options: NamingDoctorOptions = {}): Doct
 		findings.push(settingsFinding(candidate.label, before, fixed));
 	}
 	findings.push(...namingEnvironmentFindings());
+	findings.push(...namingResourceFindings({ ...options, cwd }));
 	return findings;
 }

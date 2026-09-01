@@ -180,7 +180,7 @@
 			"category": "git"
 		},
 		{
-			"name": "clio-dev",
+			"name": "clio-coder-dev",
 			"description": "Use when modifying Clio Coder's own source in this repository, evolving its harness (TUI, skills, agents, tools, prompts, domains), or deciding whether a change stays local versus becomes a contribution. Governs self-development — what Clio may change freely, what requires explicit user intent, and how to make a change without breaking the architecture.",
 			"triggers": [
 				"modify Clio Coder",
@@ -189,13 +189,13 @@
 				"evolve Clio tools or prompts",
 				"Clio contribution boundary"
 			],
-			"sourceUrl": "https://github.com/iowarp/clio-coder/tree/main/skills/meta/clio-dev",
+			"sourceUrl": "https://github.com/iowarp/clio-coder/tree/main/skills/meta/clio-coder-dev",
 			"version": "0.2.2",
 			"audit": "pass",
 			"category": "meta"
 		},
 		{
-			"name": "clio-test",
+			"name": "clio-coder-test",
 			"description": "Use when writing or modifying Clio Coder's own source under src/, or verifying a change end-to-end against the real test harness. Covers the three real layers (contracts / smoke / boundaries), choosing which to run for a given change, the mock-provider and ACP-over-stdio harness, and the hot-reload dev loop for picking up latest code. Activate on any src/ edit, before declaring a change verified, or when asked whether Clio still works.",
 			"triggers": [
 				"test Clio Coder",
@@ -204,7 +204,7 @@
 				"test ACP over stdio",
 				"Clio mock provider harness"
 			],
-			"sourceUrl": "https://github.com/iowarp/clio-coder/tree/main/skills/meta/clio-test",
+			"sourceUrl": "https://github.com/iowarp/clio-coder/tree/main/skills/meta/clio-coder-test",
 			"version": "0.1.5",
 			"audit": "pass",
 			"category": "meta"

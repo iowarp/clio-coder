@@ -1,5 +1,5 @@
 ---
-name: clio-test
+name: clio-coder-test
 description: Use when writing or modifying Clio Coder's own source under src/, or verifying a change end-to-end against the real test harness. Covers the three real layers (contracts / smoke / boundaries), choosing which to run for a given change, the mock-provider and ACP-over-stdio harness, and the hot-reload dev loop for picking up latest code. Activate on any src/ edit, before declaring a change verified, or when asked whether Clio still works.
 triggers:
   - test Clio Coder
@@ -9,9 +9,9 @@ triggers:
   - Clio mock provider harness
 version: 0.1.5
 license: Apache-2.0
-clio:
+clio-coder:
   registry-id: iowarp/clio-coder
-  source-url: https://github.com/iowarp/clio-coder/tree/main/skills/meta/clio-test
+  source-url: https://github.com/iowarp/clio-coder/tree/main/skills/meta/clio-coder-test
   audit: pass
   provenance: designed
   eval-status: scenarios-recorded
@@ -24,7 +24,7 @@ Clio's test suite has exactly three layers: **contracts**, **smoke**, and
 **boundaries**.
 
 For the question of whether a change may leave your machine (commit, push, PR),
-that is `clio-dev`, not this skill. **REQUIRED SUB-SKILL:** `clio-dev` for the
+that is `clio-coder-dev`, not this skill. **REQUIRED SUB-SKILL:** `clio-coder-dev` for the
 local-vs-contribute boundary.
 
 ## Commands

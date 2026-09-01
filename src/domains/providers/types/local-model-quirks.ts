@@ -3,7 +3,7 @@
  * keeps free-form `quirks` (gpu tiers, runtime preferences, serving notes), so
  * `KnowledgeBaseEntry.quirks` stays `Record<string, unknown>`. This module
  * narrows the slice the engine consumes (KV cache layout, per-mode sampling)
- * into a typed shape that flows through `model.clio.quirks` at synth time.
+ * into a typed shape that flows through `model.clioCoder.quirks` at synth time.
  *
  * Field naming follows the Hugging Face / model-card terminology so the YAML
  * can be authored against the source-of-truth card. The OpenAI adapter
@@ -201,7 +201,7 @@ function extractThinkingQuirks(raw: unknown): ThinkingQuirks | undefined {
 /**
  * Pull the engine-visible quirks slice out of a free-form catalog quirks
  * record. Returns `undefined` when nothing engine-relevant is configured so
- * `model.clio.quirks` only gets attached when it carries information.
+ * `model.clioCoder.quirks` only gets attached when it carries information.
  */
 export function extractLocalModelQuirks(raw: unknown): LocalModelQuirks | undefined {
 	if (!isRecord(raw)) return undefined;

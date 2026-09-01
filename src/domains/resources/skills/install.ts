@@ -140,14 +140,33 @@ interface ProvenanceFields {
 	installedBy?: "worker";
 }
 
+function canonicalizeProductMetadataBlock(lines: ReadonlyArray<string>): string[] {
+	const hasCanonical = lines.some((line) => /^clio-coder:/.test(line));
+	const canonical: string[] = [];
+	let dropLegacyChildren = false;
+	for (const line of lines) {
+		if (/^clio:/.test(line)) {
+			dropLegacyChildren = hasCanonical;
+			if (!hasCanonical) canonical.push(line.replace(/^clio:/, "clio-coder:"));
+			continue;
+		}
+		if (dropLegacyChildren) {
+			if (line.trim().length === 0 || /^[ \t]/.test(line)) continue;
+			dropLegacyChildren = false;
+		}
+		canonical.push(line);
+	}
+	return canonical;
+}
+
 /**
  * Replace install-lifecycle frontmatter with the recorded fields, written
- * nested under the reserved `clio:` block (merged into an existing block-style
- * `clio:` mapping when the skill carries one). Registry identity lines
+ * nested under the reserved `clio-coder:` block (merged into an existing block-style
+ * `clio-coder:` mapping when the skill carries one). Registry identity lines
  * (`registry-id`, `registry-url`) are content, not lifecycle, so they survive
  * the install and keep pinned drift checks working on the installed copy.
  *
- * A flow-style `clio: {...}` value cannot take appended block lines, so that
+ * A flow-style `clio-coder: {...}` value cannot take appended block lines, so that
  * rare shape falls back to the legacy flat stamps, which the hash and loader
  * still understand.
  */
@@ -166,21 +185,24 @@ function injectProvenanceFrontmatter(rawText: string, fields: ProvenanceFields):
 		"audit: unknown",
 		...(fields.installedBy ? [`installed-by: ${yamlQuote(fields.installedBy)}`] : []),
 	];
-	const clioIndex = kept.findIndex((line) => /^clio:/.test(line));
-	if (clioIndex >= 0 && !/^clio:\s*$/.test(kept[clioIndex] as string)) {
-		return `${region.head}${[...kept, ...stamps].join("\n")}${region.tail}`;
+	const canonicalKept = canonicalizeProductMetadataBlock(kept);
+	const clioIndex = canonicalKept.findIndex((line) => /^clio-coder:/.test(line));
+	if (clioIndex >= 0 && !/^clio-coder:\s*$/.test(canonicalKept[clioIndex] as string)) {
+		return `${region.head}${[...canonicalKept, ...stamps].join("\n")}${region.tail}`;
 	}
 	const nested = stamps.map((line) => `  ${line}`);
 	if (clioIndex < 0) {
-		return `${region.head}${[...kept, "clio:", ...nested].join("\n")}${region.tail}`;
+		return `${region.head}${[...canonicalKept, "clio-coder:", ...nested].join("\n")}${region.tail}`;
 	}
 	let blockEnd = clioIndex + 1;
-	while (blockEnd < kept.length) {
-		const line = kept[blockEnd] as string;
+	while (blockEnd < canonicalKept.length) {
+		const line = canonicalKept[blockEnd] as string;
 		if (line.trim().length > 0 && !/^[ \t]/.test(line)) break;
 		blockEnd += 1;
 	}
-	return `${region.head}${[...kept.slice(0, blockEnd), ...nested, ...kept.slice(blockEnd)].join("\n")}${region.tail}`;
+	return `${region.head}${[...canonicalKept.slice(0, blockEnd), ...nested, ...canonicalKept.slice(blockEnd)].join(
+		"\n",
+	)}${region.tail}`;
 }
 
 function resolveSkillDir(target: string): string {
@@ -358,7 +380,9 @@ export function installSkillFromSource(input: InstallSkillInput): InstallSkillRe
 function managedSkills(cwd: string, configDir?: string): Skill[] {
 	const list = loadSkills({ cwd, ...(configDir ? { configDir } : {}) });
 	// Only Clio-managed roots are update targets; compat roots belong to other harnesses.
-	return list.items.filter((skill) => skill.source === "clio" && (skill.scope === "user" || skill.scope === "project"));
+	return list.items.filter(
+		(skill) => skill.source === "clio-coder" && (skill.scope === "user" || skill.scope === "project"),
+	);
 }
 
 function updateOne(skill: Skill, force: boolean): SkillUpdateReport {

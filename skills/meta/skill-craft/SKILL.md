@@ -12,7 +12,7 @@ license: Apache-2.0
 allowed-tools:
   - read
   - grep
-clio:
+clio-coder:
   registry-id: iowarp/clio-coder
   source-url: https://github.com/iowarp/clio-coder/tree/main/skills/meta/skill-craft
   audit: pass

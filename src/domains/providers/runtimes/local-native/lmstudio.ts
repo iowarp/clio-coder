@@ -217,13 +217,13 @@ const lmstudioRuntime: RuntimeDescriptor = {
 		});
 		const metadata = (
 			model as Model<Api> & {
-				clio?: {
+				clioCoder?: {
 					chatTemplateKwargsUnsupported?: boolean;
 					lmstudioReasoningOptions?: ReadonlyArray<string>;
 					lmstudioDefaultModel?: string;
 				};
 			}
-		).clio;
+		).clioCoder;
 		if (metadata) {
 			metadata.chatTemplateKwargsUnsupported = true;
 			if (target.defaultModel) metadata.lmstudioDefaultModel = target.defaultModel;

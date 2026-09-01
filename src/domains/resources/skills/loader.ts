@@ -2,6 +2,7 @@ import { createHash } from "node:crypto";
 import { type Dirent, existsSync, readdirSync, readFileSync, realpathSync } from "node:fs";
 import { homedir } from "node:os";
 import path from "node:path";
+import { warnLegacyNaming } from "../../../core/naming-compat.js";
 import type { PendingSkillRequest } from "../../../core/skill-activation.js";
 import { type ToolName, ToolNames } from "../../../core/tool-names.js";
 import { clioConfigDir } from "../../../core/xdg.js";
@@ -47,7 +48,7 @@ const CORE_FRONTMATTER_KEYS = new Set([
  * only encodes collision precedence tiers shared across resource kinds.
  */
 export type SkillSource =
-	| "clio"
+	| "clio-coder"
 	| "agents"
 	| "claude"
 	| "codex"
@@ -279,7 +280,7 @@ export function defaultSkillRoots(input: LoadSkillsInput = {}): SkillRoot[] {
 		roots.push({
 			path: path.join(configDir, "skills"),
 			scope: "user",
-			source: "clio",
+			source: "clio-coder",
 			origin: "config",
 			precedence: SKILL_PRECEDENCE.user,
 			trusted: true,
@@ -303,7 +304,7 @@ export function defaultSkillRoots(input: LoadSkillsInput = {}): SkillRoot[] {
 	roots.push({
 		path: path.join(cwd, ".clio-coder", "skills"),
 		scope: "project",
-		source: "clio",
+		source: "clio-coder",
 		origin: "project",
 		precedence: SKILL_PRECEDENCE.project,
 		trusted: true,
@@ -456,24 +457,36 @@ function extractMetadata(frontmatter: Record<string, unknown>): Record<string, u
 	const metadata: Record<string, unknown> = {};
 	for (const [key, value] of Object.entries(frontmatter)) {
 		if (CORE_FRONTMATTER_KEYS.has(key)) continue;
+		if (key === "clio-coder") {
+			metadata.clioCoder = value;
+			continue;
+		}
+		if (key === "clio") {
+			warnLegacyNaming("clio: skill metadata", "clio-coder: skill metadata");
+			if (!("clio-coder" in frontmatter)) metadata.clioCoder = value;
+			continue;
+		}
 		metadata[key] = value;
 	}
 	return metadata;
 }
 
 function extractProvenance(frontmatter: Record<string, unknown>): SkillProvenance | undefined {
-	// Provenance lives nested under the reserved `clio:` block; the flat
+	// Provenance lives nested under the reserved `clio-coder:` block; the flat
 	// top-level keys remain readable for already-installed copies stamped
 	// before the nested form existed.
-	const clioRaw = frontmatter.clio;
-	const clio =
-		clioRaw !== null && typeof clioRaw === "object" && !Array.isArray(clioRaw)
-			? (clioRaw as Record<string, unknown>)
+	const canonicalRaw = frontmatter["clio-coder"];
+	const legacyRaw = frontmatter.clio;
+	if (legacyRaw !== undefined) warnLegacyNaming("clio: skill metadata", "clio-coder: skill metadata");
+	const clioCoderRaw = canonicalRaw ?? legacyRaw;
+	const clioCoder =
+		clioCoderRaw !== null && typeof clioCoderRaw === "object" && !Array.isArray(clioCoderRaw)
+			? (clioCoderRaw as Record<string, unknown>)
 			: undefined;
 	const field = (...keys: string[]): string | null => {
 		for (const key of keys) {
-			if (clio) {
-				const nested = stringField(clio, key);
+			if (clioCoder) {
+				const nested = stringField(clioCoder, key);
 				if (nested !== null) return nested;
 			}
 		}
@@ -632,7 +645,9 @@ function loadSkillFile(
 
 	const pathSubject = validationSubject(filePath);
 	const frontmatterName = stringField(parsed.frontmatter, "name");
-	const name = frontmatterName ?? pathSubject;
+	const rawName = frontmatterName ?? pathSubject;
+	const name = rawName === "clio-dev" ? "clio-coder-dev" : rawName === "clio-test" ? "clio-coder-test" : rawName;
+	if (name !== rawName) warnLegacyNaming(rawName, name);
 	const description = stringField(parsed.frontmatter, "description");
 
 	for (const message of validateDescription(description)) diagnostics.push({ type: "warning", message, path: filePath });
@@ -669,7 +684,7 @@ function loadSkillFile(
 		disableModelInvocation: booleanField(parsed.frontmatter, "disable-model-invocation"),
 		...(allowedTools ? { allowedTools } : {}),
 		...(disallowedTools ? { disallowedTools } : {}),
-		source: root.source ?? "clio",
+		source: root.source ?? "clio-coder",
 		scope,
 		hash: sha256(raw),
 		normalizedHash: normalizedSkillHash(raw),

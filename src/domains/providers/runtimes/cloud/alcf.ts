@@ -162,7 +162,7 @@ const alcfRuntime: RuntimeDescriptor = {
 			provider: "alcf",
 			baseUrlForTarget: withAsIs,
 		});
-		const meta = (model as Model<Api> & { clio?: { chatTemplateKwargsUnsupported?: boolean } }).clio;
+		const meta = (model as Model<Api> & { clioCoder?: { chatTemplateKwargsUnsupported?: boolean } }).clioCoder;
 		if (meta) meta.chatTemplateKwargsUnsupported = true;
 		return model;
 	},

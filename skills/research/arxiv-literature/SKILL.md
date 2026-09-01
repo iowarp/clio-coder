@@ -17,7 +17,7 @@ allowed-tools:
   - find
   - ls
   - artifact
-clio:
+clio-coder:
   registry-id: iowarp/clio-coder
   source-url: https://github.com/iowarp/clio-coder/tree/main/skills/research/arxiv-literature
   audit: pass

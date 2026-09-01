@@ -95,8 +95,8 @@ folder is presentation and provenance, not a namespace.
 |---|---|---|
 | [`skill-craft`](meta/skill-craft/) | reference | Writing, reviewing, or pruning any SKILL.md: invocation cost, trigger-only descriptions, completion criteria, progressive disclosure, and the pruning pass. |
 | [`find-skills`](meta/find-skills/) | workflow | A capability might exist as an installable skill. Searches with `clio-coder skills search`, browses the ecosystem read-only, and installs only through `clio-coder skills install`. |
-| [`clio-dev`](meta/clio-dev/) | discipline | Modifying Clio's own source in this repo; deciding whether a change stays local or becomes a contribution. |
-| [`clio-test`](meta/clio-test/) | reference | Writing or verifying changes to Clio against the real harness (contracts / smoke / boundaries). |
+| [`clio-coder-dev`](meta/clio-coder-dev/) | discipline | Modifying Clio's own source in this repo; deciding whether a change stays local or becomes a contribution. |
+| [`clio-coder-test`](meta/clio-coder-test/) | reference | Writing or verifying changes to Clio against the real harness (contracts / smoke / boundaries). |
 | [`credentials`](meta/credentials/) | discipline | A task needs an API key, token, or facility credential. Verifies presence without exposing values, collects new secrets via hidden terminal input, and contains leaks. |
 | [`herdr`](meta/herdr/) | integration | The user asks to launch, drive, or inspect another agent or command in a Herdr pane — including a second Clio Coder instance. Requires `HERDR_ENV=1`. |
 
@@ -117,7 +117,7 @@ skill into a discovery root and stamps install provenance so Clio can load it.
 clio-coder skills install context-handoff
 
 # User scope: copy into the Clio config skills dir, available everywhere
-clio-coder skills install clio-dev --user
+clio-coder skills install clio-coder-dev --user
 
 # Several at once, or a whole catalog group
 clio-coder skills install context-prime context-handoff --user
@@ -143,7 +143,7 @@ teammate cloning it gets the same behavior.
 | `context-prime`, `context-handoff` | user | Session boundaries follow the operator across every repo; a handoff written in one project is read at the start of the next. |
 | `find-skills`, `skill-craft` | user | Discovery and authoring are things you do to your toolkit, not things a project does. Installing `find-skills` at user scope is also what makes the Clio copy outrank the compat-root one. |
 | `credentials` | user | Credential handling is a personal-machine discipline; a repo does not get to define it. |
-| `clio-dev`, `clio-test` | project, in this repo only | They describe Clio's own source tree. Elsewhere they are noise. |
+| `clio-coder-dev`, `clio-coder-test` | project, in this repo only | They describe Clio's own source tree. Elsewhere they are noise. |
 | `--category git` | project, where `git-master` is used | Branch, PR, and worktree conventions are the repository's, and the recipe binds them by name. |
 | `--category research` | project, per project | An arXiv survey or a modernization oracle is scoped to the science being done, not to the person. |
 | `--category planning` | project | PRD and architecture output lands in the repo and is reviewed there. |
@@ -235,7 +235,7 @@ version: 0.1.0
 license: Apache-2.0
 allowed-tools:                # optional; community-standard tool narrowing
   - read
-clio:
+clio-coder:
   registry-id: iowarp/clio-coder
   source-url: https://github.com/iowarp/clio-coder/tree/main/skills/<category>/<name>
   audit: pass                 # pass | warn | fail | unknown; reset to unknown on install

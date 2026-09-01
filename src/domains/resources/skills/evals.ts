@@ -29,7 +29,7 @@ export interface SkillEvalParseResult {
 
 // Tolerates ASCII dash/colon and the en/em dashes older evals.md files used.
 // The canonical prefix is S ("## S1 - title"); discipline skills use other
-// letters (clio-dev's D1), so any single capital letter is accepted.
+// letters (clio-coder-dev's D1), so any single capital letter is accepted.
 const SCENARIO_HEADING = /^##\s+([A-Z])(\d+)\s*[-:–—]\s*(.+?)\s*$/;
 
 export function parseSkillEvals(markdown: string): SkillEvalParseResult {

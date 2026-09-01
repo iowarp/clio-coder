@@ -19,7 +19,7 @@ allowed-tools:
   - context
   - code_nav
   - bash
-clio:
+clio-coder:
   registry-id: iowarp/clio-coder
   source-url: https://github.com/iowarp/clio-coder/tree/main/skills/research/scientific-debugging
   audit: pass

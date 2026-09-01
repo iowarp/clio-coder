@@ -1,3 +1,4 @@
+import { warnLegacyNaming } from "../../core/naming-compat.js";
 import type { Api, Model } from "../../engine/types.js";
 import { getCatalogModelForRuntime } from "./catalog.js";
 import type { ProvidersContract, TargetStatus } from "./contract.js";
@@ -111,6 +112,15 @@ function capabilityHints(input: {
 }
 
 interface ClioRuntimeMetadata {
+	clioCoder?: {
+		targetId?: string;
+		runtimeId?: string;
+		lifecycle?: "user-managed" | "clio-coder-managed";
+		gateway?: boolean;
+		family?: string;
+		quirks?: LocalModelQuirks;
+	};
+	/** Released in-memory metadata name accepted at plugin/runtime read boundaries. */
 	clio?: {
 		targetId?: string;
 		runtimeId?: string;
@@ -691,7 +701,9 @@ export function resolveModelRuntimeCapabilitiesForModel<TApi extends Api>(
 	model: Model<TApi>,
 	configuredThinkingLevel?: ThinkingLevel,
 ): ResolvedModelRuntimeCapabilities {
-	const metadata = (model as Model<TApi> & ClioRuntimeMetadata).clio;
+	const runtimeModel = model as Model<TApi> & ClioRuntimeMetadata;
+	if (runtimeModel.clio !== undefined) warnLegacyNaming("model.clio", "model.clioCoder");
+	const metadata = runtimeModel.clioCoder ?? runtimeModel.clio;
 	const caps = capabilitiesFromModel(model as Model<Api> & ClioRuntimeMetadata);
 	return resolveModelRuntimeCapabilities({
 		targetId: metadata?.targetId ?? null,
