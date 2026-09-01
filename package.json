@@ -51,7 +51,6 @@
 		"assets/clio-coder-logo-128.webp",
 		"src/**",
 		"skills/**",
-		"evals/**",
 		"docs/*.md",
 		"README.md",
 		"CHANGELOG.md",

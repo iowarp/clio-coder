@@ -631,8 +631,6 @@ function evidenceSourceLabel(source: EvidenceSource): string {
 			return `run ${source.runId}`;
 		case "session":
 			return `session ${source.sessionId}`;
-		case "eval":
-			return `eval ${source.evalId}`;
 	}
 }
 
@@ -642,8 +640,6 @@ function evidenceSourceTitle(source: EvidenceSource): string {
 			return `run ${shortValue(source.runId)}`;
 		case "session":
 			return `session ${shortValue(source.sessionId)}`;
-		case "eval":
-			return `eval ${shortValue(source.evalId)}`;
 	}
 }
 
