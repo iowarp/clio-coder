@@ -1,5 +1,5 @@
 {
-	"comment": "Runtime resources the installed package must contain. Read by scripts/check-release.mjs against `npm pack --dry-run`, and by tests/contracts/packaging.test.ts against the package.json `files` allowlist, so the gate and the allowlist cannot drift apart. Every entry here must be shipped by `files`; a generated or gitignored path does not belong in this list.",
+	"comment": "Runtime resources the installed package must contain. Read by scripts/check-release.mjs against `npm pack --dry-run`, and by the packaging section of scripts/check-hygiene.ts against the package.json `files` allowlist, so the gate and the allowlist cannot drift apart. Every entry here must be shipped by `files`; a generated or gitignored path does not belong in this list.",
 	"requiredFiles": [
 		"dist/cli/index.js",
 		"dist/worker/entry.js",

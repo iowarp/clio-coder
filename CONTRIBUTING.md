@@ -70,9 +70,9 @@ Releases are cut from a tag. The GitHub release is created by CI; the npm
 publish is a manual maintainer step. The ordered procedure for a cut lives in
 [docs/release-cut-checklist.md](docs/release-cut-checklist.md).
 
-1. Bump `version` in `package.json` and retitle the top section of
-   `CHANGELOG.md` to the version being cut. `scripts/check-release.mjs` fails
-   when the two disagree or the heading still says `Unreleased`.
+1. During development, keep the top changelog section at `## Unreleased` and
+   bump `version` in `package.json` when opening the release branch. Before the
+   cut, retitle that section `## <version> - YYYY-MM-DD`.
 2. Run `npm run ci:release`. It runs the full `ci` gate, then
    `scripts/check-release.mjs`, which verifies the built `dist/` and audits
    the exact npm package contents.
@@ -85,10 +85,13 @@ publish is a manual maintainer step. The ordered procedure for a cut lives in
    release with the tarball attached and the version's `CHANGELOG.md` section
    as the body. It does not publish to npm.
 6. A maintainer publishes from the tagged commit with `npm publish`;
-   `prepublishOnly` runs the same `ci:release` gate first.
+   `prepublishOnly` runs the same `ci:release` gate in release mode first.
 
 What `scripts/check-release.mjs` enforces, and how to respond when it fails:
 
+- Development branches may open with `## Unreleased`. Exact version tags and
+  `npm publish` require `## <version> - YYYY-MM-DD`, so unfinished notes cannot
+  enter an immutable artifact.
 - Only `dist/cli/index.js` and `dist/worker/entry.js` carry a shebang. The
   shebang comes from the hashbang line in each entry source file. Never add
   a tsup `banner`; it would stamp every chunk in `dist/`.

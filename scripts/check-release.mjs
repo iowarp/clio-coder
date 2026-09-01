@@ -23,6 +23,7 @@ import { readdirSync, readFileSync } from "node:fs";
 import { join } from "node:path";
 import { fileURLToPath } from "node:url";
 import { parse as parseYaml } from "yaml";
+import { releaseVersionErrors } from "./release-version-policy.mjs";
 
 const root = fileURLToPath(new URL("..", import.meta.url));
 const SHEBANG = "#!/usr/bin/env node";
@@ -98,10 +99,9 @@ checkVersionCoherence();
  * the changelog never touched. Both are silent at publish time and permanent
  * afterwards, because a published version cannot be replaced.
  *
- * The rule is deliberately narrow. The first `##` heading in CHANGELOG.md is
- * the release being cut, so it must read `## <version>` and may carry a date
- * after it. `## Unreleased` is the pre-cut state and fails by name, since it is
- * the one wrong heading a release is actually likely to have.
+ * Development branches may keep `## Unreleased`. An explicit publish context,
+ * a hosted tag build, or an exact local version tag is immutable and requires
+ * `## <version> - YYYY-MM-DD`.
  */
 function checkVersionCoherence() {
 	let version;
@@ -111,11 +111,6 @@ function checkVersionCoherence() {
 		errors.push(`unable to read package.json version: ${error instanceof Error ? error.message : String(error)}`);
 		return;
 	}
-	if (typeof version !== "string" || version.length === 0) {
-		errors.push("package.json has no version");
-		return;
-	}
-
 	let changelog;
 	try {
 		changelog = readFileSync(join(root, "CHANGELOG.md"), "utf8");
@@ -124,26 +119,29 @@ function checkVersionCoherence() {
 		return;
 	}
 
-	const heading = changelog.split(/\r?\n/).find((line) => line.startsWith("## "));
-	if (heading === undefined) {
-		errors.push("CHANGELOG.md has no '## <version>' heading");
-		return;
+	const explicitRelease = process.env.CLIO_CODER_RELEASE_CONTEXT === "publish";
+	const hostedTag = process.env.GITHUB_REF?.startsWith("refs/tags/") ?? false;
+	let exactVersionTag = false;
+	if (typeof version === "string" && version.length > 0) {
+		try {
+			const tags = execFileSync("git", ["tag", "--points-at", "HEAD"], {
+				cwd: root,
+				encoding: "utf8",
+				stdio: ["ignore", "pipe", "ignore"],
+			});
+			exactVersionTag = tags.split(/\r?\n/).includes(`v${version}`);
+		} catch {
+			// A packed source tree may have no Git metadata. npm publish supplies
+			// the explicit release context, so absence of Git never weakens it.
+		}
 	}
-	// Everything before an optional " - <date>" is the version the section is for.
-	const named = heading.slice(3).split(" - ")[0].trim();
-	if (named === "Unreleased") {
-		// Only non-tag GitHub Actions runs may keep Unreleased; tag and local/publish runs stay strict.
-		if (process.env.GITHUB_ACTIONS === "true" && !process.env.GITHUB_REF?.startsWith("refs/tags/")) return;
-		errors.push(
-			`CHANGELOG.md still opens with '## Unreleased'; retitle that section '## ${version} - <date>' before publishing`,
-		);
-		return;
-	}
-	if (named !== version) {
-		errors.push(
-			`package.json version ${version} does not match the top CHANGELOG.md heading '${heading.trim()}'; the release notes and the published version must name the same release`,
-		);
-	}
+	errors.push(
+		...releaseVersionErrors({
+			version,
+			changelog,
+			releaseContext: explicitRelease || hostedTag || exactVersionTag,
+		}),
+	);
 }
 
 const entrySet = new Set(ENTRIES);

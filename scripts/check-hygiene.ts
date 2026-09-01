@@ -416,7 +416,7 @@ function checkCiScripts(): void {
 	);
 	expectScript("skills:check", "node --import tsx scripts/pin-skills.ts --check");
 	expectScript("ci:release", "npm run ci && node scripts/check-release.mjs");
-	expectScript("prepublishOnly", "npm run ci:release");
+	expectScript("prepublishOnly", "CLIO_CODER_RELEASE_CONTEXT=publish npm run ci:release");
 
 	// Hosted CI stays deliberately small: one Node 22 job, cancellation for
 	// superseded runs, dependency installation, and the full release gate.

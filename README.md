@@ -351,10 +351,10 @@ clio-coder --version
 
 ### Install from source
 
-From source, pinned to the current stable release:
+From source, pinned to this version:
 
 ```bash
-git clone --branch v0.4.1 https://github.com/iowarp/clio-coder.git
+git clone --branch v0.4.2 https://github.com/iowarp/clio-coder.git
 cd clio-coder
 npm ci
 npm run install:local
