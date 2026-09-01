@@ -6,6 +6,10 @@ import { afterEach, describe, it } from "node:test";
 
 import type { AssistantMessageEvent, Context, Model } from "@earendil-works/pi-ai";
 
+import type { ClioSettings } from "../../src/core/config.js";
+import { DEFAULT_SETTINGS } from "../../src/core/defaults.js";
+import type { SafeEventBus } from "../../src/core/event-bus.js";
+import type { ProvidersContract } from "../../src/domains/providers/index.js";
 import { createRuntimeRegistry } from "../../src/domains/providers/registry.js";
 import { registerBuiltinRuntimes } from "../../src/domains/providers/runtimes/builtins.js";
 import {
@@ -14,6 +18,11 @@ import {
 } from "../../src/domains/providers/runtimes/protocol/openai-compat.js";
 import { EMPTY_CAPABILITIES } from "../../src/domains/providers/types/capability-flags.js";
 import { openAICompletionsApiProvider } from "../../src/engine/apis/openai-completions.js";
+import type { OverlayHandle, TUI } from "../../src/engine/tui.js";
+import type { OverlayState } from "../../src/interactive/overlay-key-routing.js";
+import { createOverlayModelSelectors } from "../../src/interactive/overlay-model-selectors.js";
+import type { OpenModelScopeOverlayDeps } from "../../src/interactive/overlays/model-scope.js";
+import { ModelOverlayView, type ModelRow } from "../../src/interactive/overlays/model-selector.js";
 
 const temporaryDirectories: string[] = [];
 
@@ -34,7 +43,111 @@ function completionResponse(text: string): Response {
 	return new Response(body, { status: 200, headers: { "content-type": "text/event-stream" } });
 }
 
+function inertOverlayHandle(onHide?: () => void): OverlayHandle {
+	return {
+		hide: () => onHide?.(),
+		setHidden: () => undefined,
+		isHidden: () => false,
+		focus: () => undefined,
+		unfocus: () => undefined,
+		isFocused: () => true,
+	};
+}
+
+function selectableModelRow(): ModelRow {
+	const caps = { ...EMPTY_CAPABILITIES, chat: true, tools: true };
+	return {
+		value: "next-target/next-model",
+		target: "next-target",
+		model: "next-model",
+		runtimeName: "Contract runtime",
+		runtimeShortName: "Contract",
+		runtimeId: "contract-runtime",
+		apiFamily: "openai-completions",
+		bucket: "local",
+		source: "configured",
+		authText: "ready",
+		available: true,
+		reason: "",
+		healthGlyph: "●",
+		healthText: "healthy",
+		caps,
+		capabilityDecisions: {
+			chat: true,
+			tools: true,
+			reasoning: false,
+			vision: false,
+			streaming: true,
+			contextWindow: 32768,
+			maxTokens: 8192,
+		},
+		thinking: "off",
+		streaming: true,
+		badges: "T",
+		context: "32kctx",
+		maxTokens: "8k",
+		active: false,
+		scoped: false,
+		visibleByDefault: true,
+		selectable: true,
+	};
+}
+
 describe("provider transport boundary", () => {
+	it("applies a model-picker selection after the scope confirmation", () => {
+		const settings = structuredClone(DEFAULT_SETTINGS) as ClioSettings;
+		settings.chat.target = "old-target";
+		settings.chat.model = "old-model";
+		const transitions: { state: OverlayState; handle: OverlayHandle | null } = { state: "closed", handle: null };
+		const captured: { modelView?: ModelOverlayView; scopeDeps?: OpenModelScopeOverlayDeps } = {};
+		const closeOverlay = (): void => {
+			if (transitions.state === "closed") return;
+			const handle = transitions.handle;
+			transitions.state = "closed";
+			transitions.handle = null;
+			handle?.hide();
+		};
+		const selectors = createOverlayModelSelectors({
+			tui: { requestRender: () => undefined } as TUI,
+			transitions,
+			providers: {} as ProvidersContract,
+			bus: {} as SafeEventBus,
+			refreshFooter: () => undefined,
+			notify: () => undefined,
+			closeOverlay,
+			getSettings: () => settings,
+			onSelectModel: (ref, scope) => {
+				strictEqual(scope, "session");
+				settings.chat.target = ref.target;
+				settings.chat.model = ref.model;
+			},
+			openModelOverlay: (_tui, deps) => {
+				captured.modelView = new ModelOverlayView(
+					[selectableModelRow()],
+					{ totalModels: 1, targets: 1, localModels: 1, cloudModels: 0, activeRef: "old-target/old-model" },
+					deps.onSelect,
+					deps.onToggleFavorite,
+					deps.onClose,
+				);
+				return inertOverlayHandle(() => captured.modelView?.dispose());
+			},
+			openModelScopeOverlay: (_tui, deps) => {
+				captured.scopeDeps = deps;
+				return inertOverlayHandle();
+			},
+		});
+
+		selectors.openModelOverlayState();
+		strictEqual(transitions.state, "model");
+		captured.modelView?.handleInput("\r");
+		strictEqual(transitions.state, "model-scope", "Enter must leave the apply confirmation open");
+		strictEqual(settings.chat.target, "old-target", "selection alone must not apply before confirmation");
+		strictEqual(settings.chat.model, "old-model", "selection alone must not apply before confirmation");
+		captured.scopeDeps?.onChoose("session");
+		strictEqual(settings.chat.target, "next-target");
+		strictEqual(settings.chat.model, "next-model");
+	});
+
 	it("selects canonical built-in runtimes and aliases without duplicating them", () => {
 		const registry = createRuntimeRegistry();
 		registerBuiltinRuntimes(registry);
