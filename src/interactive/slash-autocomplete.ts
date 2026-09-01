@@ -26,6 +26,9 @@ const ARGUMENT_HINT_BUDGET = 44;
 /** Fits the narrowest description column the slash popup grants at 120 cols. */
 const COMPLETION_DESCRIPTION_BUDGET = 80;
 
+/** Fits the skill popup's description column at an 80-column terminal. */
+const SKILL_DESCRIPTION_BUDGET = 40;
+
 export interface SlashAutocompleteOptions {
 	basePath?: string;
 	fdPath?: string | null;
@@ -109,6 +112,12 @@ function compactCompletionDescription(description: string | undefined): string |
 	return `${clipped}…`;
 }
 
+function compactSkillDescription(description: string | undefined): string | undefined {
+	if (!description || visibleWidth(description) <= SKILL_DESCRIPTION_BUDGET) return description;
+	const clipped = truncateToWidth(description, SKILL_DESCRIPTION_BUDGET - 1, "", false).trimEnd();
+	return `${clipped}…`;
+}
+
 function isSlashCommandPrefix(lines: string[], cursorLine: number, cursorCol: number): string | null {
 	if (cursorLine !== 0) return null;
 	const currentLine = lines[cursorLine] ?? "";
@@ -164,10 +173,11 @@ class ClioAutocompleteProvider implements AutocompleteProvider {
 			// 1. Installed skills
 			for (const skill of installed) {
 				if (skill.name.toLowerCase().startsWith(typedPrefix)) {
+					const description = compactSkillDescription(skill.description);
 					items.push({
 						value: `skill:${skill.name}`,
 						label: skill.name,
-						description: skill.description,
+						...(description ? { description } : {}),
 					});
 				}
 			}
@@ -177,10 +187,11 @@ class ClioAutocompleteProvider implements AutocompleteProvider {
 				if (installed.some((s) => s.name === skill.name)) continue;
 
 				if (skill.name.toLowerCase().startsWith(typedPrefix)) {
+					const description = compactSkillDescription(skill.description);
 					items.push({
 						value: `marketplace:${skill.name}`,
 						label: `${skill.name} (marketplace)`,
-						description: skill.description,
+						...(description ? { description } : {}),
 					});
 				}
 			}

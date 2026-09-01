@@ -25,7 +25,13 @@ function makeSkill(overrides: Partial<Skill> & { name: string }): Skill {
 	return { ...base, ...overrides } as Skill;
 }
 
-const INSTALLED_SKILLS: Skill[] = [makeSkill({ name: "arxiv-literature" }), makeSkill({ name: "find-skills" })];
+const INSTALLED_SKILLS: Skill[] = [
+	makeSkill({
+		name: "arxiv-literature",
+		description: "Use when the user asks to search arXiv, summarize papers, or trace a scientific claim to sources",
+	}),
+	makeSkill({ name: "find-skills" }),
+];
 const MARKETPLACE_SKILLS: MarketplaceSkill[] = [];
 
 function provider() {
@@ -61,6 +67,15 @@ describe("contracts/slash-autocomplete", () => {
 		const values = (suggestions?.items ?? []).map((item) => item.value);
 		ok(values.includes("skill:arxiv-literature"));
 		ok(values.includes("skill:find-skills"));
+	});
+
+	it("ellipsizes skill descriptions before the 80-column popup can hard-clip them", async () => {
+		const items = (await suggestionsFor("/skill "))?.items ?? [];
+		const description = items.find((item) => item.value === "skill:arxiv-literature")?.description;
+		ok(description);
+		ok(description.endsWith("…"), description);
+		ok(visibleWidth(description) <= 40, description);
+		ok(!description.endsWith("summ"), description);
 	});
 
 	it("filters skill-name suggestions by the typed prefix after the separator", async () => {
