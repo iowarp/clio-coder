@@ -1,7 +1,13 @@
 ---
 name: grill-me
 description: Use when the user wants a plan, design, or idea stress-tested through a phased one-question-at-a-time interview before any code is written, or when intent is too ambiguous to plan from. Scans available context first, reviews known facts, fills missing decisions, respects stop signals, and ends with a compact decision log. Triggers on "grill me", "interview me", "stress-test this plan", "poke holes in this".
-version: 0.3.2
+triggers:
+  - grill me
+  - interview me about this plan
+  - stress-test this design
+  - poke holes in this idea
+  - clarify this plan one question at a time
+version: 0.3.3
 license: Apache-2.0
 allowed-tools:
   - read

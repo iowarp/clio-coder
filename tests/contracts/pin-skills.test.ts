@@ -55,6 +55,9 @@ function catalogFrontmatter(name: string, description: string, version: string):
 	return [
 		`name: "${name}"`,
 		`description: "${description}"`,
+		"triggers:",
+		`  - "use ${name}"`,
+		`  - "run ${name} workflow"`,
 		`version: "${version}"`,
 		"license: Apache-2.0",
 		"clio:",
@@ -173,12 +176,20 @@ describe("contracts/pin-skills script", () => {
 
 		const indexPath = join(catalog, "skill-marketplace.json");
 		const index = JSON.parse(readFileSync(indexPath, "utf8")) as {
-			skills: Array<{ name: string; description: string; sourceUrl: string; version?: string; audit?: string }>;
+			skills: Array<{
+				name: string;
+				description: string;
+				triggers?: string[];
+				sourceUrl: string;
+				version?: string;
+				audit?: string;
+			}>;
 		};
 		strictEqual(index.skills.length, 1);
 		const entry = index.skills[0];
 		strictEqual(entry?.name, "alpha");
 		strictEqual(entry?.description, "Alpha skill.");
+		strictEqual(entry?.triggers?.join(" | "), "use alpha | run alpha workflow");
 		strictEqual(entry?.sourceUrl, "https://example.invalid/skills/alpha");
 		strictEqual(entry?.version, "0.1.0");
 		strictEqual(entry?.audit, "pass");
@@ -189,6 +200,27 @@ describe("contracts/pin-skills script", () => {
 		const drift = await runPinScript(["--dir", catalog, "--check"]);
 		strictEqual(drift.code, 1);
 		ok(drift.stderr.includes("skill-marketplace.json does not match the catalog"), drift.stderr);
+	});
+
+	it("rejects malformed optional trigger metadata", async () => {
+		const catalog = scratchCatalog();
+		const malformed = writeSkill(catalog, "alpha", [
+			'name: "alpha"',
+			'description: "Alpha skill."',
+			"triggers: alpha",
+			'version: "0.1.0"',
+			"license: Apache-2.0",
+			"clio:",
+			"  registry-id: iowarp/clio-coder",
+			"  source-url: https://example.invalid/skills/alpha",
+			"  audit: pass",
+			"  provenance: designed",
+			"  eval-status: scenarios-recorded",
+		]);
+		const result = await runPinScript(["--dir", catalog]);
+		strictEqual(result.code, 1);
+		ok(result.stderr.includes(malformed));
+		ok(result.stderr.includes('optional frontmatter "triggers" must be a non-empty list of non-empty strings'));
 	});
 
 	it("rejects a source-url that has stopped matching the skill's catalog path", async () => {

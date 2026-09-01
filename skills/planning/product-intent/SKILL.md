@@ -1,7 +1,13 @@
 ---
 name: product-intent
 description: Use at the start of a greenfield product effort, when the user wants a problem-first product document — "why are we building this", "write the product thesis", "PRD for this idea". Interviews for the problem, evidence, and a falsifiable hypothesis; writes an intent-only PRD with zero engineering decisions. Not for engineering decisions; use architecture. Not for turning a locked idea into milestone build prompts; use prd.
-version: 0.2.0
+triggers:
+  - why are we building this
+  - write the product thesis
+  - problem-first PRD
+  - define a falsifiable product hypothesis
+  - greenfield product intent
+version: 0.2.1
 license: Apache-2.0
 allowed-tools:
   - read

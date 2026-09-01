@@ -1,7 +1,13 @@
 ---
 name: ship
 description: Use when finished work should leave the machine — "ship this", "commit and open the PR", "get this up for review". Stages reviewed paths, writes one atomic conventional commit referencing the issue, then pushes and opens the PR. Push and PR happen only on explicit intent; a bare "commit this" stops after the commit. Not for producing the change; use fix-issue.
-version: 0.1.1
+triggers:
+  - ship this
+  - commit this
+  - commit and open the PR
+  - push and open a pull request
+  - get this up for review
+version: 0.1.2
 license: Apache-2.0
 allowed-tools:
   - read

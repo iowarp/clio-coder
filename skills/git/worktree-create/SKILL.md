@@ -1,7 +1,12 @@
 ---
 name: worktree-create
 description: Use when the user asks to set up one or more git worktrees for parallel work — "create a worktree", "set up worktrees for these branches", "spin up parallel branches". Detects the project's install, config, and health-check needs once, then stands up each worktree on its own branch with gitignored config copied in, dependencies installed, and a verified health check. Not for merging finished worktrees; use worktree-merge.
-version: 0.2.0
+triggers:
+  - create a git worktree
+  - set up worktrees for these branches
+  - spin up parallel branches
+  - prepare parallel worktrees
+version: 0.2.1
 license: Apache-2.0
 allowed-tools:
   - read
