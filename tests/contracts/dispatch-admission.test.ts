@@ -1,0 +1,159 @@
+import { deepStrictEqual, match, ok, rejects, strictEqual } from "node:assert/strict";
+import { afterEach, beforeEach, describe, it } from "node:test";
+
+import { DEFAULT_SETTINGS } from "../../src/core/defaults.js";
+import type { AgentSpec } from "../../src/domains/agents/spec.js";
+import {
+	type AdmissionQueueRequest,
+	createAdmissionQueue,
+	orderAdmissionRequests,
+} from "../../src/domains/dispatch/admission-queue.js";
+import { assessCapabilityMismatch } from "../../src/domains/dispatch/capability-match.js";
+import {
+	isBoundedGateRolePrompt,
+	REVIEWER_GATE_PROMPT,
+} from "../../src/domains/dispatch/gate-role-prompts.js";
+import { normalizeDispatchIntent } from "../../src/domains/dispatch/intent.js";
+import { classifyDispatchIntentCompatibility } from "../../src/domains/dispatch/intent-compatibility.js";
+import { endpointCapacityFor } from "../../src/domains/providers/endpoint-capacity.js";
+import { createDispatchTool } from "../../src/tools/dispatch.js";
+import { isolateDispatchState, makeDispatchBundle, restoreDispatchState } from "../harness/dispatch.js";
+import { dispatchStubContext } from "../harness/dispatch-stub-context.js";
+
+function queued(id: string, priority = 0): AdmissionQueueRequest<string> {
+	return {
+		requestId: id,
+		assignmentId: id,
+		priority,
+		queuedAt: 10,
+		deadlineAt: 1_000,
+		planId: null,
+		planOrder: null,
+		value: id,
+	};
+}
+
+function agent(id: string, capabilityClass: AgentSpec["capabilityClass"]): AgentSpec {
+	return { id, capabilityClass } as AgentSpec;
+}
+
+describe("dispatch admission boundary", () => {
+	beforeEach(async () => isolateDispatchState());
+	afterEach(() => restoreDispatchState());
+
+	it("refuses a pinned read-only recipe for a mutation and admits sound capability pairings", () => {
+		const specs = [agent("verifier", "verification"), agent("coder", "workspace-edit")];
+		const mismatch = assessCapabilityMismatch({
+			agentId: "verifier",
+			capabilityClass: "verification",
+			task: "Fix the off-by-one bug in src/sum.ts",
+			autoSelected: false,
+			resultContractKind: "verifier-report",
+			specs,
+		});
+		strictEqual(mismatch?.verdict, "refuse");
+		strictEqual(mismatch?.suggestedAgentId, "coder");
+		strictEqual(
+			assessCapabilityMismatch({
+				agentId: "coder",
+				capabilityClass: "workspace-edit",
+				task: "Fix the off-by-one bug in src/sum.ts",
+				autoSelected: false,
+				resultContractKind: "mutation-report",
+				specs,
+			}),
+			null,
+		);
+	});
+
+	it("orders capacity requests deterministically and fails closed at the queue bound", async () => {
+		deepStrictEqual(
+			orderAdmissionRequests([queued("b"), queued("a"), queued("urgent", 1)]).map((entry) => entry.requestId),
+			["urgent", "a", "b"],
+		);
+		const queue = createAdmissionQueue<string>({ maxSize: 1, finiteCeilingMs: 1_000, now: () => 10 });
+		const first = queue.enqueue(queued("first"));
+		await rejects(queue.enqueue(queued("second")), /queue full/u);
+		queue.cancel("first");
+		strictEqual((await first).state, "canceled");
+	});
+
+	it("uses operator capacity, then discovered capacity, then the conservative local default", () => {
+		const target = { id: "local", runtime: "llamacpp", url: "http://localhost:8080/v1" };
+		const runtime = { id: "llamacpp", tier: "local-native" as const };
+		strictEqual(endpointCapacityFor({ target: { ...target, maxConcurrentRequests: 3 }, runtime, discoveredSlots: 2 }, {}).limit, 3);
+		strictEqual(endpointCapacityFor({ target, runtime, discoveredSlots: 2 }, {}).limit, 2);
+		strictEqual(endpointCapacityFor({ target, runtime }, {}).limit, 1);
+	});
+
+	it("refuses write authority on a read-only request without widening or dropping it", () => {
+		const normalized = normalizeDispatchIntent(
+			{
+				version: 2,
+				read_roots: ["src/"],
+				write_roots: ["src/generated/"],
+				expected_outputs: ["src/generated/index.ts"],
+				verification: [{ check: "typecheck" }],
+			},
+			new Map([["typecheck", { id: "typecheck", timeoutMs: 30_000 }]]),
+		);
+		ok(normalized.ok);
+		const findings = classifyDispatchIntentCompatibility({ intent: normalized.intent, autonomy: "read-only" });
+		deepStrictEqual(
+			findings.filter((finding) => finding.decision === "refuse").map((finding) => finding.code),
+			["intent_write_without_authority"],
+		);
+	});
+
+	it("admits only coordinator-bounded ACP gate prompts under read-only authority", () => {
+		strictEqual(
+			isBoundedGateRolePrompt({ role: "reviewer", autonomy: "read-only", systemPrompt: REVIEWER_GATE_PROMPT }),
+			true,
+		);
+		strictEqual(
+			isBoundedGateRolePrompt({ role: "reviewer", autonomy: "auto-edit", systemPrompt: REVIEWER_GATE_PROMPT }),
+			false,
+		);
+		strictEqual(
+			isBoundedGateRolePrompt({ role: "reviewer", autonomy: "read-only", systemPrompt: "caller persona" }),
+			false,
+		);
+	});
+
+	it("rejects unmediated ACP autonomy narrowing before any worker starts", async () => {
+		const settings = structuredClone(DEFAULT_SETTINGS);
+		settings.safety.autonomy = "full-auto";
+		settings.integrations.externalAgents.entries = [
+			{ id: "external-reviewer", command: "mock-acp", args: [], toolGovernance: "agent-managed" },
+		];
+		let starts = 0;
+		const bundle = makeDispatchBundle(dispatchStubContext({ settings }), {
+			spawnWorker: () => {
+				starts += 1;
+				throw new Error("native worker must not start");
+			},
+			startAcpDelegationRun: () => {
+				starts += 1;
+				throw new Error("ACP worker must not start");
+			},
+		});
+		await bundle.extension.start();
+		try {
+			const tool = createDispatchTool({
+				getAgentSpecs: () => [],
+				dispatch: bundle.contract,
+				getAutonomy: () => "full-auto",
+			});
+			const result = (await tool.run(
+				{ tasks: ["build first"], review: { reviewer: "external-reviewer" } },
+				{},
+			)) as { kind: string; message?: string };
+			strictEqual(result.kind, "error");
+			match(result.message ?? "", /agent-managed.*cannot enforce request autonomy narrowing/u);
+			strictEqual(starts, 0);
+			strictEqual(bundle.contract.listRuns().length, 0);
+		} finally {
+			await bundle.extension.stop?.();
+		}
+	});
+});
