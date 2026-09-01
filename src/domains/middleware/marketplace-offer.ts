@@ -1,3 +1,4 @@
+import { randomUUID } from "node:crypto";
 import {
 	SKILL_INSTALL_OFFER_OPTION_NEVER,
 	SKILL_INSTALL_OFFER_OPTION_NOT_NOW,
@@ -66,11 +67,23 @@ export interface MarketplaceOfferDeps {
 		readNever(): Readonly<Record<string, string>>;
 		recordNever(name: string): void;
 	};
+	/** Per-offer binding tag source; injectable for deterministic tests. Defaults to a random id. */
+	newOfferTag?: () => string;
 }
 
 const NO_EFFECTS: ReadonlyArray<MiddlewareEffect> = [];
 
-export function marketplaceOfferReminder(entry: MarketplaceSkill): string {
+/**
+ * The tag the model must echo verbatim in its ask_user question so the harness
+ * binds the answer to this specific offer and nothing else. The tag lives only
+ * in a system reminder (a trusted channel), so prompt-injected user or file
+ * content cannot forge it onto an unrelated question.
+ */
+export function offerBindingTag(offerTag: string): string {
+	return `[clio-install:${offerTag}]`;
+}
+
+export function marketplaceOfferReminder(entry: MarketplaceSkill, offerTag: string): string {
 	return (
 		`[Marketplace] This request may need expertise no installed skill covers. The local marketplace has ` +
 		`"${entry.name}" (not installed): ${entry.description} ` +
@@ -79,6 +92,8 @@ export function marketplaceOfferReminder(entry: MarketplaceSkill): string {
 		`whether to install ${entry.name}, offering exactly these options in this order: ` +
 		`"${SKILL_INSTALL_OFFER_OPTION_PROJECT}", "${SKILL_INSTALL_OFFER_OPTION_USER}", ` +
 		`"${SKILL_INSTALL_OFFER_OPTION_NOT_NOW}", "${SKILL_INSTALL_OFFER_OPTION_NEVER}". ` +
+		`Include the exact tag ${offerBindingTag(offerTag)} verbatim in that question's text so the harness can bind ` +
+		`the answer to this offer; the harness acts only on an answer carrying this tag. ` +
 		`Then continue the task in the same turn. The harness handles the answer; never install or load a skill yourself. ` +
 		`If it is not actually needed, do not mention it.`
 	);
@@ -137,16 +152,19 @@ export function createMarketplaceOfferRegistration(deps: MarketplaceOfferDeps): 
 		readNever: () => readPromotionDeclines().never,
 		recordNever: (name: string) => recordPromotionNeverDecline(name),
 	};
+	const newOfferTag = deps.newOfferTag ?? (() => randomUUID());
 	// Per-session state, reset on a session id change (same adoption rule as
 	// the skills reminder: a fresh session's opening turn fires with a null id
 	// that the created session then fills in).
 	let lastSeenSessionId: string | null | undefined;
 	let offeredNames = new Set<string>();
 	let sessionDeclines = new Set<string>();
-	// The offer put to the operator this turn; consumed by the ask_user
-	// after_tool observer, cleared at turn_end so a stale offer can never bind
-	// a later, unrelated answer.
-	let pendingOffer: MarketplaceSkill | null = null;
+	// The offer put to the operator, consumed by the ask_user after_tool
+	// observer. Each offer carries a unique binding tag the model must echo in
+	// its question; the observer acts only on an answer whose question carries
+	// that tag, so an unrelated (or prompt-injected) ask_user answer can never
+	// bind the pending offer.
+	let pendingOffer: { entry: MarketplaceSkill; tag: string } | null = null;
 
 	const trackSession = (input: MiddlewareHookInput): void => {
 		const sessionId = input.sessionId ?? null;
@@ -185,24 +203,27 @@ export function createMarketplaceOfferRegistration(deps: MarketplaceOfferDeps): 
 	const evaluateAskUserAnswers = (input: MiddlewareHookInput): ReadonlyArray<MiddlewareEffect> => {
 		const offer = pendingOffer;
 		if (!offer) return NO_EFFECTS;
+		const marker = offerBindingTag(offer.tag);
 		if (input.toolResultDetails?.cancelled === true) {
-			// A cancelled interview is the soft dismiss: session-only decline.
-			sessionDeclines.add(offer.name);
-			pendingOffer = null;
+			// A cancelled interview carries no question text, so it cannot be
+			// attributed to this offer. Do not bind it: an unrelated cancel must
+			// not decline our offer, and the offer stays armed for a later answer.
 			return NO_EFFECTS;
 		}
 		for (const answer of answersFromDetails(input.toolResultDetails)) {
+			// The answer binds only when its question carries this offer's tag.
+			if (!answer.question.includes(marker)) continue;
 			const option = chosenOfferOption(answer);
 			if (option === null) continue;
 			pendingOffer = null;
 			if (option === SKILL_INSTALL_OFFER_OPTION_NOT_NOW) {
-				sessionDeclines.add(offer.name);
+				sessionDeclines.add(offer.entry.name);
 				return NO_EFFECTS;
 			}
 			if (option === SKILL_INSTALL_OFFER_OPTION_NEVER) {
-				sessionDeclines.add(offer.name);
+				sessionDeclines.add(offer.entry.name);
 				try {
-					declines.recordNever(offer.name);
+					declines.recordNever(offer.entry.name);
 				} catch {
 					// Persistence failure degrades to a session decline.
 				}
@@ -210,23 +231,23 @@ export function createMarketplaceOfferRegistration(deps: MarketplaceOfferDeps): 
 			}
 			const scope = option === SKILL_INSTALL_OFFER_OPTION_USER ? "user" : "project";
 			try {
-				const result = installGated(offer, scope);
+				const result = installGated(offer.entry, scope);
 				return [
 					{
 						kind: "annotate_tool_result",
 						severity: "info",
 						message:
-							`[Marketplace] Installed skill "${offer.name}" (${scope} scope) to ${result.path}. ` +
-							`It is installed but not active; the operator activates it with /skill ${offer.name}.`,
+							`[Marketplace] Installed skill "${offer.entry.name}" (${scope} scope) to ${result.path}. ` +
+							`It is installed but not active; the operator activates it with /skill ${offer.entry.name}.`,
 					},
 				];
 			} catch (error) {
-				sessionDeclines.add(offer.name);
+				sessionDeclines.add(offer.entry.name);
 				return [
 					{
 						kind: "annotate_tool_result",
 						severity: "warn",
-						message: `[Marketplace] Install of "${offer.name}" failed: ${
+						message: `[Marketplace] Install of "${offer.entry.name}" failed: ${
 							error instanceof Error ? error.message : String(error)
 						}. Continue the task without it.`,
 					},
@@ -274,8 +295,9 @@ export function createMarketplaceOfferRegistration(deps: MarketplaceOfferDeps): 
 					// so the operator still hears about the match.
 				}
 			}
-			pendingOffer = match.entry;
-			return [{ kind: "inject_reminder", severity: "info", message: marketplaceOfferReminder(match.entry) }];
+			const tag = newOfferTag();
+			pendingOffer = { entry: match.entry, tag };
+			return [{ kind: "inject_reminder", severity: "info", message: marketplaceOfferReminder(match.entry, tag) }];
 		},
 	};
 }
