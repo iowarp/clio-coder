@@ -2160,13 +2160,12 @@ export class ClioProjectHost {
 		}
 		const publicId = `permission-${crypto.randomUUID()}`;
 		const requestedAt = this.#now();
-		const escalateAt = requestedAt + this.#permissionEscalateMs;
 		const expiresAt = Math.min(request.expiresAt, requestedAt + this.#permissionBudgetMs);
-		if (escalateAt >= expiresAt) {
-			// Honest rather than clamped: a short server permission ceiling simply
-			// leaves no room to escalate before the turn is stopped.
+		const scheduledEscalateAt = requestedAt + this.#permissionEscalateMs;
+		const escalateAt = scheduledEscalateAt < expiresAt ? scheduledEscalateAt : requestedAt;
+		if (scheduledEscalateAt >= expiresAt) {
 			this.#log(
-				`The GUI cannot escalate this approval: the Clio Coder permission ceiling leaves ${
+				`The GUI escalated this approval immediately: the Clio Coder permission ceiling leaves ${
 					expiresAt - requestedAt
 				} ms, shorter than the ${this.#permissionEscalateMs} ms escalation budget.`,
 			);
