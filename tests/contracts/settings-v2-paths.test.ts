@@ -182,7 +182,7 @@ describe("contracts/settings v2 paths", () => {
 
 	it("publishes the complete move and retirement manifest", () => {
 		const moves = new Map<string, string>(SETTINGS_V1_PATH_MOVES);
-		strictEqual(moves.size, 90, "the fixed v1-to-v2 move manifest stays complete");
+		strictEqual(moves.size, 97, "the fixed v1-to-v2 move manifest stays complete");
 		strictEqual(moves.get("orchestrator.target"), "chat.target");
 		strictEqual(moves.get("retry.streamStallMs"), "chat.retry.streamStallMs");
 		strictEqual(moves.get("workers.agentBindings.*"), "fleet.agentProfiles.*");
@@ -197,6 +197,8 @@ describe("contracts/settings v2 paths", () => {
 		strictEqual(moves.get("delegation.agents[].env.*"), "integrations.externalAgents.entries[].env.*");
 		strictEqual(moves.get("guardrails.observationTurnBudgetBytes"), "safety.limits.observationBytesPerTurn");
 		strictEqual(moves.get("fleet.nodes[].clioEntry"), "fleet.nodes[].clioCoderEntry");
+		strictEqual(moves.get("panes.journal"), "fleet.history.journal");
+		strictEqual(moves.get("panes.yazi.mode"), "interface.panes.files.mode");
 		deepStrictEqual(Object.keys(SETTINGS_V1_RETIRED_PATHS).sort(), [
 			"background.thinkingLevel",
 			"compaction.excludeLastTurns",
@@ -320,9 +322,16 @@ describe("contracts/settings v2 paths", () => {
 		strictEqual(asRecord(fleet.permissions, "fleet.permissions").mode, "escalate");
 		strictEqual(asRecord(fleet.retry, "fleet.retry").routeCooldownMs, 9876);
 		strictEqual(asRecord(fleet.limits, "fleet.limits").internalRunTimeoutMs, 7173);
-		// panes.journal is not carried: every panes key first shipped in v0.4.0,
-		// so the whole root is dropped and v2 defaults apply.
-		strictEqual("journal" in asRecord(fleet.history, "fleet.history"), false);
+		// The panes keys v0.4.0 shipped are carried to their direct v2 successors.
+		strictEqual(asRecord(fleet.history, "fleet.history").journal, false);
+		const uiPanes = asRecord(ui.panes, "interface.panes");
+		strictEqual(uiPanes.enabled, "auto");
+		strictEqual(uiPanes.notifications, "all");
+		const uiFiles = asRecord(uiPanes.files, "interface.panes.files");
+		strictEqual(uiFiles.enabled, false);
+		strictEqual(uiFiles.mode, "chooser");
+		strictEqual(uiFiles.profile, "user");
+		strictEqual(uiFiles.followCwd, false);
 		strictEqual(memory.maxOutputTokens, 1777);
 		strictEqual(asRecord(context.compaction, "context.compaction").systemPrompt, "prompts/compact.md");
 		strictEqual(asRecord(safety.limits, "safety.limits").sessionCostUsd, 9.5);
@@ -341,7 +350,7 @@ describe("contracts/settings v2 paths", () => {
 		strictEqual(asRecord(integrations.git, "integrations.git").commitAttribution, false);
 		strictEqual("workers" in migrated, false);
 		strictEqual("theme" in migrated, false);
-		strictEqual("panes" in migrated, false, "the panes root is dropped, not carried");
+		strictEqual("panes" in migrated, false, "the residual panes root (retired agents/keepFailed) is dropped");
 
 		const reportFile = join(stateDir, "migration-reports", `${SETTINGS_V2_MIGRATION_ID}.json`);
 		const reportText = readFileSync(reportFile, "utf8");
