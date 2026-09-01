@@ -207,7 +207,7 @@ export function createPanesRuntime(deps: PanesRuntimeDeps): PanesOperations {
 				}
 				if (preset.id === "yazi") {
 					if (!deps.getSettings().interface.panes.files.enabled) {
-						return { status: "refused", reason: "the files pane is disabled by panes.yazi.enabled" };
+						return { status: "refused", reason: "the files pane is disabled by interface.panes.files.enabled" };
 					}
 					if (!yaziController) {
 						return { status: "unavailable", reason: "the files-pane return path is not ready" };

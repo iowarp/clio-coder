@@ -1691,7 +1691,7 @@ export const BUILTIN_SLASH_COMMANDS: ReadonlyArray<BuiltinSlashCommand> = [
 				// every `--with-panes` session, even one where no pane host answered.
 				ctx.notice(
 					"info",
-					"panes are inactive: this session started without them. Restart with `clio-coder --with-panes`, or set panes.enabled=auto",
+					"panes are inactive: this session started without them. Restart with `clio-coder --with-panes`, or set interface.panes.enabled=auto",
 				);
 				return;
 			}

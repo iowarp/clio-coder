@@ -176,6 +176,7 @@ describe("smoke/built CLI core", { concurrency: false }, () => {
 			strictEqual(help.code, 0);
 			match(help.stdout, /Usage:/u);
 			match(help.stdout, /clio-coder run \[flags\] <task>/u);
+			match(help.stdout, /^ {2}clio-coder config inspect \[--json\] {2}inspect effective customization and provenance$/mu);
 
 			const unknown = await runCli(["not-a-command"], { env: scratch.env });
 			strictEqual(unknown.code, 2);
