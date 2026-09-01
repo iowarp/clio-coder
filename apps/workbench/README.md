@@ -28,8 +28,11 @@ deno task start --port=0 --open      # any free port, then hand the URL to xdg-o
 `main.ts` accepts `--port=N`, `--open`, `--smoke-ms=N`, `--version`, and `--help`. The server binds only to `127.0.0.1`,
 and each browser tab authenticates with the token the page carries, so a second machine cannot reach it.
 
-Local state (recent projects, session labels, layout) lives in `$CLIO_WORKBENCH_STATE_DIR`, else
-`$XDG_STATE_HOME/clio-workbench`, else `~/.local/state/clio-workbench`.
+Local state (recent projects, session labels, layout) lives in `$CLIO_CODER_GUI_STATE_DIR`, else
+`$XDG_STATE_HOME/clio-coder-gui`, else `~/.local/state/clio-coder-gui`. The deprecated `$CLIO_WORKBENCH_STATE_DIR`
+override remains a read-compatible fallback for two minor releases and emits one warning. On first start after an
+upgrade, the GUI atomically moves a lone `clio-workbench` state root. If legacy and canonical roots both exist, it backs
+up both `projects.json` inputs and merges valid recent projects by canonical path and newest `lastOpenedAt`.
 
 Chrome cancels every in-flight request with `net::ERR_NETWORK_CHANGED` when a network interface appears or disappears,
 which WSL2 and VPN hosts do in the first seconds after launch. The page recovers from that on its own: a cancelled

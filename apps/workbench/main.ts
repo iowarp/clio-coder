@@ -173,8 +173,9 @@ Usage: ${CLI_NAME} [--port=N] [--open] [--smoke-ms=N]
 The GUI listens on the loopback interface only. Project folders come from the
 folder picker inside the app, and the ${PRODUCT_NAME} process is started per open
 project from the clio-coder executable on PATH. Local state lives in
-$CLIO_WORKBENCH_STATE_DIR, else $XDG_STATE_HOME/clio-workbench, else
-~/.local/state/clio-workbench.`;
+$CLIO_CODER_GUI_STATE_DIR, else $XDG_STATE_HOME/clio-coder-gui, else
+~/.local/state/clio-coder-gui. The deprecated $CLIO_WORKBENCH_STATE_DIR override
+is accepted with a one-time warning for two minor releases.`;
 
 export interface WorkbenchServerOptions {
 	hostname?: string;

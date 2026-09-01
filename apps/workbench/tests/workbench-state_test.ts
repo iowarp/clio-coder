@@ -9,7 +9,16 @@
 
 import { deepStrictEqual, equal, ok, rejects } from "node:assert/strict";
 import { dirname, join } from "node:path";
-import { MAX_BROWSE_ENTRIES, MAX_RECENT_PROJECTS, WorkbenchState, WorkbenchStateError } from "../workbench-state.ts";
+import {
+	CANONICAL_STATE_DIRECTORY_NAME,
+	LEGACY_MIGRATION_MARKER,
+	LEGACY_STATE_DIRECTORY_NAME,
+	MAX_BROWSE_ENTRIES,
+	MAX_RECENT_PROJECTS,
+	resolveStateDir,
+	WorkbenchState,
+	WorkbenchStateError,
+} from "../workbench-state.ts";
 
 interface Fixture {
 	readonly root: string;
@@ -50,6 +59,165 @@ function assertStateError(code: WorkbenchStateError["code"]): (error: unknown) =
 		return true;
 	};
 }
+
+function recentFile(projects: readonly unknown[]): string {
+	return `${JSON.stringify({ version: 1, projects }, null, "\t")}\n`;
+}
+
+Deno.test("canonical state resolution wins and the legacy override warns once", () => {
+	const home = "/home/researcher";
+	const logs: string[] = [];
+	equal(
+		resolveStateDir(home, (name) => ({ XDG_STATE_HOME: "/srv/xdg-state" })[name]),
+		"/srv/xdg-state/clio-coder-gui",
+	);
+	equal(
+		resolveStateDir(
+			home,
+			(name) => ({ CLIO_CODER_GUI_STATE_DIR: "/srv/canonical", CLIO_WORKBENCH_STATE_DIR: "/srv/legacy" })[name],
+			(message) => logs.push(message),
+		),
+		"/srv/canonical",
+	);
+	for (let attempt = 0; attempt < 2; attempt += 1) {
+		equal(
+			resolveStateDir(
+				home,
+				(name) => ({ CLIO_WORKBENCH_STATE_DIR: "/srv/legacy" })[name],
+				(message) => logs.push(message),
+			),
+			"/srv/legacy",
+		);
+	}
+	equal(logs.length, 1);
+	ok(logs[0]?.includes("CLIO_CODER_GUI_STATE_DIR"));
+});
+
+Deno.test("first start atomically renames a lone legacy state root", async () => {
+	const root = await Deno.makeTempDir({ prefix: "clio-coder-gui-state-move-" });
+	try {
+		const home = join(root, "home");
+		const xdgState = join(root, "xdg-state");
+		const legacy = join(xdgState, LEGACY_STATE_DIRECTORY_NAME);
+		const canonical = join(xdgState, CANONICAL_STATE_DIRECTORY_NAME);
+		await Deno.mkdir(legacy, { recursive: true });
+		await Deno.mkdir(home, { recursive: true });
+		await Deno.writeTextFile(
+			join(legacy, "projects.json"),
+			recentFile([{
+				id: "project-moved-1",
+				canonicalPath: "/tmp/moved-project",
+				displayName: "Moved",
+				lastOpenedAt: "2026-08-30T12:00:00.000Z",
+			}]),
+		);
+		const legacyInode = (await Deno.stat(legacy)).ino;
+		const logs: string[] = [];
+		const state = await WorkbenchState.open({
+			homePath: home,
+			env: (name) => name === "XDG_STATE_HOME" ? xdgState : undefined,
+			log: (message) => logs.push(message),
+		});
+		equal(state.stateDir, canonical);
+		equal(state.recent()[0]?.id, "project-moved-1");
+		equal(await Deno.lstat(legacy).then(() => true, () => false), false);
+		equal((await Deno.stat(canonical)).ino, legacyInode);
+		ok(logs.some((message) => message.includes("Moved legacy GUI state atomically")));
+	} finally {
+		await Deno.remove(root, { recursive: true });
+	}
+});
+
+Deno.test("first start backs up and merges split state roots, then retires the marker on the next launch", async () => {
+	const root = await Deno.makeTempDir({ prefix: "clio-coder-gui-state-merge-" });
+	try {
+		const home = join(root, "home");
+		const xdgState = join(root, "xdg-state");
+		const legacy = join(xdgState, LEGACY_STATE_DIRECTORY_NAME);
+		const canonical = join(xdgState, CANONICAL_STATE_DIRECTORY_NAME);
+		await Deno.mkdir(home, { recursive: true });
+		await Deno.mkdir(legacy, { recursive: true });
+		await Deno.mkdir(canonical, { recursive: true });
+		const canonicalInput = recentFile([
+			{
+				id: "project-shared-canonical",
+				canonicalPath: "/tmp/shared-project/../shared-project",
+				displayName: "Canonical Older",
+				lastOpenedAt: "2026-08-28T12:00:00.000Z",
+			},
+			{
+				id: "project-canonical-only",
+				canonicalPath: "/tmp/canonical-only",
+				displayName: "Canonical Only",
+				lastOpenedAt: "2026-08-29T12:00:00.000Z",
+			},
+			{
+				id: "project-tie-canonical",
+				canonicalPath: "/tmp/tied-project",
+				displayName: "Canonical Tie",
+				lastOpenedAt: "2026-08-27T12:00:00.000Z",
+			},
+			{ id: "bad", canonicalPath: "relative", displayName: "Invalid", lastOpenedAt: "never" },
+		]);
+		const legacyInput = recentFile([
+			{
+				id: "project-shared-legacy",
+				canonicalPath: "/tmp/shared-project",
+				displayName: "Legacy Newest",
+				lastOpenedAt: "2026-08-31T12:00:00.000Z",
+			},
+			{
+				id: "project-legacy-only",
+				canonicalPath: "/tmp/legacy-only",
+				displayName: "Legacy Only",
+				lastOpenedAt: "2026-08-30T12:00:00.000Z",
+			},
+			{
+				id: "project-tie-legacy",
+				canonicalPath: "/tmp/tied-project",
+				displayName: "Legacy Tie",
+				lastOpenedAt: "2026-08-27T12:00:00.000Z",
+			},
+			{ id: "project-invalid-legacy", canonicalPath: "/tmp/invalid", displayName: " padded ", lastOpenedAt: "never" },
+		]);
+		await Deno.writeTextFile(join(canonical, "projects.json"), canonicalInput);
+		await Deno.writeTextFile(join(legacy, "projects.json"), legacyInput);
+		const logs: string[] = [];
+		const env = (name: string): string | undefined => name === "XDG_STATE_HOME" ? xdgState : undefined;
+		const state = await WorkbenchState.open({
+			homePath: home,
+			env,
+			now: () => Date.UTC(2026, 8, 1, 12, 0, 0),
+			log: (message) => logs.push(message),
+		});
+		deepStrictEqual(state.recent().map((project) => project.displayName), [
+			"Legacy Newest",
+			"Legacy Only",
+			"Canonical Only",
+			"Canonical Tie",
+		]);
+		equal(state.recentByPath("/tmp/shared-project")?.id, "project-shared-legacy");
+		equal(await Deno.lstat(join(legacy, "projects.json")).then(() => true, () => false), false);
+		equal(await Deno.lstat(join(legacy, LEGACY_MIGRATION_MARKER)).then(() => true, () => false), true);
+		const canonicalFiles = [...await Array.fromAsync(Deno.readDir(canonical))].map((entry) => entry.name);
+		const legacyFiles = [...await Array.fromAsync(Deno.readDir(legacy))].map((entry) => entry.name);
+		const canonicalBackup = canonicalFiles.find((name) => name.endsWith(".bak"));
+		const legacyBackup = legacyFiles.find((name) => name.endsWith(".bak"));
+		ok(canonicalBackup !== undefined);
+		ok(legacyBackup !== undefined);
+		equal(await Deno.readTextFile(join(canonical, canonicalBackup)), canonicalInput);
+		equal(await Deno.readTextFile(join(legacy, legacyBackup)), legacyInput);
+		ok(logs.some((message) => message.includes("Merged legacy GUI state")));
+
+		const reopened = await WorkbenchState.open({ homePath: home, env, log: (message) => logs.push(message) });
+		deepStrictEqual(reopened.recent(), state.recent());
+		equal(await Deno.lstat(join(legacy, LEGACY_MIGRATION_MARKER)).then(() => true, () => false), false);
+		equal(await Deno.readTextFile(join(canonical, canonicalBackup)), canonicalInput);
+		equal(await Deno.readTextFile(join(legacy, legacyBackup)), legacyInput);
+	} finally {
+		await Deno.remove(root, { recursive: true });
+	}
+});
 
 Deno.test("every guarded location is refused with a sentence the operator can act on", async () => {
 	const test = await fixture();

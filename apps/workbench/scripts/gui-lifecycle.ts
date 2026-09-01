@@ -5,7 +5,7 @@
  * so an installation is exactly three files: the binary in a bin directory, a
  * freedesktop `.desktop` entry, and a PNG icon. Every path this script writes
  * is recorded in a manifest, and uninstall removes only what the manifest
- * lists. Local state (`~/.local/state/clio-workbench`) is never touched unless
+ * lists. Local state (`~/.local/state/clio-coder-gui`) is never touched unless
  * `--purge-state` says so.
  *
  *   deno run -A scripts/gui-lifecycle.ts install   [--prefix=DIR] [--binary=PATH] [--skip-build] [--state-dir=DIR]
@@ -110,14 +110,14 @@ function isWithin(root: string, candidate: string): boolean {
 }
 
 /** Resolves where the three files and the manifest live for this environment. */
-export function resolveLayout(options: CommonOptions, env: EnvReader): Layout {
+export function resolveLayout(options: CommonOptions, env: EnvReader, log?: (line: string) => void): Layout {
 	const homeValue = env("HOME");
 	if (homeValue === undefined || !isAbsolute(homeValue)) {
 		throw new LifecycleError("HOME must be an absolute path so the installer can place user-level files.");
 	}
 	const home = resolve(homeValue);
 	const stateDir = options.stateDir === undefined
-		? resolveStateDir(home, env)
+		? resolveStateDir(home, env, log)
 		: requireAbsolute(options.stateDir, "--state-dir");
 	if (options.prefix !== undefined) {
 		const prefix = requireAbsolute(options.prefix, "--prefix");
@@ -280,7 +280,7 @@ async function placeFile(
 }
 
 export async function install(options: InstallOptions, context: LifecycleContext): Promise<InstallManifest> {
-	const layout = resolveLayout(options, context.env);
+	const layout = resolveLayout(options, context.env, context.log);
 	checkRoots(layout);
 	const previous = await readManifest(layout.manifest);
 	if (previous !== null) context.log(`Upgrading ${CLI_NAME} ${previous.version} → ${APP_VERSION}.`);
@@ -392,7 +392,7 @@ export interface StatusReport {
 }
 
 export async function status(options: CommonOptions, context: LifecycleContext): Promise<StatusReport> {
-	const layout = resolveLayout(options, context.env);
+	const layout = resolveLayout(options, context.env, context.log);
 	const manifest = await readManifest(layout.manifest);
 	const files: Array<{ file: ManifestFile; state: "ok" | "modified" | "missing" }> = [];
 	for (const file of manifest?.files ?? []) {
@@ -428,7 +428,7 @@ export async function status(options: CommonOptions, context: LifecycleContext):
 }
 
 export async function uninstall(options: UninstallOptions, context: LifecycleContext): Promise<boolean> {
-	const layout = resolveLayout(options, context.env);
+	const layout = resolveLayout(options, context.env, context.log);
 	const manifest = await readManifest(layout.manifest);
 	if (manifest === null) {
 		context.log(`${CLI_NAME} is not installed (no manifest at ${layout.manifest}); nothing removed.`);
