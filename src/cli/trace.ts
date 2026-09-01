@@ -4,10 +4,10 @@ import { resolve } from "node:path";
 import { fileURLToPath, pathToFileURL } from "node:url";
 import { clioStatePath } from "../core/xdg.js";
 import {
+	assertTraceSelectOnly,
 	DEFAULT_TRACE_RETENTION_POLICY,
 	resolveTraceRetentionPolicy,
 	TRACE_EVENT_POLL_LIMIT,
-	assertTraceSelectOnly,
 	type TraceEventRow,
 	type TracePhaseRow,
 	type TraceProcessRow,
