@@ -6,10 +6,10 @@ import { join } from "node:path";
 import { DatabaseSync } from "node:sqlite";
 import { after, describe, it } from "node:test";
 import {
+	createTraceViewerHandler,
 	EVENT_LIMIT,
 	EVIDENCE_INDEX_FILE,
 	RECEIPT_OMITTED_FIELDS,
-	createTraceViewerHandler,
 	readReceiptSidecars,
 	startTraceViewer,
 	ViewerDatabase,
