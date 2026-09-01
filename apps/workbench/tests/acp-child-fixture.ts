@@ -119,6 +119,8 @@ const SCENARIOS = [
 	"resume-truncated",
 	"resume-64-turns",
 	"resume-65-turns",
+	"resume-8192-tools",
+	"resume-8193-tools",
 	"resume-attribution-mismatch",
 	"max-turn-requests",
 	"settings",
@@ -157,6 +159,7 @@ const MAX_INPUT_LINE_BYTES = 1024 * 1024;
 const MAX_RECORDED_CALLS = 128;
 const MAX_PERMISSION_OBSERVATIONS = 32;
 const MAX_TURN_TOOL_STARTS = 128;
+const MAX_REPLAY_TOOL_STARTS = 8_192;
 const SESSION_ID = "fixture-session-1";
 const TOOL_CALL_ID = "fixture-tool-1";
 const PERMISSION_REQUEST_ID = "fixture-permission-1";
@@ -178,6 +181,8 @@ const CONVERSATION_SCENARIOS = new Set<string>([
 	"resume-truncated",
 	"resume-64-turns",
 	"resume-65-turns",
+	"resume-8192-tools",
+	"resume-8193-tools",
 	"resume-attribution-mismatch",
 	"max-turn-requests",
 	"settings",
@@ -897,8 +902,27 @@ async function run(): Promise<void> {
 		params: { sessionId, update, _meta: { "clio-coder/replay": { turn } } },
 	});
 
-	/** Replays ordinary history plus exact boundary cases for the 64-group ceiling. */
+	/** Replays ordinary history plus exact boundary cases for the turn and tool ceilings. */
 	const emitReplay = async (sessionId: string): Promise<void> => {
+		if (scenario === "resume-8192-tools" || scenario === "resume-8193-tools") {
+			// The production server dropped an older whole turn group before emitting
+			// this retained group, so the first visible raw turn marker is deliberately 2.
+			await emit(replayFrame(sessionId, 2, {
+				sessionUpdate: "user_message_chunk",
+				content: { type: "text", text: "Retained prompt after the dropped oldest group" },
+			}));
+			const toolStarts = MAX_REPLAY_TOOL_STARTS + (scenario === "resume-8193-tools" ? 1 : 0);
+			for (let index = 1; index <= toolStarts; index += 1) {
+				await emit(replayFrame(sessionId, 2, {
+					sessionUpdate: "tool_call",
+					toolCallId: `fixture-replay-budget-${index}`,
+					title: "Read retained fixture note",
+					kind: "read",
+					status: "in_progress",
+				}));
+			}
+			return;
+		}
 		const turnCount = scenario === "resume-64-turns" ? 64 : scenario === "resume-65-turns" ? 65 : 2;
 		for (let turn = 1; turn <= turnCount; turn += 1) {
 			await emit(replayFrame(sessionId, turn, {
@@ -939,10 +963,15 @@ async function run(): Promise<void> {
 			return;
 		}
 		if (scenario === "max-turn-requests") {
-			for (let index = 1; index <= MAX_TURN_TOOL_STARTS; index += 1) {
+			const accepted: Array<{ toolCallId: string; title: string }> = [];
+			for (let index = 1; index <= MAX_TURN_TOOL_STARTS + 1; index += 1) {
+				// The server observes the 129th candidate internally but suppresses its
+				// ACP start before cancelling and unwinding the turn.
+				if (index > MAX_TURN_TOOL_STARTS) break;
 				const ordinal = String(index).padStart(3, "0");
 				const toolCallId = `fixture-budget-tool-${ordinal}`;
 				const title = `Read fixture note ${ordinal}`;
+				accepted.push({ toolCallId, title });
 				turn.toolStarted = true;
 				turn.toolTerminal = false;
 				turn.openTool = { toolCallId, title, kind: "read" };
@@ -955,19 +984,20 @@ async function run(): Promise<void> {
 					locations: [{ path: fixtureLocation() }],
 				}));
 				if (turn.settled) return;
-				turn.toolTerminal = true;
-				turn.openTool = null;
+			}
+			for (const { toolCallId, title } of accepted) {
 				await emit(updateMessage(turn.sessionId, {
 					sessionUpdate: "tool_call_update",
 					toolCallId,
 					title,
 					kind: "read",
-					status: "completed",
-					content: [{ type: "content", content: { type: "text", text: `fixture note ${ordinal}` } }],
+					status: "failed",
+					content: [{ type: "content", content: { type: "text", text: "Maximum turn requests reached." } }],
 					locations: [{ path: fixtureLocation() }],
 				}));
 			}
-			// The server stops before publishing the 129th candidate as a tool start.
+			turn.toolTerminal = true;
+			turn.openTool = null;
 			await settleTurn(turn, "max_turn_requests");
 			return;
 		}
@@ -1947,10 +1977,16 @@ async function run(): Promise<void> {
 			sessionClosed = false;
 			hostedSessionId = requested;
 			stored.endedAt = null;
-			const replayedTurns = scenario === "resume-64-turns" ? 64 : scenario === "resume-65-turns" ? 65 : 2;
+			const replayedTurns = scenario === "resume-64-turns"
+				? 64
+				: scenario === "resume-65-turns"
+				? 65
+				: scenario === "resume-8192-tools" || scenario === "resume-8193-tools"
+				? 1
+				: 2;
 			const attribution = scenarioSessionMeta(requested, true, {
 				turns: replayedTurns,
-				truncated: scenario === "resume-truncated",
+				truncated: scenario === "resume-truncated" || scenario === "resume-8192-tools",
 			});
 			await emitResult(id, attribution === undefined ? {} : { _meta: attribution });
 			return;
