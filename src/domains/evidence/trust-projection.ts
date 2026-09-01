@@ -14,7 +14,7 @@ import {
  * collapsed into a score here; this module only fixes the words each state is
  * called and the order the axes are read in, so the dispatch line, the
  * monitor block, `evidence inspect`, `findings.md`, the Alt+W board, the
- * receipt view, the eval bridge, and the ACP wire cannot each spell the same
+ * receipt view and the ACP wire cannot each spell the same
  * fact differently.
  *
  * Two shapes leave this module. `formatTrustSummary` is the compact human

@@ -4,8 +4,8 @@ All notable changes to Clio Coder are documented in this file. The format follow
 
 ## Unreleased
 
-### Changed
-- The benchmarks tree and internal campaign harness are removed; the eval platform remains and is consolidated as the product's single evaluation system, with maintained reference suites under `evals/`. Future external-benchmark adapters enter through that engine instead of creating another evaluation stack. The release gate no longer runs an eval baseline.
+### Removed
+- The eval platform and the complete benchmarks tree are mothballed to branch `archive/v041-pre-diet`; the `eval` command and the experimental `skills eval` subcommand are no longer shipped.
 
 ## 0.4.1 - 2026-09-01
 
