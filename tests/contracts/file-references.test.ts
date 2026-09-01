@@ -13,6 +13,7 @@ function scratch(): string {
 	roots.push(root);
 	mkdirSync(join(root, "src"), { recursive: true });
 	writeFileSync(join(root, "src", "index.ts"), "export const value = 1;\n", "utf8");
+	writeFileSync(join(root, "operator notes.md"), "quoted file reference\n", "utf8");
 	return root;
 }
 
@@ -38,5 +39,20 @@ describe("contracts/file references working paths", () => {
 
 		const explicit = await readFileArgsAsync(["src/index.ts"], { cwd, missing: "error" });
 		deepStrictEqual(explicit.referencedPaths, [target]);
+	});
+
+	it("expands quoted inline references emitted by autocomplete", async () => {
+		const cwd = scratch();
+		const target = join(cwd, "operator notes.md");
+		const input = 'review @"operator notes.md" next';
+
+		const sync = expandInlineFileReferences(input, { cwd, missing: "leave" });
+		ok(sync.text.includes("quoted file reference"));
+		ok(sync.text.endsWith(" next"));
+		deepStrictEqual(sync.referencedPaths, [target]);
+
+		const interactive = await expandInteractiveSubmitAsync(input, undefined, cwd);
+		ok(interactive.text.includes("quoted file reference"));
+		deepStrictEqual(interactive.workingContextPaths, [target]);
 	});
 });

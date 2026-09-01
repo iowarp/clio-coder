@@ -8,6 +8,10 @@ import {
 	visibleWidth,
 } from "../engine/tui.js";
 import { resolveFdBinary } from "../tools/executables.js";
+import {
+	createFileReferenceCompletionSource,
+	type FileReferenceCompletionSource,
+} from "./file-reference-completion.js";
 import { commandReference, SETTINGS_AREA_IDS, SLASH_COMMAND_GROUPS } from "./slash-commands.js";
 import {
 	type ArgCompletion,
@@ -58,6 +62,8 @@ export interface SlashCompletionItem extends AutocompleteItem {
 	remainingGrammar?: string;
 	effectDescription?: string;
 	submenu?: { parent: string; back: true };
+	/** Cursor adjustment after insertion; quoted directories keep it before the closing quote. */
+	cursorOffset?: number;
 }
 
 export interface SlashAutocompleteOptions {
@@ -65,6 +71,8 @@ export interface SlashAutocompleteOptions {
 	fdPath?: string | null;
 	/** Slice 11 replaces the named no-op sources with read-only runtime sources. */
 	completionSources?: CompletionSources;
+	/** Replace the default workspace-aware `@` source without adding a second composer provider. */
+	fileReferenceSource?: FileReferenceCompletionSource;
 	/** @deprecated Dynamic skill values move to the named `skills` slot in slice 11. */
 	listSkills?: () => unknown;
 }
@@ -224,6 +232,12 @@ interface SlashContext {
 	argsStart: number;
 }
 
+interface FileReferenceContext {
+	query: string;
+	prefix: string;
+	replacement: { start: number; end: number };
+}
+
 function slashContext(lines: string[], cursorLine: number, cursorCol: number): SlashContext | null {
 	if (cursorLine !== 0) return null;
 	const line = lines[0] ?? "";
@@ -256,6 +270,64 @@ function genericTokenRange(line: string, cursor: number): { start: number; end: 
 	return { start, end };
 }
 
+function quotedReferenceText(raw: string, quote: '"' | "'"): string {
+	const body = raw.startsWith(quote) ? raw.slice(1) : raw;
+	const withoutClose = body.endsWith(quote) ? body.slice(0, -1) : body;
+	let decoded = "";
+	let escaped = false;
+	for (const character of withoutClose) {
+		if (escaped) {
+			decoded += character;
+			escaped = false;
+			continue;
+		}
+		if (character === "\\") {
+			escaped = true;
+			continue;
+		}
+		decoded += character;
+	}
+	if (escaped) decoded += "\\";
+	return decoded;
+}
+
+function fileReferenceContext(lines: string[], cursorLine: number, cursorCol: number): FileReferenceContext | null {
+	const line = lines[cursorLine] ?? "";
+	const cursor = Math.max(0, Math.min(cursorCol, line.length));
+	for (let start = cursor - 1; start >= 0; start -= 1) {
+		if (line[start] !== "@" || (start > 0 && !/\s/u.test(line[start - 1] ?? ""))) continue;
+		const quote = line[start + 1] === '"' || line[start + 1] === "'" ? (line[start + 1] as '"' | "'") : null;
+		let end = start + 1;
+		let escaped = false;
+		if (quote) {
+			end += 1;
+			while (end < line.length) {
+				const character = line[end] ?? "";
+				end += 1;
+				if (escaped) {
+					escaped = false;
+					continue;
+				}
+				if (character === "\\") {
+					escaped = true;
+					continue;
+				}
+				if (character === quote) break;
+			}
+		} else {
+			while (end < line.length && !/\s/u.test(line[end] ?? "")) end += 1;
+		}
+		if (cursor < start + 1 || cursor > end) continue;
+		const rawQuery = line.slice(start + 1, cursor);
+		return {
+			query: quote ? quotedReferenceText(rawQuery, quote) : rawQuery,
+			prefix: line.slice(start, cursor),
+			replacement: { start, end },
+		};
+	}
+	return null;
+}
+
 function sourceRows(values: ReadonlyArray<CompletionValue>, prefix: string): CompletionValue[] {
 	const lower = prefix.toLowerCase();
 	return values.filter((value) => !value.sensitive && value.value.toLowerCase().startsWith(lower));
@@ -264,11 +336,18 @@ function sourceRows(values: ReadonlyArray<CompletionValue>, prefix: string): Com
 class ClioAutocompleteProvider implements AutocompleteProvider {
 	readonly triggerCharacters = ["/", "@"];
 	private readonly files: CombinedAutocompleteProvider;
+	private readonly fileReferences: FileReferenceCompletionSource;
 	private readonly sourceBySlot: Record<CompletionSlotName, CompletionSource>;
 	private generation = 0;
 
-	constructor(basePath: string, fdPath: string | null, sources: CompletionSources) {
+	constructor(
+		basePath: string,
+		fdPath: string | null,
+		sources: CompletionSources,
+		fileReferenceSource?: FileReferenceCompletionSource,
+	) {
 		this.files = new CombinedAutocompleteProvider([], basePath, fdPath);
+		this.fileReferences = fileReferenceSource ?? createFileReferenceCompletionSource({ basePath });
 		this.sourceBySlot = { ...stubCompletionSources(), ...sources };
 	}
 
@@ -281,6 +360,29 @@ class ClioAutocompleteProvider implements AutocompleteProvider {
 		const generation = ++this.generation;
 		const context = slashContext(lines, cursorLine, cursorCol);
 		if (!context) {
+			const reference = fileReferenceContext(lines, cursorLine, cursorCol);
+			if (reference) {
+				const values = await this.fileReferences({ query: reference.query, signal: options.signal });
+				if (generation !== this.generation || options.signal.aborted || values.length === 0) return null;
+				return {
+					prefix: reference.prefix,
+					items: values.map((value): SlashCompletionItem => {
+						const quotedDirectory = value.isDirectory && value.value.endsWith('"');
+						return {
+							id: value.id,
+							kind: value.isDirectory ? "open-submenu" : "value",
+							value: value.value,
+							label: value.label,
+							description: value.description,
+							effectDescription: value.description,
+							replacement: reference.replacement,
+							appendSpace: !value.isDirectory,
+							...(quotedDirectory ? { cursorOffset: -1 } : {}),
+							...(value.isDirectory ? { submenu: { parent: `@${value.path}`, back: true } } : {}),
+						};
+					}),
+				};
+			}
 			const suggestions = await this.files.getSuggestions(lines, cursorLine, cursorCol, options);
 			if (!suggestions || generation !== this.generation || options.signal.aborted) return null;
 			const range = genericTokenRange(lines[cursorLine] ?? "", cursorCol);
@@ -448,21 +550,28 @@ class ClioAutocompleteProvider implements AutocompleteProvider {
 			const next = [...lines];
 			next[cursorLine] =
 				`${current.slice(0, completion.replacement.start)}${inserted}${current.slice(completion.replacement.end + 1)}`;
-			return { lines: next, cursorLine, cursorCol: completion.replacement.start + inserted.length };
+			return {
+				lines: next,
+				cursorLine,
+				cursorCol: completion.replacement.start + inserted.length + (completion.cursorOffset ?? 0),
+			};
 		}
 		const needsSpace = completion.appendSpace && !/\s/.test(current[completion.replacement.end] ?? "");
 		const inserted = `${completion.value}${needsSpace ? " " : ""}`;
 		const next = [...lines];
 		next[cursorLine] =
 			`${current.slice(0, completion.replacement.start)}${inserted}${current.slice(completion.replacement.end)}`;
-		return { lines: next, cursorLine, cursorCol: completion.replacement.start + inserted.length };
+		return {
+			lines: next,
+			cursorLine,
+			cursorCol: completion.replacement.start + inserted.length + (completion.cursorOffset ?? 0),
+		};
 	}
 
 	shouldTriggerFileCompletion(lines: string[], cursorLine: number, cursorCol: number): boolean {
-		return (
-			slashContext(lines, cursorLine, cursorCol) === null &&
-			this.files.shouldTriggerFileCompletion(lines, cursorLine, cursorCol)
-		);
+		if (slashContext(lines, cursorLine, cursorCol) !== null) return false;
+		if (fileReferenceContext(lines, cursorLine, cursorCol) !== null) return true;
+		return this.files.shouldTriggerFileCompletion(lines, cursorLine, cursorCol);
 	}
 }
 
@@ -471,5 +580,6 @@ export function createSlashCommandAutocompleteProvider(options: SlashAutocomplet
 		options.basePath ?? process.cwd(),
 		options.fdPath === undefined ? resolveFdBinary() : options.fdPath,
 		options.completionSources ?? {},
+		options.fileReferenceSource,
 	);
 }

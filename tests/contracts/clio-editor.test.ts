@@ -190,6 +190,78 @@ describe("contracts/clio-editor", () => {
 		for (const line of lines) strictEqual(visibleWidth(line), 80);
 	});
 
+	it("keeps the @ picker open when Tab enters a directory submenu", async () => {
+		setKeybindings(new KeybindingsManager(CLIO_KEYBINDINGS));
+		const { editor } = createEditor();
+		editor.setAutocompleteProvider(
+			createSlashCommandAutocompleteProvider({
+				fdPath: null,
+				fileReferenceSource: async ({ query }) =>
+					query === "src/"
+						? [
+								{
+									id: "src/index.ts",
+									value: "@src/index.ts",
+									path: "src/index.ts",
+									label: "src/index.ts",
+									description: "git tracked · export const value = 1",
+									isDirectory: false,
+									tracked: true,
+								},
+								{
+									id: "src/other.ts",
+									value: "@src/other.ts",
+									path: "src/other.ts",
+									label: "src/other.ts",
+									description: "git tracked · second child",
+									isDirectory: false,
+									tracked: true,
+								},
+							]
+						: [
+								{
+									id: "src",
+									value: "@src/",
+									path: "src",
+									label: "src/",
+									description: "git tracked directory · Tab/Enter opens",
+									isDirectory: true,
+									tracked: true,
+								},
+								{
+									id: "docs",
+									value: "@docs/",
+									path: "docs",
+									label: "docs/",
+									description: "git tracked directory · Tab/Enter opens",
+									isDirectory: true,
+									tracked: true,
+								},
+							],
+			}),
+		);
+
+		editor.handleInput("@");
+		for (
+			let attempt = 0;
+			attempt < 20 && !editor.render(100).some((line) => plain(line).includes("src/"));
+			attempt += 1
+		) {
+			await new Promise<void>((resolve) => setTimeout(resolve, 10));
+		}
+		editor.handleInput("\t");
+		for (
+			let attempt = 0;
+			attempt < 20 && !editor.render(100).some((line) => plain(line).includes("export const value = 1"));
+			attempt += 1
+		) {
+			await new Promise<void>((resolve) => setTimeout(resolve, 10));
+		}
+
+		strictEqual(editor.getText(), "@src/");
+		ok(editor.render(100).some((line) => plain(line).includes("export const value = 1")));
+	});
+
 	it("submits a pasted slash command whose paste carried a trailing newline", () => {
 		const { editor, submitted } = createEditor();
 		editor.handleInput("\x1b[200~/model\n\x1b[201~");
