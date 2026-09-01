@@ -104,6 +104,25 @@ describe("contracts/model selector fuzzy search", () => {
 });
 
 describe("contracts/model selector row layout", () => {
+	it("wraps selected-model availability and diagnostics in full", () => {
+		const reason = "the configured endpoint rejected authentication and requires a replacement credential";
+		const diagnostic = "Set the credential for this target and refresh its model catalog before selecting it.";
+		const view = modelView([
+			modelRow("offline", "model-a", {
+				available: false,
+				healthText: "unavailable",
+				reason,
+				diagnostics: [{ severity: "error", code: "target-auth", message: diagnostic }],
+			}),
+		]);
+
+		const lines = stripAnsi(view.render(40)).split("\n");
+		const collapsed = lines.join(" ").replace(/\s+/gu, " ");
+		ok(collapsed.includes(reason), `availability reason was cut: ${collapsed}`);
+		ok(collapsed.includes(diagnostic), `diagnostic was cut: ${collapsed}`);
+		for (const line of lines) ok(line.length <= 40, `line overflows: ${line}`);
+	});
+
 	it("keeps a gutter between a full-width model id and the ctx column", () => {
 		// The real catalog carries ids long enough to fill the model column
 		// exactly, which used to render "…-distilled-i1262kctx" with no separator.
