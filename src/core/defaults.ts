@@ -529,7 +529,7 @@ export const DEFAULT_SETTINGS = {
 			layout: "off",
 			workers: { ratio: 0.34 },
 			files: {
-				enabled: true,
+				enabled: false,
 				mode: "companion",
 				profile: "managed",
 				followCwd: true,
@@ -668,7 +668,7 @@ interface:
     workers:
       ratio: 0.34
     files:
-      enabled: true
+      enabled: false
       mode: companion
       profile: managed
       followCwd: true

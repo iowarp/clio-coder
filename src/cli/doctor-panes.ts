@@ -45,7 +45,7 @@ export async function panesFindings(env: NodeJS.ProcessEnv = process.env): Promi
 	let layoutRow: DoctorFinding = {
 		ok: true,
 		name: "panes layout",
-		detail: "off (no boot composition); set interface.panes.layout to workers or cockpit",
+		detail: "off",
 	};
 	try {
 		const panes = readSettings().interface.panes;
@@ -71,11 +71,9 @@ export async function panesFindings(env: NodeJS.ProcessEnv = process.env): Promi
 			{
 				ok: true,
 				name: "panes mode",
-				detail:
-					"off by choice (panes.enabled=off); start `clio-coder --with-panes` for one session, or set panes.enabled=auto",
+				detail: "off by choice",
 			},
 			layoutRow,
-			journalWritabilityFinding(),
 		];
 	}
 

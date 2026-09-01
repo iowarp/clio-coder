@@ -22,6 +22,7 @@ import { inspectYaziNaming, regenerateYaziNamingProfile } from "../domains/lifec
 export interface NamingDoctorOptions {
 	fix?: boolean;
 	cwd?: string;
+	yaziEnabled?: boolean;
 }
 
 interface SettingsNamingInspection {
@@ -36,8 +37,13 @@ const LEGACY_ENVIRONMENT_NAMES = [
 	["CLIO_YAZI_PICK_TOKEN", "CLIO_CODER_YAZI_PICK_TOKEN"],
 ] as const;
 
-function namingEnvironmentFindings(environment: NodeJS.ProcessEnv = process.env): DoctorFinding[] {
-	const present = LEGACY_ENVIRONMENT_NAMES.filter(([legacy]) => Boolean(environment[legacy]?.trim()));
+function namingEnvironmentFindings(
+	yaziEnabled: boolean,
+	environment: NodeJS.ProcessEnv = process.env,
+): DoctorFinding[] {
+	const present = LEGACY_ENVIRONMENT_NAMES.filter(
+		([legacy]) => (yaziEnabled || legacy !== "CLIO_YAZI_PICK_TOKEN") && Boolean(environment[legacy]?.trim()),
+	);
 	if (present.length === 0) {
 		return [{ ok: true, name: "naming environment", detail: "no legacy Clio Coder environment variables are set" }];
 	}
@@ -135,7 +141,14 @@ function settingsFinding(label: string, inspection: SettingsNamingInspection, fi
 	};
 }
 
-function yaziNamingFinding(fix: boolean): DoctorFinding {
+function yaziNamingFinding(fix: boolean, enabled: boolean): DoctorFinding {
+	if (!enabled) {
+		return {
+			ok: true,
+			name: "naming yazi profile",
+			detail: "disabled by settings",
+		};
+	}
 	const inspection = inspectYaziNaming();
 	const legacy = inspection.legacyEvents + inspection.legacyEnvironmentNames;
 	if (legacy === 0) {
@@ -299,9 +312,9 @@ export function namingFootprintFindings(options: NamingDoctorOptions = {}): Doct
 		}
 		findings.push(settingsFinding(candidate.label, before, fixed));
 	}
-	findings.push(...namingEnvironmentFindings());
+	findings.push(...namingEnvironmentFindings(options.yaziEnabled ?? true));
 	findings.push(...namingResourceFindings({ ...options, cwd }));
-	findings.push(yaziNamingFinding(Boolean(options.fix)));
+	findings.push(yaziNamingFinding(Boolean(options.fix), options.yaziEnabled ?? true));
 	findings.push(toolMarkerNamingFinding(Boolean(options.fix)));
 	findings.push(immutableHistoryNamingFinding());
 	findings.push(legacyGitRefsFinding(cwd));
