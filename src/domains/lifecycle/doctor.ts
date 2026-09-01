@@ -491,7 +491,7 @@ export async function runDoctorFleetChecks(projectRoot: string = process.cwd()):
 	}
 	const nodes = settings.fleet?.nodes ?? [];
 	if (nodes.length === 0) return [];
-	const { recordFleetPreflight, runFleetNodePreflight } = await import("../dispatch/fleet-preflight.js");
+	const { runFleetNodePreflight } = await import("../dispatch/fleet-preflight.js");
 	// Endpoint facts are per node. Every configured target is probed from every
 	// node, because a `localhost` URL names a different machine on each one and
 	// an orchestrator-side probe would describe none of them.
@@ -502,12 +502,6 @@ export async function runDoctorFleetChecks(projectRoot: string = process.cwd()):
 		...(target.defaultModel !== undefined ? { wireModelId: target.defaultModel } : {}),
 	}));
 	const records = await Promise.all(nodes.map((node) => runFleetNodePreflight(node, projectRoot, { targets })));
-	try {
-		recordFleetPreflight(records);
-	} catch {
-		// The findings below still tell the operator what happened; a store
-		// write failure just means placement will keep denying these nodes.
-	}
 	return records.map((record) => ({
 		ok: true,
 		level: record.ok ? "ok" : "warn",
@@ -533,13 +527,25 @@ export async function runDoctorInteropChecks(projectRoot: string = process.cwd()
 	} catch {
 		return [];
 	}
-	const skills = loadSkills({ cwd: projectRoot });
+	const configDir = resolveClioDirs().config;
+	// Extension discovery resolves through the ensuring config accessor. With no
+	// config root there cannot be user Clio extensions or skills to inspect, so
+	// keep the broken partial home untouched and retain the binary checks below.
+	const skills = existsSync(configDir) ? loadSkills({ cwd: projectRoot, configDir }) : { items: [], diagnostics: [] };
 	const foreign = skills.items.filter((skill) => FOREIGN_SKILL_SOURCES.has(skill.source));
-	const report = await detectInteropAgents({
-		cwd: projectRoot,
-		probeVersion: true,
-		skillSources: skills.items.map((skill) => skill.source),
-	});
+	const report = await detectInteropAgents(
+		{
+			cwd: projectRoot,
+			// Version probes use the shared command runner, which prepares managed Git
+			// hooks before spawning. Doctor promises observation only, so PATH presence
+			// is the strongest safe fact here.
+			probeVersion: false,
+			skillSources: skills.items.map((skill) => skill.source),
+		},
+		// Reading the prior report resolves through the ensuring state accessor.
+		// Existing decisions are irrelevant to doctor's presence-only projection.
+		[],
+	);
 	const configured = new Set(settings.delegation.agents.map((agent) => agent.id));
 	const findings: DoctorFinding[] = report.agents.map((agent) => {
 		const kind = interopAgentKind(agent.kind);
