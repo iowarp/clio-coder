@@ -90,6 +90,7 @@ import {
 	toolNamesFromAgentState,
 } from "./chat-loop-messages.js";
 import { buildModelReplayAgentMessagesFromTurns } from "./model-session-replay.js";
+import { attachedToolSchemasFromState, mainPromptCacheIdentity } from "./prompt-cache-identity.js";
 import { renderCompactionSummaryLine, renderEvictionSkipLine } from "./renderers/compaction-summary.js";
 import type { TurnMiddleware } from "./turn-middleware.js";
 import type { AgentRuntime, ChatTurnState } from "./turn-state.js";
@@ -270,8 +271,8 @@ export function createTurnContext(deps: TurnContextDeps): TurnContext {
 	// before the operator did.
 	let lastPrewarm: PrewarmStats | null = null;
 	// The session system prompt, compiled once per session. Recompiles happen
-	// only on explicit events: the compile key (target, model, safety level,
-	// session id) changes, or a config hot-reload invalidates the cache. A
+	// only when the canonical identity of every live compile input changes, or
+	// a config hot-reload invalidates compiler-owned inputs. A
 	// recompile that changes the prompt text appends a "promptRecompiled"
 	// ledger entry so a cold provider cache is always explainable.
 	let sessionPrompt: CompiledSessionPrompt | null = null;
@@ -1021,8 +1022,8 @@ export function createTurnContext(deps: TurnContextDeps): TurnContext {
 
 		/**
 		 * Ensure the session system prompt is compiled and applied to the live
-		 * agent. Compiles only when the compile key (target, model, safety
-		 * level, session id) changes or a config hot-reload invalidated the
+		 * agent. Compiles only when the canonical live-input identity changes
+		 * or a config hot-reload invalidated compiler-owned inputs in the
 		 * cache; every other submit reuses the cached prompt byte-for-byte. A
 		 * compile whose text differs from the previous prompt queues a
 		 * "promptRecompiled" ledger entry (written once the session exists).
@@ -1032,12 +1033,7 @@ export function createTurnContext(deps: TurnContextDeps): TurnContext {
 			const settings = deps.getSettings();
 			const autonomy = settings.safety.autonomy ?? "auto-edit";
 			const sessionId = deps.session?.current()?.id ?? "";
-			const workingContextKey = [...sessionWorkingContextPaths].sort().join("\0");
-			const key = `${agentRuntime.targetId}|${agentRuntime.wireModelId}|${autonomy}|${sessionId}|${workingContextKey}`;
-			if (sessionPrompt && sessionPromptKey === key) {
-				lastSystemPromptReused = true;
-				return sessionPrompt;
-			}
+			const cwd = process.cwd();
 			const modelState = agentRuntime.agent.state.model as
 				| (typeof agentRuntime.agent.state.model & { clio?: { quirks?: LocalModelQuirks } })
 				| undefined;
@@ -1062,6 +1058,7 @@ export function createTurnContext(deps: TurnContextDeps): TurnContext {
 			// the frozen surface per compile. The compiler renders them sorted by
 			// tool name, so the compiled text stays byte-stable for a given surface.
 			const toolNames = toolNamesFromAgentState(agentRuntime.agent.state.tools);
+			const attachedToolSchemas = attachedToolSchemasFromState(agentRuntime.agent.state.tools);
 			const toolPromptHints = toolNames.flatMap((name) => {
 				const hint = deps.toolRegistry?.get(name as ToolName)?.metadata?.promptHint;
 				return hint ? [{ tool: name, hint }] : [];
@@ -1085,11 +1082,27 @@ export function createTurnContext(deps: TurnContextDeps): TurnContext {
 					);
 				}
 			}
+			const key = mainPromptCacheIdentity({
+				targetId: agentRuntime.targetId,
+				runtimeId: agentRuntime.runtimeId,
+				wireModelId: agentRuntime.wireModelId,
+				autonomy,
+				sessionId,
+				cwd,
+				workingContextPaths: [...sessionWorkingContextPaths],
+				contextWindowSource,
+				sessionInputs,
+				attachedToolSchemas,
+			});
+			if (sessionPrompt && sessionPromptKey === key) {
+				lastSystemPromptReused = true;
+				return sessionPrompt;
+			}
 			try {
 				const result = await deps.prompts.compileSessionPrompt({
 					sessionInputs,
 					autonomy,
-					cwd: process.cwd(),
+					cwd,
 					workingContextPaths: [...sessionWorkingContextPaths],
 				});
 				const previousHash = sessionPromptHash ?? lastRecordedPromptHash();
