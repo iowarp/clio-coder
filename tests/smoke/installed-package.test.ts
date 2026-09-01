@@ -152,7 +152,10 @@ describe("smoke/installed package", { concurrency: false }, () => {
 			strictEqual(indexed.code, 0, indexed.stdout + indexed.stderr);
 			const result = JSON.parse(indexed.stdout) as { indexedSourceFiles: number; codewikiPath: string };
 			strictEqual(result.indexedSourceFiles, 1);
-			ok([...lazyChunks].some((path) => coveredFiles(coverage).has(path)), "real indexing must evaluate the lazy chunk");
+			ok(
+				[...lazyChunks].some((path) => coveredFiles(coverage).has(path)),
+				"real indexing must evaluate the lazy chunk",
+			);
 			const codewiki = JSON.parse(readFileSync(result.codewikiPath, "utf8")) as {
 				symbols: Array<{ name: string }>;
 			};

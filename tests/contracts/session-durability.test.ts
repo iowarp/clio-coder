@@ -4,18 +4,8 @@ import { afterEach, beforeEach, describe, it } from "node:test";
 
 import { recoverOrphanReceipts } from "../../src/domains/dispatch/orphan-recovery.js";
 import { openLedger } from "../../src/domains/dispatch/state.js";
-import {
-	appendTurn,
-	persistSessionMeta,
-	resumeSessionState,
-	startSession,
-} from "../../src/domains/session/manager.js";
-import {
-	createSession,
-	readSessionFileEntries,
-	resumeSession,
-	sessionPaths,
-} from "../../src/engine/session.js";
+import { appendTurn, persistSessionMeta, resumeSessionState, startSession } from "../../src/domains/session/manager.js";
+import { createSession, readSessionFileEntries, resumeSession, sessionPaths } from "../../src/engine/session.js";
 import { type IsolatedClioEnv, isolateClioEnv } from "../harness/scratch-env.js";
 
 describe("session durability boundary", () => {

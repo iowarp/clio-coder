@@ -1,6 +1,6 @@
 import { deepStrictEqual, match, ok, strictEqual, throws } from "node:assert/strict";
 import { describe, it } from "node:test";
-import { withReceiptIntegrity, verifyReceiptIntegrity } from "../../src/domains/dispatch/receipt-integrity.js";
+import { verifyReceiptIntegrity, withReceiptIntegrity } from "../../src/domains/dispatch/receipt-integrity.js";
 import { attributeEvidenceFailure, type EvidenceFailureFacts } from "../../src/domains/evidence/failure-attribution.js";
 import { admitRunProvenance, runProvenanceFromUnknown } from "../../src/domains/evidence/provenance.js";
 import { createRedactionTally, redactSecretsDeep } from "../../src/domains/evidence/redact.js";

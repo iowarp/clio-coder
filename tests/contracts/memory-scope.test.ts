@@ -5,13 +5,13 @@ import { join } from "node:path";
 import { afterEach, describe, it } from "node:test";
 import { canonicalMemoryRepositoryIdentity, selectApprovedMemory } from "../../src/domains/memory/operations.js";
 import { memoryRecordFromPromotion } from "../../src/domains/memory/promotion.js";
+import { TaskMemoryBank } from "../../src/domains/memory/task-bank.js";
 import {
 	parseTaskMemoryHandoffSnapshot,
 	renderTaskMemoryHandoffSnapshot,
 	seedTaskMemoryBank,
 	taskMemoryHandoffSnapshot,
 } from "../../src/domains/memory/task-memory-handoff.js";
-import { TaskMemoryBank } from "../../src/domains/memory/task-bank.js";
 import type { MemoryRecord, MemoryRepositoryIdentity } from "../../src/domains/memory/types.js";
 
 const roots: string[] = [];
@@ -46,10 +46,7 @@ describe("memory scope boundary", () => {
 			tokenBudget: 10_000,
 			activeRepository: repoA,
 		});
-		deepStrictEqual(
-			selected.map(({ id }) => id).sort(),
-			["a", "global"],
-		);
+		deepStrictEqual(selected.map(({ id }) => id).sort(), ["a", "global"]);
 		deepStrictEqual(
 			selectApprovedMemory(records, { scopes: ["global", "repo"], tokenBudget: 10_000, activeRepository: null }).map(
 				({ id }) => id,

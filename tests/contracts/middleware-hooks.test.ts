@@ -1,10 +1,10 @@
 import { deepStrictEqual, strictEqual } from "node:assert/strict";
 import { describe, it } from "node:test";
 import {
-	runMiddlewareAsyncRegistrations,
-	runMiddlewareRegistrations,
 	type MiddlewareDiagnostic,
 	type MiddlewareHookRegistration,
+	runMiddlewareAsyncRegistrations,
+	runMiddlewareRegistrations,
 } from "../../src/domains/middleware/runtime.js";
 
 function registration(
@@ -23,10 +23,10 @@ describe("middleware hook boundary", () => {
 			seen.push((context?.priorEffects ?? []).map(({ kind }) => kind));
 			return [{ kind: "block_tool", reason: "protected", severity: "hard-block" }];
 		});
-		const result = runMiddlewareRegistrations(
-			{ hook: "before_tool", toolName: "write", toolArgs: { path: "PLAN.md" } },
-			[first, second],
-		);
+		const result = runMiddlewareRegistrations({ hook: "before_tool", toolName: "write", toolArgs: { path: "PLAN.md" } }, [
+			first,
+			second,
+		]);
 		deepStrictEqual(result.ruleIds, ["first", "second"]);
 		deepStrictEqual(result.effects, [
 			{ kind: "inject_reminder", message: "prepare" },

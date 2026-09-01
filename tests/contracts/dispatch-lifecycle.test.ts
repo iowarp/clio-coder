@@ -11,8 +11,8 @@ import {
 	settleStoredAssignment,
 } from "../../src/domains/dispatch/assignment-store.js";
 import { withReceiptIntegrity } from "../../src/domains/dispatch/receipt-integrity.js";
-import { clearScratchClioHome, newScratchClioHome } from "../harness/scratch-env.js";
 import { fixtureEnvelope, fixtureReceiptDraft } from "../harness/receipt.js";
+import { clearScratchClioHome, newScratchClioHome } from "../harness/scratch-env.js";
 
 describe("dispatch assignment lifecycle", () => {
 	let scratch: string | null = null;
@@ -56,7 +56,10 @@ describe("dispatch assignment lifecycle", () => {
 		strictEqual((await opened.terminal).runId, "run-retry");
 		const final = registry.get(opened.id);
 		strictEqual(final?.status, "succeeded");
-		deepStrictEqual(final?.attempts.map(({ runId }) => runId), ["run-root", "run-retry"]);
+		deepStrictEqual(
+			final?.attempts.map(({ runId }) => runId),
+			["run-root", "run-retry"],
+		);
 	});
 
 	it("keeps detached lifecycle state durable and transition-idempotent", async () => {
