@@ -45,7 +45,7 @@ clio-coder                # start the interactive session in any project directo
 ```
 
 Requires Node.js `>=22.19.0`. `configure` lists the runtimes, asks for the
-endpoint and model, probes it, and saves it as the chat and worker target; bare
+endpoint and model, probes it, and saves it as the chat and fleet default; bare
 `clio-coder` opens the same wizard when nothing usable is configured yet. In the
 first session, type a request in plain words or `/help` for the command
 palette. `/settings` changes the model later, `/quit` leaves, and
@@ -55,6 +55,36 @@ Adding `--omit=optional` to that install skips the Claude Agent SDK's 224MB
 proprietary binary, taking the tree from 387MB to 143MB. Everything but the
 `claude-sdk` worker runtime works without it. See
 [Installation and Lifecycle](docs/installation-and-lifecycle.md#optional-dependency-the-claude-agent-sdk).
+
+## What changed in v0.4.1
+
+- **`settings.yaml` v2** replaces the accumulated legacy layout with seven
+  durable areas: `chat`, `fleet`, `targets`, `context`, `safety`, `interface`,
+  and `integrations`. `clio-coder upgrade` automatically migrates a v1 (or
+  unversioned pre-v2) file once, writes it atomically, and keeps the original as
+  `settings.yaml.v1.bak`.
+- **The interactive command surface is smaller and explicit.** `/settings`
+  accepts the same seven area names, resources meet under `/resources`, and
+  retired slash commands stop at targeted tombstones instead of falling
+  through to the model.
+- **The editor operator family is honest about context.** `@` opens a
+  workspace-aware file picker, `!` runs a public shell command whose result can
+  enter model context, and `!!` runs a context-excluded shell command that
+  remains visible to you but is never sent to a model.
+- **herdr can host managed docks.** The opt-in
+  `interface.panes.layout: workers` layout opens a live workers dock beside
+  Clio; `cockpit` adds the files dock.
+- **The local skills marketplace can meet a request in flight.** Clio may offer
+  a matching uninstalled skill, but every install initiated by that promotion
+  flow is hard-gated to Clio's own shipped catalog or the
+  `iowarp/clio-coder` repository. A public registry or foreign GitHub source is
+  refused before the installer runs.
+
+The release also hardens the surfaces that tend to fail outside unit tests:
+plain `doctor` is read-only again, configure cancellation exits correctly,
+trace empty states preserve their JSON contracts, fleet views wrap and honor
+`NO_COLOR`, Settings and other interactive prose stop losing remedy text, and
+the Workbench and herdr dock lifecycle close their timing and recovery gaps.
 
 |  | You are | Start here |
 | --- | --- | --- |
@@ -115,6 +145,7 @@ or the reverse.
 | `lmstudio` | LM Studio |
 | `ollama-native` | Ollama |
 | `vllm`, `sglang` | vLLM and SGLang |
+| `litellm` | LiteLLM gateways with per-alias capability discovery and routed-model attribution |
 | `lemonade`, `lemonade-anthropic` | Lemonade |
 | `openai-compat`, `anthropic-compat` | Any OpenAI- or Anthropic-shaped endpoint |
 | `openai`, `anthropic`, `google`, `groq`, `mistral`, `deepseek`, `openrouter`, `bedrock` | Cloud APIs |
@@ -165,11 +196,12 @@ Run `clio-coder` from the repository you want to work on. The session opens on a
 one-line header that names where Clio is working, which route answers, and
 whether project context is ready, and then the transcript owns the screen.
 Tool calls render as live rows with their verdicts, successful edits render as
-numbered diffs, and `!` runs a shell command in the same transcript.
+numbered diffs, and editor operators put files and local shell output in the
+same transcript.
 
 | You want to | Type |
 | --- | --- |
-| Change model, target, thinking level, autonomy, or terminal options | `/settings`, `/model`, `/thinking` |
+| Change model, target, thinking level, autonomy, or terminal options | `/settings [chat\|fleet\|targets\|context\|safety\|interface\|integrations]`, `/model`, `/thinking` |
 | See what is in the context window and what it costs | `/context`, `/cost` |
 | Branch, revisit, or pick up a session | `/tree`, `/fork`, `/resume`, `/new` |
 | Delegate to a fleet agent and watch it work | `/run coder "..."`, `/tasks`, `Alt+W` |
@@ -177,16 +209,82 @@ numbered diffs, and `!` runs a shell command in the same transcript.
 | Ask a side question without touching the session, or get a read-only second opinion | `/btw <question>`, `/oracle <question>` |
 | Put the same question to several models at once and read one synthesis | `/council --synthesis vote "..."` |
 | Preview and run a multi-step fleet contract, resumable from the CLI | `/fleet run <name>` |
-| Install agents, prompts, fleets, and skills from a catalog | `/library`, `/library agents` |
+| Browse or install agents, prompts, fleets, extensions, and skills | `/resources`, `/resources library agent` |
 | Carry the working state into a fresh session | `/handoff <goal>` |
 | Save a self-contained HTML transcript | `/export` (an explicit `.md` path keeps Markdown) |
 | Everything else | `/help` |
 
 Enter while Clio is running steers the current turn; `Alt+Enter` queues a
-follow-up; `Esc` cancels. Settings → Terminal offers an opt-in fullscreen mode
-with a sticky composer beneath an independently scrollable transcript; regular
-terminal scrollback is the default. The complete command and keybinding
-reference is [docs/commands-and-modes.md](docs/commands-and-modes.md).
+follow-up; `Esc` cancels. `/settings interface` opens the Terminal options,
+including an opt-in fullscreen mode with a sticky composer beneath an
+independently scrollable transcript; regular terminal scrollback is the
+default. The complete command and keybinding reference is
+[docs/commands-and-modes.md](docs/commands-and-modes.md).
+
+### Settings v2 and the seven areas
+
+The user config is a strict `version: 2` YAML document. Its seven top-level
+areas match the seven arguments accepted by `/settings`. Those arguments are
+stable deep links into the current Settings Center; the overlay still divides
+the detailed editor into its existing subsections, while the durable paths on
+disk use the seven-area vocabulary below.
+
+| Area | What it owns |
+| --- | --- |
+| `chat` | Active target and model, thinking, model-picker state, output limits, prewarm, and interactive retry |
+| `fleet` | Worker defaults and profiles, rosters, agent bindings, routing, nodes, permissions, limits, retry, and run history |
+| `targets` | Provider/runtime connections, advertised models, capabilities, and routing roles |
+| `context` | Working-set eviction, compaction, and proactive task memory |
+| `safety` | Autonomy, cost/tool/read ceilings, and the review watchdog |
+| `interface` | Output detail, terminal mode, streaming, notifications, keybindings, and panes |
+| `integrations` | Project resource trust, external agents, runtime plugins, resource libraries, and Git attribution |
+
+When upgrading an existing install, run `clio-coder upgrade`. The v1-to-v2
+migration runs before strict v2 consumers load, records its migration id so it
+does not run twice, writes through an atomic rename, and leaves the byte-exact
+v1 file beside the result as `settings.yaml.v1.bak`. If old and new paths
+collide, it refuses the migration and leaves the original untouched instead of
+guessing which value should win.
+
+The removed slash spellings are non-executing tombstones with exact remedies:
+`/targets` points to `/settings targets`, `/scoped-models` points to
+`/settings chat model-picker`, and `/library`, `/prompts`, and `/extensions`
+point to their `/resources` equivalents. The `clio-coder targets`,
+`clio-coder skills`, and other CLI command families remain available; this
+cleanup applies to slash commands inside the interactive session.
+
+### The operator family today
+
+| Operator | Behavior |
+| --- | --- |
+| `@` | Opens the workspace-aware picker. A bare `@` starts at the workspace root, a name fuzzily searches visible paths, and directory prefixes drill into the tree. Selecting a file inserts a reference that is expanded into the request when submitted. |
+| `! command` | Runs one shell command in the interactive working directory. The durable transcript entry, command, and output are available to model replay and compaction. |
+| `!! command` | Runs the same shell path and keeps the result visible and durable, but marks both command and output `not sent to model`; replay, compaction, and context accounting all exclude it. |
+
+Bang operators arm only for a non-empty, typed, single-line draft. A
+bracketed-pasted `!` or `!!` line, or any multiline draft beginning with one,
+is treated as literal prompt text rather than executed.
+
+### Optional herdr docks
+
+Panes remain off by default. Inside an existing herdr session, persist guest
+mode and the workers layout in `settings.yaml`:
+
+```yaml
+version: 2
+interface:
+  panes:
+    enabled: auto
+    layout: workers
+```
+
+For a one-session activation, keep `layout: workers` and run
+`clio-coder --with-panes` instead of persisting `enabled: auto`. The workers
+dock opens the live run viewer to the right of Clio; `layout: cockpit` also
+opens the managed files dock when files are enabled. Managed docks close on a
+clean Clio exit, while adoption of a surviving dock is reserved for crash
+recovery. `embedded` is accepted as a setting but explicitly reports that it
+is not implemented; guest mode is the working rung in v0.4.1.
 
 Outside the TUI, the same engine runs headless and speaks to editors:
 
@@ -269,6 +367,19 @@ an installed copy verifies against its audited source, and
 `clio-coder skills eval <name>` runs a skill's executable evals instead of
 trusting the prose.
 
+The catalog is also a local marketplace. On a request that matches an
+uninstalled skill and is not already covered by an installed one, the
+coordinator can offer project install, user install, not now, or never for that
+skill version, then continue the task in the same turn. Matching is local and
+lexical; request text does not leave the machine. Full-auto may skip the
+question, but it cannot skip the source gate: consented and autonomous
+promotion installs both accept only the shipped local catalog or this
+repository's own tree, and they install without activating. Dispatch workers
+never receive offers, and only the operator activates a skill with `/skill`.
+Manual `clio-coder skills install <path|github-url>` remains available for a
+source you deliberately choose; the own-marketplace guarantee governs what
+Clio installs on its own initiative.
+
 **Task memory** keeps long runs from drifting: a rules-only tier with no model
 calls watches tool and lifecycle hooks and surfaces advisory reminders at the
 right boundaries, `/memory` inspects it, and durable lessons are reviewed with
@@ -288,7 +399,7 @@ dist-tag instead.
 From source, pinned to this release:
 
 ```bash
-git clone --branch v0.4.0 https://github.com/iowarp/clio-coder.git
+git clone --branch v0.4.1 https://github.com/iowarp/clio-coder.git
 cd clio-coder
 npm run install:local
 export PATH="$HOME/.local/bin:$PATH"
@@ -314,7 +425,7 @@ Full lifecycle details, including `reset` and the upgrade path, are in
 
 ## Status
 
-The current release is **v0.4.0**, installable from npm as
+The current release is **v0.4.1**, installable from npm as
 [`@iowarp/clio-coder`](https://www.npmjs.com/package/@iowarp/clio-coder) or
 from source. Clio Coder is still experimental: we ship quickly, interfaces may
 change between minor versions, and model-specific behavior varies by target, so
