@@ -14,8 +14,8 @@ import { createDispatchBundle } from "../src/domains/dispatch/extension.js";
 import type { RunReceiptReproducibility } from "../src/domains/dispatch/types.js";
 import type { SpawnedWorker } from "../src/domains/dispatch/worker-spawn.js";
 import { createMiddlewareBundle } from "../src/domains/middleware/index.js";
-import type { PromptsContract } from "../src/domains/prompts/contract.js";
 import { compileWorker } from "../src/domains/prompts/compiler.js";
+import type { PromptsContract } from "../src/domains/prompts/contract.js";
 import { customizationFragments } from "../src/domains/prompts/extension.js";
 import { loadFragments } from "../src/domains/prompts/fragment-loader.js";
 import type { ProvidersContract, RuntimeDescriptor, TargetStatus } from "../src/domains/providers/index.js";
@@ -221,10 +221,9 @@ export function dispatchStubContext(): DomainContext {
 }
 
 /** Script one worker result without importing the repository test harness. */
-export function scriptedGateFabric(script: {
-	builderText: string;
-	builderWritesFile?: string;
-}): { spawn: (spec: WorkerSpec, options?: { cwd?: string }) => SpawnedWorker } {
+export function scriptedGateFabric(script: { builderText: string; builderWritesFile?: string }): {
+	spawn: (spec: WorkerSpec, options?: { cwd?: string }) => SpawnedWorker;
+} {
 	let nextPid = 300;
 	return {
 		spawn(_spec, options) {
