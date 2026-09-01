@@ -1693,11 +1693,8 @@ describe("contracts/settings center", () => {
 		}
 	});
 
-	it("claims every terminal row it covers, with no side margin at ultra-narrow widths", () => {
-		for (const { columns, sideMargin } of [
-			{ columns: 40, sideMargin: 0 },
-			{ columns: 100, sideMargin: 2 },
-		]) {
+	it("claims every terminal row and column so transcript fragments cannot flank the frame", () => {
+		for (const columns of [60, 80, 120]) {
 			const fake = fakeTui(24, columns);
 			openSettingsOverlay(fake.tui, {
 				getSettings: settingsWithTargets,
@@ -1705,17 +1702,14 @@ describe("contracts/settings center", () => {
 				onClose: () => undefined,
 			});
 			const options = fake.options();
-			ok(options?.visible);
-			options.visible(columns, 24);
-			const margin = options.margin as { left: number; right: number };
-			strictEqual(margin.left, sideMargin, `${columns} columns left margin`);
-			strictEqual(margin.right, sideMargin, `${columns} columns right margin`);
+			deepStrictEqual(options?.margin, { top: 1, right: 0, bottom: 1, left: 0 });
 
 			const overlay = fake.captured();
 			ok(overlay);
-			const inner = columns - sideMargin * 2;
-			for (const line of overlay.render(inner)) {
-				strictEqual(visibleWidth(line), inner, `every covered row is opaque: ${JSON.stringify(stripAnsi(line))}`);
+			for (const line of overlay.render(columns)) {
+				strictEqual(visibleWidth(line), columns, `every covered row is opaque: ${JSON.stringify(stripAnsi(line))}`);
+				const plain = stripAnsi(line);
+				ok(plain.startsWith("┌") || plain.startsWith("│") || plain.startsWith("└"), plain);
 			}
 		}
 	});
