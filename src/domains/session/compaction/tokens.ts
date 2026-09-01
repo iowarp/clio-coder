@@ -49,6 +49,10 @@ function estimateMessage(entry: MessageEntry): number {
 }
 
 function estimateBashExecution(entry: BashExecutionEntry): number {
+	// `!!` rows are transcript-only and never become provider input, including
+	// through a later compaction prompt. Charging their bytes to the model
+	// context would make the context meter claim the model can see private output.
+	if (entry.excludeFromContext === true) return 0;
 	return ceilChars(entry.command.length + entry.output.length);
 }
 

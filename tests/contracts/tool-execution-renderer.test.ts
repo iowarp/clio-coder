@@ -136,7 +136,7 @@ describe("contracts/tool execution transcript", () => {
 		);
 		ok(settled.includes("✓"), settled);
 		ok(settled.includes("output · exit 0"), settled);
-		ok(settled.includes("excluded from context"), settled);
+		ok(settled.includes("not sent to model"), settled);
 		ok(settled.includes("clean"), settled);
 	});
 
@@ -176,7 +176,7 @@ describe("contracts/tool execution transcript", () => {
 		ok(settled.includes("exit 0"), settled);
 		ok(settled.includes("19B shown / 40B total"), settled);
 		ok(settled.includes("truncated"), settled);
-		ok(settled.includes("excluded from context"), settled);
+		ok(settled.includes("not sent to model"), settled);
 		ok(settled.includes("full: /tmp/clio-local-bash.log"), settled);
 		ok(!settled.includes("clean"), settled);
 	});

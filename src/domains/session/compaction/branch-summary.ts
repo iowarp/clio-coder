@@ -162,6 +162,10 @@ export function serializeConversation(entries: ReadonlyArray<SessionEntry>): str
 			continue;
 		}
 		if (entry.kind === "bashExecution") {
+			// `!!` is an operator-private terminal command. Its immutable ledger
+			// entry remains available to transcript replay, but neither its command
+			// nor its output may cross a model boundary through compaction.
+			if (entry.excludeFromContext === true) continue;
 			parts.push(`[Bash]: $ ${entry.command}\n${truncate(entry.output, TOOL_RESULT_MAX_CHARS)}`);
 			continue;
 		}

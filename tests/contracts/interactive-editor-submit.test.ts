@@ -626,7 +626,7 @@ describe("contracts/interactive editor submit", () => {
 		ok(!rendered.includes("bash("), rendered);
 		ok(rendered.includes("live output"), rendered);
 		ok(rendered.includes("checking src"), rendered);
-		ok(rendered.includes("excluded from model context"), rendered);
+		ok(rendered.includes("not sent to model"), rendered);
 		fold.setFold(undefined);
 
 		resolveBash({ ...bashResult(), stdout: "checking src\nclean\n" });
@@ -636,7 +636,7 @@ describe("contracts/interactive editor submit", () => {
 		ok(rendered.includes("✓"), rendered);
 		ok(rendered.includes("ran `npm run typecheck`"), rendered);
 		ok(rendered.includes("exit 0"), rendered);
-		ok(rendered.includes("excluded from context"), rendered);
+		ok(rendered.includes("not sent to model"), rendered);
 		ok(!rendered.includes("clean"), `the settled row stays folded, got: ${rendered}`);
 		strictEqual(harness.replayBlocks.length, 1, "settlement keeps the original transcript position");
 
