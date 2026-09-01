@@ -4,6 +4,7 @@ import type { BashCommandResult, RunBashCommandOptions } from "../../src/core/ba
 import type { DispatchContract } from "../../src/domains/dispatch/contract.js";
 import { stripTerminalSequences } from "../../src/engine/tui.js";
 import type { ReplayBlockFoldControl } from "../../src/interactive/chat-panel.js";
+import { guardPastedEditorOperator } from "../../src/interactive/editor-bash.js";
 import {
 	createEditorSubmitController,
 	type EditorSubmitDeps,
@@ -235,6 +236,23 @@ describe("contracts/interactive editor submit", () => {
 		deepStrictEqual(commands, ["printf first", "printf second"]);
 		releases[1]?.(bashResult());
 		await flushAsync();
+	});
+
+	it("routes multiline and bracketed-pasted bang text as literal prompts, never bash", async () => {
+		const harness = createHarness();
+		harness.deps.dispatchCommandAsync = async (command) => {
+			harness.events.push(`admit:${command}`);
+		};
+		const controller = createEditorSubmitController(harness.deps);
+		const multiline = "! printf one\nprintf two";
+
+		controller.submitEditorText(multiline);
+		await controller.admitCapturedText(guardPastedEditorOperator("!! printf pasted"));
+
+		strictEqual(harness.events.includes("append-bash"), false);
+		deepStrictEqual(harness.history, [multiline, "!! printf pasted"]);
+		ok(harness.events.includes(`dispatch:${multiline}`));
+		ok(harness.events.includes("admit:!! printf pasted"));
 	});
 
 	it("aborts a captured bash admission while a chat turn is settling", async () => {
