@@ -550,9 +550,7 @@ export class ViewOverlayView implements Component {
 		}
 		if (this.artifactError) {
 			lines.push(
-				...wrapTextWithAnsi(theme.fg("error", this.artifactError), Math.max(1, width)).map((line) =>
-					padAnsi(line, width),
-				),
+				...wrapTextWithAnsi(theme.fg("error", this.artifactError), Math.max(1, width)).map((line) => padAnsi(line, width)),
 			);
 			return this.fixedLines(lines, width, height);
 		}

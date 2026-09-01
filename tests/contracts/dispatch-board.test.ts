@@ -301,7 +301,10 @@ describe("dispatch board card", () => {
 		const taskSummary = "Audit cancellation semantics and explain every operator-visible recovery path before stopping.";
 		const outcomeDetail = "The worker stopped after the endpoint closed; reconnect the target and retry this dispatch.";
 		const lines = renderDispatchCard(makeRow({ taskSummary, status: "failed", outcomeDetail }), 44);
-		const collapsed = lines.map(stripSgr).join(" ").replace(/[│\s]+/gu, " ");
+		const collapsed = lines
+			.map(stripSgr)
+			.join(" ")
+			.replace(/[│\s]+/gu, " ");
 
 		ok(collapsed.includes(taskSummary), `task summary was cut: ${collapsed}`);
 		ok(collapsed.includes(outcomeDetail), `terminal detail was cut: ${collapsed}`);
