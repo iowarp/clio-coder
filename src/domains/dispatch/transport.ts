@@ -26,13 +26,7 @@ import { AI_AGENT_NAME } from "../../core/agent-environment.js";
 import { shellQuote } from "../../core/shell-quote.js";
 import type { WorkerSpec } from "../../worker/spec-contract.js";
 import type { RunNodeIdentity } from "./types.js";
-import {
-	type SpawnedWorker,
-	type SpawnOptions,
-	spawnNativeWorker,
-	spawnWorkerProcess,
-	type WorkerProcessOptions,
-} from "./worker-spawn.js";
+import { type SpawnedWorker, spawnWorkerProcess, type WorkerProcessOptions } from "./worker-spawn.js";
 
 export type WorkerTransportKind = "local" | "ssh";
 
@@ -94,17 +88,6 @@ export function localNodeIdentity(): RunNodeIdentity {
 	return { id: LOCAL_NODE_ID, kind: "local" };
 }
 
-export function createLocalWorkerTransport(opts?: Omit<SpawnOptions, "cwd">): WorkerTransport {
-	return {
-		kind: "local",
-		node: localNodeIdentity(),
-		spawn(spec, spawnOpts) {
-			// The caller's per-spawn options ride over the transport's own defaults.
-			return spawnNativeWorker(spec, { ...opts, ...spawnOpts });
-		},
-	};
-}
-
 const DEFAULT_SSH_CONNECT_TIMEOUT_SEC = 10;
 const DEFAULT_REMOTE_CLIO_ENTRY = "clio-coder worker";
 
@@ -126,7 +109,7 @@ function remoteEnvAssignments(node: SshNodeEndpoint): string {
 	return `AI_AGENT=${AI_AGENT_NAME} CLIO_CODER_RESIDENCY=${residency} CLIO_CODER_WORKER_PGID=$$${labelAssignment}`;
 }
 
-export function buildRemoteWorkerCommand(node: SshNodeEndpoint, cwd: string): string {
+function buildRemoteWorkerCommand(node: SshNodeEndpoint, cwd: string): string {
 	const entry =
 		node.clioCoderEntry !== undefined && node.clioCoderEntry.trim().length > 0
 			? node.clioCoderEntry.trim()

@@ -54,7 +54,7 @@ function answeredAtForDecision(policy: AskUserToolPolicy, sourceQuestion: string
  * The policy already keeps last-value-wins decisions; the defensive map also
  * makes conversion deterministic for hand-built policies and older callers.
  */
-export function finalizedInterviewEntryFields(policy: AskUserToolPolicy): DecisionLedgerEntryFields | null {
+function finalizedInterviewEntryFields(policy: AskUserToolPolicy): DecisionLedgerEntryFields | null {
 	if (policy.rounds.length === 0 && policy.decisions.length === 0) return null;
 	if (!policy.turnId) throw new Error(`decision board: interview ${policy.id} has no originating user turn`);
 	if (policy.status !== "complete" && policy.status !== "cancelled") {

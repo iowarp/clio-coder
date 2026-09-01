@@ -152,7 +152,7 @@ function boundNotifyBytes(text: string, maxBytes: number): string {
 }
 
 /** The closed-vocabulary body for one event. */
-export function desktopNotifyBody(event: DesktopNotifyEvent): string {
+function desktopNotifyBody(event: DesktopNotifyEvent): string {
 	if (event.kind === "turn-finished") return "turn finished";
 	if (event.kind === "approval-needed") return "approval needed";
 	const shortId = boundNotifyBytes(sanitizeNotifyText(event.shortId), 32);
@@ -160,7 +160,7 @@ export function desktopNotifyBody(event: DesktopNotifyEvent): string {
 }
 
 /** True when the environment names a terminal that answers OSC 9 rather than OSC 777. */
-export function prefersOsc9(env: Readonly<Record<string, string | undefined>>): boolean {
+function prefersOsc9(env: Readonly<Record<string, string | undefined>>): boolean {
 	if (typeof env.WT_SESSION === "string" && env.WT_SESSION.length > 0) return true;
 	const program = (env.TERM_PROGRAM ?? "").trim().toLowerCase();
 	if (program.length === 0) return false;
@@ -173,7 +173,7 @@ export function prefersOsc9(env: Readonly<Record<string, string | undefined>>): 
  * chosen for the terminals that implement it instead. Exactly one sequence is
  * returned, so a single event can never produce two notifications.
  */
-export function buildDesktopNotifySequence(
+function buildDesktopNotifySequence(
 	event: DesktopNotifyEvent,
 	env: Readonly<Record<string, string | undefined>> = process.env,
 ): string {
@@ -208,7 +208,7 @@ export interface DesktopNotifier {
  * events. Every call re-checks the setting and the surface, so turning
  * `terminal.notify` off mid-session silences the next event.
  */
-export function createDesktopNotifier(deps: DesktopNotifierDeps): DesktopNotifier {
+function createDesktopNotifier(deps: DesktopNotifierDeps): DesktopNotifier {
 	const env = deps.env ?? process.env;
 	return {
 		notify(event) {

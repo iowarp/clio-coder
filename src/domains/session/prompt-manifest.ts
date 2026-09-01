@@ -155,11 +155,6 @@ function isSessionPromptCompileRecord(value: unknown): value is SessionPromptCom
 	);
 }
 
-/** A record written before the field existed describes the 0.3.8 layout. */
-export function promptManifestVersion(record: SessionPromptCompileRecord): number {
-	return record.version ?? 1;
-}
-
 export function getPromptManifestFilePath(meta: SessionMeta, stateDir?: string): string {
 	const safeMeta = {
 		...meta,

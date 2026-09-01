@@ -597,7 +597,7 @@ function readinessHashProjection(report: RouteReadinessReport): readonly [boolea
  * `decisionDurationMs`, which is a measurement of the decision rather than an
  * input to it, so a replay on a faster machine still reproduces the hash.
  */
-export function routeDecisionHash(input: RouteDecisionInput): string {
+function routeDecisionHash(input: RouteDecisionInput): string {
 	// Arrays give every field an explicit position, so native JSON serialization
 	// is deterministic without recursively sorting hundreds of short-lived
 	// objects at the maximum universe bound. Candidate identity uses the same

@@ -40,7 +40,7 @@ function randomState(): string {
 	return base64Url(bytes);
 }
 
-export function buildAuthorizeUrl(params: { challenge: string; state: string }): string {
+function buildAuthorizeUrl(params: { challenge: string; state: string }): string {
 	const query = new URLSearchParams({
 		client_id: AUTH_CLIENT_ID,
 		response_type: "code",
@@ -55,7 +55,7 @@ export function buildAuthorizeUrl(params: { challenge: string; state: string }):
 	return `${AUTHORIZE_URL}?${query.toString()}`;
 }
 
-export function parseAuthorizationInput(input: string): string {
+function parseAuthorizationInput(input: string): string {
 	const value = input.trim();
 	if (!value) return "";
 	try {
@@ -89,7 +89,7 @@ function isRecord(value: unknown): value is Record<string, unknown> {
 	return typeof value === "object" && value !== null;
 }
 
-export function selectGatewayGrant(payload: GlobusTokenResponse): GlobusTokenGrant {
+function selectGatewayGrant(payload: GlobusTokenResponse): GlobusTokenGrant {
 	const grants: GlobusTokenGrant[] = [payload, ...(Array.isArray(payload.other_tokens) ? payload.other_tokens : [])];
 	const byResourceServer = grants.find((grant) => grant.resource_server === GATEWAY_CLIENT_ID);
 	if (byResourceServer) return byResourceServer;
@@ -103,7 +103,7 @@ export function selectGatewayGrant(payload: GlobusTokenResponse): GlobusTokenGra
 	);
 }
 
-export function grantToCredentials(grant: GlobusTokenGrant, previousRefresh?: string): OAuthCredentials {
+function grantToCredentials(grant: GlobusTokenGrant, previousRefresh?: string): OAuthCredentials {
 	const access = grant.access_token;
 	if (typeof access !== "string" || access.length === 0) {
 		throw new Error("Globus token response is missing an access token for the ALCF gateway.");
@@ -172,7 +172,7 @@ async function refreshGatewayToken(refreshToken: string, signal: AbortSignal): P
 	return grantToCredentials(selectGatewayGrant(payload), refreshToken);
 }
 
-export async function loginAlcf(callbacks: OAuthLoginCallbacks): Promise<OAuthCredentials> {
+async function loginAlcf(callbacks: OAuthLoginCallbacks): Promise<OAuthCredentials> {
 	const { verifier, challenge } = await generatePkce();
 	const url = buildAuthorizeUrl({ challenge, state: randomState() });
 	callbacks.onAuth({

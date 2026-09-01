@@ -357,7 +357,7 @@ export interface LlamaCppRequestContextWindow {
  * 25% (issue #187). With `--kv-unified` every slot shares one sequence and
  * the total is the window.
  */
-export function llamaCppRequestContextWindow(flags: LlamaCppServerFlags): LlamaCppRequestContextWindow | undefined {
+function llamaCppRequestContextWindow(flags: LlamaCppServerFlags): LlamaCppRequestContextWindow | undefined {
 	const total = positiveNumber(flags.contextSize);
 	if (total === undefined) return undefined;
 	const parallel = positiveNumber(flags.parallel);
@@ -423,7 +423,7 @@ function booleanFlag(args: ReadonlyArray<string>, ...flags: ReadonlyArray<string
 	return undefined;
 }
 
-export function parseLlamaCppServerFlags(args: ReadonlyArray<string>): LlamaCppServerFlags {
+function parseLlamaCppServerFlags(args: ReadonlyArray<string>): LlamaCppServerFlags {
 	const flags: LlamaCppServerFlags = {};
 	const ctxSize = numberFlag(args, "--ctx-size", "-c");
 	if (ctxSize !== undefined) flags.contextSize = ctxSize;

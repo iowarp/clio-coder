@@ -64,19 +64,6 @@ export interface DeclaredScopeReplacementNotice {
 	message: string;
 }
 
-export interface LegacyScopeInferenceNotice {
-	code: "legacy_scope_inferred" | "legacy_scope_empty";
-	level: "warning";
-	paths: ReadonlyArray<{
-		path: string;
-		policy: "working-context" | "write-boundary";
-		provenance: DispatchPathProvenanceKind;
-		source: DispatchPathProvenanceSource;
-		confidence: DispatchPathConfidence;
-	}>;
-	message: string;
-}
-
 export type DispatchPathScopeInferenceErrorCode = "legacy_scope_path_absolute" | "legacy_scope_path_malformed";
 
 export class DispatchPathScopeInferenceError extends Error {
@@ -318,53 +305,5 @@ export function declaredScopeReplacementNotice(scope: DispatchPathScope): Declar
 		message: `[dispatch scope] typed intent replaced prose path inference; omitted paths: ${omittedPaths.join(
 			", ",
 		)}. Those paths did not select project rules or expand worker authority.`,
-	};
-}
-
-function legacyNoticePaths(scope: DispatchPathScope): LegacyScopeInferenceNotice["paths"] {
-	const paths: Array<LegacyScopeInferenceNotice["paths"][number]> = [];
-	for (const [policy, entries] of [
-		["working-context", scope.provenance.workingContextPaths],
-		["write-boundary", scope.provenance.writeBoundaries],
-	] as const) {
-		for (const entry of entries) {
-			for (const evidence of entry.evidence) {
-				paths.push({
-					path: entry.path,
-					policy,
-					provenance: evidence.provenance,
-					source: evidence.source,
-					confidence: evidence.confidence,
-				});
-			}
-		}
-	}
-	return paths;
-}
-
-/** Render the operator-visible warning for a legacy scope resolution. */
-export function legacyScopeInferenceNotice(scope: DispatchPathScope): LegacyScopeInferenceNotice | null {
-	if (scope.source !== "inferred") return null;
-	const paths = legacyNoticePaths(scope);
-	if (paths.length === 0) {
-		return {
-			code: "legacy_scope_empty",
-			level: "warning",
-			paths,
-			message:
-				"[dispatch scope] legacy dispatch has no declared intent and inferred no policy-bearing paths. Path-scoped rules received no inferred match input, and worker authority did not expand.",
-		};
-	}
-	const rendered = paths
-		.map(
-			(entry) =>
-				`${entry.policy} ${entry.path} (provenance=${entry.provenance} source=${entry.source} confidence=${entry.confidence})`,
-		)
-		.join("; ");
-	return {
-		code: "legacy_scope_inferred",
-		level: "warning",
-		paths,
-		message: `[dispatch scope] legacy dispatch resolved policy-bearing scope without declared intent: ${rendered}. Review this scope before execution.`,
 	};
 }

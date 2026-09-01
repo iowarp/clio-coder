@@ -102,7 +102,7 @@ export async function runEvalSuiteV2(
 }
 
 /** Known receipt cost of one finished matrix item; unpriced runs count zero. */
-export function resultCostUsd(result: Pick<EvalArtifactResultV4, "metrics">): number {
+function resultCostUsd(result: Pick<EvalArtifactResultV4, "metrics">): number {
 	const value = result.metrics["cost.usd"];
 	return typeof value === "number" && Number.isFinite(value) && value > 0 ? value : 0;
 }

@@ -23,7 +23,7 @@ export const CONTEXT_CATEGORY_TOKEN: Readonly<Record<ContextLedgerCategory, Clio
 	streaming: "accent",
 };
 
-export function contextCategoryGlyph(category: ContextLedgerCategory): string {
+function contextCategoryGlyph(category: ContextLedgerCategory): string {
 	const filled = visibleSingle(GLYPH.contextFull) ? GLYPH.contextFull : GLYPH.barFull;
 	const free = visibleSingle(GLYPH.contextFree) ? GLYPH.contextFree : GLYPH.barEmpty;
 	// The autocompact reserve is held-back headroom, not consumed context; it
@@ -187,7 +187,7 @@ export type WorkerContextSeverity = "healthy" | "warn" | "critical";
 export const WORKER_CONTEXT_WARN_PCT = 80;
 export const WORKER_CONTEXT_CRITICAL_PCT = 95;
 
-export function workerContextSeverity(pct: number): WorkerContextSeverity {
+function workerContextSeverity(pct: number): WorkerContextSeverity {
 	if (pct >= WORKER_CONTEXT_CRITICAL_PCT) return "critical";
 	if (pct >= WORKER_CONTEXT_WARN_PCT) return "warn";
 	return "healthy";
@@ -211,10 +211,7 @@ export interface WorkerContextView {
  * usage has been observed yet. The percentage is capped at 100: a provider
  * report past the window is a full window, not a >100% claim.
  */
-export function workerContextView(
-	usedTokens: number,
-	contextWindow: number | undefined | null,
-): WorkerContextView | null {
+function workerContextView(usedTokens: number, contextWindow: number | undefined | null): WorkerContextView | null {
 	if (contextWindow === undefined || contextWindow === null || contextWindow <= 0) return null;
 	if (!Number.isFinite(usedTokens) || usedTokens <= 0) return null;
 	const pct = Math.min(100, Math.round((usedTokens / contextWindow) * 100));

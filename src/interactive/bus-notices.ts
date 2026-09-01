@@ -125,7 +125,7 @@ function workerEscalationAxis(
 	return null;
 }
 
-export function middlewareBudgetWarningKey(payload: unknown): string | null {
+function middlewareBudgetWarningKey(payload: unknown): string | null {
 	if (!isMiddlewareHookFailedPayload(payload)) return null;
 	if (payload.kind !== "budget_exceeded") return null;
 	return `${payload.registrationId}\u0000${payload.hook}`;
@@ -137,7 +137,7 @@ export function middlewareBudgetWarningKey(payload: unknown): string | null {
  * either way; this warn notice is the operator's only interactive signal
  * that a guard or assessor is misbehaving.
  */
-export function middlewareHookFailedNotice(
+function middlewareHookFailedNotice(
 	payload: unknown,
 	options: MiddlewareHookFailedNoticeOptions = {},
 ): BusNotice | null {

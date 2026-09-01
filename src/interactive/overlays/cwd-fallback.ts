@@ -115,7 +115,7 @@ function describedSelect(list: SelectList, choices: ReadonlyArray<SelectItem>): 
  * Pure builder. Exposed so tests can assert row shape without booting the TUI.
  * Two rows: Continue (uses process cwd) and Cancel (returns to picker).
  */
-export function buildCwdFallbackItems(args: {
+function buildCwdFallbackItems(args: {
 	currentCwd: string;
 	sessionCwd: string;
 	reason: CwdFallbackReason;

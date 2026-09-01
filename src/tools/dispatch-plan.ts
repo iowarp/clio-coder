@@ -900,14 +900,3 @@ export function describeDispatchPlan(rawArgs: Record<string, unknown> | undefine
 		...(confirmation !== undefined ? { confirmation } : {}),
 	};
 }
-
-/** Registry-side predicate: does this dispatch call require plan approval at supervised levels? */
-export function isPlanScaleDispatchArgs(rawArgs: Record<string, unknown> | undefined): boolean {
-	try {
-		return describeDispatchPlan(rawArgs).planScale;
-	} catch {
-		// A malformed call fails closed as NOT plan-scale; the dispatch tool's
-		// own validation rejects it with a real error message.
-		return false;
-	}
-}

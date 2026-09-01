@@ -117,7 +117,7 @@ function taskReceiptRows(task: TaskBoardTask, width: number): string[] {
 	return [];
 }
 
-export function formatTasksOverlayBodyLines(
+function formatTasksOverlayBodyLines(
 	board: TaskBoardSnapshot | null,
 	contentWidth = DEFAULT_CONTENT_WIDTH,
 	selectedTaskId?: string | null,
@@ -243,7 +243,7 @@ const USER_TASK_PRESENTATION: Record<UserTask["status"], { glyph: string; token:
 };
 
 /** Pure composite renderer; callers provide already-captured history/artifact/user snapshots. */
-export function formatCompositeTasksOverlayBodyLines(
+function formatCompositeTasksOverlayBodyLines(
 	state: CompositeTasksOverlayState,
 	contentWidth = DEFAULT_CONTENT_WIDTH,
 ): string[] {

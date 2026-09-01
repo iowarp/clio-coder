@@ -145,7 +145,7 @@ function resolveCwd(command: FleetCommand, workspaceRoot: string): string {
 }
 
 /** Closed environment: the base allowlist plus whatever this command declared. */
-export function codeStepEnv(command: FleetCommand, source: NodeJS.ProcessEnv): NodeJS.ProcessEnv {
+function codeStepEnv(command: FleetCommand, source: NodeJS.ProcessEnv): NodeJS.ProcessEnv {
 	const names = [...FLEET_COMMAND_BASE_ENV, ...command.env];
 	const env: NodeJS.ProcessEnv = {};
 	for (const name of names) {

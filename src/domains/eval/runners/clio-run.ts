@@ -92,7 +92,7 @@ type ToolCallMetrics = {
 type ToolOutcome = "ok" | "error" | "blocked";
 
 /** Fold the terminal tool events emitted by `clio-coder run --json`. */
-export function toolCallMetricsFromJsonl(stdout: string): ToolCallMetrics {
+function toolCallMetricsFromJsonl(stdout: string): ToolCallMetrics {
 	const executionEnds: ToolCallMetrics = { totalCalls: 0, failed: 0, blocked: 0 };
 	const canonicalFinishes: ToolCallMetrics = { totalCalls: 0, failed: 0, blocked: 0 };
 	const seenExecutionEnds = new Set<string>();
@@ -148,7 +148,7 @@ interface BehavioralToolTerminal {
  * bounded counters against the suite's explicit public allowlist and decoy
  * list; they never become behavioral fact values or evidence excerpts.
  */
-export function toolBehaviorMetricEntriesFromJsonl(
+function toolBehaviorMetricEntriesFromJsonl(
 	stdout: string,
 	cwd: string,
 	readObservation?: { allowedPaths: string[]; decoyPaths: string[] },

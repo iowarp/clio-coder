@@ -113,7 +113,7 @@ interface LibraryTabContext {
  * approval preview instead, so this returns null for one and the caller routes
  * it there.
  */
-export function libraryUseInvocation(entry: Pick<LibraryEntry, "kind" | "name">): string | null {
+function libraryUseInvocation(entry: Pick<LibraryEntry, "kind" | "name">): string | null {
 	if (entry.kind === "fleet") return null;
 	if (entry.kind === "agent") return `/run ${entry.name} `;
 	if (entry.kind === "prompt") return `/${entry.name} `;
@@ -148,7 +148,7 @@ function skillBody(content: string): string {
 }
 
 /** @internal exported for contract tests */
-export function buildInstalledItems(list: ResourceList<Skill>): ListOverlayItem[] {
+function buildInstalledItems(list: ResourceList<Skill>): ListOverlayItem[] {
 	return list.items.map((skill) => {
 		const theme = clioTheme();
 		const flagged = list.diagnostics.some((diag) => diagnosticTouchesSkill(diag.path, skill));
@@ -182,7 +182,7 @@ export function buildInstalledItems(list: ResourceList<Skill>): ListOverlayItem[
 }
 
 /** @internal exported for contract tests */
-export function buildMarketplaceItems(
+function buildMarketplaceItems(
 	skills: ReadonlyArray<MarketplaceSkill>,
 	installed: ReadonlySet<string>,
 ): ListOverlayItem[] {
@@ -215,7 +215,7 @@ export function buildMarketplaceItems(
 }
 
 /** @internal exported for contract tests */
-export function buildDiagnosticItems(
+function buildDiagnosticItems(
 	list: ResourceList<Skill>,
 	marketplaceDiagnostics: ReadonlyArray<string> = [],
 ): ListOverlayItem[] {
@@ -252,7 +252,7 @@ export function buildDiagnosticItems(
 }
 
 /** @internal exported for contract tests */
-export function libraryRowId(entry: Pick<LibraryEntry, "kind" | "name">): string {
+function libraryRowId(entry: Pick<LibraryEntry, "kind" | "name">): string {
 	return `${LIBRARY_ROW_PREFIX}${libraryEntryRef(entry)}`;
 }
 
@@ -267,7 +267,7 @@ export function libraryRowId(entry: Pick<LibraryEntry, "kind" | "name">): string
  *
  * @internal exported for contract tests
  */
-export function buildLibraryItems(kind: LibraryEntryKind, context: LibraryTabContext): ListOverlayItem[] {
+function buildLibraryItems(kind: LibraryEntryKind, context: LibraryTabContext): ListOverlayItem[] {
 	const theme = clioTheme();
 	return context.discovery.entries
 		.filter((entry) => entry.kind === kind)
@@ -318,7 +318,7 @@ export function buildLibraryItems(kind: LibraryEntryKind, context: LibraryTabCon
  *
  * @internal exported for contract tests
  */
-export function buildLibraryDiagnosticItems(discovery: LibraryDiscoveryResult): ListOverlayItem[] {
+function buildLibraryDiagnosticItems(discovery: LibraryDiscoveryResult): ListOverlayItem[] {
 	const theme = clioTheme();
 	return discovery.diagnostics
 		.filter((message) => message !== MARKETPLACE_UNCONFIGURED)
@@ -360,7 +360,7 @@ export interface LibraryInstallRunner {
  *
  * @internal exported for contract tests
  */
-export async function runLibraryInstall(
+async function runLibraryInstall(
 	entry: LibraryEntry,
 	runner: LibraryInstallRunner,
 	options: { withRequirements: boolean },

@@ -292,7 +292,7 @@ const ROUTING_FIELD_LABELS: ReadonlyArray<{
  * writer — a second session, the CLI, or a manual edit — moved the defaults
  * out from under this session.
  */
-export function externalRoutingDivergence(
+function externalRoutingDivergence(
 	changedPaths: ReadonlyArray<string>,
 	saved: Readonly<ClioSettings>,
 	effective: Readonly<ClioSettings>,

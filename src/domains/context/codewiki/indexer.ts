@@ -752,7 +752,7 @@ function mergeTreeSitterWithRegexImports(
 	};
 }
 
-export function fallbackExtraction(language: CodewikiLanguage, relPath: string, text: string): LanguageExtraction {
+function fallbackExtraction(language: CodewikiLanguage, relPath: string, text: string): LanguageExtraction {
 	return extractWithExtractors(fallbackExtractors, language, relPath, text);
 }
 

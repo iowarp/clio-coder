@@ -271,7 +271,7 @@ function modelBlock(row: CostRow): string[] {
 	]);
 }
 
-export function formatCostOverlayBodyLines(
+function formatCostOverlayBodyLines(
 	totalCost: CostAggregate,
 	totalTokens: number,
 	rows: ReadonlyArray<CostRow>,

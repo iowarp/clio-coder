@@ -227,7 +227,7 @@ function budgetDenial(
 	};
 }
 
-export function evaluateClaudeToolPermission(input: EvaluateClaudeToolPermissionInput): ClaudeToolPermissionDecision {
+function evaluateClaudeToolPermission(input: EvaluateClaudeToolPermissionInput): ClaudeToolPermissionDecision {
 	const mapped = mapClaudeToolCall(input.toolName, input.input, input.cwd);
 	const call: ClassifierCall = { tool: mapped.clioToolName, args: mapped.args };
 	const attempt = input.budgetGate?.attempt(mapped.clioToolName);

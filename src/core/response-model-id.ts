@@ -101,20 +101,6 @@ export function responseModelIdObservationFromRecord(
 	return { state: "legacy-difference-only", differingModelId: nonEmptyString(record.responseModel) };
 }
 
-/** Human vocabulary shared by usage, footer, and receipt projections. */
-export function responseModelIdObservationLabel(observation: ResponseModelIdObservation): string {
-	switch (observation.state) {
-		case "reported":
-			return "reported";
-		case "not-reported":
-			return "not reported";
-		case "not-observed":
-			return "not observed";
-		case "legacy-difference-only":
-			return "legacy difference-only";
-	}
-}
-
 /** Model id used for accounting without claiming more than the observation supports. */
 export function attributedModelId(
 	observation: ResponseModelIdObservation,

@@ -65,12 +65,12 @@ export interface DocsMenuEntry {
 }
 
 /** Resolve docs/html from the package root; present in a source checkout, absent from the npm package. */
-export function resolveDocsHtmlDir(): string {
+function resolveDocsHtmlDir(): string {
 	return resolve(resolvePackageRoot(), "docs", "html");
 }
 
 /** Content-type for a file path by extension. Pure. Defaults to octet-stream. */
-export function contentTypeFor(filePath: string): string {
+function contentTypeFor(filePath: string): string {
 	const dot = filePath.lastIndexOf(".");
 	if (dot === -1) return "application/octet-stream";
 	return CONTENT_TYPES[filePath.slice(dot).toLowerCase()] ?? "application/octet-stream";
@@ -82,7 +82,7 @@ export function contentTypeFor(filePath: string): string {
  * to `index.html`, and rejects any traversal segment so a request can never
  * escape the served directory.
  */
-export function resolveRequestPath(rawUrl: string): { ok: true; relative: string } | { ok: false; reason: string } {
+function resolveRequestPath(rawUrl: string): { ok: true; relative: string } | { ok: false; reason: string } {
 	const pathPart = (rawUrl.split(/[?#]/, 1)[0] ?? "").trim();
 	let decoded: string;
 	try {
@@ -112,7 +112,7 @@ function titleize(topic: string): string {
  * the file-name list, not the directory. `index.html` is the menu itself and is
  * excluded; a trailing `_blueprint` is stripped from the topic key.
  */
-export function synthesizeMenu(fileNames: ReadonlyArray<string>): DocsMenuEntry[] {
+function synthesizeMenu(fileNames: ReadonlyArray<string>): DocsMenuEntry[] {
 	const entries: DocsMenuEntry[] = [];
 	for (const name of fileNames) {
 		if (!name.toLowerCase().endsWith(".html")) continue;
@@ -129,7 +129,7 @@ export function synthesizeMenu(fileNames: ReadonlyArray<string>): DocsMenuEntry[
  * topic (`safety`), the blueprint file stem (`safety_blueprint`), or a full
  * `.html` name, case-insensitively. Returns null when nothing matches.
  */
-export function topicToFile(topic: string, fileNames: ReadonlyArray<string>): string | null {
+function topicToFile(topic: string, fileNames: ReadonlyArray<string>): string | null {
 	const wanted = topic
 		.trim()
 		.toLowerCase()
@@ -227,7 +227,7 @@ export interface StartDocsServerOptions {
 }
 
 /** Start the viewer bound to 127.0.0.1 on an ephemeral port. */
-export async function startDocsServer(options: StartDocsServerOptions): Promise<DocsServerHandle> {
+async function startDocsServer(options: StartDocsServerOptions): Promise<DocsServerHandle> {
 	const host = options.host ?? HOST;
 	const server = createServer(createDocsRequestHandler(options.htmlDir));
 	await new Promise<void>((resolveListen, rejectListen) => {

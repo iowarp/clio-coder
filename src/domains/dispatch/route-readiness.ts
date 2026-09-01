@@ -90,31 +90,3 @@ export function evaluateRouteReadiness(input: RouteReadinessInput): RouteReadine
 		labelsNeeded: Math.max(0, MINIMUM_ACTIVE_QUALITY_LABELS - estimate.qualityLabeledCount),
 	};
 }
-
-/**
- * Human-readable one-liners for a refusal message. The wording names the
- * missing evidence, so an operator who sees an active refusal can tell whether
- * to wait for measurements or to fix a stale fact.
- */
-export function describeReadinessGap(gap: ReadinessGap): string {
-	switch (gap) {
-		case "hard-constraint-validity-below-one":
-			return "hard-constraint evaluation was not consistently valid over the retained window";
-		case "integrity-failures-in-window":
-			return "the retained window contains receipt or source integrity failures";
-		case "insufficient-quality-labels":
-			return `fewer than ${MINIMUM_ACTIVE_QUALITY_LABELS} quality-labeled outcomes for this route and role`;
-		case "quality-lower-bound-below-posture-floor":
-			return "the conservative quality lower bound is below the posture floor";
-		case "quality-lower-bound-below-requested-minimum":
-			return "the conservative quality lower bound is below the request's minimumQuality";
-		case "reliability-below-posture-floor":
-			return "route-attributable reliability is below the posture floor";
-		case "cost-upper-bound-unknown":
-			return "the route has no conservative cost upper bound";
-		case "route-facts-stale":
-			return "node, endpoint, resource, capacity, or settings facts are stale";
-		case "decision-latency-above-budget":
-			return `shadow decision p95 exceeds ${DECISION_LATENCY_BUDGET_MS} ms at the configured universe bound`;
-	}
-}

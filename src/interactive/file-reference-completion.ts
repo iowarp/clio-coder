@@ -291,7 +291,7 @@ async function candidateDescription(candidate: FileCandidate): Promise<string> {
 }
 
 /** Quote a completion exactly the way the inline-reference scanner accepts. */
-export function formatInlineFileReference(path: string, isDirectory: boolean): string {
+function formatInlineFileReference(path: string, isDirectory: boolean): string {
 	const completionPath = isDirectory ? `${path.replace(/\/$/u, "")}/` : path;
 	if (!/[\s"'\\]/u.test(completionPath) && !isEditorSteerTargetToken(completionPath)) return `@${completionPath}`;
 	return `@"${completionPath.replaceAll("\\", "\\\\").replaceAll('"', '\\"')}"`;

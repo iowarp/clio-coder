@@ -77,7 +77,7 @@ function contractKindFrom(receipt: Record<string, unknown>): WorkerPresentedResu
  * by older versions of Clio are still valid history, so every field is read
  * structurally and a missing one degrades the footer rather than the render.
  */
-export function workerReceiptFacts(receipt: Record<string, unknown>): WorkerReceiptFacts | null {
+function workerReceiptFacts(receipt: Record<string, unknown>): WorkerReceiptFacts | null {
 	const outcome = optionalString(receipt.outcome);
 	if (outcome === undefined) return null;
 	const output = isRecord(receipt.output) ? receipt.output : null;

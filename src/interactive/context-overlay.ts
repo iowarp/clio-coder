@@ -166,7 +166,7 @@ function renderWorkingSetLines(view: WorkingSetView, config: WorkingSetConfigVie
 	];
 }
 
-export function renderContextLedgerLines(
+function renderContextLedgerLines(
 	ledger: ContextLedger,
 	contentWidth: number,
 	workingSet?: WorkingSetView | null,

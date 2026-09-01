@@ -20,7 +20,7 @@ export interface FullscreenLayout {
 	transcript: ScrollView;
 }
 
-export function buildFullscreenLayout(
+function buildFullscreenLayout(
 	parts: LayoutParts,
 	options: Pick<LayoutOptions, "fullscreenScrollbar"> = {},
 ): FullscreenLayout {

@@ -185,10 +185,7 @@ function finiteNumber(value: unknown): number | undefined {
 	return typeof value === "number" && Number.isFinite(value) ? value : undefined;
 }
 
-export function workerRuntimeKind(
-	runtimeKind: RunKind | undefined,
-	runtimeId: string | undefined,
-): WorkerRunRuntimeKind {
+function workerRuntimeKind(runtimeKind: RunKind | undefined, runtimeId: string | undefined): WorkerRunRuntimeKind {
 	if (runtimeKind === "acp-delegation") return "acp";
 	if (runtimeId === "claude-code") return "claude-code";
 	if (runtimeId === "claude-sdk") return "claude-sdk";

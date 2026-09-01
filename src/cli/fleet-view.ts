@@ -204,7 +204,7 @@ export interface LoadRunViewOptions {
  * first, then a unique prefix. An ambiguous prefix resolves to nothing so the
  * caller can say which ids it matched.
  */
-export function resolveRunId(runId: string): { runId: string } | { candidates: string[] } {
+function resolveRunId(runId: string): { runId: string } | { candidates: string[] } {
 	const ledger = openLedger();
 	if (ledger.get(runId) !== null) return { runId };
 	const candidates = ledger
@@ -287,7 +287,7 @@ function wrapViewerValue(prefix: string, value: string, columns: number): string
  * returns the same strings, which is what lets the data-source test assert the
  * header and outcome without a PTY.
  */
-export function renderRunView(model: RunViewModel, width: number = DEFAULT_WIDTH): string[] {
+function renderRunView(model: RunViewModel, width: number = DEFAULT_WIDTH): string[] {
 	const columns = Math.max(MIN_WIDTH, width);
 	const rule = "─".repeat(columns);
 	const lines: string[] = [];
@@ -341,7 +341,7 @@ export function renderRunView(model: RunViewModel, width: number = DEFAULT_WIDTH
  * the first is the pane before any worker was entered, the second is a queued
  * run the operator selected before its ledger row landed.
  */
-export function renderWatchView(
+function renderWatchView(
 	runId: string | null,
 	model: RunViewModel | null,
 	width: number = DEFAULT_WIDTH,
@@ -430,7 +430,7 @@ function fleetRunsDir(): string {
  * first, then a unique prefix over the durable fleet-run records. An ambiguous
  * prefix resolves to nothing so the caller can name what it matched.
  */
-export function resolveFleetRootId(token: string): { rootId: string } | { candidates: string[] } {
+function resolveFleetRootId(token: string): { rootId: string } | { candidates: string[] } {
 	if (readFleetRun(token) !== null) return { rootId: token };
 	let entries: string[];
 	try {
@@ -503,7 +503,7 @@ export function loadFleetRunViewModel(rootId: string, options: { now?: () => num
  * The step index as lines. Pure, for the same reason {@link renderRunView} is:
  * asserting the strings is asserting what an operator sees.
  */
-export function renderFleetRunView(model: FleetRunViewModel, width: number = DEFAULT_WIDTH): string[] {
+function renderFleetRunView(model: FleetRunViewModel, width: number = DEFAULT_WIDTH): string[] {
 	const columns = Math.max(MIN_WIDTH, width);
 	const rule = "─".repeat(columns);
 	const lines: string[] = [];
@@ -633,7 +633,7 @@ function applyViewDirs(dirs: ParsedViewArgs["dirs"]): void {
  * interval, never a crash; the writer (src/interactive/watch-pane.ts) replaces
  * the file atomically.
  */
-export function readWatchSelection(path: string): string | null {
+function readWatchSelection(path: string): string | null {
 	let raw: string;
 	try {
 		raw = readFileSync(path, "utf8");

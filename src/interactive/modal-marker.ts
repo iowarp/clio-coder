@@ -49,20 +49,11 @@ export const MODAL_MARKER_BASE_TITLE = "clio";
 export const MODAL_MARKER_TITLE_PATTERN = /^clio \[modal:([a-z0-9][a-z0-9-]*)(?:\+([1-9]\d*))?\]$/u;
 
 /** Render the title for a modal stack, outermost first. */
-export function formatModalMarkerTitle(stack: readonly string[]): string {
+function formatModalMarkerTitle(stack: readonly string[]): string {
 	const top = stack.at(-1);
 	if (top === undefined) return MODAL_MARKER_BASE_TITLE;
 	const beneath = stack.length - 1;
 	return `${MODAL_MARKER_BASE_TITLE} [modal:${top}${beneath > 0 ? `+${beneath}` : ""}]`;
-}
-
-/** Read a marker title back. Returns null for the base title and for anything else. */
-export function parseModalMarkerTitle(title: string): { id: string; depth: number } | null {
-	const match = MODAL_MARKER_TITLE_PATTERN.exec(title);
-	const id = match?.[1];
-	if (id === undefined) return null;
-	const beneath = match?.[2];
-	return { id, depth: beneath === undefined ? 1 : 1 + Number.parseInt(beneath, 10) };
 }
 
 /** One modal's claim on the keyboard, released when the overlay goes away. */
@@ -152,19 +143,9 @@ function createModalMarkerRegistry(): ModalMarkerRegistry {
 	return { enter, stack: (): readonly string[] => activeIds() };
 }
 
-let registry = createModalMarkerRegistry();
+const registry = createModalMarkerRegistry();
 
 /** Push a modal onto the process-wide stack. See {@link ModalMarkerRegistry.enter}. */
 export function enterModal(id: string, sink?: ModalMarkerSink | null): ModalMarkerHandle {
 	return registry.enter(id, sink);
-}
-
-/** The ids that currently own keys, outermost first. */
-export function modalMarkerStack(): readonly string[] {
-	return registry.stack();
-}
-
-/** Drop every claim and forget the sink. Tests use it to isolate; nothing in the app does. */
-export function resetModalMarker(): void {
-	registry = createModalMarkerRegistry();
 }

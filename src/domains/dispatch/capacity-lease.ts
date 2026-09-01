@@ -68,7 +68,7 @@ export interface LeaseOwnerProbe {
 	alive?(pid: number): boolean;
 }
 
-export function capacityStatePath(): string {
+function capacityStatePath(): string {
 	return join(clioStateDir(), "dispatch-admission.json");
 }
 /** The admission state file itself keys the one cross-process transaction lock. */
@@ -508,10 +508,7 @@ export function createNodeLeaseUsageReader(options: {
 	};
 }
 
-export function listCapacityLeases(options?: {
-	nowMs?: number;
-	probe?: LeaseOwnerProbe;
-}): ReadonlyArray<CapacityLease> {
+function listCapacityLeases(options?: { nowMs?: number; probe?: LeaseOwnerProbe }): ReadonlyArray<CapacityLease> {
 	return withStateFileLockSync(capacityStateLockPath(), () => {
 		const file = readCapacityStateUnsafe();
 		const before = file.leases.length;

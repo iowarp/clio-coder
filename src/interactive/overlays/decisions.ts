@@ -113,7 +113,7 @@ function decisionLines(decision: DecisionRecord, selected: boolean, expanded: bo
 	return lines;
 }
 
-export function formatDecisionsOverlayBodyLines(
+function formatDecisionsOverlayBodyLines(
 	interviews: ReadonlyArray<DecisionLedgerEntry>,
 	selectedIndex = 0,
 	expandedKey: string | null = null,

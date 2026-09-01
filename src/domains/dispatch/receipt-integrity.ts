@@ -237,10 +237,7 @@ function integrityPayload(receipt: RunReceipt | RunReceiptDraft, envelope: RunEn
 	};
 }
 
-export function computeReceiptIntegrity(
-	receipt: RunReceipt | RunReceiptDraft,
-	envelope: RunEnvelope,
-): RunReceiptIntegrity {
+function computeReceiptIntegrity(receipt: RunReceipt | RunReceiptDraft, envelope: RunEnvelope): RunReceiptIntegrity {
 	return {
 		version: RUN_RECEIPT_INTEGRITY_VERSION,
 		algorithm: RUN_RECEIPT_INTEGRITY_ALGORITHM,

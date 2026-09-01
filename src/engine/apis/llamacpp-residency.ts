@@ -5,7 +5,6 @@ import {
 	type ResidencyAdapter,
 	ResidencyPreconditionError,
 	reconcileResidency,
-	resetResidencyState,
 	residencyManaged,
 	residentTagProtected,
 } from "./residency.js";
@@ -72,11 +71,6 @@ interface LlamaCppRouterProps {
 	maxInstances?: number;
 }
 
-/** Test-only: clear the reconciler's TTL cache and Clio-loaded registry. */
-export function resetLlamaCppResidencyState(): void {
-	resetResidencyState();
-}
-
 function isRecord(value: unknown): value is Record<string, unknown> {
 	return value !== null && typeof value === "object" && !Array.isArray(value);
 }
@@ -107,19 +101,7 @@ function residentModel(model: LlamaCppRouterModel): boolean {
 	return isResidentState(model.state);
 }
 
-/** Extract resident (loaded, loading, or sleeping) model records from a /v1/models payload. */
-export function parseLlamaCppResidentModels(payload: unknown): LlamaCppResidentModel[] {
-	return parseRouterModels(payload)
-		.filter(residentModel)
-		.map((entry) => ({ id: entry.id, tags: entry.tags }));
-}
-
-/** Extract resident (loaded or loading) model ids from a /v1/models payload. */
-export function parseLlamaCppResident(payload: unknown): string[] {
-	return parseLlamaCppResidentModels(payload).map((entry) => entry.id);
-}
-
-export function parseLlamaCppRouterProps(payload: unknown): LlamaCppRouterProps {
+function parseLlamaCppRouterProps(payload: unknown): LlamaCppRouterProps {
 	if (!isRecord(payload)) return {};
 	const maxInstances = payload.max_instances;
 	return typeof maxInstances === "number" && Number.isFinite(maxInstances) && maxInstances > 0

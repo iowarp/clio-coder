@@ -226,7 +226,7 @@ export interface JsonlMetricCapture {
  * split JSON arbitrarily; oversized non-metric lines are discarded without
  * growing memory.
  */
-export function createJsonlMetricCapture(): JsonlMetricCapture {
+function createJsonlMetricCapture(): JsonlMetricCapture {
 	const lines: string[] = [];
 	let storedBytes = 0;
 	let pending = "";

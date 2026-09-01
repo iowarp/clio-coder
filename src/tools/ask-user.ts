@@ -261,7 +261,7 @@ function normalizeDecisions(value: unknown): { decisions?: AskUserDecision[]; er
 	return { decisions };
 }
 
-export function normalizeAskUserCall(args: Record<string, unknown>): { call?: AskUserCall; error?: string } {
+function normalizeAskUserCall(args: Record<string, unknown>): { call?: AskUserCall; error?: string } {
 	const rawAction = trimOptionalString(args.action)?.toLowerCase() ?? "ask";
 	if (rawAction !== "ask" && rawAction !== "complete") {
 		return { error: "action must be ask or complete" };
@@ -595,7 +595,7 @@ async function completeInterview(
 	return okInterviewResult(policy, event);
 }
 
-export async function finalizeAskUserInterview(
+async function finalizeAskUserInterview(
 	policy: AskUserToolPolicy,
 	reason: string,
 	options?: ToolInvokeOptions,

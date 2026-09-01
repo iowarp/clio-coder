@@ -107,7 +107,7 @@ function rowsToItems(rows: ReadonlyArray<MessagePickerRow>): SelectItem[] {
 	}));
 }
 
-export function createMessagePickerContent(
+function createMessagePickerContent(
 	rows: ReadonlyArray<MessagePickerRow>,
 	onFork: (parentTurnId: string) => void,
 	onClose: () => void,

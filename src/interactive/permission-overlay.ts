@@ -203,7 +203,7 @@ function wrapArtifactLine(value: string, max: number): string[] {
 	return lines;
 }
 
-export function permissionDecisionPresentation(view: ApprovalRequestView): DecisionPresentation {
+function permissionDecisionPresentation(view: ApprovalRequestView): DecisionPresentation {
 	return classifyDecisionPresentation(
 		decisionFactsForPermission({
 			tool: view.tool,
@@ -307,7 +307,7 @@ function permissionInspectionLines(
  * 80-column one saw the command being authorized end mid-argument, both with
  * nothing marking the cut.
  */
-export function permissionOverlayLines(view: ApprovalRequestView, width: number): string[] {
+function permissionOverlayLines(view: ApprovalRequestView, width: number): string[] {
 	const content = Math.max(8, Math.floor(width));
 	const presentation = permissionDecisionPresentation(view);
 	// The parked call is awaiting a decision, not blocked: the raw rejection

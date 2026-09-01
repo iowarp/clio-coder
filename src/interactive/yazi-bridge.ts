@@ -113,7 +113,7 @@ function readOptional(path: string): string {
  * before the TUI lease is released. A missing or below-floor binary therefore
  * leaves the screen intact and returns the shared doctor sentence verbatim.
  */
-export async function runYaziTerminalChooser(options: YaziTerminalChooserOptions): Promise<YaziTerminalChooserResult> {
+async function runYaziTerminalChooser(options: YaziTerminalChooserOptions): Promise<YaziTerminalChooserResult> {
 	const binaries = (options.resolveBinaries ?? resolveYaziBinaries)();
 	if (!binaries.yaziPath) {
 		return { status: "missing-binary", binary: "yazi", detail: binaries.missingYaziDetail };
@@ -219,7 +219,7 @@ function pathKind(path: string): "file" | "directory" | "other" {
 }
 
 /** Format one DDS or chooser batch for the composer without ever submitting it. */
-export function formatYaziMentions(
+function formatYaziMentions(
 	paths: ReadonlyArray<string>,
 	options: {
 		cwd: string;

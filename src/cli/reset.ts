@@ -131,7 +131,7 @@ function report(label: string, path: string): void {
  * `scratch/`, and every dispatch artifact written since that sentence was
  * typed. A list nobody has to maintain cannot drift from what the removal takes.
  */
-export function rootContents(path: string): string[] {
+function rootContents(path: string): string[] {
 	let entries: Dirent[];
 	try {
 		entries = readdirSync(path, { withFileTypes: true });

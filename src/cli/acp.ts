@@ -58,7 +58,7 @@ function parseAcpFlags(args: ReadonlyArray<string>): AcpFlags | string {
  * Throws when the path cannot be resolved, which the caller reports as an
  * unusable `--cwd`.
  */
-export function resolveAcpCwd(value: string): string {
+function resolveAcpCwd(value: string): string {
 	return realpathSync(path.resolve(value));
 }
 

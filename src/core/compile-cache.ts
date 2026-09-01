@@ -65,7 +65,7 @@ export interface CompileCacheHandle {
  * exercise the settle semantics without flipping the real process-global
  * cache.
  */
-export function createCompileCache(
+function createCompileCache(
 	enableFn: typeof enableCompileCache = enableCompileCache,
 	rootExists: (dir: string) => boolean = existsSync,
 ): CompileCacheHandle {

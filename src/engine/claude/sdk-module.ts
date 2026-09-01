@@ -66,19 +66,8 @@ export type ClaudeAgentSdkLoader = () => Promise<ClaudeAgentSdkModule>;
 // runtime `import()`.
 const realLoader: ClaudeAgentSdkLoader = async () => await import("@anthropic-ai/claude-agent-sdk");
 
-let loader: ClaudeAgentSdkLoader = realLoader;
+const loader: ClaudeAgentSdkLoader = realLoader;
 let cached: ClaudeAgentSdkModule | null = null;
-
-/**
- * Swap the import used by {@link loadClaudeAgentSdk}. The absence of a 224MB
- * optional package cannot be staged inside a normal test process, so the
- * contract test intercepts the import here; passing `null` restores the real
- * one and clears the cache.
- */
-export function setClaudeAgentSdkLoader(next: ClaudeAgentSdkLoader | null): void {
-	loader = next ?? realLoader;
-	cached = null;
-}
 
 /**
  * Resolve the SDK, or fail with {@link ClaudeAgentSdkUnavailableError}. A load

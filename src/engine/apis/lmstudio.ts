@@ -145,11 +145,6 @@ function emitResidencyNoticeOnce(key: string, notice: Parameters<typeof emitResi
 	emitResidencyNotice(notice);
 }
 
-/** Test seam: forget which residency facts were announced. */
-export function resetAnnouncedResidencyFacts(): void {
-	announcedResidencyFacts.clear();
-}
-
 export async function ensureLmStudioResidency(
 	model: Model<"openai-completions">,
 	options: { apiKey?: string; signal?: AbortSignal } = {},

@@ -148,7 +148,7 @@ async function assemblePrompt(parsed: RunCliArgs): Promise<{
  * path, not a skill package, or validation failure such as a missing
  * description). Exported for contracts tests.
  */
-export function explicitSkillPathErrors(skillPaths: ReadonlyArray<string>): string[] {
+function explicitSkillPathErrors(skillPaths: ReadonlyArray<string>): string[] {
 	const errors: string[] = [];
 	for (const skillPath of skillPaths) {
 		const list = loadSkills({ disableDiscovery: true, explicitSkillPaths: [skillPath] });
@@ -187,7 +187,7 @@ export function explicitSkillPathErrors(skillPaths: ReadonlyArray<string>): stri
  * closure sits on. Boundaries rule6 in `tests/boundaries/check-boundaries.ts`
  * holds both halves of that.
  */
-export async function unknownSlashCommandRefusal(task: string): Promise<string | null> {
+async function unknownSlashCommandRefusal(task: string): Promise<string | null> {
 	if (!task.trim().startsWith("/")) return null;
 	const { parseSlashCommand } = await import("../interactive/slash-commands.js");
 	const command = parseSlashCommand(task);

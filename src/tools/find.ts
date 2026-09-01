@@ -31,12 +31,7 @@ type FindOrder = "path" | "mtime";
 // Build fd's argv. Ignore semantics (hidden files, .gitignore honoring,
 // generated-dir excludes, include_ignored) come entirely from the shared
 // ignore policy so grep and find never disagree about tree visibility.
-export function buildFdArgs(
-	pattern: string,
-	searchPath: string,
-	maxResults: number,
-	includeIgnored: boolean,
-): string[] {
+function buildFdArgs(pattern: string, searchPath: string, maxResults: number, includeIgnored: boolean): string[] {
 	const args = ["--glob", "--color=never", ...fdIgnoreArgs(searchPath, includeIgnored)];
 	args.push("--max-results", String(maxResults));
 	let effectivePattern = pattern;

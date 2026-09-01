@@ -48,7 +48,7 @@ export const BASH_DEFAULT_RESULT_DISPOSITION: ToolResultDisposition = {
 };
 
 /** Pure, idempotent normalization used by registry admission and direct calls. */
-export function normalizeBashArguments(args: Record<string, unknown>): Record<string, unknown> {
+function normalizeBashArguments(args: Record<string, unknown>): Record<string, unknown> {
 	return args.output_policy === undefined ? { ...args, output_policy: "bounded" } : args;
 }
 

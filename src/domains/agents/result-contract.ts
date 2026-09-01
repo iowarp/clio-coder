@@ -1601,7 +1601,7 @@ export interface ResultContractRepairInput {
  * One repair directive. It states the validator's reason and exact shape. Tool
  * use remains closed unless dispatch preauthorized a larger revision phase.
  */
-export function resultContractRepairMessage(input: ResultContractRepairInput): string {
+function resultContractRepairMessage(input: ResultContractRepairInput): string {
 	const last = input.attempt >= RESULT_CONTRACT_REPAIR_LIMIT;
 	const lines = [
 		last

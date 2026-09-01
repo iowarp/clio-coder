@@ -111,7 +111,7 @@ function mutationScrollDelta(data: string): number {
 }
 
 /** Pure permission overlay key router: returns true when the input was consumed. */
-export function routePermissionOverlayKey(data: string, deps: PermissionOverlayKeyDeps): boolean {
+function routePermissionOverlayKey(data: string, deps: PermissionOverlayKeyDeps): boolean {
 	if (matchesKey(data, "enter") && !isKeyRelease(data)) {
 		// Consumed either way: with a draft the press changes nothing, and the
 		// composer rail says what clears it. Letting it fall through would hand
@@ -158,7 +158,7 @@ export function routePermissionOverlayKey(data: string, deps: PermissionOverlayK
 }
 
 /** Pure overlay key router for the dispatch board. */
-export function routeDispatchBoardOverlayKey(data: string, deps: DispatchBoardOverlayKeyDeps): boolean {
+function routeDispatchBoardOverlayKey(data: string, deps: DispatchBoardOverlayKeyDeps): boolean {
 	if (isEscapeKey(data)) {
 		deps.closeOverlay();
 		return true;

@@ -110,7 +110,7 @@ function byNewest(a: EvidenceOverview, b: EvidenceOverview): number {
 	return (Date.parse(b.generatedAt) || 0) - (Date.parse(a.generatedAt) || 0);
 }
 
-export async function evidenceInventorySnapshot(
+async function evidenceInventorySnapshot(
 	now: () => number = Date.now,
 	dataDir: string = clioDataDir(),
 ): Promise<EvidenceInventorySnapshot> {

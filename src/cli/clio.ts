@@ -6,7 +6,7 @@ import { classifyDefaultTarget, describeVerdict } from "./default-target.js";
 
 /** Headless and ACP keep their established non-TUI transports even when an
  * embedding process leaves the interactive marker in the environment. */
-export function terminalLeaseEligible(
+function terminalLeaseEligible(
 	options: Pick<BootOptions, "headless" | "acp">,
 	env: Readonly<Record<string, string | undefined>> = process.env,
 ): boolean {

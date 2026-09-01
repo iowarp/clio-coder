@@ -27,7 +27,7 @@ const HANDOFF_REVIEW_MAX_WIDTH = 100;
 /** Rows of document shown at once. Anything longer scrolls. */
 export const HANDOFF_REVIEW_VISIBLE_ROWS = 20;
 
-export function handoffReviewOverlayWidth(columns: number): number {
+function handoffReviewOverlayWidth(columns: number): number {
 	return Math.max(HANDOFF_REVIEW_MIN_WIDTH, Math.min(HANDOFF_REVIEW_MAX_WIDTH, columns - 4));
 }
 
@@ -57,7 +57,7 @@ export interface HandoffReviewOverlaySession extends OverlayHandle {
  * Render the body. Pure so the layout is testable without a TUI: the goal, a
  * rule, then the scrolled document window.
  */
-export function formatHandoffReviewBody(goal: string, document: string, width: number, scroll: number): string[] {
+function formatHandoffReviewBody(goal: string, document: string, width: number, scroll: number): string[] {
 	const theme = clioTheme();
 	const contentWidth = Math.max(1, Math.floor(width));
 	const lines: string[] = [];

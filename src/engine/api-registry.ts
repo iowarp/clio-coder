@@ -78,7 +78,7 @@ function unregisterEngineApiProviders(sourceId: string): void {
 	compatUniverse?.unregisterApiProviders(sourceId);
 }
 
-export function getEngineApiProvider(api: Api): EngineRegisteredApiProvider | undefined {
+function getEngineApiProvider(api: Api): EngineRegisteredApiProvider | undefined {
 	return registry.get(api)?.provider;
 }
 

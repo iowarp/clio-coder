@@ -90,7 +90,7 @@ export interface ProjectContextInventory {
  * rather than one per session. Directories whose `.clio-coder/` is already gone are
  * dropped, because an inventory of nothing to do is noise.
  */
-export function projectContextInventory(stateDir: string): ProjectContextInventory {
+function projectContextInventory(stateDir: string): ProjectContextInventory {
 	const root = join(stateDir, "sessions");
 	let hashes: string[];
 	try {
@@ -298,7 +298,7 @@ function readNpmPrefix(): string | null {
  * that cannot be resolved is dangling, which is still something the operator
  * will hit and still not this installation.
  */
-export function otherClioOnPath(pathClio: string | null, localLink: string): string | null {
+function otherClioOnPath(pathClio: string | null, localLink: string): string | null {
 	if (pathClio === null) return null;
 	if (pathClio === localLink) return null;
 	const resolve = (path: string): string | null => {

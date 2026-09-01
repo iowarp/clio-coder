@@ -53,11 +53,11 @@ async function* oneSdkUserMessage(message: SDKUserMessage): AsyncIterable<SDKUse
 	yield message;
 }
 
-export function claudeSdkPermissionModeForAutonomy(_level: AutonomyLevel | undefined): PermissionMode {
+function claudeSdkPermissionModeForAutonomy(_level: AutonomyLevel | undefined): PermissionMode {
 	return "default";
 }
 
-export function claudeSdkToolsForAutonomy(_level: AutonomyLevel | undefined): NonNullable<Options["tools"]> {
+function claudeSdkToolsForAutonomy(_level: AutonomyLevel | undefined): NonNullable<Options["tools"]> {
 	return DEFAULT_CLAUDE_TOOLS;
 }
 
@@ -314,7 +314,7 @@ export interface ClaudeWorkerBudgetGate {
 }
 
 /** Canonical call counter shared by the SDK's PreToolUse/canUseTool mediation seam. */
-export function createClaudeWorkerBudgetGate(
+function createClaudeWorkerBudgetGate(
 	budget: WorkerBudget,
 	onBoundary: () => void,
 	onHardCap: () => void,
@@ -438,7 +438,7 @@ function decideToolUse(
 }
 
 /** Share one logical permission decision across the SDK hook/callback pair. */
-export function decideClaudeSdkToolUseOnce(
+function decideClaudeSdkToolUseOnce(
 	handled: Map<string, ClaudeToolPermissionDecision>,
 	toolUseID: string | undefined,
 	decide: () => ClaudeToolPermissionDecision,

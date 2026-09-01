@@ -144,10 +144,6 @@ function measure(input: ReplayMeasurement): MeasuredTrace {
 	};
 }
 
-export function measureReplayTrace(input: ReplayMeasurement): ReplayMetrics {
-	return measure(input).metrics;
-}
-
 function mean(values: ReadonlyArray<number>): number {
 	return values.length === 0 ? 0 : values.reduce((sum, value) => sum + value, 0) / values.length;
 }

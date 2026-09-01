@@ -788,7 +788,7 @@ function indent(text: string): string {
 		.join("\n");
 }
 
-export function inWindow(iso: string, start: number, end: number): boolean {
+function inWindow(iso: string, start: number, end: number): boolean {
 	const value = Date.parse(iso);
 	return Number.isFinite(value) && value >= start && value <= end + USAGE_WINDOW_FUTURE_SKEW_MS;
 }
@@ -968,7 +968,7 @@ function bashCommandFromToolCallPayload(payload: unknown): string | null {
  * assignments dropped, verb plus subcommand kept, flags kept with values
  * stripped, remaining arguments dropped.
  */
-export function bashShape(command: string): string {
+function bashShape(command: string): string {
 	const firstLine = command.split("\n").find((line) => {
 		const trimmed = line.trim();
 		return trimmed.length > 0 && !trimmed.startsWith("#");

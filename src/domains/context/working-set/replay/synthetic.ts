@@ -93,7 +93,7 @@ export const SYNTHETIC_CORPORA: ReadonlyArray<SyntheticCorpusSpec> = [
 	},
 ];
 
-export function syntheticCorpus(id: string): SyntheticCorpusSpec | undefined {
+function syntheticCorpus(id: string): SyntheticCorpusSpec | undefined {
 	return SYNTHETIC_CORPORA.find((spec) => spec.id === id);
 }
 
@@ -258,7 +258,7 @@ function testOutput(files: ReadonlyArray<RepoFile>, failing: RepoFile | null): s
 }
 
 /** Generate one trace of the corpus. `index` selects the trace; the spec's seed and index fix every byte. */
-export function generateSyntheticTrace(spec: SyntheticCorpusSpec, index: number): Trace {
+function generateSyntheticTrace(spec: SyntheticCorpusSpec, index: number): Trace {
 	const rnd = mulberry32(spec.seed * 1000 + index);
 	const between = (low: number, high: number): number => low + Math.floor(rnd() * (high - low + 1));
 	const pick = <T>(items: ReadonlyArray<T>): T => items[Math.floor(rnd() * items.length)] as T;

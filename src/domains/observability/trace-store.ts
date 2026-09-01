@@ -110,7 +110,7 @@ function requireSqlite(): DatabaseSyncConstructor {
  * Exported for the contract test, which drives it with a load that emits both
  * warnings; production has exactly one caller.
  */
-export function loadWithSqliteWarningSuppressed<T>(load: () => T): T {
+function loadWithSqliteWarningSuppressed<T>(load: () => T): T {
 	if (warningTracingRequested()) return load();
 	const emitWarning = process.emitWarning;
 	const forward = emitWarning.bind(process) as (...args: unknown[]) => void;

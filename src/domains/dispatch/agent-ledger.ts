@@ -124,7 +124,7 @@ export function corroboration(entries: ReadonlyArray<AgentLedgerEntry>): Corrobo
 }
 
 /** Entry ids targeted by a review that did not pass. */
-export function disputes(entries: ReadonlyArray<AgentLedgerEntry>): ReadonlySet<string> {
+function disputes(entries: ReadonlyArray<AgentLedgerEntry>): ReadonlySet<string> {
 	const disputed = new Set<string>();
 	for (const entry of entries) {
 		if (entry.body.kind === "review" && !entry.body.passed) disputed.add(entry.body.target);

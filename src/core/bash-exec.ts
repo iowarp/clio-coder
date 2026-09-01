@@ -75,7 +75,7 @@ const LOGIN_ENV_CAPTURE_TIMEOUT_MS = 10_000;
 let loginEnvCapture: Promise<NodeJS.ProcessEnv | null> | null = null;
 
 /** NUL-delimited `env -0` output to an env map; null when unusable (no PATH). */
-export function parseNullDelimitedEnv(raw: string): NodeJS.ProcessEnv | null {
+function parseNullDelimitedEnv(raw: string): NodeJS.ProcessEnv | null {
 	const env: NodeJS.ProcessEnv = {};
 	for (const entry of raw.split("\0")) {
 		if (entry.length === 0) continue;

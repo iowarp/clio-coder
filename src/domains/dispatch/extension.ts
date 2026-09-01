@@ -456,7 +456,7 @@ function calculateUsageCostUsd(meter: RunTokenMeter, pricing: EffectivePricing["
  * admit a route before settings are resolved, and it defers to the one place
  * that owns the default rather than restating the number here.
  */
-export function admissionMaxOutputTokens(settings: EffectiveSettings): number {
+function admissionMaxOutputTokens(settings: EffectiveSettings): number {
 	return settings?.chat.maxOutputTokens ?? DEFAULT_SETTINGS.chat.maxOutputTokens;
 }
 
@@ -892,7 +892,7 @@ export interface WorkspaceRootFacts {
  * claimed `npm test` then "validated" in 4ms. None of that is a model failure.
  * The harness knows the cwd exactly and was sending it nowhere.
  */
-export function readWorkspaceRootFacts(
+function readWorkspaceRootFacts(
 	cwd: string,
 	readEntries: (dir: string) => Dirent[] = readDirentsSafely,
 ): WorkspaceRootFacts {
@@ -922,7 +922,7 @@ function readDirentsSafely(dir: string): Dirent[] {
  * projection of CLIO-CODER.md: a read-only scout that cannot afford the handbook read
  * still needs its first shell call to land in the right place.
  */
-export function renderWorkerWorkspaceContext(workspace: WorkspaceRootFacts): string {
+function renderWorkerWorkspaceContext(workspace: WorkspaceRootFacts): string {
 	const lines = ["# Workspace", `Root: ${workspace.root}`, "Your process starts here; relative paths resolve from it."];
 	if (workspace.entries.length > 0) {
 		lines.push(`Top level: ${workspace.entries.join(", ")}${workspace.truncated ? ", …" : ""}`);
@@ -975,7 +975,7 @@ function renderPipelineInput(input: PipelineInput): PipelineInputRender {
  * the command actually printed rather than a summary of it. Like pipeline
  * input, this is data and is never presented as instructions.
  */
-export function renderPredecessorHandoffs(handoffs: ReadonlyArray<ExecutionHandoff>): WorkerPromptMessage | null {
+function renderPredecessorHandoffs(handoffs: ReadonlyArray<ExecutionHandoff>): WorkerPromptMessage | null {
 	if (handoffs.length === 0) return null;
 	const body = [
 		"Outputs from this step's declared predecessors, in dependency order.",
@@ -1105,7 +1105,7 @@ export interface WorkerDynamicContext {
  * the projected "Verification expectations" body (verification-class runs
  * only); when off, output is byte-identical to the historical renderer.
  */
-export function renderWorkerProjectContext(
+function renderWorkerProjectContext(
 	project: ProjectStructuredContext,
 	options: { includeVerification?: boolean } = {},
 ): string {
@@ -1147,7 +1147,7 @@ function workerProjectContextIncludesVerification(body: string): boolean {
 	return body.includes("\nVerification expectations:\n");
 }
 
-export function buildDynamicPromptMessages(
+function buildDynamicPromptMessages(
 	req: DispatchRequest,
 	dynamicContext: WorkerDynamicContext = {},
 ): WorkerPromptMessage[] {

@@ -136,10 +136,6 @@ export function workerSynthesisReserveBlockReason(tool: string, remaining: numbe
 	);
 }
 
-export function isWorkerSynthesisReserveBlockReason(reason: string): boolean {
-	return /^workerToolCallReserve: only [1-9]\d* of [1-9]\d* tool calls remain/.test(reason);
-}
-
 export function workerToolCallCapExceededReason(cap: number): string {
 	return `workerToolCallCap reached (${cap}); abort run`;
 }

@@ -74,7 +74,7 @@ function metaStrip(meta: SessionMeta, now: number): string {
  * (status, last-activity, msg count, target/model) in the primary column
  * and the first user-message preview in the description column.
  */
-export function buildSessionItems(sessions: ReadonlyArray<SessionMeta>, now: number = Date.now()): SelectItem[] {
+function buildSessionItems(sessions: ReadonlyArray<SessionMeta>, now: number = Date.now()): SelectItem[] {
 	return sessions.map((meta) => {
 		const labels = meta.labels && meta.labels.length > 0 ? `  labels: ${meta.labels.join(", ")}` : "";
 		return {
@@ -117,7 +117,7 @@ function isBareEscape(data: string): boolean {
 }
 
 /** @internal */
-export function createSessionOverlayBox(
+function createSessionOverlayBox(
 	sessions: ReadonlyArray<SessionMeta>,
 	onSelect: (sessionId: string) => void,
 	onClose: () => void,

@@ -721,7 +721,7 @@ function pendingSemanticError(value: unknown): string | null {
 }
 
 /** Verify both the pending envelope and its nested final artifact, when resolved. */
-export function verifyPendingGateDecisionRecord(record: PendingGateDecisionRecord): GateDecisionVerification {
+function verifyPendingGateDecisionRecord(record: PendingGateDecisionRecord): GateDecisionVerification {
 	const invalid = pendingSemanticError(record);
 	if (invalid !== null) return { ok: false, reason: invalid };
 	return pendingRecordDigest(pendingRecordWithoutIntegrity(record)) === record.integrity.digest

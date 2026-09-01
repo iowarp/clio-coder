@@ -46,7 +46,7 @@ export interface EvidenceDetailSnapshot {
 	readonly runsTruncated: boolean;
 }
 
-export async function evidenceDetailSnapshot(
+async function evidenceDetailSnapshot(
 	evidenceId: string,
 	now: () => number = Date.now,
 	dataDir: string = clioDataDir(),

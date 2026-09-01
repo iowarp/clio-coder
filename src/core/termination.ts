@@ -37,7 +37,7 @@ const SIGNAL_EXIT_CODES: Partial<Record<NodeJS.Signals, number>> = {
  * Break `text` into lines no wider than `width` columns, at spaces where
  * possible and mid-word when a single token is wider than the terminal.
  */
-export function wrapToWidth(text: string, width: number): string[] {
+function wrapToWidth(text: string, width: number): string[] {
 	if (!Number.isFinite(width) || width < 1) return [text];
 	const lines: string[] = [];
 	let current = "";

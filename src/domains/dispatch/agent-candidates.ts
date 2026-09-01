@@ -249,7 +249,7 @@ function candidateRejections(spec: AgentSpec, intent: AgentTaskIntent): string[]
 }
 
 /** Hard filters first; display-only category is deliberately never read. */
-export function evaluateAgentCandidates(specs: ReadonlyArray<AgentSpec>, intent: AgentTaskIntent): AgentCandidateSet {
+function evaluateAgentCandidates(specs: ReadonlyArray<AgentSpec>, intent: AgentTaskIntent): AgentCandidateSet {
 	if (specs.length > AGENT_CANDIDATE_LIMIT) {
 		throw new Error(
 			`dispatch routing configuration error: agent candidate overflow (${specs.length}/${AGENT_CANDIDATE_LIMIT})`,

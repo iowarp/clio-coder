@@ -140,7 +140,7 @@ const ENUMERABLE_ACTION_CLASSES: ReadonlySet<string> = new Set(["read", "write"]
  * `unknown` and is opaque, which is the fail-closed answer for a tool whose
  * arguments this process has no schema for.
  */
-export function toolWritesOpaquely(toolName: string): boolean {
+function toolWritesOpaquely(toolName: string): boolean {
 	return !ENUMERABLE_ACTION_CLASSES.has(classify({ tool: toolName }).actionClass);
 }
 

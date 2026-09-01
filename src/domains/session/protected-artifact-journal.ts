@@ -190,7 +190,7 @@ export function clearPendingProtectedArtifact(handle: PendingProtectedArtifactHa
 	rmSync(handle.path, { force: true });
 }
 
-export function readPendingProtectedArtifacts(sessionId: string): PendingProtectedArtifactReadResult {
+function readPendingProtectedArtifacts(sessionId: string): PendingProtectedArtifactReadResult {
 	const directory = journalDirectory(sessionId);
 	if (!existsSync(directory)) return { records: [], errors: [] };
 	const records: PendingProtectedArtifactHandle[] = [];

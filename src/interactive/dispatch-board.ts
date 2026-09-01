@@ -182,10 +182,7 @@ export interface DispatchBoardPhase {
  * the column lines up across rows; a long step id is clipped with a marker
  * rather than pushing the row's other facts out of position.
  */
-export function formatDispatchPhaseCell(
-	phase: DispatchBoardPhase | undefined,
-	width = PHASE_COLUMN_WIDTH,
-): string | null {
+function formatDispatchPhaseCell(phase: DispatchBoardPhase | undefined, width = PHASE_COLUMN_WIDTH): string | null {
 	if (phase === undefined) return null;
 	return truncateToWidth(`w${phase.wave} ${phase.stepId}`, Math.max(1, width), "…", false);
 }
@@ -294,9 +291,7 @@ export interface AgentAudiencePresentation {
  * machinery. Returns null for base/custom agents, which the operator asked for
  * directly and which therefore render like any other row.
  */
-export function agentAudiencePresentation(
-	row: Pick<DispatchBoardRow, "agentAudience">,
-): AgentAudiencePresentation | null {
+function agentAudiencePresentation(row: Pick<DispatchBoardRow, "agentAudience">): AgentAudiencePresentation | null {
 	if (row.agentAudience === "shadow") return { glyph: GLYPH.subProcess, token: "muted" };
 	if (row.agentAudience === "internal") return { glyph: GLYPH.subProcess, token: "dim" };
 	return null;
@@ -439,10 +434,7 @@ function latestEvidenceFailureReason(notices: readonly ObservabilityNotice[], ru
  * summary with an evidence bundle is ready; the latest error-level evidence
  * notice for the run marks it failed.
  */
-export function deriveRunEvidenceState(
-	snapshot: ObservabilitySnapshot | undefined,
-	runId: string,
-): RunEvidencePresentation {
+function deriveRunEvidenceState(snapshot: ObservabilitySnapshot | undefined, runId: string): RunEvidencePresentation {
 	if (!snapshot || runId.length === 0) return { state: "none", viewFilter: `dispatch:${runId}` };
 	if (snapshot.pendingEvidenceBuildRunIds.includes(runId)) {
 		return { state: "pending", viewFilter: `evidence:${runId}` };
@@ -519,7 +511,7 @@ function evidenceCardLine(theme: ClioTheme, evidence: RunEvidencePresentation, c
 }
 
 /** Sanitize lifecycle task text at the terminal boundary and collapse it to one bounded line. */
-export function sanitizeDispatchTaskSummary(value: unknown): string | undefined {
+function sanitizeDispatchTaskSummary(value: unknown): string | undefined {
 	if (typeof value !== "string") return undefined;
 	const sanitized = sanitizeCallTargetText(value);
 	if (sanitized.length === 0) return undefined;
@@ -632,7 +624,7 @@ function trustCardLines(theme: ClioTheme, row: DispatchBoardRow, contentWidth: n
 	);
 }
 
-export function renderDispatchCard(
+function renderDispatchCard(
 	row: DispatchBoardRow,
 	width: number,
 	evidence?: RunEvidencePresentation,
@@ -964,10 +956,7 @@ export type DispatchBoardItem = { kind: "run"; row: DispatchBoardRow } | { kind:
  * its first row and its remaining rows are consumed, so the board never shows a
  * member both inside its group and beside it.
  */
-export function dispatchBoardItems(
-	rows: ReadonlyArray<DispatchBoardRow>,
-	selectedRunId?: string | null,
-): DispatchBoardItem[] {
+function dispatchBoardItems(rows: ReadonlyArray<DispatchBoardRow>, selectedRunId?: string | null): DispatchBoardItem[] {
 	const byGroup = new Map<string, DispatchBoardRow[]>();
 	for (const row of rows) {
 		const group = row.council?.group;
@@ -992,14 +981,14 @@ export function dispatchBoardItems(
 }
 
 /** The framed council card: the member grid or stack, with the synthesis run full width under it. */
-export function renderCouncilCard(group: CouncilGroupView, width: number): string[] {
+function renderCouncilCard(group: CouncilGroupView, width: number): string[] {
 	const theme = clioTheme();
 	const contentWidth = Math.max(0, width - 4);
 	const title = `${theme.fg("info", "council")} ${theme.paint(group.group, { bold: true })}`;
 	return frame(theme, title, councilGroupBody(theme, group, contentWidth), width, { rightMeta: group.elapsed });
 }
 
-export function formatDispatchBoardLines(
+function formatDispatchBoardLines(
 	rows: ReadonlyArray<DispatchBoardRow>,
 	width = 76,
 	observability?: ObservabilitySnapshot,

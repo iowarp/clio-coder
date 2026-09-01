@@ -40,7 +40,7 @@ import { type ResultContract, resultContractShape } from "../agents/result-contr
  * its recipe keeps sole authority over the shape. Every other kind is fully
  * determined by its kind and can be quoted exactly.
  */
-export function fleetNodeAnswerDirective(kind: ResultContract["kind"]): string | null {
+function fleetNodeAnswerDirective(kind: ResultContract["kind"]): string | null {
 	if (kind === "architect-plan") return null;
 	return [
 		`Your result contract for this step is \`${kind}\`.`,

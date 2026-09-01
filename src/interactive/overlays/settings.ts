@@ -967,16 +967,6 @@ function parseNumberSetting(value: string, rule: NumberSettingRule): NumberSetti
 	return { value: parsed };
 }
 
-/**
- * The reason a number row would refuse `value`, or null when it would apply.
- * This is the same check the editor and `applySettingChange` run, exposed so a
- * caller that bypasses the editor can still name the bound it hit.
- */
-export function describeNumberSettingRefusal(id: NumberSettingId, value: string): string | null {
-	const outcome = parseNumberSetting(value, NUMBER_SETTING_RULES[id]);
-	return "refusal" in outcome ? outcome.refusal : null;
-}
-
 function numberSettingNote(rule: NumberSettingRule): string {
 	const noun = rule.integer ? "a whole number" : "a number";
 	const clears = rule.allowBlank === true ? "; blank clears it" : "";
@@ -1635,10 +1625,7 @@ function thinkingChoices(
  * read-only pointer rows (targets, keybindings, favorites, safety net) name the
  * surface that owns them so the Center has no dead-but-tappable rows.
  */
-export function buildSettingItems(
-	settings: Readonly<ClioSettings>,
-	options?: BuildSettingItemsOptions,
-): SettingsCenterItem[] {
+function buildSettingItems(settings: Readonly<ClioSettings>, options?: BuildSettingItemsOptions): SettingsCenterItem[] {
 	const live = options?.getSettings ?? ((): Readonly<ClioSettings> => settings);
 	const scopeList = settings.chat.modelPicker.cycleSet ?? [];
 	const scopeText = scopeList.length > 0 ? scopeList.join(", ") : "(empty)";
@@ -2328,7 +2315,7 @@ function fleetEndpointRows(providers: ProvidersContract | undefined): SettingsCe
 	});
 }
 
-export function buildSettingsSections(items: readonly SettingsCenterItem[]): SettingsCenterSection[] {
+function buildSettingsSections(items: readonly SettingsCenterItem[]): SettingsCenterSection[] {
 	return SETTINGS_SECTIONS.map((section) => ({
 		id: section.id,
 		label: section.label,
@@ -2408,7 +2395,7 @@ function applyDelegationAgentChange(settings: ClioSettings, value: string): void
 	settings.integrations.externalAgents.entries.push(entry);
 }
 
-export function applySettingChange(settings: ClioSettings, id: string, value: string): void {
+function applySettingChange(settings: ClioSettings, id: string, value: string): void {
 	if (applyEntrySettingChange(settings, id, value)) return;
 	switch (id) {
 		case "autonomy":
@@ -2898,7 +2885,7 @@ function impactFor(propagation: SettingsChangePlan["propagation"]): string {
 	return "takes effect now";
 }
 
-export function createSettingsChangePlan(
+function createSettingsChangePlan(
 	settings: Readonly<ClioSettings>,
 	item: Pick<SettingsCenterItem, "id" | "label" | "currentValue" | "scope">,
 	selectedValue: string,

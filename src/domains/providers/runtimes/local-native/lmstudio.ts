@@ -13,7 +13,6 @@ import {
 	listLmStudioModels,
 	lmStudioReasoningLevels,
 	loadedContextLength,
-	parseLmStudioV1Models,
 	resolveLmStudioInstance,
 } from "../common/lmstudio-http.js";
 import { synthLocalModel, withV1 } from "../common/local-synth.js";
@@ -179,12 +178,6 @@ function probeFromCatalog(catalog: LmStudioCatalog, target: TargetDescriptor): P
 		...(loaded.length > 0 ? [`Loaded instances: ${loaded.join(", ")}`] : []),
 	];
 	return result;
-}
-
-export function probeResultFromV1Models(data: unknown, target: TargetDescriptor, latencyMs?: number): ProbeResult {
-	const models = parseLmStudioV1Models(data);
-	if (!models) return { ok: false, error: "LM Studio /api/v1/models response has no models array" };
-	return probeFromCatalog({ ok: true, models, tier: "0.4+", ...(latencyMs !== undefined ? { latencyMs } : {}) }, target);
 }
 
 const lmstudioRuntime: RuntimeDescriptor = {

@@ -62,14 +62,6 @@ export function resolveMetricAssertion(
 	return { actual, unresolved: actual === null, holds: comparisonHolds(assertion, actual) };
 }
 
-export function evaluateMetricAssertion(
-	assertion: EvalMetricAssertion,
-	metrics: Readonly<Record<string, unknown>>,
-	artifact?: EvalArtifactV4,
-): boolean {
-	return comparisonHolds(assertion, metricValue(assertion.metric, metrics, artifact));
-}
-
 function comparisonHolds(assertion: EvalMetricAssertion, actual: number | string | boolean | null): boolean {
 	switch (assertion.op) {
 		case "lt":

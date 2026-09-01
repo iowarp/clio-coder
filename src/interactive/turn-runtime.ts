@@ -85,7 +85,7 @@ export class TurnAdmissionError extends Error {
  * same discovery view the planner budgets against, so a model Clio is planning
  * a loaded window for is never announced as absent.
  */
-export function coldModelNotice(
+function coldModelNotice(
 	status: TargetStatus | null | undefined,
 	targetId: string,
 	wireModelId: string,

@@ -117,7 +117,7 @@ export async function runModelsCommand(args: ReadonlyArray<string>): Promise<num
 	return 0;
 }
 
-export function collectRows(entries: ReadonlyArray<TargetStatus>, providers: ProvidersContract): ModelRow[] {
+function collectRows(entries: ReadonlyArray<TargetStatus>, providers: ProvidersContract): ModelRow[] {
 	const rows: ModelRow[] = [];
 	for (const status of entries) {
 		const runtimeId = status.runtime?.id ?? status.target.runtime;
@@ -188,7 +188,7 @@ function compactTokenCount(value: number): string {
 	return String(value);
 }
 
-export function emptyModelsMessage(
+function emptyModelsMessage(
 	args: Pick<ModelArgs, "search" | "target">,
 	configuredTargets: number,
 	matchedTargets: number,
@@ -217,7 +217,7 @@ function truncateModelId(id: string): string {
 	return `${id.slice(0, MODEL_ID_WIDTH_CAP - 3)}...`;
 }
 
-export function modelTableLines(rows: ReadonlyArray<ModelRow>): string[] {
+function modelTableLines(rows: ReadonlyArray<ModelRow>): string[] {
 	const includeState = rows.some((row) => row.state && row.state !== "-");
 	const headers = includeState
 		? ["target", "runtime", "model", "state", "caps", "ctx", "max"]

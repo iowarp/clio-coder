@@ -49,7 +49,7 @@ function canonicalJson(value: unknown): string {
 	throw new Error(`response schema digest cannot represent ${typeof value}`);
 }
 
-export function canonicalResponseSchemaDigest(schema: Record<string, unknown>): string {
+function canonicalResponseSchemaDigest(schema: Record<string, unknown>): string {
 	return createHash("sha256").update(canonicalJson(schema), "utf8").digest("hex");
 }
 

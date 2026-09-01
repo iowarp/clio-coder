@@ -50,7 +50,7 @@ function warnStaticCommand(config: string, options?: ResolveConfigValueOptions):
 	});
 }
 
-export function expandConfigValue(value: string, options?: ResolveConfigValueOptions): string {
+function expandConfigValue(value: string, options?: ResolveConfigValueOptions): string {
 	const sourceEnv = env(options);
 	return value.replace(/\$(\w+)|\$\{([^}]+)\}/g, (match, bare: string | undefined, braced: string | undefined) => {
 		const key = bare ?? braced;

@@ -1,5 +1,4 @@
-import type { AgentRecipe } from "./recipe.js";
-import { type AgentSpec, isUserVisibleAgent, normalizeAgentSpec } from "./spec.js";
+import { type AgentSpec, isUserVisibleAgent } from "./spec.js";
 
 const DEFAULT_DISPATCH_AGENT_ID = "coder";
 
@@ -18,10 +17,6 @@ const OPERATOR_ONLY_SHADOW_AGENT_IDS: ReadonlySet<string> = new Set(["oracle"]);
 export interface AgentCatalogSections {
 	stable: string;
 	volatile: string;
-}
-
-function renderAgentCatalogSections(recipes: ReadonlyArray<AgentRecipe>): AgentCatalogSections {
-	return renderAgentCatalogSectionsFromSpecs(recipes.map(normalizeAgentSpec));
 }
 
 /** Keeps one roster line short enough that the whole fleet block stays near its token budget. */
@@ -177,9 +172,4 @@ function formatSpecLine(spec: AgentSpec, suffix: string): string {
 	const maximum = spec.budget.maximum ? `..${spec.budget.maximum.toolCalls}/${spec.budget.maximum.readReserve}` : "";
 	const budget = `, budget=${spec.budget.toolCalls}/${spec.budget.readReserve}${maximum}/${spec.budget.synthesis ? "synthesize" : "stop"}`;
 	return `- ${spec.name} [${spec.id}] (${spec.audience}, ${spec.category}, ${spec.capabilityClass}, ${spec.latencyClass}, ${spec.source}${tags}${skills}${budget})${suffix}`;
-}
-
-export function renderAgentCatalog(recipes: ReadonlyArray<AgentRecipe>): string {
-	const sections = renderAgentCatalogSections(recipes);
-	return [sections.stable, sections.volatile].filter((part) => part.trim().length > 0).join("\n\n");
 }

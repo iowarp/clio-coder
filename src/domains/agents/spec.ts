@@ -137,17 +137,6 @@ export function isAgentProduct(value: unknown): value is AgentProduct {
 	return includes(AGENT_PRODUCTS, value);
 }
 
-/**
- * Default tier per capability class. Reproduces the historical dispatch
- * allowlist byte-for-byte: workers that act on the workspace get the bounded
- * projection; read-only, orchestration, and internal classes get none.
- */
-export function defaultProjectContextTier(capability: AgentCapabilityClass): AgentProjectContextTier {
-	return capability === "workspace-edit" || capability === "verification" || capability === "artifact-write"
-		? "bounded"
-		: "none";
-}
-
 function actionClassesForTools(tools: ReadonlyArray<ToolName>): ReadonlySet<ActionClass> {
 	const actions = new Set<ActionClass>();
 	for (const tool of tools) actions.add(classify({ tool }).actionClass);

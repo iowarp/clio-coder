@@ -74,12 +74,6 @@ export function gitCommitAttributionEnabled(source: NodeJS.ProcessEnv = process.
 	return source[CLIO_GIT_COMMITS_ENABLED_ENV] !== "0";
 }
 
-/** Forget cached repository probes and the installed managed hooks directory. */
-export function resetGitCommitAttributionCachesForTests(): void {
-	probeCache.clear();
-	installedHooksDirectory = null;
-}
-
 function boundedDiagnostic(message: string): string {
 	const folded = message.replace(/\s+/gu, " ").trim();
 	return folded.length <= DIAGNOSTIC_MAX_CHARS ? folded : `${folded.slice(0, DIAGNOSTIC_MAX_CHARS - 3)}...`;

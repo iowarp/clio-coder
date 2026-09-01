@@ -31,7 +31,7 @@ export function contextResetOptions(choice: ContextResetMutationChoice): Context
 }
 
 /** Three intentional outcomes, ordered with the least destructive action first. */
-export function buildContextResetItems(): SelectItem[] {
+function buildContextResetItems(): SelectItem[] {
 	return [
 		{
 			value: "preserve-clio-md",

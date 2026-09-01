@@ -497,7 +497,7 @@ interface TextBlock {
 	text: string;
 }
 
-export function textFromAssistant(message: unknown): string {
+function textFromAssistant(message: unknown): string {
 	if (!message || typeof message !== "object" || !("content" in message)) return "";
 	const content = (message as { content: unknown }).content;
 	if (typeof content === "string") return content;
