@@ -378,6 +378,38 @@ function missingDatabase(parsed: ParsedTraceArgs): number {
 		);
 		return 1;
 	}
+	if (parsed.json && parsed.positional[0] === "runs") {
+		process.stdout.write("[]\n");
+		return 0;
+	}
+	if (parsed.json && parsed.positional[0] === "prune") {
+		let policy: ReturnType<typeof resolveTraceRetentionPolicy>;
+		try {
+			policy = resolveTraceRetentionPolicy({
+				...(parsed.maxAgeDays === undefined ? {} : { maxAgeDays: parsed.maxAgeDays }),
+				...(parsed.maxBytes === undefined ? {} : { maxBytes: parsed.maxBytes }),
+			});
+		} catch (error) {
+			process.stderr.write(`${error instanceof Error ? error.message : String(error)}\n`);
+			return 1;
+		}
+		process.stdout.write(
+			`${JSON.stringify(
+				{
+					available: false,
+					policy,
+					runsRemoved: 0,
+					rowsRemoved: 0,
+					bytesRemoved: 0,
+					vacuumed: false,
+					protectedRuns: 0,
+				},
+				null,
+				2,
+			)}\n`,
+		);
+		return 0;
+	}
 	process.stdout.write(
 		`no trace database yet at ${parsed.db}. rows are recorded when a dispatch executes or an interactive turn runs; run \`clio-coder run "<task>"\` or start a session to create one.\n`,
 	);
