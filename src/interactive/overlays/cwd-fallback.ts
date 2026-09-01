@@ -11,6 +11,7 @@
  */
 
 import {
+	type Component,
 	type OverlayHandle,
 	type SelectItem,
 	SelectList,
@@ -18,6 +19,7 @@ import {
 	type TUI,
 	truncateToWidth,
 	visibleWidth,
+	wrapTextWithAnsi,
 } from "../../engine/tui.js";
 import { buildHint, DEFAULT_SELECT_THEME, FocusBox, showClioOverlayFrame } from "../overlay-frame.js";
 import { clioTheme } from "../theme/index.js";
@@ -69,6 +71,10 @@ function buildSelectPresentation(items: ReadonlyArray<SelectItem>): {
 			truncatePrimary: ({ text, maxWidth, item, isSelected }) => {
 				const label = singleLine(text);
 				const description = descriptions.get(item.value) ?? "";
+				// The selected explanation is the recovery decision the operator is
+				// reading, so it renders in full beneath the list instead of appearing
+				// here as an ellipsized fragment.
+				if (isSelected) return truncateToWidth(label, maxWidth, ELLIPSIS, true);
 				if (description.length === 0 || maxWidth < 32) {
 					return truncateToWidth(label, maxWidth, ELLIPSIS, true);
 				}
@@ -81,9 +87,28 @@ function buildSelectPresentation(items: ReadonlyArray<SelectItem>): {
 				const descWidth = Math.max(1, maxWidth - visibleWidth(fittedLabel) - visibleWidth(spacing));
 				const fittedDescription = truncateToWidth(description, descWidth, ELLIPSIS, true);
 				const body = `${fittedLabel}${spacing}${fittedDescription}`;
-				return isSelected ? body : `${fittedLabel}${theme.fg("muted", `${spacing}${fittedDescription}`)}`;
+				return `${fittedLabel}${theme.fg("muted", `${spacing}${fittedDescription}`)}`;
 			},
 		},
+	};
+}
+
+function describedSelect(list: SelectList, choices: ReadonlyArray<SelectItem>): Component {
+	return {
+		render(width: number): string[] {
+			const rows = list.render(width);
+			const selected = list.getSelectedItem();
+			const description = choices.find((choice) => choice.value === selected?.value)?.description;
+			if (!description) return rows;
+			const indent = "  ";
+			const wrapped = wrapTextWithAnsi(
+				clioTheme().fg("muted", singleLine(description)),
+				Math.max(1, width - visibleWidth(indent)),
+			).map((line) => `${indent}${line}`);
+			return [...rows, ...wrapped];
+		},
+		handleInput: (data: string) => list.handleInput(data),
+		invalidate: () => list.invalidate(),
 	};
 }
 
@@ -131,7 +156,7 @@ export function openCwdFallbackOverlay(tui: TUI, deps: OpenCwdFallbackOverlayDep
 		deps.onCancel();
 		deps.onClose();
 	};
-	const box = new FocusBox(list);
+	const box = new FocusBox(describedSelect(list, items));
 	return showClioOverlayFrame(tui, box, {
 		anchor: "center",
 		width: CWD_FALLBACK_OVERLAY_WIDTH,
