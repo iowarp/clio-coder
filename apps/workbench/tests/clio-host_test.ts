@@ -749,7 +749,7 @@ Deno.test("an unanswered approval stops the turn without ever telling Clio Coder
 	}
 });
 
-Deno.test("the approval escalation and expiry stamps are computed on the host clock alone", async () => {
+Deno.test("approval stamps use the host clock while honoring the ACP expiry ceiling", async () => {
 	const frozen = 1_000_000;
 	const test = await harness("permission", {
 		now: () => frozen,
@@ -762,7 +762,8 @@ Deno.test("the approval escalation and expiry stamps are computed on the host cl
 		const requestedAt = Date.parse(permission.payload.requestedAt);
 		equal(requestedAt, frozen);
 		equal(Date.parse(permission.payload.escalateAt) - requestedAt, 45_000);
-		equal(Date.parse(permission.payload.expiresAt) - requestedAt, 300_000);
+		const expiryBudget = Date.parse(permission.payload.expiresAt) - requestedAt;
+		ok(expiryBudget > 50_000 && expiryBudget <= 60_000, `expected ACP-bounded expiry, received ${expiryBudget} ms`);
 		await test.host.cancelTurn(context.turnId);
 		await waitForEvent(test.sink, "turn.terminal", (event) => event.context.turnId === context.turnId);
 	} finally {
@@ -1567,6 +1568,44 @@ Deno.test("a permission ceiling shorter than the escalation budget escalates imm
 		ok(!logs[0]?.includes(root));
 		await host.cancelTurn(context.turnId);
 		await waitForEvent(sink, "turn.terminal", (event) => event.context.turnId === context.turnId);
+	} finally {
+		await host.close().catch(() => undefined);
+		await Deno.remove(root, { recursive: true }).catch(() => undefined);
+	}
+});
+
+Deno.test("an already-past permission ceiling is cancelled without publishing an invalid card", async () => {
+	const logs: string[] = [];
+	const root = await Deno.makeTempDir({ prefix: "workbench-host-expired-permission-" });
+	const sink = new RecordingSink();
+	const frozen = 1_000_000;
+	const host = new ClioProjectHost({
+		launcher: fixtureLauncher("permission").launcher,
+		project: project("project-expired-permission", root),
+		sink,
+		acpTiming: { ...fastTiming, permissionTimeoutMs: 5 },
+		now: () => {
+			const deadline = performance.now() + 50;
+			while (performance.now() < deadline) {
+				// Ensure the ACP wall-clock ceiling passes before the host projects it.
+			}
+			return frozen;
+		},
+		permissionEscalateMs: 45_000,
+		permissionBudgetMs: 300_000,
+		log: (message) => logs.push(message),
+	});
+	try {
+		await host.open();
+		await host.newSession();
+		const context = await host.startTurn("Handle an approval whose client ceiling has passed.");
+		const terminal = await waitForEvent(sink, "turn.terminal", (event) => event.context.turnId === context.turnId);
+		equal(terminal.payload.outcome, "canceled");
+		equal(terminal.payload.code, "approval-unanswered");
+		equal(sink.ofType("turn.permission.requested").length, 0);
+		equal(logs.length, 1);
+		ok(logs[0]?.includes("permission ceiling had already passed"));
+		ok(!logs[0]?.includes(root));
 	} finally {
 		await host.close().catch(() => undefined);
 		await Deno.remove(root, { recursive: true }).catch(() => undefined);

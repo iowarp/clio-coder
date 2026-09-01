@@ -2160,7 +2160,14 @@ export class ClioProjectHost {
 		}
 		const publicId = `permission-${crypto.randomUUID()}`;
 		const requestedAt = this.#now();
-		const expiresAt = Math.min(request.expiresAt, requestedAt + this.#permissionBudgetMs);
+		const clientRemainingMs = Math.max(0, request.expiresAt - Date.now());
+		const expiresAt = requestedAt + Math.min(this.#permissionBudgetMs, clientRemainingMs);
+		if (expiresAt <= requestedAt) {
+			this.#log("The GUI discarded an approval because the Clio Coder permission ceiling had already passed.");
+			void request.resolve("cancelled").catch(() => undefined);
+			void this.#cancelTurn(process, turn, "approval-unanswered").catch(() => undefined);
+			return;
+		}
 		const scheduledEscalateAt = requestedAt + this.#permissionEscalateMs;
 		const escalateAt = scheduledEscalateAt < expiresAt ? scheduledEscalateAt : requestedAt;
 		if (scheduledEscalateAt >= expiresAt) {
