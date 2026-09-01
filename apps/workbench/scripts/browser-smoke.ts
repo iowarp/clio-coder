@@ -1252,10 +1252,10 @@ try {
 		await settingsPage.screenshot({ path: new URL("settings-recovery.png", artifactDirectory).pathname });
 		await settingsDialog.locator(".recovery-boundary").scrollIntoViewIfNeeded();
 
-		const targetSetting = settingsDialog.getByLabel("Set orchestrator.target");
-		const modelSetting = settingsDialog.getByLabel("Set orchestrator.model");
-		const thinkingSetting = settingsDialog.getByLabel("Set orchestrator.thinkingLevel");
-		const autonomySetting = settingsDialog.getByLabel("Set autonomy");
+		const targetSetting = settingsDialog.getByLabel("Set chat.target");
+		const modelSetting = settingsDialog.getByLabel("Set chat.model");
+		const thinkingSetting = settingsDialog.getByLabel("Set chat.thinkingLevel");
+		const autonomySetting = settingsDialog.getByLabel("Set safety.autonomy");
 		deepEqual(await targetSetting.locator("option").allTextContents(), ["unset", "lmstudio", "offline-lab"]);
 		deepEqual(await modelSetting.locator("option").allTextContents(), [
 			"unset",
@@ -1279,35 +1279,35 @@ try {
 		]);
 		await targetSetting.selectOption("offline-lab");
 		await settingsPage.waitForFunction(() =>
-			document.querySelector<HTMLSelectElement>('[aria-label="Set orchestrator.target"]')?.value === "offline-lab"
+			document.querySelector<HTMLSelectElement>('[aria-label="Set chat.target"]')?.value === "offline-lab"
 		);
 		await settingsPage.waitForFunction(() =>
-			[...document.querySelectorAll<HTMLOptionElement>('[aria-label="Set orchestrator.model"] option')].some(
+			[...document.querySelectorAll<HTMLOptionElement>('[aria-label="Set chat.model"] option')].some(
 				(option) => option.value === "stub-tiny",
 			)
 		);
 		deepEqual(await modelSetting.locator("option").allTextContents(), ["unset", "stub-tiny"]);
 		await targetSetting.selectOption("lmstudio");
 		await settingsPage.waitForFunction(() =>
-			document.querySelector<HTMLSelectElement>('[aria-label="Set orchestrator.target"]')?.value === "lmstudio"
+			document.querySelector<HTMLSelectElement>('[aria-label="Set chat.target"]')?.value === "lmstudio"
 		);
 		await settingsPage.waitForFunction(() =>
-			[...document.querySelectorAll<HTMLOptionElement>('[aria-label="Set orchestrator.model"] option')].some(
+			[...document.querySelectorAll<HTMLOptionElement>('[aria-label="Set chat.model"] option')].some(
 				(option) => option.value === "qwen3.8-27b",
 			)
 		);
 		deepEqual(await modelSetting.locator("option").allTextContents(), ["unset", "qwen3.8-27b", "qwen3.8-4b"]);
 		await thinkingSetting.selectOption("high");
 		await settingsPage.waitForFunction(() =>
-			document.querySelector<HTMLSelectElement>('[aria-label="Set orchestrator.thinkingLevel"]')?.value === "high"
+			document.querySelector<HTMLSelectElement>('[aria-label="Set chat.thinkingLevel"]')?.value === "high"
 		);
 		await autonomySetting.selectOption("suggest");
 		await settingsPage.waitForFunction(() =>
-			document.querySelector<HTMLSelectElement>('[aria-label="Set autonomy"]')?.value === "suggest"
+			document.querySelector<HTMLSelectElement>('[aria-label="Set safety.autonomy"]')?.value === "suggest"
 		);
 		await autonomySetting.selectOption("auto-edit");
 		await settingsPage.waitForFunction(() =>
-			document.querySelector<HTMLSelectElement>('[aria-label="Set autonomy"]')?.value === "auto-edit"
+			document.querySelector<HTMLSelectElement>('[aria-label="Set safety.autonomy"]')?.value === "auto-edit"
 		);
 
 		const offlineRow = settingsDialog.locator(".target-row").filter({ hasText: "offline-lab" });
@@ -1324,7 +1324,7 @@ try {
 		// A settings patch round-trips through Clio Coder and never through a local file.
 		await modelSetting.selectOption("qwen3.8-4b");
 		await settingsPage.waitForFunction(() =>
-			document.querySelector<HTMLSelectElement>('[aria-label="Set orchestrator.model"]')?.value === "qwen3.8-4b"
+			document.querySelector<HTMLSelectElement>('[aria-label="Set chat.model"]')?.value === "qwen3.8-4b"
 		);
 		await offlineRow.scrollIntoViewIfNeeded();
 		await settingsPage.screenshot({ path: new URL("settings-targets.png", artifactDirectory).pathname });

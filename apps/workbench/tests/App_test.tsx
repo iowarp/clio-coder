@@ -189,7 +189,7 @@ Deno.test("the Effective Clio Coder map renders provenance, apply timing, redact
 	match(html, /Next turn/u);
 	match(html, /Restart/u);
 	match(html, /Estimated context cost/u);
-	match(html, /orchestrator\.model/u);
+	match(html, /chat\.model/u);
 	match(html, /qwen3\.8-27b/u);
 	match(html, /Clio Coder could not fully inspect every surface/u);
 	match(html, /Project sources use project-relative paths/u);
@@ -996,21 +996,21 @@ Deno.test("the settings page claims a target's health only after that target was
 	const workspace = workspaceFixture(FIXTURE_PROJECT_ID, "Alpha", {
 		settings: {
 			settings: {
-				"orchestrator.target": "lmstudio",
-				"orchestrator.model": "qwen3.8-27b",
-				"orchestrator.thinkingLevel": "off",
-				autonomy: "auto-edit",
+				"chat.target": "lmstudio",
+				"chat.model": "qwen3.8-27b",
+				"chat.thinkingLevel": "off",
+				"safety.autonomy": "auto-edit",
 			},
 			editable: [
-				"orchestrator.target",
-				"orchestrator.model",
-				"orchestrator.thinkingLevel",
-				"autonomy",
+				"chat.target",
+				"chat.model",
+				"chat.thinkingLevel",
+				"safety.autonomy",
 			],
 			options: {
-				"orchestrator.target": ["lmstudio", "offline-lab"],
-				"orchestrator.model": ["qwen3.8-27b", "qwen3.8-4b"],
-				"orchestrator.thinkingLevel": [
+				"chat.target": ["lmstudio", "offline-lab"],
+				"chat.model": ["qwen3.8-27b", "qwen3.8-4b"],
+				"chat.thinkingLevel": [
 					"off",
 					"minimal",
 					"low",
@@ -1019,7 +1019,7 @@ Deno.test("the settings page claims a target's health only after that target was
 					"xhigh",
 					"max",
 				],
-				autonomy: ["read-only", "suggest", "auto-edit", "full-auto"],
+				"safety.autonomy": ["read-only", "suggest", "auto-edit", "full-auto"],
 			},
 			checkedAt: "2026-08-18T12:00:00.000Z",
 		},
@@ -1061,7 +1061,7 @@ Deno.test("the settings page claims a target's health only after that target was
 		html,
 		/This list is shortened; Clio Coder has more targets or models than are shown\./u,
 	);
-	match(html, /orchestrator\.thinkingLevel/u);
+	match(html, /chat\.thinkingLevel/u);
 	match(html, /Clio Coder target/u);
 	match(html, /Reasoning effort/u);
 	match(html, /Default working freedom/u);
@@ -1100,7 +1100,7 @@ Deno.test("a Clio Coder without the targets capability says so instead of showin
 
 Deno.test("the status bar names the next turn's routing only when it differs from the bound session", () => {
 	const base = {
-		editable: ["orchestrator.target", "orchestrator.model"],
+		editable: ["chat.target", "chat.model"],
 		options: {},
 		checkedAt: "2026-08-18T12:00:00.000Z",
 	};
@@ -1108,8 +1108,8 @@ Deno.test("the status bar names the next turn's routing only when it differs fro
 		settings: {
 			...base,
 			settings: {
-				"orchestrator.target": "lmstudio",
-				"orchestrator.model": "qwen3.8-27b",
+				"chat.target": "lmstudio",
+				"chat.model": "qwen3.8-27b",
 			},
 		},
 	})));
@@ -1123,8 +1123,8 @@ Deno.test("the status bar names the next turn's routing only when it differs fro
 			settings: {
 				...base,
 				settings: {
-					"orchestrator.target": "offline-lab",
-					"orchestrator.model": "stub-tiny",
+					"chat.target": "offline-lab",
+					"chat.model": "stub-tiny",
 				},
 			},
 		})),
@@ -1144,10 +1144,10 @@ Deno.test("the status bar names the next turn's routing only when it differs fro
 Deno.test("a patched target or model is labelled next turn while a patched autonomy is labelled next session", () => {
 	const base = {
 		editable: [
-			"orchestrator.target",
-			"orchestrator.model",
-			"orchestrator.thinkingLevel",
-			"autonomy",
+			"chat.target",
+			"chat.model",
+			"chat.thinkingLevel",
+			"safety.autonomy",
 		],
 		options: {},
 		checkedAt: "2026-08-18T12:00:00.000Z",
@@ -1158,10 +1158,10 @@ Deno.test("a patched target or model is labelled next turn while a patched auton
 			settings: {
 				...base,
 				settings: {
-					"orchestrator.target": "offline-lab",
-					"orchestrator.model": "stub-tiny",
-					"orchestrator.thinkingLevel": "high",
-					autonomy: "auto-edit",
+					"chat.target": "offline-lab",
+					"chat.model": "stub-tiny",
+					"chat.thinkingLevel": "high",
+					"safety.autonomy": "auto-edit",
 				},
 			},
 		})),
@@ -1180,10 +1180,10 @@ Deno.test("a patched target or model is labelled next turn while a patched auton
 			settings: {
 				...base,
 				settings: {
-					"orchestrator.target": "lmstudio",
-					"orchestrator.model": "qwen3.8-27b",
-					"orchestrator.thinkingLevel": "off",
-					autonomy: "read-only",
+					"chat.target": "lmstudio",
+					"chat.model": "qwen3.8-27b",
+					"chat.thinkingLevel": "off",
+					"safety.autonomy": "read-only",
 				},
 			},
 		})),

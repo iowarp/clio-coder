@@ -746,13 +746,13 @@ export function configInspectionFixture(): WireConfigInspection {
 		inspectedAt: "2026-08-29T12:00:00.000Z",
 		settings: [
 			{
-				key: "autonomy",
+				key: "safety.autonomy",
 				source: "project",
 				value: "suggest",
 				valueKind: "exact",
 			},
 			{
-				key: "orchestrator.model",
+				key: "chat.model",
 				source: "project",
 				value: "qwen3.8-27b",
 				valueKind: "exact",

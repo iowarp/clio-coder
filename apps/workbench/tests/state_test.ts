@@ -375,14 +375,14 @@ Deno.test("session, settings, configuration, catalog, usage, routing, dispatch, 
 		type: "host.event",
 		event: serverEventFixture("settings.state", {
 			settings: {
-				settings: { "orchestrator.target": "lmstudio" },
-				editable: ["orchestrator.target"],
-				options: { "orchestrator.target": ["lmstudio", "openai"] },
+				settings: { "chat.target": "lmstudio" },
+				editable: ["chat.target"],
+				options: { "chat.target": ["lmstudio", "openai"] },
 				checkedAt: "2026-08-18T12:06:00.000Z",
 			},
 		}, { sequence: 5 }),
 	});
-	deepStrictEqual(state.open?.settings?.editable, ["orchestrator.target"]);
+	deepStrictEqual(state.open?.settings?.editable, ["chat.target"]);
 
 	state = appReducer(state, { type: "config.inspect.submitted", requestId: "request-config" });
 	state = appReducer(state, {
@@ -390,7 +390,7 @@ Deno.test("session, settings, configuration, catalog, usage, routing, dispatch, 
 		event: serverEventFixture("config.state", {
 			inspection: {
 				inspectedAt: "2026-08-29T12:00:00.000Z",
-				settings: [{ key: "autonomy", source: "project", value: "suggest", valueKind: "exact" }],
+				settings: [{ key: "safety.autonomy", source: "project", value: "suggest", valueKind: "exact" }],
 				settingsTruncated: false,
 				entries: [],
 				entriesTruncated: false,

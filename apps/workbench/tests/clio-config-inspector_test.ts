@@ -22,7 +22,10 @@ Deno.test("the config projection keeps exact public routing but redacts values, 
 		{
 			cwd: root,
 			settings: [
-				{ key: "orchestrator.target", value: "laboratory", source: "project" },
+				{ key: "chat.target", value: "laboratory", source: "project" },
+				{ key: "safety.autonomy", value: "suggest", source: "project" },
+				{ key: "orchestrator.model", value: "retired-v1-model", source: "user" },
+				{ key: "autonomy", value: "retired-v1-value", source: "user" },
 				{ key: "targets.auth.apiKey", value: "sk-secret", source: "user" },
 				{ key: "custom.label", value: "private literal", source: "user" },
 				{ key: "retry.enabled", value: true, source: "project.local" },
@@ -55,7 +58,10 @@ Deno.test("the config projection keeps exact public routing but redacts values, 
 	);
 
 	deepStrictEqual(projected.settings, [
-		{ key: "orchestrator.target", source: "project", value: "laboratory", valueKind: "exact" },
+		{ key: "chat.target", source: "project", value: "laboratory", valueKind: "exact" },
+		{ key: "safety.autonomy", source: "project", value: "suggest", valueKind: "exact" },
+		{ key: "orchestrator.model", source: "user", value: "configured", valueKind: "configured" },
+		{ key: "autonomy", source: "user", value: "configured", valueKind: "configured" },
 		{ key: "targets.auth.apiKey", source: "user", value: "configured", valueKind: "configured" },
 		{ key: "custom.label", source: "user", value: "configured", valueKind: "configured" },
 		{ key: "retry.enabled", source: "project.local", value: "true", valueKind: "exact" },

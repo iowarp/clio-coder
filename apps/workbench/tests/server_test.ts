@@ -517,7 +517,7 @@ function delay(milliseconds: number): Promise<void> {
 function configInspectionFixture(): WireConfigInspection {
 	return {
 		inspectedAt: "2026-08-29T12:00:00.000Z",
-		settings: [{ key: "orchestrator.model", source: "project", value: "fixture-model", valueKind: "exact" }],
+		settings: [{ key: "chat.model", source: "project", value: "fixture-model", valueKind: "exact" }],
 		settingsTruncated: false,
 		entries: [{
 			category: "clio-md",
@@ -1603,7 +1603,7 @@ Deno.test("settings, targets, and autonomy round-trip over the socket and reach 
 		// something truthful to show before the operator asks for anything.
 		deepStrictEqual(workspace.targets?.map((target) => target.id), ["lmstudio", "offline-lab"]);
 		equal(workspace.targetsTruncated, false);
-		equal(workspace.settings?.settings["orchestrator.model"], "qwen3.8-27b");
+		equal(workspace.settings?.settings["chat.model"], "qwen3.8-27b");
 		// No probe has happened, so no health may be claimed.
 		deepStrictEqual(workspace.targets?.map((target) => target.health), [null, null]);
 
@@ -1616,11 +1616,11 @@ Deno.test("settings, targets, and autonomy round-trip over the socket and reach 
 
 		await sendCommand(socket, "request-patch", "settings.patch", {
 			projectId,
-			patch: { "orchestrator.model": "qwen3.8-4b" },
+			patch: { "chat.model": "qwen3.8-4b" },
 		});
 		const patched = (await collectThrough(socket, "settings.state")).at(-1);
 		ok(patched?.kind === "settings.state");
-		equal(patched.payload.settings.settings["orchestrator.model"], "qwen3.8-4b");
+		equal(patched.payload.settings.settings["chat.model"], "qwen3.8-4b");
 
 		await sendCommand(socket, "request-session", "session.new", { projectId });
 		await collectThrough(socket, "session.list");

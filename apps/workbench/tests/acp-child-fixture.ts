@@ -288,10 +288,10 @@ function rephraseCommand(command: string, attempt: number): string {
 const AUTONOMY_LEVELS = ["read-only", "suggest", "auto-edit", "full-auto"] as const;
 const THINKING_LEVELS = ["off", "minimal", "low", "medium", "high", "xhigh", "max"] as const;
 const EDITABLE_SETTING_KEYS = [
-	"orchestrator.target",
-	"orchestrator.model",
-	"orchestrator.thinkingLevel",
-	"autonomy",
+	"chat.target",
+	"chat.model",
+	"chat.thinkingLevel",
+	"safety.autonomy",
 ] as const;
 /** Two targets so a probe can prove both a healthy and a not-configured outcome. */
 const FIXTURE_TARGETS = [
@@ -839,25 +839,27 @@ async function run(): Promise<void> {
 	// The safe settings projection and the bound session's autonomy are mutable so
 	// a patch and a per-session override are observable on the next read and turn.
 	const safeSettings = {
-		orchestrator: { target: "lmstudio", model: "qwen3.8-27b", thinkingLevel: "off" },
-		autonomy: "auto-edit",
-	} as { orchestrator: { target: string | null; model: string | null; thinkingLevel: string }; autonomy: string };
-	let sessionAutonomy = safeSettings.autonomy;
+		chat: { target: "lmstudio", model: "qwen3.8-27b", thinkingLevel: "off" },
+		safety: { autonomy: "auto-edit" },
+	} as { chat: { target: string | null; model: string | null; thinkingLevel: string }; safety: { autonomy: string } };
+	let sessionAutonomy = safeSettings.safety.autonomy;
 	let autonomySource: "settings" | "session" = "settings";
 
 	const safeSettingsResult = (afterPatch = false): JsonRpcRecord => ({
 		settings: {
-			orchestrator: {
-				target: safeSettings.orchestrator.target,
-				model: safeSettings.orchestrator.model,
-				thinkingLevel: scenario === "settings-invalid-thinking" ? null : safeSettings.orchestrator.thinkingLevel,
+			chat: {
+				target: safeSettings.chat.target,
+				model: safeSettings.chat.model,
+				thinkingLevel: scenario === "settings-invalid-thinking" ? null : safeSettings.chat.thinkingLevel,
 			},
-			autonomy: scenario === "settings-invalid-autonomy" ||
-					(scenario === "settings-invalid-patch-result" && afterPatch)
-				? null
-				: safeSettings.autonomy,
+			safety: {
+				autonomy: scenario === "settings-invalid-autonomy" ||
+						(scenario === "settings-invalid-patch-result" && afterPatch)
+					? null
+					: safeSettings.safety.autonomy,
+			},
 		},
-		editable: scenario === "settings-invalid-editable" ? ["autonomy"] : [...EDITABLE_SETTING_KEYS],
+		editable: scenario === "settings-invalid-editable" ? ["safety.autonomy"] : [...EDITABLE_SETTING_KEYS],
 	});
 
 	const sessionMeta = (sessionId: string, resumed: boolean, replayed?: JsonRpcRecord): JsonRpcRecord => ({
@@ -2119,17 +2121,17 @@ async function run(): Promise<void> {
 			// Validate the whole patch before writing any of it: a partial write would
 			// leave the operator's settings in a state neither side asked for.
 			const staged = {
-				target: safeSettings.orchestrator.target,
-				model: safeSettings.orchestrator.model,
-				thinkingLevel: safeSettings.orchestrator.thinkingLevel,
-				autonomy: safeSettings.autonomy,
+				target: safeSettings.chat.target,
+				model: safeSettings.chat.model,
+				thinkingLevel: safeSettings.chat.thinkingLevel,
+				autonomy: safeSettings.safety.autonomy,
 			};
 			for (const [key, value] of Object.entries(patch)) {
 				if (!(EDITABLE_SETTING_KEYS as readonly string[]).includes(key)) {
 					await emitError(id, -32_602, "That setting is not editable.", "invalid_params");
 					return;
 				}
-				if (key === "orchestrator.target") {
+				if (key === "chat.target") {
 					if (value !== null && (typeof value !== "string" || !FIXTURE_TARGETS.some((t) => t.id === value))) {
 						await emitError(id, -32_602, "Unknown target.", "invalid_params", "target-unknown");
 						return;
@@ -2137,7 +2139,7 @@ async function run(): Promise<void> {
 					staged.target = value as string | null;
 					continue;
 				}
-				if (key === "orchestrator.model") {
+				if (key === "chat.model") {
 					if (value !== null && typeof value !== "string") {
 						await emitError(id, -32_602, "Unknown model.", "invalid_params");
 						return;
@@ -2145,7 +2147,7 @@ async function run(): Promise<void> {
 					staged.model = value as string | null;
 					continue;
 				}
-				if (key === "orchestrator.thinkingLevel") {
+				if (key === "chat.thinkingLevel") {
 					if (typeof value !== "string" || !(THINKING_LEVELS as readonly string[]).includes(value)) {
 						await emitError(id, -32_602, "Unknown thinking level.", "invalid_params");
 						return;
@@ -2153,16 +2155,19 @@ async function run(): Promise<void> {
 					staged.thinkingLevel = value;
 					continue;
 				}
-				if (typeof value !== "string" || !(AUTONOMY_LEVELS as readonly string[]).includes(value)) {
+				if (
+					key !== "safety.autonomy" || typeof value !== "string" ||
+					!(AUTONOMY_LEVELS as readonly string[]).includes(value)
+				) {
 					await emitError(id, -32_602, "Unknown autonomy level.", "invalid_params");
 					return;
 				}
 				staged.autonomy = value;
 			}
-			safeSettings.orchestrator.target = staged.target;
-			safeSettings.orchestrator.model = staged.model;
-			safeSettings.orchestrator.thinkingLevel = staged.thinkingLevel;
-			safeSettings.autonomy = staged.autonomy;
+			safeSettings.chat.target = staged.target;
+			safeSettings.chat.model = staged.model;
+			safeSettings.chat.thinkingLevel = staged.thinkingLevel;
+			safeSettings.safety.autonomy = staged.autonomy;
 			await emitResult(id, safeSettingsResult(true));
 			return;
 		}

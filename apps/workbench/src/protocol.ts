@@ -226,10 +226,10 @@ export type WireSettingsValue = string | null;
 
 export type WireSettingsPatch = Readonly<
 	Partial<{
-		"orchestrator.target": string | null;
-		"orchestrator.model": string | null;
-		"orchestrator.thinkingLevel": WireThinkingLevel;
-		autonomy: WireAutonomyLevel;
+		"chat.target": string | null;
+		"chat.model": string | null;
+		"chat.thinkingLevel": WireThinkingLevel;
+		"safety.autonomy": WireAutonomyLevel;
 	}>
 >;
 
@@ -2723,30 +2723,30 @@ function expectSettingsPatch(value: unknown, label: string): WireSettingsPatch {
 	const keys = Object.keys(record);
 	if (keys.length === 0) return invalid(`${label} must not be empty`);
 	const result: {
-		"orchestrator.target"?: string | null;
-		"orchestrator.model"?: string | null;
-		"orchestrator.thinkingLevel"?: WireThinkingLevel;
-		autonomy?: WireAutonomyLevel;
+		"chat.target"?: string | null;
+		"chat.model"?: string | null;
+		"chat.thinkingLevel"?: WireThinkingLevel;
+		"safety.autonomy"?: WireAutonomyLevel;
 	} = {};
 	for (const key of keys) {
 		switch (key) {
-			case "orchestrator.target":
-			case "orchestrator.model":
+			case "chat.target":
+			case "chat.model":
 				result[key] = record[key] === null ? null : expectString(record[key], `${label}.${key}`, {
 					minBytes: 1,
-					maxBytes: key === "orchestrator.target" ? 128 : 256,
+					maxBytes: key === "chat.target" ? 128 : 256,
 					trim: true,
 					noControls: true,
 				});
 				break;
-			case "orchestrator.thinkingLevel":
+			case "chat.thinkingLevel":
 				result[key] = expectEnum(
 					record[key],
 					`${label}.${key}`,
 					THINKING_LEVELS,
 				);
 				break;
-			case "autonomy":
+			case "safety.autonomy":
 				result[key] = expectEnum(
 					record[key],
 					`${label}.${key}`,

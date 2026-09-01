@@ -16,7 +16,7 @@ if (scenario === "timeout") {
 	const graph = {
 		cwd,
 		settings: [
-			{ key: "orchestrator.model", value: "fixture-model", source: "project" },
+			{ key: "chat.model", value: "fixture-model", source: "project" },
 			{ key: "targets.auth.apiKey", value: "raw-api-secret", source: "user" },
 			{ key: "custom.note", value: "private literal", source: "user" },
 			{ key: "retry.maxRetries", value: 3, source: "project.local" },
