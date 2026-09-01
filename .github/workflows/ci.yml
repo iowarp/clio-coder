@@ -2,7 +2,7 @@ name: ci
 
 on:
   push:
-    branches: [main]
+    branches: [main, "ci-scratch-**"]
   pull_request:
     branches: [main]
   workflow_dispatch:
@@ -17,26 +17,15 @@ concurrency:
 jobs:
   ci:
     runs-on: ubuntu-latest
-    timeout-minutes: 10
+    timeout-minutes: 8
     steps:
       - uses: actions/checkout@v6
         with:
           persist-credentials: false
-      # One lane, pinned to the `engines` floor. Forward-compatibility on
-      # newer Node runs weekly in flake-hunt.yml instead of doubling every
-      # push.
       - uses: actions/setup-node@v6
         with:
           node-version: 22
           cache: npm
-      # fd and ripgrep are deliberately not installed. src/tools/executables.ts
-      # resolves both at runtime and falls back when they are absent, and the
-      # whole suite passes with both off PATH. Benchmark dependencies belong
-      # to the opt-in internal harness, not the product release lane.
       - run: npm ci --prefer-offline --no-audit --no-fund
-      # The whole gate: typecheck, Biome, hygiene, skill pins, build, the
-      # sharded suite, the trace-viewer suite, and the packaging audit.
-      # Nothing else runs on push or PR. `npm run build` inside `ci` leaves
-      # dist/ in place, so smoke's dist-spawning tests are covered here.
       - name: Release gate
         run: npm run ci:release
