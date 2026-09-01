@@ -672,10 +672,18 @@ export const SETTINGS_V1_PATH_MOVES = Object.freeze([
 	["terminal.fullscreenScrollbar", "interface.fullscreenScrollbar"],
 	["terminal.showTerminalProgress", "interface.terminalProgress"],
 	["terminal.notify", "interface.desktopNotifications"],
-	// No panes.* aliases: every panes key first shipped in v0.4.0, one day
-	// before this rework, so no pre-v2 home holds one worth carrying. The
-	// `panes` root stays in V1_ONLY_ROOTS so a stray v1-era file is still
-	// recognized and stripped rather than raising an unknown-root error.
+	// The panes keys shipped for exactly one release (v0.4.0, the day before
+	// this rework) but they did ship, and each has a direct v2 successor with
+	// an identical value domain, so they move like everything else. The
+	// retired agents/keepFailed pair and the `panes` root itself stay in
+	// SETTINGS_V1_RETIRED-adjacent handling via V1_ONLY_ROOTS.
+	["panes.enabled", "interface.panes.enabled"],
+	["panes.notifications", "interface.panes.notifications"],
+	["panes.journal", "fleet.history.journal"],
+	["panes.yazi.enabled", "interface.panes.files.enabled"],
+	["panes.yazi.mode", "interface.panes.files.mode"],
+	["panes.yazi.profile", "interface.panes.files.profile"],
+	["panes.yazi.followCwd", "interface.panes.files.followCwd"],
 	["keybindings.*", "interface.keybindings.*"],
 	["skills.trustProjectCompatRoots", "integrations.projectResources.trustProjectImports"],
 	["delegation.defaults.connectTimeoutMs", "integrations.externalAgents.defaults.connectTimeoutMs"],

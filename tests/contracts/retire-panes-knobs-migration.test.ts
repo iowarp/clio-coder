@@ -57,19 +57,20 @@ panes:
   keepFailed: false
   notifications: failures
 `);
-		// The v2 schema flags the whole v1 `panes` root; the per-key strip below
-		// is still what keeps this migration honest about removing two knobs and
-		// nothing else. The root itself is the settings-v2 migration's business.
+		// The v2 schema names each carried v1 panes key a targeted tombstone; the
+		// per-key strip below is still what keeps this migration honest about
+		// removing two knobs and nothing else. The keys themselves are the
+		// settings-v2 migration's business.
 		const panesRootIssues = (): string[] =>
 			validateSettingsFile()
 				.issues.map((issue) => issue.path)
 				.filter((issuePath) => issuePath === "panes" || issuePath.startsWith("panes."))
 				.sort();
-		deepStrictEqual(panesRootIssues(), ["panes"]);
+		deepStrictEqual(panesRootIssues(), ["panes.enabled", "panes.notifications"]);
 
 		await retirePanesKnobs.up(stateDir());
 
-		deepStrictEqual(panesRootIssues(), ["panes"]);
+		deepStrictEqual(panesRootIssues(), ["panes.enabled", "panes.notifications"]);
 		const saved = parseYaml(read()) as { panes?: Record<string, unknown>; autonomy?: string };
 		// The keys around them survive: this removes two knobs, not a section.
 		deepStrictEqual(Object.keys(saved.panes ?? {}).sort(), ["enabled", "notifications"]);
