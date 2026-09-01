@@ -11,14 +11,54 @@ export interface CommandFlagSpec {
 	values?: ReadonlyArray<string>;
 	/** Usage placeholder, e.g. "profile" renders as `[--agent-profile <profile>]`. */
 	valueName?: string;
+	/** Runtime completion source attached by name; providers are wired separately. */
+	completionSlot?: CompletionSlotName;
 }
 
 export interface CommandPositionalSpec {
 	name: string; // e.g. "agent", "task"
 	required: boolean;
+	/** Closed values in semantic/manifest order. */
+	values?: ReadonlyArray<string>;
 	/** Greedy tail: consumes the rest of the line verbatim (task text, compact instructions). */
 	rest?: boolean;
+	/** Runtime completion source attached by name; providers are wired separately. */
+	completionSlot?: CompletionSlotName;
 }
+
+/**
+ * Stable grammar/provider seam. Slice 10 names every dynamic noun; slice 11
+ * supplies read-only implementations for these slots.
+ */
+export const COMPLETION_SLOT_NAMES = [
+	"agents",
+	"agent-profiles",
+	"worker-runtimes",
+	"targets",
+	"models",
+	"capabilities",
+	"external-agents",
+	"rosters",
+	"shareable-runs",
+	"skills",
+	"fleet-contracts",
+	"fleet-vars",
+	"fleet-var-values",
+	"tasks",
+	"context-refs",
+	"receipts",
+	"pane-runs-agents",
+	"pane-presets",
+	"pane-targets",
+	"library-tabs",
+	"thinking-levels",
+	"settings-areas",
+	"settings-groups",
+	"help-queries",
+	"paths",
+] as const;
+
+export type CompletionSlotName = (typeof COMPLETION_SLOT_NAMES)[number];
 
 export interface CommandArgsSpec {
 	flags?: ReadonlyArray<CommandFlagSpec>;
@@ -299,16 +339,86 @@ export function parseArgs(spec: CommandArgsSpec, argsLine: string): ParsedArgs {
 }
 
 export interface ArgCompletion {
-	/** Replacement for the trailing (possibly empty) token under the cursor. */
+	/** Canonical replacement for the token under the cursor. */
 	token: string;
 	/** Grammar hint rendered beside the suggestion, e.g. a flag's value placeholder. */
 	hint?: string;
+	completionSlot?: CompletionSlotName;
+	description?: string;
+	disabledReason?: string;
+	/** A completion with another grammatical slot receives a space on Tab. */
+	hasNextSlot: boolean;
 }
 
 export interface ArgCompletionResult {
 	completions: ArgCompletion[];
-	/** Index in the argument text where the token under the cursor begins. */
+	/** Half-open replacement range in argumentText. Quotes are outside the range. */
 	tokenStart: number;
+	tokenEnd: number;
+	quote?: '"' | "'";
+	/** Structured second-level list, rather than a flat top-level command row. */
+	submenu?: { parent: string; canGoBack: true };
+}
+
+interface CompletionToken {
+	value: string;
+	start: number;
+	end: number;
+	contentStart: number;
+	contentEnd: number;
+	quote?: '"' | "'";
+}
+
+/** Tokenize without losing source ranges; unterminated quotes intentionally run to EOL. */
+function completionTokens(text: string): CompletionToken[] {
+	const tokens: CompletionToken[] = [];
+	let index = 0;
+	while (index < text.length) {
+		while (index < text.length && /\s/.test(text[index] ?? "")) index++;
+		if (index >= text.length) break;
+		const start = index;
+		let quote: '"' | "'" | undefined;
+		if (text[index] === '"' || text[index] === "'") {
+			quote = text[index] as '"' | "'";
+			index++;
+		}
+		const contentStart = index;
+		let value = "";
+		while (index < text.length) {
+			const char = text[index] ?? "";
+			if (quote) {
+				if (char === quote) break;
+			} else if (/\s/.test(char)) {
+				break;
+			} else if (char === '"' || char === "'") {
+				// Quotes embedded in a token group their contents but are not values.
+				const embedded = char;
+				index++;
+				while (index < text.length && text[index] !== embedded) value += text[index++] ?? "";
+				if (text[index] === embedded) index++;
+				continue;
+			}
+			value += char;
+			index++;
+		}
+		const contentEnd = index;
+		if (quote && text[index] === quote) index++;
+		tokens.push({ value, start, end: index, contentStart, contentEnd, ...(quote ? { quote } : {}) });
+	}
+	return tokens;
+}
+
+function tokenAtCursor(text: string, cursor: number): { current: CompletionToken; completed: CompletionToken[] } {
+	const safeCursor = Math.max(0, Math.min(cursor, text.length));
+	const tokens = completionTokens(text);
+	const containing = tokens.find((token) => safeCursor >= token.start && safeCursor <= token.end);
+	if (containing) {
+		return { current: containing, completed: tokens.filter((token) => token.end <= containing.start) };
+	}
+	return {
+		current: { value: "", start: safeCursor, end: safeCursor, contentStart: safeCursor, contentEnd: safeCursor },
+		completed: tokens.filter((token) => token.end <= safeCursor),
+	};
 }
 
 /**
@@ -352,10 +462,14 @@ function walkCompletedTokens(spec: CommandArgsSpec, tokens: ReadonlyArray<string
 
 function flagCompletions(spec: CommandArgsSpec, walk: CompletionWalk, current: string): ArgCompletion[] {
 	const available = (spec.flags ?? []).filter((flag) => flag.repeatable === true || !walk.usedFlags.has(flag.name));
-	const rows = available.filter((flag) => flag.name.startsWith(current)).map((flag) => ({ flag, name: flag.name }));
+	const lower = current.toLowerCase();
+	const rows = available
+		.filter((flag) => flag.name.toLowerCase().startsWith(lower))
+		.map((flag) => ({ flag, name: flag.name }));
 	return rows.map(({ flag, name }) => ({
 		token: name,
 		...(flag.takesValue ? { hint: `<${getFlagValuePlaceholder(flag)}>` } : {}),
+		hasNextSlot: flag.takesValue === true,
 	}));
 }
 
@@ -367,27 +481,38 @@ function flagCompletions(spec: CommandArgsSpec, walk: CompletionWalk, current: s
  * null closes the suggestion list. The walk mirrors parseArgs so a completion
  * is always a token the parser would accept.
  */
-export function completeArgs(spec: CommandArgsSpec, argumentText: string): ArgCompletionResult | null {
-	const trailing = argumentText.match(/\S*$/)?.[0] ?? "";
-	const tokenStart = argumentText.length - trailing.length;
-	const current = trailing;
-	const completed = argumentText
-		.slice(0, tokenStart)
-		.split(/\s+/)
-		.filter((token) => token.length > 0);
+export function completeArgs(
+	spec: CommandArgsSpec,
+	argumentText: string,
+	cursor = argumentText.length,
+): ArgCompletionResult | null {
+	const { current: currentToken, completed: completedTokens } = tokenAtCursor(argumentText, cursor);
+	const current = currentToken.value.slice(0, Math.max(0, cursor - currentToken.contentStart));
+	const completed = completedTokens.map((token) => token.value);
+	const range = {
+		tokenStart: currentToken.contentStart,
+		tokenEnd: currentToken.contentEnd,
+		...(currentToken.quote ? { quote: currentToken.quote } : {}),
+	};
 
 	const completions: ArgCompletion[] = [];
 	let active = spec;
 	let walkTokens = completed;
+	let submenu: ArgCompletionResult["submenu"];
 
 	if (spec.subcommands) {
 		const first = completed[0];
 		if (first === undefined) {
 			for (const [name, subSpec] of Object.entries(spec.subcommands)) {
-				if (!name.startsWith(current)) continue;
+				if (!name.toLowerCase().startsWith(current.toLowerCase())) continue;
 				const hint = renderArgsSpec(subSpec);
-				completions.push({ token: name, ...(hint.length > 0 ? { hint } : {}) });
+				completions.push({
+					token: name,
+					...(hint.length > 0 ? { hint } : {}),
+					hasNextSlot: hint.length > 0,
+				});
 			}
+			submenu = { parent: "", canGoBack: true };
 		} else if (spec.subcommands[first]) {
 			active = spec.subcommands[first];
 			walkTokens = completed.slice(1);
@@ -397,23 +522,84 @@ export function completeArgs(spec: CommandArgsSpec, argumentText: string): ArgCo
 	const walk = walkCompletedTokens(active, walkTokens);
 
 	if (walk.restBegun) {
-		return completions.length > 0 ? { completions, tokenStart } : null;
+		return completions.length > 0 ? { completions, ...range, ...(submenu ? { submenu } : {}) } : null;
 	}
 
 	if (walk.awaitingValue) {
 		for (const value of walk.awaitingValue.values ?? []) {
-			if (value.startsWith(current)) completions.push({ token: value });
+			if (value.toLowerCase().startsWith(current.toLowerCase())) completions.push({ token: value, hasNextSlot: true });
 		}
-		return completions.length > 0 ? { completions, tokenStart } : null;
+		if (walk.awaitingValue.completionSlot) {
+			completions.push({ token: current, completionSlot: walk.awaitingValue.completionSlot, hasNextSlot: true });
+		}
+		return completions.length > 0 ? { completions, ...range, ...(submenu ? { submenu } : {}) } : null;
 	}
 
 	const atRest = (active.positionals ?? [])[walk.positionalIndex]?.rest === true;
+	const positional = (active.positionals ?? [])[walk.positionalIndex];
+	for (const value of positional?.values ?? []) {
+		if (value.toLowerCase().startsWith(current.toLowerCase())) {
+			completions.push({ token: value, hasNextSlot: walk.positionalIndex + 1 < (active.positionals?.length ?? 0) });
+		}
+	}
+	if (positional?.completionSlot && !current.startsWith("-")) {
+		completions.push({
+			token: current,
+			completionSlot: positional.completionSlot,
+			hasNextSlot: walk.positionalIndex + 1 < (active.positionals?.length ?? 0),
+		});
+	}
 	const flagsParseable = !atRest || active.parseFlagsBeforeRest === true;
 	if (flagsParseable && (current.length === 0 || current.startsWith("-"))) {
 		completions.push(...flagCompletions(active, walk, current));
 	}
 
-	return completions.length > 0 ? { completions, tokenStart } : null;
+	return completions.length > 0 ? { completions, ...range, ...(submenu ? { submenu } : {}) } : null;
+}
+
+export type CompletionAcceptance = "accept" | "accept-remainder" | "submit" | "close" | "none" | "disabled";
+
+/** Keyboard contract kept pure so editor adapters can share it. */
+export function completionAcceptance(input: {
+	key: "tab" | "right" | "enter" | "escape";
+	selectionMoved: boolean;
+	syntacticallyComplete: boolean;
+	disabled?: boolean;
+}): CompletionAcceptance {
+	if (input.key === "escape") return "close";
+	if (input.disabled) return "disabled";
+	if (input.key === "tab") return "accept";
+	if (input.key === "right") return "accept-remainder";
+	if (input.selectionMoved) return "accept";
+	return input.syntacticallyComplete ? "submit" : "none";
+}
+
+/** Apply either a whole-token acceptance or only its untyped remainder. */
+export function replaceCompletionToken(input: {
+	line: string;
+	range: { start: number; end: number };
+	cursor: number;
+	value: string;
+	mode?: "token" | "remainder";
+	appendSpace?: boolean;
+}): { line: string; cursor: number } {
+	const start = Math.max(0, Math.min(input.range.start, input.line.length));
+	const end = Math.max(start, Math.min(input.range.end, input.line.length));
+	if (input.mode === "remainder") {
+		const cursor = Math.max(start, Math.min(input.cursor, end));
+		const typed = input.line.slice(start, cursor);
+		if (!input.value.toLowerCase().startsWith(typed.toLowerCase())) return { line: input.line, cursor: input.cursor };
+		const remainder = input.value.slice(typed.length);
+		return {
+			line: `${input.line.slice(0, cursor)}${remainder}${input.line.slice(end)}`,
+			cursor: cursor + remainder.length,
+		};
+	}
+	const inserted = `${input.value}${input.appendSpace ? " " : ""}`;
+	return {
+		line: `${input.line.slice(0, start)}${inserted}${input.line.slice(end)}`,
+		cursor: start + inserted.length,
+	};
 }
 
 export function matchFromSpec(
