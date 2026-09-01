@@ -243,6 +243,25 @@ describe("contracts/resume replay transcript notices", () => {
 		ok(rendered.includes(theme.fg("muted", " attempt 2/5 in 3s")), "the retry body renders muted");
 	});
 
+	it("wraps a retry error without discarding its remedy", () => {
+		const panel = createChatPanel();
+		const errorMessage =
+			"The endpoint rejected the credential; replace it in settings.yaml and retry the selected target.";
+		rehydrateChatPanelFromTurns(panel, [
+			{
+				kind: "custom",
+				customType: "retryStatus",
+				turnId: "c2",
+				parentTurnId: null,
+				timestamp: ts,
+				data: { phase: "exhausted", attempt: 5, maxAttempts: 5, errorMessage },
+			},
+		]);
+		const rendered = strip(panel.render(40).join(" ")).replace(/\s+/gu, " ");
+
+		ok(rendered.includes(errorMessage), `retry detail was cut: ${rendered}`);
+	});
+
 	// A cancelled turn is persisted `aborted` so the context estimator skips it
 	// when looking for the last usage anchor. Marking it that way used to also
 	// stamp a synthesized "request aborted" on it, so a resumed session showed a
