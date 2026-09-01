@@ -133,7 +133,7 @@ export function runExtensionsCommand(argv: ReadonlyArray<string>): number {
 	// A bare `clio-coder extensions` is a missing required argument, which the
 	// exit-code contract puts at 2 with the usage on stderr. It used to print the
 	// same help `--help` prints and exit 0, so a CI step gated on it went on to
-	// the next line; `eval`, `memory`, `evidence`, and `usage` all already
+	// the next line; `memory`, `evidence`, and `usage` all already
 	// answered 2 here.
 	if (!parsed.command) {
 		process.stderr.write(HELP);

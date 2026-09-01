@@ -16,10 +16,9 @@
  * prior. It never contributes a hard constraint or durable raw task text.
  */
 
-import { appendFileSync, existsSync, mkdirSync, readdirSync, readFileSync, renameSync, statSync } from "node:fs";
+import { appendFileSync, existsSync, mkdirSync, readFileSync, renameSync, statSync } from "node:fs";
 import { join } from "node:path";
-import { clioDataDir, clioStateDir } from "../../core/xdg.js";
-import { parseEvalArtifactV4 } from "../eval/artifacts/store.js";
+import { clioStateDir } from "../../core/xdg.js";
 import { type AgentTaskType, classifyAgentTask } from "./agent-candidates.js";
 import { readGateDecisionArtifacts } from "./gate-decisions.js";
 import { verifyReceiptIntegrity } from "./receipt-integrity.js";
@@ -36,7 +35,7 @@ import {
 } from "./route-decision.js";
 import { createRouteHistoryStore, type RouteHistoryStore } from "./route-history.js";
 import { type RouteObservation, routeObservationFromHistory } from "./route-policy.js";
-import { type RouteQualityReduction, reduceRouteQuality, routeQualityEvalDigest } from "./route-quality.js";
+import { type RouteQualityReduction, reduceRouteQuality } from "./route-quality.js";
 import type { RunEnvelope, RunReceipt } from "./types.js";
 
 // ---------------------------------------------------------------------------
@@ -215,13 +214,12 @@ export interface CreateRouteObserverOptions {
 function durableQualitySources(stateDir: string): {
 	receipts: Array<{ receipt: RunReceipt; envelope: RunEnvelope }>;
 	gates: ReturnType<typeof readGateDecisionArtifacts>[number]["artifact"][];
-	evals: Array<{ artifact: Parameters<typeof routeQualityEvalDigest>[0]; digest: string }>;
 } {
 	const runsPath = join(stateDir, "runs.json");
-	if (!existsSync(runsPath)) return { receipts: [], gates: [], evals: [] };
+	if (!existsSync(runsPath)) return { receipts: [], gates: [] };
 	try {
 		const parsed = JSON.parse(readFileSync(runsPath, "utf8")) as unknown;
-		if (!Array.isArray(parsed)) return { receipts: [], gates: [], evals: [] };
+		if (!Array.isArray(parsed)) return { receipts: [], gates: [] };
 		const receipts: Array<{ receipt: RunReceipt; envelope: RunEnvelope }> = [];
 		for (const envelope of parsed) {
 			if (typeof envelope !== "object" || envelope === null || Array.isArray(envelope)) continue;
@@ -233,23 +231,9 @@ function durableQualitySources(stateDir: string): {
 				receipts.push({ receipt: receipt as RunReceipt, envelope: run });
 			}
 		}
-		const evals: Array<{ artifact: Parameters<typeof routeQualityEvalDigest>[0]; digest: string }> = [];
-		const evalDirectory = join(clioDataDir(), "evals");
-		if (existsSync(evalDirectory)) {
-			for (const name of readdirSync(evalDirectory)
-				.filter((entry) => entry.endsWith(".json"))
-				.sort()) {
-				try {
-					const artifact = parseEvalArtifactV4(JSON.parse(readFileSync(join(evalDirectory, name), "utf8")) as unknown, name);
-					evals.push({ artifact, digest: routeQualityEvalDigest(artifact) });
-				} catch {
-					// Retired or malformed artifact formats are not routing evidence.
-				}
-			}
-		}
-		return { receipts, gates: readGateDecisionArtifacts(undefined, stateDir).map((entry) => entry.artifact), evals };
+		return { receipts, gates: readGateDecisionArtifacts(undefined, stateDir).map((entry) => entry.artifact) };
 	} catch {
-		return { receipts: [], gates: [], evals: [] };
+		return { receipts: [], gates: [] };
 	}
 }
 
@@ -304,7 +288,6 @@ export function createRouteObserver(options: CreateRouteObserverOptions): RouteO
 				subject,
 				receipts: sources.receipts,
 				gateArtifacts: sources.gates,
-				evalArtifacts: sources.evals,
 			});
 			const completed = record.reliability === "success" && quality.label !== "fail";
 			history.upsert({
