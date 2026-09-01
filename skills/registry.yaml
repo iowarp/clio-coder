@@ -23,8 +23,8 @@ skills:
   # ── context ──
   - name: context-handoff
     path: context/context-handoff
-    version: 0.3.1
-    sha256: 2dc67e24a88607dbedb12163d8afd412421b004df7a845e301accc4e908e18ff
+    version: 0.3.2
+    sha256: c820fe5b3ff73f75de807b3c486d58f8b4571a1cc3e120d6fa32cea2b005eab6
   - name: context-prime
     path: context/context-prime
     version: 0.2.2
@@ -32,20 +32,20 @@ skills:
   # ── git ──
   - name: file-ticket
     path: git/file-ticket
-    version: 0.1.0
-    sha256: 0532ac43ffacbfe3cbc681e68b2cbb7816751d9041b6f1f365e3d43a106a0e91
+    version: 0.1.1
+    sha256: 5e29739b0ee31dbf7070b81d37517384f4bae69dbccd026e9534735226eff13d
   - name: fix-issue
     path: git/fix-issue
-    version: 0.1.0
-    sha256: 2c1a7d9c252dd8e0c9512b9610e1c467020fd2948d8d189d594e33e87e2d6fce
+    version: 0.1.1
+    sha256: 02250af554d8b6f2db199a1a1956d59fca3af3e52f1fa9477c8eb5e76ed23faf
   - name: resolve-merge-conflicts
     path: git/resolve-merge-conflicts
     version: 0.2.0
     sha256: 7974a394b560de7e8995a59e7f15fbbb7d6481d2cfdf12238d854cb9278675a0
   - name: ship
     path: git/ship
-    version: 0.1.0
-    sha256: 58b76f46629562310f833beb2adebe3cc91a078d2d84523608797ee1b53bb445
+    version: 0.1.1
+    sha256: 815f360e43739a5cd143e2e9e874ce3705a18f4fdd155810d328d2408ea76331
   - name: worktree-create
     path: git/worktree-create
     version: 0.2.0
@@ -57,8 +57,8 @@ skills:
   # ── meta ──
   - name: clio-dev
     path: meta/clio-dev
-    version: 0.2.0
-    sha256: 386ebfdac9379ebf5630fa7a9af259bb45f473f7d3d679b0a7ef4164f5fc4dea
+    version: 0.2.1
+    sha256: 153bd359ec94e2d63491057de0ff25f795e3bfd61e0b58947b577583be897aa9
   - name: clio-test
     path: meta/clio-test
     version: 0.1.4
@@ -77,13 +77,13 @@ skills:
     sha256: 147ddba47c4bd99844a896858b5ec483aa3df46fbcfadf8226115ba4bf51456b
   - name: skill-craft
     path: meta/skill-craft
-    version: 0.1.1
-    sha256: ec67b2dd6c4684886eed3c0c2204cba783b1d7b691f2234ebad5e9ab58caf754
+    version: 0.1.2
+    sha256: 6a6c14f014a6751b68d883173ed628033211f80b4b74b362a24661ff0f9cffac
   # ── planning ──
   - name: architecture
     path: planning/architecture
-    version: 0.2.0
-    sha256: e43e306e49adcc788d71eb534e425e34b13eea8d181a2af38d511308ede39b43
+    version: 0.2.1
+    sha256: 02a3112458e599698a1b074ec729fcc3a00f78b4728cfb0418d59f75f4d622dd
   - name: backlog
     path: planning/backlog
     version: 0.2.0
@@ -98,8 +98,8 @@ skills:
     sha256: 17566702dfb367e9aec1f162a7063b87051af08803be953738a8079f2ab559ed
   - name: tech-spec
     path: planning/tech-spec
-    version: 0.1.0
-    sha256: 86b3d72a6c2e155e43bdebf6687b039f3a7443ae55fc765814e62241b1e3e47c
+    version: 0.1.1
+    sha256: b31495fc7d615edf4a6a8239c0251656b59a39a2e497a92cddd55c7c48c942f0
   # ── research ──
   - name: arxiv-literature
     path: research/arxiv-literature
@@ -120,12 +120,12 @@ skills:
   # ── workflow ──
   - name: cut-it
     path: workflow/cut-it
-    version: 0.2.1
-    sha256: f83526535d43137624a9345dbbfbd9de706ccbe464a0aff96dc4a9de2abaaf16
+    version: 0.2.2
+    sha256: 2746d277a8a3adb83b70451892cf7bcc7e96e80782436cfd19a61853b7d48674
   - name: design-council
     path: workflow/design-council
-    version: 0.3.0
-    sha256: e02865e1603802acdcb1f3de6c8a43ac7b6f8f1c085f66ed7a5aeae22ab2d8b6
+    version: 0.3.1
+    sha256: aa4d84ea43965558222d3a781e22af7e603a2de212c5ad4484fe50bf15ddd641
   - name: grill-me
     path: workflow/grill-me
     version: 0.3.2

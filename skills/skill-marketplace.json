@@ -37,7 +37,7 @@
 			"name": "context-handoff",
 			"description": "Use when a session is winding down and work will continue in a new session or another agent, when context is about to be compacted or lost, or when the user asks for a handoff, brief, summary, or \"notes for the next session.\" Produces a durable, redacted, reference-not-copy handoff document the next session can pick up from.",
 			"sourceUrl": "https://github.com/iowarp/clio-coder/tree/main/skills/context/context-handoff",
-			"version": "0.3.1",
+			"version": "0.3.2",
 			"audit": "pass",
 			"category": "context"
 		},
@@ -53,15 +53,15 @@
 			"name": "file-ticket",
 			"description": "Use when something noticed mid-session must become a tracker issue — \"file a ticket\", \"open an issue for this\", \"log this bug\", \"ticket this behavior\". Captures evidence from the live session, dedups against existing issues, composes a labeled issue with acceptance criteria, confirms, and creates it via gh. Filing only; never fixes. Not for batch ticket creation from a PRD; use backlog. Not for diagnosing an existing issue; use fix-issue.",
 			"sourceUrl": "https://github.com/iowarp/clio-coder/tree/main/skills/git/file-ticket",
-			"version": "0.1.0",
+			"version": "0.1.1",
 			"audit": "pass",
 			"category": "git"
 		},
 		{
 			"name": "fix-issue",
-			"description": "Use when a tracker issue should be resolved end to end — \"fix issue 123\", \"take this ticket\", \"resolve the bug in",
+			"description": "Use when a tracker issue should be resolved end to end — \"fix issue 123\", \"take this ticket\", \"resolve the bug in #45\". Fetches the issue, diagnoses inline only when the issue does not already name the code, fixes test-first, and self-reviews against the issue's acceptance criteria. Ends with an uncommitted, verified change ready for ship. Not for filing; use file-ticket. Not for committing or PRs; use ship.",
 			"sourceUrl": "https://github.com/iowarp/clio-coder/tree/main/skills/git/fix-issue",
-			"version": "0.1.0",
+			"version": "0.1.1",
 			"audit": "pass",
 			"category": "git"
 		},
@@ -77,7 +77,7 @@
 			"name": "ship",
 			"description": "Use when finished work should leave the machine — \"ship this\", \"commit and open the PR\", \"get this up for review\". Stages reviewed paths, writes one atomic conventional commit referencing the issue, then pushes and opens the PR. Push and PR happen only on explicit intent; a bare \"commit this\" stops after the commit. Not for producing the change; use fix-issue.",
 			"sourceUrl": "https://github.com/iowarp/clio-coder/tree/main/skills/git/ship",
-			"version": "0.1.0",
+			"version": "0.1.1",
 			"audit": "pass",
 			"category": "git"
 		},
@@ -101,7 +101,7 @@
 			"name": "clio-dev",
 			"description": "Use when modifying Clio Coder's own source in this repository, evolving its harness (TUI, skills, agents, tools, prompts, domains), or deciding whether a change stays local versus becomes a contribution. Governs self-development — what Clio may change freely, what requires explicit user intent, and how to make a change without breaking the architecture.",
 			"sourceUrl": "https://github.com/iowarp/clio-coder/tree/main/skills/meta/clio-dev",
-			"version": "0.2.0",
+			"version": "0.2.1",
 			"audit": "pass",
 			"category": "meta"
 		},
@@ -141,15 +141,15 @@
 			"name": "skill-craft",
 			"description": "Use when writing, reviewing, or pruning a SKILL.md — authoring a new skill, editing an installed one, or judging whether a skill's description, body, or length is earning its cost. Triggers on \"write a skill\", \"improve this skill\", \"why isn't this skill firing\", \"is this skill too long\".",
 			"sourceUrl": "https://github.com/iowarp/clio-coder/tree/main/skills/meta/skill-craft",
-			"version": "0.1.1",
+			"version": "0.1.2",
 			"audit": "pass",
 			"category": "meta"
 		},
 		{
 			"name": "architecture",
-			"description": "Use when an intent (PRD, epic, brief, or idea) needs its engineering approach decided — \"how should we build this\", \"pick the stack\", \"architecture for this feature\". An interactive working session: investigates, proposes 2-3 genuinely different approaches with trade-offs, recommends with reasoning, lets the user decide, and writes a high-level architecture decision doc. Not a task-by-task plan; use cut-it for that. Not a multi-perspective debate; use design-council. Not product intent; use product-intent.",
+			"description": "Use when an intent (PRD, epic, brief, or idea) needs its engineering approach decided — \"how should we build this\", \"pick the stack\", \"architecture for this feature\". An interactive working session: investigates, proposes 2-3 genuinely different approaches with trade-offs, recommends with reasoning, lets the user decide, and writes a high-level architecture decision doc. Not a task-by-task plan; use cut-it for that. Not a multi-perspective debate; use design-council. Not product intent; use product-intent. Not a typed implementation handoff with code-shaped contracts; use tech-spec.",
 			"sourceUrl": "https://github.com/iowarp/clio-coder/tree/main/skills/planning/architecture",
-			"version": "0.2.0",
+			"version": "0.2.1",
 			"audit": "pass",
 			"category": "planning"
 		},
@@ -179,9 +179,9 @@
 		},
 		{
 			"name": "tech-spec",
-			"description": "Write a typed call-stack architecture handoff — code-shaped contracts plus execution flows, implementation-ready for another engineer. User-invoked only.",
+			"description": "Write a typed call-stack architecture handoff — code-shaped contracts plus execution flows, implementation-ready for another engineer. User-invoked only. Not for weighing approaches or deciding the design; use architecture first.",
 			"sourceUrl": "https://github.com/iowarp/clio-coder/tree/main/skills/planning/tech-spec",
-			"version": "0.1.0",
+			"version": "0.1.1",
 			"audit": "pass",
 			"category": "planning"
 		},
@@ -221,7 +221,7 @@
 			"name": "cut-it",
 			"description": "Use when a plan, PRD, or milestone must become an executable sprint — dependency-ordered vertical slices sized for one focused agent run each, with done-when verification per slice. Never fabricates a plan; if none exists or it is too vague to slice, says so and recommends an interview first. Triggers on \"cut it\", \"slice this plan\", \"make this executable\", \"turn this into a sprint\".",
 			"sourceUrl": "https://github.com/iowarp/clio-coder/tree/main/skills/workflow/cut-it",
-			"version": "0.2.1",
+			"version": "0.2.2",
 			"audit": "pass",
 			"category": "workflow"
 		},
@@ -229,7 +229,7 @@
 			"name": "design-council",
 			"description": "Use when a design decision has real tradeoffs and needs several expert perspectives that challenge each other before code is written, such as architecture choices, API shapes, storage formats, parallelization strategies, or dependency decisions. Quick mode runs a single round for a fast perspective check. Triggers on \"council\", \"debate this\", \"multiple perspectives\", \"weigh the options\", \"what would experts say\". Not for a one-question-at-a-time interrogation of a plan; use grill-me. Not for splitting implementation work across workers; use dispatch directly.",
 			"sourceUrl": "https://github.com/iowarp/clio-coder/tree/main/skills/workflow/design-council",
-			"version": "0.3.0",
+			"version": "0.3.1",
 			"audit": "pass",
 			"category": "workflow"
 		},
