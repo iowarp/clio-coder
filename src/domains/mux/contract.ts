@@ -8,7 +8,7 @@
  * fallback value rather than rejecting.
  *
  * Two ownership rules run through the whole file. Clio acts only on panes it
- * created, tracked in `pane-registry.ts` and tagged with the `clio_owner`
+ * created, tracked in `pane-registry.ts` and tagged with the `clio_coder_owner`
  * metadata token so `clio doctor` can find orphans. The one documented
  * exception is Clio's own hosting pane in guest mode, which `reportSelf`
  * writes to under SA-3 of the v0.4.0 cycle plan.
@@ -47,12 +47,15 @@ import {
 } from "./types.js";
 
 /** Metadata source for everything Clio's pane layer writes. */
-const METADATA_SOURCE = "clio:mux";
+const METADATA_SOURCE = "clio-coder:mux";
 /** Agent-authority source for Clio's own hosting pane, per SA-3. */
-const SELF_AGENT_SOURCE = "clio:coder";
+const SELF_AGENT_SOURCE = "clio-coder:coder";
 /** Token every Clio-created pane carries so orphans are findable. */
-const OWNER_TOKEN_KEY = "clio_owner";
-const OWNER_TOKEN_VALUE = "clio:mux";
+const OWNER_TOKEN_KEY = "clio_coder_owner";
+const OWNER_TOKEN_VALUE = "clio-coder:mux";
+/** Old-host cleanup bridge; ownership readers retain this indefinitely. */
+const LEGACY_OWNER_TOKEN_KEY = "clio_owner";
+const LEGACY_OWNER_TOKEN_VALUE = "clio:mux";
 /** herdr caps a metadata token value at 80 characters. */
 const TOKEN_VALUE_MAX = 80;
 /** How long `available()` stays false after a transport failure before probing again. */
@@ -167,6 +170,10 @@ function token(value: string | undefined | null): string | null {
 	return value.length > TOKEN_VALUE_MAX ? value.slice(0, TOKEN_VALUE_MAX) : value;
 }
 
+function hasOwnedPaneToken(tokens: Readonly<Record<string, string>>): boolean {
+	return tokens[OWNER_TOKEN_KEY] === OWNER_TOKEN_VALUE || tokens[LEGACY_OWNER_TOKEN_KEY] === LEGACY_OWNER_TOKEN_VALUE;
+}
+
 export function createMuxRuntime(options: MuxRuntimeOptions): MuxRuntime {
 	const { detection, client } = options;
 	const log = options.log ?? ((): void => undefined);
@@ -231,7 +238,11 @@ export function createMuxRuntime(options: MuxRuntimeOptions): MuxRuntime {
 			paneId,
 			source: METADATA_SOURCE,
 			...(title === undefined ? {} : { title }),
-			tokens: { [OWNER_TOKEN_KEY]: OWNER_TOKEN_VALUE, ...tokens },
+			tokens: {
+				[OWNER_TOKEN_KEY]: OWNER_TOKEN_VALUE,
+				[LEGACY_OWNER_TOKEN_KEY]: LEGACY_OWNER_TOKEN_VALUE,
+				...tokens,
+			},
 		});
 	};
 
@@ -363,7 +374,7 @@ export function createMuxRuntime(options: MuxRuntimeOptions): MuxRuntime {
 				async (live) => {
 					const snapshot = await live.snapshot();
 					for (const pane of snapshot.panes) {
-						if (pane.tokens[OWNER_TOKEN_KEY] !== OWNER_TOKEN_VALUE) continue;
+						if (!hasOwnedPaneToken(pane.tokens)) continue;
 						if (pane.tokens.role !== request.purpose) continue;
 						if (registry.owns(pane.paneId)) continue;
 						// Another workspace's pane belongs to another session's screen;

@@ -83,6 +83,7 @@ export async function panesFindings(env: NodeJS.ProcessEnv = process.env): Promi
 	// answer that boot would get. It opens a socket and nothing else: no file is
 	// created and no pane is touched.
 	const { detection, client } = await detectMux({ enabled, env });
+	const snapshot = client ? await client.snapshot().catch(() => null) : null;
 	await client?.close().catch(() => undefined);
 
 	const candidates = detection.candidates.length > 0 ? detection.candidates : resolveSocketCandidates(env);
@@ -133,6 +134,25 @@ export async function panesFindings(env: NodeJS.ProcessEnv = process.env): Promi
 	);
 
 	findings.push(layoutRow);
+	const legacyOwnedPanes =
+		snapshot?.panes.filter(
+			(pane) => pane.tokens.clio_owner === "clio:mux" && pane.tokens.clio_coder_owner !== "clio-coder:mux",
+		).length ?? 0;
+	const staleWatchTitles =
+		snapshot?.panes.filter(
+			(pane) =>
+				(pane.title === "clio watch" || pane.label === "clio watch") &&
+				(pane.tokens.clio_coder_owner === "clio-coder:mux" || pane.tokens.clio_owner === "clio:mux"),
+		).length ?? 0;
+	findings.push({
+		ok: true,
+		level: legacyOwnedPanes > 0 || staleWatchTitles > 0 ? "warn" : "ok",
+		name: "naming panes",
+		detail:
+			legacyOwnedPanes > 0 || staleWatchTitles > 0
+				? `${legacyOwnedPanes} panes carry only the legacy clio_owner=clio:mux token; ${staleWatchTitles} owned panes retain the stale 'clio watch' title; quit/cleanup recognizes both token schemes`
+				: "no legacy Clio Coder pane ownership tokens or watch titles found",
+	});
 	findings.push(journalWritabilityFinding());
 	return findings;
 }

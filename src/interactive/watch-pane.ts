@@ -120,7 +120,7 @@ export function createWatchPaneController(deps: WatchPaneDeps): PanesWatchContro
 			argv: command(selectionPath, dirs),
 			cwd: deps.getCwd(),
 			label: "watch",
-			title: "clio watch",
+			title: "clio-coder watch",
 			purpose: "watch",
 			dock: { slot: "workers", ...(deps.getWorkersRatio ? { share: deps.getWorkersRatio() } : {}) },
 		});
