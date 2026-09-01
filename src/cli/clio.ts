@@ -44,6 +44,11 @@ export async function runClioCommand(options: BootOptions = {}): Promise<number>
 			const configured = await runConfigureCommand([]);
 			if (configured !== 0) return configured;
 			startupSettings = readStrictLayeredSettings(process.cwd()).settings;
+			const configuredVerdict = classifyDefaultTarget(startupSettings);
+			if (configuredVerdict.kind !== "usable" && configuredVerdict.kind !== "missing-credential") {
+				process.stderr.write(`${describeVerdict(configuredVerdict)} Configuration did not complete; startup cancelled.\n`);
+				return 2;
+			}
 		}
 	}
 	let terminalLease: import("../interactive/terminal-lease.js").TerminalLease | undefined;
