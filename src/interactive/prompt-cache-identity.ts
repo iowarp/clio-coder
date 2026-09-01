@@ -58,6 +58,7 @@ export interface MainPromptCacheIdentityInput {
 	cwd: string;
 	workingContextPaths: ReadonlyArray<string>;
 	contextWindowSource: ContextWindowSource | null;
+	promptInputEpoch: string;
 	sessionInputs: SessionPromptInputs;
 	attachedToolSchemas: ReadonlyArray<AttachedToolSchema>;
 }
@@ -79,6 +80,7 @@ export function mainPromptCacheIdentity(input: MainPromptCacheIdentityInput): st
 			cwd: input.cwd,
 			workingContextPaths: [...input.workingContextPaths].sort((a, b) => a.localeCompare(b)),
 			contextWindowSource: input.contextWindowSource,
+			promptInputEpoch: input.promptInputEpoch,
 			sessionInputs: input.sessionInputs,
 			attachedToolSchemaBytes: attachedToolSchemaBytes(input.attachedToolSchemas),
 		}),

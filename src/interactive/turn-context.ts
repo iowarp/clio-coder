@@ -1091,6 +1091,7 @@ export function createTurnContext(deps: TurnContextDeps): TurnContext {
 				cwd,
 				workingContextPaths: [...sessionWorkingContextPaths],
 				contextWindowSource,
+				promptInputEpoch: deps.prompts.inputEpoch(),
 				sessionInputs,
 				attachedToolSchemas,
 			});

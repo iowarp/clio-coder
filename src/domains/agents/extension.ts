@@ -10,6 +10,7 @@ export function createAgentsBundle(_context: DomainContext): DomainBundle<Agents
 	let recipes: ReadonlyArray<AgentRecipe> = [];
 	let specs: ReadonlyArray<AgentSpec> = [];
 	let diagnostics: ReadonlyArray<AgentRecipeDiagnostic> = [];
+	let revision = 0;
 
 	function discover(): void {
 		const nextDiagnostics: AgentRecipeDiagnostic[] = [];
@@ -19,6 +20,7 @@ export function createAgentsBundle(_context: DomainContext): DomainBundle<Agents
 		recipes = merged;
 		specs = recipes.map(normalizeAgentSpec);
 		diagnostics = nextDiagnostics;
+		revision += 1;
 	}
 
 	const extension: DomainExtension = {
@@ -29,6 +31,9 @@ export function createAgentsBundle(_context: DomainContext): DomainBundle<Agents
 	};
 
 	const contract: AgentsContract = {
+		revision() {
+			return revision;
+		},
 		list() {
 			return recipes;
 		},
