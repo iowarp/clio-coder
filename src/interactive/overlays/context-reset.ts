@@ -82,7 +82,6 @@ function buildSelectPresentation(items: ReadonlyArray<SelectItem>): {
 				const spacing = " ".repeat(Math.max(1, labelWidth + 2 - visibleWidth(fittedLabel)));
 				const descriptionWidth = Math.max(1, maxWidth - visibleWidth(fittedLabel) - visibleWidth(spacing));
 				const fittedDescription = truncateToWidth(description, descriptionWidth, ELLIPSIS, true);
-				const body = `${fittedLabel}${spacing}${fittedDescription}`;
 				return `${fittedLabel}${clioTheme().fg("muted", `${spacing}${fittedDescription}`)}`;
 			},
 		},
