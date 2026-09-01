@@ -205,12 +205,6 @@ export interface FleetRunOutcome {
 	result: ExecutionPlanResult;
 	receipts: ReadonlyArray<RunReceipt>;
 	/**
-	 * The bare sum of every receipt's `costUsd`, which adds unpriced zeros to
-	 * priced dollars and so cannot be rendered on its own. Retained for the
-	 * interactive fleet overlay, which still reads it. Render `totalCost`.
-	 */
-	totalCostUsd: number;
-	/**
 	 * The fold that keeps unpriced calls distinguishable from priced ones, so a
 	 * run whose every receipt came back `unknown` renders as not measured rather
 	 * than as a total of zero dollars.
@@ -862,7 +856,6 @@ export async function executeFleetRun(input: ExecuteFleetRunInput): Promise<Flee
 		planHash: input.plan.hash,
 		result,
 		receipts,
-		totalCostUsd: receipts.reduce((sum, receipt) => sum + receipt.costUsd, 0),
 		totalCost: aggregateCostAmounts(
 			receipts.map((receipt) => ({ usd: receipt.costUsd, provenance: receipt.costProvenance })),
 		),

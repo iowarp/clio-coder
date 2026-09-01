@@ -365,7 +365,13 @@ describe("contracts/fleet-cost-provenance", () => {
 	 * derivation is the defect returning, whatever the surrounding text says.
 	 */
 	it("leaves no fleet render site formatting a cost by hand", () => {
-		for (const path of ["src/cli/fleet.ts", "src/domains/dispatch/fleet-run.ts"]) {
+		// The interactive settled notice is a fleet render site too: it read
+		// `outcome.totalCostUsd.toFixed(4)` while this guard watched only the CLI.
+		for (const path of [
+			"src/cli/fleet.ts",
+			"src/domains/dispatch/fleet-run.ts",
+			"src/interactive/overlay-general-openers.ts",
+		]) {
 			const source = readFileSync(join(process.cwd(), path), "utf8");
 			for (const [index, line] of source.split("\n").entries()) {
 				if (!/cost/iu.test(line)) continue;

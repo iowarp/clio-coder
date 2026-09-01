@@ -12,6 +12,7 @@ import {
 	proposeMemoryPromotion,
 } from "../domains/memory/index.js";
 import type { ObservabilityContract } from "../domains/observability/index.js";
+import { renderCostAggregate } from "../domains/observability/index.js";
 import { foregroundStreamUsage } from "../domains/providers/index.js";
 import type { ContextLedger } from "../domains/session/context-ledger.js";
 import type { SessionMeta } from "../domains/session/index.js";
@@ -496,7 +497,10 @@ export function createOverlayGeneralOpeners(deps: OverlayGeneralOpenersDeps): Ov
 			.then((outcome) => {
 				deps.notify(
 					outcome.cleanRun ? "success" : "warning",
-					`fleet ${preview.name}: ${outcome.succeededStepCount}/${outcome.requiredStepCount} steps succeeded, cost $${outcome.totalCostUsd.toFixed(4)}`,
+					// `totalCost` rather than the bare `totalCostUsd` sum: a run whose
+					// receipts were all unpriced reads as not measured instead of as a
+					// measured $0.0000 nobody put a number on.
+					`fleet ${preview.name}: ${outcome.succeededStepCount}/${outcome.requiredStepCount} steps succeeded, cost ${renderCostAggregate(outcome.totalCost)}`,
 					"fleet-run:settled",
 				);
 			})

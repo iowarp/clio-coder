@@ -6,7 +6,7 @@ import { parseFleetCommands, parseFleetContract } from "../../src/domains/agents
 import type { AgentSpec } from "../../src/domains/agents/spec.js";
 import { agentRoleFactsResolver } from "../../src/domains/dispatch/execution-role.js";
 import type { ExecuteFleetRunInput, FleetRunOutcome } from "../../src/domains/dispatch/index.js";
-import { emptyCostAggregate } from "../../src/domains/observability/cost.js";
+import { aggregateCostAmounts, type CostAggregate, emptyCostAggregate } from "../../src/domains/observability/cost.js";
 import type { Component, OverlayHandle, TUI } from "../../src/engine/tui.js";
 import {
 	createDispatchBoardStore,
@@ -33,6 +33,9 @@ import {
 
 const ESC = String.fromCharCode(27);
 const stripAnsi = (text: string): string => text.replace(new RegExp(`${ESC}\\[[0-9;]*m`, "g"), "");
+
+/** The settled notice is emitted from the run promise's continuation, not inline. */
+const settled = (): Promise<void> => new Promise((resolve) => setImmediate(resolve));
 
 const CONTRACT = [
 	"---",
@@ -129,7 +132,7 @@ function fakeTui(): { tui: TUI; component: () => Component } {
 }
 
 /** The opener under test with only the collaborators the fleet-run path touches. */
-function openersHarness(options: { preview?: string; inFlight?: boolean } = {}) {
+function openersHarness(options: { preview?: string; inFlight?: boolean; totalCost?: CostAggregate } = {}) {
 	const notices: string[] = [];
 	const runs: ExecuteFleetRunInput[] = [];
 	const phases: Array<{ runId: string; wave: number; stepId: string }> = [];
@@ -179,8 +182,7 @@ function openersHarness(options: { preview?: string; inFlight?: boolean } = {}) 
 				planHash: input.plan.hash,
 				result: { planHash: input.plan.hash } as FleetRunOutcome["result"],
 				receipts: [],
-				totalCostUsd: 0,
-				totalCost: emptyCostAggregate(),
+				totalCost: options.totalCost ?? emptyCostAggregate(),
 				requiredStepCount: 3,
 				succeededStepCount: 3,
 				resolvedLoopCount: 0,
@@ -434,6 +436,36 @@ describe("contracts/fleet-run approval dispatch", () => {
 		strictEqual(input?.contractName, "preview-demo");
 		strictEqual(input?.plan.steps.length, 3);
 		deepStrictEqual(harness.phases, [{ runId: "run-a", wave: 0, stepId: "scout" }]);
+	});
+
+	// The settled notice used to render `outcome.totalCostUsd.toFixed(4)`, which
+	// turned a run nobody priced into a measured `$0.0000`. It goes through the
+	// one cost derivation now, so an unpriced run says so.
+	it("says a run with no priced receipt was not measured rather than $0.0000", async () => {
+		const harness = openersHarness();
+		harness.openers.startFleetRun("preview-demo", { target: "the parser" });
+		harness.overlay()?.onAccept();
+		await settled();
+		const settledNotice = harness.notices.find((text) => text.includes("steps succeeded"));
+		ok(settledNotice, harness.notices.join("\n"));
+		ok(settledNotice.includes("cost not measured"), settledNotice);
+		strictEqual(settledNotice.includes("$0.0000"), false, settledNotice);
+	});
+
+	it("renders a priced run through the shared formatter, provenance and all", async () => {
+		const harness = openersHarness({
+			totalCost: aggregateCostAmounts([
+				{ usd: 0.25, provenance: "known" },
+				{ usd: 0.5, provenance: "estimated" },
+			]),
+		});
+		harness.openers.startFleetRun("preview-demo", { target: "the parser" });
+		harness.overlay()?.onAccept();
+		await settled();
+		const settledNotice = harness.notices.find((text) => text.includes("steps succeeded"));
+		ok(settledNotice, harness.notices.join("\n"));
+		// `~` and `est` are the formatter's estimate marking; `toFixed(4)` had none.
+		ok(settledNotice.includes("cost ~$0.75 est"), settledNotice);
 	});
 });
 
