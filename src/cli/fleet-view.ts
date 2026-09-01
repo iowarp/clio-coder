@@ -126,6 +126,11 @@ function sanitizeBounded(value: string, maxWidth: number): string {
 	return sanitizeCallTargetText(truncateToWidth(sanitized, maxWidth, "…", false));
 }
 
+/** The ANSI-aware TUI truncator appends reset codes; stdout snapshots are plain text. */
+function truncatePlain(value: string, width: number): string {
+	return truncateToWidth(value, width, "…", false).replaceAll("\u001B[0m", "");
+}
+
 function receiptPathFor(run: RunEnvelope): string {
 	return run.receiptPath ?? join(clioStateDir(), "receipts", `${run.id}.json`);
 }
@@ -286,13 +291,11 @@ export function renderRunView(model: RunViewModel, width: number = DEFAULT_WIDTH
 	const columns = Math.max(MIN_WIDTH, width);
 	const rule = "─".repeat(columns);
 	const lines: string[] = [];
-	lines.push(truncateToWidth(`run ${model.runId}  ${model.agentId}`, columns, "…", false));
+	lines.push(truncatePlain(`run ${model.runId}  ${model.agentId}`, columns));
 	lines.push(
-		truncateToWidth(
+		truncatePlain(
 			`model ${model.model}  target ${model.target}  node ${model.node}  phase ${model.phase}  elapsed ${formatElapsed(model.elapsedMs)}`,
 			columns,
-			"…",
-			false,
 		),
 	);
 	if (model.task !== undefined) {
@@ -310,14 +313,14 @@ export function renderRunView(model: RunViewModel, width: number = DEFAULT_WIDTH
 		if (model.transcriptTruncated) lines.push("… earlier events dropped (journal truncated)");
 		for (const entry of model.transcript) {
 			const head = `${clockOf(entry.at)} ${entry.label}`;
-			if (entry.detail === undefined) lines.push(truncateToWidth(head, columns, "…", false));
+			if (entry.detail === undefined) lines.push(truncatePlain(head, columns));
 			else lines.push(...wrapViewerValue(`${head}: `, entry.detail, columns));
 		}
 	}
 	lines.push(rule);
 	lines.push(...wrapViewerValue("evidence  ", model.evidence, columns));
 	if (model.receiptPath !== null) {
-		lines.push(truncateToWidth(`receipt   ${model.receiptPath}`, columns, "…", false));
+		lines.push(truncatePlain(`receipt   ${model.receiptPath}`, columns));
 	}
 	const outcome =
 		model.outcome === null
@@ -504,14 +507,12 @@ export function renderFleetRunView(model: FleetRunViewModel, width: number = DEF
 	const columns = Math.max(MIN_WIDTH, width);
 	const rule = "─".repeat(columns);
 	const lines: string[] = [];
-	lines.push(truncateToWidth(`fleet ${sanitizeBounded(model.fleet, 64)}  root ${model.rootId}`, columns, "…", false));
+	lines.push(truncatePlain(`fleet ${sanitizeBounded(model.fleet, 64)}  root ${model.rootId}`, columns));
 	const resumed = model.resumedFrom === null ? "" : `  resumed from ${sanitizeBounded(model.resumedFrom, 64)}`;
 	lines.push(
-		truncateToWidth(
+		truncatePlain(
 			`started ${model.startedAt}  elapsed ${formatElapsed(model.elapsedMs)}  ${model.recordedSteps} of ${model.plannedSteps} steps recorded${model.running ? "  (running)" : ""}${resumed}`,
 			columns,
-			"…",
-			false,
 		),
 	);
 	lines.push(rule);
@@ -530,7 +531,7 @@ export function renderFleetRunView(model: FleetRunViewModel, width: number = DEF
 		for (const row of rows) {
 			const head = `${row.step.padEnd(stepWidth)}  ${row.runId.padEnd(runWidth)}  ${row.outcome.padEnd(outcomeWidth)}`;
 			const text = row.tail.length === 0 ? head : `${head}  ${sanitizeBounded(row.tail, DETAIL_MAX_WIDTH)}`;
-			lines.push(truncateToWidth(text.trimEnd(), columns, "…", false));
+			lines.push(truncatePlain(text.trimEnd(), columns));
 		}
 	}
 	lines.push(rule);
