@@ -8,6 +8,10 @@ import type { MessageEntry, SessionEntry } from "../../src/domains/session/entri
 const BODY = "line one  \n\tline two\r\nüñîçødé\nend without newline";
 const TS = "2026-08-21T00:00:00.000Z";
 
+function isRecord(value: unknown): value is Record<string, unknown> {
+	return typeof value === "object" && value !== null;
+}
+
 function message(turnId: string, parentTurnId: string | null, role: "user" | "assistant"): MessageEntry {
 	return { kind: "message", turnId, parentTurnId, timestamp: TS, role, payload: { text: turnId } };
 }
@@ -68,8 +72,12 @@ describe("working-set ledger boundary", () => {
 		strictEqual(resultBody(entries[1]), BODY);
 		strictEqual(resultBody(projected[1])?.includes(BODY), false);
 		ok(JSON.stringify(projected[1]).includes("[evicted ref=r1"));
-		strictEqual((projected[1] as MessageEntry).payload.toolCallId, "call-1");
-		deepStrictEqual((projected[1] as MessageEntry).payload.result, {
+		const projectedResult = projected[1];
+		if (projectedResult?.kind !== "message" || !isRecord(projectedResult.payload)) {
+			throw new TypeError("projected tool result must be a message with an object payload");
+		}
+		strictEqual(projectedResult.payload.toolCallId, "call-1");
+		deepStrictEqual(projectedResult.payload.result, {
 			content: [{ type: "text", text: "[evicted ref=r1 reason=age_horizon tool=read path=src/a.ts]" }],
 			details: { paths: ["src/a.ts"], workingSet: { evicted: true, reason: "age_horizon", ref: "r1" } },
 		});
@@ -82,10 +90,7 @@ describe("working-set ledger boundary", () => {
 		ok(recalled.ok);
 		strictEqual(recalled.result.body, BODY);
 		const fields = buildRecallFields(recalled.result, { trigger: "tool", toolCallId: "recall-call" });
-		const next: SessionEntry[] = [
-			...entries,
-			{ ...fields, turnId: "recall-1", parentTurnId: "e1", timestamp: TS },
-		];
+		const next: SessionEntry[] = [...entries, { ...fields, turnId: "recall-1", parentTurnId: "e1", timestamp: TS }];
 		const view = foldWorkingSet(next, "recall-1");
 		strictEqual(view.evicted.has("r1"), true);
 		strictEqual(view.recalls, 1);

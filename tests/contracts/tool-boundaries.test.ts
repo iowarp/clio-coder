@@ -52,6 +52,7 @@ describe("tool boundary contract", () => {
 
 	it("normalizes registry arguments and applies one bounded result disposition", async () => {
 		let received: Record<string, unknown> | null = null;
+		const readReceived = (): Record<string, unknown> | null => received;
 		const spec: ToolSpec = {
 			name: ToolNames.Read,
 			description: "contract read",
@@ -83,8 +84,8 @@ describe("tool boundary contract", () => {
 		registry.register(spec);
 		const verdict = await registry.invoke({ tool: ToolNames.Read, args: { legacy: "src/file.ts" } });
 		strictEqual(verdict.kind, "ok");
-		strictEqual(received?.path, "src/file.ts");
-		strictEqual(received?.legacy, undefined);
+		strictEqual(readReceived()?.path, "src/file.ts");
+		strictEqual(readReceived()?.legacy, undefined);
 		if (verdict.kind !== "ok") return;
 		const disposition = verdict.result.details?.resultDisposition as { applications?: number; contextBytes?: number };
 		strictEqual(disposition.applications, 1);
@@ -94,6 +95,7 @@ describe("tool boundary contract", () => {
 
 	it("preserves web method, headers, body, and response through the transport", async () => {
 		let received: { method: string; header: string; body: string } | null = null;
+		const readReceived = (): { method: string; header: string; body: string } | null => received;
 		const server = createServer((request, response) => {
 			const chunks: Buffer[] = [];
 			request.on("data", (chunk: Buffer) => chunks.push(chunk));
@@ -122,9 +124,9 @@ describe("tool boundary contract", () => {
 				timeout_ms: 2_000,
 			});
 			strictEqual(result.kind, "ok");
-			strictEqual(received?.method, "POST");
-			strictEqual(received?.header, "tool-wire");
-			strictEqual(received?.body, "snowman=☃");
+			strictEqual(readReceived()?.method, "POST");
+			strictEqual(readReceived()?.header, "tool-wire");
+			strictEqual(readReceived()?.body, "snowman=☃");
 			if (result.kind === "ok") ok(result.output.includes("transport-ok"));
 		} finally {
 			await new Promise<void>((resolve, reject) => server.close((error) => (error ? reject(error) : resolve())));

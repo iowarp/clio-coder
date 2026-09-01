@@ -3,7 +3,7 @@ import { describe, it } from "node:test";
 
 import { serializeConversation } from "../../src/domains/session/compaction/branch-summary.js";
 import { estimateTokens } from "../../src/domains/session/compaction/tokens.js";
-import type { SessionEntry } from "../../src/domains/session/entries.js";
+import type { BashExecutionEntry } from "../../src/domains/session/entries.js";
 import { buildReplayAgentMessagesFromTurns } from "../../src/interactive/chat-renderer.js";
 
 function bashEntry(
@@ -12,7 +12,7 @@ function bashEntry(
 	output: string,
 	excludeFromContext: boolean,
 	parentTurnId: string | null,
-): SessionEntry {
+): BashExecutionEntry {
 	return {
 		kind: "bashExecution",
 		turnId: id,

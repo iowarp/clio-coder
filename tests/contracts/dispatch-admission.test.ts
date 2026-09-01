@@ -9,10 +9,7 @@ import {
 	orderAdmissionRequests,
 } from "../../src/domains/dispatch/admission-queue.js";
 import { assessCapabilityMismatch } from "../../src/domains/dispatch/capability-match.js";
-import {
-	isBoundedGateRolePrompt,
-	REVIEWER_GATE_PROMPT,
-} from "../../src/domains/dispatch/gate-role-prompts.js";
+import { isBoundedGateRolePrompt, REVIEWER_GATE_PROMPT } from "../../src/domains/dispatch/gate-role-prompts.js";
 import { normalizeDispatchIntent } from "../../src/domains/dispatch/intent.js";
 import { classifyDispatchIntentCompatibility } from "../../src/domains/dispatch/intent-compatibility.js";
 import { endpointCapacityFor } from "../../src/domains/providers/endpoint-capacity.js";
@@ -35,6 +32,11 @@ function queued(id: string, priority = 0): AdmissionQueueRequest<string> {
 
 function agent(id: string, capabilityClass: AgentSpec["capabilityClass"]): AgentSpec {
 	return { id, capabilityClass } as AgentSpec;
+}
+
+function capacityLimit(capacity: ReturnType<typeof endpointCapacityFor>): number {
+	if (capacity === null) throw new TypeError("expected endpoint capacity");
+	return capacity.limit;
 }
 
 describe("dispatch admission boundary", () => {
@@ -81,9 +83,14 @@ describe("dispatch admission boundary", () => {
 	it("uses operator capacity, then discovered capacity, then the conservative local default", () => {
 		const target = { id: "local", runtime: "llamacpp", url: "http://localhost:8080/v1" };
 		const runtime = { id: "llamacpp", tier: "local-native" as const };
-		strictEqual(endpointCapacityFor({ target: { ...target, maxConcurrentRequests: 3 }, runtime, discoveredSlots: 2 }, {}).limit, 3);
-		strictEqual(endpointCapacityFor({ target, runtime, discoveredSlots: 2 }, {}).limit, 2);
-		strictEqual(endpointCapacityFor({ target, runtime }, {}).limit, 1);
+		strictEqual(
+			capacityLimit(
+				endpointCapacityFor({ target: { ...target, maxConcurrentRequests: 3 }, runtime, discoveredSlots: 2 }, {}),
+			),
+			3,
+		);
+		strictEqual(capacityLimit(endpointCapacityFor({ target, runtime, discoveredSlots: 2 }, {})), 2);
+		strictEqual(capacityLimit(endpointCapacityFor({ target, runtime }, {})), 1);
 	});
 
 	it("refuses write authority on a read-only request without widening or dropping it", () => {
@@ -144,10 +151,10 @@ describe("dispatch admission boundary", () => {
 				dispatch: bundle.contract,
 				getAutonomy: () => "full-auto",
 			});
-			const result = (await tool.run(
-				{ tasks: ["build first"], review: { reviewer: "external-reviewer" } },
-				{},
-			)) as { kind: string; message?: string };
+			const result = (await tool.run({ tasks: ["build first"], review: { reviewer: "external-reviewer" } }, {})) as {
+				kind: string;
+				message?: string;
+			};
 			strictEqual(result.kind, "error");
 			match(result.message ?? "", /agent-managed.*cannot enforce request autonomy narrowing/u);
 			strictEqual(starts, 0);

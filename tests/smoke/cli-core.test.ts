@@ -1,6 +1,6 @@
 import { match, ok, strictEqual } from "node:assert/strict";
 import { spawn } from "node:child_process";
-import { existsSync, mkdtempSync, readFileSync, readdirSync, rmSync } from "node:fs";
+import { existsSync, mkdtempSync, readdirSync, readFileSync, rmSync } from "node:fs";
 import { createServer, type IncomingMessage, type Server } from "node:http";
 import type { AddressInfo } from "node:net";
 import { tmpdir } from "node:os";
@@ -252,10 +252,9 @@ describe("smoke/built CLI core", { concurrency: false }, () => {
 			strictEqual(JSON.parse(doctor.stdout).ok, true);
 
 			const prompt = "CLI_CORE_ONE_TURN";
-			const turn = await runCli(
-				["--no-context-files", "--no-skills", "run", "--json-events", "terminal", prompt],
-				{ env: scratch.env },
-			);
+			const turn = await runCli(["--no-context-files", "--no-skills", "run", "--json-events", "terminal", prompt], {
+				env: scratch.env,
+			});
 			strictEqual(turn.code, 0, turn.stderr);
 			const events = turn.stdout
 				.trim()
@@ -263,10 +262,13 @@ describe("smoke/built CLI core", { concurrency: false }, () => {
 				.map((line) => JSON.parse(line) as Record<string, unknown>);
 			const types = events.map((event) => event.type);
 			for (const type of ["session", "turn_start", "agent_end", "turn_end"]) ok(types.includes(type), turn.stdout);
-			const settled = events.findLast((event) => event.type === "turn_end");
+			const settled = [...events].reverse().find((event) => event.type === "turn_end");
 			strictEqual(settled?.exitCode, 0);
 			ok(typeof settled?.endedAt === "string");
-			ok(requests.some((request) => JSON.stringify(request.messages).includes(prompt)), "prompt must reach provider");
+			ok(
+				requests.some((request) => JSON.stringify(request.messages).includes(prompt)),
+				"prompt must reach provider",
+			);
 
 			const receiptDir = join(scratch.root, "state", "receipts");
 			const files = readdirSync(receiptDir).filter((name) => name.endsWith(".json"));

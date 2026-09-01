@@ -1,11 +1,8 @@
 import { deepStrictEqual, ok, strictEqual } from "node:assert/strict";
 import { afterEach, describe, it } from "node:test";
 import { ledgerUsageCalls, type SessionEntry } from "../../src/domains/session/index.js";
+import { remainingContextMaxTokens, setGlobalDefaultMaxOutputTokens } from "../../src/engine/apis/output-budget.js";
 import type { AgentMessage } from "../../src/engine/types.js";
-import {
-	remainingContextMaxTokens,
-	setGlobalDefaultMaxOutputTokens,
-} from "../../src/engine/apis/output-budget.js";
 import { estimatedUsageForInterruptedTurn } from "../../src/interactive/chat-loop-messages.js";
 import { reseedSessionUsageFromLedger } from "../../src/interactive/session-usage-reseed.js";
 
@@ -45,14 +42,19 @@ describe("contracts/metering integrity", () => {
 	it("attributes provider usage to the target and the model that answered", () => {
 		const [call] = ledgerUsageCalls(
 			[
-				assistant("a1", "stop", {
-					input: 120,
-					output: 30,
-					cacheRead: 80,
-					cacheWrite: 5,
-					totalTokens: 235,
-					cost: { total: 0.25 },
-				}, { provider: "llamacpp", model: "requested-model", responseModel: "answering-model" }),
+				assistant(
+					"a1",
+					"stop",
+					{
+						input: 120,
+						output: 30,
+						cacheRead: 80,
+						cacheWrite: 5,
+						totalTokens: 235,
+						cost: { total: 0.25 },
+					},
+					{ provider: "llamacpp", model: "requested-model", responseModel: "answering-model" },
+				),
 			],
 			{ target: "local-cluster", model: "requested-model" },
 		);
@@ -78,7 +80,7 @@ describe("contracts/metering integrity", () => {
 
 		ok(corrected);
 		strictEqual(corrected.input, 9_658);
-		ok(corrected.output > 0);
+		ok(typeof corrected.output === "number" && corrected.output > 0);
 		strictEqual(corrected.totalTokens, corrected.input + corrected.output);
 		strictEqual(corrected.estimated, true);
 		strictEqual(estimatedUsageForInterruptedTurn({ ...message, stopReason: "stop" } as AgentMessage, 9_658), null);
