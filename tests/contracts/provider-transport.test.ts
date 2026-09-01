@@ -96,7 +96,7 @@ describe("provider transport boundary", () => {
 		});
 		const result = await runtime.probe?.(
 			{ id: "missing-url", runtime: runtime.id },
-			{ credentialsPresent: new Set(), httpTimeoutMs: 100, authToken: null },
+			{ credentialsPresent: new Set(), httpTimeoutMs: 100 },
 		);
 		strictEqual(result?.ok, false);
 		ok((result?.error?.length ?? 0) > 0);

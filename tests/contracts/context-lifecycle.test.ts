@@ -15,7 +15,6 @@ import {
 	getLatestContextSnapshot,
 	lastLoadedContextWindow,
 	reconcileSnapshot,
-	type ContextSnapshot,
 } from "../../src/domains/session/context-accounting.js";
 import type { SessionMeta } from "../../src/domains/session/contract.js";
 import type { Usage } from "../../src/engine/types.js";

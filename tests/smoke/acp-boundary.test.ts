@@ -61,9 +61,9 @@ function seedTarget(target: Home, endpoint: string): void {
 				"      maxTokens: 4096",
 			].join("\n"),
 		)
-		.replace(/^  target: null$/m, "  target: acp-local")
-		.replace(/^  model: null$/m, "  model: mock-model")
-		.replace(/^  autonomy: auto-edit$/m, "  autonomy: suggest");
+		.replace(/^ {2}target: null$/m, "  target: acp-local")
+		.replace(/^ {2}model: null$/m, "  model: mock-model")
+		.replace(/^ {2}autonomy: auto-edit$/m, "  autonomy: suggest");
 	writeFileSync(path, settings);
 }
 class AcpClient {
@@ -303,7 +303,8 @@ describe("smoke/ACP stdio boundary", { concurrency: false }, () => {
 				if (decision === "allow-once") strictEqual(readFileSync(file, "utf8"), "from ACP");
 				const terminal = client.updates
 					.filter((update) => update.sessionUpdate === "tool_call_update")
-					.findLast((update) => update.toolCallId === toolCall.toolCallId);
+					.reverse()
+					.find((update) => update.toolCallId === toolCall.toolCallId);
 				strictEqual(terminal?.status, decision === "allow-once" ? "completed" : "failed");
 				await client.close(sessionId);
 			} finally {

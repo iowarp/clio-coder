@@ -6,8 +6,8 @@ import { compileExecutionPlan } from "../../src/domains/dispatch/execution-plan.
 import type { ExecutionStepResult } from "../../src/domains/dispatch/execution-scheduler.js";
 import { planFleetResume } from "../../src/domains/dispatch/fleet-run.js";
 import { createFleetPlacementResolver } from "../../src/domains/dispatch/placement.js";
-import type { WorkerTransport } from "../../src/domains/dispatch/transport.js";
 import type { FleetRunRecord } from "../../src/domains/dispatch/state.js";
+import type { WorkerTransport } from "../../src/domains/dispatch/transport.js";
 import { createFleetRegistry } from "../../src/domains/scheduling/cluster.js";
 import { clearScratchClioHome, newScratchClioHome } from "../harness/scratch-env.js";
 
@@ -105,7 +105,7 @@ describe("fleet lifecycle boundary", () => {
 			fleet: "release",
 			planHash: plan.hash,
 			stepIds: plan.steps.map(({ id }) => id),
-			planSteps: structuredClone(plan.steps),
+			planSteps: structuredClone([...plan.steps]),
 			vars: { channel: "stable" },
 			startedAt: "2026-08-23T12:00:00.000Z",
 			endedAt: null,
