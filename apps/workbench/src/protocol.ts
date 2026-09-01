@@ -394,6 +394,7 @@ export const SERVER_EVENT_KINDS = [
 ] as const;
 
 export type ServerEventKind = (typeof SERVER_EVENT_KINDS)[number];
+const LEGACY_CLIO_STATE_EVENT = "clio.state";
 
 export type ProtocolErrorCode =
 	| "unsupported-version"
@@ -2560,6 +2561,14 @@ function expectId(value: unknown, label: string): string {
 	return id;
 }
 
+/** Two-minor read bridge for V33. Writers receive only the returned canonical form. */
+function normalizeClioCoderErrorCode(value: unknown, label: string): string {
+	const code = expectId(value, label);
+	return code.startsWith("clio-") && !code.startsWith("clio-coder-")
+		? `clio-coder-${code.slice("clio-".length)}`
+		: code;
+}
+
 function expectOpaqueString(
 	value: unknown,
 	label: string,
@@ -3316,7 +3325,7 @@ function validateClioSnapshot(value: unknown, label: string): WireClioSnapshot {
 			["code", "summary"],
 		);
 		lastFailure = {
-			code: expectId(failure.code, `${label}.lastFailure.code`),
+			code: normalizeClioCoderErrorCode(failure.code, `${label}.lastFailure.code`),
 			summary: expectSanitizedMessage(
 				failure.summary,
 				`${label}.lastFailure.summary`,
@@ -3464,6 +3473,9 @@ function validateWireTimelineItem(
 			"failure",
 		] as const,
 	);
+	const normalizedDetail = detail !== undefined && (kind === "outcome" || kind === "failure")
+		? normalizeClioCoderErrorCode(detail, `${label}.detail`)
+		: detail;
 	const status = expectEnum(
 		record.status,
 		`${label}.status`,
@@ -3531,7 +3543,7 @@ function validateWireTimelineItem(
 			minBytes: 0,
 			maxBytes: 64 * 1024 + 64,
 		}),
-		...(detail === undefined ? {} : { detail }),
+		...(normalizedDetail === undefined ? {} : { detail: normalizedDetail }),
 		status,
 		turnId: expectId(record.turnId, `${label}.turnId`),
 		origin,
@@ -5956,8 +5968,6 @@ function validateEvalReport(value: unknown, label: string): WireEvalReport {
 		"startedAt",
 		"suiteId",
 		"servingGroup",
-		"clioCoderVersion",
-		"clioCoderCommit",
 		"platform",
 		"node",
 		"matrix",
@@ -5969,7 +5979,12 @@ function validateEvalReport(value: unknown, label: string): WireEvalReport {
 		"scenarios",
 		"scenariosTruncated",
 		"scenariosDropped",
-	]);
+	], ["clioCoderVersion", "clioCoderCommit", "clioVersion", "clioCommit"]);
+	const versionField = Object.hasOwn(record, "clioCoderVersion") ? "clioCoderVersion" : "clioVersion";
+	const commitField = Object.hasOwn(record, "clioCoderCommit") ? "clioCoderCommit" : "clioCommit";
+	if (!Object.hasOwn(record, versionField) || !Object.hasOwn(record, commitField)) {
+		invalid(`${label} is missing Clio Coder provenance`);
+	}
 	const evalId = expectPresentationText(record.evalId, `${label}.evalId`, 128);
 	const startedAt = expectNullableTimestamp(record.startedAt, `${label}.startedAt`);
 	// The stamp is not an independent fact: it is read out of the id, and the id
@@ -6149,8 +6164,8 @@ function validateEvalReport(value: unknown, label: string): WireEvalReport {
 		startedAt,
 		suiteId: expectPresentationText(record.suiteId, `${label}.suiteId`, 128),
 		servingGroup: expectInteger(record.servingGroup, `${label}.servingGroup`, 1),
-		clioCoderVersion: expectNullablePresentationText(record.clioCoderVersion, `${label}.clioCoderVersion`, 64),
-		clioCoderCommit: expectNullablePresentationText(record.clioCoderCommit, `${label}.clioCoderCommit`, 64),
+		clioCoderVersion: expectNullablePresentationText(record[versionField], `${label}.${versionField}`, 64),
+		clioCoderCommit: expectNullablePresentationText(record[commitField], `${label}.${commitField}`, 64),
 		platform: expectNullablePresentationText(record.platform, `${label}.platform`, 64),
 		node: expectNullablePresentationText(record.node, `${label}.node`, 64),
 		matrix: {
@@ -7056,7 +7071,6 @@ function validateWireWorkspace(
 		"treeTruncated",
 		"sessions",
 		"sessionsTruncated",
-		"clioCoder",
 		"timeline",
 		"timelineTruncated",
 		"activeTurn",
@@ -7072,7 +7086,9 @@ function validateWireWorkspace(
 		"fleet",
 		"processGeneration",
 		"lastSequence",
-	]);
+	], ["clioCoder", "clio"]);
+	const clioCoderField = Object.hasOwn(record, "clioCoder") ? "clioCoder" : "clio";
+	if (!Object.hasOwn(record, clioCoderField)) invalid(`${label} is missing Clio Coder state`);
 	return {
 		project: validateWireProjectSummary(record.project, `${label}.project`),
 		tree: validateWireTree(record.tree, `${label}.tree`),
@@ -7090,7 +7106,7 @@ function validateWireWorkspace(
 			record.sessionsTruncated,
 			`${label}.sessionsTruncated`,
 		),
-		clioCoder: validateClioSnapshot(record.clioCoder, `${label}.clioCoder`),
+		clioCoder: validateClioSnapshot(record[clioCoderField], `${label}.${clioCoderField}`),
 		timeline: expectArray(
 			record.timeline,
 			`${label}.timeline`,
@@ -7573,7 +7589,7 @@ function validateServerPayload(
 			const usage = Object.hasOwn(record, "usage") ? validateUsage(record.usage, `${label}.usage`) : undefined;
 			return {
 				outcome: expectEnum(record.outcome, `${label}.outcome`, TURN_OUTCOMES),
-				code: expectId(record.code, `${label}.code`),
+				code: normalizeClioCoderErrorCode(record.code, `${label}.code`),
 				summary: expectSanitizedMessage(record.summary, `${label}.summary`),
 				...(stopReason === undefined ? {} : { stopReason }),
 				...(usage === undefined ? {} : { usage }),
@@ -7843,7 +7859,9 @@ export function validateServerEvent(value: unknown): ServerEvent {
 			`server event protocolVersion must be ${PROTOCOL_VERSION}`,
 		);
 	}
-	const kind = expectEnum(record.kind, "server event.kind", SERVER_EVENT_KINDS);
+	const kind = record.kind === LEGACY_CLIO_STATE_EVENT
+		? "clio-coder.state"
+		: expectEnum(record.kind, "server event.kind", SERVER_EVENT_KINDS);
 	const terminal = expectBoolean(record.terminal, "server event.terminal");
 	if (terminal !== TERMINAL_EVENT_KINDS.has(kind)) {
 		return invalid(`${kind} has an invalid terminal flag`);

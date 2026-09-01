@@ -120,6 +120,18 @@ function project(report: unknown, overrides: Record<string, unknown> = {}) {
 
 Deno.test("eval projection refuses contradictions the harness cannot produce", () => {
 	equal(project(REPORT).reports[0]?.suiteId, "public-main-agent-behavior");
+	const { clioCoderVersion, clioCoderCommit, ...legacyReport } = REPORT;
+	const normalizedLegacy = project({
+		...legacyReport,
+		clioVersion: clioCoderVersion,
+		clioCommit: clioCoderCommit,
+	}).reports[0];
+	equal(normalizedLegacy?.clioCoderVersion, clioCoderVersion);
+	equal(normalizedLegacy?.clioCoderCommit, clioCoderCommit);
+	ok(!Object.hasOwn(normalizedLegacy ?? {}, "clioVersion"));
+	const canonicalWins = project({ ...REPORT, clioVersion: "0.3.2", clioCommit: "legacy-commit" }).reports[0];
+	equal(canonicalWins?.clioCoderVersion, clioCoderVersion);
+	equal(canonicalWins?.clioCoderCommit, clioCoderCommit);
 
 	// The entry path, the suite hash, and the transcript are exactly what this
 	// boundary keeps host-side.
