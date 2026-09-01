@@ -9,6 +9,7 @@ import { ToolNames } from "../../core/tool-names.js";
 import type { MarketplaceSkill } from "../resources/skills/marketplace.js";
 import {
 	assertPromotionInstallSource,
+	declineKey,
 	matchMarketplaceSkills,
 	type PromotionMatch,
 	readPromotionDeclines,
@@ -62,10 +63,10 @@ export interface MarketplaceOfferDeps {
 	getAutonomy(): AutonomyLevel;
 	/** Perform the install; the registration gates the source before calling. */
 	installEntry(entry: MarketplaceSkill, scope: "user" | "project"): MarketplaceOfferInstallResult;
-	/** Decline persistence; defaults to the promotion module's config-dir store. */
+	/** Decline persistence; defaults to the promotion module's config-dir store. Keyed by name+version. */
 	declines?: {
 		readNever(): Readonly<Record<string, string>>;
-		recordNever(name: string): void;
+		recordNever(name: string, version?: string): void;
 	};
 	/** Per-offer binding tag source; injectable for deterministic tests. Defaults to a random id. */
 	newOfferTag?: () => string;
@@ -150,7 +151,7 @@ function chosenOfferOption(answer: AnswerLike): string | null {
 export function createMarketplaceOfferRegistration(deps: MarketplaceOfferDeps): MiddlewareHookRegistration {
 	const declines = deps.declines ?? {
 		readNever: () => readPromotionDeclines().never,
-		recordNever: (name: string) => recordPromotionNeverDecline(name),
+		recordNever: (name: string, version?: string) => recordPromotionNeverDecline(name, version),
 	};
 	const newOfferTag = deps.newOfferTag ?? (() => randomUUID());
 	// Per-session state, reset on a session id change (same adoption rule as
@@ -191,8 +192,16 @@ export function createMarketplaceOfferRegistration(deps: MarketplaceOfferDeps): 
 		} catch {
 			return null;
 		}
-		const excluded = new Set<string>([...installed, ...Object.keys(never), ...sessionDeclines, ...offeredNames]);
-		return matchMarketplaceSkills(text, entries, excluded)[0] ?? null;
+		// offeredNames caps to one offer per skill per session, regardless of
+		// version. Declines are version-scoped: a "never"/"not now" on one catalog
+		// version does not suppress a later version of the same skill.
+		const excludedNames = new Set<string>([...installed, ...offeredNames]);
+		const declinedKeys = new Set<string>([...Object.keys(never), ...sessionDeclines]);
+		return (
+			matchMarketplaceSkills(text, entries, excludedNames).find(
+				(candidate) => !declinedKeys.has(declineKey(candidate.entry.name, candidate.entry.version)),
+			) ?? null
+		);
 	};
 
 	const installGated = (entry: MarketplaceSkill, scope: "user" | "project"): MarketplaceOfferInstallResult => {
@@ -216,14 +225,15 @@ export function createMarketplaceOfferRegistration(deps: MarketplaceOfferDeps): 
 			const option = chosenOfferOption(answer);
 			if (option === null) continue;
 			pendingOffer = null;
+			const offerKey = declineKey(offer.entry.name, offer.entry.version);
 			if (option === SKILL_INSTALL_OFFER_OPTION_NOT_NOW) {
-				sessionDeclines.add(offer.entry.name);
+				sessionDeclines.add(offerKey);
 				return NO_EFFECTS;
 			}
 			if (option === SKILL_INSTALL_OFFER_OPTION_NEVER) {
-				sessionDeclines.add(offer.entry.name);
+				sessionDeclines.add(offerKey);
 				try {
-					declines.recordNever(offer.entry.name);
+					declines.recordNever(offer.entry.name, offer.entry.version);
 				} catch {
 					// Persistence failure degrades to a session decline.
 				}
@@ -242,7 +252,7 @@ export function createMarketplaceOfferRegistration(deps: MarketplaceOfferDeps): 
 					},
 				];
 			} catch (error) {
-				sessionDeclines.add(offer.entry.name);
+				sessionDeclines.add(offerKey);
 				return [
 					{
 						kind: "annotate_tool_result",
