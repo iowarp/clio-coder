@@ -81,7 +81,7 @@ import {
 	type SessionPromptCompileRecord,
 } from "../domains/session/prompt-manifest.js";
 import type { AgentMessage, Usage } from "../engine/types.js";
-import type { ToolRegistry } from "../tools/registry.js";
+import { resolveToolPromptHint, type ToolRegistry } from "../tools/registry.js";
 import {
 	backendCacheVerdict,
 	extractUserText,
@@ -1060,7 +1060,7 @@ export function createTurnContext(deps: TurnContextDeps): TurnContext {
 			const toolNames = toolNamesFromAgentState(agentRuntime.agent.state.tools);
 			const attachedToolSchemas = attachedToolSchemasFromState(agentRuntime.agent.state.tools);
 			const toolPromptHints = toolNames.flatMap((name) => {
-				const hint = deps.toolRegistry?.get(name as ToolName)?.metadata?.promptHint;
+				const hint = resolveToolPromptHint(deps.toolRegistry?.get(name as ToolName)?.metadata?.promptHint, "session");
 				return hint ? [{ tool: name, hint }] : [];
 			});
 			const sessionInputs: SessionPromptInputs = {

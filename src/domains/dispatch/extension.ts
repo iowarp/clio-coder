@@ -3434,17 +3434,16 @@ export function createDispatchBundle(
 			allowedTools: effectiveTools,
 		};
 		const personaBody = workerPersonaBody(req, recipe, effectiveTools);
+		const hasCanonicalContext = effectiveTools.includes(ToolNames.Context);
+		const hasBoundSkills =
+			hasCanonicalContext && recipe.skills !== undefined && recipe.skills.length > 0 && req.noSkills !== true;
 		const compiledWorkerPrompt = await prompts.compileWorkerPrompt({
 			autonomy: effectiveAutonomy,
 			providerSupportsTools: target.runtime.kind === "subprocess" ? null : targetToolCapability(target),
 			toolNames: effectiveTools,
-			toolPromptHints: toolPromptHintsForNames(effectiveTools),
-			hasCanonicalContext: effectiveTools.includes(ToolNames.Context),
-			hasBoundSkills:
-				effectiveTools.includes(ToolNames.Context) &&
-				recipe.skills !== undefined &&
-				recipe.skills.length > 0 &&
-				req.noSkills !== true,
+			toolPromptHints: toolPromptHintsForNames(effectiveTools, hasBoundSkills ? "bound-worker" : "worker"),
+			hasCanonicalContext,
+			hasBoundSkills,
 			onPermission: settings?.fleet.permissions.mode ?? "deny",
 			persona: {
 				id: `persona.${recipe.id}`,

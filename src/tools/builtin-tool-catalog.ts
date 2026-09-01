@@ -4,7 +4,13 @@ import { BASH_DEFAULT_RESULT_DISPOSITION } from "./bash.js";
 import { OBSERVATION_POLICY_SLACK_BYTES, OBSERVE_SELF_CAPS } from "./observation.js";
 import { toolPresentationPolicy } from "./presentation.js";
 import { readMaxBytes } from "./read.js";
-import type { ToolMetadata, ToolSourceInfo, ToolSpec } from "./registry.js";
+import {
+	resolveToolPromptHint,
+	type ToolMetadata,
+	type ToolPromptHintRole,
+	type ToolSourceInfo,
+	type ToolSpec,
+} from "./registry.js";
 
 function withSourceInfo<T extends ToolSpec>(spec: T, sourceInfo: ToolSourceInfo): T {
 	return { ...spec, sourceInfo };
@@ -83,7 +89,7 @@ const TOOL_METADATA: Readonly<Record<string, ToolMetadata>> = {
 		resultSizePolicy: observePolicy(OBSERVE_SELF_CAPS.codeNav, "Raise limit or use a narrower mode/query."),
 		costLatency: "local_fast",
 		promptHint:
-			"Use code_nav for indexed code navigation (modes: symbol, path, entries, outline, deps, dependents, wiki).",
+			"Use code_nav with source=workspace (default) for project code and source=clio for Clio's shipped code map; modes: symbol, path, entries, outline, deps, dependents, wiki (workspace only).",
 	},
 	[ToolNames.Context]: {
 		objective: "Return workspace, bundled-docs, or skill context.",
@@ -94,8 +100,14 @@ const TOOL_METADATA: Readonly<Record<string, ToolMetadata>> = {
 			"Use a narrower query or scope to inspect omitted content.",
 		),
 		costLatency: "local_fast",
-		promptHint:
-			'Call context with scope="skills" to list installed and marketplace skills; when one matches the task, or the operator names a skill or asks how one works, suggest the operator run /skill <name> (a marketplace skill is offered for install) and never load it uninvited; a [Marketplace] reminder naming an uninstalled skill may instead be offered through ask_user with its exact options, and the harness performs any install. When the user message carries a skill request, first load that skill via context (scope="skills", name=<skill>) before doing anything else. When an [evicted ...] marker names content you need, recall it with context(scope="recall", ref=...); re-read the file only when the marker says it changed.',
+		promptHint: {
+			session:
+				'On an explicit pending skill request, first load exactly that skill with context(scope="skills", name=<skill>). Follow a [Marketplace] reminder\'s exact ask_user options; the harness performs any install. Recall needed [evicted ...] content with context(scope="recall", ref=...).',
+			worker:
+				'This worker has no operator skill-activation channel; do not load or suggest skills. Recall needed [evicted ...] content with context(scope="recall", ref=...).',
+			boundWorker:
+				'Load only the harness-activated recipe-bound skills named in the persona, and only when they match the assigned task. This worker cannot install or suggest marketplace skills. Recall needed [evicted ...] content with context(scope="recall", ref=...).',
+		},
 	},
 	[ToolNames.CredentialPresent]: {
 		objective: "Check whether a credential key is present without returning its value.",
@@ -264,15 +276,21 @@ const TOOL_METADATA: Readonly<Record<string, ToolMetadata>> = {
 	},
 };
 
-/** Canonical, registry-owned prompt hints for an already-admitted tool set. */
-export function toolPromptHintsForNames(names: ReadonlyArray<ToolName>): ReadonlyArray<{ tool: string; hint: string }> {
-	const seen = new Set<string>();
+/** Canonical, role-aware prompt hints for an already-admitted tool set. */
+export function toolPromptHintsForNames(
+	names: ReadonlyArray<ToolName>,
+	role: ToolPromptHintRole = "session",
+): ReadonlyArray<{ tool: string; hint: string }> {
+	const seenTools = new Set<string>();
+	const seenHints = new Set<string>();
 	const hints: Array<{ tool: string; hint: string }> = [];
 	for (const name of [...names].sort()) {
-		if (seen.has(name)) continue;
-		seen.add(name);
-		const hint = TOOL_METADATA[name]?.promptHint?.trim();
-		if (hint) hints.push({ tool: name, hint });
+		if (seenTools.has(name)) continue;
+		seenTools.add(name);
+		const hint = resolveToolPromptHint(TOOL_METADATA[name]?.promptHint, role);
+		if (!hint || seenHints.has(hint)) continue;
+		seenHints.add(hint);
+		hints.push({ tool: name, hint });
 	}
 	return hints;
 }
