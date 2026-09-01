@@ -993,8 +993,12 @@ export class ModelOverlayView implements Component {
 		if (kb.matches(data, "tui.select.confirm") || matchesKey(data, "enter") || data === "\n") {
 			const row = this.selectedRow();
 			if (row?.selectable) {
-				this.onSelect({ target: row.target, model: row.model });
+				// Close the picker before handing the selection to its owner. The
+				// application opens the session/global scope confirmation from
+				// onSelect; closing afterwards would immediately close that new overlay
+				// and leave the model binding unchanged.
 				this.onClose();
+				this.onSelect({ target: row.target, model: row.model });
 				return;
 			}
 			this.selectionError = row
