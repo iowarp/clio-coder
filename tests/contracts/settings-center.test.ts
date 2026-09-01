@@ -1424,6 +1424,29 @@ describe("contracts/settings center", () => {
 		}
 	});
 
+	it("suppresses parent-page frame controls while a Settings submenu owns input", () => {
+		for (const columns of [60, 80, 120]) {
+			const fake = fakeTui(30, columns);
+			openSettingsOverlay(fake.tui, {
+				getSettings: settingsWithTargets,
+				writeSettings: () => undefined,
+				onClose: () => undefined,
+			});
+			const overlay = fake.captured();
+			ok(overlay);
+			const parentFooter = stripAnsi(overlay.render(columns).at(-1) ?? "");
+			ok(parentFooter.includes("open"), parentFooter);
+
+			overlay.handleInput?.(ENTER);
+			const submenuLines = overlay.render(columns).map(stripAnsi);
+			const submenuFooter = submenuLines.at(-1) ?? "";
+			ok(submenuLines.some((line) => line.includes("[Enter] choose") && line.includes("[Esc] back")));
+			ok(!submenuFooter.includes("open"), submenuFooter);
+			ok(!submenuFooter.includes("preview"), submenuFooter);
+			ok(!submenuFooter.includes("filter"), submenuFooter);
+		}
+	});
+
 	it("walks Esc up exactly one level from every submenu kind, at 40 and 160 inner columns", () => {
 		const submenus: Array<{ name: string; section: Parameters<SettingsCenter["setSelection"]>[0]; row: number }> = [
 			{ name: "enum picker", section: "safety", row: 0 },

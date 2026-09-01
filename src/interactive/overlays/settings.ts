@@ -4175,8 +4175,12 @@ export function openSettingsOverlay(tui: TUI, deps: OpenSettingsOverlayDeps): Se
 		margin: SETTINGS_OVERLAY_MARGIN,
 		markerId: "settings",
 		title: "Settings",
-		footerHint: (innerWidth) =>
-			innerWidth < WIDE_LAYOUT_MIN_WIDTH
+		footerHint: (innerWidth) => {
+			// The submenu renders its own authoritative choose/back legend. Keeping
+			// the parent row controls in the outer border at the same time advertises
+			// actions (preview, open, filter) that this input depth does not route.
+			if (center.getSelection().submenuOpen) return undefined;
+			return innerWidth < WIDE_LAYOUT_MIN_WIDTH
 				? buildHint(
 						[
 							{ key: "↑↓", verb: "move" },
@@ -4193,7 +4197,8 @@ export function openSettingsOverlay(tui: TUI, deps: OpenSettingsOverlayDeps): Se
 							{ key: "/", verb: "filter" },
 						],
 						"back",
-					),
+					);
+		},
 	});
 	return Object.assign(handle, { refreshRows });
 }
