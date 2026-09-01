@@ -26,7 +26,7 @@ For process exit codes, stdout deliverable guarantees, and machine-readable JSON
 | `clio-coder --no-context-files` / `clio-coder -nc` | Skip `CLIO-CODER.md` project-context injection for one invocation. |
 | `clio-coder --no-skills` | Disable skill discovery for one invocation while still honoring explicit `--skill` paths. |
 | `clio-coder --skill <path>` | Load one explicit skill file or directory for one invocation (repeatable). |
-| `clio-coder configure` | Run the configuration wizard. |
+| `clio-coder configure` | Run the configuration wizard. Ctrl+C reports `configuration cancelled`, writes no target, and exits 130; when first-run onboarding is cancelled, startup stops instead of opening the TUI with no usable target. |
 | `clio-coder configure --interop` | Review other coding agents detected on this machine and connect one as a delegation peer. Without a TTY it prints the proposals and writes nothing. |
 | `clio-coder configure --list` | List user-facing runtime ids. |
 | `clio-coder configure --list --all` | List every registered runtime, including aliases. |
@@ -45,7 +45,7 @@ For process exit codes, stdout deliverable guarantees, and machine-readable JSON
 | `clio-coder auth status [target-or-runtime]` | Inspect auth state. |
 | `clio-coder auth login [target-or-runtime] [--api-key <value>]` | Add credentials through the supported flow. |
 | `clio-coder auth logout [target-or-runtime]` | Remove stored credentials. |
-| `clio-coder doctor [--fix] [--json]` | Diagnose state; with `--fix`, create missing structure and templates, repair credential permissions, and refresh install metadata. Settings remain strict and are not migrated. |
+| `clio-coder doctor [--fix] [--json]` | Diagnose state. Plain `doctor` is read-only and leaves even a partially initialized home byte-for-byte untouched. With `--fix`, create missing structure and templates, repair credential permissions, and refresh install metadata. Settings remain strict; lifecycle migrations belong to `upgrade`, not `doctor --fix`. |
 | `clio-coder tools list [--json]` | List the pinned external tool registry and whether each program resolves from `PATH`, Clio's vendored data directory, or nowhere. |
 | `clio-coder tools status <id> [--json] [--reset-profile]` | Inspect one registered tool. `--reset-profile` applies only to yazi's generated profile. |
 | `clio-coder tools install <id> [--force] [--json]` | Download the platform asset, verify every declared checksum, and atomically vendor it. |
@@ -56,7 +56,7 @@ For process exit codes, stdout deliverable guarantees, and machine-readable JSON
 | `clio-coder upgrade [--dry-run] [--channel=<latest\|beta\|dev>] [--skip-migrations]` | Refresh state metadata, apply migrations, and update npm installs when applicable. |
 | `clio-coder agents [--json] [--all]` | List discovered agent specs. |
 | `clio-coder fleet list\|run\|status\|drain\|resume` | List fleet contracts, run one, show dispatch state, or control admission. `drain` denies new execution starts for up to one hour and preserves running work; `resume` reopens admission immediately. `run <name>` takes `[--var k=v ...]` and `[--json]`; `status`, `drain`, and `resume` each take `[--json]`. |
-| `clio-coder fleet view <runId\|fleetRootId> [--follow]` | Read the append-only run journal after verifying receipt trust. A fleet root prints its durable step index. `--follow` requires an interactive terminal and one run id. |
+| `clio-coder fleet view <runId\|fleetRootId> [--follow]` | Read the append-only run journal after verifying receipt trust. A fleet root prints its durable step index. Without `--follow`, the width-bounded snapshot is plain text with no ANSI control bytes. `--follow` requires an interactive terminal and one run id; `fleet view --help` prints this subcommand's own usage, including `--watch`. |
 | `clio-coder fleet view --watch <selection-file>` | Follow the run id currently named by the selection file and retarget when it changes. This is the operator-pulled watch surface used by the pane integration. |
 | `clio-coder dev components [list] [--json]` | List behavior-affecting harness components. |
 | `clio-coder dev components snapshot --out <path>` | Write a component snapshot JSON file. |
@@ -65,9 +65,11 @@ For process exit codes, stdout deliverable guarantees, and machine-readable JSON
 | `clio-coder eval validate\|run\|report\|compare\|gate` | Validate, run, report, compare, and gate local evaluation suites (Suite v2). |
 | `clio-coder memory list\|propose\|promote\|approve\|reject\|prune` | Manage scoped, evidence-linked memory records. |
 | `clio-coder trace runs [--db PATH] [--limit N] [--json]` | List runs recorded in the durable trace mirror beside the ledger. |
+| `clio-coder trace inspect --json` | Emit the fixed, bounded recent accounting projection used by the Workbench. It accepts no path, identifier, or limit and omits request text, error prose, event payloads, process commands, PIDs, and hosts. |
 | `clio-coder trace phases <runId> [--db PATH]` | Show one run's recorded phases. |
 | `clio-coder trace tail <runId> [--follow] [--db PATH]` | Tail one run's recorded events; `--follow` streams as they land. |
 | `clio-coder trace procs <runId> [--db PATH]` | Show the processes one run spawned. |
+| `clio-coder trace prune [--max-age-days N] [--max-bytes N] [--db PATH] [--json]` | Apply the trace-retention policy while protecting queued and running runs; JSON reports the resolved policy, rows, runs and bytes removed, protected runs, and whether vacuum ran. |
 | `clio-coder trace sql <SELECT query> [--db PATH]` | Run one read-only query against the mirror. Only a single `SELECT` or read-only `WITH` statement is accepted; anything else exits 2. |
 | `clio-coder trace ui [--db PATH] [--port N]` | Serve the localhost-only waterfall viewer. The viewer is not part of the published package. |
 | `clio-coder dev evolve manifest init\|validate\|summarize` | Create and check typed harness change manifests. |
@@ -121,6 +123,10 @@ pings it before registering pane tools. The fleet watch pane runs
 `fleet view --watch` against a selection file. Clio writes only the selected run
 id, while the viewer reads journals itself, so dispatch remains independent of
 the pane host and a second terminal can use the same journal surface directly.
+`panes.enabled: embedded` does not start a host: it is an accepted but
+unimplemented rung that resolves to no panes, prints a refusal during boot, and
+is labelled `NOT IMPLEMENTED` in Settings. Use `auto` or `--with-panes` only
+when Clio is already inside a reachable herdr session.
 
 ### Headless Session Continuity
 

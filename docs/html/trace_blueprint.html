@@ -114,11 +114,16 @@
     <main>
       <section style="margin-bottom: 3rem;">
         <h2>clio-coder trace Subcommands</h2>
-        <p style="color: var(--text-muted); margin-bottom: 1.5rem;">The CLI exposes six dedicated subcommands for operational tracing and diagnostics:</p>
+        <p style="color: var(--text-muted); margin-bottom: 1.5rem;">The CLI exposes eight dedicated subcommands for operational tracing, bounded projection, retention, and diagnostics:</p>
 
         <div class="subcommand-card">
           <div class="subcommand-title">clio-coder trace runs [--db PATH] [--limit N] [--json]</div>
           <p>Queries and formats recent execution runs up to limit N (1 to 500, default 50). Displays run status, start timestamp, total tokens, USD cost, and run ID.</p>
+        </div>
+
+        <div class="subcommand-card">
+          <div class="subcommand-title">clio-coder trace inspect --json</div>
+          <p>Emits a fixed version-1 window of bounded run, phase, event-kind, and process-kind accounting from the default database. It accepts no caller-selected path or limit and carries no request text, event payload, command line, PID, or host.</p>
         </div>
 
         <div class="subcommand-card">
@@ -134,6 +139,11 @@
         <div class="subcommand-card">
           <div class="subcommand-title">clio-coder trace procs &lt;runId&gt; [--db PATH]</div>
           <p>Displays process records (orchestrator and worker) registered for a run. Shows process state (<code>live</code> or <code>ended</code>), PID, kind, name, and command line.</p>
+        </div>
+
+        <div class="subcommand-card">
+          <div class="subcommand-title">clio-coder trace prune [--max-age-days N] [--max-bytes N] [--db PATH] [--json]</div>
+          <p>Applies the trace retention policy while protecting queued and running runs. Reports removed runs and rows, reclaimed bytes, protected runs, and whether the database was vacuumed; JSON remains structured when no default database exists.</p>
         </div>
 
         <div class="subcommand-card">

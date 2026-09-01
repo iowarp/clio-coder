@@ -8,6 +8,9 @@
 > It details the pre-consolidation state of the codebase before the `v0.2.9` release.
 > For the current, active, and authoritative reference of environment variables, please refer to [environment-variables.md](environment-variables.md).
 
+> [!NOTE]
+> Pane settings were introduced after this audit and are intentionally absent from its tables. In the current schema, `panes.agents` and `panes.keepFailed` are retired and refused when newly authored; `clio-coder upgrade` removes them from an older settings file before strict validation. See [configuration-and-targets.md](configuration-and-targets.md) for the active pane keys and their migration behavior.
+
 ---
 
 Point-in-time inventory of every tunable knob outside `settings.yaml`: environment variables, the compiled-in defaults behind them, and the CLI flags that bridge into them. Gathered 2026-07-03 by sweeping `src/` for `process.env` reads and cross-checking `scripts/`, `benchmarks/`, and `docs/`. Purpose: reason about which knobs earn their keep, which belong in `settings.yaml`, and which are dead.

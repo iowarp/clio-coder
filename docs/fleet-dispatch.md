@@ -126,12 +126,14 @@ the node's real SSH channel:
 5. node-scoped target reachability, runtime/model compatibility, endpoint
    identity, and explicit resource facts where the target exposes them.
 
-Run it with `clio-coder doctor`. Results persist under the state dir
-(`fleet-preflight.json`) keyed by node and project root, so eligibility
-survives across processes. A record is invalidated by a changed host, a
-changed project root, or a local `clio-coder` upgrade; admission then fails closed
-with a reason that names the fix (run `clio-coder doctor` again). Failing nodes are
-doctor warnings, never fatal: the fleet degrades to the nodes that passed.
+Run it with `clio-coder doctor`. Plain doctor is diagnostic and read-only: it
+reports the live probe rows but does not create or refresh
+`fleet-preflight.json`, and therefore does not change dispatch eligibility.
+Placement still reads a pre-existing record under the state directory, keyed by
+node and project root; a changed host, changed project root, or local
+`clio-coder` upgrade invalidates that record and admission fails closed. The
+current CLI exposes no mutating doctor preflight that refreshes it. Failing
+nodes are doctor warnings rather than a failure of the local installation.
 
 ## Placement and process-safe admission
 
