@@ -762,7 +762,7 @@ entries:
   - name: chat.thinkingLevel
     kind: setting
     owner: chat
-    default: off
+    default: low
     controls: "Saved default reasoning effort for the chat model: `off`, `minimal`, `low`, `medium`, `high`, `xhigh`, `max`, clamped to what the model supports at request time; applies next session."
     precedence: "`run --thinking` > session routing (`/model`, `/thinking`, Alt+J/K, `/settings` apply-this-session) > `.clio-coder/settings.local.yaml` > `.clio-coder/settings.yaml` > user settings.yaml > default"
     verdict: keep
