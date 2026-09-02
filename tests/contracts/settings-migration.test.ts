@@ -212,7 +212,7 @@ integrations:
 		const legacy = 'run = "clio-pick $CLIO_YAZI_PICK_TOKEN clio-coder-pick $CLIO_CODER_YAZI_PICK_TOKEN"\n';
 		writeFileSync(join(profileDir, "keymap.toml"), legacy, "utf8");
 
-		const finding = namingFootprintFindings({ cwd: scratch.dir }).find((entry) => entry.name === "naming yazi profile");
+		const finding = namingFootprintFindings({ cwd: scratch.dir }).find((entry) => entry.name === "naming files profile");
 		strictEqual(finding?.level, "warn");
 		strictEqual(readFileSync(join(profileDir, "keymap.toml"), "utf8"), legacy, "doctor inspection is read-only");
 

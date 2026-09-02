@@ -324,7 +324,7 @@ reviewable lab or fleet configuration.
 writes the result atomically, and keeps the original `settings.yaml.v1.bak`.
 Conflicting old and new paths stop the migration instead of guessing.
 
-Experimental pane, dock, and Yazi integrations are opt-in and off by default;
+Experimental pane, dock, and files-pane integrations are opt-in and off by default;
 Clio does not start or download them unless you explicitly enable
 `interface.panes`.
 

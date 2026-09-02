@@ -52,6 +52,10 @@ export type YaziBridgeOpenResult =
 
 export interface YaziBridge {
 	open(options?: { once?: boolean }): Promise<YaziBridgeOpenResult>;
+	/** Close the files pane and hand focus back to the composer; false when nothing was open. */
+	close(): Promise<boolean>;
+	/** True while the pane host still reports the files pane. */
+	isOpen(): boolean;
 	status(): Readonly<YaziBridgeStatus>;
 	dispose(): void;
 }
@@ -312,9 +316,12 @@ export function createYaziBridge(deps: YaziBridgeDeps): YaziBridge {
 		}
 		deps.setDraft(appendDraft(draft, batch.text));
 		deps.requestRender();
+		// The pick is the end of the operator's trip into the files pane, so the
+		// keyboard comes back to the composer without a click.
+		void deps.mux?.focusSelf();
 		deps.notice(
 			"info",
-			`${batch.inserted} ${batch.inserted === 1 ? "path" : "paths"} from the file pane added to the draft`,
+			`${batch.inserted} ${batch.inserted === 1 ? "path" : "paths"} from the files pane added to the draft`,
 		);
 		if (batch.plainPaths > 0) {
 			deps.notice(
@@ -366,6 +373,8 @@ export function createYaziBridge(deps: YaziBridgeDeps): YaziBridge {
 				if (disposed || ownGeneration !== generation) return;
 				paneCwd = choice.cwd;
 				if (choice.paths.length > 0) insert(choice.paths, choice.cwd);
+				// A cancelled pick still ends the trip; the composer gets the keyboard back.
+				else void deps.mux?.focusSelf();
 			},
 			onStopped: () => {
 				if (ownGeneration !== generation) return;
@@ -379,12 +388,16 @@ export function createYaziBridge(deps: YaziBridgeDeps): YaziBridge {
 			return { status: "unavailable", reason: "the file pane was closed while it was opening" };
 		}
 		active = result.session;
+		// An explicit open is a request to go and pick something, so the keyboard
+		// follows the pane. The dock tier itself never steals focus; this is the
+		// one caller entitled to ask.
+		await mux.focusPane(result.session.pane.paneId);
 		if (mode === "companion") {
 			livenessTimer = setTimeout(() => {
 				if (disposed || ownGeneration !== generation || sawLine || active === null) return;
 				const stale = active;
 				active = null;
-				deps.notice("warning", "the file-pane event stream did not start; reopening yazi in chooser mode");
+				deps.notice("warning", "the files pane did not report back in time; reopening it in pick mode");
 				void stale.close().finally(() => {
 					if (!disposed && ownGeneration === generation) void start("chooser", profileMode, dockShare);
 				});
@@ -394,16 +407,49 @@ export function createYaziBridge(deps: YaziBridgeDeps): YaziBridge {
 		return { status: "opened", mode, paneId: result.session.pane.paneId, existing: false };
 	};
 
+	/**
+	 * The pane host is the authority on whether the pane exists. `active` lags
+	 * it by one event at most, but a caller deciding between open and close
+	 * must not be told a pane is open when herdr already reported it gone.
+	 */
+	const liveSession = (): YaziSession | null => {
+		if (active === null) return null;
+		const mux = deps.mux;
+		if (mux?.available() && !mux.list().some((record) => record.ref.paneId === active?.pane.paneId)) {
+			active = null;
+			return null;
+		}
+		return active;
+	};
+
+	const closeActive = async (): Promise<boolean> => {
+		const session = liveSession();
+		if (session === null) return false;
+		generation += 1;
+		clearLiveness();
+		active = null;
+		await session.close();
+		// Closing the dock the operator was looking at would otherwise leave
+		// focus wherever herdr puts it after a close, which is not the composer.
+		await deps.mux?.focusSelf();
+		return true;
+	};
+
 	return {
 		async open(options = {}): Promise<YaziBridgeOpenResult> {
-			if (disposed) return { status: "unavailable", reason: "the file-pane bridge is closed" };
+			if (disposed) return { status: "unavailable", reason: "the files pane bridge is closed" };
 			const settings = deps.getSettings?.() ?? { mode: "companion", profile: "managed", followCwd: true };
-			if (active) {
+			const existing = liveSession();
+			if (existing) {
 				if (settings.followCwd) {
 					const cwd = deps.getCwd();
-					if (await active.pushCwd(cwd)) paneCwd = cwd;
+					if (await existing.pushCwd(cwd)) paneCwd = cwd;
 				}
-				return { status: "opened", mode: active.mode, paneId: active.pane.paneId, existing: true };
+				// Re-opening an open pane means "take me there": leave any zoom that
+				// hides it and put the keyboard in it.
+				await deps.mux?.unzoomSelf();
+				await deps.mux?.focusPane(existing.pane.paneId);
+				return { status: "opened", mode: existing.mode, paneId: existing.pane.paneId, existing: true };
 			}
 			const mode = options.once || settings.profile === "user" ? "chooser" : settings.mode;
 			if (!deps.mux?.available()) {
@@ -426,7 +472,15 @@ export function createYaziBridge(deps: YaziBridgeDeps): YaziBridge {
 				}
 				return result;
 			}
+			await deps.mux.unzoomSelf();
 			return await start(mode, settings.profile, settings.ratio);
+		},
+		close(): Promise<boolean> {
+			if (disposed) return Promise.resolve(false);
+			return closeActive();
+		},
+		isOpen(): boolean {
+			return liveSession() !== null;
 		},
 		status(): Readonly<YaziBridgeStatus> {
 			const snapshot = active?.snapshot();

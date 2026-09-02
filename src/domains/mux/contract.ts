@@ -119,6 +119,20 @@ export interface MuxContract extends DomainContract {
 	focusPane(paneId: string): Promise<boolean>;
 	/** Zoom one Clio-created pane on, off, or toggled. Zooming steals focus; same rule as focusPane. */
 	zoomPane(paneId: string, mode: "on" | "off" | "toggle"): Promise<boolean>;
+	/**
+	 * Bring keyboard focus back to Clio's own hosting pane. This is the return
+	 * half of every explicit pane interaction: a pick in the files pane, a
+	 * toggle that closed a pane the operator was looking at. False outside
+	 * guest mode, without an anchor pane, or below the pane.focus floor.
+	 */
+	focusSelf(): Promise<boolean>;
+	/**
+	 * Leave zoom on the tab that hosts Clio, so a dock split from the anchor is
+	 * visible again. A zoomed tab hides every pane but one; opening or focusing
+	 * the files pane behind a zoom would report success for a pane the operator
+	 * cannot see. False when nothing was zoomed or the tier is absent.
+	 */
+	unzoomSelf(): Promise<boolean>;
 	/** Set a dock's share of its axis. False when the slot has no dock or the tier is absent. */
 	resizeDock(slot: DockSlot, share: number): Promise<boolean>;
 	/** Live dock geometry states, for `/panes` status. */
@@ -419,6 +433,30 @@ export function createMuxRuntime(options: MuxRuntimeOptions): MuxRuntime {
 				async (live) => {
 					const result = await live.paneZoom(paneId, mode);
 					// A toggle always changes state; on/off report false when already there.
+					return result.changed;
+				},
+				false,
+			);
+		},
+
+		async focusSelf(): Promise<boolean> {
+			if (anchorPaneId === null || !muxSupportsMethod(detection.server, "pane.focus")) return false;
+			return await attempt(
+				"focusSelf",
+				async (live) => {
+					await live.paneFocus(anchorPaneId);
+					return true;
+				},
+				false,
+			);
+		},
+
+		async unzoomSelf(): Promise<boolean> {
+			if (anchorPaneId === null || !muxSupportsMethod(detection.server, "pane.zoom")) return false;
+			return await attempt(
+				"unzoomSelf",
+				async (live) => {
+					const result = await live.paneZoom(anchorPaneId, "off");
 					return result.changed;
 				},
 				false,

@@ -21,6 +21,7 @@ export interface InteractiveInputKeyActionDeps {
 	requestShutdown: () => void;
 	toggleStatus: () => void;
 	toggleDispatchBoard: () => void;
+	toggleFilesPane: () => void;
 	openTasks: () => void;
 	openDecisions: () => void;
 	backgroundDispatch: () => void;
@@ -54,6 +55,8 @@ export interface InteractiveInputRuntimeDeps {
 		cycleScopedModelBackward(): void;
 		/** Convert the newest attached dispatch into a detached batch and notice the outcome. */
 		backgroundActiveDispatch(): void;
+		/** Toggle the files pane; the application decides what "inactive" says. */
+		toggleFilesPane(): void;
 	};
 	overlay: {
 		getState(): OverlayState;
@@ -154,6 +157,7 @@ export function createInteractiveInputRuntime(deps: InteractiveInputRuntimeDeps)
 		openTasks: deps.overlay.openTasksOverlayState,
 		openDecisions: deps.overlay.openDecisionsOverlayState,
 		backgroundDispatch: deps.actions.backgroundActiveDispatch,
+		toggleFilesPane: deps.actions.toggleFilesPane,
 		openModelSelector: deps.overlay.openModelOverlayState,
 		openTree: deps.overlay.openTreeOverlayState,
 		cycleScopedModelForward: () => {
