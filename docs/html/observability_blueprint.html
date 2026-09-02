@@ -1,683 +1,676 @@
-<!DOCTYPE html>
+<!doctype html>
 <html lang="en">
 <head>
-  <meta charset="UTF-8">
-  <meta name="viewport" content="width=device-width, initial-scale=1.0">
-  <title>Clio Coder Observability & Receipt Viewer</title>
-
-  <!-- Fonts -->
-
-  <style>
-    :root {
-      --bg-dark: #090d16;
-      --bg-card: rgba(17, 24, 39, 0.7);
-      --border-card: rgba(255, 255, 255, 0.08);
-      --text-main: #f3f4f6;
-      --text-muted: #9ca3af;
-      --text-dark: #4b5563;
-
-      /* Glowing Neon Colors */
-      --color-cyan: #00f0ff;
-      --color-cyan-rgb: 0, 240, 255;
-      --color-purple: #bd00ff;
-      --color-purple-rgb: 189, 0, 255;
-      --color-emerald: #10b981;
-      --color-emerald-rgb: 16, 185, 129;
-      --color-amber: #f59e0b;
-      --color-amber-rgb: 245, 158, 11;
-      --color-rose: #ef4444;
-      --color-rose-rgb: 239, 68, 68;
-
-      --font-sans: "Segoe UI", -apple-system, BlinkMacSystemFont, Roboto, "Helvetica Neue", Arial, sans-serif;
-      --font-mono: "SFMono-Regular", Consolas, "Liberation Mono", Menlo, monospace;
-    }
-
-    * {
-      box-sizing: border-box;
-      margin: 0;
-      padding: 0;
-    }
-
-    body {
-      background-color: var(--bg-dark);
-      background-image:
-        radial-gradient(circle at 10% 15%, rgba(var(--color-cyan-rgb), 0.04) 0%, transparent 35%),
-        radial-gradient(circle at 90% 85%, rgba(var(--color-purple-rgb), 0.04) 0%, transparent 35%),
-        radial-gradient(circle at 50% 50%, #0c1220 0%, var(--bg-dark) 100%);
-      color: var(--text-main);
-      font-family: var(--font-sans);
-      min-height: 100vh;
-      display: flex;
-      flex-direction: column;
-      overflow-x: hidden;
-    }
-
-    .container {
-      max-width: 1400px;
-      margin: 0 auto;
-      padding: 2rem;
-      flex: 1;
-      display: flex;
-      flex-direction: column;
-      width: 100%;
-    }
-
-    /* Header styling */
-    header {
-      border-bottom: 1px solid var(--border-card);
-      padding-bottom: 1.5rem;
-      margin-bottom: 2rem;
-      display: flex;
-      justify-content: space-between;
-      align-items: center;
-      flex-wrap: wrap;
-      gap: 1rem;
-    }
-
-    .header-logo {
-      display: flex;
-      align-items: center;
-      gap: 1rem;
-    }
-
-    .logo-box {
-      width: 48px;
-      height: 48px;
-      background: rgba(255, 255, 255, 0.02);
-      border: 1px solid var(--border-card);
-      border-radius: 10px;
-      display: flex;
-      align-items: center;
-      justify-content: center;
-      box-shadow: 0 0 15px rgba(var(--color-cyan-rgb), 0.1);
-    }
-
-    h1 {
-      font-size: 1.6rem;
-      font-weight: 800;
-      letter-spacing: -0.02em;
-    }
-
-    .subtitle {
-      font-size: 0.85rem;
-      color: var(--text-muted);
-      margin-top: 0.15rem;
-    }
-
-    .version-tag {
-      background: rgba(255, 255, 255, 0.03);
-      border: 1px solid var(--border-card);
-      padding: 0.4rem 0.8rem;
-      border-radius: 8px;
-      font-size: 0.8rem;
-      font-family: var(--font-mono);
-      display: flex;
-      align-items: center;
-      gap: 0.5rem;
-    }
-
-    .version-dot {
-      width: 6px;
-      height: 6px;
-      background-color: var(--color-cyan);
-      border-radius: 50%;
-      box-shadow: 0 0 8px var(--color-cyan);
-    }
-
-    .back-link {
-      color: var(--text-muted);
-      text-decoration: none;
-      font-size: 0.85rem;
-      display: flex;
-      align-items: center;
-      gap: 0.35rem;
-      transition: color 0.2s;
-    }
-    .back-link:hover {
-      color: var(--color-cyan);
-    }
-
-    /* Split Pane Layout */
-    .split-viewer {
-      display: grid;
-      grid-template-columns: 320px 1fr;
-      gap: 1.5rem;
-      flex: 1;
-      min-height: 550px;
-    }
-
-    .left-panel {
-      background: var(--bg-card);
-      border: 1px solid var(--border-card);
-      border-radius: 12px;
-      backdrop-filter: blur(12px);
-      display: flex;
-      flex-direction: column;
-      overflow: hidden;
-    }
-
-    .panel-header {
-      padding: 1rem;
-      border-bottom: 1px solid var(--border-card);
-      background: rgba(0, 0, 0, 0.2);
-    }
-
-    .filter-input {
-      width: 100%;
-      padding: 0.5rem 0.75rem;
-      background: rgba(0, 0, 0, 0.3);
-      border: 1px solid var(--border-card);
-      border-radius: 6px;
-      color: #fff;
-      font-size: 0.85rem;
-      font-family: var(--font-sans);
-    }
-    .filter-input:focus {
-      outline: none;
-      border-color: var(--color-cyan);
-    }
-
-    .category-group {
-      padding: 0.75rem 0;
-      border-bottom: 1px solid rgba(255, 255, 255, 0.03);
-    }
-    .category-title {
-      font-size: 0.7rem;
-      font-weight: 700;
-      text-transform: uppercase;
-      letter-spacing: 0.05em;
-      color: var(--text-dark);
-      padding: 0.25rem 1rem;
-    }
-
-    .item-list {
-      list-style: none;
-      display: flex;
-      flex-direction: column;
-    }
-
-    .item-row {
-      padding: 0.6rem 1rem;
-      font-size: 0.8rem;
-      font-family: var(--font-mono);
-      cursor: pointer;
-      display: flex;
-      justify-content: space-between;
-      align-items: center;
-      transition: all 0.2s;
-      border-left: 2px solid transparent;
-      color: var(--text-muted);
-    }
-    .item-row:hover {
-      background: rgba(255, 255, 255, 0.02);
-      color: #fff;
-    }
-    .item-row.active {
-      background: rgba(var(--color-cyan-rgb), 0.03);
-      border-left-color: var(--color-cyan);
-      color: var(--color-cyan);
-    }
-
-    .right-panel {
-      background: var(--bg-card);
-      border: 1px solid var(--border-card);
-      border-radius: 12px;
-      backdrop-filter: blur(12px);
-      display: flex;
-      flex-direction: column;
-      overflow: hidden;
-    }
-
-    .viewer-header {
-      padding: 1rem 1.5rem;
-      border-bottom: 1px solid var(--border-card);
-      background: rgba(0, 0, 0, 0.2);
-      display: flex;
-      justify-content: space-between;
-      align-items: center;
-      flex-wrap: wrap;
-      gap: 1rem;
-    }
-
-    .viewer-title {
-      font-size: 0.95rem;
-      font-weight: 600;
-      font-family: var(--font-mono);
-      color: #fff;
-      display: flex;
-      align-items: center;
-      gap: 0.5rem;
-    }
-
-    .viewer-actions {
-      display: flex;
-      align-items: center;
-      gap: 0.75rem;
-    }
-
-    .btn {
-      background: rgba(255, 255, 255, 0.03);
-      border: 1px solid var(--border-card);
-      color: var(--text-main);
-      padding: 0.4rem 0.8rem;
-      border-radius: 6px;
-      font-size: 0.8rem;
-      font-family: var(--font-sans);
-      cursor: pointer;
-      transition: all 0.2s;
-      display: inline-flex;
-      align-items: center;
-      gap: 0.35rem;
-    }
-    .btn:hover {
-      background: rgba(255, 255, 255, 0.08);
-      border-color: var(--color-cyan);
-    }
-    .btn-verify {
-      background: rgba(var(--color-cyan-rgb), 0.1);
-      border-color: var(--color-cyan);
-      color: var(--color-cyan);
-    }
-    .btn-verify:hover {
-      background: rgba(var(--color-cyan-rgb), 0.2);
-    }
-
-    .viewer-body {
-      flex: 1;
-      padding: 1.5rem;
-      overflow: auto;
-      display: flex;
-      flex-direction: column;
-      gap: 1rem;
-    }
-
-    .path-bar {
-      background: #05080e;
-      border: 1px solid var(--border-card);
-      padding: 0.5rem 1rem;
-      border-radius: 6px;
-      font-family: var(--font-mono);
-      font-size: 0.75rem;
-      color: var(--text-muted);
-      display: flex;
-      justify-content: space-between;
-      align-items: center;
-    }
-
-    .code-view {
-      background: #05080e;
-      border: 1px solid var(--border-card);
-      border-radius: 8px;
-      padding: 1.25rem;
-      font-family: var(--font-mono);
-      font-size: 0.85rem;
-      line-height: 1.5;
-      overflow-x: auto;
-      white-space: pre-wrap;
-      flex: 1;
-      color: #e5e7eb;
-    }
-
-    .verification-status-panel {
-      padding: 1.25rem;
-      border-radius: 8px;
-      font-family: var(--font-mono);
-      font-size: 0.8rem;
-      line-height: 1.5;
-      display: none;
-      white-space: pre-wrap;
-    }
-    .verification-status-panel.success {
-      display: block;
-      background: rgba(16, 185, 129, 0.03);
-      border: 1px solid rgba(16, 185, 129, 0.2);
-      color: #6ee7b7;
-    }
-    .verification-status-panel.error {
-      display: block;
-      background: rgba(239, 68, 68, 0.03);
-      border: 1px solid rgba(239, 68, 68, 0.2);
-      color: #fca5a5;
-    }
-
-    .status-badge {
-      padding: 0.15rem 0.4rem;
-      border-radius: 4px;
-      font-size: 0.7rem;
-      font-weight: 700;
-      text-transform: uppercase;
-    }
-    .status-success { background: rgba(16, 185, 129, 0.1); border: 1px solid var(--color-emerald); color: var(--color-emerald); }
-    .status-failure { background: rgba(239, 68, 68, 0.1); border: 1px solid var(--color-rose); color: var(--color-rose); }
-    .status-info { background: rgba(0, 240, 255, 0.1); border: 1px solid var(--color-cyan); color: var(--color-cyan); }
-
-    footer {
-      text-align: center;
-      margin-top: 3rem;
-      border-top: 1px solid rgba(255, 255, 255, 0.05);
-      padding-top: 1.5rem;
-      color: var(--text-dark);
-      font-size: 0.8rem;
-    }
-  </style>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <meta name="clio-markdown-source" content="docs/architecture/observability.md">
+  <meta name="clio-docs-version" content="0.4.2">
+  <title>Observability Viewer · Clio Coder 0.4.2</title>
+  <link rel="icon" href="data:,">
+  <link rel="stylesheet" href="shared.css">
 </head>
-<body>
-
+<body data-doc-category="architecture">
+  <div class="reading-progress" aria-hidden="true"></div>
+  <a class="skip-link" href="#reference-content">Skip to reference</a>
   <div class="container">
-    <!-- Header -->
-    <header>
-      <div class="header-logo">
-        <div class="logo-box">
-          <svg viewBox="0 0 64 64" width="32" height="32" role="img" aria-label="Clio Coder logo"><title>Clio Coder logo</title><rect x="8" y="8" width="48" height="48" rx="12" fill="rgba(0,240,255,0.12)" stroke="rgba(0,240,255,0.65)"/><path d="M32 14 16 23l16 9 16-9-16-9Z" fill="none" stroke="#00f0ff" stroke-width="3" stroke-linejoin="round"/><path d="M16 32l16 9 16-9M16 41l16 9 16-9" fill="none" stroke="#bd00ff" stroke-width="3" stroke-linecap="round" stroke-linejoin="round"/></svg>
-        </div>
-        <div>
+    <header class="document-header" data-category="Architecture">
+      <div class="header-left">
+        <a class="header-logo" href="index.html" aria-label="Documentation index">
+          <svg viewBox="0 0 24 24" fill="none" aria-hidden="true">
+            <path d="M12 2 2 7l10 5 10-5-10-5Z" stroke="url(#clio-logo)" stroke-width="2" stroke-linejoin="round"/>
+            <path d="m2 12 10 5 10-5M2 17l10 5 10-5" stroke="url(#clio-logo)" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"/>
+            <defs><linearGradient id="clio-logo" x1="2" y1="2" x2="22" y2="22"><stop stop-color="#00d4db"/><stop offset="1" stop-color="#ff7e29"/></linearGradient></defs>
+          </svg>
+        </a>
+        <div class="header-title-wrapper">
+          <p class="document-kicker">Architecture / canonical reference</p>
           <h1>Observability Viewer</h1>
-          <div class="subtitle">Interactive Split Panel & Run Receipt Verification Sandbox</div>
+          <p class="document-path">docs/architecture/observability.md</p>
         </div>
       </div>
-      <div style="display:flex; align-items:center; gap: 1rem;">
-        <a href="index.html" class="back-link">
-          <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><title>Icon</title><line x1="19" y1="12" x2="5" y2="12"/><polyline points="12 19 5 12 12 5"/></svg>
-          Back to Hub
-        </a>
-        <div class="version-tag">
-          <div class="version-dot"></div>
-          Clio Coder v0.4.0
-        </div>
+      <div class="header-right">
+        <a class="back-btn" href="index.html">← Index</a>
+        <span class="version-badge">v0.4.2</span>
       </div>
     </header>
-
-    <!-- Split Viewer Panel -->
-    <div class="split-viewer">
-
-      <!-- Left Panel: Lists -->
-      <div class="left-panel">
-        <div class="panel-header">
-          <input type="text" class="filter-input" id="filter-box" placeholder="Type to filter artifacts..." oninput="filterArtifacts()">
-        </div>
-
-        <div style="flex: 1; overflow-y: auto;">
-          <div class="category-group" id="group-Receipts">
-            <div class="category-title">Receipts</div>
-            <ul class="item-list" id="list-Receipts">
-              <!-- Rendered dynamically -->
-            </ul>
-          </div>
-          <div class="category-group" id="group-Dispatch">
-            <div class="category-title">Dispatch outputs</div>
-            <ul class="item-list" id="list-Dispatch">
-              <!-- Rendered dynamically -->
-            </ul>
-          </div>
-          <div class="category-group" id="group-Tool">
-            <div class="category-title">Tool outputs</div>
-            <ul class="item-list" id="list-Tool">
-              <!-- Rendered dynamically -->
-            </ul>
-          </div>
-          <div class="category-group" id="group-Compaction">
-            <div class="category-title">Compaction summaries</div>
-            <ul class="item-list" id="list-Compaction">
-              <!-- Rendered dynamically -->
-            </ul>
-          </div>
-        </div>
-      </div>
-
-      <!-- Right Panel: View & Inspect -->
-      <div class="right-panel">
-        <div class="viewer-header">
-          <div class="viewer-title" id="viewer-title">
-            <span class="status-badge status-info" id="viewer-badge">Receipt</span>
-            <span id="viewer-filename">run-9a3c9f28.json</span>
-          </div>
-          <div class="viewer-actions">
-            <button type="button" class="btn btn-verify" id="verify-btn" onclick="runIntegrityVerification()">
-              <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><title>Icon</title><path d="M12 22s8-4 8-10V5l-8-3-8 3v7c0 6 8 10 8 10z"/></svg>
-              Verify Checksum (v)
-            </button>
-            <button type="button" class="btn" onclick="showBackingPath()">
-              <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><title>Icon</title><circle cx="12" cy="12" r="10"/><line x1="12" y1="16" x2="12" y2="12"/><line x1="12" y1="8" x2="12.01" y2="8"/></svg>
-              Backing Path (o)
-            </button>
-          </div>
-        </div>
-
-        <div class="viewer-body">
-          <div class="path-bar">
-            <span id="backing-path-display">~/.local/state/clio-coder/receipts/run-9a3c9f28.json</span>
-            <span style="font-size:0.7rem; color:var(--text-dark);" id="capped-indicator">Lines: 12</span>
-          </div>
-
-          <div class="verification-status-panel" id="verification-panel">
-          </div>
-
-          <pre class="code-view" id="artifact-content-pre"></pre>
-        </div>
-      </div>
-
-    </div>
-
-    <footer>
-      <p>Clio Coder Visual Specification Blueprint. Product Version v0.4.0. Designed with high-performance dark aesthetics.</p>
-    </footer>
-  </div>
-
-  <script>
-    const ARTIFACTS = {
-      "receipts-1": {
-        name: "run-9a3c9f28.json",
-        category: "Receipts",
-        path: "~/.local/state/clio-coder/receipts/run-9a3c9f28.json",
-        badge: "Receipt",
-        badgeClass: "status-info",
-        content: `{
-  "runId": "run-9a3c9f28",
-  "command": "npm run build && npm run test:smoke",
-  "exitCode": 0,
-  "startedAt": "2026-06-12T08:12:00Z",
-  "finishedAt": "2026-06-12T08:12:45Z",
-  "receiptIntegrity": "sha256-abc874fde3c99a0042188ffabec12530164c676643",
-  "filesCreated": [
-    "dist/cli/index.js",
-    "dist/worker/entry.js"
-  ]
-}`,
-        verifySuccess: true,
-        verifyLog: `[INFO] Read ~/.local/state/clio-coder/receipts/run-9a3c9f28.json
-[INFO] Validating required receipt fields and value ranges:
-  - runId: run-9a3c9f28 (VALID)
-  - command: 'npm run build && npm run test:smoke' (VALID)
-  - exitCode: 0 (VALID)
-[INFO] Read ~/.local/state/clio-coder/runs.json
-[INFO] Found matching run envelope in global runs ledger.
-[INFO] Recomputing receipt integrity checksum:
-  - Expected: sha256-abc874fde3c99a0042188ffabec12530164c676643
-  - Computed: sha256-abc874fde3c99a0042188ffabec12530164c676643
-[SUCCESS] Receipt integrity verification PASSED.`
-      },
-      "receipts-2": {
-        name: "run-0428fa8e.json",
-        category: "Receipts",
-        path: "~/.local/state/clio-coder/receipts/run-0428fa8e.json",
-        badge: "Receipt",
-        badgeClass: "status-info",
-        content: `{
-  "runId": "run-0428fa8e",
-  "command": "sbatch run_sim.sh",
-  "exitCode": 1,
-  "startedAt": "2026-06-12T08:15:00Z",
-  "finishedAt": "2026-06-12T08:15:02Z",
-  "receiptIntegrity": "sha256-fffffffffffffffff99999999999999999999999",
-  "filesCreated": []
-}`,
-        verifySuccess: false,
-        verifyLog: `[INFO] Read ~/.local/state/clio-coder/receipts/run-0428fa8e.json
-[INFO] Validating required receipt fields and value ranges:
-  - runId: run-0428fa8e (VALID)
-  - command: 'sbatch run_sim.sh' (VALID)
-  - exitCode: 1 (WARNING: non-zero exit code)
-[INFO] Read ~/.local/state/clio-coder/runs.json
-[ERROR] Missing or unmatched run envelope in global runs ledger runs.json.
-[ERROR] Receipt integrity checksum mismatch:
-  - Expected: sha256-fffffffffffffffff99999999999999999999999
-  - Computed: sha256-000000000000000000000000000000000000000
-[FAILURE] Receipt integrity verification FAILED.`
-      },
-      "dispatch-1": {
-        name: "runs.json",
-        category: "Dispatch",
-        badge: "Ledger",
-        badgeClass: "status-success",
-        path: "~/.local/state/clio-coder/runs.json",
-        content: `[
-  {
-    "runId": "run-9a3c9f28",
-    "status": "success",
-    "cwd": "/workspace/clio-coder",
-    "timestamp": 1781259120000
-  },
-  {
-    "runId": "run-b209d841",
-    "status": "success",
-    "cwd": "/workspace/clio-coder",
-    "timestamp": 1781259180000
+    <div class="page-layout-grid reference-layout">
+      <aside class="sidebar reference-sidebar" aria-label="On this page">
+        <nav class="toc-container">
+          <p class="toc-title">On this page</p>
+          <a class="sidebar-source" href="https://github.com/iowarp/clio-coder/blob/main/docs/architecture/observability.md">Canonical Markdown<br>docs/architecture/observability.md</a>
+          <ul class="toc-list"></ul>
+        </nav>
+      </aside>
+      <main class="reference-main" id="reference-content">
+        <article class="reference-prose glass-card">
+<blockquote>
+<p><strong>Visual blueprint:</strong> The source checkout includes the complete
+<a href="observability_blueprint.html">Observability Viewer visual reference</a>.</p>
+</blockquote>
+<p><code>/view</code> is the interactive artifact viewer for a Clio session. It keeps the live transcript compact while preserving a full inspection path for durable artifacts, task ledgers, and successful workspace outputs.</p>
+<pre><code class="language-text">/view
+/view &lt;id-or-filter&gt;
+/view verify &lt;runId&gt;
+</code></pre>
+<p><code>/view</code> opens a full-screen split viewer. The left pane groups artifacts by category and supports type-to-filter. The right pane renders the selected artifact with pager controls. <code>Tab</code> or <code>Shift+Tab</code> switches between the artifact list and details. <code>Left</code> and <code>Right</code> jump to the previous or next non-empty category from either pane; <code>Up</code> and <code>Down</code> select artifacts in the list or scroll details in the content pane. Category jumps honor the active filter and wrap at the ends. <code>v</code> verifies a selected receipt. <code>o</code> shows the absolute backing path through the notice channel when the selected artifact has one; pathless artifacts produce a warning notice instead. In the list pane, <code>Esc</code> clears a non-empty filter before a second <code>Esc</code> closes the viewer.</p>
+<h2>Trace retention and state usage</h2>
+<p>The SQLite trace mirror at <code>&lt;state-dir&gt;/trace.sqlite</code> is rebuildable and bounded. By default Clio retains terminal runs for 30 days and limits the allocated database to 128 MiB (134,217,728 bytes), whichever limit is reached first. The policy runs after each dispatch or interactive turn becomes terminal. It deletes a run as one unit across <code>runs</code>, <code>phases</code>, <code>events</code>, <code>envelopes</code>, <code>gate_results</code>, <code>agent_sessions</code>, and <code>processes</code>. A <code>queued</code> or <code>running</code> run is never a candidate, even when its start time is older than the age cutoff or its rows put the store over the byte limit.</p>
+<p>Two environment variables configure the automatic policy:</p>
+<table>
+<thead>
+<tr>
+<th>Variable</th>
+<th align="right">Default</th>
+<th>Valid values</th>
+</tr>
+</thead>
+<tbody><tr>
+<td><code>CLIO_CODER_TRACE_RETENTION_DAYS</code></td>
+<td align="right"><code>30</code></td>
+<td>An integer of at least 1.</td>
+</tr>
+<tr>
+<td><code>CLIO_CODER_TRACE_MAX_BYTES</code></td>
+<td align="right"><code>134217728</code></td>
+<td>An integer of at least 1,048,576.</td>
+</tr>
+</tbody></table>
+<p>An operator can apply the current policy immediately or supply one-command overrides:</p>
+<pre><code class="language-bash">clio-coder trace prune
+clio-coder trace prune --max-age-days 14 --max-bytes 67108864
+clio-coder trace prune --json
+</code></pre>
+<p>The command reports terminal runs removed, total rows removed across the seven run-owned tables, physical bytes reclaimed from <code>trace.sqlite</code> and its WAL sidecars, whether <code>VACUUM</code> ran, and how many live runs were protected. Age pruning uses a terminal run&#39;s <code>ended_at</code>. Size pruning removes the oldest terminal runs until the live database pages fit or no terminal candidate remains.</p>
+<p>Deleting SQLite rows creates reusable pages but does not normally reduce the file. Clio runs <code>VACUUM</code> when at least 20 percent of allocated pages are reclaimable, or whenever reclaiming deleted pages is necessary to enforce the 128 MiB bound. It then truncates the WAL. Smaller deletions remain available for SQLite to reuse and avoid rewriting the whole database on every completed run.</p>
+<p><code>clio-coder doctor</code> includes a <code>state storage</code> row with the recursive byte total for the state directory and the largest top-level contributor. For example:</p>
+<pre><code class="language-text">OK   state storage          96.4 MiB (101,082,624 bytes); largest contributor trace.sqlite at 89.9 MiB (94,248,960 bytes)
+</code></pre>
+<hr>
+<h2>The Evidence Spine End-to-End</h2>
+<p>Clio Coder operates on a single, unified accountability spine that connects in-loop execution diagnostics with durable forensic evidence. The spine operates at two distinct layers:</p>
+<ol>
+<li><strong>Live Layer (In-Loop Assessment)</strong>: During a session, the safety domain executes a cheap in-memory scan over the last 80 entries on every <code>turn_end</code> hook. It detects validation commands, dispatch receipts, protected artifacts, and requested inspections to check if completion claims are backed by evidence. The live kinds are mapped to the canonical evidence taxonomy.</li>
+<li><strong>Forensic Layer (Post-Completion Aggregator)</strong>: When a run completes, the observability domain aggregates the session ledger, receipts, transcripts, and audit logs into a rich forensic bundle.</li>
+</ol>
+<pre><code class="language-mermaid">graph TD
+    dispatch[Dispatch Completed/Failed Event] --&gt; obs[Observability Bus Subscriber]
+    obs --&gt; build[Asynchronous buildEvidence]
+    build --&gt; bundle[Write Forensic Bundle to dataDir]
+    build --&gt; index[Append row to evidence-index.json in stateDir]
+    index --&gt; view[Surfaced in /view Accountability Panel]
+</code></pre>
+<h3>Auto-Build on Dispatch Completion</h3>
+<p>The observability extension subscribes to the <code>dispatch.completed</code> and <code>dispatch.failed</code> channels via the <code>SafeEventBus</code> (in <code>src/domains/observability/extension.ts</code>). When a run terminates, the domain initiates the forensic builder without blocking the event bus or TUI rendering.</p>
+<p>The builder runs <code>buildEvidence({ dataDir, stateDir, runId })</code> to read the state files and compile a detailed bundle under <code>&lt;dataDir&gt;/evidence/run-&lt;runId&gt;/</code>. If a headless run is executing, the observability stop hook (<code>stop()</code>) flushes all in-flight build promises before the process exits, ensuring no data is lost. Any build failures are swallowed and logged to stderr to prevent compiler or file-lock issues from crashing the main run.</p>
+<h3>The Sidecar Index</h3>
+<p>After building the forensic bundle, the domain appends a metadata row to the sidecar index file located at <code>&lt;stateDir&gt;/evidence-index.json</code>. The file is kept as a JSON array acting as a bounded ring (capped at 1000 rows). </p>
+<p>To prevent concurrent Clio processes from corrupting the index, writes are queued within the process and serialize across processes using the shared state-file locking mechanism.</p>
+<p>An <code>EvidenceIndexRow</code> has the following schema:</p>
+<pre><code class="language-json">{
+  &quot;runId&quot;: &quot;4f89d2a9c12&quot;,
+  &quot;evidenceId&quot;: &quot;run-4f89d2a9c12&quot;,
+  &quot;tags&quot;: [&quot;test-failure&quot;, &quot;session-linked&quot;],
+  &quot;firstPassSuccess&quot;: false,
+  &quot;findingCount&quot;: 2,
+  &quot;generatedAt&quot;: &quot;2026-06-25T14:30:00.000Z&quot;
+}
+</code></pre>
+<hr>
+<h2>Cross-Session Usage Facts</h2>
+<p><code>clio-coder usage report</code> folds the local archive into one window of facts. Its token and cost facts come from two inputs: the per-session ledgers, folded through the session domain&#39;s <code>ledgerUsageCalls</code>, and the out-of-turn usage store described below. Both the text report and <code>--json</code> carry the same fields.</p>
+<table>
+<thead>
+<tr>
+<th>Field</th>
+<th>Where it appears</th>
+<th>Meaning</th>
+</tr>
+</thead>
+<tbody><tr>
+<td><code>apiCalls</code></td>
+<td><code>tokens in window: &lt;total&gt; over &lt;n&gt; model calls</code> and the <code>tokens</code> JSON fact</td>
+<td>Provider calls folded in the window, out-of-turn rounds included.</td>
+</tr>
+<tr>
+<td><code>input</code>, <code>output</code>, <code>cacheRead</code>, <code>cacheWrite</code>, <code>reasoningTokens</code>, <code>totalTokens</code></td>
+<td>the same line and fact</td>
+<td>Provider-reported token breakdown for those calls.</td>
+</tr>
+<tr>
+<td><code>costUsd</code></td>
+<td><code>provider-reported cost in window</code> and the <code>tokens</code> fact</td>
+<td>Provider-reported cost. Never estimated.</td>
+</tr>
+<tr>
+<td><code>turns</code></td>
+<td><code>turns in window</code> and the <code>tokens</code> fact</td>
+<td>Folded calls that were turns, so labelled calls are subtracted exactly as <code>/cost</code> subtracts them.</td>
+</tr>
+<tr>
+<td><code>sideQuestions</code></td>
+<td><code>side questions in window</code> and the <code>tokens</code> fact</td>
+<td><code>/btw</code> rounds in the window.</td>
+</tr>
+<tr>
+<td><code>handoffs</code></td>
+<td><code>handoffs in window</code> and the <code>tokens</code> fact</td>
+<td><code>/handoff</code> extraction rounds in the window.</td>
+</tr>
+<tr>
+<td><code>prewarms</code></td>
+<td><code>pre-warms in window</code> and the <code>tokens</code> fact</td>
+<td>Prompt pre-warm rounds in the window.</td>
+</tr>
+<tr>
+<td><code>backgroundMemorySteps</code></td>
+<td><code>background memory steps in window</code> and the <code>tokens</code> fact</td>
+<td>Proactive-memory model steps in the window.</td>
+</tr>
+</tbody></table>
+<p>The last five fields appear only when at least one labelled call falls in the window, and each individual line is printed only when its own count is above zero. An archive with no labelled call in it renders exactly as it did before those fields existed, so their presence is itself the signal that money was spent beside a session. All four labelled kinds are subtracted from <code>turns</code> the same way, so a session&#39;s turn count never includes a round the operator did not take.</p>
+<p>The report also prints a prompt-cache block, one row per session that recorded any cache telemetry:</p>
+<pre><code class="language-text">  prompt cache by session (from backend timings and persisted verdicts)
+  session       uncached prefill  hot/partial/cold/small
+  3vpu6z19ee7t  130353            4/3/2/0
+</code></pre>
+<p><code>uncached prefill</code> is the sum of the backend&#39;s own newly evaluated prompt tokens across every persisted call in that session, and reads <code>n/a</code> rather than <code>0</code> when the server reported no cache figure to subtract. The four counts are the per-call verdicts. Both facts are also in <code>--json</code> under a <code>session-cache</code> fact per session.</p>
+<p><code>clio-coder doctor</code> reports the same evidence for the latest session only, as one row, so a cache problem is visible without opening the TUI or a report:</p>
+<pre><code class="language-text">OK cache telemetry  last session 3vpu6z19ee7t: hot 4 · partial 3 · cold 2 · small 0; top expected reason dispatch (3)
+</code></pre>
+<p>The row reads <code>top expected reason none</code> when the session recorded verdicts but no expected-cold reason, and it degrades to a warning saying <code>no prompt-cache telemetry recorded</code> when the latest session has none at all, which is the honest answer for a target whose backend reports nothing rather than a claim of a perfect cache. &quot;Latest&quot; selects the most recent <code>current.jsonl</code> by its newest entry timestamp, falling back to the file&#39;s mtime, so the other diagnostic JSONL files in a session directory cannot be mistaken for the conversation.</p>
+<h3>The Out-of-Turn Usage Store</h3>
+<p>A <code>/btw</code> side question and a <code>/handoff</code> extraction round are real provider calls that append nothing to the session JSONL, by design: a fleet run briefs its workers from the transcript, and a question the operator asked to orient themselves must not become context those workers inherit. The spend still has to be recorded somewhere durable, so it goes to <code>&lt;stateDir&gt;/usage/out-of-turn.jsonl</code>, one JSON line per priced call, written by the chat loop at the same moment it reports the call to <code>/cost</code>.</p>
+<p>The file is append-only NDJSON kept as a bounded ring (capped at 1000 rows, rewritten atomically under the shared state-file lock when it grows past the cap). Reads are tolerant: a malformed line is reported as a diagnostic on stderr and skipped.</p>
+<p>A row has the following schema:</p>
+<pre><code class="language-json">{
+  &quot;label&quot;: &quot;side-question&quot;,
+  &quot;sessionId&quot;: &quot;01JQ2K7V8W&quot;,
+  &quot;repoIdentity&quot;: &quot;9f2c1b4ea77d0c31&quot;,
+  &quot;timestamp&quot;: &quot;2026-06-25T14:30:00.000Z&quot;,
+  &quot;target&quot;: &quot;dynamo&quot;,
+  &quot;attributedModelId&quot;: &quot;qwen3.8-27b-dynamo&quot;,
+  &quot;usage&quot;: {
+    &quot;input&quot;: 120,
+    &quot;output&quot;: 8,
+    &quot;cacheRead&quot;: 4,
+    &quot;cacheWrite&quot;: 0,
+    &quot;reasoning&quot;: 2,
+    &quot;totalTokens&quot;: 132,
+    &quot;costUsd&quot;: 0.0004,
+    &quot;costProvenance&quot;: &quot;known&quot;
   }
-]`,
-        verifySuccess: true,
-        verifyLog: `[INFO] Global runs ledger validation is read-only. Use 'Verify' on individual receipts.`
-      },
-      "tool-1": {
-        name: "bashExecution-out.log",
-        category: "Tool",
-        badge: "Output",
-        badgeClass: "status-success",
-        path: "/workspace/clio-coder/.clio-coder/tmp/bashExecution-out.log",
-        content: `✔ All tests passed (12 specs)
-ℹ Checking boundary constraints...
-✔ Boundary checks passed.
-[incremental reader: file capped at first 50,000 lines]`,
-        verifySuccess: true,
-        verifyLog: `[INFO] Plain text execution log verified. Verification not applicable to raw tool outputs.`
-      },
-      "compaction-1": {
-        name: "current.jsonl",
-        category: "Compaction",
-        badge: "Summary",
-        badgeClass: "status-info",
-        path: "~/.local/state/clio-coder/sessions/cwd_hash_a9e3/sess_7a3d90f/current.jsonl",
-        content: `{"turn": 1, "compactionSummary": "Initialized project with local settings targets: deepseek-r1:8b"}
-{"turn": 4, "compactionSummary": "Masked 6 stale tool observations older than excludeLastTurns."}
-{"turn": 5, "compactionSummary": "LLM summary compaction executed: compressed 15,200 tokens into 1,200 summary tokens."}`,
-        verifySuccess: true,
-        verifyLog: `[INFO] History compaction ledger format verified.`
-      }
-    };
+}
+</code></pre>
+<p><code>repoIdentity</code> is the same cwd hash the session ledger is filed under, which is what lets <code>usage report --repo &lt;path&gt;</code> select these rows with the hash it already computes for the ledgers.</p>
+<p><code>label</code> is one of <code>side-question</code>, <code>handoff</code>, <code>prewarm</code>, or <code>background-memory</code>. The last two joined for the same reason as the first two: a prompt pre-warm and a proactive-memory step are provider calls the operator did not ask for and would otherwise never see, and neither appends anything to the session JSONL. A row may also carry <code>timing { durationMs }</code> and a <code>promptCache</code> block built from the backend&#39;s own prefill facts when the server reported them; a backend that reports no timings simply omits the block, as LM Studio&#39;s OpenAI-compatible port does.</p>
+<hr>
+<h2>Artifact Categories and Path Layouts</h2>
+<p>Clio resolves directories under platform-specific XDG defaults (on Linux, these default to <code>~/.config/clio-coder/</code>, <code>~/.local/share/clio-coder/</code>, and <code>~/.local/state/clio-coder/</code>).</p>
+<table>
+<thead>
+<tr>
+<th>Category</th>
+<th>Description</th>
+<th>Backing Path</th>
+</tr>
+</thead>
+<tbody><tr>
+<td><strong>Accountability</strong></td>
+<td>Rolling first-pass-success rate and failure-cause histogram.</td>
+<td><code>&lt;stateDir&gt;/evidence-index.json</code></td>
+</tr>
+<tr>
+<td><strong>Evidence bundles</strong></td>
+<td>Deterministic run or session overviews, findings, totals, and linked files.</td>
+<td><code>&lt;dataDir&gt;/evidence/&lt;evidenceId&gt;/</code></td>
+</tr>
+<tr>
+<td><strong>Receipts</strong></td>
+<td>Durable run receipts verified by SHA-256 integrity digests.</td>
+<td><code>&lt;stateDir&gt;/receipts/&lt;runId&gt;.json</code></td>
+</tr>
+<tr>
+<td><strong>Dispatch outputs</strong></td>
+<td>Logs and ledger records detailing worker execution.</td>
+<td><code>&lt;stateDir&gt;/runs.json</code> and <code>&lt;stateDir&gt;/receipts/&lt;runId&gt;.json</code></td>
+</tr>
+<tr>
+<td><strong>Task ledgers</strong></td>
+<td>Per-turn task-board goals, active runs, required validation evidence, and operator-task provenance when present.</td>
+<td><code>&lt;stateDir&gt;/sessions/&lt;cwdHash&gt;/&lt;sessionId&gt;/current.jsonl</code></td>
+</tr>
+<tr>
+<td><strong>Workspace outputs</strong></td>
+<td>Latest successful <code>artifact</code>, <code>write</code>, or <code>edit</code> result for each normalized path on the active session branch. Missing files remain visible as durable recorded facts.</td>
+<td>Recorded path beneath the session metadata <code>cwd</code></td>
+</tr>
+<tr>
+<td><strong>Tool outputs</strong></td>
+<td>Offloaded large outputs or execution logs.</td>
+<td><code>&lt;stateDir&gt;/scratch/&lt;sessionId&gt;/&lt;sha256 of the captured text&gt;.txt</code></td>
+</tr>
+<tr>
+<td><strong>Protected artifacts</strong></td>
+<td>Validation-protected artifact metadata and its absolute artifact path when available.</td>
+<td>Session ledger record plus the protected workspace path</td>
+</tr>
+<tr>
+<td><strong>Compaction</strong></td>
+<td>Summaries of compacted history sessions.</td>
+<td><code>&lt;stateDir&gt;/sessions/&lt;cwdHash&gt;/&lt;sessionId&gt;/current.jsonl</code></td>
+</tr>
+<tr>
+<td><strong>Prompt manifests</strong></td>
+<td>One validated record per prompt compile: <code>systemPromptHash</code>, previous hash, token estimate, thinking dial at compile time, per-section token estimates, and per-fragment content hashes. Identifies the exact compiled prompt and supports hash diffs without storing prompt text. Malformed records appear as an explicit read-error artifact.</td>
+<td><code>&lt;stateDir&gt;/sessions/&lt;cwdHash&gt;/&lt;sessionId&gt;/prompt-manifest.jsonl</code></td>
+</tr>
+<tr>
+<td><strong>Safety audit rows</strong></td>
+<td>Current-session safety and permission decisions, with malformed ledger lines surfaced separately.</td>
+<td><code>&lt;stateDir&gt;/audit/&lt;date&gt;.jsonl</code></td>
+</tr>
+</tbody></table>
+<p>Workspace output containment is checked again when the operator loads an item, not only when <code>/view</code> builds its list. The loader re-resolves the recorded workspace root and target through symlinks on every load, verifies canonical path-segment containment, and reads the canonical target. A target or ancestor symlink swapped outside the workspace is refused. A missing target keeps the recorded timestamp and reports <code>file no longer on disk</code>; it does not disappear from the artifact history.</p>
+<hr>
+<h2>The Accountability Panel</h2>
+<p>The first category in the TUI split viewer is <strong>Accountability</strong>. It reads the sidecar index directly to present a live summary without loading heavy forensic logs.</p>
+<h3>First-Pass Success Rate</h3>
+<p>A run is marked as a first-pass success when:</p>
+<ul>
+<li>The terminal dispatch outcome succeeded.</li>
+<li>The run had zero dispatch retries (attempt 0).</li>
+<li>The built bundle contains validation evidence, meaning the <code>no-validation</code> tag is absent.</li>
+</ul>
+<p>The TUI displays this rate as:
+<code>first-pass success: &lt;succeeded-attempts&gt;/&lt;total-attempts&gt; (&lt;pct&gt;%)</code></p>
+<h3>Failure-Cause Histogram</h3>
+<p>The TUI lists the top failure causes sorted by frequency (descending), then by tag name (ascending). The histogram filters out provenance and quality tags (such as <code>audit-linked</code>, <code>session-linked</code>, and <code>no-validation</code>) and displays only real failure causes:</p>
+<ul>
+<li><code>timeout</code></li>
+<li><code>auth-failure</code></li>
+<li><code>missing-dependency</code></li>
+<li><code>build-failure</code></li>
+<li><code>test-failure</code></li>
+<li><code>blocked-tool</code></li>
+</ul>
+<hr>
+<h2>Receipt Integrity Verification</h2>
+<p>Pressing <code>v</code> on a selected receipt or running <code>/view verify &lt;runId&gt;</code> performs cryptographic integrity checks:</p>
+<ol>
+<li><strong>Read Receipt</strong>: Reads the receipt JSON from <code>&lt;stateDir&gt;/receipts/&lt;runId&gt;.json</code>.</li>
+<li><strong>Resolve Ledger</strong>: Looks up the run envelope inside <code>&lt;stateDir&gt;/runs.json</code>.</li>
+<li><strong>Verify Integrity</strong>: Recomputes the SHA-256 digest over the strict v20 receipt and reconstructible ledger fields. The digest covers every current field, including dispatch intent path provenance, resolved path scope, steering, routing intent and decision, route quality, worker identity, execution role, result-contract conformance, council provenance, and fleet gate provenance. Receipts below v20 are reported as retired and are never read as evidence or migrated. Malformed, tampered, unversioned, or future-version receipts fail verification; there is no historical receipt reader.</li>
+<li><strong>Report Result</strong>: The viewer reports <code>ok</code> or the verification failure reason. It does not rename or delete the receipt. Startup orphan recovery may quarantine corrupt orphan receipt files as <code>&lt;name&gt;.json.corrupt</code>, but <code>/view verify</code> is read-only.</li>
+</ol>
+<hr>
+<h2>Receipt Fields for Dispatch Provenance</h2>
+<p>A receipt carries optional provenance and context blocks that answer &quot;what happened&quot; for a chained (pipeline), composed (persona override), escalated, briefed, steered, council, or external run. Those optional blocks remain absent when unused. Current receipts carry strict integrity v20 and an explicit <code>outcomeCode: null</code> when no classified deterministic failure occurred. Automation consumers must treat the optional blocks below as absent by default and <code>outcomeCode</code> as nullable. Lower receipt versions are retired, while malformed, unversioned, and future versions are invalid.</p>
+<p>Receipt integrity verification and evidence verification are independent.
+<code>receipt_integrity=verified/v20/sha256</code> means Clio called the receipt verifier
+against the ledger envelope; merely finding an embedded digest is not enough.
+<code>evidence_verification=&lt;verified|unverified|not_applicable|unknown&gt;/&lt;basis&gt;</code>
+describes validation evidence inside that verified receipt. Likewise,
+<code>briefing</code> authenticates parent-supplied dispatch data, while
+<code>project_context</code> authenticates the separately rendered bounded project
+message. Model-facing dispatch and collect output name all four concepts
+separately and never substitute one hash for another.</p>
+<p>The evidence bundle renders these sets in <code>transcript.md</code> (human sentences) and <code>trace.cleaned.jsonl</code> (structured run rows), <code>clio-coder evidence inspect</code> prints them as a <code>provenance &lt;runId&gt;:</code> block, and the <code>dispatch</code> tool appends a compact suffix to each run line plus additive keys on <code>details.runs[]</code>, including <code>trust</code>, the bounded canonical trust projection described in <a href="memory_blueprint.html#trust-projection">evidence-and-memory.md</a>. A timed-out or denied escalation also raises an <code>escalation</code> finding in the bundle.</p>
+<p>The base provenance sets, steering, routing, quality, worker identity, result-conformance, council provenance, and fleet gate provenance use the strict v20 shape frozen for the release. Version 20 also seals provenance for each declared dispatch-intent path and the resolved <code>pathScope</code>, so evidence distinguishes operator-declared scope from legacy scope inferred from prose. These fields are labeled <code>experimental</code> until the schema is promoted post-1.0. For the operator-facing registry of receipt and related persistent compatibility contracts, see <a href="artifact_versions_blueprint.html">artifact-versions.md</a>.</p>
+<table>
+<thead>
+<tr>
+<th>Field path</th>
+<th>Type</th>
+<th>When present</th>
+<th>Meaning</th>
+<th>Status</th>
+</tr>
+</thead>
+<tbody><tr>
+<td><code>pipeline.fromRunId</code></td>
+<td><code>string | null</code></td>
+<td>Pipeline step after the first</td>
+<td>Run whose final output was threaded in as input data; <code>null</code> when the upstream run id is unknown</td>
+<td>experimental</td>
+</tr>
+<tr>
+<td><code>pipeline.position</code></td>
+<td><code>number</code></td>
+<td>Pipeline step after the first</td>
+<td>1-based index of this step in the chain</td>
+<td>experimental</td>
+</tr>
+<tr>
+<td><code>pipeline.inputBytes</code></td>
+<td><code>number</code></td>
+<td>Pipeline step after the first</td>
+<td>UTF-8 byte length of the threaded upstream text before the 12000-char cap</td>
+<td>experimental</td>
+</tr>
+<tr>
+<td><code>pipeline.inputTruncated</code></td>
+<td><code>boolean</code></td>
+<td>Pipeline step after the first</td>
+<td><code>true</code> when the 12000-char cap clipped the threaded input</td>
+<td>experimental</td>
+</tr>
+<tr>
+<td><code>briefing.bytes</code></td>
+<td><code>number</code></td>
+<td>A bounded parent briefing was sent</td>
+<td>UTF-8 byte count of the exact canonical briefing content</td>
+<td>experimental</td>
+</tr>
+<tr>
+<td><code>briefing.contentHash</code></td>
+<td><code>string</code></td>
+<td>A bounded parent briefing was sent</td>
+<td>SHA-256 of exact canonical briefing content; prose is not copied into the receipt</td>
+<td>experimental</td>
+</tr>
+<tr>
+<td><code>projectContext.tier</code></td>
+<td><code>&quot;none&quot; | &quot;bounded&quot;</code></td>
+<td>Current receipts</td>
+<td>Effective project-context policy</td>
+<td>experimental</td>
+</tr>
+<tr>
+<td><code>projectContext.chars</code></td>
+<td><code>number</code></td>
+<td>Bounded project context</td>
+<td>Character count of the rendered project-context message</td>
+<td>experimental</td>
+</tr>
+<tr>
+<td><code>projectContext.contentHash</code></td>
+<td><code>string</code></td>
+<td>Nonempty bounded project context</td>
+<td>SHA-256 of the rendered project-context message</td>
+<td>experimental</td>
+</tr>
+<tr>
+<td><code>steering[].sequence</code></td>
+<td><code>number</code></td>
+<td>A steer was successfully written</td>
+<td>Stable 1-based order within the run</td>
+<td>experimental</td>
+</tr>
+<tr>
+<td><code>steering[].bytes</code></td>
+<td><code>number</code></td>
+<td>A steer was successfully written</td>
+<td>UTF-8 bytes of the exact canonical trimmed steer</td>
+<td>experimental</td>
+</tr>
+<tr>
+<td><code>steering[].contentHash</code></td>
+<td><code>string</code></td>
+<td>A steer was successfully written</td>
+<td>SHA-256 of the canonical steer; prose is not persisted</td>
+<td>experimental</td>
+</tr>
+<tr>
+<td><code>steering[].sentAt</code></td>
+<td><code>string</code></td>
+<td>A steer was successfully written</td>
+<td>Write timestamp</td>
+<td>experimental</td>
+</tr>
+<tr>
+<td><code>steering[].acknowledged</code></td>
+<td><code>boolean</code></td>
+<td>A steer was successfully written</td>
+<td>Whether a worker acknowledgement was actually observed</td>
+<td>experimental</td>
+</tr>
+<tr>
+<td><code>steering[].acknowledgedAt</code></td>
+<td><code>string</code></td>
+<td>Acknowledgement was observed</td>
+<td>Acknowledgement timestamp</td>
+<td>experimental</td>
+</tr>
+<tr>
+<td><code>outcomeCode</code></td>
+<td>six-value stable string union or <code>null</code></td>
+<td>Every v20 terminal receipt</td>
+<td>Non-null for <code>vram_capacity_fit_failure</code>, <code>worker_tool_call_cap_exhausted</code>, <code>loop_guard_tools_disabled_exhausted</code>, <code>result_contract_exhausted</code>, <code>worker_final_output_missing</code>, or <code>host_verification_rejected</code>; otherwise <code>null</code>. Each non-null code denotes terminal deterministic failure and is incompatible with <code>outcome: &quot;succeeded&quot;</code>. Dispatch retry policy consumes this code only, never diagnostic prose.</td>
+<td>experimental</td>
+</tr>
+<tr>
+<td><code>personaOverride.promptHash</code></td>
+<td><code>string</code></td>
+<td>Ad-hoc specialist whose persona replaced the recipe body</td>
+<td>Hash of the composed static prompt; equals <code>staticCompositionHash</code> for the run</td>
+<td>experimental</td>
+</tr>
+<tr>
+<td><code>safety.decisions.escalationRequested</code></td>
+<td><code>number</code></td>
+<td>Run saw at least one permission escalation</td>
+<td>Parked permission asks handed to the operator</td>
+<td>experimental</td>
+</tr>
+<tr>
+<td><code>safety.decisions.escalationApproved</code></td>
+<td><code>number</code></td>
+<td>Run saw at least one permission escalation</td>
+<td>Escalations the operator approved</td>
+<td>experimental</td>
+</tr>
+<tr>
+<td><code>safety.decisions.escalationDenied</code></td>
+<td><code>number</code></td>
+<td>Run saw at least one permission escalation</td>
+<td>Escalations the operator denied</td>
+<td>experimental</td>
+</tr>
+<tr>
+<td><code>safety.decisions.escalationTimedOut</code></td>
+<td><code>number</code></td>
+<td>Run saw at least one permission escalation</td>
+<td>Escalations resolved by the timeout fallback (no operator decision)</td>
+<td>experimental</td>
+</tr>
+<tr>
+<td><code>safety.toolTelemetry.coverage</code></td>
+<td><code>&quot;complete&quot; | &quot;partial&quot; | &quot;unavailable&quot;</code></td>
+<td>Current dispatch receipts</td>
+<td>Whether Clio can account for the runtime&#39;s complete tool start/finish stream</td>
+<td>experimental</td>
+</tr>
+<tr>
+<td><code>safety.toolTelemetry.ingestionErrors</code></td>
+<td><code>number</code></td>
+<td>Current dispatch receipts</td>
+<td>Malformed or lost frames, event-fold/source errors, and drain timeouts that make otherwise mediated telemetry incomplete</td>
+<td>experimental</td>
+</tr>
+<tr>
+<td><code>safety.toolTelemetry.unfinished</code></td>
+<td><code>{ tool, count }[]</code></td>
+<td>Current dispatch receipts</td>
+<td>Tool starts that had no matching finish when the receipt sealed</td>
+<td>experimental</td>
+</tr>
+<tr>
+<td><code>safety.toolTelemetry.workspaceMutationPossible</code></td>
+<td><code>boolean</code></td>
+<td>Current dispatch receipts</td>
+<td>Whether incomplete or unavailable telemetry could conceal a shared-workspace mutation; retry admission fails closed when true</td>
+<td>experimental</td>
+</tr>
+<tr>
+<td><code>autonomyEnforcement.grade</code></td>
+<td><code>string</code></td>
+<td>Always</td>
+<td>The autonomy grade level enforced for the run</td>
+<td>experimental</td>
+</tr>
+<tr>
+<td><code>autonomyEnforcement.autonomy</code></td>
+<td><code>string</code></td>
+<td>Always</td>
+<td>The effective autonomy level name (e.g. auto-edit, suggest, read-only, full-auto)</td>
+<td>experimental</td>
+</tr>
+<tr>
+<td><code>autonomyEnforcement.externalMode</code></td>
+<td><code>string</code></td>
+<td>When running external worker</td>
+<td>The execution mode of the external worker runtime</td>
+<td>experimental</td>
+</tr>
+<tr>
+<td><code>autonomyEnforcement.dangerousBypass</code></td>
+<td><code>boolean</code></td>
+<td>When running external worker</td>
+<td>Whether a safety bypass was explicitly activated</td>
+<td>experimental</td>
+</tr>
+<tr>
+<td><code>validationGrounding.claimed</code></td>
+<td><code>number</code></td>
+<td>Validation grounding evaluated</td>
+<td>Count of validations claimed by worker</td>
+<td>experimental</td>
+</tr>
+<tr>
+<td><code>validationGrounding.grounded</code></td>
+<td><code>number</code></td>
+<td>Validation grounding evaluated</td>
+<td>Count of claimed validations matched against executed commands</td>
+<td>experimental</td>
+</tr>
+<tr>
+<td><code>validationGrounding.ungrounded</code></td>
+<td><code>string[]</code></td>
+<td>Validation grounding evaluated</td>
+<td>Claim names with no matching execution, stably ordered and bounded</td>
+<td>experimental</td>
+</tr>
+<tr>
+<td><code>validationGrounding.basis</code></td>
+<td><code>&quot;no-command-executed&quot; | &quot;unmatched-command&quot;</code></td>
+<td>Validation grounding evaluated</td>
+<td>Why the unmatched claims are unmatched. Only <code>no-command-executed</code> takes a quality label away</td>
+<td>experimental</td>
+</tr>
+<tr>
+<td><code>capabilityMismatch.verdict</code></td>
+<td><code>&quot;refuse&quot; | &quot;flag&quot;</code></td>
+<td>Capability assessment evaluated</td>
+<td>Mismatch verdict for agent capability class versus task shape</td>
+<td>experimental</td>
+</tr>
+<tr>
+<td><code>capabilityMismatch.agentId</code></td>
+<td><code>string</code></td>
+<td>Capability assessment evaluated</td>
+<td>Dispatched agent ID</td>
+<td>experimental</td>
+</tr>
+<tr>
+<td><code>capabilityMismatch.capabilityClass</code></td>
+<td><code>string</code></td>
+<td>Capability assessment evaluated</td>
+<td>Admitted agent capability class</td>
+<td>experimental</td>
+</tr>
+<tr>
+<td><code>capabilityMismatch.taskType</code></td>
+<td><code>string</code></td>
+<td>Capability assessment evaluated</td>
+<td>Classified task shape</td>
+<td>experimental</td>
+</tr>
+<tr>
+<td><code>capabilityMismatch.suggestedAgentId</code></td>
+<td><code>string | null</code></td>
+<td>Capability assessment evaluated</td>
+<td>Installed recipe that can do this work, or null when none is installed</td>
+<td>experimental</td>
+</tr>
+<tr>
+<td><code>capabilityMismatch.detail</code></td>
+<td><code>string</code></td>
+<td>Capability assessment evaluated</td>
+<td>Human-readable explanation of the mismatch</td>
+<td>experimental</td>
+</tr>
+</tbody></table>
+<p>Only Clio-owned native/SSH worker wrappers and the Claude SDK path may transport worker-authored outcome events. ACP and black-box subprocess output cannot self-assert an outcome code; Clio may still assign <code>worker_final_output_missing</code> at its trusted finalization seam.</p>
+<p>The escalation counters appear together and only when <code>escalationRequested</code> is present (at least one escalation occurred), so a deny-all or non-escalating run keeps its <code>safety.decisions</code> block unchanged.</p>
+<hr>
+<h2>Worked Example: End-to-End Spine Flow</h2>
+<p>Here is a step-by-step trace of how a run passes through the spine.</p>
+<h3>1. Dispatch Completion</h3>
+<p>A dispatched task to execute tests finishes. The dispatch domain persists the run envelope and receipt, then emits <code>dispatch.completed</code>. The relevant event fields include:</p>
+<pre><code class="language-json">{
+  &quot;runId&quot;: &quot;abc1234&quot;,
+  &quot;agentId&quot;: &quot;tester&quot;,
+  &quot;targetId&quot;: &quot;mini&quot;,
+  &quot;wireModelId&quot;: &quot;ornith1.5-35b-moe&quot;,
+  &quot;runtimeId&quot;: &quot;llamacpp&quot;,
+  &quot;runtimeKind&quot;: &quot;http&quot;,
+  &quot;requestOrigin&quot;: &quot;user&quot;,
+  &quot;outcome&quot;: &quot;succeeded&quot;,
+  &quot;outcomeCode&quot;: null,
+  &quot;outcomeDetail&quot;: null,
+  &quot;exitCode&quot;: 0,
+  &quot;lineage&quot;: {
+    &quot;parentRunId&quot;: null,
+    &quot;rootRunId&quot;: &quot;abc1234&quot;,
+    &quot;attempt&quot;: 0,
+    &quot;depth&quot;: 0
+  }
+}
+</code></pre>
+<h3>2. Forensic Build</h3>
+<p>The observability domain catches the event and triggers <code>buildAndIndexEvidence</code>. It generates the overview under <code>&lt;dataDir&gt;/evidence/run-abc1234/overview.json</code>:</p>
+<pre><code class="language-json">{
+  &quot;version&quot;: 1,
+  &quot;evidenceId&quot;: &quot;run-abc1234&quot;,
+  &quot;source&quot;: { &quot;kind&quot;: &quot;run&quot;, &quot;runId&quot;: &quot;abc1234&quot; },
+  &quot;tags&quot;: [&quot;session-linked&quot;],
+  &quot;totals&quot;: {
+    &quot;toolCalls&quot;: 5,
+    &quot;toolErrors&quot;: 0
+  }
+}
+</code></pre>
+<h3>3. Sidecar Append</h3>
+<p>Observability maps the result into an index row and writes it to <code>&lt;stateDir&gt;/evidence-index.json</code>. Because there was a successful validation tool call, <code>firstPassSuccess</code> is <code>true</code>:</p>
+<pre><code class="language-json">{
+  &quot;runId&quot;: &quot;abc1234&quot;,
+  &quot;evidenceId&quot;: &quot;run-abc1234&quot;,
+  &quot;tags&quot;: [&quot;session-linked&quot;],
+  &quot;firstPassSuccess&quot;: true,
+  &quot;findingCount&quot;: 0,
+  &quot;generatedAt&quot;: &quot;2026-06-25T14:31:00.000Z&quot;
+}
+</code></pre>
+<h3>4. Surfacing in /view</h3>
+<p>When the operator opens the TUI split viewer <code>/view</code>, the Accountability panel reads the index and displays:</p>
+<pre><code class="language-text"># Accountability
 
-    let activeKey = "receipts-1";
+first-pass success: 1/1 (100%)
 
-    function initList() {
-      // Clear
-      document.getElementById("list-Receipts").innerHTML = "";
-      document.getElementById("list-Dispatch").innerHTML = "";
-      document.getElementById("list-Tool").innerHTML = "";
-      document.getElementById("list-Compaction").innerHTML = "";
+## Top failure causes
 
-      Object.keys(ARTIFACTS).forEach(key => {
-        const art = ARTIFACTS[key];
-        const row = document.createElement("li");
-        row.className = `item-row ${key === activeKey ? 'active' : ''}`;
-        row.id = `item-${key}`;
-        row.onclick = () => selectArtifact(key);
-        row.innerHTML = `
-          <span>${art.name}</span>
-          <span style="font-size:0.65rem; color:var(--text-dark);">${art.badge}</span>
-        `;
-
-        document.getElementById(`list-${art.category}`).appendChild(row);
-      });
-    }
-
-    function selectArtifact(key) {
-      activeKey = key;
-      document.querySelectorAll(".item-row").forEach(el => { el.classList.remove("active"); });
-      document.getElementById(`item-${key}`).classList.add("active");
-
-      const art = ARTIFACTS[key];
-      document.getElementById("viewer-filename").innerText = art.name;
-      document.getElementById("viewer-badge").innerText = art.badge;
-      document.getElementById("viewer-badge").className = `status-badge ${art.badgeClass}`;
-      document.getElementById("backing-path-display").innerText = art.path;
-
-      const codeEl = document.getElementById("artifact-content-pre");
-      codeEl.textContent = art.content;
-
-      const lines = art.content.split("\n").length;
-      document.getElementById("capped-indicator").innerText = `Lines: ${lines}`;
-
-      // Reset verification panel
-      const panel = document.getElementById("verification-panel");
-      panel.style.display = "none";
-      panel.className = "verification-status-panel";
-
-      // Toggle verify button visibility based on category
-      const verifyBtn = document.getElementById("verify-btn");
-      if (art.category === "Receipts") {
-        verifyBtn.style.display = "inline-flex";
-      } else {
-        verifyBtn.style.display = "none";
-      }
-    }
-
-    function runIntegrityVerification() {
-      const art = ARTIFACTS[activeKey];
-      const panel = document.getElementById("verification-panel");
-
-      panel.style.display = "block";
-      panel.textContent = art.verifyLog;
-
-      if (art.verifySuccess) {
-        panel.className = "verification-status-panel success";
-      } else {
-        panel.className = "verification-status-panel error";
-      }
-    }
-
-    function showBackingPath() {
-      const art = ARTIFACTS[activeKey];
-      alert(`Backing absolute path:\n${art.path}`);
-    }
-
-    function filterArtifacts() {
-      const q = document.getElementById("filter-box").value.toLowerCase();
-
-      Object.keys(ARTIFACTS).forEach(key => {
-        const art = ARTIFACTS[key];
-        const row = document.getElementById(`item-${key}`);
-        if (art.name.toLowerCase().includes(q) || art.category.toLowerCase().includes(q)) {
-          row.style.display = "flex";
-        } else {
-          row.style.display = "none";
-        }
-      });
-    }
-
-    // Keybindings support
-    document.addEventListener("keydown", (e) => {
-      if (e.key === "v" || e.key === "V") {
-        const art = ARTIFACTS[activeKey];
-        if (art.category === "Receipts") {
-          runIntegrityVerification();
-        }
-      } else if (e.key === "o" || e.key === "O") {
-        showBackingPath();
-      }
-    });
-
-    window.onload = () => {
-      initList();
-      selectArtifact(activeKey);
-    };
-  </script>
+none
+</code></pre>
+        </article>
+        <nav class="related-nav" aria-label="Adjacent references">
+          <a class="nav-link-card" href="models_blueprint.html"><span class="nav-label">Previous</span><span class="nav-title">Model Catalog, Runtime Refresh, and Field Notes</span></a>
+          <a class="nav-link-card next" href="pi_boundary_blueprint.html"><span class="nav-label">Next</span><span class="nav-title">Pi SDK Boundary</span></a>
+        </nav>
+        <p class="reference-footer-note">Canonical content lives in the mapped Markdown page. This visual counterpart adds navigation without changing the contract.</p>
+      </main>
+    </div>
+    <footer>Clio Coder documentation · source-aligned at v0.4.2</footer>
+  </div>
+  <script src="shared.js"></script>
 </body>
 </html>

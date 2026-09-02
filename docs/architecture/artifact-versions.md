@@ -1,5 +1,8 @@
 # Artifact Versions & Serialization Contracts
 
+> **Visual blueprint:** The source checkout includes the complete
+> [Artifact Versions & Serialization Contracts visual reference](https://github.com/iowarp/clio-coder/blob/main/docs/html/artifact_versions_blueprint.html).
+
 This document is an operator-facing registry of compatibility-sensitive file
 formats, serialized structures, integrity digests, and migration rules in the
 current source tree. It is not an exhaustive inventory of every internal store

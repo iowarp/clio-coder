@@ -1,805 +1,72 @@
-<!DOCTYPE html>
+<!doctype html>
 <html lang="en">
 <head>
-  <meta charset="UTF-8">
-  <meta name="viewport" content="width=device-width, initial-scale=1.0">
-  <title>Clio Coder Scientific Validation Blueprint</title>
-
-  <style>
-    :root {
-      --bg-dark: #090d16;
-      --bg-card: rgba(17, 24, 39, 0.7);
-      --border-card: rgba(255, 255, 255, 0.08);
-      --text-main: #f3f4f6;
-      --text-muted: #9ca3af;
-      --text-dark: #6b7280;
-
-      --color-cyan: #00f0ff;
-      --color-cyan-rgb: 0, 240, 255;
-      --color-purple: #bd00ff;
-      --color-purple-rgb: 189, 0, 255;
-      --color-emerald: #10b981;
-      --color-emerald-rgb: 16, 185, 129;
-      --color-amber: #f59e0b;
-      --color-amber-rgb: 245, 158, 11;
-      --color-rose: #ef4444;
-      --color-rose-rgb: 239, 68, 68;
-
-      --gradient-main: linear-gradient(135deg, var(--color-cyan), var(--color-purple));
-      --shadow-glow: 0 0 20px rgba(var(--color-cyan-rgb), 0.15);
-      --font-sans: "Segoe UI", -apple-system, BlinkMacSystemFont, Roboto, "Helvetica Neue", Arial, sans-serif;
-      --font-mono: "SFMono-Regular", Consolas, "Liberation Mono", Menlo, monospace;
-    }
-
-    * {
-      box-sizing: border-box;
-      margin: 0;
-      padding: 0;
-    }
-
-    body {
-      background-color: var(--bg-dark);
-      background-image:
-        radial-gradient(circle at 10% 20%, rgba(var(--color-cyan-rgb), 0.05) 0%, transparent 40%),
-        radial-gradient(circle at 90% 80%, rgba(var(--color-purple-rgb), 0.05) 0%, transparent 40%),
-        radial-gradient(circle at 50% 50%, #0d1527 0%, var(--bg-dark) 100%);
-      color: var(--text-main);
-      font-family: var(--font-sans);
-      min-height: 100vh;
-      line-height: 1.6;
-      overflow-x: hidden;
-    }
-
-    ::-webkit-scrollbar {
-      width: 8px;
-      height: 8px;
-    }
-    ::-webkit-scrollbar-track {
-      background: rgba(255, 255, 255, 0.02);
-    }
-    ::-webkit-scrollbar-thumb {
-      background: rgba(255, 255, 255, 0.1);
-      border-radius: 4px;
-    }
-    ::-webkit-scrollbar-thumb:hover {
-      background: rgba(var(--color-cyan-rgb), 0.3);
-    }
-
-    .container {
-      max-width: 1400px;
-      margin: 0 auto;
-      padding: 2rem;
-    }
-
-    header {
-      text-align: center;
-      margin-bottom: 2.5rem;
-      position: relative;
-    }
-
-    .header-logo {
-      display: inline-flex;
-      align-items: center;
-      justify-content: center;
-      width: 72px;
-      height: 72px;
-      background: rgba(255, 255, 255, 0.03);
-      border: 1px solid var(--border-card);
-      border-radius: 18px;
-      margin-bottom: 1rem;
-      box-shadow: var(--shadow-glow);
-      position: relative;
-    }
-
-    .header-logo::after {
-      content: '';
-      position: absolute;
-      inset: -2px;
-      border-radius: 20px;
-      background: var(--gradient-main);
-      z-index: -1;
-      opacity: 0.3;
-      filter: blur(4px);
-    }
-
-    .header-logo img {
-      width: 78%;
-      height: 78%;
-      object-fit: contain;
-      filter: drop-shadow(0 0 8px rgba(0, 240, 255, 0.35));
-    }
-
-    h1 {
-      font-size: 2.5rem;
-      font-weight: 800;
-      letter-spacing: -0.05em;
-      margin-bottom: 0.5rem;
-      background: linear-gradient(to right, #ffffff, #c7d2fe, var(--color-cyan));
-      -webkit-background-clip: text;
-      -webkit-text-fill-color: transparent;
-    }
-
-    .subtitle {
-      font-size: 1.1rem;
-      color: var(--text-muted);
-      max-width: 600px;
-      margin: 0 auto 1.5rem auto;
-      font-weight: 400;
-    }
-
-    .meta-grid {
-      display: flex;
-      justify-content: center;
-      gap: 1rem;
-      margin-bottom: 2rem;
-      flex-wrap: wrap;
-    }
-
-    .meta-badge {
-      background: rgba(255, 255, 255, 0.04);
-      border: 1px solid var(--border-card);
-      padding: 0.5rem 1rem;
-      border-radius: 8px;
-      font-size: 0.85rem;
-      display: flex;
-      align-items: center;
-      gap: 0.5rem;
-    }
-
-    .meta-badge .label {
-      color: var(--text-muted);
-    }
-
-    .meta-badge .value {
-      font-family: var(--font-mono);
-      font-weight: 600;
-      color: var(--color-cyan);
-    }
-
-    .tabs-nav {
-      display: flex;
-      justify-content: center;
-      gap: 0.75rem;
-      margin-bottom: 2rem;
-      flex-wrap: wrap;
-    }
-
-    .tab-btn {
-      background: rgba(255, 255, 255, 0.03);
-      border: 1px solid var(--border-card);
-      color: var(--text-muted);
-      padding: 0.75rem 1.5rem;
-      border-radius: 9999px;
-      font-weight: 600;
-      cursor: pointer;
-      display: flex;
-      align-items: center;
-      gap: 0.5rem;
-      transition: all 0.25s cubic-bezier(0.4, 0, 0.2, 1);
-    }
-
-    .tab-btn:hover {
-      background: rgba(255, 255, 255, 0.08);
-      color: var(--text-main);
-      border-color: rgba(var(--color-cyan-rgb), 0.3);
-    }
-
-    .tab-btn.active {
-      background: var(--gradient-main);
-      color: #090d16;
-      font-weight: 700;
-      border-color: transparent;
-      box-shadow: 0 4px 15px rgba(var(--color-cyan-rgb), 0.3);
-    }
-
-    .tab-btn svg {
-      width: 18px;
-      height: 18px;
-      fill: none;
-      stroke: currentColor;
-      stroke-width: 2;
-    }
-
-    .tab-pane {
-      display: none;
-      animation: fadeIn 0.4s ease-out forwards;
-    }
-
-    .tab-pane.active {
-      display: block;
-    }
-
-    @keyframes fadeIn {
-      from {
-        opacity: 0;
-        transform: translateY(10px);
-      }
-      to {
-        opacity: 1;
-        transform: translateY(0);
-      }
-    }
-
-    .glass-card {
-      background: var(--bg-card);
-      border: 1px solid var(--border-card);
-      backdrop-filter: blur(16px);
-      -webkit-backdrop-filter: blur(16px);
-      border-radius: 16px;
-      padding: 2rem;
-      box-shadow: 0 10px 30px rgba(0, 0, 0, 0.2);
-      margin-bottom: 2rem;
-    }
-
-    .card-title {
-      font-size: 1.3rem;
-      font-weight: 700;
-      margin-bottom: 1.25rem;
-      color: #ffffff;
-      display: flex;
-      align-items: center;
-      gap: 0.75rem;
-      border-bottom: 1px solid rgba(255, 255, 255, 0.05);
-      padding-bottom: 0.75rem;
-    }
-
-    .card-title svg {
-      width: 20px;
-      height: 20px;
-      stroke: var(--color-cyan);
-      stroke-width: 2;
-      fill: none;
-    }
-
-    .grid-2 {
-      display: grid;
-      grid-template-columns: 1fr 1fr;
-      gap: 1.5rem;
-    }
-
-    @media (max-width: 900px) {
-      .grid-2 {
-        grid-template-columns: 1fr;
-      }
-    }
-
-    .form-group {
-      margin-bottom: 1.25rem;
-    }
-
-    label {
-      display: block;
-      font-size: 0.85rem;
-      color: var(--text-muted);
-      margin-bottom: 0.5rem;
-      font-weight: 500;
-      text-transform: uppercase;
-      letter-spacing: 0.05em;
-    }
-
-    input[type="text"], input[type="number"], select, textarea {
-      width: 100%;
-      background: rgba(255, 255, 255, 0.03);
-      border: 1px solid var(--border-card);
-      border-radius: 8px;
-      padding: 0.75rem 1rem;
-      color: var(--text-main);
-      font-family: var(--font-sans);
-      font-size: 0.95rem;
-      transition: all 0.2s ease;
-    }
-
-    input:focus, select:focus, textarea:focus {
-      outline: none;
-      border-color: var(--color-cyan);
-      box-shadow: 0 0 10px rgba(var(--color-cyan-rgb), 0.15);
-      background: rgba(255, 255, 255, 0.06);
-    }
-
-    textarea.code-area {
-      font-family: var(--font-mono);
-      font-size: 0.85rem;
-      background: #05080e;
-      resize: vertical;
-      min-height: 250px;
-      line-height: 1.5;
-    }
-
-    .btn {
-      background: rgba(255, 255, 255, 0.05);
-      border: 1px solid var(--border-card);
-      color: var(--text-main);
-      padding: 0.75rem 1.5rem;
-      border-radius: 8px;
-      font-weight: 600;
-      cursor: pointer;
-      display: inline-flex;
-      align-items: center;
-      gap: 0.5rem;
-      transition: all 0.2s ease;
-    }
-
-    .btn:hover {
-      background: rgba(255, 255, 255, 0.1);
-      border-color: rgba(var(--color-cyan-rgb), 0.3);
-    }
-
-    .btn-primary {
-      background: var(--gradient-main);
-      color: #090d16;
-      border-color: transparent;
-      font-weight: 700;
-    }
-
-    .btn-primary:hover {
-      background: linear-gradient(135deg, #2bf1ff, #d64eff);
-      box-shadow: 0 0 15px rgba(var(--color-cyan-rgb), 0.3);
-    }
-
-    .status-panel {
-      padding: 1rem;
-      border-radius: 8px;
-      margin-top: 1rem;
-      font-size: 0.9rem;
-      display: flex;
-      align-items: flex-start;
-      gap: 0.75rem;
-    }
-
-    .status-panel.success {
-      background: rgba(16, 185, 129, 0.1);
-      border: 1px solid rgba(16, 185, 129, 0.2);
-      color: #34d399;
-    }
-
-    .status-panel.error {
-      background: rgba(239, 68, 68, 0.1);
-      border: 1px solid rgba(239, 68, 68, 0.2);
-      color: #fca5a5;
-    }
-
-    .status-panel.warning {
-      background: rgba(245, 158, 11, 0.1);
-      border: 1px solid rgba(245, 158, 11, 0.2);
-      color: #fcd34d;
-    }
-
-    .flowchart-container {
-      background: #05080e;
-      border: 1px solid var(--border-card);
-      border-radius: 12px;
-      padding: 1.5rem;
-      overflow: auto;
-      display: center;
-      justify-content: center;
-    }
-
-    .console-box {
-      background: #020408;
-      border: 1px solid var(--border-card);
-      border-radius: 8px;
-      padding: 1rem;
-      font-family: var(--font-mono);
-      font-size: 0.85rem;
-      color: #a7f3d0;
-      white-space: pre-wrap;
-      max-height: 300px;
-      overflow-y: auto;
-    }
-
-    .formula-badge {
-      background: rgba(255,255,255,0.02);
-      border: 1px solid var(--border-card);
-      border-radius: 8px;
-      padding: 1rem;
-      font-size: 1.1rem;
-      font-family: var(--font-mono);
-      text-align: center;
-      color: var(--color-cyan);
-      margin: 1rem 0;
-    }
-  </style>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <meta name="clio-markdown-source" content="docs/process/scientific-validation.md">
+  <meta name="clio-docs-version" content="0.4.2">
+  <title>Clio Coder Scientific Validation Contracts · Clio Coder 0.4.2</title>
+  <link rel="icon" href="data:,">
+  <link rel="stylesheet" href="shared.css">
 </head>
-<body>
+<body data-doc-category="process">
+  <div class="reading-progress" aria-hidden="true"></div>
+  <a class="skip-link" href="#reference-content">Skip to reference</a>
   <div class="container">
-    <header>
+    <header class="document-header" data-category="Process">
       <div class="header-left">
-        <div class="header-logo">
-          <svg viewBox="0 0 64 64" width="48" height="48" role="img" aria-label="Clio Coder logo"><title>Clio Coder logo</title><rect x="8" y="8" width="48" height="48" rx="12" fill="rgba(0,240,255,0.12)" stroke="rgba(0,240,255,0.65)"/><path d="M32 14 16 23l16 9 16-9-16-9Z" fill="none" stroke="#00f0ff" stroke-width="3" stroke-linejoin="round"/><path d="M16 32l16 9 16-9M16 41l16 9 16-9" fill="none" stroke="#bd00ff" stroke-width="3" stroke-linecap="round" stroke-linejoin="round"/></svg>
-        </div>
+        <a class="header-logo" href="index.html" aria-label="Documentation index">
+          <svg viewBox="0 0 24 24" fill="none" aria-hidden="true">
+            <path d="M12 2 2 7l10 5 10-5-10-5Z" stroke="url(#clio-logo)" stroke-width="2" stroke-linejoin="round"/>
+            <path d="m2 12 10 5 10-5M2 17l10 5 10-5" stroke="url(#clio-logo)" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"/>
+            <defs><linearGradient id="clio-logo" x1="2" y1="2" x2="22" y2="22"><stop stop-color="#00d4db"/><stop offset="1" stop-color="#ff7e29"/></linearGradient></defs>
+          </svg>
+        </a>
         <div class="header-title-wrapper">
-          <h1>Scientific Validation Contracts</h1>
-          <p>Interactive Visual Specification for Numeric Tolerances & HPC Artifact Verifications</p>
-          <div class="meta-chips-row">
-            <span class="chip">Source: docs/scientific-validation.md</span>
-            <span class="chip chip-orange">clio-coder docs validation</span>
-          </div>
+          <p class="document-kicker">Process / canonical reference</p>
+          <h1>Clio Coder Scientific Validation Contracts</h1>
+          <p class="document-path">docs/process/scientific-validation.md</p>
         </div>
       </div>
       <div class="header-right">
-        <span class="version-badge">Clio Coder v0.4.0</span>
-        <a href="index.html" class="back-btn">
-          <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><title>Icon</title><line x1="19" y1="12" x2="5" y2="12"></line><polyline points="12 19 5 12 12 5"></polyline></svg>
-          Dashboard Hub
-        </a>
+        <a class="back-btn" href="index.html">← Index</a>
+        <span class="version-badge">v0.4.2</span>
       </div>
     </header>
-
-
-      <div class="tabs-nav">
-        <button type="button" class="tab-btn active" onclick="_switchTab('calculator')">
-          <svg aria-hidden="true" viewBox="0 0 24 24"><title>Icon</title><path d="M9 7h6m0 10v-3m-3-4h.01M9 17h.01M9 14h.01M12 17h.01M12 14h.01M15 11h.01M20 21H4a2 2 0 01-2-2V5a2 2 0 012-2h16a2 2 0 012 2v14a2 2 0 01-2 2z"/></svg>
-          Tolerance Calculator
-        </button>
-        <button type="button" class="tab-btn" onclick="_switchTab('validator')">
-          <svg aria-hidden="true" viewBox="0 0 24 24"><title>Icon</title><path d="M9 12l2 2 4-4m6 2a9 9 0 11-18 0 9 9 0 0118 0z"/></svg>
-          Contract Validator
-        </button>
-        <button type="button" class="tab-btn" onclick="_switchTab('hpc')">
-          <svg aria-hidden="true" viewBox="0 0 24 24"><title>Icon</title><path d="M19 11H5m14 0a2 2 0 012 2v6a2 2 0 01-2 2H5a2 2 0 01-2-2v-6a2 2 0 012-2m14 0V9a2 2 0 00-2-2M5 11V9a2 2 0 012-2m0 0V5a2 2 0 012-2h6a2 2 0 012 2v2M7 7h10"/></svg>
-          HPC Run Simulator
-        </button>
-        <button type="button" class="tab-btn" onclick="_switchTab('flowchart')">
-          <svg aria-hidden="true" viewBox="0 0 24 24"><title>Icon</title><path d="M7 21h10a2 2 0 002-2V5a2 2 0 00-2-2H7a2 2 0 00-2 2v14a2 2 0 002 2zM12 11h.01M12 7h.01M12 15h.01"/></svg>
-          Validation Lifecycle
-        </button>
-      </div>
-    </header>
-
-    <!-- Tab 1: Tolerance Calculator -->
-    <div id="calculator" class="tab-pane active">
-      <div class="grid-2">
-        <div class="glass-card">
-          <div class="card-title">
-            <svg aria-hidden="true" viewBox="0 0 24 24"><title>Icon</title><path d="M9 7h6m0 10v-3m-3-4h.01M9 17h.01M9 14h.01M12 17h.01M12 14h.01M15 11h.01M20 21H4a2 2 0 01-2-2V5a2 2 0 012-2h16a2 2 0 012 2v14a2 2 0 01-2 2z"/></svg>
-            Numerical Inputs
-          </div>
-
-          <div class="form-group">
-            <label>Reference Value (ref)</label>
-            <input type="text" id="tol-ref" value="0.000145" oninput="calculateTolerance()">
-          </div>
-
-          <div class="form-group">
-            <label>Candidate Value (val)</label>
-            <input type="text" id="tol-val" value="0.00014502" oninput="calculateTolerance()">
-          </div>
-
-          <div class="form-group">
-            <label>Tolerance Formula Type</label>
-            <select id="tol-type" onchange="_updateFormulaText(); calculateTolerance();">
-              <option value="relative">relative (Fractional scaling)</option>
-              <option value="absolute">absolute (Additive diff)</option>
-              <option value="ulp">ulp (Unit in Last Place steps)</option>
-            </select>
-          </div>
-
-          <div class="form-group">
-            <label>Tolerance Threshold Bound</label>
-            <input type="text" id="tol-threshold" value="1.5e-4" oninput="calculateTolerance()">
-          </div>
-        </div>
-
-        <div class="glass-card">
-          <div class="card-title">
-            <svg aria-hidden="true" viewBox="0 0 24 24"><title>Icon</title><path d="M13 16h-1v-4h-1m1-4h.01M21 12a9 9 0 11-18 0 9 9 0 0118 0z"/></svg>
-            Tolerance Check Verdict
-          </div>
-
-          <div id="tol-banner" class="status-panel success">
-            Check Passed!
-          </div>
-
-          <div class="formula-badge" id="formula-display">
-            |val - ref| / |ref| &le; threshold
-          </div>
-
-          <div style="margin-top:1.5rem; background:rgba(255,255,255,0.02); border:1px solid var(--border-card); padding:1rem; border-radius:8px;">
-            <p style="margin-bottom:0.5rem;"><strong>Computed Delta:</strong> <span id="tol-calc-delta" style="font-family:var(--font-mono); color:var(--color-cyan); font-weight:600;">-</span></p>
-            <p style="margin-bottom:0.5rem;"><strong>Allowed Threshold:</strong> <span id="tol-calc-thresh" style="font-family:var(--font-mono); color:var(--color-purple); font-weight:600;">-</span></p>
-          </div>
-        </div>
-      </div>
-    </div>
-
-    <!-- Tab 2: Contract Validator -->
-    <div id="validator" class="tab-pane">
-      <div class="grid-2">
-        <div class="glass-card">
-          <div class="card-title">
-            <svg aria-hidden="true" viewBox="0 0 24 24"><title>Icon</title><path d="M11 5H6a2 2 0 00-2 2v11a2 2 0 002 2h11a2 2 0 002-2v-5m-1.414-9.414a2 2 0 112.828 2.828L11.828 15H9v-2.828l8.586-8.586z"/></svg>
-            Scientific Contract YAML Editor
-          </div>
-          <div class="form-group">
-            <label>Raw validation-contract.yaml Content</label>
-            <textarea id="raw-yaml" class="code-area" oninput="validateYaml()"></textarea>
-          </div>
-          <div style="display: flex; gap: 0.5rem;">
-            <button type="button" class="btn btn-primary" onclick="loadSampleYaml('valid')">Load Valid netCDF/Slurm</button>
-            <button type="button" class="btn" onclick="loadSampleYaml('invalid')">Load Invalid Contract</button>
-          </div>
-        </div>
-
-        <div class="glass-card">
-          <div class="card-title">
-            <svg aria-hidden="true" viewBox="0 0 24 24"><title>Icon</title><path d="M9 5H7a2 2 0 00-2 2v12a2 2 0 002 2h10a2 2 0 002-2V7a2 2 0 00-2-2h-2M9 5a2 2 0 002 2h2a2 2 0 002-2M9 5a2 2 0 012-2h2a2 2 0 012 2m-6 9l2 2 4-4"/></svg>
-            Contract Schema Audit
-          </div>
-          <div id="validator-status" class="status-panel success">
-            No syntax errors. Ready to audit.
-          </div>
-          <div style="margin-top: 1.5rem;">
-            <h4 style="margin-bottom: 0.5rem; font-size: 0.95rem; color: #ffffff;">Validation Attributes:</h4>
-            <div id="contract-properties" style="display: flex; flex-direction: column; gap: 0.5rem;">
-              <!-- Dynamic metrics badges -->
-            </div>
-          </div>
-        </div>
-      </div>
-    </div>
-
-    <!-- Tab 3: HPC Run Simulator -->
-    <div id="hpc" class="tab-pane">
-      <div class="grid-2">
-        <div class="glass-card">
-          <div class="card-title">
-            <svg aria-hidden="true" viewBox="0 0 24 24"><title>Icon</title><path d="M12 6V4m0 2a2 2 0 100 4m0-4a2 2 0 110 4m-6 8a2 2 0 100-4m0 4a2 2 0 110-4m0 4v2m0-6V4m6 6v10m6-2a2 2 0 100-4m0 4a2 2 0 110-4m0 4v2m0-6V4"/></svg>
-            HPC Queue & Cluster Setup
-          </div>
-
-          <div class="form-group">
-            <label>Runtime Scheduler Kind</label>
-            <select id="hpc-kind">
-              <option value="slurm">Slurm (sbatch queue manager)</option>
-              <option value="mpi">MPI rank-sensitive (mpirun launcher)</option>
-              <option value="local">Local execution (direct process)</option>
-            </select>
-          </div>
-
-          <div class="grid-2" style="gap:1rem; margin-bottom:0;">
-            <div class="form-group">
-              <label>Nodes allocation</label>
-              <input type="number" id="hpc-nodes" value="4">
-            </div>
-            <div class="form-group">
-              <label>Ranks count</label>
-              <input type="number" id="hpc-ranks" value="64">
-            </div>
-          </div>
-
-          <div class="form-group">
-            <label>Environment Modules (One per line)</label>
-            <textarea id="hpc-modules" style="font-family:var(--font-mono); min-height:80px;">intel/2024
-openmpi/5.0
-netcdf-c/4.9</textarea>
-          </div>
-
-          <div class="form-group">
-            <label>Target Scientific Artifact Output Path</label>
-            <input type="text" id="hpc-path" value="out/region_west.nc">
-          </div>
-
-          <div style="margin-bottom: 1.5rem;">
-            <label style="text-transform:none; font-size:0.9rem; display:flex; align-items:center; gap:0.5rem; color:var(--text-main)">
-              <input type="checkbox" id="hpc-preserve" checked> Preserve Output (prevent manual cleanup scripts from deleting checkpoints)
-            </label>
-          </div>
-
-          <button type="button" class="btn btn-primary" style="width:100%; justify-content:center;" onclick="_simulateHpcRun()">
-            Submit sbatch Job & Validate
-          </button>
-        </div>
-
-        <div class="glass-card">
-          <div class="card-title">
-            <svg aria-hidden="true" viewBox="0 0 24 24"><title>Icon</title><path d="M8 9l3 3-3 3m5 0h3M5 20h14a2 2 0 002-2V6a2 2 0 00-2-2H5a2 2 0 00-2 2v12a2 2 0 002 2z"/></svg>
-            HPC Cluster Job Logs & Advisory Receipt
-          </div>
-
-          <div id="hpc-banner" class="status-panel success" style="display:none;">
-            Validation Finished.
-          </div>
-
-          <div id="hpc-details" style="margin-top: 1rem; display:none;">
-            <div style="background: rgba(255, 255, 255, 0.02); border: 1px solid var(--border-card); padding: 1.25rem; border-radius: 8px; margin-bottom: 1rem;">
-              <p style="margin-bottom:0.5rem;"><strong>Slurm Job ID:</strong> <span id="res-jobid" style="font-family:var(--font-mono);">SBATCH-48195</span></p>
-              <p style="margin-bottom:0.5rem;"><strong>Scientific Validator:</strong> <span id="res-verdict" style="color:#34d399; font-weight:700;">PASSED (Advisory)</span></p>
-              <p style="margin-bottom:0.5rem;"><strong>Artifact Safeguard:</strong> <span id="res-preserve" style="font-family:var(--font-mono);">-</span></p>
-            </div>
-
-            <h4 style="margin-bottom: 0.5rem; font-size: 0.95rem; color:#ffffff;">HPC Cluster stdout/stderr:</h4>
-            <div class="console-box" id="hpc-log">
-              <!-- Logs go here -->
-            </div>
-          </div>
-
-          <div id="hpc-placeholder" style="text-align: center; color: var(--text-dark); padding: 5rem 1rem;">
-            Submit the job simulation on the left to review module loads, job submission queue, post-execution check triggers, and advisory receipts.
-          </div>
-        </div>
-      </div>
-    </div>
-
-    <!-- Tab 4: Validation Lifecycle -->
-    <div id="flowchart" class="tab-pane">
-      <div class="glass-card">
-        <div class="card-title">
-          <svg aria-hidden="true" viewBox="0 0 24 24"><title>Icon</title><path d="M13 10V3L4 14h7v7l9-11h-7z"/></svg>
-          HPC Validation Contract Workflow
-        </div>
-        <div class="flowchart-container">
-          <p style="margin-bottom:1.5rem; font-size:0.925rem; color:var(--text-muted);">
-            Scientific validations execute in four distinct stages. The Slurm/MPI queue manager submits jobs to execute the simulations. Post-run modules are loaded to run validation commands and check tolerances. The validation results generate advisory receipts while checkpoint policies preserve state. Finally, the artifacts and logs are transferred via <strong>Globus endpoints</strong> to high-performance facilities like <strong>Argonne ALCF</strong>.
-          </p>
-          <svg aria-hidden="true" width="850" height="420" viewBox="0 0 850 420" style="background:#020408; border-radius:10px;"><title>Icon</title>
-            <defs>
-              <marker id="arrow" viewBox="0 0 10 10" refX="5" refY="5" markerWidth="6" markerHeight="6" orient="auto-start-reverse">
-                <path d="M 0 0 L 10 5 L 0 10 z" fill="#00f0ff" />
-              </marker>
-              <filter id="glow-cyan" x="-20%" y="-20%" width="140%" height="140%">
-                <feGaussianBlur stdDeviation="4" result="blur" />
-                <feComposite in="SourceGraphic" in2="blur" operator="over" />
-              </filter>
-            </defs>
-
-            <!-- Grid background -->
-            <path d="M 0 0 L 850 0 M 0 40 L 850 40 M 0 80 L 850 80 M 0 120 L 850 120 M 0 160 L 850 160 M 0 200 L 850 200 M 0 240 L 850 240 M 0 280 L 850 280 M 0 320 L 850 320 M 0 360 L 850 360 M 0 400 L 850 400" stroke="rgba(255,255,255,0.02)" stroke-width="1" />
-            <path d="M 0 0 L 0 420 M 50 0 L 50 420 M 100 0 L 100 420 M 150 0 L 150 420 M 200 0 L 200 420 M 250 0 L 250 420 M 300 0 L 300 420 M 350 0 L 350 420 M 400 0 L 400 420 M 450 0 L 450 420 M 500 0 L 500 420 M 550 0 L 550 420 M 600 0 L 600 420 M 650 0 L 650 420 M 700 0 L 700 420 M 750 0 L 750 420 M 800 0 L 800 420" stroke="rgba(255,255,255,0.02)" stroke-width="1" />
-
-            <!-- STAGE 1: SUBMIT -->
-            <g transform="translate(10, 40)">
-              <rect x="10" y="20" width="160" height="280" rx="8" fill="rgba(255,255,255,0.01)" stroke="rgba(255,255,255,0.05)" />
-              <text x="90" y="45" fill="var(--text-dark)" font-size="11" font-weight="700" text-anchor="middle" letter-spacing="1">1. JOB QUEUE</text>
-
-              <rect x="25" y="80" width="130" height="60" rx="6" fill="#111827" stroke="rgba(255,255,255,0.1)" />
-              <text x="90" y="105" fill="#fff" font-size="11" font-weight="600" text-anchor="middle">sbatch Submission</text>
-              <text x="90" y="123" fill="var(--text-muted)" font-size="9" text-anchor="middle">Slurm / MPI run launcher</text>
-
-              <rect x="25" y="180" width="130" height="60" rx="6" fill="#111827" stroke="rgba(255,255,255,0.1)" />
-              <text x="90" y="205" fill="#fff" font-size="11" font-weight="600" text-anchor="middle">Simulation Exec</text>
-              <text x="90" y="223" fill="var(--text-muted)" font-size="9" text-anchor="middle">Writes NetCDF output</text>
-            </g>
-
-            <!-- STAGE 2: POST RUN CONTRACT VALIDATOR -->
-            <g transform="translate(200, 40)">
-              <rect x="10" y="20" width="200" height="280" rx="8" fill="rgba(0, 240, 255, 0.03)" stroke="var(--color-cyan)" stroke-width="1.5" filter="url(#glow-cyan)" />
-              <text x="110" y="45" fill="var(--color-cyan)" font-size="12" font-weight="700" text-anchor="middle" letter-spacing="1">2. POST-RUN AUDIT</text>
-
-              <!-- module load -->
-              <rect x="25" y="80" width="170" height="50" rx="6" fill="#111827" stroke="rgba(255,255,255,0.1)" />
-              <text x="110" y="105" fill="#fff" font-size="11" text-anchor="middle">Module Loading</text>
-              <text x="110" y="120" fill="var(--text-muted)" font-size="9" text-anchor="middle">Loads intel, MPI, netCDF-c</text>
-
-              <!-- checks -->
-              <rect x="25" y="170" width="170" height="60" rx="6" fill="#111827" stroke="rgba(255,255,255,0.1)" />
-              <text x="110" y="195" fill="#fff" font-size="11" text-anchor="middle">Numerical Checkers</text>
-              <text x="110" y="213" fill="var(--text-muted)" font-size="9" text-anchor="middle">Relative/Absolute tolerances</text>
-            </g>
-
-            <!-- STAGE 3: RECEIPT -->
-            <g transform="translate(430, 40)">
-              <rect x="10" y="20" width="180" height="280" rx="8" fill="rgba(255,255,255,0.01)" stroke="rgba(255,255,255,0.05)" />
-              <text x="100" y="45" fill="var(--text-dark)" font-size="11" font-weight="700" text-anchor="middle" letter-spacing="1">3. RECEIPT</text>
-
-              <rect x="25" y="80" width="150" height="60" rx="6" fill="rgba(16, 185, 129, 0.05)" stroke="var(--color-emerald)" stroke-width="1" />
-              <text x="100" y="105" fill="var(--color-emerald)" font-size="11" font-weight="700" text-anchor="middle">Advisory Receipt</text>
-              <text x="100" y="123" fill="var(--text-muted)" font-size="9" text-anchor="middle">Validates dimensions & grid</text>
-
-              <!-- Preserve Checkpoint -->
-              <rect x="25" y="170" width="150" height="60" rx="6" fill="rgba(189, 0, 255, 0.05)" stroke="var(--color-purple)" stroke-width="1" />
-              <text x="100" y="195" fill="var(--color-purple)" font-size="11" font-weight="700" text-anchor="middle">Safe Checkpoint</text>
-              <text x="100" y="213" fill="var(--text-muted)" font-size="9" text-anchor="middle">Preserves state from cleanups</text>
-            </g>
-
-            <!-- STAGE 4: ARCHIVE & PROVENANCE -->
-            <g transform="translate(640, 40)">
-              <rect x="10" y="20" width="180" height="280" rx="8" fill="rgba(255,255,255,0.01)" stroke="rgba(255,255,255,0.05)" />
-              <text x="100" y="45" fill="var(--text-dark)" font-size="11" font-weight="700" text-anchor="middle" letter-spacing="1">4. ARCHIVE</text>
-
-              <rect x="25" y="80" width="150" height="60" rx="6" fill="#111827" stroke="rgba(255,255,255,0.1)" />
-              <text x="100" y="105" fill="#fff" font-size="11" font-weight="600" text-anchor="middle">Globus Transfer</text>
-              <text x="100" y="123" fill="var(--text-muted)" font-size="9" text-anchor="middle">Secure cluster endpoints</text>
-
-              <rect x="25" y="170" width="150" height="60" rx="6" fill="#111827" stroke="rgba(255,255,255,0.1)" />
-              <text x="100" y="195" fill="#fff" font-size="11" font-weight="600" text-anchor="middle">ALCF Catalog</text>
-              <text x="100" y="213" fill="var(--text-muted)" font-size="9" text-anchor="middle">Science model provenance</text>
-            </g>
-
-            <!-- Connections -->
-            <path d="M 180 140 L 210 140" stroke="#00f0ff" stroke-width="1.5" marker-end="url(#arrow)" fill="none" />
-            <path d="M 410 140 L 440 140" stroke="#00f0ff" stroke-width="1.5" marker-end="url(#arrow)" fill="none" />
-            <path d="M 620 140 L 650 140" stroke="#00f0ff" stroke-width="1.5" marker-end="url(#arrow)" fill="none" />
-          </svg>
-        </div>
-      </div>
-    </div>
-  </div>
-
-  <script>
-    function _switchTab(tabId) {
-      document.querySelectorAll('.tab-pane').forEach(el => { el.classList.remove('active'); });
-      document.querySelectorAll('.tab-btn').forEach(el => { el.classList.remove('active'); });
-
-      document.getElementById(tabId).classList.add('active');
-      event.currentTarget.classList.add('active');
-    }
-
-    // Tolerance calculator
-    function calculateTolerance() {
-      const ref = parseFloat(document.getElementById('tol-ref').value) || 0;
-      const val = parseFloat(document.getElementById('tol-val').value) || 0;
-      const type = document.getElementById('tol-type').value;
-      const threshStr = document.getElementById('tol-threshold').value;
-      const threshold = parseFloat(threshStr) || 0;
-
-      let delta = 0;
-      let pass = false;
-
-      if (type === 'relative') {
-        delta = Math.abs(val - ref) / Math.abs(ref);
-        pass = delta <= threshold;
-      } else if (type === 'absolute') {
-        delta = Math.abs(val - ref);
-        pass = delta <= threshold;
-      } else if (type === 'ulp') {
-        // Mock ULP calculation for standard JS float64 difference representation steps
-        const view = new DataView(new ArrayBuffer(8));
-        view.setFloat64(0, ref);
-        const refInt = view.getBigUint64(0);
-        view.setFloat64(0, val);
-        const valInt = view.getBigUint64(0);
-
-        // Compute integer steps
-        const steps = Number(valInt > refInt ? valInt - refInt : refInt - valInt);
-        delta = steps;
-        pass = steps <= threshold;
-      }
-
-      const banner = document.getElementById('tol-banner');
-      const deltaEl = document.getElementById('tol-calc-delta');
-      const threshEl = document.getElementById('tol-calc-thresh');
-
-      deltaEl.textContent = delta.toExponential(6);
-      threshEl.textContent = threshold.toExponential(6);
-
-      if (pass) {
-        banner.className = 'status-panel success';
-        banner.textContent = 'Tolerance Check: PASSED. Candidate output falls within mathematical bounds.';
-      } else {
-        banner.className = 'status-panel error';
-        banner.textContent = 'Tolerance Check: FAILED. High deviation detected. Potential regression or crash.';
-      }
-    }
-
-    function _updateFormulaText() {
-      const type = document.getElementById('tol-type').value;
-      const display = document.getElementById('formula-display');
-      const thresholdInput = document.getElementById('tol-threshold');
-
-      if (type === 'relative') {
-        display.innerHTML = '|val - ref| / |ref| &le; threshold';
-        thresholdInput.value = '1e-6';
-      } else if (type === 'absolute') {
-        display.innerHTML = '|val - ref| &le; threshold';
-        thresholdInput.value = '1e-9';
-      } else if (type === 'ulp') {
-        display.innerHTML = 'StepsBetween(val, ref) &le; ULP_steps';
-        thresholdInput.value = '4';
-      }
-    }
-
-    // YAML Validation
-    const validSample = `version: 1
-task: "Regenerate the regional climate output and confirm grid metadata."
+    <div class="page-layout-grid reference-layout">
+      <aside class="sidebar reference-sidebar" aria-label="On this page">
+        <nav class="toc-container">
+          <p class="toc-title">On this page</p>
+          <a class="sidebar-source" href="https://github.com/iowarp/clio-coder/blob/main/docs/process/scientific-validation.md">Canonical Markdown<br>docs/process/scientific-validation.md</a>
+          <ul class="toc-list"></ul>
+        </nav>
+      </aside>
+      <main class="reference-main" id="reference-content">
+        <article class="reference-prose glass-card">
+<blockquote>
+<p><strong>Visual blueprint:</strong> The source checkout includes the complete
+<a href="validation_blueprint.html">Clio Coder Scientific Validation Contracts visual reference</a>.</p>
+</blockquote>
+<p>Scientific software development cannot treat simple file presence as proof of correctness. A simulation script that crashes on rank 48, or writes out NetCDF arrays filled with <code>NaN</code>s, may still successfully write a file to the disk. </p>
+<p>Clio Coder recognizes <strong>scientific validation contract files</strong> as an opt-in signal for a higher evidence bar. Currently, the session rigor resolver does not parse or enforce a scientific contract schema. The presence of <code>.clio-coder/validation.yaml</code>, <code>.clio-coder/validation.yml</code>, <code>validation.yaml</code>, <code>validation.yml</code>, or <code>VALIDATION.md</code> at the workspace root raises the default rigor level to <code>high</code>; the file contents are advisory material for developers, project agents, and external validators.</p>
+<p>This advisory convention is separate from the executable project verifier catalog at <code>.clio-coder/verifiers.yaml</code>. The verifier catalog has a strict version-1 schema and admits exact argv vectors to the <code>verify</code> tool. Scientific validation contracts and handbook expectations do not grant command authority: prose such as <code>validators: [&quot;python tools/check_grid.py&quot;]</code> remains guidance until the project owner confirms the equivalent argv, cwd, timeout, and tags in <code>verifiers.yaml</code>. The executable catalog does not interpret numerical tolerances or artifact expectations; it only runs the explicitly declared process vector through safe-exec.</p>
+<p><code>clio-coder verifiers author</code> can inspect top-level <code>validators</code> entries in the YAML contract filenames above and propose catalog checks. It labels those vectors as project-declared and shows their source index, exact argv, cwd, timeout, tags, catalog path, and resulting execution authority. This inspection is read-only. A command string with sound quoting and no shell operator can be represented as argv for review; shell expansion, pipes, redirection, environment assignments, incomplete quoting, and Markdown prose receive a manual JSON-argv diagnostic. Nothing becomes executable and nothing is dry-run until the operator confirms the catalog write with <code>--yes</code>.</p>
+<p>The convention below is a recommended shape for scientific projects that need to document expected dimensions, attributes, numerical tolerances, scheduler context, and verification commands for scientific artifacts. Developed at the <a href="https://grc.iit.edu">Gnosis Research Center (GRC)</a> at Illinois Tech as part of the NSF-funded scientific-software context (NSF Award <a href="https://www.nsf.gov/awardsearch/showAward?AWD_ID=2411318">#2411318</a>), this convention links execution metadata with physical output checks without claiming that the current harness executes those checks automatically.</p>
+<hr>
+<h2>Validation Contract Convention</h2>
+<p>A validation contract can be stored as YAML or Markdown. A custom or project-level agent (such as a local <code>scientific-validator</code> agent example under <code>.clio-coder/agents/</code>) or the developer can draft these files and commit them next to the research code. Clio core currently checks only for the documented filenames at the workspace root.</p>
+<h3>Example netCDF / Slurm validation contract:</h3>
+<pre><code class="language-yaml">version: 1
+task: &quot;Regenerate the regional climate output and confirm grid metadata.&quot;
 runtime:
   kind: slurm
   nodes: 4
   ranks: 64
-  walltime: "01:30:00"
+  walltime: &quot;01:30:00&quot;
   modules:
-    - "intel/2024"
-    - "openmpi/5.0"
-    - "netcdf-c/4.9"
+    - &quot;intel/2024&quot;
+    - &quot;openmpi/5.0&quot;
+    - &quot;netcdf-c/4.9&quot;
 artifacts:
   - path: out/region_west.nc
     format: NetCDF
@@ -808,154 +75,111 @@ artifacts:
       lat: 360
       lon: 720
     expected_attributes:
-      Conventions: "CF-1.10"
+      Conventions: &quot;CF-1.10&quot;
     numerical_tolerances:
       relative: 1.0e-6
     preserve: false
+  - path: ckpt/run-0042.chk
+    format: Checkpoint files
+    preserve: true
 validators:
-  - "ncdump -h out/region_west.nc"
-  - "python tools/check_grid.py out/region_west.nc"`;
-
-    const invalidSample = `version: "abc" # Error: must be 1
-task: "Missing artifacts list"
-runtime:
-  kind: slurm
-artifacts: [] # Error: must be non-empty list`;
-
-    function loadSampleYaml(type) {
-      if (type === 'valid') {
-        document.getElementById('raw-yaml').value = validSample;
-      } else {
-        document.getElementById('raw-yaml').value = invalidSample;
-      }
-      validateYaml();
-    }
-
-    function validateYaml() {
-      const text = document.getElementById('raw-yaml').value;
-      const statusPanel = document.getElementById('validator-status');
-      const propertiesList = document.getElementById('contract-properties');
-      propertiesList.innerHTML = '';
-
-      if (!text.trim()) {
-        statusPanel.className = 'status-panel warning';
-        statusPanel.textContent = 'Contract is empty. Write or load a sample YAML.';
-        return;
-      }
-
-      try {
-        const lines = text.split('\n');
-        const errors = [];
-        let version = null;
-        let artifactCount = 0;
-        let modulesCount = 0;
-
-        lines.forEach((line, idx) => {
-          const trimmed = line.trim();
-          if (trimmed.startsWith('#') || !trimmed) return;
-
-          const parts = trimmed.split(':');
-          if (parts.length >= 2) {
-            const key = parts[0].trim();
-            const val = parts[1].split('#')[0].trim();
-
-            if (key === 'version') {
-              version = val;
-              if (val !== '1') {
-                errors.push(`Line ${idx+1}: Contract schema version must be exactly 1`);
-              }
-            }
-            if (trimmed.startsWith('- path:')) {
-              artifactCount++;
-            }
-            if (trimmed.startsWith('- "intel') || trimmed.startsWith('- "openmpi') || trimmed.startsWith('- "netcdf')) {
-              modulesCount++;
-            }
-          }
-        });
-
-        if (errors.length > 0) {
-          statusPanel.className = 'status-panel error';
-          statusPanel.innerHTML = `<strong>Contract Schema Failures:</strong><ul style="margin-left: 1.5rem; margin-top:0.5rem;">${errors.map(e => `<li>${e}</li>`).join('')}</ul>`;
-        } else {
-          statusPanel.className = 'status-panel success';
-          statusPanel.innerHTML = `<strong>Success:</strong> Scientific Validation Contract is valid. Ready to be saved alongside research code.`;
-
-          addPropertyBadge('Contract Version', version || '1', 'cyan');
-          addPropertyBadge('Validated Artifacts', artifactCount || '1', 'purple');
-          addPropertyBadge('Cluster Modules', modulesCount || '3', 'emerald');
-        }
-      } catch (err) {
-        statusPanel.className = 'status-panel error';
-        statusPanel.textContent = `Parse Error: ${err.message}`;
-      }
-    }
-
-    function addPropertyBadge(label, val, color) {
-      const container = document.getElementById('contract-properties');
-      const item = document.createElement('div');
-      item.className = 'meta-badge';
-      item.style.borderLeft = `3px solid var(--color-${color})`;
-      item.innerHTML = `<span class="label">${label}:</span> <span class="value" style="color:var(--color-${color})">${val}</span>`;
-      container.appendChild(item);
-    }
-
-    // HPC Run Simulator
-    function _simulateHpcRun() {
-      document.getElementById('hpc-placeholder').style.display = 'none';
-      document.getElementById('hpc-details').style.display = 'block';
-      const banner = document.getElementById('hpc-banner');
-      banner.style.display = 'flex';
-
-      const kind = document.getElementById('hpc-kind').value;
-      const nodes = document.getElementById('hpc-nodes').value;
-      const ranks = document.getElementById('hpc-ranks').value;
-      const path = document.getElementById('hpc-path').value;
-      const preserve = document.getElementById('hpc-preserve').checked;
-      const modules = document.getElementById('hpc-modules').value.split('\n').filter(m => m.trim());
-
-      const logs = [];
-      logs.push(`[info] [scientific-executor] Parsing validation contract...`);
-      logs.push(`[info] Target environment declared: nodes=${nodes}, ranks=${ranks}, runtime=${kind}`);
-
-      modules.forEach(m => {
-        logs.push(`[info] [module-manager] Loading dependency module: ${m}`);
-      });
-
-      logs.push(`\n[sbatch-agent] Submitting simulation script to cluster queue...`);
-      logs.push(`[sbatch-agent] Job submitted successfully. Assigned ID: SBATCH-48195`);
-      logs.push(`[sbatch-agent] Job status: PENDING -> RUNNING`);
-
-      logs.push(`\n[cluster-node] Execution started on ranks [0..${ranks-1}]`);
-      logs.push(`[cluster-node] Simulation output written to filesystem.`);
-      logs.push(`[sbatch-agent] Job completed with exit status 0 (Success).`);
-
-      logs.push(`\n[scientific-executor] Commencing post-execution validation...`);
-      logs.push(`[info] Validating artifact at path: "${path}"`);
-      logs.push(`[info] format netCDF: checking coordinates dimensions (time: 8760, lat: 360, lon: 720)`);
-      logs.push(`[success] Dimensions match expectations.`);
-      logs.push(`[info] Running validator: "python tools/check_grid.py ${path}"`);
-      logs.push(`[success] check_grid.py completed successfully. Grid metadata matches CF-1.10 Conventions.`);
-
-      if (preserve) {
-        logs.push(`[safeguard] Checked 'preserve: true'. Output file registered in session state. Hard cleanups will protect this path.`);
-        document.getElementById('res-preserve').textContent = 'PRESERVED (Stateful)';
-        document.getElementById('res-preserve').style.color = '#bd00ff';
-      } else {
-        logs.push(`[safeguard] Checked 'preserve: false'. Temp/restart files eligible for standard session cleanups.`);
-        document.getElementById('res-preserve').textContent = 'ELIGIBLE FOR CLEANUP';
-        document.getElementById('res-preserve').style.color = 'var(--text-muted)';
-      }
-
-      logs.push(`[success] validation run finished. Advisory receipt created.`);
-
-      document.getElementById('hpc-log').textContent = logs.join('\n');
-    }
-
-    window.onload = () => {
-      calculateTolerance();
-      loadSampleYaml('valid');
-    }
-  </script>
+  - &quot;ncdump -h out/region_west.nc&quot;
+  - &quot;python tools/check_grid.py out/region_west.nc&quot;
+notes: |
+  The run is submitted with sbatch; queue exit status is not a completion check.
+  Re-run check_grid.py after job completion is observed.
+</code></pre>
+<p>The <code>validators</code> values above are intentionally advisory shell-like prose. Preview the exact catalog proposal with <code>clio-coder verifiers author</code>, or declare the Python validator manually without granting free-form shell interpretation:</p>
+<pre><code class="language-yaml"># .clio-coder/verifiers.yaml
+version: 1
+checks:
+  - id: validate-grid
+    description: Validate the generated regional grid
+    command: [python, tools/check_grid.py, out/region_west.nc]
+    cwd: .
+    timeoutMs: 120000
+    tags: [scientific, netcdf]
+</code></pre>
+<h3>Suggested Fields:</h3>
+<ol>
+<li><strong><code>version</code>:</strong> Set to <code>1</code> for project-local compatibility.</li>
+<li><strong><code>runtime.kind</code>:</strong> Document execution mode (<code>local</code>, <code>slurm</code>, <code>mpi</code>, or <code>other</code>).</li>
+<li><strong><code>artifacts</code>:</strong> List output files or directories the validation plan should inspect.</li>
+<li><strong><code>preserve</code>:</strong> Project convention for artifacts that should not be deleted by cleanup workflows. Clio&#39;s built-in protected-artifact guard is separate and is driven by live <code>protect_path</code> effects, not by this YAML field.</li>
+<li><strong><code>validators</code>:</strong> List shell commands or scripts a verifier should run to validate the generated files.</li>
+</ol>
+<hr>
+<h2>Numerical Tolerances</h2>
+<p>Comparing floating-point values in scientific computations must accommodate round-offs, hardware differences, and compiler optimizations. Project validators can document any tolerance vocabulary they enforce. A common convention is:</p>
+<table>
+<thead>
+<tr>
+<th align="left">Tolerance Type</th>
+<th align="left">Formula / Check</th>
+<th align="left">Purpose</th>
+</tr>
+</thead>
+<tbody><tr>
+<td align="left"><strong><code>relative</code></strong></td>
+<td align="left">$\frac{</td>
+<td align="left">val - ref</td>
+</tr>
+<tr>
+<td align="left"><strong><code>absolute</code></strong></td>
+<td align="left">$</td>
+<td align="left">val - ref</td>
+</tr>
+<tr>
+<td align="left"><strong><code>ulp</code></strong></td>
+<td align="left">$StepsBetween(val, ref) \le ulp$</td>
+<td align="left">Unit in the Last Place. Measures floating-point representation steps.</td>
+</tr>
+</tbody></table>
+<blockquote>
+<p>[!NOTE]
+Clio core does not currently execute tolerance comparisons and does not apply a default numerical tolerance. Put defaults directly in project validators or contract text.</p>
+</blockquote>
+<hr>
+<h2>Common Scientific Artifact Families</h2>
+<p>The following labels are useful project conventions for validation contracts and reports. They are not a closed, core-enforced enum in the current source tree:</p>
+<ul>
+<li><strong><code>HDF5</code> / <code>NetCDF</code> / <code>Zarr</code>:</strong> Multi-dimensional scientific array files.</li>
+<li><strong><code>FITS</code>:</strong> Flexible Image Transport System (used in astrophysics).</li>
+<li><strong><code>CSV</code> / <code>Parquet</code>:</strong> Structured tabular data and datasets.</li>
+<li><strong><code>VTK and ParaView</code>:</strong> Visualizations and mesh outputs.</li>
+<li><strong><code>Slurm job output</code>:</strong> Standard logs emitted by Slurm queue managers.</li>
+<li><strong><code>MPI rank-sensitive tests</code>:</strong> Diagnostic outputs matching multi-rank jobs.</li>
+<li><strong><code>Checkpoint files</code> / <code>Simulation restart artifacts</code>:</strong> Stateful binary dumps.</li>
+<li><strong><code>Plots and generated figures</code>:</strong> Output graphics (verified via path + checksum metadata).</li>
+</ul>
+<h2>HPC Schedulers and Validation Lifecycle</h2>
+<p>Scheduler-driven runs require distinct validation handling compared to local unit tests:</p>
+<ul>
+<li><strong>Queue status is not validation</strong>: Checking if a Slurm command like <code>sbatch</code> exits successfully only proves that the Slurm scheduler accepted the job script. A good contract tells the verifier how to check actual simulation artifacts inside <code>out/</code> or <code>ckpt/</code> after job completion.</li>
+<li><strong>Environment module loading</strong>: The <code>runtime.modules</code> array can document the exact software stack dependencies (such as <code>intel/2024</code>, <code>openmpi/5.0</code>) that must be loaded before running the validators.</li>
+<li><strong>HPC and Data Integration</strong>: For large-scale allocations such as those at the Argonne Leadership Computing Facility (ALCF), projects can archive verification logs through their own storage or data-transfer workflow. Clio core does not manage Globus transfers.</li>
+<li><strong>Validator execution</strong>: In the current alpha version, contract validation is advisory. Quality/verification agents (such as the base <code>verifier</code> agent or custom project-level agents) read the contract to guide developers and write out verification receipts. Automated in-harness contract execution is not implemented yet.</li>
+</ul>
+<h3>How a Validation Contract Raises Session Rigor</h3>
+<p>Clio Coder integrates scientific validation contracts directly into its safety model to raise the evidence standard automatically:</p>
+<ul>
+<li><strong>Automatic Escalation</strong>: At startup, Clio scans the workspace root. The presence of any validation contract (e.g. <code>.clio-coder/validation.yaml</code>, <code>.clio-coder/validation.yml</code>, <code>validation.yaml</code>, <code>validation.yml</code>, or <code>VALIDATION.md</code>) automatically escalates the session&#39;s rigor level from <code>normal</code> to <code>high</code>.</li>
+<li><strong>High-Rigor Gate Requirements</strong>: Once the rigor is raised to <code>high</code>, the finish gate is active. It engages on a settled <code>turn_end</code> only when the recent window contains successful workspace mutation evidence and no validation evidence or explicit limitation. The window is entries since the last user message, capped at 80 entries:<ul>
+<li>Clio issues a <code>request_continuation</code> middleware effect to keep the session running.</li>
+<li>Clio injects a dynamic warning reminder (<code>HIGH_RIGOR_REVALIDATION_MESSAGE</code>) instructing the agent to run a verification command or to declare a limitation before it can conclude the turn.</li>
+</ul>
+</li>
+</ul>
+        </article>
+        <nav class="related-nav" aria-label="Adjacent references">
+          <a class="nav-link-card" href="performance_methodology_blueprint.html"><span class="nav-label">Previous</span><span class="nav-title">Performance Measurement Methodology</span></a>
+          <a class="nav-link-card next" href="config_knobs_audit_blueprint.html"><span class="nav-label">Next</span><span class="nav-title">Config Knobs Audit (Historical Appendix)</span></a>
+        </nav>
+        <p class="reference-footer-note">Canonical content lives in the mapped Markdown page. This visual counterpart adds navigation without changing the contract.</p>
+      </main>
+    </div>
+    <footer>Clio Coder documentation · source-aligned at v0.4.2</footer>
+  </div>
+  <script src="shared.js"></script>
 </body>
 </html>

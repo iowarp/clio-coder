@@ -1,850 +1,453 @@
-<!DOCTYPE html>
+<!doctype html>
 <html lang="en">
 <head>
-  <meta charset="UTF-8">
-  <meta name="viewport" content="width=device-width, initial-scale=1.0">
-  <title>Clio Coder Architecture Blueprint (v0.4.0)</title>
-
-  <style>
-    :root {
-      --bg-dark: #090d16;
-      --bg-grid: rgba(255, 255, 255, 0.02);
-      --bg-card: rgba(13, 20, 38, 0.45);
-      --bg-card-hover: rgba(20, 30, 58, 0.6);
-      --border-card: rgba(255, 255, 255, 0.08);
-      --border-card-hover: rgba(0, 240, 255, 0.3);
-      --text-main: #f3f4f6;
-      --text-muted: #9ca3af;
-      --text-dim: #6b7280;
-
-      --color-cyan: #00f0ff;
-      --color-cyan-rgb: 0, 240, 255;
-      --color-purple: #bd00ff;
-      --color-purple-rgb: 189, 0, 255;
-      --color-emerald: #10b981;
-      --color-emerald-rgb: 16, 185, 129;
-      --color-amber: #f59e0b;
-      --color-amber-rgb: 245, 158, 11;
-      --color-rose: #ef4444;
-      --color-rose-rgb: 239, 68, 68;
-
-      --gradient-main: linear-gradient(135deg, var(--color-cyan), var(--color-purple));
-      --shadow-glow: 0 0 25px rgba(0, 240, 255, 0.15);
-      --font-sans: "Segoe UI", -apple-system, BlinkMacSystemFont, Roboto, "Helvetica Neue", Arial, sans-serif;
-      --font-mono: "SFMono-Regular", Consolas, "Liberation Mono", Menlo, monospace;
-
-      --glass-blur: blur(12px);
-    }
-
-    * {
-      box-sizing: border-box;
-      margin: 0;
-      padding: 0;
-    }
-
-    body {
-      background-color: var(--bg-dark);
-      background-image:
-        radial-gradient(circle at 10% 20%, rgba(var(--color-cyan-rgb), 0.05) 0%, transparent 40%),
-        radial-gradient(circle at 90% 80%, rgba(var(--color-purple-rgb), 0.05) 0%, transparent 40%),
-        radial-gradient(circle at 50% 50%, #0d1527 0%, var(--bg-dark) 100%);
-      color: var(--text-main);
-      font-family: var(--font-sans);
-      min-height: 100vh;
-      line-height: 1.6;
-      overflow-x: hidden;
-      position: relative;
-    }
-
-    body::before {
-      content: '';
-      position: absolute;
-      inset: 0;
-      background-image: linear-gradient(var(--bg-grid) 1px, transparent 1px),
-                        linear-gradient(90deg, var(--bg-grid) 1px, transparent 1px);
-      background-size: 40px 40px;
-      background-position: center top;
-      pointer-events: none;
-      z-index: 0;
-      opacity: 0.8;
-    }
-
-    .container {
-      max-width: 1400px;
-      margin: 0 auto;
-      padding: 2rem;
-      position: relative;
-      z-index: 1;
-    }
-
-    /* Header Styling */
-    header {
-      display: flex;
-      justify-content: space-between;
-      align-items: center;
-      margin-bottom: 2.5rem;
-      padding-bottom: 1.5rem;
-      border-bottom: 1px solid rgba(255, 255, 255, 0.05);
-    }
-
-    .header-left {
-      display: flex;
-      align-items: center;
-      gap: 1rem;
-    }
-
-    .header-logo {
-      display: inline-flex;
-      align-items: center;
-      justify-content: center;
-      width: 48px;
-      height: 48px;
-      background: rgba(255, 255, 255, 0.02);
-      border: 1px solid var(--border-card);
-      border-radius: 12px;
-    }
-
-    .header-logo svg {
-      width: 28px;
-      height: 28px;
-    }
-
-    .header-title-wrapper h1 {
-      font-size: 1.5rem;
-      font-weight: 800;
-      letter-spacing: -0.03em;
-      background: linear-gradient(to right, #ffffff, #c7d2fe, var(--color-cyan));
-      -webkit-background-clip: text;
-      -webkit-text-fill-color: transparent;
-    }
-
-    .header-title-wrapper p {
-      font-size: 0.825rem;
-      color: var(--text-muted);
-    }
-
-    .header-right {
-      display: flex;
-      align-items: center;
-      gap: 1rem;
-    }
-
-    .back-btn {
-      background: rgba(255, 255, 255, 0.03);
-      border: 1px solid var(--border-card);
-      color: var(--text-muted);
-      padding: 0.5rem 1rem;
-      border-radius: 8px;
-      font-size: 0.875rem;
-      font-weight: 600;
-      text-decoration: none;
-      display: inline-flex;
-      align-items: center;
-      gap: 0.5rem;
-      transition: all 0.2s;
-    }
-
-    .back-btn:hover {
-      background: rgba(255, 255, 255, 0.08);
-      color: var(--text-main);
-      border-color: rgba(var(--color-cyan-rgb), 0.3);
-    }
-
-    .version-badge {
-      background: rgba(0, 240, 255, 0.08);
-      border: 1px solid rgba(0, 240, 255, 0.25);
-      color: var(--color-cyan);
-      padding: 0.35rem 0.75rem;
-      border-radius: 50px;
-      font-size: 0.75rem;
-      font-weight: 600;
-      font-family: var(--font-mono);
-    }
-
-    /* Tabs Navigation */
-    .tabs-nav {
-      display: flex;
-      gap: 0.75rem;
-      margin-bottom: 2rem;
-    }
-
-    .tab-btn {
-      background: rgba(255, 255, 255, 0.03);
-      border: 1px solid var(--border-card);
-      color: var(--text-muted);
-      padding: 0.6rem 1.25rem;
-      border-radius: 8px;
-      font-size: 0.875rem;
-      font-weight: 600;
-      cursor: pointer;
-      display: flex;
-      align-items: center;
-      gap: 0.5rem;
-      transition: all 0.2s;
-    }
-
-    .tab-btn:hover {
-      background: rgba(255, 255, 255, 0.06);
-      color: var(--text-main);
-    }
-
-    .tab-btn.active {
-      background: var(--gradient-main);
-      color: #090d16;
-      border-color: transparent;
-      box-shadow: 0 4px 15px rgba(var(--color-cyan-rgb), 0.25);
-    }
-
-    /* Content Layout */
-    .tab-pane {
-      display: none;
-      animation: fadeIn 0.3s ease-out forwards;
-    }
-
-    .tab-pane.active {
-      display: block;
-    }
-
-    @keyframes fadeIn {
-      from { opacity: 0; transform: translateY(8px); }
-      to { opacity: 1; transform: translateY(0); }
-    }
-
-    /* Layout divisions */
-    .blueprint-layout {
-      display: grid;
-      grid-template-columns: 1fr 1fr;
-      gap: 2rem;
-      align-items: start;
-    }
-
-    @media (max-width: 1100px) {
-      .blueprint-layout {
-        grid-template-columns: 1fr;
-      }
-    }
-
-    .glass-card {
-      background: var(--bg-card);
-      border: 1px solid var(--border-card);
-      border-radius: 16px;
-      padding: 1.75rem;
-      margin-bottom: 2rem;
-      backdrop-filter: var(--glass-blur);
-      box-shadow: 0 8px 32px 0 rgba(0, 0, 0, 0.3);
-    }
-
-    .glass-card h2 {
-      font-size: 1.25rem;
-      font-weight: 700;
-      color: #ffffff;
-      margin-bottom: 1.25rem;
-      display: flex;
-      align-items: center;
-      gap: 0.5rem;
-      border-bottom: 1px solid rgba(255, 255, 255, 0.05);
-      padding-bottom: 0.75rem;
-    }
-
-    .glass-card h2 svg {
-      width: 18px;
-      height: 18px;
-      color: var(--color-cyan);
-    }
-
-    .glass-card p {
-      font-size: 0.925rem;
-      color: var(--text-muted);
-      margin-bottom: 1rem;
-    }
-
-    /* Interactive Directory Tree */
-    .tree-wrapper {
-      background: rgba(9, 13, 22, 0.6);
-      border: 1px solid var(--border-card);
-      border-radius: 8px;
-      padding: 1rem;
-      font-family: var(--font-mono);
-      font-size: 0.875rem;
-      height: 280px;
-      overflow-y: auto;
-    }
-
-    .tree-node {
-      margin-left: 1.5rem;
-      cursor: pointer;
-      padding: 0.15rem 0.35rem;
-      border-radius: 4px;
-      display: flex;
-      align-items: center;
-      gap: 0.4rem;
-      transition: background 0.15s;
-    }
-
-    .tree-node:hover {
-      background: rgba(255, 255, 255, 0.05);
-    }
-
-    .tree-node.selected {
-      background: rgba(0, 240, 255, 0.1);
-      border-left: 2px solid var(--color-cyan);
-      color: #fff;
-    }
-
-    .tree-node-icon {
-      color: var(--color-cyan);
-    }
-
-    /* Details Panel */
-    .details-panel {
-      min-height: 120px;
-      padding: 1rem;
-      border: 1px solid rgba(255, 255, 255, 0.05);
-      background: rgba(0,0,0,0.2);
-      border-radius: 8px;
-      margin-top: 1rem;
-    }
-
-    /* Form selectors */
-    .form-group {
-      margin-bottom: 1rem;
-    }
-
-    .form-group label {
-      display: block;
-      font-size: 0.8rem;
-      font-weight: 600;
-      color: var(--text-muted);
-      margin-bottom: 0.5rem;
-      text-transform: uppercase;
-      letter-spacing: 0.05em;
-    }
-
-    select {
-      width: 100%;
-      background: rgba(9, 13, 22, 0.7);
-      border: 1px solid var(--border-card);
-      border-radius: 8px;
-      padding: 0.65rem 0.85rem;
-      color: #fff;
-      font-family: var(--font-sans);
-      outline: none;
-    }
-
-    /* Invariants Checker result */
-    .verdict-badge {
-      border-radius: 6px;
-      padding: 0.75rem 1rem;
-      font-weight: 700;
-      margin-top: 1.25rem;
-      display: flex;
-      align-items: center;
-      gap: 0.5rem;
-      font-size: 0.9rem;
-    }
-
-    .verdict-badge.pass { background: rgba(16, 185, 129, 0.1); border: 1px solid rgba(16, 185, 129, 0.3); color: var(--color-emerald); }
-    .verdict-badge.fail { background: rgba(239, 68, 68, 0.1); border: 1px solid rgba(239, 68, 68, 0.3); color: var(--color-rose); }
-
-    /* SVG Flowchart */
-    .flow-interactive-svg {
-      width: 100%;
-      height: auto;
-      background: rgba(9, 13, 22, 0.5);
-      border: 1px solid var(--border-card);
-      border-radius: 12px;
-      padding: 1.5rem;
-    }
-
-    .flow-node {
-      cursor: pointer;
-      transition: fill 0.3s, stroke 0.3s;
-    }
-
-    .flow-node:hover rect {
-      fill: rgba(0, 240, 255, 0.15);
-      stroke: var(--color-cyan);
-    }
-
-    .flow-node.active rect {
-      fill: rgba(0, 240, 255, 0.25);
-      stroke: var(--color-cyan);
-      filter: drop-shadow(0 0 8px rgba(0, 240, 255, 0.3));
-    }
-
-    .flow-info-card {
-      margin-top: 1rem;
-      padding: 1rem;
-      background: rgba(0,0,0,0.3);
-      border: 1px solid var(--border-card);
-      border-radius: 8px;
-    }
-
-    /* Ref styling */
-    .ref-table {
-      width: 100%;
-      border-collapse: collapse;
-      margin: 1.5rem 0;
-      font-size: 0.9rem;
-    }
-
-    .ref-table th, .ref-table td {
-      padding: 0.65rem 0.85rem;
-      border: 1px solid var(--border-card);
-      text-align: left;
-    }
-
-    .ref-table th {
-      background: rgba(255,255,255,0.03);
-    }
-
-    pre {
-      background: rgba(0,0,0,0.3);
-      border: 1px solid var(--border-card);
-      border-radius: 8px;
-      padding: 1rem;
-      overflow-x: auto;
-      margin: 1rem 0;
-    }
-
-    code {
-      font-family: var(--font-mono);
-      font-size: 0.85rem;
-    }
-
-    /* Footer */
-    footer {
-      text-align: center;
-      margin-top: 4rem;
-      padding-top: 2rem;
-      border-top: 1px solid rgba(255, 255, 255, 0.05);
-      color: var(--text-dim);
-      font-size: 0.875rem;
-    }
-  </style>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <meta name="clio-markdown-source" content="docs/architecture/architecture.md">
+  <meta name="clio-docs-version" content="0.4.2">
+  <title>Clio Coder Architecture and Boundaries · Clio Coder 0.4.2</title>
+  <link rel="icon" href="data:,">
+  <link rel="stylesheet" href="shared.css">
 </head>
-<body>
+<body data-doc-category="architecture">
+  <div class="reading-progress" aria-hidden="true"></div>
+  <a class="skip-link" href="#reference-content">Skip to reference</a>
   <div class="container">
-    <header>
+    <header class="document-header" data-category="Architecture">
       <div class="header-left">
-        <div class="header-logo">
-          <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" style="color: var(--color-cyan);"><title>Icon</title>
-            <polygon points="12 2 2 7 12 12 22 7 12 2"></polygon>
-            <polyline points="2 17 12 22 22 17"></polyline>
-            <polyline points="2 12 12 17 22 12"></polyline>
+        <a class="header-logo" href="index.html" aria-label="Documentation index">
+          <svg viewBox="0 0 24 24" fill="none" aria-hidden="true">
+            <path d="M12 2 2 7l10 5 10-5-10-5Z" stroke="url(#clio-logo)" stroke-width="2" stroke-linejoin="round"/>
+            <path d="m2 12 10 5 10-5M2 17l10 5 10-5" stroke="url(#clio-logo)" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"/>
+            <defs><linearGradient id="clio-logo" x1="2" y1="2" x2="22" y2="22"><stop stop-color="#00d4db"/><stop offset="1" stop-color="#ff7e29"/></linearGradient></defs>
           </svg>
-        </div>
+        </a>
         <div class="header-title-wrapper">
-          <h1>Clio Coder Architecture &amp; Boundaries</h1>
-          <p>System codebase structure, boundary rules, and execution loops</p>
+          <p class="document-kicker">Architecture / canonical reference</p>
+          <h1>Clio Coder Architecture and Boundaries</h1>
+          <p class="document-path">docs/architecture/architecture.md</p>
         </div>
       </div>
       <div class="header-right">
-        <span class="version-badge">Clio Coder v0.4.0</span>
-        <a href="index.html" class="back-btn">
-          <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><title>Icon</title><line x1="19" y1="12" x2="5" y2="12"></line><polyline points="12 19 5 12 12 5"></polyline></svg>
-          Dashboard Hub
-        </a>
+        <a class="back-btn" href="index.html">← Index</a>
+        <span class="version-badge">v0.4.2</span>
       </div>
     </header>
-
-    <div class="tabs-nav">
-      <button type="button" class="tab-btn active" onclick="switchTab('interactive')">
-        <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><title>Icon</title><polyline points="22 12 18 12 15 21 9 3 6 12 2 12"></polyline></svg>
-        Interactive Boundaries Inspector
-      </button>
-      <button type="button" class="tab-btn" onclick="switchTab('reference')">
-        <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><title>Icon</title><path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z"></path><polyline points="14 2 14 8 20 8"></polyline><line x1="16" y1="13" x2="8" y2="13"></line><line x1="16" y1="17" x2="8" y2="17"></line><polyline points="10 9 9 9 8 9"></polyline></svg>
-        Full Technical Reference
-      </button>
+    <div class="page-layout-grid reference-layout">
+      <aside class="sidebar reference-sidebar" aria-label="On this page">
+        <nav class="toc-container">
+          <p class="toc-title">On this page</p>
+          <a class="sidebar-source" href="https://github.com/iowarp/clio-coder/blob/main/docs/architecture/architecture.md">Canonical Markdown<br>docs/architecture/architecture.md</a>
+          <ul class="toc-list"></ul>
+        </nav>
+      </aside>
+      <main class="reference-main" id="reference-content">
+        <article class="reference-prose glass-card">
+<blockquote>
+<p><strong>Visual blueprint:</strong> The source checkout includes the complete
+<a href="architecture_blueprint.html">Clio Coder Architecture and Boundaries visual reference</a>.</p>
+</blockquote>
+<p>Clio Coder is an experimental, terminal-first coding harness for the CLIO ecosystem. CLIO stands for Context Layer for Input/Output; the project is named for the Greek muse of history and developed by the Gnosis Research Center at Illinois Tech. Its architecture favors small, auditable subsystems over a single monolithic agent loop: CLI entry points, the interactive TUI, provider/runtime code, worker subprocesses, tools, and feature domains are kept separate so local-model support and scientific-software workflows can evolve without collapsing safety boundaries.</p>
+<p>This page is source-code aligned for the current source tree.</p>
+<hr>
+<h2>Source layout</h2>
+<pre><code class="language-text">src/
+├── cli/             # clio subcommands, argument parsing, headless run modes
+├── core/            # config/state paths, event bus, defaults, shared primitives
+├── domains/         # feature domains loaded through manifests/contracts
+├── engine/          # pi-ai/provider boundary and runtime adapters
+├── entry/           # orchestrator bootstrap wiring
+├── interactive/     # TUI panels, overlays, key routing, dashboard, slash commands
+├── tools/           # built-in tool specs and registry admission boundary
+├── worker/          # subprocess worker entry/runtime rehydration
+└── utils/           # small support utilities
+</code></pre>
+<p>Feature-domain directories include the following. Not every row is a loaded
+<code>DomainModule</code>: the orchestrator currently loads config, extensions, interop,
+resources, share, context, providers, toolchain, safety, prompts, agents,
+middleware, session, observability, scheduling, dispatch, and lifecycle, plus
+mux when the pane tier is active. The other rows are libraries or CLI-owned
+feature areas.</p>
+<table>
+<thead>
+<tr>
+<th>Domain</th>
+<th>Primary source</th>
+<th>Public surface</th>
+</tr>
+</thead>
+<tbody><tr>
+<td>agents</td>
+<td><code>src/domains/agents/**</code></td>
+<td>Built-in, user, and project agent recipes.</td>
+</tr>
+<tr>
+<td>components</td>
+<td><code>src/domains/components/**</code></td>
+<td>Component snapshots, diffs, and classification.</td>
+</tr>
+<tr>
+<td>config</td>
+<td><code>src/domains/config/**</code>, <code>src/core/config.ts</code></td>
+<td><code>settings.yaml</code>, keybindings, hot reload.</td>
+</tr>
+<tr>
+<td>context</td>
+<td><code>src/domains/context/**</code></td>
+<td>Layered <code>CLIO-CODER.md</code> and subtree <code>CLIO-CODER.override.md</code> guidance, codewiki indexer, repository context.</td>
+</tr>
+<tr>
+<td>dispatch</td>
+<td><code>src/domains/dispatch/**</code></td>
+<td>Fleet-agent jobs, receipts, worker spawning, route policies.</td>
+</tr>
+<tr>
+<td>eval</td>
+<td><code>src/domains/eval/**</code></td>
+<td>Local evaluation harness, suites, JUnit/SWE-bench reports.</td>
+</tr>
+<tr>
+<td>evidence</td>
+<td><code>src/domains/evidence/**</code></td>
+<td>Forensic evidence bundles, failure attribution.</td>
+</tr>
+<tr>
+<td>evolution</td>
+<td><code>src/domains/evolution/**</code></td>
+<td>Authority-tiered self-edit manifests and gates.</td>
+</tr>
+<tr>
+<td>extensions</td>
+<td><code>src/domains/extensions/**</code></td>
+<td>Extension discovery, packaging, and lifecycle.</td>
+</tr>
+<tr>
+<td>interop</td>
+<td><code>src/domains/interop/**</code></td>
+<td>The agent-kind registry, bounded detection of other coding agents, and consent to wire one as a delegation peer.</td>
+</tr>
+<tr>
+<td>lifecycle</td>
+<td><code>src/domains/lifecycle/**</code></td>
+<td>Doctor diagnostics, upgrade mechanics, uninstallation.</td>
+</tr>
+<tr>
+<td>memory</td>
+<td><code>src/domains/memory/**</code></td>
+<td>Approved long-term memory, proactive task intervention.</td>
+</tr>
+<tr>
+<td>middleware</td>
+<td><code>src/domains/middleware/**</code></td>
+<td>Declarative and programmatic lifecycle hooks and budgets.</td>
+</tr>
+<tr>
+<td>observability</td>
+<td><code>src/domains/observability/**</code></td>
+<td>SQLite trace store, metrics projections, live telemetry.</td>
+</tr>
+<tr>
+<td>prompts</td>
+<td><code>src/domains/prompts/**</code></td>
+<td>Prompt fragments, system prompt envelope, template hashing.</td>
+</tr>
+<tr>
+<td>providers</td>
+<td><code>src/domains/providers/**</code></td>
+<td>Target-first runtime registry, model probing, credentials.</td>
+</tr>
+<tr>
+<td>resources</td>
+<td><code>src/domains/resources/**</code></td>
+<td>Skills loader, marketplace synchronization, prompts loader.</td>
+</tr>
+<tr>
+<td>safety</td>
+<td><code>src/domains/safety/**</code></td>
+<td>10-step policy engine, path policy, zero-access rails, audit.</td>
+</tr>
+<tr>
+<td>scheduling</td>
+<td><code>src/domains/scheduling/**</code></td>
+<td>Budget ceilings, node cluster states, batch capacity checks.</td>
+</tr>
+<tr>
+<td>session</td>
+<td><code>src/domains/session/**</code></td>
+<td>Append-only JSONL transcripts, tree navigation, compaction.</td>
+</tr>
+<tr>
+<td>share</td>
+<td><code>src/domains/share/**</code></td>
+<td>Portable workspace and resource archive export/import.</td>
+</tr>
+<tr>
+<td>toolchain</td>
+<td><code>src/domains/toolchain/**</code></td>
+<td>Pinned external-tool discovery, installation, and resolution.</td>
+</tr>
+<tr>
+<td>user-tasks</td>
+<td><code>src/domains/user-tasks/**</code></td>
+<td>Library and CLI-owned durable user task list plus board handoff state.</td>
+</tr>
+<tr>
+<td>mux</td>
+<td><code>src/domains/mux/**</code></td>
+<td>Optional interactive pane-host integration.</td>
+</tr>
+</tbody></table>
+<p>The <code>interop</code> domain owns one question: which other coding agents are on this
+machine and in this project. <code>src/domains/interop/registry.ts</code> is pure data, one
+entry per known agent carrying its binaries, the directories it owns, its skill
+and prompt roots, its instruction filenames, and the ACP launch recipe when it
+has one. Every other module that used to keep its own copy of that list now
+derives it: the skills loader and the prompts loader take their compatibility
+roots from the table, the adoption scanner takes its candidate files from it,
+and the safety path policy takes the foreign directories it refuses to write
+into from it.</p>
+<p>The domain owns detection and consent, and nothing else. It never executes a
+foreign agent&#39;s work command, never loads a skill, prompt, or rule itself, and
+never reads under a foreign agent&#39;s <code>sessions</code>, <code>history</code>, <code>cache</code>, <code>projects</code>,
+or <code>state</code> directory. Detection resolves binaries with <code>access(X_OK)</code> and no
+shell, checks install directories, and runs a bounded <code>--version</code> only when the
+caller asks and only for a binary that already resolved; a probe that cannot
+answer reports <code>unknown</code> and never <code>absent</code>. The one durable configuration write
+is an append to <code>integrations.externalAgents.entries</code>, and it happens only after an operator
+decision.</p>
+<hr>
+<h2>Session Routing vs. Persisted Settings</h2>
+<p>Clio maintains an explicit distinction between persisted user settings (<code>settings.yaml</code>) and session-local routing state (<code>src/core/session-routing.ts</code>).</p>
+<ol>
+<li><strong>Decoupled Overlays</strong>: Turn-level selections (such as active target, model override, thinking level, and scoped models cycled via Alt+J / Alt+K) apply dynamically through <code>applySessionRouting</code> without mutating <code>settings.yaml</code>.</li>
+<li><strong>Lifecycle Flow</strong>:<ul>
+<li><code>seedSessionRouting</code>: Seeds runtime fields from configuration at startup.</li>
+<li><code>applyRoutingPatch</code>: Applies surgical routing mutations (such as changing active model or target in the TUI).</li>
+<li><code>diffRouting</code>: Detects when an active session&#39;s routing diverges from <code>settings.yaml</code>.</li>
+<li><code>routingChangeNotices</code>: Generates structured notifications when external edits modify <code>settings.yaml</code> during an active session, allowing graceful reconciliation.</li>
+<li><code>restoreRoutingFields</code>: Restores persisted defaults when resetting session overlays.</li>
+</ul>
+</li>
+</ol>
+<hr>
+<h2>Workspace Enumeration and Language Classification</h2>
+<p>Source: <code>src/core/workspace-files.ts</code>, <code>src/core/c-header-language.ts</code>.</p>
+<ol>
+<li><strong>Filesystem Walker Invariants</strong>:
+Fallback workspace file enumeration enforces strict safety caps to prevent runaway memory usage or hangs on massive trees:<ul>
+<li><code>maxVisitedEntries</code>: 100,000 entries</li>
+<li><code>maxDepth</code>: 64 directory levels</li>
+<li><code>maxPathBytes</code>: 64 MiB total path storage</li>
+<li><code>maxDurationMs</code>: 5,000 ms timeout</li>
+</ul>
+</li>
+<li><strong>C/C++ Header Classification</strong>:
+Header files (<code>.h</code>, <code>.hpp</code>, <code>.hxx</code>, <code>.hh</code>) are classified deterministically through a 3-tier inspection pipeline:<ul>
+<li>Tier 1: Sibling source matches (for example matching <code>.cpp</code> or <code>.c</code> with the same base name).</li>
+<li>Tier 2: Distinctive <code>#include</code> directives (standard C++ headers vs standard C headers).</li>
+<li>Tier 3: Language-exclusive tokens (<code>template&lt;</code>, <code>namespace </code>, <code>class </code>, <code>nullptr</code>, <code>constexpr</code>).</li>
+</ul>
+</li>
+</ol>
+<h2>Codewiki ownership and worker boundary</h2>
+<p>Codewiki keeps its boot-time read surface separate from its build graph:</p>
+<ul>
+<li><code>src/domains/context/codewiki/schema.ts</code>, <code>artifact.ts</code>, and <code>paths.ts</code> own the
+stable data shapes, normalized artifact compatibility, synchronous and
+asynchronous reads, serialization, and cheap path classification. Reading a
+cached artifact does not load tree-sitter.</li>
+<li><code>indexer.ts</code> owns full, synchronized, and incremental candidate construction.
+Its tree-sitter adapter is a real dynamic import; grammars load only for the
+source paths an actual build needs.</li>
+<li><code>build-worker.ts</code> is the sole runtime execution boundary for codewiki
+candidate walks, freshness fingerprinting, and parsing. Other context surfaces
+independently detect project metadata, but the interactive process does not
+run a codewiki scan or an uninterruptible parser call on its render/input loop.</li>
+<li><code>coordinator.ts</code> owns production commits. One FIFO per workspace establishes
+generation order inside a process, and <code>withStateFileLock</code> extends that order
+across Clio processes. Each transaction rereads the artifact after acquiring
+the lease, publishes atomically, and updates freshness state before releasing
+ownership.</li>
+</ul>
+<p>Session-start refresh, parallel tool demand, incremental mutation notices,
+explicit index/refresh, context bootstrap, wiki grounding, and context reset all
+enter this transaction boundary. A never-indexed workspace remains untouched by
+background session startup. <code>code_nav</code> still waits for a fresh demand result;
+reset queues behind already-admitted work and therefore cannot be undone by an
+older completion. Context-domain shutdown drains both mutation admission and the
+coordinator lane before returning. The direct builder and artifact writer remain
+available to build scripts and test fixtures, but production workspace writes
+must go through the coordinator.</p>
+<h2>Lazy built-in tool boundary</h2>
+<p>The registry always owns one complete, immutable <code>ToolSpec</code> surface before a
+model turn starts. <code>context</code>, <code>code_nav</code>, <code>verify</code>, <code>web_fetch</code>, <code>dispatch</code>,
+<code>monitor</code>, and <code>steer</code> keep their
+name, description, TypeBox schema, action class, execution mode, synchronous
+argument hooks, source provenance, and policy metadata in lightweight surface
+modules. <code>registerAllTools</code> registers those surfaces in the same order as every
+other built-in; capability discovery, worker attestation, provider schema
+serialization, safety classification, autonomy and permission admission, and
+<code>before_tool</code> middleware therefore run without evaluating the implementation.
+The worker composition root imports <code>core-bootstrap.ts</code> directly, so its real
+built entry never evaluates the orchestrator-only dispatch, monitor, or steer
+runners. The orchestrator appends those three tools in their historical order.</p>
+<p>Dispatch is the one stateful lazy boundary. Its synchronous admission controller
+owns the exact WeakMap/WeakSet identities for trusted plans, parsed requests,
+capacity reservations, Scout plans, and prepared arguments. The dynamically
+loaded runner receives that same controller state; it never reconstructs an
+approved call. A deeply frozen, discriminated execution snapshot also pins the
+normalized requests, mode, review/compete settings, detach flag, timeout, output
+bound, and an <code>apply_winner</code> branch plus absolute repository destination before
+middleware or an approval prompt can expose the prepared argument identity. The
+winner destination is part of the rendered and hashed approval artifact.
+Admission disposal is one registry-owned finally boundary, so a
+middleware guard block, ordinary return, or thrown body releases a provisional
+reservation exactly once.</p>
+<p>For ordinary lazy tools, only the admitted <code>run</code> step crosses
+<code>src/tools/lazy-tool.ts</code>. One cached promise owns the implementation import,
+including a deterministic failure, so concurrent first calls cannot initialize
+competing implementations. The loaded spec must match the advertised surface
+before its body can run. Ordinary body exceptions, result shaping, <code>after_tool</code>
+middleware, abort signals, and telemetry continue through the registry&#39;s
+existing path. This mechanism is built-in-only; it does not turn extension
+manifests or provider plugins into an executable tool loader. Dispatch is
+different: <code>registerAllTools</code> creates its lightweight admission surface eagerly,
+and <code>src/tools/dispatch.ts</code> owns a separate cached dynamic import of
+<code>dispatch-runner.ts</code> after admission succeeds. It does not pass through
+<code>lazy-tool.ts</code>.</p>
+<h2>Boundary invariants</h2>
+<p><code>npm run lint</code> executes the boundary checker (<code>tests/boundaries/check-boundaries.ts</code>, imported by <code>scripts/check-hygiene.ts</code>). Treat these checks as executable specifications.</p>
+<p>The enforced import rules below are complemented by the maintained
+<a href="pi_boundary_blueprint.html">Pi SDK boundary table</a>, which records the semantic owner of
+each overlapping helper and the Clio deltas that must survive an SDK upgrade.</p>
+<p>These six enforced boundary rules constrain dependency <strong>direction</strong>, never import <strong>form</strong> (whether static vs dynamic, default vs named):</p>
+<h3>Rule 1: <code>@earendil-works/pi-*</code> imports stay in <code>src/engine/**</code></h3>
+<p>Only files under <code>src/engine/**</code> may import <code>@earendil-works/pi-*</code> packages. Since the 0.83.0 engine-boundary rework, no file outside <code>src/engine/**</code> may import those packages at all, value or type-only. Domain modules import erased engine shapes (<code>EngineModel</code>, <code>Api</code>, <code>Model</code>) directly from <code>src/engine/types.ts</code>.</p>
+<p>Why: provider SDKs and pi-ai engine values must remain swappable behind one engine boundary. Domains and presentation layers operate against Clio contracts rather than vendor or runtime implementations. <code>src/engine/api-registry.ts</code> composes Pi&#39;s public lazy API factories in their canonical order, retains provider-owned authentication/header dispatch, and lets Clio&#39;s local-runtime adapters override API families without importing the deprecated compatibility aggregate. The only <code>pi-ai/compat</code> edge is dynamic: before a configured out-of-tree runtime evaluates, Clio joins Pi&#39;s process-global registry and mirrors its overrides so external provider plugins retain the same registry identity and last-writer-wins order. No configured plugin means no compatibility aggregate. OpenAI-compatible sampler fields and vLLM thinking budgets flow through Pi&#39;s <code>samplingParams</code> and <code>supportsThinkingTokenBudget</code> contracts; Clio&#39;s adapter retains only catalog selection and runtime-specific payload deltas. Tool head/tail truncation, byte formatting, and grep-line clipping likewise flow through pi-agent-core&#39;s <code>truncateHead</code>, <code>truncateTail</code>, <code>formatSize</code>, and <code>truncateLine</code>; Clio retains only its 16 KiB per-observation default and its exported line-count helper. Tool string enums come from pi-ai&#39;s <code>StringEnum</code> (<code>src/engine/ai.ts</code>), the model-facing text for replayed bash executions and branch or compaction summaries comes from pi-agent-core&#39;s <code>bashExecutionToText</code> and summary prefixes (<code>src/engine/messages.ts</code>), and Anthropic thinking payloads are assembled by Pi&#39;s narrow lazy stream implementation with no Clio rewrite.</p>
+<h3>Rule 2: Workers do not value-import domains except runtime rehydration</h3>
+<p>Files under <code>src/worker/**</code> may not value-import <code>src/domains/**</code>, with the sole exception of worker-safe provider runtime rehydration modules:</p>
+<ul>
+<li><code>src/domains/providers/plugins.ts</code></li>
+<li><code>src/domains/providers/registry.ts</code></li>
+<li><code>src/domains/providers/runtimes/builtins.ts</code></li>
+</ul>
+<p>Type-only imports erase at compile time and are permitted. Workers receive a serializable <code>WorkerSpec</code> envelope, rehydrate only necessary target/runtime descriptors, and avoid pulling interactive state or domain stores into worker subprocesses.</p>
+<h3>Rule 3: Domains do not import each other&#39;s <code>extension.ts</code></h3>
+<p>A file under <code>src/domains/&lt;x&gt;/**</code> must not import <code>src/domains/&lt;y&gt;/extension.ts</code> for <code>y != x</code>. Cross-domain behavior flows through public contracts exported from domain index files (<code>src/domains/&lt;y&gt;/index.ts</code>), the domain loader, event buses, or serialized manifests.</p>
+<h3>Rule 4: Tool substrate is surface-agnostic (<code>src/tools/**</code> never imports <code>src/interactive/**</code>)</h3>
+<p>Files under <code>src/tools/**</code> may never import <code>src/interactive/**</code> (neither value nor type-only imports). The tool substrate is surface-agnostic across headless, interactive, ACP, and worker runs. Allowing tools to import TUI presentation modules would couple execution logic to presentation code.</p>
+<h3>Rule 5: One-way entry point composition (<code>chat-loop.ts</code> never imports <code>src/entry/**</code>)</h3>
+<p>Turn modules and state machine files in the chat loop (<code>src/interactive/turn-*.ts</code>, <code>chat-loop.ts</code>) may never import <code>src/entry/**</code>. Composition flows in one direction only: the entry point composes the chat loop, never the reverse.</p>
+<h3>Rule 6: Stage 0 remains behind declared seams</h3>
+<p>Value importers outside the computed instant-shell Stage 0 closure and its
+<code>src/interactive/**</code> and <code>src/engine/**</code> trees may enter those protected trees
+only through a seam declared in <code>STAGE0_SEAMS</code>. A declared seam may not lead back
+into the Stage 0 closure unless the existing composition-root overlap is
+explicitly recorded. CLI type edges retain the declaration requirement. This
+keeps unrelated importers from creating another reacher into the cold-start
+chunk graph.</p>
+<hr>
+<h2>Runtime flow</h2>
+<pre><code class="language-mermaid">graph TD
+    CLI[cli/index.ts] --&gt; ORCH[entry/orchestrator.ts]
+    TUI[interactive/index.ts] --&gt; LOOP[interactive/chat-loop.ts]
+    ORCH --&gt; DOMAINS[domain-loader + domain contracts]
+    LOOP --&gt; PROMPTS[prompts compiler]
+    LOOP --&gt; TOOLS[tool registry]
+    LOOP --&gt; ENGINE[engine runtime]
+    TOOLS --&gt; SAFETY[safety policy]
+    TOOLS --&gt; MIDDLEWARE[middleware hook boundary]
+    ENGINE --&gt; PROVIDERS[provider runtime descriptors]
+    DISPATCH[dispatch domain] --&gt; WORKER[worker subprocess]
+    WORKER --&gt; PROVIDERS
+</code></pre>
+<p>Core data paths:</p>
+<ol>
+<li>CLI or TUI boot initializes config, data, state, and cache directories through <code>src/core/init.ts</code>.</li>
+<li>The domain loader starts domains according to each <code>manifest.ts</code> dependency list.</li>
+<li>The chat loop resolves model/runtime state and visible tools for the selected target and request intent.</li>
+<li>The prompt compiler builds a hashed prompt envelope and dynamic turn fragments.</li>
+<li>Tool calls enter <code>src/tools/registry.ts</code>, which enforces visibility, safety, middleware hooks, protected artifacts, and result shaping before returning output.</li>
+<li>Fleet dispatch writes run ledger entries and receipts; evidence/memory/eval domains consume those artifacts later.</li>
+</ol>
+<hr>
+<h2>Event and audit model</h2>
+<p>Clio uses in-process event buses for status and audit surfaces, but safety is not delegated to events. The hard gate lives in code:</p>
+<ul>
+<li>Provider capability resolution decides whether tool schemas are sent at all; tool-capable sessions receive the full registry as one deterministic session tool surface.</li>
+<li><code>src/domains/safety/policy-engine.ts</code> evaluates damage-control rules, project policy, Bash default-deny, and path policy. Write boundaries are detect-and-rollback mechanisms (such as change tracking and rollbacks), never OS-level sandboxing.</li>
+<li><code>src/tools/registry.ts</code> is the admission point for every tool invocation.</li>
+<li><code>src/domains/dispatch/receipt-integrity.ts</code> and related dispatch files persist receipts used by evidence and cost surfaces.</li>
+</ul>
+<h2>Interactive render transactions</h2>
+<p>The interactive shell owns one concrete pi-tui renderer. Clio&#39;s instrumented
+subclasses bracket the renderer&#39;s protected <code>doRender()</code> seam, so one render
+transaction receives one <code>frameId</code> even when regular-screen cursor/IME work
+issues several terminal writes. Protocol, startup, and shutdown writes outside
+a render retain <code>frameId: null</code>; they are never fabricated into frames.</p>
+<p>The root component is timed in place so its identity and fullscreen layout
+markers do not change. Public pi-tui seams provide component/layout, overlay,
+normalization, and cursor-extraction phases. Viewport selection, diffing, ANSI
+construction, and remaining cursor work are reported honestly as one combined
+remainder because the engine does not expose narrower hooks. The stdout
+boundary records enqueue duration, return value, backpressure, and drain.</p>
+<p>Canonical text/thinking events are numbered at the beginning of the primary
+projection, before any consumer. Panel admission/application and the first
+committed frame&#39;s high water establish event causality without changing the
+public event object or fan-out order. Input is numbered after terminal protocol
+decoding and before the application controller mutates editor, overlay, scroll,
+or submit state. The first frame whose input high water includes that id is the
+input-to-stdout-commit endpoint.</p>
+<p>Adaptive streaming remains inside that presentation boundary. One semantic
+classifier drops only transparent raw text/thinking mirrors, sends derived
+visible content through one generation/epoch FIFO, and treats every other
+transcript mutation as an ordered drain boundary. Pacer slices mutate the
+panel directly and are never re-emitted on the public bus, so session storage,
+replay/export, tool-call formation, and cumulative tool-result behavior keep
+their canonical synchronous inputs. Abort, retry, interrupt, submit, mode
+change, and teardown drain the queue and can await the containing committed
+frame. The stdout gate stops later frame construction after a false write and
+coalesces to current model state until <code>drain</code>; it is not installed for the
+default <code>off</code> path and therefore cannot become a second unbounded SSH buffer.</p>
+<p>Interactive boot has one terminal owner across its two stages. The
+<code>TerminalLease</code> creates one terminal/TUI/root host/editor and owns raw mode,
+decoded input, resize, protocol initialization, signal routing, and teardown.
+Stage 0 mounts a small static shell on that owner. Stage 1 hydrates services and
+atomically replaces the root plus input/signal delegates while preserving the
+editor object and buffer. Submissions accepted before attachment are immutable
+FIFO records shown in the shell and admitted exactly once through the normal
+slash/bash/chat pipeline after attachment. A generation guard rejects a late
+hydration after shutdown; every failure path shares one idempotent close and
+terminal restoration transaction. The source boundary checker protects the
+declared Stage 0 closure and seams. There is no committed built-chunk budget
+contract at this revision; the installed-package smoke test still exercises
+lazy codewiki loading. ACP, headless, ordinary non-TTY invocation, help, and
+subcommands never construct a lease; the established explicit
+<code>CLIO_CODER_INTERACTIVE=1</code> non-TTY override remains force-interactive.</p>
+<p>Tracing is opt-in and content-free. Its bounded asynchronous writer never does
+filesystem append I/O on the render stack, and shutdown awaits a bounded flush.
+See <a href="performance_methodology_blueprint.html">performance-methodology.md</a> for vocabulary,
+commands, PTY limitations, and baseline evidence.</p>
+<h2>Command spec</h2>
+<p>Interactive slash commands in Clio Coder are governed by a unified declarative command specification registry. This declarative system replaces hand-rolled parsing logic with structured specifications that define the names, flags, positionals, and subcommands for each entry. The central registry acts as the single source of truth for command matching, argument parsing, autocomplete suggestion generation, and usage help output. The parser processes user input strings using these declarative specifications to generate structured argument objects and canonical command representations. By deriving all command-related behavior from these specifications, the system ensures consistency across usage help messages and autocomplete overlays.</p>
+<hr>
+<h2>Verification commands</h2>
+<pre><code class="language-bash">npm run lint
+npm run typecheck
+npm run test
+npm run build
+</code></pre>
+<p>Run the focused boundary check before editing <code>src/engine/**</code>, <code>src/worker/**</code>, or cross-domain imports. Run the full test/build gate before release-facing documentation or behavior changes.</p>
+        </article>
+        <nav class="related-nav" aria-label="Adjacent references">
+          <a class="nav-link-card" href="alcf_blueprint.html"><span class="nav-label">Previous</span><span class="nav-title">ALCF Inference Provider</span></a>
+          <a class="nav-link-card next" href="artifact_placement_blueprint.html"><span class="nav-label">Next</span><span class="nav-title">Artifact Placement</span></a>
+        </nav>
+        <p class="reference-footer-note">Canonical content lives in the mapped Markdown page. This visual counterpart adds navigation without changing the contract.</p>
+      </main>
     </div>
-
-    <!-- TAB 1: INTERACTIVE BOUNDARIES INSPECTOR -->
-    <main class="tab-pane active" id="pane-interactive">
-      <div class="blueprint-layout">
-
-        <!-- Left: Codebase tree explorer -->
-        <div class="specs-col">
-          <div class="glass-card">
-            <h2>
-              <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><title>Icon</title><path d="M22 19a2 2 0 0 1-2 2H4a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h5l2 3h9a2 2 0 0 1 2 2z"></path></svg>
-              Source Directory Tree
-            </h2>
-            <p>Explore Clio Coder's directories. Select a directory to view its core responsibilities, invariants, and allowed boundary rules.</p>
-
-            <div class="tree-wrapper">
-              <div style="font-weight:700; margin-bottom:0.5rem;">src/</div>
-              <div class="tree-node selected" id="node-cli" onclick="selectNode('cli')">├── cli/</div>
-              <div class="tree-node" id="node-core" onclick="selectNode('core')">├── core/</div>
-              <div class="tree-node" id="node-domains" onclick="selectNode('domains')">├── domains/</div>
-              <div class="tree-node" id="node-engine" onclick="selectNode('engine')">├── engine/</div>
-              <div class="tree-node" id="node-entry" onclick="selectNode('entry')">├── entry/</div>
-              <div class="tree-node" id="node-interactive" onclick="selectNode('interactive')">├── interactive/</div>
-              <div class="tree-node" id="node-tools" onclick="selectNode('tools')">├── tools/</div>
-              <div class="tree-node" id="node-worker" onclick="selectNode('worker')">├── worker/</div>
-              <div class="tree-node" id="node-utils" onclick="selectNode('utils')">└── utils/</div>
-            </div>
-
-            <div class="details-panel" id="treeDetails">
-              <h3 id="nodeTitle" style="color:#fff; margin-bottom:0.5rem;">cli/</h3>
-              <p id="nodeDesc" style="font-size:0.9rem; color:var(--text-muted)">Contains clio-coder CLI subcommands, argument parsing, and headless execution configurations.</p>
-              <div id="nodeRule" style="font-size:0.8rem; color:var(--color-cyan); font-family:var(--font-mono); margin-top:0.5rem;">Rules: Subject to Rule 1 (no pi-ai imports).</div>
-            </div>
-          </div>
-
-          <!-- Boundary Checker -->
-          <div class="glass-card">
-            <h2>
-              <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><title>Icon</title><path d="M12 22s8-4 8-10V5l-8-3-8 3v7c0 6 8 10 8 10z"></path></svg>
-              Boundary Rule Validator
-            </h2>
-            <p>Simulate imports to test project boundaries (Rules 1, 2, 3, 4, and 5 constraints).</p>
-
-            <div class="form-group">
-              <label for="importSource">Source File Path</label>
-              <select id="importSource" onchange="checkBoundaryRules()">
-                <option value="src/interactive/chat-loop.ts">src/interactive/chat-loop.ts</option>
-                <option value="src/worker/rehydrate.ts">src/worker/rehydrate.ts</option>
-                <option value="src/domains/safety/policy.ts">src/domains/safety/policy.ts</option>
-                <option value="src/domains/agents/registry.ts">src/domains/agents/registry.ts</option>
-                <option value="src/tools/bash.ts">src/tools/bash.ts</option>
-              </select>
-            </div>
-
-            <div class="form-group">
-              <label for="importTarget">Target Code Import</label>
-              <select id="importTarget" onchange="checkBoundaryRules()">
-                <option value="@earendil-works/pi-ai (value import)">@earendil-works/pi-ai (value import)</option>
-                <option value="src/domains/providers/plugins.ts (value import)">src/domains/providers/plugins.ts (value import)</option>
-                <option value="src/domains/safety/extension.ts (value import)">src/domains/safety/extension.ts (value import)</option>
-                <option value="src/domains/safety/policy-engine.ts (value import)">src/domains/safety/policy-engine.ts (value import)</option>
-                <option value="src/interactive/chat-panel.ts (value import)">src/interactive/chat-panel.ts (value import)</option>
-                <option value="src/entry/orchestrator.ts (value import)">src/entry/orchestrator.ts (value import)</option>
-              </select>
-            </div>
-
-            <div class="form-group">
-              <label for="importType">Import Type</label>
-              <select id="importType" onchange="checkBoundaryRules()">
-                <option value="value">Value Import (runtime import)</option>
-                <option value="type">Type-Only Import (compile-time erased)</option>
-              </select>
-            </div>
-
-            <div id="boundaryVerdict" class="verdict-badge pass">
-              PASSED
-            </div>
-          </div>
-        </div>
-
-        <!-- Right: Runtime flow -->
-        <div class="specs-col">
-          <div class="glass-card">
-            <h2>
-              <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><title>Icon</title><polyline points="22 12 18 12 15 21 9 3 6 12 2 12"></polyline></svg>
-              Execution Flow Inspector
-            </h2>
-            <p>Click on the execution stages below to explore the data paths and invariants.</p>
-
-            <svg class="flow-interactive-svg" viewBox="0 0 320 380" fill="none" xmlns="http://www.w3.org/2000/svg"><title>Icon</title>
-              <defs>
-                <marker id="flow-arr" viewBox="0 0 10 10" refX="6" refY="5" markerWidth="6" markerHeight="6" orient="auto-start-reverse">
-                  <path d="M 0 1.5 L 8 5 L 0 8.5 z" fill="var(--color-cyan)"/>
-                </marker>
-              </defs>
-
-              <!-- Node 1 -->
-              <g class="flow-node active" id="fnode-cli" onclick="selectFlow('cli')">
-                <rect x="70" y="10" width="180" height="40" rx="8" fill="rgba(255,255,255,0.02)" stroke="var(--border-card)" stroke-width="1.5"/>
-                <text x="160" y="34" fill="#fff" font-size="12" font-family="var(--font-sans)" text-anchor="middle" font-weight="600">CLI / Entrypoint</text>
-              </g>
-
-              <!-- Arrow 1 -> 2 -->
-              <path d="M 160 50 L 160 75" fill="none" stroke="var(--color-cyan)" stroke-width="1.5" marker-end="url(#flow-arr)"/>
-
-              <!-- Node 2 -->
-              <g class="flow-node" id="fnode-loader" onclick="selectFlow('loader')">
-                <rect x="70" y="85" width="180" height="40" rx="8" fill="rgba(255,255,255,0.02)" stroke="var(--border-card)" stroke-width="1.5"/>
-                <text x="160" y="109" fill="#fff" font-size="12" font-family="var(--font-sans)" text-anchor="middle" font-weight="600">Domain Loader</text>
-              </g>
-
-              <!-- Arrow 2 -> 3 -->
-              <path d="M 160 125 L 160 150" fill="none" stroke="var(--color-cyan)" stroke-width="1.5" marker-end="url(#flow-arr)"/>
-
-              <!-- Node 3 -->
-              <g class="flow-node" id="fnode-loop" onclick="selectFlow('loop')">
-                <rect x="70" y="160" width="180" height="40" rx="8" fill="rgba(255,255,255,0.02)" stroke="var(--border-card)" stroke-width="1.5"/>
-                <text x="160" y="184" fill="#fff" font-size="12" font-family="var(--font-sans)" text-anchor="middle" font-weight="600">Interactive Chat Loop</text>
-              </g>
-
-              <!-- Arrow 3 -> 4 -->
-              <path d="M 160 200 L 160 225" fill="none" stroke="var(--color-cyan)" stroke-width="1.5" marker-end="url(#flow-arr)"/>
-
-              <!-- Node 4 -->
-              <g class="flow-node" id="fnode-tools" onclick="selectFlow('tools')">
-                <rect x="70" y="235" width="180" height="40" rx="8" fill="rgba(255,255,255,0.02)" stroke="var(--border-card)" stroke-width="1.5"/>
-                <text x="160" y="259" fill="#fff" font-size="12" font-family="var(--font-sans)" text-anchor="middle" font-weight="600">Tool Registry &amp; Safety Gate</text>
-              </g>
-
-              <!-- Arrow 4 -> 5 -->
-              <path d="M 160 275 L 160 300" fill="none" stroke="var(--color-cyan)" stroke-width="1.5" marker-end="url(#flow-arr)"/>
-
-              <!-- Node 5 -->
-              <g class="flow-node" id="fnode-engine" onclick="selectFlow('engine')">
-                <rect x="70" y="310" width="180" height="40" rx="8" fill="rgba(255,255,255,0.02)" stroke="var(--border-card)" stroke-width="1.5"/>
-                <text x="160" y="334" fill="#fff" font-size="12" font-family="var(--font-sans)" text-anchor="middle" font-weight="600">Engine / Providers Registry</text>
-              </g>
-            </svg>
-
-            <div class="flow-info-card" id="flowDetails">
-              <h4 id="flowTitle" style="color:var(--color-cyan)">CLI / Entrypoint</h4>
-              <p id="flowDesc" style="font-size:0.875rem; color:var(--text-muted); margin-top:0.25rem;">Initiates config and data trees, loads environment variables, parses arguments, and decides interactive TUI vs headless runs.</p>
-            </div>
-          </div>
-        </div>
-
-      </div>
-    </main>
-
-    <!-- TAB 2: TECHNICAL REFERENCE -->
-    <main class="tab-pane" id="pane-reference">
-      <div class="glass-card">
-        <h2>Clio Coder Architecture Specifications</h2>
-        <p>Clio Coder is an experimental, terminal-first coding harness for the CLIO ecosystem. Its architecture favors small, auditable subsystems over a single monolithic agent loop: CLI entry points, the interactive TUI, provider/runtime code, worker subprocesses, tools, and feature domains are kept separate so local-model support and scientific-software workflows can evolve without collapsing safety boundaries.</p>
-
-        <h3 style="margin: 1.5rem 0 0.5rem 0; color:#fff;">Source Code Layout</h3>
-        <table class="ref-table">
-          <thead>
-            <tr>
-              <th>Folder</th>
-              <th>Responsibility</th>
-            </tr>
-          </thead>
-          <tbody>
-            <tr>
-              <td><code>src/cli/</code></td>
-              <td>clio-coder subcommands, argument parsing, headless run modes</td>
-            </tr>
-            <tr>
-              <td><code>src/core/</code></td>
-              <td>config/state paths, event bus, defaults, shared primitives</td>
-            </tr>
-            <tr>
-              <td><code>src/domains/</code></td>
-              <td>feature domains loaded through manifests/contracts</td>
-            </tr>
-            <tr>
-              <td><code>src/engine/</code></td>
-              <td>pi-ai/provider boundary and runtime adapters</td>
-            </tr>
-            <tr>
-              <td><code>src/entry/</code></td>
-              <td>orchestrator bootstrap wiring</td>
-            </tr>
-            <tr>
-              <td><code>src/interactive/</code></td>
-              <td>TUI panels, overlays, key routing, dashboard, slash commands</td>
-            </tr>
-            <tr>
-              <td><code>src/tools/</code></td>
-              <td>built-in tool specs and registry admission boundary</td>
-            </tr>
-            <tr>
-              <td><code>src/worker/</code></td>
-              <td>subprocess worker entry/runtime rehydration</td>
-            </tr>
-          </tbody>
-        </table>
-
-        <h3 style="margin: 1.5rem 0 0.5rem 0; color:#fff;">Boundary Invariants</h3>
-        <p>Boundary rules are enforced by the boundary checker that <code>npm run lint</code> runs. Five rules constrain dependency <strong>direction</strong>, never import <strong>form</strong>:</p>
-        <ul style="margin-left: 2rem; margin-bottom: 1rem; font-size: 0.925rem; color: var(--text-muted);">
-          <li style="margin-bottom: 0.5rem;"><strong>Rule 1: @earendil-works/* imports stay in <code>src/engine/**</code></strong><br>Only files under <code>src/engine/**</code> may import `@earendil-works/*` packages (value or type-only). Domains take erased shapes from `src/engine/types.ts`.</li>
-          <li style="margin-bottom: 0.5rem;"><strong>Rule 2: workers do not value-import domains except runtime rehydration</strong><br><code>src/worker/**</code> may not value-import `src/domains/**` except worker-safe provider runtime rehydration modules (plugins.ts, registry.ts, runtimes/builtins.ts).</li>
-          <li style="margin-bottom: 0.5rem;"><strong>Rule 3: domains do not import each other's `extension.ts`</strong><br>A file under <code>src/domains/&lt;x&gt;/**</code> must not import `src/domains/&lt;y&gt;/extension.ts` for `y != x`.</li>
-          <li style="margin-bottom: 0.5rem;"><strong>Rule 4: tool substrate is surface-agnostic</strong><br>Files under <code>src/tools/**</code> may never import <code>src/interactive/**</code> (value or type-only).</li>
-          <li style="margin-bottom: 0.5rem;"><strong>Rule 5: one-way entry point composition</strong><br>Turn modules in <code>src/interactive/turn-*.ts</code> and <code>chat-loop.ts</code> may never import <code>src/entry/**</code>.</li>
-        </ul>
-
-        <h3 style="margin: 1.5rem 0 0.5rem 0; color:#fff;">Command Verification</h3>
-        <pre><code>npm run lint                 # Biome plus the hygiene and boundary checks
-npm run typecheck            # type check TS
-npm run test                 # run tests suite
-npm run build                # compile build package</code></pre>
-      </div>
-    </main>
-
-    <footer>
-      <p>Clio Coder Architecture Spec Dashboard &bull; Version 0.4.0</p>
-    </footer>
+    <footer>Clio Coder documentation · source-aligned at v0.4.2</footer>
   </div>
-
-  <script>
-    // Tab switching
-    function switchTab(tabId) {
-      document.querySelectorAll('.tab-btn').forEach(btn => { btn.classList.remove('active'); });
-      document.querySelectorAll('.tab-pane').forEach(pane => { pane.classList.remove('active'); });
-
-      if (tabId === 'interactive') {
-        document.querySelector('.tab-btn:nth-child(1)').classList.add('active');
-        document.getElementById('pane-interactive').classList.add('active');
-      } else {
-        document.querySelector('.tab-btn:nth-child(2)').classList.add('active');
-        document.getElementById('pane-reference').classList.add('active');
-      }
-    }
-
-    // Node data
-    const nodes = {
-      cli: {
-        title: "cli/",
-        desc: "Handles command line entrypoints, arguments parsing, doctor diagnostics, reset settings, and headless modes launcher.",
-        rule: "Subject to Rule 1: Cannot value-import @earendil-works/pi-* packages directly."
-      },
-      core: {
-        title: "core/",
-        desc: "Defines system-wide constants, data folders, local storage configurations, events bus, and bootstrap structures.",
-        rule: "Shared foundation. Cannot import domains or interactive layers."
-      },
-      domains: {
-        title: "domains/",
-        desc: "Hosts isolated subsystem code loaded via manifest files (safety, agents, providers, config, session, memory).",
-        rule: "Subject to Rule 3: Subsystems cannot import another subsystem's extension.ts."
-      },
-      engine: {
-        title: "engine/",
-        desc: "Houses the pi-ai adapters, provider wire wrappers, and runtime descriptors abstractions.",
-        rule: "Allowed to value-import @earendil-works/pi-* packages (Rule 1 entrypoint)."
-      },
-      entry: {
-        title: "entry/",
-        desc: "Coordinates startup, initializes the domain loader, starts interactive chat session or launches headless task runners.",
-        rule: "Bootstrapper surface."
-      },
-      interactive: {
-        title: "interactive/",
-        desc: "Responsible for terminal console drawings, ListOverlays, dashboard rendering, help screens, and user input editor.",
-        rule: "Contains TUI rendering layers. Cannot be value-imported by worker processes."
-      },
-      tools: {
-        title: "tools/",
-        desc: "Registers the built-in tool specifications, validates invocation schemas, runs middleware blocks, and shapes outputs.",
-        rule: "Unified tools gateway. Strictly code-gates model tool calls."
-      },
-      worker: {
-        title: "worker/",
-        desc: "Rehydrates serializable specifications and processes fleet-agent delegation tasks out of the main orchestrator loop.",
-        rule: "Subject to Rule 2: Cannot value-import src/domains/** except the rehydration subset."
-      },
-      utils: {
-        title: "utils/",
-        desc: "Common stateless helper functions (filesystem walks, logs, strings formatting, and date formatting).",
-        rule: "Utility layer. Cannot import any other system component."
-      }
-    };
-
-    function selectNode(id) {
-      document.querySelectorAll('.tree-node').forEach(n => { n.classList.remove('selected'); });
-      document.getElementById(`node-${id}`).classList.add('selected');
-
-      const data = nodes[id];
-      document.getElementById('nodeTitle').innerText = data.title;
-      document.getElementById('nodeDesc').innerText = data.desc;
-      document.getElementById('nodeRule').innerText = data.rule;
-    }
-
-    // Boundary Invariants logic
-    function checkBoundaryRules() {
-      const src = document.getElementById('importSource').value;
-      const target = document.getElementById('importTarget').value;
-      const type = document.getElementById('importType').value;
-      const verdictEl = document.getElementById('boundaryVerdict');
-
-      let passed = true;
-      let reason = "Import conforms to Clio Coder boundaries.";
-
-      // Rule 1 check: import of pi-ai outside src/engine
-      if (target.includes('@earendil-works/') && !src.startsWith('src/engine/')) {
-        passed = false;
-        reason = "Rule 1 Violation: Only files under src/engine/** may import @earendil-works/* packages.";
-      }
-
-      // Rule 2 check: workers value import of domains outside allowable rehydration modules
-      if (src.startsWith('src/worker/') && target.includes('src/domains/') && type === 'value') {
-        if (!target.includes('providers/plugins.ts') && !target.includes('providers/registry.ts') && !target.includes('providers/runtimes/builtins.ts')) {
-          passed = false;
-          reason = "Rule 2 Violation: src/worker/** may not value-import src/domains/** except provider rehydration modules.";
-        }
-      }
-
-      // Rule 3 check: domains importing other extension.ts
-      if (src.startsWith('src/domains/') && target.includes('extension.ts')) {
-        const srcSub = src.split('/')[2];
-        const tgtSub = target.split('/')[2];
-        if (srcSub !== tgtSub) {
-          passed = false;
-          reason = `Rule 3 Violation: src/domains/${srcSub}/** cannot import src/domains/${tgtSub}/extension.ts.`;
-        }
-      }
-
-      // Rule 4 check: tools importing interactive
-      if (src.startsWith('src/tools/') && target.includes('src/interactive/')) {
-        passed = false;
-        reason = "Rule 4 Violation: src/tools/** may not import src/interactive/** (the tool substrate is surface-agnostic).";
-      }
-
-      // Rule 5 check: chat loop turn modules importing entry
-      if ((src.includes('chat-loop.ts') || src.includes('turn-')) && target.includes('src/entry/')) {
-        passed = false;
-        reason = "Rule 5 Violation: Chat loop turn modules may not import src/entry/** (composition flows one way).";
-      }
-
-      if (passed) {
-        verdictEl.className = "verdict-badge pass";
-        verdictEl.innerHTML = `✓ Passed: ${reason}`;
-      } else {
-        verdictEl.className = "verdict-badge fail";
-        verdictEl.innerHTML = `✗ Violation: ${reason}`;
-      }
-    }
-
-    // Flow interactive logic
-    const flowStates = {
-      cli: {
-        title: "1. CLI / Entrypoint Boot",
-        desc: "System directories are loaded. Command-line flags are evaluated to route request to interactive chat TUI or a headless background worker."
-      },
-      loader: {
-        title: "2. Domain Loader Dependency Resolver",
-        desc: "Runs manifest.ts files in sequence. Safety rule packs are parsed, configuration files hot-reload, and prompt/tool adapters initialize."
-      },
-      loop: {
-        title: "3. Interactive Chat / Headless Loop",
-        desc: "Prompts compiler binds context files (CLIO-CODER.md), recent session history, and system-agent instructions. The target routing engine prepares parameters."
-      },
-      tools: {
-        title: "4. Tool Registry Gatekeeper",
-        desc: "Inspects incoming calls. Safety policy runs (checks path blocks, command recognition, and substitution rails). If passed, middleware hooks dispatch."
-      },
-      engine: {
-        title: "5. Engine Wire Transmission",
-        desc: "Bridges tool outputs to the designated target's runtime descriptor (Ollama, LM Studio, llamacpp, Bedrock, Vertex, Anthropic, SGLang, vLLM, OpenAI Codex, Anthropic Max, Claude SDK, Claude Code)."
-      }
-    };
-
-    function selectFlow(id) {
-      document.querySelectorAll('.flow-node').forEach(n => { n.classList.remove('active'); });
-      document.getElementById(`fnode-${id}`).classList.add('active');
-
-      const data = flowStates[id];
-      document.getElementById('flowTitle').innerText = data.title;
-      document.getElementById('flowDesc').innerText = data.desc;
-    }
-
-    // Init check
-    window.onload = () => {
-      checkBoundaryRules();
-    };
-  </script>
+  <script src="shared.js"></script>
 </body>
 </html>

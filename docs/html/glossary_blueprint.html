@@ -1,260 +1,315 @@
-<!DOCTYPE html>
+<!doctype html>
 <html lang="en">
 <head>
-  <meta charset="UTF-8">
-  <meta name="viewport" content="width=device-width, initial-scale=1.0">
-  <title>Clio Coder - Architectural Glossary &amp; Type Index</title>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <meta name="clio-markdown-source" content="docs/guide/glossary.md">
+  <meta name="clio-docs-version" content="0.4.2">
+  <title>Clio Coder Glossary · Clio Coder 0.4.2</title>
+  <link rel="icon" href="data:,">
   <link rel="stylesheet" href="shared.css">
-  <style>
-    .term-card {
-      background: rgba(0, 0, 0, 0.3);
-      border: 1px solid var(--border-card);
-      border-radius: 8px;
-      padding: 1rem;
-      margin-bottom: 1rem;
-    }
-    .term-header {
-      display: flex;
-      justify-content: space-between;
-      align-items: center;
-      margin-bottom: 0.5rem;
-    }
-    .term-title {
-      font-size: 1.05rem;
-      font-weight: 700;
-      color: #fff;
-    }
-    .type-badge {
-      font-family: var(--font-mono);
-      font-size: 0.75rem;
-      background: rgba(70, 229, 208, 0.1);
-      color: var(--color-cyan);
-      border: 1px solid rgba(70, 229, 208, 0.3);
-      padding: 0.2rem 0.5rem;
-      border-radius: 4px;
-    }
-    .term-def {
-      font-size: 0.9rem;
-      color: var(--text-main);
-      line-height: 1.5;
-    }
-  </style>
 </head>
-<body>
+<body data-doc-category="guide">
+  <div class="reading-progress" aria-hidden="true"></div>
+  <a class="skip-link" href="#reference-content">Skip to reference</a>
   <div class="container">
-    <header>
+    <header class="document-header" data-category="Guide">
       <div class="header-left">
-        <div class="header-logo">
-          <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" style="color: var(--color-cyan);"><title>Glossary Icon</title>
-            <path d="M4 19.5A2.5 2.5 0 0 1 6.5 17H20"></path>
-            <path d="M6.5 2H20v20H6.5A2.5 2.5 0 0 1 4 19.5v-15A2.5 2.5 0 0 1 6.5 2z"></path>
+        <a class="header-logo" href="index.html" aria-label="Documentation index">
+          <svg viewBox="0 0 24 24" fill="none" aria-hidden="true">
+            <path d="M12 2 2 7l10 5 10-5-10-5Z" stroke="url(#clio-logo)" stroke-width="2" stroke-linejoin="round"/>
+            <path d="m2 12 10 5 10-5M2 17l10 5 10-5" stroke="url(#clio-logo)" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"/>
+            <defs><linearGradient id="clio-logo" x1="2" y1="2" x2="22" y2="22"><stop stop-color="#00d4db"/><stop offset="1" stop-color="#ff7e29"/></linearGradient></defs>
           </svg>
-        </div>
+        </a>
         <div class="header-title-wrapper">
-          <h1>Architectural Glossary &amp; Type Index</h1>
-          <p>Canonical definitions of 40 core architectural concepts mapped to their owning TypeScript types in src/</p>
+          <p class="document-kicker">Guide / canonical reference</p>
+          <h1>Clio Coder Glossary</h1>
+          <p class="document-path">docs/guide/glossary.md</p>
         </div>
       </div>
       <div class="header-right">
-        <span class="version-badge">v0.4.0</span>
-        <a href="index.html" class="back-btn">
-          <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><title>Back Icon</title><line x1="19" y1="12" x2="5" y2="12"></line><polyline points="12 19 5 12 12 5"></polyline></svg>
-          Dashboard Hub
-        </a>
+        <a class="back-btn" href="index.html">← Index</a>
+        <span class="version-badge">v0.4.2</span>
       </div>
     </header>
-
-    <div class="page-layout-grid">
-      <nav class="sidebar" aria-label="Table of Contents">
-        <div class="toc-container">
-          <div class="toc-title">On This Page</div>
-          <ul class="toc-list">
-            <!-- Populated dynamically by shared.js -->
-          </ul>
-        </div>
-      </nav>
-
-      <main>
-        <div class="tabs-nav">
-          <button type="button" class="tab-btn active" onclick="switchTab('terms-index')">
-            <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><title>Terms</title><line x1="8" y1="6" x2="21" y2="6"></line><line x1="8" y1="12" x2="21" y2="12"></line><line x1="8" y1="18" x2="21" y2="18"></line><line x1="3" y1="6" x2="3.01" y2="6"></line><line x1="3" y1="12" x2="3.01" y2="12"></line><line x1="3" y1="18" x2="3.01" y2="18"></line></svg>
-            Terms &amp; Concept Definitions
-          </button>
-          <button type="button" class="tab-btn" onclick="switchTab('ledger-taxonomy')">
-            <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><title>Ledgers</title><path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z"></path><polyline points="14 2 14 8 20 8"></polyline></svg>
-            The Five Ledger Families
-          </button>
-        </div>
-
-        <!-- TAB 1: TERMS INDEX -->
-        <div class="tab-pane active" id="pane-terms-index">
-          <div class="glass-card">
-            <h2>Core Architectural Concepts</h2>
-            <p>Filter terms across the 40 definitions:</p>
-
-            <div style="margin-bottom: 1.25rem;">
-              <input type="text" id="termSearchInput" placeholder="Filter terms (e.g. assignment, receipt, ledger, route)..." oninput="filterTerms()" style="width:100%; background:rgba(0,0,0,0.4); border:1px solid var(--border-card); padding:0.75rem 1rem; border-radius:8px; color:#fff; font-family:var(--font-sans);">
-            </div>
-
-            <div id="termsList">
-              <div class="term-card" data-term="assignment">
-                <div class="term-header">
-                  <span class="term-title">Assignment</span>
-                  <span class="type-badge">DurableAssignmentRecord (src/domains/dispatch/assignment-store.ts)</span>
-                </div>
-                <div class="term-def">The logical unit of work dispatched to the fleet. An assignment encapsulates task text, briefing, authority boundaries, and retry history across one or more concrete run attempts.</div>
-              </div>
-
-              <div class="term-card" data-term="run">
-                <div class="term-header">
-                  <span class="term-title">Run</span>
-                  <span class="type-badge">RunEnvelope (src/domains/dispatch/types.ts)</span>
-                </div>
-                <div class="term-def">A concrete execution attempt of an assignment. Every run possesses a unique UUIDv7 identifier, an isolated event stream, a designated execution node, and a final cryptographically sealed receipt.</div>
-              </div>
-
-              <div class="term-card" data-term="receipt">
-                <div class="term-header">
-                  <span class="term-title">Receipt</span>
-                  <span class="type-badge">RunReceipt (src/domains/dispatch/types.ts, v16)</span>
-                </div>
-                <div class="term-def">An immutable, cryptographically sealed record of a completed run containing full execution facts, tool telemetry, token accounting, validation grounding, and outcome codes.</div>
-              </div>
-
-              <div class="term-card" data-term="attempt">
-                <div class="term-header">
-                  <span class="term-title">Attempt</span>
-                  <span class="type-badge">RunLineage.attempt (src/domains/dispatch/types.ts)</span>
-                </div>
-                <div class="term-def">A 0-based sequential retry index of a logical assignment. Retries after infrastructure errors increment this index while preserving previous run records and receipts.</div>
-              </div>
-
-              <div class="term-card" data-term="batch">
-                <div class="term-header">
-                  <span class="term-title">Batch</span>
-                  <span class="type-badge">DetachedBatchRecord (src/domains/dispatch/batch-store.ts)</span>
-                </div>
-                <div class="term-def">A durable collection of detached assignments created and tracked together under a single batch ID in <code>batches.json</code>.</div>
-              </div>
-
-              <div class="term-card" data-term="plan">
-                <div class="term-header">
-                  <span class="term-title">Plan</span>
-                  <span class="type-badge">ExecutionPlan (src/domains/dispatch/execution-plan.ts)</span>
-                </div>
-                <div class="term-def">A multi-step directed acyclic graph (DAG) defining steps, dependencies, code validations, and budget ceilings approved by the operator before dispatch.</div>
-              </div>
-
-              <div class="term-card" data-term="topology">
-                <div class="term-header">
-                  <span class="term-title">Topology</span>
-                  <span class="type-badge">ExecutionPlanTopology / DispatchPlanTopology</span>
-                </div>
-                <div class="term-def">Multi-agent structural orchestration pattern governing workflow execution: <code>parallel</code>, <code>sequential</code>, <code>pipeline</code>, <code>review</code>, <code>compete</code>, and <code>fleet</code>.</div>
-              </div>
-
-              <div class="term-card" data-term="route">
-                <div class="term-header">
-                  <span class="term-title">Route</span>
-                  <span class="type-badge">RouteCandidate (src/domains/dispatch/route-decision.ts)</span>
-                </div>
-                <div class="term-def">An exact execution tuple composed of <code>{ agent, target, model, node }</code> evaluated by the active route planner for capability fit and cost readiness.</div>
-              </div>
-            </div>
-          </div>
-        </div>
-
-        <!-- TAB 2: LEDGER TAXONOMY -->
-        <div class="tab-pane" id="pane-ledger-taxonomy">
-          <h2>The Five Distinct Ledger Families</h2>
-          <table class="ref-table">
-            <thead>
-              <tr>
-                <th>Ledger Name</th>
-                <th>Storage Path</th>
-                <th>Owning Type</th>
-                <th>Purpose &amp; Consumers</th>
-              </tr>
-            </thead>
-            <tbody>
-              <tr>
-                <td><strong>Run Ledger</strong></td>
-                <td><code>&lt;stateDir&gt;/runs.json</code></td>
-                <td><code>RunEnvelope</code></td>
-                <td>Durable dispatch run index read by Fleet board, <code>clio-coder trace</code>, and eval linking.</td>
-              </tr>
-              <tr>
-                <td><strong>Agent Ledger</strong></td>
-                <td><code>&lt;stateDir&gt;/agent-ledgers.json</code></td>
-                <td><code>AgentLedgerEntry</code></td>
-                <td>Append-only progress log written by concurrent dispatch workers via <code>ledger</code> tool.</td>
-              </tr>
-              <tr>
-                <td><strong>Session Ledger</strong></td>
-                <td><code>&lt;stateDir&gt;/sessions/.../current.jsonl</code></td>
-                <td><code>SessionEntry</code> (v3)</td>
-                <td>Append-only conversation turn ledger read by <code>/resume</code>, <code>/tree</code>, and <code>/fork</code>.</td>
-              </tr>
-              <tr>
-                <td><strong>Task Ledger</strong></td>
-                <td>Folded into session entries</td>
-                <td><code>TaskLedgerEntry</code></td>
-                <td>Persisted session task board state surviving session switches and forks.</td>
-              </tr>
-              <tr>
-                <td><strong>Context Ledger</strong></td>
-                <td>Runtime state</td>
-                <td><code>ContextLedgerCategory</code></td>
-                <td>Accounting of token budget consumption across system, tools, skills, and memory.</td>
-              </tr>
-            </tbody>
-          </table>
-        </div>
-
-        <!-- Related Navigation -->
-        <nav class="related-nav" aria-label="Related Pages">
-          <a href="troubleshooting_blueprint.html" class="nav-link-card">
-            <span class="nav-label">Previous Blueprint</span>
-            <span class="nav-title">Troubleshooting</span>
-          </a>
-          <a href="acp_blueprint.html" class="nav-link-card next">
-            <span class="nav-label">Next Blueprint</span>
-            <span class="nav-title">ACP Protocol Server</span>
-          </a>
+    <div class="page-layout-grid reference-layout">
+      <aside class="sidebar reference-sidebar" aria-label="On this page">
+        <nav class="toc-container">
+          <p class="toc-title">On this page</p>
+          <a class="sidebar-source" href="https://github.com/iowarp/clio-coder/blob/main/docs/guide/glossary.md">Canonical Markdown<br>docs/guide/glossary.md</a>
+          <ul class="toc-list"></ul>
         </nav>
+      </aside>
+      <main class="reference-main" id="reference-content">
+        <article class="reference-prose glass-card">
+<blockquote>
+<p><strong>Visual blueprint:</strong> The source checkout includes the complete
+<a href="glossary_blueprint.html">Clio Coder Glossary visual reference</a>.</p>
+</blockquote>
+<p>This document defines the 50 core architectural concepts and terminology used throughout Clio Coder, mapped to their authoritative TypeScript type definitions in <code>src/</code>.</p>
+<hr>
+<h2>Terms &amp; Concept Definitions</h2>
+<h3>1. Assignment</h3>
+<ul>
+<li><strong>Definition</strong>: The logical unit of work dispatched to the fleet. An assignment encapsulates the requested task, briefing, authority boundaries, and retry history across one or more concrete run attempts.</li>
+<li><strong>Owning Type</strong>: <code>DurableAssignmentRecord</code> in <code>src/domains/dispatch/assignment-store.ts</code>.</li>
+</ul>
+<h3>2. Run</h3>
+<ul>
+<li><strong>Definition</strong>: A concrete execution attempt of an assignment. Dispatch creates a 12-character random base36 run identifier with <code>newRunId()</code>. Session ids use the same 12-character base36 generator, while appended session turn and entry ids use UUIDv7. Every run has an isolated event stream, a designated execution node, and a final cryptographically sealed receipt.</li>
+<li><strong>Owning Type</strong>: <code>RunEnvelope</code> in <code>src/domains/dispatch/types.ts</code>.</li>
+</ul>
+<h3>3. Attempt</h3>
+<ul>
+<li><strong>Definition</strong>: A 0-based sequential retry index of a logical assignment. The first run of an assignment is attempt 0; a retry after a retriable infrastructure error increments it while preserving the earlier attempt&#39;s own run and receipt.</li>
+<li><strong>Owning Type</strong>: <code>RunLineage.attempt</code> in <code>src/domains/dispatch/types.ts</code>.</li>
+</ul>
+<h3>4. Batch</h3>
+<ul>
+<li><strong>Definition</strong>: A durable collection of detached assignments created and tracked together under a single batch ID (<code>batches.json</code>).</li>
+<li><strong>Owning Type</strong>: <code>DetachedBatchRecord</code> in <code>src/domains/dispatch/batch-store.ts</code>.</li>
+</ul>
+<h3>5. Plan</h3>
+<ul>
+<li><strong>Definition</strong>: A multi-step directed acyclic graph (DAG) defining steps, dependencies, code validations, and budget ceilings approved by the operator before dispatch.</li>
+<li><strong>Owning Type</strong>: <code>ExecutionPlan</code> in <code>src/domains/dispatch/execution-plan.ts</code>.</li>
+</ul>
+<h3>6. Receipt</h3>
+<ul>
+<li><strong>Definition</strong>: An immutable, cryptographically sealed record of a completed run containing full execution facts, tool telemetry, token accounting, validation grounding, and outcome codes.</li>
+<li><strong>Owning Type</strong>: <code>RunReceipt</code> in <code>src/domains/dispatch/types.ts</code> (<code>RUN_RECEIPT_INTEGRITY_VERSION = 20</code>).</li>
+</ul>
+<h3>7. Envelope</h3>
+<ul>
+<li><strong>Definition</strong>: A bounded container enforcing byte-length limits and truncation indicators on a dynamic payload. Tool output carries shown and total byte counts plus a continuation fragment; a parent briefing carries byte count and SHA-256 content hash instead.</li>
+<li><strong>Owning Type</strong>: <code>Observation</code> in <code>src/tools/observation.ts</code> for tool output; <code>RunBriefingProvenance</code> in <code>src/domains/dispatch/types.ts</code> for briefings.</li>
+</ul>
+<h3>8. Phase</h3>
+<ul>
+<li><strong>Definition</strong>: A designated execution interval within a run. Every trace event and spend row is keyed to one <code>phaseId</code>, and the <code>phases</code> table is opened alongside <code>runs</code> for each operator turn.</li>
+<li><strong>Owning Type</strong>: <code>TraceEventInput.phaseId</code> and the <code>phases</code> table in <code>src/domains/observability/trace-store.ts</code>.</li>
+</ul>
+<h3>9. Gate</h3>
+<ul>
+<li><strong>Definition</strong>: A validation or review barrier (such as a read-only reviewer verdict or a compete judge decision) determining whether candidate diffs are merged or revised.</li>
+<li><strong>Owning Type</strong>: <code>GateDecisionArtifact</code> in <code>src/domains/dispatch/gate-decisions.ts</code>.</li>
+</ul>
+<h3>10. Recipe</h3>
+<ul>
+<li><strong>Definition</strong>: A versioned Markdown document declaring an agent&#39;s static persona, tool profile, execution capability class, cost ceilings, and result contracts.</li>
+<li><strong>Owning Type</strong>: <code>AgentRecipe</code> in <code>src/domains/agents/recipe-schema.ts</code>.</li>
+</ul>
+<h3>11. Worker</h3>
+<ul>
+<li><strong>Definition</strong>: An isolated execution subprocess (or remote SSH worker) running a dedicated tool dispatch runtime and communicating over structured NDJSON socket channels.</li>
+<li><strong>Owning Type</strong>: <code>WorkerSpec</code> in <code>src/worker/spec-contract.ts</code>.</li>
+</ul>
+<h3>12. Target</h3>
+<ul>
+<li><strong>Definition</strong>: A configured provider endpoint definition mapping a named identifier to an LLM provider runtime, base URL, authentication method, and default model.</li>
+<li><strong>Owning Type</strong>: <code>TargetDescriptor</code> in <code>src/core/config.ts</code>.</li>
+</ul>
+<h3>13. Node</h3>
+<ul>
+<li><strong>Definition</strong>: An addressable physical or virtual compute host within the fleet capacity pool (<code>local</code> or remote SSH host).</li>
+<li><strong>Owning Type</strong>: <code>FleetNodeSnapshot</code> in <code>src/domains/scheduling/cluster.ts</code>.</li>
+</ul>
+<h3>14. Route</h3>
+<ul>
+<li><strong>Definition</strong>: The complete execution candidate evaluated by the route planner for capability fit, readiness, and cost. Its operational identity includes agent, execution role, target, model, runtime, node, thinking level when present, tool and prompt composition, endpoint identity, and immutable spec/settings fingerprints.</li>
+<li><strong>Owning Type</strong>: <code>RouteCandidate</code> in <code>src/domains/dispatch/route-decision.ts</code>.</li>
+</ul>
+<h3>15. Posture (Autonomy Level)</h3>
+<ul>
+<li><strong>Definition</strong>: The active safety permission level governing tool mutation authority (<code>read-only</code>, <code>suggest</code>, <code>auto-edit</code>, <code>full-auto</code>).</li>
+<li><strong>Owning Type</strong>: <code>AutonomyLevel</code> in <code>src/domains/safety/autonomy.ts</code>.</li>
+</ul>
+<h3>16. Capability Class</h3>
+<ul>
+<li><strong>Definition</strong>: The maximum permitted mutation boundary declared by an agent recipe (<code>read-only</code>, <code>verification</code>, <code>artifact-write</code>, <code>workspace-edit</code>).</li>
+<li><strong>Owning Type</strong>: <code>AgentCapabilityClass</code> in <code>src/domains/agents/spec.ts</code>.</li>
+</ul>
+<h3>17. Topology</h3>
+<ul>
+<li><strong>Definition</strong>: The multi-agent structural orchestration pattern governing workflow execution. Three unions spell it for three jobs. A compiled plan supports <code>parallel</code>, <code>sequential</code>, <code>pipeline</code>, <code>review</code>, <code>compete</code>, <code>council</code>, and <code>fleet</code>. A capacity reservation supports <code>parallel</code>, <code>detached</code>, <code>sequential</code>, <code>pipeline</code>, <code>review</code>, <code>compete</code>, and <code>council</code>. The dispatch-plan tool surface supports all eight values from those two sets. The operator-facing argument is spelled <code>mode</code>; <code>singular</code> (the one-task call shape) and <code>auto</code> are values of that argument, not topologies.</li>
+<li><strong>Owning Types</strong>: <code>ExecutionPlanTopology</code> in <code>src/domains/dispatch/execution-plan.ts</code>, <code>ReservationTopology</code> in <code>src/domains/dispatch/reservation-store.ts</code>, <code>DispatchPlanTopology</code> in <code>src/tools/dispatch-plan.ts</code>.</li>
+</ul>
+<h3>18. Worker Block</h3>
+<ul>
+<li><strong>Definition</strong>: The attributed transcript segment rendering a worker&#39;s streaming execution. It includes a header with origin glyph and route, a rail for worker prose, coalesced tool names, and a one-line receipt footer.</li>
+<li><strong>Owning Type</strong>: <code>WorkerEntryState</code> in <code>src/interactive/worker-stream.ts</code>.</li>
+</ul>
+<h3>19. Origin Glyphs (<code>◇</code>/<code>◆</code>)</h3>
+<ul>
+<li><strong>Definition</strong>: Transcript and fleet board indicators that identify who requested a run. The glyph <code>◇</code> marks operator-typed runs, <code>◆</code> marks model-requested dispatches, and a dim dot marks internal Clio runs. Transcript worker entries admit only user and agent origins; internal runs can appear on dispatch surfaces but never become transcript worker entries.</li>
+<li><strong>Owning Types</strong>: <code>WorkerRunOrigin</code> in <code>src/domains/session/entries.ts</code> for transcript entries; <code>DispatchRequestOrigin</code> in <code>src/domains/dispatch/types.ts</code> for user, agent, and internal dispatches.</li>
+</ul>
+<h3>20. Share Note</h3>
+<ul>
+<li><strong>Definition</strong>: A bounded operator note formatted as <code>[worker result] &lt;agent&gt; · run &lt;id&gt; · &lt;outcome&gt; · shared by the operator</code> that delivers a finished worker answer into the main agent context over the user-turn path.</li>
+<li><strong>Owning Type</strong>: <code>WorkerShareFacts</code> in <code>src/interactive/worker-share.ts</code>.</li>
+</ul>
+<h3>21. Fold</h3>
+<ul>
+<li><strong>Definition</strong>: Collapsing an expanded tool call or worker block down to a single-line summary row. Toggled for the newest foldable item with <code>Alt+O</code> or for all items with <code>Ctrl+Alt+O</code> / <code>Alt+Shift+O</code>.</li>
+<li><strong>Owning Type</strong>: <code>WorkerEntryRenderOptions</code> in <code>src/interactive/renderers/worker-entry.ts</code>.</li>
+</ul>
+<h3>22. Interop</h3>
+<ul>
+<li><strong>Definition</strong>: The domain governing discovery, compatibility roots, and delegation wiring for other coding agents installed on the local machine and in the repository.</li>
+<li><strong>Owning Type</strong>: <code>InteropContract</code> in <code>src/domains/interop/contract.ts</code>.</li>
+</ul>
+<h3>23. Consent Record</h3>
+<ul>
+<li><strong>Definition</strong>: A persistent state entry recording the operator&#39;s decision to accept or decline an interop agent proposal, written atomically under <code>interop.json</code>.</li>
+<li><strong>Owning Type</strong>: <code>InteropAgentRecord</code> in <code>src/domains/interop/types.ts</code>.</li>
+</ul>
+<h3>24. Fingerprint</h3>
+<ul>
+<li><strong>Definition</strong>: A SHA-256 digest of stable agent facts (including binary path, version, and launch recipe) that keys consent records so standing decisions stay valid until facts change.</li>
+<li><strong>Owning Type</strong>: <code>InteropAgentFacts</code> in <code>src/domains/interop/types.ts</code>.</li>
+</ul>
+<h3>25. noWritePaths</h3>
+<ul>
+<li><strong>Definition</strong>: A damage-control path policy class that permits reads while blocking writes and deletes under every registered foreign agent directory across all autonomy levels.</li>
+<li><strong>Owning Type</strong>: <code>PathPolicyKind</code> in <code>src/domains/safety/path-policy.ts</code>.</li>
+</ul>
+<h3>26. Foreign Prompt Root</h3>
+<ul>
+<li><strong>Definition</strong>: An external prompt directory owned by another coding agent (such as <code>.claude/commands</code> or <code>.codex/prompts</code>) from which Clio loads prompt templates.</li>
+<li><strong>Owning Type</strong>: <code>PromptTemplateRoot</code> in <code>src/domains/resources/prompts/loader.ts</code>.</li>
+</ul>
+<h3>27. Compat Root</h3>
+<ul>
+<li><strong>Definition</strong>: A compatibility directory for prompts or skills discovered from foreign agent installations, ranked below native Clio resource roots.</li>
+<li><strong>Owning Type</strong>: <code>ResourceSourceInfo</code> in <code>src/domains/resources/collision.ts</code>.</li>
+</ul>
+<h3>28. Trust Gate</h3>
+<ul>
+<li><strong>Definition</strong>: A security boundary requiring explicit operator opt-in via <code>integrations.projectResources.trustProjectImports</code> before prompt templates or skills from project-scope foreign roots can execute or expand.</li>
+<li><strong>Owning Type</strong>: <code>PromptTemplate</code> in <code>src/domains/resources/prompts/loader.ts</code>.</li>
+</ul>
+<h3>29. Fleet</h3>
+<ul>
+<li><strong>Definition</strong>: The set of addressable nodes Clio may place work on, <code>local</code> plus every configured SSH host, together with their capacity accounting. <code>fleet</code> is also the topology of a plan compiled from a fleet contract.</li>
+<li><strong>Owning Types</strong>: <code>FleetNodeSnapshot</code> in <code>src/domains/scheduling/cluster.ts</code> for capacity; <code>FleetContract</code> in <code>src/domains/agents/fleet-contract.ts</code> for the declared multi-step workflow.</li>
+</ul>
+<h3>30. Dispatch</h3>
+<ul>
+<li><strong>Definition</strong>: Sending one unit of work to a worker: the domain that resolves recipe, target, model, and node, admits the request against authority, spawns the worker, and seals the receipt. It is the <code>dispatch</code> tool, the <code>/run</code> slash command, and <code>src/domains/dispatch/</code>.</li>
+<li><strong>Owning Type</strong>: <code>DispatchRequest</code> in <code>src/domains/dispatch/contract.ts</code>.</li>
+</ul>
+<h3>31. Run Ledger</h3>
+<ul>
+<li><strong>Definition</strong>: The durable dispatch run list at <code>runs.json</code> in the state directory, retention-capped by <code>fleet.history.maxRuns</code>. It is what the fleet board, <code>clio-coder fleet status</code>, and eval linking read.</li>
+<li><strong>Owning Type</strong>: <code>RunEnvelope</code> in <code>src/domains/dispatch/types.ts</code>, persisted by <code>src/domains/dispatch/state.ts</code>.</li>
+</ul>
+<h3>32. Agent Ledger</h3>
+<ul>
+<li><strong>Definition</strong>: The append-only progress log a worker writes for itself through the <code>ledger</code> tool, mirrored to the orchestrator over the control lane and persisted in <code>agent-ledgers.json</code>. Live subscribers are tracked in memory by the ledger hub.</li>
+<li><strong>Owning Type</strong>: <code>AgentLedgerEntry</code> in <code>src/worker/protocol.ts</code>, stored by <code>src/domains/dispatch/agent-ledger-store.ts</code>.</li>
+</ul>
+<h3>33. Session Ledger</h3>
+<ul>
+<li><strong>Definition</strong>: The JSONL record of one session&#39;s turns, written per session and referenced by eval artifacts as <code>sessionLedgers</code>. It is what <code>/resume</code>, <code>/fork</code>, and replay read.</li>
+<li><strong>Owning Type</strong>: <code>SessionEntry</code> in <code>src/domains/session/entries.ts</code>.</li>
+</ul>
+<h3>34. Task Ledger</h3>
+<ul>
+<li><strong>Definition</strong>: The persisted form of the session task board: goals, subgoals, and the run ids in flight when the snapshot was folded. One session entry kind, distinct from the board that renders it.</li>
+<li><strong>Owning Type</strong>: <code>TaskLedgerEntry</code> in <code>src/domains/session/entries.ts</code>.</li>
+</ul>
+<h3>35. Context Ledger</h3>
+<ul>
+<li><strong>Definition</strong>: The accounting of how the model&#39;s context window is spent and the input to compaction decisions. Current buckets are <code>system</code>, <code>tools</code>, <code>agents</code>, <code>skills</code>, <code>memory</code>, <code>project</code>, <code>messages</code>, <code>pending</code>, <code>reserve</code>, <code>free</code>, and <code>streaming</code>.</li>
+<li><strong>Owning Type</strong>: <code>ContextLedgerCategory</code> in <code>src/domains/session/context-ledger.ts</code>.</li>
+</ul>
+<h3>36. Dispatch Board</h3>
+<ul>
+<li><strong>Definition</strong>: The live fleet view: one row per in-flight or recently finished run, carrying origin glyph, route, status, and the steer and cancel affordances.</li>
+<li><strong>Owning Type</strong>: <code>DispatchBoardRow</code> in <code>src/interactive/dispatch-board.ts</code>.</li>
+</ul>
+<h3>37. Task Board</h3>
+<ul>
+<li><strong>Definition</strong>: The operator-facing goal and subgoal checklist for the session. It renders from a snapshot and persists as a task ledger entry, so the UI noun and the wire format are deliberately named differently.</li>
+<li><strong>Owning Type</strong>: <code>TaskBoardSnapshot</code> in <code>src/domains/session/task-board.ts</code>.</li>
+</ul>
+<h3>38. Dashboard</h3>
+<ul>
+<li><strong>Definition</strong>: The startup and footer panels summarizing targets, session, and spend. Not a board in the dispatch or task sense; it holds no rows a run or a goal maps to.</li>
+<li><strong>Owning Type</strong>: <code>WelcomeDashboardStats</code> in <code>src/interactive/welcome-dashboard.ts</code>.</li>
+</ul>
+<h3>39. Handbook</h3>
+<ul>
+<li><strong>Definition</strong>: <code>CLIO-CODER.md</code>, the human-owned, version-controlled project context file at the repository root: project name, one-line description, conventions, hard invariants, and optional sections, closed by a fingerprint comment.</li>
+<li><strong>Owning Type</strong>: <code>ParsedClioMd</code> in <code>src/domains/context/clio-md.ts</code>.</li>
+</ul>
+<h3>40. Delegate</h3>
+<ul>
+<li><strong>Definition</strong>: Another coding agent Clio drives over ACP stdio as if it were a worker, configured under <code>integrations.externalAgents.entries</code> and invoked with <code>/delegate</code>. A delegate is a foreign harness, not a model target.</li>
+<li><strong>Owning Type</strong>: <code>DelegationAgentConfig</code> in <code>src/core/defaults.ts</code>.</li>
+</ul>
+<h3>41. Working Set</h3>
+<ul>
+<li><strong>Definition</strong>: The part of the session ledger the model receives on the next request. It is the ledger with the current eviction projection applied, and it exists only in memory; the ledger itself is never narrowed. Not to be confused with the context ledger, which is the accounting of how the window is spent.</li>
+<li><strong>Owning Type</strong>: <code>WorkingSetView</code> in <code>src/domains/context/working-set/contract.ts</code>.</li>
+</ul>
+<h3>42. Projection</h3>
+<ul>
+<li><strong>Definition</strong>: The pure, idempotent transform from ledger entries to the entries the replay builder hands the model. It substitutes markers for evicted bodies and drops thinking from closed turns, returning unaffected entries by reference. Nothing about it is persisted.</li>
+<li><strong>Owning Type</strong>: <code>projectWorkingSet</code> in <code>src/domains/context/working-set/project.ts</code>.</li>
+</ul>
+<h3>43. Eviction</h3>
+<ul>
+<li><strong>Definition</strong>: The decision that a tool-result body or an assistant turn&#39;s thinking leaves the working set, recorded as an append-only ledger entry with a typed reason. It removes nothing: the original entry stays in the ledger and stays visible in the transcript, <code>/resume</code>, <code>/fork</code>, and the HTML export.</li>
+<li><strong>Owning Type</strong>: <code>ContextEvictionEntry</code> in <code>src/domains/session/entries.ts</code>.</li>
+</ul>
+<h3>44. Recall</h3>
+<ul>
+<li><strong>Definition</strong>: Readmitting an evicted body by ref, through <code>context(scope=&quot;recall&quot;, ref=...)</code> for the model or <code>/context recall &lt;ref&gt;</code> for the operator. A recall does not un-evict: the marker stays where it was so the provider prefix cache is untouched, and repeated recalls of one ref are the churn signal.</li>
+<li><strong>Owning Type</strong>: <code>ContextRecallEntry</code> in <code>src/domains/session/entries.ts</code>; resolution in <code>resolveRecall</code> in <code>src/domains/context/working-set/recall.ts</code>.</li>
+</ul>
+<h3>45. Marker</h3>
+<ul>
+<li><strong>Definition</strong>: The byte-stable one-line stub the projection renders in place of an evicted body, naming the ref, the reason, the tool, the size, and the exact recall call. It carries no timestamp and no counter, because a marker whose bytes drifted between renders would cold-start the prefix cache on a turn that evicted nothing new.</li>
+<li><strong>Owning Type</strong>: <code>renderMarker</code> in <code>src/domains/context/working-set/marker.ts</code>.</li>
+</ul>
+<h3>46. Canonical Trust Status</h3>
+<ul>
+<li><strong>Definition</strong>: The six-axis record of what is known about one run: artifact integrity, validation grounding, independent review, context provenance, autonomy enforcement, and completion evidence. It is an algebra, not a score: no axis promotes another, every non-absent state names its source and authority, and <code>absent</code>, <code>unknown</code>, and <code>not_applicable</code> are states in their own right. See <a href="memory_blueprint.html#canonical-trust-status">docs/architecture/evidence-and-memory.md</a> for the full state table.</li>
+<li><strong>Owning Type</strong>: <code>CanonicalTrustStatus</code> in <code>src/domains/evidence/trust-status.ts</code>.</li>
+</ul>
+<h3>47. Trust Projection</h3>
+<ul>
+<li><strong>Definition</strong>: The one rendering of the canonical trust status every operator surface prints. The compact human line answers who claims the result, what was observed, what was independently checked, and what is still unknown, in six fixed clauses (<code>sealed; grounded by host-verification; not independently reviewed; mediated; context recorded; completion evidenced</code>). The machine projection is the same answer as a bounded, versioned record with references to the detailed artifacts. Dispatch and monitor output, <code>evidence inspect</code>, <code>findings.md</code>, the Alt+W board, the receipt view, the eval bridge, and the ACP wire all print from it.</li>
+<li><strong>Owning Type</strong>: <code>formatTrustSummary</code> and <code>TrustSummaryProjection</code> in <code>src/domains/evidence/trust-projection.ts</code>.</li>
+</ul>
+<h3>48. Trust Verdict</h3>
+<ul>
+<li><strong>Definition</strong>: The presentation tier read off the axes in a fixed order, used for styling and sorting and never as a score. <code>reviewed</code> requires an authenticated independent pass and is the only tier styled as independently verified. <code>grounded</code> is observed validation without independent review. <code>unverified</code> is a sealed receipt with nothing observed. <code>compromised</code> is a broken seal, a bypassed gate, a failed or inferred validation, a failed or correlated review, or a contradictory context record. <code>unknown</code> is an unchecked or missing seal.</li>
+<li><strong>Owning Type</strong>: <code>TrustVerdict</code> and <code>trustVerdict</code> in <code>src/domains/evidence/trust-projection.ts</code>.</li>
+</ul>
+<h3>49. Trust Vocabulary</h3>
+<ul>
+<li><strong>Definition</strong>: The standardized word for each canonical state, so the same fact is never spelled two ways. <code>sealed</code> means the receipt authenticated against the ledger row; it says nothing about correctness. <code>grounded</code> means validation was observed to run and pass, named by its claimant (<code>host-verification</code>, <code>validation-tool</code>, <code>receipt-quality</code>, <code>evidence-grounding</code>). <code>independently reviewed</code> means an authenticated reviewer that was not the run itself recorded a verdict. <code>inferred</code> means the worker claimed validation and nothing was observed to have run. <code>mediated</code> is the word for the <code>enforced</code> autonomy state: Clio&#39;s own safety gate mediated the run. <code>approximated</code> and <code>bypassed</code> name an external runtime&#39;s enforcement, always with the runtime&#39;s id. <code>unknown</code> means a named source could not answer; <code>not applicable</code> means a named authority decided the axis does not apply.</li>
+<li><strong>Owning Type</strong>: <code>TRUST_STATE_WORDS</code> in <code>src/domains/evidence/trust-projection.ts</code>.</li>
+</ul>
+<h3>50. Commonly Confused Trust States</h3>
+<ul>
+<li><strong>Definition</strong>: <code>sealed</code> is not <code>grounded</code>: a receipt can authenticate perfectly and describe a run that validated nothing. <code>grounded</code> is not <code>independently reviewed</code>: a host check is Clio observing the run&#39;s own declared command, not a second agent judging the result. A <code>host checks verified</code> unit on the board is folded into validation grounding and is never independent review. <code>mediated</code> and <code>enforced</code> are one state under two names, the receipt grade and the canonical id. <code>not_requested</code> is not a trust state at all; a run with no host check reads <code>no validation observed</code>. <code>completion unevidenced</code> (a mutation finished with no validation at the completion boundary) is distinct from <code>no validation observed</code> (no validation was linked anywhere in the run): the first is the finish contract&#39;s observation, the second the evidence linker&#39;s.</li>
+<li><strong>Owning Type</strong>: <code>TRUST_STATE_WORDS</code> and <code>trustVerdict</code> in <code>src/domains/evidence/trust-projection.ts</code>; the axis states in <code>TRUST_STATUS_STATES</code> in <code>src/domains/evidence/trust-status.ts</code>.</li>
+</ul>
+        </article>
+        <nav class="related-nav" aria-label="Adjacent references">
+          <a class="nav-link-card" href="fleet_dispatch_blueprint.html"><span class="nav-label">Previous</span><span class="nav-title">Fleet Dispatch</span></a>
+          <a class="nav-link-card next" href="lifecycle_blueprint.html"><span class="nav-label">Next</span><span class="nav-title">Installation and Lifecycle Operations</span></a>
+        </nav>
+        <p class="reference-footer-note">Canonical content lives in the mapped Markdown page. This visual counterpart adds navigation without changing the contract.</p>
       </main>
     </div>
-
-    <footer>
-      <p>Clio Coder Glossary Blueprint &bull; Version 0.4.0 &bull; Gnosis Research Center</p>
-    </footer>
+    <footer>Clio Coder documentation · source-aligned at v0.4.2</footer>
   </div>
-
   <script src="shared.js"></script>
-  <script>
-    function switchTab(tabId) {
-      document.querySelectorAll('.tab-btn').forEach(btn => btn.classList.remove('active'));
-      document.querySelectorAll('.tab-pane').forEach(pane => pane.classList.remove('active'));
-
-      const pane = document.getElementById(`pane-${tabId}`);
-      if (pane) pane.classList.add('active');
-
-      const activeBtn = Array.from(document.querySelectorAll('.tab-btn')).find(btn => {
-        return btn.getAttribute('onclick')?.includes(`'${tabId}'`);
-      });
-      if (activeBtn) activeBtn.classList.add('active');
-
-      if (window.initTableOfContents) window.initTableOfContents();
-    }
-
-    function filterTerms() {
-      const q = document.getElementById('termSearchInput').value.toLowerCase().trim();
-      const cards = document.querySelectorAll('.term-card');
-      cards.forEach(card => {
-        const text = card.getAttribute('data-term') + ' ' + card.innerText.toLowerCase();
-        card.style.display = text.includes(q) ? 'block' : 'none';
-      });
-    }
-  </script>
 </body>
 </html>

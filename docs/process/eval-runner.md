@@ -1,8 +1,7 @@
 # Clio Coder Local Evaluation Runner
 
-> [!TIP]
-> **Interactive spec available:** The source checkout includes the
-> [eval blueprint](https://github.com/iowarp/clio-coder/blob/main/docs/html/eval_blueprint.html).
+> **Visual blueprint:** The source checkout includes the complete
+> [Clio Coder Local Evaluation Runner visual reference](https://github.com/iowarp/clio-coder/blob/main/docs/html/eval_blueprint.html).
 
 The local evaluation runner executes repository-local YAML task suites as deterministic subprocess checks. It is useful for comparing harness changes, prompts, tools, or local workflows.
 

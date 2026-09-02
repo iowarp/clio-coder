@@ -1,508 +1,728 @@
-<!DOCTYPE html>
+<!doctype html>
 <html lang="en">
 <head>
-  <meta charset="UTF-8">
-  <meta name="viewport" content="width=device-width, initial-scale=1.0">
-  <title>TUI Design System Blueprint (v0.4.0)</title>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <meta name="clio-markdown-source" content="docs/architecture/tui-design.md">
+  <meta name="clio-docs-version" content="0.4.2">
+  <title>Clio TUI Design System · Clio Coder 0.4.2</title>
+  <link rel="icon" href="data:,">
   <link rel="stylesheet" href="shared.css">
-  <style>
-    /* Terminal custom styles */
-    .terminal-container {
-      background: #060913;
-      border: 1px solid #1f354f;
-      border-radius: 8px;
-      font-family: var(--font-mono);
-      font-size: 0.85rem;
-      padding: 1.25rem;
-      color: #b0c4de;
-      box-shadow: inset 0 0 10px rgba(0,0,0,0.8);
-      position: relative;
-    }
-    .terminal-header {
-      border-bottom: 1px solid #1f354f;
-      padding-bottom: 0.5rem;
-      margin-bottom: 0.75rem;
-      display: flex;
-      justify-content: space-between;
-      align-items: center;
-      font-size: 0.75rem;
-      color: #6a7c85;
-    }
-
-    .tui-accent { color: #46e5d0; }
-    .tui-accent-deep { color: #1fb7a6; font-weight: bold; }
-    .tui-action { color: #ff7e29; }
-    .tui-success { color: #57e389; }
-    .tui-warn { color: #ffb454; }
-    .tui-error { color: #ff5c66; }
-    .tui-reason { color: #9d8cff; }
-    .tui-dim { color: #6a7a85; }
-    .tui-muted { color: #8a99a4; }
-
-    .color-swatch {
-      width: 20px;
-      height: 20px;
-      border-radius: 4px;
-      border: 1px solid rgba(255,255,255,0.1);
-      display: inline-block;
-      vertical-align: middle;
-    }
-  </style>
 </head>
-<body>
+<body data-doc-category="architecture">
+  <div class="reading-progress" aria-hidden="true"></div>
+  <a class="skip-link" href="#reference-content">Skip to reference</a>
   <div class="container">
-    <header>
+    <header class="document-header" data-category="Architecture">
       <div class="header-left">
-        <div class="header-logo">
-          <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" style="color: var(--color-cyan);"><title>Icon</title>
-            <rect x="3" y="3" width="18" height="18" rx="2" ry="2"></rect>
-            <line x1="9" y1="3" x2="9" y2="21"></line>
+        <a class="header-logo" href="index.html" aria-label="Documentation index">
+          <svg viewBox="0 0 24 24" fill="none" aria-hidden="true">
+            <path d="M12 2 2 7l10 5 10-5-10-5Z" stroke="url(#clio-logo)" stroke-width="2" stroke-linejoin="round"/>
+            <path d="m2 12 10 5 10-5M2 17l10 5 10-5" stroke="url(#clio-logo)" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"/>
+            <defs><linearGradient id="clio-logo" x1="2" y1="2" x2="22" y2="22"><stop stop-color="#00d4db"/><stop offset="1" stop-color="#ff7e29"/></linearGradient></defs>
           </svg>
-        </div>
+        </a>
         <div class="header-title-wrapper">
+          <p class="document-kicker">Architecture / canonical reference</p>
           <h1>Clio TUI Design System</h1>
-          <p>Glyph vocabularies, layout rules, and live CLI transcript terminal formatting</p>
-          <div class="meta-chips-row">
-            <span class="chip">Source: docs/tui-design.md</span>
-            <span class="chip chip-orange">clio-coder docs tui_design</span>
-          </div>
+          <p class="document-path">docs/architecture/tui-design.md</p>
         </div>
       </div>
       <div class="header-right">
-        <span class="version-badge">Clio Coder v0.4.0</span>
-        <a href="index.html" class="back-btn">
-          <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><title>Icon</title><line x1="19" y1="12" x2="5" y2="12"></line><polyline points="12 19 5 12 12 5"></polyline></svg>
-          Dashboard Hub
-        </a>
+        <a class="back-btn" href="index.html">← Index</a>
+        <span class="version-badge">v0.4.2</span>
       </div>
     </header>
-
-    <div class="page-layout-grid">
-      <nav class="sidebar" aria-label="Table of Contents">
-        <div class="toc-container">
-          <div class="toc-title">On This Page</div>
-          <ul class="toc-list">
-            <!-- Dynamically populated -->
-          </ul>
-        </div>
-      </nav>
-
-      <main>
-        <div class="glass-card">
-          <h2>Overview Summary</h2>
-          <p>Clio's interactive TUI operates under the core design tenet: color indicates state, boxes outline structure, and brand icons represent identity. Everything that is not state or structure remains visually quiet.</p>
-        </div>
-
-        <div class="tabs-nav">
-          <button type="button" class="tab-btn active" onclick="switchTab('token-lab')">
-            Color &amp; Glyph Lab
-          </button>
-          <button type="button" class="tab-btn" onclick="switchTab('fullscreen-spec')">
-            Fullscreen Mode &amp; Surfaces
-          </button>
-          <button type="button" class="tab-btn" onclick="switchTab('ledger-diffs')">
-            Tool Ledgers &amp; Diffs
-          </button>
-          <button type="button" class="tab-btn" onclick="switchTab('terminal-sim')">
-            Transcript Previewer
-          </button>
-        </div>
-
-        <!-- Tab 1: Token Lab -->
-        <div class="tab-pane active" id="pane-token-lab">
-          <div class="blueprint-layout">
-            <div class="specs-col">
-              <div class="glass-card">
-                <h3>TUI Color Semantic Tokens</h3>
-                <p>Click any token row to highlight in the simulator:</p>
-
-                <table class="env-table" style="cursor: pointer;">
-                  <thead>
-                    <tr>
-                      <th>Token</th>
-                      <th>Color Value</th>
-                      <th>Typical Role</th>
-                    </tr>
-                  </thead>
-                  <tbody>
-                    <tr onclick="previewToken('accent')">
-                      <td class="env-name" style="color:#46e5d0;">accent</td>
-                      <td><span class="color-swatch" style="background:#46e5d0;"></span> #46E5D0</td>
-                      <td>Brand headers, cursor, tool actions, interactive prompts</td>
-                    </tr>
-                    <tr onclick="previewToken('accentDeep')">
-                      <td class="env-name" style="color:#1fb7a6;">accentDeep</td>
-                      <td><span class="color-swatch" style="background:#1fb7a6;"></span> #1FB7A6</td>
-                      <td>Structural emphasis only: bold CAPS section tags (WORKSPACE, ROUTE, NEXT)</td>
-                    </tr>
-                    <tr onclick="previewToken('action')">
-                      <td class="env-name" style="color:#ff7e29;">action</td>
-                      <td><span class="color-swatch" style="background:#ff7e29;"></span> #FF7E29</td>
-                      <td>Active operations only: dispatching, running connect/probe, STEER mode tag</td>
-                    </tr>
-                    <tr onclick="previewToken('success')">
-                      <td class="env-name" style="color:#57e389;">success</td>
-                      <td><span class="color-swatch" style="background:#57e389;"></span> #57E389</td>
-                      <td>Success ticks, clean state status, verified health, diff additions</td>
-                    </tr>
-                    <tr onclick="previewToken('warning')">
-                      <td class="env-name" style="color:#ffb454;">warning</td>
-                      <td><span class="color-swatch" style="background:#ffb454;"></span> #FFB454</td>
-                      <td>Warnings, truncations, cache issues, retry state</td>
-                    </tr>
-                    <tr onclick="previewToken('error')">
-                      <td class="env-name" style="color:#ff5c66;">error</td>
-                      <td><span class="color-swatch" style="background:#ff5c66;"></span> #FF5C66</td>
-                      <td>Failures, bad loops, errors, critical alerts, diff removals</td>
-                    </tr>
-                    <tr onclick="previewToken('reason')">
-                      <td class="env-name" style="color:#9d8cff;">reason</td>
-                      <td><span class="color-swatch" style="background:#9d8cff;"></span> #9D8CFF</td>
-                      <td>Purple reasoning fields, thinking rails, compacting state</td>
-                    </tr>
-                    <tr onclick="previewToken('dim')">
-                      <td class="env-name" style="color:#6a7a85;">dim</td>
-                      <td><span class="color-swatch" style="background:#6a7a85;"></span> #6A7A85</td>
-                      <td>Keys, delimiters, separators, usage receipts</td>
-                    </tr>
-                    <tr onclick="previewToken('muted')">
-                      <td class="env-name" style="color:#8a99a4;">muted</td>
-                      <td><span class="color-swatch" style="background:#8a99a4;"></span> #8A99A4</td>
-                      <td>System text, notices, inactive metadata</td>
-                    </tr>
-                  </tbody>
-                </table>
-              </div>
-            </div>
-
-            <div class="specs-col">
-              <div class="glass-card">
-                <h3>Glyph System Vocabulary</h3>
-                <table class="env-table">
-                  <thead>
-                    <tr>
-                      <th>Glyph</th>
-                      <th>Token</th>
-                      <th>Meaning</th>
-                    </tr>
-                  </thead>
-                  <tbody>
-                    <tr>
-                      <td style="font-size:1.1rem; text-align:center;"><code>›</code></td>
-                      <td><code>accent</code></td>
-                      <td>User prompt turn start</td>
-                    </tr>
-                    <tr>
-                      <td style="font-size:1.1rem; text-align:center;"><code>✦</code></td>
-                      <td><code>accent</code> / <code>error</code></td>
-                      <td>Agent turn voice glyph (turns red on turn failure)</td>
-                    </tr>
-                    <tr>
-                      <td style="font-size:1.1rem; text-align:center;"><code>✓</code></td>
-                      <td><code>success</code></td>
-                      <td>Operation success checkmark</td>
-                    </tr>
-                    <tr>
-                      <td style="font-size:1.1rem; text-align:center;"><code>✗</code></td>
-                      <td><code>error</code></td>
-                      <td>Failure indicator cross</td>
-                    </tr>
-                    <tr>
-                      <td style="font-size:1.1rem; text-align:center;"><code>▸</code></td>
-                      <td><code>toolHeader</code></td>
-                      <td>Tool ledger header and subline indicator</td>
-                    </tr>
-                    <tr>
-                      <td style="font-size:1.1rem; text-align:center;"><code>◆ / ◇</code></td>
-                      <td><code>active</code></td>
-                      <td>Model-requested (◆) vs operator-requested (◇) dispatch</td>
-                    </tr>
-                    <tr>
-                      <td style="font-size:1.1rem; text-align:center;"><code>▰ ▒ ▱</code></td>
-                      <td><code>contextMeters</code></td>
-                      <td>Context gauge cells (used, reserve, free)</td>
-                    </tr>
-                  </tbody>
-                </table>
-              </div>
-            </div>
-          </div>
-        </div>
-
-        <!-- Tab 2: Fullscreen Spec -->
-        <div class="tab-pane" id="pane-fullscreen-spec">
-          <h2>Fullscreen Mode &amp; Screen Architecture</h2>
-          <div class="grid grid-2">
-            <div class="glass-card">
-              <h3>Fullscreen Alternate-Screen Renderer</h3>
-              <p>Opt-in via <code>terminal.tuiMode: "fullscreen"</code> (restart required):</p>
-              <ul>
-                <li>Docked composer, follow-up queue, and footer remain locked at the bottom.</li>
-                <li>Transcript and launchpad occupy an independently scrollable upper viewport.</li>
-                <li><code>PageUp</code> / <code>PageDown</code> scroll one viewport; <code>Home</code> / <code>End</code> jump to bounds.</li>
-                <li><code>Ctrl+Shift+Up</code> / <code>Ctrl+Shift+Down</code> jump between semantic prompts via OSC 133 prompt markers.</li>
-                <li><code>terminal.fullscreenScrollbar</code>: <code>hidden</code>, <code>auto</code>, or <code>always</code>.</li>
-                <li>Manual scrolling suspends follow-end until the operator returns to the bottom.</li>
-              </ul>
-            </div>
-            <div class="glass-card">
-              <h3>Prompt Navigation History</h3>
-              <p>Process-local navigation history via <code>Ctrl+P</code> and <code>Ctrl+N</code>:</p>
-              <ul>
-                <li>Accepted chat turns, slash commands, steering inputs, follow-ups, and interrupts are recorded.</li>
-                <li>Consecutive duplicates are collapsed.</li>
-                <li>Rejected or malformed inputs remain editable in the composer without polluting history.</li>
-                <li>Navigating forward past the newest entry cleanly restores the unfinished draft prompt.</li>
-              </ul>
-            </div>
-          </div>
-
-          <h2>Four-Zone Layout</h2>
-          <pre><code>┌──────────────────────────────────────────────────────────────┐
-│ ZONE 1: Launchpad (Pre-Submit) / Immutable Header (Collapsed)│
-├──────────────────────────────────────────────────────────────┤
-│ ZONE 2: Conversation Transcript (Independently Scrollable)   │
-│         - User prose (› hanging indent)                      │
-│         - Assistant prose (✦ hanging indent)                 │
-│         - Folded thinking blocks (│ reason rail)             │
-│         - Tool ledgers & word-level diffs                    │
-├──────────────────────────────────────────────────────────────┤
-│ ZONE 3: Composer (ClioEditor: MESSAGE, FOLLOW-UP, STEER)     │
-├──────────────────────────────────────────────────────────────┤
-│ ZONE 4: Footer Dashboard (Compact 2-Line / Expanded Alt+U)   │
-└──────────────────────────────────────────────────────────────┘</code></pre>
-
-          <h2 style="margin-top:2rem;">First-Class Guest Panes Mode (<code>--with-panes</code>)</h2>
-          <div class="grid grid-2">
-            <div class="glass-card">
-              <h3>Multiplexer Guest Integration</h3>
-              <p>Opt in with <code>--with-panes</code> for one launch or <code>panes.enabled: "auto"</code> in settings. The accepted <code>embedded</code> setting currently resolves to unavailable because host startup is not implemented:</p>
-              <ul>
-                <li>Validates <code>HERDR_ENV=1</code> environment, connects to reachable socket, and pings before registering pane tools.</li>
-                <li>Provides <code>/panes</code> slash commands and the model-facing <code>panes</code> tool for focus, show, open, close, and inventory.</li>
-                <li>Fixed utility presets (e.g. file-picker via <code>yazi</code>) keep arbitrary shell command execution strictly operator-driven.</li>
-                <li>Zero-cost fallback: Clio functions fully without external multiplexer dependencies.</li>
-              </ul>
-            </div>
-            <div class="glass-card">
-              <h3>Operator-Pulled Watch Pane</h3>
-              <p>Independent, decoupled viewer loop via <code>clio-coder fleet view --watch &lt;selection-file&gt;</code>:</p>
-              <ul>
-                <li>One side pane beside Clio rendering whichever dispatched worker the operator selects.</li>
-                <li>Atomic single-line selection file writes: arrow navigation retargets the watch process without socket contention.</li>
-                <li>The viewer process reads the run ledger, append-only NDJSON event journal, and sealed receipt without routing display traffic through dispatch.</li>
-                <li>Closing or detaching the watch pane leaves underlying worker executions undisturbed.</li>
-              </ul>
-            </div>
-          </div>
-        </div>
-
-        <!-- Tab 3: Ledgers & Diffs -->
-        <div class="tab-pane" id="pane-ledger-diffs">
-          <h2>Tool Ledgers, Diffs, and Approval Facts</h2>
-          <div class="grid grid-2">
-            <div class="glass-card">
-              <h3>Stable Tool Lifecycle Rows</h3>
-              <p>Every tool call owns one stable transcript row from start to settlement:</p>
-              <ul>
-                <li><code>forming call</code> &rarr; <code>ready</code> &rarr; <code>running</code> &rarr; <code>settled</code>.</li>
-                <li>Running calls display <code>live output</code> and stream partial results in place.</li>
-                <li>Parked calls display transient approval facts: action class, asking safety axis, and target.</li>
-                <li>Settled calls display exit code, byte/line counts, duration, and full output path.</li>
-              </ul>
-            </div>
-            <div class="glass-card">
-              <h3>Word-Level Diffs &amp; Diagram Rendering</h3>
-              <ul>
-                <li><strong>edit / write:</strong> Render numbered diffs with word-level changes highlighted in <code>success</code> green and <code>error</code> red.</li>
-                <li><strong>Mermaid Diagrams:</strong> Fenced <code>mermaid</code> blocks render as Unicode flowcharts, state diagrams, and class diagrams when they fit width-wise.</li>
-                <li><strong>Unicode LaTeX:</strong> Math expressions like <code>$x^2$</code> render as Unicode (<code>x²</code>) without external image dependencies.</li>
-              </ul>
-            </div>
-          </div>
-        </div>
-
-        <!-- Tab 4: Transcript Sim -->
-        <div class="tab-pane" id="pane-terminal-sim">
-          <div class="blueprint-layout">
-            <div class="specs-col">
-              <div class="glass-card">
-                <h3>Choreography Options</h3>
-                <p>Configure the state of the active step in our simulated terminal:</p>
-
-                <div class="form-group">
-                  <label for="stepState">Active Step State</label>
-                  <select id="stepState" onchange="renderTerminalSim()">
-                    <option value="launchpad">Launchpad (Pre-Submit)</option>
-                    <option value="thinking">Model Thinking (reasoning Purple)</option>
-                    <option value="diff">Edit / Write Word-Level Diff</option>
-                    <option value="approval">Parked Approval Facts</option>
-                    <option value="executing">Tool Executing (gear Cyan)</option>
-                    <option value="success">Success Final (Voice Turn + Hanging Indent)</option>
-                    <option value="error">Failure Blocked (cross Red)</option>
-                  </select>
-                </div>
-
-                <div class="form-group">
-                  <label for="inputText">Simulated Prompt</label>
-                  <input type="text" id="inputText" value="Summarize repository boundaries and verify compilation." oninput="renderTerminalSim()">
-                </div>
-              </div>
-            </div>
-
-            <div class="specs-col">
-              <div class="glass-card">
-                <h3>Simulated CLI Frame Preview</h3>
-
-                <div class="terminal-container" id="terminalSim">
-                  <!-- Generated dynamically -->
-                </div>
-              </div>
-            </div>
-          </div>
-        </div>
-
-        <!-- Related Navigation -->
-        <nav class="related-nav" aria-label="Related Pages">
-          <a href="provider_adapter_blueprint.html" class="nav-link-card">
-            <span class="nav-label">Previous Blueprint</span>
-            <span class="nav-title">Provider Adapter Cookbook</span>
-          </a>
-          <a href="worker_dispatch_blueprint.html" class="nav-link-card next">
-            <span class="nav-label">Next Blueprint</span>
-            <span class="nav-title">Worker Dispatch Mechanics</span>
-          </a>
+    <div class="page-layout-grid reference-layout">
+      <aside class="sidebar reference-sidebar" aria-label="On this page">
+        <nav class="toc-container">
+          <p class="toc-title">On this page</p>
+          <a class="sidebar-source" href="https://github.com/iowarp/clio-coder/blob/main/docs/architecture/tui-design.md">Canonical Markdown<br>docs/architecture/tui-design.md</a>
+          <ul class="toc-list"></ul>
         </nav>
+      </aside>
+      <main class="reference-main" id="reference-content">
+        <article class="reference-prose glass-card">
+<blockquote>
+<p><strong>Visual blueprint:</strong> The source checkout includes the complete
+<a href="tui_design_blueprint.html">Clio TUI Design System visual reference</a>.</p>
+</blockquote>
+<p>This document is the reference specification for the Clio Coder TUI visual layout, styling, and behavior. It describes color semantics, the glyph vocabulary, structural recipes, and state choreography for all surfaces under <a href="https://github.com/iowarp/clio-coder/tree/main/src/interactive/">src/interactive/</a>.</p>
+<p>The governing principle: <strong>the user reads state from color, structure from frames, and identity from brand marks.</strong> Everything that is not state or structure remains visually quiet.</p>
+<hr>
+<h2>1. Color System</h2>
+<p>All color styling is defined in <a href="https://github.com/iowarp/clio-coder/blob/main/src/interactive/theme/tokens.ts">src/interactive/theme/tokens.ts</a>. No raw SGR sequences, <code>38;2;</code>/<code>38;5;</code> ANSI escape fragments, or hardcoded hex colors are allowed outside this theme module.</p>
+<h3>1.1 Color Tokens</h3>
+<table>
+<thead>
+<tr>
+<th>Token</th>
+<th>Value (truecolor)</th>
+<th>Role</th>
+</tr>
+</thead>
+<tbody><tr>
+<td><code>accent</code></td>
+<td><code>rgb(70, 229, 208)</code> (Teal)</td>
+<td>Brand and interactivity: frame titles, selection highlight, keybinding/slash-command affordances, agent voice glyphs, tool verbs, and active/writing phases.</td>
+</tr>
+<tr>
+<td><code>accentDeep</code></td>
+<td><code>rgb(31, 183, 166)</code></td>
+<td>Structural emphasis only: bold CAPS section tags.</td>
+</tr>
+<tr>
+<td><code>action</code></td>
+<td><code>rgb(255, 126, 41)</code> (Orange)</td>
+<td>Active autonomous operations: dispatching phase pills, active fleet badges, running fleet indicators, running connect/probe indicators, and user-steering queues.</td>
+</tr>
+<tr>
+<td><code>success</code></td>
+<td><code>rgb(87, 227, 137)</code> (Green)</td>
+<td>Positive outcomes: success indicators (<code>✓</code>), ok health status, clean git trees, and output-token count updates.</td>
+</tr>
+<tr>
+<td><code>warning</code></td>
+<td><code>rgb(255, 180, 84)</code> (Amber)</td>
+<td>Real warnings only: stale data, dirty trees, retry status, blocked tools, and truncation.</td>
+</tr>
+<tr>
+<td><code>error</code></td>
+<td><code>rgb(255, 92, 102)</code> (Red)</td>
+<td>Failures: error indicators (<code>✗</code>), error rails, stuck states, and error message text.</td>
+</tr>
+<tr>
+<td><code>info</code></td>
+<td><code>rgb(91, 168, 255)</code> (Blue)</td>
+<td>Informational messages, notices, and system-prompt meters.</td>
+</tr>
+<tr>
+<td><code>reason</code></td>
+<td><code>rgb(157, 140, 255)</code> (Purple)</td>
+<td>Reasoning-related status: thinking phases, thinking rails, reasoning-token metrics, and context compacting.</td>
+</tr>
+<tr>
+<td><code>dim</code></td>
+<td><code>rgb(106, 122, 133)</code></td>
+<td>Scaffolding elements: separators, key names, keyboard shortcut hints, durations, and timestamps.</td>
+</tr>
+<tr>
+<td><code>muted</code></td>
+<td><code>rgb(138, 153, 164)</code></td>
+<td>Secondary content: paths, previews, counts, and non-status values.</td>
+</tr>
+<tr>
+<td><code>title</code></td>
+<td>alias of <code>accent</code></td>
+<td>Semantic title token mapping.</td>
+</tr>
+<tr>
+<td><code>frame</code></td>
+<td><code>rgb(47, 93, 90)</code></td>
+<td>Borders, rules, inner dividers, and unused context space.</td>
+</tr>
+<tr>
+<td><code>frameStrong</code></td>
+<td><code>rgb(42, 171, 158)</code></td>
+<td>The active editor input rail background.</td>
+</tr>
+</tbody></table>
+<h3>1.2 Placement Rules</h3>
+<ul>
+<li>Color is used functionally to indicate state. If removing a color does not lose information, the text is colored using <code>dim</code>, <code>muted</code>, or left unstyled.</li>
+<li><code>warning</code> amber is reserved for true warnings. Costs and neutral telemetry numbers use <code>muted</code>.</li>
+<li><code>accentDeep</code> is used only in section tags. Metric values (such as TTFT, tokens-per-second, and autonomy status) use <code>muted</code>.</li>
+<li><code>action</code> neon orange remains scarce and strictly disciplined: only while Clio is acting, for workspace-authority and worker-escalation decision frames, or in <code>STEER</code> mode. It is never used for idle decoration or settled telemetry, and never appears on more than one element per screen region. Outward, safety-net, and system decision frames use <code>warning</code>; conversational answers use <code>accent</code>.</li>
+<li>Per-surface color budgets limit noise: chip strips use at most one non-neutral token per chip, and framed cards use at most one status token alongside neutral colors.</li>
+</ul>
+<hr>
+<h2>2. Glyph Vocabulary</h2>
+<p>All symbols are defined as constants in <a href="https://github.com/iowarp/clio-coder/blob/main/src/interactive/theme/glyphs.ts">src/interactive/theme/glyphs.ts</a>. Rendering code reference these names instead of embedding hardcoded glyph literals.</p>
+<table>
+<thead>
+<tr>
+<th>Glyph</th>
+<th>Name</th>
+<th>Meaning</th>
+<th>Used by</th>
+</tr>
+</thead>
+<tbody><tr>
+<td><code>&gt;C_</code></td>
+<td><code>brand</code></td>
+<td>Clio wordmark</td>
+<td>Welcome launchpad header, session header, and dashboard header only.</td>
+</tr>
+<tr>
+<td><code>✦</code></td>
+<td><code>agent</code></td>
+<td>Agent voice</td>
+<td>Chat reply prefix (accent; error red on failed turns).</td>
+</tr>
+<tr>
+<td><code>›</code></td>
+<td><code>user</code></td>
+<td>User voice</td>
+<td>Chat user prefix (accent); steering queue marker (action).</td>
+</tr>
+<tr>
+<td><code>❯</code></td>
+<td><code>cursor</code></td>
+<td>Selection focus</td>
+<td>Settings, list overlays, selectors.</td>
+</tr>
+<tr>
+<td><code>▸</code></td>
+<td><code>toolHeader</code></td>
+<td>Tool ledger line</td>
+<td>Tool sublines and expanded tool headers.</td>
+</tr>
+<tr>
+<td><code>✓</code></td>
+<td><code>ok</code></td>
+<td>Success</td>
+<td>Everywhere.</td>
+</tr>
+<tr>
+<td><code>✗</code></td>
+<td><code>error</code></td>
+<td>Failure</td>
+<td>Everywhere.</td>
+</tr>
+<tr>
+<td><code>⊘</code></td>
+<td><code>cancelled</code></td>
+<td>Cancelled or aborted</td>
+<td>Everywhere.</td>
+</tr>
+<tr>
+<td><code>⚠</code></td>
+<td><code>warn</code></td>
+<td>Warning block</td>
+<td>Notices, stuck phase.</td>
+</tr>
+<tr>
+<td><code>!</code></td>
+<td><code>warnInline</code></td>
+<td>Inline warning mark</td>
+<td>Git dirty, stale rows, fleet row warnings.</td>
+</tr>
+<tr>
+<td><code>ℹ</code></td>
+<td><code>info</code></td>
+<td>Informational notice</td>
+<td>Notification surfaces.</td>
+</tr>
+<tr>
+<td><code>●</code></td>
+<td><code>running</code></td>
+<td>Live run (static form)</td>
+<td>Dispatch rows when not animated, health ok.</td>
+</tr>
+<tr>
+<td><code>◌</code></td>
+<td><code>queued</code></td>
+<td>Queued or idle</td>
+<td>Queued dispatch rows, idle phase.</td>
+</tr>
+<tr>
+<td><code>⣾⣽⣻⢿⡿⣟⣯⣷</code></td>
+<td><code>SPINNER_FRAMES</code></td>
+<td>Live activity</td>
+<td>Phase pill and running dispatch rows.</td>
+</tr>
+<tr>
+<td><code>◔ ◐ ◑</code></td>
+<td><code>phaseWaiting/phaseThinking/phaseWriting</code></td>
+<td>Turn progression</td>
+<td>Phase pill.</td>
+</tr>
+<tr>
+<td><code>⚙</code></td>
+<td><code>phaseTool</code></td>
+<td>Tool executing</td>
+<td>Phase pill.</td>
+</tr>
+<tr>
+<td><code>⏸</code></td>
+<td><code>phaseBlocked</code></td>
+<td>Awaiting confirmation</td>
+<td>Phase pill.</td>
+</tr>
+<tr>
+<td><code>↻</code></td>
+<td><code>phaseRetry</code></td>
+<td>Retrying</td>
+<td>Phase pill, retry notices.</td>
+</tr>
+<tr>
+<td><code>♻</code></td>
+<td><code>phaseCompact</code></td>
+<td>Compacting</td>
+<td>Phase pill.</td>
+</tr>
+<tr>
+<td><code>⇲</code></td>
+<td><code>phaseDispatch</code></td>
+<td>Dispatching (action orange)</td>
+<td>Phase pill.</td>
+</tr>
+<tr>
+<td><code>↑ ↓</code></td>
+<td><code>up/down</code></td>
+<td>Input and output tokens; scroll</td>
+<td>Everywhere.</td>
+</tr>
+<tr>
+<td><code>⚡</code></td>
+<td><code>speed</code></td>
+<td>Throughput</td>
+<td>Everywhere.</td>
+</tr>
+<tr>
+<td><code>▰ ▱</code></td>
+<td><code>contextFull/contextFree</code></td>
+<td>Context meter cells</td>
+<td>Meters.</td>
+</tr>
+<tr>
+<td><code>▒</code></td>
+<td><code>contextReserve</code></td>
+<td>Autocompact reserve cells</td>
+<td>Context meters.</td>
+</tr>
+<tr>
+<td><code>█ ░</code></td>
+<td><code>barFull/barEmpty</code></td>
+<td>Wide-glyph fallback</td>
+<td>Meters.</td>
+</tr>
+<tr>
+<td><code>│</code></td>
+<td><code>rail</code></td>
+<td>Body rail and section bar</td>
+<td>Tool bodies, thinking rail, column separators.</td>
+</tr>
+<tr>
+<td><code>─</code></td>
+<td>(rules)</td>
+<td>Horizontal rule and borders</td>
+<td>Frames and rules.</td>
+</tr>
+<tr>
+<td><code>╌</code></td>
+<td><code>innerDivider</code></td>
+<td>Divider inside a frame</td>
+<td>Task island, any framed list.</td>
+</tr>
+<tr>
+<td><code>·</code></td>
+<td>(dotSep)</td>
+<td>Chip separator (dim)</td>
+<td>Everywhere.</td>
+</tr>
+<tr>
+<td><code>◆ ◇</code></td>
+<td><code>active/scoped</code></td>
+<td>Active and scoped marks</td>
+<td>Model selector, thinking selector, Settings profile workbench.</td>
+</tr>
+</tbody></table>
+<hr>
+<h2>3. Formatting Rules</h2>
+<p>Standardized formatters live in <a href="https://github.com/iowarp/clio-coder/blob/main/src/interactive/theme/labels.ts">src/interactive/theme/labels.ts</a> and other shared UI modules:</p>
+<ul>
+<li><strong>Duration</strong>: <code>formatCompactMs</code> is the unified duration formatter, yielding compact outputs (<code>860ms</code>, <code>4.2s</code>, <code>42s</code>, <code>1m36s</code>).</li>
+<li><strong>Token Counts</strong>: <code>formatFooterTokens</code> formats footer and chip counts (<code>842</code>, <code>12.4k</code>, <code>1.2M</code>). Full numeric strings via <code>toLocaleString</code> are reserved for detailed tables like the context legend.</li>
+<li><strong>Cost</strong>: The shared <code>formatUsd</code> formatter handles dollar values, printing up to four decimal places when under one cent.</li>
+<li><strong>Model IDs</strong>: <code>abbreviateModelId</code> keeps whole dash-separated parts of model names up to 18 characters; if the parts still overflow, it clips the ID at 18 characters.</li>
+</ul>
+<hr>
+<h2>4. Structural Layouts</h2>
+<h3>4.1 The Island (Framed Block)</h3>
+<p>Rendered via <code>frame()</code> in <a href="https://github.com/iowarp/clio-coder/blob/main/src/interactive/theme/rules.ts">src/interactive/theme/rules.ts</a>:</p>
+<pre><code>┌─ Title ──────────────────────────── meta ─┐
+│ body line                                 │
+│ body line                                 │
+└───────────────────────────────────────────┘
+</code></pre>
+<ul>
+<li>Corners and borders use <code>frame</code>.</li>
+<li><code>Title</code> is written in bold <code>title</code> color, padded with exactly one space on each side.</li>
+<li>The right-aligned <code>meta</code> field is drawn in <code>dim</code> color before the closing corner.</li>
+<li>Body rows use the vertical rail <code>│</code> with one space of padding.</li>
+<li>Inner dividers use <code>╌</code> in <code>frame</code> color.</li>
+</ul>
+<h3>4.2 The Overlay</h3>
+<p>Overlay frames share the island&#39;s top border rules and include keyboard shortcut hints in the bottom border:</p>
+<pre><code>└─ [Tab] mode · [Esc] close ─────────────────┘
+</code></pre>
+<p>Fleet run cards add two bounded budget rows when native dispatch admission supplies an envelope. The <code>policy</code> row shows the recipe default or exact pin, its optional maximum, and the invocation request. The <code>budget</code> row shows the effective phase, the operator lifetime cap, and the clamp or retry/revision escalation reason. Historical or external-agent rows without this provenance omit both rows.</p>
+<h3>4.3 Section Headers</h3>
+<ul>
+<li><strong>Panel Section Tag</strong>: Bold CAPS in <code>accentDeep</code>.</li>
+<li><strong>List Group Header</strong>: A leading rule followed by the label, e.g. <code>── Label</code> in <code>dim</code>.</li>
+</ul>
+<h3>4.4 Key-Value Rows</h3>
+<p>Drawn as <code>&lt;key padded, dim&gt; &lt;value&gt;</code>, where the value defaults to <code>muted</code> unless a semantic token applies.</p>
+<h3>4.5 The Status Pill</h3>
+<pre><code>&lt;spinner|glyph&gt; &lt;label&gt; [ · badge]
+</code></pre>
+<ul>
+<li>For active phases, the animated spinner frames replace the static phase glyph.</li>
+<li>Spinner, glyph, and label all use the current phase&#39;s token color.</li>
+<li>Badges are separated by dim dots: <code>· fleet 2</code> (action), <code>· tools 1</code> (muted).</li>
+</ul>
+<h3>4.6 Narrow Terminal Behavior</h3>
+<p>All TUI overlays and cards support compact widths down to 40 columns:</p>
+<ul>
+<li>Split overlays such as <code>/view</code> fall back to a single-pane layout with <code>[Tab]</code> switching between the artifact list and details.</li>
+<li>Keybinding hints, cards, and markdown detail text wrap fluidly without horizontal clipping.</li>
+<li>Settings provides a dedicated drill-down stack below 72 columns.</li>
+</ul>
+<h3>4.7 Decision Consequence Frames</h3>
+<p>Permission confirmation and <code>ask_user</code> use one pure consequence presentation classifier while keeping separate input and execution protocols. The classifier supplies the tier title, semantic frame token, consequence and reversibility copy, requester attribution, and display actions. Permission keeps allow-once, deny, and stop behavior. <code>ask_user</code> keeps selection, free-text, cancellation, and its compact, panel, or interview layout chosen from question shape.</p>
+<table>
+<thead>
+<tr>
+<th>Tier</th>
+<th>Title</th>
+<th>Token</th>
+<th>Plain-text identity</th>
+</tr>
+</thead>
+<tbody><tr>
+<td>Conversation</td>
+<td><code>Answer a question</code></td>
+<td><code>accent</code></td>
+<td><code>Conversational answer</code></td>
+</tr>
+<tr>
+<td>Workspace</td>
+<td><code>Approve workspace action</code></td>
+<td><code>action</code></td>
+<td><code>Workspace authority</code></td>
+</tr>
+<tr>
+<td>Outward</td>
+<td><code>Confirm outward consequence</code></td>
+<td><code>warning</code></td>
+<td><code>Outward consequence</code></td>
+</tr>
+<tr>
+<td>Safety net</td>
+<td><code>Safety-net confirmation</code></td>
+<td><code>warning</code></td>
+<td><code>Safety-net confirmation</code></td>
+</tr>
+<tr>
+<td>System</td>
+<td><code>Approve system change</code></td>
+<td><code>warning</code></td>
+<td><code>System change</code></td>
+</tr>
+<tr>
+<td>Worker</td>
+<td><code>Worker needs approval</code></td>
+<td><code>action</code></td>
+<td><code>Worker escalation</code></td>
+</tr>
+</tbody></table>
+<p>The words carry the meaning when color is disabled. Permission copy states the exact one-shot authority, whether effects are reversible, the authenticated requester and axis, and what deny and stop do. The classifier never consumes question, reason, summary, option-label, or requested-title prose, so those strings cannot select or lower a tier.</p>
+<hr>
+<h2>5. Screen Surfaces &amp; State Choreography</h2>
+<p>The Clio screen maintains a responsive, four-zone structure: the launchpad / session header, transcript, composer, and footer. <code>interface.mode</code> chooses the renderer at startup. The default <code>regular</code> mode uses terminal scrollback. Opt-in <code>fullscreen</code> mode uses the alternate screen: the launchpad/header and transcript occupy an independently scrollable viewport while the follow-up queue, composer, and footer remain docked at the bottom.</p>
+<p>In fullscreen mode, <code>PageUp</code> and <code>PageDown</code> scroll one viewport, <code>Home</code> and <code>End</code> jump to its bounds, <code>Ctrl+Shift+Up</code> and <code>Ctrl+Shift+Down</code> jump between semantic prompts, and the mouse wheel scrolls the transcript. Dragging the scrollbar thumb moves the viewport directly. <code>interface.fullscreenScrollbar</code> is <code>hidden</code>, <code>auto</code> (visible during interaction), or <code>always</code>. Manual scrolling suspends follow-end so new output does not steal the operator&#39;s position; returning to the bottom resumes it. Both fullscreen settings are restart-scoped because Clio constructs its terminal renderer and component graph once at startup.</p>
+<p><code>interface.smoothStreaming</code> controls presentation-only pacing of derived assistant text and thinking. The shipped <code>off</code> value uses the immediate 16 ms coalescer. <code>auto</code> paces only on a capable local TTY and bypasses pacing for non-TTY, SSH, multiplexers, CI, screen-reader/reduced-motion markers, or observed stdout backpressure. <code>on</code> explicitly requests grapheme-safe pacing, while still stopping frame production behind stdout backpressure. Raw provider wrappers never enter the panel, canonical events and persistence remain synchronous, and tool/message/turn/abort/retry/submit/teardown boundaries drain visible state before they continue.</p>
+<p>Interactive startup uses one terminal lease across both boot stages. Stage 0 owns the terminal, renderer, root host, exact editor instance, input decoder, raw mode, resize subscription, protocol queries, signals, and stop lifecycle, and commits a measured minimal frame while services hydrate. Hydration synchronously swaps the root and input/signal delegates without reconstructing the editor or initializing terminal protocols again. Early Enter submissions become immutable, visibly queued admissions and drain once through the ordinary command pipeline; a later draft and cursor stay in the same editor. Boot failure or an early signal closes the lease exactly once, restores the terminal, and prints recoverable queued input and draft text. <code>CLIO_CODER_INSTANT_SHELL=0</code> selects the legacy fully hydrated first frame; ACP, headless, ordinary non-TTY invocation, and subcommand execution never acquire the lease. An explicit <code>CLIO_CODER_INTERACTIVE=1</code> retains its established force-interactive behavior on a non-TTY stream.</p>
+<h3>5.1 Welcome Launchpad &amp; Session Header</h3>
+<ul>
+<li><strong>Pre-Submit Launchpad</strong>: Before the first prompt, renders a compact launchpad at line 0 with bold CAPS section tags (<code>WORKSPACE</code>, <code>ROUTE</code>, <code>NEXT</code>), honest readiness state, and a context-sensitive next action (e.g. <code>ctx missing · /context init</code>, <code>ctx checking…</code>, or <code>ctx ready · type a task</code>). Asynchronous repository probes use height-stable dim placeholders (<code>factsPending</code>).</li>
+<li><strong>Session Header Collapse</strong>: On first user submission, the launchpad deliberately collapses into an immutable, single-line session header (<code>&gt;C_ Clio Coder vX.Y.Z · &lt;workspace · git branch&gt; · &lt;target·model · ready&gt; · ctx ready · type a task</code>) so the conversation transcript owns the viewport while the header keeps naming where Clio works, which route answers, and what the context is ready for.</li>
+</ul>
+<h3>5.2 Composer (ClioEditor)</h3>
+<ul>
+<li><strong>Mode Section Tag</strong>: The top rail features an explicit left section tag indicating prompt semantics:<ul>
+<li><code>MESSAGE</code> (dim/teal) while idle.</li>
+<li><code>FOLLOW-UP</code> (muted) while Clio is actively processing a run.</li>
+<li><code>STEER</code> (neon orange) when Enter will actively steer in-flight work.</li>
+<li>When the draft scrolls, the active mode folds into the scroll indicator row so the orange warning remains visible.</li>
+</ul>
+</li>
+<li><strong>Top Rail Metadata</strong>: The top rail right displays target/model and thinking level with two-step color hierarchy: <code>off</code> (dim), <code>minimal</code>/<code>low</code> (muted), <code>medium</code>/<code>high</code> (<code>reason</code> purple), and <code>xhigh</code>/<code>max</code>/<code>on</code> (bold <code>reason</code> purple).</li>
+<li><strong>Empty-State Placeholder</strong>: Displays dim prompt <code>Ask Clio…  / for commands</code>.</li>
+<li><strong>Lower Rail Affordance</strong>: On terminals at or above 60 columns, the bottom rail displays <code>Enter send · Shift+Enter newline</code> (or resolved keybindings).</li>
+</ul>
+<h3>5.3 Progressively Disclosed Footer</h3>
+<ul>
+<li><strong>Compact Mode (Quiet Idle)</strong>: Two always-on lines that eliminate idle telemetry noise (suppresses <code>tools none</code>, <code>◌ idle</code>, and default-output tags):<ul>
+<li><strong>Line 1 (Workspace &amp; Readiness)</strong>: CWD path, git branch/dirty state, and active phase pill only when meaningful.</li>
+<li><strong>Line 2 (Context &amp; Receipt)</strong>: Context window meter and the best current/last-turn receipt.</li>
+</ul>
+</li>
+<li><strong>Expanded Mode (<code>Alt+U</code>)</strong>: Four responsive sections ordered by operational urgency rather than a static telemetry grid:<ol>
+<li><code>Activity</code>: Live agent phase, active workers, running tool calls.</li>
+<li><code>Context</code>: Context window gauge, breakdown, token headroom.</li>
+<li><code>Session</code>: Session cost, throughput, total token breakdown, leader key state.</li>
+<li><code>Workspace</code>: CWD, branch, target, git dirty status.
+Empty rows collapse rather than occupying blank grid space.</li>
+</ol>
+</li>
+<li><strong>Notification Badge &amp; Degradation Ladder</strong>: The footer notification badge reserves the severity head (<code>ℹ 1 notice</code>, <code>⚠ 1 warning</code>, <code>✗ 1 error</code>), separator, and <code>[Alt+X] dismiss</code> tail first, allocating the middle width to an ellipsized message. At narrow widths, it degrades gracefully down the ladder (<code>head · [Alt+X] dismiss</code> → <code>head · [Alt+X]</code> → <code>head</code> → glyph alone) without clipping the action key.</li>
+</ul>
+<h3>5.4 State Choreography Table</h3>
+<p>State is signaled through the status pill in the footer and matches the following table:</p>
+<table>
+<thead>
+<tr>
+<th>State</th>
+<th>Pill</th>
+<th>Transcript Echo</th>
+<th>Action Orange?</th>
+</tr>
+</thead>
+<tbody><tr>
+<td>idle</td>
+<td>Quiet (phase omitted; line 1 shows workspace, line 2 shows context/receipt)</td>
+<td>None; last-turn telemetry on line 2</td>
+<td>No</td>
+</tr>
+<tr>
+<td>preparing / waiting</td>
+<td>spinner + <code>waiting</code> (info)</td>
+<td>None</td>
+<td>No</td>
+</tr>
+<tr>
+<td>thinking</td>
+<td>spinner + <code>thinking</code> (reason)</td>
+<td>Dim <code>Thinking (N tokens)…</code> marker</td>
+<td>No</td>
+</tr>
+<tr>
+<td>writing</td>
+<td>spinner + <code>writing</code> (accent)</td>
+<td>Streaming markdown text</td>
+<td>No</td>
+</tr>
+<tr>
+<td>tool running</td>
+<td>spinner + <code>tool &lt;name&gt;</code> (accent)</td>
+<td><code>▸</code> tool execution ledger line</td>
+<td>No</td>
+</tr>
+<tr>
+<td>blocked</td>
+<td><code>⏸ blocked</code> (warning)</td>
+<td>Permission prompt surface</td>
+<td>No</td>
+</tr>
+<tr>
+<td>retrying</td>
+<td><code>↻ retry 2/5</code> (warning)</td>
+<td>Dim retry details line</td>
+<td>No</td>
+</tr>
+<tr>
+<td>compacting</td>
+<td>spinner + <code>compacting</code> (reason)</td>
+<td>None</td>
+<td>No</td>
+</tr>
+<tr>
+<td>dispatching / fleet live</td>
+<td>spinner + <code>dispatch</code> (action)</td>
+<td>Task island status updates</td>
+<td>Yes</td>
+</tr>
+<tr>
+<td>stuck</td>
+<td><code>⚠ stuck 12s</code> (error)</td>
+<td>Inline watchdog warning</td>
+<td>No</td>
+</tr>
+<tr>
+<td>done</td>
+<td><code>✓ done</code> (success), then quiet telemetry</td>
+<td>Settled transcript blocks</td>
+<td>No</td>
+</tr>
+</tbody></table>
+<hr>
+<h2>6. Agent and Transcript Formatting</h2>
+<h3>6.1 Voices &amp; Hanging Indent</h3>
+<ul>
+<li><strong>User</strong>: <code>› text</code> with the user glyph in <code>accent</code>.</li>
+<li><strong>Agent</strong>: <code>✦ text</code> with the agent glyph in <code>accent</code> (turning <code>error</code> red on failed turns, along with the text message). Skill suggestions do not claim the <code>✦</code> reply glyph.</li>
+<li><strong>Two-Cell Hanging Indent</strong>: User and assistant prose are rendered with a fixed two-cell gutter. The first line begins with the turn prefix (<code>› </code> or <code>✦ </code>), while all wrapped continuation lines indent by two spaces (<code>PROSE_GUTTER = &quot;  &quot;</code>), keeping multiline text visibly attached to its voice glyph.</li>
+</ul>
+<h3>6.2 Thinking Blocks</h3>
+<p>Drawn as a folded dim marker (<code>Thinking (N tokens)…</code> or <code>Thinking…</code>), which expands into a body using the <code>reason</code> color vertical <code>│</code> rail. Cap of 12 lines.</p>
+<h3>6.3 Tool Ledger</h3>
+<p>Every tool call owns one stable transcript block for its complete lifecycle. Streamed
+<code>toolcall_*</code> message updates first expose the call as <code>forming call</code>, the completed argument block
+becomes <code>ready</code>, <code>tool_execution_start</code> changes the same row to <code>running</code>, and cumulative
+<code>tool_execution_update</code> results replace the live body until <code>tool_execution_end</code> settles it. Rapid
+tool updates are coalesced to terminal frame rate; settlement always renders immediately.</p>
+<p>The collapsed form is one composed ledger line:</p>
+<pre><code>▸ verb(object) · resource · facts · size ✓ · 230ms · full: path (Alt+O)
+</code></pre>
+<ul>
+<li>Verb is bold <code>accent</code>, tail details are <code>dim</code>, status glyph is semantic (<code>✓</code>/<code>✗</code>), and the keyboard shortcut hint is appended at the end. Tool ledgers maintain full terminal width and bypass the prose hanging indent.</li>
+<li>Expanded calls show the primary argument in the signature and every secondary argument as a typed field list. Multiline argument bodies become line and byte facts, nested objects retain structured rendering, and safety-sensitive values remain redacted.</li>
+<li>Running calls label <code>live output</code> and replace the cumulative partial result in place. Settled calls label <code>output</code> and show available exit status, result or observation counts, line count, displayed and total byte sizes, truncation, timeout, tool-token usage, dynamically added tools, context exclusion, and the full-output path. A blocked or aborted admission instead labels its <code>decision</code> and does not claim that the tool ran.</li>
+<li>A call parked for one-shot approval replaces its running timer with <code>awaiting approval</code> and shows the already-sanitized action class, asking safety axis, and target below the row. These facts are transient UI state: approval, denial, abort, or settlement clears them, and they are never reconstructed from the session ledger.</li>
+<li>The live permission frame derives its consequence tier from those typed facts and the authenticated origin. It anchors at bottom center with five rows reserved for the composer and footer, and it recomputes that anchor on resize. Each queued frame retains its own tier and requester.</li>
+<li>Text and image tool results keep their text while rendering images as MIME and byte-size placeholders; base64 image data is never written to the terminal.</li>
+<li>Successful <code>edit</code> and <code>write</code> calls render the bounded diff produced by the tool result. Live regular-screen and fullscreen rows color removed and added lines with the <code>error</code> and <code>success</code> tokens and emphasize changed words; <code>/resume</code> replay and <code>/export</code> keep the same numbered diff as plain text.</li>
+<li>Operator <code>!</code> and <code>!!</code> bash commands use the same running and settled block as model-initiated bash. The block appears before the process starts, streams the throttled cumulative stdout/stderr tail, and settles in place while the existing <code>bashExecution</code> session entry remains the durable record. <code>!!</code> continues to exclude that record from model context and says so in the block.</li>
+</ul>
+<h3>6.4 Editor Rail</h3>
+<p>The right-hand label shows <code>model · thinking</code>. Thinking level colors map as: <code>off</code> (dim), <code>minimal</code>/<code>low</code> (muted), <code>medium</code>/<code>high</code> (<code>reason</code> purple), and <code>xhigh</code>/<code>max</code>/<code>on</code> (bold <code>reason</code> purple).</p>
+<h3>6.5 Transcript Notices</h3>
+<p>Replay and system tags (e.g. <code>[retry]</code>, <code>[model]</code>) are wrapped in <code>dim</code> brackets with a <code>muted</code> message. Retry tags use <code>warning</code> amber.</p>
+<h3>6.6 Output Verbosity Receipts</h3>
+<p>Turn usage receipts rendered at the bottom of completed turns respect the output verbosity configuration:</p>
+<ul>
+<li><code>minimal</code>: Omits the turn usage receipt entirely.</li>
+<li><code>default</code>: Renders one compact dim receipt: <code>turn · in &lt;N&gt; · out &lt;M&gt;</code>.</li>
+<li><code>verbose</code>: Renders the full receipt with model call counts (<code>over N calls</code>), cache reads/writes (<code>cache R/W</code>), reasoning tokens with provenance (<code>reasoning N provider</code> or <code>reasoning ≈N estimated</code>), and the verification caveat (<code>· reasoning text is a UI excerpt, not a verification</code>).</li>
+</ul>
+<h3>6.7 Code Ink (Syntax Highlighting)</h3>
+<p>Syntax highlighting within code blocks is handled by <a href="https://github.com/iowarp/clio-coder/blob/main/src/interactive/renderers/code-ink.ts">src/interactive/renderers/code-ink.ts</a>. It maps a restricted set of four tokens to stay quiet:</p>
+<ul>
+<li><strong>Comments</strong>: <code>dim</code></li>
+<li><strong>String Literals</strong>: <code>success</code></li>
+<li><strong>Language Keywords</strong>: <code>reason</code></li>
+<li><strong>Numeric Literals</strong>: <code>info</code></li>
+</ul>
+<p>All other code elements (identifiers, types, function names, punctuation) remain plain. Diff blocks highlight added lines with <code>success</code> green and removed lines with <code>error</code> red.</p>
+<h3>6.8 Mermaid and LaTeX</h3>
+<p>Finalized assistant Markdown renders inline and display LaTeX as terminal-friendly Unicode through
+the Markdown renderer. For example, <code>$x^2$</code> becomes <code>x²</code> without requiring an image-capable
+terminal.</p>
+<p>Top-level fenced <code>mermaid</code> blocks pass through the width-aware Markdown <code>transform</code> hook and the
+engine&#39;s Unicode-diagram strategy. Supported flowcharts, state diagrams,
+class diagrams, entity-relationship diagrams, and sequence diagrams render with quiet <code>frame</code>
+borders, plain labels, and <code>accent</code> connectors. If a diagram is invalid, unsupported, or wider than
+the transcript content width, Clio leaves the original Mermaid fence visible instead of clipping or
+silently dropping it. Mermaid transformation runs only after an assistant text segment is finalized,
+so partial fences never flicker into incomplete diagrams while streaming.</p>
+<hr>
+<h2>7. Settings Center &amp; Command Overlays</h2>
+<h3>7.1 Settings Center Architecture</h3>
+<p>The <code>/settings</code> overlay is a full-screen transactional control center:</p>
+<ul>
+<li><strong>Group Structure</strong>: Sections are organized under non-selectable section headers:<ul>
+<li><code>CORE</code>: Autonomy &amp; Safety (<code>safety</code>), Orchestrator (<code>orchestrator</code>)</li>
+<li><code>ROUTING</code>: Fleet (<code>fleet</code>), Targets (<code>targets</code>), Models (<code>models</code>)</li>
+<li><code>RUNTIME</code>: Budget (<code>budget</code>), Compaction (<code>compaction</code>), Retry (<code>retry</code>)</li>
+<li><code>EXPERIENCE</code>: Terminal (<code>terminal</code>), Advanced (<code>advanced</code>)</li>
+</ul>
+</li>
+<li><strong>Semantic Row Grammar</strong>: Explicit presentation kinds (<code>setting</code>, <code>status</code>, <code>action</code>, <code>group-header</code>, <code>read-only-fact</code>, <code>destructive-action</code>) prevent confusion between focus (teal), health (green/amber/red), modified status (neutral/teal mark), and active operations (scarce orange).</li>
+<li><strong>Transactional Edits</strong>: Selecting a row and pressing <code>Enter</code> opens a dedicated value picker, input dialog, or checklist rather than immediately toggling values. Edits construct an immutable <code>SettingsChangePlan</code> and present explicit destination choices:<ul>
+<li><code>Apply this session</code> (for live-capable settings)</li>
+<li><code>Apply and save globally</code></li>
+<li><code>Cancel</code> (or <code>Esc</code>)</li>
+<li>Restart-required settings (<code>fleet.concurrency</code>, <code>integrations.runtimePlugins</code>, <code>interface.mode</code>, and <code>interface.fullscreenScrollbar</code>) offer only global save and announce <code>Saved to settings.yaml · restart Clio to apply</code>.</li>
+<li>Destructive actions (target/profile removal) execute preflight analysis showing affected chat, fleet, and memory routes before confirmation.</li>
+</ul>
+</li>
+<li><strong>Fleet Workbench</strong>: Organizes fleet settings with dim group headers (<code>Defaults</code>, <code>Profiles</code>, <code>Agent routes</code>, <code>Placement</code>). Profiles render as one-row summaries with <code>◆ Edit</code> affordance; pressing <code>Enter</code> drills into profile fields (target, model, thinking level, placement) or destructive removal.</li>
+<li><strong>Targets Console Table</strong>: Displays configured targets in an operational console table (<code>HEALTH</code>, <code>ID</code>, <code>ROLES</code>, <code>RUNTIME</code>, <code>LATENCY</code>) with an in-place action/detail drawer (URL, default model, last probe, failure reason). Actions include <code>Use</code>, <code>Connect</code>, <code>Probe</code>, and <code>Remove</code>. Active connect/probe operations show the single orange activity indicator.</li>
+<li><strong>Scoped Models Checklist</strong>: Settings → <code>Models</code> provides a provider-backed checklist subview with target-level and target/model items, checked current selections, <code>Space</code> to toggle, and capability details in the inspector. Unresolved model references are preserved under an <code>Unavailable</code> group.</li>
+<li><strong>Narrow Terminal Drill-Down Navigation</strong>: Below 72 columns, Settings transitions from a split view to a modal drill-down stack (section list → section rows → detail drawer) with a breadcrumb and <code>Esc</code> moving up one level before closing. Includes <code>/</code> filtering across label, path, and description, narrowing per keystroke like <code>/model</code> and <code>/resume</code>. Below 60 columns, side margins are removed for full-width presentation.</li>
+</ul>
+<h3>7.2 Fleet Runs Board</h3>
+<p>The <code>Alt+W</code> board renders one card per run. The default list is compact: run id, route, task, status, telemetry, retry, tool names, and proof. <code>Enter</code> opens the selected run&#39;s worker detail, which adds two rows to that card and nothing to any other:</p>
+<ul>
+<li><strong><code>doing</code></strong>: the phase (<code>◐ thinking</code> in <code>reason</code>, <code>◑ writing</code> in <code>accent</code>, <code>⚙ tool</code> in <code>action</code>, <code>◔ waiting</code> in <code>info</code>) followed by the running call as <code>&lt;tool&gt; &lt;verb&gt; &lt;object&gt;</code>, or the last finished call as <code>last &lt;tool&gt; &lt;verb&gt; &lt;object&gt;</code>. The verb and object come from a descriptor composed at the worker seam; raw arguments never reach the renderer.</li>
+<li><strong><code>answer</code></strong>: the newest rows of the worker&#39;s bounded prose on a <code>│</code> rail with a hanging indent under the key, then a dim row naming the lines and bytes the bounds refused and the <code>/view dispatch:&lt;runId&gt;</code> deep link.</li>
+</ul>
+<p>Wrapping happens before the row cap, so the block is at most six rows tall at any width and a streaming answer cannot make the card grow under the operator. Detail follows the cursor rather than pinning to a run, and closing the board closes it. Reasoning text is never rendered; the <code>thinking</code> phase word is the whole of what the board says about it.</p>
+<h3>7.3 Task and Decision Boards</h3>
+<ul>
+<li><strong>Composite Tasks Board (<code>/tasks</code>, <code>Alt+B</code>)</strong>: Presents four sections in one reopenable overlay: the live session board, terminal task history, successful workspace artifacts, and project-scoped operator tasks. Selecting a workspace artifact opens the filtered <code>/view</code> path. Operator rows support add, hand, done, and drop actions; refresh is explicit for captured history and artifacts, while lightweight repaint reads the current board snapshot.</li>
+<li><strong>Settled Decisions Board (<code>/decisions</code>, <code>Alt+D</code>)</strong>: Groups completed and cancelled interviews on the active branch, expands source questions and answers, and lets the operator supersede a value or submit a correction. Corrections travel through the ordinary operator-turn path after the durable decision snapshot is updated.</li>
+<li><strong>Approved editor overrides</strong>: <code>Alt+B</code> and <code>Alt+D</code> are deliberate application-input boundary overrides of Pi&#39;s editor word-back and word-delete chords. Clio routes them before the editor so the two global boards remain one chord away. They are explicit exceptions to the general rule that Clio app bindings avoid Pi editor reserves, and users may rebind the Clio actions in <code>settings.yaml</code>.</li>
+</ul>
+<h3>7.4 Slash Autocomplete Command Palette</h3>
+<ul>
+<li><strong>Grouped Palette</strong>: Typing <code>/</code> opens a grouped command palette (ordered by <code>Run</code>, <code>Inspect</code>, <code>Configure</code>, <code>Sessions</code>) with compact argument hints and formatted descriptions.</li>
+<li><strong>One Canonical Spelling</strong>: Autocomplete, help, and parsing expose the same unique slash-command names; no alias rows compete with canonical commands.</li>
+</ul>
+<hr>
+<h2>8. Shared Vocabulary</h2>
+<p>One quantity gets one word, and every surface that shows it uses that word. A user comparing the transcript, the footer, and an overlay is checking whether Clio is telling a consistent story; a synonym reads as a discrepancy. The current vocabulary is owned by <code>src/interactive/chat-panel.ts</code>, <code>src/interactive/cost-overlay.ts</code>, <code>src/interactive/status/reasoning.ts</code>, and <code>src/interactive/thinking-level-policy.ts</code>; there is no standalone <code>usage-vocabulary</code> contract test in the current tree.</p>
+<table>
+<thead>
+<tr>
+<th>Concept</th>
+<th>Word</th>
+<th>Surfaces</th>
+</tr>
+</thead>
+<tbody><tr>
+<td>One model API call</td>
+<td><code>call</code></td>
+<td>Chat panel <code>turn · in N over M calls</code>, <code>/cost</code> <code>model calls</code>, <code>/cost</code> <code>(avg/call …)</code></td>
+</tr>
+<tr>
+<td>One user-to-assistant exchange</td>
+<td><code>turn</code></td>
+<td>Chat panel <code>turn · …</code>, <code>/cost</code> <code>turns</code></td>
+</tr>
+<tr>
+<td>Provider-reported reasoning tokens</td>
+<td><code>reasoning N provider</code></td>
+<td>Chat panel</td>
+</tr>
+<tr>
+<td>Reasoning tokens estimated from displayed text</td>
+<td><code>reasoning ≈N estimated</code></td>
+<td>Chat panel; the footer carries the same <code>≈</code> on <code>r≈N</code></td>
+</tr>
+<tr>
+<td>Reasoning tokens in the cost tally</td>
+<td><code>reasoning N provider-reported only</code></td>
+<td><code>/cost</code>. This tally never estimates, so it disagrees with the panel on a model that reports nothing, and the row says which one it is.</td>
+</tr>
+<tr>
+<td>Thinking level a model cannot turn off</td>
+<td><code>forced</code></td>
+<td>Editor rail, model overlay, thinking cycle (<code>thinkingLevelDisplayWord</code>)</td>
+</tr>
+<tr>
+<td>Thinking level on a model with only on and off</td>
+<td><code>on</code> / <code>off</code></td>
+<td>Same surfaces</td>
+</tr>
+</tbody></table>
+<h3>8.1 Slash-Command Failures</h3>
+<p>Two shapes, both ending at something the user can act on.</p>
+<ul>
+<li>A command that exists but was called wrongly prints the reason and then that command&#39;s usage line: <code>&lt;reason&gt;. usage: /&lt;name&gt; …</code>.</li>
+<li>A command-shaped token that is not a command prints <code>/&lt;token&gt; is not a command. Type /help for the list.</code> and is never sent to the model as chat. The escape for a line that starts with a slash is a leading backslash, so <code>\/tmp is full</code> reaches the model as <code>/tmp is full</code>. A leading space does not work and never did, because the editor trims the submitted line before the parser sees it.</li>
+</ul>
+<h3>8.2 Memory Step Rows</h3>
+<p><code>/memory</code> activity rows read <code>&lt;trigger&gt; &lt;decision&gt; &lt;reason&gt;</code>, followed by <code>&lt;N&gt;w</code> when the step wrote to the bank and <code>&lt;N&gt; cited</code> when it cited entries, then the tier and latency. <code>describeTaskMemoryActivity</code> is the one place that builds this string.</p>
+<p>Knowledge and procedural task-bank rows expose <code>p</code> to propose the selected
+entry for the active canonical repository and <code>g</code> to propose it globally.
+Global scope requires a second <code>g</code> press on the same entry after the warning
+line appears. Status rows are labeled private and neither action can promote
+them. Both actions create unapproved durable proposals, show the resulting
+memory ID, and leave approval to the separate reviewed memory lifecycle.</p>
+        </article>
+        <nav class="related-nav" aria-label="Adjacent references">
+          <a class="nav-link-card" href="trace_blueprint.html"><span class="nav-label">Previous</span><span class="nav-title">Trace store contract</span></a>
+          <a class="nav-link-card next" href="worker_dispatch_blueprint.html"><span class="nav-label">Next</span><span class="nav-title">Worker Dispatch Mechanics</span></a>
+        </nav>
+        <p class="reference-footer-note">Canonical content lives in the mapped Markdown page. This visual counterpart adds navigation without changing the contract.</p>
       </main>
     </div>
-
-    <footer>
-      <p>Clio Coder TUI Blueprint &bull; Version 0.4.0 &bull; Gnosis Research Center</p>
-    </footer>
+    <footer>Clio Coder documentation · source-aligned at v0.4.2</footer>
   </div>
-
   <script src="shared.js"></script>
-  <script>
-    function switchTab(tabId) {
-      document.querySelectorAll('.tab-btn').forEach(btn => btn.classList.remove('active'));
-      document.querySelectorAll('.tab-pane').forEach(pane => pane.classList.remove('active'));
-
-      const pane = document.getElementById(`pane-${tabId}`);
-      if (pane) pane.classList.add('active');
-
-      const activeBtn = Array.from(document.querySelectorAll('.tab-btn')).find(btn => {
-        return btn.getAttribute('onclick')?.includes(`'${tabId}'`);
-      });
-      if (activeBtn) activeBtn.classList.add('active');
-
-      if (window.initTableOfContents) window.initTableOfContents();
-    }
-
-    function previewToken(token) {
-      alert(`Token ${token} clicked. Semantics are loaded natively under themes/tokens.ts`);
-    }
-
-    function renderTerminalSim() {
-      const state = document.getElementById("stepState").value;
-      const cmd = document.getElementById("inputText").value;
-      const container = document.getElementById("terminalSim");
-
-      let html = "";
-
-      if (state === 'launchpad') {
-        html += `
-          <div class="terminal-header"><span>&gt;C_ Clio Coder v0.4.0</span></div>
-          <div style="margin-bottom:0.75rem;">
-            <div>&nbsp;&nbsp;<span class="tui-accent-deep">WORKSPACE</span>&nbsp;&nbsp;<span class="tui-muted">clio-coder &middot; git v0.4.0</span></div>
-            <div>&nbsp;&nbsp;<span class="tui-accent-deep">ROUTE</span>&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;<span class="tui-success">local-lmstudio/qwen &middot; ready</span></div>
-            <div>&nbsp;&nbsp;<span class="tui-accent-deep">NEXT</span>&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;<span class="tui-success">ctx ready &middot; type a task</span></div>
-          </div>
-          <div style="border-top:1px solid #1f354f; padding-top:0.5rem; color:#6a7c85;">
-            Ask Clio&hellip; &nbsp;/ for commands
-          </div>
-          <div style="margin-top:0.75rem; padding-top:0.5rem; border-top:1px solid #1f354f; font-size:0.75rem; color:#8a99a4;">
-            clio-coder &middot; git v0.4.0<br>
-            <span class="tui-dim">ctx 8k/128k &middot; turn &middot; in 0 &middot; out 0</span>
-          </div>
-        `;
-      } else {
-        html += `<div class="terminal-header"><span>&gt;C_ Clio Coder v0.4.0 &middot; clio-coder &middot; git v0.4.0 &middot; local-lmstudio/qwen &middot; ready &middot; ctx ready</span></div>`;
-        html += `<div><span class="tui-accent">›</span> <span style="color:#fff;">${cmd}</span></div>`;
-
-        if (state === 'thinking') {
-          html += `
-            <div style="margin-top:0.5rem;"><span class="tui-dim">Thinking (142 tokens)&hellip;</span></div>
-            <div style="margin-top:0.25rem; border-left: 2px solid #9d8cff; padding-left: 0.5rem; color:#888;">
-              Analyzing source module boundaries and key contracts&hellip;<br>
-              Checking compilation targets under dist/&hellip;
-            </div>
-          `;
-        } else if (state === 'diff') {
-          html += `
-            <div style="margin-top:0.5rem; color:#8a99a4;">
-              <span class="tui-accent">▸</span> <strong class="tui-accent">edit</strong> path="src/core/config.ts" &middot; 3 lines changed <span class="tui-success">✓</span>
-            </div>
-            <div style="margin-top:0.25rem; font-family: monospace; font-size:0.8rem; background:rgba(0,0,0,0.3); padding:0.5rem; border-radius:4px;">
-              <div style="color:#6a7a85;">@@ -42,3 +42,3 @@</div>
-              <div style="color:#ff5c66; background:rgba(255,92,102,0.1);">- <span style="background:rgba(255,92,102,0.3);">terminal.tuiMode: "regular"</span></div>
-              <div style="color:#57e389; background:rgba(87,227,137,0.1);">+ <span style="background:rgba(87,227,137,0.3);">terminal.tuiMode: "fullscreen"</span></div>
-            </div>
-          `;
-        } else if (state === 'approval') {
-          html += `
-            <div style="margin-top:0.5rem; color:#8a99a4;">
-              <span class="tui-accent">▸</span> <strong class="tui-action">bash</strong> command="rm -rf /tmp/build-cache" &middot; <span style="color:#ff7e29;">[approval required]</span>
-            </div>
-            <div style="margin-top:0.25rem; border-left: 2px solid #ff7e29; padding-left: 0.5rem; color:#888; font-size:0.8rem;">
-              <span style="color:#ff7e29;">Asked by:</span> damage-control-rules.yaml &middot; <span style="color:#ff7e29;">Action:</span> recursive-delete &middot; <span style="color:#ff7e29;">Target:</span> /tmp/build-cache
-            </div>
-          `;
-        } else if (state === 'executing') {
-          html += `
-            <div style="margin-top:0.5rem; color:#8a99a4;">
-              <span class="tui-accent">▸</span> <strong class="tui-accent">bash</strong> command="npm run build" &middot; 240ms <span class="tui-success">✓</span>
-            </div>
-          `;
-        } else if (state === 'success') {
-          html += `
-            <div style="margin-top:0.5rem; color:#8a99a4;">
-              <span class="tui-accent">▸</span> <strong class="tui-accent">read_file</strong> path="docs/tui-design.md" &middot; 14kB <span class="tui-success">✓</span>
-            </div>
-            <div style="margin-top:0.5rem; line-height: 1.4;">
-              <div><span class="tui-accent">✦</span> The codebase enforces strict separation between interactive presentation layers</div>
-              <div style="padding-left: 1rem; color: #b0c4de;">and core domain primitives. All 12 revamped TUI surfaces are fully aligned.</div>
-            </div>
-            <div style="margin-top:0.4rem; font-size:0.75rem; color:#6a7a85;">
-              &nbsp;&nbsp;turn &middot; in 1.4k &middot; out 420
-            </div>
-          `;
-        } else if (state === 'error') {
-          html += `
-            <div style="margin-top:0.5rem; line-height: 1.4;">
-              <div><span class="tui-error">✦</span> Build verification failed with unresolved type errors.</div>
-              <div style="padding-left: 1rem; color: #ff5c66;">Error: Cannot find module './missing-component.js'</div>
-            </div>
-          `;
-        }
-
-        html += `
-          <div style="margin-top:0.75rem; padding-top:0.5rem; border-top:1px solid #1f354f; font-size:0.75rem; color:#8a99a4;">
-            clio-coder &middot; git v0.4.0<br>
-            <span class="tui-dim">ctx 14k/128k &middot; turn &middot; in 1.4k &middot; out 420</span>
-          </div>
-        `;
-      }
-
-      container.innerHTML = html;
-      if (window.initTableOfContents) window.initTableOfContents();
-    }
-
-    // Init
-    window.onload = () => {
-      renderTerminalSim();
-      window.previewToken = previewToken;
-      window.renderTerminalSim = renderTerminalSim;
-    };
-  </script>
 </body>
 </html>

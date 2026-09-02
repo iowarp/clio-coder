@@ -1,5 +1,8 @@
 # Performance Measurement Methodology
 
+> **Visual blueprint:** The source checkout includes the complete
+> [Performance Measurement Methodology visual reference](https://github.com/iowarp/clio-coder/blob/main/docs/html/performance_methodology_blueprint.html).
+
 Clio Coder treats performance observations as diagnostic evidence, not as a
 reason to weaken behavior. Event ordering, persistence, permissions, terminal
 restoration, accessibility, output contracts, and installed-package behavior

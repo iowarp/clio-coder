@@ -1,7 +1,7 @@
 # Prompt Envelope and Tools
 
-> [!TIP]
-> **Interactive Spec Available:** A source-checkout dashboard is available at [docs/html/tools_blueprint.html](https://github.com/iowarp/clio-coder/blob/main/docs/html/tools_blueprint.html).
+> **Visual blueprint:** The source checkout includes the complete
+> [Prompt Envelope and Tools visual reference](https://github.com/iowarp/clio-coder/blob/main/docs/html/tools_blueprint.html).
 
 Clio Coder keeps the model-facing envelope stable and moves enforcement into the runtime registry and safety policy.
 

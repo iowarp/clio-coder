@@ -1,5 +1,8 @@
 # Fleet Demo Runbook
 
+> **Visual blueprint:** The source checkout includes the complete
+> [Fleet Demo Runbook visual reference](https://github.com/iowarp/clio-coder/blob/main/docs/html/fleet_demo_blueprint.html).
+
 A repeatable multi-node demonstration: one orchestrator drives a real
 CMake/C++ fix through a reviewer-gated dispatch across SSH nodes, and every
 worker's receipt (including the remote ones) verifies afterward. The steps

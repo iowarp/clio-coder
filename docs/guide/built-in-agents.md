@@ -1,9 +1,9 @@
 # Clio Coder Agent Fleet
 
-Clio Coder dispatches focused fleet agents from Markdown recipes. Recipes are data files, not hidden code plugins: YAML frontmatter declares identity, tool requirements, skill bindings, audience, capability and latency classes, budget, and result contract; the Markdown body is the agent instruction text.
+> **Visual blueprint:** The source checkout includes the complete
+> [Clio Coder Agent Fleet visual reference](https://github.com/iowarp/clio-coder/blob/main/docs/html/agents_blueprint.html).
 
-> [!TIP]
-> **Interactive Spec Available:** A source-checkout dashboard for the agent registry and dispatch admission gates is available at [docs/html/agents_blueprint.html](https://github.com/iowarp/clio-coder/blob/main/docs/html/agents_blueprint.html).
+Clio Coder dispatches focused fleet agents from Markdown recipes. Recipes are data files, not hidden code plugins: YAML frontmatter declares identity, tool requirements, skill bindings, audience, capability and latency classes, budget, and result contract; the Markdown body is the agent instruction text.
 
 The source of truth is `src/domains/agents/**`. Clio's agent dispatch engine and execution boundaries are built upon the [@earendil-works/pi-agent-core](https://www.npmjs.com/package/@earendil-works/pi-agent-core) library.
 

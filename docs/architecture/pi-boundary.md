@@ -1,5 +1,8 @@
 # Pi SDK Boundary
 
+> **Visual blueprint:** The source checkout includes the complete
+> [Pi SDK Boundary visual reference](https://github.com/iowarp/clio-coder/blob/main/docs/html/pi_boundary_blueprint.html).
+
 Clio Coder uses Pi 0.84.4 as its provider, agent-loop, and terminal SDK. This
 page records where Pi owns a reusable primitive and where Clio deliberately
 keeps product behavior. Review this table on every Pi upgrade. An action marked

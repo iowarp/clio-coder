@@ -1,277 +1,236 @@
-<!DOCTYPE html>
+<!doctype html>
 <html lang="en">
 <head>
-  <meta charset="UTF-8">
-  <meta name="viewport" content="width=device-width, initial-scale=1.0">
-  <title>Clio Coder - Troubleshooting &amp; Error Remediation Blueprint</title>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <meta name="clio-markdown-source" content="docs/guide/troubleshooting.md">
+  <meta name="clio-docs-version" content="0.4.2">
+  <title>Troubleshooting &amp; Error Remediation · Clio Coder 0.4.2</title>
+  <link rel="icon" href="data:,">
   <link rel="stylesheet" href="shared.css">
-  <style>
-    .error-search-box {
-      margin-bottom: 1.25rem;
-    }
-    .error-search-box input {
-      width: 100%;
-      background: rgba(0, 0, 0, 0.4);
-      border: 1px solid var(--border-card);
-      padding: 0.75rem 1rem;
-      border-radius: 8px;
-      color: #fff;
-      font-family: var(--font-sans);
-      font-size: 0.95rem;
-    }
-    .error-search-box input:focus {
-      outline: none;
-      border-color: var(--color-cyan);
-    }
-    .error-row {
-      background: rgba(0, 0, 0, 0.3);
-      border: 1px solid var(--border-card);
-      border-radius: 8px;
-      padding: 1rem;
-      margin-bottom: 1rem;
-    }
-    .error-msg {
-      font-family: var(--font-mono);
-      font-size: 0.85rem;
-      color: var(--color-rose);
-      margin-bottom: 0.5rem;
-      font-weight: 700;
-    }
-    .error-remediation {
-      font-size: 0.9rem;
-      color: var(--text-main);
-      line-height: 1.5;
-    }
-  </style>
 </head>
-<body>
+<body data-doc-category="guide">
+  <div class="reading-progress" aria-hidden="true"></div>
+  <a class="skip-link" href="#reference-content">Skip to reference</a>
   <div class="container">
-    <header>
+    <header class="document-header" data-category="Guide">
       <div class="header-left">
-        <div class="header-logo">
-          <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" style="color: var(--color-amber);"><title>Troubleshoot Icon</title>
-            <path d="M10.29 3.86L1.82 18a2 2 0 0 0 1.71 3h16.94a2 2 0 0 0 1.71-3L13.71 3.86a2 2 0 0 0-3.42 0z"></path>
-            <line x1="12" y1="9" x2="12" y2="13"></line>
-            <line x1="12" y1="17" x2="12.01" y2="17"></line>
+        <a class="header-logo" href="index.html" aria-label="Documentation index">
+          <svg viewBox="0 0 24 24" fill="none" aria-hidden="true">
+            <path d="M12 2 2 7l10 5 10-5-10-5Z" stroke="url(#clio-logo)" stroke-width="2" stroke-linejoin="round"/>
+            <path d="m2 12 10 5 10-5M2 17l10 5 10-5" stroke="url(#clio-logo)" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"/>
+            <defs><linearGradient id="clio-logo" x1="2" y1="2" x2="22" y2="22"><stop stop-color="#00d4db"/><stop offset="1" stop-color="#ff7e29"/></linearGradient></defs>
           </svg>
-        </div>
+        </a>
         <div class="header-title-wrapper">
+          <p class="document-kicker">Guide / canonical reference</p>
           <h1>Troubleshooting &amp; Error Remediation</h1>
-          <p>Actionable remediation procedures, exact message lookups, and diagnostic toolchains</p>
+          <p class="document-path">docs/guide/troubleshooting.md</p>
         </div>
       </div>
       <div class="header-right">
-        <span class="version-badge">v0.4.0</span>
-        <a href="index.html" class="back-btn">
-          <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><title>Back Icon</title><line x1="19" y1="12" x2="5" y2="12"></line><polyline points="12 19 5 12 12 5"></polyline></svg>
-          Dashboard Hub
-        </a>
+        <a class="back-btn" href="index.html">← Index</a>
+        <span class="version-badge">v0.4.2</span>
       </div>
     </header>
-
-    <div class="page-layout-grid">
-      <nav class="sidebar" aria-label="Table of Contents">
-        <div class="toc-container">
-          <div class="toc-title">On This Page</div>
-          <ul class="toc-list">
-            <!-- Populated dynamically by shared.js -->
-          </ul>
-        </div>
-      </nav>
-
-      <main>
-        <div class="tabs-nav">
-          <button type="button" class="tab-btn active" onclick="switchTab('error-matrix')">
-            <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><title>Matrix</title><rect x="3" y="3" width="18" height="18" rx="2" ry="2"></rect><line x1="3" y1="9" x2="21" y2="9"></line><line x1="9" y1="21" x2="9" y2="9"></line></svg>
-            Error Catalog &amp; Search
-          </button>
-          <button type="button" class="tab-btn" onclick="switchTab('diagnostics')">
-            <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><title>Diag</title><polyline points="22 12 18 12 15 21 9 3 6 12 2 12"></polyline></svg>
-            Diagnostic Playbooks
-          </button>
-          <button type="button" class="tab-btn" onclick="switchTab('local-serving')">
-            <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><title>Local</title><rect x="2" y="2" width="20" height="8" rx="2" ry="2"></rect><rect x="2" y="14" width="20" height="8" rx="2" ry="2"></rect><line x1="6" y1="6" x2="6.01" y2="6"></line><line x1="6" y1="18" x2="6.01" y2="18"></line></svg>
-            Local Serving Remediation
-          </button>
-        </div>
-
-        <!-- TAB 1: ERROR MATRIX -->
-        <div class="tab-pane active" id="pane-error-matrix">
-          <div class="glass-card">
-            <h2>Error Catalog &amp; Remediation Matrix</h2>
-            <p>Type any keyword or message fragment to filter actionable remedies:</p>
-
-            <div class="error-search-box">
-              <input type="text" id="errorSearchInput" placeholder="Filter errors (e.g. permission, trace, global option, lmstudio, sleeping)..." oninput="filterErrors()">
-            </div>
-
-            <div id="errorList">
-              <div class="error-row" data-text="headless permission denied rerun interactively clio-coder run cannot confirm permission requests">
-                <div class="error-msg">clio-coder run cannot confirm permission requests; rerun interactively to approve this action.</div>
-                <div class="error-remediation"><strong>Cause:</strong> A mutating tool required manual permission approval during headless execution.<br><strong>Remedy:</strong> Rerun interactively in the TUI (<code>clio</code>) for one-shot approval, adjust workspace policy in <code>.clio-coder/safety.yaml</code>, or pass <code>--autonomy full-auto</code> if safe.</div>
-              </div>
-
-              <div class="error-row" data-text="global option position before subcommand --api-key -nc --no-context-files">
-                <div class="error-msg">&lt;arg&gt; is a global option and must come before the subcommand: clio-coder &lt;usage&gt; &lt;command&gt; ...</div>
-                <div class="error-remediation"><strong>Cause:</strong> A global CLI flag was placed after the subcommand name.<br><strong>Remedy:</strong> Place global options before the subcommand: <code>clio-coder --api-key &lt;key&gt; run "..."</code> instead of <code>clio-coder run --api-key &lt;key&gt; "..."</code>.</div>
-              </div>
-
-              <div class="error-row" data-text="trace database not found no trace database yet">
-                <div class="error-msg">no trace database yet at &lt;path&gt; / trace database not found: &lt;path&gt;</div>
-                <div class="error-remediation"><strong>Cause:</strong> No sessions or runs have executed, or an explicit <code>--db &lt;path&gt;</code> points to a nonexistent file.<br><strong>Remedy:</strong> Execute a command or turn to initialize the SQLite database, or omit <code>--db</code> to use the default state root (<code>~/.local/state/clio-coder/trace.sqlite</code>).</div>
-              </div>
-
-              <div class="error-row" data-text="target not registered settings.yaml targets add">
-                <div class="error-msg">target &lt;id&gt; is not registered</div>
-                <div class="error-remediation"><strong>Cause:</strong> The designated target ID does not exist in <code>settings.yaml</code>.<br><strong>Remedy:</strong> Run <code>clio-coder targets</code> to view active targets, or register a new target using <code>clio-coder targets add</code>.</div>
-              </div>
-
-              <div class="error-row" data-text="worker_final_output_missing receipt sealed output">
-                <div class="error-msg">worker_final_output_missing</div>
-                <div class="error-remediation"><strong>Cause:</strong> Worker subprocess exited 0 but emitted no final output before closing.<br><strong>Remedy:</strong> Inspect worker event log with <code>clio-coder trace tail &lt;runId&gt;</code> or inspect receipt with <code>monitor(run_id="&lt;id&gt;", mode="receipt")</code>.</div>
-              </div>
-
-              <div class="error-row" data-text="vram_capacity_fit_failure gpu memory schedule">
-                <div class="error-msg">vram_capacity_fit_failure</div>
-                <div class="error-remediation"><strong>Cause:</strong> Target node does not have sufficient GPU VRAM capacity for the model.<br><strong>Remedy:</strong> Select a smaller quantized model variant (e.g. Q4_K_M), reduce context window, or route to an alternate node.</div>
-              </div>
-
-              <div class="error-row" data-text="loop_guard_tools_disabled_exhausted repeated tool calls">
-                <div class="error-msg">loop_guard_tools_disabled_exhausted</div>
-                <div class="error-remediation"><strong>Cause:</strong> Loop detector identified repeated unproductive tool calls with identical arguments.<br><strong>Remedy:</strong> Provide clearer intermediate steering instructions to break recursive tool call cycles.</div>
-              </div>
-
-              <div class="error-row" data-text="cwd-fallback no-cwd missing not-a-directory workspace deleted">
-                <div class="error-msg">cwd-fallback: no-cwd / missing / not-a-directory</div>
-                <div class="error-remediation"><strong>Cause:</strong> Recorded session workspace directory has been moved, unmounted, or deleted.<br><strong>Remedy:</strong> Select an existing valid directory when prompted by the CWD fallback interactive dialog.</div>
-              </div>
-
-              <div class="error-row" data-text="lmstudio duplicate model load peer projection lm link">
-                <div class="error-msg">LM Studio duplicate model load / peer projection</div>
-                <div class="error-remediation"><strong>Cause:</strong> Sending bare model keys when resident instances exist, or requesting dual-host LM Link projections.<br><strong>Remedy:</strong> Clio resolves model IDs to resident instances (#113). Run <code>clio-coder targets --probe</code> to inspect loaded server instances.</div>
-              </div>
-
-              <div class="error-row" data-text="llamacpp 400 model is already running sleeping resident">
-                <div class="error-msg">llama.cpp 400 model is already running</div>
-                <div class="error-remediation"><strong>Cause:</strong> Requesting load for an idle or sleeping model in llama.cpp router.<br><strong>Remedy:</strong> Sleeping models are treated as resident (#127, #134). Verify router slots before requesting eviction.</div>
-              </div>
-
-              <div class="error-row" data-text="oauth token exchange cancelled aborted signal">
-                <div class="error-msg">OAuth token exchange cancelled</div>
-                <div class="error-remediation"><strong>Cause:</strong> In-flight OAuth login or refresh was cancelled before credential commitment.<br><strong>Remedy:</strong> Re-run <code>clio-coder auth login &lt;target&gt;</code> to restart flow. Uncommitted tokens are discarded cleanly.</div>
-              </div>
-            </div>
-          </div>
-        </div>
-
-        <!-- TAB 2: DIAGNOSTICS -->
-        <div class="tab-pane" id="pane-diagnostics">
-          <h2>Standard Diagnostic Toolchain</h2>
-          <table class="ref-table">
-            <thead>
-              <tr>
-                <th>Command</th>
-                <th>Diagnostic Purpose</th>
-                <th>When to Use</th>
-              </tr>
-            </thead>
-            <tbody>
-              <tr>
-                <td><code>clio-coder doctor</code></td>
-                <td>Inspects system dependencies, folder permissions, config schemas, and detected coding peers.</td>
-                <td>First step for any runtime or environment anomaly.</td>
-              </tr>
-              <tr>
-                <td><code>clio-coder doctor --fix</code></td>
-                <td>Repairs folder permissions (chmod 0o600 credentials), creates missing directories, and updates install metadata.</td>
-                <td>After upgrades or permissions warnings.</td>
-              </tr>
-              <tr>
-                <td><code>clio-coder targets --probe</code></td>
-                <td>Tests network connectivity, authentication tokens, and model listings for all configured providers.</td>
-                <td>When model calls timeout or return auth errors.</td>
-              </tr>
-              <tr>
-                <td><code>clio-coder trace tail &lt;runId&gt;</code></td>
-                <td>Streams granular NDJSON event logs and tool execution records from the SQLite trace store.</td>
-                <td>Investigating failed or stuck worker runs.</td>
-              </tr>
-              <tr>
-                <td><code>clio-coder reset --cache</code></td>
-                <td>Clears stale runtime caches without affecting configuration, credentials, or sessions.</td>
-                <td>Resolving cache corruption or schema drift.</td>
-              </tr>
-            </tbody>
-          </table>
-        </div>
-
-        <!-- TAB 3: LOCAL SERVING -->
-        <div class="tab-pane" id="pane-local-serving">
-          <h2>Local Runtime &amp; Inference Server Quirks</h2>
-          <div class="grid grid-2">
-            <div class="glass-card">
-              <h3>LM Studio Instance Resolution (#113)</h3>
-              <ul>
-                <li>Bare model keys are resolved against resident instances on the target host.</li>
-                <li>Prevents server from loading a second 27B model copy in GPU memory.</li>
-                <li>LM Link peer projections across multiple hosts are flagged and never auto-selected.</li>
-              </ul>
-            </div>
-            <div class="glass-card">
-              <h3>llama.cpp Residency &amp; Sleep States (#127, #134)</h3>
-              <ul>
-                <li>Idle models in router <code>sleeping</code> state are recognized as resident.</li>
-                <li>Eliminates repeated <code>400 model is already running</code> turn failures.</li>
-                <li>Eviction is refused if the replacement model is not in the catalog.</li>
-              </ul>
-            </div>
-          </div>
-        </div>
-
-        <!-- Related Navigation -->
-        <nav class="related-nav" aria-label="Related Pages">
-          <a href="prompt_envelope_blueprint.html" class="nav-link-card">
-            <span class="nav-label">Previous Blueprint</span>
-            <span class="nav-title">Prompt Envelope &amp; Tools</span>
-          </a>
-          <a href="glossary_blueprint.html" class="nav-link-card next">
-            <span class="nav-label">Next Blueprint</span>
-            <span class="nav-title">Glossary</span>
-          </a>
+    <div class="page-layout-grid reference-layout">
+      <aside class="sidebar reference-sidebar" aria-label="On this page">
+        <nav class="toc-container">
+          <p class="toc-title">On this page</p>
+          <a class="sidebar-source" href="https://github.com/iowarp/clio-coder/blob/main/docs/guide/troubleshooting.md">Canonical Markdown<br>docs/guide/troubleshooting.md</a>
+          <ul class="toc-list"></ul>
         </nav>
+      </aside>
+      <main class="reference-main" id="reference-content">
+        <article class="reference-prose glass-card">
+<blockquote>
+<p><strong>Visual blueprint:</strong> The source checkout includes the complete
+<a href="troubleshooting_blueprint.html">Troubleshooting &amp; Error Remediation visual reference</a>.</p>
+</blockquote>
+<p>This guide provides concrete, actionable remediation procedures for
+operational errors, permission denials, target connection failures, and system
+diagnostics in the current source tree.</p>
+<hr>
+<h2>Error Catalog &amp; Remediation Matrix</h2>
+<table>
+<thead>
+<tr>
+<th align="left">User-Facing Error / Notice</th>
+<th align="left">Cause</th>
+<th align="left">Actionable Remediation</th>
+</tr>
+</thead>
+<tbody><tr>
+<td align="left"><code>clio-coder run cannot confirm permission requests; rerun interactively to approve this action.</code></td>
+<td align="left">A tool call required manual permission confirmation during a non-interactive headless <code>clio-coder run</code> execution.</td>
+<td align="left">Run the command interactively in the TUI (<code>clio</code>) to grant one-shot approval, adjust the workspace policy in <code>.clio-coder/safety.yaml</code>, or run with <code>--autonomy full-auto</code> if safe.</td>
+</tr>
+<tr>
+<td align="left"><code>no trace database yet at &lt;path&gt;</code></td>
+<td align="left">The trace mirror database has not been initialized because no interactive sessions or dispatches have executed yet.</td>
+<td align="left">Execute a turn or dispatch a task. In SQLite trace commands, this notice is informational (exit code <code>0</code>).</td>
+</tr>
+<tr>
+<td align="left"><code>trace database not found: &lt;path&gt;</code></td>
+<td align="left">An explicit <code>--db &lt;path&gt;</code> flag was provided pointing to a nonexistent database file.</td>
+<td align="left">Verify the database path or omit <code>--db</code> to use the default state directory database (<code>&lt;stateDir&gt;/trace.sqlite</code>); the next line prints that default path.</td>
+</tr>
+<tr>
+<td align="left"><code>no local skill marketplace catalog or index configured</code></td>
+<td align="left">No catalog directory (<code>CLIO_CODER_SKILL_CATALOG_DIR</code>, a <code>skills/</code> folder in the working tree, or the installed package&#39;s own <code>skills/</code> catalog) and no JSON index (<code>CLIO_CODER_SKILL_MARKETPLACE_INDEX</code>, <code>&lt;configDir&gt;/skill-marketplace.json</code>, or the package&#39;s <code>skills/skill-marketplace.json</code>) was found. On an npm install this means the package is incomplete; check <code>clio-coder doctor</code>.</td>
+<td align="left">Point <code>CLIO_CODER_SKILL_CATALOG_DIR</code> at a <code>skills/</code> catalog or <code>CLIO_CODER_SKILL_MARKETPLACE_INDEX</code> at a valid <code>skill-marketplace.json</code>, or install a skill directly via <code>clio-coder skills install &lt;path|github-url&gt;</code>.</td>
+</tr>
+<tr>
+<td align="left"><code>&lt;arg&gt; is a global option and must come before the subcommand: clio-coder &lt;usage&gt; &lt;command&gt; ...</code></td>
+<td align="left">A global CLI option (such as <code>--api-key</code>, <code>--no-context-files</code>, or <code>-nc</code>) was placed after the subcommand name. Directory roots are configured via <code>CLIO_CODER_*_DIR</code> environment variables.</td>
+<td align="left">Move the flag before the subcommand name (e.g. <code>clio-coder --api-key &lt;key&gt; run ...</code> instead of <code>clio-coder run --api-key &lt;key&gt; ...</code>).</td>
+</tr>
+<tr>
+<td align="left"><code>target &lt;id&gt; is not registered</code></td>
+<td align="left">The designated target ID does not exist in <code>settings.yaml</code>.</td>
+<td align="left">Run <code>clio-coder targets</code> to view available targets, or configure a new target using <code>clio-coder targets add</code>.</td>
+</tr>
+<tr>
+<td align="left"><code>budget: ceiling must be &gt;= 0 (got &lt;val&gt;)</code></td>
+<td align="left">A negative session cost ceiling reached the scheduling budget (<code>src/domains/scheduling/budget.ts</code>).</td>
+<td align="left">Set a non-negative <code>safety.limits.sessionCostUsd</code> in <code>settings.yaml</code>, or edit Session ceiling (USD) in Settings → Budget.</td>
+</tr>
+<tr>
+<td align="left"><code>worker_final_output_missing</code></td>
+<td align="left">A worker process completed execution with exit code 0 but failed to emit a valid final answer before the stream closed.</td>
+<td align="left">Check the worker event log using <code>clio-coder trace tail &lt;runId&gt;</code> or inspect the receipt via <code>monitor(run_id=&quot;&lt;id&gt;&quot;, mode=&quot;receipt&quot;)</code>.</td>
+</tr>
+<tr>
+<td align="left"><code>vram_capacity_fit_failure</code></td>
+<td align="left">The model could not be scheduled or loaded due to insufficient GPU VRAM capacity on the target node.</td>
+<td align="left">Select a smaller quantized model variant, reduce context window size, or route to an alternative fleet node with greater memory capacity.</td>
+</tr>
+<tr>
+<td align="left"><code>loop_guard_tools_disabled_exhausted</code></td>
+<td align="left">The loop detector identified repeated unproductive tool calls with identical arguments and disabled tool execution.</td>
+<td align="left">Inspect model prompts and provide clearer intermediate steering instructions to prevent recursive tool loops.</td>
+</tr>
+<tr>
+<td align="left"><code>Node.js ExperimentalWarning: SQLite is an experimental feature</code></td>
+<td align="left">Node.js emitted an experimental feature warning for <code>node:sqlite</code>.</td>
+<td align="left">By default, Clio suppresses this warning via a scoped filter. If visible when running scripts directly, pass <code>--trace-warnings</code> to control diagnostics.</td>
+</tr>
+<tr>
+<td align="left"><code>cwd-fallback: no-cwd / missing / not-a-directory</code></td>
+<td align="left">The session recorded in <code>meta.json</code> points to a workspace directory that has been deleted, unmounted, or renamed.</td>
+<td align="left">When prompted by the <code>cwd-fallback</code> overlay, select a valid existing directory to re-anchor the session.</td>
+</tr>
+<tr>
+<td align="left"><code>LM Studio duplicate model load / peer projection</code></td>
+<td align="left">Sending a bare model key that already has a loaded instance or an LM Link peer projection.</td>
+<td align="left">Clio resolves model IDs to resident instances automatically. Verify loaded instances on the target server with <code>clio-coder targets --probe</code>.</td>
+</tr>
+<tr>
+<td align="left"><code>llama.cpp 400 model is already running</code></td>
+<td align="left">Sending load requests to a router where the model is idle/sleeping.</td>
+<td align="left">Sleeping models are treated as resident. Verify router slots and catalog models before initiating eviction.</td>
+</tr>
+<tr>
+<td align="left"><code>OAuth token exchange cancelled</code></td>
+<td align="left">An in-flight OAuth login or credential refresh was aborted before persistence.</td>
+<td align="left">Re-run <code>clio-coder auth login &lt;target&gt;</code> to restart the OAuth flow cleanly. Uncommitted tokens are discarded.</td>
+</tr>
+</tbody></table>
+<hr>
+<h2>Reading a cold cache</h2>
+<p>On a local server prefill is most of what a turn costs, so a cold prefix cache is the difference between a first token in under a second and one in fifty. This is how to find out why a turn went cold, starting from what the TUI shows.</p>
+<p><strong>1. Read the <code>/context</code> cache lines.</strong> Two lines answer different questions. The prompt-cache line says what the provider reported and whether the compiled prompt shell was reused. The prefill line says what the server itself did:</p>
+<pre><code class="language-text">prefill: 34,951 uncached · 0 cached · 48,617 ms
+</code></pre>
+<p>Those are the server&#39;s own numbers, not Clio&#39;s estimate. <code>server does not report cache reads</code> in place of the cached figure means the backend gave no <code>cache_n</code> at all, which is LM Studio 2.29.0&#39;s OpenAI-compatible port today; on that target the verdict comes from the provider&#39;s <code>cached_tokens</code> instead and the prefill line reports only total prompt work and milliseconds.</p>
+<p><strong>2. Look for the expected-cold line.</strong> When the last settled run came back <code>cold</code> and Clio had recorded a cause, <code>/context</code> names it rather than warning:</p>
+<pre><code class="language-text">last cold turn: working-set eviction (expected)
+</code></pre>
+<p>The eight causes and what stamps each one are in <a href="context_blueprint.html#cache-divergence-honesty">context-engine.md</a>. <code>background_memory</code> renders in prose as <code>last cold turn: background memory step (expected)</code>.</p>
+<p><strong>3. Confirm it in the ledger.</strong> The reasons are durable, so a finished session answers the same question without the TUI. Open <code>current.jsonl</code> under the session directory <code>clio-coder paths</code> reports and read the run&#39;s first assistant entry:</p>
+<pre><code class="language-json">{
+  &quot;timing&quot;: { &quot;ttftMs&quot;: 53194, &quot;apiMs&quot;: 56770 },
+  &quot;promptCache&quot;: {
+    &quot;input&quot;: 34951, &quot;cacheRead&quot;: 0, &quot;cacheWrite&quot;: 0,
+    &quot;backendVerdict&quot;: &quot;cold&quot;,
+    &quot;expectedColdReasons&quot;: [&quot;dispatch&quot;, &quot;residency&quot;],
+    &quot;backend&quot;: {
+      &quot;promptTokens&quot;: 34951, &quot;cachedTokens&quot;: 0, &quot;predictedTokens&quot;: 24,
+      &quot;promptMs&quot;: 48617, &quot;predictedMs&quot;: 373, &quot;source&quot;: &quot;llamacpp-timings&quot;
+    }
+  }
+}
+</code></pre>
+<p><code>expectedColdReasons</code> is stamped once per run, on its first persisted call, so a turn with several model calls carries it on the first one only. <code>clio-coder doctor</code> folds the latest session for you and prints the verdict counts plus the most frequent reason, and <code>clio-coder usage report</code> gives per-session uncached prefill and verdict counts across the window.</p>
+<p><strong>4. When there is no reason, the warning is the finding.</strong> A cold backend with a reused prompt shell and no recorded reason is a real disagreement: Clio kept the bytes stable and the server re-prefilled anyway. <code>/context</code> leaves the warning in place for exactly that case. Four causes are worth checking in order, and none of them is a Clio bug:</p>
+<ul>
+<li><strong>The server slept.</strong> A llama.cpp router started with <code>--sleep-idle-seconds N</code> drops the slot&#39;s prefix cache when it sleeps, and <code>--cache-ram</code> does not reliably restore a large state. A gap longer than that setting between two turns explains a cold turn completely. Raise the flag, or accept that a session left idle pays for its first turn back.</li>
+<li><strong>Something else used the endpoint.</strong> A worker, a second Clio session, or another client on the same server evicts the slot. Clio stamps <code>dispatch</code>, <code>residency</code>, and <code>background_memory</code> only for work it can attribute to itself on that endpoint; a foreign process leaves no stamp. <code>clio-coder targets --probe</code> reports the endpoint&#39;s slot count, and <code>/fleet</code> settings show active slots per endpoint.</li>
+<li><strong>The model was swapped.</strong> A router serving one model at a time reloads on a residency change, and everything the previous model had cached is gone. This normally does stamp <code>residency</code>, but only when the mutation went through Clio.</li>
+<li><strong>The prompt moved for a reason Clio did not classify.</strong> Compare the run&#39;s <code>promptHash</code> and <code>toolSignature</code> in <code>context-snapshots.jsonl</code> against the previous run&#39;s. Equal hashes with a cold backend point at the server; different hashes with no <code>prompt_recompiled</code> or <code>tool_surface_change</code> stamp is worth an issue.</li>
+</ul>
+<p>One case is expected on hybrid architectures and looks like a bug. Qwen3.8 keeps recurrent state that llama.cpp cannot roll back to an arbitrary token, so a change anywhere inside a cached prefix re-prefills from the last context checkpoint rather than from the changed byte. A small edit to old history can therefore cost thousands of tokens of prefill with the prompt hash otherwise stable. The server&#39;s checkpoint count and its <code>--checkpoint-min-step</code> are the levers; see the <code>qwen3.8-27b</code> family&#39;s <code>serving</code> and <code>measuredUnder</code> notes in <code>src/domains/providers/models/local-models/clio-coder-local-coding-targets.yaml</code> for the measured figures and the exact argv they were taken under.</p>
+<hr>
+<h2>A TUI that stops answering the keyboard</h2>
+<p>When an interactive session stops responding to typing, the question worth
+answering before anything else is which half of the input pipeline stopped: the
+stdin reader that hands bytes to the application, or the renderer that turns
+them into a frame on stdout. Clio keeps that evidence without being asked. Every
+interactive process holds a bounded in-memory ring of the last 256 input-ingress
+records and the last 256 committed frames, and writes it out when the process
+receives <code>SIGTERM</code>, which is the signal a <code>kill</code> of the stuck pane sends.</p>
+<p>The dump lands in the state directory <code>clio-coder paths</code> reports:</p>
+<pre><code class="language-text">&lt;stateDir&gt;/input-wedge/&lt;ISO timestamp&gt;-&lt;pid&gt;.json
+</code></pre>
+<p>The five newest dumps are kept and older ones are removed as new ones land.
+Read <code>classification</code> first:</p>
+<table>
+<thead>
+<tr>
+<th align="left"><code>classification</code></th>
+<th align="left">What it means</th>
+</tr>
+</thead>
+<tbody><tr>
+<td align="left"><code>input-not-committed</code></td>
+<td align="left">Bytes reached the application and no frame carrying them ever reached stdout. The renderer is the stuck half.</td>
+</tr>
+<tr>
+<td align="left"><code>no-input-recorded</code></td>
+<td align="left">Nothing was delivered at all. If the operator was typing, the stdin reader is the stuck half.</td>
+</tr>
+<tr>
+<td align="left"><code>input-committed</code></td>
+<td align="left">Both halves were moving. Whatever the session was doing, it was not this pipeline.</td>
+</tr>
+</tbody></table>
+<p><code>msSinceLastInputIngress</code> and <code>msSinceLastCommittedFrame</code> say how long each half
+had been quiet when the signal arrived, and the <code>inputIngress</code> and <code>frames</code>
+arrays carry the records themselves. Frames are kept only when they reached
+stdout, so an empty <code>frames</code> array is itself a finding.</p>
+<p>For a full session trace rather than the tail, set <code>CLIO_CODER_RENDER_TRACE</code> to
+a file path before starting the session. That writes every record, including
+provider deltas and terminal writes, as JSONL. The ring is the always-on subset
+of the same records, for the case where nobody armed the trace first.</p>
+<hr>
+<h2>Diagnostic Commands</h2>
+<p>When encountering unexpected system behavior:</p>
+<ol>
+<li><strong>System Health Check</strong>: Run <code>clio-coder doctor</code> (or <code>clio-coder doctor --fix</code> to auto-repair state directory permissions and configuration defaults).</li>
+<li><strong>Target Connectivity Probe</strong>: Run <code>clio-coder targets --probe</code> to verify authentication and reachability for all configured LLM providers.</li>
+<li><strong>Trace Store Inspection</strong>: Run <code>clio-coder trace runs</code> and <code>clio-coder trace tail &lt;runId&gt;</code> to inspect event logs, durations, and tool outputs.</li>
+<li><strong>Receipt Validation</strong>: Run <code>clio-coder evidence inspect &lt;evidenceId&gt;</code> or <code>/view verify &lt;runId&gt;</code> to check cryptographic integrity and execution telemetry. Build the evidence id first with <code>clio-coder evidence build --run &lt;runId&gt;</code>.</li>
+</ol>
+        </article>
+        <nav class="related-nav" aria-label="Adjacent references">
+          <a class="nav-link-card" href="tool_usage_blueprint.html"><span class="nav-label">Previous</span><span class="nav-title">Tool Usage Reference</span></a>
+          <a class="nav-link-card next" href="acp_blueprint.html"><span class="nav-label">Next</span><span class="nav-title">Agent Client Protocol (ACP) Server</span></a>
+        </nav>
+        <p class="reference-footer-note">Canonical content lives in the mapped Markdown page. This visual counterpart adds navigation without changing the contract.</p>
       </main>
     </div>
-
-    <footer>
-      <p>Clio Coder Troubleshooting Blueprint &bull; Version 0.4.0 &bull; Gnosis Research Center</p>
-    </footer>
+    <footer>Clio Coder documentation · source-aligned at v0.4.2</footer>
   </div>
-
   <script src="shared.js"></script>
-  <script>
-    function switchTab(tabId) {
-      document.querySelectorAll('.tab-btn').forEach(btn => btn.classList.remove('active'));
-      document.querySelectorAll('.tab-pane').forEach(pane => pane.classList.remove('active'));
-
-      const pane = document.getElementById(`pane-${tabId}`);
-      if (pane) pane.classList.add('active');
-
-      const activeBtn = Array.from(document.querySelectorAll('.tab-btn')).find(btn => {
-        return btn.getAttribute('onclick')?.includes(`'${tabId}'`);
-      });
-      if (activeBtn) activeBtn.classList.add('active');
-
-      if (window.initTableOfContents) window.initTableOfContents();
-    }
-
-    function filterErrors() {
-      const q = document.getElementById('errorSearchInput').value.toLowerCase().trim();
-      const rows = document.querySelectorAll('.error-row');
-      rows.forEach(row => {
-        const text = row.getAttribute('data-text').toLowerCase() + ' ' + row.innerText.toLowerCase();
-        row.style.display = text.includes(q) ? 'block' : 'none';
-      });
-    }
-  </script>
 </body>
 </html>

@@ -1,0 +1,159 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <meta name="clio-markdown-source" content="docs/process/git-commit-provenance.md">
+  <meta name="clio-docs-version" content="0.4.2">
+  <title>Git Commit Provenance · Clio Coder 0.4.2</title>
+  <link rel="icon" href="data:,">
+  <link rel="stylesheet" href="shared.css">
+</head>
+<body data-doc-category="process">
+  <div class="reading-progress" aria-hidden="true"></div>
+  <a class="skip-link" href="#reference-content">Skip to reference</a>
+  <div class="container">
+    <header class="document-header" data-category="Process">
+      <div class="header-left">
+        <a class="header-logo" href="index.html" aria-label="Documentation index">
+          <svg viewBox="0 0 24 24" fill="none" aria-hidden="true">
+            <path d="M12 2 2 7l10 5 10-5-10-5Z" stroke="url(#clio-logo)" stroke-width="2" stroke-linejoin="round"/>
+            <path d="m2 12 10 5 10-5M2 17l10 5 10-5" stroke="url(#clio-logo)" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"/>
+            <defs><linearGradient id="clio-logo" x1="2" y1="2" x2="22" y2="22"><stop stop-color="#00d4db"/><stop offset="1" stop-color="#ff7e29"/></linearGradient></defs>
+          </svg>
+        </a>
+        <div class="header-title-wrapper">
+          <p class="document-kicker">Process / canonical reference</p>
+          <h1>Git Commit Provenance</h1>
+          <p class="document-path">docs/process/git-commit-provenance.md</p>
+        </div>
+      </div>
+      <div class="header-right">
+        <a class="back-btn" href="index.html">← Index</a>
+        <span class="version-badge">v0.4.2</span>
+      </div>
+    </header>
+    <div class="page-layout-grid reference-layout">
+      <aside class="sidebar reference-sidebar" aria-label="On this page">
+        <nav class="toc-container">
+          <p class="toc-title">On this page</p>
+          <a class="sidebar-source" href="https://github.com/iowarp/clio-coder/blob/main/docs/process/git-commit-provenance.md">Canonical Markdown<br>docs/process/git-commit-provenance.md</a>
+          <ul class="toc-list"></ul>
+        </nav>
+      </aside>
+      <main class="reference-main" id="reference-content">
+        <article class="reference-prose glass-card">
+<blockquote>
+<p><strong>Visual blueprint:</strong> The source checkout includes the complete
+<a href="git_commit_provenance_blueprint.html">Git Commit Provenance visual reference</a>.</p>
+</blockquote>
+<p>Clio Coder adds evidence-aware role trailers to commits created through Clio.
+The feature is enabled by default:</p>
+<pre><code class="language-yaml">integrations:
+  git:
+    commitAttribution: true
+</code></pre>
+<p>The released <code>attribution.gitCommits</code> path is a migration alias. Current
+settings files and writers use <code>integrations.git.commitAttribution</code>.</p>
+<p>Settings -&gt; Advanced exposes the same switch as <strong>Clio commit provenance</strong>, with
+<code>enabled</code> and <code>disabled</code> values. A change applies immediately to subsequent
+commits in the session. When disabled, Clio leaves commit messages entirely
+unchanged.</p>
+<h2>Canonical identity</h2>
+<p>The identity is compiled into Clio and is not user-editable:</p>
+<pre><code class="language-text">Clio Coder &lt;clio-coder@iowarp.ai&gt;
+</code></pre>
+<p>Clio never replaces the human author or committer. The person and Git identity
+that made the commit remain in the commit&#39;s author and committer fields.</p>
+<h2>Evidence-dependent roles</h2>
+<p>Each trailer states what trusted execution evidence proves. A role is not an
+advertisement and is never inferred from an agent saying in prose that it ran a
+check or performed a review.</p>
+<pre><code class="language-text">Assisted-by: Clio Coder &lt;clio-coder@iowarp.ai&gt;
+Tested-by: Clio Coder &lt;clio-coder@iowarp.ai&gt;
+Reviewed-by: Clio Coder &lt;clio-coder@iowarp.ai&gt;
+Co-authored-by: Clio Coder &lt;clio-coder@iowarp.ai&gt;
+</code></pre>
+<ul>
+<li><code>Assisted-by</code> means Clio materially created or edited work in the commit.</li>
+<li><code>Tested-by</code> means an actual validation command completed successfully against
+the work. Prose that claims tests passed is not evidence.</li>
+<li><code>Reviewed-by</code> means an independent verifier or reviewer produced a passing
+result. A self-review or an unsealed assertion is not enough.</li>
+<li><code>Co-authored-by</code> is added only when Clio materially authored part of the
+change. GitHub and GitLab recognize this compatibility trailer for
+contributor and avatar display. Testing or review alone never adds it.</li>
+</ul>
+<p>Existing human trailers stay in place. A Clio trailer already present in any
+letter case is respected rather than repeated, line endings are normalized only
+while attribution is enabled, and repeated processing is idempotent. When a directly relevant
+receipt-v20 digest passes integrity verification, Clio may additionally add the
+full digest:</p>
+<pre><code class="language-text">Clio-Evidence: receipt-v20/sha256:&lt;64-character digest&gt;
+</code></pre>
+<p>Clio does not invent, shorten, or add an unrelated digest. The role trailers do
+not depend on this optional line.</p>
+<h2>Commit paths and hooks</h2>
+<p>The deterministic SDLC fleet attributes its plan, code, and documentation
+commits at the controlled commit seam. Material agent work supplies assistance
+and authorship, successful deterministic code steps supply testing, and a
+passing independent gate supplies review. Any later workspace mutation makes
+prior testing and review stale; only validation or review that is fresh for the
+commit can be claimed.</p>
+<p>For Clio-controlled child processes, Clio supplies a process-local managed
+hooks directory through command-scope Git configuration. The directory holds a
+chaining wrapper for every hook name Git knows, so the repository&#39;s own
+<code>pre-commit</code>, <code>commit-msg</code>, <code>pre-push</code>, and remaining default hooks still run
+exactly as before with their original exit status. Only the <code>prepare-commit-msg</code>
+wrapper adds anything, and only after the repository&#39;s own hook has run and
+succeeded. It runs only when both <code>AI_AGENT=clio-coder</code> and the effective
+attribution setting are present. It uses <code>git interpret-trailers</code>. Normal
+commits from an external terminal do not receive Clio&#39;s managed hooks.</p>
+<p>The child-process seams attribute by spawn provenance, not by sealed evidence.
+A commit the agent itself runs through the Bash tool, a worker, or a registered
+code step claims assistance and authorship, because it records the agent&#39;s own
+session work. A commit made by a delegated external harness over ACP claims
+assistance only, since that harness authored the change. A commit made by an
+operator hook command claims nothing. Testing and review are never claimed at
+these seams; only the fleet&#39;s coordinator-owned results can supply them.</p>
+<p>The managed hook attributes only a message supplied up front with <code>-m</code>, <code>-F</code>,
+or a merge. It skips amend, commit-message reuse, squash, cherry-pick, revert,
+rebase, sequencer operations, and editor sessions, so historical messages are
+not falsely attributed and an abandoned editor still aborts the commit.
+<code>--no-verify</code> does not bypass <code>prepare-commit-msg</code>, matching Git&#39;s normal hook
+semantics. The message is finalized at this stage before Git signs the commit,
+so signed commits retain their existing behavior.</p>
+<p>Clio never overwrites repository hooks or changes <code>core.hooksPath</code>. If a custom
+hooks path or another setup cannot be composed safely, Clio fails open, emits a
+bounded diagnostic, and relies on controlled commit seams such as the fleet
+runner. Attribution failure does not destroy a commit; only a pre-existing hook
+that already failed continues to block it.</p>
+<p>The repository probe behind the managed environment (whether the command&#39;s
+working directory is inside a work tree, and what <code>core.hooksPath</code> resolves to)
+is reused for ten seconds per working directory and Git environment, and the
+managed hooks directory is installed once per process. A <code>git init</code> or a
+<code>core.hooksPath</code> change takes effect for spawns that begin after that window.</p>
+<h2>Platform identity and avatar</h2>
+<p>Git commit data contains names and email addresses, not logos. GitHub and
+GitLab obtain the displayed avatar from the platform account that has verified
+the commit email. Until maintainers verify <code>clio-coder@iowarp.ai</code> on
+IOWarp-controlled GitHub and GitLab identities, for example <code>clio-coder-bot</code> or
+<code>iowarp-clio</code>, those platforms render the trailers as plain text with a default
+avatar; the trailers themselves are complete and correct either way. That
+verification is a maintainer follow-up rather than a release gate, and
+<code>assets/clio-coder-avatar-512.png</code> is an exact PNG conversion of the existing
+512 px Clio logo for platforms that require PNG. No account creation or remote
+operation is performed by Clio Coder.</p>
+        </article>
+        <nav class="related-nav" aria-label="Adjacent references">
+          <a class="nav-link-card" href="fleet_demo_blueprint.html"><span class="nav-label">Previous</span><span class="nav-title">Fleet Demo Runbook</span></a>
+          <a class="nav-link-card next" href="performance_methodology_blueprint.html"><span class="nav-label">Next</span><span class="nav-title">Performance Measurement Methodology</span></a>
+        </nav>
+        <p class="reference-footer-note">Canonical content lives in the mapped Markdown page. This visual counterpart adds navigation without changing the contract.</p>
+      </main>
+    </div>
+    <footer>Clio Coder documentation · source-aligned at v0.4.2</footer>
+  </div>
+  <script src="shared.js"></script>
+</body>
+</html>

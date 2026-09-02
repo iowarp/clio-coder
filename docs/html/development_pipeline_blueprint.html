@@ -1,0 +1,196 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <meta name="clio-markdown-source" content="docs/process/development-pipeline.md">
+  <meta name="clio-docs-version" content="0.4.2">
+  <title>Development Pipeline · Clio Coder 0.4.2</title>
+  <link rel="icon" href="data:,">
+  <link rel="stylesheet" href="shared.css">
+</head>
+<body data-doc-category="process">
+  <div class="reading-progress" aria-hidden="true"></div>
+  <a class="skip-link" href="#reference-content">Skip to reference</a>
+  <div class="container">
+    <header class="document-header" data-category="Process">
+      <div class="header-left">
+        <a class="header-logo" href="index.html" aria-label="Documentation index">
+          <svg viewBox="0 0 24 24" fill="none" aria-hidden="true">
+            <path d="M12 2 2 7l10 5 10-5-10-5Z" stroke="url(#clio-logo)" stroke-width="2" stroke-linejoin="round"/>
+            <path d="m2 12 10 5 10-5M2 17l10 5 10-5" stroke="url(#clio-logo)" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"/>
+            <defs><linearGradient id="clio-logo" x1="2" y1="2" x2="22" y2="22"><stop stop-color="#00d4db"/><stop offset="1" stop-color="#ff7e29"/></linearGradient></defs>
+          </svg>
+        </a>
+        <div class="header-title-wrapper">
+          <p class="document-kicker">Process / canonical reference</p>
+          <h1>Development Pipeline</h1>
+          <p class="document-path">docs/process/development-pipeline.md</p>
+        </div>
+      </div>
+      <div class="header-right">
+        <a class="back-btn" href="index.html">← Index</a>
+        <span class="version-badge">v0.4.2</span>
+      </div>
+    </header>
+    <div class="page-layout-grid reference-layout">
+      <aside class="sidebar reference-sidebar" aria-label="On this page">
+        <nav class="toc-container">
+          <p class="toc-title">On this page</p>
+          <a class="sidebar-source" href="https://github.com/iowarp/clio-coder/blob/main/docs/process/development-pipeline.md">Canonical Markdown<br>docs/process/development-pipeline.md</a>
+          <ul class="toc-list"></ul>
+        </nav>
+      </aside>
+      <main class="reference-main" id="reference-content">
+        <article class="reference-prose glass-card">
+<blockquote>
+<p><strong>Visual blueprint:</strong> The source checkout includes the complete
+<a href="development_pipeline_blueprint.html">Development Pipeline visual reference</a>.</p>
+</blockquote>
+<p>How a change to Clio Coder moves from &quot;we noticed something&quot; to a published
+release. This is the process the maintainers follow and the process Clio
+herself follows when dogfooding: every stage is a marketplace skill, so any
+harness that loads the skills (Clio, Claude Code, Codex) runs the same
+pipeline. One-shot reactive prompting is the anti-pattern this page retires:
+work that is not traceable to an issue does not merge.</p>
+<h2>The lifecycle</h2>
+<p>Three stages. A skill earns a stage only when it encodes repo policy a
+model cannot guess or an irreversibility gate a small model will skip
+under pressure; git mechanics alone never justify a stage.</p>
+<table>
+<thead>
+<tr>
+<th>Stage</th>
+<th>Skill</th>
+<th>Output</th>
+</tr>
+</thead>
+<tbody><tr>
+<td>1. File</td>
+<td><a href="https://github.com/iowarp/clio-coder/tree/main/skills/git/file-ticket/"><code>file-ticket</code></a></td>
+<td>A labeled GitHub issue with evidence and acceptance criteria</td>
+</tr>
+<tr>
+<td>2. Fix</td>
+<td><a href="https://github.com/iowarp/clio-coder/tree/main/skills/git/fix-issue/"><code>fix-issue</code></a></td>
+<td>An uncommitted, verified change where failing tests preceded the fix, self-reviewed against the issue&#39;s acceptance criteria</td>
+</tr>
+<tr>
+<td>3. Ship</td>
+<td><a href="https://github.com/iowarp/clio-coder/tree/main/skills/git/ship/"><code>ship</code></a></td>
+<td>An atomic conventional commit referencing the issue (<code>fixes #N</code>), a gated push, and an open PR; merge is a human decision</td>
+</tr>
+</tbody></table>
+<p>Releases follow <a href="release_cut_checklist_blueprint.html">release-cut-checklist.md</a> as a
+human-gated checklist, not a skill. Worktrees
+(<a href="https://github.com/iowarp/clio-coder/tree/main/skills/git/worktree-create/"><code>worktree-create</code></a>,
+<a href="https://github.com/iowarp/clio-coder/tree/main/skills/git/worktree-merge/"><code>worktree-merge</code></a>),
+<a href="https://github.com/iowarp/clio-coder/tree/main/skills/git/resolve-merge-conflicts/"><code>resolve-merge-conflicts</code></a>, and
+<a href="https://github.com/iowarp/clio-coder/tree/main/skills/coding/tdd/"><code>tdd</code></a> are à-la-carte tools reached for when the
+situation calls for them, not stages every change passes through. An RCA
+written as the closing comment on the issue (<code>rca</code> label) is an artifact of
+hard bugs, not a mandatory toll booth. Batch ticket creation from a PRD
+bypasses stage 1 and uses <a href="https://github.com/iowarp/clio-coder/tree/main/skills/planning/backlog/"><code>backlog</code></a>
+instead; everything downstream is identical.</p>
+<h2>Inheriting a Pi release</h2>
+<p>Pi dependency upgrades use a fixed five-step review so that upstream fixes
+replace Clio copies without crossing the product boundary:</p>
+<ol>
+<li>Read the release notes or package changelogs for <code>pi-ai</code>, <code>pi-agent-core</code>,
+and <code>pi-tui</code>.</li>
+<li>Run <code>npm run pi:surface-diff</code>. A changed or removed symbol that Clio imports
+is an error; a new export is review input.</li>
+<li>Run the focused contracts in the
+<a href="pi_boundary_blueprint.html#pi-regression-net">Pi regression net</a>, then run <code>npm run ci</code>.</li>
+<li>Walk Pi&#39;s fixed-issue list against the
+<a href="pi_boundary_blueprint.html">Pi SDK boundary table</a>. For every fix in a surface Clio
+still owns, either delete Clio&#39;s copy in favor of Pi or add a dated reason
+for keeping the delta.</li>
+<li>Review the matching pi-coding-agent release diff for application features
+worth a Clio ticket.</li>
+</ol>
+<p>After review, regenerate <code>docs/pi-surface.json</code> with
+<code>npm run pi:surface-snapshot</code>, inspect the symbol and signature changes, and
+commit the dependency pins, snapshot, boundary notes, and proving contracts
+together. <code>npm run lint</code> invokes the surface check automatically when the
+installed Pi versions differ from the checked-in snapshot.</p>
+<h2>Test lanes</h2>
+<p><code>npm test</code> uses Node&#39;s test runner over every <code>tests/contracts/*.test.ts</code> and
+<code>tests/smoke/*.test.ts</code> file, with <code>tests/harness/tmp-root.ts</code> preloaded to
+isolate test state. Its <code>pretest</code> hook builds <code>dist/</code> when the CLI bundle is
+absent. Run one focused file while iterating with:</p>
+<pre><code class="language-bash">npm run test:file -- tests/contracts/&lt;name&gt;.test.ts
+</code></pre>
+<p>There is no committed weighted-shard or special serial-lane runner. Keep timing
+claims within the focused contract that owns them, and use the full <code>npm run ci</code>
+gate before handoff.</p>
+<h2>Issue conventions</h2>
+<ul>
+<li><strong>Title</strong>: conventional tag plus imperative summary (<code>fix: memory overlay cannot scroll</code>), matching <code>.github/ISSUE_TEMPLATE/</code> prefixes.</li>
+<li><strong>Body</strong>: Problem, Reproduce, Evidence with <code>file:line</code> pointers,
+Acceptance criteria as a verifiable checklist, Links.</li>
+<li><strong>Labels</strong>: exactly one type label (<code>bug</code>, <code>enhancement</code>,
+<code>documentation</code>, <code>question</code>) plus applicable <code>area:*</code> labels.</li>
+<li><strong>Milestone</strong>: the open release milestone when the work is committed to
+it; unassigned issues carry <code>needs-triage</code> until a human places them.</li>
+</ul>
+<h3>Label taxonomy</h3>
+<table>
+<thead>
+<tr>
+<th>Kind</th>
+<th>Labels</th>
+<th>Meaning</th>
+</tr>
+</thead>
+<tbody><tr>
+<td>Type</td>
+<td><code>bug</code>, <code>enhancement</code>, <code>documentation</code>, <code>question</code></td>
+<td>What the issue is; exactly one</td>
+</tr>
+<tr>
+<td>Area</td>
+<td><code>area:tui</code>, <code>area:engine</code>, <code>area:memory</code>, <code>area:dispatch</code>, <code>area:skills</code>, <code>area:cli</code>, <code>area:api</code>, <code>area:docs</code></td>
+<td>Which subsystem; one or more</td>
+</tr>
+<tr>
+<td>Status</td>
+<td><code>needs-triage</code>, <code>rca</code>, <code>blocked</code></td>
+<td>Where in the lifecycle</td>
+</tr>
+<tr>
+<td>Community</td>
+<td><code>good first issue</code>, <code>help wanted</code>, <code>duplicate</code>, <code>invalid</code>, <code>wontfix</code></td>
+<td>GitHub defaults, unchanged</td>
+</tr>
+</tbody></table>
+<p>New <code>area:*</code> labels are proposed in an issue, not created ad hoc.</p>
+<h2>Milestones are releases</h2>
+<p>Each open milestone names an upcoming version. Triage means
+assigning an issue to a milestone or explicitly leaving it in the backlog.
+A release cut requires every issue in its milestone to be closed
+or bumped; the milestone closes when the tag is published.</p>
+<h2>Dogfooding setup</h2>
+<p>The marketplace copy under <code>skills/git/</code> is the committed source of truth,
+pinned in <code>skills/registry.yaml</code> by <code>npm run skills:pin</code>. Runtime roots are
+gitignored, so each developer installs locally:</p>
+<pre><code class="language-bash">cp -r skills/git/file-ticket .clio-coder/skills/   # Clio Coder
+cp -r skills/git/file-ticket .claude/skills/       # Claude Code
+</code></pre>
+<p>The other pipeline skills are model-invoked from the marketplace catalog the
+same way. When a skill changes, re-run <code>npm run skills:pin</code> and re-copy;
+drift between an installed copy and the pinned hash surfaces a warning at
+activation.</p>
+        </article>
+        <nav class="related-nav" aria-label="Adjacent references">
+          <a class="nav-link-card" href="worker_dispatch_blueprint.html"><span class="nav-label">Previous</span><span class="nav-title">Worker Dispatch Mechanics</span></a>
+          <a class="nav-link-card next" href="documentation_coverage_blueprint.html"><span class="nav-label">Next</span><span class="nav-title">Documentation coverage and source-alignment audit</span></a>
+        </nav>
+        <p class="reference-footer-note">Canonical content lives in the mapped Markdown page. This visual counterpart adds navigation without changing the contract.</p>
+      </main>
+    </div>
+    <footer>Clio Coder documentation · source-aligned at v0.4.2</footer>
+  </div>
+  <script src="shared.js"></script>
+</body>
+</html>

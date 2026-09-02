@@ -1,5 +1,8 @@
 # Git Commit Provenance
 
+> **Visual blueprint:** The source checkout includes the complete
+> [Git Commit Provenance visual reference](https://github.com/iowarp/clio-coder/blob/main/docs/html/git_commit_provenance_blueprint.html).
+
 Clio Coder adds evidence-aware role trailers to commits created through Clio.
 The feature is enabled by default:
 

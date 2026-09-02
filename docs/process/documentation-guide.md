@@ -1,8 +1,7 @@
 # Documentation Standards and Codebase Alignment
 
-> [!TIP]
-> **Interactive spec available:** The source checkout includes the
-> [documentation blueprint](https://github.com/iowarp/clio-coder/blob/main/docs/html/documentation_blueprint.html).
+> **Visual blueprint:** The source checkout includes the complete
+> [Documentation Standards and Codebase Alignment visual reference](https://github.com/iowarp/clio-coder/blob/main/docs/html/documentation_blueprint.html).
 
 Clio Coder is an experimental community alpha. Documentation should help contributors and early users work from the source of truth without overstating maturity. When docs drift, prefer the current source and tests over older prose or aspirational roadmap notes.
 
@@ -123,25 +122,22 @@ Use alerts sparingly:
 
 ---
 
-## Blueprint Coverage & Format Strategy
+## Blueprint coverage and format strategy
 
 Clio Coder maintains two complementary documentation formats:
 
-1. **Markdown Documents (`docs/guide/**/*.md`, `docs/architecture/**/*.md`, `docs/process/**/*.md`, and `docs/history/**/*.md`)**: The canonical reference for coding agents, developers, and maintainers, with `docs/README.md` as the hub. They optimize for retrievability, exact enumerations, schema tables, typed TypeScript contracts, and source citations (`src/...:line`).
-2. **Interactive HTML Blueprints (`docs/html/*.html`)**: Visual reference cards and client-side simulators designed for human operators exploring dynamic behaviors (such as safety rule evaluation, token compaction calculation, YAML target validation, and prompt structure).
+1. **Markdown documents (`docs/guide/**/*.md`, `docs/architecture/**/*.md`, `docs/process/**/*.md`, and `docs/history/**/*.md`)**: The canonical reference for coding agents, developers, and maintainers, with `docs/README.md` as the hub. They optimize for retrievability, exact enumerations, schema tables, typed TypeScript contracts, and source citations (`src/...:line`).
+2. **HTML blueprints (`docs/html/*_blueprint.html`)**: One visual counterpart per Markdown page for human readers. Each blueprint carries the complete canonical prose plus navigation and copy affordances, and declares its source in `meta[name="clio-markdown-source"]`.
 
 ### Blueprint Creation Policy
 
 Blueprint coverage is explicit rather than inferred from document style. The
-page-level status and exact filenames live in
-[`documentation-coverage.md`](documentation-coverage.md). At the 0.4.2 audit,
-11 pages had no dedicated or shared blueprint: the documentation hub,
-configuration reference, context working set, development pipeline, typed
-dispatch intent, documentation coverage, fleet demo, Git provenance,
-performance methodology, release checklist, and resource library.
-`docs/html/index.html` must link every existing blueprint and identify any
-remaining Markdown-only reference without claiming that an existing HTML file
-is absent.
+page-level audit lives in
+[`documentation-coverage.md`](documentation-coverage.md). All 51 Markdown pages
+have a dedicated blueprint. `docs/html/index.html` groups those counterparts by
+the same Guide, Architecture, Process, and History tree, while a source meta tag
+provides the one-to-one machine-readable mapping. Every mapping must remain
+unique, complete, and free of orphaned Markdown or HTML pages.
 
 ---
 
@@ -161,7 +157,7 @@ Suggested local link check:
 ```bash
 python3 - <<'PY'
 import pathlib, re
-for md in list(pathlib.Path('docs').glob('*.md')) + [pathlib.Path('README.md')]:
+for md in list(pathlib.Path('docs').rglob('*.md')) + [pathlib.Path('README.md')]:
     text = md.read_text()
     for m in re.finditer(r'\[[^\]]+\]\(([^)]+)\)', text):
         link = m.group(1)

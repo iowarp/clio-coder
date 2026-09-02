@@ -1,8 +1,7 @@
 # Internal Eval Suites
 
-> [!TIP]
-> **Interactive spec available:** The source checkout includes the
-> [internal eval blueprint](https://github.com/iowarp/clio-coder/blob/main/docs/html/evals_internal_blueprint.html).
+> **Visual blueprint:** The source checkout includes the complete
+> [Internal Eval Suites visual reference](https://github.com/iowarp/clio-coder/blob/main/docs/html/evals_internal_blueprint.html).
 
 Private suites should live outside this repository. Keep datasets, prompts,
 live fleet coordinates, calibration outputs, and raw run artifacts in a private

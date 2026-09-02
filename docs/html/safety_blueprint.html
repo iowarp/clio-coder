@@ -1,1386 +1,590 @@
-<!DOCTYPE html>
+<!doctype html>
 <html lang="en">
 <head>
-  <meta charset="UTF-8">
-  <meta name="viewport" content="width=device-width, initial-scale=1.0">
-  <title>Clio Coder Safety Model Blueprint (v0.4.0)</title>
-
-  <style>
-    :root {
-      --bg-dark: #090d16;
-      --bg-grid: rgba(255, 255, 255, 0.02);
-      --bg-card: rgba(13, 20, 38, 0.45);
-      --bg-card-hover: rgba(20, 30, 58, 0.6);
-      --border-card: rgba(255, 255, 255, 0.08);
-      --border-card-hover: rgba(0, 240, 255, 0.3);
-      --text-main: #f3f4f6;
-      --text-muted: #9ca3af;
-      --text-dim: #6b7280;
-
-      --color-cyan: #00f0ff;
-      --color-cyan-rgb: 0, 240, 255;
-      --color-purple: #bd00ff;
-      --color-purple-rgb: 189, 0, 255;
-      --color-emerald: #10b981;
-      --color-emerald-rgb: 16, 185, 129;
-      --color-amber: #f59e0b;
-      --color-amber-rgb: 245, 158, 11;
-      --color-rose: #ef4444;
-      --color-rose-rgb: 239, 68, 68;
-
-      --gradient-main: linear-gradient(135deg, var(--color-cyan), var(--color-purple));
-      --shadow-glow: 0 0 25px rgba(0, 240, 255, 0.15);
-      --font-sans: "Segoe UI", -apple-system, BlinkMacSystemFont, Roboto, "Helvetica Neue", Arial, sans-serif;
-      --font-mono: "SFMono-Regular", Consolas, "Liberation Mono", Menlo, monospace;
-
-      --glass-blur: blur(12px);
-    }
-
-    * {
-      box-sizing: border-box;
-      margin: 0;
-      padding: 0;
-    }
-
-    body {
-      background-color: var(--bg-dark);
-      background-image:
-        radial-gradient(circle at 10% 20%, rgba(var(--color-cyan-rgb), 0.05) 0%, transparent 40%),
-        radial-gradient(circle at 90% 80%, rgba(var(--color-purple-rgb), 0.05) 0%, transparent 40%),
-        radial-gradient(circle at 50% 50%, #0d1527 0%, var(--bg-dark) 100%);
-      color: var(--text-main);
-      font-family: var(--font-sans);
-      min-height: 100vh;
-      line-height: 1.6;
-      overflow-x: hidden;
-      position: relative;
-    }
-
-    body::before {
-      content: '';
-      position: absolute;
-      inset: 0;
-      background-image: linear-gradient(var(--bg-grid) 1px, transparent 1px),
-                        linear-gradient(90deg, var(--bg-grid) 1px, transparent 1px);
-      background-size: 40px 40px;
-      background-position: center top;
-      pointer-events: none;
-      z-index: 0;
-      opacity: 0.8;
-    }
-
-    .container {
-      max-width: 1400px;
-      margin: 0 auto;
-      padding: 2rem;
-      position: relative;
-      z-index: 1;
-    }
-
-    /* Header Styling */
-    header {
-      display: flex;
-      justify-content: space-between;
-      align-items: center;
-      margin-bottom: 2.5rem;
-      padding-bottom: 1.5rem;
-      border-bottom: 1px solid rgba(255, 255, 255, 0.05);
-    }
-
-    .header-left {
-      display: flex;
-      align-items: center;
-      gap: 1rem;
-    }
-
-    .header-logo {
-      display: inline-flex;
-      align-items: center;
-      justify-content: center;
-      width: 48px;
-      height: 48px;
-      background: rgba(255, 255, 255, 0.02);
-      border: 1px solid var(--border-card);
-      border-radius: 12px;
-      position: relative;
-    }
-
-    .header-logo svg {
-      width: 28px;
-      height: 28px;
-    }
-
-    .header-title-wrapper h1 {
-      font-size: 1.5rem;
-      font-weight: 800;
-      letter-spacing: -0.03em;
-      background: linear-gradient(to right, #ffffff, #c7d2fe, var(--color-cyan));
-      -webkit-background-clip: text;
-      -webkit-text-fill-color: transparent;
-    }
-
-    .header-title-wrapper p {
-      font-size: 0.825rem;
-      color: var(--text-muted);
-    }
-
-    .header-right {
-      display: flex;
-      align-items: center;
-      gap: 1rem;
-    }
-
-    .back-btn {
-      background: rgba(255, 255, 255, 0.03);
-      border: 1px solid var(--border-card);
-      color: var(--text-muted);
-      padding: 0.5rem 1rem;
-      border-radius: 8px;
-      font-size: 0.875rem;
-      font-weight: 600;
-      text-decoration: none;
-      display: inline-flex;
-      align-items: center;
-      gap: 0.5rem;
-      transition: all 0.2s;
-    }
-
-    .back-btn:hover {
-      background: rgba(255, 255, 255, 0.08);
-      color: var(--text-main);
-      border-color: rgba(var(--color-cyan-rgb), 0.3);
-    }
-
-    .version-badge {
-      background: rgba(0, 240, 255, 0.08);
-      border: 1px solid rgba(0, 240, 255, 0.25);
-      color: var(--color-cyan);
-      padding: 0.35rem 0.75rem;
-      border-radius: 50px;
-      font-size: 0.75rem;
-      font-weight: 600;
-      font-family: var(--font-mono);
-    }
-
-    /* Tabs Navigation */
-    .tabs-nav {
-      display: flex;
-      gap: 0.75rem;
-      margin-bottom: 2rem;
-    }
-
-    .tab-btn {
-      background: rgba(255, 255, 255, 0.03);
-      border: 1px solid var(--border-card);
-      color: var(--text-muted);
-      padding: 0.6rem 1.25rem;
-      border-radius: 8px;
-      font-size: 0.875rem;
-      font-weight: 600;
-      cursor: pointer;
-      display: flex;
-      align-items: center;
-      gap: 0.5rem;
-      transition: all 0.2s;
-    }
-
-    .tab-btn:hover {
-      background: rgba(255, 255, 255, 0.06);
-      color: var(--text-main);
-    }
-
-    .tab-btn.active {
-      background: var(--gradient-main);
-      color: #090d16;
-      border-color: transparent;
-      box-shadow: 0 4px 15px rgba(var(--color-cyan-rgb), 0.25);
-    }
-
-    /* Content Layout */
-    .tab-pane {
-      display: none;
-      animation: fadeIn 0.3s ease-out forwards;
-    }
-
-    .tab-pane.active {
-      display: block;
-    }
-
-    @keyframes fadeIn {
-      from { opacity: 0; transform: translateY(8px); }
-      to { opacity: 1; transform: translateY(0); }
-    }
-
-    /* Split layout: Specs + Simulator */
-    .blueprint-layout {
-      display: grid;
-      grid-template-columns: 1.1fr 0.9fr;
-      gap: 2rem;
-      align-items: start;
-    }
-
-    @media (max-width: 1100px) {
-      .blueprint-layout {
-        grid-template-columns: 1fr;
-      }
-    }
-
-    .glass-card {
-      background: var(--bg-card);
-      border: 1px solid var(--border-card);
-      border-radius: 16px;
-      padding: 1.75rem;
-      margin-bottom: 2rem;
-      backdrop-filter: var(--glass-blur);
-      box-shadow: 0 8px 32px 0 rgba(0, 0, 0, 0.3);
-    }
-
-    .glass-card h2 {
-      font-size: 1.25rem;
-      font-weight: 700;
-      color: #ffffff;
-      margin-bottom: 1.25rem;
-      display: flex;
-      align-items: center;
-      gap: 0.5rem;
-      border-bottom: 1px solid rgba(255, 255, 255, 0.05);
-      padding-bottom: 0.75rem;
-    }
-
-    .glass-card h2 svg {
-      width: 18px;
-      height: 18px;
-      color: var(--color-cyan);
-    }
-
-    .glass-card p {
-      font-size: 0.925rem;
-      color: var(--text-muted);
-      margin-bottom: 1rem;
-    }
-
-    /* Autonomy Matrix Style */
-    .matrix-wrapper {
-      overflow-x: auto;
-      margin-bottom: 1.5rem;
-      border-radius: 8px;
-      border: 1px solid var(--border-card);
-    }
-
-    .matrix-table {
-      width: 100%;
-      border-collapse: collapse;
-      font-size: 0.85rem;
-    }
-
-    .matrix-table th, .matrix-table td {
-      padding: 0.75rem 1rem;
-      text-align: left;
-      border-bottom: 1px solid rgba(255, 255, 255, 0.05);
-    }
-
-    .matrix-table th {
-      background: rgba(0,0,0,0.3);
-      color: var(--text-muted);
-      font-weight: 600;
-    }
-
-    .matrix-table td.col-hdr {
-      font-weight: 600;
-    }
-
-    .matrix-table td {
-      color: var(--text-main);
-    }
-
-    /* Matrix Highlight Columns */
-    .matrix-table th.highlight, .matrix-table td.highlight {
-      background: rgba(var(--color-cyan-rgb), 0.08);
-      border-left: 1px solid rgba(var(--color-cyan-rgb), 0.15);
-      border-right: 1px solid rgba(var(--color-cyan-rgb), 0.15);
-    }
-
-    .matrix-table tr:hover td {
-      background: rgba(255,255,255,0.02);
-    }
-
-    .badge-decision {
-      display: inline-block;
-      padding: 0.15rem 0.5rem;
-      border-radius: 4px;
-      font-weight: 700;
-      font-size: 0.75rem;
-      text-transform: uppercase;
-      font-family: var(--font-mono);
-    }
-
-    .badge-decision.allow { background: rgba(16, 185, 129, 0.1); border: 1px solid rgba(16, 185, 129, 0.25); color: var(--color-emerald); }
-    .badge-decision.ask { background: rgba(245, 158, 11, 0.1); border: 1px solid rgba(245, 158, 11, 0.25); color: var(--color-amber); }
-    .badge-decision.deny { background: rgba(239, 68, 68, 0.1); border: 1px solid rgba(239, 68, 68, 0.25); color: var(--color-rose); }
-    .badge-decision.block { background: rgba(239, 68, 68, 0.15); border: 1px solid rgba(239, 68, 68, 0.4); color: var(--color-rose); text-shadow: 0 0 5px rgba(239, 68, 68, 0.3); }
-
-    /* SVG Flowchart */
-    .flowchart-container {
-      background: rgba(9, 13, 22, 0.6);
-      border: 1px solid var(--border-card);
-      border-radius: 12px;
-      padding: 1.5rem;
-      text-align: center;
-      margin: 1.5rem 0;
-    }
-
-    .flowchart-container svg {
-      width: 100%;
-      height: auto;
-      max-height: 280px;
-    }
-
-    /* Simulator Panel Styling */
-    .simulator-panel {
-      position: sticky;
-      top: 2rem;
-    }
-
-    .form-group {
-      margin-bottom: 1.25rem;
-    }
-
-    .form-group label {
-      display: block;
-      font-size: 0.8rem;
-      font-weight: 600;
-      color: var(--text-muted);
-      margin-bottom: 0.5rem;
-      text-transform: uppercase;
-      letter-spacing: 0.05em;
-    }
-
-    .form-row {
-      display: grid;
-      grid-template-columns: 1fr 1fr;
-      gap: 1rem;
-    }
-
-    select, input, textarea {
-      width: 100%;
-      background: rgba(9, 13, 22, 0.7);
-      border: 1px solid var(--border-card);
-      border-radius: 8px;
-      padding: 0.65rem 0.85rem;
-      color: #fff;
-      font-family: var(--font-sans);
-      font-size: 0.9rem;
-      outline: none;
-      transition: all 0.2s;
-    }
-
-    select:focus, input:focus, textarea:focus {
-      border-color: var(--color-cyan);
-      box-shadow: 0 0 10px rgba(var(--color-cyan-rgb), 0.15);
-    }
-
-    textarea {
-      font-family: var(--font-mono);
-      font-size: 0.8rem;
-      resize: vertical;
-    }
-
-    /* Preset list */
-    .presets-list {
-      display: flex;
-      flex-wrap: wrap;
-      gap: 0.4rem;
-      margin-bottom: 1.25rem;
-    }
-
-    .preset-btn {
-      background: rgba(255, 255, 255, 0.03);
-      border: 1px solid var(--border-card);
-      color: var(--text-muted);
-      padding: 0.3rem 0.6rem;
-      border-radius: 4px;
-      font-size: 0.725rem;
-      cursor: pointer;
-      font-family: var(--font-mono);
-      transition: all 0.2s;
-    }
-
-    .preset-btn:hover {
-      background: rgba(0, 240, 255, 0.08);
-      border-color: var(--color-cyan);
-      color: #fff;
-    }
-
-    /* Simulation Verdict Displays */
-    .verdict-header {
-      font-size: 0.8rem;
-      font-weight: 600;
-      color: var(--text-muted);
-      margin-bottom: 0.5rem;
-      text-transform: uppercase;
-    }
-
-    .verdict-card {
-      border-radius: 12px;
-      padding: 1.25rem;
-      margin-bottom: 1.5rem;
-      display: flex;
-      align-items: center;
-      justify-content: space-between;
-      transition: all 0.3s ease;
-    }
-
-    .verdict-info h3 {
-      font-size: 1.35rem;
-      font-weight: 800;
-      letter-spacing: 0.05em;
-    }
-
-    .verdict-info p {
-      font-size: 0.825rem;
-      color: var(--text-main);
-      margin: 0.25rem 0 0 0;
-    }
-
-    .verdict-status-badge {
-      font-size: 2.25rem;
-      font-weight: 900;
-    }
-
-    /* Verdict classes */
-    .v-allow {
-      background: rgba(16, 185, 129, 0.08);
-      border: 1px solid rgba(16, 185, 129, 0.3);
-      color: var(--color-emerald);
-      box-shadow: 0 0 15px rgba(16, 185, 129, 0.08);
-    }
-
-    .v-ask {
-      background: rgba(245, 158, 11, 0.08);
-      border: 1px solid rgba(245, 158, 11, 0.3);
-      color: var(--color-amber);
-      box-shadow: 0 0 15px rgba(245, 158, 11, 0.08);
-    }
-
-    .v-deny {
-      background: rgba(239, 68, 68, 0.08);
-      border: 1px solid rgba(239, 68, 68, 0.3);
-      color: var(--color-rose);
-      box-shadow: 0 0 15px rgba(239, 68, 68, 0.08);
-    }
-
-    .v-block {
-      background: rgba(239, 68, 68, 0.12);
-      border: 1px solid rgba(239, 68, 68, 0.45);
-      color: var(--color-rose);
-      box-shadow: 0 0 20px rgba(239, 68, 68, 0.12);
-    }
-
-    /* Live trace console */
-    .console-header {
-      display: flex;
-      justify-content: space-between;
-      align-items: center;
-      margin-bottom: 0.5rem;
-    }
-
-    .console-title {
-      font-size: 0.8rem;
-      font-weight: 600;
-      color: var(--text-muted);
-      text-transform: uppercase;
-    }
-
-    .console-body {
-      background: #020408;
-      border: 1px solid var(--border-card);
-      border-radius: 8px;
-      padding: 1rem;
-      font-family: var(--font-mono);
-      font-size: 0.8rem;
-      height: 180px;
-      overflow-y: auto;
-      white-space: pre-wrap;
-      color: #a5b4fc;
-      box-shadow: inset 0 2px 10px rgba(0,0,0,0.8);
-    }
-
-    /* Code block style */
-    pre {
-      background: rgba(0,0,0,0.3);
-      border: 1px solid var(--border-card);
-      border-radius: 8px;
-      padding: 1rem;
-      overflow-x: auto;
-      margin: 1rem 0;
-    }
-
-    code {
-      font-family: var(--font-mono);
-      font-size: 0.85rem;
-    }
-
-    /* Markdown styling classes */
-    .ref-table {
-      width: 100%;
-      border-collapse: collapse;
-      margin: 1.5rem 0;
-    }
-
-    .ref-table th, .ref-table td {
-      padding: 0.65rem 0.85rem;
-      border: 1px solid var(--border-card);
-      text-align: left;
-    }
-
-    .ref-table th {
-      background: rgba(255,255,255,0.03);
-    }
-
-    .alert-tip {
-      background: rgba(16, 185, 129, 0.06);
-      border-left: 4px solid var(--color-emerald);
-      padding: 1rem;
-      border-radius: 0 8px 8px 0;
-      margin: 1.5rem 0;
-      font-size: 0.9rem;
-    }
-
-    .alert-tip strong {
-      color: var(--color-emerald);
-    }
-
-    /* Footer */
-    footer {
-      text-align: center;
-      margin-top: 4rem;
-      padding-top: 2rem;
-      border-top: 1px solid rgba(255, 255, 255, 0.05);
-      color: var(--text-dim);
-      font-size: 0.875rem;
-    }
-  </style>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <meta name="clio-markdown-source" content="docs/architecture/safety-model.md">
+  <meta name="clio-docs-version" content="0.4.2">
+  <title>Clio Coder Safety Model · Clio Coder 0.4.2</title>
+  <link rel="icon" href="data:,">
+  <link rel="stylesheet" href="shared.css">
 </head>
-<body>
+<body data-doc-category="architecture">
+  <div class="reading-progress" aria-hidden="true"></div>
+  <a class="skip-link" href="#reference-content">Skip to reference</a>
   <div class="container">
-    <header>
+    <header class="document-header" data-category="Architecture">
       <div class="header-left">
-        <div class="header-logo">
-          <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" style="color: var(--color-cyan);"><title>Icon</title>
-            <rect x="3" y="11" width="18" height="11" rx="2" ry="2"></rect>
-            <path d="M7 11V7a5 5 0 0 1 10 0v4"></path>
+        <a class="header-logo" href="index.html" aria-label="Documentation index">
+          <svg viewBox="0 0 24 24" fill="none" aria-hidden="true">
+            <path d="M12 2 2 7l10 5 10-5-10-5Z" stroke="url(#clio-logo)" stroke-width="2" stroke-linejoin="round"/>
+            <path d="m2 12 10 5 10-5M2 17l10 5 10-5" stroke="url(#clio-logo)" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"/>
+            <defs><linearGradient id="clio-logo" x1="2" y1="2" x2="22" y2="22"><stop stop-color="#00d4db"/><stop offset="1" stop-color="#ff7e29"/></linearGradient></defs>
           </svg>
-        </div>
+        </a>
         <div class="header-title-wrapper">
+          <p class="document-kicker">Architecture / canonical reference</p>
           <h1>Clio Coder Safety Model</h1>
-          <p>Execution-gated guardrails, autonomy mappings, and policy enforcement engine</p>
-          <div class="meta-chips-row">
-            <span class="chip">Source: docs/safety-model.md</span>
-            <span class="chip chip-orange">clio-coder docs safety</span>
-          </div>
+          <p class="document-path">docs/architecture/safety-model.md</p>
         </div>
       </div>
       <div class="header-right">
-        <span class="version-badge">Clio Coder v0.4.0</span>
-        <a href="index.html" class="back-btn">
-          <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><title>Icon</title><line x1="19" y1="12" x2="5" y2="12"></line><polyline points="12 19 5 12 12 5"></polyline></svg>
-          Dashboard Hub
-        </a>
+        <a class="back-btn" href="index.html">← Index</a>
+        <span class="version-badge">v0.4.2</span>
       </div>
     </header>
-
-    <div class="tabs-nav">
-      <button type="button" class="tab-btn active" onclick="switchTab('interactive')">
-        <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><title>Icon</title><polyline points="22 12 18 12 15 21 9 3 6 12 2 12"></polyline></svg>
-        Interactive Spec &amp; Simulator
-      </button>
-      <button type="button" class="tab-btn" onclick="switchTab('reference')">
-        <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><title>Icon</title><path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z"></path><polyline points="14 2 14 8 20 8"></polyline><line x1="16" y1="13" x2="8" y2="13"></line><line x1="16" y1="17" x2="8" y2="17"></line><polyline points="10 9 9 9 8 9"></polyline></svg>
-        Full Technical Reference
-      </button>
-    </div>
-
-    <!-- TAB 1: INTERACTIVE -->
-    <main class="tab-pane active" id="pane-interactive">
-      <div class="blueprint-layout">
-
-        <!-- Left: Matrix & Flows -->
-        <div class="specs-col">
-
-          <div class="glass-card">
-            <h2>
-              <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><title>Icon</title><path d="M12 22s8-4 8-10V5l-8-3-8 3v7c0 6 8 10 8 10z"></path></svg>
-              Autonomy Level Matrix
-            </h2>
-            <p>The <code>autonomy</code> setting in <code>settings.yaml</code> (read-only | suggest | auto-edit | full-auto) controls tool execution gates. The safety net blocks apply regardless of this level.</p>
-
-            <div class="matrix-wrapper">
-              <table class="matrix-table" id="matrixTable">
-                <thead>
-                  <tr>
-                    <th>Action Class</th>
-                    <th id="hdr-read-only">read-only</th>
-                    <th id="hdr-suggest">suggest</th>
-                    <th id="hdr-auto-edit" class="highlight">auto-edit (default)</th>
-                    <th id="hdr-full-auto">full-auto</th>
-                  </tr>
-                </thead>
-                <tbody>
-                  <tr id="row-read">
-                    <td class="col-hdr">read</td>
-                    <td><span class="badge-decision allow">allow</span></td>
-                    <td><span class="badge-decision allow">allow</span></td>
-                    <td class="highlight"><span class="badge-decision allow">allow</span></td>
-                    <td><span class="badge-decision allow">allow</span></td>
-                  </tr>
-                  <tr id="row-write">
-                    <td class="col-hdr">write</td>
-                    <td><span class="badge-decision deny">deny</span></td>
-                    <td><span class="badge-decision ask">ask</span></td>
-                    <td class="highlight"><span class="badge-decision allow">allow</span></td>
-                    <td><span class="badge-decision allow">allow</span></td>
-                  </tr>
-                  <tr id="row-execute-builtin">
-                    <td class="col-hdr">execute (builtin / project command)</td>
-                    <td><span class="badge-decision deny">deny</span></td>
-                    <td><span class="badge-decision ask">ask</span></td>
-                    <td class="highlight"><span class="badge-decision allow">allow</span></td>
-                    <td><span class="badge-decision allow">allow</span></td>
-                  </tr>
-                  <tr id="row-execute-other">
-                    <td class="col-hdr">execute (any other bash)</td>
-                    <td><span class="badge-decision deny">deny</span></td>
-                    <td><span class="badge-decision ask">ask</span></td>
-                    <td class="highlight"><span class="badge-decision ask">ask</span></td>
-                    <td><span class="badge-decision allow">allow</span></td>
-                  </tr>
-                  <tr id="row-dispatch">
-                    <td class="col-hdr">dispatch</td>
-                    <td><span class="badge-decision deny">deny</span></td>
-                    <td><span class="badge-decision ask">ask</span></td>
-                    <td class="highlight"><span class="badge-decision allow">allow</span></td>
-                    <td><span class="badge-decision allow">allow</span></td>
-                  </tr>
-                  <tr id="row-system-modify">
-                    <td class="col-hdr">system_modify</td>
-                    <td><span class="badge-decision deny">deny</span></td>
-                    <td><span class="badge-decision ask">ask</span></td>
-                    <td class="highlight"><span class="badge-decision ask">ask</span></td>
-                    <td><span class="badge-decision ask">ask</span></td>
-                  </tr>
-                  <tr id="row-git-destructive">
-                    <td class="col-hdr">git_destructive</td>
-                    <td><span class="badge-decision block">net block</span></td>
-                    <td><span class="badge-decision block">net block</span></td>
-                    <td class="highlight"><span class="badge-decision block">net block</span></td>
-                    <td><span class="badge-decision block">net block</span></td>
-                  </tr>
-                  <tr id="row-unknown">
-                    <td class="col-hdr">unknown</td>
-                    <td><span class="badge-decision deny">deny</span></td>
-                    <td><span class="badge-decision ask">ask</span></td>
-                    <td class="highlight"><span class="badge-decision ask">ask</span></td>
-                    <td><span class="badge-decision ask">ask</span></td>
-                  </tr>
-                </tbody>
-              </table>
-            </div>
-          </div>
-
-          <div class="glass-card">
-            <h2>
-              <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><title>Icon</title><polyline points="22 12 18 12 15 21 9 3 6 12 2 12"></polyline></svg>
-              Enforcement Path Flow
-            </h2>
-            <p>Every tool call evaluates through the Safety Net filters first, followed by Autonomy level mapping, and finally queues through the Approvals resolver.</p>
-
-            <div class="flowchart-container">
-              <svg viewBox="0 0 600 220" fill="none" xmlns="http://www.w3.org/2000/svg"><title>Icon</title>
-                <!-- Marker def -->
-                <defs>
-                  <marker id="arrow" viewBox="0 0 10 10" refX="6" refY="5" markerWidth="6" markerHeight="6" orient="auto-start-reverse">
-                    <path d="M 0 1.5 L 8 5 L 0 8.5 z" fill="var(--color-cyan)"/>
-                  </marker>
-                </defs>
-
-                <!-- Box 1 -->
-                <rect x="10" y="70" width="115" height="50" rx="8" fill="rgba(255,255,255,0.02)" stroke="var(--border-card)" stroke-width="1"/>
-                <text x="67" y="94" fill="#fff" font-size="10" font-family="var(--font-sans)" text-anchor="middle" font-weight="600">Tool Call Input</text>
-                <text x="67" y="108" fill="var(--text-muted)" font-size="8" font-family="var(--font-sans)" text-anchor="middle">(bash, write, etc.)</text>
-
-                <!-- Arrow 1 -> 2 -->
-                <path d="M 125 95 L 150 95" fill="none" stroke="var(--color-cyan)" stroke-width="1.5" marker-end="url(#arrow)"/>
-
-                <!-- Box 2 -->
-                <rect id="flow-net" x="160" y="60" width="110" height="70" rx="8" fill="rgba(255,255,255,0.02)" stroke="var(--border-card)" stroke-width="1"/>
-                <text x="215" y="85" fill="#fff" font-size="11" font-family="var(--font-sans)" text-anchor="middle" font-weight="700">1. Safety Net</text>
-                <text x="215" y="100" fill="var(--color-rose)" font-size="8" font-family="var(--font-sans)" text-anchor="middle" font-weight="600">Block / Confirm</text>
-                <text x="215" y="115" fill="var(--color-emerald)" font-size="8" font-family="var(--font-sans)" text-anchor="middle" font-weight="600">Pass →</text>
-
-                <!-- Arrow 2 -> 3 -->
-                <path d="M 270 95 L 295 95" fill="none" stroke="var(--color-cyan)" stroke-width="1.5" marker-end="url(#arrow)"/>
-
-                <!-- Box 3 -->
-                <rect id="flow-autonomy" x="305" y="60" width="110" height="70" rx="8" fill="rgba(0, 240, 255, 0.03)" stroke="var(--color-cyan)" stroke-width="1.5"/>
-                <text x="360" y="85" fill="#fff" font-size="11" font-family="var(--font-sans)" text-anchor="middle" font-weight="700">2. Autonomy</text>
-                <text x="360" y="100" fill="var(--text-muted)" font-size="8" font-family="var(--font-sans)" text-anchor="middle">Mapping Matrix</text>
-                <text x="360" y="115" fill="var(--color-cyan)" font-size="8" font-family="var(--font-sans)" text-anchor="middle" font-weight="600">Allow / Ask / Deny</text>
-
-                <!-- Arrow 3 -> 4 -->
-                <path d="M 415 95 L 440 95" fill="none" stroke="var(--color-cyan)" stroke-width="1.5" marker-end="url(#arrow)"/>
-
-                <!-- Box 4 -->
-                <rect id="flow-approvals" x="450" y="60" width="130" height="70" rx="8" fill="rgba(255,255,255,0.02)" stroke="var(--border-card)" stroke-width="1"/>
-                <text x="515" y="85" fill="#fff" font-size="11" font-family="var(--font-sans)" text-anchor="middle" font-weight="700">3. Approvals Flow</text>
-                <text x="515" y="100" fill="var(--color-amber)" font-size="8" font-family="var(--font-sans)" text-anchor="middle">TUI: Queue overlay</text>
-                <text x="515" y="115" fill="var(--color-rose)" font-size="8" font-family="var(--font-sans)" text-anchor="middle">Headless: Deny</text>
-
-                <!-- Safety Net reject branch -->
-                <path d="M 215 130 L 215 170 L 450 170" fill="none" stroke="var(--color-rose)" stroke-width="1" stroke-dasharray="3 3" marker-end="url(#arrow)"/>
-                <text x="330" y="165" fill="var(--color-rose)" font-size="8" font-family="var(--font-sans)">Safety block / escape block</text>
-              </svg>
-            </div>
-          </div>
-
-        </div>
-
-        <!-- Right: Simulator -->
-        <div class="simulator-panel">
-          <div class="glass-card">
-            <h2>
-              <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><title>Icon</title><path d="M12 22s8-4 8-10V5l-8-3-8 3v7c0 6 8 10 8 10z"></path></svg>
-              Safety Evaluation Simulator
-            </h2>
-
-            <div class="presets-list">
-              <span class="preset-btn" onclick="loadPreset('status')">git status</span>
-              <span class="preset-btn" onclick="loadPreset('npm-test')">npm test</span>
-              <span class="preset-btn" onclick="loadPreset('write-src')">write index.ts</span>
-              <span class="preset-btn" onclick="loadPreset('write-env')">write .env</span>
-              <span class="preset-btn" onclick="loadPreset('rm-rf')">rm -rf /</span>
-              <span class="preset-btn" onclick="loadPreset('stash-drop')">git stash drop</span>
-              <span class="preset-btn" onclick="loadPreset('force-push')">git push --force</span>
-              <span class="preset-btn" onclick="loadPreset('escape-write')">write /etc/hosts</span>
-              <span class="preset-btn" onclick="loadPreset('unrecognized-exec')">apt-get install</span>
-            </div>
-
-            <div class="form-row">
-              <div class="form-group">
-                <label for="autonomyLevel">Autonomy Level</label>
-                <select id="autonomyLevel" onchange="runSimulation()">
-                  <option value="read-only">read-only</option>
-                  <option value="suggest">suggest</option>
-                  <option value="auto-edit" selected>auto-edit (default)</option>
-                  <option value="full-auto">full-auto</option>
-                </select>
-              </div>
-              <div class="form-group">
-                <label for="operatingPosture">Posture Mode</label>
-                <select id="operatingPosture" onchange="runSimulation()">
-                  <option value="interactive">Interactive TUI</option>
-                  <option value="headless">Headless (clio-coder run)</option>
-                </select>
-              </div>
-            </div>
-
-            <div class="form-row">
-              <div class="form-group">
-                <label for="toolGroup">Tool Group</label>
-                <select id="toolGroup" onchange="onToolChange()">
-                  <option value="read">read (read, grep, find, ls)</option>
-                  <option value="write" selected>write / edit</option>
-                  <option value="git">git (status, diff, log, checkout)</option>
-                  <option value="bash">bash (general commands)</option>
-                  <option value="dispatch">dispatch (worker delegation)</option>
-                </select>
-              </div>
-              <div class="form-group">
-                <label for="cmdCwd">Working Directory</label>
-                <input type="text" id="cmdCwd" value="/workspace/project" oninput="runSimulation()">
-              </div>
-            </div>
-
-            <div class="form-group" id="group-command" style="display:none;">
-              <label for="commandInput">Shell Command</label>
-              <input type="text" id="commandInput" value="" placeholder="e.g. npm test" oninput="runSimulation()">
-            </div>
-
-            <div class="form-group" id="group-filepath">
-              <label for="filepathInput">File Path</label>
-              <input type="text" id="filepathInput" value="src/core/config.ts" placeholder="e.g. src/index.ts" oninput="runSimulation()">
-            </div>
-
-            <div class="form-group">
-              <label for="projectPolicy">Simulated .clio-coder/safety.yaml</label>
-              <textarea id="projectPolicy" rows="6" oninput="runSimulation()">zeroAccessPaths:
-  - secrets/
-  - .env
-readOnlyPaths:
-  - vendor/
-noDeletePaths:
-  - out/validated/
-commands:
-  - id: local-test
-    command: npm test
-    cwd: .
-    requireConfirmation: false</textarea>
-            </div>
-
-            <div class="verdict-header">Evaluation Verdict</div>
-            <div id="verdictCard" class="verdict-card v-allow">
-              <div class="verdict-info">
-                <h3 id="verdictTitle">ALLOW</h3>
-                <p id="verdictDesc">Tool call passes all checks and runs immediately.</p>
-              </div>
-              <div id="verdictIcon" class="verdict-status-badge">✓</div>
-            </div>
-
-            <div class="console-header">
-              <span class="console-title">Engine Decision Trace</span>
-              <span class="preset-btn" style="padding: 0.15rem 0.4rem; font-size:0.65rem;" onclick="clearConsole()">Clear</span>
-            </div>
-            <div id="traceConsole" class="console-body">Initializing Safety Policy Engine...</div>
-          </div>
-        </div>
-
-      </div>
-    </main>
-
-    <!-- TAB 2: TECHNICAL REFERENCE -->
-    <main class="tab-pane" id="pane-reference">
-      <div class="glass-card">
-        <h2>Clio Coder Safety Model Specification</h2>
-
-        <div class="alert-tip">
-          <strong>Interactive Spec Available:</strong> Use the <strong>Interactive Spec &amp; Simulator</strong> tab above to simulate policy enforcement runs in real-time.
-        </div>
-
-        <p>Clio Coder's safety posture is code-enforced, not prompt-only. Prompt text tells the model how to behave, but execution is gated by target capabilities, the tool registry, safety policy engine, project policy, protected-artifact checks, and receipts.</p>
-        <p>Source of truth: <code>src/domains/safety/**</code>, <code>src/tools/registry.ts</code>, <code>src/tools/bootstrap.ts</code>, and <code>damage-control-rules.yaml</code>.</p>
-
-        <h3 style="margin: 1.5rem 0 0.5rem 0; color:#fff;">Two axes: autonomy and the safety net</h3>
-        <p>The <code>autonomy</code> setting (<code>read-only</code> | <code>suggest</code> | <code>auto-edit</code> | <code>full-auto</code>) is an enforced dial. It controls exactly one thing: which action classes run immediately, which park for operator approval, and which are auto-denied. Effective autonomy is resolved through <code>resolveEffectiveAutonomy</code> and <code>resolveBaselineAutonomy</code> in <code>src/entry/orchestrator.ts</code> across all admission surfaces. The safety net (damage-control rules, path policy, protected artifacts, loop guard, dispatch scope admission) is independent of the dial and identical at every level.</p>
-
-        <h3 style="margin: 1.5rem 0 0.5rem 0; color:#fff;">Enforcement path</h3>
-        <p>Every tool call, orchestrator or worker, evaluates in this order:</p>
-        <ol style="margin-left: 2rem; margin-bottom: 1rem; font-size: 0.925rem; color: var(--text-muted);">
-          <li style="margin-bottom: 0.5rem;"><strong>Safety net</strong> (policy engine + middleware guards): <code>block</code> is final at every level; <code>ask</code> is a confirm rail (damage-control <code>ask</code> rules, project <code>requireConfirmation</code>) that parks at every level; <code>pass</code> hands off to step 2.</li>
-          <li style="margin-bottom: 0.5rem;"><strong>Autonomy mapping</strong>: the action class plus the level produce allow, ask, or deny per the matrix.</li>
-          <li style="margin-bottom: 0.5rem;"><strong>Approvals</strong>: whatever asked in step 1 or 2 parks interactively, denies deterministically headless, resolves per <code>workers.onPermission</code> in workers, and non-stall denies in delegations.</li>
-        </ol>
-
-        <h3 style="margin: 1.5rem 0 0.5rem 0; color:#fff;">Damage-control rules</h3>
-        <p><code>damage-control-rules.yaml</code> is compiled into rule packs. Base rules apply broadly. Rules with <code>ask: true</code> park for one-shot confirmation (for example <code>git stash drop</code> and remote-branch deletion); hard-block rules and classifier-pattern <code>git_destructive</code> hits are always blocked. Both behaviors apply at every autonomy level.</p>
-
-        <h3 style="margin: 1.5rem 0 0.5rem 0; color:#fff;">Bash recognition</h3>
-        <p>The policy engine tags every bash command as recognized or unrecognized:</p>
-        <ul style="margin-left: 2rem; margin-bottom: 1rem; font-size: 0.925rem; color: var(--text-muted);">
-          <li style="margin-bottom: 0.5rem;"><strong>Recognized</strong>: a valid <code>.clio-coder/safety.yaml</code> command entry, or the narrow built-in no-prompt set such as <code>pwd</code>, simple <code>ls</code>, <code>git status</code>, bounded <code>git diff/log</code>, common test/lint/build commands. Recognized commands run without prompting at <code>auto-edit</code> and <code>full-auto</code>.</li>
-          <li style="margin-bottom: 0.5rem;"><strong>Unrecognized</strong>: anything else. Unrecognized bash asks for one-shot approval at <code>auto-edit</code> and runs at <code>full-auto</code>; at <code>suggest</code> it asks like every mutation, and at <code>read-only</code> it is denied.</li>
-        </ul>
-
-        <h3 style="margin: 1.5rem 0 0.5rem 0; color:#fff;">Project safety policy</h3>
-        <p>Clio searches upward from the current working directory for <code>.clio-coder/safety.yaml</code>. Minimum schema is version-locked (v1) and parses into standard path boundaries (<code>zeroAccessPaths</code>, <code>readOnlyPaths</code>, <code>noDeletePaths</code>) and customized command sets.</p>
-
-        <pre><code>version: 1
+    <div class="page-layout-grid reference-layout">
+      <aside class="sidebar reference-sidebar" aria-label="On this page">
+        <nav class="toc-container">
+          <p class="toc-title">On this page</p>
+          <a class="sidebar-source" href="https://github.com/iowarp/clio-coder/blob/main/docs/architecture/safety-model.md">Canonical Markdown<br>docs/architecture/safety-model.md</a>
+          <ul class="toc-list"></ul>
+        </nav>
+      </aside>
+      <main class="reference-main" id="reference-content">
+        <article class="reference-prose glass-card">
+<blockquote>
+<p><strong>Visual blueprint:</strong> The source checkout includes the complete
+<a href="safety_blueprint.html">Clio Coder Safety Model visual reference</a>.</p>
+</blockquote>
+<p>Clio Coder&#39;s safety posture is code-enforced, not prompt-only. As the orchestrator coding agent in the <a href="https://iowarp.ai">IOWarp</a> ecosystem developed by the <a href="https://grc.iit.edu">Gnosis Research Center</a> at Illinois Tech under NSF Award <a href="https://www.nsf.gov/awardsearch/showAward?AWD_ID=2411318">#2411318</a>, Clio gates execution by target capabilities, the tool registry, the safety policy engine, project policies, protected-artifact checks, and audit receipts.</p>
+<p>Source of truth: <code>src/domains/safety/**</code>, <code>src/tools/registry.ts</code>, <code>src/tools/bootstrap.ts</code>, <code>src/tools/policy.ts</code>, <code>src/entry/orchestrator.ts</code>, <code>src/domains/dispatch/write-boundary.ts</code>, <code>src/interactive/view/artifacts.ts</code>, and <code>damage-control-rules.yaml</code>.</p>
+<hr>
+<h2>Two axes: autonomy and the safety net</h2>
+<p>The <code>safety.autonomy</code> setting (<code>read-only</code> | <code>suggest</code> | <code>auto-edit</code> | <code>full-auto</code>) is an enforced dial. It controls exactly one thing: which action classes run immediately, which park for operator approval, and which are auto-denied. The safety net (damage-control rules, path policy, protected artifacts, loop guard, dispatch scope admission) is independent of the dial and identical at every level. When a <code>[safety-net]</code> notice appears at full-auto, that is the always-on net working as designed, not a contradiction of the level.</p>
+<p>In the current source tree, effective autonomy resolution is strictly centralized in <code>src/entry/orchestrator.ts</code> through <code>resolveEffectiveAutonomy</code> and <code>resolveBaselineAutonomy</code>. Every admission surface (tool registry admission, dispatch plan provenance, and ACP session snapshots) delegates to this pair of functions so that fallback paths cannot diverge across execution contexts. <code>resolveBaselineAutonomy</code> evaluates dispatch settings overrides, headless CLI options, and configuration settings before applying the default <code>auto-edit</code> level. <code>resolveEffectiveAutonomy</code> combines any active ACP session autonomy level with the baseline resolution.</p>
+<h3>Autonomy levels</h3>
+<table>
+<thead>
+<tr>
+<th>Action class</th>
+<th><code>read-only</code></th>
+<th><code>suggest</code></th>
+<th><code>auto-edit</code> (default)</th>
+<th><code>full-auto</code></th>
+</tr>
+</thead>
+<tbody><tr>
+<td><code>read</code></td>
+<td>allow</td>
+<td>allow</td>
+<td>allow</td>
+<td>allow</td>
+</tr>
+<tr>
+<td><code>write</code></td>
+<td>deny</td>
+<td>ask</td>
+<td>allow</td>
+<td>allow</td>
+</tr>
+<tr>
+<td><code>execute</code>: builtin no-prompt set + project commands</td>
+<td>deny</td>
+<td>ask</td>
+<td>allow</td>
+<td>allow</td>
+</tr>
+<tr>
+<td><code>execute</code>: any other bash</td>
+<td>deny</td>
+<td>ask</td>
+<td>ask</td>
+<td>allow</td>
+</tr>
+<tr>
+<td><code>dispatch</code></td>
+<td>deny</td>
+<td>ask</td>
+<td>allow</td>
+<td>allow</td>
+</tr>
+<tr>
+<td><code>system_modify</code></td>
+<td>deny</td>
+<td>ask</td>
+<td>ask</td>
+<td>ask</td>
+</tr>
+<tr>
+<td><code>git_destructive</code></td>
+<td>net block</td>
+<td>net block</td>
+<td>net block</td>
+<td>net block</td>
+</tr>
+<tr>
+<td><code>unknown</code></td>
+<td>deny</td>
+<td>ask</td>
+<td>ask</td>
+<td>ask</td>
+</tr>
+<tr>
+<td><code>read</code>: a gate declaring <code>exposure: outward</code></td>
+<td>allow</td>
+<td>ask</td>
+<td>ask</td>
+<td>allow</td>
+</tr>
+</tbody></table>
+<ul>
+<li><strong><code>read-only</code></strong>: Clio inspects and answers. Mutating calls are auto-denied with a rejection telling the model to propose the change instead; approvals are never invoked. Denials render as <code>[autonomy]</code> notices.</li>
+<li><strong><code>suggest</code></strong>: every non-read action parks for one-shot approval. The operator drives.</li>
+<li><strong><code>auto-edit</code></strong>: workspace edits and recognized commands run; unrecognized bash asks instead of blocking.</li>
+<li><strong><code>full-auto</code></strong>: bash runs without prompting; the net is the protection, not the prompt. <code>system_modify</code> still asks because it reaches outside the workspace; <code>unknown</code> still asks because the net cannot reason about calls it cannot classify.</li>
+</ul>
+<p>The exposure tier is the one row keyed by the call rather than by its action class. A call may declare <code>exposure: outward</code> when answering it publishes or sends something the operator cannot quietly take back: filing an issue or a PR, posting a comment, pushing a branch, cutting a release. Today <code>ask_user</code> is the only tool that declares one, so a skill marks its own confirmation step outward and <code>auto-edit</code> parks that gate for the operator instead of answering it. Acting on the workspace without asking is not the same permission as publishing without asking. <code>suggest</code> parks it too, because the dial is ordered and a stricter level must never gate a surface less than the looser one below it. <code>full-auto</code> answers outward gates like everything else, <code>read-only</code> still answers them because the outward effect being confirmed is denied there anyway, and the tier only ever adds an ask: it never widens a row the action class already denied. The tier is declared, never inferred, because only the caller knows whether the step it is confirming leaves the machine; a value the schema does not recognize reads as <code>outward</code> and the call is then rejected, so a misspelled tier costs one prompt rather than silently downgrading the gate.</p>
+<p>The <code>system_modify</code> confirm is level-invariant, so it is enforced and attributed as a safety-net confirm rail: the overlay, notices, and audit ledger name the net (reason code <code>system-modify-confirm</code>, policy source <code>builtin-classifier</code>), not the autonomy level. The matrix row above is unchanged in outcome at every level; only <code>read-only</code> converts the ask to a denial. <code>unknown</code> remains in the autonomy mapping because the registry substitutes a registered tool&#39;s base action class after the net evaluates.</p>
+<p>The level is persisted as <code>safety.autonomy</code> in <code>settings.yaml</code>, hot-reloads, and is edited in the <code>/settings</code> Autonomy &amp; Safety section.</p>
+<h3>Consequence tier is presentation, not authority</h3>
+<p>Every operator decision also receives one closed consequence tier. The tier explains what the already-required decision can affect. It never decides whether a call runs, never changes the autonomy level, and never overrides a safety-net verdict. Registry admission still follows the enforcement path below before any presentation is built.</p>
+<table>
+<thead>
+<tr>
+<th>Consequence tier</th>
+<th>Trusted facts that select it</th>
+<th>Operator-facing meaning</th>
+</tr>
+</thead>
+<tbody><tr>
+<td>Conversational answer</td>
+<td>A local <code>ask_user</code> question that records an answer</td>
+<td>Records an answer without granting tool authority.</td>
+</tr>
+<tr>
+<td>Workspace authority</td>
+<td>A main-agent one-shot approval whose bounded scope is the workspace</td>
+<td>Authorizes only the presented call. Workspace changes can be reviewed and reverted when the action class supports that.</td>
+</tr>
+<tr>
+<td>Outward consequence</td>
+<td>Typed <code>exposure: outward</code></td>
+<td>The answer concerns a step that can reach people or systems outside the workspace. The interview itself does not publish or send anything.</td>
+</tr>
+<tr>
+<td>Safety-net confirmation</td>
+<td>An always-on confirm rail</td>
+<td>The safety net requires a one-shot operator decision independently of the autonomy level.</td>
+</tr>
+<tr>
+<td>System change</td>
+<td><code>system_modify</code>, destructive, unknown, or otherwise system-scoped consequences</td>
+<td>The effect reaches outside the workspace or cannot be safely bounded, and reversibility is unknown.</td>
+</tr>
+<tr>
+<td>Worker escalation</td>
+<td>An authenticated dispatched-worker origin</td>
+<td>The parked decision belongs to the named worker run and returns only to that exact request.</td>
+</tr>
+</tbody></table>
+<p>The classifier reads the request kind, the enforced safety or autonomy axis, normalized local or outward exposure, derived reversibility and scope, authenticated main-agent or worker origin, and whether the surface records an answer or grants one-shot authority. Model-authored questions, reasons, summaries, option labels, titles, and color names do not enter the classifier. Worker and system facts take conservative precedence, and an unknown action class uses the system tier. An interview that has reached outward exposure keeps that tier for later rounds and durable replay, so a later local declaration cannot visually lower it.</p>
+<p>These three concepts answer different questions:</p>
+<ul>
+<li>The autonomy level decides when the registry allows, parks, or denies an action class.</li>
+<li>The safety-net axis identifies an always-on rule that can block or require confirmation at every autonomy level.</li>
+<li>The consequence tier explains the scope, reversibility, requester, and effect of a decision that the enforced axes have already produced.</li>
+</ul>
+<hr>
+<h2>Enforcement path</h2>
+<p>Every tool call, orchestrator or worker, evaluates in this order:</p>
+<ol>
+<li><strong>Safety net</strong> (policy engine + middleware guards): <code>block</code> is final at every level; <code>ask</code> is a confirm rail (damage-control <code>ask</code> rules, project <code>requireConfirmation</code>, <code>system_modify</code>) that parks at every level; <code>pass</code> hands off to step 2. Blocks precede asks: a damage-control <code>ask</code> rule never bypasses a hard block, so confirming an ask-rule command that targets a zero-access path still blocks. The built-in path protection (which includes zero-access blocklists for critical files like <code>.git/config</code> and <code>credentials.yaml</code>, resolved with symlink canonicalization to prevent bypasses) is evaluated even when <code>.clio-coder/safety.yaml</code> is malformed, invalid, or attempts to override it. A malformed project policy cannot disable built-in default path protection, so credential protection never fails open.</li>
+<li><strong>Autonomy mapping</strong>: the action class plus the level produce allow, ask, or deny per the matrix above.</li>
+<li><strong>Approvals</strong>: whatever asked in step 1 or 2 parks interactively, denies deterministically headless, resolves per <code>fleet.permissions.mode</code> in workers, and non-stall denies in delegations.</li>
+</ol>
+<pre><code class="language-mermaid">graph TD
+    user[User request] --&gt; surface[Provider tool capability]
+    surface --&gt; registry[Tool registry admission]
+    registry --&gt; net[Safety net verdict: block / confirm / pass]
+    net --&gt; autonomy[Autonomy mapping: allow / ask / deny]
+    autonomy --&gt; approvals[Approvals: park, deny, or resolve per context]
+    approvals --&gt; middleware[Middleware + protected artifacts]
+    middleware --&gt; run[Tool execution]
+    run --&gt; shape[Result shaping]
+    shape --&gt; receipt[Receipts, audit, evidence]
+</code></pre>
+<p>Net <code>confirm</code> is never auto-allowed by autonomy, including full-auto. Net <code>block</code> is never downgraded by anything. A tool hidden by target capability or explicit suppression is not shown to the model; a tool that is shown still must pass this path before it can run.</p>
+<h3>Worker permission escalation</h3>
+<p>Dispatched workers run non-interactively, so step 3 resolves per <code>fleet.permissions.mode</code>: <code>deny</code> turns the parked call into a structured denial, <code>fail</code> ends the run, and <code>escalate</code> hands the ask up to the interactive operator. Under <code>escalate</code> the worker parks the call, emits a <code>clio_coder_permission_escalated</code> event, and waits; dispatch republishes the ask on the bus tagged with the run id; the operator resolves it in the same permission overlay used for the main agent; and the decision returns down the worker&#39;s stdin. Resolution is human-only by construction: no model-facing tool can approve a worker permission, and the dispatch <code>resolveWorkerPermission</code> method is reachable only from the interactive layer. This preserves the receipt&#39;s honesty, since a model approving its own fleet&#39;s asks would collapse the audit trail.</p>
+<p>Escalation can never hang a run. Every escalated ask resolves by an operator decision or by the <code>fleet.permissions.escalation</code> timeout fallback (<code>{ timeoutMs, fallback }</code>, defaults 120000 ms and <code>deny</code>); a headless session has no subscriber, so the timeout fallback always governs there. The worker keeps emitting heartbeats while parked, so the reconciler does not reap it, and every escalation and its resolution source (operator or timeout) is recorded on the receipt.</p>
+<hr>
+<h2>Operating Posture and Visible Tools</h2>
+<p>Clio operates under a single operating posture. The canonical catalog contains
+21 built-in tools organized in seven planes; each plane is one policy unit for
+action class, size posture, and concurrency, asserted at bootstrap by
+<code>src/tools/policy.ts</code> so the classifier and registered specs cannot drift apart
+silently. Dependency wiring, target capability, worker profile, and recipe
+policy determine which subset is visible in a particular context.</p>
+<table>
+<thead>
+<tr>
+<th>Plane</th>
+<th>Tools</th>
+<th>Action class</th>
+</tr>
+</thead>
+<tbody><tr>
+<td>OBSERVE</td>
+<td><code>read</code>, <code>grep</code>, <code>find</code>, <code>ls</code>, <code>code_nav</code>, <code>context</code>, <code>credential_present</code></td>
+<td><code>read</code></td>
+</tr>
+<tr>
+<td>MUTATE</td>
+<td><code>write</code>, <code>edit</code></td>
+<td><code>write</code></td>
+</tr>
+<tr>
+<td>EXECUTE</td>
+<td><code>bash</code>, <code>verify</code></td>
+<td><code>execute</code></td>
+</tr>
+<tr>
+<td>EXECUTE</td>
+<td><code>git</code></td>
+<td><code>read</code></td>
+</tr>
+<tr>
+<td>ORCHESTRATE</td>
+<td><code>dispatch</code>, <code>steer</code></td>
+<td><code>dispatch</code></td>
+</tr>
+<tr>
+<td>ORCHESTRATE</td>
+<td><code>monitor</code>, <code>tasks</code>, <code>ledger</code>, <code>panes</code></td>
+<td><code>read</code></td>
+</tr>
+<tr>
+<td>RETRIEVE</td>
+<td><code>web_fetch</code></td>
+<td><code>read</code></td>
+</tr>
+<tr>
+<td>INTERACT</td>
+<td><code>ask_user</code></td>
+<td><code>read</code></td>
+</tr>
+<tr>
+<td>ARTIFACT</td>
+<td><code>artifact</code></td>
+<td><code>write</code></td>
+</tr>
+</tbody></table>
+<p><code>git</code> is read-only inspection on the safe-exec spine, so it carries the read class despite living in the EXECUTE plane. <code>monitor</code> does not mutate a run or the workspace. The model-facing <code>tasks</code> tool is an intentional bookkeeping exception to the everyday meaning of &quot;read&quot;: board mutations append full <code>taskLedger</code> snapshots to Clio&#39;s session ledger, and any action may reconcile the project-local <code>.clio-coder/user-tasks.json</code> inbox while <code>pick</code> and linked <code>done</code> update its durable correlation. Those Clio-owned ledger and inbox mutations intentionally remain audited with <code>actionClass: &quot;read&quot;</code>, so task planning and pickup stay available at every autonomy level without an approval card. <code>ledger</code> reads a worker-local mirror and posts through the dispatch control lane; it registers only for a worker with an agent-ledger port. <code>panes</code> controls Clio-owned terminal panes and registers only when a pane host and live mux are available. Both are read class and sequential because their coordination state must not interleave. This classification grants no source-workspace, command-execution, or run-mutation authority; those operations still require their own tools and action classes. <code>gateway</code> is a design-reserved name only (see <code>src/core/tool-names.ts</code>), not a registered tool.</p>
+<p>Target capability, dispatch tool profiles, and recipe constraints can further narrow the tools available to a run. That narrowing is convenience and budget control; safety still lives in code gates.</p>
+<h3>Workspace artifact reads</h3>
+<p>The <code>/view</code> workspace category treats a recorded successful write as a durable fact, not as permanent read authority over that pathname. Immediately before every file load, the viewer resolves both the recorded workspace root and selected target through the live filesystem, checks canonical path-segment containment, and reads the canonical target. It does not cache the canonical workspace root between provider construction and load. A file or ancestor directory swapped to a symlink outside the current workspace is refused without reading the outside target. An <code>ENOENT</code> from re-resolution or loading keeps the durable <code>file no longer on disk (recorded at ...)</code> result instead of dropping the artifact row.</p>
+<hr>
+<h2>Skill tool surface narrowing</h2>
+<p>A <code>SKILL.md</code> may declare <code>allowed-tools</code> and <code>disallowed-tools</code>. The declaration is enforced at tool admission, between the safety net and the autonomy mapping, on every surface that activates skills (interactive turns, headless <code>clio-coder run</code> turns, and dispatched workers whose recipes declare skills).</p>
+<ul>
+<li><strong>Window.</strong> Narrowing arms when <code>context</code> (scope=&quot;skills&quot;) successfully loads the skill and lasts for the lifetime of the pending-skill policy: to the end of the current turn for the main agent, and to the end of the run for a worker. A later turn is unrestricted until a skill is requested and loaded again.</li>
+<li><strong>Merge.</strong> Denials win: a tool named in any loaded skill&#39;s <code>disallowed-tools</code> is blocked. Allow-narrowing applies only while every loaded skill declares <code>allowed-tools</code>; the merged surface is the union of those lists. A loaded skill that declares no <code>allowed-tools</code> keeps the full surface for its own workflow, which lifts the allow-narrowing (never the denials) for that window.</li>
+<li><strong>Exemptions.</strong> <code>context</code> (the remaining requested skills of the turn must still load) and <code>ask_user</code> (the escape hatch the block message points at) are always admitted.</li>
+<li><strong>Direction.</strong> Narrowing only blocks. It never grants a tool the safety net, damage-control rules, or autonomy mapping would refuse, and an out-of-surface call blocks terminally instead of parking for confirmation.</li>
+<li><strong>Block message.</strong> The rejection names the tool, the active skill(s), and the merged surface, and states the remediation: work within the declared surface, or use <code>ask_user</code> (when available) to hand the step to the operator. The audit row carries reason code <code>skill_surface</code>.</li>
+</ul>
+<hr>
+<h2>Damage-control rules</h2>
+<p><code>damage-control-rules.yaml</code> is compiled into rule packs. Base rules apply broadly. Rules with <code>ask: true</code> park for one-shot confirmation (for example <code>git stash drop</code> and remote-branch deletion); hard-block rules and classifier-pattern <code>git_destructive</code> hits are always blocked. Both behaviors apply at every autonomy level.</p>
+<p>Examples of patterns the rules target include destructive filesystem operations, dangerous device writes, fork bombs, pipe-to-shell installers, and destructive git operations.</p>
+<p>Safety policy metadata records active rule IDs and hashes so receipts/evidence can explain which rule pack was active.</p>
+<hr>
+<h2>Bash recognition</h2>
+<p>The policy engine tags every bash command as recognized or unrecognized; the autonomy mapping decides what happens next:</p>
+<ol>
+<li><strong>Recognized</strong>: a valid <code>.clio-coder/safety.yaml</code> command entry, or the narrow built-in no-prompt set such as <code>pwd</code>, simple <code>ls</code>, <code>git status</code>, bounded <code>git diff/log</code>, common test/lint/build commands, <code>pytest</code>, <code>cargo test</code>, <code>go test</code>, or <code>make test</code>. In addition, compound <code>&amp;&amp;</code> chains where every segment is a recognized safe command (up to <code>CHAIN_MAX_SEGMENTS = 6</code>) are recognized. Commands wrapped inside <code>sh -c</code> are expanded up to depth 3 (<code>INNER_SHELL_MAX_DEPTH = 3</code>) and evaluated segment by segment. Recognized commands run without prompting at <code>auto-edit</code> and <code>full-auto</code>.</li>
+<li><strong>Unrecognized</strong>: anything else. Unrecognized bash asks for one-shot approval at <code>auto-edit</code> and runs at <code>full-auto</code>; at <code>suggest</code> it asks like every mutation, and at <code>read-only</code> it is denied.</li>
+</ol>
+<p>Shell operators split two ways. Unrecognized sequencing and redirection (<code>||</code>, <code>;</code>, pipes, redirects, newlines, or <code>&amp;&amp;</code> chains with unapproved commands or more than 6 segments) make a command unrecognized: it asks at <code>auto-edit</code> and runs at <code>full-auto</code>. Command substitution (<code>$(...)</code>, backticks) is a net confirm rail at every level, full-auto included, because the net cannot scan what it executes until runtime. The rule pack scans the full command string before either check, so a destructive verb behind an operator is caught regardless of level. Project policy entries reject operator kinds unless the entry sets <code>shellOperators: allow</code>.</p>
+<p>Bash <code>cwd</code> is resolved under the workspace root. Escaping the workspace is blocked unless a reviewed project policy permits the exact command/cwd combination.</p>
+<p>Bash <code>output_policy</code> changes only the canonical model-context disposition after execution; it never changes command classification, autonomy, cwd containment, environment filtering, process-group termination, or the 16 MiB capture ceiling. Omitted/<code>bounded</code> retains the diagnostic tail. <code>summary</code> uses a deterministic code path with repository secret redaction and bounded head, tail, and error-like lines. <code>metadata-only</code> retains success/failure, exit, signal, timeout, abort, output-cap, byte-size, and retrieval facts without stdout or stderr in model context. <code>full</code> is appropriate only for known-small results and records a typed downgrade plus retrieval when the hard result budget cannot admit it. Operator presentation remains independently tail-biased, and only the terminal result may write its single retained scratch artifact.</p>
+<hr>
+<h2>Policy Engine Evaluation Order</h2>
+<p>Source: <code>src/domains/safety/policy-engine.ts</code>.</p>
+<p>Every tool call entering the safety engine passes through a strict 10-step evaluation sequence. Safety-net blocks are final; autonomy mapping applies only after the safety net passes:</p>
+<ol>
+<li><strong>Damage-Control Scan</strong>: Evaluates compiled rule packs (<code>damage-control-rules.yaml</code>) against command strings, paths, and tool arguments.</li>
+<li><strong>Write-Root Containment</strong>: Verifies that mutations remain within configured write boundaries (<code>evaluateWriteRoots</code>).</li>
+<li><strong>Hard Blocks</strong>: Enforces unconditional blocks against destructive actions (such as <code>git_destructive</code> operations and zero-access credentials).</li>
+<li><strong>Invalid Project Policy Fail-Closed</strong>: If <code>.clio-coder/safety.yaml</code> contains parsing or schema errors, execution tools fail closed.</li>
+<li><strong>Path Policy Enforcement</strong>: Evaluates <code>zeroAccessPaths</code>, <code>readOnlyPaths</code>, <code>noWritePaths</code>, and <code>noDeletePaths</code>.</li>
+<li><strong>Bash Zero-Access Protocol</strong>: Rejects shell commands attempting to read, exfiltrate, or redirect from protected credential files. A safe presence-check exception (<code>grep -sq &quot;^NAME=&quot; &lt;file&gt;</code>) is permitted for environment probing without exposing secrets.</li>
+<li><strong>Ask Rails</strong>: Evaluates rules requiring confirmation (such as project <code>requireConfirmation</code> or unanalyzable command substitutions <code>$(...)</code>).</li>
+<li><strong>System Modify Checks</strong>: Assesses operating-system level modification commands targeting system roots (<code>/etc</code>, <code>/usr</code>, <code>/var</code>, <code>/bin</code>, <code>/sbin</code>, <code>/run</code>), exempting temporary write paths (<code>/var/tmp</code>, <code>/var/folders</code>).</li>
+<li><strong>Bash Allowlist Recognition</strong>: Checks whether the command matches the known safe command allowlist or compound <code>&amp;&amp;</code> chain.</li>
+<li><strong>Default Allow</strong>: If no prior rule intervened, the action proceeds to autonomy-level evaluation.</li>
+</ol>
+<hr>
+<h2>Project safety policy</h2>
+<p>Clio searches upward from the current working directory for <code>.clio-coder/safety.yaml</code>. The file is parsed once into a loaded policy. Invalid policy files fail closed for execution tools.</p>
+<p>Minimal schema v1:</p>
+<pre><code class="language-yaml">version: 1
 zeroAccessPaths:
   - secrets/
   - .env
 readOnlyPaths:
   - vendor/
+noWritePaths:
+  - third_party/generated/
 noDeletePaths:
   - out/validated/
 commands:
   - id: local-test
     command: npm test
     cwd: .
+    timeoutMs: 120000
+    maxOutputBytes: 600000
     actionClass: execute
     shellOperators: deny
+    env:
+      mode: none
+      allow: []
     requireConfirmation: false
-    rationale: Standard local test command.</code></pre>
-
-        <h3 style="margin: 1.5rem 0 0.5rem 0; color:#fff;">Typed validation tools</h3>
-        <p>Prefer typed tools over Bash: <code>git</code> (status/diff/log) and <code>verify</code>. <code>verify(check="frontend")</code> accepts <code>.html</code>, <code>.css</code>, <code>.js</code> under the workspace root, performing syntax checks and optionally validating references in headless browsers.</p>
-
-        <h3 style="margin: 1.5rem 0 0.5rem 0; color:#fff;">Dispatch and delegation runtimes</h3>
-        <p>Clio dispatches tasks to worker runtimes and delegation agents under different safety postures:</p>
-        <ul style="margin-left: 2rem; margin-bottom: 1rem; font-size: 0.925rem; color: var(--text-muted);">
-          <li style="margin-bottom: 0.5rem;"><strong><code>claude-sdk</code> (Enforced Safety):</strong> The Claude Code SDK worker is the <strong>strong safety path</strong>. It gates every tool request through Clio's safety net and active autonomy dial before execution via PreToolUse hooks. Worker denials resolve non-interactively based on <code>workers.onPermission</code>.</li>
-          <li style="margin-bottom: 0.5rem;"><strong><code>claude-code</code> (Subprocess Gating):</strong> Drives <code>claude -p</code> as a subprocess. Gating is restricted to command-line parameters mapping the autonomy level to CLI permission modes, without per-tool callbacks.</li>
-          <li style="margin-bottom: 0.5rem;"><strong>Claude Code over ACP (Advisory Gating):</strong> Drives the agent over ACP delegation. Gating is <strong>advisory</strong> because Claude self-governs its tools; <code>claude-sdk</code> is preferred for fully enforced safety.</li>
-        </ul>
-
-        <h3 style="margin: 1.5rem 0 0.5rem 0; color:#fff;">Write boundaries: detect-and-rollback</h3>
-        <p>Post-run enforcement of declared write boundaries is strictly detect-and-rollback, never sandboxing (<code>src/domains/dispatch/write-boundary.ts</code>). Nothing prevents a write during step execution: no container, no seccomp filter, and no filesystem interception. After execution, the orchestrator compares the checkout against pre-step snapshots, rolls back unpermitted modifications, and fails the step with a <code>WriteBoundaryViolation</code>.</p>
-
-        <h3 style="margin: 1.5rem 0 0.5rem 0; color:#fff;">Receipts and evidence</h3>
-        <p>Safety decisions feed receipts, audit rows, and evidence. The interactive <code>/view</code> surface can inspect receipt artifacts without mutating them, detailing rules matched, command hashes, and active decisions counts.</p>
-      </div>
-    </main>
-
-    <footer>
-      <p>Clio Coder Safety Model Specification Dashboard &bull; Version 0.4.0</p>
-    </footer>
+    rationale: Standard local test command.
+    owner: maintainers
+    comment: Keep exact and reviewed.
+</code></pre>
+<p>Accepted root keys:</p>
+<pre><code class="language-text">version | commands | tasks | disableDefaultPathPolicy | zeroAccessPaths | readOnlyPaths | noWritePaths | noDeletePaths
+</code></pre>
+<p><code>tasks</code> is an alias for command policy entries. Unknown keys, wrong types, duplicate command IDs, absolute <code>cwd</code>, <code>..</code>-escaping <code>cwd</code>, and invalid path-policy entries make the policy invalid.</p>
+<p>Path-policy behavior:</p>
+<table>
+<thead>
+<tr>
+<th>Key</th>
+<th>Effect</th>
+</tr>
+</thead>
+<tbody><tr>
+<td><code>zeroAccessPaths</code></td>
+<td>Blocks read, write, and delete.</td>
+</tr>
+<tr>
+<td><code>readOnlyPaths</code></td>
+<td>Allows read, blocks write/delete.</td>
+</tr>
+<tr>
+<td><code>noWritePaths</code></td>
+<td>Allows read, blocks write/delete. Separate from <code>readOnlyPaths</code> so the default policy can name directories Clio reads as a matter of course and must never author.</td>
+</tr>
+<tr>
+<td><code>noDeletePaths</code></td>
+<td>Blocks delete.</td>
+</tr>
+<tr>
+<td><code>disableDefaultPathPolicy</code></td>
+<td>Uses only project path policy rather than merging default damage-control paths. Note: This cannot disable built-in zero-access protection for critical system paths like <code>.git/config</code> and <code>credentials.yaml</code>.</td>
+</tr>
+</tbody></table>
+<p>The default damage-control policy populates <code>noWritePaths</code> from the interop
+agent registry: <code>~/.claude/</code>, <code>.claude/</code>, <code>~/.codex/</code>, <code>.codex/</code>, <code>~/.config/opencode/</code>,
+<code>.opencode/</code>, <code>~/.gemini/</code>, <code>.gemini/</code>, <code>~/.copilot/</code>, <code>~/.cursor/</code>, <code>.cursor/</code>,
+<code>~/.antigravitycli/</code>, <code>.antigravitycli/</code>, <code>~/.agents/</code>, and <code>.agents/</code>. Clio never writes
+into another coding agent&#39;s directory. It reads those roots for skills, prompts, and
+rule prose and has no reason to author them. A <code>write</code> or <code>edit</code> targeting any of
+these paths is refused at every posture including <code>auto-edit</code> and <code>full-auto</code>, with reason
+code <code>path-policy:noWritePaths</code>. Reads remain allowed. <code>.clio-coder/</code> is Clio&#39;s own directory
+and is untouched. <code>.github/</code> is deliberately not blocked.</p>
+<p>Command entry notes:</p>
+<table>
+<thead>
+<tr>
+<th>Field</th>
+<th>Meaning</th>
+</tr>
+</thead>
+<tbody><tr>
+<td><code>shellOperators</code></td>
+<td><code>deny</code> by default; <code>allow</code> only for exact reviewed commands.</td>
+</tr>
+<tr>
+<td><code>env</code></td>
+<td><code>mode: none</code> by default; <code>mode: allowlist</code> permits named environment variables.</td>
+</tr>
+<tr>
+<td><code>requireConfirmation</code></td>
+<td>Parks the call for super confirmation instead of immediate allow.</td>
+</tr>
+</tbody></table>
+<hr>
+<h2>Typed validation tools</h2>
+<p>Prefer typed tools over Bash:</p>
+<ul>
+<li><code>git</code> (op=status/diff/log) uses fixed command vectors.</li>
+<li><code>verify(check=&quot;&lt;id&gt;&quot;)</code> runs either a declared package.json verification script (the <code>test*/lint*/build*/typecheck*/check*/format*/ci*</code> family) or an exact version-1 <code>.clio-coder/verifiers.yaml</code> argv vector through bounded execution helpers with no shell; <code>verify()</code> lists both sources through one canonical check projection.</li>
+<li><code>verify(check=&quot;frontend&quot;, path=...)</code> validates frontend artifacts without granting arbitrary shell access.</li>
+</ul>
+<p>A package-script check and the frontend validator are in the no-prompt set at <code>auto-edit</code>: both are bounded by the verification-script family and a fixed argv shape. A project-catalog check is not. The engine resolves the check id against <code>.clio-coder/verifiers.yaml</code> on every call and treats the declared argv exactly like a bash command string: the damage-control rules and the zero-access read guard scan it, and it is tagged unrecognized, so <code>auto-edit</code> parks it for one confirmation that shows the argv and <code>full-auto</code> runs it. <code>.clio-coder/verifiers.yaml</code> and <code>.clio-coder/safety.yaml</code> are read-only to the model&#39;s <code>write</code>, <code>edit</code>, and bash redirect paths through the default path policy: both files are operator authority, and a model that could author either one could widen its own permissions in two tool calls.</p>
+<p>The project verifier catalog is an executable authority supplied by the repository, not by model prose. Its schema rejects unknown fields, shell strings, invalid or duplicate IDs, oversized values, absolute or escaping working directories, unsupported versions, and collisions with package-provider IDs. It also refuses the common shell executables (<code>sh</code>, <code>bash</code>, <code>zsh</code>, and the like) as argv[0], which is a tripwire against the obvious mistake rather than a sandbox: <code>python3 -c</code>, <code>node -e</code>, and <code>env bash -c</code> pass the schema, so the authority boundary is the fact that the catalog file is operator-owned and read-only to the model, and that every catalog check is scanned by the damage-control rules and parked at <code>auto-edit</code>. A catalog entry fixes argv, repository-relative cwd, and timeout. Tool-call <code>args</code>, <code>cwd</code>, timeout, output-cap, or environment-shaped fields cannot widen it. Safe-exec uses <code>spawn</code> without a shell, filters the child environment to the Clio allowlist, honors cancellation, and reports exact argv and termination evidence.</p>
+<p><code>clio-coder verifiers discover</code> and <code>clio-coder verifiers author</code> do not grant authority during inspection. They read only declared package, Cargo, CMake preset, Python runner, Go module, and YAML validation-command signals and render exact argv vectors with provenance. The preview names the catalog path, cwd, timeout, tags, and authority consequence for every check. Toolchain conventions are labeled separately from literal project declarations. Ambiguous validation prose and directory-only hints are rejected with a JSON argv manual-entry path.</p>
+<p>Authoring validation serializes the proposed catalog in memory and passes it to the production catalog parser. Discovery, revision, and preview cannot reach the filesystem writer or verifier executor. A reviewed mutating CLI invocation must be repeated with <code>--yes</code> before an atomic catalog write is reachable. An optional authoring dry run begins only after that decision and goes through the production <code>verify</code> execution path. Editing, renaming, and removal use the same preview boundary; collisions fail before writing, and removal explicitly revokes that catalog command&#39;s execution authority.</p>
+<p>The frontend check accepts <code>.html</code>, <code>.htm</code>, <code>.css</code>, <code>.js</code>, <code>.mjs</code>, and <code>.cjs</code> under the workspace root. It checks HTML tag balance, local script/style references, JavaScript syntax, CSS brace/comment/string balance, and optionally loads HTML with an available headless Chromium/Chrome/Edge executable (<code>browser: auto|required|off</code>).</p>
+<p>The <code>edit</code> tool also carries conservative matching rules. It preserves
+unchanged bytes, handles common quote, dash, whitespace, and indentation drift
+for matching only, and rejects ambiguous or no-op edits rather than applying a
+guess.</p>
+<h3>Write boundaries: detect-and-rollback</h3>
+<p>Post-run enforcement of declared write boundaries is strictly detect-and-rollback, never sandboxing. Nothing prevents a write during step execution: no container, no seccomp filter, no read-only mount, and no filesystem interception of the worker&#39;s tools. A step executes with whatever permissions its environment provides.</p>
+<p>After step execution, the orchestrator compares the working checkout against the git snapshot recorded before the step (<code>src/domains/dispatch/write-boundary.ts</code>). It identifies modifications outside declared write boundaries, rolls back unauthorized file changes, and fails the step with a typed failure reason (<code>WriteBoundaryViolation</code>). Operators requiring steps to be physically incapable of writing outside designated paths must employ OS-level isolation, which Clio Coder deliberately does not claim to provide.</p>
+<hr>
+<h2>Dispatch runtimes</h2>
+<p>Fleet dispatch is admitted only when the requested worker scope is a subset of the orchestrator scope and requested actions fit the worker scope.</p>
+<p>Dispatch workers can run the same HTTP or native runtimes as the orchestrator. Clio observes and governs those tool calls directly, so every worker run is subject to the same safety mapping and receipt accounting as an interactive turn.</p>
+<p>Three integration paths exist for driving Claude Code, ranging from fully enforced to advisory gating:</p>
+<ul>
+<li><strong><code>claude-sdk</code> (Enforced Safety):</strong> Drives <a href="https://www.npmjs.com/package/@anthropic-ai/claude-agent-sdk">@anthropic-ai/claude-agent-sdk</a> directly. This is the <strong>strong safety path</strong> because Clio enforces tool gating before execution. Clio registers a <code>PreToolUse</code> hook (which fires for all tool uses, including auto-allowed reads) and wraps <code>canUseTool</code> for permission paths. Every tool request is mapped into a Clio tool/action class, evaluated by the safety net, and passed through the active autonomy matrix. Because a dispatched worker is noninteractive, any <code>ask</code> decision is resolved as a non-stall denial (<code>fleet.permissions.mode=deny</code> returns denial; <code>fleet.permissions.mode=fail</code> terminates the run with a permission-required code).</li>
+<li><strong><code>claude-code</code> (Subprocess Gating):</strong> Drives <code>claude -p</code> as a subprocess. Because the CLI lacks a direct callback hook, Clio cannot evaluate each tool invocation. Instead, Clio maps the active autonomy level to the binary&#39;s command-line parameters (such as <code>--permission-mode</code> and tool allowlists). Unrecognized tools are gated by the subprocess runtime itself. Dispatch at autonomy <code>suggest</code> is refused outright (the same applies to <code>antigravity-code</code>): a subprocess cannot park a tool call for approval, so <code>suggest</code> has no honest mapping and the runner fails closed before launching the external CLI. A dangerous bypass (<code>--allow-dangerously-skip-permissions</code>) is only sent when autonomy is <code>full-auto</code> and <code>CLIO_CODER_ALLOW_EXTERNAL_FULL_ACCESS=1</code>, and it is never silent: the run&#39;s receipt records it (see the enforcement grades below) and evidence raises an external-bypass finding.</li>
+<li><strong>Claude Code over ACP (Advisory Gating):</strong> Drives Zed&#39;s <code>@zed-industries/claude-code-acp</code> (or <code>@agentclientprotocol/claude-agent-acp</code>) bridge as an <a href="https://agentclientprotocol.com">Agent Client Protocol (ACP)</a> delegation agent. Clio&#39;s ACP mediator intercepts tool calls and filters them against the safety net, but gating is ultimately <strong>advisory</strong> as Claude governs its own runtime execution. For strict, code-enforced per-tool safety, <code>claude-sdk</code> is preferred over ACP.</li>
+</ul>
+<p>All Claude Code runtimes rely on the user&#39;s existing CLI authentication and store no credentials in Clio.</p>
+<h3>Autonomy enforcement grades</h3>
+<p>How faithfully a runtime can honor the autonomy model is a recorded fact, not an assumption. Worker receipts carry an optional <code>autonomyEnforcement</code> block sealed into the integrity digest:</p>
+<ul>
+<li><strong><code>mediated</code></strong>: per-call evaluation through Clio&#39;s net and autonomy mapping (native workers, <code>claude-sdk</code>).</li>
+<li><strong><code>approximated</code></strong>: the posture is mapped to external harness flags with no per-call mediation (<code>claude-code</code>, <code>antigravity-code</code> subprocesses).</li>
+<li><strong><code>bypassed</code></strong>: a dangerous external mode ran under <code>CLIO_CODER_ALLOW_EXTERNAL_FULL_ACCESS=1</code>, where even net blocks do not exist.</li>
+</ul>
+<p>Evidence raises a warn-level external-bypass finding for bypassed runs and an info-level approximation note otherwise, and the provenance projection surfaces the block in <code>transcript.md</code>, <code>trace.cleaned.jsonl</code>, and compact dispatch output. The product statement is: safety-net blocks are final on mediated runtimes; on approximated runtimes Clio maps your autonomy level to the closest external posture and records that it did; bypassed runs are explicitly marked in receipts and evidence.</p>
+<hr>
+<h2>Approvals</h2>
+<p>An <code>ask</code> can come from either axis: a safety-net confirm rail (damage-control <code>ask</code> rule, project <code>requireConfirmation</code>, <code>system_modify</code>) or the autonomy mapping. The permission overlay names the authenticated requester and asking axis on its <code>Requested by:</code> lines, and the transcript carries an <code>[approval]</code> notice for every parked call.</p>
+<p>Every approvable ask has one canonical identity: a <code>requestId</code> minted at the approvals plane. The <code>PermissionRequested</code> and <code>PermissionResolved</code> bus payloads and the audit permission rows all carry it, along with <code>origin</code> (who asked), <code>axis</code> (which rail or level), and <code>decidedBy</code> (who or what answered), so a request joins its resolution on one key across the bus, the ledger, and receipts, and every request resolves exactly once. Worker escalations forward their full decision provenance (reasons, reason code, rule id, policy source), so the overlay names the real asking rail for a worker exactly as it does for the main agent.</p>
+<p>How an ask resolves depends on the context:</p>
+<h3>Interactive TUI Behavior</h3>
+<p>In interactive mode, a permission request opens a queued overlay prompt immediately in the TUI, and the composer rail switches to <code>CONFIRM</code> with the same keys for as long as the prompt owns the keyboard.</p>
+<ul>
+<li><strong>Queued Overlays:</strong> If multiple tools or worker dispatches require permission during a single turn, the TUI queues the requests. Closing one overlay automatically pops the next permission overlay in the queue. Each queued request retains its consequence tier and authenticated requester. A request that arrives while a different overlay (a picker, <code>/context</code>, the fleet board) holds the screen is announced with an <code>[approval]</code> notice and re-presented the moment that overlay closes.</li>
+<li><strong>Operator Options:</strong> <code>Enter</code> grants permission once, which resumes only the parked tool call without changing the overall operating posture; the one-shot grant is scoped to the presented request&#39;s <code>requestId</code>. <code>Esc</code> denies only the presented request and advances the queue; the next parked call re-presents. <code>s</code> denies it and ends the turn. Cancel-all is reserved for shutdown, an aborted turn, headless runs, and transport failure, where no operator can answer.</li>
+<li><strong>Enter never doubles as send:</strong> <code>Enter</code> allows only from an empty composer. While the composer holds a draft, <code>Enter</code> does nothing, both surfaces say <code>[Backspace] clear draft</code> in its place, and only deletion keys reach the editor. An operator who typed a message and pressed the habitual send key cannot approve a parked call by accident; on a safety rail the ambiguous key resolves away from allow.</li>
+</ul>
+<h3>Deterministic Headless Behavior</h3>
+<p>When executing tasks in headless mode through <code>clio-coder run</code>, there is no terminal operator to prompt.</p>
+<ul>
+<li><strong>Deterministic Denials:</strong> Any action that requires permission resolves as a deterministic tool denial. The model receives the rejection and may adapt within the same run.</li>
+<li><strong>Rejection Message:</strong> The engine assigns a standard rejection reason to the denied action: <code>&quot;clio-coder run cannot confirm permission requests; rerun interactively to approve this action.&quot;</code></li>
+<li><strong>Run Exit:</strong> The process exit code reflects the overall run outcome, not the permission denial by itself. A run can still exit 0 if the model completes successfully after receiving the rejected tool result.</li>
+<li><strong>Receipts and Audit:</strong> Headless permission denials increment <code>permissionRequested</code> receipt/audit counts, so scripts can detect that approval would have been needed without treating every denial as a failed process.</li>
+</ul>
+<h3>Workers and delegations</h3>
+<ul>
+<li><strong>Workers</strong> inherit the session&#39;s autonomy level, capped by dispatch scope admission. A worker ask resolves per <code>fleet.permissions.mode</code>: <code>deny</code> continues the run with a rejection; <code>fail</code> ends it; <code>escalate</code> forwards it to the interactive operator (see the escalation section above). All three values are editable in the <code>/settings</code> center.</li>
+<li><strong>Delegations (ACP)</strong> under <code>clio-coder-policy</code> governance evaluate through the same net and autonomy mapping; an ask resolves as a non-stall deny so the external agent never hangs waiting for an operator.</li>
+<li><strong>ACP server sessions</strong> (a remote client driving Clio) snapshot the autonomy level at <code>session/new</code>, so a mid-session settings change on the host cannot alter an in-flight remote session&#39;s admission decisions.</li>
+</ul>
+<hr>
+<h2>Rigor Gate and Finish Contract</h2>
+<p>In addition to tool-level safety gates, Clio Coder enforces a completion boundary via the finish-contract assessor. This gate is governed by a single <code>rigor</code> setting (either <code>normal</code> or <code>high</code>), which is completely orthogonal to the autonomy permission levels.</p>
+<h3>Autonomy versus Rigor</h3>
+<p>It is critical to distinguish these two control axes:</p>
+<ul>
+<li><strong>Autonomy (Permission)</strong>: Determines what files, directories, tools, or shell commands the agent is permitted to touch, and whether it must ask the operator for permission before executing them.</li>
+<li><strong>Rigor (Evidence Bar)</strong>: Determines the verification standard required to accept a task as &quot;done&quot;. Autonomy gates what the agent <em>can do</em>; rigor gates what the agent must <em>verify</em> before it is allowed to finish.</li>
+</ul>
+<table>
+<thead>
+<tr>
+<th>Setting</th>
+<th>Axis</th>
+<th>Governed By</th>
+<th>Handled In</th>
+</tr>
+</thead>
+<tbody><tr>
+<td><strong>Autonomy</strong></td>
+<td>Authority</td>
+<td><code>safety.autonomy</code> settings dial, <code>CLIO_CODER_ALLOW_EXTERNAL_FULL_ACCESS</code></td>
+<td><code>src/tools/registry.ts</code>, <code>src/domains/safety/</code></td>
+</tr>
+<tr>
+<td><strong>Rigor</strong></td>
+<td>Validation</td>
+<td><code>CLIO_CODER_RIGOR</code> override, workspace validation contracts</td>
+<td><code>src/domains/safety/rigor.ts</code>, <code>src/domains/safety/finish-contract-registration.ts</code></td>
+</tr>
+</tbody></table>
+<hr>
+<h3>Rigor Resolution</h3>
+<p>The effective rigor level for a session or dispatch run is resolved at boot time using the following prioritization:</p>
+<ol>
+<li><p><strong>Explicit Override</strong>: Checked via the <code>CLIO_CODER_RIGOR</code> environment variable. It is trimmed and parsed case-insensitively. A value of <code>&quot;high&quot;</code> or <code>&quot;normal&quot;</code> overrides any other setting.</p>
+</li>
+<li><p><strong>Repository-Derived Default</strong>: If no override is present, Clio checks the workspace root for the presence of any of the following validation contract files:</p>
+<ul>
+<li><code>.clio-coder/validation.yaml</code></li>
+<li><code>.clio-coder/validation.yml</code></li>
+<li><code>validation.yaml</code></li>
+<li><code>validation.yml</code></li>
+<li><code>VALIDATION.md</code></li>
+</ul>
+<p>If any of these files are present, the default rigor level is raised to <code>high</code>. Otherwise, the default is <code>normal</code>.</p>
+</li>
+</ol>
+<hr>
+<h3>The Finish Gate and Re-Prompt Behavior</h3>
+<p>On every settled <code>turn_end</code>, the finish-contract assessor scans entries since the last user message, capped at 80 entries. The trigger is action-scoped: the gate engages only when that window contains successful workspace mutation evidence and no validation evidence or explicit limitation. The model does not have to type a phrase such as <code>done</code> or <code>fixed</code>; the settled turn after mutation is the completion signal.</p>
+<p>The assessor decision order is:</p>
+<ol>
+<li>If the window has no successful mutating receipt or settled mutating <code>!</code> bash execution, the contract passes with <code>no_mutation</code>.</li>
+<li>If the window has validation evidence, the contract passes with <code>validation_evidence</code>. Evidence includes successful validation commands, <code>verify</code> checks (declared package scripts, admitted project-catalog entries, and the frontend check), passed dispatch receipts, and protected-artifact validation records.</li>
+<li>If the assistant explicitly states what could not be verified and why, the contract passes with <code>explicit_limitation</code>.</li>
+<li>Otherwise, the contract engages with <code>unvalidated_mutation</code>.</li>
+</ol>
+<p>The finish assessment projects only onto the canonical completion-evidence
+axis. <code>validation_evidence</code> becomes <code>evidenced</code>, <code>unvalidated_mutation</code> becomes
+<code>incomplete</code>, <code>explicit_limitation</code> becomes <code>limited</code>, and <code>no_mutation</code>
+becomes <code>not_applicable</code>. The worker receipt&#39;s autonomy grade belongs to the
+separate autonomy-enforcement axis. Even <code>enforced</code> autonomy cannot promote
+completion evidence. The canonical state vocabulary, attribution rules, and
+persisted-format compatibility table are documented in
+<a href="memory_blueprint.html#canonical-trust-status"><code>evidence-and-memory.md</code></a>.</p>
+<ul>
+<li><strong>Normal Rigor</strong>: Clio issues a soft advisory warning (<code>FINISH_CONTRACT_ADVISORY_MESSAGE</code>) injected as a reminder for the next turn, but permits the turn to settle.</li>
+<li><strong>High Rigor</strong>: Clio withholds completion. The assessor emits <code>request_continuation</code> and a warning <code>inject_reminder</code> carrying <code>HIGH_RIGOR_REVALIDATION_MESSAGE</code>, instructing the model to run a verification-family command (e.g. <code>npm test</code>, <code>npm run build</code>) or explicitly declare a limitation before ending.</li>
+</ul>
+<h4>Exemptions and Safety Precautions</h4>
+<ul>
+<li><strong>No-Mutation Turns</strong>: Read-only status, alignment, and inspection turns are exempt because there is no successful workspace mutation in the recent window.</li>
+<li><strong>Limitation Claims</strong>: If the model explicitly states what could not be verified and why, the assessor accepts the statement as an explicit limitation and allows the turn to settle cleanly.</li>
+<li><strong>Dynamic Injection</strong>: All gate directives are injected dynamically through middleware effects. This ensures that the static system prompt prefix remains byte-stable, preserving prompt caches.</li>
+<li><strong>Prior Hard-Block Preservation</strong>: If a prior middleware hook has already emitted a hard block (e.g. tool-prose violation), the high-rigor continuation is suppressed so that critical error guidance is not overwritten.</li>
+</ul>
+<hr>
+<h2>Receipts and evidence</h2>
+<p>Safety decisions feed receipts, audit rows, and evidence artifacts.</p>
+<ul>
+<li><p><strong>Audit Ledger Durability (<code>src/domains/safety/audit.ts</code>)</strong>: Audit entries are appended to <code>&lt;stateDir&gt;/audit/audit-&lt;date&gt;.jsonl</code> synchronously, backed by a debounced 5-second <code>fsyncSync</code> flush to guarantee on-disk durability without stalling interactive turns. Write errors are logged to stderr without throwing, ensuring auditing never crashes the main execution loop.</p>
+</li>
+<li><p><strong>Timestamp Ordering</strong>: Audit rows flush asynchronously from concurrent producers and are not strictly time-ordered within a raw <code>.jsonl</code> file; consumers must sort rows by <code>ts</code> before reasoning about sequence (the evidence builder does this automatically).</p>
+</li>
+<li><p><strong>Inspection</strong>: The interactive <a href="observability_blueprint.html"><code>/view</code></a> surface can inspect and verify receipt artifacts without mutating them. When reporting a problem, include redacted receipts or evidence IDs when possible so maintainers can see:</p>
+</li>
+<li><p>mode and requested action class;</p>
+</li>
+<li><p>policy source and rule IDs;</p>
+</li>
+<li><p>project policy hash/path;</p>
+</li>
+<li><p>blocked/asked/allowed decision counts;</p>
+</li>
+<li><p>permission request and resolution rows, joinable on <code>requestId</code>;</p>
+</li>
+<li><p>the worker <code>autonomyEnforcement</code> grade where present;</p>
+</li>
+<li><p>tool statistics and failure messages.</p>
+</li>
+</ul>
+        </article>
+        <nav class="related-nav" aria-label="Adjacent references">
+          <a class="nav-link-card" href="provider_adapter_blueprint.html"><span class="nav-label">Previous</span><span class="nav-title">Provider Adapter Cookbook</span></a>
+          <a class="nav-link-card next" href="session_lifecycle_blueprint.html"><span class="nav-label">Next</span><span class="nav-title">Session Lifecycle</span></a>
+        </nav>
+        <p class="reference-footer-note">Canonical content lives in the mapped Markdown page. This visual counterpart adds navigation without changing the contract.</p>
+      </main>
+    </div>
+    <footer>Clio Coder documentation · source-aligned at v0.4.2</footer>
   </div>
-
-  <script>
-    // Tab switching
-    function switchTab(tabId) {
-      document.querySelectorAll('.tab-btn').forEach(btn => { btn.classList.remove('active'); });
-      document.querySelectorAll('.tab-pane').forEach(pane => { pane.classList.remove('active'); });
-
-      if (tabId === 'interactive') {
-        document.querySelector('.tab-btn:nth-child(1)').classList.add('active');
-        document.getElementById('pane-interactive').classList.add('active');
-      } else {
-        document.querySelector('.tab-btn:nth-child(2)').classList.add('active');
-        document.getElementById('pane-reference').classList.add('active');
-      }
-    }
-
-    // Rules Definitions
-    const DAMAGE_CONTROL_RULES = [
-      { id: "rm-rf-root", pattern: /\brm\s+-rf?\s+\/(?![a-z0-9]*tmp\/)/, class: "system_modify", block: true, reason: "Destructive filesystem operation on root" },
-      { id: "git-push-force", pattern: /\bgit\s+push\s+.*(--force|-f)(?!-with-lease)\b/, class: "git_destructive", block: true, reason: "Force push overwrites branch history" },
-      { id: "curl-pipe-sh", pattern: /\bcurl\b[^|]*\|\s*(sudo\s+)?(sh|bash|zsh)\b/, class: "execute", block: true, reason: "Remote-script-to-shell installer is prohibited" },
-      { id: "git-stash-drop", pattern: /\bgit\s+stash\s+drop\b/, class: "git_destructive", block: false, ask: true, reason: "Stash drop permanently discards uncommitted code" },
-      { id: "git-restore-dot", pattern: /\bgit\s+restore\s+\.\s*$/, class: "git_destructive", block: false, ask: true, reason: "Git restore discards all local workspace edits" },
-    ];
-
-    const BUILTIN_RECOGNIZED = [
-      /^pwd$/,
-      /^ls(?:\s+-[a-zA-Z0-9]+|\s+[\w./-]+)*$/,
-      /^git\s+status$/,
-      /^git\s+diff(?:\s+[\w./-]+)*$/,
-      /^git\s+log(?:\s+-[0-9]+)?$/,
-      /^npm\s+test$/,
-      /^npm\s+run\s+test$/
-    ];
-
-    // Tool Groups Change
-    function onToolChange() {
-      const tool = document.getElementById('toolGroup').value;
-      const cmdGroup = document.getElementById('group-command');
-      const fileGroup = document.getElementById('group-filepath');
-
-      if (tool === 'bash' || tool === 'git') {
-        cmdGroup.style.display = 'block';
-        fileGroup.style.display = 'none';
-      } else if (tool === 'read' || tool === 'write') {
-        cmdGroup.style.display = 'none';
-        fileGroup.style.display = 'block';
-      } else {
-        cmdGroup.style.display = 'none';
-        fileGroup.style.display = 'none';
-      }
-      runSimulation();
-    }
-
-    // Load presets
-    function loadPreset(presetId) {
-      const toolGroup = document.getElementById('toolGroup');
-      const commandInput = document.getElementById('commandInput');
-      const filepathInput = document.getElementById('filepathInput');
-
-      switch(presetId) {
-        case 'status':
-          toolGroup.value = 'git';
-          commandInput.value = 'git status';
-          break;
-        case 'npm-test':
-          toolGroup.value = 'bash';
-          commandInput.value = 'npm test';
-          break;
-        case 'write-src':
-          toolGroup.value = 'write';
-          filepathInput.value = 'src/index.ts';
-          break;
-        case 'write-env':
-          toolGroup.value = 'write';
-          filepathInput.value = '.env';
-          break;
-        case 'rm-rf':
-          toolGroup.value = 'bash';
-          commandInput.value = 'rm -rf /';
-          break;
-        case 'stash-drop':
-          toolGroup.value = 'git';
-          commandInput.value = 'git stash drop';
-          break;
-        case 'force-push':
-          toolGroup.value = 'git';
-          commandInput.value = 'git push origin main --force';
-          break;
-        case 'escape-write':
-          toolGroup.value = 'write';
-          filepathInput.value = '/etc/hosts';
-          break;
-        case 'unrecognized-exec':
-          toolGroup.value = 'bash';
-          commandInput.value = 'sudo apt-get install build-essential';
-          break;
-      }
-      onToolChange();
-    }
-
-    // Clear console
-    function clearConsole() {
-      document.getElementById('traceConsole').innerHTML = '';
-    }
-
-    // Log to console helper
-    function logTrace(msg, type = 'info') {
-      const consoleEl = document.getElementById('traceConsole');
-      let prefix = '[INFO]';
-      if (type === 'warn') prefix = '[WARN]';
-      if (type === 'error') prefix = '[ERROR]';
-      if (type === 'success') prefix = '[SUCCESS]';
-
-      consoleEl.innerHTML += `\n${prefix} ${msg}`;
-      consoleEl.scrollTop = consoleEl.scrollHeight;
-    }
-
-    // Parse simple yaml zeroAccess/readOnly/noDelete paths
-    function parsePathPolicies(yamlText) {
-      const zeroAccess = [];
-      const readOnly = [];
-      const noDelete = [];
-
-      try {
-        const lines = yamlText.split('\n');
-        let currentSection = null;
-        lines.forEach(line => {
-          const trimmed = line.trim();
-          if (!trimmed || trimmed.startsWith('#')) return;
-
-          if (trimmed.startsWith('zeroAccessPaths:')) {
-            currentSection = 'zero';
-          } else if (trimmed.startsWith('readOnlyPaths:')) {
-            currentSection = 'readonly';
-          } else if (trimmed.startsWith('noDeletePaths:')) {
-            currentSection = 'nodelete';
-          } else if (trimmed.startsWith('commands:')) {
-            currentSection = 'commands';
-          } else if (trimmed.startsWith('-') && currentSection) {
-            const val = trimmed.replace(/^-/, '').trim().replace(/['"]/g, '');
-            if (currentSection === 'zero') zeroAccess.push(val);
-            if (currentSection === 'readonly') readOnly.push(val);
-            if (currentSection === 'nodelete') noDelete.push(val);
-          }
-        });
-      } catch (_) {
-        // fail silently
-      }
-
-      return { zeroAccess, readOnly, noDelete };
-    }
-
-    // Main simulator algorithm
-    function runSimulation() {
-      const autonomy = document.getElementById('autonomyLevel').value;
-      const posture = document.getElementById('operatingPosture').value;
-      const tool = document.getElementById('toolGroup').value;
-      const cwd = document.getElementById('cmdCwd').value.trim();
-      const command = document.getElementById('commandInput').value.trim();
-      const filepath = document.getElementById('filepathInput').value.trim();
-      const policyYaml = document.getElementById('projectPolicy').value;
-
-      clearConsole();
-      logTrace("Evaluating safety request...", 'info');
-      logTrace(`autonomy_level="${autonomy}" posture_mode="${posture}" tool="${tool}"`, 'info');
-
-      // Highlight active autonomy column in matrix table
-      document.querySelectorAll('#matrixTable th, #matrixTable td').forEach(el => { el.classList.remove('highlight'); });
-      const activeColId = `hdr-${autonomy}`;
-      const colIndex = Array.from(document.querySelectorAll('#matrixTable th')).findIndex(th => th.id === activeColId);
-      if (colIndex !== -1) {
-        document.querySelectorAll(`#matrixTable th:nth-child(${colIndex + 1})`).forEach(el => { el.classList.add('highlight'); });
-        document.querySelectorAll(`#matrixTable td:nth-child(${colIndex + 1})`).forEach(el => { el.classList.add('highlight'); });
-      }
-
-      // ----------------------------------------------------
-      // STAGE 1: CLASSIFY ACTION CLASS
-      // ----------------------------------------------------
-      let actionClass = "unknown";
-
-      if (tool === 'read') {
-        actionClass = "read";
-      } else if (tool === 'write') {
-        // Path safety overrides classification
-        const SYSTEM_ROOTS = ['/etc', '/usr', '/var', '/bin', '/sbin', '/run'];
-        const SCRATCH_EXEMPT = ['/var/tmp', '/var/folders'];
-        const underSystemRoot =
-          SYSTEM_ROOTS.some((root) => filepath === root || filepath.startsWith(root + '/')) &&
-          !SCRATCH_EXEMPT.some((root) => filepath === root || filepath.startsWith(root + '/'));
-        if (underSystemRoot) {
-          actionClass = "system_modify";
-          logTrace(`Path Escaping: file write path "${filepath}" is a system directory`, 'warn');
-        } else if (filepath.startsWith('..') || filepath.startsWith('/') && !filepath.startsWith(cwd)) {
-          actionClass = "system_modify";
-          logTrace(`Path Escaping: file write path "${filepath}" escapes workspace root`, 'warn');
-        } else {
-          actionClass = "write";
-        }
-      } else if (tool === 'git') {
-        // Parse git command
-        let isDestructive = false;
-        for (const rule of DAMAGE_CONTROL_RULES) {
-          if (rule.class === 'git_destructive' && rule.pattern.test(command)) {
-            actionClass = "git_destructive";
-            isDestructive = true;
-            break;
-          }
-        }
-        if (!isDestructive) {
-          if (command.startsWith('git diff') || command.startsWith('git status') || command.startsWith('git log')) {
-            actionClass = "read";
-          } else {
-            actionClass = "execute"; // git commit, add, stash, etc.
-          }
-        }
-      } else if (tool === 'bash') {
-        // Classify bash commands
-        let isDestructive = false;
-        let isSysModify = false;
-
-        for (const rule of DAMAGE_CONTROL_RULES) {
-          if (rule.pattern.test(command)) {
-            if (rule.class === 'git_destructive') {
-              actionClass = "git_destructive";
-              isDestructive = true;
-            } else if (rule.class === 'system_modify') {
-              actionClass = "system_modify";
-              isSysModify = true;
-            }
-            break;
-          }
-        }
-
-        if (!isDestructive && !isSysModify) {
-          if (command.includes('sudo') || command.includes('apt-get') || command.includes('npm install -g')) {
-            actionClass = "system_modify";
-          } else {
-            // Check if recognized
-            let recognized = false;
-            const hasOtherOperators = /\|\||[;|><\n]/.test(command);
-            const isChain = !hasOtherOperators && command.includes('&&');
-            if (hasOtherOperators) {
-              logTrace(`Sequencing or redirection operator found. Command is unrecognized.`, 'warn');
-            } else if (isChain) {
-              // An && chain is recognized only when every member is, capped at
-              // six members, and it takes the most restrictive member's verdict.
-              const segments = command.split('&&').map((part) => part.trim()).filter(Boolean);
-              const memberRecognized = (segment) =>
-                BUILTIN_RECOGNIZED.some((rx) => rx.test(segment)) || segment === 'npm test' || /^cd\s+\S+$/.test(segment);
-              if (segments.length > 6) {
-                logTrace(`Chain of ${segments.length} members exceeds the six-member cap. Command is unrecognized.`, 'warn');
-              } else if (segments.every(memberRecognized)) {
-                recognized = true;
-                logTrace(`Every member of the && chain is recognized. Chain classified as execute (recognized).`, 'success');
-              } else {
-                logTrace(`One or more && chain members are unrecognized. Command is unrecognized.`, 'warn');
-              }
-            } else {
-              for (const rx of BUILTIN_RECOGNIZED) {
-                if (rx.test(command)) {
-                  recognized = true;
-                  break;
-                }
-              }
-              // Check project policy command IDs
-              if (command === 'npm test') {
-                recognized = true; // matches simulated policy
-              }
-            }
-
-            if (recognized) {
-              actionClass = "execute"; // Recognized no-prompt set
-              logTrace(`Recognized command match: "${command}" classified as execute (recognized)`, 'success');
-            } else {
-              actionClass = "execute_other"; // Unrecognized bash
-              logTrace(`Unrecognized command: "${command}" classified as execute (any other bash)`, 'warn');
-            }
-          }
-        }
-      } else if (tool === 'dispatch') {
-        actionClass = "dispatch";
-      }
-
-      // Highlight active row in matrix
-      document.querySelectorAll('#matrixTable tbody tr').forEach(tr => { tr.style.background = 'none'; });
-      let rowEl = null;
-      if (actionClass === 'read') rowEl = document.getElementById('row-read');
-      else if (actionClass === 'write') rowEl = document.getElementById('row-write');
-      else if (actionClass === 'execute') rowEl = document.getElementById('row-execute-builtin');
-      else if (actionClass === 'execute_other') rowEl = document.getElementById('row-execute-other');
-      else if (actionClass === 'dispatch') rowEl = document.getElementById('row-dispatch');
-      else if (actionClass === 'system_modify') rowEl = document.getElementById('row-system-modify');
-      else if (actionClass === 'git_destructive') rowEl = document.getElementById('row-git-destructive');
-      else rowEl = document.getElementById('row-unknown');
-
-      if (rowEl) {
-        rowEl.style.background = 'rgba(0, 240, 255, 0.04)';
-      }
-
-      logTrace(`Resolved Action Class: "${actionClass === 'execute_other' ? 'execute: other bash' : actionClass}"`, 'info');
-
-      // ----------------------------------------------------
-      // STAGE 2: RUN THROUGH SAFETY NET (Damage Control Rules & Path Policies)
-      // ----------------------------------------------------
-      let safetyNetVerdict = "pass";
-      let safetyNetReason = "";
-
-      // Path policies from YAML
-      const policies = parsePathPolicies(policyYaml);
-      const activeScanPath = tool === 'write' ? filepath : command;
-
-      // Check zeroAccessPaths
-      for (const p of policies.zeroAccess) {
-        if (activeScanPath.includes(p)) {
-          safetyNetVerdict = "block";
-          safetyNetReason = `zeroAccessPaths breach: path contains "${p}"`;
-          break;
-        }
-      }
-
-      // Check command substitution confirm rail
-      if (safetyNetVerdict === 'pass' && (tool === 'bash' || tool === 'git')) {
-        const hasSubstitution = /\$\(|`/.test(command);
-        if (hasSubstitution) {
-          safetyNetVerdict = "confirm";
-          safetyNetReason = "Command substitution $(...) or backticks is an always-on Safety Net confirm rail";
-        }
-      }
-
-      // Check readOnlyPaths (for write commands)
-      if (safetyNetVerdict === 'pass' && tool === 'write') {
-        for (const p of policies.readOnly) {
-          if (filepath.includes(p)) {
-            safetyNetVerdict = "block";
-            safetyNetReason = `readOnlyPaths breach: writing to "${p}" is blocked`;
-            break;
-          }
-        }
-      }
-
-      // Check Damage Control rules regexes
-      if (safetyNetVerdict === 'pass') {
-        for (const rule of DAMAGE_CONTROL_RULES) {
-          if (rule.pattern.test(command) || rule.pattern.test(filepath)) {
-            if (rule.block) {
-              safetyNetVerdict = "block";
-              safetyNetReason = `Damage control match: ${rule.reason} (Rule: ${rule.id})`;
-            } else if (rule.ask) {
-              safetyNetVerdict = "confirm";
-              safetyNetReason = `Damage control confirm check: ${rule.reason} (Rule: ${rule.id})`;
-            }
-            break;
-          }
-        }
-      }
-
-      logTrace(`[Safety Net Check] Verdict: ${safetyNetVerdict.toUpperCase()} ${safetyNetReason ? `(${safetyNetReason})` : ''}`, safetyNetVerdict === 'block' ? 'error' : (safetyNetVerdict === 'confirm' ? 'warn' : 'success'));
-
-      // ----------------------------------------------------
-      // STAGE 3: AUTONOMY MAPPING
-      // ----------------------------------------------------
-      let autonomyVerdict = "allow";
-
-      if (safetyNetVerdict !== 'block') {
-        // Map matrix
-        if (autonomy === 'read-only') {
-          autonomyVerdict = (actionClass === 'read') ? 'allow' : 'deny';
-        } else if (autonomy === 'suggest') {
-          autonomyVerdict = (actionClass === 'read') ? 'allow' : 'ask';
-        } else if (autonomy === 'auto-edit') {
-          if (actionClass === 'read' || actionClass === 'write' || actionClass === 'execute' || actionClass === 'dispatch') {
-            autonomyVerdict = 'allow';
-          } else {
-            autonomyVerdict = 'ask'; // execute_other, system_modify, unknown
-          }
-        } else if (autonomy === 'full-auto') {
-          if (actionClass === 'system_modify' || actionClass === 'unknown') {
-            autonomyVerdict = 'ask';
-          } else {
-            autonomyVerdict = 'allow';
-          }
-        }
-
-        // git_destructive is net block regardless of autonomy level
-        // EXCEPT when it is overridden by an authored damage-control confirm (ask) rule (e.g. git stash drop)
-        const isAskRule = (safetyNetVerdict === 'confirm');
-        if (actionClass === 'git_destructive' && !isAskRule) {
-          autonomyVerdict = 'block';
-        }
-      } else {
-        autonomyVerdict = 'block';
-      }
-
-      logTrace(`[Autonomy Mapping] Matrix result: ${autonomyVerdict.toUpperCase()}`, autonomyVerdict === 'allow' ? 'success' : (autonomyVerdict === 'ask' ? 'warn' : 'error'));
-
-      // ----------------------------------------------------
-      // STAGE 4: RESOLVE APPROVALS / POSTURE
-      // ----------------------------------------------------
-      let finalVerdict = "ALLOW";
-      let finalDetails = "Tool call passes all checks and runs immediately.";
-      let cardClass = "v-allow";
-      let icon = "✓";
-
-      // Combine Safety Net + Autonomy Mappings
-      const resolvesToAsk = (safetyNetVerdict === 'confirm' || autonomyVerdict === 'ask');
-      const resolvesToBlock = (safetyNetVerdict === 'block' || autonomyVerdict === 'block');
-      const resolvesToDeny = (autonomyVerdict === 'deny');
-
-      if (resolvesToBlock) {
-        finalVerdict = "BLOCK";
-        finalDetails = `[safety-net] block: ${safetyNetReason || 'Action classified as destructive and hard blocked by rule.'}`;
-        cardClass = "v-block";
-        icon = "🛑";
-        logTrace(`Safety Net blocked execution. Final status: BLOCKED`, 'error');
-      } else if (resolvesToDeny) {
-        finalVerdict = "DENY";
-        finalDetails = `[autonomy] denied: Operating under "${autonomy}" level. Action is denied.`;
-        cardClass = "v-deny";
-        icon = "✕";
-        logTrace(`Autonomy level denied execution. Final status: DENIED`, 'error');
-      } else if (resolvesToAsk) {
-        if (posture === 'headless') {
-          // Headless mode automatically denies asks deterministically
-          finalVerdict = "DENY (HEADLESS)";
-          finalDetails = `clio-coder run cannot confirm permission requests; rerun interactively to approve this action.`;
-          cardClass = "v-block";
-          icon = "✕";
-          logTrace(`Headless mode auto-denied interactive request. Final status: DENIED`, 'error');
-        } else {
-          // Interactive TUI mode parks for overlay approval
-          finalVerdict = "ASK / PARK";
-          const askedBy = (safetyNetVerdict === 'confirm') ? 'Asked by: Safety Net rule' : 'Asked by: Autonomy Mapping Matrix';
-          finalDetails = `[approval] notice: Parked in TUI queue overlay. (${askedBy})`;
-          cardClass = "v-ask";
-          icon = "⏳";
-          logTrace(`Parked in TUI permission overlay queue. Waiting for operator...`, 'warn');
-        }
-      } else {
-        logTrace(`Tool call successfully allowed. Final status: ALLOWED`, 'success');
-      }
-
-      // Update UI displays
-      document.getElementById('verdictTitle').innerText = finalVerdict;
-      document.getElementById('verdictDesc').innerText = finalDetails;
-
-      const vCard = document.getElementById('verdictCard');
-      vCard.className = `verdict-card ${cardClass}`;
-      document.getElementById('verdictIcon').innerText = icon;
-    }
-
-    window.switchTab = switchTab;
-    window.loadPreset = loadPreset;
-    window.clearConsole = clearConsole;
-
-    // Initialize Simulator on load
-    window.onload = () => {
-      onToolChange();
-    };
-  </script>
+  <script src="shared.js"></script>
 </body>
 </html>

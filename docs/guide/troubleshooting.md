@@ -1,5 +1,8 @@
 # Troubleshooting & Error Remediation
 
+> **Visual blueprint:** The source checkout includes the complete
+> [Troubleshooting & Error Remediation visual reference](https://github.com/iowarp/clio-coder/blob/main/docs/html/troubleshooting_blueprint.html).
+
 This guide provides concrete, actionable remediation procedures for
 operational errors, permission denials, target connection failures, and system
 diagnostics in the current source tree.

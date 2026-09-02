@@ -1,5 +1,8 @@
 # Agent Client Protocol (ACP) Server
 
+> **Visual blueprint:** The source checkout includes the complete
+> [Agent Client Protocol (ACP) Server visual reference](https://github.com/iowarp/clio-coder/blob/main/docs/html/acp_blueprint.html).
+
 This document defines the architecture, transport protocols, tool mediation layers, permission handling, and error taxonomy for Clio Coder's Agent Client Protocol (ACP) server implementation in the current source tree.
 
 Source implementations: `src/engine/acp/` and `src/cli/acp.ts`.

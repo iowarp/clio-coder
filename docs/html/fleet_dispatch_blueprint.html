@@ -1,332 +1,947 @@
-<!DOCTYPE html>
+<!doctype html>
 <html lang="en">
 <head>
-  <meta charset="UTF-8">
-  <meta name="viewport" content="width=device-width, initial-scale=1.0">
-  <title>Fleet Dispatch Architecture &amp; Mechanics (v0.4.0)</title>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <meta name="clio-markdown-source" content="docs/guide/fleet-dispatch.md">
+  <meta name="clio-docs-version" content="0.4.2">
+  <title>Fleet Dispatch · Clio Coder 0.4.2</title>
+  <link rel="icon" href="data:,">
   <link rel="stylesheet" href="shared.css">
-  <style>
-    .fleet-grid {
-      display: grid;
-      grid-template-columns: 1fr 1fr;
-      gap: 1.5rem;
-    }
-    @media (max-width: 900px) {
-      .fleet-grid { grid-template-columns: 1fr; }
-    }
-    .node-card {
-      background: var(--bg-card);
-      border: 1px solid var(--border-card);
-      border-radius: 12px;
-      padding: 1.25rem;
-      position: relative;
-    }
-    .node-status {
-      display: inline-block;
-      width: 10px;
-      height: 10px;
-      border-radius: 50%;
-      margin-right: 0.5rem;
-    }
-    .status-healthy { background: var(--color-emerald); box-shadow: 0 0 8px var(--color-emerald); }
-    .status-warning { background: var(--color-amber); box-shadow: 0 0 8px var(--color-amber); }
-    .status-error { background: var(--color-rose); box-shadow: 0 0 8px var(--color-rose); }
-
-    .terminal-window {
-      background: #050811;
-      border: 1px solid var(--border-card);
-      border-radius: 8px;
-      padding: 1rem;
-      font-family: var(--font-mono);
-      font-size: 0.85rem;
-      color: #cbd5e1;
-      line-height: 1.5;
-      overflow-x: auto;
-    }
-    .term-line { margin-bottom: 0.35rem; }
-    .term-prompt { color: var(--color-cyan); font-weight: 700; }
-    .term-out { color: var(--text-muted); }
-    .term-success { color: var(--color-emerald); }
-    .term-warn { color: var(--color-amber); }
-    .term-err { color: var(--color-rose); }
-
-    .interactive-panel {
-      background: rgba(13, 20, 38, 0.6);
-      border: 1px solid var(--border-card);
-      border-radius: 12px;
-      padding: 1.5rem;
-      margin-top: 1.5rem;
-    }
-    .control-row {
-      display: flex;
-      gap: 1rem;
-      align-items: center;
-      flex-wrap: wrap;
-      margin-bottom: 1rem;
-    }
-    .badge-v030 {
-      background: rgba(255, 126, 41, 0.15);
-      border: 1px solid var(--color-orange);
-      color: var(--color-orange);
-      font-size: 0.75rem;
-      padding: 0.2rem 0.6rem;
-      border-radius: 4px;
-      font-weight: 700;
-    }
-  </style>
 </head>
-<body>
+<body data-doc-category="guide">
+  <div class="reading-progress" aria-hidden="true"></div>
+  <a class="skip-link" href="#reference-content">Skip to reference</a>
   <div class="container">
-    <header>
+    <header class="document-header" data-category="Guide">
       <div class="header-left">
-        <div class="header-logo">
-          <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" style="color: var(--color-orange);"><title>Fleet Dispatch</title>
-            <path d="M17 21v-2a4 4 0 0 0-4-4H5a4 4 0 0 0-4 4v2"></path>
-            <circle cx="9" cy="7" r="4"></circle>
-            <path d="M23 21v-2a4 4 0 0 0-3-3.87"></path>
-            <path d="M16 3.13a4 4 0 0 1 0 7.75"></path>
+        <a class="header-logo" href="index.html" aria-label="Documentation index">
+          <svg viewBox="0 0 24 24" fill="none" aria-hidden="true">
+            <path d="M12 2 2 7l10 5 10-5-10-5Z" stroke="url(#clio-logo)" stroke-width="2" stroke-linejoin="round"/>
+            <path d="m2 12 10 5 10-5M2 17l10 5 10-5" stroke="url(#clio-logo)" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"/>
+            <defs><linearGradient id="clio-logo" x1="2" y1="2" x2="22" y2="22"><stop stop-color="#00d4db"/><stop offset="1" stop-color="#ff7e29"/></linearGradient></defs>
           </svg>
-        </div>
+        </a>
         <div class="header-title-wrapper">
-          <h1>Fleet Dispatch Mechanics &amp; Bounded Reconnaissance</h1>
-          <p>Process-safe multi-node execution, attested workers, measured routing, strict receipts, and bounded agent automation</p>
-          <div class="meta-chips-row">
-            <span class="chip">Source: docs/fleet-dispatch.md</span>
-            <span class="chip chip-orange">clio-coder docs fleet</span>
-            <span class="badge-v030">v0.4.0 Architecture</span>
-          </div>
+          <p class="document-kicker">Guide / canonical reference</p>
+          <h1>Fleet Dispatch</h1>
+          <p class="document-path">docs/guide/fleet-dispatch.md</p>
         </div>
       </div>
       <div class="header-right">
-        <span class="version-badge">Clio Coder v0.4.0</span>
-        <a href="index.html" class="back-btn">
-          <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><title>Back</title><line x1="19" y1="12" x2="5" y2="12"></line><polyline points="12 19 5 12 12 5"></polyline></svg>
-          Dashboard Hub
-        </a>
+        <a class="back-btn" href="index.html">← Index</a>
+        <span class="version-badge">v0.4.2</span>
       </div>
     </header>
-
-    <div class="page-layout-grid">
-      <nav class="sidebar" aria-label="Table of Contents">
-        <div class="toc-container">
-          <div class="toc-title">On This Page</div>
-          <ul class="toc-list">
-            <!-- Populated dynamically by shared.js -->
-          </ul>
-        </div>
-      </nav>
-
-      <main>
-        <!-- Architecture Overview Card -->
-        <div class="glass-card">
-          <h2>Fleet Dispatch v0.4.0 Overview</h2>
-          <p>Clio's Fleet Dispatch orchestrates bounded agents across local processes and remote HPC nodes via SSH transport. In v0.4.0, dispatch includes process-safe capacity leases, WorkerSpec v3 attestation, ExecutionPlan v2 DAGs, Contract v4 per-step write boundaries (detect-and-rollback), bounded check/repair loops, deterministic code steps, strict receipt integrity v16, measured shadow routing, readiness-gated active routing, transactional editing attempts, and bounded agent automation.</p>
-        </div>
-
-        <!-- Interactive Tabs Navigation -->
-        <div class="tabs-nav">
-          <button type="button" class="tab-btn active" onclick="switchTab('topology')">
-            Fleet Topology &amp; Placement
-          </button>
-          <button type="button" class="tab-btn" onclick="switchTab('intent')">
-            Typed Intent (v2) &amp; Path Scopes
-          </button>
-          <button type="button" class="tab-btn" onclick="switchTab('scout')">
-            Scout Exploration &amp; Budget
-          </button>
-          <button type="button" class="tab-btn" onclick="switchTab('receipts')">
-            Integrity-Sealed Receipts
-          </button>
-          <button type="button" class="tab-btn" onclick="switchTab('failover')">
-            Failure Taxonomy &amp; Failover
-          </button>
-        </div>
-
-        <!-- Tab 1: Topology -->
-        <div class="tab-pane active" id="pane-topology">
-          <div class="interactive-panel">
-            <h3>Fleet Node Config &amp; Preflight Validator</h3>
-            <p>Simulate the placement inputs checked by <code>clio-coder doctor</code> across configured cluster nodes:</p>
-            <div class="control-row">
-              <label for="placementSelect" style="font-weight: 600;">Placement Mode:</label>
-              <select id="placementSelect" onchange="runTopologySim()" style="background: #090d16; color: #fff; padding: 0.4rem 0.8rem; border-radius: 6px; border: 1px solid var(--border-card);">
-                <option value="automatic">Automatic: least-loaded eligible remote</option>
-                <option value="pinned">Pinned: profile or request node</option>
-                <option value="local">Local fallback</option>
-              </select>
-              <button type="button" class="tab-btn active" onclick="runTopologySim()">Run Preflight Simulation</button>
-            </div>
-
-            <div class="fleet-grid" id="nodeGrid">
-              <!-- Dynamically populated -->
-            </div>
-          </div>
-        </div>
-
-        <!-- Tab 2: Typed Intent -->
-        <div class="tab-pane" id="pane-intent">
-          <div class="interactive-panel">
-            <h3>Typed Intent Specification (Version 2)</h3>
-            <p>Clio's dispatch tool (<code>dispatch</code>) accepts structured, machine-verifiable intent declarations to bound worker authority, seal path provenance, and enforce gate checks before execution:</p>
-
-            <div class="terminal-window" style="margin-top: 1rem;">
-              <div class="term-line"><span class="term-prompt">// Model argument payload</span></div>
-              <div class="term-line">{</div>
-              <div class="term-line">&nbsp;&nbsp;<span class="term-prompt">"agent"</span>: "coder",</div>
-              <div class="term-line">&nbsp;&nbsp;<span class="term-prompt">"task"</span>: "Refactor session ledger in src/engine/session/ledger.ts",</div>
-              <div class="term-line">&nbsp;&nbsp;<span class="term-prompt">"intent"</span>: {</div>
-              <div class="term-line">&nbsp;&nbsp;&nbsp;&nbsp;<span class="term-prompt">"read_roots"</span>: ["src/engine/session", "src/core"],</div>
-              <div class="term-line">&nbsp;&nbsp;&nbsp;&nbsp;<span class="term-prompt">"write_roots"</span>: ["src/engine/session"],</div>
-              <div class="term-line">&nbsp;&nbsp;&nbsp;&nbsp;<span class="term-prompt">"relevant_paths"</span>: ["src/engine/session/ledger.ts", "tests/session.test.ts"],</div>
-              <div class="term-line">&nbsp;&nbsp;&nbsp;&nbsp;<span class="term-prompt">"expected_outputs"</span>: ["src/engine/session/ledger.ts"],</div>
-              <div class="term-line">&nbsp;&nbsp;&nbsp;&nbsp;<span class="term-prompt">"verification"</span>: [{ <span class="term-prompt">"check"</span>: "test", <span class="term-prompt">"timeout_ms"</span>: 15000 }]</div>
-              <div class="term-line">&nbsp;&nbsp;}</div>
-              <div class="term-line">}</div>
-            </div>
-
-            <div style="margin-top: 1.5rem;" class="grid grid-2">
-              <div class="glass-card">
-                <h4>Intent Enforcement Guarantees</h4>
-                <ul>
-                  <li><strong>Integrity-Sealed Path Provenance:</strong> Tracks exact declared sources and confidence for all policy paths.</li>
-                  <li><strong>Hard Parameter Caps:</strong> &le;32 entries in each path list (512B each), &le;8 verification checks (&ge;1,000ms timeout).</li>
-                  <li><strong>Repository Root Containment:</strong> Paths must be repo-relative POSIX without parent directory traversal (<code>..</code>).</li>
-                </ul>
-              </div>
-              <div class="glass-card">
-                <h4>Read-Only Role Projection</h4>
-                <ul>
-                  <li><strong>Council / Reviewer Projection:</strong> <code>narrowDispatchIntentToReadOnly()</code> converts <code>write_roots</code> to <code>read_roots</code> with zero write permissions.</li>
-                  <li><strong>Fail-Closed Gate Checks:</strong> Undeclared verification check IDs are rejected at preflight admission.</li>
-                  <li><strong>No Silent Fallbacks:</strong> Unknown fields or version mismatches produce fatal refusals rather than silent migrations.</li>
-                </ul>
-              </div>
-            </div>
-          </div>
-        </div>
-
-        <!-- Tab 2: Scout Exploration -->
-        <div class="tab-pane" id="pane-scout">
-          <div class="interactive-panel">
-            <h3>Advisory Scout Reconnaissance &amp; Bounded Synthesis</h3>
-            <p>The operating contract steers explicit broad repository exploration to the read-only Scout recipe. After nine or more manual read-only exploration calls without a successful Scout dispatch, middleware emits one advisory notice; direct reads remain allowed.</p>
-            <div class="terminal-window" id="scoutTerminal">
-              <div class="term-line"><span class="term-prompt">orchestrator$</span> clio-coder dispatch --query "explore repository architecture and dependencies"</div>
-              <div class="term-line term-out">[dispatch] evaluating task profile: broad reconnaissance query detected.</div>
-              <div class="term-line term-out">[dispatch] broad exploration is advisory-routed to the read-only Scout recipe.</div>
-              <div class="term-line term-out">[middleware] 9+ manual read-only calls without Scout: advisory notice emitted.</div>
-              <div class="term-line term-success">[scout-1] launched on node-login-01 (SSH). Exploration budget: 18 calls; read reserve: 4.</div>
-              <div class="term-line term-success">[scout-1] synthesis phase: text-only handoff with live path:line citations.</div>
-            </div>
-          </div>
-        </div>
-
-        <!-- Tab 3: Receipts -->
-        <div class="tab-pane" id="pane-receipts">
-          <div class="interactive-panel">
-            <h3>Integrity-Sealed Receipt Verification</h3>
-            <p>Model-facing dispatch and monitor output separates the sealed receipt digest from validation evidence and worker prose.</p>
-            <div class="terminal-window">
-              <div class="term-line"><span class="term-prompt">receipt-verifier$</span> checking worker dispatch receipt #rcpt-89201</div>
-              <div class="term-line term-out">Worker claim: "Edited 3 files and ran pytest successfully"</div>
-              <div class="term-line term-success">receipt_integrity=verified/v16/sha256</div>
-              <div class="term-line term-success">evidence_verification=verified/validation-tool</div>
-              <div class="term-line term-success">host_verification=not_requested</div>
-              <div class="term-line term-success">Run tokens: 12,410 | Cost: ~$0.04 est</div>
-              <div class="term-line term-prompt">worker output (tool-verified):</div>
-            </div>
-          </div>
-        </div>
-
-        <!-- Tab 4: Failover -->
-        <div class="tab-pane" id="pane-failover">
-          <div class="interactive-panel">
-            <h3>Typed Failure Taxonomy &amp; Failover Attribution</h3>
-            <p>When worker dispatches fail, the coordinator classifies termination evidence and applies assignment-aware retry policy without corrupting session state. Target cooldowns and node offline state are separate mechanisms; there is no generic circuit-breaker state in the public fleet registry.</p>
-            <p>Representative policy rows are shown below; the complete 13-class matrix is documented in <a href="../worker-dispatch-mechanics.md">Worker Dispatch Mechanics</a>.</p>
-            <table style="width: 100%; border-collapse: collapse; margin-top: 1rem; font-size: 0.9rem;">
-              <thead>
-                <tr style="border-bottom: 1px solid var(--border-card); text-align: left;">
-                  <th style="padding: 0.5rem;">Failure Class</th>
-                  <th style="padding: 0.5rem;">Trigger Cause</th>
-                  <th style="padding: 0.5rem;">Failover Action</th>
-                  <th style="padding: 0.5rem;">Retry / Node State</th>
-                </tr>
-              </thead>
-              <tbody>
-                <tr style="border-bottom: 1px solid rgba(255,255,255,0.05);">
-                  <td style="padding: 0.5rem; color: var(--color-rose);">node-channel</td>
-                  <td style="padding: 0.5rem;">Heartbeat dead/stalled, spawn failure, or SSH exit 255</td>
-                  <td style="padding: 0.5rem;">Retry with `node` excluded</td>
-                  <td style="padding: 0.5rem; color: var(--color-amber);">Offline after 2 consecutive channel failures</td>
-                </tr>
-                <tr style="border-bottom: 1px solid rgba(255,255,255,0.05);">
-                  <td style="padding: 0.5rem; color: var(--color-rose);">target-rate-limit</td>
-                  <td style="padding: 0.5rem;">HTTP 429 or rate-limit diagnostic</td>
-                  <td style="padding: 0.5rem;">Retry with `target` excluded after 1s minimum</td>
-                  <td style="padding: 0.5rem; color: var(--color-amber);">Target cooldown (default 15s; configurable)</td>
-                </tr>
-                <tr style="border-bottom: 1px solid rgba(255,255,255,0.05);">
-                  <td style="padding: 0.5rem; color: var(--color-rose);">deterministic-task</td>
-                  <td style="padding: 0.5rem;">Typed terminal outcome code</td>
-                  <td style="padding: 0.5rem;">No retry; preserve the attempt receipt</td>
-                  <td style="padding: 0.5rem; color: var(--color-emerald);">No breaker action</td>
-                </tr>
-              </tbody>
-            </table>
-          </div>
-        </div>
-
+    <div class="page-layout-grid reference-layout">
+      <aside class="sidebar reference-sidebar" aria-label="On this page">
+        <nav class="toc-container">
+          <p class="toc-title">On this page</p>
+          <a class="sidebar-source" href="https://github.com/iowarp/clio-coder/blob/main/docs/guide/fleet-dispatch.md">Canonical Markdown<br>docs/guide/fleet-dispatch.md</a>
+          <ul class="toc-list"></ul>
+        </nav>
+      </aside>
+      <main class="reference-main" id="reference-content">
+        <article class="reference-prose glass-card">
+<blockquote>
+<p><strong>Visual blueprint:</strong> The source checkout includes the complete
+<a href="fleet_dispatch_blueprint.html">Fleet Dispatch visual reference</a>.</p>
+</blockquote>
+<p>Clio Coder dispatches bounded worker agents. With a fleet configured, those
+workers run on remote machines over SSH while the orchestrator keeps every
+guarantee it makes locally: one admission path, one autonomy matrix, one
+receipt chain. This page covers the architecture, node setup, the doctor
+preflight, placement, topologies, failure semantics, and the residency
+default. For the end-to-end demo see
+<a href="fleet_demo_blueprint.html">fleet-demo-runbook.md</a>.</p>
+<p>Source of truth: <code>src/domains/dispatch/**</code>, <code>src/domains/scheduling/cluster.ts</code>,
+<code>src/tools/dispatch.ts</code>, <code>src/tools/monitor.ts</code>, and the contract tests under
+<code>tests/contracts/</code>.</p>
+<h2>Architecture</h2>
+<p>The worker protocol is transport-neutral: the orchestrator writes one
+WorkerSpec JSON line to the worker&#39;s stdin and reads NDJSON events from its
+stdout. A remote worker is exactly the same protocol tunneled through
+<code>ssh -T</code>, so nothing about prompts, safety, receipts, or telemetry changes
+with distance. Transport is a ladder: <code>local</code> and <code>ssh</code> exist today; a future
+container or cloud tier implements the same <code>WorkerTransport</code> interface
+(<code>src/domains/dispatch/transport.ts</code>) without touching the protocol.</p>
+<p>Both local and SSH native workers must emit <code>worker_announce</code> as their first
+protocol event over the structured stderr control lane. The transport consumes it,
+checks the dispatched WorkerSpec version, and accepts ordinary events only after
+that check. The worker then attests protocol version (WORKER_PROTOCOL_VERSION = 1),
+spec version, process ID, process group ID (or null), host, settings fingerprint,
+worker-computed spec digest, runtime ID, target ID, endpoint identity hash, wire
+model ID, effective tool signature, and bounded node resource facts (labels, CPU count,
+total memory, free memory, GPU count, VRAM, and resident models) before any model
+call. Drift from the approved identity kills the whole process group. The announcement and
+attestation are strict protocol evidence, not proof against a malicious child
+that controls its own process; SSH also uses the attested remote process group
+for bounded abort escalation.</p>
+<p>Scout routing is advisory rather than forced: the session&#39;s Delegation
+passage steers explicit broad repository exploration to the read-only <code>scout</code> recipe,
+and middleware emits one advisory notice after nine or more manual
+read-only exploration calls without a successful Scout dispatch. The advisory
+costs no extra model round. Direct reads remain allowed; Clio does not
+automatically rewrite a broad request into a Scout run.</p>
+<p>Design decisions that shape everything else:</p>
+<ul>
+<li>Per-node inference targets, no central proxy. Target URLs resolve on the
+node the worker runs on, so <code>localhost</code> in a worker&#39;s target means that
+node&#39;s own inference server. The orchestrator-resolved API key rides the
+WorkerSpec.</li>
+<li>Shared filesystem. Remote nodes see the project at the same absolute path.
+The doctor preflight verifies this parity per node; hosts with a disjoint
+filesystem fail admission with a clear reason.</li>
+<li>Deterministic placement and measured routing. Exact pins remain exact.
+Unpinned placement prefers lower durable lease usage and declaration order;
+the cross-process lease state is the final capacity authority. Route quality
+can be activated only for named roles/postures after exact-tuple readiness,
+and hard constraints always eliminate before any score.</li>
+<li>Environment whitelist. The SSH command carries an explicit environment
+(<code>CLIO_CODER_WORKER_PGID=$$</code> and any configured <code>CLIO_CODER_WORKER_LABELS</code>);
+the orchestrator&#39;s <code>process.env</code> never crosses the wire. Node residency is
+projected into the target lifecycle carried by the WorkerSpec.
+<code>CLIO_CODER_WORKER_PGID</code> names the remote process group so an abort escalates
+against the whole group rather than one process.</li>
+</ul>
+<h2>Worker prompt and budget admission</h2>
+<p>Dispatch resolves the recipe, target, effective autonomy, and final canonical toolkit before compiling one stable Clio worker harness. The harness contains identity-lite, the shared operating contract, the exact native tool surface (or honest no-tools wording), safety for the enforced autonomy, and the recipe or bounded override persona. Project context, memory, bounded briefing, pipeline input, task text, and run posture remain dynamic messages and therefore do not churn stable hashes. Briefing is explicitly untrusted task data and does not transport conversation or session history.</p>
+<p>One run has a first-class singular shape: <code>task</code> is the worker assignment and
+<code>briefing</code> is separate bounded context/data. Briefing never replaces task,
+never gets copied into the receipt task, and remains a separately delimited
+dynamic prompt message. <code>tasks</code> is the batch form. A shared top-level briefing
+applies to string tasks and task objects without an override; an object-level
+briefing wins. Supplying both <code>task</code> and <code>tasks</code> fails instead of choosing one.
+After approval, execution consumes only the registry-owned resolved plan, so
+later mutation of raw arguments cannot change either field.</p>
+<p>Recipes declare a default with <code>budget: {toolCalls, readReserve, synthesis}</code>. They may also declare <code>maximum: {toolCalls, readReserve}</code> inside that object. A recipe without <code>maximum</code> is an exact pin, which preserves the fixed behavior of existing recipes. A ranged recipe admits the optional dispatch request <code>budget: {toolCalls, readReserve, retryRevision?}</code> only when the request is inside its maximum. <code>retryRevision</code> has the same two integer fields and preauthorizes the ceiling that a later automatic retry, bounded result-contract revision, or review revision may select. The loop guard raises a result-contract revision boundary only in this case. A phase without that ceiling cannot grow and retains the existing text-only repair behavior.</p>
+<p><code>toolCalls</code> is the admitted-call phase boundary. The final <code>readReserve</code> slots accept canonical <code>read</code> plus the agent&#39;s granted mutation tools, so a writer can still deliver inside its own reserve. Admission requires integers and <code>0 &lt;= readReserve &lt; toolCalls</code> for every declared phase. <code>synthesis: true</code> forces a text-only final round, while <code>false</code> stops after the admitted phase. <code>fleet.limits.toolCallsPerRun</code> remains the operator-controlled lifetime ceiling and always wins when lower. A default may be clamped by a lower operator cap so default callers retain their prior behavior; an explicit request outside the operator cap is denied.</p>
+<p>Admission computes one immutable envelope with the recipe policy, invocation request, effective worker budget, and every clamp or escalation reason. Native workers and Claude SDK enforce the effective budget. Claude Code, Antigravity, and ACP delegation reject invocation envelopes because their black-box loops cannot provide equivalent per-call mediation. Before launch, every admitted WorkerSpec v3 still contains one concrete effective budget and a settings fingerprint. The envelope provenance is sealed in the run ledger and receipt and appears in monitor, fleet status, and the live fleet card.</p>
+<h2>Node setup</h2>
+<p>Fleet nodes are declared under <code>fleet.nodes</code> in <code>settings.yaml</code>. The implicit
+<code>local</code> node always exists and is never declared. A run&#39;s node is the host its
+worker process ran on, never the host serving the model, so a run against a
+remote target from this machine still records <code>node: local</code>.</p>
+<pre><code class="language-yaml">fleet:
+  nodes:
+    - id: node-a
+      host: node-a.example.net
+      user: me                  # optional; defaults to the SSH config
+      port: 22                  # optional
+      identityFile: ~/.ssh/id_fleet   # optional
+      labels: [cpu]             # optional operator labels
+      maxWorkers: 2             # per-node cap; defaults to 2
+      residency: observe        # observe (default) or manage
+    - id: node-b
+      host: node-b.example.net
+      maxWorkers: 1
+</code></pre>
+<p><code>clioCoderEntry</code> may override the remote invocation (default <code>clio-coder worker</code>).
+Node ids must be unique and <code>local</code> is reserved.</p>
+<p>Worker profiles can pin work to a node: <code>fleet.profiles.&lt;name&gt;.node</code> routes
+every dispatch bound to that profile. Settings → Fleet (<code>/fleet</code>) edits the
+pin on the profile&#39;s <code>node</code> row, and the dispatch tool accepts an explicit
+<code>node</code> argument per task.</p>
+<h2>Doctor preflight</h2>
+<p>A remote node is dispatch-eligible only after one preflight pass proved, over
+the node&#39;s real SSH channel:</p>
+<ol>
+<li>reachability (SSH connects in batch mode),</li>
+<li>a version-matched <code>clio-coder</code> on the remote invocation path,</li>
+<li>path parity for the project root (the shared-filesystem assumption),</li>
+<li>a writable remote state directory,</li>
+<li>node-scoped target reachability, runtime/model compatibility, endpoint
+identity, and explicit resource facts where the target exposes them.</li>
+</ol>
+<p>Run it with <code>clio-coder doctor</code>. Plain doctor is diagnostic and read-only: it
+reports the live probe rows but does not create or refresh
+<code>fleet-preflight.json</code>, and therefore does not change dispatch eligibility.
+Placement still reads a pre-existing record under the state directory, keyed by
+node and project root; a changed host, changed project root, or local
+<code>clio-coder</code> upgrade invalidates that record and admission fails closed. The
+current CLI exposes no mutating doctor preflight that refreshes it. Failing
+nodes are doctor warnings rather than a failure of the local installation.</p>
+<h2>Placement and process-safe admission</h2>
+<p>Placement and admission are separate, deterministic authorities:</p>
+<ol>
+<li>An explicit request pin, profile pin, or approved route envelope restricts
+the eligible node set. Unknown, offline, stale-preflight, or incompatible
+pins fail closed; they never silently fall back.</li>
+<li>For unpinned eligible nodes, placement prefers lower durable lease usage
+read through the fleet registry; declaration order breaks ties.</li>
+<li>The capacity lease store decides under one cross-process state lock (<code>dispatch-admission.json</code>).
+A stale placement preference cannot over-admit a node.</li>
+<li>If a pinned or selected node is momentarily full, the bounded admission
+queue preserves priority/FIFO order until its finite deadline instead of
+silently selecting another node.</li>
+</ol>
+<p>The durable capacity state file (<code>dispatch-admission.json</code>) uses schema version 2 and owns global and per-node leases, heartbeats, reservation transfer, retry rebinding, and the TTL-bounded operator drain (<code>DEFAULT_CAPACITY_DRAIN_TTL_MS</code> = 3,600,000 ms). A lease acts as durable expiring authority (<code>DEFAULT_CAPACITY_LEASE_TTL_MS</code> = 30,000 ms) and is reclaimed only with owner-liveness evidence when a process birth token cannot prove process death. A plan reserves its peak wave, and a retry rebinds the same assignment member to its actual node and cost bound so that an assignment retry belongs to its existing plan slot and cannot queue behind or outspend itself. Full leasing schema and locking protocols are specified in <a href="capacity_scheduling_blueprint.html">capacity-and-scheduling.md</a>.</p>
+<p>Use <code>clio-coder fleet drain [--json]</code> before maintenance to close that shared
+admission authority. Existing workers continue, but new plans and every new
+execution start—including a retry or a previously reserved member—fail closed.
+The drain expires after one hour so an abandoned operator process cannot wedge
+future dispatch; repeating the command renews the deadline. <code>clio-coder fleet status [--json]</code> reports the active deadline, requesting PID, and request time.
+Use <code>clio-coder fleet resume [--json]</code> to reopen admission early. Detailed drain mechanics are documented in <a href="capacity_scheduling_blueprint.html">capacity-and-scheduling.md</a>.</p>
+<p>With no fleet configured and nothing requested, placement resolves to the
+implicit local path and optional fleet-node provenance may remain absent.
+Every new receipt uses strict integrity v20. Older receipt formats are not
+accepted as current evidence; lower versions are reported as retired and are
+never migrated.</p>
+<h2>Failure semantics</h2>
+<ul>
+<li>Channel failures (a stalled heartbeat, a spawn failure, SSH exit 255) count
+against the node; completing the protocol counts for it; operator cancels
+are neutral.</li>
+<li>Two consecutive channel failures classify the node dead. Every other
+in-flight run on that node is reaped through the stall path, finalizes as
+<code>stalled</code> (retryable), and its bounded retry re-enters placement on a
+surviving node.</li>
+<li>Every failover hop is recorded as a reroute (<code>fromNode</code>, <code>toNode</code>, reason)
+on the ledger row and the receipt, so the placement lineage of a run is
+reconstructable from evidence alone.</li>
+<li>An idle node is never auto-offlined by staleness; only consecutive channel
+failures change the process-local registry health to <code>offline</code>. Doctor
+preflight is a separate durable eligibility gate: a failed or stale record
+blocks placement without pretending it changed channel health.</li>
+<li>A result-contract repair round is a synthetic tool exchange, and its assistant
+half carries explicit zero usage. Request sizing reads usage from every
+assistant message that is not aborted or errored, and a repair message with no
+usage crashed the worker one round after its terminal message. Zero usage is
+skipped by the estimator, so the model&#39;s last real usage still anchors the
+estimate and the worker survives the repair round (#70).</li>
+</ul>
+<h2>Topologies</h2>
+<p>All topologies go through the dispatch tool, the same admission chain, and
+the autonomy matrix. Workers never exceed the orchestrator&#39;s authority; a
+request-level <code>autonomy</code> can only narrow the level (reviewers and judges run
+<code>read-only</code>).</p>
+<table>
+<thead>
+<tr>
+<th>Topology</th>
+<th>Invocation</th>
+<th>Semantics</th>
+</tr>
+</thead>
+<tbody><tr>
+<td>Singular</td>
+<td><code>task: &quot;...&quot;</code></td>
+<td>One assignment, with optional separate <code>briefing</code>.</td>
+</tr>
+<tr>
+<td>Parallel (default)</td>
+<td><code>tasks: [...]</code></td>
+<td>Fan out, wait for all, one summary.</td>
+</tr>
+<tr>
+<td>Sequential</td>
+<td><code>mode: &quot;sequential&quot;</code></td>
+<td>One at a time, stop reporting on timeout/abort.</td>
+</tr>
+<tr>
+<td>Pipeline</td>
+<td><code>mode: &quot;pipeline&quot;</code></td>
+<td>Each step receives the previous step&#39;s output as data.</td>
+</tr>
+<tr>
+<td>Detached</td>
+<td><code>detach: true</code></td>
+<td>Return logical assignment ids and a batch id immediately; collect later.</td>
+</tr>
+<tr>
+<td>Review gate</td>
+<td><code>review: {reviewer?, max_cycles?}</code></td>
+<td>Builder, read-only reviewer verdict, bounded revise loop.</td>
+</tr>
+<tr>
+<td>Compete</td>
+<td><code>mode: &quot;compete&quot;, candidates: 2..4</code></td>
+<td>N candidates in scratch worktrees, read-only judge, winner applied or preserved.</td>
+</tr>
+<tr>
+<td>Council</td>
+<td><code>mode: &quot;council&quot;, roster: &quot;design&quot;</code></td>
+<td>Two to five read-only members answer the same task, with optional vote or judge synthesis.</td>
+</tr>
+<tr>
+<td>Agent automation</td>
+<td><code>agent: &quot;auto&quot;</code></td>
+<td>Baselines candidate agent from task shape via shared classifier (<code>coder</code>, <code>tester</code>, <code>documenter</code>, <code>verifier</code>, <code>researcher</code>, <code>scout</code>); advisory unless activated.</td>
+</tr>
+</tbody></table>
+<h3>Single-writer token</h3>
+<p>A parallel batch may declare <code>writers: 1</code>. One is the only accepted value in
+this release, and omission retains ordinary parallel admission. The scheduler
+admits at most one write-scope step at a time. An agent step with a nonempty
+<code>writes</code> allowlist is a writer, as is a workspace-scope step that may mutate
+the checkout. Read-scope steps and agent steps with <code>writes: []</code> remain
+concurrent. Waiting writers follow the plan&#39;s declared step order and then the
+request order. Agent ledger claims remain advisory and do not enforce the
+token.</p>
+<h3>Declared step scope</h3>
+<p>A v4+ contract&#39;s per-step <code>writes:</code> declaration has two consumers. The
+write-boundary enforcer verifies the step window afterwards, which is where the
+boundary is enforced; pre-emptive confinement for declared commands would need a
+command sandbox that does not exist. The same declaration also compiles into the
+step&#39;s typed dispatch intent as <code>relevant_paths</code>, so the paths the contract
+already named select the project rules that apply to them and pin the worker&#39;s
+context instead of being reconstructed from path-like tokens in the rendered
+prompt.</p>
+<p>It is carried as declared scope rather than as intent <code>write_roots</code> on purpose.
+Intent write roots become the enforced boundary at the per-tool worker seam,
+which refuses outright on the subprocess and ACP runtimes a fleet may
+legitimately route a step to, so restating the contract&#39;s boundary there would
+mint a second grant in a second place and fail closed on contracts that run
+correctly today. A pre-v4 contract and every readonly step declare nothing and
+keep the legacy inference path. See
+<a href="dispatch_typed_intent_blueprint.html">dispatch-typed-intent.md</a> for the full producer
+table and the refusal reason codes.</p>
+<p>The first checkout writer acquires a process-owned lease under the Clio state
+directory. Its key is the canonical checkout path, and its record contains the
+owner pid, process birth token, and acquisition time. A live sibling process
+causes admission to fail with <code>checkout_writer_lease_held</code> and the holder pid.
+A dead owner or reused pid is reclaimed. The lease remains held until the last
+writer settles, including writers collected from detached batches. Read-only
+runs never acquire it.</p>
+<h3>Worktree per task</h3>
+<p>A singular writer or an item in <code>tasks</code> may declare <code>worktree: true</code> and
+<code>apply: &quot;merge&quot; | &quot;preserve&quot;</code>. The default is <code>merge</code>. Clio creates
+<code>.clio-coder/worktrees/&lt;runId&gt;/</code> on <code>clio/task/&lt;runId&gt;</code>, maps the worker cwd and
+protected artifacts into that checkout, and runs declared host verification
+there. The approved execution snapshot renders both fields and freezes the
+parent checkout as the merge destination.</p>
+<p>After a successful worker and successful host verification, merge application
+commits the task branch, rechecks protected paths, and uses the same guarded
+merge path as compete. A conflict fails closed with
+<code>worktree_merge_conflict</code> and preserves the branch and worktree. Preserve
+application never merges and reports the branch. A detached task applies when its run finalizes, so <code>monitor(mode=&quot;collect&quot;)</code> returns the sealed application receipt.
+Admission refuses a non-git checkout, a read-only agent, compete mode, or an
+explicit cwd outside the parent checkout with a named reason.</p>
+<h3>Typed intent and host-run verification</h3>
+<p>The singular request and every object in <code>tasks</code> accept an optional <code>intent</code>:</p>
+<pre><code class="language-json">{
+  &quot;read_roots&quot;: [&quot;src/domains/dispatch&quot;],
+  &quot;write_roots&quot;: [&quot;src/tools&quot;],
+  &quot;relevant_paths&quot;: [&quot;docs/guide/fleet-dispatch.md&quot;],
+  &quot;expected_outputs&quot;: [&quot;dist/cli.js&quot;],
+  &quot;verification&quot;: [{ &quot;check&quot;: &quot;test&quot;, &quot;timeout_ms&quot;: 600000 }]
+}
+</code></pre>
+<p>A top-level intent is inherited by batch items unless an item supplies its own
+intent. <code>gate: &quot;test&quot;</code> is exact shorthand for
+<code>intent.verification: [{check: &quot;test&quot;}]</code>; supplying both spellings is refused.
+Every path is normalized into a sorted, duplicate-free repository-relative
+POSIX path list before approval. Absolute paths, empty paths, root escapes,
+malformed entries, and values beyond the documented caps fail admission.
+Normalized <code>intent.writeRoots</code> feeds the existing worker write-boundary
+enforcement when no legacy <code>JobSpec.writeRoots</code> exists. Conflicting declarations
+are refused as <code>intent_write_roots_contradiction</code>.</p>
+<p>Verification values are declared check ids, never shell commands. Admission
+resolves each id from a package script or <code>.clio-coder/verifiers.yaml</code>, clamps
+the requested timeout to the declaration, and freezes the exact argv, cwd,
+timeout, and normalized intent into the execution snapshot and plan hash. A
+later catalog edit cannot change the approved command. Undeclared ids fail
+before approval with <code>verification_check_undeclared</code> and declaration guidance.</p>
+<p>After a successful worker attempt, the orchestrator runs the frozen checks with
+no shell, a fixed cwd, and the code-step environment allowlist. Logs are written
+under the run artifact directory. Successful evidence is memoized by the
+workspace fingerprint, resolved argv, cwd, and allowed environment values. A
+memo hit names the run that produced the original evidence. A changed tree is a
+miss. An unsuccessful worker records <code>hostVerification.status=&quot;skipped&quot;</code> with
+<code>reason=&quot;worker_not_successful&quot;</code>; a failed host check records <code>rejected</code> with
+its exit code, bounded output tail, and artifact path. Worker-reported command
+success never populates this status.</p>
+<p>Host checks are supported for singular, parallel, sequential, pipeline, and
+detached native runs. Review and compete accept intent paths and outputs but
+refuse verification entries with <code>verification_unsupported_for_mode</code>.
+Claude Code subprocess routes refuse them with
+<code>verification_unsupported_runtime</code>.</p>
+<h3>Agent ledger</h3>
+<p>Every topology that runs more than one worker at once opens an agent ledger, the
+bounded coordination board those workers share while they run: the parallel
+fan-out in <code>runBatch</code>, a detached batch of two or more in <code>runDetached</code>, and
+<code>runCompete</code>, all in <code>src/tools/dispatch-runner.ts</code>. A worker reaches it through the <code>ledger</code> tool
+and posts one of three typed entries. A <code>claim</code> stakes path prefixes so peers
+stop colliding, a <code>finding</code> reports one observation with the path and line that
+ground it, and a <code>review</code> judges another entry by its id. Nothing untyped is
+postable, and a run gets 20 posts.</p>
+<p>The orchestrator is the sole writer. A post travels up the control lane as a
+body and nothing else, and every attribution field is stamped from the
+orchestrator&#39;s own admission record, so no worker-supplied value can reach a
+field a peer or a receipt reads as identity. Admitted entries are pushed back
+down as <code>ledger_delta</code> stdin frames into a per-worker mirror, so a read answers
+locally with a watermark instead of blocking on a round trip. A worker that
+spawns late is handed the whole board twice over: the hub replays it on
+subscription, and it is rendered into that worker&#39;s dynamic prompt messages at
+spawn as untrusted peer data.</p>
+<p>The reducers never merge. Citations are compared in workspace-relative form, so
+<code>./src/a.ts</code> and the absolute path of that file are one path. A path cited by
+two or more runs is corroborated, a path cited by one is uncorroborated and still rendered standing on its own, a
+finding with no citation is an ungrounded lead, and an entry a review failed is
+marked disputed where it stands. Overlapping claims from different runs carry
+the ids they overlap, which is advisory; the per-wave write boundary is what
+actually stops two writers.</p>
+<p>When the board closes depends on where the batch settles. An attached parallel
+fan-out closes it when the tool call returns, and compete closes it once every
+candidate and the judge have settled. A detached batch, and a parallel batch the
+operator moved to the background, carry the ledger id on the durable batch
+record and close it on the first <code>monitor(mode=&quot;collect&quot;)</code>, because their peers
+stay concurrent past the call that started them. After the close, appends are
+refused and counted.</p>
+<p>The main model reads the board too, once its workers have all settled. The
+parallel dispatch result, the compete result, and <code>monitor(mode=&quot;collect&quot;)</code> for
+a detached batch each carry one <code>agent ledger (&lt;n&gt; entries, sequence &lt;w&gt;)</code>
+section after the per-run lines, holding the same bounded render a worker sees,
+with the same attribution and the same corroboration and dispute marks and
+still no count, score, or consensus line. The same text is on the result&#39;s
+<code>details.agentLedgerBoard</code>. A board nobody posted to is omitted, so a
+single-run dispatch and an unused board read exactly as they did before.</p>
+<p>What survives into a receipt is that run&#39;s <code>ledgerContribution</code>, which is the
+ledger id, its posted and refused counts, and a sha256 over its own attributed entries, sealed orchestrator-side
+and covered by receipt integrity.</p>
+<h3>Detached fan-out, backgrounding, and collect</h3>
+<p><code>detach: true</code> validates, admits, and spawns every task, then returns. The
+reported id is the logical assignment id (also the first attempt&#39;s run id).
+For an in-flight attached dispatch, pressing <code>Alt+S</code> or <code>Ctrl+Alt+B</code> converts
+the running attached dispatch into a detached batch. Backgrounding checks
+against a refusal table: it refuses Scout dependency plans driving stages from
+the turn, compete judge gates, review cycle gates, multi-step pipelines,
+dispatches with explicit <code>timeout_ms</code>, or missing detached records.</p>
+<p>Attempts keep streaming into the board and immutable run ledger. The batch and
+assignment index are durable (<code>batches.json</code> and <code>assignments.json</code> under the
+state dir), so collection survives session exit. Gather results with the
+monitor tool: <code>mode=&quot;wait&quot;</code> observes one assignment for a bounded time (it
+never cancels it; <code>steer</code> with <code>action=&quot;cancel&quot;</code> cancels its current attempt
+and suppresses later attempts); <code>mode=&quot;collect&quot;</code> is the barrier over a batch id
+or assignment-id list. It returns a pending snapshot while assignments are in
+flight, then each assignment&#39;s terminal attempt plus <code>attemptRunIds</code> history.
+Collecting marks the batch so the turn-end nudge stops firing. <code>wait</code> observes
+without collecting; <code>collect</code> is the authoritative terminal batch operation.
+Collect every detached batch before final synthesis.</p>
+<h3>Review gate</h3>
+<p>The builder runs the task. A reviewer then inspects the workspace against the
+task. The reviewer defaults to the builtin <code>verifier</code> recipe
+(<code>DEFAULT_GATE_DECIDER_AGENT_ID</code>) and never falls back to the builder&#39;s own
+agent; it is pinned to read-only autonomy and is routable to a different node,
+model, or target.</p>
+<p>The reviewer answers a typed <code>verifier-report</code> contract rather than trailing
+prose:</p>
+<pre><code class="language-json">{&quot;verdict&quot;:&quot;pass&quot;,&quot;checks&quot;:[{&quot;name&quot;:&quot;npm run typecheck&quot;,&quot;passed&quot;:true,&quot;evidence&quot;:&quot;exit 0&quot;}]}
+</code></pre>
+<p><code>revise</code> is not a verdict a model authors. The reviewer answers <code>pass</code> or
+<code>fail</code>, and <code>decideReviewGate</code> in
+<code>src/domains/dispatch/gate-decisions.ts</code> owns the continuation policy: a
+non-passing verdict below the terminal cycle becomes <code>revise</code> and re-runs the
+builder with only the failed checks threaded as input data, bounded by
+<code>max_cycles</code> (default 2, max 4). On the terminal cycle the verdict settles as
+reported. A reviewer that produces no structured result settles as <code>exhausted</code>
+and surfaces as an explicit operator decision, never a silent failure.</p>
+<h3>Compete</h3>
+<p>N candidate builders (2 to 4) run the same task, each in its own scratch git
+worktree under <code>.clio-coder/worktrees/&lt;group&gt;/</code> on its own
+<code>clio/compete/&lt;group&gt;/&lt;n&gt;</code> branch. Each candidate&#39;s work is committed on its
+branch; a read-only judge ranks the branches and names a winner
+(<code>WINNER: &lt;n&gt;</code>). At full-auto the winning branch is merged. At supervised
+levels the winner&#39;s branch and worktree are preserved and the operator
+confirms through <code>apply_winner</code>, whose approval prompt is the winner
+confirmation. Losers are cleaned on every path, including abort.</p>
+<p>The compete group is a durable transaction owner. Its manifest records the
+coordinator identity and every admitted worker process before the dispatch
+handle is returned. At orchestrator startup, Clio uses process birth tokens
+to distinguish the leased process from PID reuse, terminates an abandoned
+worker or ACP process group, and then removes the group&#39;s registered
+worktrees and branches. If a judge output is waiting in the decision journal,
+the workers are quiesced but the candidates remain until that output is bound
+to an integrity-verified judge receipt; a recovered winner is preserved for
+operator inspection rather than silently auto-applied after restart.</p>
+<h3>Council</h3>
+<p>Council is the read-only sibling of compete. Two to five members run the same
+singular task concurrently on local HTTP or native targets. A request selects
+exactly one configured <code>fleet.rosters</code> entry or supplies inline <code>members</code>.
+Admission pins every member to <code>read-only</code> autonomy and to the <code>read</code>, <code>grep</code>,
+<code>find</code>, <code>ls</code>, <code>code_nav</code>, and <code>context</code> tool surface. A route that resolves to
+an SSH fleet node is refused before approval. Council never creates a worktree
+and never mutates the workspace.</p>
+<p>Council supports one to three rounds. The first round gives every member the
+same task and briefing. A later round gives each member the other members&#39;
+prior answers as labelled, untrusted briefing data. The member never receives
+its own prior answer. Each briefing is limited to 8 KiB and carries an explicit
+truncation marker when necessary. A failed peer contributes a labelled failure
+marker and no answer text.</p>
+<p><code>synthesis: &quot;none&quot;</code> returns the final member answers directly. <code>vote</code> performs
+a deterministic majority tally over structured <code>verdict</code> fields without a
+model call. A vote council asks each member for that verdict: the member&#39;s task
+carries the ballot directive and the member&#39;s run seals a <code>council-ballot</code>
+postcondition, <code>{&quot;verdict&quot;:&quot;...&quot;,&quot;text&quot;:&quot;...&quot;}</code>, in place of the seated
+recipe&#39;s own result contract. The seated agent, its persona, and its read-only
+tool profile are unchanged, so any recipe can be voted with. The verdict is a
+single line of at most 64 bytes and is lower-cased before the tally, so members
+who reach the same conclusion land on the same key; the reasoning belongs in
+<code>text</code>, which is what the council report shows as the member&#39;s answer. A member
+that seals no conforming ballot fails its own run and is reported as a failed
+member rather than dropping silently out of the count. A vote with no majority
+reports <code>no_majority</code>, and a vote whose final members all failed reports
+<code>no_verdict_field</code>. <code>judge</code> runs one additional read-only judge against all final
+answers. Every member run seals a receipt. A judge receipt points backward to
+every final member receipt through gate provenance. The approval artifact names
+each member&#39;s label, target, model, thinking level, node, color, round count,
+and synthesis mode, so the plan hash binds the whole council contract.</p>
+<h3>ExecutionPlan and plan approval</h3>
+<p>Every orchestration shape compiles to one strict ExecutionPlan v2 DAG with
+stable task ids, explicit dependencies, requested and approved authority,
+capacity-bounded waves, stop/continue semantics, and authenticated structured
+handoffs. The scheduler performs whole-plan preflight and reservation before
+the first worker spawns. A missing authority grant is an admission failure.</p>
+<p>A plan-scale dispatch call (more than one task, review, compete, effective
+remote placement, or <code>apply_winner</code>) maps to an approval ask at supervised
+autonomy levels. Before asking, Clio resolves the effective agent, target,
+model, node, bounded review cycles/candidates/judge, and scheduling cost
+ceiling, then reserves the plan&#39;s capacity and budget as a unit. The parked
+call shows that sanitized artifact, including the approved fallback candidates
+in preference order, and one approval covers the whole plan. Declining the plan
+rolls the whole reservation back.</p>
+<p>A reservation holds three scarce things and nothing else: a global concurrency
+slot, a per-node slot, and a budget upper bound. It never pins route identity.
+Capacity and budget are checked for the plan as a unit at approval time, per
+wave, so a three-step sequential plan holds one slot rather than three and N
+parallel tasks whose individual estimates each fit but whose sum breaches the
+ceiling are denied together with the aggregate figure. A member is consumed
+once by its assignment and released once when that assignment settles; a retry
+that lands on a different node or a differently priced route rebinds the member
+atomically and fails closed if the new node has no free slot or the new
+estimate breaches the ceiling. Reservations owned by a dead process are
+reclaimed at startup, with a TTL as the backstop, and live sibling processes&#39;
+reservations are preserved. Execution consumes the
+same pins, including each expanded builder/reviewer/candidate/judge role and
+the SSH node&#39;s transport kind and host. A placement, host, capability, or
+cost-ceiling change fails before launch rather than silently choosing an
+unapproved alternative. Full-auto skips the stop and seals the
+same plan hash into every run&#39;s receipt instead
+(<code>plan.approval: &quot;full-auto&quot;</code>). Read-only autonomy denies dispatch outright,
+as it denies every non-read action.</p>
+<p>The registry boundary is resolved dispatch plan v3. <code>deadlineMs</code> is required:
+a fleet plan carries a positive finite number and a non-fleet plan carries
+explicit <code>null</code>. Older versions, missing fields, and compatibility shapes are
+rejected.</p>
+<h3>Shipped fleets and contract versions</h3>
+<p>Clio ships three builtin fleet contracts under <code>src/domains/agents/fleets/</code>: <code>build-test</code>, <code>build-review</code>, and <code>sdlc</code>. Projects can declare custom fleet contracts or shadow builtin fleets by placing Markdown files under <code>.clio-coder/fleets/&lt;name&gt;.md</code>. A file named <code>.clio-coder/fleets/&lt;name&gt;.md</code> shadows a builtin fleet of the same name.</p>
+<p>Fleet contracts support schema versions 1 through 5:</p>
+<ul>
+<li>Version 1: Supports agent steps only.</li>
+<li>Version 2: Introduces deterministic code steps.</li>
+<li>Version 3: Adds bounded check/repair loops and commit steps with <code>commitFrom</code> message sources.</li>
+<li>Version 4 (<code>FLEET_WRITE_BOUNDARY_VERSION = 4</code>): Introduces per-step declared write boundaries (<code>writes</code>) and orchestrator post-step enforcement.</li>
+<li>Version 5 (<code>FLEET_DYNAMIC_STEP_VERSION = 5</code>): Adds plan steps, executable gate steps, per-step target or worker-profile defaults, and the optional single-writer declaration.</li>
+</ul>
+<h4>Contract v5: plan, gate, and per-step target</h4>
+<p>A version 5 agent step, including an agent loop check or repair, may declare either <code>target: &lt;targetId&gt;</code> or <code>profile: &lt;fleet.profiles key&gt;</code>. It may never declare both. Fleet preflight resolves these values through the same worker routing used by <code>/run --target</code> and <code>/run --agent-profile</code>. An unknown value refuses before approval and names the target or profile. Versions 1 through 4 continue to refuse both fields.</p>
+<p>A <code>kind: gate</code> step asks its validator agent to write exactly one repository-relative <code>path</code>. The contract derives the step&#39;s write boundary from that path, so a separate <code>writes</code> property is refused. Its <code>run</code> property names a command whose argv contains one whole-token <code>{{path}}</code> placeholder. After the agent writes the executable acceptance check, the coordinator runs it without a shell against the otherwise untouched tree. A red result admits the gate. A green result refuses the run as <code>gate_not_discriminating</code>. The fleet ledger records the gate path hash. A loop may use <code>check: {kind: gate, gate: &lt;stepId&gt;}</code>. Only the bounded output lines beginning with <code>FAIL</code> cross that failed check edge into the repair agent.</p>
+<p>A <code>kind: plan</code> step defaults to the builtin <code>architect</code>. It declares <code>roster</code>, <code>maxTasks</code> from 1 through 16, an optional <code>proposals: true</code>, its own scope and write boundary, and an optional target or profile default. The architect returns a <code>delegation-plan</code> object whose tasks contain <code>id</code>, <code>agent</code>, <code>description</code>, <code>depends_on</code>, <code>writes</code>, and an optional <code>mode</code> of <code>sequential</code> or <code>parallel</code>. The coordinator admits only roster agents, unique and acyclic task ids, resolvable dependencies, the declared task count, and task writes contained by the plan step boundary. Successful tasks carry lineage to the plan step and inherit its target or profile. A contract with <code>writers: 1</code> serializes write tasks through the existing single-writer token.</p>
+<p>When <code>proposals: true</code>, every roster member first runs with read-only autonomy against the same task. Their answers reach the architect as labelled, bounded briefing data. Proposal agents do not choose targets for generated work. The plan step&#39;s contract default remains authoritative for every admitted task.</p>
+<h3>Fleet authoring</h3>
+<p>The fleet CLI provides five authoring and inspection operations:</p>
+<ul>
+<li><code>clio-coder fleet new &lt;name&gt; --from &lt;builtin&gt;</code> copies one of <code>build-review</code>, <code>build-test</code>, or <code>sdlc</code> into <code>.clio-coder/fleets/&lt;name&gt;.md</code>. The command requires a safe file stem and refuses to replace an existing contract.</li>
+<li><code>clio-coder fleet validate &lt;name&gt; [--json]</code> parses the contract, validates its graph and command bindings, resolves every agent, and compiles the execution plan. It creates no state directory, ledger row, reservation, worker, or receipt.</li>
+<li><code>clio-coder fleet graph &lt;name&gt; [--json]</code> renders the compiled waves with each step kind, agent or command, scope, and write boundary. Bounded loops also show their check and repair nodes beneath the loop identifier.</li>
+<li><code>clio-coder fleet commands init</code> discovers declared package scripts, just recipes, Makefile targets, and supported <code>pyproject.toml</code> script and tool entries. It writes a fully commented <code>.clio-coder/fleets/commands.yaml</code> draft. Uncommenting an entry confirms its exact argument vector, and an existing registry is never replaced.</li>
+<li><code>clio-coder fleet run &lt;name&gt; --resume &lt;runId&gt;</code> starts a new fleet run after replaying the successful, integrity-valid prefix recorded for the named prior fleet run.</li>
+</ul>
+<p>Run resumption is separate from <code>clio-coder fleet resume</code>, which continues to reopen dispatch admission after an operator drain. A resumable fleet run records its contract name, rendered plan hash, ordered step identifiers, variables, and receipt references in the durable fleet ledger. Runs started from the TUI through <code>/fleet run</code> use the same durable record and can be resumed by the authoring CLI. The new run records the prior fleet run as its resume parent. Replayed steps are reported as <code>replayed</code>, retain their original receipt or code-report references, and do not create new receipts.</p>
+<p>The current contract must compile to the same plan hash. A mismatch refuses before execution and prints the changed positions in the ordered step list. Variables must exactly match the original run. A different value, an added value, or an omitted value is refused even when the resulting task text would otherwise be similar.</p>
+<h3>Per-step write boundaries (Contract v4)</h3>
+<p>Contract v4 requires every step to declare its write boundary using the <code>writes</code> allowlist property. Steps with scope <code>readonly</code> declare an empty allowlist (<code>[]</code>).</p>
+<p>The grammar for declared write boundary entries requires repository-relative POSIX paths:</p>
+<ul>
+<li>Trailing <code>/</code> indicates a directory subtree allowlist.</li>
+<li>Exact relative paths without a trailing <code>/</code> permit changes to that single file.</li>
+<li>Declarations must not contain glob characters (<code>*</code>, <code>?</code>, <code>[</code>, <code>]</code>, <code>{</code>, <code>}</code>), <code>..</code> or <code>.</code> segments, backslashes, or absolute paths.</li>
+<li>Each step declaration is capped at a maximum of 32 entries (<code>WRITE_BOUNDARY_MAX_ENTRIES = 32</code>).</li>
+</ul>
+<p>Write boundary enforcement is detect-and-rollback, never OS or filesystem sandboxing. A step runs with whatever filesystem permissions its underlying execution environment possesses. Upon step completion, the orchestrator inspects the working tree to verify compliance:</p>
+<ol>
+<li>Snapshot baseline: Before a step executes, the orchestrator captures a snapshot (<code>captureWorkspaceSnapshot</code>) recording the baseline git HEAD commit and existing dirty path content tokens.</li>
+<li>Workspace diffing: After step completion, the orchestrator runs git status inspection (<code>diffWorkspace</code>) to identify changed paths relative to the snapshot baseline commit.</li>
+<li>Authorship attribution: A changed path outside the allowlist is blamed on the window only when it intersects what the window&#39;s own runs recorded writing. That record is the run&#39;s tool-call stream, folded by the same recorder that grounds a sealed mutation report and read back through <code>DispatchContract.observedRunWriteAttribution</code>. A change that no run in the window recorded is an unattributed concurrent change: it is listed under <code>unattributed</code> in the verdict and reported to the operator, and it is never rolled back. This is what keeps a file an operator edited while a fleet ran from being overwritten with its committed version.</li>
+<li>Open records: A run&#39;s recorded write set is read as a closed list only when the run could not have written outside it. A window whose steps do not all offer a closed record falls back to blaming every change outside the allowlist, which is the behavior that predates attribution. Three things open a record: a <code>kind: code</code> step, whose registered command publishes no tool events; a run whose tool telemetry coverage is not <code>complete</code>, such as one on a subprocess runtime; and a run that made a successful call to a tool able to mutate a path its own arguments do not name. That last set is derived from the tool surface rather than authored, as every registered tool outside the <code>read</code> and <code>write</code> action classes, which today is <code>bash</code>, <code>verify</code>, <code>dispatch</code>, and <code>steer</code>, plus any dynamic or MCP tool whose schema this process cannot read. The <code>git</code> tool is a closed status, diff, and log surface and stays enumerable. When a successful opaque call opens the record, the live Alt+W card immediately names the tool and says that its arguments cannot enumerate every path it may write. The durable verdict records <code>attributionComplete: false</code> and an <code>attributionDowngrades</code> entry with the reason, tool name, tool call id, run id, and step id. The after-the-fact write-boundary message repeats that cause before explaining why the whole outside diff was blamed on the window.</li>
+<li>Rollback execution: Attributed unauthorized changes are automatically rolled back (<code>rollbackPath</code>).</li>
+<li>Content source: Rollback restores content strictly from what git already has in the pinned baseline commit (<code>snapshot.head</code>). If a path was already dirty when the step snapshot was captured, its prior content is not stored in git, so in-place restoration cannot be guaranteed. The working tree is left as the step made it, and the status settles as <code>rollback-incomplete</code>.</li>
+<li>Violation handling: Any attributed unauthorized change fails the step with the typed reason <code>writes_boundary_violation</code>.</li>
+<li>Window attribution: Enforcement evaluates scheduling windows (<code>wave-&lt;n&gt;</code> or <code>revalidate-&lt;stepId&gt;-&lt;n&gt;</code>). A wave window cannot combine steps with overlapping declared boundaries or multiple concurrent step writers, ensuring single-step attribution.</li>
+<li>Ignored paths and state subtraction: Enforcement evaluates paths reported by git status, which never lists a git-ignored path. A declared <code>writes</code> entry the repository ignores is therefore refused before anything runs, by <code>fleet validate</code>, by <code>fleet run</code> preflight, and by the <code>/fleet run</code> preview, with a diagnostic naming the entry and the ignoring rule (for example <code>&#39;work/&#39; is ignored by .gitignore:1:work/</code>). Silently certifying such a window as clean is not an option, because nothing about it was observed. The Clio state directory (<code>.clio-coder/</code> or <code>clioStateDir()</code>) is subtracted from status checks so orchestrator receipts, code step log artifacts, and boundary verdicts do not trigger false violations.</li>
+<li>Durable records: Verdicts are serialized as JSON records at <code>write-boundaries/&lt;rootId&gt;/&lt;window&gt;.json</code> under the Clio state directory, carrying the baseline HEAD commit, checked paths, violations, unattributed concurrent changes, the attribution completeness flag and downgrade causes, rollback actions, status, and SHA-256 digest.</li>
+</ol>
+<h3>Bounded check/repair loops</h3>
+<p>Contract v3 and v4 support declared check/repair loops (<code>kind: loop</code>). A loop declares <code>id</code>, <code>maxAttempts</code> (an integer between 1 and <code>FLEET_LOOP_MAX_ATTEMPTS = 5</code>), <code>check</code> (a code command or agent reviewer), and <code>repair</code> (an agent coder).</p>
+<p>At plan compilation, the orchestrator unrolls each loop statically into a deterministic hashed DAG containing <code>maxAttempts</code> verification check steps (<code>&lt;loopId&gt;.check.&lt;n&gt;</code>) and <code>maxAttempts - 1</code> repair steps (<code>&lt;loopId&gt;.repair.&lt;n&gt;</code>).</p>
+<ul>
+<li>Receipt per attempt: Every attempt in an unrolled loop executes as an independent plan node and produces its own receipt.</li>
+<li>Recovery role: Repair attempts following the first check are assigned the <code>recovery</code> execution role.</li>
+<li>Spent bounds: Reaching <code>maxAttempts</code> without a passing check settles the loop with the terminal reason <code>loop_bound_exhausted</code>.</li>
+<li>Four terminal reasons: A loop concludes with one of four reasons: <code>resolved</code> (verification passed), <code>loop_bound_exhausted</code> (attempt ceiling spent), <code>loop_step_failed</code> (underlying step errored or was denied), or <code>loop_not_reached</code> (prior plan dependencies failed).</li>
+<li>Node counting: Unneeded nodes (verifications or repairs remaining after a loop resolves) are counted separately from skipped nodes.</li>
+<li>Verification staleness: The scheduler enforces verification staleness by re-running a check step if a subsequent workspace-editing step executes after it.</li>
+</ul>
+<h3>Deterministic code steps</h3>
+<p>Deterministic code steps (<code>kind: code</code>) execute known commands directly as subprocesses rather than calling an agent model.</p>
+<ul>
+<li>Registry binding: The <code>command</code> property must reference a command ID declared in <code>.clio-coder/fleets/commands.yaml</code>. Invocation strings are never generated from model output.</li>
+<li>Execution environment: Code steps run unattended with arguments bound from the command registry, fixed working directory, closed environment allowlist (<code>FLEET_COMMAND_BASE_ENV</code> plus declared command env), bounded timeout (<code>timeoutMs</code>), byte-capped output capture (<code>CODE_STEP_CAPTURE_MAX_BYTES</code> = 1 MB log artifact, <code>CODE_STEP_EXCERPT_MAX_BYTES</code> = 8 KB excerpt), no stdin pipe, no permission prompt, and no shell interpreter.</li>
+<li>Missing registry diagnostic: If a contract declares code steps but <code>.clio-coder/fleets/commands.yaml</code> is missing in the repository, <code>clio-coder fleet list</code> reports the fleet status as <code>setup</code> and provides the remedy: <code>needs .clio-coder/fleets/commands.yaml declaring &lt;id&gt;; declare each id there under commands: with an argv list; clio-coder docs fleet_dispatch has the schema</code>.</li>
+<li>Commit message sources: A code step with <code>commitFrom</code> populates its <code>commitMessage</code> placeholder from the output of preceding agent steps.</li>
+<li>Route quality: Code steps do not consume model tokens or cost estimates; their quality reports <code>unmeasured</code> rather than zero.</li>
+</ul>
+<h4>Command Registry Schema (<code>.clio-coder/fleets/commands.yaml</code>)</h4>
+<p>The repository command registry binds command IDs to exact argument vectors:</p>
+<pre><code class="language-yaml">version: 1
+commands:
+  test:
+    argv: [&quot;npm&quot;, &quot;test&quot;]
+    timeoutMs: 600000
+    description: &quot;Run repository test suite&quot;
+  lint:
+    argv: [&quot;npm&quot;, &quot;run&quot;, &quot;lint&quot;]
+    timeoutMs: 300000
+  build:
+    argv: [&quot;npm&quot;, &quot;run&quot;, &quot;build&quot;]
+    timeoutMs: 600000
+  commit:
+    argv: [&quot;git&quot;, &quot;commit&quot;, &quot;-m&quot;, &quot;{{commitMessage}}&quot;]
+    timeoutMs: 60000
+  acceptance:
+    argv: [&quot;node&quot;, &quot;{{path}}&quot;]
+    timeoutMs: 60000
+</code></pre>
+<p>Each command entry supports:</p>
+<ul>
+<li><code>argv</code> (required): Array of command arguments starting with the binary name (no shell strings).</li>
+<li><code>cwd</code> (optional): Repository-relative working directory (defaults to repository root).</li>
+<li><code>timeoutMs</code> (optional): Per-step execution timeout in milliseconds (defaults to 600,000 ms; bounds: 1,000 to 3,600,000 ms).</li>
+<li><code>env</code> (optional): Array of extra environment variable names to pass through on top of <code>FLEET_COMMAND_BASE_ENV</code> (<code>PATH</code>, <code>HOME</code>, <code>LANG</code>, <code>LC_ALL</code>, <code>TZ</code>, <code>TMPDIR</code>).</li>
+<li><code>description</code> (optional): Human-readable description.</li>
+</ul>
+<p>The whole-token <code>{{commitMessage}}</code> substitution is available to commit steps. The whole-token <code>{{path}}</code> substitution is available to version 5 gate commands. Each substitution becomes exactly one argv element and never passes through a shell.</p>
+<h2>Measured route selection and agent automation</h2>
+<p>The joint resolver treats agent, target, model, runtime, and node as one
+bounded tuple. Manual pins, the approved plan envelope, authority, audience,
+required tools and skills, result contract, response-schema support, locality,
+authentication, network policy, endpoint reachability, context, resource fit,
+capacity, budget, deadline, and cooldown are hard filters. Only survivors are
+estimated and Pareto-ranked by conservative quality, reliability, completed
+cost and latency, queue wait, and cache affinity. The complete bounded
+candidate/rejection set is sealed; at most three fallbacks are projected.</p>
+<p>Shadow is the default and never changes the explicit route. Active route
+selection requires both the execution role and posture to be named:</p>
+<pre><code class="language-yaml">routing:
+  activeRoles: [researcher, verifier, reviewer, judge]
+  activePostures: [quality, balanced]
+  agentAutomation:
+    activeAgentRoles: []
+</code></pre>
+<p>For every exact tuple, <code>evaluateRouteReadiness</code> requires consistent hard-
+constraint evaluation, no integrity failures, at least six role-specific
+quality labels, conservative quality and reliability floors, known cost,
+fresh node/endpoint/resource/capacity/settings facts, and decision p95 below
+10 ms. If no tuple is ready, active mode refuses the assignment. It never
+falls back to the fixed route, and manual or <code>failover: none</code> intent never
+drifts.</p>
+<p><code>agent: &quot;auto&quot;</code> first filters recipe audience, authority, tools, skills,
+result contract, locality, and governance. Bounded task features affect cold
+priors only; one truthful role-quality label retires the task prior. Agent
+automation has its own readiness report per agent/spec/role and stays shadow
+unless the operator names an exact agent/role pair. A read-only Scout can
+settle reconnaissance directly or return at most four typed subtasks. The
+coordinator validates ids, dependencies, expected result contracts, and
+requested authority and rejects embedded agents, routes, deadlines, costs, or
+other control fields. Escalation to workspace editing requires authenticated
+plan approval or existing full-auto authority.</p>
+<h2>Assignments, attempts, and failover</h2>
+<p>A dispatch is a logical assignment containing one or more immutable run
+attempts. The assignment id and terminal run ids are distinct identities;
+there is no <code>runIds</code> compatibility alias. Public <code>finalPromise</code> handles resolve only when the assignment succeeds,
+is canceled, or exhausts its retry policy; the returned receipt is the
+terminal attempt&#39;s unchanged receipt. Earlier attempts stay independently
+addressable and integrity-verifiable.</p>
+<p>The assignment owns the event stream as well as the terminal receipt. The
+stream returned by <code>dispatch()</code> yields attempt 1&#39;s frames, then a synthetic
+<code>attempt_start</code> frame for each retry, then that attempt&#39;s frames, and ends when
+the assignment settles. A consumer therefore observes the same run the receipt
+describes, and the marker tells it to discard state accumulated from an attempt
+that has been superseded. The stream is single-consumer and bounded
+(drop-oldest), so a slow reader degrades live display and never stalls a worker.</p>
+<p>Manual <code>target</code>, <code>model</code>, or <code>node</code> pins default to exact failover (<code>none</code>): a
+retry may repeat the tuple but cannot silently move away from it. <code>approved</code>
+failover requires an ordered <code>allowedCandidates</code> envelope of exact
+agent/target/model/node tuples and can never leave that set. <code>automatic</code>
+failover lets typed infrastructure failures exclude only the failed route
+part—for example, an SSH channel failure can move the node while retaining the
+agent, target, and model. Cancellation, policy rejection, and permission
+refusal neither retry nor penalize infrastructure.</p>
+<p>A plan-approved task is never <code>automatic</code>. An explicitly pinned task seals its
+exact tuple with <code>failover: &quot;none&quot;</code>; any other planned task seals
+<code>failover: &quot;approved&quot;</code> with a bounded candidate list enumerated by
+<code>route-candidates.ts</code> and rendered into the plan text the operator approves.
+Validation rejects <code>automatic</code> on a request carrying plan provenance, so an
+approved dispatch can only reroute to a tuple the approval actually showed.</p>
+<p>Retries are governed by <code>fleet.retry.maxRetries</code> and backoff, and by nothing else.
+A target cooldown protects new work from a known-bad target; it does not gate
+an assignment already in flight, because that assignment&#39;s own retry budget is
+the correct and sufficient bound. A retry denied at admission settles the
+assignment failed, reports the reason on stderr, and records it in the
+assignment&#39;s <code>outcomeDetail</code>.</p>
+<p>Assignment status, attempt ids, and terminal run id are stored separately in
+<code>assignments.json</code> while each attempt keeps its own strict v20 receipt.
+Pipelines and batches await assignment terminals, so downstream stages consume
+the successful fallback output rather than an earlier failed attempt.</p>
+<p>A fleet run is the exception to &quot;the attempts settle the record&quot;. Every step of
+a fleet dispatches under the fleet root id as its lineage root, so all of them
+share one row, and no single step is the run&#39;s verdict. The run claims the row
+by writing <code>verdictOwner: &quot;fleet&quot;</code> when it opens, files every settled step&#39;s
+terminal run id in <code>attempts</code> (an agent step&#39;s receipt id, a code step&#39;s
+<code>code-*</code> run id, whose report sits under <code>code-steps/&lt;fleetRootId&gt;/</code>), and
+writes <code>status</code> once at the end from the whole-run outcome. Until then the row
+stays <code>running</code>, and a step settling under it records its attempt without
+touching the status. A run that stops before its last step, whose final step
+fails, or that throws is <code>failed</code>; a run abandoned by a crashed process is
+reconciled to <code>failed</code> at the next startup rather than inheriting a green
+step&#39;s success.</p>
+<p>Editing assignments also own one baseline-pinned workspace transaction. Every
+attempt gets a distinct worktree. Before any winning diff can reach the
+destination checkout, a pure gate checks terminal outcome, receipt integrity,
+result conformance, and quality-gate success; protected artifacts, baseline
+ancestry, and destination cleanliness are then rechecked on disk. Refusal
+preserves the winner and recovery instructions, and the transaction cannot be
+closed while a winner remains unapplied.</p>
+<h2>Receipts</h2>
+<p>Receipts carry exactly one current integrity version (<code>RUN_RECEIPT_INTEGRITY_VERSION = 20</code>), which authenticates the complete receipt and reconstructible ledger provenance surface. There is no historical evidence reader: a lower version is reported as retired, is not migrated, and is never read as evidence; a malformed or future version is invalid. The fleet provenance fields covered by the digest
+include:</p>
+<ul>
+<li><code>node</code>: the fleet node the worker ran on (<code>id</code>, <code>kind</code>, <code>host</code>). The <code>node.id</code> explicitly identifies the worker process host executing the task, not the model host (which is represented by the <code>target</code> id). This behavior tracks issue #120.</li>
+<li><code>reroutes</code>: dead-node failover hops, oldest first.</li>
+<li><code>gate</code>: review/compete provenance (role, group, cycle, subject run ids with
+their receipt digests, and the verdict that caused a revise builder).</li>
+<li><code>plan</code>: plan-approval provenance (hash, topology, task count, cost ceiling,
+approval kind, and the registry approval identity when supervised).</li>
+<li><code>briefing</code>: byte count and SHA-256 of the exact canonical parent briefing;
+the prose is not retained and is distinct from bounded project context.</li>
+<li><code>intent</code>: the normalized typed path, expected-output, and verification
+declaration that admission sealed for the run.</li>
+<li><code>verification</code>: the existing evidence state and basis observed from worker
+tool execution.</li>
+<li><code>hostVerification</code>: host-run status and the resolved check evidence, including
+argv, cwd, exit code, duration, memo provenance, bounded output tail, and
+optional artifact path.</li>
+<li><code>worktree</code>: task worktree path, branch, diff hash, requested application,
+applied status, and an optional closed failure reason.</li>
+<li><code>steering</code>: ordered byte/hash/timestamp and acknowledgement provenance for
+successfully written steers; steering prose is never stored.</li>
+<li><code>outcomeCode</code>: the stable terminal classifier, including
+<code>worker_final_output_missing</code> when an otherwise successful worker exits
+without a nonempty receipt-sealed final answer and
+<code>host_verification_rejected</code> when a declared host check rejects the settled
+tree. Both suppress automatic retry.</li>
+<li><code>routingIntent</code>, <code>routeDecision</code>, and <code>quality</code>: the normalized hard bounds,
+complete current-policy decision, exact execution role, route estimate and
+readiness evidence, and authenticated quality sources.</li>
+<li><code>resultContract</code>: the admitted contract identity and <code>valid</code>, <code>invalid</code>, or
+<code>not-reached</code> conformance state. Only a due correctness-bearing contract can
+label route quality.</li>
+<li><code>validationGrounding</code>: claimed versus grounded validations checked against canonical executed commands.</li>
+<li><code>capabilityMismatch</code>: capability class versus task shape verdict (<code>refuse</code> vs <code>flag</code>).</li>
+<li>worker attestation identity: settings/WorkerSpec fingerprints, runtime,
+target, endpoint, model, tool surface, node, and bounded resource facts.</li>
+</ul>
+<p>Process exit zero is not a delegated deliverable. Native and ACP runs succeed
+only when the drained event stream yields a nonempty receipt output with
+<code>state: &quot;final&quot;</code>. A missing final answer fails with
+<code>outcomeCode: &quot;worker_final_output_missing&quot;</code>; any captured unfinished text is
+retained only as <code>state: &quot;partial&quot;</code> diagnostics and automatic retry is
+suppressed. Dispatch, monitor, ledger, receipt, terminal bus event, and retry
+policy all consume that same final classification.</p>
+<p>Receipt integrity, host verification, and evidence verification are separate axes. Integrity says
+that the sealed receipt matches its ledger envelope; evidence verification
+reports whether Clio observed an applicable validation tool (or marks the
+basis unknown/not applicable). A read-only Scout can therefore report <code>receipt_integrity=verified/v20/sha256</code> alongside
+<code>evidence_verification=not_applicable/read-only-agent</code>. Host verification is
+rendered independently as <code>host_verification=verified|rejected|skipped|not_requested</code>.
+A host-executed successful check projects onto canonical validation grounding as
+authenticated validator evidence. Briefing provenance and
+bounded <code>project_context</code> provenance are also rendered independently; neither
+hash substitutes for the other.</p>
+<p>The canonical terminology for these facts is the six-axis trust status in
+<a href="memory_blueprint.html#canonical-trust-status"><code>evidence-and-memory.md</code></a>.
+Receipt integrity projects onto artifact integrity; receipt verification,
+typed quality, and validation grounding project onto validation grounding;
+gate decisions project onto independent review; briefing and project context
+project onto context provenance; and <code>autonomyEnforcement</code> projects onto
+autonomy enforcement. A receipt does not contain independent-review or
+completion-evidence outcomes merely because it is sealed. Those axes remain
+<code>absent</code> until an authenticated gate artifact or finish assessment is composed.
+In particular, verified integrity cannot validate claims, known provenance
+cannot establish correctness, and a review verdict cannot establish
+authorship.</p>
+<p>Gate references point backward: a reviewer references the builder it
+reviewed, a revise builder references the reviewer whose findings it
+received, and a judge references every candidate. Because a worker receipt
+seals before the coordinator parses its final verdict, terminal pass/fail,
+exhaustion, winner, and confirmation outcomes are append-only integrity-
+covered gate-decision artifacts under the state directory. Evidence builds
+discover them from linked receipt ids and export <code>gate-decisions.json</code>.
+Reviewer and judge terminal output first crosses an integrity-covered
+write-ahead boundary under <code>state/gate-decisions/pending/</code>, before the caller
+waits for the final receipt. Restart recovery verifies the receipt, applies
+the same verdict/winner parser, materializes the final artifact idempotently,
+and only then clears the pending record. Missing receipts, tampering, or a
+conflicting artifact fail closed and leave the journal and any compete
+worktrees available for inspection.</p>
+<p>Protected-artifact hard blocks follow compete work into candidate worktrees:
+Clio mirrors every applicable parent-checkout path into each admitted worker
+spec and independently rejects a winner branch whose diff touches a protected
+parent path. The merge/apply coordinator rechecks the live protection state,
+so neither full-auto nor a later supervised winner approval can override that
+hard block.</p>
+<h2>Operator visibility</h2>
+<ul>
+<li>Every run carries the origin that asked for it, and every surface shows it
+with the same pair of glyphs: <code>◇</code> for a run the operator started with <code>/run</code>
+or <code>/delegate</code>, <code>◆</code> for one the model started by calling a dispatch tool, and
+a dim <code>·</code> for the runs Clio starts for itself. A running <code>◇</code> on the board is
+therefore the operator&#39;s own work. The footer chip in the status line splits
+into <code>◇1 ◆3</code> when more than one kind is live and stays <code>fleet N</code> otherwise.
+Board rows carry an origin glyph too.</li>
+<li>User-origin and agent-origin runs stream into the chat transcript as an
+attributed worker block. The typed command is echoed dim above the block.
+Header units display <code>&lt;agentId&gt;</code> then <code>&lt;targetId&gt;/&lt;wireModelId&gt;</code> then <code>run &lt;runId&gt;</code>
+for fleet workers (such as <code>◇ coder · node-a/example-coder-model · run 2mkas6s</code>),
+or <code>&lt;id&gt; (acp) · run &lt;runId&gt;</code> with no route for ACP delegation peers. The block
+body renders the worker prose down a rail, one coalesced line of tool names,
+and a one-line receipt footer showing the outcome glyph, token count, duration,
+and contract status (such as <code>└ ✓ ok · 8.4k tok · 18s · contract unmeasured</code>),
+with the failure reason printed on the rail above the footer when a run fails.</li>
+<li>Runs the model itself asked for through the dispatch tool (identified by
+parentToolCallId) render as folded <code>◆</code> cards under the spawning tool segment;
+operator-typed runs are <code>◇</code> and open. The fold chord uses the <code>clio-coder.tool.expand</code>
+keybinding (<code>Alt+O</code>), which toggles the newest foldable item of either kind
+(tool call or worker block). <code>Ctrl+Alt+O</code> or <code>Alt+Shift+O</code> toggles every tool
+call and worker block at once.</li>
+<li>Sharing: nothing a worker produced enters the main model&#39;s context unless
+<code>--share</code> was passed or the operator runs <code>/share [runId]</code>. What enters is a
+bounded note of the shape <code>[worker result] &lt;agent&gt; · run &lt;id&gt; · &lt;outcome&gt; · shared by the operator</code>
+followed by the bounded answer text, traveling the ordinary user-turn path.
+The operating contract tells the main agent that this note is operator
+steering backed by a readable receipt, not a tool result to verify against
+its own dispatch history.
+Bare <code>/share</code> picks the newest finished run the operator started themselves
+(never a model-asked <code>◆</code> run); <code>/share &lt;runId&gt;</code> may name a model-asked run
+explicitly. <code>/new</code> resets the transcript and the pool bare <code>/share</code> draws
+from, so a run from the previous session cannot be shared into the new one.</li>
+<li>Replay: <code>/resume</code> replays worker blocks from receipts; the session file&#39;s
+<code>workerRun</code> entries carry ids, origin, and runtime only, without prose; the
+replayed answer is bounded from the receipt exactly like the live one. A
+missing receipt renders <code>receipt unavailable</code>.</li>
+<li>Memory workers on the background target never appear as transcript blocks.</li>
+<li>The dispatch board shows per-run cards with the node id (absent placement
+renders <code>local</code>), gate badges (<code>gate reviewer c2</code>), reroute badges, live
+tool activity (names only; arguments never cross the worker stdout seam),
+and a per-worker context meter.</li>
+<li><code>Enter</code> on the selected Fleet Runs row opens its worker detail: the phase,
+the running call with a redacted action descriptor (<code>bash running npm test</code>), and the bounded tail of the worker&#39;s own prose. The default list
+stays compact, so a fan-out of scouts costs one card each until an operator
+opens one. Detail follows the cursor rather than pinning to a run.</li>
+<li>The board and the transcript worker block read one projection
+(<code>src/interactive/worker-progress.ts</code>), so they cannot disagree about what a
+worker is saying or touching. It keeps 40 lines and 4096 bytes of tail, 8
+distinct tool names, 4 recent actions, and accepts 16 KB of delta bytes per
+250 ms; what the bounds refuse is counted and named on the card beside the
+<code>/view dispatch:&lt;runId&gt;</code> deep link.</li>
+<li>Action descriptors are composed where the arguments are trusted: the tool
+registry&#39;s admission path, the Claude tool mapper, and the ACP update
+mapper. Each reads a fixed verb vocabulary and a fixed argument-field
+allowlist, scrubs credentials, strips escape sequences, and bounds the
+result to 64 characters before it crosses the worker stdout seam. Raw
+argument objects never cross at all.</li>
+<li>Reasoning content is never displayed. The detail may name a <code>thinking</code>
+phase and the usage facts the card already carries, never the text.</li>
+<li>Settlement replaces the provisional tail with the sealed receipt&#39;s answer;
+a run whose receipt cannot be read keeps its own last durable message.</li>
+<li>The context meter renders the worker&#39;s last-message context occupancy
+against the model&#39;s context window: healthy below 80 percent, warn from 80,
+critical from 95.</li>
+<li><code>/fleet</code> opens Settings → Fleet: profiles (with the node pin), bindings,
+and read-only node rows (state, capacity, and last-seen). Running and
+retrying runs, with their node, live in the <code>Alt+W</code> Fleet Runs board.</li>
+<li><code>/fleet run &lt;name&gt; [--var k=v ...]</code> compiles the contract&#39;s plan and opens
+the approval overlay before anything dispatches. The overlay lists the steps
+grouped by wave, and for each step its kind, its agent and resolved target
+(or its command id and the exact argv from <code>commands.yaml</code> for a code step),
+its scope, and its declared write boundary, followed by the budget ceiling
+the run would be admitted under. Enter dispatches the plan through the same
+path <code>clio-coder fleet run</code> uses, so admission, autonomy, receipts, and the
+durable ledger are identical. Esc cancels with nothing dispatched and nothing
+written. A contract that fails preflight opens the same overlay with its
+diagnostics and no accept key. A turn in flight refuses the command with a
+notice rather than queueing it: an approved plan describes the workspace as
+it stands.</li>
+<li>A council is one question asked of several members, so its rows render as one
+card rather than as three to five unrelated neighbours. On the <code>Alt+W</code> board the
+members sit side by side, one column each, as long as every column keeps at
+least 34 cells; below that the whole group stacks one member under another
+rather than squeezing some columns and not others. Each column carries the
+member label in its roster color (a member with no color takes the accent), the
+target and model, the round, the status, and the same bounded answer tail the
+run&#39;s own card would show. The synthesis run takes the full width under the
+members, because it is the council&#39;s answer rather than one voice in it. A
+council that ran several rounds still shows one column per member: each label
+keeps its newest round, so the card describes the council rather than its
+history.</li>
+<li>The compact Fleet Runs island shows a council as one card naming the group, how
+many members are seated, and which round they are on. The grid belongs to the
+board, where there is width to read an answer in. <code>/share</code> is what moves a
+council answer into the main agent&#39;s context; the card moves nothing.</li>
+<li>Board rows a fleet plan dispatched carry a phase column naming the step&#39;s
+wave index and step id (<code>w2 build</code>). A run that is not a fleet step renders
+the column empty. The compact Fleet Runs island keeps its fixed width, so it
+shows the column only when the row can still hold a readable agent label;
+otherwise the phase appears on the expanded card.</li>
+<li>The monitor tool reports the node and reroute lineage on <code>status</code>, <code>list</code>,
+and <code>collect</code>.</li>
+<li><code>clio-coder fleet status [--json]</code> shows the durable ledger view cross-process.</li>
+<li>A worker permission escalation uses the <code>Worker escalation</code> consequence tier in operator presentation. The tier names the worker agent and run and describes where the one-shot answer returns. It does not approve the request, change the worker&#39;s inherited autonomy, or weaken the safety net; the existing worker escalation protocol remains the only resolution path.</li>
+</ul>
+<h2>Speculation observer</h2>
+<p>A shadow-mode observer watches every dispatch, computes the plan a rule-based
+pipeline would have chosen (synchronous keyword rules, no model calls), and
+records plan-versus-actual accuracy into a bounded JSONL under
+<code>&lt;state&gt;/speculation/observations.jsonl</code>. It never influences dispatch;
+disabling it changes nothing else.</p>
+<h2>Residency</h2>
+<p>Remote workers default to residency observe. The SSH transport projects that
+posture as <code>lifecycle: user-managed</code> in the worker&#39;s target, so a worker on a
+node that serves resident models (for example a GPU box running the operator&#39;s
+inference server) never evicts them. A node opts into management explicitly
+with <code>residency: manage</code> in its fleet entry. An explicit target
+<code>lifecycle: user-managed</code> remains authoritative even on a managing node.</p>
+<p>A model the router tags as pinned (<code>pinned:true</code> or <code>role:scout</code>) is never
+evicted once resident, so Clio refuses to load it by evicting a resident that
+settings still reference by role; on a one-slot router such an override
+declines with a <code>will-not-fit</code> notice instead of stranding the configured model.</p>
+<h2>Manual fleet verification</h2>
+<p>Use <code>clio-coder fleet validate &lt;name&gt;</code> and <code>clio-coder fleet graph &lt;name&gt;</code> for
+model-free contract checks. An operator with configured targets can then run
+the contract explicitly with <code>clio-coder fleet run &lt;name&gt;</code> and retain its
+receipts. The <a href="fleet_demo_blueprint.html">fleet demo runbook</a> provides a bounded
+end-to-end scenario, including reviewer gates and verification commands. Live
+fleet execution is not hidden inside deterministic CI.</p>
+        </article>
+        <nav class="related-nav" aria-label="Adjacent references">
+          <a class="nav-link-card" href="extensions_blueprint.html"><span class="nav-label">Previous</span><span class="nav-title">Extensions, Resources, and Share Archives</span></a>
+          <a class="nav-link-card next" href="glossary_blueprint.html"><span class="nav-label">Next</span><span class="nav-title">Clio Coder Glossary</span></a>
+        </nav>
+        <p class="reference-footer-note">Canonical content lives in the mapped Markdown page. This visual counterpart adds navigation without changing the contract.</p>
       </main>
     </div>
-
-    <footer>
-      <p>Clio Coder Fleet Dispatch Mechanics &bull; Version 0.4.0</p>
-      <p>IOWarp / Gnosis Research Center &bull; iowarp.ai</p>
-    </footer>
+    <footer>Clio Coder documentation · source-aligned at v0.4.2</footer>
   </div>
-
   <script src="shared.js"></script>
-  <script>
-    function switchTab(tabId) {
-      document.querySelectorAll('.tab-btn').forEach(btn => btn.classList.remove('active'));
-      document.querySelectorAll('.tab-pane').forEach(pane => pane.classList.remove('active'));
-
-      const activeBtn = Array.from(document.querySelectorAll('.tab-btn')).find(b => b.getAttribute('onclick').includes(tabId));
-      if (activeBtn) activeBtn.classList.add('active');
-
-      const activePane = document.getElementById('pane-' + tabId);
-      if (activePane) activePane.classList.add('active');
-    }
-
-    function runTopologySim() {
-      const grid = document.getElementById('nodeGrid');
-      const strategy = document.getElementById('placementSelect').value;
-      const route = strategy === 'local'
-        ? 'local (explicit fallback)'
-        : strategy === 'pinned'
-          ? 'remote-login-01 (profile/request pin)'
-          : 'remote-login-01 (least-loaded eligible remote)';
-      grid.innerHTML = `
-        <div class="node-card">
-          <h4><span class="node-status status-healthy"></span> Selected route: ${route}</h4>
-          <p style="font-size: 0.85rem; color: var(--text-muted); margin-top: 0.4rem;">
-            ${strategy === 'local' ? 'Transport: Local Process | Capacity: global gate' : 'Transport: ssh -T user@hpc-cluster | Active Runs: 1/2'}<br>
-            ${strategy === 'local' ? 'Preflight: implicit local node' : 'Doctor preflight: PASS'} | Node state: online
-          </p>
-        </div>
-        <div class="node-card">
-          <h4><span class="node-status status-warning"></span> Placement rules</h4>
-          <p style="font-size: 0.85rem; color: var(--text-muted); margin-top: 0.4rem;">
-            Explicit pins fail closed when unavailable. Unpinned placement prefers lower durable lease usage and then declaration order; the cross-process lease store remains the final capacity authority.
-          </p>
-        </div>
-      `;
-    }
-
-    document.addEventListener('DOMContentLoaded', () => {
-      runTopologySim();
-    });
-  </script>
 </body>
 </html>

@@ -1,0 +1,400 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <meta name="clio-markdown-source" content="docs/README.md">
+  <meta name="clio-docs-version" content="0.4.2">
+  <title>Clio Coder documentation · Clio Coder 0.4.2</title>
+  <link rel="icon" href="data:,">
+  <link rel="stylesheet" href="shared.css">
+</head>
+<body data-doc-category="root">
+  <div class="reading-progress" aria-hidden="true"></div>
+  <a class="skip-link" href="#reference-content">Skip to reference</a>
+  <div class="container">
+    <header class="document-header" data-category="Documentation hub">
+      <div class="header-left">
+        <a class="header-logo" href="index.html" aria-label="Documentation index">
+          <svg viewBox="0 0 24 24" fill="none" aria-hidden="true">
+            <path d="M12 2 2 7l10 5 10-5-10-5Z" stroke="url(#clio-logo)" stroke-width="2" stroke-linejoin="round"/>
+            <path d="m2 12 10 5 10-5M2 17l10 5 10-5" stroke="url(#clio-logo)" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"/>
+            <defs><linearGradient id="clio-logo" x1="2" y1="2" x2="22" y2="22"><stop stop-color="#00d4db"/><stop offset="1" stop-color="#ff7e29"/></linearGradient></defs>
+          </svg>
+        </a>
+        <div class="header-title-wrapper">
+          <p class="document-kicker">Documentation hub / canonical reference</p>
+          <h1>Clio Coder documentation</h1>
+          <p class="document-path">docs/README.md</p>
+        </div>
+      </div>
+      <div class="header-right">
+        <a class="back-btn" href="index.html">← Index</a>
+        <span class="version-badge">v0.4.2</span>
+      </div>
+    </header>
+    <div class="page-layout-grid reference-layout">
+      <aside class="sidebar reference-sidebar" aria-label="On this page">
+        <nav class="toc-container">
+          <p class="toc-title">On this page</p>
+          <a class="sidebar-source" href="https://github.com/iowarp/clio-coder/blob/main/docs/README.md">Canonical Markdown<br>docs/README.md</a>
+          <ul class="toc-list"></ul>
+        </nav>
+      </aside>
+      <main class="reference-main" id="reference-content">
+        <article class="reference-prose glass-card">
+<blockquote>
+<p><strong>Visual blueprint:</strong> The source checkout includes the complete
+<a href="readme_blueprint.html">Clio Coder documentation visual reference</a>.</p>
+</blockquote>
+<p>This is the documentation map for Clio Coder. Start with the path closest to
+what you are trying to do; the deeper references are here when you need exact
+schemas, wire contracts, or architectural invariants.</p>
+<p>The guides track the current source tree. Released behavior is fixed by the
+corresponding Git tag and <a href="https://github.com/iowarp/clio-coder/blob/main/CHANGELOG.md">changelog</a>. If prose and the checked
+source disagree, treat source, schema validation, and contract tests as
+authoritative—and please fix or report the documentation drift.</p>
+<p>The reference is organized by purpose:</p>
+<pre><code class="language-text">docs/
+├── guide/          Operator and user workflows
+├── architecture/   Runtime contracts and design
+├── process/        Development, validation, and release practice
+├── history/        Dated records that are not current guidance
+└── html/           Source-checkout visual blueprints
+</code></pre>
+<h2>Start here</h2>
+<table>
+<thead>
+<tr>
+<th>Goal</th>
+<th>Guide</th>
+</tr>
+</thead>
+<tbody><tr>
+<td>Install Clio and connect the first model</td>
+<td><a href="lifecycle_blueprint.html">Installation and Lifecycle</a> → <a href="configuration_blueprint.html">Configuration and Targets</a></td>
+</tr>
+<tr>
+<td>Learn the interactive session and CLI</td>
+<td><a href="commands_blueprint.html">Commands and Modes</a></td>
+</tr>
+<tr>
+<td>Understand what Clio may read, change, or execute</td>
+<td><a href="safety_blueprint.html">Safety Model</a></td>
+</tr>
+<tr>
+<td>Diagnose a problem by its exact message</td>
+<td><a href="troubleshooting_blueprint.html">Troubleshooting</a></td>
+</tr>
+</tbody></table>
+<p>A minimal first run is:</p>
+<pre><code class="language-bash">npm install -g @iowarp/clio-coder
+clio-coder configure
+cd /path/to/your/project
+clio-coder
+</code></pre>
+<p>Use <code>clio-coder --help</code> for the installed command surface and <code>/help</code> inside an
+interactive session. <code>clio-coder doctor</code> is a read-only installation check;
+<code>doctor --fix</code> performs only the repairs it reports.</p>
+<h2>Using Clio day to day</h2>
+<table>
+<thead>
+<tr>
+<th>Topic</th>
+<th>Guide</th>
+</tr>
+</thead>
+<tbody><tr>
+<td>Targets, providers, auth, settings v2, routing, and fleet profiles</td>
+<td><a href="configuration_blueprint.html">Configuration and Targets</a></td>
+</tr>
+<tr>
+<td>Every settings key, environment variable, flag, and project-file key with its default and precedence</td>
+<td><a href="configuration_reference_blueprint.html">Configuration Reference</a></td>
+</tr>
+<tr>
+<td>Runtime discovery, model capabilities, local overlays, and field notes</td>
+<td><a href="models_blueprint.html">Model Catalog</a></td>
+</tr>
+<tr>
+<td>Argonne ALCF Sophia and Metis targets over Globus OAuth</td>
+<td><a href="alcf_blueprint.html">ALCF Provider</a></td>
+</tr>
+<tr>
+<td>Project handbooks, context windows, accounting, compaction, and indexing</td>
+<td><a href="context_blueprint.html">Context Engine</a></td>
+</tr>
+<tr>
+<td>Non-destructive working-set eviction, markers, and recall</td>
+<td><a href="context_working_set_blueprint.html">Context Working Set</a></td>
+</tr>
+<tr>
+<td>Session ledgers, branches, checkpoints, resume, and recovery</td>
+<td><a href="session_lifecycle_blueprint.html">Session Lifecycle</a></td>
+</tr>
+<tr>
+<td>Proactive task memory, interventions, and handoffs</td>
+<td><a href="proactive_memory_blueprint.html">Proactive Memory</a></td>
+</tr>
+<tr>
+<td>Skills discovery, marketplace safety, installation, and publishing</td>
+<td><a href="skills_blueprint.html">Skills Marketplace</a></td>
+</tr>
+<tr>
+<td>Agents, prompts, extensions, and portable share archives</td>
+<td><a href="extensions_blueprint.html">Extensions and Sharing</a></td>
+</tr>
+<tr>
+<td>Private resource catalogs and synchronization</td>
+<td><a href="resource_library_blueprint.html">Resource Library</a></td>
+</tr>
+<tr>
+<td>TUI layout, responsive behavior, colors, and interaction rules</td>
+<td><a href="tui_design_blueprint.html">TUI Design</a></td>
+</tr>
+</tbody></table>
+<h2>Safety, evidence, and reproducibility</h2>
+<table>
+<thead>
+<tr>
+<th>Topic</th>
+<th>Guide</th>
+</tr>
+</thead>
+<tbody><tr>
+<td>Autonomy, default-deny execution, project policy, and damage-control rules</td>
+<td><a href="safety_blueprint.html">Safety Model</a></td>
+</tr>
+<tr>
+<td>Receipts, run inspection, costs, and observability routing</td>
+<td><a href="observability_blueprint.html">Observability</a></td>
+</tr>
+<tr>
+<td>Durable evidence bundles, findings, and reviewed memory</td>
+<td><a href="memory_blueprint.html">Evidence and Memory</a></td>
+</tr>
+<tr>
+<td>SQLite trace mirror, schemas, cursors, and rebuildability</td>
+<td><a href="trace_blueprint.html">Trace Store</a></td>
+</tr>
+<tr>
+<td>Where generated files live and who should read them</td>
+<td><a href="artifact_placement_blueprint.html">Artifact Placement</a></td>
+</tr>
+<tr>
+<td>Evidence-aware Git role trailers and managed-hook safety</td>
+<td><a href="git_commit_provenance_blueprint.html">Git Commit Provenance</a></td>
+</tr>
+<tr>
+<td>Advisory scientific validation contracts and HPC assumptions</td>
+<td><a href="validation_blueprint.html">Scientific Validation</a></td>
+</tr>
+<tr>
+<td>Versioned artifact schemas and migration policy</td>
+<td><a href="artifact_versions_blueprint.html">Artifact Versions</a></td>
+</tr>
+</tbody></table>
+<p>Receipts establish what Clio observed and did. They do not replace domain
+validation, reference data, or human scientific judgment.</p>
+<h2>Delegation and fleets</h2>
+<table>
+<thead>
+<tr>
+<th>Topic</th>
+<th>Guide</th>
+</tr>
+</thead>
+<tbody><tr>
+<td>Built-in worker recipes, discovery, frontmatter, and admission</td>
+<td><a href="agents_blueprint.html">Built-in Agents</a></td>
+</tr>
+<tr>
+<td>Local and multi-node fleet execution, placement, gates, and receipts</td>
+<td><a href="fleet_dispatch_blueprint.html">Fleet Dispatch</a></td>
+</tr>
+<tr>
+<td>An executable multi-node walkthrough with a reviewer gate</td>
+<td><a href="fleet_demo_blueprint.html">Fleet Demo Runbook</a></td>
+</tr>
+<tr>
+<td>Capacity leases, heartbeats, locks, and node drain control</td>
+<td><a href="capacity_scheduling_blueprint.html">Capacity and Scheduling</a></td>
+</tr>
+<tr>
+<td>Worker process protocol, watchdogs, steering, and exit mapping</td>
+<td><a href="worker_dispatch_blueprint.html">Worker Dispatch Mechanics</a></td>
+</tr>
+<tr>
+<td>Typed dispatch intent and compatibility boundaries</td>
+<td><a href="dispatch_typed_intent_blueprint.html">Dispatch Typed Intent</a></td>
+</tr>
+<tr>
+<td>Why dispatch remains one domain and where its seams actually are</td>
+<td><a href="dispatch_rationale_blueprint.html">Dispatch Architecture Rationale</a></td>
+</tr>
+</tbody></table>
+<h2>Automation and integration</h2>
+<table>
+<thead>
+<tr>
+<th>Topic</th>
+<th>Guide</th>
+</tr>
+</thead>
+<tbody><tr>
+<td>Agent Client Protocol server, stdio transport, and permission mediation</td>
+<td><a href="acp_blueprint.html">ACP</a></td>
+</tr>
+<tr>
+<td>Prompt-envelope reuse, provider tool delivery, and bounded results</td>
+<td><a href="tools_blueprint.html">Prompt Envelope and Tools</a></td>
+</tr>
+<tr>
+<td>All built-in worker tools, arguments, outputs, and error examples</td>
+<td><a href="tool_usage_blueprint.html">Tool Usage</a></td>
+</tr>
+<tr>
+<td>Implementing a runtime or inference-server adapter</td>
+<td><a href="provider_adapter_blueprint.html">Provider Adapter Cookbook</a></td>
+</tr>
+<tr>
+<td>Middleware hooks, effects, budgets, and component snapshots</td>
+<td><a href="middleware_blueprint.html">Middleware and Components</a></td>
+</tr>
+<tr>
+<td>Process exit codes, stdout/stderr rules, JSONL, and <code>--help</code> contracts</td>
+<td><a href="exit_codes_blueprint.html">Exit Codes and Output</a></td>
+</tr>
+<tr>
+<td>Environment overrides, directory controls, and debug toggles</td>
+<td><a href="environment_blueprint.html">Environment Variables</a></td>
+</tr>
+</tbody></table>
+<h2>Evaluation and measurement</h2>
+<table>
+<thead>
+<tr>
+<th>Topic</th>
+<th>Guide</th>
+</tr>
+</thead>
+<tbody><tr>
+<td>Local Suite v2 files, artifacts, reports, comparisons, and gates</td>
+<td><a href="eval_blueprint.html">Eval Runner</a></td>
+</tr>
+<tr>
+<td>Private suite handling and measurement design</td>
+<td><a href="evals_internal_blueprint.html">Internal Evals</a></td>
+</tr>
+<tr>
+<td>Correct render, startup, import-graph, and streaming measurements</td>
+<td><a href="performance_methodology_blueprint.html">Performance Methodology</a></td>
+</tr>
+<tr>
+<td>Falsifiable change manifests and <code>clio-coder evolve</code></td>
+<td><a href="evolution_blueprint.html">Evolution</a></td>
+</tr>
+</tbody></table>
+<p>Reviewable reference suites ship under <a href="https://github.com/iowarp/clio-coder/tree/main/evals/"><code>evals/</code></a>. They are explicit
+operator measurements, not hidden CI steps. Private prompts, credentials,
+endpoints, raw campaign artifacts, and proprietary datasets belong outside the
+repository.</p>
+<h2>Architecture and contributing</h2>
+<table>
+<thead>
+<tr>
+<th>Topic</th>
+<th>Guide</th>
+</tr>
+</thead>
+<tbody><tr>
+<td>Source layout, compile-time boundaries, domain loading, and runtime flow</td>
+<td><a href="architecture_blueprint.html">Architecture</a></td>
+</tr>
+<tr>
+<td>Pi framework boundary and Clio-owned policy</td>
+<td><a href="pi_boundary_blueprint.html">Pi Boundary</a></td>
+</tr>
+<tr>
+<td>Documentation style and source-alignment workflow</td>
+<td><a href="documentation_blueprint.html">Documentation Guide</a></td>
+</tr>
+<tr>
+<td>Source-to-guide ownership map</td>
+<td><a href="documentation_coverage_blueprint.html">Documentation Coverage</a></td>
+</tr>
+<tr>
+<td>Issue-driven development and release workflow</td>
+<td><a href="development_pipeline_blueprint.html">Development Pipeline</a></td>
+</tr>
+<tr>
+<td>Clock, duration, timestamp, and ordering conventions</td>
+<td><a href="time_conventions_blueprint.html">Time Conventions</a></td>
+</tr>
+<tr>
+<td>Core terms mapped to source concepts</td>
+<td><a href="glossary_blueprint.html">Glossary</a></td>
+</tr>
+</tbody></table>
+<p>The <a href="config_knobs_audit_blueprint.html">configuration-knob audit</a> is a dated historical
+inventory, not the current settings reference. The
+<a href="release_cut_checklist_blueprint.html">v0.4.1 release-cut checklist</a> is retained as release
+engineering history and must not be reused unchanged for a future release.</p>
+<h2>Developer quick start</h2>
+<pre><code class="language-bash">git clone https://github.com/iowarp/clio-coder.git
+cd clio-coder
+npm ci
+npm run build
+node dist/cli/index.js --help
+</code></pre>
+<p>For a persistent local command:</p>
+<pre><code class="language-bash">npm run install:local
+export PATH=&quot;$HOME/.local/bin:$PATH&quot;
+hash -r
+clio-coder --version
+</code></pre>
+<p>Use <code>npm run dev</code> for a watch build. Before handing back a change, run the
+focused test while iterating and <code>npm run ci</code> for the deterministic repository
+gate. Maintainers use <code>npm run ci:release</code> to add the distribution and package
+audit.</p>
+<h2>Project context in a source checkout</h2>
+<p>Projects can keep human-owned guidance in <code>CLIO-CODER.md</code>, generated with
+<code>clio-coder context init</code>. This repository gitignores its own generated copy so
+local dogfooding instructions do not collide with public documentation. If the
+file exists in your checkout, read it before making changes; if it does not,
+the architecture guide and <code>CONTRIBUTING.md</code> are the public starting points.</p>
+<h2>Interactive blueprints</h2>
+<p>Every Markdown page has a dedicated visual blueprint under <code>docs/html/</code>, and
+the separate <code>docs/html/index.html</code> landing page mirrors this documentation
+tree. Blueprint links use the public repository so they still work when a guide
+is read from the npm package. From a source checkout, serve the same files
+locally with:</p>
+<pre><code class="language-bash">clio-coder docs
+</code></pre>
+<p>The Markdown pages are the portable reference and ship with the npm package.
+The HTML blueprints are development aids and are not required for the runtime.</p>
+<h2>Writing documentation</h2>
+<p>Follow <a href="documentation_blueprint.html">Documentation Guide</a>. In particular:</p>
+<ul>
+<li>Verify commands against the built binary rather than copying an old example.</li>
+<li>Use current, canonical settings paths; describe legacy names only in a
+clearly marked migration or historical section.</li>
+<li>Separate deterministic contracts from model-dependent observations.</li>
+<li>Put release chronology in the <a href="https://github.com/iowarp/clio-coder/blob/main/CHANGELOG.md">CHANGELOG</a>, not in the
+product README or an evergreen task guide.</li>
+<li>Link to the detailed contract instead of duplicating a large schema in
+several places.</li>
+</ul>
+        </article>
+        <nav class="related-nav" aria-label="Adjacent references">
+          <span></span>
+          <a class="nav-link-card next" href="agents_blueprint.html"><span class="nav-label">Next</span><span class="nav-title">Clio Coder Agent Fleet</span></a>
+        </nav>
+        <p class="reference-footer-note">Canonical content lives in the mapped Markdown page. This visual counterpart adds navigation without changing the contract.</p>
+      </main>
+    </div>
+    <footer>Clio Coder documentation · source-aligned at v0.4.2</footer>
+  </div>
+  <script src="shared.js"></script>
+</body>
+</html>

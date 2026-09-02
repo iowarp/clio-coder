@@ -1,5 +1,8 @@
 # Resource Library
 
+> **Visual blueprint:** The source checkout includes the complete
+> [Resource Library visual reference](https://github.com/iowarp/clio-coder/blob/main/docs/html/resource_library_blueprint.html).
+
 The resource library extends the existing local skills marketplace catalog to carry agent recipes, prompt templates, and fleet contracts. It does not change the Agent Skills format, discovery roots, trust gating, or existing skill installation sources.
 
 ## Catalog schema

@@ -1,364 +1,417 @@
-<!DOCTYPE html>
+<!doctype html>
 <html lang="en">
 <head>
-  <meta charset="UTF-8">
-  <meta name="viewport" content="width=device-width, initial-scale=1.0">
-  <title>Environment Variables Blueprint (v0.4.0)</title>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <meta name="clio-markdown-source" content="docs/guide/environment-variables.md">
+  <meta name="clio-docs-version" content="0.4.2">
+  <title>Environment Variables · Clio Coder 0.4.2</title>
+  <link rel="icon" href="data:,">
   <link rel="stylesheet" href="shared.css">
-  <style>
-    /* Environment resolver custom styling */
-    .path-row {
-      display: flex;
-      justify-content: space-between;
-      align-items: center;
-      padding: 0.5rem 0;
-      border-bottom: 1px solid rgba(255, 255, 255, 0.03);
-    }
-    .path-label {
-      font-size: 0.85rem;
-      color: var(--text-muted);
-    }
-    .path-value {
-      font-family: var(--font-mono);
-      font-size: 0.8rem;
-      color: var(--color-cyan);
-    }
-
-    /* Env table custom styling */
-    .env-table {
-      width: 100%;
-      border-collapse: collapse;
-      margin-top: 1rem;
-      font-size: 0.85rem;
-    }
-    .env-table th, .env-table td {
-      padding: 0.75rem;
-      text-align: left;
-      border-bottom: 1px solid rgba(255, 255, 255, 0.05);
-    }
-    .env-table th {
-      color: #fff;
-      font-weight: 600;
-      background: rgba(255, 255, 255, 0.02);
-    }
-    .env-name {
-      font-family: var(--font-mono);
-      color: var(--color-cyan);
-      font-weight: 700;
-    }
-  </style>
 </head>
-<body>
+<body data-doc-category="guide">
+  <div class="reading-progress" aria-hidden="true"></div>
+  <a class="skip-link" href="#reference-content">Skip to reference</a>
   <div class="container">
-    <header>
+    <header class="document-header" data-category="Guide">
       <div class="header-left">
-        <div class="header-logo">
-          <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" style="color: var(--color-cyan);"><title>Icon</title>
-            <rect x="4" y="4" width="16" height="16" rx="2" ry="2"></rect>
-            <rect x="9" y="9" width="6" height="6"></rect>
-            <line x1="9" y1="1" x2="9" y2="4"></line>
-            <line x1="15" y1="1" x2="15" y2="4"></line>
-            <line x1="9" y1="20" x2="9" y2="23"></line>
-            <line x1="15" y1="20" x2="15" y2="23"></line>
-            <line x1="20" y1="9" x2="23" y2="9"></line>
-            <line x1="20" y1="15" x2="23" y2="15"></line>
-            <line x1="1" y1="9" x2="4" y2="9"></line>
-            <line x1="1" y1="15" x2="4" y2="15"></line>
+        <a class="header-logo" href="index.html" aria-label="Documentation index">
+          <svg viewBox="0 0 24 24" fill="none" aria-hidden="true">
+            <path d="M12 2 2 7l10 5 10-5-10-5Z" stroke="url(#clio-logo)" stroke-width="2" stroke-linejoin="round"/>
+            <path d="m2 12 10 5 10-5M2 17l10 5 10-5" stroke="url(#clio-logo)" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"/>
+            <defs><linearGradient id="clio-logo" x1="2" y1="2" x2="22" y2="22"><stop stop-color="#00d4db"/><stop offset="1" stop-color="#ff7e29"/></linearGradient></defs>
           </svg>
-        </div>
+        </a>
         <div class="header-title-wrapper">
+          <p class="document-kicker">Guide / canonical reference</p>
           <h1>Environment Variables</h1>
-          <p>Process overrides, directory layout overrides, and internal plumbing variables</p>
-          <div class="meta-chips-row">
-            <span class="chip">Source: docs/environment-variables.md</span>
-            <span class="chip chip-orange">clio-coder docs environment</span>
-          </div>
+          <p class="document-path">docs/guide/environment-variables.md</p>
         </div>
       </div>
       <div class="header-right">
-        <span class="version-badge">Clio Coder v0.4.0</span>
-        <a href="index.html" class="back-btn">
-          <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><title>Icon</title><line x1="19" y1="12" x2="5" y2="12"></line><polyline points="12 19 5 12 12 5"></polyline></svg>
-          Dashboard Hub
-        </a>
+        <a class="back-btn" href="index.html">← Index</a>
+        <span class="version-badge">v0.4.2</span>
       </div>
     </header>
-
-    <div class="page-layout-grid">
-      <nav class="sidebar" aria-label="Table of Contents">
-        <div class="toc-container">
-          <div class="toc-title">On This Page</div>
-          <ul class="toc-list">
-            <!-- Dynamically populated -->
-          </ul>
-        </div>
-      </nav>
-
-      <main>
-        <div class="glass-card">
-          <h2>Overview Summary</h2>
-          <p>Environment variables allow operator-scoped and process-scoped overrides (such as CI or one-off tests). The settings YAML file remains the primary home for durable configuration, but env vars override settings values on runtime startup.</p>
-        </div>
-
-        <div class="tabs-nav">
-          <button type="button" class="tab-btn active" onclick="switchTab('explorer')">
-            Env Variables Explorer
-          </button>
-          <button type="button" class="tab-btn" onclick="switchTab('resolver')">
-            Path Resolver
-          </button>
-        </div>
-
-        <!-- Tab 1: Explorer -->
-        <div class="tab-pane active" id="pane-explorer">
-          <div class="glass-card">
-            <h3>Variables Matrix</h3>
-            <p>Filter or search process environment variables:</p>
-
-            <div class="form-group" style="margin-top: 1rem;">
-              <input type="text" id="envSearch" placeholder="Search variables (e.g. CLIO_CODER_HOME, turn, budget)..." oninput="filterEnvTable()" style="padding: 0.65rem 0.85rem; font-size: 0.9rem;">
-            </div>
-
-            <div class="filter-tags" style="justify-content: flex-start; margin-bottom: 1rem;">
-              <button type="button" class="filter-tag active" id="btn-all" onclick="filterCategory('all')">All roles</button>
-              <button type="button" class="filter-tag" id="btn-guard" onclick="filterCategory('guardrail')">Guardrails</button>
-              <button type="button" class="filter-tag" id="btn-knob" onclick="filterCategory('knob')">Knobs</button>
-              <button type="button" class="filter-tag" id="btn-layout" onclick="filterCategory('layout')">Layout</button>
-              <button type="button" class="filter-tag" id="btn-debug" onclick="filterCategory('debug')">Debugging</button>
-              <button type="button" class="filter-tag" id="btn-plumbing" onclick="filterCategory('plumbing')">Plumbing</button>
-              <button type="button" class="filter-tag" id="btn-test" onclick="filterCategory('test')">Test-Only</button>
-            </div>
-
-            <table class="env-table">
-              <thead>
-                <tr>
-                  <th>Variable</th>
-                  <th>Default</th>
-                  <th>Controls / Scope</th>
-                </tr>
-              </thead>
-              <tbody id="envTableBody">
-                <tr data-cat="knob">
-                  <td class="env-name">CLIO_CODER_RIGOR</td>
-                  <td><code>repo-derived</code></td>
-                  <td>Finish-contract evidence validation bar (normal or high).</td>
-                </tr>
-                <tr data-cat="knob">
-                  <td class="env-name">CLIO_CODER_ALLOW_EXTERNAL_FULL_ACCESS</td>
-                  <td><code>off</code></td>
-                  <td>Let full-auto pass to external runtimes.</td>
-                </tr>
-                <tr data-cat="layout">
-                  <td class="env-name">CLIO_CODER_HOME</td>
-                  <td><code>unset</code></td>
-                  <td>Override installation root path. Sets config, state, and cache relative to it.</td>
-                </tr>
-                <tr data-cat="layout">
-                  <td class="env-name">CLIO_CODER_CONFIG_DIR</td>
-                  <td><code>Platform XDG</code></td>
-                  <td>Settings directory path override.</td>
-                </tr>
-                <tr data-cat="layout">
-                  <td class="env-name">CLIO_CODER_DATA_DIR</td>
-                  <td><code>Platform XDG</code></td>
-                  <td>Data directory path override.</td>
-                </tr>
-                <tr data-cat="layout">
-                  <td class="env-name">CLIO_CODER_STATE_DIR</td>
-                  <td><code>Platform XDG</code></td>
-                  <td>State and session directory path override.</td>
-                </tr>
-                <tr data-cat="layout">
-                  <td class="env-name">CLIO_CODER_CACHE_DIR</td>
-                  <td><code>Platform XDG</code></td>
-                  <td>Marketplace/models caching path override.</td>
-                </tr>
-                <tr data-cat="debug">
-                  <td class="env-name">CLIO_CODER_BUS_TRACE</td>
-                  <td><code>off</code></td>
-                  <td>Trace event-bus events to stderr.</td>
-                </tr>
-                <tr data-cat="debug">
-                  <td class="env-name">CLIO_CODER_TIMING</td>
-                  <td><code>off</code></td>
-                  <td>Print boot timing reports.</td>
-                </tr>
-                <tr data-cat="plumbing">
-                  <td class="env-name">CLIO_CODER_INTERACTIVE</td>
-                  <td><code>off</code></td>
-                  <td>Flag indicating interactive TUI mode. Cleaned from children.</td>
-                </tr>
-                <tr data-cat="plumbing">
-                  <td class="env-name">CLIO_CODER_RUN_OVERRIDES</td>
-                  <td><code>unset</code></td>
-                  <td>JSON envelope for process option bindings.</td>
-                </tr>
-                <tr data-cat="test">
-                  <td class="env-name">CLIO_CODER_WORKER_FAUX</td>
-                  <td><code>unset</code></td>
-                  <td>Fake LLM responses mapping framework for test assertions.</td>
-                </tr>
-              </tbody>
-            </table>
-          </div>
-        </div>
-
-        <!-- Tab 2: Resolver -->
-        <div class="tab-pane" id="pane-resolver">
-          <div class="blueprint-layout">
-            <div class="specs-col">
-              <div class="glass-card">
-                <h3>Directory Resolver Calculator</h3>
-                <p>Input variables to see where Clio resolves session and configuration folders:</p>
-
-                <div class="form-group">
-                  <label for="osSelect">Operating System</label>
-                  <select id="osSelect" onchange="resolvePaths()">
-                    <option value="linux">Linux</option>
-                    <option value="macos">macOS</option>
-                    <option value="windows">Windows</option>
-                  </select>
-                </div>
-
-                <div class="form-group">
-                  <label for="clioHomeInput">CLIO_CODER_HOME (Override)</label>
-                  <input type="text" id="clioHomeInput" value="" placeholder="e.g. /home/user/my_clio_tree" oninput="resolvePaths()">
-                </div>
-
-                <div class="form-group">
-                  <label for="clioConfigInput">CLIO_CODER_CONFIG_DIR (Override)</label>
-                  <input type="text" id="clioConfigInput" value="" placeholder="e.g. /etc/clio" oninput="resolvePaths()">
-                </div>
-              </div>
-            </div>
-
-            <div class="specs-col">
-              <div class="glass-card">
-                <h3>Effective Resolved Paths</h3>
-                <p>Resolution order: <code>per-role env var &gt; CLIO_CODER_HOME &gt; platform default</code></p>
-
-                <div class="path-row">
-                  <span class="path-label">Config Folder</span>
-                  <span class="path-value" id="valConfig">/home/user/.config/clio-coder</span>
-                </div>
-                <div class="path-row">
-                  <span class="path-label">Data Folder</span>
-                  <span class="path-value" id="valData">/home/user/.local/share/clio-coder</span>
-                </div>
-                <div class="path-row">
-                  <span class="path-label">State Folder</span>
-                  <span class="path-value" id="valState">/home/user/.local/state/clio-coder</span>
-                </div>
-                <div class="path-row">
-                  <span class="path-label">Cache Folder</span>
-                  <span class="path-value" id="valCache">/home/user/.cache/clio-coder</span>
-                </div>
-              </div>
-            </div>
-          </div>
-        </div>
-
-        <!-- Related Navigation -->
-        <nav class="related-nav" aria-label="Related Pages">
-          <a href="alcf_blueprint.html" class="nav-link-card">
-            <span class="nav-label">Previous Blueprint</span>
-            <span class="nav-title">ALCF Inference Provider</span>
-          </a>
-          <a href="tool_usage_blueprint.html" class="nav-link-card next">
-            <span class="nav-label">Next Blueprint</span>
-            <span class="nav-title">Tool Usage Reference</span>
-          </a>
+    <div class="page-layout-grid reference-layout">
+      <aside class="sidebar reference-sidebar" aria-label="On this page">
+        <nav class="toc-container">
+          <p class="toc-title">On this page</p>
+          <a class="sidebar-source" href="https://github.com/iowarp/clio-coder/blob/main/docs/guide/environment-variables.md">Canonical Markdown<br>docs/guide/environment-variables.md</a>
+          <ul class="toc-list"></ul>
         </nav>
+      </aside>
+      <main class="reference-main" id="reference-content">
+        <article class="reference-prose glass-card">
+<blockquote>
+<p><strong>Visual blueprint:</strong> The source checkout includes the complete
+<a href="environment_blueprint.html">Environment Variables visual reference</a>.</p>
+</blockquote>
+<p>This page inventories Clio-specific runtime variables and the ambient variables that materially change documented operator behavior. <code>settings.yaml</code> is the durable home for operator policy; environment variables support per-process overrides, directory layout, debugging, credentials, terminal integration, and internal plumbing. When prose and source disagree, prefer the cited read site.</p>
+<p>The <code>environment-variable-inventory</code> check in <code>scripts/check-hygiene.ts</code>, run by <code>npm run lint</code>, enforces coverage for Clio&#39;s <code>CLIO_*</code> variables and <code>NO_COLOR</code>. It intentionally does not treat every operating-system or provider convention as a Clio knob. Examples outside that enforced family include <code>PATH</code>, <code>HOME</code>, terminal capability variables, and provider API-key names selected dynamically by <code>src/engine/env-api-keys.ts</code>.</p>
+<h2>Behavior knobs without a settings key</h2>
+<table>
+<thead>
+<tr>
+<th>Variable</th>
+<th>Default</th>
+<th>Controls</th>
+</tr>
+</thead>
+<tbody><tr>
+<td><code>NO_COLOR</code></td>
+<td>unset</td>
+<td>Set to any non-empty value to drop every foreground and background color. Bold, dim, italic, and underline stay, because they are what is left to read the interface by (<code>src/interactive/theme/tokens.ts</code>).</td>
+</tr>
+<tr>
+<td><code>CLIO_CODER_SYNTHESIS_LOCK</code></td>
+<td>strip</td>
+<td>How a synthesis-locked worker round is enforced on OpenAI-family runtimes: <code>strip</code> removes the tool schemas from the request, <code>tool-choice</code> keeps them and sends <code>tool_choice: none</code>, which preserves the prompt prefix but relies on the model honoring the knob (<code>src/engine/provider-payload.ts</code>).</td>
+</tr>
+<tr>
+<td><code>CLIO_CODER_RIGOR</code></td>
+<td>repo-derived</td>
+<td>Finish-contract evidence bar, <code>normal</code> or <code>high</code>, layered over the repo-derived default (<code>src/domains/safety/rigor.ts</code>).</td>
+</tr>
+<tr>
+<td><code>CLIO_CODER_ALLOW_EXTERNAL_FULL_ACCESS</code></td>
+<td>off</td>
+<td><code>1</code> lets full-auto pass through to external CLI runtimes with their own full access (<code>src/engine/claude/subprocess-runtime.ts</code>, <code>src/engine/antigravity/subprocess-runtime.ts</code>).</td>
+</tr>
+<tr>
+<td><code>CLIO_CODER_FORCE_COMPACT</code></td>
+<td>off</td>
+<td><code>1</code> forces compaction before every interactive turn for as long as it is set (<code>src/interactive/chat-loop.ts</code>).</td>
+</tr>
+<tr>
+<td><code>CLIO_CODER_LEGACY_MASK</code></td>
+<td>off</td>
+<td><code>1</code> temporarily restores the destructive stale-observation mask before summary compaction; remove it after compatibility diagnosis.</td>
+</tr>
+<tr>
+<td><code>CLIO_CODER_STATUS_STUCK_MS</code></td>
+<td>180000</td>
+<td>Stuck-turn watchdog threshold (<code>src/interactive/status/watchdog.ts</code>).</td>
+</tr>
+<tr>
+<td><code>CLIO_CODER_SHUTDOWN_HOOK_MS</code></td>
+<td>500</td>
+<td>Wall-clock budget per shutdown hook (<code>src/core/termination.ts</code>).</td>
+</tr>
+<tr>
+<td><code>CLIO_CODER_HOOK_BUDGET_MS</code></td>
+<td>per-phase built-ins</td>
+<td>Global middleware hook wall-clock budget (<code>src/domains/middleware/budget.ts</code>).</td>
+</tr>
+<tr>
+<td><code>CLIO_CODER_HOOK_BUDGET_&lt;PHASE&gt;_MS</code></td>
+<td>per-phase built-ins</td>
+<td>Per-phase hook budget, e.g. <code>CLIO_CODER_HOOK_BUDGET_TURN_END_MS</code>; beats the global var.</td>
+</tr>
+<tr>
+<td><code>CLIO_CODER_HOOK_BUDGET_WARMUP_CALLS</code></td>
+<td>1</td>
+<td>Hook calls exempted from budget accounting at startup.</td>
+</tr>
+<tr>
+<td><code>CLIO_CODER_HOOK_BUDGET_WINDOW</code></td>
+<td>5</td>
+<td>Sliding-window size for steady-state hook-budget warnings.</td>
+</tr>
+<tr>
+<td><code>CLIO_CODER_HOOK_BUDGET_THRESHOLD</code></td>
+<td>3</td>
+<td>Overruns within the window before a steady-state warning.</td>
+</tr>
+<tr>
+<td><code>CLIO_CODER_LMSTUDIO_CORESIDENT_CONTEXT</code></td>
+<td>131072</td>
+<td>Largest context length Clio requests when it loads an LM Studio model while another model is resident on the same server. LM Studio reports no VRAM and caps GPU offload instead of refusing an oversized load, so a KV cache that does not fit is served from CPU at a crawl; the ceiling bounds that by evidence. <code>off</code> or <code>0</code> disables clamping (<code>src/engine/apis/lmstudio-residency.ts</code>).</td>
+</tr>
+<tr>
+<td><code>CLIO_CODER_SKILL_CATALOG_DIR</code></td>
+<td>unset</td>
+<td>Local skill-catalog directory override (<code>src/domains/resources/skills/marketplace.ts</code>).</td>
+</tr>
+<tr>
+<td><code>CLIO_CODER_SKILL_MARKETPLACE_INDEX</code></td>
+<td>unset</td>
+<td>Skill-marketplace index path override (<code>src/domains/resources/skills/marketplace.ts</code>).</td>
+</tr>
+<tr>
+<td><code>CLIO_CODER_MODEL_CATALOG_DIRS</code></td>
+<td>unset</td>
+<td>Extra model-catalog directories (<code>src/domains/providers/knowledge-base-path.ts</code>).</td>
+</tr>
+<tr>
+<td><code>CLIO_CODER_ENDPOINT_SLOTS_TTL_MS</code></td>
+<td>86400000</td>
+<td>How long a persisted endpoint slot count answers for an endpoint nothing has probed in this process. A record past the bound is ignored and pruned rather than allowed to over-admit (<code>src/domains/providers/endpoint-slots-store.ts</code>).</td>
+</tr>
+<tr>
+<td><code>CLIO_CODER_NO_NETWORK_TOOLS</code></td>
+<td>off</td>
+<td><code>1</code> strips network tools from every registry in the process; the skills-eval harness sets it for hermetic arms; <code>--allow-network</code> clears it (<code>src/tools/network-policy.ts</code>).</td>
+</tr>
+<tr>
+<td><code>CLIO_CODER_REDUCE_MOTION</code></td>
+<td>off</td>
+<td><code>1</code> makes smooth-streaming <code>auto</code> use the immediate coalescer. Explicit <code>on</code> remains an operator request, while stdout backpressure still pauses frame production.</td>
+</tr>
+<tr>
+<td><code>CLIO_CODER_SCREEN_READER</code></td>
+<td>off</td>
+<td><code>1</code> makes smooth-streaming <code>auto</code> use the immediate coalescer so a screen reader receives the existing low-motion update behavior.</td>
+</tr>
+<tr>
+<td><code>CLIO_CODER_INSTANT_SHELL</code></td>
+<td>on</td>
+<td><code>0</code> disables the single-owner Stage 0 interactive shell for immediate rollback. Unset or <code>1</code> mounts one terminal/editor owner before service hydration; ACP, headless, ordinary non-TTY, and subcommand paths never mount it. An explicit <code>CLIO_CODER_INTERACTIVE=1</code> keeps its force-interactive non-TTY behavior.</td>
+</tr>
+<tr>
+<td><code>CLIO_CODER_TRACE_RETENTION_DAYS</code></td>
+<td>30</td>
+<td>Maximum age in days for terminal rows in the rebuildable SQLite trace mirror. The value is an integer of at least 1 (<code>src/domains/observability/trace-store.ts</code>).</td>
+</tr>
+<tr>
+<td><code>CLIO_CODER_TRACE_MAX_BYTES</code></td>
+<td>134217728</td>
+<td>Maximum allocated size for the SQLite trace mirror before the oldest terminal runs are pruned. The value is an integer of at least 1,048,576 (<code>src/domains/observability/trace-store.ts</code>).</td>
+</tr>
+</tbody></table>
+<h2>Directory and install layout</h2>
+<table>
+<thead>
+<tr>
+<th>Variable</th>
+<th>Default</th>
+<th>Controls</th>
+</tr>
+</thead>
+<tbody><tr>
+<td><code>CLIO_CODER_HOME</code></td>
+<td>unset</td>
+<td>Single-tree install root; the per-role vars below beat it (<code>src/core/xdg.ts</code>).</td>
+</tr>
+<tr>
+<td><code>CLIO_CODER_CONFIG_DIR</code>, <code>CLIO_CODER_DATA_DIR</code>, <code>CLIO_CODER_STATE_DIR</code>, <code>CLIO_CODER_CACHE_DIR</code></td>
+<td>XDG platform defaults</td>
+<td>Per-role directory overrides (<code>src/core/xdg.ts</code>).</td>
+</tr>
+<tr>
+<td><code>XDG_CONFIG_HOME</code>, <code>XDG_DATA_HOME</code>, <code>XDG_STATE_HOME</code>, <code>XDG_CACHE_HOME</code></td>
+<td>platform/user defaults</td>
+<td>Linux base directories used when the corresponding <code>CLIO_CODER_*_DIR</code> and <code>CLIO_CODER_HOME</code> variables are unset (<code>src/core/xdg.ts</code>).</td>
+</tr>
+<tr>
+<td><code>APPDATA</code>, <code>LOCALAPPDATA</code></td>
+<td>Windows profile defaults</td>
+<td>Windows roaming and local base directories used when Clio-specific directory overrides are unset (<code>src/core/xdg.ts</code>).</td>
+</tr>
+<tr>
+<td><code>CLIO_CODER_BIN_DIR</code></td>
+<td><code>~/.local/bin</code></td>
+<td>Launcher symlink location (<code>src/cli/uninstall.ts</code>).</td>
+</tr>
+<tr>
+<td><code>CLIO_CODER_PACKAGE_ROOT</code></td>
+<td>auto-detected</td>
+<td>Package root for bundled-asset resolution (<code>src/core/package-root.ts</code>).</td>
+</tr>
+</tbody></table>
+<h2>Ambient provider, runtime, and terminal inputs</h2>
+<p>These names follow an upstream or operating-system convention. They are not substitutes for settings keys, but source reads them when the associated integration is used.</p>
+<table>
+<thead>
+<tr>
+<th>Variable or family</th>
+<th>Controls</th>
+</tr>
+</thead>
+<tbody><tr>
+<td>Provider credential variables</td>
+<td><code>src/engine/env-api-keys.ts</code> maps the selected provider to its conventional key, including <code>OPENAI_API_KEY</code>, <code>ANTHROPIC_API_KEY</code>, <code>OPENROUTER_API_KEY</code>, <code>GEMINI_API_KEY</code>, <code>AWS_*</code> Bedrock credentials, and Google Vertex application credentials. <code>clio-coder auth</code> remains the preferred managed credential path.</td>
+</tr>
+<tr>
+<td><code>OLLAMA_NUM_PARALLEL</code></td>
+<td>Fallback concurrency advertised for an Ollama Native target when the runtime does not provide a stronger slot fact (<code>src/domains/providers/runtimes/local-native/ollama-native.ts</code>).</td>
+</tr>
+<tr>
+<td><code>VISUAL</code>, <code>EDITOR</code></td>
+<td>External editor command, with <code>VISUAL</code> taking precedence (<code>src/interactive/external-editor.ts</code>).</td>
+</tr>
+<tr>
+<td><code>TERM</code>, <code>COLORTERM</code>, <code>TERM_PROGRAM</code>, <code>WT_SESSION</code></td>
+<td>Terminal capability, color-depth, keybinding, and desktop-notification adaptation. These variables describe the terminal rather than Clio policy.</td>
+</tr>
+<tr>
+<td><code>SSH_CONNECTION</code>, <code>SSH_TTY</code>, <code>TMUX</code>, <code>STY</code></td>
+<td>Remote-session and terminal-multiplexer detection used by the adaptive stream-pacing policy (<code>src/interactive/stream-pacing-policy.ts</code>).</td>
+</tr>
+<tr>
+<td><code>COLUMNS</code></td>
+<td>Fallback text width for non-TTY CLI output (<code>src/cli/text-layout.ts</code>).</td>
+</tr>
+<tr>
+<td><code>TZ</code></td>
+<td>Local timestamp formatting and daily audit-log date boundaries (<code>src/interactive/format-time.ts</code>, <code>src/domains/safety/audit.ts</code>).</td>
+</tr>
+<tr>
+<td><code>CI</code>, <code>NODE_ENV</code></td>
+<td>CI-sensitive presentation behavior and test/development-only seams. Neither grants tool authority.</td>
+</tr>
+</tbody></table>
+<h2>Debug and trace toggles</h2>
+<p>All default off; enable with <code>1</code>.</p>
+<table>
+<thead>
+<tr>
+<th>Variable</th>
+<th>Controls</th>
+</tr>
+</thead>
+<tbody><tr>
+<td><code>CLIO_CODER_BUS_TRACE</code></td>
+<td>Event-bus channel tracing to stderr (<code>src/core/bus-trace.ts</code>).</td>
+</tr>
+<tr>
+<td><code>CLIO_CODER_TRACE_BOOT</code></td>
+<td>Boot-phase timing trace (<code>src/core/boot-trace.ts</code>).</td>
+</tr>
+<tr>
+<td><code>CLIO_CODER_TIMING</code></td>
+<td>Startup timing report, printed only on the bannered non-interactive boot (<code>src/entry/orchestrator.ts</code>).</td>
+</tr>
+<tr>
+<td><code>CLIO_CODER_DEBUG_SHUTDOWN</code></td>
+<td>Shutdown-path diagnostics (<code>src/core/termination.ts</code>).</td>
+</tr>
+<tr>
+<td><code>CLIO_CODER_HOOK_BUDGET_DEBUG</code></td>
+<td>Per-overrun hook-budget diagnostics (<code>src/domains/middleware/runtime.ts</code>).</td>
+</tr>
+</tbody></table>
+<h3>File-writing traces</h3>
+<p>These two take a path, not <code>1</code>. Setting either to <code>1</code> writes a file named <code>1</code> in the working directory. Both are off when unset or empty, and both create parent directories.</p>
+<table>
+<thead>
+<tr>
+<th>Variable</th>
+<th>Contents</th>
+<th>Controls</th>
+</tr>
+</thead>
+<tbody><tr>
+<td><code>CLIO_CODER_RENDER_TRACE</code></td>
+<td>timing only</td>
+<td>Versioned JSONL for the full interactive render pipeline, truncated on open so one file is one session. Records event/input sequence ranges, queue and panel high-water marks, explicit frames, grouped stdout commits, write return values, backpressure, and drain—but no conversation text. Output is bounded and asynchronous after the initial pre-TUI file open; trace failure is nonfatal. See <a href="performance_methodology_blueprint.html">performance-methodology.md</a> for endpoint definitions (<code>src/interactive/render-trace.ts</code>).</td>
+</tr>
+<tr>
+<td><code>CLIO_CODER_MEMORY_TRACE</code></td>
+<td>conversation text</td>
+<td>Proactive task-memory step envelopes, including up to 8000 characters of the text each step saw. This is content-bearing by construction, so the file carries whatever the session carried. Do not enable it on work you would not paste, and do not attach the file to a bug report without reading it first (<code>src/domains/memory/task-memory-trace.ts</code>).</td>
+</tr>
+</tbody></table>
+<p>Example:</p>
+<pre><code class="language-bash">CLIO_CODER_RENDER_TRACE=/tmp/clio-render.jsonl clio-coder
+</code></pre>
+<h2>Internal plumbing</h2>
+<p>Set by Clio for its own processes; not operator knobs.</p>
+<table>
+<thead>
+<tr>
+<th>Variable</th>
+<th>Purpose</th>
+</tr>
+</thead>
+<tbody><tr>
+<td><code>AI_AGENT</code></td>
+<td>Clio sets this generic child-process attribution marker to <code>clio-coder</code> at both shipped entry points and reinforces it for bash tools, fleet workers, registered code steps, and command hooks. Child tooling may read it to identify the agent that launched it (<code>src/cli/index.ts</code>, <code>src/worker/entry.ts</code>, <code>src/core/bash-exec.ts</code>).</td>
+</tr>
+<tr>
+<td><code>CLIO_CODER_GIT_COMMITS_ENABLED</code></td>
+<td>Carries the effective <code>integrations.git.commitAttribution</code> setting to Clio-controlled child-process seams. It is set from validated settings and is not an operator override (<code>src/core/git-commit-attribution.ts</code>).</td>
+</tr>
+<tr>
+<td><code>CLIO_CODER_COMMIT_ASSISTED</code>, <code>CLIO_CODER_COMMIT_AUTHORED</code></td>
+<td>Per-spawn inputs to the managed <code>prepare-commit-msg</code> hook, which also requires <code>AI_AGENT=clio-coder</code> and <code>CLIO_CODER_GIT_COMMITS_ENABLED=1</code>; normal external shells never receive this set. Only assistance and authorship cross the environment. Testing, review, and receipt trailers are composed in process by the fleet seam, so a child shell cannot forge them by exporting a variable (<code>src/core/git-commit-attribution.ts</code>).</td>
+</tr>
+<tr>
+<td><code>CLIO_CODER_GIT_CONFIG_BASE_COUNT</code>, <code>CLIO_CODER_GIT_DEFAULT_HOOKS_EQUIVALENT</code></td>
+<td>Bookkeeping that lets each managed hook wrapper remove only Clio&#39;s command-scope <code>core.hooksPath</code> pair before chaining the repository&#39;s own hook of the same name. Existing <code>GIT_CONFIG_COUNT</code> entries remain in force; an explicit <code>core.hooksPath</code> is treated as composable only when it resolves exactly to the repository&#39;s default hooks directory (<code>src/core/git-commit-attribution.ts</code>).</td>
+</tr>
+<tr>
+<td><code>CLIO_CODER_INTERACTIVE</code></td>
+<td>Marks the interactive TUI process; scrubbed from bash-tool children so nested invocations do not inherit it (<code>src/cli/clio.ts</code>, <code>src/core/bash-exec.ts</code>).</td>
+</tr>
+<tr>
+<td><code>CLIO_CODER_RUN_OVERRIDES</code></td>
+<td>JSON envelope for run-scoped CLI options (<code>--max-context-tokens</code>, <code>--kv-cache-mode</code>, sampling flags). One typed variable instead of one env var per option; worker subprocesses inherit it (<code>src/core/run-overrides.ts</code>).</td>
+</tr>
+<tr>
+<td><code>CLIO_CODER_EVAL_RUNNER_STDOUT_FILE</code></td>
+<td>Set by the eval runner for the <code>clio-coder run</code> child it spawns; the child appends its stdout to that path so the runner can read it after exit (<code>src/domains/eval/suites/run.ts</code>).</td>
+</tr>
+<tr>
+<td><code>CLIO_CODER_YAZI_PICK_TOKEN</code></td>
+<td>Per-session token the yazi file-pane integration hands its yazi child and expects back on a pick, so a pick from another session is ignored (<code>src/domains/mux/yazi/session.ts</code>, <code>src/domains/mux/yazi/profile.ts</code>).</td>
+</tr>
+<tr>
+<td><code>CLIO_CODER_WORKER_LABELS</code></td>
+<td>Comma-separated labels a dispatched worker reports as its own (<code>src/domains/dispatch/transport.ts</code>, <code>src/worker/entry.ts</code>).</td>
+</tr>
+<tr>
+<td><code>CLIO_CODER_WORKER_PGID</code></td>
+<td>Process-group id the transport assigns a worker so its whole tree can be signalled (<code>src/domains/dispatch/transport.ts</code>, <code>src/worker/entry.ts</code>).</td>
+</tr>
+<tr>
+<td><code>CLIO_CODER_WORKER_RUN</code></td>
+<td>Marks a dispatched worker process; a skill install run inside it is stamped <code>installed-by: worker</code> (<code>src/worker/entry.ts</code>, <code>src/domains/resources/skills/install.ts</code>).</td>
+</tr>
+<tr>
+<td><code>CLIO_CODER_INJECTED_COMPILE_CACHE</code></td>
+<td>Marks a <code>NODE_COMPILE_CACHE</code> value Clio injected into a native worker&#39;s environment so its module graph compiles from Clio&#39;s V8 compile cache. The worker entry consumes the pair from its own environment immediately after Node reads it, so no worker child of any kind inherits it, and the spawn path never lets the marker travel beside an operator-supplied <code>NODE_COMPILE_CACHE</code> (<code>src/core/compile-cache.ts</code>, <code>src/domains/dispatch/worker-spawn.ts</code>, <code>src/worker/entry.ts</code>).</td>
+</tr>
+</tbody></table>
+<h2>Test-only</h2>
+<table>
+<thead>
+<tr>
+<th>Variable</th>
+<th>Purpose</th>
+</tr>
+</thead>
+<tbody><tr>
+<td><code>CLIO_CODER_WORKER_FAUX</code> (+ <code>_MODEL</code>, <code>_TEXT</code>, <code>_STOP_REASON</code>, <code>_ERROR_MESSAGE</code>)</td>
+<td>Fake worker model for tests (<code>src/engine/ai.ts</code>).</td>
+</tr>
+<tr>
+<td><code>CLIO_CODER_TEST_UPGRADE_NO_NETWORK</code></td>
+<td>Skips npm install during upgrade tests (<code>src/cli/upgrade.ts</code>).</td>
+</tr>
+<tr>
+<td><code>CLIO_CODER_TEST_STAGE1_DELAY_MS</code>, <code>CLIO_CODER_TEST_STAGE1_FAIL</code></td>
+<td><code>NODE_ENV=test</code>-only, bounded instant-shell interleaving and injected hydration failure seams for the built PTY acceptance suite (<code>src/cli/clio.ts</code>).</td>
+</tr>
+<tr>
+<td><code>CLIO_CODER_REQUIRE_HOME_PREFIX</code></td>
+<td>Test guardrail: abort if resolved directories escape <code>CLIO_CODER_HOME</code> (<code>src/core/init.ts</code>).</td>
+</tr>
+</tbody></table>
+<p>Variables used only by external benchmark harnesses or install scripts are not
+part of the shipped runtime and should be documented with those harnesses. The
+reviewable reference suites under <code>evals/</code> use the ordinary eval runner and a
+configured <code>--target &lt;id&gt;</code> when a model is required.</p>
+        </article>
+        <nav class="related-nav" aria-label="Adjacent references">
+          <a class="nav-link-card" href="configuration_reference_blueprint.html"><span class="nav-label">Previous</span><span class="nav-title">Configuration reference</span></a>
+          <a class="nav-link-card next" href="exit_codes_blueprint.html"><span class="nav-label">Next</span><span class="nav-title">Exit Codes &amp; Machine-Readable Output Contracts</span></a>
+        </nav>
+        <p class="reference-footer-note">Canonical content lives in the mapped Markdown page. This visual counterpart adds navigation without changing the contract.</p>
       </main>
     </div>
-
-    <footer>
-      <p>Clio Coder Env Blueprint &bull; Version 0.4.0 &bull; Gnosis Research Center</p>
-    </footer>
+    <footer>Clio Coder documentation · source-aligned at v0.4.2</footer>
   </div>
-
   <script src="shared.js"></script>
-  <script>
-    let activeCat = 'all';
-
-    function filterCategory(cat) {
-      activeCat = cat;
-      document.querySelectorAll('.filter-tag').forEach(b => b.classList.remove('active'));
-      const activeBtn = document.getElementById(`btn-${cat}`);
-      if (activeBtn) activeBtn.classList.add('active');
-      filterEnvTable();
-    }
-
-    function filterEnvTable() {
-      const q = document.getElementById("envSearch").value.toLowerCase().trim();
-      const rows = document.querySelectorAll("#envTableBody tr");
-
-      rows.forEach(row => {
-        const name = row.querySelector(".env-name").innerText.toLowerCase();
-        const desc = row.cells[2].innerText.toLowerCase();
-        const cat = row.getAttribute("data-cat");
-
-        const matchesQ = !q || name.includes(q) || desc.includes(q);
-        const matchesCat = activeCat === 'all' || cat === activeCat;
-
-        if (matchesQ && matchesCat) {
-          row.style.display = "";
-        } else {
-          row.style.display = "none";
-        }
-      });
-    }
-
-    function resolvePaths() {
-      const os = document.getElementById("osSelect").value;
-      const clioHome = document.getElementById("clioHomeInput").value.trim();
-      const clioConfig = document.getElementById("clioConfigInput").value.trim();
-
-      let config = "";
-      let data = "";
-      let state = "";
-      let cache = "";
-
-      if (clioHome) {
-        config = `${clioHome}/config`;
-        data = `${clioHome}/data`;
-        state = `${clioHome}/state`;
-        cache = `${clioHome}/cache`;
-      } else {
-        if (os === "linux") {
-          config = "~/.config/clio-coder";
-          data = "~/.local/share/clio-coder";
-          state = "~/.local/state/clio-coder";
-          cache = "~/.cache/clio-coder";
-        } else if (os === "macos") {
-          config = "~/Library/Application Support/clio-coder/config";
-          data = "~/Library/Application Support/clio-coder/data";
-          state = "~/Library/Application Support/clio-coder/state";
-          cache = "~/Library/Caches/clio-coder";
-        } else {
-          config = "%APPDATA%\\clio-coder\\config";
-          data = "%APPDATA%\\clio-coder\\data";
-          state = "%LOCALAPPDATA%\\clio-coder\\state";
-          cache = "%LOCALAPPDATA%\\clio-coder\\cache";
-        }
-      }
-
-      if (clioConfig) {
-        config = clioConfig;
-      }
-
-      document.getElementById("valConfig").innerText = config;
-      document.getElementById("valData").innerText = data;
-      document.getElementById("valState").innerText = state;
-      document.getElementById("valCache").innerText = cache;
-    }
-
-    // Init
-    window.onload = () => {
-      resolvePaths();
-      // Make functions globally available
-      window.filterCategory = filterCategory;
-    };
-  </script>
 </body>
 </html>

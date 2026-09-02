@@ -1,8 +1,7 @@
 # Model Catalog, Runtime Refresh, and Field Notes
 
-> [!TIP]
-> **Interactive spec available:** The source checkout includes the
-> [model and target blueprint](https://github.com/iowarp/clio-coder/blob/main/docs/html/models_blueprint.html).
+> **Visual blueprint:** The source checkout includes the complete
+> [Model Catalog, Runtime Refresh, and Field Notes visual reference](https://github.com/iowarp/clio-coder/blob/main/docs/html/models_blueprint.html).
 
 Clio Coder treats a selectable model as the intersection of three sources:
 

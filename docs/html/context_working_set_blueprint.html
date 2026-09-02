@@ -1,0 +1,324 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <meta name="clio-markdown-source" content="docs/architecture/context-working-set.md">
+  <meta name="clio-docs-version" content="0.4.2">
+  <title>Working Set · Clio Coder 0.4.2</title>
+  <link rel="icon" href="data:,">
+  <link rel="stylesheet" href="shared.css">
+</head>
+<body data-doc-category="architecture">
+  <div class="reading-progress" aria-hidden="true"></div>
+  <a class="skip-link" href="#reference-content">Skip to reference</a>
+  <div class="container">
+    <header class="document-header" data-category="Architecture">
+      <div class="header-left">
+        <a class="header-logo" href="index.html" aria-label="Documentation index">
+          <svg viewBox="0 0 24 24" fill="none" aria-hidden="true">
+            <path d="M12 2 2 7l10 5 10-5-10-5Z" stroke="url(#clio-logo)" stroke-width="2" stroke-linejoin="round"/>
+            <path d="m2 12 10 5 10-5M2 17l10 5 10-5" stroke="url(#clio-logo)" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"/>
+            <defs><linearGradient id="clio-logo" x1="2" y1="2" x2="22" y2="22"><stop stop-color="#00d4db"/><stop offset="1" stop-color="#ff7e29"/></linearGradient></defs>
+          </svg>
+        </a>
+        <div class="header-title-wrapper">
+          <p class="document-kicker">Architecture / canonical reference</p>
+          <h1>Working Set</h1>
+          <p class="document-path">docs/architecture/context-working-set.md</p>
+        </div>
+      </div>
+      <div class="header-right">
+        <a class="back-btn" href="index.html">← Index</a>
+        <span class="version-badge">v0.4.2</span>
+      </div>
+    </header>
+    <div class="page-layout-grid reference-layout">
+      <aside class="sidebar reference-sidebar" aria-label="On this page">
+        <nav class="toc-container">
+          <p class="toc-title">On this page</p>
+          <a class="sidebar-source" href="https://github.com/iowarp/clio-coder/blob/main/docs/architecture/context-working-set.md">Canonical Markdown<br>docs/architecture/context-working-set.md</a>
+          <ul class="toc-list"></ul>
+        </nav>
+      </aside>
+      <main class="reference-main" id="reference-content">
+        <article class="reference-prose glass-card">
+<blockquote>
+<p><strong>Visual blueprint:</strong> The source checkout includes the complete
+<a href="context_working_set_blueprint.html">Working Set visual reference</a>.</p>
+</blockquote>
+<p>The working set is the part of the session ledger the model actually receives on the next request. When context pressure crosses <code>context.compaction.threshold</code>, Clio narrows that view before it considers summarizing anything: selected tool-result bodies and closed-turn thinking blocks stop being replayed, and a one-line marker takes each body&#39;s place. Nothing is deleted. The ledger keeps every byte the tools produced, the transcript keeps showing them, and the model can ask for any evicted body back by ref.</p>
+<p>Source of truth is <code>src/domains/context/working-set/</code> (<code>contract.ts</code>, <code>fold.ts</code>, <code>project.ts</code>, <code>marker.ts</code>, <code>protect.ts</code>, <code>engine.ts</code>, <code>recall.ts</code>, <code>policies/</code>), the ledger records in <code>src/domains/session/entries.ts</code>, and the compaction stage in <code>src/interactive/turn-context.ts</code> (<code>runAutoCompact</code>).</p>
+<blockquote>
+<p>[!WARNING]
+This is an experimental community alpha surface. The default policy is <code>structural-v1</code>; <code>age-horizon</code> preserves the old age-based selection except for the current low-yield token floor and stays available.</p>
+</blockquote>
+<h2>Vocabulary</h2>
+<table>
+<thead>
+<tr>
+<th>Term</th>
+<th>Definition</th>
+</tr>
+</thead>
+<tbody><tr>
+<td>Working set</td>
+<td>What the model sees on the next request: the ledger with the current projection applied. It is never a file.</td>
+</tr>
+<tr>
+<td>Ledger</td>
+<td>The durable append-only session record (<code>current.jsonl</code>). The working-set layer appends to it and never rewrites it.</td>
+</tr>
+<tr>
+<td>Evicted</td>
+<td>A unit whose body the projection replaces with a marker. The ledger entry that holds the original body is untouched.</td>
+</tr>
+<tr>
+<td>Offloaded</td>
+<td>A result the observation envelope already wrote to a file because it exceeded the per-call cap. Its marker carries the pointer instead of a preview, and recall returns the pointer rather than inlining the file.</td>
+</tr>
+<tr>
+<td>Recall</td>
+<td>Readmitting an evicted body by ref, through <code>context(scope=&quot;recall&quot;, ref=...)</code> for the model or <code>/context recall &lt;ref&gt;</code> for the operator.</td>
+</tr>
+<tr>
+<td>Marker</td>
+<td>The byte-stable one-line stub the projection renders in place of an evicted body. It names the ref, the reason, the size, and the exact call that brings the body back.</td>
+</tr>
+<tr>
+<td>Projection</td>
+<td>A pure, in-memory transform from ledger entries to the entries the replay builder hands the model. <code>projectWorkingSet(entries, view)</code> is that function.</td>
+</tr>
+</tbody></table>
+<h2>Eviction is a projection, not a rewrite</h2>
+<p>The stage this layer replaces rewrote history. <code>maskStaleObservations</code> walked the entries, replaced observation bodies with a masked-out string, and called <code>session.replaceEntries</code>. That destroyed the only copy: after a mask, <code>/resume</code>, <code>/tree</code>, <code>/fork</code>, and the HTML export all showed the placeholder, and the content was gone for the operator as well as the model.</p>
+<p>The working-set layer separates the two audiences. What leaves is recorded as a <code>contextEviction</code> entry, appended like any other. <code>refreshAgentMessagesFromSession</code> folds those entries into a <code>WorkingSetView</code> and applies <code>projectWorkingSet</code> before <code>buildReplayAgentMessagesFromTurns</code> runs, so only the messages bound for the provider carry markers. Every reader that shows the session to a human reads the raw ledger and sees the full bodies.</p>
+<p>Three properties follow from that shape:</p>
+<ul>
+<li><strong>Idempotence.</strong> Projecting an already-projected slice reproduces it byte for byte, because the marker comes from the ledger entry rather than from the body being replaced.</li>
+<li><strong>Branch safety.</strong> The fold runs through <code>filterEntriesToActivePath</code> (issue #94), so an eviction recorded on a branch <code>/tree</code> later abandoned cannot project onto the live one, and a fork inherits the view of its shared prefix.</li>
+<li><strong>Determinism.</strong> A policy is a pure function of <code>PolicyInput</code>. The same ledger and the same settings select the same units in a live session and in an offline replay of that session.</li>
+</ul>
+<p>Usage anchors recorded before an eviction described a longer prompt than the model will now receive, so the projection stamps <code>contextUsageInvalidated</code> on assistant entries that precede the newest eviction event. Without that, <code>calculateContextTokens</code> would keep reporting the pre-eviction size and the pressure estimator would never see the space the event freed. The stamp is replay bookkeeping, not provider-visible message content, and the prompt estimator deliberately excludes it. That keeps plan-time <code>tokensAfter</code> and the post-event cold-prefix metric on the same byte definition.</p>
+<h2>Ledger records and format v4</h2>
+<p>Two entry kinds carry the layer, both defined in <code>src/domains/session/entries.ts</code>:</p>
+<table>
+<thead>
+<tr>
+<th>Kind</th>
+<th>Fields</th>
+<th>Meaning</th>
+</tr>
+</thead>
+<tbody><tr>
+<td><code>contextEviction</code></td>
+<td><code>policyId</code>, <code>trigger</code> (<code>pressure</code> or <code>operator</code>), <code>evicted[]</code>, <code>tokensBefore</code>, <code>tokensAfter</code>, <code>pressureBefore</code>, <code>snapshotIdBefore</code></td>
+<td>One applied event. Each <code>evicted[]</code> item is <code>{ ref, reason, tokensFreed, marker, by? }</code>.</td>
+</tr>
+<tr>
+<td><code>contextRecall</code></td>
+<td><code>ref</code>, <code>trigger</code> (<code>tool</code> or <code>operator</code>), <code>tokensReadmitted</code>, <code>toolCallId?</code></td>
+<td>One readmission of one ref. It is a churn record, not an un-eviction.</td>
+</tr>
+</tbody></table>
+<p><code>reason</code> is one of <code>superseded_read</code>, <code>stale_after_mutation</code>, <code>listing_consumed</code>, <code>failure_resolved</code>, <code>thinking_turn_closed</code>, <code>age_horizon</code>, <code>operator</code>. A <code>ref</code> is the <code>turnId</code> of the ledger entry that holds the unit: for a <code>tool_result</code> message the unit is the result body, and for an <code>assistant</code> message it is every thinking block the message carries. Per-block eviction is deliberately not modelled.</p>
+<p>Adding those kinds bumps the session format to version 4 (<code>CURRENT_SESSION_FORMAT_VERSION = 4</code> in <code>src/engine/session.ts</code>). The bump is additive: no existing entry kind changes shape, so a version 3 session migrates to 4 in place when Clio opens it and no entry is rewritten. <code>runMigrations</code> refuses only what it cannot read, a session written by a newer build, with &quot;upgrade clio-coder to resume this session&quot;. The bump is still one-way for the operator: Clio 0.3.3 does not know these kinds and cannot open a session this release wrote.</p>
+<h2>The marker contract</h2>
+<p>A marker is one line, its fields are in fixed order, and it carries no timestamp and no counter. That is not cosmetic. The marker is persisted inside the <code>contextEviction</code> entry and replayed on every subsequent request, so a marker whose bytes drifted between renders would cold-start the provider prefix cache on a turn that evicted nothing new. It would also make two replays of the same recorded ledger disagree.</p>
+<p>Field order is <code>ref</code>, <code>reason</code>, <code>by</code>, <code>tool</code>, <code>path</code>, <code>size</code>, <code>offload</code>, <code>recall</code>, then the body tail. Undefined fields are omitted rather than rendered empty. <code>path</code> is the one file the result was about: <code>details.paths</code> when the tool recorded exactly one (<code>edit</code>, <code>write</code>, <code>artifact</code>), otherwise the <code>path</code> argument of the call as the model wrote it, which is how a <code>read</code> marker names its file. Real output from <code>renderMarker</code> in <code>src/domains/context/working-set/marker.ts</code>:</p>
+<pre><code class="language-text">[evicted ref=0198f3c2-7a10-7c31-9d44-2b0c5f1e88a3 reason=stale_after_mutation by=0198f3c2-9b02-7f55-8e10-6d21ac9e4471 tool=read path=src/domains/context/working-set/engine.ts size=41 lines/3.8KB recall=context(scope=&quot;recall&quot;, ref=&quot;0198f3c2-7a10-7c31-9d44-2b0c5f1e88a3&quot;) preview=&quot;export function planEviction(policy: WorkingSetPolicy, input: PolicyInput): EvictionPlan | null { export function planEv&quot;]
+</code></pre>
+<pre><code class="language-text">[evicted ref=0198f3c2-1d44-7a90-b201-77c0e1a2f5de reason=failure_resolved by=0198f3c3-0002-7ab1-9c33-14ff90bb2c07 tool=bash size=4 lines/152B recall=context(scope=&quot;recall&quot;, ref=&quot;0198f3c2-1d44-7a90-b201-77c0e1a2f5de&quot;) first_line=&quot;src/interactive/turn-context.ts(466,15): error TS2345: Argument of type &#39;PolicyInput&#39; is not assignable to parameter of &quot;]
+</code></pre>
+<pre><code class="language-text">[evicted ref=0198f3c4-55aa-7be2-8f01-9a3d6c2b1e77 reason=listing_consumed tool=grep size=1 lines/234.4KB offload=/home/dev/.local/state/clio-coder/offload/0198f3c4-grep.txt recall=context(scope=&quot;recall&quot;, ref=&quot;0198f3c4-55aa-7be2-8f01-9a3d6c2b1e77&quot;)]
+</code></pre>
+<p>Three rules govern the tail. Most reasons render <code>preview</code>: the first 120 characters of the body, whitespace collapsed and double quotes escaped, so the preview cannot break the quoted field or spill onto a second line. A <code>failure_resolved</code> eviction renders <code>first_line</code> instead, because the line that says what failed is worth the marker&#39;s tokens where a preview of a stack trace is not. An offloaded body renders neither, because the <code>offload=</code> pointer already promises the full artifact at a stable path and a preview would spend tokens repeating it.</p>
+<p>Thinking eviction renders no marker at all. The reasoning simply stops being replayed. A marker there would spend tokens announcing that something the model cannot act on is gone.</p>
+<h2>Policies</h2>
+<p>A policy answers one question: which units should leave. It never writes, never reads a clock, and never calls a model. <code>planEviction</code> then materializes the selection into <code>EvictedItem</code>s with markers rendered and tokens measured, and prices the result against the projection the model will actually receive.</p>
+<h3>Protection predicates</h3>
+<p><code>protect.ts</code> runs before every rule in <code>structural-v1</code> and is absolute. A policy is allowed to be wrong about relevance; it is not allowed to drop these:</p>
+<ol>
+<li>Anything that is not a <code>tool_result</code> or <code>assistant</code> message. Operator words, compaction and branch summaries, skill activations, task ledgers, worker runs, and bash executions are the session&#39;s record of itself.</li>
+<li>Anything inside the recent window, which starts at <code>protectionCutoffIndex(entries, protectLastTurns)</code>. A turn starts at a user message, a <code>bashExecution</code>, or a <code>branchSummary</code>.</li>
+<li>A result whose estimated body is below <code>minEvictableTokens</code>. This protects low-yield bodies from churn; the engine independently rejects a marker that would free no tokens.</li>
+<li>A body the legacy destructive stage already replaced, which has nothing left to evict.</li>
+<li>A call the safety rails blocked. A refused call is a decision the session made, not an observation it can re-fetch.</li>
+<li>A write or edit the turn in flight is still standing on.</li>
+<li>A failure nothing later resolved, and any unindexed failure, because without an observation there is no way to ask whether it was resolved.</li>
+</ol>
+<h3><code>age-horizon</code></h3>
+<p>The rule <code>maskStaleObservations</code> applied, recorded instead of destroyed. Every <code>tool_result</code> body older than the protection horizon leaves the working set, and every <code>assistant</code> message older than the horizon loses its thinking blocks. Same turn-start definition, same cutoff, and a body carrying a legacy compaction marker is skipped the same way.</p>
+<p>One skip condition is new, so this is today&#39;s selection minus small results rather than a byte-identical reproduction of it: a result whose estimated body is below <code>minEvictableTokens</code> (200 tokens by default) stays, whatever its age. The engine already rejects markers that save no tokens; the higher default is a measured low-yield churn guard. The old mask had no such floor and masked those results too. Thinking has no size floor either way, because dropping it renders no marker.</p>
+<p><code>age-horizon</code> has no target stop. It evicts everything beyond the horizon in one event, exactly as the mask did, and ignores <code>context.workingSet.target</code>; the replay tables show this as <code>saturated events = 1.000</code> on every row. That is deliberate: the policy exists to reproduce the old selection through the ledger, and an operator who wants batching to a target wants <code>structural-v1</code>. Candidates arrive newest-safe-first, so a caller that stops early has evicted the newest safe unit rather than the oldest one.</p>
+<p>Age is not a quality signal. A file read twenty turns ago and never touched since is more useful than a directory listing from two turns ago, which is the whole reason <code>structural-v1</code> exists and is the default.</p>
+<h3><code>structural-v1</code> (default)</h3>
+<p>Rule order is the policy. Each rung emits candidates newest-first, every candidate passes <code>isProtected</code>, and no unit is claimed twice, so a read that is both stale and superseded is evicted for the reason that came first and carries the <code>by</code> ref that explains it. The rungs, in order:</p>
+<table>
+<thead>
+<tr>
+<th>#</th>
+<th>Reason</th>
+<th>Fires when</th>
+</tr>
+</thead>
+<tbody><tr>
+<td>1</td>
+<td><code>stale_after_mutation</code></td>
+<td>A read-class observation is followed by a write or edit of the same file. Whatever the body said is now a claim about a file that no longer exists in that form.</td>
+</tr>
+<tr>
+<td>2</td>
+<td><code>superseded_read</code></td>
+<td>A later successful read of the same file covers this one&#39;s lines. A full read covers everything; any other read covers only an identical or containing range, and an unknown range covers nothing.</td>
+</tr>
+<tr>
+<td>3</td>
+<td><code>failure_resolved</code></td>
+<td>A later call succeeded with byte-identical arguments, or, for <code>read</code>, <code>grep</code>, and <code>find</code>, reached the same file by any route.</td>
+</tr>
+<tr>
+<td>4</td>
+<td><code>listing_consumed</code></td>
+<td>Every path the listing surfaced went on to be read. One surfaced path still unread and the listing stays, because that is the path the agent comes back to.</td>
+</tr>
+<tr>
+<td>5</td>
+<td><code>thinking_turn_closed</code></td>
+<td>An assistant message beyond the protection horizon carries thinking blocks.</td>
+</tr>
+<tr>
+<td>6</td>
+<td><code>age_horizon</code></td>
+<td>Only under pressure, and only until the projection reaches <code>target</code>.</td>
+</tr>
+</tbody></table>
+<p>Rungs 1 through 5 are unconditional: redundant content is free to drop, whatever the pressure. Rung 6 is the only one that looks at token counts, and it stops the moment the projected size reaches <code>context.workingSet.target × contextWindow</code>. Newest-first within a rung is a cost decision: evicting the youngest safe unit keeps the cold region after the eviction point small, so the turn that pays for the event pays least.</p>
+<p>A historical local long-trace sweep found that targets 0.4 and an exhaustive rung 6 produced identical results because the usable candidate pool ran out first. Relative to the 0.6 default, 0.4 reduced cold-prefix tokens by 2.8% at 64k and 7.3% at 128k, did not reduce summaries, and lowered retention covered by 0.00072 at 128k. The default therefore remained 0.6. The generated grid and reopening calculation were local artifacts and are not versioned in this repository; use the replay commands in <a href="commands_blueprint.html#working-set-replay">Commands and Modes</a> to measure the current tree.</p>
+<p>The facts the rungs read come from <code>path-index.ts</code>, one deterministic pass over the active-path entries producing one observation per tool result that names a path: which file, which line range, which paths a listing surfaced, whether the call failed, and where in the turn sequence it sits. Tools that observe no path (dispatch, web fetch, tasks, ask user, context) produce no observation. There are no content fingerprints.</p>
+<h2>Recall</h2>
+<p>Recall is explicit and by ref. There is no auto-readmission: the marker tells the model exactly which call brings the body back, and the model decides.</p>
+<p><code>resolveRecall(entries, view, ref, activeLeafTurnId)</code> resolves a ref against the fold at the live leaf and returns the original body byte-exact, read with the same field precedence the projection would have used. It fails in three typed ways:</p>
+<ul>
+<li><code>invalid_ref</code> when the ref is empty or carries whitespace.</li>
+<li><code>not_on_active_path</code> when the session has no such turn on this branch, which includes a ref from a branch <code>/tree</code> abandoned.</li>
+<li><code>not_evicted</code> when the unit is still in context. An assistant turn reports separately that thinking is not recallable.</li>
+</ul>
+<p>The <code>not_on_active_path</code> and <code>not_evicted</code> messages end with the refs that can be recalled on the active path (tool results only, up to eight, then a count). <code>invalid_ref</code> reports only the malformed value. Clio deliberately lists valid refs instead of guessing a nearest ref, because similar time-ordered identifiers can name unrelated results.</p>
+<p>An LLM summary also preserves recall discovery across its cut. When an evicted tool result falls before <code>firstKeptTurnId</code>, the generated checkpoint carries a <code>&lt;recallable-refs&gt;</code> block with the same <code>ref (tool path)</code> rows used by recall failures, bounded to eight rows plus a remaining count. Results that stay after the cut keep their ordinary markers and are not repeated in the block.</p>
+<p><strong>A recall does not un-evict.</strong> The key stays in <code>view.evicted</code>, the marker stays byte-identical at its original position, and the recalled body arrives at the tail of the working set inside the recall result. Readmitting it in place would duplicate the bytes and invalidate the provider prefix cache for everything after that point, which costs more than the recall saved.</p>
+<p>That also makes recall the churn signal. <code>churn = recalls / itemsEvicted</code> over the active path. A high churn number means the policy keeps evicting content the session still needs, which is a reason to change the policy rather than to raise the threshold.</p>
+<p>The procedural replay does not synthesize churn from path reuse. Its reference graph maps each earlier observation to every later reread or discovery of the same path, while a real <code>contextRecall</code> is an explicit model choice of one ref. A later reread already returns current content at the tail, so also injecting the old body would duplicate data and misread stale or superseded observations as recall demand. Replay reports <code>recallTokens</code> as a one-time demand bound per evicted item and waits for explicit <code>contextRecall</code> records before reporting recall count, churn, or tail growth. Graph-density measurements and reopening calculations are generated local artifacts rather than a versioned replay README.</p>
+<p>An offloaded result returns its pointer, never the file. The model gets the same <code>full: &lt;path&gt;</code> promise the original tool result ended with and reads it with <code>read</code> when it wants it.</p>
+<p>The two entry points differ in where the body lands:</p>
+<table>
+<thead>
+<tr>
+<th>Caller</th>
+<th>Entry point</th>
+<th>Where the body goes</th>
+<th>Ledger record</th>
+</tr>
+</thead>
+<tbody><tr>
+<td>Model</td>
+<td><code>context(scope=&quot;recall&quot;, ref=...)</code></td>
+<td>Back into the working set through the normal observation envelope, so the per-turn pool and the self cap still apply</td>
+<td><code>contextRecall</code> with <code>trigger: &quot;tool&quot;</code> and the <code>toolCallId</code></td>
+</tr>
+<tr>
+<td>Operator</td>
+<td><code>/context recall &lt;ref&gt;</code></td>
+<td>The transcript only. It is never submitted as a turn and never counted against the context window</td>
+<td><code>contextRecall</code> with <code>trigger: &quot;operator&quot;</code></td>
+</tr>
+</tbody></table>
+<p>Both publish <code>BusChannels.ContextRecalled</code>, and both route through the middleware <code>on_compaction</code> hook as stage <code>working_set_recall</code>.</p>
+<h2>Settings</h2>
+<pre><code class="language-yaml">context:
+  workingSet:
+    enabled: true
+    policy: structural-v1
+    target: 0.6
+    protectLastTurns: 6
+    minEvictableTokens: 200
+</code></pre>
+<table>
+<thead>
+<tr>
+<th>Key</th>
+<th>Default</th>
+<th>Accepted</th>
+<th>Meaning</th>
+</tr>
+</thead>
+<tbody><tr>
+<td><code>context.workingSet.enabled</code></td>
+<td><code>true</code></td>
+<td>boolean</td>
+<td>Master switch. <code>false</code> skips eviction and goes straight to summary compaction. It does not restore the destructive mask.</td>
+</tr>
+<tr>
+<td><code>context.workingSet.policy</code></td>
+<td><code>structural-v1</code></td>
+<td><code>age-horizon</code>, <code>structural-v1</code></td>
+<td>Candidate selection rule set.</td>
+</tr>
+<tr>
+<td><code>context.workingSet.target</code></td>
+<td><code>0.6</code></td>
+<td>number greater than 0 and less than 1</td>
+<td>Used-over-window ratio an applied <code>structural-v1</code> event batches down to. <code>age-horizon</code> ignores it.</td>
+</tr>
+<tr>
+<td><code>context.workingSet.protectLastTurns</code></td>
+<td><code>6</code></td>
+<td>integer ≥ 1</td>
+<td>Recent turns whose observations and thinking are never evicted.</td>
+</tr>
+<tr>
+<td><code>context.workingSet.minEvictableTokens</code></td>
+<td><code>200</code></td>
+<td>integer ≥ 0</td>
+<td>Results below this body estimate are never evicted. The default protects low-yield bodies; marker break-even is enforced separately.</td>
+</tr>
+</tbody></table>
+<p>The retired <code>compaction.excludeLastTurns</code> key is not accepted by settings v2. The temporary legacy mask uses a compiled six-turn fallback; working-set protection uses <code>context.workingSet.protectLastTurns</code>. Settings validation is strict, so an unknown key under this block fails startup with its exact path.</p>
+<p><code>CLIO_CODER_LEGACY_MASK=1</code> restores the destructive stale-observation stage for one release as a compatibility escape hatch. It rewrites the ledger, and it is removed in the next release.</p>
+<h2>What the operator sees</h2>
+<ul>
+<li><strong><code>/context</code> overlay.</strong> A working-set section under the category legend: the configured policy with its state (<code>policy structural-v1 · no events yet</code> until the first event, <code>disabled</code> when <code>context.workingSet.enabled</code> is off, and <code>(last event by &lt;policy&gt;)</code> when the setting changed after an event), evicted item count, evicted tokens, event count, recall count, and churn. Evicted tokens render as one line after the legend rather than as a meter category, because they are outside the window rather than a slice of it.</li>
+<li><strong>Transcript.</strong> An evicted tool row keeps its full body and gains a dim <code>evicted · &lt;reason&gt;</code> tag. The transcript shows the ledger, never the projection, so <code>/resume</code>, <code>/tree</code>, <code>/fork</code>, and the HTML export are unaffected by eviction.</li>
+<li><strong><code>/context recall &lt;ref&gt;</code>.</strong> Prints the ref, why it was evicted, the token count, and the offload pointer when there is one, followed by the original body. Transcript only.</li>
+<li><strong>Prompt cache line.</strong> Every applied event stamps <code>working_set_evict</code> on the next assistant entry&#39;s <code>promptCache.expectedColdReasons</code>. When the last settled run came back cold for that reason, the overlay adds <code>last cold turn: working-set eviction (expected)</code> and drops the shell-reused-but-backend-cold warning, because the cold turn is explained rather than surprising.</li>
+<li><strong>Notice.</strong> One line per applied event: <code>[context engine] working set: N items evicted by &lt;policy&gt;; ~X -&gt; ~Y tokens, recall by ref with context(scope=&quot;recall&quot;)</code>. The numbers are the plan&#39;s, priced over the visible ledger slice, and they are the same numbers the <code>contextEviction</code> entry, the <code>[Compaction] Reclaimed context</code> toast, and the overlay&#39;s <code>last compaction</code> line carry. The footer meter is a separate live estimate over the agent message list and can differ from them by the tool schemas and replay text it includes.</li>
+</ul>
+<h2>Not in this release</h2>
+<p>These are tracked follow-ups, not available behavior:</p>
+<ul>
+<li><strong>Auto-readmission.</strong> Nothing brings an evicted body back on its own. There are no path fingerprints and no registry of what the model is likely to need next.</li>
+<li><strong>Cost model and deferred scheduling.</strong> Pressure is the only trigger, and it is <code>context.compaction.threshold</code>, not <code>target</code>. Historical local replay tables priced every applied event by the cold prefix it re-prefilled (about 29k tokens per event at a 64k budget), and batching from the threshold down to the target kept one event per cycle; a trigger at the target would make every turn above 60% with one newly redundant read an event of its own. Those tables are not versioned benchmark results. There is no break-even horizon, no deferred eviction plan, and no piggybacking beyond the fact that the working-set stage already runs first inside <code>runAutoCompact</code>.</li>
+<li><strong>Intra-turn eviction.</strong> Eviction runs before a request is sent. A single turn whose tool results overflow the window is handled by the observation envelope&#39;s caps and by summary compaction, not by this layer.</li>
+<li><strong>Worker runtimes.</strong> Dispatched workers replay their own ledgers without the working-set stage.</li>
+<li><strong>Digests.</strong> A marker carries tool, size, and a first-line preview. The generated summaries from #165 are not embedded in it.</li>
+</ul>
+<h2>See also</h2>
+<ul>
+<li><code>clio-coder context replay --sessions &lt;path&gt;...</code> replays Clio ledgers, and <code>--synthetic &lt;ids&gt;</code> replays the seeded procedural corpora, through the same fold, projection, and policy code with <code>none</code>, <code>random</code>, and <code>oracle</code> controls; <code>clio-coder context working-set --session &lt;id|path&gt;</code> prints one session&#39;s fold and path index. Both are described under <a href="commands_blueprint.html#working-set-replay">Working-set replay</a>. Generated replay tables are local artifacts rather than versioned benchmark results.</li>
+<li><a href="context_blueprint.html">context-engine.md</a> for context window resolution, token accounting, and how this stage sits ahead of summary compaction.</li>
+<li><a href="session_lifecycle_blueprint.html">session-lifecycle.md</a> for the ledger format, active-path lineage, and branching.</li>
+<li><a href="glossary_blueprint.html">glossary.md</a> for the one-line definitions of these terms.</li>
+</ul>
+        </article>
+        <nav class="related-nav" aria-label="Adjacent references">
+          <a class="nav-link-card" href="context_blueprint.html"><span class="nav-label">Previous</span><span class="nav-title">Context Engine</span></a>
+          <a class="nav-link-card next" href="dispatch_rationale_blueprint.html"><span class="nav-label">Next</span><span class="nav-title">Dispatch Architecture Rationale</span></a>
+        </nav>
+        <p class="reference-footer-note">Canonical content lives in the mapped Markdown page. This visual counterpart adds navigation without changing the contract.</p>
+      </main>
+    </div>
+    <footer>Clio Coder documentation · source-aligned at v0.4.2</footer>
+  </div>
+  <script src="shared.js"></script>
+</body>
+</html>

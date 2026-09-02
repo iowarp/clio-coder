@@ -1,5 +1,8 @@
 # v0.4.1 Release-Cut Checklist
 
+> **Visual blueprint:** The source checkout includes the complete
+> [v0.4.1 Release-Cut Checklist visual reference](https://github.com/iowarp/clio-coder/blob/main/docs/html/release_cut_checklist_blueprint.html).
+
 > [!IMPORTANT]
 > Historical release record. v0.4.1 has been published, and this checklist is
 > retained to explain how that release was cut. It is not the procedure for

@@ -1,5 +1,8 @@
 # Documentation coverage and source-alignment audit
 
+> **Visual blueprint:** The source checkout includes the complete
+> [Documentation coverage and source-alignment audit visual reference](https://github.com/iowarp/clio-coder/blob/main/docs/html/documentation_coverage_blueprint.html).
+
 This is the page-level audit for Clio Coder 0.4.2. The source comparison is
 pinned to commit `ff56ea3e`. A disagreement means that a current factual claim,
 default, identifier, path, schema, or command differs from the implementation at
@@ -9,18 +12,18 @@ treated as current operator guidance.
 ## Headline
 
 - Markdown pages audited: **51**.
-- Pages with a dedicated or explicitly shared HTML blueprint: **40**.
-- Pages without a blueprint: **11**. The HTML landing page represents the
-  documentation hub, while the other ten are parity gaps scheduled for the HTML
-  parity pass.
-- Pages with one or more source disagreements: **42**.
-- Pages with no source disagreement found: **9**.
+- Dedicated HTML blueprints now present: **51**.
+- Pages without a blueprint: **0**. Every Markdown page has one visual
+  counterpart, so there are no exception reasons to record.
+- Pages with one or more source disagreements at `ff56ea3e`: **42**.
+- Pages with no source disagreement found at `ff56ea3e`: **9**.
 - Source disagreements corrected in Markdown: **42 of 42 affected pages**.
+- HTML blueprints synchronized from the corrected Markdown: **51 of 51**.
 
-`prompt-envelope-and-tools.md` currently has two HTML implementations.
-`proactive-memory.md` points at the shared evidence and memory blueprint. Those
-facts explain why 40 blueprint files cover 40 pages even though one pair shares
-a file and another page has a duplicate.
+At audit time, 40 blueprint files covered 40 pages because
+`prompt-envelope-and-tools.md` had two HTML implementations while
+`proactive-memory.md` shared the evidence and memory blueprint. The table below
+preserves that audit-time state.
 
 ## Page audit
 
@@ -78,18 +81,20 @@ a file and another page has a duplicate.
 | `architecture/tui-design.md` | `src/interactive/theme/tokens.ts`; `src/interactive/theme/glyphs.ts`; interactive renderer and view modules | `html/tui_design_blueprint.html` | The cited `tests/contracts/usage-vocabulary.test.ts` no longer exists. |
 | `architecture/worker-dispatch-mechanics.md` | `src/worker/**`; dispatch receipt, worker spec, heartbeat, and failure classification modules | `html/worker_dispatch_blueprint.html` | Receipt integrity is v20, not v19. A pre-v20 seal is retired and excluded from evidence rather than treated as a current invalid seal. Steering and permission events use the `clio_coder_*` namespace. The detailed retry-acceptance table cites contract files that no longer exist. |
 
-## Blueprint gaps
+## Blueprint disposition
 
-The eleven pages without a dedicated or shared blueprint are the documentation
+The eleven audit-time gaps now have dedicated blueprints: the documentation
 hub, configuration reference, context working set, development pipeline, typed
 dispatch intent, this coverage audit, fleet demo runbook, Git commit provenance,
-performance methodology, release checklist, and resource library. The landing
-page already serves the hub role; the other ten have no architectural reason to
-remain Markdown-only and should receive blueprints during the parity pass.
+performance methodology, release checklist, and resource library. Proactive
+memory also has its own page instead of sharing the evidence blueprint, and the
+duplicate prompt-envelope implementation was removed. The historical
+configuration-knob audit remains available under the History section of the
+HTML index.
 
 ## Audit disposition
 
 The source-alignment pass corrected all findings across the 42 affected
 Markdown pages. The table preserves what the audit found at `ff56ea3e`; it does
-not describe outstanding Markdown debt. HTML remains the next parity surface
-and must be updated from this corrected corpus.
+not describe outstanding Markdown debt. Every HTML blueprint now renders the
+complete corrected counterpart and identifies its Markdown source explicitly.

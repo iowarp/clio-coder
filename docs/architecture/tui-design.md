@@ -1,8 +1,7 @@
 # Clio TUI Design System
 
-> [!TIP]
-> **Interactive spec available:** The source checkout includes the
-> [TUI design blueprint](https://github.com/iowarp/clio-coder/blob/main/docs/html/tui_design_blueprint.html).
+> **Visual blueprint:** The source checkout includes the complete
+> [Clio TUI Design System visual reference](https://github.com/iowarp/clio-coder/blob/main/docs/html/tui_design_blueprint.html).
 
 This document is the reference specification for the Clio Coder TUI visual layout, styling, and behavior. It describes color semantics, the glyph vocabulary, structural recipes, and state choreography for all surfaces under [src/interactive/](../../src/interactive/).
 

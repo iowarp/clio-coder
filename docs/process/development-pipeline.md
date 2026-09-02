@@ -1,5 +1,8 @@
 # Development Pipeline
 
+> **Visual blueprint:** The source checkout includes the complete
+> [Development Pipeline visual reference](https://github.com/iowarp/clio-coder/blob/main/docs/html/development_pipeline_blueprint.html).
+
 How a change to Clio Coder moves from "we noticed something" to a published
 release. This is the process the maintainers follow and the process Clio
 herself follows when dogfooding: every stage is a marketplace skill, so any

@@ -1,190 +1,375 @@
-<!DOCTYPE html>
+<!doctype html>
 <html lang="en">
 <head>
-  <meta charset="UTF-8">
-  <meta name="viewport" content="width=device-width, initial-scale=1.0">
-  <title>Internal Eval Suites Blueprint (v0.4.0)</title>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <meta name="clio-markdown-source" content="docs/process/evals-internal.md">
+  <meta name="clio-docs-version" content="0.4.2">
+  <title>Internal Eval Suites · Clio Coder 0.4.2</title>
+  <link rel="icon" href="data:,">
   <link rel="stylesheet" href="shared.css">
-  <style>
-    .internal-warning {
-      background: rgba(239, 68, 68, 0.08);
-      border: 1px solid rgba(239, 68, 68, 0.3);
-      color: var(--color-rose);
-      padding: 1rem;
-      border-radius: 8px;
-      margin-bottom: 2rem;
-      font-size: 0.9rem;
-    }
-  </style>
 </head>
-<body>
+<body data-doc-category="process">
+  <div class="reading-progress" aria-hidden="true"></div>
+  <a class="skip-link" href="#reference-content">Skip to reference</a>
   <div class="container">
-    <header>
+    <header class="document-header" data-category="Process">
       <div class="header-left">
-        <div class="header-logo">
-          <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" style="color: var(--color-rose);"><title>Icon</title>
-            <path d="M10.29 3.86L1.82 18a2 2 0 0 0 1.71 3h16.94a2 2 0 0 0 1.71-3L13.71 3.86a2 2 0 0 0-3.42 0z"></path>
-            <line x1="12" y1="9" x2="12" y2="13"></line>
-            <line x1="12" y1="17" x2="12.01" y2="17"></line>
+        <a class="header-logo" href="index.html" aria-label="Documentation index">
+          <svg viewBox="0 0 24 24" fill="none" aria-hidden="true">
+            <path d="M12 2 2 7l10 5 10-5-10-5Z" stroke="url(#clio-logo)" stroke-width="2" stroke-linejoin="round"/>
+            <path d="m2 12 10 5 10-5M2 17l10 5 10-5" stroke="url(#clio-logo)" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"/>
+            <defs><linearGradient id="clio-logo" x1="2" y1="2" x2="22" y2="22"><stop stop-color="#00d4db"/><stop offset="1" stop-color="#ff7e29"/></linearGradient></defs>
           </svg>
-        </div>
+        </a>
         <div class="header-title-wrapper">
-          <h1 style="background: linear-gradient(to right, #ffffff, #c7d2fe, var(--color-rose)); -webkit-background-clip: text; -webkit-text-fill-color: transparent;">Internal Eval Suites</h1>
-          <p>Private validation matrices, regression seeds, and offline datasets guidelines</p>
-          <div class="meta-chips-row">
-            <span class="chip">Source: docs/evals-internal.md</span>
-            <span class="chip chip-orange" style="color: var(--color-rose); border-color: rgba(239, 68, 68, 0.3); background: rgba(239, 68, 68, 0.05);">clio-coder docs evals_internal</span>
-          </div>
+          <p class="document-kicker">Process / canonical reference</p>
+          <h1>Internal Eval Suites</h1>
+          <p class="document-path">docs/process/evals-internal.md</p>
         </div>
       </div>
       <div class="header-right">
-        <span class="version-badge" style="color: var(--color-rose); border-color: rgba(239, 68, 68, 0.3); background: rgba(239, 68, 68, 0.08);">Clio Coder v0.4.0 (Internal)</span>
-        <a href="index.html" class="back-btn">
-          <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><title>Icon</title><line x1="19" y1="12" x2="5" y2="12"></line><polyline points="12 19 5 12 12 5"></polyline></svg>
-          Dashboard Hub
-        </a>
+        <a class="back-btn" href="index.html">← Index</a>
+        <span class="version-badge">v0.4.2</span>
       </div>
     </header>
-
-    <div class="page-layout-grid">
-      <nav class="sidebar" aria-label="Table of Contents">
-        <div class="toc-container">
-          <div class="toc-title">On This Page</div>
-          <ul class="toc-list">
-            <!-- Dynamically populated -->
-          </ul>
-        </div>
-      </nav>
-
-      <main>
-        <div class="internal-warning">
-          <strong>INTERNAL DEVELOPMENT NOTICE:</strong> These specifications represent private datasets and validation benchmarks. Keep all raw calibration outputs and prompt matrices out of public pull requests.
-        </div>
-
-        <div class="glass-card">
-          <h2>Overview Summary</h2>
-          <p>Private evaluation suites operate locally. We run them from the repository root pointing to external paths, ensuring dataset privacy while validating orchestrator performance.</p>
-        </div>
-
-        <div class="tabs-nav">
-          <button type="button" class="tab-btn active" onclick="switchTab('seeds')">
-            Regression Seeds
-          </button>
-          <button type="button" class="tab-btn" onclick="switchTab('gates')">
-            Internal Gates Checklist
-          </button>
-        </div>
-
-        <!-- Tab 1: Seeds -->
-        <div class="tab-pane active" id="pane-seeds">
-          <div class="blueprint-layout">
-            <div class="specs-col">
-              <div class="glass-card">
-                <h3>Regression Seed Selector</h3>
-                <p>Select a seed pattern to view its YAML specification template:</p>
-
-                <div class="form-group">
-                  <label for="seedSelect">YAML Seed</label>
-                  <select id="seedSelect" onchange="updateSeedYaml()">
-                    <option value="regression">Context Regression (context determinism)</option>
-                    <option value="matrix">Model Matrix (target smoke suite)</option>
-                  </select>
-                </div>
-              </div>
-            </div>
-
-            <div class="specs-col">
-              <div class="glass-card">
-                <h3>YAML Specification</h3>
-                <pre><code id="seedYamlCode">// Populated dynamically</code></pre>
-              </div>
-            </div>
-          </div>
-        </div>
-
-        <!-- Tab 2: Gates -->
-        <div class="tab-pane" id="pane-gates">
-          <div class="glass-card">
-            <h3>Internal Sanitization Gates</h3>
-            <p>Ensure these checks are satisfied before publishing a sanitized report outside the repository:</p>
-
-            <div style="margin-top:1.5rem; display:flex; flex-direction:column; gap:1rem;">
-              <label class="checkbox-item"><input type="checkbox"> No secret tokens or private keys in target parameters.</label>
-              <label class="checkbox-item"><input type="checkbox"> Output logs are stripped of internal file path structures.</label>
-              <label class="checkbox-item"><input type="checkbox"> Evaded files are sanitized to `manifest.json` and `summary.json` only.</label>
-              <label class="checkbox-item"><input type="checkbox"> Run IDs do not expose host user names or local system metadata.</label>
-            </div>
-          </div>
-        </div>
-
-        <!-- Related Navigation -->
-        <nav class="related-nav" aria-label="Related Pages">
-          <a href="worker_dispatch_blueprint.html" class="nav-link-card">
-            <span class="nav-label">Previous Blueprint</span>
-            <span class="nav-title">Worker Dispatch Mechanics</span>
-          </a>
-          <a href="config_knobs_audit_blueprint.html" class="nav-link-card next">
-            <span class="nav-label">Next Blueprint</span>
-            <span class="nav-title">Config Knobs Audit</span>
-          </a>
+    <div class="page-layout-grid reference-layout">
+      <aside class="sidebar reference-sidebar" aria-label="On this page">
+        <nav class="toc-container">
+          <p class="toc-title">On this page</p>
+          <a class="sidebar-source" href="https://github.com/iowarp/clio-coder/blob/main/docs/process/evals-internal.md">Canonical Markdown<br>docs/process/evals-internal.md</a>
+          <ul class="toc-list"></ul>
         </nav>
-      </main>
-    </div>
-
-    <footer>
-      <p>Clio Coder Internal Evals Blueprint &bull; Version 0.4.0 &bull; Gnosis Research Center</p>
-    </footer>
-  </div>
-
-  <script src="shared.js"></script>
-  <script>
-    const SEEDS = {
-      regression: `version: 2
+      </aside>
+      <main class="reference-main" id="reference-content">
+        <article class="reference-prose glass-card">
+<blockquote>
+<p><strong>Visual blueprint:</strong> The source checkout includes the complete
+<a href="evals_internal_blueprint.html">Internal Eval Suites visual reference</a>.</p>
+</blockquote>
+<p>Private suites should live outside this repository. Keep datasets, prompts,
+live fleet coordinates, calibration outputs, and raw run artifacts in a private
+checkout or object store.</p>
+<p>Run a private suite from this source checkout with:</p>
+<pre><code class="language-sh">npm run build
+clio-coder eval run --suite &lt;external-path&gt; --clio-coder-entry dist/cli/index.js
+</code></pre>
+<p>Use <code>--out &lt;dir&gt;</code> when the artifact should be written outside the default Clio
+data directory. External benchmark campaigns should adapt their cases and
+grader observations into the same eval engine while keeping private datasets,
+credentials, endpoints, and raw artifacts outside this repository.</p>
+<p>The public behavioral corpus is the deliberate exception to the otherwise
+private Suite v2 data policy. Its reviewable, synthetic suites live under
+<code>evals/</code>: a model-free positive/adversarial authority pair for every
+built-in worker recipe, four tiny main-agent model scenarios covering all eight
+behavioral categories with event- and grader-derived facts, and an intentional
+decoy negative control. The model-free driver uses the shipped recipe catalog,
+real dispatch admission, scripted workers, and sealed receipts rather than
+frontmatter inspection. See
+<a href="eval_blueprint.html#public-built-in-behavioral-corpus">eval-runner.md</a> for the
+focused commands. Private prompts, calibration cases, fleet coordinates, and
+campaign artifacts still belong outside this repository and must not be copied
+into the public corpus.</p>
+<h2>Running a private suite as a measurement</h2>
+<p>A private suite is usually run to answer whether a harness change moved
+something, which makes it a measurement rather than a pass or fail. Three
+mechanics matter for that, all documented in full in
+<a href="eval_blueprint.html#the-verdict-envelope">eval-runner.md</a>.</p>
+<p>Run repeated trials with <code>--trials N</code> rather than by editing <code>matrix.repeats</code>.
+The flag overrides the suite&#39;s repeat count and asks for an isolated workspace
+per matrix item, so a <code>local</code> workspace is copied for the run instead of being
+mutated across trials. Each result&#39;s verdict carries its <code>trialIndex</code>, and the
+artifact&#39;s <code>aggregates</code> reduce them per scenario: <code>k</code>, <code>passAtK</code> (any trial
+passed), <code>passPowK</code> (every trial passed), and a mean and nearest-rank p90 for
+every tracked metric. A single trial produces a <code>k: 1</code> aggregate whose mean and
+p90 are the same observed value, which is a fact to state in a report rather
+than a distribution to reason about.</p>
+<p>Read the tracked metrics with their sources attached. A private suite on a
+local target is measuring prefill economics as much as correctness, so
+<code>uncachedPrefillTokens</code>, <code>cacheReadTokens</code>, <code>ttftMsFirstCall</code>, and the
+<code>expectedColdReasons</code> histogram are the interesting columns, and each one says
+whether it came from the ledger, from the receipt, or was <code>estimated</code>. A metric
+marked <code>estimated</code> on one side of a comparison and measured on the other is
+refused rather than differenced.</p>
+<p>Behavioral suites add a second projection beside those tracked performance
+metrics. Compare it per scenario, role, and target/model envelope rather than
+reducing unlike roles into one pass rate. Correctness and safety are hard
+regression gates; tool efficiency, unnecessary exploration, delegation
+quality, unsupported claims, tokens, latency, and receipt cost remain separate
+families with their own measured coverage and repeat variance. A missing value
+is null and makes that row incomparable, never zero.</p>
+<p>Put release-blocking assertions under <code>thresholds.fail</code> and non-blocking spend
+or latency budgets under <code>thresholds.informational</code>. Informational findings are
+printed in every gate run but do not change its exit status. Do not put a cost
+budget in the hard list to compensate for weak correctness, and do not turn a
+correctness rule into an informational budget; the comparison gate evaluates
+correctness and safety before either kind of operator-authored threshold.</p>
+<p>Record the serving configuration or the comparison is not one. The artifact
+captures <code>targetId</code>, <code>runtimeId</code>, <code>modelId</code>, <code>serverBuild</code>, <code>total_slots</code>,
+<code>thinkingLevel</code>, and <code>compiledPromptHash</code>, read from the server after the matrix
+has run while it is still awake. <code>eval compare</code> refuses two artifacts whose
+configurations differ unless <code>--allow-config-drift</code> is passed, and prints both
+either way. Treat that refusal as the useful behavior it is: a private suite
+compared across a server restart that changed a flag, a quantization, or the
+thinking level is measuring the server, not the change under test.</p>
+<p>The verdict envelope keeps its original <code>behavioral: null</code> field for compatibility.
+A suite that declares a versioned behavioral scenario records the result as a
+separate <code>clio-coder.eval.behavior.v1</code> document on the Artifact v4 result, cross-linked
+to the unchanged verdict identity. Its labels come only from bounded transcript,
+tool, receipt, or grader facts, never from an ungrounded judge paragraph. A run whose harness broke records
+<code>machinery: &quot;infrastructure_failure&quot;</code>, which the parser refuses to pair with a
+<code>pass</code>, so a private suite cannot report a passing rate that includes runs
+nothing measured.</p>
+<h2>Context Regression Seed</h2>
+<pre><code class="language-yaml">version: 2
 suite:
   id: internal-context-regression
   title: Internal context regression
   visibility: private
+  description: Private context index determinism and coverage regression.
+  provenance:
+    owner: internal-eval
+    source: private
 matrix:
   targets:
     - id: local
   repeats: 3
 tasks:
-  - id: context-index-private
+  - id: context-index-private-checkout
+    tags:
+      - internal
+      - context
+      - offline
     workspace:
       kind: local
       path: .
+      excludes:
+        - .git
+        - node_modules
+        - dist
+        - coverage
     runner:
       kind: context-index
     verify:
       assertions:
         - metric: context.indexedFiles
           op: gt
-          value: 0`,
-      matrix: `version: 2
+          value: 0
+        - metric: context.coverage
+          op: gt
+          value: 0
+      forbidPaths:
+        - data/private-dump
+        - runs/raw
+    metrics:
+      collect:
+        - context.indexedFiles
+        - context.coverage
+        - context.structuralHash
+        - context.digestTokens
+        - latency.wallMs
+    timeoutMs: 120000
+thresholds:
+  fail:
+    - metric: result.pass
+      op: eq
+      value: false
+    - metric: context.coverage
+      op: lte
+      value: 0
+</code></pre>
+<h2>Model Matrix Seed</h2>
+<pre><code class="language-yaml">version: 2
 suite:
   id: internal-model-matrix
   title: Internal model matrix
   visibility: private
+  description: Private model target smoke matrix for headless Clio runs.
+  provenance:
+    owner: internal-eval
+    source: private
 matrix:
   targets:
     - id: local-fast
       model: example-fast-model
+      thinking: low
     - id: local-deep
       model: example-deep-model
-  repeats: 2`
-    };
-
-    function updateSeedYaml() {
-      const val = document.getElementById("seedSelect").value;
-      document.getElementById("seedYamlCode").innerText = SEEDS[val];
-      if (window.initTableOfContents) window.initTableOfContents();
-    }
-
-    // Init
-    window.onload = () => {
-      updateSeedYaml();
-      window.updateSeedYaml = updateSeedYaml;
-    };
-  </script>
+      thinking: high
+  repeats: 2
+tasks:
+  - id: version-smoke
+    tags:
+      - internal
+      - matrix
+      - smoke
+    workspace:
+      kind: temp-copy
+      path: fixtures/version-smoke
+      excludes:
+        - node_modules
+        - dist
+    runner:
+      kind: external-command
+      commands:
+        - node -e &quot;console.log(&#39;matrix smoke&#39;)&quot;
+    verify:
+      assertions:
+        - metric: verifier.exitCode
+          op: eq
+          value: 0
+    metrics:
+      collect:
+        - latency.wallMs
+        - verifier.exitCode
+    timeoutMs: 30000
+  - id: tiny-clio-run
+    tags:
+      - internal
+      - matrix
+      - model-required
+    workspace:
+      kind: temp-copy
+      path: fixtures/tiny-repair
+      excludes:
+        - node_modules
+        - dist
+    runner:
+      kind: clio-coder-run
+      prompt: Fix the intentionally broken function so the local verifier passes.
+    verify:
+      commands:
+        - npm test
+      assertions:
+        - metric: result.pass
+          op: eq
+          value: true
+    metrics:
+      collect:
+        - tokens.input
+        - tokens.output
+        - tokens.total
+        - latency.wallMs
+        - patch.filesChanged
+        - verifier.exitCode
+    timeoutMs: 600000
+thresholds:
+  fail:
+    - metric: result.pass
+      op: eq
+      value: false
+    - metric: tools.blocked
+      op: gt
+      value: 0
+</code></pre>
+<h2>Live Turns Seed</h2>
+<pre><code class="language-yaml">version: 2
+suite:
+  id: internal-live-turns
+  title: Internal live turns
+  visibility: private
+  description: Private live-fleet prompts for end-to-end Clio turn checks.
+  provenance:
+    owner: internal-eval
+    source: private
+matrix:
+  targets:
+    - id: live-orchestrator
+      model: example-live-model
+      thinking: low
+  repeats: 1
+tasks:
+  - id: readonly-repo-summary
+    tags:
+      - internal
+      - live
+      - readonly
+      - model-required
+    workspace:
+      kind: temp-copy
+      path: fixtures/live-readonly
+      excludes:
+        - node_modules
+        - dist
+        - .clio-coder
+    runner:
+      kind: clio-coder-run
+      prompt: Summarize the repository purpose and make no file changes.
+    verify:
+      forbidPaths:
+        - unexpected-output.txt
+      assertions:
+        - metric: result.pass
+          op: eq
+          value: true
+        - metric: patch.filesChanged
+          op: eq
+          value: 0
+    metrics:
+      collect:
+        - tokens.total
+        - latency.wallMs
+        - tools.totalCalls
+        - tools.failed
+        - patch.filesChanged
+    timeoutMs: 300000
+  - id: live-small-edit
+    tags:
+      - internal
+      - live
+      - edit
+      - model-required
+    workspace:
+      kind: temp-copy
+      path: fixtures/live-small-edit
+      excludes:
+        - node_modules
+        - dist
+        - .clio-coder
+    runner:
+      kind: clio-coder-run
+      prompt: Fix the failing unit test with the smallest source change.
+    verify:
+      commands:
+        - npm test
+      assertions:
+        - metric: result.pass
+          op: eq
+          value: true
+        - metric: patch.testFilesModified
+          op: eq
+          value: 0
+    metrics:
+      collect:
+        - tokens.input
+        - tokens.output
+        - tokens.total
+        - latency.wallMs
+        - tools.totalCalls
+        - tools.failed
+        - patch.filesChanged
+        - patch.testFilesModified
+        - verifier.exitCode
+    timeoutMs: 600000
+thresholds:
+  fail:
+    - metric: result.pass
+      op: eq
+      value: false
+    - metric: tools.failed
+      op: gt
+      value: 0
+</code></pre>
+        </article>
+        <nav class="related-nav" aria-label="Adjacent references">
+          <a class="nav-link-card" href="eval_blueprint.html"><span class="nav-label">Previous</span><span class="nav-title">Clio Coder Local Evaluation Runner</span></a>
+          <a class="nav-link-card next" href="evolution_blueprint.html"><span class="nav-label">Next</span><span class="nav-title">Evolution and Change Manifests</span></a>
+        </nav>
+        <p class="reference-footer-note">Canonical content lives in the mapped Markdown page. This visual counterpart adds navigation without changing the contract.</p>
+      </main>
+    </div>
+    <footer>Clio Coder documentation · source-aligned at v0.4.2</footer>
+  </div>
+  <script src="shared.js"></script>
 </body>
 </html>

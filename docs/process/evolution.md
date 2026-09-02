@@ -1,7 +1,7 @@
 # Evolution and Change Manifests
 
-> [!TIP]
-> **Interactive Spec Available:** A source-checkout change manifest editor, authority risk assessor, and checklist workspace is available at [docs/html/evolution_blueprint.html](https://github.com/iowarp/clio-coder/blob/main/docs/html/evolution_blueprint.html).
+> **Visual blueprint:** The source checkout includes the complete
+> [Evolution and Change Manifests visual reference](https://github.com/iowarp/clio-coder/blob/main/docs/html/evolution_blueprint.html).
 
 Clio Coder uses change manifests to make harness changes reviewable, falsifiable, and rollback-friendly. CLIO stands for Context Layer for Input/Output, named for the Greek muse of history. A manifest is JSON, generated or checked with `clio-coder evolve manifest`, and should describe what changed, why, what evidence supports it, what could regress, how to validate it, and how to roll it back.
 

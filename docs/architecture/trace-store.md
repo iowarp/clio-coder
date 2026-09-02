@@ -1,7 +1,7 @@
 # Trace store contract
 
-> [!TIP]
-> **Interactive Spec Available:** A source-checkout trace database viewer, schema inspector, and SQL query validator simulator is available at [docs/html/trace_blueprint.html](https://github.com/iowarp/clio-coder/blob/main/docs/html/trace_blueprint.html).
+> **Visual blueprint:** The source checkout includes the complete
+> [Trace store contract visual reference](https://github.com/iowarp/clio-coder/blob/main/docs/html/trace_blueprint.html).
 
 Clio's trace database is a rebuildable, queryable mirror. Receipts, session
 ledgers, gate artifacts, and evidence remain the source of truth. Removing

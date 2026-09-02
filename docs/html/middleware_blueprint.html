@@ -1,664 +1,363 @@
-<!DOCTYPE html>
+<!doctype html>
 <html lang="en">
 <head>
-  <meta charset="UTF-8">
-  <meta name="viewport" content="width=device-width, initial-scale=1.0">
-  <title>Clio Coder Middleware &amp; Components Blueprint (v0.4.0)</title>
-
-  <style>
-    :root {
-      --bg-dark: #090d16;
-      --bg-grid: rgba(255, 255, 255, 0.02);
-      --bg-card: rgba(13, 20, 38, 0.45);
-      --bg-card-hover: rgba(20, 30, 58, 0.6);
-      --border-card: rgba(255, 255, 255, 0.08);
-      --border-card-hover: rgba(0, 240, 255, 0.3);
-      --text-main: #f3f4f6;
-      --text-muted: #9ca3af;
-      --text-dim: #6b7280;
-
-      --color-cyan: #00f0ff;
-      --color-cyan-rgb: 0, 240, 255;
-      --color-purple: #bd00ff;
-      --color-purple-rgb: 189, 0, 255;
-      --color-emerald: #10b981;
-      --color-emerald-rgb: 16, 185, 129;
-      --color-amber: #f59e0b;
-      --color-amber-rgb: 245, 158, 11;
-      --color-rose: #ef4444;
-      --color-rose-rgb: 239, 68, 68;
-
-      --gradient-main: linear-gradient(135deg, var(--color-cyan), var(--color-purple));
-      --shadow-glow: 0 0 25px rgba(0, 240, 255, 0.15);
-      --font-sans: "Segoe UI", -apple-system, BlinkMacSystemFont, Roboto, "Helvetica Neue", Arial, sans-serif;
-      --font-mono: "SFMono-Regular", Consolas, "Liberation Mono", Menlo, monospace;
-
-      --glass-blur: blur(12px);
-    }
-
-    * {
-      box-sizing: border-box;
-      margin: 0;
-      padding: 0;
-    }
-
-    body {
-      background-color: var(--bg-dark);
-      background-image:
-        radial-gradient(circle at 10% 20%, rgba(var(--color-cyan-rgb), 0.05) 0%, transparent 40%),
-        radial-gradient(circle at 90% 80%, rgba(var(--color-purple-rgb), 0.05) 0%, transparent 40%),
-        radial-gradient(circle at 50% 50%, #0d1527 0%, var(--bg-dark) 100%);
-      color: var(--text-main);
-      font-family: var(--font-sans);
-      min-height: 100vh;
-      line-height: 1.6;
-      overflow-x: hidden;
-      position: relative;
-    }
-
-    body::before {
-      content: '';
-      position: absolute;
-      inset: 0;
-      background-image: linear-gradient(var(--bg-grid) 1px, transparent 1px),
-                        linear-gradient(90deg, var(--bg-grid) 1px, transparent 1px);
-      background-size: 40px 40px;
-      background-position: center top;
-      pointer-events: none;
-      z-index: 0;
-      opacity: 0.8;
-    }
-
-    .container {
-      max-width: 1400px;
-      margin: 0 auto;
-      padding: 2rem;
-      position: relative;
-      z-index: 1;
-    }
-
-    /* Header Styling */
-    header {
-      display: flex;
-      justify-content: space-between;
-      align-items: center;
-      margin-bottom: 2.5rem;
-      padding-bottom: 1.5rem;
-      border-bottom: 1px solid rgba(255, 255, 255, 0.05);
-    }
-
-    .header-left {
-      display: flex;
-      align-items: center;
-      gap: 1rem;
-    }
-
-    .header-logo {
-      display: inline-flex;
-      align-items: center;
-      justify-content: center;
-      width: 48px;
-      height: 48px;
-      background: rgba(255, 255, 255, 0.02);
-      border: 1px solid var(--border-card);
-      border-radius: 12px;
-    }
-
-    .header-logo svg {
-      width: 28px;
-      height: 28px;
-    }
-
-    .header-title-wrapper h1 {
-      font-size: 1.5rem;
-      font-weight: 800;
-      letter-spacing: -0.03em;
-      background: linear-gradient(to right, #ffffff, #c7d2fe, var(--color-cyan));
-      -webkit-background-clip: text;
-      -webkit-text-fill-color: transparent;
-    }
-
-    .header-title-wrapper p {
-      font-size: 0.825rem;
-      color: var(--text-muted);
-    }
-
-    .header-right {
-      display: flex;
-      align-items: center;
-      gap: 1rem;
-    }
-
-    .back-btn {
-      background: rgba(255, 255, 255, 0.03);
-      border: 1px solid var(--border-card);
-      color: var(--text-muted);
-      padding: 0.5rem 1rem;
-      border-radius: 8px;
-      font-size: 0.875rem;
-      font-weight: 600;
-      text-decoration: none;
-      display: inline-flex;
-      align-items: center;
-      gap: 0.5rem;
-      transition: all 0.2s;
-    }
-
-    .back-btn:hover {
-      background: rgba(255, 255, 255, 0.08);
-      color: var(--text-main);
-      border-color: rgba(var(--color-cyan-rgb), 0.3);
-    }
-
-    .version-badge {
-      background: rgba(0, 240, 255, 0.08);
-      border: 1px solid rgba(0, 240, 255, 0.25);
-      color: var(--color-cyan);
-      padding: 0.35rem 0.75rem;
-      border-radius: 50px;
-      font-size: 0.75rem;
-      font-weight: 600;
-      font-family: var(--font-mono);
-    }
-
-    /* Tabs Navigation */
-    .tabs-nav {
-      display: flex;
-      gap: 0.75rem;
-      margin-bottom: 2rem;
-    }
-
-    .tab-btn {
-      background: rgba(255, 255, 255, 0.03);
-      border: 1px solid var(--border-card);
-      color: var(--text-muted);
-      padding: 0.6rem 1.25rem;
-      border-radius: 8px;
-      font-size: 0.875rem;
-      font-weight: 600;
-      cursor: pointer;
-      display: flex;
-      align-items: center;
-      gap: 0.5rem;
-      transition: all 0.2s;
-    }
-
-    .tab-btn:hover {
-      background: rgba(255, 255, 255, 0.06);
-      color: var(--text-main);
-    }
-
-    .tab-btn.active {
-      background: var(--gradient-main);
-      color: #090d16;
-      border-color: transparent;
-      box-shadow: 0 4px 15px rgba(var(--color-cyan-rgb), 0.25);
-    }
-
-    /* Content Layout */
-    .tab-pane {
-      display: none;
-      animation: fadeIn 0.3s ease-out forwards;
-    }
-
-    .tab-pane.active {
-      display: block;
-    }
-
-    @keyframes fadeIn {
-      from { opacity: 0; transform: translateY(8px); }
-      to { opacity: 1; transform: translateY(0); }
-    }
-
-    /* Split layout */
-    .blueprint-layout {
-      display: grid;
-      grid-template-columns: 1fr 1fr;
-      gap: 2rem;
-      align-items: start;
-    }
-
-    @media (max-width: 1100px) {
-      .blueprint-layout {
-        grid-template-columns: 1fr;
-      }
-    }
-
-    .glass-card {
-      background: var(--bg-card);
-      border: 1px solid var(--border-card);
-      border-radius: 16px;
-      padding: 1.75rem;
-      margin-bottom: 2rem;
-      backdrop-filter: var(--glass-blur);
-      box-shadow: 0 8px 32px 0 rgba(0, 0, 0, 0.3);
-    }
-
-    .glass-card h2 {
-      font-size: 1.25rem;
-      font-weight: 700;
-      color: #ffffff;
-      margin-bottom: 1.25rem;
-      display: flex;
-      align-items: center;
-      gap: 0.5rem;
-      border-bottom: 1px solid rgba(255, 255, 255, 0.05);
-      padding-bottom: 0.75rem;
-    }
-
-    .glass-card h2 svg {
-      width: 18px;
-      height: 18px;
-      color: var(--color-cyan);
-    }
-
-    .glass-card p {
-      font-size: 0.925rem;
-      color: var(--text-muted);
-      margin-bottom: 1rem;
-    }
-
-    /* Form Elements */
-    .form-group {
-      margin-bottom: 1.25rem;
-    }
-
-    .form-group label {
-      display: block;
-      font-size: 0.8rem;
-      font-weight: 600;
-      color: var(--text-muted);
-      margin-bottom: 0.5rem;
-      text-transform: uppercase;
-      letter-spacing: 0.05em;
-    }
-
-    select, input, textarea {
-      width: 100%;
-      background: rgba(9, 13, 22, 0.7);
-      border: 1px solid var(--border-card);
-      border-radius: 8px;
-      padding: 0.65rem 0.85rem;
-      color: #fff;
-      font-family: var(--font-sans);
-      font-size: 0.9rem;
-      outline: none;
-    }
-
-    /* Scanner Presets list */
-    .presets-list {
-      display: flex;
-      flex-wrap: wrap;
-      gap: 0.4rem;
-      margin-bottom: 1.25rem;
-    }
-
-    .preset-btn {
-      background: rgba(255, 255, 255, 0.03);
-      border: 1px solid var(--border-card);
-      color: var(--text-muted);
-      padding: 0.3rem 0.6rem;
-      border-radius: 4px;
-      font-size: 0.725rem;
-      cursor: pointer;
-      transition: all 0.2s;
-    }
-
-    .preset-btn:hover {
-      background: rgba(0, 240, 255, 0.08);
-      border-color: var(--color-cyan);
-      color: #fff;
-    }
-
-    /* Scanner Output block */
-    .scanner-out {
-      background: #020408;
-      border: 1px solid var(--border-card);
-      border-radius: 8px;
-      padding: 1rem;
-      font-family: var(--font-mono);
-      font-size: 0.825rem;
-    }
-
-    .scanner-line {
-      margin-bottom: 0.5rem;
-    }
-
-    .scanner-line strong {
-      color: var(--color-cyan);
-    }
-
-    /* Reload Badge */
-    .reload-badge {
-      display: inline-block;
-      font-size: 0.725rem;
-      padding: 0.15rem 0.4rem;
-      border-radius: 4px;
-      font-weight: 700;
-      text-transform: uppercase;
-    }
-
-    .reload-badge.hot { background: rgba(16, 185, 129, 0.1); border: 1px solid rgba(16, 185, 129, 0.3); color: var(--color-emerald); }
-    .reload-badge.dispatch { background: rgba(0, 240, 255, 0.1); border: 1px solid rgba(0, 240, 255, 0.3); color: var(--color-cyan); }
-    .reload-badge.restart { background: rgba(239, 68, 68, 0.1); border: 1px solid rgba(239, 68, 68, 0.3); color: var(--color-rose); }
-
-    /* Pipeline execution list */
-    .pipeline-step {
-      background: rgba(0,0,0,0.2);
-      border: 1px solid rgba(255,255,255,0.05);
-      padding: 0.75rem 1rem;
-      border-radius: 8px;
-      margin-bottom: 0.75rem;
-      font-size: 0.875rem;
-    }
-
-    .pipeline-step strong {
-      display: block;
-      color: #fff;
-    }
-
-    .pipeline-step span {
-      font-size: 0.75rem;
-      color: var(--text-muted);
-    }
-
-    /* Tables */
-    .ref-table {
-      width: 100%;
-      border-collapse: collapse;
-      margin: 1.5rem 0;
-      font-size: 0.9rem;
-    }
-
-    .ref-table th, .ref-table td {
-      padding: 0.65rem 0.85rem;
-      border: 1px solid var(--border-card);
-      text-align: left;
-    }
-
-    .ref-table th {
-      background: rgba(255,255,255,0.03);
-    }
-
-    pre {
-      background: rgba(0,0,0,0.3);
-      border: 1px solid var(--border-card);
-      border-radius: 8px;
-      padding: 1rem;
-      overflow-x: auto;
-      margin: 1rem 0;
-    }
-
-    code {
-      font-family: var(--font-mono);
-      font-size: 0.85rem;
-    }
-
-    /* Footer */
-    footer {
-      text-align: center;
-      margin-top: 4rem;
-      padding-top: 2rem;
-      border-top: 1px solid rgba(255, 255, 255, 0.05);
-      color: var(--text-dim);
-      font-size: 0.875rem;
-    }
-  </style>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <meta name="clio-markdown-source" content="docs/architecture/middleware-and-components.md">
+  <meta name="clio-docs-version" content="0.4.2">
+  <title>Middleware and Component Registry · Clio Coder 0.4.2</title>
+  <link rel="icon" href="data:,">
+  <link rel="stylesheet" href="shared.css">
 </head>
-<body>
+<body data-doc-category="architecture">
+  <div class="reading-progress" aria-hidden="true"></div>
+  <a class="skip-link" href="#reference-content">Skip to reference</a>
   <div class="container">
-    <header>
+    <header class="document-header" data-category="Architecture">
       <div class="header-left">
-        <div class="header-logo">
-          <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" style="color: var(--color-cyan);"><title>Icon</title>
-            <rect x="4" y="4" width="16" height="16" rx="2" ry="2"></rect>
-            <rect x="9" y="9" width="6" height="6"></rect>
-            <line x1="9" y1="1" x2="9" y2="4"></line>
-            <line x1="15" y1="1" x2="15" y2="4"></line>
-            <line x1="9" y1="20" x2="9" y2="23"></line>
-            <line x1="15" y1="20" x2="15" y2="23"></line>
-            <line x1="20" y1="9" x2="23" y2="9"></line>
-            <line x1="20" y1="15" x2="23" y2="15"></line>
-            <line x1="1" y1="9" x2="4" y2="9"></line>
-            <line x1="1" y1="15" x2="4" y2="15"></line>
+        <a class="header-logo" href="index.html" aria-label="Documentation index">
+          <svg viewBox="0 0 24 24" fill="none" aria-hidden="true">
+            <path d="M12 2 2 7l10 5 10-5-10-5Z" stroke="url(#clio-logo)" stroke-width="2" stroke-linejoin="round"/>
+            <path d="m2 12 10 5 10-5M2 17l10 5 10-5" stroke="url(#clio-logo)" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"/>
+            <defs><linearGradient id="clio-logo" x1="2" y1="2" x2="22" y2="22"><stop stop-color="#00d4db"/><stop offset="1" stop-color="#ff7e29"/></linearGradient></defs>
           </svg>
-        </div>
+        </a>
         <div class="header-title-wrapper">
-          <h1>Clio Coder Middleware &amp; Component Registry</h1>
-          <p>Durable component hash scanner, hook actions, and experimental effect rules</p>
+          <p class="document-kicker">Architecture / canonical reference</p>
+          <h1>Middleware and Component Registry</h1>
+          <p class="document-path">docs/architecture/middleware-and-components.md</p>
         </div>
       </div>
       <div class="header-right">
-        <span class="version-badge">Clio Coder v0.4.0</span>
-        <a href="index.html" class="back-btn">
-          <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><title>Icon</title><line x1="19" y1="12" x2="5" y2="12"></line><polyline points="12 19 5 12 12 5"></polyline></svg>
-          Dashboard Hub
-        </a>
+        <a class="back-btn" href="index.html">← Index</a>
+        <span class="version-badge">v0.4.2</span>
       </div>
     </header>
-
-    <div class="tabs-nav">
-      <button type="button" class="tab-btn active" onclick="switchTab('interactive')">
-        <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><title>Icon</title><polyline points="22 12 18 12 15 21 9 3 6 12 2 12"></polyline></svg>
-        Interactive Scanner &amp; Pipeline
-      </button>
-      <button type="button" class="tab-btn" onclick="switchTab('reference')">
-        <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><title>Icon</title><path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z"></path><polyline points="14 2 14 8 20 8"></polyline><line x1="16" y1="13" x2="8" y2="13"></line><line x1="16" y1="17" x2="8" y2="17"></line><polyline points="10 9 9 9 8 9"></polyline></svg>
-        Full Technical Reference
-      </button>
+    <div class="page-layout-grid reference-layout">
+      <aside class="sidebar reference-sidebar" aria-label="On this page">
+        <nav class="toc-container">
+          <p class="toc-title">On this page</p>
+          <a class="sidebar-source" href="https://github.com/iowarp/clio-coder/blob/main/docs/architecture/middleware-and-components.md">Canonical Markdown<br>docs/architecture/middleware-and-components.md</a>
+          <ul class="toc-list"></ul>
+        </nav>
+      </aside>
+      <main class="reference-main" id="reference-content">
+        <article class="reference-prose glass-card">
+<blockquote>
+<p><strong>Visual blueprint:</strong> The source checkout includes the complete
+<a href="middleware_blueprint.html">Middleware and Component Registry visual reference</a>.</p>
+</blockquote>
+<p>Clio Coder has two related but separate surfaces:</p>
+<ol>
+<li><strong>Components</strong>: deterministic inventory of files that can affect harness behavior.</li>
+<li><strong>Middleware</strong>: an experimental hook/effect contract around tool, turn, and compaction lifecycle points.</li>
+</ol>
+<p>The components surface is active and user-facing through <code>clio-coder components</code>. The middleware runtime is intentionally conservative in the current alpha: the hook/effect types, validation helpers, declarative rule engine, built-in registrations, and a receipted hook-file surface exist, but arbitrary repository or user middleware packages are not a shipped public extension point. Enforcing guard registrations ride the same hook runtime at the composition root: the loop guard, protected-artifacts guard, dispatch dedup, file and skill observers, tool-prose checks, and finish-contract assessor form the middleware tier of the safety net (see <a href="safety_blueprint.html">safety-model.md</a>).</p>
+<hr>
+<h2>Component scanner</h2>
+<p>Source: <code>src/domains/components/scan.ts</code> and <code>src/domains/components/types.ts</code>.</p>
+<p>The scanner reads files, computes SHA-256 hashes, and emits a stable <code>ComponentSnapshot</code>:</p>
+<pre><code class="language-ts">interface ComponentSnapshot {
+  version: 1;
+  generatedAt: string;
+  root: string;
+  components: HarnessComponent[];
+}
+</code></pre>
+<p>It does not execute scanned files.</p>
+<h3>Component kinds</h3>
+<p><code>COMPONENT_KINDS</code> currently contains:</p>
+<table>
+<thead>
+<tr>
+<th>Kind</th>
+<th>Typical source</th>
+<th>Authority</th>
+</tr>
+</thead>
+<tbody><tr>
+<td><code>prompt-fragment</code></td>
+<td><code>src/domains/prompts/fragments/**/*.md</code></td>
+<td>advisory</td>
+</tr>
+<tr>
+<td><code>agent-recipe</code></td>
+<td><code>src/domains/agents/builtins/*.md</code></td>
+<td>advisory</td>
+</tr>
+<tr>
+<td><code>tool-implementation</code></td>
+<td><code>src/tools/*.ts</code></td>
+<td>enforcing</td>
+</tr>
+<tr>
+<td><code>tool-helper</code></td>
+<td>selected helper files such as <code>src/tools/registry.ts</code></td>
+<td>enforcing</td>
+</tr>
+<tr>
+<td><code>runtime-descriptor</code></td>
+<td><code>src/domains/providers/runtimes/**/*.ts</code></td>
+<td>runtime-critical</td>
+</tr>
+<tr>
+<td><code>safety-rule-pack</code></td>
+<td><code>damage-control-rules.yaml</code></td>
+<td>enforcing</td>
+</tr>
+<tr>
+<td><code>config-schema</code></td>
+<td><code>src/core/defaults.ts</code>, <code>src/core/config.ts</code> (scanner list in <code>src/domains/components/scan.ts</code>)</td>
+<td>runtime-critical</td>
+</tr>
+<tr>
+<td><code>session-schema</code></td>
+<td>session entry/contract files</td>
+<td>runtime-critical</td>
+</tr>
+<tr>
+<td><code>receipt-schema</code></td>
+<td>dispatch receipt/integrity files</td>
+<td>runtime-critical</td>
+</tr>
+<tr>
+<td><code>context-file</code></td>
+<td><code>CLIO-CODER.md</code>, <code>CONTRIBUTING.md</code>, <code>SECURITY.md</code></td>
+<td>advisory</td>
+</tr>
+<tr>
+<td><code>doc-spec</code></td>
+<td>currently <code>docs/specs/**/*.md</code> if present</td>
+<td>descriptive</td>
+</tr>
+<tr>
+<td><code>middleware</code></td>
+<td>reserved kind</td>
+<td>enforcing</td>
+</tr>
+<tr>
+<td><code>memory</code></td>
+<td>reserved kind</td>
+<td>advisory</td>
+</tr>
+<tr>
+<td><code>eval-suite</code></td>
+<td>reserved kind</td>
+<td>descriptive</td>
+</tr>
+</tbody></table>
+<blockquote>
+<p>[!WARNING]
+The current scanner still looks for <code>doc-spec</code> files under <code>docs/specs/</code>.
+Public reference pages now live under <code>docs/guide/</code>, <code>docs/architecture/</code>,
+<code>docs/process/</code>, and <code>docs/history/</code>, so they do not appear as <code>doc-spec</code>
+components unless the scanner&#39;s dedicated root is updated.</p>
+</blockquote>
+<h3>Reload classes</h3>
+<table>
+<thead>
+<tr>
+<th>Reload class</th>
+<th>Meaning</th>
+</tr>
+</thead>
+<tbody><tr>
+<td><code>hot</code></td>
+<td>Can be reread during an active process where supported.</td>
+</tr>
+<tr>
+<td><code>next-dispatch</code></td>
+<td>Affects the next fleet worker dispatch.</td>
+</tr>
+<tr>
+<td><code>restart-required</code></td>
+<td>Low-level schemas/rules/runtimes should be treated as restart-bound.</td>
+</tr>
+<tr>
+<td><code>static</code></td>
+<td>Descriptive specs and suites.</td>
+</tr>
+</tbody></table>
+<hr>
+<h2>Component CLI</h2>
+<pre><code class="language-bash">clio-coder components
+clio-coder components --json
+clio-coder components snapshot --out before.json
+clio-coder components diff --from before.json --to after.json
+</code></pre>
+<p>Snapshots are useful in reviews because they show behavior-affecting changes even when the raw diff is broad.</p>
+<hr>
+<h2>Middleware contract</h2>
+<p>Source: <code>src/domains/middleware/types.ts</code>, <code>validate.ts</code>, <code>budget.ts</code>, and <code>runtime.ts</code>.</p>
+<p>Supported hooks:</p>
+<table>
+<thead>
+<tr>
+<th>Hook ID</th>
+<th>Current use</th>
+</tr>
+</thead>
+<tbody><tr>
+<td><code>before_tool</code></td>
+<td>Guard and annotate a tool call before execution. Rejected or parked attempts still reach loop detection.</td>
+</tr>
+<tr>
+<td><code>after_tool</code></td>
+<td>Observe or annotate a completed tool result. File mutation and skill activation observers listen here and cannot change the result.</td>
+</tr>
+<tr>
+<td><code>turn_start</code></td>
+<td>Inject visible <code>&lt;system-reminder&gt;</code> text into the accepted request.</td>
+</tr>
+<tr>
+<td><code>turn_end</code></td>
+<td>Buffer reminders for the next request, including stalled-turn, tool-prose, and finish-contract advisories.</td>
+</tr>
+<tr>
+<td><code>on_compaction</code></td>
+<td>Observe compaction events. Effects from this hook are discarded by design.</td>
+</tr>
+</tbody></table>
+<p>Supported effect kinds:</p>
+<table>
+<thead>
+<tr>
+<th>Effect</th>
+<th>Current meaning</th>
+</tr>
+</thead>
+<tbody><tr>
+<td><code>inject_reminder</code></td>
+<td>Structured reminder payload.</td>
+</tr>
+<tr>
+<td><code>annotate_tool_result</code></td>
+<td>Append deterministic annotation to a tool result.</td>
+</tr>
+<tr>
+<td><code>block_tool</code></td>
+<td>Hard-block a tool before execution.</td>
+</tr>
+<tr>
+<td><code>protect_path</code></td>
+<td>Register a protected artifact path in session state.</td>
+</tr>
+<tr>
+<td><code>request_continuation</code></td>
+<td>Ask the chat loop for one bounded automatic continuation.</td>
+</tr>
+<tr>
+<td><code>require_tool</code></td>
+<td>Require a specific tool for the next turn.</td>
+</tr>
+<tr>
+<td><code>lock_tools</code></td>
+<td>Lock available tools to the current subset.</td>
+</tr>
+</tbody></table>
+<p>Declarative rules run before coded registrations. Scoped registrations match by hook and, for tool hooks, by tool name. Hook failures emit diagnostics and later hooks still run.</p>
+<p>Middleware hook budgets are phase-aware through <code>DEFAULT_MIDDLEWARE_HOOK_BUDGETS_MS</code>:</p>
+<ul>
+<li><code>before_tool</code>: 25 ms</li>
+<li><code>after_tool</code>: 25 ms</li>
+<li><code>turn_start</code>: 50 ms</li>
+<li><code>turn_end</code>: 75 ms</li>
+<li><code>on_compaction</code>: 150 ms</li>
+</ul>
+<p>Per-phase budgets can be overridden via <code>CLIO_CODER_HOOK_BUDGET_&lt;PHASE&gt;_MS</code> or global <code>CLIO_CODER_HOOK_BUDGET_MS</code>. Warmup grace exempts initial calls (<code>DEFAULT_HOOK_BUDGET_WARMUP_CALLS = 1</code>), and steady-state warnings trigger when at least 3 of the last 5 post-warmup calls exceed budget (<code>DEFAULT_HOOK_BUDGET_WINDOW = 5</code>, <code>DEFAULT_HOOK_BUDGET_THRESHOLD = 3</code>). Overruns are reported but do not abort the turn. The orchestrator and workers share the middleware contract, but worker guard state is process-local.</p>
+<p>Middleware reminders are visible request text, not hidden prompt state. <code>turn_start</code> reminders flush into the same accepted request; <code>turn_end</code> reminders flush once on the next request. A <code>request_continuation</code> from any producer is capped at one automatic continuation per user prompt; a second producer in the same prompt gets a footer notice that the nudge is spent, and the turn is handed back to the operator rather than looped.</p>
+<h3>Built-in registrations</h3>
+<p>These ship in every interactive session. Each is one bounded behavior with a visible reminder; none changes a tool policy or a safety verdict.</p>
+<table>
+<thead>
+<tr>
+<th>Id</th>
+<th>Hooks</th>
+<th>What it does</th>
+</tr>
+</thead>
+<tbody><tr>
+<td><code>nudge.stalled-turn</code></td>
+<td><code>turn_end</code></td>
+<td>The one declarative rule. A turn that called no tools and ended on an announced action (&quot;Next I will inspect <code>src/cli/index.ts</code>&quot;) is continued once with a reminder to perform it or say plainly that it is finished. Questions, &quot;let me know&quot;, conditional offers (&quot;if you want me to&quot;), and completion statements are not announcements.</td>
+</tr>
+<tr>
+<td><code>observer.skills-reminder</code></td>
+<td><code>turn_start</code>, <code>turn_end</code></td>
+<td>Once per session, on the first substantive turn, when installed or installable skills exist, injects one line teaching the suggestion protocol: list with <code>context(scope=&quot;skills&quot;)</code>, open the reply with <code>Suggested skill: /skill &lt;name&gt;</code> when one matches, then continue the task in the same turn. Only the operator loads a skill. At <code>turn_end</code>, a reply that made the suggestion and stopped with only listing calls behind it is continued once (#184): the suggestion is not the task. Greetings do not spend the session&#39;s one reminder; a resumed or forked session never gets one.</td>
+</tr>
+<tr>
+<td><code>observer.marketplace-offer</code></td>
+<td><code>turn_start</code>, <code>after_tool</code></td>
+<td>On coordinator sessions, locally matches a substantive request against undeclined, uninstalled skills in Clio&#39;s marketplace and offers each matching skill at most once per session. Ordinary autonomy asks the operator through a tag-bound <code>ask_user</code> choice; <code>Not now</code> lasts for the session and <code>Never offer this skill</code> persists for that skill version. <code>full-auto</code> installs the match at project scope without the question. Both consented and autonomous installs pass the Clio-marketplace source gate, and installation never activates the skill; activation remains operator-gated.</td>
+</tr>
+<tr>
+<td><code>observer.task-board-reminder</code></td>
+<td><code>turn_start</code></td>
+<td>Once per session, when the operator&#39;s text literally enumerates three or more steps (<code>1)</code>, <code>2.</code>, <code>step 3:</code>, or three bulleted lines), injects one line asking for <code>tasks action=&quot;plan&quot;</code> before the first edit. Prose that merely mentions numbers never counts.</td>
+</tr>
+<tr>
+<td><code>nudge.open-tasks</code></td>
+<td><code>turn_end</code></td>
+<td>A settled work turn (one that called tools) that ends while the session task board still has pending or active tasks is continued once with the open list. Pure conversation turns, aborted or errored turns, and boards where every remaining task is blocked do not trigger.</td>
+</tr>
+<tr>
+<td><code>nudge.detached-dispatch</code></td>
+<td><code>turn_end</code></td>
+<td>A settled turn that ends while a detached dispatch batch has every run terminal and uncollected is continued once, naming the ready batches; <code>monitor mode=&quot;collect&quot;</code> clears it, including across resume. Batches with runs still in flight, and surfaces without <code>monitor</code>, do not trigger.</td>
+</tr>
+<tr>
+<td><code>nudge.read-only-exploration</code></td>
+<td><code>after_tool</code>, <code>turn_end</code></td>
+<td>After nine or more read-only calls (<code>read</code>, <code>grep</code>, <code>find</code>, <code>ls</code>, <code>code_nav</code>, read-only shell) in one user turn without a successful Scout dispatch, injects one advisory to delegate broad reconnaissance to Scout. One advisory per user turn, and only on surfaces that have <code>dispatch</code>.</td>
+</tr>
+<tr>
+<td><code>rail.unbacked-worker-claim</code></td>
+<td><code>after_tool</code>, <code>turn_end</code></td>
+<td>A reply that reports worker or Scout results in a turn with no <code>dispatch</code> call gets one warning that the claim is not backed by a receipt. A <code>[worker result]</code> note the operator shared is receipt-backed and exempt. No continuation: the operator decides.</td>
+</tr>
+<tr>
+<td><code>observer.watchdog</code></td>
+<td><code>after_tool</code>, <code>turn_end</code></td>
+<td>Opt-in through <code>watchdog.enabled</code> (default off). A turn that changed the tree is reviewed by one read-only <code>verifier</code> dispatch briefed with the turn&#39;s coalesced diff (per-path last-write-wins, bounded to 12 KiB) and the task board&#39;s current scope. Its failed checks become one transcript notice naming the count and the first three; a passing report emits nothing. <code>watchdog.cadenceToolCalls: N</code> also fires it every N tool calls inside the turn. One run in flight at a time; an overlapping trigger is dropped and counted. It emits no middleware effects, never continues a turn, and never mutates. Turns with no file mutations, headless runs, and ACP runs never fire it.</td>
+</tr>
+<tr>
+<td><code>observer.memory-intervention</code></td>
+<td><code>before_tool</code>, <code>after_tool</code>, <code>turn_start</code>, <code>turn_end</code>, <code>on_compaction</code></td>
+<td>Tracks bounded task memory throughout the turn. Repeated failures and post-compaction knowledge can inject rules-only reminders without a model. Interval, error-streak, and loop triggers queue a detached background reflection at <code>turn_end</code>; it uses the configured memory route and can deliver a bounded reminder with the next submitted turn. Governed by the <code>context.memory</code> settings block.</td>
+</tr>
+</tbody></table>
+<p>Two coded controls sit beside the registrations rather than among them. <code>tool-choice-control</code> turns <code>require_tool</code> and <code>lock_tools</code> effects into the provider&#39;s tool-choice field for the next round: a required tool clears when that tool starts, a lock lasts until the next submitted turn and outranks later requirements. <code>hook-receipts</code> is the durable ring (200 entries, throttled to one write per two seconds) of user-defined hook executions that <code>clio-coder config inspect</code> reads.</p>
+<p>User-defined hook declarations load from three places: <code>&lt;extensionRoot&gt;/hooks.yaml</code>, <code>.clio-coder/hooks.yaml</code>, and <code>.clio-coder/hooks.local.yaml</code>. A hook can be <code>prompt</code>, <code>effect</code>, or <code>command</code>. Command hooks run an argv array without a shell, under the workspace with a timeout and bounded output, and every hook execution emits a receipt. Project files are read from disk; extension declarations come from the committed extension snapshot, which captured the <code>hooks.yaml</code> bytes during install-digest verification, so a file rewritten after verification is never reopened. A receipt for an extension hook carries the package provenance, the declarations digest, and the extension generation that admitted it.</p>
+<p>User hooks are one owned registration set. The extensions domain publishes nothing when it starts. After the guard registrations and before the turn-end assessors, the composition root prepares boot generation 1 and its user hooks, checks that both candidates are current, and publishes their references in adjacent assignment-only calls. <code>/resources extensions reload</code> uses the same paired path for later generations. A replacement for an older or equal generation is refused during preparation; after final validation neither publication primitive can refuse or call out. Conflict diagnostics and the reload event run only after both references are live. An owned registration that would take a builtin or host id is dropped with a <code>registration_conflict</code> diagnostic; a later host registration with the same id evicts the owned one. Evaluation captures the registration list once per hook occurrence, so an asynchronous phase that started before a reload finishes against the list it started with.</p>
+<hr>
+<h2>Validation helpers</h2>
+<p>Middleware validators enforce closed fields and known enum values. Minimal valid rule object:</p>
+<pre><code class="language-json">{
+  &quot;id&quot;: &quot;lab.require-validation&quot;,
+  &quot;source&quot;: &quot;builtin&quot;,
+  &quot;description&quot;: &quot;Require validation after generated artifact writes.&quot;,
+  &quot;enabled&quot;: true,
+  &quot;hooks&quot;: [&quot;turn_end&quot;],
+  &quot;effectKinds&quot;: [&quot;request_continuation&quot;]
+}
+</code></pre>
+<p>Minimal valid effect object examples:</p>
+<pre><code class="language-json">{ &quot;kind&quot;: &quot;block_tool&quot;, &quot;reason&quot;: &quot;protected path&quot;, &quot;severity&quot;: &quot;hard-block&quot; }
+</code></pre>
+<pre><code class="language-json">{ &quot;kind&quot;: &quot;protect_path&quot;, &quot;path&quot;: &quot;out/checkpoint.nc&quot;, &quot;reason&quot;: &quot;validated output&quot; }
+</code></pre>
+<p>The current <code>MiddlewareRuleSource</code> is only <code>builtin</code>. Hook files compile into coded registrations on the same runtime, but they are not custom declarative rule sources and do not grant new tool authority.</p>
+        </article>
+        <nav class="related-nav" aria-label="Adjacent references">
+          <a class="nav-link-card" href="memory_blueprint.html"><span class="nav-label">Previous</span><span class="nav-title">Evidence Corpus and Long-Term Memory</span></a>
+          <a class="nav-link-card next" href="models_blueprint.html"><span class="nav-label">Next</span><span class="nav-title">Model Catalog, Runtime Refresh, and Field Notes</span></a>
+        </nav>
+        <p class="reference-footer-note">Canonical content lives in the mapped Markdown page. This visual counterpart adds navigation without changing the contract.</p>
+      </main>
     </div>
-
-    <!-- TAB 1: INTERACTIVE -->
-    <main class="tab-pane active" id="pane-interactive">
-      <div class="blueprint-layout">
-
-        <!-- Left: Scanner -->
-        <div class="specs-col">
-          <div class="glass-card">
-            <h2>
-              <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><title>Icon</title><rect x="2" y="2" width="20" height="20" rx="2.18" ry="2.18"></rect><line x1="7" y1="2" x2="7" y2="22"></line><line x1="17" y1="2" x2="17" y2="22"></line><line x1="2" y1="12" x2="22" y2="12"></line><line x1="2" y1="7" x2="22" y2="7"></line><line x1="2" y1="17" x2="22" y2="17"></line></svg>
-              Interactive Component Scanner
-            </h2>
-            <p>Modify simulated files and monitor hash tracking alongside reload lifecycle bounds.</p>
-
-            <div class="presets-list">
-              <span class="preset-btn" onclick="modifyComponent('recipe')">Modify Coder Agent Recipe</span>
-              <span class="preset-btn" onclick="modifyComponent('rules')">Modify Safety Rule Pack</span>
-              <span class="preset-btn" onclick="modifyComponent('schema')">Modify Config Schema</span>
-            </div>
-
-            <div class="scanner-out">
-              <div class="scanner-line">
-                <strong>Component ID:</strong> <span id="scanId">agent-recipe:coder</span>
-              </div>
-              <div class="scanner-line">
-                <strong>File Path:</strong> <span id="scanPath">src/domains/agents/builtins/coder.md</span>
-              </div>
-              <div class="scanner-line">
-                <strong>SHA-256 Hash:</strong> <span id="scanHash" style="font-family:var(--font-mono); color:var(--color-purple)">7c8f9024a...</span>
-              </div>
-              <div class="scanner-line">
-                <strong>Reload Bound:</strong> <span class="reload-badge hot" id="scanReload">hot</span>
-              </div>
-            </div>
-          </div>
-        </div>
-
-        <!-- Right: Pipeline -->
-        <div class="specs-col">
-          <div class="glass-card">
-            <h2>
-              <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><title>Icon</title><polyline points="22 12 18 12 15 21 9 3 6 12 2 12"></polyline></svg>
-              Dynamic Hook &amp; Effect Pipeline
-            </h2>
-            <p>Pick a hook trigger to simulate evaluation rules and trace generated effects.</p>
-
-            <div class="form-group">
-              <label for="hookSelect">Hook Trigger Event</label>
-              <select id="hookSelect" onchange="runPipelineSim()">
-                <option value="before_tool">before_tool (Registry call admission)</option>
-                <option value="after_tool">after_tool (Post tool execution)</option>
-                <option value="turn_end">turn_end (Turn completion reminder)</option>
-                <option value="on_compaction">on_compaction (Sliding window overflows)</option>
-              </select>
-            </div>
-
-            <div class="verdict-header">Pipeline Trace log</div>
-            <div class="pipeline-out" id="pipelineBox">
-              <!-- filled dynamically -->
-            </div>
-          </div>
-        </div>
-
-      </div>
-    </main>
-
-    <!-- TAB 2: TECHNICAL REFERENCE -->
-    <main class="tab-pane" id="pane-reference">
-      <div class="glass-card">
-        <h2>Clio Coder Middleware &amp; Component Specifications</h2>
-
-        <h3 style="margin: 1.5rem 0 0.5rem 0; color:#fff;">Component scanner</h3>
-        <p>The scanner computes SHA-256 signatures of codebase blocks and compiles component records used in reviews to flag runtime behavior alterations.</p>
-
-        <h3 style="margin: 1.5rem 0 0.5rem 0; color:#fff;">Reload Classes</h3>
-        <table class="ref-table">
-          <thead>
-            <tr>
-              <th>Reload Class</th>
-              <th>Meaning</th>
-            </tr>
-          </thead>
-          <tbody>
-            <tr>
-              <td><code>hot</code></td>
-              <td>Can be hot-reloaded during active session runtime.</td>
-            </tr>
-            <tr>
-              <td><code>next-dispatch</code></td>
-              <td>Applies to subsequent worker dispatches.</td>
-            </tr>
-            <tr>
-              <td><code>restart-required</code></td>
-              <td>Requires full Clio restart to load schema updates safely.</td>
-            </tr>
-          </tbody>
-        </table>
-
-        <h3 style="margin: 1.5rem 0 0.5rem 0; color:#fff;">Middleware Hooks and Effects</h3>
-        <p>Middleware filters evaluate tool calls, turn lifecycle reminders, and compaction observation:</p>
-        <ul style="margin-left: 2rem; margin-bottom: 1.5rem; color:var(--text-muted)">
-          <li style="margin-bottom:0.4rem;"><strong>Hook IDs</strong>: <code>before_tool</code>, <code>after_tool</code>, <code>turn_start</code>, <code>turn_end</code>, <code>on_compaction</code>.</li>
-          <li style="margin-bottom:0.4rem;"><strong>Effect Kinds</strong>: <code>inject_reminder</code>, <code>annotate_tool_result</code>, <code>block_tool</code>, <code>protect_path</code>, <code>request_continuation</code>.</li>
-          <li style="margin-bottom:0.4rem;"><strong>Phase-Aware Budgets</strong> (<code>DEFAULT_MIDDLEWARE_HOOK_BUDGETS_MS</code>): <code>before_tool</code>: 25ms, <code>after_tool</code>: 25ms, <code>turn_start</code>: 50ms, <code>turn_end</code>: 75ms, <code>on_compaction</code>: 150ms.</li>
-        </ul>
-      </div>
-    </main>
-
-    <footer>
-      <p>Clio Coder Middleware spec &bull; Version 0.4.0</p>
-    </footer>
+    <footer>Clio Coder documentation · source-aligned at v0.4.2</footer>
   </div>
-
-  <script>
-    // Tab switching
-    function switchTab(tabId) {
-      document.querySelectorAll('.tab-btn').forEach(btn => { btn.classList.remove('active'); });
-      document.querySelectorAll('.tab-pane').forEach(pane => { pane.classList.remove('active'); });
-
-      if (tabId === 'interactive') {
-        document.querySelector('.tab-btn:nth-child(1)').classList.add('active');
-        document.getElementById('pane-interactive').classList.add('active');
-      } else {
-        document.querySelector('.tab-btn:nth-child(2)').classList.add('active');
-        document.getElementById('pane-reference').classList.add('active');
-      }
-    }
-
-    // Component details
-    const components = {
-      recipe: {
-        id: "agent-recipe:coder",
-        path: "src/domains/agents/builtins/coder.md",
-        reload: "hot",
-        hashes: ["e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855", "8f3a9e048fc28bd2987116298ae8cf5527ae41e4649b934ca495991b7852b822"]
-      },
-      rules: {
-        id: "safety-rule-pack:damage-control",
-        path: "damage-control-rules.yaml",
-        reload: "next-dispatch",
-        hashes: ["c4298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b8222", "a048fc28bd2987116298ae8cf5527ae41e4649b934ca495991b7852b8222fa1b0"]
-      },
-      schema: {
-        id: "config-schema:settings",
-        path: "src/domains/config/schema.ts",
-        reload: "restart-required",
-        hashes: ["d3a98ea0c44298fc1c149afbf4c8996fbd67ae41e4649b934ca495991b7852b", "f98216298ae8cf5527ae41e4649b934ca495991b7852b8220f18835d03829ad"]
-      }
-    };
-
-    let activeComp = 'recipe';
-    let hashToggle = false;
-
-    function modifyComponent(type) {
-      activeComp = type;
-      hashToggle = !hashToggle;
-
-      const comp = components[type];
-      document.getElementById('scanId').innerText = comp.id;
-      document.getElementById('scanPath').innerText = comp.path;
-      document.getElementById('scanHash').innerText = hashToggle ? comp.hashes[0] : comp.hashes[1];
-
-      const badge = document.getElementById('scanReload');
-      badge.innerText = comp.reload;
-      badge.className = `reload-badge ${comp.reload === 'hot' ? 'hot' : (comp.reload === 'next-dispatch' ? 'dispatch' : 'restart')}`;
-    }
-
-    // Pipeline simulator logic
-    function runPipelineSim() {
-      const hook = document.getElementById('hookSelect').value;
-      const box = document.getElementById('pipelineBox');
-      box.innerHTML = '';
-
-      if (hook === 'before_tool') {
-        addStep("Trigger: before_tool", "Tool Registry intercepts write invocation on 'src/core/init.ts'.", "info");
-        addStep("Rules scan: safety.protect-path", "Checking path exclusions list...", "info");
-        addStep("Effect generated: block_tool", "Rule triggered: target path matches read-only boundary vendor/.", "warn");
-        addStep("Consuming effect", "Registry blocks tool execution and throws safety exception.", "error");
-      } else if (hook === 'after_tool') {
-        addStep("Trigger: after_tool", "Tool Coder finishes execution of 'write src/index.ts'.", "info");
-        addStep("Observer notification", "File mutation and skill activation observers receive a best-effort event.", "info");
-        addStep("Effect generated: annotate_tool_result", "Tool result can receive deterministic metadata without changing the underlying file write.", "success");
-      } else if (hook === 'turn_end') {
-        addStep("Trigger: turn_end", "Assistant stops after announcing work without tool calls.", "info");
-        addStep("Rules scan: stalled-turn", "Checking whether one bounded continuation should be requested.", "info");
-        addStep("Effect generated: request_continuation", "Chat loop schedules one automatic continuation for the same user prompt.", "success");
-      } else {
-        addStep("Trigger: on_compaction", "Messages ledger pressure exceeds threshold (0.83 > 0.80).", "info");
-        addStep("Observer notification", "Compaction event is available to middleware telemetry.", "info");
-        addStep("Effects discarded", "This hook observes state only; emitted effects are ignored by design.", "success");
-      }
-    }
-
-    function addStep(title, desc, type) {
-      const box = document.getElementById('pipelineBox');
-      const step = document.createElement('div');
-      step.className = 'pipeline-step';
-
-      let color = '#fff';
-      if (type === 'warn') color = 'var(--color-amber)';
-      if (type === 'error') color = 'var(--color-rose)';
-      if (type === 'success') color = 'var(--color-emerald)';
-
-      step.innerHTML = `<strong style="color:${color}">${title}</strong><span>${desc}</span>`;
-      box.appendChild(step);
-    }
-
-    // Init
-    window.onload = () => {
-      modifyComponent('recipe');
-      runPipelineSim();
-    };
-  </script>
+  <script src="shared.js"></script>
 </body>
 </html>

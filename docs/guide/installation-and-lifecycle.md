@@ -1,11 +1,9 @@
 # Installation and Lifecycle Operations
 
-Clio Coder is designed to be self-contained and platform-compliant. This document outlines the default directory paths, file purposes, permission levels, and lifecycle commands (`install`, `reset`, `upgrade`, and `uninstall`). Clio Coder installs from npm as `@iowarp/clio-coder` (`npm install -g @iowarp/clio-coder`, published since v0.3.0) or from a source checkout with a deterministic local symlink; the CLI classifies both install kinds and `clio-coder upgrade` handles each.
+> **Visual blueprint:** The source checkout includes the complete
+> [Installation and Lifecycle Operations visual reference](https://github.com/iowarp/clio-coder/blob/main/docs/html/lifecycle_blueprint.html).
 
-> [!TIP]
-> **Interactive spec available:** The source checkout includes the
-> [lifecycle blueprint](https://github.com/iowarp/clio-coder/blob/main/docs/html/lifecycle_blueprint.html) with a path simulator and
-> visual flowcharts.
+Clio Coder is designed to be self-contained and platform-compliant. This document outlines the default directory paths, file purposes, permission levels, and lifecycle commands (`install`, `reset`, `upgrade`, and `uninstall`). Clio Coder installs from npm as `@iowarp/clio-coder` (`npm install -g @iowarp/clio-coder`, published since v0.3.0) or from a source checkout with a deterministic local symlink; the CLI classifies both install kinds and `clio-coder upgrade` handles each.
 
 ### Optional dependency: the Claude Agent SDK
 
@@ -397,7 +395,7 @@ If you are removing Clio Coder completely from your system, verify that all cate
 3.  **Global Bin Links**:
     *   `clio-coder` executable in your global npm path (for source checkouts, avoid this path unless intentionally debugging npm link behavior).
 4.  **Per-Repository State**:
-    *   `.clio-coder/` in every repository Clio has worked in, and the generated `CLIO-CODER.md` beside it. See [The Project `.clio-coder/` Directory](#the-project-clio-directory) for what each entry is before deleting.
+    *   `.clio-coder/` in every repository Clio has worked in, and the generated `CLIO-CODER.md` beside it. See [The Project `.clio-coder/` Directory](#the-project-clio-coder-directory) for what each entry is before deleting.
     *   Remove `.clio-coder/worktrees/` with `git worktree remove` rather than `rm -rf`, so git does not keep stale worktree metadata.
 
 ---

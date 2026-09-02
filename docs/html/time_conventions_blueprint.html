@@ -1,211 +1,195 @@
-<!DOCTYPE html>
+<!doctype html>
 <html lang="en">
 <head>
-  <meta charset="UTF-8">
-  <meta name="viewport" content="width=device-width, initial-scale=1.0">
-  <title>Clio Coder - Time &amp; Clock Conventions Blueprint</title>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <meta name="clio-markdown-source" content="docs/architecture/time-conventions.md">
+  <meta name="clio-docs-version" content="0.4.2">
+  <title>Time and Clock Conventions · Clio Coder 0.4.2</title>
+  <link rel="icon" href="data:,">
   <link rel="stylesheet" href="shared.css">
 </head>
-<body>
+<body data-doc-category="architecture">
+  <div class="reading-progress" aria-hidden="true"></div>
+  <a class="skip-link" href="#reference-content">Skip to reference</a>
   <div class="container">
-    <header>
+    <header class="document-header" data-category="Architecture">
       <div class="header-left">
-        <div class="header-logo">
-          <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" style="color: var(--color-cyan);"><title>Clock Icon</title>
-            <circle cx="12" cy="12" r="10"></circle>
-            <polyline points="12 6 12 12 16 14"></polyline>
+        <a class="header-logo" href="index.html" aria-label="Documentation index">
+          <svg viewBox="0 0 24 24" fill="none" aria-hidden="true">
+            <path d="M12 2 2 7l10 5 10-5-10-5Z" stroke="url(#clio-logo)" stroke-width="2" stroke-linejoin="round"/>
+            <path d="m2 12 10 5 10-5M2 17l10 5 10-5" stroke="url(#clio-logo)" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"/>
+            <defs><linearGradient id="clio-logo" x1="2" y1="2" x2="22" y2="22"><stop stop-color="#00d4db"/><stop offset="1" stop-color="#ff7e29"/></linearGradient></defs>
           </svg>
-        </div>
+        </a>
         <div class="header-title-wrapper">
-          <h1>Time &amp; Clock Conventions Blueprint</h1>
-          <p>Monotonic duration spans, wall clock anchor instants, UTC storage, and render-boundary formatters</p>
+          <p class="document-kicker">Architecture / canonical reference</p>
+          <h1>Time and Clock Conventions</h1>
+          <p class="document-path">docs/architecture/time-conventions.md</p>
         </div>
       </div>
       <div class="header-right">
-        <span class="version-badge">v0.4.0</span>
-        <a href="index.html" class="back-btn">
-          <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><title>Back Icon</title><line x1="19" y1="12" x2="5" y2="12"></line><polyline points="12 19 5 12 12 5"></polyline></svg>
-          Dashboard Hub
-        </a>
+        <a class="back-btn" href="index.html">← Index</a>
+        <span class="version-badge">v0.4.2</span>
       </div>
     </header>
-
-    <div class="page-layout-grid">
-      <nav class="sidebar" aria-label="Table of Contents">
-        <div class="toc-container">
-          <div class="toc-title">On This Page</div>
-          <ul class="toc-list">
-            <!-- Populated dynamically by shared.js -->
-          </ul>
-        </div>
-      </nav>
-
-      <main>
-        <div class="tabs-nav">
-          <button type="button" class="tab-btn active" onclick="switchTab('clock-types')">
-            <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><title>Clocks</title><circle cx="12" cy="12" r="10"></circle><polyline points="12 6 12 12 16 14"></polyline></svg>
-            Monotonic vs Wall Clocks
-          </button>
-          <button type="button" class="tab-btn" onclick="switchTab('utc-formatters')">
-            <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><title>Formatters</title><globe></globe><circle cx="12" cy="12" r="10"></circle><line x1="2" y1="12" x2="22" y2="12"></line><path d="M12 2a15.3 15.3 0 0 1 4 10 15.3 15.3 0 0 1-4 10 15.3 15.3 0 0 1-4-10 15.3 15.3 0 0 1 4-10z"></path></svg>
-            UTC Everywhere &amp; Formatters
-          </button>
-          <button type="button" class="tab-btn" onclick="switchTab('concurrency-testing')">
-            <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><title>Testing</title><polygon points="5 3 19 12 5 21 5 3"></polygon></svg>
-            Ordering &amp; Test Determinism
-          </button>
-        </div>
-
-        <!-- TAB 1: CLOCK TYPES -->
-        <div class="tab-pane active" id="pane-clock-types">
-          <div class="glass-card">
-            <h2>Which Clock for What Purpose</h2>
-            <div class="grid grid-2">
-              <div>
-                <h3>Monotonic Clocks for Spans &amp; Durations</h3>
-                <p>All durations, latencies, TTFT, timeouts, watchdogs, and retry backoffs MUST use <code>performance.now()</code> or <code>process.hrtime.bigint()</code>:</p>
-                <ul>
-                  <li>Immune to NTP stepping, system sleep/wake, and DST clock shifts.</li>
-                  <li>Answers: "How long did this take?" or "How long until timeout?".</li>
-                </ul>
-              </div>
-              <div>
-                <h3>Wall Clocks for Anchored Instants</h3>
-                <p><code>Date.now()</code> or <code>new Date().toISOString()</code> are reserved exclusively for anchor timestamps that humans or external systems inspect:</p>
-                <ul>
-                  <li>Includes <code>startedAt</code>, <code>endedAt</code>, <code>createdAt</code>, <code>expiresAt</code>.</li>
-                  <li>NEVER used for calculating elapsed durations or intervals.</li>
-                </ul>
-              </div>
-            </div>
-          </div>
-
-          <h2>Combined Anchor and Span Pattern</h2>
-          <p>When recording an operation with both an anchor and an exact duration (e.g. <code>src/domains/dispatch/code-step.ts</code>):</p>
-          <pre><code>const startedAtMs = Date.now();                      // wall anchor, for the record
-const clock = process.hrtime.bigint();               // monotonic span
+    <div class="page-layout-grid reference-layout">
+      <aside class="sidebar reference-sidebar" aria-label="On this page">
+        <nav class="toc-container">
+          <p class="toc-title">On this page</p>
+          <a class="sidebar-source" href="https://github.com/iowarp/clio-coder/blob/main/docs/architecture/time-conventions.md">Canonical Markdown<br>docs/architecture/time-conventions.md</a>
+          <ul class="toc-list"></ul>
+        </nav>
+      </aside>
+      <main class="reference-main" id="reference-content">
+        <article class="reference-prose glass-card">
+<blockquote>
+<p><strong>Visual blueprint:</strong> The source checkout includes the complete
+<a href="time_conventions_blueprint.html">Time and Clock Conventions visual reference</a>.</p>
+</blockquote>
+<p>This document describes the time practices implemented in the current Clio
+Coder source tree. The code distinguishes process-local elapsed spans from
+durable instants, but it does not impose one clock primitive on every module.</p>
+<hr>
+<h2>1. Choose a clock for the lifetime of the fact</h2>
+<table>
+<thead>
+<tr>
+<th>Fact</th>
+<th>Current practice</th>
+<th>Representative sources</th>
+</tr>
+</thead>
+<tbody><tr>
+<td>Process-local elapsed span</td>
+<td>Use a monotonic source such as <code>performance.now()</code> or <code>process.hrtime.bigint()</code> when the start and finish occur in one process.</td>
+<td><code>src/domains/dispatch/heartbeat.ts</code>, <code>src/domains/dispatch/code-step.ts</code>, <code>src/core/startup-timer.ts</code></td>
+</tr>
+<tr>
+<td>Durable or cross-process instant</td>
+<td>Store epoch milliseconds or canonical UTC from <code>new Date(...).toISOString()</code>.</td>
+<td>Session entries, receipts, dispatch rows, audit rows</td>
+</tr>
+<tr>
+<td>Persisted expiry, lock age, or restart-visible deadline</td>
+<td>Some owners intentionally compare <code>Date.now()</code> values because the fact must survive a process boundary or is derived from filesystem metadata.</td>
+<td><code>src/core/state-file-lock.ts</code>, dispatch admission and recovery</td>
+</tr>
+<tr>
+<td>Concurrent ordering</td>
+<td>Prefer an explicit sequence or store order when the protocol supplies one; do not invent ordering from close timestamps.</td>
+<td><code>src/domains/dispatch/agent-ledger-store.ts</code>, <code>src/domains/dispatch/execution-scheduler.ts</code></td>
+</tr>
+</tbody></table>
+<p>This means neither <code>performance.now()</code> nor <code>Date.now()</code> is universally correct.
+A monotonic value has meaning only within its clock origin and is the right
+choice for a live heartbeat age or one process&#39;s latency. A wall-clock value is
+necessary for a receipt timestamp, a persisted lease deadline, a filesystem
+mtime age, or a record another process must read after restart.</p>
+<h3>Combined anchor and span pattern</h3>
+<p>When a record needs both a human-readable anchor and an accurate in-process
+duration, <code>src/domains/dispatch/code-step.ts</code> uses one wall anchor and one
+monotonic span:</p>
+<pre><code class="language-ts">const startedAtMs = Date.now();
+const clock = process.hrtime.bigint();
 const startedAt = new Date(startedAtMs).toISOString();
-
-// ... execution runs ...
-
+// ... operation executes ...
 const durationMs = Number((process.hrtime.bigint() - clock) / 1_000_000n);
 const endedAt = new Date(startedAtMs + durationMs).toISOString();
-
-// Guarantees: endedAt - startedAt === durationMs, unaffected by NTP shifts</code></pre>
-        </div>
-
-        <!-- TAB 2: UTC & FORMATTERS -->
-        <div class="tab-pane" id="pane-utc-formatters">
-          <h2>Storage, Transport, and Comparisons in UTC</h2>
-          <div class="grid grid-2">
-            <div class="glass-card">
-              <h3>UTC Invariants</h3>
-              <ul>
-                <li><strong>Storage:</strong> All timestamps in JSON/JSONL are canonical ISO-8601 UTC strings.</li>
-                <li><strong>Transport:</strong> Stored and sent across stdio/NDJSON as UTC.</li>
-                <li><strong>Comparisons:</strong> Time comparisons are performed on UTC epoch milliseconds.</li>
-              </ul>
-            </div>
-            <div class="glass-card">
-              <h3>Render-Boundary Conversion</h3>
-              <p>Conversion to the operator's local timezone occurs strictly at the final UI render call site:</p>
-              <ul>
-                <li>The canonical UTC instant remains accessible in detail views.</li>
-              </ul>
-            </div>
-          </div>
-
-          <h2>Standardized Formatter Functions (`src/interactive/format-time.ts`)</h2>
-          <table class="ref-table">
-            <thead>
-              <tr>
-                <th>Function</th>
-                <th>Output Format</th>
-                <th>Locale &amp; Frame</th>
-                <th>Purpose</th>
-              </tr>
-            </thead>
-            <tbody>
-              <tr>
-                <td><code>clockLocal(instant)</code></td>
-                <td><code>HH:MM:SS</code></td>
-                <td>Operator local timezone (<code>en-GB</code>, 24h)</td>
-                <td>Renders time-of-day for logs, tree selectors, and message pickers.</td>
-              </tr>
-              <tr>
-                <td><code>dateLocal(instant)</code></td>
-                <td><code>YYYY-MM-DD</code></td>
-                <td>Operator local timezone (<code>en-CA</code>)</td>
-                <td>Renders calendar dates for session pickers, welcome dashboards, and export files.</td>
-              </tr>
-              <tr>
-                <td><code>relative(instant, now)</code></td>
-                <td><code>"3m ago"</code></td>
-                <td>Operator local timezone</td>
-                <td>Renders relative recency ladders with automatic fallback to calendar dates.</td>
-              </tr>
-            </tbody>
-          </table>
-        </div>
-
-        <!-- TAB 3: ORDERING & DETERMINISM -->
-        <div class="tab-pane" id="pane-concurrency-testing">
-          <h2>Sequence Ordering &amp; Cross-Host Boundaries</h2>
-          <div class="grid grid-2">
-            <div class="glass-card">
-              <h3>Sequence Numbers Over Timestamps</h3>
-              <p>Under concurrent execution, components like the agent ledger and execution scheduler rely on monotonic sequence numbers rather than timestamps for total ordering.</p>
-            </div>
-            <div class="glass-card">
-              <h3>Cross-Host Boundaries</h3>
-              <p>Timestamps produced on one host are never compared directly against clocks on another host. Events are receive-stamped locally on arrival.</p>
-            </div>
-          </div>
-
-          <h2>Test Determinism &amp; Steppable Harness</h2>
-          <p>In test suites (<code>tests/harness/clock.ts</code>):</p>
-          <ul>
-            <li>Every module that reads a clock accepts an injectable clock interface.</li>
-            <li>Test harnesses advance time deterministically via steppable clocks, eliminating flakes and real-time passage delays.</li>
-            <li>Receipt integrity digests seal normalized timestamps before sealing; timestamps are never rewritten after receipt creation.</li>
-          </ul>
-        </div>
-
-        <!-- Related Navigation -->
-        <nav class="related-nav" aria-label="Related Pages">
-          <a href="capacity_scheduling_blueprint.html" class="nav-link-card">
-            <span class="nav-label">Previous Blueprint</span>
-            <span class="nav-title">Capacity &amp; Scheduling</span>
-          </a>
-          <a href="artifact_placement_blueprint.html" class="nav-link-card next">
-            <span class="nav-label">Next Blueprint</span>
-            <span class="nav-title">Artifact Placement</span>
-          </a>
+</code></pre>
+<p>The derived ending instant stays consistent with the measured duration even if
+the wall clock changes during the operation.</p>
+<h3>Cross-host and restart boundaries</h3>
+<p>Never subtract process-local monotonic values from different processes or
+hosts. A restart has no shared monotonic origin with the worker it recovers;
+<code>src/domains/dispatch/orphan-recovery.ts</code> first adjudicates the host-scoped
+process identity and then uses the persisted heartbeat only as a display and
+evidence bound. Transport protocols that need a durable anchor and live
+liveness carry both. <code>HeartbeatStamp.current</code> is the wall-clock instant, while
+<code>HeartbeatStamp.monotonic</code> is the value the live watchdog compares.</p>
+<p>On a shared filesystem, a process record created by another host is not checked
+against the local process table. Host, pid, and process-birth facts prevent pid
+reuse and cross-host confusion. When exact event ordering matters, use a
+protocol sequence, SQLite rowid, or append order defined by the owning store.</p>
+<h3>Injectable seams are local contracts</h3>
+<p>Clock injection exists where deterministic timing tests or protocol logic need
+it. Examples include the pure heartbeat classifier, dispatch admission queues,
+capacity leases, fleet preflight, worker spawn, and the audit writer&#39;s date
+function. Other modules read a platform clock directly. There is no global
+test-clock harness; tests use the seam supplied by the owner under test or
+exercise real passage explicitly.</p>
+<hr>
+<h2>2. UTC storage and local rendering</h2>
+<p>Durable and wire timestamps use canonical ISO-8601 UTC strings produced by
+<code>toISOString()</code> unless a schema explicitly owns epoch milliseconds. Localized
+display strings do not belong in persisted models.</p>
+<p>Operator-facing conversion is centralized in
+<code>src/interactive/format-time.ts</code> for the surfaces that display session and
+message instants:</p>
+<table>
+<thead>
+<tr>
+<th>Function</th>
+<th>Output</th>
+<th>Purpose</th>
+</tr>
+</thead>
+<tbody><tr>
+<td><code>clockLocal(instant)</code></td>
+<td><code>HH:MM:SS</code> through <code>en-GB</code> with a 24-hour cycle</td>
+<td>Local time of day</td>
+</tr>
+<tr>
+<td><code>dateLocal(instant)</code></td>
+<td><code>YYYY-MM-DD</code> through <code>en-CA</code></td>
+<td>Local calendar date</td>
+</tr>
+<tr>
+<td><code>relative(instant, now)</code></td>
+<td><code>3m ago</code>, <code>yesterday</code>, or a local date</td>
+<td>Coarse recency</td>
+</tr>
+</tbody></table>
+<p>The module keeps its <code>Intl.DateTimeFormat</code> instances at module scope and
+rebuilds them when <code>process.env.TZ</code> changes. Machine-readable surfaces such as
+structured logs, session records, and receipts bypass these formatters.</p>
+<hr>
+<h2>3. Receipt and audit integrity</h2>
+<p>Persisted receipt fields such as <code>startedAt</code> and <code>endedAt</code> participate in the
+integrity digest owned by <code>src/domains/dispatch/receipt-integrity.ts</code>. Timestamp
+normalization and duration derivation must finish before sealing. A sealed
+receipt must not be rewritten merely to make its clocks look tidier.</p>
+<p>Safety audit rows are written under:</p>
+<pre><code class="language-text">&lt;stateDir&gt;/audit/YYYY-MM-DD.jsonl
+</code></pre>
+<p>The filename date is the operator-local calendar date on which the writer
+opened that generation. Each row still carries a canonical UTC <code>ts</code>. Concurrent
+producers do not promise timestamp order in the raw file, so consumers sort by
+<code>ts</code> when reconstructing time order. The local date label is not itself a
+machine ordering key.</p>
+<hr>
+<h2>4. Review checklist</h2>
+<p>When adding a timed fact:</p>
+<ol>
+<li>Decide whether it is a process-local span, a durable instant, or a
+restart-visible deadline.</li>
+<li>Keep monotonic values inside their originating process.</li>
+<li>Persist UTC anchors and the measured duration when both are useful.</li>
+<li>Use host identity and process-birth evidence before consulting a local pid.</li>
+<li>Add a narrow injectable seam when deterministic tests need one; do not imply
+that an unrelated module shares it.</li>
+<li>Normalize timestamps before sealing any receipt or evidence digest.</li>
+</ol>
+        </article>
+        <nav class="related-nav" aria-label="Adjacent references">
+          <a class="nav-link-card" href="session_lifecycle_blueprint.html"><span class="nav-label">Previous</span><span class="nav-title">Session Lifecycle</span></a>
+          <a class="nav-link-card next" href="trace_blueprint.html"><span class="nav-label">Next</span><span class="nav-title">Trace store contract</span></a>
         </nav>
+        <p class="reference-footer-note">Canonical content lives in the mapped Markdown page. This visual counterpart adds navigation without changing the contract.</p>
       </main>
     </div>
-
-    <footer>
-      <p>Clio Coder Time Conventions Blueprint &bull; Version 0.4.0 &bull; Gnosis Research Center</p>
-    </footer>
+    <footer>Clio Coder documentation · source-aligned at v0.4.2</footer>
   </div>
-
   <script src="shared.js"></script>
-  <script>
-    function switchTab(tabId) {
-      document.querySelectorAll('.tab-btn').forEach(btn => btn.classList.remove('active'));
-      document.querySelectorAll('.tab-pane').forEach(pane => pane.classList.remove('active'));
-
-      const pane = document.getElementById(`pane-${tabId}`);
-      if (pane) pane.classList.add('active');
-
-      const activeBtn = Array.from(document.querySelectorAll('.tab-btn')).find(btn => {
-        return btn.getAttribute('onclick')?.includes(`'${tabId}'`);
-      });
-      if (activeBtn) activeBtn.classList.add('active');
-
-      if (window.initTableOfContents) window.initTableOfContents();
-    }
-  </script>
 </body>
 </html>

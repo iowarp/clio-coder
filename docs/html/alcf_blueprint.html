@@ -1,324 +1,118 @@
-<!DOCTYPE html>
+<!doctype html>
 <html lang="en">
 <head>
-  <meta charset="UTF-8">
-  <meta name="viewport" content="width=device-width, initial-scale=1.0">
-  <title>ALCF Inference Provider Blueprint (v0.4.0)</title>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <meta name="clio-markdown-source" content="docs/architecture/alcf-provider.md">
+  <meta name="clio-docs-version" content="0.4.2">
+  <title>ALCF Inference Provider · Clio Coder 0.4.2</title>
+  <link rel="icon" href="data:,">
   <link rel="stylesheet" href="shared.css">
-  <style>
-    /* Flow diagram custom styles */
-    .flow-diagram {
-      margin: 1.5rem 0;
-      padding: 1.5rem;
-      background: rgba(0, 0, 0, 0.3);
-      border: 1px solid var(--border-card);
-      border-radius: 12px;
-      display: flex;
-      flex-direction: column;
-      gap: 1rem;
-    }
-    .flow-step {
-      display: flex;
-      align-items: center;
-      gap: 1rem;
-      padding: 0.75rem;
-      border-radius: 8px;
-      background: rgba(255, 255, 255, 0.02);
-      border: 1px solid transparent;
-      transition: all 0.25s;
-    }
-    .flow-step.active {
-      background: rgba(0, 212, 219, 0.05);
-      border-color: rgba(0, 212, 219, 0.3);
-    }
-    .step-number {
-      width: 28px;
-      height: 28px;
-      border-radius: 50%;
-      background: rgba(255, 255, 255, 0.05);
-      border: 1px solid var(--border-card);
-      display: inline-flex;
-      align-items: center;
-      justify-content: center;
-      font-weight: 700;
-      font-size: 0.85rem;
-      color: var(--text-muted);
-    }
-    .flow-step.active .step-number {
-      background: var(--color-cyan);
-      color: #090d16;
-      border-color: transparent;
-      box-shadow: 0 0 10px rgba(0, 212, 219, 0.4);
-    }
-    .step-details h4 {
-      font-size: 0.9rem;
-      font-weight: 700;
-      color: #fff;
-    }
-    .step-details p {
-      font-size: 0.775rem;
-      color: var(--text-muted);
-      margin: 0;
-    }
-
-    .oauth-btn {
-      background: var(--color-cyan);
-      color: #090d16;
-      border: none;
-      padding: 0.5rem 1rem;
-      border-radius: 6px;
-      font-size: 0.85rem;
-      font-weight: 600;
-      cursor: pointer;
-      transition: background 0.2s;
-    }
-    .oauth-btn:hover {
-      background: #00b4bc;
-    }
-  </style>
 </head>
-<body>
+<body data-doc-category="architecture">
+  <div class="reading-progress" aria-hidden="true"></div>
+  <a class="skip-link" href="#reference-content">Skip to reference</a>
   <div class="container">
-    <header>
+    <header class="document-header" data-category="Architecture">
       <div class="header-left">
-        <div class="header-logo">
-          <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" style="color: var(--color-cyan);"><title>Icon</title>
-            <path d="M12 2L2 7L12 12L22 7L12 2Z"></path>
-            <path d="M2 17L12 22L22 17"></path>
-            <path d="M2 12L12 17L22 12"></path>
+        <a class="header-logo" href="index.html" aria-label="Documentation index">
+          <svg viewBox="0 0 24 24" fill="none" aria-hidden="true">
+            <path d="M12 2 2 7l10 5 10-5-10-5Z" stroke="url(#clio-logo)" stroke-width="2" stroke-linejoin="round"/>
+            <path d="m2 12 10 5 10-5M2 17l10 5 10-5" stroke="url(#clio-logo)" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"/>
+            <defs><linearGradient id="clio-logo" x1="2" y1="2" x2="22" y2="22"><stop stop-color="#00d4db"/><stop offset="1" stop-color="#ff7e29"/></linearGradient></defs>
           </svg>
-        </div>
+        </a>
         <div class="header-title-wrapper">
+          <p class="document-kicker">Architecture / canonical reference</p>
           <h1>ALCF Inference Provider</h1>
-          <p>Argonne Sophia and Metis gateway configuration backed by Globus OAuth</p>
-          <div class="meta-chips-row">
-            <span class="chip">Source: docs/alcf-provider.md</span>
-            <span class="chip chip-orange">clio-coder docs alcf</span>
-          </div>
+          <p class="document-path">docs/architecture/alcf-provider.md</p>
         </div>
       </div>
       <div class="header-right">
-        <span class="version-badge">Clio Coder v0.4.0</span>
-        <a href="index.html" class="back-btn">
-          <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><title>Icon</title><line x1="19" y1="12" x2="5" y2="12"></line><polyline points="12 19 5 12 12 5"></polyline></svg>
-          Dashboard Hub
-        </a>
+        <a class="back-btn" href="index.html">← Index</a>
+        <span class="version-badge">v0.4.2</span>
       </div>
     </header>
-
-    <div class="page-layout-grid">
-      <nav class="sidebar" aria-label="Table of Contents">
-        <div class="toc-container">
-          <div class="toc-title">On This Page</div>
-          <ul class="toc-list">
-            <!-- Dynamically populated -->
-          </ul>
-        </div>
-      </nav>
-
-      <main>
-        <div class="glass-card">
-          <h2>Overview Summary</h2>
-          <p>Clio connects directly to Argonne National Laboratory's ALCF inference gateways Sophia and Metis. This connection uses an OpenAI-compatible API target authenticated via Globus OAuth client PKCE flows.</p>
-        </div>
-
-        <div class="tabs-nav">
-          <button type="button" class="tab-btn active" onclick="switchTab('configurator')">
-            Target Configurator
-          </button>
-          <button type="button" class="tab-btn" onclick="switchTab('oauth-flow')">
-            Globus OAuth Flow
-          </button>
-          <button type="button" class="tab-btn" onclick="switchTab('reference')">
-            Technical Specs
-          </button>
-        </div>
-
-        <!-- Tab 1: Configurator -->
-        <div class="tab-pane active" id="pane-configurator">
-          <div class="blueprint-layout">
-            <div class="specs-col">
-              <div class="glass-card">
-                <h3>Select Gateway Target</h3>
-                <p>Choose an ALCF supercomputing cluster to generate configure commands.</p>
-
-                <div class="form-group">
-                  <label for="clusterSelect">Cluster Gateway</label>
-                  <select id="clusterSelect" onchange="updateConfigSim()">
-                    <option value="sophia">Sophia Cluster (uses /resource_server/sophia/vllm/v1)</option>
-                    <option value="metis">Metis Cluster (uses /resource_server/metis/api/v1)</option>
-                  </select>
-                </div>
-
-                <div class="form-group">
-                  <label for="modelSelect">Target Model</label>
-                  <select id="modelSelect" onchange="updateConfigSim()">
-                    <option value="openai/gpt-oss-120b">openai/gpt-oss-120b (Sophia vLLM id)</option>
-                    <option value="gpt-oss-120b">gpt-oss-120b (Metis bare id)</option>
-                    <option value="custom">Custom model ID...</option>
-                  </select>
-                </div>
-
-                <div id="customModelGroup" class="form-group" style="display: none;">
-                  <label for="customModelText">Custom Model ID</label>
-                  <input type="text" id="customModelText" value="openai/gpt-custom-model" oninput="updateConfigSim()">
-                </div>
-
-                <div class="form-group">
-                  <label for="maxTokens">Max Tokens Limit</label>
-                  <input type="number" id="maxTokens" value="4096" min="512" max="16384" step="512" oninput="updateConfigSim()">
-                </div>
-              </div>
-            </div>
-
-            <div class="specs-col">
-              <div class="glass-card">
-                <h3>Generated Configuration Commands</h3>
-                <p>Run these commands inside your Clio Coder session to login and save the target profile:</p>
-
-                <pre><code id="generatedCommand1">clio-coder auth login alcf</code></pre>
-                <pre><code id="generatedCommand2">clio-coder configure ...</code></pre>
-                <pre><code id="generatedCommand3">clio-coder targets use alcf-sophia</code></pre>
-              </div>
-            </div>
-          </div>
-        </div>
-
-        <!-- Tab 2: OAuth Flow -->
-        <div class="tab-pane" id="pane-oauth-flow">
-          <div class="glass-card">
-            <h3>Globus OAuth Paste-Code Login</h3>
-            <p>Clio's interactive SSH-friendly OAuth PKCE loop sequence:</p>
-
-            <div class="flow-diagram">
-              <div class="flow-step active" id="step1">
-                <span class="step-number">1</span>
-                <div class="step-details">
-                  <h4>Launch Authentication Command</h4>
-                  <p>Operator executes: <code>clio-coder auth login alcf</code></p>
-                </div>
-              </div>
-              <div class="flow-step" id="step2">
-                <span class="step-number">2</span>
-                <div class="step-details">
-                  <h4>Authorize via Browser</h4>
-                  <p>Clio prints a secure Globus URL. Click to approve and log in through ANL portal.</p>
-                  <button type="button" class="oauth-btn" style="margin-top: 0.5rem;" onclick="simulateOAuthStep(2)">Simulate ANL Globus Portal Login</button>
-                </div>
-              </div>
-              <div class="flow-step" id="step3">
-                <span class="step-number">3</span>
-                <div class="step-details">
-                  <h4>Paste Authorization Code</h4>
-                  <p>Globus displays a code. Paste it back into the Clio prompt: <input type="text" id="pasteCodeSim" placeholder="e.g. abcd1234ef..." style="width:150px; padding:0.25rem 0.5rem; font-size:0.8rem; display:inline-block; vertical-align:middle; margin-left:0.5rem;" oninput="simulateOAuthStep(3)"></p>
-                </div>
-              </div>
-              <div class="flow-step" id="step4">
-                <span class="step-number">4</span>
-                <div class="step-details">
-                  <h4>Token Resolved &amp; Saved</h4>
-                  <p>Clio exchanges code for OAuth token, verifies it, and stores the encrypted credential locally.</p>
-                </div>
-              </div>
-            </div>
-          </div>
-        </div>
-
-        <!-- Tab 3: Reference -->
-        <div class="tab-pane" id="pane-reference">
-          <div class="glass-card">
-            <h3>Configure Details</h3>
-            <p>Sophia currently maps to <code>/resource_server/sophia/vllm/v1</code> and Metis maps to <code>/resource_server/metis/api/v1</code>. Wire model IDs must be exact; Metis uses bare names while Sophia uses <code>openai/</code> prefixes.</p>
-
-            <h3>Implementation files</h3>
-            <ul>
-              <li><code>src/engine/alcf-oauth.ts</code>: PKCE pasting flows</li>
-              <li><code>src/domains/providers/runtimes/cloud/alcf.ts</code>: Sophia/Metis discovery models</li>
-            </ul>
-
-            <h3 style="margin-top:1.5rem;">Chat Templates Exception</h3>
-            <p>ALCF gateways reject custom client-side <code>chat_template_kwargs</code>. Clio automatically handles this by flagging target profiles with <code>clio.chatTemplateKwargsUnsupported</code>, which strips this field from request bodies before transmitting.</p>
-          </div>
-        </div>
-
-        <!-- Related Navigation -->
-        <nav class="related-nav" aria-label="Related Pages">
-          <a href="lifecycle_blueprint.html" class="nav-link-card">
-            <span class="nav-label">Previous Blueprint</span>
-            <span class="nav-title">Installation &amp; Lifecycle</span>
-          </a>
-          <a href="environment_blueprint.html" class="nav-link-card next">
-            <span class="nav-label">Next Blueprint</span>
-            <span class="nav-title">Environment Variables</span>
-          </a>
+    <div class="page-layout-grid reference-layout">
+      <aside class="sidebar reference-sidebar" aria-label="On this page">
+        <nav class="toc-container">
+          <p class="toc-title">On this page</p>
+          <a class="sidebar-source" href="https://github.com/iowarp/clio-coder/blob/main/docs/architecture/alcf-provider.md">Canonical Markdown<br>docs/architecture/alcf-provider.md</a>
+          <ul class="toc-list"></ul>
         </nav>
+      </aside>
+      <main class="reference-main" id="reference-content">
+        <article class="reference-prose glass-card">
+<blockquote>
+<p><strong>Visual blueprint:</strong> The source checkout includes the complete
+<a href="alcf_blueprint.html">ALCF Inference Provider visual reference</a>.</p>
+</blockquote>
+<p>Clio can use Argonne&#39;s ALCF inference gateway as an OpenAI-compatible target
+backed by Globus OAuth. The runtime id is <code>alcf</code>; each configured target points
+at one gateway cluster URL, such as Sophia or Metis.</p>
+<p>The login flow is SSH-friendly. <code>clio-coder auth login alcf</code> opens a Globus authorize
+URL and asks you to paste back the displayed authorization code. Clio stores the
+resulting OAuth refresh/access credential in <code>providers.auth</code> persisted through <code>openAuthStorage()</code>,
+refreshed through the same provider auth path used by other OAuth runtimes.</p>
+<h2>Configure</h2>
+<p>Authenticate first:</p>
+<pre><code class="language-bash">clio-coder auth login alcf
+</code></pre>
+<p>Then register one or both cluster targets:</p>
+<pre><code class="language-bash">clio-coder configure \
+  --id alcf-sophia \
+  --runtime alcf \
+  --url https://inference-api.alcf.anl.gov/resource_server/sophia/vllm/v1 \
+  --model openai/gpt-oss-120b \
+  --max-tokens 4096
+
+clio-coder configure \
+  --id alcf-metis \
+  --runtime alcf \
+  --url https://inference-api.alcf.anl.gov/resource_server/metis/api/v1 \
+  --model gpt-oss-120b \
+  --max-tokens 4096
+</code></pre>
+<p>Sophia currently uses <code>vllm</code> in the URL and serves <code>openai/</code>-prefixed model ids.
+Metis currently uses <code>api</code> in the URL and serves bare model ids. Clio sends the
+configured wire model id literally and does not rewrite it.</p>
+<p>Set a target as the chat default when you are ready:</p>
+<pre><code class="language-bash">clio-coder targets use alcf-sophia
+clio-coder targets --probe
+clio-coder models --target alcf-sophia
+</code></pre>
+<h2>Implementation Notes</h2>
+<p>The implementation is intentionally inside Clio Coder rather than downstream
+scientific apps:</p>
+<ul>
+<li><code>src/engine/alcf-oauth.ts</code> implements the Globus PKCE paste-code OAuth flow.</li>
+<li><code>src/engine/oauth.ts</code> registers the Clio-owned OAuth provider through the
+engine boundary.</li>
+<li><code>src/domains/providers/runtimes/cloud/alcf.ts</code> implements Sophia/Metis
+discovery and reuses the generic OpenAI-compatible chat synthesis.</li>
+<li><code>ProbeContext.authToken</code> carries a resolved stored/API/OAuth bearer into live
+probes so authenticated model discovery does not reach into auth storage.</li>
+<li>ALCF rejects non-standard <code>chat_template_kwargs</code> request fields. The runtime
+currently marks synthesized models with
+<code>clioCoder.chatTemplateKwargsUnsupported</code>, while the OpenAI-compatible engine
+adapter still reads the released legacy <code>clio.chatTemplateKwargsUnsupported</code>
+location. At this source revision the marker therefore does not guarantee
+omission of <code>chat_template_kwargs</code>; the accepted top-level
+<code>reasoning_effort</code> remains independent of that mismatch.</li>
+</ul>
+<p>Live model availability depends on which gateway jobs are running. The static
+model list is only a fallback for offline resolution; <code>clio-coder targets --probe</code>
+uses the ALCF catalog and jobs endpoints after authentication.</p>
+        </article>
+        <nav class="related-nav" aria-label="Adjacent references">
+          <a class="nav-link-card" href="acp_blueprint.html"><span class="nav-label">Previous</span><span class="nav-title">Agent Client Protocol (ACP) Server</span></a>
+          <a class="nav-link-card next" href="architecture_blueprint.html"><span class="nav-label">Next</span><span class="nav-title">Clio Coder Architecture and Boundaries</span></a>
+        </nav>
+        <p class="reference-footer-note">Canonical content lives in the mapped Markdown page. This visual counterpart adds navigation without changing the contract.</p>
       </main>
     </div>
-
-    <footer>
-      <p>Clio Coder ALCF Inference Blueprint &bull; Version 0.4.0 &bull; Gnosis Research Center</p>
-    </footer>
+    <footer>Clio Coder documentation · source-aligned at v0.4.2</footer>
   </div>
-
   <script src="shared.js"></script>
-  <script>
-    function updateConfigSim() {
-      const cluster = document.getElementById("clusterSelect").value;
-      const modelMode = document.getElementById("modelSelect").value;
-      const customModelGroup = document.getElementById("customModelGroup");
-
-      let modelId = modelMode;
-      if (modelMode === "custom") {
-        customModelGroup.style.display = "block";
-        modelId = document.getElementById("customModelText").value;
-      } else {
-        customModelGroup.style.display = "none";
-        // Auto select appropriate model based on cluster
-        if (cluster === "sophia" && modelMode === "gpt-oss-120b") {
-          document.getElementById("modelSelect").value = "openai/gpt-oss-120b";
-          modelId = "openai/gpt-oss-120b";
-        } else if (cluster === "metis" && modelMode === "openai/gpt-oss-120b") {
-          document.getElementById("modelSelect").value = "gpt-oss-120b";
-          modelId = "gpt-oss-120b";
-        }
-      }
-
-      const tokens = document.getElementById("maxTokens").value;
-      const targetId = `alcf-${cluster}`;
-      const url = cluster === "sophia"
-        ? "https://inference-api.alcf.anl.gov/resource_server/sophia/vllm/v1"
-        : "https://inference-api.alcf.anl.gov/resource_server/metis/api/v1";
-
-      document.getElementById("generatedCommand2").innerText = `clio-coder configure \\\n  --id ${targetId} \\\n  --runtime alcf \\\n  --url ${url} \\\n  --model ${modelId} \\\n  --max-tokens ${tokens}`;
-      document.getElementById("generatedCommand3").innerText = `clio-coder targets use ${targetId}`;
-
-      // Update TOC just in case
-      if (window.initTableOfContents) window.initTableOfContents();
-    }
-
-    let currentSimStep = 1;
-    function simulateOAuthStep(step) {
-      document.querySelectorAll(".flow-step").forEach(s => s.classList.remove("active"));
-
-      if (step === 2) {
-        document.getElementById("step2").classList.add("active");
-      } else if (step === 3) {
-        document.getElementById("step3").classList.add("active");
-        const val = document.getElementById("pasteCodeSim").value.trim();
-        if (val.length > 5) {
-          setTimeout(() => {
-            simulateOAuthStep(4);
-          }, 600);
-        }
-      } else if (step === 4) {
-        document.getElementById("step4").classList.add("active");
-      }
-    }
-
-    // Init
-    window.onload = () => {
-      updateConfigSim();
-    };
-  </script>
 </body>
 </html>

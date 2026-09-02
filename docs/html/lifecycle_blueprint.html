@@ -1,733 +1,622 @@
-<!DOCTYPE html>
+<!doctype html>
 <html lang="en">
 <head>
-  <meta charset="UTF-8">
-  <meta name="viewport" content="width=device-width, initial-scale=1.0">
-  <title>Clio Coder Lifecycle Operations Blueprint (v0.4.0)</title>
-
-  <style>
-    :root {
-      --bg-dark: #090d16;
-      --bg-grid: rgba(255, 255, 255, 0.02);
-      --bg-card: rgba(13, 20, 38, 0.45);
-      --bg-card-hover: rgba(20, 30, 58, 0.6);
-      --border-card: rgba(255, 255, 255, 0.08);
-      --border-card-hover: rgba(0, 240, 255, 0.3);
-      --text-main: #f3f4f6;
-      --text-muted: #9ca3af;
-      --text-dim: #6b7280;
-
-      --color-cyan: #00f0ff;
-      --color-cyan-rgb: 0, 240, 255;
-      --color-purple: #bd00ff;
-      --color-purple-rgb: 189, 0, 255;
-      --color-emerald: #10b981;
-      --color-emerald-rgb: 16, 185, 129;
-      --color-amber: #f59e0b;
-      --color-amber-rgb: 245, 158, 11;
-      --color-rose: #ef4444;
-      --color-rose-rgb: 239, 68, 68;
-
-      --gradient-main: linear-gradient(135deg, var(--color-cyan), var(--color-purple));
-      --shadow-glow: 0 0 25px rgba(0, 240, 255, 0.15);
-      --font-sans: "Segoe UI", -apple-system, BlinkMacSystemFont, Roboto, "Helvetica Neue", Arial, sans-serif;
-      --font-mono: "SFMono-Regular", Consolas, "Liberation Mono", Menlo, monospace;
-
-      --glass-blur: blur(12px);
-    }
-
-    * {
-      box-sizing: border-box;
-      margin: 0;
-      padding: 0;
-    }
-
-    body {
-      background-color: var(--bg-dark);
-      background-image:
-        radial-gradient(circle at 10% 20%, rgba(var(--color-cyan-rgb), 0.05) 0%, transparent 40%),
-        radial-gradient(circle at 90% 80%, rgba(var(--color-purple-rgb), 0.05) 0%, transparent 40%),
-        radial-gradient(circle at 50% 50%, #0d1527 0%, var(--bg-dark) 100%);
-      color: var(--text-main);
-      font-family: var(--font-sans);
-      min-height: 100vh;
-      line-height: 1.6;
-      overflow-x: hidden;
-      position: relative;
-    }
-
-    body::before {
-      content: '';
-      position: absolute;
-      inset: 0;
-      background-image: linear-gradient(var(--bg-grid) 1px, transparent 1px),
-                        linear-gradient(90deg, var(--bg-grid) 1px, transparent 1px);
-      background-size: 40px 40px;
-      background-position: center top;
-      pointer-events: none;
-      z-index: 0;
-      opacity: 0.8;
-    }
-
-    .container {
-      max-width: 1400px;
-      margin: 0 auto;
-      padding: 2rem;
-      position: relative;
-      z-index: 1;
-    }
-
-    /* Header Styling */
-    header {
-      display: flex;
-      justify-content: space-between;
-      align-items: center;
-      margin-bottom: 2.5rem;
-      padding-bottom: 1.5rem;
-      border-bottom: 1px solid rgba(255, 255, 255, 0.05);
-    }
-
-    .header-left {
-      display: flex;
-      align-items: center;
-      gap: 1rem;
-    }
-
-    .header-logo {
-      display: inline-flex;
-      align-items: center;
-      justify-content: center;
-      width: 48px;
-      height: 48px;
-      background: rgba(255, 255, 255, 0.02);
-      border: 1px solid var(--border-card);
-      border-radius: 12px;
-    }
-
-    .header-logo svg {
-      width: 28px;
-      height: 28px;
-    }
-
-    .header-title-wrapper h1 {
-      font-size: 1.5rem;
-      font-weight: 800;
-      letter-spacing: -0.03em;
-      background: linear-gradient(to right, #ffffff, #c7d2fe, var(--color-cyan));
-      -webkit-background-clip: text;
-      -webkit-text-fill-color: transparent;
-    }
-
-    .header-title-wrapper p {
-      font-size: 0.825rem;
-      color: var(--text-muted);
-    }
-
-    .header-right {
-      display: flex;
-      align-items: center;
-      gap: 1rem;
-    }
-
-    .back-btn {
-      background: rgba(255, 255, 255, 0.03);
-      border: 1px solid var(--border-card);
-      color: var(--text-muted);
-      padding: 0.5rem 1rem;
-      border-radius: 8px;
-      font-size: 0.875rem;
-      font-weight: 600;
-      text-decoration: none;
-      display: inline-flex;
-      align-items: center;
-      gap: 0.5rem;
-      transition: all 0.2s;
-    }
-
-    .back-btn:hover {
-      background: rgba(255, 255, 255, 0.08);
-      color: var(--text-main);
-      border-color: rgba(var(--color-cyan-rgb), 0.3);
-    }
-
-    .version-badge {
-      background: rgba(0, 240, 255, 0.08);
-      border: 1px solid rgba(0, 240, 255, 0.25);
-      color: var(--color-cyan);
-      padding: 0.35rem 0.75rem;
-      border-radius: 50px;
-      font-size: 0.75rem;
-      font-weight: 600;
-      font-family: var(--font-mono);
-    }
-
-    /* Tabs Navigation */
-    .tabs-nav {
-      display: flex;
-      gap: 0.75rem;
-      margin-bottom: 2rem;
-    }
-
-    .tab-btn {
-      background: rgba(255, 255, 255, 0.03);
-      border: 1px solid var(--border-card);
-      color: var(--text-muted);
-      padding: 0.6rem 1.25rem;
-      border-radius: 8px;
-      font-size: 0.875rem;
-      font-weight: 600;
-      cursor: pointer;
-      display: flex;
-      align-items: center;
-      gap: 0.5rem;
-      transition: all 0.2s;
-    }
-
-    .tab-btn:hover {
-      background: rgba(255, 255, 255, 0.06);
-      color: var(--text-main);
-    }
-
-    .tab-btn.active {
-      background: var(--gradient-main);
-      color: #090d16;
-      border-color: transparent;
-      box-shadow: 0 4px 15px rgba(var(--color-cyan-rgb), 0.25);
-    }
-
-    /* Content Layout */
-    .tab-pane {
-      display: none;
-      animation: fadeIn 0.3s ease-out forwards;
-    }
-
-    .tab-pane.active {
-      display: block;
-    }
-
-    @keyframes fadeIn {
-      from { opacity: 0; transform: translateY(8px); }
-      to { opacity: 1; transform: translateY(0); }
-    }
-
-    /* Split layout */
-    .blueprint-layout {
-      display: grid;
-      grid-template-columns: 1fr 1.1fr;
-      gap: 2rem;
-      align-items: start;
-    }
-
-    @media (max-width: 1100px) {
-      .blueprint-layout {
-        grid-template-columns: 1fr;
-      }
-    }
-
-    .glass-card {
-      background: var(--bg-card);
-      border: 1px solid var(--border-card);
-      border-radius: 16px;
-      padding: 1.75rem;
-      margin-bottom: 2rem;
-      backdrop-filter: var(--glass-blur);
-      box-shadow: 0 8px 32px 0 rgba(0, 0, 0, 0.3);
-    }
-
-    .glass-card h2 {
-      font-size: 1.25rem;
-      font-weight: 700;
-      color: #ffffff;
-      margin-bottom: 1.25rem;
-      display: flex;
-      align-items: center;
-      gap: 0.5rem;
-      border-bottom: 1px solid rgba(255, 255, 255, 0.05);
-      padding-bottom: 0.75rem;
-    }
-
-    .glass-card h2 svg {
-      width: 18px;
-      height: 18px;
-      color: var(--color-cyan);
-    }
-
-    .glass-card p {
-      font-size: 0.925rem;
-      color: var(--text-muted);
-      margin-bottom: 1rem;
-    }
-
-    /* Form selectors */
-    .form-group {
-      margin-bottom: 1rem;
-    }
-
-    .form-group label {
-      display: block;
-      font-size: 0.8rem;
-      font-weight: 600;
-      color: var(--text-muted);
-      margin-bottom: 0.5rem;
-      text-transform: uppercase;
-      letter-spacing: 0.05em;
-    }
-
-    .form-row {
-      display: grid;
-      grid-template-columns: 1fr 1fr;
-      gap: 1rem;
-    }
-
-    select, input {
-      width: 100%;
-      background: rgba(9, 13, 22, 0.7);
-      border: 1px solid var(--border-card);
-      border-radius: 8px;
-      padding: 0.65rem 0.85rem;
-      color: #fff;
-      font-family: var(--font-sans);
-      font-size: 0.9rem;
-      outline: none;
-    }
-
-    /* Path outcomes panel */
-    .resolved-paths-panel {
-      background: rgba(0,0,0,0.3);
-      border: 1px solid var(--border-card);
-      border-radius: 8px;
-      padding: 1rem;
-      margin-top: 1.25rem;
-    }
-
-    .path-row {
-      margin-bottom: 0.75rem;
-      font-size: 0.875rem;
-    }
-
-    .path-row:last-child {
-      margin-bottom: 0;
-    }
-
-    .path-row strong {
-      display: block;
-      color: var(--color-cyan);
-    }
-
-    .path-row span {
-      font-family: var(--font-mono);
-      font-size: 0.8rem;
-      color: #fff;
-      word-break: break-all;
-    }
-
-    /* Boot console */
-    .boot-console {
-      background: #020408;
-      border: 1px solid var(--border-card);
-      border-radius: 8px;
-      padding: 1rem;
-      font-family: var(--font-mono);
-      font-size: 0.8rem;
-      height: 180px;
-      overflow-y: auto;
-      white-space: pre-wrap;
-      color: var(--color-emerald);
-      box-shadow: inset 0 2px 10px rgba(0,0,0,0.8);
-      margin-top: 1rem;
-    }
-
-    .action-btn {
-      width: 100%;
-      background: var(--gradient-main);
-      color: #090d16;
-      border: none;
-      padding: 0.65rem;
-      border-radius: 8px;
-      font-weight: 700;
-      font-family: var(--font-sans);
-      cursor: pointer;
-      transition: opacity 0.2s;
-    }
-
-    .action-btn:hover {
-      opacity: 0.9;
-    }
-
-    /* Ref styling */
-    .ref-table {
-      width: 100%;
-      border-collapse: collapse;
-      margin: 1.5rem 0;
-      font-size: 0.9rem;
-    }
-
-    .ref-table th, .ref-table td {
-      padding: 0.65rem 0.85rem;
-      border: 1px solid var(--border-card);
-      text-align: left;
-    }
-
-    .ref-table th {
-      background: rgba(255,255,255,0.03);
-    }
-
-    pre {
-      background: rgba(0,0,0,0.3);
-      border: 1px solid var(--border-card);
-      border-radius: 8px;
-      padding: 1rem;
-      overflow-x: auto;
-      margin: 1rem 0;
-    }
-
-    code {
-      font-family: var(--font-mono);
-      font-size: 0.85rem;
-    }
-
-    /* Footer */
-    footer {
-      text-align: center;
-      margin-top: 4rem;
-      padding-top: 2rem;
-      border-top: 1px solid rgba(255, 255, 255, 0.05);
-      color: var(--text-dim);
-      font-size: 0.875rem;
-    }
-  </style>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <meta name="clio-markdown-source" content="docs/guide/installation-and-lifecycle.md">
+  <meta name="clio-docs-version" content="0.4.2">
+  <title>Installation and Lifecycle Operations · Clio Coder 0.4.2</title>
+  <link rel="icon" href="data:,">
+  <link rel="stylesheet" href="shared.css">
 </head>
-<body>
+<body data-doc-category="guide">
+  <div class="reading-progress" aria-hidden="true"></div>
+  <a class="skip-link" href="#reference-content">Skip to reference</a>
   <div class="container">
-    <header>
+    <header class="document-header" data-category="Guide">
       <div class="header-left">
-        <div class="header-logo">
-          <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" style="color: var(--color-cyan);"><title>Icon</title>
-            <path d="M12 2L2 7L12 12L22 7L12 2Z"></path>
-            <path d="M2 17L12 22L22 17"></path>
-            <path d="M2 12L12 17L22 12"></path>
+        <a class="header-logo" href="index.html" aria-label="Documentation index">
+          <svg viewBox="0 0 24 24" fill="none" aria-hidden="true">
+            <path d="M12 2 2 7l10 5 10-5-10-5Z" stroke="url(#clio-logo)" stroke-width="2" stroke-linejoin="round"/>
+            <path d="m2 12 10 5 10-5M2 17l10 5 10-5" stroke="url(#clio-logo)" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"/>
+            <defs><linearGradient id="clio-logo" x1="2" y1="2" x2="22" y2="22"><stop stop-color="#00d4db"/><stop offset="1" stop-color="#ff7e29"/></linearGradient></defs>
           </svg>
-        </div>
+        </a>
         <div class="header-title-wrapper">
-          <h1>Clio Coder Installation &amp; Lifecycle</h1>
-          <p>Directory path setups, credentials security, and installation operations</p>
+          <p class="document-kicker">Guide / canonical reference</p>
+          <h1>Installation and Lifecycle Operations</h1>
+          <p class="document-path">docs/guide/installation-and-lifecycle.md</p>
         </div>
       </div>
       <div class="header-right">
-        <span class="version-badge">Clio Coder v0.4.0</span>
-        <a href="index.html" class="back-btn">
-          <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><title>Icon</title><line x1="19" y1="12" x2="5" y2="12"></line><polyline points="12 19 5 12 12 5"></polyline></svg>
-          Dashboard Hub
-        </a>
+        <a class="back-btn" href="index.html">← Index</a>
+        <span class="version-badge">v0.4.2</span>
       </div>
     </header>
-
-    <div class="tabs-nav">
-      <button type="button" class="tab-btn active" onclick="switchTab('interactive')">
-        <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><title>Icon</title><polyline points="22 12 18 12 15 21 9 3 6 12 2 12"></polyline></svg>
-        Interactive Path Resolver &amp; Bootstrap
-      </button>
-      <button type="button" class="tab-btn" onclick="switchTab('reference')">
-        <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><title>Icon</title><path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z"></path><polyline points="14 2 14 8 20 8"></polyline><line x1="16" y1="13" x2="8" y2="13"></line><line x1="16" y1="17" x2="8" y2="17"></line><polyline points="10 9 9 9 8 9"></polyline></svg>
-        Full Technical Reference
-      </button>
-    </div>
-
-    <!-- TAB 1: INTERACTIVE -->
-    <main class="tab-pane active" id="pane-interactive">
-      <div class="blueprint-layout">
-
-        <!-- Left: Path Resolver inputs -->
-        <div class="specs-col">
-          <div class="glass-card">
-            <h2>
-              <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><title>Icon</title><path d="M20.59 13.41l-7.17 7.17a2 2 0 0 1-2.83 0L2 12V2h10l8.59 8.59a2 2 0 0 1 0 2.82z"></path><line x1="7" y1="7" x2="7.01" y2="7"></line></svg>
-              Platform path overrides
-            </h2>
-            <p>Simulate how environment variables redirect config, data, state, and cache folders.</p>
-
-            <div class="form-group">
-              <label for="platformSelect">Target OS</label>
-              <select id="platformSelect" onchange="resolvePaths()">
-                <option value="linux">Linux / Unix</option>
-                <option value="macos">macOS</option>
-                <option value="windows">Windows</option>
-              </select>
-            </div>
-
-            <div class="form-group">
-              <label for="clioHomeInput">CLIO_CODER_HOME (Unified override)</label>
-              <input type="text" id="clioHomeInput" value="" placeholder="e.g. /home/user/my-clio-home" oninput="resolvePaths()">
-            </div>
-
-            <div class="form-row">
-              <div class="form-group">
-                <label for="configDirInput">CLIO_CODER_CONFIG_DIR</label>
-                <input type="text" id="configDirInput" value="" placeholder="Default" oninput="resolvePaths()">
-              </div>
-              <div class="form-group">
-                <label for="dataDirInput">CLIO_CODER_DATA_DIR</label>
-                <input type="text" id="dataDirInput" value="" placeholder="Default" oninput="resolvePaths()">
-              </div>
-            </div>
-
-            <div class="form-row">
-              <div class="form-group">
-                <label for="stateDirInput">CLIO_CODER_STATE_DIR</label>
-                <input type="text" id="stateDirInput" value="" placeholder="Default" oninput="resolvePaths()">
-              </div>
-              <div class="form-group">
-                <label for="cacheDirInput">CLIO_CODER_CACHE_DIR</label>
-                <input type="text" id="cacheDirInput" value="" placeholder="Default" oninput="resolvePaths()">
-              </div>
-            </div>
-
-            <div class="resolved-paths-panel">
-              <div class="path-row">
-                <strong>Config Directory (settings/keys)</strong>
-                <span id="resolvedConfig">~/.config/clio-coder</span>
-              </div>
-              <div class="path-row">
-                <strong>Data Directory (memory/evidence/evals)</strong>
-                <span id="resolvedData">~/.local/share/clio-coder</span>
-              </div>
-              <div class="path-row">
-                <strong>State Directory (sessions/audit/receipts)</strong>
-                <span id="resolvedState">~/.local/state/clio-coder</span>
-              </div>
-              <div class="path-row">
-                <strong>Cache Directory</strong>
-                <span id="resolvedCache">~/.cache/clio-coder</span>
-              </div>
-            </div>
-          </div>
-        </div>
-
-        <!-- Right: Bootstrap Console -->
-        <div class="specs-col">
-          <div class="glass-card">
-            <h2>
-              <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><title>Icon</title><polyline points="22 12 18 12 15 21 9 3 6 12 2 12"></polyline></svg>
-              Bootstrap Initialization Simulator
-            </h2>
-            <p>Run the initialization sequence to test directory trees creation and credentials file permission locks.</p>
-
-            <button type="button" class="action-btn" onclick="runBootstrapSim()">Run initializeClioHome() Simulation</button>
-
-            <div class="boot-console" id="bootConsole">Console ready. Click button to bootstrap.</div>
-          </div>
-        </div>
-
-      </div>
-    </main>
-
-    <!-- TAB 2: TECHNICAL REFERENCE -->
-    <main class="tab-pane" id="pane-reference">
-      <div class="glass-card">
-        <h2>Clio Coder Platform Specifications</h2>
-
-        <h3 style="margin: 1.5rem 0 0.5rem 0; color:#fff;">Platform Path Defaults</h3>
-        <table class="ref-table">
-          <thead>
-            <tr>
-              <th>OS</th>
-              <th>Config Directory</th>
-              <th>Data Directory</th>
-              <th>State Directory</th>
-              <th>Cache Directory</th>
-            </tr>
-          </thead>
-          <tbody>
-            <tr>
-              <td>Linux / Unix</td>
-              <td><code>~/.config/clio-coder</code></td>
-              <td><code>~/.local/share/clio-coder</code></td>
-              <td><code>~/.local/state/clio-coder</code></td>
-              <td><code>~/.cache/clio-coder</code></td>
-            </tr>
-            <tr>
-              <td>macOS</td>
-              <td><code>~/Library/Application Support/clio-coder/config</code></td>
-              <td><code>~/Library/Application Support/clio-coder/data</code></td>
-              <td><code>~/Library/Application Support/clio-coder/state</code></td>
-              <td><code>~/Library/Caches/clio-coder</code></td>
-            </tr>
-            <tr>
-              <td>Windows</td>
-              <td><code>%APPDATA%\clio-coder\config</code></td>
-              <td><code>%APPDATA%\clio-coder\data</code></td>
-              <td><code>%LOCALAPPDATA%\clio-coder\state</code></td>
-              <td><code>%LOCALAPPDATA%\clio-coder\cache</code></td>
-            </tr>
-          </tbody>
-        </table>
-
-        <h3 style="margin: 1.5rem 0 0.5rem 0; color:#fff;">File &amp; Permissions Matrix</h3>
-        <table class="ref-table">
-          <thead>
-            <tr>
-              <th>File Name</th>
-              <th>Role</th>
-              <th>Permissions</th>
-              <th>Removal Condition</th>
-            </tr>
-          </thead>
-          <tbody>
-            <tr>
-              <td><code>settings.yaml</code></td>
-              <td> Runtimes/Theme configurations </td>
-              <td><code>0o644</code></td>
-              <td>Uninstall Wiped</td>
-            </tr>
-            <tr>
-              <td><code>credentials.yaml</code></td>
-              <td>API Keys/Tokens</td>
-              <td><code>0o600</code> (Strict owner rw)</td>
-              <td>Uninstall Wiped</td>
-            </tr>
-            <tr>
-              <td><code>install.json</code></td>
-              <td>Platform Installation version state</td>
-              <td><code>0o644</code></td>
-              <td>Uninstall Wiped</td>
-            </tr>
-            <tr>
-              <td><code>audit/*.jsonl</code></td>
-              <td> Daily safety audit logs </td>
-              <td><code>0o644</code></td>
-              <td>Uninstall Wiped</td>
-            </tr>
-          </tbody>
-        </table>
-
-        <h3 style="margin: 1.5rem 0 0.5rem 0; color:#fff;">Doctor Repair Semantics</h3>
-        <p><code>clio-coder doctor</code> is read-only. <code>clio-coder doctor --fix</code> creates missing structure and templates, repairs credential permissions, and refreshes install metadata. Settings are validated directly against the current schema; <code>--fix</code> never rewrites removed keys or migrates an older settings file.</p>
-
-        <h3 style="margin: 1.5rem 0 0.5rem 0; color:#fff;">Upgrading to Version 0.4.0</h3>
-        <p>Upgrades run via <code>clio-coder upgrade</code> or <code>npm install -g @iowarp/clio-coder@latest</code>. In v0.4.0:</p>
-        <ul>
-          <li><strong>Guest Panes Mode:</strong> First-class <code>--with-panes</code> guest mode with operator-pulled watch pane (<code>fleet view --watch</code>) powered by <code>herdr</code>.</li>
-          <li><strong>External Toolchain Management:</strong> <code>clio-coder tools list|status|install|remove</code> and <code>clio-coder panes install</code> manage pinned, checksum-verified external binaries (herdr, yazi, croc) with zero network fetches on startup.</li>
-          <li><strong>Typed-Intent Dispatch v2:</strong> Robust path scopes (read/write roots, relevant paths) and verification gates with integrity-sealed provenance.</li>
-          <li><strong>LiteLLM Gateway Runtime:</strong> Real capability discovery via <code>/v1/model/info</code> and routed-deployment attribution from <code>x-litellm-*</code> headers.</li>
-          <li><strong>ACP Protocol &amp; Workbench:</strong> Expanded JSON-RPC 2.0 stdio server, non-stall permissions, session management, and localhost desktop client support.</li>
-        </ul>
-
-        <h3 style="margin: 1.5rem 0 0.5rem 0; color:#fff;">Durable symlink setup</h3>
-        <pre><code># checkout repo
-git clone https://github.com/iowarp/clio-coder.git
+    <div class="page-layout-grid reference-layout">
+      <aside class="sidebar reference-sidebar" aria-label="On this page">
+        <nav class="toc-container">
+          <p class="toc-title">On this page</p>
+          <a class="sidebar-source" href="https://github.com/iowarp/clio-coder/blob/main/docs/guide/installation-and-lifecycle.md">Canonical Markdown<br>docs/guide/installation-and-lifecycle.md</a>
+          <ul class="toc-list"></ul>
+        </nav>
+      </aside>
+      <main class="reference-main" id="reference-content">
+        <article class="reference-prose glass-card">
+<blockquote>
+<p><strong>Visual blueprint:</strong> The source checkout includes the complete
+<a href="lifecycle_blueprint.html">Installation and Lifecycle Operations visual reference</a>.</p>
+</blockquote>
+<p>Clio Coder is designed to be self-contained and platform-compliant. This document outlines the default directory paths, file purposes, permission levels, and lifecycle commands (<code>install</code>, <code>reset</code>, <code>upgrade</code>, and <code>uninstall</code>). Clio Coder installs from npm as <code>@iowarp/clio-coder</code> (<code>npm install -g @iowarp/clio-coder</code>, published since v0.3.0) or from a source checkout with a deterministic local symlink; the CLI classifies both install kinds and <code>clio-coder upgrade</code> handles each.</p>
+<h3>Optional dependency: the Claude Agent SDK</h3>
+<p><code>@anthropic-ai/claude-agent-sdk</code> is an <code>optionalDependencies</code> entry, not a hard dependency. Its platform package carries a proprietary binary of roughly 224MB per platform, and only the <code>claude-sdk</code> runtime uses it. Skip it with:</p>
+<pre><code class="language-bash">npm install -g @iowarp/clio-coder --omit=optional
+</code></pre>
+<p>Measured on Linux x64 with a production install (<code>--omit=dev</code>): 387MB across 118 packages with the SDK, 143MB across 109 packages without it. That is 244MB and nine packages saved, a 63% smaller tree, and what remains is fully open-licensed.</p>
+<p>Everything except the <code>claude-sdk</code> runtime works on the smaller install: boot, <code>clio-coder doctor</code>, every other target and worker runtime. Dispatching a <code>claude-sdk</code> target on an install that omitted the package fails that run with a diagnostic naming the package and the command that fixes it (<code>npm install @anthropic-ai/claude-agent-sdk@0.3.186</code>); nothing else degrades, and nothing fails at startup.</p>
+<hr>
+<h2>1. Directory Layout &amp; Platform Defaults</h2>
+<p>Clio Coder follows standard platform specifications for user configurations, databases, and caches, but allows full environment overrides.</p>
+<h3>Platform Defaults</h3>
+<table>
+<thead>
+<tr>
+<th align="left">Operating System</th>
+<th align="left">Config (<code>configDir</code>)</th>
+<th align="left">Data (<code>dataDir</code>)</th>
+<th align="left">State (<code>stateDir</code>)</th>
+<th align="left">Cache (<code>cacheDir</code>)</th>
+</tr>
+</thead>
+<tbody><tr>
+<td align="left"><strong>Linux / Unix</strong></td>
+<td align="left"><code>~/.config/clio-coder</code></td>
+<td align="left"><code>~/.local/share/clio-coder</code></td>
+<td align="left"><code>~/.local/state/clio-coder</code></td>
+<td align="left"><code>~/.cache/clio-coder</code></td>
+</tr>
+<tr>
+<td align="left"><strong>macOS</strong></td>
+<td align="left"><code>~/Library/Application Support/clio-coder/config</code></td>
+<td align="left"><code>~/Library/Application Support/clio-coder/data</code></td>
+<td align="left"><code>~/Library/Application Support/clio-coder/state</code></td>
+<td align="left"><code>~/Library/Caches/clio-coder</code></td>
+</tr>
+<tr>
+<td align="left"><strong>Windows</strong></td>
+<td align="left"><code>%APPDATA%\clio-coder\config</code></td>
+<td align="left"><code>%APPDATA%\clio-coder\data</code></td>
+<td align="left"><code>%LOCALAPPDATA%\clio-coder\state</code></td>
+<td align="left"><code>%LOCALAPPDATA%\clio-coder\cache</code></td>
+</tr>
+</tbody></table>
+<p>Run <code>clio-coder paths [--json]</code> to print the resolved table for the current environment.</p>
+<h3>Environment Overrides</h3>
+<p>You can redirect Clio Coder&#39;s folders using environment variables:</p>
+<ul>
+<li><code>CLIO_CODER_HOME</code>: Sets a symmetric tree: <code>$CLIO_CODER_HOME/config</code>, <code>$CLIO_CODER_HOME/data</code>, <code>$CLIO_CODER_HOME/state</code>, and <code>$CLIO_CODER_HOME/cache</code>.</li>
+<li><code>CLIO_CODER_CONFIG_DIR</code>: Overrides the configuration directory only (takes precedence over <code>CLIO_CODER_HOME</code>).</li>
+<li><code>CLIO_CODER_DATA_DIR</code>: Overrides the data directory only (takes precedence over <code>CLIO_CODER_HOME</code>).</li>
+<li><code>CLIO_CODER_STATE_DIR</code>: Overrides the state directory only (takes precedence over <code>CLIO_CODER_HOME</code>).</li>
+<li><code>CLIO_CODER_CACHE_DIR</code>: Overrides the cache directory only (takes precedence over <code>CLIO_CODER_HOME</code>).</li>
+</ul>
+<h3>The Project <code>.clio-coder/</code> Directory</h3>
+<p>The tables above cover the per-user roots. A repository Clio works in also grows a
+<code>.clio-coder/</code> directory, and everything in it falls into one of three kinds:</p>
+<ul>
+<li><strong>Operator input.</strong> You wrote it. Clio only reads it. Deleting it removes a
+behavior you configured and nothing else.</li>
+<li><strong>Runtime state.</strong> Clio wrote it. It is derived from your repository and can be
+regenerated, though not always cheaply.</li>
+<li><strong>Overlay.</strong> You wrote it, and it composes with a directory Clio ships. The
+overlay column below says how.</li>
+</ul>
+<table>
+<thead>
+<tr>
+<th align="left">Path</th>
+<th align="left">Kind</th>
+<th align="left">What it is</th>
+<th align="left">Safe to delete?</th>
+<th align="left"><code>context reset</code></th>
+</tr>
+</thead>
+<tbody><tr>
+<td align="left"><code>.clio-coder/settings.yaml</code>, <code>.clio-coder/settings.local.yaml</code></td>
+<td align="left">Operator input</td>
+<td align="left">Project settings layered over the user&#39;s <code>settings.yaml</code>. Precedence is built-in &lt; user &lt; project &lt; project-local.</td>
+<td align="left">Yes; the user-level settings apply again.</td>
+<td align="left">Kept</td>
+</tr>
+<tr>
+<td align="left"><code>.clio-coder/safety.yaml</code></td>
+<td align="left">Operator input</td>
+<td align="left">Per-repository command allowlist consulted before execute actions.</td>
+<td align="left">Yes; approvals return to per-action prompting.</td>
+<td align="left">Kept</td>
+</tr>
+<tr>
+<td align="left"><code>.clio-coder/hooks.yaml</code>, <code>.clio-coder/hooks.local.yaml</code></td>
+<td align="left">Operator input</td>
+<td align="left">Project-declared hooks.</td>
+<td align="left">Yes.</td>
+<td align="left">Kept</td>
+</tr>
+<tr>
+<td align="left"><code>.clio-coder/rules/**/*.md</code></td>
+<td align="left">Operator input</td>
+<td align="left">Path-scoped project rules injected into the prompt.</td>
+<td align="left">Yes.</td>
+<td align="left">Kept</td>
+</tr>
+<tr>
+<td align="left"><code>.clio-coder/profile.yaml</code></td>
+<td align="left">Operator input</td>
+<td align="left">Operator profile; closed enums and bounded path lists.</td>
+<td align="left">Yes.</td>
+<td align="left">Kept</td>
+</tr>
+<tr>
+<td align="left"><code>.clio-coder/fleets/*.md</code>, <code>.clio-coder/fleets/commands.yaml</code></td>
+<td align="left">Overlay</td>
+<td align="left">Fleet contracts and their command registry. Adds to the fleets shipped under <code>src/domains/agents/fleets/</code>.</td>
+<td align="left">Yes; shipped fleets remain.</td>
+<td align="left">Kept</td>
+</tr>
+<tr>
+<td align="left"><code>.clio-coder/agents/*.md</code></td>
+<td align="left">Overlay</td>
+<td align="left">Project agent recipes. Composes with shipped builtins and the user&#39;s <code>~/.config/clio-coder/agents</code>; a project recipe reusing a builtin id is <strong>ignored</strong>, not applied, with a note on stderr.</td>
+<td align="left">Yes; shipped agents remain.</td>
+<td align="left">Kept, and named</td>
+</tr>
+<tr>
+<td align="left"><code>.clio-coder/skills/**</code></td>
+<td align="left">Overlay</td>
+<td align="left">Project skills, trusted as repository-local. This is where <code>clio-coder skills install &lt;name&gt;</code> lands a catalog skill; the shipped catalog under the package&#39;s <code>skills/</code> is a marketplace to install from, not a discovery root, so nothing appears here until the operator installs it.</td>
+<td align="left">Yes; the shipped catalog remains installable.</td>
+<td align="left">Kept, and named</td>
+</tr>
+<tr>
+<td align="left"><code>CLIO-CODER.md</code> (repository root)</td>
+<td align="left">Runtime state</td>
+<td align="left">The generated project handbook. Human-reviewable, but written by <code>context init</code>.</td>
+<td align="left">Yes; regenerate with <code>clio-coder context init</code>.</td>
+<td align="left">Kept unless <code>--all</code></td>
+</tr>
+<tr>
+<td align="left"><code>.clio-coder/codewiki.json</code></td>
+<td align="left">Runtime state</td>
+<td align="left">Structural index, schema v5.</td>
+<td align="left">Yes; rebuilt by <code>clio-coder context index</code>.</td>
+<td align="left"><strong>Removed</strong></td>
+</tr>
+<tr>
+<td align="left"><code>.clio-coder/state.json</code></td>
+<td align="left">Runtime state</td>
+<td align="left">Index fingerprint and freshness stamps.</td>
+<td align="left">Yes; forces a rebuild.</td>
+<td align="left"><strong>Removed</strong></td>
+</tr>
+<tr>
+<td align="left"><code>.clio-coder/proposals/</code></td>
+<td align="left">Runtime state</td>
+<td align="left">Ignored handbook drafts from <code>context init --propose</code>.</td>
+<td align="left">Yes.</td>
+<td align="left"><strong>Removed</strong></td>
+</tr>
+<tr>
+<td align="left"><code>.clio-coder/handoffs/</code></td>
+<td align="left">Runtime state</td>
+<td align="left">Session handoff notes.</td>
+<td align="left">Yes.</td>
+<td align="left"><strong>Removed</strong></td>
+</tr>
+<tr>
+<td align="left"><code>.clio-coder/wiki/</code></td>
+<td align="left">Runtime state</td>
+<td align="left">The generated Markdown wiki plus <code>meta.json</code>. The most expensive artifact here: one model dispatch per page.</td>
+<td align="left">Yes, but regenerating costs a full <code>clio-coder context wiki</code> run.</td>
+<td align="left">Kept, and named</td>
+</tr>
+<tr>
+<td align="left"><code>.clio-coder/wiki-prev/</code></td>
+<td align="left">Runtime state</td>
+<td align="left">Previous wiki, retained for rollback during generation.</td>
+<td align="left">Yes.</td>
+<td align="left">Kept, not named</td>
+</tr>
+<tr>
+<td align="left"><code>.clio-coder/worktrees/</code></td>
+<td align="left">Runtime state</td>
+<td align="left">Git worktrees for <code>compete</code> candidate groups.</td>
+<td align="left">Prefer <code>git worktree remove</code>; a plain delete leaves git metadata behind.</td>
+<td align="left">Kept, not named</td>
+</tr>
+</tbody></table>
+<p><code>~/.config/clio-coder/runtimes/</code> holds third-party runtime plugins. It lives under the
+user configuration directory, not in any repository.</p>
+<p>None of <code>.clio-coder/</code> is published by Clio&#39;s own package. The directories Clio ships
+(<code>src/domains/agents/builtins/</code>, <code>src/domains/agents/fleets/</code>, the whole <code>skills/</code> catalog
+with its <code>registry.yaml</code> and <code>skill-marketplace.json</code>, <code>src/domains/prompts/fragments/</code>,
+<code>src/domains/providers/models/</code>) are read from the installed package root; the <code>.clio-coder/</code>
+entries above compose with them and never replace them on disk. Builtin agent recipes bind
+skills straight out of the package catalog; the operator&#39;s own session reaches the same
+catalog only as a marketplace, through <code>clio-coder skills install &lt;name&gt;</code> or <code>/skill &lt;name&gt;</code>.</p>
+<hr>
+<h2>2. File &amp; Permissions Matrix</h2>
+<p>The core files are created automatically during the first run. <code>credentials.yaml</code> is the secret-bearing file and is forced to owner-only read-write permissions. Other initialized files and directories use either the explicit mode shown below or the platform default produced by the writer and process umask.</p>
+<table>
+<thead>
+<tr>
+<th align="left">Directory</th>
+<th align="left">File Path</th>
+<th align="left">Purpose</th>
+<th align="left">Permissions</th>
+<th align="left">Lifecycle Action</th>
+</tr>
+</thead>
+<tbody><tr>
+<td align="left"><strong>Config</strong></td>
+<td align="left"><code>settings.yaml</code></td>
+<td align="left">Target runtimes, model defaults, keybindings, and theme preferences.</td>
+<td align="left"><code>0o644</code> (rw-r--r--)</td>
+<td align="left">Removed by uninstall / <code>reset --config</code>.</td>
+</tr>
+<tr>
+<td align="left"><strong>Config</strong></td>
+<td align="left"><code>credentials.yaml</code></td>
+<td align="left">Private keys and tokens managed via <code>clio-coder auth</code>.</td>
+<td align="left"><code>0o600</code> (rw-------)</td>
+<td align="left">Removed by uninstall / <code>reset --auth</code>.</td>
+</tr>
+<tr>
+<td align="left"><strong>Config</strong></td>
+<td align="left"><code>credentials.yaml.lock</code></td>
+<td align="left">Lockfile used during credentials updates to prevent file corruption.</td>
+<td align="left">Ephemeral</td>
+<td align="left">Auto-removed.</td>
+</tr>
+<tr>
+<td align="left"><strong>State</strong></td>
+<td align="left"><code>install.json</code></td>
+<td align="left">Install metadata: Clio version, node, platform, <code>installedAt</code> (written once at first install) or <code>repairedAt</code> (when metadata is reconstructed over a preexisting config, data, or state root), <code>upgradedAt</code> and <code>upgradedFrom</code> (stamped on a version change), and <code>noticedVersion</code> (the version whose one-time upgrade notice the interactive launch has shown).</td>
+<td align="left">Writer/umask default</td>
+<td align="left">Removed by uninstall / <code>reset --state</code>.</td>
+</tr>
+<tr>
+<td align="left"><strong>State</strong></td>
+<td align="left"><code>migrations.json</code></td>
+<td align="left">Log of successfully applied schema/state migrations.</td>
+<td align="left">Writer/umask default</td>
+<td align="left">Removed by uninstall / <code>reset --state</code>.</td>
+</tr>
+<tr>
+<td align="left"><strong>Data</strong></td>
+<td align="left"><code>memory/records.json</code></td>
+<td align="left">Long-term learning memories (up to 500 records) proposed/approved from runs.</td>
+<td align="left">Writer/umask default</td>
+<td align="left">Removed by uninstall / <code>reset --data</code>.</td>
+</tr>
+<tr>
+<td align="left"><strong>Data</strong></td>
+<td align="left"><code>tools/&lt;id&gt;/&lt;version&gt;/</code></td>
+<td align="left">One pinned external program Clio downloaded on request (<code>clio-coder tools install &lt;id&gt;</code>), with its upstream license text and a <code>clio-install.json</code> recording url, sha256, platform and install time. Binaries <code>0o755</code>, documents <code>0o644</code>. Only the pinned version is kept: a successful install prunes the versions it supersedes.</td>
+<td align="left"><code>0o755</code> dir</td>
+<td align="left"><code>clio-coder tools remove &lt;id&gt;</code> deletes every version of one tool; removed by uninstall / <code>reset --data</code>.</td>
+</tr>
+<tr>
+<td align="left"><strong>State</strong></td>
+<td align="left"><code>audit/YYYY-MM-DD.jsonl</code></td>
+<td align="left">Daily safety audit logs showing allowed/blocked tool actions.</td>
+<td align="left">Writer/umask default</td>
+<td align="left">Removed by uninstall / <code>reset --state</code>.</td>
+</tr>
+<tr>
+<td align="left"><strong>State</strong></td>
+<td align="left"><code>sessions/&lt;cwdHash&gt;/&lt;id&gt;/</code></td>
+<td align="left">Session details: <code>meta.json</code>, <code>current.jsonl</code>, and fork hierarchies <code>tree.json</code>.</td>
+<td align="left">Writer/umask default</td>
+<td align="left">Removed by uninstall / <code>reset --state</code>.</td>
+</tr>
+</tbody></table>
+<hr>
+<h2>3. Bootstrap Initialization</h2>
+<p>When Clio Coder boots (or after a reset), it calls <code>initializeClioHome()</code> (see <code>src/core/init.ts</code>) to bootstrap missing structures:</p>
+<ol>
+<li><strong>Directory Tree</strong>: Recursively creates the four roots (<code>config</code>, <code>data</code>, <code>state</code>, <code>cache</code>) and their skeletons: <code>agents</code> under config, <code>memory</code>/<code>evidence</code>/<code>evals</code> under data, and <code>sessions</code>/<code>audit</code>/<code>receipts</code>/<code>interviews</code>/<code>scratch</code> under state.</li>
+<li><strong>Settings Template</strong>: If <code>settings.yaml</code> is absent, creates a fresh default config. An existing file is never read, validated, or rewritten by initialization.</li>
+<li><strong>Credentials Security</strong>: If <code>credentials.yaml</code> is absent, creates a YAML file containing a managed-file comment and an empty object (<code>{}</code>), then locks its permissions immediately to owner-only read-write (<code>0o600</code>).</li>
+<li><strong>Install Metadata</strong>: Writes <code>install.json</code> with <code>installedAt</code> exactly once when no config, data, or state root existed before initialization. If Clio reconstructs missing metadata over a preexisting config, data, or state root, it writes <code>repairedAt</code> instead of inventing an installation time. A cache-only root does not count as a preexisting home for this decision. A later version, platform, or node change preserves whichever original timestamp exists and stamps <code>upgradedAt</code>; a version change also records the previous version as <code>upgradedFrom</code>.</li>
+</ol>
+<hr>
+<h2>4. Source Checkout Install</h2>
+<p>Use the local source installer from the cloned repository:</p>
+<pre><code class="language-bash">git clone https://github.com/iowarp/clio-coder.git
 cd clio-coder
-
-# install and link
 npm run install:local
 hash -r
-clio-coder --version</code></pre>
-      </div>
-    </main>
+clio-coder --version
+</code></pre>
+<p><code>scripts/install-local.sh</code> is idempotent and auditable:</p>
+<ul>
+<li>verifies <code>node</code> satisfies <code>package.json</code> <code>engines.node</code>;</li>
+<li>runs <code>npm ci</code> unless <code>node_modules</code> satisfies the lockfile or <code>--skip-deps</code> is passed;</li>
+<li>runs <code>npm run build</code> unless <code>--no-build</code> is passed;</li>
+<li>verifies <code>dist/cli/index.js</code> exists and is executable;</li>
+<li>creates <code>${CLIO_CODER_BIN_DIR:-$HOME/.local/bin}</code> and links <code>clio-coder</code> there;</li>
+<li>warns if that bin dir is not on <code>PATH</code>, and warns when another <code>clio-coder</code>
+earlier on <code>PATH</code> shadows the freshly linked one;</li>
+<li>runs the installed CLI&#39;s structure repair (<code>node dist/cli/index.js doctor --fix</code> with the caller&#39;s environment), so a fresh install passes plain
+<code>clio-coder doctor</code> with no manual steps.</li>
+</ul>
+<p>On a machine where Clio has never run, plain <code>clio-coder doctor</code> prints one
+<code>WARN installation  not set up yet</code> row, exits 0, and creates nothing (it is a
+read-only diagnosis, and an untouched home is not a broken one). Launching
+<code>clio-coder</code>, running <code>clio-coder configure</code>, or <code>clio-coder doctor --fix</code>
+creates everything; once any root exists, doctor reports each missing piece and
+exits 1 until it is repaired.</p>
+<p>First-run target setup after install:</p>
+<p><strong>Option A: Local Model / API Key Target</strong></p>
+<pre><code class="language-bash">clio-coder configure --list
+clio-coder configure --id local-lmstudio --runtime lmstudio --url http://localhost:1234 --model your-model --set-orchestrator --set-fleet-default
+clio-coder targets use local-lmstudio
+clio-coder targets --probe
+clio-coder
+</code></pre>
+<p><strong>Option B: Subscription Target (OAuth / Claude Code)</strong></p>
+<pre><code class="language-bash"># Authenticate ChatGPT Plus/Pro or Claude Pro/Max subscription
+clio-coder auth login openai-codex
+clio-coder auth login anthropic-max
 
-    <footer>
-      <p>Clio Coder Lifecycle spec &bull; Version 0.4.0</p>
-    </footer>
+# Authenticate Claude CLI for worker targets
+claude auth login
+
+# Configure OAuth subscription target
+clio-coder configure --id claude-sub --runtime anthropic-max --model your-claude-model --set-orchestrator
+
+# Configure Claude Code SDK worker target
+clio-coder configure --id claude-sdk-worker --runtime claude-sdk --model your-claude-model --set-fleet-default
+
+clio-coder targets use claude-sub
+clio-coder targets --probe
+clio-coder
+</code></pre>
+<p>If a shell still tries an old removed path such as <code>~/.local/bin/clio-coder</code>, clear
+its command cache with <code>hash -r</code> in Bash or <code>rehash</code> in Zsh.</p>
+<h2>5. Lifecycle Commands</h2>
+<p>Clio Coder provides CLI utilities to manage operations safely. For a complete catalog of operational errors, permission denial handling, and remediation procedures, see <a href="troubleshooting_blueprint.html">troubleshooting.md</a>.</p>
+<h3>A. Integrity Diagnostics (<code>clio-coder doctor</code>)</h3>
+<p>Runs a series of health sweeps across the environment:</p>
+<ul>
+<li>Validates <code>settings.yaml</code> against the strict schema, reporting exact key paths, read-only.</li>
+<li>Asserts owner-only permissions on credentials (<code>0o600</code>).</li>
+<li>Reports the installed Clio, Node, platform, and engine package readiness.</li>
+<li>Checks config, data, state, cache, and state metadata freshness. It also warns when an OpenAI-compatible or Anthropic-compatible target appears to be a native LM Studio or Ollama server that should be converted.</li>
+<li><em>Recovery:</em> Run <code>clio-coder doctor --fix</code> to create missing directories and templates, repair credential permissions, and refresh install metadata. Settings are always validated against the current schema; <code>--fix</code> does not rewrite removed keys or migrate an older settings file. Run <code>clio-coder upgrade</code> for registered lifecycle migrations, including removal of the retired <code>panes.agents</code> and <code>panes.keepFailed</code> keys; paths with no registered migration still require deliberate editing.</li>
+</ul>
+<h3>B. Upgrades (<code>clio-coder upgrade</code>)</h3>
+<p>Refreshes state metadata and applies pending lifecycle migrations, which may update settings, state, or extension data.</p>
+<pre><code class="language-bash">clio-coder upgrade [--dry-run] [--channel=&lt;latest|beta|dev&gt;] [--skip-migrations]
+</code></pre>
+<p>The command detects the install method from the running binary. On a source
+checkout it never runs <code>npm install -g</code>: it performs its safe local duties
+(migration check, <code>install.json</code> refresh) and prints the real update steps,
+<code>git pull</code>, <code>npm run install:local</code>, <code>hash -r</code>. The npm reinstall path applies
+only to a genuinely npm-installed binary.</p>
+<h4>Current migration contract</h4>
+<p>The v0.4.2 source tree registers five migrations in execution order:</p>
+<ol>
+<li><code>2026-09-01-settings-v2</code></li>
+<li><code>2026-09-01-extension-install-digests</code></li>
+<li><code>2026-09-01-clio-coder-naming</code></li>
+<li><code>2026-09-01-retire-panes-knobs</code></li>
+<li><code>2026-08-18-lmstudio-runtime-id</code></li>
+</ol>
+<p>Applied IDs are recorded in <code>&lt;stateDir&gt;/migrations.json</code>. An ID already in that
+manifest is skipped, and each successful migration is recorded immediately so a
+later failure does not cause it to run again. <code>clio-coder upgrade --dry-run</code>
+lists every registered migration it would consider; it does not claim that
+every listed ID is pending. <code>--skip-migrations</code> is a recovery override that lets
+the independent install and metadata work proceed after a migration failure.
+Fix the migration&#39;s cause and rerun the ordinary upgrade afterward.</p>
+<h4>Historical record: upgrading from 0.3.0 to 0.3.1</h4>
+<p>The following behavior records the 0.3.0 and 0.3.1 release binaries. It is not
+the current migration inventory or current upgrade output.</p>
+<p>Nothing has to be done by hand. On an npm install, one command does it all:</p>
+<pre><code class="language-bash">clio-coder upgrade
+</code></pre>
+<p>The 0.3.0 binary prints its header (<code>install npm</code>, <code>channel latest</code>,
+<code>current 0.3.0</code>), runs <code>npm install -g @iowarp/clio-coder@latest</code>, and then
+hands over to the binary that install just put on <code>PATH</code> with
+<code>clio-coder upgrade --post-install</code>. That newer binary runs the migration
+check, records <code>2026-08-18-lmstudio-runtime-id</code> in <code>state/migrations.json</code>, and
+normalizes any legacy LM Studio target id, websocket URL, and stored credential
+name. It then runs <code>clio-coder doctor --fix</code>,
+which refreshes <code>install.json</code>, and reports the transition as
+<code>ok: 0.3.0 -&gt; 0.3.1 (migrations: 1)</code>. The outer 0.3.0 process closes with
+<code>ok: 0.3.0 -&gt; post-install checks complete</code>. Under nvm or a custom npm prefix
+this works because <code>npm install -g</code> and the bare <code>clio-coder</code> resolve through
+the same prefix; the doctor rows the child prints are the proof of which binary
+answered. <code>clio-coder upgrade --dry-run</code> first names the exact command it would
+run, names the pending LM Studio migration, and prints
+<code>would refresh state metadata 0.3.0 -&gt; 0.3.1</code> without touching the record.</p>
+<p>If you instead ran <code>npm install -g @iowarp/clio-coder</code> yourself, or launched
+the new binary before running <code>upgrade</code>, plain <code>clio-coder doctor</code> shows one
+failing row, <code>state metadata  stale 0.3.0 (...); current 0.3.1</code>, pointing at
+<code>clio-coder doctor --fix</code>, and exits 1. Either <code>clio-coder doctor --fix</code> or the
+next <code>clio-coder</code> launch refreshes it. <code>install.json</code> then reads
+<code>version: 0.3.1</code>, keeps the original <code>installedAt</code>, and gains <code>upgradedAt</code> and
+<code>upgradedFrom: &quot;0.3.0&quot;</code>; doctor&#39;s row becomes
+<code>0.3.1 (installed ..., upgraded ... from 0.3.0)</code>.</p>
+<h4>Historical record: 0.3.x release notes</h4>
+<p>The retained notes below span the 0.3.3 upgrade and later 0.3.7 operational
+changes. Upgrading from 0.3.1 to 0.3.3 was automated:</p>
+<pre><code class="language-bash">clio-coder upgrade
+</code></pre>
+<p>Key lifecycle and operational updates in v0.3.7:</p>
+<ul>
+<li>Upgraded the underlying engine SDK libraries to 0.84.0 with signal-aware OAuth cancellation.</li>
+<li>Hardened migration resilience: damaged <code>credentials.yaml</code> files no longer block upgrades when no renames are needed (#121); <code>--skip-migrations</code> is available as a recovery override.</li>
+<li>Fullscreen TUI mode (<code>interface.mode</code>, <code>interface.fullscreenScrollbar</code>) is
+available through <code>/settings interface</code> and requires a restart. Adaptive
+presentation pacing is the live <code>interface.smoothStreaming</code> setting; it
+defaults to <code>off</code>, with conservative <code>auto</code> and explicit <code>on</code> available from
+the same area.</li>
+<li>Interactive launch paints a measured Stage 0 shell on the same terminal and editor that Stage 1 hydrates. Typing, queued submits, resize, and Ctrl+C remain live during hydration; set <code>CLIO_CODER_INSTANT_SHELL=0</code> for the legacy fully hydrated first-frame path.</li>
+<li>Turn settlement is enforced on <code>/new</code>, <code>/resume</code>, <code>/tree</code>, and <code>/fork</code> to cleanly commit in-flight streams before session writer replacement (#114).</li>
+<li>Resumed and forked session entry replays standardize message prefixes through <code>src/engine/messages.ts</code>.</li>
+<li><code>AI_AGENT=clio-coder</code> is set on all child processes for system attribution.</li>
+</ul>
+<p>The first interactive launch after that upgrade showed this contemporary
+version notice:
+<code>clio: upgraded 0.3.1 → 0.3.3. What changed at the keyboard: ...</code>
+Recorded once per version in <code>install.json</code> as <code>noticedVersion</code>.</p>
+<p>Current launches use the <code>clio-coder:</code> prefix. Version 0.3.1 has specialized
+keyboard-facing text; all other target versions use the generic form
+<code>clio-coder: upgraded &lt;from&gt; → &lt;to&gt;. What changed is in CHANGELOG.md, section &lt;to&gt;.</code></p>
+<h3>C. System Resets (<code>clio-coder reset</code>)</h3>
+<p>Selective recovery wipes:</p>
+<pre><code class="language-bash">clio-coder reset [--state|--data|--cache|--auth|--config|--all] [--dry-run] [--force]
+</code></pre>
+<p>Levels are combinable except <code>--all</code>. Each level clears exactly the root or file it names and nothing else, then bootstraps the missing structure again unless <code>--dry-run</code> is present. <code>--force</code> is required only for destructive execution.</p>
+<p>Every run lists each selected root and then the entries inside it, read off the
+disk on that run, before removing anything; <code>--dry-run</code> prints the identical
+listing. That listing, not this page and not <code>--help</code>, is the authoritative
+inventory of what a level covers, because a remembered list drifts as soon as a
+new artifact is written into a root.</p>
+<ul>
+<li><code>--state</code> <em>(Default)</em>: Deletes the state root only. It holds every session transcript and the audit trail beside it, so a reset is the end of <code>resume</code>, <code>/view</code>, and their history. This is the level a bare <code>clio-coder reset</code> selects, and it carries that note in its preview.</li>
+<li><code>--data</code>: Deletes the data root only: memory, evidence, evals, and any vendored external tools (durable products). The vendored tools are the one entry a reset cannot regenerate locally; <code>clio-coder tools install &lt;id&gt;</code> downloads them again.</li>
+<li><code>--cache</code>: Deletes the cache root only.</li>
+<li><code>--auth</code>: Deletes <code>credentials.yaml</code>. Removes all saved keys.</li>
+<li><code>--config</code>: Deletes <code>settings.yaml</code> to revert preferences to default.</li>
+<li><code>--all</code>: Wipes all four roots (config, data, state, cache) and automatically reinitializes a fresh environment.</li>
+</ul>
+<h3>D. Uninstallation (<code>clio-coder uninstall</code>)</h3>
+<p><code>clio-coder uninstall</code> is the single uninstall path for every install method. It
+removes all four roots (config, data, state, cache):</p>
+<pre><code class="language-bash">clio-coder uninstall [--remove-binary] [--dry-run] [--force]
+</code></pre>
+<p>Preview first, then remove:</p>
+<pre><code class="language-bash">clio-coder uninstall --dry-run
+clio-coder uninstall --remove-binary --force
+hash -r
+</code></pre>
+<p><code>--dry-run</code> prints the roots and the optional launcher action without changing
+anything, and enumerates the same resolved absolute paths the real run would
+remove. It prints binary-removal guidance for the active launcher, npm-global
+installs, npm links, and the local source symlink.</p>
+<h4>Per-project <code>.clio-coder/</code> directories</h4>
+<p>Uninstall removes the four roots under your home directory. The <code>.clio-coder/</code>
+directory Clio writes inside each repository it runs in is not one of them and
+is never removed here. Every project is recorded in the session metadata under
+the state root, so both the real run and <code>--dry-run</code> list the surviving
+<code>.clio-coder/</code> directories and name the command that clears one:</p>
+<pre><code class="language-bash">clio-coder context reset --all
+</code></pre>
+<p>That command works on the current directory, so run it from inside each listed
+project. The listing is printed before the roots are removed, because the record
+it reads lives in one of them, and before <code>--remove-binary</code> unlinks the launcher,
+because <code>clio-coder context reset</code> needs the binary that is about to go. With
+<code>--remove-binary</code> the listing says so and tells you to clear the projects first,
+then re-run the uninstall. Neither the preview nor the real run deletes project
+data. To wipe state selectively
+while keeping settings or credentials, use <code>clio-coder reset</code> instead of
+uninstalling. If the launcher is already gone but state remains, run the built
+CLI directly from the checkout: <code>node dist/cli/index.js uninstall --force</code>.</p>
+<h4>What <code>--remove-binary</code> will and will not remove</h4>
+<p>Ownership is identity, not shape. The launcher is removed only when it resolves
+to <em>this</em> installation&#39;s own <code>dist/cli/index.js</code>. A path test on the target&#39;s
+spelling was three ways too broad: it matched a live symlink into a different
+clio-coder checkout, and it matched a target that is not even a file, so an uninstall
+from one installation could unlink another one&#39;s launcher and leave that
+installation on disk with no way to start it.</p>
+<table>
+<thead>
+<tr>
+<th>At <code>$CLIO_CODER_BIN_DIR/clio-coder</code></th>
+<th>Outcome</th>
+</tr>
+</thead>
+<tbody><tr>
+<td>A symlink resolving to this installation&#39;s entry</td>
+<td>Removed</td>
+</tr>
+<tr>
+<td>A symlink resolving to a different clio-coder installation</td>
+<td>Kept, with the path it points at and the exact <code>rm</code> that removes it</td>
+</tr>
+<tr>
+<td>A symlink to a directory named <code>index.js</code></td>
+<td>Kept, because a directory is not an entry</td>
+</tr>
+<tr>
+<td>A real file</td>
+<td>Kept, with a note to remove it through the package manager that put it there</td>
+</tr>
+<tr>
+<td>A dangling symlink naming a clio-coder entry</td>
+<td>Removed, and reported as dangling. Leaving it would put a broken <code>clio-coder</code> on PATH after an uninstall that claimed to finish</td>
+</tr>
+<tr>
+<td>A dangling symlink naming anything else</td>
+<td>Kept, with the exact <code>rm</code></td>
+</tr>
+</tbody></table>
+<h4>Partial failure</h4>
+<p>A recursive delete can stop halfway: an unwritable parent leaves some children
+removed and some in place. <code>reset</code> and <code>uninstall</code> collect per-path failures
+instead of throwing the first one. Every selected root still gets its attempt,
+the skeleton is rebuilt, each surviving path is named with the reason it
+resisted, and the command exits 1 with the exact invocation to rerun. Both
+commands are idempotent, so the recovery is always the same: fix the permission
+or release the handle, then run the identical command again and it resumes from
+whatever is left. A partial delete never reports global success.</p>
+<hr>
+<h2>6. Residues Checklist for Manual Purging</h2>
+<p>If you are removing Clio Coder completely from your system, verify that all categories of residues are removed:</p>
+<ol>
+<li><strong>System Roots</strong>:<ul>
+<li><code>~/.config/clio-coder</code></li>
+<li><code>~/.local/share/clio-coder</code></li>
+<li><code>~/.local/state/clio-coder</code></li>
+<li><code>~/.cache/clio-coder</code></li>
+</ul>
+</li>
+<li><strong>Local Source Bin Link</strong>:<ul>
+<li><code>${CLIO_CODER_BIN_DIR:-$HOME/.local/bin}/clio-coder</code></li>
+</ul>
+</li>
+<li><strong>Global Bin Links</strong>:<ul>
+<li><code>clio-coder</code> executable in your global npm path (for source checkouts, avoid this path unless intentionally debugging npm link behavior).</li>
+</ul>
+</li>
+<li><strong>Per-Repository State</strong>:<ul>
+<li><code>.clio-coder/</code> in every repository Clio has worked in, and the generated <code>CLIO-CODER.md</code> beside it. See <a href="#the-project-clio-coder-directory">The Project <code>.clio-coder/</code> Directory</a> for what each entry is before deleting.</li>
+<li>Remove <code>.clio-coder/worktrees/</code> with <code>git worktree remove</code> rather than <code>rm -rf</code>, so git does not keep stale worktree metadata.</li>
+</ul>
+</li>
+</ol>
+<hr>
+<h2>7. Headless and CI Execution Behavior</h2>
+<p>Clio Coder supports headless operation for automation and continuous integration.</p>
+<p>When executing tasks headlessly using <code>clio-coder run</code>, interactive permission prompting is unavailable. The engine resolves permission requests using a deterministic model:</p>
+<ul>
+<li><strong>Main-agent auto-denial:</strong> Any main-agent tool call that parks for operator authorization is denied with <code>clio-coder run cannot confirm permission requests; rerun interactively to approve this action.</code> The parked call is cancelled with that reason, and the headless turn finishes according to the resulting assistant outcome.</li>
+<li><strong>Worker non-stall policy:</strong> Dispatched workers use <code>fleet.permissions.mode</code>. The default <code>deny</code> turns a permission ask into a structured tool denial and lets the worker continue. <code>fail</code> aborts the worker and records the dispatch outcome as <code>failed/permission_required</code>.</li>
+<li><strong>CI behavior:</strong> Neither path waits for an interactive prompt. Exit status still reflects the final headless or dispatch result rather than the mere fact that a permission ask occurred.</li>
+</ul>
+        </article>
+        <nav class="related-nav" aria-label="Adjacent references">
+          <a class="nav-link-card" href="glossary_blueprint.html"><span class="nav-label">Previous</span><span class="nav-title">Clio Coder Glossary</span></a>
+          <a class="nav-link-card next" href="proactive_memory_blueprint.html"><span class="nav-label">Next</span><span class="nav-title">Proactive task memory</span></a>
+        </nav>
+        <p class="reference-footer-note">Canonical content lives in the mapped Markdown page. This visual counterpart adds navigation without changing the contract.</p>
+      </main>
+    </div>
+    <footer>Clio Coder documentation · source-aligned at v0.4.2</footer>
   </div>
-
-  <script>
-    // Tab switching
-    function switchTab(tabId) {
-      document.querySelectorAll('.tab-btn').forEach(btn => { btn.classList.remove('active'); });
-      document.querySelectorAll('.tab-pane').forEach(pane => { pane.classList.remove('active'); });
-
-      if (tabId === 'interactive') {
-        document.querySelector('.tab-btn:nth-child(1)').classList.add('active');
-        document.getElementById('pane-interactive').classList.add('active');
-      } else {
-        document.querySelector('.tab-btn:nth-child(2)').classList.add('active');
-        document.getElementById('pane-reference').classList.add('active');
-      }
-    }
-
-    function resolvePaths() {
-      const platform = document.getElementById('platformSelect').value;
-      const clioHome = document.getElementById('clioHomeInput').value.trim();
-      const configOverride = document.getElementById('configDirInput').value.trim();
-      const dataOverride = document.getElementById('dataDirInput').value.trim();
-      const stateOverride = document.getElementById('stateDirInput').value.trim();
-      const cacheOverride = document.getElementById('cacheDirInput').value.trim();
-
-      let defConfig = '';
-      let defData = '';
-      let defState = '';
-      let defCache = '';
-
-      if (platform === 'linux') {
-        defConfig = '/home/user/.config/clio-coder';
-        defData = '/home/user/.local/share/clio-coder';
-        defState = '/home/user/.local/state/clio-coder';
-        defCache = '/home/user/.cache/clio-coder';
-      } else if (platform === 'macos') {
-        defConfig = '/Users/user/Library/Application Support/clio-coder/config';
-        defData = '/Users/user/Library/Application Support/clio-coder/data';
-        defState = '/Users/user/Library/Application Support/clio-coder/state';
-        defCache = '/Users/user/Library/Caches/clio-coder';
-      } else {
-        defConfig = 'C:\\Users\\user\\AppData\\Roaming\\clio-coder\\config';
-        defData = 'C:\\Users\\user\\AppData\\Roaming\\clio-coder\\data';
-        defState = 'C:\\Users\\user\\AppData\\Local\\clio-coder\\state';
-        defCache = 'C:\\Users\\user\\AppData\\Local\\clio-coder\\cache';
-      }
-
-      // apply overrides
-      const finalConfig = configOverride || (clioHome ? `${clioHome}/config` : defConfig);
-      const finalData = dataOverride || (clioHome ? `${clioHome}/data` : defData);
-      const finalState = stateOverride || (clioHome ? `${clioHome}/state` : defState);
-      const finalCache = cacheOverride || (clioHome ? `${clioHome}/cache` : defCache);
-
-      document.getElementById('resolvedConfig').innerText = finalConfig;
-      document.getElementById('resolvedData').innerText = finalData;
-      document.getElementById('resolvedState').innerText = finalState;
-      document.getElementById('resolvedCache').innerText = finalCache;
-    }
-
-    function runBootstrapSim() {
-      const consoleEl = document.getElementById('bootConsole');
-      const conf = document.getElementById('resolvedConfig').innerText;
-      const data = document.getElementById('resolvedData').innerText;
-      const state = document.getElementById('resolvedState').innerText;
-      const cache = document.getElementById('resolvedCache').innerText;
-
-      consoleEl.innerHTML = `[BOOT] Calling initializeClioHome()...`;
-
-      setTimeout(() => {
-        consoleEl.innerHTML += `\n[BOOT] Resolving config root: ${conf}`;
-        consoleEl.innerHTML += `\n[BOOT] Resolving data root: ${data}`;
-        consoleEl.innerHTML += `\n[BOOT] Resolving state root: ${state}`;
-        consoleEl.innerHTML += `\n[BOOT] Resolving cache root: ${cache}`;
-      }, 300);
-
-      setTimeout(() => {
-        consoleEl.innerHTML += `\n[FS] Creating directory tree structure...`;
-        consoleEl.innerHTML += `\n[FS] -> ${data}/memory/ (rw-r--r--)`;
-        consoleEl.innerHTML += `\n[FS] -> ${data}/evidence/ (rw-r--r--)`;
-        consoleEl.innerHTML += `\n[FS] -> ${state}/sessions/ (rw-r--r--)`;
-        consoleEl.innerHTML += `\n[FS] -> ${state}/audit/ (rw-r--r--)`;
-        consoleEl.innerHTML += `\n[FS] -> ${state}/receipts/ (rw-r--r--)`;
-      }, 600);
-
-      setTimeout(() => {
-        consoleEl.innerHTML += `\n[SETTINGS] settings.yaml not found. Deploying default template...`;
-        consoleEl.innerHTML += `\n[SECURITY] credentials.yaml not found. Creating locked credential segment...`;
-        consoleEl.innerHTML += `\n[SECURITY] chmod 0o600 ${conf}/credentials.yaml (Owner RW only)`;
-      }, 1000);
-
-      setTimeout(() => {
-        consoleEl.innerHTML += `\n[METADATA] Writing ${state}/install.json: { version: "0.4.0", node: "v22.19.0" }`;
-        consoleEl.innerHTML += `\n[BOOT] initializeClioHome() completed successfully.`;
-      }, 1400);
-    }
-
-    // Init
-    window.onload = () => {
-      resolvePaths();
-    };
-  </script>
+  <script src="shared.js"></script>
 </body>
 </html>

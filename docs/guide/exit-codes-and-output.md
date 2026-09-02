@@ -1,5 +1,8 @@
 # Exit Codes & Machine-Readable Output Contracts
 
+> **Visual blueprint:** The source checkout includes the complete
+> [Exit Codes & Machine-Readable Output Contracts visual reference](https://github.com/iowarp/clio-coder/blob/main/docs/html/exit_codes_blueprint.html).
+
 This document specifies the process exit codes, machine-readable JSON streaming formats, standard I/O separation rules, and `--help` conventions across all Clio Coder CLI commands in the current source tree.
 
 Source implementations: `src/cli/` and `src/entry/`.

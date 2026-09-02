@@ -1,7 +1,7 @@
 # Clio Coder Scientific Validation Contracts
 
-> [!TIP]
-> **Interactive Spec Available:** A source-checkout numerical tolerance calculator and HPC queue execution simulator is available at [docs/html/validation_blueprint.html](https://github.com/iowarp/clio-coder/blob/main/docs/html/validation_blueprint.html).
+> **Visual blueprint:** The source checkout includes the complete
+> [Clio Coder Scientific Validation Contracts visual reference](https://github.com/iowarp/clio-coder/blob/main/docs/html/validation_blueprint.html).
 
 Scientific software development cannot treat simple file presence as proof of correctness. A simulation script that crashes on rank 48, or writes out NetCDF arrays filled with `NaN`s, may still successfully write a file to the disk. 
 

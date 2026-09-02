@@ -1,0 +1,241 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <meta name="clio-markdown-source" content="docs/history/release-cut-checklist.md">
+  <meta name="clio-docs-version" content="0.4.2">
+  <title>v0.4.1 Release-Cut Checklist · Clio Coder 0.4.2</title>
+  <link rel="icon" href="data:,">
+  <link rel="stylesheet" href="shared.css">
+</head>
+<body data-doc-category="history">
+  <div class="reading-progress" aria-hidden="true"></div>
+  <a class="skip-link" href="#reference-content">Skip to reference</a>
+  <div class="container">
+    <header class="document-header" data-category="History">
+      <div class="header-left">
+        <a class="header-logo" href="index.html" aria-label="Documentation index">
+          <svg viewBox="0 0 24 24" fill="none" aria-hidden="true">
+            <path d="M12 2 2 7l10 5 10-5-10-5Z" stroke="url(#clio-logo)" stroke-width="2" stroke-linejoin="round"/>
+            <path d="m2 12 10 5 10-5M2 17l10 5 10-5" stroke="url(#clio-logo)" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"/>
+            <defs><linearGradient id="clio-logo" x1="2" y1="2" x2="22" y2="22"><stop stop-color="#00d4db"/><stop offset="1" stop-color="#ff7e29"/></linearGradient></defs>
+          </svg>
+        </a>
+        <div class="header-title-wrapper">
+          <p class="document-kicker">History / canonical reference</p>
+          <h1>v0.4.1 Release-Cut Checklist</h1>
+          <p class="document-path">docs/history/release-cut-checklist.md</p>
+        </div>
+      </div>
+      <div class="header-right">
+        <a class="back-btn" href="index.html">← Index</a>
+        <span class="version-badge">v0.4.2</span>
+      </div>
+    </header>
+    <div class="page-layout-grid reference-layout">
+      <aside class="sidebar reference-sidebar" aria-label="On this page">
+        <nav class="toc-container">
+          <p class="toc-title">On this page</p>
+          <a class="sidebar-source" href="https://github.com/iowarp/clio-coder/blob/main/docs/history/release-cut-checklist.md">Canonical Markdown<br>docs/history/release-cut-checklist.md</a>
+          <ul class="toc-list"></ul>
+        </nav>
+      </aside>
+      <main class="reference-main" id="reference-content">
+        <article class="reference-prose glass-card">
+<blockquote>
+<p><strong>Visual blueprint:</strong> The source checkout includes the complete
+<a href="release_cut_checklist_blueprint.html">v0.4.1 Release-Cut Checklist visual reference</a>.</p>
+</blockquote>
+<blockquote>
+<p>[!IMPORTANT]
+Historical release record. v0.4.1 has been published, and this checklist is
+retained to explain how that release was cut. It is not the procedure for
+v0.4.2 or any later release; paths, gates, versions, dates, and authorization
+state must be re-established from current source before a future cut.</p>
+</blockquote>
+<p>This is the ordered procedure for turning the prepared <code>v0.4.1</code> branch into a
+published release. Everything above the <strong>AUTHORIZATION BOUNDARY</strong> is local,
+repeatable, and reversible. Everything below it changes a remote ref, creates a
+release, or publishes an immutable package and therefore requires the
+operator&#39;s explicit approval of the exact candidate SHA and commands.</p>
+<h2>Part 1: verify the exact candidate</h2>
+<ol>
+<li><p>Resolve and record the exact candidate SHA. Confirm <code>package.json</code> and both
+version fields in <code>package-lock.json</code> are <code>0.4.1</code>, and confirm the first
+version heading in <code>CHANGELOG.md</code> is exactly
+<code>## 0.4.1 - 2026-09-01</code>. Work from the branch ref explicitly when a branch
+and tag share the name: <code>refs/heads/v0.4.1</code> is the branch and
+<code>refs/tags/v0.4.1</code> is the tag.</p>
+</li>
+<li><p>Confirm the tracked worktree is clean. Do not fold unrelated local or
+ignored release evidence into the candidate.</p>
+</li>
+<li><p>Install exactly from the lockfile:</p>
+<pre><code class="language-sh">npm ci --prefer-offline --no-audit --no-fund
+</code></pre>
+</li>
+<li><p>Run the one local release gate:</p>
+<pre><code class="language-sh">npm run ci:release
+</code></pre>
+<p><code>ci:release</code> runs <code>ci</code> and then <code>scripts/check-release.mjs</code>. The <code>ci</code> script
+performs typecheck; Biome and repository hygiene; the shipped-skill pin
+check; the build; the 35-file <code>node --test</code> suite; and the trace-viewer
+tests. The release audit then checks the built launcher and dist contents,
+version/changelog coherence, required package resources, dependency audit,
+and tarball size and contents. Run individual subcommands only to diagnose a
+failure; rerunning each one before <code>ci:release</code> does not add coverage.</p>
+</li>
+<li><p>Confirm the hosted push/PR configuration still has one CI workflow, one
+Node 22 job, and one release-gate step in <code>.github/workflows/ci.yml</code>. There
+is no repeat/shuffle job, shard matrix, or Node 24 lane.
+<code>.github/workflows/release.yml</code> is a separate tag-only publication workflow;
+it reruns the same <code>ci:release</code> gate on the tagged tree rather than inheriting
+another workflow&#39;s result.</p>
+</li>
+<li><p>Keep evals outside the gate. The engine under <code>src/domains/eval/</code> and the
+reference suites under <code>evals/</code> ship for explicit operator measurements,
+but neither CI nor <code>ci:release</code> runs an eval. When a release-specific model
+measurement is requested, run it and retain its artifacts separately:</p>
+<pre><code class="language-sh">node dist/cli/index.js eval run --suite evals/behavioral-model.yaml --target &lt;id&gt; --clio-coder-entry dist/cli/index.js
+node dist/cli/index.js eval run --suite evals/behavioral-model-negative-control.yaml --target &lt;id&gt; --clio-coder-entry dist/cli/index.js
+</code></pre>
+<p>These runs can inform an operator decision, but they are not CI or release
+gates. The model-free <code>evals/behavioral-machinery.yaml</code> suite is likewise a
+maintained reference suite, not a checked release baseline.</p>
+</li>
+<li><p>When a configured target is available, run one real built-binary turn:</p>
+<pre><code class="language-sh">node dist/cli/index.js run --target &lt;id&gt; --autonomy read-only \
+  &quot;Report the active target and confirm this is a release smoke turn.&quot;
+</code></pre>
+<p>Run it with an isolated <code>CLIO_CODER_HOME</code> containing only the test target.
+Record a missing or unauthorized target as a deferred live check; never
+substitute a model-dependent result for the deterministic gate.</p>
+</li>
+<li><p>Inspect the package twice: first with <code>npm pack --dry-run</code>, then with a real
+<code>npm pack</code> directed to a temporary directory. Record the filename, integrity,
+shasum, packed size, and unpacked size. Confirm <code>dist/</code>, <code>src/</code>, <code>skills/</code>,
+<code>evals/</code>, the Markdown guides, package metadata, and required runtime assets
+are present. Confirm <code>docs/html/</code>, <code>apps/workbench/</code>, <code>.superpowers/</code>,
+<code>tests/</code>, <code>scripts/</code>, scratch files, and source maps are absent.</p>
+</li>
+<li><p>Install that tarball into a clean temporary prefix with an empty
+<code>CLIO_CODER_HOME</code>. Verify <code>clio-coder --version</code>, <code>--help</code>, an empty-state
+non-TTY launch, <code>doctor</code>, and <code>uninstall --dry-run</code> without using
+developer-local state. The in-suite installed-package smoke already proves
+a packed install can launch from a foreign working directory; this step
+inspects the exact final tarball.</p>
+</li>
+<li><p>Run the interactive release matrix against the clean install. Cover fresh
+onboarding, v1 settings migration, all seven <code>/settings</code> deep links,
+retired-command tombstones, slash autocomplete, <code>@</code> references, public and
+private bang operators, paste inertness, marketplace promotion, and the
+opt-in workers dock. Record PASS / FAIL / BLOCKED with concrete evidence.
+A deterministic behavior failure blocks the cut; a model-choice outcome is
+reported as model-dependent rather than rewritten into a deterministic
+claim.</p>
+</li>
+</ol>
+<h2>Part 2: notes and package coherence</h2>
+<ol start="11">
+<li>Confirm the <code>## 0.4.1 - 2026-09-01</code> changelog section tells the complete
+release story in release-body order and contains no <code>Unreleased</code> section
+above it. The tag workflow extracts this section verbatim for the GitHub
+Release.</li>
+<li>Confirm README quickstart and source-install commands name real commands,
+current paths, and <code>v0.4.1</code>. Confirm current eval documentation points to
+<code>src/domains/eval/</code> and <code>evals/</code>, not to a retired parallel tree.</li>
+<li>Confirm <code>docs/architecture/artifact-versions.md</code> includes every persisted artifact added
+or re-versioned by the candidate, including any canonical naming schema
+identifiers. A compatibility reader does not make a newly emitted schema
+optional to document.</li>
+<li>After any version, changelog, package-list, or release-note edit, rerun
+<code>npm run ci:release</code> and commit the coherent result on <code>v0.4.1</code>.</li>
+</ol>
+<h2>Part 3: present the gate</h2>
+<ol start="15">
+<li>Before touching a remote ref, report the exact final candidate SHA and
+tracked status; commits added since the prior handoff; the local
+<code>ci:release</code> result; the GitHub Actions URL for the candidate when one
+exists; package and changelog versions; tarball audit; clean-install and
+interactive results; any deferred live or eval measurement; and the
+proposed commands for the remaining parts.</li>
+<li>Reconfirm whether <code>refs/tags/v0.4.1</code>, a v0.4.1 GitHub Release, or
+<code>@iowarp/clio-coder@0.4.1</code> already exists. Obtain the operator&#39;s npm
+dist-tag decision explicitly; do not infer <code>latest</code> or <code>next</code> from a prior
+release.</li>
+</ol>
+<hr>
+<h2>AUTHORIZATION BOUNDARY</h2>
+<p>Every step below is externally visible or cannot be undone by an ordinary
+local Git command. Do not execute any of it until the operator approves the
+exact SHA and commands.</p>
+<h2>Part 4: fast-forward <code>main</code></h2>
+<ol start="17">
+<li><code>git fetch origin</code> immediately before integrating. Require <code>origin/main</code>
+to be an ancestor of the reviewed candidate and confirm no other worktree
+has <code>main</code> checked out.</li>
+<li>Fast-forward local <code>main</code> to <code>refs/heads/v0.4.1</code>; do not create a merge
+commit, rebase the candidate, or reset a published branch. Verify <code>main</code>
+equals the reviewed SHA and is clean.</li>
+<li>Fetch once more and stop on unexpected remote movement. Push <code>main</code> without
+force.</li>
+</ol>
+<h2>Part 5: exact-SHA CI, tag, and GitHub Release</h2>
+<ol start="20">
+<li>The <code>main</code> push triggers the single <code>ci</code> workflow. Require its one Node 22
+job for the exact reviewed SHA to finish green before tagging. A red run
+blocks the cut and is investigated on its own evidence.</li>
+<li>Reconfirm the tag and GitHub Release do not exist. Create annotated tag
+<code>v0.4.1</code> on the green SHA and push only <code>refs/tags/v0.4.1</code>.</li>
+<li>The tag triggers <code>.github/workflows/release.yml</code>. It verifies the tag
+matches <code>package.json</code>, independently runs <code>npm run ci:release</code> on the
+tagged tree, packs the tarball, extracts the v0.4.1 changelog section, and
+creates the GitHub Release. It does not publish to npm. Verify the run SHA,
+release notes, attached tarball, and URL.</li>
+</ol>
+<h2>Part 6: npm publication</h2>
+<ol start="23">
+<li>Run <code>npm whoami</code>; confirm the registry, account, package scope, and that
+<code>@iowarp/clio-coder@0.4.1</code> is still absent.</li>
+<li>Reconfirm the operator&#39;s dist-tag decision, then run <code>npm publish</code> once
+with that decision. <code>prepublishOnly</code> reruns <code>ci:release</code>; it is a final
+safety net, not a substitute for Parts 1 and 5.</li>
+<li>Treat publication as irreversible. A published version cannot be replaced;
+correct a mistake with a higher version rather than attempting to reuse
+<code>0.4.1</code>.</li>
+</ol>
+<h2>Part 7: post-publish verification</h2>
+<ol start="26">
+<li>Verify <code>npm view @iowarp/clio-coder@0.4.1</code> and the selected dist-tag.</li>
+<li>On a clean machine, install from the registry rather than the local
+tarball. Repeat the version/help/doctor lifecycle checks, then configure a
+real target and run one real turn when authorized.</li>
+<li>From a supported pre-v0.4.1 installation, run <code>clio-coder upgrade</code> and
+verify settings v2 plus the recorded Clio Coder naming migration. Confirm
+canonical writers use the new machine identifiers and a released legacy
+identifier remains read-compatible within the documented v0.5/v0.6 window.</li>
+<li>Record the final SHA, CI and tag-workflow URLs, tag, GitHub Release URL,
+npm version and dist-tag, tarball evidence, and post-publish verification in
+the release report.</li>
+</ol>
+<hr>
+<h2>Rollback</h2>
+<p>There is no rollback after npm publication. Before publication, delete only
+newly created release artifacts that the operator explicitly authorizes for
+removal. Correct a pushed <code>main</code> branch with a new forward commit, never by
+rewriting it. Local verification and note edits remain ordinary reversible Git
+work until they cross the authorization boundary.</p>
+        </article>
+        <nav class="related-nav" aria-label="Adjacent references">
+          <a class="nav-link-card" href="config_knobs_audit_blueprint.html"><span class="nav-label">Previous</span><span class="nav-title">Config Knobs Audit (Historical Appendix)</span></a>
+          <span></span>
+        </nav>
+        <p class="reference-footer-note">Canonical content lives in the mapped Markdown page. This visual counterpart adds navigation without changing the contract.</p>
+      </main>
+    </div>
+    <footer>Clio Coder documentation · source-aligned at v0.4.2</footer>
+  </div>
+  <script src="shared.js"></script>
+</body>
+</html>

@@ -1,178 +1,395 @@
-<!DOCTYPE html>
+<!doctype html>
 <html lang="en">
 <head>
-  <meta charset="UTF-8">
-  <meta name="viewport" content="width=device-width, initial-scale=1.0">
-  <title>Config Knobs Audit Historical Appendix Blueprint (v0.2.9)</title>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <meta name="clio-markdown-source" content="docs/history/config-knobs-audit.md">
+  <meta name="clio-docs-version" content="0.4.2">
+  <title>Config Knobs Audit (Historical Appendix) · Clio Coder 0.4.2</title>
+  <link rel="icon" href="data:,">
   <link rel="stylesheet" href="shared.css">
-  <style>
-    .historical-notice {
-      background: rgba(245, 158, 11, 0.08);
-      border: 1px solid rgba(245, 158, 11, 0.3);
-      color: var(--color-amber);
-      padding: 1rem;
-      border-radius: 8px;
-      margin-bottom: 2rem;
-      font-size: 0.9rem;
-    }
-  </style>
 </head>
-<body>
+<body data-doc-category="history">
+  <div class="reading-progress" aria-hidden="true"></div>
+  <a class="skip-link" href="#reference-content">Skip to reference</a>
   <div class="container">
-    <header>
+    <header class="document-header" data-category="History">
       <div class="header-left">
-        <div class="header-logo">
-          <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" style="color: var(--color-amber);"><title>Icon</title>
-            <circle cx="12" cy="12" r="10"></circle>
-            <line x1="12" y1="8" x2="12" y2="12"></line>
-            <line x1="12" y1="16" x2="12.01" y2="16"></line>
+        <a class="header-logo" href="index.html" aria-label="Documentation index">
+          <svg viewBox="0 0 24 24" fill="none" aria-hidden="true">
+            <path d="M12 2 2 7l10 5 10-5-10-5Z" stroke="url(#clio-logo)" stroke-width="2" stroke-linejoin="round"/>
+            <path d="m2 12 10 5 10-5M2 17l10 5 10-5" stroke="url(#clio-logo)" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"/>
+            <defs><linearGradient id="clio-logo" x1="2" y1="2" x2="22" y2="22"><stop stop-color="#00d4db"/><stop offset="1" stop-color="#ff7e29"/></linearGradient></defs>
           </svg>
-        </div>
+        </a>
         <div class="header-title-wrapper">
-          <h1 style="background: linear-gradient(to right, #ffffff, #c7d2fe, var(--color-amber)); -webkit-background-clip: text; -webkit-text-fill-color: transparent;">Config Knobs Audit</h1>
-          <p>Point-in-time inventory of legacy env variables and consolidation records</p>
-          <div class="meta-chips-row">
-            <span class="chip">Source: docs/config-knobs-audit.md</span>
-            <span class="chip chip-orange" style="color: var(--color-amber); border-color: rgba(245, 158, 11, 0.3); background: rgba(245, 158, 11, 0.05);">clio-coder docs config_knobs_audit</span>
-          </div>
+          <p class="document-kicker">History / canonical reference</p>
+          <h1>Config Knobs Audit (Historical Appendix)</h1>
+          <p class="document-path">docs/history/config-knobs-audit.md</p>
         </div>
       </div>
       <div class="header-right">
-        <span class="version-badge" style="color: var(--color-amber); border-color: rgba(245, 158, 11, 0.3); background: rgba(245, 158, 11, 0.08);">Clio Coder v0.2.9 (Historical)</span>
-        <a href="index.html" class="back-btn">
-          <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><title>Icon</title><line x1="19" y1="12" x2="5" y2="12"></line><polyline points="12 19 5 12 12 5"></polyline></svg>
-          Dashboard Hub
-        </a>
+        <a class="back-btn" href="index.html">← Index</a>
+        <span class="version-badge">v0.4.2</span>
       </div>
     </header>
-
-    <div class="page-layout-grid">
-      <nav class="sidebar" aria-label="Table of Contents">
-        <div class="toc-container">
-          <div class="toc-title">On This Page</div>
-          <ul class="toc-list">
-            <!-- Dynamically populated -->
-          </ul>
-        </div>
-      </nav>
-
-      <main>
-        <div class="historical-notice">
-          <strong>HISTORICAL RECORD:</strong> This document reflects pre-consolidated states prior to version `v0.2.9`. For active reference, check environment variables directly.
-        </div>
-
-        <div class="glass-card">
-          <h2>Overview Summary</h2>
-          <p>Consolidation audits are conducted to move process variables into standard settings YAML files. This minimizes process namespace pollution and ensures clean, reproducible environments.</p>
-        </div>
-
-        <div class="tabs-nav">
-          <button type="button" class="tab-btn active" onclick="switchTab('auditor')">
-            Historical Knobs Auditor
-          </button>
-          <button type="button" class="tab-btn" onclick="switchTab('findings')">
-            Audit Findings
-          </button>
-        </div>
-
-        <!-- Tab 1: Auditor -->
-        <div class="tab-pane active" id="pane-auditor">
-          <div class="blueprint-layout">
-            <div class="specs-col">
-              <div class="glass-card">
-                <h3>Legacy Variable Selector</h3>
-                <p>Select a pre-consolidation variable to trace its history:</p>
-
-                <div class="form-group">
-                  <label for="knobSelect">Legacy Env Variable</label>
-                  <select id="knobSelect" onchange="updateAuditDetails()">
-                    <option value="orch_calls">CLIO_CODER_ORCH_MAX_TOOL_CALLS</option>
-                    <option value="max_context">CLIO_CODER_MAX_CONTEXT_TOKENS</option>
-                    <option value="sampling">CLIO_CODER_SAMPLING_OVERRIDES</option>
-                  </select>
-                </div>
-              </div>
-            </div>
-
-            <div class="specs-col">
-              <div class="glass-card">
-                <h3>Consolidation Audit Record</h3>
-
-                <div class="verdict-box warn" id="auditStatusBox" style="margin-top:0;">
-                  <strong id="auditStatusTitle" style="display:block; font-size:1.1rem">RETIRED / CONSOLIDATED</strong>
-                  <span id="auditStatusDesc">Trace details...</span>
-                </div>
-
-                <div style="margin-top: 1rem;">
-                  <strong>v0.2.9 Replacement:</strong>
-                  <code id="auditReplacement" style="display:block; margin-top:0.25rem; font-size:0.9rem; color:var(--color-cyan);">settings.yaml</code>
-                </div>
-              </div>
-            </div>
-          </div>
-        </div>
-
-        <!-- Tab 2: Findings -->
-        <div class="tab-pane" id="pane-findings">
-          <div class="glass-card">
-            <h3>Audit Findings Summary</h3>
-            <p>During the consolidation sweep on 2026-07-03, the following tasks were completed:</p>
-            <ul>
-              <li><strong>Guardrails section added:</strong> All soft and hard loop ceilings are now defined under <code>guardrails:</code> settings structures.</li>
-              <li><strong>Bridge variables collapsed:</strong> Legacy variables used to pass CLI parameters into deep engines are replaced by <code>CLIO_CODER_RUN_OVERRIDES</code> JSON transport configurations.</li>
-            </ul>
-          </div>
-        </div>
-
-        <!-- Related Navigation -->
-        <nav class="related-nav" aria-label="Related Pages">
-          <a href="evals_internal_blueprint.html" class="nav-link-card">
-            <span class="nav-label">Previous Blueprint</span>
-            <span class="nav-title">Internal Eval Suites</span>
-          </a>
-          <a href="index.html" class="nav-link-card next">
-            <span class="nav-label">Next Blueprint</span>
-            <span class="nav-title">Dashboard Hub</span>
-          </a>
+    <div class="page-layout-grid reference-layout">
+      <aside class="sidebar reference-sidebar" aria-label="On this page">
+        <nav class="toc-container">
+          <p class="toc-title">On this page</p>
+          <a class="sidebar-source" href="https://github.com/iowarp/clio-coder/blob/main/docs/history/config-knobs-audit.md">Canonical Markdown<br>docs/history/config-knobs-audit.md</a>
+          <ul class="toc-list"></ul>
         </nav>
+      </aside>
+      <main class="reference-main" id="reference-content">
+        <article class="reference-prose glass-card">
+<blockquote>
+<p><strong>Visual blueprint:</strong> The source checkout includes the complete
+<a href="config_knobs_audit_blueprint.html">Config Knobs Audit (Historical Appendix) visual reference</a>.</p>
+</blockquote>
+<blockquote>
+<p>[!IMPORTANT]
+This document is a historical record of the point-in-time configuration knob audit conducted on 2026-07-03.
+It details the pre-consolidation state of the codebase before the <code>v0.2.9</code> release.
+For the current, active, and authoritative reference of environment variables, please refer to <a href="environment_blueprint.html">environment-variables.md</a>.</p>
+</blockquote>
+<blockquote>
+<p>[!NOTE]
+Pane settings were introduced after this audit and are intentionally absent from its tables. In the current schema, <code>panes.agents</code> and <code>panes.keepFailed</code> are retired and refused when newly authored; <code>clio-coder upgrade</code> removes them from an older settings file before strict validation. See <a href="configuration_blueprint.html">configuration-and-targets.md</a> for the active pane keys and their migration behavior.</p>
+</blockquote>
+<hr>
+<p>Point-in-time inventory of every tunable knob outside <code>settings.yaml</code>: environment variables, the compiled-in defaults behind them, and the CLI flags that bridge into them. Gathered 2026-07-03 by sweeping <code>src/</code> for <code>process.env</code> reads and cross-checking <code>scripts/</code>, <code>benchmarks/</code>, and <code>docs/</code>. Purpose: reason about which knobs earn their keep, which belong in <code>settings.yaml</code>, and which are dead.</p>
+<blockquote>
+<p><strong>Status: findings 1-5 fixed on 2026-07-03.</strong> Guardrail policy moved into settings, and the transitional guardrail environment overrides were removed on 2026-09-02. The run.ts/print.ts env bridges collapsed into one typed transport (<code>src/core/run-overrides.ts</code>, <code>CLIO_CODER_RUN_OVERRIDES</code>), retiring <code>CLIO_CODER_MAX_CONTEXT_TOKENS</code>, <code>CLIO_CODER_KV_CACHE_MODE</code>, and <code>CLIO_CODER_SAMPLING_OVERRIDES</code>; the dead <code>CLIO_CODER_NO_UPDATE_NOTIFIER</code> setters were deleted; and <a href="environment_blueprint.html">environment-variables.md</a> is now the maintained reference. The tables below preserve the pre-fix state.</p>
+</blockquote>
+<h2>The pattern, first</h2>
+<p>Most knobs come in a pair that looks redundant but is not:</p>
+<ul>
+<li><code>DEFAULT_ORCH_TURN_TOOL_CALL_BUDGET = 60</code> is the compiled-in default constant.</li>
+<li><code>CLIO_CODER_ORCH_MAX_TOOL_CALLS</code> is the env var that overrides it at runtime.</li>
+</ul>
+<p>Every runtime-tunable value needs both halves; the pair is one knob, not two. The real bloat questions are different ones: whether a knob should exist at all, whether env is the right surface for it (versus <code>settings.yaml</code> or a CLI flag), and whether its name says what it does. Those are called out in the findings at the bottom.</p>
+<h2>1. Operator tuning knobs (read by <code>src/</code>) (Pre-consolidated State)</h2>
+<table>
+<thead>
+<tr>
+<th>Env var</th>
+<th>Default</th>
+<th>Read at</th>
+<th>Controls</th>
+</tr>
+</thead>
+<tbody><tr>
+<td><code>CLIO_CODER_ORCH_MAX_TOOL_CALLS</code></td>
+<td>60 soft, hard = soft + 15</td>
+<td><code>src/engine/loop-guard.ts</code> → <code>src/entry/orchestrator.ts</code></td>
+<td>Orchestrator per-turn tool-call budget. Soft crossing blocks further calls this turn; hard ceiling interrupts the turn.</td>
+</tr>
+<tr>
+<td><code>CLIO_CODER_MAX_TOOL_CALLS</code></td>
+<td>50</td>
+<td><code>src/engine/loop-guard.ts</code> → <code>src/engine/worker-runtime.ts</code></td>
+<td>Worker lifetime tool-call cap for a dispatched run. Different axis than the orchestrator budget despite the near-identical name.</td>
+</tr>
+<tr>
+<td><code>CLIO_CODER_MAX_DISPATCH_RUNS</code></td>
+<td>1000</td>
+<td><code>src/domains/dispatch/state.ts</code></td>
+<td>Dispatch run-ledger retention cap.</td>
+</tr>
+<tr>
+<td><code>CLIO_CODER_MAX_CONTEXT_TOKENS</code></td>
+<td>unset</td>
+<td><code>src/domains/providers/runtime-resolution.ts</code></td>
+<td>Context-window override for local runtimes. Also set internally by <code>clio-coder run --max-context-tokens</code> (see §6).</td>
+</tr>
+<tr>
+<td><code>CLIO_CODER_KV_CACHE_MODE</code></td>
+<td>unset</td>
+<td>retired</td>
+<td>KV-cache quantization mode. Also set internally by the former <code>clio-coder run --kv-cache-mode</code> path.</td>
+</tr>
+<tr>
+<td><code>CLIO_CODER_SAMPLING_OVERRIDES</code></td>
+<td>unset</td>
+<td><code>src/engine/apis/sampling-overrides.ts</code></td>
+<td>JSON sampling-parameter override. Set internally by print-mode sampling flags.</td>
+</tr>
+<tr>
+<td><code>CLIO_CODER_READ_MAX_BYTES</code></td>
+<td>51200 (50 KB)</td>
+<td><code>src/tools/read.ts</code></td>
+<td>Per-call byte cap for the read tool.</td>
+</tr>
+<tr>
+<td><code>CLIO_CODER_OBSERVATION_TURN_BUDGET_BYTES</code></td>
+<td>196608 (192 KB)</td>
+<td><code>src/tools/observation.ts</code></td>
+<td>Shared per-turn byte pool across all observation tools.</td>
+</tr>
+<tr>
+<td><code>CLIO_CODER_RIGOR</code></td>
+<td>repo-derived</td>
+<td><code>src/domains/safety/rigor.ts</code>; read in orchestrator + dispatch</td>
+<td>Finish-contract evidence bar (<code>normal</code>/<code>high</code>), layered over the repo-derived default.</td>
+</tr>
+<tr>
+<td><code>CLIO_CODER_RESIDENCY</code></td>
+<td>managed</td>
+<td><code>src/engine/apis/residency.ts</code></td>
+<td>Set to <code>observe</code>/<code>off</code> to stop Clio managing model residency on local servers.</td>
+</tr>
+<tr>
+<td><code>CLIO_CODER_HOOK_BUDGET_MS</code></td>
+<td>per-phase built-ins</td>
+<td><code>src/domains/middleware/budget.ts</code></td>
+<td>Global middleware hook wall-clock budget.</td>
+</tr>
+<tr>
+<td><code>CLIO_CODER_HOOK_BUDGET_&lt;PHASE&gt;_MS</code></td>
+<td>per-phase built-ins</td>
+<td><code>src/domains/middleware/budget.ts</code></td>
+<td>Per-phase override, e.g. <code>CLIO_CODER_HOOK_BUDGET_TURN_END_MS</code>. Beats the global var.</td>
+</tr>
+<tr>
+<td><code>CLIO_CODER_HOOK_BUDGET_WARMUP_CALLS</code></td>
+<td>1</td>
+<td><code>src/domains/middleware/budget.ts</code></td>
+<td>Hook calls exempted from budget accounting at startup.</td>
+</tr>
+<tr>
+<td><code>CLIO_CODER_HOOK_BUDGET_WINDOW</code></td>
+<td>5</td>
+<td><code>src/domains/middleware/budget.ts</code></td>
+<td>Sliding-window size for steady-state hook budget warnings.</td>
+</tr>
+<tr>
+<td><code>CLIO_CODER_HOOK_BUDGET_THRESHOLD</code></td>
+<td>3</td>
+<td><code>src/domains/middleware/budget.ts</code></td>
+<td>Overruns within the window before a steady-state warning.</td>
+</tr>
+<tr>
+<td><code>CLIO_CODER_STATUS_STUCK_MS</code></td>
+<td>180000</td>
+<td><code>src/interactive/status/watchdog.ts</code></td>
+<td>Stuck-turn watchdog threshold.</td>
+</tr>
+<tr>
+<td><code>CLIO_CODER_SHUTDOWN_HOOK_MS</code></td>
+<td>500</td>
+<td><code>src/core/termination.ts</code></td>
+<td>Wall-clock budget per shutdown hook.</td>
+</tr>
+<tr>
+<td><code>CLIO_CODER_FORCE_COMPACT</code></td>
+<td>off</td>
+<td><code>src/interactive/chat-loop.ts</code></td>
+<td><code>1</code> forces compaction on the next turn regardless of threshold.</td>
+</tr>
+<tr>
+<td><code>CLIO_CODER_TRUST_PROJECT_RESOURCES</code></td>
+<td>off</td>
+<td><code>src/domains/resources/skills/loader.ts</code></td>
+<td><code>1</code> trusts project-local compatibility resources for execution.</td>
+</tr>
+<tr>
+<td><code>CLIO_CODER_ALLOW_EXTERNAL_FULL_ACCESS</code></td>
+<td>off</td>
+<td><code>src/engine/claude/subprocess-runtime.ts</code>, <code>src/engine/antigravity/subprocess-runtime.ts</code></td>
+<td><code>1</code> lets full-auto pass through to external CLI runtimes with their own full access.</td>
+</tr>
+<tr>
+<td><code>CLIO_CODER_SKILL_CATALOG_DIR</code></td>
+<td>unset</td>
+<td><code>src/domains/resources/skills/marketplace.ts</code>, <code>provenance-pin.ts</code></td>
+<td>Local skill-catalog directory override.</td>
+</tr>
+<tr>
+<td><code>CLIO_CODER_SKILL_MARKETPLACE_INDEX</code></td>
+<td>unset</td>
+<td><code>src/domains/resources/skills/marketplace.ts</code></td>
+<td>Marketplace index path override.</td>
+</tr>
+<tr>
+<td><code>CLIO_CODER_MODEL_CATALOG_DIRS</code></td>
+<td>unset</td>
+<td><code>src/domains/providers/knowledge-base-path.ts</code></td>
+<td>Extra model-catalog directories.</td>
+</tr>
+</tbody></table>
+<h2>2. Directory and install layout (Pre-consolidated State)</h2>
+<table>
+<thead>
+<tr>
+<th>Env var</th>
+<th>Default</th>
+<th>Read at</th>
+<th>Controls</th>
+</tr>
+</thead>
+<tbody><tr>
+<td><code>CLIO_CODER_HOME</code></td>
+<td>unset</td>
+<td><code>src/core/xdg.ts</code></td>
+<td>Single-tree install root; per-role vars below beat it.</td>
+</tr>
+<tr>
+<td><code>CLIO_CODER_CONFIG_DIR</code> / <code>CLIO_CODER_DATA_DIR</code> / <code>CLIO_CODER_STATE_DIR</code> / <code>CLIO_CODER_CACHE_DIR</code></td>
+<td>XDG platform defaults</td>
+<td><code>src/core/xdg.ts</code></td>
+<td>Per-role directory overrides.</td>
+</tr>
+<tr>
+<td><code>CLIO_CODER_BIN_DIR</code></td>
+<td><code>~/.local/bin</code></td>
+<td><code>src/cli/uninstall.ts</code></td>
+<td>Where the launcher symlink lives.</td>
+</tr>
+<tr>
+<td><code>CLIO_CODER_PACKAGE_ROOT</code></td>
+<td>auto-detected</td>
+<td><code>src/core/package-root.ts</code></td>
+<td>Package root override for bundled-asset resolution.</td>
+</tr>
+</tbody></table>
+<h2>3. Debug and trace toggles (Pre-consolidated State)</h2>
+<p>All default off; all enabled with <code>1</code>.</p>
+<table>
+<thead>
+<tr>
+<th>Env var</th>
+<th>Read at</th>
+<th>Controls</th>
+</tr>
+</thead>
+<tbody><tr>
+<td><code>CLIO_CODER_BUS_TRACE</code></td>
+<td><code>src/core/bus-trace.ts</code>, compaction</td>
+<td>Event-bus channel tracing to stderr.</td>
+</tr>
+<tr>
+<td><code>CLIO_CODER_TRACE_BOOT</code></td>
+<td><code>src/core/boot-trace.ts</code></td>
+<td>Boot-phase timing trace.</td>
+</tr>
+<tr>
+<td><code>CLIO_CODER_TIMING</code></td>
+<td><code>src/entry/orchestrator.ts</code></td>
+<td>Startup timing report to stdout.</td>
+</tr>
+<tr>
+<td><code>CLIO_CODER_DEBUG_SHUTDOWN</code></td>
+<td><code>src/core/domain-loader.ts</code>, <code>src/core/termination.ts</code></td>
+<td>Shutdown-path diagnostics.</td>
+</tr>
+<tr>
+<td><code>CLIO_CODER_HOOK_BUDGET_DEBUG</code></td>
+<td><code>src/domains/middleware/runtime.ts</code></td>
+<td>Per-overrun hook-budget diagnostics.</td>
+</tr>
+</tbody></table>
+<h2>4. Internal plumbing (Pre-consolidated State)</h2>
+<table>
+<thead>
+<tr>
+<th>Env var</th>
+<th>Set by</th>
+<th>Read at</th>
+<th>Purpose</th>
+</tr>
+</thead>
+<tbody><tr>
+<td><code>CLIO_CODER_INTERACTIVE</code></td>
+<td><code>src/cli/clio.ts</code></td>
+<td>orchestrator, context, dispatch, ACP adapter, bash-exec scrub list</td>
+<td>Marks the process as the interactive TUI. Scrubbed from bash-tool child env so nested clio invocations do not inherit it.</td>
+</tr>
+<tr>
+<td><code>CLIO_CODER_RESUME_SESSION_ID</code></td>
+<td>restart/resume flow</td>
+<td><code>src/entry/orchestrator.ts</code> (consumed then deleted)</td>
+<td>Hands the session id across a self-restart.</td>
+</tr>
+<tr>
+<td><code>CLIO_CODER_BOOTSTRAP_GENERATE_CHILD</code></td>
+<td>context bootstrap</td>
+<td><code>src/domains/context/extension.ts</code></td>
+<td>Marks the child process that generates CLIO-CODER.md so it skips recursion.</td>
+</tr>
+</tbody></table>
+<h2>5. Test-only (Pre-consolidated State)</h2>
+<table>
+<thead>
+<tr>
+<th>Env var</th>
+<th>Read at</th>
+<th>Purpose</th>
+</tr>
+</thead>
+<tbody><tr>
+<td><code>CLIO_CODER_WORKER_FAUX</code> (+ <code>_MODEL</code>, <code>_TEXT</code>, <code>_STOP_REASON</code>, <code>_ERROR_MESSAGE</code>)</td>
+<td><code>src/engine/ai.ts</code></td>
+<td>Fake worker model for tests.</td>
+</tr>
+<tr>
+<td><code>CLIO_CODER_TEST_UPGRADE_NO_NETWORK</code></td>
+<td><code>src/cli/upgrade.ts</code></td>
+<td>Skips npm install during upgrade tests.</td>
+</tr>
+<tr>
+<td><code>CLIO_CODER_REQUIRE_HOME_PREFIX</code></td>
+<td><code>src/core/init.ts</code></td>
+<td>Test guardrail: aborts if resolved dirs escape <code>CLIO_CODER_HOME</code>.</td>
+</tr>
+</tbody></table>
+<h2>6. CLI flags that bridge through env vars (Pre-consolidated State)</h2>
+<p><code>clio-coder run --max-context-tokens</code> and <code>--kv-cache-mode</code> (<code>src/cli/run.ts:143-234</code>) and the print-mode sampling flags (<code>src/cli/modes/print.ts:306-333</code>) do not plumb their values through function arguments. They mutate <code>process.env</code> (<code>CLIO_CODER_MAX_CONTEXT_TOKENS</code>, <code>CLIO_CODER_KV_CACHE_MODE</code>, <code>CLIO_CODER_SAMPLING_OVERRIDES</code>), run the command, then restore the previous value in a <code>finally</code>. The env var is the transport between the CLI layer and deep engine code.</p>
+<h2>7. Script- and benchmark-only vars (Pre-consolidated State)</h2>
+<table>
+<thead>
+<tr>
+<th>Env var(s)</th>
+<th>Used by</th>
+</tr>
+</thead>
+<tbody><tr>
+<td><code>CLIO_CODER_MAIN_TARGET/_MODEL/_URL/_RUNTIME/_THINKING</code>, <code>CLIO_CODER_WORKER_TARGET/_MODEL/_URL/_RUNTIME/_THINKING</code>, <code>CLIO_CODER_LLAMACPP_KEY</code>, <code>CLIO_CODER_LMSTUDIO_KEY</code></td>
+<td>Terminal-Bench installed agent (<code>benchmarks/community/terminal-bench/</code>), which renders its own settings.yaml inside the task container</td>
+</tr>
+<tr>
+<td><code>CLIO_CODER_AUTONOMY</code>, <code>CLIO_CODER_TASK_TIMEOUT</code></td>
+<td>terminal-bench agent wrapper (writes settings.yaml / its own timeout; not a Clio knob)</td>
+</tr>
+<tr>
+<td><code>CLIO_CODER_BIN</code>, <code>CLIO_CODER_ENTRY</code>, <code>CLIO_CODER_TARBALL_URL</code></td>
+<td>install/dev scripts</td>
+</tr>
+<tr>
+<td><code>CLIO_CODER_NO_UPDATE_NOTIFIER</code></td>
+<td><strong>Dead.</strong> Set by four benchmark harnesses, read by nothing in <code>src/</code>. Either an update notifier was removed and the setters were left behind, or the feature was never built.</td>
+</tr>
+</tbody></table>
+<h2>Findings and consolidation candidates</h2>
+<ol>
+<li><strong>Naming: <code>CLIO_CODER_MAX_TOOL_CALLS</code> vs <code>CLIO_CODER_ORCH_MAX_TOOL_CALLS</code>.</strong> These sounded like the same knob but governed different axes. Both transitional names were later removed in favor of the canonical settings paths.</li>
+<li><strong>Operator policy living in env instead of settings.</strong> Guard budgets, tool byte caps, and run retention are durable operator policy. Their canonical version 2 paths now live under <code>safety.limits</code> and <code>fleet</code>, with no environment precedence layer.</li>
+<li><strong>The env-bridge pattern (§6) is the real implementation bloat.</strong> Set-env / run / restore-env in <code>run.ts</code> and <code>print.ts</code> was collapsed into <code>CLIO_CODER_RUN_OVERRIDES</code>.</li>
+<li><strong>Undocumented knobs.</strong> Many operator knobs were undocumented in v0.2.7. Whatever survived the audit was consolidated into <a href="environment_blueprint.html">environment-variables.md</a>.</li>
+<li><strong>Dead reference.</strong> <code>CLIO_CODER_NO_UPDATE_NOTIFIER</code> (§7) was removed.</li>
+<li><strong>Resolved overlap: project resource trust.</strong> <code>integrations.projectResources.trustProjectImports</code> is now the only trust-policy surface; the transitional environment override was removed.</li>
+<li><strong>Healthy as-is.</strong> Directory overrides (§2), debug toggles (§3), internal plumbing (§4), and test-only vars (§5) are all conventional env usage and cheap to keep. The hook-budget family is five vars but one subsystem with sane defaults; fold into settings only if hook tuning becomes routine.</li>
+</ol>
+        </article>
+        <nav class="related-nav" aria-label="Adjacent references">
+          <a class="nav-link-card" href="validation_blueprint.html"><span class="nav-label">Previous</span><span class="nav-title">Clio Coder Scientific Validation Contracts</span></a>
+          <a class="nav-link-card next" href="release_cut_checklist_blueprint.html"><span class="nav-label">Next</span><span class="nav-title">v0.4.1 Release-Cut Checklist</span></a>
+        </nav>
+        <p class="reference-footer-note">Canonical content lives in the mapped Markdown page. This visual counterpart adds navigation without changing the contract.</p>
       </main>
     </div>
-
-    <footer>
-      <p>Clio Coder Config Audit Blueprint &bull; Version 0.2.9 &bull; Gnosis Research Center</p>
-    </footer>
+    <footer>Clio Coder documentation · source-aligned at v0.4.2</footer>
   </div>
-
   <script src="shared.js"></script>
-  <script>
-    const AUDITS = {
-      orch_calls: {
-        desc: "Orchestrator per-turn soft and hard tool call limits.",
-        rep: "CLIO_CODER_TURN_TOOL_CALL_BUDGET / guardrails.turnToolCallBudget"
-      },
-      max_context: {
-        desc: "Context-window override for local models.",
-        rep: "CLIO_CODER_RUN_OVERRIDES / clio-coder run --max-context-tokens"
-      },
-      sampling: {
-        desc: "JSON sampling-parameter overrides passed from CLI print modes.",
-        rep: "CLIO_CODER_RUN_OVERRIDES / sampling flags"
-      }
-    };
-
-    function updateAuditDetails() {
-      const val = document.getElementById("knobSelect").value;
-      const data = AUDITS[val];
-      document.getElementById("auditStatusDesc").innerText = data.desc;
-      document.getElementById("auditReplacement").innerText = data.rep;
-      if (window.initTableOfContents) window.initTableOfContents();
-    }
-
-    // Init
-    window.onload = () => {
-      updateAuditDetails();
-      window.updateAuditDetails = updateAuditDetails;
-    };
-  </script>
 </body>
 </html>

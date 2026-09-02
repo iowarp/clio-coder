@@ -1,7 +1,7 @@
 # Extensions, Resources, and Share Archives
 
-> [!TIP]
-> **Interactive Spec Available:** A source-checkout dashboard is available at [docs/html/extensions_blueprint.html](https://github.com/iowarp/clio-coder/blob/main/docs/html/extensions_blueprint.html).
+> **Visual blueprint:** The source checkout includes the complete
+> [Extensions, Resources, and Share Archives visual reference](https://github.com/iowarp/clio-coder/blob/main/docs/html/extensions_blueprint.html).
 
 Clio Coder has lightweight community-oriented resource packaging. Extensions are filesystem bundles that can contribute prompts, skills, agent recipes, and fleet contracts. Manifests may also reserve a theme root, but the runtime does not apply extension themes. Share archives are portable JSON files for moving project and user Clio resources between machines or collaborators.
 
