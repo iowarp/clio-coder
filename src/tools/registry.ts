@@ -2,6 +2,7 @@ import { createHash, randomBytes } from "node:crypto";
 import type { TSchema } from "typebox";
 import { isWorkerToolCallCapExceededReason } from "../core/guardrails.js";
 import { HEADLESS_PERMISSION_DENIED_MARKER } from "../core/headless-permission.js";
+import { normalizePromptHint } from "../core/prompt-hint.js";
 import {
 	evaluateSkillToolSurface,
 	type PendingSkillToolPolicy,
@@ -59,26 +60,16 @@ export interface ToolPromptHintVariants {
 
 export type ToolPromptHintMetadata = string | ToolPromptHintVariants;
 
-/** Collapse registry-authored guidance to one byte-stable line. */
-function normalizeToolPromptHint(text: string | undefined): string | undefined {
-	if (!text) return undefined;
-	const normalized = text
-		.replace(/[\r\n]+/gu, " ")
-		.replace(/\s+/gu, " ")
-		.trim();
-	return normalized.length > 0 ? normalized : undefined;
-}
-
 /** Resolve one tool's guidance for the exact prompt role being compiled. */
 export function resolveToolPromptHint(
 	hint: ToolPromptHintMetadata | undefined,
 	role: ToolPromptHintRole,
 ): string | undefined {
-	if (typeof hint === "string") return normalizeToolPromptHint(hint);
+	if (typeof hint === "string") return normalizePromptHint(hint);
 	if (!hint) return undefined;
 	const selected =
 		role === "session" ? hint.session : role === "bound-worker" ? (hint.boundWorker ?? hint.worker) : hint.worker;
-	return normalizeToolPromptHint(selected);
+	return normalizePromptHint(selected);
 }
 
 export interface ToolSourceInfo {

@@ -102,7 +102,7 @@ const TOOL_METADATA: Readonly<Record<string, ToolMetadata>> = {
 		costLatency: "local_fast",
 		promptHint: {
 			session:
-				'On an explicit pending skill request, first load exactly that skill with context(scope="skills", name=<skill>). Follow a [Marketplace] reminder\'s exact ask_user options; the harness performs any install. Recall needed [evicted ...] content with context(scope="recall", ref=...).',
+				'On an explicit pending skill request, first load exactly that skill with context(scope="skills", name=<skill>). Follow a [Marketplace] reminder\'s exact ask_user options. Recall needed [evicted ...] content with context(scope="recall", ref=...).',
 			worker:
 				'This worker has no operator skill-activation channel; do not load or suggest skills. Recall needed [evicted ...] content with context(scope="recall", ref=...).',
 			boundWorker:

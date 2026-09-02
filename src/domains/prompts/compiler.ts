@@ -1,5 +1,6 @@
 import { join } from "node:path";
 import { resolvePackageRoot } from "../../core/package-root.js";
+import { normalizePromptHint } from "../../core/prompt-hint.js";
 import type { ToolName } from "../../core/tool-names.js";
 import type { AutonomyLevel } from "../safety/autonomy.js";
 import { ceilChars } from "../session/context-accounting.js";
@@ -262,10 +263,7 @@ function canonicalToolPromptHints(
 	const normalized = entries
 		.map((entry) => ({
 			tool: entry.tool.trim(),
-			hint: entry.hint
-				.replace(/[\r\n]+/gu, " ")
-				.replace(/\s+/gu, " ")
-				.trim(),
+			hint: normalizePromptHint(entry.hint) ?? "",
 		}))
 		.filter((entry) => admitted.has(entry.tool) && entry.hint.length > 0)
 		.sort((a, b) => {
