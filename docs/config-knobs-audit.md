@@ -32,7 +32,7 @@ Every runtime-tunable value needs both halves; the pair is one knob, not two. Th
 |---|---|---|---|
 | `CLIO_CODER_ORCH_MAX_TOOL_CALLS` | 60 soft, hard = soft + 15 | `src/engine/loop-guard.ts` → `src/entry/orchestrator.ts` | Orchestrator per-turn tool-call budget. Soft crossing blocks further calls this turn; hard ceiling interrupts the turn. |
 | `CLIO_CODER_MAX_TOOL_CALLS` | 50 | `src/engine/loop-guard.ts` → `src/engine/worker-runtime.ts` | Worker lifetime tool-call cap for a dispatched run. Different axis than the orchestrator budget despite the near-identical name. |
-| `CLIO_CODER_MAX_RUNS` | 1000 | `src/domains/dispatch/state.ts` | Dispatch run-ledger retention cap. |
+| `CLIO_CODER_MAX_DISPATCH_RUNS` | 1000 | `src/domains/dispatch/state.ts` | Dispatch run-ledger retention cap. |
 | `CLIO_CODER_MAX_CONTEXT_TOKENS` | unset | `src/domains/providers/runtime-resolution.ts` | Context-window override for local runtimes. Also set internally by `clio-coder run --max-context-tokens` (see §6). |
 | `CLIO_CODER_KV_CACHE_MODE` | unset | retired | KV-cache quantization mode. Also set internally by the former `clio-coder run --kv-cache-mode` path. |
 | `CLIO_CODER_SAMPLING_OVERRIDES` | unset | `src/engine/apis/sampling-overrides.ts` | JSON sampling-parameter override. Set internally by print-mode sampling flags. |
@@ -48,7 +48,7 @@ Every runtime-tunable value needs both halves; the pair is one knob, not two. Th
 | `CLIO_CODER_STATUS_STUCK_MS` | 180000 | `src/interactive/status/watchdog.ts` | Stuck-turn watchdog threshold. |
 | `CLIO_CODER_SHUTDOWN_HOOK_MS` | 500 | `src/core/termination.ts` | Wall-clock budget per shutdown hook. |
 | `CLIO_CODER_FORCE_COMPACT` | off | `src/interactive/chat-loop.ts` | `1` forces compaction on the next turn regardless of threshold. |
-| `CLIO_CODER_TRUST_PROJECT_SKILLS` | off | `src/domains/resources/skills/loader.ts` | `1` trusts project-local skills for execution. |
+| `CLIO_CODER_TRUST_PROJECT_RESOURCES` | off | `src/domains/resources/skills/loader.ts` | `1` trusts project-local compatibility resources for execution. |
 | `CLIO_CODER_ALLOW_EXTERNAL_FULL_ACCESS` | off | `src/engine/claude/subprocess-runtime.ts`, `src/engine/antigravity/subprocess-runtime.ts` | `1` lets full-auto pass through to external CLI runtimes with their own full access. |
 | `CLIO_CODER_SKILL_CATALOG_DIR` | unset | `src/domains/resources/skills/marketplace.ts`, `provenance-pin.ts` | Local skill-catalog directory override. |
 | `CLIO_CODER_SKILL_MARKETPLACE_INDEX` | unset | `src/domains/resources/skills/marketplace.ts` | Marketplace index path override. |
@@ -107,9 +107,9 @@ All default off; all enabled with `1`.
 ## Findings and consolidation candidates
 
 1. **Naming: `CLIO_CODER_MAX_TOOL_CALLS` vs `CLIO_CODER_ORCH_MAX_TOOL_CALLS`.** These sound like the same knob but govern different axes (worker lifetime cap vs orchestrator per-turn budget). They were renamed to `CLIO_CODER_WORKER_TOOL_CALL_CAP` and `CLIO_CODER_TURN_TOOL_CALL_BUDGET`.
-2. **Operator policy living in env instead of settings.** The guard budgets, tool byte caps, and `CLIO_CODER_MAX_RUNS` are durable operator policy, the same species as `compaction.threshold` or `budget.sessionCeilingUsd`, which live in `settings.yaml`. These moved to a `guardrails:` settings section, keeping env as an emergency override.
+2. **Operator policy living in env instead of settings.** The guard budgets, tool byte caps, and `CLIO_CODER_MAX_DISPATCH_RUNS` are durable operator policy, the same species as `compaction.threshold` or `budget.sessionCeilingUsd`, which live in `settings.yaml`. These moved to a `guardrails:` settings section, keeping env as an emergency override.
 3. **The env-bridge pattern (§6) is the real implementation bloat.** Set-env / run / restore-env in `run.ts` and `print.ts` was collapsed into `CLIO_CODER_RUN_OVERRIDES`.
 4. **Undocumented knobs.** Many operator knobs were undocumented in v0.2.7. Whatever survived the audit was consolidated into [environment-variables.md](environment-variables.md).
 5. **Dead reference.** `CLIO_CODER_NO_UPDATE_NOTIFIER` (§7) was removed.
-6. **Overlap to check: skills trust.** `CLIO_CODER_TRUST_PROJECT_SKILLS` (env) and `skills.trustProjectCompatRoots` (settings) are adjacent trust decisions with different surfaces and different names. They govern different roots today, but one `skills.trust*` settings block with both switches would be easier to reason about.
+6. **Overlap to check: project resource trust.** `CLIO_CODER_TRUST_PROJECT_RESOURCES` (env) and `integrations.projectResources.trustProjectImports` (settings) express the same trust decision through two precedence layers.
 7. **Healthy as-is.** Directory overrides (§2), debug toggles (§3), internal plumbing (§4), and test-only vars (§5) are all conventional env usage and cheap to keep. The hook-budget family is five vars but one subsystem with sane defaults; fold into settings only if hook tuning becomes routine.

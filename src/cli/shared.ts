@@ -9,11 +9,9 @@ import { printError } from "./argv.js";
 // import sites unchanged.
 export {
 	columnWidths,
-	deprecatedFlagMessage,
 	extractGlobalFlags,
 	formatColumnRow,
 	formatColumns,
-	noteDeprecatedFlag,
 	parseFlags,
 	printError,
 	printHeader,

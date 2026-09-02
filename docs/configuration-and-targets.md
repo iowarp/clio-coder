@@ -881,8 +881,6 @@ clio-coder targets rename <old> <new>
 
 Without `--fleet-target` the default fleet target follows the orchestrator, which is the single-node case. Pass `--fleet-target <id>` to keep them apart when one node orchestrates and another runs the fleet. The fleet target is validated for fleet dispatch through the same check a fleet profile uses, so it can be a worker-only runtime such as `claude-sdk`, `claude-code`, or `antigravity-code`. Its model defaults to that target's own default rather than the orchestrator's, because a model id resolved against one target means nothing on another; `--fleet-model <id>` names it explicitly. `clio-coder configure --set-fleet-default` and `clio-coder targets profile` remain the routes for per-agent fleet routing.
 
-`--worker-target` and `--worker-model` are accepted as aliases of `--fleet-target` and `--fleet-model`, carried over from before the worker/fleet rename.
-
 ### Target-Profile Subcommands
 
 The command `clio-coder targets profile` supports several subcommands to manage fleet worker profiles and agent bindings:

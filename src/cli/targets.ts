@@ -24,7 +24,7 @@ import { registerBuiltinRuntimes } from "../domains/providers/runtimes/builtins.
 import type { CapabilityFlags } from "../domains/providers/types/capability-flags.js";
 import type { RuntimeTier } from "../domains/providers/types/runtime-descriptor.js";
 import { runConfigureCommand, runTargetRemove, runTargetRename } from "./configure.js";
-import { noteDeprecatedFlag, printError, printOk } from "./shared.js";
+import { printError, printOk } from "./shared.js";
 import { column, terminalColumns, truncate, wrapPlain } from "./text-layout.js";
 
 const HEADER: ReadonlyArray<string> = ["id", "tier", "runtime", "auth", "url", "model", "health", "caps", "notes"];
@@ -51,10 +51,6 @@ Usage:
   clio-coder targets convert <id> --runtime <runtimeId>
   clio-coder targets remove <id>
   clio-coder targets rename <old> <new>
-
-Aliases:
-  --worker-target and --worker-model are accepted for --fleet-target and
-  --fleet-model, carried over from before the worker/fleet rename.
 `;
 
 const USE_USAGE =
@@ -249,13 +245,11 @@ function parseUseArgs(args: ReadonlyArray<string>): UseArgs | null {
 			parsed.backgroundModel = need();
 			continue;
 		}
-		if (arg === "--fleet-model" || arg === "--worker-model") {
-			if (arg === "--worker-model") noteDeprecatedFlag(arg, "--fleet-model");
+		if (arg === "--fleet-model") {
 			parsed.workerModel = need();
 			continue;
 		}
-		if (arg === "--fleet-target" || arg === "--worker-target") {
-			if (arg === "--worker-target") noteDeprecatedFlag(arg, "--fleet-target");
+		if (arg === "--fleet-target") {
 			parsed.workerTarget = need();
 			continue;
 		}
