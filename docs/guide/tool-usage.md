@@ -613,7 +613,7 @@ Arguments:
 - `action` (required). `show`, `open`, `close`, or `list`.
 - `target` (show or close). For `show`, an agent id or run-id prefix. For
   `close`, a Clio-owned pane id, label, agent id, or `all`.
-- `preset` (open). One of `yazi`, `logs`, or `shell`.
+- `preset` (open). One of `files`, `logs`, or `shell`. Opening a preset whose pane is already open focuses that pane instead of splitting again.
 
 `show` focuses a live dispatched run in the watch pane. `open` accepts only the
 fixed preset enum. Arbitrary argv is operator-only through `/panes open` and is
