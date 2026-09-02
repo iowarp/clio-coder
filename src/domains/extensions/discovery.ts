@@ -1,4 +1,4 @@
-import { existsSync, readdirSync, readFileSync, realpathSync, statSync } from "node:fs";
+import { type Dirent, existsSync, lstatSync, readdirSync, readFileSync, realpathSync, statSync } from "node:fs";
 import path from "node:path";
 import { parse as parseYaml, stringify as stringifyYaml } from "yaml";
 import { evaluateClioCompatibility } from "./compatibility.js";
@@ -145,10 +145,26 @@ function validateResourceTree(
 			const candidate = path.join(directory, entry.name);
 			if (entry.isSymbolicLink()) {
 				try {
-					if (!contained(canonicalRoot, realpathSync(candidate))) {
+					const canonicalTarget = realpathSync(candidate);
+					if (!contained(canonicalRoot, canonicalTarget)) {
 						diagnostics.push({
 							type: "error",
 							message: `resources.${kind} contains an escaping symbolic link`,
+							path: candidate,
+						});
+						continue;
+					}
+					const targetStat = statSync(candidate);
+					if (!targetStat.isDirectory() && !targetStat.isFile()) {
+						diagnostics.push({
+							type: "error",
+							message: `resources.${kind} contains a symbolic link to an unsupported filesystem entry`,
+							path: candidate,
+						});
+					} else if (targetStat.isFile() && targetStat.nlink !== 1) {
+						diagnostics.push({
+							type: "error",
+							message: `resources.${kind} contains a symbolic link to a hard-linked file`,
 							path: candidate,
 						});
 					}
@@ -161,6 +177,28 @@ function validateResourceTree(
 				}
 			} else if (entry.isDirectory()) {
 				pending.push(candidate);
+			} else if (entry.isFile()) {
+				try {
+					if (lstatSync(candidate).nlink !== 1) {
+						diagnostics.push({
+							type: "error",
+							message: `resources.${kind} contains a hard-linked file`,
+							path: candidate,
+						});
+					}
+				} catch (error) {
+					diagnostics.push({
+						type: "error",
+						message: `resources.${kind} entry could not be inspected: ${error instanceof Error ? error.message : String(error)}`,
+						path: candidate,
+					});
+				}
+			} else {
+				diagnostics.push({
+					type: "error",
+					message: `resources.${kind} contains an unsupported filesystem entry`,
+					path: candidate,
+				});
 			}
 		}
 	}
@@ -340,7 +378,24 @@ export function discoverExtensionPackages(root: string): ExtensionCandidate[] {
 	if (!existsSync(full)) {
 		return [{ path: full, valid: false, diagnostics: [{ type: "error", message: "path does not exist", path: full }] }];
 	}
-	const stat = statSync(full);
+	let stat: ReturnType<typeof statSync>;
+	try {
+		stat = statSync(full);
+	} catch (error) {
+		return [
+			{
+				path: full,
+				valid: false,
+				diagnostics: [
+					{
+						type: "error",
+						message: `extension path could not be inspected: ${error instanceof Error ? error.message : String(error)}`,
+						path: full,
+					},
+				],
+			},
+		];
+	}
 	if (!stat.isDirectory()) {
 		return [
 			{
@@ -350,12 +405,48 @@ export function discoverExtensionPackages(root: string): ExtensionCandidate[] {
 			},
 		];
 	}
-	const canonicalFull = realpathSync(full);
+	let canonicalFull: string;
+	try {
+		canonicalFull = realpathSync(full);
+	} catch (error) {
+		return [
+			{
+				path: full,
+				valid: false,
+				diagnostics: [
+					{
+						type: "error",
+						message: `extension path could not be canonicalized: ${error instanceof Error ? error.message : String(error)}`,
+						path: full,
+					},
+				],
+			},
+		];
+	}
 	const direct = loadManifestFromRoot(canonicalFull);
 	if (direct.valid || direct.manifestPath) return [direct];
 	const candidates: ExtensionCandidate[] = [];
+	const discoveryFailures: ExtensionCandidate[] = [];
 	const spellingsByCanonicalRoot = new Map<string, string[]>();
-	for (const entry of readdirSync(canonicalFull, { withFileTypes: true }).sort(compareNames)) {
+	let entries: Dirent<string>[];
+	try {
+		entries = readdirSync(canonicalFull, { withFileTypes: true, encoding: "utf8" });
+	} catch (error) {
+		return [
+			{
+				path: canonicalFull,
+				valid: false,
+				diagnostics: [
+					{
+						type: "error",
+						message: `extension directory could not be read: ${error instanceof Error ? error.message : String(error)}`,
+						path: canonicalFull,
+					},
+				],
+			},
+		];
+	}
+	for (const entry of entries.sort(compareNames)) {
 		if (entry.name.startsWith(".")) continue;
 		const child = path.join(canonicalFull, entry.name);
 		try {
@@ -364,8 +455,18 @@ export function discoverExtensionPackages(root: string): ExtensionCandidate[] {
 			const spellings = spellingsByCanonicalRoot.get(canonicalChild) ?? [];
 			spellings.push(child);
 			spellingsByCanonicalRoot.set(canonicalChild, spellings);
-		} catch {
-			// An unresolved child cannot be an extension package.
+		} catch (error) {
+			discoveryFailures.push({
+				path: child,
+				valid: false,
+				diagnostics: [
+					{
+						type: "error",
+						message: `extension child could not be canonicalized: ${error instanceof Error ? error.message : String(error)}`,
+						path: child,
+					},
+				],
+			});
 		}
 	}
 	for (const canonicalChild of [...spellingsByCanonicalRoot.keys()].sort()) {
@@ -380,7 +481,10 @@ export function discoverExtensionPackages(root: string): ExtensionCandidate[] {
 		}
 		if (loaded.valid || loaded.manifestPath) candidates.push(loaded);
 	}
-	const discovered = candidates.length > 0 ? candidates : [direct];
+	const discovered = [...candidates, ...discoveryFailures].sort((a, b) =>
+		a.path < b.path ? -1 : a.path > b.path ? 1 : 0,
+	);
+	if (discovered.length === 0) discovered.push(direct);
 	const ids = new Map<string, ExtensionCandidate[]>();
 	for (const candidate of discovered) {
 		const id = candidate.manifest?.id;

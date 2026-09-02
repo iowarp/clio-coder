@@ -9,6 +9,7 @@ All notable changes to Clio Coder are documented in this file. The format follow
 
 ### Fixed
 - Extension manifests once again permit the documented omission of `resources` while strictly validating any value that is present. Upgrade now backs up and atomically adds verified content digests to valid pre-digest install records without changing their source, timestamp, or disabled state; invalid legacy trees remain visible but inactive. Corrupt extension state stays fail-closed but no longer traps operators: forced reinstall and removal preserve corrupt state and unverifiable package bytes before recovery. Share-imported extension packages now pass whole-tree preflight and the canonical transactional installer, so a successful import always has a verified install record before resources activate.
+- Extension admission now rejects malformed manifests, invalid or changed installed trees, escaping links, hard-linked files, and special resource entries before they can contribute resources or hooks; canonical package discovery deduplicates aliases while retaining failures as deterministic diagnostics.
 
 ## 0.4.1 - 2026-09-01
 
