@@ -1,5 +1,17 @@
 import { createHash } from "node:crypto";
-import { existsSync, lstatSync, readdirSync, readFileSync, realpathSync, type Stats, statSync } from "node:fs";
+import {
+	existsSync,
+	lstatSync,
+	mkdirSync,
+	mkdtempSync,
+	readdirSync,
+	readFileSync,
+	realpathSync,
+	rmSync,
+	type Stats,
+	statSync,
+} from "node:fs";
+import { tmpdir } from "node:os";
 import path from "node:path";
 import { parse as parseYaml, stringify as stringifyYaml } from "yaml";
 import { type ClioSettings, readSettings, settingsPath, updateSettings, validateSettings } from "../../core/config.js";
@@ -18,6 +30,10 @@ import {
 	parseAgentRecipeSchema,
 	parseFleetContract,
 } from "../agents/index.js";
+import { loadManifestFromRoot } from "../extensions/discovery.js";
+import { extensionContentDigest } from "../extensions/integrity.js";
+import { extensionBaseDir, installExtension, listInstalledExtensions } from "../extensions/state.js";
+import type { ExtensionScope } from "../extensions/types.js";
 import { migrateSettingsV1Document } from "../lifecycle/migrations/2026-09-01-settings-v2.js";
 
 export type ShareScope = "project" | "user";
@@ -331,7 +347,14 @@ export function createShareArchive(options: ShareExportOptions = {}): ClioShareA
 		for (const scope of scopes) {
 			const root =
 				scope === "user" ? path.join(clioConfigDir(), "extensions") : path.join(cwd, ".clio-coder", "extensions");
-			addTree(files, "extension", scope, root, `${scope}/extensions`, (rel) => path.basename(rel) !== "state.json");
+			addTree(
+				files,
+				"extension",
+				scope,
+				root,
+				`${scope}/extensions`,
+				(relativePath) => !relativePath.split("/")[0]?.startsWith(".") && path.basename(relativePath) !== "state.json",
+			);
 		}
 	}
 	if (includes.includeSettings) {
@@ -453,6 +476,15 @@ interface ShareImportPreparedPlan {
 	actions: ShareImportAction[];
 	diagnostics: ShareDiagnostic[];
 	targets: ShareImportPreparedTarget[];
+	extensionPackages: ShareImportPreparedExtensionPackage[];
+}
+
+interface ShareImportPreparedExtensionPackage {
+	id: string;
+	scope: ExtensionScope;
+	files: Array<{ relativePath: string; buffer: Buffer }>;
+	contentDigest: string;
+	install: boolean;
 }
 
 function configDirPath(): string {
@@ -608,6 +640,91 @@ function preflightImportTargets(
 	return { targets, diagnostics };
 }
 
+function withStagedExtensionPackage<T>(
+	input: { id: string; files: ReadonlyArray<{ relativePath: string; buffer: Buffer }> },
+	fn: (root: string) => T,
+): T {
+	const stagingParent = mkdtempSync(path.join(tmpdir(), "clio-share-extension-"));
+	const root = path.join(stagingParent, input.id);
+	try {
+		mkdirSync(root, { recursive: true });
+		for (const file of input.files) safeResourceWrite(path.join(root, file.relativePath), file.buffer);
+		return fn(root);
+	} finally {
+		rmSync(stagingParent, { recursive: true, force: true });
+	}
+}
+
+function prepareExtensionPackages(
+	targets: ReadonlyArray<ShareImportPreparedTarget>,
+	options: ShareImportOptions,
+): { packages: ShareImportPreparedExtensionPackage[]; diagnostics: ShareDiagnostic[] } {
+	const diagnostics: ShareDiagnostic[] = [];
+	const grouped = new Map<string, Omit<ShareImportPreparedExtensionPackage, "contentDigest" | "install">>();
+	for (const target of targets) {
+		if (target.entry.type !== "extension") continue;
+		const segments = relativePathSegments(target.entry.relativePath);
+		const id = segments?.[0];
+		const packagePath = segments?.slice(1).join("/");
+		if (!id || !packagePath) {
+			diagnostics.push({
+				type: "error",
+				message: `extension archive path must be <id>/<package-path>: ${pathDiagnostic(target.entry)}`,
+				path: target.entry.relativePath,
+			});
+			continue;
+		}
+		const scope = target.scope as ExtensionScope;
+		const key = `${scope}\0${id}`;
+		const group = grouped.get(key) ?? { id, scope, files: [] };
+		if (group.files.some((file) => file.relativePath === packagePath)) {
+			diagnostics.push({ type: "error", message: `duplicate extension archive path ${target.entry.relativePath}` });
+			continue;
+		}
+		group.files.push({ relativePath: packagePath, buffer: target.buffer });
+		grouped.set(key, group);
+	}
+
+	const packages: ShareImportPreparedExtensionPackage[] = [];
+	for (const group of [...grouped.values()].sort((a, b) => `${a.scope}/${a.id}`.localeCompare(`${b.scope}/${b.id}`))) {
+		try {
+			const contentDigest = withStagedExtensionPackage(group, (root) => {
+				const candidate = loadManifestFromRoot(root);
+				if (!candidate.valid || !candidate.manifest) {
+					throw new Error(candidate.diagnostics.map((diagnostic) => diagnostic.message).join("; ") || "manifest is invalid");
+				}
+				if (candidate.manifest.id !== group.id) {
+					throw new Error(`manifest id ${candidate.manifest.id} does not match archive package ${group.id}`);
+				}
+				return extensionContentDigest(root);
+			});
+			const cwd = path.resolve(options.cwd ?? process.cwd());
+			const targetRoot = path.join(extensionBaseDir(group.scope, cwd), group.id);
+			const existing = listInstalledExtensions(cwd, { scope: group.scope, all: true }).find(
+				(extension) => extension.id === group.id && extension.rootPath === targetRoot,
+			);
+			const alreadyVerified =
+				existing?.valid === true &&
+				existing.installedContentDigest === contentDigest &&
+				existing.observedContentDigest === contentDigest;
+			if (existsSync(targetRoot) && !alreadyVerified && !options.force) {
+				diagnostics.push({
+					type: "conflict",
+					message: `extension ${group.id} is not already installed with the archive's verified digest; re-run with --force to use the canonical installer`,
+					path: targetRoot,
+				});
+			}
+			packages.push({ ...group, contentDigest, install: !alreadyVerified });
+		} catch (error) {
+			diagnostics.push({
+				type: "error",
+				message: `extension ${group.id} in share archive is invalid: ${error instanceof Error ? error.message : String(error)}`,
+			});
+		}
+	}
+	return { packages, diagnostics };
+}
+
 function versionDiagnostics(archive: ClioShareArchive): ShareDiagnostic[] {
 	const current = readClioVersion();
 	const [curMajor, curMinor] = current.split(".");
@@ -657,13 +774,20 @@ function prepareShareImport(filePath: string, options: ShareImportOptions = {}):
 			actions: [],
 			diagnostics: [{ type: "error", message: err instanceof Error ? err.message : String(err), path: filePath }],
 			targets: [],
+			extensionPackages: [],
 		};
 	}
 	const diagnostics: ShareDiagnostic[] = [...versionDiagnostics(archive)];
 	const actions: ShareImportAction[] = [];
 	const preflight = preflightImportTargets(archive, options);
 	if (preflight.diagnostics.length > 0) {
-		return { archive, actions: [], diagnostics: [...diagnostics, ...preflight.diagnostics], targets: [] };
+		return {
+			archive,
+			actions: [],
+			diagnostics: [...diagnostics, ...preflight.diagnostics],
+			targets: [],
+			extensionPackages: [],
+		};
 	}
 	for (const targetInfo of preflight.targets) {
 		const { entry, target, scope, buffer } = targetInfo;
@@ -706,7 +830,9 @@ function prepareShareImport(filePath: string, options: ShareImportOptions = {}):
 		}
 		actions.push({ action: "write", type: entry.type, scope, path: target });
 	}
-	return { archive, actions, diagnostics, targets: preflight.targets };
+	const extensions = prepareExtensionPackages(preflight.targets, options);
+	diagnostics.push(...extensions.diagnostics);
+	return { archive, actions, diagnostics, targets: preflight.targets, extensionPackages: extensions.packages };
 }
 
 function publicImportPlan(prepared: ShareImportPreparedPlan, recovery?: ShareImportRecovery): ShareImportPlan {
@@ -750,10 +876,41 @@ export function importShareArchive(filePath: string, options: ShareImportOptions
 	};
 	let failed: string | undefined;
 	try {
+		for (const extensionPackage of prepared.extensionPackages) {
+			if (!extensionPackage.install) continue;
+			const cwd = path.resolve(options.cwd ?? process.cwd());
+			failed = path.join(extensionBaseDir(extensionPackage.scope, cwd), extensionPackage.id);
+			const result = withStagedExtensionPackage(extensionPackage, (root) =>
+				installExtension(root, {
+					cwd,
+					scope: extensionPackage.scope,
+					...(options.force !== undefined ? { force: options.force } : {}),
+				}),
+			);
+			for (const backup of [result.recovery?.stateBackup, result.recovery?.packageBackup]) {
+				if (backup && !backups.includes(backup)) backups.push(backup);
+			}
+			const errors = result.diagnostics.filter((diagnostic) => diagnostic.type === "error");
+			if (!result.extension || errors.length > 0) {
+				throw new Error(errors.map((diagnostic) => diagnostic.message).join("; ") || "canonical install failed");
+			}
+			if (result.extension.installedContentDigest !== extensionPackage.contentDigest) {
+				throw new Error(`canonical install digest mismatch for extension ${extensionPackage.id}`);
+			}
+			for (const diagnostic of result.diagnostics) {
+				prepared.diagnostics.push({
+					type: "warning",
+					message: diagnostic.message,
+					...(diagnostic.path ? { path: diagnostic.path } : {}),
+				});
+			}
+			if (!written.includes(result.extension.rootPath)) written.push(result.extension.rootPath);
+			failed = undefined;
+		}
 		for (let index = 0; index < prepared.targets.length; index += 1) {
 			const targetInfo = prepared.targets[index];
 			const action = prepared.actions[index];
-			if (!targetInfo || !action || action.action === "skip") continue;
+			if (!targetInfo || !action || action.action === "skip" || targetInfo.entry.type === "extension") continue;
 			failed = targetInfo.target;
 			if (targetInfo.entry.type === "settings") {
 				const path = mergeSettingsFragment(targetInfo.buffer);
@@ -768,7 +925,7 @@ export function importShareArchive(filePath: string, options: ShareImportOptions
 			);
 			failed = undefined;
 		}
-		return plan;
+		return publicImportPlan(prepared, backups.length > 0 ? { written, backups } : undefined);
 	} catch (err) {
 		if (failed) {
 			const expectedBackup = safeResourceBackupPath(failed);
@@ -787,7 +944,7 @@ export function importShareArchive(filePath: string, options: ShareImportOptions
 					...prepared.diagnostics,
 					{
 						type: "error",
-						message: `share import failed while writing${failed ? ` ${failed}` : ""}: ${reason}`,
+						message: `share import failed${failed ? ` while importing ${failed}` : ""}: ${reason}`,
 						...(failed ? { path: failed } : {}),
 					},
 				],
