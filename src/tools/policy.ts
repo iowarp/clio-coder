@@ -105,7 +105,10 @@ export interface BuiltinToolPolicyOptions {
 	includeNetworkTools?: boolean;
 }
 
-function validateBuiltinToolPolicy(specs: ReadonlyArray<ToolSpec>, options: BuiltinToolPolicyOptions = {}): string[] {
+export function validateBuiltinToolPolicy(
+	specs: ReadonlyArray<ToolSpec>,
+	options: BuiltinToolPolicyOptions = {},
+): string[] {
 	const errors: string[] = [];
 	const registered = new Map<ToolName, ToolSpec>();
 
