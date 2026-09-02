@@ -2131,6 +2131,7 @@ export async function bootOrchestrator(options: BootOptions = {}): Promise<BootR
 		...(initialNotices.length > 0 ? { initialNotices } : {}),
 		...(resources ? { resources } : {}),
 		...(extensions ? { extensions } : {}),
+		reloadExtensions: () => extensionReload.reload(),
 		...(interop ? { interop } : {}),
 		...(share ? { share } : {}),
 		...(mux ? { mux } : {}),
