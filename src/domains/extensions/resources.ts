@@ -1,4 +1,4 @@
-import { lstatSync, realpathSync } from "node:fs";
+import { realpathSync, statSync } from "node:fs";
 import path from "node:path";
 import { listInstalledExtensions } from "./state.js";
 import type { ExtensionResourceKind, ExtensionResourceRoot } from "./types.js";
@@ -20,8 +20,8 @@ export function extensionResourcePath(rootPath: string, resourcePath: string): s
 		) {
 			return null;
 		}
-		if (!lstatSync(full).isDirectory()) return null;
-		return full;
+		if (!statSync(fullReal).isDirectory()) return null;
+		return fullReal;
 	} catch {
 		return null;
 	}

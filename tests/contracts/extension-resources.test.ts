@@ -1,14 +1,19 @@
-import { deepStrictEqual, ok, strictEqual } from "node:assert/strict";
+import { deepStrictEqual, notStrictEqual, ok, strictEqual, throws } from "node:assert/strict";
+import { spawnSync } from "node:child_process";
 import {
 	existsSync,
+	linkSync,
+	lstatSync,
 	mkdirSync,
 	mkdtempSync,
 	readFileSync,
 	realpathSync,
+	renameSync,
 	rmSync,
 	symlinkSync,
 	writeFileSync,
 } from "node:fs";
+import { createRequire, syncBuiltinESMExports } from "node:module";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { afterEach, describe, it } from "node:test";
@@ -18,6 +23,7 @@ import {
 	loadManifestFromRoot,
 	parseExtensionManifest,
 } from "../../src/domains/extensions/discovery.js";
+import { extensionContentDigest } from "../../src/domains/extensions/integrity.js";
 import { enabledExtensionResourceRoots, extensionResourcePath } from "../../src/domains/extensions/resources.js";
 import {
 	installExtension,
@@ -170,6 +176,21 @@ describe("extension resource boundary", () => {
 		);
 	});
 
+	it("retains deterministic diagnostics for roots that cannot be canonicalized", () => {
+		const parent = scratch();
+		const brokenAlias = join(parent, "broken-alias");
+		symlinkSync(join(parent, "missing-package"), brokenAlias, "dir");
+
+		const first = discoverExtensionPackages(parent);
+		const second = discoverExtensionPackages(parent);
+
+		deepStrictEqual(second, first);
+		strictEqual(first.length, 1);
+		strictEqual(first[0]?.path, brokenAlias);
+		strictEqual(first[0]?.valid, false);
+		ok(first[0]?.diagnostics.some((diagnostic) => diagnostic.message.includes("could not be canonicalized")));
+	});
+
 	it("still rejects the same id from distinct canonical roots", () => {
 		const parent = scratch();
 		writeManifest(join(parent, "one"), "duplicate-id");
@@ -188,12 +209,168 @@ describe("extension resource boundary", () => {
 		const root = scratch();
 		const outside = scratch();
 		mkdirSync(join(root, "prompts"));
+		mkdirSync(join(root, "internal-prompts"));
 		mkdirSync(join(outside, "external"));
 		strictEqual(extensionResourcePath(root, "prompts"), join(root, "prompts"));
+		symlinkSync("internal-prompts", join(root, "internal-link"), "dir");
+		strictEqual(extensionResourcePath(root, "internal-link"), realpathSync(join(root, "internal-prompts")));
 		strictEqual(extensionResourcePath(root, "../outside"), null);
 		symlinkSync(join(outside, "external"), join(root, "linked"), "dir");
 		strictEqual(extensionResourcePath(root, "linked"), null);
 		strictEqual(extensionResourcePath(root, "."), null);
+	});
+
+	it("rejects hard-linked files from package validity and content identity", () => {
+		const root = scratch();
+		const outside = scratch();
+		writeManifest(root, "hardlink-package", "resources:\n  prompts: prompts\n");
+		mkdirSync(join(root, "prompts"));
+		writeFileSync(join(outside, "shared.md"), "shared bytes\n");
+		linkSync(join(outside, "shared.md"), join(root, "prompts", "shared.md"));
+
+		const candidate = loadManifestFromRoot(root);
+		strictEqual(candidate.valid, false);
+		ok(candidate.diagnostics.some((diagnostic) => diagnostic.message.includes("hard-linked file")));
+		throws(() => extensionContentDigest(root), /hard-linked file/u);
+	});
+
+	it("frames file names, payloads, and symbolic-link targets without ambiguity", () => {
+		const first = scratch();
+		const second = scratch();
+		writeManifest(first, "framing-proof");
+		writeManifest(second, "framing-proof");
+		writeFileSync(join(first, "ab"), "c");
+		writeFileSync(join(second, "a"), "bc");
+		notStrictEqual(extensionContentDigest(first), extensionContentDigest(second));
+
+		rmSync(join(first, "ab"));
+		rmSync(join(second, "a"));
+		writeFileSync(join(first, "target"), "same target\n");
+		writeFileSync(join(second, "target"), "same target\n");
+		symlinkSync("target", join(first, "alias"));
+		symlinkSync("./target", join(second, "alias"));
+		notStrictEqual(extensionContentDigest(first), extensionContentDigest(second));
+	});
+
+	it("rejects a symbolic link in place of the package root", () => {
+		const actualRoot = scratch();
+		const aliasParent = scratch();
+		writeManifest(actualRoot, "linked-root");
+		const alias = join(aliasParent, "package-alias");
+		symlinkSync(actualRoot, alias, "dir");
+
+		throws(() => extensionContentDigest(alias), /extension root must be a directory, not a symbolic link/u);
+	});
+
+	it("does not follow a file swapped to a symlink between inspection and read", () => {
+		const root = scratch();
+		const outside = scratch();
+		writeManifest(root, "digest-race");
+		const victim = join(root, "payload.txt");
+		const parked = join(root, "payload.parked");
+		const outsideFile = join(outside, "outside.txt");
+		writeFileSync(victim, "installed bytes\n");
+		writeFileSync(outsideFile, "outside bytes\n");
+		const expected = extensionContentDigest(root);
+
+		const require = createRequire(import.meta.url);
+		const fs = require("node:fs") as Record<string, unknown>;
+		const originalReadFileSync = fs.readFileSync as typeof readFileSync;
+		fs.readFileSync = ((file: Parameters<typeof readFileSync>[0], options?: unknown) => {
+			if (file === victim) {
+				renameSync(victim, parked);
+				symlinkSync(outsideFile, victim);
+			}
+			return originalReadFileSync(file, options as never);
+		}) as typeof readFileSync;
+		syncBuiltinESMExports();
+		try {
+			strictEqual(extensionContentDigest(root), expected);
+			strictEqual(lstatSync(victim).isFile(), true);
+		} finally {
+			fs.readFileSync = originalReadFileSync;
+			syncBuiltinESMExports();
+			if (lstatSync(victim, { throwIfNoEntry: false })?.isSymbolicLink()) rmSync(victim);
+			if (lstatSync(parked, { throwIfNoEntry: false })?.isFile()) renameSync(parked, victim);
+		}
+	});
+
+	it("rejects a symbolic link swapped outside the package while being hashed", () => {
+		const root = scratch();
+		const outside = scratch();
+		writeManifest(root, "symlink-race");
+		const internalTarget = join(root, "internal.txt");
+		const outsideTarget = join(outside, "outside.txt");
+		const link = join(root, "alias.txt");
+		writeFileSync(internalTarget, "internal bytes\n");
+		writeFileSync(outsideTarget, "outside bytes\n");
+		symlinkSync("internal.txt", link);
+
+		const require = createRequire(import.meta.url);
+		const fs = require("node:fs") as Record<string, unknown>;
+		const originalReadlinkSync = fs.readlinkSync as (path: string) => string;
+		fs.readlinkSync = ((file: string) => {
+			if (file === link) {
+				rmSync(link);
+				symlinkSync(outsideTarget, link);
+			}
+			return originalReadlinkSync(file);
+		}) as typeof originalReadlinkSync;
+		syncBuiltinESMExports();
+		try {
+			throws(() => extensionContentDigest(root), /symbolic link (?:changed|escapes)/u);
+		} finally {
+			fs.readlinkSync = originalReadlinkSync;
+			syncBuiltinESMExports();
+			rmSync(link, { force: true });
+			symlinkSync("internal.txt", link);
+		}
+	});
+
+	it("rejects a directory swapped outside the package while being hashed", () => {
+		const root = scratch();
+		const outside = scratch();
+		writeManifest(root, "directory-race");
+		const directory = join(root, "tree");
+		const parked = join(root, "tree.parked");
+		mkdirSync(directory);
+		writeFileSync(join(directory, "inside.txt"), "inside bytes\n");
+		writeFileSync(join(outside, "outside.txt"), "outside bytes\n");
+
+		const require = createRequire(import.meta.url);
+		const fs = require("node:fs") as Record<string, unknown>;
+		const originalReaddirSync = fs.readdirSync as (path: string) => string[];
+		fs.readdirSync = ((path: string) => {
+			if (path === directory) {
+				renameSync(directory, parked);
+				symlinkSync(outside, directory, "dir");
+			}
+			return originalReaddirSync(path);
+		}) as typeof originalReaddirSync;
+		syncBuiltinESMExports();
+		try {
+			throws(() => extensionContentDigest(root), /extension directory (?:changed|escapes)/u);
+		} finally {
+			fs.readdirSync = originalReaddirSync;
+			syncBuiltinESMExports();
+			rmSync(directory, { recursive: true, force: true });
+			renameSync(parked, directory);
+		}
+	});
+
+	it("rejects special filesystem entries from declared resource trees", { skip: process.platform === "win32" }, () => {
+		const root = scratch();
+		writeManifest(root, "special-entry", "resources:\n  prompts: prompts\n");
+		mkdirSync(join(root, "prompts"));
+		const fifoPath = join(root, "prompts", "resource.fifo");
+		const created = spawnSync("mkfifo", [fifoPath]);
+		strictEqual(created.status, 0, created.error?.message);
+		strictEqual(lstatSync(fifoPath).isFIFO(), true);
+
+		const candidate = loadManifestFromRoot(root);
+		strictEqual(candidate.valid, false);
+		ok(candidate.diagnostics.some((diagnostic) => diagnostic.message.includes("unsupported filesystem entry")));
+		throws(() => extensionContentDigest(root), /unsupported filesystem entry/u);
 	});
 
 	it("keeps a package with an invalid resource tree visible but inactive", () => {
@@ -254,6 +431,44 @@ describe("extension resource boundary", () => {
 		strictEqual(preserved?.loadable, true);
 		strictEqual(preserved?.installedContentDigest, originalDigest);
 		strictEqual(preserved?.observedContentDigest, originalDigest);
+	});
+
+	it("restores the previous package when the install-state commit fails", () => {
+		const project = scratch();
+		const original = scratch();
+		const replacement = scratch();
+		writeManifest(original, "state-rollback");
+		writeFileSync(join(original, "marker.txt"), "original\n");
+		const first = installExtension(original, { cwd: project, scope: "project" });
+		strictEqual(first.extension?.loadable, true);
+		const originalDigest = first.extension?.installedContentDigest;
+
+		writeManifest(replacement, "state-rollback");
+		writeFileSync(join(replacement, "marker.txt"), "replacement\n");
+		const statePath = join(project, ".clio-coder", "extensions", "state.json");
+		const require = createRequire(import.meta.url);
+		const fs = require("node:fs") as Record<string, unknown>;
+		const originalRenameSync = fs.renameSync as typeof renameSync;
+		fs.renameSync = ((from: Parameters<typeof renameSync>[0], to: Parameters<typeof renameSync>[1]) => {
+			if (to === statePath) throw new Error("injected state commit failure");
+			return originalRenameSync(from, to);
+		}) as typeof renameSync;
+		syncBuiltinESMExports();
+		let forced: ReturnType<typeof installExtension>;
+		try {
+			forced = installExtension(replacement, { cwd: project, scope: "project", force: true });
+		} finally {
+			fs.renameSync = originalRenameSync;
+			syncBuiltinESMExports();
+		}
+
+		strictEqual(forced.extension, undefined);
+		ok(forced.diagnostics.some((diagnostic) => diagnostic.message.includes("injected state commit failure")));
+		const installedRoot = join(project, ".clio-coder", "extensions", "state-rollback");
+		strictEqual(readFileSync(join(installedRoot, "marker.txt"), "utf8"), "original\n");
+		const [preserved] = listInstalledExtensions(project, { scope: "project" });
+		strictEqual(preserved?.loadable, true);
+		strictEqual(preserved?.installedContentDigest, originalDigest);
 	});
 
 	it("detects post-install content drift and prevents activation", () => {
