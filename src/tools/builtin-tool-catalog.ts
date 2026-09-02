@@ -300,9 +300,21 @@ export function toolPromptHintsForNames(
 // live panel (which has no registry) answer the fold question identically.
 function withBuiltinMetadata<T extends ToolSpec>(spec: T): T {
 	const metadata = TOOL_METADATA[spec.name];
-	return metadata
-		? withMetadata(spec, { ...metadata, presentation: toolPresentationPolicy(spec.name, undefined) })
-		: spec;
+	if (!metadata) return spec;
+	// The read cap is a guardrail (`safety.limits.readBytesPerCall`) installed
+	// from settings after this module loads, so the table's import-time value
+	// is the default, not the operator's. Recompute the policy cap when the tool
+	// is registered; the drift check in policy.ts compares against the live cap
+	// and a settings file raising the read cap used to fail boot.
+	const resultSizePolicy =
+		spec.name === ToolNames.Read
+			? observePolicy(readMaxBytes(), metadata.resultSizePolicy?.followUpHint ?? "")
+			: metadata.resultSizePolicy;
+	return withMetadata(spec, {
+		...metadata,
+		...(resultSizePolicy ? { resultSizePolicy } : {}),
+		presentation: toolPresentationPolicy(spec.name, undefined),
+	});
 }
 
 export function builtin<T extends ToolSpec>(spec: T, sourceInfo: ToolSourceInfo): T {
