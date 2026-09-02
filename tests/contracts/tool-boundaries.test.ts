@@ -1,4 +1,5 @@
 import { deepStrictEqual, match, ok, strictEqual, throws } from "node:assert/strict";
+import { readFileSync } from "node:fs";
 import { createServer } from "node:http";
 import type { AddressInfo } from "node:net";
 import { afterEach, beforeEach, describe, it } from "node:test";
@@ -93,6 +94,45 @@ describe("tool boundary contract", () => {
 		strictEqual(disposition.applications, 1);
 		ok((disposition.contextBytes ?? Number.POSITIVE_INFINITY) <= 320);
 		ok(Buffer.byteLength(toolResultContextText(verdict.result), "utf8") <= 320);
+	});
+
+	it("caps tool results at the default or session override and offloads every omitted byte", async () => {
+		const fullOutput = "0123456789abcdef".repeat(4_500);
+		const spec: ToolSpec = {
+			name: ToolNames.Read,
+			description: "oversize contract result",
+			parameters: Type.Object({}),
+			baseActionClass: "read",
+			run: async () => ({ kind: "ok", output: fullOutput }),
+		};
+		const registry = createRegistry({ safety: allowAllSafety() });
+		registry.register(spec);
+
+		const defaultVerdict = await registry.invoke({ tool: ToolNames.Read, args: {} });
+		strictEqual(defaultVerdict.kind, "ok");
+		if (defaultVerdict.kind !== "ok") return;
+		const defaultSize = defaultVerdict.result.details?.resultSize as {
+			maxBytes?: number;
+			truncated?: boolean;
+			offloadPath?: string;
+		};
+		strictEqual(defaultSize.maxBytes, 65_536);
+		strictEqual(defaultSize.truncated, true);
+		ok(defaultSize.offloadPath);
+		strictEqual(readFileSync(defaultSize.offloadPath, "utf8"), fullOutput);
+		if (defaultVerdict.result.kind === "ok") match(defaultVerdict.result.output, /full: .*\.txt/u);
+
+		const overrideVerdict = await registry.invoke(
+			{ tool: ToolNames.Read, args: {} },
+			{ sessionId: "override", toolResultMaxBytes: 4_096 },
+		);
+		strictEqual(overrideVerdict.kind, "ok");
+		if (overrideVerdict.kind !== "ok") return;
+		const overrideSize = overrideVerdict.result.details?.resultSize as { maxBytes?: number; offloadPath?: string };
+		strictEqual(overrideSize.maxBytes, 4_096);
+		ok(overrideSize.offloadPath);
+		strictEqual(readFileSync(overrideSize.offloadPath, "utf8"), fullOutput);
+		if (overrideVerdict.result.kind === "ok") match(overrideVerdict.result.output, /full: .*\.txt/u);
 	});
 
 	it("keeps the code_nav source selector closed and defaults its schema to workspace", async () => {

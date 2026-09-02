@@ -208,6 +208,7 @@ export const SETTINGS_LABELS_BY_ID = {
 	"modelSelector.favorites": "Pinned favorites",
 	"budget.sessionCeilingUsd": "Session ceiling (USD)",
 	"defaults.maxTokens": "Output budget (tokens)",
+	"context.toolResultMaxBytes": "Tool result cap (bytes)",
 	"budget.concurrency": "Fleet concurrency",
 	"guardrails.turnToolCallBudget": "Turn tool-call budget",
 	"guardrails.workerToolCallCap": "Worker tool-call cap",
@@ -326,6 +327,7 @@ export const SETTINGS_SECTION_ROWS = {
 	budget: [
 		"budget.sessionCeilingUsd",
 		"defaults.maxTokens",
+		"context.toolResultMaxBytes",
 		"budget.concurrency",
 		"guardrails.turnToolCallBudget",
 		"guardrails.workerToolCallCap",
@@ -424,6 +426,7 @@ const SETTINGS_DESCRIPTIONS_BY_ID = {
 	"modelSelector.favorites": "Exact target/model refs pinned in /model.",
 	"budget.sessionCeilingUsd": "Per-session cost cap.",
 	"defaults.maxTokens": "Output tokens requested per turn, applied to every target.",
+	"context.toolResultMaxBytes": "Maximum bytes returned from one tool result before the full text spills to scratch.",
 	"budget.concurrency": "Parallel workers allowed during dispatch.",
 	"guardrails.turnToolCallBudget": "Soft per-turn tool-call budget for this chat loop.",
 	"guardrails.workerToolCallCap": "Lifetime ceiling on tool calls one dispatched worker may execute.",
@@ -475,6 +478,8 @@ const SETTINGS_HELP_BY_ID: Partial<Record<EditableSettingId, string>> = {
 		"read-only observes; suggest parks non-read calls; auto-edit edits, dispatches, and runs recognized commands; full-auto runs except command substitution and system-level changes. A confirmation marked exposure=outward parks for you at suggest and auto-edit.",
 	"defaults.maxTokens":
 		"Clamped down to each model's max-output cap and the remaining context window. Set 0 to use per-model caps only.",
+	"context.toolResultMaxBytes":
+		"The 192KB per-turn observation pool remains authoritative. Three full 64KB results consume it, so a fourth finds it filled. Whole number of at least 4096 bytes · default: 65536 (64KB).",
 	"compaction.threshold":
 		"pressure = estimated tokens ÷ context window. Higher keeps more history but risks overflow before a summary runs.",
 	"context.workingSet.enabled":
@@ -1838,6 +1843,9 @@ function buildSettingItems(settings: Readonly<ClioSettings>, options?: BuildSett
 		settingItem("defaults.maxTokens", String(settings.chat.maxOutputTokens), {
 			values: ["0", "4096", "8192", "16384", "32768", "65536", "131072"],
 		}),
+		settingItem("context.toolResultMaxBytes", String(settings.context.toolResultMaxBytes), {
+			values: ["4096", "8192", "16384", "32768", "65536", "131072"],
+		}),
 		settingItem("budget.concurrency", String(settings.fleet.concurrency), {
 			values: ["auto", "1", "2", "4", "8"],
 		}),
@@ -2705,6 +2713,11 @@ function applySettingChange(settings: ClioSettings, id: string, value: string): 
 				else if (id === "guardrails.readMaxBytes") settings.safety.limits.readBytesPerCall = next;
 				else if (id === "guardrails.observationTurnBudgetBytes") settings.safety.limits.observationBytesPerTurn = next;
 				else settings.fleet.limits.internalRunTimeoutMs = next;
+			});
+			return;
+		case "context.toolResultMaxBytes":
+			applyNonNegativeInteger(value, (next) => {
+				if (next >= 4096) settings.context.toolResultMaxBytes = next;
 			});
 			return;
 		case "context.workingSet.enabled":
