@@ -685,15 +685,17 @@ export interface CompactionPayload {
  * Published on {@link BusChannels.MiddlewareHookFailed} when a middleware hook
  * registration misbehaves: `hook_failed` for a thrown evaluate (its effects
  * are discarded and the turn proceeds), `budget_exceeded` for a soft
- * wall-time overrun (effects still apply). Diagnostics only; nothing
- * subscribing here may decide anything.
+ * wall-time overrun (effects still apply), `registration_conflict` when an
+ * owned registration set (user hooks) offered an id a builtin or host
+ * registration holds, or a host registration evicted an owned one.
+ * Diagnostics only; nothing subscribing here may decide anything.
  */
 export interface MiddlewareHookFailedPayload {
-	kind: "hook_failed" | "budget_exceeded";
+	kind: "hook_failed" | "budget_exceeded" | "registration_conflict";
 	registrationId: string;
 	hook: MiddlewareHook;
 	at: number;
-	/** Error text; hook_failed only. */
+	/** Error text for hook_failed; one formatted line for registration_conflict. */
 	message?: string | undefined;
 	/** Measured and allowed wall time in ms; budget_exceeded only. */
 	elapsedMs?: number | undefined;

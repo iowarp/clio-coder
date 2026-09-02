@@ -89,6 +89,19 @@ export {
 	type MemoryInterventionDeps,
 } from "./memory-intervention.js";
 export { announceMemoryStepEndpoint, type MemoryStepEndpointAnnouncerDeps } from "./memory-step-endpoint.js";
+export {
+	createMiddlewareRegistrationTable,
+	MIDDLEWARE_REGISTRATION_OWNERS,
+	type MiddlewareRegistrationConflict,
+	type MiddlewareRegistrationConflictTier,
+	type MiddlewareRegistrationOwner,
+	type MiddlewareRegistrationReplacement,
+	type MiddlewareRegistrationTable,
+	type MiddlewareRegistrationTableOptions,
+	type PrepareRegistrationReplacementResult,
+	type ReplaceRegistrationsRejection,
+	type ReplaceRegistrationsReport,
+} from "./registrations.js";
 export { BUILTIN_MIDDLEWARE_RULE_IDS, listMiddlewareRuleDefinitions, listMiddlewareRules } from "./rules.js";
 export type {
 	MiddlewareDiagnostic,
@@ -99,6 +112,7 @@ export type {
 	RunMiddlewareRegistrationsOptions,
 } from "./runtime.js";
 export {
+	formatRegistrationConflict,
 	registrationFromRuleDefinition,
 	runMiddlewareHook,
 	runMiddlewareRegistrations,

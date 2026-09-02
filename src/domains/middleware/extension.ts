@@ -6,6 +6,7 @@ import {
 	resolveHookBudgetTunablesFromEnv,
 } from "./budget.js";
 import type { MiddlewareContract } from "./contract.js";
+import { createMiddlewareRegistrationTable } from "./registrations.js";
 import { cloneMiddlewareRule, listMiddlewareRuleDefinitions } from "./rules.js";
 import {
 	type MiddlewareDiagnosticSink,
@@ -14,6 +15,7 @@ import {
 	registrationFromRuleDefinition,
 	runMiddlewareAsyncRegistrations,
 	runMiddlewareRegistrations,
+	writeMiddlewareDiagnosticToStderr,
 } from "./runtime.js";
 import { createMiddlewareSnapshot } from "./snapshot.js";
 
@@ -54,18 +56,28 @@ export interface MiddlewareBundleOptions {
 
 export function createMiddlewareBundle(options: MiddlewareBundleOptions = {}): DomainBundle<MiddlewareContract> {
 	const ruleDefinitions = combineRuleDefinitions(listMiddlewareRuleDefinitions(), options.ruleDefinitions ?? []);
-	const registrations = combineRegistrations(ruleDefinitions, options.registrations ?? []);
-	const registeredIds = new Set(registrations.map((registration) => registration.id));
 	let diagnosticSink = options.onDiagnostic;
+	// Declarative rules are the fixed tier; construction-time coded
+	// registrations are the first host entries, deduplicated first-wins across
+	// the shared id namespace exactly as before.
+	const table = createMiddlewareRegistrationTable({
+		fixed: ruleDefinitions.map(registrationFromRuleDefinition),
+		diagnosticSink: () => diagnosticSink ?? writeMiddlewareDiagnosticToStderr,
+	});
+	for (const registration of options.registrations ?? []) table.registerHook(registration);
 	const budgetTracker = options.budgetTracker ?? createEnvHookBudgetTracker();
 	const contract: MiddlewareContract = {
 		runHook(input) {
+			// Capture the list once; a replacement published mid-evaluation
+			// takes effect for the next evaluation, never this one.
+			const registrations = table.list();
 			return runMiddlewareRegistrations(input, registrations, {
 				budgetTracker,
 				...(diagnosticSink !== undefined ? { onDiagnostic: diagnosticSink } : {}),
 			});
 		},
 		runAsyncHook(input, priorEffects = []) {
+			const registrations = table.list();
 			return runMiddlewareAsyncRegistrations(input, registrations, priorEffects, {
 				...(diagnosticSink !== undefined ? { onDiagnostic: diagnosticSink } : {}),
 			});
@@ -77,12 +89,19 @@ export function createMiddlewareBundle(options: MiddlewareBundleOptions = {}): D
 			return createMiddlewareSnapshot(ruleDefinitions.map((definition) => definition.rule));
 		},
 		registerHook(registration) {
-			if (registeredIds.has(registration.id)) return;
-			registeredIds.add(registration.id);
-			registrations.push(registration);
+			table.registerHook(registration);
 		},
 		setDiagnosticSink(sink) {
 			diagnosticSink = sink;
+		},
+		prepareRegistrationReplacement(owner, generation, registrations) {
+			return table.prepareReplacement(owner, generation, registrations);
+		},
+		replaceRegistrations(owner, generation, registrations) {
+			return table.replaceRegistrations(owner, generation, registrations);
+		},
+		ownedGeneration(owner) {
+			return table.ownedGeneration(owner);
 		},
 	};
 	return {
@@ -105,25 +124,6 @@ function combineRuleDefinitions(
 		if (seen.has(definition.rule.id)) continue;
 		seen.add(definition.rule.id);
 		combined.push(definition);
-	}
-	return combined;
-}
-
-/**
- * One ordered evaluation list: declarative rules first (builtin, then
- * composition-root), then coded registrations, deduplicated across the shared
- * id namespace with the earlier entry winning.
- */
-function combineRegistrations(
-	ruleDefinitions: ReadonlyArray<MiddlewareRuleDefinition>,
-	coded: ReadonlyArray<MiddlewareHookRegistration>,
-): MiddlewareHookRegistration[] {
-	const seen = new Set<string>(ruleDefinitions.map((definition) => definition.rule.id));
-	const combined: MiddlewareHookRegistration[] = ruleDefinitions.map(registrationFromRuleDefinition);
-	for (const registration of coded) {
-		if (seen.has(registration.id)) continue;
-		seen.add(registration.id);
-		combined.push(registration);
 	}
 	return combined;
 }

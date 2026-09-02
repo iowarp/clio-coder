@@ -89,6 +89,7 @@ import {
 	createMiddlewareToolChoiceControl,
 	createSkillsReminderRegistration,
 	type ExtensionHookRoot,
+	formatRegistrationConflict,
 	installUserHooks,
 	type MiddlewareContract,
 	MiddlewareDomainModule,
@@ -1050,6 +1051,20 @@ export async function bootOrchestrator(options: BootOptions = {}): Promise<BootR
 	// middleware.hookFailed (the interactive warn notice consumes it) and keep
 	// stderr for non-interactive runs, which have no notice subscriber.
 	middleware.setDiagnosticSink((diagnostic) => {
+		if (diagnostic.kind === "registration_conflict") {
+			// Registration bookkeeping has no hook occurrence; the affected owner
+			// today declares user hooks, which never run on on_compaction, so the
+			// payload's hook slot carries that as the "no evaluation" marker.
+			bus.emit(BusChannels.MiddlewareHookFailed, {
+				kind: "registration_conflict",
+				registrationId: diagnostic.registrationId,
+				hook: "on_compaction",
+				at: Date.now(),
+				message: formatRegistrationConflict(diagnostic),
+			});
+			if (!interactive) writeMiddlewareDiagnosticToStderr(diagnostic);
+			return;
+		}
 		bus.emit(BusChannels.MiddlewareHookFailed, {
 			kind: diagnostic.kind,
 			registrationId: diagnostic.registrationId,

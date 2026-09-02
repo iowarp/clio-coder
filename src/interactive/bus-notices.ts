@@ -72,7 +72,7 @@ function isSafetyBlockedPayload(value: unknown): value is SafetyBlockedPayload {
 function isMiddlewareHookFailedPayload(value: unknown): value is MiddlewareHookFailedPayload {
 	if (!value || typeof value !== "object") return false;
 	const p = value as Record<string, unknown>;
-	if (p.kind !== "hook_failed" && p.kind !== "budget_exceeded") return false;
+	if (p.kind !== "hook_failed" && p.kind !== "budget_exceeded" && p.kind !== "registration_conflict") return false;
 	if (typeof p.registrationId !== "string" || p.registrationId.length === 0) return false;
 	if (typeof p.hook !== "string" || p.hook.length === 0) return false;
 	if (p.message !== undefined && typeof p.message !== "string") return false;
@@ -142,6 +142,13 @@ function middlewareHookFailedNotice(
 	options: MiddlewareHookFailedNoticeOptions = {},
 ): BusNotice | null {
 	if (!isMiddlewareHookFailedPayload(payload)) return null;
+	if (payload.kind === "registration_conflict") {
+		const detail =
+			payload.message !== undefined && payload.message.length > 0
+				? payload.message
+				: `registration '${payload.registrationId}' conflicts with an existing id`;
+		return { level: "warn", text: `[middleware] ${detail}` };
+	}
 	if (payload.kind === "hook_failed") {
 		const detail = payload.message !== undefined && payload.message.length > 0 ? `: ${payload.message}` : "";
 		return {

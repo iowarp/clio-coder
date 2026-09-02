@@ -1,13 +1,14 @@
 import { createHookBudgetTracker, resolveHookBudgetsFromEnv, resolveHookBudgetTunablesFromEnv } from "./budget.js";
 import type { MiddlewareContract } from "./contract.js";
+import { createMiddlewareRegistrationTable } from "./registrations.js";
 import { cloneMiddlewareRule, listMiddlewareRuleDefinitions, listMiddlewareRules } from "./rules.js";
 import {
 	cloneMiddlewareEffect,
 	type MiddlewareDiagnosticSink,
-	type MiddlewareHookRegistration,
 	type MiddlewareRuleDefinition,
 	registrationFromRuleDefinition,
 	runMiddlewareRegistrations,
+	writeMiddlewareDiagnosticToStderr,
 } from "./runtime.js";
 import type { MiddlewareRule, MiddlewareSnapshot } from "./types.js";
 
@@ -39,15 +40,20 @@ export function createMiddlewareContractFromSnapshot(snapshot: MiddlewareSnapsho
 		if (builtin?.predicate !== undefined) definition.predicate = builtin.predicate;
 		return definition;
 	});
-	const registrations: MiddlewareHookRegistration[] = definitions.map(registrationFromRuleDefinition);
-	const registeredIds = new Set(registrations.map((registration) => registration.id));
+	let diagnosticSink: MiddlewareDiagnosticSink | undefined;
+	// Workers never receive owned registrations; the table exists so the
+	// worker contract satisfies the same interface with the same semantics.
+	const table = createMiddlewareRegistrationTable({
+		fixed: definitions.map(registrationFromRuleDefinition),
+		diagnosticSink: () => diagnosticSink ?? writeMiddlewareDiagnosticToStderr,
+	});
 	const budgetTracker = createHookBudgetTracker({
 		budgets: resolveHookBudgetsFromEnv(),
 		...resolveHookBudgetTunablesFromEnv(),
 	});
-	let diagnosticSink: MiddlewareDiagnosticSink | undefined;
 	return {
 		runHook(input) {
+			const registrations = table.list();
 			return runMiddlewareRegistrations(input, registrations, {
 				budgetTracker,
 				...(diagnosticSink !== undefined ? { onDiagnostic: diagnosticSink } : {}),
@@ -60,12 +66,19 @@ export function createMiddlewareContractFromSnapshot(snapshot: MiddlewareSnapsho
 			return createMiddlewareSnapshot(definitions.map((definition) => definition.rule));
 		},
 		registerHook(registration) {
-			if (registeredIds.has(registration.id)) return;
-			registeredIds.add(registration.id);
-			registrations.push(registration);
+			table.registerHook(registration);
 		},
 		setDiagnosticSink(sink) {
 			diagnosticSink = sink;
+		},
+		prepareRegistrationReplacement(owner, generation, registrations) {
+			return table.prepareReplacement(owner, generation, registrations);
+		},
+		replaceRegistrations(owner, generation, registrations) {
+			return table.replaceRegistrations(owner, generation, registrations);
+		},
+		ownedGeneration(owner) {
+			return table.ownedGeneration(owner);
 		},
 	};
 }
