@@ -138,36 +138,6 @@
                 </tr>
               </thead>
               <tbody id="envTableBody">
-                <tr data-cat="guardrail">
-                  <td class="env-name">CLIO_CODER_TURN_TOOL_CALL_BUDGET</td>
-                  <td><code>60</code></td>
-                  <td>Orchestrator per-turn soft tool-call budget; hard ceiling sits 15 above.</td>
-                </tr>
-                <tr data-cat="guardrail">
-                  <td class="env-name">CLIO_CODER_WORKER_TOOL_CALL_CAP</td>
-                  <td><code>150</code></td>
-                  <td>Lifetime tool-call cap per dispatched worker process run.</td>
-                </tr>
-                <tr data-cat="guardrail">
-                  <td class="env-name">CLIO_CODER_INTERNAL_DISPATCH_TIMEOUT_MS</td>
-                  <td><code>900000</code></td>
-                  <td>Internal dispatch execution timeout in milliseconds (15 minutes).</td>
-                </tr>
-                <tr data-cat="guardrail">
-                  <td class="env-name">CLIO_CODER_MAX_DISPATCH_RUNS</td>
-                  <td><code>1000</code></td>
-                  <td>Dispatch run-ledger retention cap.</td>
-                </tr>
-                <tr data-cat="guardrail">
-                  <td class="env-name">CLIO_CODER_READ_MAX_BYTES</td>
-                  <td><code>51200</code></td>
-                  <td>Per-call byte cap for the file read tool (min 1024).</td>
-                </tr>
-                <tr data-cat="guardrail">
-                  <td class="env-name">CLIO_CODER_OBSERVATION_TURN_BUDGET_BYTES</td>
-                  <td><code>196608</code></td>
-                  <td>Shared per-turn byte pool across observation tools.</td>
-                </tr>
                 <tr data-cat="knob">
                   <td class="env-name">CLIO_CODER_RIGOR</td>
                   <td><code>repo-derived</code></td>

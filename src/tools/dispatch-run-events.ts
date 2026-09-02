@@ -102,7 +102,7 @@ export function runTailEntryFromEvent(event: unknown, at: string = new Date().to
 export interface DispatchRunEventRegistryOptions {
 	/**
 	 * Durable tee for the display tail. Omitted takes the process-wide default
-	 * journal (settings-gated by `panes.journal`); `null` turns it off for this
+	 * journal (settings-gated by `fleet.history.journal`); `null` turns it off for this
 	 * registry. This is the one wiring choke point: every registry in the
 	 * process is built by this factory, so the sink attaches here rather than at
 	 * each of the three construction sites that call it.

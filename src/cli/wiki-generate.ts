@@ -236,7 +236,7 @@ async function runWikiDispatch(input: {
 	} catch (err) {
 		return { ok: false, detail: err instanceof Error ? err.message : String(err) };
 	}
-	const deadline = armInternalDispatchDeadline(input.dispatch, handle.runId, input.label, process.env, input.deadlineMs);
+	const deadline = armInternalDispatchDeadline(input.dispatch, handle.runId, input.label, input.deadlineMs);
 	let lastHeartbeatAt = startedAtClock;
 	try {
 		const summary = await drainDispatchEvents(handle.events, (tools) => {

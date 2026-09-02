@@ -1604,11 +1604,7 @@ function assertPostRuntimeToolCompatibility(
 }
 
 function workerToolCallHardCap(settings: EffectiveSettings): number {
-	const rawEnvCap = process.env.CLIO_CODER_WORKER_TOOL_CALL_CAP?.trim();
-	const parsedEnvCap = rawEnvCap && /^[1-9]\d*$/.test(rawEnvCap) ? Number(rawEnvCap) : Number.NaN;
-	return Number.isSafeInteger(parsedEnvCap)
-		? parsedEnvCap
-		: (settings?.fleet.limits.toolCallsPerRun ?? GUARDRAIL_DEFAULTS.workerToolCallCap);
+	return settings?.fleet.limits.toolCallsPerRun ?? GUARDRAIL_DEFAULTS.workerToolCallCap;
 }
 
 function resolveEffectiveWorkerBudget(input: {

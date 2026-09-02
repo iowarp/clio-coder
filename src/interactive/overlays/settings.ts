@@ -487,17 +487,17 @@ const SETTINGS_HELP_BY_ID: Partial<Record<EditableSettingId, string>> = {
 	"context.workingSet.minEvictableTokens":
 		"The floor sweep put marker break-even near 50 tokens; 200 is the churn guard. Whole number, 0 evicts anything · default: 200.",
 	"guardrails.turnToolCallBudget":
-		"Crossing it blocks further calls in the turn with a stop-and-summarize directive, and the hard interrupt ceiling sits a fixed margin above. A backstop against a model spraying unproductive calls, not a routine ceiling: a repo-wide audit legitimately runs dozens. Whole number of at least 1 · default: 60. Env override CLIO_CODER_TURN_TOOL_CALL_BUDGET beats this value.",
+		"Crossing it blocks further calls in the turn with a stop-and-summarize directive, and the hard interrupt ceiling sits a fixed margin above. A backstop against a model spraying unproductive calls, not a routine ceiling: a repo-wide audit legitimately runs dozens. Whole number of at least 1 · default: 60.",
 	"guardrails.workerToolCallCap":
-		"Bounds admitted calls, not attempts: a call the harness refuses never ran and never spends the cap. Dispatch takes the smaller of this and the agent recipe's own budget, so the recipe normally binds. Whole number of at least 1 · default: 150. Env override CLIO_CODER_WORKER_TOOL_CALL_CAP beats this value.",
+		"Bounds admitted calls, not attempts: a call the harness refuses never ran and never spends the cap. Dispatch takes the smaller of this and the agent recipe's own budget, so the recipe normally binds. Whole number of at least 1 · default: 150.",
 	"guardrails.maxDispatchRuns":
-		"Runs leaving the ring also lose their event journal directory. Whole number of at least 1 · default: 1000. Env override CLIO_CODER_MAX_DISPATCH_RUNS beats this value.",
+		"Runs leaving the ring also lose their event journal directory. Whole number of at least 1 · default: 1000.",
 	"guardrails.readMaxBytes":
-		"Clamped up to a 1KB floor at use. Whole number of bytes, at least 1 · default: 51200 (50KB). Env override CLIO_CODER_READ_MAX_BYTES beats this value.",
+		"Clamped up to a 1KB floor at use. Whole number of bytes, at least 1 · default: 51200 (50KB).",
 	"guardrails.observationTurnBudgetBytes":
-		"One pool shared by every observation-producing tool in a turn, so a single verbose tool cannot starve the rest. Whole number of bytes, at least 1 · default: 196608 (192KB). Env override CLIO_CODER_OBSERVATION_TURN_BUDGET_BYTES beats this value.",
+		"One pool shared by every observation-producing tool in a turn, so a single verbose tool cannot starve the rest. Whole number of bytes, at least 1 · default: 196608 (192KB).",
 	"guardrails.internalDispatchTimeoutMs":
-		"Covers the wiki documenter and the bootstrap scout. Continuous output satisfies the heartbeat watchdog and a run mid-generation spends no tool calls, so this is the only guard that ends a degenerate generator. Healthy runs finish in minutes. Whole milliseconds of at least 1 · default: 900000 (15 minutes). Env override CLIO_CODER_INTERNAL_DISPATCH_TIMEOUT_MS beats this value.",
+		"Covers the wiki documenter and the bootstrap scout. Continuous output satisfies the heartbeat watchdog and a run mid-generation spends no tool calls, so this is the only guard that ends a degenerate generator. Healthy runs finish in minutes. Whole milliseconds of at least 1 · default: 900000 (15 minutes).",
 	"retry.streamStallMs":
 		"Measured from the last token received, not from the request, so a slow-but-alive stream is never aborted. The retry then follows the same enabled/maxRetries/delay settings above. Whole milliseconds · default: 180000 (three minutes).",
 	"library.catalog":

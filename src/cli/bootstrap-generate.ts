@@ -325,7 +325,7 @@ async function attemptBootstrapDispatch(
 	// and returned zero bytes at 29s. The wiki documenter in this same directory
 	// budgets minutes for the same shape of work. `internalDispatchTimeoutMs` is
 	// the operator's knob for slow targets; nothing here knows better than it does.
-	const deadline = armInternalDispatchDeadline(dispatch, handle.runId, "context bootstrap", process.env);
+	const deadline = armInternalDispatchDeadline(dispatch, handle.runId, "context bootstrap");
 	let text = "";
 	let receipt: RunReceipt | undefined;
 	let parserAttempted = false;

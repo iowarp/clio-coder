@@ -87,9 +87,9 @@ export const LOOP_SYNTHESIS_BACKSTOP_DENIALS = 2;
 export const WIDE_BATCH_DENIAL_FLOOR = 32;
 
 /**
- * Default lifetime tool-call cap for a worker run. Value and env override live
- * in core/guardrails.ts (`CLIO_CODER_WORKER_TOOL_CALL_CAP`); re-exported here for
- * tests and callers that reason about the guard's tuning in one place.
+ * Default lifetime tool-call cap for a worker run. The configurable value lives
+ * at `fleet.limits.toolCallsPerRun`; this default is re-exported for tests and
+ * callers that reason about the guard's tuning in one place.
  */
 export const DEFAULT_WORKER_TOOL_CALL_CAP = GUARDRAIL_DEFAULTS.workerToolCallCap;
 
@@ -105,7 +105,7 @@ export const DEFAULT_WORKER_TOOL_CALL_CAP = GUARDRAIL_DEFAULTS.workerToolCallCap
  * DISTINCT unproductive calls. Legitimate deep work (a repo-wide audit runs
  * 25+ productive calls in one turn) must not be decapitated by it; mainstream
  * harnesses run 100+ calls per turn with no ceiling at all. Value and env
- * override (`CLIO_CODER_TURN_TOOL_CALL_BUDGET`) live in core/guardrails.ts.
+ * live at `safety.limits.chatToolCallsPerTurn`.
  */
 export const DEFAULT_ORCH_TURN_TOOL_CALL_BUDGET = GUARDRAIL_DEFAULTS.turnToolCallBudget;
 /**
@@ -424,8 +424,8 @@ export interface OrchTurnToolCallBudget {
 	hard: number;
 }
 
-export function readOrchTurnToolCallBudget(env: NodeJS.ProcessEnv = process.env): OrchTurnToolCallBudget {
-	const soft = resolveGuardrail("turnToolCallBudget", env);
+export function readOrchTurnToolCallBudget(): OrchTurnToolCallBudget {
+	const soft = resolveGuardrail("turnToolCallBudget");
 	return { soft, hard: soft + ORCH_TURN_TOOL_CALL_HARD_MARGIN };
 }
 
@@ -480,7 +480,7 @@ export interface CreateLoopGuardRegistrationOptions {
 	 * the turn over the bus. Absent for workers, which rely on the lifetime
 	 * {@link toolCallCap} instead.
 	 */
-	turnToolCallBudget?: OrchTurnToolCallBudget;
+	turnToolCallBudget?: OrchTurnToolCallBudget | (() => OrchTurnToolCallBudget);
 	/**
 	 * When the per-turn loop-block budget is exhausted, lock tool use for the
 	 * rest of the turn instead of cancelling it outright. Every further call is
@@ -531,7 +531,6 @@ export function createLoopGuardRegistration(options: CreateLoopGuardRegistration
 		(cap === undefined || options.toolCallSoftLimit <= cap)
 			? options.toolCallSoftLimit
 			: undefined;
-	const turnBudget = options.turnToolCallBudget;
 	const synthesisLockout = options.turnSynthesisLockout === true;
 	let softReadReserve = options.toolCallSoftReadReserve ?? 0;
 	let softReadReserveThreshold =
@@ -812,11 +811,11 @@ export function createLoopGuardRegistration(options: CreateLoopGuardRegistration
 
 	const emitBudgetEvent = (
 		input: MiddlewareHookInput,
+		turnBudget: OrchTurnToolCallBudget,
 		callsThisTurn: number,
 		interrupted: boolean,
 		at: number,
 	): void => {
-		if (turnBudget === undefined) return;
 		const payload: ToolBudgetExceededPayload = {
 			tool: input.toolName ?? "unknown",
 			callsThisTurn,
@@ -830,6 +829,8 @@ export function createLoopGuardRegistration(options: CreateLoopGuardRegistration
 	};
 
 	const evaluateTurnBudget = (input: MiddlewareHookInput, now: number): ReadonlyArray<MiddlewareEffect> | null => {
+		const budgetSource = options.turnToolCallBudget;
+		const turnBudget = typeof budgetSource === "function" ? budgetSource() : budgetSource;
 		if (turnBudget === undefined) return null;
 		const turnKey = input.turnId ?? NO_TURN_BUCKET;
 		const callsThisTurn = bumpBoundedCounter(callsByTurn, turnKey);
@@ -837,7 +838,7 @@ export function createLoopGuardRegistration(options: CreateLoopGuardRegistration
 			// Hard ceiling: interrupt the turn the same way the block budget does.
 			// The bus event drives chat.cancel() in the interactive layer; the
 			// block effect makes the in-flight attempt fail with the same reason.
-			if (callsThisTurn === turnBudget.hard) emitBudgetEvent(input, callsThisTurn, true, now);
+			if (callsThisTurn === turnBudget.hard) emitBudgetEvent(input, turnBudget, callsThisTurn, true, now);
 			return [
 				{
 					kind: "block_tool",
@@ -856,7 +857,7 @@ export function createLoopGuardRegistration(options: CreateLoopGuardRegistration
 			// ever run. The operator sees one warn notice per turn (the first
 			// crossing); the model keeps getting the directive on every further
 			// over-budget attempt so it cannot quietly resume spraying calls.
-			if (callsThisTurn === turnBudget.soft) emitBudgetEvent(input, callsThisTurn, false, now);
+			if (callsThisTurn === turnBudget.soft) emitBudgetEvent(input, turnBudget, callsThisTurn, false, now);
 			return [
 				{
 					kind: "block_tool",

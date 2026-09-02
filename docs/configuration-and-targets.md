@@ -376,9 +376,9 @@ for one worker and can only narrow a recipe budget. `fleet.history.maxRuns`
 `safety.limits.readBytesPerCall` (default `51200`) bounds one read, while
 `safety.limits.observationBytesPerTurn` (default `196608`) is the shared
 per-turn observation pool. `fleet.limits.internalRunTimeoutMs` (default
-`900000`) bounds an internal generator dispatch. The environment overrides in
-[Environment Variables](environment-variables.md) name the same effective
-limits.
+`900000`) bounds an internal generator dispatch. These settings are the only
+operator-facing policy paths for the limits and refresh with the effective
+session view.
 
 Agent recipe budgets define a normal admitted-call phase inside `workerToolCallCap`; they do not replace it. A declared phase boundary is clamped down to the cap, and when the two are equal the last call may complete and the graceful synthesis transition happens without requiring an over-cap call. The recipe's `readReserve` is the tail of that phase. It admits canonical `read` plus whatever mutation tools the agent was actually granted, because the reserve exists to end broad discovery rather than to stop an agent from delivering: a writer whose product is files has to be able to write them in its last calls. An agent with no mutation tools keeps a read-only reserve and the request-level `require_tool(read)` lock. The reserve becomes zero when `read` is absent from the admitted schema surface, and never installs a nonexistent read requirement. Calls the reserve refuses are steering rather than work: they neither run nor spend the cap, and a model that keeps calling discovery tools there reaches the same bounded synthesis lockout a spent budget ends in.
 

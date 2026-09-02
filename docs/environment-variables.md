@@ -7,23 +7,6 @@ This page is the complete inventory, and the `environment-variable-inventory` ch
 > [!TIP]
 > [docs/html/environment_blueprint.html](https://github.com/iowarp/clio-coder/blob/main/docs/html/environment_blueprint.html) is a source-checkout walkthrough of the most commonly set variables with an effective-path resolver. It covers a curated subset, so use the tables below when you need the full list.
 
-## Guardrail overrides
-
-Durable values live under `safety.limits` or `fleet.limits` in `settings.yaml`
-(see [Configuration and Targets](configuration-and-targets.md)). These
-environment variables override them for one process; resolution is environment,
-then settings, then the built-in default. Resolution lives in
-`src/core/guardrails.ts`.
-
-| Variable | Settings key | Default | Controls |
-| --- | --- | --- | --- |
-| `CLIO_CODER_TURN_TOOL_CALL_BUDGET` | `safety.limits.chatToolCallsPerTurn` | 60 | Orchestrator per-turn soft tool-call budget; the hard interrupt ceiling sits 15 above it (`src/engine/loop-guard.ts`). |
-| `CLIO_CODER_WORKER_TOOL_CALL_CAP` | `fleet.limits.toolCallsPerRun` | 150 | Lifetime ceiling on tool calls one dispatched worker may execute. Calls the harness refused (reserve steering, synthesis-lockout denials) never spend it. Agent recipe budgets may narrow but never widen it (`src/engine/loop-guard.ts`). |
-| `CLIO_CODER_MAX_DISPATCH_RUNS` | `fleet.history.maxRuns` | 1000 | Dispatch run-ledger retention cap (`src/domains/dispatch/state.ts`). |
-| `CLIO_CODER_READ_MAX_BYTES` | `safety.limits.readBytesPerCall` | 51200 | Per-call byte cap for the read tool, floored at 1024 (`src/tools/read.ts`). |
-| `CLIO_CODER_OBSERVATION_TURN_BUDGET_BYTES` | `safety.limits.observationBytesPerTurn` | 196608 | Shared per-turn byte pool across observation tools (`src/tools/observation.ts`). |
-| `CLIO_CODER_INTERNAL_DISPATCH_TIMEOUT_MS` | `fleet.limits.internalRunTimeoutMs` | 900000 | Wall-clock cap for one internal generator dispatch: the wiki documenter and the bootstrap scout (`src/cli/internal-dispatch.ts`). |
-
 ## Behavior knobs without a settings key
 
 | Variable | Default | Controls |
@@ -49,7 +32,6 @@ then settings, then the built-in default. Resolution lives in
 | `CLIO_CODER_MODEL_CATALOG_DIRS` | unset | Extra model-catalog directories (`src/domains/providers/knowledge-base-path.ts`). |
 | `CLIO_CODER_ENDPOINT_SLOTS_TTL_MS` | 86400000 | How long a persisted endpoint slot count answers for an endpoint nothing has probed in this process. A record past the bound is ignored and pruned rather than allowed to over-admit (`src/domains/providers/endpoint-slots-store.ts`). |
 | `CLIO_CODER_NO_NETWORK_TOOLS` | off | `1` strips network tools from every registry in the process; the skills-eval harness sets it for hermetic arms; `--allow-network` clears it (`src/tools/network-policy.ts`). |
-| `CLIO_CODER_RUN_JOURNAL` | settings value | `1`/`0` overrides `fleet.history.journal` for one process: whether every dispatched run writes its append-only event journal under the state directory (`src/domains/dispatch/run-event-journal.ts`). |
 | `CLIO_CODER_SMOOTH_STREAM` | settings value | Per-process override for `interface.smoothStreaming`: `0`/`off`/`false`, `auto`, or `1`/`on`/`true`. A valid value wins over settings; an invalid value fails safely to `off`. |
 | `CLIO_CODER_REDUCE_MOTION` | off | `1` makes smooth-streaming `auto` use the immediate coalescer. Explicit `on` remains an operator request, while stdout backpressure still pauses frame production. |
 | `CLIO_CODER_SCREEN_READER` | off | `1` makes smooth-streaming `auto` use the immediate coalescer so a screen reader receives the existing low-motion update behavior. |
