@@ -78,8 +78,10 @@ export function createPanesTool(deps: PanesToolDeps): ToolSpec {
 						kind: "ok",
 						output:
 							result.paneId === null
-								? `completed the ${result.label} chooser.`
-								: `opened the ${result.label} pane (${result.paneId}).`,
+								? `completed the ${result.label} pick.`
+								: result.existing
+									? `the ${result.label} pane was already open and is now focused (${result.paneId}).`
+									: `opened the ${result.label} pane (${result.paneId}).`,
 						details: { action: "open", preset, paneId: result.paneId },
 					};
 				}

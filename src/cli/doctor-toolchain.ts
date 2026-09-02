@@ -16,7 +16,7 @@ function yaziProfileFinding(enabled: boolean): DoctorFinding {
 	if (!enabled) {
 		return {
 			ok: true,
-			name: "yazi managed profile",
+			name: "files pane profile",
 			detail: "disabled by settings",
 		};
 	}
@@ -24,14 +24,14 @@ function yaziProfileFinding(enabled: boolean): DoctorFinding {
 		const profile = inspectCurrentYaziProfile();
 		return {
 			ok: true,
-			name: "yazi managed profile",
+			name: "files pane profile",
 			detail: describeYaziProfile(profile),
 			level: profile.state === "current" ? "ok" : "warn",
 		};
 	} catch (error) {
 		return {
 			ok: true,
-			name: "yazi managed profile",
+			name: "files pane profile",
 			level: "warn",
 			detail: `${yaziProfileDir()} could not be inspected (${error instanceof Error ? error.message : String(error)}); user config ${userYaziConfigDir()} is separate and untouched`,
 		};

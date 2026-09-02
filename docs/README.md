@@ -65,6 +65,7 @@ interactive session. `clio-coder doctor` is a read-only installation check;
 | Agents, prompts, extensions, and portable share archives | [Extensions and Sharing](guide/extensions-and-sharing.md) |
 | Private resource catalogs and synchronization | [Resource Library](guide/resource-library.md) |
 | TUI layout, responsive behavior, colors, and interaction rules | [TUI Design](architecture/tui-design.md) |
+| Terminal panes beside a session and the files pane: install, keys, settings, doctor, troubleshooting | [Panes and the Files Pane](guide/panes-and-files.md) |
 
 ## Safety, evidence, and reproducibility
 

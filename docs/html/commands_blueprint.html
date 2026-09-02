@@ -203,6 +203,10 @@ For process exit codes, stdout deliverable guarantees, and machine-readable JSON
 <td>Alias for <code>clio-coder tools install herdr</code>.</td>
 </tr>
 <tr>
+<td><code>clio-coder panes theme</code></td>
+<td>Print Clio&#39;s theme tokens as a herdr <code>[theme.custom]</code> block to paste into herdr&#39;s <code>config.toml</code>; Clio never edits that file itself. See <a href="panes_files_blueprint.html">Panes and the Files Pane</a>.</td>
+</tr>
+<tr>
 <td><code>clio-coder reset [--state|--data|--cache|--auth|--config|--all] [--dry-run] [--force]</code></td>
 <td>Reset selected Clio Coder state. <code>--state</code> is the default level.</td>
 </tr>
@@ -595,8 +599,13 @@ when Clio is already inside a reachable herdr session.</p>
 </tr>
 <tr>
 <td><code>/panes</code></td>
-<td><code>/panes show &lt;run-or-agent&gt; | /panes open &lt;preset-or-argv&gt; | /panes close [target]</code></td>
-<td>Inspect the pane layer, watch a live run in a pane, or open a utility pane</td>
+<td><code>/panes show &lt;run-or-agent&gt; | /panes open &lt;preset-or-argv&gt; | /panes zoom [target] | /panes close [target]</code></td>
+<td>Inspect the pane layer, watch a live run in a pane, or open a utility pane (<code>files</code>, <code>logs</code>, <code>shell</code>, <code>files --once</code>, or a command); a second open focuses the pane already there</td>
+</tr>
+<tr>
+<td><code>/files</code></td>
+<td><code>/files [open|close|pick]</code></td>
+<td>Toggle the files pane docked below the session; picks land in the composer as <code>@</code> mentions. See <a href="panes_files_blueprint.html">Panes and the Files Pane</a></td>
 </tr>
 <tr>
 <td><code>/thinking</code></td>
@@ -929,6 +938,10 @@ editor reserves and can be rebound through <code>settings.yaml.keybindings</code
 <tr>
 <td><code>Alt+W</code></td>
 <td>Toggle the Fleet Runs board (task, run ID, live telemetry, retry, and terminal history). Inside it, <code>Enter</code> opens the selected run&#39;s live worker detail, <code>s</code> steers, and <code>x</code> cancels.</td>
+</tr>
+<tr>
+<td><code>Alt+E</code></td>
+<td>Toggle the files pane docked below the session in a <code>--with-panes</code> session inside herdr; the same as <code>/files</code>. Rebind through <code>clio-coder.files.toggle</code>.</td>
 </tr>
 <tr>
 <td><code>Alt+B</code></td>
