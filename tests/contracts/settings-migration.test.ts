@@ -413,9 +413,16 @@ integrations:
 		mkdirSync(join(root, ".claude", "skills", "file-ticket"), { recursive: true });
 		writeFileSync(
 			skill,
-			["---", "name: file-ticket", "description: File a ticket.", "clio:", "  registry-id: iowarp/clio-coder", "---", "Body.", ""].join(
-				"\n",
-			),
+			[
+				"---",
+				"name: file-ticket",
+				"description: File a ticket.",
+				"clio:",
+				"  registry-id: iowarp/clio-coder",
+				"---",
+				"Body.",
+				"",
+			].join("\n"),
 			"utf8",
 		);
 		const finding = namingFootprintFindings({ cwd: root }).find((entry) => entry.name === "naming resources");
