@@ -664,11 +664,12 @@ export function startWorkerRun(input: WorkerRunInput, emit: WorkerEventEmit): Wo
 			pendingReadCitations.delete(event.toolCallId);
 			if (request !== undefined && event.isError !== true) recordObservedRead(request, event.result);
 		}
-		// Synthesis-locked run: a model that answers with tool-call markup emits
-		// its chat template's syntax as plain text. Sanitize the finished
-		// message in place before it hits stdout; pi stores this same object in
-		// agent state, so the NDJSON event, the dispatch consumer's answer
-		// reconstruction, and any later provider round all see the same text.
+		// Synthesis-locked run: the round ships no tool surface, so a model that
+		// calls a tool anyway lands its chat template's tool-call syntax in the
+		// reply as plain text. Sanitize the finished message in place before it
+		// hits stdout; pi stores this same object in agent state, so the NDJSON
+		// event, the dispatch consumer's answer reconstruction, and any later
+		// provider round all see the same text.
 		// A markup-only locked reply re-prompted this round; the result-contract
 		// check below stands aside so the round costs the one re-prompt, not one
 		// of the contract's bounded repair slots (on ornith both were queued for
@@ -679,9 +680,8 @@ export function startWorkerRun(input: WorkerRunInput, emit: WorkerEventEmit): Wo
 			const stripped = sanitizeLockedSynthesisMessage(event.message);
 			// A model that calls a tool anyway hands its markup back as text and
 			// the sanitizer leaves only the fallback notice: the training habit
-			// survives the strip (Qwen3.8 did it in 1 of 5 stripped runs), and on
-			// Anthropic the schemas are still rendered under tool_choice none.
-			// One re-prompt, delivered as a tool exchange like the result-contract
+			// survives the strip (Qwen3.8 did it in 1 of 5 stripped runs). One
+			// re-prompt, delivered as a tool exchange like the result-contract
 			// repair, asks for the answer in prose; a second markup-only reply
 			// keeps the notice.
 			if (stripped && lockedSynthesisReprompts < 1 && isLockedSynthesisFallbackOnly(event.message)) {
