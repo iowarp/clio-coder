@@ -40,6 +40,7 @@ interactive session. `clio-coder doctor` is a read-only installation check;
 | Topic | Guide |
 | --- | --- |
 | Targets, providers, auth, settings v2, routing, and fleet profiles | [Configuration and Targets](configuration-and-targets.md) |
+| Every settings key, environment variable, flag, and project-file key with its default and precedence | [Configuration Reference](configuration-reference.md) |
 | Runtime discovery, model capabilities, local overlays, and field notes | [Model Catalog](model-catalog.md) |
 | Argonne ALCF Sophia and Metis targets over Globus OAuth | [ALCF Provider](alcf-provider.md) |
 | Project handbooks, context windows, accounting, compaction, and indexing | [Context Engine](context-engine.md) |
