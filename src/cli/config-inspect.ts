@@ -45,7 +45,8 @@ export type CustomizationCategory =
 	| "safety"
 	| "memory";
 
-export type ReloadClass = "hot" | "next-turn" | "restart" | "n/a";
+/** `reload` means an explicit `/resources extensions reload` (or a restart) publishes the change. */
+export type ReloadClass = "hot" | "next-turn" | "reload" | "restart" | "n/a";
 
 export interface CustomizationEntry {
 	category: CustomizationCategory;
@@ -221,7 +222,7 @@ function inspectHooks(cwd: string, graph: CustomizationGraph): void {
 				hash: hook.hash,
 				trust: hook.source.origin === "extension" ? "untrusted" : "trusted",
 				precedence: "winner",
-				reloadClass: "restart",
+				reloadClass: "reload",
 				detail: { on: hook.on, kind: hook.spec.kind, enabled: hook.enabled, ...(hook.tools ? { tools: hook.tools } : {}) },
 			});
 		}
@@ -234,7 +235,7 @@ function inspectHooks(cwd: string, graph: CustomizationGraph): void {
 				hash: loser.hash,
 				trust: loser.source.origin === "extension" ? "untrusted" : "trusted",
 				precedence: "loser",
-				reloadClass: "restart",
+				reloadClass: "reload",
 				detail: { on: loser.on, kind: loser.spec.kind },
 			});
 		}
@@ -254,7 +255,7 @@ function inspectExtensions(cwd: string, graph: CustomizationGraph): void {
 				hash: shortHash(`${ext.id}@${ext.version}`),
 				trust: "untrusted",
 				precedence: ext.effective ? "winner" : "loser",
-				reloadClass: "restart",
+				reloadClass: "reload",
 				detail: {
 					version: ext.version,
 					enabled: ext.enabled,

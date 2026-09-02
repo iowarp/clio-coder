@@ -169,7 +169,7 @@ The registry table below lists the available interactive slash commands. On a ba
 | `/quit` | `/quit` | Exit Clio Coder |
 | `/help` | `/help [query]` | Open the interactive help center showing commands and keys |
 | `/skill` | `/skill [name] [task]` | Open the Skills Hub or invoke a skill |
-| `/resources` | `/resources [skills\|prompts\|library [kind]\|extensions]` | Browse installed resources and private library entries |
+| `/resources` | `/resources [skills\|prompts\|library [kind]\|extensions [reload]]` | Browse installed resources and private library entries; `extensions reload` commits a new extension generation |
 | `/share` | `/share [runId]` | Share a worker result with the main agent |
 | `/archive` | `/archive export <path> \| /archive import [--dry-run] [--force] <path>` | Export or import a full Clio archive |
 | `/run` | `/run [--agent-profile <profile>] [--runtime <runtimeId>] [--target <id>] [--model <id>] [--thinking <level>] [--tool-profile <minimal-local\|science-local\|full-agent>] [--require <cap>] [--share] <agent> <task>` | Run a fleet agent |
