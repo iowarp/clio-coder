@@ -44,16 +44,19 @@ export { createEnvHookBudgetTracker, createMiddlewareBundle } from "./extension.
 export { createHookReceiptLog, HOOK_RECEIPT_LOG_CAPACITY, type HookReceiptLog } from "./hook-receipts.js";
 export type {
 	HookReceipt,
+	HookReceiptExtension,
 	HookReceiptSink,
 	NormalizedUserHook,
 	UserHookCommandResult,
 	UserHookCommandRunner,
 	UserHookDeclarationBatch,
+	UserHookExtensionSource,
 	UserHookKind,
 	UserHookLoadIssue,
 	UserHookLoadResult,
 	UserHookOrigin,
 	UserHookOutcome,
+	UserHookPackageProvenance,
 	UserHookSource,
 } from "./hooks.js";
 export {
@@ -66,10 +69,12 @@ export {
 	userHookToRegistration,
 } from "./hooks.js";
 export {
-	type ExtensionHookRoot,
+	type BuildUserHookRegistrationsOptions,
+	type BuildUserHookRegistrationsResult,
+	buildUserHookRegistrations,
+	type CapturedHookDeclarations,
+	type CapturedHookSourceSet,
 	type HookFileIssue,
-	type InstallUserHooksResult,
-	installUserHooks,
 	readHookSources,
 	spawnSyncCommandRunner,
 } from "./hooks-io.js";
@@ -89,6 +94,19 @@ export {
 	type MemoryInterventionDeps,
 } from "./memory-intervention.js";
 export { announceMemoryStepEndpoint, type MemoryStepEndpointAnnouncerDeps } from "./memory-step-endpoint.js";
+export {
+	createMiddlewareRegistrationTable,
+	MIDDLEWARE_REGISTRATION_OWNERS,
+	type MiddlewareRegistrationConflict,
+	type MiddlewareRegistrationConflictTier,
+	type MiddlewareRegistrationOwner,
+	type MiddlewareRegistrationReplacement,
+	type MiddlewareRegistrationTable,
+	type MiddlewareRegistrationTableOptions,
+	type PrepareRegistrationReplacementResult,
+	type ReplaceRegistrationsRejection,
+	type ReplaceRegistrationsReport,
+} from "./registrations.js";
 export { BUILTIN_MIDDLEWARE_RULE_IDS, listMiddlewareRuleDefinitions, listMiddlewareRules } from "./rules.js";
 export type {
 	MiddlewareDiagnostic,
@@ -99,6 +117,7 @@ export type {
 	RunMiddlewareRegistrationsOptions,
 } from "./runtime.js";
 export {
+	formatRegistrationConflict,
 	registrationFromRuleDefinition,
 	runMiddlewareHook,
 	runMiddlewareRegistrations,

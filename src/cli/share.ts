@@ -142,7 +142,11 @@ function printDiagnostics(diagnostics: ReadonlyArray<ShareDiagnostic>): void {
 
 function printRecovery(plan: ShareImportPlan): void {
 	if (!plan.recovery) return;
-	process.stderr.write("recovery: import stopped after a write failure\n");
+	process.stderr.write(
+		plan.recovery.failed
+			? "recovery: import stopped after a write failure\n"
+			: "recovery: import completed with preserved backups\n",
+	);
 	process.stderr.write("written files:\n");
 	if (plan.recovery.written.length === 0) process.stderr.write("  none\n");
 	else {

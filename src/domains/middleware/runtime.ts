@@ -1,4 +1,5 @@
 import { createHookBudgetTracker, type HookBudgetStats, type HookBudgetTracker } from "./budget.js";
+import type { MiddlewareRegistrationConflictTier, MiddlewareRegistrationOwner } from "./registrations.js";
 import { listMiddlewareRuleDefinitions } from "./rules.js";
 import {
 	MIDDLEWARE_HOOK_TEXT_MAX_CHARS,
@@ -90,6 +91,20 @@ export type MiddlewareDiagnostic =
 			steadyStateWarn: boolean;
 			/** Rolling-window stats (p50/p95/over-count) for diagnosis. */
 			stats: HookBudgetStats;
+	  }
+	| {
+			/**
+			 * An owned registration set offered an id already held by a builtin
+			 * rule or a host registration (dropped), or a later host registration
+			 * took an id an owner held (evicted). Bookkeeping only; nothing was
+			 * evaluated.
+			 */
+			kind: "registration_conflict";
+			registrationId: string;
+			owner: MiddlewareRegistrationOwner;
+			generation: number;
+			conflictsWith: MiddlewareRegistrationConflictTier;
+			action: "dropped" | "evicted";
 	  };
 
 export type MiddlewareDiagnosticSink = (diagnostic: MiddlewareDiagnostic) => void;
@@ -106,6 +121,10 @@ export function writeMiddlewareDiagnosticToStderr(diagnostic: MiddlewareDiagnost
 		);
 		return;
 	}
+	if (diagnostic.kind === "registration_conflict") {
+		process.stderr.write(`[clio-coder:middleware] ${formatRegistrationConflict(diagnostic)}\n`);
+		return;
+	}
 	// A single post-warmup spike is telemetry, not operator-facing noise: only
 	// consistent slowness prints, unless CLIO_CODER_HOOK_BUDGET_DEBUG=1 asks for all.
 	if (!diagnostic.steadyStateWarn && process.env.CLIO_CODER_HOOK_BUDGET_DEBUG !== "1") return;
@@ -118,6 +137,15 @@ export function writeMiddlewareDiagnosticToStderr(diagnostic: MiddlewareDiagnost
 		`[clio-coder:middleware] registration '${diagnostic.registrationId}' exceeded budget on '${diagnostic.hook}': ` +
 			`${diagnostic.elapsedMs.toFixed(1)}ms > ${diagnostic.budgetMs}ms${trend}\n`,
 	);
+}
+
+/** One operator line for a registration_conflict diagnostic. */
+export function formatRegistrationConflict(
+	diagnostic: Extract<MiddlewareDiagnostic, { kind: "registration_conflict" }>,
+): string {
+	return diagnostic.action === "dropped"
+		? `${diagnostic.owner} registration '${diagnostic.registrationId}' (generation ${diagnostic.generation}) dropped: id is held by a ${diagnostic.conflictsWith} registration`
+		: `${diagnostic.owner} registration '${diagnostic.registrationId}' (generation ${diagnostic.generation}) evicted by a ${diagnostic.conflictsWith} registration with the same id`;
 }
 
 /**

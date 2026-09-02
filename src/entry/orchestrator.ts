@@ -88,8 +88,7 @@ import {
 	createMarketplaceOfferRegistration,
 	createMiddlewareToolChoiceControl,
 	createSkillsReminderRegistration,
-	type ExtensionHookRoot,
-	installUserHooks,
+	formatRegistrationConflict,
 	type MiddlewareContract,
 	MiddlewareDomainModule,
 	writeMiddlewareDiagnosticToStderr,
@@ -181,6 +180,7 @@ import { createChatLoop } from "../interactive/chat-loop.js";
 import { type RunIo, startInteractive } from "../interactive/index.js";
 import { buildModelReplayAgentMessagesFromTurns } from "../interactive/model-session-replay.js";
 import type { BootOptions } from "./boot-options.js";
+import { createExtensionReloadCoordinator } from "./extension-reload.js";
 import { resolvePanesEnablement } from "./panes-activation.js";
 
 export type { BootOptions, HeadlessSamplingOverrides } from "./boot-options.js";
@@ -1050,6 +1050,20 @@ export async function bootOrchestrator(options: BootOptions = {}): Promise<BootR
 	// middleware.hookFailed (the interactive warn notice consumes it) and keep
 	// stderr for non-interactive runs, which have no notice subscriber.
 	middleware.setDiagnosticSink((diagnostic) => {
+		if (diagnostic.kind === "registration_conflict") {
+			// Registration bookkeeping has no hook occurrence; the affected owner
+			// today declares user hooks, which never run on on_compaction, so the
+			// payload's hook slot carries that as the "no evaluation" marker.
+			bus.emit(BusChannels.MiddlewareHookFailed, {
+				kind: "registration_conflict",
+				registrationId: diagnostic.registrationId,
+				hook: "on_compaction",
+				at: Date.now(),
+				message: formatRegistrationConflict(diagnostic),
+			});
+			if (!interactive) writeMiddlewareDiagnosticToStderr(diagnostic);
+			return;
+		}
 		bus.emit(BusChannels.MiddlewareHookFailed, {
 			kind: diagnostic.kind,
 			registrationId: diagnostic.registrationId,
@@ -1299,24 +1313,26 @@ export async function bootOrchestrator(options: BootOptions = {}): Promise<BootR
 	// same effect machinery. They register after the guards, so safety stays
 	// authoritative: a hook may add effects (including request block_tool) but
 	// cannot grant a permission safety would deny. Loading is best-effort.
+	// The coordinator is the only writer of the "user-hooks" owner and the only
+	// caller of the extensions reload; it publishes the extension generation
+	// and the hook registrations with two adjacent assignments on one stack
+	// and emits extensions.reloaded only after both. The boot generation is
+	// published here too (the extensions bundle publishes nothing at start),
+	// so no consumer ever sees extension resources paired with hooks from a
+	// different generation. The owner slot is anchored here, so user hooks
+	// keep evaluating after the guards and before the assessors below.
 	const hookReceiptLog = createHookReceiptLog({ persistPath: join(clioStateDir(), "hook-receipts.json") });
-	const extensionHookRoots: ExtensionHookRoot[] = (extensions?.list(process.cwd()) ?? [])
-		.filter((ext) => ext.enabled && ext.effective)
-		.map((ext) => ({ id: ext.id, rootPath: ext.rootPath }));
-	const userHooks = installUserHooks({
-		cwd: process.cwd(),
-		extensions: extensionHookRoots,
-		registerHook: (registration) => middleware.registerHook(registration),
+	const extensionReload = createExtensionReloadCoordinator({
+		extensions,
+		middleware,
+		cwd: () => process.cwd(),
 		recordReceipt: (receipt) => hookReceiptLog.record(receipt),
+		report: (line) => {
+			if (!interactive) process.stderr.write(`${line}\n`);
+		},
+		onCommitted: (event) => bus.emit(BusChannels.ExtensionsReloaded, event),
 	});
-	if (!interactive) {
-		for (const issue of userHooks.fileIssues) {
-			process.stderr.write(`[clio-coder:hooks] ${issue.message}\n`);
-		}
-		for (const issue of userHooks.issues) {
-			process.stderr.write(`[clio-coder:hooks] ${issue.source.sourcePath}#${issue.index}: ${issue.issues.join("; ")}\n`);
-		}
-	}
+	extensionReload.applyBoot();
 	termination.onDrain(() => hookReceiptLog.flush());
 	// Autonomy is hot-reloaded for interactive and headless admissions. ACP
 	// server prompts use the snapshot captured at session/new.
@@ -2117,6 +2133,7 @@ export async function bootOrchestrator(options: BootOptions = {}): Promise<BootR
 		...(initialNotices.length > 0 ? { initialNotices } : {}),
 		...(resources ? { resources } : {}),
 		...(extensions ? { extensions } : {}),
+		reloadExtensions: () => extensionReload.reload(),
 		...(interop ? { interop } : {}),
 		...(share ? { share } : {}),
 		...(mux ? { mux } : {}),
