@@ -17,8 +17,10 @@
  */
 
 import { BusChannels } from "../../core/bus-events.js";
+import { resolveDispatchFailureStatus } from "../../core/dispatch-outcome.js";
 import type { SafeEventBus } from "../../core/event-bus.js";
 import type { TargetStatus } from "../providers/contract.js";
+import { resolveCostProvenance } from "../providers/types/cost-provenance.js";
 import type { AccountabilitySummary } from "./accountability.js";
 import type {
 	ObservabilityNotice,
@@ -92,17 +94,6 @@ function resolveHeartbeat(status: unknown): ObservabilityRunSummary["status"] | 
 	if (status === "stale") return "stale";
 	if (status === "dead") return "dead";
 	return null;
-}
-
-/** Map a DispatchFailed outcome/reason to a summary status, mirroring the board. */
-function resolveFailedStatus(reason: unknown): ObservabilityRunSummary["status"] {
-	if (reason === "dead" || reason === "stalled") return "dead";
-	if (reason === "interrupted" || reason === "canceled") return "aborted";
-	return "failed";
-}
-
-function normalizeLevel(value: unknown): ObservabilityNotice["level"] {
-	return value === "error" || value === "warning" || value === "info" ? value : "info";
 }
 
 /** Build a notice ref from candidate parts, dropping anything non-string/empty. */
@@ -216,22 +207,20 @@ export function createObservabilityProjection(bus: SafeEventBus, deps: Projectio
 		if (typeof id.runtimeKind === "string" && id.runtimeKind.length > 0) summary.runtimeKind = id.runtimeKind;
 	}
 
+	// num()'s Number.isFinite check matters here specifically: a NaN or
+	// Infinity costUsd/tokenCount from a payload used to pass the bare
+	// `typeof === "number"` check this function had instead, so the projection
+	// could corrupt a run's running total on a malformed terminal payload while
+	// the dispatch board's parseFiniteNumber (an identical check) rejected it.
 	function applyTerminalTokens(summary: ObservabilityRunSummary, payload: Record<string, unknown>): void {
-		if (typeof payload.tokenCount === "number") summary.tokens.total = payload.tokenCount;
+		summary.tokens.total = num(payload.tokenCount, summary.tokens.total);
 		if (typeof payload.inputTokenCount === "number") {
-			summary.tokens.input = payload.inputTokenCount + num(payload.cacheReadTokenCount, 0);
+			summary.tokens.input = num(payload.inputTokenCount, summary.tokens.input) + num(payload.cacheReadTokenCount, 0);
 		}
-		if (typeof payload.outputTokenCount === "number") summary.tokens.output = payload.outputTokenCount;
-		if (typeof payload.reasoningTokenCount === "number") summary.tokens.reasoning = payload.reasoningTokenCount;
-		if (typeof payload.costUsd === "number") summary.costUsd = payload.costUsd;
-		if (
-			payload.costProvenance === "known" ||
-			payload.costProvenance === "known_free" ||
-			payload.costProvenance === "estimated" ||
-			payload.costProvenance === "unknown"
-		) {
-			summary.costProvenance = payload.costProvenance;
-		}
+		summary.tokens.output = num(payload.outputTokenCount, summary.tokens.output);
+		summary.tokens.reasoning = num(payload.reasoningTokenCount, summary.tokens.reasoning);
+		summary.costUsd = num(payload.costUsd, summary.costUsd);
+		summary.costProvenance = resolveCostProvenance(payload.costProvenance, summary.costProvenance);
 	}
 
 	function pushNotice(
@@ -337,7 +326,7 @@ export function createObservabilityProjection(bus: SafeEventBus, deps: Projectio
 			const now = Date.now();
 			const summary = runs.get(runId) ?? emptyRun(runId, now);
 			applyIdentity(summary, payload);
-			summary.status = resolveFailedStatus(payload.reason);
+			summary.status = resolveDispatchFailureStatus(payload.reason);
 			summary.updatedAtMs = now;
 			summary.finishedAtMs = now;
 			summary.durationMs = num(payload.durationMs, Math.max(0, now - summary.startedAtMs));
@@ -354,71 +343,6 @@ export function createObservabilityProjection(bus: SafeEventBus, deps: Projectio
 			if (payload.status === null || typeof payload.status !== "object") return;
 			providerHealth.set(payload.id, payload.status as TargetStatus);
 			markChanged();
-		}),
-		bus.on(BusChannels.RuntimeNotice, (raw: unknown) => {
-			const payload = (raw ?? {}) as Record<string, unknown>;
-			pushNotice(
-				"runtime",
-				normalizeLevel(payload.level),
-				str(payload.message, "runtime notice"),
-				makeRef({ targetId: payload.targetId, modelId: payload.model }),
-			);
-		}),
-		bus.on(BusChannels.MiddlewareHookFailed, (raw: unknown) => {
-			const payload = (raw ?? {}) as Record<string, unknown>;
-			const kind = payload.kind;
-			// Mirror the interactive notice policy: every crashed hook surfaces, but
-			// a budget overrun only surfaces once it is steady-state slowness.
-			if (kind === "budget_exceeded" && payload.steadyStateWarn !== true) return;
-			const hook = str(payload.hook, "hook");
-			const message =
-				typeof payload.message === "string" && payload.message.length > 0
-					? payload.message
-					: kind === "budget_exceeded"
-						? `middleware hook ${hook} exceeded ${num(payload.budgetMs, 0)}ms budget`
-						: `middleware hook ${hook} failed`;
-			pushNotice("middleware", kind === "budget_exceeded" ? "warning" : "error", message);
-		}),
-		bus.on(BusChannels.SafetyBlocked, (raw: unknown) => {
-			const payload = (raw ?? {}) as Record<string, unknown>;
-			const tool = str(payload.tool, "tool");
-			const rejection = (payload.rejection ?? {}) as { short?: unknown };
-			const short = str(rejection.short, `${str(payload.actionClass, "action")} blocked`);
-			pushNotice("safety", "warning", `${tool}: ${short}`, makeRef({ tool: payload.tool }));
-		}),
-		bus.on(BusChannels.LoopBlocked, (raw: unknown) => {
-			const payload = (raw ?? {}) as Record<string, unknown>;
-			const tool = str(payload.tool, "tool");
-			pushNotice(
-				"loop",
-				payload.interrupted === true ? "error" : "warning",
-				`loop guard blocked repeated ${tool} (${num(payload.repeatCount, 0)}x)`,
-				makeRef({ tool: payload.tool }),
-			);
-		}),
-		bus.on(BusChannels.ToolBudgetExceeded, (raw: unknown) => {
-			const payload = (raw ?? {}) as Record<string, unknown>;
-			const tool = str(payload.tool, "tool");
-			pushNotice(
-				"tool-budget",
-				payload.interrupted === true ? "error" : "warning",
-				`tool-call budget reached on ${tool} (${num(payload.callsThisTurn, 0)} calls)`,
-				makeRef({ tool: payload.tool }),
-			);
-		}),
-		bus.on(BusChannels.ContextPruned, (raw: unknown) => {
-			const payload = (raw ?? {}) as Record<string, unknown>;
-			const reclaimed = Math.max(0, num(payload.tokensBefore, 0) - num(payload.tokensAfter, 0));
-			pushNotice("context", "info", `context pruned ${reclaimed} tokens (${str(payload.stage, "prune")})`);
-		}),
-		bus.on(BusChannels.BudgetAlert, (raw: unknown) => {
-			const payload = (raw ?? {}) as Record<string, unknown>;
-			const over = payload.level === "over";
-			pushNotice(
-				"budget",
-				over ? "error" : "warning",
-				`session cost $${num(payload.currentUsd, 0).toFixed(2)} ${over ? "over" : "at"} $${num(payload.ceilingUsd, 0).toFixed(2)} ceiling`,
-			);
 		}),
 	];
 

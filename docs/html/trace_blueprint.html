@@ -65,7 +65,12 @@ try to change it, because changing journal mode is a database write.</p>
 <p>The seven Clio trace tables are <code>runs</code>, <code>phases</code>, <code>events</code>, <code>envelopes</code>,
 <code>gate_results</code>, <code>agent_sessions</code>, and <code>processes</code>; <code>meta</code> carries the schema
 version. Runs use terminal run ids. Interactive session turns are also recorded
-as <code>runs</code> rows using <code>assignment_id = &quot;session&quot;</code>. A phase belongs to a run and carries its
+as <code>runs</code> rows, distinguished by <code>runs.source</code> (<code>&#39;dispatch&#39;</code> or <code>&#39;session&#39;</code>;
+a session turn also carries the historical sentinel <code>assignment_id =
+&quot;session&quot;</code>, which predates the column and is unchanged). <code>runs.source</code> is an
+additive column: a database created before it existed gains it in place on
+next open, backfilled from that sentinel, the same way <code>processes.host</code> and
+<code>processes.birth_token</code> were added without a schema-version bump. A phase belongs to a run and carries its
 assignment/worker-facing name, kind, owner, attempt, timing, status, itemized
 token spend, optional itemized dollar spend, total dollar spend, and context
 occupancy. Missing historical or unavailable component costs are <code>NULL</code>, never
@@ -129,7 +134,7 @@ clio-coder trace ui [--db PATH] [--port N]
 </ul>
 <h3>Subcommand Specifications</h3>
 <ol>
-<li><strong><code>runs</code></strong>: Lists recent dispatch runs from the trace store. <code>--limit</code> sets maximum rows (1 to 500, default 50); <code>--json</code> emits the selected trace rows as an array. Formats status, start time, total tokens, total USD cost, and run ID in text mode.</li>
+<li><strong><code>runs</code></strong>: Lists recent dispatch runs and interactive session turns from the trace store. <code>--limit</code> sets maximum rows (1 to 500, default 50); <code>--json</code> emits the selected trace rows as an array. Formats status, <code>source</code> (<code>dispatch</code> or <code>session</code>), start time, total tokens, total USD cost, and run ID in text mode.</li>
 <li><strong><code>inspect</code></strong>: Emits only <code>--json</code>, from the default database, with no caller-controlled path or window. The version-1 snapshot carries at most eight newest runs and bounded phase, event-kind, and process-kind aggregates. It omits request text, phase error prose, event payloads, command lines, PIDs, hosts, and database paths, and distinguishes an unavailable database from an available empty one through <code>available</code>.</li>
 <li><strong><code>phases</code></strong>: Lists sequence phases for a designated <code>runId</code>. Displays status, attempt, owner, total tokens, USD cost, and phase name.</li>
 <li><strong><code>tail</code></strong>: Displays append-ordered event rows for a designated <code>runId</code>. When <code>--follow</code> is specified, polls for new events every 500 ms until two consecutive idle polls observe a finished run status.</li>

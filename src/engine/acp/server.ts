@@ -209,6 +209,8 @@ interface AcpServerUsage {
 	cacheRead: number;
 	cacheWrite: number;
 	reasoning: number;
+	totalTokens: number;
+	costUsd: number;
 }
 
 function isRecord(value: unknown): value is Record<string, unknown> {
@@ -521,8 +523,8 @@ function utf8Bytes(value: string): number {
 	return Buffer.byteLength(value, "utf8");
 }
 
-function emptyUsage(): AcpServerUsage {
-	return { input: 0, output: 0, cacheRead: 0, cacheWrite: 0, reasoning: 0 };
+export function emptyUsage(): AcpServerUsage {
+	return { input: 0, output: 0, cacheRead: 0, cacheWrite: 0, reasoning: 0, totalTokens: 0, costUsd: 0 };
 }
 
 function createActivePromptState(): ActivePrompt {
@@ -552,15 +554,33 @@ function finite(value: unknown): number {
 	return typeof value === "number" && Number.isFinite(value) && value > 0 ? value : 0;
 }
 
-function mergeUsage(into: AcpServerUsage, usage: unknown): void {
+/** Only field `sumRunUsage` (chat-loop-messages.ts) reads for a dollar figure; matched here so ACP never re-derives cost through a separate path. */
+function costTotal(usage: Record<string, unknown>): number {
+	const cost = usage.cost;
+	return isRecord(cost) ? finite(cost.total) : 0;
+}
+
+export function mergeUsage(into: AcpServerUsage, usage: unknown): void {
 	if (!isRecord(usage)) return;
-	into.input +=
+	const input =
 		finite(usage.input) + finite(usage.inputTokens) + finite(usage.input_tokens) + finite(usage.prompt_tokens);
-	into.output +=
+	const output =
 		finite(usage.output) + finite(usage.outputTokens) + finite(usage.output_tokens) + finite(usage.completion_tokens);
-	into.cacheRead += finite(usage.cacheRead) + finite(usage.cacheReadTokens) + finite(usage.cache_read_tokens);
-	into.cacheWrite += finite(usage.cacheWrite) + finite(usage.cacheWriteTokens) + finite(usage.cache_write_tokens);
-	into.reasoning += finite(usage.reasoning) + finite(usage.reasoningTokens) + finite(usage.reasoning_tokens);
+	const cacheRead = finite(usage.cacheRead) + finite(usage.cacheReadTokens) + finite(usage.cache_read_tokens);
+	const cacheWrite = finite(usage.cacheWrite) + finite(usage.cacheWriteTokens) + finite(usage.cache_write_tokens);
+	const reasoning = finite(usage.reasoning) + finite(usage.reasoningTokens) + finite(usage.reasoning_tokens);
+	into.input += input;
+	into.output += output;
+	into.cacheRead += cacheRead;
+	into.cacheWrite += cacheWrite;
+	into.reasoning += reasoning;
+	// Same fallback sumRunUsage uses: prefer the provider's own total, otherwise
+	// sum the four merged categories for this message (reasoning excluded,
+	// matching sumRunUsage, since a provider that reports reasoning separately
+	// still counts it inside output for billing).
+	const explicitTotal = finite(usage.totalTokens) + finite(usage.total_tokens);
+	into.totalTokens += explicitTotal > 0 ? explicitTotal : input + output + cacheRead + cacheWrite;
+	into.costUsd += costTotal(usage);
 }
 
 function mergeMessageUsage(into: AcpServerUsage, message: unknown, seen?: WeakSet<object>): void {
@@ -2607,6 +2627,8 @@ function promptResponse(stopReason: string, active: ActivePrompt): AcpPromptResp
 				cacheRead: active.usage.cacheRead,
 				cacheWrite: active.usage.cacheWrite,
 				reasoning: active.usage.reasoning,
+				totalTokens: active.usage.totalTokens,
+				costUsd: active.usage.costUsd,
 			},
 		},
 	};

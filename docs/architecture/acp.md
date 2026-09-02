@@ -214,7 +214,7 @@ The shipped `clio-coder acp` composition supplies the session, settings, provide
 | `clio-coder/replay` | replayed `session/update.params._meta` | `{ turn }`; absent on live updates. |
 | `clio-coder/truncated` | `clio-coder/targets/list` or `clio-coder/session/list` result `_meta` | `true` only when that method's aggregate byte budget omitted a target/model entry or session row; absent otherwise. |
 | `clio-coder/tools` | `initialize` → `agentCapabilities._meta` | `"mediated"` |
-| `clio-coder/usage` | `session/prompt` result `_meta` | `{ input, output, cacheRead, cacheWrite, reasoning }` |
+| `clio-coder/usage` | `session/prompt` result `_meta` | `{ input, output, cacheRead, cacheWrite, reasoning, totalTokens, costUsd }` |
 | `clio-coder/error` | any `error.data._meta` | `{ version, code, reason?, supported? }` |
 
 ---
