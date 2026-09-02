@@ -1101,6 +1101,7 @@ export function createTurnContext(deps: TurnContextDeps): TurnContext {
 			}
 			try {
 				const result = await deps.prompts.compileSessionPrompt({
+					sessionId,
 					sessionInputs,
 					autonomy,
 					cwd,
