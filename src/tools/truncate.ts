@@ -8,12 +8,13 @@ import {
 	truncateTail as truncatePiTail,
 } from "../engine/truncate.js";
 
-// Per-observation source cap. Pi defaults to 50 KiB; Clio deliberately keeps
-// one result proportional to its per-turn observation budget at 16 KiB. The
-// wrappers below retain only that product-level delta while Pi owns UTF-8-safe
-// head/tail truncation, line limits, grep-line clipping, and size formatting.
+// Per-observation source cap. Pi defaults to 50 KiB; Clio allows 64 KiB while
+// its default 192 KiB turn pool remains authoritative across calls. Three full
+// results consume that pool, so a fourth finds it filled. The wrappers below
+// retain only that product-level delta while Pi owns UTF-8-safe head/tail
+// truncation, line limits, grep-line clipping, and size formatting.
 export const DEFAULT_MAX_LINES = 2000;
-export const DEFAULT_MAX_BYTES = 16 * 1024;
+export const DEFAULT_MAX_BYTES = 64 * 1024;
 export type { TruncationResult };
 export { formatSize, GREP_MAX_LINE_LENGTH, truncateLine };
 

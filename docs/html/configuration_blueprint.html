@@ -440,6 +440,13 @@ remaining context window. Models with no known cap use a 32,768-token ceiling
 instead of the whole remaining context window. A per-target
 <code>capabilities.maxTokens</code> override records the model&#39;s true cap. Set a positive
 value to impose a smaller global ceiling.</p>
+<p><code>context.toolResultMaxBytes</code> caps one tool result before Clio truncates the
+visible body and spills the complete text to the session scratch file. It
+defaults to 65,536 bytes and accepts integers of at least 4,096. The setting is
+read before every tool result, so a session override or configuration reload
+applies to the next result. The separate
+<code>safety.limits.observationBytesPerTurn</code> guardrail remains 196,608 bytes. Three
+full-size results consume that shared turn pool, so a fourth finds it filled.</p>
 <p>The setting <code>fleet.retry.maxRetries</code> controls automated retries for retryable
 fleet failures. Setting it to <code>0</code> disables retries.</p>
 <p>The setting <code>fleet.permissions.mode</code> decides how noninteractive workers handle
@@ -943,6 +950,12 @@ this guide remain the canonical version-2 paths in the inventory below.</p>
 <td>unset</td>
 <td>non-empty path string when present</td>
 <td>next turn</td>
+</tr>
+<tr>
+<td><code>context.toolResultMaxBytes</code></td>
+<td><code>65536</code></td>
+<td>integer ≥ 4096; complete overflow spills to the session scratch file; three full-size results consume the default 196,608-byte turn pool, so a fourth finds it filled</td>
+<td>next turn; a live session change applies to the next tool result</td>
 </tr>
 <tr>
 <td><code>context.memory.enabled</code></td>

@@ -333,6 +333,14 @@ instead of the whole remaining context window. A per-target
 `capabilities.maxTokens` override records the model's true cap. Set a positive
 value to impose a smaller global ceiling.
 
+`context.toolResultMaxBytes` caps one tool result before Clio truncates the
+visible body and spills the complete text to the session scratch file. It
+defaults to 65,536 bytes and accepts integers of at least 4,096. The setting is
+read before every tool result, so a session override or configuration reload
+applies to the next result. The separate
+`safety.limits.observationBytesPerTurn` guardrail remains 196,608 bytes. Three
+full-size results consume that shared turn pool, so a fourth finds it filled.
+
 The setting `fleet.retry.maxRetries` controls automated retries for retryable
 fleet failures. Setting it to `0` disables retries.
 
@@ -586,6 +594,7 @@ This is the version-2 durable schema shipped in `DEFAULT_SETTINGS`. Validation i
 
 | Key | Default | Validation | When it applies |
 | --- | --- | --- | --- |
+| `context.toolResultMaxBytes` | `65536` | integer ≥ 4096; complete overflow spills to the session scratch file; three full-size results consume the default 196,608-byte turn pool, so a fourth finds it filled | next turn; a live session change applies to the next tool result |
 | `context.workingSet.enabled` | `true` | boolean | next turn |
 | `context.workingSet.policy` | `structural-v1` | `structural-v1` or `age-horizon` | next turn |
 | `context.workingSet.target` | `0.6` | number greater than 0 and less than 1 | next turn |

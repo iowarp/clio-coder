@@ -1486,7 +1486,11 @@ export function validateSettings(raw: unknown): SettingsValidationResult {
 		if (!isPlainObject(raw.context)) issues.add("context", `expected a map, got ${describe(raw.context)}`);
 		else {
 			const context = raw.context;
-			issues.unknownKeys("context", context, ["workingSet", "compaction", "memory"]);
+			issues.unknownKeys("context", context, ["toolResultMaxBytes", "workingSet", "compaction", "memory"]);
+			if ("toolResultMaxBytes" in context) {
+				const parsed = expectInteger(issues, "context.toolResultMaxBytes", context.toolResultMaxBytes, { min: 4096 });
+				if (parsed !== undefined) settings.context.toolResultMaxBytes = parsed;
+			}
 			if ("workingSet" in context) {
 				if (!isPlainObject(context.workingSet))
 					issues.add("context.workingSet", `expected a map, got ${describe(context.workingSet)}`);
