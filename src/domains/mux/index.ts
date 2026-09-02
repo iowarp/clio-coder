@@ -113,4 +113,4 @@ export {
 	type YaziSessionOptions,
 	type YaziSessionSnapshot,
 } from "./yazi/session.js";
-export { renderYaziTheme } from "./yazi/theme.js";
+export { renderHerdrThemeBlock, renderYaziTheme } from "./yazi/theme.js";
