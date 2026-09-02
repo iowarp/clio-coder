@@ -1,4 +1,7 @@
-import { deepStrictEqual, match, ok, rejects, strictEqual } from "node:assert/strict";
+import { deepStrictEqual, match, ok, rejects, strictEqual, throws } from "node:assert/strict";
+import { mkdirSync, mkdtempSync, rmSync, writeFileSync } from "node:fs";
+import { tmpdir } from "node:os";
+import { join } from "node:path";
 import { afterEach, beforeEach, describe, it } from "node:test";
 
 import { DEFAULT_SETTINGS } from "../../src/core/defaults.js";
@@ -12,7 +15,11 @@ import { assessCapabilityMismatch } from "../../src/domains/dispatch/capability-
 import { isBoundedGateRolePrompt, REVIEWER_GATE_PROMPT } from "../../src/domains/dispatch/gate-role-prompts.js";
 import { normalizeDispatchIntent } from "../../src/domains/dispatch/intent.js";
 import { classifyDispatchIntentCompatibility } from "../../src/domains/dispatch/intent-compatibility.js";
-import { declaredScopeReplacementNotice, resolveDispatchPathScope } from "../../src/domains/dispatch/path-scope.js";
+import {
+	declaredScopeReplacementNotice,
+	inferredScopeDroppedPathNotice,
+	resolveDispatchPathScope,
+} from "../../src/domains/dispatch/path-scope.js";
 import { endpointCapacityFor } from "../../src/domains/providers/endpoint-capacity.js";
 import {
 	EMPTY_CAPABILITIES,
@@ -162,6 +169,58 @@ describe("dispatch admission boundary", () => {
 		} as Parameters<typeof resolveDispatchPathScope>[0]);
 		strictEqual(scope.source, "inferred");
 		ok(scope.workingContextPaths.includes("parser.js"));
+	});
+
+	it("anchors a quoted ../ specifier that names a real file, drops one that does not, and still refuses an escape", () => {
+		// Round-5 run 3: a coder briefing quoted `import { Store } from "../src/store.js"`
+		// out of test/store.test.ts and admission failed the whole dispatch with
+		// legacy_scope_path_malformed. Inference never sees the quote's origin, so
+		// the remainder is probed against the dispatch root instead of refused.
+		const root = mkdtempSync(join(tmpdir(), "clio-path-scope-"));
+		try {
+			mkdirSync(join(root, "src"), { recursive: true });
+			writeFileSync(join(root, "src", "store.js"), "export const store = 1;\n", "utf8");
+			const scope = resolveDispatchPathScope({
+				cwd: root,
+				task: "Make the store durable",
+				briefing: 'test/store.test.ts has import { Store } from "../src/store.js" and ../src/absent.js',
+			} as Parameters<typeof resolveDispatchPathScope>[0]);
+			strictEqual(scope.source, "inferred");
+			ok(scope.workingContextPaths.includes("src/store.js"), scope.workingContextPaths.join(","));
+			ok(!scope.workingContextPaths.includes("../src/absent.js"), scope.workingContextPaths.join(","));
+			deepStrictEqual(
+				scope.droppedPaths.map((entry) => entry.path),
+				["../src/absent.js"],
+			);
+			const notice = inferredScopeDroppedPathNotice(scope);
+			ok(notice, "a dropped prose token is named in the scope notice");
+			ok(notice.message.startsWith("[dispatch scope] "), notice.message);
+			ok(notice.message.includes("../src/absent.js"), notice.message);
+			throws(
+				() =>
+					resolveDispatchPathScope({
+						cwd: root,
+						task: "read src/../../etc/passwd now",
+					} as Parameters<typeof resolveDispatchPathScope>[0]),
+				/legacy_scope_path_malformed/u,
+			);
+		} finally {
+			rmSync(root, { recursive: true, force: true });
+		}
+	});
+
+	it("keeps typed scope entries refusing a parent segment that prose inference now anchors", () => {
+		// The prose leniency stops at the request text. A declared scope entry has
+		// a known root and an escape there is decidable, so it stays a refusal.
+		const relevant = normalizeDispatchIntent({ version: 2, relevant_paths: ["../src/store.js"] }, new Map());
+		ok(!relevant.ok);
+		strictEqual(relevant.reason, "intent_path_escapes_root");
+		const read = normalizeDispatchIntent({ version: 2, read_roots: ["../src/store.js"] }, new Map());
+		ok(!read.ok);
+		strictEqual(read.reason, "intent_path_escapes_root");
+		const outputs = normalizeDispatchIntent({ version: 2, expected_outputs: ["../src/store.js"] }, new Map());
+		ok(!outputs.ok);
+		strictEqual(outputs.reason, "intent_path_escapes_root");
 	});
 
 	it("reports only path-looking tokens when a typed intent replaces prose inference", () => {
