@@ -1,12 +1,12 @@
 ---
 name: worktree-merge
-description: Use when parallel worktree branches are finished and the user asks to integrate them — "merge my worktrees", "integrate these branches". Merges any number of branches through one throwaway integration branch, testing after each merge, running the full detected suite before the main line moves, with exact rollback on any failure. Not for creating worktrees; use worktree-create.
+description: Integrates finished worktree branches through one throwaway integration branch, testing after each merge and running the full suite before the main line moves, with exact rollback on failure. Not for creating worktrees; use worktree-create.
 triggers:
   - merge my worktrees
   - integrate these worktree branches
   - combine parallel branches
   - land finished worktrees
-version: 0.2.1
+version: 0.3.0
 license: Apache-2.0
 allowed-tools:
   - read

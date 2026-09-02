@@ -1,6 +1,6 @@
 ---
 name: experiment-protocol
-description: Use when running a performance study, numerical comparison, parameter sweep, kernel or solver benchmark, or any change justified by "faster" or "more accurate", and success criteria should be locked before results exist. Pre-registers thresholds, tolerances, environment pins, and verdict conditions into the repository validation contract before any measurement. Triggers on "benchmark", "compare implementations", "optimize", "tolerance", "reproduce results", "parameter sweep". Not for diagnosing a stalled bug; use scientific-debugging.
+description: "Pre-registers a performance study, numerical comparison, parameter sweep, or benchmark: thresholds, tolerances, environment pins, and verdict conditions locked into the validation contract before any measurement. Not for diagnosing a stalled bug; use scientific-debugging."
 triggers:
   - benchmark these implementations
   - pre-register a performance experiment
@@ -8,7 +8,7 @@ triggers:
   - define numerical tolerances
   - reproduce these results
   - compare solver accuracy
-version: 0.1.3
+version: 0.2.0
 license: Apache-2.0
 allowed-tools:
   - read

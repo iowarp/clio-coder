@@ -280,10 +280,11 @@ function renderSkillsList(
 		// claim none is configured; it simply has nothing to list.
 		return marketplaceOffered ? "No skills are installed and no marketplace is configured." : "No skills are installed.";
 	}
-	const lines = [
-		"Available skills. Match the current task against the descriptions below: when one fits, suggest the operator run /skill <name>; when several compose, suggest the sequence in order. Skill bodies load only after an explicit operator request; never load one without it.",
-		"",
-	];
+	// The header names the listing and nothing more. The reply protocol is
+	// stated once, as the recency anchor at the bottom, because that is the
+	// line literal models act on; a second copy up here cost every listing
+	// call the same sentences again.
+	const lines = ["Available skills.", ""];
 	if (skills.length > 0) {
 		lines.push("Installed:");
 		for (const skill of skills) {
@@ -297,10 +298,7 @@ function renderSkillsList(
 		// operator's /skill <name> prompts to install before it runs, so the
 		// model's move is the same suggest-and-wait. Only the body is out of
 		// reach until then, which is why the description is all that appears.
-		lines.push(
-			"",
-			"Marketplace (not installed; /skill <name> offers to install, or `clio-coder skills install <name>`). Suggest these the same way when one matches; their bodies cannot be loaded until the operator installs them:",
-		);
+		lines.push("", "Marketplace (not installed; /skill <name> offers to install):");
 		for (const entry of marketplace) {
 			const category = entry.category ? ` [${entry.category}]` : "";
 			lines.push(`- ${entry.name}${category}: ${entry.description}`);

@@ -1,13 +1,13 @@
 ---
 name: tech-spec
-description: Write a typed call-stack architecture handoff — code-shaped contracts plus execution flows, implementation-ready for another engineer. User-invoked only. Not for weighing approaches or deciding the design; use architecture first.
+description: "Writes a typed call-stack architecture handoff: code-shaped contracts plus execution flows, implementation-ready for another engineer. User-invoked only. Not for weighing approaches or deciding the design; use architecture first."
 triggers:
   - write a tech spec
   - typed call-stack handoff
   - code-shaped contracts
   - implementation-ready technical specification
   - specify execution flows
-version: 0.1.2
+version: 0.2.0
 license: Apache-2.0
 disable-model-invocation: true
 allowed-tools:

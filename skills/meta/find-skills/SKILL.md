@@ -1,13 +1,13 @@
 ---
 name: find-skills
-description: Use when the user asks "is there a skill for X", "find a skill", "install a skill", "add a skill", asks whether a capability exists as an installable skill, or wants to extend the agent with functionality that might already be published. Searches with `clio-coder skills search`, browses the ecosystem read-only, and installs only through `clio-coder skills install`. Not for authoring a new skill; use skill-craft.
+description: Finds and installs published skills when the user asks whether a capability exists as a skill, searching with clio-coder skills search and installing only through clio-coder skills install. Not for authoring a new skill; use skill-craft.
 triggers:
   - find a skill
   - is there a skill for this
   - install a skill
   - add an agent skill
   - search the skills marketplace
-version: 0.1.2
+version: 0.2.0
 license: Apache-2.0
 allowed-tools:
   - bash

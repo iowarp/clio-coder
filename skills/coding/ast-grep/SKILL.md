@@ -1,13 +1,13 @@
 ---
 name: ast-grep
-description: Use when a code search needs structure, not text — "find all async functions without error handling", "find calls with this argument shape", "find X inside Y" — or when grep returns too much noise to filter. Writes and tests ast-grep rules, then scans the codebase. Search only; never rewrites code. Not for plain string or filename lookups; use grep or find.
+description: "Structural code search with ast-grep rules: finds code by shape when grep on text is too noisy, and never rewrites it. Not for plain string or filename lookups; use grep or find."
 triggers:
   - structural code search
   - ast-grep rule
   - find calls with this argument shape
   - find code inside a function
   - grep returns too much noise
-version: 0.1.1
+version: 0.2.0
 license: Apache-2.0
 allowed-tools:
   - bash

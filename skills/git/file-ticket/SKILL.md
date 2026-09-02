@@ -1,13 +1,13 @@
 ---
 name: file-ticket
-description: Use when something noticed mid-session must become a tracker issue — "file a ticket", "open an issue for this", "log this bug", "ticket this behavior". Captures evidence from the live session, dedups against existing issues, composes a labeled issue with acceptance criteria, confirms, and creates it via gh. Filing only; never fixes. Not for batch ticket creation from a PRD; use backlog. Not for diagnosing an existing issue; use fix-issue.
+description: "Turns something noticed mid-session into a tracker issue: captures evidence, dedups against existing issues, composes a labeled issue with acceptance criteria, confirms, and creates it via gh. Not for batch ticket creation from a PRD; use backlog. Not for diagnosing an existing issue; use fix-issue."
 triggers:
   - file a ticket
   - open an issue for this
   - log this bug
   - ticket this behavior
   - create a tracker issue
-version: 0.1.2
+version: 0.2.0
 license: Apache-2.0
 allowed-tools:
   - read
