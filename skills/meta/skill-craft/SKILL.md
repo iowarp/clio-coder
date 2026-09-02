@@ -7,7 +7,7 @@ triggers:
   - improve this skill
   - why isn't this skill firing
   - prune a skill body
-version: 0.2.0
+version: 0.3.0
 license: Apache-2.0
 allowed-tools:
   - read
@@ -36,11 +36,14 @@ tool. Project skills live in `.clio-coder/skills/<name>/`; user skills in the Cl
 config dir under `skills/<name>/`. The loader validates on load; check work
 with `clio-coder skills validate`. Frontmatter contract (Agent Skills compatible):
 
-- `name`: lowercase-hyphen, ≤64 chars, must match the folder.
+- `name`: lowercase-hyphen, ≤64 chars. Catalog convention requires it to match
+  the folder; the runtime loader warns on a mismatch and uses the frontmatter
+  name.
 - `description`: required, ≤1024 chars; its craft is the section below. Quote
   it when it contains ` #` — an unquoted YAML scalar is truncated there.
-- `version` and `license`: required for catalog publication; bump the version
-  on any name or description change so drift detection can tell copies apart.
+- `version` and `license`: required for catalog publication. Follow the
+  marketplace versioning policy for body, trigger-surface, and sibling-file
+  changes; the normalized `SKILL.md` hash handles drift separately.
 - `disable-model-invocation: true`: hides the skill from the agent; only the
   user can activate it.
 - `allowed-tools` / `disallowed-tools`: a *narrowing* declaration, not a
@@ -50,7 +53,7 @@ with `clio-coder skills validate`. Frontmatter contract (Agent Skills compatible
   names only (see skills/README.md, "Claude Code interop").
 - `requires`: `skill:<name>` dependencies; the loader warns when one is
   missing. Reference an installed skill by name instead of restating its job.
-- `clio:`: the reserved publication block (`registry-id`, `source-url`,
+- `clio-coder:`: the reserved publication block (`registry-id`, `source-url`,
   `audit`, `provenance` designed|adapted|imported with `origin` when not
   designed, `eval-status`, optional `model-size` and `agents`). Required for
   catalog skills; approval is judged against it (skills/README.md).

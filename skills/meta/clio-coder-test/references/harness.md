@@ -1,126 +1,102 @@
 # Clio test harness reference
 
-How to drive the real Clio binary, a mock provider, the ACP surface, and a
-real pseudo-terminal in tests. Every model here is a stub; these are machinery
-tests. A run against a real model is `benchmarks/internal/SKILL.md`.
+This reference covers the harness modules that exist in the current tree:
+temporary-state isolation, dispatch fixtures, a loopback OpenAI-compatible
+server, and the ACP stdio smoke driver. Deterministic tests do not contact a
+real model and the repository currently has no shared spawn or PTY harness.
 
-## Contents
-- The spawn harness (`runCli`, `makeScratchHome`)
-- Mocking a provider (OpenAI-compatible SSE fixture)
-- ACP over JSON-RPC/stdio
-- The PTY (`openPty`, `runInPty`)
-- One-off probes (no test file)
+## Temporary roots and state isolation
 
-## The spawn harness
+The `test:file` and `test` package scripts preload `tests/harness/tmp-root.ts`.
+It creates one guarded root below the system temp directory, points `TMPDIR`
+inside it before test modules load, sweeps abandoned roots only after a bounded
+age, and removes the current root on process exit. `tmp-git-guard.ts` prevents
+a test from creating `.git` at the system or run temp root, where it would alter
+project-boundary discovery for unrelated tests.
 
-`tests/harness/spawn.ts` spawns `node dist/cli/index.js` with piped stdio, so
-**build first** (or keep `npm run dev` running) before running smoke.
+Use `tests/harness/scratch-env.ts` for Clio-specific state:
 
-```ts
-import { makeScratchHome, runCli } from "../harness/spawn.js";
+- `makeScratchHome()` returns a directory, a child-process environment, and a
+  cleanup function without mutating `process.env`.
+- `isolateClioEnv()` snapshots and mutates `process.env`, resets the XDG cache,
+  and returns a restoring teardown.
+- `newScratchClioHome()` and `clearScratchClioHome()` provide the same
+  in-process isolation when a plain directory string is more convenient.
+- `scratchClioEnvVars()` keeps `CLIO_CODER_HOME` and the data, config, state,
+  and cache overrides in one root. The child-process form also sets
+  `CLIO_CODER_REQUIRE_HOME_PREFIX=1`.
 
-const scratch = makeScratchHome();
-try {
-  await runCli(["doctor", "--fix"], { env: scratch.env });   // bootstrap config
-  const res = await runCli(["targets", "--json"], { env: scratch.env, timeoutMs: 20_000 });
-  // res = { code, signal, stdout, stderr }
-  const parsed = JSON.parse(res.stdout) as { targets: unknown[] };
-} finally {
-  scratch.cleanup();
-}
-```
+In-process environment isolation is a process-wide critical section. Await the
+acquire helper in setup and always invoke its matching restore or clear helper
+in teardown.
 
-- `runCli(args, { env, cwd, timeoutMs, input })` → `Promise<{ code, signal, stdout, stderr }>`.
-  Default `timeoutMs` is 15_000; raise it for `run`/`acp`.
-- `makeScratchHome()` → `{ dir, env, cleanup }`. The `env` sets `CLIO_CODER_HOME`,
-  `CLIO_CODER_DATA_DIR`, `CLIO_CODER_CONFIG_DIR`, `CLIO_CODER_CACHE_DIR`, and
-  `CLIO_CODER_REQUIRE_HOME_PREFIX=1`. **Always pass `env: scratch.env`** so the test
-  never touches the developer's real config, and always `cleanup()` in `finally`.
-- Bootstrap a scratch home with `runCli(["doctor", "--fix"], …)` before commands
-  that need settings.
+## Driving the built CLI
 
-Useful flags seen in smoke tests: `--no-context-files`, `--no-skills`,
-`--skill <path>`, `--json`. For the live CLI surface, run `clio-coder --help` and
-`clio-coder <command> --help` rather than hardcoding a command list here.
+Every file under `tests/smoke/` spawns `dist/cli/index.js` through a local
+process driver suited to that boundary:
 
-## Mocking a provider
+- `cli-core.test.ts` captures stdout and stderr with a bounded timeout.
+- `acp-boundary.test.ts` keeps stdin open and frames ACP v1 JSON-RPC messages.
+- `installed-package.test.ts` packs, installs, and launches the installed
+  artifact.
+- `process-lifecycle.test.ts` keeps the process live long enough to verify
+  signal propagation into a tool child.
+- `real-binary-boot.test.ts` supports interactive setup input and bounded
+  shutdown during first-run and migration checks.
 
-To exercise an agent `run` without a real model, stand up an in-process
-OpenAI-compatible server that streams one SSE chunk, then point a target at it by
-patching `settings.yaml`. This is the pattern in `tests/smoke/cli.test.ts`:
+Build before a focused smoke run. `npm run ci` performs that build in the
+correct order. Keep environment roots under a scratch directory, capture both
+output streams, bound every wait, and terminate a surviving child in teardown.
+Do not import a nonexistent shared `runCli`; copy the closest smoke driver's
+small pattern or extract a helper only when more than one current boundary has
+the same contract.
 
-```ts
-// 1. Start a fixture that replies with a fixed string over text/event-stream.
-const fixture = await startOpenAICompatFixture("mock reply");
-// 2. Patch the scratch settings.yaml: add an `openai-compat` target whose
-//    url is fixture.url, set orchestrator.target/model to it, and supply the
-//    apiKeyEnvVar it expects.
-seedOpenAICompatOrchestrator(join(scratch.dir, "config"), fixture.url);
-// 3. Run, providing the key env var the target references.
-const res = await runCli(["--no-context-files", "run", "hello"], {
-  env: { ...scratch.env, CLIO_CODER_TEST_OPENAI_KEY: "sk-test" },
-  timeoutMs: 20_000,
-});
-// res.stdout === "mock reply\n"
-await closeServer(fixture.server);
-```
+## Loopback provider fixtures
 
-The fixture also records `fixture.requests`, so you can assert what Clio sent
-(e.g. that an explicit `--skill` was injected into the prompt).
+`tests/harness/openai-compat-fixture.ts` exports
+`startOpenAICompatFixture()` and `closeServer()`. The fixture listens on an
+ephemeral loopback port, serves `/v1/models` and `/v1/chat/completions`, supports
+streaming text and one scripted tool call, and records request bodies for
+assertions. Its seed helpers write scratch target configurations for
+orchestrator, tool, fleet, bootstrap, and unregistered-runtime cases.
 
-## ACP over JSON-RPC/stdio
+The current reusable fixture is used by provider contracts. Smoke files define
+their own minimal loopback servers because their wire behavior differs. In
+either lane, close the server in teardown and assert the request body when the
+test's claim concerns payload fields.
 
-`clio-coder acp` speaks ACP v1 over stdio. Drive it with a line-delimited JSON-RPC
-client (see `createJsonRpcProcessClient` in the smoke test): `initialize` →
-`session/new` → `session/prompt` → `session/close`. Streaming arrives as
-`session/update` notifications whose `update.sessionUpdate` must be a v1 variant
-(`agent_message_chunk`, `tool_call`, `plan`, `current_mode_update`, …). A
-non-spec discriminator breaks strict clients like Zed, so the smoke test asserts
-every emitted variant is in the v1 set.
+## Dispatch contracts
 
-## The PTY
+`tests/harness/dispatch.ts` provides:
 
-Piped stdio reports no terminal width and no TTY, so the TUI refuses to start
-and every width-sensitive path collapses to 80 columns. `tests/harness/pty.ts`
-opens a real pseudo-terminal through `node-pty` (a devDependency, never
-shipped):
+- `makeDispatchBundle()` with the real prompt customization path and a fast,
+  argument-preserving reproducibility collector.
+- `isolateDispatchState()` and `restoreDispatchState()` for ledger, receipt,
+  and environment isolation.
+- `holdEventLoop()` for contracts that await an unref'd production watchdog.
 
-```ts
-import { openPty, runInPty, stripAnsi, visibleLines } from "../harness/pty.js";
+`dispatch-stub-context.ts` supplies the minimal domain context used by dispatch
+tests. `receipt.ts` supplies typed envelope and receipt drafts. Prefer these
+fixtures over reconstructing broad domain objects in each test.
 
-// Scripted: type on a schedule, stop when the output matches, bounded by a timeout.
-const run = await runInPty(process.execPath, [CLI], { cols: 120, rows: 40, cwd, env,
-  readyWhen: /ctx /, input: [{ afterMs: 200, data: "/quit\r" }], until: /bye/, timeoutMs: 20_000 });
+## ACP over JSON-RPC stdio
 
-// Controllable: write, resize, pause output, wait for a matcher, wait for exit.
-const session = await openPty(process.execPath, [CLI], { cols: 140, rows: 44, cwd, env });
-await session.waitForOutput((out) => /ctx /.test(stripAnsi(out)), 30_000);
-session.write("/quit\r");
-await session.waitForExit(10_000);
-```
+`tests/smoke/acp-boundary.test.ts` owns the current `AcpClient`. It launches
+`clio-coder acp` with piped stdio, parses one JSON object per line, correlates
+responses by id, collects `session/update` notifications, and handles inbound
+`session/request_permission` calls.
 
-Use it only for what a pipe cannot show: width, raw mode, SIGINT through a
-terminal, the alternate-screen and keyboard-protocol teardown. The three
-suites that need it are `tests/smoke/tui-width-matrix.test.ts`,
-`instant-shell-pty.test.ts`, and `render-trace-pty.test.ts`. Anything else
-belongs on `runCli`.
+The exercised sequence is `initialize`, `session/new`, `session/prompt`, then
+`session/close`. Permission cases answer the inbound request with a selected
+`allow-once` or `reject-once` option and assert both the final tool-call update
+and the filesystem outcome. Keep stdout exclusively for protocol frames;
+diagnostics belong on stderr.
 
-## One-off probes (no test file)
+## Disposable probes
 
-To poke at Clio without writing a permanent test, drop a throwaway script in
-your scratch directory and run it with tsx. Delete it when done — never leave
-probes under `tests/`, `scripts/`, or `benchmarks/`.
-
-```ts
-// /tmp/probe.ts
-import { makeScratchHome, runCli } from "/abs/path/to/repo/tests/harness/spawn.js";
-const scratch = makeScratchHome();
-await runCli(["doctor", "--fix"], { env: scratch.env });
-const out = await runCli(["skills", "list", "--json", "--all"], { env: scratch.env, cwd: process.cwd() });
-console.log(out.stdout.slice(0, 400));
-scratch.cleanup();
-```
-
-```bash
-npx tsx /tmp/probe.ts
-```
+A one-off diagnostic belongs under `/tmp`, not `tests/`, `scripts/`, or an
+invented benchmark tree. Run TypeScript probes with `node --import tsx`, point
+all Clio state variables at a fresh temporary root, and delete the probe after
+recording the result. A result from a loopback fixture is machinery evidence,
+not live-model evidence. Live validation must name the configured target,
+model, runtime, prompt, and serving settings.

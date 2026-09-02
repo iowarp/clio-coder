@@ -57,12 +57,12 @@ skills:
   # ── meta ──
   - name: clio-coder-dev
     path: meta/clio-coder-dev
-    version: 0.3.0
-    sha256: 1b306ee79b84d2a59aa9d9949d57c03a8e2841c773e68ca44a64e1a2d29cd376
+    version: 0.4.0
+    sha256: 8980f3bed0f06c24685bc0a02f3ffbbcdac9442616dc3ce54122265b666ae0d7
   - name: clio-coder-test
     path: meta/clio-coder-test
-    version: 0.2.0
-    sha256: 46dbfae2f8fb0e2216067a720a92ee2ffaae5c70f4c8fb9395edb9edbd557daf
+    version: 0.3.0
+    sha256: 87f6689d083080e4b80294304f2b2fd36f70ce941ab7265cb573e84e4c5e6a12
   - name: credentials
     path: meta/credentials
     version: 0.2.0
@@ -77,8 +77,8 @@ skills:
     sha256: eeda051fe8736344b480fbd0d482a0e0ab82d4fc44e7ced5ff7058378beae3b6
   - name: skill-craft
     path: meta/skill-craft
-    version: 0.2.0
-    sha256: eca4b7b70cf8f43d07012c6fc6d08de67edb2f59acff2bf19e73624811daab1d
+    version: 0.3.0
+    sha256: ba81e09412f26647a9384b07359201efb08949865c50934778a4ab3173d43096
   # ── planning ──
   - name: architecture
     path: planning/architecture

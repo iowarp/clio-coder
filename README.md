@@ -390,7 +390,7 @@ The full directory, permission, reset, migration, and uninstall behavior is in
 
 ## Project status
 
-The latest stable release is available from npm as
+The latest release is available from npm as
 [`@iowarp/clio-coder`](https://www.npmjs.com/package/@iowarp/clio-coder) and
 from [GitHub Releases](https://github.com/iowarp/clio-coder/releases/latest).
 The exact release history belongs in the [CHANGELOG](CHANGELOG.md).

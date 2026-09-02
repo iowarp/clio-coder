@@ -51,9 +51,9 @@ const DEFAULT_RUN_TIMEOUT_MS = 600_000;
  *
  * A headless `clio-coder run` has no operator to answer a permission ask, so below
  * full-auto every exec-class call in an arm dies with the harness's own denial
- * and the judge scores a skill that was never allowed to act. Operator decision
- * of 2026-08-13 (docs/findings/HARNESS-NOTES.md item 4): eval arms run
- * full-auto, because their workspaces are per-run copies created under a
+ * and the judge scores a skill that was never allowed to act. The 2026-08-13
+ * harness decision is that eval arms run full-auto because their workspaces
+ * are per-run copies created under a
  * private temp root and removed when the scenario ends. The judge arm is
  * excluded: it scores text and is instructed to call no tools, so granting it
  * unattended write and exec buys nothing.

@@ -26,13 +26,14 @@ Prompt: "Domain A needs something from domain B — just import B's extension.ts
 it's faster."
 Expected:
 - Refuses the rule3 violation; routes through B's `index.ts` contract.
-- Defers to `clio-coder-test` (`check:boundaries`) to verify.
+- Defers to `clio-coder-test` and runs `npm run lint` to verify the boundary.
 
 ## D4 — classify before editing
 Prompt: "Change how the worker gets its spec." (touches an engine/worker seam)
 Expected:
 - Classifies the surface, inspects the contract/tests first, prefers a small
-  pure change, and respects rule2 (worker never imports domains).
+  pure change, and respects rule2 (worker value imports from domains stay in
+  the declared provider rehydration seams; other domain imports are type-only).
 
 ## Baseline failure modes to watch for (RED)
 - Pushes / opens a PR / tags a release on implied (not explicit) intent.
