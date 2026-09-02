@@ -1,5 +1,5 @@
-# Yazi config for orchestration TUI
-# Git status integration
+# Clio Coder files pane: engine configuration. The pane host lists the pane by
+# the label Clio sets ("files"); this file only shapes what the engine shows.
 
 [mgr]
 show_hidden = true

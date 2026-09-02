@@ -513,7 +513,7 @@ absent tool means the current session has no model-facing pane layer.</p>
 <li><code>action</code> (required). <code>show</code>, <code>open</code>, <code>close</code>, or <code>list</code>.</li>
 <li><code>target</code> (show or close). For <code>show</code>, an agent id or run-id prefix. For
 <code>close</code>, a Clio-owned pane id, label, agent id, or <code>all</code>.</li>
-<li><code>preset</code> (open). One of <code>yazi</code>, <code>logs</code>, or <code>shell</code>.</li>
+<li><code>preset</code> (open). One of <code>files</code>, <code>logs</code>, or <code>shell</code>. Opening a preset whose pane is already open focuses that pane instead of splitting again.</li>
 </ul>
 <p><code>show</code> focuses a live dispatched run in the watch pane. <code>open</code> accepts only the
 fixed preset enum. Arbitrary argv is operator-only through <code>/panes open</code> and is

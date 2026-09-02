@@ -51,6 +51,7 @@ For process exit codes, stdout deliverable guarantees, and machine-readable JSON
 | `clio-coder tools install <id> [--force] [--json]` | Download the platform asset, verify every declared checksum, and atomically vendor it. |
 | `clio-coder tools remove <id>\|--all [--json]` | Remove Clio-vendored copies without touching a program found on `PATH`. |
 | `clio-coder panes install` | Alias for `clio-coder tools install herdr`. |
+| `clio-coder panes theme` | Print Clio's theme tokens as a herdr `[theme.custom]` block to paste into herdr's `config.toml`; Clio never edits that file itself. See [Panes and the Files Pane](panes-and-files.md). |
 | `clio-coder reset [--state\|--data\|--cache\|--auth\|--config\|--all] [--dry-run] [--force]` | Reset selected Clio Coder state. `--state` is the default level. |
 | `clio-coder uninstall [--dry-run] [--remove-binary] [--force]` | Remove Clio Coder state and print uninstall guidance. |
 | `clio-coder upgrade [--dry-run] [--channel=<latest\|beta\|dev>] [--skip-migrations]` | Refresh state metadata, apply migrations, and update npm installs when applicable. |
@@ -183,7 +184,8 @@ The registry table below lists the available interactive slash commands. On a ba
 | `/tasks` | `/tasks add <text> \| /tasks hand <id> \| /tasks done <id> \| /tasks drop <id>` | Show the session board or manage project operator tasks |
 | `/memory` | `/memory seed` | Inspect, promote, or seed task memory |
 | `/view` | `/view [filter] \| /view verify <runId>` | Browse session artifacts and verify receipts |
-| `/panes` | `/panes show <run-or-agent> \| /panes open <preset-or-argv> \| /panes close [target]` | Inspect the pane layer, watch a live run in a pane, or open a utility pane |
+| `/panes` | `/panes show <run-or-agent> \| /panes open <preset-or-argv> \| /panes zoom [target] \| /panes close [target]` | Inspect the pane layer, watch a live run in a pane, or open a utility pane (`files`, `logs`, `shell`, `files --once`, or a command); a second open focuses the pane already there |
+| `/files` | `/files [open\|close\|pick]` | Toggle the files pane docked below the session; picks land in the composer as `@` mentions. See [Panes and the Files Pane](panes-and-files.md) |
 | `/thinking` | `/thinking [level]` | Set the chat thinking level, or open Settings → Orchestrator |
 | `/output` | `/output [verbosity]` | Set transcript detail (minimal, default, verbose), or open Settings → Terminal |
 | `/model` | `/model [pattern]` | Open model selector or set a model |
@@ -470,6 +472,7 @@ editor reserves and can be rebound through `settings.yaml.keybindings`.
 | `Alt+L` | Open the model and targets selector. |
 | `Alt+J` / `Alt+K` | Cycle forward / backward through the configured model set (when empty, directs the operator to `/settings chat model-picker`). |
 | `Alt+W` | Toggle the Fleet Runs board (task, run ID, live telemetry, retry, and terminal history). Inside it, `Enter` opens the selected run's live worker detail, `s` steers, and `x` cancels. |
+| `Alt+E` | Toggle the files pane docked below the session in a `--with-panes` session inside herdr; the same as `/files`. Rebind through `clio-coder.files.toggle`. |
 | `Alt+B` | Open the composite session and operator task board (`/tasks`). Approved application-boundary override of editor word-back. |
 | `Alt+D` | Open the settled interview decision board (`/decisions`). Approved application-boundary override of editor word-delete. |
 | `Alt+S` / `Ctrl+Alt+B` | Convert an active attached dispatch to a detached background batch. |

@@ -314,6 +314,8 @@ export interface KeyBindingDeps {
 	requestShutdown: () => void;
 	toggleStatus: () => void;
 	toggleDispatchBoard: () => void;
+	/** `/files` as a key: open the files pane when closed, close it when open. */
+	toggleFilesPane: () => void;
 	openTasks: () => void;
 	openDecisions: () => void;
 	backgroundDispatch: () => void;
@@ -399,6 +401,9 @@ function dispatchInteractiveAction(id: ClioKeybinding, deps: KeyBindingDeps): bo
 		case "clio-coder.dispatchBoard.toggle":
 			deps.toggleDispatchBoard();
 			return true;
+		case "clio-coder.files.toggle":
+			deps.toggleFilesPane();
+			return true;
 		case "clio-coder.tasks.open":
 			deps.openTasks();
 			return true;
@@ -433,6 +438,7 @@ export function routeInteractiveKey(data: string, deps: KeyBindingDeps): boolean
 		"clio-coder.thinking.cycle",
 		"clio-coder.session.tree",
 		"clio-coder.dispatchBoard.toggle",
+		"clio-coder.files.toggle",
 		"clio-coder.tasks.open",
 		"clio-coder.decisions.open",
 		"clio-coder.dispatch.background",
@@ -609,7 +615,7 @@ export async function createInteractiveApplication(deps: InteractiveDeps): Promi
 					getDraft: () => editor.getText(),
 					setDraft: (text) => editor.setText(text),
 					requestRender: () => tui.requestRender(),
-					notice: (level, text) => notify(level, text, `yazi:${level}`),
+					notice: (level, text) => notify(level, text, `files:${level}`),
 					getCwd: () => process.cwd(),
 					getSettings: () =>
 						deps.getSettings?.().interface.panes.files ?? {
@@ -1060,6 +1066,25 @@ export async function createInteractiveApplication(deps: InteractiveDeps): Promi
 				if (deps.onCycleScopedModelBackward?.() === false) announceEmptyScopedSet();
 			},
 			backgroundActiveDispatch,
+			toggleFilesPane: () => {
+				const panes = deps.panes;
+				if (!panes) {
+					notify(
+						"info",
+						"the files pane is inactive: this session started without panes. Restart with `clio-coder --with-panes`, or set interface.panes.enabled=auto",
+						"files:info",
+					);
+					return;
+				}
+				void panes.files("toggle").then((result) => {
+					if (result.status === "opened") {
+						if (result.paneId !== null)
+							notify("success", `files pane ${result.existing ? "focused" : "opened"}`, "files:open");
+					} else if (result.status === "closed") notify("info", "files pane closed", "files:close");
+					else if (result.status === "missing-binary") notify("warning", result.detail, "files:missing");
+					else notify("warning", result.reason, "files:refused");
+				});
+			},
 		},
 		overlay: overlayLifecycle,
 		refreshFooter: () => footer.refresh(),

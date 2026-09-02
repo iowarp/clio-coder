@@ -1,0 +1,369 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <meta name="clio-markdown-source" content="docs/guide/panes-and-files.md">
+  <meta name="clio-docs-version" content="0.4.2">
+  <title>Panes and the Files Pane · Clio Coder 0.4.2</title>
+  <link rel="icon" href="data:,">
+  <link rel="stylesheet" href="shared.css">
+</head>
+<body data-doc-category="guide">
+  <div class="reading-progress" aria-hidden="true"></div>
+  <a class="skip-link" href="#reference-content">Skip to reference</a>
+  <div class="container">
+    <header class="document-header" data-category="Guide">
+      <div class="header-left">
+        <a class="header-logo" href="index.html" aria-label="Documentation index">
+          <svg viewBox="0 0 24 24" fill="none" aria-hidden="true">
+            <path d="M12 2 2 7l10 5 10-5-10-5Z" stroke="url(#clio-logo)" stroke-width="2" stroke-linejoin="round"/>
+            <path d="m2 12 10 5 10-5M2 17l10 5 10-5" stroke="url(#clio-logo)" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"/>
+            <defs><linearGradient id="clio-logo" x1="2" y1="2" x2="22" y2="22"><stop stop-color="#00d4db"/><stop offset="1" stop-color="#ff7e29"/></linearGradient></defs>
+          </svg>
+        </a>
+        <div class="header-title-wrapper">
+          <p class="document-kicker">Guide / canonical reference</p>
+          <h1>Panes and the Files Pane</h1>
+          <p class="document-path">docs/guide/panes-and-files.md</p>
+        </div>
+      </div>
+      <div class="header-right">
+        <a class="back-btn" href="index.html">← Index</a>
+        <span class="version-badge">v0.4.2</span>
+      </div>
+    </header>
+    <div class="page-layout-grid reference-layout">
+      <aside class="sidebar reference-sidebar" aria-label="On this page">
+        <nav class="toc-container">
+          <p class="toc-title">On this page</p>
+          <a class="sidebar-source" href="https://github.com/iowarp/clio-coder/blob/main/docs/guide/panes-and-files.md">Canonical Markdown<br>docs/guide/panes-and-files.md</a>
+          <ul class="toc-list"></ul>
+        </nav>
+      </aside>
+      <main class="reference-main" id="reference-content">
+        <article class="reference-prose glass-card">
+<blockquote>
+<p><strong>Visual blueprint:</strong> The source checkout includes the complete
+<a href="panes_files_blueprint.html">Panes and the Files Pane visual reference</a>.</p>
+</blockquote>
+<p>This page is the operator&#39;s path from a clean machine to a working files pane
+beside a Clio Coder session: what to install, how a session joins its pane
+host, the commands and keys, the settings that govern them, what <code>doctor</code>
+says at each stage, and what to do when something does not open. Every step
+below was run on Linux x64 against Clio Coder 0.4.2 with herdr 0.8.2 and the
+pinned files-pane engine; the outputs quoted are what those runs printed.</p>
+<p>Panes are optional. A session without them behaves exactly as before, and
+nothing on a startup path downloads, probes a socket, or writes a file unless
+panes were asked for.</p>
+<h2>What you get</h2>
+<p>Inside a herdr session, Clio can open panes beside itself and close them
+when it quits:</p>
+<ul>
+<li><strong>The files pane.</strong> A file view docked below the session. <code>/files</code> or
+<code>Alt+E</code> opens it and moves the keyboard into it; the same key or command
+closes it. Picking a file sends it back to the composer as an <code>@file</code>
+mention and returns the keyboard to the prompt. The engine behind it is a
+vendored file manager, installed on request with
+<code>clio-coder tools install yazi</code>; that program&#39;s name appears nowhere else in
+the operator surface.</li>
+<li><strong>The logs pane.</strong> <code>/panes open logs</code> follows the newest dispatched run&#39;s
+event journal with <code>tail -F</code>.</li>
+<li><strong>The shell pane.</strong> <code>/panes open shell</code> opens a login shell in the
+workspace.</li>
+<li><strong>The workers watch pane.</strong> Enter on a live run in the <code>Alt+W</code> board renders
+that run&#39;s stream in a pane to the right. It is documented with the fleet
+in <a href="fleet_dispatch_blueprint.html">Fleet Dispatch</a>; this page covers the utility panes.</li>
+</ul>
+<p>Outside herdr, <code>/files</code> still works: the file view takes over the terminal
+for one pick and returns to the session with the selection in the composer.
+The logs and shell panes need a pane host and say so.</p>
+<h2>Install, from a clean machine</h2>
+<p>Clio bundles neither the pane host nor the files-pane engine. The npm
+package ships the engine&#39;s configuration (the profile under
+<code>src/domains/mux/yazi/assets/</code>), and the two programs are downloaded only
+when an operator asks, from a registry that pins each release&#39;s URL and
+sha256 per platform. A copy already on <code>PATH</code> wins over a vendored one when it
+clears the registry&#39;s minimum version.</p>
+<pre><code class="language-bash">npm install -g @iowarp/clio-coder
+clio-coder configure
+clio-coder tools install herdr     # or: clio-coder panes install
+clio-coder tools install yazi
+</code></pre>
+<p>Both installs verified their checksums and finished in under a second on
+this machine:</p>
+<pre><code class="language-text">$ clio-coder tools install yazi
+  downloading https://github.com/sxyazi/yazi/releases/download/v26.8.15/yazi-x86_64-unknown-linux-gnu.zip
+  checksum verified (cc67eb7991550c2f9407cda52d3f5af0937627aa6884e7de99a04fcf059807e0)
+ok: installed yazi 26.8.15 (MIT) at ~/.local/share/clio-coder/tools/yazi/26.8.15
+</code></pre>
+<p><code>clio-coder tools list</code> then shows where each program resolves. On the test
+machine a file manager from a distribution package sat on <code>PATH</code> below the
+registry floor, and the listing said exactly that rather than reporting it
+missing:</p>
+<pre><code class="language-text">TOOL   PIN      LICENSE     SOURCE    RESOLVED
+herdr  0.8.2    Apache-2.0  path      PATH /home/you/.local/bin/herdr (0.8.2, pin 0.8.2)
+yazi   26.8.15  MIT         vendored  vendored .../tools/yazi/26.8.15/yazi (26.8.15); PATH copy /home/you/.local/bin/yazi is 26.1.22, below the 26.8.15 floor, so Clio runs the vendored copy
+</code></pre>
+<p>The vendored programs live under the data root (<code>clio-coder paths</code>), so
+<code>clio-coder reset --data</code> removes them and <code>tools install</code> brings them back.
+<code>clio-coder tools remove yazi</code> removes only Clio&#39;s copy.</p>
+<h2>Turn panes on</h2>
+<p>Two switches, both off by default:</p>
+<pre><code class="language-yaml">interface:
+  panes:
+    enabled: auto      # detect a herdr session and join it as a guest
+    files:
+      enabled: true    # allow the files pane
+</code></pre>
+<p>Or, for one session, start Clio with <code>clio-coder --with-panes</code> from a pane
+inside herdr; the flag beats the setting in both directions
+(<code>--no-panes</code> turns them off). <code>interface.panes.enabled: embedded</code> is
+accepted but not implemented: it resolves to no panes and says so at boot.</p>
+<p>Guest mode needs three things, checked in this order: <code>HERDR_ENV=1</code> in the
+environment (herdr sets it in every pane it opens), a herdr socket that
+connects, and a ping answered inside one second. <code>HERDR_SOCKET_PATH</code> and
+<code>HERDR_SESSION</code> name the socket when herdr&#39;s defaults do not apply.</p>
+<h2>What doctor says</h2>
+<p><code>clio-coder doctor</code> never fails an install for missing panes; the rows are
+warnings that name the next step. With the settings above and Clio started
+from a plain terminal rather than a herdr pane, the run on this machine
+printed:</p>
+<pre><code class="language-text">OK   external tool herdr    PATH /home/you/.local/bin/herdr (0.8.2, pin 0.8.2)
+WARN external tool yazi     PATH copy /home/you/.local/bin/yazi is 26.1.22, below the 26.8.15 floor, and nothing is vendored (install with `clio-coder tools install yazi`)
+WARN files pane profile     ~/.cache/clio-coder/yazi/profile (missing); user config ~/.config/yazi is separate and untouched
+WARN panes mode             none (panes.enabled=auto); HERDR_ENV is not 1, so Clio is not running inside a pane host
+WARN panes socket           no socket answered; tried /home/you/.config/herdr/herdr.sock
+WARN panes protocol         unknown; Clio&#39;s optional methods need protocol 17 or newer
+OK   panes binary           PATH /home/you/.local/bin/herdr (0.8.2, pin 0.8.2)
+OK   panes layout           off
+</code></pre>
+<p>With both settings off, the same rows read <code>experimental integration disabled by settings</code> and <code>panes mode: off by choice</code>, and doctor does not
+advertise setup work. The <code>files pane profile</code> row is <code>missing</code> until the
+first open generates it, then <code>current</code>; <code>stale</code> means the engine, Clio&#39;s
+version, or the theme changed since, and the next open regenerates it.</p>
+<h2>Commands and keys</h2>
+<table>
+<thead>
+<tr>
+<th>Surface</th>
+<th>What it does</th>
+</tr>
+</thead>
+<tbody><tr>
+<td><code>/files</code></td>
+<td>Toggle the files pane: open it below the session and move the keyboard into it, or close it and return the keyboard to the composer.</td>
+</tr>
+<tr>
+<td><code>Alt+E</code></td>
+<td>The same toggle as a key (<code>clio-coder.files.toggle</code>; <code>Ctrl+G</code> then <code>e</code> on terminals without Alt).</td>
+</tr>
+<tr>
+<td><code>/files open</code></td>
+<td>Open the pane, or focus it when it is already open.</td>
+</tr>
+<tr>
+<td><code>/files close</code></td>
+<td>Close the pane.</td>
+</tr>
+<tr>
+<td><code>/files pick</code></td>
+<td>Borrow the pane for one selection, then close it. Outside herdr, <code>/files</code> always behaves this way.</td>
+</tr>
+<tr>
+<td><code>/panes</code></td>
+<td>Mode, socket, effective settings, the files pane&#39;s state, docks, and every Clio-owned pane.</td>
+</tr>
+<tr>
+<td><code>/panes open files|logs|shell</code></td>
+<td>Open a preset pane; a second open focuses the pane that is already there instead of splitting again. <code>yazi</code> still parses as <code>files</code>.</td>
+</tr>
+<tr>
+<td><code>/panes open files --once</code></td>
+<td>The same one-shot pick as <code>/files pick</code>.</td>
+</tr>
+<tr>
+<td><code>/panes open &lt;command…&gt;</code></td>
+<td>Open an arbitrary command in a pane. Operator-only; the model&#39;s <code>panes</code> tool cannot do this.</td>
+</tr>
+<tr>
+<td><code>/panes show &lt;run-or-agent&gt;</code></td>
+<td>Point the workers watch pane at a live run.</td>
+</tr>
+<tr>
+<td><code>/panes zoom [target]</code></td>
+<td>Toggle zoom on a Clio-owned pane (default: the watch pane).</td>
+</tr>
+<tr>
+<td><code>/panes close [target|all]</code></td>
+<td>Close one Clio-owned pane by id, label, or purpose, or all of them.</td>
+</tr>
+</tbody></table>
+<p>The model has the same doors with one exception: its <code>panes</code> tool opens only
+the three presets (<code>files</code>, <code>logs</code>, <code>shell</code>) and never arbitrary argv. See
+<a href="tool_usage_blueprint.html">Tool Usage</a>.</p>
+<h3>Picking a file</h3>
+<p>The pane opens on the workspace directory with the keyboard in it. Move with
+the arrow keys or <code>j</code>/<code>k</code>, enter a directory with <code>l</code> or <code>Enter</code>, go up with
+<code>h</code>, and mark several files with <code>Space</code>. <code>Ctrl+Y</code> sends the selection to
+Clio; in pick mode <code>Enter</code> on a file does the same and closes the pane.</p>
+<p>What arrives in the composer is appended to the draft, never submitted. A
+file becomes <code>@src/a.ts</code>; a directory or a path with spaces is inserted as
+plain backticked text, because those cannot be file mentions. Up to 32 paths
+and 4,096 characters land per pick, duplicates are skipped, and a notice
+counts what was inserted. The run on this machine, after picking
+<code>SECURITY.md</code> with <code>Ctrl+Y</code>, showed the composer holding <code>@SECURITY.md</code> with
+the keyboard back in it and the notice <code>1 path from the files pane added to the draft</code>.</p>
+<h3>What closes what</h3>
+<ul>
+<li><code>/files</code>, <code>Alt+E</code>, and <code>/files close</code> close the files pane. A pane the
+operator closed from herdr is treated as closed the moment herdr reports
+it, so the next toggle opens rather than trying to close a pane that is
+not there.</li>
+<li><code>/panes close shell</code>, <code>/panes close logs</code>, <code>/panes close all</code> close the
+utility panes.</li>
+<li><code>/quit</code> closes the docks Clio manages, the files pane and the workers
+watch pane, and leaves a shell or logs pane you opened. That pane carries
+Clio&#39;s owner token but is not reclaimed by the next session; close it with
+<code>/panes close all</code> before quitting, or from herdr. Whether <code>/quit</code> should
+take those panes with it is tracked as an issue rather than decided here.</li>
+</ul>
+<h2>Settings</h2>
+<table>
+<thead>
+<tr>
+<th>Key</th>
+<th>Default</th>
+<th>What it controls</th>
+</tr>
+</thead>
+<tbody><tr>
+<td><code>interface.panes.enabled</code></td>
+<td><code>off</code></td>
+<td><code>auto</code> joins a detected herdr session; <code>off</code> skips detection; <code>embedded</code> is accepted and not implemented.</td>
+</tr>
+<tr>
+<td><code>interface.panes.files.enabled</code></td>
+<td><code>false</code></td>
+<td>Whether <code>/files</code>, its key, <code>/panes open files</code>, and the <code>panes</code> tool may open the files pane. Refused with the key&#39;s name otherwise.</td>
+</tr>
+<tr>
+<td><code>interface.panes.files.mode</code></td>
+<td><code>companion</code></td>
+<td><code>companion</code> keeps the pane open across picks; <code>chooser</code> closes it after one selection.</td>
+</tr>
+<tr>
+<td><code>interface.panes.files.profile</code></td>
+<td><code>managed</code></td>
+<td><code>managed</code> runs the engine on Clio&#39;s generated, themed profile; <code>user</code> runs it on the operator&#39;s own configuration, in which case picks use the one-shot chooser.</td>
+</tr>
+<tr>
+<td><code>interface.panes.files.followCwd</code></td>
+<td><code>true</code></td>
+<td>Reopening an open pane pushes the conversation&#39;s working directory into it.</td>
+</tr>
+<tr>
+<td><code>interface.panes.files.ratio</code></td>
+<td><code>0.3</code></td>
+<td>Share of the terminal height the files dock takes, <code>0.05</code> through <code>0.5</code>, floored at a usable number of rows.</td>
+</tr>
+<tr>
+<td><code>interface.panes.layout</code></td>
+<td><code>off</code></td>
+<td><code>workers</code> opens the watch pane at boot; <code>cockpit</code> opens the watch pane and the files pane. Both close on <code>/quit</code>.</td>
+</tr>
+<tr>
+<td><code>interface.panes.notifications</code></td>
+<td><code>failures</code></td>
+<td>Which finished runs raise a herdr toast.</td>
+</tr>
+<tr>
+<td><code>interface.keybindings.&quot;clio-coder.files.toggle&quot;</code></td>
+<td><code>alt+e</code></td>
+<td>Rebind the files toggle.</td>
+</tr>
+</tbody></table>
+<p>Every key is live through <code>/settings</code> under Terminal, files pane, and in the
+<a href="configuration_reference_blueprint.html">Configuration Reference</a>.</p>
+<h2>Theme</h2>
+<p>The files pane is themed from Clio&#39;s own palette. Every color in the
+engine&#39;s generated theme comes from the theme tokens in
+<code>src/core/theme-token-hex.ts</code> (accent, action, success, warning, error, info,
+frame, and the rest), rendered when the managed profile is generated on open
+and stamped into the profile, so a palette change regenerates the profile on
+the next open. Clio ships one palette; there is no separate light theme to
+mirror, and the pane follows whatever Clio itself uses.</p>
+<p>What is not themed by Clio is herdr&#39;s own chrome: the sidebar, tab bar,
+borders, and agent rows come from herdr&#39;s <code>config.toml</code>, and herdr has no
+per-pane styling on its socket. <code>clio-coder panes theme</code> prints Clio&#39;s tokens
+as a herdr <code>[theme.custom]</code> block to paste into that file; Clio does not edit
+another program&#39;s configuration. With <code>interface.panes.files.profile: user</code>,
+nothing is themed and the engine runs on your own configuration.</p>
+<p>Clio&#39;s generated profile lives under the cache root at <code>yazi/profile</code> and
+never touches <code>~/.config/yazi</code>. <code>clio-coder tools status yazi --reset-profile</code>
+deletes it; the next open rebuilds it.</p>
+<h2>Troubleshooting</h2>
+<p><strong><code>panes are inactive: this session started without them</code></strong> on <code>/panes</code> or
+<code>/files</code>: the session booted without the panes extension. Restart with
+<code>clio-coder --with-panes</code> or set <code>interface.panes.enabled: auto</code>.</p>
+<p><strong><code>the pane layer is not available in this session: HERDR_ENV is not 1 …</code></strong>
+on <code>/panes open logs</code> or <code>shell</code>: Clio has panes enabled but is not running
+inside a herdr pane. Start herdr, open a pane, run Clio there. <code>/files</code>
+still works as a one-shot pick in this state.</p>
+<p><strong><code>the files pane is disabled by interface.panes.files.enabled</code></strong>: set that
+key to <code>true</code>, or flip Files pane under <code>/settings</code> Terminal.</p>
+<p><strong><code>the files pane engine is not available: not found …</code></strong>: the message
+ends with the install command, <code>clio-coder tools install yazi</code>; run it. If a
+copy is on <code>PATH</code>, the message says which version it found and which floor it
+missed.</p>
+<p><strong><code>no dispatched run has written a journal under … yet</code></strong> on
+<code>/panes open logs</code>: the logs pane follows a run&#39;s journal and no run has
+started in this state root. Dispatch something first.</p>
+<p><strong>The pane opened but nothing arrived after <code>Ctrl+Y</code></strong>: within five seconds
+of opening, Clio expects the pane to report its directory; if that never
+comes it says <code>the files pane did not report back in time; reopening it in pick mode</code> and retries with the one-shot chooser, whose picks arrive through
+a file instead of the event stream. <code>/panes</code> shows <code>file pane: … lastLine=</code>
+and a <code>dropped</code> count of lines that carried another session&#39;s token.</p>
+<p><strong><code>doctor</code> warns <code>files pane profile … (stale)</code></strong>: nothing to do; the next
+open regenerates it. <code>tools status yazi --reset-profile</code> forces it.</p>
+<p><strong>A pane survived <code>/quit</code></strong>: it was a shell or logs pane. See &quot;What closes
+what&quot; above.</p>
+<h2>Where things live</h2>
+<table>
+<thead>
+<tr>
+<th>Path</th>
+<th>What</th>
+</tr>
+</thead>
+<tbody><tr>
+<td><code>&lt;data&gt;/tools/&lt;id&gt;/&lt;version&gt;/</code></td>
+<td>Vendored programs with their license files and an install marker.</td>
+</tr>
+<tr>
+<td><code>&lt;cache&gt;/yazi/profile/</code></td>
+<td>Clio&#39;s generated engine profile: <code>yazi.toml</code>, <code>keymap.toml</code>, <code>theme.toml</code>, <code>init.lua</code>, a git-status plugin, and a stamp of the inputs.</td>
+</tr>
+<tr>
+<td><code>&lt;cache&gt;/yazi/sessions/</code></td>
+<td>Per-pane transport files, removed when the pane closes; anything older than a day is swept on the next open.</td>
+</tr>
+<tr>
+<td><code>&lt;state&gt;/runs/&lt;runId&gt;/events.ndjson</code></td>
+<td>The journal the logs pane follows.</td>
+</tr>
+</tbody></table>
+<p>Resolve <code>&lt;data&gt;</code>, <code>&lt;cache&gt;</code>, and <code>&lt;state&gt;</code> with <code>clio-coder paths</code>.</p>
+        </article>
+        <nav class="related-nav" aria-label="Adjacent references">
+          <a class="nav-link-card" href="commands_blueprint.html"><span class="nav-label">Previous</span><span class="nav-title">Commands and Modes</span></a>
+          <a class="nav-link-card next" href="tool_usage_blueprint.html"><span class="nav-label">Next</span><span class="nav-title">Tool Usage Reference</span></a>
+        </nav>
+        <p class="reference-footer-note">Canonical content lives in the mapped Markdown page. This visual counterpart adds navigation without changing the contract.</p>
+      </main>
+    </div>
+    <footer>Clio Coder documentation · source-aligned at v0.4.2</footer>
+  </div>
+  <script src="shared.js"></script>
+</body>
+</html>

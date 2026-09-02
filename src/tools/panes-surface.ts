@@ -15,7 +15,7 @@ import type { ToolSurface } from "./lazy-tool.js";
 export const panesToolSurface = {
 	name: ToolNames.Panes,
 	description:
-		"Manage the terminal panes Clio owns beside this session: show focuses a dispatched run's viewer pane, open starts a fixed utility preset (never an arbitrary command), close removes a Clio-created pane, list reports the inventory and the pane layer's health.",
+		"Manage the terminal panes Clio owns beside this session: show focuses a dispatched run's viewer pane, open starts a fixed utility preset (files, logs, or shell; never an arbitrary command) or focuses it when it is already open, close removes a Clio-created pane, list reports the inventory and the pane layer's health.",
 	parameters: Type.Object({
 		action: StringEnum(["show", "open", "close", "list"], { description: "Pane action." }),
 		target: Type.Optional(

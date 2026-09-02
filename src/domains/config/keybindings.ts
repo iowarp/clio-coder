@@ -24,6 +24,7 @@ export interface ClioAppKeybindings {
 	"clio-coder.status.toggle": true;
 	"clio-coder.session.tree": true;
 	"clio-coder.dispatchBoard.toggle": true;
+	"clio-coder.files.toggle": true;
 	"clio-coder.tasks.open": true;
 	"clio-coder.decisions.open": true;
 	"clio-coder.dispatch.background": true;
@@ -89,6 +90,13 @@ export const CLIO_APP_KEYBINDINGS = {
 	"clio-coder.dispatchBoard.toggle": {
 		defaultKeys: "alt+w",
 		description: "Toggle the dispatch (workers) board overlay",
+	},
+	"clio-coder.files.toggle": {
+		// Alt+F is a pi-tui editor reserve (word-forward), so the files pane
+		// takes the next letter that reads as "explorer" and stays inside the
+		// Alt+<letter> scheme, which also earns it the Ctrl+G leader fallback.
+		defaultKeys: "alt+e",
+		description: "Toggle the files pane beside the session (a --with-panes session inside herdr)",
 	},
 	"clio-coder.tasks.open": {
 		// Approved application-boundary override of pi-tui editor word-back.
