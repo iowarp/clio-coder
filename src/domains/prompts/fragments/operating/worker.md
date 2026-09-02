@@ -1,7 +1,6 @@
 ---
 id: operating.worker
 version: 1
-budgetTokens: 120
 description: Assigned-task contract for a bounded fleet worker
 ---
 

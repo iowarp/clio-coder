@@ -1,7 +1,6 @@
 ---
 id: identity.self-awareness
 version: 1
-budgetTokens: 130
 description: Clio self-awareness, installed documentation, and harness configuration paths
 ---
 

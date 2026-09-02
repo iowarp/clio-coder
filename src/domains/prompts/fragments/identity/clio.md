@@ -1,7 +1,6 @@
 ---
 id: identity.clio
 version: 1
-budgetTokens: 110
 description: Clio identity and persona block
 ---
 

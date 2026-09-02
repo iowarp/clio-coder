@@ -24,7 +24,7 @@ import { registerBuiltinRuntimes } from "../domains/providers/runtimes/builtins.
 import type { CapabilityFlags } from "../domains/providers/types/capability-flags.js";
 import type { RuntimeTier } from "../domains/providers/types/runtime-descriptor.js";
 import { runConfigureCommand, runTargetRemove, runTargetRename } from "./configure.js";
-import { printError, printOk } from "./shared.js";
+import { noteDeprecatedFlag, printError, printOk } from "./shared.js";
 import { column, terminalColumns, truncate, wrapPlain } from "./text-layout.js";
 
 const HEADER: ReadonlyArray<string> = ["id", "tier", "runtime", "auth", "url", "model", "health", "caps", "notes"];
@@ -250,10 +250,12 @@ function parseUseArgs(args: ReadonlyArray<string>): UseArgs | null {
 			continue;
 		}
 		if (arg === "--fleet-model" || arg === "--worker-model") {
+			if (arg === "--worker-model") noteDeprecatedFlag(arg, "--fleet-model");
 			parsed.workerModel = need();
 			continue;
 		}
 		if (arg === "--fleet-target" || arg === "--worker-target") {
+			if (arg === "--worker-target") noteDeprecatedFlag(arg, "--fleet-target");
 			parsed.workerTarget = need();
 			continue;
 		}

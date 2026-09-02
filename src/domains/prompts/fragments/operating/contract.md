@@ -1,7 +1,6 @@
 ---
 id: operating.contract
 version: 1
-budgetTokens: 220
 description: Constitutional operating posture shared by every Clio prompt
 ---
 

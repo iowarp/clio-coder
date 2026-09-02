@@ -22,7 +22,6 @@ export function resolveSmoothStreamingMode(
 export interface AutoPacingEnvironment {
 	isTTY: boolean;
 	term?: string;
-	termProgram?: string;
 	sshConnection?: string;
 	sshTty?: string;
 	tmux?: string;
@@ -53,7 +52,6 @@ export function processAutoPacingAllowed(backpressureObserved: boolean, env: Nod
 	return autoPacingAllowed({
 		isTTY: process.stdout.isTTY === true,
 		...(env.TERM === undefined ? {} : { term: env.TERM }),
-		...(env.TERM_PROGRAM === undefined ? {} : { termProgram: env.TERM_PROGRAM }),
 		...(env.SSH_CONNECTION === undefined ? {} : { sshConnection: env.SSH_CONNECTION }),
 		...(env.SSH_TTY === undefined ? {} : { sshTty: env.SSH_TTY }),
 		...(env.TMUX === undefined ? {} : { tmux: env.TMUX }),

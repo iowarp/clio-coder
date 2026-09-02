@@ -1,7 +1,6 @@
 ---
 id: operating.skills
 version: 1
-budgetTokens: 160
 description: Coordinator skill suggestion discipline; rendered only when context is on the surface
 ---
 
