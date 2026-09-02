@@ -32,7 +32,7 @@ import {
 } from "../../domains/providers/index.js";
 import type { LocalModelQuirks, SamplingProfile } from "../../domains/providers/types/local-model-quirks.js";
 import { calculateEngineCost } from "../ai.js";
-import { createGemmaChannelFilter } from "../gemma-channel-filter.js";
+import { createGemmaChannelFilter, usesGemmaChannelMarkers } from "../gemma-channel-filter.js";
 import { createSentinelStripper } from "../strip-tokenizer-sentinels.js";
 import { remainingContextMaxTokens } from "./output-budget.js";
 import { type ResidencyAdapter, reconcileResidency, residencyManagedFor } from "./residency.js";
@@ -384,7 +384,7 @@ function runStream(
 			let doneReason: string | undefined;
 			const sentinelStripper = createSentinelStripper();
 			const resolved = resolveModelRuntimeCapabilitiesForModel(model, thinkingLevel);
-			const channelFilter = resolved.family === "gemma-4" ? createGemmaChannelFilter() : null;
+			const channelFilter = usesGemmaChannelMarkers(resolved.modelId) ? createGemmaChannelFilter() : null;
 			const closeActiveThinking = () => {
 				if (!activeThinking) return;
 				stream.push({

@@ -28,7 +28,7 @@ import { lmStudioReasoningEffort } from "../../domains/providers/runtimes/common
 import type { ThinkingLevel } from "../../domains/providers/types/capability-flags.js";
 import type { LocalModelQuirks, SamplingProfile } from "../../domains/providers/types/local-model-quirks.js";
 import type { LmStudioTargetSettings } from "../../domains/providers/types/target-descriptor.js";
-import { filterGemmaChannelStream } from "../gemma-channel-filter.js";
+import { filterGemmaChannelStream, usesGemmaChannelMarkers } from "../gemma-channel-filter.js";
 import { HarmonyResponseParser } from "../harmony-response.js";
 import { createSentinelStripper, stripTokenizerSentinels } from "../strip-tokenizer-sentinels.js";
 import { ensureLlamaCppResidency } from "./llamacpp-residency.js";
@@ -936,7 +936,7 @@ export const openAICompletionsApiProvider: EngineApiProvider<"openai-completions
 										(requestModel) => piOpenAICompletions.stream(requestModel, effectiveContext, capturedOptions),
 									),
 							),
-							resolved.family === "gemma-4",
+							usesGemmaChannelMarkers(resolved.modelId),
 						),
 						resolved,
 					),
@@ -969,7 +969,7 @@ export const openAICompletionsApiProvider: EngineApiProvider<"openai-completions
 										(requestModel) => piOpenAICompletions.streamSimple(requestModel, effectiveContext, capturedOptions),
 									),
 							),
-							resolved.family === "gemma-4",
+							usesGemmaChannelMarkers(resolved.modelId),
 						),
 						resolved,
 					),

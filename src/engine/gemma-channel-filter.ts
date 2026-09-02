@@ -6,6 +6,25 @@ import type {
 	ThinkingContent,
 } from "@earendil-works/pi-ai";
 import { createAssistantMessageEventStream } from "@earendil-works/pi-ai";
+import { inferLocalModelFamily } from "../domains/providers/model-family.js";
+
+/**
+ * Whether a model id names a Gemma 4 checkpoint, whose chat template writes its
+ * private channel with the markers below when llama-server leaves the thought
+ * inline in `content` instead of extracting it to `reasoning_content`.
+ *
+ * Keyed on the wire model id rather than on the resolved family, because
+ * `capabilityFamily` returns the knowledge-base family whenever the catalog
+ * matches an id and every Gemma entry there names a build (`gemma4-26b-a4b`,
+ * `gemma-4-31b-it-qat-mtp`, `gemopus-4-31b-it`), never the literal `gemma-4`
+ * that `inferLocalModelFamily` produces for an id the catalog does not match.
+ * Gating on the family therefore ran the filter only for Gemma ids the catalog
+ * did not know, so naming `gemma4-26b-moe` and `gemma4-31b-dense` in it (issue
+ * #263) turned the filter off for the two ids the router actually serves.
+ */
+export function usesGemmaChannelMarkers(modelId: string): boolean {
+	return inferLocalModelFamily(modelId) === "gemma-4";
+}
 
 const THOUGHT_START = /<\|channel>[^\n]*\n/;
 const BARE_THOUGHT_START = /^\s*(?:thought|own[- ]?(?:thought|think))\s*\n/i;
