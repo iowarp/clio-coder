@@ -185,6 +185,70 @@ function loopBlockBaseReason(tool: string, repeatCount: number, priorSuccesses: 
 	);
 }
 
+/** True when a sanitized locked reply holds nothing but the fallback notice. */
+export function isLockedSynthesisFallbackOnly(message: AgentMessage | undefined): boolean {
+	if (!message || typeof message !== "object" || (message as { role?: unknown }).role !== "assistant") return false;
+	const content = (message as { content?: unknown }).content;
+	if (!Array.isArray(content)) return false;
+	const text = content
+		.filter((block): block is { type: "text"; text: string } => block?.type === "text" && typeof block.text === "string")
+		.map((block) => block.text)
+		.join("")
+		.trim();
+	return text === lockedSynthesisFallbackText();
+}
+
+export const LOCKED_SYNTHESIS_REPROMPT_TOOL = "clio_synthesis_reprompt";
+
+/**
+ * One bounded re-prompt after a locked round came back as tool-call markup
+ * only. Delivered as a paired synthetic tool exchange, never a user turn, for
+ * the same reason the result-contract repair is (#55: a late user message
+ * re-renders every earlier assistant turn on templates keyed off the last
+ * user message and invalidates the whole prompt cache).
+ */
+export function lockedSynthesisRepromptMessages(
+	attempt: number,
+	origin: { provider: string; api: string; model: string },
+): ReadonlyArray<AgentMessage> {
+	const id = `clio-synthesis-reprompt-${attempt}`;
+	const timestamp = Date.now();
+	return [
+		{
+			role: "assistant",
+			content: [{ type: "toolCall", id, name: LOCKED_SYNTHESIS_REPROMPT_TOOL, arguments: {} }],
+			stopReason: "toolUse",
+			usage: {
+				input: 0,
+				output: 0,
+				cacheRead: 0,
+				cacheWrite: 0,
+				totalTokens: 0,
+				cost: { input: 0, output: 0, cacheRead: 0, cacheWrite: 0, total: 0 },
+			},
+			...origin,
+			timestamp,
+		},
+		{
+			role: "toolResult",
+			toolCallId: id,
+			toolName: LOCKED_SYNTHESIS_REPROMPT_TOOL,
+			content: [
+				{
+					type: "text",
+					text:
+						"Your previous reply contained only tool-call markup, which cannot run: tool calls are disabled for " +
+						"the rest of this run. Everything you gathered is already in the conversation above. Write the " +
+						"final answer now as plain prose (or the exact result format the task asked for), with no tool-call " +
+						"markup of any kind.",
+				},
+			],
+			isError: true,
+			timestamp,
+		},
+	] as unknown as ReadonlyArray<AgentMessage>;
+}
+
 /**
  * Directive returned when a turn is locked to synthesis: tool use is over, so
  * the model must answer from what it already gathered. Fed back to the model as

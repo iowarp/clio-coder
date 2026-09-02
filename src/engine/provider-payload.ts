@@ -253,6 +253,20 @@ export interface WorkerPayloadPatchOptions {
 	toolChoiceName?: string;
 	/** Synthesis-locked round: remove the tool surface, see {@link patchToolSurfaceLockedPayload}. */
 	toolSurfaceLocked?: boolean;
+	/**
+	 * How a locked round is enforced on OpenAI-family APIs. `strip` (default)
+	 * removes the tool schemas, which changes the prompt prefix for the last
+	 * round or two; `tool-choice` keeps the schemas and sends tool_choice none,
+	 * which preserves the prefix but relies on the runtime honoring the knob.
+	 */
+	toolSurfaceLockMode?: SynthesisLockMode;
+}
+
+export type SynthesisLockMode = "strip" | "tool-choice";
+
+/** Operator override for experiments; anything but `tool-choice` is the default strip. */
+export function synthesisLockModeFromEnv(env: NodeJS.ProcessEnv = process.env): SynthesisLockMode {
+	return env.CLIO_CODER_SYNTHESIS_LOCK === "tool-choice" ? "tool-choice" : "strip";
 }
 
 /** Compose all worker-owned request mutations over one payload in a stable order. */
@@ -277,7 +291,10 @@ export function patchWorkerRequestPayload(
 	}
 
 	if (options.toolSurfaceLocked === true) {
-		const lockedPatched = patchToolSurfaceLockedPayload(patched, model);
+		const lockedPatched =
+			options.toolSurfaceLockMode === "tool-choice"
+				? patchToolChoiceNonePayload(patched, model)
+				: patchToolSurfaceLockedPayload(patched, model);
 		if (lockedPatched !== undefined) {
 			patched = lockedPatched;
 			changed = true;

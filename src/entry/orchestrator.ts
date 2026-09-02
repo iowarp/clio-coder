@@ -1534,8 +1534,13 @@ export async function bootOrchestrator(options: BootOptions = {}): Promise<BootR
 	// view, so the live session reflects them immediately while settings.yaml
 	// (the global default for new sessions) stays untouched until the operator
 	// chooses to save globally.
+	// Overrides are keyed by settings path, the same ids the /settings overlay
+	// commits (`setAtPath` walks the dotted path). The headless `--autonomy`
+	// flag was keyed by the bare word, which wrote a top-level `autonomy` key
+	// nothing reads, so `run --autonomy full-auto` compiled and admitted at
+	// whatever settings.yaml said.
 	const sessionOverrides: SessionOverrides = new Map(
-		options.headless?.autonomy === undefined ? [] : [["autonomy", options.headless.autonomy]],
+		options.headless?.autonomy === undefined ? [] : [["safety.autonomy", options.headless.autonomy]],
 	);
 	// The effective view is derived by deep-cloning the saved snapshot, and it
 	// is read on the tool-admission hot path (every call resolves autonomy

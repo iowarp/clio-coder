@@ -73,13 +73,15 @@ import { startClaudeSdkWorkerRun } from "./claude/sdk-runtime.js";
 import { startClaudeCodeWorkerRun } from "./claude/subprocess-runtime.js";
 import {
 	createLoopGuardRegistration,
+	isLockedSynthesisFallbackOnly,
 	isLoopGuardSynthesisBackstopReason,
 	lockedSynthesisFallbackText,
+	lockedSynthesisRepromptMessages,
 	resolveDeliveryTools,
 	sanitizeLockedSynthesisMessage,
 	workerLoopBlockBudget,
 } from "./loop-guard.js";
-import { patchWorkerRequestPayload } from "./provider-payload.js";
+import { patchWorkerRequestPayload, synthesisLockModeFromEnv } from "./provider-payload.js";
 import type { AgentEvent, AgentMessage, EngineModel } from "./types.js";
 import type { ClioWorkerEvent } from "./worker-events.js";
 import { createWorkerSafety, createWorkerToolRegistry } from "./worker-tools.js";
@@ -414,6 +416,8 @@ export function startWorkerRun(input: WorkerRunInput, emit: WorkerEventEmit): Wo
 	// Flipped by the loop guard's lockout callback; read by onPayload below to
 	// force the remaining model rounds text-only via tool_choice none.
 	let synthesisToolLock = false;
+	const synthesisLockMode = synthesisLockModeFromEnv();
+	let lockedSynthesisReprompts = 0;
 	let workerBoundFailure: string | null = null;
 	let workerBoundAborted = false;
 	let abortWorkerForBound: (() => void) | null = null;
@@ -622,6 +626,7 @@ export function startWorkerRun(input: WorkerRunInput, emit: WorkerEventEmit): Wo
 				thinkingLevel: effectiveThinkingLevel,
 				...(input.responseSchema !== undefined ? { responseSchema: input.responseSchema } : {}),
 				toolSurfaceLocked: synthesisToolLock,
+				toolSurfaceLockMode: synthesisLockMode,
 				toolChoiceNone: middlewareChoice.kind === "none",
 				...(middlewareChoice.kind === "required" ? { toolChoiceName: middlewareChoice.toolName } : {}),
 			});
@@ -666,8 +671,33 @@ export function startWorkerRun(input: WorkerRunInput, emit: WorkerEventEmit): Wo
 		// message in place before it hits stdout; pi stores this same object in
 		// agent state, so the NDJSON event, the dispatch consumer's answer
 		// reconstruction, and any later provider round all see the same text.
+		// A markup-only locked reply re-prompted this round; the result-contract
+		// check below stands aside so the round costs the one re-prompt, not one
+		// of the contract's bounded repair slots (on ornith both were queued for
+		// the same message and the run then ran out of repairs on a later
+		// grounding violation).
+		let repromptedThisMessage = false;
 		if (synthesisToolLock && event.type === "message_end") {
-			sanitizeLockedSynthesisMessage(event.message);
+			const stripped = sanitizeLockedSynthesisMessage(event.message);
+			// A model that calls a tool anyway hands its markup back as text and
+			// the sanitizer leaves only the fallback notice: under tool_choice none
+			// because the runtime still renders the schemas, and with the surface
+			// stripped because the training habit survives (Qwen3.8 did it in 1
+			// of 5 stripped runs). One re-prompt, delivered as a tool exchange
+			// like the result-contract repair, asks for the answer in prose; a
+			// second markup-only reply keeps the notice.
+			if (stripped && lockedSynthesisReprompts < 1 && isLockedSynthesisFallbackOnly(event.message)) {
+				lockedSynthesisReprompts += 1;
+				repromptedThisMessage = true;
+				process.stderr.write("[worker] synthesis lock: reply was tool-call markup only; re-prompting once for prose\n");
+				for (const message of lockedSynthesisRepromptMessages(lockedSynthesisReprompts, {
+					provider: model.provider,
+					api: model.api,
+					model: model.id,
+				})) {
+					agent.followUp(message as unknown as AgentMessage);
+				}
+			}
 		}
 		// Bounded terminal-contract repair, on whichever message ends the run.
 		// A worker that finishes inside its budget never trips the synthesis
@@ -676,7 +706,7 @@ export function startWorkerRun(input: WorkerRunInput, emit: WorkerEventEmit): Wo
 		// same contract against the sealed receipt; this is the only point at
 		// which the model can still act on the validator's reason.
 		const contract = input.resultContract;
-		if (contract && event.type === "message_end" && isTerminalAssistantMessage(event.message)) {
+		if (contract && !repromptedThisMessage && event.type === "message_end" && isTerminalAssistantMessage(event.message)) {
 			const violation = terminalContractViolation(
 				contract,
 				event.message,
