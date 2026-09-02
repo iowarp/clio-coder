@@ -84,7 +84,7 @@ thinking level is measuring the server, not the change under test.
 
 The verdict envelope keeps its original `behavioral: null` field for compatibility.
 A suite that declares a versioned behavioral scenario records the result as a
-separate `clio.eval.behavior.v1` document on the Artifact v4 result, cross-linked
+separate `clio-coder.eval.behavior.v1` document on the Artifact v4 result, cross-linked
 to the unchanged verdict identity. Its labels come only from bounded transcript,
 tool, receipt, or grader facts, never from an ungrounded judge paragraph. A run whose harness broke records
 `machinery: "infrastructure_failure"`, which the parser refuses to pair with a
@@ -211,7 +211,7 @@ tasks:
         - node_modules
         - dist
     runner:
-      kind: clio-run
+      kind: clio-coder-run
       prompt: Fix the intentionally broken function so the local verifier passes.
     verify:
       commands:
@@ -272,7 +272,7 @@ tasks:
         - dist
         - .clio-coder
     runner:
-      kind: clio-run
+      kind: clio-coder-run
       prompt: Summarize the repository purpose and make no file changes.
     verify:
       forbidPaths:
@@ -306,7 +306,7 @@ tasks:
         - dist
         - .clio-coder
     runner:
-      kind: clio-run
+      kind: clio-coder-run
       prompt: Fix the failing unit test with the smallest source change.
     verify:
       commands:

@@ -40,9 +40,8 @@ replace Clio copies without crossing the product boundary:
    and `pi-tui`.
 2. Run `npm run pi:surface-diff`. A changed or removed symbol that Clio imports
    is an error; a new export is review input.
-3. Run `npm run ci`, then explicitly run the wire-capture fixtures and
-   `tests/smoke/tui-width-matrix.test.ts` from the
-   [Pi regression net](pi-boundary.md#pi-regression-net).
+3. Run the focused contracts in the
+   [Pi regression net](pi-boundary.md#pi-regression-net), then run `npm run ci`.
 4. Walk Pi's fixed-issue list against the
    [Pi SDK boundary table](pi-boundary.md). For every fix in a surface Clio
    still owns, either delete Clio's copy in favor of Pi or add a dated reason
@@ -58,22 +57,18 @@ installed Pi versions differ from the checked-in snapshot.
 
 ## Test lanes
 
-`npm test` runs `scripts/shard-tests.mjs`. Contract and smoke files are assigned
-deterministically to weighted parallel lanes, with timings from
-`scripts/shard-weights.json`; `--list` shows the assignment and `--shard <n>`
-reproduces one numbered lane. Tests whose assertion is itself sensitive to
-wall-clock scheduling live in the explicit serial set. The runner waits for all
-parallel lanes to drain, then runs that set alone with
-`CLIO_TEST_CONCURRENCY=1`. Reproduce it with:
+`npm test` uses Node's test runner over every `tests/contracts/*.test.ts` and
+`tests/smoke/*.test.ts` file, with `tests/harness/tmp-root.ts` preloaded to
+isolate test state. Its `pretest` hook builds `dist/` when the CLI bundle is
+absent. Run one focused file while iterating with:
 
 ```bash
-node scripts/shard-tests.mjs --shard serial
+npm run test:file -- tests/contracts/<name>.test.ts
 ```
 
-Do not repair a timing-measurement failure by widening its product bound or by
-moving ordinary watchdog tests into the serial set. `tests/harness/load.ts`
-scales watchdogs by the parallel lane count; the serial lane is reserved for
-claims that cease to mean the same thing under contention.
+There is no committed weighted-shard or special serial-lane runner. Keep timing
+claims within the focused contract that owns them, and use the full `npm run ci`
+gate before handoff.
 
 ## Issue conventions
 

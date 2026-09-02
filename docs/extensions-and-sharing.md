@@ -1,9 +1,9 @@
-# Extensions, Prompt Templates, Skills, and Share Archives
+# Extensions, Resources, and Share Archives
 
 > [!TIP]
 > **Interactive Spec Available:** A source-checkout dashboard is available at [docs/html/extensions_blueprint.html](https://github.com/iowarp/clio-coder/blob/main/docs/html/extensions_blueprint.html).
 
-Clio Coder has lightweight community-oriented resource packaging. Extensions are filesystem bundles that contribute prompts and skills. Share archives are portable JSON files for moving project/user Clio resources between machines or collaborators. Themes are built into the engine and are no longer loaded from extensions.
+Clio Coder has lightweight community-oriented resource packaging. Extensions are filesystem bundles that can contribute prompts, skills, agent recipes, and fleet contracts. Manifests may also reserve a theme root, but the runtime does not apply extension themes. Share archives are portable JSON files for moving project and user Clio resources between machines or collaborators.
 
 Source of truth: `src/domains/extensions/**`, `src/domains/resources/**`, `src/domains/share/**`, `src/cli/extensions.ts`, and `src/cli/share.ts`.
 
@@ -157,7 +157,7 @@ baseline, treatment, and judge runs; see
 verifies. Fixture commands in an `evals.md` are real shell and only run with
 `--trust-fixtures`.
 
-Every arm runs hermetic in a disposable workspace at autonomy `full-auto`: the network tool plane is stripped from child runs so a scenario measures the skill against its workspace and not against the open web. `--allow-network` keeps the web tools, and the run reports which network policy was in force. The per-arm execution timeout is set with `--timeout <seconds>`.
+Every arm runs hermetic in a disposable workspace: the network tool plane is stripped from child runs so a scenario measures the skill against its workspace and not against the open web. Baseline and treatment arms run with `full-auto` autonomy; the judge does not receive that flag. `--allow-network` keeps the web tools, and the run reports which network policy was in force. The per-arm execution timeout is set with `--timeout <seconds>`.
 
 Exit code is 1 when a treatment bullet fails. Exit code is 3 when a scenario goes unmeasured, such as when judge output is truncated, missing, or unparseable, or when a run dies at a permission wall. Permission-wall deaths and harness infrastructure failures are classified as unmeasured infrastructure errors rather than negative verdicts on the skill.
 
@@ -193,12 +193,14 @@ description: Prompts and skills for this lab
 resources:
   prompts: prompts
   skills: skills
+  agents: agents
+  fleets: fleets
   themes: themes
 compatibility:
   clio: ">=0.2.0"
 ```
 
-Required fields are `manifestVersion: 1`, `id`, `version`, and `description`. `name` defaults to `id` when absent, and `resources` is optional. When `resources` is present it must be an object containing only supported resource keys with non-empty relative directory paths. Clio loads `prompts` and `skills`. A manifest may reserve a `themes` path for forward compatibility, but Clio does not load theme resources.
+Required fields are `manifestVersion: 1`, `id`, `version`, and `description`. `name` defaults to `id` when absent, and `resources` is optional. When `resources` is present it must be an object containing only `prompts`, `skills`, `agents`, `fleets`, and `themes`, each with a non-empty relative directory path. Clio consumes prompt, skill, agent, and fleet roots. A manifest may reserve a `themes` path for forward compatibility, but Clio does not apply theme resources.
 
 IDs must be lowercase and may include numbers, dots, underscores, and hyphens; they must start/end alphanumeric.
 
@@ -290,11 +292,11 @@ Share archives are single JSON files:
 
 ```json
 {
-  "kind": "clio-share-archive",
+  "kind": "clio-coder-share-archive",
   "formatVersion": 1,
   "manifest": {
-    "format": "clio.share.v1",
-    "clioVersion": "0.3.7",
+    "format": "clio-coder.share.v1",
+    "clioCoderVersion": "0.4.2",
     "createdAt": "...",
     "files": []
   },
@@ -303,6 +305,9 @@ Share archives are single JSON files:
 ```
 
 Every file entry is base64 encoded and SHA-256 checked on import.
+Readers continue to accept the released legacy identities `clio-share-archive`,
+`clio.share.v1`, and `clioVersion`, then normalize them to the canonical shape.
+New exports use only the `clio-coder` names above.
 
 ### Export
 
@@ -329,7 +334,10 @@ Options:
 
 If no include flags are supplied, export includes all supported classes for the selected scope.
 
-Settings fragments include non-secret UI/runtime preferences such as `autonomy`, `scope`, `budget`, `theme`, `terminal`, `keybindings`, `compaction`, and `retry`. Targets and credentials are not included.
+Settings fragments are version 2 documents containing only
+`chat.modelPicker.cycleSet`, `chat.retry`, `fleet.concurrency`,
+`context.compaction`, `safety.autonomy`, `safety.limits.sessionCostUsd`, and the
+`interface` settings block. Targets and credentials are not included.
 
 ### Import and inspect
 

@@ -9,7 +9,12 @@ Source of truth: `src/core/tool-names.ts`, `src/tools/agent-tools.ts`, `src/tool
 
 ## One system prompt per session
 
-The chat loop compiles one provider-facing system prompt for a session. The compile key is `target|model|autonomy|sessionId|workingContextPaths`, with the working-context paths sorted before hashing into the key.
+The chat loop compiles one provider-facing system prompt for a session. The
+version-2 compile identity hashes the target id, runtime id, wire model id,
+autonomy, session id, working directory, sorted working-context paths, context
+window source, prompt-input epoch, resolved session inputs, and the exact
+attached tool-schema bytes. `mainPromptCacheIdentity` in
+`src/interactive/prompt-cache-identity.ts` owns that list.
 
 The compiled prompt is reused byte-for-byte on ordinary submits. It recompiles only when that key changes or when config hot-reload invalidates the prompt cache. Path-scoped project rules can therefore recompile the prompt when a matching file enters working context. When recompilation changes the text, the session ledger records a `promptRecompiled` entry with the previous hash, new hash, and token estimate.
 
@@ -76,9 +81,16 @@ The compiler runs after target capability and tool-profile admission. Its canoni
 
 Project context, memory, bounded dispatch briefing, pipeline input, the assigned task, and the per-run safety-posture reminder remain dynamic user messages. A briefing is a separately delimited message labeled as untrusted task context/data; it is never concatenated into the task or stable system prompt. Dynamic ordering is project, safety, memory, briefing, then pipeline input, with pipeline input last. These messages do not affect the stable composition hash. Persona, effective autonomy, target tool capability, or final toolkit changes do affect it.
 
-## Seven planes, twenty tools
+## Seven planes, twenty-one tools
 
-The builtin surface is 20 registered tools organized in seven planes. Each plane is one policy unit: its tools share an action class, a size posture, a details schema, and a concurrency rule. `src/tools/policy.ts` asserts these invariants at bootstrap, so drift between the plane design, the safety classifier, and the registered specs fails loudly instead of shipping a surface that behaves differently from what the policy engine assumes.
+The canonical builtin catalog contains 21 tools organized in seven planes. A
+particular session or worker receives the subset whose dependencies and policy
+allow it to register. Each plane is one policy unit: its tools share an action
+class, a size posture, a details schema, and a concurrency rule.
+`src/tools/policy.ts` asserts these invariants at bootstrap, so drift between
+the plane design, the safety classifier, and the registered specs fails loudly
+instead of shipping a surface that behaves differently from what the policy
+engine assumes.
 
 | Plane | Tools | Action class | Concurrency |
 | --- | --- | --- | --- |
@@ -90,13 +102,36 @@ The builtin surface is 20 registered tools organized in seven planes. Each plane
 | ORCHESTRATE | `monitor` | read | parallel |
 | ORCHESTRATE | `tasks` | read | sequential |
 | ORCHESTRATE | `ledger` | read | sequential |
+| ORCHESTRATE | `panes` | read | sequential |
 | RETRIEVE | `web_fetch` | read | parallel |
 | INTERACT | `ask_user` | read | sequential |
 | ARTIFACT | `artifact` | write | sequential |
 
-Three tools sit in a plane for containment rather than class. `git` is read-only inspection (op=status/diff/log) that runs on the safe-exec spine, so it lives in the EXECUTE plane with read-class safety disposition. `monitor` never mutates a run, so it stays read class and parallel inside the ORCHESTRATE plane. `tasks` orchestrates the agent's own work rather than workers: it mutates only the session's task ledger, never the workspace, so it keeps read class (never gated behind a confirmation) but runs sequential so two board mutations in one batch cannot interleave. `ledger` is the agent ledger, the coordination board concurrent dispatch workers share: a post reaches a one-way control lane and a read answers from a local mirror, so it touches no workspace and stays read class, and reviewers and judges are pinned to read-only autonomy where a write class would block the peer review the board exists for.
+Several tools sit in a plane for containment rather than class. `git` is
+read-only inspection (op=status/diff/log) that runs on the safe-exec spine, so
+it lives in the EXECUTE plane with read-class safety disposition. `monitor`
+never mutates a run, so it stays read class and parallel inside the ORCHESTRATE
+plane. `tasks` orchestrates the agent's own work rather than workers: it mutates
+only the session's task ledger, never the workspace, so it keeps read class
+(never gated behind a confirmation) but runs sequential so two board mutations
+in one batch cannot interleave. `ledger` is the agent ledger, the coordination
+board concurrent dispatch workers share: a post reaches a one-way control lane
+and a read answers from a local mirror, so it touches no workspace and stays
+read class, and reviewers and judges are pinned to read-only autonomy where a
+write class would block the peer review the board exists for. `panes` controls
+only Clio-owned terminal panes through the live mux; it stays read class but is
+sequential so two operations cannot race the same pane registry.
 
-Registration is conditional on wiring: `context` gains its workspace scope only when a session contract is bound, `dispatch`/`monitor`/`steer` register only with a dispatch contract, `ask_user` registers only when an interactive handler exists, and `ledger` registers only when a worker bound its dispatch's agent-ledger port (the session never does, and without a port the tool could only answer "no ledger"). Dispatch tool profiles narrow the surface for workers: `minimal-local` is `read`, `grep`, `find`, `ls`, `git`, `context`, `code_nav`; `science-local` adds `verify`; `full-agent` keeps everything.
+Registration is conditional on wiring: `context` gains its workspace scope only
+when a session contract is bound, `dispatch`/`monitor`/`steer` register only
+with a dispatch contract, `ask_user` registers only when an interactive handler
+exists, `ledger` registers only when a worker bound its dispatch's agent-ledger
+port (the session never does, and without a port the tool could only answer
+"no ledger"), and `panes` registers only when a pane host answered detection and
+the mux is live. Dispatch tool profiles narrow the surface for workers:
+`minimal-local` is `read`, `grep`, `find`, `ls`, `git`, `context`, `code_nav`,
+and `ledger`; `science-local` adds `verify`; `full-agent` keeps everything that
+the runtime registered and the recipe allows.
 
 `ask_user` keeps its typed `exposure: local | outward` admission fact separate from caller prose. The registry uses exposure only in the enforced autonomy mapping. After admission, the host carries the normalized fact into the shared decision-presentation classifier; question text, headers, options, summaries, and requested color or severity words cannot select a consequence tier. The resulting presentation object contains no admission disposition and cannot grant authority.
 
@@ -111,7 +146,7 @@ Several tools absorb what used to be separate tools:
 - `artifact(kind="plan"|"review"|"report", content, ...)` writes named artifacts behind one surface: Markdown documents (default `.clio-coder/artifacts/PLAN.md`/`REVIEW.md`/`REPORT.md`; `path` may override inside the workspace) that terminate the turn, because writing the artifact is the answer. Skills are not artifacts; a `SKILL.md` is written with the ordinary write tool and validated by the skills loader.
 - `dispatch(task?, tasks?, mode?, ...)` supports a first-class singular assignment (`task`) and a batch (`tasks`), never both. `task` is worker instructions; `briefing` is optional bounded parent context/data and cannot replace it. Briefing stays a separate dynamic message and receipt provenance, never part of the receipt task. A shared top-level briefing applies to strings and objects without an override; an object-level briefing wins. Blank values are omitted, the cap is 12,000 UTF-8 bytes, and approval pins the exact canonical value. Ordinary handles enter one registered event consumer immediately. Synchronous calls auto-wait for stream-and-receipt completion; `detach:true` returns ids after durable batch registration while the same consumer continues. Review and compete retain gate-sensitive direct drains. Task objects may include `persona`, `tool_profile`, and a typed `budget: {toolCalls, readReserve, retryRevision?}`. The budget must fit the recipe's authored range and the operator lifetime cap. `retryRevision` is the only authority for a later retry, result-contract revision, or review revision to grow its phase. Pipeline output is threaded as bounded data. A successful native or ACP run requires a nonempty receipt-sealed final output; exit zero without one fails as `worker_final_output_missing`, with unfinished text retained only as partial diagnostics. `dispatch(list=true)` renders the catalog.
 - `monitor(run_id?, mode?)` is read-only visibility into known synchronous and detached runs: `list` enumerates, `status` reports one, `peek` returns the in-process event tail, `receipt` exposes the stored evidence, and `wait` observes one run without collecting or canceling it. `collect` is the authoritative terminal batch operation over a detached batch or run-id list; collect before final synthesis. Completed output reports receipt integrity, evidence verification, briefing provenance, and bounded project-context provenance as different fields.
-- `steer(run_id, action, message?)` controls a running worker: `guide` writes a canonical trimmed steering message to an HTTP or SDK worker and `cancel` terminates it. Successfully written steers gain ordered byte/hash/timestamp provenance; after the runtime accepts the guidance, `clio_steer_received` acknowledges the exact matching sequence, and prose is never stored in ledger or receipt. Single-shot subprocess runtimes and ACP remain non-steerable. Interactive operators can steer synchronous live-input runs; parent-model steering requires detached ids because model tools are sequential.
+- `steer(run_id, action, message?)` controls a running worker: `guide` writes a canonical trimmed steering message to an HTTP or SDK worker and `cancel` terminates it. Successfully written steers gain ordered byte/hash/timestamp provenance; after the runtime accepts the guidance, `clio_coder_steer_received` acknowledges the exact matching sequence, and prose is never stored in ledger or receipt. Single-shot subprocess runtimes and ACP remain non-steerable. Interactive operators can steer synchronous live-input runs; parent-model steering requires detached ids because model tools are sequential.
 
 ### One ignore policy for path walkers
 
@@ -155,8 +190,8 @@ Tool descriptions are tiered by how much a wrong call costs. The hot tools the m
 
 Clio uses two context-protection mechanisms.
 
-1. Tool results are capped at the source and again at the registry boundary. OBSERVE tools use the envelope caps above. Exact mutation tools (`write`, `edit`, `artifact`) use 8KB; `steer` and `credential_present` use 4KB; `ask_user` has a 20KB policy. Summary-kind tools (`bash`, `git`, `verify`, `dispatch`, `monitor`) use 16KB at the registry boundary. Bash also exposes the canonical per-call `output_policy`: omitted/`bounded` keeps its diagnostic tail, `summary` selects stable redacted head/error/tail evidence, `metadata-only` keeps facts and retrieval without stdout/stderr context, and `full` succeeds only inside the same hard result budget or records a typed downgrade. This model-context choice does not change the folded tail-biased operator presentation. `web_fetch` is bounded at 16KB after shaping and may read more before it: its `max_bytes` argument defaults to 600KB and is hard-capped at 5MB. Tools without an explicit result-size policy use an approximately 18KB generic backstop. Over-cap generic results are shown briefly and, when possible, saved under `<stateDir>/scratch/<sessionId>/<sha256 of the captured text>.txt` with an `offloadPath` detail and a 10MB scratch-file cap.
-2. Auto-compaction uses one pressure threshold. The default threshold is 0.8. When pressure crosses the threshold, Clio first masks stale tool observations and stale thinking older than `excludeLastTurns`. If pressure remains above the threshold, it runs the LLM summary compaction path and replays from the compacted session view.
+1. Tool results are capped at the source and again at the registry boundary. OBSERVE tools use the envelope caps above. Exact mutation tools (`write`, `edit`, `artifact`) use 8KB; `steer` and `credential_present` use 4KB; `ledger` uses 16KB; `panes` uses 8KB; and `ask_user` has a 20KB policy. Summary-kind tools (`bash`, `git`, `verify`, `dispatch`, `monitor`) use 16KB at the registry boundary. Bash also exposes the canonical per-call `output_policy`: omitted/`bounded` keeps its diagnostic tail, `summary` selects stable redacted head/error/tail evidence, `metadata-only` keeps facts and retrieval without stdout/stderr context, and `full` succeeds only inside the same hard result budget or records a typed downgrade. This model-context choice does not change the folded tail-biased operator presentation. `web_fetch` is bounded at 16KB after shaping and may read more before it: its `max_bytes` argument defaults to 600KB and is hard-capped at 5MB. Tools without an explicit result-size policy use an approximately 18KB generic backstop. Over-cap generic results are shown briefly and, when possible, saved under `<stateDir>/scratch/<sessionId>/<sha256 of the captured text>.txt` with an `offloadPath` detail and a 10MB scratch-file cap.
+2. Auto-compaction uses one pressure threshold. The default threshold is 0.8. When pressure crosses the threshold, Clio first applies a non-destructive working-set eviction and records the evicted items in the session ledger. If pressure remains above the threshold, it runs the LLM summary compaction path and replays from the compacted session view. The older destructive observation/thinking mask is available only as a compatibility escape hatch when `CLIO_CODER_LEGACY_MASK=1`.
 
 Manual `/context compact`, `CLIO_CODER_FORCE_COMPACT=1`, and overflow recovery force the LLM summary path directly.
 

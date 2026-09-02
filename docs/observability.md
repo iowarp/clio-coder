@@ -135,7 +135,7 @@ A row has the following schema:
   "repoIdentity": "9f2c1b4ea77d0c31",
   "timestamp": "2026-06-25T14:30:00.000Z",
   "target": "dynamo",
-  "attributedModelId": "Nemo-3.5",
+  "attributedModelId": "qwen3.8-27b-dynamo",
   "usage": {
     "input": 120,
     "output": 8,
@@ -207,17 +207,17 @@ Pressing `v` on a selected receipt or running `/view verify <runId>` performs cr
 
 1. **Read Receipt**: Reads the receipt JSON from `<stateDir>/receipts/<runId>.json`.
 2. **Resolve Ledger**: Looks up the run envelope inside `<stateDir>/runs.json`.
-3. **Verify Integrity**: Recomputes the SHA-256 digest over the strict v19 receipt and reconstructible ledger fields. The digest covers every current field, including steering, routing intent and decision, route quality, worker identity, execution role, result-contract conformance, council provenance, and fleet gate provenance. Every version other than 19 fails verification; there is no historical receipt reader.
+3. **Verify Integrity**: Recomputes the SHA-256 digest over the strict v20 receipt and reconstructible ledger fields. The digest covers every current field, including dispatch intent path provenance, resolved path scope, steering, routing intent and decision, route quality, worker identity, execution role, result-contract conformance, council provenance, and fleet gate provenance. Receipts below v20 are reported as retired and are never read as evidence or migrated. Malformed, tampered, unversioned, or future-version receipts fail verification; there is no historical receipt reader.
 4. **Report Result**: The viewer reports `ok` or the verification failure reason. It does not rename or delete the receipt. Startup orphan recovery may quarantine corrupt orphan receipt files as `<name>.json.corrupt`, but `/view verify` is read-only.
 
 ---
 
 ## Receipt Fields for Dispatch Provenance
 
-A receipt carries optional provenance and context blocks that answer "what happened" for a chained (pipeline), composed (persona override), escalated, briefed, steered, council, or external run. Those optional blocks remain absent when unused. Current receipts carry strict integrity v19 and an explicit `outcomeCode: null` when no classified deterministic failure occurred. Automation consumers must treat the optional blocks below as absent by default and `outcomeCode` as nullable; older receipt versions are invalid.
+A receipt carries optional provenance and context blocks that answer "what happened" for a chained (pipeline), composed (persona override), escalated, briefed, steered, council, or external run. Those optional blocks remain absent when unused. Current receipts carry strict integrity v20 and an explicit `outcomeCode: null` when no classified deterministic failure occurred. Automation consumers must treat the optional blocks below as absent by default and `outcomeCode` as nullable. Lower receipt versions are retired, while malformed, unversioned, and future versions are invalid.
 
 Receipt integrity verification and evidence verification are independent.
-`receipt_integrity=verified/v19/sha256` means Clio called the receipt verifier
+`receipt_integrity=verified/v20/sha256` means Clio called the receipt verifier
 against the ledger envelope; merely finding an embedded digest is not enough.
 `evidence_verification=<verified|unverified|not_applicable|unknown>/<basis>`
 describes validation evidence inside that verified receipt. Likewise,
@@ -228,7 +228,7 @@ separately and never substitute one hash for another.
 
 The evidence bundle renders these sets in `transcript.md` (human sentences) and `trace.cleaned.jsonl` (structured run rows), `clio-coder evidence inspect` prints them as a `provenance <runId>:` block, and the `dispatch` tool appends a compact suffix to each run line plus additive keys on `details.runs[]`, including `trust`, the bounded canonical trust projection described in [evidence-and-memory.md](evidence-and-memory.md#trust-projection). A timed-out or denied escalation also raises an `escalation` finding in the bundle.
 
-The base provenance sets, steering, routing, quality, worker identity, result-conformance, council provenance, and fleet gate provenance use the strict v19 shape frozen for the release. These fields are labeled `experimental` until the schema is promoted post-1.0. For the complete version registry and migration contract across all artifacts, see [artifact-versions.md](artifact-versions.md).
+The base provenance sets, steering, routing, quality, worker identity, result-conformance, council provenance, and fleet gate provenance use the strict v20 shape frozen for the release. Version 20 also seals provenance for each declared dispatch-intent path and the resolved `pathScope`, so evidence distinguishes operator-declared scope from legacy scope inferred from prose. These fields are labeled `experimental` until the schema is promoted post-1.0. For the operator-facing registry of receipt and related persistent compatibility contracts, see [artifact-versions.md](artifact-versions.md).
 
 | Field path | Type | When present | Meaning | Status |
 | --- | --- | --- | --- | --- |
@@ -247,7 +247,7 @@ The base provenance sets, steering, routing, quality, worker identity, result-co
 | `steering[].sentAt` | `string` | A steer was successfully written | Write timestamp | experimental |
 | `steering[].acknowledged` | `boolean` | A steer was successfully written | Whether a worker acknowledgement was actually observed | experimental |
 | `steering[].acknowledgedAt` | `string` | Acknowledgement was observed | Acknowledgement timestamp | experimental |
-| `outcomeCode` | six-value stable string union or `null` | Every v19 terminal receipt | Non-null for `vram_capacity_fit_failure`, `worker_tool_call_cap_exhausted`, `loop_guard_tools_disabled_exhausted`, `result_contract_exhausted`, `worker_final_output_missing`, or `host_verification_rejected`; otherwise `null`. Each non-null code denotes terminal deterministic failure and is incompatible with `outcome: "succeeded"`. Dispatch retry policy consumes this code only, never diagnostic prose. | experimental |
+| `outcomeCode` | six-value stable string union or `null` | Every v20 terminal receipt | Non-null for `vram_capacity_fit_failure`, `worker_tool_call_cap_exhausted`, `loop_guard_tools_disabled_exhausted`, `result_contract_exhausted`, `worker_final_output_missing`, or `host_verification_rejected`; otherwise `null`. Each non-null code denotes terminal deterministic failure and is incompatible with `outcome: "succeeded"`. Dispatch retry policy consumes this code only, never diagnostic prose. | experimental |
 | `personaOverride.promptHash` | `string` | Ad-hoc specialist whose persona replaced the recipe body | Hash of the composed static prompt; equals `staticCompositionHash` for the run | experimental |
 | `safety.decisions.escalationRequested` | `number` | Run saw at least one permission escalation | Parked permission asks handed to the operator | experimental |
 | `safety.decisions.escalationApproved` | `number` | Run saw at least one permission escalation | Escalations the operator approved | experimental |
@@ -283,13 +283,26 @@ The escalation counters appear together and only when `escalationRequested` is p
 Here is a step-by-step trace of how a run passes through the spine.
 
 ### 1. Dispatch Completion
-A dispatched task to execute tests finishes. The dispatch domain persists the run envelope and the receipt, then emits the completion event:
+A dispatched task to execute tests finishes. The dispatch domain persists the run envelope and receipt, then emits `dispatch.completed`. The relevant event fields include:
 ```json
 {
   "runId": "abc1234",
-  "status": "completed",
+  "agentId": "tester",
+  "targetId": "mini",
+  "wireModelId": "ornith1.5-35b-moe",
+  "runtimeId": "llamacpp",
+  "runtimeKind": "http",
+  "requestOrigin": "user",
+  "outcome": "succeeded",
+  "outcomeCode": null,
+  "outcomeDetail": null,
   "exitCode": 0,
-  "lineage": { "attempt": 0 }
+  "lineage": {
+    "parentRunId": null,
+    "rootRunId": "abc1234",
+    "attempt": 0,
+    "depth": 0
+  }
 }
 ```
 

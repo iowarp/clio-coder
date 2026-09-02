@@ -59,7 +59,7 @@ Many Clio CLI subcommands provide structured JSON output for integration with sc
 
 | Subcommand | Flag | Output Structure |
 | :--- | :--- | :--- |
-| `clio-coder run` | `--json` | Stream of incremental NDJSON event frames (`session`, `agent_start`, `turn_start`, `message_start`, `message_end`, `thinking_delta`, `text_delta`, `tool_execution_start`, `tool_execution_end`, `turn_end`, `agent_end`). |
+| `clio-coder run` | `--json` | Stream of incremental NDJSON event frames. Core frame kinds include `session`, `agent_start`, `turn_start`, `message_start`, `message_end`, `thinking_delta`, `text_delta`, `tool_execution_start`, `tool_execution_end`, `turn_end`, and `agent_end`. Full streams can also carry registered `clio_coder_*` tool, permission, plan, and lifecycle frames; consumers must dispatch on `type` and tolerate additive kinds. |
 | `clio-coder run` | `--json-events terminal` | Emits the `session` header, a synthesized `turn_start` (`startedAt`), the `agent_end` and `notice` events that pass the filter, and a synthesized `turn_end` carrying `startedAt`, `endedAt`, `exitCode`, and `error` when the turn failed. Per-segment token usage rides `agent_end`. Excludes multi-kilobyte intermediate message bodies (#122). |
 | `clio-coder run` | `--json-events full` | Emits complete event stream with projected assistant messages (`streamed: true`, `textLength`, `thinkingLength`) to eliminate duplicate wire tokens (#122). |
 | `clio-coder agents` | `--json` | JSON array of registered agent recipe metadata objects. |

@@ -10,10 +10,10 @@ Long-Horizon Agents* (2026), adapted to Clio's visible middleware and local-mode
 routing.
 
 The rules-only tier is enabled by default and makes no model calls. An LLM memory
-tier is opt-in through the independent `background` route. The action agent's
-system prompt and tool surface do not change, and disabling
-`memory.intervention.enabled` removes observation, bank writes, model resolution,
-reminders, handoff offers, and handoff seeding.
+tier is opt-in through the independent `context.memory.target` and
+`context.memory.model` route. The action agent's system prompt and tool surface
+do not change, and disabling `context.memory.enabled` removes observation, bank
+writes, model resolution, reminders, handoff offers, and handoff seeding.
 
 ## Architecture
 
@@ -116,11 +116,11 @@ than discarding the writes that came with it. A timeout, provider failure,
 malformed response, or telemetry failure is silent and never blocks a tool.
 
 ### Intervention Defaults & Cadence Knobs
-- `memory.intervention.enabled` (default `true`): Enables observation, task bank writes, and reminder injection.
-- `memory.intervention.everyNTools` (default `10`): Minimum completed-tool interval between background interventions.
-- `memory.intervention.windowSteps` (default `8`): Completed tool-trajectory window analyzed during background evaluation.
-- `memory.intervention.maxTokens` (default `400`): Bounds the rendered memory-bank and reminder context budget; the policy model output cap is a separate fixed `4,000`-token contract in `task-memory-policy.ts`, sized so that a model which reasons anyway still reaches its envelope.
-- `memory.intervention.timeoutMs` (default `30000`): Wall-clock limit for one background memory-policy request. The step is detached, so this deadline never delays a turn, but it does hold a request slot on a real inference endpoint that your own turns and your dispatched workers queue against. The default is what a turn boundary can wait for rather than what a long-tailed route eventually answers in: on the reference route below, 23 of 60 steps ran past 30 seconds and 531 of the measured 1,666 seconds were spent beyond that mark. Raise it only if you have measured that your route's slow steps are the ones producing reminders, and read the trade in "Cost and the default decision" first.
+- `context.memory.enabled` (default `true`): Enables observation, task bank writes, and reminder injection.
+- `context.memory.cadenceToolCalls` (default `10`): Minimum completed-tool interval between background interventions.
+- `context.memory.trajectorySteps` (default `8`): Completed tool-trajectory window analyzed during background evaluation.
+- `context.memory.maxOutputTokens` (default `2000`): Bounds the rendered memory-bank context and the ordinary policy-model completion. An always-on-thinking model receives additional reasoning headroom, at least `4,000` tokens when its model cap permits, so it can still reach the strict envelope.
+- `context.memory.timeoutMs` (default `60000`): Wall-clock limit for one background memory-policy request. The step is detached, so this deadline never delays a turn, but it does hold a request slot on a real inference endpoint that your own turns and dispatched workers queue against. Raise it only after inspecting the timeout and hit-rate evidence for the selected route.
 
 ## Trigger semantics
 
@@ -130,7 +130,7 @@ it runs detached from it.
 
 | Trigger | Behavior |
 | --- | --- |
-| Interval | After `memory.intervention.everyNTools` completed tools since the last prompted step; default 10. This is the nondeterministic/citation-gated path. |
+| Interval | After `context.memory.cadenceToolCalls` completed tools since the last prompted step; default 10. This is the nondeterministic/citation-gated path. |
 | Tool-error streak | Two consecutive error outcomes. A successful tool resets the streak. |
 | Loop signal | Reuses the orchestrator loop guard's verdict; it does not infer a second competing loop detector. |
 | Repeated failure | The rules tier records failed operation fingerprints and annotates the failing tool result once the same failure appears twice in the bounded trajectory. |
@@ -163,9 +163,9 @@ records one telemetry row, not two.
 
 The agent loop does not become idle until every `agent_end` listener settles, so a
 memory step awaited at that boundary would add its full latency to the visible
-end of every triggered turn. Measured on the reference route below, step latency
-has a median of 18.6 seconds and ranges up to 220.8 seconds. This makes an awaited
-step intolerable as an end-of-turn pause.
+end of every triggered turn. Historical operator measurements below put a
+typical step in the tens of seconds. This makes an awaited step intolerable as
+an end-of-turn pause.
 
 The prompted step is therefore detached. `evaluateAsync` starts it and returns
 immediately; the turn ends on schedule. When the step resolves, its reminder is
@@ -217,8 +217,8 @@ hit rate.
 
 ### The measurement
 
-From one operator's `steps.jsonl`, 274 rows spanning 2026-08-14 to 2026-08-29 on
-a small local background route:
+From one operator's dated `steps.jsonl` export, 274 rows spanning 2026-08-14 to
+2026-08-29 on a small local background route:
 
 | Figure | Value |
 | --- | --- |
@@ -240,18 +240,19 @@ injections cost nothing.
 The default does not change, and it is a deliberate default rather than an
 unexamined one:
 
-- `memory.intervention.enabled` stays `true`. It runs the rules tier, which makes
+- `context.memory.enabled` stays `true`. It runs the rules tier, which makes
   no model calls, spends no tokens, and produced 4 of the 10 injections.
 - The LLM tier stays opt-in through `context.memory.target` and `context.memory.model`,
   which is already the case: an unset background role never resolves a client.
   A 10 percent hit rate at 22,868 tokens per injection does not earn a default-on
   position, and it is not so poor that it earns removal from an operator who has
   measured their own route and wants it.
-- The step deadline drops from 180 s to 30 s. This is the one behavioral change,
-  and it is a genuine trade: at 30 s, two of the six observed injections, at
-  53.6 s and 57.7 s, would have been cut, while 531 s of the 1,666 s spent would
-  not have been spent at all. The deadline is the bound on what one optional call
-  may hold a shared local server for, not a prediction of when a route answers.
+- `context.memory.timeoutMs` is `60000` in the current defaults. The dated study
+  considered a 30-second counterfactual: two of six observed injections, at
+  53.6 and 57.7 seconds, would have been cut, while 531 of 1,666 model seconds
+  would not have been spent. The current 60-second deadline is the source-backed
+  bound on what one optional call may hold a shared local server for, not a
+  prediction of when a route answers.
 - A step that would run on the endpoint the chat target is streaming against is
   skipped with reason `endpoint_busy`, and the skip is recorded. On a single-slot
   llama.cpp router the alternative is queueing behind the operator's own decoding
@@ -298,7 +299,8 @@ llama.cpp reads `chat_template_kwargs.enable_thinking`, and LM Studio reads
 
 A model that reasons anyway still works. Some genuinely cannot be silenced, and
 the catalog records those as always-on so the level reads `forced` rather than
-`off`; the shipped background model `qwopus3.5-9b-v3` is one of them. Reasoning
+`off`; the shipped model catalog classifies `qwopus3.5-9b-v3` that way. No model
+is selected for background memory by default. Reasoning
 blocks are discarded and only the envelope is kept, and the output budget is
 sized to let a reasoning preamble run its course first. The cost is latency,
 which the detached step absorbs.
@@ -328,18 +330,15 @@ KV caches, and parallel slots must all fit the target's available memory.
 The shipped defaults are:
 
 ```yaml
-background:
-  target: null
-  model: null
-  thinkingLevel: off
-
-memory:
-  intervention:
+context:
+  memory:
     enabled: true
-    everyNTools: 10
-    windowSteps: 8
-    maxTokens: 400
-    timeoutMs: 30000
+    target: null
+    model: null
+    cadenceToolCalls: 10
+    trajectorySteps: 8
+    maxOutputTokens: 2000
+    timeoutMs: 60000
 ```
 
 With `context.memory.target` and `context.memory.model` unset, Clio stays in the
@@ -349,31 +348,41 @@ steps with their trigger, decision, write count, cited-entry count, tier, and
 latency. That history is the only place a capture, a gate, or a timeout becomes
 visible, since those outcomes produce no transcript entry by design; only an
 actual injection reaches the transcript. It carries counts and outcomes only,
-never bank or trajectory text. `/settings` exposes every key above; the saved
+never bank or trajectory text. `/settings` exposes controls for every key above;
+its compact row labels retain shorter operator-facing names. The saved
 background-memory target is the Memory target row in Settings → Orchestrator,
 independent of the chat target and the fleet default. A running session owns
 its routing snapshot, while the saved
 selection becomes the default for new sessions.
 
-The reference live configuration is an LM Studio server on the `node-a` node with
-the wire model `example-background-model`:
+The reference topology separates chat from memory work:
+
+| Role | Target | Runtime and endpoint | Model | Capacity |
+| --- | --- | --- | --- | --- |
+| Chat | `dynamo` | LM Studio at `192.168.86.143:1234` | `qwen3.8-27b-dynamo` | Reported by the LM Studio probe |
+| Background memory | `mini` | llama.cpp router at `192.168.86.141:8080` | `ornith1.5-35b-moe` | 4 parallel slots, 262,144 context tokens per slot |
+
+The corresponding saved role selection is:
 
 ```yaml
-background:
-  target: node-a
-  model: example-background-model
-  thinkingLevel: off
+chat:
+  target: dynamo
+  model: qwen3.8-27b-dynamo
+context:
+  memory:
+    target: mini
+    model: ornith1.5-35b-moe
 ```
 
-A small model is the intended shape for this role. Across 60 measured steps on
-that route, latency ran 4.4 to 220.8 seconds with a median of 18.6, a 90th
-percentile of 79.9, and a 95th of 131.6. Capability is not the constraint;
-latency is, its spread is wide, and the detached step above is what makes the
-tier usable anyway.
+A smaller, efficient model is the intended shape for this role. The current
+reference uses a separate multi-slot endpoint so memory does not compete with
+the LM Studio chat stream. Capability is not the only constraint; latency and
+endpoint contention still matter, and the detached step above bounds their
+effect on the operator's turn.
 
 The deadline is a bound on what an optional call may hold that server for, not a
-figure sized to capture the tail. The shipped 30000 sits above the median and
-below the tail deliberately, and a step that exceeds it records `timeout` with
+figure sized to capture the tail. The shipped `60000` is a bounded compromise,
+and a step that exceeds it records `timeout` with
 its work discarded. A route whose steps mostly record `timeout` is a
 misconfigured deadline before it is a slow model, so read the ledger before
 raising it: `/memory` shows the hit rate the raise would be buying.
@@ -384,17 +393,19 @@ real target surfaces to verify the route:
 
 ```bash
 clio-coder targets --probe
-clio-coder models --target node-a
+clio-coder models --target mini
+clio-coder models --target dynamo
 clio-coder
 ```
 
 Then inspect `/settings targets`, `/settings`, and `/memory`. Local co-residency still
 matters: the background model, action model, their KV caches, and parallel slots
-must fit the target's available memory. Increase `timeoutMs` for a deliberately
-slow local route; lowering `maxTokens` bounds the visible reminder but does not
-change the background model's strict output grammar.
+must fit the target's available memory. Increase `context.memory.timeoutMs` for
+a deliberately slow local route; lowering `context.memory.maxOutputTokens`
+bounds the visible reminder and ordinary completion budget but does not change
+the background model's strict output grammar.
 
-For an immediate kill switch, set `memory.intervention.enabled` to `false` in
+For an immediate kill switch, set `context.memory.enabled` to `false` in
 `/settings`. Removing the background target instead returns to rules-only
 operation while leaving deterministic protection active.
 
@@ -533,15 +544,16 @@ trial. The report provides:
 - total and baseline-relative added tokens and latency;
 - an `alwaysNoisyRegression` verdict.
 
-The deterministic end-to-end harness contract can be run directly:
-
-```bash
-npm run test:file -- tests/contracts/proactive-memory-eval.test.ts
-```
+The source-level harness remains available to a runner adapter, and the eval
+platform remains active. Its former dedicated contract test was retired, and
+the current test tree has no direct reference to `runProactiveMemoryEval`.
+There is therefore no maintained direct test coverage or standalone
+`npm run test:file` invocation for this harness. Treat a live comparison as an
+explicit measurement campaign.
 
 For a live local comparison, an adapter should route only the `llm` variant
-through the request's target/model (the reference is `node-a` /
-`example-background-model`), keep baseline memory telemetry empty, and run all
+through the request's target/model (the reference memory route is `mini` /
+`ornith1.5-35b-moe`), keep baseline memory telemetry empty, and run all
 nine trials in equivalent isolated workspaces. Do not promote the LLM tier from
 one anecdotal task. The evidence bar is a pass-rate gain from a small number of
 specific, usually cited reminders at acceptable added token and latency cost.

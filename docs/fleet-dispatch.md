@@ -164,8 +164,9 @@ Use `clio-coder fleet resume [--json]` to reopen admission early. Detailed drain
 
 With no fleet configured and nothing requested, placement resolves to the
 implicit local path and optional fleet-node provenance may remain absent.
-Every new receipt uses strict integrity v19; older receipt formats are not
-accepted by the current reader.
+Every new receipt uses strict integrity v20. Older receipt formats are not
+accepted as current evidence; lower versions are reported as retired and are
+never migrated.
 
 ## Failure semantics
 
@@ -317,8 +318,8 @@ Claude Code subprocess routes refuse them with
 
 Every topology that runs more than one worker at once opens an agent ledger, the
 bounded coordination board those workers share while they run: the parallel
-fan-out (`src/tools/dispatch.ts:3247`), a detached batch of two or more
-(`:538`), and compete (`:1549`). A worker reaches it through the `ledger` tool
+fan-out in `runBatch`, a detached batch of two or more in `runDetached`, and
+`runCompete`, all in `src/tools/dispatch-runner.ts`. A worker reaches it through the `ledger` tool
 and posts one of three typed entries. A `claim` stakes path prefixes so peers
 stop colliding, a `finding` reports one observation with the path and line that
 ground it, and a `review` judges another entry by its id. Nothing untyped is
@@ -703,7 +704,7 @@ assignment failed, reports the reason on stderr, and records it in the
 assignment's `outcomeDetail`.
 
 Assignment status, attempt ids, and terminal run id are stored separately in
-`assignments.json` while each attempt keeps its own strict v19 receipt.
+`assignments.json` while each attempt keeps its own strict v20 receipt.
 Pipelines and batches await assignment terminals, so downstream stages consume
 the successful fallback output rather than an earlier failed attempt.
 
@@ -730,7 +731,7 @@ closed while a winner remains unapplied.
 
 ## Receipts
 
-Receipts carry exactly one integrity version (`RUN_RECEIPT_INTEGRITY_VERSION = 19`), which authenticates the complete receipt and reconstructible ledger provenance surface. There is no historical verification path: any other version is invalid, and a receipt that fails verification is never read as evidence. The fleet provenance fields covered by the digest
+Receipts carry exactly one current integrity version (`RUN_RECEIPT_INTEGRITY_VERSION = 20`), which authenticates the complete receipt and reconstructible ledger provenance surface. There is no historical evidence reader: a lower version is reported as retired, is not migrated, and is never read as evidence; a malformed or future version is invalid. The fleet provenance fields covered by the digest
 include:
 
 - `node`: the fleet node the worker ran on (`id`, `kind`, `host`). The `node.id` explicitly identifies the worker process host executing the task, not the model host (which is represented by the `target` id). This behavior tracks issue #120.
@@ -779,7 +780,7 @@ policy all consume that same final classification.
 Receipt integrity, host verification, and evidence verification are separate axes. Integrity says
 that the sealed receipt matches its ledger envelope; evidence verification
 reports whether Clio observed an applicable validation tool (or marks the
-basis unknown/not applicable). A read-only Scout can therefore report `receipt_integrity=verified/v19/sha256` alongside
+basis unknown/not applicable). A read-only Scout can therefore report `receipt_integrity=verified/v20/sha256` alongside
 `evidence_verification=not_applicable/read-only-agent`. Host verification is
 rendered independently as `host_verification=verified|rejected|skipped|not_requested`.
 A host-executed successful check projects onto canonical validation grounding as
@@ -842,7 +843,7 @@ hard block.
   with the failure reason printed on the rail above the footer when a run fails.
 - Runs the model itself asked for through the dispatch tool (identified by
   parentToolCallId) render as folded `◆` cards under the spawning tool segment;
-  operator-typed runs are `◇` and open. The fold chord uses the `clio.tool.expand`
+  operator-typed runs are `◇` and open. The fold chord uses the `clio-coder.tool.expand`
   keybinding (`Alt+O`), which toggles the newest foldable item of either kind
   (tool call or worker block). `Ctrl+Alt+O` or `Alt+Shift+O` toggles every tool
   call and worker block at once.

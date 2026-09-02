@@ -1,101 +1,122 @@
 # Time and Clock Conventions
 
-This document defines the canonical time and clock conventions for `clio-coder`. These policies establish consistent rules for measuring durations, recording instants, converting timezones, and managing concurrency across the codebase.
-
-This policy is promoted from Section 10 of the repository time audit conducted on 2026-08-15.
+This document describes the time practices implemented in the current Clio
+Coder source tree. The code distinguishes process-local elapsed spans from
+durable instants, but it does not impose one clock primitive on every module.
 
 ---
 
-## 1. Which Clock for What Purpose
+## 1. Choose a clock for the lifetime of the fact
 
-### Monotonic clocks for durations
+| Fact | Current practice | Representative sources |
+| --- | --- | --- |
+| Process-local elapsed span | Use a monotonic source such as `performance.now()` or `process.hrtime.bigint()` when the start and finish occur in one process. | `src/domains/dispatch/heartbeat.ts`, `src/domains/dispatch/code-step.ts`, `src/core/startup-timer.ts` |
+| Durable or cross-process instant | Store epoch milliseconds or canonical UTC from `new Date(...).toISOString()`. | Session entries, receipts, dispatch rows, audit rows |
+| Persisted expiry, lock age, or restart-visible deadline | Some owners intentionally compare `Date.now()` values because the fact must survive a process boundary or is derived from filesystem metadata. | `src/core/state-file-lock.ts`, dispatch admission and recovery |
+| Concurrent ordering | Prefer an explicit sequence or store order when the protocol supplies one; do not invent ordering from close timestamps. | `src/domains/dispatch/agent-ledger-store.ts`, `src/domains/dispatch/execution-scheduler.ts` |
 
-All durations must be measured using `performance.now()` without exception. This rule applies to latency measurements, elapsed run times, time-to-first-token (TTFT), execution budgets, timeouts, stall watchdogs, retry backoff intervals, and rendering metrics.
-
-Whenever a value answers the question "how long did this take" or "how long until", it must originate from the monotonic clock. Monotonic clocks are unaffected by Network Time Protocol (NTP) adjustments, system suspend or resume events, and Daylight Saving Time (DST) transitions.
-
-### Wall clocks for anchored instants
-
-Wall clock reads via `Date.now()` or `new Date()` are reserved exclusively for anchoring instants that a human operator or an external machine will inspect. These include timestamps such as `startedAt`, `endedAt`, `createdAt`, and `expiresAt`. Wall clocks must never be used to measure durations or elapsed intervals.
+This means neither `performance.now()` nor `Date.now()` is universally correct.
+A monotonic value has meaning only within its clock origin and is the right
+choice for a live heartbeat age or one process's latency. A wall-clock value is
+necessary for a receipt timestamp, a persisted lease deadline, a filesystem
+mtime age, or a record another process must read after restart.
 
 ### Combined anchor and span pattern
 
-When both an anchor instant and a duration are required, code must follow the pattern established in `src/domains/dispatch/code-step.ts:291-306`:
+When a record needs both a human-readable anchor and an accurate in-process
+duration, `src/domains/dispatch/code-step.ts` uses one wall anchor and one
+monotonic span:
 
 ```ts
-const startedAtMs = Date.now();                      // wall anchor, for the record
-const clock = process.hrtime.bigint();               // monotonic span
+const startedAtMs = Date.now();
+const clock = process.hrtime.bigint();
 const startedAt = new Date(startedAtMs).toISOString();
 // ... operation executes ...
 const durationMs = Number((process.hrtime.bigint() - clock) / 1_000_000n);
 const endedAt = new Date(startedAtMs + durationMs).toISOString();
 ```
 
-The wall clock anchors the starting instant for human correlation. The monotonic clock measures the elapsed span. The ending timestamp `endedAt` is derived by adding the monotonic span to the initial wall anchor. This derivation guarantees that `endedAt - startedAt === durationMs` remains true regardless of any wall-clock adjustments that occur during execution.
+The derived ending instant stays consistent with the measured duration even if
+the wall clock changes during the operation.
 
-### Injectable clock seams
+### Cross-host and restart boundaries
 
-Every module that reads a clock must accept an optional injectable clock interface in its configuration or options, defaulting to the system clock. Injectable clock seams allow test suites to run deterministically without relying on real-time passage or introducing timing races.
+Never subtract process-local monotonic values from different processes or
+hosts. A restart has no shared monotonic origin with the worker it recovers;
+`src/domains/dispatch/orphan-recovery.ts` first adjudicates the host-scoped
+process identity and then uses the persisted heartbeat only as a display and
+evidence bound. Transport protocols that need a durable anchor and live
+liveness carry both. `HeartbeatStamp.current` is the wall-clock instant, while
+`HeartbeatStamp.monotonic` is the value the live watchdog compares.
 
-### Cross-host timestamp boundaries
+On a shared filesystem, a process record created by another host is not checked
+against the local process table. Host, pid, and process-birth facts prevent pid
+reuse and cross-host confusion. When exact event ordering matters, use a
+protocol sequence, SQLite rowid, or append order defined by the owning store.
 
-A timestamp produced on one host must never be compared directly against a clock read on another host. Systems must receive-stamp incoming events upon arrival on the local host, maintain an explicit clock offset, or order events using sequence numbers rather than timestamps. Code must never subtract timestamps across host boundaries.
+### Injectable seams are local contracts
 
-### Sequence numbers over timestamps for ordering
-
-When ordering operations under concurrency, code must prefer monotonic sequence numbers over timestamps. Components such as the agent ledger (`src/domains/session/agent-ledger-store.ts`) and the execution scheduler (`src/domains/dispatch/execution-scheduler.ts`) rely on sequence numbers to remain correct by construction. Timestamps are reserved for human display and coarse windowing. Any attribution logic that relies on timestamps must report ambiguity explicitly rather than returning null.
-
----
-
-## 2. Where UTC Is Converted
-
-### Storage, transport, and comparisons in UTC
-
-The system stores UTC, transports UTC, and compares UTC. Conversion to local time occurs once, strictly at the render call site.
-
-1. On disk and across the wire, timestamps are always represented as canonical ISO-8601 strings produced by `toISOString()`. Every store validates timestamps upon reading using the exact round-trip check from `src/domains/dispatch/capacity-lease.ts:80-84`.
-2. In memory, instants are stored as epoch milliseconds or canonical ISO-8601 strings. Localized or pre-formatted date strings must not be held in memory models.
-3. At the user interface render boundary, UTC instants are converted to the operator's local timezone.
-4. Whenever a converted local timestamp is displayed, the underlying canonical UTC instant must remain accessible. For example, a table row displays local time while the associated detail pane preserves the exact ISO-8601 string so that the two representations can always be reconciled.
-
----
-
-## 3. Formatter Policy
-
-All operator-facing time formatting is consolidated in `src/interactive/format-time.ts`. The module provides three standardized formatting functions:
-
-| Function | Output Format | Timezone and Locale Frame | Purpose |
-|---|---|---|---|
-| `clockLocal(instant)` | `HH:MM:SS` | Operator local timezone using `en-GB` locale with 24-hour cycle (`hourCycle: "h23"`) | Renders time-of-day for logs, tree selectors, and message pickers |
-| `dateLocal(instant)` | `YYYY-MM-DD` | Operator local timezone using `en-CA` locale | Renders calendar dates for session selectors, welcome dashboards, and export filenames |
-| `relative(instant, now)` | `"3m ago"` (falls back to `dateLocal`) | Operator local timezone | Renders relative recency ladders with automatic fallback to calendar dates |
-
-Both `Intl.DateTimeFormat` instances are constructed at module scope. The module automatically rebuilds formatters if `process.env.TZ` changes during runtime.
-
-Machine surfaces such as filenames, IDs, structured log fields, and receipt records bypass the formatting module entirely and use canonical `toISOString()`.
+Clock injection exists where deterministic timing tests or protocol logic need
+it. Examples include the pure heartbeat classifier, dispatch admission queues,
+capacity leases, fleet preflight, worker spawn, and the audit writer's date
+function. Other modules read a platform clock directly. There is no global
+test-clock harness; tests use the seam supplied by the owner under test or
+exercise real passage explicitly.
 
 ---
 
-## 4. Test Determinism and Receipt Integrity
+## 2. UTC storage and local rendering
 
-### Test clock harness
+Durable and wire timestamps use canonical ISO-8601 UTC strings produced by
+`toISOString()` unless a schema explicitly owns epoch milliseconds. Localized
+display strings do not belong in persisted models.
 
-Test suites must rely on the steppable clock helper in `tests/harness/clock.ts`. Every factory function that reads a clock must default to the harness clock in test environments. Real-time passage in tests is opt-in and requires explicit configuration.
+Operator-facing conversion is centralized in
+`src/interactive/format-time.ts` for the surfaces that display session and
+message instants:
 
-### Receipt integrity digests
+| Function | Output | Purpose |
+| --- | --- | --- |
+| `clockLocal(instant)` | `HH:MM:SS` through `en-GB` with a 24-hour cycle | Local time of day |
+| `dateLocal(instant)` | `YYYY-MM-DD` through `en-CA` | Local calendar date |
+| `relative(instant, now)` | `3m ago`, `yesterday`, or a local date | Coarse recency |
 
-Persisted fields such as `startedAt` and `endedAt` participate in receipt integrity digests (`src/domains/dispatch/receipt-integrity.ts`). Any timestamp normalization, derivation, or adjustment must occur before the receipt digest is sealed. Timestamps must never be rewritten after receipt creation.
+The module keeps its `Intl.DateTimeFormat` instances at module scope and
+rebuilds them when `process.env.TZ` changes. Machine-readable surfaces such as
+structured logs, session records, and receipts bypass these formatters.
 
 ---
 
-## 5. State-Root and Audit-Filename Assumptions
+## 3. Receipt and audit integrity
 
-### Host-scoped state root and coordination
+Persisted receipt fields such as `startedAt` and `endedAt` participate in the
+integrity digest owned by `src/domains/dispatch/receipt-integrity.ts`. Timestamp
+normalization and duration derivation must finish before sealing. A sealed
+receipt must not be rewritten merely to make its clocks look tidier.
 
-The state root directory is host-scoped. Durable locks and capacity leases carry a metadata payload containing `{host, pid, birthToken}`.
+Safety audit rows are written under:
 
-A coordination record created by a foreign host is never adjudicated against the local process table. This follows the host-scoping pattern implemented in `src/tools/compete-worktrees.ts:207-215`, `src/domains/dispatch/orphan-recovery.ts:140-149`, and `src/core/run-identity.ts:23`.
+```text
+<stateDir>/audit/YYYY-MM-DD.jsonl
+```
 
-### Audit filename semantics
+The filename date is the operator-local calendar date on which the writer
+opened that generation. Each row still carries a canonical UTC `ts`. Concurrent
+producers do not promise timestamp order in the raw file, so consumers sort by
+`ts` when reconstructing time order. The local date label is not itself a
+machine ordering key.
 
-The date in an audit log filename (such as `audit-YYYY-MM-DD.jsonl`) is a human-facing label indicating the local calendar date on which the audit log was opened. It does not represent machine-read data. All individual audit event records contained within the file store canonical UTC ISO-8601 timestamps.
+---
+
+## 4. Review checklist
+
+When adding a timed fact:
+
+1. Decide whether it is a process-local span, a durable instant, or a
+   restart-visible deadline.
+2. Keep monotonic values inside their originating process.
+3. Persist UTC anchors and the measured duration when both are useful.
+4. Use host identity and process-birth evidence before consulting a local pid.
+5. Add a narrow injectable seam when deterministic tests need one; do not imply
+   that an unrelated module shares it.
+6. Normalize timestamps before sealing any receipt or evidence digest.

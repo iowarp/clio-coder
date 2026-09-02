@@ -63,9 +63,12 @@ scientific apps:
 - `ProbeContext.authToken` carries a resolved stored/API/OAuth bearer into live
   probes so authenticated model discovery does not reach into auth storage.
 - ALCF rejects non-standard `chat_template_kwargs` request fields. The runtime
-  marks synthesized models with `clio.chatTemplateKwargsUnsupported`, and the
-  OpenAI-compatible engine adapter omits that field while still sending the
-  accepted top-level `reasoning_effort`.
+  currently marks synthesized models with
+  `clioCoder.chatTemplateKwargsUnsupported`, while the OpenAI-compatible engine
+  adapter still reads the released legacy `clio.chatTemplateKwargsUnsupported`
+  location. At this source revision the marker therefore does not guarantee
+  omission of `chat_template_kwargs`; the accepted top-level
+  `reasoning_effort` remains independent of that mismatch.
 
 Live model availability depends on which gateway jobs are running. The static
 model list is only a fallback for offline resolution; `clio-coder targets --probe`

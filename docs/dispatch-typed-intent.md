@@ -32,16 +32,23 @@ Related pages: [tool-usage.md](tool-usage.md) for the `dispatch` tool arguments,
 }
 ```
 
-Every path is a repository-relative POSIX path under the boundary grammar in
-`src/core/path-boundary.ts`. A trailing `/` means the subtree; no trailing `/`
-means that exact file. Absolute paths, `..`, `.` segments, backslashes, and
-globs are refused rather than interpreted. Each list is normalized,
-deduplicated, and sorted by code point, holds at most 32 entries, and each entry
-is at most 512 UTF-8 bytes. `verification` holds at most 8 entries and every
+The three scope fields, `read_roots`, `write_roots`, and `relevant_paths`, use
+the repository-relative POSIX boundary grammar in `src/core/path-boundary.ts`.
+A trailing `/` means the subtree; no trailing `/` means that exact file.
+Absolute paths, `..` segments, interior `.` segments, backslashes, and globs
+are refused in those fields. An entry that is exactly `.` or `./` is accepted
+as the repository root and normalizes out of the list. Expected outputs use a
+separate normalizer: it rejects absolute paths, backslashes, root escapes, and
+an empty normalized path, but it normalizes interior `.` and repeated `/`
+segments and does not interpret or reject glob characters. Each list is
+normalized, deduplicated, and sorted by
+code point, holds at most 32 entries, and each entry is at most 512 UTF-8 bytes.
+`verification` holds at most 8 entries and every
 `check` is a declared id resolved from package scripts or
 `.clio-coder/verifiers.yaml`, never a shell command. The one exception is
 `{ "check": "none" }`, which models write to mean "no verification"; it
-normalizes to an empty list instead of costing a refused round.
+normalizes to an empty list instead of costing a refused round unless the
+workspace actually declares a verifier whose id is `none`.
 
 Normalization is in `src/domains/dispatch/intent.ts`. The normalized object
 carries `version: 2` and a `pathProvenance` array binding every policy-bearing
@@ -58,7 +65,7 @@ Each rule resolves to exactly one of three decisions.
 | Decision | Meaning | Where it surfaces |
 | :--- | :--- | :--- |
 | **accept** | The request is unambiguous. | Nothing is reported. |
-| **warn** | The request is compatible, but its policy-bearing scope rests on something weaker than a declaration. The dispatch runs with the authority it would have had anyway. | The approval artifact renders the full resolved scope before a supervised dispatch runs; `pathScope` is sealed on the receipt. |
+| **warn** | The request is compatible, but the classifier identified a weaker declaration or a scope-replacement tradeoff. The dispatch runs with the authority it would have had anyway. | Current admission publishes the typed-scope replacement warning. Legacy provenance still appears in the approval artifact and sealed `pathScope`; the absent-intent and missing-verification classifier findings are not emitted as standalone warnings. |
 | **refuse** | The request states two incompatible things about authority, or states one this build cannot interpret. | Terminal admission error carrying the reason code. The dispatch never runs. |
 
 The invariant that separates `warn` from `refuse`: **a warning is never the
@@ -69,7 +76,7 @@ touch, the answer is a refusal, never the union of the two.
 
 ### 2.1 Omitted intent
 
-Accepted, with a warning. Policy-bearing scope is resolved by
+Accepted without a standalone runtime warning. Policy-bearing scope is resolved by
 `legacyPathScope()`: legacy `writeRoots` become the write boundary with
 provenance `derived`, and path-like tokens in the task (confidence `medium`) and
 briefing (confidence `low`) become working-context paths with provenance
@@ -79,7 +86,10 @@ Inferred paths select project rules and compile worker context. They never
 become write boundaries and never add a verification requirement. The only path
 into a write boundary without a declaration is the explicit legacy `writeRoots`
 field, which the caller had to set on purpose. This is what makes omission a
-warning rather than a refusal: nothing about it can widen authority.
+compatible rather than a refusal: nothing about it can widen authority. The pure
+compatibility classifier can return `intent_absent_legacy_inference`, but the
+production dispatch path deliberately treats omitted intent as ordinary. The
+approval artifact and receipt provenance remain the operator-visible record.
 
 An absolute or malformed path token in prose is not silently dropped. It throws
 `DispatchPathScopeInferenceError` with code `legacy_scope_path_absolute` or
@@ -92,13 +102,15 @@ Accepted. Every field is independently optional and an omitted list normalizes
 to empty. A declaration is not required to be complete to be authoritative:
 declaring only `write_roots` is a complete statement about write scope.
 
-One partial shape gets a warning. Intent that declares `write_roots` or
+The pure classifier identifies one partial shape as a warning. Intent that declares `write_roots` or
 `expected_outputs` but no `verification` describes work that changes the tree
 with nothing the orchestrator itself runs to prove the change is sound
-(`intent_partial_verification_absent`).
+(`intent_partial_verification_absent`). Current production admission keeps only
+terminal refusals from this classifier, so it does not emit that finding as an
+operator diagnostic.
 
-One partial shape is refused. An `expected_outputs` entry outside every declared
-`write_root` (`intent_outputs_outside_write_roots`) means the write boundary
+One partial shape is refused when both lists are non-empty. An `expected_outputs`
+entry outside every declared `write_root` (`intent_outputs_outside_write_roots`) means the write boundary
 would block exactly the artifact the task is required to produce. Refusing that
 at admission costs a rejected call; accepting it costs a full worker run that
 cannot succeed.
@@ -121,8 +133,9 @@ is the same: restate the fields on a fresh dispatch call.
 
 Refused. Three contradictions are enumerated.
 
-- **Legacy against declared write scope.** `writeRoots` and `intent.write_roots`
-  resolving to different trees is `intent_write_roots_contradiction`. Neither the
+- **Legacy against declared write scope.** When both lists are non-empty,
+  `writeRoots` and `intent.write_roots` resolving to different trees is
+  `intent_write_roots_contradiction`. Neither the
   union nor the legacy field wins; the caller drops `writeRoots` and declares
   once.
 - **Narrowed against enclosing scope.** A per-task intent in a batch, or any
@@ -137,19 +150,20 @@ Refused. Three contradictions are enumerated.
 
 The declared-versus-inferred case is not a contradiction and is not refused.
 When a request declares intent, prose inference stops resolving scope entirely;
-paths mentioned only in prose are reported as omitted through
-`typed_scope_replaced_inferred_paths` and take no part in rule selection or
-authority. Declared always outranks inferred.
+paths mentioned only in prose take no part in rule selection or authority.
+`typed_scope_replaced_inferred_paths` reports the useful subset that looks like
+a source or documentation path, or ends in a directory separator, capped at 12
+entries for the transcript. Declared always outranks inferred.
 
 ---
 
 ## 3. Producer Compatibility Table
 
 Every producer that can reach a worker passes through `validateJobSpec()` in
-`src/domains/dispatch/validation.ts`, which is where the classifier runs. The
-rules above therefore hold for every row below, including the rows that cannot
-declare intent yet: those rows resolve scope by inference and are refused only
-when they state a contradiction.
+`src/domains/dispatch/validation.ts`. When an `intent` property is present, that
+validator runs the classifier and retains its terminal refusals. Requests with
+no intent skip compatibility classification and resolve scope through the legacy
+inference path, whose malformed-path errors remain terminal.
 
 | Dispatch producer | Source | Typed intent | Behavior without declaration | Refuses on |
 | :--- | :--- | :--- | :--- | :--- |
@@ -157,13 +171,13 @@ when they state a contradiction.
 | **`dispatch` tool, batch `tasks[]`** | `src/tools/dispatch-arguments.ts` | Declared per task, shallow-merged over the top-level default | Same as singular, per task | All codes, plus `intent_scope_widening` against the top-level ceiling |
 | **`dispatch` modes parallel / sequential / pipeline / detached** | `src/tools/dispatch-admission.ts` | Inherited unchanged from the task that declared it | Legacy inference | All codes |
 | **`dispatch` mode compete, candidates** | `src/tools/dispatch-admission.ts` | Inherited unchanged from the single base task | Legacy inference | All codes. `verification` is refused for the mode (`verification_unsupported_for_mode`) |
-| **`dispatch` mode compete, judge** | `src/tools/dispatch-admission.ts` | None. The judge is a fresh read-only request | Legacy inference over the judge's own task | All codes |
+| **`dispatch` mode compete, judge** | `src/tools/dispatch-admission.ts` | None. The judge is a fresh read-only request | Legacy inference over the judge's own task | Legacy inference errors only |
 | **`dispatch` mode council, members** | `src/tools/dispatch-admission.ts` | Inherited, narrowed to read-only: declared write roots arrive as read roots | Legacy inference | All codes. `verification` is refused for the mode (`council_verification_unsupported`) |
-| **`dispatch` mode council, synthesis judge** | `src/tools/dispatch-admission.ts` | None. Fresh read-only request | Legacy inference over the judge's own task | All codes |
+| **`dispatch` mode council, synthesis judge** | `src/tools/dispatch-admission.ts` | None. Fresh read-only request | Legacy inference over the judge's own task | Legacy inference errors only |
 | **`dispatch` review gate, builder** | `src/tools/dispatch-admission.ts` | Inherited unchanged | Legacy inference | All codes |
-| **`dispatch` review gate, reviewer** | `src/tools/dispatch-admission.ts` | None on the request. `expected_outputs` and `verification` reach the reviewer as rendered *requirements*, never as evidence | Legacy inference over the reviewer's own task | All codes |
+| **`dispatch` review gate, reviewer** | `src/tools/dispatch-admission.ts` | None on the request. `expected_outputs` and `verification` reach the reviewer as rendered *requirements*, never as evidence | Legacy inference over the reviewer's own task | Legacy inference errors only |
 | **`dispatch` `apply_winner`** | `src/tools/dispatch-admission.ts` | Not applicable. Branch application runs no worker | Not applicable | Branch-shape refusals only |
-| **`from_scout` continuation** | `src/tools/dispatch-scout-admission.ts` | **None today.** The compiled continuation plan carries no intent | Legacy inference per step | Contradiction codes only |
+| **`from_scout` continuation** | `src/tools/dispatch-scout-admission.ts` | **None today.** The compiled continuation plan carries no intent | Legacy inference per step | Legacy inference errors only |
 | **Fleet contract agent step (v4+ `writes:`)** | `src/domains/dispatch/fleet-run.ts` | Declared. The contract's `writes:` compiles to `relevant_paths` | Legacy inference for pre-v4 contracts and readonly steps | All codes |
 | **Fleet contract gate / plan step** | `src/domains/dispatch/fleet-run.ts` | Declared, same path (`writes` is the gate path or the plan step's boundary) | Legacy inference when undeclared | All codes |
 | **Fleet delegation-plan spliced step** | `src/domains/dispatch/fleet-run.ts` | Declared from the validated plan task's `writes` | Legacy inference when the task declares none | All codes |
@@ -171,14 +185,14 @@ when they state a contradiction.
 | **ACP delegation target** | `src/domains/dispatch/extension.ts` | Accepted and carried into the plan, but the external agent runs its own tool surface | Legacy inference | All codes, plus a hard refusal of any resolved `writeRoots` on this transport |
 | **Custom agent recipe** | `src/domains/agents/` | Not a producer. A recipe narrows the tool surface and capability class; it never declares dispatch scope | Not applicable | Not applicable |
 | **Extension-authored `DispatchRequest`** | Any `DispatchContract` consumer | Declared, if the extension builds one through `declaredScopeIntent()` or the normalizer | Legacy inference | All codes |
-| **`clio-coder run --agent`** | `src/cli/run.ts` | **None today** | Legacy inference | Contradiction codes only |
-| **`clio-coder wiki generate`** | `src/cli/wiki-generate.ts` | **None today.** Sets legacy `writeRoots` | Legacy inference plus a derived write boundary | Contradiction codes only |
-| **`clio-coder bootstrap generate`** | `src/cli/bootstrap-generate.ts` | **None today** | Legacy inference | Contradiction codes only |
-| **Interactive slash commands, overlays, watchdog** | `src/interactive/` | **None today** | Legacy inference | Contradiction codes only |
+| **`clio-coder run --agent`** | `src/cli/run.ts` | **None today** | Legacy inference | Legacy inference errors only |
+| **`clio-coder wiki generate`** | `src/cli/wiki-generate.ts` | **None today.** Sets legacy `writeRoots` | Legacy inference plus a derived write boundary | Legacy inference errors only |
+| **`clio-coder bootstrap generate`** | `src/cli/bootstrap-generate.ts` | **None today** | Legacy inference | Legacy inference errors only |
+| **Interactive slash commands, overlays, watchdog** | `src/interactive/` | **None today** | Legacy inference | Legacy inference errors only |
 
-"All codes" means every code in section 5 that can apply to the row's shape.
-"Contradiction codes only" means the row cannot declare intent, so only the
-`intent_absent_legacy_inference` warning and the legacy inference errors apply.
+"All codes" means every terminal code in section 5 that can apply to the row's
+shape. "Legacy inference errors only" means the row cannot declare intent, so
+only malformed or absolute prose-path inference can refuse it.
 
 ---
 
@@ -210,8 +224,8 @@ filesystem, no clock, no environment, and no package layout. The supported
 version set is a compiled-in constant, not a lookup. A source checkout, a global
 npm install, and a bundled `dist/` therefore classify identical input
 identically, which is what makes the version policy verifiable rather than
-environmental. `tests/contracts/dispatch-intent-compatibility.test.ts` asserts it
-by classifying the same input from two different working directories.
+environmental. `tests/contracts/dispatch-admission.test.ts` covers the current
+normalization and compatibility boundary.
 
 The one input that is legitimately environmental is the *verification catalog*:
 `check` ids resolve from the project's `package.json` scripts and
@@ -223,16 +237,18 @@ Clio installation. An undeclared id fails closed with
 
 ## 5. Reason Codes
 
-Every code is stable and appears as the prefix of its diagnostic, in the form
-`<code>: <what is wrong and what to do about it>`.
+Active refusal codes are stable and appear as the prefix of their diagnostic, in
+the form `<code>: <what is wrong and what to do about it>`. The table also marks
+classifier-only findings and compatibility identifiers that have no current
+producer.
 
 | Code | Decision | Meaning |
 | :--- | :--- | :--- |
-| `intent_absent_legacy_inference` | warn | No typed intent; scope came from legacy inference. |
-| `intent_partial_verification_absent` | warn | Declares tree-changing work with no verification requirement. |
+| `intent_absent_legacy_inference` | classifier-only warn | No typed intent; scope came from legacy inference. Production admission does not emit it. |
+| `intent_partial_verification_absent` | classifier-only warn | Declares tree-changing work with no verification requirement. Production admission does not emit it. |
 | `typed_scope_replaced_inferred_paths` | warn | Typed intent was declared, so prose-only paths took no part in scope. |
-| `legacy_scope_inferred` | warn | Legacy dispatch resolved policy-bearing scope with no declaration. |
-| `legacy_scope_empty` | warn | Legacy dispatch inferred no policy-bearing path at all. |
+| `legacy_scope_inferred` | retained compatibility id | Accepted by the event projection for older producers; no current source emits it. |
+| `legacy_scope_empty` | retained compatibility id | Accepted by the event projection for older producers; no current source emits it. |
 | `intent_version_unsupported` | refuse | `intent.version` names a version this build does not speak. |
 | `intent_malformed` | refuse | Not a normalized intent for a reason other than its version. |
 | `intent_write_roots_contradiction` | refuse | Legacy `writeRoots` and `intent.write_roots` name different trees. |
@@ -255,7 +271,8 @@ Every code is stable and appears as the prefix of its diagnostic, in the form
 ## 6. Examples
 
 Typed intent is the default for every example below. A call that omits it still
-works; it just resolves its scope from weaker evidence.
+works without a dedicated warning; it resolves its scope from weaker evidence
+recorded in the approval artifact and receipt.
 
 ### 6.1 Main-agent call, single writer
 

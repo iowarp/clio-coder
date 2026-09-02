@@ -11,7 +11,7 @@ This document defines the 50 core architectural concepts and terminology used th
 - **Owning Type**: `DurableAssignmentRecord` in `src/domains/dispatch/assignment-store.ts`.
 
 ### 2. Run
-- **Definition**: A concrete execution attempt of an assignment. Every run possesses a unique UUIDv7 identifier, an isolated event stream, a designated execution node, and a final cryptographically sealed receipt.
+- **Definition**: A concrete execution attempt of an assignment. Dispatch creates a 12-character random base36 run identifier with `newRunId()`. Session ids use the same 12-character base36 generator, while appended session turn and entry ids use UUIDv7. Every run has an isolated event stream, a designated execution node, and a final cryptographically sealed receipt.
 - **Owning Type**: `RunEnvelope` in `src/domains/dispatch/types.ts`.
 
 ### 3. Attempt
@@ -28,7 +28,7 @@ This document defines the 50 core architectural concepts and terminology used th
 
 ### 6. Receipt
 - **Definition**: An immutable, cryptographically sealed record of a completed run containing full execution facts, tool telemetry, token accounting, validation grounding, and outcome codes.
-- **Owning Type**: `RunReceipt` in `src/domains/dispatch/types.ts` (`RUN_RECEIPT_INTEGRITY_VERSION = 19`).
+- **Owning Type**: `RunReceipt` in `src/domains/dispatch/types.ts` (`RUN_RECEIPT_INTEGRITY_VERSION = 20`).
 
 ### 7. Envelope
 - **Definition**: A bounded container enforcing byte-length limits and truncation indicators on a dynamic payload. Tool output carries shown and total byte counts plus a continuation fragment; a parent briefing carries byte count and SHA-256 content hash instead.
@@ -59,7 +59,7 @@ This document defines the 50 core architectural concepts and terminology used th
 - **Owning Type**: `FleetNodeSnapshot` in `src/domains/scheduling/cluster.ts`.
 
 ### 14. Route
-- **Definition**: An exact execution tuple composed of `{ agent, target, model, node }` evaluated by the active route planner for capability fit and cost readiness.
+- **Definition**: The complete execution candidate evaluated by the route planner for capability fit, readiness, and cost. Its operational identity includes agent, execution role, target, model, runtime, node, thinking level when present, tool and prompt composition, endpoint identity, and immutable spec/settings fingerprints.
 - **Owning Type**: `RouteCandidate` in `src/domains/dispatch/route-decision.ts`.
 
 ### 15. Posture (Autonomy Level)
@@ -71,7 +71,7 @@ This document defines the 50 core architectural concepts and terminology used th
 - **Owning Type**: `AgentCapabilityClass` in `src/domains/agents/spec.ts`.
 
 ### 17. Topology
-- **Definition**: The multi-agent structural orchestration pattern governing workflow execution. Three unions spell it for three different jobs and their value sets differ: `parallel`, `sequential`, `pipeline`, `review`, `compete`, and `fleet` in a compiled plan; the same set with `detached` and without `fleet` for a capacity reservation; both plus `detached` and `fleet` at the tool surface. The operator-facing argument is spelled `mode`, and `singular` (the one-task call shape) and `auto` are values of that argument, not topologies.
+- **Definition**: The multi-agent structural orchestration pattern governing workflow execution. Three unions spell it for three jobs. A compiled plan supports `parallel`, `sequential`, `pipeline`, `review`, `compete`, `council`, and `fleet`. A capacity reservation supports `parallel`, `detached`, `sequential`, `pipeline`, `review`, `compete`, and `council`. The dispatch-plan tool surface supports all eight values from those two sets. The operator-facing argument is spelled `mode`; `singular` (the one-task call shape) and `auto` are values of that argument, not topologies.
 - **Owning Types**: `ExecutionPlanTopology` in `src/domains/dispatch/execution-plan.ts`, `ReservationTopology` in `src/domains/dispatch/reservation-store.ts`, `DispatchPlanTopology` in `src/tools/dispatch-plan.ts`.
 
 ### 18. Worker Block
@@ -79,8 +79,8 @@ This document defines the 50 core architectural concepts and terminology used th
 - **Owning Type**: `WorkerEntryState` in `src/interactive/worker-stream.ts`.
 
 ### 19. Origin Glyphs (`◇`/`◆`)
-- **Definition**: Transcript and fleet board indicators that identify who requested a run. The glyph `◇` marks operator-typed runs, `◆` marks model-requested dispatches, and a dim dot marks internal Clio runs.
-- **Owning Type**: `WorkerRunOrigin` in `src/domains/session/entries.ts`.
+- **Definition**: Transcript and fleet board indicators that identify who requested a run. The glyph `◇` marks operator-typed runs, `◆` marks model-requested dispatches, and a dim dot marks internal Clio runs. Transcript worker entries admit only user and agent origins; internal runs can appear on dispatch surfaces but never become transcript worker entries.
+- **Owning Types**: `WorkerRunOrigin` in `src/domains/session/entries.ts` for transcript entries; `DispatchRequestOrigin` in `src/domains/dispatch/types.ts` for user, agent, and internal dispatches.
 
 ### 20. Share Note
 - **Definition**: A bounded operator note formatted as `[worker result] <agent> · run <id> · <outcome> · shared by the operator` that delivers a finished worker answer into the main agent context over the user-turn path.
@@ -143,7 +143,7 @@ This document defines the 50 core architectural concepts and terminology used th
 - **Owning Type**: `TaskLedgerEntry` in `src/domains/session/entries.ts`.
 
 ### 35. Context Ledger
-- **Definition**: The accounting of how the model's context window is spent, bucketed into system, tools, agents, skills, memory, and the rest, and the input to compaction decisions.
+- **Definition**: The accounting of how the model's context window is spent and the input to compaction decisions. Current buckets are `system`, `tools`, `agents`, `skills`, `memory`, `project`, `messages`, `pending`, `reserve`, `free`, and `streaming`.
 - **Owning Type**: `ContextLedgerCategory` in `src/domains/session/context-ledger.ts`.
 
 ### 36. Dispatch Board

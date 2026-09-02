@@ -11,7 +11,7 @@ Source of truth: `src/domains/safety/**`, `src/tools/registry.ts`, `src/tools/bo
 
 ## Two axes: autonomy and the safety net
 
-The `autonomy` setting (`read-only` | `suggest` | `auto-edit` | `full-auto`) is an enforced dial. It controls exactly one thing: which action classes run immediately, which park for operator approval, and which are auto-denied. The safety net (damage-control rules, path policy, protected artifacts, loop guard, dispatch scope admission) is independent of the dial and identical at every level. When a `[safety-net]` notice appears at full-auto, that is the always-on net working as designed, not a contradiction of the level.
+The `safety.autonomy` setting (`read-only` | `suggest` | `auto-edit` | `full-auto`) is an enforced dial. It controls exactly one thing: which action classes run immediately, which park for operator approval, and which are auto-denied. The safety net (damage-control rules, path policy, protected artifacts, loop guard, dispatch scope admission) is independent of the dial and identical at every level. When a `[safety-net]` notice appears at full-auto, that is the always-on net working as designed, not a contradiction of the level.
 
 In the current source tree, effective autonomy resolution is strictly centralized in `src/entry/orchestrator.ts` through `resolveEffectiveAutonomy` and `resolveBaselineAutonomy`. Every admission surface (tool registry admission, dispatch plan provenance, and ACP session snapshots) delegates to this pair of functions so that fallback paths cannot diverge across execution contexts. `resolveBaselineAutonomy` evaluates dispatch settings overrides, headless CLI options, and configuration settings before applying the default `auto-edit` level. `resolveEffectiveAutonomy` combines any active ACP session autonomy level with the baseline resolution.
 
@@ -38,7 +38,7 @@ The exposure tier is the one row keyed by the call rather than by its action cla
 
 The `system_modify` confirm is level-invariant, so it is enforced and attributed as a safety-net confirm rail: the overlay, notices, and audit ledger name the net (reason code `system-modify-confirm`, policy source `builtin-classifier`), not the autonomy level. The matrix row above is unchanged in outcome at every level; only `read-only` converts the ask to a denial. `unknown` remains in the autonomy mapping because the registry substitutes a registered tool's base action class after the net evaluates.
 
-The level is persisted as `autonomy` in `settings.yaml`, hot-reloads, and is edited in the `/settings` Autonomy & Safety section.
+The level is persisted as `safety.autonomy` in `settings.yaml`, hot-reloads, and is edited in the `/settings` Autonomy & Safety section.
 
 ### Consequence tier is presentation, not authority
 
@@ -88,7 +88,7 @@ Net `confirm` is never auto-allowed by autonomy, including full-auto. Net `block
 
 ### Worker permission escalation
 
-Dispatched workers run non-interactively, so step 3 resolves per `fleet.permissions.mode`: `deny` turns the parked call into a structured denial, `fail` ends the run, and `escalate` hands the ask up to the interactive operator. Under `escalate` the worker parks the call, emits a `clio_permission_escalated` event, and waits; dispatch republishes the ask on the bus tagged with the run id; the operator resolves it in the same permission overlay used for the main agent; and the decision returns down the worker's stdin. Resolution is human-only by construction: no model-facing tool can approve a worker permission, and the dispatch `resolveWorkerPermission` method is reachable only from the interactive layer. This preserves the receipt's honesty, since a model approving its own fleet's asks would collapse the audit trail.
+Dispatched workers run non-interactively, so step 3 resolves per `fleet.permissions.mode`: `deny` turns the parked call into a structured denial, `fail` ends the run, and `escalate` hands the ask up to the interactive operator. Under `escalate` the worker parks the call, emits a `clio_coder_permission_escalated` event, and waits; dispatch republishes the ask on the bus tagged with the run id; the operator resolves it in the same permission overlay used for the main agent; and the decision returns down the worker's stdin. Resolution is human-only by construction: no model-facing tool can approve a worker permission, and the dispatch `resolveWorkerPermission` method is reachable only from the interactive layer. This preserves the receipt's honesty, since a model approving its own fleet's asks would collapse the audit trail.
 
 Escalation can never hang a run. Every escalated ask resolves by an operator decision or by the `fleet.permissions.escalation` timeout fallback (`{ timeoutMs, fallback }`, defaults 120000 ms and `deny`); a headless session has no subscriber, so the timeout fallback always governs there. The worker keeps emitting heartbeats while parked, so the reconciler does not reap it, and every escalation and its resolution source (operator or timeout) is recorded on the receipt.
 
@@ -96,7 +96,12 @@ Escalation can never hang a run. Every escalated ask resolves by an operator dec
 
 ## Operating Posture and Visible Tools
 
-Clio operates under a single operating posture with a standard, unified visible toolset. The 20 built-in tools are organized in seven planes; each plane is one policy unit for action class, size posture, and concurrency, asserted at bootstrap by `src/tools/policy.ts` so the classifier and the registered specs can never drift apart silently.
+Clio operates under a single operating posture. The canonical catalog contains
+21 built-in tools organized in seven planes; each plane is one policy unit for
+action class, size posture, and concurrency, asserted at bootstrap by
+`src/tools/policy.ts` so the classifier and registered specs cannot drift apart
+silently. Dependency wiring, target capability, worker profile, and recipe
+policy determine which subset is visible in a particular context.
 
 | Plane | Tools | Action class |
 | --- | --- | --- |
@@ -105,12 +110,12 @@ Clio operates under a single operating posture with a standard, unified visible 
 | EXECUTE | `bash`, `verify` | `execute` |
 | EXECUTE | `git` | `read` |
 | ORCHESTRATE | `dispatch`, `steer` | `dispatch` |
-| ORCHESTRATE | `monitor`, `tasks` | `read` |
+| ORCHESTRATE | `monitor`, `tasks`, `ledger`, `panes` | `read` |
 | RETRIEVE | `web_fetch` | `read` |
 | INTERACT | `ask_user` | `read` |
 | ARTIFACT | `artifact` | `write` |
 
-`git` is read-only inspection on the safe-exec spine, so it carries the read class despite living in the EXECUTE plane. `monitor` does not mutate a run or the workspace. The model-facing `tasks` tool is an intentional bookkeeping exception to the everyday meaning of "read": board mutations append full `taskLedger` snapshots to Clio's session ledger, and any action may reconcile the project-local `.clio-coder/user-tasks.json` inbox while `pick` and linked `done` update its durable correlation. Those Clio-owned ledger and inbox mutations intentionally remain audited with `actionClass: "read"`, so task planning and pickup stay available at every autonomy level without an approval card. This classification grants no source-workspace, command-execution, or run-mutation authority; those operations still require their own tools and action classes. `gateway` is a design-reserved name only (see `src/core/tool-names.ts`), not a registered tool.
+`git` is read-only inspection on the safe-exec spine, so it carries the read class despite living in the EXECUTE plane. `monitor` does not mutate a run or the workspace. The model-facing `tasks` tool is an intentional bookkeeping exception to the everyday meaning of "read": board mutations append full `taskLedger` snapshots to Clio's session ledger, and any action may reconcile the project-local `.clio-coder/user-tasks.json` inbox while `pick` and linked `done` update its durable correlation. Those Clio-owned ledger and inbox mutations intentionally remain audited with `actionClass: "read"`, so task planning and pickup stay available at every autonomy level without an approval card. `ledger` reads a worker-local mirror and posts through the dispatch control lane; it registers only for a worker with an agent-ledger port. `panes` controls Clio-owned terminal panes and registers only when a pane host and live mux are available. Both are read class and sequential because their coordination state must not interleave. This classification grants no source-workspace, command-execution, or run-mutation authority; those operations still require their own tools and action classes. `gateway` is a design-reserved name only (see `src/core/tool-names.ts`), not a registered tool.
 
 Target capability, dispatch tool profiles, and recipe constraints can further narrow the tools available to a run. That narrowing is convenience and budget control; safety still lives in code gates.
 
@@ -331,7 +336,7 @@ When executing tasks in headless mode through `clio-coder run`, there is no term
 ### Workers and delegations
 
 - **Workers** inherit the session's autonomy level, capped by dispatch scope admission. A worker ask resolves per `fleet.permissions.mode`: `deny` continues the run with a rejection; `fail` ends it; `escalate` forwards it to the interactive operator (see the escalation section above). All three values are editable in the `/settings` center.
-- **Delegations (ACP)** under `clio-policy` governance evaluate through the same net and autonomy mapping; an ask resolves as a non-stall deny so the external agent never hangs waiting for an operator.
+- **Delegations (ACP)** under `clio-coder-policy` governance evaluate through the same net and autonomy mapping; an ask resolves as a non-stall deny so the external agent never hangs waiting for an operator.
 - **ACP server sessions** (a remote client driving Clio) snapshot the autonomy level at `session/new`, so a mid-session settings change on the host cannot alter an in-flight remote session's admission decisions.
 
 ---
@@ -348,7 +353,7 @@ It is critical to distinguish these two control axes:
 
 | Setting | Axis | Governed By | Handled In |
 | --- | --- | --- | --- |
-| **Autonomy** | Authority | `autonomy` settings dial, `CLIO_CODER_ALLOW_EXTERNAL_FULL_ACCESS` | `src/tools/registry.ts`, `src/domains/safety/` |
+| **Autonomy** | Authority | `safety.autonomy` settings dial, `CLIO_CODER_ALLOW_EXTERNAL_FULL_ACCESS` | `src/tools/registry.ts`, `src/domains/safety/` |
 | **Rigor** | Validation | `CLIO_CODER_RIGOR` override, workspace validation contracts | `src/domains/safety/rigor.ts`, `src/domains/safety/finish-contract-registration.ts` |
 
 ---

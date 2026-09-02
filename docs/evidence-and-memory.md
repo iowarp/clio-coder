@@ -15,11 +15,17 @@ Source of truth: `src/domains/evidence/**`, `src/domains/memory/**`, `src/cli/ev
 clio-coder evidence build --run <runId>
 clio-coder evidence build --session <sessionId>
 clio-coder evidence build --eval <evalId>
-clio-coder evidence inspect <evidenceId>
+clio-coder evidence inspect <evidenceId> [--json]
 clio-coder evidence list
+clio-coder evidence inventory --json
 ```
 
-`clio-coder evidence inspect <id>` requires a valid evidence artifact ID. If the requested artifact does not exist on disk, it outputs `error: evidence artifact not found: <id> (see clio-coder evidence list)` and exits with code 1.
+`clio-coder evidence inspect <id>` requires a valid evidence artifact ID. If the requested artifact does not exist on disk, it exits with code 1 and prints the error and remedy on separate lines:
+
+```text
+error: evidence artifact not found: <id>
+  run `clio-coder evidence list` to see local bundles
+```
 
 Evidence IDs are deterministic:
 
@@ -86,7 +92,7 @@ Session evidence retains the two operator-facing bookkeeping ledgers instead of 
 
 ## Evidence Tag Taxonomy and Failure Causes
 
-Clio Coder classifies every run, session, and eval record using a closed set of 25 canonical tags. These tags distinguish general execution characteristics (such as lineage linkages) from actual failure causes.
+Clio Coder classifies every run, session, and eval record using a closed set of 29 canonical tags. These tags distinguish general execution characteristics, such as lineage linkages, from actual failure causes.
 
 ### Complete Taxonomy
 
@@ -131,8 +137,8 @@ A subset of the taxonomy represents actual failure causes (governed by the `FAIL
 1. **`timeout`**: Triggered if the run outcome is `"timed_out"` or `"stalled"`, or if the error/failure text contains `"timed out"` or `"timeout"`.
 2. **`auth-failure`**: Triggered if failure text contains keywords like `"auth"`, `"api key"`, `"credential"`, or `"unauthorized"`.
 3. **`missing-dependency`**: Triggered if failure logs contain `"module not found"`, `"missing package"`, or `"missing dependency"`.
-4. **`build-failure`**: Triggered in receipt summaries when a non-zero receipt exit is paired with build tool names in `toolStats` (e.g. `build`, `compile`, `make`, `cmake`, `cargo`, `gradle`, `ninja`, `tsc`). Forensic evidence can also classify a non-zero run from build language in the recorded task text.
-5. **`test-failure`**: Triggered in receipt summaries when a non-zero receipt exit is paired with test or lint tool names in `toolStats` (e.g. `pytest`, `ctest`, `jest`, `vitest`, `test`, `lint`, `typecheck`). Forensic evidence can also classify a non-zero run from validation language in the recorded task text.
+4. **`build-failure`**: Triggered in receipt summaries when a non-zero receipt exit is paired with build tool names in `toolStats` (e.g. `build`, `compile`, `make`, `cmake`, `cargo`, `gradle`, `ninja`, `tsc`). Forensic evidence may also classify it from termination diagnostics in `outcomeDetail` or the recorded failure message. The task text is never causal evidence.
+5. **`test-failure`**: Triggered in receipt summaries when a non-zero receipt exit is paired with test or lint tool names in `toolStats` (e.g. `pytest`, `ctest`, `jest`, `vitest`, `test`, `lint`, `typecheck`). Forensic evidence may also classify it from termination diagnostics in `outcomeDetail` or the recorded failure message. Validation words in the task text are never causal evidence.
 6. **`blocked-tool`**: Triggered if tool execution statistics show a blocked count greater than `0`.
 
 ---
@@ -152,12 +158,13 @@ Each run receipt (persisted under `<stateDir>/receipts/<runId>.json`) carries an
 ### Computation and Lifecycle
 - **Circular Dependency Prevention**: To prevent circular dependencies, `findingsSummary` is calculated **cheaply in-memory** at receipt-record time using the draft envelope and tool statistics (in `src/domains/dispatch/receipt-findings.ts`). It never reads from disk or calls `buildEvidence`.
 - **First-Pass Success**: Calculated as `true` only if the terminal outcome was `"succeeded"`, the lineage attempt was `0` (no dispatch retries), the tool stats confirm at least one successful validation tool was executed, and no failure-cause tags were detected.
-- **Cryptographic Coverage**: Current receipts use strict v19 and authenticate every current receipt field, including briefing and steering provenance, routing intent and decision, route quality, worker identity, execution role, result-contract conformance, council provenance, and fleet gate provenance, against the reconstructed ledger. Every version other than v19 is rejected; there is no historical receipt reader.
+- **Cryptographic Coverage**: Current receipts use strict v20 and authenticate every current receipt field, including dispatch intent path provenance, resolved path scope, briefing and steering provenance, routing intent and decision, route quality, worker identity, execution role, result-contract conformance, council provenance, and fleet gate provenance, against the reconstructed ledger. Only v20 is authenticated as current evidence. Lower versions are reported as retired and are neither migrated nor read as evidence.
 
 | Version | Verification policy | Compatibility policy |
 |---|---|---|
-| v19 | Current canonical projection; every current receipt and reconstructible ledger field is authenticated | Accepted |
-| Any other version | No reader | Rejected; remove or archive the incompatible state rather than expecting migration |
+| v20 | Current canonical projection; every current receipt and reconstructible ledger field is authenticated | Accepted |
+| v1 through v19 | Historical sealed shape unsupported by this build | Reported as retired; not migrated and not read as evidence |
+| Malformed, unversioned, or future version | No current reader | Invalid; archive incompatible state rather than expecting migration |
 
 Receipt integrity and evidence verification answer different questions. The
 former proves that a receipt matches its ledger envelope; the latter records
@@ -234,10 +241,10 @@ prints the tier, summary, and every axis before those diagnostic records, while
 their detailed domain artifacts remain in the receipt, gate, audit, and trace
 files.
 
-The canonical aggregate is an additive projection for downstream work. Receipt
-integrity remains version 18, evidence bundles remain version 1, gate decisions
-remain version 2, and no persisted receipt field or cryptographic algorithm
-changes.
+The canonical aggregate is an additive projection for downstream work. Evidence
+bundles remain version 1 and gate decisions remain version 2. Receipt integrity
+is independently versioned and currently uses v20; that version adds dispatch
+intent path provenance and resolved path scope while retaining SHA-256 sealing.
 
 ### Trust projection
 

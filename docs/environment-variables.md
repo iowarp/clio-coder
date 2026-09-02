@@ -1,8 +1,8 @@
 # Environment Variables
 
-Every environment variable the shipped `src/` tree reads, grouped by role. Settings.yaml is the durable home for operator policy; env vars exist for per-process overrides (CI, one-off experiments), directory layout, debugging, and internal plumbing. When prose and source disagree, prefer the source; the table cites the read site.
+This page inventories Clio-specific runtime variables and the ambient variables that materially change documented operator behavior. `settings.yaml` is the durable home for operator policy; environment variables support per-process overrides, directory layout, debugging, credentials, terminal integration, and internal plumbing. When prose and source disagree, prefer the cited read site.
 
-This page is the complete inventory, and the `environment-variable-inventory` check in `scripts/check-hygiene.ts` (run by `npm run lint`) fails if `src/` reads a variable that has no row here.
+The `environment-variable-inventory` check in `scripts/check-hygiene.ts`, run by `npm run lint`, enforces coverage for Clio's `CLIO_*` variables and `NO_COLOR`. It intentionally does not treat every operating-system or provider convention as a Clio knob. Examples outside that enforced family include `PATH`, `HOME`, terminal capability variables, and provider API-key names selected dynamically by `src/engine/env-api-keys.ts`.
 
 > [!TIP]
 > [docs/html/environment_blueprint.html](https://github.com/iowarp/clio-coder/blob/main/docs/html/environment_blueprint.html) is a source-checkout walkthrough of the most commonly set variables with an effective-path resolver. It covers a curated subset, so use the tables below when you need the full list.
@@ -42,8 +42,25 @@ This page is the complete inventory, and the `environment-variable-inventory` ch
 | --- | --- | --- |
 | `CLIO_CODER_HOME` | unset | Single-tree install root; the per-role vars below beat it (`src/core/xdg.ts`). |
 | `CLIO_CODER_CONFIG_DIR`, `CLIO_CODER_DATA_DIR`, `CLIO_CODER_STATE_DIR`, `CLIO_CODER_CACHE_DIR` | XDG platform defaults | Per-role directory overrides (`src/core/xdg.ts`). |
+| `XDG_CONFIG_HOME`, `XDG_DATA_HOME`, `XDG_STATE_HOME`, `XDG_CACHE_HOME` | platform/user defaults | Linux base directories used when the corresponding `CLIO_CODER_*_DIR` and `CLIO_CODER_HOME` variables are unset (`src/core/xdg.ts`). |
+| `APPDATA`, `LOCALAPPDATA` | Windows profile defaults | Windows roaming and local base directories used when Clio-specific directory overrides are unset (`src/core/xdg.ts`). |
 | `CLIO_CODER_BIN_DIR` | `~/.local/bin` | Launcher symlink location (`src/cli/uninstall.ts`). |
 | `CLIO_CODER_PACKAGE_ROOT` | auto-detected | Package root for bundled-asset resolution (`src/core/package-root.ts`). |
+
+## Ambient provider, runtime, and terminal inputs
+
+These names follow an upstream or operating-system convention. They are not substitutes for settings keys, but source reads them when the associated integration is used.
+
+| Variable or family | Controls |
+| --- | --- |
+| Provider credential variables | `src/engine/env-api-keys.ts` maps the selected provider to its conventional key, including `OPENAI_API_KEY`, `ANTHROPIC_API_KEY`, `OPENROUTER_API_KEY`, `GEMINI_API_KEY`, `AWS_*` Bedrock credentials, and Google Vertex application credentials. `clio-coder auth` remains the preferred managed credential path. |
+| `OLLAMA_NUM_PARALLEL` | Fallback concurrency advertised for an Ollama Native target when the runtime does not provide a stronger slot fact (`src/domains/providers/runtimes/local-native/ollama-native.ts`). |
+| `VISUAL`, `EDITOR` | External editor command, with `VISUAL` taking precedence (`src/interactive/external-editor.ts`). |
+| `TERM`, `COLORTERM`, `TERM_PROGRAM`, `WT_SESSION` | Terminal capability, color-depth, keybinding, and desktop-notification adaptation. These variables describe the terminal rather than Clio policy. |
+| `SSH_CONNECTION`, `SSH_TTY`, `TMUX`, `STY` | Remote-session and terminal-multiplexer detection used by the adaptive stream-pacing policy (`src/interactive/stream-pacing-policy.ts`). |
+| `COLUMNS` | Fallback text width for non-TTY CLI output (`src/cli/text-layout.ts`). |
+| `TZ` | Local timestamp formatting and daily audit-log date boundaries (`src/interactive/format-time.ts`, `src/domains/safety/audit.ts`). |
+| `CI`, `NODE_ENV` | CI-sensitive presentation behavior and test/development-only seams. Neither grants tool authority. |
 
 ## Debug and trace toggles
 

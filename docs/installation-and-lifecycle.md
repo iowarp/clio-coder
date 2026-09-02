@@ -95,7 +95,7 @@ The core files are created automatically during the first run. `credentials.yaml
 | **Config** | `settings.yaml` | Target runtimes, model defaults, keybindings, and theme preferences. | `0o644` (rw-r--r--) | Removed by uninstall / `reset --config`. |
 | **Config** | `credentials.yaml` | Private keys and tokens managed via `clio-coder auth`. | `0o600` (rw-------) | Removed by uninstall / `reset --auth`. |
 | **Config** | `credentials.yaml.lock` | Lockfile used during credentials updates to prevent file corruption. | Ephemeral | Auto-removed. |
-| **State** | `install.json` | Install metadata: Clio version, node, platform, `installedAt` (written once at first install), `upgradedAt` and `upgradedFrom` (stamped on a version change), and `noticedVersion` (the version whose one-time upgrade notice the interactive launch has shown). | Writer/umask default | Removed by uninstall / `reset --state`. |
+| **State** | `install.json` | Install metadata: Clio version, node, platform, `installedAt` (written once at first install) or `repairedAt` (when metadata is reconstructed over a preexisting config, data, or state root), `upgradedAt` and `upgradedFrom` (stamped on a version change), and `noticedVersion` (the version whose one-time upgrade notice the interactive launch has shown). | Writer/umask default | Removed by uninstall / `reset --state`. |
 | **State** | `migrations.json` | Log of successfully applied schema/state migrations. | Writer/umask default | Removed by uninstall / `reset --state`. |
 | **Data** | `memory/records.json` | Long-term learning memories (up to 500 records) proposed/approved from runs. | Writer/umask default | Removed by uninstall / `reset --data`. |
 | **Data** | `tools/<id>/<version>/` | One pinned external program Clio downloaded on request (`clio-coder tools install <id>`), with its upstream license text and a `clio-install.json` recording url, sha256, platform and install time. Binaries `0o755`, documents `0o644`. Only the pinned version is kept: a successful install prunes the versions it supersedes. | `0o755` dir | `clio-coder tools remove <id>` deletes every version of one tool; removed by uninstall / `reset --data`. |
@@ -110,7 +110,7 @@ When Clio Coder boots (or after a reset), it calls `initializeClioHome()` (see `
 1.  **Directory Tree**: Recursively creates the four roots (`config`, `data`, `state`, `cache`) and their skeletons: `agents` under config, `memory`/`evidence`/`evals` under data, and `sessions`/`audit`/`receipts`/`interviews`/`scratch` under state.
 2.  **Settings Template**: If `settings.yaml` is absent, creates a fresh default config. An existing file is never read, validated, or rewritten by initialization.
 3.  **Credentials Security**: If `credentials.yaml` is absent, creates a YAML file containing a managed-file comment and an empty object (`{}`), then locks its permissions immediately to owner-only read-write (`0o600`).
-4.  **Install Metadata**: Writes `install.json` with `installedAt` exactly once at first install; a later version, platform, or node change preserves `installedAt` and stamps `upgradedAt`, and a version change also records the previous version as `upgradedFrom`.
+4.  **Install Metadata**: Writes `install.json` with `installedAt` exactly once when no config, data, or state root existed before initialization. If Clio reconstructs missing metadata over a preexisting config, data, or state root, it writes `repairedAt` instead of inventing an installation time. A cache-only root does not count as a preexisting home for this decision. A later version, platform, or node change preserves whichever original timestamp exists and stamps `upgradedAt`; a version change also records the previous version as `upgradedFrom`.
 
 ---
 
@@ -193,7 +193,7 @@ Runs a series of health sweeps across the environment:
 *   *Recovery:* Run `clio-coder doctor --fix` to create missing directories and templates, repair credential permissions, and refresh install metadata. Settings are always validated against the current schema; `--fix` does not rewrite removed keys or migrate an older settings file. Run `clio-coder upgrade` for registered lifecycle migrations, including removal of the retired `panes.agents` and `panes.keepFailed` keys; paths with no registered migration still require deliberate editing.
 
 ### B. Upgrades (`clio-coder upgrade`)
-Refreshes state metadata and applies pending data-dir migrations.
+Refreshes state metadata and applies pending lifecycle migrations, which may update settings, state, or extension data.
 ```bash
 clio-coder upgrade [--dry-run] [--channel=<latest|beta|dev>] [--skip-migrations]
 ```
@@ -203,7 +203,28 @@ checkout it never runs `npm install -g`: it performs its safe local duties
 `git pull`, `npm run install:local`, `hash -r`. The npm reinstall path applies
 only to a genuinely npm-installed binary.
 
-#### Upgrading from 0.3.0
+#### Current migration contract
+
+The v0.4.2 source tree registers five migrations in execution order:
+
+1. `2026-09-01-settings-v2`
+2. `2026-09-01-extension-install-digests`
+3. `2026-09-01-clio-coder-naming`
+4. `2026-09-01-retire-panes-knobs`
+5. `2026-08-18-lmstudio-runtime-id`
+
+Applied IDs are recorded in `<stateDir>/migrations.json`. An ID already in that
+manifest is skipped, and each successful migration is recorded immediately so a
+later failure does not cause it to run again. `clio-coder upgrade --dry-run`
+lists every registered migration it would consider; it does not claim that
+every listed ID is pending. `--skip-migrations` is a recovery override that lets
+the independent install and metadata work proceed after a migration failure.
+Fix the migration's cause and rerun the ordinary upgrade afterward.
+
+#### Historical record: upgrading from 0.3.0 to 0.3.1
+
+The following behavior records the 0.3.0 and 0.3.1 release binaries. It is not
+the current migration inventory or current upgrade output.
 
 Nothing has to be done by hand. On an npm install, one command does it all:
 
@@ -236,9 +257,10 @@ next `clio-coder` launch refreshes it. `install.json` then reads
 `upgradedFrom: "0.3.0"`; doctor's row becomes
 `0.3.1 (installed ..., upgraded ... from 0.3.0)`.
 
-#### Upgrading to 0.3.3
+#### Historical record: 0.3.x release notes
 
-Upgrading from 0.3.1 to 0.3.3 is automated:
+The retained notes below span the 0.3.3 upgrade and later 0.3.7 operational
+changes. Upgrading from 0.3.1 to 0.3.3 was automated:
 
 ```bash
 clio-coder upgrade
@@ -257,9 +279,14 @@ Key lifecycle and operational updates in v0.3.7:
 - Resumed and forked session entry replays standardize message prefixes through `src/engine/messages.ts`.
 - `AI_AGENT=clio-coder` is set on all child processes for system attribution.
 
-The first interactive launch after upgrading shows the version notice:
+The first interactive launch after that upgrade showed this contemporary
+version notice:
 `clio: upgraded 0.3.1 → 0.3.3. What changed at the keyboard: ...`
 Recorded once per version in `install.json` as `noticedVersion`.
+
+Current launches use the `clio-coder:` prefix. Version 0.3.1 has specialized
+keyboard-facing text; all other target versions use the generic form
+`clio-coder: upgraded <from> → <to>. What changed is in CHANGELOG.md, section <to>.`
 
 ### C. System Resets (`clio-coder reset`)
 Selective recovery wipes:
