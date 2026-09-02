@@ -18,7 +18,7 @@ import {
 } from "../../src/domains/dispatch/gate-decisions.js";
 import { createFleetPlacementResolver } from "../../src/domains/dispatch/placement.js";
 import type { FleetRunRecord } from "../../src/domains/dispatch/state.js";
-import type { WorkerTransport } from "../../src/domains/dispatch/transport.js";
+import { resolveSshTargetLifecycle, type WorkerTransport } from "../../src/domains/dispatch/transport.js";
 import { createFleetRegistry } from "../../src/domains/scheduling/cluster.js";
 import {
 	claimCompeteGroup,
@@ -77,6 +77,14 @@ describe("fleet lifecycle boundary", () => {
 	afterEach(() => {
 		if (scratch !== null) clearScratchClioHome(scratch);
 		scratch = null;
+	});
+
+	it("projects SSH residency into target lifecycle without weakening target opt-outs", () => {
+		strictEqual(resolveSshTargetLifecycle(undefined, undefined), "user-managed");
+		strictEqual(resolveSshTargetLifecycle("observe", "clio-coder-managed"), "user-managed");
+		strictEqual(resolveSshTargetLifecycle("manage", undefined), "clio-coder-managed");
+		strictEqual(resolveSshTargetLifecycle("manage", "clio-coder-managed"), "clio-coder-managed");
+		strictEqual(resolveSshTargetLifecycle("manage", "user-managed"), "user-managed");
 	});
 
 	it("places by durable usage and excludes a failed node on failover", () => {

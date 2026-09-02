@@ -21,7 +21,6 @@ function environment(root: string): NodeJS.ProcessEnv {
 		CLIO_CODER_STATE_DIR: join(root, "state"),
 		CLIO_CODER_CACHE_DIR: join(root, "cache"),
 		CLIO_CODER_REQUIRE_HOME_PREFIX: "1",
-		CLIO_CODER_RESIDENCY: "observe",
 	};
 }
 
@@ -37,6 +36,7 @@ function seedTarget(root: string, url: string): void {
 				`    url: ${url}`,
 				"    defaultModel: mock-model",
 				"    wireModels: [mock-model]",
+				"    lifecycle: user-managed",
 				"    capabilities:",
 				"      chat: true",
 				"      tools: true",

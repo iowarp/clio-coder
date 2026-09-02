@@ -264,14 +264,6 @@ entries:
     default: off
     controls: Exactly `1` aborts startup when any resolved Clio directory lies outside `CLIO_CODER_HOME`; a test-harness guardrail that does nothing when `CLIO_CODER_HOME` is unset.
     verdict: keep
-  - name: CLIO_CODER_RESIDENCY
-    kind: env
-    owner: engine
-    default: managed
-    controls: "`observe`, `off`, `0`, `false`, `user`, or `user-managed` stops Clio managing model residency on every local runtime path; any other value or unset keeps management on."
-    precedence: "either env or a target's `targets.<id>.lifecycle: user-managed` forces observe-only; neither re-enables; built-in managed"
-    verdict: keep
-    note: docs list only `observe`/`off`; code also accepts `0`, `false`, `user`, `user-managed`. src/domains/dispatch/transport.ts:109 exports `CLIO_CODER_RESIDENCY=<node.residency or observe>` to SSH workers.
   - name: CLIO_CODER_RIGOR
     kind: env
     owner: dispatch
@@ -1026,7 +1018,7 @@ entries:
     kind: setting
     owner: fleet
     default: observe
-    controls: "Residency posture the remote worker launches with, exported as `CLIO_CODER_RESIDENCY`: `observe` (default) forbids evicting or swapping resident models on that node, `manage` opts into the reconciler."
+    controls: "Residency posture projected into the remote worker target lifecycle: `observe` (default) sets `user-managed`; `manage` sets `clio-coder-managed` unless the target already says `user-managed`."
     verdict: keep
   - name: fleet.nodes[].user
     kind: setting
@@ -1553,7 +1545,7 @@ entries:
     kind: setting
     owner: targets
     controls: "Residency policy: `user-managed` makes Clio observe-only on this target (never load or unload models), `clio-coder-managed` (legacy `clio-managed`) opts in; absent means managed."
-    precedence: "`CLIO_CODER_RESIDENCY=observe` (process-wide opt-out) and `lifecycle: user-managed` (per target) each forbid management, whichever is set; otherwise `.clio-coder/settings.local.yaml` > `.clio-coder/settings.yaml` > user settings.yaml > default (managed)"
+    precedence: ".clio-coder/settings.local.yaml > .clio-coder/settings.yaml > user settings.yaml > default (managed); SSH node `residency: observe` narrows the remote WorkerSpec to `user-managed`, while an explicit target `user-managed` also wins over node `manage`"
     verdict: keep
   - name: targets[].lmstudio.load.contextLength
     kind: setting
