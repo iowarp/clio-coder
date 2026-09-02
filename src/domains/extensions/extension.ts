@@ -9,11 +9,19 @@ import {
 	listInstalledExtensions,
 	removeExtension,
 } from "./manager.js";
+import { buildExtensionSnapshot } from "./snapshot.js";
+import { bindExtensionSnapshotStore, createExtensionSnapshotStore } from "./snapshot-store.js";
 
 export function createExtensionsBundle(_context: DomainContext): DomainBundle<ExtensionsContract> {
+	const store = createExtensionSnapshotStore();
 	const extension: DomainExtension = {
 		start() {
-			return undefined;
+			const snapshot = buildExtensionSnapshot({ cwd: process.cwd(), generation: store.nextGeneration() });
+			if (!store.commit(snapshot)) throw new Error("initial extension snapshot generation was stale");
+			bindExtensionSnapshotStore(store);
+		},
+		stop() {
+			bindExtensionSnapshotStore(null);
 		},
 	};
 	const contract: ExtensionsContract = {
@@ -37,6 +45,12 @@ export function createExtensionsBundle(_context: DomainContext): DomainBundle<Ex
 		},
 		resourceRoots(kind, cwd) {
 			return enabledExtensionResourceRoots(kind, cwd);
+		},
+		snapshot() {
+			return store.current();
+		},
+		generation() {
+			return store.current()?.generation ?? 0;
 		},
 		async reload() {
 			return undefined;
