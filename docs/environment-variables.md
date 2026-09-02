@@ -19,7 +19,7 @@ then settings, then the built-in default. Resolution lives in
 | --- | --- | --- | --- |
 | `CLIO_CODER_TURN_TOOL_CALL_BUDGET` | `safety.limits.chatToolCallsPerTurn` | 60 | Orchestrator per-turn soft tool-call budget; the hard interrupt ceiling sits 15 above it (`src/engine/loop-guard.ts`). |
 | `CLIO_CODER_WORKER_TOOL_CALL_CAP` | `fleet.limits.toolCallsPerRun` | 150 | Lifetime ceiling on tool calls one dispatched worker may execute. Calls the harness refused (reserve steering, synthesis-lockout denials) never spend it. Agent recipe budgets may narrow but never widen it (`src/engine/loop-guard.ts`). |
-| `CLIO_CODER_MAX_DISPATCH_RUNS` | `fleet.history.maxRuns` | 1000 | Dispatch run-ledger retention cap (`src/domains/dispatch/state.ts`). The older `CLIO_CODER_MAX_RUNS` spelling still reads when the canonical name is unset. |
+| `CLIO_CODER_MAX_DISPATCH_RUNS` | `fleet.history.maxRuns` | 1000 | Dispatch run-ledger retention cap (`src/domains/dispatch/state.ts`). The older `CLIO_CODER_MAX_RUNS` spelling still reads when the canonical name is unset and emits one deprecation warning per process. |
 | `CLIO_CODER_READ_MAX_BYTES` | `safety.limits.readBytesPerCall` | 51200 | Per-call byte cap for the read tool, floored at 1024 (`src/tools/read.ts`). |
 | `CLIO_CODER_OBSERVATION_TURN_BUDGET_BYTES` | `safety.limits.observationBytesPerTurn` | 196608 | Shared per-turn byte pool across observation tools (`src/tools/observation.ts`). |
 | `CLIO_CODER_INTERNAL_DISPATCH_TIMEOUT_MS` | `fleet.limits.internalRunTimeoutMs` | 900000 | Wall-clock cap for one internal generator dispatch: the wiki documenter and the bootstrap scout (`src/cli/internal-dispatch.ts`). |
@@ -31,11 +31,11 @@ then settings, then the built-in default. Resolution lives in
 | `NO_COLOR` | unset | Set to any non-empty value to drop every foreground and background color. Bold, dim, italic, and underline stay, because they are what is left to read the interface by (`src/interactive/theme/tokens.ts`). |
 | `CLIO_CODER_SYNTHESIS_LOCK` | strip | How a synthesis-locked worker round is enforced on OpenAI-family runtimes: `strip` removes the tool schemas from the request, `tool-choice` keeps them and sends `tool_choice: none`, which preserves the prompt prefix but relies on the model honoring the knob (`src/engine/provider-payload.ts`). |
 | `CLIO_CODER_RIGOR` | repo-derived | Finish-contract evidence bar, `normal` or `high`, layered over the repo-derived default (`src/domains/safety/rigor.ts`). |
-| `CLIO_CODER_RESIDENCY` | managed | `observe`/`off` stops Clio managing model residency on every local runtime path, llama.cpp routers included; per-target opt-out via `lifecycle: user-managed` (`src/engine/apis/residency.ts`). |
-| `CLIO_CODER_TRUST_PROJECT_RESOURCES` | settings value | `1` trusts third-party project resource imports for this process, overriding `integrations.projectResources.trustProjectImports`; otherwise the validated setting applies (`src/domains/resources/skills/loader.ts`). |
+| `CLIO_CODER_RESIDENCY` | managed | `observe`, `off`, `0`, `false`, `user`, or `user-managed` stops Clio managing model residency on every local runtime path, llama.cpp routers included; per-target opt-out via `lifecycle: user-managed`. The dispatch transport also exports it to SSH workers as the node's `residency` (`src/engine/apis/residency.ts`, `src/domains/dispatch/transport.ts`). |
+| `CLIO_CODER_TRUST_PROJECT_RESOURCES` | settings value | `1` trusts third-party project resource imports for this process when `integrations.projectResources.trustProjectImports` is false; the variable can only enable trust, never revoke a setting that already grants it (`src/domains/resources/skills/loader.ts`). |
 | `CLIO_CODER_TRUST_PROJECT_SKILLS` | off | Deprecated alias for `CLIO_CODER_TRUST_PROJECT_RESOURCES`; `1` still trusts third-party project resource imports and emits a deprecation warning (`src/domains/resources/skills/loader.ts`). |
 | `CLIO_CODER_ALLOW_EXTERNAL_FULL_ACCESS` | off | `1` lets full-auto pass through to external CLI runtimes with their own full access (`src/engine/claude/subprocess-runtime.ts`, `src/engine/antigravity/subprocess-runtime.ts`). |
-| `CLIO_CODER_FORCE_COMPACT` | off | `1` forces compaction on the next interactive turn (`src/interactive/chat-loop.ts`). |
+| `CLIO_CODER_FORCE_COMPACT` | off | `1` forces compaction before every interactive turn for as long as it is set (`src/interactive/chat-loop.ts`). |
 | `CLIO_CODER_LEGACY_MASK` | off | `1` temporarily restores the destructive stale-observation mask before summary compaction; remove it after compatibility diagnosis. |
 | `CLIO_CODER_STATUS_STUCK_MS` | 180000 | Stuck-turn watchdog threshold (`src/interactive/status/watchdog.ts`). |
 | `CLIO_CODER_SHUTDOWN_HOOK_MS` | 500 | Wall-clock budget per shutdown hook (`src/core/termination.ts`). |
@@ -50,6 +50,7 @@ then settings, then the built-in default. Resolution lives in
 | `CLIO_CODER_MODEL_CATALOG_DIRS` | unset | Extra model-catalog directories (`src/domains/providers/knowledge-base-path.ts`). |
 | `CLIO_CODER_ENDPOINT_SLOTS_TTL_MS` | 86400000 | How long a persisted endpoint slot count answers for an endpoint nothing has probed in this process. A record past the bound is ignored and pruned rather than allowed to over-admit (`src/domains/providers/endpoint-slots-store.ts`). |
 | `CLIO_CODER_NO_NETWORK_TOOLS` | off | `1` strips network tools from every registry in the process; the skills-eval harness sets it for hermetic arms; `--allow-network` clears it (`src/tools/network-policy.ts`). |
+| `CLIO_CODER_RUN_JOURNAL` | settings value | `1`/`0` overrides `fleet.history.journal` for one process: whether every dispatched run writes its append-only event journal under the state directory (`src/domains/dispatch/run-event-journal.ts`). |
 | `CLIO_CODER_SMOOTH_STREAM` | settings value | Per-process override for `interface.smoothStreaming`: `0`/`off`/`false`, `auto`, or `1`/`on`/`true`. A valid value wins over settings; an invalid value fails safely to `off`. |
 | `CLIO_CODER_REDUCE_MOTION` | off | `1` makes smooth-streaming `auto` use the immediate coalescer. Explicit `on` remains an operator request, while stdout backpressure still pauses frame production. |
 | `CLIO_CODER_SCREEN_READER` | off | `1` makes smooth-streaming `auto` use the immediate coalescer so a screen reader receives the existing low-motion update behavior. |
@@ -74,7 +75,7 @@ All default off; enable with `1`.
 | --- | --- |
 | `CLIO_CODER_BUS_TRACE` | Event-bus channel tracing to stderr (`src/core/bus-trace.ts`). |
 | `CLIO_CODER_TRACE_BOOT` | Boot-phase timing trace (`src/core/boot-trace.ts`). |
-| `CLIO_CODER_TIMING` | Startup timing report (`src/entry/orchestrator.ts`). |
+| `CLIO_CODER_TIMING` | Startup timing report, printed only on the bannered non-interactive boot (`src/entry/orchestrator.ts`). |
 | `CLIO_CODER_DEBUG_SHUTDOWN` | Shutdown-path diagnostics (`src/core/termination.ts`). |
 | `CLIO_CODER_HOOK_BUDGET_DEBUG` | Per-overrun hook-budget diagnostics (`src/domains/middleware/runtime.ts`). |
 
@@ -105,8 +106,8 @@ Set by Clio for its own processes; not operator knobs.
 | `CLIO_CODER_GIT_CONFIG_BASE_COUNT`, `CLIO_CODER_GIT_DEFAULT_HOOKS_EQUIVALENT` | Bookkeeping that lets each managed hook wrapper remove only Clio's command-scope `core.hooksPath` pair before chaining the repository's own hook of the same name. Existing `GIT_CONFIG_COUNT` entries remain in force; an explicit `core.hooksPath` is treated as composable only when it resolves exactly to the repository's default hooks directory (`src/core/git-commit-attribution.ts`). |
 | `CLIO_CODER_INTERACTIVE` | Marks the interactive TUI process; scrubbed from bash-tool children so nested invocations do not inherit it (`src/cli/clio.ts`, `src/core/bash-exec.ts`). |
 | `CLIO_CODER_RUN_OVERRIDES` | JSON envelope for run-scoped CLI options (`--max-context-tokens`, `--kv-cache-mode`, sampling flags). One typed variable instead of one env var per option; worker subprocesses inherit it (`src/core/run-overrides.ts`). |
-| `CLIO_CODER_RESUME_SESSION_ID` | Session id handed across a self-restart; consumed and deleted at boot (`src/entry/orchestrator.ts`). |
-| `CLIO_CODER_BOOTSTRAP_GENERATE_CHILD` | Marks the CLIO-CODER.md-generation child so it skips recursion (`src/domains/context/extension.ts`). |
+| `CLIO_CODER_EVAL_RUNNER_STDOUT_FILE` | Set by the eval runner for the `clio-coder run` child it spawns; the child appends its stdout to that path so the runner can read it after exit (`src/domains/eval/suites/run.ts`). |
+| `CLIO_CODER_YAZI_PICK_TOKEN` | Per-session token the yazi file-pane integration hands its yazi child and expects back on a pick, so a pick from another session is ignored (`src/domains/mux/yazi/session.ts`, `src/domains/mux/yazi/profile.ts`). |
 | `CLIO_CODER_WORKER_LABELS` | Comma-separated labels a dispatched worker reports as its own (`src/domains/dispatch/transport.ts`, `src/worker/entry.ts`). |
 | `CLIO_CODER_WORKER_PGID` | Process-group id the transport assigns a worker so its whole tree can be signalled (`src/domains/dispatch/transport.ts`, `src/worker/entry.ts`). |
 | `CLIO_CODER_WORKER_RUN` | Marks a dispatched worker process; a skill install run inside it is stamped `installed-by: worker` (`src/worker/entry.ts`, `src/domains/resources/skills/install.ts`). |

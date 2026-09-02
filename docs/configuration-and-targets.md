@@ -650,7 +650,7 @@ The six limit leaves retain their one-process environment overrides where docume
 | `integrations.externalAgents.defaults.connectTimeoutMs` | `30000` | integer ≥ 1 | next dispatch |
 | `integrations.externalAgents.defaults.turnTimeoutMs` | `300000` | integer ≥ 1 | next dispatch |
 | `integrations.externalAgents.defaults.permissionTimeoutMs` | `120000` | integer ≥ 1 | next dispatch |
-| `integrations.externalAgents.defaults.toolGovernance` | `clio-policy` | `clio-policy`, `agent-managed`, `deny-all` | next dispatch |
+| `integrations.externalAgents.defaults.toolGovernance` | `clio-coder-policy` | `clio-policy`, `agent-managed`, `deny-all` | next dispatch |
 | `integrations.runtimePlugins` | `[]` | list of plugin package names | restart |
 | `integrations.library.catalog` | `null` | string or null | next turn |
 | `integrations.library.remote` | `null` | string or null | next turn |
