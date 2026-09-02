@@ -1,4 +1,4 @@
-import { strictEqual } from "node:assert/strict";
+import { deepStrictEqual, strictEqual } from "node:assert/strict";
 import { join } from "node:path";
 import { describe, it } from "node:test";
 import { EMPTY_CAPABILITIES } from "../../src/domains/providers/index.js";
@@ -51,7 +51,7 @@ describe("thinking off reaches the wire", () => {
 		strictEqual(resolved.request.reasoningEffort, "medium");
 	});
 
-	it("forwards static chat-template kwargs for llama.cpp and LM Studio", () => {
+	it("forwards static chat-template kwargs on llama.cpp and reports them undeliverable on LM Studio", () => {
 		const staticQuirks = {
 			chatTemplateKwargs: {
 				static: { force_nonempty_content: true },
@@ -64,14 +64,130 @@ describe("thinking off reaches the wire", () => {
 			quirks: staticQuirks as never,
 		});
 		strictEqual(llama.request.chatTemplateKwargs?.force_nonempty_content, true);
+		strictEqual(llama.request.undeliverableChatTemplateKwargs, undefined);
 
+		// LM Studio ignores chat_template_kwargs for every family measured, so
+		// the resolver names the keys instead of carrying a map the wire deletes.
 		const lmstudio = resolveModelRuntimeCapabilities({
 			runtimeId: "lmstudio",
 			modelId: "nvidia-nemotron-3.5-lightning-30b-a3b",
 			capabilities: { ...EMPTY_CAPABILITIES, chat: true, tools: true },
 			quirks: staticQuirks as never,
 		});
-		strictEqual(lmstudio.request.chatTemplateKwargs?.force_nonempty_content, true);
+		strictEqual(lmstudio.request.chatTemplateKwargs, undefined);
+		deepStrictEqual(lmstudio.request.undeliverableChatTemplateKwargs, {
+			keys: ["force_nonempty_content"],
+			declaredUnsupported: false,
+		});
+
+		const declared = resolveModelRuntimeCapabilities({
+			runtimeId: "lmstudio",
+			modelId: "nvidia-nemotron-3.5-lightning-30b-a3b",
+			capabilities: { ...EMPTY_CAPABILITIES, chat: true, tools: true },
+			quirks: { chatTemplateKwargs: { ...staticQuirks.chatTemplateKwargs, lmstudio: "unsupported" } } as never,
+		});
+		strictEqual(declared.request.undeliverableChatTemplateKwargs?.declaredUnsupported, true);
+	});
+
+	// Issue #268: measured 2026-09-02 on dynamo, enable_thinking:false left 52
+	// reasoning tokens on gemma-4-26b-a4b-it and 105 on nemotron-3.5-lightning,
+	// while reasoning_effort:"none" produced 0 on both.
+	it("sends reasoning_effort none to LM Studio for an on-off family", () => {
+		const onOffQuirks = { thinking: { mechanism: "on-off" } } as const;
+		const off = resolveModelRuntimeCapabilities({
+			runtimeId: "lmstudio",
+			modelId: "gemma-4-26b-a4b-it",
+			capabilities: { ...EMPTY_CAPABILITIES, chat: true, tools: true, reasoning: true },
+			quirks: onOffQuirks as never,
+			configuredThinkingLevel: "off",
+		});
+		strictEqual(off.thinking.mechanism, "on-off");
+		strictEqual(off.request.reasoningEffort, "none");
+		strictEqual(off.request.chatTemplateKwargs?.enable_thinking, false);
+
+		const on = resolveModelRuntimeCapabilities({
+			runtimeId: "lmstudio",
+			modelId: "gemma-4-26b-a4b-it",
+			capabilities: { ...EMPTY_CAPABILITIES, chat: true, tools: true, reasoning: true },
+			quirks: onOffQuirks as never,
+			configuredThinkingLevel: "low",
+		});
+		strictEqual(on.request.reasoningEffort, "low");
+
+		const llama = resolveModelRuntimeCapabilities({
+			runtimeId: "llamacpp",
+			modelId: "gemma4-26b-moe",
+			capabilities: { ...EMPTY_CAPABILITIES, chat: true, tools: true, reasoning: true },
+			quirks: onOffQuirks as never,
+			configuredThinkingLevel: "off",
+		});
+		strictEqual(llama.request.reasoningEffort, undefined);
+		strictEqual(llama.request.chatTemplateKwargs?.enable_thinking, false);
+	});
+
+	it("sends reasoning_effort none to LM Studio for a budget-tokens family", () => {
+		const budgetQuirks = {
+			thinking: { mechanism: "budget-tokens", budgetByLevel: { low: 1024, medium: 4096, high: 16384 } },
+		} as const;
+		const off = resolveModelRuntimeCapabilities({
+			runtimeId: "lmstudio",
+			modelId: "budget-model",
+			capabilities: { ...EMPTY_CAPABILITIES, chat: true, tools: true, reasoning: true },
+			quirks: budgetQuirks as never,
+			configuredThinkingLevel: "off",
+		});
+		strictEqual(off.thinking.mechanism, "budget-tokens");
+		strictEqual(off.request.reasoningEffort, "none");
+
+		const on = resolveModelRuntimeCapabilities({
+			runtimeId: "lmstudio",
+			modelId: "budget-model",
+			capabilities: { ...EMPTY_CAPABILITIES, chat: true, tools: true, reasoning: true },
+			quirks: budgetQuirks as never,
+			configuredThinkingLevel: "medium",
+		});
+		strictEqual(on.request.reasoningEffort, undefined);
+		strictEqual(on.request.budgetTokens, 4096);
+
+		const llama = resolveModelRuntimeCapabilities({
+			runtimeId: "llamacpp",
+			modelId: "budget-model",
+			capabilities: { ...EMPTY_CAPABILITIES, chat: true, tools: true, reasoning: true },
+			quirks: budgetQuirks as never,
+			configuredThinkingLevel: "off",
+		});
+		strictEqual(llama.request.reasoningEffort, undefined);
+	});
+
+	it("resolves the shipped Gemma 4 and Nemotron 3.5 entries to reasoning_effort none on LM Studio", () => {
+		const kb = new FileKnowledgeBase(join(process.cwd(), "src/domains/providers/models"));
+		const gemma = kb.lookup("gemma-4-26b-a4b-it");
+		strictEqual(gemma?.entry.family, "gemma4-26b-a4b");
+		const gemmaResolved = resolveModelRuntimeCapabilities({
+			runtimeId: "lmstudio",
+			modelId: "gemma-4-26b-a4b-it",
+			capabilities: { ...EMPTY_CAPABILITIES, chat: true, tools: true, reasoning: true },
+			kbHit: gemma,
+			configuredThinkingLevel: "off",
+		});
+		strictEqual(gemmaResolved.thinking.mechanism, "on-off");
+		strictEqual(gemmaResolved.request.reasoningEffort, "none");
+
+		const nemotron = kb.lookup("nvidia-nemotron-3.5-lightning-30b-a3b");
+		strictEqual(nemotron?.entry.family, "nemotron-3.5-lightning-30b-a3b");
+		const nemotronResolved = resolveModelRuntimeCapabilities({
+			runtimeId: "lmstudio",
+			modelId: "nvidia-nemotron-3.5-lightning-30b-a3b",
+			capabilities: { ...EMPTY_CAPABILITIES, chat: true, tools: true, reasoning: true },
+			kbHit: nemotron,
+			configuredThinkingLevel: "off",
+		});
+		strictEqual(nemotronResolved.thinking.mechanism, "on-off");
+		strictEqual(nemotronResolved.request.reasoningEffort, "none");
+		deepStrictEqual(nemotronResolved.request.undeliverableChatTemplateKwargs, {
+			keys: ["force_nonempty_content"],
+			declaredUnsupported: true,
+		});
 	});
 
 	it("resolves level-keyed chat-template kwargs from thinking level high", () => {

@@ -273,6 +273,34 @@ function appendThinkingDiagnostics(
 	diagnostics.push(diagnostic(severity, `thinking-${thinking.noticeKind}`, thinking.notice));
 }
 
+const CHAT_TEMPLATE_KWARGS_UNDELIVERABLE = "chat-template-kwargs-undeliverable";
+
+/**
+ * One warning when the family declares chat-template kwargs the runtime
+ * cannot carry (#268). LM Studio ignores `chat_template_kwargs` for every
+ * family measured, so a Nemotron 3.5 target on that runtime runs without the
+ * `force_nonempty_content` its card asks for; the operator sees that once per
+ * target and model rather than finding the key silently missing from the wire.
+ */
+function appendChatTemplateKwargsDiagnostics(
+	diagnostics: RuntimeResolutionDiagnostic[],
+	resolved: ResolvedModelRuntimeCapabilities,
+): void {
+	const undeliverable = resolved.request.undeliverableChatTemplateKwargs;
+	if (!undeliverable || undeliverable.keys.length === 0) return;
+	const keys = undeliverable.keys.join(", ");
+	const declared = undeliverable.declaredUnsupported
+		? "its family entry marks them unsupported there"
+		: "its family entry does not say so";
+	diagnostics.push(
+		diagnostic(
+			"warning",
+			CHAT_TEMPLATE_KWARGS_UNDELIVERABLE,
+			`chat-template kwargs ${keys} cannot reach ${resolved.runtimeId}, which ignores chat_template_kwargs; ${resolved.modelId} runs without them and ${declared}`,
+		),
+	);
+}
+
 function nonNegativeFiniteNumber(value: unknown): number | undefined {
 	return typeof value === "number" && Number.isFinite(value) && value >= 0 ? value : undefined;
 }
@@ -447,6 +475,7 @@ export function resolveRuntimeTarget(
 	const decisions = capabilityDecisions(runtime, capabilities);
 	appendCapabilityDiagnostics(diagnostics, input, capabilities, decisions, targetId);
 	appendThinkingDiagnostics(diagnostics, modelRuntime, requestedThinkingLevel);
+	appendChatTemplateKwargsDiagnostics(diagnostics, modelRuntime);
 
 	if (hasError(diagnostics)) return { ok: false, diagnostics };
 
@@ -493,6 +522,7 @@ function withoutStaleRuntimeDiagnostics(
 ): RuntimeResolutionDiagnostic[] {
 	return diagnostics.filter((entry) => {
 		if (entry.code.startsWith("thinking-")) return false;
+		if (entry.code === CHAT_TEMPLATE_KWARGS_UNDELIVERABLE) return false;
 		if (entry.code === "output-budget-unknown" && decisions.maxTokens > 0) return false;
 		if (entry.code === "tools-unsupported" && decisions.tools) return false;
 		return true;
@@ -545,6 +575,7 @@ export function refineRuntimeTargetWithModelHints(
 	const decisions = capabilityDecisions(target.runtime, capabilities);
 	const diagnostics = withoutStaleRuntimeDiagnostics(target.diagnostics, decisions);
 	appendThinkingDiagnostics(diagnostics, modelRuntime, target.requestedThinkingLevel);
+	appendChatTemplateKwargsDiagnostics(diagnostics, modelRuntime);
 	return {
 		...target,
 		capabilities,

@@ -4656,7 +4656,7 @@
 <tr>
 <td><code>quirks.thinking.chatTemplateKwargs</code></td>
 <td></td>
-<td>Family-specific static and thinking-level template kwargs extracted into the request capability. Supported OpenAI-compatible adapters emit them as <code>chat_template_kwargs</code>; native LM Studio suppresses the map, and mechanism-owned thinking controls win key collisions.</td>
+<td>Family-specific static and thinking-level template kwargs extracted into the request capability. Supported OpenAI-compatible adapters emit them as <code>chat_template_kwargs</code>; native LM Studio ignores that field, so the resolver names the keys as undeliverable and resolution prints one warning per target and model instead of sending them. Mechanism-owned thinking controls win key collisions.</td>
 </tr>
 <tr>
 <td><code>quirks.thinking.chatTemplateKwargs.byLevel</code></td>
@@ -4671,7 +4671,7 @@
 <tr>
 <td><code>quirks.thinking.chatTemplateKwargs.byLevel.lmstudio</code></td>
 <td></td>
-<td>Free-text runtime annotation retained in the extracted quirks but not used to build a request; native LM Studio suppresses all <code>chat_template_kwargs</code>.</td>
+<td><code>unsupported</code> records that the family documents LM Studio as unable to carry the level-keyed kwarg, and the undeliverable-kwargs warning says so; any other text is retained as provenance. Native LM Studio never receives <code>chat_template_kwargs</code> either way.</td>
 </tr>
 <tr>
 <td><code>quirks.thinking.chatTemplateKwargs.byLevel.values</code></td>
@@ -4686,7 +4686,7 @@
 <tr>
 <td><code>quirks.thinking.chatTemplateKwargs.lmstudio</code></td>
 <td></td>
-<td>String or string map retained as runtime provenance; request builders do not branch on it, and native LM Studio omits the template-kwargs map.</td>
+<td><code>unsupported</code> records that the family documents LM Studio as unable to carry its kwargs, and the undeliverable-kwargs warning says so; any other string or string map is retained as provenance. Native LM Studio omits the template-kwargs map either way.</td>
 </tr>
 <tr>
 <td><code>quirks.thinking.chatTemplateKwargs.static</code></td>

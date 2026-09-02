@@ -54,6 +54,19 @@ export interface ResolvedRequestCapability {
 	budgetTokens?: number;
 	budgetEnforcement: ThinkingBudgetEnforcement;
 	chatTemplateKwargs?: Record<string, boolean | string | number>;
+	/**
+	 * Family-declared chat-template kwargs the runtime cannot carry. LM Studio
+	 * ignores `chat_template_kwargs` for every family measured, so the keys are
+	 * named here for the resolution diagnostics instead of riding in
+	 * `chatTemplateKwargs` only to be deleted at the wire.
+	 */
+	undeliverableChatTemplateKwargs?: UndeliverableChatTemplateKwargs;
+}
+
+export interface UndeliverableChatTemplateKwargs {
+	keys: string[];
+	/** True when the family entry itself marks the block `lmstudio: unsupported`. */
+	declaredUnsupported: boolean;
 }
 
 export interface ResolvedResponseCapability {
@@ -526,15 +539,19 @@ function resolveThinkingCapability(
 }
 
 /**
- * Runtimes whose OpenAI-compatible surface reads the on-off thinking control
- * from `reasoning_effort` rather than `chat_template_kwargs.enable_thinking`.
- * Measured against the live fleet on 2026-08-11 with
- * `nvidia-nemotron-3.5-lightning-30b-a3b`: LM Studio suppressed reasoning
- * entirely for `reasoning_effort: "none"` and ignored `enable_thinking: false`,
- * while llama.cpp did the reverse. Sending the wrong spelling reads as "no
- * preference" to the server, so the model keeps reasoning at every dial.
+ * Runtimes whose OpenAI-compatible surface ignores `chat_template_kwargs`
+ * and reads every thinking control from `reasoning_effort`. Measured against
+ * dynamo (LM Studio) on 2026-08-11 with `nvidia-nemotron-3.5-lightning-30b-a3b`
+ * and again on 2026-09-02 across three mechanisms: `enable_thinking: false`
+ * left 26 reasoning tokens on qwen3.8-27b (effort-levels), 52 on
+ * gemma-4-26b-a4b-it (on-off) and 105 on nemotron-3.5-lightning (on-off),
+ * while `reasoning_effort: "none"` produced 0 on each; llama.cpp does the
+ * reverse. Sending the wrong spelling reads as "no preference" to the
+ * server, so the model keeps reasoning at every dial. The same runtime drops
+ * a family's own kwargs (#267) for the same reason, so those are reported as
+ * undeliverable rather than merged into the request (#268).
  */
-const REASONING_EFFORT_ON_OFF_RUNTIMES: ReadonlySet<string> = new Set(["lmstudio"]);
+const REASONING_EFFORT_ONLY_RUNTIMES: ReadonlySet<string> = new Set(["lmstudio"]);
 
 /** `none` is LM Studio's documented off value; on-off models have no finer dial than `low`. */
 function onOffReasoningEffort(thinkingActive: boolean): string {
@@ -564,6 +581,12 @@ function resolveFamilyChatTemplateKwargs(
 	return Object.keys(out).length > 0 ? out : undefined;
 }
 
+function familyKwargsDeclaredUnsupported(quirks: LocalModelQuirks | undefined, runtimeId: string): boolean {
+	if (runtimeId !== "lmstudio") return false;
+	const block = quirks?.chatTemplateKwargs ?? quirks?.thinking?.chatTemplateKwargs;
+	return block?.lmstudio === "unsupported" || block?.byLevel?.lmstudio === "unsupported";
+}
+
 function resolveRequestCapability(
 	thinking: ResolvedThinkingCapability,
 	parser: ResponseParserKind,
@@ -571,8 +594,14 @@ function resolveRequestCapability(
 	quirks?: LocalModelQuirks,
 ): ResolvedRequestCapability {
 	const request: ResolvedRequestCapability = { budgetEnforcement: thinking.budgetEnforcement };
+	const effortOnly = REASONING_EFFORT_ONLY_RUNTIMES.has(runtimeId);
 	const familyKwargs = resolveFamilyChatTemplateKwargs(quirks, thinking.effectiveLevel, thinking.configuredLevel);
-	if (familyKwargs) {
+	if (familyKwargs && effortOnly) {
+		request.undeliverableChatTemplateKwargs = {
+			keys: Object.keys(familyKwargs),
+			declaredUnsupported: familyKwargsDeclaredUnsupported(quirks, runtimeId),
+		};
+	} else if (familyKwargs) {
 		request.chatTemplateKwargs = { ...familyKwargs };
 	}
 	if (thinking.mechanism === "effort-levels" && thinking.effort) {
@@ -580,29 +609,25 @@ function resolveRequestCapability(
 	}
 	if (thinking.mechanism === "effort-levels" && !thinking.thinkingActive) {
 		request.chatTemplateKwargs = { ...(request.chatTemplateKwargs ?? {}), enable_thinking: false };
-		// LM Studio ignores chat_template_kwargs for these families and reads the
-		// off switch from reasoning_effort alone. Measured on 2026-09-02 against
-		// qwen3.8-27b on dynamo: enable_thinking:false left 63 reasoning tokens
-		// on a one-line arithmetic prompt, the same as no override, while
-		// reasoning_effort:"none" produced 0 and a shorter rendered prompt. An
-		// interactive session with thinking "off" had spent 37k reasoning tokens
-		// before this reached the wire.
-		if (REASONING_EFFORT_ON_OFF_RUNTIMES.has(runtimeId)) {
-			request.reasoningEffort = onOffReasoningEffort(false);
-		}
 	}
 	if (thinking.mechanism === "budget-tokens" && thinking.budgetTokens !== undefined) {
 		request.budgetTokens = thinking.budgetTokens;
 	}
 	if (thinking.mechanism === "on-off" && thinking.chatTemplateKwargs) {
 		request.chatTemplateKwargs = { ...(request.chatTemplateKwargs ?? {}), ...thinking.chatTemplateKwargs };
-		if (REASONING_EFFORT_ON_OFF_RUNTIMES.has(runtimeId)) {
-			request.reasoningEffort = onOffReasoningEffort(thinking.thinkingActive);
-		}
 	}
 	if (parser === "harmony" && thinking.effort) {
 		request.reasoningEffort = thinking.effort;
 		request.chatTemplateKwargs = { ...(request.chatTemplateKwargs ?? {}), reasoning_effort: thinking.effort };
+	}
+	// Every mechanism that means "off" has to reach an effort-only runtime as
+	// reasoning_effort "none": the template flag above is what llama.cpp reads
+	// and what LM Studio drops. An interactive session with thinking "off" had
+	// spent 37k reasoning tokens before the effort-levels case reached the
+	// wire, and on-off and budget-tokens families reasoned on the same way.
+	if (effortOnly && thinking.mechanism !== "none" && thinking.mechanism !== "always-on") {
+		if (!thinking.thinkingActive) request.reasoningEffort = onOffReasoningEffort(false);
+		else if (thinking.mechanism === "on-off") request.reasoningEffort = onOffReasoningEffort(true);
 	}
 	return request;
 }
