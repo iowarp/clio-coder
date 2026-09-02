@@ -96,7 +96,7 @@ function workerPrompt(input: {
 	});
 }
 
-describe("Candidate B prompt contracts", () => {
+describe("compact prompt contracts", () => {
 	it("keeps main composition deterministic across autonomy and tool input order", () => {
 		const tools = [
 			ToolNames.Read,
@@ -175,6 +175,8 @@ describe("Candidate B prompt contracts", () => {
 		match(compiled.systemPrompt, /For this local model, reason compactly/u);
 		strictEqual(occurrences(compiled.systemPrompt, FLEET_DELEGATION_RULE), 1);
 		strictEqual(occurrences(compiled.systemPrompt, "only an explicit operator request activates it"), 1);
+		strictEqual(occurrences(compiled.systemPrompt, "The harness handles any consented marketplace install"), 1);
+		strictEqual(occurrences(compiled.systemPrompt, "harness performs any install"), 0);
 		strictEqual(occurrences(compiled.systemPrompt, "A sealed run receipt is the durable record"), 1);
 	});
 
@@ -261,27 +263,36 @@ describe("Candidate B prompt contracts", () => {
 		}
 	});
 
-	it("holds fixed Candidate B main and worker token fixtures", () => {
+	it("holds fixed compact main and worker token budgets", () => {
 		strictEqual(builtinRecipes.length, 13, "the fixed Fleet fixture requires the 13 shipped recipes");
 		const mainToolNames = ALL_TOOL_NAMES.filter((name) => name !== ToolNames.Ledger);
 		strictEqual(mainToolNames.length, 20);
 		const main = mainPrompt({ providerSupportsTools: true, toolNames: mainToolNames });
 		const normalizedMain = main.systemPrompt.split(resolvePackageRoot()).join("{PACKAGE_ROOT}");
-		strictEqual(normalizedMain.length, 12_581);
-		strictEqual(Math.ceil(normalizedMain.length / 4), 3_146);
+		strictEqual(normalizedMain.length, 12_547);
+		strictEqual(Math.ceil(normalizedMain.length / 4), 3_137);
 		ok(main.systemPrompt.length <= 12_800, `main prompt grew to ${main.systemPrompt.length} chars`);
 		ok(main.tokenEstimate <= 3_200, `main prompt grew to ${main.tokenEstimate} estimated tokens`);
 		strictEqual(Math.ceil(main.systemPrompt.length / 4), main.tokenEstimate);
+		const operatingContract = table.byId.get("operating.contract")?.body.trim();
+		if (!operatingContract) throw new Error("fixed main fixture requires the operating contract");
+		const identityBoundary = normalizedMain.indexOf(`\n\n${operatingContract}`);
+		ok(identityBoundary > 0, "fixed main fixture must expose the identity section boundary");
+		const normalizedIdentityEstimate = Math.ceil(normalizedMain.slice(0, identityBoundary).length / 4);
 		deepStrictEqual(
-			Object.fromEntries(
-				main.sections.filter((section) => section.id !== "identity").map((section) => [section.id, section.tokenEstimate]),
-			),
 			{
+				identity: normalizedIdentityEstimate,
+				...Object.fromEntries(
+					main.sections.filter((section) => section.id !== "identity").map((section) => [section.id, section.tokenEstimate]),
+				),
+			},
+			{
+				identity: 652,
 				"operating-contract": 252,
 				delegation: 460,
 				skills: 102,
 				safety: 266,
-				"tool-contract": 806,
+				"tool-contract": 798,
 				fleet: 528,
 				"retrieval-hints": 36,
 				runtime: 43,
