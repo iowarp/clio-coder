@@ -16,7 +16,7 @@ import { emitResidencyMutation, emitResidencyNotice, reconcileResidency, residen
 import { withResidencyLock } from "./residency-lock.js";
 
 interface LmStudioModelMetadata {
-	clio?: {
+	clioCoder?: {
 		targetId: string;
 		runtimeId: string;
 		lifecycle?: "user-managed" | "clio-coder-managed";
@@ -42,8 +42,8 @@ function responseInstanceId(data: unknown): string | undefined {
 	return typeof id === "string" && id.trim().length > 0 ? id.trim() : undefined;
 }
 
-function metadata(model: Model<Api>): NonNullable<LmStudioModelMetadata["clio"]> | undefined {
-	return (model as Model<Api> & LmStudioModelMetadata).clio;
+function metadata(model: Model<Api>): NonNullable<LmStudioModelMetadata["clioCoder"]> | undefined {
+	return (model as Model<Api> & LmStudioModelMetadata).clioCoder;
 }
 
 function targetForModel(model: Model<"openai-completions">): TargetDescriptor | null {

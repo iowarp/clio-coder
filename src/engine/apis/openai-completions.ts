@@ -60,7 +60,7 @@ const REASONING_CHARS_PER_TOKEN = 4;
 export { estimateInputTokensFromContext, remainingContextMaxTokens } from "./output-budget.js";
 
 interface ClioRuntimeMetadata {
-	clio?: {
+	clioCoder?: {
 		targetId: string;
 		runtimeId: string;
 		/** Present only when settings set the target lifecycle explicitly. */
@@ -75,11 +75,11 @@ interface ClioRuntimeMetadata {
 }
 
 function chatTemplateKwargsUnsupported(model: Model<Api>): boolean {
-	return (model as Model<Api> & ClioRuntimeMetadata).clio?.chatTemplateKwargsUnsupported === true;
+	return (model as Model<Api> & ClioRuntimeMetadata).clioCoder?.chatTemplateKwargsUnsupported === true;
 }
 
 function clioQuirks(model: Model<"openai-completions">): LocalModelQuirks | undefined {
-	return (model as Model<"openai-completions"> & ClioRuntimeMetadata).clio?.quirks;
+	return (model as Model<"openai-completions"> & ClioRuntimeMetadata).clioCoder?.quirks;
 }
 
 function pickSamplingProfile(
@@ -138,7 +138,7 @@ function backendCompletionTimings(value: unknown, source: BackendTimingsSource):
 }
 
 function backendTimingsSourceForModel(model: Model<Api>): BackendTimingsSource | null {
-	const metadata = (model as Model<Api> & ClioRuntimeMetadata).clio;
+	const metadata = (model as Model<Api> & ClioRuntimeMetadata).clioCoder;
 	if (model.provider === "llamacpp" && metadata?.runtimeId === "llamacpp") return "llamacpp-timings";
 	if (model.provider === "lmstudio" && metadata?.runtimeId === "lmstudio") return "lmstudio-timings";
 	return null;
@@ -596,8 +596,8 @@ function hasEmptyArguments(args: Record<string, unknown>): boolean {
 	return Object.keys(args).length === 0;
 }
 
-function runtimeMetadata(model: Model<Api>): NonNullable<ClioRuntimeMetadata["clio"]> | undefined {
-	return (model as Model<Api> & ClioRuntimeMetadata).clio;
+function runtimeMetadata(model: Model<Api>): NonNullable<ClioRuntimeMetadata["clioCoder"]> | undefined {
+	return (model as Model<Api> & ClioRuntimeMetadata).clioCoder;
 }
 
 function emptyErrorMessage(model: Model<"openai-completions">, message: string): AssistantMessage {

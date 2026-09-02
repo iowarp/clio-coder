@@ -43,7 +43,7 @@ import type { EngineApiProvider } from "./types.js";
 const REASONING_CHARS_PER_TOKEN = 4;
 
 interface ClioRuntimeMetadata {
-	clio?: {
+	clioCoder?: {
 		targetId: string;
 		runtimeId: string;
 		/** Present only when settings set the target lifecycle explicitly. */
@@ -55,11 +55,11 @@ interface ClioRuntimeMetadata {
 }
 
 function clioQuirks(model: Model<"ollama-native">): LocalModelQuirks | undefined {
-	return (model as Model<"ollama-native"> & ClioRuntimeMetadata).clio?.quirks;
+	return (model as Model<"ollama-native"> & ClioRuntimeMetadata).clioCoder?.quirks;
 }
 
 function ollamaTargetId(model: Model<"ollama-native">): string {
-	return (model as Model<"ollama-native"> & ClioRuntimeMetadata).clio?.targetId ?? model.provider;
+	return (model as Model<"ollama-native"> & ClioRuntimeMetadata).clioCoder?.targetId ?? model.provider;
 }
 
 /**
@@ -74,7 +74,7 @@ function ollamaTargetId(model: Model<"ollama-native">): string {
 async function reconcileOllamaResidency(model: Model<"ollama-native">, headers: Record<string, string>): Promise<void> {
 	const baseUrl = model.baseUrl;
 	if (!baseUrl) return;
-	const metadata = (model as Model<"ollama-native"> & ClioRuntimeMetadata).clio;
+	const metadata = (model as Model<"ollama-native"> & ClioRuntimeMetadata).clioCoder;
 	const adapter: ResidencyAdapter = {
 		targetKey: residencyTargetKey("ollama-native", baseUrl),
 		targetId: ollamaTargetId(model),
