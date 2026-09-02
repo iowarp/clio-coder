@@ -49,7 +49,13 @@ import {
 } from "./configure-layout.js";
 import { createDelayedManualCodeInput } from "./oauth-manual-input.js";
 import { promptOAuthSelection } from "./oauth-select.js";
-import { credentialWriteFailed, printError, printOk, printPlaintextCredentialWarning } from "./shared.js";
+import {
+	credentialWriteFailed,
+	noteDeprecatedFlag,
+	printError,
+	printOk,
+	printPlaintextCredentialWarning,
+} from "./shared.js";
 import { terminalColumns, wrapPlain } from "./text-layout.js";
 import { type LiveModelInventory, validateModelChoice } from "./validate-model.js";
 
@@ -201,14 +207,17 @@ function parseSetupArgs(argv: ReadonlyArray<string>): ParsedArgs {
 				break;
 			case "--fleet-model":
 			case "--worker-model":
+				if (a === "--worker-model") noteDeprecatedFlag(a, "--fleet-model");
 				out.workerModel = need();
 				break;
 			case "--agent-profile":
 			case "--worker-profile":
+				if (a === "--worker-profile") noteDeprecatedFlag(a, "--agent-profile");
 				out.workerProfile = need();
 				break;
 			case "--agent-profile-model":
 			case "--worker-profile-model":
+				if (a === "--worker-profile-model") noteDeprecatedFlag(a, "--agent-profile-model");
 				out.workerProfileModel = need();
 				break;
 			case "--api-key-env":
@@ -239,6 +248,7 @@ function parseSetupArgs(argv: ReadonlyArray<string>): ParsedArgs {
 				break;
 			case "--set-fleet-default":
 			case "--set-worker-default":
+				if (a === "--set-worker-default") noteDeprecatedFlag(a, "--set-fleet-default");
 				out.setWorkerDefault = true;
 				break;
 			case "--context-window": {

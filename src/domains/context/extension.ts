@@ -59,9 +59,6 @@ function persistState(
  * because nothing inside it awaited.
  */
 async function ensureCodewikiFresh(cwd: string): Promise<void> {
-	// The bootstrap model-generation child runs a headless session purely to draft
-	// CLIO-CODER.md; it must not re-index while the parent context-init owns the rebuild.
-	if (process.env.CLIO_CODER_BOOTSTRAP_GENERATE_CHILD === "1") return;
 	const state = readClioState(cwd);
 	if (!state && !existsSync(codewikiPath(cwd))) return;
 	const indexedAt = new Date().toISOString();

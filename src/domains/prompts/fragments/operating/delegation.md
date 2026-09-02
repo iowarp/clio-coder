@@ -1,7 +1,6 @@
 ---
 id: operating.delegation
 version: 1
-budgetTokens: 360
 description: Coordinator delegation and receipt discipline; rendered only when dispatch is on the surface
 ---
 

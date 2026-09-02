@@ -20,6 +20,24 @@ export function printNote(message: string): void {
 	process.stderr.write(`${chalk.yellow("note:")} ${message}\n`);
 }
 
+/**
+ * Older spellings a command parser still accepts. Each use prints one note per
+ * process so scripts keep working while the canonical name is learned; the
+ * knob registry (docs/knobs.yaml) lists every alias with its canonical flag.
+ */
+export function deprecatedFlagMessage(alias: string, canonical: string): string {
+	return `${alias} is a deprecated alias of ${canonical}; use ${canonical}`;
+}
+
+const notedFlagAliases = new Set<string>();
+
+/** Print the deprecation note for `alias` once per process. */
+export function noteDeprecatedFlag(alias: string, canonical: string): void {
+	if (notedFlagAliases.has(alias)) return;
+	notedFlagAliases.add(alias);
+	printNote(deprecatedFlagMessage(alias, canonical));
+}
+
 export function printOk(message: string): void {
 	process.stdout.write(`${chalk.green("ok:")} ${message}\n`);
 }

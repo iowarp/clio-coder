@@ -1026,7 +1026,7 @@ export async function bootOrchestrator(options: BootOptions = {}): Promise<BootR
 			else resolvedResumeId = latest.id;
 		}
 	}
-	const resumeId = resolvedResumeId ?? process.env.CLIO_CODER_RESUME_SESSION_ID?.trim();
+	const resumeId = resolvedResumeId;
 	let resumedSessionAtBoot = false;
 	if (resumeId && session && headlessResumeFailure === null) {
 		try {
@@ -1038,7 +1038,6 @@ export async function bootOrchestrator(options: BootOptions = {}): Promise<BootR
 			else bootStderr(`Clio Coder: failed to resume session ${resumeId}: ${detail}\n`);
 		}
 	}
-	Reflect.deleteProperty(process.env, "CLIO_CODER_RESUME_SESSION_ID");
 	if (headlessResumeFailure !== null) {
 		bootStderr(`clio-coder run: ${headlessResumeFailure}\n`);
 		await termination.shutdown(2);
@@ -1913,7 +1912,7 @@ export async function bootOrchestrator(options: BootOptions = {}): Promise<BootR
 		await chat.whenSettled();
 	});
 
-	// A boot-time resume (CLIO_CODER_RESUME_SESSION_ID) must replay the resumed
+	// A boot-time resume (headless --session or --continue) must replay the resumed
 	// session into the chat loop the same way the interactive /resume overlay
 	// does. Without this, the first submit runs with an empty provider context
 	// and parents its user turn at null, appending a second root that silently

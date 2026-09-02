@@ -1,7 +1,7 @@
 import { THINKING_LEVELS } from "../core/defaults.js";
 import type { JobThinkingLevel } from "../domains/dispatch/validation.js";
 import { AUTONOMY_LEVELS, type AutonomyLevel } from "../domains/safety/autonomy.js";
-import { globalFlagPositionHint } from "./argv.js";
+import { deprecatedFlagMessage, globalFlagPositionHint } from "./argv.js";
 
 export interface CliArgDiagnostic {
 	type: "warning" | "error";
@@ -167,11 +167,17 @@ export function parseRunCliArgs(argv: ReadonlyArray<string>): RunCliArgs {
 			continue;
 		}
 		if (arg === "--agent-profile" || arg === "--worker-profile" || arg === "--worker") {
+			if (arg !== "--agent-profile") {
+				parsed.diagnostics.push({ type: "warning", message: deprecatedFlagMessage(arg, "--agent-profile") });
+			}
 			const value = need(arg);
 			if (value !== null) parsed.agentProfile = value;
 			continue;
 		}
 		if (arg === "--agent-runtime" || arg === "--worker-runtime" || arg === "--runtime") {
+			if (arg !== "--agent-runtime") {
+				parsed.diagnostics.push({ type: "warning", message: deprecatedFlagMessage(arg, "--agent-runtime") });
+			}
 			const value = need(arg);
 			if (value !== null) parsed.agentRuntime = value;
 			continue;

@@ -193,13 +193,30 @@ function parsePositiveSafeInt(raw: string | undefined): number | undefined {
 	return Number.isSafeInteger(parsed) ? parsed : undefined;
 }
 
-/** Resolve one guardrail: env override > configured settings > default. */
-export function resolveGuardrail(key: keyof GuardrailValues, env: NodeJS.ProcessEnv = process.env): number {
+const warnedAliases = new Set<string>();
+
+/** One deprecation warning per process for a guardrail read through its older spelling. */
+function warnGuardrailAlias(alias: string, canonical: string, warn: (message: string) => void): void {
+	if (warnedAliases.has(alias)) return;
+	warnedAliases.add(alias);
+	warn(`${alias} is deprecated; use ${canonical} instead`);
+}
+
+/** Test seam: forget which aliases this process already warned about. */
+export function resetGuardrailAliasWarnings(): void {
+	warnedAliases.clear();
+}
+
+/** Resolve one guardrail: env override > deprecated alias (with a warning) > configured settings > default. */
+export function resolveGuardrail(
+	key: keyof GuardrailValues,
+	env: NodeJS.ProcessEnv = process.env,
+	warn: (message: string) => void = (message) => process.emitWarning(message, { code: "CLIO_CODER_DEPRECATED_ENV" }),
+): number {
+	const canonical = parsePositiveSafeInt(env[GUARDRAIL_ENV_VARS[key]]);
+	if (canonical !== undefined) return canonical;
 	const alias = GUARDRAIL_ENV_ALIASES[key];
-	return (
-		parsePositiveSafeInt(env[GUARDRAIL_ENV_VARS[key]]) ??
-		(alias ? parsePositiveSafeInt(env[alias]) : undefined) ??
-		configured[key] ??
-		GUARDRAIL_DEFAULTS[key]
-	);
+	const aliased = alias ? parsePositiveSafeInt(env[alias]) : undefined;
+	if (alias && aliased !== undefined) warnGuardrailAlias(alias, GUARDRAIL_ENV_VARS[key], warn);
+	return aliased ?? configured[key] ?? GUARDRAIL_DEFAULTS[key];
 }

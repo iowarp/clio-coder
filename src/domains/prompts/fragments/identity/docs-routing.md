@@ -1,7 +1,6 @@
 ---
 id: identity.docs-routing
 version: 1
-budgetTokens: 70
 description: Directive to route questions about Clio herself through context(scope="docs"); rendered only when context is on the surface
 ---
 
