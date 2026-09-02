@@ -22,7 +22,6 @@
 
 import { createHash } from "node:crypto";
 import { isAbsolute, resolve } from "node:path";
-import type { ExtensionProvenance, ExtensionScope } from "../extensions/index.js";
 import type { MiddlewareHookRegistration } from "./runtime.js";
 import {
 	isMiddlewareHook,
@@ -53,14 +52,33 @@ export const USER_HOOK_COMMAND_OUTPUT_MAX_CHARS = 4_000;
 export const USER_HOOK_PROMPT_MAX_CHARS = 2_000;
 
 /**
- * Attribution for a hook declared by an installed extension. The declaration
- * bytes behind `declarationsDigest` are the ones hashed during install-digest
- * verification and captured into the extension snapshot; nothing here was
- * re-read from a mutable path after verification.
+ * Provenance of an installed package that supplied hook declarations, as the
+ * composition root attributes it. Middleware treats it as opaque identity
+ * data; it neither reads packages nor knows how the digests were produced.
+ */
+export interface UserHookPackageProvenance {
+	id: string;
+	/** Install scope label of the package (for example "user" or "project"). */
+	scope: string;
+	/** Path recorded at install, when known. */
+	sourcePath?: string;
+	/** Canonical filesystem identity of the installed package root. */
+	canonicalRoot: string;
+	/** SHA-256 of the manifest bytes covered by the installed-tree digest. */
+	manifestDigest: string;
+	/** Installed-tree digest recorded at install and reverified by the supplier. */
+	contentDigest: string;
+}
+
+/**
+ * Attribution for a hook declared by an installed package. The declaration
+ * bytes behind `declarationsDigest` are the ones the supplier hashed during
+ * content verification and captured; nothing here was re-read from a mutable
+ * path after verification.
  */
 export interface UserHookExtensionSource {
-	provenance: ExtensionProvenance;
-	/** Extension snapshot generation the declarations were admitted under; 0 for an ephemeral build. */
+	provenance: UserHookPackageProvenance;
+	/** Generation the declarations were admitted under; 0 for an ephemeral build. */
 	generation: number;
 	/** SHA-256 of the captured hooks.yaml bytes. */
 	declarationsDigest: string;
@@ -334,7 +352,7 @@ export type UserHookOutcome = "emitted" | "command-ok" | "command-failed" | "com
 /** Bounded extension attribution carried on every receipt of an extension hook. */
 export interface HookReceiptExtension {
 	id: string;
-	scope: ExtensionScope;
+	scope: string;
 	canonicalRoot: string;
 	manifestDigest: string;
 	contentDigest: string;

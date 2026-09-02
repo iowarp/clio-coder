@@ -10,10 +10,13 @@
  *   - owned: registration sets replaced as one unit by an owner under a
  *     strictly increasing generation. Today the only owner is "user-hooks".
  *
- * The evaluation list is a frozen array replaced by reference. Every writer
- * runs to completion on one stack, so a reader that captures the list at
- * entry evaluates one consistent set even across an await, and a prepared
- * replacement publishes with a single assignment that cannot throw.
+ * The whole table is one immutable state object held behind a single
+ * reference. Every writer computes a complete next state and publishes it
+ * with one assignment; readers capture the reference once per evaluation, so
+ * an evaluation that started before a publish finishes against the state it
+ * started with, including across an await. Preparation never runs user code:
+ * conflicts are returned as frozen data and a caller emits them through the
+ * diagnostic sink only after publication.
  */
 
 import type { MiddlewareDiagnostic, MiddlewareDiagnosticSink, MiddlewareHookRegistration } from "./runtime.js";
@@ -30,6 +33,8 @@ export interface MiddlewareRegistrationConflict {
 }
 
 export type ReplaceRegistrationsRejection = "stale" | "unknown-owner";
+
+export type RegistrationConflictDiagnostic = Extract<MiddlewareDiagnostic, { kind: "registration_conflict" }>;
 
 export interface ReplaceRegistrationsReport {
 	applied: boolean;
@@ -48,19 +53,27 @@ export interface ReplaceRegistrationsReport {
 }
 
 /**
- * A validated replacement whose evaluation list is already built. `commit`
- * assigns that list and is the only visible step; it refuses (applied: false)
- * when a newer generation or a host registration landed after `prepare`.
+ * A validated replacement whose complete next table state is already built.
+ * `publish` is one reference assignment: it does not validate, refuse,
+ * throw, or call out. The caller checks `current()` on the same stack
+ * immediately before publishing, then emits `conflicts` afterwards.
  */
 export interface MiddlewareRegistrationReplacement {
 	owner: MiddlewareRegistrationOwner;
 	generation: number;
 	dropped: ReadonlyArray<MiddlewareRegistrationConflict>;
-	/** Registrations that will be active for the owner after commit. */
+	/** Diagnostics for `dropped`, as data. Nothing was emitted during preparation. */
+	conflicts: ReadonlyArray<RegistrationConflictDiagnostic>;
+	/** Registrations that will be active for the owner after publish. */
 	size: number;
-	/** True while commit would apply: no newer generation, no host change since prepare. */
+	/** True while the table state this replacement was prepared against is still the live one. */
 	current(): boolean;
-	commit(): ReplaceRegistrationsReport;
+	/** Assignment-only publication of the prepared state. */
+	publish(): void;
+	/** Send `conflicts` to the diagnostic sink. Call only after publication. */
+	emitConflicts(): void;
+	/** Remove this generation's registrations if the owner still holds it. */
+	dispose(): void;
 	discard(): void;
 }
 
@@ -97,6 +110,14 @@ interface OwnerSlot {
 	anchor: number;
 }
 
+/** One immutable table state. Replaced wholesale, never mutated. */
+interface TableState {
+	host: ReadonlyArray<MiddlewareHookRegistration>;
+	hostIds: ReadonlySet<string>;
+	slots: ReadonlyMap<MiddlewareRegistrationOwner, OwnerSlot>;
+	list: ReadonlyArray<MiddlewareHookRegistration>;
+}
+
 export interface MiddlewareRegistrationTableOptions {
 	fixed: ReadonlyArray<MiddlewareHookRegistration>;
 	/** Resolved per emission so the composition root can swap the sink later. */
@@ -112,29 +133,15 @@ export function createMiddlewareRegistrationTable(
 ): MiddlewareRegistrationTable {
 	const fixed = Object.freeze([...options.fixed]);
 	const fixedIds = new Set(fixed.map((registration) => registration.id));
-	const host: MiddlewareHookRegistration[] = [];
-	const hostIds = new Set<string>();
-	const slots = new Map<MiddlewareRegistrationOwner, OwnerSlot>();
-	// Bumped on every host append; a prepared replacement built against an
-	// older host set refuses to commit rather than publish a list that omits it.
-	let hostVersion = 0;
-	let evaluationList: ReadonlyArray<MiddlewareHookRegistration> = fixed;
-
-	const emit = (diagnostic: MiddlewareDiagnostic): void => {
-		try {
-			options.diagnosticSink()(diagnostic);
-		} catch {
-			// A diagnostics sink must never affect registration bookkeeping.
-		}
-	};
 
 	const buildList = (
-		overrides: ReadonlyMap<MiddlewareRegistrationOwner, OwnerSlot>,
+		host: ReadonlyArray<MiddlewareHookRegistration>,
+		slots: ReadonlyMap<MiddlewareRegistrationOwner, OwnerSlot>,
 	): ReadonlyArray<MiddlewareHookRegistration> => {
 		const list: MiddlewareHookRegistration[] = [...fixed];
 		const slotAt = (index: number): void => {
 			for (const owner of MIDDLEWARE_REGISTRATION_OWNERS) {
-				const slot = overrides.get(owner) ?? slots.get(owner);
+				const slot = slots.get(owner);
 				if (slot !== undefined && slot.anchor === index) list.push(...slot.registrations);
 			}
 		};
@@ -146,24 +153,54 @@ export function createMiddlewareRegistrationTable(
 		return Object.freeze(list);
 	};
 
-	const rebuild = (): void => {
-		evaluationList = buildList(new Map());
+	const makeState = (
+		host: ReadonlyArray<MiddlewareHookRegistration>,
+		slots: ReadonlyMap<MiddlewareRegistrationOwner, OwnerSlot>,
+	): TableState =>
+		Object.freeze({
+			host: Object.freeze([...host]),
+			hostIds: new Set(host.map((registration) => registration.id)),
+			slots: new Map(slots),
+			list: buildList(host, slots),
+		});
+
+	// The single live reference. Every publish below is `state = next`.
+	let state: TableState = makeState([], new Map());
+
+	const emit = (diagnostic: MiddlewareDiagnostic): void => {
+		try {
+			options.diagnosticSink()(diagnostic);
+		} catch {
+			// A diagnostics sink must never affect registration bookkeeping.
+		}
 	};
 
-	const slotFor = (owner: MiddlewareRegistrationOwner): OwnerSlot =>
-		slots.get(owner) ?? { generation: 0, registrations: [], anchor: host.length };
+	const slotFor = (base: TableState, owner: MiddlewareRegistrationOwner): OwnerSlot =>
+		base.slots.get(owner) ?? { generation: 0, registrations: [], anchor: base.host.length };
+
+	const disposeGeneration = (owner: MiddlewareRegistrationOwner, generation: number): void => {
+		const base = state;
+		const held = base.slots.get(owner);
+		if (held === undefined || held.generation !== generation || held.registrations.length === 0) return;
+		const slots = new Map(base.slots);
+		slots.set(owner, { ...held, registrations: Object.freeze([]) });
+		state = makeState(base.host, slots);
+	};
 
 	const table: MiddlewareRegistrationTable = {
-		list: () => evaluationList,
+		list: () => state.list,
 		registerHook(registration) {
-			if (fixedIds.has(registration.id) || hostIds.has(registration.id)) return;
-			for (const [owner, slot] of slots) {
+			const base = state;
+			if (fixedIds.has(registration.id) || base.hostIds.has(registration.id)) return;
+			const evictions: RegistrationConflictDiagnostic[] = [];
+			const slots = new Map(base.slots);
+			for (const [owner, slot] of base.slots) {
 				if (!slot.registrations.some((entry) => entry.id === registration.id)) continue;
 				slots.set(owner, {
 					...slot,
 					registrations: Object.freeze(slot.registrations.filter((entry) => entry.id !== registration.id)),
 				});
-				emit({
+				evictions.push({
 					kind: "registration_conflict",
 					registrationId: registration.id,
 					owner,
@@ -172,33 +209,35 @@ export function createMiddlewareRegistrationTable(
 					action: "evicted",
 				});
 			}
-			host.push(registration);
-			hostIds.add(registration.id);
-			hostVersion += 1;
-			rebuild();
+			state = makeState([...base.host, registration], slots);
+			// Diagnostics only after the publish; a sink that registers another
+			// host hook re-enters against the already-published state.
+			for (const eviction of evictions) emit(eviction);
 		},
 		prepareReplacement(owner, generation, registrations) {
 			if (!isRegistrationOwner(owner)) {
 				return { status: "rejected", owner, reason: "unknown-owner", activeGeneration: 0 };
 			}
-			const slot = slotFor(owner);
+			const base = state;
+			const slot = slotFor(base, owner);
 			if (!Number.isInteger(generation) || generation <= slot.generation) {
 				return { status: "rejected", owner, reason: "stale", activeGeneration: slot.generation };
 			}
 			const dropped: MiddlewareRegistrationConflict[] = [];
+			const conflicts: RegistrationConflictDiagnostic[] = [];
 			const accepted: MiddlewareHookRegistration[] = [];
 			const seen = new Set<string>();
 			for (const registration of registrations) {
 				const conflictsWith: MiddlewareRegistrationConflictTier | null = fixedIds.has(registration.id)
 					? "builtin"
-					: hostIds.has(registration.id)
+					: base.hostIds.has(registration.id)
 						? "host"
 						: seen.has(registration.id)
 							? "owned"
 							: null;
 				if (conflictsWith !== null) {
 					dropped.push({ id: registration.id, conflictsWith });
-					emit({
+					conflicts.push({
 						kind: "registration_conflict",
 						registrationId: registration.id,
 						owner,
@@ -211,48 +250,30 @@ export function createMiddlewareRegistrationTable(
 				seen.add(registration.id);
 				accepted.push(registration);
 			}
-			const nextSlot: OwnerSlot = { generation, registrations: Object.freeze(accepted), anchor: slot.anchor };
-			const nextList = buildList(new Map([[owner, nextSlot]]));
-			const preparedHostVersion = hostVersion;
+			const slots = new Map(base.slots);
+			slots.set(owner, { generation, registrations: Object.freeze(accepted), anchor: slot.anchor });
+			const prepared = makeState(base.host, slots);
 			let settled = false;
-			const current = (): boolean =>
-				!settled && hostVersion === preparedHostVersion && generation > slotFor(owner).generation;
 			const frozenDropped = Object.freeze(dropped);
+			const frozenConflicts = Object.freeze(conflicts);
 			const replacement: MiddlewareRegistrationReplacement = {
 				owner,
 				generation,
 				dropped: frozenDropped,
+				conflicts: frozenConflicts,
 				size: accepted.length,
-				current,
-				commit() {
-					if (!current()) {
-						settled = true;
-						return {
-							applied: false,
-							owner,
-							activeGeneration: slotFor(owner).generation,
-							reason: "stale",
-							dropped: frozenDropped,
-							dispose: () => undefined,
-						};
-					}
+				// Reference identity on the base state covers every kind of
+				// intervening change: host appends, other replacements, disposals.
+				current: () => !settled && state === base,
+				publish() {
 					settled = true;
-					slots.set(owner, nextSlot);
-					// The one visible step: a reference assignment with nothing
-					// after it that can throw or yield.
-					evaluationList = nextList;
-					return {
-						applied: true,
-						owner,
-						activeGeneration: generation,
-						dropped: frozenDropped,
-						dispose: () => {
-							const held = slots.get(owner);
-							if (held === undefined || held.generation !== generation || held.registrations.length === 0) return;
-							slots.set(owner, { ...held, registrations: Object.freeze([]) });
-							rebuild();
-						},
-					};
+					state = prepared;
+				},
+				emitConflicts() {
+					for (const conflict of frozenConflicts) emit(conflict);
+				},
+				dispose() {
+					disposeGeneration(owner, generation);
 				},
 				discard() {
 					settled = true;
@@ -272,10 +293,33 @@ export function createMiddlewareRegistrationTable(
 					dispose: () => undefined,
 				};
 			}
-			return prepared.replacement.commit();
+			const replacement = prepared.replacement;
+			// Nothing ran between prepare and here, so current() holds; the
+			// check is kept so the one-call form has the same shape as a caller
+			// that validates on its own stack.
+			if (!replacement.current()) {
+				replacement.discard();
+				return {
+					applied: false,
+					owner,
+					activeGeneration: table.ownedGeneration(owner),
+					reason: "stale",
+					dropped: replacement.dropped,
+					dispose: () => undefined,
+				};
+			}
+			replacement.publish();
+			replacement.emitConflicts();
+			return {
+				applied: true,
+				owner,
+				activeGeneration: generation,
+				dropped: replacement.dropped,
+				dispose: () => replacement.dispose(),
+			};
 		},
 		ownedGeneration(owner) {
-			return slots.get(owner)?.generation ?? 0;
+			return state.slots.get(owner)?.generation ?? 0;
 		},
 	};
 	return table;

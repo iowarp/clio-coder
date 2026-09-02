@@ -1,9 +1,14 @@
 import type { ExtensionSnapshot } from "./types.js";
 
+/**
+ * Holder for the committed snapshot reference plus the process-local
+ * generation counter. `publish` is assignment-only: validation that a
+ * snapshot is strictly newer belongs to the candidate that prepared it, on
+ * the same stack, immediately before publishing.
+ */
 export interface ExtensionSnapshotStore {
 	current(): ExtensionSnapshot | null;
-	/** Refuses a generation at or below the committed generation. */
-	commit(snapshot: ExtensionSnapshot): boolean;
+	publish(snapshot: ExtensionSnapshot): void;
 	/** Reserve and return the next process-local generation. Reservations are never reused. */
 	nextGeneration(): number;
 }
@@ -13,11 +18,8 @@ export function createExtensionSnapshotStore(): ExtensionSnapshotStore {
 	let reservedGeneration = 0;
 	return {
 		current: () => committed,
-		commit(snapshot) {
-			if (snapshot.generation <= (committed?.generation ?? 0)) return false;
+		publish(snapshot) {
 			committed = snapshot;
-			reservedGeneration = Math.max(reservedGeneration, snapshot.generation);
-			return true;
 		},
 		nextGeneration() {
 			reservedGeneration += 1;

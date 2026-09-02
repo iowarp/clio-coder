@@ -3,23 +3,32 @@
  *
  * The extensions bundle owns the snapshot store and the middleware bundle
  * owns the registration table; neither knows the other exists. This module
- * is the only writer of both for the "user-hooks" owner, and it sequences
- * them so an observer can never see resources from one generation paired
- * with hooks from another:
+ * is the only writer of both for the "user-hooks" owner and the only caller
+ * of the extensions reload, and it sequences them so no observer can see
+ * resources from one generation paired with hooks from another:
  *
- *   1. prepare the extension candidate (build, validate, reserve generation);
- *   2. build the user-hook registrations from that candidate's captured
- *      declarations plus the project files;
- *   3. prepare the middleware replacement (validate, build the list);
- *   4. commit both with two reference assignments on one stack, with no
- *      await, callback, event, or logging between them;
- *   5. only then emit the reload event and report issues.
+ *   1. capture and canonicalize the workspace once;
+ *   2. prepare the extension candidate (build, validate, reserve generation)
+ *      and require its snapshot to be for that exact workspace;
+ *   3. build the user-hook registrations from the candidate's captured
+ *      declarations plus the project files under that workspace;
+ *   4. prepare the middleware replacement (validate, build the next state);
+ *   5. confirm both prepared states are still current, then publish both
+ *      with two assignment-only calls in adjacent statements;
+ *   6. only then emit conflicts, the reload event, and issue lines.
  *
- * Any failure before step 4 discards whatever was prepared and leaves both
- * committed generations untouched. Everything here is synchronous; the
- * reentrancy guard exists for a caller that re-enters from a callback.
+ * Neither publish primitive validates, refuses, throws, or calls out, so a
+ * partial publication is impossible by construction: every failure or stale
+ * state is detected before step 5 and discards both prepared states. Boot
+ * uses the same path, so the first extension generation and the first hook
+ * set become live together; before that, readers take the ephemeral
+ * generation-0 path. Everything here is synchronous; the reentrancy guard
+ * exists for a caller that re-enters from a callback.
  */
 
+import { realpathSync } from "node:fs";
+import path from "node:path";
+import type { ExtensionsReloadedPayload } from "../core/bus-events.js";
 import type {
 	ExtensionReloadCommitted,
 	ExtensionReloadRejection,
@@ -30,19 +39,13 @@ import { EXTENSION_SNAPSHOT_DIAGNOSTIC_MESSAGE_CAP } from "../domains/extensions
 import {
 	type BuildUserHookRegistrationsResult,
 	buildUserHookRegistrations,
-	type ExtensionHookSnapshotView,
+	type CapturedHookSourceSet,
 	type HookReceiptSink,
 	type MiddlewareContract,
 	type MiddlewareRegistrationConflict,
 	type UserHookCommandRunner,
 } from "../domains/middleware/index.js";
-
-export interface ExtensionsReloadedEvent {
-	generation: number;
-	previousGeneration: number;
-	changed: boolean;
-	digest: string;
-}
+import { capturedHookSourcesFor } from "./extension-hook-sources.js";
 
 export interface ExtensionReloadHookSummary {
 	/** Registrations published for the owner in this generation. */
@@ -59,21 +62,26 @@ export type ExtensionReloadOutcome =
 
 export interface ExtensionReloadCoordinatorDeps {
 	/** Absent on a degraded boot where the extensions domain failed to start. */
-	extensions: Pick<ExtensionsContract, "prepareReload" | "commitReload" | "discardReload" | "snapshot"> | undefined;
+	extensions: Pick<ExtensionsContract, "prepareReload" | "snapshot"> | undefined;
 	middleware: Pick<MiddlewareContract, "prepareRegistrationReplacement" | "replaceRegistrations" | "ownedGeneration">;
+	/** Read once per run and canonicalized; the candidate must be for exactly this workspace. */
 	cwd: () => string;
 	recordReceipt: HookReceiptSink;
 	runCommand?: UserHookCommandRunner;
 	now?: () => number;
 	/** One operator line per issue; stderr in headless runs, dropped or noticed by the host in interactive runs. */
 	report: (line: string) => void;
-	/** Called once per committed reload, after both references are published. */
-	onCommitted?: (event: ExtensionsReloadedEvent) => void;
+	/** Called once per published generation, after both references are live. */
+	onCommitted?: (event: ExtensionsReloadedPayload) => void;
 }
 
 export interface ExtensionReloadCoordinator {
-	/** Boot: publish user hooks for the generation the extensions bundle committed at start. */
-	applyCurrent(): BuildUserHookRegistrationsResult;
+	/**
+	 * Boot: publish generation 1 and its user hooks together. On a rejected
+	 * build, or without an extensions domain, the project's own hooks are
+	 * published under generation 1 and no extension generation exists.
+	 */
+	applyBoot(): ExtensionReloadOutcome;
 	/** Operator or programmatic reload. Synchronous and never throws. */
 	reload(): ExtensionReloadOutcome;
 }
@@ -111,10 +119,11 @@ function issueLines(
 export function createExtensionReloadCoordinator(deps: ExtensionReloadCoordinatorDeps): ExtensionReloadCoordinator {
 	let inFlight = false;
 
-	const build = (snapshot: ExtensionHookSnapshotView | null): BuildUserHookRegistrationsResult =>
+	const build = (workspace: string, captured: CapturedHookSourceSet | null): BuildUserHookRegistrationsResult =>
 		buildUserHookRegistrations({
-			cwd: deps.cwd(),
-			...(snapshot !== null ? { extensionSnapshot: snapshot } : {}),
+			cwd: workspace,
+			workspaceRoot: workspace,
+			...(captured !== null ? { capturedSources: captured } : {}),
 			recordReceipt: deps.recordReceipt,
 			...(deps.runCommand !== undefined ? { runCommand: deps.runCommand } : {}),
 			...(deps.now !== undefined ? { now: deps.now } : {}),
@@ -130,28 +139,57 @@ export function createExtensionReloadCoordinator(deps: ExtensionReloadCoordinato
 		}
 	};
 
-	return {
-		applyCurrent() {
-			const snapshot = deps.extensions?.snapshot() ?? null;
-			const built = build(snapshot);
-			// A degraded boot without an extensions domain still publishes the
-			// project's own hooks under generation 1; nothing will ever reload it.
-			const report = deps.middleware.replaceRegistrations("user-hooks", snapshot?.generation ?? 1, built.registrations);
-			const lines = issueLines(built, report.dropped);
-			if (!report.applied) lines.push(`[clio-coder:hooks] user hooks were not applied: ${report.reason ?? "refused"}`);
-			emitLines(lines);
-			return built;
-		},
-		reload() {
-			const rejected = (
-				rejection: ExtensionReloadRejection,
-				lines: ReadonlyArray<string> = [],
-			): ExtensionReloadOutcome => {
-				const all = [...lines, ...rejection.diagnostics.entries.map((entry) => `[clio-coder:extensions] ${entry.message}`)];
-				emitLines(all);
-				return { ...rejection, lines: all.slice(0, EXTENSION_RELOAD_REPORT_LINE_CAP) };
-			};
+	const rejected = (rejection: ExtensionReloadRejection): ExtensionReloadOutcome => {
+		const lines = rejection.diagnostics.entries.map((entry) => `[clio-coder:extensions] ${entry.message}`);
+		emitLines(lines);
+		return { ...rejection, lines: lines.slice(0, EXTENSION_RELOAD_REPORT_LINE_CAP) };
+	};
+
+	const canonicalWorkspace = (): string | null => {
+		try {
+			return realpathSync(path.resolve(deps.cwd()));
+		} catch {
+			return null;
+		}
+	};
+
+	/**
+	 * Degraded boot: no extension generation will ever exist, so the project's
+	 * own hooks are published alone under generation 1. Readers keep taking
+	 * the ephemeral path, which pairs no generation with no generation.
+	 */
+	const publishProjectHooksOnly = (workspace: string): void => {
+		if (deps.middleware.ownedGeneration("user-hooks") !== 0) return;
+		const built = build(workspace, null);
+		const report = deps.middleware.replaceRegistrations("user-hooks", 1, built.registrations);
+		const lines = issueLines(built, report.dropped);
+		if (!report.applied) lines.push(`[clio-coder:hooks] project hooks were not applied: ${report.reason ?? "refused"}`);
+		emitLines(lines);
+	};
+
+	const run = (boot: boolean): ExtensionReloadOutcome => {
+		const activeGeneration = deps.extensions?.snapshot()?.generation ?? 0;
+		if (inFlight) {
+			return rejected({
+				status: "rejected",
+				reason: "reentrant",
+				generation: activeGeneration,
+				diagnostics: { entries: [], truncated: 0 },
+			});
+		}
+		inFlight = true;
+		try {
+			const workspace = canonicalWorkspace();
+			if (workspace === null) {
+				return rejected({
+					status: "rejected",
+					reason: "build-failed",
+					generation: activeGeneration,
+					diagnostics: failure("the working directory could not be resolved"),
+				});
+			}
 			if (deps.extensions === undefined) {
+				if (boot) publishProjectHooksOnly(workspace);
 				return rejected({
 					status: "rejected",
 					reason: "build-failed",
@@ -159,97 +197,104 @@ export function createExtensionReloadCoordinator(deps: ExtensionReloadCoordinato
 					diagnostics: failure("extensions domain is not loaded; restart to recover it"),
 				});
 			}
-			if (inFlight) {
+			const prepared = deps.extensions.prepareReload();
+			if (prepared.status === "rejected") {
+				if (boot) publishProjectHooksOnly(workspace);
+				return rejected(prepared);
+			}
+			const candidate = prepared.candidate;
+			if (candidate.snapshot.cwd !== workspace) {
+				candidate.discard();
 				return rejected({
 					status: "rejected",
-					reason: "reentrant",
-					generation: deps.extensions.snapshot()?.generation ?? 0,
-					diagnostics: { entries: [], truncated: 0 },
+					reason: "workspace-changed",
+					generation: candidate.previousGeneration,
+					diagnostics: failure(
+						`extension snapshot was built for ${candidate.snapshot.cwd} but the session workspace is ${workspace}`,
+					),
 				});
 			}
-			inFlight = true;
+			let built: BuildUserHookRegistrationsResult;
 			try {
-				const prepared = deps.extensions.prepareReload();
-				if (prepared.status === "rejected") return rejected(prepared);
-				const candidate = prepared.candidate;
-				let built: BuildUserHookRegistrationsResult;
-				try {
-					built = build(candidate.snapshot);
-				} catch (error) {
-					deps.extensions.discardReload(candidate);
-					return rejected({
-						status: "rejected",
-						reason: "build-failed",
-						generation: candidate.previousGeneration,
-						diagnostics: failure(
-							`user hook registrations could not be built: ${error instanceof Error ? error.message : String(error)}`,
-						),
-					});
-				}
-				const replacement = deps.middleware.prepareRegistrationReplacement(
-					"user-hooks",
-					candidate.generation,
-					built.registrations,
-				);
-				if (replacement.status === "rejected") {
-					deps.extensions.discardReload(candidate);
-					return rejected({
-						status: "rejected",
-						reason: "stale",
-						generation: candidate.previousGeneration,
-						diagnostics: failure(
-							`middleware refused generation ${candidate.generation} (${replacement.reason}; active ${replacement.activeGeneration})`,
-						),
-					});
-				}
-				// Everything is validated. From here to the end of the two commits
-				// nothing may await, emit, log, or call user code.
-				if (!replacement.replacement.current()) {
-					replacement.replacement.discard();
-					deps.extensions.discardReload(candidate);
-					return rejected({
-						status: "rejected",
-						reason: "stale",
-						generation: candidate.previousGeneration,
-						diagnostics: failure(`middleware generation moved before generation ${candidate.generation} could commit`),
-					});
-				}
-				const committed = deps.extensions.commitReload(candidate);
-				if (committed.status !== "committed") {
-					replacement.replacement.discard();
-					return rejected(committed);
-				}
-				const applied = replacement.replacement.commit();
-				// Both references are published. Observers may run from here on.
-				const lines = issueLines(built, applied.dropped);
-				if (!applied.applied) {
-					// Unreachable while both commits are synchronous: current() was
-					// true one statement earlier. Reported rather than swallowed.
-					lines.push(
-						`[clio-coder:hooks] invariant violation: middleware refused generation ${candidate.generation} after the extension commit (${applied.reason ?? "refused"})`,
-					);
-				}
-				deps.onCommitted?.({
-					generation: committed.generation,
-					previousGeneration: committed.previousGeneration,
-					changed: committed.changed,
-					digest: committed.digest,
+				built = build(workspace, capturedHookSourcesFor(candidate.snapshot));
+			} catch (error) {
+				candidate.discard();
+				return rejected({
+					status: "rejected",
+					reason: "build-failed",
+					generation: candidate.previousGeneration,
+					diagnostics: failure(
+						`user hook registrations could not be built: ${error instanceof Error ? error.message : String(error)}`,
+					),
 				});
-				emitLines(lines);
-				return {
-					...committed,
-					hooks: {
-						registered: applied.applied ? built.registrations.length - applied.dropped.length : 0,
-						dropped: applied.dropped.length,
-						fileIssues: built.fileIssues.length,
-						issues: built.issues.length,
-						overridden: built.overridden.length,
-					},
-					lines: lines.slice(0, EXTENSION_RELOAD_REPORT_LINE_CAP),
-				};
-			} finally {
-				inFlight = false;
 			}
-		},
+			const preparedReplacement = deps.middleware.prepareRegistrationReplacement(
+				"user-hooks",
+				candidate.generation,
+				built.registrations,
+			);
+			if (preparedReplacement.status === "rejected") {
+				candidate.discard();
+				return rejected({
+					status: "rejected",
+					reason: "stale",
+					generation: candidate.previousGeneration,
+					diagnostics: failure(
+						`middleware refused generation ${candidate.generation} (${preparedReplacement.reason}; active ${preparedReplacement.activeGeneration})`,
+					),
+				});
+			}
+			const replacement = preparedReplacement.replacement;
+			// Final freshness validation. After this point neither primitive can
+			// refuse, so a stale side here discards both and publishes neither.
+			if (!candidate.current() || !replacement.current()) {
+				replacement.discard();
+				candidate.discard();
+				return rejected({
+					status: "rejected",
+					reason: "stale",
+					generation: candidate.previousGeneration,
+					diagnostics: failure(`generation ${candidate.generation} was superseded before it could be published`),
+				});
+			}
+			candidate.publish();
+			replacement.publish();
+			// Both references are live. Observers may run from here on.
+			replacement.emitConflicts();
+			deps.onCommitted?.({
+				generation: candidate.generation,
+				previousGeneration: candidate.previousGeneration,
+				changed: candidate.changed,
+				digest: candidate.snapshot.digest,
+			});
+			const lines = issueLines(built, replacement.dropped);
+			emitLines(lines);
+			return {
+				status: "committed",
+				generation: candidate.generation,
+				previousGeneration: candidate.previousGeneration,
+				changed: candidate.changed,
+				digest: candidate.snapshot.digest,
+				added: candidate.added,
+				removed: candidate.removed,
+				modified: candidate.modified,
+				diagnostics: candidate.snapshot.diagnostics,
+				hooks: {
+					registered: replacement.size,
+					dropped: replacement.dropped.length,
+					fileIssues: built.fileIssues.length,
+					issues: built.issues.length,
+					overridden: built.overridden.length,
+				},
+				lines: lines.slice(0, EXTENSION_RELOAD_REPORT_LINE_CAP),
+			};
+		} finally {
+			inFlight = false;
+		}
+	};
+
+	return {
+		applyBoot: () => run(true),
+		reload: () => run(false),
 	};
 }

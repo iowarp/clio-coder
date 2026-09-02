@@ -8,10 +8,11 @@
  *   - `<extensionRoot>/hooks.yaml`  hooks shipped by an installed extension.
  *
  * Project files are read from disk here. Extension declarations are never
- * read here: they arrive already parsed from the extension snapshot, which
- * captured the bytes during install-digest verification, so a hooks.yaml
- * rewritten after verification cannot be admitted until the next generation
- * re-verifies the tree.
+ * read here: they arrive already parsed as a captured source set that the
+ * composition root adapts from the extension snapshot, which captured the
+ * bytes during install-digest verification, so a hooks.yaml rewritten after
+ * verification cannot be admitted until the next generation re-verifies the
+ * tree. Middleware never sees extension-domain types.
  *
  * Reads are best-effort: a missing file is skipped silently, and a malformed
  * file is reported as an issue without aborting anything.
@@ -25,7 +26,6 @@ import {
 	reportCommitAttributionDiagnostic,
 	withManagedGitCommitAttributionEnvironment,
 } from "../../core/git-commit-attribution.js";
-import type { ExtensionHookSource } from "../extensions/index.js";
 import {
 	type HookReceiptSink,
 	loadUserHooks,
@@ -33,6 +33,7 @@ import {
 	type UserHookCommandRunner,
 	type UserHookDeclarationBatch,
 	type UserHookLoadResult,
+	type UserHookPackageProvenance,
 	type UserHookSource,
 	userHookToRegistration,
 } from "./hooks.js";
@@ -50,17 +51,27 @@ export interface ReadHookSourcesResult {
 	fileIssues: HookFileIssue[];
 }
 
-/** The captured hook declarations of one extension snapshot generation. */
-export interface ExtensionHookSnapshotView {
+/** One package's hook declarations, captured by the supplier from verified bytes. */
+export interface CapturedHookDeclarations {
+	provenance: UserHookPackageProvenance;
+	/** SHA-256 of the captured hooks.yaml bytes. */
+	declarationsDigest: string;
+	/** Parsed declarations, or an empty list when parsing failed. */
+	declarations: unknown;
+	parseError?: string;
+}
+
+/** The captured declarations of one supplier generation. */
+export interface CapturedHookSourceSet {
 	/** 0 for an ephemeral (uncommitted) build. */
 	generation: number;
-	hookSources: ReadonlyArray<ExtensionHookSource>;
+	sources: ReadonlyArray<CapturedHookDeclarations>;
 }
 
 export interface ReadHookSourcesOptions {
 	cwd: string;
 	/** Captured extension declarations; absent means no extension hooks. */
-	extensionSnapshot?: ExtensionHookSnapshotView;
+	capturedSources?: CapturedHookSourceSet;
 }
 
 function readBatch(
@@ -95,23 +106,23 @@ export function readHookSources(options: ReadHookSourcesOptions): ReadHookSource
 	const fileIssues: HookFileIssue[] = [];
 	const batches: UserHookDeclarationBatch[] = [];
 
-	const snapshot = options.extensionSnapshot;
-	for (const captured of snapshot?.hookSources ?? []) {
+	const captured = options.capturedSources;
+	for (const entry of captured?.sources ?? []) {
 		const source: UserHookSource = {
 			origin: "extension",
-			sourcePath: `${captured.provenance.id}:hooks.yaml`,
-			sourceId: captured.provenance.id,
+			sourcePath: `${entry.provenance.id}:hooks.yaml`,
+			sourceId: entry.provenance.id,
 			extension: {
-				provenance: captured.provenance,
-				generation: snapshot?.generation ?? 0,
-				declarationsDigest: captured.declarationsDigest,
+				provenance: entry.provenance,
+				generation: captured?.generation ?? 0,
+				declarationsDigest: entry.declarationsDigest,
 			},
 		};
-		if (captured.parseError !== undefined) {
-			fileIssues.push({ source, message: `failed to parse ${source.sourcePath}: ${captured.parseError}` });
+		if (entry.parseError !== undefined) {
+			fileIssues.push({ source, message: `failed to parse ${source.sourcePath}: ${entry.parseError}` });
 			continue;
 		}
-		batches.push({ source, declarations: captured.declarations });
+		batches.push({ source, declarations: entry.declarations });
 	}
 
 	const projectBatch = readBatch(
@@ -135,7 +146,7 @@ export interface BuildUserHookRegistrationsOptions {
 	cwd: string;
 	/** Absolute workspace root a command `cwd` must resolve under; defaults to `cwd`. */
 	workspaceRoot?: string;
-	extensionSnapshot?: ExtensionHookSnapshotView;
+	capturedSources?: CapturedHookSourceSet;
 	recordReceipt: HookReceiptSink;
 	/** Injected for tests; defaults to the spawnSync runner. */
 	runCommand?: UserHookCommandRunner;
@@ -152,7 +163,7 @@ export interface BuildUserHookRegistrationsResult extends UserHookLoadResult {
  * Read project files, merge them with the captured extension declarations,
  * normalize, and build one registration per admitted hook. Pure with respect
  * to the middleware contract: the caller decides when the set is published,
- * which is what lets extension and hook state commit on one stack. The
+ * which is what lets extension and hook state publish on one stack. The
  * returned hooks and issues feed `clio-coder config inspect`. Best-effort
  * throughout: a malformed file or hook is reported, never thrown.
  */
@@ -161,7 +172,7 @@ export function buildUserHookRegistrations(
 ): BuildUserHookRegistrationsResult {
 	const workspaceRoot = options.workspaceRoot ?? options.cwd;
 	const readOptions: ReadHookSourcesOptions = { cwd: options.cwd };
-	if (options.extensionSnapshot !== undefined) readOptions.extensionSnapshot = options.extensionSnapshot;
+	if (options.capturedSources !== undefined) readOptions.capturedSources = options.capturedSources;
 	const { batches, fileIssues } = readHookSources(readOptions);
 	const loaded = loadUserHooks(batches, { workspaceRoot });
 	const runCommand = options.runCommand ?? spawnSyncCommandRunner();

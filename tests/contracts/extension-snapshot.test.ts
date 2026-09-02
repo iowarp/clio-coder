@@ -125,18 +125,19 @@ describe("extension snapshot contract", () => {
 		]);
 	});
 
-	it("commits only strictly newer snapshots and never reuses reservations", () => {
+	it("reserves generations monotonically and publishes by plain assignment", () => {
 		const project = scratch();
 		installFixture(project);
 		const store = createExtensionSnapshotStore();
+		strictEqual(store.current(), null);
 		const one = buildExtensionSnapshot({ cwd: project, generation: store.nextGeneration() });
 		strictEqual(one.generation, 1);
-		strictEqual(store.commit(one), true);
-		strictEqual(store.commit(one), false);
+		strictEqual(store.publish(one), undefined, "publish returns nothing and cannot refuse");
+		strictEqual(store.current(), one);
 		strictEqual(store.nextGeneration(), 2);
-		strictEqual(store.nextGeneration(), 3, "a discarded candidate burns generation 2");
+		strictEqual(store.nextGeneration(), 3, "a discarded reservation burns generation 2");
 		const three = buildExtensionSnapshot({ cwd: project, generation: 3 });
-		strictEqual(store.commit(three), true);
+		store.publish(three);
 		strictEqual(store.current(), three);
 	});
 
@@ -147,7 +148,7 @@ describe("extension snapshot contract", () => {
 		installFixture(secondProject, "ephemeral-two");
 		const store = createExtensionSnapshotStore();
 		const committed = buildExtensionSnapshot({ cwd: firstProject, generation: 7 });
-		strictEqual(store.commit(committed), true);
+		store.publish(committed);
 		bindExtensionSnapshotStore(store);
 		deepStrictEqual(
 			enabledExtensionResourceRoots("skills", firstProject).map((root) => [root.id, root.generation]),
@@ -193,7 +194,16 @@ describe("extension reload generations", () => {
 		for (const root of roots.splice(0)) rmSync(root, { recursive: true, force: true });
 	});
 
-	it("boots at generation one, increments per commit, and burns rejected reservations", () => {
+	function publish(bundle: ReturnType<typeof createExtensionsBundle>) {
+		const prepared = bundle.contract.prepareReload();
+		strictEqual(prepared.status, "prepared");
+		if (prepared.status !== "prepared") throw new Error("expected a prepared candidate");
+		ok(prepared.candidate.current());
+		prepared.candidate.publish();
+		return prepared.candidate;
+	}
+
+	it("publishes nothing at start, then increments per publish and burns rejected reservations", () => {
 		const project = scratch();
 		installFixture(project);
 		let failNextBuild = false;
@@ -208,21 +218,21 @@ describe("extension reload generations", () => {
 			},
 		});
 		bundle.extension.start();
-		const boot = bundle.contract.snapshot();
-		ok(boot);
+		strictEqual(bundle.contract.snapshot(), null, "start binds an empty store and publishes nothing");
+		strictEqual(bundle.contract.generation(), 0);
+		strictEqual(enabledExtensionResourceRoots("skills", project)[0]?.generation, 0, "readers take the ephemeral path");
+		const boot = publish(bundle);
 		strictEqual(boot.generation, 1);
+		strictEqual(boot.previousGeneration, 0);
+		strictEqual(boot.changed, true);
+		strictEqual(bundle.contract.snapshot(), boot.snapshot);
 		for (const expected of [2, 3, 4]) {
-			const prepared = bundle.contract.prepareReload();
-			strictEqual(prepared.status, "prepared");
-			if (prepared.status !== "prepared") return;
-			const committed = bundle.contract.commitReload(prepared.candidate);
-			strictEqual(committed.status, "committed");
-			if (committed.status !== "committed") return;
-			strictEqual(committed.generation, expected);
-			strictEqual(committed.previousGeneration, expected - 1);
-			strictEqual(committed.changed, false, "an unchanged tree commits a new generation with changed=false");
-			strictEqual(committed.digest, boot.digest);
-			deepStrictEqual([committed.added, committed.removed, committed.modified], [[], [], []]);
+			const candidate = publish(bundle);
+			strictEqual(candidate.generation, expected);
+			strictEqual(candidate.previousGeneration, expected - 1);
+			strictEqual(candidate.changed, false, "an unchanged tree publishes a new generation with changed=false");
+			strictEqual(candidate.snapshot.digest, boot.snapshot.digest);
+			deepStrictEqual([candidate.added, candidate.removed, candidate.modified], [[], [], []]);
 		}
 		failNextBuild = true;
 		const rejected = bundle.contract.prepareReload();
@@ -232,21 +242,18 @@ describe("extension reload generations", () => {
 		strictEqual(rejected.generation, 4);
 		strictEqual(rejected.diagnostics.entries[0]?.message, "simulated listing failure");
 		strictEqual(bundle.contract.generation(), 4);
-		const recovered = bundle.contract.prepareReload();
-		strictEqual(recovered.status, "prepared");
-		if (recovered.status !== "prepared") return;
-		strictEqual(recovered.candidate.generation, 6, "the failed candidate burned generation 5");
-		strictEqual(bundle.contract.commitReload(recovered.candidate).status, "committed");
+		const recovered = publish(bundle);
+		strictEqual(recovered.generation, 6, "the failed candidate burned generation 5");
 		strictEqual(bundle.contract.generation(), 6);
 		bundle.extension.stop?.();
 	});
 
-	it("refuses reentrant prepares and stale commits without touching the committed generation", () => {
+	it("refuses reentrant prepares and reports stale candidates as not current without touching the committed generation", () => {
 		const project = scratch();
 		installFixture(project);
 		const bundle = createExtensionsBundle(domainContext, { cwd: () => project });
 		bundle.extension.start();
-		const committedAtBoot = bundle.contract.snapshot();
+		const boot = publish(bundle);
 		const first = bundle.contract.prepareReload();
 		strictEqual(first.status, "prepared");
 		if (first.status !== "prepared") return;
@@ -257,42 +264,36 @@ describe("extension reload generations", () => {
 			generation: 1,
 			diagnostics: { entries: [], truncated: 0 },
 		});
-		bundle.contract.discardReload(first.candidate);
-		const staleAfterDiscard = bundle.contract.commitReload(first.candidate);
-		strictEqual(staleAfterDiscard.status, "rejected");
-		if (staleAfterDiscard.status !== "rejected") return;
-		strictEqual(staleAfterDiscard.reason, "stale");
-		strictEqual(bundle.contract.snapshot(), committedAtBoot);
+		strictEqual(first.candidate.current(), true);
+		first.candidate.discard();
+		strictEqual(first.candidate.current(), false, "a discarded candidate is never current again");
+		strictEqual(bundle.contract.snapshot(), boot.snapshot);
 
 		const second = bundle.contract.prepareReload();
 		strictEqual(second.status, "prepared");
 		if (second.status !== "prepared") return;
 		strictEqual(second.candidate.generation, 3, "the discarded candidate burned generation 2");
-		const foreign = { ...second.candidate, snapshot: buildExtensionSnapshot({ cwd: project, generation: 99 }) };
 		strictEqual(
-			bundle.contract.commitReload(foreign).status,
-			"rejected",
-			"a candidate the bundle did not prepare is stale",
+			first.candidate.current(),
+			false,
+			"an older candidate cannot become current once a newer one is in flight",
 		);
-		strictEqual(bundle.contract.snapshot(), committedAtBoot);
-		strictEqual(bundle.contract.commitReload(second.candidate).status, "committed");
+		strictEqual(second.candidate.current(), true);
+		second.candidate.publish();
 		strictEqual(bundle.contract.snapshot(), second.candidate.snapshot);
-		const twice = bundle.contract.commitReload(second.candidate);
-		strictEqual(twice.status, "rejected");
-		if (twice.status !== "rejected") return;
-		strictEqual(twice.reason, "stale");
+		strictEqual(second.candidate.current(), false, "a published candidate is settled");
 		strictEqual(bundle.contract.generation(), 3);
 		bundle.extension.stop?.();
 	});
 
-	it("publishes a prepared candidate only at commit and readers see one generation at a time", () => {
+	it("publishes a prepared candidate only at publish and readers see one generation at a time", () => {
 		const project = scratch();
 		const other = scratch();
 		installFixture(project, "alpha");
 		installFixture(other, "elsewhere");
 		const bundle = createExtensionsBundle(domainContext, { cwd: () => project });
 		bundle.extension.start();
-		const bootSnapshot = bundle.contract.snapshot();
+		const boot = publish(bundle);
 		const readerBefore = bundle.contract.resourceRoots("skills");
 		deepStrictEqual(
 			readerBefore.map((root) => [root.id, root.generation]),
@@ -304,12 +305,13 @@ describe("extension reload generations", () => {
 		if (prepared.status !== "prepared") return;
 		strictEqual(prepared.candidate.changed, true);
 		deepStrictEqual(prepared.candidate.added, ["beta"]);
-		strictEqual(bundle.contract.snapshot(), bootSnapshot, "prepare publishes nothing");
+		strictEqual(bundle.contract.snapshot(), boot.snapshot, "prepare publishes nothing");
 		deepStrictEqual(
 			bundle.contract.resourceRoots("skills").map((root) => [root.id, root.generation]),
 			[["alpha", 1]],
 		);
-		strictEqual(bundle.contract.commitReload(prepared.candidate).status, "committed");
+		ok(prepared.candidate.current());
+		prepared.candidate.publish();
 		const readerAfter = bundle.contract.resourceRoots("skills");
 		deepStrictEqual(
 			readerAfter.map((root) => [root.id, root.generation]),
@@ -321,7 +323,7 @@ describe("extension reload generations", () => {
 		deepStrictEqual(
 			readerBefore.map((root) => [root.id, root.generation]),
 			[["alpha", 1]],
-			"a projection captured before the commit is untouched",
+			"a projection captured before the publish is untouched",
 		);
 		for (const roots of [readerBefore, readerAfter]) {
 			strictEqual(new Set(roots.map((root) => root.generation)).size, 1, "no reader mixes generations");

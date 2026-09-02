@@ -1314,11 +1314,13 @@ export async function bootOrchestrator(options: BootOptions = {}): Promise<BootR
 	// authoritative: a hook may add effects (including request block_tool) but
 	// cannot grant a permission safety would deny. Loading is best-effort.
 	// The coordinator is the only writer of the "user-hooks" owner and the only
-	// caller of the extensions reload; it commits the extension generation and
-	// the hook registrations back-to-back on one stack and publishes
-	// extensions.reloaded only after both. Its owner slot is anchored here, so
-	// user hooks keep evaluating after the guards and before the assessors
-	// registered below.
+	// caller of the extensions reload; it publishes the extension generation
+	// and the hook registrations with two adjacent assignments on one stack
+	// and emits extensions.reloaded only after both. The boot generation is
+	// published here too (the extensions bundle publishes nothing at start),
+	// so no consumer ever sees extension resources paired with hooks from a
+	// different generation. The owner slot is anchored here, so user hooks
+	// keep evaluating after the guards and before the assessors below.
 	const hookReceiptLog = createHookReceiptLog({ persistPath: join(clioStateDir(), "hook-receipts.json") });
 	const extensionReload = createExtensionReloadCoordinator({
 		extensions,
@@ -1330,7 +1332,7 @@ export async function bootOrchestrator(options: BootOptions = {}): Promise<BootR
 		},
 		onCommitted: (event) => bus.emit(BusChannels.ExtensionsReloaded, event),
 	});
-	extensionReload.applyCurrent();
+	extensionReload.applyBoot();
 	termination.onDrain(() => hookReceiptLog.flush());
 	// Autonomy is hot-reloaded for interactive and headless admissions. ACP
 	// server prompts use the snapshot captured at session/new.

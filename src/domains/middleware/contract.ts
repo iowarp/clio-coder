@@ -41,8 +41,8 @@ export interface MiddlewareContract {
 	 * Validate an owner's replacement registration set against the current
 	 * builtin and host ids and build its evaluation list without publishing.
 	 * Rejected when `generation` is not strictly greater than the owner's
-	 * active generation. The returned replacement commits with one reference
-	 * assignment that never throws, so a composition root can publish it
+	 * active generation. The returned replacement publishes with one reference
+	 * assignment that cannot refuse or call out, so a composition root can publish it
 	 * back-to-back with another domain's generation on the same stack.
 	 */
 	prepareRegistrationReplacement(
@@ -50,7 +50,7 @@ export interface MiddlewareContract {
 		generation: number,
 		registrations: ReadonlyArray<MiddlewareHookRegistration>,
 	): PrepareRegistrationReplacementResult;
-	/** prepareRegistrationReplacement followed by commit. */
+	/** Prepare, check currentness, publish, then emit any conflict diagnostics. */
 	replaceRegistrations(
 		owner: MiddlewareRegistrationOwner,
 		generation: number,
