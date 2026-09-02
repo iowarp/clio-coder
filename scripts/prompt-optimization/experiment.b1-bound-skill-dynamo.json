@@ -1,0 +1,55 @@
+{
+	"schema": "clio.eval.prompt-ab.config.v1",
+	"harnessVersion": 1,
+	"experimentId": "v042-b1-bound-skill",
+	"seed": 20260904,
+	"repetitions": 5,
+	"corpus": "development",
+	"phase": "tuning",
+	"strata": ["cold", "warm"],
+	"arms": [
+		{
+			"id": "A",
+			"label": "B0 integrated production baseline v0.4.2 (d7a7fc69)",
+			"checkout": "/tmp/clio-ab-arm-base",
+			"entry": "dist/cli/index.js",
+			"commit": "d7a7fc69"
+		},
+		{
+			"id": "B",
+			"label": "B1 bound worker loads its bound skills before editing (9bd52491)",
+			"checkout": "/tmp/clio-ab-arm-b1",
+			"entry": "dist/cli/index.js",
+			"commit": "9bd52491"
+		}
+	],
+	"pinned": {
+		"target": "dynamo",
+		"model": "qwen3.8-27b",
+		"runtime": "lmstudio",
+		"thinking": "medium",
+		"autonomy": "auto-edit",
+		"toolProfile": null,
+		"maxContextTokens": 262144,
+		"kvCacheMode": "f16",
+		"sampling": {
+			"temperature": 0.0,
+			"topP": 1.0,
+			"topK": 0,
+			"minP": 0.0,
+			"repeatPenalty": 1.0,
+			"presencePenalty": 0.0,
+			"frequencyPenalty": 0.0
+		},
+		"serverConcurrency": 1,
+		"targetUrl": "http://192.168.86.143:1234"
+	},
+	"warm": {
+		"prefixTurns": [
+			"You are about to help with a small task in this repository. Do not take any action yet; reply with the single word ready."
+		]
+	},
+	"outDir": "/tmp/clio-prompt-ab-runs/v042-b1-bound-skill",
+	"coldResetSettleMs": 2000,
+	"coldResetCommand": null
+}
