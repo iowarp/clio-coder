@@ -1,7 +1,7 @@
 import { strictEqual } from "node:assert/strict";
 import { describe, it } from "node:test";
-import { resolveModelRuntimeCapabilities } from "../../src/domains/providers/model-runtime-capabilities.js";
 import { EMPTY_CAPABILITIES } from "../../src/domains/providers/index.js";
+import { resolveModelRuntimeCapabilities } from "../../src/domains/providers/model-runtime-capabilities.js";
 
 const effortLevelsQuirks = {
 	thinking: {
