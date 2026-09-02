@@ -1,7 +1,7 @@
 # Skills Marketplace
 
-> [!TIP]
-> **Interactive Spec Available:** A source-checkout dashboard is available at [docs/html/skills_blueprint.html](https://github.com/iowarp/clio-coder/blob/main/docs/html/skills_blueprint.html).
+> **Visual blueprint:** The source checkout includes the complete
+> [Skills Marketplace visual reference](https://github.com/iowarp/clio-coder/blob/main/docs/html/skills_blueprint.html).
 
 The Skills Hub (`/skill`) shows project skills, user skills, and the marketplace. Every marketplace row comes from the same local lookup that `clio-coder skills install <name>` and `/skill <name>` resolve through, so the hub lists nothing it cannot install.
 

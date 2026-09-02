@@ -1,442 +1,250 @@
-<!DOCTYPE html>
+<!doctype html>
 <html lang="en">
 <head>
-  <meta charset="UTF-8">
-  <meta name="viewport" content="width=device-width, initial-scale=1.0">
-  <title>Clio Coder - Session Lifecycle &amp; Ledger Blueprint</title>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <meta name="clio-markdown-source" content="docs/architecture/session-lifecycle.md">
+  <meta name="clio-docs-version" content="0.4.2">
+  <title>Session Lifecycle · Clio Coder 0.4.2</title>
+  <link rel="icon" href="data:,">
   <link rel="stylesheet" href="shared.css">
-  <style>
-    .tree-sim-container {
-      display: grid;
-      grid-template-columns: 1fr 1fr;
-      gap: 1.5rem;
-      margin-top: 1rem;
-    }
-    @media (max-width: 1024px) {
-      .tree-sim-container { grid-template-columns: 1fr; }
-    }
-    .tree-node-card {
-      background: rgba(0, 0, 0, 0.4);
-      border: 1px solid var(--border-card);
-      border-radius: 8px;
-      padding: 0.85rem;
-      margin-bottom: 0.75rem;
-      cursor: pointer;
-      transition: all 0.2s ease;
-    }
-    .tree-node-card:hover {
-      border-color: var(--color-cyan);
-      transform: translateX(4px);
-    }
-    .tree-node-card.active-path {
-      border-color: var(--color-emerald);
-      background: rgba(87, 227, 137, 0.08);
-    }
-    .tree-node-card.pinned {
-      border-color: var(--color-purple);
-      box-shadow: 0 0 12px rgba(157, 140, 255, 0.2);
-    }
-    .node-header {
-      display: flex;
-      justify-content: space-between;
-      align-items: center;
-      margin-bottom: 0.35rem;
-    }
-    .node-title {
-      font-weight: 700;
-      font-size: 0.9rem;
-      color: #fff;
-    }
-    .node-badge {
-      font-size: 0.7rem;
-      padding: 0.15rem 0.45rem;
-      border-radius: 4px;
-      font-family: var(--font-mono);
-    }
-    .node-desc {
-      font-size: 0.8rem;
-      color: var(--text-muted);
-      margin-bottom: 0.35rem;
-    }
-    .node-meta {
-      font-size: 0.75rem;
-      font-family: var(--font-mono);
-      color: var(--text-dim);
-    }
-  </style>
 </head>
-<body>
+<body data-doc-category="architecture">
+  <div class="reading-progress" aria-hidden="true"></div>
+  <a class="skip-link" href="#reference-content">Skip to reference</a>
   <div class="container">
-    <header>
+    <header class="document-header" data-category="Architecture">
       <div class="header-left">
-        <div class="header-logo">
-          <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" style="color: var(--color-cyan);"><title>Session Icon</title>
-            <circle cx="12" cy="12" r="10"></circle>
-            <polyline points="12 6 12 12 16 14"></polyline>
+        <a class="header-logo" href="index.html" aria-label="Documentation index">
+          <svg viewBox="0 0 24 24" fill="none" aria-hidden="true">
+            <path d="M12 2 2 7l10 5 10-5-10-5Z" stroke="url(#clio-logo)" stroke-width="2" stroke-linejoin="round"/>
+            <path d="m2 12 10 5 10-5M2 17l10 5 10-5" stroke="url(#clio-logo)" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"/>
+            <defs><linearGradient id="clio-logo" x1="2" y1="2" x2="22" y2="22"><stop stop-color="#00d4db"/><stop offset="1" stop-color="#ff7e29"/></linearGradient></defs>
           </svg>
-        </div>
+        </a>
         <div class="header-title-wrapper">
-          <h1>Session Lifecycle &amp; Ledger Blueprint</h1>
-          <p>On-disk ledger v3, directed conversation tree, /fork branching, streaming turn settlement, and recovery</p>
+          <p class="document-kicker">Architecture / canonical reference</p>
+          <h1>Session Lifecycle</h1>
+          <p class="document-path">docs/architecture/session-lifecycle.md</p>
         </div>
       </div>
       <div class="header-right">
-        <span class="version-badge">v0.4.0</span>
-        <a href="index.html" class="back-btn">
-          <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><title>Back Icon</title><line x1="19" y1="12" x2="5" y2="12"></line><polyline points="12 19 5 12 12 5"></polyline></svg>
-          Dashboard Hub
-        </a>
+        <a class="back-btn" href="index.html">← Index</a>
+        <span class="version-badge">v0.4.2</span>
       </div>
     </header>
-
-    <div class="page-layout-grid">
-      <nav class="sidebar" aria-label="Table of Contents">
-        <div class="toc-container">
-          <div class="toc-title">On This Page</div>
-          <ul class="toc-list">
-            <!-- Populated dynamically by shared.js -->
-          </ul>
-        </div>
-      </nav>
-
-      <main>
-        <div class="tabs-nav">
-          <button type="button" class="tab-btn active" onclick="switchTab('tree-sim')">
-            <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><title>Tree Icon</title><rect x="3" y="3" width="7" height="7"></rect><rect x="14" y="3" width="7" height="7"></rect><rect x="14" y="14" width="7" height="7"></rect><path d="M10 6.5h4M17.5 10v4"></path></svg>
-            Tree &amp; Lineage Simulator
-          </button>
-          <button type="button" class="tab-btn" onclick="switchTab('ledger-spec')">
-            <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><title>Ledger Icon</title><path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z"></path><polyline points="14 2 14 8 20 8"></polyline><line x1="16" y1="13" x2="8" y2="13"></line><line x1="16" y1="17" x2="8" y2="17"></line></svg>
-            Ledger &amp; Storage Architecture
-          </button>
-          <button type="button" class="tab-btn" onclick="switchTab('resumption-export')">
-            <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><title>Export Icon</title><path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"></path><polyline points="7 10 12 15 17 10"></polyline><line x1="12" y1="15" x2="12" y2="3"></line></svg>
-            Resumption, CWD &amp; Export
-          </button>
-        </div>
-
-        <!-- TAB 1: TREE & LINEAGE SIMULATOR -->
-        <div class="tab-pane active" id="pane-tree-sim">
-          <div class="glass-card">
-            <h2>Directed Conversation Tree &amp; Active-Path Lineage</h2>
-            <p>Clio Coder records conversation turns as a directed graph. Switching branches with <code>/tree</code> or creating child sessions with <code>/fork</code> isolates the active path without deleting historical entries.</p>
-          </div>
-
-          <div class="tree-sim-container">
-            <div class="specs-col">
-              <div class="glass-card">
-                <h3>Conversation Tree Graph</h3>
-                <p>Click any turn to simulate selecting/pinning active leaf:</p>
-
-                <div id="treeNodeList">
-                  <div class="tree-node-card active-path" onclick="selectTreeNode('turn-1')">
-                    <div class="node-header">
-                      <span class="node-title">Turn 1: Root Prompt</span>
-                      <span class="node-badge" style="background: rgba(70,229,208,0.2); color: var(--color-cyan);">user</span>
-                    </div>
-                    <div class="node-desc">"Analyze codebase boundary and types"</div>
-                    <div class="node-meta">ID: 01912a34-0001 &middot; Parent: null</div>
-                  </div>
-
-                  <div class="tree-node-card active-path" onclick="selectTreeNode('turn-2')">
-                    <div class="node-header">
-                      <span class="node-title">Turn 2: Tool Execution</span>
-                      <span class="node-badge" style="background: rgba(157,140,255,0.2); color: var(--color-purple);">tool_call</span>
-                    </div>
-                    <div class="node-desc">read_file("src/engine/session.ts")</div>
-                    <div class="node-meta">ID: 01912a34-0002 &middot; Parent: 01912a34-0001</div>
-                  </div>
-
-                  <div class="tree-node-card active-path pinned" onclick="selectTreeNode('turn-3a')">
-                    <div class="node-header">
-                      <span class="node-title">Turn 3a: Branch A (Active)</span>
-                      <span class="node-badge" style="background: rgba(87,227,137,0.2); color: var(--color-emerald);">assistant</span>
-                    </div>
-                    <div class="node-desc">"Refactor session writer to debounce fsync"</div>
-                    <div class="node-meta">ID: 01912a34-0003a &middot; Parent: 01912a34-0002 &middot; <strong>[PINNED]</strong></div>
-                  </div>
-
-                  <div class="tree-node-card" onclick="selectTreeNode('turn-3b')">
-                    <div class="node-header">
-                      <span class="node-title">Turn 3b: Branch B (Alternate)</span>
-                      <span class="node-badge" style="background: rgba(255,180,84,0.2); color: var(--color-amber);">assistant</span>
-                    </div>
-                    <div class="node-desc">"Maintain synchronous flush per append"</div>
-                    <div class="node-meta">ID: 01912a34-0003b &middot; Parent: 01912a34-0002</div>
-                  </div>
-                </div>
-              </div>
-            </div>
-
-            <div class="specs-col">
-              <div class="glass-card">
-                <h3>Active Path Projection</h3>
-                <div id="pathProjectionOutput" style="font-family: var(--font-mono); font-size: 0.82rem; color: #fff; background: rgba(0,0,0,0.5); padding: 1rem; border-radius: 8px;">
-                  <div style="color: var(--color-emerald); font-weight: 700; margin-bottom: 0.5rem;">[ACTIVE PATH LINEAGE]</div>
-                  <div>&bull; Turn 1 (01912a34-0001): user</div>
-                  <div>&bull; Turn 2 (01912a34-0002): tool_call</div>
-                  <div>&bull; Turn 3a (01912a34-0003a): assistant [PINNED LEAF]</div>
-                  <div style="margin-top: 1rem; color: var(--text-dim); border-top: 1px solid rgba(255,255,255,0.1); padding-top: 0.5rem;">
-                    Pruned Sibling Nodes: Turn 3b (01912a34-0003b)<br>
-                    Sidecars Filtered: unanchored taskLedger post-turn 3a excluded
-                  </div>
-                </div>
-
-                <h3 style="margin-top: 1.5rem;">Turn Settlement Safety (#114)</h3>
-                <p>When switching sessions via <code>/new</code>, <code>/resume</code>, <code>/tree</code>, or <code>/fork</code> during an active stream:</p>
-                <div style="background: rgba(0,0,0,0.3); border-left: 3px solid var(--color-cyan); padding: 0.75rem; border-radius: 4px; font-size: 0.85rem;">
-                  <code>settleChatBeforeSessionSwitch</code> cancels the in-flight stream and awaits completion. The partial turn and completed tool executions seal cleanly into the original session ledger before the session writer is replaced, preventing orphaned root entries or lost answers.
-                </div>
-              </div>
-            </div>
-          </div>
-        </div>
-
-        <!-- TAB 2: LEDGER & STORAGE ARCHITECTURE -->
-        <div class="tab-pane" id="pane-ledger-spec">
-          <h2>On-Disk Session Directory Structure</h2>
-          <pre><code>&lt;stateDir&gt;/sessions/&lt;cwdHash&gt;/&lt;sessionId&gt;/
-  meta.json        # ClioSessionMeta JSON document (atomic write)
-  current.jsonl    # Append-only structured session event ledger (v3)
-  tree.json        # SessionTreeNode[] conversation tree graph</code></pre>
-
-          <h2>Session Metadata Schema (`meta.json`)</h2>
-          <table class="ref-table">
-            <thead>
-              <tr>
-                <th>Field</th>
-                <th>Type</th>
-                <th>Description</th>
-              </tr>
-            </thead>
-            <tbody>
-              <tr>
-                <td><code>id</code></td>
-                <td><code>string</code></td>
-                <td>UUIDv7 session identifier generated at initialization.</td>
-              </tr>
-              <tr>
-                <td><code>cwd</code></td>
-                <td><code>string</code></td>
-                <td>Absolute workspace root directory at session creation.</td>
-              </tr>
-              <tr>
-                <td><code>cwdHash</code></td>
-                <td><code>string</code></td>
-                <td>First 16 hexadecimal characters of SHA-256 of canonical <code>resolve(cwd)</code>.</td>
-              </tr>
-              <tr>
-                <td><code>createdAt / endedAt</code></td>
-                <td><code>string / string | null</code></td>
-                <td>ISO-8601 UTC timestamps for session start and completion.</td>
-              </tr>
-              <tr>
-                <td><code>model / target</code></td>
-                <td><code>string | null</code></td>
-                <td>Active model selector and target identifier.</td>
-              </tr>
-              <tr>
-                <td><code>clioVersion</code></td>
-                <td><code>string</code></td>
-                <td>Clio Coder release version (<code>0.4.0</code>).</td>
-              </tr>
-              <tr>
-                <td><code>sessionFormatVersion</code></td>
-                <td><code>number</code></td>
-                <td><code>CURRENT_SESSION_FORMAT_VERSION = 3</code> (<code>src/engine/session.ts:66</code>).</td>
-              </tr>
-              <tr>
-                <td><code>pinnedLeafTurnId</code></td>
-                <td><code>string | null</code></td>
-                <td>Active leaf turn pinned via <code>/tree</code>, cleared on next append.</td>
-              </tr>
-            </tbody>
-          </table>
-
-          <h2>Append-Only Ledger Taxonomy (`current.jsonl`)</h2>
-          <p>Every line in <code>current.jsonl</code> is a complete JSON document written via <code>O_APPEND</code> file descriptors:</p>
-          <ul>
-            <li><strong>Header Frame (Line 1):</strong> <code>{"type":"session","version":3,"id":"...","timestamp":"...","cwd":"..."}</code></li>
-            <li><strong>Message Entry (<code>kind: "message"</code>):</strong> User inputs, assistant thoughts/prose, and tool calls/results.</li>
-            <li><strong>Label Entry (<code>kind: "label"</code>):</strong> User-defined bookmark anchored to a specific <code>targetTurnId</code>.</li>
-            <li><strong>Session Info Entry (<code>kind: "sessionInfo"</code>):</strong> Model switches, target migrations, and thinking dial updates.</li>
-            <li><strong>Compaction Summary (<code>kind: "compactionSummary"</code>):</strong> Progressive summary preserving historical context up to <code>firstKeptTurnId</code>.</li>
-          </ul>
-
-          <h2>Protected-Artifact Write-Ahead Journal</h2>
-          <p>Location: <code>&lt;stateDir&gt;/protected-artifact-pending/&lt;sessionKey&gt;/&lt;recordId&gt;.json</code></p>
-          <div class="grid grid-2">
-            <div class="glass-card">
-              <h3>Staging &amp; Commit Lifecycle</h3>
-              <ol style="margin-left: 1.25rem; font-size: 0.875rem; color: var(--text-muted);">
-                <li><strong>Stage:</strong> Mutating tool results stage artifact registration to the pending directory before returning.</li>
-                <li><strong>Commit:</strong> When the turn finishes and appends to <code>current.jsonl</code>, the staged file is unlinked.</li>
-              </ol>
-            </div>
-            <div class="glass-card">
-              <h3>Reconciliation on Startup</h3>
-              <p style="font-size: 0.875rem; color: var(--text-muted);">
-                During <code>/resume</code>, <code>reconcilePendingProtectedArtifacts</code> checks for leftover journal entries and restores protected artifact locks before user interaction begins.
-              </p>
-            </div>
-          </div>
-        </div>
-
-        <!-- TAB 3: RESUMPTION, CWD & EXPORT -->
-        <div class="tab-pane" id="pane-resumption-export">
-          <h2>Session Resumption &amp; CWD Fallback</h2>
-          <p>When resuming via <code>/resume</code> or <code>CLIO_CODER_RESUME_SESSION_ID</code>, <code>resolveSessionCwd</code> validates the recorded workspace path:</p>
-          <table class="ref-table">
-            <thead>
-              <tr>
-                <th>Condition</th>
-                <th>Failure Reason</th>
-                <th>Remediation Behavior</th>
-              </tr>
-            </thead>
-            <tbody>
-              <tr>
-                <td>Directory exists and is readable</td>
-                <td><code>null</code> (valid)</td>
-                <td>Resumes session immediately without prompts.</td>
-              </tr>
-              <tr>
-                <td><code>meta.cwd</code> is empty or missing</td>
-                <td><code>no-cwd</code></td>
-                <td>Opens CWD-fallback dialog to select current directory.</td>
-              </tr>
-              <tr>
-                <td>Directory path no longer exists</td>
-                <td><code>missing</code></td>
-                <td>Opens CWD-fallback dialog with path suggestion.</td>
-              </tr>
-              <tr>
-                <td>Path points to a non-directory file</td>
-                <td><code>not-a-directory</code></td>
-                <td>Prompts operator for valid directory path.</td>
-              </tr>
-            </tbody>
-          </table>
-
-          <h2>Transcript Export Contract (`/export`)</h2>
-          <div class="grid grid-2">
-            <div class="glass-card">
-              <h3>Self-Contained HTML (Default)</h3>
-              <ul>
-                <li>Path: <code>.clio-coder/exports/&lt;sessionId&gt;-&lt;local-date&gt;.html</code></li>
-                <li>Carries converted ANSI styling with full Clio theme colors.</li>
-                <li>Semantic tool rows with expandable parameters and output.</li>
-                <li>Self-contained: 0 external scripts, stylesheets, or images.</li>
-                <li>Bounded: Capped at 2 MiB; truncates cleanly at whole row.</li>
-              </ul>
-            </div>
-            <div class="glass-card">
-              <h3>Plain Markdown Export</h3>
-              <ul>
-                <li>Requested by specifying an explicit <code>.md</code> file extension.</li>
-                <li>Heading with UTC instant, metadata, and fenced text.</li>
-                <li>Terminal escape codes and controls stripped cleanly.</li>
-                <li>Follows active leaf path; omits pruned sibling turns.</li>
-              </ul>
-            </div>
-          </div>
-
-          <h2>Directory Handbooks &amp; Prompt History</h2>
-          <div class="grid grid-2">
-            <div class="glass-card">
-              <h3>Handbook Subtree Overrides</h3>
-              <p><code>CLIO-CODER.override.md</code> replaces inherited instructions for its directory subtree:</p>
-              <ul>
-                <li>Creates explicit subtree boundaries without affecting sibling directories.</li>
-                <li>Subdirectories can add narrower rules with additional override files.</li>
-                <li>Context resets never delete override files.</li>
-              </ul>
-            </div>
-            <div class="glass-card">
-              <h3>Prompt Navigation History</h3>
-              <p>Process-local navigation via <code>Ctrl+P</code> / <code>Ctrl+N</code>:</p>
-              <ul>
-                <li>Preserves accepted chat, slash, steering, and follow-up inputs.</li>
-                <li>Consecutive duplicate prompts are collapsed.</li>
-                <li>Malformed inputs remain in editor without polluting history.</li>
-                <li>Forward navigation restores the unfinished draft.</li>
-              </ul>
-            </div>
-          </div>
-        </div>
-
-        <!-- Related Navigation -->
-        <nav class="related-nav" aria-label="Related Pages">
-          <a href="commands_blueprint.html" class="nav-link-card">
-            <span class="nav-label">Previous Blueprint</span>
-            <span class="nav-title">Commands &amp; Modes</span>
-          </a>
-          <a href="exit_codes_blueprint.html" class="nav-link-card next">
-            <span class="nav-label">Next Blueprint</span>
-            <span class="nav-title">Exit Codes &amp; Output Contracts</span>
-          </a>
+    <div class="page-layout-grid reference-layout">
+      <aside class="sidebar reference-sidebar" aria-label="On this page">
+        <nav class="toc-container">
+          <p class="toc-title">On this page</p>
+          <a class="sidebar-source" href="https://github.com/iowarp/clio-coder/blob/main/docs/architecture/session-lifecycle.md">Canonical Markdown<br>docs/architecture/session-lifecycle.md</a>
+          <ul class="toc-list"></ul>
         </nav>
+      </aside>
+      <main class="reference-main" id="reference-content">
+        <article class="reference-prose glass-card">
+<blockquote>
+<p><strong>Visual blueprint:</strong> The source checkout includes the complete
+<a href="session_lifecycle_blueprint.html">Session Lifecycle visual reference</a>.</p>
+</blockquote>
+<p>This document is the authoritative specification for Clio Coder interactive and headless session lifecycles, on-disk ledger structures, tree-based conversation branching, checkpoints, and recovery protocols in the current source tree.</p>
+<p>Source implementations: <code>src/engine/session.ts</code> and <code>src/domains/session/</code>.</p>
+<hr>
+<h2>1. On-Disk Session Layout</h2>
+<p>Sessions are persisted durably on disk under the platform state root (<code>clioStateDir()</code>, resolving to <code>~/.local/state/clio-coder</code> on Linux, <code>~/Library/Application Support/clio-coder/state</code> on macOS, or <code>%LOCALAPPDATA%\clio-coder\state</code> on Windows):</p>
+<pre><code class="language-text">&lt;stateDir&gt;/sessions/&lt;cwdHash&gt;/&lt;sessionId&gt;/
+  meta.json        # ClioSessionMeta JSON document
+  current.jsonl    # Append-only structured session event ledger
+  tree.json        # SessionTreeNode[] conversation tree graph
+</code></pre>
+<ul>
+<li><code>&lt;cwdHash&gt;</code>: First 16 hexadecimal characters of SHA-256 of canonical workspace root path (<code>createHash(&quot;sha256&quot;).update(resolve(cwd)).digest(&quot;hex&quot;).slice(0, 16)</code>).</li>
+<li><code>&lt;sessionId&gt;</code>: UUIDv7 generated at session initialization.</li>
+</ul>
+<hr>
+<h2>2. Session Metadata (<code>meta.json</code>)</h2>
+<p>Session metadata is written atomically (<code>.tmp</code> + <code>fsyncSync</code> + <code>renameSync</code>) by <code>src/engine/session.ts:atomicWrite</code> and updated without closing via <code>src/domains/session/manager.ts:persistSessionMeta</code>.</p>
+<pre><code class="language-typescript">export interface ClioSessionMeta {
+  id: string;
+  cwd: string;
+  cwdHash: string;
+  createdAt: string;
+  endedAt: string | null;
+  model: string | null;
+  target: string | null;
+  clioCoderVersion: string;
+  piMonoVersion: string;
+  platform: string;
+  nodeVersion: string;
+  sessionFormatVersion?: number; // CURRENT_SESSION_FORMAT_VERSION = 4
+}
+</code></pre>
+<p>Format version <code>CURRENT_SESSION_FORMAT_VERSION = 4</code> (<code>src/engine/session.ts</code>) is stamped on all sessions created since the working-set layer landed. Version 4 adds the <code>contextEviction</code> and <code>contextRecall</code> ledger kinds. <code>runMigrations</code> in <code>src/domains/session/migrations/</code> performs the one supported additive migration from version 3 to version 4. A missing version or a version below 3 names the remedy (remove the session directory), while a version above 4 says the session was written by a newer Clio and must not be read by this build.</p>
+<hr>
+<h2>3. Append-Only Context Ledger (<code>current.jsonl</code>)</h2>
+<p>The session ledger <code>current.jsonl</code> records all conversation events, model turns, tool executions, and checkpoints in strict append-only order.</p>
+<h3>Header Line</h3>
+<p>The first line of <code>current.jsonl</code> is the canonical session header:</p>
+<pre><code class="language-json">{&quot;type&quot;:&quot;session&quot;,&quot;version&quot;:4,&quot;id&quot;:&quot;01912a34-b567-7890-abcd-ef0123456789&quot;,&quot;timestamp&quot;:&quot;2026-08-14T12:00:00.000Z&quot;,&quot;cwd&quot;:&quot;/path/to/project&quot;}
+</code></pre>
+<h3>Entry Taxonomy</h3>
+<p>Subsequent lines represent typed <code>SessionEntry</code> objects (<code>src/domains/session/entries.ts</code>):</p>
+<ol>
+<li><strong><code>message</code></strong>: User inputs, assistant responses, and tool calls/results.<pre><code class="language-typescript">export interface MessageEntry {
+  kind: &quot;message&quot;;
+  turnId: string;
+  parentTurnId: string | null;
+  timestamp: string;
+  role: &quot;user&quot; | &quot;assistant&quot; | &quot;tool_call&quot; | &quot;tool_result&quot; | &quot;system&quot; | &quot;checkpoint&quot;;
+  payload: unknown;
+}
+</code></pre>
+</li>
+<li><strong><code>label</code></strong>: User-defined turn bookmark or tag anchored to <code>targetTurnId</code>.</li>
+<li><strong><code>sessionInfo</code></strong>: Metadata event (such as model switch, target change, or thinking level adjustment).</li>
+<li><strong><code>compactionSummary</code></strong>: Progressive compaction snapshot retaining historical context up to <code>firstKeptTurnId</code>.</li>
+<li><strong><code>taskLedger</code></strong>: Full session task-board snapshot with a stable board id, goal and subgoal states, active run ids, required validation evidence, and optional operator provenance through <code>origin: &quot;user&quot;</code> plus <code>userTaskId</code>.</li>
+<li><strong><code>decisionLedger</code></strong>: Branch-anchored snapshot of a completed or cancelled <code>ask_user</code> interview, including its timing, round count, settled values, superseded values, and operator corrections.</li>
+</ol>
+<p><code>taskLedger</code> and <code>decisionLedger</code> are context-free bookkeeping entries. They refold the <code>/tasks</code> and <code>/decisions</code> surfaces and enter evidence projection, but do not consume model-context tokens or become model messages by themselves.</p>
+<h3>Write Durability &amp; Atomicity</h3>
+<ul>
+<li>Appends hold an open <code>O_APPEND</code> file descriptor across the writer lifetime (<code>src/engine/session.ts:openSync</code>).</li>
+<li>Each line append is executed via a single <code>write(2)</code> call.</li>
+<li><code>fsyncSync</code> is debounced during high-frequency streaming turns and unconditionally forced on checkpoint (<code>persistTree</code>) and session shutdown (<code>close</code>).</li>
+<li>Torn last lines resulting from abrupt system crashes or power losses are tolerated by the ledger reader (<code>src/engine/session.ts:readSessionFileEntries</code>), which logs a warning and skips the incomplete trailing record.</li>
+</ul>
+<hr>
+<h2>4. Conversation Tree Graph (<code>tree.json</code>) &amp; Lineage</h2>
+<p>Clio Coder tracks all conversation turns as a directed tree graph, enabling non-destructive branching, navigation, and message forking.</p>
+<h3>Tree Structure</h3>
+<p><code>tree.json</code> stores the complete node linkage:</p>
+<pre><code class="language-typescript">export interface SessionTreeNode {
+  id: string;              // UUIDv7 turn identifier
+  parentId: string | null; // UUIDv7 parent turn identifier
+  at: string;              // ISO-8601 creation timestamp
+  kind: &quot;user&quot; | &quot;assistant&quot; | &quot;tool_call&quot; | &quot;tool_result&quot; | &quot;system&quot; | &quot;checkpoint&quot;;
+}
+</code></pre>
+<h3>Active Path Lineage Selection</h3>
+<p>When an operator branches or switches turns using <code>/tree</code> or <code>Alt+T</code>, the next append point changes without mutating or deleting historical entries in <code>current.jsonl</code>.</p>
+<p>The active path filter (<code>src/domains/session/tree/active-path.ts</code>) traces ancestry back from the active leaf:</p>
+<ol>
+<li>Resolves all <code>turnId</code> identifiers tracing back to the root <code>null</code> parent.</li>
+<li>Selects all ledger entries explicitly matching these <code>turnId</code>s.</li>
+<li>Both <code>/tree</code> (in-session switch) and <code>/fork</code> (new session branch) reconstruct the exact same state, strictly excluding any unanchored sidecar entries (<code>taskLedger</code>, routing notices, leafless <code>workerRun</code>) that appear after the chosen leaf&#39;s position.</li>
+<li>For a <code>/tree</code> switch, the active pin is persisted to <code>meta.pinnedLeafTurnId</code> and cleared on the next append, so a switch survives quit and <code>/resume</code> without reverting to the abandoned tip via timestamp inference.</li>
+<li>Prunes abandoned sibling branches from the context window supplied to the LLM.</li>
+</ol>
+<h3>Branch Forking (<code>/fork</code>)</h3>
+<p>The <code>/fork</code> command (<code>src/domains/session/tree/fork.ts:forkFromParentTurn</code>) initializes an independent session branched from an arbitrary turn:</p>
+<ol>
+<li>Closes the current session writer.</li>
+<li>Creates a new session directory and metadata inheriting <code>cwd</code>, <code>model</code>, and <code>target</code> from the parent.</li>
+<li>Traces ancestry up to <code>parentTurnId</code> and copies exactly the active path entries (excluding later unanchored sidecars) into the new session ledger.</li>
+<li>Stamps <code>parentSession</code> and <code>parentTurnId</code> in the new session header.</li>
+</ol>
+<h3>Handoff (<code>/handoff &lt;goal&gt;</code>)</h3>
+<p><code>/handoff</code> mints a successor session seeded with a reviewed document describing
+what the current session settled. It is a session operation and only that: it
+writes no memory promotion candidate, touches no memory record, and never calls
+the task-memory bank.</p>
+<p>The rule that makes the document trustworthy is read-ledger validation. Clio folds
+this session&#39;s persisted <code>read</code>, <code>edit</code>, <code>write</code>, <code>ls</code>, <code>find</code>, <code>grep</code>, and
+<code>artifact</code> tool calls (plus its <code>fileEntry</code> records) into a set of
+workspace-relative paths, through <code>filterEntriesToActivePath</code> so an abandoned
+<code>/tree</code> branch contributes nothing, exactly as the task board folds its own inputs.
+Every path the extraction round names is checked against that set and never against
+the filesystem. A file that exists on disk but that this session never opened is
+still an invention, so it is dropped and listed in the review document under
+<code>dropped (not in this session&#39;s read ledger)</code>.</p>
+<p>Extracted decisions merge with the session&#39;s settled decision board
+(<code>src/domains/session/decision-board.ts</code>); board entries win on conflict and are
+marked as settled. Superseded board decisions are history and do not travel.</p>
+<p>On accept, the new session opens with one <code>custom</code> entry of type <code>handoffSeed</code>
+carrying the reviewed document, the originating session id, and the goal. It
+projects into the model&#39;s replay as one user-role context message labelled as a
+handoff from the named session, on the same seam compaction and branch summaries
+use; it is never written as a fabricated user turn. The old session&#39;s
+<code>skillActivation</code> entries are replayed into the new session so loaded skills carry
+forward. The old session gains exactly one <code>custom</code> entry of type <code>handoffNote</code>
+recording the target session id, and is otherwise untouched. Esc during review
+cancels the whole handoff with nothing written in either session.</p>
+<p>The extraction round itself runs on the out-of-turn seam <code>/btw</code> uses: one call
+against the session&#39;s live target and model, the compiled message history as
+read-only input, no tools, and no entry in the ledger. Its provider usage is
+reported to <code>/cost</code> under a handoffs row and excluded from the turn count.</p>
+<h3>Streaming Turn Settlement During Session Transitions</h3>
+<p>When an operator issues <code>/new</code>, <code>/resume</code>, <code>/tree</code>, or <code>/fork</code> while an assistant turn is actively streaming, <code>settleChatBeforeSessionSwitch</code> (<code>src/interactive/session-switch-settlement.ts</code>) cancels the in-flight stream and awaits completion. This guarantees that partial assistant records and completed tool executions seal cleanly into the active session ledger before the session writer is replaced, preventing orphaned records in new sessions or unanswered prompts in original sessions (#114). Synchronous session transitions when chat is idle continue to execute immediately.</p>
+<hr>
+<h2>5. Session Resumption (<code>/resume</code>) &amp; Working Directory Fallback</h2>
+<p>When resuming a session via <code>/resume</code> or a headless <code>clio-coder run --session &lt;id&gt;</code> / <code>--continue</code>:</p>
+<ol>
+<li><code>src/domains/session/manager.ts:resumeSessionState</code> loads <code>meta.json</code> and runs migrations.</li>
+<li><code>src/domains/session/cwd-fallback.ts:resolveSessionCwd</code> probes the recorded <code>meta.cwd</code> against the filesystem.</li>
+<li>If the directory is invalid, it returns a typed failure reason:<ul>
+<li><code>no-cwd</code>: <code>meta.cwd</code> is missing or empty.</li>
+<li><code>missing</code>: The directory no longer exists on disk.</li>
+<li><code>not-a-directory</code>: The path points to a non-directory file or broken symlink.</li>
+</ul>
+</li>
+<li>The interactive layer displays the <code>cwd-fallback</code> overlay prompting the operator to choose a valid workspace directory.</li>
+</ol>
+<h3>Model-Facing Custom Entry Replay</h3>
+<p>When resumed or forked session history is replayed to the model, custom session entries (such as compaction summaries, branch summaries, and operator bash executions) are projected into standardized user-role message text via <code>src/engine/messages.ts</code> constants (<code>COMPACTION_SUMMARY_PREFIX</code>, <code>BRANCH_SUMMARY_PREFIX</code>, <code>bashExecutionToText</code>) rather than ad-hoc formats, ensuring deterministic prompt construction across sessions.</p>
+<hr>
+<h2>6. Session Export</h2>
+<p><code>/export</code> replays the active branch through the same transcript projection used by the live TUI and <code>/resume</code>. With no path, it writes <code>.clio-coder/exports/&lt;sessionId&gt;-&lt;local-date&gt;.html</code>. The HTML document is self-contained, carries the active Clio theme through converted ANSI styles, renders tool calls as semantic tool rows, references no external assets, and is capped at 2 MiB. If the transcript exceeds that limit, the export ends at a complete rendered row and states that later rows were omitted.</p>
+<p>An explicit path ending in <code>.md</code> keeps the plain Markdown form: a heading, UTC export instant, and a terminal-control-free fenced transcript. Export never changes the ledger or the active tree pin. Both formats follow the pinned active leaf and omit abandoned sibling turns.</p>
+<hr>
+<h2>7. Directory Handbooks and Project Overrides</h2>
+<p>During session context loading, <code>loadProjectContextFiles</code> (<code>src/domains/context/clio-md.ts</code>) discovers root <code>CLIO-CODER.md</code> handbooks and directory-scoped <code>CLIO-CODER.override.md</code> files:</p>
+<ul>
+<li>An override handbook replaces inherited project instructions for its directory and all subdirectories, establishing an explicit subtree boundary.</li>
+<li>Sibling directories remain unaffected.</li>
+<li>Subdirectories within the subtree may supply narrower instructions with additional override files.</li>
+<li>Prompt blocks preserve explicit source paths for provenance.</li>
+<li>Malformed override files fail closed, and context resets never delete override files.</li>
+</ul>
+<hr>
+<h2>8. Prompt History and Input Recovery</h2>
+<p>The interactive editor provides process-local prompt history via <code>Ctrl+P</code> (previous) and <code>Ctrl+N</code> (next):</p>
+<ul>
+<li>Accepted chat prompts, slash commands, local command executions, steering inputs, follow-ups, and interrupt messages are preserved in navigation history.</li>
+<li>Consecutive duplicates are collapsed.</li>
+<li>Rejected or malformed commands remain editable in the composer without polluting navigation history.</li>
+<li>Navigating forward past the newest entry restores the unfinished draft prompt.</li>
+</ul>
+<hr>
+<h2>9. Protected-Artifact Write-Ahead Journal</h2>
+<p>To guarantee that protected artifacts and validation locks survive unexpected crashes between tool execution and ledger commitment, Clio Coder maintains a write-ahead journal (<code>src/domains/session/protected-artifact-journal.ts</code>):</p>
+<ul>
+<li>Location: <code>&lt;stateDir&gt;/protected-artifact-pending/&lt;sessionKey&gt;/&lt;recordId&gt;.json</code></li>
+<li>Lifecycle:<ol>
+<li><strong>Stage</strong>: Before a mutating tool result is returned, the protected artifact registration is staged atomically to the journal directory.</li>
+<li><strong>Commit</strong>: Once the turn completes and appends to <code>current.jsonl</code>, the staged journal file is unlinked.</li>
+<li><strong>Reconcile</strong>: During session startup or resume, <code>reconcilePendingProtectedArtifacts</code> reads any leftover staged records and injects them into the protection engine before accepting user commands.</li>
+</ol>
+</li>
+</ul>
+<hr>
+<h2>10. In-Session Task Board &amp; Usage Accounting</h2>
+<ul>
+<li><strong>Task Board</strong> (<code>src/domains/session/task-board.ts</code>): Maintains session task items as full <code>taskLedger</code> snapshots with <code>pending</code>, <code>active</code>, <code>completed</code>, <code>blocked</code>, and <code>cancelled</code> states. Stable board ids retain terminal board history; rows picked from the project operator inbox retain <code>origin: &quot;user&quot;</code> and <code>userTaskId</code> across <code>/resume</code>, <code>/fork</code>, <code>/view</code>, and evidence export. The project-scoped inbox itself lives at <code>.clio-coder/user-tasks.json</code>, outside the session directory.</li>
+<li><strong>Decision Board</strong> (<code>src/domains/session/decision-board.ts</code>): Appends one branch-anchored <code>decisionLedger</code> snapshot when an <code>ask_user</code> interview completes or is cancelled. Superseding or correcting a value appends a new snapshot, preserving the earlier value and the operator-authored revision trail.</li>
+<li><strong>Usage Accounting</strong> (<code>src/domains/session/usage.ts</code>): Aggregates session token counts across input, output, cache read, cache write, and reasoning tokens. Anchors against provider-reported totals on settled turns.</li>
+<li><strong>Aborted Turn Persistence</strong>: When a turn is interrupted by <code>Ctrl+C</code> or a SIGINT signal, partial assistant output and completed tool executions are committed to <code>current.jsonl</code> with <code>interrupted: true</code> before yielding the prompt.</li>
+</ul>
+        </article>
+        <nav class="related-nav" aria-label="Adjacent references">
+          <a class="nav-link-card" href="safety_blueprint.html"><span class="nav-label">Previous</span><span class="nav-title">Clio Coder Safety Model</span></a>
+          <a class="nav-link-card next" href="time_conventions_blueprint.html"><span class="nav-label">Next</span><span class="nav-title">Time and Clock Conventions</span></a>
+        </nav>
+        <p class="reference-footer-note">Canonical content lives in the mapped Markdown page. This visual counterpart adds navigation without changing the contract.</p>
       </main>
     </div>
-
-    <footer>
-      <p>Clio Coder Session Lifecycle Blueprint &bull; Version 0.4.0 &bull; Gnosis Research Center</p>
-    </footer>
+    <footer>Clio Coder documentation · source-aligned at v0.4.2</footer>
   </div>
-
   <script src="shared.js"></script>
-  <script>
-    function switchTab(tabId) {
-      document.querySelectorAll('.tab-btn').forEach(btn => btn.classList.remove('active'));
-      document.querySelectorAll('.tab-pane').forEach(pane => pane.classList.remove('active'));
-
-      const pane = document.getElementById(`pane-${tabId}`);
-      if (pane) pane.classList.add('active');
-
-      const activeBtn = Array.from(document.querySelectorAll('.tab-btn')).find(btn => {
-        return btn.getAttribute('onclick')?.includes(`'${tabId}'`);
-      });
-      if (activeBtn) activeBtn.classList.add('active');
-
-      if (window.initTableOfContents) window.initTableOfContents();
-    }
-
-    function selectTreeNode(nodeId) {
-      document.querySelectorAll('.tree-node-card').forEach(card => {
-        card.classList.remove('active-path', 'pinned');
-      });
-
-      const out = document.getElementById('pathProjectionOutput');
-      if (nodeId === 'turn-3b') {
-        document.querySelectorAll('.tree-node-card')[0].classList.add('active-path');
-        document.querySelectorAll('.tree-node-card')[1].classList.add('active-path');
-        document.querySelectorAll('.tree-node-card')[3].classList.add('active-path', 'pinned');
-        out.innerHTML = `
-          <div style="color: var(--color-amber); font-weight: 700; margin-bottom: 0.5rem;">[ACTIVE PATH LINEAGE - BRANCH B]</div>
-          <div>&bull; Turn 1 (01912a34-0001): user</div>
-          <div>&bull; Turn 2 (01912a34-0002): tool_call</div>
-          <div>&bull; Turn 3b (01912a34-0003b): assistant [PINNED LEAF]</div>
-          <div style="margin-top: 1rem; color: var(--text-dim); border-top: 1px solid rgba(255,255,255,0.1); padding-top: 0.5rem;">
-            Pruned Sibling Nodes: Turn 3a (01912a34-0003a)<br>
-            Active Pin: meta.pinnedLeafTurnId = "01912a34-0003b"
-          </div>
-        `;
-      } else {
-        document.querySelectorAll('.tree-node-card')[0].classList.add('active-path');
-        document.querySelectorAll('.tree-node-card')[1].classList.add('active-path');
-        document.querySelectorAll('.tree-node-card')[2].classList.add('active-path', 'pinned');
-        out.innerHTML = `
-          <div style="color: var(--color-emerald); font-weight: 700; margin-bottom: 0.5rem;">[ACTIVE PATH LINEAGE - BRANCH A]</div>
-          <div>&bull; Turn 1 (01912a34-0001): user</div>
-          <div>&bull; Turn 2 (01912a34-0002): tool_call</div>
-          <div>&bull; Turn 3a (01912a34-0003a): assistant [PINNED LEAF]</div>
-          <div style="margin-top: 1rem; color: var(--text-dim); border-top: 1px solid rgba(255,255,255,0.1); padding-top: 0.5rem;">
-            Pruned Sibling Nodes: Turn 3b (01912a34-0003b)<br>
-            Active Pin: meta.pinnedLeafTurnId = "01912a34-0003a"
-          </div>
-        `;
-      }
-    }
-  </script>
 </body>
 </html>

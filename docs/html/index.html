@@ -1,970 +1,397 @@
-<!DOCTYPE html>
+<!doctype html>
 <html lang="en">
 <head>
-  <meta charset="UTF-8">
-  <meta name="viewport" content="width=device-width, initial-scale=1.0">
-  <title>Clio Coder Documentation Hub (v0.4.0)</title>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <meta name="description" content="Clio Coder documentation blueprints">
+  <title>Documentation blueprints · Clio Coder 0.4.2</title>
+  <link rel="icon" href="data:,">
   <link rel="stylesheet" href="shared.css">
-  <style>
-    /* Unique homepage layouts */
-    .hub-header {
-      text-align: center;
-      margin-bottom: 3.5rem;
-      padding-bottom: 2rem;
-      border-bottom: 1px solid rgba(255, 255, 255, 0.05);
-    }
-    .hub-logo {
-      display: inline-flex;
-      align-items: center;
-      justify-content: center;
-      width: 80px;
-      height: 80px;
-      background: rgba(255, 255, 255, 0.02);
-      border: 1px solid var(--border-card);
-      border-radius: 24px;
-      margin-bottom: 1.5rem;
-      position: relative;
-      box-shadow: var(--shadow-glow);
-    }
-    .hub-logo::after {
-      content: '';
-      position: absolute;
-      inset: -2px;
-      border-radius: 26px;
-      background: var(--gradient-main);
-      z-index: -1;
-      opacity: 0.3;
-      filter: blur(8px);
-    }
-    .hub-logo svg {
-      width: 48px;
-      height: 48px;
-    }
-    .hub-title {
-      font-size: 2.8rem;
-      font-weight: 800;
-      letter-spacing: -0.05em;
-      margin-bottom: 0.75rem;
-      background: linear-gradient(to right, #ffffff, #c7d2fe, var(--color-cyan));
-      -webkit-background-clip: text;
-      -webkit-text-fill-color: transparent;
-    }
-    .subtitle {
-      font-size: 1.15rem;
-      color: var(--text-muted);
-      max-width: 750px;
-      margin: 0 auto 1.5rem auto;
-    }
-
-    /* Category Filter Grid */
-    .filter-section {
-      margin-bottom: 2rem;
-    }
-    .filter-tags {
-      display: flex;
-      flex-wrap: wrap;
-      gap: 0.5rem;
-      justify-content: center;
-      margin-bottom: 2rem;
-    }
-    .filter-tag {
-      background: rgba(255, 255, 255, 0.03);
-      border: 1px solid var(--border-card);
-      color: var(--text-muted);
-      padding: 0.4rem 1rem;
-      border-radius: 9999px;
-      font-size: 0.825rem;
-      cursor: pointer;
-      font-weight: 600;
-      transition: all 0.2s;
-    }
-    .filter-tag:hover {
-      background: rgba(255, 255, 255, 0.08);
-      color: var(--text-main);
-    }
-    .filter-tag.active {
-      background: var(--color-cyan);
-      color: #090d16;
-      border-color: transparent;
-      box-shadow: 0 0 12px rgba(0, 212, 219, 0.3);
-    }
-
-    /* Operator Journeys Panel */
-    .journeys-panel {
-      margin-bottom: 3.5rem;
-    }
-    .journeys-grid {
-      display: grid;
-      grid-template-columns: repeat(auto-fit, minmax(240px, 1fr));
-      gap: 1.25rem;
-    }
-    .journey-card {
-      background: rgba(13, 20, 38, 0.35);
-      border: 1px solid rgba(255,255,255,0.05);
-      border-radius: 12px;
-      padding: 1.25rem;
-      transition: all 0.2s;
-    }
-    .journey-card:hover {
-      border-color: rgba(var(--color-orange-rgb), 0.35);
-      background: rgba(13, 20, 38, 0.5);
-    }
-    .journey-title {
-      font-size: 0.9rem;
-      text-transform: uppercase;
-      font-weight: 700;
-      letter-spacing: 0.05em;
-      color: var(--color-orange);
-      margin-bottom: 0.5rem;
-      display: flex;
-      align-items: center;
-      gap: 0.4rem;
-    }
-    .journey-links {
-      display: flex;
-      flex-direction: column;
-      gap: 0.35rem;
-      font-size: 0.85rem;
-    }
-    .journey-links a {
-      color: var(--text-muted);
-      text-decoration: none;
-      transition: color 0.15s;
-    }
-    .journey-links a:hover {
-      color: #fff;
-      text-decoration: underline;
-    }
-
-    /* Hub Grid */
-    .hub-grid {
-      display: grid;
-      grid-template-columns: repeat(auto-fill, minmax(320px, 1fr));
-      gap: 1.5rem;
-    }
-
-    /* Document Cards */
-    .doc-card {
-      background: var(--bg-card);
-      border: 1px solid var(--border-card);
-      border-radius: 14px;
-      padding: 1.5rem;
-      text-decoration: none;
-      color: inherit;
-      transition: all 0.25s cubic-bezier(0.4, 0, 0.2, 1);
-      display: flex;
-      flex-direction: column;
-      height: 100%;
-      position: relative;
-    }
-    .doc-card:hover {
-      background: var(--bg-card-hover);
-      border-color: var(--border-card-hover);
-      transform: translateY(-4px);
-      box-shadow: 0 10px 25px rgba(0, 0, 0, 0.4), 0 0 15px rgba(255, 126, 41, 0.1);
-    }
-    .doc-card.flagship:hover {
-      border-color: var(--color-orange);
-      box-shadow: 0 10px 25px rgba(0, 0, 0, 0.4), 0 0 15px rgba(255, 126, 41, 0.15);
-    }
-    .doc-card.flagship::before {
-      content: '';
-      position: absolute;
-      top: 0;
-      left: 0;
-      width: 100%;
-      height: 3px;
-      background: var(--gradient-main);
-      border-radius: 14px 14px 0 0;
-    }
-    .card-top {
-      display: flex;
-      justify-content: space-between;
-      align-items: flex-start;
-      margin-bottom: 0.75rem;
-    }
-    .card-title {
-      font-size: 1.15rem;
-      font-weight: 700;
-      color: #fff;
-      transition: color 0.2s;
-    }
-    .doc-card:hover .card-title {
-      color: var(--color-orange);
-    }
-    .card-badge {
-      font-size: 0.7rem;
-      padding: 0.2rem 0.5rem;
-      border-radius: 4px;
-      font-weight: 700;
-      text-transform: uppercase;
-    }
-    .badge-flagship {
-      background: rgba(255, 126, 41, 0.1);
-      border: 1px solid rgba(255, 126, 41, 0.3);
-      color: var(--color-orange);
-    }
-    .badge-ref {
-      background: rgba(16, 185, 129, 0.08);
-      border: 1px solid rgba(16, 185, 129, 0.25);
-      color: var(--color-emerald);
-    }
-    .badge-internal {
-      background: rgba(245, 158, 11, 0.08);
-      border: 1px solid rgba(245, 158, 11, 0.25);
-      color: var(--color-amber);
-    }
-    .badge-markdown {
-      background: rgba(99, 102, 241, 0.12);
-      border: 1px solid rgba(99, 102, 241, 0.35);
-      color: #a5b4fc;
-    }
-    .card-desc {
-      font-size: 0.875rem;
-      color: var(--text-muted);
-      margin-bottom: 1.25rem;
-      flex-grow: 1;
-    }
-    .card-footer {
-      border-top: 1px solid rgba(255, 255, 255, 0.05);
-      padding-top: 0.75rem;
-      display: flex;
-      justify-content: space-between;
-      align-items: center;
-      font-size: 0.75rem;
-      color: var(--text-dim);
-    }
-    .card-footer .path {
-      font-family: var(--font-mono);
-      overflow: hidden;
-      text-overflow: ellipsis;
-      white-space: nowrap;
-      max-width: 60%;
-    }
-    .card-footer .feature {
-      color: var(--color-orange);
-      font-weight: 600;
-    }
-  </style>
 </head>
 <body>
+  <a class="skip-link" href="#blueprint-tree">Skip to documentation tree</a>
   <div class="container">
-    <div class="hub-header">
-      <div class="hub-logo">
-        <svg viewBox="0 0 24 24" fill="none" xmlns="http://www.w3.org/2000/svg">
-          <path d="M12 2L2 7L12 12L22 7L12 2Z" stroke="url(#logoGrad)" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"/>
-          <path d="M2 17L12 22L22 17" stroke="url(#logoGrad)" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"/>
-          <path d="M2 12L12 17L22 12" stroke="url(#logoGrad)" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"/>
-          <defs>
-            <linearGradient id="logoGrad" x1="2" y1="2" x2="22" y2="22" gradientUnits="userSpaceOnUse">
-              <stop stop-color="#00d4db" />
-              <stop offset="1" stop-color="#ff7e29" />
-            </linearGradient>
-          </defs>
-        </svg>
+    <header class="hub-masthead">
+      <p class="hub-eyebrow">Source-aligned field manual / v0.4.2</p>
+      <h1 class="hub-title">Clio Coder documentation blueprints</h1>
+      <p class="hub-subtitle">A human-readable mirror of the complete Markdown reference, arranged by the same operator, architecture, process, and history boundaries.</p>
+      <div class="hub-stats" aria-label="Documentation coverage">
+        <span class="hub-stat">51 Markdown sources</span>
+        <span class="hub-stat">51 visual counterparts</span>
+        <span class="hub-stat">0 parity gaps</span>
       </div>
-      <h1 class="hub-title">Clio Coder Documentation Hub</h1>
-      <p class="subtitle">Interactive technical blueprints and specifications for IOWarp's terminal-first agentic computing orchestrator</p>
-
-      <div class="meta-badges">
-        <span class="meta-badge version">
-          <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><title>Icon</title><circle cx="12" cy="12" r="10"></circle><polyline points="12 6 12 12 16 14"></polyline></svg>
-          v0.4.0
-        </span>
-        <span class="meta-badge" style="border-color: rgba(255,255,255,0.08); color: var(--text-muted);">
-          CLI command: <code style="color: var(--color-orange); margin-left: 0.35rem;">clio-coder docs [topic]</code>
-        </span>
+    </header>
+    <div class="index-controls" role="search">
+      <label class="index-search">
+        <span hidden>Search documentation</span>
+        <input type="search" data-doc-search placeholder="Search titles, paths, and section names" autocomplete="off">
+      </label>
+      <div class="index-filters" aria-label="Filter by documentation category">
+        <button class="index-filter active" type="button" data-doc-filter="all">All</button>
+          <button class="index-filter" type="button" data-doc-filter="root">Documentation hub</button>
+          <button class="index-filter" type="button" data-doc-filter="guide">Guide</button>
+          <button class="index-filter" type="button" data-doc-filter="architecture">Architecture</button>
+          <button class="index-filter" type="button" data-doc-filter="process">Process</button>
+          <button class="index-filter" type="button" data-doc-filter="history">History</button>
       </div>
     </div>
-
-    <!-- Search Controls -->
-    <div class="glass-card" style="padding: 1.25rem; margin-bottom: 2rem;">
-      <div class="form-group" style="margin-bottom: 0;">
-        <input type="text" id="searchDocs" placeholder="Search blueprints, keys, file paths, interactive features..." oninput="filterCards()" style="padding: 0.85rem 1.25rem; font-size: 1rem; border-radius: 10px;">
+    <p class="index-result-line" data-doc-result aria-live="polite">51 of 51 blueprints visible</p>
+    <main id="blueprint-tree">
+    <section class="doc-group" data-doc-group data-category="root">
+      <div class="doc-group-header">
+        <span class="doc-group-index">01</span>
+        <h2 class="doc-group-title">Documentation hub</h2>
+        <span class="doc-group-count">1 page</span>
       </div>
-    </div>
-
-    <!-- Filter Tags -->
-    <div class="filter-section">
-      <div class="filter-tags" id="filterTags">
-        <button type="button" class="filter-tag active" onclick="setCategory('all')">All blueprints</button>
-        <button type="button" class="filter-tag" onclick="setCategory('start')">Start &amp; Configure</button>
-        <button type="button" class="filter-tag" onclick="setCategory('operate')">Operate &amp; Tools</button>
-        <button type="button" class="filter-tag" onclick="setCategory('safety')">Safety &amp; Context</button>
-        <button type="button" class="filter-tag" onclick="setCategory('fleet')">Agents &amp; Fleet</button>
-        <button type="button" class="filter-tag" onclick="setCategory('obs')">Observability &amp; Trace</button>
-        <button type="button" class="filter-tag" onclick="setCategory('models')">Models &amp; Providers</button>
-        <button type="button" class="filter-tag" onclick="setCategory('skills')">Extensions &amp; Skills</button>
-        <button type="button" class="filter-tag" onclick="setCategory('validation')">Validation &amp; Evals</button>
-        <button type="button" class="filter-tag" onclick="setCategory('reference')">Reference &amp; Arch</button>
-        <button type="button" class="filter-tag" onclick="setCategory('internal')">Internal/Historical</button>
+      <div class="doc-grid">
+        <a class="blueprint-card" style="--order: 0" href="readme_blueprint.html" data-blueprint-card data-category="root" data-search="clio coder documentation docs/readme.md start here using clio day to day safety, evidence, and reproducibility delegation and fleets automation and integration evaluation and measurement architecture and contributing developer quick start project context in a source checkout interactive blueprints writing documentation">
+          <span class="blueprint-card-kind">11 sections · 1,204 words</span>
+          <h3>Clio Coder documentation</h3>
+          <p>Start here · Using Clio day to day</p>
+          <span class="blueprint-card-path">docs/README.md</span>
+        </a>
       </div>
-    </div>
-
-    <!-- Operator Journeys -->
-    <div class="glass-card journeys-panel">
-      <h2 style="font-size: 1.1rem; border-bottom: 1px solid rgba(255,255,255,0.05); padding-bottom: 0.5rem; margin-bottom: 1rem; text-transform: uppercase; color: var(--text-dim);">
-        Learning Path &amp; Operator Journeys
-      </h2>
-      <div class="journeys-grid">
-        <div class="journey-card">
-          <div class="journey-title">
-            <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><title>Icon</title><polygon points="5 3 19 12 5 21 5 3"></polygon></svg>
-            1. Install &amp; Configure
-          </div>
-          <div class="journey-links">
-            <a href="lifecycle_blueprint.html">1. Installation &amp; Directory Layout</a>
-            <a href="configuration_blueprint.html">2. Configuration Settings Profile</a>
-            <a href="alcf_blueprint.html">3. HPC / ALCF Inference Setup</a>
-            <a href="environment_blueprint.html">4. Environment Variables Matrix</a>
-          </div>
-        </div>
-        <div class="journey-card">
-          <div class="journey-title">
-            <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><title>Icon</title><rect x="3" y="11" width="18" height="11" rx="2" ry="2"></rect><path d="M7 11V7a5 5 0 0 1 10 0v4"></path></svg>
-            2. Run Tasks &amp; Tools
-          </div>
-          <div class="journey-links">
-            <a href="commands_blueprint.html">1. Commands &amp; Headless Flags</a>
-            <a href="tools_blueprint.html">2. Seven-Plane Tool Surface</a>
-            <a href="tool_usage_blueprint.html">3. Detailed Tool Usage Reference</a>
-            <a href="tui_design_blueprint.html">4. TUI Design &amp; Glyphs</a>
-          </div>
-        </div>
-        <div class="journey-card">
-          <div class="journey-title">
-            <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><title>Icon</title><path d="M12 22s8-4 8-10V5l-8-3-8 3v7c0 6 8 10 8 10z"></path></svg>
-            3. Safety &amp; Context
-          </div>
-          <div class="journey-links">
-            <a href="safety_blueprint.html">1. Safety Postures &amp; Autonomy</a>
-            <a href="context_blueprint.html">2. Context Window &amp; Compaction</a>
-            <a href="validation_blueprint.html">3. Scientific Validation Contracts</a>
-            <a href="architecture_blueprint.html">4. Architecture Boundary Rules</a>
-          </div>
-        </div>
-        <div class="journey-card">
-          <div class="journey-title">
-            <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><title>Icon</title><path d="M17 21v-2a4 4 0 0 0-4-4H5a4 4 0 0 0-4 4v2"></path><circle cx="9" cy="7" r="4"></circle><path d="M23 21v-2a4 4 0 0 0-3-3.87"></path><path d="M16 3.13a4 4 0 0 1 0 7.75"></path></svg>
-            4. Multi-Node &amp; Fleets
-          </div>
-          <div class="journey-links">
-            <a href="fleet_dispatch_blueprint.html">1. Multi-Node SSH Fleet Dispatch</a>
-            <a href="agents_blueprint.html">2. Built-in Agent Recipes</a>
-            <a href="worker_dispatch_blueprint.html">3. Worker Subprocess Mechanics</a>
-          </div>
-        </div>
-        <div class="journey-card">
-          <div class="journey-title">
-            <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><title>Icon</title><circle cx="12" cy="12" r="10"></circle><polyline points="12 6 12 12 16 14"></polyline></svg>
-            5. Measure, Trace &amp; Verify
-          </div>
-          <div class="journey-links">
-            <a href="trace_blueprint.html">1. WAL SQLite Trace Store</a>
-            <a href="eval_blueprint.html">2. Evaluation Runner &amp; Dual Tokens</a>
-            <a href="observability_blueprint.html">3. Observability &amp; Receipts</a>
-          </div>
-        </div>
+    </section>
+    <section class="doc-group" data-doc-group data-category="guide">
+      <div class="doc-group-header">
+        <span class="doc-group-index">02</span>
+        <h2 class="doc-group-title">Guide</h2>
+        <span class="doc-group-count">15 pages</span>
       </div>
-    </div>
-
-    <!-- Hub Grid -->
-    <main class="hub-grid" id="hubGrid">
-
-      <!-- Card: Safety Model -->
-      <a href="safety_blueprint.html" class="doc-card flagship" data-categories="safety,start" data-title="Safety Model" data-tags="safety security autonomy block rules gate bash rollback">
-        <div class="card-top">
-          <h3 class="card-title">Safety Model</h3>
-          <span class="card-badge badge-flagship">Core</span>
-        </div>
-        <p class="card-desc">Autonomy dials, safety net rules, default-deny shell constraints, detect-and-rollback write boundaries, and interactive validation loops.</p>
-        <div class="card-footer">
-          <span class="path">safety-model.md</span>
-          <span class="feature">Safety Simulator</span>
-        </div>
-      </a>
-
-      <!-- Card: Configuration & Targets -->
-      <a href="configuration_blueprint.html" class="doc-card flagship" data-categories="configure,start" data-title="Configuration &amp; Targets" data-tags="config target route settings yaml connection provenance">
-        <div class="card-top">
-          <h3 class="card-title">Configuration &amp; Targets</h3>
-          <span class="card-badge badge-flagship">Core</span>
-        </div>
-        <p class="card-desc">Profile definitions, context-window provenance, settings routing, and interactive validation checkers.</p>
-        <div class="card-footer">
-          <span class="path">configuration-and-targets.md</span>
-          <span class="feature">YAML Validator</span>
-        </div>
-      </a>
-
-      <!-- Card: Commands & Modes -->
-      <a href="commands_blueprint.html" class="doc-card flagship" data-categories="operate,start" data-title="Commands &amp; Modes" data-tags="commands CLI slash steering keybindings postures session continue json">
-        <div class="card-top">
-          <h3 class="card-title">Commands &amp; Modes</h3>
-          <span class="card-badge badge-flagship">Core</span>
-        </div>
-        <p class="card-desc">CLI flags, headless session continuity (--session/--continue), key steering triggers, slash actions, and operating mode states.</p>
-        <div class="card-footer">
-          <span class="path">commands-and-modes.md</span>
-          <span class="feature">Command Palette</span>
-        </div>
-      </a>
-
-      <!-- Card: Architecture -->
-      <a href="architecture_blueprint.html" class="doc-card flagship" data-categories="reference,start" data-title="Architecture" data-tags="architecture boundaries rules direction flow domain loader engine worker">
-        <div class="card-top">
-          <h3 class="card-title">Architecture</h3>
-          <span class="card-badge badge-flagship">Core</span>
-        </div>
-        <p class="card-desc">Source layout, 5 enforced boundary rules (dependency direction vs import form), runtime flow, and detect-and-rollback boundaries.</p>
-        <div class="card-footer">
-          <span class="path">architecture.md</span>
-          <span class="feature">Boundary Check</span>
-        </div>
-      </a>
-
-      <!-- Card: Context Engine -->
-      <a href="context_blueprint.html" class="doc-card" data-categories="safety,context" data-title="Context Engine" data-tags="context window compaction token ledger prime prefix">
-        <div class="card-top">
-          <h3 class="card-title">Context Engine</h3>
-          <span class="card-badge badge-ref">Ref</span>
-        </div>
-        <p class="card-desc">Sliding window mechanics, compaction thresholds, model-driven init, format v3 session enforcement, and prefix cache audits.</p>
-        <div class="card-footer">
-          <span class="path">context-engine.md</span>
-          <span class="feature">Compaction Calc</span>
-        </div>
-      </a>
-
-      <!-- Card: Prompt Envelope & Tools -->
-      <a href="tools_blueprint.html" class="doc-card" data-categories="safety,operate" data-title="Prompt Envelope &amp; Tools" data-tags="tools envelope registry envelope results truncate adapter panes toolchain">
-        <div class="card-top">
-          <h3 class="card-title">Prompt Envelope &amp; Tools</h3>
-          <span class="card-badge badge-ref">Ref</span>
-        </div>
-        <p class="card-desc">Envelopes structure, 21 tools grouped into seven planes via single agent-tools.ts adapter, pinned toolchain management, observation budgets, and safety checks.</p>
-        <div class="card-footer">
-          <span class="path">prompt-envelope-and-tools.md</span>
-          <span class="feature">Tool Inspector</span>
-        </div>
-      </a>
-
-      <!-- Card: Installation & Lifecycle -->
-      <a href="lifecycle_blueprint.html" class="doc-card" data-categories="start" data-title="Installation &amp; Lifecycle" data-tags="install update bootstrap directories doctor repair reset permissions">
-        <div class="card-top">
-          <h3 class="card-title">Installation &amp; Lifecycle</h3>
-          <span class="card-badge badge-ref">Ref</span>
-        </div>
-        <p class="card-desc">Source install instructions, configuration directories layouts, permissions matrix (0o600 credentials), validation repair, and reset cleaning.</p>
-        <div class="card-footer">
-          <span class="path">installation-and-lifecycle.md</span>
-          <span class="feature">Command Builder</span>
-        </div>
-      </a>
-
-      <!-- Card: ALCF Inference Provider -->
-      <a href="alcf_blueprint.html" class="doc-card" data-categories="start,models" data-title="ALCF Inference Provider" data-tags="alcf supercomputer HPC sophia metis globus oauth PKCE">
-        <div class="card-top">
-          <h3 class="card-title">ALCF Inference Provider</h3>
-          <span class="card-badge badge-ref">Ref</span>
-        </div>
-        <p class="card-desc">Argonne National Lab HPC supercomputer access config, Sophia/Metis models, and Globus PKCE authentication flow.</p>
-        <div class="card-footer">
-          <span class="path">alcf-provider.md</span>
-          <span class="feature">OAuth Diagram</span>
-        </div>
-      </a>
-
-      <!-- Card: Environment Variables -->
-      <a href="environment_blueprint.html" class="doc-card" data-categories="start,reference" data-title="Environment Variables" data-tags="environment env vars knobs overrides debugging path">
-        <div class="card-top">
-          <h3 class="card-title">Environment Variables</h3>
-          <span class="card-badge badge-ref">Ref</span>
-        </div>
-        <p class="card-desc">Comprehensive reference of variables recognized by Clio runtime: settings overrides, directory paths, debug loggers.</p>
-        <div class="card-footer">
-          <span class="path">environment-variables.md</span>
-          <span class="feature">Env Matrix</span>
-        </div>
-      </a>
-
-      <!-- Card: Tool Usage Reference -->
-      <a href="tool_usage_blueprint.html" class="doc-card" data-categories="operate,reference" data-title="Tool Usage Reference" data-tags="tools details read write edit bash grep dispatch code_nav">
-        <div class="card-top">
-          <h3 class="card-title">Tool Usage Reference</h3>
-          <span class="card-badge badge-ref">Ref</span>
-        </div>
-        <p class="card-desc">In-depth reference for all 20 worker tools including parameters, typical payloads, prepareArguments normalizers, and error examples.</p>
-        <div class="card-footer">
-          <span class="path">tool-usage.md</span>
-          <span class="feature">Tool Atlas</span>
-        </div>
-      </a>
-
-      <!-- Card: Provider Adapter Cookbook -->
-      <a href="provider_adapter_blueprint.html" class="doc-card" data-categories="models,reference" data-title="Provider Adapter Cookbook" data-tags="provider adapter custom model integration descriptor probe config">
-        <div class="card-top">
-          <h3 class="card-title">Provider Adapter Cookbook</h3>
-          <span class="card-badge badge-ref">Ref</span>
-        </div>
-        <p class="card-desc">Step-by-step instructions for adding custom LLM/inference provider adapters, routing templates, and probe formats.</p>
-        <div class="card-footer">
-          <span class="path">provider-adapter-cookbook.md</span>
-          <span class="feature">Descriptor Builder</span>
-        </div>
-      </a>
-
-      <!-- Card: Built-in Agents -->
-      <a href="agents_blueprint.html" class="doc-card" data-categories="fleet" data-title="Built-in Agents" data-tags="agents recipes built-ins schemas dispatch catalog context">
-        <div class="card-top">
-          <h3 class="card-title">Built-in Agents</h3>
-          <span class="card-badge badge-ref">Ref</span>
-        </div>
-        <p class="card-desc">Built-in recipes catalog, frontmatter config properties, fleet contract shadowing (.clio-coder/fleets/<name>.md), and custom additions.</p>
-        <div class="card-footer">
-          <span class="path">built-in-agents.md</span>
-          <span class="feature">Recipe Check</span>
-        </div>
-      </a>
-
-      <!-- Card: Fleet Dispatch -->
-      <a href="fleet_dispatch_blueprint.html" class="doc-card flagship" data-categories="fleet,operate" data-title="Fleet Dispatch" data-tags="fleet dispatch remote ssh doctor capacity leases write boundary loops code steps attestation">
-        <div class="card-top">
-          <h3 class="card-title">Fleet Dispatch</h3>
-          <span class="card-badge badge-flagship">Core</span>
-        </div>
-        <p class="card-desc">Multi-node SSH execution, process-safe capacity leases, Contract v4 per-step write boundaries (detect-and-rollback), bounded loops, deterministic code steps, and worker attestation.</p>
-        <div class="card-footer">
-          <span class="path">fleet-dispatch.md</span>
-          <span class="feature">Fleet Simulator</span>
-        </div>
-      </a>
-
-      <!-- Card: Trace Store -->
-      <a href="trace_blueprint.html" class="doc-card flagship" data-categories="obs,validation" data-title="Trace Store" data-tags="trace sqlite wal runs phases procs sql subcommands">
-        <div class="card-top">
-          <h3 class="card-title">Trace Store</h3>
-          <span class="card-badge badge-flagship">Core</span>
-        </div>
-        <p class="card-desc">Durable WAL SQLite trace mirror database schema, bounded inspection, retention, rowid cursor queries, rebuildability, and the 8 `clio-coder trace` subcommands (runs, inspect, phases, tail, procs, prune, sql, ui).</p>
-        <div class="card-footer">
-          <span class="path">trace-store.md</span>
-          <span class="feature">Trace SQL Inspector</span>
-        </div>
-      </a>
-
-      <!-- Card: Evidence & Memory -->
-      <a href="memory_blueprint.html" class="doc-card" data-categories="obs" data-title="Evidence &amp; Memory" data-tags="memory evidence database session audit approval log">
-        <div class="card-top">
-          <h3 class="card-title">Evidence &amp; Memory</h3>
-          <span class="card-badge badge-ref">Ref</span>
-        </div>
-        <p class="card-desc">Evidence folder layouts, session database tracking, audit trails, and long-term memory approvals flow.</p>
-        <div class="card-footer">
-          <span class="path">evidence-and-memory.md</span>
-          <span class="feature">State Explorer</span>
-        </div>
-      </a>
-
-      <!-- Card: Skills Marketplace -->
-      <a href="skills_blueprint.html" class="doc-card" data-categories="skills" data-title="Skills Marketplace" data-tags="skills marketplace registry local catalog index publish git hub">
-        <div class="card-top">
-          <h3 class="card-title">Skills Marketplace</h3>
-          <span class="card-badge badge-ref">Ref</span>
-        </div>
-        <p class="card-desc">Skills Hub discovery interface, local catalog and index sources, and publisher checklists.</p>
-        <div class="card-footer">
-          <span class="path">skills-marketplace.md</span>
-          <span class="feature">Marketplace Lab</span>
-        </div>
-      </a>
-
-      <!-- Card: Model Catalog & Routing -->
-      <a href="models_blueprint.html" class="doc-card" data-categories="models" data-title="Model Catalog &amp; Routing" data-tags="models catalog routing probeCapabilitiesForModel offline fallback details">
-        <div class="card-top">
-          <h3 class="card-title">Model Catalog &amp; Routing</h3>
-          <span class="card-badge badge-ref">Ref</span>
-        </div>
-        <p class="card-desc">Model capability matching, exact-id selector `probeCapabilitiesForModel`, live probes (`--offline` toggle), reasoning configurations, and model routing rules.</p>
-        <div class="card-footer">
-          <span class="path">model-catalog.md</span>
-          <span class="feature">Prober Lab</span>
-        </div>
-      </a>
-
-      <!-- Card: Evaluation Runner -->
-      <a href="eval_blueprint.html" class="doc-card" data-categories="validation" data-title="Evaluation Runner" data-tags="eval runner validation suites YAML baseline metrics dual tokens receiptUsage">
-        <div class="card-top">
-          <h3 class="card-title">Evaluation Runner</h3>
-          <span class="card-badge badge-ref">Ref</span>
-        </div>
-        <p class="card-desc">YAML eval configuration, dual token accountings (wire `tokens.*` vs journal `receiptUsage.*`), EvalArtifactV4 format, and verify.measure task outcome recording.</p>
-        <div class="card-footer">
-          <span class="path">eval-runner.md</span>
-          <span class="feature">Eval Planner</span>
-        </div>
-      </a>
-
-      <!-- Card: Scientific Validation -->
-      <a href="validation_blueprint.html" class="doc-card" data-categories="validation" data-title="Scientific Validation" data-tags="scientific validation contract numerical tolerance HPC float">
-        <div class="card-top">
-          <h3 class="card-title">Scientific Validation</h3>
-          <span class="card-badge badge-ref">Ref</span>
-        </div>
-        <p class="card-desc">Floating-point numeric assertions, scientific file format checks, and HPC execution gating.</p>
-        <div class="card-footer">
-          <span class="path">scientific-validation.md</span>
-          <span class="feature">Tolerance Calc</span>
-        </div>
-      </a>
-
-      <!-- Card: Code Evolution -->
-      <a href="evolution_blueprint.html" class="doc-card" data-categories="validation" data-title="Code Evolution" data-tags="evolution manifests json evolve audit pipeline atomic">
-        <div class="card-top">
-          <h3 class="card-title">Code Evolution</h3>
-          <span class="card-badge badge-ref">Ref</span>
-        </div>
-        <p class="card-desc">Falsifiable change manifest schema, atomic execution sequence, and `clio-coder evolve` command guidelines.</p>
-        <div class="card-footer">
-          <span class="path">evolution.md</span>
-          <span class="feature">Manifest Editor</span>
-        </div>
-      </a>
-
-      <!-- Card: Middleware & Components -->
-      <a href="middleware_blueprint.html" class="doc-card" data-categories="fleet" data-title="Middleware &amp; Components" data-tags="middleware hooks register effect components snapshots budget">
-        <div class="card-top">
-          <h3 class="card-title">Middleware &amp; Components</h3>
-          <span class="card-badge badge-ref">Ref</span>
-        </div>
-        <p class="card-desc">Subsystem hooks, phase-aware middleware hook budgets (DEFAULT_MIDDLEWARE_HOOK_BUDGETS_MS), effect kinds, and runtime component interfaces.</p>
-        <div class="card-footer">
-          <span class="path">middleware-and-components.md</span>
-          <span class="feature">Hook Flow</span>
-        </div>
-      </a>
-
-      <!-- Card: Observability -->
-      <a href="observability_blueprint.html" class="doc-card" data-categories="obs" data-title="Observability" data-tags="observability spine receipts view dashboard cost telemetry">
-        <div class="card-top">
-          <h3 class="card-title">Observability</h3>
-          <span class="card-badge badge-ref">Ref</span>
-        </div>
-        <p class="card-desc">Saved tool output viewing, step log audits, and execution cost visual metrics.</p>
-        <div class="card-footer">
-          <span class="path">observability.md</span>
-          <span class="feature">Receipt Checker</span>
-        </div>
-      </a>
-
-      <!-- Card: Extensions & Sharing -->
-      <a href="extensions_blueprint.html" class="doc-card" data-categories="skills" data-title="Extensions &amp; Sharing" data-tags="extensions packages manifests prompt skills archive sharing">
-        <div class="card-top">
-          <h3 class="card-title">Extensions &amp; Sharing</h3>
-          <span class="card-badge badge-ref">Ref</span>
-        </div>
-        <p class="card-desc">Precedence directories overlays, extensions packaging manifest files, and share format definitions.</p>
-        <div class="card-footer">
-          <span class="path">extensions-and-sharing.md</span>
-          <span class="feature">Manifest Builder</span>
-        </div>
-      </a>
-
-      <!-- Card: Documentation Guide -->
-      <a href="documentation_blueprint.html" class="doc-card" data-categories="reference" data-title="Documentation Guide" data-tags="documentation guide structure style standards checker lint">
-        <div class="card-top">
-          <h3 class="card-title">Documentation Guide</h3>
-          <span class="card-badge badge-ref">Ref</span>
-        </div>
-        <p class="card-desc">Source-first standards, documentation directory structure, claims classes, and markdown linter script.</p>
-        <div class="card-footer">
-          <span class="path">documentation-guide.md</span>
-          <span class="feature">Claims Linter</span>
-        </div>
-      </a>
-
-      <!-- Card: TUI Design System -->
-      <a href="tui_design_blueprint.html" class="doc-card" data-categories="operate,internal" data-title="TUI Design System" data-tags="tui UI colors glyphs formatting state choreograph visual contextReserve">
-        <div class="card-top">
-          <h3 class="card-title">TUI Design System</h3>
-          <span class="card-badge badge-internal">Internal</span>
-        </div>
-        <p class="card-desc">Interface layout colors palette, Unicode character vocabulary (contextReserve ▒), terminal state drawing choreographies.</p>
-        <div class="card-footer">
-          <span class="path">tui-design.md</span>
-          <span class="feature">Color Lab</span>
-        </div>
-      </a>
-
-      <!-- Card: Worker Dispatch Mechanics -->
-      <a href="worker_dispatch_blueprint.html" class="doc-card" data-categories="fleet,internal" data-title="Worker Dispatch Mechanics" data-tags="worker processes environment NDJSON protocol heartbeats exit attestation">
-        <div class="card-top">
-          <h3 class="card-title">Worker Dispatch Mechanics</h3>
-          <span class="card-badge badge-internal">Internal</span>
-        </div>
-        <p class="card-desc">NDJSON parent-child socket stream protocols, 13-field worker attestation frame, timeout watchdog timing, and exit status mapping.</p>
-        <div class="card-footer">
-          <span class="path">worker-dispatch-mechanics.md</span>
-          <span class="feature">Protocol Sim</span>
-        </div>
-      </a>
-
-      <!-- Card: Internal Eval Suites -->
-      <a href="evals_internal_blueprint.html" class="doc-card" data-categories="validation,internal" data-title="Internal Eval Suites" data-tags="evals internal seeds regression prompt matrices gates">
-        <div class="card-top">
-          <h3 class="card-title">Internal Eval Suites</h3>
-          <span class="card-badge badge-internal">Internal</span>
-        </div>
-        <p class="card-desc">Regression test directories, prompt validation matrices, and internal model quality gates.</p>
-        <div class="card-footer">
-          <span class="path">evals-internal.md</span>
-          <span class="feature">Gates Check</span>
-        </div>
-      </a>
-
-      <!-- Card: Config Knobs Audit -->
-      <a href="config_knobs_audit_blueprint.html" class="doc-card" data-categories="configure,internal" data-title="Config Knobs Audit" data-tags="audit historical legacy knobs vars settings cleanup">
-        <div class="card-top">
-          <h3 class="card-title">Config Knobs Audit</h3>
-          <span class="card-badge badge-internal">Historical</span>
-        </div>
-        <p class="card-desc">Audit documentation tracking consolidated environment variables, old settings layout, and design findings.</p>
-        <div class="card-footer">
-          <span class="path">config-knobs-audit.md</span>
-          <span class="feature">Knobs Auditor</span>
-        </div>
-      </a>
-
-      <!-- Card: Session Lifecycle -->
-      <a href="session_lifecycle_blueprint.html" class="doc-card" data-categories="operate,reference" data-title="Session Lifecycle" data-tags="session ledger tree jsonl fork resume checkpoint active path migrations settlement">
-        <div class="card-top">
-          <h3 class="card-title">Session Lifecycle</h3>
-          <span class="card-badge badge-ref">Ref</span>
-        </div>
-        <p class="card-desc">Session ledger v3, conversation tree graph, active-path lineage selection, /fork, /resume, turn settlement, and write-ahead protected artifact journal.</p>
-        <div class="card-footer">
-          <span class="path">session-lifecycle.md</span>
-          <span class="feature">Tree Sim</span>
-        </div>
-      </a>
-
-      <!-- Card: ACP Server -->
-      <a href="acp_blueprint.html" class="doc-card" data-categories="operate,reference" data-title="ACP Protocol Server" data-tags="acp agent client protocol jsonrpc stdio permissions mediator zed errors">
-        <div class="card-top">
-          <h3 class="card-title">ACP Protocol Server</h3>
-          <span class="card-badge badge-ref">Ref</span>
-        </div>
-        <p class="card-desc">Agent Client Protocol (ACP v1 / schema 0.4.5) JSON-RPC server over stdio, tool mediation, non-stall permission handling, and error taxonomy.</p>
-        <div class="card-footer">
-          <span class="path">acp.md</span>
-          <span class="feature">Protocol Spec</span>
-        </div>
-      </a>
-
-      <!-- Card: Artifact Versions -->
-      <a href="artifact_versions_blueprint.html" class="doc-card" data-categories="reference" data-title="Artifact Versions" data-tags="versions receipt integrity session format workerspec fleet eval trace schema migration">
-        <div class="card-top">
-          <h3 class="card-title">Artifact Versions</h3>
-          <span class="card-badge badge-ref">Ref</span>
-        </div>
-        <p class="card-desc">Authoritative registry and migration policies for all 9 serialized artifact schemas across Clio Coder.</p>
-        <div class="card-footer">
-          <span class="path">artifact-versions.md</span>
-          <span class="feature">Version Registry</span>
-        </div>
-      </a>
-
-      <!-- Card: Exit Codes & Output Contracts -->
-      <a href="exit_codes_blueprint.html" class="doc-card" data-categories="operate,reference" data-title="Exit Codes &amp; Output Contracts" data-tags="exit codes status help json streaming stdout stderr format cli">
-        <div class="card-top">
-          <h3 class="card-title">Exit Codes &amp; Output</h3>
-          <span class="card-badge badge-ref">Ref</span>
-        </div>
-        <p class="card-desc">Deterministic process exit code taxonomy (0, 1, 2, 3), --help standard on stdout, and machine-readable JSON streaming contracts.</p>
-        <div class="card-footer">
-          <span class="path">exit-codes-and-output.md</span>
-          <span class="feature">Exit Taxonomy</span>
-        </div>
-      </a>
-
-      <!-- Card: Capacity Leases & Scheduling -->
-      <a href="capacity_scheduling_blueprint.html" class="doc-card" data-categories="fleet,reference" data-title="Capacity Leases &amp; Scheduling" data-tags="capacity leases scheduling drain lock ttl admission cluster dispatch">
-        <div class="card-top">
-          <h3 class="card-title">Capacity &amp; Scheduling</h3>
-          <span class="card-badge badge-ref">Ref</span>
-        </div>
-        <p class="card-desc">Multi-process capacity leasing (dispatch-admission.json), heartbeat TTLs, cross-process transaction locks, and cluster drain control.</p>
-        <div class="card-footer">
-          <span class="path">capacity-and-scheduling.md</span>
-          <span class="feature">Leasing Protocol</span>
-        </div>
-      </a>
-
-      <!-- Card: Glossary -->
-      <a href="glossary_blueprint.html" class="doc-card" data-categories="reference" data-title="Glossary" data-tags="glossary terms assignment run attempt batch plan receipt topology types">
-        <div class="card-top">
-          <h3 class="card-title">Glossary</h3>
-          <span class="card-badge badge-ref">Ref</span>
-        </div>
-        <p class="card-desc">Authoritative definitions of 40 core architectural concepts mapped to their owning TypeScript types in src/.</p>
-        <div class="card-footer">
-          <span class="path">glossary.md</span>
-          <span class="feature">Terms Index</span>
-        </div>
-      </a>
-
-      <!-- Card: Troubleshooting -->
-      <a href="troubleshooting_blueprint.html" class="doc-card" data-categories="operate,reference" data-title="Troubleshooting" data-tags="troubleshooting errors remedies diagnostics doctor probe repair warnings">
-        <div class="card-top">
-          <h3 class="card-title">Troubleshooting</h3>
-          <span class="card-badge badge-ref">Ref</span>
-        </div>
-        <p class="card-desc">Actionable error remediation and diagnostics catalog keyed by exact user-facing messages and failure codes.</p>
-        <div class="card-footer">
-          <span class="path">troubleshooting.md</span>
-          <span class="feature">Error Matrix</span>
-        </div>
-      </a>
-
-      <!-- Card: Pi SDK Boundary -->
-      <a href="pi_boundary_blueprint.html" class="doc-card" data-categories="reference" data-title="Pi SDK Boundary" data-tags="sdk boundary upstream primitives keep route attribution">
-        <div class="card-top">
-          <h3 class="card-title">Pi SDK Boundary</h3>
-          <span class="card-badge badge-ref">Ref</span>
-        </div>
-        <p class="card-desc">Explicit architectural boundary defining which primitives route upstream and which behaviors are owned by Clio.</p>
-        <div class="card-footer">
-          <span class="path">pi-boundary.md</span>
-          <span class="feature">Boundary Table</span>
-        </div>
-      </a>
-
-      <!-- Card: Dispatch Architecture Rationale -->
-      <a href="dispatch_rationale_blueprint.html" class="doc-card" data-categories="fleet,reference" data-title="Dispatch Architecture Rationale" data-tags="dispatch rationale cohesion invariants waves scheduler">
-        <div class="card-top">
-          <h3 class="card-title">Dispatch Rationale</h3>
-          <span class="card-badge badge-ref">Ref</span>
-        </div>
-        <p class="card-desc">Cohesion invariants, wave scheduling constraints, and single-owner reducers across the dispatch domain.</p>
-        <div class="card-footer">
-          <span class="path">dispatch-architecture-rationale.md</span>
-          <span class="feature">Rationale Spec</span>
-        </div>
-      </a>
-
-      <!-- Card: Time Conventions -->
-      <a href="time_conventions_blueprint.html" class="doc-card" data-categories="reference" data-title="Time Conventions" data-tags="time clock monotonic wall utc formatters instants durations">
-        <div class="card-top">
-          <h3 class="card-title">Time &amp; Clock Conventions</h3>
-          <span class="card-badge badge-ref">Ref</span>
-        </div>
-        <p class="card-desc">Monotonic clocks for durations, wall clocks for anchor instants, UTC storage, and render-boundary formatters.</p>
-        <div class="card-footer">
-          <span class="path">time-conventions.md</span>
-          <span class="feature">Clock Rules</span>
-        </div>
-      </a>
-
-      <!-- Card: Artifact Placement -->
-      <a href="artifact_placement_blueprint.html" class="doc-card" data-categories="reference" data-title="Artifact Placement" data-tags="artifact placement workspace transient state storage">
-        <div class="card-top">
-          <h3 class="card-title">Artifact Placement</h3>
-          <span class="card-badge badge-ref">Ref</span>
-        </div>
-        <p class="card-desc">Clear separation of files by audience: human deliverables in workspace, transient outputs in .clio-coder/, and state in XDG roots.</p>
-        <div class="card-footer">
-          <span class="path">artifact-placement.md</span>
-          <span class="feature">Placement Contract</span>
-        </div>
-      </a>
-
-      <!-- Card: Prompt Envelope -->
-      <a href="prompt_envelope_blueprint.html" class="doc-card" data-categories="operate,safety" data-title="Prompt Envelope &amp; Tools" data-tags="prompt envelope templates override subtree tool planes">
-        <div class="card-top">
-          <h3 class="card-title">Prompt Envelope &amp; Tools</h3>
-          <span class="card-badge badge-ref">Ref</span>
-        </div>
-        <p class="card-desc">Layered system prompts, shell-style template parameter expansion, handbook subtree boundaries, and seven tool planes.</p>
-        <div class="card-footer">
-          <span class="path">prompt-envelope-and-tools.md</span>
-          <span class="feature">Prompt Architecture</span>
-        </div>
-      </a>
-
+      <div class="doc-grid">
+        <a class="blueprint-card" style="--order: 1" href="agents_blueprint.html" data-blueprint-card data-category="guide" data-search="clio coder agent fleet docs/guide/built-in-agents.md agent architecture semantics built-in catalog frontmatter schema dispatching agents fleet management and fault tolerance adding a project agent">
+          <span class="blueprint-card-kind">6 sections · 3,549 words</span>
+          <h3>Clio Coder Agent Fleet</h3>
+          <p>Agent Architecture Semantics · Built-in catalog</p>
+          <span class="blueprint-card-path">docs/guide/built-in-agents.md</span>
+        </a>
+        <a class="blueprint-card" style="--order: 2" href="commands_blueprint.html" data-blueprint-card data-category="guide" data-search="commands and modes docs/guide/commands-and-modes.md cli commands headless run flags interactive slash commands keybindings live steering operating posture and autonomy dispatch and built-in agents verification lanes environment variables project context reasoning and live thinking controls tui surface refinements overlay and presentation conventions troubleshooting">
+          <span class="blueprint-card-kind">14 sections · 9,848 words</span>
+          <h3>Commands and Modes</h3>
+          <p>CLI Commands · Headless Run Flags</p>
+          <span class="blueprint-card-path">docs/guide/commands-and-modes.md</span>
+        </a>
+        <a class="blueprint-card" style="--order: 3" href="configuration_blueprint.html" data-blueprint-card data-category="guide" data-search="configuration, targets, runtimes, and auth docs/guide/configuration-and-targets.md directory locations first-run flow settings shape strict validation and lifecycle repair live routing vs saved defaults settings center settings inventory configure targets interop with other coding agents subscription-based targets and runtimes target management local model quirks model listing and refresh built-in runtime categories auth troubleshooting checklist">
+          <span class="blueprint-card-kind">16 sections · 8,166 words</span>
+          <h3>Configuration, Targets, Runtimes, and Auth</h3>
+          <p>Directory locations · First-run flow</p>
+          <span class="blueprint-card-path">docs/guide/configuration-and-targets.md</span>
+        </a>
+        <a class="blueprint-card" style="--order: 4" href="configuration_reference_blueprint.html" data-blueprint-card data-category="guide" data-search="configuration reference docs/guide/configuration-reference.md settings keys environment variables cli flags project files agent recipe frontmatter prompt fragment frontmatter tool arguments model knowledge-base tags bounding constants">
+          <span class="blueprint-card-kind">9 sections · 16,704 words</span>
+          <h3>Configuration reference</h3>
+          <p>Settings keys · Environment variables</p>
+          <span class="blueprint-card-path">docs/guide/configuration-reference.md</span>
+        </a>
+        <a class="blueprint-card" style="--order: 5" href="environment_blueprint.html" data-blueprint-card data-category="guide" data-search="environment variables docs/guide/environment-variables.md behavior knobs without a settings key directory and install layout ambient provider, runtime, and terminal inputs debug and trace toggles internal plumbing test-only">
+          <span class="blueprint-card-kind">6 sections · 1,828 words</span>
+          <h3>Environment Variables</h3>
+          <p>Behavior knobs without a settings key · Directory and install layout</p>
+          <span class="blueprint-card-path">docs/guide/environment-variables.md</span>
+        </a>
+        <a class="blueprint-card" style="--order: 6" href="exit_codes_blueprint.html" data-blueprint-card data-category="guide" data-search="exit codes &amp; machine-readable output contracts docs/guide/exit-codes-and-output.md 1. global exit codes 2. the --help standard 3. standard i/o separation &amp; headless execution 4. machine-readable output formats (--json &amp; --json-events)">
+          <span class="blueprint-card-kind">4 sections · 926 words</span>
+          <h3>Exit Codes &amp; Machine-Readable Output Contracts</h3>
+          <p>1. Global Exit Codes · 2. The --help Standard</p>
+          <span class="blueprint-card-path">docs/guide/exit-codes-and-output.md</span>
+        </a>
+        <a class="blueprint-card" style="--order: 7" href="extensions_blueprint.html" data-blueprint-card data-category="guide" data-search="extensions, resources, and share archives docs/guide/extensions-and-sharing.md resource roots and precedence prompt templates skills extension package manifest extension cli share archives community packaging guidance">
+          <span class="blueprint-card-kind">7 sections · 2,938 words</span>
+          <h3>Extensions, Resources, and Share Archives</h3>
+          <p>Resource roots and precedence · Prompt templates</p>
+          <span class="blueprint-card-path">docs/guide/extensions-and-sharing.md</span>
+        </a>
+        <a class="blueprint-card" style="--order: 8" href="fleet_dispatch_blueprint.html" data-blueprint-card data-category="guide" data-search="fleet dispatch docs/guide/fleet-dispatch.md architecture worker prompt and budget admission node setup doctor preflight placement and process-safe admission failure semantics topologies measured route selection and agent automation assignments, attempts, and failover receipts operator visibility speculation observer residency manual fleet verification">
+          <span class="blueprint-card-kind">14 sections · 10,027 words</span>
+          <h3>Fleet Dispatch</h3>
+          <p>Architecture · Worker prompt and budget admission</p>
+          <span class="blueprint-card-path">docs/guide/fleet-dispatch.md</span>
+        </a>
+        <a class="blueprint-card" style="--order: 9" href="glossary_blueprint.html" data-blueprint-card data-category="guide" data-search="clio coder glossary docs/guide/glossary.md terms &amp; concept definitions">
+          <span class="blueprint-card-kind">1 sections · 2,787 words</span>
+          <h3>Clio Coder Glossary</h3>
+          <p>Terms &amp; Concept Definitions</p>
+          <span class="blueprint-card-path">docs/guide/glossary.md</span>
+        </a>
+        <a class="blueprint-card" style="--order: 10" href="lifecycle_blueprint.html" data-blueprint-card data-category="guide" data-search="installation and lifecycle operations docs/guide/installation-and-lifecycle.md 1. directory layout &amp; platform defaults 2. file &amp; permissions matrix 3. bootstrap initialization 4. source checkout install 5. lifecycle commands 6. residues checklist for manual purging 7. headless and ci execution behavior">
+          <span class="blueprint-card-kind">7 sections · 3,727 words</span>
+          <h3>Installation and Lifecycle Operations</h3>
+          <p>1. Directory Layout &amp; Platform Defaults · 2. File &amp; Permissions Matrix</p>
+          <span class="blueprint-card-path">docs/guide/installation-and-lifecycle.md</span>
+        </a>
+        <a class="blueprint-card" style="--order: 11" href="proactive_memory_blueprint.html" data-blueprint-card data-category="guide" data-search="proactive task memory docs/guide/proactive-memory.md architecture paper mapping and clio constraints trigger semantics background steps never hold a turn open cost and the default decision choosing a background model operator setup where what the tier writes ends up what the llm tier actually writes handoff continuity telemetry evaluation and promotion bar worker growth path">
+          <span class="blueprint-card-kind">13 sections · 4,656 words</span>
+          <h3>Proactive task memory</h3>
+          <p>Architecture · Paper mapping and Clio constraints</p>
+          <span class="blueprint-card-path">docs/guide/proactive-memory.md</span>
+        </a>
+        <a class="blueprint-card" style="--order: 12" href="resource_library_blueprint.html" data-blueprint-card data-category="guide" data-search="resource library docs/guide/resource-library.md catalog schema private catalog and remote gating cli in the tui installation roots and validation">
+          <span class="blueprint-card-kind">5 sections · 589 words</span>
+          <h3>Resource Library</h3>
+          <p>Catalog schema · Private catalog and remote gating</p>
+          <span class="blueprint-card-path">docs/guide/resource-library.md</span>
+        </a>
+        <a class="blueprint-card" style="--order: 13" href="skills_blueprint.html" data-blueprint-card data-category="guide" data-search="skills marketplace docs/guide/skills-marketplace.md where marketplace rows come from using the hub tabs publishing a skill">
+          <span class="blueprint-card-kind">4 sections · 964 words</span>
+          <h3>Skills Marketplace</h3>
+          <p>Where marketplace rows come from · Using the hub</p>
+          <span class="blueprint-card-path">docs/guide/skills-marketplace.md</span>
+        </a>
+        <a class="blueprint-card" style="--order: 14" href="tool_usage_blueprint.html" data-blueprint-card data-category="guide" data-search="tool usage reference docs/guide/tool-usage.md observation envelope: truncation notices, offload, next hints, and the turn budget read: page through a file with offset, limit, and tail edit: exact text replacements in one file write: create or overwrite a whole file bash: run a shell command grep: search file contents with ripgrep find: locate files and directories by glob pattern ls: list one directory credential_present: check environment or file for a credential key dispatch: run bounded tasks on fleet agents verify: run declared verification checks git: read-only inspection of git repository state context: workspace snapshot, docs retrieval, and skills code_nav: navigate the codewiki index web_fetch: fetch http(s) urls and convert html to markdown monitor: inspect dispatched runs steer: guide or cancel a running worker tasks: the session task board ledger: coordinate peer workers through typed entries panes: manage clio-owned terminal panes ask_user: host-owned operator interviews artifact: plans, reviews, and reports">
+          <span class="blueprint-card-kind">22 sections · 7,854 words</span>
+          <h3>Tool Usage Reference</h3>
+          <p>Observation envelope: truncation notices, offload, next hints, and the turn budget · read: page through a file with offset, limit, and tail</p>
+          <span class="blueprint-card-path">docs/guide/tool-usage.md</span>
+        </a>
+        <a class="blueprint-card" style="--order: 15" href="troubleshooting_blueprint.html" data-blueprint-card data-category="guide" data-search="troubleshooting &amp; error remediation docs/guide/troubleshooting.md error catalog &amp; remediation matrix reading a cold cache a tui that stops answering the keyboard diagnostic commands">
+          <span class="blueprint-card-kind">4 sections · 1,760 words</span>
+          <h3>Troubleshooting &amp; Error Remediation</h3>
+          <p>Error Catalog &amp; Remediation Matrix · Reading a cold cache</p>
+          <span class="blueprint-card-path">docs/guide/troubleshooting.md</span>
+        </a>
+      </div>
+    </section>
+    <section class="doc-group" data-doc-group data-category="architecture">
+      <div class="doc-group-header">
+        <span class="doc-group-index">03</span>
+        <h2 class="doc-group-title">Architecture</h2>
+        <span class="doc-group-count">23 pages</span>
+      </div>
+      <div class="doc-grid">
+        <a class="blueprint-card" style="--order: 16" href="acp_blueprint.html" data-blueprint-card data-category="architecture" data-search="agent client protocol (acp) server docs/architecture/acp.md 1. overview &amp; protocol specification 2. server command &amp; transport wiring 3. supported acp methods 4. initial safe profile 5. tool presentation and outbound delegation governance 6. security &amp; boundary guarantees 7. delegation peers in the transcript 8. error taxonomy">
+          <span class="blueprint-card-kind">8 sections · 5,953 words</span>
+          <h3>Agent Client Protocol (ACP) Server</h3>
+          <p>1. Overview &amp; Protocol Specification · 2. Server Command &amp; Transport Wiring</p>
+          <span class="blueprint-card-path">docs/architecture/acp.md</span>
+        </a>
+        <a class="blueprint-card" style="--order: 17" href="alcf_blueprint.html" data-blueprint-card data-category="architecture" data-search="alcf inference provider docs/architecture/alcf-provider.md configure implementation notes">
+          <span class="blueprint-card-kind">2 sections · 337 words</span>
+          <h3>ALCF Inference Provider</h3>
+          <p>Configure · Implementation Notes</p>
+          <span class="blueprint-card-path">docs/architecture/alcf-provider.md</span>
+        </a>
+        <a class="blueprint-card" style="--order: 18" href="architecture_blueprint.html" data-blueprint-card data-category="architecture" data-search="clio coder architecture and boundaries docs/architecture/architecture.md source layout session routing vs. persisted settings workspace enumeration and language classification codewiki ownership and worker boundary lazy built-in tool boundary boundary invariants runtime flow event and audit model interactive render transactions command spec verification commands">
+          <span class="blueprint-card-kind">11 sections · 3,029 words</span>
+          <h3>Clio Coder Architecture and Boundaries</h3>
+          <p>Source layout · Session Routing vs. Persisted Settings</p>
+          <span class="blueprint-card-path">docs/architecture/architecture.md</span>
+        </a>
+        <a class="blueprint-card" style="--order: 19" href="artifact_placement_blueprint.html" data-blueprint-card data-category="architecture" data-search="artifact placement docs/architecture/artifact-placement.md three audiences placement by class the artifact tool default .clio-coder/ and git finding what was hidden">
+          <span class="blueprint-card-kind">5 sections · 728 words</span>
+          <h3>Artifact Placement</h3>
+          <p>Three audiences · Placement by class</p>
+          <span class="blueprint-card-path">docs/architecture/artifact-placement.md</span>
+        </a>
+        <a class="blueprint-card" style="--order: 20" href="artifact_versions_blueprint.html" data-blueprint-card data-category="architecture" data-search="artifact versions &amp; serialization contracts docs/architecture/artifact-versions.md 1. operator-facing artifact registry 2. integrity verification contracts 3. migration mechanics">
+          <span class="blueprint-card-kind">3 sections · 2,313 words</span>
+          <h3>Artifact Versions &amp; Serialization Contracts</h3>
+          <p>1. Operator-facing Artifact Registry · 2. Integrity Verification Contracts</p>
+          <span class="blueprint-card-path">docs/architecture/artifact-versions.md</span>
+        </a>
+        <a class="blueprint-card" style="--order: 21" href="capacity_scheduling_blueprint.html" data-blueprint-card data-category="architecture" data-search="capacity leases &amp; fleet scheduling docs/architecture/capacity-and-scheduling.md 1. capacity model &amp; admission invariants 2. capacity lease schema &amp; ttls 3. heartbeats &amp; dead-process recovery 4. cluster drain &amp; emergency control 5. fail-closed invariants">
+          <span class="blueprint-card-kind">5 sections · 1,497 words</span>
+          <h3>Capacity Leases &amp; Fleet Scheduling</h3>
+          <p>1. Capacity Model &amp; Admission Invariants · 2. Capacity Lease Schema &amp; TTLs</p>
+          <span class="blueprint-card-path">docs/architecture/capacity-and-scheduling.md</span>
+        </a>
+        <a class="blueprint-card" style="--order: 22" href="context_blueprint.html" data-blueprint-card data-category="architecture" data-search="context engine docs/architecture/context-engine.md context window resolution token accounting and snapshots single-threshold compaction cache-divergence honesty prompt pre-warm settings directory-scoped project handbooks project-context preload class context refresh generated handbook structure and verification expectations codewiki and wiki">
+          <span class="blueprint-card-kind">11 sections · 6,614 words</span>
+          <h3>Context Engine</h3>
+          <p>Context window resolution · Token accounting and snapshots</p>
+          <span class="blueprint-card-path">docs/architecture/context-engine.md</span>
+        </a>
+        <a class="blueprint-card" style="--order: 23" href="context_working_set_blueprint.html" data-blueprint-card data-category="architecture" data-search="working set docs/architecture/context-working-set.md vocabulary eviction is a projection, not a rewrite ledger records and format v4 the marker contract policies recall settings what the operator sees not in this release see also">
+          <span class="blueprint-card-kind">10 sections · 3,426 words</span>
+          <h3>Working Set</h3>
+          <p>Vocabulary · Eviction is a projection, not a rewrite</p>
+          <span class="blueprint-card-path">docs/architecture/context-working-set.md</span>
+        </a>
+        <a class="blueprint-card" style="--order: 24" href="dispatch_rationale_blueprint.html" data-blueprint-card data-category="architecture" data-search="dispatch architecture rationale docs/architecture/dispatch-architecture-rationale.md size does not argue for a split dispatch reads an eval parser the eval barrel does not export the repository has no barrel-only import convention">
+          <span class="blueprint-card-kind">3 sections · 1,088 words</span>
+          <h3>Dispatch Architecture Rationale</h3>
+          <p>Size does not argue for a split · Dispatch reads an eval parser the eval barrel does not export</p>
+          <span class="blueprint-card-path">docs/architecture/dispatch-architecture-rationale.md</span>
+        </a>
+        <a class="blueprint-card" style="--order: 25" href="dispatch_typed_intent_blueprint.html" data-blueprint-card data-category="architecture" data-search="typed dispatch intent: migration and refusal policy docs/architecture/dispatch-typed-intent.md 1. the shape 2. compatibility rules 3. producer compatibility table 4. persisted and serialized contract table 5. reason codes 6. examples 7. retirement criterion for legacy inference">
+          <span class="blueprint-card-kind">7 sections · 3,210 words</span>
+          <h3>Typed Dispatch Intent: Migration and Refusal Policy</h3>
+          <p>1. The Shape · 2. Compatibility Rules</p>
+          <span class="blueprint-card-path">docs/architecture/dispatch-typed-intent.md</span>
+        </a>
+        <a class="blueprint-card" style="--order: 26" href="memory_blueprint.html" data-blueprint-card data-category="architecture" data-search="evidence corpus and long-term memory docs/architecture/evidence-and-memory.md evidence cli evidence directory layout evidence tag taxonomy and failure causes receipt findingssummary memory cli memory record lifecycle prompt injection rules recommended workflow">
+          <span class="blueprint-card-kind">8 sections · 4,080 words</span>
+          <h3>Evidence Corpus and Long-Term Memory</h3>
+          <p>Evidence CLI · Evidence directory layout</p>
+          <span class="blueprint-card-path">docs/architecture/evidence-and-memory.md</span>
+        </a>
+        <a class="blueprint-card" style="--order: 27" href="middleware_blueprint.html" data-blueprint-card data-category="architecture" data-search="middleware and component registry docs/architecture/middleware-and-components.md component scanner component cli middleware contract validation helpers">
+          <span class="blueprint-card-kind">4 sections · 1,804 words</span>
+          <h3>Middleware and Component Registry</h3>
+          <p>Component scanner · Component CLI</p>
+          <span class="blueprint-card-path">docs/architecture/middleware-and-components.md</span>
+        </a>
+        <a class="blueprint-card" style="--order: 28" href="models_blueprint.html" data-blueprint-card data-category="architecture" data-search="model catalog, runtime refresh, and field notes docs/architecture/model-catalog.md runtime refresh controls measuring models what &quot;sanctioned&quot; means local catalog overlays field note template &lt;model family or exact model&gt; on &lt;runtime&gt; reasoning controls and thinking replay semantics subscription catalog models local runtime resolution &amp; quirks promotion path">
+          <span class="blueprint-card-kind">10 sections · 1,887 words</span>
+          <h3>Model Catalog, Runtime Refresh, and Field Notes</h3>
+          <p>Runtime refresh controls · Measuring models</p>
+          <span class="blueprint-card-path">docs/architecture/model-catalog.md</span>
+        </a>
+        <a class="blueprint-card" style="--order: 29" href="observability_blueprint.html" data-blueprint-card data-category="architecture" data-search="observability viewer docs/architecture/observability.md trace retention and state usage the evidence spine end-to-end cross-session usage facts artifact categories and path layouts the accountability panel receipt integrity verification receipt fields for dispatch provenance worked example: end-to-end spine flow top failure causes">
+          <span class="blueprint-card-kind">9 sections · 3,311 words</span>
+          <h3>Observability Viewer</h3>
+          <p>Trace retention and state usage · The Evidence Spine End-to-End</p>
+          <span class="blueprint-card-path">docs/architecture/observability.md</span>
+        </a>
+        <a class="blueprint-card" style="--order: 30" href="pi_boundary_blueprint.html" data-blueprint-card data-category="architecture" data-search="pi sdk boundary docs/architecture/pi-boundary.md boundary table thin-wrapper watch list pi regression net">
+          <span class="blueprint-card-kind">3 sections · 1,953 words</span>
+          <h3>Pi SDK Boundary</h3>
+          <p>Boundary table · Thin-wrapper watch list</p>
+          <span class="blueprint-card-path">docs/architecture/pi-boundary.md</span>
+        </a>
+        <a class="blueprint-card" style="--order: 31" href="tools_blueprint.html" data-blueprint-card data-category="architecture" data-search="prompt envelope and tools docs/architecture/prompt-envelope-and-tools.md one system prompt per session section order: stable prefix first prompt template expansion directory-scoped handbook overrides one tool surface per session canonical worker harness seven planes, twenty-one tools the observation envelope description tiering the gateway reservation context protection inspecting a session self-documentation retrieval edit matching safety">
+          <span class="blueprint-card-kind">14 sections · 5,164 words</span>
+          <h3>Prompt Envelope and Tools</h3>
+          <p>One system prompt per session · Section order: stable prefix first</p>
+          <span class="blueprint-card-path">docs/architecture/prompt-envelope-and-tools.md</span>
+        </a>
+        <a class="blueprint-card" style="--order: 32" href="provider_adapter_blueprint.html" data-blueprint-card data-category="architecture" data-search="provider adapter cookbook docs/architecture/provider-adapter-cookbook.md 1. anatomy of a runtime descriptor 2. probing mechanisms 3. model synthesis 4. configuring reasoning &amp; thinking formats 5. adding the adapter to clio">
+          <span class="blueprint-card-kind">5 sections · 1,362 words</span>
+          <h3>Provider Adapter Cookbook</h3>
+          <p>1. Anatomy of a Runtime Descriptor · 2. Probing Mechanisms</p>
+          <span class="blueprint-card-path">docs/architecture/provider-adapter-cookbook.md</span>
+        </a>
+        <a class="blueprint-card" style="--order: 33" href="safety_blueprint.html" data-blueprint-card data-category="architecture" data-search="clio coder safety model docs/architecture/safety-model.md two axes: autonomy and the safety net enforcement path operating posture and visible tools skill tool surface narrowing damage-control rules bash recognition policy engine evaluation order project safety policy typed validation tools dispatch runtimes approvals rigor gate and finish contract receipts and evidence">
+          <span class="blueprint-card-kind">13 sections · 5,945 words</span>
+          <h3>Clio Coder Safety Model</h3>
+          <p>Two axes: autonomy and the safety net · Enforcement path</p>
+          <span class="blueprint-card-path">docs/architecture/safety-model.md</span>
+        </a>
+        <a class="blueprint-card" style="--order: 34" href="session_lifecycle_blueprint.html" data-blueprint-card data-category="architecture" data-search="session lifecycle docs/architecture/session-lifecycle.md 1. on-disk session layout 2. session metadata (meta.json) 3. append-only context ledger (current.jsonl) 4. conversation tree graph (tree.json) &amp; lineage 5. session resumption (/resume) &amp; working directory fallback 6. session export 7. directory handbooks and project overrides 8. prompt history and input recovery 9. protected-artifact write-ahead journal 10. in-session task board &amp; usage accounting">
+          <span class="blueprint-card-kind">10 sections · 1,923 words</span>
+          <h3>Session Lifecycle</h3>
+          <p>1. On-Disk Session Layout · 2. Session Metadata (meta.json)</p>
+          <span class="blueprint-card-path">docs/architecture/session-lifecycle.md</span>
+        </a>
+        <a class="blueprint-card" style="--order: 35" href="time_conventions_blueprint.html" data-blueprint-card data-category="architecture" data-search="time and clock conventions docs/architecture/time-conventions.md 1. choose a clock for the lifetime of the fact 2. utc storage and local rendering 3. receipt and audit integrity 4. review checklist">
+          <span class="blueprint-card-kind">4 sections · 834 words</span>
+          <h3>Time and Clock Conventions</h3>
+          <p>1. Choose a clock for the lifetime of the fact · 2. UTC storage and local rendering</p>
+          <span class="blueprint-card-path">docs/architecture/time-conventions.md</span>
+        </a>
+        <a class="blueprint-card" style="--order: 36" href="trace_blueprint.html" data-blueprint-card data-category="architecture" data-search="trace store contract docs/architecture/trace-store.md connection and version contract tables polling contract failure behavior cli commands">
+          <span class="blueprint-card-kind">5 sections · 1,262 words</span>
+          <h3>Trace store contract</h3>
+          <p>Connection and version contract · Tables</p>
+          <span class="blueprint-card-path">docs/architecture/trace-store.md</span>
+        </a>
+        <a class="blueprint-card" style="--order: 37" href="tui_design_blueprint.html" data-blueprint-card data-category="architecture" data-search="clio tui design system docs/architecture/tui-design.md 1. color system 2. glyph vocabulary 3. formatting rules 4. structural layouts 5. screen surfaces &amp; state choreography 6. agent and transcript formatting 7. settings center &amp; command overlays 8. shared vocabulary">
+          <span class="blueprint-card-kind">8 sections · 4,430 words</span>
+          <h3>Clio TUI Design System</h3>
+          <p>1. Color System · 2. Glyph Vocabulary</p>
+          <span class="blueprint-card-path">docs/architecture/tui-design.md</span>
+        </a>
+        <a class="blueprint-card" style="--order: 38" href="worker_dispatch_blueprint.html" data-blueprint-card data-category="architecture" data-search="worker dispatch mechanics docs/architecture/worker-dispatch-mechanics.md 1. spawning sequence &amp; environment isolation 2. standard input/output ndjson protocol 3. heartbeats and the watchdog 4. permission escalation and parking 5. assignment-aware retry and failover 6. worker exit codes">
+          <span class="blueprint-card-kind">6 sections · 2,014 words</span>
+          <h3>Worker Dispatch Mechanics</h3>
+          <p>1. Spawning Sequence &amp; Environment Isolation · 2. Standard Input/Output NDJSON Protocol</p>
+          <span class="blueprint-card-path">docs/architecture/worker-dispatch-mechanics.md</span>
+        </a>
+      </div>
+    </section>
+    <section class="doc-group" data-doc-group data-category="process">
+      <div class="doc-group-header">
+        <span class="doc-group-index">04</span>
+        <h2 class="doc-group-title">Process</h2>
+        <span class="doc-group-count">10 pages</span>
+      </div>
+      <div class="doc-grid">
+        <a class="blueprint-card" style="--order: 39" href="development_pipeline_blueprint.html" data-blueprint-card data-category="process" data-search="development pipeline docs/process/development-pipeline.md the lifecycle inheriting a pi release test lanes issue conventions milestones are releases dogfooding setup">
+          <span class="blueprint-card-kind">6 sections · 817 words</span>
+          <h3>Development Pipeline</h3>
+          <p>The lifecycle · Inheriting a Pi release</p>
+          <span class="blueprint-card-path">docs/process/development-pipeline.md</span>
+        </a>
+        <a class="blueprint-card" style="--order: 40" href="documentation_coverage_blueprint.html" data-blueprint-card data-category="process" data-search="documentation coverage and source-alignment audit docs/process/documentation-coverage.md headline page audit blueprint disposition audit disposition">
+          <span class="blueprint-card-kind">4 sections · 3,394 words</span>
+          <h3>Documentation coverage and source-alignment audit</h3>
+          <p>Headline · Page audit</p>
+          <span class="blueprint-card-path">docs/process/documentation-coverage.md</span>
+        </a>
+        <a class="blueprint-card" style="--order: 41" href="documentation_blueprint.html" data-blueprint-card data-category="process" data-search="documentation standards and codebase alignment docs/process/documentation-guide.md source-first documentation rule documentation map style conventions blueprint coverage and format strategy update checklist community documentation priorities">
+          <span class="blueprint-card-kind">6 sections · 2,258 words</span>
+          <h3>Documentation Standards and Codebase Alignment</h3>
+          <p>Source-first documentation rule · Documentation map</p>
+          <span class="blueprint-card-path">docs/process/documentation-guide.md</span>
+        </a>
+        <a class="blueprint-card" style="--order: 42" href="eval_blueprint.html" data-blueprint-card data-category="process" data-search="clio coder local evaluation runner docs/process/eval-runner.md cli commands suite v2 schema workspace kinds runner kinds metric assertions failure classes v1 compatibility token accounting &amp; provenance eval artifact format (v4) the verdict envelope task outcome measurement (verify.measure)">
+          <span class="blueprint-card-kind">11 sections · 3,288 words</span>
+          <h3>Clio Coder Local Evaluation Runner</h3>
+          <p>CLI Commands · Suite v2 Schema</p>
+          <span class="blueprint-card-path">docs/process/eval-runner.md</span>
+        </a>
+        <a class="blueprint-card" style="--order: 43" href="evals_internal_blueprint.html" data-blueprint-card data-category="process" data-search="internal eval suites docs/process/evals-internal.md running a private suite as a measurement context regression seed model matrix seed live turns seed">
+          <span class="blueprint-card-kind">4 sections · 770 words</span>
+          <h3>Internal Eval Suites</h3>
+          <p>Running a private suite as a measurement · Context Regression Seed</p>
+          <span class="blueprint-card-path">docs/process/evals-internal.md</span>
+        </a>
+        <a class="blueprint-card" style="--order: 44" href="evolution_blueprint.html" data-blueprint-card data-category="process" data-search="evolution and change manifests docs/process/evolution.md cli minimal manifest schema notes recommended workflow">
+          <span class="blueprint-card-kind">4 sections · 773 words</span>
+          <h3>Evolution and Change Manifests</h3>
+          <p>CLI · Minimal manifest</p>
+          <span class="blueprint-card-path">docs/process/evolution.md</span>
+        </a>
+        <a class="blueprint-card" style="--order: 45" href="fleet_demo_blueprint.html" data-blueprint-card data-category="process" data-search="fleet demo runbook docs/process/fleet-demo-runbook.md reference fabric 1. declare the fleet (local) 2. preflight the nodes 3. open the session and the fleet views 4. dispatch the gated fix across nodes 5. collect the results 6. verify every receipt, including the remote ones provenance walkthrough: what a pi can verify from receipts alone">
+          <span class="blueprint-card-kind">8 sections · 1,047 words</span>
+          <h3>Fleet Demo Runbook</h3>
+          <p>Reference fabric · 1. Declare the fleet (local)</p>
+          <span class="blueprint-card-path">docs/process/fleet-demo-runbook.md</span>
+        </a>
+        <a class="blueprint-card" style="--order: 46" href="git_commit_provenance_blueprint.html" data-blueprint-card data-category="process" data-search="git commit provenance docs/process/git-commit-provenance.md canonical identity evidence-dependent roles commit paths and hooks platform identity and avatar">
+          <span class="blueprint-card-kind">4 sections · 879 words</span>
+          <h3>Git Commit Provenance</h3>
+          <p>Canonical identity · Evidence-dependent roles</p>
+          <span class="blueprint-card-path">docs/process/git-commit-provenance.md</span>
+        </a>
+        <a class="blueprint-card" style="--order: 47" href="performance_methodology_blueprint.html" data-blueprint-card data-category="process" data-search="performance measurement methodology docs/process/performance-methodology.md endpoint vocabulary render trace import-graph method corrected 0.3.3 baseline historical graph-cut observations adaptive stream-pacer observations instant-shell observations reporting checklist">
+          <span class="blueprint-card-kind">8 sections · 4,084 words</span>
+          <h3>Performance Measurement Methodology</h3>
+          <p>Endpoint vocabulary · Render trace</p>
+          <span class="blueprint-card-path">docs/process/performance-methodology.md</span>
+        </a>
+        <a class="blueprint-card" style="--order: 48" href="validation_blueprint.html" data-blueprint-card data-category="process" data-search="clio coder scientific validation contracts docs/process/scientific-validation.md validation contract convention numerical tolerances common scientific artifact families hpc schedulers and validation lifecycle">
+          <span class="blueprint-card-kind">4 sections · 1,114 words</span>
+          <h3>Clio Coder Scientific Validation Contracts</h3>
+          <p>Validation Contract Convention · Numerical Tolerances</p>
+          <span class="blueprint-card-path">docs/process/scientific-validation.md</span>
+        </a>
+      </div>
+    </section>
+    <section class="doc-group" data-doc-group data-category="history">
+      <div class="doc-group-header">
+        <span class="doc-group-index">05</span>
+        <h2 class="doc-group-title">History</h2>
+        <span class="doc-group-count">2 pages</span>
+      </div>
+      <div class="doc-grid">
+        <a class="blueprint-card" style="--order: 49" href="config_knobs_audit_blueprint.html" data-blueprint-card data-category="history" data-search="config knobs audit (historical appendix) docs/history/config-knobs-audit.md the pattern, first 1. operator tuning knobs (read by src/) (pre-consolidated state) 2. directory and install layout (pre-consolidated state) 3. debug and trace toggles (pre-consolidated state) 4. internal plumbing (pre-consolidated state) 5. test-only (pre-consolidated state) 6. cli flags that bridge through env vars (pre-consolidated state) 7. script- and benchmark-only vars (pre-consolidated state) findings and consolidation candidates">
+          <span class="blueprint-card-kind">9 sections · 1,390 words</span>
+          <h3>Config Knobs Audit (Historical Appendix)</h3>
+          <p>The pattern, first · 1. Operator tuning knobs (read by src/) (Pre-consolidated State)</p>
+          <span class="blueprint-card-path">docs/history/config-knobs-audit.md</span>
+        </a>
+        <a class="blueprint-card" style="--order: 50" href="release_cut_checklist_blueprint.html" data-blueprint-card data-category="history" data-search="v0.4.1 release-cut checklist docs/history/release-cut-checklist.md part 1: verify the exact candidate part 2: notes and package coherence part 3: present the gate authorization boundary part 4: fast-forward main part 5: exact-sha ci, tag, and github release part 6: npm publication part 7: post-publish verification rollback">
+          <span class="blueprint-card-kind">9 sections · 1,428 words</span>
+          <h3>v0.4.1 Release-Cut Checklist</h3>
+          <p>Part 1: verify the exact candidate · Part 2: notes and package coherence</p>
+          <span class="blueprint-card-path">docs/history/release-cut-checklist.md</span>
+        </a>
+      </div>
+    </section>
+      <p class="index-empty" data-doc-empty hidden>No blueprint matches this search.</p>
     </main>
-
-    <!-- Quick Start Section -->
-    <div class="glass-card" style="margin-top: 3.5rem;">
-      <h3 style="font-size: 1.25rem; font-weight: 700; color: #ffffff; margin-bottom: 1rem; display: flex; align-items: center; gap: 0.5rem;">
-        <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><title>Icon</title><polygon points="5 3 19 12 5 21 5 3"></polygon></svg>
-        CLI Quick Reference
-      </h3>
-      <p style="margin-bottom: 1rem; color: var(--text-muted);">Launch the visual docs server from your local Clio checkout workspace environment:</p>
-      <pre><code># Start local http server and open landing page
-clio-coder docs
-
-# Jump directly to safety specs page
-clio-coder docs safety
-
-# Print only the bound port url without launching a browser
-clio-coder docs --no-open</code></pre>
-    </div>
-
-    <footer>
-      <p>Clio Coder Visual Documentation Center &bull; Version 0.4.0</p>
-      <p>Maintainer: Illinois Institute of Technology / Gnosis Research Center &bull; iowarp.ai</p>
-    </footer>
+    <footer>The landing page is navigation only. Every card opens a dedicated counterpart with an explicit Markdown source mapping.</footer>
   </div>
-
-  <script>
-    let activeCategory = 'all';
-
-    function setCategory(catId) {
-      activeCategory = catId;
-
-      // Update buttons
-      document.querySelectorAll('.filter-tag').forEach(btn => {
-        btn.classList.remove('active');
-      });
-      // Find the button
-      const activeBtn = Array.from(document.querySelectorAll('.filter-tag')).find(btn => {
-        return btn.getAttribute('onclick').includes(`'${catId}'`);
-      });
-      if (activeBtn) activeBtn.classList.add('active');
-
-      filterCards();
-    }
-
-    function filterCards() {
-      const query = document.getElementById('searchDocs').value.toLowerCase().trim();
-      const cards = document.querySelectorAll('.doc-card');
-
-      cards.forEach(card => {
-        const title = card.getAttribute('data-title').toLowerCase();
-        const tags = card.getAttribute('data-tags').toLowerCase();
-        const desc = card.querySelector('.card-desc').textContent.toLowerCase();
-        const path = card.querySelector('.path').textContent.toLowerCase();
-        const categories = card.getAttribute('data-categories').split(',');
-
-        const matchesQuery = !query ||
-                             title.includes(query) ||
-                             tags.includes(query) ||
-                             desc.includes(query) ||
-                             path.includes(query);
-
-        const matchesCategory = activeCategory === 'all' || categories.includes(activeCategory);
-
-        if (matchesQuery && matchesCategory) {
-          card.style.display = 'flex';
-        } else {
-          card.style.display = 'none';
-        }
-      });
-    }
-
-    // Make functions globally available
-    window.setCategory = setCategory;
-    window.filterCards = filterCards;
-  </script>
+  <script src="shared.js"></script>
 </body>
 </html>

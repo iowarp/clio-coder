@@ -1,5 +1,8 @@
 # Session Lifecycle
 
+> **Visual blueprint:** The source checkout includes the complete
+> [Session Lifecycle visual reference](https://github.com/iowarp/clio-coder/blob/main/docs/html/session_lifecycle_blueprint.html).
+
 This document is the authoritative specification for Clio Coder interactive and headless session lifecycles, on-disk ledger structures, tree-based conversation branching, checkpoints, and recovery protocols in the current source tree.
 
 Source implementations: `src/engine/session.ts` and `src/domains/session/`.

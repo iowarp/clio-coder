@@ -1,0 +1,654 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <meta name="clio-markdown-source" content="docs/guide/proactive-memory.md">
+  <meta name="clio-docs-version" content="0.4.2">
+  <title>Proactive task memory · Clio Coder 0.4.2</title>
+  <link rel="icon" href="data:,">
+  <link rel="stylesheet" href="shared.css">
+</head>
+<body data-doc-category="guide">
+  <div class="reading-progress" aria-hidden="true"></div>
+  <a class="skip-link" href="#reference-content">Skip to reference</a>
+  <div class="container">
+    <header class="document-header" data-category="Guide">
+      <div class="header-left">
+        <a class="header-logo" href="index.html" aria-label="Documentation index">
+          <svg viewBox="0 0 24 24" fill="none" aria-hidden="true">
+            <path d="M12 2 2 7l10 5 10-5-10-5Z" stroke="url(#clio-logo)" stroke-width="2" stroke-linejoin="round"/>
+            <path d="m2 12 10 5 10-5M2 17l10 5 10-5" stroke="url(#clio-logo)" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"/>
+            <defs><linearGradient id="clio-logo" x1="2" y1="2" x2="22" y2="22"><stop stop-color="#00d4db"/><stop offset="1" stop-color="#ff7e29"/></linearGradient></defs>
+          </svg>
+        </a>
+        <div class="header-title-wrapper">
+          <p class="document-kicker">Guide / canonical reference</p>
+          <h1>Proactive task memory</h1>
+          <p class="document-path">docs/guide/proactive-memory.md</p>
+        </div>
+      </div>
+      <div class="header-right">
+        <a class="back-btn" href="index.html">← Index</a>
+        <span class="version-badge">v0.4.2</span>
+      </div>
+    </header>
+    <div class="page-layout-grid reference-layout">
+      <aside class="sidebar reference-sidebar" aria-label="On this page">
+        <nav class="toc-container">
+          <p class="toc-title">On this page</p>
+          <a class="sidebar-source" href="https://github.com/iowarp/clio-coder/blob/main/docs/guide/proactive-memory.md">Canonical Markdown<br>docs/guide/proactive-memory.md</a>
+          <ul class="toc-list"></ul>
+        </nav>
+      </aside>
+      <main class="reference-main" id="reference-content">
+        <article class="reference-prose glass-card">
+<blockquote>
+<p><strong>Visual blueprint:</strong> The source checkout includes the complete
+<a href="proactive_memory_blueprint.html">Proactive task memory visual reference</a>.</p>
+</blockquote>
+<p>Clio&#39;s proactive task memory protects long-running work from behavioral state
+decay: a requirement, environment fact, failed attempt, or diagnosis can still
+exist in the transcript while no longer influencing the next action. The design
+follows Wu et al., <em>Remember When It Matters: Proactive Memory Agent for
+Long-Horizon Agents</em> (2026), adapted to Clio&#39;s visible middleware and local-model
+routing.</p>
+<p>The rules-only tier is enabled by default and makes no model calls. An LLM memory
+tier is opt-in through the independent <code>context.memory.target</code> and
+<code>context.memory.model</code> route. The action agent&#39;s system prompt and tool surface
+do not change, and disabling <code>context.memory.enabled</code> removes observation, bank
+writes, model resolution, reminders, handoff offers, and handoff seeding.</p>
+<h2>Architecture</h2>
+<pre><code class="language-mermaid">flowchart LR
+  T[tool and lifecycle hooks] --&gt; R[memory intervention registration]
+  R --&gt; B[session task bank]
+  R --&gt; D{trigger boundary}
+  D --&gt;|rules only| S[deterministic policy]
+  D --&gt;|background configured| L[two-phase local model policy]
+  S --&gt; V[visible advisory reminder]
+  L --&gt; V
+  V --&gt; U[next user turn and session ledger]
+  R -. counts and outcomes only .-&gt; J[bounded state JSONL]
+  B -. explicit context-handoff .-&gt; H[redacted handoff snapshot]
+</code></pre>
+<p>The task bank is in <code>src/domains/memory/</code> and belongs to one live session. It is
+separate from both durable approved lessons and the regenerable repository
+context engine.</p>
+<ul>
+<li><strong>Private status</strong> is the memory policy&#39;s short progress model. It can be
+inspected with <code>/memory</code>, but is never rendered to either model, injected into
+the action turn, or exported to a handoff.</li>
+<li><strong>Knowledge</strong> contains stable task facts such as requirements, paths,
+environment facts, and constraints.</li>
+<li><strong>Procedural memory</strong> contains attempts and outcomes such as failed commands,
+ruled-out hypotheses, diagnoses, and fixes that worked.</li>
+</ul>
+<p>Knowledge and procedural entries have stable short IDs. A visible reminder is
+one <code>Memory:</code> advisory block and records the cited entry IDs&#39; injection counts.
+The existing middleware path places that block in the next submitted user turn
+and persists its attribution in the session ledger; there is no hidden
+<code>transformContext</code> injection.</p>
+<h2>Paper mapping and Clio constraints</h2>
+<table>
+<thead>
+<tr>
+<th>Paper mechanism</th>
+<th>Clio implementation</th>
+</tr>
+</thead>
+<tbody><tr>
+<td>Separate memory agent</td>
+<td>One stateful middleware registration beside the unmodified action agent</td>
+</tr>
+<tr>
+<td>Status, knowledge, and procedural bank</td>
+<td>Bounded in-memory <code>TaskMemoryBank</code>; status stays out of every reminder except the post-compaction restore</td>
+</tr>
+<tr>
+<td>Phase 1 bank maintenance</td>
+<td>Strict <code>update_status</code>, <code>save_knowledge</code>, <code>save_procedural</code>, and <code>delete</code> operations</td>
+</tr>
+<tr>
+<td>Phase 2 intervene or stay silent</td>
+<td>One advisory <code>inject_reminder</code> effect or explicit silence</td>
+</tr>
+<tr>
+<td>Fixed memory cadence</td>
+<td>Deterministic decay signals plus a coarse interval floor</td>
+</tr>
+<tr>
+<td>Learned intervention calibration</td>
+<td>Structural authority gate: spontaneous reminders must cite a bank entry; deterministic triggers may be uncited</td>
+</tr>
+<tr>
+<td>Passive and always-on ablations</td>
+<td>A/B harness compares baseline, rules, and LLM tiers and flags always-noisy ties as regressions</td>
+</tr>
+</tbody></table>
+<p>Model output uses a strict two-line grammar parsed by <code>src/domains/memory/task-memory-policy.ts</code>:</p>
+<pre><code class="language-text">&lt;operations&gt;[{&quot;op&quot;:&quot;update_status&quot;,&quot;content&quot;:&quot;Tracking the current requirement.&quot;}]&lt;/operations&gt;
+&lt;no_intervention/&gt;
+</code></pre>
+<p>When a visible reminder cites an existing bank entry, the second line uses:</p>
+<pre><code class="language-text">&lt;operations&gt;[]&lt;/operations&gt;
+&lt;context_for_action&gt;Restored requirement [tm-k-1]&lt;/context_for_action&gt;
+</code></pre>
+<p>Knowledge and procedural saves use <code>{&quot;op&quot;:&quot;save_knowledge&quot;,&quot;content&quot;:&quot;...&quot;}</code> or
+<code>{&quot;op&quot;:&quot;save_procedural&quot;,&quot;content&quot;:&quot;...&quot;}</code>; an <code>id</code> is only valid when updating
+an existing entry.</p>
+<p>The parser locates that envelope rather than matching the response byte for byte,
+because a small local model routinely delivers a correct decision inside
+imperfect packaging. A markdown fence, a <code>&lt;think&gt;</code> block, a leading &quot;Here is my
+step:&quot;, a closing pleasantry, and a pretty-printed multi-line operations array
+are all accepted. Two shapes are read conservatively rather than generously:</p>
+<ul>
+<li>A response with no phase-two line at all is silence, since silence is the
+prompt&#39;s documented default. Its phase-one writes still apply. An envelope
+truncated mid-reasoning yields nothing at all.</li>
+<li>Tag shapes are stripped from the reminder before it is emitted, so the memory
+model cannot close the <code>&lt;system-reminder&gt;</code> block it rides inside. Ordinary
+comparisons and arrows survive.</li>
+</ul>
+<p>Operations are validated structurally as a batch: a malformed entry or more than
+eight operations rejects the whole list and changes nothing, because both say
+the model did not produce an operation list at all. Two narrower mistakes cost
+one operation instead of the step, because a small model makes both routinely
+and the notes beside them are the point of the step.</p>
+<p>Identity is repaired rather than rejected, because a small model invents a
+descriptive id for content it is recording for the first time. A
+<code>save_knowledge</code> or <code>save_procedural</code> whose id names no entry of that class
+becomes a new entry, and a <code>delete</code> of an unknown id is dropped.</p>
+<p>An unrecognized <code>op</code> is dropped the same way. Handed a JSON tool trajectory, a
+small model borrows that trajectory&#39;s shape for an entry or two and answers
+<code>{&quot;op&quot;:&quot;read&quot;,&quot;path&quot;:&quot;...&quot;}</code> beside otherwise valid saves; on the reference
+route that happened in a third of sampled steps, and three of four such batches
+carried a valid operation that the old whole-batch rejection discarded. A step
+whose every operation was invented still records <code>malformed</code> rather than
+passing as silence, since recovering nothing is not a decision to stay quiet.</p>
+<p>Phase 1 writes remain valid when Phase 2 is gated or yields to a deterministic
+reminder; an over-budget reminder is recorded as <code>gated</code> and suppressed rather
+than discarding the writes that came with it. A timeout, provider failure,
+malformed response, or telemetry failure is silent and never blocks a tool.</p>
+<h3>Intervention Defaults &amp; Cadence Knobs</h3>
+<ul>
+<li><code>context.memory.enabled</code> (default <code>true</code>): Enables observation, task bank writes, and reminder injection.</li>
+<li><code>context.memory.cadenceToolCalls</code> (default <code>10</code>): Minimum completed-tool interval between background interventions.</li>
+<li><code>context.memory.trajectorySteps</code> (default <code>8</code>): Completed tool-trajectory window analyzed during background evaluation.</li>
+<li><code>context.memory.maxOutputTokens</code> (default <code>2000</code>): Bounds the rendered memory-bank context and the ordinary policy-model completion. An always-on-thinking model receives additional reasoning headroom, at least <code>4,000</code> tokens when its model cap permits, so it can still reach the strict envelope.</li>
+<li><code>context.memory.timeoutMs</code> (default <code>60000</code>): Wall-clock limit for one background memory-policy request. The step is detached, so this deadline never delays a turn, but it does hold a request slot on a real inference endpoint that your own turns and dispatched workers queue against. Raise it only after inspecting the timeout and hit-rate evidence for the selected route.</li>
+</ul>
+<h2>Trigger semantics</h2>
+<p>Memory does not call a model after every tool. Signals accumulate and coalesce at
+a turn-end boundary; at most one prompted step is started for that boundary, and
+it runs detached from it.</p>
+<table>
+<thead>
+<tr>
+<th>Trigger</th>
+<th>Behavior</th>
+</tr>
+</thead>
+<tbody><tr>
+<td>Interval</td>
+<td>After <code>context.memory.cadenceToolCalls</code> completed tools since the last prompted step; default 10. This is the nondeterministic/citation-gated path.</td>
+</tr>
+<tr>
+<td>Tool-error streak</td>
+<td>Two consecutive error outcomes. A successful tool resets the streak.</td>
+</tr>
+<tr>
+<td>Loop signal</td>
+<td>Reuses the orchestrator loop guard&#39;s verdict; it does not infer a second competing loop detector.</td>
+</tr>
+<tr>
+<td>Repeated failure</td>
+<td>The rules tier records failed operation fingerprints and annotates the failing tool result once the same failure appears twice in the bounded trajectory.</td>
+</tr>
+<tr>
+<td>Post-compaction</td>
+<td>The first turn start after compaction restores status and knowledge once, without a model call, because compaction is precisely where execution facts leave the active window.</td>
+</tr>
+</tbody></table>
+<h3>Two delivery channels</h3>
+<p>A turn boundary is the wrong place to warn about a failure that happened forty
+tool calls earlier in the same turn, because the reminder cannot reach the model
+until the operator submits again. Memory therefore has two channels, and each
+repeated failure uses exactly one of them:</p>
+<ul>
+<li><strong>Mid-turn annotation.</strong> The second identical failure appends one cited
+<code>Memory:</code> advisory to that tool&#39;s own result, through the existing
+<code>annotate_tool_result</code> effect the loop guard already uses. The advisory uses
+the canonical result-disposition digest when one is available. Older hook
+producers fall back to the first tool-error line that names a problem. Every
+digest is redacted and byte-capped before it reaches the task bank. The model
+reads the advisory on its very next round. This is spent once per operation
+fingerprint per turn and re-earned in a later turn, because the same command
+failing again after an operator turn is news again.</li>
+<li><strong>Next-turn reminder.</strong> Post-compaction reactivation and any background-model
+reminder ride the <code>inject_reminder</code> buffer into the next submitted turn, inside
+the visible <code>&lt;system-reminder&gt;</code> block, and persist in the session ledger.</li>
+</ul>
+<p>A boundary that already spoke through the annotation stays silent at turn end and
+records one telemetry row, not two.</p>
+<h2>Background steps never hold a turn open</h2>
+<p>The agent loop does not become idle until every <code>agent_end</code> listener settles, so a
+memory step awaited at that boundary would add its full latency to the visible
+end of every triggered turn. Historical operator measurements below put a
+typical step in the tens of seconds. This makes an awaited step intolerable as
+an end-of-turn pause.</p>
+<p>The prompted step is therefore detached. <code>evaluateAsync</code> starts it and returns
+immediately; the turn ends on schedule. When the step resolves, its reminder is
+delivered through the deferred-reminder path into the next submitted turn, which
+is exactly where an awaited turn_end reminder would have been buffered anyway.
+Two consequences follow, both deliberate:</p>
+<ul>
+<li>At most one background step is alive per session. A boundary that arrives while
+a step is still running is dropped rather than queued, so a model slower than
+the turns that trigger it can never build a backlog. The drop is recorded as
+its own telemetry row, because a cadence starved by a slow route and one that
+simply never triggered are otherwise identical in the step log. Its triggers
+stay pending, so the next free boundary still runs for them.</li>
+<li>A reminder can arrive one turn later than the trajectory that earned it. The
+rules tier is unaffected and stays synchronous, so deterministic protection
+keeps its original timing.</li>
+</ul>
+<p><code>/memory</code> shows whether a step is in flight, and the footer&#39;s memory row shows
+<code>working</code> while one is running.</p>
+<p>The error-streak, loop, repeated-failure, and post-compaction paths are
+deterministic. A prompted reminder from one of those paths may be uncited. An
+interval-only prompted reminder must cite at least one current knowledge or
+procedural ID or it is recorded as <code>gated</code> and remains invisible.</p>
+<h3>Outcome semantics</h3>
+<p>The <code>/memory</code> overlay displays <code>last &lt;decision&gt;</code> where <code>&lt;decision&gt;</code> is the
+combined outcome of the most recent actual memory boundary. A <strong>memory boundary</strong>
+is a turn-end evaluation that includes newly completed tools or an explicit
+deterministic trigger (interval, error-streak, loop signal). A no-tool
+middleware continuation is another turn-end with no new tools since the previous
+boundary. It is not a new memory boundary and does not replace the prior outcome.
+Thus <code>last</code> remains <code>injected</code> across such continuations until a later
+tool-bearing or explicitly triggered memory step produces a new outcome (e.g.,
+a healthy tool leading to <code>silent</code>).</p>
+<h2>Cost and the default decision</h2>
+<p>The LLM tier costs real tokens, real seconds of model time, and a request slot on
+a server that is usually the same machine the operator&#39;s own turns run on. Every
+step is therefore accounted for the way a <code>/btw</code> side question is: one cost entry
+under the <code>background-memory</code> label, which <code>/cost</code> shows as its own <code>memory steps</code>
+row, and one durable row in <code>&lt;stateDir&gt;/usage/out-of-turn.jsonl</code> carrying the
+usage, the call&#39;s duration, and the backend&#39;s prefill facts, which
+<code>clio-coder usage report</code> folds after the process exits. <code>/memory</code> shows the
+lifetime figures folded from <code>steps.jsonl</code>: steps, tokens, model time, and the
+hit rate.</p>
+<h3>The measurement</h3>
+<p>From one operator&#39;s dated <code>steps.jsonl</code> export, 274 rows spanning 2026-08-14 to
+2026-08-29 on a small local background route:</p>
+<table>
+<thead>
+<tr>
+<th>Figure</th>
+<th>Value</th>
+</tr>
+</thead>
+<tbody><tr>
+<td>Model-tier steps</td>
+<td>60</td>
+</tr>
+<tr>
+<td>Tokens</td>
+<td>137,205</td>
+</tr>
+<tr>
+<td>Model time</td>
+<td>1,666.6 s</td>
+</tr>
+<tr>
+<td>Step latency</td>
+<td>median 18.7 s, p90 70.2 s, max 102.5 s</td>
+</tr>
+<tr>
+<td>Injections produced by the model tier</td>
+<td>6</td>
+</tr>
+<tr>
+<td>Hit rate</td>
+<td>10.0 percent</td>
+</tr>
+<tr>
+<td>Cost per injection</td>
+<td>22,868 tokens and 278 s of model time</td>
+</tr>
+<tr>
+<td>Model-tier injections in the last 5 days</td>
+<td>0 of 4 steps</td>
+</tr>
+</tbody></table>
+<p>Four further injections in the same window came from the free rules tier, so the
+lifetime total of 10 injections is not the model tier&#39;s score. Rules-tier
+injections cost nothing.</p>
+<h3>The decision</h3>
+<p>The default does not change, and it is a deliberate default rather than an
+unexamined one:</p>
+<ul>
+<li><code>context.memory.enabled</code> stays <code>true</code>. It runs the rules tier, which makes
+no model calls, spends no tokens, and produced 4 of the 10 injections.</li>
+<li>The LLM tier stays opt-in through <code>context.memory.target</code> and <code>context.memory.model</code>,
+which is already the case: an unset background role never resolves a client.
+A 10 percent hit rate at 22,868 tokens per injection does not earn a default-on
+position, and it is not so poor that it earns removal from an operator who has
+measured their own route and wants it.</li>
+<li><code>context.memory.timeoutMs</code> is <code>60000</code> in the current defaults. The dated study
+considered a 30-second counterfactual: two of six observed injections, at
+53.6 and 57.7 seconds, would have been cut, while 531 of 1,666 model seconds
+would not have been spent. The current 60-second deadline is the source-backed
+bound on what one optional call may hold a shared local server for, not a
+prediction of when a route answers.</li>
+<li>A step that would run on the endpoint the chat target is streaming against is
+skipped with reason <code>endpoint_busy</code>, and the skip is recorded. On a single-slot
+llama.cpp router the alternative is queueing behind the operator&#39;s own decoding
+or evicting the resident model, and neither is a cost an optional call may
+impose.</li>
+</ul>
+<h3>What a background target costs on a shared local server</h3>
+<p>If <code>context.memory.target</code> names the same server as <code>chat.target</code>, that
+server&#39;s slots are shared. On a llama.cpp router started with <code>--parallel 1</code>
+there is exactly one, and the memory step and the operator&#39;s turn contend for it.</p>
+<p>The consequence is worth stating plainly: a shared endpoint suppresses the model
+tier rather than merely delaying it. A step is started from the <code>turn_end</code> hook,
+which fires inside the streaming run at <code>agent_end</code>
+(<code>src/interactive/turn-runtime.ts</code>), while the chat loop still holds its
+foreground registration on that endpoint; the loop releases the hold afterwards,
+in the <code>finally</code> around the run (<code>src/interactive/chat-loop.ts</code>). Every boundary
+therefore finds the endpoint busy and records <code>dropped</code>/<code>endpoint_busy</code>. That is
+the intended trade: an optional call may not take the one slot the operator&#39;s own
+turn is using, and it may not make the server swap the resident model out. The
+<code>/memory</code> step list and <code>steps.jsonl</code> say so on every boundary, so the tier is
+visibly declining rather than quietly idle.</p>
+<p>The second mechanism is an <code>expected cold</code> stamp, for the case where a step did
+run on the chat endpoint. Its prompt is a trajectory rather than the chat prefix,
+so the next turn&#39;s prefill is expected to be cold; <code>/context</code> names
+<code>background_memory</code> as the reason instead of reporting an unexplained cold
+prefix.</p>
+<p>Pointing the background role at a second machine avoids both effects and is the
+arrangement the tier is designed for.</p>
+<h2>Choosing a background model</h2>
+<p>Memory reads a trajectory and writes a fixed envelope. It does not plan, and it
+does not need to be clever. A small non-reasoning model is the right choice, and
+Clio always requests the memory route with thinking off. Version 2 therefore
+has no configurable memory thinking-level key.</p>
+<p>That request reaches the wire wherever the runtime carries a thinking control:
+llama.cpp reads <code>chat_template_kwargs.enable_thinking</code>, and LM Studio reads
+<code>reasoning_effort</code>, where <code>none</code> is the off value.</p>
+<p>A model that reasons anyway still works. Some genuinely cannot be silenced, and
+the catalog records those as always-on so the level reads <code>forced</code> rather than
+<code>off</code>; the shipped model catalog classifies <code>qwopus3.5-9b-v3</code> that way. No model
+is selected for background memory by default. Reasoning
+blocks are discarded and only the envelope is kept, and the output budget is
+sized to let a reasoning preamble run its course first. The cost is latency,
+which the detached step absorbs.</p>
+<p>One configuration is refused rather than degraded. If the background role names
+the same target and model as the orchestrator, and that model reasons, the LLM
+memory tier stays off and memory runs on its free deterministic tier. A single
+reasoning model already driving chat, workers, and shadow agents cannot also
+deliberate over memory steps without contending with the work the operator
+actually asked for.</p>
+<p>This is a mix-and-match plane, not a local-only one. The background role resolves
+through the same target machinery as every other role, so the useful shapes are:</p>
+<ul>
+<li>A frontier model for chat and a small efficient model for memory, whether that
+small model is co-hosted, on another node, or a cheap cloud tier.</li>
+<li>A local workhorse for chat and a co-resident small local model for memory, with
+the co-residency caveat below.</li>
+<li>Everything cloud: pick the provider&#39;s small fast model for memory and spend the
+budget on the agent and the fleet.</li>
+</ul>
+<p>Local co-residency still matters. The background model, the action model, their
+KV caches, and parallel slots must all fit the target&#39;s available memory.</p>
+<h2>Operator setup</h2>
+<p>The shipped defaults are:</p>
+<pre><code class="language-yaml">context:
+  memory:
+    enabled: true
+    target: null
+    model: null
+    cadenceToolCalls: 10
+    trajectorySteps: 8
+    maxOutputTokens: 2000
+    timeoutMs: 60000
+</code></pre>
+<p>With <code>context.memory.target</code> and <code>context.memory.model</code> unset, Clio stays in the
+zero-cost rules tier. <code>/memory</code> shows the current tier, last decision, approved
+durable lessons, the live bank, and a bounded history of the last twenty memory
+steps with their trigger, decision, write count, cited-entry count, tier, and
+latency. That history is the only place a capture, a gate, or a timeout becomes
+visible, since those outcomes produce no transcript entry by design; only an
+actual injection reaches the transcript. It carries counts and outcomes only,
+never bank or trajectory text. <code>/settings</code> exposes controls for every key above;
+its compact row labels retain shorter operator-facing names. The saved
+background-memory target is the Memory target row in Settings → Orchestrator,
+independent of the chat target and the fleet default. A running session owns
+its routing snapshot, while the saved
+selection becomes the default for new sessions.</p>
+<p>The reference topology separates chat from memory work:</p>
+<table>
+<thead>
+<tr>
+<th>Role</th>
+<th>Target</th>
+<th>Runtime and endpoint</th>
+<th>Model</th>
+<th>Capacity</th>
+</tr>
+</thead>
+<tbody><tr>
+<td>Chat</td>
+<td><code>dynamo</code></td>
+<td>LM Studio at <code>192.168.86.143:1234</code></td>
+<td><code>qwen3.8-27b-dynamo</code></td>
+<td>Reported by the LM Studio probe</td>
+</tr>
+<tr>
+<td>Background memory</td>
+<td><code>mini</code></td>
+<td>llama.cpp router at <code>192.168.86.141:8080</code></td>
+<td><code>ornith1.5-35b-moe</code></td>
+<td>4 parallel slots, 262,144 context tokens per slot</td>
+</tr>
+</tbody></table>
+<p>The corresponding saved role selection is:</p>
+<pre><code class="language-yaml">chat:
+  target: dynamo
+  model: qwen3.8-27b-dynamo
+context:
+  memory:
+    target: mini
+    model: ornith1.5-35b-moe
+</code></pre>
+<p>A smaller, efficient model is the intended shape for this role. The current
+reference uses a separate multi-slot endpoint so memory does not compete with
+the LM Studio chat stream. Capability is not the only constraint; latency and
+endpoint contention still matter, and the detached step above bounds their
+effect on the operator&#39;s turn.</p>
+<p>The deadline is a bound on what an optional call may hold that server for, not a
+figure sized to capture the tail. The shipped <code>60000</code> is a bounded compromise,
+and a step that exceeds it records <code>timeout</code> with
+its work discarded. A route whose steps mostly record <code>timeout</code> is a
+misconfigured deadline before it is a slow model, so read the ledger before
+raising it: <code>/memory</code> shows the hit rate the raise would be buying.</p>
+<p>The target ID is not hard-coded. Any configured orchestrator-eligible local
+target and wire model can fill the background role. Before enabling it, use the
+real target surfaces to verify the route:</p>
+<pre><code class="language-bash">clio-coder targets --probe
+clio-coder models --target mini
+clio-coder models --target dynamo
+clio-coder
+</code></pre>
+<p>Then inspect <code>/settings targets</code>, <code>/settings</code>, and <code>/memory</code>. Local co-residency still
+matters: the background model, action model, their KV caches, and parallel slots
+must fit the target&#39;s available memory. Increase <code>context.memory.timeoutMs</code> for
+a deliberately slow local route; lowering <code>context.memory.maxOutputTokens</code>
+bounds the visible reminder and ordinary completion budget but does not change
+the background model&#39;s strict output grammar.</p>
+<p>For an immediate kill switch, set <code>context.memory.enabled</code> to <code>false</code> in
+<code>/settings</code>. Removing the background target instead returns to rules-only
+operation while leaving deterministic protection active.</p>
+<h2>Where what the tier writes ends up</h2>
+<p>A bank entry lives and dies with its session. When a reminder actually reaches
+the operator, the entries it cited are also proposed into the durable store at
+<code>&lt;dataDir&gt;/memory/records.json</code>, unapproved, scoped to the repository the session
+is working in, with provenance naming the session and the source entry. That is
+the one automatic writer of that file; everything else about it is unchanged.
+<code>/memory</code> and <code>clio-coder memory list</code> show the proposal, and
+<code>clio-coder memory approve &lt;id&gt;</code> is still a separate operator action, so nothing
+the background plane produced reaches a system prompt without review. A step with
+no session, or one running outside a canonical repository, proposes nothing:
+global scope broadens applicability to every future session and is not a claim a
+background step may make on the operator&#39;s behalf.</p>
+<p>Rules-tier reminders are not proposed. Their entries are this middleware&#39;s own
+one-line records of a repeated tool failure, and filing each one as a durable
+lesson would fill the review queue with rows nobody asked for. They remain
+promotable by hand from <code>/memory</code>.</p>
+<h2>What the LLM tier actually writes</h2>
+<p>Measured on the shipped prompt against <code>google/gemma-4-26b-a4b-qat</code>, across ten
+live steps and forty controlled runs on the same route.</p>
+<p>Earlier measurements found that the tier wrote <code>update_status</code> reliably and
+<code>save_knowledge</code> rarely. At that time a successful trajectory step carried an
+opaque result fingerprint, so a window of successful reads told the model which
+files were touched and nothing about what was in them.</p>
+<p>A current trajectory step keeps two fields with different jobs. The operation
+fingerprint identifies repeated calls and remains derived only from the tool name
+and arguments. The result digest is human-readable diagnostic content from the
+canonical result-disposition projection, with explicit source provenance. Secret
+redaction and a 240-byte cap apply before the digest reaches the task bank or the
+background request. A metadata-only disposition contributes outcome facts and no
+captured body. Results without a canonical disposition use a redacted deterministic
+fallback, so older tool producers remain useful without gaining a second model
+summarizer.</p>
+<p>Three candidate causes were ruled out in the earlier implementation by
+controlled runs that changed one variable at a time:</p>
+<ul>
+<li>rewriting the prompt&#39;s second worked example to carry a <code>save_knowledge</code> moved
+nothing, and made the model emit no operations at all in four of five runs;</li>
+<li>seeding the bank with existing knowledge entries so the model could learn the
+shape by example moved nothing;</li>
+<li>giving successful steps a content-bearing digest moved nothing on its own.</li>
+</ul>
+<p>What does elicit knowledge is a durable fact in the input. With a task stating two
+explicit constraints the model wrote both as knowledge; with that same task plus
+content-bearing digests it wrote six. Error digests already carry a real
+diagnostic line, which is why <code>save_procedural</code> fires on failing windows.</p>
+<p>The consequence for reactivation is why the post-compaction block restores status.
+Restoring knowledge alone restored nothing in the common case, because the one
+class it read was usually the one class the model had not written.</p>
+<p>Two further numbers from the same route. Roughly a quarter of live steps returned a
+malformed envelope, usually <code>&lt;operations&gt;</code> with no list followed by
+<code>&lt;no_intervention/&gt;</code>, which is recorded as <code>malformed</code>/<code>unparseable</code> and is
+model behavior rather than a route fault. The boundary drop rate remains 0% at
+shipped settings.</p>
+<h2>Handoff continuity</h2>
+<p>The bank normally dies with the session. When <code>context-handoff</code> is explicitly
+requested, Clio supplies the skill a redacted <code>clio-task-memory</code> fenced snapshot
+containing knowledge and procedural entries only. Ordinary turns receive no
+snapshot. The handoff artifact remains under ignored <code>.clio-coder/handoffs/</code>; private
+status and secret-shaped values do not cross the export boundary.</p>
+<p>After <code>/resume</code>, Clio checks only the newest handoff and offers <code>/memory seed</code> if
+it contains a valid snapshot. Seeding is explicit and deduplicated. It resets
+injection attribution for the new session, and the master kill switch disables
+both the offer and writes. <code>/new</code>, <code>/fork</code>, <code>/resume</code>, and ACP session changes
+clear the prior heap bank before the new session can observe it.</p>
+<h2>Telemetry</h2>
+<p>Each completed memory step appends one content-free record to:</p>
+<pre><code class="language-text">&lt;stateDir&gt;/memory/steps.jsonl
+</code></pre>
+<p>Use <code>clio-coder paths --json</code> to resolve the state directory (the <code>&quot;state&quot;</code> property). The log rotates after 1 MiB and
+keeps one previous generation as <code>steps.jsonl.1</code>. Every exact-schema record has:</p>
+<ul>
+<li>timestamp and schema version;</li>
+<li>one to three coalesced trigger reasons;</li>
+<li><code>rules</code> or <code>llm</code> tier;</li>
+<li>per-class added, updated, and deleted entry counts;</li>
+<li><code>silent</code>, <code>injected</code>, <code>gated</code>, <code>timeout</code>, <code>malformed</code>, or <code>dropped</code> decision;</li>
+<li>count of cited entries, input/output/total memory-model tokens, and latency.</li>
+</ul>
+<p>The same steps are also billed. See &quot;Cost and the default decision&quot; for the
+<code>/cost</code> row, the durable out-of-turn usage row, and the lifetime figures <code>/memory</code>
+folds out of this file.</p>
+<p><code>dropped</code> is the one outcome that ran no step. It has two causes, separated by
+the row&#39;s reason: <code>step_in_flight</code> means the boundary triggered while an earlier
+step still held the single in-flight slot, and <code>endpoint_busy</code> means the step
+would have called the endpoint the chat target was streaming against. Both cost
+no tokens and no latency, both leave their triggers pending for the next free
+boundary, and neither replaces the operator-visible last decision. Counting
+<code>dropped</code> rows against <code>llm</code> rows over a session is how a starved cadence becomes
+visible.</p>
+<p>A step that exceeds the deadline records <code>timeout</code>, never <code>silent</code>: reason
+<code>deadline</code> when the policy&#39;s own race fired first, and <code>timed_out</code> when the
+transport aborted at its deadline. Both are distinct from <code>client_error</code>, which
+is a route that refused rather than a route that was slow.</p>
+<p>The log contains no task, trajectory, bank, error, or reminder text. File creation,
+rotation, serialization, and injected sinks are all best effort; a read-only
+state directory or full disk cannot alter intervention behavior.</p>
+<p>Note that routine no-tool continuation checks do not emit telemetry rows, as they
+are not considered new memory boundaries. Only actual tool-bearing or explicitly
+triggered memory steps produce rows.</p>
+<h2>Evaluation and promotion bar</h2>
+<p><code>src/domains/eval/proactive-memory.ts</code> exports a fixed three-task, matched A/B
+harness. It executes <code>baseline</code>, <code>rules</code>, and <code>llm</code> variants in stable order and
+accepts any <code>{ id, model }</code> target. A runner adapter owns isolated task execution
+and returns action tokens/latency plus the exact telemetry rows emitted for that
+trial. The report provides:</p>
+<ul>
+<li>pass rate;</li>
+<li>injected and cited reminder counts;</li>
+<li>reminders per task and citation rate;</li>
+<li>total and baseline-relative added tokens and latency;</li>
+<li>an <code>alwaysNoisyRegression</code> verdict.</li>
+</ul>
+<p>The source-level harness remains available to a runner adapter, and the eval
+platform remains active. Its former dedicated contract test was retired, and
+the current test tree has no direct reference to <code>runProactiveMemoryEval</code>.
+There is therefore no maintained direct test coverage or standalone
+<code>npm run test:file</code> invocation for this harness. Treat a live comparison as an
+explicit measurement campaign.</p>
+<p>For a live local comparison, an adapter should route only the <code>llm</code> variant
+through the request&#39;s target/model (the reference memory route is <code>mini</code> /
+<code>ornith1.5-35b-moe</code>), keep baseline memory telemetry empty, and run all
+nine trials in equivalent isolated workspaces. Do not promote the LLM tier from
+one anecdotal task. The evidence bar is a pass-rate gain from a small number of
+specific, usually cited reminders at acceptable added token and latency cost.
+Injecting at least once per task while merely tying or losing to baseline is
+always a regression, even when every reminder is cited.</p>
+<h2>Worker growth path</h2>
+<p>Worker-side intervention is intentionally not implemented in this sprint. The
+bank, policy client, telemetry, and registration interfaces carry no interactive
+chat-loop types, so they can be instantiated per worker later without moving the
+policy into the action agent.</p>
+<p>The existing transport already exposes the required seams:</p>
+<ol>
+<li><code>src/domains/dispatch/worker-spawn.ts</code> receives worker NDJSON events and its
+<code>SpawnedWorker.send</code> path can write bounded control messages while the worker
+is alive.</li>
+<li>Worker steering already drains between tool batches, which is the safe point
+for a visible memory advisory; it must not interrupt a tool in flight.</li>
+<li>Workers already maintain per-worker loop detectors and tool-call caps. A
+future registration should consume those verdicts instead of re-deriving
+them.</li>
+<li>Each dispatched run needs its own bank, cadence, spend guard, telemetry
+attribution, and teardown. Parent session memory must not leak into sibling
+workers implicitly.</li>
+</ol>
+<p>The future sequence is therefore worker events → worker-local registration → one
+bounded steering advisory between batches. It must preserve the current receipt,
+safety, timeout, and permission semantics, and it should ship only after a
+Terminal-Bench-style long-run evaluation shows a selective benefit.</p>
+        </article>
+        <nav class="related-nav" aria-label="Adjacent references">
+          <a class="nav-link-card" href="lifecycle_blueprint.html"><span class="nav-label">Previous</span><span class="nav-title">Installation and Lifecycle Operations</span></a>
+          <a class="nav-link-card next" href="resource_library_blueprint.html"><span class="nav-label">Next</span><span class="nav-title">Resource Library</span></a>
+        </nav>
+        <p class="reference-footer-note">Canonical content lives in the mapped Markdown page. This visual counterpart adds navigation without changing the contract.</p>
+      </main>
+    </div>
+    <footer>Clio Coder documentation · source-aligned at v0.4.2</footer>
+  </div>
+  <script src="shared.js"></script>
+</body>
+</html>

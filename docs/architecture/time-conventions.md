@@ -1,5 +1,8 @@
 # Time and Clock Conventions
 
+> **Visual blueprint:** The source checkout includes the complete
+> [Time and Clock Conventions visual reference](https://github.com/iowarp/clio-coder/blob/main/docs/html/time_conventions_blueprint.html).
+
 This document describes the time practices implemented in the current Clio
 Coder source tree. The code distinguishes process-local elapsed spans from
 durable instants, but it does not impose one clock primitive on every module.

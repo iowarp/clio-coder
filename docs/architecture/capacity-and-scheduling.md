@@ -1,5 +1,8 @@
 # Capacity Leases & Fleet Scheduling
 
+> **Visual blueprint:** The source checkout includes the complete
+> [Capacity Leases & Fleet Scheduling visual reference](https://github.com/iowarp/clio-coder/blob/main/docs/html/capacity_scheduling_blueprint.html).
+
 This document specifies the multi-process capacity leasing protocols, node
 scheduling models, cross-process transaction locks, and failure recovery
 mechanics in the current source tree.

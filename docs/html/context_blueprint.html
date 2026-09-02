@@ -1,603 +1,481 @@
-<!DOCTYPE html>
+<!doctype html>
 <html lang="en">
 <head>
-  <meta charset="UTF-8">
-  <meta name="viewport" content="width=device-width, initial-scale=1.0">
-  <title>Clio Coder Context Engine Blueprint (v0.4.0)</title>
-
-  <style>
-    :root {
-      --bg-dark: #090d16;
-      --bg-grid: rgba(255, 255, 255, 0.02);
-      --bg-card: rgba(13, 20, 38, 0.45);
-      --bg-card-hover: rgba(20, 30, 58, 0.6);
-      --border-card: rgba(255, 255, 255, 0.08);
-      --border-card-hover: rgba(0, 240, 255, 0.3);
-      --text-main: #f3f4f6;
-      --text-muted: #9ca3af;
-      --text-dim: #6b7280;
-
-      --color-cyan: #00f0ff;
-      --color-cyan-rgb: 0, 240, 255;
-      --color-purple: #bd00ff;
-      --color-purple-rgb: 189, 0, 255;
-      --color-emerald: #10b981;
-      --color-emerald-rgb: 16, 185, 129;
-      --color-amber: #f59e0b;
-      --color-amber-rgb: 245, 158, 11;
-      --color-rose: #ef4444;
-      --color-rose-rgb: 239, 68, 68;
-
-      --gradient-main: linear-gradient(135deg, var(--color-cyan), var(--color-purple));
-      --shadow-glow: 0 0 25px rgba(0, 240, 255, 0.15);
-      --font-sans: "Segoe UI", -apple-system, BlinkMacSystemFont, Roboto, "Helvetica Neue", Arial, sans-serif;
-      --font-mono: "SFMono-Regular", Consolas, "Liberation Mono", Menlo, monospace;
-
-      --glass-blur: blur(12px);
-    }
-
-    * {
-      box-sizing: border-box;
-      margin: 0;
-      padding: 0;
-    }
-
-    body {
-      background-color: var(--bg-dark);
-      background-image:
-        radial-gradient(circle at 10% 20%, rgba(var(--color-cyan-rgb), 0.05) 0%, transparent 40%),
-        radial-gradient(circle at 90% 80%, rgba(var(--color-purple-rgb), 0.05) 0%, transparent 40%),
-        radial-gradient(circle at 50% 50%, #0d1527 0%, var(--bg-dark) 100%);
-      color: var(--text-main);
-      font-family: var(--font-sans);
-      min-height: 100vh;
-      line-height: 1.6;
-      overflow-x: hidden;
-      position: relative;
-    }
-
-    body::before {
-      content: '';
-      position: absolute;
-      inset: 0;
-      background-image: linear-gradient(var(--bg-grid) 1px, transparent 1px),
-                        linear-gradient(90deg, var(--bg-grid) 1px, transparent 1px);
-      background-size: 40px 40px;
-      background-position: center top;
-      pointer-events: none;
-      z-index: 0;
-      opacity: 0.8;
-    }
-
-    .container {
-      max-width: 1400px;
-      margin: 0 auto;
-      padding: 2rem;
-      position: relative;
-      z-index: 1;
-    }
-
-    /* Header Styling */
-    header {
-      display: flex;
-      justify-content: space-between;
-      align-items: center;
-      margin-bottom: 2.5rem;
-      padding-bottom: 1.5rem;
-      border-bottom: 1px solid rgba(255, 255, 255, 0.05);
-    }
-
-    .header-left {
-      display: flex;
-      align-items: center;
-      gap: 1rem;
-    }
-
-    .header-logo {
-      display: inline-flex;
-      align-items: center;
-      justify-content: center;
-      width: 48px;
-      height: 48px;
-      background: rgba(255, 255, 255, 0.02);
-      border: 1px solid var(--border-card);
-      border-radius: 12px;
-    }
-
-    .header-logo svg {
-      width: 28px;
-      height: 28px;
-    }
-
-    .header-title-wrapper h1 {
-      font-size: 1.5rem;
-      font-weight: 800;
-      letter-spacing: -0.03em;
-      background: linear-gradient(to right, #ffffff, #c7d2fe, var(--color-cyan));
-      -webkit-background-clip: text;
-      -webkit-text-fill-color: transparent;
-    }
-
-    .header-title-wrapper p {
-      font-size: 0.825rem;
-      color: var(--text-muted);
-    }
-
-    .header-right {
-      display: flex;
-      align-items: center;
-      gap: 1rem;
-    }
-
-    .back-btn {
-      background: rgba(255, 255, 255, 0.03);
-      border: 1px solid var(--border-card);
-      color: var(--text-muted);
-      padding: 0.5rem 1rem;
-      border-radius: 8px;
-      font-size: 0.875rem;
-      font-weight: 600;
-      text-decoration: none;
-      display: inline-flex;
-      align-items: center;
-      gap: 0.5rem;
-      transition: all 0.2s;
-    }
-
-    .back-btn:hover {
-      background: rgba(255, 255, 255, 0.08);
-      color: var(--text-main);
-      border-color: rgba(var(--color-cyan-rgb), 0.3);
-    }
-
-    .version-badge {
-      background: rgba(0, 240, 255, 0.08);
-      border: 1px solid rgba(0, 240, 255, 0.25);
-      color: var(--color-cyan);
-      padding: 0.35rem 0.75rem;
-      border-radius: 50px;
-      font-size: 0.75rem;
-      font-weight: 600;
-      font-family: var(--font-mono);
-    }
-
-    /* Tabs Navigation */
-    .tabs-nav {
-      display: flex;
-      gap: 0.75rem;
-      margin-bottom: 2rem;
-    }
-
-    .tab-btn {
-      background: rgba(255, 255, 255, 0.03);
-      border: 1px solid var(--border-card);
-      color: var(--text-muted);
-      padding: 0.6rem 1.25rem;
-      border-radius: 8px;
-      font-size: 0.875rem;
-      font-weight: 600;
-      cursor: pointer;
-      display: flex;
-      align-items: center;
-      gap: 0.5rem;
-      transition: all 0.2s;
-    }
-
-    .tab-btn:hover {
-      background: rgba(255, 255, 255, 0.06);
-      color: var(--text-main);
-    }
-
-    .tab-btn.active {
-      background: var(--gradient-main);
-      color: #090d16;
-      border-color: transparent;
-      box-shadow: 0 4px 15px rgba(var(--color-cyan-rgb), 0.25);
-    }
-
-    /* Content Layout */
-    .tab-pane {
-      display: none;
-      animation: fadeIn 0.3s ease-out forwards;
-    }
-
-    .tab-pane.active {
-      display: block;
-    }
-
-    @keyframes fadeIn {
-      from { opacity: 0; transform: translateY(8px); }
-      to { opacity: 1; transform: translateY(0); }
-    }
-
-    /* Split layout */
-    .blueprint-layout {
-      display: grid;
-      grid-template-columns: 1fr 1fr;
-      gap: 2rem;
-      align-items: start;
-    }
-
-    @media (max-width: 1100px) {
-      .blueprint-layout {
-        grid-template-columns: 1fr;
-      }
-    }
-
-    .glass-card {
-      background: var(--bg-card);
-      border: 1px solid var(--border-card);
-      border-radius: 16px;
-      padding: 1.75rem;
-      margin-bottom: 2rem;
-      backdrop-filter: var(--glass-blur);
-      box-shadow: 0 8px 32px 0 rgba(0, 0, 0, 0.3);
-    }
-
-    .glass-card h2 {
-      font-size: 1.25rem;
-      font-weight: 700;
-      color: #ffffff;
-      margin-bottom: 1.25rem;
-      display: flex;
-      align-items: center;
-      gap: 0.5rem;
-      border-bottom: 1px solid rgba(255, 255, 255, 0.05);
-      padding-bottom: 0.75rem;
-    }
-
-    .glass-card h2 svg {
-      width: 18px;
-      height: 18px;
-      color: var(--color-cyan);
-    }
-
-    .glass-card p {
-      font-size: 0.925rem;
-      color: var(--text-muted);
-      margin-bottom: 1rem;
-    }
-
-    /* Form Elements */
-    .form-group {
-      margin-bottom: 1.25rem;
-    }
-
-    .form-group label {
-      display: block;
-      font-size: 0.8rem;
-      font-weight: 600;
-      color: var(--text-muted);
-      margin-bottom: 0.5rem;
-      text-transform: uppercase;
-      letter-spacing: 0.05em;
-    }
-
-    select, input {
-      width: 100%;
-      background: rgba(9, 13, 22, 0.7);
-      border: 1px solid var(--border-card);
-      border-radius: 8px;
-      padding: 0.65rem 0.85rem;
-      color: #fff;
-      font-family: var(--font-sans);
-      font-size: 0.9rem;
-      outline: none;
-    }
-
-    /* Stacked Token Visualizer */
-    .stack-meter {
-      height: 32px;
-      border-radius: 8px;
-      background: rgba(255,255,255,0.02);
-      border: 1px solid var(--border-card);
-      overflow: hidden;
-      display: flex;
-      margin: 1.5rem 0 0.75rem 0;
-    }
-
-    .stack-seg {
-      height: 100%;
-      transition: width 0.3s ease;
-    }
-
-    .seg-sys { background: var(--color-cyan); }
-    .seg-msg { background: var(--color-purple); }
-    .seg-tools { background: var(--color-amber); }
-    .seg-free { background: rgba(255, 255, 255, 0.08); }
-
-    .legend-row {
-      display: flex;
-      flex-wrap: wrap;
-      gap: 1rem;
-      font-size: 0.75rem;
-      color: var(--text-muted);
-      margin-bottom: 1.5rem;
-    }
-
-    .legend-item {
-      display: flex;
-      align-items: center;
-      gap: 0.4rem;
-    }
-
-    .legend-dot {
-      width: 8px;
-      height: 8px;
-      border-radius: 50%;
-    }
-
-    /* Pressure gauge card */
-    .verdict-box {
-      border-radius: 12px;
-      padding: 1.25rem;
-      border: 1px solid transparent;
-      margin-top: 1.5rem;
-    }
-
-    .verdict-box.normal { background: rgba(16, 185, 129, 0.08); border-color: rgba(16, 185, 129, 0.3); color: var(--color-emerald); }
-    .verdict-box.warn { background: rgba(245, 158, 11, 0.08); border-color: rgba(245, 158, 11, 0.3); color: var(--color-amber); }
-    .verdict-box.error { background: rgba(239, 68, 68, 0.08); border-color: rgba(239, 68, 68, 0.3); color: var(--color-rose); }
-
-    pre {
-      background: rgba(0,0,0,0.3);
-      border: 1px solid var(--border-card);
-      border-radius: 8px;
-      padding: 1rem;
-      overflow-x: auto;
-      margin: 1rem 0;
-    }
-
-    code {
-      font-family: var(--font-mono);
-      font-size: 0.85rem;
-    }
-
-    /* Footer */
-    footer {
-      text-align: center;
-      margin-top: 4rem;
-      padding-top: 2rem;
-      border-top: 1px solid rgba(255, 255, 255, 0.05);
-      color: var(--text-dim);
-      font-size: 0.875rem;
-    }
-  </style>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <meta name="clio-markdown-source" content="docs/architecture/context-engine.md">
+  <meta name="clio-docs-version" content="0.4.2">
+  <title>Context Engine · Clio Coder 0.4.2</title>
+  <link rel="icon" href="data:,">
+  <link rel="stylesheet" href="shared.css">
 </head>
-<body>
+<body data-doc-category="architecture">
+  <div class="reading-progress" aria-hidden="true"></div>
+  <a class="skip-link" href="#reference-content">Skip to reference</a>
   <div class="container">
-    <header>
+    <header class="document-header" data-category="Architecture">
       <div class="header-left">
-        <div class="header-logo">
-          <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" style="color: var(--color-cyan);"><title>Icon</title>
-            <line x1="18" y1="20" x2="18" y2="10"></line>
-            <line x1="12" y1="20" x2="12" y2="4"></line>
-            <line x1="6" y1="20" x2="6" y2="14"></line>
+        <a class="header-logo" href="index.html" aria-label="Documentation index">
+          <svg viewBox="0 0 24 24" fill="none" aria-hidden="true">
+            <path d="M12 2 2 7l10 5 10-5-10-5Z" stroke="url(#clio-logo)" stroke-width="2" stroke-linejoin="round"/>
+            <path d="m2 12 10 5 10-5M2 17l10 5 10-5" stroke="url(#clio-logo)" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"/>
+            <defs><linearGradient id="clio-logo" x1="2" y1="2" x2="22" y2="22"><stop stop-color="#00d4db"/><stop offset="1" stop-color="#ff7e29"/></linearGradient></defs>
           </svg>
-        </div>
+        </a>
         <div class="header-title-wrapper">
-          <h1>Clio Coder Context Engine</h1>
-          <p>Sliding context windows, token accounting estimators, and single-threshold compaction</p>
+          <p class="document-kicker">Architecture / canonical reference</p>
+          <h1>Context Engine</h1>
+          <p class="document-path">docs/architecture/context-engine.md</p>
         </div>
       </div>
       <div class="header-right">
-        <span class="version-badge">Clio Coder v0.4.0</span>
-        <a href="index.html" class="back-btn">
-          <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><title>Icon</title><line x1="19" y1="12" x2="5" y2="12"></line><polyline points="12 19 5 12 12 5"></polyline></svg>
-          Dashboard Hub
-        </a>
+        <a class="back-btn" href="index.html">← Index</a>
+        <span class="version-badge">v0.4.2</span>
       </div>
     </header>
+    <div class="page-layout-grid reference-layout">
+      <aside class="sidebar reference-sidebar" aria-label="On this page">
+        <nav class="toc-container">
+          <p class="toc-title">On this page</p>
+          <a class="sidebar-source" href="https://github.com/iowarp/clio-coder/blob/main/docs/architecture/context-engine.md">Canonical Markdown<br>docs/architecture/context-engine.md</a>
+          <ul class="toc-list"></ul>
+        </nav>
+      </aside>
+      <main class="reference-main" id="reference-content">
+        <article class="reference-prose glass-card">
+<blockquote>
+<p><strong>Visual blueprint:</strong> The source checkout includes the complete
+<a href="context_blueprint.html">Context Engine visual reference</a>.</p>
+</blockquote>
+<p>Clio Coder tracks context pressure, records per-turn snapshots, and protects the provider context with bounded tool results plus single-threshold compaction.</p>
+<p>Source of truth lives in <code>src/domains/session/context-accounting.ts</code>, <code>src/domains/session/context-ledger.ts</code>, <code>src/domains/session/compaction/</code>, <code>src/domains/context/working-set/</code>, <code>src/domains/session/migrations/index.ts</code>, and the chat-loop integration in <code>src/interactive/chat-loop.ts</code>.</p>
+<p>The non-destructive eviction layer has its own guide: <a href="context_working_set_blueprint.html">context-working-set.md</a>.</p>
+<h2>Context window resolution</h2>
+<p>Each target has a declared, desired, and effective context window. The effective window is the operating ceiling used by budget checks and compaction. A one-run <code>--max-context-tokens</code> override wins when present. Otherwise sources rank most-live first: the window discovery reports the model is loaded at, then a probed window, a target capability override, a model hint, knowledge-base data, the built-in model catalog, a runtime descriptor default, and finally Clio&#39;s assumed fallback.</p>
+<p>The loaded window outranks the declared one because it is the only figure describing what the backend will serve. LM Studio routinely opens a model well below its <code>max_context_length</code>, and a run planned against the larger number overruns the server before compaction ever fires. Discovery carries that number per model in <code>discoveredModelStates[&lt;model&gt;].contextLength</code>, and the residency notice reads the same entry, so a model Clio is budgeting a loaded window for is never announced as absent.</p>
+<p>A resumed session carries the loaded window it already recorded. A resume re-resolves its target before discovery has reported what the backend has open, so the first turn used to budget against the probed figure, which on a multi-slot or multi-copy backend can be several times the real headroom, and corrected a turn later. <code>lastLoadedContextWindow</code> reads the last <code>loaded</code> window the session&#39;s own <code>context-snapshots.jsonl</code> recorded for the same target and model and hands it to resolution as <code>knownLoadedContextWindow</code>. It is used only when live discovery reports nothing, and it is scoped to that target and model, so a different selection re-probes and a model reloaded at a new size corrects as soon as discovery names the live window.</p>
+<p>Clio uses 131,072 tokens as the minimum desired window and as the fallback when no source reports one, on every runtime tier. A reported effective window below 128,000 tokens triggers the undersized-window warning. If a live model reports a smaller loaded context window, Clio re-resolves the target so accounting uses the actual ceiling.</p>
+<p>The <code>/context</code> overlay states which layer answered, next to the token total: <code>loaded</code>, <code>probed</code>, <code>configured</code>, <code>declared</code>, or <code>assumed</code>.</p>
+<p>A probed llama.cpp window is the share one request gets, not the server&#39;s total. llama.cpp splits <code>--ctx-size</code> evenly across <code>--parallel</code> slots unless <code>--kv-unified</code> is set, so a server started with <code>--ctx-size 786432 --parallel 4 --no-kv-unified</code> admits 196,608 tokens per request, and that is the figure autocompact and the meter plan against. The probe reads the flags (long and short forms, <code>-c</code>, <code>-np</code>, <code>-kvu</code>, and the last of <code>--kv-unified</code> or <code>--no-kv-unified</code> given) off the router&#39;s per-model status, keeps the split on the model&#39;s discovery state, and <code>/context</code> prints the derivation next to the share: <code>196,608 (786,432 / 4 slots)</code>. <code>clio-coder targets</code> does the same in its <code>ctx</code> note for the target&#39;s default model and adds a probe note naming the flags.</p>
+<h2>Token accounting and snapshots</h2>
+<p>The estimator in <code>context-accounting.ts</code> uses a four-characters-per-token family for hot-path accounting. It estimates system prompt, tools, messages, pending input, and runtime categories without calling a model tokenizer on every TUI refresh.</p>
+<p>At submit time, Clio captures a context snapshot and persists a slim JSONL record under the session directory as <code>context-snapshots.jsonl</code>. The slim record keeps token counts, segment metadata, signatures, and hashes, not the heavy prompt or transcript text. When provider usage arrives, <code>reconcileSnapshot</code> folds actual input and output counts back into the ledger.</p>
+<p>Every snapshot records the divergence between the two accountings. <code>estimatedTokens</code> is the chars/4 prompt-side total the snapshot was captured with and is never rewritten by a reconcile; <code>reconciledTokens</code> is the provider&#39;s own prompt count for the call, with cached prompt tokens folded back in; <code>divergenceRatio</code> is the second over the first. A ratio above 1 means the estimator is under-counting what the backend charges for the same messages.</p>
+<p>The reconciled figure is not only a display value. Once a provider has answered, the compaction verdict budgets against <code>max(estimate, reconciled + estimate of everything appended since)</code>, at all three evaluation points: the pre-submit trigger, the post-tool continuation guard, and the preflight overflow check. The estimate stays a floor because it prices material the attested call never saw; the provider count can only raise the figure, never lower it. A working-set projection subtracts the tokens the eviction planner priced out and re-anchors on the projected message list rather than discarding the attestation, so post-eviction accounting is still provider-anchored. A summary compaction rewrites the conversation the attestation described, so it drops the anchor and the next call re-establishes it.</p>
+<p>Session metadata enforces session format version 4 (<code>CURRENT_SESSION_FORMAT_VERSION = 4</code>). Version 4 is additive: it adds the <code>contextEviction</code> and <code>contextRecall</code> records and changes no existing entry. A version 3 session therefore migrates to 4 in place when Clio opens it, and no entry is rewritten. Only a session written by a newer build is refused, with an error naming the version it read and pointing at upgrading. The bump is one-way for the operator: a 0.3.3 binary cannot open a session this release wrote.</p>
+<p>The <code>/context</code> overlay and footer meter read the same ledger categories in display order: <code>system</code>, <code>tools</code>, <code>agents</code>, <code>skills</code>, <code>memory</code>, <code>project</code>, <code>messages</code>, <code>pending</code>, <code>streaming</code>, <code>free</code>, and <code>reserve</code>.</p>
+<h2>Single-threshold compaction</h2>
+<p>Auto-compaction is controlled by <code>context.compaction.threshold</code>. Pressure is <code>budgeted_tokens / context_window</code>, where the budgeted figure is the reconciled total when the provider has attested one and the chars/4 estimate otherwise. The default threshold is <code>0.8</code>.</p>
+<p>Crossing that threshold engages three mechanisms in a fixed order. The first two are cheap, reversible, and call no model. Only the third rewrites what the session says about itself.</p>
+<h3>1. Working-set eviction</h3>
+<p>When <code>context.compaction.auto</code> is enabled and pressure crosses the threshold before a request, Clio applies the configured working-set policy first. The policy selects tool-result bodies and closed-turn thinking blocks, <code>runAutoCompact</code> appends one <code>contextEviction</code> ledger entry, and <code>refreshAgentMessagesFromSession</code> projects those units out of model replay behind a one-line marker. Nothing is deleted: the ledger keeps the original bodies, the transcript keeps showing them, and <code>/resume</code>, <code>/tree</code>, <code>/fork</code>, and the HTML export are unaffected.</p>
+<p>Already-evicted units are never selected again. Recent turns keep their full observations and thinking, governed by <code>context.workingSet.protectLastTurns</code>. Results whose estimated body is below <code>context.workingSet.minEvictableTokens</code> (200 tokens by default) are kept whatever their age as a low-yield churn guard. The engine separately refuses any candidate whose marker would save no tokens. The <code>age-horizon</code> policy is therefore the selection the old destructive mask made minus those small results, not a byte-identical reproduction of it; the default <code>structural-v1</code> policy applies its structural rules before any age rule.</p>
+<p>If the projection drops pressure below the threshold, Clio sends the request and no summary runs. The policies, the protection predicates, the marker format, and the ledger records are documented in <a href="context_working_set_blueprint.html">context-working-set.md</a>.</p>
+<h3>2. Recall</h3>
+<p>An evicted body comes back on demand and only on demand. The marker names the exact call: <code>context(scope=&quot;recall&quot;, ref=&quot;&lt;turnId&gt;&quot;)</code> returns the original body byte-exact through the observation envelope and appends a <code>contextRecall</code> entry. Operators use <code>/context recall &lt;ref&gt;</code>, which prints the body to the transcript without putting it into model context.</p>
+<p>A recall does not un-evict. The marker stays byte-identical where it was, so the provider prefix cache is untouched, and repeated recalls of the same ref are the churn signal the <code>/context</code> overlay reports.</p>
+<p>Offline replay does not infer those explicit decisions from a later read of the same path. A reread already returns current content, while recall returns a selected historical ref. The replay tables keep the token-weighted <code>recallTokens</code> demand bound and reserve recall count, churn, and tail-growth simulation for ledgers or corpora that record which refs were actually recalled.</p>
+<h3>3. LLM summary, as a last resort</h3>
+<p>If pressure remains above the threshold after eviction, Clio runs the summary compaction path: it calls the summarization model, appends a <code>compactionSummary</code> entry, refreshes projected replay messages from the session, and continues. This is the only mechanism that spends tokens and the only one whose output is a lossy paraphrase, which is why it runs last.</p>
+<p>Iterative compaction has one raw-history boundary. The first pass searches from the start of the active path. A later pass searches strictly after the previous <code>compactionSummary</code>, while the prior checkpoint and its retained suffix are fed to the summarizer as canonical context for one cumulative replacement. The replay benchmark uses that same boundary. It must not run <code>findCutPoint</code> over the visible retained suffix again: doing so re-prices history already captured by the previous checkpoint and overstates repeated summary churn.</p>
+<p>Manual <code>/context compact</code>, <code>CLIO_CODER_FORCE_COMPACT=1</code>, and overflow recovery force the summary path directly and skip every pre-stage. The overflow guard runs before the user turn is committed, so a blocked oversized request does not leave an unanswered user entry in the ledger.</p>
+<h3>The legacy mask escape hatch</h3>
+<p><code>CLIO_CODER_LEGACY_MASK=1</code> restores the destructive pre-stage working-set eviction replaced. It calls <code>session.replaceEntries</code> and rewrites the persisted bodies, so masked content is gone for the operator as well as the model. It uses the old marker format:</p>
+<pre><code class="language-text">[Observation masked: &lt;tool&gt; output was &lt;lines&gt; lines, &lt;chars&gt; chars - contents masked to save context. Re-run the tool for current content.] Preview: &lt;preview&gt;
+</code></pre>
+<p>It exists for one release as a compatibility diagnosis path and is removed in the next.</p>
+<h3>Replay text</h3>
+<p>When the ledger is replayed to the model, compaction summaries, branch summaries, and bash executions become standardized user-role message text. Clio imports <code>COMPACTION_SUMMARY_PREFIX</code>, <code>BRANCH_SUMMARY_PREFIX</code>, their suffixes, and <code>bashExecutionToText</code> through <code>src/engine/messages.ts</code>; <code>src/interactive/chat-renderer.ts</code> maps Clio&#39;s entry shapes onto them and applies replay truncation. The working-set projection runs before that builder, so markers are what the replay text is built from.</p>
+<h2>Cache-divergence honesty</h2>
+<p>Every provider Clio targets caches by exact prefix. Anthropic hashes the cumulative prefix up to a <code>cache_control</code> breakpoint and looks back at most 20 blocks for an earlier write; the minimum cacheable prefix is 512 to 4,096 tokens by model, reads cost 0.1x input and writes 1.25x. OpenAI caches automatically from 1,024 tokens in 128-token increments on exact prefix matches at 0.1x. vLLM hashes each KV block from its parent block&#39;s hash, so a change in one block invalidates every later block. llama.cpp (and LM Studio on top of it) picks the slot with the longest common prefix and re-evaluates only the suffix, and <code>--cache-reuse</code> can shift later KV chunks back into place after a mid-prompt removal. The consequence is the same everywhere except on llama.cpp with cache reuse: whatever bytes change, everything after the earliest changed position is re-prefilled. That is why a marker is byte-stable, why a recall rides the tail instead of restoring the body in place, why <code>structural-v1</code> batches evictions down to <code>target</code> instead of trimming on every turn, and why the replay tables report cold prefix tokens per event next to tokens evicted: at a 32k budget one event re-prefills most of the window whichever policy chose the items, so the lever that protects a cloud cache is the number of events, not their contents. A local backend with cache reuse pays less for the same removal, which is where finer-grained eviction and recall earn their keep.</p>
+<p>A historical local replay target sweep measured 0.4, 0.5, 0.6, and an exhaustive rung-6 stop over 24 traces. Target 0.4 and exhaustive selection converged because un-evictable residue exhausted the candidate pool. Against 0.6, target 0.4 cut cold-prefix tokens by 2.8% at 64k and 7.3% at 128k, with no summary reduction and a 0.00072 reduction in retention covered at 128k. That was below the 10% cache-saving threshold used for the experiment, so the default remained 0.6. The generated tables and reopening calculation were local artifacts and are not versioned in this repository; use the replay commands in <a href="commands_blueprint.html#working-set-replay">Commands and Modes</a> to measure the current tree.</p>
+<p>The same arithmetic governs the compiled system prompt, which sits ahead of every message. Its sections are ordered stable prefix first, so a section that can change between two turns never sits ahead of one that cannot; the order and the rule behind it are in <a href="tools_blueprint.html#section-order-stable-prefix-first">prompt-envelope-and-tools.md</a>.</p>
+<p>Compaction and eviction both change the replayed history. On a local backend with a single prefix-cache slot, the next turn after either one is expected to be cold because the byte prefix moved. Dispatch traffic can disturb the same slot.</p>
+<p>Clio records these disturbances once on the next assistant entry as <code>promptCache.expectedColdReasons</code>. There are eight recorded reasons, and they split into two groups by what they disturb.</p>
+<table>
+<thead>
+<tr>
+<th>Reason</th>
+<th>Stamped when</th>
+<th>Tier</th>
+</tr>
+</thead>
+<tbody><tr>
+<td><code>working_set_evict</code></td>
+<td>An eviction event was applied to the replayed history.</td>
+<td>every tier</td>
+</tr>
+<tr>
+<td><code>tool_surface_change</code></td>
+<td>The session&#39;s tool signature differs from the last completed run&#39;s.</td>
+<td>every tier</td>
+</tr>
+<tr>
+<td><code>prompt_recompiled</code></td>
+<td>A recompile changed the prompt text and the manifest holds a previous hash to name, or an in-process session switch replaced the prefix after this process had applied a prompt.</td>
+<td>every tier</td>
+</tr>
+<tr>
+<td><code>compaction</code></td>
+<td>The summary compaction path ran.</td>
+<td><code>local-native</code></td>
+</tr>
+<tr>
+<td><code>dispatch</code></td>
+<td>A dispatch started, completed, or failed between turns.</td>
+<td><code>local-native</code></td>
+</tr>
+<tr>
+<td><code>residency</code></td>
+<td>A residency load or eviction succeeded on this session&#39;s own serving endpoint.</td>
+<td><code>local-native</code></td>
+</tr>
+<tr>
+<td><code>thinking_change</code></td>
+<td>The resolved thinking level for this run differs from the last completed backend run&#39;s.</td>
+<td><code>local-native</code></td>
+</tr>
+<tr>
+<td><code>background_memory</code></td>
+<td>A proactive-memory step completed against the endpoint this session streams to.</td>
+<td><code>local-native</code></td>
+</tr>
+</tbody></table>
+<p>The three tier-independent reasons moved the byte prefix itself, so a cloud prefix cache is cold for exactly the same reason a local one is. The other five disturb a local server or the template it renders, and a single-slot local cache is the only one an interleaved run actually displaces, so they are stamped only when the runtime&#39;s tier is <code>local-native</code>. Two of them are gated on identity as well as tier: <code>residency</code> compares the mutation&#39;s target key against this session&#39;s own runtime and base URL, and <code>background_memory</code> compares the memory step&#39;s canonical endpoint key against the target this session streams to, so work on a second server never explains a cold prefix on the first. <code>prompt_recompiled</code> deliberately does not fire on a process&#39;s first compile: a fresh or resumed session has no previous hash to have diverged from, and stamping it there would mark every session&#39;s opening turn as expected-cold. An in-process switch (<code>/resume</code>, <code>/new</code>, a fork) stamps it from the switch itself rather than from the manifest. Manifest provenance follows the session, so the incoming session&#39;s <code>previousHash</code> is its own last recorded hash and usually equals what it compiles now, which leaves the manifest with nothing to report; the backend&#39;s slot meanwhile still holds the outgoing session&#39;s prompt and history, so the first turn after the switch is cold on every tier.</p>
+<p>The user sees one dim notice per reason, and the same reasons persist on the run&#39;s first assistant entry in the session ledger next to the per-call cache data. The <code>/context</code> overlay renders each one in prose (<code>working-set eviction</code>, <code>dispatch traffic</code>, <code>residency change</code>, <code>thinking-level change</code>, <code>tool-surface change</code>, <code>prompt recompile</code>, <code>compaction</code>, <code>background memory step</code>) and falls through to the wire value only for an unknown reason.</p>
+<p>Per-call cache verdicts are <code>hot</code>, <code>partial</code>, <code>cold</code>, and <code>small</code>. They are derived from provider usage and persisted with <code>timing { ttftMs, apiMs }</code> and <code>promptCache { input, cacheRead, cacheWrite, backendVerdict }</code> when available.</p>
+<h3>What the serving backend reports</h3>
+<p>On a llama.cpp or LM Studio target, Clio also persists the server&#39;s own prefill accounting rather than inferring it from pi-ai&#39;s token counts. The observer reads the last complete timing object off the final ordinary SSE event of a stream, or the top-level one on a non-streaming response, from the response the turn already makes; it opens no second connection and sets no extra payload flag. What lands on the assistant entry is <code>promptCache.backend</code>:</p>
+<table>
+<thead>
+<tr>
+<th>Field</th>
+<th>Meaning</th>
+</tr>
+</thead>
+<tbody><tr>
+<td><code>promptTokens</code></td>
+<td>The whole prompt the server accounted for. On the observed llama.cpp build that is <code>prompt_n + cache_n</code>, since <code>prompt_n</code> counts only newly evaluated work.</td>
+</tr>
+<tr>
+<td><code>cachedTokens</code></td>
+<td><code>cache_n</code>, the prompt work the slot reused. <code>null</code> when the server reports no cache figure at all.</td>
+</tr>
+<tr>
+<td><code>predictedTokens</code></td>
+<td><code>predicted_n</code>, tokens generated.</td>
+</tr>
+<tr>
+<td><code>promptMs</code></td>
+<td><code>prompt_ms</code>, wall-clock milliseconds spent in prefill.</td>
+</tr>
+<tr>
+<td><code>predictedMs</code></td>
+<td><code>predicted_ms</code>, wall-clock milliseconds spent generating.</td>
+</tr>
+<tr>
+<td><code>source</code></td>
+<td><code>llamacpp-timings</code> or <code>lmstudio-timings</code>.</td>
+</tr>
+</tbody></table>
+<p><code>uncachedPrefillTokens</code> is derived centrally as <code>promptTokens - cachedTokens</code>, and only when both figures are present and consistent. That distinction carries all the way to the surfaces: a missing <code>cache_n</code> persists <code>cachedTokens: null</code> and leaves the pi-ai verdict in force, so <code>/context</code> says <code>server does not report cache reads</code> instead of calling the backend cold. LM Studio 2.29.0 is that case today. Its OpenAI-compatible port returns <code>usage</code>, <code>stats</code>, and <code>system_fingerprint</code> and no <code>timings</code> object, on both the streaming and non-streaming shapes and with <code>timings_per_token</code> explicitly requested, so <code>lmstudio-timings</code> is a shape Clio accepts and has not yet observed.</p>
+<p>The verdict keeps its existing pi-ai path unless pi-ai reports <code>cacheRead === 0</code> while the backend reports a numeric <code>cachedTokens</code>. In that one case the same hot, partial, cold, and small thresholds are applied to the measured counts instead. No timing ratio or wall-clock heuristic participates in a verdict.</p>
+<p><code>/context</code> renders the last call as <code>prefill: N uncached · M cached · X ms</code>, and falls back to <code>prefill: N prompt · X ms</code> when the server gave no cache figure. <code>/cost</code> folds every durable call in the session into a total uncached prefill plus the four verdict counts, <code>clio-coder usage report</code> carries the same two facts per session, and <code>clio-coder doctor</code> reports the latest session&#39;s verdict counts and its most frequent expected-cold reason without opening the TUI.</p>
+<p>The <code>/context</code> overlay closes the loop. When the last settled run came back <code>cold</code> and Clio had recorded a reason for it, the overlay adds a line naming that reason, for example <code>last cold turn: working-set eviction (expected)</code>, and reports the cache line without the warning token. A reused prompt shell with a cold backend and no recorded reason stays a warning: Clio kept the bytes stable and the provider re-prefilled anyway, which is a disagreement worth surfacing.</p>
+<h2>Prompt pre-warm</h2>
+<p>On a local server prefill is the cost. A fresh session&#39;s first turn prefills the whole compiled prompt plus the tool schemas before the model emits a token, and a resumed session&#39;s first turn prefills the entire replayed history. Both are paid after the operator presses Enter, and both are fully determined before they type anything. Since llama.cpp picks the slot with the longest common prefix and re-evaluates only the suffix, sending that prefix early leaves the processed KV where the real turn will land.</p>
+<p>Clio sends it at three moments: after the session prompt compiles at session start, after a resume rebuilds the message array, and after a compaction settles. The third is included because the next turn is known to be cold and the operator is usually reading the summary rather than typing.</p>
+<p>The payload is the request the next turn would send minus the operator&#39;s text: the same system prompt, the same tool schemas, the same replayed messages, the same thinking level, and the same <code>cache_prompt</code>, with one single-character user message appended so the chat template renders the prefix up to the user turn, and <code>max_tokens: 1</code>. It is built through the same <code>streamSimple</code> dispatcher <code>createEngineAgent</code> hands the engine as its <code>streamFn</code>, not a hand-assembled payload, because any byte that differs ahead of the user turn defeats the purpose.</p>
+<p>The pre-warm is refused rather than queued whenever it would compete with real work. It runs only on <code>local-native</code> targets, whatever <code>chat.prewarm</code> says, because a cloud provider bills the request and caches on its own schedule. It never runs while a turn is in flight, while any dispatch is outstanding, on a worker, or in headless <code>run</code>. The dispatch guard is a stand-in: without per-endpoint capacity accounting the pre-warm cannot tell whether a worker already occupies the server it would warm, so it stands down for all worker traffic. The round already claims one endpoint slot for as long as its request is out and releases it in a <code>finally</code>, through the <code>registerEndpointSlot</code> seam the chat loop wires from the endpoint-capacity registry, so capacity counts a pre-warm the same way it counts the orchestrator&#39;s streaming turn.</p>
+<p>Pressing Enter lets go of an in-flight pre-warm at the keystroke, before the admission gate. Whether it also aborts the HTTP request is gated on what the backend does with a cancelled one, and the backend used for the original experiment did nothing. On an earlier single-slot llama.cpp deployment (build <code>b226-2115b73d8</code>, Qwen3.8-27B, <code>--parallel 1</code>), aborting 1.5 s into a 47,620-token prefill did not cancel the server&#39;s work: the server finished prefilling, so the prefix did survive the abort and the next request read 47,596 of 47,620 tokens from cache with <code>prompt_ms 927</code>, but that request also waited 89.5 s of wall clock for the abandoned one to leave the single slot. Letting the pre-warm complete instead cost 89.3 s plus a 1.3 s turn, the same wall clock. The abort therefore freed no slot and saved no time on that backend; all it did was discard the usage and timings of prefill the server performed. The current operator topology is different: <code>mini</code> is a llama.cpp router at <code>192.168.86.141:8080</code> serving <code>ornith1.5-35b-moe</code> with four parallel slots and 262,144 context tokens per slot, while <code>dynamo</code> is LM Studio at <code>192.168.86.143:1234</code> serving <code>qwen3.8-27b-dynamo</code> for chat. The cancellation result must be remeasured before it is generalized to either deployment. A submit currently detaches the round: Clio stops calling it the current pre-warm, never waits on it, withholds its <code>/context</code> line because it no longer describes the prefix the next turn will send, and still records what it cost. <code>ABORT_ROUND_ON_SUBMIT</code> in <code>src/interactive/turn-prewarm.ts</code> carries the historical measurement and flips the behavior for a backend that honors cancellation.</p>
+<p>Each round appends one <code>prewarm</code> custom ledger entry carrying its trigger, the backend prompt tokens, <code>timing</code>, and <code>promptCache</code>. The entry is never rendered and never becomes a model message, so it contributes zero tokens to the context estimate. <code>/context</code> shows <code>prewarmed: N tokens in X ms</code> until the next settled run answers the question it asked. <code>prewarm</code> is never an expected-cold reason: a pre-warm is the opposite of a disturbance. Its provider usage is real spend and is reported to <code>/cost</code> and <code>clio-coder usage report</code> under its own row, the way a <code>/btw</code> side question is.</p>
+<h2>Settings</h2>
+<p>The public settings use one compaction threshold plus a non-destructive working-set stage:</p>
+<pre><code class="language-yaml">chat:
+  prewarm: true
 
-    <div class="tabs-nav">
-      <button type="button" class="tab-btn active" onclick="switchTab('interactive')">
-        <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><title>Icon</title><polyline points="22 12 18 12 15 21 9 3 6 12 2 12"></polyline></svg>
-        Pressure &amp; Compaction Calculator
-      </button>
-      <button type="button" class="tab-btn" onclick="switchTab('reference')">
-        <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><title>Icon</title><path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z"></path><polyline points="14 2 14 8 20 8"></polyline><line x1="16" y1="13" x2="8" y2="13"></line><line x1="16" y1="17" x2="8" y2="17"></line><polyline points="10 9 9 9 8 9"></polyline></svg>
-        Full Technical Reference
-      </button>
+context:
+  workingSet:
+    enabled: true
+    policy: structural-v1
+    target: 0.6
+    protectLastTurns: 6
+    minEvictableTokens: 200
+  compaction:
+    auto: true
+    threshold: 0.8
+    # model: provider/summary-model-id
+    # systemPrompt: ~/.config/clio-coder/prompts/compaction.md
+</code></pre>
+<p><code>context.compaction.auto</code> controls the pre-request trigger. Manual <code>/context compact</code> still runs when <code>auto</code> is false. <code>context.compaction.model</code> optionally selects a dedicated summarization model, and <code>context.compaction.systemPrompt</code> optionally points at a prompt override file. The retired <code>compaction.excludeLastTurns</code> key is not part of settings v2. The temporary legacy mask uses its compiled six-turn fallback, while working-set protection uses <code>context.workingSet.protectLastTurns</code>.</p>
+<table>
+<thead>
+<tr>
+<th>Key</th>
+<th>Default</th>
+<th>Accepted</th>
+<th>Meaning</th>
+</tr>
+</thead>
+<tbody><tr>
+<td><code>context.workingSet.enabled</code></td>
+<td><code>true</code></td>
+<td>boolean</td>
+<td><code>false</code> skips eviction and goes directly to summary compaction. It does not restore the destructive mask.</td>
+</tr>
+<tr>
+<td><code>context.workingSet.policy</code></td>
+<td><code>structural-v1</code></td>
+<td><code>age-horizon</code>, <code>structural-v1</code></td>
+<td>Candidate selection rule set. <code>age-horizon</code> is the pre-layer age selection.</td>
+</tr>
+<tr>
+<td><code>context.workingSet.target</code></td>
+<td><code>0.6</code></td>
+<td>number greater than 0 and less than 1</td>
+<td>Used-over-window ratio an applied eviction event batches down to.</td>
+</tr>
+<tr>
+<td><code>context.workingSet.protectLastTurns</code></td>
+<td><code>6</code></td>
+<td>integer ≥ 1</td>
+<td>Recent turns whose observations and thinking are never evicted.</td>
+</tr>
+<tr>
+<td><code>context.workingSet.minEvictableTokens</code></td>
+<td><code>200</code></td>
+<td>integer ≥ 0</td>
+<td>Results below this body estimate are never evicted. The default is a measured low-yield churn guard; marker break-even is enforced separately.</td>
+</tr>
+</tbody></table>
+<p>Set <code>CLIO_CODER_LEGACY_MASK=1</code> only as a temporary compatibility escape hatch for the old destructive mask stage. See <a href="context_working_set_blueprint.html">context-working-set.md</a> for what each policy selects and why.</p>
+<p>Settings validation is strict: an older file still carrying the removed <code>compaction.thresholds</code> block fails to load with the exact key path during normal startup. Edit removed or unknown keys deliberately; <code>clio-coder doctor --fix</code> does not transform settings into the current schema.</p>
+<hr>
+<h2>Directory-scoped project handbooks</h2>
+<p>Project guidance is resolved from the filesystem root to the working directory. An ordinary <code>CLIO-CODER.md</code> adds a layer for its directory and descendants. <code>CLIO-CODER.override.md</code> starts a replacement boundary: it wins over <code>CLIO-CODER.md</code> in the same directory, discards all handbook layers inherited from ancestors, and remains effective below that directory. Ordinary handbooks in deeper directories may add new layers after the override. A sibling outside the override&#39;s subtree keeps its own inherited chain.</p>
+<p>For example, a session in <code>repo/src/parser/</code> loads <code>repo/src/CLIO-CODER.override.md</code> followed by <code>repo/src/parser/CLIO-CODER.md</code>; it does not load <code>repo/CLIO-CODER.md</code>. A session in <code>repo/docs/</code> still loads <code>repo/CLIO-CODER.md</code>. Surviving files are rendered in ancestor-to-descendant order as separate <code>&lt;project-context path=&quot;...&quot;&gt;</code> blocks, preserving the source of every instruction. The nearest surviving handbook supplies the project name used by compact reporting, while conventions, hard invariants, imported context, and custom sections layer in order.</p>
+<p>An unreadable or malformed override fails closed. Clio warns about that file but does not reactivate the inherited or same-directory handbook it replaced. <code>clio-coder config inspect</code> lists every effective handbook and its layer number.</p>
+<p>Handbook resolution is read-only. <code>/context init</code> and its CLI form are the only commands that author or update the exact <code>CLIO-CODER.md</code> in the current directory; <code>/context refresh</code> touches neither standard nor override handbooks. Neither command rewrites an inherited file or an override. A same-directory override therefore continues to shadow a standard handbook created or updated by init until the operator removes the override. Normal reset preserves both handbook names; <code>context reset --all</code> may remove the local standard <code>CLIO-CODER.md</code> after its second confirmation but always preserves <code>CLIO-CODER.override.md</code> as operator-authored context.</p>
+<h2>Project-context preload class</h2>
+<p>The compiled session prompt preloads the full rendered project context (the effective handbook fragments plus project-type and codewiki markers) only when at least one selected handbook parses and the rendered text stays within 8000 characters and 220 lines; otherwise it preloads a compact synopsis. The rule lives in <code>src/domains/prompts/preload.ts</code> and every reporting surface classifies with it:</p>
+<ul>
+<li><code>/context init</code> and <code>clio-coder context init</code> print <code>preload: full (N.NkB, N lines)</code> or <code>preload: synopsis (reason: size|lines)</code> after the summary, and warn when a full preload is within 10% of either limit.</li>
+<li><code>clio-coder config inspect</code> shows the shared preload class and layer position on every effective handbook entry.</li>
+<li>The <code>/context</code> overlay shows a <code>project preload:</code> line under the category legend once a session prompt has compiled, followed by the effective handbook path(s): one <code>handbook:</code> line for a single file, or a <code>handbooks (ancestor → nearest):</code> list when layered handbooks apply. Paths render workspace-relative; a handbook above the workspace keeps a <code>~</code>-shortened or absolute path.</li>
+</ul>
+<h2>Context refresh</h2>
+<p><code>/context refresh</code> and <code>clio-coder context refresh</code> rebuild the structural codewiki
+and restamp <code>.clio-coder/state.json</code> without reading or writing inherited handbooks or overrides. The CLI
+flag <code>--wiki</code> is the only refresh path that may update the Markdown wiki, and
+it only runs when an existing wiki metadata file is present. Regenerating or
+updating the exact local standard handbook stays with <code>/context init</code>.</p>
+<p><code>clio-coder context init</code> is model-driven by default. The <code>--heuristic</code> flag is the sole deterministic flag for offline handbook generation. The <code>--propose</code> flag writes ignored drafts to <code>.clio-coder/proposals/</code>, <code>--apply</code> updates from the existing handbook, and <code>--rewrite</code> generates a fresh handbook.</p>
+<p>When bootstrapping across local runtimes such as <code>llamacpp</code> where strict grammar/schema enforcement might be rejected by the endpoint, generator logic retries automatically using a bounded prompt-parser fallback. If <code>--rewrite</code> was requested but the model generation fails to produce a valid handbook rewrite, <code>clio-coder context init</code> prints a notice and exits with code 1 rather than leaving an inconsistent state.</p>
+<h2>Generated handbook structure and verification expectations</h2>
+<p>During handbook generation (<code>context init</code> and <code>clio-coder context init</code>), Clio derives structural sections directly from workspace manifests and toolchains:</p>
+<ul>
+<li><strong>Context retrieval</strong>: Derived from the codewiki index, naming primary entry points and directing agents to use <code>code_nav</code> for navigation. To prevent staleness across repository mutations, exact volatile file counts are omitted.</li>
+<li><strong>Verification expectations</strong>: Synthesized from declared toolchain configuration and manifest files:<ul>
+<li><strong>Node.js</strong>: Detects the active package manager (<code>npm</code>, <code>pnpm</code>, <code>yarn</code>, or <code>bun</code>) and names declared non-mutating scripts (<code>typecheck</code>, <code>lint</code>, <code>format</code>, <code>build</code>, <code>test</code>, <code>ci</code>, <code>test:contracts</code>, <code>test:smoke</code>, <code>check:boundaries</code>).</li>
+<li><strong>CMake</strong>: Inspects <code>CMakePresets.json</code> and emits declared configure, build, and test presets independently.</li>
+<li><strong>Rust / Cargo</strong>: Names <code>cargo build</code> and <code>cargo test</code> when <code>Cargo.toml</code> is present.</li>
+<li><strong>Go</strong>: Names <code>go build ./...</code> and <code>go test ./...</code> when <code>go.mod</code> is present.</li>
+<li><strong>Python</strong>: Detects declared runners (<code>tox</code> via <code>tox.ini</code> or <code>[tool.tox]</code> in <code>pyproject.toml</code>; <code>pytest</code> via <code>pytest.ini</code> or <code>[tool.pytest.ini_options]</code> in <code>pyproject.toml</code>) and names them without guessing undeclared runners.</li>
+</ul>
+</li>
+</ul>
+<hr>
+<h2>Codewiki and Wiki</h2>
+<p>Project context has two local layers. The structural layer is model-free and
+feeds navigation. The Markdown wiki layer is agent-authored and exists only
+when the operator explicitly asks for it.</p>
+<table>
+<thead>
+<tr>
+<th>Layer</th>
+<th>Artifact</th>
+<th>Producer</th>
+<th>Model use</th>
+<th>Prompt surfacing</th>
+</tr>
+</thead>
+<tbody><tr>
+<td>Structural codewiki</td>
+<td><code>.clio-coder/codewiki.json</code> plus <code>.clio-coder/state.json</code></td>
+<td><code>context init</code>, <code>context refresh</code>, <code>context index</code>, session freshness checks, and incremental mutation observers</td>
+<td>None</td>
+<td><code>&lt;codewiki&gt;available...; use code_nav&lt;/codewiki&gt;</code></td>
+</tr>
+<tr>
+<td>Markdown wiki</td>
+<td><code>.clio-coder/wiki/**/*.md</code> plus <code>.clio-coder/wiki/meta.json</code></td>
+<td><code>clio-coder context wiki</code> or <code>clio-coder context refresh --wiki</code></td>
+<td>Yes, one planning dispatch plus one dispatch per page</td>
+<td><code>&lt;wiki&gt;N pages at .clio-coder/wiki (start: quickstart.md)...&lt;/wiki&gt;</code></td>
+</tr>
+</tbody></table>
+<h3>Structural Index</h3>
+<p><code>.clio-coder/codewiki.json</code> uses schema v5 and is written as compact JSON. File
+records contain a stable id, path, language, line count, role, per-file content
+hash, extracted import specifiers, and an optional first docstring/JSDoc
+summary. Symbol records store declaration-level symbols only (such as classes, interfaces, types, global functions, and methods) and intentionally skip function-local symbols. Each record stores name, kind, file id, line, and optional signature. Edges are built from imports and record either an internal file id target or an external module string.</p>
+<p>In Git workspaces, the indexer uses the same visible file set across full builds,
+incremental updates, fingerprints, and project profiles: tracked files plus
+untracked, unignored work in progress. It excludes symlinks, submodule gitlinks,
+generated output, scratch space, and local-state directories such as <code>.git</code>,
+<code>.clio-coder</code>, <code>.superpowers</code>, <code>.codex</code>, <code>.claude</code>, <code>node_modules</code>,
+<code>dist</code>, <code>build</code>, <code>coverage</code>, virtualenvs, <code>target</code>, and <code>vendor</code>. Non-Git
+workspaces use a bounded filesystem walk with the same directory exclusions.
+Source coverage spans TypeScript, JavaScript, Python, Rust, Go, C, C++, CUDA
+(<code>.cu</code> and <code>.cuh</code>), Java, Ruby, and C#, with config entries for manifests such
+as <code>package.json</code>, <code>pyproject.toml</code>, <code>Cargo.toml</code>, <code>go.mod</code>, <code>pom.xml</code>,
+<code>CMakeLists.txt</code>, <code>Gemfile</code>, and <code>*.csproj</code>.</p>
+<p>Extraction is async and tree-sitter-first. Clio loads WASM grammars for the ten
+source language grammars above, extracts symbols/imports/exports from the parsed tree,
+and merges regex import extraction for languages with regex extractors. If a
+tree-sitter parse fails for one file, that file falls back to the available
+regex extractor instead of aborting the whole build. C# is covered by the
+tree-sitter C# grammar.</p>
+<p>Ambiguous <code>.h</code> files are classified deterministically by <code>classifyCHeaderLanguage</code> (<code>src/core/c-header-language.ts</code>). The scanner removes comments before checking C++-only standard-library includes, and removes comments and literals before checking C++ syntax markers such as templates, namespaces, class/member declarations, scope resolution, C++ casts, and C++ qualifiers. If any C++ marker is present, the header is indexed as <code>c++</code>; otherwise, it defaults to <code>c</code>. This guarantees that both full indexing and incremental file syncs assign identical language tags to <code>.h</code> files. Declaration-only C/C++ APIs are indexed so header-heavy MPI, CUDA, and scientific libraries remain navigable even when implementations live elsewhere.</p>
+<p>Incremental updates are real updates, not a full rebuild hidden behind the
+name. Successful file-mutating tools report changed paths through the
+middleware observer. The context domain coalesces those paths, checks per-file
+content hashes and reparses only changed files (<code>perf(context)</code> optimization),
+reads only the changed indexable files for path-based updates, replaces their file and symbol records, removes
+deleted records, and rebuilds edges from the merged import set. Non-indexable
+paths are no-ops.</p>
+<h3>Markdown Wiki &amp; <code>code_nav</code> Resolution</h3>
+<p>The wiki lives under <code>.clio-coder/wiki/</code> as a nested tree and is written by the
+<code>wiki-writer</code> agent. Model agents resolve pages dynamically through <code>code_nav</code>
+with <code>mode: &quot;wiki&quot;</code>; an optional query resolves a page id or title, where the id
+is the page&#39;s path without its extension (<code>domains/dispatch</code>), and returns its
+summary and path. That gives deterministic on-demand navigation without loading
+whole pages into prompt context.</p>
+<p>The unit of work is one page, not one wiki. A run makes a single planning
+dispatch, then one dispatch per page, each with a fresh context holding only that
+page&#39;s plan entry, its anchor sources, and the sibling paths it may link to. The
+repository-wide payload, including the codewiki digest, appears only in the
+planning prompt. Because a static prompt is re-sent on every round of a run, this
+is what keeps prefill cost from growing quadratically with the size of the wiki.</p>
+<p><code>_plan.json</code> is the skeleton and the checkpoint. It is derived deterministically
+from the codewiki index, so a usable plan exists before any model runs; the
+planning dispatch may merge, split, rename, drop, or re-anchor entries by
+rewriting it, and a malformed rewrite falls back to the candidate. The harness
+owns each entry&#39;s status and rewrites the file after every page, so a run that
+ends early records exactly which pages are still owed. Staging survives such a
+run and the next one resumes from it.</p>
+<p>Every page opens with repaired front matter. Its metadata model has <code>title</code>,
+<code>summary</code>, <code>sources</code>, <code>symbols</code>, <code>tests</code>, <code>invariants</code>, and <code>validate</code>, but the
+serializer always writes only <code>title</code>, adds <code>summary</code> when non-empty, and omits
+empty list fields. That metadata is the retrieval layer: <code>quickstart.md</code>, every
+directory <code>index.md</code>, and the task-routing table are generated from the repaired
+values after each run, so navigation cannot drift or miss a page and no writer
+has to remember to update it.</p>
+<p>Assembly repairs rather than rejects. A missing H1, absent or malformed front
+matter, a dangling <code>sources</code> entry, a link to a page that was never written, and
+a citation to a path that does not exist are all mechanically fixable, so each is
+fixed or recorded in a <code>&lt;!-- clio:wiki ... --&gt;</code> marker and reported; none fails a
+run. An empty page is dropped and its plan entry stays owed. An update run&#39;s
+scope is computed, not guessed: a page is rewritten when git reports a change to
+one of the sources its own front matter claims.</p>
+<p><code>meta.json</code> records <code>updatedAt</code>, <code>gitHead</code>, the indexed source-tree hash, the
+model label, a content hash over the page tree, the page list, and the plan.
+<code>generation.pagesPlanned</code> and <code>generation.pagesWritten</code> say whether a run
+finished; when they differ, <code>clio-coder context wiki --update</code> completes the rest.</p>
+<p><code>clio-coder context wiki</code> creates a wiki when no metadata exists and updates one when metadata is present. During wiki generation, Clio automatically refreshes a stale codewiki index before grounding the model run. The decision to write new pages and update metadata is a no-op if the newly generated content&#39;s hash matches the existing content hash. <code>clio-coder context wiki --update</code> requests update mode explicitly. <code>clio-coder context wiki --status</code> only reads metadata and does not run a model. <code>clio-coder context refresh --wiki</code> first rebuilds the structural codewiki and then updates an existing wiki when <code>.clio-coder/wiki/meta.json</code> exists; when no wiki metadata exists, it performs no wiki generation.</p>
+<h3>Lifecycle Matrix</h3>
+<table>
+<thead>
+<tr>
+<th>Event</th>
+<th>Structural codewiki behavior</th>
+<th>Markdown wiki behavior</th>
+</tr>
+</thead>
+<tbody><tr>
+<td>Session start</td>
+<td>If state or <code>.clio-coder/codewiki.json</code> already exists, Clio checks freshness best-effort and performs a full rebuild when the index is stale, missing, unreadable, or needs v5 backfill. Never-indexed directories are skipped.</td>
+<td>No generation or update. Existing wiki status may surface in the welcome dashboard.</td>
+</tr>
+<tr>
+<td>In-session edits</td>
+<td>Successful file mutations enqueue changed paths for incremental <code>updateCodewikiPaths</code>; the queue is serialized and best-effort.</td>
+<td>No automatic update.</td>
+</tr>
+<tr>
+<td>Session stop</td>
+<td>Drains the incremental queue, then rebuilds only when state is stale, the index is missing, or v5 backfill is needed. State records <code>lastSessionAt</code>, <code>lastIndexedAt</code> when applicable, and <code>codewikiVersion</code>.</td>
+<td>No automatic update.</td>
+</tr>
+<tr>
+<td><code>/context init</code> or <code>clio-coder context init</code></td>
+<td>Performs a full codewiki rebuild before generating, preserving, proposing, or previewing <code>CLIO-CODER.md</code>; writes state with the fingerprint and codewiki version when it writes state.</td>
+<td>No wiki generation.</td>
+</tr>
+<tr>
+<td><code>/context refresh</code> or <code>clio-coder context refresh</code></td>
+<td>Performs a full codewiki rebuild and writes state. Does not touch <code>CLIO-CODER.md</code>.</td>
+<td>If an existing wiki is stale and <code>--wiki</code> was not passed on the CLI, prints a hint to run <code>clio-coder context refresh --wiki</code> or <code>clio-coder context wiki --update</code>.</td>
+</tr>
+<tr>
+<td><code>clio-coder context refresh --wiki</code></td>
+<td>Performs the same full codewiki rebuild and state write.</td>
+<td>Updates an existing wiki through the model-backed page dispatches. No wiki metadata means no wiki model call.</td>
+</tr>
+<tr>
+<td><code>clio-coder context wiki</code></td>
+<td>Automatically refreshes the codewiki index if stale before composing the wiki prompt.</td>
+<td>Plans, then writes each owed page in its own dispatch, assembles and promotes whatever landed (no-op if content hashes match), and records any pages still owed.</td>
+</tr>
+<tr>
+<td><code>clio-coder context wiki --status</code></td>
+<td>No index rebuild.</td>
+<td>Reads metadata and reports page count, update time, recorded git head, git-head drift, and how many planned pages remain unwritten.</td>
+</tr>
+</tbody></table>
+<h3>Staleness</h3>
+<p>Codewiki staleness is controlled by one predicate:
+<code>isStale(prev, curr)</code> compares only <code>fingerprint.treeHash</code>. The fingerprint
+hash is mtime-aware: it walks the repository, excludes generated/local-state
+directories and lock/archive files, and hashes each included relative path,
+file size, and floored <code>mtimeMs</code>. The fingerprint also records <code>gitHead</code> and
+<code>loc</code>; <code>loc</code> comes from the codewiki artifact when available, otherwise from a
+line count over source extensions. Those fields are reporting data, not the
+stale predicate.</p>
+<p><code>.clio-coder/state.json</code> stores the fingerprint and optional <code>codewikiVersion</code>.
+Legacy v2/v3/v4 codewiki files can still be read as degraded v5 artifacts, but
+their missing or deliberately invalidated per-file hashes make <code>codewikiNeedsBackfill</code> true. The
+next session freshness check, <code>code_nav</code> demand load, wiki generation, or
+explicit refresh rebuilds them into full v5.</p>
+<p>Wiki staleness is separate. New <code>.clio-coder/wiki/meta.json</code> files record both the git
+head and the indexed source-tree hash used when the wiki content last changed.
+Clio reports drift at the same git head when tracked or untracked source files
+change, and combines committed and working-tree evidence in its changed-file
+count. Older metadata without a source-tree hash retains the git-head-only
+check. Git-less or unreadable git states degrade to <code>fresh</code> with a warning when
+Clio cannot prove drift.</p>
+<h3>Surfacing and Navigation</h3>
+<p>The compiled prompt surfaces only markers, never the codewiki JSON or wiki page
+contents. Fresh codewiki renders as <code>&lt;codewiki&gt;available; use code_nav&lt;/codewiki&gt;</code>.
+A stale codewiki marker adds <code>(stale; run /context refresh)</code>. A valid wiki marker
+names the page count and <code>quickstart.md</code>; a stale wiki marker adds <code>(stale; run clio-coder context wiki --update)</code>.</p>
+<p><code>clio-coder context</code> prints a structural digest from <code>renderCodewikiDigest</code>: schema
+version, project language, file/config/symbol/edge counts, language and role
+counts, top areas, entry points, key symbols, and dependency samples. The
+welcome dashboard shows module count, wiki page count and freshness, and a
+small entry-point excerpt from the same digest. Agents query the structural
+layer through the read-only <code>code_nav</code> tool. See <a href="tool_usage_blueprint.html">tool-usage.md</a>
+for the full mode reference.</p>
+        </article>
+        <nav class="related-nav" aria-label="Adjacent references">
+          <a class="nav-link-card" href="capacity_scheduling_blueprint.html"><span class="nav-label">Previous</span><span class="nav-title">Capacity Leases &amp; Fleet Scheduling</span></a>
+          <a class="nav-link-card next" href="context_working_set_blueprint.html"><span class="nav-label">Next</span><span class="nav-title">Working Set</span></a>
+        </nav>
+        <p class="reference-footer-note">Canonical content lives in the mapped Markdown page. This visual counterpart adds navigation without changing the contract.</p>
+      </main>
     </div>
-
-    <!-- TAB 1: INTERACTIVE -->
-    <main class="tab-pane active" id="pane-interactive">
-      <div class="blueprint-layout">
-
-        <!-- Left: Sliders inputs -->
-        <div class="specs-col">
-          <div class="glass-card">
-            <h2>
-              <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><title>Icon</title><circle cx="12" cy="12" r="10"></circle><polyline points="12 6 12 12 16 14"></polyline></svg>
-              Context Parameters
-            </h2>
-            <p>Set token counts to estimate context window pressure and determine compaction behavior.</p>
-
-            <div class="form-group">
-              <label for="windowSize">Context Window Limit</label>
-              <select id="windowSize" onchange="recalculate()">
-                <option value="128000">128,000 tokens (Standard Local/Cloud)</option>
-                <option value="32768">32,768 tokens (Compact Local)</option>
-                <option value="8192">8,192 tokens (Legacy Model)</option>
-              </select>
-            </div>
-
-            <div class="form-group">
-              <label>System Prompt + Tools (tokens)</label>
-              <input type="range" id="sizeSys" min="2000" max="40000" step="1000" value="12000" oninput="recalculate()">
-              <span id="txtSys" style="font-family:var(--font-mono); font-size:0.8rem;">12,000</span>
-            </div>
-
-            <div class="form-group">
-              <label>Messages History (tokens)</label>
-              <input type="range" id="sizeMsg" min="4000" max="120000" step="2000" value="48000" oninput="recalculate()">
-              <span id="txtMsg" style="font-family:var(--font-mono); font-size:0.8rem;">48,000</span>
-            </div>
-
-            <div class="form-group">
-              <label>Tool Observations (tokens)</label>
-              <input type="range" id="sizeTools" min="0" max="50000" step="1000" value="15000" oninput="recalculate()">
-              <span id="txtTools" style="font-family:var(--font-mono); font-size:0.8rem;">15,000</span>
-            </div>
-
-            <div class="form-group">
-              <label>Compaction Threshold</label>
-              <input type="range" id="threshold" min="0.5" max="0.95" step="0.05" value="0.80" oninput="recalculate()">
-              <span id="txtThreshold" style="font-family:var(--font-mono); font-size:0.8rem;">0.80</span>
-            </div>
-          </div>
-        </div>
-
-        <!-- Right: Gauges and results -->
-        <div class="specs-col">
-          <div class="glass-card">
-            <h2>
-              <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><title>Icon</title><line x1="18" y1="20" x2="18" y2="10"></line><line x1="12" y1="20" x2="12" y2="4"></line><line x1="6" y1="20" x2="6" y2="14"></line></svg>
-              Context Pressure Gauge
-            </h2>
-            <p>Visual representation of model context window space.</p>
-
-            <div class="stack-meter">
-              <div class="stack-seg seg-sys" id="segSys" style="width: 10%"></div>
-              <div class="stack-seg seg-msg" id="segMsg" style="width: 40%"></div>
-              <div class="stack-seg seg-tools" id="segTools" style="width: 15%"></div>
-              <div class="stack-seg seg-free" id="segFree" style="width: 35%"></div>
-            </div>
-
-            <div class="legend-row">
-              <div class="legend-item"><span class="legend-dot seg-sys"></span>System Prompt (<span id="pctSys">10%</span>)</div>
-              <div class="legend-item"><span class="legend-dot seg-msg"></span>Messages (<span id="pctMsg">40%</span>)</div>
-              <div class="legend-item"><span class="legend-dot seg-tools"></span>Tool Obs (<span id="pctTools">15%</span>)</div>
-              <div class="legend-item"><span class="legend-dot seg-free"></span>Free Space (<span id="pctFree">35%</span>)</div>
-            </div>
-
-            <div class="verdict-header">Compaction Verdict</div>
-            <div id="verdictBox" class="verdict-box normal">
-              <strong id="verdictTitle" style="display:block; font-size:1.1rem">NO COMPACTION REQUIRED</strong>
-              <span id="verdictDesc">Pressure is below threshold. Full context fits cleanly.</span>
-            </div>
-
-            <div id="maskedPreviewBox" style="margin-top:1.5rem; display:none">
-              <div class="verdict-header">Simulated Observation Mask Marker</div>
-              <pre><code id="maskedPreviewText">[Observation masked: read output was 240 lines...]</code></pre>
-            </div>
-          </div>
-        </div>
-
-      </div>
-    </main>
-
-    <!-- TAB 2: TECHNICAL REFERENCE -->
-    <main class="tab-pane" id="pane-reference">
-      <div class="glass-card">
-        <h2>Clio Coder Context Engine Specification</h2>
-        <p>Clio Coder tracks context pressure, records per-turn snapshots, and protects the provider context with bounded tool results plus single-threshold compaction.</p>
-
-        <h3 style="margin: 1.5rem 0 0.5rem 0; color:#fff;">Token Estimator</h3>
-        <p>Accounting is hot-path optimized. Instead of querying a remote model tokenizer on every keypress or display refresh, the engine uses a 4 characters-per-token heuristic. This allows instant calculations of messages size, tools payloads, and system scopes.</p>
-
-        <h3 style="margin: 1.5rem 0 0.5rem 0; color:#fff;">Single-Threshold Compaction</h3>
-        <p>Auto-compaction resolves in two tiers to avoid calling the model when cheap edits work:</p>
-        <ol style="margin-left: 2rem; margin-bottom: 1.5rem; color:var(--text-muted)">
-          <li style="margin-bottom:0.5rem;"><strong>Tier 1: Observation and thinking masking (local)</strong>: Clio first scans stale tool results and stale assistant thinking older than <code>excludeLastTurns</code> (default: 6), replaces observation bodies with compact markers, and drops stale thinking while preserving replay structures.</li>
-          <li style="margin-bottom:0.5rem;"><strong>Tier 2: LLM Summary (Model)</strong>: If pressure remains above the threshold after local masking, the engine executes a summary compaction call, folding older chat segments into a single compact ledger summary turn.</li>
-        </ol>
-
-        <h3 style="margin: 1.5rem 0 0.5rem 0; color:#fff;">Cache-Divergence Honesty</h3>
-        <p>Because compaction rewrites the replayed history buffer, local backend models running prefix-caches will experience cold boots on the next turn. Clio monitors and captures this cache-divergence behaviour inside timing structures to inform the operator.</p>
-      </div>
-    </main>
-
-    <footer>
-      <p>Clio Coder Context Engine spec &bull; Version 0.4.0</p>
-    </footer>
+    <footer>Clio Coder documentation · source-aligned at v0.4.2</footer>
   </div>
-
-  <script>
-    // Tab switching
-    function switchTab(tabId) {
-      document.querySelectorAll('.tab-btn').forEach(btn => { btn.classList.remove('active'); });
-      document.querySelectorAll('.tab-pane').forEach(pane => { pane.classList.remove('active'); });
-
-      if (tabId === 'interactive') {
-        document.querySelector('.tab-btn:nth-child(1)').classList.add('active');
-        document.getElementById('pane-interactive').classList.add('active');
-      } else {
-        document.querySelector('.tab-btn:nth-child(2)').classList.add('active');
-        document.getElementById('pane-reference').classList.add('active');
-      }
-    }
-
-    function recalculate() {
-      const windowSize = parseInt(document.getElementById('windowSize').value);
-      const sys = parseInt(document.getElementById('sizeSys').value);
-      const msg = parseInt(document.getElementById('sizeMsg').value);
-      const tools = parseInt(document.getElementById('sizeTools').value);
-      const threshold = parseFloat(document.getElementById('threshold').value);
-
-      // update text labels
-      document.getElementById('txtSys').innerText = sys.toLocaleString();
-      document.getElementById('txtMsg').innerText = msg.toLocaleString();
-      document.getElementById('txtTools').innerText = tools.toLocaleString();
-      document.getElementById('txtThreshold').innerText = threshold.toFixed(2);
-
-      // clamp sum to windowSize
-      const total = sys + msg + tools;
-
-      const pctSys = (sys / windowSize) * 100;
-      const pctMsg = (msg / windowSize) * 100;
-      const pctTools = (tools / windowSize) * 100;
-      const pctFree = Math.max(0, 100 - (pctSys + pctMsg + pctTools));
-
-      // update meter widths
-      document.getElementById('segSys').style.width = pctSys + '%';
-      document.getElementById('segMsg').style.width = pctMsg + '%';
-      document.getElementById('segTools').style.width = pctTools + '%';
-      document.getElementById('segFree').style.width = pctFree + '%';
-
-      // update legend labels
-      document.getElementById('pctSys').innerText = Math.round(pctSys) + '%';
-      document.getElementById('pctMsg').innerText = Math.round(pctMsg) + '%';
-      document.getElementById('pctTools').innerText = Math.round(pctTools) + '%';
-      document.getElementById('pctFree').innerText = Math.round(pctFree) + '%';
-
-      // evaluate compaction
-      const pressure = total / windowSize;
-      const vBox = document.getElementById('verdictBox');
-      const vTitle = document.getElementById('verdictTitle');
-      const vDesc = document.getElementById('verdictDesc');
-      const previewBox = document.getElementById('maskedPreviewBox');
-
-      if (pressure < threshold) {
-        vBox.className = "verdict-box normal";
-        vTitle.innerText = "NO COMPACTION REQUIRED";
-        vDesc.innerText = `Pressure (${pressure.toFixed(2)}) is below threshold (${threshold.toFixed(2)}). History fits in window.`;
-        previewBox.style.display = 'none';
-      } else {
-        // threshold crossed: simulate local masking first
-        const savedByMasking = tools * 0.85; // approximate savings from observation and thinking masking
-        const pressureAfterMasking = (total - savedByMasking) / windowSize;
-
-        if (pressureAfterMasking < threshold) {
-          vBox.className = "verdict-box warn";
-          vTitle.innerText = "LOCAL MASKING TRIGGERED";
-          vDesc.innerText = `Pressure (${pressure.toFixed(2)}) crossed threshold. Masking stale observations and dropping stale thinking recovered ${Math.round(savedByMasking).toLocaleString()} tokens, dropping pressure to ${pressureAfterMasking.toFixed(2)} and avoiding LLM compaction.`;
-
-          previewBox.style.display = 'block';
-          document.getElementById('maskedPreviewText').innerText = `[Observation masked: read output was 320 lines, 12800 chars - contents masked to save context. Re-run tool for current contents.] Preview: export default class ConfigResolver { ... }\n[Stale thinking dropped from assistant replay]`;
-        } else {
-          vBox.className = "verdict-box error";
-          vTitle.innerText = "LLM SUMMARY COMPACTION TRIGGERED";
-          vDesc.innerText = `Pressure is too high (${pressure.toFixed(2)}). Masking alone is insufficient (${pressureAfterMasking.toFixed(2)}). Clio will trigger LLM compaction summarization to clear context space.`;
-          previewBox.style.display = 'none';
-        }
-      }
-    }
-
-    // Init
-    window.onload = () => {
-      recalculate();
-    };
-  </script>
+  <script src="shared.js"></script>
 </body>
 </html>

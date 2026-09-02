@@ -1,7 +1,7 @@
 # Middleware and Component Registry
 
-> [!TIP]
-> **Interactive Spec Available:** A source-checkout dashboard with a component scanner and dynamic hook-and-effect pipeline is available at [docs/html/middleware_blueprint.html](https://github.com/iowarp/clio-coder/blob/main/docs/html/middleware_blueprint.html).
+> **Visual blueprint:** The source checkout includes the complete
+> [Middleware and Component Registry visual reference](https://github.com/iowarp/clio-coder/blob/main/docs/html/middleware_blueprint.html).
 
 Clio Coder has two related but separate surfaces:
 

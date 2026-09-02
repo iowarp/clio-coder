@@ -1,347 +1,215 @@
-<!DOCTYPE html>
+<!doctype html>
 <html lang="en">
 <head>
-  <meta charset="UTF-8">
-  <meta name="viewport" content="width=device-width, initial-scale=1.0">
-  <title>Clio Coder - Exit Codes &amp; Machine-Readable Output Contracts</title>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <meta name="clio-markdown-source" content="docs/guide/exit-codes-and-output.md">
+  <meta name="clio-docs-version" content="0.4.2">
+  <title>Exit Codes &amp; Machine-Readable Output Contracts · Clio Coder 0.4.2</title>
+  <link rel="icon" href="data:,">
   <link rel="stylesheet" href="shared.css">
-  <style>
-    .code-tester-box {
-      background: rgba(0, 0, 0, 0.4);
-      border: 1px solid var(--border-card);
-      border-radius: 8px;
-      padding: 1rem;
-      margin-top: 1rem;
-    }
-    .stream-preview {
-      display: grid;
-      grid-template-columns: 1fr 1fr;
-      gap: 1rem;
-      margin-top: 1rem;
-    }
-    @media (max-width: 768px) {
-      .stream-preview { grid-template-columns: 1fr; }
-    }
-    .stream-col {
-      background: #020408;
-      border: 1px solid var(--border-card);
-      border-radius: 6px;
-      padding: 0.75rem;
-      font-family: var(--font-mono);
-      font-size: 0.8rem;
-      min-height: 120px;
-    }
-    .stream-header {
-      font-weight: 700;
-      margin-bottom: 0.5rem;
-      padding-bottom: 0.25rem;
-      border-bottom: 1px solid rgba(255,255,255,0.1);
-      font-size: 0.75rem;
-      text-transform: uppercase;
-      letter-spacing: 0.05em;
-    }
-  </style>
 </head>
-<body>
+<body data-doc-category="guide">
+  <div class="reading-progress" aria-hidden="true"></div>
+  <a class="skip-link" href="#reference-content">Skip to reference</a>
   <div class="container">
-    <header>
+    <header class="document-header" data-category="Guide">
       <div class="header-left">
-        <div class="header-logo">
-          <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" style="color: var(--color-cyan);"><title>Exit Codes Icon</title>
-            <polyline points="4 17 10 11 4 5"></polyline>
-            <line x1="12" y1="19" x2="20" y2="19"></line>
+        <a class="header-logo" href="index.html" aria-label="Documentation index">
+          <svg viewBox="0 0 24 24" fill="none" aria-hidden="true">
+            <path d="M12 2 2 7l10 5 10-5-10-5Z" stroke="url(#clio-logo)" stroke-width="2" stroke-linejoin="round"/>
+            <path d="m2 12 10 5 10-5M2 17l10 5 10-5" stroke="url(#clio-logo)" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"/>
+            <defs><linearGradient id="clio-logo" x1="2" y1="2" x2="22" y2="22"><stop stop-color="#00d4db"/><stop offset="1" stop-color="#ff7e29"/></linearGradient></defs>
           </svg>
-        </div>
+        </a>
         <div class="header-title-wrapper">
-          <h1>Exit Codes &amp; Output Contracts</h1>
-          <p>Deterministic exit codes (0, 1, 2, 3), standard stream separation, and NDJSON streaming specifications</p>
+          <p class="document-kicker">Guide / canonical reference</p>
+          <h1>Exit Codes &amp; Machine-Readable Output Contracts</h1>
+          <p class="document-path">docs/guide/exit-codes-and-output.md</p>
         </div>
       </div>
       <div class="header-right">
-        <span class="version-badge">v0.4.0</span>
-        <a href="index.html" class="back-btn">
-          <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><title>Back Icon</title><line x1="19" y1="12" x2="5" y2="12"></line><polyline points="12 19 5 12 12 5"></polyline></svg>
-          Dashboard Hub
-        </a>
+        <a class="back-btn" href="index.html">← Index</a>
+        <span class="version-badge">v0.4.2</span>
       </div>
     </header>
-
-    <div class="page-layout-grid">
-      <nav class="sidebar" aria-label="Table of Contents">
-        <div class="toc-container">
-          <div class="toc-title">On This Page</div>
-          <ul class="toc-list">
-            <!-- Populated dynamically by shared.js -->
-          </ul>
-        </div>
-      </nav>
-
-      <main>
-        <div class="tabs-nav">
-          <button type="button" class="tab-btn active" onclick="switchTab('exit-codes')">
-            <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><title>Exit Codes</title><circle cx="12" cy="12" r="10"></circle><line x1="12" y1="8" x2="12" y2="12"></line><line x1="12" y1="16" x2="12.01" y2="16"></line></svg>
-            Exit Code Taxonomy
-          </button>
-          <button type="button" class="tab-btn" onclick="switchTab('json-streams')">
-            <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><title>Streams</title><polyline points="16 18 22 12 16 6"></polyline><polyline points="8 6 2 12 8 18"></polyline></svg>
-            JSON Streaming &amp; Deduplication
-          </button>
-          <button type="button" class="tab-btn" onclick="switchTab('stream-tester')">
-            <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><title>Tester</title><polygon points="5 3 19 12 5 21 5 3"></polygon></svg>
-            Interactive Stream Tester
-          </button>
-        </div>
-
-        <!-- TAB 1: EXIT CODE TAXONOMY -->
-        <div class="tab-pane active" id="pane-exit-codes">
-          <div class="glass-card">
-            <h2>Deterministic Process Exit Codes</h2>
-            <p>Clio Coder follows a strict exit code contract across all CLI subcommands:</p>
-
-            <table class="ref-table">
-              <thead>
-                <tr>
-                  <th>Exit Code</th>
-                  <th>Classification</th>
-                  <th>Typical Conditions &amp; Guarantees</th>
-                </tr>
-              </thead>
-              <tbody>
-                <tr>
-                  <td><span class="badge" style="background: rgba(87,227,137,0.2); color: var(--color-emerald); font-weight:700;">0</span></td>
-                  <td><strong>Success</strong></td>
-                  <td>Command executed successfully, <code>--help</code> output delivered to stdout, <code>--version</code> emitted, or empty trace database notice rendered without explicit <code>--db</code>.</td>
-                </tr>
-                <tr>
-                  <td><span class="badge" style="background: rgba(255,92,102,0.2); color: var(--color-rose); font-weight:700;">1</span></td>
-                  <td><strong>Operational Failure</strong></td>
-                  <td>Model target unreachable, doctor diagnosis with unresolved failures, evaluation rubric failed (fail/error verdict), or explicit <code>--db</code> path missing.</td>
-                </tr>
-                <tr>
-                  <td><span class="badge" style="background: rgba(255,180,84,0.2); color: var(--color-amber); font-weight:700;">2</span></td>
-                  <td><strong>Syntax / Usage Error</strong></td>
-                  <td>Unknown subcommand, unknown flag, missing required positional arguments, global flag placed after subcommand, or mutating SQL statement passed to <code>trace sql</code>. Output strictly on <code>stderr</code>.</td>
-                </tr>
-                <tr>
-                  <td><span class="badge" style="background: rgba(157,140,255,0.2); color: var(--color-purple); font-weight:700;">3</span></td>
-                  <td><strong>Unmeasured / Harness State</strong></td>
-                  <td>Specific to evaluation runners (<code>skills eval</code>): rubric could not be evaluated due to timeout, unparseable judge output, or evidence write failure.</td>
-                </tr>
-              </tbody>
-            </table>
-          </div>
-
-          <h2>The `--help` Standard &amp; Global Options</h2>
-          <div class="grid grid-2">
-            <div class="glass-card">
-              <h3>Strict `--help` Guarantees</h3>
-              <ul>
-                <li><strong>stdout:</strong> Usage guide is printed exclusively to <code>stdout</code>.</li>
-                <li><strong>Exit 0:</strong> Always exits with code <code>0</code>.</li>
-                <li><strong>Zero Side Effects:</strong> Runs no network probes, initiates no agent runtimes, and mutates no state files.</li>
-              </ul>
-            </div>
-            <div class="glass-card">
-              <h3>Global Flag Positioning</h3>
-              <p>Global flags (<code>--api-key</code>, <code>--no-context-files</code>, <code>-nc</code>) must precede the subcommand name:</p>
-              <pre><code># Valid:
-clio-coder --api-key &lt;key&gt; run "..."
-
-# Usage Error (Exit 2 on stderr):
-clio-coder run --api-key &lt;key&gt; "..."</code></pre>
-            </div>
-          </div>
-        </div>
-
-        <!-- TAB 2: JSON STREAMS & DEDUPLICATION -->
-        <div class="tab-pane" id="pane-json-streams">
-          <h2>Machine-Readable Subcommand Formats</h2>
-          <table class="ref-table">
-            <thead>
-              <tr>
-                <th>Subcommand</th>
-                <th>Invocation</th>
-                <th>Output Structure</th>
-              </tr>
-            </thead>
-            <tbody>
-              <tr>
-                <td><code>clio-coder run</code></td>
-                <td><code>--json</code></td>
-                <td>NDJSON event frames: <code>session</code>, <code>agent_start</code>, <code>turn_start</code>, <code>message_start</code>, <code>message_end</code>, <code>thinking_delta</code>, <code>text_delta</code>, <code>tool_execution_start</code>, <code>tool_execution_end</code>, <code>turn_end</code>, <code>agent_end</code>.</td>
-              </tr>
-              <tr>
-                <td><code>clio-coder run</code></td>
-                <td><code>--json-events terminal</code></td>
-                <td>Receipt-focused stream: the <code>session</code> header, a synthesized <code>turn_start</code> carrying <code>startedAt</code>, the <code>agent_end</code> and <code>notice</code> events that pass the filter, and a synthesized <code>turn_end</code> carrying <code>startedAt</code>, <code>endedAt</code>, <code>exitCode</code>, and <code>error</code> when the turn failed. Per-segment token usage rides <code>agent_end</code>. Excludes bulky message bodies (#122).</td>
-              </tr>
-              <tr>
-                <td><code>clio-coder run</code></td>
-                <td><code>--json-events full</code></td>
-                <td>Full event stream with assistant messages projected to strip redundant text bodies, eliminating duplicate wire tokens.</td>
-              </tr>
-              <tr>
-                <td><code>clio-coder trace runs</code></td>
-                <td><code>--json</code></td>
-                <td>JSON array of trace run summary records.</td>
-              </tr>
-              <tr>
-                <td><code>clio-coder trace sql</code></td>
-                <td>Positional <code>SELECT ...</code></td>
-                <td>JSON array of query result row objects. Mutating statements exit 2.</td>
-              </tr>
-              <tr>
-                <td><code>clio-coder paths</code></td>
-                <td><code>--json</code></td>
-                <td>JSON object mapping platform directory names to absolute filesystem paths.</td>
-              </tr>
-            </tbody>
-          </table>
-
-          <h2>Incremental Streaming &amp; Deduplication Invariants (#122, #123)</h2>
-          <div class="grid grid-2">
-            <div class="glass-card">
-              <h3>Delta Deduplication Protocol</h3>
-              <p>Assistant content is streamed incrementally via <code>text_delta</code> and <code>thinking_delta</code> events. To prevent duplicate token delivery, <code>message_end</code> and <code>turn_end</code> project content blocks to lightweight metadata descriptors:</p>
-              <pre><code>// Projected assistant block in message_end:
-{
-  "type": "text",
-  "streamed": true,
-  "textLength": 42
-}</code></pre>
-            </div>
-            <div class="glass-card">
-              <h3>Headless Permission Denials</h3>
-              <p>When a mutating tool requires confirmation in headless mode, Clio returns <code>HEADLESS_PERMISSION_DENIED_REASON</code> to the agent as a tool result:</p>
-              <div style="background: rgba(0,0,0,0.3); border-left: 3px solid var(--color-amber); padding: 0.75rem; border-radius: 4px; font-size: 0.82rem; font-family: var(--font-mono);">
-                clio-coder run cannot confirm permission requests; rerun interactively to approve this action.
-              </div>
-            </div>
-          </div>
-        </div>
-
-        <!-- TAB 3: STREAM TESTER -->
-        <div class="tab-pane" id="pane-stream-tester">
-          <div class="glass-card">
-            <h2>Command Output &amp; Stream Separation Simulator</h2>
-            <p>Select a CLI invocation to preview its exit code and standard stream separation:</p>
-
-            <div class="form-group">
-              <label for="cmdSelect">Simulated Command</label>
-              <select id="cmdSelect" onchange="runStreamSim()">
-                <option value="help">clio-coder trace --help</option>
-                <option value="trace-unknown">clio-coder trace bogus</option>
-                <option value="trace-sql-select">clio-coder trace sql "SELECT count(*) AS total FROM runs"</option>
-                <option value="trace-sql-mutate">clio-coder trace sql "DELETE FROM runs"</option>
-                <option value="run-terminal">clio-coder run --json-events terminal "Say OK."</option>
-                <option value="flag-misplaced">clio-coder run --api-key sk-123 "Hello"</option>
-              </select>
-            </div>
-
-            <div class="code-tester-box">
-              <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 0.75rem;">
-                <span style="font-weight: 700; color: #fff;">Simulated Process Status:</span>
-                <span id="simExitBadge" class="badge" style="background: rgba(87,227,137,0.2); color: var(--color-emerald); font-weight:700;">Exit Code: 0</span>
-              </div>
-
-              <div class="stream-preview">
-                <div class="stream-col">
-                  <div class="stream-header" style="color: var(--color-emerald);">stdout (Standard Output)</div>
-                  <div id="simStdout" style="color: #c9d1d9; white-space: pre-wrap;"></div>
-                </div>
-                <div class="stream-col">
-                  <div class="stream-header" style="color: var(--color-rose);">stderr (Standard Error)</div>
-                  <div id="simStderr" style="color: #ff7b72; white-space: pre-wrap;"></div>
-                </div>
-              </div>
-            </div>
-          </div>
-        </div>
-
-        <!-- Related Navigation -->
-        <nav class="related-nav" aria-label="Related Pages">
-          <a href="session_lifecycle_blueprint.html" class="nav-link-card">
-            <span class="nav-label">Previous Blueprint</span>
-            <span class="nav-title">Session Lifecycle</span>
-          </a>
-          <a href="prompt_envelope_blueprint.html" class="nav-link-card next">
-            <span class="nav-label">Next Blueprint</span>
-            <span class="nav-title">Prompt Envelope &amp; Tools</span>
-          </a>
+    <div class="page-layout-grid reference-layout">
+      <aside class="sidebar reference-sidebar" aria-label="On this page">
+        <nav class="toc-container">
+          <p class="toc-title">On this page</p>
+          <a class="sidebar-source" href="https://github.com/iowarp/clio-coder/blob/main/docs/guide/exit-codes-and-output.md">Canonical Markdown<br>docs/guide/exit-codes-and-output.md</a>
+          <ul class="toc-list"></ul>
         </nav>
+      </aside>
+      <main class="reference-main" id="reference-content">
+        <article class="reference-prose glass-card">
+<blockquote>
+<p><strong>Visual blueprint:</strong> The source checkout includes the complete
+<a href="exit_codes_blueprint.html">Exit Codes &amp; Machine-Readable Output Contracts visual reference</a>.</p>
+</blockquote>
+<p>This document specifies the process exit codes, machine-readable JSON streaming formats, standard I/O separation rules, and <code>--help</code> conventions across all Clio Coder CLI commands in the current source tree.</p>
+<p>Source implementations: <code>src/cli/</code> and <code>src/entry/</code>.</p>
+<hr>
+<h2>1. Global Exit Codes</h2>
+<p>Clio Coder follows a deterministic exit code taxonomy across all commands:</p>
+<table>
+<thead>
+<tr>
+<th align="left">Exit Code</th>
+<th align="left">Meaning</th>
+<th align="left">Typical Causes &amp; Conditions</th>
+</tr>
+</thead>
+<tbody><tr>
+<td align="left"><strong><code>0</code></strong></td>
+<td align="left"><strong>Success</strong></td>
+<td align="left">Successful command execution, clean run settlement, <code>--version</code>, <code>--help</code> invocation, or missing trace database notice without an explicit <code>--db</code> flag.</td>
+</tr>
+<tr>
+<td align="left"><strong><code>1</code></strong></td>
+<td align="left"><strong>Operational Failure</strong></td>
+<td align="left">Execution error, model target unreachable, doctor diagnosis with unresolved issues, explicit <code>--db</code> path not found, or evaluation rubric failure (<code>fail</code> or <code>error</code> verdict).</td>
+</tr>
+<tr>
+<td align="left"><strong><code>2</code></strong></td>
+<td align="left"><strong>Syntax / Usage Error</strong></td>
+<td align="left">Unknown subcommand, invalid flag, missing required positional arguments, global flag placed after subcommand, or data mutation SQL keyword passed to <code>clio-coder trace sql</code>.</td>
+</tr>
+<tr>
+<td align="left"><strong><code>3</code></strong></td>
+<td align="left"><strong>Unmeasured / Harness State</strong></td>
+<td align="left">Specific to <code>clio-coder skills eval</code>: rubric could not be evaluated due to unparseable judge output, timeout, or evidence archive write failure (distinct from a failure/regression).</td>
+</tr>
+</tbody></table>
+<hr>
+<h2>2. The <code>--help</code> Standard</h2>
+<p>Every subcommand in Clio Coder adheres to the strict <code>--help</code> convention:</p>
+<ol>
+<li><strong>Standard Output</strong>: Usage instructions and options are printed exclusively to <code>stdout</code>.</li>
+<li><strong>Zero Exit</strong>: The process exits with code <code>0</code>.</li>
+<li><strong>Zero Side Effects</strong>: Running <code>clio-coder &lt;subcommand&gt; --help</code> executes no runtime setup, initiates no network probes, and mutates no state files.</li>
+</ol>
+<h3>Global vs Subcommand Flag Positioning</h3>
+<p>Global options (such as <code>--api-key</code>, <code>--no-context-files</code>, and <code>-nc</code>) must precede the subcommand. Directory redirection is configured via the <code>CLIO_CODER_*_DIR</code> environment variables (see <a href="environment_blueprint.html">docs/guide/environment-variables.md</a>). If a global flag is placed after the subcommand name, Clio prints a remediation guide to <code>stderr</code> and exits with code <code>2</code>:</p>
+<pre><code class="language-text">--api-key is a global option and must come before the subcommand: clio-coder --api-key &lt;key&gt; &lt;command&gt; ...
+</code></pre>
+<hr>
+<h2>3. Standard I/O Separation &amp; Headless Execution</h2>
+<p>In headless execution (<code>clio-coder run</code>):</p>
+<ol>
+<li><strong>Standard Output (<code>stdout</code>)</strong>: Reserved strictly for the final answer, deliverable artifact content, or machine-readable JSON streams.</li>
+<li><strong>Standard Error (<code>stderr</code>)</strong>: Reserved for progress notifications, permission denial advisories, telemetry warnings, and error diagnostics.</li>
+<li><strong>Headless Permission Denials</strong>: When a tool requires permission that cannot be granted in headless mode, Clio emits <code>HEADLESS_PERMISSION_DENIED_REASON</code>:<pre><code class="language-text">clio-coder run cannot confirm permission requests; rerun interactively to approve this action.
+</code></pre>
+The denial is delivered to the LLM as a tool result so the agent can adapt or report the limitation. If the run completes after the denial, the process exits <code>0</code> with the answer on <code>stdout</code>.</li>
+</ol>
+<hr>
+<h2>4. Machine-Readable Output Formats (<code>--json</code> &amp; <code>--json-events</code>)</h2>
+<p>Many Clio CLI subcommands provide structured JSON output for integration with scripts, CI pipelines, and external orchestrators.</p>
+<h3>Subcommand JSON Summary</h3>
+<table>
+<thead>
+<tr>
+<th align="left">Subcommand</th>
+<th align="left">Flag</th>
+<th align="left">Output Structure</th>
+</tr>
+</thead>
+<tbody><tr>
+<td align="left"><code>clio-coder run</code></td>
+<td align="left"><code>--json</code></td>
+<td align="left">Stream of incremental NDJSON event frames. Core frame kinds include <code>session</code>, <code>agent_start</code>, <code>turn_start</code>, <code>message_start</code>, <code>message_end</code>, <code>thinking_delta</code>, <code>text_delta</code>, <code>tool_execution_start</code>, <code>tool_execution_end</code>, <code>turn_end</code>, and <code>agent_end</code>. Full streams can also carry registered <code>clio_coder_*</code> tool, permission, plan, and lifecycle frames; consumers must dispatch on <code>type</code> and tolerate additive kinds.</td>
+</tr>
+<tr>
+<td align="left"><code>clio-coder run</code></td>
+<td align="left"><code>--json-events terminal</code></td>
+<td align="left">Emits the <code>session</code> header, a synthesized <code>turn_start</code> (<code>startedAt</code>), the <code>agent_end</code> and <code>notice</code> events that pass the filter, and a synthesized <code>turn_end</code> carrying <code>startedAt</code>, <code>endedAt</code>, <code>exitCode</code>, and <code>error</code> when the turn failed. Per-segment token usage rides <code>agent_end</code>. Excludes multi-kilobyte intermediate message bodies (#122).</td>
+</tr>
+<tr>
+<td align="left"><code>clio-coder run</code></td>
+<td align="left"><code>--json-events full</code></td>
+<td align="left">Emits complete event stream with projected assistant messages (<code>streamed: true</code>, <code>textLength</code>, <code>thinkingLength</code>) to eliminate duplicate wire tokens (#122).</td>
+</tr>
+<tr>
+<td align="left"><code>clio-coder agents</code></td>
+<td align="left"><code>--json</code></td>
+<td align="left">JSON array of registered agent recipe metadata objects.</td>
+</tr>
+<tr>
+<td align="left"><code>clio-coder targets</code></td>
+<td align="left"><code>--json</code></td>
+<td align="left">JSON object containing the configured <code>targets</code> array.</td>
+</tr>
+<tr>
+<td align="left"><code>clio-coder models</code></td>
+<td align="left"><code>--json</code></td>
+<td align="left">JSON array of catalog models with capability flags.</td>
+</tr>
+<tr>
+<td align="left"><code>clio-coder fleet status</code></td>
+<td align="left"><code>--json</code></td>
+<td align="left">JSON snapshot object with <code>generatedAt</code>, <code>admission</code> (<code>open</code> or <code>draining</code>), <code>running</code>, <code>retrying</code>, and <code>totals</code>. Each run row carries its <code>node</code>, defaulting to <code>local</code>.</td>
+</tr>
+<tr>
+<td align="left"><code>clio-coder fleet validate</code></td>
+<td align="left"><code>--json</code></td>
+<td align="left">JSON report with <code>valid</code>, <code>fleet</code>, and either successful <code>checks</code> plus <code>planHash</code> or failure <code>diagnostics</code>. Validation failures exit <code>1</code>; usage errors exit <code>2</code>.</td>
+</tr>
+<tr>
+<td align="left"><code>clio-coder fleet graph</code></td>
+<td align="left"><code>--json</code></td>
+<td align="left">JSON object with <code>fleet</code>, <code>planHash</code>, compiled <code>waves</code>, and expanded <code>loops</code>. Contract failures exit <code>1</code>; usage errors exit <code>2</code>.</td>
+</tr>
+<tr>
+<td align="left"><code>clio-coder fleet run --resume</code></td>
+<td align="left"><code>--json</code></td>
+<td align="left">NDJSON step records include <code>status: &quot;replayed&quot;</code> and the original receipt reference for replayed prefix steps. Plan or variable mismatches exit <code>1</code>.</td>
+</tr>
+<tr>
+<td align="left"><code>clio-coder trace runs</code></td>
+<td align="left"><code>--json</code></td>
+<td align="left">JSON array of trace run records.</td>
+</tr>
+<tr>
+<td align="left"><code>clio-coder trace inspect</code></td>
+<td align="left"><code>--json</code></td>
+<td align="left">Version-1 bounded snapshot with <code>generatedAt</code>, <code>available</code>, <code>runs</code>, and aggregate <code>truncated</code>; each run contains bounded accounting plus phase, event-kind, and process-kind summaries, never request text or raw rows.</td>
+</tr>
+<tr>
+<td align="left"><code>clio-coder trace prune</code></td>
+<td align="left"><code>--json</code></td>
+<td align="left">JSON object containing <code>available</code>, the resolved <code>policy</code>, <code>runsRemoved</code>, <code>rowsRemoved</code>, <code>bytesRemoved</code>, <code>vacuumed</code>, and <code>protectedRuns</code>. With no default database it remains a structured successful no-op.</td>
+</tr>
+<tr>
+<td align="left"><code>clio-coder trace sql</code></td>
+<td align="left">Positional query</td>
+<td align="left">JSON array of rows returned by the read-only SQLite query. A single <code>SELECT</code> or read-only <code>WITH</code> statement is accepted; multiple statements and mutating keywords are refused with exit code 2.</td>
+</tr>
+<tr>
+<td align="left"><code>clio-coder paths</code></td>
+<td align="left"><code>--json</code></td>
+<td align="left">JSON object mapping platform directory names to absolute paths.</td>
+</tr>
+</tbody></table>
+<h3>Incremental Streaming &amp; Deduplication Invariant (#122, #123)</h3>
+<p>The <code>--json</code> stream from <code>clio-coder run</code> emits <strong>deltas and increments</strong>, never repeated whole-message snapshots:</p>
+<ol>
+<li><code>text_delta</code> and <code>thinking_delta</code> stream incremental content tokens.</li>
+<li><code>message_end</code> and <code>turn_end</code> frames project assistant content blocks to metadata descriptors (<code>{ streamed: true, textLength }</code> and <code>{ streamed: true, thinkingLength, thinkingSignature }</code>), stripping raw text/thinking bodies so content is never transmitted across the wire twice.</li>
+<li>Tool calls and results are preserved intact since they carry execution payloads not present in text deltas.</li>
+<li>Terminal accounting and token usage remain fully populated for auditability.</li>
+<li>Exit code validation strictly precedes database inspection: unknown flags, missing required positionals, or mutating SQL queries consistently exit <code>2</code> with usage syntax printed to <code>stderr</code> (#123).</li>
+</ol>
+        </article>
+        <nav class="related-nav" aria-label="Adjacent references">
+          <a class="nav-link-card" href="environment_blueprint.html"><span class="nav-label">Previous</span><span class="nav-title">Environment Variables</span></a>
+          <a class="nav-link-card next" href="extensions_blueprint.html"><span class="nav-label">Next</span><span class="nav-title">Extensions, Resources, and Share Archives</span></a>
+        </nav>
+        <p class="reference-footer-note">Canonical content lives in the mapped Markdown page. This visual counterpart adds navigation without changing the contract.</p>
       </main>
     </div>
-
-    <footer>
-      <p>Clio Coder Exit Codes &amp; Output Contracts Blueprint &bull; Version 0.4.0 &bull; Gnosis Research Center</p>
-    </footer>
+    <footer>Clio Coder documentation · source-aligned at v0.4.2</footer>
   </div>
-
   <script src="shared.js"></script>
-  <script>
-    function switchTab(tabId) {
-      document.querySelectorAll('.tab-btn').forEach(btn => btn.classList.remove('active'));
-      document.querySelectorAll('.tab-pane').forEach(pane => pane.classList.remove('active'));
-
-      const pane = document.getElementById(`pane-${tabId}`);
-      if (pane) pane.classList.add('active');
-
-      const activeBtn = Array.from(document.querySelectorAll('.tab-btn')).find(btn => {
-        return btn.getAttribute('onclick')?.includes(`'${tabId}'`);
-      });
-      if (activeBtn) activeBtn.classList.add('active');
-
-      if (window.initTableOfContents) window.initTableOfContents();
-    }
-
-    function runStreamSim() {
-      const choice = document.getElementById('cmdSelect').value;
-      const badge = document.getElementById('simExitBadge');
-      const stdout = document.getElementById('simStdout');
-      const stderr = document.getElementById('simStderr');
-
-      if (choice === 'help') {
-        badge.style.background = 'rgba(87,227,137,0.2)';
-        badge.style.color = 'var(--color-emerald)';
-        badge.innerText = 'Exit Code: 0 (Success)';
-        stdout.innerText = 'Usage:\n  clio-coder trace runs [--db PATH] [--limit N] [--json]\n  clio-coder trace phases <runId> [--db PATH]\n  clio-coder trace tail <runId> [--follow] [--db PATH]\n  clio-coder trace procs <runId> [--db PATH]\n  clio-coder trace sql <SELECT query> [--db PATH]\n  clio-coder trace ui [--db PATH] [--port N]        source checkout only';
-        stderr.innerText = '';
-      } else if (choice === 'trace-unknown') {
-        badge.style.background = 'rgba(255,180,84,0.2)';
-        badge.style.color = 'var(--color-amber)';
-        badge.innerText = 'Exit Code: 2 (Usage Error)';
-        stdout.innerText = '';
-        stderr.innerText = 'unknown trace command: bogus\n(followed by the trace usage block on stderr)';
-      } else if (choice === 'trace-sql-select') {
-        badge.style.background = 'rgba(87,227,137,0.2)';
-        badge.style.color = 'var(--color-emerald)';
-        badge.innerText = 'Exit Code: 0 (Success)';
-        stdout.innerText = '[{"total": 14}]';
-        stderr.innerText = '';
-      } else if (choice === 'trace-sql-mutate') {
-        badge.style.background = 'rgba(255,180,84,0.2)';
-        badge.style.color = 'var(--color-amber)';
-        badge.innerText = 'Exit Code: 2 (Usage Error)';
-        stdout.innerText = '';
-        stderr.innerText = 'trace sql accepts SELECT or read-only WITH queries only';
-      } else if (choice === 'run-terminal') {
-        badge.style.background = 'rgba(87,227,137,0.2)';
-        badge.style.color = 'var(--color-emerald)';
-        badge.innerText = 'Exit Code: 0 (Success)';
-        stdout.innerText = '{"type":"session","id":"01912a34-...","timestamp":"2026-01-05T09:12:11.000Z","cwd":"/repo"}\n{"type":"turn_start","startedAt":"2026-01-05T09:12:11.000Z"}\n{"type":"agent_end","messageCount":2,"usage":{"input":118,"output":24,"totalTokens":142,"measured":true}}\n{"type":"turn_end","startedAt":"2026-01-05T09:12:11.000Z","endedAt":"2026-01-05T09:12:11.400Z","exitCode":0}';
-        stderr.innerText = '';
-      } else if (choice === 'flag-misplaced') {
-        badge.style.background = 'rgba(255,180,84,0.2)';
-        badge.style.color = 'var(--color-amber)';
-        badge.innerText = 'Exit Code: 2 (Usage Error)';
-        stdout.innerText = '';
-        stderr.innerText = 'error: --api-key is a global option and must come before the subcommand: clio-coder --api-key <key> run ...';
-      }
-    }
-
-    window.onload = () => {
-      runStreamSim();
-    };
-  </script>
 </body>
 </html>

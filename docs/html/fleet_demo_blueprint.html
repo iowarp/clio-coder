@@ -1,0 +1,226 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <meta name="clio-markdown-source" content="docs/process/fleet-demo-runbook.md">
+  <meta name="clio-docs-version" content="0.4.2">
+  <title>Fleet Demo Runbook · Clio Coder 0.4.2</title>
+  <link rel="icon" href="data:,">
+  <link rel="stylesheet" href="shared.css">
+</head>
+<body data-doc-category="process">
+  <div class="reading-progress" aria-hidden="true"></div>
+  <a class="skip-link" href="#reference-content">Skip to reference</a>
+  <div class="container">
+    <header class="document-header" data-category="Process">
+      <div class="header-left">
+        <a class="header-logo" href="index.html" aria-label="Documentation index">
+          <svg viewBox="0 0 24 24" fill="none" aria-hidden="true">
+            <path d="M12 2 2 7l10 5 10-5-10-5Z" stroke="url(#clio-logo)" stroke-width="2" stroke-linejoin="round"/>
+            <path d="m2 12 10 5 10-5M2 17l10 5 10-5" stroke="url(#clio-logo)" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"/>
+            <defs><linearGradient id="clio-logo" x1="2" y1="2" x2="22" y2="22"><stop stop-color="#00d4db"/><stop offset="1" stop-color="#ff7e29"/></linearGradient></defs>
+          </svg>
+        </a>
+        <div class="header-title-wrapper">
+          <p class="document-kicker">Process / canonical reference</p>
+          <h1>Fleet Demo Runbook</h1>
+          <p class="document-path">docs/process/fleet-demo-runbook.md</p>
+        </div>
+      </div>
+      <div class="header-right">
+        <a class="back-btn" href="index.html">← Index</a>
+        <span class="version-badge">v0.4.2</span>
+      </div>
+    </header>
+    <div class="page-layout-grid reference-layout">
+      <aside class="sidebar reference-sidebar" aria-label="On this page">
+        <nav class="toc-container">
+          <p class="toc-title">On this page</p>
+          <a class="sidebar-source" href="https://github.com/iowarp/clio-coder/blob/main/docs/process/fleet-demo-runbook.md">Canonical Markdown<br>docs/process/fleet-demo-runbook.md</a>
+          <ul class="toc-list"></ul>
+        </nav>
+      </aside>
+      <main class="reference-main" id="reference-content">
+        <article class="reference-prose glass-card">
+<blockquote>
+<p><strong>Visual blueprint:</strong> The source checkout includes the complete
+<a href="fleet_demo_blueprint.html">Fleet Demo Runbook visual reference</a>.</p>
+</blockquote>
+<p>A repeatable multi-node demonstration: one orchestrator drives a real
+CMake/C++ fix through a reviewer-gated dispatch across SSH nodes, and every
+worker&#39;s receipt (including the remote ones) verifies afterward. The steps
+are executable in order; this document doubles as the recording script.
+Background and reference: <a href="fleet_dispatch_blueprint.html">fleet-dispatch.md</a>.</p>
+<h2>Reference fabric</h2>
+<table>
+<thead>
+<tr>
+<th>Role</th>
+<th>Machine</th>
+<th>Notes</th>
+</tr>
+</thead>
+<tbody><tr>
+<td>Orchestrator</td>
+<td><code>local</code></td>
+<td>Runs the interactive Clio session.</td>
+</tr>
+<tr>
+<td>SSH node</td>
+<td><code>node-a</code></td>
+<td>General worker capacity.</td>
+</tr>
+<tr>
+<td>SSH node</td>
+<td><code>node-b</code></td>
+<td>Serves the operator&#39;s resident models on its GPU; residency stays observe.</td>
+</tr>
+<tr>
+<td>SSH node</td>
+<td><code>node-c</code></td>
+<td>General worker capacity.</td>
+</tr>
+</tbody></table>
+<p>All four machines share the filesystem, so the project root resolves to the
+same absolute path everywhere. The demo project is any CMake/C++ repository
+with a known failing build or test; a one-line compile error in a <code>.cpp</code> file
+works well on camera.</p>
+<h2>1. Declare the fleet (local)</h2>
+<p>Add the nodes to <code>settings.yaml</code> (see <code>clio-coder paths</code> for its location):</p>
+<pre><code class="language-yaml">fleet:
+  nodes:
+    - id: node-a
+      host: node-a.example.net
+      maxWorkers: 2
+    - id: node-b
+      host: node-b.example.net
+      maxWorkers: 1
+      residency: observe
+    - id: node-c
+      host: node-c.example.net
+      maxWorkers: 2
+</code></pre>
+<p>The implicit <code>local</code> node (the orchestrator host itself) is never declared. <code>residency: observe</code> is the default and is written here only to make the demo point
+explicit: workers on node-b must never evict its resident models.</p>
+<h2>2. Preflight the nodes</h2>
+<pre><code>clio-coder doctor
+</code></pre>
+<p>Doctor probes each node over its real SSH channel: reachability, a
+version-matched <code>clio-coder</code> on the remote path, path parity for the project root,
+and a writable remote state dir. Those rows are read-only diagnostics: the
+current command does not create or refresh <code>fleet-preflight.json</code>, so it does
+not make a passing node dispatch-eligible. Placement can still consume an
+existing preflight record, but admission fails closed when that record is
+missing or stale after a host, project, or version change. There is currently
+no mutating doctor command that refreshes it.</p>
+<p>Confirm the durable view:</p>
+<pre><code>clio-coder fleet status
+</code></pre>
+<h2>3. Open the session and the fleet views</h2>
+<pre><code>clio-coder
+</code></pre>
+<p>In the session:</p>
+<ul>
+<li><code>/fleet</code> opens Settings → Fleet; its node rows show node-a, node-b, and node-c
+online with their capacity.</li>
+<li>Alt+W toggles the dispatch board, which will fill with per-run cards once
+work starts.</li>
+</ul>
+<h2>4. Dispatch the gated fix across nodes</h2>
+<p>Give the orchestrator a concrete instruction that names the topology and the
+placement. Example prompt for the chat input:</p>
+<pre><code>Dispatch the fix for the failing CMake build as a reviewed task: builder on
+node node-a, reviewer on node node-c, at most 2 review cycles. The task is:
+&quot;Fix the compile error in src/mesh/loader.cpp so `cmake --build build` and
+`ctest --test-dir build` both pass. Keep the change minimal.&quot;
+</code></pre>
+<p>The model calls the dispatch tool with <code>review: {max_cycles: 2, node: &quot;node-c&quot;}</code> and <code>node: &quot;node-a&quot;</code> on the task. Because a remote placement is
+plan-scale, supervised autonomy parks the call and shows the plan artifact
+(topology, per-task agent, model, node); one approval launches the whole
+plan. Full-auto skips the stop and seals the plan hash into the receipts
+instead.</p>
+<p>What to watch:</p>
+<ul>
+<li>The board card for the builder shows <code>node node-a</code>, live tool activity, and
+the per-worker context meter.</li>
+<li>The reviewer card shows <code>node node-c</code> and <code>gate reviewer c1</code>; the reviewer
+runs read-only and ends with a <code>VERDICT:</code> line.</li>
+<li>On a revise verdict, a second builder card appears with <code>gate builder c2</code>;
+the reviewer&#39;s findings were threaded to it as input data.</li>
+<li>The <code>Alt+W</code> Fleet Runs board carries the node column for both runs.</li>
+</ul>
+<p>If a node dies mid-run (for the demo: stop sshd on node-a), the run finalizes
+as stalled, the node is classified dead after consecutive channel failures,
+and the bounded retry reroutes to a survivor with the hop recorded on the new
+receipt.</p>
+<h2>5. Collect the results</h2>
+<p>The dispatch tool returns the gate verdict, the run ids, and the receipt
+paths. The monitor tool answers follow-ups inside the session (<code>mode=list</code>,
+<code>mode=status</code>, <code>mode=receipt</code>). For asynchronous work the same flow applies
+with <code>detach: true</code> plus <code>monitor mode=&quot;collect&quot;</code>; the demo keeps the gate
+attached so the verdict lands in one message.</p>
+<p>Verify the fix like any local change:</p>
+<pre><code>cmake --build build &amp;&amp; ctest --test-dir build
+</code></pre>
+<h2>6. Verify every receipt, including the remote ones</h2>
+<pre><code>clio-coder fleet status --json
+clio-coder evidence build --run &lt;builderRunId&gt;
+clio-coder evidence build --run &lt;reviewerRunId&gt;
+clio-coder evidence list
+clio-coder evidence inspect &lt;evidenceId&gt;
+</code></pre>
+<p><code>clio-coder evidence build</code> recomputes the receipt&#39;s integrity digest against the
+run ledger; a tampered or mismatched receipt fails the build with the field
+that diverged. The receipts of the remote runs verify on the orchestrator host because the
+ledger and receipts live on the shared filesystem. Current receipts use strict
+v20 and authenticate every current receipt and reconstructed-ledger field.
+Lower versions are reported as retired and are never read as evidence or
+migrated; malformed and future shapes fail verification.</p>
+<h2>Provenance walkthrough: what a PI can verify from receipts alone</h2>
+<p>Each run&#39;s receipt is a JSON file under <code>&lt;state&gt;/receipts/&lt;runId&gt;.json</code>
+(<code>clio-coder paths</code> shows the state dir; the monitor tool prints the exact path per
+run). From the receipts alone, with no session transcript, a PI can
+reconstruct:</p>
+<ol>
+<li>What ran and where. <code>agentId</code>, <code>task</code>, <code>targetId</code>, <code>wireModelId</code>,
+<code>runtimeKind</code>, and <code>node</code> name the agent, model, and machine. <code>identity</code>
+anchors the host, user, and any HPC scheduler allocation. <code>reroutes</code> lists
+every dead-node failover hop the run survived.</li>
+<li>Against which code. <code>reproducibility.git</code> records branch, commit, dirty
+state, and a status hash of the working tree at run start; <code>cwd</code> is the
+workspace.</li>
+<li>Under which authority. <code>autonomyEnforcement</code> seals the autonomy level and
+how the runtime enforced it. <code>safety</code> counts allowed, blocked, and
+permission-requested tool calls and lists blocked attempts.
+<code>plan</code> proves the dispatch was operator-approved (or full-auto logged)
+and hashes the exact plan artifact.</li>
+<li>Through which gate. <code>gate</code> on the reviewer receipt references the builder
+run id and its receipt digest; a revise builder references the reviewer
+that sent it back, with the verdict. Following <code>gate.subjects</code> digests
+backward reconstructs the whole review chain, and any edit to an earlier
+receipt breaks the digest the later one recorded.</li>
+<li>That nothing was altered. The <code>integrity</code> block is a sha256 over the
+complete receipt schema and its stable ledger row. <code>clio-coder evidence build --run &lt;id&gt;</code> recomputes and cross-checks it; <code>verifyReceiptIntegrity</code> in
+<code>src/domains/dispatch/receipt-integrity.ts</code> is the reference
+ implementation. Current receipts use v20. Lower versions are reported as
+ retired, while malformed and future shapes fail verification. Incompatible
+ state may be archived for inspection, but it is never read as evidence through
+ a compatibility verifier.</li>
+</ol>
+<p>The walkthrough for an audience is three commands: <code>clio-coder evidence build --run &lt;id&gt;</code> (it verifies), open the receipt JSON (read <code>node</code>, <code>gate</code>,
+<code>plan</code>, <code>reproducibility.git</code>), and <code>clio-coder evidence build</code> again after
+hand-editing one byte of the receipt (it refuses, naming the mismatch).</p>
+        </article>
+        <nav class="related-nav" aria-label="Adjacent references">
+          <a class="nav-link-card" href="evolution_blueprint.html"><span class="nav-label">Previous</span><span class="nav-title">Evolution and Change Manifests</span></a>
+          <a class="nav-link-card next" href="git_commit_provenance_blueprint.html"><span class="nav-label">Next</span><span class="nav-title">Git Commit Provenance</span></a>
+        </nav>
+        <p class="reference-footer-note">Canonical content lives in the mapped Markdown page. This visual counterpart adds navigation without changing the contract.</p>
+      </main>
+    </div>
+    <footer>Clio Coder documentation · source-aligned at v0.4.2</footer>
+  </div>
+  <script src="shared.js"></script>
+</body>
+</html>

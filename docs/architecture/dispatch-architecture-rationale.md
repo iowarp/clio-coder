@@ -1,5 +1,8 @@
 # Dispatch Architecture Rationale
 
+> **Visual blueprint:** The source checkout includes the complete
+> [Dispatch Architecture Rationale visual reference](https://github.com/iowarp/clio-coder/blob/main/docs/html/dispatch_rationale_blueprint.html).
+
 Why `src/domains/dispatch/` is one domain, why one import out of it looks
 irregular and is allowed to, and why the repository has no barrel-only import
 convention. No code moved as a result of this document. It exists so that a

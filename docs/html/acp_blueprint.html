@@ -1,338 +1,525 @@
-<!DOCTYPE html>
+<!doctype html>
 <html lang="en">
 <head>
-  <meta charset="UTF-8">
-  <meta name="viewport" content="width=device-width, initial-scale=1.0">
-  <title>Clio Coder - Agent Client Protocol (ACP) Server Blueprint</title>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <meta name="clio-markdown-source" content="docs/architecture/acp.md">
+  <meta name="clio-docs-version" content="0.4.2">
+  <title>Agent Client Protocol (ACP) Server · Clio Coder 0.4.2</title>
+  <link rel="icon" href="data:,">
   <link rel="stylesheet" href="shared.css">
-  <style>
-    .rpc-sim-box {
-      background: #020408;
-      border: 1px solid var(--border-card);
-      border-radius: 8px;
-      padding: 1rem;
-      font-family: var(--font-mono);
-      font-size: 0.8rem;
-      margin-top: 1rem;
-      min-height: 140px;
-      color: var(--color-emerald);
-      white-space: pre-wrap;
-    }
-  </style>
 </head>
-<body>
+<body data-doc-category="architecture">
+  <div class="reading-progress" aria-hidden="true"></div>
+  <a class="skip-link" href="#reference-content">Skip to reference</a>
   <div class="container">
-    <header>
+    <header class="document-header" data-category="Architecture">
       <div class="header-left">
-        <div class="header-logo">
-          <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" style="color: var(--color-purple);"><title>ACP Icon</title>
-            <rect x="2" y="2" width="20" height="8" rx="2" ry="2"></rect>
-            <rect x="2" y="14" width="20" height="8" rx="2" ry="2"></rect>
-            <line x1="6" y1="6" x2="6.01" y2="6"></line>
-            <line x1="6" y1="18" x2="6.01" y2="18"></line>
+        <a class="header-logo" href="index.html" aria-label="Documentation index">
+          <svg viewBox="0 0 24 24" fill="none" aria-hidden="true">
+            <path d="M12 2 2 7l10 5 10-5-10-5Z" stroke="url(#clio-logo)" stroke-width="2" stroke-linejoin="round"/>
+            <path d="m2 12 10 5 10-5M2 17l10 5 10-5" stroke="url(#clio-logo)" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"/>
+            <defs><linearGradient id="clio-logo" x1="2" y1="2" x2="22" y2="22"><stop stop-color="#00d4db"/><stop offset="1" stop-color="#ff7e29"/></linearGradient></defs>
           </svg>
-        </div>
+        </a>
         <div class="header-title-wrapper">
-          <h1>Agent Client Protocol (ACP) Server Blueprint</h1>
-          <p>ACP v1 / schema 0.4.5 JSON-RPC server over stdio, tool mediation, safe settings, and error taxonomy</p>
+          <p class="document-kicker">Architecture / canonical reference</p>
+          <h1>Agent Client Protocol (ACP) Server</h1>
+          <p class="document-path">docs/architecture/acp.md</p>
         </div>
       </div>
       <div class="header-right">
-        <span class="version-badge">v0.4.0</span>
-        <a href="index.html" class="back-btn">
-          <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><title>Back Icon</title><line x1="19" y1="12" x2="5" y2="12"></line><polyline points="12 19 5 12 12 5"></polyline></svg>
-          Dashboard Hub
-        </a>
+        <a class="back-btn" href="index.html">← Index</a>
+        <span class="version-badge">v0.4.2</span>
       </div>
     </header>
-
-    <div class="page-layout-grid">
-      <nav class="sidebar" aria-label="Table of Contents">
-        <div class="toc-container">
-          <div class="toc-title">On This Page</div>
-          <ul class="toc-list">
-            <!-- Populated dynamically by shared.js -->
-          </ul>
-        </div>
-      </nav>
-
-      <main>
-        <div class="tabs-nav">
-          <button type="button" class="tab-btn active" onclick="switchTab('acp-methods')">
-            <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><title>Methods</title><polyline points="4 17 10 11 4 5"></polyline><line x1="12" y1="19" x2="20" y2="19"></line></svg>
-            Methods &amp; Protocol Wire
-          </button>
-          <button type="button" class="tab-btn" onclick="switchTab('error-envelope')">
-            <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><title>Errors</title><circle cx="12" cy="12" r="10"></circle><line x1="12" y1="8" x2="12" y2="12"></line><line x1="12" y1="16" x2="12.01" y2="16"></line></svg>
-            Error Envelope &amp; Closed Taxonomy
-          </button>
-          <button type="button" class="tab-btn" onclick="switchTab('security-invariants')">
-            <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><title>Security</title><rect x="3" y="11" width="18" height="11" rx="2" ry="2"></rect><path d="M7 11V7a5 5 0 0 1 10 0v4"></path></svg>
-            Security &amp; Workspace Invariants
-          </button>
-          <button type="button" class="tab-btn" onclick="switchTab('rpc-tester')">
-            <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><title>Tester</title><polygon points="5 3 19 12 5 21 5 3"></polygon></svg>
-            JSON-RPC 2.0 Console Simulator
-          </button>
-        </div>
-
-        <!-- TAB 1: METHODS -->
-        <div class="tab-pane active" id="pane-acp-methods">
-          <div class="glass-card">
-            <h2>Supported ACP Methods</h2>
-            <p>The native ACP server (<code>clio-coder acp</code>) exposes JSON-RPC 2.0 methods over stdio. Diagnostics route exclusively to <code>stderr</code>.</p>
-
-            <table class="ref-table">
-              <thead>
-                <tr>
-                  <th>Method</th>
-                  <th>Direction</th>
-                  <th>Description</th>
-                </tr>
-              </thead>
-              <tbody>
-                <tr>
-                  <td><code>initialize</code></td>
-                  <td>Client &rarr; Server</td>
-                  <td>Negotiates protocol version (1), agent capabilities, and implementation metadata. Exactly once.</td>
-                </tr>
-                <tr>
-                  <td><code>session/new</code></td>
-                  <td>Client &rarr; Server</td>
-                  <td>Binds the single hosted session, snapshots autonomy, and records initial orchestrator routing.</td>
-                </tr>
-                <tr>
-                  <td><code>session/load</code></td>
-                  <td>Client &rarr; Server</td>
-                  <td>Resumes a closed session from the launch workspace and replays bounded original turn updates.</td>
-                </tr>
-                <tr>
-                  <td><code>session/prompt</code></td>
-                  <td>Client &rarr; Server</td>
-                  <td>Submits a user prompt to the execution loop; streams updates and tool progress.</td>
-                </tr>
-                <tr>
-                  <td><code>session/cancel</code></td>
-                  <td>Client &rarr; Server</td>
-                  <td>Cancels in-flight execution, active tool operations, and pending permission requests.</td>
-                </tr>
-                <tr>
-                  <td><code>session/close</code></td>
-                  <td>Client &rarr; Server</td>
-                  <td>Closes the durable session cleanly. Advertised via <code>_meta["clio-coder/session"].close</code>.</td>
-                </tr>
-                <tr>
-                  <td><code>clio-coder/session/list</code></td>
-                  <td>Client &rarr; Server</td>
-                  <td>Lists bounded session summaries from the canonical workspace. Legal during turns.</td>
-                </tr>
-                <tr>
-                  <td><code>clio-coder/session/label</code></td>
-                  <td>Client &rarr; Server</td>
-                  <td>Sets or clears a durable session display name (0–256 UTF-8 bytes).</td>
-                </tr>
-                <tr>
-                  <td><code>clio-coder/session/delete</code></td>
-                  <td>Client &rarr; Server</td>
-                  <td>Permanently deletes a closed workspace session. Refuses hosted or unended records.</td>
-                </tr>
-                <tr>
-                  <td><code>clio-coder/session/autonomy</code></td>
-                  <td>Client &rarr; Server</td>
-                  <td>Reads or overrides session autonomy level (<code>read-only</code>, <code>suggest</code>, <code>auto-edit</code>, <code>full-auto</code>).</td>
-                </tr>
-                <tr>
-                  <td><code>clio-coder/settings/get_safe</code></td>
-                  <td>Client &rarr; Server</td>
-                  <td>Reads closed credential-free settings projection (<code>orchestrator.*</code>, <code>autonomy</code>).</td>
-                </tr>
-                <tr>
-                  <td><code>clio-coder/settings/patch_safe</code></td>
-                  <td>Client &rarr; Server</td>
-                  <td>Atomically validates and persists a flat patch over the safe settings subset.</td>
-                </tr>
-                <tr>
-                  <td><code>clio-coder/targets/list</code></td>
-                  <td>Client &rarr; Server</td>
-                  <td>Lists bounded, credential-free target/model summaries without network traffic.</td>
-                </tr>
-                <tr>
-                  <td><code>clio-coder/targets/probe</code></td>
-                  <td>Client &rarr; Server</td>
-                  <td>Explicitly probes one configured target and returns closed health/latency facts.</td>
-                </tr>
-                <tr>
-                  <td><code>session/request_permission</code></td>
-                  <td>Server &rarr; Client</td>
-                  <td>Requests client-side approval for a gated mutating action. Serial queue with timeout ceiling.</td>
-                </tr>
-                <tr>
-                  <td><code>clio-coder/event</code></td>
-                  <td>Server &rarr; Client</td>
-                  <td>Opt-in extension events: <code>safety.loopBlocked</code> and <code>dispatch.{enqueued,started,progress,completed,failed}</code>.</td>
-                </tr>
-              </tbody>
-            </table>
-
-            <div style="margin-top: 2rem;">
-              <h3>Localhost Workbench Client &amp; Delegation Peers</h3>
-              <p>The repository includes the <code>apps/workbench</code> desktop client interfacing over this ACP adapter. It provides session browsing, target probes, safe settings patches, evaluation inventory, and the live fleet event strip. In the reverse direction, Clio acts as an ACP client via <code>/delegate &lt;agent-id&gt; &lt;task&gt;</code>, rendering external ACP peers (e.g. Codex, OpenCode) with typed read scopes into the main transcript.</p>
-            </div>
-          </div>
-        </div>
-
-        <!-- TAB 2: ERROR ENVELOPE -->
-        <div class="tab-pane" id="pane-error-envelope">
-          <h2>Structured Error Envelope &amp; Closed Taxonomy</h2>
-          <div class="grid grid-2">
-            <div class="glass-card">
-              <h3>Wire Format &amp; Redaction</h3>
-              <p>Clio errors use code <code>-32000</code>. Wire messages are short (&le;256 chars), single-line, and strictly redact file paths, stacks, URLs, and secrets:</p>
-              <pre><code>{
-  "code": -32000,
-  "message": "the prompt turn failed",
-  "data": {
-    "_meta": {
-      "clio-coder/error": {
-        "version": 1,
-        "code": "turn_failed",
-        "supported": [1]
-      }
-    }
-  }
-}</code></pre>
-            </div>
-            <div class="glass-card">
-              <h3>Closed `data.code` Values</h3>
-              <ul>
-                <li><code>not_initialized</code> / <code>already_initialized</code></li>
-                <li><code>protocol_version_unsupported</code> (code -32602)</li>
-                <li><code>invalid_params</code> (code -32602, reason details)</li>
-                <li><code>session_cwd_mismatch</code> / <code>session_limit</code></li>
-                <li><code>session_unknown</code> / <code>session_open</code></li>
-                <li><code>prompt_active</code> / <code>prompt_not_admitted</code></li>
-                <li><code>permission_expired</code> (audited as expired, not denied)</li>
-                <li><code>turn_failed</code> / <code>internal_error</code></li>
-              </ul>
-            </div>
-          </div>
-        </div>
-
-        <!-- TAB 3: SECURITY INVARIANTS -->
-        <div class="tab-pane" id="pane-security-invariants">
-          <h2>Security &amp; Workspace Invariants</h2>
-          <table class="ref-table">
-            <thead>
-              <tr>
-                <th>Invariant</th>
-                <th>Enforcement Mechanism</th>
-              </tr>
-            </thead>
-            <tbody>
-              <tr>
-                <td><strong>One Session per Process</strong></td>
-                <td>Exactly one <code>session/new</code> or <code>session/load</code> succeeds per process. Secondary attempts fail with <code>session_limit</code>.</td>
-              </tr>
-              <tr>
-                <td><strong>Workspace Pinning</strong></td>
-                <td>The launch <code>--cwd</code> is resolved with <code>fs.realpath</code> at boot. The process never calls <code>chdir</code>, and relative paths in <code>session/new</code> are rejected.</td>
-              </tr>
-              <tr>
-                <td><strong>Permission Timeout Ceiling</strong></td>
-                <td><code>--permission-timeout MS</code> sets fail-safe ceiling. Expired requests abort execution safely and audit as <code>expired</code>, never as human denials.</td>
-              </tr>
-              <tr>
-                <td><strong>Safe Settings Projection</strong></td>
-                <td>Only 4 editable fields (<code>orchestrator.target</code>, <code>model</code>, <code>thinkingLevel</code>, <code>autonomy</code>) cross the wire. Secrets and URLs are never exposed.</td>
-              </tr>
-              <tr>
-                <td><strong>Replay Caps</strong></td>
-                <td>Session load replays retain newest 64 user turns, at most 8,192 tool starts, and &le;4 MiB serialized frames.</td>
-              </tr>
-            </tbody>
-          </table>
-        </div>
-
-        <!-- TAB 4: RPC TESTER -->
-        <div class="tab-pane" id="pane-rpc-tester">
-          <div class="glass-card">
-            <h2>JSON-RPC 2.0 Console Simulator</h2>
-            <p>Select a simulated ACP request frame to view the server response:</p>
-
-            <div class="form-group">
-              <label for="rpcSelect">Client Request Frame</label>
-              <select id="rpcSelect" onchange="runRpcSim()">
-                <option value="init">initialize (protocolVersion: 1)</option>
-                <option value="new">session/new (cwd: "/workspace/project")</option>
-                <option value="get_safe">clio-coder/settings/get_safe</option>
-                <option value="prompt">session/prompt (prompt: "Check types")</option>
-                <option value="cancel">session/cancel</option>
-                <option value="invalid">bogus/method (Unknown)</option>
-              </select>
-            </div>
-
-            <div class="rpc-sim-box" id="rpcOutput"></div>
-          </div>
-        </div>
-
-        <!-- Related Navigation -->
-        <nav class="related-nav" aria-label="Related Pages">
-          <a href="glossary_blueprint.html" class="nav-link-card">
-            <span class="nav-label">Previous Blueprint</span>
-            <span class="nav-title">Glossary</span>
-          </a>
-          <a href="pi_boundary_blueprint.html" class="nav-link-card next">
-            <span class="nav-label">Next Blueprint</span>
-            <span class="nav-title">Pi SDK Boundary</span>
-          </a>
+    <div class="page-layout-grid reference-layout">
+      <aside class="sidebar reference-sidebar" aria-label="On this page">
+        <nav class="toc-container">
+          <p class="toc-title">On this page</p>
+          <a class="sidebar-source" href="https://github.com/iowarp/clio-coder/blob/main/docs/architecture/acp.md">Canonical Markdown<br>docs/architecture/acp.md</a>
+          <ul class="toc-list"></ul>
         </nav>
+      </aside>
+      <main class="reference-main" id="reference-content">
+        <article class="reference-prose glass-card">
+<blockquote>
+<p><strong>Visual blueprint:</strong> The source checkout includes the complete
+<a href="acp_blueprint.html">Agent Client Protocol (ACP) Server visual reference</a>.</p>
+</blockquote>
+<p>This document defines the architecture, transport protocols, tool mediation layers, permission handling, and error taxonomy for Clio Coder&#39;s Agent Client Protocol (ACP) server implementation in the current source tree.</p>
+<p>Source implementations: <code>src/engine/acp/</code> and <code>src/cli/acp.ts</code>.</p>
+<hr>
+<h2>1. Overview &amp; Protocol Specification</h2>
+<p>Clio Coder provides a native ACP server via the <code>clio-coder acp</code> command. The server implements the open Agent Client Protocol specification (ACP v1 / schema 0.4.5) over standard I/O JSON-RPC 2.0 transport (<code>src/engine/acp/transport.ts</code>).</p>
+<p>The ACP server allows external IDEs, editors (such as Zed), and automated orchestration engines to drive Clio Coder sessions over a structured protocol.
+The source tree includes the <code>apps/workbench</code> localhost desktop client. Its ACP
+adapter supports session browsing and deletion, safe settings, target probes,
+usage, recovery, evaluation inventory, routing and dispatch inspection, toolchain
+status, agent attribution, and the live fleet event strip. The workbench is a
+source application and is not included in the published CLI package.</p>
+<pre><code class="language-mermaid">graph LR
+    client[External ACP Client] &lt;--&gt;|JSON-RPC 2.0 / stdio| server[Clio ACP Server]
+    server --&gt; mediator[Tool Mediator &amp; Safety Net]
+    mediator --&gt; engine[Clio Execution Engine]
+    mediator --&gt; session[Session Ledger v4]
+</code></pre>
+<hr>
+<h2>2. Server Command &amp; Transport Wiring</h2>
+<p>The server is invoked via:</p>
+<pre><code class="language-bash">clio-coder acp [--cwd PATH] [--permission-timeout MS]
+</code></pre>
+<p><code>clio-coder --acp [--cwd PATH] [--permission-timeout MS]</code> is an exact alias;
+both spellings reach the same command dispatcher, option parser, stdout guard,
+and server boot path.</p>
+<ul>
+<li><code>--cwd PATH</code>: Workspace root the server boots in. The path is resolved and then canonicalized with <code>fs.realpath</code>, so a symlinked launch root, a trailing slash, and a <code>/.</code> suffix all name the same workspace. Clio changes into that canonical path before it reads settings, builds project context, or opens a session ledger, so a session opens at that root. A path that does not exist or that the process cannot enter exits 2 without starting the server. The canonical path is the server&#39;s workspace identity for its whole life: <code>session/new</code> must carry a <code>cwd</code> that canonicalizes to the same path, and nothing after boot ever changes the process directory.</li>
+<li><code>--permission-timeout MS</code>: The server-side fail-safe ceiling for one mediated permission request, as a whole number from 1 through Node&#39;s maximum schedulable timer delay (<code>2147483647</code>) milliseconds. Values outside that range are refused before the protocol server starts. If the timer wins, the approval expires, the active turn is aborted, every parked call for that turn is settled only so execution can unwind, and <code>session/prompt</code> fails with <code>permission_expired</code>. Expiry is audited as <code>expired</code>, never as a human denial, and no denial result is fed into a continuing model loop. The flag overrides <code>integrations.externalAgents.defaults.permissionTimeoutMs</code> for this server only, which itself defaults to <code>DEFAULT_DELEGATION_PERMISSION_TIMEOUT_MS = 120000</code> (<code>src/core/defaults.ts:290</code>). The source-checkout Workbench treats the remaining ACP request window as a hard ceiling on its own approval budget, projects that duration onto the Workbench clock, escalates immediately when the remaining window is shorter than its escalation delay, and cancels without publishing a card if the window has already elapsed. Other clients may enforce a shorter operator-facing policy by sending ordinary <code>session/cancel</code>.</li>
+</ul>
+<p>Transport frames are JSON-RPC 2.0 messages serialized over <code>stdin</code>/<code>stdout</code>. All logging and diagnostic output is strictly routed to <code>stderr</code> to preserve standard I/O framing integrity.</p>
+<hr>
+<h2>3. Supported ACP Methods</h2>
+<p>These are every method the server answers (<code>src/engine/acp/server.ts</code>). Anything else returns <code>-32601</code>.</p>
+<table>
+<thead>
+<tr>
+<th align="left">Method</th>
+<th align="left">Direction</th>
+<th align="left">Description</th>
+</tr>
+</thead>
+<tbody><tr>
+<td align="left"><code>initialize</code></td>
+<td align="left">Client → Server</td>
+<td align="left">Negotiates the protocol version, agent capabilities, and server implementation info. Must be called first, exactly once.</td>
+</tr>
+<tr>
+<td align="left"><code>session/new</code></td>
+<td align="left">Client → Server</td>
+<td align="left">Opens the one session this process hosts, snapshotting the active autonomy posture and recording the bind-time target/model selection.</td>
+</tr>
+<tr>
+<td align="left"><code>session/load</code></td>
+<td align="left">Client → Server</td>
+<td align="left">Standard ACP v1 load. Resumes one closed session from the launch workspace, resets the provider context to its pinned active branch, and replays bounded original transcript updates before returning.</td>
+</tr>
+<tr>
+<td align="left"><code>session/prompt</code></td>
+<td align="left">Client → Server</td>
+<td align="left">Submits a user prompt to the session execution loop.</td>
+</tr>
+<tr>
+<td align="left"><code>session/cancel</code></td>
+<td align="left">Client → Server</td>
+<td align="left">Cancels the in-flight prompt, its running tools, and any outstanding permission request. Accepted as a request (returns <code>{}</code>) and as a notification (returns nothing).</td>
+</tr>
+<tr>
+<td align="left"><code>session/close</code></td>
+<td align="left">Client → Server</td>
+<td align="left">Closes the durable session and returns <code>{}</code>. Not an ACP v1 method: it is advertised through <code>agentCapabilities._meta[&quot;clio-coder/session&quot;].close === true</code>.</td>
+</tr>
+<tr>
+<td align="left"><code>clio-coder/session/list</code></td>
+<td align="left">Client → Server</td>
+<td align="left">Lists bounded session summaries from the canonical launch workspace. Legal before opening a session and during a prompt.</td>
+</tr>
+<tr>
+<td align="left"><code>clio-coder/session/label</code></td>
+<td align="left">Client → Server</td>
+<td align="left">Sets or clears a durable session display name. Legal before opening a session and during a prompt.</td>
+</tr>
+<tr>
+<td align="left"><code>clio-coder/session/delete</code></td>
+<td align="left">Client → Server</td>
+<td align="left">Permanently deletes a closed workspace session. Refuses hosted or unended sessions.</td>
+</tr>
+<tr>
+<td align="left"><code>clio-coder/session/autonomy</code></td>
+<td align="left">Client → Server</td>
+<td align="left">Reads the hosted session&#39;s autonomy snapshot or explicitly overrides it for the next prompt. Set is refused during a prompt.</td>
+</tr>
+<tr>
+<td align="left"><code>clio-coder/settings/get_safe</code></td>
+<td align="left">Client → Server</td>
+<td align="left">Reads the closed credential-free settings projection. Legal before opening a session and during a prompt.</td>
+</tr>
+<tr>
+<td align="left"><code>clio-coder/settings/patch_safe</code></td>
+<td align="left">Client → Server</td>
+<td align="left">Atomically validates, persists, and applies a flat patch over the closed safe setting set. Refused during a prompt.</td>
+</tr>
+<tr>
+<td align="left"><code>clio-coder/targets/list</code></td>
+<td align="left">Client → Server</td>
+<td align="left">Lists bounded, credential-free target/model summaries from configuration and the in-memory cache without network traffic.</td>
+</tr>
+<tr>
+<td align="left"><code>clio-coder/targets/probe</code></td>
+<td align="left">Client → Server</td>
+<td align="left">Explicitly probes one configured target through the provider domain and returns only a closed health result.</td>
+</tr>
+<tr>
+<td align="left"><code>session/request_permission</code></td>
+<td align="left">Server → Client</td>
+<td align="left">Requests permission from the client for a gated tool operation.</td>
+</tr>
+<tr>
+<td align="left"><code>clio-coder/event</code></td>
+<td align="left">Server → Client</td>
+<td align="left">Sends a versioned extension event only to a client that opted into a recognized kind. The v1 allowlist is <code>safety.loopBlocked</code> plus <code>dispatch.enqueued</code>, <code>dispatch.started</code>, <code>dispatch.progress</code>, <code>dispatch.completed</code>, and <code>dispatch.failed</code>.</td>
+</tr>
+</tbody></table>
+<p><code>agentCapabilities.loadSession</code> is <code>true</code>. All non-standard methods are advertised only under <code>agentCapabilities._meta</code>; a strict generic ACP v1 client sees the standard new/load/prompt/cancel/permission surface, ignores namespaced result metadata, and receives no non-standard notification unless it explicitly opts into a recognized event kind.</p>
+<hr>
+<h2>4. Initial Safe Profile</h2>
+<p>This section states what the server guarantees on the wire. It is the source-side contract any strict client can hold Clio to.</p>
+<h3>Error envelope</h3>
+<p>JSON-RPC layer codes stay standard: <code>-32700</code> parse, <code>-32600</code> invalid request, <code>-32601</code> method not found, <code>-32602</code> invalid params. Every Clio-originated failure is <code>-32000</code>. Every error frame, whatever its code, carries its machine-readable detail in exactly one place:</p>
+<pre><code class="language-json">{&quot;code&quot;:-32000,&quot;message&quot;:&quot;&lt;one line, ≤256 chars, no paths, no stack&gt;&quot;,
+ &quot;data&quot;:{&quot;_meta&quot;:{&quot;clio-coder/error&quot;:{&quot;version&quot;:1,&quot;code&quot;:&quot;&lt;closed-set string&gt;&quot;,&quot;reason&quot;:&quot;&lt;optional&gt;&quot;,&quot;supported&quot;:[1]}}}}
+</code></pre>
+<p><code>data</code> never carries a stack, an echoed frame, a filesystem path, provider text, or a secret. Neither does <code>message</code>. Every message on the wire is authored by this process: <code>turn_failed</code> is always the fixed string <code>the prompt turn failed</code>, <code>internal_error</code> is always the fixed string <code>internal error</code>, and <code>method_not_found</code> is always the fixed string <code>method not found</code>, whatever the underlying failure said and whatever the peer called. A provider or engine failure body legitimately quotes the request URL it used, the settings file it read a credential from, or the credential itself, and bounding that text to one line still ships the secret. The client branches on <code>data._meta</code>&#39;s <code>code</code>; the original message, bounded to one line, goes to stderr prefixed with <code>[clio-coder:acp]</code>. The <code>code</code> values are a closed set:</p>
+<table>
+<thead>
+<tr>
+<th align="left"><code>data.code</code></th>
+<th align="left">When</th>
+</tr>
+</thead>
+<tbody><tr>
+<td align="left"><code>not_initialized</code></td>
+<td align="left">Any method other than <code>initialize</code> before a successful <code>initialize</code>.</td>
+</tr>
+<tr>
+<td align="left"><code>already_initialized</code></td>
+<td align="left">A second <code>initialize</code> on the same connection.</td>
+</tr>
+<tr>
+<td align="left"><code>protocol_version_unsupported</code></td>
+<td align="left"><code>initialize.protocolVersion</code> is not the integer <code>1</code>. Uses <code>-32602</code> and carries <code>supported: [1]</code>.</td>
+</tr>
+<tr>
+<td align="left"><code>invalid_params</code></td>
+<td align="left">A request is missing a required value, has an unknown key or closed-enum value, exceeds a byte/array bound, contains a C0/DEL control character in peer-controlled text, or otherwise violates its exact method shape. Uses <code>-32602</code>. <code>reason: &quot;target-unknown&quot;</code> refines selection of an unconfigured target.</td>
+</tr>
+<tr>
+<td align="left"><code>session_cwd_mismatch</code></td>
+<td align="left"><code>session/new.cwd</code> or <code>session/load.cwd</code> is absent, not an absolute string, unresolvable, or canonicalizes to something other than the server&#39;s workspace.</td>
+</tr>
+<tr>
+<td align="left"><code>session_limit</code></td>
+<td align="left">A second successful <code>session/new</code> or <code>session/load</code> in the same process, including after <code>session/close</code>.</td>
+</tr>
+<tr>
+<td align="left"><code>session_unknown</code></td>
+<td align="left">A session id is not hosted when hosting is required, or cannot be found in canonical-workspace history for a list/load/label/delete operation. The server does not disclose whether the same id exists under another workspace.</td>
+</tr>
+<tr>
+<td align="left"><code>session_open</code></td>
+<td align="left">Load or delete targets the hosted session, or a workspace record whose <code>endedAt</code> is still null. Clio has no cross-process lease, so an unclean crash is intentionally indistinguishable from another process still owning the record.</td>
+</tr>
+<tr>
+<td align="left"><code>prompt_active</code></td>
+<td align="left">A second <code>session/prompt</code> while one is running, <code>session/close</code> while one is running, or a settings/session-autonomy mutation during a prompt.</td>
+</tr>
+<tr>
+<td align="left"><code>prompt_not_admitted</code></td>
+<td align="left">Clio refused to start the turn. <code>data.reason</code> carries the admission reason.</td>
+</tr>
+<tr>
+<td align="left"><code>permission_expired</code></td>
+<td align="left">The server permission ceiling won. The prompt is aborted and fails with fixed message <code>permission approval expired</code>; internal audit status is <code>expired</code>, not <code>denied</code>.</td>
+</tr>
+<tr>
+<td align="left"><code>turn_failed</code></td>
+<td align="left">The provider or engine failed after the turn was admitted. <code>message</code> is the fixed string <code>the prompt turn failed</code>; the provider&#39;s own text goes to stderr.</td>
+</tr>
+<tr>
+<td align="left"><code>parse_error</code></td>
+<td align="left">A stdin line was not valid JSON. Uses <code>-32700</code> with <code>id: null</code>; the offending line is not echoed.</td>
+</tr>
+<tr>
+<td align="left"><code>invalid_request</code></td>
+<td align="left">A frame was not JSON-RPC <code>2.0</code>, or carried an <code>id</code> and no <code>method</code>. Uses <code>-32600</code>; the rejected frame is not echoed.</td>
+</tr>
+<tr>
+<td align="left"><code>input_line_too_large</code></td>
+<td align="left">One stdin line exceeded 1 MiB. Uses <code>-32600</code> with <code>id: null</code>; the line is discarded and the transport continues.</td>
+</tr>
+<tr>
+<td align="left"><code>invalid_request_id</code></td>
+<td align="left">A request arrived with <code>id: null</code>. Uses <code>-32600</code>.</td>
+</tr>
+<tr>
+<td align="left"><code>method_not_found</code></td>
+<td align="left">An unregistered method. Uses <code>-32601</code>. <code>message</code> is the fixed string <code>method not found</code>; the peer-controlled method name is never echoed, however short it is.</td>
+</tr>
+<tr>
+<td align="left"><code>internal_error</code></td>
+<td align="left">A handler failed in a way it did not classify. <code>message</code> is the fixed string <code>internal error</code>; the thrower&#39;s text goes to stderr and carries no stack.</td>
+</tr>
+</tbody></table>
+<h3>One session per process</h3>
+<p>Exactly one <code>session/new</code> or <code>session/load</code> succeeds per process lifetime. Any later opener fails with <code>session_limit</code>, and closing the first session does not free the slot. One <code>chat</code> instance backs the server, so a second session id would share provider context and ledger ancestry with the first. A client that needs another workspace, another resumed session, or a clean context retires the child and spawns a new one.</p>
+<h3>Workspace pinning</h3>
+<p>The launch <code>--cwd</code> is canonicalized once at boot and is the server&#39;s workspace for its whole life. <code>session/new</code> and <code>session/load</code> require a <code>cwd</code> that is a non-blank absolute path, checked before any session is opened, and that canonicalizes to the server&#39;s workspace; anything else fails with <code>session_cwd_mismatch</code>. A relative <code>cwd</code> such as <code>.</code>, <code>./</code>, or <code>sub</code> is refused even when it would resolve to the workspace, since it resolves against whatever directory the process happens to be in and the client would believe it had pinned a path it never sent. The server never calls <code>chdir</code> after boot and never falls back to the launch root when the requested path is unusable. The mismatch message names no path.</p>
+<p>Workspace authority remains the exact canonical launch directory, never the enclosing Git root. Workspace Git probes treat an ignored nested scratch directory as non-Git. An unignored monorepo subdirectory may truthfully inherit repository-level branch, upstream, and remote facts, but dirty status and recent commits are path-scoped to the exact workspace, and no parent path is returned.</p>
+<h3>Session attribution and load replay</h3>
+<p><code>session/new</code> captures the current effective orchestrator <code>target</code> and <code>model</code> in durable session metadata and returns them under <code>_meta[&quot;clio-coder/session&quot;]</code>. These are the initial selections at bind time, not an eager health/admission promise. A later settings patch may change the next turn&#39;s route; the original metadata remains initial attribution and the runtime ledger records later model changes. The TUI <code>/new</code> path records the same two fields.</p>
+<p><code>session/new</code> returns <code>{sessionId,_meta:{&quot;clio-coder/session&quot;:{sessionId,target,model,autonomy,createdAt,resumed:false}}}</code>. Session ids and target ids are 1–128 UTF-8 bytes; model ids are at most 256 bytes. <code>target</code> or <code>model</code> is null when that half was unselected at bind. A locally configured selected route that exceeds those wire bounds makes the opener fail <code>internal_error</code>; Clio never converts an active over-bound selection to null and then runs it anyway. <code>createdAt</code> is canonical ISO-8601 and autonomy is one of <code>read-only</code>, <code>suggest</code>, <code>auto-edit</code>, or <code>full-auto</code>.</p>
+<p><code>session/load</code> accepts exactly <code>{sessionId,cwd,mcpServers:[]}</code>. Non-empty or malformed MCP configuration is <code>invalid_params</code>; this server advertises no MCP transport capability. The id must occur in the launch workspace&#39;s history and must be durably closed. An unhosted record with <code>endedAt:null</code> fails <code>session_open</code>: Clio cannot prove whether it belongs to a live process or an unclean crash, and does not guess.</p>
+<p>Before writing any client history, load resolves the durable pinned leaf, reads and validates the rich entry stream, constructs the full provider replay for the active path, resumes the writer, and calls <code>ChatLoop.resetForSession(leaf,replayMessages)</code>. Only then does it emit standard <code>session/update</code> history. Client replay uses original user, assistant, thought, tool-call, and tool-result entries from the selected branch; it never disguises Clio-generated compaction summaries, system notes, bash sidecars, or skill context as operator prose. A stored tool call with no outcome receives one terminal failed update with content <code>unrecorded</code>. Historical tool ids use the same 128-byte alias/uniqueness rules as live calls, and replay never requests permission.</p>
+<p>Every replay notification precedes the <code>session/load</code> response and carries <code>params._meta[&quot;clio-coder/replay&quot;]={turn:n}</code>. Markers are 1-based over the replay that was actually sent; live updates omit the marker. Client-visible replay retains the newest 64 user turns, at most 8,192 <code>tool_call</code> starts, and at most 4 MiB of serialized frames, dropping whole oldest turn groups for every cap. The load response is <code>{_meta:{&quot;clio-coder/session&quot;:{...bindMetadata,resumed:true,replayed:{turns,truncated}}}}</code>. <code>truncated:true</code> means only the GUI history is partial; Clio&#39;s validated provider context remains the full selected resumable context.</p>
+<h3>Session list, label, delete, and autonomy</h3>
+<p><code>clio-coder/session/list</code> accepts <code>{limit?:1..200}</code> (default 50) and returns <code>{sessions,truncated}</code> newest first. Each item is <code>{sessionId,label,preview,createdAt,updatedAt,turns,target,model,state,hosted}</code>. Label is null or at most 256 UTF-8 bytes; preview is a single line of at most 512 bytes; target/model use the attribution bounds. State is deliberately only <code>open</code> (hosted by this process), <code>closed</code> (<code>endedAt</code> is non-null), or <code>unknown</code> (unended but not hosted here). <code>hosted</code> is true only for this process. The complete result is capped to a 240 KiB stable prefix of whole newest-first session rows so the JSON-RPC response fits a strict 256 KiB line ceiling. When this byte budget drops a row, <code>truncated</code> is true and result <code>_meta[&quot;clio-coder/truncated&quot;]</code> is also true; that <code>_meta</code> key is absent when only the requested <code>limit</code> shortened the history. The method is legal before an opener and during a prompt.</p>
+<p><code>clio-coder/session/label</code> accepts <code>{sessionId,label}</code> where label is 0–256 UTF-8 bytes and C0/DEL-free. Empty clears. It writes the existing session-wide <code>sessionInfo.name</code> vocabulary, including for an off-current closed session, and list is the readback. It is legal before an opener and during a prompt.</p>
+<p><code>clio-coder/session/delete</code> accepts <code>{sessionId}</code> and permanently deletes only a canonical-workspace record whose <code>endedAt</code> is non-null. Hosted or unended records fail <code>session_open</code>; unknown and cross-workspace ids fail <code>session_unknown</code> without disclosing another workspace. It is legal before an opener and during an unrelated prompt.</p>
+<p><code>clio-coder/session/autonomy</code> accepts <code>{sessionId,level?}</code>. Without <code>level</code>, it returns <code>{level,source}</code>. <code>source:&quot;settings&quot;</code> means the inherited snapshot taken when the session was bound; <code>source:&quot;session&quot;</code> means an explicit ACP override. A valid supplied level changes only the hosted session, is refused with <code>prompt_active</code> during a turn, and controls Clio&#39;s ordinary safety/autonomy enforcement for the next prompt. It never bypasses classification or a safety rail. A global safe-settings autonomy patch changes the future-session default and does not silently mutate this bound snapshot.</p>
+<h3>Safe settings and targets</h3>
+<p><code>clio-coder/settings/get_safe</code> accepts <code>{}</code> and returns exactly:</p>
+<pre><code class="language-json">{&quot;settings&quot;:{&quot;chat&quot;:{&quot;target&quot;:null,&quot;model&quot;:null,&quot;thinkingLevel&quot;:&quot;off&quot;},&quot;safety&quot;:{&quot;autonomy&quot;:&quot;auto-edit&quot;}},
+ &quot;editable&quot;:[&quot;chat.target&quot;,&quot;chat.model&quot;,&quot;chat.thinkingLevel&quot;,&quot;safety.autonomy&quot;]}
+</code></pre>
+<p>The values above are illustrative. Thinking is one of <code>off</code>, <code>minimal</code>, <code>low</code>, <code>medium</code>, <code>high</code>, <code>xhigh</code>, or <code>max</code>. No other settings leaf, URL, auth fact, credential reference, path, header, provider reason, or provider error crosses the wire. The method is legal before an opener and during a prompt.</p>
+<p><code>clio-coder/settings/patch_safe</code> accepts <code>{patch}</code> where patch is a flat object keyed only by the four strings in <code>editable</code>. It validates the entire candidate before one locked settings mutation, persists routing as the future default, and updates this process&#39;s next-turn routing. The locked writer applies the effective-view delta to the user document and revalidates it with the workspace&#39;s project layers before writing, so a project-only target can be selected without copying its URL or descriptor into user settings; a higher-precedence project leaf that would silently undo the patch causes the write to fail with no partial document. Unknown keys or values are <code>invalid_params</code>; an unknown non-null target adds <code>reason:&quot;target-unknown&quot;</code>. Target/model identifiers use the 128/256-byte bounds and peer-controlled strings reject C0/DEL. A non-null model requires a non-null resulting target. A pre-existing selected route outside those bounds makes <code>get_safe</code> fail <code>internal_error</code> rather than falsely returning null. Patch is legal before an opener but fails <code>prompt_active</code> while a turn runs.</p>
+<p><code>clio-coder/targets/list</code> accepts <code>{}</code> and returns <code>{targets:[{id,runtime,models,isOrchestrator}]}</code>. It reads only configured and cached state, never probes. At most 64 targets are returned. Target ids are at most 128 bytes, runtime ids 64, and the stable union of configured default/wire and discovered model ids is at most 64 models per target, each at most 256 bytes. The complete result is also capped to a 240 KiB stable prefix of whole target/model entries so it fits a strict 256 KiB JSON-RPC frame ceiling after the response envelope is added. If that byte budget drops a model or target, the result additionally carries <code>_meta[&quot;clio-coder/truncated&quot;]:true</code>; the key is absent when the byte-budget result is complete. Unsafe stored identifiers are omitted rather than truncated into collisions. URL, auth state, credential provenance, raw runtime descriptors, health errors, and provider prose are never projected.</p>
+<p><code>clio-coder/targets/probe</code> accepts exactly <code>{targetId}</code> for an already-configured target and performs the provider domain&#39;s existing bounded live probe. It returns <code>{targetId,healthy,latencyMs,reason}</code> where latency is a non-negative integer or null and reason is exactly <code>not-configured</code>, <code>unreachable</code>, <code>unsupported</code>, <code>probe-failed</code>, or null. Provider text is mapped, never copied. The call starts no Clio turn and spends no orchestrator model tokens. Both target methods are legal before an opener and during a prompt.</p>
+<h3>Opt-in extension events</h3>
+<p>A client opts into the first extension event with <code>initialize.params.clientCapabilities._meta[&quot;clio-coder/events&quot;]={version:1,kinds:[&quot;safety.loopBlocked&quot;]}</code>. The kinds array has at most 16 strings, each at most 64 UTF-8 bytes and C0/DEL-free; a malformed opt-in is ignored. Unknown bounded versions and kinds are ignored. Without a recognized opt-in, no <code>clio-coder/event</code> notification is sent.</p>
+<p>The v1 notification is <code>{version,workspaceInstanceId,sessionId,turnId,sequence,kind,terminal,payload}</code>. <code>workspaceInstanceId</code> is one opaque process UUID advertised at initialize, and <code>sequence</code> increases monotonically within it. Recognized kinds are <code>safety.loopBlocked</code>, <code>dispatch.enqueued</code>, <code>dispatch.started</code>, <code>dispatch.progress</code>, <code>dispatch.completed</code>, and <code>dispatch.failed</code>. A loop-blocked event is emitted only during the hosted active prompt and has <code>terminal:false</code>. Its payload is <code>{toolCallId:null,tool,repeatCount,blocksThisTurn,budget,disposition,interrupted,shape:null}</code>. Disposition is <code>block</code>, <code>lockout</code>, or <code>stop</code>, and <code>interrupted</code> is true exactly for <code>stop</code>. The detector fires before the blocked call executes, so no honest ACP tool-call id exists; the bus has no disclosure-safe normalized shape. Both fields therefore remain null rather than being fabricated. Dispatch events carry bounded run and agent identity plus the small lifecycle counters or terminal taxonomy appropriate to their kind; completed and failed events set <code>terminal:true</code>. Enqueued and started events may include <code>taskPreview</code>, a control-character-stripped prefix bounded to 160 UTF-8 bytes. The exact task and raw progress or failure prose never cross this boundary.</p>
+<h3>Prompt input</h3>
+<p>Prompt text is read only from <code>params.prompt</code>, the ACP v1 array of content blocks, and only blocks with <code>type: &quot;text&quot;</code> and a string <code>text</code> contribute; the blocks are joined with a newline and trimmed. Image, audio, and resource_link blocks are ignored rather than coerced into prose the model would answer. No other shape is accepted: <code>params.content</code>, <code>params.message</code>, and a bare string <code>params.prompt</code> all fail with <code>-32602 invalid_params</code>, the same as a prompt whose text is empty. A client&#39;s framing bug therefore fails here the same way it would against any other ACP agent, instead of appearing to work only against Clio.</p>
+<h3>Bounds</h3>
+<p>Every frame the server writes is bounded (<code>src/engine/acp/types.ts</code>). Every cap counts UTF-8 bytes, which is what the peer&#39;s read buffer spends, not UTF-16 code units:</p>
+<ul>
+<li><code>agent_message_chunk</code> and <code>agent_thought_chunk</code> text is at most 16 KiB per chunk. A longer delta is split across consecutive chunks and nothing is dropped, so concatenating chunks in order reproduces the model&#39;s text exactly. No split falls inside a code point, so a surrogate pair never arrives as two replacement characters.</li>
+<li>Tool <code>content</code> text is truncated at 16 KiB with a trailing <code>…[truncated]</code>.</li>
+<li>Live tool titles are at most 512 UTF-8 bytes. The bound applies identically to <code>tool_call</code>, <code>tool_call_update</code>, and <code>session/request_permission</code>; replay titles retain their stricter 64-byte stored-data bound.</li>
+<li>Every string inside <code>rawInput</code> and <code>rawOutput</code> is truncated at 4 KiB with the same marker, and the walk stops at depth 8, replacing anything deeper with <code>&quot;[depth]&quot;</code>. The marker is reserved inside the cap, so a truncated value is at most the cap itself. If the bounded record still serializes past 32 KiB of UTF-8 it becomes <code>{&quot;truncated&quot;:true,&quot;bytes&quot;:&lt;serialized UTF-8 length&gt;}</code>, where the length is the record&#39;s serialization before any bounding, so the figure names the payload the engine produced rather than the shortened copy that was not sent. A record that does not serialize at all reports the bounded copy&#39;s length, or <code>0</code> when neither form serializes.</li>
+<li>Every <code>toolCallId</code> is at most 128 UTF-8 bytes. An engine id longer than that, a missing one, or one that collides with an alias this turn already minted is replaced by a per-turn <code>clio-coder-tool-&lt;n&gt;</code> alias, and the same alias is used for the call&#39;s <code>tool_call</code>, its <code>tool_call_update</code>, and its permission request, so one call never splits into two identities on the client. Identity runs one way: each engine tool-call id maps to exactly one emitted call. A turn that starts a second call under an engine id it already used mints a fresh alias for it rather than reusing the earlier wire id, so two calls never merge into one, and a <code>tool_execution_end</code> closes that id&#39;s most recently opened call first. An end that names an engine id is confined to that engine id&#39;s own calls: an id this turn never started binds to nothing, and the end is dropped and reported on the stderr tail rather than borrowing another call&#39;s wire id, which reported one tool&#39;s result under another tool&#39;s identity and closed a call that was still running. Every wire id receives exactly one terminal update. Once a <code>tool_call_update</code> with <code>completed</code> or <code>failed</code> has gone out for an id, the cancel/fail sweep included, that id never receives another, and a late or duplicate end for it is dropped and reported on the stderr tail instead of overwriting the result the client already rendered. An end arriving with no engine id binds to the most recently opened call still running, which is what makes a nested lifecycle close correctly: with an outer and an inner call open and the inner one already ended, the next unidentified end is the outer call&#39;s. With nothing still open it binds to the most recently emitted call of the turn, which drops it when that call is already terminal, and an end arriving before the turn has emitted any <code>tool_call</code> is dropped outright. Nothing on the end path mints a wire id, so a <code>tool_call_update</code> never announces an id the client never saw start.</li>
+<li><code>locations</code> carries the absolute path for the built-in path-bearing tools (<code>read</code>, <code>write</code>, <code>edit</code>, <code>ls</code>, <code>grep</code>, <code>find</code>) when the arguments name one, resolved against the pinned workspace and deliberately not realpath&#39;ed, since an <code>edit</code> or <code>write</code> target may not exist yet. Each emitted path is at most 4 KiB of UTF-8, with <code>…[truncated]</code> inside that budget when the resolved value is longer. The exact bounded snapshot is reused by <code>session/request_permission</code>. When there is no recognizable path the field is omitted entirely rather than sent as <code>null</code> or <code>[]</code>.</li>
+<li>A live prompt emits at most 128 <code>tool_call</code> starts. On the next start the server emits no 129th call, cancels the underlying Clio turn, suppresses subsequent chat events, terminally fails every already-rendered open call, and resolves <code>session/prompt</code> with standard stop reason <code>max_turn_requests</code>. This stop reason is emitted by the ACP bridge only for that presentation ceiling; Clio&#39;s separate configurable execution guard remains an engine policy rather than a wire-cardinality promise.</li>
+<li>A cancelled or failed turn synthesizes a <code>tool_call_update</code> with <code>status: &quot;failed&quot;</code> for every call that received a <code>tool_call</code> and no terminal update, before the prompt request settles.</li>
+</ul>
+<h3>Admission failure</h3>
+<p>A prompt Clio cannot start fails with <code>prompt_not_admitted</code> and zero preceding <code>session/update</code> notifications. <code>data.reason</code> is one of <code>orchestrator-not-configured</code>, <code>target-unknown</code>, <code>target-not-configured</code>, <code>target-not-found</code>, <code>runtime-not-registered</code>, <code>model-not-configured</code>, <code>chat-unsupported</code>, <code>streaming-unsupported</code>, or the catch-all <code>admission-failed</code>. That list is closed and the server enforces it: the engine&#39;s runtime-resolution diagnostics are a larger and faster-moving vocabulary (<code>runtime-target-unsupported</code>, <code>runtime-use-unsupported</code>, <code>required-capability-missing</code>, and others), and any reason outside the list is reported as <code>admission-failed</code> rather than teaching clients a code the profile never promised. The two halves of an unconfigured orchestrator are distinguished: no <code>chat.target</code> reports <code>orchestrator-not-configured</code>, and a configured target with no <code>chat.model</code> reports <code>model-not-configured</code>, so a client is pointed at the half of the settings that is actually missing. The message is a sanitized one-line sentence and never contains the settings path. A failure after admission fails with <code>turn_failed</code> instead. Readiness before the first prompt is unchanged and lives in the CLI: <code>paths --json</code> for home identity, <code>doctor --json</code> for installation sanity, and <code>targets --json [--probe]</code> for target, auth, and health. <code>--probe</code> performs a request to the configured endpoint, so the client decides when that is allowed.</p>
+<h3>Permission requests</h3>
+<p>The outbound <code>session/request_permission</code> carries <code>{sessionId, toolCall:{sessionUpdate:&quot;tool_call&quot;, toolCallId, title, kind, status:&quot;pending&quot;, rawInput, locations?}, options}</code>. <code>toolCallId</code> is always the id of a <code>tool_call</code> the client already rendered and has not yet seen finish. Binding is lookup-only. When the engine supplies an id, it resolves through the calls this turn actually emitted, and only to one that is still open; when that id has more than one open call, because the engine reused it, the request binds to the most recently opened of them. When the engine supplies no id, the request binds to the turn&#39;s one open tool call. Every other case fails closed: an id nothing was emitted for, an id whose calls have all completed, zero open calls, or more than one open call with no id to choose between them. Failing closed means the client is never asked, no <code>session/request_permission</code> frame is written, the parked call is cancelled, and the resolution is recorded as denied with <code>decidedBy: &quot;error&quot;</code> and the reason <code>permission request has no bindable tool call</code>. There is no bridge-local id and no id is minted here: asking about an id the client never received put an approval on a call nobody could identify. <code>rawInput</code> and <code>locations</code> are the stored snapshot of the bound call&#39;s <code>tool_call</code> update, replayed byte for byte and never recomputed, so a client can diff the call it is showing against the call it is being asked to approve and find nothing. The snapshot is taken when the <code>tool_call</code> is emitted and keyed by wire id, because the registry&#39;s copy of a call is not always the engine&#39;s: a tool&#39;s <code>prepareAdmissionArguments</code> may rewrite a relative path to an absolute one or attach a prepared artifact before the safety net sees the call, so deriving the ask from those arguments made the two frames disagree for reasons the client could only read as a mismatch. The tool&#39;s name is in <code>title</code>, never folded into <code>rawInput</code>. Options are exactly <code>allow-once</code> and <code>reject-once</code>. Only the exact <code>optionId: &quot;allow-once&quot;</code> under <code>outcome: &quot;selected&quot;</code> grants; every other client answer, including <code>outcome: &quot;cancelled&quot;</code>, is a client denial. At most one request is outstanding at a time and the queue is serial. Transport loss denies every queued request and cancels the parked calls. A <code>session/cancel</code> while a request is outstanding stops the server waiting on it, cancels the parked tool, and settles the prompt with <code>stopReason: &quot;cancelled&quot;</code>; a late answer to the abandoned request is ignored.</p>
+<p>The server timeout is different from a client answer. When <code>--permission-timeout</code> wins, every permission still parked for the active turn is internally resolved as <code>expired</code>, the registry calls are cancelled only to unwind execution, the chat loop is aborted, any later ordinary tool/message events from that unwind are suppressed, and <code>session/prompt</code> fails with <code>permission_expired</code>. The client therefore never sees a fabricated human denial or model prose reacting to it. A literal <code>reject-once</code> remains an ordinary client denial and may be observed by the model as the tool result.</p>
+<h3>Cancel, close, and shutdown</h3>
+<p><code>session/cancel</code> is idempotent while a prompt is active and answers <code>{}</code> in its request form. <code>session/close</code> during an active prompt fails with <code>prompt_active</code>, so the client cancels and awaits the prompt&#39;s terminal response first. Closing an already-closed id returns <code>{}</code>. On stdin EOF or a transport error the pending outbound requests fail, the active prompt is cancelled, the permission bridge is unregistered, and the server waits for the in-flight prompt handler to settle (bounded at 5 s) before resolving, so no session write can land after the session domain stops. Stdout is JSON-RPC only; stderr is an unstructured diagnostic tail.</p>
+<h3><code>_meta</code> keys</h3>
+<p>The shipped <code>clio-coder acp</code> composition supplies the session, settings, provider, event-bus, and tool-registry dependencies, so it advertises the <code>true</code>/present values below and standard <code>loadSession:true</code>. The server constructor also supports narrow embedded/test compositions: in those, <code>loadSession</code> and the corresponding session/settings/target booleans reflect actual dependency availability, and the events/tools keys are omitted when their source is absent. A flag never claims a method is usable when that composition cannot serve it.</p>
+<table>
+<thead>
+<tr>
+<th align="left">Key</th>
+<th align="left">Where</th>
+<th align="left">Payload</th>
+</tr>
+</thead>
+<tbody><tr>
+<td align="left"><code>clio-coder/session</code></td>
+<td align="left"><code>initialize</code> → <code>agentCapabilities._meta</code></td>
+<td align="left"><code>{ close:true, list:true, label:true, delete:true, autonomy:true }</code></td>
+</tr>
+<tr>
+<td align="left"><code>clio-coder/settings</code></td>
+<td align="left"><code>initialize</code> → <code>agentCapabilities._meta</code></td>
+<td align="left"><code>{ get_safe:true, patch_safe:true }</code></td>
+</tr>
+<tr>
+<td align="left"><code>clio-coder/targets</code></td>
+<td align="left"><code>initialize</code> → <code>agentCapabilities._meta</code></td>
+<td align="left"><code>{ list:true, probe:true }</code></td>
+</tr>
+<tr>
+<td align="left"><code>clio-coder/agent</code></td>
+<td align="left"><code>initialize</code> → <code>agentCapabilities._meta</code></td>
+<td align="left"><code>{ version:1, meta:&quot;clio-coder/agent&quot; }</code>, advertising per-frame agent attribution.</td>
+</tr>
+<tr>
+<td align="left"><code>clio-coder/agent</code></td>
+<td align="left">live and replayed <code>session/update.params._meta</code></td>
+<td align="left">An array beginning with orchestrator attribution and including bounded delegated-agent attribution for a tool call when available.</td>
+</tr>
+<tr>
+<td align="left"><code>clio-coder/events</code></td>
+<td align="left"><code>initialize</code> → <code>agentCapabilities._meta</code></td>
+<td align="left"><code>{ version:1, notification:&quot;clio-coder/event&quot;, kinds:[&quot;safety.loopBlocked&quot;,&quot;dispatch.enqueued&quot;,&quot;dispatch.started&quot;,&quot;dispatch.progress&quot;,&quot;dispatch.completed&quot;,&quot;dispatch.failed&quot;], workspaceInstanceId }</code></td>
+</tr>
+<tr>
+<td align="left"><code>clio-coder/session</code></td>
+<td align="left"><code>session/new</code> / <code>session/load</code> result <code>_meta</code></td>
+<td align="left">Bind-time <code>{sessionId,target,model,autonomy,createdAt,resumed,replayed?}</code> attribution.</td>
+</tr>
+<tr>
+<td align="left"><code>clio-coder/replay</code></td>
+<td align="left">replayed <code>session/update.params._meta</code></td>
+<td align="left"><code>{ turn }</code>; absent on live updates.</td>
+</tr>
+<tr>
+<td align="left"><code>clio-coder/truncated</code></td>
+<td align="left"><code>clio-coder/targets/list</code> or <code>clio-coder/session/list</code> result <code>_meta</code></td>
+<td align="left"><code>true</code> only when that method&#39;s aggregate byte budget omitted a target/model entry or session row; absent otherwise.</td>
+</tr>
+<tr>
+<td align="left"><code>clio-coder/tools</code></td>
+<td align="left"><code>initialize</code> → <code>agentCapabilities._meta</code></td>
+<td align="left"><code>&quot;mediated&quot;</code></td>
+</tr>
+<tr>
+<td align="left"><code>clio-coder/usage</code></td>
+<td align="left"><code>session/prompt</code> result <code>_meta</code></td>
+<td align="left"><code>{ input, output, cacheRead, cacheWrite, reasoning }</code></td>
+</tr>
+<tr>
+<td align="left"><code>clio-coder/error</code></td>
+<td align="left">any <code>error.data._meta</code></td>
+<td align="left"><code>{ version, code, reason?, supported? }</code></td>
+</tr>
+</tbody></table>
+<hr>
+<h2>5. Tool Presentation and Outbound Delegation Governance</h2>
+<p>The hosted server presents ordinary Clio tool-registry activity to its client.
+Separately, when Clio delegates to an external ACP peer, it mediates that
+peer&#39;s permission requests before they can affect the workspace.</p>
+<h3>Canonical Tool Mapping</h3>
+<p>The hosted server maps Clio tool names to the closed ACP <code>ToolKind</code>
+enumeration in <code>src/engine/acp/server.ts</code>:</p>
+<table>
+<thead>
+<tr>
+<th align="left">Clio Tool Name</th>
+<th align="left">ACP <code>ToolKind</code></th>
+<th align="left">Primary Action Category</th>
+</tr>
+</thead>
+<tbody><tr>
+<td align="left"><code>read</code>, <code>ls</code>, <code>context</code></td>
+<td align="left"><code>read</code></td>
+<td align="left">Workspace inspection</td>
+</tr>
+<tr>
+<td align="left"><code>write</code>, <code>edit</code>, <code>artifact</code></td>
+<td align="left"><code>edit</code></td>
+<td align="left">Workspace mutation</td>
+</tr>
+<tr>
+<td align="left"><code>grep</code>, <code>find</code>, <code>code_nav</code></td>
+<td align="left"><code>search</code></td>
+<td align="left">Codebase exploration</td>
+</tr>
+<tr>
+<td align="left"><code>bash</code>, <code>verify</code></td>
+<td align="left"><code>execute</code></td>
+<td align="left">Shell and verification execution</td>
+</tr>
+<tr>
+<td align="left"><code>web_fetch</code></td>
+<td align="left"><code>fetch</code></td>
+<td align="left">Network retrieval</td>
+</tr>
+<tr>
+<td align="left"><code>monitor</code></td>
+<td align="left"><code>read</code></td>
+<td align="left">Dispatch status inspection</td>
+</tr>
+<tr>
+<td align="left"><code>git</code>, <code>dispatch</code>, <code>steer</code></td>
+<td align="left"><code>other</code></td>
+<td align="left">Specialized mapped tools</td>
+</tr>
+<tr>
+<td align="left"><code>credential_present</code>, <code>tasks</code>, <code>ledger</code>, <code>panes</code>, <code>ask_user</code>, dynamic / MCP tools</td>
+<td align="left"><code>other</code></td>
+<td align="left">Canonical or dynamic tools without a dedicated ACP mapping fall back to <code>other</code></td>
+</tr>
+</tbody></table>
+<h3>Outbound Non-Stall Permission Mediation</h3>
+<p><code>src/engine/acp/adapter.ts</code> constructs <code>AcpToolMediator</code> when Clio acts as an
+ACP client for an outbound delegation. Under <code>clio-coder-policy</code> governance:</p>
+<ol>
+<li>Tool calls evaluate through the 10-step safety net policy engine.</li>
+<li>If the safety net or autonomy level yields an <code>ask</code> verdict (such as mutating actions at <code>suggest</code> level or unrecognized bash at <code>auto-edit</code> level), the mediator resolves the ask as a <strong>non-stall denial</strong> (<code>autonomyDenyRejection</code>).</li>
+<li>This non-stall behavior prevents external non-interactive client connections from hanging indefinitely while preserving safety boundaries.</li>
+</ol>
+<p>This outbound path is distinct from the hosted server&#39;s
+<code>installPermissionBridge</code>. The hosted server sends <code>session/request_permission</code>
+to its connected client and resumes a parked registry call when the client
+selects <code>allow-once</code>, subject to the timeout and binding rules above.</p>
+<hr>
+<h2>6. Security &amp; Boundary Guarantees</h2>
+<p>The ACP boundary enforces strict isolation rules:</p>
+<ol>
+<li><strong>Autonomy Snapshotting</strong>: The autonomy level is snapshotted at <code>session/new</code> or <code>session/load</code>. A subsequent global configuration change does not alter the bound remote session&#39;s security policy; only an explicit idle <code>clio-coder/session/autonomy</code> set changes its next prompt.</li>
+<li><strong>Metadata Namespacing</strong>: Clio-specific extensions travel exclusively within namespaced metadata fields (<code>ACP_USAGE_META_KEY = &quot;clio-coder/usage&quot;</code>, <code>ACP_SESSION_META_KEY = &quot;clio-coder/session&quot;</code> in <code>src/engine/acp/types.ts:8-9</code>). Strict clients (e.g. Zed Serde deserializers) never encounter unmapped top-level keys.</li>
+<li><strong>No External Outcome Overrides</strong>: External ACP processes cannot self-assert terminal outcome codes (e.g. <code>worker_final_output_missing</code> is enforced at Clio&#39;s trusted finalization seam).</li>
+</ol>
+<hr>
+<h2>7. Delegation Peers in the Transcript</h2>
+<p>The sections above describe Clio as an ACP server. In the other direction, Clio
+is an ACP client: <code>/delegate &lt;agent-id&gt; &lt;task&gt;</code> and any dispatch to an agent id
+configured under <code>integrations.externalAgents.entries</code> run the task on an external peer such as
+<code>codex</code> or <code>opencode</code>.</p>
+<p>A delegated peer is a worker like any other on screen. The adapter maps the
+peer&#39;s <code>text_delta</code> and <code>message_end</code> notifications onto the same dispatch event
+stream a local Clio worker publishes, so the peer&#39;s answer renders in the chat
+transcript as the same attributed block, with the same fold behavior, the same
+<code>--share</code> and <code>/share</code> path into the main agent&#39;s context, and the same replay
+from a sealed receipt. There is no ACP-specific UI path.</p>
+<p>The header is where the difference shows. A local Clio worker names the target
+and model it ran on; a peer runs behind someone else&#39;s process and can honestly
+name only the protocol it was reached through, so its header reads <code>◇ codex (acp) · run 7hq2ab</code>. Its footer reports elapsed and, when the peer reports no
+token usage, the count of mediated tool calls in place of a token count; a peer
+that does report usage gets the same <code>tok</code> unit a local worker does.</p>
+<h3>Typed intent on a delegated dispatch</h3>
+<p>A dispatch to a delegation agent accepts typed intent and renders the declared
+scope into the plan approval artifact, so an operator sees what the peer was
+told to work on before it starts. The declaration grants nothing on this
+transport: the peer runs its own tool surface and Clio mediates no per-tool
+call, so a resolved write boundary would be a claim nothing enforces and is
+refused outright rather than accepted and left unenforced. Declare <code>read_roots</code>
+and <code>relevant_paths</code> to bound what the peer is asked to look at; run the writing
+half of the work on a native or <code>claude-sdk</code> worker. The compatibility rules and
+reason codes are the same as for any other producer; see
+<a href="dispatch_typed_intent_blueprint.html">dispatch-typed-intent.md</a>.</p>
+<hr>
+<h2>8. Error Taxonomy</h2>
+<p>The ACP subsystem defines four typed error classes (<code>src/engine/acp/errors.ts</code>):</p>
+<pre><code class="language-typescript">export class AcpError extends Error {
+  readonly code: string;
+  readonly data?: unknown;
+}
+
+export class AcpProtocolError extends AcpError {
+  constructor(message: string, data?: unknown) {
+    super(&quot;acp_protocol_error&quot;, message, data);
+  }
+}
+
+export class AcpTimeoutError extends AcpError {
+  constructor(message: string, data?: unknown) {
+    super(&quot;acp_timeout&quot;, message, data);
+  }
+}
+
+export class AcpProcessError extends AcpError {
+  constructor(message: string, data?: unknown) {
+    super(&quot;acp_process_error&quot;, message, data);
+  }
+}
+</code></pre>
+        </article>
+        <nav class="related-nav" aria-label="Adjacent references">
+          <a class="nav-link-card" href="troubleshooting_blueprint.html"><span class="nav-label">Previous</span><span class="nav-title">Troubleshooting &amp; Error Remediation</span></a>
+          <a class="nav-link-card next" href="alcf_blueprint.html"><span class="nav-label">Next</span><span class="nav-title">ALCF Inference Provider</span></a>
+        </nav>
+        <p class="reference-footer-note">Canonical content lives in the mapped Markdown page. This visual counterpart adds navigation without changing the contract.</p>
       </main>
     </div>
-
-    <footer>
-      <p>Clio Coder ACP Server Blueprint &bull; Version 0.4.0 &bull; Gnosis Research Center</p>
-    </footer>
+    <footer>Clio Coder documentation · source-aligned at v0.4.2</footer>
   </div>
-
   <script src="shared.js"></script>
-  <script>
-    function switchTab(tabId) {
-      document.querySelectorAll('.tab-btn').forEach(btn => btn.classList.remove('active'));
-      document.querySelectorAll('.tab-pane').forEach(pane => pane.classList.remove('active'));
-
-      const pane = document.getElementById(`pane-${tabId}`);
-      if (pane) pane.classList.add('active');
-
-      const activeBtn = Array.from(document.querySelectorAll('.tab-btn')).find(btn => {
-        return btn.getAttribute('onclick')?.includes(`'${tabId}'`);
-      });
-      if (activeBtn) activeBtn.classList.add('active');
-
-      if (window.initTableOfContents) window.initTableOfContents();
-    }
-
-    function runRpcSim() {
-      const choice = document.getElementById('rpcSelect').value;
-      const out = document.getElementById('rpcOutput');
-
-      if (choice === 'init') {
-        out.innerText = `--> {"jsonrpc":"2.0","id":1,"method":"initialize","params":{"protocolVersion":1,"clientInfo":{"name":"Zed","version":"0.148.0"}}}\n\n<-- {"jsonrpc":"2.0","id":1,"result":{"protocolVersion":1,"agentInfo":{"name":"clio-coder","version":"0.4.0"},"agentCapabilities":{"loadSession":true,"_meta":{"clio-coder/session":{"close":true}}}}}`;
-      } else if (choice === 'new') {
-        out.innerText = `--> {"jsonrpc":"2.0","id":2,"method":"session/new","params":{"cwd":"/workspace/project","mcpServers":[]}}\n\n<-- {"jsonrpc":"2.0","id":2,"result":{"sessionId":"01912a34-b567-7890-abcd-ef0123456789","_meta":{"clio-coder/session":{"sessionId":"01912a34-...","target":"local-lmstudio","model":"qwen3.8-27b","autonomy":"auto-edit","createdAt":"2026-08-19T16:00:00.000Z","resumed":false}}}}`;
-      } else if (choice === 'get_safe') {
-        out.innerText = `--> {"jsonrpc":"2.0","id":3,"method":"clio-coder/settings/get_safe","params":{}}\n\n<-- {"jsonrpc":"2.0","id":3,"result":{"settings":{"orchestrator":{"target":"local-lmstudio","model":"qwen3.8-27b","thinkingLevel":"off"},"autonomy":"auto-edit"},"editable":["orchestrator.target","orchestrator.model","orchestrator.thinkingLevel","autonomy"]}}`;
-      } else if (choice === 'prompt') {
-        out.innerText = `--> {"jsonrpc":"2.0","id":4,"method":"session/prompt","params":{"sessionId":"01912a34-...","prompt":[{"type":"text","text":"Check types"}]}}\n\n<-- {"jsonrpc":"2.0","method":"session/update","params":{"sessionId":"01912a34-...","update":{"type":"agent_start"}}}\n<-- {"jsonrpc":"2.0","id":4,"result":{"stopReason":"completed"}}`;
-      } else if (choice === 'cancel') {
-        out.innerText = `--> {"jsonrpc":"2.0","id":5,"method":"session/cancel","params":{"sessionId":"01912a34-..."}}\n\n<-- {"jsonrpc":"2.0","id":5,"result":{}}`;
-      } else if (choice === 'invalid') {
-        out.innerText = `--> {"jsonrpc":"2.0","id":6,"method":"bogus/method","params":{}}\n\n<-- {"jsonrpc":"2.0","id":6,"error":{"code":-32601,"message":"method not found","data":{"_meta":{"clio-coder/error":{"version":1,"code":"method_not_found","supported":[1]}}}}}`;
-      }
-    }
-
-    window.onload = () => {
-      runRpcSim();
-    };
-  </script>
 </body>
 </html>

@@ -1,0 +1,129 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <meta name="clio-markdown-source" content="docs/guide/resource-library.md">
+  <meta name="clio-docs-version" content="0.4.2">
+  <title>Resource Library · Clio Coder 0.4.2</title>
+  <link rel="icon" href="data:,">
+  <link rel="stylesheet" href="shared.css">
+</head>
+<body data-doc-category="guide">
+  <div class="reading-progress" aria-hidden="true"></div>
+  <a class="skip-link" href="#reference-content">Skip to reference</a>
+  <div class="container">
+    <header class="document-header" data-category="Guide">
+      <div class="header-left">
+        <a class="header-logo" href="index.html" aria-label="Documentation index">
+          <svg viewBox="0 0 24 24" fill="none" aria-hidden="true">
+            <path d="M12 2 2 7l10 5 10-5-10-5Z" stroke="url(#clio-logo)" stroke-width="2" stroke-linejoin="round"/>
+            <path d="m2 12 10 5 10-5M2 17l10 5 10-5" stroke="url(#clio-logo)" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"/>
+            <defs><linearGradient id="clio-logo" x1="2" y1="2" x2="22" y2="22"><stop stop-color="#00d4db"/><stop offset="1" stop-color="#ff7e29"/></linearGradient></defs>
+          </svg>
+        </a>
+        <div class="header-title-wrapper">
+          <p class="document-kicker">Guide / canonical reference</p>
+          <h1>Resource Library</h1>
+          <p class="document-path">docs/guide/resource-library.md</p>
+        </div>
+      </div>
+      <div class="header-right">
+        <a class="back-btn" href="index.html">← Index</a>
+        <span class="version-badge">v0.4.2</span>
+      </div>
+    </header>
+    <div class="page-layout-grid reference-layout">
+      <aside class="sidebar reference-sidebar" aria-label="On this page">
+        <nav class="toc-container">
+          <p class="toc-title">On this page</p>
+          <a class="sidebar-source" href="https://github.com/iowarp/clio-coder/blob/main/docs/guide/resource-library.md">Canonical Markdown<br>docs/guide/resource-library.md</a>
+          <ul class="toc-list"></ul>
+        </nav>
+      </aside>
+      <main class="reference-main" id="reference-content">
+        <article class="reference-prose glass-card">
+<blockquote>
+<p><strong>Visual blueprint:</strong> The source checkout includes the complete
+<a href="resource_library_blueprint.html">Resource Library visual reference</a>.</p>
+</blockquote>
+<p>The resource library extends the existing local skills marketplace catalog to carry agent recipes, prompt templates, and fleet contracts. It does not change the Agent Skills format, discovery roots, trust gating, or existing skill installation sources.</p>
+<h2>Catalog schema</h2>
+<p>A catalog is a JSON or YAML list, or an object whose <code>skills</code> property contains the list. The historical property name remains accepted so every existing skill marketplace index works unchanged.</p>
+<pre><code class="language-yaml">skills:
+  - kind: fleet
+    name: release
+    description: Build and verify a release.
+    sourceUrl: ./fleets/release.md
+    requires:
+      - agent:release-builder
+      - skill:ship
+</code></pre>
+<p><code>kind</code> accepts <code>skill</code>, <code>agent</code>, <code>prompt</code>, or <code>fleet</code> and defaults to <code>skill</code>. <code>requires</code> accepts typed references with those same four prefixes. Clio resolves requirements recursively across the selected catalog and the private catalog. Missing, malformed, and cyclic requirements are refused with stable <code>library_requirement_*</code> diagnostics. A requirement is satisfied when its typed reference exists in <code>&lt;configDir&gt;/library-pins.yaml</code> or its kind-specific destination exists. Add output lists satisfied and unsatisfied requirements separately. Requirements are reported without installation unless <code>library add</code> receives <code>--with-requirements</code>. That flag installs only the unsatisfied dependencies in dependency order before the requested entry.</p>
+<h2>Private catalog and remote gating</h2>
+<p><code>integrations.library.catalog</code> selects a private catalog and defaults to <code>&lt;configDir&gt;/library.yaml</code>. Relative sources in that file resolve beside the catalog. <code>integrations.library.remote</code> records an optional git remote URL. <code>integrations.library.sync</code> defaults to false, and no git process is started while it remains false.</p>
+<p>The private catalog repository must name its git remote <code>library</code>. Clio checks it with <code>git remote get-url library</code>. Run <code>clio-coder library remote confirm &lt;url&gt;</code> once after reviewing the configured URL. When <code>integrations.library.remote</code> is unset, confirmation records the URL as both the configured and confirmed remote. A confirmation that differs from an existing <code>integrations.library.remote</code> refuses with <code>library_remote_mismatch</code>. A missing confirmation or a later settings change refuses synchronization and publishing with <code>library_remote_unconfirmed</code>.</p>
+<p>When <code>integrations.library.sync</code> is false, both <code>library sync</code> and <code>library push</code> refuse with <code>library_sync_disabled</code> before any process starts. When synchronization is enabled, <code>library sync</code> runs <code>git fetch library</code> followed by <code>git merge --ff-only FETCH_HEAD</code>, and <code>library push</code> runs <code>git push library</code>. Both commands execute git as an argument vector without a shell.</p>
+<h2>CLI</h2>
+<pre><code class="language-text">clio-coder library list [--kind k] [--json]
+clio-coder library search &lt;query&gt; [--kind k] [--json]
+clio-coder library add &lt;ref&gt; [--from &lt;catalog|path&gt;] [--with-requirements] [--yes] [--json]
+clio-coder library use &lt;kind&gt; &lt;name&gt;
+clio-coder library push
+clio-coder library sync
+clio-coder library remote confirm &lt;url&gt;
+</code></pre>
+<p><code>library add</code> prints every destination and SHA-256 hash before it writes. It writes nothing until <code>--yes</code> is present. <code>library use</code> prints the invocation to paste into the relevant surface.</p>
+<h2>In the TUI</h2>
+<p>The Skills Hub carries one tab per kind. <code>/resources library &lt;kind&gt;</code> opens the
+requested tab, while <code>/skill</code> opens Skills. Each tab lists discovered entries
+and any unresolved requirements. Installing from a row uses the same
+plan-then-write path as <code>clio-coder library add</code>, behind a confirmation that
+states every destination and hash and writes nothing when cancelled. <code>Enter</code>
+on an installed row leads to its invocation surface. See
+<a href="skills_blueprint.html">Skills Marketplace</a> for the key table.</p>
+<h2>Installation roots and validation</h2>
+<table>
+<thead>
+<tr>
+<th>Kind</th>
+<th>User installation root</th>
+<th>Validation before write</th>
+</tr>
+</thead>
+<tbody><tr>
+<td>skill</td>
+<td><code>&lt;configDir&gt;/skills/&lt;name&gt;/SKILL.md</code></td>
+<td>Existing skill loader and installer</td>
+</tr>
+<tr>
+<td>agent</td>
+<td><code>&lt;configDir&gt;/agents/&lt;name&gt;.md</code></td>
+<td>Agent recipe schema and policy</td>
+</tr>
+<tr>
+<td>prompt</td>
+<td><code>&lt;configDir&gt;/prompts/&lt;name&gt;.md</code></td>
+<td>Prompt template loader</td>
+</tr>
+<tr>
+<td>fleet</td>
+<td><code>&lt;configDir&gt;/fleets/&lt;name&gt;.md</code></td>
+<td>Fleet contract parser</td>
+</tr>
+</tbody></table>
+<p>Every installed item records a kind-qualified hash in <code>&lt;configDir&gt;/library-pins.yaml</code>. Agent recipes become visible through <code>clio-coder agents</code>. User fleet contracts participate between built-in and project fleet precedence, so a project contract still wins. Prompts use the existing user prompt root.</p>
+<p>Share archives may carry agent and fleet entries. Import always validates these formats before writing, and fleet entries land in the user fleet root.</p>
+        </article>
+        <nav class="related-nav" aria-label="Adjacent references">
+          <a class="nav-link-card" href="proactive_memory_blueprint.html"><span class="nav-label">Previous</span><span class="nav-title">Proactive task memory</span></a>
+          <a class="nav-link-card next" href="skills_blueprint.html"><span class="nav-label">Next</span><span class="nav-title">Skills Marketplace</span></a>
+        </nav>
+        <p class="reference-footer-note">Canonical content lives in the mapped Markdown page. This visual counterpart adds navigation without changing the contract.</p>
+      </main>
+    </div>
+    <footer>Clio Coder documentation · source-aligned at v0.4.2</footer>
+  </div>
+  <script src="shared.js"></script>
+</body>
+</html>

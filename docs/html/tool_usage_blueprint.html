@@ -1,352 +1,577 @@
-<!DOCTYPE html>
+<!doctype html>
 <html lang="en">
 <head>
-  <meta charset="UTF-8">
-  <meta name="viewport" content="width=device-width, initial-scale=1.0">
-  <title>Tool Usage Reference Blueprint (v0.4.0)</title>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <meta name="clio-markdown-source" content="docs/guide/tool-usage.md">
+  <meta name="clio-docs-version" content="0.4.2">
+  <title>Tool Usage Reference · Clio Coder 0.4.2</title>
+  <link rel="icon" href="data:,">
   <link rel="stylesheet" href="shared.css">
-  <style>
-    /* Custom calculator styling */
-    .calc-row {
-      display: flex;
-      justify-content: space-between;
-      align-items: center;
-      margin-bottom: 0.75rem;
-    }
-    .atlas-grid {
-      display: grid;
-      grid-template-columns: 200px 1fr;
-      gap: 1.5rem;
-    }
-    .atlas-menu {
-      display: flex;
-      flex-direction: column;
-      gap: 0.5rem;
-    }
-    .atlas-btn {
-      background: rgba(255, 255, 255, 0.02);
-      border: 1px solid var(--border-card);
-      color: var(--text-muted);
-      padding: 0.6rem 0.85rem;
-      border-radius: 6px;
-      font-size: 0.8rem;
-      cursor: pointer;
-      text-align: left;
-      font-weight: 600;
-      transition: all 0.2s;
-    }
-    .atlas-btn:hover {
-      background: rgba(255, 255, 255, 0.06);
-      color: #fff;
-    }
-    .atlas-btn.active {
-      border-color: var(--color-cyan);
-      color: var(--color-cyan);
-      background: rgba(0, 212, 219, 0.05);
-    }
-    .atlas-details {
-      background: rgba(0,0,0,0.2);
-      border: 1px solid var(--border-card);
-      border-radius: 10px;
-      padding: 1.25rem;
-    }
-    @media (max-width: 768px) {
-      .atlas-grid {
-        grid-template-columns: 1fr;
-      }
-    }
-  </style>
 </head>
-<body>
+<body data-doc-category="guide">
+  <div class="reading-progress" aria-hidden="true"></div>
+  <a class="skip-link" href="#reference-content">Skip to reference</a>
   <div class="container">
-    <header>
+    <header class="document-header" data-category="Guide">
       <div class="header-left">
-        <div class="header-logo">
-          <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" style="color: var(--color-cyan);"><title>Icon</title>
-            <polyline points="22 12 18 12 15 21 9 3 6 12 2 12"></polyline>
+        <a class="header-logo" href="index.html" aria-label="Documentation index">
+          <svg viewBox="0 0 24 24" fill="none" aria-hidden="true">
+            <path d="M12 2 2 7l10 5 10-5-10-5Z" stroke="url(#clio-logo)" stroke-width="2" stroke-linejoin="round"/>
+            <path d="m2 12 10 5 10-5M2 17l10 5 10-5" stroke="url(#clio-logo)" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"/>
+            <defs><linearGradient id="clio-logo" x1="2" y1="2" x2="22" y2="22"><stop stop-color="#00d4db"/><stop offset="1" stop-color="#ff7e29"/></linearGradient></defs>
           </svg>
-        </div>
+        </a>
         <div class="header-title-wrapper">
+          <p class="document-kicker">Guide / canonical reference</p>
           <h1>Tool Usage Reference</h1>
-          <p>The seven-plane tool surface, observation budgets, and dynamic continuation limits</p>
-          <div class="meta-chips-row">
-            <span class="chip">Source: docs/tool-usage.md</span>
-            <span class="chip chip-orange">clio-coder docs tool_usage</span>
-          </div>
+          <p class="document-path">docs/guide/tool-usage.md</p>
         </div>
       </div>
       <div class="header-right">
-        <span class="version-badge">Clio Coder v0.4.0</span>
-        <a href="index.html" class="back-btn">
-          <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><title>Icon</title><line x1="19" y1="12" x2="5" y2="12"></line><polyline points="12 19 5 12 12 5"></polyline></svg>
-          Dashboard Hub
-        </a>
+        <a class="back-btn" href="index.html">← Index</a>
+        <span class="version-badge">v0.4.2</span>
       </div>
     </header>
-
-    <div class="page-layout-grid">
-      <nav class="sidebar" aria-label="Table of Contents">
-        <div class="toc-container">
-          <div class="toc-title">On This Page</div>
-          <ul class="toc-list">
-            <!-- Dynamically populated -->
-          </ul>
-        </div>
-      </nav>
-
-      <main>
-        <div class="glass-card">
-          <h2>Overview Summary</h2>
-          <p>Clio Coder exposes 21 built-in tools organized across 7 distinct planes, backed by the <code>clio-coder tools</code> pinned toolchain manager and first-class <code>--with-panes</code> guest mode. This reference covers argument surfaces, result formatting, and turn budget mechanics.</p>
-        </div>
-
-        <div class="tabs-nav">
-          <button type="button" class="tab-btn active" onclick="switchTab('atlas')">
-            Seven-Plane Tool Atlas
-          </button>
-          <button type="button" class="tab-btn" onclick="switchTab('calc')">
-            Observation Envelope Calculator
-          </button>
-        </div>
-
-        <!-- Tab 1: Tool Atlas -->
-        <div class="tab-pane active" id="pane-atlas">
-          <div class="glass-card">
-            <h3>Tool Surface Planes</h3>
-            <p>Select a plane below to explore its available tools and parameters:</p>
-
-            <div class="atlas-grid" style="margin-top:1.5rem;">
-              <div class="atlas-menu">
-                <button type="button" class="atlas-btn active" onclick="selectPlane(1)">1. Observe Plane (7)</button>
-                <button type="button" class="atlas-btn" onclick="selectPlane(2)">2. Mutate Plane (2)</button>
-                <button type="button" class="atlas-btn" onclick="selectPlane(3)">3. Execute Plane (3)</button>
-                <button type="button" class="atlas-btn" onclick="selectPlane(4)">4. Orchestrate Plane (6)</button>
-                <button type="button" class="atlas-btn" onclick="selectPlane(5)">5. Retrieve Plane (1)</button>
-                <button type="button" class="atlas-btn" onclick="selectPlane(6)">6. Interact Plane (1)</button>
-                <button type="button" class="atlas-btn" onclick="selectPlane(7)">7. Artifact Plane (1)</button>
-              </div>
-
-              <div class="atlas-details" id="planeDetails">
-                <!-- Populated dynamically -->
-              </div>
-            </div>
-          </div>
-        </div>
-
-        <!-- Tab 2: Truncation Calculator -->
-        <div class="tab-pane" id="pane-calc">
-          <div class="blueprint-layout">
-            <div class="specs-col">
-              <div class="glass-card">
-                <h3>Envelope &amp; Budget Parameters</h3>
-                <p>Simulate a tool result to calculate truncation thresholds, offload directories, and per-turn budget usages:</p>
-
-                <div class="form-group">
-                  <label for="toolSelect">Tool Type</label>
-                  <select id="toolSelect" onchange="runCalc()">
-                    <option value="read">read (cap: 50KB)</option>
-                    <option value="grep">grep (cap: 16KB)</option>
-                    <option value="find">find (cap: 8KB)</option>
-                    <option value="ls">ls (cap: 8KB)</option>
-                    <option value="code_nav">code_nav (cap: 16KB)</option>
-                    <option value="context">context (cap: 50KB)</option>
-                  </select>
-                </div>
-
-                <div class="form-group">
-                  <label for="resultSize">Collected Result Size (KB)</label>
-                  <input type="range" id="resultSize" min="1" max="100" step="1" value="25" oninput="runCalc()">
-                  <span id="txtResultSize" style="font-family:var(--font-mono); font-size:0.8rem;">25 KB</span>
-                </div>
-
-                <div class="form-group">
-                  <label for="budgetUsed">Budget Already Used in Turn (KB)</label>
-                  <input type="range" id="budgetUsed" min="0" max="250" step="10" value="40" oninput="runCalc()">
-                  <span id="txtBudgetUsed" style="font-family:var(--font-mono); font-size:0.8rem;">40 KB</span>
-                </div>
-              </div>
-            </div>
-
-            <div class="specs-col">
-              <div class="glass-card">
-                <h3>Simulator Verdict</h3>
-
-                <div id="calcVerdictBox" class="verdict-box normal">
-                  <strong id="calcTitle" style="display:block; font-size:1.1rem">FITS CLEANLY</strong>
-                  <span id="calcDesc">Output fits within per-call caps and turn budgets.</span>
-                </div>
-
-                <div id="noticePreviewBox" style="margin-top:1.5rem;">
-                  <div class="form-group">
-                    <label>Envelope Notice String</label>
-                  </div>
-                  <pre><code id="noticeText">None (full content returned)</code></pre>
-                </div>
-              </div>
-            </div>
-          </div>
-        </div>
-
-        <!-- Related Navigation -->
-        <nav class="related-nav" aria-label="Related Pages">
-          <a href="environment_blueprint.html" class="nav-link-card">
-            <span class="nav-label">Previous Blueprint</span>
-            <span class="nav-title">Environment Variables</span>
-          </a>
-          <a href="provider_adapter_blueprint.html" class="nav-link-card next">
-            <span class="nav-label">Next Blueprint</span>
-            <span class="nav-title">Provider Adapter Cookbook</span>
-          </a>
+    <div class="page-layout-grid reference-layout">
+      <aside class="sidebar reference-sidebar" aria-label="On this page">
+        <nav class="toc-container">
+          <p class="toc-title">On this page</p>
+          <a class="sidebar-source" href="https://github.com/iowarp/clio-coder/blob/main/docs/guide/tool-usage.md">Canonical Markdown<br>docs/guide/tool-usage.md</a>
+          <ul class="toc-list"></ul>
         </nav>
+      </aside>
+      <main class="reference-main" id="reference-content">
+        <article class="reference-prose glass-card">
+<blockquote>
+<p><strong>Visual blueprint:</strong> The source checkout includes the complete
+<a href="tool_usage_blueprint.html">Tool Usage Reference visual reference</a>.</p>
+</blockquote>
+<p>This is the deep usage reference behind the deliberately terse tool descriptions in the prompt envelope. Toolkit v2 keeps rich guidance out of tool descriptions and puts it here, where <code>context(scope=&quot;docs&quot;, query=...)</code> retrieves it section by section. Each tool below has its own self-contained <code>##</code> section covering the argument surface, defaults, truncation and continuation behavior, and concrete calls. Source of truth is <code>src/tools/</code>.</p>
+<p>In the current source tree, <code>src/tools/agent-tools.ts</code> serves as the single agent-tool adapter across both orchestrator and worker runtimes. Both surfaces resolve their executable tools through the exact same <code>effectiveToolNames</code> narrowing, ensuring that attested tool schemas never drift from the tools available at runtime. Tools are keyed strictly by the <code>ToolName</code> union with no alias table. Argument leniency for weak-model callers is provided exclusively by per-tool <code>prepareArguments</code> normalizers declared on <code>ToolSpec</code>.</p>
+<h2>Observation envelope: truncation notices, offload, next hints, and the turn budget</h2>
+<p>The six envelope-backed OBSERVE tools (read, grep, find, ls, code_nav,
+context) share one result envelope, implemented in <code>src/tools/observation.ts</code>.
+The OBSERVE policy plane also contains <code>credential_present</code>, whose deliberately
+minimal result does not use that envelope.</p>
+<p>Per-call byte caps: read 50KB (<code>safety.limits.readBytesPerCall</code>), grep 16KB for mode=content and 8KB for mode=files/count, find 8KB, ls 8KB, code_nav 16KB, context 16KB for scope=docs and 50KB for scope=skills/workspace.</p>
+<p>Truncated text results append exactly one notice line:</p>
+<pre><code class="language-text">[&lt;tool&gt;: &lt;shown&gt;/&lt;total&gt; &lt;unit&gt; shown (&lt;shownSize&gt; of &lt;totalSize&gt;) | full: &lt;offloadPath&gt; | next: &lt;exact-call&gt;]
+</code></pre>
+<p>Segments that do not apply are omitted. <code>&lt;total&gt;</code> renders as <code>N+</code> when the search stopped early at its item limit, so the true total was never counted. <code>next:</code> is an exact argument fragment (for example <code>limit=200</code> or <code>offset=451</code>); re-issue the same call with that argument changed to continue.</p>
+<p>Offload: when the byte cap cut content that was already collected, the complete rendering is written to <code>&lt;clio-coder state dir&gt;/scratch/&lt;sessionId&gt;/&lt;sha256 of the captured text&gt;.txt</code> and the notice&#39;s <code>full:</code> segment names the path. Read it with <code>read</code> using offset/limit. Tools offload only when the byte cap cut collected content; a bare item-limit truncation continues via <code>next</code> and does not offload. <code>read</code> never offloads, because the source file is directly re-addressable via <code>offset</code>.</p>
+<p>JSON-format results (code_nav, context scope=docs/workspace) never get an appended notice. An oversize JSON payload is replaced whole by the parseable stub <code>{&quot;error&quot;:&quot;result exceeded &lt;cap&gt;&quot;,&quot;offloadPath&quot;:&quot;...&quot;,&quot;next&quot;:&quot;...&quot;}</code> so the model never receives JSON cut mid-document. Empty results are also valid JSON with empty arrays and <code>next</code> populated.</p>
+<p>Turn budget: all six OBSERVE tools draw from one shared pool of 192KB per turn (<code>safety.limits.observationBytesPerTurn</code>, keyed on <code>sessionId:turnId</code>). When the remaining pool shrinks a call below its self cap, a note is appended naming the bytes already used. When the pool is exhausted, the call short-circuits with <code>[observation budget exhausted for this turn before &lt;tool&gt; ...]</code> instead of paying for a search whose output cannot be returned. Use narrower arguments or continue in a follow-up turn.</p>
+<h2>read: page through a file with offset, limit, and tail</h2>
+<p>Reads one UTF-8 text file. Source: <code>src/tools/read.ts</code>.</p>
+<p>Arguments:</p>
+<ul>
+<li><code>path</code> (required). Relative or absolute; <code>~</code> expands to the home directory.</li>
+<li><code>offset</code> (optional). 1-indexed start line; default 1.</li>
+<li><code>limit</code> (optional). Max lines to return.</li>
+<li><code>tail</code> (optional). Return the last N lines (jump to EOF). Overrides offset/limit.</li>
+</ul>
+<p>Each call is capped at 2000 lines or <code>safety.limits.readBytesPerCall</code>, whichever hits first; the per-turn observation budget can shrink it further. Files larger than 20MB error outright; use grep/find to locate the relevant region instead. A missing file errors with a hint to locate it via code_nav, find, or ls.</p>
+<p>Continuation: a truncated result&#39;s notice carries <code>next: offset=&lt;first unshown line&gt;</code>. read does not offload; the file itself is the continuation source. If a single line exceeds the byte cap, the result is that line&#39;s UTF-8 prefix plus an explanatory note suggesting grep with a narrower pattern or edit with exact surrounding text. An <code>offset</code> beyond EOF errors with the file&#39;s total line count.</p>
+<p>Reach for read when you know the path and need contents. Use grep first to find where something lives, then read the cited region with offset/limit instead of paging a large file from the top. Use <code>tail</code> for logs and build output where the interesting lines are at the end.</p>
+<pre><code class="language-text">read(path=&quot;src/tools/observation.ts&quot;)
+read(path=&quot;src/interactive/chat-loop.ts&quot;, offset=451, limit=120)
+read(path=&quot;build.log&quot;, tail=100)
+</code></pre>
+<h2>edit: exact text replacements in one file</h2>
+<p>Applies targeted replacements to an existing file. Sources: <code>src/tools/edit.ts</code>, <code>src/tools/edit-diff.ts</code>.</p>
+<p>Arguments:</p>
+<ul>
+<li><code>path</code> (required).</li>
+<li><code>edits</code> (required). Array of <code>{oldText, newText}</code> objects. Each <code>oldText</code> must match exactly one region of the original file, and regions must not overlap.</li>
+</ul>
+<p>Matching runs a cascade: exact substring match first, then a fuzzy match that normalizes Unicode punctuation, non-breaking spaces, and trailing whitespace, then an indentation-relaxed match that compares lines with leading whitespace stripped and re-applies the file&#39;s actual indentation to <code>newText</code>. If <code>oldText</code> matches more than once the call errors and asks for more surrounding context; if it matches nowhere the call errors telling you the text must match exactly including whitespace and newlines; if the result would be byte-identical the call errors with &quot;No changes made&quot;.</p>
+<p>The file&#39;s BOM and CRLF/LF line endings are preserved: content is normalized to LF for matching and the original ending restored on write. Same-file mutations from edit and write are serialized through a mutation queue. Success returns <code>edited &lt;path&gt;: N replacement(s)</code> plus a one-line validation nudge (rerun the failing test or verify; navigation tools do not validate edits), with <code>details = {diff, firstChangedLine, paths}</code>.</p>
+<p>Argument tolerance: <code>edits</code> sent as a JSON string is parsed, and a legacy top-level <code>{oldText, newText}</code> pair is folded into <code>edits</code>.</p>
+<p>Prefer edit over write for any change to an existing file; the diff in details is the review surface. Batch related changes to one file into a single call with multiple disjoint edits.</p>
+<pre><code class="language-text">edit(path=&quot;src/tools/ls.ts&quot;, edits=[{oldText: &quot;const DEFAULT_LIMIT = 500;&quot;, newText: &quot;const DEFAULT_LIMIT = 1000;&quot;}])
+edit(path=&quot;README.md&quot;, edits=[
+  {oldText: &quot;## Install&quot;, newText: &quot;## Installation&quot;},
+  {oldText: &quot;npm i clio&quot;, newText: &quot;npm install clio&quot;}
+])
+</code></pre>
+<h2>write: create or overwrite a whole file</h2>
+<p>Writes a complete UTF-8 file, creating parent directories as needed and overwriting silently if the file exists. Source: <code>src/tools/write.ts</code>.</p>
+<p>Arguments:</p>
+<ul>
+<li><code>path</code> (required).</li>
+<li><code>content</code> (required). The full file contents.</li>
+</ul>
+<p>Success reports the byte count written. If the previous content ended with a newline and the new content does not, the result appends a note so the dropped trailing newline is visible. Writes to the same path are serialized with edit through the file mutation queue.</p>
+<p>Use write for new files or full regeneration. Use edit for surgical changes to an existing file; write replaces everything and produces no diff.</p>
+<pre><code class="language-text">write(path=&quot;src/tools/new-tool.ts&quot;, content=&quot;import { Type } from \&quot;typebox\&quot;;\n...&quot;)
+write(path=&quot;.clio-coder/notes/session.md&quot;, content=&quot;# Session notes\n\n...&quot;)
+</code></pre>
+<h2>bash: run a shell command</h2>
+<p>Executes a command in a fresh <code>/bin/bash</code> per call and returns combined stdout and stderr. The login environment is captured once per process (one <code>bash -lc &#39;env -0&#39;</code>) and reused, so every call gets the profile-shaped PATH without re-sourcing the profile chain; when the capture fails the tool falls back to per-call <code>-lc</code>. Sources: <code>src/tools/bash.ts</code>, <code>src/core/bash-exec.ts</code>.</p>
+<p>Arguments:</p>
+<ul>
+<li><code>command</code> (required).</li>
+<li><code>cwd</code> (optional). Working directory; resolved against the session workspace and rejected when it escapes it. The safety net blocks an escaping cwd at admission, and the tool enforces the same rule itself.</li>
+<li><code>timeout_ms</code> (optional). Default 300000 (5 minutes).</li>
+<li><code>output_policy</code> (optional). Canonical model-context disposition: <code>full</code>, <code>bounded</code>, <code>summary</code>, or <code>metadata-only</code>. Omission is exactly <code>bounded</code>.</li>
+</ul>
+<p>Workspace containment: commands whose filesystem targets resolve outside the session workspace escalate to <code>system_modify</code> and ask for one-shot confirmation at every autonomy level (headless runs deny asks). Recognized targets are shell redirects, <code>tee</code>/<code>mkdir</code>/<code>touch</code> path operands, <code>cp</code>/<code>mv</code>/<code>ln</code> destinations, in-place <code>sed -i</code> operands, and any <code>cd</code>/<code>pushd</code> whose directory leaves the workspace, since a <code>cd</code> outside re-bases every relative path that follows it. Inside-workspace equivalents stay plain <code>execute</code> with no new prompts.</p>
+<p>The default <code>bounded</code> policy keeps a tail-biased model excerpt under the 16KB result budget, because the failing assertion, compiler error, and exit summary usually live at the end. <code>summary</code> is useful for noisy builds and test runs: code deterministically selects a bounded head, tail, and error-like lines, applies Clio&#39;s repository secret redactor, and records the source hash and algorithm in summary provenance. <code>metadata-only</code> is appropriate when the model needs only outcome and termination facts; stdout and stderr stay out of model context while the operator presentation, retained byte size, and retrieval path remain available. <code>full</code> is for output known to be small. It is admitted only when the complete captured result and its facts fit the bounded result/context budget; otherwise the result explicitly records a typed downgrade to tail-biased <code>bounded</code> and provides retrieval. Do not use <code>full</code> as the routine default.</p>
+<p>Presentation is independent from model context. The operator-facing display remains folded and tail-biased under every policy. When the display or selected context omits captured content, the terminal result writes one per-session scratch artifact and names it in the result. Live updates use the selected policy, remain bounded, and never write per-update artifacts. Every terminal result records requested and applied context modes, captured/displayed/context bytes, truncation or downgrade state, and any offload path. Exit code, signal, timeout, abort, and output-cap facts survive every policy. Scratch retrieval may contain the raw retained output; the deterministic <code>summary</code> projection is the redacted surface.</p>
+<p>A command producing more than 16MB of combined output is stopped with an error. UTF-8 decoding spans process chunks, and a code point split by the hard byte cap is discarded rather than replaced with an invalid character. Raw NUL bytes are removed from model context under every policy, which leaves multi-byte code points and ANSI escape sequences whole; the operator presentation and the scratch artifact keep the captured bytes, and the result still records the omission and its retrieval path. A timeout, abort, output cap, or nonzero exit preserves captured diagnostics and appends a status line such as <code>bash: command timed out after &lt;ms&gt;ms</code> or <code>bash: command failed (exit N)</code> before canonical shaping.</p>
+<p>Reach for bash for builds, git, package managers, and anything without a dedicated tool. Prefer the dedicated tools over their shell equivalents: grep/find/read/ls get envelope truncation, exact continuation hints, and the shared ignore policy that <code>cat</code>, shell <code>grep</code>, and shell <code>find</code> do not. Prefer <code>verify</code> over bash for declared package scripts and project-catalog entries, since verify produces typed evidence.</p>
+<pre><code class="language-text">bash(command=&quot;git status --short&quot;)
+bash(command=&quot;git log --oneline -10&quot;)
+bash(command=&quot;npm run build&quot;, timeout_ms=600000)
+bash(command=&quot;npm run test&quot;, timeout_ms=600000, output_policy=&quot;summary&quot;)
+bash(command=&quot;make artifact&quot;, output_policy=&quot;metadata-only&quot;)
+</code></pre>
+<h2>grep: search file contents with ripgrep</h2>
+<p>Content search over a directory or single file, backed by ripgrep with a bounded pure-Node fallback when rg is not on PATH. Source: <code>src/tools/grep.ts</code>.</p>
+<p>Arguments:</p>
+<ul>
+<li><code>pattern</code> (required). Regex by default.</li>
+<li><code>path</code> (optional). Directory or file; default <code>.</code>.</li>
+<li><code>mode</code> (optional). <code>content</code> (default) returns matching lines with paths and line numbers, <code>files</code> returns only matching file paths (rg <code>-l</code>), <code>count</code> returns per-file match counts (rg <code>-c</code>).</li>
+<li><code>glob</code> (optional). File filter, e.g. <code>*.ts</code>.</li>
+<li><code>ignore_case</code> (optional boolean).</li>
+<li><code>literal</code> (optional boolean). Treat the pattern as fixed text.</li>
+<li><code>context</code> (optional). Context lines per match; mode=content only. Context comes from rg&#39;s <code>--json</code> stream, never a second file read.</li>
+<li><code>limit</code> (optional). Max matches; default 100.</li>
+<li><code>include_ignored</code> (optional boolean).</li>
+</ul>
+<p>Visibility follows the shared ignore policy (<code>src/tools/ignore-policy.ts</code>): <code>.gitignore</code> is honored natively, <code>.clio-coder</code>/<code>.fallow</code>/<code>.git</code> are always excluded, and a fixed generated-dirs list (<code>node_modules</code>, <code>dist</code>, <code>build</code>, <code>coverage</code>, <code>target</code>, <code>.venv</code>, <code>.next</code>, <code>.cache</code>, <code>.pytest_cache</code>, <code>.turbo</code>) is force-excluded even when a project forgot to gitignore it. <code>include_ignored=true</code> lifts the gitignore and generated layers together; the clio-internal layer always stands. Pointing <code>path</code> directly inside an excluded directory searches it. grep and find answer visibility from the same policy, so <code>grep mode=files</code> and <code>find</code> never disagree about which paths exist.</p>
+<p>Rendering: match lines print as <code>path:line: text</code>, context lines as <code>path-line- text</code>. Lines longer than 500 characters are cut with a note suggesting read for the full line. No matches returns <code>No matches found</code>.</p>
+<p>Truncation: hitting the match limit gives <code>next: limit=&lt;2x&gt;</code> with the total rendered as <code>N+</code>. Hitting the byte cap (16KB content, 8KB files/count) offloads the full rendering and, in content mode, suggests <code>next: mode=files</code>. Searches are killed after 30 seconds with a hint to narrow the pattern, path, or glob.</p>
+<p>The fallback searcher (rg absent) skips files over 20MB and binary files, walks the same ignored-dir set, and stops at the match limit.</p>
+<p>Reach for grep to find where something lives; use mode=files to map breadth cheaply before reading, and mode=count to size a rename or sweep.</p>
+<pre><code class="language-text">grep(pattern=&quot;finalizeObservation&quot;, path=&quot;src&quot;, mode=&quot;files&quot;)
+grep(pattern=&quot;observationBudget&quot;, glob=&quot;*.ts&quot;, ignore_case=true)
+grep(pattern=&quot;TODO|FIXME&quot;, path=&quot;src/tools&quot;, context=2, limit=50)
+grep(pattern=&quot;reserveObservation(&quot;, literal=true, path=&quot;src&quot;)
+</code></pre>
+<h2>find: locate files and directories by glob pattern</h2>
+<p>Finds paths matching a glob, backed by fd with a bounded dirent-only fallback walker. Source: <code>src/tools/find.ts</code>.</p>
+<p>Arguments:</p>
+<ul>
+<li><code>pattern</code> (required). Glob dialect: <code>*</code>, <code>**</code>, <code>?</code>, <code>[abc]</code>.</li>
+<li><code>path</code> (optional). Directory to search; default <code>.</code>.</li>
+<li><code>order</code> (optional). <code>path</code> (default, fd&#39;s native order) or <code>mtime</code> (newest first).</li>
+<li><code>limit</code> (optional). Max results; default 500.</li>
+<li><code>include_ignored</code> (optional boolean).</li>
+</ul>
+<p>Results are relative to the search directory, with a <code>/</code> suffix on directories. A bare pattern like <code>*.md</code> matches at any depth; a pattern containing <code>/</code> matches against the search-root-relative path and is auto-prefixed with <code>**/</code> unless anchored with <code>/</code> or <code>**/</code>. Visibility follows the same shared ignore policy as grep (see the grep section); <code>include_ignored=true</code> reveals the same extra paths in both tools.</p>
+<p><code>order=&quot;mtime&quot;</code> never walks the whole tree: it collects a bounded candidate set of <code>max(4 * limit, 2000)</code> paths, stats only those, sorts newest first, and slices to <code>limit</code>. <code>details.candidates = {cap, collected, capHit, note?}</code> records the bound; when the cap was hit the ordering is approximate and <code>next: order=path</code> is suggested.</p>
+<p>Truncation: hitting the result limit gives <code>next: limit=&lt;2x&gt;</code> with the total rendered as <code>N+</code>; the 8KB byte cap offloads the full path list. No matches returns <code>No files found matching pattern</code>. Searches are killed after 30 seconds.</p>
+<p>Reach for find when you know the file&#39;s name or shape; use <code>order=&quot;mtime&quot;</code> with a small limit to answer &quot;what changed recently&quot;. When you know contents but not names, use <code>grep mode=files</code> instead.</p>
+<pre><code class="language-text">find(pattern=&quot;*.test.ts&quot;, path=&quot;tests&quot;)
+find(pattern=&quot;src/**/*.ts&quot;, limit=200)
+find(pattern=&quot;*&quot;, path=&quot;src/tools&quot;, order=&quot;mtime&quot;, limit=10)
+find(pattern=&quot;**/dist/**&quot;, include_ignored=true)
+</code></pre>
+<h2>ls: list one directory</h2>
+<p>Lists the entries of a single directory, non-recursive. Source: <code>src/tools/ls.ts</code>.</p>
+<p>Arguments:</p>
+<ul>
+<li><code>path</code> (optional). Default <code>.</code>.</li>
+<li><code>limit</code> (optional). Max entries; default 500.</li>
+</ul>
+<p>Entries are sorted alphabetically case-insensitively, directories carry a <code>/</code> suffix, and dotfiles are included. ls reads the directory raw and applies no ignore policy, so <code>node_modules/</code> and <code>.git/</code> appear if present. Entries that vanish or cannot be statted mid-scan are skipped. An empty directory returns <code>(empty directory)</code>.</p>
+<p>Truncation: hitting the entry limit gives <code>next: limit=&lt;2x&gt;</code>; the 8KB byte cap offloads the full listing. Reach for ls to orient in one directory; use find for recursive matching.</p>
+<pre><code class="language-text">ls()
+ls(path=&quot;src/tools&quot;)
+ls(path=&quot;docs&quot;, limit=100)
+</code></pre>
+<h2>credential_present: check environment or file for a credential key</h2>
+<p>Checks whether a credential key is present in the process environment or an env-style file (like <code>.env</code>) without ever returning the value of the credential. Source: <code>src/tools/credential-present.ts</code>. Read class; parallel.</p>
+<p>Arguments:</p>
+<ul>
+<li><code>name</code> (required). Credential key name, e.g. <code>OPENAI_API_KEY</code>. Must match <code>[A-Za-z_][A-Za-z0-9_]*</code>.</li>
+<li><code>source</code> (optional). One of <code>auto</code>, <code>environment</code> (or <code>env</code>), or <code>file</code>. Default <code>auto</code>.<ul>
+<li><code>auto</code>: Checks the process environment, and checks the env-style file if <code>file</code> is supplied.</li>
+<li><code>environment</code>/<code>env</code>: Checks only the process environment.</li>
+<li><code>file</code>: Checks only the env-style file.</li>
+</ul>
+</li>
+<li><code>file</code> (optional). Env-style file path to check, e.g. <code>.env</code>.</li>
+</ul>
+<p>Returns a JSON presence summary mapping containing:</p>
+<ul>
+<li><code>name</code>: The checked credential key name.</li>
+<li><code>present</code>: Boolean indicating if the credential is found in any checked source.</li>
+<li><code>source</code>: The source that matched (<code>environment</code>, <code>file</code>, <code>both</code>, or <code>none</code>).</li>
+<li><code>checked</code>: Array listing the sources actually checked (<code>environment</code> and/or <code>file</code>).</li>
+<li><code>file</code>: The env-style file path checked, if applicable.</li>
+<li><code>fileMissing</code>: True if the file path was specified but does not exist.</li>
+</ul>
+<pre><code class="language-text">credential_present(name=&quot;OPENAI_API_KEY&quot;)
+credential_present(name=&quot;MY_SECRET_KEY&quot;, source=&quot;file&quot;, file=&quot;.env&quot;)
+</code></pre>
+<h2>dispatch: run bounded tasks on fleet agents</h2>
+<p>Dispatches one or more tasks to Clio fleet agents and returns per-run receipt summaries. Source: <code>src/tools/dispatch.ts</code>.</p>
+<p>Arguments:</p>
+<ul>
+<li><code>task</code> (required for the singular form unless <code>list:true</code>). One worker assignment/instruction string. It is distinct from briefing.</li>
+<li><code>tasks</code> (required for the batch form unless <code>list:true</code>). Array of task strings or <code>{task, agent, target, model, node, briefing, intent, gate, budget, worktree}</code> objects. Per-item fields override the top-level defaults below; <code>persona</code>, <code>tool_profile</code>, <code>cwd</code>, and <code>apply</code> come from the batch defaults (an item that carries one is still honored, but the schema no longer advertises them per item). The <code>intent</code> and <code>budget</code> schemas are serialized once under <code>$defs</code> and referenced from the top level and from each item. Supplying both <code>task</code> and <code>tasks</code> is an error.</li>
+<li><code>mode</code> (optional). <code>parallel</code> (default) runs items concurrently; <code>sequential</code> runs them one at a time, each completing before the next dispatches. <code>pipeline</code>, <code>compete</code>, and <code>council</code> select their named topologies. A single ordinary task always runs down the sequential path.</li>
+<li><code>roster</code> (council only). Names one <code>fleet.rosters</code> entry. Supply exactly one of <code>roster</code> or <code>members</code>.</li>
+<li><code>members</code> (council only). Supplies two to five inline <code>{label,target,model?,thinking?}</code> entries.</li>
+<li><code>synthesis</code> (council only). Accepts <code>none</code>, <code>judge</code>, or <code>vote</code>; the default is <code>none</code>.</li>
+<li><code>rounds</code> (council only). Accepts an integer from 1 through 3; the default is 1.</li>
+<li><code>judge</code> (council only with judge synthesis, or compete). Accepts optional <code>agent</code>, <code>model</code>, <code>target</code>, and <code>node</code> route fields.</li>
+<li><code>detach</code> (optional boolean). For parallel fan-out, returns the durable batch id and assignment ids after registration while the shared event consumer continues in the background. An assignment id equals its first attempt&#39;s run id. This is the parent model&#39;s route to mid-run monitor/steer; ordinary synchronous, sequential, and pipeline calls auto-wait for each assignment&#39;s terminal attempt.</li>
+<li><code>list</code> (optional boolean). Returns the agent catalog instead of dispatching.</li>
+<li><code>agent</code> (optional). Default agent recipe for items that do not name one; default <code>coder</code>. The retired <code>agent_id</code> spelling is rejected with a message to use <code>agent</code>.</li>
+<li><code>target</code> (optional). Default configured target id.</li>
+<li><code>model</code> (optional). Default model override.</li>
+<li><code>node</code> (optional). Default fleet-node pin.</li>
+<li><code>routing</code> (optional). Hard route bounds include <code>maxCostUsd</code>, <code>deadlineMs</code>, and <code>requiredCapabilities</code>. When adaptive routing is configured, the schema also exposes <code>posture</code>, <code>minimumQuality</code>, <code>locality</code>, and <code>failover</code> (<code>none|approved</code>). Exact <code>target</code>, <code>model</code>, or <code>node</code> pins require manual posture and imply no failover. Top-level <code>failover</code>, <code>allowed_candidates</code>, and <code>allowedCandidates</code> are rejected; model-authored candidate envelopes are not accepted. Approved fallback candidates come from the admitted fleet route plan.</li>
+<li><code>thinking_level</code> (optional). One of <code>off|minimal|low|medium|high|xhigh|max</code>, applied to all items.</li>
+<li><code>cwd</code> (optional). Default agent working directory.</li>
+<li><code>timeout_ms</code> (optional). Aborts the whole dispatch; in sequential mode remaining tasks are skipped and the skip is reported.</li>
+<li><code>briefing</code> (optional string, top-level default or per-task override). Parent-composed context/data, not worker instructions: it cannot replace <code>task</code>. It is trimmed and omitted when blank, rejected above 12,000 UTF-8 bytes, sent as its own delimited untrusted dynamic message, and retained only as byte/hash provenance. The shared value applies to string tasks and object tasks without an override; an object-level briefing wins.</li>
+<li><code>intent</code> (object, top-level default or per-task override, and the default way to dispatch). Declares <code>read_roots</code>, <code>write_roots</code>, <code>relevant_paths</code>, <code>expected_outputs</code>, and <code>verification</code>. Path arrays contain normalized repository-relative POSIX paths. Verification entries contain a declared <code>check</code> id and optional <code>timeout_ms</code>; ids are resolved from package scripts and <code>.clio-coder/verifiers.yaml</code> before approval. Checks are ids, not shell commands. Declared paths select the project rules that apply to them and pin worker context; omitting <code>intent</code> falls back to reading path-like tokens out of the task and briefing, which can miss an applicable rule. In a batch, per-task <code>intent</code> shallow-merges over the top-level object and is then checked against it as a ceiling: a task may narrow the shared scope and is refused with <code>intent_scope_widening</code> if it reaches outside. Declaring <code>write_roots</code> that disagree with a legacy <code>writeRoots</code>, an <code>expected_outputs</code> entry outside every declared write root, or an <code>intent.version</code> other than 2 are each terminal refusals carrying a stable reason code. See <a href="dispatch_typed_intent_blueprint.html">dispatch-typed-intent.md</a>.</li>
+<li><code>gate</code> (optional string, top-level default or per-task override). Exact shorthand for <code>intent.verification=[{check: gate}]</code>. Supplying it together with <code>intent.verification</code> is refused.</li>
+<li><code>max_output_bytes</code> (optional). Summary byte budget; default 20000, split across runs with at least 1024 bytes each.</li>
+</ul>
+<p>Argument tolerance: <code>tasks</code> sent as a JSON string is parsed and a single object or bare string is wrapped into an array. The top-level singular <code>task</code> is first-class. Briefing-only calls fail with guidance that briefing is context and cannot replace a task.</p>
+<p>Output is one batch-shaped summary even for a single task: a header <code>dispatch (&lt;mode&gt;) total=N failed=M</code>, the assignment id list, then one terminal-attempt receipt line per assignment (run id, agent, exit code, target, model, tokens, receipt path, verification state, failure message if any) followed by the worker&#39;s final assistant text. <code>details = {mode, assignmentIds, receiptCount, failedCount, runs[]}</code>, and each <code>runs[]</code> entry carries distinct <code>assignmentId</code> and terminal <code>runId</code> fields plus the structured <code>verification</code> state and <code>receiptIntegrity</code> result. There is no <code>runIds</code> compatibility alias. Any terminal attempt with a nonzero exit turns the whole result into an error carrying the same summary. A run that succeeded without a single successful tool call carries a <code>note=</code> marker; do not treat such a run as validated work.</p>
+<p>The summary separates five things that must never be conflated: <code>receipt_integrity=verified/v20/sha256</code> comes only from verification against the ledger; <code>host_verification=&lt;status&gt;</code> describes orchestrator-executed declared checks; <code>evidence_verification=&lt;state&gt;/&lt;basis&gt;</code> describes worker-tool validation evidence; <code>briefing=bytes:&lt;n&gt; sha256:&lt;hash&gt;</code> authenticates parent-supplied data; and <code>project_context=...</code> authenticates the independently rendered bounded project message. A pre-v20 receipt is retired and cannot count as evidence. A tampered v20 receipt renders a head-anchored <code>RECEIPT INTEGRITY FAILED</code> banner. A read-only Scout can have verified integrity with <code>not_applicable/read-only-agent</code> evidence. Missing briefing is <code>briefing=none</code>, never a project-context hash.</p>
+<p>Exit zero is insufficient without a durable deliverable. A successful native or ACP run must seal a nonempty <code>output.state=&quot;final&quot;</code>. Otherwise it fails with <code>worker_final_output_missing</code>; any unfinished text remains partial diagnostics and automatic retry is suppressed. Live tool-use preambles never replace a missing receipt answer.</p>
+<p>Sealed receipts are the durable evidence; worker prose remains advisory until verified or spot-checked. Treat a successful reconnaissance receipt as an index and normally spot-check no more than six risk-weighted citations. Parent spot-checking is not independent specialist confirmation. For detached work, <code>wait</code> only observes; <code>collect</code> closes the batch and is required before final synthesis. Collection resolves each assignment to its terminal attempt and includes <code>assignmentId</code>, <code>terminalRunId</code>, and <code>attemptRunIds</code>; each failed earlier attempt remains available through monitor/ledger receipt lookup. A successful steer records ordered byte/hash/timestamp and acknowledgement provenance without storing prose. After a loop guard blocks a repeated call, do not retry the same call or a syntactic variant. When a report is requested but file modification is forbidden, answer in the final assistant response rather than creating <code>REPORT.md</code>.</p>
+<pre><code class="language-text">dispatch(list=true)
+dispatch(agent=&quot;debugger&quot;, task=&quot;Adversarially verify the strict v20 receipt boundary&quot;, briefing=&quot;Prior receipt R1 cited receipt-integrity.ts and left these claims unresolved&quot;, intent={read_roots: [&quot;src/domains/dispatch/&quot;]}, detach=true)
+dispatch(tasks=[
+  {task: &quot;Run the contract tests in tests/contracts/dispatch-lifecycle.test.ts and report each failure with its assertion&quot;,
+   intent: {read_roots: [&quot;tests/contracts/&quot;, &quot;src/domains/dispatch/&quot;], verification: [{check: &quot;test&quot;}]}}
+])
+dispatch(tasks=[
+  {agent: &quot;researcher&quot;, task: &quot;Map every caller of finalizeObservation and summarize the envelope shapes&quot;,
+   intent: {read_roots: [&quot;src/domains/&quot;]}},
+  {agent: &quot;coder&quot;, task: &quot;Fix the failing assertion in tests/contracts/safety-gates.test.ts&quot;,
+   intent: {write_roots: [&quot;tests/contracts/&quot;], expected_outputs: [&quot;tests/contracts/safety-gates.test.ts&quot;], verification: [{check: &quot;test&quot;}]}}
+], mode=&quot;parallel&quot;)
+dispatch(
+  intent={read_roots: [&quot;src/&quot;], write_roots: [&quot;src/domains/&quot;]},
+  tasks=[
+    {task: &quot;Refactor step 1&quot;, intent: {write_roots: [&quot;src/domains/dispatch/&quot;]}},
+    {task: &quot;Refactor step 2&quot;, intent: {write_roots: [&quot;src/domains/context/&quot;]}}
+  ], mode=&quot;sequential&quot;, timeout_ms=600000)
+</code></pre>
+<h2>verify: run declared verification checks</h2>
+<p>One EXECUTE entry point for declared verification. Sources: <code>src/tools/verify/index.ts</code>, <code>src/tools/verify/catalog.ts</code>, <code>src/tools/verify/scripts.ts</code>, <code>src/tools/verify/authoring.ts</code>, <code>src/tools/verify/frontend.ts</code>.</p>
+<p>Arguments:</p>
+<ul>
+<li><code>check</code> (optional). A declared project-catalog ID, package.json script name, or <code>&quot;frontend&quot;</code>. Omit to list available checks.</li>
+<li><code>path</code> (check=frontend). Artifact file under the workspace root.</li>
+<li><code>args</code> (package scripts only). Extra arguments passed after <code>--</code>. A JSON-string array is tolerated and parsed. Project-catalog checks ignore this field.</li>
+<li><code>browser</code> (check=frontend). <code>auto</code> (default), <code>required</code>, or <code>off</code>.</li>
+<li><code>cwd</code> (package scripts only). Package working directory. Project catalogs are always discovered at the session workspace root, and a project check uses its declared <code>cwd</code>.</li>
+<li><code>timeout_ms</code> (package scripts and frontend only). Default 120000. A project check uses its declared <code>timeoutMs</code>.</li>
+<li><code>max_output_bytes</code> (package scripts and frontend only). Default 600000. Project checks retain the safe-exec default cap.</li>
+</ul>
+<p><code>verify()</code> lists checks grouped as <code>package.json</code> and <code>.clio-coder/verifiers.yaml</code>. Both providers project through the same canonical metadata: <code>{id, description, command, cwd, timeoutMs, tags, source}</code>. Package scripts must match the verification family <code>test*/lint*/build*/typecheck*/check*/format*/ci*</code> (a family prefix, optionally followed by <code>:</code>, <code>.</code>, or <code>-</code> and a suffix, e.g. <code>test:unit</code>). <code>verify(check=&quot;typecheck&quot;)</code> runs <code>npm run typecheck</code> through the safe-exec spine with no shell. A package script name outside the family is rejected with a pointer to run it through bash.</p>
+<h3>Project verifier catalog</h3>
+<p>Projects may commit a versioned executable catalog at <code>.clio-coder/verifiers.yaml</code>:</p>
+<pre><code class="language-yaml">version: 1
+checks:
+  - id: rust-workspace
+    description: Run the Rust workspace tests
+    command: [cargo, test, --workspace]
+    cwd: .
+    timeoutMs: 600000
+    tags: [rust, test]
+</code></pre>
+<p>Version 1 is strict. Every root and check field shown above is required, unknown fields fail, and duplicate IDs fail. A project ID uses lowercase letters, digits, <code>.</code>, <code>_</code>, <code>:</code>, or <code>-</code>, begins with a letter or digit, and is at most 64 UTF-8 bytes. <code>frontend</code> is reserved. Descriptions are trimmed single-line text capped at 512 bytes. <code>command</code> is a nonempty argv array with at most 64 entries and 4096 bytes per entry. A shell command string is invalid, and explicit shell executables such as <code>sh</code>, <code>bash</code>, <code>pwsh</code>, and <code>cmd</code> are rejected. <code>cwd</code> is a repository-relative existing directory capped at 512 bytes; absolute paths, <code>..</code> escapes, and symbolic-link escapes fail. <code>timeoutMs</code> is a positive integer capped at 900000. A check may carry at most 16 distinct lowercase tags of at most 32 bytes each. The whole file is capped at 262144 bytes and may contain at most 128 checks. YAML aliases are disabled.</p>
+<p>Provider IDs share one namespace. If a catalog ID collides with a discovered package script, listing and execution fail and identify both source files. Catalog parsing also fails closed before any package or project check runs.</p>
+<p><code>verify(check=&quot;rust-workspace&quot;)</code> spawns exactly <code>cargo</code> with <code>test</code> and <code>--workspace</code>; it does not interpolate model text or invoke a shell. Model-supplied <code>args</code>, <code>cwd</code>, <code>timeout_ms</code>, <code>max_output_bytes</code>, or undeclared environment fields cannot widen or replace the catalog entry. Safe execution passes only Clio&#39;s small environment allowlist, applies cancellation and the declared timeout, and shapes output at the standard 600000-byte cap. Execution details retain the compatible command string plus exact <code>argv</code>, <code>cwd</code>, <code>exitCode</code>, <code>durationMs</code>, <code>aborted</code>, <code>timedOut</code>, and <code>outputCapped</code> evidence, along with the check&#39;s declared source, command, cwd, timeout, description, and tags.</p>
+<h3>Guided catalog authoring</h3>
+<p>An empty <code>verify()</code> result points to <code>clio-coder verifiers author</code>. The authoring command inspects only command-bearing files at the workspace root:</p>
+<ul>
+<li>verification-family package scripts, projected exactly as <code>npm run &lt;script&gt;</code> and shown as already active rather than duplicated into the catalog;</li>
+<li><code>Cargo.toml</code>, projected to Cargo&#39;s package or workspace test vector;</li>
+<li>visible build and test entries in <code>CMakePresets.json</code>, projected to the corresponding <code>cmake --build --preset</code> or <code>ctest --preset</code> vector;</li>
+<li>declared Python runners in <code>pyproject.toml</code>, <code>pytest.ini</code>, <code>tox.ini</code>, <code>noxfile.py</code>, or the pytest section of <code>setup.cfg</code>;</li>
+<li>a module directive in <code>go.mod</code>, projected to <code>go test ./...</code>;</li>
+<li>top-level <code>validators</code> entries in the documented YAML scientific-validation files.</li>
+</ul>
+<p>Every proposal records its source path and location and labels the command origin as <code>project-declared</code> or <code>toolchain-defined</code>. Project-declared examples include a package script, a Python entry point, and an exact validation-contract command. Toolchain-defined examples include Cargo&#39;s test command, a named CMake preset invocation, a configured Python runner, and Go&#39;s module test command. Validation command strings are converted to argv only when their quoting is complete and they contain no shell operators, expansion, redirection, or environment assignment. Ambiguous entries and <code>VALIDATION.md</code> prose receive a manual-entry diagnostic. Directory names such as <code>build</code>, <code>tests</code>, <code>python</code>, or <code>cargo</code> never imply a command.</p>
+<p><code>discover</code> and every mutating command first print an authority preview. Each check shows the destination or active source path, source provenance, exact JSON argv vector, repository-relative cwd, timeout, tags, and effective execution authority. Preview and discovery do not create <code>.clio-coder</code>, write a file, or run a check. A mutating command without <code>--yes</code> ends after the preview. Repeating the reviewed command with <code>--yes</code> is the explicit write decision; the serialized YAML must pass the production catalog parser before the atomic write is reachable.</p>
+<pre><code class="language-text">clio-coder verifiers discover
+clio-coder verifiers author
+clio-coder verifiers author --exclude cmake-build-debug --rename go-test=go-suite
+clio-coder verifiers author --dry-run go-suite --yes
+clio-coder verifiers validate
+</code></pre>
+<p><code>validate</code> reads the committed file with the same parser used by <code>verify()</code>. <code>dry-run &lt;id&gt;</code> is an explicit request to execute one admitted check through the production <code>verify</code> path. <code>author --dry-run &lt;id&gt; --yes</code> writes only after confirmation and starts the selected dry run only after the write is accepted by production discovery.</p>
+<p>Later changes use the same preview and confirmation boundary. <code>edit</code> preserves the ID unless <code>rename</code> is requested. Renames and additions reject collisions with catalog IDs and active package-script IDs. Removals state that the deleted command will no longer be executable through catalog authority. Generated IDs are stable for a stable ordered signal set; a collision receives the first available deterministic <code>-2</code>, <code>-3</code>, and later suffix.</p>
+<pre><code class="language-text">clio-coder verifiers add --id validate-grid --description &quot;Validate the regional grid&quot; --command &#39;[&quot;python&quot;,&quot;tools/check_grid.py&quot;,&quot;out/region_west.nc&quot;]&#39;
+clio-coder verifiers add --id validate-grid --description &quot;Validate the regional grid&quot; --command &#39;[&quot;python&quot;,&quot;tools/check_grid.py&quot;,&quot;out/region_west.nc&quot;]&#39; --tags scientific,netcdf --yes
+clio-coder verifiers edit validate-grid --timeout-ms 300000
+clio-coder verifiers rename validate-grid validate-regional-grid --yes
+clio-coder verifiers remove validate-regional-grid --yes
+</code></pre>
+<p>The <code>add</code> command is the explicit path for an unsupported or ambiguous project. <code>--command</code> must be a JSON argv array, so manual entry still cannot turn a shell command string into executable catalog authority.</p>
+<p><code>verify(check=&quot;frontend&quot;, path=&lt;file&gt;)</code> validates an HTML, CSS, or JavaScript artifact without shell access. The path must stay inside the workspace root and end in <code>.html</code>, <code>.htm</code>, <code>.css</code>, <code>.js</code>, <code>.mjs</code>, or <code>.cjs</code>. Checks per type: HTML tag balance (comment-aware, HTML5 optional end tags honored), inline and referenced script syntax (classic scripts parsed in-process, modules via <code>node --check</code>), inline and linked CSS brace/string/comment balance, local script and stylesheet references resolved and existence-checked (external and root-relative references are skipped), and an optional headless browser load. <code>browser=&quot;auto&quot;</code> warns when no chromium/chrome/edge executable is on PATH, <code>&quot;required&quot;</code> fails, <code>&quot;off&quot;</code> skips. Each check reports pass, warn, fail, or skip; any fail makes the whole result an error. <code>details = {action: &quot;verify&quot;, check: &quot;frontend&quot;, path, browserMode, status, checks}</code>.</p>
+<p>Prefer verify over bash for the verification family and project catalog: the typed result feeds the finish contract as validation evidence.</p>
+<pre><code class="language-text">verify()
+verify(check=&quot;typecheck&quot;)
+verify(check=&quot;test&quot;, args=[&quot;tests/contracts/dispatch-lifecycle.test.ts&quot;])
+verify(check=&quot;rust-workspace&quot;)
+verify(check=&quot;frontend&quot;, path=&quot;site/index.html&quot;, browser=&quot;off&quot;)
+</code></pre>
+<h2>git: read-only inspection of git repository state</h2>
+<p>Executes read-only inspection commands against the local git repository. Source: <code>src/tools/safe-exec.ts</code>. Read class; parallel.</p>
+<p>Arguments:</p>
+<ul>
+<li><code>op</code> (required). The inspection operation to run: <code>status</code>, <code>diff</code>, or <code>log</code>.</li>
+<li><code>path</code> (optional). Limit diff/log to a specific file or directory path.</li>
+<li><code>cached</code> (optional boolean). For <code>op=&quot;diff&quot;</code>: staged changes (<code>--cached</code>).</li>
+<li><code>stat</code> (optional boolean). For <code>op=&quot;diff&quot;</code>: summary only (<code>--stat</code>).</li>
+<li><code>name_only</code> (optional boolean). For <code>op=&quot;diff&quot;</code>: file names only.</li>
+<li><code>limit</code> (optional number). For <code>op=&quot;log&quot;</code>: commits to show (default 20, max 200).</li>
+<li><code>cwd</code> (optional). Working directory.</li>
+</ul>
+<p>Commands map directly to git subprocess execution:</p>
+<ul>
+<li><code>op=&quot;status&quot;</code> runs <code>git status --short --branch</code>.</li>
+<li><code>op=&quot;diff&quot;</code> runs <code>git diff</code> with optional <code>--cached</code>, <code>--stat</code>, or <code>--name-only</code> flags.</li>
+<li><code>op=&quot;log&quot;</code> runs <code>git log --oneline -n &lt;limit&gt;</code> listing recent commit shas and subjects.</li>
+</ul>
+<pre><code class="language-text">git(op=&quot;status&quot;)
+git(op=&quot;diff&quot;, stat=true)
+git(op=&quot;diff&quot;, path=&quot;src/tools/safe-exec.ts&quot;)
+git(op=&quot;log&quot;, limit=10)
+</code></pre>
+<h2>context: workspace snapshot, docs retrieval, and skills</h2>
+<p>One OBSERVE entry point for material about the working environment rather than the tree itself. Sources: <code>src/tools/context/index.ts</code>, <code>src/tools/context/docs-engine.ts</code>.</p>
+<p>Arguments:</p>
+<ul>
+<li><code>scope</code> (required). <code>workspace</code>, <code>docs</code>, or <code>skills</code>.</li>
+<li><code>query</code> (scope=docs). Question or terms; omit to list the corpus (files plus doc/section counts) instead of searching.</li>
+<li><code>limit</code> (scope=docs). Max sections; default 5, max 12.</li>
+<li><code>name</code> (scope=skills). Skill to load; omit to list.</li>
+<li><code>include_tree</code> (scope=skills, boolean). List up to 50 files under the skill&#39;s base_dir.</li>
+</ul>
+<p><code>scope=&quot;workspace&quot;</code> returns the session&#39;s git/project snapshot as JSON, probing and caching it on first call. When model-visible skills are installed, the payload carries a one-line <code>skills</code> pointer (count plus the suggest protocol) so orientation surfaces the catalog; the pointer never includes catalog entries and never changes the load gate. It requires a bound session; worker registries without one get a clean error. 50KB cap.</p>
+<p><code>scope=&quot;docs&quot;</code> runs deterministic, offline retrieval over Clio&#39;s recursively
+bundled Markdown tree under <code>docs/</code> plus README.md, CHANGELOG.md, and
+CLIO-CODER.md, indexed as heading-delimited sections with light stemming, Clio
+vocabulary aliases, phrase boosts, and BM25-style body scoring. The JSON payload carries <code>corpus</code>, the expanded <code>terms</code>, and ranked <code>results</code> with <code>file</code>, <code>heading</code>, <code>breadcrumb</code>, <code>anchor</code>, <code>lines</code>, <code>snippet</code>, <code>score</code>, <code>coverage</code>, <code>matchedTerms</code>, and <code>signals</code>, plus an <code>omitted</code> count. Follow the <code>followUp</code> guidance: read the cited file and line range when you need the full section. Empty results are still valid JSON with <code>next</code> populated (the closest vocabulary expansion, or <code>query=overview</code>). 16KB cap; an oversize payload is replaced by the parseable JSON stub. The old <code>docs_search</code> <code>file</code> filter was dropped in the consolidation. Omitting <code>query</code> returns the corpus listing (the file set plus doc and section counts, the same <code>corpus</code> shape a search carries) so the model can pick a term without wasting a round on a <code>requires query</code> error.</p>
+<p><code>scope=&quot;skills&quot;</code> with no <code>name</code> lists installed skills with descriptions; the listing asks the model to match the current task against the catalog and, on a fit, to open its reply with <code>Suggested skill: /skill &lt;name&gt;</code> (a comma-separated sequence when skills compose) and wait for the operator. Loading a body is policy-gated: a skill loads only after an explicit <code>/skill &lt;name&gt; [task]</code> operator request, including one picked from the Skills Hub, and recipe-bound workers may load only their declared skills. A load attempt without a pending request is denied with the model&#39;s compliant next move spelled out: do not retry, open the reply with the <code>Suggested skill: /skill &lt;name&gt;</code> line and wait for the operator, or continue without skills. On the first substantive turn of a session with model-visible skills installed, a once-per-session middleware reminder in the user message teaches the same protocol. A pending request&#39;s task text is surfaced with the body. Marketplace-installed skills are drift-checked against their pinned hash; a mismatch annotates the result with a <code>skill_drift</code> warning but never blocks. 50KB cap; a truncated body offloads in full.</p>
+<pre><code class="language-text">context(scope=&quot;workspace&quot;)
+context(scope=&quot;docs&quot;, query=&quot;dispatch receipts evidence&quot;, limit=8)
+context(scope=&quot;skills&quot;)
+context(scope=&quot;skills&quot;, name=&quot;context-prime&quot;, include_tree=true)
+</code></pre>
+<h2>code_nav: navigate the codewiki index</h2>
+<p>Structural navigation over the persisted codewiki index (<code>.clio-coder/codewiki.json</code>)
+and the optional Markdown wiki metadata. The index is built by context init,
+refresh, or index commands and can be rebuilt/backfilled on tool demand. Source:
+<code>src/tools/codewiki/code-nav.ts</code>.</p>
+<p>Arguments:</p>
+<ul>
+<li><code>mode</code> (required). <code>symbol</code>, <code>path</code>, <code>entries</code>, <code>outline</code>, <code>deps</code>, <code>dependents</code>, or <code>wiki</code>.</li>
+<li><code>query</code> (required for every mode except <code>entries</code> and <code>wiki</code>). Symbol name, indexed path, path pattern, or path substring.</li>
+<li><code>limit</code> (optional). Default 50 (25 for <code>entries</code>), max 200.</li>
+</ul>
+<p>Modes:</p>
+<ul>
+<li><code>symbol</code>: returns declaration records for an exact symbol name, including path, line, kind, and signature.</li>
+<li><code>path</code>: returns indexed files whose paths match a glob, <code>/regex/flags</code>, regex-looking pattern, or substring.</li>
+<li><code>entries</code>: returns likely entry points ranked from file roles and <code>package.json</code> <code>main</code>/<code>bin</code>.</li>
+<li><code>outline</code>: returns declarations in one indexed file, sorted by line.</li>
+<li><code>deps</code>: returns one indexed file&#39;s internal and external imports.</li>
+<li><code>dependents</code>: returns indexed files that import the target file.</li>
+<li><code>wiki</code>: returns Markdown wiki pages plus absent/fresh/stale wiki state and layout warnings.</li>
+</ul>
+<p>For <code>outline</code>, <code>deps</code>, and <code>dependents</code> the query must resolve to exactly one indexed file: an exact path or a substring matching one path. An ambiguous substring errors with the match count. Output is always parseable JSON (empty results carry empty arrays, an <code>omitted</code> count, and <code>next</code>); an omitted remainder suggests <code>next: limit=&lt;2x&gt;</code>. 16KB cap with the JSON stub on overflow.</p>
+<p>Reach for code_nav instead of grep when you want a definition site, a file&#39;s structure, change-impact fan-out, or wiki inventory; it reads local artifacts, not the tree.</p>
+<pre><code class="language-text">code_nav(mode=&quot;symbol&quot;, query=&quot;finalizeObservation&quot;)
+code_nav(mode=&quot;outline&quot;, query=&quot;src/tools/grep.ts&quot;)
+code_nav(mode=&quot;dependents&quot;, query=&quot;src/tools/observation.ts&quot;)
+code_nav(mode=&quot;entries&quot;)
+code_nav(mode=&quot;wiki&quot;)
+</code></pre>
+<h2>web_fetch: fetch http(s) URLs and convert HTML to markdown</h2>
+<p>Fetches content from an http(s) URL. HTML content is automatically cleaned and converted to readable Markdown. Source: <code>src/tools/web-fetch.ts</code>. Read class; parallel.</p>
+<p>Arguments:</p>
+<ul>
+<li><code>url</code> (required). Fully-qualified http(s) URL.</li>
+<li><code>method</code> (optional). HTTP method (default <code>GET</code>).</li>
+<li><code>headers</code> (optional). Key-value request headers.</li>
+<li><code>body</code> (optional). Request body string.</li>
+<li><code>timeout_ms</code> (optional). Request timeout in milliseconds (default 30000).</li>
+<li><code>max_bytes</code> (optional). Max bytes returned (default 600000, capped at 5MB).</li>
+<li><code>format</code> (optional). Content parsing format: <code>auto</code> (default, converts HTML to Markdown), <code>markdown</code>, or <code>raw</code>.</li>
+</ul>
+<p>Specialized behaviors:</p>
+<ul>
+<li><strong>ArXiv Papers</strong>: If the URL points to an arXiv paper or abstract page (such as <code>arxiv.org/abs/...</code> or <code>alphaxiv.org/...</code>), it automatically retrieves paper metadata, abstract, and any AlphaXiv markdown overview.</li>
+<li><strong>ArXiv API Query</strong>: If the URL points to the arXiv search API, it parses the Atom XML and returns a structured markdown listing of papers.</li>
+<li><strong>Git Repo Tree Summary</strong>: If the URL points to a GitHub or GitLab directory tree (such as <code>github.com/.../tree/...</code>), it fetches repository contents, summarizes the directory tree, and preloads the first few markdown files (e.g. README/SKILL/INSTALL).</li>
+<li><strong>HTML Cleaning</strong>: For regular websites, boilerplate content (scripts, styles, svg, iframe, forms) is stripped, and the main article/content area is extracted and parsed into Markdown.</li>
+<li><strong>Binary formats</strong>: Non-text, binary, or unsupported content types are rejected.</li>
+</ul>
+<pre><code class="language-text">web_fetch(url=&quot;https://arxiv.org/abs/2303.17564&quot;)
+web_fetch(url=&quot;https://github.com/iowarp/clio-coder/tree/main/docs&quot;)
+web_fetch(url=&quot;https://example.com&quot;, format=&quot;raw&quot;)
+</code></pre>
+<h2>monitor: inspect dispatched runs</h2>
+<p>Read-only visibility into known synchronous and detached dispatched runs, built on the dispatch domain&#39;s ledger, live snapshot, and instance-scoped event tails. Synchronous dispatch auto-waits. The interactive operator/TUI can inspect an active synchronous run through the dispatch contract, but the parent model cannot schedule monitor while its sequential synchronous dispatch call is pending; it must choose <code>detach:true</code> to receive ids first. Source: <code>src/tools/monitor.ts</code>. Read class; runs in parallel with other reads.</p>
+<p>Arguments:</p>
+<ul>
+<li><code>run_id</code> (optional). A run id from dispatch output or <code>monitor(mode=&quot;list&quot;)</code>.</li>
+<li><code>mode</code> (optional). <code>list</code>, <code>status</code>, <code>peek</code>, <code>receipt</code>, <code>wait</code>, <code>collect</code>, or <code>tools</code>. Default is <code>status</code> when <code>run_id</code> is given, <code>list</code> otherwise.</li>
+</ul>
+<p>Modes:</p>
+<ul>
+<li><code>list</code>: up to 20 known runs, newest first, scoped to this session when it has runs and otherwise all sessions. Each line carries the run id, agent, state, start time, tokens, and receipt path.</li>
+<li><code>status</code>: one run&#39;s state and outcome, target/model/runtime, start/end times, exit code, tokens, cost, and receipt path. A still-running run adds a live line with phase, heartbeat, elapsed seconds, and token count.</li>
+<li><code>peek</code>: the bounded tail of the run&#39;s recent events buffered in this process (an in-process ring of 100 events per run across at most 64 runs, heartbeats excluded, 8KB output with the oldest entries trimmed first). Runs dispatched by another process, or before this process started, have no tail; monitor says so and points at <code>mode=&quot;receipt&quot;</code> or <code>mode=&quot;status&quot;</code>.</li>
+<li><code>receipt</code>: the stored receipt JSON, truncated at 14KB with a note naming the receipt path so you can read the rest.</li>
+<li><code>wait</code>: bounded observation of one run until it becomes terminal or the timeout elapses; timeout never cancels the run.</li>
+<li><code>collect</code>: a non-blocking barrier snapshot for a detached <code>batch_id</code> or explicit <code>run_ids</code>, returning full results once all are terminal.</li>
+<li><code>tools</code>: what a run executed, from this process&#39;s bounded event buffer plus the integrity-verified receipt totals. The buffer records tool name and outcome, not command arguments, and the answer says so; a run from another process may have no buffer at all.</li>
+</ul>
+<p>Use monitor to check on detached parallel workers without interrupting them; pair with steer when a native run needs correction.</p>
+<pre><code class="language-text">monitor(mode=&quot;list&quot;)
+monitor(run_id=&quot;run-01H...&quot;)
+monitor(run_id=&quot;run-01H...&quot;, mode=&quot;peek&quot;)
+monitor(run_id=&quot;run-01H...&quot;, mode=&quot;receipt&quot;)
+monitor(run_id=&quot;run-01H...&quot;, mode=&quot;tools&quot;)
+</code></pre>
+<h2>steer: guide or cancel a running worker</h2>
+<p>Controls a running dispatched worker whose id is already available. Parent-model mid-run control requires detached dispatch because dispatch and steer are sequential; the interactive operator/TUI can steer an active synchronous HTTP or SDK worker through the dispatch contract. Source: <code>src/tools/steer.ts</code>. Dispatch class; sequential.</p>
+<p>Arguments:</p>
+<ul>
+<li><code>run_id</code> (required). A run id from dispatch output or <code>monitor(mode=&quot;list&quot;)</code>.</li>
+<li><code>action</code> (required). <code>guide</code> or <code>cancel</code>.</li>
+<li><code>message</code> (required for <code>guide</code>). The steering text.</li>
+</ul>
+<p><code>action=&quot;guide&quot;</code> injects the message through the dispatch contract&#39;s stdin steer channel; an HTTP or SDK worker sees it as a user message at its next turn boundary. The worker acknowledges only after its runtime accepts the guidance. Single-shot subprocess runtimes (Claude CLI and Antigravity) and ACP delegation do not expose live input and return the contract&#39;s structured unsupported-steering error.</p>
+<p><code>action=&quot;cancel&quot;</code> aborts a non-terminal run; the run finalizes with <code>outcome=canceled</code> and its receipt records the cancellation. A run that already finished (completed, failed, interrupted, stale, or dead) errors with its state, since there is nothing to cancel.</p>
+<p>Prefer guide over cancel-and-redispatch when the worker is on track but needs a scope correction; the worker keeps its context.</p>
+<pre><code class="language-text">steer(run_id=&quot;run-01H...&quot;, action=&quot;guide&quot;, message=&quot;Skip the docs sweep; limit the fix to tests/contracts and report the diff.&quot;)
+steer(run_id=&quot;run-01H...&quot;, action=&quot;cancel&quot;)
+</code></pre>
+<h2>tasks: the session task board</h2>
+<p>Declares and tracks the agent&#39;s own working plan. Source: <code>src/tools/tasks.ts</code>. Read class (never gated); sequential.</p>
+<p>Arguments:</p>
+<ul>
+<li><code>action</code> (required). <code>plan</code>, <code>add</code>, <code>start</code>, <code>done</code>, <code>block</code>, <code>drop</code>, or <code>list</code>.</li>
+<li><code>title</code> (required for <code>plan</code>). The board title.</li>
+<li><code>tasks</code> (required for <code>plan</code> and <code>add</code>). Task titles as an array of strings.</li>
+<li><code>id</code> (required for <code>start</code>, <code>done</code>, <code>block</code>, <code>drop</code>). A task id like <code>t2</code>.</li>
+<li><code>note</code> (optional). Evidence of completion on <code>done</code>; the reason on <code>block</code> (required there) and <code>drop</code>.</li>
+</ul>
+<p><code>action=&quot;plan&quot;</code> declares a titled board and replaces any prior board; tasks get sequential ids <code>t1..tN</code> and start pending. <code>start</code> marks one task active and parks any other active task back to pending, so the board always names exactly one current focus. <code>done</code> completes a task; its <code>note</code> is recorded on the session ledger as passed validation evidence, so a completed task carries its receipt rather than a bare status flip. <code>block</code> requires a reason and is the honest state for work waiting on the operator; blocked tasks never trigger the turn-end nudge. <code>drop</code> cancels a task; ids are never reused. Every action returns the whole rendered board, so the current state always sits in the latest tool result.</p>
+<p>Every mutation persists a full-snapshot <code>taskLedger</code> entry in the session ledger: the board replays from the JSONL alone, survives <code>/resume</code> and <code>/fork</code>, costs nothing at compaction, and feeds the footer tasks row plus the <code>/tasks</code> overlay. When a tool-calling turn settles while pending or active tasks remain, the <code>nudge.open-tasks</code> middleware carries the turn onward once with the open-task list; record the honest state (<code>done</code> with evidence, <code>block</code> with a reason, or <code>drop</code>) instead of stopping with a stale board.</p>
+<p>Dispatched runs link to the live board through the ledger&#39;s <code>activeRunIds</code> field: the orchestrator attaches a run when its worker process goes live and detaches it when the run finalizes, so a snapshot records which fleet runs were serving the board. The linkage is process-live, so a refold after <code>/resume</code> or <code>/fork</code> restores it empty (the runs ended with the process that dispatched them). Claude SDK/CLI workers map their <code>TodoWrite</code> calls onto this tool, so a Claude worker&#39;s todo list lands on the same board rather than writing a separate artifact.</p>
+<pre><code class="language-text">tasks(action=&quot;plan&quot;, title=&quot;Fix the flaky scheduler test&quot;, tasks=[&quot;reproduce the failure&quot;, &quot;isolate the race&quot;, &quot;fix and verify&quot;])
+tasks(action=&quot;start&quot;, id=&quot;t1&quot;)
+tasks(action=&quot;done&quot;, id=&quot;t1&quot;, note=&quot;reproduced 3/3 with CLIO_CODER_SEED=7; failure in tests/contracts/dispatch-admission.test.ts:88&quot;)
+tasks(action=&quot;block&quot;, id=&quot;t2&quot;, note=&quot;needs operator decision on the retry policy&quot;)
+tasks(action=&quot;list&quot;)
+</code></pre>
+<h2>ledger: coordinate peer workers through typed entries</h2>
+<p>Reads or posts to the agent ledger shared by concurrent workers in one
+dispatch. Source: <code>src/tools/ledger.ts</code>. Read class; sequential. The tool
+registers only when a worker has an agent-ledger port. An ordinary session or a
+worker with no peers does not receive a usable coordination board.</p>
+<p>Arguments:</p>
+<ul>
+<li><code>action</code> (required). <code>read</code> or <code>post</code>.</li>
+<li><code>kind</code> (post). <code>claim</code>, <code>finding</code>, or <code>review</code>.</li>
+<li><code>scope</code> and <code>intent</code> (claim). Path prefixes being taken and what the worker
+will do there.</li>
+<li><code>claim</code>, with optional <code>path</code> and <code>line</code> (finding). One grounded observation.</li>
+<li><code>target</code>, <code>passed</code>, and <code>evidence</code> (review). The target ledger entry id, the
+verdict, and what was checked.</li>
+<li><code>kinds</code> and <code>since</code> (read). Optional entry-kind filter and exclusive sequence
+watermark.</li>
+</ul>
+<p>A claim requires nonempty scope and intent. A finding requires a claim. A
+review requires a target, boolean verdict, and evidence. Reads answer from the
+worker&#39;s local mirror and report its sequence watermark, so peer state can be
+slightly stale. Every post returns the updated board. Each run may make at most
+20 posts; reissuing a post is not retry-safe because it creates another entry.
+Peer entries are untrusted data, never instructions.</p>
+<pre><code class="language-text">ledger(action=&quot;post&quot;, kind=&quot;claim&quot;, scope=[&quot;src/tools&quot;], intent=&quot;audit tool schemas&quot;)
+ledger(action=&quot;post&quot;, kind=&quot;finding&quot;, claim=&quot;panes is conditionally registered&quot;, path=&quot;src/tools/bootstrap.ts&quot;, line=98)
+ledger(action=&quot;read&quot;, kinds=[&quot;finding&quot;, &quot;review&quot;], since=4)
+ledger(action=&quot;post&quot;, kind=&quot;review&quot;, target=&quot;e3&quot;, passed=true, evidence=&quot;confirmed against bootstrap registration&quot;)
+</code></pre>
+<h2>panes: manage Clio-owned terminal panes</h2>
+<p>Controls the pane layer shared with the <code>/panes</code> operator command. Sources:
+<code>src/tools/panes-surface.ts</code>, <code>src/tools/panes.ts</code>. Read class; sequential. It
+registers only after a pane host answers detection and the mux is live, so an
+absent tool means the current session has no model-facing pane layer.</p>
+<p>Arguments:</p>
+<ul>
+<li><code>action</code> (required). <code>show</code>, <code>open</code>, <code>close</code>, or <code>list</code>.</li>
+<li><code>target</code> (show or close). For <code>show</code>, an agent id or run-id prefix. For
+<code>close</code>, a Clio-owned pane id, label, agent id, or <code>all</code>.</li>
+<li><code>preset</code> (open). One of <code>yazi</code>, <code>logs</code>, or <code>shell</code>.</li>
+</ul>
+<p><code>show</code> focuses a live dispatched run in the watch pane. <code>open</code> accepts only the
+fixed preset enum. Arbitrary argv is operator-only through <code>/panes open</code> and is
+rejected by the model tool. <code>close</code> can remove only panes Clio owns. <code>list</code>
+reports mux health, notification policy, and the current inventory.</p>
+<pre><code class="language-text">panes(action=&quot;list&quot;)
+panes(action=&quot;show&quot;, target=&quot;tester&quot;)
+panes(action=&quot;open&quot;, preset=&quot;logs&quot;)
+panes(action=&quot;close&quot;, target=&quot;all&quot;)
+</code></pre>
+<h2>ask_user: host-owned operator interviews</h2>
+<p>Runs a host-owned interactive interview or single-question prompt with the operator, recording decisions and/or free-form answers. Source: <code>src/tools/ask-user.ts</code>. Read class; sequential.</p>
+<p>Arguments:</p>
+<ul>
+<li><code>action</code> (optional). <code>ask</code> (default) to present questions; <code>complete</code> to finalise the interview and record compact decisions.</li>
+<li><code>mode</code> (optional). <code>round</code> (default) to batch multiple questions; <code>single_question</code> for exactly one question.</li>
+<li><code>questions</code> (optional array). For <code>action=&quot;ask&quot;</code>, up to four question objects containing:<ul>
+<li><code>question</code> (required): Question text prompt.</li>
+<li><code>header</code> (optional): Short header.</li>
+<li><code>options</code> (optional array): Suggested choices (<code>{label, description}</code>).</li>
+<li><code>multi_select</code> (optional boolean): Allows multiple selections.</li>
+</ul>
+</li>
+<li><code>decisions</code> (optional array). For <code>action=&quot;complete&quot;</code>, key-value objects representing settled configurations.</li>
+<li><code>summary</code> (optional). Closeout explanation for <code>action=&quot;complete&quot;</code>.</li>
+<li><code>max_rounds</code> (optional number). Round limit for this interview (default 6, max 24).</li>
+<li><code>exposure</code> (optional). <code>local</code> (default) or <code>outward</code>. <code>outward</code> marks a gate whose answer publishes or sends something outside the workspace (filing an issue or PR, posting a comment, pushing, releasing). At autonomy <code>auto-edit</code> an outward gate parks for the operator instead of being answered automatically; <code>full-auto</code> answers it. See <a href="safety_blueprint.html">safety-model.md</a>.</li>
+</ul>
+<p>The tool manages a stateful operator interview. The UI presents choices (with an implicit &quot;Other&quot; option for custom text input). Once completed, the final decisions are persisted as standard configurations in the session ledger, allowing the agent to proceed with operators&#39; inputs or defaults.</p>
+<p>Ask only when blocked on a decision the request does not answer. Never ask about anything the operator already stated: a request that names its own scope (&quot;all tools&quot;, &quot;read only&quot;) has answered the interview before it starts.</p>
+<pre><code class="language-text">ask_user(action=&quot;ask&quot;, questions=[{question: &quot;Which database should we use?&quot;, options: [{label: &quot;SQLite&quot;, description: &quot;Local database&quot;}, {label: &quot;PostgreSQL&quot;}]}])
+ask_user(action=&quot;complete&quot;, summary=&quot;Operator selected SQLite.&quot;, decisions=[{key: &quot;db_choice&quot;, value: &quot;SQLite&quot;}])
+</code></pre>
+<h2>artifact: plans, reviews, and reports</h2>
+<p>Terminal document writers behind one surface. Source: <code>src/tools/artifact.ts</code>.</p>
+<p>Arguments:</p>
+<ul>
+<li><code>kind</code> (required). <code>plan</code>, <code>review</code>, or <code>report</code>.</li>
+<li><code>content</code> (required). Full Markdown body.</li>
+<li><code>title</code> (optional). Document title.</li>
+<li><code>path</code> (optional). Override the default path under <code>.clio-coder/artifacts/</code>.</li>
+</ul>
+<p><code>kind=plan|review|report</code> writes a Markdown document to <code>.clio-coder/artifacts/PLAN.md</code>, <code>REVIEW.md</code>, or <code>REPORT.md</code> by default, so a turn nobody asked a file from never litters the working tree; <code>path</code> may override the destination but must stay inside the workspace. See <a href="artifact_placement_blueprint.html">artifact-placement.md</a> for the full contract. When <code>content</code> does not already start with <code>#</code>, a non-empty <code>title</code> is prepended as an H1. These kinds are TERMINAL: writing the artifact completes the turn and the harness skips the follow-up model call, so the artifact body itself is the answer. Put everything the reader needs in <code>content</code>; there is no closing message after the write.</p>
+<p>Skills are not artifacts. A skill is a <code>SKILL.md</code> folder written with the ordinary write tool into <code>.clio-coder/skills/&lt;name&gt;/</code> (or the user skill store) and validated by the skills loader; the <code>skill-craft</code> shipped skill documents the format and craft rules.</p>
+<pre><code class="language-text">artifact(kind=&quot;plan&quot;, content=&quot;# Migration plan\n\n## Step 1 ...&quot;)
+artifact(kind=&quot;report&quot;, title=&quot;Benchmark results&quot;, path=&quot;docs/reports/bench.md&quot;, content=&quot;...&quot;)
+artifact(kind=&quot;review&quot;, content=&quot;# Review: toolkit-v2\n\n## Findings ...&quot;)
+</code></pre>
+        </article>
+        <nav class="related-nav" aria-label="Adjacent references">
+          <a class="nav-link-card" href="skills_blueprint.html"><span class="nav-label">Previous</span><span class="nav-title">Skills Marketplace</span></a>
+          <a class="nav-link-card next" href="troubleshooting_blueprint.html"><span class="nav-label">Next</span><span class="nav-title">Troubleshooting &amp; Error Remediation</span></a>
+        </nav>
+        <p class="reference-footer-note">Canonical content lives in the mapped Markdown page. This visual counterpart adds navigation without changing the contract.</p>
       </main>
     </div>
-
-    <footer>
-      <p>Clio Coder Tool Usage Blueprint &bull; Version 0.4.0 &bull; Gnosis Research Center</p>
-    </footer>
+    <footer>Clio Coder documentation · source-aligned at v0.4.2</footer>
   </div>
-
   <script src="shared.js"></script>
-  <script>
-    const PLANES = {
-      1: {
-        title: "Observe Plane (7 Tools)",
-        tools: [
-          { name: "read", params: "path, offset, limit, tail", desc: "Reads text files line by line, capped at 50KB or 2000 lines. Larger files must be paged or offset." },
-          { name: "grep", params: "pattern, path, mode, glob, ignore_case, literal, context, limit, include_ignored", desc: "Ripgrep search across workspace directory models (capped at 16KB content / 8KB files)." },
-          { name: "find", params: "pattern, path, order, limit, include_ignored", desc: "Locates files by regex/glob matching (capped at 8KB)." },
-          { name: "ls", params: "path, limit, include_ignored", desc: "Lists directory contents with file sizes and recursive child counts (capped at 8KB)." },
-          { name: "code_nav", params: "mode, query, limit", desc: "Navigates CodeWiki symbol indexes, outlines, dependencies, dependents, or architecture pages (capped at 16KB)." },
-          { name: "context", params: "scope, query, limit, name, include_tree", desc: "Gathers workspace priming context, documentation folders, or installed skill definitions (capped at 16KB docs / 50KB skills/workspace)." },
-          { name: "credential_present", params: "name, source, file", desc: "Checks whether a required credential exists in environment or files without exposing secret values." }
-        ]
-      },
-      2: {
-        title: "Mutate Plane (2 Tools)",
-        tools: [
-          { name: "write", params: "path, content", desc: "Atomically writes or overwrites entire file contents under write boundary governance. Returns numbered diff with word-level changes." },
-          { name: "edit", params: "path, edits: {oldText, newText}[]", desc: "Surgical matching/patching edits in files. Returns numbered word-level diff with theme color highlighting." }
-        ]
-      },
-      3: {
-        title: "Execute Plane (3 Tools)",
-        tools: [
-          { name: "bash", params: "command, cwd, timeout_ms", desc: "Executes shell commands within workspace boundaries (default 300,000 ms timeout). Sets AI_AGENT=clio-coder in child environment and streams live output tail." },
-          { name: "git", params: "op, path, cached, stat, name_only, limit, cwd", desc: "Runs safe git status, diff, and log inspections." },
-          { name: "verify", params: "check, focus", desc: "Runs declared project verification suites (tests, lints, typechecks, builds)." }
-        ]
-      },
-      4: {
-        title: "Orchestrate Plane (6 Tools)",
-        tools: [
-          { name: "dispatch", params: "task, tasks, mode, detach, agent, target, model, node, intent, routing, thinking_level, cwd, timeout_ms, briefing, max_output_bytes", desc: "Dispatches worker agents, compete worktree groups, or fan-out batch execution plans with typed intent scopes." },
-          { name: "monitor", params: "run_id, mode", desc: "Inspects active/dispatched worker execution timelines, statuses, and receipts." },
-          { name: "steer", params: "run_id, action, message", desc: "Steers with guidance or cancels in-flight worker execution runs." },
-          { name: "tasks", params: "action, title, tasks, id, note", desc: "Manages structured session task boards across plan, add, start, done, block, and drop actions." },
-          { name: "ledger", params: "action, channel, note, claim", desc: "Reads local mirror and posts findings over the one-way control lane without workspace mutation." },
-          { name: "panes", params: "action, target, preset", desc: "Focuses, opens, closes, and inventories terminal panes Clio owns beside this session (requires --with-panes)." }
-        ]
-      },
-      5: {
-        title: "Retrieve Plane (1 Tool)",
-        tools: [
-          { name: "web_fetch", params: "url, method, headers, body, timeout_ms, max_bytes, format", desc: "Fetches external web documentation, arXiv/AlphaXiv papers, and APIs with boilerplate stripping (default 600KB)." }
-        ]
-      },
-      6: {
-        title: "Interact Plane (1 Tool)",
-        tools: [
-          { name: "ask_user", params: "action, mode, questions, decisions, summary, max_rounds", desc: "Asks clarification questions or gets structured multi-choice decisions from operator." }
-        ]
-      },
-      7: {
-        title: "Artifact Plane (1 Tool)",
-        tools: [
-          { name: "artifact", params: "kind, content, title, path", desc: "Writes terminal markdown blueprints, plans, reviews, or reports at workspace root." }
-        ]
-      }
-    };
-
-    function selectPlane(planeId) {
-      document.querySelectorAll(".atlas-btn").forEach((b, idx) => {
-        b.classList.toggle("active", idx + 1 === planeId);
-      });
-
-      const p = PLANES[planeId];
-      let html = `<h3>${p.title}</h3><div style="margin-top:1rem; display:flex; flex-direction:column; gap:1.25rem;">`;
-
-      p.tools.forEach(t => {
-        html += `
-          <div>
-            <strong style="color:var(--color-cyan); font-family:var(--font-mono); font-size:1.05rem;">${t.name}()</strong>
-            <div style="font-size:0.8rem; color:var(--text-dim); margin-bottom:0.25rem;">Arguments: <code>${t.params}</code></div>
-            <p style="font-size:0.875rem; color:var(--text-muted); margin:0;">${t.desc}</p>
-          </div>
-        `;
-      });
-      html += "</div>";
-
-      document.getElementById("planeDetails").innerHTML = html;
-      if (window.initTableOfContents) window.initTableOfContents();
-    }
-
-    function runCalc() {
-      const tool = document.getElementById("toolSelect").value;
-      const size = parseInt(document.getElementById("resultSize").value);
-      const used = parseInt(document.getElementById("budgetUsed").value);
-
-      document.getElementById("txtResultSize").innerText = `${size} KB`;
-      document.getElementById("txtBudgetUsed").innerText = `${used} KB`;
-
-      let cap = 8;
-      if (tool === 'read' || tool === 'context') cap = 50;
-      if (tool === 'grep' || tool === 'code_nav') cap = 16;
-
-      const totalBudget = 192;
-      const budgetLeft = Math.max(0, totalBudget - used);
-
-      const vBox = document.getElementById("calcVerdictBox");
-      const vTitle = document.getElementById("calcTitle");
-      const vDesc = document.getElementById("calcDesc");
-      const notice = document.getElementById("noticeText");
-
-      if (used >= totalBudget) {
-        vBox.className = "verdict-box error";
-        vTitle.innerText = "BUDGET EXHAUSTED";
-        vDesc.innerText = `The per-turn observation budget is depleted. The call will short-circuit immediately.`;
-        notice.innerText = `[observation budget exhausted for this turn before ${tool} ...]`;
-        return;
-      }
-
-      const effectiveCap = Math.min(cap, budgetLeft);
-
-      if (size <= effectiveCap) {
-        vBox.className = "verdict-box normal";
-        vTitle.innerText = "FITS CLEANLY";
-        vDesc.innerText = `Result (${size} KB) fits inside effective cap of ${effectiveCap} KB (budget remaining: ${budgetLeft} KB).`;
-        notice.innerText = `None (full content returned)`;
-      } else {
-        vBox.className = "verdict-box warn";
-        vTitle.innerText = "TRUNCATED & OFFLOADED";
-        vDesc.innerText = `Result (${size} KB) exceeds cap limits. Clio will truncate output to ${effectiveCap} KB and write full content to local scratch folder.`;
-
-        let noticeStr = `[${tool}: ${Math.floor(effectiveCap * 10)}/100 lines shown (${effectiveCap}KB of ${size}KB)`;
-        if (tool !== 'read') {
-          noticeStr += ` | full: .clio-coder/state/scratch/session_123/call_abc.txt`;
-        }
-        noticeStr += ` | next: offset=${Math.floor(effectiveCap * 10) + 1}]`;
-
-        notice.innerText = noticeStr;
-      }
-    }
-
-    // Init
-    window.onload = () => {
-      selectPlane(1);
-      runCalc();
-      window.selectPlane = selectPlane;
-      window.runCalc = runCalc;
-    };
-  </script>
 </body>
 </html>

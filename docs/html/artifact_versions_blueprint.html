@@ -1,247 +1,320 @@
-<!DOCTYPE html>
+<!doctype html>
 <html lang="en">
 <head>
-  <meta charset="UTF-8">
-  <meta name="viewport" content="width=device-width, initial-scale=1.0">
-  <title>Clio Coder - Artifact Versions &amp; Serialization Contracts Blueprint</title>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <meta name="clio-markdown-source" content="docs/architecture/artifact-versions.md">
+  <meta name="clio-docs-version" content="0.4.2">
+  <title>Artifact Versions &amp; Serialization Contracts · Clio Coder 0.4.2</title>
+  <link rel="icon" href="data:,">
   <link rel="stylesheet" href="shared.css">
-  <style>
-    .version-tag {
-      font-family: var(--font-mono);
-      font-size: 0.75rem;
-      font-weight: 700;
-      padding: 0.2rem 0.5rem;
-      border-radius: 4px;
-      background: rgba(70, 229, 208, 0.15);
-      color: var(--color-cyan);
-      border: 1px solid rgba(70, 229, 208, 0.3);
-    }
-  </style>
 </head>
-<body>
+<body data-doc-category="architecture">
+  <div class="reading-progress" aria-hidden="true"></div>
+  <a class="skip-link" href="#reference-content">Skip to reference</a>
   <div class="container">
-    <header>
+    <header class="document-header" data-category="Architecture">
       <div class="header-left">
-        <div class="header-logo">
-          <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" style="color: var(--color-emerald);"><title>Versions Icon</title>
-            <path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z"></path>
-            <polyline points="14 2 14 8 20 8"></polyline>
-            <line x1="16" y1="13" x2="8" y2="13"></line>
-            <line x1="16" y1="17" x2="8" y2="17"></line>
-            <polyline points="10 9 9 9 8 9"></polyline>
+        <a class="header-logo" href="index.html" aria-label="Documentation index">
+          <svg viewBox="0 0 24 24" fill="none" aria-hidden="true">
+            <path d="M12 2 2 7l10 5 10-5-10-5Z" stroke="url(#clio-logo)" stroke-width="2" stroke-linejoin="round"/>
+            <path d="m2 12 10 5 10-5M2 17l10 5 10-5" stroke="url(#clio-logo)" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"/>
+            <defs><linearGradient id="clio-logo" x1="2" y1="2" x2="22" y2="22"><stop stop-color="#00d4db"/><stop offset="1" stop-color="#ff7e29"/></linearGradient></defs>
           </svg>
-        </div>
+        </a>
         <div class="header-title-wrapper">
+          <p class="document-kicker">Architecture / canonical reference</p>
           <h1>Artifact Versions &amp; Serialization Contracts</h1>
-          <p>Authoritative registry and migration policies for all serialized artifact schemas across Clio Coder</p>
+          <p class="document-path">docs/architecture/artifact-versions.md</p>
         </div>
       </div>
       <div class="header-right">
-        <span class="version-badge">v0.4.0</span>
-        <a href="index.html" class="back-btn">
-          <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><title>Back Icon</title><line x1="19" y1="12" x2="5" y2="12"></line><polyline points="12 19 5 12 12 5"></polyline></svg>
-          Dashboard Hub
-        </a>
+        <a class="back-btn" href="index.html">← Index</a>
+        <span class="version-badge">v0.4.2</span>
       </div>
     </header>
-
-    <div class="page-layout-grid">
-      <nav class="sidebar" aria-label="Table of Contents">
-        <div class="toc-container">
-          <div class="toc-title">On This Page</div>
-          <ul class="toc-list">
-            <!-- Populated dynamically by shared.js -->
-          </ul>
-        </div>
-      </nav>
-
-      <main>
-        <div class="tabs-nav">
-          <button type="button" class="tab-btn active" onclick="switchTab('version-registry')">
-            <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><title>Registry</title><rect x="3" y="3" width="18" height="18" rx="2" ry="2"></rect><line x1="3" y1="9" x2="21" y2="9"></line><line x1="9" y1="21" x2="9" y2="9"></line></svg>
-            Artifact Schema Registry
-          </button>
-          <button type="button" class="tab-btn" onclick="switchTab('receipt-integrity')">
-            <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><title>Integrity</title><path d="M12 22s8-4 8-10V5l-8-3-8 3v7c0 6 8 10 8 10z"></path></svg>
-            Receipt Integrity v16
-          </button>
-          <button type="button" class="tab-btn" onclick="switchTab('migration-mechanics')">
-            <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><title>Migrations</title><polyline points="22 12 18 12 15 21 9 3 6 12 2 12"></polyline></svg>
-            Automated Migrations
-          </button>
-        </div>
-
-        <!-- TAB 1: VERSION REGISTRY -->
-        <div class="tab-pane active" id="pane-version-registry">
-          <div class="glass-card">
-            <h2>Serialized Artifact Version Registry</h2>
-            <p>Every persistent artifact and network-transported frame is strictly versioned:</p>
-
-            <table class="ref-table">
-              <thead>
-                <tr>
-                  <th>Artifact / Subsystem</th>
-                  <th>Current Version</th>
-                  <th>Symbol &amp; Source Location</th>
-                  <th>Persisted Path / Wire Location</th>
-                  <th>Mismatch Handling</th>
-                </tr>
-              </thead>
-              <tbody>
-                <tr>
-                  <td><strong>Run Receipt</strong></td>
-                  <td><span class="version-tag">v16</span></td>
-                  <td><code>RUN_RECEIPT_INTEGRITY_VERSION = 16</code><br><code>src/domains/dispatch/receipt-integrity.ts:13</code></td>
-                  <td><code>&lt;stateDir&gt;/receipts/&lt;runId&gt;.json</code></td>
-                  <td>Fail-closed. Incompatible receipts fail validation.</td>
-                </tr>
-                <tr>
-                  <td><strong>Session Ledger</strong></td>
-                  <td><span class="version-tag">v3</span></td>
-                  <td><code>CURRENT_SESSION_FORMAT_VERSION = 3</code><br><code>src/engine/session.ts:66</code></td>
-                  <td><code>&lt;stateDir&gt;/sessions/.../</code> (<code>meta.json</code>, <code>current.jsonl</code>)</td>
-                  <td>Automated migration via <code>src/domains/session/migrations/</code> on <code>/resume</code>.</td>
-                </tr>
-                <tr>
-                  <td><strong>Worker Spec</strong></td>
-                  <td><span class="version-tag">v3</span></td>
-                  <td><code>WORKER_SPEC_VERSION = 3</code><br><code>src/worker/spec-contract.ts:22</code></td>
-                  <td>Subprocess <code>stdin</code> payload</td>
-                  <td>Fail-closed preflight rejection before activation.</td>
-                </tr>
-                <tr>
-                  <td><strong>Worker Runtime Descriptor</strong></td>
-                  <td><span class="version-tag">v2</span></td>
-                  <td><code>WORKER_RUNTIME_DESCRIPTOR_VERSION = 2</code><br><code>src/worker/spec-contract.ts:23</code></td>
-                  <td>Worker attestation descriptor frame</td>
-                  <td>Attestation mismatch causes process termination.</td>
-                </tr>
-                <tr>
-                  <td><strong>Fleet Contract</strong></td>
-                  <td><span class="version-tag">v4</span></td>
-                  <td><code>FLEET_WRITE_BOUNDARY_VERSION = 4</code><br><code>src/domains/agents/fleet-contract.ts:37, 140</code></td>
-                  <td><code>.clio-coder/fleets/&lt;name&gt;.yaml</code></td>
-                  <td>Refuses unsupported contract version features.</td>
-                </tr>
-                <tr>
-                  <td><strong>Execution Plan</strong></td>
-                  <td><span class="version-tag">v4</span></td>
-                  <td><code>version: 4</code> in <code>ExecutionPlan</code><br><code>src/domains/dispatch/execution-plan.ts:98</code></td>
-                  <td>Statically compiled DAG in memory &amp; receipts</td>
-                  <td>Preflight rejects unsupported plan versions.</td>
-                </tr>
-                <tr>
-                  <td><strong>Eval Artifact</strong></td>
-                  <td><span class="version-tag">v4</span></td>
-                  <td><code>version: 4</code> in <code>EvalArtifactV4</code><br><code>src/domains/eval/schema/artifact.ts:51-52</code></td>
-                  <td><code>&lt;stateDir&gt;/evals/&lt;evalId&gt;.json</code></td>
-                  <td>Rejected during report and compare operations. (Note: <code>types.ts:2</code> v1 is dead code).</td>
-                </tr>
-                <tr>
-                  <td><strong>Trace Database</strong></td>
-                  <td><span class="version-tag">v1</span></td>
-                  <td><code>TRACE_SCHEMA_VERSION = 1</code><br><code>src/domains/observability/trace-store.ts:23</code></td>
-                  <td><code>&lt;stateDir&gt;/trace.sqlite</code></td>
-                  <td>Emits warning; trace writing degrades safely.</td>
-                </tr>
-                <tr>
-                  <td><strong>Capacity State File</strong></td>
-                  <td><span class="version-tag">v2</span></td>
-                  <td><code>version: 2</code> in <code>CapacityStateFile</code><br><code>src/domains/dispatch/capacity-lease.ts:40</code></td>
-                  <td><code>&lt;stateDir&gt;/dispatch-admission.json</code></td>
-                  <td>Corrupted file causes admission to fail closed.</td>
-                </tr>
-                <tr>
-                  <td><strong>Protected Artifact Journal</strong></td>
-                  <td><span class="version-tag">v1</span></td>
-                  <td><code>version: 1</code> in <code>PendingProtectedArtifactRecord</code><br><code>src/domains/session/protected-artifact-journal.ts:22</code></td>
-                  <td><code>&lt;stateDir&gt;/protected-artifact-pending/...</code></td>
-                  <td>Reconciled during session initialization.</td>
-                </tr>
-              </tbody>
-            </table>
-          </div>
-        </div>
-
-        <!-- TAB 2: RECEIPT INTEGRITY -->
-        <div class="tab-pane" id="pane-receipt-integrity">
-          <h2>Cryptographic Receipt Integrity (Version 15)</h2>
-          <div class="grid grid-2">
-            <div class="glass-card">
-              <h3>Canonical Digest Calculation</h3>
-              <p>Receipt integrity guarantees that execution facts, token counts, tool outputs, and validation grounding were sealed authoritatively by the orchestrator:</p>
-              <pre><code>export function computeReceiptDigest(receipt: RunReceiptV15): string {
-  const canonical = serializeCanonicalReceipt(receipt);
-  return createHash("sha256").update(canonical, "utf8").digest("hex");
-}</code></pre>
-            </div>
-            <div class="glass-card">
-              <h3>Sealed Integrity Checks</h3>
-              <ol style="margin-left:1.25rem; font-size:0.875rem; color:var(--text-muted);">
-                <li><code>integrity.version === 16</code></li>
-                <li>Calculated SHA-256 digest matches <code>integrity.digest</code></li>
-                <li>All optional blocks (<code>validationGrounding</code>, <code>capabilityMismatch</code>, <code>steering</code>, <code>gate</code>, <code>plan</code>, <code>briefing</code>) strictly conform to v16 schema.</li>
-              </ol>
-            </div>
-          </div>
-        </div>
-
-        <!-- TAB 3: MIGRATIONS -->
-        <div class="tab-pane" id="pane-migration-mechanics">
-          <h2>Automated Session Migrations</h2>
-          <p>When resuming a session via <code>/resume</code> whose <code>meta.sessionFormatVersion &lt; 3</code>:</p>
-          <div class="grid grid-2">
-            <div class="glass-card">
-              <h3>Sequential Migration Pipeline</h3>
-              <ul>
-                <li><strong>Discovery:</strong> <code>runMigrations</code> reads recorded format version.</li>
-                <li><strong>Step Execution:</strong> Runs sequential passes (<code>v1 &rarr; v2</code>, <code>v2 &rarr; v3</code>), transforming <code>current.jsonl</code> and updating <code>tree.json</code>.</li>
-              </ul>
-            </div>
-            <div class="glass-card">
-              <h3>Atomic Commitment</h3>
-              <p style="font-size:0.875rem; color:var(--text-muted);">
-                Staged migrations are written to temporary files, fsync'd, and atomically renamed over the original session directory before <code>meta.sessionFormatVersion</code> is updated to 3.
-              </p>
-            </div>
-          </div>
-        </div>
-
-        <!-- Related Navigation -->
-        <nav class="related-nav" aria-label="Related Pages">
-          <a href="artifact_placement_blueprint.html" class="nav-link-card">
-            <span class="nav-label">Previous Blueprint</span>
-            <span class="nav-title">Artifact Placement</span>
-          </a>
-          <a href="index.html" class="nav-link-card next">
-            <span class="nav-label">Dashboard Hub</span>
-            <span class="nav-title">Visual Documentation Center</span>
-          </a>
+    <div class="page-layout-grid reference-layout">
+      <aside class="sidebar reference-sidebar" aria-label="On this page">
+        <nav class="toc-container">
+          <p class="toc-title">On this page</p>
+          <a class="sidebar-source" href="https://github.com/iowarp/clio-coder/blob/main/docs/architecture/artifact-versions.md">Canonical Markdown<br>docs/architecture/artifact-versions.md</a>
+          <ul class="toc-list"></ul>
         </nav>
+      </aside>
+      <main class="reference-main" id="reference-content">
+        <article class="reference-prose glass-card">
+<blockquote>
+<p><strong>Visual blueprint:</strong> The source checkout includes the complete
+<a href="artifact_versions_blueprint.html">Artifact Versions &amp; Serialization Contracts visual reference</a>.</p>
+</blockquote>
+<p>This document is an operator-facing registry of compatibility-sensitive file
+formats, serialized structures, integrity digests, and migration rules in the
+current source tree. It is not an exhaustive inventory of every internal store
+or wire frame. Source version constants and their readers remain authoritative.</p>
+<hr>
+<h2>1. Operator-facing Artifact Registry</h2>
+<p>Clio Coder gives its compatibility-sensitive persistent and network contracts an
+explicit version or schema identity. This table also calls out selected
+unversioned stores whose handling matters to operators. It does not enumerate
+every internal contract, such as the worker wire protocol, detached-batch,
+code-step, agent-ledger, and route-history stores, or the unversioned run
+ledger. Depending on the artifact, an incompatible reader fails closed, skips
+an invalid record, or uses an explicitly documented compatibility
+normalization.</p>
+<table>
+<thead>
+<tr>
+<th align="left">Artifact / Subsystem</th>
+<th align="left">Current Version</th>
+<th align="left">Symbol / Type &amp; Source Location</th>
+<th align="left">Persisted Path / Wire Location</th>
+<th align="left">Schema Semantics &amp; Version Differences</th>
+<th align="left">Mismatch Handling</th>
+</tr>
+</thead>
+<tbody><tr>
+<td align="left"><strong>Run Receipt</strong></td>
+<td align="left"><code>20</code></td>
+<td align="left"><code>RUN_RECEIPT_INTEGRITY_VERSION = 20</code><br><code>src/domains/dispatch/receipt-integrity.ts:13</code></td>
+<td align="left"><code>&lt;stateDir&gt;/receipts/&lt;runId&gt;.json</code></td>
+<td align="left">Cryptographically sealed run record. Version 20 adds <code>pathProvenance</code> on dispatch intent and the resolved <code>pathScope</code>, over the v19 base of provenance fields, routing intent, quality labels, <code>validationGrounding</code>, <code>capabilityMismatch</code>, council provenance, and fleet gate provenance.</td>
+<td align="left">Fail-closed. A receipt below v20 is reported as retired rather than invalid, is never read as evidence, and is never migrated; a malformed or tampered v20 receipt fails verification.</td>
+</tr>
+<tr>
+<td align="left"><strong>Dispatch Intent</strong></td>
+<td align="left"><code>2</code></td>
+<td align="left"><code>DISPATCH_INTENT_VERSION = 2</code>, <code>DISPATCH_INTENT_SUPPORTED_VERSIONS = [2]</code><br><code>src/domains/dispatch/intent-compatibility.ts</code></td>
+<td align="left">Inside the resolved dispatch plan artifact, the <code>JobSpec</code>/<code>DispatchRequest</code>, and the sealed run receipt</td>
+<td align="left">Typed model- and producer-declared scope: <code>read_roots</code>, <code>write_roots</code>, <code>relevant_paths</code>, <code>expected_outputs</code>, and declared-id <code>verification</code>, plus the <code>pathProvenance</code> binding every policy-bearing path to the field that declared it. Version 2 adds <code>pathProvenance</code> over the v1 path-and-output shape.</td>
+<td align="left">Fail-closed, never migrated. The supported set is a membership list, not a range: any other version is refused with <code>intent_version_unsupported</code> and the caller restates the fields on a fresh dispatch call. Omitted intent is accepted through the separately tracked legacy inference path; contradictory intent is a terminal refusal. See <a href="dispatch_typed_intent_blueprint.html">dispatch-typed-intent.md</a>.</td>
+</tr>
+<tr>
+<td align="left"><strong>Dispatch Path Scope Provenance</strong></td>
+<td align="left"><code>1</code></td>
+<td align="left"><code>version: 1</code> in <code>interface DispatchPathScopeProvenance</code><br><code>src/domains/dispatch/path-scope.ts</code></td>
+<td align="left"><code>pathScope</code> on the sealed run receipt</td>
+<td align="left">Resolved policy-bearing paths with per-field provenance (<code>declared</code>/<code>derived</code>/<code>inferred</code>), source, and confidence. Never carries the task or briefing prose an inferred path came from.</td>
+<td align="left">Sealed inside the receipt integrity digest; shares the receipt&#39;s fail-closed policy.</td>
+</tr>
+<tr>
+<td align="left"><strong>Resolved Dispatch Plan Artifact</strong></td>
+<td align="left"><code>3</code></td>
+<td align="left"><code>version: 3</code> in <code>interface ResolvedDispatchPlanArtifact</code><br><code>src/tools/dispatch-plan.ts:121</code></td>
+<td align="left">Trusted admission-time tool argument, rendered and hashed into the plan approval</td>
+<td align="left">Pinned agent/target/model/node per task plus the sealed <code>intent</code> and admission-resolved <code>resolvedVerification</code>. The rendered artifact carries <code>intent_sha256</code> for a declared task and the full inferred scope table for a legacy one.</td>
+<td align="left">Fail-closed. Any version but 3 parses as <code>null</code>, as does any task whose present <code>intent</code> is not a normalized v2 intent; omitted intent remains the valid legacy-inference shape. The call falls back to unresolved admission rather than executing a half-understood plan.</td>
+</tr>
+<tr>
+<td align="left"><strong>Session Ledger</strong></td>
+<td align="left"><code>4</code></td>
+<td align="left"><code>CURRENT_SESSION_FORMAT_VERSION = 4</code><br><code>src/engine/session.ts:73</code></td>
+<td align="left"><code>&lt;stateDir&gt;/sessions/&lt;cwdHash&gt;/&lt;sessionId&gt;/</code> (<code>meta.json</code>, <code>current.jsonl</code>, <code>tree.json</code>)</td>
+<td align="left">Append-only ledger format with UUIDv7 turn IDs, session header line, and tree graph linkage. Version 4 adds <code>contextEviction</code> and <code>contextRecall</code> entry kinds.</td>
+<td align="left">The reader accepts v3 and v4. Opening v3 restamps metadata as v4 without rewriting ledger entries; versions below 3 and versions from a newer build are refused.</td>
+</tr>
+<tr>
+<td align="left"><strong>Worker Spec</strong></td>
+<td align="left"><code>3</code></td>
+<td align="left"><code>WORKER_SPEC_VERSION = 3</code><br><code>src/worker/spec-contract.ts:23</code></td>
+<td align="left">Subprocess <code>stdin</code> control plane JSON payload</td>
+<td align="left">Worker invocation parameters, tool surface profile, and execution bounds.</td>
+<td align="left">Fail-closed preflight rejection before worker activation.</td>
+</tr>
+<tr>
+<td align="left"><strong>Worker Runtime Descriptor</strong></td>
+<td align="left"><code>2</code></td>
+<td align="left"><code>WORKER_RUNTIME_DESCRIPTOR_VERSION = 2</code><br><code>src/worker/spec-contract.ts:24</code></td>
+<td align="left">Nested <code>runtime</code> object in the Worker Spec</td>
+<td align="left">Serialized runtime id, kind, API family, auth mode, and optional aliases used to rehydrate the worker&#39;s provider runtime. Hardware and environment facts belong to the separate worker-protocol attestation.</td>
+<td align="left">Worker-spec parsing rejects an unsupported descriptor version or id mismatch. Rehydration rejects id, kind, API-family, or auth drift before the worker model call.</td>
+</tr>
+<tr>
+<td align="left"><strong>Worker Protected Artifact State</strong></td>
+<td align="left"><code>1</code></td>
+<td align="left"><code>WORKER_PROTECTED_ARTIFACT_STATE_VERSION = 1</code><br><code>src/worker/spec-contract.ts:25</code></td>
+<td align="left">Worker spec initialization snapshot</td>
+<td align="left">Snapshot of active protected artifact paths and validation commands passed to worker.</td>
+<td align="left">Worker fails closed before executing mutations.</td>
+</tr>
+<tr>
+<td align="left"><strong>Fleet Contract</strong></td>
+<td align="left"><code>1 | 2 | 3 | 4 | 5</code> (Current: <code>5</code>)</td>
+<td align="left"><code>FleetContractVersion = 1 | 2 | 3 | 4 | 5</code><br><code>FLEET_WRITE_BOUNDARY_VERSION = 4</code><br><code>FLEET_DYNAMIC_STEP_VERSION = 5</code><br><code>src/domains/agents/fleet-contract.ts</code></td>
+<td align="left">Markdown recipes with YAML front matter, including <code>.clio-coder/fleets/&lt;name&gt;.md</code> plus built-in, enabled-extension, and user tiers</td>
+<td align="left">Multi-agent workflow contract. v1 is agent-only; v2 adds deterministic code steps; v3 adds bounded loops and commit steps; v4 adds declared per-step write boundaries; v5 adds plan steps, gate steps, per-step target or profile routing, and the single-writer declaration.</td>
+<td align="left">Reader refuses contracts whose version features it does not support.</td>
+</tr>
+<tr>
+<td align="left"><strong>Execution Plan</strong></td>
+<td align="left"><code>4</code></td>
+<td align="left"><code>version: 4</code> in <code>interface ExecutionPlan</code><br><code>src/domains/dispatch/execution-plan.ts:114</code></td>
+<td align="left">Complete compiled DAG in memory; plan hash and provenance in receipts; selected steps and hash in the Fleet Run Record</td>
+<td align="left">Statically unrolled, deterministically hashed execution plan. v4 adds bounded loop nodes, verification staleness tracking, and commit nodes.</td>
+<td align="left">The compiler stamps version 4. There is no execution-plan deserializer or cross-version mismatch path; fleet resume validates its separate Fleet Run Record and plan hash.</td>
+</tr>
+<tr>
+<td align="left"><strong>Eval Artifact</strong></td>
+<td align="left"><code>4</code></td>
+<td align="left"><code>version: 4</code> in <code>interface EvalArtifactV4</code><br><code>src/domains/eval/schema/artifact.ts</code></td>
+<td align="left"><code>&lt;dataDir&gt;/evals/&lt;evalId&gt;.json</code></td>
+<td align="left">Stored eval results with suite provenance, matrix parameters, and itemized metric outcomes. <code>EVAL_TASK_FILE_VERSION = 1</code> versions compatibility v1 <code>--task-file</code> inputs; Suite v2 is a separate contract.</td>
+<td align="left">Incompatible eval artifacts are rejected during <code>clio-coder eval report</code> and <code>compare</code>.</td>
+</tr>
+<tr>
+<td align="left"><strong>Prompt Manifest</strong></td>
+<td align="left"><code>2</code></td>
+<td align="left"><code>PROMPT_MANIFEST_VERSION = 2</code><br><code>src/domains/session/prompt-manifest.ts:30</code></td>
+<td align="left"><code>&lt;stateDir&gt;/sessions/&lt;cwdHash&gt;/&lt;sessionId&gt;/prompt-manifest.jsonl</code></td>
+<td align="left">Per-session record of the compiled system prompt: fragment ids, relative paths, content hashes, section token estimates, and the composition hash. Version 2 is the stable-prefix-first ordering with one <code># Memory</code> header and records <code>contextWindowSource</code> beside the window the prompt states (#249).</td>
+<td align="left">Additive. A record without a <code>version</code> field predates the field and reads as version 1, so a 0.3.8 manifest still parses; the version explains the single <code>promptRecompiled</code> entry a resumed session&#39;s first compile writes.</td>
+</tr>
+<tr>
+<td align="left"><strong>Eval Verdict Envelope</strong></td>
+<td align="left"><code>clio-coder.eval.verdict.v1</code></td>
+<td align="left"><code>EVAL_VERDICT_SCHEMA_V1</code><br><code>src/domains/eval/schema/verdict.ts</code></td>
+<td align="left">Optional result sibling inside the Eval Artifact at <code>&lt;dataDir&gt;/evals/&lt;evalId&gt;.json</code></td>
+<td align="left">Strict per-trial verdict identity with outcome and machinery, ledger- and receipt-sourced tracked metrics, and evidence links (#252). One pass decision: the code grader&#39;s outcome is part of <code>result.pass</code>. Distribution aggregates and serving configuration belong to the enclosing Eval Artifact.</td>
+<td align="left">A present malformed envelope is rejected, and behavioral results require one; an absent envelope remains valid for older non-behavioral results and is omitted from verdict comparisons. Separately, <code>eval compare</code> refuses artifact-level serving-configuration drift unless explicitly allowed. Released <code>clio.eval.*</code> identities are normalized only at the read boundary.</td>
+</tr>
+<tr>
+<td align="left"><strong>Behavioral Scenario &amp; Result</strong></td>
+<td align="left"><code>clio-coder.eval.scenario.v1</code>, <code>clio-coder.eval.behavior.v1</code></td>
+<td align="left"><code>EVAL_BEHAVIOR_SCENARIO_SCHEMA_V1</code>, <code>EVAL_BEHAVIOR_SCHEMA_V1</code><br><code>src/domains/eval/schema/behavioral.ts</code></td>
+<td align="left">Suite v2 task declarations; additive sibling inside the Eval Artifact</td>
+<td align="left">Versioned behavioral contract: bounded expected and forbidden rules across tool choice, exploration, delegation, safety comprehension, claim grounding, denied-tool recovery, completion behavior, and task correctness, with deterministic judge inputs canonicalized from transcript, tool, receipt, and grader facts (#156). References the canonical <code>clio-coder.eval.verdict.v1</code> identity.</td>
+<td align="left">Fail-closed. <code>unknown</code>, <code>unmeasured</code>, <code>behavioral_failure</code>, and <code>infrastructure_failure</code> stay distinct; a malformed, partial, contradictory, or cross-linked verdict cannot parse as a pass. Existing artifact readers are unaffected because the sibling is additive. Released <code>clio.eval.*</code> identities normalize only on read.</td>
+</tr>
+<tr>
+<td align="left"><strong>Behavioral Metrics Projection</strong></td>
+<td align="left"><code>clio-coder.eval.behavior.metrics.v1</code></td>
+<td align="left"><code>EVAL_BEHAVIOR_METRICS_SCHEMA_V1</code><br><code>src/domains/eval/schema/behavioral-metrics.ts</code></td>
+<td align="left">Additive role- and target/model-bound projection inside the Eval Artifact</td>
+<td align="left">Sourced metric families cover correctness, safety, label violations, tool-call efficiency, unnecessary exploration, delegation quality, unsupported claims, tokens, latency, cost, and repeat variability, with coverage, min/max, p90, population variance, and standard deviation per distribution (#161).</td>
+<td align="left">Unmeasured observations stay typed <code>null</code> and never become zero violations. A baseline hard metric that becomes unmeasured fails the comparison closed, and <code>--metric</code> filtering cannot hide a hard failure. Released <code>clio.eval.*</code> identities normalize only on read.</td>
+</tr>
+<tr>
+<td align="left"><strong>Execution Envelope</strong></td>
+<td align="left"><code>clio-coder.eval.execution-envelope.v1</code></td>
+<td align="left"><code>EVAL_EXECUTION_ENVELOPE_SCHEMA_V1</code><br><code>src/domains/eval/schema/execution-envelope.ts</code></td>
+<td align="left">On every new behavioral result inside the Eval Artifact</td>
+<td align="left">Strictly parsed binding of prompt fragment ids, versions, and content hashes, composition hash, recipe identity and content hash, target, wire model, runtime, thinking level, tool signature, autonomy, policy hashes, project-context provenance, and corpus id and version (#164). Suites declare which matrix dimensions may vary.</td>
+<td align="left">Fail-closed. Comparisons mark rows incomparable on any undeclared envelope drift, refuse one-sided envelopes and within-run variance, and name every prompt- or recipe-affected corpus result. Released <code>clio.eval.*</code> identities normalize only on read.</td>
+</tr>
+<tr>
+<td align="left"><strong>Trace Database</strong></td>
+<td align="left"><code>1</code></td>
+<td align="left"><code>TRACE_SCHEMA_VERSION = 1</code><br><code>src/domains/observability/trace-store.ts:26</code></td>
+<td align="left"><code>&lt;stateDir&gt;/trace.sqlite</code> (<code>meta</code> table <code>schema_version</code>)</td>
+<td align="left">Schema version for the 7 SQLite trace mirror tables (<code>runs</code>, <code>phases</code>, <code>events</code>, <code>envelopes</code>, <code>gate_results</code>, <code>agent_sessions</code>, <code>processes</code>).</td>
+<td align="left">The asynchronous dispatch mirror logs <code>[clio-coder:trace]</code> and degrades without failing the parent run. Direct <code>clio-coder trace</code> readers reject an unsupported schema and exit 1.</td>
+</tr>
+<tr>
+<td align="left"><strong>Capacity State File</strong></td>
+<td align="left"><code>2</code></td>
+<td align="left"><code>version: 2</code> in <code>interface CapacityStateFile</code><br><code>src/domains/dispatch/capacity-lease.ts:56</code></td>
+<td align="left"><code>&lt;stateDir&gt;/dispatch-admission.json</code></td>
+<td align="left">Active capacity leases, drain status, and whole-plan reservations. The cross-process advisory lock lives in a separate <code>.lock</code> file.</td>
+<td align="left">Corrupted or unparseable state file causes admission to fail closed.</td>
+</tr>
+<tr>
+<td align="left"><strong>Protected Artifact Journal</strong></td>
+<td align="left"><code>1</code></td>
+<td align="left"><code>version: 1</code> in <code>interface PendingProtectedArtifactRecord</code><br><code>src/domains/session/protected-artifact-journal.ts:21</code></td>
+<td align="left"><code>&lt;stateDir&gt;/protected-artifact-pending/&lt;key&gt;/&lt;id&gt;.json</code></td>
+<td align="left">Write-ahead durability records for pending protected artifacts.</td>
+<td align="left">Leftover records reconciled during session initialization.</td>
+</tr>
+<tr>
+<td align="left"><strong>Fleet Run Record</strong></td>
+<td align="left"><code>1</code></td>
+<td align="left"><code>version: 1</code> in <code>interface FleetRunRecord</code><br><code>src/domains/dispatch/state.ts</code></td>
+<td align="left"><code>&lt;stateDir&gt;/fleet-runs/&lt;runId&gt;.json</code></td>
+<td align="left">Durable record of one fleet run: contract name, plan hash, static step ids and steps, <code>--var</code> values, replayed and settled step results, and the delegation plan hash a <code>kind: plan</code> step produced. Read by <code>fleet run --resume</code>.</td>
+<td align="left">Resume refuses a changed plan hash with a per-step diff and refuses differing <code>--var</code> values.</td>
+</tr>
+<tr>
+<td align="left"><strong>Durable Assignment Store</strong></td>
+<td align="left"><code>1</code></td>
+<td align="left"><code>version: 1</code> in <code>interface AssignmentStoreFile</code><br><code>DurableAssignmentRecord</code><br><code>src/domains/dispatch/assignment-store.ts</code></td>
+<td align="left"><code>&lt;stateDir&gt;/assignments.json</code></td>
+<td align="left">Machine-wide logical-dispatch records: assignment id, attempt ids, terminal run id, status, optional fleet verdict owner, and—while running—<code>processOwner {pid, processBirthToken, acquiredAt}</code>. The owner is cleared on a true terminal transition.</td>
+<td align="left">A live sibling owner keeps the row running; a genuinely dead or legacy ownerless row is reconciled. An unsupported or unreadable store is treated as empty, and malformed records are ignored.</td>
+</tr>
+<tr>
+<td align="left"><strong>Checkout Writer Lease</strong></td>
+<td align="left"><code>1</code></td>
+<td align="left"><code>version: 1</code> in <code>interface CheckoutWriterLeaseRecord</code><br><code>src/domains/dispatch/checkout-writer-lease.ts</code></td>
+<td align="left"><code>&lt;stateDir&gt;/checkout-writer-leases/&lt;key&gt;.json</code> (key derived from the canonical checkout path)</td>
+<td align="left">Cross-process single-writer lease: checkout path, pid, process birth token, acquisition time.</td>
+<td align="left">A live sibling holder is refused with <code>checkout_writer_lease_held</code>; a dead owner is reclaimed; a malformed or unreadable record throws and fails admission closed.</td>
+</tr>
+<tr>
+<td align="left"><strong>Out-of-turn Usage Ledger</strong></td>
+<td align="left">unversioned JSONL</td>
+<td align="left"><code>OutOfTurnUsageRow</code><br><code>src/domains/observability/out-of-turn-usage.ts</code></td>
+<td align="left"><code>&lt;stateDir&gt;/usage/out-of-turn.jsonl</code></td>
+<td align="left">One row per priced side question, handoff, prompt prewarm, or background-memory call. Each row records its <code>side-question</code>, <code>handoff</code>, <code>prewarm</code>, or <code>background-memory</code> label plus session id, repository identity, timestamp, target, attributed model, and provider usage. The ledger is a bounded ring of <code>MAX_OUT_OF_TURN_USAGE_ROWS = 1000</code>, rewritten atomically under the state-file lock.</td>
+<td align="left">Unparseable rows are skipped and counted by <code>usage report</code>; the session ledger is never affected.</td>
+</tr>
+<tr>
+<td align="left"><strong>User Tasks File</strong></td>
+<td align="left"><code>1</code></td>
+<td align="left"><code>USER_TASKS_FILE_VERSION = 1</code><br><code>src/domains/user-tasks/store.ts:6</code></td>
+<td align="left"><code>&lt;workspace&gt;/.clio-coder/user-tasks.json</code></td>
+<td align="left">Durable operator task list with monotonic <code>uN</code> ids, status, timestamps, optional notes, and optional session and board links. <code>nextId</code> must stay above every stored id.</td>
+<td align="left">Fails closed with <code>UserTasksStoreError</code> on corrupt JSON, an unknown version or field, an invalid task, a duplicate id, or an unsafe <code>nextId</code>; missing files initialize as an empty list.</td>
+</tr>
+<tr>
+<td align="left"><strong>Library Pins</strong></td>
+<td align="left">unversioned YAML map</td>
+<td align="left"><code>readLibraryPins</code><br><code>src/domains/resources/library.ts</code></td>
+<td align="left"><code>&lt;configDir&gt;/library-pins.yaml</code></td>
+<td align="left">Typed ref (<code>skill:x</code>, <code>agent:y</code>, <code>prompt:p</code>, <code>fleet:z</code>) to <code>{sha256, sourceUrl}</code> for every resource <code>library add</code> or the Skills Hub installed.</td>
+<td align="left">Malformed YAML throws; a successfully parsed non-map reads as empty. Either a kind-qualified pin or the destination file makes an entry report installed, so a surviving pin still counts when its installed file is missing.</td>
+</tr>
+</tbody></table>
+<hr>
+<h2>2. Integrity Verification Contracts</h2>
+<h3>Receipt Integrity (Version 20)</h3>
+<p>Receipt integrity authenticates that a sealed receipt matches its ledger envelope without modification. The private <code>computeReceiptIntegrity</code> helper hashes a canonical payload built from both records:</p>
+<pre><code class="language-typescript">function computeReceiptIntegrity(
+  receipt: RunReceipt | RunReceiptDraft,
+  envelope: RunEnvelope,
+  legacyNaming = false,
+): RunReceiptIntegrity {
+  return {
+    version: 20,
+    algorithm: &quot;sha256&quot;,
+    digest: sha256(canonicalJson(integrityPayload(receipt, envelope, legacyNaming))),
+  };
+}
+</code></pre>
+<p>Receipt verification checks:</p>
+<ol>
+<li>The quality block and integrity block have their strict current shapes, including <code>integrity.version === 20</code>. A receipt sealed at a lower version is reported as retired rather than invalid: it is intact, but is not read as evidence and is never migrated.</li>
+<li><code>executionRole</code> and <code>routingIntent</code> parse, and an optional <code>routeDecision</code> is current.</li>
+<li>Receipt identity, route, timing, usage, cost, outcome, node, briefing, budget, and steering fields agree with the run ledger envelope.</li>
+<li>The SHA-256 of the canonical receipt-and-ledger payload matches <code>integrity.digest</code>; the reader also recognizes the released legacy contract-name spelling when recomputing an otherwise current v20 digest.</li>
+</ol>
+<hr>
+<h2>3. Migration Mechanics</h2>
+<p>Session format handling runs automatically when a session is opened:</p>
+<ol>
+<li><strong>Discovery</strong>: <code>src/domains/session/migrations/index.ts:runMigrations</code> reads the recorded <code>sessionFormatVersion</code>, treating a missing field as version 1.</li>
+<li><strong>Readable range</strong>: This build reads only versions 3 and 4. A version below 3 is disposable pre-1.0 state and is refused; a version above 4 belongs to a newer build and is refused with upgrade guidance.</li>
+<li><strong>Additive step</strong>: Version 3 opens as version 4 because v4 only adds the <code>contextEviction</code> and <code>contextRecall</code> entry kinds. Existing <code>current.jsonl</code> and <code>tree.json</code> content is not transformed.</li>
+<li><strong>Metadata update</strong>: The session metadata is restamped with <code>sessionFormatVersion: 4</code> through the session writer&#39;s normal durable path.</li>
+</ol>
+        </article>
+        <nav class="related-nav" aria-label="Adjacent references">
+          <a class="nav-link-card" href="artifact_placement_blueprint.html"><span class="nav-label">Previous</span><span class="nav-title">Artifact Placement</span></a>
+          <a class="nav-link-card next" href="capacity_scheduling_blueprint.html"><span class="nav-label">Next</span><span class="nav-title">Capacity Leases &amp; Fleet Scheduling</span></a>
+        </nav>
+        <p class="reference-footer-note">Canonical content lives in the mapped Markdown page. This visual counterpart adds navigation without changing the contract.</p>
       </main>
     </div>
-
-    <footer>
-      <p>Clio Coder Artifact Versions Blueprint &bull; Version 0.4.0 &bull; Gnosis Research Center</p>
-    </footer>
+    <footer>Clio Coder documentation · source-aligned at v0.4.2</footer>
   </div>
-
   <script src="shared.js"></script>
-  <script>
-    function switchTab(tabId) {
-      document.querySelectorAll('.tab-btn').forEach(btn => btn.classList.remove('active'));
-      document.querySelectorAll('.tab-pane').forEach(pane => pane.classList.remove('active'));
-
-      const pane = document.getElementById(`pane-${tabId}`);
-      if (pane) pane.classList.add('active');
-
-      const activeBtn = Array.from(document.querySelectorAll('.tab-btn')).find(btn => {
-        return btn.getAttribute('onclick')?.includes(`'${tabId}'`);
-      });
-      if (activeBtn) activeBtn.classList.add('active');
-
-      if (window.initTableOfContents) window.initTableOfContents();
-    }
-  </script>
 </body>
 </html>

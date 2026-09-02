@@ -1,11 +1,11 @@
 # Environment Variables
 
+> **Visual blueprint:** The source checkout includes the complete
+> [Environment Variables visual reference](https://github.com/iowarp/clio-coder/blob/main/docs/html/environment_blueprint.html).
+
 This page inventories Clio-specific runtime variables and the ambient variables that materially change documented operator behavior. `settings.yaml` is the durable home for operator policy; environment variables support per-process overrides, directory layout, debugging, credentials, terminal integration, and internal plumbing. When prose and source disagree, prefer the cited read site.
 
 The `environment-variable-inventory` check in `scripts/check-hygiene.ts`, run by `npm run lint`, enforces coverage for Clio's `CLIO_*` variables and `NO_COLOR`. It intentionally does not treat every operating-system or provider convention as a Clio knob. Examples outside that enforced family include `PATH`, `HOME`, terminal capability variables, and provider API-key names selected dynamically by `src/engine/env-api-keys.ts`.
-
-> [!TIP]
-> [docs/html/environment_blueprint.html](https://github.com/iowarp/clio-coder/blob/main/docs/html/environment_blueprint.html) is a source-checkout walkthrough of the most commonly set variables with an effective-path resolver. It covers a curated subset, so use the tables below when you need the full list.
 
 ## Behavior knobs without a settings key
 

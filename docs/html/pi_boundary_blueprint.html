@@ -1,248 +1,350 @@
-<!DOCTYPE html>
+<!doctype html>
 <html lang="en">
 <head>
-  <meta charset="UTF-8">
-  <meta name="viewport" content="width=device-width, initial-scale=1.0">
-  <title>Clio Coder - Engine &amp; Pi SDK Boundary Blueprint</title>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <meta name="clio-markdown-source" content="docs/architecture/pi-boundary.md">
+  <meta name="clio-docs-version" content="0.4.2">
+  <title>Pi SDK Boundary · Clio Coder 0.4.2</title>
+  <link rel="icon" href="data:,">
   <link rel="stylesheet" href="shared.css">
-  <style>
-    .boundary-table th, .boundary-table td {
-      padding: 0.65rem 0.85rem;
-      border: 1px solid var(--border-card);
-    }
-    .action-route {
-      color: var(--color-cyan);
-      font-weight: 700;
-      font-family: var(--font-mono);
-      font-size: 0.8rem;
-    }
-    .action-keep {
-      color: var(--color-emerald);
-      font-weight: 700;
-      font-family: var(--font-mono);
-      font-size: 0.8rem;
-    }
-  </style>
 </head>
-<body>
+<body data-doc-category="architecture">
+  <div class="reading-progress" aria-hidden="true"></div>
+  <a class="skip-link" href="#reference-content">Skip to reference</a>
   <div class="container">
-    <header>
+    <header class="document-header" data-category="Architecture">
       <div class="header-left">
-        <div class="header-logo">
-          <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" style="color: var(--color-cyan);"><title>Boundary Icon</title>
-            <polygon points="12 2 2 7 12 12 22 7 12 2"></polygon>
-            <polyline points="2 17 12 22 22 17"></polyline>
-            <polyline points="2 12 12 17 22 12"></polyline>
+        <a class="header-logo" href="index.html" aria-label="Documentation index">
+          <svg viewBox="0 0 24 24" fill="none" aria-hidden="true">
+            <path d="M12 2 2 7l10 5 10-5-10-5Z" stroke="url(#clio-logo)" stroke-width="2" stroke-linejoin="round"/>
+            <path d="m2 12 10 5 10-5M2 17l10 5 10-5" stroke="url(#clio-logo)" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"/>
+            <defs><linearGradient id="clio-logo" x1="2" y1="2" x2="22" y2="22"><stop stop-color="#00d4db"/><stop offset="1" stop-color="#ff7e29"/></linearGradient></defs>
           </svg>
-        </div>
+        </a>
         <div class="header-title-wrapper">
-          <h1>Engine &amp; Pi SDK Boundary Blueprint</h1>
-          <p>Architectural ownership table, thin-wrapper watchlist, and SDK upgrade regression net (v0.84.0)</p>
+          <p class="document-kicker">Architecture / canonical reference</p>
+          <h1>Pi SDK Boundary</h1>
+          <p class="document-path">docs/architecture/pi-boundary.md</p>
         </div>
       </div>
       <div class="header-right">
-        <span class="version-badge">v0.4.0</span>
-        <a href="index.html" class="back-btn">
-          <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><title>Back Icon</title><line x1="19" y1="12" x2="5" y2="12"></line><polyline points="12 19 5 12 12 5"></polyline></svg>
-          Dashboard Hub
-        </a>
+        <a class="back-btn" href="index.html">← Index</a>
+        <span class="version-badge">v0.4.2</span>
       </div>
     </header>
-
-    <div class="page-layout-grid">
-      <nav class="sidebar" aria-label="Table of Contents">
-        <div class="toc-container">
-          <div class="toc-title">On This Page</div>
-          <ul class="toc-list">
-            <!-- Populated dynamically by shared.js -->
-          </ul>
-        </div>
-      </nav>
-
-      <main>
-        <div class="tabs-nav">
-          <button type="button" class="tab-btn active" onclick="switchTab('boundary-table')">
-            <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><title>Table</title><rect x="3" y="3" width="18" height="18" rx="2" ry="2"></rect><line x1="3" y1="9" x2="21" y2="9"></line><line x1="9" y1="21" x2="9" y2="9"></line></svg>
-            Boundary Ownership Table
-          </button>
-          <button type="button" class="tab-btn" onclick="switchTab('thin-wrappers')">
-            <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><title>Watchlist</title><path d="M1 12s4-8 11-8 11 8 11 8-4 8-11 8-11-8-11-8z"></path><circle cx="12" cy="12" r="3"></circle></svg>
-            Thin-Wrapper Watchlist
-          </button>
-          <button type="button" class="tab-btn" onclick="switchTab('upgrade-net')">
-            <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><title>Upgrade</title><polyline points="22 12 18 12 15 21 9 3 6 12 2 12"></polyline></svg>
-            SDK Upgrade Net &amp; Checks
-          </button>
-        </div>
-
-        <!-- TAB 1: BOUNDARY TABLE -->
-        <div class="tab-pane active" id="pane-boundary-table">
-          <div class="glass-card">
-            <h2>SDK Ownership Decisions (Pi 0.84.0)</h2>
-            <p>Clio uses Pi SDK libraries for provider protocols, message conversions, and terminal primitives. An action marked <strong>Keep</strong> represents an explicit architectural product boundary.</p>
-
-            <table class="ref-table boundary-table">
-              <thead>
-                <tr>
-                  <th>Pi Primitive / Export</th>
-                  <th>Clio Target File / Area</th>
-                  <th>Action</th>
-                  <th>Rationale</th>
-                </tr>
-              </thead>
-              <tbody>
-                <tr>
-                  <td><code>truncateHead</code>, <code>truncateTail</code>, <code>truncateLine</code></td>
-                  <td><code>src/tools/truncate.ts</code></td>
-                  <td><span class="action-route">Route</span></td>
-                  <td>Pi owns UTF-8-safe truncation. Clio retains 16 KiB default and line-counting helper.</td>
-                </tr>
-                <tr>
-                  <td><code>StringEnum</code></td>
-                  <td><code>src/tools/string-enum.ts</code></td>
-                  <td><span class="action-route">Route</span></td>
-                  <td>Replaces TypeBox copy with Pi's compact provider-safe string enum schema.</td>
-                </tr>
-                <tr>
-                  <td><code>COMPACTION_SUMMARY_PREFIX</code>, <code>bashExecutionToText</code></td>
-                  <td><code>src/engine/messages.ts</code></td>
-                  <td><span class="action-route">Route</span></td>
-                  <td>Aligns replayed message texts with LLM expectations while keeping Clio ledger entries.</td>
-                </tr>
-                <tr>
-                  <td><code>stripTerminalSequences</code></td>
-                  <td><code>src/domains/session/tree/preview.ts</code></td>
-                  <td><span class="action-keep">Keep</span></td>
-                  <td>Clio sanitizer strips private-mode CSI escapes from captured tool output.</td>
-                </tr>
-                <tr>
-                  <td><code>isRetryableAssistantError</code></td>
-                  <td><code>src/domains/session/retry.ts</code></td>
-                  <td><span class="action-route">Route + Delta</span></td>
-                  <td>Routes generic errors through Pi and preserves Clio's 15s local-model load delay.</td>
-                </tr>
-                <tr>
-                  <td><code>retryAssistantCall</code></td>
-                  <td><code>src/interactive/chat-loop.ts</code></td>
-                  <td><span class="action-keep">Keep</span></td>
-                  <td>Clio uses interactive turn recovery with visible cancellable countdown.</td>
-                </tr>
-                <tr>
-                  <td><code>Provider.auth.oauth</code></td>
-                  <td><code>src/engine/oauth.ts</code></td>
-                  <td><span class="action-route">Route + ALCF</span></td>
-                  <td>Routes built-in OAuth through Pi; preserves custom ALCF Globus PKCE flow.</td>
-                </tr>
-                <tr>
-                  <td><code>CredentialStore</code></td>
-                  <td><code>src/domains/providers/auth/storage.ts</code></td>
-                  <td><span class="action-keep">Keep</span></td>
-                  <td>Clio's locked YAML storage (0o600) and target-first registry are product invariants.</td>
-                </tr>
-                <tr>
-                  <td><code>JsonlSessionRepo</code> / v4 <code>Session</code></td>
-                  <td><code>src/domains/session/**</code></td>
-                  <td><span class="action-keep">Keep</span></td>
-                  <td>On-disk ledger v3, active tree graph, and receipts form Clio's durable state spine.</td>
-                </tr>
-                <tr>
-                  <td><code>Markdown</code>, <code>renderLatex</code></td>
-                  <td><code>src/interactive/renderers/**</code></td>
-                  <td><span class="action-route">Route</span></td>
-                  <td>Routes terminal rendering, box-drawing Mermaid, and Unicode LaTeX through Pi.</td>
-                </tr>
-              </tbody>
-            </table>
-          </div>
-        </div>
-
-        <!-- TAB 2: THIN WRAPPERS -->
-        <div class="tab-pane" id="pane-thin-wrappers">
-          <h2>Thin-Wrapper Watchlist</h2>
-          <p>Inspect these files first during SDK updates to avoid reimplementing upstream primitives:</p>
-          <div class="grid grid-2">
-            <div class="glass-card">
-              <h3>Engine Layer</h3>
-              <ul>
-                <li><code>src/engine/apis/index.ts</code>: API provider registration via pi-ai <code>/compat</code>.</li>
-                <li><code>src/engine/apis/openai-completions.ts</code>: Compatibility flags, sampling, and thinking budgets.</li>
-                <li><code>src/engine/provider-payload.ts</code>: Retains OpenAI Responses reasoning-summary patch.</li>
-                <li><code>src/engine/types.ts</code> &amp; <code>ai.ts</code>: Erased Pi types and StringEnum schemas.</li>
-              </ul>
-            </div>
-            <div class="glass-card">
-              <h3>Interactive &amp; Session Layer</h3>
-              <ul>
-                <li><code>src/domains/session/retry.ts</code>: Wraps <code>isRetryableAssistantError</code> with local model delays.</li>
-                <li><code>src/interactive/chat-renderer.ts</code>: Replay message phrasing via <code>src/engine/messages.ts</code>.</li>
-                <li><code>src/domains/config/keybindings.ts</code>: Keybindings mapping over Pi editor actions.</li>
-              </ul>
-            </div>
-          </div>
-        </div>
-
-        <!-- TAB 3: UPGRADE NET -->
-        <div class="tab-pane" id="pane-upgrade-net">
-          <h2>SDK Upgrade Regression Net &amp; Checklist</h2>
-          <div class="grid grid-2">
-            <div class="glass-card">
-              <h3>Targeted Regression Contracts</h3>
-              <pre><code>tests/contracts/thinking-runtime.test.ts
-tests/contracts/openai-completions.test.ts
-tests/contracts/lmstudio.test.ts
-tests/contracts/lmstudio-instance-resolution.test.ts
-tests/contracts/replay-pi-message-text.test.ts
-tests/contracts/tool-string-enum.test.ts
-tests/smoke/tui-width-matrix.test.ts
-tests/contracts/cli-json-stream-dedup.test.ts</code></pre>
-            </div>
-            <div class="glass-card">
-              <h3>Snapshot Gate (`docs/pi-surface.json`)</h3>
-              <p>Clio maintains a declaration snapshot in <code>docs/pi-surface.json</code>. The <code>scripts/check-hygiene.ts</code> gate enforces:</p>
-              <ul>
-                <li>Fails if any imported SDK symbol changes or disappears.</li>
-                <li>Reports newly exported primitives for architectural review.</li>
-                <li>Ensures deliberate decisions for all newly introduced SDK features.</li>
-              </ul>
-            </div>
-          </div>
-        </div>
-
-        <!-- Related Navigation -->
-        <nav class="related-nav" aria-label="Related Pages">
-          <a href="acp_blueprint.html" class="nav-link-card">
-            <span class="nav-label">Previous Blueprint</span>
-            <span class="nav-title">ACP Protocol Server</span>
-          </a>
-          <a href="dispatch_rationale_blueprint.html" class="nav-link-card next">
-            <span class="nav-label">Next Blueprint</span>
-            <span class="nav-title">Dispatch Rationale</span>
-          </a>
+    <div class="page-layout-grid reference-layout">
+      <aside class="sidebar reference-sidebar" aria-label="On this page">
+        <nav class="toc-container">
+          <p class="toc-title">On this page</p>
+          <a class="sidebar-source" href="https://github.com/iowarp/clio-coder/blob/main/docs/architecture/pi-boundary.md">Canonical Markdown<br>docs/architecture/pi-boundary.md</a>
+          <ul class="toc-list"></ul>
         </nav>
+      </aside>
+      <main class="reference-main" id="reference-content">
+        <article class="reference-prose glass-card">
+<blockquote>
+<p><strong>Visual blueprint:</strong> The source checkout includes the complete
+<a href="pi_boundary_blueprint.html">Pi SDK Boundary visual reference</a>.</p>
+</blockquote>
+<p>Clio Coder uses Pi 0.84.4 as its provider, agent-loop, and terminal SDK. This
+page records where Pi owns a reusable primitive and where Clio deliberately
+keeps product behavior. Review this table on every Pi upgrade. An action marked
+<code>Keep</code> is an explicit boundary decision, not an invitation to replace the
+Clio-owned surface during a dependency bump.</p>
+<h2>Boundary table</h2>
+<table>
+<thead>
+<tr>
+<th>Pi export or surface</th>
+<th>Clio file or function</th>
+<th>Action</th>
+<th>Reason</th>
+</tr>
+</thead>
+<tbody><tr>
+<td>pi-agent-core <code>truncateHead</code>, <code>truncateTail</code>, <code>truncateLine</code>, and <code>formatSize</code></td>
+<td><code>src/tools/truncate.ts</code></td>
+<td>Route through Pi.</td>
+<td>Pi owns UTF-8-safe truncation. Clio retains its 16 KiB default and <code>splitLinesForCounting</code>, which Pi does not export.</td>
+</tr>
+<tr>
+<td>pi-ai <code>StringEnum</code></td>
+<td><code>src/engine/ai.ts</code></td>
+<td>Route through Pi.</td>
+<td>The deleted <code>src/tools/string-enum.ts</code> TypeBox adapter duplicated Pi&#39;s compact provider-safe schema. Tools now import the re-export from the engine boundary.</td>
+</tr>
+<tr>
+<td>pi-agent-core <code>COMPACTION_SUMMARY_PREFIX</code>, <code>COMPACTION_SUMMARY_SUFFIX</code>, <code>BRANCH_SUMMARY_PREFIX</code>, <code>BRANCH_SUMMARY_SUFFIX</code>, and <code>bashExecutionToText</code></td>
+<td><code>src/interactive/chat-renderer.ts</code> through <code>src/engine/messages.ts</code></td>
+<td>Route through Pi.</td>
+<td>Replay text must match Pi&#39;s <code>convertToLlm</code> wording while Clio keeps its <code>SessionEntry</code> mapping and replay bounds.</td>
+</tr>
+<tr>
+<td>pi-tui <code>stripTerminalSequences</code></td>
+<td><code>src/domains/session/tree/preview.ts</code></td>
+<td>Keep the Clio sanitizer.</td>
+<td>Pi removes SGR and OSC sequences but intentionally leaves private-mode CSI and character-set escapes that may occur in captured tool output.</td>
+</tr>
+<tr>
+<td>pi-ai <code>isRetryableAssistantError</code></td>
+<td><code>src/domains/session/retry.ts</code></td>
+<td>Route generic classification through Pi and keep the Clio delta.</td>
+<td>Clio additionally recognizes self-hosted model loading and enforces its separate 15-second floor.</td>
+</tr>
+<tr>
+<td>pi-ai <code>retryAssistantCall</code> and pi-agent-core <code>AgentHarness</code> retry</td>
+<td><code>src/interactive/chat-loop.ts</code> and <code>src/interactive/turn-recovery.ts</code></td>
+<td>Keep Clio orchestration.</td>
+<td>Clio retries <code>agent.continue()</code> with a visible cancellable countdown. <code>retryAssistantCall</code> wraps one completion, and <code>AgentHarness</code> requires Pi&#39;s session repository.</td>
+</tr>
+<tr>
+<td>pi-ai <code>StreamOptions.samplingParams</code>, <code>OpenAICompletionsOptions.thinkingBudgets</code>, and <code>supportsThinkingTokenBudget</code></td>
+<td><code>src/engine/apis/openai-completions.ts</code></td>
+<td>Route request controls through Pi.</td>
+<td>Clio retains only catalog-to-option selection and runtime-specific payload fields.</td>
+</tr>
+<tr>
+<td>pi-ai <code>compat.thinkingFormat</code></td>
+<td><code>src/engine/apis/openai-completions.ts</code> payload adapters</td>
+<td>Keep the LM Studio and llama.cpp deltas.</td>
+<td>Pi has no LM Studio TTL or draft-model field and no llama.cpp <code>cache_prompt</code> field.</td>
+</tr>
+<tr>
+<td>pi-agent-core <code>validateToolArguments</code></td>
+<td><code>src/engine/apis/openai-completions.ts</code> malformed-call guard</td>
+<td>Keep the Clio diagnostic.</td>
+<td>Pi returns a validation result so a model can retry. Clio stops a turn from a repeatedly malformed local server and gives the operator a runtime-specific remedy.</td>
+</tr>
+<tr>
+<td>pi-ai <code>Usage.reasoning</code></td>
+<td><code>src/engine/apis/openai-completions.ts</code> reasoning estimate</td>
+<td>Keep the Clio fallback.</td>
+<td>Some self-hosted servers stream thinking but report no reasoning usage. Clio fills only an absent value.</td>
+</tr>
+<tr>
+<td>No Pi equivalent</td>
+<td><code>src/engine/apis/openai-completions.ts</code> sentinel filters, <code>src/engine/harmony-response.ts</code>, and <code>src/engine/gemma-channel-filter.ts</code></td>
+<td>Keep Clio ownership.</td>
+<td>Pi has no Harmony or Gemma channel parser and no tokenizer-sentinel stream filter.</td>
+</tr>
+<tr>
+<td>pi-ai <code>clampMaxTokensToContext</code></td>
+<td><code>src/engine/apis/output-budget.ts</code></td>
+<td>Keep the Clio outer budget.</td>
+<td>Clio adds its default output budget, a llama.cpp tool-turn cap, and the loaded context window. Pi&#39;s conservative clamp still runs underneath.</td>
+</tr>
+<tr>
+<td>pi-ai Anthropic <code>streamSimple</code> request assembly</td>
+<td><code>src/engine/provider-payload.ts</code> Anthropic thinking patch</td>
+<td>Delete the Clio rewrite and route through Pi.</td>
+<td>Pi produces the same adaptive effort and token-budget fields from the active thinking level.</td>
+</tr>
+<tr>
+<td>pi-ai <code>OpenAIResponsesOptions.reasoningSummary</code></td>
+<td><code>src/engine/provider-payload.ts</code> OpenAI reasoning-summary patch</td>
+<td>Keep the Clio patch.</td>
+<td>Pi&#39;s <code>Agent</code> path calls <code>streamSimple</code>, which fixes this field to <code>auto</code> and exposes no caller option.</td>
+</tr>
+<tr>
+<td>No Pi equivalent</td>
+<td><code>src/engine/apis/ollama-native.ts</code>, <code>src/engine/apis/lmstudio.ts</code>, and <code>src/engine/apis/llamacpp-residency.ts</code></td>
+<td>Keep Clio ownership.</td>
+<td>Pi&#39;s Ollama provider uses OpenAI completions and has no target residency manager.</td>
+</tr>
+<tr>
+<td>pi-ai <code>CredentialStore</code> and <code>Models.getAuth</code></td>
+<td><code>src/domains/providers/auth/storage.ts</code></td>
+<td>Keep Clio ownership.</td>
+<td>Clio&#39;s locked YAML store, damage control, target-first registry, and runtime overrides are product boundaries.</td>
+</tr>
+<tr>
+<td>pi-ai <code>createModels</code>, <code>createProvider</code>, and <code>ModelsStore</code></td>
+<td><code>src/domains/providers/**</code></td>
+<td>Keep Clio ownership.</td>
+<td>Targets, nodes, probing, residency, ALCF, and fleet placement are Clio concepts rather than provider-keyed SDK state.</td>
+</tr>
+<tr>
+<td>pi-ai <code>Provider.auth.oauth</code></td>
+<td><code>src/engine/oauth.ts</code></td>
+<td>Route built-in OAuth through Pi and keep ALCF.</td>
+<td>Pi owns provider OAuth implementations. Clio adds the ALCF science-provider flow.</td>
+</tr>
+<tr>
+<td>pi-agent-core application cut-point helpers</td>
+<td><code>src/domains/session/compaction/cut-point.ts</code></td>
+<td>Keep Clio ownership.</td>
+<td>The published SDK does not export these helpers, and Clio operates on its larger <code>SessionEntry</code> union with a tested small-session fallback.</td>
+</tr>
+<tr>
+<td>pi-agent-core <code>estimateTokens</code> and <code>estimateContextTokens</code></td>
+<td><code>src/domains/session/compaction/tokens.ts</code> and <code>src/domains/session/context-accounting.ts</code></td>
+<td>Keep Clio ownership.</td>
+<td>Clio accounts for message overhead, images, tool-schema splits, and provider-usage reconciliation beyond Pi&#39;s character estimate.</td>
+</tr>
+<tr>
+<td>pi-agent-core <code>SUMMARIZATION_SYSTEM_PROMPT</code>, <code>generateSummary</code>, and <code>serializeConversation</code></td>
+<td><code>src/domains/session/compaction/compact.ts</code> and <code>src/domains/session/compaction/branch-summary.ts</code></td>
+<td>Keep Clio ownership.</td>
+<td>Pi&#39;s functions require Pi v4 entries and <code>Models</code>; Clio compacts its ledger with cumulative checkpoints and turn-prefix summaries.</td>
+</tr>
+<tr>
+<td>pi-agent-core <code>JsonlSessionRepo</code>, v4 <code>Session</code>, and <code>AgentHarness</code></td>
+<td><code>src/engine/session.ts</code> and <code>src/domains/session/**</code></td>
+<td>Keep Clio ownership.</td>
+<td>The on-disk ledger, active tree, fork behavior, receipts, and evidence are Clio&#39;s durable spine.</td>
+</tr>
+<tr>
+<td>pi-agent-core <code>loadSkills</code>, <code>loadPromptTemplates</code>, <code>parseCommandArgs</code>, <code>substituteArgs</code>, and <code>formatSkillsForSystemPrompt</code></td>
+<td><code>src/domains/resources/skills/loader.ts</code> and <code>src/domains/resources/prompts/loader.ts</code></td>
+<td>Keep Clio loaders and reuse leaf primitives when compatible.</td>
+<td>Clio owns marketplace pinning, trust, evals, activation records, and prompt-source policy. Argument substitution can use Pi without replacing the loader.</td>
+</tr>
+<tr>
+<td>pi-agent-core harness tools, <code>executeShellWithCapture</code>, and <code>sanitizeBinaryOutput</code></td>
+<td><code>src/tools/**</code></td>
+<td>Keep Clio ownership.</td>
+<td>Tool admission, observation budgets, safety rails, and result shaping apply across interactive, headless, ACP, and worker runs.</td>
+</tr>
+<tr>
+<td>No Pi equivalent</td>
+<td><code>src/engine/loop-guard.ts</code>, <code>src/domains/safety/**</code>, <code>src/domains/dispatch/**</code>, and <code>src/domains/evidence/**</code></td>
+<td>Keep Clio ownership.</td>
+<td>These surfaces enforce Clio&#39;s safety, fleet, receipt, and evidence contracts.</td>
+</tr>
+<tr>
+<td>pi-tui <code>wrapTextWithAnsi</code></td>
+<td><code>src/core/termination.ts</code></td>
+<td>Keep the small ASCII wrapper.</td>
+<td>Core cannot import Pi across the engine boundary, and the shutdown notice does not justify another adapter.</td>
+</tr>
+<tr>
+<td>No pi-tui transcript model</td>
+<td><code>src/interactive/chat-panel.ts</code> and <code>src/interactive/worker-stream.ts</code></td>
+<td>Keep Clio ownership.</td>
+<td>Transcript folding, worker cards, and tool-output collapse are application policy.</td>
+</tr>
+<tr>
+<td>pi-tui <code>CombinedAutocompleteProvider</code></td>
+<td><code>src/interactive/slash-autocomplete.ts</code></td>
+<td>Keep Clio command composition.</td>
+<td>Clio&#39;s declarative slash specification owns parsing, help, and completion consistency.</td>
+</tr>
+<tr>
+<td>pi-tui <code>KeybindingsManager</code>, <code>TUI_KEYBINDINGS</code>, and <code>Editor.addToHistory</code></td>
+<td><code>src/domains/config/keybindings.ts</code> and interactive editor wiring</td>
+<td>Route terminal actions through Pi.</td>
+<td>Pi owns editor behavior while Clio owns the configured bindings and accepted-input policy.</td>
+</tr>
+<tr>
+<td>pi-tui <code>Markdown</code>, <code>renderLatex</code>, <code>visibleWidth</code>, <code>truncateToWidth</code>, <code>wrapTextWithAnsi</code>, and <code>stripTerminalSequences</code></td>
+<td>Interactive Markdown, Mermaid, layout, and width wiring</td>
+<td>Route terminal primitives through Pi.</td>
+<td>Clio retains theme tokens, Mermaid span styling, and application layout only.</td>
+</tr>
+<tr>
+<td>pi-agent-core <code>prepareNextTurn</code> / <code>prepareNextTurnWithContext</code> (0.84.4 ordering: runs only when the loop will start another assistant turn)</td>
+<td><code>src/interactive/turn-runtime.ts</code> continuation guard and <code>src/interactive/turn-context.ts</code> <code>postToolContinuationGuard</code></td>
+<td>Keep <code>prepareNextTurn</code>; no adaptation.</td>
+<td>The guard already returned early unless the transcript tail was a tool result, so it was continuation-only on 0.84.0. Under 0.84.4 it also stops running after terminating batches and before <code>agent_end</code>, which removes a spurious guard failure after <code>artifact</code>-style terminal tool results. End-of-run work stays on <code>agent_end</code>. Locked by <code>tests/contracts/engine-lifecycle.test.ts</code>.</td>
+</tr>
+<tr>
+<td>pi-agent-core <code>Agent.reset()</code> (0.84.1 rejects during an active run)</td>
+<td><code>src/interactive/chat-loop.ts</code> <code>resetForSession</code> and <code>src/interactive/session-switch-settlement.ts</code></td>
+<td>Keep Clio&#39;s settle-then-replace reset.</td>
+<td>Clio never calls <code>Agent.reset()</code>. Every session reset caller cancels and awaits <code>whenSettled()</code> first, then replaces <code>agent.state.messages</code>; the bang-command path waits on <code>isStreaming()</code> before refreshing. The contract test records that a mid-run reset is refused upstream.</td>
+</tr>
+<tr>
+<td>pi-agent-core <code>BeforeToolCallResult.terminate</code> (0.84.1)</td>
+<td><code>src/tools/agent-tools.ts</code> blocked-call path</td>
+<td>Decline.</td>
+<td>Clio blocks tools inside <code>execute</code> by throwing the model-facing rejection; a blocked call must not end the batch. Batch termination stays on <code>AgentToolResult.terminate</code> from successful terminal tools.</td>
+</tr>
+<tr>
+<td>pi-agent-core <code>streamProxy()</code> namespace metadata (0.84.2) and <code>ToolCall.namespace</code></td>
+<td>None</td>
+<td>Decline.</td>
+<td>Clio does not proxy assistant streams and does not use OpenAI Responses namespaced or deferred tools.</td>
+</tr>
+<tr>
+<td>pi-ai <code>SimpleStreamOptions.toolChoice</code> (0.84.3, <code>auto</code> / <code>none</code>)</td>
+<td><code>src/engine/provider-payload.ts</code> and the <code>onPayload</code> hook in <code>src/interactive/turn-runtime.ts</code> and <code>src/engine/worker-runtime.ts</code></td>
+<td>Keep the Clio payload patch.</td>
+<td>Clio needs both <code>none</code> and a named required tool across every dialect it serves, including generic OpenAI-compatible servers that reject object <code>tool_choice</code>. Splitting <code>none</code> onto the neutral option would leave two mechanisms for one concern.</td>
+</tr>
+<tr>
+<td>pi-ai strict tool-schema conversion and null normalization (0.84.2)</td>
+<td><code>src/engine/ai.ts</code> <code>validateEngineToolArguments</code></td>
+<td>Inherit.</td>
+<td>No Clio tool sets <code>constrainedSampling</code>, so strict conversion is inert. <code>null</code> for an optional non-nullable argument is now dropped instead of rejected; locked by the engine lifecycle contract.</td>
+</tr>
+<tr>
+<td>pi-ai OpenAI-compatible reasoning replay and signature serialization fixes (0.84.3, 0.84.4)</td>
+<td><code>src/engine/apis/openai-completions.ts</code></td>
+<td>Inherit.</td>
+<td>The wrapper delegates <code>stream</code> and <code>streamSimple</code> to Pi&#39;s adapter, so replay fixes apply to in-run turns. Clio&#39;s ledger does not persist <code>thinkingSignature</code>, so resumed sessions still replay without signatures (pre-existing).</td>
+</tr>
+<tr>
+<td>pi-ai Anthropic server-side refusal fallback with returned-model pricing (0.84.3)</td>
+<td><code>src/interactive/turn-context.ts</code> <code>reconcileUsage</code> and <code>src/domains/observability/trace-store.ts</code></td>
+<td>Inherit.</td>
+<td>Usage and cost arrive already priced for the returned model; Clio records <code>message.model</code> as reported. <code>fallbacks</code> is only sent for catalog models that declare <code>allowedFallbackModels</code>.</td>
+</tr>
+<tr>
+<td>pi-tui capability overrides (<code>PI_HYPERLINKS</code>, <code>PI_IMAGE_PROTOCOL</code>, <code>PI_TRUE_COLOR</code>, <code>setCapabilityOverrides</code>) and <code>PI_TUI_ESC_TIMEOUT</code> (0.84.2, 0.84.4)</td>
+<td><code>src/interactive/theme/tokens.ts</code> truecolor detection</td>
+<td>Decline.</td>
+<td>These govern pi-tui&#39;s own image, hyperlink, and escape-sequence handling. Clio&#39;s theme detects truecolor from <code>COLORTERM</code> and <code>TERM</code> independently and does not consume pi-tui capability detection.</td>
+</tr>
+<tr>
+<td>pi-tui <code>TuiAltScreenOptions.copyOnSelect</code> / <code>copySelection</code> and transcript search (<code>tui.altScreen.search*</code>, 0.84.2, 0.84.4)</td>
+<td><code>src/interactive/interactive-shell.ts</code> alt-screen construction and <code>src/domains/config/keybindings.ts</code></td>
+<td>Inherit defaults.</td>
+<td>Selection copy stays on by default. Search is pi-tui&#39;s viewport listener and runs before Clio&#39;s router; <code>ctrl+g</code> advances a match only while the search overlay is focused, so the Clio leader chord is unavailable during a search and nowhere else. Locked by the engine lifecycle contract.</td>
+</tr>
+<tr>
+<td>pi-tui alternate-screen direct-row painting (0.84.2)</td>
+<td><code>src/engine/instrumented-tui.ts</code></td>
+<td>Inherit.</td>
+<td><code>compositeOverlays</code>, <code>extractCursorPosition</code>, and <code>applyLineResets</code> still run inside one <code>doRender</code>, so Clio&#39;s frame and phase measurements are unchanged. Locked by the engine lifecycle contract.</td>
+</tr>
+</tbody></table>
+<h2>Thin-wrapper watch list</h2>
+<p>Review these files first when Pi changes. They intentionally contain little
+behavior and should not grow another implementation of an SDK primitive.</p>
+<ul>
+<li><code>src/engine/api-registry.ts</code> owns Clio&#39;s ordered dispatcher using Pi&#39;s public lazy API factories and full built-in provider catalog. Its dynamic <code>/compat</code> bridge exists only for configured out-of-tree runtime plugins that require Pi&#39;s process-global registry identity.</li>
+<li><code>src/engine/env-api-keys.ts</code> pins Pi 0.84&#39;s synchronous environment-key and ambient-credential discovery behind a parity contract; revisit it on every Pi upgrade until Pi exports that helper directly.</li>
+<li><code>src/engine/apis/openai-completions.ts</code> maps compatibility flags, sampling parameters, and thinking budgets. Its Clio deltas are the local-runtime guards and sentinel, Harmony, and Gemma filters.</li>
+<li><code>src/engine/provider-payload.ts</code> retains only the OpenAI Responses reasoning-summary patch.</li>
+<li><code>src/engine/types.ts</code> and <code>src/engine/ai.ts</code> expose erased Pi types and <code>StringEnum</code> behind the engine boundary.</li>
+<li><code>src/domains/session/retry.ts</code> wraps <code>isRetryableAssistantError</code> and adds the local-model loading rule.</li>
+<li><code>src/interactive/chat-renderer.ts</code> consumes Pi&#39;s compaction, branch, and bash replay wording through <code>src/engine/messages.ts</code>.</li>
+<li>Interactive Markdown, Mermaid, LaTeX, fullscreen, alternate-screen, and keybinding glue should continue to compose pi-tui primitives.</li>
+</ul>
+<h2>Pi regression net</h2>
+<p>Run these contracts first on a Pi bump, before the full gate:</p>
+<ul>
+<li><code>tests/contracts/engine-lifecycle.test.ts</code> (agent-loop ordering, reset, tool-argument normalization, keybinding table, alt-screen render seams)</li>
+<li><code>tests/contracts/provider-transport.test.ts</code></li>
+<li><code>tests/contracts/provider-context-boundary.test.ts</code></li>
+<li><code>tests/contracts/gemma-channel-filter.test.ts</code></li>
+<li><code>tests/contracts/tool-boundaries.test.ts</code></li>
+<li><code>tests/contracts/session-durability.test.ts</code></li>
+<li><code>tests/smoke/process-lifecycle.test.ts</code></li>
+</ul>
+<p>The complete upgrade procedure lives in
+<a href="development_pipeline_blueprint.html#inheriting-a-pi-release">Development Pipeline</a>.</p>
+        </article>
+        <nav class="related-nav" aria-label="Adjacent references">
+          <a class="nav-link-card" href="observability_blueprint.html"><span class="nav-label">Previous</span><span class="nav-title">Observability Viewer</span></a>
+          <a class="nav-link-card next" href="tools_blueprint.html"><span class="nav-label">Next</span><span class="nav-title">Prompt Envelope and Tools</span></a>
+        </nav>
+        <p class="reference-footer-note">Canonical content lives in the mapped Markdown page. This visual counterpart adds navigation without changing the contract.</p>
       </main>
     </div>
-
-    <footer>
-      <p>Clio Coder Pi SDK Boundary Blueprint &bull; Version 0.4.0 &bull; Gnosis Research Center</p>
-    </footer>
+    <footer>Clio Coder documentation · source-aligned at v0.4.2</footer>
   </div>
-
   <script src="shared.js"></script>
-  <script>
-    function switchTab(tabId) {
-      document.querySelectorAll('.tab-btn').forEach(btn => btn.classList.remove('active'));
-      document.querySelectorAll('.tab-pane').forEach(pane => pane.classList.remove('active'));
-
-      const pane = document.getElementById(`pane-${tabId}`);
-      if (pane) pane.classList.add('active');
-
-      const activeBtn = Array.from(document.querySelectorAll('.tab-btn')).find(btn => {
-        return btn.getAttribute('onclick')?.includes(`'${tabId}'`);
-      });
-      if (activeBtn) activeBtn.classList.add('active');
-
-      if (window.initTableOfContents) window.initTableOfContents();
-    }
-  </script>
 </body>
 </html>

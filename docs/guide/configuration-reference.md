@@ -1,5 +1,8 @@
 # Configuration reference
 
+> **Visual blueprint:** The source checkout includes the complete
+> [Configuration reference visual reference](https://github.com/iowarp/clio-coder/blob/main/docs/html/configuration_reference_blueprint.html).
+
 Every switch that changes what Clio Coder does, in one place: settings keys, environment variables, CLI flags, project files under `.clio-coder/`, recipe and prompt-fragment frontmatter, tool arguments the model can send, and model knowledge-base tags. The source of truth is `src/`; this page is the audited inventory of what the code read at the 0.4.2 cut and is maintained by hand with each release. The narrative guide is [configuration-and-targets.md](configuration-and-targets.md); operator prose for each environment variable is in [environment-variables.md](environment-variables.md).
 
 Precedence, where several surfaces set the same value: a one-run CLI flag beats a session override (`/settings`, `/model`, `/thinking`), which beats `.clio-coder/settings.local.yaml`, which beats `.clio-coder/settings.yaml`, which beats the user `settings.yaml`, which beats the compiled default. Entries whose order differs say so in their precedence column.

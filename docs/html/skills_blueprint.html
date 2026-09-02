@@ -1,671 +1,128 @@
-<!DOCTYPE html>
+<!doctype html>
 <html lang="en">
 <head>
-  <meta charset="UTF-8">
-  <meta name="viewport" content="width=device-width, initial-scale=1.0">
-  <title>Clio Coder Skills Hub & Marketplace</title>
-
-  <!-- Fonts -->
-
-  <style>
-    :root {
-      --bg-dark: #090d16;
-      --bg-card: rgba(17, 24, 39, 0.7);
-      --border-card: rgba(255, 255, 255, 0.08);
-      --text-main: #f3f4f6;
-      --text-muted: #9ca3af;
-      --text-dark: #4b5563;
-
-      /* Glowing Neon Colors */
-      --color-cyan: #00f0ff;
-      --color-cyan-rgb: 0, 240, 255;
-      --color-purple: #bd00ff;
-      --color-purple-rgb: 189, 0, 255;
-      --color-emerald: #10b981;
-      --color-emerald-rgb: 16, 185, 129;
-      --color-amber: #f59e0b;
-      --color-amber-rgb: 245, 158, 11;
-      --color-rose: #ef4444;
-      --color-rose-rgb: 239, 68, 68;
-
-      --font-sans: "Segoe UI", -apple-system, BlinkMacSystemFont, Roboto, "Helvetica Neue", Arial, sans-serif;
-      --font-mono: "SFMono-Regular", Consolas, "Liberation Mono", Menlo, monospace;
-    }
-
-    * {
-      box-sizing: border-box;
-      margin: 0;
-      padding: 0;
-    }
-
-    body {
-      background-color: var(--bg-dark);
-      background-image:
-        radial-gradient(circle at 10% 15%, rgba(var(--color-cyan-rgb), 0.04) 0%, transparent 35%),
-        radial-gradient(circle at 90% 85%, rgba(var(--color-purple-rgb), 0.04) 0%, transparent 35%),
-        radial-gradient(circle at 50% 50%, #0c1220 0%, var(--bg-dark) 100%);
-      color: var(--text-main);
-      font-family: var(--font-sans);
-      min-height: 100vh;
-      display: flex;
-      flex-direction: column;
-      overflow-x: hidden;
-    }
-
-    .container {
-      max-width: 1400px;
-      margin: 0 auto;
-      padding: 2rem;
-      flex: 1;
-      display: flex;
-      flex-direction: column;
-      width: 100%;
-    }
-
-    /* Header styling */
-    header {
-      border-bottom: 1px solid var(--border-card);
-      padding-bottom: 1.5rem;
-      margin-bottom: 2rem;
-      display: flex;
-      justify-content: space-between;
-      align-items: center;
-      flex-wrap: wrap;
-      gap: 1rem;
-    }
-
-    .header-logo {
-      display: flex;
-      align-items: center;
-      gap: 1rem;
-    }
-
-    .logo-box {
-      width: 48px;
-      height: 48px;
-      background: rgba(255, 255, 255, 0.02);
-      border: 1px solid var(--border-card);
-      border-radius: 10px;
-      display: flex;
-      align-items: center;
-      justify-content: center;
-      box-shadow: 0 0 15px rgba(var(--color-cyan-rgb), 0.1);
-    }
-
-    h1 {
-      font-size: 1.6rem;
-      font-weight: 800;
-      letter-spacing: -0.02em;
-    }
-
-    .subtitle {
-      font-size: 0.85rem;
-      color: var(--text-muted);
-      margin-top: 0.15rem;
-    }
-
-    .version-tag {
-      background: rgba(255, 255, 255, 0.03);
-      border: 1px solid var(--border-card);
-      padding: 0.4rem 0.8rem;
-      border-radius: 8px;
-      font-size: 0.8rem;
-      font-family: var(--font-mono);
-      display: flex;
-      align-items: center;
-      gap: 0.5rem;
-    }
-
-    .version-dot {
-      width: 6px;
-      height: 6px;
-      background-color: var(--color-cyan);
-      border-radius: 50%;
-      box-shadow: 0 0 8px var(--color-cyan);
-    }
-
-    .back-link {
-      color: var(--text-muted);
-      text-decoration: none;
-      font-size: 0.85rem;
-      display: flex;
-      align-items: center;
-      gap: 0.35rem;
-      transition: color 0.2s;
-    }
-    .back-link:hover {
-      color: var(--color-cyan);
-    }
-
-    /* Split Hub Layout */
-    .skills-hub {
-      display: grid;
-      grid-template-columns: 1fr 1fr;
-      gap: 2rem;
-      flex: 1;
-      min-height: 550px;
-    }
-
-    .list-side {
-      display: flex;
-      flex-direction: column;
-      gap: 1.25rem;
-    }
-
-    .search-panel {
-      background: var(--bg-card);
-      border: 1px solid var(--border-card);
-      border-radius: 12px;
-      padding: 1.25rem;
-      backdrop-filter: blur(12px);
-    }
-
-    .search-input-wrapper {
-      position: relative;
-      display: flex;
-      gap: 0.75rem;
-    }
-
-    .search-input {
-      flex: 1;
-      padding: 0.6rem 1rem;
-      background: rgba(0, 0, 0, 0.3);
-      border: 1px solid var(--border-card);
-      border-radius: 8px;
-      color: #fff;
-      font-size: 0.9rem;
-      font-family: var(--font-sans);
-    }
-    .search-input:focus {
-      outline: none;
-      border-color: var(--color-cyan);
-      box-shadow: 0 0 10px rgba(var(--color-cyan-rgb), 0.15);
-    }
-
-    .skills-list-container {
-      background: var(--bg-card);
-      border: 1px solid var(--border-card);
-      border-radius: 12px;
-      padding: 1rem;
-      flex: 1;
-      overflow-y: auto;
-      max-height: 450px;
-      display: flex;
-      flex-direction: column;
-      gap: 1rem;
-    }
-
-    .group-title {
-      font-size: 0.75rem;
-      font-weight: 800;
-      text-transform: uppercase;
-      letter-spacing: 0.05em;
-      color: var(--text-dark);
-      margin-bottom: 0.5rem;
-      border-bottom: 1px solid rgba(255, 255, 255, 0.03);
-      padding-bottom: 0.25rem;
-    }
-
-    .skill-card {
-      background: rgba(255, 255, 255, 0.01);
-      border: 1px solid var(--border-card);
-      border-radius: 8px;
-      padding: 0.75rem 1rem;
-      cursor: pointer;
-      transition: all 0.2s;
-      display: flex;
-      justify-content: space-between;
-      align-items: center;
-    }
-    .skill-card:hover {
-      background: rgba(255, 255, 255, 0.03);
-      border-color: rgba(var(--color-cyan-rgb), 0.3);
-    }
-    .skill-card.active {
-      background: rgba(var(--color-cyan-rgb), 0.03);
-      border-color: var(--color-cyan);
-      box-shadow: 0 0 12px rgba(var(--color-cyan-rgb), 0.1);
-    }
-
-    .skill-name {
-      font-size: 0.85rem;
-      font-weight: 600;
-      font-family: var(--font-mono);
-      color: #fff;
-    }
-    .skill-card.active .skill-name {
-      color: var(--color-cyan);
-    }
-
-    .skill-desc-short {
-      font-size: 0.75rem;
-      color: var(--text-muted);
-      margin-top: 0.15rem;
-    }
-
-    .scope-badge {
-      font-size: 0.65rem;
-      padding: 0.15rem 0.45rem;
-      border-radius: 4px;
-      font-weight: 700;
-      text-transform: uppercase;
-    }
-    .scope-project { background: rgba(0, 240, 255, 0.1); border: 1px solid var(--color-cyan); color: var(--color-cyan); }
-    .scope-user { background: rgba(189, 0, 255, 0.1); border: 1px solid var(--color-purple); color: var(--color-purple); }
-    .scope-market { background: rgba(245, 158, 11, 0.1); border: 1px solid var(--color-amber); color: var(--color-amber); }
-
-    .detail-side {
-      background: var(--bg-card);
-      border: 1px solid var(--border-card);
-      border-radius: 12px;
-      padding: 1.5rem;
-      backdrop-filter: blur(12px);
-      display: flex;
-      flex-direction: column;
-      gap: 1.25rem;
-    }
-
-    .detail-header {
-      border-bottom: 1px solid var(--border-card);
-      padding-bottom: 1rem;
-      display: flex;
-      justify-content: space-between;
-      align-items: flex-start;
-    }
-
-    .detail-title {
-      font-size: 1.15rem;
-      font-weight: 700;
-      font-family: var(--font-mono);
-      color: #fff;
-    }
-
-    .detail-provenance {
-      font-size: 0.75rem;
-      color: var(--text-muted);
-      margin-top: 0.25rem;
-      display: flex;
-      align-items: center;
-      gap: 0.35rem;
-    }
-
-    .provenance-dot {
-      width: 6px;
-      height: 6px;
-      border-radius: 50%;
-    }
-    .provenance-live { background-color: var(--color-emerald); }
-    .provenance-cached { background-color: var(--color-cyan); }
-    .provenance-pinned { background-color: var(--color-amber); }
-
-    .metadata-grid {
-      display: grid;
-      grid-template-columns: 1fr 1fr;
-      gap: 0.75rem;
-      background: rgba(0, 0, 0, 0.15);
-      border: 1px solid var(--border-card);
-      border-radius: 8px;
-      padding: 0.75rem;
-      font-size: 0.8rem;
-    }
-
-    .metadata-item span {
-      color: var(--text-muted);
-    }
-    .metadata-item strong {
-      color: #fff;
-      font-family: var(--font-mono);
-    }
-
-    .detail-body {
-      flex: 1;
-      background: #05080e;
-      border: 1px solid var(--border-card);
-      border-radius: 8px;
-      padding: 1rem;
-      font-family: var(--font-sans);
-      font-size: 0.85rem;
-      line-height: 1.5;
-      overflow-y: auto;
-      white-space: pre-wrap;
-      color: #e5e7eb;
-    }
-
-    .hud-actions {
-      display: flex;
-      gap: 0.75rem;
-    }
-
-    .btn {
-      background: rgba(255, 255, 255, 0.03);
-      border: 1px solid var(--border-card);
-      color: var(--text-main);
-      padding: 0.5rem 1rem;
-      border-radius: 6px;
-      font-size: 0.85rem;
-      cursor: pointer;
-      transition: all 0.2s;
-      display: inline-flex;
-      align-items: center;
-      gap: 0.35rem;
-    }
-    .btn:hover {
-      background: rgba(255, 255, 255, 0.08);
-      border-color: var(--color-cyan);
-    }
-    .btn-action {
-      background: rgba(var(--color-cyan-rgb), 0.1);
-      border-color: var(--color-cyan);
-      color: var(--color-cyan);
-    }
-    .btn-action:hover {
-      background: rgba(var(--color-cyan-rgb), 0.2);
-    }
-
-    .hud-console {
-      background: #05080e;
-      border: 1px solid var(--border-card);
-      border-radius: 8px;
-      padding: 0.75rem 1rem;
-      font-family: var(--font-mono);
-      font-size: 0.75rem;
-      color: var(--color-emerald);
-      min-height: 40px;
-      display: flex;
-      align-items: center;
-    }
-
-    footer {
-      text-align: center;
-      margin-top: 3rem;
-      border-top: 1px solid rgba(255, 255, 255, 0.05);
-      padding-top: 1.5rem;
-      color: var(--text-dark);
-      font-size: 0.8rem;
-    }
-  </style>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <meta name="clio-markdown-source" content="docs/guide/skills-marketplace.md">
+  <meta name="clio-docs-version" content="0.4.2">
+  <title>Skills Marketplace · Clio Coder 0.4.2</title>
+  <link rel="icon" href="data:,">
+  <link rel="stylesheet" href="shared.css">
 </head>
-<body>
-
+<body data-doc-category="guide">
+  <div class="reading-progress" aria-hidden="true"></div>
+  <a class="skip-link" href="#reference-content">Skip to reference</a>
   <div class="container">
-    <!-- Header -->
-    <header>
-      <div class="header-logo">
-        <div class="logo-box">
-          <svg viewBox="0 0 64 64" width="32" height="32" role="img" aria-label="Clio Coder logo"><title>Clio Coder logo</title><rect x="8" y="8" width="48" height="48" rx="12" fill="rgba(0,240,255,0.12)" stroke="rgba(0,240,255,0.65)"/><path d="M32 14 16 23l16 9 16-9-16-9Z" fill="none" stroke="#00f0ff" stroke-width="3" stroke-linejoin="round"/><path d="M16 32l16 9 16-9M16 41l16 9 16-9" fill="none" stroke="#bd00ff" stroke-width="3" stroke-linecap="round" stroke-linejoin="round"/></svg>
-        </div>
-        <div>
+    <header class="document-header" data-category="Guide">
+      <div class="header-left">
+        <a class="header-logo" href="index.html" aria-label="Documentation index">
+          <svg viewBox="0 0 24 24" fill="none" aria-hidden="true">
+            <path d="M12 2 2 7l10 5 10-5-10-5Z" stroke="url(#clio-logo)" stroke-width="2" stroke-linejoin="round"/>
+            <path d="m2 12 10 5 10-5M2 17l10 5 10-5" stroke="url(#clio-logo)" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"/>
+            <defs><linearGradient id="clio-logo" x1="2" y1="2" x2="22" y2="22"><stop stop-color="#00d4db"/><stop offset="1" stop-color="#ff7e29"/></linearGradient></defs>
+          </svg>
+        </a>
+        <div class="header-title-wrapper">
+          <p class="document-kicker">Guide / canonical reference</p>
           <h1>Skills Marketplace</h1>
-          <div class="subtitle">Interactive Skills Hub Explorer & Package Installer</div>
+          <p class="document-path">docs/guide/skills-marketplace.md</p>
         </div>
       </div>
-      <div style="display:flex; align-items:center; gap: 1rem;">
-        <a href="index.html" class="back-link">
-          <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><title>Icon</title><line x1="19" y1="12" x2="5" y2="12"/><polyline points="12 19 5 12 12 5"/></svg>
-          Back to Hub
-        </a>
-        <div class="version-tag">
-          <div class="version-dot"></div>
-          Clio Coder v0.4.0
-        </div>
+      <div class="header-right">
+        <a class="back-btn" href="index.html">← Index</a>
+        <span class="version-badge">v0.4.2</span>
       </div>
     </header>
-
-    <!-- Skills Hub Split Pane -->
-    <div class="skills-hub">
-
-      <!-- Left side: List and search -->
-      <div class="list-side">
-        <div class="search-panel">
-          <div class="search-input-wrapper">
-            <input type="text" class="search-input" id="search-box" placeholder="Search skills by name or description..." oninput="filterSkills()">
-          </div>
-        </div>
-
-        <div class="skills-list-container">
-          <!-- Project Group -->
-          <div>
-            <div class="group-title">Project Skills (.clio-coder/skills)</div>
-            <div id="group-project"></div>
-          </div>
-          <!-- User Group -->
-          <div style="margin-top: 1rem;">
-            <div class="group-title">User Skills (configDir/skills)</div>
-            <div id="group-user"></div>
-          </div>
-          <!-- Marketplace Group -->
-          <div style="margin-top: 1rem;">
-            <div class="group-title">Marketplace (local catalog or skill-marketplace.json)</div>
-            <div id="group-market"></div>
-          </div>
-        </div>
-      </div>
-
-      <!-- Right side: Detail pane & Simulator actions -->
-      <div class="detail-side">
-        <div class="detail-header">
-          <div>
-            <div class="detail-title" id="det-title">hdf5-review</div>
-            <div class="detail-provenance">
-              <span class="provenance-dot" id="det-provenance-dot"></span>
-              <span id="det-provenance-text">Loaded from Cache</span>
-            </div>
-          </div>
-          <span class="scope-badge" id="det-scope-badge">Project</span>
-        </div>
-
-        <div class="metadata-grid">
-          <div class="metadata-item"><span>License:</span> <strong id="det-license">MIT</strong></div>
-          <div class="metadata-item"><span>Version:</span> <strong id="det-version">1.0.0</strong></div>
-          <div class="metadata-item"><span>Allowed Tools:</span> <strong id="det-tools">Read, Grep</strong></div>
-          <div class="metadata-item"><span>Integrity Hash:</span> <strong id="det-hash">sha256-4b684...</strong></div>
-        </div>
-
-        <div class="detail-body" id="det-body">
-          Loading...
-        </div>
-
-        <!-- CLI Console Simulation -->
-        <div class="hud-console" id="console-output">
-          System idle. Select a skill or install packages.
-        </div>
-
-        <div class="hud-actions">
-          <button type="button" class="btn btn-action" onclick="simulateSelectSkill()">
-            Insert to Editor (Enter)
-          </button>
-          <button type="button" class="btn" id="install-btn" onclick="simulateInstallSkill()">
-            Install Eagerly (i)
-          </button>
-        </div>
-      </div>
-
+    <div class="page-layout-grid reference-layout">
+      <aside class="sidebar reference-sidebar" aria-label="On this page">
+        <nav class="toc-container">
+          <p class="toc-title">On this page</p>
+          <a class="sidebar-source" href="https://github.com/iowarp/clio-coder/blob/main/docs/guide/skills-marketplace.md">Canonical Markdown<br>docs/guide/skills-marketplace.md</a>
+          <ul class="toc-list"></ul>
+        </nav>
+      </aside>
+      <main class="reference-main" id="reference-content">
+        <article class="reference-prose glass-card">
+<blockquote>
+<p><strong>Visual blueprint:</strong> The source checkout includes the complete
+<a href="skills_blueprint.html">Skills Marketplace visual reference</a>.</p>
+</blockquote>
+<p>The Skills Hub (<code>/skill</code>) shows project skills, user skills, and the marketplace. Every marketplace row comes from the same local lookup that <code>clio-coder skills install &lt;name&gt;</code> and <code>/skill &lt;name&gt;</code> resolve through, so the hub lists nothing it cannot install.</p>
+<h2>Where marketplace rows come from</h2>
+<p>There is one source, <code>discoverMarketplaceSkills()</code> in <code>src/domains/resources/skills/marketplace.ts</code>, and it reads two kinds of real local data:</p>
+<ol>
+<li><strong>A catalog directory</strong> of actual <code>SKILL.md</code> packages. Resolution order: <code>CLIO_CODER_SKILL_CATALOG_DIR</code>, then a <code>skills/</code> directory in the working tree when it holds packages, then the <code>skills/</code> catalog the installed clio-coder package carries. Metadata comes from the packages themselves through the skill loader, so a row&#39;s version, category, and audit state are the package&#39;s own.</li>
+<li><strong>A JSON index</strong> whose entries name a <code>sourceUrl</code> that <code>clio-coder skills install</code> accepts. Resolution order: <code>CLIO_CODER_SKILL_MARKETPLACE_INDEX</code>, then <code>&lt;configDir&gt;/skill-marketplace.json</code>, then the package&#39;s own <code>skills/skill-marketplace.json</code>. <code>npm run skills:pin</code> publishes that file&#39;s <code>version</code>, <code>audit</code>, and <code>category</code> fields.</li>
+</ol>
+<p>The package fallbacks mean a fresh npm install has a marketplace with no configuration: <code>clio-coder skills search grill</code> lists <code>grill-me</code> from the shipped catalog, <code>clio-coder skills install grill-me</code> copies it out of the package into <code>.clio-coder/skills/</code>, and <code>/skill grill-me</code> offers that install before running. The shipped catalog is a marketplace source only, never a discovery root: nothing from it is loadable until the operator installs it, which keeps the install-then-activate contract and the per-skill scope choice in the operator&#39;s hands.</p>
+<p>Catalog packages win over index entries on a name collision, because the local files are the thing that installs. Neither source reaches the network; the hub opens on local data and never blocks. Only an index entry whose <code>sourceUrl</code> is a GitHub URL, and that no catalog also carries, needs the network at install time.</p>
+<p>The model sees the same lookup: <code>context(scope=&quot;skills&quot;)</code> lists installed skills and, under a <code>Marketplace (not installed)</code> heading, the entries this lookup would install. Loading a marketplace-only skill by name answers &quot;not installed&quot; and points at <code>/skill &lt;name&gt;</code>, never <code>unknown skill</code>.</p>
+<p>When both sources are absent (a source checkout with no <code>skills/</code> folder, or an incomplete package) the hub has nothing to list and says so, naming the remedy:</p>
+<pre><code>no skills installed and no local marketplace configured. install one with
+`clio-coder skills install &lt;path|github-url&gt;`, or point CLIO_CODER_SKILL_CATALOG_DIR at a
+skills/ catalog.
+</code></pre>
+<p>The CLI reports the same state as <code>no local skill marketplace catalog or index configured</code>. A marketplace source that exists but fails (an unreadable index, a broken catalog package) is a diagnostic row in the hub, not a silent omission.</p>
+<p>The same index machinery can also describe agent recipes, prompt templates, and fleet contracts through typed entries and requirements. See <a href="resource_library_blueprint.html">resource-library.md</a> for the schema, private catalog, installation roots, and <code>clio-coder library</code> commands. Those kinds render on their own tabs in the hub, described below.</p>
+<h2>Using the hub</h2>
+<table>
+<thead>
+<tr>
+<th>Key</th>
+<th>Action</th>
+</tr>
+</thead>
+<tbody><tr>
+<td>type</td>
+<td>Filter all groups</td>
+</tr>
+<tr>
+<td><code>←</code>/<code>→</code></td>
+<td>Switch tabs</td>
+</tr>
+<tr>
+<td><code>Enter</code></td>
+<td>Use the selected row: insert <code>/skill &lt;name&gt; </code> into the editor for the task text, or the invocation the row&#39;s kind is called by</td>
+</tr>
+<tr>
+<td><code>Tab</code></td>
+<td>Toggle the detail pane (split layout on wide terminals)</td>
+</tr>
+<tr>
+<td><code>i</code></td>
+<td>Install the selected row through the resolver its kind installs by</td>
+</tr>
+<tr>
+<td><code>PgUp</code>/<code>PgDn</code></td>
+<td>Scroll the detail pane</td>
+</tr>
+</tbody></table>
+<p>Invoking an uninstalled marketplace skill with <code>/skill &lt;name&gt;</code> prompts before installing it. <code>i</code> runs the same install path eagerly from the hub.</p>
+<h2>Tabs</h2>
+<p>The hub carries one tab per resource-library kind: Skills, Agents, Prompts, and
+Fleets. <code>←</code> and <code>→</code> move between them. The frame title names the active tab and
+the footer states its row count, so the numbers on screen always describe the
+tab being read. <code>/skill</code> opens Skills; <code>/resources library &lt;kind&gt;</code> opens the
+requested library tab.</p>
+<p>The Skills tab is unchanged. The other three list the entries of their kind from <code>discoverLibrary()</code>, which is the same discovery <code>clio-coder library list --kind &lt;kind&gt;</code> reads, so the hub and the CLI never disagree about what exists. Each row carries the entry&#39;s origin and version, whether it is installed or available, the short form of its recorded pin hash, and, in the warning token, the names of any requirements it still needs. An entry the catalog refuses outright, because a requirement is missing, malformed, or cyclic, appears as a diagnostic row rather than being omitted.</p>
+<p><code>Enter</code> uses the selected row. An agent inserts <code>/run &lt;agent&gt; </code> into the composer, a prompt inserts its <code>/&lt;id&gt; </code> invocation, a skill does what the Skills tab does, and a fleet closes the hub and opens the <code>/fleet run</code> approval preview for that contract. A row that is not installed says so instead and points at <code>i</code>.</p>
+<p><code>i</code> installs, through the same plan-then-write pair <code>clio-coder library add</code> runs. A framed confirmation states every destination path and SHA-256 hash before anything is written, which is the TUI spelling of the CLI&#39;s <code>--yes</code> gate; <code>Esc</code> there leaves every destination untouched. An entry whose requirements are not all installed is refused by name on the first <code>i</code>, and a second <code>i</code> opens the install-with-requirements confirmation, which names every entry it would write in dependency order.</p>
+<p>The CLI <code>clio-coder skills</code> commands manage local skill discovery, validation, and
+creation. Extension resource roots and share archives are documented in
+<a href="extensions_blueprint.html">extensions-and-sharing.md</a>; this page owns the TUI
+Hub and marketplace behavior.</p>
+<h2>Publishing a skill</h2>
+<p>Add a directory under <code>skills/&lt;category&gt;/&lt;name&gt;/</code> (or <code>skills/&lt;name&gt;/</code>) in the repo containing a <code>SKILL.md</code> with <code>name</code> and <code>description</code> frontmatter. The directory name must match <code>[A-Za-z0-9][A-Za-z0-9._-]*</code>. Run <code>npm run skills:pin</code> to republish <code>skills/skill-marketplace.json</code>, which is the index consumers point <code>CLIO_CODER_SKILL_MARKETPLACE_INDEX</code> at or copy to <code>&lt;configDir&gt;/skill-marketplace.json</code>. Scientific and niche coding domains are the marketplace&#39;s focus; see the existing <code>skills/</code> tree for the house format.</p>
+        </article>
+        <nav class="related-nav" aria-label="Adjacent references">
+          <a class="nav-link-card" href="resource_library_blueprint.html"><span class="nav-label">Previous</span><span class="nav-title">Resource Library</span></a>
+          <a class="nav-link-card next" href="tool_usage_blueprint.html"><span class="nav-label">Next</span><span class="nav-title">Tool Usage Reference</span></a>
+        </nav>
+        <p class="reference-footer-note">Canonical content lives in the mapped Markdown page. This visual counterpart adds navigation without changing the contract.</p>
+      </main>
     </div>
-
-    <footer>
-      <p>Clio Coder Visual Specification Blueprint. Product Version v0.4.0. Designed with high-performance dark aesthetics.</p>
-    </footer>
+    <footer>Clio Coder documentation · source-aligned at v0.4.2</footer>
   </div>
-
-  <script>
-    const SKILLS = {
-      "hdf5-review": {
-        name: "hdf5-review",
-        scope: "project",
-        scopeClass: "scope-project",
-        provenance: "Local Disk (.clio-coder/skills/hdf5-review)",
-        provDot: "provenance-cached",
-        license: "MIT",
-        version: "1.0.0",
-        tools: "Read, Grep",
-        hash: "sha256-abc482fd8f9a93012ff1875e",
-        description: "Review HDF5/NetCDF validation logic and output assumptions.",
-        body: `When asked to review scientific array output:
-- identify expected dimensions and attributes;
-- ask for validation data when absent;
-- prefer deterministic scripts over visual inspection;
-- cite files and commands used.`
-      },
-      "sys-bench": {
-        name: "sys-bench",
-        scope: "user",
-        scopeClass: "scope-user",
-        provenance: "User Directory (~/.config/clio-coder/skills/sys-bench)",
-        provDot: "provenance-cached",
-        license: "Apache-2.0",
-        version: "1.2.0",
-        tools: "Bash, Verify",
-        hash: "sha256-d8f92ea4b78712ab870c99a0",
-        description: "Execute baseline benchmarks on target serving matrices.",
-        body: `When benchmarking local model presets:
-- build the binaries in release target;
-- request single-file CLI output generation;
-- verify model context parameters and record output TTFT.`
-      },
-      "netcdf-check": {
-        name: "netcdf-check",
-        scope: "market",
-        scopeClass: "scope-market",
-        provenance: "Local marketplace catalog (installs on i)",
-        provDot: "provenance-pinned",
-        license: "MIT",
-        version: "1.0.1",
-        tools: "Read, Bash",
-        hash: "sha256-ff7a391c12df8bfa982a01f4",
-        description: "Run metadata inspections on NetCDF climate files.",
-        body: `When inspecting .nc file dimensions:
-- invoke 'ncdump -h' to read variables schema;
-- check CF conventions version tag attributes;
-- verify latitude and longitude grids spacing invariants.`
-      },
-      "vtk-render": {
-        name: "vtk-render",
-        scope: "market",
-        scopeClass: "scope-market",
-        provenance: "GitHub contents API listing",
-        provDot: "provenance-live",
-        license: "BSD-3-Clause",
-        version: "2.0.0",
-        tools: "Bash, Read",
-        hash: "sha256-829afc87ffea1029ba87eddf",
-        description: "Generate ParaView state files from local scientific meshes.",
-        body: `When visualizing VTK mesh coordinates:
-- verify cell arrays formatting;
-- validate coordinate system bounds against scientific tolerances;
-- execute local python export pipelines scripts.`
-      }
-    };
-
-    let activeSkill = "hdf5-review";
-
-    function renderList() {
-      document.getElementById("group-project").innerHTML = "";
-      document.getElementById("group-user").innerHTML = "";
-      document.getElementById("group-market").innerHTML = "";
-
-      Object.keys(SKILLS).forEach(key => {
-        const sk = SKILLS[key];
-        const card = document.createElement("div");
-        card.className = `skill-card ${key === activeSkill ? 'active' : ''}`;
-        card.id = `skill-card-${key}`;
-        card.onclick = () => selectSkill(key);
-
-        card.innerHTML = `
-          <div>
-            <div class="skill-name">${sk.name}</div>
-            <div class="skill-desc-short">${sk.description}</div>
-          </div>
-          <span class="scope-badge ${sk.scopeClass}">${sk.scope}</span>
-        `;
-
-        document.getElementById(`group-${sk.scope}`).appendChild(card);
-      });
-    }
-
-    function selectSkill(key) {
-      activeSkill = key;
-      document.querySelectorAll(".skill-card").forEach(c => { c.classList.remove("active"); });
-      document.getElementById(`skill-card-${key}`).classList.add("active");
-
-      const sk = SKILLS[key];
-      document.getElementById("det-title").innerText = sk.name;
-      document.getElementById("det-scope-badge").innerText = sk.scope;
-      document.getElementById("det-scope-badge").className = `scope-badge ${sk.scopeClass}`;
-      document.getElementById("det-provenance-text").innerText = sk.provenance;
-      document.getElementById("det-provenance-dot").className = `provenance-dot ${sk.provDot}`;
-
-      document.getElementById("det-license").innerText = sk.license;
-      document.getElementById("det-version").innerText = sk.version;
-      document.getElementById("det-tools").innerText = sk.tools;
-      document.getElementById("det-hash").innerText = sk.hash;
-      document.getElementById("det-body").textContent = sk.body;
-
-      const installBtn = document.getElementById("install-btn");
-      if (sk.scope === "market") {
-        installBtn.style.display = "inline-flex";
-      } else {
-        installBtn.style.display = "none";
-      }
-    }
-
-    function simulateSelectSkill() {
-      const sk = SKILLS[activeSkill];
-      const cmd = `/skill ${sk.name} `;
-      document.getElementById("console-output").innerText = `[TUI Editor] Inserted: "${cmd}"`;
-
-      const cons = document.getElementById("console-output");
-      cons.style.color = "var(--color-cyan)";
-      setTimeout(() => { cons.style.color = "var(--color-emerald)"; }, 2000);
-    }
-
-    function simulateInstallSkill() {
-      const sk = SKILLS[activeSkill];
-      document.getElementById("console-output").innerText = `[CLI] Eagerly installing skill '${sk.name}' into project scope at '.clio-coder/skills/${sk.name}'...`;
-
-      setTimeout(() => {
-        // Upgrade scope to project
-        sk.scope = "project";
-        sk.scopeClass = "scope-project";
-        sk.provenance = `Eagerly Installed (.clio-coder/skills/${sk.name})`;
-        sk.provDot = "provenance-cached";
-
-        renderList();
-        selectSkill(activeSkill);
-
-        document.getElementById("console-output").innerText = `[SUCCESS] Installed skill '${sk.name}' successfully.`;
-      }, 1500);
-    }
-
-    function filterSkills() {
-      const q = document.getElementById("search-box").value.toLowerCase();
-
-      Object.keys(SKILLS).forEach(key => {
-        const sk = SKILLS[key];
-        const card = document.getElementById(`skill-card-${key}`);
-        if (sk.name.toLowerCase().includes(q) || sk.description.toLowerCase().includes(q) || sk.body.toLowerCase().includes(q)) {
-          card.style.display = "flex";
-        } else {
-          card.style.display = "none";
-        }
-      });
-    }
-
-    // Keybindings support
-    document.addEventListener("keydown", (e) => {
-      if (e.key === "Enter") {
-        simulateSelectSkill();
-      } else if (e.key === "i" || e.key === "I") {
-        const sk = SKILLS[activeSkill];
-        if (sk.scope === "market") {
-          simulateInstallSkill();
-        }
-      }
-    });
-
-    window.onload = () => {
-      renderList();
-      selectSkill(activeSkill);
-    };
-  </script>
+  <script src="shared.js"></script>
 </body>
 </html>

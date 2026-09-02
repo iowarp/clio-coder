@@ -1,9 +1,7 @@
 # Commands and Modes
 
-> [!TIP]
-> **Interactive spec available:** The source checkout includes the
-> [commands blueprint](https://github.com/iowarp/clio-coder/blob/main/docs/html/commands_blueprint.html).
-
+> **Visual blueprint:** The source checkout includes the complete
+> [Commands and Modes visual reference](https://github.com/iowarp/clio-coder/blob/main/docs/html/commands_blueprint.html).
 
 Clio Coder is a terminal-first coding agent. This page is the detailed command
 reference for interactive sessions, headless runs, dispatch, verification, and

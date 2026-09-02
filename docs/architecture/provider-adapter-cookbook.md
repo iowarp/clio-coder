@@ -1,7 +1,7 @@
 # Provider Adapter Cookbook
 
-> [!TIP]
-> **Interactive Spec Available:** An interactive runtime adapter descriptor builder and probe sequence capability checklist is located in the source checkout at [docs/html/provider_adapter_blueprint.html](https://github.com/iowarp/clio-coder/blob/main/docs/html/provider_adapter_blueprint.html).
+> **Visual blueprint:** The source checkout includes the complete
+> [Provider Adapter Cookbook visual reference](https://github.com/iowarp/clio-coder/blob/main/docs/html/provider_adapter_blueprint.html).
 
 This cookbook guides developers through implementing custom model runtimes and inference server integrations within Clio Coder. It explains the runtime descriptor interfaces, probing protocols, model synthesis, and how to configure reasoning and thinking behaviors.
 

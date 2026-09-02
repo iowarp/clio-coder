@@ -1,699 +1,767 @@
-<!DOCTYPE html>
+<!doctype html>
 <html lang="en">
 <head>
-  <meta charset="UTF-8">
-  <meta name="viewport" content="width=device-width, initial-scale=1.0">
-  <title>Clio Coder Evidence &amp; Memory Blueprint (v0.4.0)</title>
-
-  <style>
-    :root {
-      --bg-dark: #090d16;
-      --bg-grid: rgba(255, 255, 255, 0.02);
-      --bg-card: rgba(13, 20, 38, 0.45);
-      --bg-card-hover: rgba(20, 30, 58, 0.6);
-      --border-card: rgba(255, 255, 255, 0.08);
-      --border-card-hover: rgba(0, 240, 255, 0.3);
-      --text-main: #f3f4f6;
-      --text-muted: #9ca3af;
-      --text-dim: #6b7280;
-
-      --color-cyan: #00f0ff;
-      --color-cyan-rgb: 0, 240, 255;
-      --color-purple: #bd00ff;
-      --color-purple-rgb: 189, 0, 255;
-      --color-emerald: #10b981;
-      --color-emerald-rgb: 16, 185, 129;
-      --color-amber: #f59e0b;
-      --color-amber-rgb: 245, 158, 11;
-      --color-rose: #ef4444;
-      --color-rose-rgb: 239, 68, 68;
-
-      --gradient-main: linear-gradient(135deg, var(--color-cyan), var(--color-purple));
-      --shadow-glow: 0 0 25px rgba(0, 240, 255, 0.15);
-      --font-sans: "Segoe UI", -apple-system, BlinkMacSystemFont, Roboto, "Helvetica Neue", Arial, sans-serif;
-      --font-mono: "SFMono-Regular", Consolas, "Liberation Mono", Menlo, monospace;
-
-      --glass-blur: blur(12px);
-    }
-
-    * {
-      box-sizing: border-box;
-      margin: 0;
-      padding: 0;
-    }
-
-    body {
-      background-color: var(--bg-dark);
-      background-image:
-        radial-gradient(circle at 10% 20%, rgba(var(--color-cyan-rgb), 0.05) 0%, transparent 40%),
-        radial-gradient(circle at 90% 80%, rgba(var(--color-purple-rgb), 0.05) 0%, transparent 40%),
-        radial-gradient(circle at 50% 50%, #0d1527 0%, var(--bg-dark) 100%);
-      color: var(--text-main);
-      font-family: var(--font-sans);
-      min-height: 100vh;
-      line-height: 1.6;
-      overflow-x: hidden;
-      position: relative;
-    }
-
-    body::before {
-      content: '';
-      position: absolute;
-      inset: 0;
-      background-image: linear-gradient(var(--bg-grid) 1px, transparent 1px),
-                        linear-gradient(90deg, var(--bg-grid) 1px, transparent 1px);
-      background-size: 40px 40px;
-      background-position: center top;
-      pointer-events: none;
-      z-index: 0;
-      opacity: 0.8;
-    }
-
-    .container {
-      max-width: 1400px;
-      margin: 0 auto;
-      padding: 2rem;
-      position: relative;
-      z-index: 1;
-    }
-
-    /* Header Styling */
-    header {
-      display: flex;
-      justify-content: space-between;
-      align-items: center;
-      margin-bottom: 2.5rem;
-      padding-bottom: 1.5rem;
-      border-bottom: 1px solid rgba(255, 255, 255, 0.05);
-    }
-
-    .header-left {
-      display: flex;
-      align-items: center;
-      gap: 1rem;
-    }
-
-    .header-logo {
-      display: inline-flex;
-      align-items: center;
-      justify-content: center;
-      width: 48px;
-      height: 48px;
-      background: rgba(255, 255, 255, 0.02);
-      border: 1px solid var(--border-card);
-      border-radius: 12px;
-    }
-
-    .header-logo svg {
-      width: 28px;
-      height: 28px;
-    }
-
-    .header-title-wrapper h1 {
-      font-size: 1.5rem;
-      font-weight: 800;
-      letter-spacing: -0.03em;
-      background: linear-gradient(to right, #ffffff, #c7d2fe, var(--color-cyan));
-      -webkit-background-clip: text;
-      -webkit-text-fill-color: transparent;
-    }
-
-    .header-title-wrapper p {
-      font-size: 0.825rem;
-      color: var(--text-muted);
-    }
-
-    .header-right {
-      display: flex;
-      align-items: center;
-      gap: 1rem;
-    }
-
-    .back-btn {
-      background: rgba(255, 255, 255, 0.03);
-      border: 1px solid var(--border-card);
-      color: var(--text-muted);
-      padding: 0.5rem 1rem;
-      border-radius: 8px;
-      font-size: 0.875rem;
-      font-weight: 600;
-      text-decoration: none;
-      display: inline-flex;
-      align-items: center;
-      gap: 0.5rem;
-      transition: all 0.2s;
-    }
-
-    .back-btn:hover {
-      background: rgba(255, 255, 255, 0.08);
-      color: var(--text-main);
-      border-color: rgba(var(--color-cyan-rgb), 0.3);
-    }
-
-    .version-badge {
-      background: rgba(0, 240, 255, 0.08);
-      border: 1px solid rgba(0, 240, 255, 0.25);
-      color: var(--color-cyan);
-      padding: 0.35rem 0.75rem;
-      border-radius: 50px;
-      font-size: 0.75rem;
-      font-weight: 600;
-      font-family: var(--font-mono);
-    }
-
-    /* Tabs Navigation */
-    .tabs-nav {
-      display: flex;
-      gap: 0.75rem;
-      margin-bottom: 2rem;
-    }
-
-    .tab-btn {
-      background: rgba(255, 255, 255, 0.03);
-      border: 1px solid var(--border-card);
-      color: var(--text-muted);
-      padding: 0.6rem 1.25rem;
-      border-radius: 8px;
-      font-size: 0.875rem;
-      font-weight: 600;
-      cursor: pointer;
-      display: flex;
-      align-items: center;
-      gap: 0.5rem;
-      transition: all 0.2s;
-    }
-
-    .tab-btn:hover {
-      background: rgba(255, 255, 255, 0.06);
-      color: var(--text-main);
-    }
-
-    .tab-btn.active {
-      background: var(--gradient-main);
-      color: #090d16;
-      border-color: transparent;
-      box-shadow: 0 4px 15px rgba(var(--color-cyan-rgb), 0.25);
-    }
-
-    /* Content Layout */
-    .tab-pane {
-      display: none;
-      animation: fadeIn 0.3s ease-out forwards;
-    }
-
-    .tab-pane.active {
-      display: block;
-    }
-
-    @keyframes fadeIn {
-      from { opacity: 0; transform: translateY(8px); }
-      to { opacity: 1; transform: translateY(0); }
-    }
-
-    /* Split layout */
-    .blueprint-layout {
-      display: grid;
-      grid-template-columns: 1fr 1fr;
-      gap: 2rem;
-      align-items: start;
-    }
-
-    @media (max-width: 1100px) {
-      .blueprint-layout {
-        grid-template-columns: 1fr;
-      }
-    }
-
-    .glass-card {
-      background: var(--bg-card);
-      border: 1px solid var(--border-card);
-      border-radius: 16px;
-      padding: 1.75rem;
-      margin-bottom: 2rem;
-      backdrop-filter: var(--glass-blur);
-      box-shadow: 0 8px 32px 0 rgba(0, 0, 0, 0.3);
-    }
-
-    .glass-card h2 {
-      font-size: 1.25rem;
-      font-weight: 700;
-      color: #ffffff;
-      margin-bottom: 1.25rem;
-      display: flex;
-      align-items: center;
-      gap: 0.5rem;
-      border-bottom: 1px solid rgba(255, 255, 255, 0.05);
-      padding-bottom: 0.75rem;
-    }
-
-    .glass-card h2 svg {
-      width: 18px;
-      height: 18px;
-      color: var(--color-cyan);
-    }
-
-    .glass-card p {
-      font-size: 0.925rem;
-      color: var(--text-muted);
-      margin-bottom: 1rem;
-    }
-
-    /* Form Elements */
-    .form-group {
-      margin-bottom: 1.25rem;
-    }
-
-    .form-group label {
-      display: block;
-      font-size: 0.8rem;
-      font-weight: 600;
-      color: var(--text-muted);
-      margin-bottom: 0.5rem;
-      text-transform: uppercase;
-      letter-spacing: 0.05em;
-    }
-
-    .form-row {
-      display: grid;
-      grid-template-columns: 1fr 1fr;
-      gap: 1rem;
-    }
-
-    select, input, textarea {
-      width: 100%;
-      background: rgba(9, 13, 22, 0.7);
-      border: 1px solid var(--border-card);
-      border-radius: 8px;
-      padding: 0.65rem 0.85rem;
-      color: #fff;
-      font-family: var(--font-sans);
-      font-size: 0.9rem;
-      outline: none;
-    }
-
-    /* Button rows */
-    .action-btn-row {
-      display: flex;
-      gap: 0.5rem;
-      margin-top: 1rem;
-    }
-
-    .action-btn {
-      flex: 1;
-      background: rgba(255,255,255,0.03);
-      border: 1px solid var(--border-card);
-      color: #fff;
-      padding: 0.5rem;
-      border-radius: 6px;
-      font-weight: 600;
-      cursor: pointer;
-      font-size: 0.8rem;
-      transition: all 0.2s;
-    }
-
-    .action-btn:hover {
-      background: rgba(255,255,255,0.08);
-    }
-
-    .action-btn.active-state {
-      background: var(--gradient-main);
-      color: #090d16;
-      border-color: transparent;
-    }
-
-    /* State graphic */
-    .state-graphic {
-      background: rgba(9, 13, 22, 0.5);
-      border: 1px solid var(--border-card);
-      border-radius: 12px;
-      padding: 1.5rem;
-      text-align: center;
-      margin-bottom: 1.5rem;
-    }
-
-    .state-graphic svg {
-      width: 100%;
-      height: auto;
-      max-height: 120px;
-    }
-
-    .state-node rect {
-      transition: fill 0.3s, stroke 0.3s;
-    }
-
-    .state-node.active rect {
-      fill: rgba(0, 240, 255, 0.15);
-      stroke: var(--color-cyan);
-      filter: drop-shadow(0 0 6px rgba(0,240,255,0.3));
-    }
-
-    /* Output Console */
-    pre {
-      background: rgba(0,0,0,0.3);
-      border: 1px solid var(--border-card);
-      border-radius: 8px;
-      padding: 1rem;
-      overflow-x: auto;
-      margin: 1rem 0;
-    }
-
-    code {
-      font-family: var(--font-mono);
-      font-size: 0.85rem;
-    }
-
-    .ref-table {
-      width: 100%;
-      border-collapse: collapse;
-      margin: 1.5rem 0;
-      font-size: 0.9rem;
-    }
-
-    .ref-table th, .ref-table td {
-      padding: 0.65rem 0.85rem;
-      border: 1px solid var(--border-card);
-      text-align: left;
-    }
-
-    .ref-table th {
-      background: rgba(255,255,255,0.03);
-    }
-
-    /* Footer */
-    footer {
-      text-align: center;
-      margin-top: 4rem;
-      padding-top: 2rem;
-      border-top: 1px solid rgba(255, 255, 255, 0.05);
-      color: var(--text-dim);
-      font-size: 0.875rem;
-    }
-  </style>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <meta name="clio-markdown-source" content="docs/architecture/evidence-and-memory.md">
+  <meta name="clio-docs-version" content="0.4.2">
+  <title>Evidence Corpus and Long-Term Memory · Clio Coder 0.4.2</title>
+  <link rel="icon" href="data:,">
+  <link rel="stylesheet" href="shared.css">
 </head>
-<body>
+<body data-doc-category="architecture">
+  <div class="reading-progress" aria-hidden="true"></div>
+  <a class="skip-link" href="#reference-content">Skip to reference</a>
   <div class="container">
-    <header>
+    <header class="document-header" data-category="Architecture">
       <div class="header-left">
-        <div class="header-logo">
-          <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" style="color: var(--color-cyan);"><title>Icon</title>
-            <path d="M12 22s8-4 8-10V5l-8-3-8 3v7c0 6 8 10 8 10z"></path>
+        <a class="header-logo" href="index.html" aria-label="Documentation index">
+          <svg viewBox="0 0 24 24" fill="none" aria-hidden="true">
+            <path d="M12 2 2 7l10 5 10-5-10-5Z" stroke="url(#clio-logo)" stroke-width="2" stroke-linejoin="round"/>
+            <path d="m2 12 10 5 10-5M2 17l10 5 10-5" stroke="url(#clio-logo)" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"/>
+            <defs><linearGradient id="clio-logo" x1="2" y1="2" x2="22" y2="22"><stop stop-color="#00d4db"/><stop offset="1" stop-color="#ff7e29"/></linearGradient></defs>
           </svg>
-        </div>
+        </a>
         <div class="header-title-wrapper">
-          <h1>Clio Coder Evidence &amp; Memory</h1>
-          <p>Durable evidence corpora directories, tags checklist, and approved memory logs</p>
+          <p class="document-kicker">Architecture / canonical reference</p>
+          <h1>Evidence Corpus and Long-Term Memory</h1>
+          <p class="document-path">docs/architecture/evidence-and-memory.md</p>
         </div>
       </div>
       <div class="header-right">
-        <span class="version-badge">Clio Coder v0.4.0</span>
-        <a href="index.html" class="back-btn">
-          <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><title>Icon</title><line x1="19" y1="12" x2="5" y2="12"></line><polyline points="12 19 5 12 12 5"></polyline></svg>
-          Dashboard Hub
-        </a>
+        <a class="back-btn" href="index.html">← Index</a>
+        <span class="version-badge">v0.4.2</span>
       </div>
     </header>
-
-    <div class="tabs-nav">
-      <button type="button" class="tab-btn active" onclick="switchTab('interactive')">
-        <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><title>Icon</title><polyline points="22 12 18 12 15 21 9 3 6 12 2 12"></polyline></svg>
-        Memory Lifecycle Dashboard
-      </button>
-      <button type="button" class="tab-btn" onclick="switchTab('reference')">
-        <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><title>Icon</title><path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z"></path><polyline points="14 2 14 8 20 8"></polyline><line x1="16" y1="13" x2="8" y2="13"></line><line x1="16" y1="17" x2="8" y2="17"></line><polyline points="10 9 9 9 8 9"></polyline></svg>
-        Full Technical Reference
-      </button>
+    <div class="page-layout-grid reference-layout">
+      <aside class="sidebar reference-sidebar" aria-label="On this page">
+        <nav class="toc-container">
+          <p class="toc-title">On this page</p>
+          <a class="sidebar-source" href="https://github.com/iowarp/clio-coder/blob/main/docs/architecture/evidence-and-memory.md">Canonical Markdown<br>docs/architecture/evidence-and-memory.md</a>
+          <ul class="toc-list"></ul>
+        </nav>
+      </aside>
+      <main class="reference-main" id="reference-content">
+        <article class="reference-prose glass-card">
+<blockquote>
+<p><strong>Visual blueprint:</strong> The source checkout includes the complete
+<a href="memory_blueprint.html">Evidence Corpus and Long-Term Memory visual reference</a>.</p>
+</blockquote>
+<p>Clio Coder treats run claims and agent lessons as structured artifacts to support reproducibility and scientific provenance. In evaluations such as <a href="https://www.swebench.com">SWE-bench</a>, capturing granular execution evidence is essential for validating agent claims. Evidence corpora are deterministic directories built from run ledgers, receipts, sessions, audits, and eval artifacts. Currently, forensic evidence auto-builds on dispatch run completion: when a run finalizes, the observability domain automatically compiles the evidence bundle under <code>&lt;dataDir&gt;/evidence/run-&lt;id&gt;/</code> and updates a compact sidecar index row in <code>&lt;stateDir&gt;/evidence-index.json</code>. Long-term memory records are local, evidence-linked, and only injected after explicit approval. Use the TUI <a href="observability_blueprint.html"><code>/view</code></a> command for interactive inspection of receipts, dispatch output, durable tool output, compaction summaries, and session accountability before building or citing evidence.</p>
+<p>Source of truth: <code>src/domains/evidence/**</code>, <code>src/domains/memory/**</code>, <code>src/cli/evidence.ts</code>, and <code>src/cli/memory.ts</code>.</p>
+<hr>
+<h2>Evidence CLI</h2>
+<pre><code class="language-bash">clio-coder evidence build --run &lt;runId&gt;
+clio-coder evidence build --session &lt;sessionId&gt;
+clio-coder evidence build --eval &lt;evalId&gt;
+clio-coder evidence inspect &lt;evidenceId&gt; [--json]
+clio-coder evidence list
+clio-coder evidence inventory --json
+</code></pre>
+<p><code>clio-coder evidence inspect &lt;id&gt;</code> requires a valid evidence artifact ID. If the requested artifact does not exist on disk, it exits with code 1 and prints the error and remedy on separate lines:</p>
+<pre><code class="language-text">error: evidence artifact not found: &lt;id&gt;
+  run `clio-coder evidence list` to see local bundles
+</code></pre>
+<p>Evidence IDs are deterministic:</p>
+<table>
+<thead>
+<tr>
+<th>Source</th>
+<th>ID shape</th>
+</tr>
+</thead>
+<tbody><tr>
+<td>Run</td>
+<td><code>run-&lt;runId&gt;</code></td>
+</tr>
+<tr>
+<td>Session</td>
+<td><code>session-&lt;sessionId&gt;</code></td>
+</tr>
+<tr>
+<td>Eval</td>
+<td><code>eval-&lt;evalId&gt;</code></td>
+</tr>
+</tbody></table>
+<p>Rebuilding the same evidence ID rewrites the same directory under <code>&lt;dataDir&gt;/evidence/</code>.</p>
+<hr>
+<h2>Evidence directory layout</h2>
+<p>Run/session evidence files:</p>
+<pre><code class="language-text">&lt;dataDir&gt;/evidence/&lt;evidenceId&gt;/
+├── overview.json
+├── transcript.md
+├── trace.raw.jsonl
+├── trace.cleaned.jsonl
+├── tool-events.jsonl
+├── audit-linked.jsonl
+├── receipt.json
+├── gate-decisions.json
+├── trust-status.json
+├── protected-artifacts.json
+├── findings.json
+└── findings.md
+</code></pre>
+<p>Eval evidence adds <code>eval-result.json</code> and uses empty receipt/protected-artifact placeholders when no linked receipts exist.</p>
+<h3>Core files</h3>
+<table>
+<thead>
+<tr>
+<th>File</th>
+<th>Purpose</th>
+</tr>
+</thead>
+<tbody><tr>
+<td><code>overview.json</code></td>
+<td>Stable summary: source, runs, sessions, statuses, tasks, models, totals, tags, and file list.</td>
+</tr>
+<tr>
+<td><code>transcript.md</code></td>
+<td>Human-readable run/session/eval transcript.</td>
+</tr>
+<tr>
+<td><code>trace.raw.jsonl</code></td>
+<td>Raw run ledger/receipt/eval rows.</td>
+</tr>
+<tr>
+<td><code>trace.cleaned.jsonl</code></td>
+<td>Compact normalized rows plus findings.</td>
+</tr>
+<tr>
+<td><code>tool-events.jsonl</code></td>
+<td>Tool summaries from session entries, audit rows, receipts, or eval commands.</td>
+</tr>
+<tr>
+<td><code>audit-linked.jsonl</code></td>
+<td>Audit rows linked to run/session context when available.</td>
+</tr>
+<tr>
+<td><code>receipt.json</code></td>
+<td>Receipt bundle (<code>{ version: 1, receipts: [...] }</code>); only receipts that pass integrity verification contribute verified fields.</td>
+</tr>
+<tr>
+<td><code>gate-decisions.json</code></td>
+<td>Integrity-verified review verdicts, compete winner selections, and winner confirmations discovered from linked receipt ids.</td>
+</tr>
+<tr>
+<td><code>trust-status.json</code></td>
+<td>Canonical per-run six-axis trust projections derived from authenticated receipts, gate decisions, and grounded validation artifacts.</td>
+</tr>
+<tr>
+<td><code>protected-artifacts.json</code></td>
+<td>Protected artifact state/events.</td>
+</tr>
+<tr>
+<td><code>findings.json</code> / <code>findings.md</code></td>
+<td>Structured findings plus a readable report that begins with each linked run&#39;s canonical tier, fixed-order summary, and six axes.</td>
+</tr>
+</tbody></table>
+<h3>Run attribution under concurrency</h3>
+<p>Session ledger entries are attributed to a run by the run id the producer stamped on the entry at write time. Rows built from those entries carry that provenance in a <code>runLink</code> field (<code>{ kind, confidence, candidateRunIds? }</code>) in <code>tool-events.jsonl</code> and <code>protected-artifacts.json</code>; a write-time stamp is <code>kind: &quot;entry-run-id&quot;</code>, <code>confidence: &quot;exact&quot;</code>. Entries written without run context fall back to timestamp windowing, labeled <code>kind: &quot;timestamp-window&quot;</code>, <code>confidence: &quot;best-effort&quot;</code>, and printed as <code>link=timestamp-window</code> in the transcript. Concurrent dispatch runs share one clock and their windows overlap, so an entry inside more than one window has no owner the bundle can name. Such an entry is reported in the bundle of every run it may belong to, with <code>runId: null</code>, <code>kind: &quot;ambiguous-timestamp-window&quot;</code>, and a <code>candidateRunIds</code> list, plus a <code>best-effort-link</code> finding counting them. It is never dropped and never claimed as exact.</p>
+<p>When a run was chained (pipeline), composed with a persona override, or escalated for a permission, <code>transcript.md</code> and <code>trace.cleaned.jsonl</code> surface the receipt&#39;s provenance field sets, and <code>clio-coder evidence inspect</code> prints them as a <code>provenance &lt;runId&gt;:</code> block. The block is the detail behind the canonical trust projection, never a second reading of it: it is printed only for a run whose seal the projection verified, its <code>autonomy:</code> line carries the policy name, external mode, and bypass flag and never the axis word (<code>mediated</code>, <code>approximated</code>, <code>bypassed</code> are the trust summary&#39;s to print), and a run whose seal was rejected or retired gets no block at all, so the output never publishes a value the projection reported as <code>absent</code>. The field paths, types, and stability labels are documented in the <a href="observability_blueprint.html#receipt-fields-for-dispatch-provenance">receipt provenance schema</a>.</p>
+<h3>Task and decision provenance</h3>
+<p>Session evidence retains the two operator-facing bookkeeping ledgers instead of flattening them into prose. A <code>taskLedger</code> projection names the stable board id, goal counts, active runs, required evidence, and bounded task rows with status, origin, <code>userTaskId</code>, reason, and evidence. This keeps an operator task traceable from the project inbox correlation through agent pickup and completion. A <code>decisionLedger</code> projection names the active-path anchor, interview identity and status, timing, round count, summary, and every settled or superseded decision. Operator revisions are explicit through <code>revisedAt</code>, <code>revisionSource=operator</code>, and the recorded correction text. Both kinds remain session facts in <code>trace.raw.jsonl</code>, <code>trace.cleaned.jsonl</code>, and the readable transcript; evidence does not reinterpret them as validation results.</p>
+<hr>
+<h2>Evidence Tag Taxonomy and Failure Causes</h2>
+<p>Clio Coder classifies every run, session, and eval record using a closed set of 29 canonical tags. These tags distinguish general execution characteristics, such as lineage linkages, from actual failure causes.</p>
+<h3>Complete Taxonomy</h3>
+<table>
+<thead>
+<tr>
+<th>Tag</th>
+<th>Category</th>
+<th>Trigger / Meaning</th>
+</tr>
+</thead>
+<tbody><tr>
+<td><code>audit-linked</code></td>
+<td>Provenance</td>
+<td>Audit logs successfully linked to this run or session.</td>
+</tr>
+<tr>
+<td><code>audit-missing</code></td>
+<td>Provenance</td>
+<td>No matching audit logs were found.</td>
+</tr>
+<tr>
+<td><code>best-effort-link</code></td>
+<td>Provenance</td>
+<td>Inspection commands or logs linked via heuristics.</td>
+</tr>
+<tr>
+<td><code>timeout</code></td>
+<td>Failure</td>
+<td>Execution exceeded the maximum duration limit.</td>
+</tr>
+<tr>
+<td><code>context-overflow</code></td>
+<td>Constraint</td>
+<td>Model context limit was exceeded.</td>
+</tr>
+<tr>
+<td><code>provider-transient</code></td>
+<td>Transient</td>
+<td>Temporary API or model gateway connection error.</td>
+</tr>
+<tr>
+<td><code>missing-dependency</code></td>
+<td>Failure</td>
+<td>Python, Node, or system package dependency was missing.</td>
+</tr>
+<tr>
+<td><code>wrong-runtime</code></td>
+<td>Configuration</td>
+<td>Execution failed due to incorrect compiler or runtime environment.</td>
+</tr>
+<tr>
+<td><code>proxy-validation</code></td>
+<td>Validation</td>
+<td>Weak validation (e.g. only file-presence check rather than execution).</td>
+</tr>
+<tr>
+<td><code>no-validation</code></td>
+<td>Validation</td>
+<td>Succeeded turn or run did not execute any verification commands.</td>
+</tr>
+<tr>
+<td><code>destructive-cleanup</code></td>
+<td>Precaution</td>
+<td>Clean-up rules triggered to prevent workspace pollution or damage.</td>
+</tr>
+<tr>
+<td><code>blocked-tool</code></td>
+<td>Failure</td>
+<td>The safety net blocked a tool call requested by the model.</td>
+</tr>
+<tr>
+<td><code>escalation</code></td>
+<td>Precaution</td>
+<td>A worker permission escalation timed out or was denied; see the receipt provenance schema below.</td>
+</tr>
+<tr>
+<td><code>receipt-integrity</code></td>
+<td>Security</td>
+<td>Forensic verification detected receipt modification or checksum mismatch.</td>
+</tr>
+<tr>
+<td><code>receipt-retired</code></td>
+<td>Provenance</td>
+<td>The receipt was sealed under an integrity version this build no longer verifies. It is not migrated and not read as evidence; the row names both versions. An info row, never the security warning a modified receipt gets.</td>
+</tr>
+<tr>
+<td><code>protected-artifact</code></td>
+<td>Precaution</td>
+<td>Mutating a path protected by project or system safety policies.</td>
+</tr>
+<tr>
+<td><code>tool-loop</code></td>
+<td>Constraint</td>
+<td>The model repeatedly called the same tool with identical arguments.</td>
+</tr>
+<tr>
+<td><code>test-failure</code></td>
+<td>Failure</td>
+<td>A verification command containing test/lint keywords exited non-zero.</td>
+</tr>
+<tr>
+<td><code>build-failure</code></td>
+<td>Failure</td>
+<td>A verification command containing build keywords exited non-zero.</td>
+</tr>
+<tr>
+<td><code>cwd-missing</code></td>
+<td>Configuration</td>
+<td>The directory target specified for execution did not exist.</td>
+</tr>
+<tr>
+<td><code>session-linked</code></td>
+<td>Provenance</td>
+<td>The run is linked back to its originating parent session.</td>
+</tr>
+<tr>
+<td><code>session-missing</code></td>
+<td>Provenance</td>
+<td>No parent session could be resolved for this run.</td>
+</tr>
+<tr>
+<td><code>auth-failure</code></td>
+<td>Failure</td>
+<td>Missing or invalid credentials/API keys.</td>
+</tr>
+<tr>
+<td><code>external-bypass</code></td>
+<td>Security</td>
+<td>An external runner bypassed standard safety gates.</td>
+</tr>
+<tr>
+<td><code>external-approximation</code></td>
+<td>Validation</td>
+<td>An external runner approximated results rather than fully executing.</td>
+</tr>
+<tr>
+<td><code>independent-review</code></td>
+<td>Validation</td>
+<td>The canonical independent-review axis: a failed, correlated, or inconclusive review is a warning; a successful run with no review at all is an info row saying its result rests on its own receipt.</td>
+</tr>
+<tr>
+<td><code>context-provenance</code></td>
+<td>Provenance</td>
+<td>The canonical context-provenance axis read <code>invalid</code>: the receipt&#39;s briefing or project-context record contradicts itself.</td>
+</tr>
+<tr>
+<td><code>completion-evidence</code></td>
+<td>Validation</td>
+<td>The canonical completion-evidence axis: a mutation that finished without validation evidence at the completion boundary is a warning; an explicit limitation is an info row.</td>
+</tr>
+<tr>
+<td><code>unknown</code></td>
+<td>Undefined</td>
+<td>Unclassified execution failure.</td>
+</tr>
+</tbody></table>
+<hr>
+<h3>Failure-Cause Tag Subset</h3>
+<p>A subset of the taxonomy represents actual failure causes (governed by the <code>FAILURE_CAUSE_TAG_ORDER</code> array). These are the only tags included in the receipt summaries and TUI observability histograms:</p>
+<ol>
+<li><strong><code>timeout</code></strong>: Triggered if the run outcome is <code>&quot;timed_out&quot;</code> or <code>&quot;stalled&quot;</code>, or if the error/failure text contains <code>&quot;timed out&quot;</code> or <code>&quot;timeout&quot;</code>.</li>
+<li><strong><code>auth-failure</code></strong>: Triggered if failure text contains keywords like <code>&quot;auth&quot;</code>, <code>&quot;api key&quot;</code>, <code>&quot;credential&quot;</code>, or <code>&quot;unauthorized&quot;</code>.</li>
+<li><strong><code>missing-dependency</code></strong>: Triggered if failure logs contain <code>&quot;module not found&quot;</code>, <code>&quot;missing package&quot;</code>, or <code>&quot;missing dependency&quot;</code>.</li>
+<li><strong><code>build-failure</code></strong>: Triggered in receipt summaries when a non-zero receipt exit is paired with build tool names in <code>toolStats</code> (e.g. <code>build</code>, <code>compile</code>, <code>make</code>, <code>cmake</code>, <code>cargo</code>, <code>gradle</code>, <code>ninja</code>, <code>tsc</code>). Forensic evidence may also classify it from termination diagnostics in <code>outcomeDetail</code> or the recorded failure message. The task text is never causal evidence.</li>
+<li><strong><code>test-failure</code></strong>: Triggered in receipt summaries when a non-zero receipt exit is paired with test or lint tool names in <code>toolStats</code> (e.g. <code>pytest</code>, <code>ctest</code>, <code>jest</code>, <code>vitest</code>, <code>test</code>, <code>lint</code>, <code>typecheck</code>). Forensic evidence may also classify it from termination diagnostics in <code>outcomeDetail</code> or the recorded failure message. Validation words in the task text are never causal evidence.</li>
+<li><strong><code>blocked-tool</code></strong>: Triggered if tool execution statistics show a blocked count greater than <code>0</code>.</li>
+</ol>
+<hr>
+<h2>Receipt findingsSummary</h2>
+<p>Each run receipt (persisted under <code>&lt;stateDir&gt;/receipts/&lt;runId&gt;.json</code>) carries an optional <code>findingsSummary</code> block. This block provides a cheap, integrity-covered summary of the run&#39;s findings:</p>
+<pre><code class="language-json">&quot;findingsSummary&quot;: {
+  &quot;tags&quot;: [&quot;test-failure&quot;],
+  &quot;firstPassSuccess&quot;: false,
+  &quot;findingCount&quot;: 1
+}
+</code></pre>
+<h3>Computation and Lifecycle</h3>
+<ul>
+<li><strong>Circular Dependency Prevention</strong>: To prevent circular dependencies, <code>findingsSummary</code> is calculated <strong>cheaply in-memory</strong> at receipt-record time using the draft envelope and tool statistics (in <code>src/domains/dispatch/receipt-findings.ts</code>). It never reads from disk or calls <code>buildEvidence</code>.</li>
+<li><strong>First-Pass Success</strong>: Calculated as <code>true</code> only if the terminal outcome was <code>&quot;succeeded&quot;</code>, the lineage attempt was <code>0</code> (no dispatch retries), the tool stats confirm at least one successful validation tool was executed, and no failure-cause tags were detected.</li>
+<li><strong>Cryptographic Coverage</strong>: Current receipts use strict v20 and authenticate every current receipt field, including dispatch intent path provenance, resolved path scope, briefing and steering provenance, routing intent and decision, route quality, worker identity, execution role, result-contract conformance, council provenance, and fleet gate provenance, against the reconstructed ledger. Only v20 is authenticated as current evidence. Lower versions are reported as retired and are neither migrated nor read as evidence.</li>
+</ul>
+<table>
+<thead>
+<tr>
+<th>Version</th>
+<th>Verification policy</th>
+<th>Compatibility policy</th>
+</tr>
+</thead>
+<tbody><tr>
+<td>v20</td>
+<td>Current canonical projection; every current receipt and reconstructible ledger field is authenticated</td>
+<td>Accepted</td>
+</tr>
+<tr>
+<td>v1 through v19</td>
+<td>Historical sealed shape unsupported by this build</td>
+<td>Reported as retired; not migrated and not read as evidence</td>
+</tr>
+<tr>
+<td>Malformed, unversioned, or future version</td>
+<td>No current reader</td>
+<td>Invalid; archive incompatible state rather than expecting migration</td>
+</tr>
+</tbody></table>
+<p>Receipt integrity and evidence verification answer different questions. The
+former proves that a receipt matches its ledger envelope; the latter records
+whether applicable validation evidence was observed. Briefing provenance is
+also distinct from bounded project-context provenance: both can be absent or
+present independently, and neither hash is evidence for the other.</p>
+<h3>Canonical trust status</h3>
+<p><code>src/domains/evidence/trust-status.ts</code> defines the version 1 canonical trust
+status. It is a six-axis algebra, not an overall trust verdict, confidence
+percentage, or pass/fail score. Consumers project only the axes needed for a
+decision and preserve every other axis unchanged.</p>
+<table>
+<thead>
+<tr>
+<th>Axis</th>
+<th>Closed states</th>
+<th>Question answered</th>
+</tr>
+</thead>
+<tbody><tr>
+<td>Artifact integrity</td>
+<td><code>verified</code>, <code>failed</code>, <code>absent</code>, <code>unknown</code>, <code>not_applicable</code></td>
+<td>Did the integrity verifier authenticate the referenced artifact?</td>
+</tr>
+<tr>
+<td>Validation grounding</td>
+<td><code>validated</code>, <code>failed</code>, <code>ungrounded</code>, <code>absent</code>, <code>unknown</code>, <code>not_applicable</code></td>
+<td>What correctness-bearing validation was observed and grounded?</td>
+</tr>
+<tr>
+<td>Independent review</td>
+<td><code>passed</code>, <code>failed</code>, <code>inconclusive</code>, <code>not_independent</code>, <code>absent</code>, <code>unknown</code>, <code>not_applicable</code></td>
+<td>What outcome did an authenticated independent reviewer or judge record?</td>
+</tr>
+<tr>
+<td>Context provenance</td>
+<td><code>recorded</code>, <code>invalid</code>, <code>absent</code>, <code>unknown</code>, <code>not_applicable</code></td>
+<td>Is the origin of briefing, project context, or linked evidence recorded consistently?</td>
+</tr>
+<tr>
+<td>Autonomy enforcement</td>
+<td><code>enforced</code>, <code>approximated</code>, <code>bypassed</code>, <code>absent</code>, <code>unknown</code>, <code>not_applicable</code></td>
+<td>How faithfully did the runtime enforce the selected authority?</td>
+</tr>
+<tr>
+<td>Completion evidence</td>
+<td><code>evidenced</code>, <code>incomplete</code>, <code>limited</code>, <code>absent</code>, <code>unknown</code>, <code>not_applicable</code></td>
+<td>What did the finish contract observe at the completion boundary?</td>
+</tr>
+</tbody></table>
+<p><code>absent</code> means no fact was recorded and carries a reason but no invented
+attribution. <code>unknown</code> means a named source exists but cannot establish the
+answer. <code>not_applicable</code> means a named authority determined that the axis does
+not apply. Every non-absent state names both its source and its authority.
+Sources may retain up to 16 typed artifact references. References contain an
+artifact kind, identifier, and optional SHA-256 digest; they never embed the
+artifact body. Normalization sorts the references and rejects duplicates,
+unbounded lists, unknown fields, invalid identifiers, and sources that are not
+permitted to speak for an axis.</p>
+<p>The composition rules prohibit cross-axis promotion:</p>
+<ul>
+<li>Verified artifact integrity never promotes validation grounding.</li>
+<li>Recorded context provenance never promotes validation or correctness.</li>
+<li>A passing review never establishes authorship or context origin.</li>
+<li>Enforced autonomy never promotes completion evidence.</li>
+<li>A completion self-report never promotes validation grounding. The linked
+<code>completion_contract</code> audit row is the run&#39;s own report of what it did, so it
+reaches completion evidence and no other axis. Validation grounding is filled
+only by independently observed executions the session ledger recorded.</li>
+</ul>
+<p>The current adapters apply the following persisted-format compatibility rules.
+They do not mutate receipt, gate-decision, evidence-bundle, or session formats.</p>
+<table>
+<thead>
+<tr>
+<th>Existing persisted fact</th>
+<th>Canonical mapping</th>
+</tr>
+</thead>
+<tbody><tr>
+<td>Missing receipt</td>
+<td>Every receipt-owned axis is <code>absent</code> with <code>artifact_missing</code>.</td>
+</tr>
+<tr>
+<td>Current receipt present but integrity not checked</td>
+<td>Artifact integrity is <code>unknown</code>; the receipt&#39;s own digest never authenticates itself. The other receipt-owned axes are <code>absent</code> with <code>not_observed</code> until authentication succeeds.</td>
+</tr>
+<tr>
+<td>Historical receipt missing its integrity block</td>
+<td>Receipt-owned axes are <code>unknown</code> through the compatibility source, even if a caller presents a contradictory positive verification result.</td>
+</tr>
+<tr>
+<td>Integrity verification succeeds or fails</td>
+<td>Artifact integrity is <code>verified</code> or <code>failed</code>. A failure leaves the receipt-owned validation grounding, context provenance, and autonomy enforcement <code>absent</code>; no untrusted receipt claim contributes a positive state. Validation the session ledger observed on its own (a validation command that ran and exited 0) still grounds the run, so a tampered run can read <code>artifactIntegrity: failed</code> beside <code>validationGrounding: validated</code>. The two axes name different artifacts and different authorities, and the bundle&#39;s <code>receipt-integrity</code> finding is what flags the pairing.</td>
+</tr>
+<tr>
+<td>Receipt sealed under a retired integrity version</td>
+<td>Artifact integrity is <code>unknown</code> through the compatibility source <code>run_receipt:&lt;runId&gt;:integrity-v&lt;N&gt;-retired</code>, which is where the human clause reads the version back from (<code>seal v19 retired (this build verifies v20)</code>); <code>failed</code> and &quot;seal broken&quot; are reserved for a seal this build checked and rejected. The receipt-owned axes are <code>absent</code> with <code>historical_format</code>, and the verdict is <code>unknown</code> rather than <code>compromised</code>. The receipt is not migrated and not read as evidence: the bundle records a <code>receipt-retired</code> info finding, <code>evidence build</code> prints it as a note and exits 0, and <code>/view verify</code> reports <code>verify retired</code> with both versions.</td>
+</tr>
+<tr>
+<td>Receipt <code>verification.state: verified</code></td>
+<td>Validation grounding is <code>validated</code> unless a stronger typed failure or ungrounded claim is present.</td>
+</tr>
+<tr>
+<td>Receipt <code>verification.state: unverified</code></td>
+<td>Validation grounding is <code>absent</code> with <code>not_observed</code>; lack of a validation tool is not a failed validation.</td>
+</tr>
+<tr>
+<td>Receipt verification <code>unknown</code> or <code>not_applicable</code></td>
+<td>Validation grounding preserves <code>unknown</code> or <code>not_applicable</code>. A missing historical verification field maps to <code>unknown</code>.</td>
+</tr>
+<tr>
+<td>Typed receipt validation or result-contract quality</td>
+<td>A passing correctness-bearing fact maps to <code>validated</code>; a failing fact maps to <code>failed</code>; an ungrounded passing claim maps to <code>ungrounded</code>.</td>
+</tr>
+<tr>
+<td>Valid bounded project context, valid none-tier workspace-root record, or valid briefing hash</td>
+<td>Context provenance is <code>recorded</code>. A <code>none</code>-tier run still receives the workspace-root message, so a none-tier block naming exactly <code>workspace-root</code> with a well-formed count and hash is <code>recorded</code>. Explicit project-context tier <code>none</code> with no content and no briefing is <code>not_applicable</code>; a missing historical field is <code>unknown</code>; a contradictory block (a handbook section under a none policy, a hash with no section, a malformed count) is <code>invalid</code>.</td>
+</tr>
+<tr>
+<td>Gate decision</td>
+<td>An authenticated independent pass or fail maps to <code>passed</code> or <code>failed</code>. Correlated review maps to <code>not_independent</code>. Unauthenticated artifacts map to <code>unknown</code>; operator or full-auto confirmation alone is <code>not_applicable</code> to independent review.</td>
+</tr>
+<tr>
+<td>Receipt autonomy grade</td>
+<td><code>mediated</code>, <code>approximated</code>, and <code>bypassed</code> map to <code>enforced</code>, <code>approximated</code>, and <code>bypassed</code>. A dangerous-bypass flag always normalizes to <code>bypassed</code>; a missing historical block is <code>unknown</code>.</td>
+</tr>
+<tr>
+<td>Finish-contract assessment</td>
+<td>The assessment remains linked in <code>audit-linked.jsonl</code> and contributes its domain findings and tags. It does not override the receipt-derived <code>completionEvidence</code> axis on the evidence surface alone.</td>
+</tr>
+<tr>
+<td>Malformed audit row identifier</td>
+<td>A blank or whitespace-only optional identifier remains linked as audit input and never aborts the bundle. It cannot affect the receipt-derived trust projection.</td>
+</tr>
+<tr>
+<td>Bundle without <code>trust-status.json</code></td>
+<td>Inspection reports <code>projection: historical_format</code> with no canonical run projections. It never reconstructs positive states from older summary tags.</td>
+</tr>
+</tbody></table>
+<p>Receipt inspection, worker output, monitor details, and evidence rebuilding all
+use the same authenticated receipt projection boundary. Evidence rebuilding
+then composes independently authenticated gate decisions without changing
+receipt-owned axes. Findings such as
+<code>no-validation</code>, <code>proxy-validation</code>, <code>external-approximation</code>,
+<code>external-bypass</code>, <code>independent-review</code>, <code>context-provenance</code>, and
+<code>completion-evidence</code> are selected from the canonical states. <code>findings.md</code>
+prints the tier, summary, and every axis before those diagnostic records, while
+their detailed domain artifacts remain in the receipt, gate, audit, and trace
+files.</p>
+<p>The canonical aggregate is an additive projection for downstream work. Evidence
+bundles remain version 1 and gate decisions remain version 2. Receipt integrity
+is independently versioned and currently uses v20; that version adds dispatch
+intent path provenance and resolved path scope while retaining SHA-256 sealing.</p>
+<h3>Trust projection</h3>
+<p><code>src/domains/evidence/trust-projection.ts</code> is the one place the canonical
+status is turned into words. Every operator surface prints from it, so the
+same canonical input renders the same verdict on the dispatch run line, in a
+monitor block, under <code>clio-coder evidence inspect</code>, in <code>findings.md</code>, on the
+Alt+W board, in the <code>/view</code> receipt header, in eval metrics, and on the ACP
+wire.</p>
+<p>The compact human line has six fixed clauses in a fixed order and answers the
+four operator questions without receipt internals:</p>
+<pre><code class="language-text">trust v1: sealed; grounded by host-verification; not independently reviewed; mediated; context recorded; completion evidenced
+</code></pre>
+<table>
+<thead>
+<tr>
+<th>Clause</th>
+<th>Axis</th>
+<th>Question it answers</th>
+</tr>
+</thead>
+<tbody><tr>
+<td><code>sealed</code> / <code>seal broken</code> / <code>seal unchecked</code> / <code>no receipt</code></td>
+<td>Artifact integrity</td>
+<td>Can the record be trusted to be what was written?</td>
+</tr>
+<tr>
+<td><code>grounded by &lt;claimant&gt;</code> / <code>validation failed by &lt;claimant&gt;</code> / <code>inferred: validation claimed, none observed</code> / <code>no validation observed</code> / <code>validation unknown (&lt;system&gt;)</code> / <code>validation not applicable</code></td>
+<td>Validation grounding</td>
+<td>Who claims the result, and what was observed?</td>
+</tr>
+<tr>
+<td><code>independently reviewed: pass</code> / <code>independently reviewed: fail</code> / <code>independent review inconclusive</code> / <code>review not independent</code> / <code>not independently reviewed</code></td>
+<td>Independent review</td>
+<td>What did a second, uncorrelated authority check?</td>
+</tr>
+<tr>
+<td><code>mediated</code> / <code>approximated (&lt;runtime&gt;)</code> / <code>bypassed (&lt;runtime&gt;)</code> / <code>autonomy not recorded</code></td>
+<td>Autonomy enforcement</td>
+<td>Did Clio&#39;s own gate mediate the run?</td>
+</tr>
+<tr>
+<td><code>context recorded</code> / <code>context record invalid</code> / <code>context not recorded</code></td>
+<td>Context provenance</td>
+<td>Is what the worker was given recorded consistently?</td>
+</tr>
+<tr>
+<td><code>completion evidenced</code> / <code>completion unevidenced</code> / <code>completion limited</code> / <code>completion not applicable</code></td>
+<td>Completion evidence</td>
+<td>What did the finish contract observe?</td>
+</tr>
+</tbody></table>
+<p><code>mediated</code> is the word for the <code>enforced</code> state because it is what the
+receipt grade already says; <code>inferred</code> is the word for an <code>ungrounded</code> claim.
+Every <code>unknown</code> and <code>absent</code> state prints as such, so what remains unknown is
+part of the line, never an omission.</p>
+<p>The drill-down line prints every axis by its canonical state id and is the
+same on every text surface:</p>
+<pre><code class="language-text">trust_status=v1 artifactIntegrity:verified validationGrounding:validated independentReview:absent contextProvenance:recorded autonomyEnforcement:enforced completionEvidence:evidenced
+</code></pre>
+<p>The machine projection (<code>TrustSummaryProjection</code>, <code>trust</code> on the <code>dispatch</code>
+tool&#39;s <code>details.runs[]</code> entries and on the <code>monitor</code> receipt details) is
+bounded and versioned: the verdict tier, the six axis states, the claimant,
+the axes still unknown, the compact text, and up to 8 <code>&lt;kind&gt;:&lt;id&gt;</code>
+references into the detailed artifacts. It is flat by design so a depth-capped
+wire such as ACP <code>rawOutput</code> carries it whole where the nested canonical
+status&#39;s artifact references fall off the depth cap.</p>
+<p>The verdict tier styles a surface and never scores a run. <code>reviewed</code> is the
+only tier styled as independently verified; a sealed receipt with observed
+validation is <code>grounded</code>, a sealed receipt with nothing observed is
+<code>unverified</code>, a broken seal, bypassed gate, failed or inferred validation,
+failed or correlated review, or contradictory context record is
+<code>compromised</code>, and an unchecked or missing seal is <code>unknown</code>. The Alt+W board
+never carries a verdict on the terminal bus event: the event is published the
+moment the receipt is sealed, before anything has read it back and
+authenticated it against the ledger row, so the board reads the receipt file
+back and projects that authenticated status, and shows <code>trust: receipt not read back</code> until it can.</p>
+<h3>Mutation-Report Grounding</h3>
+<p>Mutation-report receipts are grounded directly against observed tool events recorded in the run ledger:</p>
+<ul>
+<li>When a worker run concludes, claimed modified files are validated against the actual write set observed from <code>edit</code> and <code>write</code> tool invocations.</li>
+<li>If a target file was untouched during the run but already existed on disk, the result contract seals route quality as <code>unmeasured</code> rather than <code>fail</code>.</li>
+<li>If a write attempt was refused or denied, mutation validation marks the outcome as <code>unmeasured</code>.</li>
+<li>If an unattempted mutation target does not exist on disk, postcondition validation fails.</li>
+</ul>
+<hr>
+<h2>Memory CLI</h2>
+<pre><code class="language-bash">clio-coder memory list
+clio-coder memory propose --from-evidence &lt;evidenceId&gt; [scope options]
+clio-coder memory promote --from-handoff &lt;path&gt; [--entry &lt;id&gt;...] --scope &lt;scope&gt; [scope options]
+clio-coder memory approve &lt;memoryId&gt;
+clio-coder memory reject &lt;memoryId&gt;
+clio-coder memory prune --stale
+</code></pre>
+<p>Memory records live in:</p>
+<pre><code class="language-text">&lt;dataDir&gt;/memory/records.json
+</code></pre>
+<p>The store is capped at <code>500</code> records and is sorted by scope, key, creation time, and id for stable writes.</p>
+<hr>
+<h2>Memory record lifecycle</h2>
+<pre><code class="language-mermaid">stateDiagram-v2
+    evidence --&gt; proposed: propose --from-evidence
+    taskBank --&gt; proposed: /memory selected-entry action
+    redactedHandoff --&gt; proposed: promote --from-handoff
+    proposed --&gt; approved: approve &lt;id&gt;
+    proposed --&gt; rejected: reject &lt;id&gt;
+    approved --&gt; rejected: reject &lt;id&gt;
+    proposed --&gt; pruned: prune --stale after 30 days
+    rejected --&gt; pruned: prune --stale after 30 days
+    approved --&gt; pruned: prune --stale after 180 days since lastVerifiedAt/createdAt
+</code></pre>
+<p>Records must cite at least one evidence ID to be considered for prompt injection. Rejected records remain in the store until stale pruning so the same bad lesson is not immediately re-proposed from the same evidence.</p>
+<p>Task-bank promotion is a reviewed export from transient execution memory. The
+<code>/memory</code> overlay offers repo and global proposal actions only on selected
+knowledge and procedural rows. Status remains private and cannot enter the
+promotion service. The first global action arms a warning, and the second
+action acknowledges the broader applicability. A successful action writes an
+unapproved record and names the separate <code>memory approve</code> command required to
+make it injectable.</p>
+<p>The CLI consumes a version 2 <code>clio-task-memory</code> handoff snapshot. Omitting
+<code>--entry</code> proposes every knowledge and procedural entry; repeating <code>--entry</code>
+selects exact entry IDs. Version 2 snapshots carry source session, evidence,
+runtime, agent, timestamps, and export-redaction facts. Version 1 snapshots
+remain seedable but cannot be promoted because they do not carry source
+session or evidence provenance.</p>
+<p>Every promotion redacts secret-shaped values before <code>records.json</code> is written.
+The durable provenance block records the source kind, session, selected entry,
+entry class and timestamps, plus the replacement count and source field paths.
+Promotion never approves its own output.</p>
+<h3>Explicit scope selection</h3>
+<p>Reviewed scope options are closed to four choices:</p>
+<table>
+<thead>
+<tr>
+<th>Scope</th>
+<th>Required selection</th>
+<th>Validation</th>
+</tr>
+</thead>
+<tbody><tr>
+<td><code>repo</code></td>
+<td><code>--repository &lt;canonical-absolute-path&gt;</code></td>
+<td>The path must exist and already equal its canonical absolute identity. Symlink aliases and paths containing unresolved segments are rejected.</td>
+</tr>
+<tr>
+<td><code>global</code></td>
+<td><code>--acknowledge-global</code></td>
+<td>The acknowledgement is separate from <code>--scope global</code>.</td>
+</tr>
+<tr>
+<td><code>runtime</code></td>
+<td><code>--runtime &lt;id&gt;</code></td>
+<td>The ID must be valid and must occur in the source provenance.</td>
+</tr>
+<tr>
+<td><code>agent</code></td>
+<td><code>--agent &lt;id&gt;</code></td>
+<td>The ID must be valid and must occur in the source provenance.</td>
+</tr>
+</tbody></table>
+<p>The same options may be added to <code>memory propose --from-evidence</code>. With no
+scope option, evidence proposals keep the existing inference order. An
+explicit repository may differ from the repository that produced the
+evidence, which supports a reviewed lesson about repository A learned while
+working in repository B. Runtime and agent overrides may only select an exact
+identity already recorded by the evidence. Global scope always requires its
+own acknowledgement. No inference path widens an explicit choice.</p>
+<hr>
+<h2>Prompt injection rules</h2>
+<p>The chat loop loads memory synchronously from the bounded local store and calls <code>buildMemoryPromptSection()</code>.</p>
+<p>Defaults:</p>
+<table>
+<thead>
+<tr>
+<th>Constraint</th>
+<th>Default</th>
+</tr>
+</thead>
+<tbody><tr>
+<td>Base scopes</td>
+<td><code>global</code>, <code>repo</code></td>
+</tr>
+<tr>
+<td>Token budget</td>
+<td><code>400</code> estimated tokens</td>
+</tr>
+<tr>
+<td>Max records</td>
+<td><code>5</code></td>
+</tr>
+<tr>
+<td>Required status</td>
+<td><code>approved: true</code></td>
+</tr>
+<tr>
+<td>Required provenance</td>
+<td>At least one <code>evidenceRefs[]</code> entry</td>
+</tr>
+<tr>
+<td>Suppression</td>
+<td>Records with active <code>regressions[]</code> entries are skipped</td>
+</tr>
+</tbody></table>
+<p>Rendered memory lines always cite record ID, scope, lesson, and evidence IDs. The prompt tells the model not to extrapolate beyond cited findings.</p>
+<p>Interactive main-agent sessions additionally admit records for the exact
+active runtime. <code>clio-coder run --agent</code> admits records for the exact resolved
+runtime and selected agent. Runtime and agent records use structured identity
+fields; <code>appliesWhen</code> text cannot grant either applicability. Missing,
+malformed, or different active identities exclude those records.</p>
+<h3>Repository-scoped identity</h3>
+<p>Repository memory is selected by an exact canonical absolute-path identity. The interactive orchestrator and <code>clio-coder run --agent</code> compute that identity from the active working directory; symlink aliases collapse to the same key. A repository move, a different Git worktree path, a subdirectory launch, a malformed identity, or a missing identity does not inherit another repository&#39;s memory. Global records are unaffected.</p>
+<p>Every <code>scope: &quot;repo&quot;</code> record must carry:</p>
+<pre><code class="language-json">&quot;repository&quot;: { &quot;kind&quot;: &quot;canonical-path&quot;, &quot;key&quot;: &quot;/canonical/absolute/repository/path&quot; }
+</code></pre>
+<p>The structured <code>repository</code> field is the only applicability mechanism: store validation rejects repo records without it, and <code>appliesWhen</code> tokens never grant repository applicability. There is intentionally no automatic path rewrite for moved repositories or worktrees: a filesystem move produces a different identity and the record simply stops applying until it is re-scoped with new evidence.</p>
+<p>Runtime and agent records follow the same fail-closed shape:</p>
+<pre><code class="language-json">{ &quot;runtime&quot;: { &quot;kind&quot;: &quot;runtime&quot;, &quot;key&quot;: &quot;openai&quot; } }
+</code></pre>
+<pre><code class="language-json">{ &quot;agent&quot;: { &quot;kind&quot;: &quot;agent&quot;, &quot;key&quot;: &quot;coder&quot; } }
+</code></pre>
+<p>Only the field matching the record scope is present.</p>
+<hr>
+<h2>Recommended workflow</h2>
+<ol>
+<li>Build evidence from the run/session/eval that taught the lesson.</li>
+<li>Inspect the evidence and findings.</li>
+<li>Propose memory from the evidence, or promote selected public task memory from <code>/memory</code> or a redacted handoff.</li>
+<li>Review the proposed lesson, source provenance, redaction facts, and exact scope.</li>
+<li>Approve only if it is durable and useful under that scope.</li>
+<li>Reject incorrect or overbroad records.</li>
+<li>Prune stale records periodically.</li>
+</ol>
+<p>Memory is meant to reduce repeated mistakes, not to become an unreviewed second instruction system.</p>
+        </article>
+        <nav class="related-nav" aria-label="Adjacent references">
+          <a class="nav-link-card" href="dispatch_typed_intent_blueprint.html"><span class="nav-label">Previous</span><span class="nav-title">Typed Dispatch Intent: Migration and Refusal Policy</span></a>
+          <a class="nav-link-card next" href="middleware_blueprint.html"><span class="nav-label">Next</span><span class="nav-title">Middleware and Component Registry</span></a>
+        </nav>
+        <p class="reference-footer-note">Canonical content lives in the mapped Markdown page. This visual counterpart adds navigation without changing the contract.</p>
+      </main>
     </div>
-
-    <!-- TAB 1: INTERACTIVE -->
-    <main class="tab-pane active" id="pane-interactive">
-      <div class="blueprint-layout">
-
-        <!-- Left: Memory Lifecycle Controls -->
-        <div class="specs-col">
-          <div class="glass-card">
-            <h2>
-              <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><title>Icon</title><path d="M12 22s8-4 8-10V5l-8-3-8 3v7c0 6 8 10 8 10z"></path></svg>
-              Memory lifecycle manager
-            </h2>
-            <p>Simulate how operator actions transition a memory candidate between states.</p>
-
-            <div class="form-group">
-              <label for="lessonInput">Memory Lesson / Content</label>
-              <input type="text" id="lessonInput" value="Always use git log --oneline instead of git log to save context tokens" oninput="updateMemorySpec()">
-            </div>
-
-            <div class="form-row">
-              <div class="form-group">
-                <label for="evidenceRef">Evidence Reference ID</label>
-                <input type="text" id="evidenceRef" value="session-abc123" oninput="updateMemorySpec()">
-              </div>
-              <div class="form-group">
-                <label for="scopeSelect">Scope</label>
-                <select id="scopeSelect" onchange="updateMemorySpec()">
-                  <option value="repo">repo</option>
-                  <option value="global">global</option>
-                </select>
-              </div>
-            </div>
-
-            <label>Current Record State</label>
-            <div class="action-btn-row">
-              <button type="button" class="action-btn active-state" id="btn-proposed" onclick="transitionState('proposed')">Proposed</button>
-              <button type="button" class="action-btn" id="btn-approved" onclick="transitionState('approved')">Approved</button>
-              <button type="button" class="action-btn" id="btn-rejected" onclick="transitionState('rejected')">Rejected</button>
-              <button type="button" class="action-btn" id="btn-pruned" onclick="transitionState('pruned')">Pruned</button>
-            </div>
-          </div>
-        </div>
-
-        <!-- Right: Prompt builder / visual lifecycle -->
-        <div class="specs-col">
-          <div class="glass-card">
-            <h2>
-              <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><title>Icon</title><line x1="18" y1="20" x2="18" y2="10"></line><line x1="12" y1="20" x2="12" y2="4"></line><line x1="6" y1="20" x2="6" y2="14"></line></svg>
-              State Transition Diagram
-            </h2>
-
-            <div class="state-graphic">
-              <svg viewBox="0 0 300 80" fill="none" xmlns="http://www.w3.org/2000/svg"><title>Icon</title>
-                <defs>
-                  <marker id="m-arr" viewBox="0 0 10 10" refX="6" refY="5" markerWidth="6" markerHeight="6" orient="auto-start-reverse">
-                    <path d="M 0 1.5 L 8 5 L 0 8.5 z" fill="var(--color-cyan)"/>
-                  </marker>
-                </defs>
-
-                <!-- Proposed Node -->
-                <g class="state-node active" id="snode-proposed">
-                  <rect x="10" y="20" width="70" height="35" rx="5" fill="rgba(255,255,255,0.02)" stroke="var(--border-card)" stroke-width="1.5"/>
-                  <text x="45" y="42" fill="#fff" font-size="10" font-family="var(--font-sans)" text-anchor="middle">Proposed</text>
-                </g>
-
-                <!-- Arrow 1 -> 2 -->
-                <path d="M 80 37 L 105 37" fill="none" stroke="var(--color-cyan)" stroke-width="1" marker-end="url(#m-arr)"/>
-
-                <!-- Approved Node -->
-                <g class="state-node" id="snode-approved">
-                  <rect x="115" y="5" width="70" height="30" rx="5" fill="rgba(255,255,255,0.02)" stroke="var(--border-card)" stroke-width="1.5"/>
-                  <text x="150" y="23" fill="#fff" font-size="10" font-family="var(--font-sans)" text-anchor="middle">Approved</text>
-                </g>
-
-                <!-- Rejected Node -->
-                <g class="state-node" id="snode-rejected">
-                  <rect x="115" y="45" width="70" height="30" rx="5" fill="rgba(255,255,255,0.02)" stroke="var(--border-card)" stroke-width="1.5"/>
-                  <text x="150" y="63" fill="#fff" font-size="10" font-family="var(--font-sans)" text-anchor="middle">Rejected</text>
-                </g>
-
-                <!-- Arrow 2 -> 3 -->
-                <path d="M 185 37 L 210 37" fill="none" stroke="var(--color-cyan)" stroke-width="1" marker-end="url(#m-arr)"/>
-
-                <!-- Pruned Node -->
-                <g class="state-node" id="snode-pruned">
-                  <rect x="220" y="20" width="70" height="35" rx="5" fill="rgba(255,255,255,0.02)" stroke="var(--border-card)" stroke-width="1.5"/>
-                  <text x="255" y="42" fill="#fff" font-size="10" font-family="var(--font-sans)" text-anchor="middle">Pruned</text>
-                </g>
-              </svg>
-            </div>
-
-            <div class="verdict-header">Synchronous Prompt Injection block</div>
-            <pre><code id="memoryPromptBlock"># No active memory injected (state proposed is not approved).</code></pre>
-          </div>
-        </div>
-
-      </div>
-    </main>
-
-    <!-- TAB 2: TECHNICAL REFERENCE -->
-    <main class="tab-pane" id="pane-reference">
-      <div class="glass-card">
-        <h2>Clio Coder Memory &amp; Evidence Specifications</h2>
-
-        <h3 style="margin: 1.5rem 0 0.5rem 0; color:#fff;">Evidence Corpus Layout</h3>
-        <p>Evidence ID is derived deterministically from run/session/eval tasks and builds folder records under <code>&lt;dataDir&gt;/evidence/</code>:</p>
-        <ul style="margin-left: 2rem; margin-bottom: 1.5rem; color:var(--text-muted)">
-          <li><code>overview.json</code>: Stable summary metrics metadata.</li>
-          <li><code>transcript.md</code>: Raw markdown chat segment log.</li>
-          <li><code>findings.json</code>: Compiled findings and diagnostics list.</li>
-        </ul>
-
-        <h3 style="margin: 1.5rem 0 0.5rem 0; color:#fff;">Durable Memory Injection Rules</h3>
-        <p>The TUI chat loop compiles approved memory constraints synchronously before a turn starts:</p>
-        <table class="ref-table">
-          <thead>
-            <tr>
-              <th>Constraint / Parameter</th>
-              <th>Source / Default Value</th>
-            </tr>
-          </thead>
-          <tbody>
-            <tr>
-              <td>Allowed Scopes</td>
-              <td><code>global</code>, <code>repo</code> (<code>prompt-section.ts</code>)</td>
-            </tr>
-            <tr>
-              <td>Token Budget</td>
-              <td>Max <code>400</code> estimated tokens (<code>prompt-section.ts</code>)</td>
-            </tr>
-            <tr>
-              <td>Max Record Count</td>
-              <td>Max <code>5</code> records (<code>prompt-section.ts</code>)</td>
-            </tr>
-            <tr>
-              <td>Store Capacity Limit</td>
-              <td>Max <code>500</code> records (<code>store.ts</code>)</td>
-            </tr>
-            <tr>
-              <td>Required Status</td>
-              <td><code>approved: true</code></td>
-            </tr>
-            <tr>
-              <td>Required Citation</td>
-              <td>At least 1 linked Evidence Ref</td>
-            </tr>
-            <tr>
-              <td>Stale Pruning Thresholds</td>
-              <td>Unapproved: <code>30</code> days; Approved: <code>180</code> days (<code>store.ts</code>)</td>
-            </tr>
-          </tbody>
-        </table>
-
-        <h3 style="margin: 1.5rem 0 0.5rem 0; color:#fff;">Proactive Task Memory &amp; Telemetry</h3>
-        <p>Background proactive task memory policy maintains session state in <code>TaskMemoryBank</code> and records content-free telemetry to <code>&lt;stateDir&gt;/memory/steps.jsonl</code>:</p>
-        <table class="ref-table">
-          <thead>
-            <tr>
-              <th>Knob / Concept</th>
-              <th>Config Key / Location</th>
-              <th>Value &amp; Notes</th>
-            </tr>
-          </thead>
-          <tbody>
-            <tr>
-              <td>Intervention Switch</td>
-              <td><code>memory.intervention.enabled</code></td>
-              <td>Default <code>true</code> (<code>defaults.ts</code>)</td>
-            </tr>
-            <tr>
-              <td>Interval Floor</td>
-              <td><code>memory.intervention.everyNTools</code></td>
-              <td>Default <code>10</code> completed tools (<code>defaults.ts</code>)</td>
-            </tr>
-            <tr>
-              <td>Window Steps</td>
-              <td><code>memory.intervention.windowSteps</code></td>
-              <td>Default <code>8</code> steps (<code>defaults.ts</code>)</td>
-            </tr>
-            <tr>
-              <td>Render Token Limit</td>
-              <td><code>memory.intervention.maxTokens</code></td>
-              <td>Default <code>400</code> tokens (<code>defaults.ts</code>)</td>
-            </tr>
-            <tr>
-              <td>Policy Output Cap</td>
-              <td><code>TASK_MEMORY_POLICY_MODEL_MAX_OUTPUT_TOKENS</code></td>
-              <td>Fixed <code>4000</code> output tokens (library contract in <code>task-memory-policy.ts</code>)</td>
-            </tr>
-            <tr>
-              <td>Policy Timeout (Operator)</td>
-              <td><code>memory.intervention.timeoutMs</code></td>
-              <td>Default <code>180000</code> ms (shipped operator default in <code>defaults.ts</code>)</td>
-            </tr>
-            <tr>
-              <td>Policy Timeout (Library)</td>
-              <td><code>TASK_MEMORY_POLICY_DEFAULT_TIMEOUT_MS</code></td>
-              <td>Fallback <code>20000</code> ms (library fallback in <code>task-memory-policy.ts</code>)</td>
-            </tr>
-            <tr>
-              <td>Telemetry Decisions</td>
-              <td><code>TaskMemoryTelemetryDecision</code></td>
-              <td><code>silent</code>, <code>injected</code>, <code>gated</code>, <code>timeout</code>, <code>malformed</code>, <code>dropped</code> (<code>task-memory-telemetry.ts</code>)</td>
-            </tr>
-          </tbody>
-        </table>
-      </div>
-    </main>
-
-    <footer>
-      <p>Clio Coder Memory spec &bull; Version 0.4.0</p>
-    </footer>
+    <footer>Clio Coder documentation · source-aligned at v0.4.2</footer>
   </div>
-
-  <script>
-    // Tab switching
-    function switchTab(tabId) {
-      document.querySelectorAll('.tab-btn').forEach(btn => { btn.classList.remove('active'); });
-      document.querySelectorAll('.tab-pane').forEach(pane => { pane.classList.remove('active'); });
-
-      if (tabId === 'interactive') {
-        document.querySelector('.tab-btn:nth-child(1)').classList.add('active');
-        document.getElementById('pane-interactive').classList.add('active');
-      } else {
-        document.querySelector('.tab-btn:nth-child(2)').classList.add('active');
-        document.getElementById('pane-reference').classList.add('active');
-      }
-    }
-
-    let activeState = 'proposed';
-
-    function transitionState(state) {
-      activeState = state;
-
-      // highlight button
-      document.querySelectorAll('.action-btn').forEach(btn => { btn.classList.remove('active-state'); });
-      document.getElementById(`btn-${state}`).classList.add('active-state');
-
-      // highlight svg node
-      document.querySelectorAll('.state-node').forEach(n => { n.classList.remove('active'); });
-      document.getElementById(`snode-${state}`).classList.add('active');
-
-      updateMemorySpec();
-    }
-
-    function updateMemorySpec() {
-      const lesson = document.getElementById('lessonInput').value.trim();
-      const ref = document.getElementById('evidenceRef').value.trim();
-      const scope = document.getElementById('scopeSelect').value;
-      const codeEl = document.getElementById('memoryPromptBlock');
-
-      if (activeState === 'approved') {
-        codeEl.innerText = `[SYSTEM MEMORY INJECTION]
-Record ID: mem-82f9c
-Scope: ${scope}
-Evidence Ref: ${ref}
-Lesson: ${lesson}
-Note: Do not extrapolate beyond cited findings.`;
-      } else if (activeState === 'proposed') {
-        codeEl.innerText = `# Candidate is PROPOSED. Requiring explicit operator approval before prompt injection.`;
-      } else if (activeState === 'rejected') {
-        codeEl.innerText = `# Candidate is REJECTED. Record excluded from prompt injection.`;
-      } else {
-        codeEl.innerText = `# Candidate has been PRUNED due to age parameters.`;
-      }
-    }
-
-    // Init
-    window.onload = () => {
-      updateMemorySpec();
-    };
-  </script>
+  <script src="shared.js"></script>
 </body>
 </html>

@@ -4,6 +4,9 @@
 
 # Clio Coder documentation
 
+> **Visual blueprint:** The source checkout includes the complete
+> [Clio Coder documentation visual reference](https://github.com/iowarp/clio-coder/blob/main/docs/html/readme_blueprint.html).
+
 This is the documentation map for Clio Coder. Start with the path closest to
 what you are trying to do; the deeper references are here when you need exact
 schemas, wire contracts, or architectural invariants.
@@ -168,9 +171,11 @@ the architecture guide and `CONTRIBUTING.md` are the public starting points.
 
 ## Interactive blueprints
 
-Many guides link to visual HTML blueprints under `docs/html/`. Those links use
-the public repository so they still work when a guide is read from the npm
-package. From a source checkout, serve the same files locally with:
+Every Markdown page has a dedicated visual blueprint under `docs/html/`, and
+the separate `docs/html/index.html` landing page mirrors this documentation
+tree. Blueprint links use the public repository so they still work when a guide
+is read from the npm package. From a source checkout, serve the same files
+locally with:
 
 ```bash
 clio-coder docs

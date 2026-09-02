@@ -1,5 +1,8 @@
 # Typed Dispatch Intent: Migration and Refusal Policy
 
+> **Visual blueprint:** The source checkout includes the complete
+> [Typed Dispatch Intent: Migration and Refusal Policy visual reference](https://github.com/iowarp/clio-coder/blob/main/docs/html/dispatch_typed_intent_blueprint.html).
+
 Typed dispatch intent is the structured declaration of what a dispatched worker
 may read, may write, is expected to produce, and must verify. It replaces the
 practice of reconstructing that answer from optional `writeRoots` plus path-like

@@ -1,674 +1,242 @@
-<!DOCTYPE html>
+<!doctype html>
 <html lang="en">
 <head>
-  <meta charset="UTF-8">
-  <meta name="viewport" content="width=device-width, initial-scale=1.0">
-  <title>Clio Coder Code Evolution Blueprint (v0.4.0)</title>
-
-  <style>
-    :root {
-      --bg-dark: #090d16;
-      --bg-grid: rgba(255, 255, 255, 0.02);
-      --bg-card: rgba(13, 20, 38, 0.45);
-      --bg-card-hover: rgba(20, 30, 58, 0.6);
-      --border-card: rgba(255, 255, 255, 0.08);
-      --border-card-hover: rgba(0, 240, 255, 0.3);
-      --text-main: #f3f4f6;
-      --text-muted: #9ca3af;
-      --text-dim: #6b7280;
-
-      --color-cyan: #00f0ff;
-      --color-cyan-rgb: 0, 240, 255;
-      --color-purple: #bd00ff;
-      --color-purple-rgb: 189, 0, 255;
-      --color-emerald: #10b981;
-      --color-emerald-rgb: 16, 185, 129;
-      --color-amber: #f59e0b;
-      --color-amber-rgb: 245, 158, 11;
-      --color-rose: #ef4444;
-      --color-rose-rgb: 239, 68, 68;
-
-      --gradient-main: linear-gradient(135deg, var(--color-cyan), var(--color-purple));
-      --shadow-glow: 0 0 25px rgba(0, 240, 255, 0.15);
-      --font-sans: "Segoe UI", -apple-system, BlinkMacSystemFont, Roboto, "Helvetica Neue", Arial, sans-serif;
-      --font-mono: "SFMono-Regular", Consolas, "Liberation Mono", Menlo, monospace;
-
-      --glass-blur: blur(12px);
-    }
-
-    * {
-      box-sizing: border-box;
-      margin: 0;
-      padding: 0;
-    }
-
-    body {
-      background-color: var(--bg-dark);
-      background-image:
-        radial-gradient(circle at 10% 20%, rgba(var(--color-cyan-rgb), 0.05) 0%, transparent 40%),
-        radial-gradient(circle at 90% 80%, rgba(var(--color-purple-rgb), 0.05) 0%, transparent 40%),
-        radial-gradient(circle at 50% 50%, #0d1527 0%, var(--bg-dark) 100%);
-      color: var(--text-main);
-      font-family: var(--font-sans);
-      min-height: 100vh;
-      line-height: 1.6;
-      overflow-x: hidden;
-      position: relative;
-    }
-
-    body::before {
-      content: '';
-      position: absolute;
-      inset: 0;
-      background-image: linear-gradient(var(--bg-grid) 1px, transparent 1px),
-                        linear-gradient(90deg, var(--bg-grid) 1px, transparent 1px);
-      background-size: 40px 40px;
-      background-position: center top;
-      pointer-events: none;
-      z-index: 0;
-      opacity: 0.8;
-    }
-
-    .container {
-      max-width: 1400px;
-      margin: 0 auto;
-      padding: 2rem;
-      position: relative;
-      z-index: 1;
-    }
-
-    /* Header Styling */
-    header {
-      display: flex;
-      justify-content: space-between;
-      align-items: center;
-      margin-bottom: 2.5rem;
-      padding-bottom: 1.5rem;
-      border-bottom: 1px solid rgba(255, 255, 255, 0.05);
-    }
-
-    .header-left {
-      display: flex;
-      align-items: center;
-      gap: 1rem;
-    }
-
-    .header-logo {
-      display: inline-flex;
-      align-items: center;
-      justify-content: center;
-      width: 48px;
-      height: 48px;
-      background: rgba(255, 255, 255, 0.02);
-      border: 1px solid var(--border-card);
-      border-radius: 12px;
-    }
-
-    .header-logo svg {
-      width: 28px;
-      height: 28px;
-    }
-
-    .header-title-wrapper h1 {
-      font-size: 1.5rem;
-      font-weight: 800;
-      letter-spacing: -0.03em;
-      background: linear-gradient(to right, #ffffff, #c7d2fe, var(--color-cyan));
-      -webkit-background-clip: text;
-      -webkit-text-fill-color: transparent;
-    }
-
-    .header-title-wrapper p {
-      font-size: 0.825rem;
-      color: var(--text-muted);
-    }
-
-    .header-right {
-      display: flex;
-      align-items: center;
-      gap: 1rem;
-    }
-
-    .back-btn {
-      background: rgba(255, 255, 255, 0.03);
-      border: 1px solid var(--border-card);
-      color: var(--text-muted);
-      padding: 0.5rem 1rem;
-      border-radius: 8px;
-      font-size: 0.875rem;
-      font-weight: 600;
-      text-decoration: none;
-      display: inline-flex;
-      align-items: center;
-      gap: 0.5rem;
-      transition: all 0.2s;
-    }
-
-    .back-btn:hover {
-      background: rgba(255, 255, 255, 0.08);
-      color: var(--text-main);
-      border-color: rgba(var(--color-cyan-rgb), 0.3);
-    }
-
-    .version-badge {
-      background: rgba(0, 240, 255, 0.08);
-      border: 1px solid rgba(0, 240, 255, 0.25);
-      color: var(--color-cyan);
-      padding: 0.35rem 0.75rem;
-      border-radius: 50px;
-      font-size: 0.75rem;
-      font-weight: 600;
-      font-family: var(--font-mono);
-    }
-
-    /* Tabs Navigation */
-    .tabs-nav {
-      display: flex;
-      gap: 0.75rem;
-      margin-bottom: 2rem;
-    }
-
-    .tab-btn {
-      background: rgba(255, 255, 255, 0.03);
-      border: 1px solid var(--border-card);
-      color: var(--text-muted);
-      padding: 0.6rem 1.25rem;
-      border-radius: 8px;
-      font-size: 0.875rem;
-      font-weight: 600;
-      cursor: pointer;
-      display: flex;
-      align-items: center;
-      gap: 0.5rem;
-      transition: all 0.2s;
-    }
-
-    .tab-btn:hover {
-      background: rgba(255, 255, 255, 0.06);
-      color: var(--text-main);
-    }
-
-    .tab-btn.active {
-      background: var(--gradient-main);
-      color: #090d16;
-      border-color: transparent;
-      box-shadow: 0 4px 15px rgba(var(--color-cyan-rgb), 0.25);
-    }
-
-    /* Content Layout */
-    .tab-pane {
-      display: none;
-      animation: fadeIn 0.3s ease-out forwards;
-    }
-
-    .tab-pane.active {
-      display: block;
-    }
-
-    @keyframes fadeIn {
-      from { opacity: 0; transform: translateY(8px); }
-      to { opacity: 1; transform: translateY(0); }
-    }
-
-    /* Split layout */
-    .blueprint-layout {
-      display: grid;
-      grid-template-columns: 1.1fr 0.9fr;
-      gap: 2rem;
-      align-items: start;
-    }
-
-    @media (max-width: 1100px) {
-      .blueprint-layout {
-        grid-template-columns: 1fr;
-      }
-    }
-
-    .glass-card {
-      background: var(--bg-card);
-      border: 1px solid var(--border-card);
-      border-radius: 16px;
-      padding: 1.75rem;
-      margin-bottom: 2rem;
-      backdrop-filter: var(--glass-blur);
-      box-shadow: 0 8px 32px 0 rgba(0, 0, 0, 0.3);
-    }
-
-    .glass-card h2 {
-      font-size: 1.25rem;
-      font-weight: 700;
-      color: #ffffff;
-      margin-bottom: 1.25rem;
-      display: flex;
-      align-items: center;
-      gap: 0.5rem;
-      border-bottom: 1px solid rgba(255, 255, 255, 0.05);
-      padding-bottom: 0.75rem;
-    }
-
-    .glass-card h2 svg {
-      width: 18px;
-      height: 18px;
-      color: var(--color-cyan);
-    }
-
-    .glass-card p {
-      font-size: 0.925rem;
-      color: var(--text-muted);
-      margin-bottom: 1rem;
-    }
-
-    /* Form Elements */
-    .form-group {
-      margin-bottom: 1.25rem;
-    }
-
-    .form-group label {
-      display: block;
-      font-size: 0.8rem;
-      font-weight: 600;
-      color: var(--text-muted);
-      margin-bottom: 0.5rem;
-      text-transform: uppercase;
-      letter-spacing: 0.05em;
-    }
-
-    textarea {
-      width: 100%;
-      background: rgba(9, 13, 22, 0.7);
-      border: 1px solid var(--border-card);
-      border-radius: 8px;
-      padding: 0.65rem 0.85rem;
-      color: #fff;
-      font-family: var(--font-mono);
-      font-size: 0.825rem;
-      outline: none;
-      resize: vertical;
-    }
-
-    /* Presets list */
-    .presets-list {
-      display: flex;
-      gap: 0.5rem;
-      margin-bottom: 1rem;
-    }
-
-    .preset-btn {
-      background: rgba(255, 255, 255, 0.03);
-      border: 1px solid var(--border-card);
-      color: var(--text-muted);
-      padding: 0.35rem 0.75rem;
-      border-radius: 6px;
-      font-size: 0.75rem;
-      cursor: pointer;
-      transition: all 0.2s;
-    }
-
-    .preset-btn:hover {
-      background: rgba(0, 240, 255, 0.08);
-      border-color: var(--color-cyan);
-      color: #fff;
-    }
-
-    /* Validation Results display */
-    .status-panel {
-      border-radius: 12px;
-      padding: 1.25rem;
-      margin-bottom: 1.5rem;
-      border: 1px solid transparent;
-      font-size: 0.9rem;
-    }
-
-    .status-panel.success { background: rgba(16, 185, 129, 0.08); border-color: rgba(16, 185, 129, 0.3); color: var(--color-emerald); }
-    .status-panel.error { background: rgba(239, 68, 68, 0.08); border-color: rgba(239, 68, 68, 0.3); color: var(--color-rose); }
-    .status-panel.warning { background: rgba(245, 158, 11, 0.08); border-color: rgba(245, 158, 11, 0.3); color: var(--color-amber); }
-
-    .summary-badge-grid {
-      display: flex;
-      flex-wrap: wrap;
-      gap: 0.5rem;
-      margin-top: 1rem;
-    }
-
-    .summary-badge {
-      background: rgba(255, 255, 255, 0.04);
-      border: 1px solid var(--border-card);
-      padding: 0.4rem 0.85rem;
-      border-radius: 6px;
-      font-size: 0.8rem;
-      font-family: var(--font-sans);
-    }
-
-    /* Tables */
-    .ref-table {
-      width: 100%;
-      border-collapse: collapse;
-      margin: 1.5rem 0;
-      font-size: 0.9rem;
-    }
-
-    .ref-table th, .ref-table td {
-      padding: 0.65rem 0.85rem;
-      border: 1px solid var(--border-card);
-      text-align: left;
-    }
-
-    .ref-table th {
-      background: rgba(255,255,255,0.03);
-    }
-
-    /* Footer */
-    footer {
-      text-align: center;
-      margin-top: 4rem;
-      padding-top: 2rem;
-      border-top: 1px solid rgba(255, 255, 255, 0.05);
-      color: var(--text-dim);
-      font-size: 0.875rem;
-    }
-  </style>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <meta name="clio-markdown-source" content="docs/process/evolution.md">
+  <meta name="clio-docs-version" content="0.4.2">
+  <title>Evolution and Change Manifests · Clio Coder 0.4.2</title>
+  <link rel="icon" href="data:,">
+  <link rel="stylesheet" href="shared.css">
 </head>
-<body>
+<body data-doc-category="process">
+  <div class="reading-progress" aria-hidden="true"></div>
+  <a class="skip-link" href="#reference-content">Skip to reference</a>
   <div class="container">
-    <header>
+    <header class="document-header" data-category="Process">
       <div class="header-left">
-        <div class="header-logo">
-          <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" style="color: var(--color-cyan);"><title>Icon</title>
-            <path d="M11 4H4a2 2 0 0 0-2 2v14a2 2 0 0 0 2 2h14a2 2 0 0 0 2-2v-7"></path>
-            <path d="M18.5 2.5a2.121 2.121 0 1 1 3 3L12 15l-4 1 1-4 9.5-9.5z"></path>
+        <a class="header-logo" href="index.html" aria-label="Documentation index">
+          <svg viewBox="0 0 24 24" fill="none" aria-hidden="true">
+            <path d="M12 2 2 7l10 5 10-5-10-5Z" stroke="url(#clio-logo)" stroke-width="2" stroke-linejoin="round"/>
+            <path d="m2 12 10 5 10-5M2 17l10 5 10-5" stroke="url(#clio-logo)" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"/>
+            <defs><linearGradient id="clio-logo" x1="2" y1="2" x2="22" y2="22"><stop stop-color="#00d4db"/><stop offset="1" stop-color="#ff7e29"/></linearGradient></defs>
           </svg>
-        </div>
+        </a>
         <div class="header-title-wrapper">
-          <h1>Clio Coder Evolution &amp; Change Manifests</h1>
-          <p>Durable change manifest workspace, authority safety checks, and risk analysis metrics</p>
+          <p class="document-kicker">Process / canonical reference</p>
+          <h1>Evolution and Change Manifests</h1>
+          <p class="document-path">docs/process/evolution.md</p>
         </div>
       </div>
       <div class="header-right">
-        <span class="version-badge">Clio Coder v0.4.0</span>
-        <a href="index.html" class="back-btn">
-          <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><title>Icon</title><line x1="19" y1="12" x2="5" y2="12"></line><polyline points="12 19 5 12 12 5"></polyline></svg>
-          Dashboard Hub
-        </a>
+        <a class="back-btn" href="index.html">← Index</a>
+        <span class="version-badge">v0.4.2</span>
       </div>
     </header>
-
-    <div class="tabs-nav">
-      <button type="button" class="tab-btn active" onclick="switchTab('interactive')">
-        <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><title>Icon</title><polyline points="22 12 18 12 15 21 9 3 6 12 2 12"></polyline></svg>
-        Interactive Manifest Editor &amp; Risk Evaluator
-      </button>
-      <button type="button" class="tab-btn" onclick="switchTab('reference')">
-        <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><title>Icon</title><path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z"></path><polyline points="14 2 14 8 20 8"></polyline><line x1="16" y1="13" x2="8" y2="13"></line><line x1="16" y1="17" x2="8" y2="17"></line><polyline points="10 9 9 9 8 9"></polyline></svg>
-        Full Technical Reference
-      </button>
+    <div class="page-layout-grid reference-layout">
+      <aside class="sidebar reference-sidebar" aria-label="On this page">
+        <nav class="toc-container">
+          <p class="toc-title">On this page</p>
+          <a class="sidebar-source" href="https://github.com/iowarp/clio-coder/blob/main/docs/process/evolution.md">Canonical Markdown<br>docs/process/evolution.md</a>
+          <ul class="toc-list"></ul>
+        </nav>
+      </aside>
+      <main class="reference-main" id="reference-content">
+        <article class="reference-prose glass-card">
+<blockquote>
+<p><strong>Visual blueprint:</strong> The source checkout includes the complete
+<a href="evolution_blueprint.html">Evolution and Change Manifests visual reference</a>.</p>
+</blockquote>
+<p>Clio Coder uses change manifests to make harness changes reviewable, falsifiable, and rollback-friendly. CLIO stands for Context Layer for Input/Output, named for the Greek muse of history. A manifest is JSON, generated or checked with <code>clio-coder evolve manifest</code>, and should describe what changed, why, what evidence supports it, what could regress, how to validate it, and how to roll it back.</p>
+<p>Source of truth: <code>src/domains/evolution/manifest.ts</code>, <code>src/domains/evolution/validate.ts</code>, and <code>src/cli/evolve.ts</code>.</p>
+<hr>
+<h2>CLI</h2>
+<pre><code class="language-bash">clio-coder evolve manifest init &gt; change-manifest.json
+clio-coder evolve manifest validate change-manifest.json
+clio-coder evolve manifest summarize change-manifest.json
+</code></pre>
+<p><code>init</code> prints a template. <code>validate</code> exits non-zero and reports JSON paths when fields are missing or invalid. In <code>v0.2.9</code>, it additionally resolves each non-empty <code>evidenceRefs</code> entry (which must match <code>run-&lt;id&gt;</code> or <code>session-&lt;id&gt;</code> formatting) against the local evidence store, failing validation if a referenced bundle is not found. <code>summarize</code> prints the iteration id, base SHA, authority levels, components, files, predicted regressions, validation-step count, and reports evidence refs resolution.</p>
+<hr>
+<h2>Minimal manifest</h2>
+<pre><code class="language-json">{
+  &quot;version&quot;: 1,
+  &quot;iterationId&quot;: &quot;exploratory-1&quot;,
+  &quot;baseGitSha&quot;: &quot;0000000000000000000000000000000000000000&quot;,
+  &quot;createdAt&quot;: &quot;2026-04-29T00:00:00.000Z&quot;,
+  &quot;changes&quot;: [
+    {
+      &quot;id&quot;: &quot;change-1&quot;,
+      &quot;componentIds&quot;: [&quot;context-file:CLIO-CODER.md&quot;],
+      &quot;filesChanged&quot;: [&quot;CLIO-CODER.md&quot;],
+      &quot;authorityLevel&quot;: &quot;prompt&quot;,
+      &quot;evidenceRefs&quot;: [],
+      &quot;rootCause&quot;: &quot;First exploratory iteration; no evidence corpus exists yet.&quot;,
+      &quot;targetedFix&quot;: &quot;Describe the smallest proposed harness change.&quot;,
+      &quot;predictedFixes&quot;: [&quot;One expected improvement.&quot;],
+      &quot;predictedRegressions&quot;: [],
+      &quot;validationPlan&quot;: [&quot;npm run test&quot;],
+      &quot;rollbackPlan&quot;: &quot;Revert the filesChanged entries for this change.&quot;,
+      &quot;expectedBudgetImpact&quot;: {
+        &quot;risk&quot;: &quot;same&quot;
+      }
+    }
+  ]
+}
+</code></pre>
+<p>Only the first exploratory iteration (<code>iterationId: &quot;exploratory-1&quot;</code>) is permitted to use an empty <code>evidenceRefs</code> array. For all other iterations, the manifest must cite valid evidence of verification.</p>
+<h3>Evidence-Linked Validation (Slice 5a)</h3>
+<p>During <code>clio-coder evolve manifest validate</code> and <code>summarize</code> commands, Clio Coder validates the referenced evidence bundles:</p>
+<ul>
+<li><strong>Format Verification</strong>: Every reference in the <code>evidenceRefs</code> array must follow the format <code>run-&lt;id&gt;</code> or <code>session-&lt;id&gt;</code>.</li>
+<li><strong>Durable Store Resolution</strong>: Each reference must correspond to a folder that actually exists under <code>&lt;dataDir&gt;/evidence/</code>. If any referenced bundle is missing, validation fails and reports a dangling reference issue.</li>
+<li><strong>Engine Boundaries</strong>: To maintain the domain boundaries the lint-time boundary checker enforces, the validation function <code>validateChangeManifest</code> is completely decoupled. It accepts a <code>resolveEvidenceRef</code> predicate option. The CLI passes a resolver connected to the evidence store, keeping the evolution domain from directly importing the evidence domain.</li>
+</ul>
+<h3>Self-Edit Gate Deferral (Slice 5b)</h3>
+<p>Enforcement of high-authority self-edits (Slice 5b) is deferred per the status and design in <code>src/domains/evolution/SELF_EDIT_GATE.md</code>.</p>
+<h4>Why it is Deferred</h4>
+<p>To enforce that Clio Coder cannot modify its own codebase (specifically paths mapped to <code>HIGH_AUTHORITY_LEVELS</code> such as <code>src/engine/**</code> or <code>src/domains/safety/**</code>) without a validated change manifest, the harness must distinguish between:</p>
+<ol>
+<li><strong>Agent-Initiated Self-Edits</strong>: Clio editing its own harness paths autonomously.</li>
+<li><strong>Operator-Requested Edits</strong>: The developer instructing Clio to modify files in the repository.</li>
+</ol>
+<p>Currently, the middleware lacks a reliable signal to separate these two scenarios. Implementing a naive path-glob filter would block developers from making ordinary source changes, which is forbidden by the release specification.</p>
+<h4>Concrete Gate Design and Re-entry</h4>
+<p>When the required signal (<code>selfEditOrigin: &quot;operator-requested&quot; | &quot;agent-initiated&quot;</code>) is implemented, Slice 5b will run as a <code>before_tool</code> middleware registration. For any high-authority tool call classified as <code>agent-initiated</code>, it will require a change manifest whose <code>evidenceRefs</code> validate against the local evidence store, returning a <code>block_tool</code> effect if missing.</p>
+<hr>
+<h2>Schema notes</h2>
+<table>
+<thead>
+<tr>
+<th>Field</th>
+<th>Type</th>
+<th>Requirement</th>
+</tr>
+</thead>
+<tbody><tr>
+<td><code>version</code></td>
+<td>literal <code>1</code></td>
+<td>Required.</td>
+</tr>
+<tr>
+<td><code>iterationId</code></td>
+<td>non-empty string</td>
+<td>Required. <code>exploratory-1</code> has special empty-evidence handling.</td>
+</tr>
+<tr>
+<td><code>baseGitSha</code></td>
+<td>non-empty string</td>
+<td>Required. Use the commit the change was based on.</td>
+</tr>
+<tr>
+<td><code>createdAt</code></td>
+<td>non-empty string</td>
+<td>Required; ISO timestamp recommended.</td>
+</tr>
+<tr>
+<td><code>changes</code></td>
+<td>array</td>
+<td>Required.</td>
+</tr>
+<tr>
+<td><code>changes[].id</code></td>
+<td>non-empty string</td>
+<td>Required.</td>
+</tr>
+<tr>
+<td><code>changes[].componentIds</code></td>
+<td>string array</td>
+<td>Required; can be empty only if <code>filesChanged</code> is non-empty.</td>
+</tr>
+<tr>
+<td><code>changes[].filesChanged</code></td>
+<td>string array</td>
+<td>Required; can be empty only if <code>componentIds</code> is non-empty.</td>
+</tr>
+<tr>
+<td><code>changes[].authorityLevel</code></td>
+<td>enum</td>
+<td>Required; see below.</td>
+</tr>
+<tr>
+<td><code>changes[].evidenceRefs</code></td>
+<td>string array</td>
+<td>Required; empty only for <code>exploratory-1</code>.</td>
+</tr>
+<tr>
+<td><code>changes[].rootCause</code></td>
+<td>non-empty string</td>
+<td>Required.</td>
+</tr>
+<tr>
+<td><code>changes[].targetedFix</code></td>
+<td>non-empty string</td>
+<td>Required.</td>
+</tr>
+<tr>
+<td><code>changes[].predictedFixes</code></td>
+<td>string array</td>
+<td>Required.</td>
+</tr>
+<tr>
+<td><code>changes[].predictedRegressions</code></td>
+<td>string array</td>
+<td>Required; high-authority changes require at least one entry.</td>
+</tr>
+<tr>
+<td><code>changes[].validationPlan</code></td>
+<td>string array</td>
+<td>Required.</td>
+</tr>
+<tr>
+<td><code>changes[].rollbackPlan</code></td>
+<td>non-empty string</td>
+<td>Required.</td>
+</tr>
+<tr>
+<td><code>changes[].expectedBudgetImpact</code></td>
+<td>object</td>
+<td>Optional; when present, <code>risk</code> is required.</td>
+</tr>
+</tbody></table>
+<p>Authority levels:</p>
+<pre><code class="language-text">prompt | tool-description | tool-implementation | middleware | memory | runtime | safety | schema | cli
+</code></pre>
+<p>High-authority levels are:</p>
+<pre><code class="language-text">tool-implementation | middleware | runtime | safety | schema | cli
+</code></pre>
+<p>High-authority changes must list predicted regressions. This is deliberate: the point of the manifest is not to promise safety, but to make risk reviewable.</p>
+<p>Budget impact risk values:</p>
+<pre><code class="language-text">lower | same | higher
+</code></pre>
+<p>Optional budget deltas:</p>
+<pre><code class="language-json">&quot;expectedBudgetImpact&quot;: {
+  &quot;tokenDelta&quot;: 500,
+  &quot;wallTimeDeltaMs&quot;: 2000,
+  &quot;risk&quot;: &quot;higher&quot;
+}
+</code></pre>
+<hr>
+<h2>Recommended workflow</h2>
+<ol>
+<li>Capture the current commit: <code>git rev-parse HEAD</code>.</li>
+<li>Run <code>clio-coder components snapshot --out before.json</code> if the change affects prompts, tools, runtimes, safety, schemas, or recipes.</li>
+<li>Draft the change manifest.</li>
+<li>Implement the smallest change set.</li>
+<li>Run the validation plan and update <code>evidenceRefs</code> with resolved evidence bundle IDs such as <code>run-&lt;id&gt;</code> or <code>session-&lt;id&gt;</code> where available.</li>
+<li>Run <code>clio-coder evolve manifest validate</code> and include the manifest in review notes.</li>
+<li>If the change fails, use <code>rollbackPlan</code> rather than ad hoc cleanup.</li>
+</ol>
+<p>Change manifests are especially useful for experimental CLIO work because they separate evidence-backed claims from plans, hypotheses, and future milestones.</p>
+        </article>
+        <nav class="related-nav" aria-label="Adjacent references">
+          <a class="nav-link-card" href="evals_internal_blueprint.html"><span class="nav-label">Previous</span><span class="nav-title">Internal Eval Suites</span></a>
+          <a class="nav-link-card next" href="fleet_demo_blueprint.html"><span class="nav-label">Next</span><span class="nav-title">Fleet Demo Runbook</span></a>
+        </nav>
+        <p class="reference-footer-note">Canonical content lives in the mapped Markdown page. This visual counterpart adds navigation without changing the contract.</p>
+      </main>
     </div>
-
-    <!-- TAB 1: INTERACTIVE -->
-    <main class="tab-pane active" id="pane-interactive">
-      <div class="blueprint-layout">
-
-        <!-- Left: Manifest Editor -->
-        <div class="specs-col">
-          <div class="glass-card">
-            <h2>
-              <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><title>Icon</title><path d="M21 16V8a2 2 0 0 0-1-1.73l-7-4a2 2 0 0 0-2 0l-7 4A2 2 0 0 0 3 8v8a2 2 0 0 0 1 1.73l7 4a2 2 0 0 0 2 0l7-4A2 2 0 0 0 21 16z"></path></svg>
-              Manifest JSON Editor
-            </h2>
-            <p>Paste or edit your change-manifest.json. The evaluator checks constraints on high-authority risks and evidence reference verification.</p>
-
-            <div class="presets-list">
-              <span class="preset-btn" onclick="loadManifestPreset('valid')">Valid v1 Manifest</span>
-              <span class="preset-btn" onclick="loadManifestPreset('missing-regression')">Trigger High-Authority Error (Missing Regression)</span>
-              <span class="preset-btn" onclick="loadManifestPreset('missing-evidence')">Trigger Evidence Error (Later iteration empty evidence)</span>
-            </div>
-
-            <div class="form-group">
-              <textarea id="manifestInput" rows="18" oninput="validateManifest()"></textarea>
-            </div>
-          </div>
-        </div>
-
-        <!-- Right: Evaluator -->
-        <div class="specs-col">
-          <div class="glass-card">
-            <h2>
-              <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><title>Icon</title><path d="M12 22s8-4 8-10V5l-8-3-8 3v7c0 6 8 10 8 10z"></path></svg>
-              Manifest Risk Assessor
-            </h2>
-            <p>Runs evolution verification rules matching schema configurations.</p>
-
-            <div class="verdict-header">Validation Output</div>
-            <div id="manifestResult" class="status-panel success">
-              JSON is empty. Load a preset.
-            </div>
-
-            <div class="verdict-header">Change Metrics Summary</div>
-            <div class="summary-badge-grid">
-              <div class="summary-badge">Iteration: <strong id="m-iteration" style="color:var(--color-cyan)">exploratory-1</strong></div>
-              <div class="summary-badge">Files: <strong id="m-files" style="color:var(--color-cyan)">1</strong></div>
-              <div class="summary-badge">Authority: <strong id="m-authority" style="color:var(--color-cyan)">prompt</strong></div>
-              <div class="summary-badge">Regression Count: <strong id="m-regressions" style="color:var(--color-cyan)">0</strong></div>
-            </div>
-          </div>
-        </div>
-
-      </div>
-    </main>
-
-    <!-- TAB 2: TECHNICAL REFERENCE -->
-    <main class="tab-pane" id="pane-reference">
-      <div class="glass-card">
-        <h2>Clio Coder Change Manifest Specifications</h2>
-        <p>Change manifests are JSON structures generated or validated using the <code>clio-coder evolve manifest</code> command to support reviewable and falsifiable harness changes.</p>
-
-        <h3 style="margin: 1.5rem 0 0.5rem 0; color:#fff;">Change Manifest Schema</h3>
-        <p>Every change must satisfy specific verification keys:</p>
-        <table class="ref-table">
-          <thead>
-            <tr>
-              <th>Field Path</th>
-              <th>Type</th>
-              <th>Constraint</th>
-            </tr>
-          </thead>
-          <tbody>
-            <tr>
-              <td><code>iterationId</code></td>
-              <td>string</td>
-              <td>Required. Only <code>exploratory-1</code> may omit linked evidence references.</td>
-            </tr>
-            <tr>
-              <td><code>authorityLevel</code></td>
-              <td>enum</td>
-              <td>Required. Must be one of the nine allowed authority channels.</td>
-            </tr>
-            <tr>
-              <td><code>predictedRegressions</code></td>
-              <td>string array</td>
-              <td>Required. High-authority changes **must** list at least one regression.</td>
-            </tr>
-            <tr>
-              <td><code>rollbackPlan</code></td>
-              <td>string</td>
-              <td>Required non-empty string.</td>
-            </tr>
-          </tbody>
-        </table>
-
-        <h3 style="margin: 1.5rem 0 0.5rem 0; color:#fff;">Authority levels</h3>
-        <p>Allowed levels include: <code>prompt</code>, <code>tool-description</code>, <code>tool-implementation</code>, <code>middleware</code>, <code>memory</code>, <code>runtime</code>, <code>safety</code>, <code>schema</code>, <code>cli</code>.</p>
-        <p>High-authority levels that require explicit regression declarations include: <code>tool-implementation</code>, <code>middleware</code>, <code>runtime</code>, <code>safety</code>, <code>schema</code>, <code>cli</code>.</p>
-      </div>
-    </main>
-
-    <footer>
-      <p>Clio Coder Evolution spec &bull; Version 0.4.0</p>
-    </footer>
+    <footer>Clio Coder documentation · source-aligned at v0.4.2</footer>
   </div>
-
-  <script>
-    // Tab switching
-    function switchTab(tabId) {
-      document.querySelectorAll('.tab-btn').forEach(btn => { btn.classList.remove('active'); });
-      document.querySelectorAll('.tab-pane').forEach(pane => { pane.classList.remove('active'); });
-
-      if (tabId === 'interactive') {
-        document.querySelector('.tab-btn:nth-child(1)').classList.add('active');
-        document.getElementById('pane-interactive').classList.add('active');
-      } else {
-        document.querySelector('.tab-btn:nth-child(2)').classList.add('active');
-        document.getElementById('pane-reference').classList.add('active');
-      }
-    }
-
-    const manifestSamples = {
-      valid: `{
-  "version": 1,
-  "iterationId": "exploratory-1",
-  "baseGitSha": "0000000000000000000000000000000000000000",
-  "createdAt": "2026-04-29T00:00:00.000Z",
-  "changes": [
-    {
-      "id": "change-1",
-      "componentIds": ["context-file:CLIO-CODER.md"],
-      "filesChanged": ["CLIO-CODER.md"],
-      "authorityLevel": "prompt",
-      "evidenceRefs": [],
-      "rootCause": "Exploratory setup.",
-      "targetedFix": "Initial config changes.",
-      "predictedFixes": ["First setup."],
-      "predictedRegressions": [],
-      "validationPlan": ["npm run test"],
-      "rollbackPlan": "git checkout CLIO-CODER.md"
-    }
-  ]
-}`,
-      missingRegression: `{
-  "version": 1,
-  "iterationId": "iteration-2",
-  "baseGitSha": "3e9b048fa...",
-  "createdAt": "2026-04-29T00:00:00.000Z",
-  "changes": [
-    {
-      "id": "safety-update",
-      "filesChanged": ["src/domains/safety/policy-engine.ts"],
-      "authorityLevel": "safety",
-      "evidenceRefs": ["run-82f9c"],
-      "rootCause": "Update safety policy bounds.",
-      "targetedFix": "Tighten path blocks.",
-      "predictedFixes": ["Better safety net."],
-      "predictedRegressions": [],
-      "validationPlan": ["npm run test"],
-      "rollbackPlan": "git revert HEAD"
-    }
-  ]
-}`,
-      missingEvidence: `{
-  "version": 1,
-  "iterationId": "iteration-2",
-  "baseGitSha": "3e9b048fa...",
-  "createdAt": "2026-04-29T00:00:00.000Z",
-  "changes": [
-    {
-      "id": "prompt-change",
-      "filesChanged": ["src/domains/prompts/init.ts"],
-      "authorityLevel": "prompt",
-      "evidenceRefs": [],
-      "rootCause": "Update wording.",
-      "targetedFix": "Tweak text.",
-      "predictedFixes": ["Better flow."],
-      "predictedRegressions": [],
-      "validationPlan": ["npm run test"],
-      "rollbackPlan": "git revert HEAD"
-    }
-  ]
-}`
-    };
-
-    function loadManifestPreset(type) {
-      document.getElementById('manifestInput').value = manifestSamples[type].trim();
-      validateManifest();
-    }
-
-    function validateManifest() {
-      const text = document.getElementById('manifestInput').value;
-      const output = document.getElementById('manifestResult');
-
-      if (!text.trim()) {
-        output.className = 'status-panel warning';
-        output.innerText = 'JSON is empty. Load a preset.';
-        return;
-      }
-
-      try {
-        const obj = JSON.parse(text);
-        const errors = [];
-
-        if (obj.version !== 1) {
-          errors.push("Schema Version must equal 1.");
-        }
-
-        if (!obj.iterationId) {
-          errors.push("iterationId is required.");
-        }
-
-        let totalRegressions = 0;
-        let totalFiles = 0;
-        let primaryAuthority = 'prompt';
-
-        if (Array.isArray(obj.changes)) {
-          obj.changes.forEach((change, idx) => {
-            if (change.filesChanged) totalFiles += change.filesChanged.length;
-            primaryAuthority = change.authorityLevel || 'prompt';
-
-            // Check high-authority regression requirement
-            const highAuthorities = ['tool-implementation', 'middleware', 'runtime', 'safety', 'schema', 'cli'];
-            if (highAuthorities.includes(change.authorityLevel)) {
-              if (!change.predictedRegressions || change.predictedRegressions.length === 0) {
-                errors.push(`Change[${idx}] ("${change.id}"): High-authority changes (${change.authorityLevel}) must declare at least one predicted regression risk to ensure transparency in reviews.`);
-              }
-            }
-
-            // Check evidence references
-            if (obj.iterationId !== 'exploratory-1') {
-              if (!change.evidenceRefs || change.evidenceRefs.length === 0) {
-                errors.push(`Change[${idx}] ("${change.id}"): evidenceRefs cannot be empty for iteration "${obj.iterationId}". Only "exploratory-1" iteration is allowed to have empty evidenceRefs.`);
-              }
-            }
-
-            if (change.predictedRegressions) {
-              totalRegressions += change.predictedRegressions.length;
-            }
-          });
-        } else {
-          errors.push("changes must be an array.");
-        }
-
-        // update metrics
-        document.getElementById('m-iteration').innerText = obj.iterationId || 'None';
-        document.getElementById('m-files').innerText = totalFiles;
-        document.getElementById('m-authority').innerText = primaryAuthority;
-        document.getElementById('m-regressions').innerText = totalRegressions;
-
-        if (errors.length > 0) {
-          output.className = 'status-panel error';
-          output.innerHTML = `<strong>Validation Errors Found:</strong><ul style="margin-left:1.5rem; margin-top:0.5rem;">` +
-            errors.map(err => `<li>${err}</li>`).join('') + `</ul>`;
-        } else {
-          output.className = 'status-panel success';
-          output.innerHTML = "<strong>Success:</strong> change-manifest.json is structurally valid and satisfies high-authority risk transparency constraints.";
-        }
-
-      } catch(err) {
-        output.className = 'status-panel error';
-        output.innerText = `JSON Parse Error: ${err.message}`;
-      }
-    }
-
-    // Init
-    window.onload = () => {
-      loadManifestPreset('valid');
-    };
-  </script>
+  <script src="shared.js"></script>
 </body>
 </html>

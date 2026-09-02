@@ -1,832 +1,452 @@
-<!DOCTYPE html>
+<!doctype html>
 <html lang="en">
 <head>
-  <meta charset="UTF-8">
-  <meta name="viewport" content="width=device-width, initial-scale=1.0">
-  <title>Clio Coder Documentation Alignment Portal</title>
-
-  <style>
-    :root {
-      --bg-dark: #090d16;
-      --bg-card: rgba(17, 24, 39, 0.7);
-      --border-card: rgba(255, 255, 255, 0.08);
-      --text-main: #f3f4f6;
-      --text-muted: #9ca3af;
-      --text-dark: #6b7280;
-
-      --color-cyan: #00f0ff;
-      --color-cyan-rgb: 0, 240, 255;
-      --color-purple: #bd00ff;
-      --color-purple-rgb: 189, 0, 255;
-      --color-emerald: #10b981;
-      --color-emerald-rgb: 16, 185, 129;
-      --color-amber: #f59e0b;
-      --color-amber-rgb: 245, 158, 11;
-      --color-rose: #ef4444;
-      --color-rose-rgb: 239, 68, 68;
-
-      --gradient-main: linear-gradient(135deg, var(--color-cyan), var(--color-purple));
-      --shadow-glow: 0 0 20px rgba(var(--color-cyan-rgb), 0.15);
-      --font-sans: "Segoe UI", -apple-system, BlinkMacSystemFont, Roboto, "Helvetica Neue", Arial, sans-serif;
-      --font-mono: "SFMono-Regular", Consolas, "Liberation Mono", Menlo, monospace;
-    }
-
-    * {
-      box-sizing: border-box;
-      margin: 0;
-      padding: 0;
-    }
-
-    body {
-      background-color: var(--bg-dark);
-      background-image:
-        radial-gradient(circle at 10% 20%, rgba(var(--color-cyan-rgb), 0.05) 0%, transparent 40%),
-        radial-gradient(circle at 90% 80%, rgba(var(--color-purple-rgb), 0.05) 0%, transparent 40%),
-        radial-gradient(circle at 50% 50%, #0d1527 0%, var(--bg-dark) 100%);
-      color: var(--text-main);
-      font-family: var(--font-sans);
-      min-height: 100vh;
-      line-height: 1.6;
-      overflow-x: hidden;
-    }
-
-    ::-webkit-scrollbar {
-      width: 8px;
-      height: 8px;
-    }
-    ::-webkit-scrollbar-track {
-      background: rgba(255, 255, 255, 0.02);
-    }
-    ::-webkit-scrollbar-thumb {
-      background: rgba(255, 255, 255, 0.1);
-      border-radius: 4px;
-    }
-    ::-webkit-scrollbar-thumb:hover {
-      background: rgba(var(--color-cyan-rgb), 0.3);
-    }
-
-    .container {
-      max-width: 1400px;
-      margin: 0 auto;
-      padding: 2rem;
-    }
-
-    header {
-      text-align: center;
-      margin-bottom: 2.5rem;
-      position: relative;
-    }
-
-    .header-logo {
-      display: inline-flex;
-      align-items: center;
-      justify-content: center;
-      width: 72px;
-      height: 72px;
-      background: rgba(255, 255, 255, 0.03);
-      border: 1px solid var(--border-card);
-      border-radius: 18px;
-      margin-bottom: 1rem;
-      box-shadow: var(--shadow-glow);
-      position: relative;
-    }
-
-    .header-logo::after {
-      content: '';
-      position: absolute;
-      inset: -2px;
-      border-radius: 20px;
-      background: var(--gradient-main);
-      z-index: -1;
-      opacity: 0.3;
-      filter: blur(4px);
-    }
-
-    .header-logo img {
-      width: 78%;
-      height: 78%;
-      object-fit: contain;
-      filter: drop-shadow(0 0 8px rgba(0, 240, 255, 0.35));
-    }
-
-    h1 {
-      font-size: 2.5rem;
-      font-weight: 800;
-      letter-spacing: -0.05em;
-      margin-bottom: 0.5rem;
-      background: linear-gradient(to right, #ffffff, #c7d2fe, var(--color-cyan));
-      -webkit-background-clip: text;
-      -webkit-text-fill-color: transparent;
-    }
-
-    .subtitle {
-      font-size: 1.1rem;
-      color: var(--text-muted);
-      max-width: 600px;
-      margin: 0 auto 1.5rem auto;
-      font-weight: 400;
-    }
-
-    .meta-grid {
-      display: flex;
-      justify-content: center;
-      gap: 1rem;
-      margin-bottom: 2rem;
-      flex-wrap: wrap;
-    }
-
-    .meta-badge {
-      background: rgba(255, 255, 255, 0.04);
-      border: 1px solid var(--border-card);
-      padding: 0.5rem 1rem;
-      border-radius: 8px;
-      font-size: 0.85rem;
-      display: flex;
-      align-items: center;
-      gap: 0.5rem;
-    }
-
-    .meta-badge .label {
-      color: var(--text-muted);
-    }
-
-    .meta-badge .value {
-      font-family: var(--font-mono);
-      font-weight: 600;
-      color: var(--color-cyan);
-    }
-
-    .tabs-nav {
-      display: flex;
-      justify-content: center;
-      gap: 0.75rem;
-      margin-bottom: 2rem;
-      flex-wrap: wrap;
-    }
-
-    .tab-btn {
-      background: rgba(255, 255, 255, 0.03);
-      border: 1px solid var(--border-card);
-      color: var(--text-muted);
-      padding: 0.75rem 1.5rem;
-      border-radius: 9999px;
-      font-weight: 600;
-      cursor: pointer;
-      display: flex;
-      align-items: center;
-      gap: 0.5rem;
-      transition: all 0.25s cubic-bezier(0.4, 0, 0.2, 1);
-    }
-
-    .tab-btn:hover {
-      background: rgba(255, 255, 255, 0.08);
-      color: var(--text-main);
-      border-color: rgba(var(--color-cyan-rgb), 0.3);
-    }
-
-    .tab-btn.active {
-      background: var(--gradient-main);
-      color: #090d16;
-      font-weight: 700;
-      border-color: transparent;
-      box-shadow: 0 4px 15px rgba(var(--color-cyan-rgb), 0.3);
-    }
-
-    .tab-btn svg {
-      width: 18px;
-      height: 18px;
-      fill: none;
-      stroke: currentColor;
-      stroke-width: 2;
-    }
-
-    .tab-pane {
-      display: none;
-      animation: fadeIn 0.4s ease-out forwards;
-    }
-
-    .tab-pane.active {
-      display: block;
-    }
-
-    @keyframes fadeIn {
-      from {
-        opacity: 0;
-        transform: translateY(10px);
-      }
-      to {
-        opacity: 1;
-        transform: translateY(0);
-      }
-    }
-
-    .glass-card {
-      background: var(--bg-card);
-      border: 1px solid var(--border-card);
-      backdrop-filter: blur(16px);
-      -webkit-backdrop-filter: blur(16px);
-      border-radius: 16px;
-      padding: 2rem;
-      box-shadow: 0 10px 30px rgba(0, 0, 0, 0.2);
-      margin-bottom: 2rem;
-    }
-
-    .card-title {
-      font-size: 1.3rem;
-      font-weight: 700;
-      margin-bottom: 1.25rem;
-      color: #ffffff;
-      display: flex;
-      align-items: center;
-      gap: 0.75rem;
-      border-bottom: 1px solid rgba(255, 255, 255, 0.05);
-      padding-bottom: 0.75rem;
-    }
-
-    .card-title svg {
-      width: 20px;
-      height: 20px;
-      stroke: var(--color-cyan);
-      stroke-width: 2;
-      fill: none;
-    }
-
-    .grid-2 {
-      display: grid;
-      grid-template-columns: 1fr 1fr;
-      gap: 1.5rem;
-    }
-
-    @media (max-width: 900px) {
-      .grid-2 {
-        grid-template-columns: 1fr;
-      }
-    }
-
-    .form-group {
-      margin-bottom: 1.25rem;
-    }
-
-    label {
-      display: block;
-      font-size: 0.85rem;
-      color: var(--text-muted);
-      margin-bottom: 0.5rem;
-      font-weight: 500;
-      text-transform: uppercase;
-      letter-spacing: 0.05em;
-    }
-
-    input[type="text"], input[type="number"], select, textarea {
-      width: 100%;
-      background: rgba(255, 255, 255, 0.03);
-      border: 1px solid var(--border-card);
-      border-radius: 8px;
-      padding: 0.75rem 1rem;
-      color: var(--text-main);
-      font-family: var(--font-sans);
-      font-size: 0.95rem;
-      transition: all 0.2s ease;
-    }
-
-    input:focus, select:focus, textarea:focus {
-      outline: none;
-      border-color: var(--color-cyan);
-      box-shadow: 0 0 10px rgba(var(--color-cyan-rgb), 0.15);
-      background: rgba(255, 255, 255, 0.06);
-    }
-
-    textarea.code-area {
-      font-family: var(--font-mono);
-      font-size: 0.85rem;
-      background: #05080e;
-      resize: vertical;
-      min-height: 250px;
-      line-height: 1.5;
-    }
-
-    .btn {
-      background: rgba(255, 255, 255, 0.05);
-      border: 1px solid var(--border-card);
-      color: var(--text-main);
-      padding: 0.75rem 1.5rem;
-      border-radius: 8px;
-      font-weight: 600;
-      cursor: pointer;
-      display: inline-flex;
-      align-items: center;
-      gap: 0.5rem;
-      transition: all 0.2s ease;
-    }
-
-    .btn:hover {
-      background: rgba(255, 255, 255, 0.1);
-      border-color: rgba(var(--color-cyan-rgb), 0.3);
-    }
-
-    .btn-primary {
-      background: var(--gradient-main);
-      color: #090d16;
-      border-color: transparent;
-      font-weight: 700;
-    }
-
-    .btn-primary:hover {
-      background: linear-gradient(135deg, #2bf1ff, #d64eff);
-      box-shadow: 0 0 15px rgba(var(--color-cyan-rgb), 0.3);
-    }
-
-    .status-panel {
-      padding: 1rem;
-      border-radius: 8px;
-      margin-top: 1rem;
-      font-size: 0.9rem;
-      display: flex;
-      align-items: flex-start;
-      gap: 0.75rem;
-    }
-
-    .status-panel.success {
-      background: rgba(16, 185, 129, 0.1);
-      border: 1px solid rgba(16, 185, 129, 0.2);
-      color: #34d399;
-    }
-
-    .status-panel.error {
-      background: rgba(239, 68, 68, 0.1);
-      border: 1px solid rgba(239, 68, 68, 0.2);
-      color: #fca5a5;
-    }
-
-    .status-panel.warning {
-      background: rgba(245, 158, 11, 0.1);
-      border: 1px solid rgba(245, 158, 11, 0.2);
-      color: #fcd34d;
-    }
-
-    .flowchart-container {
-      background: #05080e;
-      border: 1px solid var(--border-card);
-      border-radius: 12px;
-      padding: 1.5rem;
-      overflow: auto;
-      display: flex;
-      justify-content: center;
-    }
-
-    .console-box {
-      background: #020408;
-      border: 1px solid var(--border-card);
-      border-radius: 8px;
-      padding: 1rem;
-      font-family: var(--font-mono);
-      font-size: 0.85rem;
-      color: #a7f3d0;
-      white-space: pre-wrap;
-      max-height: 300px;
-      overflow-y: auto;
-    }
-
-    /* Checklist */
-    .checklist {
-      display: flex;
-      flex-direction: column;
-      gap: 0.75rem;
-    }
-
-    .checklist-item {
-      display: flex;
-      align-items: flex-start;
-      gap: 0.75rem;
-      padding: 0.5rem;
-      border-radius: 6px;
-      background: rgba(255,255,255,0.01);
-      border: 1px solid transparent;
-      transition: all 0.2s ease;
-    }
-
-    .checklist-item.done {
-      background: rgba(16, 185, 129, 0.03);
-      border-color: rgba(16, 185, 129, 0.1);
-    }
-
-    .checklist-item input[type="checkbox"] {
-      margin-top: 0.3rem;
-      cursor: pointer;
-    }
-
-    .checklist-item-text {
-      flex-grow: 1;
-    }
-
-    .checklist-title {
-      font-weight: 600;
-      color: #fff;
-      font-size: 0.95rem;
-    }
-
-    .checklist-desc {
-      font-size: 0.85rem;
-      color: var(--text-muted);
-    }
-  </style>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <meta name="clio-markdown-source" content="docs/process/documentation-guide.md">
+  <meta name="clio-docs-version" content="0.4.2">
+  <title>Documentation Standards and Codebase Alignment · Clio Coder 0.4.2</title>
+  <link rel="icon" href="data:,">
+  <link rel="stylesheet" href="shared.css">
 </head>
-<body>
+<body data-doc-category="process">
+  <div class="reading-progress" aria-hidden="true"></div>
+  <a class="skip-link" href="#reference-content">Skip to reference</a>
   <div class="container">
-    <header>
+    <header class="document-header" data-category="Process">
       <div class="header-left">
-        <div class="header-logo">
-          <svg viewBox="0 0 64 64" width="48" height="48" role="img" aria-label="Clio Coder logo"><title>Clio Coder logo</title><rect x="8" y="8" width="48" height="48" rx="12" fill="rgba(0,240,255,0.12)" stroke="rgba(0,240,255,0.65)"/><path d="M32 14 16 23l16 9 16-9-16-9Z" fill="none" stroke="#00f0ff" stroke-width="3" stroke-linejoin="round"/><path d="M16 32l16 9 16-9M16 41l16 9 16-9" fill="none" stroke="#bd00ff" stroke-width="3" stroke-linecap="round" stroke-linejoin="round"/></svg>
-        </div>
+        <a class="header-logo" href="index.html" aria-label="Documentation index">
+          <svg viewBox="0 0 24 24" fill="none" aria-hidden="true">
+            <path d="M12 2 2 7l10 5 10-5-10-5Z" stroke="url(#clio-logo)" stroke-width="2" stroke-linejoin="round"/>
+            <path d="m2 12 10 5 10-5M2 17l10 5 10-5" stroke="url(#clio-logo)" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"/>
+            <defs><linearGradient id="clio-logo" x1="2" y1="2" x2="22" y2="22"><stop stop-color="#00d4db"/><stop offset="1" stop-color="#ff7e29"/></linearGradient></defs>
+          </svg>
+        </a>
         <div class="header-title-wrapper">
-          <h1>Documentation Alignment Portal</h1>
-          <p>Interactive Visual Specification for Source-First Guidelines and Claim Linting</p>
-          <div class="meta-chips-row">
-            <span class="chip">Source: docs/documentation-guide.md</span>
-            <span class="chip chip-orange">clio-coder docs documentation</span>
-          </div>
+          <p class="document-kicker">Process / canonical reference</p>
+          <h1>Documentation Standards and Codebase Alignment</h1>
+          <p class="document-path">docs/process/documentation-guide.md</p>
         </div>
       </div>
       <div class="header-right">
-        <span class="version-badge">Clio Coder v0.4.0</span>
-        <a href="index.html" class="back-btn">
-          <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><title>Icon</title><line x1="19" y1="12" x2="5" y2="12"></line><polyline points="12 19 5 12 12 5"></polyline></svg>
-          Dashboard Hub
-        </a>
+        <a class="back-btn" href="index.html">← Index</a>
+        <span class="version-badge">v0.4.2</span>
       </div>
     </header>
-
-    <div class="tabs-nav" style="justify-content: center; margin-bottom: 2rem;">
-      <button type="button" class="tab-btn active" onclick="_switchTab('linter')">
-        Markdown Link Linter
-      </button>
-      <button type="button" class="tab-btn" onclick="_switchTab('phrasing')">
-        Claim Class Checker
-      </button>
-      <button type="button" class="tab-btn" onclick="_switchTab('tracker')">
-        Update Checklist
-      </button>
-      <button type="button" class="tab-btn" onclick="_switchTab('flowchart')">
-        Doc Lifecycle Flow
-      </button>
+    <div class="page-layout-grid reference-layout">
+      <aside class="sidebar reference-sidebar" aria-label="On this page">
+        <nav class="toc-container">
+          <p class="toc-title">On this page</p>
+          <a class="sidebar-source" href="https://github.com/iowarp/clio-coder/blob/main/docs/process/documentation-guide.md">Canonical Markdown<br>docs/process/documentation-guide.md</a>
+          <ul class="toc-list"></ul>
+        </nav>
+      </aside>
+      <main class="reference-main" id="reference-content">
+        <article class="reference-prose glass-card">
+<blockquote>
+<p><strong>Visual blueprint:</strong> The source checkout includes the complete
+<a href="documentation_blueprint.html">Documentation Standards and Codebase Alignment visual reference</a>.</p>
+</blockquote>
+<p>Clio Coder is an experimental community alpha. Documentation should help contributors and early users work from the source of truth without overstating maturity. When docs drift, prefer the current source and tests over older prose or aspirational roadmap notes.</p>
+<hr>
+<h2>Source-first documentation rule</h2>
+<p>Before changing public docs, inspect the relevant implementation:</p>
+<ol>
+<li><code>git log --oneline -- &lt;area&gt;</code> for recent intent and release context.</li>
+<li><code>src/**</code> for current behavior.</li>
+<li><code>tests/**</code> for executable contracts and edge cases.</li>
+<li><code>README.md</code>, <code>CHANGELOG.md</code>, and <code>docs/**/*.md</code> for existing public wording.</li>
+</ol>
+<p>Classify claims clearly:</p>
+<table>
+<thead>
+<tr>
+<th>Claim class</th>
+<th>How to word it</th>
+</tr>
+</thead>
+<tbody><tr>
+<td>Shipped and tested</td>
+<td>State directly and link to source/tests.</td>
+</tr>
+<tr>
+<td>Implemented but experimental</td>
+<td>Say alpha/experimental and name sharp edges.</td>
+</tr>
+<tr>
+<td>Typed contract exists, default runtime is inert</td>
+<td>Say the schema exists but no public loader/rules are active.</td>
+</tr>
+<tr>
+<td>Planned/future</td>
+<td>Put in roadmap language; do not present as available behavior.</td>
+</tr>
+</tbody></table>
+<hr>
+<h2>Documentation map</h2>
+<table>
+<thead>
+<tr>
+<th>Guide</th>
+<th>Primary source references</th>
+<th>What it should cover</th>
+</tr>
+</thead>
+<tbody><tr>
+<td><a href="https://github.com/iowarp/clio-coder/blob/main/README.md">README.md</a></td>
+<td><code>CHANGELOG.md</code>, package metadata, release receipts</td>
+<td>Product overview, install, first run, alpha framing, and release status.</td>
+</tr>
+<tr>
+<td><a href="readme_blueprint.html">docs/README.md</a></td>
+<td>This docs directory</td>
+<td>Documentation hub.</td>
+</tr>
+<tr>
+<td><a href="documentation_blueprint.html">documentation-guide.md</a></td>
+<td><code>docs/**</code>, <code>src/**</code>, <code>tests/**</code></td>
+<td>Documentation structure, source ownership, writing rules, and blueprint policy.</td>
+</tr>
+<tr>
+<td><a href="commands_blueprint.html">commands-and-modes.md</a></td>
+<td><code>src/cli/index.ts</code>, <code>src/cli/args.ts</code>, <code>src/interactive/slash-commands.ts</code>, <code>src/domains/dispatch/**</code></td>
+<td>CLI commands, headless run flags (<code>--session</code>, <code>--continue</code>, <code>--json-events</code>), session continuity, <code>--json</code> wire projection promise, slash commands, keybindings, live steering.</td>
+</tr>
+<tr>
+<td><a href="context_blueprint.html">context-engine.md</a></td>
+<td><code>src/domains/context/**</code>, <code>src/domains/session/context-accounting.ts</code>, <code>src/domains/session/context-ledger.ts</code>, <code>src/domains/session/compaction/</code></td>
+<td>Context window resolution, per-model probe capabilities, token accounting, snapshots, the three compaction mechanisms, model-driven <code>clio-coder context init</code>, format v4 session enforcement.</td>
+</tr>
+<tr>
+<td><a href="context_working_set_blueprint.html">context-working-set.md</a></td>
+<td><code>src/domains/context/working-set/**</code>, <code>src/domains/session/entries.ts</code>, <code>src/interactive/turn-context.ts</code></td>
+<td>Working-set vocabulary, eviction as a projection, the <code>contextEviction</code> / <code>contextRecall</code> records, the marker contract, the <code>age-horizon</code> and <code>structural-v1</code> policies, recall semantics, and the operator surfaces.</td>
+</tr>
+<tr>
+<td><a href="architecture_blueprint.html">architecture.md</a></td>
+<td><code>tests/boundaries/check-boundaries.ts</code>, <code>src/core/domain-loader.ts</code>, <code>src/engine/**</code>, <code>src/worker/**</code></td>
+<td>Source layout, six enforced boundary rules, runtime flow mermaid diagram, event and audit model, and detect-and-rollback write boundaries.</td>
+</tr>
+<tr>
+<td><a href="time_conventions_blueprint.html">time-conventions.md</a></td>
+<td><code>src/domains/dispatch/code-step.ts</code>, <code>src/domains/dispatch/extension.ts</code>, <code>src/domains/session/**</code>, <code>src/domains/observability/**</code></td>
+<td>Monotonic durations, wall-clock instants, anchored spans, injected clocks, timeout accounting, and timestamp serialization.</td>
+</tr>
+<tr>
+<td><a href="dispatch_rationale_blueprint.html">dispatch-architecture-rationale.md</a></td>
+<td><code>src/domains/dispatch/**</code>, <code>tests/boundaries/check-boundaries.ts</code></td>
+<td>Design rationale, not behavior: invariants that cross the seams a dispatch split would use, what any future split must preserve, the one dispatch→eval import, and the closed barrel-import decision.</td>
+</tr>
+<tr>
+<td><a href="dispatch_typed_intent_blueprint.html">dispatch-typed-intent.md</a></td>
+<td><code>src/domains/dispatch/intent.ts</code>, <code>src/domains/dispatch/intent-compatibility.ts</code>, <code>src/domains/dispatch/path-scope.ts</code>, <code>src/tools/dispatch-plan.ts</code></td>
+<td>Dispatch intent v2, path provenance, legacy inference, retirement telemetry, and fail-closed version handling.</td>
+</tr>
+<tr>
+<td><a href="configuration_blueprint.html">configuration-and-targets.md</a></td>
+<td><code>src/core/defaults.ts</code>, <code>src/core/config.ts</code>, <code>src/domains/providers/**</code>, <code>src/cli/configure.ts</code>, <code>src/cli/targets.ts</code>, <code>src/cli/models.ts</code>, <code>src/cli/auth.ts</code></td>
+<td>TargetDescriptor, contextWindowProvenance (<code>configured</code>, <code>discovered</code>, <code>catalog</code>, <code>runtime-default</code>), settings.yaml, strict validation, saved defaults vs live routing.</td>
+</tr>
+<tr>
+<td><a href="artifact_placement_blueprint.html">artifact-placement.md</a></td>
+<td><code>src/core/artifact-paths.ts</code>, <code>src/core/config.ts</code>, <code>src/domains/agents/result-contract-filesystem.ts</code></td>
+<td>Audience-based artifact placement, configured output roots, containment, and migration from legacy paths.</td>
+</tr>
+<tr>
+<td><a href="configuration_reference_blueprint.html">configuration-reference.md</a></td>
+<td><code>src/core/defaults.ts</code>, <code>src/cli/**</code>, <code>src/tools/**</code>, <code>src/domains/agents/recipe-schema.ts</code>, <code>src/domains/providers/models/local-models/**</code></td>
+<td>Audited inventory of every settings key, environment variable, CLI flag, project-file key, frontmatter key, tool argument, and model tag with defaults and precedence.</td>
+</tr>
+<tr>
+<td><a href="safety_blueprint.html">safety-model.md</a></td>
+<td><code>src/domains/safety/**</code>, <code>src/tools/registry.ts</code>, <code>src/tools/policy.ts</code>, <code>src/tools/verify/**</code>, <code>src/entry/orchestrator.ts</code>, <code>src/domains/dispatch/write-boundary.ts</code></td>
+<td>Operating posture, <code>resolveEffectiveAutonomy</code> / <code>resolveBaselineAutonomy</code>, detect-and-rollback write boundaries, approval axes, damage control, typed validation.</td>
+</tr>
+<tr>
+<td><a href="tools_blueprint.html">prompt-envelope-and-tools.md</a></td>
+<td><code>src/domains/prompts/compiler.ts</code>, <code>src/interactive/chat-loop.ts</code>, <code>src/core/tool-names.ts</code>, <code>src/tools/registry.ts</code>, <code>src/tools/observation.ts</code>, <code>src/tools/agent-tools.ts</code></td>
+<td>Prompt envelope reuse, canonical tool delivery via single <code>agent-tools.ts</code> adapter, seven-plane tool surface, observation envelope, strict <code>ToolName</code> keying.</td>
+</tr>
+<tr>
+<td><a href="tool_usage_blueprint.html">tool-usage.md</a></td>
+<td><code>src/tools/agent-tools.ts</code>, <code>src/tools/registry.ts</code>, <code>src/tools/observation.ts</code></td>
+<td>In-depth reference for all 21 canonical tools, including conditional registration, parameters, typical payloads, normalizers, and error examples.</td>
+</tr>
+<tr>
+<td><a href="provider_adapter_blueprint.html">provider-adapter-cookbook.md</a></td>
+<td><code>src/domains/providers/registry.ts</code>, <code>src/domains/providers/types/runtime-descriptor.ts</code></td>
+<td>RuntimeDescriptor, probe(), probeReasoning(), synthesizeModel(), thinking mechanisms.</td>
+</tr>
+<tr>
+<td><a href="pi_boundary_blueprint.html">pi-boundary.md</a></td>
+<td><code>src/engine/**</code>, <code>src/tools/truncate.ts</code>, <code>tests/boundaries/check-boundaries.ts</code></td>
+<td>Which Pi SDK capabilities Clio delegates to, which Clio-specific adapters remain, and the boundary tests that keep the split explicit.</td>
+</tr>
+<tr>
+<td><a href="alcf_blueprint.html">alcf-provider.md</a></td>
+<td><code>src/domains/providers/runtimes/cloud/alcf.ts</code>, <code>src/engine/alcf-oauth.ts</code></td>
+<td>Globus PKCE OAuth, openAuthStorage(), Sophia vLLM, Metis API, chatTemplateKwargsUnsupported.</td>
+</tr>
+<tr>
+<td><a href="environment_blueprint.html">environment-variables.md</a></td>
+<td><code>src/core/guardrails.ts</code>, <code>src/core/xdg.ts</code>, <code>src/domains/providers/knowledge-base-path.ts</code></td>
+<td>Comprehensive env var matrix: guardrail overrides, directory layout (CLIO_CODER_HOME), debug toggles, and internal plumbing.</td>
+</tr>
+<tr>
+<td><a href="agents_blueprint.html">built-in-agents.md</a></td>
+<td><code>src/domains/agents/**</code>, <code>src/domains/agents/builtins/*.md</code>, <code>src/domains/dispatch/**</code></td>
+<td>Builtin agent recipes, discovery roots, frontmatter schema, fleet contract shadowing (<code>.clio-coder/fleets/&lt;name&gt;.md</code>), active route automation.</td>
+</tr>
+<tr>
+<td><a href="fleet_dispatch_blueprint.html">fleet-dispatch.md</a></td>
+<td><code>src/domains/dispatch/**</code></td>
+<td>Multi-node SSH dispatch: process-safe admission, capacity leases, fleet contracts v1 through v5, v4 write boundaries, v5 plan and gate steps, bounded check/repair loops (<code>loop_bound_exhausted</code>), deterministic code steps, attestation, and receipts v20.</td>
+</tr>
+<tr>
+<td><a href="capacity_scheduling_blueprint.html">capacity-and-scheduling.md</a></td>
+<td><code>src/domains/scheduling/**</code>, <code>src/domains/dispatch/capacity-lease.ts</code>, <code>src/domains/dispatch/reservation-store.ts</code></td>
+<td>Multi-process capacity leases (<code>dispatch-admission.json</code>), heartbeat TTLs, cross-process transaction locks (<code>dispatch-admission.json.lock</code>), and cluster drain controls.</td>
+</tr>
+<tr>
+<td><a href="worker_dispatch_blueprint.html">worker-dispatch-mechanics.md</a></td>
+<td><code>src/worker/**</code></td>
+<td>NDJSON parent-child socket protocols, control/bulk lane demuxing, watchdog timers, worker attestation (13 protocol fields), permission parking, exit codes.</td>
+</tr>
+<tr>
+<td><a href="fleet_demo_blueprint.html">fleet-demo-runbook.md</a></td>
+<td><code>src/domains/dispatch/**</code></td>
+<td>Multi-node fleet demo: SSH setup, C++ build/repair workflow, reviewer gates, and receipt verification v20.</td>
+</tr>
+<tr>
+<td><a href="session_lifecycle_blueprint.html">session-lifecycle.md</a></td>
+<td><code>src/engine/session.ts</code>, <code>src/domains/session/**</code></td>
+<td>Session lifecycle, on-disk ledger format v4 (<code>current.jsonl</code>), tree branching (<code>tree.json</code>), active-path lineage selection, <code>/fork</code>, <code>/resume</code>, checkpoints, and write-ahead protected-artifact journal.</td>
+</tr>
+<tr>
+<td><a href="acp_blueprint.html">acp.md</a></td>
+<td><code>src/engine/acp/**</code>, <code>src/cli/acp.ts</code></td>
+<td>Agent Client Protocol (ACP) server over stdio, tool mediation, non-stall permission handling, timeout bounds, and error taxonomy.</td>
+</tr>
+<tr>
+<td><a href="artifact_versions_blueprint.html">artifact-versions.md</a></td>
+<td><code>src/domains/dispatch/receipt-integrity.ts</code>, <code>src/engine/session.ts</code>, <code>src/worker/spec-contract.ts</code>, <code>src/domains/agents/fleet-contract.ts</code>, <code>src/domains/eval/schema/</code>, <code>src/domains/observability/trace-store.ts</code></td>
+<td>Operator-facing registry and migration policies for selected compatibility-sensitive serialized artifacts.</td>
+</tr>
+<tr>
+<td><a href="exit_codes_blueprint.html">exit-codes-and-output.md</a></td>
+<td><code>src/cli/**</code>, <code>src/entry/**</code></td>
+<td>Global process exit codes (0, 1, 2, 3), <code>--help</code> standard on stdout, machine-readable JSON streaming (<code>--json</code>, <code>--json-events</code>), and headless stdout deliverable contracts.</td>
+</tr>
+<tr>
+<td><a href="troubleshooting_blueprint.html">troubleshooting.md</a></td>
+<td><code>src/core/**</code>, <code>src/cli/**</code>, <code>src/domains/**</code></td>
+<td>Actionable error remediation and diagnostics keyed by exact user-facing messages.</td>
+</tr>
+<tr>
+<td><a href="glossary_blueprint.html">glossary.md</a></td>
+<td><code>src/domains/dispatch/types.ts</code>, <code>src/tools/**</code>, <code>src/domains/agents/**</code>, <code>src/core/**</code></td>
+<td>Canonical definitions of 50 core architectural concepts mapped to <code>src/</code> types.</td>
+</tr>
+<tr>
+<td><a href="documentation_coverage_blueprint.html">documentation-coverage.md</a></td>
+<td><code>src/**</code></td>
+<td>Complete source-to-documentation mapping matrix and subsystem coverage status.</td>
+</tr>
+<tr>
+<td><a href="tui_design_blueprint.html">tui-design.md</a></td>
+<td><code>src/interactive/theme/tokens.ts</code>, <code>src/interactive/theme/glyphs.ts</code></td>
+<td>TUI color system, glyph vocabulary (<code>contextReserve</code>), structural layouts, state choreography, code ink.</td>
+</tr>
+<tr>
+<td><a href="lifecycle_blueprint.html">installation-and-lifecycle.md</a></td>
+<td><code>src/cli/paths.ts</code>, <code>src/cli/doctor.ts</code>, <code>src/cli/uninstall.ts</code>, <code>src/cli/removal.ts</code></td>
+<td>Installation, upgrade, reset, uninstallation, launcher ownership and what <code>--remove-binary</code> will and will not remove, partial-failure behavior, configuration folders (<code>credentials.yaml</code> <code>0o600</code>), and permissions.</td>
+</tr>
+<tr>
+<td><a href="release_cut_checklist_blueprint.html">release-cut-checklist.md</a></td>
+<td><code>scripts/check-release.mjs</code>, <code>tests/smoke/installed-package.test.ts</code>, <code>.github/workflows/</code>, <code>package.json</code></td>
+<td>Historical v0.4.1 release procedure retained as evidence; future releases must draft and verify their own checklist.</td>
+</tr>
+<tr>
+<td><a href="development_pipeline_blueprint.html">development-pipeline.md</a></td>
+<td><code>skills/git/**</code>, <code>.github/**</code>, <code>scripts/check-release.mjs</code>, <code>package.json</code></td>
+<td>Issue-to-PR development lifecycle, validation, release inheritance, and the human merge boundary.</td>
+</tr>
+<tr>
+<td><a href="git_commit_provenance_blueprint.html">git-commit-provenance.md</a></td>
+<td><code>src/core/commit-attribution.ts</code>, <code>src/core/git-commit-attribution.ts</code>, <code>src/domains/dispatch/fleet-commit-attribution.ts</code></td>
+<td>Evidence-aware commit roles, trailers, managed hook chaining, and receipt v20 attribution.</td>
+</tr>
+<tr>
+<td><a href="observability_blueprint.html">observability.md</a></td>
+<td><code>src/domains/observability/**</code>, <code>src/interactive/view/**</code>, <code>src/domains/dispatch/**</code>, <code>src/core/bus-events.ts</code></td>
+<td><code>/view</code> artifact browsing, receipt verification, worker diagnostics, event routing, and cost snapshots.</td>
+</tr>
+<tr>
+<td><a href="performance_methodology_blueprint.html">performance-methodology.md</a></td>
+<td><code>src/interactive/render-trace.ts</code>, <code>src/interactive/**</code>, <code>tests/contracts/rendering-invariants.test.ts</code>, <code>tests/smoke/real-binary-boot.test.ts</code></td>
+<td>Reproducible terminal and model-path performance endpoints, trace interpretation, measurement controls, and reporting rules.</td>
+</tr>
+<tr>
+<td><a href="memory_blueprint.html">evidence-and-memory.md</a></td>
+<td><code>src/domains/evidence/**</code>, <code>src/domains/memory/**</code>, <code>src/cli/evidence.ts</code>, <code>src/cli/memory.ts</code></td>
+<td>Evidence corpus layout, findings, memory lifecycle and prompt injection.</td>
+</tr>
+<tr>
+<td><a href="proactive_memory_blueprint.html">proactive-memory.md</a></td>
+<td><code>src/domains/memory/**</code></td>
+<td>Proactive task memory architecture, session task bank, intervention rules, and handoff carrying.</td>
+</tr>
+<tr>
+<td><a href="trace_blueprint.html">trace-store.md</a></td>
+<td><code>src/cli/trace.ts</code>, <code>src/domains/observability/trace-store.ts</code></td>
+<td>WAL SQLite trace mirror database schema, rowid cursor queries, rebuildability, and eight <code>clio-coder trace</code> subcommands: <code>runs</code>, <code>phases</code>, <code>tail</code>, <code>procs</code>, <code>inspect</code>, <code>prune</code>, read-only <code>sql</code>, and <code>ui</code>.</td>
+</tr>
+<tr>
+<td><a href="eval_blueprint.html">eval-runner.md</a></td>
+<td><code>src/domains/eval/**</code>, <code>src/cli/eval.ts</code></td>
+<td>Local YAML eval tasks, dual token accountings (<code>tokens.*</code> wire vs <code>receiptUsage.*</code> journal), fail-closed null totals, EvalArtifactV4 format, <code>verify.measure</code> task outcome recording.</td>
+</tr>
+<tr>
+<td><a href="evals_internal_blueprint.html">evals-internal.md</a></td>
+<td><code>src/domains/eval/**</code>, <code>evals/**</code></td>
+<td>Private suite handling, measurement design, and the boundary between shipped reference inputs and external campaigns.</td>
+</tr>
+<tr>
+<td><a href="extensions_blueprint.html">extensions-and-sharing.md</a></td>
+<td><code>src/domains/extensions/**</code>, <code>src/domains/resources/**</code>, <code>src/domains/share/**</code>, <code>src/cli/extensions.ts</code>, <code>src/cli/share.ts</code></td>
+<td>Prompt, skill, agent, fleet, and reserved theme resources; extension manifests; portable share archives.</td>
+</tr>
+<tr>
+<td><a href="resource_library_blueprint.html">resource-library.md</a></td>
+<td><code>src/domains/resources/library.ts</code>, <code>src/cli/library.ts</code></td>
+<td>Catalog schemas, private and remote source policy, checksum pins, resource installation, and update checks.</td>
+</tr>
+<tr>
+<td><a href="skills_blueprint.html">skills-marketplace.md</a></td>
+<td><code>src/interactive/overlays/skills-hub.ts</code>, <code>src/domains/resources/skills/marketplace.ts</code></td>
+<td>Skills Hub marketplace discovery through the install resolver, empty state, install actions, publishing flow.</td>
+</tr>
+<tr>
+<td><a href="models_blueprint.html">model-catalog.md</a></td>
+<td><code>src/domains/providers/catalog.ts</code>, <code>src/domains/providers/models/**</code>, <code>src/domains/providers/probe/**</code>, <code>src/domains/providers/model-capabilities.ts</code></td>
+<td>Model catalog, live probes (<code>--offline</code> toggle), exact-id selector <code>probeCapabilitiesForModel</code>, field-note promotion.</td>
+</tr>
+<tr>
+<td><a href="middleware_blueprint.html">middleware-and-components.md</a></td>
+<td><code>src/domains/components/**</code>, <code>src/domains/middleware/**</code>, <code>src/cli/components.ts</code></td>
+<td>Active component snapshots, phase-aware middleware hook budgets (<code>DEFAULT_MIDDLEWARE_HOOK_BUDGETS_MS</code>).</td>
+</tr>
+<tr>
+<td><a href="validation_blueprint.html">scientific-validation.md</a></td>
+<td><code>src/domains/safety/rigor.ts</code>, <code>src/domains/safety/finish-contract.ts</code></td>
+<td>Advisory validation-contract patterns for scientific artifacts and HPC assumptions.</td>
+</tr>
+<tr>
+<td><a href="evolution_blueprint.html">evolution.md</a></td>
+<td><code>src/domains/evolution/**</code>, <code>src/cli/evolve.ts</code></td>
+<td>Falsifiable Change Manifest JSON templates, evidence-linked validation, and <code>clio-coder evolve</code>.</td>
+</tr>
+<tr>
+<td><a href="config_knobs_audit_blueprint.html">config-knobs-audit.md</a></td>
+<td><code>src/cli/config.ts</code></td>
+<td>Point-in-time inventory of legacy environment variables (Historical Appendix).</td>
+</tr>
+</tbody></table>
+<hr>
+<h2>Style conventions</h2>
+<h3>Alpha framing</h3>
+<p>Use direct, honest language:</p>
+<ul>
+<li>&quot;experimental community alpha&quot;</li>
+<li>&quot;source-build path&quot;</li>
+<li>&quot;current runtime is conservative/inert&quot;</li>
+<li>&quot;advisory contract&quot;</li>
+<li>&quot;planned/future milestone&quot;</li>
+</ul>
+<p>Avoid phrases that imply managed production stability, full plugin maturity, or automatic scientific validation when the current code does not provide it.</p>
+<h3>Markdown structure</h3>
+<ul>
+<li>Prefer short sections with tables for command and schema references.</li>
+<li>Use fenced examples that can be copied.</li>
+<li>Keep links relative and repository-portable; do not use absolute <code>file:///home/...</code> links.</li>
+<li>Mention source file paths in backticks instead of editor-specific absolute URLs.</li>
+</ul>
+<h3>GitHub alerts</h3>
+<p>Use alerts sparingly:</p>
+<blockquote>
+<p>[!NOTE]
+Context or caveats that prevent misinterpretation.</p>
+</blockquote>
+<blockquote>
+<p>[!WARNING]
+Sharp edges, alpha limitations, or behavior that can surprise contributors.</p>
+</blockquote>
+<blockquote>
+<p>[!CAUTION]
+Safety, data loss, or security-sensitive constraints.</p>
+</blockquote>
+<hr>
+<h2>Blueprint coverage and format strategy</h2>
+<p>Clio Coder maintains two complementary documentation formats:</p>
+<ol>
+<li><strong>Markdown documents (<code>docs/guide/**/*.md</code>, <code>docs/architecture/**/*.md</code>, <code>docs/process/**/*.md</code>, and <code>docs/history/**/*.md</code>)</strong>: The canonical reference for coding agents, developers, and maintainers, with <code>docs/README.md</code> as the hub. They optimize for retrievability, exact enumerations, schema tables, typed TypeScript contracts, and source citations (<code>src/...:line</code>).</li>
+<li><strong>HTML blueprints (<code>docs/html/*_blueprint.html</code>)</strong>: One visual counterpart per Markdown page for human readers. Each blueprint carries the complete canonical prose plus navigation and copy affordances, and declares its source in <code>meta[name=&quot;clio-markdown-source&quot;]</code>.</li>
+</ol>
+<h3>Blueprint Creation Policy</h3>
+<p>Blueprint coverage is explicit rather than inferred from document style. The
+page-level audit lives in
+<a href="documentation_coverage_blueprint.html"><code>documentation-coverage.md</code></a>. All 51 Markdown pages
+have a dedicated blueprint. <code>docs/html/index.html</code> groups those counterparts by
+the same Guide, Architecture, Process, and History tree, while a source meta tag
+provides the one-to-one machine-readable mapping. Every mapping must remain
+unique, complete, and free of orphaned Markdown or HTML pages.</p>
+<hr>
+<h2>Update checklist</h2>
+<p>When a feature changes:</p>
+<ol>
+<li>Identify the source owner (<code>src/cli</code>, <code>src/interactive</code>, <code>src/tools</code>, or a domain).</li>
+<li>Check whether public CLI help changed.</li>
+<li>Update the mapped guide in the same PR.</li>
+<li>If behavior affects safety, sessions, receipts, prompts, targets, or dispatch, update both README-level user docs and the deeper guide.</li>
+<li>Run a lightweight link check for changed Markdown.</li>
+<li>For release docs, verify version badges/sections match <code>package.json</code> and <code>CHANGELOG.md</code>.</li>
+</ol>
+<p>Suggested local link check:</p>
+<pre><code class="language-bash">python3 - &lt;&lt;&#39;PY&#39;
+import pathlib, re
+for md in list(pathlib.Path(&#39;docs&#39;).rglob(&#39;*.md&#39;)) + [pathlib.Path(&#39;README.md&#39;)]:
+    text = md.read_text()
+    for m in re.finditer(r&#39;\[[^\]]+\]\(([^)]+)\)&#39;, text):
+        link = m.group(1)
+        if link.startswith((&#39;http://&#39;, &#39;https://&#39;, &#39;mailto:&#39;, &#39;#&#39;)):
+            continue
+        target = link.split(&#39;#&#39;)[0]
+        if target and not (md.parent / target).exists():
+            line = text.count(&#39;\n&#39;, 0, m.start()) + 1
+            print(f&#39;{md}:{line}: missing {link}&#39;)
+PY
+</code></pre>
+<hr>
+<h2>Community documentation priorities</h2>
+<p>Clio users tend to be early adopters running real repositories, local models, and scientific/HPC code. Good docs should therefore prioritize:</p>
+<ul>
+<li>reproducible first-run and target configuration;</li>
+<li>local model/runtime field notes with exact versions and serving settings;</li>
+<li>safety receipts and redaction guidance for issue reports;</li>
+<li>small examples for project-local <code>CLIO-CODER.md</code>, <code>.clio-coder/safety.yaml</code>, prompts, skills, and agents;</li>
+<li>clear labels for experimental surfaces such as middleware and scientific validation contracts.</li>
+</ul>
+        </article>
+        <nav class="related-nav" aria-label="Adjacent references">
+          <a class="nav-link-card" href="documentation_coverage_blueprint.html"><span class="nav-label">Previous</span><span class="nav-title">Documentation coverage and source-alignment audit</span></a>
+          <a class="nav-link-card next" href="eval_blueprint.html"><span class="nav-label">Next</span><span class="nav-title">Clio Coder Local Evaluation Runner</span></a>
+        </nav>
+        <p class="reference-footer-note">Canonical content lives in the mapped Markdown page. This visual counterpart adds navigation without changing the contract.</p>
+      </main>
     </div>
-
-
-    <!-- Tab 1: Markdown Link Linter -->
-    <div id="linter" class="tab-pane active">
-      <div class="grid-2">
-        <div class="glass-card">
-          <div class="card-title">
-            <svg aria-hidden="true" viewBox="0 0 24 24"><title>Icon</title><path d="M11 5H6a2 2 0 00-2 2v11a2 2 0 002 2h11a2 2 0 002-2v-5m-1.414-9.414a2 2 0 112.828 2.828L11.828 15H9v-2.828l8.586-8.586z"/></svg>
-            Markdown Block Editor
-          </div>
-          <div class="form-group">
-            <label>Raw Markdown Content</label>
-            <textarea id="raw-markdown" class="code-area" oninput="lintMarkdown()"></textarea>
-          </div>
-          <div style="display: flex; gap: 0.5rem;">
-            <button type="button" class="btn btn-primary" onclick="loadSampleMd('valid')">Load Compliant Sample</button>
-            <button type="button" class="btn" onclick="loadSampleMd('invalid')">Load Broken Links Sample</button>
-          </div>
-        </div>
-
-        <div class="glass-card">
-          <div class="card-title">
-            <svg aria-hidden="true" viewBox="0 0 24 24"><title>Icon</title><path d="M9 5H7a2 2 0 00-2 2v12a2 2 0 002 2h10a2 2 0 002-2V7a2 2 0 00-2-2h-2M9 5a2 2 0 002 2h2a2 2 0 002-2M9 5a2 2 0 012-2h2a2 2 0 012 2m-6 9l2 2 4-4"/></svg>
-            Documentation Linter Receipt
-          </div>
-          <div id="linter-status" class="status-panel success">
-            No lint errors. Ready to audit.
-          </div>
-          <div style="margin-top: 1.5rem;">
-            <h4 style="margin-bottom: 0.5rem; font-size: 0.95rem; color: #ffffff;">Detected Documentation metrics:</h4>
-            <div id="linter-metrics" style="display: flex; flex-direction: column; gap: 0.5rem;">
-              <!-- Dynamic metrics badges -->
-            </div>
-          </div>
-        </div>
-      </div>
-    </div>
-
-    <!-- Tab 2: Claim Class Checker -->
-    <div id="phrasing" class="tab-pane">
-      <div class="grid-2">
-        <div class="glass-card">
-          <div class="card-title">
-            <svg aria-hidden="true" viewBox="0 0 24 24"><title>Icon</title><path d="M12 6V4m0 2a2 2 0 100 4m0-4a2 2 0 110 4m-6 8a2 2 0 100-4m0 4a2 2 0 110-4m0 4v2m0-6V4m6 6v10m6-2a2 2 0 100-4m0 4a2 2 0 110-4m0 4v2m0-6V4"/></svg>
-            Assert codebase features & capabilities
-          </div>
-
-          <div class="form-group">
-            <label>Feature/Claim Class</label>
-            <select id="claim-class" onchange="checkPhrasing()">
-              <option value="experimental">Implemented but experimental (Alpha)</option>
-              <option value="shipped">Shipped and fully tested (Stable)</option>
-              <option value="inert">Typed contract exists but inert (In-progress)</option>
-              <option value="planned">Planned / future roadmap</option>
-            </select>
-          </div>
-
-          <div class="form-group">
-            <label>Draft claim paragraph</label>
-            <textarea id="claim-text" style="min-height: 120px;" oninput="checkPhrasing()">Clio automatically validates all local cluster runs, providing stable npm package execution and universal local-model compatibility.</textarea>
-          </div>
-        </div>
-
-        <div class="glass-card">
-          <div class="card-title">
-            <svg aria-hidden="true" viewBox="0 0 24 24"><title>Icon</title><path d="M9 19v-6a2 2 0 00-2-2H5a2 2 0 00-2 2v6a2 2 0 002 2h2a2 2 0 002-2zm0 0V9a2 2 0 012-2h2a2 2 0 012 2v10m-6 0a2 2 0 002 2h2a2 2 0 002-2m0 0V5a2 2 0 012-2h2a2 2 0 012 2v14a2 2 0 002 2h2a2 2 0 002-2"/></svg>
-            Alignment Check Verdict
-          </div>
-
-          <div id="phrasing-banner" class="status-panel success">
-            Phrasing passes rules!
-          </div>
-
-          <div style="margin-top: 1.5rem;">
-            <h4 style="margin-bottom:0.5rem; font-size:0.95rem; color:#fff;">Analysis details:</h4>
-            <div class="console-box" id="phrasing-log">
-              <!-- Logs -->
-            </div>
-          </div>
-        </div>
-      </div>
-    </div>
-
-    <!-- Tab 3: Update Checklist -->
-    <div id="tracker" class="tab-pane">
-      <div class="glass-card">
-        <div class="card-title">
-          <svg aria-hidden="true" viewBox="0 0 24 24"><title>Icon</title><path d="M9 5H7a2 2 0 00-2 2v12a2 2 0 002 2h10a2 2 0 002-2V7a2 2 0 00-2-2h-2M9 5a2 2 0 002 2h2a2 2 0 002-2M9 5a2 2 0 012-2h2a2 2 0 012 2m-6 9l2 2 4-4"/></svg>
-          PR Documentation Update Checklist
-        </div>
-
-        <div class="checklist">
-          <div class="checklist-item" id="item-1">
-            <input type="checkbox" onchange="_toggleCheckItem(1)">
-            <div class="checklist-item-text">
-              <p class="checklist-title">1. Identify Source Owner</p>
-              <p class="checklist-desc">Trace the TS files backing the behavior under <code style="font-family:var(--font-mono)">src/cli/</code>, <code style="font-family:var(--font-mono)">src/interactive/</code>, or specific domain scopes.</p>
-            </div>
-          </div>
-
-          <div class="checklist-item" id="item-2">
-            <input type="checkbox" onchange="_toggleCheckItem(2)">
-            <div class="checklist-item-text">
-              <p class="checklist-title">2. Check Public CLI Help Changes</p>
-              <p class="checklist-desc">Verify that all command lines and args mentioned in docs match output from <code style="font-family:var(--font-mono)">node dist/cli/index.js --help</code>.</p>
-            </div>
-          </div>
-
-          <div class="checklist-item" id="item-3">
-            <input type="checkbox" onchange="_toggleCheckItem(3)">
-            <div class="checklist-item-text">
-              <p class="checklist-title">3. Update the Mapped Guide</p>
-              <p class="checklist-desc">Edit the corresponding <code style="font-family:var(--font-mono)">docs/*.md</code> file in the same PR containing code improvements.</p>
-            </div>
-          </div>
-
-          <div class="checklist-item" id="item-4">
-            <input type="checkbox" onchange="_toggleCheckItem(4)">
-            <div class="checklist-item-text">
-              <p class="checklist-title">4. Propagate Core System Changes to README</p>
-              <p class="checklist-desc">If modifications affect safety bounds, session ceilings, credentials, or dispatch worker routing, keep user-facing README.md in sync.</p>
-            </div>
-          </div>
-
-          <div class="checklist-item" id="item-5">
-            <input type="checkbox" onchange="_toggleCheckItem(5)">
-            <div class="checklist-item-text">
-              <p class="checklist-title">5. Execute Python Link Check Script</p>
-              <p class="checklist-desc">Execute the local Python script to verify relative links across all files prior to pushing commits: <code style="font-family:var(--font-mono)">python3 tools/check_links.py</code>.</p>
-            </div>
-          </div>
-        </div>
-      </div>
-    </div>
-
-    <!-- Tab 4: Doc Lifecycle Flow -->
-    <div id="flowchart" class="tab-pane">
-      <div class="glass-card">
-        <div class="card-title">
-          <svg aria-hidden="true" viewBox="0 0 24 24"><title>Icon</title><path d="M13 10V3L4 14h7v7l9-11h-7z"/></svg>
-          Source-First Documentation Alignment Flow
-        </div>
-        <div class="flowchart-container">
-          <svg aria-hidden="true" width="850" height="420" viewBox="0 0 850 420" style="background:#020408; border-radius:10px;"><title>Icon</title>
-            <defs>
-              <marker id="arrow" viewBox="0 0 10 10" refX="5" refY="5" markerWidth="6" markerHeight="6" orient="auto-start-reverse">
-                <path d="M 0 0 L 10 5 L 0 10 z" fill="#00f0ff" />
-              </marker>
-              <filter id="glow-cyan" x="-20%" y="-20%" width="140%" height="140%">
-                <feGaussianBlur stdDeviation="4" result="blur" />
-                <feComposite in="SourceGraphic" in2="blur" operator="over" />
-              </filter>
-            </defs>
-
-            <!-- Grid background -->
-            <path d="M 0 0 L 850 0 M 0 40 L 850 40 M 0 80 L 850 80 M 0 120 L 850 120 M 0 160 L 850 160 M 0 200 L 850 200 M 0 240 L 850 240 M 0 280 L 850 280 M 0 320 L 850 320 M 0 360 L 850 360 M 0 400 L 850 400" stroke="rgba(255,255,255,0.02)" stroke-width="1" />
-            <path d="M 0 0 L 0 420 M 50 0 L 50 420 M 100 0 L 100 420 M 150 0 L 150 420 M 200 0 L 200 420 M 250 0 L 250 420 M 300 0 L 300 420 M 350 0 L 350 420 M 400 0 L 400 420 M 450 0 L 450 420 M 500 0 L 500 420 M 550 0 L 550 420 M 600 0 L 600 420 M 650 0 L 650 420 M 700 0 L 700 420 M 750 0 L 750 420 M 800 0 L 800 420" stroke="rgba(255,255,255,0.02)" stroke-width="1" />
-
-            <!-- STEP 1: AUDIT -->
-            <g transform="translate(10, 40)">
-              <rect x="10" y="20" width="160" height="280" rx="8" fill="rgba(255,255,255,0.01)" stroke="rgba(255,255,255,0.05)" />
-              <text x="90" y="45" fill="var(--text-dark)" font-size="11" font-weight="700" text-anchor="middle" letter-spacing="1">1. SOURCE AUDIT</text>
-
-              <rect x="25" y="80" width="130" height="60" rx="6" fill="#111827" stroke="rgba(255,255,255,0.1)" />
-              <text x="90" y="105" fill="#fff" font-size="11" font-weight="600" text-anchor="middle">Code & tests</text>
-              <text x="90" y="123" fill="var(--text-muted)" font-size="9" text-anchor="middle">Audits actual behavior</text>
-
-              <rect x="25" y="180" width="130" height="60" rx="6" fill="#111827" stroke="rgba(255,255,255,0.1)" />
-              <text x="90" y="205" fill="#fff" font-size="11" font-weight="600" text-anchor="middle">Git Logs</text>
-              <text x="90" y="223" fill="var(--text-muted)" font-size="9" text-anchor="middle">Verify release history</text>
-            </g>
-
-            <!-- STEP 2: ALIGN & LINT -->
-            <g transform="translate(200, 40)">
-              <rect x="10" y="20" width="200" height="280" rx="8" fill="rgba(0, 240, 255, 0.03)" stroke="var(--color-cyan)" stroke-width="1.5" filter="url(#glow-cyan)" />
-              <text x="110" y="45" fill="var(--color-cyan)" font-size="12" font-weight="700" text-anchor="middle" letter-spacing="1">2. CLAIM LINTING</text>
-
-              <!-- Phrasing -->
-              <rect x="25" y="80" width="170" height="50" rx="6" fill="#111827" stroke="rgba(255,255,255,0.1)" />
-              <text x="110" y="105" fill="#fff" font-size="11" text-anchor="middle">Verify Vocabulary</text>
-              <text x="110" y="120" fill="var(--text-muted)" font-size="9" text-anchor="middle">Alpha phrasing guidelines</text>
-
-              <!-- Links -->
-              <rect x="25" y="170" width="170" height="60" rx="6" fill="#111827" stroke="rgba(255,255,255,0.1)" />
-              <text x="110" y="195" fill="#fff" font-size="11" text-anchor="middle">Link integrity</text>
-              <text x="110" y="213" fill="var(--text-muted)" font-size="9" text-anchor="middle">Relative paths checker</text>
-            </g>
-
-            <!-- STEP 3: RENDER -->
-            <g transform="translate(430, 40)">
-              <rect x="10" y="20" width="180" height="280" rx="8" fill="rgba(255,255,255,0.01)" stroke="rgba(255,255,255,0.05)" />
-              <text x="100" y="45" fill="var(--text-dark)" font-size="11" font-weight="700" text-anchor="middle" letter-spacing="1">3. DISTRIBUTION</text>
-
-              <rect x="25" y="80" width="150" height="50" rx="6" fill="rgba(16, 185, 129, 0.05)" stroke="var(--color-emerald)" stroke-width="1" />
-              <text x="100" y="105" fill="var(--color-emerald)" font-size="11" font-weight="700" text-anchor="middle">Markdown Guides</text>
-              <text x="100" y="120" fill="var(--text-muted)" font-size="9" text-anchor="middle">Linked specs in Tip Boxes</text>
-
-              <rect x="25" y="170" width="150" height="50" rx="6" fill="rgba(189, 0, 255, 0.05)" stroke="var(--color-purple)" stroke-width="1" />
-              <text x="100" y="195" fill="var(--color-purple)" font-size="11" font-weight="700" text-anchor="middle">Interactive Blueprints</text>
-              <text x="100" y="210" fill="var(--text-muted)" font-size="9" text-anchor="middle">HTML playground versions</text>
-            </g>
-
-            <!-- Connections -->
-            <path d="M 180 140 L 210 140" stroke="#00f0ff" stroke-width="1.5" marker-end="url(#arrow)" fill="none" />
-            <path d="M 410 140 L 440 140" stroke="#00f0ff" stroke-width="1.5" marker-end="url(#arrow)" fill="none" />
-          </svg>
-        </div>
-      </div>
-    </div>
+    <footer>Clio Coder documentation · source-aligned at v0.4.2</footer>
   </div>
-
-  <script>
-    function _switchTab(tabId) {
-      document.querySelectorAll('.tab-pane').forEach(el => { el.classList.remove('active'); });
-      document.querySelectorAll('.tab-btn').forEach(el => { el.classList.remove('active'); });
-
-      document.getElementById(tabId).classList.add('active');
-      event.currentTarget.classList.add('active');
-    }
-
-    const validSample = `## Setup validation
-
-To begin, verify targets are loaded properly. Refer to [commands-and-modes.md](commands-and-modes.md#L10) for instructions.
-
-> [!NOTE]
-> Clio Coder is an experimental community alpha. Some local model behaviors can vary.`;
-
-    const invalidSample = `## Core setup
-
-For active setups, inspect [\`registry.ts\`](file:///workspace/clio-coder/src/tools/registry.ts). # Error: absolute file URI, backticks inside link text
-
-> [!TIP]
-> This is a fully automatic production-grade stable upgrade engine. # Error: overstating alpha maturity`;
-
-    function loadSampleMd(type) {
-      if (type === 'valid') {
-        document.getElementById('raw-markdown').value = validSample;
-      } else {
-        document.getElementById('raw-markdown').value = invalidSample;
-      }
-      lintMarkdown();
-    }
-
-    function lintMarkdown() {
-      const text = document.getElementById('raw-markdown').value;
-      const statusPanel = document.getElementById('linter-status');
-      const metricsList = document.getElementById('linter-metrics');
-      metricsList.innerHTML = '';
-
-      if (!text.trim()) {
-        statusPanel.className = 'status-panel warning';
-        statusPanel.textContent = 'Markdown is empty. Write or load a sample.';
-        return;
-      }
-
-      const errors = [];
-      let absoluteLinksCount = 0;
-      let backtickLinksCount = 0;
-      let alertsCount = 0;
-
-      // Simple link parser
-      const linkRegex = /\[([^\]]+)\]\(([^)]+)\)/g;
-      let match = linkRegex.exec(text);
-      while (match !== null) {
-        const linkText = match[1];
-        const linkTarget = match[2];
-
-        if (linkTarget.startsWith("file://")) {
-          errors.push(`Absolute link path detected: "${linkTarget}". Use repository-relative paths.`);
-          absoluteLinksCount++;
-        }
-        if (linkText.startsWith("`") && linkText.endsWith("`")) {
-          errors.push(`Do not wrap link text in backticks: "[\`${linkText.slice(1, -1)}\`]...". Place backticks outside the link: \`[text](link)\`.`);
-          backtickLinksCount++;
-        }
-        match = linkRegex.exec(text);
-      }
-
-      // Alert matches
-      if (text.includes('> [!NOTE]') || text.includes('> [!WARNING]') || text.includes('> [!CAUTION]') || text.includes('> [!TIP]')) {
-        alertsCount++;
-      }
-
-      if (errors.length > 0) {
-        statusPanel.className = 'status-panel error';
-        statusPanel.innerHTML = `<strong>Markdown Alignment Failures:</strong><ul style="margin-left: 1.5rem; margin-top:0.5rem;">${errors.map(e => `<li>${e}</li>`).join('')}</ul>`;
-      } else {
-        statusPanel.className = 'status-panel success';
-        statusPanel.innerHTML = `<strong>Success:</strong> Markdown alignment conforms to all codebase guidelines and checks out.`;
-
-        addMetricBadge('Absolute Links', absoluteLinksCount, 'purple');
-        addMetricBadge('Format Errors', backtickLinksCount, 'rose');
-        addMetricBadge('GitHub Alerts', alertsCount ? 'Yes' : 'None', 'emerald');
-      }
-    }
-
-    function addMetricBadge(label, val, color) {
-      const container = document.getElementById('linter-metrics');
-      const item = document.createElement('div');
-      item.className = 'meta-badge';
-      item.style.borderLeft = `3px solid var(--color-${color})`;
-      item.innerHTML = `<span class="label">${label}:</span> <span class="value" style="color:var(--color-${color})">${val}</span>`;
-      container.appendChild(item);
-    }
-
-    // Phrasing checker
-    function checkPhrasing() {
-      const text = document.getElementById('claim-text').value;
-      const claimClass = document.getElementById('claim-class').value;
-
-      const logs = [];
-      let hasError = false;
-
-      logs.push(`[info] Analyzing claim class alignment for: "${claimClass}"`);
-
-      const forbiddenMaturity = ['stable', 'production-grade', 'guaranteed', 'fully automatic', 'npm registry', 'universal'];
-
-      forbiddenMaturity.forEach(word => {
-        if (text.toLowerCase().includes(word)) {
-          if (claimClass === 'experimental' || claimClass === 'inert' || claimClass === 'planned') {
-            logs.push(`[warning] Overstating maturity: found forbidden word "${word}" in draft claim.`);
-            hasError = true;
-          }
-        }
-      });
-
-      if (hasError) {
-        document.getElementById('phrasing-banner').className = 'status-panel error';
-        document.getElementById('phrasing-banner').innerHTML = `<strong>Status: PHRASING MISALIGNMENT</strong>. Vocabulary overstates code maturity.`;
-        logs.push(`\n[suggestion] Refactor text to use conservative wording:`);
-        logs.push(`- "experimental community alpha"`);
-        logs.push(`- "source-build execution path"`);
-        logs.push(`- "advisory scientific validation contracts"`);
-      } else {
-        document.getElementById('phrasing-banner').className = 'status-panel success';
-        document.getElementById('phrasing-banner').innerHTML = `<strong>Status: ALIGNED</strong>. Wording is conservative and source-aligned.`;
-        logs.push(`\n[success] Verification passed. Claim matches source maturity level.`);
-      }
-
-      document.getElementById('phrasing-log').textContent = logs.join('\n');
-    }
-
-    // Checklist
-    function _toggleCheckItem(id) {
-      const item = document.getElementById(`item-${id}`);
-      const checkbox = item.querySelector('input[type="checkbox"]');
-      if (checkbox.checked) {
-        item.classList.add('done');
-      } else {
-        item.classList.remove('done');
-      }
-    }
-
-    window.onload = () => {
-      loadSampleMd('valid');
-      checkPhrasing();
-    }
-  </script>
+  <script src="shared.js"></script>
 </body>
 </html>

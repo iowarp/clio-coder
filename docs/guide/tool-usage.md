@@ -1,7 +1,7 @@
 # Tool Usage Reference
 
-> [!TIP]
-> **Interactive Spec Available:** A source-checkout seven-plane tool atlas and observation envelope truncation/offload calculator is available at [docs/html/tool_usage_blueprint.html](https://github.com/iowarp/clio-coder/blob/main/docs/html/tool_usage_blueprint.html).
+> **Visual blueprint:** The source checkout includes the complete
+> [Tool Usage Reference visual reference](https://github.com/iowarp/clio-coder/blob/main/docs/html/tool_usage_blueprint.html).
 
 This is the deep usage reference behind the deliberately terse tool descriptions in the prompt envelope. Toolkit v2 keeps rich guidance out of tool descriptions and puts it here, where `context(scope="docs", query=...)` retrieves it section by section. Each tool below has its own self-contained `##` section covering the argument surface, defaults, truncation and continuation behavior, and concrete calls. Source of truth is `src/tools/`.
 

@@ -1,1114 +1,1674 @@
-<!DOCTYPE html>
+<!doctype html>
 <html lang="en">
 <head>
-  <meta charset="UTF-8">
-  <meta name="viewport" content="width=device-width, initial-scale=1.0">
-  <title>Clio Coder Configuration Blueprint (v0.4.0)</title>
-
-  <style>
-    :root {
-      --bg-dark: #090d16;
-      --bg-grid: rgba(255, 255, 255, 0.02);
-      --bg-card: rgba(13, 20, 38, 0.45);
-      --bg-card-hover: rgba(20, 30, 58, 0.6);
-      --border-card: rgba(255, 255, 255, 0.08);
-      --border-card-hover: rgba(0, 240, 255, 0.3);
-      --text-main: #f3f4f6;
-      --text-muted: #9ca3af;
-      --text-dim: #6b7280;
-
-      --color-cyan: #00f0ff;
-      --color-cyan-rgb: 0, 240, 255;
-      --color-purple: #bd00ff;
-      --color-purple-rgb: 189, 0, 255;
-      --color-emerald: #10b981;
-      --color-emerald-rgb: 16, 185, 129;
-      --color-amber: #f59e0b;
-      --color-amber-rgb: 245, 158, 11;
-      --color-rose: #ef4444;
-      --color-rose-rgb: 239, 68, 68;
-
-      --gradient-main: linear-gradient(135deg, var(--color-cyan), var(--color-purple));
-      --shadow-glow: 0 0 25px rgba(0, 240, 255, 0.15);
-      --font-sans: "Segoe UI", -apple-system, BlinkMacSystemFont, Roboto, "Helvetica Neue", Arial, sans-serif;
-      --font-mono: "SFMono-Regular", Consolas, "Liberation Mono", Menlo, monospace;
-
-      --glass-blur: blur(12px);
-    }
-
-    * {
-      box-sizing: border-box;
-      margin: 0;
-      padding: 0;
-    }
-
-    body {
-      background-color: var(--bg-dark);
-      background-image:
-        radial-gradient(circle at 10% 20%, rgba(var(--color-cyan-rgb), 0.05) 0%, transparent 40%),
-        radial-gradient(circle at 90% 80%, rgba(var(--color-purple-rgb), 0.05) 0%, transparent 40%),
-        radial-gradient(circle at 50% 50%, #0d1527 0%, var(--bg-dark) 100%);
-      color: var(--text-main);
-      font-family: var(--font-sans);
-      min-height: 100vh;
-      line-height: 1.6;
-      overflow-x: hidden;
-      position: relative;
-    }
-
-    body::before {
-      content: '';
-      position: absolute;
-      inset: 0;
-      background-image: linear-gradient(var(--bg-grid) 1px, transparent 1px),
-                        linear-gradient(90deg, var(--bg-grid) 1px, transparent 1px);
-      background-size: 40px 40px;
-      background-position: center top;
-      pointer-events: none;
-      z-index: 0;
-      opacity: 0.8;
-    }
-
-    .container {
-      max-width: 1400px;
-      margin: 0 auto;
-      padding: 2rem;
-      position: relative;
-      z-index: 1;
-    }
-
-    /* Header Styling */
-    header {
-      display: flex;
-      justify-content: space-between;
-      align-items: center;
-      margin-bottom: 2.5rem;
-      padding-bottom: 1.5rem;
-      border-bottom: 1px solid rgba(255, 255, 255, 0.05);
-    }
-
-    .header-left {
-      display: flex;
-      align-items: center;
-      gap: 1rem;
-    }
-
-    .header-logo {
-      display: inline-flex;
-      align-items: center;
-      justify-content: center;
-      width: 48px;
-      height: 48px;
-      background: rgba(255, 255, 255, 0.02);
-      border: 1px solid var(--border-card);
-      border-radius: 12px;
-      position: relative;
-    }
-
-    .header-logo svg {
-      width: 28px;
-      height: 28px;
-    }
-
-    .header-title-wrapper h1 {
-      font-size: 1.5rem;
-      font-weight: 800;
-      letter-spacing: -0.03em;
-      background: linear-gradient(to right, #ffffff, #c7d2fe, var(--color-cyan));
-      -webkit-background-clip: text;
-      -webkit-text-fill-color: transparent;
-    }
-
-    .header-title-wrapper p {
-      font-size: 0.825rem;
-      color: var(--text-muted);
-    }
-
-    .header-right {
-      display: flex;
-      align-items: center;
-      gap: 1rem;
-    }
-
-    .back-btn {
-      background: rgba(255, 255, 255, 0.03);
-      border: 1px solid var(--border-card);
-      color: var(--text-muted);
-      padding: 0.5rem 1rem;
-      border-radius: 8px;
-      font-size: 0.875rem;
-      font-weight: 600;
-      text-decoration: none;
-      display: inline-flex;
-      align-items: center;
-      gap: 0.5rem;
-      transition: all 0.2s;
-    }
-
-    .back-btn:hover {
-      background: rgba(255, 255, 255, 0.08);
-      color: var(--text-main);
-      border-color: rgba(var(--color-cyan-rgb), 0.3);
-    }
-
-    .version-badge {
-      background: rgba(0, 240, 255, 0.08);
-      border: 1px solid rgba(0, 240, 255, 0.25);
-      color: var(--color-cyan);
-      padding: 0.35rem 0.75rem;
-      border-radius: 50px;
-      font-size: 0.75rem;
-      font-weight: 600;
-      font-family: var(--font-mono);
-    }
-
-    /* Tabs Navigation */
-    .tabs-nav {
-      display: flex;
-      gap: 0.75rem;
-      margin-bottom: 2rem;
-    }
-
-    .tab-btn {
-      background: rgba(255, 255, 255, 0.03);
-      border: 1px solid var(--border-card);
-      color: var(--text-muted);
-      padding: 0.6rem 1.25rem;
-      border-radius: 8px;
-      font-size: 0.875rem;
-      font-weight: 600;
-      cursor: pointer;
-      display: flex;
-      align-items: center;
-      gap: 0.5rem;
-      transition: all 0.2s;
-    }
-
-    .tab-btn:hover {
-      background: rgba(255, 255, 255, 0.06);
-      color: var(--text-main);
-    }
-
-    .tab-btn.active {
-      background: var(--gradient-main);
-      color: #090d16;
-      border-color: transparent;
-      box-shadow: 0 4px 15px rgba(var(--color-cyan-rgb), 0.25);
-    }
-
-    /* Content Layout */
-    .tab-pane {
-      display: none;
-      animation: fadeIn 0.3s ease-out forwards;
-    }
-
-    .tab-pane.active {
-      display: block;
-    }
-
-    @keyframes fadeIn {
-      from { opacity: 0; transform: translateY(8px); }
-      to { opacity: 1; transform: translateY(0); }
-    }
-
-    /* Split layout: Specs + Simulator */
-    .blueprint-layout {
-      display: grid;
-      grid-template-columns: 1fr 1fr;
-      gap: 2rem;
-      align-items: start;
-    }
-
-    @media (max-width: 1100px) {
-      .blueprint-layout {
-        grid-template-columns: 1fr;
-      }
-    }
-
-    .glass-card {
-      background: var(--bg-card);
-      border: 1px solid var(--border-card);
-      border-radius: 16px;
-      padding: 1.75rem;
-      margin-bottom: 2rem;
-      backdrop-filter: var(--glass-blur);
-      box-shadow: 0 8px 32px 0 rgba(0, 0, 0, 0.3);
-    }
-
-    .glass-card h2 {
-      font-size: 1.25rem;
-      font-weight: 700;
-      color: #ffffff;
-      margin-bottom: 1.25rem;
-      display: flex;
-      align-items: center;
-      gap: 0.5rem;
-      border-bottom: 1px solid rgba(255, 255, 255, 0.05);
-      padding-bottom: 0.75rem;
-    }
-
-    .glass-card h2 svg {
-      width: 18px;
-      height: 18px;
-      color: var(--color-cyan);
-    }
-
-    .glass-card p {
-      font-size: 0.925rem;
-      color: var(--text-muted);
-      margin-bottom: 1rem;
-    }
-
-    /* Form Elements */
-    .form-group {
-      margin-bottom: 1.25rem;
-    }
-
-    .form-group label {
-      display: block;
-      font-size: 0.8rem;
-      font-weight: 600;
-      color: var(--text-muted);
-      margin-bottom: 0.5rem;
-      text-transform: uppercase;
-      letter-spacing: 0.05em;
-    }
-
-    .form-row {
-      display: grid;
-      grid-template-columns: 1fr 1fr;
-      gap: 1rem;
-    }
-
-    select, input, textarea {
-      width: 100%;
-      background: rgba(9, 13, 22, 0.7);
-      border: 1px solid var(--border-card);
-      border-radius: 8px;
-      padding: 0.65rem 0.85rem;
-      color: #fff;
-      font-family: var(--font-sans);
-      font-size: 0.9rem;
-      outline: none;
-      transition: all 0.2s;
-    }
-
-    select:focus, input:focus, textarea:focus {
-      border-color: var(--color-cyan);
-      box-shadow: 0 0 10px rgba(var(--color-cyan-rgb), 0.15);
-    }
-
-    textarea {
-      font-family: var(--font-mono);
-      font-size: 0.825rem;
-      resize: vertical;
-    }
-
-    .checkbox-group {
-      display: flex;
-      align-items: center;
-      gap: 0.5rem;
-      margin-bottom: 1rem;
-    }
-
-    .checkbox-group input {
-      width: auto;
-      margin-right: 0.25rem;
-    }
-
-    .checkbox-group label {
-      display: inline;
-      text-transform: none;
-      font-size: 0.875rem;
-      font-weight: 500;
-      cursor: pointer;
-    }
-
-    /* Presets list */
-    .presets-list {
-      display: flex;
-      gap: 0.5rem;
-      margin-bottom: 1rem;
-    }
-
-    .preset-btn {
-      background: rgba(255, 255, 255, 0.03);
-      border: 1px solid var(--border-card);
-      color: var(--text-muted);
-      padding: 0.35rem 0.75rem;
-      border-radius: 6px;
-      font-size: 0.75rem;
-      cursor: pointer;
-      font-family: var(--font-sans);
-      transition: all 0.2s;
-    }
-
-    .preset-btn:hover {
-      background: rgba(0, 240, 255, 0.08);
-      border-color: var(--color-cyan);
-      color: #fff;
-    }
-
-    /* Validation Results display */
-    .status-panel {
-      border-radius: 12px;
-      padding: 1.25rem;
-      margin-bottom: 1.5rem;
-      border: 1px solid transparent;
-      font-size: 0.9rem;
-    }
-
-    .status-panel.success {
-      background: rgba(16, 185, 129, 0.08);
-      border-color: rgba(16, 185, 129, 0.3);
-      color: var(--color-emerald);
-    }
-
-    .status-panel.error {
-      background: rgba(239, 68, 68, 0.08);
-      border-color: rgba(239, 68, 68, 0.3);
-      color: var(--color-rose);
-    }
-
-    .status-panel.warning {
-      background: rgba(245, 158, 11, 0.08);
-      border-color: rgba(245, 158, 11, 0.3);
-      color: var(--color-amber);
-    }
-
-    /* Code & Output Blocks */
-    .code-block-wrapper {
-      position: relative;
-    }
-
-    .copy-btn {
-      position: absolute;
-      top: 0.75rem;
-      right: 0.75rem;
-      background: rgba(255, 255, 255, 0.05);
-      border: 1px solid var(--border-card);
-      color: var(--text-muted);
-      padding: 0.25rem 0.6rem;
-      border-radius: 4px;
-      font-size: 0.7rem;
-      cursor: pointer;
-      font-family: var(--font-sans);
-      font-weight: 600;
-      transition: all 0.2s;
-    }
-
-    .copy-btn:hover {
-      background: var(--color-cyan);
-      color: #090d16;
-      border-color: transparent;
-    }
-
-    .code-output {
-      background: #020408;
-      border: 1px solid var(--border-card);
-      border-radius: 8px;
-      padding: 1.25rem;
-      font-family: var(--font-mono);
-      font-size: 0.85rem;
-      overflow-x: auto;
-      color: #e5e7eb;
-    }
-
-    /* Badges */
-    .cap-badge-grid {
-      display: flex;
-      flex-wrap: wrap;
-      gap: 0.5rem;
-      margin-top: 0.75rem;
-    }
-
-    .cap-badge {
-      font-family: var(--font-mono);
-      font-size: 0.75rem;
-      font-weight: 700;
-      padding: 0.25rem 0.5rem;
-      border-radius: 4px;
-      text-transform: uppercase;
-      display: inline-flex;
-      align-items: center;
-      gap: 0.3rem;
-    }
-
-    .cap-badge.active { background: rgba(0, 240, 255, 0.1); border: 1px solid rgba(0, 240, 255, 0.3); color: var(--color-cyan); }
-    .cap-badge.inactive { background: rgba(255, 255, 255, 0.03); border: 1px solid rgba(255, 255, 255, 0.08); color: var(--text-dim); }
-
-    /* Tables */
-    .ref-table {
-      width: 100%;
-      border-collapse: collapse;
-      margin: 1.5rem 0;
-      font-size: 0.9rem;
-    }
-
-    .ref-table th, .ref-table td {
-      padding: 0.65rem 0.85rem;
-      border: 1px solid var(--border-card);
-      text-align: left;
-    }
-
-    .ref-table th {
-      background: rgba(255,255,255,0.03);
-      font-weight: 600;
-    }
-
-    .alert-tip {
-      background: rgba(16, 185, 129, 0.06);
-      border-left: 4px solid var(--color-emerald);
-      padding: 1rem;
-      border-radius: 0 8px 8px 0;
-      margin: 1.5rem 0;
-      font-size: 0.9rem;
-    }
-
-    .alert-tip strong {
-      color: var(--color-emerald);
-    }
-
-    /* Footer */
-    footer {
-      text-align: center;
-      margin-top: 4rem;
-      padding-top: 2rem;
-      border-top: 1px solid rgba(255, 255, 255, 0.05);
-      color: var(--text-dim);
-      font-size: 0.875rem;
-    }
-  </style>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <meta name="clio-markdown-source" content="docs/guide/configuration-and-targets.md">
+  <meta name="clio-docs-version" content="0.4.2">
+  <title>Configuration, Targets, Runtimes, and Auth · Clio Coder 0.4.2</title>
+  <link rel="icon" href="data:,">
+  <link rel="stylesheet" href="shared.css">
 </head>
-<body>
+<body data-doc-category="guide">
+  <div class="reading-progress" aria-hidden="true"></div>
+  <a class="skip-link" href="#reference-content">Skip to reference</a>
   <div class="container">
-    <header>
+    <header class="document-header" data-category="Guide">
       <div class="header-left">
-        <div class="header-logo">
-          <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" style="color: var(--color-cyan);"><title>Icon</title>
-            <polygon points="12 2 2 7 12 12 22 7 12 2"></polygon>
-            <polyline points="2 17 12 22 22 17"></polyline>
-            <polyline points="2 12 12 17 22 12"></polyline>
+        <a class="header-logo" href="index.html" aria-label="Documentation index">
+          <svg viewBox="0 0 24 24" fill="none" aria-hidden="true">
+            <path d="M12 2 2 7l10 5 10-5-10-5Z" stroke="url(#clio-logo)" stroke-width="2" stroke-linejoin="round"/>
+            <path d="m2 12 10 5 10-5M2 17l10 5 10-5" stroke="url(#clio-logo)" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"/>
+            <defs><linearGradient id="clio-logo" x1="2" y1="2" x2="22" y2="22"><stop stop-color="#00d4db"/><stop offset="1" stop-color="#ff7e29"/></linearGradient></defs>
           </svg>
-        </div>
+        </a>
         <div class="header-title-wrapper">
-          <h1>Clio Coder Configuration Blueprint</h1>
-          <p>Config specs, model resolver, and interactive validator</p>
+          <p class="document-kicker">Guide / canonical reference</p>
+          <h1>Configuration, Targets, Runtimes, and Auth</h1>
+          <p class="document-path">docs/guide/configuration-and-targets.md</p>
         </div>
       </div>
       <div class="header-right">
-        <span class="version-badge">Clio Coder v0.4.0</span>
-        <a href="index.html" class="back-btn">
-          <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><title>Icon</title><line x1="19" y1="12" x2="5" y2="12"></line><polyline points="12 19 5 12 12 5"></polyline></svg>
-          Dashboard Hub
-        </a>
+        <a class="back-btn" href="index.html">← Index</a>
+        <span class="version-badge">v0.4.2</span>
       </div>
     </header>
-
-    <div class="tabs-nav">
-      <button type="button" class="tab-btn active" onclick="switchTab('interactive')">
-        <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><title>Icon</title><polyline points="22 12 18 12 15 21 9 3 6 12 2 12"></polyline></svg>
-        Interactive Config Studio
-      </button>
-      <button type="button" class="tab-btn" onclick="switchTab('reference')">
-        <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><title>Icon</title><path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z"></path><polyline points="14 2 14 8 20 8"></polyline><line x1="16" y1="13" x2="8" y2="13"></line><line x1="16" y1="17" x2="8" y2="17"></line><polyline points="10 9 9 9 8 9"></polyline></svg>
-        Full Technical Reference
-      </button>
-    </div>
-
-    <!-- TAB 1: INTERACTIVE Config Studio -->
-    <main class="tab-pane active" id="pane-interactive">
-      <div class="blueprint-layout">
-
-        <!-- Left Column: YAML Validator -->
-        <div class="specs-col">
-          <div class="glass-card">
-            <h2>
-              <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><title>Icon</title><path d="M22 11.08V12a10 10 0 1 1-5.93-9.14"></path><polyline points="22 4 12 14.01 9 11.01"></polyline></svg>
-              settings.yaml Validator (v0.4.0 Schema)
-            </h2>
-            <p>Paste or edit your <code>settings.yaml</code> configuration file below. The validator checks schema version, target mapping links, target IDs, budget structures, and flags legacy properties such as <code>defaultMode</code> or misplaced state fields.</p>
-
-            <div class="presets-list">
-              <span class="preset-btn" onclick="loadYamlPreset('valid')">Load Valid v0.4.0 Config</span>
-              <span class="preset-btn" onclick="loadYamlPreset('stale')">Load Legacy Config (Triggers Warnings)</span>
-              <span class="preset-btn" onclick="loadYamlPreset('invalid')">Load Invalid Config</span>
-            </div>
-
-            <div class="form-group">
-              <textarea id="yamlInput" rows="18" oninput="validateYaml()" placeholder="Paste settings.yaml contents here..."></textarea>
-            </div>
-
-            <div class="verdict-header">Validator Output</div>
-            <div id="validatorResult" class="status-panel success">
-              YAML is empty. Load a preset or paste configurations to evaluate.
-            </div>
-          </div>
-        </div>
-
-        <!-- Right Column: Command Generator & Target Resolver -->
-        <div class="specs-col">
-
-          <!-- CLI Command Generator -->
-          <div class="glass-card">
-            <h2>
-              <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><title>Icon</title><polyline points="4 17 10 11 4 5"></polyline><line x1="12" y1="19" x2="20" y2="19"></line></svg>
-              CLI Command Generator
-            </h2>
-            <p>Interactively configure your target runtime and build a copy-pasteable command to register it in Clio Coder.</p>
-
-            <div class="form-row">
-              <div class="form-group">
-                <label for="cliId">Target ID (id)</label>
-                <input type="text" id="cliId" value="local-ollama" oninput="generateCommand()">
-              </div>
-              <div class="form-group">
-                <label for="cliRuntime">Runtime Descriptor</label>
-                <select id="cliRuntime" onchange="onCliRuntimeChange()">
-                  <option value="ollama-native">ollama-native</option>
-                  <option value="lmstudio">lmstudio</option>
-                  <option value="llamacpp">llamacpp</option>
-                  <option value="vllm">vllm</option>
-                  <option value="openai-compat">openai-compat</option>
-                  <option value="anthropic-compat">anthropic-compat</option>
-                  <option value="google">google</option>
-                  <option value="openai-codex">openai-codex</option>
-                  <option value="anthropic-max">anthropic-max</option>
-                  <option value="claude-sdk">claude-sdk</option>
-                </select>
-              </div>
-            </div>
-
-            <div class="form-row">
-              <div class="form-group">
-                <label for="cliUrl">Endpoint URL</label>
-                <input type="text" id="cliUrl" value="http://localhost:11434" oninput="generateCommand()">
-              </div>
-              <div class="form-group">
-                <label for="cliModel">Model ID</label>
-                <input type="text" id="cliModel" value="qwen2.5-coder:14b" oninput="generateCommand()">
-              </div>
-            </div>
-
-            <div class="form-row">
-              <div class="form-group">
-                <label for="cliContext">Context Window (Override)</label>
-                <input type="number" id="cliContext" value="" placeholder="Default" oninput="generateCommand()">
-              </div>
-              <div class="form-group">
-                <label for="cliMaxTokens">Max Output Tokens</label>
-                <input type="number" id="cliMaxTokens" value="" placeholder="Default" oninput="generateCommand()">
-              </div>
-            </div>
-
-            <div class="checkbox-group">
-              <input type="checkbox" id="cliReasoning" checked onchange="generateCommand()">
-              <label for="cliReasoning">Enable reasoning capability override (<code>--reasoning true</code>)</label>
-            </div>
-
-            <div class="checkbox-group">
-              <input type="checkbox" id="cliSetOrch" checked onchange="generateCommand()">
-              <label for="cliSetOrch">Set as main orchestrator target (<code>--set-orchestrator</code>)</label>
-            </div>
-
-            <div class="checkbox-group">
-              <input type="checkbox" id="cliSetFleet" checked onchange="generateCommand()">
-              <label for="cliSetFleet">Set as default fleet worker target (<code>--set-fleet-default</code>)</label>
-            </div>
-
-            <div class="verdict-header">Generated CLI Command</div>
-            <div class="code-block-wrapper">
-              <button type="button" class="copy-btn" onclick="copyCliText()">Copy</button>
-              <pre class="code-output" id="cliCommandOutput">clio-coder configure ...</pre>
-            </div>
-          </div>
-
-          <!-- Target Resolver Dashboard -->
-          <div class="glass-card">
-            <h2>
-              <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><title>Icon</title><path d="M21 16V8a2 2 0 0 0-1-1.73l-7-4a2 2 0 0 0-2 0l-7 4A2 2 0 0 0 3 8v8a2 2 0 0 0 1 1.73l7 4a2 2 0 0 0 2 0l7-4A2 2 0 0 0 21 16z"></path><polyline points="3.27 6.96 12 12.01 20.73 6.96"></polyline><line x1="12" y1="22.08" x2="12" y2="12"></line></svg>
-              Resolved Capabilities Dashboard
-            </h2>
-            <p>Clio blends user targets, probe results, and model catalogs to form the resolved capabilities below:</p>
-
-            <div class="form-group">
-              <label>Simulated Resolved Target: <span id="dashIdText" style="color:var(--color-cyan); font-family:var(--font-mono)">local-ollama</span></label>
-              <div class="cap-badge-grid" id="dashBadges">
-                <span class="cap-badge active">C: Chat</span>
-                <span class="cap-badge active">T: Tools</span>
-                <span class="cap-badge active">R: Reasoning</span>
-                <span class="cap-badge inactive">V: Vision</span>
-                <span class="cap-badge inactive">E: Embeddings</span>
-                <span class="cap-badge inactive">K: Rerank</span>
-                <span class="cap-badge inactive">F: FIM</span>
-              </div>
-            </div>
-
-            <div class="form-row" style="margin-top:1rem;">
-              <div>
-                <span style="font-size:0.75rem; color:var(--text-muted); display:block;">Effective Context Limit</span>
-                <span style="font-size:1.1rem; font-weight:700; color:#fff;" id="dashContextText">32,768 tokens</span>
-              </div>
-              <div>
-                <span style="font-size:0.75rem; color:var(--text-muted); display:block;">Max Output Tokens</span>
-                <span style="font-size:1.1rem; font-weight:700; color:#fff;" id="dashMaxTokensText">2,048 tokens</span>
-              </div>
-            </div>
-          </div>
-
-        </div>
-
-      </div>
-    </main>
-
-    <!-- TAB 2: TECHNICAL REFERENCE -->
-    <main class="tab-pane" id="pane-reference">
-      <div class="glass-card">
-        <h2>Clio Coder Configuration Specification</h2>
-
-        <div class="alert-tip">
-          <strong>Interactive Spec Available:</strong> Use the <strong>Interactive Config Studio</strong> tab above to validate YAML schemas, resolve targets, and generate CLI configurations.
-        </div>
-
-        <p>Clio Coder is target-first: chat and fleet dispatch resolve through configured targets in <code>settings.yaml</code>, not through provider-specific ad hoc flags. Chat, print, and fleet dispatch targets are all HTTP/native-backed runtimes.</p>
-        <p>Source of truth: <code>src/core/defaults.ts</code>, <code>src/core/config.ts</code>, <code>src/domains/providers/**</code>, <code>src/cli/configure.ts</code>, <code>src/cli/targets.ts</code>, and <code>src/cli/auth.ts</code>.</p>
-
-        <h3 style="margin: 1.5rem 0 0.5rem 0; color:#fff;">State Locations</h3>
-        <table class="ref-table">
-          <thead>
-            <tr>
-              <th>Environment Variable</th>
-              <th>Effect</th>
-            </tr>
-          </thead>
-          <tbody>
-            <tr>
-              <td><code>CLIO_CODER_HOME</code></td>
-              <td>Single-tree override: config at <code>$CLIO_CODER_HOME/config</code>, data at <code>$CLIO_CODER_HOME/data</code>, state at <code>$CLIO_CODER_HOME/state</code>, and cache at <code>$CLIO_CODER_HOME/cache</code>.</td>
-            </tr>
-            <tr>
-              <td><code>CLIO_CODER_CONFIG_DIR</code></td>
-              <td>Overrides config directory only. Default config directory is platform-specific (e.g. <code>~/.config/clio-coder</code> on Linux).</td>
-            </tr>
-            <tr>
-              <td><code>CLIO_CODER_DATA_DIR</code></td>
-              <td>Overrides data directory only. Contains durable artifacts such as memory, evidence, and evals.</td>
-            </tr>
-            <tr>
-              <td><code>CLIO_CODER_STATE_DIR</code></td>
-              <td>Overrides state directory only. Contains sessions, audit logs, receipts, runs.json, recent models, install metadata, interviews, and scratch output.</td>
-            </tr>
-            <tr>
-              <td><code>CLIO_CODER_CACHE_DIR</code></td>
-              <td>Overrides cache directory only.</td>
-            </tr>
-          </tbody>
-        </table>
-
-        <h3 style="margin: 1.5rem 0 0.5rem 0; color:#fff;">Autonomy Dial</h3>
-        <p>Clio v0.4.0 uses the <code>autonomy</code> dial for immediate execution, approvals, and auto-denials. Settings are validated directly against the current schema; <code>clio-coder doctor --fix</code> does not transform removed keys into this shape.</p>
-        <ul style="margin-left: 2rem; margin-bottom: 1rem; font-size: 0.925rem; color: var(--text-muted);">
-          <li style="margin-bottom: 0.3rem;"><strong><code>read-only</code></strong>: Clio inspects and answers. Write/execute tools are auto-denied.</li>
-          <li style="margin-bottom: 0.3rem;"><strong><code>suggest</code></strong>: Every mutating action parks for operator confirmation.</li>
-          <li style="margin-bottom: 0.3rem;"><strong><code>auto-edit</code></strong>: Workspace writes and recognized commands execute; unrecognized bash prompts.</li>
-          <li style="margin-bottom: 0.3rem;"><strong><code>full-auto</code></strong>: Bash commands run without prompting. The safety net remains active.</li>
-        </ul>
-
-        <h3 style="margin: 1.5rem 0 0.5rem 0; color:#fff;">First-Run Target Setup</h3>
-        <p>Clio works on checked-out code repositories. First register a target and set it as orchestrator:</p>
-        <pre><code># Register local Ollama target
-clio-coder configure \
-  --id local-ollama \
-  --runtime ollama-native \
-  --url http://localhost:11434 \
-  --model qwen2.5-coder:14b \
+    <div class="page-layout-grid reference-layout">
+      <aside class="sidebar reference-sidebar" aria-label="On this page">
+        <nav class="toc-container">
+          <p class="toc-title">On this page</p>
+          <a class="sidebar-source" href="https://github.com/iowarp/clio-coder/blob/main/docs/guide/configuration-and-targets.md">Canonical Markdown<br>docs/guide/configuration-and-targets.md</a>
+          <ul class="toc-list"></ul>
+        </nav>
+      </aside>
+      <main class="reference-main" id="reference-content">
+        <article class="reference-prose glass-card">
+<blockquote>
+<p><strong>Visual blueprint:</strong> The source checkout includes the complete
+<a href="configuration_blueprint.html">Configuration, Targets, Runtimes, and Auth visual reference</a>.</p>
+</blockquote>
+<p>Clio Coder is target-first: chat and fleet dispatch resolve through configured targets in <code>settings.yaml</code>, not through provider-specific ad hoc flags. Chat and print targets are HTTP and native engine-backed runtimes. Fleet dispatch can also target the sanctioned Claude Code subscription runtimes described below.</p>
+<p>Clio&#39;s engine is built on the pi SDK (see <a href="pi_boundary_blueprint.html">docs/architecture/pi-boundary.md</a>). Broad provider/model support comes from engine-backed descriptors and from the generic <code>openai-compat</code> and <code>anthropic-compat</code> targets. Clio adds orchestration, local/native runtime ergonomics, target configuration, dispatch, safety, and receipts rather than creating a first-class descriptor for every provider.</p>
+<p>Source of truth: <code>src/core/defaults.ts</code>, <code>src/core/config.ts</code>, <code>src/domains/providers/**</code>, <code>src/cli/configure.ts</code>, <code>src/cli/targets.ts</code>, <code>src/cli/models.ts</code>, and <code>src/cli/auth.ts</code>.</p>
+<hr>
+<h2>Directory locations</h2>
+<p>Clio resolves four directories (config, data, state, cache) from platform defaults, with environment overrides. The most specific override wins:</p>
+<table>
+<thead>
+<tr>
+<th>Variable</th>
+<th>Effect</th>
+</tr>
+</thead>
+<tbody><tr>
+<td><code>CLIO_CODER_HOME</code></td>
+<td>Single-tree override: all four roots become <code>$CLIO_CODER_HOME/config</code>, <code>$CLIO_CODER_HOME/data</code>, <code>$CLIO_CODER_HOME/state</code>, and <code>$CLIO_CODER_HOME/cache</code>.</td>
+</tr>
+<tr>
+<td><code>CLIO_CODER_CONFIG_DIR</code></td>
+<td>Overrides the config directory only (beats <code>CLIO_CODER_HOME</code>).</td>
+</tr>
+<tr>
+<td><code>CLIO_CODER_DATA_DIR</code></td>
+<td>Overrides the data directory only (beats <code>CLIO_CODER_HOME</code>).</td>
+</tr>
+<tr>
+<td><code>CLIO_CODER_STATE_DIR</code></td>
+<td>Overrides the state directory only (beats <code>CLIO_CODER_HOME</code>).</td>
+</tr>
+<tr>
+<td><code>CLIO_CODER_CACHE_DIR</code></td>
+<td>Overrides the cache directory only (beats <code>CLIO_CODER_HOME</code>).</td>
+</tr>
+</tbody></table>
+<p>Default config file:</p>
+<pre><code class="language-text">&lt;configDir&gt;/settings.yaml
+</code></pre>
+<p>Role contents: config holds user-authored files (settings, credentials, agents, skills, prompts, extensions, runtimes); data holds durable artifacts (memory, evidence, evals, vendored external tools); state holds machine-produced session state (sessions, audit, receipts, runs.json, recent-models.json, install.json, interop.json, interviews, scratch); cache holds disposable derived files.</p>
+<p>The <code>integrations.library</code> settings block configures the private resource
+catalog. <code>integrations.library.catalog</code> is an optional path and defaults to
+<code>&lt;configDir&gt;/library.yaml</code>. <code>integrations.library.remote</code> is an optional Git
+remote URL, and the catalog repository must name that remote <code>library</code>.
+<code>integrations.library.sync</code> defaults to <code>false</code>, which makes sync and push
+refuse before spawning Git. <code>integrations.library.confirmedRemote</code> is written
+by <code>clio-coder library remote confirm &lt;url&gt;</code> and must exactly match the
+configured remote before synchronization can run. See
+<a href="resource_library_blueprint.html">Resource Library</a>.</p>
+<p><code>clio-coder paths --json</code> prints the resolved directories and is the single source of truth for scripts.</p>
+<hr>
+<h2>First-run flow</h2>
+<p>From a source checkout:</p>
+<pre><code class="language-bash">git clone https://github.com/iowarp/clio-coder.git
+cd clio-coder
+npm ci
+npm run install:local
+hash -r
+clio-coder --version
+</code></pre>
+<p>Then start from the repository you want Clio to work on:</p>
+<pre><code class="language-bash">cd /path/to/your/repo
+clio-coder doctor --fix
+clio-coder configure --list
+</code></pre>
+<p>Start one local runtime and register exactly one target first. Clio integrates with popular local inference engines:</p>
+<ul>
+<li><strong><a href="https://lmstudio.ai">LM Studio</a>:</strong> A desktop application to run LLMs locally. Target runtime ID: <code>lmstudio</code>.</li>
+<li><strong><a href="https://ollama.com">Ollama</a>:</strong> A lightweight, extensible framework for building and running LLMs locally. Target runtime ID: <code>ollama-native</code>.</li>
+<li><strong><a href="https://github.com/ggerganov/llama.cpp">llama.cpp</a>:</strong> A minimal C/C++ implementation for local LLM inference. Target runtime ID: <code>llamacpp</code>.</li>
+<li><strong><a href="https://github.com/vllm-project/vllm">vLLM</a>:</strong> A high-throughput and memory-efficient LLM serving engine. Target runtime ID: <code>vllm</code>.</li>
+<li><strong><a href="https://github.com/sgl-project/sglang">SGLang</a>:</strong> A fast serving framework for large language models. Target runtime ID: <code>sglang</code>.</li>
+</ul>
+<p>Common local runtime IDs and default URLs are:</p>
+<table>
+<thead>
+<tr>
+<th>Runtime</th>
+<th>Target runtime id</th>
+<th>Example local URL</th>
+</tr>
+</thead>
+<tbody><tr>
+<td>LM Studio</td>
+<td><code>lmstudio</code></td>
+<td><code>http://127.0.0.1:1234</code></td>
+</tr>
+<tr>
+<td>Ollama</td>
+<td><code>ollama-native</code></td>
+<td><code>http://127.0.0.1:11434</code></td>
+</tr>
+<tr>
+<td>llama.cpp server</td>
+<td><code>llamacpp</code></td>
+<td><code>http://127.0.0.1:8080</code></td>
+</tr>
+<tr>
+<td>vLLM</td>
+<td><code>vllm</code></td>
+<td><code>http://127.0.0.1:8000</code></td>
+</tr>
+<tr>
+<td>SGLang</td>
+<td><code>sglang</code></td>
+<td><code>http://127.0.0.1:30000</code></td>
+</tr>
+</tbody></table>
+<p>Example registration:</p>
+<pre><code class="language-bash">clio-coder configure \
+  --id local-lmstudio \
+  --runtime lmstudio \
+  --url http://127.0.0.1:1234 \
+  --model qwen3.8-27b \
   --set-orchestrator \
   --set-fleet-default
-
-# Probe registered targets and models
+</code></pre>
+<p><code>--model</code> must be an id the server advertises. <code>configure</code> fetches the
+server&#39;s model list and refuses an id that is not on it, printing the ids it
+found and which of them are loaded; <code>--force</code> saves the target anyway. Replace
+<code>qwen3.8-27b</code> with an id from <code>lms ls</code> (LM Studio) or your server&#39;s model list.</p>
+<p>Use the id you chose, probe it, then launch the TUI:</p>
+<pre><code class="language-bash">clio-coder targets use local-lmstudio
 clio-coder targets --probe
-clio-coder models --target local-ollama
-clio-coder</code></pre>
-
-        <h3 style="margin: 1.5rem 0 0.5rem 0; color:#fff;">Live Routing vs Saved Defaults</h3>
-        <p>Routing properties (<code>orchestrator.*</code>, <code>workers.default.*</code>) in <code>settings.yaml</code> are <strong>defaults</strong> that seed a TUI session on launch. Once running, Alt+L or <code>/model</code> modifications only apply to the current active terminal session and are serialized back for next-session setups without affecting other concurrent running TUI instances.</p>
-        <p>Writes from multiple processes are synchronized under an advisory lock file (<code>settings.yaml.lock</code>) and saved atomically.</p>
-
-        <h3 style="margin: 1.5rem 0 0.5rem 0; color:#fff;">Terminal Settings (`terminal.*`)</h3>
-        <table class="ref-table">
-          <thead>
-            <tr>
-              <th>Setting Key</th>
-              <th>Type / Options</th>
-              <th>Default</th>
-              <th>Description</th>
-            </tr>
-          </thead>
-          <tbody>
-            <tr>
-              <td><code>terminal.tuiMode</code></td>
-              <td><code>"regular" | "fullscreen"</code></td>
-              <td><code>"regular"</code></td>
-              <td>Enables fullscreen alternate-screen renderer with docked composer and footer (restart required).</td>
-            </tr>
-            <tr>
-              <td><code>terminal.fullscreenScrollbar</code></td>
-              <td><code>"hidden" | "auto" | "always"</code></td>
-              <td><code>"auto"</code></td>
-              <td>Controls visibility of the mouse-draggable scrollbar in fullscreen TUI mode.</td>
-            </tr>
-          </tbody>
-        </table>
-
-        <h3 style="margin: 1.5rem 0 0.5rem 0; color:#fff;">Local Runtime Resolution &amp; Residency</h3>
-        <ul>
-          <li><strong>LM Studio Instance Resolution (#113):</strong> Model IDs resolve against loaded instances on the target host. Bare keys are never dispatched when resident instances exist, preventing duplicate GPU allocations. Dual-host models are flagged as LM Link peer projections.</li>
-          <li><strong>llama.cpp Residency (#127, #134):</strong> Router unloads are refused when the replacement model is not in the catalog. Idle models reported as <code>sleeping</code> are recognized as resident, eliminating <code>400 model is already running</code> errors.</li>
-          <li><strong>Probed Context Window Precedence (#129):</strong> Live server context window sizes dynamically override static catalog defaults (e.g. server serving 131,072 tokens overrides catalog 262,144 tokens), preventing context overrun and triggering timely auto-compaction.</li>
-          <li><strong>Thinking Token Budgeting (#128, #130):</strong> <code>--thinking max</code> maps monotonically across all 7 levels. vLLM uses <code>thinking_token_budget</code> to reserve space for final answer completion.</li>
-        </ul>
-
-        <h3 style="margin: 1.5rem 0 0.5rem 0; color:#fff;">Measured Dispatch Activation</h3>
-        <p>The <code>routing</code> block is a separate fail-closed activation boundary. Joint route selection becomes active only when both the execution role and posture are explicitly listed; empty lists keep the resolver in shadow mode. Agent automation requires exact <code>{agentId, executionRole}</code> pairs under <code>routing.agentAutomation.activeAgentRoles</code>. Manual pins never drift, and hard constraints remove candidates before ranking.</p>
-      </div>
-    </main>
-
-    <footer>
-      <p>Clio Coder Configuration Specification Dashboard &bull; Version 0.4.0</p>
-    </footer>
-  </div>
-
-  <script>
-    // Tab switching
-    function switchTab(tabId) {
-      document.querySelectorAll('.tab-btn').forEach(btn => { btn.classList.remove('active'); });
-      document.querySelectorAll('.tab-pane').forEach(pane => { pane.classList.remove('active'); });
-
-      if (tabId === 'interactive') {
-        document.querySelector('.tab-btn:nth-child(1)').classList.add('active');
-        document.getElementById('pane-interactive').classList.add('active');
-      } else {
-        document.querySelector('.tab-btn:nth-child(2)').classList.add('active');
-        document.getElementById('pane-reference').classList.add('active');
-      }
-    }
-
-    // YAML sample datasets
-    const sampleValid = `version: 1
-identity: clio
-autonomy: auto-edit
+clio-coder models --target local-lmstudio
+clio-coder
+</code></pre>
+<p>Inside the TUI, verify the local surface with:</p>
+<pre><code class="language-text">/settings targets
+/agents
+/skill
+</code></pre>
+<p><code>/settings targets</code> opens one row per configured target with its roles (chat,
+fleet, memory) and probe health. <code>Enter</code> on a row offers use for chat and fleet
+dispatch, connect (API key or OAuth, then a probe), probe, and remove. The
+retired <code>/targets</code> slash spelling is a non-executing tombstone that points to
+this settings area; the <code>clio-coder targets</code> CLI family remains available.</p>
+<p>Only add <code>--context-window &lt;tokens&gt;</code>, <code>--max-tokens &lt;tokens&gt;</code>, or <code>--reasoning true</code> when you have runtime/model-specific values that should override live probe results.</p>
+<hr>
+<h2>Settings shape</h2>
+<p>On disk, configured model targets live under <code>targets:</code>. The in-memory shape uses the same name; there is no separate internal vocabulary.</p>
+<p>Terminology used in code and receipts:</p>
+<table>
+<thead>
+<tr>
+<th>Term</th>
+<th>Meaning</th>
+</tr>
+</thead>
+<tbody><tr>
+<td><code>RuntimeDescriptor</code></td>
+<td>Executable adapter, transport, or protocol implementation, for example <code>openai-codex</code>, <code>anthropic</code>, <code>openai-compat</code>, <code>llamacpp</code>, <code>claude-sdk</code>, or <code>claude-code</code>.</td>
+</tr>
+<tr>
+<td>Target / <code>TargetDescriptor</code></td>
+<td>Persisted user-configured target plus runtime id, model defaults, auth metadata, and capability overrides.</td>
+</tr>
+<tr>
+<td>Resolved target</td>
+<td>Target spec combined with the runtime descriptor, model catalog/probe data, wire model id, and effective capabilities.</td>
+</tr>
+<tr>
+<td>Orchestrator target</td>
+<td>Main chat/print target. HTTP/native engine-backed.</td>
+</tr>
+<tr>
+<td>Background target</td>
+<td>Optional proactive-memory model target. Unset means deterministic rules-only memory.</td>
+</tr>
+<tr>
+<td>Worker target</td>
+<td>Fleet dispatch target. HTTP/native engine-backed, or one of the sanctioned subscription worker runtimes such as <code>claude-sdk</code>, <code>claude-code</code>, or <code>antigravity-code</code>.</td>
+</tr>
+</tbody></table>
+<p>This abbreviated example uses the current version-2 information architecture.
+The <a href="#settings-inventory">settings inventory</a> below lists every accepted leaf
+and its shipped default.</p>
+<pre><code class="language-yaml">version: 2
 
 targets:
-  - id: local-ollama
-    runtime: ollama-native
-    url: http://localhost:11434
-    defaultModel: qwen2.5-coder:14b
-    capabilities:
-      reasoning: true
-      contextWindow: 32768
-      maxTokens: 2048
+  - id: local-lmstudio
+    runtime: lmstudio
+    url: http://127.0.0.1:1234
+    defaultModel: your-model-id
+    maxConcurrentRequests: 2  # optional override; prefer live discovery
 
-orchestrator:
-  target: local-ollama
-  model: qwen2.5-coder:14b
-  thinkingLevel: off
+chat:
+  target: local-lmstudio
+  model: your-model-id
+  thinkingLevel: low
+  modelPicker:
+    cycleSet: []
+    favorites: []
+    recentLimit: 12
+  maxOutputTokens: 32768
+  prewarm: true
 
-workers:
+fleet:
   default:
-    target: local-ollama
-    model: qwen2.5-coder:14b
+    target: local-lmstudio
+    model: your-model-id
     thinkingLevel: off
   profiles: {}
-  maxRetries: 2
-  resilienceCooldownMs: 15000
-
-routing:
-  activeRoles: []
-  activePostures: []
-  agentAutomation:
-    activeAgentRoles: []
-
-budget:
-  sessionCeilingUsd: 5
+  rosters: {}
+  agentProfiles: {}
+  nodes: []
   concurrency: auto
 
-compaction:
-  auto: true
-  threshold: 0.8
-  excludeLastTurns: 6
+context:
+  workingSet:
+    enabled: true
+    policy: structural-v1
+    target: 0.6
+    protectLastTurns: 6
+    minEvictableTokens: 200
+  compaction:
+    auto: true
+    threshold: 0.8
+  memory:
+    enabled: true
+    target: null
+    model: null
 
-retry:
-  enabled: true
-  maxRetries: 3
-  baseDelayMs: 2000
-  maxDelayMs: 60000`;
+safety:
+  autonomy: auto-edit
+  limits:
+    sessionCostUsd: 5
+    chatToolCallsPerTurn: 60
+    readBytesPerCall: 51200
+    observationBytesPerTurn: 196608
+  review:
+    enabled: false
 
-    const sampleStale = `version: 1
-identity: clio
-# LEGACY: defaultMode is no longer part of the schema
-defaultMode: default
+interface:
+  outputDetail: default
+  smoothStreaming: off
+  mode: regular
+  fullscreenScrollbar: auto
+  terminalProgress: false
+  desktopNotifications: false
+  panes:
+    enabled: off
+    layout: off
+    files:
+      enabled: false
+  keybindings: {}
 
-targets:
-  - id: local-llamacpp
-    runtime: llamacpp
-    url: http://localhost:8080
-    defaultModel: qwen-coder-32b
+integrations:
+  projectResources:
+    trustProjectImports: false
+  externalAgents:
+    entries: []
+  runtimePlugins: []
+  git:
+    commitAttribution: true
+</code></pre>
+<p>Target capability overrides may include <code>chat</code>, <code>tools</code>, <code>toolCallFormat</code>, <code>reasoning</code>, <code>thinkingFormat</code>, <code>structuredOutputs</code>, <code>vision</code>, <code>audio</code>, <code>embeddings</code>, <code>rerank</code>, <code>fim</code>, <code>contextWindow</code>, and <code>maxTokens</code>.</p>
+<h3><code>maxConcurrentRequests</code></h3>
+<p><code>maxConcurrentRequests</code> is a per-target integer of at least 1, validated with the rest of the target block, and it is the operator&#39;s override for how many requests the inference endpoint behind that target can serve at once. It is not a settings-file default and has no shipped value, so it does not appear in the settings inventory below.</p>
+<p>Set it only when discovery is wrong. Clio resolves the limit in this order: this override; then a <code>parallelSlots</code> count cached on the target&#39;s probe result; then one slot for any other <code>local-native</code> runtime; then no bound at all for a cloud runtime, vLLM, or SGLang. llama.cpp discovery reads <code>total_slots</code> from the router&#39;s <code>/props</code>, falls back to the selected worker&#39;s <code>/props?model=&lt;id&gt;</code> when the router reports none, and falls back again to the <code>--parallel</code> argv on the selected <code>/v1/models</code> entry. LM Studio reads <code>config.parallel</code> off the loaded instance and otherwise reports one; Ollama reads <code>OLLAMA_NUM_PARALLEL</code> from the environment the Clio process can see and otherwise reports one.</p>
+<p>The limit is keyed on the endpoint rather than the target, so two targets pointed at the same normalized URL share it. Raising it above what the server will actually serve does not create capacity; it removes the refusal that would have told you the server was full. See <a href="capacity_scheduling_blueprint.html">capacity-and-scheduling.md</a> for the admission model and the exact denial text.</p>
+<h3>The <code>local-native</code> tier</h3>
+<p>Three behaviors in this release are gated on a runtime&#39;s tier being <code>local-native</code> rather than on a target id or a server name, so it is worth stating what the tier is. It is a property of the runtime descriptor (<code>RuntimeTier</code> in <code>src/domains/providers/types/runtime-descriptor.ts</code>), and the runtimes that carry it are <code>llamacpp</code> with its completion, embedding, rerank, and Anthropic-surface variants, <code>lmstudio</code>, <code>ollama-native</code>, <code>vllm</code>, <code>sglang</code>, and the two <code>lemonade</code> surfaces. Everything else is <code>cloud</code>, <code>protocol</code>, or <code>subscription</code>.</p>
+<p>The tier means &quot;an inference server the operator runs, whose prefix cache and resident model Clio&#39;s own behavior can displace.&quot; That is what the three gates are actually asking:</p>
+<ul>
+<li><strong>Pre-warm</strong> runs only here, whatever <code>chat.prewarm</code> says, because a cloud provider bills the request and caches on its own schedule. The check is made twice, once from configuration before any runtime is resolved and once against the resolved runtime, so an unreachable target does not pay for a capability probe at boot just to be told no.</li>
+<li><strong>Endpoint capacity</strong> defaults to one slot here when discovery reports nothing, and to unbounded elsewhere. vLLM and SGLang are the deliberate exceptions inside the tier: both serve genuinely concurrent requests, so an undiscovered limit is left unbounded rather than guessed at one.</li>
+<li><strong>Five of the eight expected-cold reasons</strong> are stamped only here, because a single-slot local cache is the only one an interleaved run actually displaces. The other three moved the prompt bytes themselves and are stamped on every tier. The full split is in <a href="context_blueprint.html#cache-divergence-honesty">context-engine.md</a>.</li>
+</ul>
+<p>The tool-prose-loop detector is keyed on the same tier, for the same reason: narrating a tool call instead of emitting one is a behavior of open-weight models served locally, and a list of server names would have left an Ollama or vLLM run with no cutoff at all.</p>
+<h3>LM Studio transport and settings</h3>
+<p>The canonical runtime id is <code>lmstudio</code>. The former <code>lmstudio-native</code> id remains an accepted alias,
+and <code>clio-coder upgrade</code> rewrites persisted targets to the canonical id. It also converts <code>ws:</code> URLs
+to <code>http:</code> and <code>wss:</code> URLs to <code>https:</code> because this adapter is entirely HTTP. Chat uses LM Studio&#39;s
+OpenAI-compatible <code>POST /v1/chat/completions</code> endpoint
+(<a href="https://lmstudio.ai/docs/developer/openai-compat/chat-completions">https://lmstudio.ai/docs/developer/openai-compat/chat-completions</a>). Model discovery and residency
+use the native REST API, with <code>GET /api/v1/models</code> as the preferred catalog
+(<a href="https://lmstudio.ai/docs/developer/rest/list">https://lmstudio.ai/docs/developer/rest/list</a>), <code>GET /api/v0/models</code> for older servers, and
+<code>GET /v1/models</code> as the final listing fallback.</p>
+<p>Leave <code>lmstudio.load</code> absent to preserve LM Studio&#39;s just-in-time loading behavior. Clio then observes
+residency but sends no explicit load request. When <code>lmstudio.load</code> is present and the selected model
+is unloaded, Clio calls <code>POST /api/v1/models/load</code> with <code>echo_load_config: true</code>; LM Studio documents
+the load operation at <a href="https://lmstudio.ai/docs/developer/rest/load">https://lmstudio.ai/docs/developer/rest/load</a>. Clio sends only fields that the
+target explicitly configured:</p>
+<table>
+<thead>
+<tr>
+<th>Settings key</th>
+<th>REST load field</th>
+</tr>
+</thead>
+<tbody><tr>
+<td><code>contextLength</code></td>
+<td><code>context_length</code></td>
+</tr>
+<tr>
+<td><code>flashAttention</code></td>
+<td><code>flash_attention</code></td>
+</tr>
+<tr>
+<td><code>evalBatchSize</code></td>
+<td><code>eval_batch_size</code></td>
+</tr>
+<tr>
+<td><code>numExperts</code></td>
+<td><code>num_experts</code></td>
+</tr>
+<tr>
+<td><code>offloadKvCacheToGpu</code></td>
+<td><code>offload_kv_cache_to_gpu</code></td>
+</tr>
+</tbody></table>
+<p>Loaded instances are addressed by their instance ids when Clio calls
+<code>POST /api/v1/models/unload</code> (<a href="https://lmstudio.ai/docs/developer/rest/unload">https://lmstudio.ai/docs/developer/rest/unload</a>). Clio records the
+instance id returned by each successful load in this process and refuses to unload every other
+instance. Models that were already resident and instances reported through LM Link remain
+observe-only. Model selection remains permissive: <code>defaultModel</code> and <code>wireModels</code> may name either
+the model key or one of its loaded instance ids. The probe reports both forms and exposes each
+instance&#39;s echoed load configuration from the native model listing
+(<a href="https://lmstudio.ai/docs/developer/rest/list">https://lmstudio.ai/docs/developer/rest/list</a>).</p>
+<p>The request settings map as follows:</p>
+<table>
+<thead>
+<tr>
+<th>Settings key</th>
+<th>Chat request behavior</th>
+</tr>
+</thead>
+<tbody><tr>
+<td><code>ttlSeconds</code></td>
+<td>Sends <code>ttl</code>, using LM Studio&#39;s auto-eviction TTL (<a href="https://lmstudio.ai/docs/developer/core/ttl-and-auto-evict">https://lmstudio.ai/docs/developer/core/ttl-and-auto-evict</a>).</td>
+</tr>
+<tr>
+<td><code>draftModel</code></td>
+<td>Sends <code>draft_model</code> on the OpenAI-compatible chat request (<a href="https://lmstudio.ai/docs/developer/openai-compat/chat-completions">https://lmstudio.ai/docs/developer/openai-compat/chat-completions</a>).</td>
+</tr>
+<tr>
+<td><code>reasoning</code></td>
+<td><code>off</code> sends <code>reasoning_effort: none</code>; <code>on</code> sends <code>low</code>; a literal <code>low</code>, <code>medium</code>, or <code>high</code> outranks the thinking dial but is still clamped to the efforts the model advertises (a model reporting only <code>[off, on]</code> receives <code>low</code>); <code>auto</code> maps the active Clio thinking level.</td>
+</tr>
+</tbody></table>
+<p>Clio maps the active thinking level through the model family&#39;s runtime resolver map. If the model family specifies an explicit effort map (such as mapping <code>max</code> to <code>xhigh</code>), Clio sends that exact effort; otherwise it falls back to the default <code>off</code> to <code>none</code>, <code>minimal</code>/<code>low</code> to <code>low</code>, <code>medium</code> to <code>medium</code>, and <code>high</code>/<code>xhigh</code>/<code>max</code> to <code>high</code>. For model families that declare a <code>none</code> or <code>always-on</code> reasoning mechanism, the <code>reasoning_effort</code> field is omitted. A model reporting only <code>[off,on]</code> clamps every
+non-off level to <code>low</code>. Clio uses only <code>reasoning_effort</code> on LM Studio&#39;s documented chat surface
+(<a href="https://lmstudio.ai/docs/developer/openai-compat/chat-completions">https://lmstudio.ai/docs/developer/openai-compat/chat-completions</a>) and never sends
+<code>chat_template_kwargs</code> to LM Studio.</p>
+<p>LM Studio can require bearer authentication for its HTTP APIs
+(<a href="https://lmstudio.ai/docs/developer/core/authentication">https://lmstudio.ai/docs/developer/core/authentication</a>). Clio sends the resolved target API key as
+<code>Authorization: Bearer ...</code> on chat, listing, load, and unload calls. Configure validates the exact
+<code>/lmstudio-greeting</code> response before saving a direct <code>lmstudio</code> target.</p>
+<h3>Loaded instances and LM Link peers</h3>
+<p>A model id on an LM Studio target is resolved against that host&#39;s loaded instances. A key with a loaded instance is never sent bare (which would JIT-load a second copy). An instance id reported loaded by two configured LM Studio targets on different hosts is an LM Link peer projection. When a bare model key is requested and multiple instances of it are loaded, Clio selects an instance in this order: the target&#39;s configured <code>defaultModel</code>, then an instance not cross-listed by another configured LM Studio target, and finally the first loaded instance. This behavior tracks issue #113.</p>
+<p>When the selected instance is also loaded on a peer, a request may be answered by that peer (#185). Clio separates the requested model id, the response observation, and the model id used for accounting. Every new assistant ledger entry carries <code>responseModelIdObservation</code> in one of these explicit shapes:</p>
+<table>
+<thead>
+<tr>
+<th>State</th>
+<th>Meaning</th>
+<th>Accounting attribution</th>
+</tr>
+</thead>
+<tbody><tr>
+<td><code>{ &quot;state&quot;: &quot;reported&quot;, &quot;reportedModelId&quot;: &quot;&lt;id&gt;&quot; }</code></td>
+<td>Clio observed an OpenAI-compatible event stream and the provider reported a model id.</td>
+<td>The reported id.</td>
+</tr>
+<tr>
+<td><code>{ &quot;state&quot;: &quot;not-reported&quot; }</code></td>
+<td>Clio observed the event stream and it contained no model id.</td>
+<td><code>unknown</code>, because the provider did not identify the responding model.</td>
+</tr>
+<tr>
+<td><code>{ &quot;state&quot;: &quot;not-observed&quot; }</code></td>
+<td>This provider path did not expose response model-id presence to the stream tap.</td>
+<td>A differing <code>responseModel</code> when available, otherwise the requested model id.</td>
+</tr>
+<tr>
+<td><code>{ &quot;state&quot;: &quot;legacy-difference-only&quot;, &quot;differingModelId&quot;: &quot;&lt;id&gt;&quot; }</code> or the same shape with <code>null</code></td>
+<td>The ledger predates #193 and recorded only whether the response <code>model</code> differed from the request. This state is produced while reading historical rows; new rows do not write it.</td>
+<td>The historical differing id when available, otherwise the requested model id.</td>
+</tr>
+</tbody></table>
+<p>The adapter retains <code>responseModel</code> as the differing response id because providers outside the stream tap still supply that fact. <code>clio-coder usage report</code> emits <code>attributedModelId</code>, <code>requestedModelIds</code>, and <code>responseModelIdObservationCounts</code>. Its text table and the <code>/cost</code> overlay use the labels <code>attributed model</code>, <code>requested model ids</code>, and <code>response model id observation</code>; requested ids are printed as ids rather than as <code>same</code>. The footer&#39;s last-turn line uses <code>response model id observation &lt;state&gt;</code>, with the id after <code>reported</code> or a historical <code>legacy difference-only</code> state. Dispatch receipt <code>upstreamResponses</code> entries carry <code>requestedModelId</code>, <code>responseModelIdObservation</code>, <code>differingResponseModelId</code>, and <code>providerResponseId</code>. The peer warning is said once per process per distinct fact (target, requested id, resolved instance, peer set), not once per turn.</p>
+<p>Prompt-template overrides, system prompts, GPU-offload ratios, KV-cache quantization, parallel slots,
+context checkpoints, and speculative-decoding variants are not writable through this Clio settings
+block. Set them in LM Studio&#39;s My Models load settings or with <code>lms load</code>; the CLI is documented at
+<a href="https://lmstudio.ai/docs/cli">https://lmstudio.ai/docs/cli</a>, and the broader load-config vocabulary is documented at
+<a href="https://lmstudio.ai/docs/typescript/api-reference/llm-load-model-config">https://lmstudio.ai/docs/typescript/api-reference/llm-load-model-config</a>. Clio reads back the load
+configuration that <code>GET /api/v1/models</code> exposes instead of pretending it applied settings the REST
+load endpoint did not accept (<a href="https://lmstudio.ai/docs/developer/rest/list">https://lmstudio.ai/docs/developer/rest/list</a>).</p>
+<p><code>chat.maxOutputTokens</code> is a global output budget requested for every turn
+(default <code>32768</code>). At request time it is clamped to the model&#39;s known
+max-output cap and the remaining context window. A per-target
+<code>capabilities.maxTokens</code> override still records the model&#39;s true cap. Set
+<code>chat.maxOutputTokens: 0</code> to disable the global default and fall back to
+per-model caps only.</p>
+<p>The setting <code>fleet.retry.maxRetries</code> controls automated retries for retryable
+fleet failures. Setting it to <code>0</code> disables retries.</p>
+<p>The setting <code>fleet.permissions.mode</code> decides how noninteractive workers handle
+a tool call that asks for permission. It supports three modes:</p>
+<ul>
+<li><code>deny</code>: Immediately returns a structured denial to the model, and the run continues.</li>
+<li><code>fail</code>: Finalizes the run as failed, exiting the worker subprocess with exit code 3 (<a href="https://github.com/iowarp/clio-coder/blob/main/src/worker/spec-contract.ts">WORKER_EXIT_PERMISSION_REQUIRED</a>).</li>
+<li><code>escalate</code>: Parks the tool call, emits a <code>clio_coder_permission_escalated</code> event,
+and waits for an operator decision. If no decision arrives within
+<code>fleet.permissions.escalation.timeoutMs</code>, it applies the configured fallback.
+A headless worker or runtime without an operator channel collapses to that
+non-stall fallback immediately.</li>
+</ul>
+<p>The <code>fleet.permissions.escalation</code> block defines parameters for escalation:</p>
+<ul>
+<li><code>timeoutMs</code> (default <code>120000</code>): The wall-clock budget in milliseconds before the parked call applies the fallback.</li>
+<li><code>fallback</code> (default <code>deny</code>): The fallback posture (<code>deny</code> or <code>fail</code>) applied upon timeout.</li>
+</ul>
+<p><code>fleet.retry.routeCooldownMs</code> is the cooldown between retries on a failed
+route.</p>
+<p><code>fleet.adaptiveRouting</code> controls the two independent activation boundaries for
+measured dispatch. Joint target/model/runtime/node selection becomes active
+only when both the assignment&#39;s execution role and requested posture appear in
+<code>roles</code> and <code>postures</code>; otherwise the resolver records a shadow recommendation
+without changing execution. Active mode also requires route readiness. Manual
+pins and <code>failover: none</code> remain exact.</p>
+<p>Agent automation is separately shadowed. Each
+<code>fleet.adaptiveRouting.agentRoles</code> item must be an exact
+<code>{agentId, executionRole}</code> pair. An <code>agent: auto</code> request may change agents only
+for a listed pair whose readiness report passes.</p>
+<p>Version 2 places numeric backstops beside the behavior they govern.
+<code>safety.limits.chatToolCallsPerTurn</code> (default <code>60</code>) is the main-agent soft
+tool-call budget; the hard interrupt ceiling remains 15 calls above it.
+<code>fleet.limits.toolCallsPerRun</code> (default <code>150</code>) is the independent lifetime cap
+for one worker and can only narrow a recipe budget. <code>fleet.history.maxRuns</code>
+(default <code>1000</code>) bounds durable dispatch history.
+<code>safety.limits.readBytesPerCall</code> (default <code>51200</code>) bounds one read, while
+<code>safety.limits.observationBytesPerTurn</code> (default <code>196608</code>) is the shared
+per-turn observation pool. <code>fleet.limits.internalRunTimeoutMs</code> (default
+<code>900000</code>) bounds an internal generator dispatch. These settings are the only
+operator-facing policy paths for the limits and refresh with the effective
+session view.</p>
+<p>Agent recipe budgets define a normal admitted-call phase inside <code>workerToolCallCap</code>; they do not replace it. A declared phase boundary is clamped down to the cap, and when the two are equal the last call may complete and the graceful synthesis transition happens without requiring an over-cap call. The recipe&#39;s <code>readReserve</code> is the tail of that phase. It admits canonical <code>read</code> plus whatever mutation tools the agent was actually granted, because the reserve exists to end broad discovery rather than to stop an agent from delivering: a writer whose product is files has to be able to write them in its last calls. An agent with no mutation tools keeps a read-only reserve and the request-level <code>require_tool(read)</code> lock. The reserve becomes zero when <code>read</code> is absent from the admitted schema surface, and never installs a nonexistent read requirement. Calls the reserve refuses are steering rather than work: they neither run nor spend the cap, and a model that keeps calling discovery tools there reaches the same bounded synthesis lockout a spent budget ends in.</p>
+<h3>Local model co-residency and scouts</h3>
+<p>Clio can use a small scout model beside a larger coding model when your local
+runtime supports multiple resident instances. This is an operator capacity
+decision, not a prompt setting. The safe rule is: after the main resident model
+is loaded, any additional scout or worker model must still fit in the remaining
+GPU memory together with its KV cache, context window, and parallel slots. If
+the runtime spills weights or cache into CPU RAM, generation will be much
+slower even though the target still responds.</p>
+<p>For llama.cpp router targets, Clio observes <code>/v1/models</code> and <code>/props</code>. It can
+tell which models are loaded and whether the resident count is within the
+router&#39;s <code>max_instances</code>, so an allowed two-model setup is reported as an
+informational co-residency notice. A model reporting a <code>sleeping</code> state counts as resident, because the router wakes it on the next inference request. Clio&#39;s residency manager never evicts a resident model when the requested replacement model is not in the router&#39;s catalog. The router response does not expose free
+VRAM or per-model loaded footprint, so Clio cannot prove the loaded set fits.
+Use host tools such as <code>nvidia-smi</code>, <code>rocm-smi</code>, Vulkan memory telemetry, or
+the runtime&#39;s own dashboard to confirm headroom after loading the main coding
+model and the scout model. Lower <code>--ctx-size</code>, KV cache precision, parallel
+slots, or unload the scout model if memory pressure pushes work into CPU RAM.</p>
+<p>Workers dispatched to separate nodes or separate targets have their own memory
+budgets. Workers routed to the same local target share that target&#39;s remaining
+VRAM with the orchestrator and scout model, so the same co-residency rule
+applies.</p>
+<p>LM Studio targets get three extra rules, because LM Studio reports no VRAM
+figure anywhere and <code>gpuStrictVramCap</code> caps GPU offload rather than refusing a
+load that will not fit. An oversized load therefore succeeds and then generates
+at CPU speed instead of failing.</p>
+<ul>
+<li><strong>Context fit before load.</strong> While another model is resident on the same
+server, Clio caps a just-in-time load at 131,072 tokens and says so in a
+warning naming the co-resident models. Raise or disable the ceiling with
+<code>CLIO_CODER_LMSTUDIO_CORESIDENT_CONTEXT</code>. A target serving one model alone is
+never clamped.</li>
+<li><strong>Reuse an existing instance.</strong> A load config is never sent for a model that is
+already resident, because LM Studio answers that with a second instance
+holding another copy of the weights and KV cache. A resident model is reused
+as loaded, and the output budget follows the window the server actually has
+open. Same-key instances reported by separate LM Link nodes are independent,
+not duplicates, and remain untouched.</li>
+<li><strong>Unload only process-owned instances.</strong> Clio may release an instance only
+when this adapter process loaded it and recorded the exact returned instance
+id. Every pre-existing local instance and every LM Link instance is
+observe-only. A fallback swap can therefore release an earlier Clio load but
+cannot disturb the operator&#39;s resident models.</li>
+<li><strong>Roles remain visible.</strong> Every model the configuration references carries
+the plane it serves (chat, memory, worker, target default). Notices name that
+role and describe co-residency without claiming that an operator-owned model
+can be evicted.</li>
+</ul>
+<p>A turn whose token rate collapses below 2 tokens per second for 30 seconds
+surfaces a <code>degraded</code> notice listing what is resident on the target. That is
+what a spill to CPU looks like from outside, and it is reported while the turn
+is still running rather than left as an indefinite spinner. The notice never
+cancels the turn.</p>
+<hr>
+<h2>Strict validation and lifecycle repair</h2>
+<p>Settings validation is strict. Unknown keys and type violations report exact
+paths and stop startup so stale configuration does not silently change runtime
+behavior.</p>
+<p>Plain <code>clio-coder doctor</code> is read-only. <code>clio-coder doctor --fix</code> creates missing
+directories and template files, repairs credential permissions, and refreshes
+install metadata. It validates <code>settings.yaml</code> directly against the current
+schema but never rewrites removed keys or migrates an old settings shape. Any
+unknown or retired key remains a validation error on that doctor run.
+Registered <code>clio-coder upgrade</code> migrations are the narrow exception. Upgrade
+moves a version-1 or unversioned settings document into the version-2 areas,
+records the migration, and keeps the byte-exact original as
+<code>settings.yaml.v1.bak</code>. A source/destination collision refuses the migration
+without replacing the original. Other reported paths still require deliberate
+editing.</p>
+<hr>
+<h2>Live routing vs saved defaults</h2>
+<p>The routing keys in <code>settings.yaml</code>—<code>chat.*</code>, <code>context.memory.*</code>,
+<code>fleet.default.*</code>, and <code>chat.modelPicker.*</code>—are defaults. Each interactive
+session seeds its route at launch and then owns that active route:</p>
+<ul>
+<li>Interactive changes through <code>/model</code>, <code>/thinking</code>, <code>/settings</code>, and the
+model-picker keys apply to the current session after confirmation and can be
+saved as defaults for later sessions.</li>
+<li>Writes from another process update shared defaults and the target catalog,
+but never redirect a running session. The active session reports when its
+route differs from the saved default.</li>
+<li>Non-routing values apply at the boundary named in the
+<a href="#settings-inventory">settings inventory</a>: immediately, next turn, next
+dispatch, next session, or restart.</li>
+<li><code>/resume</code> and <code>/new</code> switch session history without silently changing the
+terminal&#39;s active target, model, or thinking level.</li>
+</ul>
+<p>Every settings writer uses an advisory lock and atomic replacement, so
+concurrent saves cannot expose a partial YAML file. Recently selected models
+are machine state in <code>recent-models.json</code>; deliberate favorites remain
+configuration under <code>chat.modelPicker.favorites</code>. ACP sessions preserve
+routing-divergence notices in the session ledger because ACP v1 has no
+out-of-turn advisory channel.</p>
+<hr>
+<h2>Settings Center</h2>
+<p>Open <code>/settings</code> in the TUI to edit session-visible values and saved defaults.
+Wide terminals use a section sidebar and detail inspector; narrow terminals
+switch to a drill-down flow with breadcrumbs, search, and <code>Esc</code> backtracking.</p>
+<p>Every edit is transactional. Depending on the setting, the confirmation offers:</p>
+<ul>
+<li><code>Apply this session</code></li>
+<li><code>Apply and save globally</code></li>
+<li><code>Cancel</code></li>
+</ul>
+<p>Restart-required settings—<code>fleet.concurrency</code>,
+<code>integrations.runtimePlugins</code>, <code>interface.mode</code>, and
+<code>interface.fullscreenScrollbar</code>—offer only global save and say that Clio must
+restart. Destructive actions such as removing a target or fleet profile show
+the affected chat, fleet, and memory routes before confirmation.</p>
+<p>The durable configuration has seven top-level areas, and <code>/settings</code> accepts
+each as a stable deep link:</p>
+<table>
+<thead>
+<tr>
+<th>Area</th>
+<th>What it owns</th>
+</tr>
+</thead>
+<tbody><tr>
+<td><code>chat</code></td>
+<td>Active target/model defaults, thinking, model picker, output budget, pre-warm, and interactive retry</td>
+</tr>
+<tr>
+<td><code>fleet</code></td>
+<td>Worker defaults, profiles, rosters, routes, nodes, permissions, capacity, limits, retry, and run history</td>
+</tr>
+<tr>
+<td><code>targets</code></td>
+<td>Runtime connections, advertised models, auth metadata, and capability overrides</td>
+</tr>
+<tr>
+<td><code>context</code></td>
+<td>Working set, compaction, and proactive memory</td>
+</tr>
+<tr>
+<td><code>safety</code></td>
+<td>Autonomy, cost/tool/read limits, and the optional review watchdog</td>
+</tr>
+<tr>
+<td><code>interface</code></td>
+<td>Output detail, terminal behavior, notifications, keybindings, and experimental pane settings</td>
+</tr>
+<tr>
+<td><code>integrations</code></td>
+<td>Project-resource trust, external agents, runtime plugins, resource library, and Git attribution</td>
+</tr>
+</tbody></table>
+<p>The Center groups rows with task-oriented labels such as Orchestrator, Targets,
+Models, Fleet, Budget, and Terminal. The YAML paths shown in row details and in
+this guide remain the canonical version-2 paths in the inventory below.</p>
+<hr>
+<h2>Settings inventory</h2>
+<p>This is the version-2 durable schema shipped in <code>DEFAULT_SETTINGS</code>. Validation is strict: a path absent from this inventory is rejected, including a retired version-1 path. <code>clio-coder upgrade</code> performs the one-time v1-to-v2 rename before configuration-domain load and keeps the original as the sibling <code>settings.yaml.v1.bak</code> backup.</p>
+<p>&quot;When it applies&quot; follows the configuration classifier. <strong>Immediately</strong> means a running process observes the value without rebuilding runtime state. <strong>Next turn</strong> and <strong>next dispatch</strong> mean current work finishes on the old value. <strong>Next session</strong> identifies routing defaults copied into session-owned state at launch. <strong>Restart</strong> means process or pane-host setup must be rebuilt.</p>
+<h3>Structural and target catalog</h3>
+<table>
+<thead>
+<tr>
+<th>Key</th>
+<th>Default</th>
+<th>Validation</th>
+<th>When it applies</th>
+</tr>
+</thead>
+<tbody><tr>
+<td><code>version</code></td>
+<td><code>2</code></td>
+<td>integer, exactly <code>2</code></td>
+<td>restart</td>
+</tr>
+<tr>
+<td><code>targets</code></td>
+<td><code>[]</code></td>
+<td>target descriptor list with unique ids and registered runtimes</td>
+<td>next turn for the catalog; next session for saved routing defaults</td>
+</tr>
+</tbody></table>
+<h3>Chat</h3>
+<table>
+<thead>
+<tr>
+<th>Key</th>
+<th>Default</th>
+<th>Validation</th>
+<th>When it applies</th>
+</tr>
+</thead>
+<tbody><tr>
+<td><code>chat.target</code></td>
+<td><code>null</code></td>
+<td>configured target id or null</td>
+<td>next session</td>
+</tr>
+<tr>
+<td><code>chat.model</code></td>
+<td><code>null</code></td>
+<td>string or null</td>
+<td>next session</td>
+</tr>
+<tr>
+<td><code>chat.thinkingLevel</code></td>
+<td><code>low</code></td>
+<td><code>off</code>, <code>minimal</code>, <code>low</code>, <code>medium</code>, <code>high</code>, <code>xhigh</code>, <code>max</code></td>
+<td>next session</td>
+</tr>
+<tr>
+<td><code>chat.modelPicker.cycleSet</code></td>
+<td><code>[]</code></td>
+<td>list of target or target/model references</td>
+<td>immediately for this session; next session as the saved default</td>
+</tr>
+<tr>
+<td><code>chat.modelPicker.favorites</code></td>
+<td><code>[]</code></td>
+<td>list of target/model references</td>
+<td>immediately</td>
+</tr>
+<tr>
+<td><code>chat.modelPicker.recentLimit</code></td>
+<td><code>12</code></td>
+<td>integer ≥ 1</td>
+<td>immediately</td>
+</tr>
+<tr>
+<td><code>chat.maxOutputTokens</code></td>
+<td><code>32768</code></td>
+<td>integer ≥ 0</td>
+<td>next turn</td>
+</tr>
+<tr>
+<td><code>chat.prewarm</code></td>
+<td><code>true</code></td>
+<td>boolean</td>
+<td>next turn</td>
+</tr>
+<tr>
+<td><code>chat.retry.enabled</code></td>
+<td><code>true</code></td>
+<td>boolean</td>
+<td>next turn</td>
+</tr>
+<tr>
+<td><code>chat.retry.maxRetries</code></td>
+<td><code>3</code></td>
+<td>integer ≥ 0</td>
+<td>next turn</td>
+</tr>
+<tr>
+<td><code>chat.retry.baseDelayMs</code></td>
+<td><code>2000</code></td>
+<td>integer ≥ 0</td>
+<td>next turn</td>
+</tr>
+<tr>
+<td><code>chat.retry.maxDelayMs</code></td>
+<td><code>60000</code></td>
+<td>integer ≥ 0</td>
+<td>next turn</td>
+</tr>
+<tr>
+<td><code>chat.retry.streamStallMs</code></td>
+<td><code>180000</code></td>
+<td>integer ≥ 0; <code>0</code> disables the stall timer</td>
+<td>next turn</td>
+</tr>
+</tbody></table>
+<h3>Fleet</h3>
+<p><code>fleet.rosters.&lt;name&gt;.members</code> contains two to five members. Each member has a unique <code>label</code>, a <code>target</code>, and optional <code>model</code>, <code>thinkingLevel</code>, and <code>color</code>. <code>fleet.agentProfiles</code> is the persisted agent-id-to-profile map.</p>
+<table>
+<thead>
+<tr>
+<th>Key</th>
+<th>Default</th>
+<th>Validation</th>
+<th>When it applies</th>
+</tr>
+</thead>
+<tbody><tr>
+<td><code>fleet.default.target</code></td>
+<td><code>null</code></td>
+<td>configured target id or null</td>
+<td>next session</td>
+</tr>
+<tr>
+<td><code>fleet.default.model</code></td>
+<td><code>null</code></td>
+<td>string or null</td>
+<td>next session</td>
+</tr>
+<tr>
+<td><code>fleet.default.thinkingLevel</code></td>
+<td><code>off</code></td>
+<td>supported thinking level</td>
+<td>next session</td>
+</tr>
+<tr>
+<td><code>fleet.profiles</code></td>
+<td><code>{}</code></td>
+<td>map of profile name to target/model/thinking/optional-node routes</td>
+<td>next dispatch</td>
+</tr>
+<tr>
+<td><code>fleet.rosters</code></td>
+<td><code>{}</code></td>
+<td>map of roster name to council members</td>
+<td>next dispatch</td>
+</tr>
+<tr>
+<td><code>fleet.agentProfiles</code></td>
+<td><code>{}</code></td>
+<td>map of native agent id to an existing fleet profile</td>
+<td>next dispatch</td>
+</tr>
+<tr>
+<td><code>fleet.nodes</code></td>
+<td><code>[]</code></td>
+<td>list of validated local/SSH node descriptors</td>
+<td>next dispatch</td>
+</tr>
+<tr>
+<td><code>fleet.adaptiveRouting.roles</code></td>
+<td><code>[]</code></td>
+<td>subset of <code>researcher</code>, <code>verifier</code>, <code>reviewer</code>, <code>judge</code></td>
+<td>next dispatch</td>
+</tr>
+<tr>
+<td><code>fleet.adaptiveRouting.postures</code></td>
+<td><code>[]</code></td>
+<td>subset of <code>quality</code>, <code>balanced</code>, <code>latency</code>, <code>economy</code></td>
+<td>next dispatch</td>
+</tr>
+<tr>
+<td><code>fleet.adaptiveRouting.agentRoles</code></td>
+<td><code>[]</code></td>
+<td>exact agent-id/execution-role pairs</td>
+<td>next dispatch</td>
+</tr>
+<tr>
+<td><code>fleet.permissions.mode</code></td>
+<td><code>deny</code></td>
+<td><code>deny</code>, <code>fail</code>, <code>escalate</code></td>
+<td>next dispatch</td>
+</tr>
+<tr>
+<td><code>fleet.permissions.escalation.timeoutMs</code></td>
+<td><code>120000</code></td>
+<td>integer ≥ 1</td>
+<td>next dispatch</td>
+</tr>
+<tr>
+<td><code>fleet.permissions.escalation.fallback</code></td>
+<td><code>deny</code></td>
+<td><code>deny</code> or <code>fail</code></td>
+<td>next dispatch</td>
+</tr>
+<tr>
+<td><code>fleet.concurrency</code></td>
+<td><code>auto</code></td>
+<td><code>auto</code> or integer ≥ 1</td>
+<td>restart</td>
+</tr>
+<tr>
+<td><code>fleet.retry.maxRetries</code></td>
+<td><code>2</code></td>
+<td>integer ≥ 0</td>
+<td>next dispatch</td>
+</tr>
+<tr>
+<td><code>fleet.retry.routeCooldownMs</code></td>
+<td><code>15000</code></td>
+<td>integer ≥ 0</td>
+<td>next dispatch</td>
+</tr>
+<tr>
+<td><code>fleet.limits.toolCallsPerRun</code></td>
+<td><code>150</code></td>
+<td>integer ≥ 1</td>
+<td>next dispatch</td>
+</tr>
+<tr>
+<td><code>fleet.limits.internalRunTimeoutMs</code></td>
+<td><code>900000</code></td>
+<td>integer ≥ 1</td>
+<td>next dispatch</td>
+</tr>
+<tr>
+<td><code>fleet.history.maxRuns</code></td>
+<td><code>1000</code></td>
+<td>integer ≥ 1</td>
+<td>next dispatch</td>
+</tr>
+<tr>
+<td><code>fleet.history.journal</code></td>
+<td><code>true</code></td>
+<td>boolean</td>
+<td>next dispatch</td>
+</tr>
+</tbody></table>
+<h3>Context</h3>
+<table>
+<thead>
+<tr>
+<th>Key</th>
+<th>Default</th>
+<th>Validation</th>
+<th>When it applies</th>
+</tr>
+</thead>
+<tbody><tr>
+<td><code>context.workingSet.enabled</code></td>
+<td><code>true</code></td>
+<td>boolean</td>
+<td>next turn</td>
+</tr>
+<tr>
+<td><code>context.workingSet.policy</code></td>
+<td><code>structural-v1</code></td>
+<td><code>structural-v1</code> or <code>age-horizon</code></td>
+<td>next turn</td>
+</tr>
+<tr>
+<td><code>context.workingSet.target</code></td>
+<td><code>0.6</code></td>
+<td>number greater than 0 and less than 1</td>
+<td>next turn</td>
+</tr>
+<tr>
+<td><code>context.workingSet.protectLastTurns</code></td>
+<td><code>6</code></td>
+<td>integer ≥ 1</td>
+<td>next turn</td>
+</tr>
+<tr>
+<td><code>context.workingSet.minEvictableTokens</code></td>
+<td><code>200</code></td>
+<td>integer ≥ 0</td>
+<td>next turn</td>
+</tr>
+<tr>
+<td><code>context.compaction.auto</code></td>
+<td><code>true</code></td>
+<td>boolean</td>
+<td>next turn</td>
+</tr>
+<tr>
+<td><code>context.compaction.threshold</code></td>
+<td><code>0.8</code></td>
+<td>number from 0 through 1</td>
+<td>next turn</td>
+</tr>
+<tr>
+<td><code>context.compaction.model</code></td>
+<td>unset</td>
+<td>non-empty string when present</td>
+<td>next turn</td>
+</tr>
+<tr>
+<td><code>context.compaction.systemPrompt</code></td>
+<td>unset</td>
+<td>non-empty path string when present</td>
+<td>next turn</td>
+</tr>
+<tr>
+<td><code>context.memory.enabled</code></td>
+<td><code>true</code></td>
+<td>boolean</td>
+<td>next turn</td>
+</tr>
+<tr>
+<td><code>context.memory.target</code></td>
+<td><code>null</code></td>
+<td>configured target id or null</td>
+<td>next turn</td>
+</tr>
+<tr>
+<td><code>context.memory.model</code></td>
+<td><code>null</code></td>
+<td>string or null</td>
+<td>next turn</td>
+</tr>
+<tr>
+<td><code>context.memory.cadenceToolCalls</code></td>
+<td><code>10</code></td>
+<td>integer ≥ 2</td>
+<td>next turn</td>
+</tr>
+<tr>
+<td><code>context.memory.trajectorySteps</code></td>
+<td><code>8</code></td>
+<td>integer ≥ 1</td>
+<td>next turn</td>
+</tr>
+<tr>
+<td><code>context.memory.maxOutputTokens</code></td>
+<td><code>2000</code></td>
+<td>integer ≥ 1</td>
+<td>next turn</td>
+</tr>
+<tr>
+<td><code>context.memory.timeoutMs</code></td>
+<td><code>60000</code></td>
+<td>integer ≥ 1</td>
+<td>next turn</td>
+</tr>
+</tbody></table>
+<h3>Safety</h3>
+<p>The safety-limit leaves have no one-process <code>CLIO_CODER_*</code> overrides in the current schema. Resolution follows the normal settings stack, from session or project layers where supported through user <code>settings.yaml</code>, then the compiled default.</p>
+<table>
+<thead>
+<tr>
+<th>Key</th>
+<th>Default</th>
+<th>Validation</th>
+<th>When it applies</th>
+</tr>
+</thead>
+<tbody><tr>
+<td><code>safety.autonomy</code></td>
+<td><code>auto-edit</code></td>
+<td><code>read-only</code>, <code>suggest</code>, <code>auto-edit</code>, <code>full-auto</code></td>
+<td>immediately</td>
+</tr>
+<tr>
+<td><code>safety.limits.sessionCostUsd</code></td>
+<td><code>5</code></td>
+<td>number ≥ 0</td>
+<td>next turn</td>
+</tr>
+<tr>
+<td><code>safety.limits.chatToolCallsPerTurn</code></td>
+<td><code>60</code></td>
+<td>integer ≥ 1</td>
+<td>next turn</td>
+</tr>
+<tr>
+<td><code>safety.limits.readBytesPerCall</code></td>
+<td><code>51200</code></td>
+<td>integer ≥ 1; the read tool applies its 1024-byte floor</td>
+<td>next turn</td>
+</tr>
+<tr>
+<td><code>safety.limits.observationBytesPerTurn</code></td>
+<td><code>196608</code></td>
+<td>integer ≥ 1</td>
+<td>next turn</td>
+</tr>
+<tr>
+<td><code>safety.review.enabled</code></td>
+<td><code>false</code></td>
+<td>boolean</td>
+<td>immediately</td>
+</tr>
+<tr>
+<td><code>safety.review.target</code></td>
+<td>unset</td>
+<td>configured target id when present</td>
+<td>immediately</td>
+</tr>
+<tr>
+<td><code>safety.review.cadenceToolCalls</code></td>
+<td>unset</td>
+<td>integer ≥ 1 when present</td>
+<td>immediately</td>
+</tr>
+</tbody></table>
+<h3>Interface</h3>
+<table>
+<thead>
+<tr>
+<th>Key</th>
+<th>Default</th>
+<th>Validation</th>
+<th>When it applies</th>
+</tr>
+</thead>
+<tbody><tr>
+<td><code>interface.terminalProgress</code></td>
+<td><code>false</code></td>
+<td>boolean</td>
+<td>next turn</td>
+</tr>
+<tr>
+<td><code>interface.outputDetail</code></td>
+<td><code>default</code></td>
+<td><code>minimal</code>, <code>default</code>, <code>verbose</code></td>
+<td>next turn</td>
+</tr>
+<tr>
+<td><code>interface.mode</code></td>
+<td><code>regular</code></td>
+<td><code>regular</code> or <code>fullscreen</code></td>
+<td>restart</td>
+</tr>
+<tr>
+<td><code>interface.fullscreenScrollbar</code></td>
+<td><code>auto</code></td>
+<td><code>hidden</code>, <code>auto</code>, <code>always</code></td>
+<td>restart</td>
+</tr>
+<tr>
+<td><code>interface.smoothStreaming</code></td>
+<td><code>off</code></td>
+<td><code>off</code>, <code>auto</code>, <code>on</code></td>
+<td>immediately</td>
+</tr>
+<tr>
+<td><code>interface.desktopNotifications</code></td>
+<td><code>false</code></td>
+<td>boolean</td>
+<td>next turn</td>
+</tr>
+<tr>
+<td><code>interface.panes.enabled</code></td>
+<td><code>off</code></td>
+<td><code>auto</code>, <code>embedded</code>, <code>off</code></td>
+<td>restart</td>
+</tr>
+<tr>
+<td><code>interface.panes.notifications</code></td>
+<td><code>failures</code></td>
+<td><code>failures</code>, <code>all</code>, <code>off</code></td>
+<td>immediately</td>
+</tr>
+<tr>
+<td><code>interface.panes.layout</code></td>
+<td><code>off</code></td>
+<td><code>off</code>, <code>workers</code>, <code>cockpit</code></td>
+<td>restart</td>
+</tr>
+<tr>
+<td><code>interface.panes.workers.ratio</code></td>
+<td><code>0.34</code></td>
+<td>finite dock ratio</td>
+<td>restart</td>
+</tr>
+<tr>
+<td><code>interface.panes.files.enabled</code></td>
+<td><code>false</code></td>
+<td>boolean</td>
+<td>immediately on the next files-pane open</td>
+</tr>
+<tr>
+<td><code>interface.panes.files.mode</code></td>
+<td><code>companion</code></td>
+<td><code>companion</code> or <code>chooser</code></td>
+<td>immediately on the next files-pane open</td>
+</tr>
+<tr>
+<td><code>interface.panes.files.profile</code></td>
+<td><code>managed</code></td>
+<td><code>managed</code> or <code>user</code></td>
+<td>immediately on the next files-pane open</td>
+</tr>
+<tr>
+<td><code>interface.panes.files.followCwd</code></td>
+<td><code>true</code></td>
+<td>boolean</td>
+<td>immediately on the next files-pane open</td>
+</tr>
+<tr>
+<td><code>interface.panes.files.ratio</code></td>
+<td><code>0.3</code></td>
+<td>finite dock ratio</td>
+<td>restart</td>
+</tr>
+<tr>
+<td><code>interface.keybindings</code></td>
+<td><code>{}</code></td>
+<td>map of binding id to a key string or list of strings</td>
+<td>immediately</td>
+</tr>
+</tbody></table>
+<h3>Integrations</h3>
+<table>
+<thead>
+<tr>
+<th>Key</th>
+<th>Default</th>
+<th>Validation</th>
+<th>When it applies</th>
+</tr>
+</thead>
+<tbody><tr>
+<td><code>integrations.projectResources.trustProjectImports</code></td>
+<td><code>false</code></td>
+<td>boolean</td>
+<td>next turn</td>
+</tr>
+<tr>
+<td><code>integrations.externalAgents.entries</code></td>
+<td><code>[]</code></td>
+<td>list of validated ACP agent definitions</td>
+<td>next dispatch</td>
+</tr>
+<tr>
+<td><code>integrations.externalAgents.defaults.connectTimeoutMs</code></td>
+<td><code>30000</code></td>
+<td>integer ≥ 1</td>
+<td>next dispatch</td>
+</tr>
+<tr>
+<td><code>integrations.externalAgents.defaults.turnTimeoutMs</code></td>
+<td><code>300000</code></td>
+<td>integer ≥ 1</td>
+<td>next dispatch</td>
+</tr>
+<tr>
+<td><code>integrations.externalAgents.defaults.permissionTimeoutMs</code></td>
+<td><code>120000</code></td>
+<td>integer ≥ 1</td>
+<td>next dispatch</td>
+</tr>
+<tr>
+<td><code>integrations.externalAgents.defaults.toolGovernance</code></td>
+<td><code>clio-coder-policy</code></td>
+<td><code>clio-coder-policy</code>, <code>agent-managed</code>, <code>deny-all</code></td>
+<td>next dispatch</td>
+</tr>
+<tr>
+<td><code>integrations.runtimePlugins</code></td>
+<td><code>[]</code></td>
+<td>list of plugin package names</td>
+<td>restart</td>
+</tr>
+<tr>
+<td><code>integrations.library.catalog</code></td>
+<td><code>null</code></td>
+<td>string or null</td>
+<td>next turn</td>
+</tr>
+<tr>
+<td><code>integrations.library.remote</code></td>
+<td><code>null</code></td>
+<td>string or null</td>
+<td>next turn</td>
+</tr>
+<tr>
+<td><code>integrations.library.confirmedRemote</code></td>
+<td><code>null</code></td>
+<td>string or null</td>
+<td>next turn</td>
+</tr>
+<tr>
+<td><code>integrations.library.sync</code></td>
+<td><code>false</code></td>
+<td>boolean</td>
+<td>next turn</td>
+</tr>
+<tr>
+<td><code>integrations.git.commitAttribution</code></td>
+<td><code>true</code></td>
+<td>boolean</td>
+<td>immediately for subsequent commits</td>
+</tr>
+</tbody></table>
+<p>The retired v1-only paths <code>identity</code>, <code>background.thinkingLevel</code>, <code>theme</code>, and <code>compaction.excludeLastTurns</code> have no v2 replacement. Fresh v2 files naming them receive targeted removal diagnostics. The v1 migrator drops them with the reason recorded in its migration report; they are tombstones, not executable aliases.</p>
+<hr>
+<h2>Configure targets</h2>
+<p>Interactive wizard:</p>
+<pre><code class="language-bash">clio-coder configure
+</code></pre>
+<p>List runtimes:</p>
+<pre><code class="language-bash">clio-coder configure --list
+clio-coder configure --list --all
+</code></pre>
+<p><code>clio-coder configure --list</code> outputs every registered runtime across all categories (local, cloud, subscription, worker-only) along with its auth type and catalog status. For catalog-backed runtimes, it reports the catalog size (for example, <code>models=38 in catalog</code>). It also includes a reference to <code>clio-coder auth list</code> for runtimes that require authentication.</p>
+<p>When configuring a catalog-backed runtime non-interactively, <code>clio-coder configure</code> requires the <code>--model</code> flag to specify an explicit model from the catalog; it will not silently seed a generic default model.</p>
+<p>Register non-interactively:</p>
+<pre><code class="language-bash">clio-coder configure \
+  --id local-llamacpp \
+  --runtime llamacpp \
+  --url http://127.0.0.1:8080 \
+  --model qwen3.8-27b \
+  --set-orchestrator \
+  --set-fleet-default
+</code></pre>
+<p>Add capability overrides such as <code>--context-window &lt;tokens&gt;</code>, <code>--max-tokens &lt;tokens&gt;</code>, or <code>--reasoning true</code> only when live probes cannot infer the right values for your runtime/model.</p>
+<hr>
+<h2>Interop with other coding agents</h2>
+<p>Clio knows which other coding agents are installed on the machine and in the project, and it can propose connecting an ACP-capable one as a delegation peer. <code>src/domains/interop/registry.ts</code> holds one entry per known agent (<code>claude-code</code>, <code>codex</code>, <code>opencode</code>, <code>gemini</code>, <code>copilot</code>, <code>cursor</code>, <code>antigravity</code>, plus the <code>.agents</code> convention) carrying its binaries, the directories it owns, its skill and prompt roots, its instruction filenames, and its ACP launch recipe when it has one.</p>
+<p>Detection is bounded and fails open. It resolves binaries with <code>access(X_OK)</code> and no shell, checks install directories, and runs a <code>--version</code> with a two-second timeout only when the caller asks for it and only for a binary that already resolved. A probe that cannot answer reports <code>unknown</code> rather than <code>absent</code>, and detection never throws. It never spawns a foreign agent&#39;s work command, and it never reads under a foreign agent&#39;s <code>sessions</code>, <code>history</code>, <code>cache</code>, <code>projects</code>, or <code>state</code> directory: it records that a foreign session store exists, never its contents.</p>
+<p>Review and connect detected agents with:</p>
+<pre><code class="language-bash">clio-coder configure --interop
+</code></pre>
+<p>On a terminal this walks the pending proposals one at a time, showing the exact
+YAML entry before it asks, and writes only what you answer yes to. Without a
+TTY it prints the proposals and exits 0 with <code>settings.yaml</code> byte-identical.
+The interactive <code>clio-coder configure</code> wizard ends with the same review, and
+<code>/agents connect</code> in the TUI opens the same flow.</p>
+<p>No code path writes <code>integrations.externalAgents.entries</code> without an operator
+decision, and <code>doctor --fix</code> is not such a path. An accepted proposal appends
+exactly one entry through the serialized settings writer under its lock. The
+entry carries <code>toolGovernance: clio-coder-policy</code> and no <code>projectContext</code> key,
+so the peer receives task text rather than the project projection. Both facts
+are shown before confirmation.</p>
+<p>Decisions are recorded in <code>&lt;CLIO_CODER_HOME&gt;/state/interop.json</code>, schema v1, written atomically only when an explicit decision is taken; <code>doctor</code> and non-TTY <code>configure --interop</code> write nothing at all. Each decision is keyed by agent kind plus a fingerprint of the facts it was made against (version and path), so a declined agent stays silent while its binary path and version hold, and comes back as a fresh proposal when either moves. Accepting and declining in one review persists both decisions. A file this version cannot parse degrades to &quot;no report&quot; rather than acting on a half-read decision record. Project-scoped facts stay where they already live, in <code>.clio-coder/state.json</code> under <code>contextSources</code>.</p>
+<p>Clio never writes into a foreign agent&#39;s directory. The safety path policy carries a <code>noWritePaths</code> class populated from the same registry; see <a href="safety_blueprint.html">safety-model.md</a> for the enumerated classes.</p>
+<hr>
+<h2>Subscription-based Targets and Runtimes</h2>
+<p>Clio supports running on AI subscriptions rather than API keys, both for orchestrators and workers:</p>
+<h3>1. OAuth Subscription Runtimes (Orchestrator + Worker)</h3>
+<p>These runtimes use your personal subscription credentials via OAuth, minting tokens to power standard HTTP execution. They are eligible to run as both the main orchestrator (chat/print) and worker targets.</p>
+<ul>
+<li><strong><code>openai-codex</code></strong>: Powers the orchestrator or workers using a ChatGPT Plus/Pro subscription.</li>
+<li><strong><code>anthropic-max</code></strong>: Powers the orchestrator or workers using a Claude Pro/Max subscription.<ul>
+<li><em>Terms of Service Caveat:</em> During login (<code>clio-coder auth login anthropic-max</code>), Clio displays this warning notice:<blockquote>
+<p>[!WARNING]
+Connects with your Claude Pro/Max subscription via OAuth (the same path Claude Code uses). Using subscription credentials outside Anthropic&#39;s first-party apps may not align with their terms of service; enable at your own discretion.</p>
+</blockquote>
+</li>
+</ul>
+</li>
+</ul>
+<p><strong>Login and Configuration Examples:</strong></p>
+<pre><code class="language-bash"># Authenticate
+clio-coder auth login openai-codex
+clio-coder auth login anthropic-max
 
-orchestrator:
-  target: local-llamacpp
-  model: qwen-coder-32b
+# Configure orchestrator targets
+clio-coder configure --id chatgpt-sub --runtime openai-codex --model your-codex-model --set-orchestrator
+clio-coder configure --id claude-sub --runtime anthropic-max --model claude-sonnet-5 --set-orchestrator
+</code></pre>
+<p>Choose model ids from <code>clio-coder configure --list</code> or from <code>clio-coder models --target &lt;id&gt;</code> after login.</p>
+<h3>2. ALCF Globus Runtime (Orchestrator + Worker)</h3>
+<p>The <code>alcf</code> runtime targets the inference gateway of the <a href="https://www.alcf.anl.gov">Argonne Leadership Computing Facility (ALCF)</a>, specifically accessing the Sophia and Metis clusters. Sophia runs vLLM on NVIDIA A100 GPU nodes while Metis serves model requests using SambaNova SN40L hardware. The authentication flow uses <a href="https://www.globus.org">Globus Auth</a> PKCE OAuth. It is a scientific cloud target rather than a consumer subscription, but it uses the same <code>clio-coder auth login &lt;runtime&gt;</code> workflow:</p>
+<pre><code class="language-bash">clio-coder auth login alcf
 
-state:
-  recentModels:
-    - qwen-coder-32b
+clio-coder configure \
+  --id alcf-sophia \
+  --runtime alcf \
+  --url https://inference-api.alcf.anl.gov/resource_server/sophia/vllm/v1 \
+  --model openai/gpt-oss-120b \
+  --max-tokens 4096
 
-compaction:
-  thresholds:
-    warning: 0.7
-    critical: 0.9`;
+clio-coder configure \
+  --id alcf-metis \
+  --runtime alcf \
+  --url https://inference-api.alcf.anl.gov/resource_server/metis/api/v1 \
+  --model gpt-oss-120b \
+  --max-tokens 4096
+</code></pre>
+<p>See <a href="alcf_blueprint.html">alcf-provider.md</a> for the Globus login and ALCF discovery
+details.</p>
+<h3>3. Sanctioned Claude Code Worker Runtimes (Worker-Only)</h3>
+<p>These runtimes drive your local <code>claude</code> installation to execute subagent tasks. They are worker-only targets: they can be selected for dispatch via fleet defaults or profiles, but chat/print orchestration requires an HTTP target (like <code>anthropic-max</code> or <code>openai-codex</code>). They rely on your authenticated <code>claude</code> CLI and store no credentials in Clio.</p>
+<ul>
+<li><strong><code>claude-sdk</code></strong> (Claude Code SDK): The main worker runtime, usable alongside Clio&#39;s native subagent workers (e.g. <code>llama.cpp</code> or LM Studio fleet). It integrates with the official <a href="https://www.npmjs.com/package/@anthropic-ai/claude-agent-sdk">@anthropic-ai/claude-agent-sdk</a> library and is the <strong>strong safety path</strong> because it routes every tool execution through Clio&#39;s safety contract and autonomy matrix.</li>
+<li><strong><code>claude-code</code></strong>: Runs the CLI tool <code>claude -p --output-format stream-json</code> as a subprocess. Since the subprocess has no direct callback hook, it is restricted to command-line permission-mode gating.</li>
+</ul>
+<p><strong>Configuration Examples:</strong></p>
+<pre><code class="language-bash"># 1. Authenticate outside Clio using the official CLI
+claude auth login
 
-    const sampleInvalid = `version: 2                  # Error: version must be exactly 1
-identity: clio
-autonomy: high-autonomy      # Error: invalid autonomy value
+# 2. Configure the SDK worker target (enforced safety)
+clio-coder configure --id claude-sdk-worker --runtime claude-sdk --model sonnet --set-fleet-default
 
-targets:
-  - id: ""                    # Error: Target ID cannot be empty
-    runtime: unknown-runner   # Error: invalid runtime identifier
-    url: localhost:8080
-
-orchestrator:
-  target: local-none          # Warning: orchestrator targets an unregistered target ID`;
-
-    // Load YAML presets
-    function loadYamlPreset(presetType) {
-      const input = document.getElementById('yamlInput');
-      if (presetType === 'valid') input.value = sampleValid;
-      else if (presetType === 'stale') input.value = sampleStale;
-      else input.value = sampleInvalid;
-      validateYaml();
-    }
-
-    // YAML Schema validation engine
-    function validateYaml() {
-      const val = document.getElementById('yamlInput').value;
-      const output = document.getElementById('validatorResult');
-
-      if (!val.trim()) {
-        output.className = 'status-panel warning';
-        output.innerText = 'YAML is empty. Load a preset or paste configurations to evaluate.';
-        return;
-      }
-
-      // Simple scanning
-      const lines = val.split('\n');
-      const errors = [];
-      const warnings = [];
-      const targetIds = [];
-
-      let _version = null;
-      let _autonomy = null;
-      let orchestratorTarget = null;
-
-      lines.forEach((line, idx) => {
-        const trimmed = line.trim();
-        if (!trimmed || trimmed.startsWith('#')) return;
-
-        const parts = trimmed.split(':');
-        if (parts.length >= 2) {
-          const key = parts[0].trim();
-          const restVal = parts.slice(1).join(':').trim();
-          const cleanVal = restVal.split('#')[0].trim().replace(/['"]/g, '');
-
-          // Check version
-          if (key === 'version') {
-            _version = cleanVal;
-            if (cleanVal !== '1') {
-              errors.push(`[Line ${idx+1}] Schema version must be exactly 1 (found "${cleanVal}").`);
-            }
-          }
-
-          // Check autonomy
-          if (key === 'autonomy') {
-            _autonomy = cleanVal;
-            const validAutonomies = ['read-only', 'suggest', 'auto-edit', 'full-auto'];
-            if (!validAutonomies.includes(cleanVal)) {
-              errors.push(`[Line ${idx+1}] "autonomy" must be one of: read-only | suggest | auto-edit | full-auto (found "${cleanVal}").`);
-            }
-          }
-
-          // Flag stale fields
-          if (key === 'defaultMode') {
-            warnings.push(`[Line ${idx+1}] Removed key "defaultMode" found. Delete it and set the required current fields explicitly.`);
-          }
-          if (key === 'state') {
-            warnings.push(`[Line ${idx+1}] Legacy runtime state found in settings.yaml. Current Clio stores recent models under the state directory.`);
-          }
-          if (key === 'thresholds') {
-            warnings.push(`[Line ${idx+1}] Legacy compaction thresholds block found. Use compaction.threshold with a single numeric pressure value.`);
-          }
-
-          // Targets parsing
-          if (key === 'id' && line.includes('- id')) {
-            if (!cleanVal) {
-              errors.push(`[Line ${idx+1}] Target "id" cannot be empty.`);
-            } else {
-              targetIds.push(cleanVal);
-            }
-          }
-
-          if (key === 'runtime') {
-            const validRuntimes = ['ollama-native', 'lmstudio', 'llamacpp', 'vllm', 'sglang', 'openai-compat', 'anthropic-compat', 'google', 'openai', 'anthropic', 'bedrock', 'mistral', 'openrouter', 'lemonade'];
-            if (!validRuntimes.includes(cleanVal)) {
-              errors.push(`[Line ${idx+1}] Unknown runtime "${cleanVal}". Valid options include: ollama-native, llamacpp, openai-compat, etc.`);
-            }
-          }
-
-          // Orchestrator target checking
-          if (key === 'target' && (lines[idx-1] && lines[idx-1].includes('orchestrator:'))) {
-            orchestratorTarget = cleanVal;
-          }
-        }
-      });
-
-      // Target references check
-      if (orchestratorTarget && targetIds.length > 0) {
-        if (!targetIds.includes(orchestratorTarget)) {
-          warnings.push(`Orchestrator points to target ID "${orchestratorTarget}", which is not declared under targets.`);
-        }
-      }
-
-      // Display validation status
-      if (errors.length > 0) {
-        output.className = 'status-panel error';
-        output.innerHTML = `<strong>Schema Errors Found (${errors.length}):</strong><ul style="margin-left:1.5rem; margin-top:0.5rem;">` +
-          errors.map(err => `<li>${err}</li>`).join('') + `</ul>`;
-      } else if (warnings.length > 0) {
-        output.className = 'status-panel warning';
-        output.innerHTML = `<strong>YAML is syntactically correct, but contains warnings:</strong><ul style="margin-left:1.5rem; margin-top:0.5rem;">` +
-          warnings.map(warn => `<li>${warn}</li>`).join('') + `</ul>`;
-      } else {
-        output.className = 'status-panel success';
-        output.innerHTML = `<strong>Validation Success:</strong> settings.yaml is structurally valid and fully conforms to the Clio Coder v0.4.0 schema settings constraints.`;
-      }
-    }
-
-    // Command Generator and Resolver logic
-    const runtimeSpecs = {
-      'ollama-native': { port: '11434', cLimit: 32768, tLimit: 2048, r: true, badges: ['chat', 'tools', 'reasoning'] },
-      'lmstudio': { port: '1234', cLimit: 16384, tLimit: 1024, r: true, badges: ['chat', 'tools', 'reasoning'] },
-      'llamacpp': { port: '8080', cLimit: 131072, tLimit: 4096, r: false, badges: ['chat', 'tools'] },
-      'vllm': { port: '8000', cLimit: 65536, tLimit: 2048, r: false, badges: ['chat', 'tools'] },
-      'openai-compat': { port: '5000', cLimit: 8192, tLimit: 1024, r: false, badges: ['chat'] },
-      'anthropic-compat': { port: '8000', cLimit: 16384, tLimit: 2048, r: false, badges: ['chat'] },
-      'openai-codex': { port: '', cLimit: 272000, tLimit: 8192, r: true, badges: ['chat', 'tools', 'vision'] },
-      'anthropic-max': { port: '', cLimit: 200000, tLimit: 8192, r: true, badges: ['chat', 'tools', 'vision'] },
-      'claude-sdk': { port: '', cLimit: 200000, tLimit: 8192, r: true, badges: ['chat', 'tools', 'vision'] },
-      'google': { port: '', cLimit: 1048576, tLimit: 8192, r: true, badges: ['chat', 'tools', 'vision'] }
-    };
-
-    function onCliRuntimeChange() {
-      const runtime = document.getElementById('cliRuntime').value;
-      const urlInput = document.getElementById('cliUrl');
-      const modelInput = document.getElementById('cliModel');
-      const spec = runtimeSpecs[runtime];
-
-      if (spec) {
-        if (spec.port) {
-          urlInput.value = `http://localhost:${spec.port}`;
-        } else {
-          urlInput.value = runtime === 'openai-codex' ? 'https://api.openai.com/v1' :
-                          runtime === 'anthropic-max' ? 'https://api.anthropic.com/v1' :
-                          runtime === 'claude-sdk' ? 'https://api.anthropic.com/v1' :
-                          'https://api.gemini.google.com/v1';
-        }
-
-        modelInput.value = runtime === 'openai-codex' ? 'gpt-5.4' :
-                           runtime === 'anthropic-max' ? 'claude-sonnet-5' :
-                           runtime === 'claude-sdk' ? 'sonnet' :
-                           runtime === 'google' ? 'gemini-1.5-pro' :
-                           'qwen2.5-coder:14b';
-      }
-      generateCommand();
-    }
-
-    function generateCommand() {
-      const id = document.getElementById('cliId').value.trim();
-      const runtime = document.getElementById('cliRuntime').value;
-      const url = document.getElementById('cliUrl').value.trim();
-      const model = document.getElementById('cliModel').value.trim();
-      const context = document.getElementById('cliContext').value;
-      const maxTokens = document.getElementById('cliMaxTokens').value;
-      const reasoning = document.getElementById('cliReasoning').checked;
-      const setOrch = document.getElementById('cliSetOrch').checked;
-      const setFleet = document.getElementById('cliSetFleet').checked;
-
-      let cmd = `clio-coder configure \\\n  --id ${id} \\\n  --runtime ${runtime} \\\n  --url ${url} \\\n  --model ${model}`;
-
-      if (context) cmd += ` \\\n  --context-window ${context}`;
-      if (maxTokens) cmd += ` \\\n  --max-tokens ${maxTokens}`;
-      if (reasoning) cmd += ` \\\n  --reasoning true`;
-      if (setOrch) cmd += ` \\\n  --set-orchestrator`;
-      if (setFleet) cmd += ` \\\n  --set-fleet-default`;
-
-      document.getElementById('cliCommandOutput').innerText = cmd;
-
-      // Update Resolver Dashboard
-      document.getElementById('dashIdText').innerText = id;
-      const spec = runtimeSpecs[runtime];
-      if (spec) {
-        // Badges update
-        const badgeGrid = document.getElementById('dashBadges');
-        badgeGrid.innerHTML = '';
-
-        const allBadges = [
-          { key: 'chat', label: 'C: Chat' },
-          { key: 'tools', label: 'T: Tools' },
-          { key: 'reasoning', label: 'R: Reasoning' },
-          { key: 'vision', label: 'V: Vision' },
-          { key: 'embeddings', label: 'E: Embeddings' },
-          { key: 'rerank', label: 'K: Rerank' },
-          { key: 'fim', label: 'F: FIM' }
-        ];
-
-        allBadges.forEach(b => {
-          let isActive = false;
-          if (b.key === 'reasoning') isActive = reasoning || spec.badges.includes('reasoning');
-          else isActive = spec.badges.includes(b.key);
-
-          const badgeEl = document.createElement('span');
-          badgeEl.className = `cap-badge ${isActive ? 'active' : 'inactive'}`;
-          badgeEl.innerText = b.label;
-          badgeGrid.appendChild(badgeEl);
-        });
-
-        // Limits update
-        const finalCtx = context ? parseInt(context) : spec.cLimit;
-        const finalMax = maxTokens ? parseInt(maxTokens) : spec.tLimit;
-
-        document.getElementById('dashContextText').innerText = finalCtx.toLocaleString() + ' tokens';
-        document.getElementById('dashMaxTokensText').innerText = finalMax.toLocaleString() + ' tokens';
-      }
-    }
-
-    function copyCliText() {
-      const text = document.getElementById('cliCommandOutput').innerText;
-      navigator.clipboard.writeText(text).then(() => {
-        const btn = document.querySelector('.copy-btn');
-        btn.innerText = 'Copied!';
-        setTimeout(() => { btn.innerText = 'Copy'; }, 1500);
-      });
-    }
-
-    window.loadYamlPreset = loadYamlPreset;
-    window.copyCliText = copyCliText;
-    window.switchTab = switchTab;
-
-    // Initialize
-    window.onload = () => {
-      document.getElementById('yamlInput').value = sampleValid;
-      validateYaml();
-      onCliRuntimeChange();
-    };
-  </script>
+# 3. Configure the subprocess worker target (advisory/permission-mode gating)
+clio-coder configure --id claude-code-worker --runtime claude-code --model sonnet
+</code></pre>
+<h3>4. Claude Code over ACP (Delegation-Only)</h3>
+<p>You can drive Claude Code as an external delegation agent over the Agent Client Protocol (ACP). This relies on the Zed <code>@zed-industries/claude-code-acp</code> adapter to run over stdio under your existing Claude Code subscription.</p>
+<ul>
+<li><strong>Advisory Gating:</strong> Under ACP, gating is <strong>advisory</strong> because Claude self-governs its tools; prefer <code>claude-sdk</code> for <strong>enforced</strong> per-tool safety where Clio&#39;s safety net intercepts every action class.</li>
+<li><strong>Configuration Recipe:</strong> Configure by adding a delegation agent in <code>settings.yaml</code> (a commented recipe is included by default):</li>
+</ul>
+<pre><code class="language-yaml">integrations:
+  externalAgents:
+    entries:
+      - id: claude-code
+        command: npx
+        args: [&quot;-y&quot;, &quot;@zed-industries/claude-code-acp&quot;]
+        toolGovernance: clio-coder-policy
+</code></pre>
+<p>Then invoke it using <code>/delegate claude-code &lt;task&gt;</code>.</p>
+<h3>5. Google Antigravity CLI Runtime (Worker-Only)</h3>
+<p>The <code>antigravity-code</code> runtime drives your local Google Antigravity CLI (<code>agy</code>) installation to execute subagent tasks. It runs the CLI as a subprocess using the <code>agy --print</code> command and maps Clio autonomy levels onto the CLI&#39;s permission flags.</p>
+<p>Google Antigravity supports a context window of up to 1,000,000 tokens and is suitable for large-context codebase reasoning. Because <code>agy</code> emits plain text without structured events, Clio cannot perform fine-grained tool call interception. Gating is applied coarsely: read-only runs pass both <code>--mode plan</code> (the no-change agent posture) and <code>--sandbox</code> (terminal restrictions). Full-auto passes <code>--dangerously-skip-permissions</code> only when the environment variable <code>CLIO_CODER_ALLOW_EXTERNAL_FULL_ACCESS=1</code> is explicitly set.</p>
+<p>Configured targets use your existing local <code>agy</code> login and credentials. Supported model names include <code>Gemini 3.5 Flash (High)</code> as the default tier, <code>Gemini 3.5 Flash (Medium)</code>, <code>Gemini 3.5 Flash (Low)</code>, <code>Gemini 3.1 Pro (High)</code>, <code>Gemini 3.1 Pro (Low)</code>, <code>Claude Sonnet 4.6 (Thinking)</code>, <code>Claude Opus 4.6 (Thinking)</code>, and <code>GPT-OSS 120B (Medium)</code>.</p>
+<p><strong>Configuration Example:</strong></p>
+<pre><code class="language-bash">clio-coder configure --id agy-worker --runtime antigravity-code --model &quot;Gemini 3.5 Flash (High)&quot;
+</code></pre>
+<p>Useful flags:</p>
+<table>
+<thead>
+<tr>
+<th>Flag</th>
+<th>Meaning</th>
+</tr>
+</thead>
+<tbody><tr>
+<td><code>--id &lt;targetId&gt;</code></td>
+<td>Stable target id.</td>
+</tr>
+<tr>
+<td><code>--runtime &lt;runtimeId&gt;</code></td>
+<td>Runtime descriptor id.</td>
+</tr>
+<tr>
+<td><code>--url &lt;host&gt;</code></td>
+<td>Base URL for HTTP runtimes. Missing schemes default to <code>http://</code>; some runtimes get default ports. Give the server root or its <code>/v1</code> mount point; both name the same target, because runtimes whose request paths already carry <code>/v1</code> reduce the URL to the root before using it.</td>
+</tr>
+<tr>
+<td><code>--model &lt;wireModelId&gt;</code></td>
+<td>Target default wire model id.</td>
+</tr>
+<tr>
+<td><code>--orchestrator-model &lt;id&gt;</code></td>
+<td>Model to save for chat default.</td>
+</tr>
+<tr>
+<td><code>--fleet-model &lt;id&gt;</code></td>
+<td>Model to save for fleet default.</td>
+</tr>
+<tr>
+<td><code>--agent-profile &lt;name&gt;</code></td>
+<td>Save this target/model as a named fleet profile.</td>
+</tr>
+<tr>
+<td><code>--agent-profile-model &lt;id&gt;</code></td>
+<td>Model to save for the named fleet profile.</td>
+</tr>
+<tr>
+<td><code>--api-key-env &lt;VAR&gt;</code></td>
+<td>Read API key from the environment at call time.</td>
+</tr>
+<tr>
+<td><code>--api-key &lt;literal&gt;</code></td>
+<td>Store an API key in <code>credentials.yaml</code>.</td>
+</tr>
+<tr>
+<td><code>--force</code></td>
+<td>Allow model/capability choices outside the local catalog guardrails.</td>
+</tr>
+<tr>
+<td><code>--gateway</code></td>
+<td>Mark target as a gateway.</td>
+</tr>
+<tr>
+<td>`--lifecycle &lt;user-managed</td>
+<td>clio-coder-managed&gt;`</td>
+</tr>
+<tr>
+<td><code>--set-orchestrator</code></td>
+<td>Use this target as the chat default.</td>
+</tr>
+<tr>
+<td><code>--set-fleet-default</code></td>
+<td>Use this target as the fleet default.</td>
+</tr>
+<tr>
+<td><code>--context-window &lt;N&gt;</code></td>
+<td>Override the target context-window capability.</td>
+</tr>
+<tr>
+<td><code>--max-tokens &lt;N&gt;</code></td>
+<td>Override the target output-token capability.</td>
+</tr>
+<tr>
+<td>`--reasoning &lt;true</td>
+<td>false&gt;`</td>
+</tr>
+</tbody></table>
+<hr>
+<h2>Target management</h2>
+<pre><code class="language-bash">clio-coder targets [--json] [--probe] [--target &lt;id&gt;]
+clio-coder targets add [configure flags]
+clio-coder targets use &lt;id&gt; [--model &lt;id&gt;] [--orchestrator-model &lt;id&gt;] [--background-model &lt;id&gt;]
+                      [--fleet-target &lt;id&gt;] [--fleet-model &lt;id&gt;]
+clio-coder targets fleet [--json]
+clio-coder targets profile list [--json]
+clio-coder targets profile set &lt;name&gt; &lt;id&gt; [--model &lt;id&gt;] [--thinking &lt;level&gt;]
+clio-coder targets profile &lt;name&gt; &lt;id&gt; [--model &lt;id&gt;] [--thinking &lt;level&gt;]
+clio-coder targets profile remove &lt;name&gt; [--force]
+clio-coder targets profile rename &lt;old&gt; &lt;new&gt;
+clio-coder targets profile bind &lt;agentId&gt; &lt;profileName&gt;
+clio-coder targets profile unbind &lt;agentId&gt;
+clio-coder targets profile bindings [--json]
+clio-coder targets convert &lt;id&gt; --runtime &lt;runtimeId&gt;
+clio-coder targets remove &lt;id&gt;
+clio-coder targets rename &lt;old&gt; &lt;new&gt;
+</code></pre>
+<p><code>clio-coder targets use &lt;id&gt;</code> sets the orchestrator target. It refuses any target whose runtime is not a registered HTTP/native runtime because the selected target must be valid for chat.</p>
+<p>Without <code>--fleet-target</code> the default fleet target follows the orchestrator, which is the single-node case. Pass <code>--fleet-target &lt;id&gt;</code> to keep them apart when one node orchestrates and another runs the fleet. The fleet target is validated for fleet dispatch through the same check a fleet profile uses, so it can be a worker-only runtime such as <code>claude-sdk</code>, <code>claude-code</code>, or <code>antigravity-code</code>. Its model defaults to that target&#39;s own default rather than the orchestrator&#39;s, because a model id resolved against one target means nothing on another; <code>--fleet-model &lt;id&gt;</code> names it explicitly. <code>clio-coder configure --set-fleet-default</code> and <code>clio-coder targets profile</code> remain the routes for per-agent fleet routing.</p>
+<h3>Target-Profile Subcommands</h3>
+<p>The command <code>clio-coder targets profile</code> supports several subcommands to manage fleet worker profiles and agent bindings:</p>
+<ul>
+<li><strong>list</strong>: Show configured fleet profiles. Use <code>clio-coder targets profile list [--json]</code> to output details in JSON format.</li>
+<li><strong>set</strong>: Create or update a named fleet profile. Use <code>clio-coder targets profile set &lt;name&gt; &lt;id&gt; [--model &lt;id&gt;] [--thinking &lt;level&gt;]</code>; the compatibility form <code>clio-coder targets profile &lt;name&gt; &lt;id&gt; ...</code> is also accepted.</li>
+<li><strong>remove</strong>: Remove a profile from settings. Use <code>clio-coder targets profile remove &lt;name&gt; [--force]</code>. The <code>--force</code> flag is required if the profile has active agent bindings.</li>
+<li><strong>rename</strong>: Rename a fleet profile. Use <code>clio-coder targets profile rename &lt;old&gt; &lt;new&gt;</code>. Active agent bindings are updated to point to the new profile name automatically.</li>
+<li><strong>bind</strong>: Bind an agent to a fleet profile. Use <code>clio-coder targets profile bind &lt;agentId&gt; &lt;profileName&gt;</code>. Active ACP delegation agents are rejected.</li>
+<li><strong>unbind</strong>: Unbind an agent from its profile. Use <code>clio-coder targets profile unbind &lt;agentId&gt;</code>.</li>
+<li><strong>bindings</strong>: List active agent-to-profile bindings. Use <code>clio-coder targets profile bindings [--json]</code> to output details in JSON format.</li>
+</ul>
+<p>Inside the TUI, <code>/settings targets</code> opens the operational target console.
+Targets render with <code>HEALTH</code>, <code>ID</code>, <code>ROLES</code>, <code>RUNTIME</code>, and <code>LATENCY</code>, plus a
+detail drawer for URL, default model, last probe, and failure reason. Actions
+include <code>Use</code>, <code>Connect</code>, <code>Probe</code>, and <code>Remove</code>; adding a target uses
+<code>clio-coder targets add</code>.</p>
+<h3>Context-Window Provenance</h3>
+<p>Target status resolution tracks provenance explicitly in <code>TargetStatus.contextWindowProvenance</code>. The provenance names which layer answered the context window query:</p>
+<ul>
+<li><code>configured</code>: Explicitly set by the operator via <code>--context-window</code> or <code>capabilities.contextWindow</code>.</li>
+<li><code>discovered</code>: Live target probe discovered the context limit directly from the endpoint.</li>
+<li><code>catalog</code>: Resolved from the model catalog knowledge base.</li>
+<li><code>runtime-default</code>: Unanswered placeholder fall-back provided by the runtime descriptor.</li>
+</ul>
+<p>When a probed target reports no context window, Clio uses the runtime descriptor default as an unverified guess. In <code>clio-coder targets</code> text output, this renders as <code>ctx &lt;N&gt; (unverified runtime default)</code>. In JSON output, <code>contextWindowProvenance</code> is set to <code>&quot;runtime-default&quot;</code>. During target creation via <code>clio-coder configure</code>, Clio emits a warning: <code>warning: the target reported no context window; Clio will use the runtime default as a guess. Set one with --context-window.</code>. This design ensures that a number the operator never chose and the server never claimed will not read like a verified capability.</p>
+<hr>
+<h2>Local Model Quirks</h2>
+<p>Local models often require specific engine configurations to perform optimally. Clio parses local model quirks from catalog entries and applies them during target execution. Keep target inventory in <code>settings.yaml</code> (<code>wireModels</code>, <code>defaultModel</code>, URL/auth), and keep per-model semantics in catalog YAML. For local experiments, use <code>$CLIO_CODER_CONFIG_DIR/model-catalog.d</code> or <code>.clio-coder/model-catalog.d</code>; promote entries into the bundled source catalog only after the model family is verified for broader Clio use.</p>
+<h3>1. KV-Cache Quantization</h3>
+<p>You can optimize the GPU memory usage of the key and value caches for local inference engines. Quirks parameters include:</p>
+<ul>
+<li><code>kQuant</code>: Quantization type for the key cache. Supported values are <code>f32</code>, <code>f16</code>, <code>q8_0</code>, <code>q4_0</code>, <code>q4_1</code>, <code>iq4_nl</code>, <code>q5_0</code>, and <code>q5_1</code>. Set to <code>false</code> to disable quantization and run in full precision.</li>
+<li><code>vQuant</code>: Quantization type for the value cache. This requires flash attention to take effect.</li>
+<li><code>useFp16</code>: Force fp16 precision for key and value caches.</li>
+</ul>
+<h3>2. Sampling Profiles</h3>
+<p>You can configure different sampling settings for the subagent depending on whether thinking is active:</p>
+<ul>
+<li><code>thinking</code>: Sampler profile applied when the thinking level is not <code>off</code>.</li>
+<li><code>instruct</code>: Sampler profile applied when the thinking level is <code>off</code>.</li>
+</ul>
+<p>Each profile can configure overrides for <code>temperature</code>, <code>topP</code>, <code>topK</code>, <code>minP</code>, <code>repeatPenalty</code> (or <code>repetitionPenalty</code>), <code>presencePenalty</code>, <code>frequencyPenalty</code>, and <code>maxTokens</code>.</p>
+<h3>3. Thinking Mechanisms</h3>
+<p>Local models use different mechanisms to control and parse reasoning steps. The supported mechanisms are:</p>
+<ul>
+<li><code>effort-levels</code>: The engine accepts a discrete reasoning effort parameter.</li>
+<li><code>budget-tokens</code>: The engine enforces a numeric thinking token budget.</li>
+<li><code>on-off</code>: The chat template toggles thinking on or off.</li>
+<li><code>always-on</code>: The model emits chain-of-thought tokens unconditionally.</li>
+<li><code>none</code>: The model does not support thinking or reasoning states.</li>
+</ul>
+<h3>Local reasoning-token budgets</h3>
+<p>Some local reasoning models can spend most of a small output budget on hidden
+thinking before emitting visible text. If a smoke test finishes with reasoning
+tokens and no visible answer, keep the configured <code>maxTokens</code>/output budget high
+enough for both reasoning and final text, or set the orchestrator/fleet
+<code>thinkingLevel</code> to <code>off</code> when a terse visible answer matters more than reasoning
+traces.</p>
+<hr>
+<h2>Model listing and refresh</h2>
+<pre><code class="language-bash">clio-coder models [search] [--target &lt;id&gt;] [--json] [--offline]
+</code></pre>
+<p>Model rows combine:</p>
+<ol>
+<li>configured <code>wireModels</code> and <code>defaultModel</code>;</li>
+<li>runtime-discovered models from probes;</li>
+<li>known models from bundled/provider catalogs.</li>
+</ol>
+<p>Capability badges in CLI output are compact:</p>
+<table>
+<thead>
+<tr>
+<th>Badge</th>
+<th>Capability</th>
+</tr>
+</thead>
+<tbody><tr>
+<td><code>C</code></td>
+<td>chat</td>
+</tr>
+<tr>
+<td><code>T</code></td>
+<td>tool calling</td>
+</tr>
+<tr>
+<td><code>R</code></td>
+<td>reasoning/thinking</td>
+</tr>
+<tr>
+<td><code>V</code></td>
+<td>vision</td>
+</tr>
+<tr>
+<td><code>E</code></td>
+<td>embeddings</td>
+</tr>
+<tr>
+<td><code>K</code></td>
+<td>rerank</td>
+</tr>
+<tr>
+<td><code>F</code></td>
+<td>fill-in-middle</td>
+</tr>
+</tbody></table>
+<hr>
+<h2>Built-in runtime categories</h2>
+<p>Representative built-in runtime IDs:</p>
+<table>
+<thead>
+<tr>
+<th>Category</th>
+<th>Runtime IDs</th>
+</tr>
+</thead>
+<tbody><tr>
+<td>Protocol-compatible</td>
+<td><code>openai-compat</code>, <code>anthropic-compat</code> generic surfaces for additional OpenAI-compatible or Anthropic-compatible APIs, including APIs such as InceptionAI when configured with the appropriate base URL and credentials.</td>
+</tr>
+<tr>
+<td>Cloud</td>
+<td><code>alcf</code>, <code>anthropic</code>, <code>bedrock</code>, <code>deepseek</code>, <code>google</code>, <code>groq</code>, <code>mistral</code>, <code>openai</code>, <code>openrouter</code></td>
+</tr>
+<tr>
+<td>Subscription and worker harnesses</td>
+<td><code>openai-codex</code> for ChatGPT OAuth, <code>anthropic-max</code> for Anthropic OAuth, <code>claude-sdk</code> for Claude Agent SDK workers, <code>claude-code</code> for <code>claude -p</code> subprocess workers, and <code>antigravity-code</code> for <code>agy --print</code> subprocess workers</td>
+</tr>
+<tr>
+<td>Local native</td>
+<td><code>llamacpp</code>, <code>lmstudio</code>, <code>ollama-native</code>, <code>vllm</code>, <code>sglang</code>, <code>lemonade</code>, <code>lemonade-anthropic</code></td>
+</tr>
+</tbody></table>
+<p>Some hidden aliases exist for backward compatibility or special surfaces; use <code>clio-coder configure --list --all</code> to see them.</p>
+<blockquote>
+<p>[!NOTE]
+Chat and print targets are HTTP and native engine-backed adapters. Dispatch workers also admit the sanctioned subscription worker runtimes: <code>claude-sdk</code>, <code>claude-code</code>, and <code>antigravity-code</code>.</p>
+</blockquote>
+<hr>
+<h2>Auth</h2>
+<p>Auth state is exposed via <code>providers.auth</code> and persisted through <code>openAuthStorage()</code>.</p>
+<pre><code class="language-bash">clio-coder auth list
+clio-coder auth status [target-or-runtime]
+clio-coder auth login [target-or-runtime] [--api-key &lt;value&gt;]
+clio-coder auth logout [target-or-runtime]
+</code></pre>
+<p><code>clio-coder auth list</code> lists the specific runtimes that Clio authenticates itself (runtimes using API keys, OAuth, AWS SDK, or Vertex ADC), alongside their authentication status and credential sources. For the complete list of all registered runtime adapters (including local and unauthenticated runtimes), see <code>clio-coder configure --list</code>.</p>
+<p>Auth types come from runtime descriptors:</p>
+<table>
+<thead>
+<tr>
+<th>Auth type</th>
+<th>Behavior</th>
+</tr>
+</thead>
+<tbody><tr>
+<td><code>api-key</code></td>
+<td>Environment variable or stored credential.</td>
+</tr>
+<tr>
+<td><code>oauth</code></td>
+<td>Browser/manual OAuth flow where implemented.</td>
+</tr>
+<tr>
+<td><code>aws-sdk</code> / <code>vertex-adc</code></td>
+<td>Uses platform SDK/application credentials.</td>
+</tr>
+<tr>
+<td><code>claude-cli</code></td>
+<td>Uses the installed <code>claude</code> command&#39;s existing Claude Code login; Clio stores no credential.</td>
+</tr>
+<tr>
+<td><code>none</code></td>
+<td>No credential required.</td>
+</tr>
+</tbody></table>
+<h3>Credential storage and its limits</h3>
+<p>You have two ways to give Clio an API key:</p>
+<ul>
+<li><strong>Environment variable</strong> (<code>--api-key-env &lt;VAR&gt;</code>, or the env choice in <code>clio-coder configure</code>). Clio stores nothing and reads <code>$VAR</code> at call time. This is the recommended default. The wizard suggests it for new credentials and offers <code>keep</code> first when a stored credential already exists.</li>
+<li><strong>Stored credential</strong> (<code>--api-key &lt;literal&gt;</code>, or <code>clio-coder auth login</code>). The key is written to <code>credentials.yaml</code> (see directory locations) as <strong>plaintext</strong>, protected only by file mode <code>0600</code>. There is no encryption and no OS-keychain integration. Any process running as your user, plus backups and dotfile sync, can read it. Clio prints a warning whenever it writes a literal key for this reason.</li>
+</ul>
+<p>OAuth refresh follows signal-aware credential mutation. Clio serializes the read, token exchange, and atomic <code>credentials.yaml</code> write under one lock, forwards the active agent or background-request abort signal through <code>providers.auth</code>, and cancels a queued lock wait immediately. A cancelled refresh neither continues later nor publishes an uncommitted token into the process-local credential view.</p>
+<p>Prefer <code>--api-key-env</code> for shared machines, HPC login nodes, and CI. Avoid committing literal secrets in settings or share archives. Stored keys are never printed back by <code>clio-coder auth status</code>, <code>clio-coder targets</code>, or <code>clio-coder configure</code>; only the source (env var name or <code>stored-api-key</code>) is shown.</p>
+<p>For interactive auth, open <code>/settings targets</code>, select the row, and press <code>c</code>.
+For stored credential cleanup, use
+<code>clio-coder auth logout &lt;target-or-runtime&gt;</code>.</p>
+<hr>
+<h2>Troubleshooting checklist</h2>
+<pre><code class="language-bash">clio-coder doctor --json
+clio-coder targets --probe
+clio-coder models --target &lt;id&gt;
+clio-coder auth status &lt;target-or-runtime&gt;
+</code></pre>
+<p>When opening issues, include the Clio version, Node version, target id/runtime, model id, whether the live model listing succeeds (or the target probe result), and a redacted receipt or command transcript.</p>
+        </article>
+        <nav class="related-nav" aria-label="Adjacent references">
+          <a class="nav-link-card" href="commands_blueprint.html"><span class="nav-label">Previous</span><span class="nav-title">Commands and Modes</span></a>
+          <a class="nav-link-card next" href="configuration_reference_blueprint.html"><span class="nav-label">Next</span><span class="nav-title">Configuration reference</span></a>
+        </nav>
+        <p class="reference-footer-note">Canonical content lives in the mapped Markdown page. This visual counterpart adds navigation without changing the contract.</p>
+      </main>
+    </div>
+    <footer>Clio Coder documentation · source-aligned at v0.4.2</footer>
+  </div>
+  <script src="shared.js"></script>
 </body>
 </html>

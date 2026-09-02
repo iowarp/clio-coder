@@ -1,7 +1,7 @@
 # Evidence Corpus and Long-Term Memory
 
-> [!TIP]
-> **Interactive Spec Available:** A source-checkout memory lifecycle dashboard and simulator is available at [docs/html/memory_blueprint.html](https://github.com/iowarp/clio-coder/blob/main/docs/html/memory_blueprint.html). Use it to design, validate, and simulate memory proposals, approval loops, pruning rules, and token budgets.
+> **Visual blueprint:** The source checkout includes the complete
+> [Evidence Corpus and Long-Term Memory visual reference](https://github.com/iowarp/clio-coder/blob/main/docs/html/memory_blueprint.html).
 
 Clio Coder treats run claims and agent lessons as structured artifacts to support reproducibility and scientific provenance. In evaluations such as [SWE-bench](https://www.swebench.com), capturing granular execution evidence is essential for validating agent claims. Evidence corpora are deterministic directories built from run ledgers, receipts, sessions, audits, and eval artifacts. Currently, forensic evidence auto-builds on dispatch run completion: when a run finalizes, the observability domain automatically compiles the evidence bundle under `<dataDir>/evidence/run-<id>/` and updates a compact sidecar index row in `<stateDir>/evidence-index.json`. Long-term memory records are local, evidence-linked, and only injected after explicit approval. Use the TUI [`/view`](observability.md) command for interactive inspection of receipts, dispatch output, durable tool output, compaction summaries, and session accountability before building or citing evidence.
 

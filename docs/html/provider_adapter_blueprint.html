@@ -1,245 +1,259 @@
-<!DOCTYPE html>
+<!doctype html>
 <html lang="en">
 <head>
-  <meta charset="UTF-8">
-  <meta name="viewport" content="width=device-width, initial-scale=1.0">
-  <title>Provider Adapter Cookbook Blueprint (v0.4.0)</title>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <meta name="clio-markdown-source" content="docs/architecture/provider-adapter-cookbook.md">
+  <meta name="clio-docs-version" content="0.4.2">
+  <title>Provider Adapter Cookbook · Clio Coder 0.4.2</title>
+  <link rel="icon" href="data:,">
   <link rel="stylesheet" href="shared.css">
-  <style>
-    /* Custom builder style */
-    .checkbox-group {
-      display: grid;
-      grid-template-columns: 1fr 1fr;
-      gap: 0.5rem;
-      margin-top: 0.5rem;
-    }
-    .checkbox-item {
-      display: flex;
-      align-items: center;
-      gap: 0.5rem;
-      font-size: 0.85rem;
-    }
-    .checkbox-item input {
-      width: auto;
-    }
-  </style>
 </head>
-<body>
+<body data-doc-category="architecture">
+  <div class="reading-progress" aria-hidden="true"></div>
+  <a class="skip-link" href="#reference-content">Skip to reference</a>
   <div class="container">
-    <header>
+    <header class="document-header" data-category="Architecture">
       <div class="header-left">
-        <div class="header-logo">
-          <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" style="color: var(--color-cyan);"><title>Icon</title>
-            <polygon points="12 2 2 7 12 12 22 7 12 2"></polygon>
-            <polyline points="2 17 12 22 22 17"></polyline>
-            <polyline points="2 12 12 17 22 12"></polyline>
+        <a class="header-logo" href="index.html" aria-label="Documentation index">
+          <svg viewBox="0 0 24 24" fill="none" aria-hidden="true">
+            <path d="M12 2 2 7l10 5 10-5-10-5Z" stroke="url(#clio-logo)" stroke-width="2" stroke-linejoin="round"/>
+            <path d="m2 12 10 5 10-5M2 17l10 5 10-5" stroke="url(#clio-logo)" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"/>
+            <defs><linearGradient id="clio-logo" x1="2" y1="2" x2="22" y2="22"><stop stop-color="#00d4db"/><stop offset="1" stop-color="#ff7e29"/></linearGradient></defs>
           </svg>
-        </div>
+        </a>
         <div class="header-title-wrapper">
+          <p class="document-kicker">Architecture / canonical reference</p>
           <h1>Provider Adapter Cookbook</h1>
-          <p>Custom inference API connectors, endpoint probing logic, and runtime registry templates</p>
-          <div class="meta-chips-row">
-            <span class="chip">Source: docs/provider-adapter-cookbook.md</span>
-            <span class="chip chip-orange">clio-coder docs provider_adapter</span>
-          </div>
+          <p class="document-path">docs/architecture/provider-adapter-cookbook.md</p>
         </div>
       </div>
       <div class="header-right">
-        <span class="version-badge">Clio Coder v0.4.0</span>
-        <a href="index.html" class="back-btn">
-          <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><title>Icon</title><line x1="19" y1="12" x2="5" y2="12"></line><polyline points="12 19 5 12 12 5"></polyline></svg>
-          Dashboard Hub
-        </a>
+        <a class="back-btn" href="index.html">← Index</a>
+        <span class="version-badge">v0.4.2</span>
       </div>
     </header>
-
-    <div class="page-layout-grid">
-      <nav class="sidebar" aria-label="Table of Contents">
-        <div class="toc-container">
-          <div class="toc-title">On This Page</div>
-          <ul class="toc-list">
-            <!-- Dynamically populated -->
-          </ul>
-        </div>
-      </nav>
-
-      <main>
-        <div class="glass-card">
-          <h2>Overview Summary</h2>
-          <p>This blueprint provides boilerplate and step-by-step guides for integrating custom local/remote inference adapters inside Clio Coder.</p>
-        </div>
-
-        <div class="tabs-nav">
-          <button type="button" class="tab-btn active" onclick="switchTab('builder')">
-            Descriptor Builder
-          </button>
-          <button type="button" class="tab-btn" onclick="switchTab('checklist')">
-            Capability checklist
-          </button>
-        </div>
-
-        <!-- Tab 1: Builder -->
-        <div class="tab-pane active" id="pane-builder">
-          <div class="blueprint-layout">
-            <div class="specs-col">
-              <div class="glass-card">
-                <h3>Descriptor Properties</h3>
-                <p>Customize fields below to build your TypeScript adapter plugin:</p>
-
-                <div class="form-group">
-                  <label for="runtimeId">Runtime ID</label>
-                  <input type="text" id="runtimeId" value="my-custom-service" oninput="generateDescriptor()">
-                </div>
-
-                <div class="form-group">
-                  <label for="runtimeName">Display Name</label>
-                  <input type="text" id="runtimeName" value="My Custom Service Native Client" oninput="generateDescriptor()">
-                </div>
-
-                <div class="form-group">
-                  <label for="runtimeKind">Client Type</label>
-                  <select id="runtimeKind" onchange="generateDescriptor()">
-                    <option value="http">http (Rest API / JSON endpoints)</option>
-                    <option value="sdk">sdk (e.g. Anthropic, Vertex SDKs)</option>
-                    <option value="subprocess">subprocess (spawn CLI worker)</option>
-                  </select>
-                </div>
-
-                <div class="form-group">
-                  <label for="authType">Authentication Mechanism</label>
-                  <select id="authType" onchange="generateDescriptor()">
-                    <option value="api-key">api-key (API credential token)</option>
-                    <option value="oauth">oauth (OAuth login PKCE flow)</option>
-                    <option value="none">none (Unauthenticated endpoint)</option>
-                  </select>
-                </div>
-
-                <div class="form-group">
-                  <label>Capabilities</label>
-                  <div class="checkbox-group">
-                    <label class="checkbox-item"><input type="checkbox" id="capTools" checked onchange="generateDescriptor()"> Tools support</label>
-                    <label class="checkbox-item"><input type="checkbox" id="capReasoning" onchange="generateDescriptor()"> Reasoning / Thinking</label>
-                    <label class="checkbox-item"><input type="checkbox" id="capVision" onchange="generateDescriptor()"> Vision inputs</label>
-                    <label class="checkbox-item"><input type="checkbox" id="capEmbed" onchange="generateDescriptor()"> Embeddings</label>
-                  </div>
-                </div>
-              </div>
-            </div>
-
-            <div class="specs-col">
-              <div class="glass-card">
-                <h3>Generated Runtime Plugin</h3>
-                <p>Save this file as <code>src/domains/providers/runtimes/custom/my-custom-service.ts</code>:</p>
-
-                <pre><code id="generatedDescriptorCode">// Populated dynamically</code></pre>
-              </div>
-            </div>
-          </div>
-        </div>
-
-        <!-- Tab 2: Checklist -->
-        <div class="tab-pane" id="pane-checklist">
-          <div class="glass-card">
-            <h3>Adapter Capability Requirements</h3>
-            <p>Clio's runtime uses standard features mapped as follows:</p>
-
-            <div style="margin-top:1.5rem; display:flex; flex-direction:column; gap:1rem;">
-              <div class="verdict-box normal" style="margin-top:0;">
-                <strong>Chat Completion (REQUIRED)</strong>
-                <span style="display:block; font-size:0.85rem; margin-top:0.25rem;">The model must process system instructions and a replayed array of assistant/user/tool messages.</span>
-              </div>
-              <div class="verdict-box warn" style="margin-top:0;">
-                <strong>Function Calling / Tools (HIGHLY RECOMMENDED)</strong>
-                <span style="display:block; font-size:0.85rem; margin-top:0.25rem;">Enables Clio to issue file search, read, write, and bash commands. If disabled, Clio acts in a conversational-only posture.</span>
-              </div>
-              <div class="verdict-box normal" style="margin-top:0; background:rgba(59, 130, 246, 0.08); border-color:rgba(59, 130, 246, 0.3); color:#3b82f6;">
-                <strong>Structured JSON Outputs (RECOMMENDED)</strong>
-                <span style="display:block; font-size:0.85rem; margin-top:0.25rem;">Used for structured change manifests (`clio-coder evolve`) and local evaluation reports.</span>
-              </div>
-              <div class="verdict-box normal" style="margin-top:0; background:rgba(255,255,255,0.02); border-color:var(--border-card); color:var(--text-muted);">
-                <strong>Fill-in-the-Middle FIM (OPTIONAL)</strong>
-                <span style="display:block; font-size:0.85rem; margin-top:0.25rem;">Enables surgical code edits when exact line matching fails.</span>
-              </div>
-            </div>
-          </div>
-        </div>
-
-        <!-- Related Navigation -->
-        <nav class="related-nav" aria-label="Related Pages">
-          <a href="tool_usage_blueprint.html" class="nav-link-card">
-            <span class="nav-label">Previous Blueprint</span>
-            <span class="nav-title">Tool Usage Reference</span>
-          </a>
-          <a href="tui_design_blueprint.html" class="nav-link-card next">
-            <span class="nav-label">Next Blueprint</span>
-            <span class="nav-title">TUI Design System</span>
-          </a>
+    <div class="page-layout-grid reference-layout">
+      <aside class="sidebar reference-sidebar" aria-label="On this page">
+        <nav class="toc-container">
+          <p class="toc-title">On this page</p>
+          <a class="sidebar-source" href="https://github.com/iowarp/clio-coder/blob/main/docs/architecture/provider-adapter-cookbook.md">Canonical Markdown<br>docs/architecture/provider-adapter-cookbook.md</a>
+          <ul class="toc-list"></ul>
         </nav>
+      </aside>
+      <main class="reference-main" id="reference-content">
+        <article class="reference-prose glass-card">
+<blockquote>
+<p><strong>Visual blueprint:</strong> The source checkout includes the complete
+<a href="provider_adapter_blueprint.html">Provider Adapter Cookbook visual reference</a>.</p>
+</blockquote>
+<p>This cookbook guides developers through implementing custom model runtimes and inference server integrations within Clio Coder. It explains the runtime descriptor interfaces, probing protocols, model synthesis, and how to configure reasoning and thinking behaviors.</p>
+<p>Source of truth:</p>
+<ul>
+<li>Runtime descriptor types: <a href="https://github.com/iowarp/clio-coder/blob/main/src/domains/providers/types/runtime-descriptor.ts">src/domains/providers/types/runtime-descriptor.ts</a></li>
+<li>Registry loader: <a href="https://github.com/iowarp/clio-coder/blob/main/src/domains/providers/registry.ts">src/domains/providers/registry.ts</a></li>
+<li>Probe reasoning helpers: <a href="https://github.com/iowarp/clio-coder/blob/main/src/domains/providers/probe/reasoning.ts">src/domains/providers/probe/reasoning.ts</a></li>
+<li>Model capabilities resolver: <a href="https://github.com/iowarp/clio-coder/blob/main/src/domains/providers/model-capabilities.ts">src/domains/providers/model-capabilities.ts</a></li>
+<li>Inference capability flags: <a href="https://github.com/iowarp/clio-coder/blob/main/src/domains/providers/types/capability-flags.ts">src/domains/providers/types/capability-flags.ts</a></li>
+<li>Model target resolution: <a href="https://github.com/iowarp/clio-coder/blob/main/src/domains/providers/runtime-resolution.ts">src/domains/providers/runtime-resolution.ts</a></li>
+</ul>
+<hr>
+<h2>1. Anatomy of a Runtime Descriptor</h2>
+<p>Every model runtime (e.g., Local Native, Cloud HTTP, Subprocess) implements the <code>RuntimeDescriptor</code> interface defined in <code>src/domains/providers/types/runtime-descriptor.ts</code>.</p>
+<p>Here is a template for a new runtime plugin:</p>
+<pre><code class="language-typescript">import { Type } from &quot;typebox&quot;;
+import type { Api, Model } from &quot;@earendil-works/pi-ai&quot;;
+import type {
+	RuntimeDescriptor,
+	ProbeContext,
+	ProbeResult,
+	ReasoningProbeResult,
+} from &quot;../../types/runtime-descriptor.js&quot;;
+import { type CapabilityFlags } from &quot;../../types/capability-flags.js&quot;;
+
+export const myCustomRuntime: RuntimeDescriptor = {
+	id: &quot;my-custom-service&quot;,
+	displayName: &quot;My Custom Service Native Client&quot;,
+	kind: &quot;http&quot;, // &quot;http&quot; | &quot;sdk&quot; | &quot;subprocess&quot;
+	tier: &quot;local-native&quot;, // &quot;protocol&quot; | &quot;cloud&quot; | &quot;local-native&quot; | &quot;subscription&quot;
+	apiFamily: &quot;openai-responses&quot;, // api model mapping class
+	auth: &quot;api-key&quot;, // &quot;api-key&quot; | &quot;oauth&quot; | &quot;aws-sdk&quot; | &quot;vertex-adc&quot; | &quot;claude-cli&quot; | &quot;none&quot;
+	credentialsEnvVar: &quot;CUSTOM_SERVICE_API_KEY&quot;,
+
+	defaultCapabilities: {
+		chat: true,
+		tools: true,
+		toolCallFormat: &quot;openai&quot;,
+		reasoning: false,
+		structuredOutputs: &quot;json-schema&quot;,
+		vision: false,
+		audio: false,
+		embeddings: false,
+		rerank: false,
+		fim: false,
+		contextWindow: 8192,
+		maxTokens: 4096,
+	},
+
+	// Probes target endpoint health and loaded models.
+	async probe(target, ctx): Promise&lt;ProbeResult&gt; {
+		// Implementation here (see Section 2)
+	},
+
+	// Synthesizes the model client for execution.
+	synthesizeModel(target, wireModelId, kb): Model&lt;Api&gt; {
+		// Implementation here (see Section 3)
+	}
+};
+</code></pre>
+<hr>
+<h2>2. Probing Mechanisms</h2>
+<p>Probes discover the current state of a target inference server when Clio starts
+or when <code>/settings targets</code> or <code>/model</code> is refreshed.</p>
+<h3>2.1 Endpoint Probing (<code>probe</code>)</h3>
+<p>The <code>probe</code> method validates endpoint reachability and collects loaded models:</p>
+<ul>
+<li><strong>Inputs:</strong> <code>TargetDescriptor</code> (which holds target <code>url</code>, optional <code>auth</code> metadata, and connection metadata) and <code>ProbeContext</code> (which provides timeout signals, credential-presence keys, and an optional resolved <code>authToken</code>). Request paths that resolve OAuth through <code>providers.auth.resolveForTarget</code> must pass <code>{ signal }</code>; Pi 0.84&#39;s <code>AuthOperationOptions</code> keeps cancellation attached while Clio waits for or mutates its credential store.</li>
+<li><strong>Return Value:</strong> A <code>ProbeResult</code> indicating:<ul>
+<li><code>ok</code>: True if reachable.</li>
+<li><code>serverVersion</code>: String identifier of the backend (e.g. <code>&quot;Ollama/0.1.48&quot;</code>).</li>
+<li><code>models</code>: A list of strings representing the currently loaded/selectable models.</li>
+<li><code>modelStates</code> (optional): Footprint mappings detailing VRAM/RAM loading stats.</li>
+</ul>
+</li>
+</ul>
+<h3>2.2 Reasoning Probing (<code>probeReasoning</code>)</h3>
+<p>For local endpoints where models are loaded dynamically, the runtime can supply a <code>probeReasoning</code> method. It sends a short mock completion request to inspect whether the model outputs reasoning/thinking tags (such as <code>reasoning_content</code> in OpenAI completions or <code>&lt;think&gt;</code> tags in raw text streams).</p>
+<p>Clio caches this result in the providers domain by exact target and model id for
+the current process. Provider reinitialization, configuration reload, and target
+disconnect paths clear the relevant cache rather than persisting it in a
+session ledger.</p>
+<h3>2.3 Exact-ID Capability Selection (<code>probeCapabilitiesForModel</code>)</h3>
+<p><code>probeCapabilitiesForModel</code> is the one exact-id selector during capability resolution. When a router target serves several models, <code>probeCapabilitiesForModel</code> matches <code>probeModelCapabilities</code> keyed strictly to the requested wire model ID. A router serving multiple models thus answers only from the <code>/v1/models</code> row keyed to its own wire model, preventing capability flags or token limits from bleeding across different models on the same target.</p>
+<h3>2.4 LM Studio as a reference adapter</h3>
+<p>The built-in <code>lmstudio</code> adapter is an example of one canonical descriptor with a compatibility
+alias. Its descriptor declares <code>aliases: [&quot;lmstudio-native&quot;]</code>, while registry listing and persisted
+configuration use only <code>lmstudio</code>. The probe first requires the exact <code>/lmstudio-greeting</code> body for
+a directly configured target. It lists keys, loaded instance ids, capabilities, and echoed load
+configuration through <code>GET /api/v1/models</code> (<a href="https://lmstudio.ai/docs/developer/rest/list">https://lmstudio.ai/docs/developer/rest/list</a>), falls
+back to <code>/api/v0/models</code> for older servers, and uses <code>/v1/models</code> only when neither native model
+shape is available.</p>
+<p>Chat synthesis stays on the ordinary <code>openai-completions</code> family and joins the target URL to
+<code>/v1/chat/completions</code> (<a href="https://lmstudio.ai/docs/developer/openai-compat/chat-completions">https://lmstudio.ai/docs/developer/openai-compat/chat-completions</a>). Native
+REST is reserved for model management through the documented load and unload operations
+(<a href="https://lmstudio.ai/docs/developer/rest/load">https://lmstudio.ai/docs/developer/rest/load</a> and
+<a href="https://lmstudio.ai/docs/developer/rest/unload">https://lmstudio.ai/docs/developer/rest/unload</a>). This split avoids a second streaming parser while
+still exposing runtime-specific residency and capability data.</p>
+<hr>
+<h2>3. Model Synthesis</h2>
+<p>The <code>synthesizeModel</code> method acts as the factory that creates the <code>pi-ai</code> compatible client interface for model turns.</p>
+<ul>
+<li><strong>Signature:</strong><pre><code class="language-typescript">synthesizeModel(
+    target: TargetDescriptor,
+    wireModelId: string,
+    kb: KnowledgeBaseHit | null
+): Model&lt;Api&gt;
+</code></pre>
+</li>
+<li><strong>Tasks:</strong><ol>
+<li>Combine target, catalog, probe, and capability metadata into a <code>pi-ai</code> model descriptor.</li>
+<li>Select the API family, endpoint, pricing, token limits, and Clio runtime metadata required by the streaming adapter.</li>
+<li>Leave secrets and request-time authentication to <code>providers.auth.resolveForTarget</code> at the call site. Optional FIM support belongs to the descriptor&#39;s separate <code>infill</code> method rather than to prompt binding in <code>synthesizeModel</code>.</li>
+</ol>
+</li>
+</ul>
+<h3>3.1 Stream Filters and Sentinel Stripping</h3>
+<p>When a model family requires response parsing or sentinel stripping before the payload reaches the core logic, Clio applies runtime-agnostic stream filters in the engine stream adapter after model synthesis. For example, if the resolved model family is <code>gemma-4</code>, a dedicated <code>createGemmaChannelFilter</code> intercepts and reclassifies <code>&lt;|channel&gt;thought</code> markers directly from the <code>text_delta</code> stream into <code>thinking_delta</code> events, dropping orphan channel closers and own-thought labels seamlessly.</p>
+<h3>3.2 OpenAI-compatible sampling and vLLM budgets</h3>
+<p>Catalog entries keep Clio&#39;s family knowledge in <code>quirks.sampling</code>, using the typed names
+<code>temperature</code>, <code>topP</code>, <code>topK</code>, <code>minP</code>, <code>presencePenalty</code>, <code>frequencyPenalty</code>, and
+<code>repeatPenalty</code>. The OpenAI-completions engine adapter translates those names once and passes the
+result through Pi&#39;s <code>StreamOptions.samplingParams</code>; it does not patch sampler fields into the final
+JSON body. Request-level <code>samplingParams</code> win per key, matching Pi&#39;s merge contract, while an
+explicit request temperature still wins over the catalog temperature.</p>
+<p>For a <code>vllm</code> target, model synthesis opts into Pi&#39;s
+<code>OpenAICompletionsCompat.supportsThinkingTokenBudget</code>. Clio supplies the selected family&#39;s
+<code>quirks.thinking.budgetByLevel</code> as Pi <code>thinkingBudgets</code>, and Pi emits the top-level
+<code>thinking_token_budget</code> while retaining at least 1,024 tokens beneath <code>max_tokens</code> for the final
+answer. llama.cpp and LM Studio do not receive that vLLM-only field. Their remaining payload hooks
+are limited to runtime deltas such as <code>chat_template_kwargs</code>, prompt-cache flags, LM Studio TTL and
+draft-model settings, and the exact reasoning-effort spelling their servers accept.</p>
+<p>Local OpenAI-compatible model synthesis also declares
+<code>OpenAICompletionsCompat.supportsFinishReason: false</code>. Pi then infers <code>stop</code> or <code>toolUse</code> at the end
+of a complete stream when a local server omits <code>finish_reason</code>, instead of turning an otherwise
+valid answer into a provider error. Explicit finish reasons remain authoritative when supplied.</p>
+<p>Anthropic thinking is assembled by Pi, not by Clio. Pi&#39;s <code>streamSimple</code> maps the agent&#39;s thinking
+level onto <code>thinking.type: &quot;adaptive&quot;</code> plus <code>output_config.effort</code> (read from the model&#39;s
+<code>thinkingLevelMap</code> and <code>compat.forceAdaptiveThinking</code>) or onto a bounded <code>budget_tokens</code> for
+budget-based models. Clio&#39;s <code>onPayload</code> hook no longer rewrites those fields; it only sets the
+OpenAI Responses <code>reasoning.summary</code> verbosity, which the agent loop cannot express as an option.
+<code>tests/contracts/thinking-off-wire.test.ts</code> locks the local LM Studio and
+llama.cpp controls used when thinking is off. Anthropic request assembly is
+inherited from the pinned Pi dependency; Clio no longer carries a separate
+contract test that reconstructs Pi&#39;s whole adaptive or budget payload.</p>
+<hr>
+<h2>4. Configuring Reasoning &amp; Thinking Formats</h2>
+<p>Clio supports diverse thinking mechanisms. If your model family uses a custom format, it must be mapped to one of the following mechanisms in the model&#39;s catalog YAML entry (<code>quirks.thinking.mechanism</code>):</p>
+<table>
+<thead>
+<tr>
+<th>Mechanism</th>
+<th>Behavior</th>
+</tr>
+</thead>
+<tbody><tr>
+<td><code>none</code></td>
+<td>The family does not reason; the effective level is <code>off</code> and thinking controls are omitted.</td>
+</tr>
+<tr>
+<td><code>effort-levels</code></td>
+<td>Named levels map to provider effort values, such as LM Studio <code>reasoning_effort</code>.</td>
+</tr>
+<tr>
+<td><code>budget-tokens</code></td>
+<td>Named levels map to explicit reasoning-token budgets.</td>
+</tr>
+<tr>
+<td><code>on-off</code></td>
+<td>The runtime exposes a binary thinking switch rather than graduated effort.</td>
+</tr>
+<tr>
+<td><code>always-on</code></td>
+<td>The model cannot disable reasoning; Clio reports the effective level as forced and allows extra completion headroom where required.</td>
+</tr>
+</tbody></table>
+<p>Wire formats such as <code>anthropic-extended</code>, <code>qwen-chat-template</code>, and
+<code>deepseek-r1</code> live in capability metadata. Runtime API families such as
+<code>openai-completions</code> and <code>ollama-native</code> are separate descriptor fields; neither
+set is a valid value for <code>quirks.thinking.mechanism</code>.</p>
+<hr>
+<h2>5. Adding the Adapter to Clio</h2>
+<p>Once your runtime adapter descriptor is implemented:</p>
+<h3>5.1 Static Built-in Registration</h3>
+<p>Add your descriptor to the static array export in <a href="https://github.com/iowarp/clio-coder/blob/main/src/domains/providers/runtimes/builtins.ts">src/domains/providers/runtimes/builtins.ts</a>:</p>
+<pre><code class="language-typescript">import { myCustomRuntime } from &quot;./custom/my-custom-runtime.js&quot;;
+
+export const BUILTIN_RUNTIMES = [
+    // ...
+    myCustomRuntime,
+];
+</code></pre>
+<h3>5.2 Dynamic Plugin Loading</h3>
+<p>Clio&#39;s <code>RuntimeRegistry</code> can load custom runtimes dynamically at startup:</p>
+<ul>
+<li><strong>Directories:</strong> Place compiled Javascript descriptors (<code>.js</code>) inside <code>$CLIO_CODER_CONFIG_DIR/runtimes/</code> (defaulting to <code>~/.config/clio-coder/runtimes/</code>).</li>
+<li><strong>Package exports:</strong> Publish an npm package that exports a <code>clioRuntimes</code> array containing your runtime descriptors, then list the package name under <code>integrations.runtimePlugins</code> in your configuration settings.</li>
+</ul>
+        </article>
+        <nav class="related-nav" aria-label="Adjacent references">
+          <a class="nav-link-card" href="tools_blueprint.html"><span class="nav-label">Previous</span><span class="nav-title">Prompt Envelope and Tools</span></a>
+          <a class="nav-link-card next" href="safety_blueprint.html"><span class="nav-label">Next</span><span class="nav-title">Clio Coder Safety Model</span></a>
+        </nav>
+        <p class="reference-footer-note">Canonical content lives in the mapped Markdown page. This visual counterpart adds navigation without changing the contract.</p>
       </main>
     </div>
-
-    <footer>
-      <p>Clio Coder Provider Adapter Cookbook Blueprint &bull; Version 0.4.0 &bull; Gnosis Research Center</p>
-    </footer>
+    <footer>Clio Coder documentation · source-aligned at v0.4.2</footer>
   </div>
-
   <script src="shared.js"></script>
-  <script>
-    function generateDescriptor() {
-      const id = document.getElementById("runtimeId").value;
-      const name = document.getElementById("runtimeName").value;
-      const kind = document.getElementById("runtimeKind").value;
-      const auth = document.getElementById("authType").value;
-
-      const tools = document.getElementById("capTools").checked;
-      const reasoning = document.getElementById("capReasoning").checked;
-      const vision = document.getElementById("capVision").checked;
-      const embed = document.getElementById("capEmbed").checked;
-
-      const cred = auth === 'api-key' ? `\n  credentialsEnvVar: "${id.toUpperCase().replace(/-/g, '_')}_API_KEY",` : '';
-
-      const code = `import { type RuntimeDescriptor } from "../../types/runtime-descriptor.js";
-
-export const customRuntime: RuntimeDescriptor = {
-  id: "${id}",
-  displayName: "${name}",
-  kind: "${kind}",
-  tier: "local-native",
-  apiFamily: "openai-responses",
-  auth: "${auth}",${cred}
-
-  defaultCapabilities: {
-    chat: true,
-    tools: ${tools},
-    toolCallFormat: "openai",
-    reasoning: ${reasoning},
-    structuredOutputs: "json-schema",
-    vision: ${vision},
-    embeddings: ${embed},
-    contextWindow: 16384,
-    maxTokens: 4096
-  },
-
-  async probe(target, ctx) {
-    // Check health endpoint & return models list
-    return { ok: true, serverVersion: "custom/1.0", models: ["model-v1"] };
-  },
-
-  synthesizeModel(target, wireModelId, kb) {
-    // Factory method building model connection
-    throw new Error("Method not implemented.");
-  }
-};`;
-
-      document.getElementById("generatedDescriptorCode").innerText = code;
-      if (window.initTableOfContents) window.initTableOfContents();
-    }
-
-    // Init
-    window.onload = () => {
-      generateDescriptor();
-      window.generateDescriptor = generateDescriptor;
-    };
-  </script>
 </body>
 </html>

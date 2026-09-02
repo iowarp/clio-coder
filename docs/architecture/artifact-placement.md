@@ -1,5 +1,8 @@
 # Artifact Placement
 
+> **Visual blueprint:** The source checkout includes the complete
+> [Artifact Placement visual reference](https://github.com/iowarp/clio-coder/blob/main/docs/html/artifact_placement_blueprint.html).
+
 Every file Clio generates has one home, decided by who reads it. The rule that
 follows from that: **the repo working tree holds files a human asked for.**
 Anything Clio produced on its own initiative lands in the project-local

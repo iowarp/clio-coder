@@ -1,2252 +1,277 @@
-<!DOCTYPE html>
+<!doctype html>
 <html lang="en">
 <head>
-  <meta charset="UTF-8">
-  <meta name="viewport" content="width=device-width, initial-scale=1.0">
-  <title>Clio Coder Prompt Envelope & Tools Blueprint</title>
-  <!-- Typography Fonts -->
-
-  <style>
-    :root {
-      --bg-dark: #090d16;
-      --bg-card: rgba(17, 24, 39, 0.7);
-      --border-card: rgba(255, 255, 255, 0.08);
-      --text-main: #f3f4f6;
-      --text-muted: #9ca3af;
-      --text-dark: #4b5563;
-
-      /* Glowing Neon Colors */
-      --color-cyan: #00f0ff;
-      --color-cyan-rgb: 0, 240, 255;
-      --color-purple: #bd00ff;
-      --color-purple-rgb: 189, 0, 255;
-      --color-emerald: #10b981;
-      --color-emerald-rgb: 16, 185, 129;
-      --color-amber: #f59e0b;
-      --color-amber-rgb: 245, 158, 11;
-      --color-rose: #ef4444;
-      --color-rose-rgb: 239, 68, 68;
-
-      --gradient-main: linear-gradient(135deg, var(--color-cyan), var(--color-purple));
-      --shadow-glow: 0 0 20px rgba(var(--color-cyan-rgb), 0.15);
-      --font-sans: "Segoe UI", -apple-system, BlinkMacSystemFont, Roboto, "Helvetica Neue", Arial, sans-serif;
-      --font-mono: "SFMono-Regular", Consolas, "Liberation Mono", Menlo, monospace;
-    }
-
-    * {
-      box-sizing: border-box;
-      margin: 0;
-      padding: 0;
-    }
-
-    body {
-      background-color: var(--bg-dark);
-      background-image:
-        radial-gradient(circle at 5% 15%, rgba(var(--color-cyan-rgb), 0.04) 0%, transparent 35%),
-        radial-gradient(circle at 95% 85%, rgba(var(--color-purple-rgb), 0.04) 0%, transparent 35%),
-        radial-gradient(circle at 50% 50%, #0c1220 0%, var(--bg-dark) 100%);
-      color: var(--text-main);
-      font-family: var(--font-sans);
-      min-height: 100vh;
-      line-height: 1.6;
-      overflow-x: hidden;
-    }
-
-    /* Scrollbar */
-    ::-webkit-scrollbar {
-      width: 8px;
-      height: 8px;
-    }
-    ::-webkit-scrollbar-track {
-      background: rgba(255, 255, 255, 0.01);
-    }
-    ::-webkit-scrollbar-thumb {
-      background: rgba(255, 255, 255, 0.08);
-      border-radius: 4px;
-    }
-    ::-webkit-scrollbar-thumb:hover {
-      background: rgba(var(--color-cyan-rgb), 0.25);
-    }
-
-    .container {
-      max-width: 1400px;
-      margin: 0 auto;
-      padding: 2rem;
-    }
-
-    /* Header */
-    header {
-      position: relative;
-      margin-bottom: 2.5rem;
-      padding-bottom: 2rem;
-      border-bottom: 1px solid var(--border-card);
-    }
-
-    .header-top {
-      display: flex;
-      justify-content: space-between;
-      align-items: center;
-      flex-wrap: wrap;
-      gap: 1rem;
-    }
-
-    .logo-area {
-      display: flex;
-      align-items: center;
-      gap: 1rem;
-    }
-
-    .logo-hex {
-      width: 48px;
-      height: 48px;
-      background: rgba(var(--color-cyan-rgb), 0.1);
-      border: 1.5px solid var(--color-cyan);
-      border-radius: 12px;
-      display: flex;
-      align-items: center;
-      justify-content: center;
-      box-shadow: 0 0 15px rgba(var(--color-cyan-rgb), 0.2);
-    }
-
-    .logo-hex img {
-      width: 78%;
-      height: 78%;
-      object-fit: contain;
-      filter: drop-shadow(0 0 8px rgba(0, 240, 255, 0.35));
-    }
-
-    h1 {
-      font-size: 2.25rem;
-      font-weight: 800;
-      letter-spacing: -0.04em;
-      background: linear-gradient(to right, #ffffff, #c7d2fe, var(--color-cyan));
-      -webkit-background-clip: text;
-      -webkit-text-fill-color: transparent;
-    }
-
-    .version-tag {
-      background: rgba(255, 255, 255, 0.05);
-      border: 1px solid var(--border-card);
-      border-radius: 9999px;
-      padding: 0.25rem 0.85rem;
-      font-family: var(--font-mono);
-      font-size: 0.85rem;
-      color: var(--color-cyan);
-      display: flex;
-      align-items: center;
-      gap: 0.35rem;
-      font-weight: 600;
-    }
-
-    .version-dot {
-      width: 6px;
-      height: 6px;
-      background-color: var(--color-emerald);
-      border-radius: 50%;
-      box-shadow: 0 0 8px var(--color-emerald);
-    }
-
-    .header-desc {
-      color: var(--text-muted);
-      font-size: 1.05rem;
-      margin-top: 0.5rem;
-      max-width: 800px;
-    }
-
-    /* Tabs */
-    .tabs-nav {
-      display: flex;
-      gap: 0.75rem;
-      margin-bottom: 2rem;
-      border-bottom: 1px solid var(--border-card);
-      padding-bottom: 0.75rem;
-      flex-wrap: wrap;
-    }
-
-    .tab-btn {
-      background: rgba(255, 255, 255, 0.02);
-      border: 1px solid var(--border-card);
-      color: var(--text-muted);
-      padding: 0.65rem 1.25rem;
-      border-radius: 8px;
-      font-weight: 600;
-      font-size: 0.95rem;
-      cursor: pointer;
-      display: flex;
-      align-items: center;
-      gap: 0.5rem;
-      transition: all 0.2s cubic-bezier(0.4, 0, 0.2, 1);
-    }
-
-    .tab-btn:hover {
-      background: rgba(255, 255, 255, 0.06);
-      color: var(--text-main);
-      border-color: rgba(var(--color-cyan-rgb), 0.3);
-    }
-
-    .tab-btn.active {
-      background: rgba(var(--color-cyan-rgb), 0.1);
-      color: var(--color-cyan);
-      border-color: var(--color-cyan);
-      box-shadow: 0 0 15px rgba(var(--color-cyan-rgb), 0.1);
-    }
-
-    .tab-pane {
-      display: none;
-      animation: fadeIn 0.35s ease-out forwards;
-    }
-
-    .tab-pane.active {
-      display: block;
-    }
-
-    @keyframes fadeIn {
-      from { opacity: 0; transform: translateY(8px); }
-      to { opacity: 1; transform: translateY(0); }
-    }
-
-    /* Grid & Cards */
-    .grid-2 {
-      display: grid;
-      grid-template-columns: 1fr 1fr;
-      gap: 1.5rem;
-      align-items: start;
-    }
-
-    @media (max-width: 1024px) {
-      .grid-2 {
-        grid-template-columns: 1fr;
-      }
-    }
-
-    .glass-card {
-      background: var(--bg-card);
-      border: 1px solid var(--border-card);
-      backdrop-filter: blur(16px);
-      -webkit-backdrop-filter: blur(16px);
-      border-radius: 12px;
-      padding: 1.5rem;
-      box-shadow: 0 8px 32px rgba(0, 0, 0, 0.2);
-      margin-bottom: 1.5rem;
-    }
-
-    .card-title {
-      font-size: 1.25rem;
-      font-weight: 700;
-      margin-bottom: 1.25rem;
-      display: flex;
-      align-items: center;
-      gap: 0.5rem;
-      color: #ffffff;
-      border-left: 3px solid var(--color-cyan);
-      padding-left: 0.65rem;
-    }
-
-    .card-subtitle {
-      font-size: 0.9rem;
-      color: var(--text-muted);
-      margin-top: -0.85rem;
-      margin-bottom: 1.25rem;
-    }
-
-    /* Inputs Form Controls */
-    .form-group {
-      margin-bottom: 1.25rem;
-    }
-
-    .form-row {
-      display: grid;
-      grid-template-columns: 1fr 1fr;
-      gap: 1rem;
-      margin-bottom: 1.25rem;
-    }
-
-    @media (max-width: 640px) {
-      .form-row {
-        grid-template-columns: 1fr;
-      }
-    }
-
-    label {
-      display: block;
-      font-size: 0.85rem;
-      font-weight: 600;
-      margin-bottom: 0.45rem;
-      color: var(--text-muted);
-      text-transform: uppercase;
-      letter-spacing: 0.05em;
-    }
-
-    input[type="text"], input[type="number"], select, textarea {
-      width: 100%;
-      background: rgba(0, 0, 0, 0.3);
-      border: 1px solid var(--border-card);
-      border-radius: 6px;
-      padding: 0.65rem 0.85rem;
-      color: #ffffff;
-      font-family: var(--font-sans);
-      font-size: 0.9rem;
-      outline: none;
-      transition: all 0.2s;
-    }
-
-    input:focus, select:focus, textarea:focus {
-      border-color: var(--color-cyan);
-      box-shadow: 0 0 10px rgba(var(--color-cyan-rgb), 0.15);
-      background: rgba(0, 0, 0, 0.4);
-    }
-
-    textarea.code-editor {
-      font-family: var(--font-mono);
-      font-size: 0.85rem;
-      resize: vertical;
-      background: rgba(5, 8, 16, 0.6);
-      line-height: 1.5;
-    }
-
-    .checkbox-grid {
-      display: grid;
-      grid-template-columns: repeat(auto-fill, minmax(130px, 1fr));
-      gap: 0.5rem;
-      background: rgba(0, 0, 0, 0.2);
-      border: 1px solid var(--border-card);
-      border-radius: 6px;
-      padding: 0.75rem;
-      max-height: 160px;
-      overflow-y: auto;
-    }
-
-    .checkbox-label {
-      display: flex;
-      align-items: center;
-      gap: 0.4rem;
-      font-size: 0.8rem;
-      color: var(--text-main);
-      cursor: pointer;
-      user-select: none;
-      text-transform: none;
-      letter-spacing: normal;
-      font-weight: 400;
-      margin-bottom: 0;
-    }
-
-    .checkbox-label input[type="checkbox"] {
-      accent-color: var(--color-cyan);
-      cursor: pointer;
-    }
-
-    /* Buttons */
-    .btn {
-      background: rgba(255, 255, 255, 0.04);
-      border: 1px solid var(--border-card);
-      color: #ffffff;
-      padding: 0.6rem 1.2rem;
-      border-radius: 6px;
-      font-weight: 600;
-      font-size: 0.9rem;
-      cursor: pointer;
-      transition: all 0.2s;
-      display: inline-flex;
-      align-items: center;
-      gap: 0.5rem;
-    }
-
-    .btn:hover {
-      background: rgba(255, 255, 255, 0.08);
-      border-color: rgba(var(--color-cyan-rgb), 0.4);
-    }
-
-    .btn-primary {
-      background: var(--gradient-main);
-      color: #050812;
-      border-color: transparent;
-      box-shadow: 0 4px 12px rgba(var(--color-cyan-rgb), 0.25);
-    }
-
-    .btn-primary:hover {
-      opacity: 0.9;
-      transform: translateY(-1px);
-      box-shadow: 0 4px 18px rgba(var(--color-cyan-rgb), 0.4);
-    }
-
-    .btn-danger {
-      background: rgba(var(--color-rose-rgb), 0.15);
-      border-color: var(--color-rose);
-      color: #ff8585;
-    }
-
-    .btn-danger:hover {
-      background: rgba(var(--color-rose-rgb), 0.25);
-    }
-
-    /* Calculator Results Panels */
-    .pressure-panel {
-      display: flex;
-      flex-direction: column;
-      gap: 1rem;
-    }
-
-    .progress-bar-container {
-      width: 100%;
-      height: 12px;
-      background: rgba(255, 255, 255, 0.05);
-      border: 1px solid var(--border-card);
-      border-radius: 9999px;
-      overflow: hidden;
-      position: relative;
-    }
-
-    .progress-bar-fill {
-      height: 100%;
-      width: 0%;
-      background: var(--color-emerald);
-      border-radius: 9999px;
-      transition: width 0.4s cubic-bezier(0.4, 0, 0.2, 1), background-color 0.3s;
-    }
-
-    .status-pill {
-      display: inline-flex;
-      align-items: center;
-      gap: 0.35rem;
-      font-size: 0.8rem;
-      font-weight: 700;
-      text-transform: uppercase;
-      padding: 0.2rem 0.6rem;
-      border-radius: 4px;
-      background: rgba(255, 255, 255, 0.05);
-      border: 1px solid var(--border-card);
-    }
-
-    .pill-cyan { color: var(--color-cyan); border-color: rgba(var(--color-cyan-rgb), 0.3); background: rgba(var(--color-cyan-rgb), 0.05); }
-    .pill-emerald { color: var(--color-emerald); border-color: rgba(var(--color-emerald-rgb), 0.3); background: rgba(var(--color-emerald-rgb), 0.05); }
-    .pill-amber { color: var(--color-amber); border-color: rgba(var(--color-amber-rgb), 0.3); background: rgba(var(--color-amber-rgb), 0.05); }
-    .pill-rose { color: var(--color-rose); border-color: rgba(var(--color-rose-rgb), 0.3); background: rgba(var(--color-rose-rgb), 0.05); }
-
-    .data-grid {
-      display: grid;
-      grid-template-columns: repeat(auto-fit, minmax(130px, 1fr));
-      gap: 1rem;
-      margin-bottom: 1rem;
-    }
-
-    .data-card {
-      background: rgba(0, 0, 0, 0.2);
-      border: 1px solid var(--border-card);
-      border-radius: 8px;
-      padding: 0.75rem;
-      text-align: center;
-    }
-
-    .data-val {
-      font-family: var(--font-mono);
-      font-size: 1.25rem;
-      font-weight: 700;
-      margin-bottom: 0.2rem;
-    }
-
-    .data-label {
-      font-size: 0.75rem;
-      color: var(--text-muted);
-      text-transform: uppercase;
-      letter-spacing: 0.05em;
-    }
-
-    .segment-table {
-      width: 100%;
-      border-collapse: collapse;
-      font-size: 0.85rem;
-      margin-top: 1rem;
-    }
-
-    .segment-table th, .segment-table td {
-      border: 1px solid var(--border-card);
-      padding: 0.55rem 0.75rem;
-      text-align: left;
-    }
-
-    .segment-table th {
-      background: rgba(255, 255, 255, 0.03);
-      color: var(--text-muted);
-      font-weight: 600;
-    }
-
-    .segment-table tr:hover td {
-      background: rgba(255, 255, 255, 0.02);
-    }
-
-    .hash-badge {
-      font-family: var(--font-mono);
-      font-size: 0.75rem;
-      background: rgba(0, 0, 0, 0.4);
-      border: 1px solid rgba(255,255,255,0.05);
-      border-radius: 4px;
-      padding: 0.15rem 0.4rem;
-      color: #a5b4fc;
-      max-width: 100px;
-      display: inline-block;
-      text-overflow: ellipsis;
-      overflow: hidden;
-      white-space: nowrap;
-      vertical-align: middle;
-    }
-
-    /* Output console */
-    .console-out {
-      background: #04070e;
-      border: 1px solid var(--border-card);
-      border-radius: 8px;
-      padding: 1rem;
-      font-family: var(--font-mono);
-      font-size: 0.825rem;
-      color: #8bebff;
-      max-height: 400px;
-      overflow-y: auto;
-      white-space: pre-wrap;
-      position: relative;
-    }
-
-    .console-header {
-      display: flex;
-      justify-content: space-between;
-      align-items: center;
-      margin-bottom: 0.5rem;
-      font-family: var(--font-sans);
-      font-size: 0.75rem;
-      text-transform: uppercase;
-      letter-spacing: 0.05em;
-      color: var(--text-muted);
-    }
-
-    .copy-btn {
-      background: transparent;
-      border: none;
-      color: var(--color-cyan);
-      cursor: pointer;
-      font-size: 0.8rem;
-      font-weight: 600;
-      display: flex;
-      align-items: center;
-      gap: 0.25rem;
-    }
-
-    .copy-btn:hover {
-      text-decoration: underline;
-    }
-
-    /* Preset Scenarios */
-    .scenario-grid {
-      display: flex;
-      gap: 0.5rem;
-      margin-bottom: 1.25rem;
-      flex-wrap: wrap;
-    }
-
-    .scenario-pill {
-      background: rgba(255, 255, 255, 0.03);
-      border: 1px solid var(--border-card);
-      border-radius: 6px;
-      padding: 0.4rem 0.8rem;
-      font-size: 0.8rem;
-      cursor: pointer;
-      transition: all 0.2s;
-      color: var(--text-muted);
-      font-weight: 500;
-    }
-
-    .scenario-pill:hover {
-      background: rgba(var(--color-cyan-rgb), 0.08);
-      color: var(--color-cyan);
-      border-color: rgba(var(--color-cyan-rgb), 0.3);
-    }
-
-    /* Diagrams Layout */
-    .diagrams-container {
-      display: flex;
-      flex-direction: column;
-      gap: 2.5rem;
-    }
-
-    .diagram-card {
-      background: var(--bg-card);
-      border: 1px solid var(--border-card);
-      border-radius: 16px;
-      padding: 1.5rem;
-    }
-
-    .diagram-desc {
-      font-size: 0.9rem;
-      color: var(--text-muted);
-      margin-bottom: 1.5rem;
-      max-width: 900px;
-    }
-
-    .svg-wrapper {
-      width: 100%;
-      background: rgba(4, 7, 14, 0.8);
-      border: 1px solid var(--border-card);
-      border-radius: 12px;
-      padding: 1.5rem;
-      display: flex;
-      justify-content: center;
-      align-items: center;
-      overflow-x: auto;
-    }
-
-    .svg-wrapper svg {
-      max-width: 100%;
-      height: auto;
-      display: block;
-    }
-
-    /* Tool Call Simulator Details */
-    .history-list {
-      max-height: 180px;
-      overflow-y: auto;
-      border: 1px solid var(--border-card);
-      border-radius: 6px;
-      padding: 0.5rem;
-      background: rgba(0, 0, 0, 0.2);
-    }
-
-    .history-item {
-      font-size: 0.78rem;
-      font-family: var(--font-mono);
-      padding: 0.35rem;
-      border-bottom: 1px solid rgba(255,255,255,0.03);
-      display: flex;
-      justify-content: space-between;
-      align-items: center;
-    }
-
-    .history-item:last-child {
-      border-bottom: none;
-    }
-
-    .history-timestamp {
-      color: var(--text-dark);
-      font-size: 0.7rem;
-    }
-
-    .verdict-box {
-      border-radius: 6px;
-      padding: 1rem;
-      margin-bottom: 1.25rem;
-      font-size: 0.88rem;
-      display: none;
-    }
-
-    .verdict-box.show {
-      display: block;
-    }
-
-    .verdict-box.allow {
-      background: rgba(16, 185, 129, 0.1);
-      border: 1px solid var(--color-emerald);
-      color: #a7f3d0;
-    }
-
-    .verdict-box.block {
-      background: rgba(239, 68, 68, 0.1);
-      border: 1px solid var(--color-rose);
-      color: #fecaca;
-    }
-
-    .verdict-box.elevated {
-      background: rgba(245, 158, 11, 0.1);
-      border: 1px solid var(--color-amber);
-      color: #fde68a;
-    }
-
-    /* Interactive Badge */
-    .pulse-badge {
-      display: inline-flex;
-      align-items: center;
-      gap: 0.35rem;
-      font-size: 0.725rem;
-      font-weight: 700;
-      color: var(--color-cyan);
-      background: rgba(var(--color-cyan-rgb), 0.1);
-      border: 1px solid rgba(var(--color-cyan-rgb), 0.3);
-      padding: 0.15rem 0.45rem;
-      border-radius: 4px;
-      margin-left: 0.5rem;
-      vertical-align: middle;
-      text-transform: uppercase;
-      letter-spacing: 0.05em;
-    }
-
-    .pulse-dot {
-      width: 5px;
-      height: 5px;
-      background-color: var(--color-cyan);
-      border-radius: 50%;
-      animation: pulse 1.8s infinite;
-    }
-
-    @keyframes pulse {
-      0% { transform: scale(0.9); box-shadow: 0 0 0 0 rgba(var(--color-cyan-rgb), 0.5); }
-      70% { transform: scale(1.1); box-shadow: 0 0 0 5px rgba(var(--color-cyan-rgb), 0); }
-      100% { transform: scale(0.9); box-shadow: 0 0 0 0 rgba(var(--color-cyan-rgb), 0); }
-    }
-  </style>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <meta name="clio-markdown-source" content="docs/architecture/prompt-envelope-and-tools.md">
+  <meta name="clio-docs-version" content="0.4.2">
+  <title>Prompt Envelope and Tools · Clio Coder 0.4.2</title>
+  <link rel="icon" href="data:,">
+  <link rel="stylesheet" href="shared.css">
 </head>
-<body>
-
-<div class="container">
-  <header>
-    <div class="header-left">
-      <div class="header-logo">
-        <svg viewBox="0 0 64 64" width="48" height="48" role="img" aria-label="Clio Coder logo"><title>Clio Coder logo</title><rect x="8" y="8" width="48" height="48" rx="12" fill="rgba(0,240,255,0.12)" stroke="rgba(0,240,255,0.65)"/><path d="M32 14 16 23l16 9 16-9-16-9Z" fill="none" stroke="#00f0ff" stroke-width="3" stroke-linejoin="round"/><path d="M16 32l16 9 16-9M16 41l16 9 16-9" fill="none" stroke="#bd00ff" stroke-width="3" stroke-linecap="round" stroke-linejoin="round"/></svg>
-      </div>
-      <div class="header-title-wrapper">
-        <h1>Prompt Envelopes & Tools Spec</h1>
-        <p>Technical architecture specification, compiler calculator, and registry simulator for Clio Coder's secure LLM delivery.</p>
-        <div class="meta-chips-row">
-          <span class="chip">Source: docs/prompt-envelope-and-tools.md</span>
-          <span class="chip chip-orange">clio-coder docs tools</span>
-        </div>
-      </div>
-    </div>
-    <div class="header-right">
-      <span class="version-badge">Clio Coder v0.4.0</span>
-      <a href="index.html" class="back-btn">
-        <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><title>Icon</title><line x1="19" y1="12" x2="5" y2="12"></line><polyline points="12 19 5 12 12 5"></polyline></svg>
-        Dashboard Hub
-      </a>
-    </div>
-  </header>
-
-
-  <!-- Navigation Tabs -->
-  <div class="tabs-nav">
-    <button type="button" class="tab-btn active" onclick="_switchTab('tab-diagrams')">
-      <svg aria-hidden="true" viewBox="0 0 24 24"><title>Icon</title><path d="M19 3H5c-1.1 0-2 .9-2 2v14c0 1.1.9 2 2 2h14c1.1 0 2-.9 2-2V5c0-1.1-.9-2-2-2zm0 16H5V5h14v14zM7 10h2v7H7zm4-3h2v10h-2zm4 6h2v4h-2z"/></svg>
-      Architecture & Visual Flowcharts
-    </button>
-    <button type="button" class="tab-btn" onclick="_switchTab('tab-calculator')">
-      <svg aria-hidden="true" viewBox="0 0 24 24"><title>Icon</title><path d="M19 3H5c-1.1 0-2 .9-2 2v14c0 1.1.9 2 2 2h14c1.1 0 2-.9 2-2V5c0-1.1-.9-2-2-2zm-4 14h-2v-2h2v2zm0-4h-2v-2h2v2zm0-4h-2V7h2v2zm-4 8H7v-2h2v2zm0-4H7v-2h2v2zm0-4H7V7h2v2z"/></svg>
-      Token Pressure Calculator
-    </button>
-    <button type="button" class="tab-btn" onclick="_switchTab('tab-simulator')">
-      <svg aria-hidden="true" viewBox="0 0 24 24"><title>Icon</title><path d="M12 2C6.48 2 2 6.48 2 12s4.48 10 10 10 10-4.48 10-10S17.52 2 12 2zm1 17h-2v-2h2v2zm2.07-7.75l-.9.92C13.45 12.9 13 13.5 13 15h-2v-.5c0-1.1.45-2.1 1.17-2.83l1.24-1.26c.37-.36.59-.86.59-1.41 0-1.1-.9-2-2-2s-2 .9-2 2H7c0-2.76 2.24-5 5-5s5 2.24 5 5c0 1.04-.42 1.99-1.07 2.75z"/></svg>
-      Tool & Registry Simulator
-    </button>
-    <button type="button" class="tab-btn" onclick="_switchTab('tab-recompiler')">
-      <svg aria-hidden="true" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><title>Icon</title><path d="M12 2v4M12 18v4M4.93 4.93l2.83 2.83M16.24 16.24l2.83 2.83M2 12h4M18 12h4M4.93 19.07l2.83-2.83M16.24 7.76l2.83-2.83"/></svg>
-      Prompt Recompiler & Capping
-      <span class="pulse-badge"><span class="pulse-dot"></span>New</span>
-    </button>
-  </div>
-
-  <!-- Tab: Diagrams -->
-  <div id="tab-diagrams" class="tab-pane active">
-    <div class="diagrams-container">
-
-      <!-- Diagram 1 -->
-      <div class="diagram-card">
-        <h2 class="card-title">1. Provider Tool Schema Delivery</h2>
-        <div class="diagram-desc">
-          Unlike legacy prompt-based wrappers, Clio converts TypeBox schemas into formal provider tool schemas.
-          The model calls tools natively through the LLM API's structural JSON envelope rather than parsing text logs.
-        </div>
-        <div class="svg-wrapper">
-          <svg aria-hidden="true" width="900" height="280" viewBox="0 0 900 280" fill="none" xmlns="http://www.w3.org/2000/svg"><title>Icon</title>
-            <!-- Background grids -->
-            <rect width="900" height="280" rx="8" fill="#04070e" />
-
-            <!-- Nodes -->
-            <!-- Node A: TypeBox Code Spec -->
-            <rect x="30" y="80" width="180" height="90" rx="8" fill="rgba(189, 0, 255, 0.1)" stroke="#bd00ff" stroke-width="1.5" />
-            <text x="120" y="115" fill="#ffffff" font-family="var(--font-sans)" font-size="14" font-weight="700" text-anchor="middle">TypeBox Spec</text>
-            <text x="120" y="135" fill="var(--text-muted)" font-family="var(--font-sans)" font-size="11" text-anchor="middle">src/tools/*.ts</text>
-            <text x="120" y="152" fill="#bd00ff" font-family="var(--font-mono)" font-size="10" text-anchor="middle">Type.Object({path:...})</text>
-
-            <!-- Connector A -> B -->
-            <path d="M210 125 H260" stroke="rgba(189, 0, 255, 0.4)" stroke-width="2" stroke-dasharray="4" />
-            <polygon points="260,125 252,121 252,129" fill="#bd00ff" />
-
-            <!-- Node B: Registry.ts -->
-            <rect x="270" y="80" width="180" height="90" rx="8" fill="rgba(0, 240, 255, 0.1)" stroke="#00f0ff" stroke-width="1.5" />
-            <text x="360" y="115" fill="#ffffff" font-family="var(--font-sans)" font-size="14" font-weight="700" text-anchor="middle">ToolRegistry</text>
-            <text x="360" y="135" fill="var(--text-muted)" font-family="var(--font-sans)" font-size="11" text-anchor="middle">src/tools/registry.ts</text>
-            <text x="360" y="152" fill="#00f0ff" font-family="var(--font-mono)" font-size="10" text-anchor="middle">listForMode(mode)</text>
-
-            <!-- Connector B -> C -->
-            <path d="M450 125 H500" stroke="rgba(0, 240, 255, 0.4)" stroke-width="2" />
-            <polygon points="500,125 492,121 492,129" fill="#00f0ff" />
-
-            <!-- Node C: worker-tools.ts -->
-            <rect x="510" y="80" width="180" height="90" rx="8" fill="rgba(16, 185, 129, 0.1)" stroke="#10b981" stroke-width="1.5" />
-            <text x="600" y="115" fill="#ffffff" font-family="var(--font-sans)" font-size="14" font-weight="700" text-anchor="middle">Worker Resolver</text>
-            <text x="600" y="135" fill="var(--text-muted)" font-family="var(--font-sans)" font-size="11" text-anchor="middle">src/engine/worker-tools.ts</text>
-            <text x="600" y="152" fill="#10b981" font-family="var(--font-mono)" font-size="10" text-anchor="middle">resolveAgentTools()</text>
-
-            <!-- Connector C -> D -->
-            <path d="M690 125 H740" stroke="rgba(16, 185, 129, 0.4)" stroke-width="2" stroke-dasharray="4" />
-            <polygon points="740,125 732,121 732,129" fill="#10b981" />
-
-            <!-- Node D: LLM Provider Client -->
-            <rect x="750" y="60" width="120" height="130" rx="8" fill="rgba(245, 158, 11, 0.1)" stroke="#f59e0b" stroke-width="1.5" />
-            <text x="810" y="90" fill="#ffffff" font-family="var(--font-sans)" font-size="13" font-weight="700" text-anchor="middle">LLM Provider</text>
-            <text x="810" y="110" fill="var(--text-muted)" font-family="var(--font-sans)" font-size="11" text-anchor="middle">Format Mapping</text>
-            <text x="810" y="135" fill="#f59e0b" font-family="var(--font-mono)" font-size="9" text-anchor="middle">• tools: [...]</text>
-            <text x="810" y="150" fill="#f59e0b" font-family="var(--font-mono)" font-size="9" text-anchor="middle">• type: "function"</text>
-            <text x="810" y="165" fill="#f59e0b" font-family="var(--font-mono)" font-size="9" text-anchor="middle">• parameters: json</text>
-
-            <!-- Flow annotations -->
-            <text x="235" y="112" fill="var(--text-muted)" font-family="var(--font-sans)" font-size="10" text-anchor="middle">registers</text>
-            <text x="475" y="112" fill="var(--text-muted)" font-family="var(--font-sans)" font-size="10" text-anchor="middle">exposes</text>
-            <text x="715" y="112" fill="var(--text-muted)" font-family="var(--font-sans)" font-size="10" text-anchor="middle">delivers</text>
+<body data-doc-category="architecture">
+  <div class="reading-progress" aria-hidden="true"></div>
+  <a class="skip-link" href="#reference-content">Skip to reference</a>
+  <div class="container">
+    <header class="document-header" data-category="Architecture">
+      <div class="header-left">
+        <a class="header-logo" href="index.html" aria-label="Documentation index">
+          <svg viewBox="0 0 24 24" fill="none" aria-hidden="true">
+            <path d="M12 2 2 7l10 5 10-5-10-5Z" stroke="url(#clio-logo)" stroke-width="2" stroke-linejoin="round"/>
+            <path d="m2 12 10 5 10-5M2 17l10 5 10-5" stroke="url(#clio-logo)" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"/>
+            <defs><linearGradient id="clio-logo" x1="2" y1="2" x2="22" y2="22"><stop stop-color="#00d4db"/><stop offset="1" stop-color="#ff7e29"/></linearGradient></defs>
           </svg>
+        </a>
+        <div class="header-title-wrapper">
+          <p class="document-kicker">Architecture / canonical reference</p>
+          <h1>Prompt Envelope and Tools</h1>
+          <p class="document-path">docs/architecture/prompt-envelope-and-tools.md</p>
         </div>
       </div>
-
-      <!-- Diagram 2 -->
-      <div class="diagram-card">
-        <h2 class="card-title">2. Prompt Wrapping Envelope & Cache Decision Flow</h2>
-        <div class="diagram-desc">
-          Clio splits prompts into three tiers (Static, Session, Dynamic) and generates distinct hashes.
-          When supported by targets (e.g. llamacpp or cloud cache), Clio leverages these hashes to skip resending the session shell prompt if it has not changed.
-        </div>
-        <div class="svg-wrapper">
-          <svg aria-hidden="true" width="900" height="350" viewBox="0 0 900 350" fill="none" xmlns="http://www.w3.org/2000/svg"><title>Icon</title>
-            <rect width="900" height="350" rx="8" fill="#04070e" />
-
-            <!-- Box: Full Rendered Prompt Envelope -->
-            <rect x="20" y="30" width="300" height="290" rx="8" fill="rgba(255, 255, 255, 0.02)" stroke="var(--border-card)" stroke-width="1.5" />
-            <text x="35" y="55" fill="#ffffff" font-family="var(--font-sans)" font-size="13" font-weight="700">PROMPT ENVELOPE SECTIONS</text>
-
-            <!-- Section 1: Static Shell -->
-            <rect x="35" y="75" width="270" height="65" rx="6" fill="rgba(0, 240, 255, 0.05)" stroke="var(--color-cyan)" stroke-opacity="0.5" />
-            <text x="45" y="95" fill="#ffffff" font-family="var(--font-sans)" font-size="11" font-weight="600">Static Shell (Tier: static-shell)</text>
-            <text x="45" y="112" fill="var(--text-muted)" font-family="var(--font-sans)" font-size="10">Identity / Selected Mode / Safety instructions</text>
-            <text x="45" y="128" fill="var(--color-cyan)" font-family="var(--font-mono)" font-size="9">staticShellHash: SHA-256</text>
-
-            <!-- Section 2: Session Shell -->
-            <rect x="35" y="150" width="270" height="75" rx="6" fill="rgba(189, 0, 255, 0.05)" stroke="var(--color-purple)" stroke-opacity="0.5" />
-            <text x="45" y="170" fill="#ffffff" font-family="var(--font-sans)" font-size="11" font-weight="600">Session Shell (Tier: session-shell)</text>
-            <text x="45" y="187" fill="var(--text-muted)" font-family="var(--font-sans)" font-size="10">Runtime Config / Tool Surface / Retrieval Hints</text>
-            <text x="45" y="202" fill="var(--text-muted)" font-family="var(--font-sans)" font-size="10">Skills list (when active)</text>
-            <text x="45" y="217" fill="var(--color-purple)" font-family="var(--font-mono)" font-size="9">sessionShellHash: SHA-256 (System Prompt)</text>
-
-            <!-- Section 3: Dynamic Turn -->
-            <rect x="35" y="235" width="270" height="70" rx="6" fill="rgba(16, 185, 129, 0.05)" stroke="var(--color-emerald)" stroke-opacity="0.5" />
-            <text x="45" y="255" fill="#ffffff" font-family="var(--font-sans)" font-size="11" font-weight="600">Dynamic Turn (Tier: dynamic-turn)</text>
-            <text x="45" y="272" fill="var(--text-muted)" font-family="var(--font-sans)" font-size="10">Memory / Project Context Files / Turn Counts</text>
-            <text x="45" y="290" fill="var(--color-emerald)" font-family="var(--font-mono)" font-size="9">dynamicHash: SHA-256 (Dynamic Fragments)</text>
-
-            <!-- Flow Arrows from Envelope to decision point -->
-            <path d="M320 175 H400" stroke="#a5b4fc" stroke-width="2" />
-            <polygon points="400,175 392,171 392,179" fill="#a5b4fc" />
-
-            <!-- Decision Point Box -->
-            <rect x="410" y="125" width="180" height="100" rx="8" fill="rgba(245, 158, 11, 0.1)" stroke="var(--color-amber)" stroke-width="1.5" />
-            <text x="500" y="150" fill="#ffffff" font-family="var(--font-sans)" font-size="12" font-weight="700" text-anchor="middle">Delivery Check</text>
-            <text x="500" y="170" fill="var(--color-amber)" font-family="var(--font-sans)" font-size="10" font-weight="600" text-anchor="middle">Has sessionShellHash</text>
-            <text x="500" y="185" fill="var(--color-amber)" font-family="var(--font-sans)" font-size="10" font-weight="600" text-anchor="middle">changed since last turn?</text>
-            <text x="500" y="208" fill="var(--text-muted)" font-family="var(--font-mono)" font-size="9" text-anchor="middle">reduced-repeated-envelope</text>
-
-            <!-- Choice: YES (Changed / First Turn) -->
-            <path d="M590 150 H670" stroke="var(--color-rose)" stroke-width="1.5" />
-            <polygon points="670,150 662,146 662,154" fill="var(--color-rose)" />
-            <text x="630" y="142" fill="var(--color-rose)" font-family="var(--font-sans)" font-size="10" text-anchor="middle" font-weight="600">YES</text>
-
-            <!-- Action: Send Full Envelope -->
-            <rect x="680" y="105" width="190" height="60" rx="6" fill="rgba(239, 68, 68, 0.05)" stroke="var(--color-rose)" stroke-width="1" />
-            <text x="775" y="128" fill="#ffffff" font-family="var(--font-sans)" font-size="11" font-weight="600" text-anchor="middle">Full System Reset</text>
-            <text x="775" y="145" fill="var(--text-muted)" font-family="var(--font-sans)" font-size="10" text-anchor="middle">Send Static + Session Shell prompts</text>
-
-            <!-- Choice: NO (Not Changed) -->
-            <path d="M590 200 H670" stroke="var(--color-emerald)" stroke-width="1.5" />
-            <polygon points="670,200 662,196 662,204" fill="var(--color-emerald)" />
-            <text x="630" y="192" fill="var(--color-emerald)" font-family="var(--font-sans)" font-size="10" text-anchor="middle" font-weight="600">NO</text>
-
-            <!-- Action: Reuse Cache -->
-            <rect x="680" y="180" width="190" height="70" rx="6" fill="rgba(16, 185, 129, 0.05)" stroke="var(--color-emerald)" stroke-width="1" />
-            <text x="775" y="202" fill="#ffffff" font-family="var(--font-sans)" font-size="11" font-weight="600" text-anchor="middle">Reuse System Prompt</text>
-            <text x="775" y="218" fill="var(--text-muted)" font-family="var(--font-sans)" font-size="10" text-anchor="middle">Send ONLY Dynamic fragments</text>
-            <text x="775" y="233" fill="var(--color-emerald)" font-family="var(--font-sans)" font-size="9" text-anchor="middle" font-weight="600">Saves substantial context/time</text>
-          </svg>
-        </div>
+      <div class="header-right">
+        <a class="back-btn" href="index.html">← Index</a>
+        <span class="version-badge">v0.4.2</span>
       </div>
-
-      <!-- Diagram 3 -->
-      <div class="diagram-card">
-        <h2 class="card-title">3. Tool Invocation & Result Shaping Lifecycle</h2>
-        <div class="diagram-desc">
-          Every tool invocation goes through the registry checks, classifying arguments, detecting loop locks, and evaluating security policies.
-          Upon execution, outputs are bounded to respect context pressure through safe UTF-8 truncation and suffix injection.
-        </div>
-        <div class="svg-wrapper">
-          <svg aria-hidden="true" width="900" height="340" viewBox="0 0 900 340" fill="none" xmlns="http://www.w3.org/2000/svg"><title>Icon</title>
-            <rect width="900" height="340" rx="8" fill="#04070e" />
-
-            <!-- Path Timeline -->
-            <!-- Step 1: LLM Tool Call Request -->
-            <rect x="30" y="40" width="150" height="60" rx="6" fill="rgba(255, 255, 255, 0.03)" stroke="var(--border-card)" />
-            <text x="105" y="65" fill="#ffffff" font-family="var(--font-sans)" font-size="12" font-weight="700" text-anchor="middle">Model Call Request</text>
-            <text x="105" y="82" fill="var(--color-cyan)" font-family="var(--font-mono)" font-size="10" text-anchor="middle">{name, arguments}</text>
-
-            <!-- Arrow 1 -> 2 -->
-            <path d="M180 70 H220" stroke="var(--border-card)" stroke-width="1.5" />
-            <polygon points="220,70 214,66 214,74" fill="var(--text-muted)" />
-
-            <!-- Step 2: Loop Guard & Classification -->
-            <rect x="230" y="30" width="180" height="80" rx="6" fill="rgba(189, 0, 255, 0.05)" stroke="var(--color-purple)" />
-            <text x="320" y="52" fill="#ffffff" font-family="var(--font-sans)" font-size="12" font-weight="700" text-anchor="middle">Registry Admission Gates</text>
-            <text x="320" y="70" fill="var(--text-muted)" font-family="var(--font-sans)" font-size="10" text-anchor="middle">1. Visible in Mode?</text>
-            <text x="320" y="85" fill="var(--text-muted)" font-family="var(--font-sans)" font-size="10" text-anchor="middle">2. Action Class allowed?</text>
-            <text x="320" y="99" fill="var(--color-purple)" font-family="var(--font-mono)" font-size="9" text-anchor="middle">Loop Guard & Safety Policy</text>
-
-            <!-- Arrow 2 -> 3 -->
-            <path d="M410 70 H450" stroke="var(--border-card)" stroke-width="1.5" />
-            <polygon points="450,70 444,66 444,74" fill="var(--text-muted)" />
-
-            <!-- Step 3: Tool Execution -->
-            <rect x="460" y="40" width="160" height="60" rx="6" fill="rgba(16, 185, 129, 0.05)" stroke="var(--color-emerald)" />
-            <text x="540" y="65" fill="#ffffff" font-family="var(--font-sans)" font-size="12" font-weight="700" text-anchor="middle">Tool Execution (run)</text>
-            <text x="540" y="82" fill="var(--text-muted)" font-family="var(--font-sans)" font-size="10" text-anchor="middle">Isolated execution scope</text>
-
-            <!-- Arrow 3 -> 4 (Down and Right to Shaping) -->
-            <path d="M620 70 H710 V140" stroke="var(--border-card)" stroke-width="1.5" fill="none" />
-            <polygon points="710,140 706,134 714,134" fill="var(--text-muted)" />
-
-            <!-- Step 4: Result Shaper Gate -->
-            <rect x="580" y="150" width="260" height="155" rx="8" fill="rgba(245, 158, 11, 0.05)" stroke="var(--color-amber)" stroke-width="1.5" />
-            <text x="710" y="175" fill="#ffffff" font-family="var(--font-sans)" font-size="13" font-weight="700" text-anchor="middle">Result Shaper</text>
-            <text x="710" y="195" fill="var(--text-muted)" font-family="var(--font-sans)" font-size="10" text-anchor="middle">Checks byte size of result against tool limit.</text>
-
-            <rect x="595" y="210" width="230" height="40" rx="4" fill="rgba(0,0,0,0.3)" stroke="var(--border-card)" />
-            <text x="710" y="226" fill="var(--color-amber)" font-family="var(--font-sans)" font-size="10" font-weight="600" text-anchor="middle">Is Size &gt; maxBytes? 8KB backstop</text>
-            <text x="710" y="238" fill="var(--text-muted)" font-family="var(--font-mono)" font-size="9" text-anchor="middle">UTF-8 Safe Truncation</text>
-
-            <text x="710" y="270" fill="var(--text-muted)" font-family="var(--font-sans)" font-size="10" text-anchor="middle">Appends follow-up hint + details metadata</text>
-            <text x="710" y="285" fill="var(--color-cyan)" font-family="var(--font-mono)" font-size="9" text-anchor="middle">resultSize: {truncated, offloadPath?}</text>
-
-            <!-- Arrow 4 -> 5 -->
-            <path d="M580 220 H340" stroke="var(--color-cyan)" stroke-width="1.5" />
-            <polygon points="340,220 348,224 348,216" fill="var(--color-cyan)" />
-
-            <!-- Step 5: Final Clean Delivery Envelope -->
-            <rect x="40" y="160" width="280" height="130" rx="8" fill="rgba(0, 240, 255, 0.05)" stroke="var(--color-cyan)" stroke-width="1.5" />
-            <text x="180" y="185" fill="#ffffff" font-family="var(--font-sans)" font-size="13" font-weight="700" text-anchor="middle">Final Delivery</text>
-
-            <rect x="55" y="200" width="250" height="75" rx="4" fill="#04070e" stroke="var(--border-card)" />
-            <text x="65" y="218" fill="var(--color-emerald)" font-family="var(--font-mono)" font-size="10">kind: "ok"</text>
-            <text x="65" y="234" fill="var(--text-muted)" font-family="var(--font-mono)" font-size="9">output: "...[truncated]\n\n[Use a narrower query...]"</text>
-            <text x="65" y="250" fill="var(--text-muted)" font-family="var(--font-mono)" font-size="9">details: { resultSize: { truncated: true, offloadPath } }</text>
-            <text x="65" y="265" fill="var(--text-muted)" font-family="var(--font-mono)" font-size="9">scratch cap: 10MB under state/scratch</text>
-            <text x="65" y="280" fill="var(--color-cyan)" font-family="var(--font-mono)" font-size="9">terminate: true/false</text>
-
-          </svg>
-        </div>
-      </div>
-
+    </header>
+    <div class="page-layout-grid reference-layout">
+      <aside class="sidebar reference-sidebar" aria-label="On this page">
+        <nav class="toc-container">
+          <p class="toc-title">On this page</p>
+          <a class="sidebar-source" href="https://github.com/iowarp/clio-coder/blob/main/docs/architecture/prompt-envelope-and-tools.md">Canonical Markdown<br>docs/architecture/prompt-envelope-and-tools.md</a>
+          <ul class="toc-list"></ul>
+        </nav>
+      </aside>
+      <main class="reference-main" id="reference-content">
+        <article class="reference-prose glass-card">
+<blockquote>
+<p><strong>Visual blueprint:</strong> The source checkout includes the complete
+<a href="tools_blueprint.html">Prompt Envelope and Tools visual reference</a>.</p>
+</blockquote>
+<p>Clio Coder keeps the model-facing envelope stable and moves enforcement into the runtime registry and safety policy.</p>
+<p>Source of truth: <code>src/core/tool-names.ts</code>, <code>src/tools/agent-tools.ts</code>, <code>src/tools/bootstrap.ts</code>, <code>src/tools/policy.ts</code>, <code>src/tools/observation.ts</code>, <code>src/tools/ignore-policy.ts</code>, and the per-tool modules under <code>src/tools/**</code>.</p>
+<h2>One system prompt per session</h2>
+<p>The chat loop compiles one provider-facing system prompt for a session. The
+version-2 compile identity hashes the target id, runtime id, wire model id,
+autonomy, session id, working directory, sorted working-context paths, context
+window source, prompt-input epoch, resolved session inputs, and the exact
+attached tool-schema bytes. <code>mainPromptCacheIdentity</code> in
+<code>src/interactive/prompt-cache-identity.ts</code> owns that list.</p>
+<p>The compiled prompt is reused byte-for-byte on ordinary submits. It recompiles only when that key changes or when config hot-reload invalidates the prompt cache. Path-scoped project rules can therefore recompile the prompt when a matching file enters working context. When recompilation changes the text, the session ledger records a <code>promptRecompiled</code> entry with the previous hash, new hash, and token estimate.</p>
+<h2>Section order: stable prefix first</h2>
+<p>The compiled prompt lays its sections down in <code>SESSION_PROMPT_SECTION_ORDER</code> (<code>src/domains/prompts/compiler.ts</code>): identity, operating contract, delegation, skills, safety, tool contract, fleet, retrieval hints, project context, memory, runtime, then the operator-editable tail fragments (workspace root, Clio repo awareness, project rules, operator profile) in their own order.</p>
+<p>One rule fixes that list. A section goes as late as its volatility, and anything that reads a clock, a probe, or a mutable store goes after everything that does not. Every backend Clio targets caches by exact prefix and re-prefills from the earliest changed byte, so a section that can change between two turns must not sit ahead of sections that cannot. The runtime block is last of the compiled sections because its <code>Context window: N</code> moves when the backend reloads a model or a co-residency clamp lands; memory sits just ahead of it because an approved memory record rewrites that section mid-session; project rules are dead last because path-scoped rules join the prompt when a matching file enters working context.</p>
+<p><code>Context window: N</code> is the window the backend will actually serve. A recorded loaded window outranks a probe, which reports a figure the target advertises without saying it is what is open, so a resumed session states the window its ledger measured rather than a re-probed server-wide number. Each prompt-manifest record carries that window and the layer that answered it (<code>contextWindow</code>, <code>contextWindowSource</code>) alongside a <code>version</code> for the prompt layout itself, so a recompile whose only cause was the window moving is explained by the record rather than inferred.</p>
+<p><code>PROMPT_MANIFEST_VERSION</code> (<code>src/domains/session/prompt-manifest.ts</code>) is <code>2</code> as of this release, and the reordering above is what moved it. The field is additive: a record written by 0.3.8 carries no <code>version</code> and reads back as version 1, so a <code>prompt-manifest.jsonl</code> from an older session still parses. The rule for the field is that it tracks the layout rather than the inputs. Bump it when the compiled text moves for a reason other than a changed fragment, a changed tool surface, or a changed setting, so that a resumed session has the version in hand to explain the single <code>promptRecompiled</code> entry its first compile writes.</p>
+<h3>What not to add to the prefix</h3>
+<p>Two additions look free and are not.</p>
+<p>The first is a terseness rule. It is tempting to cap the prose a model emits between tool calls, because that text is generated tokens on every hop of a long turn. Anthropic measured that exact change on Claude Code and reported a 3 percent quality regression, so a word-count or verbosity limit on inter-tool text is a bad trade: the tokens it saves are the cheapest ones in the turn, and the model&#39;s own narration of what it is about to do is load-bearing for what it then does. Bound tool results instead, where a single <code>grep</code> can cost thousands of tokens and the envelope caps already do the work.</p>
+<p>The second is anything that varies with the wall clock or the working tree. No timestamp, no <code>git status</code>, no branch name, no session id, and no run id belongs anywhere in the compiled prefix. Every backend Clio targets caches by exact prefix and re-prefills from the earliest changed byte, so one such field turns the whole prompt into a cache miss on every turn for no information the model could not have asked a tool for. On the sprint&#39;s measurement server that is a whole 2,778-token prompt re-prefilled at 2.6 s where the same change behind the stable sections cost 516 tokens and 0.72 s. Volatile facts belong in the user message, in a tool result, or in the runtime block, which is last for this reason.</p>
+<p>The disk fragments under <code>src/domains/prompts/fragments/</code> are layered by who reads them. <code>identity.clio</code> and <code>operating.contract</code> are constitutional: they render for every reader, name no tool, and state what is always true about Clio and her harness. <code>operating.delegation</code> (the delegation threshold as a count taken before the first edit, with the dispatch call shape beside it; receipts, spot-checks, shared <code>[worker result]</code> notes) renders only when <code>dispatch</code> is on the session&#39;s tool surface, and <code>operating.skills</code> (skill-shaped tasks, <code>/skill &lt;name&gt;</code> suggestions) only when <code>context</code> is; a fragment that teaches a tool is absent when the tool is, the same rule the Fleet block follows. <code>identity.docs-routing</code>, the directive to call <code>context(scope=&quot;docs&quot;)</code> before answering a question about Clio herself, follows the <code>context</code> gate too, while <code>identity.self-awareness</code> (installed paths, code outranks docs, configuration locations) names no tool and is unconditional. <code>operating.worker</code> (the assigned-task contract) renders only for dispatched workers, which never see the coordinator fragments. <code>safety.&lt;level&gt;</code> states what runs, what is approval-required, and what is blocked at the effective autonomy, in the safety net&#39;s action-class vocabulary (read, write, command, <code>system_modify</code>, <code>git_destructive</code>) and never by tool name, so the same body is true on every surface; the session and every worker read that one body, and what &quot;approval-required&quot; resolves to is the only role text (one operator confirmation for the session, the worker&#39;s <code>onPermission</code> routing for a worker).</p>
+<p>Prompt extensions can add dynamic fragments for project rules, the operator profile, and Clio source-tree awareness. Pending skill requests and middleware reminders are visible text in the user message, not hidden prompt machinery.</p>
+<h2>Prompt template expansion</h2>
+<p>Prompt templates expand into the operator&#39;s user message before submission. They do not alter the compiled system prompt or bypass the trust check on project-scope compatibility roots. The prompt-root locations, frontmatter fields, and trust rules are documented in <a href="extensions_blueprint.html#prompt-templates">extensions-and-sharing.md</a>.</p>
+<p>The first whitespace character after <code>/template-name</code> is the command delimiter; CRLF counts as one delimiter. Leading whitespace before the slash is also command framing. Every byte after that delimiter is the argument payload, including leading or trailing whitespace, repeated spaces, tabs, quotes, and line breaks.</p>
+<p>The template body may use <code>$ARGUMENTS</code> to insert that raw payload byte-for-byte. Raw insertion is not recursively substituted, so placeholder-like text such as <code>$1</code> remains data. <code>$1</code> through <code>$9</code>, <code>$@</code>, <code>${@:N}</code>, and <code>${@:N:L}</code> retain shell-style parsing: single or double quotes group spaces within one argument, <code>$@</code> joins all parsed arguments with single spaces, <code>${@:N}</code> selects parsed arguments from one-based position <code>N</code>, and <code>${@:N:L}</code> selects <code>L</code> arguments beginning there. A positional placeholder with no matching argument expands to an empty string. Template names that collide with built-in slash commands fail closed with a diagnostic and are excluded from <code>/resources prompts</code>.</p>
+<h2>Directory-scoped handbook overrides</h2>
+<p>In addition to project root <code>CLIO-CODER.md</code> handbooks, Clio supports directory-scoped <code>CLIO-CODER.override.md</code> files:</p>
+<ul>
+<li>An override handbook replaces inherited project instructions for its containing directory and all descendants.</li>
+<li>Sibling directories outside the subtree continue to inherit from the root handbook or their own local overrides.</li>
+<li>Deeper subtrees within the directory may add further localized guidance.</li>
+<li>Prompt blocks preserve explicit source paths for attribution and debugging.</li>
+<li>Malformed override files fail closed rather than injecting partial guidance, and context resets never delete override files.</li>
+</ul>
+<p><code>wiki.page</code> and <code>wiki.plan</code> (<code>src/domains/prompts/fragments/wiki/*.md</code>) load through this same loader, with the same id/version/content-hash contract as every other fragment, but they are consumed differently: <code>context/wiki/prompts.ts</code> reads them by id, substitutes per-dispatch <code>{{token}}</code> placeholders (a page&#39;s path, title, and relative path; the plan file&#39;s path), and sends the result as a wiki-generation dispatch&#39;s <code>task</code>, never as a compiled system prompt. <code>{{token}}</code> substitution has no home in the fragment loader itself, the same division <code>identity.self-awareness</code>&#39;s <code>{TOKEN}</code> placeholders use in <code>compiler.ts</code>: the loader hands back a raw body, and the one caller that needs live values fills them in. Both files&#39; bodies open and close on a standalone <code>---</code> line that predates their frontmatter and was kept unchanged as body text so the substituted prompt stays byte-identical to what the old hand-rolled <code>readFileSync</code> produced.</p>
+<p>The Tool Contract section of the prompt renders a fixed set of base lines plus one optional guidance sentence per tool, sourced from the tool registry (<code>ToolMetadata.promptHint</code> in <code>src/tools/registry.ts</code>, assigned in <code>src/tools/bootstrap.ts</code>). The base lines cover the complete-surface rule, the harness model (direct tools, fleet workers, skills as distinct capability sets), the capability-inventory rule, tool-free answering, the narrow-orientation tool list, validation before final claims, and failure recovery through <code>context(scope=&quot;docs&quot;)</code> instead of blind retries. Delegation, the tasks board, and skill listing are not restated here: <code>operating.delegation</code>, the <code>tasks</code> hint, and <code>operating.skills</code> each say their rule once and render exactly when their tool is on the surface. Fleet routing, including the sentence that <code>agent:&quot;auto&quot;</code> is a fallback rather than a router, lives in the Fleet block next to the roster ids and is not restated here; the threshold that says when to delegate at all is the opening of <code>operating.delegation</code>, not a Fleet line, because on the round-2 drive with Qwen3.8-27B the bare threshold after the tool contract lost to inertia on every run, while the same count stated up front with the call shape next to it dispatched both workers on every two-changes run and scout on every reconnaissance run once the sentence about repository size was in place. The chat loop derives the hint list once from the session&#39;s frozen tool surface at compile time, and the compiler renders the hints sorted by tool name, so the compiled text depends only on which hinted tools are on the surface. The frozen name list is the surface: a hint renders only for a tool in that list, and the gates that decide whether the Delegation, Skills, and docs-routing passages render read the same list, so a stale hint can neither render itself nor pull in a passage for a tool the model cannot call. Today six tools carry hints: <code>ask_user</code>, <code>bash</code>, <code>code_nav</code>, <code>context</code>, <code>panes</code>, and <code>tasks</code>. A hint carries only a decision-local call shape the tool&#39;s own description cannot; policy that applies across tools is said once in its prompt section, so <code>dispatch</code> carries no hint. Removing a tool from the surface removes its hint with no compiler change; adding a hint to a tool is a deliberate prompt-text change that must land with updated prompt contract tests and a CHANGELOG note.</p>
+<h2>One tool surface per session</h2>
+<p>For tool-capable providers, Clio sends the full registry as the session tool surface. The list is deterministic and sorted through the worker-tool resolver (<code>resolveAgentTools</code> in <code>src/tools/agent-tools.ts</code>), so the serialized schemas stay byte-identical on every submit. The schema handed to the agent loop is <code>wireParameterSchema(spec.parameters)</code>: a copy with every <code>~</code>-prefixed key removed, because TypeBox 1.x stamps string-keyed markers such as <code>~unsafe</code> and <code>~optional</code> on the schemas it builds and, unlike the older symbol keys, those survive JSON serialization and reach the model as properties. Validation is unaffected (<code>Value.Check</code> answers identically with and without them) and the registry keeps the original object. <code>src/tools/agent-tools.ts</code> is the single agent-tool adapter across the codebase. Both the orchestrator session and worker subprocesses resolve their tool set through the same <code>effectiveToolNames</code> narrowing function, ensuring that the attested signature and runtime surface cannot diverge.</p>
+<p>Tools are keyed strictly by the canonical <code>ToolName</code> union defined in <code>src/core/tool-names.ts</code> with no alias table. Pure and idempotent <code>prepareArguments</code> normalizers defined on <code>ToolSpec</code> serve as the sole leniency layer for coercing legacy or weak-model parameter formats.</p>
+<p>Tool visibility is not a per-turn hinting system. Pending-skill policy, ask-user policy, Bash policy, path policy, protected artifacts, dispatch admission, middleware, and the autonomy mapping are enforced when a tool is invoked. The <code>autonomy</code> level is applied at registry admission after the safety net passes a call; the safety prompt fragment mirrors that enforced matrix as guidance to the model. Prompt text and provider schemas do not bypass the registry.</p>
+<p>Providers that cannot call tools receive no schemas, and the prompt tells the model to proceed without tool calls.</p>
+<h2>Canonical worker harness</h2>
+<p>Native and mediated dispatch workers use a separate prompts-domain compiler over the same loaded fragment table. Its stable system prompt has five fixed sections plus one optional trailing one: identity-lite, the constitutional operating contract plus the <code>operating.worker</code> assigned-task contract, a tool contract sliced to the final canonical toolkit, the same <code>safety.&lt;level&gt;</code> fragment the session reads for the single effective autonomy under a worker one-liner that carries the run&#39;s permission routing, one final persona, and the operator-editable layer when either of its parts renders non-empty: active project rules scoped to this run&#39;s inferred working context, and the operator profile. A request persona override replaces only the recipe body; eligible bound-skill instructions are composed inside that same final persona and never widen tools.</p>
+<p>The operator-editable layer reaches a worker through <code>additionalFragments</code>, the same channel <code>compile()</code> uses for the session, so nothing splices into an existing section. The operator profile renders unconditionally, capped, the same as it does for the session: it governs how the worker should do the task (validation preference, commit-message style, local-only paths), not only how the orchestrator talks to the operator. Project rules are scoped to the worker&#39;s working context rather than shipped wholesale. That context is <code>writeRoots</code>, when the caller sets them, plus path-like tokens recalled from the task and briefing text, since the model-facing dispatch tool has no structured path field. A missed path token means a rule can go unseen; it can never fabricate one, because <code>selectActiveRules</code> still requires a real glob match.</p>
+<p>The compiler runs after target capability and tool-profile admission. Its canonical tool names are the same names transported in <code>WorkerSpec.allowedTools</code> and attached as schemas; routine non-Scout work removes <code>code_nav</code>, narrow profiles remove their excluded schemas and guidance, tool-incapable targets get an explicit no-tools contract, and Claude SDK aliases are filtered from the same canonical set. ACP&#39;s external inventory is unknown, so ACP bounded-role admission continues to validate the unchanged raw persona rather than fabricating a complete native schema list.</p>
+<p>Project context, memory, bounded dispatch briefing, pipeline input, the assigned task, and the per-run safety-posture reminder remain dynamic user messages. A briefing is a separately delimited message labeled as untrusted task context/data; it is never concatenated into the task or stable system prompt. Dynamic ordering is project, safety, memory, briefing, then pipeline input, with pipeline input last. These messages do not affect the stable composition hash. Persona, effective autonomy, target tool capability, or final toolkit changes do affect it.</p>
+<h2>Seven planes, twenty-one tools</h2>
+<p>The canonical builtin catalog contains 21 tools organized in seven planes. A
+particular session or worker receives the subset whose dependencies and policy
+allow it to register. Each plane is one policy unit: its tools share an action
+class, a size posture, a details schema, and a concurrency rule.
+<code>src/tools/policy.ts</code> asserts these invariants at bootstrap, so drift between
+the plane design, the safety classifier, and the registered specs fails loudly
+instead of shipping a surface that behaves differently from what the policy
+engine assumes.</p>
+<table>
+<thead>
+<tr>
+<th>Plane</th>
+<th>Tools</th>
+<th>Action class</th>
+<th>Concurrency</th>
+</tr>
+</thead>
+<tbody><tr>
+<td>OBSERVE</td>
+<td><code>read</code>, <code>grep</code>, <code>find</code>, <code>ls</code>, <code>code_nav</code>, <code>context</code>, <code>credential_present</code></td>
+<td>read</td>
+<td>parallel</td>
+</tr>
+<tr>
+<td>MUTATE</td>
+<td><code>write</code>, <code>edit</code></td>
+<td>write</td>
+<td>sequential</td>
+</tr>
+<tr>
+<td>EXECUTE</td>
+<td><code>bash</code>, <code>verify</code></td>
+<td>execute</td>
+<td>sequential</td>
+</tr>
+<tr>
+<td>EXECUTE</td>
+<td><code>git</code></td>
+<td>read</td>
+<td>parallel</td>
+</tr>
+<tr>
+<td>ORCHESTRATE</td>
+<td><code>dispatch</code>, <code>steer</code></td>
+<td>dispatch</td>
+<td>sequential</td>
+</tr>
+<tr>
+<td>ORCHESTRATE</td>
+<td><code>monitor</code></td>
+<td>read</td>
+<td>parallel</td>
+</tr>
+<tr>
+<td>ORCHESTRATE</td>
+<td><code>tasks</code></td>
+<td>read</td>
+<td>sequential</td>
+</tr>
+<tr>
+<td>ORCHESTRATE</td>
+<td><code>ledger</code></td>
+<td>read</td>
+<td>sequential</td>
+</tr>
+<tr>
+<td>ORCHESTRATE</td>
+<td><code>panes</code></td>
+<td>read</td>
+<td>sequential</td>
+</tr>
+<tr>
+<td>RETRIEVE</td>
+<td><code>web_fetch</code></td>
+<td>read</td>
+<td>parallel</td>
+</tr>
+<tr>
+<td>INTERACT</td>
+<td><code>ask_user</code></td>
+<td>read</td>
+<td>sequential</td>
+</tr>
+<tr>
+<td>ARTIFACT</td>
+<td><code>artifact</code></td>
+<td>write</td>
+<td>sequential</td>
+</tr>
+</tbody></table>
+<p>Several tools sit in a plane for containment rather than class. <code>git</code> is
+read-only inspection (op=status/diff/log) that runs on the safe-exec spine, so
+it lives in the EXECUTE plane with read-class safety disposition. <code>monitor</code>
+never mutates a run, so it stays read class and parallel inside the ORCHESTRATE
+plane. <code>tasks</code> orchestrates the agent&#39;s own work rather than workers: it mutates
+only the session&#39;s task ledger, never the workspace, so it keeps read class
+(never gated behind a confirmation) but runs sequential so two board mutations
+in one batch cannot interleave. <code>ledger</code> is the agent ledger, the coordination
+board concurrent dispatch workers share: a post reaches a one-way control lane
+and a read answers from a local mirror, so it touches no workspace and stays
+read class, and reviewers and judges are pinned to read-only autonomy where a
+write class would block the peer review the board exists for. <code>panes</code> controls
+only Clio-owned terminal panes through the live mux; it stays read class but is
+sequential so two operations cannot race the same pane registry.</p>
+<p>Registration is conditional on wiring: <code>context</code> gains its workspace scope only
+when a session contract is bound, <code>dispatch</code>/<code>monitor</code>/<code>steer</code> register only
+with a dispatch contract, <code>ask_user</code> registers only when an interactive handler
+exists, <code>ledger</code> registers only when a worker bound its dispatch&#39;s agent-ledger
+port (the session never does, and without a port the tool could only answer
+&quot;no ledger&quot;), and <code>panes</code> registers only when a pane host answered detection and
+the mux is live. Dispatch tool profiles narrow the surface for workers:
+<code>minimal-local</code> is <code>read</code>, <code>grep</code>, <code>find</code>, <code>ls</code>, <code>git</code>, <code>context</code>, <code>code_nav</code>,
+and <code>ledger</code>; <code>science-local</code> adds <code>verify</code>; <code>full-agent</code> keeps everything that
+the runtime registered and the recipe allows.</p>
+<p><code>ask_user</code> keeps its typed <code>exposure: local | outward</code> admission fact separate from caller prose. The registry uses exposure only in the enforced autonomy mapping. After admission, the host carries the normalized fact into the shared decision-presentation classifier; question text, headers, options, summaries, and requested color or severity words cannot select a consequence tier. The resulting presentation object contains no admission disposition and cannot grant authority.</p>
+<h3>Consolidated call shapes</h3>
+<p>Several tools absorb what used to be separate tools:</p>
+<ul>
+<li><code>find(pattern, path?, order?, limit?, include_ignored?)</code> locates paths by glob pattern (<code>*</code>, <code>**</code>, <code>?</code>, <code>[abc]</code>), default limit 500. <code>order=&quot;path&quot;</code> (default) returns fd&#39;s native order; <code>order=&quot;mtime&quot;</code> returns newest first from a bounded candidate set instead of statting the whole tree, and reports <code>details.candidates</code> when the candidate cap made the ordering approximate.</li>
+<li><code>grep(pattern, path?, mode?, glob?, ignore_case?, literal?, context?, limit?, include_ignored?)</code> searches file contents with ripgrep, degrading to a bounded pure-Node search when rg is absent. <code>mode=content</code> (default) returns line-referenced matches, <code>mode=files</code> returns matching paths, <code>mode=count</code> returns per-file counts. Context lines are consumed from rg&#39;s <code>--json</code> stream.</li>
+<li><code>context(scope=&quot;workspace&quot;|&quot;docs&quot;|&quot;skills&quot;)</code> is the one OBSERVE entry point for material about the working environment: the session workspace snapshot, retrieval over Clio&#39;s bundled documentation (<code>query</code> required), and skill listing or loading (<code>name</code> optional, <code>include_tree</code> for the skill&#39;s resource files).</li>
+<li><code>verify(check?, path?, args?, browser?, cwd?, timeout_ms?)</code> runs declared verification. <code>verify()</code> lists package.json verification scripts and strict version-1 <code>.clio-coder/verifiers.yaml</code> entries through the same <code>{id, description, command, cwd, timeoutMs, tags, source}</code> projection. <code>verify(check=&quot;&lt;id&gt;&quot;)</code> runs a package script or the catalog&#39;s exact argv/cwd/timeout through safe-exec with no shell. Model <code>args</code>, cwd, timeout, output-cap, and environment fields cannot mutate a project entry. <code>verify(check=&quot;frontend&quot;, path=...)</code> validates an HTML/CSS/JS artifact without granting shell access.</li>
+<li><code>artifact(kind=&quot;plan&quot;|&quot;review&quot;|&quot;report&quot;, content, ...)</code> writes named artifacts behind one surface: Markdown documents (default <code>.clio-coder/artifacts/PLAN.md</code>/<code>REVIEW.md</code>/<code>REPORT.md</code>; <code>path</code> may override inside the workspace) that terminate the turn, because writing the artifact is the answer. Skills are not artifacts; a <code>SKILL.md</code> is written with the ordinary write tool and validated by the skills loader.</li>
+<li><code>dispatch(task?, tasks?, mode?, ...)</code> supports a first-class singular assignment (<code>task</code>) and a batch (<code>tasks</code>), never both. <code>task</code> is worker instructions; <code>briefing</code> is optional bounded parent context/data and cannot replace it. Briefing stays a separate dynamic message and receipt provenance, never part of the receipt task. A shared top-level briefing applies to strings and objects without an override; an object-level briefing wins. Blank values are omitted, the cap is 12,000 UTF-8 bytes, and approval pins the exact canonical value. Ordinary handles enter one registered event consumer immediately. Synchronous calls auto-wait for stream-and-receipt completion; <code>detach:true</code> returns ids after durable batch registration while the same consumer continues. Review and compete retain gate-sensitive direct drains. Task objects may include <code>persona</code>, <code>tool_profile</code>, and a typed <code>budget: {toolCalls, readReserve, retryRevision?}</code>. The budget must fit the recipe&#39;s authored range and the operator lifetime cap. <code>retryRevision</code> is the only authority for a later retry, result-contract revision, or review revision to grow its phase. Pipeline output is threaded as bounded data. A successful native or ACP run requires a nonempty receipt-sealed final output; exit zero without one fails as <code>worker_final_output_missing</code>, with unfinished text retained only as partial diagnostics. <code>dispatch(list=true)</code> renders the catalog.</li>
+<li><code>monitor(run_id?, mode?)</code> is read-only visibility into known synchronous and detached runs: <code>list</code> enumerates, <code>status</code> reports one, <code>peek</code> returns the in-process event tail, <code>receipt</code> exposes the stored evidence, and <code>wait</code> observes one run without collecting or canceling it. <code>collect</code> is the authoritative terminal batch operation over a detached batch or run-id list; collect before final synthesis. Completed output reports receipt integrity, evidence verification, briefing provenance, and bounded project-context provenance as different fields.</li>
+<li><code>steer(run_id, action, message?)</code> controls a running worker: <code>guide</code> writes a canonical trimmed steering message to an HTTP or SDK worker and <code>cancel</code> terminates it. Successfully written steers gain ordered byte/hash/timestamp provenance; after the runtime accepts the guidance, <code>clio_coder_steer_received</code> acknowledges the exact matching sequence, and prose is never stored in ledger or receipt. Single-shot subprocess runtimes and ACP remain non-steerable. Interactive operators can steer synchronous live-input runs; parent-model steering requires detached ids because model tools are sequential.</li>
+</ul>
+<h3>One ignore policy for path walkers</h3>
+<p><code>grep</code>, <code>find</code>, and their pure-Node fallbacks answer &quot;which parts of the tree are visible&quot; from one shared policy in <code>src/tools/ignore-policy.ts</code>. Three layers apply: <code>.clio-coder</code>, <code>.fallow</code>, and <code>.git</code> are always excluded; <code>.gitignore</code> is honored natively by rg/fd; and one generated-dirs list (<code>node_modules</code>, <code>dist</code>, <code>build</code>, <code>coverage</code>, <code>.venv</code>, and similar) is force-excluded even when a project forgot to gitignore it. <code>include_ignored: true</code> lifts the gitignore and generated-dirs layers together. The clio-internal layer always stands, except that pointing a tool directly at one of those directories means the caller wants those paths.</p>
+<h2>The observation envelope</h2>
+<p>The six content-returning OBSERVE tools (<code>read</code>, <code>grep</code>, <code>find</code>, <code>ls</code>, <code>code_nav</code>, <code>context</code>) close every result through one shared envelope in <code>src/tools/observation.ts</code>. <code>credential_present</code> sits in the OBSERVE plane but returns a typed boolean and carries no envelope cap. The envelope owns four guarantees.</p>
+<p><strong>One notice line, one format.</strong> A truncated text result appends exactly one notice:</p>
+<pre><code class="language-text">[&lt;tool&gt;: &lt;shown&gt;/&lt;total&gt; &lt;unit&gt; shown (&lt;shownSize&gt; of &lt;totalSize&gt;) | full: &lt;offloadPath&gt; | next: &lt;exact-call&gt;]
+</code></pre>
+<p>Unknown segments are omitted. <code>&lt;total&gt;</code> renders as <code>N+</code> when the search was killed early at its limit, meaning matches beyond it exist but were never counted. <code>next</code> is always an exact continuation call fragment such as <code>limit=200</code> or <code>offset=451</code>, never prose. Untruncated results get no notice. Empty results are standardized: <code>grep</code> returns <code>No matches found</code>, <code>find</code> returns <code>No files found matching pattern</code>, <code>ls</code> returns <code>(empty directory)</code>, and the JSON-format tools return valid JSON with empty arrays and <code>next</code> populated.</p>
+<p><strong>Offload on truncation.</strong> When a byte cap cuts collected content, the tool spills its full rendering to the per-session scratch file (<code>&lt;stateDir&gt;/scratch/&lt;sessionId&gt;/&lt;sha256 of the captured text&gt;.txt</code>) and reports the path in the notice, so no collected match, path, or line is ever unrecoverable. Two deliberate exceptions exist: <code>read</code> never offloads because the source file is directly re-addressable via <code>next: offset=N</code>, and a bare item-limit truncation without a byte cut continues via <code>next</code> alone, since an offload would only duplicate the body.</p>
+<p><strong>Always-valid JSON.</strong> <code>code_nav</code> and the JSON scopes of <code>context</code> declare <code>format: &quot;json&quot;</code>. A JSON payload must parse or be replaced whole; it is never cut mid-document. An oversize payload is offloaded and the body is replaced by the parseable stub:</p>
+<pre><code class="language-json">{&quot;error&quot;:&quot;result exceeded &lt;cap&gt;&quot;,&quot;offloadPath&quot;:&quot;...&quot;,&quot;next&quot;:&quot;...&quot;}
+</code></pre>
+<p><strong>One turn budget.</strong> All six envelope tools draw from a single per-turn pool keyed <code>sessionId:turnId</code>, default 192KB and configured by <code>safety.limits.observationBytesPerTurn</code>. Each call reserves the minimum of its self cap and the remaining budget before doing the work. An exhausted pool short-circuits with an <code>[observation budget exhausted ...]</code> notice naming the tool, the subject, and the used/limit sizes, instead of paying for a search whose output could not be returned. A call whose cap was reduced by the pool appends a budget note telling the model to narrow its arguments or continue in a follow-up turn.</p>
+<p>Per-call self caps: <code>read</code> 50KB (<code>safety.limits.readBytesPerCall</code>), <code>grep</code> 16KB for <code>mode=content</code> and 8KB for <code>files</code>/<code>count</code>, <code>find</code> 8KB, <code>ls</code> 8KB, <code>code_nav</code> 16KB, <code>context</code> 16KB for docs and 50KB for skills/workspace. The registry backstop cap for each envelope tool is its self cap plus 2KB slack, so a tool&#39;s own notice with its exact continuation call survives shaping instead of being cut again and replaced by a generic hint; the bootstrap policy assertion fails loudly if a cap ever drops below that.</p>
+<p>Every envelope result carries <code>details.observation</code> (<code>{tool, unit, shownCount, totalCount, shownBytes, totalBytes, truncated, format, next?, offloadPath?, budget?}</code>) for the TUI ledger, session turns, and observers.</p>
+<h2>Description tiering</h2>
+<p>Tool descriptions are tiered by how much a wrong call costs. The hot tools the model calls constantly (<code>read</code>, <code>grep</code>, <code>find</code>, <code>dispatch</code>) embed their operational contract in the description: caps, modes, ignore semantics, and how truncated results continue. Every other tool carries a one-to-two-sentence statement of what it does, and deep usage guidance lives in the bundled docs corpus (<a href="tool_usage_blueprint.html">tool-usage.md</a>) rather than the prompt prefix, retrievable on demand through <code>context(scope=&quot;docs&quot;)</code>. This keeps the serialized schema block small and byte-stable while still giving the model a path to depth when it needs one.</p>
+<h2>The gateway reservation</h2>
+<p><code>gateway</code> is a design-reserved name in <code>src/core/tool-names.ts</code>, not an implemented tool. The reserved contract sketch is <code>gateway(op: &quot;find&quot; | &quot;describe&quot; | &quot;call&quot;, capability?, args?)</code>: an MCP/database proxy with one fixed schema, where external capabilities surface through find/describe/call results rather than as per-capability schemas in the prompt prefix. It would carry the network action class and run sequentially. Reserving the name keeps classifiers and profiles from ever assigning <code>gateway</code> to a dynamic tool.</p>
+<h2>Context protection</h2>
+<p>Clio uses two context-protection mechanisms.</p>
+<ol>
+<li>Tool results are capped at the source and again at the registry boundary. OBSERVE tools use the envelope caps above. Exact mutation tools (<code>write</code>, <code>edit</code>, <code>artifact</code>) use 8KB; <code>steer</code> and <code>credential_present</code> use 4KB; <code>ledger</code> uses 16KB; <code>panes</code> uses 8KB; and <code>ask_user</code> has a 20KB policy. Summary-kind tools (<code>bash</code>, <code>git</code>, <code>verify</code>, <code>dispatch</code>, <code>monitor</code>) use 16KB at the registry boundary. Bash also exposes the canonical per-call <code>output_policy</code>: omitted/<code>bounded</code> keeps its diagnostic tail, <code>summary</code> selects stable redacted head/error/tail evidence, <code>metadata-only</code> keeps facts and retrieval without stdout/stderr context, and <code>full</code> succeeds only inside the same hard result budget or records a typed downgrade. This model-context choice does not change the folded tail-biased operator presentation. <code>web_fetch</code> is bounded at 16KB after shaping and may read more before it: its <code>max_bytes</code> argument defaults to 600KB and is hard-capped at 5MB. Tools without an explicit result-size policy use an approximately 18KB generic backstop. Over-cap generic results are shown briefly and, when possible, saved under <code>&lt;stateDir&gt;/scratch/&lt;sessionId&gt;/&lt;sha256 of the captured text&gt;.txt</code> with an <code>offloadPath</code> detail and a 10MB scratch-file cap.</li>
+<li>Auto-compaction uses one pressure threshold. The default threshold is 0.8. When pressure crosses the threshold, Clio first applies a non-destructive working-set eviction and records the evicted items in the session ledger. If pressure remains above the threshold, it runs the LLM summary compaction path and replays from the compacted session view. The older destructive observation/thinking mask is available only as a compatibility escape hatch when <code>CLIO_CODER_LEGACY_MASK=1</code>.</li>
+</ol>
+<p>Manual <code>/context compact</code>, <code>CLIO_CODER_FORCE_COMPACT=1</code>, and overflow recovery force the LLM summary path directly.</p>
+<p>Compaction rewrites history, so the next turn on a local single-slot backend is expected to lose prefix-cache alignment. Clio records <code>expectedColdReasons</code> and shows one dim notice for that turn.</p>
+<h2>Inspecting a session</h2>
+<p>Timing and cache behavior are persisted per API call, so a finished session can be inspected from its stored artifacts alone. Each assistant entry in the session ledger (<code>current.jsonl</code>, under the directory reported by <code>clio-coder paths</code>) carries <code>timing { ttftMs, apiMs }</code> and <code>promptCache { input, cacheRead, cacheWrite, backendVerdict }</code>, and the run&#39;s first persisted call also carries <code>expectedColdReasons</code>. Cache verdicts are <code>hot</code>, <code>partial</code>, <code>cold</code>, or <code>small</code>.</p>
+<p>For aggregate cost and token facts across sessions, use <code>clio-coder usage report --days &lt;n&gt;</code>. Inside the TUI, <code>/cost</code> shows session totals and <code>/context</code> opens the context-window ledger overlay.</p>
+<h2>Self-documentation retrieval</h2>
+<p><code>context(scope=&quot;docs&quot;)</code> is the model-facing companion to the human <code>clio-coder docs</code> server. From a source checkout, the server serves <code>docs/html/**</code> blueprints for people; in every installation, the docs scope indexes the bundled Markdown corpus for agents. It is deterministic and offline: no embeddings service, network call, or filesystem write is needed.</p>
+<p>The search index splits markdown into heading-delimited sections, records heading breadcrumbs and line ranges, and ranks results with light stemming, controlled Clio vocabulary aliases, phrase boosts, and BM25-style body scoring. The tool returns compact JSON containing corpus metadata, normalized and expanded query terms, and ranked hits with <code>file</code>, <code>heading</code>, <code>breadcrumb</code>, <code>anchor</code>, section <code>lines</code>, <code>snippetLines</code>, a bounded <code>snippet</code>, <code>matchedTerms</code>, <code>signals</code>, <code>coverage</code>, and <code>score</code>. <code>limit</code> defaults to 5 sections and caps at 12. The per-file filter the pre-consolidation docs tool accepted was dropped; narrow with more specific query terms instead. Even an empty result is valid JSON with empty arrays and a populated <code>next</code> continuation.</p>
+<h2>Edit matching safety</h2>
+<p>The <code>edit</code> tool first attempts exact matching. If the model&#39;s old text differs
+only by normalized quote, dash, whitespace, or indentation details, Clio maps
+the normalized match back to the original line span and splices only the
+intended replacement. Unchanged spans keep their original bytes, including
+smart punctuation and CRLF line endings. Ambiguous duplicate matches,
+overlapping hunks, empty changes, and no-op edits are rejected instead of
+guessing.</p>
+        </article>
+        <nav class="related-nav" aria-label="Adjacent references">
+          <a class="nav-link-card" href="pi_boundary_blueprint.html"><span class="nav-label">Previous</span><span class="nav-title">Pi SDK Boundary</span></a>
+          <a class="nav-link-card next" href="provider_adapter_blueprint.html"><span class="nav-label">Next</span><span class="nav-title">Provider Adapter Cookbook</span></a>
+        </nav>
+        <p class="reference-footer-note">Canonical content lives in the mapped Markdown page. This visual counterpart adds navigation without changing the contract.</p>
+      </main>
     </div>
+    <footer>Clio Coder documentation · source-aligned at v0.4.2</footer>
   </div>
-
-  <!-- Tab: Calculator -->
-  <div id="tab-calculator" class="tab-pane">
-    <div class="grid-2">
-      <!-- Input Panel -->
-      <div class="glass-card">
-        <h2 class="card-title">Prompt Envelope Settings</h2>
-
-        <div class="scenario-grid">
-          <button type="button" class="scenario-pill" onclick="loadScenario('standard')">Standard Code Turn</button>
-          <button type="button" class="scenario-pill" onclick="loadScenario('planning')">Planning Phase</button>
-          <button type="button" class="scenario-pill" onclick="loadScenario('constrained')">Constrained Context</button>
-          <button type="button" class="scenario-pill" onclick="loadScenario('no-tools')">Fallback (No Tools)</button>
-        </div>
-
-        <div class="form-row">
-          <div class="form-group">
-            <label for="context-window">Context Window Size</label>
-            <select id="context-window" onchange="calculateTokenPressure()">
-              <option value="4096">4,096 tokens (Llama-3-8B-local)</option>
-              <option value="8192">8,192 tokens</option>
-              <option value="16384">16,384 tokens</option>
-              <option value="32768" selected>32,768 tokens (Mistral-Large-local)</option>
-              <option value="65536">65,536 tokens</option>
-              <option value="131072">131,072 tokens (Claude 3.5 Sonnet / Gemini)</option>
-            </select>
-          </div>
-          <div class="form-group">
-            <label for="mode-select">Active Mode Profile</label>
-            <select id="mode-select" onchange="_onModeChange()">
-              <option value="default" selected>default (Read, Write, Exec, Dispatch)</option>
-              <option value="advise">advise (Read, Dispatch only; restricted write)</option>
-              <option value="super">super (Read, Write, Exec, Dispatch, Sys-Modify)</option>
-            </select>
-          </div>
-        </div>
-
-        <div class="form-row">
-          <div class="form-group">
-            <label for="delivery-mode">Delivery Mode</label>
-            <select id="delivery-mode" onchange="calculateTokenPressure()">
-              <option value="reduced-repeated-envelope" selected>reduced-repeated-envelope</option>
-              <option value="prefix-cache-deterministic">prefix-cache-deterministic</option>
-              <option value="no-tools-fallback">no-tools-fallback</option>
-            </select>
-          </div>
-          <div class="form-group">
-            <label for="thinking-applied">Thinking Configuration</label>
-            <select id="thinking-applied" onchange="calculateTokenPressure()">
-              <option value="applied" selected>applied (budget: medium, mechanism: thinking)</option>
-              <option value="unsupported">unsupported</option>
-              <option value="always-on">always-on</option>
-            </select>
-          </div>
-        </div>
-
-        <div class="form-group">
-          <label>Active Tools & Schemas this Turn</label>
-          <div class="checkbox-grid" id="tools-checkboxes">
-            <!-- Populated dynamically by javascript -->
-          </div>
-        </div>
-
-        <div class="form-group">
-          <label for="static-shell-input">Static Shell Parts (Verbatim Harness/Identity/Safety)</label>
-          <textarea id="static-shell-input" class="code-editor" rows="5" oninput="calculateTokenPressure()"></textarea>
-        </div>
-
-        <div class="form-group">
-          <label for="dynamic-memory-input">Dynamic Turn: Memory Section</label>
-          <textarea id="dynamic-memory-input" class="code-editor" rows="2" oninput="calculateTokenPressure()"></textarea>
-        </div>
-
-        <div class="form-group">
-          <label for="dynamic-project-input">Dynamic Turn: Project Files & Context</label>
-          <textarea id="dynamic-project-input" class="code-editor" rows="3" oninput="calculateTokenPressure()"></textarea>
-        </div>
-
-        <div class="form-group">
-          <label for="user-query-input">Dynamic Turn: User Request (Query)</label>
-          <textarea id="user-query-input" class="code-editor" rows="3" oninput="calculateTokenPressure()"></textarea>
-        </div>
-      </div>
-
-      <!-- Result Panel -->
-      <div class="glass-card">
-        <h2 class="card-title">Envelope Pressure Diagnostics</h2>
-
-        <div class="pressure-panel">
-
-          <div style="display:flex; justify-content:space-between; align-items:center;">
-            <span style="font-weight:700;">Context Window Pressure</span>
-            <span id="pressure-ratio" style="font-family:var(--font-mono); font-weight:700;">0 / 32,768 (0.00%)</span>
-          </div>
-
-          <div class="progress-bar-container">
-            <div class="progress-bar-fill" id="pressure-bar"></div>
-          </div>
-
-          <div style="display:flex; justify-content:space-between; align-items:center; margin-top: -0.25rem;">
-            <span class="status-pill pill-emerald" id="capacity-status">Optimal</span>
-            <span id="capacity-left" style="font-size:0.85rem; color:var(--text-muted);">32,768 tokens remaining</span>
-          </div>
-
-          <div class="data-grid" style="margin-top: 1rem;">
-            <div class="data-card">
-              <div class="data-val" id="val-static">0</div>
-              <div class="data-label">Static Shell</div>
-            </div>
-            <div class="data-card">
-              <div class="data-val" id="val-session">0</div>
-              <div class="data-label">Session Shell</div>
-            </div>
-            <div class="data-card">
-              <div class="data-val" id="val-dynamic">0</div>
-              <div class="data-label">Dynamic Turn</div>
-            </div>
-            <div class="data-card">
-              <div class="data-val" id="val-tools">0</div>
-              <div class="data-label">Tool Schemas</div>
-            </div>
-          </div>
-
-          <table class="segment-table">
-            <thead>
-              <tr>
-                <th>Segment ID</th>
-                <th>Tier</th>
-                <th>Hash (SHA-256)</th>
-                <th>Tokens</th>
-                <th>Status</th>
-              </tr>
-            </thead>
-            <tbody id="segments-table-body">
-              <!-- Populated dynamically by javascript -->
-            </tbody>
-          </table>
-
-          <div class="form-group" style="margin-top:1rem;">
-            <div class="console-header">
-              <span>Resulting compiled Prompt Envelope Signature (JSON)</span>
-              <button type="button" class="copy-btn" onclick="_copyText('envelope-signature-out')">Copy JSON</button>
-            </div>
-            <pre class="console-out" id="envelope-signature-out"></pre>
-          </div>
-
-          <div class="form-group">
-            <div class="console-header">
-              <span>Verbatim System Prompt Sent to Provider</span>
-              <button type="button" class="copy-btn" onclick="_copyText('system-prompt-out')">Copy Prompt</button>
-            </div>
-            <pre class="console-out" id="system-prompt-out"></pre>
-          </div>
-
-        </div>
-      </div>
-    </div>
-  </div>
-
-  <!-- Tab: Simulator -->
-  <div id="tab-simulator" class="tab-pane">
-    <div class="grid-2">
-      <!-- Left side: Tool Call Form -->
-      <div class="glass-card">
-        <h2 class="card-title">Tool Call Invocation</h2>
-        <p class="card-subtitle">Format tool arguments into Canonical JSON, check loop detectors, and trigger security validation policies.</p>
-
-        <div class="form-group">
-          <label for="sim-mode-select">Simulated Current Mode</label>
-          <select id="sim-mode-select" onchange="onSimModeChange()">
-            <option value="default" selected>default (Normal operations)</option>
-            <option value="advise">advise (Read/Dispatch only)</option>
-            <option value="super">super (Full privileges)</option>
-          </select>
-        </div>
-
-        <div class="form-row">
-          <div class="form-group">
-            <label for="sim-tool-select">Select Tool Name</label>
-            <select id="sim-tool-select" onchange="onSimToolChange()">
-              <!-- Populated dynamically -->
-            </select>
-          </div>
-          <div class="form-group">
-            <label for="sim-max-bytes">Result Bounded Limit (Max Bytes)</label>
-            <input type="number" id="sim-max-bytes" value="200" min="50" max="60000" oninput="simulateToolFlow()">
-          </div>
-        </div>
-
-        <div class="form-group">
-          <label for="sim-args">Arguments (JSON Format)</label>
-          <textarea id="sim-args" class="code-editor" rows="5" oninput="simulateToolFlow()"></textarea>
-          <div id="args-json-err" style="color:var(--color-rose); font-size:0.8rem; margin-top:0.25rem; display:none;">Invalid JSON format</div>
-        </div>
-
-        <div class="form-group">
-          <label for="sim-raw-output">Simulated Raw Output from Tool Execution</label>
-          <textarea id="sim-raw-output" class="code-editor" rows="5" oninput="simulateToolFlow()">[
-  {"id": 1, "symbol": "compile", "path": "src/domains/prompts/compiler.ts", "line": 402},
-  {"id": 2, "symbol": "buildPromptEnvelope", "path": "src/domains/prompts/compiler.ts", "line": 362},
-  {"id": 3, "symbol": "estimatePromptTokens", "path": "src/domains/prompts/compiler.ts", "line": 316},
-  {"id": 4, "symbol": "renderToolContractBlock", "path": "src/domains/prompts/compiler.ts", "line": 184},
-  {"id": 5, "symbol": "renderRuntimeBlock", "path": "src/domains/prompts/compiler.ts", "line": 147},
-  {"id": 6, "symbol": "lookupFragment", "path": "src/domains/prompts/compiler.ts", "line": 120}
-]</textarea>
-        </div>
-
-        <div class="form-row">
-          <button type="button" class="btn btn-primary" onclick="_executeSimulatedCall()">Submit Call to Registry</button>
-          <button type="button" class="btn btn-danger" onclick="_clearSimHistory()">Clear History & Reset Loop</button>
-        </div>
-
-        <div class="form-group" style="margin-top:1.5rem;">
-          <label>Sliding Window History (10s window, max 50 calls)</label>
-          <div class="history-list" id="history-items">
-            <div style="color:var(--text-dark); text-align:center; padding:1.5rem 0; font-size:0.85rem;">No recent calls in buffer</div>
-          </div>
-        </div>
-
-      </div>
-
-      <!-- Right side: Registry & Shaping Results -->
-      <div class="glass-card">
-        <h2 class="card-title">Registry Gates & Result Shaping Verdict</h2>
-
-        <div id="verdict-display" class="verdict-box">
-          <!-- Populated by JavaScript -->
-        </div>
-
-        <div class="form-group">
-          <label>Parsed & Canonical Serialized Args (canonicalJson)</label>
-          <pre class="console-out" id="canonical-args-out" style="max-height: 100px;"></pre>
-        </div>
-
-        <div class="form-row">
-          <div class="form-group">
-            <label>Tool Call Fingerprint (Hash)</label>
-            <pre class="console-out" id="call-hash-out" style="max-height: 50px; padding:0.4rem 0.8rem; overflow:hidden; text-overflow:ellipsis;"></pre>
-          </div>
-          <div class="form-group">
-            <label>Safety Classification Class</label>
-            <pre class="console-out" id="class-out" style="max-height: 50px; padding:0.4rem 0.8rem; overflow:hidden; text-overflow:ellipsis;"></pre>
-          </div>
-        </div>
-
-        <div class="form-group">
-          <div class="console-header">
-            <span>Registry Output Delivered to Model (Bounded result)</span>
-            <button type="button" class="copy-btn" onclick="_copyText('shaped-result-out')">Copy Output</button>
-          </div>
-          <pre class="console-out" id="shaped-result-out" style="max-height: 250px; color:#4ef1a6;"></pre>
-        </div>
-
-        <div class="form-group">
-          <div class="console-header">
-            <span>Full ToolResult Details Payload (Diagnostic evidence metadata)</span>
-            <button type="button" class="copy-btn" onclick="_copyText('result-details-out')">Copy Details</button>
-          </div>
-          <pre class="console-out" id="result-details-out" style="max-height: 180px; color:#c084fc;"></pre>
-        </div>
-      </div>
-    </div>
-  </div>
-
-  <!-- Tab: Prompt Recompiler & Tool Result Capping Validator -->
-  <div id="tab-recompiler" class="tab-pane">
-    <div style="display: grid; grid-template-columns: 1fr 1fr; gap: 2rem; margin-top: 1.5rem;">
-      <!-- Section 1: System Prompt Recompile Simulator -->
-      <div class="glass-card" style="padding: 1.5rem; background: var(--bg-card); border: 1px solid var(--border-card); border-radius: 12px; display: flex; flex-direction: column; gap: 1.25rem;">
-        <h3 style="color: var(--color-cyan); font-family: var(--font-sans); font-size: 1.2rem; display: flex; align-items: center; gap: 0.5rem; margin-bottom: 0.5rem; margin-top: 0;">
-          <svg width="20" height="20" aria-hidden="true" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><title>Icon</title><path d="M12 2v4M12 18v4M4.93 4.93l2.83 2.83M16.24 16.24l2.83 2.83M2 12h4M18 12h4M4.93 19.07l2.83-2.83M16.24 7.76l2.83-2.83"/></svg>
-          System Prompt Recompile Simulator
-        </h3>
-        <p style="font-size: 0.85rem; color: var(--text-muted); margin-bottom: 0.5rem;">
-          Clio Coder compiles one provider-facing system prompt per session. It recompiles only when the compile key (<code style="font-family: var(--font-mono); color: var(--color-purple);">target|model|autonomy|sessionId</code>) changes or configuration is hot-reloaded.
-        </p>
-
-        <div class="form-group" style="margin-bottom: 1rem;">
-          <label for="recomp-endpoint" style="font-size: 0.8rem; color: var(--text-main); display: block; margin-bottom: 0.25rem;">Endpoint</label>
-          <select id="recomp-endpoint" class="form-control" onchange="simulateRecompilerAndCapping()" style="width: 100%; padding: 0.5rem; background: rgba(0,0,0,0.3); border: 1px solid var(--border-card); border-radius: 6px; color: #fff;">
-            <option value="http://localhost:11434">ollama (http://localhost:11434)</option>
-            <option value="http://localhost:1234">lmstudio (http://localhost:1234)</option>
-            <option value="https://api.openai.com/v1">openai-completions (https://api.openai.com)</option>
-          </select>
-        </div>
-
-        <div class="form-group" style="margin-bottom: 1rem;">
-          <label for="recomp-model" style="font-size: 0.8rem; color: var(--text-main); display: block; margin-bottom: 0.25rem;">Model ID</label>
-          <select id="recomp-model" class="form-control" onchange="simulateRecompilerAndCapping()" style="width: 100%; padding: 0.5rem; background: rgba(0,0,0,0.3); border: 1px solid var(--border-card); border-radius: 6px; color: #fff;">
-            <option value="deepseek-r1:8b">deepseek-r1:8b</option>
-            <option value="phi-4">phi-4</option>
-            <option value="gpt-5.4">gpt-5.4</option>
-            <option value="o1-mini">o1-mini</option>
-          </select>
-        </div>
-
-        <div class="form-group" style="margin-bottom: 1rem;">
-          <label for="recomp-autonomy" style="font-size: 0.8rem; color: var(--text-main); display: block; margin-bottom: 0.25rem;">Autonomy Level</label>
-          <select id="recomp-autonomy" class="form-control" onchange="simulateRecompilerAndCapping()" style="width: 100%; padding: 0.5rem; background: rgba(0,0,0,0.3); border: 1px solid var(--border-card); border-radius: 6px; color: #fff;">
-            <option value="read-only">read-only</option>
-            <option value="suggest">suggest</option>
-            <option value="auto-edit">auto-edit</option>
-            <option value="full-auto">full-auto</option>
-          </select>
-        </div>
-
-        <div class="form-group" style="margin-bottom: 1rem;">
-          <label for="recomp-session" style="font-size: 0.8rem; color: var(--text-main); display: block; margin-bottom: 0.25rem;">Session ID</label>
-          <input type="text" id="recomp-session" value="sess_7a3d90f" oninput="simulateRecompilerAndCapping()" style="width: 100%; padding: 0.5rem; background: rgba(0,0,0,0.3); border: 1px solid var(--border-card); border-radius: 6px; color: #fff; font-family: var(--font-mono);">
-        </div>
-
-        <div class="form-group" style="display: flex; align-items: center; gap: 0.5rem; margin-top: 0.5rem; margin-bottom: 1rem;">
-          <input type="checkbox" id="recomp-hotreload" onchange="simulateRecompilerAndCapping()" style="cursor: pointer;">
-          <label for="recomp-hotreload" style="font-size: 0.85rem; color: var(--text-main); cursor: pointer;">Simulate Config Hot-Reload Invalidation</label>
-        </div>
-
-        <div style="border-top: 1px solid var(--border-card); padding-top: 1rem; margin-top: auto; display: flex; flex-direction: column; gap: 0.75rem;">
-          <div style="font-size: 0.85rem;">
-            <span style="color: var(--text-muted);">Current Compile Key:</span>
-            <pre id="recomp-key-out" style="background: #05080e; padding: 0.5rem; border-radius: 6px; font-family: var(--font-mono); font-size: 0.75rem; color: var(--color-purple); margin-top: 0.25rem; overflow-x: auto; white-space: nowrap; border: 1px solid var(--border-card);"></pre>
-          </div>
-          <div style="font-size: 0.85rem;">
-            <span style="color: var(--text-muted);">Active Compile Key Hash:</span>
-            <pre id="recomp-hash-out" style="background: #05080e; padding: 0.5rem; border-radius: 6px; font-family: var(--font-mono); font-size: 0.75rem; color: var(--color-cyan); margin-top: 0.25rem; overflow-x: auto; white-space: nowrap; border: 1px solid var(--border-card);"></pre>
-          </div>
-        </div>
-      </div>
-
-      <!-- Section 2: Session Ledger & Capping Validator -->
-      <div style="display: flex; flex-direction: column; gap: 1.5rem;">
-        <!-- Ledger Output -->
-        <div class="glass-card" style="padding: 1.5rem; background: var(--bg-card); border: 1px solid var(--border-card); border-radius: 12px; display: flex; flex-direction: column; gap: 0.75rem; flex: 1;">
-          <h3 style="color: var(--color-emerald); font-family: var(--font-sans); font-size: 1.1rem; display: flex; align-items: center; gap: 0.5rem; margin-bottom: 0.25rem; margin-top: 0;">
-            <svg width="18" height="18" aria-hidden="true" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><title>Icon</title><rect x="3" y="3" width="18" height="18" rx="2" ry="2"/><line x1="9" y1="9" x2="15" y2="9"/><line x1="9" y1="13" x2="15" y2="13"/><line x1="9" y1="17" x2="13" y2="17"/></svg>
-            Session Ledger Logs (System Recompiler)
-          </h3>
-          <div id="recomp-ledger-out" style="background: #05080e; border: 1px solid var(--border-card); border-radius: 8px; padding: 1rem; font-family: var(--font-mono); font-size: 0.8rem; overflow-y: auto; max-height: 200px; flex: 1; display: flex; flex-direction: column; gap: 0.4rem; min-height: 150px;">
-          </div>
-        </div>
-
-        <!-- Tool Result Capping Validator -->
-        <div class="glass-card" style="padding: 1.5rem; background: var(--bg-card); border: 1px solid var(--border-card); border-radius: 12px; display: flex; flex-direction: column; gap: 1rem;">
-          <h3 style="color: var(--color-amber); font-family: var(--font-sans); font-size: 1.1rem; display: flex; align-items: center; gap: 0.5rem; margin-top: 0; margin-bottom: 0.5rem;">
-            <svg width="18" height="18" aria-hidden="true" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><title>Icon</title><path d="M12 22s8-4 8-10V5l-8-3-8 3v7c0 6 8 10 8 10z"/></svg>
-            Tool Result Capping Validator
-          </h3>
-
-          <div class="form-group" style="margin-bottom: 1rem;">
-            <label for="capping-tool" style="font-size: 0.8rem; color: var(--text-main); display: block; margin-bottom: 0.25rem;">Tool / Policy Group</label>
-            <select id="capping-tool" class="form-control" onchange="simulateRecompilerAndCapping()" style="width: 100%; padding: 0.5rem; background: rgba(0,0,0,0.3); border: 1px solid var(--border-card); border-radius: 6px; color: #fff;">
-              <option value="read">read / read-kind (Cap: 6KB, Backstop: 8KB)</option>
-              <option value="bash">bash / verify / web_fetch / summary-kind (Cap: 16KB)</option>
-              <option value="ask_user">ask_user (Cap: 20KB)</option>
-            </select>
-          </div>
-
-          <div class="form-group" style="margin-bottom: 1rem;">
-            <label for="capping-size" style="font-size: 0.8rem; color: var(--text-main); display: block; margin-bottom: 0.25rem;">Generated Output Size (KB)</label>
-            <div style="display: flex; align-items: center; gap: 1rem;">
-              <input type="range" id="capping-size" min="1" max="35" value="10" oninput="simulateRecompilerAndCapping()" style="flex: 1;">
-              <span id="capping-size-val" style="font-family: var(--font-mono); font-size: 0.9rem; color: var(--color-amber); font-weight: 700; width: 60px;">10 KB</span>
-            </div>
-          </div>
-
-          <div style="border-top: 1px solid var(--border-card); padding-top: 1rem; display: flex; flex-direction: column; gap: 0.5rem;">
-            <div style="display: flex; justify-content: space-between; font-size: 0.8rem;">
-              <span style="color: var(--text-muted);">Result Truncated:</span>
-              <span id="capping-truncated-badge" style="font-weight: 700;">No</span>
-            </div>
-            <div style="display: flex; justify-content: space-between; font-size: 0.8rem;">
-              <span style="color: var(--text-muted);">Policy Limit Applied:</span>
-              <span id="capping-limit-val" style="font-family: var(--font-mono); color: var(--color-cyan);">6 KB</span>
-            </div>
-            <div style="display: flex; justify-content: space-between; font-size: 0.8rem;">
-              <span style="color: var(--text-muted);">Final Output Payload Size:</span>
-              <span id="capping-final-val" style="font-family: var(--font-mono); color: var(--color-emerald);">10 KB</span>
-            </div>
-            <div id="capping-hint-box" style="margin-top: 0.5rem; background: rgba(245, 158, 11, 0.05); border: 1px dashed rgba(245, 158, 11, 0.2); padding: 0.5rem; border-radius: 6px; font-size: 0.75rem; color: var(--color-amber); line-height: 1.4;">
-            </div>
-          </div>
-        </div>
-      </div>
-    </div>
-  </div>
-
-</div>
-
-<script>
-  // Navigation Tabs logic
-  function _switchTab(tabId) {
-    document.querySelectorAll('.tab-btn').forEach(btn => { btn.classList.remove('active'); });
-    document.querySelectorAll('.tab-pane').forEach(pane => { pane.classList.remove('active'); });
-
-    // Find button
-    const btn = Array.from(document.querySelectorAll('.tab-btn')).find(b => b.onclick.toString().includes(tabId));
-    if (btn) btn.classList.add('active');
-
-    document.getElementById(tabId).classList.add('active');
-
-    if (tabId === 'tab-calculator') {
-      calculateTokenPressure();
-    } else if (tabId === 'tab-simulator') {
-      simulateToolFlow();
-    }
-  }
-
-  // --- SCENARIO DATA & CALCULATOR STATE ---
-  const MOCK_FRAGMENTS = {
-    identity: `You are Clio Coder, an advanced AI coding assistant engineered for scientific software development, high-performance computing (HPC), and numerical simulation workflows. Your goal is to guide the user in designing, compiling, testing, and debugging complex source code repositories while maintaining safety boundary restrictions. You are running as Clio Coder version 0.4.0.`,
-
-    mode_default: `Advisory: You are in default mode. Edits within the workspace are permitted. You have access to active inspection, modification, and execution tools. Ensure that you run tests to verify compilation.`,
-    mode_advise: `Advisory: You are in advise mode. You may NOT edit codebase files directly, and you may NOT run execution tools (like bash). You can inspect files, write reviews, and write plans. Output an advisory markdown report as your final step.`,
-    mode_super: `Advisory: You are in super mode. Full escalation is active. You have access to execution-class and system-modification tools. Execute effectful commands with precision.`,
-
-    safety_suggest: `Safety directive: suggest. Describe the proposed modifications, build procedures, or commands. Do not write file changes or execute commands.`,
-    safety_auto_edit: `Safety directive: auto-edit. Edits inside the repository workspace are permitted without confirmation. Execution-class actions (like running bash commands) require confirmation.`,
-    safety_full_auto: `Safety directive: full-auto. Edits and local commands are allowed to run automatically. System-level modifications and destructive git operations require explicit confirmations.`,
-  };
-
-  const SCENARIOS = {
-    standard: {
-      mode: 'default',
-      policy: 'reduced-repeated-envelope',
-      thinking: 'applied',
-      window: 32768,
-      tools: ['read', 'write', 'edit', 'bash', 'grep', 'find', 'context'],
-      memory: `Project goal: Refactor the MPI communicator wrapper in src/hpc/comm.ts to resolve thread races.\nRecent observation: The custom barrier function drifts during heavy MPI ranks exchange.`,
-      project: `Language: TypeScript\nTarget: node\nActive workspace files:\n- src/hpc/comm.ts (3,400 bytes)\n- src/hpc/barrier.ts (1,200 bytes)\n- tests/comm.test.ts (2,500 bytes)`,
-      notes: `Turn count: 4\nPrevious step: read src/hpc/comm.ts successfully.\nPending action: Locate race conditions inside MPI_Comm_dup wrapper.`,
-      query: `Identify the thread race in src/hpc/comm.ts and write a replacement chunk using the edit tool.`
-    },
-    planning: {
-      mode: 'advise',
-      policy: 'reduced-repeated-envelope',
-      thinking: 'applied',
-      window: 32768,
-      tools: ['read', 'grep', 'find', 'context', 'artifact'],
-      memory: `Architecture review for compiler pipeline. Target is prefix cache friendly layout.\nGoal: Draft a 5-step plan to integrate TypeBox schemas into the worker subprocess layer safely.`,
-      project: `Language: C++\nWorkspace files:\n- include/compiler.h\n- src/compiler.cpp`,
-      notes: `Turn count: 1\nSession initialized.`,
-      query: `Inspect include/compiler.h and write a plan inside docs/plans/typebox_migration.md to outline the migration steps.`
-    },
-    constrained: {
-      mode: 'default',
-      policy: 'prefix-cache-deterministic',
-      thinking: 'always-on',
-      window: 4096,
-      tools: ['read', 'write', 'edit', 'grep'],
-      memory: `Local model, minimal context window budget constraint.`,
-      project: `Language: Python\nActive files: main.py`,
-      notes: `Turn count: 8`,
-      query: `Replace the division in main.py line 42 with a safe division wrapper.`
-    },
-    'no-tools': {
-      mode: 'advise',
-      policy: 'no-tools-fallback',
-      thinking: 'unsupported',
-      window: 8192,
-      tools: [],
-      memory: `Model has no active tool capabilities this turn.`,
-      project: `Language: Markdown`,
-      notes: `Turn count: 2`,
-      query: `Explain the difference between a prompt envelope and a tool contract.`
-    }
-  };
-
-  // Tools Metadata & Presets for Simulator. Toolkit v2: 21 tools across seven
-  // planes (OBSERVE, MUTATE, EXECUTE, ORCHESTRATE, RETRIEVE, INTERACT, ARTIFACT).
-  const ALL_TOOLS = {
-    // OBSERVE
-    read: { actionClass: 'read', estimate: 140, preset: '{\n  "path": "src/domains/prompts/compiler.ts",\n  "offset": 1,\n  "limit": 100\n}' },
-    grep: { actionClass: 'read', estimate: 120, preset: '{\n  "pattern": "compileResult",\n  "path": "src/",\n  "mode": "content"\n}' },
-    find: { actionClass: 'read', estimate: 110, preset: '{\n  "pattern": "src/**/*.ts",\n  "path": "src/"\n}' },
-    ls: { actionClass: 'read', estimate: 100, preset: '{\n  "path": "src/domains/prompts"\n}' },
-    code_nav: { actionClass: 'read', estimate: 110, preset: '{\n  "mode": "symbol",\n  "query": "compile"\n}' },
-    context: { actionClass: 'read', estimate: 120, preset: '{\n  "scope": "docs",\n  "query": "observation envelope"\n}' },
-    credential_present: { actionClass: 'read', estimate: 90, preset: '{\n  "name": "OPENAI_API_KEY"\n}' },
-    // MUTATE
-    write: { actionClass: 'write', estimate: 180, preset: '{\n  "path": "src/domains/prompts/compiler.ts",\n  "content": "// Modifying compile results"\n}' },
-    edit: { actionClass: 'write', estimate: 220, preset: '{\n  "path": "src/domains/prompts/compiler.ts",\n  "edits": [\n    {\n      "oldText": "function lookupFragment() {",\n      "newText": "function lookupFragment() {\\n  // Optimized lookup"\n    }\n  ]\n}' },
-    // EXECUTE
-    bash: { actionClass: 'execute', estimate: 160, preset: '{\n  "command": "npm run build && npm run test",\n  "cwd": "/workspace"\n}' },
-    git: { actionClass: 'read', estimate: 90, preset: '{\n  "op": "status"\n}' },
-    verify: { actionClass: 'execute', estimate: 110, preset: '{\n  "check": "test"\n}' },
-    // ORCHESTRATE
-    dispatch: { actionClass: 'dispatch', estimate: 150, preset: '{\n  "tasks": [\n    {\n      "agent": "coder",\n      "task": "Rewrite compiler.ts with optimizations"\n    }\n  ]\n}' },
-    monitor: { actionClass: 'read', estimate: 100, preset: '{\n  "mode": "list"\n}' },
-    steer: { actionClass: 'dispatch', estimate: 110, preset: '{\n  "run_id": "run-01H...",\n  "action": "guide",\n  "message": "Limit the fix to tests/contracts."\n}' },
-    tasks: { actionClass: 'read', estimate: 100, preset: '{\n  "action": "list"\n}' },
-    ledger: { actionClass: 'read', estimate: 110, preset: '{\n  "action": "status"\n}' },
-    panes: { actionClass: 'read', estimate: 120, preset: '{\n  "action": "list"\n}' },
-    // RETRIEVE
-    web_fetch: { actionClass: 'read', estimate: 130, preset: '{\n  "url": "https://iowarp.ai/docs/tools"\n}' },
-    // INTERACT
-    ask_user: { actionClass: 'read', estimate: 100, preset: '{\n  "action": "ask",\n  "questions": [\n    {\n      "question": "Proceed with the migration?"\n    }\n  ]\n}' },
-    // ARTIFACT
-    artifact: { actionClass: 'write', estimate: 140, preset: '{\n  "kind": "plan",\n  "content": "# Migration Plan\\n1. Move files\\n2. Build types"\n}' }
-  };
-
-  const MODE_PROFILES = {
-    default: {
-      tools: ['read', 'grep', 'find', 'ls', 'code_nav', 'context', 'credential_present', 'write', 'edit', 'bash', 'git', 'verify', 'dispatch', 'monitor', 'steer', 'tasks', 'ledger', 'panes', 'web_fetch', 'ask_user', 'artifact'],
-      allowedActions: ['read', 'write', 'execute', 'dispatch'],
-      dispatchScope: 'any'
-    },
-    advise: {
-      tools: ['read', 'grep', 'find', 'ls', 'code_nav', 'context', 'credential_present', 'git', 'tasks', 'ledger', 'panes', 'web_fetch', 'dispatch', 'monitor', 'steer', 'artifact'],
-      allowedActions: ['read', 'write', 'dispatch'],
-      dispatchScope: 'readonly'
-    },
-    super: {
-      tools: ['read', 'grep', 'find', 'ls', 'code_nav', 'context', 'credential_present', 'write', 'edit', 'bash', 'git', 'verify', 'dispatch', 'monitor', 'steer', 'tasks', 'ledger', 'panes', 'web_fetch', 'ask_user', 'artifact'],
-      allowedActions: ['read', 'write', 'execute', 'dispatch', 'system_modify'],
-      dispatchScope: 'any'
-    }
-  };
-
-  // State
-  const selectedScenarioTools = new Set();
-  let simHistory = [];
-
-  // Initialize
-  window.addEventListener('DOMContentLoaded', () => {
-    // Populate calculator tools checklists
-    renderCalculatorToolsCheckboxes();
-    loadScenario('standard');
-
-    // Populate simulator tools dropdown
-    onSimModeChange();
-  });
-
-  function renderCalculatorToolsCheckboxes() {
-    const container = document.getElementById('tools-checkboxes');
-    container.innerHTML = '';
-
-    Object.keys(ALL_TOOLS).forEach(toolName => {
-      const label = document.createElement('label');
-      label.className = 'checkbox-label';
-
-      const checkbox = document.createElement('input');
-      checkbox.type = 'checkbox';
-      checkbox.value = toolName;
-      checkbox.id = `calc-tool-${toolName}`;
-      checkbox.onchange = (e) => {
-        if (e.target.checked) {
-          selectedScenarioTools.add(toolName);
-        } else {
-          selectedScenarioTools.delete(toolName);
-        }
-        calculateTokenPressure();
-      };
-
-      label.appendChild(checkbox);
-      label.appendChild(document.createTextNode(toolName));
-      container.appendChild(label);
-    });
-  }
-
-  function loadScenario(name) {
-    const scenario = SCENARIOS[name];
-    if (!scenario) return;
-
-    document.getElementById('context-window').value = scenario.window;
-    document.getElementById('mode-select').value = scenario.mode;
-    document.getElementById('delivery-mode').value = scenario.policy;
-    document.getElementById('thinking-applied').value = scenario.thinking;
-
-    // Populate inputs
-    let staticText = `[Fragment: identity/clio.md]\n${MOCK_FRAGMENTS.identity}\n\n`;
-    staticText += `[Fragment: modes/${scenario.mode}.md]\n${MOCK_FRAGMENTS[`mode_${scenario.mode}`]}\n\n`;
-
-    // Set appropriate safety fragment based on mode
-    let autonomyLevel = 'suggest';
-    if (scenario.mode === 'default') autonomyLevel = 'auto-edit';
-    if (scenario.mode === 'super') autonomyLevel = 'full-auto';
-    const safetyFragmentKey = autonomyLevel.replace(/-/g, '_');
-
-    staticText += `[Fragment: safety/${autonomyLevel}.md]\n${MOCK_FRAGMENTS[`safety_${safetyFragmentKey}`]}`;
-
-    document.getElementById('static-shell-input').value = staticText;
-    document.getElementById('dynamic-memory-input').value = scenario.memory;
-    document.getElementById('dynamic-project-input').value = scenario.project;
-    document.getElementById('user-query-input').value = scenario.query;
-
-    // Set checked tools
-    selectedScenarioTools.clear();
-    scenario.tools.forEach(t => { selectedScenarioTools.add(t); });
-
-    // Update DOM checkboxes
-    Object.keys(ALL_TOOLS).forEach(t => {
-      const el = document.getElementById(`calc-tool-${t}`);
-      if (el) {
-        el.checked = scenario.tools.includes(t);
-        // Show/hide based on mode visibility rules
-        const isVisible = MODE_PROFILES[scenario.mode].tools.includes(t);
-        el.parentElement.style.opacity = isVisible ? '1' : '0.4';
-      }
-    });
-
-    calculateTokenPressure();
-  }
-
-  function _onModeChange() {
-    const mode = document.getElementById('mode-select').value;
-
-    // Disable/enable tools that are not visible in this mode
-    Object.keys(ALL_TOOLS).forEach(t => {
-      const el = document.getElementById(`calc-tool-${t}`);
-      if (el) {
-        const isVisible = MODE_PROFILES[mode].tools.includes(t);
-        el.parentElement.style.opacity = isVisible ? '1' : '0.4';
-        if (!isVisible && el.checked) {
-          el.checked = false;
-          selectedScenarioTools.delete(t);
-        }
-      }
-    });
-
-    // Reload standard static prompt content for that mode
-    let staticText = `[Fragment: identity/clio.md]\n${MOCK_FRAGMENTS.identity}\n\n`;
-    staticText += `[Fragment: modes/${mode}.md]\n${MOCK_FRAGMENTS[`mode_${mode}`]}\n\n`;
-
-    let autonomyLevel = 'suggest';
-    if (mode === 'default') autonomyLevel = 'auto-edit';
-    if (mode === 'super') autonomyLevel = 'full-auto';
-    const safetyFragmentKey = autonomyLevel.replace(/-/g, '_');
-
-    staticText += `[Fragment: safety/${autonomyLevel}.md]\n${MOCK_FRAGMENTS[`safety_${safetyFragmentKey}`]}`;
-    document.getElementById('static-shell-input').value = staticText;
-
-    calculateTokenPressure();
-  }
-
-  // Helper token estimator
-  function estimateTokens(text) {
-    const trimmed = text.trim();
-    if (trimmed.length === 0) return 0;
-    return Math.ceil(trimmed.length / 4);
-  }
-
-  // Simple string hashing helper for simulated visual output
-  async function computeHash(text) {
-    if (!text) return "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"; // Empty hash
-    const msgBuffer = new TextEncoder().encode(text);
-    try {
-      const hashBuffer = await crypto.subtle.digest('SHA-256', msgBuffer);
-      const hashArray = Array.from(new Uint8Array(hashBuffer));
-      return hashArray.map(b => b.toString(16).padStart(2, '0')).join('');
-    } catch (e) {
-      // Fallback simple hash for offline environments
-      let hash = 0;
-      for (let i = 0; i < text.length; i++) {
-        hash = (hash << 5) - hash + text.charCodeAt(i);
-        hash |= 0;
-      }
-      return `mocked_hash_${Math.abs(hash).toString(16).padStart(16, '0')}`;
-    }
-  }
-
-  async function calculateTokenPressure() {
-    const contextLimit = parseInt(document.getElementById('context-window').value, 10);
-    const mode = document.getElementById('mode-select').value;
-    const deliveryMode = document.getElementById('delivery-mode').value;
-    const thinking = document.getElementById('thinking-applied').value;
-
-    // Inputs
-    const staticText = document.getElementById('static-shell-input').value;
-    const memory = document.getElementById('dynamic-memory-input').value;
-    const project = document.getElementById('dynamic-project-input').value;
-    const query = document.getElementById('user-query-input').value;
-
-    // Tokens estimates
-    const staticTokens = estimateTokens(staticText);
-
-    // Build runtime section (Simulating renderRuntimeBlock)
-    let runtimeText = `# Runtime\nProvider: local-harness\nModel: local-32b\nContext window: ${contextLimit}\nPrompt delivery mode: ${deliveryMode}`;
-    if (thinking === 'applied') {
-      runtimeText += `\nThinking level: medium\nThinking mechanism: thinking\nThinking applied: applied`;
-    }
-    const runtimeTokens = estimateTokens(runtimeText);
-
-    // Build tool contract block (Simulating renderToolContractBlock)
-    let toolContractText = `# Tool Contract\nProvider tool calls: ${deliveryMode !== 'no-tools-fallback' ? 'available' : 'unavailable'}.\n`;
-    if (deliveryMode === 'no-tools-fallback' || selectedScenarioTools.size === 0) {
-      toolContractText += `Active tools this turn: none.\nAnswer directly. Do not claim repository facts that require inspection.`;
-    } else {
-      toolContractText += `Active tools this turn: ${Array.from(selectedScenarioTools).join(', ')}.\n`;
-      toolContractText += `Only call tools in the active list, and only for concrete inspection or changes.`;
-    }
-    const contractTokens = estimateTokens(toolContractText);
-
-    // Tools schemas token estimate
-    let toolSchemasTokens = 0;
-    if (deliveryMode !== 'no-tools-fallback') {
-      selectedScenarioTools.forEach(t => {
-        toolSchemasTokens += ALL_TOOLS[t]?.estimate || 50;
-      });
-    }
-
-    // Dynamic Turn items
-    const memoryText = memory ? `# Memory\n\n${memory}` : '';
-    const memoryTokens = estimateTokens(memoryText);
-
-    const projectText = project ? `# Project\n\n${project}` : '';
-    const projectTokens = estimateTokens(projectText);
-
-    const sessionText = `# Session\nTurn count: 1\nNotes: active debugging session`;
-    const sessionTokens = estimateTokens(sessionText);
-
-    const queryText = query ? `# Request\n\n${query}` : '';
-    const queryTokens = estimateTokens(queryText);
-
-    // Retrieval Hints
-    let hintsText = '';
-    if (deliveryMode !== 'no-tools-fallback' && selectedScenarioTools.size > 0) {
-      hintsText = `# Retrieval Hints\nRepository structure and CLIO-CODER.md are not preloaded. Use context(scope="workspace").`;
-    }
-    const hintsTokens = estimateTokens(hintsText);
-
-    // Tiers mapping
-    // static-shell: staticText
-    // session-shell: runtimeText, toolContractText, hintsText
-    // dynamic-turn: memoryText, projectText, sessionText, queryText
-    const staticShellTotal = staticTokens;
-    const sessionShellTotal = runtimeTokens + contractTokens + hintsTokens;
-    const dynamicTurnTotal = memoryTokens + projectTokens + sessionTokens + queryTokens;
-
-    const totalPromptTokens = staticShellTotal + sessionShellTotal + dynamicTurnTotal + toolSchemasTokens;
-    const remainingCapacity = Math.max(0, contextLimit - totalPromptTokens);
-    const pressurePercent = ((totalPromptTokens / contextLimit) * 100).toFixed(2);
-
-    // UI Updates
-    document.getElementById('val-static').innerText = staticShellTotal.toLocaleString();
-    document.getElementById('val-session').innerText = sessionShellTotal.toLocaleString();
-    document.getElementById('val-dynamic').innerText = dynamicTurnTotal.toLocaleString();
-    document.getElementById('val-tools').innerText = toolSchemasTokens.toLocaleString();
-
-    document.getElementById('pressure-ratio').innerText = `${totalPromptTokens.toLocaleString()} / ${contextLimit.toLocaleString()} (${pressurePercent}%)`;
-
-    const pressureBar = document.getElementById('pressure-bar');
-    pressureBar.style.width = `${Math.min(100, parseFloat(pressurePercent))}%`;
-
-    const capacityStatus = document.getElementById('capacity-status');
-    const capacityLeft = document.getElementById('capacity-left');
-    capacityLeft.innerText = `${remainingCapacity.toLocaleString()} tokens remaining`;
-
-    if (totalPromptTokens > contextLimit) {
-      pressureBar.style.backgroundColor = 'var(--color-rose)';
-      capacityStatus.innerText = 'OVERFLOW';
-      capacityStatus.className = 'status-pill pill-rose';
-    } else if (parseFloat(pressurePercent) > 85) {
-      pressureBar.style.backgroundColor = 'var(--color-rose)';
-      capacityStatus.innerText = 'CRITICAL';
-      capacityStatus.className = 'status-pill pill-rose';
-    } else if (parseFloat(pressurePercent) > 60) {
-      pressureBar.style.backgroundColor = 'var(--color-amber)';
-      capacityStatus.innerText = 'WARNING';
-      capacityStatus.className = 'status-pill pill-amber';
-    } else {
-      pressureBar.style.backgroundColor = 'var(--color-emerald)';
-      capacityStatus.innerText = 'OPTIMAL';
-      capacityStatus.className = 'status-pill pill-emerald';
-    }
-
-    // Hashes recomputation
-    const staticTextHash = await computeHash(staticText);
-    const sessionTextHash = await computeHash(`${runtimeText}\n\n${toolContractText}\n\n${hintsText}`);
-    const dynamicTextHash = await computeHash(`${memoryText}\n\n${projectText}\n\n${sessionText}\n\n${queryText}`);
-
-    const fullPromptText = [staticText, runtimeText, toolContractText, hintsText, memoryText, projectText, sessionText, queryText]
-      .filter(x => x.trim().length > 0).join("\n\n");
-    const fullTextHash = await computeHash(fullPromptText);
-
-    // System prompt sent
-    const systemPromptCompiled = [staticText, runtimeText, toolContractText, hintsText].filter(x => x.trim().length > 0).join("\n\n");
-    document.getElementById('system-prompt-out').innerText = systemPromptCompiled || "[Empty]";
-
-    // Fill table
-    const segmentsTable = document.getElementById('segments-table-body');
-    segmentsTable.innerHTML = '';
-
-    const segments = [
-      { id: 'identity', tier: 'static-shell', hash: await computeHash(MOCK_FRAGMENTS.identity), tokens: estimateTokens(MOCK_FRAGMENTS.identity), incl: true },
-      { id: 'mode', tier: 'static-shell', hash: await computeHash(MOCK_FRAGMENTS[`mode_${mode}`]), tokens: estimateTokens(MOCK_FRAGMENTS[`mode_${mode}`]), incl: true },
-      { id: 'runtime', tier: 'session-shell', hash: await computeHash(runtimeText), tokens: runtimeTokens, incl: true },
-      { id: 'tool-contract', tier: 'session-shell', hash: await computeHash(toolContractText), tokens: contractTokens, incl: true },
-      { id: 'retrieval-hints', tier: 'session-shell', hash: await computeHash(hintsText), tokens: hintsTokens, incl: hintsText.length > 0 },
-      { id: 'memory', tier: 'dynamic-turn', hash: await computeHash(memoryText), tokens: memoryTokens, incl: memoryText.length > 0 },
-      { id: 'project-context', tier: 'dynamic-turn', hash: await computeHash(projectText), tokens: projectTokens, incl: projectText.length > 0 },
-      { id: 'user-request', tier: 'dynamic-turn', hash: await computeHash(queryText), tokens: queryTokens, incl: queryText.length > 0 }
-    ];
-
-    segments.forEach(s => {
-      const row = document.createElement('tr');
-      row.style.opacity = s.incl ? '1' : '0.4';
-      row.innerHTML = `
-        <td style="font-family:var(--font-mono); font-weight:600;">${s.id}</td>
-        <td><span class="status-pill ${s.tier === 'static-shell' ? 'pill-cyan' : s.tier === 'session-shell' ? 'pill-purple' : 'pill-emerald'}">${s.tier}</span></td>
-        <td><span class="hash-badge" title="${s.hash}">${s.hash}</span></td>
-        <td style="font-family:var(--font-mono); text-align:right;">${s.tokens}</td>
-        <td>${s.incl ? 'Included' : 'Skipped'}</td>
-      `;
-      segmentsTable.appendChild(row);
-    });
-
-    // Envelope Signature JSON output
-    const envelopeSig = {
-      version: 1,
-      promptSignature: fullTextHash,
-      staticShellHash: staticTextHash,
-      sessionShellHash: sessionTextHash,
-      dynamicHash: dynamicTextHash,
-      parts: [
-        { id: "pinnedHarness", tier: "static-shell", contentHash: staticTextHash, tokenEstimate: staticShellTotal, included: true },
-        { id: "pinnedRuntime", tier: "session-shell", contentHash: await computeHash(runtimeText), tokenEstimate: runtimeTokens, included: true },
-        { id: "pinnedToolContract", tier: "session-shell", contentHash: await computeHash(toolContractText), tokenEstimate: contractTokens, included: true },
-        { id: "sessionContext", tier: "dynamic-turn", contentHash: await computeHash(`${memoryText}\n\n${sessionText}`), tokenEstimate: memoryTokens + sessionTokens, included: true },
-        { id: "turnContext", tier: "dynamic-turn", contentHash: await computeHash(`${projectText}\n\n${queryText}`), tokenEstimate: projectTokens + queryTokens, included: true },
-        { id: "retrievalHints", tier: "session-shell", contentHash: await computeHash(hintsText), tokenEstimate: hintsTokens, included: hintsText.length > 0 }
-      ]
-    };
-
-    document.getElementById('envelope-signature-out').innerText = JSON.stringify(envelopeSig, null, 2);
-  }
-
-  // --- SIMULATOR LOGIC ---
-  function onSimModeChange() {
-    const mode = document.getElementById('sim-mode-select').value;
-    const toolSelect = document.getElementById('sim-tool-select');
-    toolSelect.innerHTML = '';
-
-    const visibleTools = MODE_PROFILES[mode].tools;
-    visibleTools.forEach(toolName => {
-      const opt = document.createElement('option');
-      opt.value = toolName;
-      opt.innerText = `${toolName} (Action: ${ALL_TOOLS[toolName].actionClass})`;
-      toolSelect.appendChild(opt);
-    });
-
-    onSimToolChange();
-  }
-
-  function onSimToolChange() {
-    const toolName = document.getElementById('sim-tool-select').value;
-    if (!toolName || !ALL_TOOLS[toolName]) return;
-
-    document.getElementById('sim-args').value = ALL_TOOLS[toolName].preset;
-    simulateToolFlow();
-  }
-
-  // Canonical JSON implementation in JS
-  function canonicalJson(value) {
-    if (value === undefined) {
-      throw new Error("canonicalJson: undefined is not representable at root");
-    }
-    return canonicalSerialize(value, new WeakSet());
-  }
-
-  function canonicalSerialize(value, seen) {
-    if (value === null) return "null";
-    if (typeof value === "number") {
-      if (!Number.isFinite(value)) {
-        throw new Error("canonicalJson: non-finite number is not representable");
-      }
-      return JSON.stringify(value);
-    }
-    if (typeof value === "string" || typeof value === "boolean") {
-      return JSON.stringify(value);
-    }
-    if (typeof value === "bigint") {
-      throw new Error("canonicalJson: bigint is not representable");
-    }
-    if (typeof value === "symbol" || typeof value === "function") {
-      throw new Error("canonicalJson: unsupported type");
-    }
-    if (Array.isArray(value)) {
-      if (seen.has(value)) throw new Error("canonicalJson: circular reference");
-      seen.add(value);
-      try {
-        const parts = [];
-        for (let i = 0; i < value.length; i++) {
-          if (!(i in value) || value[i] === undefined) {
-            parts.push("null");
-            continue;
-          }
-          parts.push(canonicalSerialize(value[i], seen));
-        }
-        return `[${parts.join(",")}]`;
-      } finally {
-        seen.delete(value);
-      }
-    }
-    if (typeof value === "object") {
-      if (value instanceof Date) {
-        return JSON.stringify(value.toJSON());
-      }
-      if (seen.has(value)) throw new Error("canonicalJson: circular reference");
-      seen.add(value);
-      try {
-        const keys = Object.keys(value).sort();
-        const parts = [];
-        for (const key of keys) {
-          const child = value[key];
-          if (child === undefined) continue;
-          parts.push(`${JSON.stringify(key)}:${canonicalSerialize(child, seen)}`);
-        }
-        return `{${parts.join(",")}}`;
-      } finally {
-        seen.delete(value);
-      }
-    }
-    throw new Error("canonicalJson: unsupported type");
-  }
-
-  // Simple UTF-8 byte truncation matching truncate-utf8
-  function truncateUtf8(str, maxBytes, marker = "") {
-    const encoder = new TextEncoder();
-    const encoded = encoder.encode(str);
-    if (encoded.length <= maxBytes) return str;
-
-    // Account for marker length
-    const markerEncoded = encoder.encode(marker);
-    const limit = maxBytes - markerEncoded.length;
-
-    if (limit <= 0) return marker;
-
-    // Find valid UTF-8 character boundary
-    let index = limit;
-    // In UTF-8, continuation bytes start with bits 10xxxxxx (0x80 to 0xBF)
-    // We backtrack until we find a byte that does not match this pattern
-    while (index > 0 && (encoded[index] & 0xC0) === 0x80) {
-      index--;
-    }
-
-    const truncatedBytes = encoded.slice(0, index);
-    const decoder = new TextDecoder("utf-8");
-    return decoder.decode(truncatedBytes) + marker;
-  }
-
-  function getByteLength(str) {
-    return new TextEncoder().encode(str).length;
-  }
-
-  async function simulateToolFlow() {
-    const toolName = document.getElementById('sim-tool-select').value;
-    const mode = document.getElementById('sim-mode-select').value;
-    const rawArgsText = document.getElementById('sim-args').value;
-    const rawOutput = document.getElementById('sim-raw-output').value;
-    const maxBytes = parseInt(document.getElementById('sim-max-bytes').value, 10) || 200;
-
-    const errEl = document.getElementById('args-json-err');
-    errEl.style.display = 'none';
-
-    let parsedArgs = {};
-    try {
-      parsedArgs = JSON.parse(rawArgsText);
-    } catch (e) {
-      errEl.style.display = 'block';
-      return;
-    }
-
-    // 1. Canonical Serialization
-    let canonical = "";
-    try {
-      canonical = canonicalJson(parsedArgs);
-      document.getElementById('canonical-args-out').innerText = canonical;
-    } catch (e) {
-      document.getElementById('canonical-args-out').innerText = `Error serializing: ${e.message}`;
-      return;
-    }
-
-    // 2. Hash compute
-    const hash = await computeHash(`${toolName}${canonical}`);
-    document.getElementById('call-hash-out').innerText = hash;
-
-    // 3. Classification
-    const toolMeta = ALL_TOOLS[toolName];
-    const actionClass = toolMeta ? toolMeta.actionClass : 'unknown';
-    document.getElementById('class-out').innerText = actionClass;
-
-    // 4. Registry Gate evaluation
-    const verdictBox = document.getElementById('verdict-display');
-    const profile = MODE_PROFILES[mode];
-
-    let verdictKind = "ok";
-    let blockReason = "";
-
-    // Check Visibility
-    if (!profile.tools.includes(toolName)) {
-      verdictKind = "not_visible";
-      blockReason = `Registry rejection: Tool '${toolName}' is not visible in mode '${mode}'.`;
-    }
-    // Check Action Class
-    else if (!profile.allowedActions.includes(actionClass)) {
-      // artifact (kind=plan/review) is the advise-mode write: plans and reviews
-      if (mode === 'advise' && actionClass === 'write' && toolName === 'artifact') {
-        // permitted
-      } else {
-        verdictKind = "blocked";
-        blockReason = `Registry Blocked: Action class '${actionClass}' is not allowed in mode '${mode}'.`;
-      }
-    }
-    // Hard-blocks simulation: project rules & protected paths
-    else if (actionClass === 'execute' && rawArgsText.includes('rm -rf')) {
-      verdictKind = "blocked";
-      blockReason = `Safety Gate Blocked: Command contains destructive pattern 'rm -rf'. Hard-blocked by damage-control rules.`;
-    }
-    else if (rawArgsText.includes('.git/config') || rawArgsText.includes('/etc/passwd')) {
-      verdictKind = "blocked";
-      blockReason = `Safety Gate Blocked: Path is protected. Write/read actions on configuration artifacts are denied.`;
-    }
-
-    // Check loop detection (repetition check)
-    // Filter history to last 10 seconds
-    const now = Date.now();
-    const activeHistory = simHistory.filter(h => now - h.timestamp < 10000);
-    const matches = activeHistory.filter(h => h.hash === hash);
-
-    if (verdictKind === "ok") {
-      if (matches.length > 0) {
-        verdictKind = "blocked";
-        blockReason = `Loop Guard Blocked: Tool '${toolName}' with identical arguments repeated ${matches.length + 1} times in 10000ms. Aborting to prevent runaway execution.`;
-      } else if (simHistory.length >= 50) {
-        verdictKind = "blocked";
-        blockReason = `Registry Cap Blocked: Turn tool-call cap reached (50 calls). Invocation denied.`;
-      }
-    }
-
-    // Show Verdict Pill
-    verdictBox.className = "verdict-box show";
-    if (verdictKind === "ok") {
-      verdictBox.innerText = `Verdict: Admitted & Executed successfully.`;
-      verdictBox.classList.add('allow');
-    } else {
-      verdictBox.innerText = verdictKind === 'not_visible' ? `Verdict: Rejected (Not Visible)\n${blockReason}` : `Verdict: Blocked\n${blockReason}`;
-      verdictBox.classList.add('block');
-    }
-
-    // 5. Result Shaping (If Admitted)
-    if (verdictKind === "ok") {
-      const byteSize = getByteLength(rawOutput);
-      const isTruncated = byteSize > maxBytes;
-      const followUp = "Use offset/limit arguments or narrow the path query to inspect omitted contents.";
-
-      let finalOutputText = rawOutput;
-      const resultSizeDetails = {
-        bytes: byteSize,
-        shownBytes: byteSize,
-        maxBytes: maxBytes,
-        truncated: false,
-        policy: "truncate",
-        followUpHint: followUp
-      };
-
-      if (isTruncated) {
-        const truncatedContent = truncateUtf8(rawOutput, maxBytes, "\n[tool result truncated]");
-        finalOutputText = `${truncatedContent}\n\n[${followUp}]`;
-        resultSizeDetails.shownBytes = getByteLength(finalOutputText);
-        resultSizeDetails.truncated = true;
-      }
-
-      const toolResult = {
-        kind: "ok",
-        output: finalOutputText
-      };
-
-      const detailsPayload = {
-        resultSize: resultSizeDetails
-      };
-
-      document.getElementById('shaped-result-out').innerText = JSON.stringify(toolResult, null, 2);
-      document.getElementById('result-details-out').innerText = JSON.stringify(detailsPayload, null, 2);
-    } else {
-      // Return Blocked / Error Result
-      const toolResult = {
-        kind: "error",
-        message: blockReason
-      };
-      document.getElementById('shaped-result-out').innerText = JSON.stringify(toolResult, null, 2);
-      document.getElementById('result-details-out').innerText = JSON.stringify({ errorDetails: { verdict: verdictKind, reason: blockReason } }, null, 2);
-    }
-  }
-
-  function _executeSimulatedCall() {
-    const toolName = document.getElementById('sim-tool-select').value;
-    const rawArgsText = document.getElementById('sim-args').value;
-
-    let parsedArgs = {};
-    try {
-      parsedArgs = JSON.parse(rawArgsText);
-    } catch (e) {
-      alert("Invalid JSON arguments!");
-      return;
-    }
-
-    const canonical = canonicalJson(parsedArgs);
-    computeHash(`${toolName}${canonical}`).then(hash => {
-      // Add to history
-      simHistory.push({
-        tool: toolName,
-        args: canonical,
-        hash: hash,
-        timestamp: Date.now()
-      });
-
-      renderHistory();
-      simulateToolFlow();
-    });
-  }
-
-  function renderHistory() {
-    const container = document.getElementById('history-items');
-    container.innerHTML = '';
-
-    if (simHistory.length === 0) {
-      container.innerHTML = `<div style="color:var(--text-dark); text-align:center; padding:1.5rem 0; font-size:0.85rem;">No recent calls in buffer</div>`;
-      return;
-    }
-
-    // Sort showing newest first
-    const reversed = [...simHistory].reverse();
-    reversed.forEach(item => {
-      const el = document.createElement('div');
-      el.className = 'history-item';
-
-      const timeStr = new Date(item.timestamp).toLocaleTimeString();
-      const summaryArgs = item.args.length > 30 ? `${item.args.slice(0, 30)}...` : item.args;
-
-      el.innerHTML = `
-        <div>
-          <span style="color:var(--color-cyan); font-weight:700;">${item.tool}</span>
-          <span style="color:var(--text-muted); font-size:0.75rem;">${summaryArgs}</span>
-        </div>
-        <div class="history-timestamp">${timeStr}</div>
-      `;
-      container.appendChild(el);
-    });
-  }
-
-  function _clearSimHistory() {
-    simHistory = [];
-    renderHistory();
-    simulateToolFlow();
-  }
-
-  // Copy helper
-  function _copyText(elementId) {
-    const text = document.getElementById(elementId).innerText;
-    navigator.clipboard.writeText(text).then(() => {
-      alert("Copied to clipboard!");
-    }).catch(err => {
-      console.error('Could not copy text: ', err);
-    });
-  }
-
-  // --- RECOMPILER AND CAPPING VALIDATOR SIMULATOR ---
-  let lastCompileKey = "";
-  let lastCompileHash = "";
-  const recompileLedger = [];
-
-  function cyrb128(str) {
-    let h1 = 1779033703, h2 = 3024733165, h3 = 3362453605, h4 = 502492259;
-    for (let i = 0, k; i < str.length; i++) {
-      k = str.charCodeAt(i);
-      h1 = h2 ^ Math.imul(h1 ^ k, 597399067);
-      h2 = h3 ^ Math.imul(h2 ^ k, 2869860233);
-      h3 = h4 ^ Math.imul(h3 ^ k, 951274213);
-      h4 = h1 ^ Math.imul(h4 ^ k, 2716044179);
-    }
-    h1 = Math.imul(h3 ^ (h1 >>> 18), 597399067);
-    h2 = Math.imul(h4 ^ (h2 >>> 22), 2869860233);
-    h3 = Math.imul(h1 ^ (h3 >>> 17), 951274213);
-    h4 = Math.imul(h2 ^ (h4 >>> 19), 2716044179);
-    return [(h1^h2^h3^h4)>>>0, (h2^h1)>>>0, (h3^h1)>>>0, (h4^h1)>>>0];
-  }
-  function simpleHash(str) {
-    const hashes = cyrb128(str);
-    return hashes.map(h => h.toString(16).padStart(8, '0')).join('');
-  }
-
-  function simulateRecompilerAndCapping() {
-    // 1. Recompiler Logic
-    const ep = document.getElementById("recomp-endpoint").value;
-    const model = document.getElementById("recomp-model").value;
-    const autonomy = document.getElementById("recomp-autonomy").value;
-    const session = document.getElementById("recomp-session").value.trim() || "sess_default";
-    const hotReload = document.getElementById("recomp-hotreload").checked;
-
-    const compileKey = `${ep}|${model}|${autonomy}|${session}`;
-    const compileHash = simpleHash(compileKey).substring(0, 16);
-
-    document.getElementById("recomp-key-out").innerText = compileKey;
-    document.getElementById("recomp-hash-out").innerText = compileHash;
-
-    const ledgerEl = document.getElementById("recomp-ledger-out");
-
-    let forced = false;
-    let compiled = false;
-
-    if (compileKey !== lastCompileKey || hotReload) {
-      compiled = true;
-      if (hotReload) {
-        forced = true;
-        document.getElementById("recomp-hotreload").checked = false; // Reset toggle
-      }
-
-      const prevHash = lastCompileHash || "none";
-      const tokenEst = 3500 + Math.floor(Math.random() * 800) + (autonomy.length * 20);
-
-      const logEntry = {
-        timestamp: new Date().toLocaleTimeString(),
-        event: "promptRecompiled",
-        prevHash: prevHash,
-        newHash: compileHash,
-        tokenEstimate: tokenEst,
-        reason: forced ? "Config Hot-Reload Invalidation" : "Compile Key Changed"
-      };
-
-      recompileLedger.unshift(logEntry);
-
-      lastCompileKey = compileKey;
-      lastCompileHash = compileHash;
-    }
-
-    // Render Ledger
-    ledgerEl.innerHTML = "";
-    if (recompileLedger.length === 0) {
-      ledgerEl.innerHTML = `<div style="color:var(--text-dark); text-align:center; padding:1rem 0;">No ledger entries yet</div>`;
-    } else {
-      recompileLedger.forEach(entry => {
-        const item = document.createElement("div");
-        item.style.paddingBottom = "0.4rem";
-        item.style.borderBottom = "1px solid rgba(255,255,255,0.02)";
-        item.innerHTML = `
-          <span style="color:var(--text-muted); font-size:0.75rem;">[${entry.timestamp}]</span>
-          <span style="color:var(--color-purple); font-weight:bold;">${entry.event}</span>:
-          prev=<span style="color:var(--text-dark);">${entry.prevHash}</span>,
-          new=<span style="color:var(--color-cyan);">${entry.newHash}</span>,
-          tokens=<span style="color:var(--color-amber);">${entry.tokenEstimate}</span>
-          <span style="color:var(--text-dark); font-size:0.75rem;">(${entry.reason})</span>
-        `;
-        ledgerEl.appendChild(item);
-      });
-    }
-
-    if (compiled) {
-      ledgerEl.style.borderColor = "var(--color-cyan)";
-      setTimeout(() => { ledgerEl.style.borderColor = "var(--border-card)"; }, 3000);
-    }
-
-    // 2. Capping Validator Logic
-    const capTool = document.getElementById("capping-tool").value;
-    const mockSizeKB = parseInt(document.getElementById("capping-size").value, 10);
-    document.getElementById("capping-size-val").innerText = `${mockSizeKB} KB`;
-
-    let limitKB = 6;
-    let hint = "";
-    let truncated = false;
-
-    if (capTool === "read") {
-      limitKB = 6;
-      truncated = mockSizeKB > limitKB;
-      if (truncated) {
-        hint = `Result capped at source policy limit of 6KB. Continuation text added: "Use offset/limit arguments or narrow the path query to inspect omitted contents."`;
-      } else {
-        hint = "Result is within the 6KB safety limit and delivered in full.";
-      }
-    } else if (capTool === "bash") {
-      limitKB = 16;
-      truncated = mockSizeKB > limitKB;
-      if (truncated) {
-        hint = `Result capped at summary-kind policy limit of 16KB. Trailing terminal lines omitted.`;
-      } else {
-        hint = "Result is within the 16KB summary safety limit and delivered in full.";
-      }
-    } else if (capTool === "ask_user") {
-      limitKB = 20;
-      truncated = mockSizeKB > limitKB;
-      if (truncated) {
-        hint = `Result capped at ask_user policy limit of 20KB. Excess query context removed.`;
-      } else {
-        hint = "Result is within the 20KB ask_user safety limit and delivered in full.";
-      }
-    }
-
-    const finalSizeKB = truncated ? limitKB : mockSizeKB;
-
-    const truncBadge = document.getElementById("capping-truncated-badge");
-    truncBadge.innerText = truncated ? "YES (Capped)" : "NO";
-    truncBadge.style.color = truncated ? "var(--color-rose)" : "var(--color-emerald)";
-
-    document.getElementById("capping-limit-val").innerText = `${limitKB} KB`;
-    document.getElementById("capping-final-val").innerText = `${finalSizeKB} KB`;
-
-    const hintBox = document.getElementById("capping-hint-box");
-    hintBox.innerText = hint;
-    hintBox.style.borderColor = truncated ? "rgba(239, 68, 68, 0.3)" : "rgba(16, 185, 129, 0.3)";
-    hintBox.style.background = truncated ? "rgba(239, 68, 68, 0.03)" : "rgba(16, 185, 129, 0.03)";
-    hintBox.style.color = truncated ? "var(--color-rose)" : "var(--text-main)";
-  }
-
-  // Initialize recompiler
-  simulateRecompilerAndCapping();
-</script>
+  <script src="shared.js"></script>
 </body>
 </html>

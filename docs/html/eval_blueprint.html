@@ -1,753 +1,617 @@
-<!DOCTYPE html>
+<!doctype html>
 <html lang="en">
 <head>
-  <meta charset="UTF-8">
-  <meta name="viewport" content="width=device-width, initial-scale=1.0">
-  <title>Clio Coder Evaluation Runner Blueprint (v0.4.0)</title>
-
-  <style>
-    :root {
-      --bg-dark: #090d16;
-      --bg-grid: rgba(255, 255, 255, 0.02);
-      --bg-card: rgba(13, 20, 38, 0.45);
-      --bg-card-hover: rgba(20, 30, 58, 0.6);
-      --border-card: rgba(255, 255, 255, 0.08);
-      --border-card-hover: rgba(0, 240, 255, 0.3);
-      --text-main: #f3f4f6;
-      --text-muted: #9ca3af;
-      --text-dim: #6b7280;
-
-      --color-cyan: #00f0ff;
-      --color-cyan-rgb: 0, 240, 255;
-      --color-purple: #bd00ff;
-      --color-purple-rgb: 189, 0, 255;
-      --color-emerald: #10b981;
-      --color-emerald-rgb: 16, 185, 129;
-      --color-amber: #f59e0b;
-      --color-amber-rgb: 245, 158, 11;
-      --color-rose: #ef4444;
-      --color-rose-rgb: 239, 68, 68;
-
-      --gradient-main: linear-gradient(135deg, var(--color-cyan), var(--color-purple));
-      --shadow-glow: 0 0 25px rgba(0, 240, 255, 0.15);
-      --font-sans: "Segoe UI", -apple-system, BlinkMacSystemFont, Roboto, "Helvetica Neue", Arial, sans-serif;
-      --font-mono: "SFMono-Regular", Consolas, "Liberation Mono", Menlo, monospace;
-
-      --glass-blur: blur(12px);
-    }
-
-    * {
-      box-sizing: border-box;
-      margin: 0;
-      padding: 0;
-    }
-
-    body {
-      background-color: var(--bg-dark);
-      background-image:
-        radial-gradient(circle at 10% 20%, rgba(var(--color-cyan-rgb), 0.05) 0%, transparent 40%),
-        radial-gradient(circle at 90% 80%, rgba(var(--color-purple-rgb), 0.05) 0%, transparent 40%),
-        radial-gradient(circle at 50% 50%, #0d1527 0%, var(--bg-dark) 100%);
-      color: var(--text-main);
-      font-family: var(--font-sans);
-      min-height: 100vh;
-      line-height: 1.6;
-      overflow-x: hidden;
-      position: relative;
-    }
-
-    body::before {
-      content: '';
-      position: absolute;
-      inset: 0;
-      background-image: linear-gradient(var(--bg-grid) 1px, transparent 1px),
-                        linear-gradient(90deg, var(--bg-grid) 1px, transparent 1px);
-      background-size: 40px 40px;
-      background-position: center top;
-      pointer-events: none;
-      z-index: 0;
-      opacity: 0.8;
-    }
-
-    .container {
-      max-width: 1400px;
-      margin: 0 auto;
-      padding: 2rem;
-      position: relative;
-      z-index: 1;
-    }
-
-    /* Header Styling */
-    header {
-      display: flex;
-      justify-content: space-between;
-      align-items: center;
-      margin-bottom: 2.5rem;
-      padding-bottom: 1.5rem;
-      border-bottom: 1px solid rgba(255, 255, 255, 0.05);
-    }
-
-    .header-left {
-      display: flex;
-      align-items: center;
-      gap: 1rem;
-    }
-
-    .header-logo {
-      display: inline-flex;
-      align-items: center;
-      justify-content: center;
-      width: 48px;
-      height: 48px;
-      background: rgba(255, 255, 255, 0.02);
-      border: 1px solid var(--border-card);
-      border-radius: 12px;
-    }
-
-    .header-logo svg {
-      width: 28px;
-      height: 28px;
-    }
-
-    .header-title-wrapper h1 {
-      font-size: 1.5rem;
-      font-weight: 800;
-      letter-spacing: -0.03em;
-      background: linear-gradient(to right, #ffffff, #c7d2fe, var(--color-cyan));
-      -webkit-background-clip: text;
-      -webkit-text-fill-color: transparent;
-    }
-
-    .header-title-wrapper p {
-      font-size: 0.825rem;
-      color: var(--text-muted);
-    }
-
-    .header-right {
-      display: flex;
-      align-items: center;
-      gap: 1rem;
-    }
-
-    .back-btn {
-      background: rgba(255, 255, 255, 0.03);
-      border: 1px solid var(--border-card);
-      color: var(--text-muted);
-      padding: 0.5rem 1rem;
-      border-radius: 8px;
-      font-size: 0.875rem;
-      font-weight: 600;
-      text-decoration: none;
-      display: inline-flex;
-      align-items: center;
-      gap: 0.5rem;
-      transition: all 0.2s;
-    }
-
-    .back-btn:hover {
-      background: rgba(255, 255, 255, 0.08);
-      color: var(--text-main);
-      border-color: rgba(var(--color-cyan-rgb), 0.3);
-    }
-
-    .version-badge {
-      background: rgba(0, 240, 255, 0.08);
-      border: 1px solid rgba(0, 240, 255, 0.25);
-      color: var(--color-cyan);
-      padding: 0.35rem 0.75rem;
-      border-radius: 50px;
-      font-size: 0.75rem;
-      font-weight: 600;
-      font-family: var(--font-mono);
-    }
-
-    /* Tabs Navigation */
-    .tabs-nav {
-      display: flex;
-      gap: 0.75rem;
-      margin-bottom: 2rem;
-    }
-
-    .tab-btn {
-      background: rgba(255, 255, 255, 0.03);
-      border: 1px solid var(--border-card);
-      color: var(--text-muted);
-      padding: 0.6rem 1.25rem;
-      border-radius: 8px;
-      font-size: 0.875rem;
-      font-weight: 600;
-      cursor: pointer;
-      display: flex;
-      align-items: center;
-      gap: 0.5rem;
-      transition: all 0.2s;
-    }
-
-    .tab-btn:hover {
-      background: rgba(255, 255, 255, 0.06);
-      color: var(--text-main);
-    }
-
-    .tab-btn.active {
-      background: var(--gradient-main);
-      color: #090d16;
-      border-color: transparent;
-      box-shadow: 0 4px 15px rgba(var(--color-cyan-rgb), 0.25);
-    }
-
-    /* Content Layout */
-    .tab-pane {
-      display: none;
-      animation: fadeIn 0.3s ease-out forwards;
-    }
-
-    .tab-pane.active {
-      display: block;
-    }
-
-    @keyframes fadeIn {
-      from { opacity: 0; transform: translateY(8px); }
-      to { opacity: 1; transform: translateY(0); }
-    }
-
-    /* Split layout */
-    .blueprint-layout {
-      display: grid;
-      grid-template-columns: 1fr 1fr;
-      gap: 2rem;
-      align-items: start;
-    }
-
-    @media (max-width: 1100px) {
-      .blueprint-layout {
-        grid-template-columns: 1fr;
-      }
-    }
-
-    .glass-card {
-      background: var(--bg-card);
-      border: 1px solid var(--border-card);
-      border-radius: 16px;
-      padding: 1.75rem;
-      margin-bottom: 2rem;
-      backdrop-filter: var(--glass-blur);
-      box-shadow: 0 8px 32px 0 rgba(0, 0, 0, 0.3);
-    }
-
-    .glass-card h2 {
-      font-size: 1.25rem;
-      font-weight: 700;
-      color: #ffffff;
-      margin-bottom: 1.25rem;
-      display: flex;
-      align-items: center;
-      gap: 0.5rem;
-      border-bottom: 1px solid rgba(255, 255, 255, 0.05);
-      padding-bottom: 0.75rem;
-    }
-
-    .glass-card h2 svg {
-      width: 18px;
-      height: 18px;
-      color: var(--color-cyan);
-    }
-
-    .glass-card p {
-      font-size: 0.925rem;
-      color: var(--text-muted);
-      margin-bottom: 1rem;
-    }
-
-    /* Form Elements */
-    .form-group {
-      margin-bottom: 1.25rem;
-    }
-
-    .form-group label {
-      display: block;
-      font-size: 0.8rem;
-      font-weight: 600;
-      color: var(--text-muted);
-      margin-bottom: 0.5rem;
-      text-transform: uppercase;
-      letter-spacing: 0.05em;
-    }
-
-    .form-row {
-      display: grid;
-      grid-template-columns: 1fr 1fr;
-      gap: 1rem;
-    }
-
-    select, input, textarea {
-      width: 100%;
-      background: rgba(9, 13, 22, 0.7);
-      border: 1px solid var(--border-card);
-      border-radius: 8px;
-      padding: 0.65rem 0.85rem;
-      color: #fff;
-      font-family: var(--font-sans);
-      font-size: 0.9rem;
-      outline: none;
-    }
-
-    textarea {
-      font-family: var(--font-mono);
-      font-size: 0.8rem;
-    }
-
-    /* Presets list */
-    .presets-list {
-      display: flex;
-      gap: 0.5rem;
-      margin-bottom: 1rem;
-    }
-
-    .preset-btn {
-      background: rgba(255, 255, 255, 0.03);
-      border: 1px solid var(--border-card);
-      color: var(--text-muted);
-      padding: 0.35rem 0.75rem;
-      border-radius: 6px;
-      font-size: 0.75rem;
-      cursor: pointer;
-      transition: all 0.2s;
-    }
-
-    .preset-btn:hover {
-      background: rgba(0, 240, 255, 0.08);
-      border-color: var(--color-cyan);
-      color: #fff;
-    }
-
-    /* Output Console */
-    .console-body {
-      background: #020408;
-      border: 1px solid var(--border-card);
-      border-radius: 8px;
-      padding: 1rem;
-      font-family: var(--font-mono);
-      font-size: 0.8rem;
-      height: 180px;
-      overflow-y: auto;
-      white-space: pre-wrap;
-      color: var(--color-cyan);
-      box-shadow: inset 0 2px 10px rgba(0,0,0,0.8);
-      margin-top: 1rem;
-    }
-
-    /* Status panels */
-    .status-panel {
-      border-radius: 12px;
-      padding: 1.25rem;
-      margin-bottom: 1.5rem;
-      border: 1px solid transparent;
-      font-size: 0.9rem;
-    }
-
-    .status-panel.success { background: rgba(16, 185, 129, 0.08); border-color: rgba(16, 185, 129, 0.3); color: var(--color-emerald); }
-    .status-panel.error { background: rgba(239, 68, 68, 0.08); border-color: rgba(239, 68, 68, 0.3); color: var(--color-rose); }
-    .status-panel.warning { background: rgba(245, 158, 11, 0.08); border-color: rgba(245, 158, 11, 0.3); color: var(--color-amber); }
-
-    /* Compare Output Grid */
-    .compare-grid {
-      display: grid;
-      grid-template-columns: 1fr 1fr;
-      gap: 1rem;
-      margin-top: 1rem;
-    }
-
-    .compare-card {
-      background: rgba(0,0,0,0.2);
-      border: 1px solid var(--border-card);
-      border-radius: 8px;
-      padding: 0.75rem 1rem;
-      text-align: center;
-    }
-
-    .compare-card strong {
-      display: block;
-      font-size: 1.5rem;
-      color: #fff;
-    }
-
-    .compare-card span {
-      font-size: 0.75rem;
-      color: var(--text-muted);
-    }
-
-    .ref-table {
-      width: 100%;
-      border-collapse: collapse;
-      margin: 1.5rem 0;
-      font-size: 0.9rem;
-    }
-
-    .ref-table th, .ref-table td {
-      padding: 0.65rem 0.85rem;
-      border: 1px solid var(--border-card);
-      text-align: left;
-    }
-
-    .ref-table th {
-      background: rgba(255,255,255,0.03);
-    }
-
-    /* Footer */
-    footer {
-      text-align: center;
-      margin-top: 4rem;
-      padding-top: 2rem;
-      border-top: 1px solid rgba(255, 255, 255, 0.05);
-      color: var(--text-dim);
-      font-size: 0.875rem;
-    }
-  </style>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <meta name="clio-markdown-source" content="docs/process/eval-runner.md">
+  <meta name="clio-docs-version" content="0.4.2">
+  <title>Clio Coder Local Evaluation Runner · Clio Coder 0.4.2</title>
+  <link rel="icon" href="data:,">
+  <link rel="stylesheet" href="shared.css">
 </head>
-<body>
+<body data-doc-category="process">
+  <div class="reading-progress" aria-hidden="true"></div>
+  <a class="skip-link" href="#reference-content">Skip to reference</a>
   <div class="container">
-    <header>
+    <header class="document-header" data-category="Process">
       <div class="header-left">
-        <div class="header-logo">
-          <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" style="color: var(--color-cyan);"><title>Icon</title>
-            <path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z"></path>
-            <polyline points="14 2 14 8 20 8"></polyline>
-            <line x1="16" y1="13" x2="8" y2="13"></line>
-            <line x1="16" y1="17" x2="8" y2="17"></line>
+        <a class="header-logo" href="index.html" aria-label="Documentation index">
+          <svg viewBox="0 0 24 24" fill="none" aria-hidden="true">
+            <path d="M12 2 2 7l10 5 10-5-10-5Z" stroke="url(#clio-logo)" stroke-width="2" stroke-linejoin="round"/>
+            <path d="m2 12 10 5 10-5M2 17l10 5 10-5" stroke="url(#clio-logo)" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"/>
+            <defs><linearGradient id="clio-logo" x1="2" y1="2" x2="22" y2="22"><stop stop-color="#00d4db"/><stop offset="1" stop-color="#ff7e29"/></linearGradient></defs>
           </svg>
-        </div>
+        </a>
         <div class="header-title-wrapper">
+          <p class="document-kicker">Process / canonical reference</p>
           <h1>Clio Coder Local Evaluation Runner</h1>
-          <p>Task suite schemas, execution failure classification, and performance compare tools</p>
+          <p class="document-path">docs/process/eval-runner.md</p>
         </div>
       </div>
       <div class="header-right">
-        <span class="version-badge">Clio Coder v0.4.0</span>
-        <a href="index.html" class="back-btn">
-          <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><title>Icon</title><line x1="19" y1="12" x2="5" y2="12"></line><polyline points="12 19 5 12 12 5"></polyline></svg>
-          Dashboard Hub
-        </a>
+        <a class="back-btn" href="index.html">← Index</a>
+        <span class="version-badge">v0.4.2</span>
       </div>
     </header>
-
-    <div class="tabs-nav">
-      <button type="button" class="tab-btn active" onclick="switchTab('interactive')">
-        <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><title>Icon</title><polyline points="22 12 18 12 15 21 9 3 6 12 2 12"></polyline></svg>
-        Interactive Task Runner &amp; Compare
-      </button>
-      <button type="button" class="tab-btn" onclick="switchTab('reference')">
-        <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><title>Icon</title><path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z"></path><polyline points="14 2 14 8 20 8"></polyline><line x1="16" y1="13" x2="8" y2="13"></line><line x1="16" y1="17" x2="8" y2="17"></line><polyline points="10 9 9 9 8 9"></polyline></svg>
-        Full Technical Reference
-      </button>
+    <div class="page-layout-grid reference-layout">
+      <aside class="sidebar reference-sidebar" aria-label="On this page">
+        <nav class="toc-container">
+          <p class="toc-title">On this page</p>
+          <a class="sidebar-source" href="https://github.com/iowarp/clio-coder/blob/main/docs/process/eval-runner.md">Canonical Markdown<br>docs/process/eval-runner.md</a>
+          <ul class="toc-list"></ul>
+        </nav>
+      </aside>
+      <main class="reference-main" id="reference-content">
+        <article class="reference-prose glass-card">
+<blockquote>
+<p><strong>Visual blueprint:</strong> The source checkout includes the complete
+<a href="eval_blueprint.html">Clio Coder Local Evaluation Runner visual reference</a>.</p>
+</blockquote>
+<p>The local evaluation runner executes repository-local YAML task suites as deterministic subprocess checks. It is useful for comparing harness changes, prompts, tools, or local workflows.</p>
+<p>Source of truth: <a href="https://github.com/iowarp/clio-coder/tree/main/src/domains/eval/">src/domains/eval/</a> and <a href="https://github.com/iowarp/clio-coder/blob/main/src/cli/eval.ts">src/cli/eval.ts</a>.</p>
+<hr>
+<h2>CLI Commands</h2>
+<p>The CLI commands under <code>clio-coder eval</code> support running, validating, reporting, comparing, and gating evaluation suites.</p>
+<pre><code class="language-bash">clio-coder eval validate --suite &lt;suite.yaml&gt;
+clio-coder eval run --suite &lt;suite.yaml&gt; [--trials &lt;n&gt;] [--target &lt;id&gt;] [--model &lt;id&gt;] [--out &lt;path&gt;] [--clio-coder-entry &lt;path&gt;]
+clio-coder eval run --task-file &lt;tasks.yaml&gt; [--repeat &lt;n&gt;] [--out &lt;path&gt;] [--clio-coder-entry &lt;path&gt;]
+clio-coder eval report &lt;evalId&gt; --format text|json|md|swe-jsonl|junit
+clio-coder eval compare &lt;baselineEvalId&gt; &lt;candidateEvalId&gt; [--metric &lt;name&gt;] [--format text|json|md|junit] [--allow-config-drift]
+clio-coder eval gate &lt;candidateEvalId&gt; --baseline &lt;baselineEvalId&gt; [--thresholds &lt;file&gt;]
+clio-coder eval inventory --json
+</code></pre>
+<h3>Command Roles</h3>
+<ul>
+<li><strong><code>validate</code></strong>: Validates the structure and constraints of a Suite v2 YAML file without executing it.</li>
+<li><strong><code>run</code></strong>: Runs a Suite v2 (via <code>--suite</code>) or a compatibility v1 task file (via <code>--task-file</code>). Outputs a text summary and writes an eval artifact under <code>&lt;dataDir&gt;/evals/</code> and evidence under <code>&lt;dataDir&gt;/evidence/eval-&lt;evalId&gt;/</code>.</li>
+<li><strong><code>report</code></strong>: Formats and prints a report from a saved <code>evalId</code>. Supports multiple <code>--format</code> outputs:<ul>
+<li><code>text</code> (default): Human-readable stdout summary.</li>
+<li><code>json</code>: Raw JSON structure of the artifact.</li>
+<li><code>md</code>: Markdown document with tables and summaries.</li>
+<li><code>swe-jsonl</code>: Standardized JSONL format representing task runs (e.g. for SWE-bench comparisons).</li>
+<li><code>junit</code>: XML report for CI/CD integration.</li>
+</ul>
+</li>
+<li><strong><code>compare</code></strong>: Compares two evaluation artifacts (baseline and candidate) by matching tasks.</li>
+<li><strong><code>gate</code></strong>: Compares candidate metrics against baseline and absolute thresholds. Correctness and safety regressions fail independently of informational budgets.</li>
+<li><strong><code>inventory</code></strong>: Prints the fixed machine-readable inventory used by GUI hosts. It includes stored report identity, provenance, serving facts, accounting, and per-scenario outcomes without report attachments.</li>
+</ul>
+<p>Exit codes:</p>
+<table>
+<thead>
+<tr>
+<th>Command</th>
+<th>Success</th>
+<th>Failure</th>
+</tr>
+</thead>
+<tbody><tr>
+<td><code>eval validate</code></td>
+<td><code>0</code> when validation passes</td>
+<td><code>2</code> for validation issues</td>
+</tr>
+<tr>
+<td><code>eval run</code></td>
+<td><code>0</code> when all task repetitions pass</td>
+<td><code>1</code> when any task fails, <code>2</code> for invalid configs</td>
+</tr>
+<tr>
+<td><code>eval report</code></td>
+<td><code>0</code> when artifact loads</td>
+<td><code>1</code> if artifact cannot be read, <code>2</code> for invalid ID</td>
+</tr>
+<tr>
+<td><code>eval compare</code></td>
+<td><code>0</code> when both artifacts compare and the behavioral hard gate passes</td>
+<td><code>1</code> for a hard regression or unreadable artifact, <code>2</code> for invalid ID</td>
+</tr>
+<tr>
+<td><code>eval gate</code></td>
+<td><code>0</code> when correctness, safety, and hard threshold assertions pass</td>
+<td><code>1</code> for hard failures, unreadable inputs, and malformed threshold files; <code>2</code> for an invalid eval ID or usage error</td>
+</tr>
+</tbody></table>
+<hr>
+<h2>Suite v2 Schema</h2>
+<p>Suite v2 files define matrix targets, workspaces, runner parameters, validation metrics, assertions, and path blocklists.</p>
+<pre><code class="language-yaml">version: 2
+suite:
+  id: &quot;science-suite&quot;
+  title: &quot;Scientific Software Evaluation&quot;
+  visibility: &quot;local&quot;
+  description: &quot;Suite for verifying HPC integrations.&quot;
+matrix:
+  targets:
+    - id: &quot;local-gemini&quot;
+      model: &quot;gemini-3.5-flash&quot;
+    - id: &quot;local-claude&quot;
+      model: &quot;claude-sonnet-5&quot;
+  repeats: 3
+tasks:
+  - id: &quot;fft-tolerance-check&quot;
+    tags:
+      - numeric
+      - fast
+    workspace:
+      kind: &quot;temp-copy&quot; # local | git | temp-copy
+      path: &quot;fixtures/fft-src&quot;
+      excludes:
+        - &quot;**/node_modules/**&quot;
+    runner:
+      kind: &quot;clio-coder-run&quot; # clio-coder-run | context-index | context-init | external-command
+      prompt: &quot;Optimize the FFT tolerance bounds in solver.ts&quot;
+      timeoutMs: 60000
+    verify:
+      commands:
+        - &quot;npm run test&quot;
+      assertions:
+        - metric: &quot;result.pass&quot;
+          op: &quot;eq&quot;
+          value: true
+        - metric: &quot;tokens.total&quot;
+          op: &quot;lt&quot;
+          value: 15000
+      forbidPaths:
+        - &quot;**/credentials.yaml&quot;
+    metrics:
+      collect:
+        - &quot;tokens.total&quot;
+        - &quot;latency.wallMs&quot;
+    timeoutMs: 90000
+</code></pre>
+<h3>Schema Field Reference</h3>
+<table>
+<thead>
+<tr>
+<th>Field / Section</th>
+<th>Sub-fields</th>
+<th>Description</th>
+</tr>
+</thead>
+<tbody><tr>
+<td><code>version</code></td>
+<td>-</td>
+<td>Must equal <code>2</code>.</td>
+</tr>
+<tr>
+<td><code>suite</code></td>
+<td><code>id</code>, <code>title</code>, <code>visibility</code>, <code>description</code></td>
+<td>Metadata identifying the evaluation suite.</td>
+</tr>
+<tr>
+<td><code>matrix</code></td>
+<td><code>targets[]</code>, <code>repeats</code>, <code>dimensions[]</code>, <code>maxCostUsd</code></td>
+<td>Matrix of execution targets, repetition count, execution-envelope fields intentionally varied by the suite, and an optional cumulative known-cost ceiling.</td>
+</tr>
+<tr>
+<td><code>workspace</code></td>
+<td><code>kind</code>, <code>path</code>, <code>url</code>, <code>commit</code>, <code>checkout</code>, <code>excludes</code>, <code>setup</code></td>
+<td>Workspace strategy: <code>local</code> (run in-place), <code>git</code> (clone from URL), or <code>temp-copy</code> (isolated copy of a directory). Optional <code>setup</code> commands prepare the workspace before the runner starts.</td>
+</tr>
+<tr>
+<td><code>runner</code></td>
+<td><code>kind</code>, <code>prompt</code>, <code>autonomy</code>, <code>agent</code>, <code>command</code>, <code>commands</code>, <code>args</code>, <code>timeoutMs</code></td>
+<td>Runner type: <code>clio-coder-run</code> (starts Clio&#39;s agent loop), <code>context-index</code> (runs the indexer), <code>context-init</code> (initializes context), or <code>external-command</code> (spawns a subprocess). <code>agent</code> selects a worker recipe and <code>autonomy</code> sets one-run headless authority.</td>
+</tr>
+<tr>
+<td><code>behavioral</code></td>
+<td><code>schema</code>, <code>corpus</code>, <code>execution</code>, <code>expectedBehavior</code>, <code>forbiddenBehavior</code>, <code>judge</code></td>
+<td>Optional <code>clio-coder.eval.scenario.v1</code> behavioral contract. Rules name a closed category and a typed predicate over transcript, tool, receipt, or grader facts.</td>
+</tr>
+<tr>
+<td><code>verify</code></td>
+<td><code>commands</code>, <code>measure</code>, <code>assertions</code>, <code>forbidPaths</code></td>
+<td>Validation steps: shell commands, a task-outcome grader, metric assertions (e.g. <code>op: lt</code> for max token counts), and files/directories that must not be created or modified (<code>forbidPaths</code>).</td>
+</tr>
+<tr>
+<td><code>metrics</code></td>
+<td><code>collect</code>, <code>readObservation</code></td>
+<td>Metric names to compile plus optional public allowlisted and decoy paths reduced to bounded read counters. Raw path strings do not enter behavioral facts.</td>
+</tr>
+</tbody></table>
+<hr>
+<h2>Workspace Kinds</h2>
+<ul>
+<li><strong><code>local</code></strong>: Executes the task directly in the specified local path.</li>
+<li><strong><code>git</code></strong>: Clones the repository from <code>url</code>, checks out the specified <code>commit</code> or <code>checkout</code> ref, and runs there.</li>
+<li><strong><code>temp-copy</code></strong>: Copies the directory at <code>path</code> to a temporary workspace location immediately before the matrix item runs and removes it afterward. In a Git checkout, the copy contains exactly tracked files plus untracked files not excluded by Git ignore rules (<code>git ls-files --cached --others --exclude-standard</code>), with <code>excludes</code> applied afterward. Outside Git it retains the recursive directory copy. This prevents side-effects from polluting other task runs without copying ignored datasets or build trees.</li>
+</ul>
+<hr>
+<h2>Runner Kinds</h2>
+<ul>
+<li><strong><code>clio-coder-run</code></strong>: Invokes the main Clio Coder agent loop with the task&#39;s prompt, tracing all tools. The released <code>clio-run</code> spelling is accepted only as a legacy input alias and is normalized before validation; writers and new suites use <code>clio-coder-run</code>.</li>
+<li><strong><code>context-index</code></strong>: Triggers the context engine to build index structures (<code>codewiki</code>).</li>
+<li><strong><code>context-init</code></strong>: Initializes workspace files (such as generating <code>CLIO-CODER.md</code>).</li>
+<li><strong><code>external-command</code></strong>: Spawns an external command or sequence of commands in the task workspace.</li>
+</ul>
+<hr>
+<h2>Metric Assertions</h2>
+<p>Metrics collected during runs can be validated automatically using the <code>verify.assertions</code> list. Supported operator fields (<code>op</code>) are:</p>
+<ul>
+<li><code>lt</code> (less than)</li>
+<li><code>lte</code> (less than or equal)</li>
+<li><code>gt</code> (greater than)</li>
+<li><code>gte</code> (greater than or equal)</li>
+<li><code>eq</code> (equal)</li>
+<li><code>neq</code> (not equal)</li>
+</ul>
+<p>Metrics that can be validated include <code>tokens.input</code>, <code>tokens.output</code>, <code>tokens.total</code>, <code>latency.wallMs</code>, <code>tools.totalCalls</code>, <code>tools.failed</code>, <code>tools.blocked</code>, <code>verifier.exitCode</code>, and <code>result.pass</code>.</p>
+<hr>
+<h2>Failure Classes</h2>
+<p>Evaluation tasks may fail with one of the following classes:</p>
+<table>
+<thead>
+<tr>
+<th>Failure Class</th>
+<th>Meaning</th>
+</tr>
+</thead>
+<tbody><tr>
+<td><code>setup_failed</code></td>
+<td>A setup command exited non-zero.</td>
+</tr>
+<tr>
+<td><code>verifier_failed</code></td>
+<td>A verifier command exited non-zero.</td>
+</tr>
+<tr>
+<td><code>timeout</code></td>
+<td>A setup or verifier command timed out.</td>
+</tr>
+<tr>
+<td><code>cwd_missing</code></td>
+<td>Resolved task cwd does not exist.</td>
+</tr>
+<tr>
+<td><code>command_error</code></td>
+<td>Reserved class for command spawn/system errors.</td>
+</tr>
+</tbody></table>
+<hr>
+<h2>v1 Compatibility</h2>
+<p>Version 1 task files can still be run directly via:</p>
+<pre><code class="language-bash">clio-coder eval run --task-file tasks.yaml [--repeat &lt;n&gt;]
+</code></pre>
+<p>Under the hood, these are parsed and wrapped into a Suite v2 adapter with:</p>
+<ul>
+<li>Workspace kind: <code>local</code> (using task <code>cwd</code> as workspace path)</li>
+<li>Runner kind: <code>external-command</code> (executing task <code>setup</code> commands)</li>
+<li>Verify commands: Task <code>verifier</code> commands</li>
+<li>Timeout and tags mapped directly</li>
+</ul>
+<hr>
+<h2>Token Accounting &amp; Provenance</h2>
+<p>Clio maintains two distinct token accounting streams with different provenances. These accounts are never merged, reconciled, or treated as interchangeable:</p>
+<ol>
+<li><strong><code>tokens.*</code> (Wire Streaming)</strong>: Folded live off stdout from assistant <code>message_end</code> events watched by <code>token-stream.ts</code> / <code>createStreamInvariantFold</code>. This represents usage reported by the provider for assistant messages watched over the wire. On surfaces without stdout streaming (such as <code>clio-coder fleet run --json</code>), <code>tokens.measured</code> is <code>false</code>.</li>
+<li><strong><code>receiptUsage.*</code> (Journal Receipts)</strong>: Summed from an evaluation item&#39;s run journal. Every attempt writes a receipt carrying token counts and USD cost authenticated against its own ledger envelope.</li>
+</ol>
+<h3>Fail-Closed Reporting</h3>
+<p>Both accounting streams report unmeasured state with no counts at all rather than a numeric zero. Reporting zero for an unmeasured run would falsely claim the run cost nothing. On an unmeasured run, <code>tokens.total</code> resolves to <code>null</code> and fails closed on metric threshold comparisons.</p>
+<hr>
+<h2>Eval Artifact Format (v4)</h2>
+<p>Evaluation artifacts use format version 4 (<code>EvalArtifactV4</code>). Summary token metrics report <code>measuredRuns</code> out of total <code>runs</code>:</p>
+<pre><code class="language-typescript">export interface EvalArtifactV4 {
+  version: 4;
+  evalId: string;
+  suite: { id: string; hash: string };
+  clioCoder: EvalClioProvenance;
+  environment: EvalEnvironmentProvenance;
+  matrix: { target: string; model: string | null; thinking: string | null };
+  summary: EvalArtifactSummaryV4;
+  results: EvalArtifactResultV4[];
+  servingConfiguration?: EvalServingConfigurationV1;
+  aggregates?: EvalScenarioAggregateV1[];
+}
+</code></pre>
+<p><code>servingConfiguration</code> and <code>aggregates</code> are additive. The v4 reader still accepts an artifact that omits them, and each result&#39;s <code>verdict</code> is optional for the same reason, so an artifact written before this release loads unchanged.</p>
+<hr>
+<h2>The verdict envelope</h2>
+<p>Every result carries a strictly parsed <code>clio-coder.eval.verdict.v1</code> envelope (<code>src/domains/eval/schema/verdict.ts</code>). Suite v2 results are adapted into it at one explicit boundary (<code>src/domains/eval/schema/adapter.ts</code>) rather than by widening the artifact version, because the envelope carries no information a v4 artifact cannot hold.</p>
+<pre><code class="language-json">{
+  &quot;schema&quot;: &quot;clio-coder.eval.verdict.v1&quot;,
+  &quot;scenarioId&quot;: &quot;latency-nonnegative&quot;,
+  &quot;trialIndex&quot;: 0,
+  &quot;outcome&quot;: &quot;pass&quot;,
+  &quot;machinery&quot;: &quot;ok&quot;,
+  &quot;reason&quot;: null,
+  &quot;trackedMetrics&quot;: { &quot;...&quot;: &quot;see below&quot; },
+  &quot;behavioral&quot;: null,
+  &quot;evidence&quot;: {
+    &quot;assignmentId&quot;: &quot;qcy5rfopdrfw&quot;,
+    &quot;terminalReceiptDigest&quot;: &quot;d85a3ad4f8ae...&quot;,
+    &quot;graderExitCode&quot;: 0
+  }
+}
+</code></pre>
+<p>The envelope is fail-closed by construction. <code>outcome</code> is one of <code>pass</code>, <code>fail</code>, or <code>unmeasured</code>; <code>machinery</code> is <code>ok</code> or <code>infrastructure_failure</code>; <code>reason</code> is null for a pass or unmeasured outcome and names the rule or failure class for every failure; the original <code>behavioral</code> reservation remains exactly <code>null</code>; and an envelope claiming both <code>infrastructure_failure</code> and <code>pass</code> is rejected at parse rather than recorded. A run whose harness broke therefore cannot be read as a model that succeeded. Behavioral results use the separately versioned sibling document below rather than changing this persisted schema.</p>
+<h3>Behavioral scenario and verdict documents</h3>
+<p>Behavioral evaluation is additive and does not change the persisted <code>clio-coder.eval.verdict.v1</code> reader. A Suite v2 task may declare a <code>clio-coder.eval.scenario.v1</code> block, and its Artifact v4 result then carries a sibling <code>clio-coder.eval.behavior.v1</code> document whose <code>verdictRef</code> names the verdict schema, scenario id, and trial index. This preserves existing verdicts and the tracked-metrics baseline while making a cross-linked behavioral document independently parseable. Readers normalize the released <code>clio.eval.*</code> identifiers for compatibility, but current writers emit only <code>clio-coder.eval.*</code> identifiers.</p>
+<p>The closed categories are <code>tool_choice</code>, <code>exploration</code>, <code>delegation</code>, <code>safety_comprehension</code>, <code>claim_grounding</code>, <code>denied_tool_recovery</code>, <code>completion_behavior</code>, and <code>task_correctness</code>. Each category result is exactly one of <code>satisfied</code>, <code>violated</code>, <code>unknown</code>, or <code>unmeasured</code>. The document outcome is <code>pass</code>, <code>behavioral_failure</code>, <code>unknown</code>, <code>unmeasured</code>, or <code>infrastructure_failure</code>; missing facts are never invented as successes, and an infrastructure failure cannot become a behavioral pass.</p>
+<p>Expected and forbidden rules contain typed predicates over facts sourced from <code>transcript</code>, <code>tool</code>, <code>receipt</code>, or <code>grader</code>. Facts cite a locator, SHA-256 digest, and optional bounded excerpt. The parser caps rules, facts, evidence per category, ids, and explanations. Before judging, facts and unavailable sources are sorted into a canonical representation and hashed as <code>judgeInputDigest</code>, so input order cannot change the judge result. Duplicate or conflicting facts, missing categories, malformed evidence, contradictory outcomes, and a behavioral document that references a different result are refused.</p>
+<p>Suite execution adapts scalar run metrics into these observable facts at the Suite v2 to Artifact v4 boundary. A declared no-tool target leaves tool-dependent rules <code>unmeasured</code>, while an available evidence source that omits a required fact produces <code>unknown</code>. Categories a role-specific scenario does not claim to measure remain <code>unmeasured</code>; they are not numeric zero and do not silently satisfy a rule.</p>
+<h3>Public built-in behavioral corpus</h3>
+<p>The source repository carries corpus <code>public-built-in-behavior</code> version <code>1.0.0</code>
+under <code>evals/</code>. It contains no private prompts, endpoints, credentials, or
+mutable external dataset:</p>
+<ul>
+<li><code>behavioral-machinery.yaml</code> provides one positive and one adversarial
+machinery-only check for each of the 13 shipped built-in worker recipes. Its
+deterministic driver loads the production recipe catalog, admits a real
+dispatch through the production gate, runs a scripted worker, and verifies
+the sealed receipt and result-contract outcome. The 26 scenarios require no
+model; they do not infer behavior by grepping recipe frontmatter.</li>
+<li><code>behavioral-model.yaml</code> provides four isolated main-agent scenarios on the
+<code>mini</code> target: a focused edit, adversarial scope control, required
+delegation, and recovery after Bash is denied. Together they cover all eight
+behavioral categories with per-tool call and blocked-call counts, distinct
+and allowlisted read-path counts, declared decoy hits, and grader-emitted
+claim-support and completion facts.</li>
+<li><code>behavioral-model-negative-control.yaml</code> intentionally reads a declared
+decoy. A healthy run solves its literal task while recording
+<code>behavioral_failure</code> with violated exploration and safety labels, proving
+that the rules can reject observed model behavior rather than merely restate
+aggregate success counters.</li>
+</ul>
+<p>These are source-checkout workflows: the npm archive keeps the inputs for
+inspection and reproducibility, but the deterministic TypeScript driver uses
+the repository development toolchain. Build once, then run either focused
+suite from the repository root:</p>
+<pre><code class="language-sh">node dist/cli/index.js eval run --suite evals/behavioral-machinery.yaml --clio-coder-entry dist/cli/index.js
+node dist/cli/index.js eval run --suite evals/behavioral-model.yaml --target mini --clio-coder-entry dist/cli/index.js
+node dist/cli/index.js eval run --suite evals/behavioral-model-negative-control.yaml --target mini --clio-coder-entry dist/cli/index.js
+</code></pre>
+<p>The machinery tasks use the repository read-only and create only private
+scratch state under <code>TMPDIR</code>; model tasks use a fresh <code>temp-copy</code> workspace and
+remove it after the matrix item settles. The machinery suite is the fast
+admission, worker, and receipt contract. The model suite is the live behavioral
+measurement: keep its Artifact v4 output as evidence for the exact target and
+serving configuration that ran, rather than treating one observed model result
+as a universal guarantee. Behavioral facts and their evidence store only
+bounded read counters, not path strings. As with other eval runs, the artifact&#39;s
+bounded diagnostic stdout may retain the underlying tool event stream.</p>
+<h3><code>trackedMetrics</code></h3>
+<p>Eleven numbers plus a reason histogram, each carrying the source it came from. <code>source</code> is <code>ledger</code> (the per-call ledger folded from the worker&#39;s own JSON stream), <code>receipt</code> (the sealed run receipt), or <code>estimated</code>, and <code>estimated</code> is what a missing observation is marked as rather than being silently counted as measured.</p>
+<table>
+<thead>
+<tr>
+<th>Metric</th>
+<th>Usual source</th>
+</tr>
+</thead>
+<tbody><tr>
+<td><code>modelCalls</code></td>
+<td>ledger</td>
+</tr>
+<tr>
+<td><code>uncachedPrefillTokens</code></td>
+<td>ledger, from <code>promptCache.backend</code></td>
+</tr>
+<tr>
+<td><code>cacheReadTokens</code></td>
+<td>ledger, from <code>promptCache.backend</code>, falling back to pi-ai cache reads</td>
+</tr>
+<tr>
+<td><code>generatedTokens</code></td>
+<td>ledger</td>
+</tr>
+<tr>
+<td><code>reasoningTokens</code></td>
+<td>receipt; nullable, because absent and zero are different claims</td>
+</tr>
+<tr>
+<td><code>toolCalls</code>, <code>toolErrors</code></td>
+<td>ledger when present, otherwise receipt</td>
+</tr>
+<tr>
+<td><code>ttftMsFirstCall</code></td>
+<td>ledger</td>
+</tr>
+<tr>
+<td><code>wallClockMs</code></td>
+<td>receipt</td>
+</tr>
+<tr>
+<td><code>contextTokensAtEnd</code></td>
+<td>ledger</td>
+</tr>
+<tr>
+<td><code>compactions</code></td>
+<td>ledger</td>
+</tr>
+<tr>
+<td><code>expectedColdReasons</code></td>
+<td>ledger, one sourced count per reason</td>
+</tr>
+</tbody></table>
+<p>A dispatched worker&#39;s receipt reports <code>sessionId: null</code> and writes no session archive, which is why the ledger source exists at all: the runner folds structured usage, backend timing, cache, and monotonic TTFT facts out of the worker&#39;s <code>message_end</code> events. It keeps no prompt text, no model prose, and no tool-result content in that fold.</p>
+<h3>Scenario aggregates</h3>
+<p><code>aggregates</code> groups verdicts by <code>scenarioId</code>, sets <code>k</code> to the trial count, and records <code>passAtK</code> (any trial passed) and <code>passPowK</code> (every trial passed). Each tracked numeric metric reports observation, measured, and unmeasured counts, mean, min, max, nearest-rank p90, population variance, standard deviation, and the set of sources observed. A metric with no observation keeps every numeric statistic <code>null</code>; it never becomes zero. At <code>k: 1</code>, variance and standard deviation are zero only when the value was actually measured.</p>
+<h3>Behavioral multi-metric results</h3>
+<p>A result with a <code>clio-coder.eval.behavior.v1</code> verdict also carries the additive
+<code>clio-coder.eval.behavior.metrics.v1</code> projection. The projection binds the scenario
+to its role and target/model envelope and records one <code>number | null</code>
+observation for each closed metric. The source travels beside every value:</p>
+<table>
+<thead>
+<tr>
+<th>Family</th>
+<th>Metric</th>
+<th>Direction</th>
+<th>Gate</th>
+<th>Source</th>
+</tr>
+</thead>
+<tbody><tr>
+<td>correctness</td>
+<td><code>correctness.taskSolved</code></td>
+<td>higher</td>
+<td>hard</td>
+<td>grader</td>
+</tr>
+<tr>
+<td>safety</td>
+<td><code>safety.violations</code></td>
+<td>lower</td>
+<td>hard</td>
+<td>behavioral label</td>
+</tr>
+<tr>
+<td>behavior</td>
+<td><code>behavior.labelViolations</code></td>
+<td>lower</td>
+<td>informational</td>
+<td>behavioral labels</td>
+</tr>
+<tr>
+<td>efficiency</td>
+<td><code>efficiency.toolCalls</code></td>
+<td>lower</td>
+<td>informational</td>
+<td>terminal tool events</td>
+</tr>
+<tr>
+<td>exploration</td>
+<td><code>exploration.unnecessaryReads</code></td>
+<td>lower</td>
+<td>informational</td>
+<td>read observation counters</td>
+</tr>
+<tr>
+<td>delegation</td>
+<td><code>delegation.quality</code></td>
+<td>higher</td>
+<td>informational</td>
+<td>behavioral label</td>
+</tr>
+<tr>
+<td>claims</td>
+<td><code>claims.unsupported</code></td>
+<td>lower</td>
+<td>informational</td>
+<td>grader</td>
+</tr>
+<tr>
+<td>tokens</td>
+<td><code>tokens.total</code></td>
+<td>lower</td>
+<td>informational</td>
+<td>runner usage stream</td>
+</tr>
+<tr>
+<td>latency</td>
+<td><code>latency.wallMs</code></td>
+<td>lower</td>
+<td>informational</td>
+<td>monotonic runner clock</td>
+</tr>
+<tr>
+<td>cost</td>
+<td><code>cost.usd</code></td>
+<td>lower</td>
+<td>informational</td>
+<td>sealed receipt</td>
+</tr>
+</tbody></table>
+<p>Label metrics are numeric projections only when the category is <code>satisfied</code> or
+<code>violated</code>; <code>unknown</code> and <code>unmeasured</code> remain null. A missing grader, token
+stream, receipt, read observation, or category label likewise remains null.
+The projection therefore records observation coverage without claiming that
+silence was success, safety, or zero cost.</p>
+<h3>Behavioral comparisons and variance</h3>
+<p><code>eval compare</code> reduces the behavioral projection independently for every
+scenario, role, target id, and model id. Each row contains the baseline and
+candidate distributions, coverage, mean delta, variance delta, and two closed
+classifications: <code>improved</code>, <code>regressed</code>, <code>unchanged</code>, or <code>incomparable</code> for the
+mean and for variability. Lower variance is the improvement direction for the
+variability classification.</p>
+<p>Correctness and safety rows are hard. A measured regression fails the hard
+gate even when pass rate, tokens, latency, or cost improved. Losing a
+correctness or safety measurement that existed in the baseline is also a hard
+failure; a category explicitly unmeasured on both sides stays incomparable but
+does not invent a regression. Other families remain visible informational
+tradeoffs. <code>--metric</code> accepts either a behavioral metric or family as well as a
+tracked metric, but filtering displayed rows never filters the hard-gate
+decision.</p>
+<p>Comparison output supports <code>text</code>, <code>json</code>, <code>md</code>, and <code>junit</code>. All four carry
+the same hard-gate result and closed classifications. JUnit failures represent
+only hard behavioral failures; an informational efficiency or cost regression
+is emitted as testcase output rather than a failed testcase.</p>
+<h3>Execution-envelope provenance and comparability</h3>
+<p>Every newly written behavioral result carries an additive
+<code>clio-coder.eval.execution-envelope.v1</code> sibling. Artifact v4,
+<code>clio-coder.eval.verdict.v1</code>, and <code>clio-coder.eval.behavior.metrics.v1</code> retain their
+existing identities. The envelope records the selected prompt fragment ids,
+authored versions or <code>unversioned</code> marker, fragment content hashes, prompt
+composition hash, recipe id/version/fingerprint when a worker recipe applies,
+target, wire model, runtime, thinking level, tool signature, effective
+autonomy, rule-pack and project-policy hashes, bounded project-context
+provenance, and corpus id/version. A machinery-only scenario uses explicit
+nulls for model concepts that did not apply; null is not substituted for a
+fact that was observed.</p>
+<p>Suite v2 may declare <code>matrix.dimensions</code> from <code>prompt</code>, <code>recipe</code>, <code>target</code>,
+<code>wireModel</code>, <code>runtime</code>, <code>thinkingLevel</code>, <code>toolSignature</code>, <code>autonomy</code>, <code>policy</code>,
+<code>projectContext</code>, and <code>corpus</code>. Comparison ignores only dimensions declared by
+both artifacts. Any other envelope difference marks every metric row for that
+scenario/role/target incomparable and fails the behavioral gate. A missing
+envelope on only one side is also incomparable. Two older artifacts that both
+predate the sibling remain readable and compare under their existing data.</p>
+<p>Text, JSON, Markdown, and JUnit comparison reports carry the same envelope
+mismatch. Text and Markdown also include independent per-scenario and per-role
+baseline/candidate counts for improved, regressed, unchanged, and incomparable
+metric means and variances. When the prompt or recipe identity changes, the
+generated evidence names each affected corpus scenario and role instead of
+hiding it behind an aggregate score.</p>
+<h3>Reference behavioral baseline</h3>
+<p><code>evals/behavioral-machinery-baseline.json</code> is retained as reviewable reference
+evidence for the machinery corpus. It is not a CI or release gate. Run the
+current <code>evals/behavioral-machinery.yaml</code> through the built CLI when a prompt,
+recipe, policy, or expected-behavior change needs a fresh measurement, inspect
+the named scenario evidence, and update any retained baseline deliberately in
+the reviewed change. Model-required and negative-control suites remain manual
+measurements tied to their exact target and serving configuration.</p>
+<h3>Hard thresholds and informational budgets</h3>
+<p>Suite and external threshold files keep two separate assertion lists:</p>
+<pre><code class="language-yaml">thresholds:
+  fail:
+    - metric: task.solved
+      op: eq
+      value: false
+  informational:
+    - metric: cost.usd
+      op: gt
+      value: 0.25
+</code></pre>
+<p><code>fail</code> is the backwards-compatible hard list. A firing or unresolved hard
+assertion makes <code>eval run</code> or <code>eval gate</code> exit nonzero. <code>informational</code> uses the
+same typed predicates and reports every firing budget or missing measurement,
+but never changes the exit status. <code>eval gate</code> additionally evaluates the
+baseline-to-candidate correctness and safety hard gate, so a cheaper candidate
+cannot offset a task or safety regression.</p>
+<h3><code>--trials N</code></h3>
+<p><code>--trials N</code> overrides the suite&#39;s <code>matrix.repeats</code> and asks for an isolated workspace per matrix item. A <code>local</code> workspace is converted to a temporary copy immediately before that item runs, so an explicit trial run never mutates the directory it was pointed at; <code>git</code> and <code>temp-copy</code> workspaces already produce a distinct preparation directory per item. Workspace and state directories are removed on the item&#39;s <code>finally</code> path, including runner, setup, and copy failures. The trial index rides through to each verdict&#39;s <code>trialIndex</code>.</p>
+<h3>Serving-configuration provenance and drift refusal</h3>
+<p><code>servingConfiguration</code> records what the numbers were measured against: <code>targetId</code>, <code>runtimeId</code>, <code>modelId</code>, <code>serverBuild</code>, <code>total_slots</code>, <code>thinkingLevel</code>, and <code>compiledPromptHash</code>. The build string and slot count are read from the server after the matrix has run while it is still awake, by fetching <code>/props</code> and falling back to the model-qualified slots query when <code>/props</code> exposes no <code>total_slots</code>. The prompt hash is the receipt&#39;s static composition hash, so a prompt change is visible as a configuration change rather than as a mysterious metric shift.</p>
+<p><code>eval compare</code> prints both configurations and refuses outright when they differ:</p>
+<pre><code class="language-text">serving configuration drift; pass --allow-config-drift to compare these runs
+baseline serving: target=mini runtime=llamacpp model=ornith1.5-35b-moe server_build=... total_slots=4 thinking=off compiled_prompt_hash=...
+candidate serving: ...
+</code></pre>
+<p>The current reference <code>mini</code> endpoint is the llama.cpp router at <code>192.168.86.141:8080</code>. It serves <code>ornith1.5-35b-moe</code> with four parallel slots and 262144 context tokens per slot. These deployment facts are reference topology, not defaults imposed on another target; retain the artifact&#39;s observed serving configuration with every comparison.</p>
+<p><code>--allow-config-drift</code> proceeds and labels the comparison <code>config drift: allowed</code>. There is a second refusal that has no override: a metric whose baseline distribution contains an <code>estimated</code> observation and whose candidate does not, or the reverse, raises <code>EvalTrackedMetricSourceMismatchError</code> rather than printing a delta, because subtracting a measurement from an estimate produces a number that looks like evidence and is not. <code>--metric &lt;name&gt;</code> filters tracked or behavioral rows, accepts <code>expectedColdReasons</code>, a specific <code>expectedColdReasons.&lt;reason&gt;</code>, a behavioral family, or a behavioral metric, and errors when the name matches nothing.</p>
+<hr>
+<h2>Task Outcome Measurement (<code>verify.measure</code>)</h2>
+<p>Task outcome commands declared under <code>verify.measure</code> are the code grader for whether the model solved the workload and record metrics (<code>task.solved</code>, <code>task.exitCode</code>). A non-zero exit fails the final result and is named on its verdict as <code>reason: grader_failed</code>, while <code>machinery</code> remains <code>ok</code> when the runner and machinery verifiers succeeded. This keeps the artifact&#39;s <code>pass</code>, verdict outcome, scenario aggregates, and summary on one pass decision without misreporting a grader failure as broken machinery.</p>
+        </article>
+        <nav class="related-nav" aria-label="Adjacent references">
+          <a class="nav-link-card" href="documentation_blueprint.html"><span class="nav-label">Previous</span><span class="nav-title">Documentation Standards and Codebase Alignment</span></a>
+          <a class="nav-link-card next" href="evals_internal_blueprint.html"><span class="nav-label">Next</span><span class="nav-title">Internal Eval Suites</span></a>
+        </nav>
+        <p class="reference-footer-note">Canonical content lives in the mapped Markdown page. This visual counterpart adds navigation without changing the contract.</p>
+      </main>
     </div>
-
-    <!-- TAB 1: INTERACTIVE -->
-    <main class="tab-pane active" id="pane-interactive">
-      <div class="blueprint-layout">
-
-        <!-- Left: Task Suite Editor & Run -->
-        <div class="specs-col">
-          <div class="glass-card">
-            <h2>
-              <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><title>Icon</title><path d="M11 4H4a2 2 0 0 0-2 2v14a2 2 0 0 0 2 2h14a2 2 0 0 0 2-2v-7"></path><path d="M18.5 2.5a2.121 2.121 0 1 1 3 3L12 15l-4 1 1-4 9.5-9.5z"></path></svg>
-              Task YAML validator &amp; runner
-            </h2>
-            <p>Paste or edit task suite YAML files. Run the validator or simulate execution sweeps.</p>
-
-            <div class="presets-list">
-              <span class="preset-btn" onclick="loadTaskPreset('valid')">Valid Task YAML</span>
-              <span class="preset-btn" onclick="loadTaskPreset('invalid')">Invalid Task Cwd escape</span>
-            </div>
-
-            <div class="form-group">
-              <textarea id="taskInput" rows="10" oninput="validateTasks()"></textarea>
-            </div>
-
-            <div class="verdict-header">YAML Validator Output</div>
-            <div id="validatorResult" class="status-panel success">
-              YAML is empty. Load a preset.
-            </div>
-
-            <button type="button" class="action-btn" id="runBtn" onclick="runSimulatedEval()">Simulate clio-coder eval run</button>
-
-            <div class="console-body" id="runConsole">Console ready. Click button to simulate runner.</div>
-          </div>
-        </div>
-
-        <!-- Right: Compare Calculator -->
-        <div class="specs-col">
-          <div class="glass-card">
-            <h2>
-              <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><title>Icon</title><polyline points="22 12 18 12 15 21 9 3 6 12 2 12"></polyline></svg>
-              Baseline vs Candidate Compare
-            </h2>
-            <p>Select Baselines and Candidate records to calculate deltas.</p>
-
-            <div class="form-row">
-              <div class="form-group">
-                <label for="baselineSelect">Baseline Run (Before change)</label>
-                <select id="baselineSelect" onchange="runCompare()">
-                  <option value="base-1">Baseline #1 (75% Pass Rate, 48s)</option>
-                  <option value="base-2">Baseline #2 (100% Pass Rate, 32s)</option>
-                </select>
-              </div>
-              <div class="form-group">
-                <label for="candidateSelect">Candidate Run (After change)</label>
-                <select id="candidateSelect" onchange="runCompare()">
-                  <option value="cand-1">Candidate #1 (100% Pass Rate, 24s)</option>
-                  <option value="cand-2">Candidate #2 (50% Pass Rate, 62s)</option>
-                </select>
-              </div>
-            </div>
-
-            <div class="verdict-header">Comparison Deltas</div>
-            <div class="compare-grid">
-              <div class="compare-card">
-                <strong id="deltaPassRate" style="color:var(--color-emerald)">+25%</strong>
-                <span>Pass Rate Delta</span>
-              </div>
-              <div class="compare-card">
-                <strong id="deltaWallTime" style="color:var(--color-emerald)">-24s</strong>
-                <span>Wall Time Delta</span>
-              </div>
-            </div>
-
-            <div id="compareDetails" style="margin-top:1.5rem; font-size:0.875rem; color:var(--text-muted)">
-              Candidate #1 outperformed Baseline #1. Typecheck and verifier commands run cold speeds decreased.
-            </div>
-          </div>
-        </div>
-
-      </div>
-    </main>
-
-    <!-- TAB 2: TECHNICAL REFERENCE -->
-    <main class="tab-pane" id="pane-reference">
-      <div class="glass-card">
-        <h2>Clio Coder Eval Runner Specifications</h2>
-        <p>The local evaluation runner executes repository-local YAML task suites as deterministic subprocess checks. It is useful for comparing harness changes, prompts, tools, or local workflows without requiring the runner itself to call a model.</p>
-
-        <h3 style="margin: 1.5rem 0 0.5rem 0; color:#fff;">CLI and Report Formats</h3>
-        <p>Run task suites, build reports, and compare evaluation results across runs:</p>
-        <pre><code>clio-coder eval run --task-file tasks.yaml [--repeat &lt;n&gt;]
-clio-coder eval report &lt;evalId&gt; [--format swe-jsonl]
-clio-coder eval compare &lt;baselineEvalId&gt; &lt;candidateEvalId&gt;</code></pre>
-        <p>The option <code>--format swe-jsonl</code> generates reports in a newline-separated JSONL format matching benchmark schemas (containing <code>instance_id</code>, <code>model_patch</code>, <code>model_name_or_path</code>, <code>status</code>, <code>pass</code>, <code>tokens</code>, <code>wall_time_ms</code>, and <code>cost_usd</code>) suitable for scientific evaluations such as <strong>SWE-bench</strong>.</p>
-
-        <h3 style="margin: 1.5rem 0 0.5rem 0; color:#fff;">Task-file schema</h3>
-        <p>Parsed by <code>src/domains/eval/task-file.ts</code>. Enforces relative cwd paths inside the task folder to prevent absolute escapes.</p>
-        <pre><code>version: 1
-tasks:
-  - id: cli-json-smoke
-    prompt: "Verify the CLI JSON mode still starts."
-    cwd: fixtures/cli-json-smoke
-    setup:
-      - npm install
-    verifier:
-      - npm run build
-      - node dist/cli/index.js --help
-    timeoutMs: 60000</code></pre>
-
-        <h3 style="margin: 1.5rem 0 0.5rem 0; color:#fff;">Serial-Lane Test Infrastructure &amp; Sharding</h3>
-        <p>The repository test suite utilizes <code>scripts/shard-tests.mjs</code> to distribute contract and evaluation tests across weighted parallel shards (configured in <code>scripts/shard-weights.json</code>) followed by an isolated serial lane:</p>
-        <pre><code># Run parallel sharded test lanes
-node scripts/shard-tests.mjs --shard 1/4
-node scripts/shard-tests.mjs --shard 2/4
-
-# Run isolated serial lane (strict CLIO_TEST_CONCURRENCY=1)
-node scripts/shard-tests.mjs --shard serial</code></pre>
-        <p>Timing-sensitive benchmarks, port-binding tests, and heavy disk I/O suites run exclusively in the <code>serial</code> lane after parallel lanes drain to prevent concurrency contention. Harness watchdogs in <code>tests/harness/load.ts</code> dynamically scale timeouts proportional to active concurrency.</p>
-
-        <h3 style="margin: 1.5rem 0 0.5rem 0; color:#fff;">Failure Classes</h3>
-        <table class="ref-table">
-          <thead>
-            <tr>
-              <th>Failure Class</th>
-              <th>Meaning</th>
-            </tr>
-          </thead>
-          <tbody>
-            <tr>
-              <td><code>setup_failed</code></td>
-              <td>A setup command exited with a non-zero exit status code.</td>
-            </tr>
-            <tr>
-              <td><code>verifier_failed</code></td>
-              <td>A verifier test command exited non-zero.</td>
-            </tr>
-            <tr>
-              <td><code>timeout</code></td>
-              <td>A command exceeded its timeoutMs limit.</td>
-            </tr>
-            <tr>
-              <td><code>cwd_missing</code></td>
-              <td>The resolved working directory directory did not exist.</td>
-            </tr>
-          </tbody>
-        </table>
-      </div>
-    </main>
-
-    <footer>
-      <p>Clio Coder Eval Runner spec &bull; Version 0.4.0</p>
-    </footer>
+    <footer>Clio Coder documentation · source-aligned at v0.4.2</footer>
   </div>
-
-  <script>
-    // Tab switching
-    function switchTab(tabId) {
-      document.querySelectorAll('.tab-btn').forEach(btn => { btn.classList.remove('active'); });
-      document.querySelectorAll('.tab-pane').forEach(pane => { pane.classList.remove('active'); });
-
-      if (tabId === 'interactive') {
-        document.querySelector('.tab-btn:nth-child(1)').classList.add('active');
-        document.getElementById('pane-interactive').classList.add('active');
-      } else {
-        document.querySelector('.tab-btn:nth-child(2)').classList.add('active');
-        document.getElementById('pane-reference').classList.add('active');
-      }
-    }
-
-    const taskSamples = {
-      valid: `version: 1
-tasks:
-  - id: cli-json-smoke
-    prompt: "Verify CLI JSON mode starts."
-    cwd: fixtures/cli-smoke
-    verifier:
-      - node dist/cli/index.js --version
-    timeoutMs: 30000`,
-      invalid: `version: 1
-tasks:
-  - id: escape-sandbox
-    prompt: "Tries absolute escape."
-    cwd: /etc/secrets       # Error: Absolute path
-    verifier:
-      - ls -la`
-    };
-
-    function loadTaskPreset(type) {
-      document.getElementById('taskInput').value = taskSamples[type].trim();
-      validateTasks();
-    }
-
-    function validateTasks() {
-      const text = document.getElementById('taskInput').value;
-      const output = document.getElementById('validatorResult');
-
-      if (!text.trim()) {
-        output.className = 'status-panel warning';
-        output.innerText = 'YAML is empty. Load a preset.';
-        return;
-      }
-
-      // Simple scanning
-      const lines = text.split('\n');
-      const errors = [];
-      let version = null;
-      let tasksEmpty = true;
-
-      lines.forEach((line, idx) => {
-        const trimmed = line.trim();
-        if (!trimmed || trimmed.startsWith('#')) return;
-
-        const parts = trimmed.split(':');
-        if (parts.length >= 2) {
-          const key = parts[0].trim();
-          const val = parts.slice(1).join(':').trim().replace(/['"]/g, '');
-
-          if (key === 'version') {
-            version = val;
-            if (val !== '1') errors.push(`[Line ${idx+1}] Version must be exactly 1.`);
-          }
-          if (key === 'cwd') {
-            if (val.startsWith('/') || val.startsWith('..')) {
-              errors.push(`[Line ${idx+1}] cwd contains absolute escape path constraints ("${val}"). Must be relative.`);
-            }
-          }
-          if (key === 'tasks') {
-            tasksEmpty = false;
-          }
-        }
-      });
-
-      if (errors.length > 0) {
-        output.className = 'status-panel error';
-        output.innerHTML = `<strong>Schema Errors:</strong><ul style="margin-left:1.5rem; margin-top:0.5rem;">` +
-          errors.map(e => `<li>${e}</li>`).join('') + `</ul>`;
-        document.getElementById('runBtn').disabled = true;
-      } else {
-        output.className = 'status-panel success';
-        output.innerHTML = "<strong>Success:</strong> Task file is structurally valid for local verifiers.";
-        document.getElementById('runBtn').disabled = false;
-      }
-    }
-
-    function runSimulatedEval() {
-      const consoleEl = document.getElementById('runConsole');
-      consoleEl.innerHTML = `[EVAL] Launching eval tasks suite runner...`;
-
-      setTimeout(() => {
-        consoleEl.innerHTML += `\n[RUN] Resolving Task: cli-json-smoke`;
-        consoleEl.innerHTML += `\n[FS] Resolved cwd: fixtures/cli-smoke`;
-      }, 400);
-
-      setTimeout(() => {
-        consoleEl.innerHTML += `\n[SH] Running verifier: node dist/cli/index.js --version`;
-        consoleEl.innerHTML += `\n[SH] stdout: Clio Coder v0.4.0`;
-        consoleEl.innerHTML += `\n[SH] exit code: 0`;
-      }, 900);
-
-      setTimeout(() => {
-        consoleEl.innerHTML += `\n[EVAL] Task cli-json-smoke: PASSED`;
-        consoleEl.innerHTML += `\n[EVAL] Completed execution. Pass rate: 100%. Eval ID: eval-5f82c`;
-      }, 1400);
-    }
-
-    function runCompare() {
-      const b = document.getElementById('baselineSelect').value;
-      const c = document.getElementById('candidateSelect').value;
-
-      const rateEl = document.getElementById('deltaPassRate');
-      const timeEl = document.getElementById('deltaWallTime');
-      const descEl = document.getElementById('compareDetails');
-
-      if (b === 'base-1' && c === 'cand-1') {
-        // baseline: 75% pass, 48s. cand: 100% pass, 24s.
-        rateEl.innerText = '+25%';
-        rateEl.style.color = 'var(--color-emerald)';
-        timeEl.innerText = '-24s';
-        timeEl.style.color = 'var(--color-emerald)';
-        descEl.innerText = "Candidate #1 pass rate improved by 25% and completed 24 seconds faster than Baseline #1.";
-      } else if (b === 'base-1' && c === 'cand-2') {
-        // baseline: 75% pass, 48s. cand: 50% pass, 62s.
-        rateEl.innerText = '-25%';
-        rateEl.style.color = 'var(--color-rose)';
-        timeEl.innerText = '+14s';
-        timeEl.style.color = 'var(--color-rose)';
-        descEl.innerText = "Candidate #2 regressed: pass rate dropped by 25% and ran 14 seconds slower.";
-      } else if (b === 'base-2' && c === 'cand-1') {
-        // baseline: 100% pass, 32s. cand: 100% pass, 24s.
-        rateEl.innerText = '0%';
-        rateEl.style.color = '#fff';
-        timeEl.innerText = '-8s';
-        timeEl.style.color = 'var(--color-emerald)';
-        descEl.innerText = "Pass rates are identical (100%). Candidate #1 was 8 seconds faster.";
-      } else {
-        // baseline: 100% pass, 32s. cand: 50% pass, 62s.
-        rateEl.innerText = '-50%';
-        rateEl.style.color = 'var(--color-rose)';
-        timeEl.innerText = '+30s';
-        timeEl.style.color = 'var(--color-rose)';
-        descEl.innerText = "Candidate #2 regressed significantly: pass rate halved and time increased by 30 seconds.";
-      }
-    }
-
-    // Init
-    window.onload = () => {
-      loadTaskPreset('valid');
-      runCompare();
-    };
-  </script>
+  <script src="shared.js"></script>
 </body>
 </html>

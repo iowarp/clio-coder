@@ -1,990 +1,1487 @@
-<!DOCTYPE html>
+<!doctype html>
 <html lang="en">
 <head>
-  <meta charset="UTF-8">
-  <meta name="viewport" content="width=device-width, initial-scale=1.0">
-  <title>Clio Coder Commands &amp; Modes Blueprint (v0.4.0)</title>
-
-  <style>
-    :root {
-      --bg-dark: #090d16;
-      --bg-grid: rgba(255, 255, 255, 0.02);
-      --bg-card: rgba(13, 20, 38, 0.45);
-      --bg-card-hover: rgba(20, 30, 58, 0.6);
-      --border-card: rgba(255, 255, 255, 0.08);
-      --border-card-hover: rgba(0, 240, 255, 0.3);
-      --text-main: #f3f4f6;
-      --text-muted: #9ca3af;
-      --text-dim: #6b7280;
-
-      --color-cyan: #00f0ff;
-      --color-cyan-rgb: 0, 240, 255;
-      --color-purple: #bd00ff;
-      --color-purple-rgb: 189, 0, 255;
-      --color-emerald: #10b981;
-      --color-emerald-rgb: 16, 185, 129;
-      --color-amber: #f59e0b;
-      --color-amber-rgb: 245, 158, 11;
-      --color-rose: #ef4444;
-      --color-rose-rgb: 239, 68, 68;
-
-      --gradient-main: linear-gradient(135deg, var(--color-cyan), var(--color-purple));
-      --shadow-glow: 0 0 25px rgba(0, 240, 255, 0.15);
-      --font-sans: "Segoe UI", -apple-system, BlinkMacSystemFont, Roboto, "Helvetica Neue", Arial, sans-serif;
-      --font-mono: "SFMono-Regular", Consolas, "Liberation Mono", Menlo, monospace;
-
-      --glass-blur: blur(12px);
-    }
-
-    * {
-      box-sizing: border-box;
-      margin: 0;
-      padding: 0;
-    }
-
-    body {
-      background-color: var(--bg-dark);
-      background-image:
-        radial-gradient(circle at 10% 20%, rgba(var(--color-cyan-rgb), 0.05) 0%, transparent 40%),
-        radial-gradient(circle at 90% 80%, rgba(var(--color-purple-rgb), 0.05) 0%, transparent 40%),
-        radial-gradient(circle at 50% 50%, #0d1527 0%, var(--bg-dark) 100%);
-      color: var(--text-main);
-      font-family: var(--font-sans);
-      min-height: 100vh;
-      line-height: 1.6;
-      overflow-x: hidden;
-      position: relative;
-    }
-
-    body::before {
-      content: '';
-      position: absolute;
-      inset: 0;
-      background-image: linear-gradient(var(--bg-grid) 1px, transparent 1px),
-                        linear-gradient(90deg, var(--bg-grid) 1px, transparent 1px);
-      background-size: 40px 40px;
-      background-position: center top;
-      pointer-events: none;
-      z-index: 0;
-      opacity: 0.8;
-    }
-
-    .container {
-      max-width: 1400px;
-      margin: 0 auto;
-      padding: 2rem;
-      position: relative;
-      z-index: 1;
-    }
-
-    /* Header Styling */
-    header {
-      display: flex;
-      justify-content: space-between;
-      align-items: center;
-      margin-bottom: 2.5rem;
-      padding-bottom: 1.5rem;
-      border-bottom: 1px solid rgba(255, 255, 255, 0.05);
-    }
-
-    .header-left {
-      display: flex;
-      align-items: center;
-      gap: 1rem;
-    }
-
-    .header-logo {
-      display: inline-flex;
-      align-items: center;
-      justify-content: center;
-      width: 48px;
-      height: 48px;
-      background: rgba(255, 255, 255, 0.02);
-      border: 1px solid var(--border-card);
-      border-radius: 12px;
-    }
-
-    .header-logo svg {
-      width: 28px;
-      height: 28px;
-    }
-
-    .header-title-wrapper h1 {
-      font-size: 1.5rem;
-      font-weight: 800;
-      letter-spacing: -0.03em;
-      background: linear-gradient(to right, #ffffff, #c7d2fe, var(--color-cyan));
-      -webkit-background-clip: text;
-      -webkit-text-fill-color: transparent;
-    }
-
-    .header-title-wrapper p {
-      font-size: 0.825rem;
-      color: var(--text-muted);
-    }
-
-    .header-right {
-      display: flex;
-      align-items: center;
-      gap: 1rem;
-    }
-
-    .back-btn {
-      background: rgba(255, 255, 255, 0.03);
-      border: 1px solid var(--border-card);
-      color: var(--text-muted);
-      padding: 0.5rem 1rem;
-      border-radius: 8px;
-      font-size: 0.875rem;
-      font-weight: 600;
-      text-decoration: none;
-      display: inline-flex;
-      align-items: center;
-      gap: 0.5rem;
-      transition: all 0.2s;
-    }
-
-    .back-btn:hover {
-      background: rgba(255, 255, 255, 0.08);
-      color: var(--text-main);
-      border-color: rgba(var(--color-cyan-rgb), 0.3);
-    }
-
-    .version-badge {
-      background: rgba(0, 240, 255, 0.08);
-      border: 1px solid rgba(0, 240, 255, 0.25);
-      color: var(--color-cyan);
-      padding: 0.35rem 0.75rem;
-      border-radius: 50px;
-      font-size: 0.75rem;
-      font-weight: 600;
-      font-family: var(--font-mono);
-    }
-
-    /* Tabs Navigation */
-    .tabs-nav {
-      display: flex;
-      gap: 0.75rem;
-      margin-bottom: 2rem;
-    }
-
-    .tab-btn {
-      background: rgba(255, 255, 255, 0.03);
-      border: 1px solid var(--border-card);
-      color: var(--text-muted);
-      padding: 0.6rem 1.25rem;
-      border-radius: 8px;
-      font-size: 0.875rem;
-      font-weight: 600;
-      cursor: pointer;
-      display: flex;
-      align-items: center;
-      gap: 0.5rem;
-      transition: all 0.2s;
-    }
-
-    .tab-btn:hover {
-      background: rgba(255, 255, 255, 0.06);
-      color: var(--text-main);
-    }
-
-    .tab-btn.active {
-      background: var(--gradient-main);
-      color: #090d16;
-      border-color: transparent;
-      box-shadow: 0 4px 15px rgba(var(--color-cyan-rgb), 0.25);
-    }
-
-    /* Content Layout */
-    .tab-pane {
-      display: none;
-      animation: fadeIn 0.3s ease-out forwards;
-    }
-
-    .tab-pane.active {
-      display: block;
-    }
-
-    @keyframes fadeIn {
-      from { opacity: 0; transform: translateY(8px); }
-      to { opacity: 1; transform: translateY(0); }
-    }
-
-    /* Split layout */
-    .blueprint-layout {
-      display: grid;
-      grid-template-columns: 1fr 1fr;
-      gap: 2rem;
-      align-items: start;
-    }
-
-    @media (max-width: 1100px) {
-      .blueprint-layout {
-        grid-template-columns: 1fr;
-      }
-    }
-
-    .glass-card {
-      background: var(--bg-card);
-      border: 1px solid var(--border-card);
-      border-radius: 16px;
-      padding: 1.75rem;
-      margin-bottom: 2rem;
-      backdrop-filter: var(--glass-blur);
-      box-shadow: 0 8px 32px 0 rgba(0, 0, 0, 0.3);
-    }
-
-    .glass-card h2 {
-      font-size: 1.25rem;
-      font-weight: 700;
-      color: #ffffff;
-      margin-bottom: 1.25rem;
-      display: flex;
-      align-items: center;
-      gap: 0.5rem;
-      border-bottom: 1px solid rgba(255, 255, 255, 0.05);
-      padding-bottom: 0.75rem;
-    }
-
-    .glass-card h2 svg {
-      width: 18px;
-      height: 18px;
-      color: var(--color-cyan);
-    }
-
-    .glass-card p {
-      font-size: 0.925rem;
-      color: var(--text-muted);
-      margin-bottom: 1rem;
-    }
-
-    /* Interactive Terminal console */
-    .tui-console {
-      background: #020408;
-      border: 1px solid var(--border-card);
-      border-radius: 12px;
-      padding: 1.25rem;
-      font-family: var(--font-mono);
-      font-size: 0.875rem;
-      position: relative;
-      min-height: 200px;
-    }
-
-    .tui-line {
-      display: flex;
-      align-items: center;
-      gap: 0.5rem;
-      color: #fff;
-    }
-
-    .tui-prompt {
-      color: var(--color-cyan);
-      font-weight: 700;
-    }
-
-    .tui-input {
-      background: transparent;
-      border: none;
-      color: #fff;
-      font-family: var(--font-mono);
-      outline: none;
-      width: 100%;
-    }
-
-    /* Autocomplete overlay */
-    .autocomplete-popover {
-      position: absolute;
-      top: 3.5rem;
-      left: 1.25rem;
-      right: 1.25rem;
-      background: rgba(13, 20, 38, 0.95);
-      border: 1px solid var(--color-cyan);
-      border-radius: 8px;
-      box-shadow: var(--shadow-glow);
-      z-index: 10;
-      max-height: 180px;
-      overflow-y: auto;
-      display: none;
-    }
-
-    .autocomplete-item {
-      padding: 0.5rem 0.75rem;
-      cursor: pointer;
-      display: flex;
-      justify-content: space-between;
-      color: var(--text-muted);
-    }
-
-    .autocomplete-item:hover, .autocomplete-item.selected {
-      background: rgba(0, 240, 255, 0.15);
-      color: #fff;
-    }
-
-    .autocomplete-item strong {
-      color: var(--color-cyan);
-    }
-
-    .tui-details {
-      margin-top: 1rem;
-      padding: 0.75rem;
-      background: rgba(255, 255, 255, 0.02);
-      border-radius: 6px;
-      border-left: 2.5px solid var(--color-cyan);
-      display: none;
-    }
-
-    /* Notice level simulator */
-    .logs-wrapper {
-      background: #020408;
-      border: 1px solid var(--border-card);
-      border-radius: 8px;
-      padding: 1rem;
-      font-family: var(--font-mono);
-      font-size: 0.8rem;
-      height: 150px;
-      overflow-y: auto;
-      margin-top: 1rem;
-    }
-
-    .btn-row {
-      display: flex;
-      gap: 0.5rem;
-      margin-top: 0.75rem;
-    }
-
-    .log-btn {
-      flex: 1;
-      padding: 0.4rem;
-      cursor: pointer;
-      background: rgba(255,255,255,0.03);
-      border: 1px solid var(--border-card);
-      border-radius: 6px;
-      font-size: 0.75rem;
-      font-weight: 600;
-      color: #fff;
-    }
-
-    .log-btn:hover {
-      background: rgba(255,255,255,0.08);
-    }
-
-    .log-line {
-      display: flex;
-      gap: 0.5rem;
-      margin-bottom: 0.25rem;
-    }
-
-    .log-line.info { color: var(--text-muted); }
-    .log-line.success { color: var(--color-emerald); }
-    .log-line.warn { color: var(--color-amber); }
-    .log-line.error { color: var(--color-rose); }
-
-    /* Keybindings Visual Grid */
-    .key-grid {
-      display: grid;
-      grid-template-columns: repeat(auto-fill, minmax(260px, 1fr));
-      gap: 1rem;
-    }
-
-    .key-card {
-      background: rgba(0,0,0,0.15);
-      border: 1px solid var(--border-card);
-      border-radius: 8px;
-      padding: 0.85rem;
-      display: flex;
-      align-items: center;
-      justify-content: space-between;
-    }
-
-    .kbd-tag {
-      background: rgba(255, 255, 255, 0.05);
-      border: 1.5px solid rgba(255, 255, 255, 0.15);
-      border-bottom-width: 3px;
-      padding: 0.2rem 0.5rem;
-      border-radius: 5px;
-      font-family: var(--font-mono);
-      font-size: 0.75rem;
-      font-weight: 700;
-      color: #fff;
-    }
-
-    /* Ref table */
-    .ref-table {
-      width: 100%;
-      border-collapse: collapse;
-      margin: 1.5rem 0;
-      font-size: 0.9rem;
-    }
-
-    .ref-table th, .ref-table td {
-      padding: 0.65rem 0.85rem;
-      border: 1px solid var(--border-card);
-      text-align: left;
-    }
-
-    .ref-table th {
-      background: rgba(255,255,255,0.03);
-    }
-
-    /* Footer */
-    footer {
-      text-align: center;
-      margin-top: 4rem;
-      padding-top: 2rem;
-      border-top: 1px solid rgba(255, 255, 255, 0.05);
-      color: var(--text-dim);
-      font-size: 0.875rem;
-    }
-  </style>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <meta name="clio-markdown-source" content="docs/guide/commands-and-modes.md">
+  <meta name="clio-docs-version" content="0.4.2">
+  <title>Commands and Modes · Clio Coder 0.4.2</title>
+  <link rel="icon" href="data:,">
+  <link rel="stylesheet" href="shared.css">
 </head>
-<body>
+<body data-doc-category="guide">
+  <div class="reading-progress" aria-hidden="true"></div>
+  <a class="skip-link" href="#reference-content">Skip to reference</a>
   <div class="container">
-    <header>
+    <header class="document-header" data-category="Guide">
       <div class="header-left">
-        <div class="header-logo">
-          <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" style="color: var(--color-cyan);"><title>Icon</title>
-            <polyline points="4 17 10 11 4 5"></polyline>
-            <line x1="12" y1="19" x2="20" y2="19"></line>
+        <a class="header-logo" href="index.html" aria-label="Documentation index">
+          <svg viewBox="0 0 24 24" fill="none" aria-hidden="true">
+            <path d="M12 2 2 7l10 5 10-5-10-5Z" stroke="url(#clio-logo)" stroke-width="2" stroke-linejoin="round"/>
+            <path d="m2 12 10 5 10-5M2 17l10 5 10-5" stroke="url(#clio-logo)" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"/>
+            <defs><linearGradient id="clio-logo" x1="2" y1="2" x2="22" y2="22"><stop stop-color="#00d4db"/><stop offset="1" stop-color="#ff7e29"/></linearGradient></defs>
           </svg>
-        </div>
+        </a>
         <div class="header-title-wrapper">
-          <h1>Clio Coder Commands &amp; Modes</h1>
-          <p>CLI syntax rules, TUI slash commands, notice channels, and hotkey bindings</p>
+          <p class="document-kicker">Guide / canonical reference</p>
+          <h1>Commands and Modes</h1>
+          <p class="document-path">docs/guide/commands-and-modes.md</p>
         </div>
       </div>
       <div class="header-right">
-        <span class="version-badge">Clio Coder v0.4.0</span>
-        <a href="index.html" class="back-btn">
-          <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><title>Icon</title><line x1="19" y1="12" x2="5" y2="12"></line><polyline points="12 19 5 12 12 5"></polyline></svg>
-          Dashboard Hub
-        </a>
+        <a class="back-btn" href="index.html">← Index</a>
+        <span class="version-badge">v0.4.2</span>
       </div>
     </header>
-
-    <div class="tabs-nav">
-      <button type="button" class="tab-btn active" onclick="switchTab('interactive')">
-        <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><title>Icon</title><polyline points="22 12 18 12 15 21 9 3 6 12 2 12"></polyline></svg>
-        Interactive Console Simulator
-      </button>
-      <button type="button" class="tab-btn" onclick="switchTab('reference')">
-        <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><title>Icon</title><path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z"></path><polyline points="14 2 14 8 20 8"></polyline><line x1="16" y1="13" x2="8" y2="13"></line><line x1="16" y1="17" x2="8" y2="17"></line><polyline points="10 9 9 9 8 9"></polyline></svg>
-        Full Technical Reference
-      </button>
+    <div class="page-layout-grid reference-layout">
+      <aside class="sidebar reference-sidebar" aria-label="On this page">
+        <nav class="toc-container">
+          <p class="toc-title">On this page</p>
+          <a class="sidebar-source" href="https://github.com/iowarp/clio-coder/blob/main/docs/guide/commands-and-modes.md">Canonical Markdown<br>docs/guide/commands-and-modes.md</a>
+          <ul class="toc-list"></ul>
+        </nav>
+      </aside>
+      <main class="reference-main" id="reference-content">
+        <article class="reference-prose glass-card">
+<blockquote>
+<p><strong>Visual blueprint:</strong> The source checkout includes the complete
+<a href="commands_blueprint.html">Commands and Modes visual reference</a>.</p>
+</blockquote>
+<p>Clio Coder is a terminal-first coding agent. This page is the detailed command
+reference for interactive sessions, headless runs, dispatch, verification, and
+common operator workflows; the README remains an approachable product and
+onboarding guide.</p>
+<p>Source of truth: <code>src/cli/index.ts</code>, <code>src/interactive/slash-commands.ts</code>,
+<code>src/domains/dispatch/**</code>, <code>src/tools/registry.ts</code>, and the current test suite.
+For process exit codes, stdout deliverable guarantees, and machine-readable JSON streaming formats, see <a href="exit_codes_blueprint.html">exit-codes-and-output.md</a>.</p>
+<h2>CLI Commands</h2>
+<table>
+<thead>
+<tr>
+<th>Command</th>
+<th>Purpose</th>
+</tr>
+</thead>
+<tbody><tr>
+<td><code>clio-coder</code></td>
+<td>Launch the interactive terminal UI.</td>
+</tr>
+<tr>
+<td><code>clio-coder run &quot;&lt;task&gt;&quot; [flags]</code></td>
+<td>Run one headless main-agent turn. Use <code>--json</code> for JSONL events.</td>
+</tr>
+<tr>
+<td><code>clio-coder run &quot;&lt;task&gt;&quot; --agent &lt;id&gt; [flags]</code></td>
+<td>Dispatch one explicit fleet agent non-interactively and write a receipt.</td>
+</tr>
+<tr>
+<td><code>clio-coder acp [--cwd PATH] [--permission-timeout MS]</code></td>
+<td>Serve Clio as an ACP v1 agent over stdio for ACP frontends.</td>
+</tr>
+<tr>
+<td><code>clio-coder --version</code></td>
+<td>Print the installed version. <code>clio-coder version</code> is the subcommand form.</td>
+</tr>
+<tr>
+<td><code>clio-coder --help [--all]</code></td>
+<td>Print the command list. <code>--all</code> appends every command under <code>clio-coder dev</code>.</td>
+</tr>
+<tr>
+<td><code>clio-coder --api-key &lt;key&gt;</code></td>
+<td>Override the active target API key for one invocation.</td>
+</tr>
+<tr>
+<td><code>clio-coder --no-context-files</code> / <code>clio-coder -nc</code></td>
+<td>Skip <code>CLIO-CODER.md</code> project-context injection for one invocation.</td>
+</tr>
+<tr>
+<td><code>clio-coder --no-skills</code></td>
+<td>Disable skill discovery for one invocation while still honoring explicit <code>--skill</code> paths.</td>
+</tr>
+<tr>
+<td><code>clio-coder --skill &lt;path&gt;</code></td>
+<td>Load one explicit skill file or directory for one invocation (repeatable).</td>
+</tr>
+<tr>
+<td><code>clio-coder configure</code></td>
+<td>Run the configuration wizard. Ctrl+C reports <code>configuration cancelled</code>, writes no target, and exits 130; when first-run onboarding is cancelled, startup stops instead of opening the TUI with no usable target.</td>
+</tr>
+<tr>
+<td><code>clio-coder configure --interop</code></td>
+<td>Review other coding agents detected on this machine and connect one as a delegation peer. Without a TTY it prints the proposals and writes nothing.</td>
+</tr>
+<tr>
+<td><code>clio-coder configure --list</code></td>
+<td>List user-facing runtime ids.</td>
+</tr>
+<tr>
+<td><code>clio-coder configure --list --all</code></td>
+<td>List every registered runtime, including aliases.</td>
+</tr>
+<tr>
+<td><code>clio-coder config [inspect] [--json]</code></td>
+<td>Print the effective customization graph across settings, context files, rules, skills, prompts, agents, extensions, safety, memory, hooks, and operator profile.</td>
+</tr>
+<tr>
+<td><code>clio-coder targets [--json] [--probe] [--target &lt;id&gt;]</code></td>
+<td>List configured targets, health, auth, runtime, model, and capabilities.</td>
+</tr>
+<tr>
+<td><code>clio-coder targets add</code></td>
+<td>Add a target interactively or through configure flags.</td>
+</tr>
+<tr>
+<td><code>clio-coder targets use &lt;id&gt; [--model &lt;id&gt;] [--orchestrator-model &lt;id&gt;] [--background-model &lt;id&gt;] [--fleet-target &lt;id&gt;] [--fleet-model &lt;id&gt;]</code></td>
+<td>Point the orchestrator at one target. Without <code>--fleet-target</code> the fleet default follows it; with <code>--fleet-target</code> the fleet runs on a different node.</td>
+</tr>
+<tr>
+<td><code>clio-coder targets fleet [--json]</code></td>
+<td>List the configured fleet profiles with their target, runtime, model, and thinking level. <code>targets workers</code> is an accepted alias.</td>
+</tr>
+<tr>
+<td><code>clio-coder targets profile list|set|remove|rename|bind|unbind|bindings</code></td>
+<td>Manage named fleet profiles and agent bindings. <code>clio-coder targets profile &lt;name&gt; &lt;id&gt;</code> is the short form of <code>profile set</code>, and <code>targets worker</code> is an accepted alias for <code>targets profile</code>.</td>
+</tr>
+<tr>
+<td><code>clio-coder targets convert &lt;id&gt; --runtime &lt;runtimeId&gt;</code></td>
+<td>Convert older local target definitions to a runtime-specific target.</td>
+</tr>
+<tr>
+<td><code>clio-coder targets remove &lt;id&gt;</code></td>
+<td>Remove a target.</td>
+</tr>
+<tr>
+<td><code>clio-coder targets rename &lt;old&gt; &lt;new&gt;</code></td>
+<td>Rename a target id.</td>
+</tr>
+<tr>
+<td><code>clio-coder models [search] [--target &lt;id&gt;] [--json] [--offline]</code></td>
+<td>List models. Live probing is the default; <code>--offline</code> skips it.</td>
+</tr>
+<tr>
+<td><code>clio-coder paths [--json]</code></td>
+<td>Print the resolved config, data, state, and cache directories.</td>
+</tr>
+<tr>
+<td><code>clio-coder auth list</code></td>
+<td>Show known auth entries.</td>
+</tr>
+<tr>
+<td><code>clio-coder auth status [target-or-runtime]</code></td>
+<td>Inspect auth state.</td>
+</tr>
+<tr>
+<td><code>clio-coder auth login [target-or-runtime] [--api-key &lt;value&gt;]</code></td>
+<td>Add credentials through the supported flow.</td>
+</tr>
+<tr>
+<td><code>clio-coder auth logout [target-or-runtime]</code></td>
+<td>Remove stored credentials.</td>
+</tr>
+<tr>
+<td><code>clio-coder doctor [--fix] [--json]</code></td>
+<td>Diagnose state. Plain <code>doctor</code> is read-only and leaves even a partially initialized home byte-for-byte untouched. With <code>--fix</code>, create missing structure and templates, repair credential permissions, and refresh install metadata. Settings remain strict; lifecycle migrations belong to <code>upgrade</code>, not <code>doctor --fix</code>.</td>
+</tr>
+<tr>
+<td><code>clio-coder tools list [--json]</code></td>
+<td>List the pinned external tool registry and whether each program resolves from <code>PATH</code>, Clio&#39;s vendored data directory, or nowhere.</td>
+</tr>
+<tr>
+<td><code>clio-coder tools status &lt;id&gt; [--json] [--reset-profile]</code></td>
+<td>Inspect one registered tool. <code>--reset-profile</code> applies only to yazi&#39;s generated profile.</td>
+</tr>
+<tr>
+<td><code>clio-coder tools install &lt;id&gt; [--force] [--json]</code></td>
+<td>Download the platform asset, verify every declared checksum, and atomically vendor it.</td>
+</tr>
+<tr>
+<td><code>clio-coder tools remove &lt;id&gt;|--all [--json]</code></td>
+<td>Remove Clio-vendored copies without touching a program found on <code>PATH</code>.</td>
+</tr>
+<tr>
+<td><code>clio-coder panes install</code></td>
+<td>Alias for <code>clio-coder tools install herdr</code>.</td>
+</tr>
+<tr>
+<td><code>clio-coder reset [--state|--data|--cache|--auth|--config|--all] [--dry-run] [--force]</code></td>
+<td>Reset selected Clio Coder state. <code>--state</code> is the default level.</td>
+</tr>
+<tr>
+<td><code>clio-coder uninstall [--dry-run] [--remove-binary] [--force]</code></td>
+<td>Remove Clio Coder state and print uninstall guidance.</td>
+</tr>
+<tr>
+<td><code>clio-coder upgrade [--dry-run] [--channel=&lt;latest|beta|dev&gt;] [--skip-migrations]</code></td>
+<td>Refresh state metadata, apply migrations, and update npm installs when applicable.</td>
+</tr>
+<tr>
+<td><code>clio-coder agents [--json] [--all]</code></td>
+<td>List discovered agent specs.</td>
+</tr>
+<tr>
+<td><code>clio-coder fleet list|run|status|drain|resume</code></td>
+<td>List fleet contracts, run one, show dispatch state, or control admission. <code>drain</code> denies new execution starts for up to one hour and preserves running work; <code>resume</code> reopens admission immediately. <code>run &lt;name&gt;</code> takes <code>[--var k=v ...]</code> and <code>[--json]</code>; <code>status</code>, <code>drain</code>, and <code>resume</code> each take <code>[--json]</code>.</td>
+</tr>
+<tr>
+<td><code>clio-coder fleet view &lt;runId|fleetRootId&gt; [--follow]</code></td>
+<td>Read the append-only run journal after verifying receipt trust. A fleet root prints its durable step index. Without <code>--follow</code>, the width-bounded snapshot is plain text with no ANSI control bytes. <code>--follow</code> requires an interactive terminal and one run id; <code>fleet view --help</code> prints this subcommand&#39;s own usage, including <code>--watch</code>.</td>
+</tr>
+<tr>
+<td><code>clio-coder fleet view --watch &lt;selection-file&gt;</code></td>
+<td>Follow the run id currently named by the selection file and retarget when it changes. This is the operator-pulled watch surface used by the pane integration.</td>
+</tr>
+<tr>
+<td><code>clio-coder dev components [list] [--json]</code></td>
+<td>List behavior-affecting harness components.</td>
+</tr>
+<tr>
+<td><code>clio-coder dev components snapshot --out &lt;path&gt;</code></td>
+<td>Write a component snapshot JSON file.</td>
+</tr>
+<tr>
+<td><code>clio-coder dev components diff --from &lt;a&gt; --to &lt;b&gt; [--json]</code></td>
+<td>Compare component snapshots.</td>
+</tr>
+<tr>
+<td><code>clio-coder evidence build|inspect|list</code></td>
+<td>Build and inspect deterministic evidence artifacts.</td>
+</tr>
+<tr>
+<td><code>clio-coder eval validate|run|report|compare|gate</code></td>
+<td>Validate, run, report, compare, and gate local evaluation suites (Suite v2).</td>
+</tr>
+<tr>
+<td><code>clio-coder memory list|propose|promote|approve|reject|prune</code></td>
+<td>Manage scoped, evidence-linked memory records.</td>
+</tr>
+<tr>
+<td><code>clio-coder trace runs [--db PATH] [--limit N] [--json]</code></td>
+<td>List runs recorded in the durable trace mirror beside the ledger.</td>
+</tr>
+<tr>
+<td><code>clio-coder trace inspect --json</code></td>
+<td>Emit the fixed, bounded recent accounting projection used by the Workbench. It accepts no path, identifier, or limit and omits request text, error prose, event payloads, process commands, PIDs, and hosts.</td>
+</tr>
+<tr>
+<td><code>clio-coder trace phases &lt;runId&gt; [--db PATH]</code></td>
+<td>Show one run&#39;s recorded phases.</td>
+</tr>
+<tr>
+<td><code>clio-coder trace tail &lt;runId&gt; [--follow] [--db PATH]</code></td>
+<td>Tail one run&#39;s recorded events; <code>--follow</code> streams as they land.</td>
+</tr>
+<tr>
+<td><code>clio-coder trace procs &lt;runId&gt; [--db PATH]</code></td>
+<td>Show the processes one run spawned.</td>
+</tr>
+<tr>
+<td><code>clio-coder trace prune [--max-age-days N] [--max-bytes N] [--db PATH] [--json]</code></td>
+<td>Apply the trace-retention policy while protecting queued and running runs; JSON reports the resolved policy, rows, runs and bytes removed, protected runs, and whether vacuum ran.</td>
+</tr>
+<tr>
+<td><code>clio-coder trace sql &lt;SELECT query&gt; [--db PATH]</code></td>
+<td>Run one read-only query against the mirror. Only a single <code>SELECT</code> or read-only <code>WITH</code> statement is accepted; anything else exits 2.</td>
+</tr>
+<tr>
+<td><code>clio-coder trace ui [--db PATH] [--port N]</code></td>
+<td>Serve the localhost-only waterfall viewer. The viewer is not part of the published package.</td>
+</tr>
+<tr>
+<td><code>clio-coder dev evolve manifest init|validate|summarize</code></td>
+<td>Create and check typed harness change manifests.</td>
+</tr>
+<tr>
+<td><code>clio-coder extensions list|discover|install|enable|disable|remove</code></td>
+<td>Manage installed extension packages and resource roots. <code>clio-coder ext</code> is an accepted alias.</td>
+</tr>
+<tr>
+<td><code>clio-coder skills list|search|inspect|validate|install|update|sync|eval</code></td>
+<td>Manage discovered skills, Clio-native skills, and local marketplace installs.</td>
+</tr>
+<tr>
+<td><code>clio-coder docs [topic] [--no-open]</code></td>
+<td>Serve the interactive HTML docs of a source checkout on 127.0.0.1; the npm package ships the Markdown guides only.</td>
+</tr>
+<tr>
+<td><code>clio-coder usage report [--repo &lt;path&gt;] [--days &lt;n&gt;] [--json]</code></td>
+<td>Cross-session usage facts and opportunities from the session and run ledgers. The window defaults to 30 days and the JSON schema is marked experimental.</td>
+</tr>
+<tr>
+<td><code>clio-coder dev share export --out &lt;path&gt; [--project|--user|--both] [--context] [--prompts] [--skills] [--settings] [--extensions]</code></td>
+<td>Export project context, prompts, skills, settings fragments, and extension bundles.</td>
+</tr>
+<tr>
+<td><code>clio-coder dev share import &lt;path&gt; [--dry-run] [--force] [--project|--user] [--json]</code></td>
+<td>Import a share archive with conflict reporting.</td>
+</tr>
+<tr>
+<td><code>clio-coder dev share inspect &lt;path&gt; [--json]</code></td>
+<td>Inspect a share archive without importing it.</td>
+</tr>
+<tr>
+<td><code>clio-coder export --out &lt;path&gt; ...</code> / <code>clio-coder import &lt;path&gt; ...</code></td>
+<td>Top-level aliases for <code>dev share export</code> and <code>dev share import</code>. Each <code>dev</code> command also resolves without the <code>dev</code> prefix.</td>
+</tr>
+<tr>
+<td><code>clio-coder context</code></td>
+<td>Show project context status, preload class, codewiki freshness, and the codewiki digest when present.</td>
+</tr>
+<tr>
+<td><code>clio-coder context init [--preview] [--heuristic] [--yes] [--json] [--adopt] [--global] [--propose|--apply|--rewrite] [--target &lt;id&gt; [--model &lt;id&gt;] [--thinking &lt;level&gt;]]</code></td>
+<td>Explore the repo and bootstrap or update project context: <code>CLIO-CODER.md</code>, <code>.clio-coder/codewiki.json</code>, and <code>.clio-coder/state.json</code>.</td>
+</tr>
+<tr>
+<td><code>clio-coder context refresh [--wiki]</code></td>
+<td>Rebuild the codewiki and state without touching <code>CLIO-CODER.md</code>; with <code>--wiki</code>, update an existing Markdown wiki.</td>
+</tr>
+<tr>
+<td><code>clio-coder context wiki [--update] [--status] [--depth auto|simple|medium|detailed] [--target &lt;id&gt;] [--model &lt;id&gt;] [--thinking off|low|medium|high]</code></td>
+<td>Generate, update, or inspect the agent-authored Markdown wiki under <code>.clio-coder/wiki/</code>.</td>
+</tr>
+<tr>
+<td><code>clio-coder context reset [--all] [--yes]</code></td>
+<td>Clear accumulated project context artifacts; <code>--all</code> also removes <code>CLIO-CODER.md</code>. <code>--yes</code> (or <code>-y</code>) answers every confirmation and is required when stdin is not a terminal.</td>
+</tr>
+<tr>
+<td><code>clio-coder context index [--json]</code></td>
+<td>Build the structural codewiki index without model calls; writes <code>.clio-coder/codewiki.json</code> and <code>.clio-coder/state.json</code> and prints coverage plus a structural hash.</td>
+</tr>
+<tr>
+<td><code>clio-coder context replay (--sessions &lt;path&gt;... | --synthetic &lt;ids&gt;) [--policies &lt;ids&gt;] [--budgets &lt;tokens&gt;] [--threshold &lt;ratio&gt;] [--target &lt;ratio&gt;] [--protect-last-turns &lt;n&gt;] [--min-evictable-tokens &lt;n&gt;] [--seed &lt;n&gt;] [--no-filter] [--json &lt;out&gt;] [--md &lt;out&gt;]</code></td>
+<td>Replay working-set policies over Clio session ledgers or the seeded procedural corpora and report retention, precision, token savings, recall cost, cold-prefix cost, saturation, and summary headroom.</td>
+</tr>
+<tr>
+<td><code>clio-coder context working-set --session &lt;id|path&gt;</code></td>
+<td>Inspect one session&#39;s durable working-set fold and path-index summary without modifying the ledger.</td>
+</tr>
+</tbody></table>
+<h2>Headless Run Flags</h2>
+<table>
+<thead>
+<tr>
+<th>Flag</th>
+<th>Meaning</th>
+</tr>
+</thead>
+<tbody><tr>
+<td><code>--target &lt;id&gt;</code></td>
+<td>One-run main-agent or dispatch target override.</td>
+</tr>
+<tr>
+<td><code>--model &lt;wireId&gt;</code></td>
+<td>One-run model override.</td>
+</tr>
+<tr>
+<td><code>--thinking &lt;level&gt;</code></td>
+<td>One-run thinking level: <code>off</code>, <code>minimal</code>, <code>low</code>, <code>medium</code>, <code>high</code>, <code>xhigh</code>, or <code>max</code>.</td>
+</tr>
+<tr>
+<td><code>--autonomy &lt;level&gt;</code></td>
+<td>One-run autonomy override: <code>read-only</code>, <code>suggest</code>, <code>auto-edit</code>, or <code>full-auto</code>; it does not change saved settings.</td>
+</tr>
+<tr>
+<td><code>--temperature &lt;n&gt;</code> / <code>--top-p &lt;n&gt;</code> / <code>--top-k &lt;n&gt;</code> / <code>--min-p &lt;n&gt;</code></td>
+<td>One-run sampler overrides when the selected runtime supports them.</td>
+</tr>
+<tr>
+<td><code>--presence-penalty &lt;n&gt;</code> / <code>--frequency-penalty &lt;n&gt;</code> / <code>--repeat-penalty &lt;n&gt;</code></td>
+<td>One-run penalty overrides when the selected runtime supports them.</td>
+</tr>
+<tr>
+<td><code>--max-context-tokens &lt;n&gt;</code></td>
+<td>One-run context-window override for supported local runtimes.</td>
+</tr>
+<tr>
+<td><code>--kv-cache-mode &lt;mode&gt;</code></td>
+<td>One-run KV-cache override for supported local runtimes: <code>f16</code>, <code>f32</code>, <code>none</code>, <code>false</code>, <code>q8_0</code>, <code>q4_0</code>, <code>q4_1</code>, <code>iq4_nl</code>, <code>q5_0</code>, or <code>q5_1</code>.</td>
+</tr>
+<tr>
+<td><code>--json</code></td>
+<td>Stream JSONL events for main-agent runs; dispatch streams events and receipt JSON.</td>
+</tr>
+<tr>
+<td><code>--json-events &lt;mode&gt;</code></td>
+<td>Main-agent JSON stream mode: <code>full</code> or <code>terminal</code>; implies <code>--json</code>.</td>
+</tr>
+<tr>
+<td><code>--session &lt;id&gt;</code></td>
+<td>Append this turn to an existing session identified by <code>&lt;id&gt;</code>.</td>
+</tr>
+<tr>
+<td><code>--continue</code></td>
+<td>Append this turn to the most recent session for the current working directory.</td>
+</tr>
+<tr>
+<td><code>--agent &lt;recipe-id&gt;</code></td>
+<td>Dispatch a fleet agent instead of the main agent. Unknown ids fail fast.</td>
+</tr>
+<tr>
+<td><code>--skill &lt;path&gt;</code></td>
+<td>Load one explicit skill file or skill directory for this run. Repeatable.</td>
+</tr>
+<tr>
+<td><code>--no-skills</code></td>
+<td>Disable skill discovery for this run while still honoring explicit <code>--skill</code> paths.</td>
+</tr>
+<tr>
+<td><code>--agent-profile &lt;name&gt;</code></td>
+<td>Use a named fleet profile for dispatch.</td>
+</tr>
+<tr>
+<td><code>--agent-runtime &lt;id&gt;</code></td>
+<td>Pick the first fleet profile whose target uses this runtime.</td>
+</tr>
+<tr>
+<td><code>--tool-profile &lt;name&gt;</code></td>
+<td>Restrict dispatched-agent tools: <code>minimal-local</code>, <code>science-local</code>, or <code>full-agent</code>.</td>
+</tr>
+<tr>
+<td><code>--require &lt;capability&gt;</code></td>
+<td>Require a target capability for dispatch. Repeatable.</td>
+</tr>
+<tr>
+<td><code>--steer-channel &lt;path&gt;</code></td>
+<td>Read live steering lines from a FIFO or an appended regular file to steer the active run.</td>
+</tr>
+<tr>
+<td><code>--with-panes</code></td>
+<td>Activate guest pane integration for this invocation when Clio is already inside a reachable herdr session. It overrides <code>interface.panes.enabled</code>.</td>
+</tr>
+<tr>
+<td><code>--no-panes</code></td>
+<td>Disable pane integration for this invocation. It overrides <code>interface.panes.enabled</code>.</td>
+</tr>
+</tbody></table>
+<p><code>--with-panes</code> is an explicit first-class launch mode, not permission to start a
+pane server. Clio confirms <code>HERDR_ENV=1</code>, connects to an existing socket, and
+pings it before registering pane tools. The fleet watch pane runs
+<code>fleet view --watch</code> against a selection file. Clio writes only the selected run
+id, while the viewer reads journals itself, so dispatch remains independent of
+the pane host and a second terminal can use the same journal surface directly.
+<code>interface.panes.enabled: embedded</code> does not start a host: it is an accepted but
+unimplemented rung that resolves to no panes, prints a refusal during boot, and
+is labelled <code>NOT IMPLEMENTED</code> in Settings. Use <code>auto</code> or <code>--with-panes</code> only
+when Clio is already inside a reachable herdr session.</p>
+<h3>Headless Session Continuity</h3>
+<p>A headless turn (<code>clio-coder run</code>) starts a fresh session unless <code>--session &lt;id&gt;</code> or <code>--continue</code> specifies a session to append to.</p>
+<ul>
+<li><code>--session &lt;id&gt;</code> appends the turn to the session with id <code>&lt;id&gt;</code>.</li>
+<li><code>--continue</code> appends the turn to the most recent session recorded for the current working directory.</li>
+<li><code>--session</code> and <code>--continue</code> are mutually exclusive. Specifying both causes the invocation to fail with exit code 2 before execution.</li>
+<li>Session continuity options apply strictly to main-agent execution. They are non-applicable to <code>--agent</code> fleet dispatches because dispatched agents execute in isolated worker processes with independent transcripts; specifying session flags alongside <code>--agent</code> exits with code 2.</li>
+<li>A named session that cannot be resumed (such as an unknown session ID or unreadable history) fails the run with exit code 2 before any model call is initiated.</li>
+<li>The session ID is discoverable via the <code>session</code> event when running under <code>--json</code> mode and on stderr via the <code>clio-coder run: session &lt;id&gt;</code> line in text mode. Standard output remains reserved for the assistant answer alone.</li>
+</ul>
+<h3>JSON Event Streaming and Wire Projection Promise</h3>
+<p>When <code>--json</code> or <code>--json-events &lt;mode&gt;</code> (<code>full</code> | <code>terminal</code>) is passed, <code>clio-coder run</code> streams structured JSONL events.</p>
+<ul>
+<li><strong>Wire Projection Promise:</strong> Each piece of turn content crosses the wire exactly once.</li>
+<li>Intermediate <code>message_update</code> events are dropped to prevent quadratic snapshot duplication over stdout.</li>
+<li><code>text_delta</code> and <code>thinking_delta</code> events stream incremental text deltas rather than accumulating message snapshots.</li>
+<li><code>agent_end</code> events carry segment summary metrics (<code>messageCount</code> and a <code>usage</code> object containing <code>input</code>, <code>output</code>, <code>cacheRead</code>, <code>cacheWrite</code>, <code>reasoning</code>, <code>totalTokens</code>, <code>costUsd</code>, <code>apiCalls</code>, and <code>measured</code>) instead of duplicating the full message transcript.</li>
+<li><code>turn_end</code> preserves the final assistant message while dropping <code>toolResults</code> array objects, each of which already crossed the wire in an preceding <code>tool_execution_end</code> event.</li>
+</ul>
+<p>Example:</p>
+<pre><code class="language-bash">clio-coder run \
+  &quot;Find the test command and summarize the project structure.&quot; \
+  --target local-lmstudio \
+  --model qwen3.8-27b
+</code></pre>
+<h2>Interactive Slash Commands</h2>
+<p>Slash commands are available inside the TUI. Type <code>/</code> at the start of the prompt to open the grouped command palette autocomplete.</p>
+<p>The registry table below lists the available interactive slash commands. On a bare <code>/</code>, commands are presented in groups (<code>Run</code>, <code>Inspect</code>, <code>Configure</code>, <code>Sessions</code>) with compact argument hints. Each operation has one canonical spelling; autocomplete, help, and parsing all read the same registry. The &quot;Usage&quot; column details expected arguments, with brackets <code>[]</code> indicating optional arguments and angle brackets <code>&lt;&gt;</code> indicating required arguments.</p>
+<table>
+<thead>
+<tr>
+<th>Command</th>
+<th>Usage</th>
+<th>Purpose</th>
+</tr>
+</thead>
+<tbody><tr>
+<td><code>/quit</code></td>
+<td><code>/quit</code></td>
+<td>Exit Clio Coder</td>
+</tr>
+<tr>
+<td><code>/help</code></td>
+<td><code>/help [query]</code></td>
+<td>Open the interactive help center showing commands and keys</td>
+</tr>
+<tr>
+<td><code>/skill</code></td>
+<td><code>/skill [name] [task]</code></td>
+<td>Open the Skills Hub or invoke a skill</td>
+</tr>
+<tr>
+<td><code>/resources</code></td>
+<td><code>/resources [skills|prompts|library [kind]|extensions [reload]]</code></td>
+<td>Browse installed resources and private library entries; <code>extensions reload</code> commits a new extension generation</td>
+</tr>
+<tr>
+<td><code>/share</code></td>
+<td><code>/share [runId]</code></td>
+<td>Share a worker result with the main agent</td>
+</tr>
+<tr>
+<td><code>/archive</code></td>
+<td><code>/archive export &lt;path&gt; | /archive import [--dry-run] [--force] &lt;path&gt;</code></td>
+<td>Export or import a full Clio archive</td>
+</tr>
+<tr>
+<td><code>/run</code></td>
+<td><code>/run [--agent-profile &lt;profile&gt;] [--runtime &lt;runtimeId&gt;] [--target &lt;id&gt;] [--model &lt;id&gt;] [--thinking &lt;level&gt;] [--tool-profile &lt;minimal-local|science-local|full-agent&gt;] [--require &lt;cap&gt;] [--share] &lt;agent&gt; &lt;task&gt;</code></td>
+<td>Run a fleet agent</td>
+</tr>
+<tr>
+<td><code>/delegate</code></td>
+<td><code>/delegate [--share] &lt;agent-id&gt; &lt;task&gt;</code></td>
+<td>Run an ACP delegation agent</td>
+</tr>
+<tr>
+<td><code>/btw</code></td>
+<td><code>/btw &lt;question&gt;</code></td>
+<td>Ask a side question that never enters the session transcript</td>
+</tr>
+<tr>
+<td><code>/oracle</code></td>
+<td><code>/oracle &lt;question&gt;</code></td>
+<td>Ask a read-only advisor to challenge a question against this session&#39;s settled decisions</td>
+</tr>
+<tr>
+<td><code>/council</code></td>
+<td><code>/council [--roster &lt;name&gt;] [--rounds &lt;n&gt;] [--synthesis &lt;judge|vote|none&gt;] &lt;task&gt;</code></td>
+<td>Ask a roster of read-only members the same task, with an optional vote or judge synthesis</td>
+</tr>
+<tr>
+<td><code>/agents</code></td>
+<td><code>/agents [list|connect]</code></td>
+<td>List native and external agents, or review detected external-agent proposals</td>
+</tr>
+<tr>
+<td><code>/cost</code></td>
+<td><code>/cost</code></td>
+<td>Show session token and cost totals</td>
+</tr>
+<tr>
+<td><code>/context</code></td>
+<td><code>/context compact [instructions] | /context recall &lt;ref&gt; | /context init | /context refresh | /context reset</code></td>
+<td>Context hub: window overlay plus compact, recall, init, refresh, and reset</td>
+</tr>
+<tr>
+<td><code>/fleet</code></td>
+<td><code>/fleet run [--var &lt;key=value&gt;] &lt;name&gt;</code></td>
+<td>Open Settings → Fleet, or run a fleet contract with an approval preview</td>
+</tr>
+<tr>
+<td><code>/decisions</code></td>
+<td><code>/decisions</code></td>
+<td>Show settled interview decisions and operator revisions</td>
+</tr>
+<tr>
+<td><code>/tasks</code></td>
+<td><code>/tasks add &lt;text&gt; | /tasks hand &lt;id&gt; | /tasks done &lt;id&gt; | /tasks drop &lt;id&gt;</code></td>
+<td>Show the session board or manage project operator tasks</td>
+</tr>
+<tr>
+<td><code>/memory</code></td>
+<td><code>/memory seed</code></td>
+<td>Inspect, promote, or seed task memory</td>
+</tr>
+<tr>
+<td><code>/view</code></td>
+<td><code>/view [filter] | /view verify &lt;runId&gt;</code></td>
+<td>Browse session artifacts and verify receipts</td>
+</tr>
+<tr>
+<td><code>/panes</code></td>
+<td><code>/panes show &lt;run-or-agent&gt; | /panes open &lt;preset-or-argv&gt; | /panes close [target]</code></td>
+<td>Inspect the pane layer, watch a live run in a pane, or open a utility pane</td>
+</tr>
+<tr>
+<td><code>/thinking</code></td>
+<td><code>/thinking [level]</code></td>
+<td>Set the chat thinking level, or open Settings → Orchestrator</td>
+</tr>
+<tr>
+<td><code>/output</code></td>
+<td><code>/output [verbosity]</code></td>
+<td>Set transcript detail (minimal, default, verbose), or open Settings → Terminal</td>
+</tr>
+<tr>
+<td><code>/model</code></td>
+<td><code>/model [pattern]</code></td>
+<td>Open model selector or set a model</td>
+</tr>
+<tr>
+<td><code>/settings</code></td>
+<td><code>/settings [chat|fleet|targets|context|safety|interface|integrations] [group]</code></td>
+<td>Open interactive settings, optionally at a durable area and UI group</td>
+</tr>
+<tr>
+<td><code>/resume</code></td>
+<td><code>/resume</code></td>
+<td>Resume a past session</td>
+</tr>
+<tr>
+<td><code>/new</code></td>
+<td><code>/new</code></td>
+<td>Start a fresh session</td>
+</tr>
+<tr>
+<td><code>/handoff</code></td>
+<td><code>/handoff &lt;goal&gt;</code></td>
+<td>Hand this session&#39;s working state to a fresh session for a stated goal</td>
+</tr>
+<tr>
+<td><code>/tree</code></td>
+<td><code>/tree</code></td>
+<td>Open session tree navigator</td>
+</tr>
+<tr>
+<td><code>/fork</code></td>
+<td><code>/fork</code></td>
+<td>Fork from an assistant turn</td>
+</tr>
+<tr>
+<td><code>/export</code></td>
+<td><code>/export [path]</code></td>
+<td>Export a self-contained HTML transcript by default; a <code>.md</code> path writes Markdown</td>
+</tr>
+</tbody></table>
+<p>Retired spellings fail closed and print their exact replacement. In particular,
+<code>/targets</code> points to <code>/settings targets</code>, <code>/scoped-models</code> points to
+<code>/settings chat model-picker</code>, and <code>/library</code>, <code>/prompts</code>, and <code>/extensions</code>
+point to the corresponding <code>/resources</code> subcommand. They never fall through to
+the model as prompt text.</p>
+<p><code>/context</code> with no arguments opens the context-window ledger overlay, including
+the working-set section (policy, evicted items and tokens, events, recalls, churn).
+The subcommands own the durable project-context noun: <code>compact</code> summarizes older
+turns in the session window, <code>recall &lt;ref&gt;</code> prints an evicted tool-result body
+back into the transcript by the ref its <code>[evicted ...]</code> marker names (it never
+enters model context; the model recalls with <code>context(scope=&quot;recall&quot;, ref=...)</code>),
+<code>init</code> bootstraps or updates <code>CLIO-CODER.md</code> and the
+codewiki, <code>refresh</code> re-indexes the codewiki and refreshes <code>.clio-coder/state.json</code>
+without touching <code>CLIO-CODER.md</code>, and <code>reset</code> deletes accumulated
+context artifacts (<code>.clio-coder/codewiki.json</code>, <code>.clio-coder/state.json</code>,
+<code>.clio-coder/handoffs/</code>, <code>.clio-coder/proposals/</code>). Its interactive choice preserves or
+deletes <code>CLIO-CODER.md</code>; cancellation makes no changes. Session reset stays <code>/new</code>;
+there is deliberately no <code>/context clear</code>. The spellings <code>/context-init</code>,
+<code>/context-clear</code>, and <code>/context-view</code> are gone and are not aliased to anything.
+There are no slash-command aliases. <code>/context compact</code>, <code>/quit</code>, <code>/model</code>,
+<code>/settings</code>, and <code>/skill &lt;name&gt;</code> are their only spellings. Retired or foreign
+spellings stay errors that name <code>/help</code> instead of guessing which operation the
+operator intended.</p>
+<p><code>/model</code> never changes routing on its own. Both spellings, the picker and
+<code>/model &lt;pattern&gt;</code>, resolve the swap and then ask where it lands: <code>Apply this session</code>, <code>Apply and save globally</code>, or <code>Cancel</code>. Session is the default and
+touches no file, so a mid-conversation experiment dies with the session that
+made it; global is the same write the settings center performs, and it is the
+only one a later launch inherits. Cancel leaves the model where it was. A
+thinking level named in the pattern follows the same choice.</p>
+<p><code>/btw &lt;question&gt;</code> runs one model round beside the session and renders the answer
+in an overlay. It sends the same compiled message history the next turn would
+send, as read-only input, under a short system instruction saying this is a side
+question, with no tools. Nothing about the round is appended: not the session
+JSONL, not the transcript panel, not the context ledger, not the task board. That
+is the point of it. A fleet run briefs its workers from the transcript, so a
+question the operator asks to orient themselves mid-run would otherwise become
+context every worker inherits. Esc closes the overlay, and cancels the round if it
+is still streaming. <code>/btw</code> during an in-flight turn is refused with a notice
+rather than queued, because a side question answered after the run it was asked
+during has already missed its moment. The round&#39;s token usage still shows in
+<code>/cost</code>, labeled as a side question, because it was a real call and cost real
+money; it is deliberately not counted as a turn.</p>
+<p><code>/council [--roster &lt;name&gt;] [--rounds &lt;n&gt;] [--synthesis judge|vote|none] &lt;task&gt;</code>
+asks a roster of two to five read-only members the same task and puts the group on
+the Fleet Runs board as one card. It owns no dispatch path of its own: the command
+builds dispatch-tool arguments and admits them through the tool registry, so a
+supervised autonomy level parks the call and the approval overlay names every
+member&#39;s label, target, model, node, round count, and synthesis mode before
+anything runs. Members are pinned to read-only autonomy and the council tool
+surface by admission, exactly as they are for a council the model asks for.</p>
+<p><code>--roster</code> names a <code>fleet.rosters</code> entry. Without it the command takes
+<code>fleet.rosters.default</code> when that roster exists, and with neither it refuses
+and names the setting to declare. A roster that is the only one configured is
+still not the default: seating a council from whichever roster happens to be
+present would run models the operator never chose. <code>--rounds</code> accepts one to
+three and <code>--synthesis</code> accepts <code>judge</code>, <code>vote</code>, or <code>none</code>, which are the tool&#39;s
+own bounds, enforced where the operator typed them so a council is never refused
+after its plan has already been shown. <code>/council</code> during an in-flight turn is
+refused with a notice rather than queued, for the same reason <code>/fleet run</code> is: an
+approved plan describes the workspace as it stands. Nothing the members produce
+enters the main agent&#39;s context until an operator runs <code>/share</code>.</p>
+<p><code>/handoff &lt;goal&gt;</code> carries this session&#39;s working state into a fresh session for a
+goal the operator states. The goal is required and gated: a goal shorter than 12
+characters is refused, and so is one of a small stoplist of non-goals such as
+&quot;continue&quot;, &quot;next&quot;, or &quot;resume&quot;. Both refusals name the rule they enforce, because
+&quot;keep going&quot; is exactly the instruction a handoff exists to replace.</p>
+<p>One model round then runs on the same out-of-turn seam <code>/btw</code> uses. It reads the
+compiled message history the next turn would send, sends no tools, and answers
+with JSON validated against a fixed response schema of decisions, facts, files,
+commands, and open questions. Every list and every string is bounded; output over
+a bound is truncated with a visible marker and the document names each bound that
+fired, so nothing is cut silently and an over-eager answer is never a refusal.</p>
+<p>Every file path the model names is checked against this session&#39;s read ledger and
+never against the filesystem. Paths the session did not touch are dropped and
+listed in the document under their own heading so the operator can see what the
+model invented. Extracted decisions are merged with the session&#39;s settled decision
+board, and the board wins. The result is one Markdown document opened for review:
+Enter accepts it, <code>e</code> hands it to <code>$EDITOR</code>, and Esc cancels the whole handoff with
+nothing written anywhere.</p>
+<p>On accept, Clio mints a new session, writes the reviewed document into it as
+bounded data labelled as a handoff from the old session id, and replays the old
+session&#39;s skill activations so loaded skills carry forward. The document is never
+written as a fabricated user turn. The old session is left untouched apart from one
+terminal note recording the target session id. A handoff is a session operation
+throughout: it writes no memory promotion candidate and never calls the task-memory
+bank. <code>/handoff</code> during an in-flight turn is refused with a notice rather than
+queued, because a document summarizing a session that is still moving would be
+wrong by the time it was read.</p>
+<p>The <code>/resume</code> picker accepts Page Up and Page Down to move by its 12 visible rows. Arrow keys continue to move one session at a time, and typing continues to filter the list.</p>
+<p>Only active commands run. Typing anything command-shaped that the registry does
+not own checks the loaded prompt templates across native and foreign prompt roots.
+Built-in command names are reserved across interactive and headless modes; a
+template with the same basename is omitted from <code>/resources prompts</code> with a collision
+diagnostic instead of shadowing a command on one surface and expanding on another.
+If a matching template is found in an untrusted project root, Clio prints that the
+prompt template comes from an untrusted project root and directs the operator to set
+<code>integrations.projectResources.trustProjectImports</code>, sending nothing to the model. If the token names
+neither a command nor a template, it reports <code>is not a command</code> and points at <code>/help</code>;
+it is never sent to the model. That covers spellings removed outright, such as
+<code>/status</code> and <code>/receipts</code>, as well as ordinary typos. It replaces the earlier
+behavior where an unrecognized spelling reached the model as prose and was answered
+conversationally, which left the operator believing a command had run when nothing had.</p>
+<p>A headless <code>clio-coder run &quot;/typo&quot;</code> refuses the same way. The verdict is reached
+before boot, so no session is opened and no turn is spent; the diagnostic names
+the token on stderr and the run exits <code>2</code>, the usage-error code.</p>
+<p>Command-shaped means one word of letters, digits, hyphens, or colons after the slash, so
+paths such as <code>/home/user/notes.md</code> still reach the model unchanged. One word
+followed by prose is treated as a command, because <code>/status please</code> and <code>/tmp is full</code> are indistinguishable. To send such a line as text, escape the slash:
+<code>\/tmp is full</code> reaches the model as <code>/tmp is full</code>. The escape claims a single
+backslash and only in front of a slash, so <code>\\server\share</code> is unchanged, and it
+works on a real command too, so <code>\/help</code> is a question about <code>/help</code> rather than
+the help overlay.</p>
+<p>A rejected command stays in the input line. The error names the spelling and the
+text is still there to correct, rather than having to be retyped. Retired spellings (such as <code>/status</code>, <code>/receipts</code>, <code>/context-init</code>, <code>/context-clear</code>, <code>/context-view</code>, and <code>/skill:&lt;name&gt;</code>) are not recognized and fail closed with <code>/&lt;token&gt; is not a command. Type /help for the list.</code></p>
+<p>The accepted spelling of every command is the table under <a href="#interactive-slash-commands">Interactive Slash Commands</a>; there is exactly one per operation, and nothing else is parsed as a command.</p>
+<p>Configuration lives in one place: the <code>/settings</code> overlay. <code>/settings &lt;section&gt;</code> reaches every section directly. <code>/thinking &lt;level&gt;</code>, <code>/output &lt;verbosity&gt;</code>, and <code>/model &lt;pattern&gt;</code> stay as quick setters that apply without opening anything.</p>
+<p>Settings → Targets presents an operational console table (<code>HEALTH</code>, <code>ID</code>, <code>ROLES</code>, <code>RUNTIME</code>, <code>LATENCY</code>) with an in-place action/detail drawer for URL, default model, last probe error, and reachability. <code>Enter</code> opens actions for <code>Use</code> (switches active chat target and rebases model), <code>Connect</code> (runs the API-key or OAuth flow then probes), <code>Probe</code>, and <code>Remove</code> (with preflight analysis of affected routes/profiles). Probing runs live when the overlay opens or when explicitly requested. Target creation is initiated via <code>clio-coder targets add</code>.</p>
+<p>Settings → Fleet is an entity workbench organized with dim group headers (<code>Defaults</code>, <code>Profiles</code>, <code>Agent routes</code>, <code>Placement</code>). Dispatched worker defaults and profile rows render as compact summaries (<code>fast-local node-a/example-coder-model  high  auto</code>), drilling into fields (<code>target</code>, <code>model</code>, <code>thinkingLevel</code>, <code>node</code>) on <code>Enter</code>. Profile removal is a named destructive action with affected-route preflight. Running and retrying dispatches live in the <code>Alt+W</code> Fleet Runs board, which also steers and cancels them. <code>Enter</code> opens the selected run&#39;s worker detail: the phase, the running call with its redacted action descriptor, and the bounded tail of the worker&#39;s own prose.</p>
+<p><code>/run</code> and <code>/delegate</code> put the worker&#39;s answer on screen. Both echo the typed
+line dim above the block, then stream the run into the transcript as an attributed
+block: a header (<code>◇ coder · node-a/example-coder-model · run 2mkas6s</code> for fleet workers,
+or <code>◇ codex (acp) · run 7hq2ab</code> for ACP peers), the worker&#39;s prose down a rail,
+one coalesced line of tool names, and a one-line footer carrying the outcome glyph,
+token count, duration, and contract status (such as <code>└ ✓ ok · 8.4k tok · 18s · contract unmeasured</code>),
+with the failure reason printed on the rail above the footer when a run fails.
+Runs the model itself asked for through the dispatch tool render as folded <code>◆</code>
+cards under the spawning tool segment; operator-typed runs are <code>◇</code> and open.
+The footer chip in the status line splits them (such as <code>◇1 ◆3</code>). <code>Alt+O</code> toggles
+the newest foldable item (tool call or worker block), while <code>Ctrl+Alt+O</code> or
+<code>Alt+Shift+O</code> toggles every one. Memory workers on the background target never
+appear as transcript blocks. A run that fails over keeps one block and gains an
+<code>↻ failed over → attempt 2 on node-b/example-coder-model</code> line inside it.</p>
+<p>That block is the only place a <code>/run</code> answer goes. The main agent is not told
+about it, which is what makes a side run a side run; asked about the answer, it
+will say it has not seen one. <code>--share</code> on either command hands the result over
+when the run finishes, and <code>/share [runId]</code> does it afterwards for a run already
+on screen. Bare <code>/share</code> takes the newest finished run the operator started
+themselves (never a model-asked <code>◆</code> run), while <code>/share &lt;runId&gt;</code> may name a
+model-asked run explicitly. What crosses is the receipt&#39;s own bounded text under a
+<code>[worker result] coder · run 2mkas6s · ok · shared by the operator</code> header,
+entering the session through the ordinary user-turn path so replay and
+compaction treat it as operator text. The header names the operator as the
+origin, and the system prompt tells the main agent that such a note is
+operator steering whose run id names a receipt it can read, so a model that
+never dispatched the run does not discard it as unattributed output. A turn
+that only relays a shared note does not trip the unbacked-worker-claim
+advisory.
+A council run shares as a council. <code>/share &lt;synthesis runId&gt;</code> brings the whole
+<code>council-report</code> in as one bounded block: every final-round member&#39;s answer under
+its roster label, each with its verdict when it declared one, then the synthesis
+line naming the mode, the verdict, the tally, and the judge run when there was
+one. <code>/share &lt;member runId&gt;</code> brings that one member&#39;s answer in under its roster
+label, so a single voice never reaches the main agent as an unattributed one. A
+synthesis run whose sealed text does not parse as a report is shared verbatim
+rather than dropped, because the operator named that run.</p>
+<p><code>/new</code> resets the transcript and the pool bare <code>/share</code> draws from, so a run
+from the previous session cannot be shared into the new one. Worker tool
+arguments never cross at all: the transcript carries tool names only, the same
+rule the dispatch board follows.</p>
+<p>Blocks survive a resume. Each attempt writes a <code>workerRun</code> session entry naming
+the run, its origin, and its runtime, and <code>/resume</code> rebuilds the block from that
+entry plus the sealed receipt under <code>&lt;state&gt;/receipts/&lt;runId&gt;.json</code>. The session
+file&#39;s <code>workerRun</code> entries carry ids, origins, and runtime references only, without
+prose; the replayed answer is bounded from the receipt exactly like the live one.
+A run whose receipt is gone replays with a <code>receipt unavailable</code> footer rather
+than a header with nothing under it. The entries are bookkeeping: they cost nothing
+in the context window and never become model context, so resuming a session full
+of side runs does not spend the window on them.</p>
+<p>The <code>/tasks</code> overlay combines the live session board, terminal task history,
+successful workspace artifacts, and the project-scoped operator task inbox.
+The live board shows every task with its status, operator provenance, completion
+evidence, or block/drop reason. It persists as full <code>taskLedger</code> snapshots, so
+stable board history and <code>userTaskId</code> pickup links survive <code>/resume</code> and <code>/fork</code>
+and can be audited from <code>current.jsonl</code>. Operator tasks persist separately in
+<code>.clio-coder/user-tasks.json</code>; the overlay can add, hand, finish, or drop them.
+The model-facing <code>tasks</code> tool&#39;s session-ledger and inbox bookkeeping is the
+documented read-class exception described in <a href="safety_blueprint.html">the safety model</a>:
+calls remain audited as <code>read</code> and do not grant workspace mutation authority.</p>
+<p>The <code>/decisions</code> overlay shows completed and cancelled <code>ask_user</code> interviews
+from the active branch. It retains settled and superseded values from
+<code>decisionLedger</code> snapshots, expands the source question and answer, and lets the
+operator supersede a decision or enter a correction. A correction is submitted
+to the model as an ordinary operator turn after the durable snapshot changes.</p>
+<p>The read-only <code>/memory</code> overlay keeps durable and session memory attributable
+in one place. It lists approved evidence-backed lessons, then the live task
+bank by private status, knowledge, and procedural class, including each
+entry&#39;s injection count and the last memory-step outcome. The welcome launchpad
+and expanded dashboard summarize whether intervention is on, its rules or LLM
+tier, and current bank size.
+After <code>/resume</code>, Clio offers <code>/memory seed</code> when the newest handoff contains a
+structured snapshot. Seeding is explicit, deduplicated, and unavailable while
+<code>context.memory.enabled</code> is false.</p>
+<p>The <code>/agents connect</code> overlay lists the other coding agents Clio found on this machine,
+grouped <code>Detected</code>, <code>Configured</code>, and <code>Declined</code>. A detected row&#39;s detail pane
+shows the exact <code>integrations.externalAgents.entries</code> entry that connecting it would append, plus
+the two facts a new peer inherits: <code>projectContext: none</code>, so the peer receives
+the task text and never the project projection, and <code>toolGovernance: clio-coder-policy</code>, so its tool calls are gated by Clio safety. Press <code>a</code> to connect
+one or <code>d</code> to decline; the overlay reads the report this process already produced
+at boot and never probes on a keystroke. Accepting applies to the live session,
+because <code>delegation</code> hot-reloads.</p>
+<p>Boot adds at most one line about interop, in the current source shape
+<code>clio-coder: codex detected on PATH and not configured. Run /interop to review.</code>
+The <code>/interop</code> name is retained only as a retired-command tombstone and answers
+<code>Use /agents connect.</code>, so operators can open <code>/agents connect</code> directly. The
+hint names only agents that are installed, unconfigured, and undecided, appears
+at most once per set of facts, and is never emitted in headless or ACP mode.
+Declining an agent silences it until its binary version or path changes, at which
+point it becomes a fresh proposal.</p>
+<p><code>clio-coder doctor</code> reports interop and never proposes anything. It emits one
+<code>ok</code> row per detected agent naming its version, its path, and whether it is
+configured, one <code>warn</code> row for a configured peer whose command no longer resolves
+on PATH, and one aggregate row counting the skills loaded from foreign roots. A
+machine with no other agents installed emits no interop rows at all. Reachability
+for a stdio peer means the command resolves; doctor never starts a session with
+one, and plain <code>doctor</code> writes nothing.</p>
+<h2>Keybindings</h2>
+<p>App bindings use <code>Alt + &lt;key&gt;</code> as the primary scheme, plus <code>Shift+Tab</code>,
+<code>Ctrl+D</code>, <code>Shift+Enter</code> / <code>Ctrl+J</code>, and a portable <code>Ctrl+G</code> leader. Modern terminals and Linux/meta
+setups send Alt directly. Stock macOS Terminal.app needs <strong>Use Option as Meta
+key</strong> enabled in Settings &gt; Profiles &gt; Keyboard for native Alt; otherwise use
+<code>Ctrl+G</code> then the Alt binding letter.</p>
+<p><code>Alt+B</code> and <code>Alt+D</code> are approved application-input boundary overrides of Pi&#39;s
+editor word-back and word-delete chords. Clio routes those two bindings before
+the editor sees them so the task and decision boards remain global shortcuts.
+They are intentional exceptions to the other app bindings&#39; avoidance of Pi
+editor reserves and can be rebound through <code>settings.yaml.keybindings</code>.</p>
+<table>
+<thead>
+<tr>
+<th>Binding</th>
+<th>Action</th>
+</tr>
+</thead>
+<tbody><tr>
+<td><code>Enter</code></td>
+<td>Send draft prompt (when idle) or deliver it at the next slot of the active run (when streaming).</td>
+</tr>
+<tr>
+<td><code>Shift+Enter</code> / <code>Ctrl+J</code></td>
+<td>Insert a newline into multiline editor input.</td>
+</tr>
+<tr>
+<td><code>Ctrl+P</code> / <code>Ctrl+N</code></td>
+<td>Browse backward / forward through prompts accepted in this interactive process; returning past the newest entry restores the unfinished draft.</td>
+</tr>
+<tr>
+<td><code>Alt+Enter</code></td>
+<td>End of turn: queue the current draft for delivery when the active run settles.</td>
+</tr>
+<tr>
+<td><code>Alt+I</code></td>
+<td>Interrupt: cancel the active run and deliver the current draft now. Refused while an attached dispatch runs or a permission ask is parked; the draft then queues for the next slot.</td>
+</tr>
+<tr>
+<td><code>Alt+Up</code></td>
+<td>Restore queued next-slot and end-of-turn messages to the editor.</td>
+</tr>
+<tr>
+<td><code>Shift+Tab</code></td>
+<td>Cycle orchestrator thinking level (<code>off</code>, <code>minimal</code>, <code>low</code>, <code>medium</code>, <code>high</code>, <code>xhigh</code>, <code>max</code>).</td>
+</tr>
+<tr>
+<td><code>Alt+T</code></td>
+<td>Open the session tree navigator (<code>/tree</code>).</td>
+</tr>
+<tr>
+<td><code>Alt+U</code></td>
+<td>Toggle the footer dashboard between compact (quiet 2-zone) and expanded (4-zone urgency) layouts.</td>
+</tr>
+<tr>
+<td><code>Alt+L</code></td>
+<td>Open the model and targets selector.</td>
+</tr>
+<tr>
+<td><code>Alt+J</code> / <code>Alt+K</code></td>
+<td>Cycle forward / backward through the configured model set (when empty, directs the operator to <code>/settings chat model-picker</code>).</td>
+</tr>
+<tr>
+<td><code>Alt+W</code></td>
+<td>Toggle the Fleet Runs board (task, run ID, live telemetry, retry, and terminal history). Inside it, <code>Enter</code> opens the selected run&#39;s live worker detail, <code>s</code> steers, and <code>x</code> cancels.</td>
+</tr>
+<tr>
+<td><code>Alt+B</code></td>
+<td>Open the composite session and operator task board (<code>/tasks</code>). Approved application-boundary override of editor word-back.</td>
+</tr>
+<tr>
+<td><code>Alt+D</code></td>
+<td>Open the settled interview decision board (<code>/decisions</code>). Approved application-boundary override of editor word-delete.</td>
+</tr>
+<tr>
+<td><code>Alt+S</code> / <code>Ctrl+Alt+B</code></td>
+<td>Convert an active attached dispatch to a detached background batch.</td>
+</tr>
+<tr>
+<td><code>Alt+O</code></td>
+<td>Toggle the newest tool call or worker block between collapsed subline and full body.</td>
+</tr>
+<tr>
+<td><code>Ctrl+Alt+O</code> / <code>Alt+Shift+O</code></td>
+<td>Toggle all tool calls and worker blocks between collapsed sublines and full bodies.</td>
+</tr>
+<tr>
+<td><code>Alt+P</code></td>
+<td>Toggle streaming partial tool output in expanded tool bodies.</td>
+</tr>
+<tr>
+<td><code>Alt+R</code></td>
+<td>Toggle the latest thinking block between hidden marker and full body.</td>
+</tr>
+<tr>
+<td><code>Ctrl+Alt+R</code> / <code>Alt+Shift+R</code></td>
+<td>Toggle all thinking blocks between hidden markers and full bodies.</td>
+</tr>
+<tr>
+<td><code>Alt+G</code></td>
+<td>Open the current input in an external editor.</td>
+</tr>
+<tr>
+<td><code>Alt+X</code></td>
+<td>Dismiss footer notifications.</td>
+</tr>
+<tr>
+<td><code>Ctrl+G</code>, then a letter</td>
+<td>Portable leader fallback for Alt-letter actions.</td>
+</tr>
+<tr>
+<td><code>Ctrl+C</code></td>
+<td>With no overlay: cancel stream, clear input, or press twice to exit. With an overlay open: close/cancel that overlay only.</td>
+</tr>
+<tr>
+<td><code>Ctrl+D</code></td>
+<td>Exit when the editor is empty; otherwise delete the next character. It never exits from inside an overlay.</td>
+</tr>
+<tr>
+<td><code>PageUp</code> / <code>PageDown</code></td>
+<td>In <code>/resume</code> and list overlays: scroll the selection by one full page (12 rows).</td>
+</tr>
+<tr>
+<td><code>Esc</code></td>
+<td>With an overlay open: clear non-empty filter first, move up drill-down level, then close/cancel. With no overlay: cancel stream/operation or collapse dashboard.</td>
+</tr>
+</tbody></table>
+<p>When scripting Clio inside tmux, prefer <code>tmux send-keys C-m</code> for submit/confirm keys instead of the literal <code>Enter</code> token; some tmux/terminal combinations do not deliver <code>Enter</code> reliably.</p>
+<h2>Live Steering</h2>
+<p>While a run is active, the key that submits a message chooses when it lands.
+There are three modes, chosen per message; the default is next slot.</p>
+<table>
+<thead>
+<tr>
+<th>Mode</th>
+<th>Key</th>
+<th>Delivery</th>
+</tr>
+</thead>
+<tbody><tr>
+<td>Next slot</td>
+<td><code>Enter</code></td>
+<td>Between tool batches, mid-run, through <code>agent.steer</code>. The agent keeps going and reads the message before its next model call.</td>
+</tr>
+<tr>
+<td>End of turn</td>
+<td><code>Alt+Enter</code></td>
+<td>When the whole run settles and Clio would hand control back, through <code>agent.followUp</code>. A turn is the whole run, not one model round.</td>
+</tr>
+<tr>
+<td>Interrupt</td>
+<td><code>Alt+I</code> (or <code>Ctrl+G</code>, <code>i</code>)</td>
+<td>Cancels the in-flight work the way <code>Esc</code> does (generation aborts; a running bash child gets SIGTERM, then SIGKILL), waits for the cancelled run to seal its tool results in ledger order, then submits the message as a fresh prompt. Anything already queued returns to the editor.</td>
+</tr>
+</tbody></table>
+<p>Interrupt is refused in two states and the message is queued for the next slot
+instead, with a notice saying why: while an attached dispatch is running (the
+abort would kill the worker&#39;s run with no receipt; steer it with <code>@&lt;agent&gt;</code> or
+cancel it with <code>Esc</code>) and while a permission ask is parked (it is already
+waiting on you). A steer that arrives as the run ends is resubmitted as a fresh
+prompt. Headless <code>--steer-channel</code> lines are always next-slot steers.</p>
+<p>For running dispatches, the editor also accepts:</p>
+<pre><code class="language-text">@&lt;agentId-or-runId-prefix&gt; &lt;steering text&gt;
+</code></pre>
+<p>Clio resolves the token to an exact agent id first, then to a run-id prefix,
+and forwards the text to an HTTP or SDK worker&#39;s steering channel. File-looking
+tokens such as <code>@package.json</code> are rejected so ordinary repository references
+do not accidentally become steering requests.</p>
+<p>The <code>Alt+W</code> Fleet Runs board makes this control path discoverable: use
+Up/Down or <code>j</code>/<code>k</code> to select a run, <code>s</code> to close the board and prefill its
+exact <code>@&lt;runId&gt; </code> steering prefix, and <code>x</code> to cancel a live worker or queued
+retry. A steer first reports <code>queued</code>; only the worker&#39;s
+<code>clio_coder_steer_received</code> acknowledgement reports <code>received</code>. Single-shot
+subprocess runtimes and ACP delegation do not expose a live steering channel
+and are labeled accordingly.</p>
+<h2>Operating Posture and Autonomy</h2>
+<p>Clio Coder operates with a single, unified tool surface. There are no separate tool-visibility modes; what varies is the <code>autonomy</code> level (<code>read-only</code> | <code>suggest</code> | <code>auto-edit</code> | <code>full-auto</code>), edited in the <code>/settings</code> Autonomy &amp; Safety section.</p>
+<p>Tool and command execution is governed by:</p>
+<ul>
+<li><strong>Target Capabilities:</strong> What the selected model target actually supports (such as tools, streaming, and vision).</li>
+<li><strong>Safety Net:</strong> Granular rule packs loaded from <code>damage-control-rules.yaml</code>, project policies, and protected artifact paths; always on, identical at every autonomy level.</li>
+<li><strong>Autonomy Mapping:</strong> Once the net passes a call, the level decides whether it runs, asks, or is denied. See <a href="safety_blueprint.html">safety-model.md</a> for the full matrix.</li>
+</ul>
+<p>When an action asks for confirmation, whether from a safety-net rail or from the autonomy level, the call parks and three surfaces say so at once. The transcript row reads <code>⏸ awaiting approval</code> with <code>action ·</code>, <code>axis ·</code>, and <code>target ·</code> lines under it; the footer phase pill reads <code>⏸ confirm</code>; and a consequence-tier dialog opens with the tool, target, action, authenticated requester, one-shot authority, reversibility, and deny and stop effects. Titles distinguish workspace authority, outward consequences, safety-net confirmation, system changes, and worker escalations. The dialog sits at bottom center with five rows reserved for the composer and footer, and it re-anchors on resize. The composer rail switches to <code>CONFIRM</code> and repeats the keys while the prompt owns the keyboard.</p>
+<p>The keys are the same on both surfaces: <code>Enter</code> allows this one call, <code>Esc</code> denies it, and <code>s</code> denies it and stops the turn so nothing asks again. <code>Enter</code> allows only from an empty composer. While the composer holds a draft, the habitual send key does nothing, the rail and the dialog footer read <code>[Backspace] clear draft</code> instead of <code>[Enter] allow</code>, and only the deletion keys (<code>Backspace</code>, <code>Delete</code>, <code>Ctrl+U</code>, <code>Ctrl+W</code>, <code>Ctrl+K</code>) reach the editor until the draft is gone. Every other key is swallowed. A call that parks while another overlay holds the screen is announced with an <code>[approval]</code> notice and the dialog opens as soon as that overlay closes; the dialog lays itself out for any terminal width, so no width is too narrow for it. Approving or denying never changes the level.</p>
+<p>Notice vocabulary, one prefix per mechanism: <code>[safety-net]</code> for level-independent blocks, <code>[approval]</code> for parked calls, <code>[autonomy]</code> for read-only denials, and <code>[middleware]</code> for hook diagnostics.</p>
+<h2>Dispatch and Built-In Agents</h2>
+<p>Fleet dispatch runs focused agent recipes through configured targets. The final agent fleet includes:</p>
+<table>
+<thead>
+<tr>
+<th>Agent</th>
+<th>Category / Audience</th>
+<th>Use it for</th>
+</tr>
+</thead>
+<tbody><tr>
+<td><code>architect</code></td>
+<td><code>plan</code> / <code>base</code></td>
+<td>Mapping boundaries, contracts, and migration slices.</td>
+</tr>
+<tr>
+<td><code>coder</code></td>
+<td><code>implement</code> / <code>base</code></td>
+<td>Bounded implementation, repairs, and behavior-preserving refactors.</td>
+</tr>
+<tr>
+<td><code>debugger</code></td>
+<td><code>quality</code> / <code>base</code></td>
+<td>Explaining a failing run, test failure, or session evidence without edits.</td>
+</tr>
+<tr>
+<td><code>documenter</code></td>
+<td><code>implement</code> / <code>base</code></td>
+<td>Updating developer-facing docs, examples, and operational runbooks.</td>
+</tr>
+<tr>
+<td><code>git-master</code></td>
+<td><code>implement</code> / <code>base</code></td>
+<td>Bounded git repository operations, history, commits, worktrees, and PR preparation.</td>
+</tr>
+<tr>
+<td><code>tester</code></td>
+<td><code>quality</code> / <code>base</code></td>
+<td>Focused tests for regressions and verification gaps.</td>
+</tr>
+<tr>
+<td><code>verifier</code></td>
+<td><code>quality</code> / <code>base</code></td>
+<td>Independent test, lint, build, and quality gate reports.</td>
+</tr>
+<tr>
+<td><code>wiki-writer</code></td>
+<td><code>implement</code> / <code>base</code></td>
+<td>Planning one repository wiki or researching and writing one wiki page.</td>
+</tr>
+<tr>
+<td><code>scout</code></td>
+<td><code>explore</code> / <code>shadow</code></td>
+<td>Read-only repository exploration, symbol mapping, and context assembly.</td>
+</tr>
+<tr>
+<td><code>researcher</code></td>
+<td><code>research</code> / <code>shadow</code></td>
+<td>Documentation, literature, and web-grounded investigation.</td>
+</tr>
+<tr>
+<td><code>provenance</code></td>
+<td><code>operations</code> / <code>shadow</code></td>
+<td>Reading evidence files, receipts, diffs, and telemetry for handoffs.</td>
+</tr>
+<tr>
+<td><code>oracle</code></td>
+<td><code>plan</code> / <code>shadow</code></td>
+<td>Challenging one question against the session&#39;s settled decisions through <code>/oracle</code>.</td>
+</tr>
+<tr>
+<td><code>context-bootstrap</code></td>
+<td><code>internal</code> / <code>internal</code></td>
+<td>Bootstrap agent behind <code>clio-coder context init</code> that inspects the repository and returns <code>CLIO-CODER.md</code>.</td>
+</tr>
+</tbody></table>
+<p>Examples:</p>
+<pre><code class="language-bash">clio-coder run --agent coder &quot;Find the main build, test, and lint commands.&quot;
+clio-coder run --agent architect &quot;Plan a minimal change to add JSON output to the CLI.&quot;
+clio-coder run --agent verifier &quot;Run tests and confirm the build passes.&quot;
+</code></pre>
+<p>Dispatchable shadow helpers (<code>scout</code>, <code>researcher</code>, <code>provenance</code>) appear in
+<code>clio-coder agents --all</code>, the full agent catalog, and the compact fleet prompt,
+but user-origin <code>/run</code> and <code>clio-coder run --agent</code> requests are rejected for
+them. <code>oracle</code> also appears in <code>--all</code> and the full catalog, but it is deliberately
+excluded from the compact prompt and is reached only through <code>/oracle</code>.
+For broad repository reconnaissance, the operating contract and Scout catalog
+description steer the model to author a Scout dispatch. The chat harness does
+not mechanically route the request. A threshold nudge advises Scout delegation
+after 9 or more manual read-only exploration calls in one turn.</p>
+<p>Agent recipes are the Markdown source files. The normalized agent spec is the
+catalog/runtime view: category, capability class, latency class, tags, mode, and
+tool set. This keeps Clio&#39;s product vocabulary stable while dispatch continues
+to execute through the existing engine worker path, the sanctioned Claude Code worker runtimes (<code>claude-sdk</code> and <code>claude-code</code>), or external ACP delegation agents.</p>
+<h2>Verification Lanes</h2>
+<table>
+<thead>
+<tr>
+<th>Command</th>
+<th>Purpose</th>
+</tr>
+</thead>
+<tbody><tr>
+<td><code>npm run ci</code></td>
+<td>Local and GitHub PR gate: typecheck, lint, skills pin check, build, the deterministic test suite, and the trace-viewer suite.</td>
+</tr>
+<tr>
+<td><code>npm run ci:release</code></td>
+<td>Maintainer release gate: <code>npm run ci</code>, then the <code>check-release</code> dist and packaging audit.</td>
+</tr>
+<tr>
+<td><code>npm run typecheck</code></td>
+<td>Strict TypeScript pass.</td>
+</tr>
+<tr>
+<td><code>npm run lint</code></td>
+<td>Biome checks plus <code>scripts/check-hygiene.ts</code>, which runs the boundary invariants, the skills pin check, and the README and docs drift rules.</td>
+</tr>
+<tr>
+<td><code>npm test</code></td>
+<td>Focused contract and smoke files through plain <code>node --test</code>.</td>
+</tr>
+<tr>
+<td><code>npm run build</code></td>
+<td>Production bundle through <code>tsup</code>.</td>
+</tr>
+<tr>
+<td><code>npm run dev</code></td>
+<td><code>tsup --watch</code>.</td>
+</tr>
+<tr>
+<td><code>npm run clean</code></td>
+<td>Remove <code>dist/</code>.</td>
+</tr>
+</tbody></table>
+<p>Live provider checks cost tokens or local GPU time and are deliberately not
+part of deterministic CI. Maintainers perform them explicitly against an
+isolated Clio home and a named configured target, recording the target, wire
+model id, serving configuration, and result with the release evidence. This is
+the appropriate lane for local gateways such as llama.cpp, LM Studio, vLLM,
+and SGLang, and for cloud targets with operator-provided credentials.</p>
+<h2>Environment Variables</h2>
+<p>Clio Coder also reads environment variables for platform paths, diagnostics, lifecycle integration, tests, and process-local behavior such as <code>CLIO_CODER_RIGOR</code>. Durable guardrail policy lives only in settings. For the complete maintained inventory, see <a href="environment_blueprint.html">environment-variables.md</a>.</p>
+<hr>
+<h2>Project Context</h2>
+<p>Clio uses the nearest checked-in <code>CLIO-CODER.md</code> as the canonical project guide. Run
+<code>/context init</code> in the TUI or <code>clio-coder context init</code> from the shell to create or
+refresh it. During adoption, Clio can fold useful content from supported agent
+instruction files into <code>CLIO-CODER.md</code> with provenance.</p>
+<p>To skip project context for one invocation:</p>
+<pre><code class="language-bash">clio-coder --no-context-files
+clio-coder -nc run --agent scout &quot;...&quot;
+</code></pre>
+<h3>Codewiki index</h3>
+<p><code>clio-coder context index</code> builds the structural codewiki without any model calls. It
+writes <code>.clio-coder/codewiki.json</code> plus
+<code>.clio-coder/state.json</code>, records <code>codewikiVersion</code>, and prints coverage plus a
+structural hash. The same builder is used by <code>clio-coder context init</code>, <code>clio-coder context refresh</code>, session freshness checks, tool-demand backfill, and in-session
+incremental updates.</p>
+<h3>Working-set replay</h3>
+<p><code>clio-coder context replay --sessions &lt;path&gt;...</code> accepts individual session directories,
+Clio sessions roots, and ledger JSONL files; <code>--synthetic &lt;ids&gt;</code> adds one or more procedural
+corpora (<code>science-long</code>, <code>refactor</code>, <code>exploration</code>) generated in memory from a fixed seed, so
+the committed tables can be rebuilt byte for byte on any checkout without private transcripts.
+Clio traces remove prior eviction/recall sidecars and select the active branch. Both sources
+drive the live fold, projection, policy, and eviction planner at deterministic turn
+boundaries. The default inclusion cascade for ledgers requires at least eight turns, eight
+tool results, and one file re-read; <code>--no-filter</code> retains every otherwise-readable trace.
+Markdown goes to stdout unless <code>--md</code> names a file, while <code>--json</code> writes a stable report
+including the configuration, the corpus, git revision when available, and exact command line.
+<code>--protect-last-turns</code> and <code>--min-evictable-tokens</code> override those two working-set settings
+for the replay only; they never update saved settings. Saturated events is pooled over
+applied eviction events and reports how often a policy exhausted its usable candidates,
+which distinguishes a budget that measures policy choice from one that simply runs out of
+evictable material. Recall tokens is the token-weighted complement of precision: what a
+perfect recall would read back for evicted items the session referenced again. Cold prefix
+tokens is the projected working set after the earliest evicted position of each event, which
+is what an exact-prefix cache re-prefills on the next request. The replay also models the
+summary stage: when the projection is still over the threshold after an eviction, it applies
+the same <code>findCutPoint(keepRecentTokens)</code> cut the live path uses, appends a stand-in
+<code>compactionSummary</code>, counts it, and treats what the cut removed as lost for retention.
+Summaries (mean) is therefore the number of lossy, token-spending compactions a policy forced
+per trace. The summary-headroom mean always carries its contributing trace count because
+traces that never require summary compaction do not enter that nullable mean.</p>
+<p><code>clio-coder context working-set --session &lt;id|path&gt;</code> is a read-only inspection command for
+one ledger. It prints evicted refs with reason, superseding ref, and token count; aggregate
+event, recall, and churn facts; path-observation counts by operation; and paths whose earlier
+reads were followed by writes or edits. A persisted <code>/tree</code> pin is honored when the session
+metadata is available, so the report does not resurrect an abandoned branch.</p>
+<p>The current artifact is schema v5. It records files with path, language, line
+count, role, content hash, imports, and optional summary; declaration-only
+symbols with name, kind, file id, line, and optional signature; and import edges
+to internal files or external modules. The writer emits compact JSON.
+Tree-sitter extraction covers TypeScript, JavaScript, Python, Go, Rust, C, C++,
+Java, Ruby, and C#, with per-file regex fallback where a regex extractor exists.</p>
+<h3>Markdown wiki commands</h3>
+<p><code>clio-coder context wiki</code> generates the optional agent-authored wiki under
+<code>.clio-coder/wiki/</code> by dispatching the <code>wiki-writer</code> agent through the configured
+model target. It makes one planning dispatch, which revises the page plan the
+codewiki index derived, then one dispatch per page. <code>quickstart.md</code> and every
+directory <code>index.md</code> are generated deterministically from the pages&#39; front
+matter after the run, so no dispatch writes them. <code>.clio-coder/wiki/meta.json</code> records
+the page list, model label, content hash, git head, indexed source-tree hash,
+and the plan.</p>
+<p>Each page dispatch is bounded on its own wall clock, and the run is bounded
+between pages. Neither bound loses work: a page that fails or times out is
+recorded as still owed and the run continues to the next one, and every finished
+page is assembled and promoted. When <code>generation.pagesWritten</code> is below
+<code>generation.pagesPlanned</code>, run <code>clio-coder context wiki --update</code> to finish the rest;
+it resumes from the plan rather than starting over.</p>
+<p><code>clio-coder context wiki --update</code> requests update mode explicitly. It rewrites the
+pages whose front-matter <code>sources</code> git reports as changed since the recorded
+wiki <code>gitHead</code>, and leaves the rest alone.
+<code>clio-coder context wiki --status</code> is read-only: it prints whether wiki metadata is
+present, page count, <code>updatedAt</code>, recorded <code>gitHead</code>, whether that head differs
+from current <code>HEAD</code>, and how many planned pages remain unwritten. It dispatches
+nothing and spends no model tokens.</p>
+<p><code>clio-coder context refresh</code> rebuilds only the structural codewiki and state. It does
+not run a model and does not touch <code>CLIO-CODER.md</code> or <code>.clio-coder/wiki/</code>. If a wiki exists
+and its recorded git head is stale, the command prints the hint:</p>
+<pre><code class="language-text">wiki is stale; run clio-coder context refresh --wiki or clio-coder context wiki --update
+</code></pre>
+<p><code>clio-coder context refresh --wiki</code> is the explicit model-spend path for refresh. It
+first rebuilds the structural codewiki, then updates an existing wiki when
+<code>.clio-coder/wiki/meta.json</code> exists. If no wiki metadata exists, the flag is accepted
+and no wiki model call is made; use <code>clio-coder context wiki</code> to create the first
+wiki.</p>
+<h3>code_nav modes</h3>
+<p>Agents query the codewiki through the read-only <code>code_nav</code> tool instead of
+grepping the tree. Every mode reads local artifacts, so lookups are fast and
+model-free.</p>
+<table>
+<thead>
+<tr>
+<th>Mode</th>
+<th>Arguments</th>
+<th>Returns</th>
+</tr>
+</thead>
+<tbody><tr>
+<td><code>symbol</code></td>
+<td><code>query=&lt;name&gt;</code></td>
+<td>Declaration records with path, line, kind, and signature.</td>
+</tr>
+<tr>
+<td><code>path</code></td>
+<td><code>query=&lt;glob | /regex/ | substring&gt;</code></td>
+<td>Indexed files whose path matches the pattern.</td>
+</tr>
+<tr>
+<td><code>entries</code></td>
+<td><code>[limit=&lt;n&gt;]</code></td>
+<td>Likely entry points from file roles and <code>package.json</code> main/bin.</td>
+</tr>
+<tr>
+<td><code>outline</code></td>
+<td><code>query=&lt;path&gt;</code></td>
+<td>Declarations in one indexed file.</td>
+</tr>
+<tr>
+<td><code>deps</code></td>
+<td><code>query=&lt;path&gt;</code></td>
+<td>The file&#39;s internal and external imports.</td>
+</tr>
+<tr>
+<td><code>dependents</code></td>
+<td><code>query=&lt;path&gt;</code></td>
+<td>Indexed files that import the target file.</td>
+</tr>
+<tr>
+<td><code>wiki</code></td>
+<td>none</td>
+<td>Wiki pages plus absent/fresh/stale state and layout warnings.</td>
+</tr>
+</tbody></table>
+<p><code>entries</code> defaults to 25 results and caps at 200. <code>path</code> accepts a
+<code>/pattern/flags</code> regex, a glob using <code>*</code>, <code>?</code>, or <code>[...]</code>, or a plain substring.
+<code>outline</code>, <code>deps</code>, and <code>dependents</code> resolve an exact indexed path or a unique
+substring match.</p>
+<h2>Reasoning and Live Thinking Controls</h2>
+<p>Clio Coder features direct, interactive controls for model reasoning and thinking streams:</p>
+<ul>
+<li><strong>Thinking Level (<code>Shift+Tab</code>):</strong> Allows operators to cycle through available thinking configurations. This is useful for dialing model reasoning budgets up or down in real time.</li>
+<li><strong>Thinking Blocks Toggle (<code>Alt+R</code>):</strong> Toggles the latest assistant thinking block between a compact, single-line folded marker and an expanded, full-body view.</li>
+<li><strong>All Thinking (<code>Ctrl+Alt+R</code> / <code>Alt+Shift+R</code>):</strong> Toggles every thinking block in the transcript.</li>
+<li><strong>Tool Body Toggle (<code>Alt+O</code>) / All Tools (<code>Ctrl+Alt+O</code> / <code>Alt+Shift+O</code>):</strong> Expand the latest tool or every tool body. The single-target key takes the newest foldable thing of either kind, so a worker card that just landed opens before the tool call above it; exactly one surface advertises the chord at a time.</li>
+<li><strong>Live Tool Output (<code>Alt+P</code>):</strong> Pause or resume cumulative partial tool output in expanded live tool bodies; the tool still executes.</li>
+<li><strong>Live Streaming:</strong> During active assistant turns, thinking increments stream live into the chat panel down a rail-prefixed segment. Reasoning totals marked <code>≈</code> are approximations from visible text; provider-reported totals are shown without that marker. Neither implies complete or cryptographically verified hidden reasoning.</li>
+<li><strong>Thinking Replay:</strong> When continuing a conversation, prior thinking is preserved and replayed in the history according to target-specific rules.</li>
+</ul>
+<h2>TUI Surface Refinements</h2>
+<p>The Clio TUI has been enhanced to maximize readability, operational focus, and command discovery:</p>
+<ul>
+<li><strong>Adaptive Welcome Launchpad:</strong> Before the first prompt, renders a compact launchpad with bold CAPS section tags (<code>WORKSPACE</code>, <code>ROUTE</code>, <code>NEXT</code>), honest readiness indicators, and context-sensitive next actions. Upon first prompt submission, it deliberately collapses into a single-line session header (<code>&gt;C_ Clio Coder vX.Y.Z · &lt;workspace · git branch&gt; · &lt;target·model · ready&gt; · ctx ready · type a task</code>) so the conversation transcript owns the viewport.</li>
+<li><strong>Unmistakable Clio Composer:</strong> The input editor features an explicit left section tag reflecting current prompt semantics (<code>MESSAGE</code> while idle, <code>FOLLOW-UP</code> while Clio runs, and orange <code>STEER</code> when Enter steers in-flight execution). Includes the dim placeholder <code>Ask Clio…  / for commands</code> and lower-rail hint <code>Enter send · Shift+Enter newline</code> at wider widths.</li>
+<li><strong>Progressively Disclosed Footer:</strong> The compact footer uses a quiet two-zone status layout that suppresses idle decoration (<code>tools none</code>, <code>◌ idle</code>, and default-output tags). Line 1 displays workspace location, git branch/dirty state, and active phase only when meaningful; Line 2 displays the context window gauge and best current/last-turn receipt. <code>Alt+U</code> toggles the expanded dashboard, which orders information by operational urgency (Activity, Context, Session, Workspace).</li>
+<li><strong>Footer Notification Degradation Ladder:</strong> The footer notification badge reserves the severity head (<code>glyph count noun</code>) and <code>[Alt+X] dismiss</code> tail first, allocating remaining width to an ellipsized message body. Under narrow terminal constraints, it degrades cleanly down the ladder without clipping action keys.</li>
+<li><strong>Grouped Slash Command Palette:</strong> Typing <code>/</code> opens an autocomplete command palette grouped by operational category (<code>Run</code>, <code>Inspect</code>, <code>Configure</code>, <code>Sessions</code>) with compact argument hints. Every suggestion is the command&#39;s one canonical spelling.</li>
+<li><strong>Voice-First Transcript &amp; Receipts:</strong> User (<code>› </code>) and assistant (<code>✦ </code>) prose are formatted with a two-cell hanging indent, ensuring wrapped continuation lines remain visually tied to their voice prefix. Tool ledgers maintain full terminal width. Completed turn receipts honor output verbosity (<code>minimal</code> none, <code>default</code> compact dim <code>turn · in N · out M</code>, <code>verbose</code> full receipt with call counts, cache reads/writes, reasoning provenance, and verification caveats).</li>
+<li><strong>Transactional Settings Center:</strong> Open <code>/settings</code> or deep-link to one of
+<code>chat</code>, <code>fleet</code>, <code>targets</code>, <code>context</code>, <code>safety</code>, <code>interface</code>, or
+<code>integrations</code>. Value edits construct change plans offering <code>Apply this session</code>, <code>Apply and save globally</code>, or <code>Cancel</code>; narrow terminals use a
+drill-down layout below 72 columns.</li>
+</ul>
+<h2>Overlay and Presentation Conventions</h2>
+<p>Clio Coder follows strict presentation guidelines across all TUI surfaces:</p>
+<h3>Hint Grammar</h3>
+<p>All TUI overlays construct footer hints using a standard grammar. Keys are displayed in brackets and normalized to canonical casing (<code>Enter</code>, <code>Esc</code>, <code>Space</code>, <code>Tab</code>, <code>↑↓</code>, <code>r</code>, <code>R</code>, <code>type</code>), separated by a middle dot (<code>·</code>):</p>
+<ul>
+<li>Format: <code>[Key] action · [Esc] close</code></li>
+</ul>
+<h3>Browse vs. Commit Modes</h3>
+<p>Overlays operate in one of two modes which govern the Escape key behavior:</p>
+<ul>
+<li><strong>Browse Mode:</strong> Used for read-only viewing or exploration. The Escape key is labeled <code>close</code> (<code>[Esc] close</code>).</li>
+<li><strong>Commit Mode:</strong> Used for forms, selections, or settings changes that alter state. The Escape key is labeled <code>cancel</code> (<code>[Esc] cancel</code>).</li>
+</ul>
+<h3>Notice Levels</h3>
+<p>Diagnostic writes in the transcript use the themed notice channel instead of raw ANSI or bracket prefixes. Notices render a single themed line containing a colorized glyph and the message:</p>
+<table>
+<thead>
+<tr>
+<th>Level</th>
+<th>Glyphs</th>
+<th>Color Token</th>
+<th>Purpose</th>
+</tr>
+</thead>
+<tbody><tr>
+<td><code>info</code></td>
+<td><code>ℹ</code></td>
+<td><code>info</code></td>
+<td>Informational notices and general system status</td>
+</tr>
+<tr>
+<td><code>success</code></td>
+<td><code>✓</code></td>
+<td><code>success</code></td>
+<td>Operation completed successfully</td>
+</tr>
+<tr>
+<td><code>warn</code></td>
+<td><code>⚠</code></td>
+<td><code>warning</code></td>
+<td>Non-fatal issue or precaution</td>
+</tr>
+<tr>
+<td><code>error</code></td>
+<td><code>✗</code></td>
+<td><code>error</code></td>
+<td>Fatal issue or operation failure</td>
+</tr>
+</tbody></table>
+<h3>ListOverlay Behavior</h3>
+<p>The <code>ListOverlay</code> component provides a reusable kit for filterable, grouped, and selectable lists with an optional detail pane.</p>
+<p>Navigation keys include the up and down arrow keys, as well as the &#39;j&#39; and &#39;k&#39; keys when the filter input is not focused. These keys wrap selection around the ends of the list.</p>
+<p>The Tab key, or the Enter key when no primary action is defined, toggles the detail pane below the list.</p>
+<p>For filtering, typing in the input row dynamically filters items using a fuzzy search that matches both the item label and the group name. Group headers that have no matching items are hidden. The Escape key clears a non-empty filter, and pressing it again closes or cancels the overlay.</p>
+<p>The detail pane displays structured descriptions, usage, or state metadata using the Markdown component with the Clio markdown theme.</p>
+<h3>Responsive Width Adaptation</h3>
+<p>All TUI overlays fluidly adapt to narrow terminals down to 40 columns:</p>
+<ul>
+<li>Split overlays such as <code>/view</code> gracefully fall back to a single-pane presentation with <code>[Tab]</code> switching between list and content panes.</li>
+<li>Settings provides a drill-down navigation stack below 72 columns (sections → rows → details) with breadcrumbs and <code>Esc</code> backtracking.</li>
+<li>Text content and detail descriptions wrap cleanly without line truncation.</li>
+</ul>
+<h2>Troubleshooting</h2>
+<table>
+<thead>
+<tr>
+<th>Problem</th>
+<th>Try this</th>
+</tr>
+</thead>
+<tbody><tr>
+<td><code>clio-coder: command not found</code></td>
+<td>Run <code>npm run install:local</code>, then <code>hash -r</code>; confirm <code>${CLIO_CODER_BIN_DIR:-$HOME/.local/bin}</code> is on <code>PATH</code>.</td>
+</tr>
+<tr>
+<td>No model target is available</td>
+<td>Run <code>clio-coder configure</code>, then <code>clio-coder targets --probe</code>.</td>
+</tr>
+<tr>
+<td>Local model does not respond</td>
+<td>Confirm the runtime is running and the target URL is correct.</td>
+</tr>
+<tr>
+<td>Cloud model auth fails</td>
+<td>Check <code>clio-coder auth status &lt;target&gt;</code> and verify the relevant API key or login flow.</td>
+</tr>
+<tr>
+<td>Source changes do not appear</td>
+<td>Re-run <code>npm run build</code>; linked CLI points at <code>dist/</code>.</td>
+</tr>
+<tr>
+<td>Session replay looks incomplete</td>
+<td>Confirm durable session entries exist for the relevant tool, bash, or display activity.</td>
+</tr>
+<tr>
+<td>Doctor reports stale state metadata</td>
+<td>Run <code>clio-coder doctor --fix</code>; upgrades also refresh install metadata after reinstalling.</td>
+</tr>
+<tr>
+<td>You need a clean start</td>
+<td>Use <code>clio-coder reset --state</code>, <code>--data</code>, <code>--cache</code>, <code>--auth</code>, <code>--config</code>, or <code>--all</code>.</td>
+</tr>
+</tbody></table>
+<p>For issue reports, include <code>clio-coder --version</code>, <code>node --version</code>, <code>clio-coder doctor</code>,
+<code>clio-coder targets</code>, the command you ran, the target/model, expected behavior, and
+actual behavior. Redact secrets and private repository content.</p>
+<blockquote>
+<p>[!NOTE]
+<code>clio-coder dev &lt;command&gt;</code> groups the instruments that answer a question about the
+harness rather than about your own work. Bare <code>clio-coder dev</code> or <code>clio-coder dev --help</code> prints
+developer instrument help and exits with code 0. Nothing under it is deprecated: every
+name still resolves without the prefix, so scripts and agents driving Clio over
+bash keep working unchanged. The prefix exists so <code>clio-coder --help</code> stays the set of
+commands a person needs to read; <code>clio-coder --help --all</code> prints both lists. Across all
+CLI subcommands (<code>targets use/remove/rename/profile/convert</code>, <code>context refresh</code>,
+<code>fleet list/run/status/drain/resume</code>, <code>auth login</code>), passing <code>--help</code> prints
+usage instructions and exits with code 0.</p>
+</blockquote>
+        </article>
+        <nav class="related-nav" aria-label="Adjacent references">
+          <a class="nav-link-card" href="agents_blueprint.html"><span class="nav-label">Previous</span><span class="nav-title">Clio Coder Agent Fleet</span></a>
+          <a class="nav-link-card next" href="configuration_blueprint.html"><span class="nav-label">Next</span><span class="nav-title">Configuration, Targets, Runtimes, and Auth</span></a>
+        </nav>
+        <p class="reference-footer-note">Canonical content lives in the mapped Markdown page. This visual counterpart adds navigation without changing the contract.</p>
+      </main>
     </div>
-
-    <!-- TAB 1: INTERACTIVE -->
-    <main class="tab-pane active" id="pane-interactive">
-      <div class="blueprint-layout">
-
-        <!-- Left: Console simulator -->
-        <div class="specs-col">
-          <div class="glass-card">
-            <h2>
-              <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><title>Icon</title><polyline points="4 17 10 11 4 5"></polyline><line x1="12" y1="19" x2="20" y2="19"></line></svg>
-              TUI Slash Command Console
-            </h2>
-            <p>Type a slash command (e.g. <code>/settings</code>, <code>/run</code>, <code>/targets</code>, <code>/help</code>) to test Clio's autocomplete and ListOverlay detail pane.</p>
-
-            <div class="tui-console">
-              <div class="tui-line">
-                <span class="tui-prompt">clio-coder &gt;</span>
-                <input type="text" id="consoleInput" class="tui-input" placeholder="Type / to trigger autocomplete..." oninput="onInputChanged()" onkeydown="onConsoleKeyDown(event)">
-              </div>
-
-              <!-- Autocomplete popover -->
-              <div class="autocomplete-popover" id="autocompletePopover">
-                <!-- items injected via script -->
-              </div>
-            </div>
-
-            <!-- Detail overlay mock -->
-            <div class="tui-details" id="commandDetails">
-              <strong id="detailTitle" style="color:var(--color-cyan)">/run</strong>
-              <p id="detailUsage" style="font-family:var(--font-mono); font-size:0.75rem; margin-top:0.25rem; color:#fff;">Usage: /run &lt;agent&gt; &lt;task&gt;</p>
-              <p id="detailDesc" style="font-size:0.875rem; color:var(--text-muted); margin-top:0.5rem;">Dispatches a fleet agent worker with specific rules.</p>
-            </div>
-          </div>
-        </div>
-
-        <!-- Right: Notice channels tester -->
-        <div class="specs-col">
-          <div class="glass-card">
-            <h2>
-              <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><title>Icon</title><circle cx="12" cy="12" r="10"></circle><line x1="12" y1="16" x2="12" y2="12"></line><line x1="12" y1="8" x2="12.01" y2="8"></line></svg>
-              Notice Channels Logger
-            </h2>
-            <p>Clio TUI displays colored logs utilizing specific notice channel glyphs. Click below to simulate lines:</p>
-
-            <div class="logs-wrapper" id="simLogs">
-              <div class="log-line info">· System initialized. Autonomy level set to auto-edit.</div>
-            </div>
-
-            <div class="btn-row">
-              <button type="button" class="log-btn" style="border-left: 3px solid var(--text-dim)" onclick="logNotice('info')">Log Info</button>
-              <button type="button" class="log-btn" style="border-left: 3px solid var(--color-emerald)" onclick="logNotice('success')">Log Success</button>
-              <button type="button" class="log-btn" style="border-left: 3px solid var(--color-amber)" onclick="logNotice('warn')">Log Warn</button>
-              <button type="button" class="log-btn" style="border-left: 3px solid var(--color-rose)" onclick="logNotice('error')">Log Error</button>
-            </div>
-          </div>
-        </div>
-
-      </div>
-    </main>
-
-    <!-- TAB 2: TECHNICAL REFERENCE -->
-    <main class="tab-pane" id="pane-reference">
-      <div class="glass-card">
-        <h2>Clio Coder Keybindings &amp; Command List</h2>
-
-        <h3 style="margin: 1.5rem 0 0.5rem 0; color:#fff;">App Keybindings</h3>
-        <p>Alt bindings represent the main navigation channel. In macOS terminals, ensure Meta is set to Option.</p>
-
-        <div class="key-grid">
-          <div class="key-card">
-            <span>Send prompt / Steer active run</span>
-            <span class="kbd-tag">Enter</span>
-          </div>
-          <div class="key-card">
-            <span>Insert newline in draft</span>
-            <span class="kbd-tag">Shift+Enter / Ctrl+J</span>
-          </div>
-          <div class="key-card">
-            <span>Queue after-run follow-up</span>
-            <span class="kbd-tag">Alt+Enter</span>
-          </div>
-          <div class="key-card">
-            <span>Restore queued messages to editor</span>
-            <span class="kbd-tag">Alt+Up</span>
-          </div>
-          <div class="key-card">
-            <span>Cycle thinking levels</span>
-            <span class="kbd-tag">Shift+Tab</span>
-          </div>
-          <div class="key-card">
-            <span>Open Session Tree Navigator</span>
-            <span class="kbd-tag">Alt+T</span>
-          </div>
-          <div class="key-card">
-            <span>Toggle Footer Dashboard size</span>
-            <span class="kbd-tag">Alt+U</span>
-          </div>
-          <div class="key-card">
-            <span>Open Model/Target Selector</span>
-            <span class="kbd-tag">Alt+L</span>
-          </div>
-          <div class="key-card">
-            <span>Cycle through scoped models</span>
-            <span class="kbd-tag">Alt+J / Alt+K</span>
-          </div>
-          <div class="key-card">
-            <span>Toggle Dispatch Board overlay</span>
-            <span class="kbd-tag">Alt+W</span>
-          </div>
-          <div class="key-card">
-            <span>Send dispatch to background</span>
-            <span class="kbd-tag">Alt+S / Ctrl+Alt+B</span>
-          </div>
-          <div class="key-card">
-            <span>Toggle tool segment body</span>
-            <span class="kbd-tag">Alt+O / Ctrl+Alt+O</span>
-          </div>
-          <div class="key-card">
-            <span>Toggle live tool output</span>
-            <span class="kbd-tag">Alt+P</span>
-          </div>
-          <div class="key-card">
-            <span>Toggle thinking blocks</span>
-            <span class="kbd-tag">Alt+R / Ctrl+Alt+R</span>
-          </div>
-          <div class="key-card">
-            <span>Open external editor</span>
-            <span class="kbd-tag">Alt+G</span>
-          </div>
-          <div class="key-card">
-            <span>Dismiss footer notifications</span>
-            <span class="kbd-tag">Alt+X</span>
-          </div>
-          <div class="key-card">
-            <span>Leader key fallback for Alt</span>
-            <span class="kbd-tag">Ctrl+G</span>
-          </div>
-        </div>
-
-        <h3 style="margin: 2rem 0 0.5rem 0; color:#fff;">TUI Slash Commands</h3>
-        <table class="ref-table">
-          <thead>
-            <tr>
-              <th>Group</th>
-              <th>Command</th>
-              <th>Usage</th>
-              <th>Purpose</th>
-            </tr>
-          </thead>
-          <tbody>
-            <tr>
-              <td><span class="badge">Run</span></td>
-              <td><code>/skill</code></td>
-              <td><code>/skill [name] [task]</code></td>
-              <td>Open Skills Hub or invoke a skill</td>
-            </tr>
-            <tr>
-              <td><span class="badge">Run</span></td>
-              <td><code>/run</code></td>
-              <td><code>/run [--agent-profile &lt;profile&gt;] [--runtime &lt;runtimeId&gt;] [--target &lt;id&gt;] [--model &lt;id&gt;] [--thinking &lt;level&gt;] [--tool-profile &lt;minimal-local|science-local|full-agent&gt;] [--require &lt;cap&gt;] [--share] &lt;agent&gt; &lt;task&gt;</code></td>
-              <td>Run a fleet agent locally or on remote node</td>
-            </tr>
-            <tr>
-              <td><span class="badge">Run</span></td>
-              <td><code>/delegate</code></td>
-              <td><code>/delegate [--share] &lt;agent-id&gt; &lt;task&gt;</code></td>
-              <td>Run an ACP delegation agent</td>
-            </tr>
-            <tr>
-              <td><span class="badge">Inspect</span></td>
-              <td><code>/prompts</code></td>
-              <td><code>/prompts</code></td>
-              <td>List prompt templates</td>
-            </tr>
-            <tr>
-              <td><span class="badge">Inspect</span></td>
-              <td><code>/extensions</code></td>
-              <td><code>/extensions</code></td>
-              <td>List installed extensions</td>
-            </tr>
-            <tr>
-              <td><span class="badge">Inspect</span></td>
-              <td><code>/interop</code></td>
-              <td><code>/interop</code></td>
-              <td>Review other coding agents detected on this machine</td>
-            </tr>
-            <tr>
-              <td><span class="badge">Operate</span></td>
-              <td><code>/panes</code></td>
-              <td><code>/panes | /panes open &lt;preset-or-argv&gt; | /panes close [target] | /panes show &lt;run-or-agent&gt;</code></td>
-              <td>Manage guest terminal panes (requires --with-panes)</td>
-            </tr>
-            <tr>
-              <td><span class="badge">Sessions</span></td>
-              <td><code>/share</code></td>
-              <td><code>/share [runId] | /share export &lt;path&gt; | /share import [--dry-run] [--force] &lt;path&gt;</code></td>
-              <td>Share worker result with main agent, or export/import Clio archives</td>
-            </tr>
-            <tr>
-              <td><span class="badge">Inspect</span></td>
-              <td><code>/agents</code></td>
-              <td><code>/agents</code></td>
-              <td>List Clio agents and ACP delegation agents</td>
-            </tr>
-            <tr>
-              <td><span class="badge">Configure</span></td>
-              <td><code>/targets</code></td>
-              <td><code>/targets</code></td>
-              <td>Open Settings → Targets console: health, use, connect, probe, remove</td>
-            </tr>
-            <tr>
-              <td><span class="badge">Inspect</span></td>
-              <td><code>/cost</code></td>
-              <td><code>/cost</code></td>
-              <td>Show session token and cost totals</td>
-            </tr>
-            <tr>
-              <td><span class="badge">Inspect</span></td>
-              <td><code>/context</code></td>
-              <td><code>/context compact [instructions] | /context init | /context refresh | /context reset</code></td>
-              <td>Context hub: window ledger overlay plus compact, init, refresh, reset</td>
-            </tr>
-            <tr>
-              <td><span class="badge">Configure</span></td>
-              <td><code>/fleet</code></td>
-              <td><code>/fleet</code></td>
-              <td>Open Settings → Fleet workbench: defaults, profiles, agent routes, nodes</td>
-            </tr>
-            <tr>
-              <td><span class="badge">Inspect</span></td>
-              <td><code>/tasks</code></td>
-              <td><code>/tasks</code></td>
-              <td>Show session task board tracked with tasks tool</td>
-            </tr>
-            <tr>
-              <td><span class="badge">Inspect</span></td>
-              <td><code>/memory</code></td>
-              <td><code>/memory seed</code></td>
-              <td>Inspect task memory or seed from newest handoff</td>
-            </tr>
-            <tr>
-              <td><span class="badge">Inspect</span></td>
-              <td><code>/view</code></td>
-              <td><code>/view [filter] | /view verify &lt;runId&gt;</code></td>
-              <td>Browse artifacts and verify receipt integrity</td>
-            </tr>
-            <tr>
-              <td><span class="badge">Configure</span></td>
-              <td><code>/thinking</code></td>
-              <td><code>/thinking [level]</code></td>
-              <td>Set chat thinking level or open Settings → Orchestrator</td>
-            </tr>
-            <tr>
-              <td><span class="badge">Configure</span></td>
-              <td><code>/output</code></td>
-              <td><code>/output [verbosity]</code></td>
-              <td>Set transcript detail (minimal, default, verbose) or open Settings → Terminal</td>
-            </tr>
-            <tr>
-              <td><span class="badge">Configure</span></td>
-              <td><code>/model</code></td>
-              <td><code>/model [pattern]</code></td>
-              <td>Open model selector or set model</td>
-            </tr>
-            <tr>
-              <td><span class="badge">Configure</span></td>
-              <td><code>/scoped-models</code></td>
-              <td><code>/scoped-models</code></td>
-              <td>Open Settings → Models: Alt+J / Alt+K cycle set checklist</td>
-            </tr>
-            <tr>
-              <td><span class="badge">Configure</span></td>
-              <td><code>/settings</code></td>
-              <td><code>/settings [section]</code></td>
-              <td>Open interactive transactional Settings Center</td>
-            </tr>
-            <tr>
-              <td><span class="badge">Sessions</span></td>
-              <td><code>/quit</code></td>
-              <td><code>/quit</code></td>
-              <td>Exit Clio Coder</td>
-            </tr>
-            <tr>
-              <td><span class="badge">Inspect</span></td>
-              <td><code>/help</code></td>
-              <td><code>/help [query]</code></td>
-              <td>Open interactive help center and key reference</td>
-            </tr>
-            <tr>
-              <td><span class="badge">Sessions</span></td>
-              <td><code>/resume</code></td>
-              <td><code>/resume</code></td>
-              <td>Resume a past session from history ledger</td>
-            </tr>
-            <tr>
-              <td><span class="badge">Sessions</span></td>
-              <td><code>/new</code></td>
-              <td><code>/new</code></td>
-              <td>Start a fresh session</td>
-            </tr>
-            <tr>
-              <td><span class="badge">Sessions</span></td>
-              <td><code>/tree</code></td>
-              <td><code>/tree</code></td>
-              <td>Open session tree navigator</td>
-            </tr>
-            <tr>
-              <td><span class="badge">Sessions</span></td>
-              <td><code>/fork</code></td>
-              <td><code>/fork</code></td>
-              <td>Fork from an assistant turn</td>
-            </tr>
-            <tr>
-              <td><span class="badge">Sessions</span></td>
-              <td><code>/export</code></td>
-              <td><code>/export [path]</code></td>
-              <td>Export session transcript to self-contained HTML (default, capped at 2 MiB) or Markdown (.md)</td>
-            </tr>
-          </tbody>
-        </table>
-
-        <h3 style="margin: 2rem 0 0.5rem 0; color:#fff;">CLI Commands &amp; Modes</h3>
-        <table class="ref-table">
-          <thead>
-            <tr>
-              <th>Command / Flag</th>
-              <th>Description</th>
-            </tr>
-          </thead>
-          <tbody>
-            <tr>
-              <td><code>clio-coder run</code></td>
-              <td>Main interactive session or headless execution.</td>
-            </tr>
-            <tr>
-              <td><code>--with-panes</code></td>
-              <td>Activate guest pane integration for this invocation when Clio is already inside a reachable herdr session. Overrides panes.enabled.</td>
-            </tr>
-            <tr>
-              <td><code>clio-coder fleet view --watch &lt;selection-file&gt;</code></td>
-              <td>Follow the run id currently named by the selection file and retarget when it changes. This is the operator-pulled watch surface.</td>
-            </tr>
-            <tr>
-              <td><code>--session &lt;id&gt;</code></td>
-              <td>Append a headless turn to the session with id &lt;id&gt;.</td>
-            </tr>
-            <tr>
-              <td><code>--continue</code></td>
-              <td>Append a headless turn to the most recent session recorded for the current working directory.</td>
-            </tr>
-          </tbody>
-        </table>
-
-      </div>
-    </main>
-
-    <footer>
-      <p>Clio Coder UI Command specs &bull; Version 0.4.0</p>
-    </footer>
+    <footer>Clio Coder documentation · source-aligned at v0.4.2</footer>
   </div>
-
-  <script>
-    // Tab switching
-    function switchTab(tabId) {
-      document.querySelectorAll('.tab-btn').forEach(btn => { btn.classList.remove('active'); });
-      document.querySelectorAll('.tab-pane').forEach(pane => { pane.classList.remove('active'); });
-
-      if (tabId === 'interactive') {
-        document.querySelector('.tab-btn:nth-child(1)').classList.add('active');
-        document.getElementById('pane-interactive').classList.add('active');
-      } else {
-        document.querySelector('.tab-btn:nth-child(2)').classList.add('active');
-        document.getElementById('pane-reference').classList.add('active');
-      }
-    }
-
-    // Command registry
-    const commandsList = [
-      { cmd: "/settings", usage: "/settings [section]", desc: "Canonical transactional Settings Center (CORE, ROUTING, RUNTIME, EXPERIENCE). Retired standalone aliases fail closed." },
-      { cmd: "/targets", usage: "/targets", desc: "Deep link into Settings → Targets: health, use, connect, probe, remove." },
-      { cmd: "/fleet", usage: "/fleet", desc: "Deep link into Settings → Fleet: defaults, profiles, agent bindings, nodes." },
-      { cmd: "/scoped-models", usage: "/scoped-models", desc: "Deep link into Settings → Models: the Alt+J / Alt+K cycle set and favorites." },
-      { cmd: "/model", usage: "/model [pattern]", desc: "Fuzzy search and select model from live runtime probes and catalog rows (target/model direct match outranks proxy IDs)." },
-      { cmd: "/thinking", usage: "/thinking [level]", desc: "Quick-sets thinking level (off, minimal, low, medium, high, xhigh, max) or opens Settings → Orchestrator." },
-      { cmd: "/output", usage: "/output [verbosity]", desc: "Sets transcript detail (minimal, default, verbose) or opens Settings → Terminal." },
-      { cmd: "/run", usage: "/run [--agent-profile <profile>] [--runtime <runtimeId>] [--target <id>] [--model <id>] [--thinking <level>] [--tool-profile <minimal-local|science-local|full-agent>] [--require <cap>] [--share] <agent> <task>", desc: "Spawns a fleet worker locally or on remote nodes with optional profile, runtime, target, model, thinking, tool-profile, and capability overrides." },
-      { cmd: "/delegate", usage: "/delegate [--share] <agent-id> <task>", desc: "Run an ACP delegation agent." },
-      { cmd: "/agents", usage: "/agents", desc: "List Clio agents and ACP delegation agents." },
-      { cmd: "/skill", usage: "/skill [name] [task]", desc: "Opens the Skills Hub, or invokes a skill; the model invokes context(scope='skills') before executing instructions." },
-      { cmd: "/view", usage: "/view [filter] | /view verify <runId>", desc: "Browses receipts, dispatch outputs, durable tool output, and compaction summaries." },
-      { cmd: "/context", usage: "/context compact [instructions] | /context init | /context refresh | /context reset", desc: "Bare /context visualizes the token sliding window and compaction breakdown; the subcommands own project context." },
-      { cmd: "/context compact", usage: "/context compact [instructions]", desc: "Immediately executes LLM context compaction on the active session." },
-      { cmd: "/context init", usage: "/context init", desc: "Explore the repo and bootstrap project context: CLIO-CODER.md and codewiki." },
-      { cmd: "/context refresh", usage: "/context refresh", desc: "Re-index the codewiki and refresh .clio-coder state without touching CLIO-CODER.md." },
-      { cmd: "/context reset", usage: "/context reset", desc: "Clear accumulated project context artifacts; the interactive choice preserves or deletes CLIO-CODER.md." },
-      { cmd: "/tasks", usage: "/tasks", desc: "Read-only overlay of the session task board with per-task receipts." },
-      { cmd: "/memory", usage: "/memory seed", desc: "Bare /memory inspects task memory; seed imports from the newest handoff." },
-      { cmd: "/cost", usage: "/cost", desc: "Show session token and cost totals." },
-      { cmd: "/prompts", usage: "/prompts", desc: "List prompt templates with shell-style argument expansion." },
-      { cmd: "/extensions", usage: "/extensions", desc: "List installed extensions." },
-      { cmd: "/interop", usage: "/interop", desc: "Review other coding agents detected on this machine." },
-
-      { cmd: "/panes", usage: "/panes", desc: "List terminal panes Clio owns beside this session." },
-      { cmd: "/panes open", usage: "/panes open <preset-or-argv>", desc: "Open a utility preset or an operator-supplied command in a pane." },
-      { cmd: "/panes close", usage: "/panes close [target]", desc: "Close a pane Clio created." },
-      { cmd: "/panes show", usage: "/panes show <run-or-agent>", desc: "Show a dispatched run in the fleet watch pane." },
-      { cmd: "/share", usage: "/share [runId] | /share export <path> | /share import [--dry-run] [--force] <path>", desc: "Share a worker result with the main agent, or export and import Clio archives." },
-      { cmd: "/help", usage: "/help [query]", desc: "Searches available shortcuts and operating posture documentation." },
-      { cmd: "/resume", usage: "/resume", desc: "Resume a past session. In fullscreen mode, PageUp/PageDown scroll viewports." },
-      { cmd: "/new", usage: "/new", desc: "Start a fresh session; cancels and awaits in-flight streaming turns." },
-      { cmd: "/tree", usage: "/tree", desc: "Open session tree navigator; cancels and awaits in-flight streaming turns." },
-      { cmd: "/fork", usage: "/fork", desc: "Fork from an assistant turn; cancels and awaits in-flight streaming turns." },
-      { cmd: "/export", usage: "/export [path]", desc: "Export session transcript to self-contained HTML (default, capped at 2 MiB) or Markdown (.md)." },
-      { cmd: "/quit", usage: "/quit", desc: "Exits clio-coder process cleanly." }
-    ];
-
-    let selectedIndex = 0;
-    let filteredCmds = [...commandsList];
-
-    function onInputChanged() {
-      const val = document.getElementById('consoleInput').value;
-      const popover = document.getElementById('autocompletePopover');
-
-      if (val.startsWith('/')) {
-        const query = val.toLowerCase();
-        filteredCmds = commandsList.filter(c => c.cmd.toLowerCase().startsWith(query));
-        selectedIndex = 0;
-
-        if (filteredCmds.length > 0) {
-          renderAutocomplete();
-          popover.style.display = 'block';
-        } else {
-          popover.style.display = 'none';
-        }
-      } else {
-        popover.style.display = 'none';
-      }
-    }
-
-    function renderAutocomplete() {
-      const popover = document.getElementById('autocompletePopover');
-      popover.innerHTML = '';
-
-      filteredCmds.forEach((c, idx) => {
-        const item = document.createElement('div');
-        item.className = `autocomplete-item ${idx === selectedIndex ? 'selected' : ''}`;
-        item.innerHTML = `<strong>${c.cmd}</strong> <span>${c.usage}</span>`;
-        item.onclick = () => {
-          selectCommand(c);
-        };
-        popover.appendChild(item);
-      });
-    }
-
-    function selectCommand(c) {
-      document.getElementById('consoleInput').value = c.cmd;
-      document.getElementById('autocompletePopover').style.display = 'none';
-
-      // Show details
-      document.getElementById('commandDetails').style.display = 'block';
-      document.getElementById('detailTitle').innerText = c.cmd;
-      document.getElementById('detailUsage').innerText = `Usage: ${c.usage}`;
-      document.getElementById('detailDesc').innerText = c.desc;
-    }
-
-    function onConsoleKeyDown(e) {
-      const popover = document.getElementById('autocompletePopover');
-      if (popover.style.display === 'block') {
-        if (e.key === 'ArrowDown') {
-          e.preventDefault();
-          selectedIndex = (selectedIndex + 1) % filteredCmds.length;
-          renderAutocomplete();
-        } else if (e.key === 'ArrowUp') {
-          e.preventDefault();
-          selectedIndex = (selectedIndex - 1 + filteredCmds.length) % filteredCmds.length;
-          renderAutocomplete();
-        } else if (e.key === 'Enter') {
-          e.preventDefault();
-          if (filteredCmds[selectedIndex]) {
-            selectCommand(filteredCmds[selectedIndex]);
-          }
-        } else if (e.key === 'Escape') {
-          e.preventDefault();
-          popover.style.display = 'none';
-        }
-      }
-    }
-
-    // Logs simulator
-    function logNotice(level) {
-      const logs = document.getElementById('simLogs');
-      let glyph = '·';
-      let msg = '';
-      if (level === 'info') {
-        glyph = '·';
-        msg = 'Settings hot-reloaded: autonomy level is auto-edit.';
-      } else if (level === 'success') {
-        glyph = '✓';
-        msg = 'Connection established successfully with target "local-ollama".';
-      } else if (level === 'warn') {
-        glyph = '!';
-        msg = '[safety-net] Unrecognized bash command sequencing. Will ask operator.';
-      } else {
-        glyph = '✗';
-        msg = 'Fatal: API Key credentials missing for Anthropic Cloud runtime.';
-      }
-
-      const logLine = document.createElement('div');
-      logLine.className = `log-line ${level}`;
-      logLine.innerHTML = `<span>${glyph}</span> <span>${msg}</span>`;
-
-      logs.appendChild(logLine);
-      logs.scrollTop = logs.scrollHeight;
-    }
-  </script>
+  <script src="shared.js"></script>
 </body>
 </html>

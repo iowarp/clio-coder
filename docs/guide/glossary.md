@@ -1,5 +1,8 @@
 # Clio Coder Glossary
 
+> **Visual blueprint:** The source checkout includes the complete
+> [Clio Coder Glossary visual reference](https://github.com/iowarp/clio-coder/blob/main/docs/html/glossary_blueprint.html).
+
 This document defines the 50 core architectural concepts and terminology used throughout Clio Coder, mapped to their authoritative TypeScript type definitions in `src/`.
 
 ---

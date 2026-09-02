@@ -1,0 +1,709 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <meta name="clio-markdown-source" content="docs/architecture/dispatch-typed-intent.md">
+  <meta name="clio-docs-version" content="0.4.2">
+  <title>Typed Dispatch Intent: Migration and Refusal Policy · Clio Coder 0.4.2</title>
+  <link rel="icon" href="data:,">
+  <link rel="stylesheet" href="shared.css">
+</head>
+<body data-doc-category="architecture">
+  <div class="reading-progress" aria-hidden="true"></div>
+  <a class="skip-link" href="#reference-content">Skip to reference</a>
+  <div class="container">
+    <header class="document-header" data-category="Architecture">
+      <div class="header-left">
+        <a class="header-logo" href="index.html" aria-label="Documentation index">
+          <svg viewBox="0 0 24 24" fill="none" aria-hidden="true">
+            <path d="M12 2 2 7l10 5 10-5-10-5Z" stroke="url(#clio-logo)" stroke-width="2" stroke-linejoin="round"/>
+            <path d="m2 12 10 5 10-5M2 17l10 5 10-5" stroke="url(#clio-logo)" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"/>
+            <defs><linearGradient id="clio-logo" x1="2" y1="2" x2="22" y2="22"><stop stop-color="#00d4db"/><stop offset="1" stop-color="#ff7e29"/></linearGradient></defs>
+          </svg>
+        </a>
+        <div class="header-title-wrapper">
+          <p class="document-kicker">Architecture / canonical reference</p>
+          <h1>Typed Dispatch Intent: Migration and Refusal Policy</h1>
+          <p class="document-path">docs/architecture/dispatch-typed-intent.md</p>
+        </div>
+      </div>
+      <div class="header-right">
+        <a class="back-btn" href="index.html">← Index</a>
+        <span class="version-badge">v0.4.2</span>
+      </div>
+    </header>
+    <div class="page-layout-grid reference-layout">
+      <aside class="sidebar reference-sidebar" aria-label="On this page">
+        <nav class="toc-container">
+          <p class="toc-title">On this page</p>
+          <a class="sidebar-source" href="https://github.com/iowarp/clio-coder/blob/main/docs/architecture/dispatch-typed-intent.md">Canonical Markdown<br>docs/architecture/dispatch-typed-intent.md</a>
+          <ul class="toc-list"></ul>
+        </nav>
+      </aside>
+      <main class="reference-main" id="reference-content">
+        <article class="reference-prose glass-card">
+<blockquote>
+<p><strong>Visual blueprint:</strong> The source checkout includes the complete
+<a href="dispatch_typed_intent_blueprint.html">Typed Dispatch Intent: Migration and Refusal Policy visual reference</a>.</p>
+</blockquote>
+<p>Typed dispatch intent is the structured declaration of what a dispatched worker
+may read, may write, is expected to produce, and must verify. It replaces the
+practice of reconstructing that answer from optional <code>writeRoots</code> plus path-like
+tokens recalled from task and briefing prose.</p>
+<p>This page is the migration contract. It names every dispatch producer and every
+persisted structure typed intent touches, states what happens when intent is
+omitted, partial, versioned differently, or contradictory, lists the stable
+reason codes an operator or integrator can branch on, and states the measurable
+condition under which the legacy inference fallback may be proposed for removal.</p>
+<p>Related pages: <a href="tool_usage_blueprint.html">tool-usage.md</a> for the <code>dispatch</code> tool arguments,
+<a href="fleet_dispatch_blueprint.html">fleet-dispatch.md</a> for fleet contracts,
+<a href="artifact_versions_blueprint.html">artifact-versions.md</a> for the serialization registry, and
+<a href="safety_blueprint.html">safety-model.md</a> for how a resolved write boundary is enforced.</p>
+<hr>
+<h2>1. The Shape</h2>
+<pre><code class="language-jsonc">{
+  &quot;intent&quot;: {
+    &quot;read_roots&quot;:     [&quot;src/domains/dispatch/&quot;],
+    &quot;write_roots&quot;:    [&quot;src/domains/dispatch/&quot;, &quot;tests/contracts/&quot;],
+    &quot;relevant_paths&quot;: [&quot;docs/architecture/dispatch-typed-intent.md&quot;],
+    &quot;expected_outputs&quot;: [&quot;src/domains/dispatch/intent-compatibility.ts&quot;],
+    &quot;verification&quot;:   [{ &quot;check&quot;: &quot;typecheck&quot; }, { &quot;check&quot;: &quot;lint&quot;, &quot;timeout_ms&quot;: 60000 }]
+  }
+}
+</code></pre>
+<p>The three scope fields, <code>read_roots</code>, <code>write_roots</code>, and <code>relevant_paths</code>, use
+the repository-relative POSIX boundary grammar in <code>src/core/path-boundary.ts</code>.
+A trailing <code>/</code> means the subtree; no trailing <code>/</code> means that exact file.
+Absolute paths, <code>..</code> segments, interior <code>.</code> segments, backslashes, and globs
+are refused in those fields. An entry that is exactly <code>.</code> or <code>./</code> is accepted
+as the repository root and normalizes out of the list. Expected outputs use a
+separate normalizer: it rejects absolute paths, backslashes, root escapes, and
+an empty normalized path, but it normalizes interior <code>.</code> and repeated <code>/</code>
+segments and does not interpret or reject glob characters. Each list is
+normalized, deduplicated, and sorted by
+code point, holds at most 32 entries, and each entry is at most 512 UTF-8 bytes.
+<code>verification</code> holds at most 8 entries and every
+<code>check</code> is a declared id resolved from package scripts or
+<code>.clio-coder/verifiers.yaml</code>, never a shell command. The one exception is
+<code>{ &quot;check&quot;: &quot;none&quot; }</code>, which models write to mean &quot;no verification&quot;; it
+normalizes to an empty list instead of costing a refused round unless the
+workspace actually declares a verifier whose id is <code>none</code>.</p>
+<p>Normalization is in <code>src/domains/dispatch/intent.ts</code>. The normalized object
+carries <code>version: 2</code> and a <code>pathProvenance</code> array binding every policy-bearing
+path to the field that declared it, its provenance kind, and its confidence.
+<code>src/domains/dispatch/path-scope.ts</code> resolves the request&#39;s path scope from it.
+<code>src/domains/dispatch/intent-compatibility.ts</code> owns every rule on this page.</p>
+<hr>
+<h2>2. Compatibility Rules</h2>
+<p>Each rule resolves to exactly one of three decisions.</p>
+<table>
+<thead>
+<tr>
+<th align="left">Decision</th>
+<th align="left">Meaning</th>
+<th align="left">Where it surfaces</th>
+</tr>
+</thead>
+<tbody><tr>
+<td align="left"><strong>accept</strong></td>
+<td align="left">The request is unambiguous.</td>
+<td align="left">Nothing is reported.</td>
+</tr>
+<tr>
+<td align="left"><strong>warn</strong></td>
+<td align="left">The request is compatible, but the classifier identified a weaker declaration or a scope-replacement tradeoff. The dispatch runs with the authority it would have had anyway.</td>
+<td align="left">Current admission publishes the typed-scope replacement warning. Legacy provenance still appears in the approval artifact and sealed <code>pathScope</code>; the absent-intent and missing-verification classifier findings are not emitted as standalone warnings.</td>
+</tr>
+<tr>
+<td align="left"><strong>refuse</strong></td>
+<td align="left">The request states two incompatible things about authority, or states one this build cannot interpret.</td>
+<td align="left">Terminal admission error carrying the reason code. The dispatch never runs.</td>
+</tr>
+</tbody></table>
+<p>The invariant that separates <code>warn</code> from <code>refuse</code>: <strong>a warning is never the
+difference between a narrow grant and a wide one.</strong> No compatibility path widens
+read, write, or verification authority to resolve an ambiguity. When the
+compatible reading and the declared reading disagree about what a worker may
+touch, the answer is a refusal, never the union of the two.</p>
+<h3>2.1 Omitted intent</h3>
+<p>Accepted without a standalone runtime warning. Policy-bearing scope is resolved by
+<code>legacyPathScope()</code>: legacy <code>writeRoots</code> become the write boundary with
+provenance <code>derived</code>, and path-like tokens in the task (confidence <code>medium</code>) and
+briefing (confidence <code>low</code>) become working-context paths with provenance
+<code>inferred</code>.</p>
+<p>Inferred paths select project rules and compile worker context. They never
+become write boundaries and never add a verification requirement. The only path
+into a write boundary without a declaration is the explicit legacy <code>writeRoots</code>
+field, which the caller had to set on purpose. This is what makes omission a
+compatible rather than a refusal: nothing about it can widen authority. The pure
+compatibility classifier can return <code>intent_absent_legacy_inference</code>, but the
+production dispatch path deliberately treats omitted intent as ordinary. The
+approval artifact and receipt provenance remain the operator-visible record.</p>
+<p>An absolute or malformed path token in prose is not silently dropped. It throws
+<code>DispatchPathScopeInferenceError</code> with code <code>legacy_scope_path_absolute</code> or
+<code>legacy_scope_path_malformed</code>, because a token the inference cannot normalize is
+exactly where a silent omission would hide an applicable rule.</p>
+<h3>2.2 Partial intent</h3>
+<p>Accepted. Every field is independently optional and an omitted list normalizes
+to empty. A declaration is not required to be complete to be authoritative:
+declaring only <code>write_roots</code> is a complete statement about write scope.</p>
+<p>The pure classifier identifies one partial shape as a warning. Intent that declares <code>write_roots</code> or
+<code>expected_outputs</code> but no <code>verification</code> describes work that changes the tree
+with nothing the orchestrator itself runs to prove the change is sound
+(<code>intent_partial_verification_absent</code>). Current production admission keeps only
+terminal refusals from this classifier, so it does not emit that finding as an
+operator diagnostic.</p>
+<p>One partial shape is refused when both lists are non-empty. An <code>expected_outputs</code>
+entry outside every declared <code>write_root</code> (<code>intent_outputs_outside_write_roots</code>) means the write boundary
+would block exactly the artifact the task is required to produce. Refusing that
+at admission costs a rejected call; accepting it costs a full worker run that
+cannot succeed.</p>
+<h3>2.3 Stale or unsupported version</h3>
+<p>Refused, never migrated. <code>DISPATCH_INTENT_SUPPORTED_VERSIONS</code> is <code>[2]</code> and
+membership in that list is the whole test. It is deliberately not a range: a
+reader that accepts &quot;2 or newer&quot; accepts fields it cannot interpret, and a
+reader that accepts &quot;2 or older&quot; reads a v1 statement about authority under v2
+rules. Both are the ambiguity typed intent exists to remove.</p>
+<p>Raw model-facing intent may echo <code>version: 2</code> so a caller can replay a
+declaration it was shown. Any other value fails normalization with
+<code>intent_version_unsupported</code>. A normalized intent arriving on a job spec at
+another version fails admission with the same code. The remedy in both messages
+is the same: restate the fields on a fresh dispatch call.</p>
+<h3>2.4 Contradictory intent</h3>
+<p>Refused. Three contradictions are enumerated.</p>
+<ul>
+<li><strong>Legacy against declared write scope.</strong> When both lists are non-empty,
+<code>writeRoots</code> and <code>intent.write_roots</code> resolving to different trees is
+<code>intent_write_roots_contradiction</code>. Neither the
+union nor the legacy field wins; the caller drops <code>writeRoots</code> and declares
+once.</li>
+<li><strong>Narrowed against enclosing scope.</strong> A per-task intent in a batch, or any
+other narrowed declaration, reaching outside the intent it narrows is
+<code>intent_scope_widening</code>. Narrowing is monotonic: downstream may shrink and may
+never reach outside. Read scope is checked against reads plus writes, because a
+declared write root is necessarily readable.</li>
+<li><strong>Write scope against run authority.</strong> <code>write_roots</code> declared on a request
+whose autonomy is <code>read-only</code> is <code>intent_write_without_authority</code>. Silently
+dropping the declaration would leave the request claiming a write scope nothing
+enforces.</li>
+</ul>
+<p>The declared-versus-inferred case is not a contradiction and is not refused.
+When a request declares intent, prose inference stops resolving scope entirely;
+paths mentioned only in prose take no part in rule selection or authority.
+<code>typed_scope_replaced_inferred_paths</code> reports the useful subset that looks like
+a source or documentation path, or ends in a directory separator, capped at 12
+entries for the transcript. Declared always outranks inferred.</p>
+<hr>
+<h2>3. Producer Compatibility Table</h2>
+<p>Every producer that can reach a worker passes through <code>validateJobSpec()</code> in
+<code>src/domains/dispatch/validation.ts</code>. When an <code>intent</code> property is present, that
+validator runs the classifier and retains its terminal refusals. Requests with
+no intent skip compatibility classification and resolve scope through the legacy
+inference path, whose malformed-path errors remain terminal.</p>
+<table>
+<thead>
+<tr>
+<th align="left">Dispatch producer</th>
+<th align="left">Source</th>
+<th align="left">Typed intent</th>
+<th align="left">Behavior without declaration</th>
+<th align="left">Refuses on</th>
+</tr>
+</thead>
+<tbody><tr>
+<td align="left"><strong><code>dispatch</code> tool, singular <code>task</code></strong></td>
+<td align="left"><code>src/tools/dispatch-arguments.ts</code></td>
+<td align="left">Declared, top-level <code>intent</code></td>
+<td align="left">Legacy inference from <code>writeRoots</code> + task/briefing tokens</td>
+<td align="left">All codes</td>
+</tr>
+<tr>
+<td align="left"><strong><code>dispatch</code> tool, batch <code>tasks[]</code></strong></td>
+<td align="left"><code>src/tools/dispatch-arguments.ts</code></td>
+<td align="left">Declared per task, shallow-merged over the top-level default</td>
+<td align="left">Same as singular, per task</td>
+<td align="left">All codes, plus <code>intent_scope_widening</code> against the top-level ceiling</td>
+</tr>
+<tr>
+<td align="left"><strong><code>dispatch</code> modes parallel / sequential / pipeline / detached</strong></td>
+<td align="left"><code>src/tools/dispatch-admission.ts</code></td>
+<td align="left">Inherited unchanged from the task that declared it</td>
+<td align="left">Legacy inference</td>
+<td align="left">All codes</td>
+</tr>
+<tr>
+<td align="left"><strong><code>dispatch</code> mode compete, candidates</strong></td>
+<td align="left"><code>src/tools/dispatch-admission.ts</code></td>
+<td align="left">Inherited unchanged from the single base task</td>
+<td align="left">Legacy inference</td>
+<td align="left">All codes. <code>verification</code> is refused for the mode (<code>verification_unsupported_for_mode</code>)</td>
+</tr>
+<tr>
+<td align="left"><strong><code>dispatch</code> mode compete, judge</strong></td>
+<td align="left"><code>src/tools/dispatch-admission.ts</code></td>
+<td align="left">None. The judge is a fresh read-only request</td>
+<td align="left">Legacy inference over the judge&#39;s own task</td>
+<td align="left">Legacy inference errors only</td>
+</tr>
+<tr>
+<td align="left"><strong><code>dispatch</code> mode council, members</strong></td>
+<td align="left"><code>src/tools/dispatch-admission.ts</code></td>
+<td align="left">Inherited, narrowed to read-only: declared write roots arrive as read roots</td>
+<td align="left">Legacy inference</td>
+<td align="left">All codes. <code>verification</code> is refused for the mode (<code>council_verification_unsupported</code>)</td>
+</tr>
+<tr>
+<td align="left"><strong><code>dispatch</code> mode council, synthesis judge</strong></td>
+<td align="left"><code>src/tools/dispatch-admission.ts</code></td>
+<td align="left">None. Fresh read-only request</td>
+<td align="left">Legacy inference over the judge&#39;s own task</td>
+<td align="left">Legacy inference errors only</td>
+</tr>
+<tr>
+<td align="left"><strong><code>dispatch</code> review gate, builder</strong></td>
+<td align="left"><code>src/tools/dispatch-admission.ts</code></td>
+<td align="left">Inherited unchanged</td>
+<td align="left">Legacy inference</td>
+<td align="left">All codes</td>
+</tr>
+<tr>
+<td align="left"><strong><code>dispatch</code> review gate, reviewer</strong></td>
+<td align="left"><code>src/tools/dispatch-admission.ts</code></td>
+<td align="left">None on the request. <code>expected_outputs</code> and <code>verification</code> reach the reviewer as rendered <em>requirements</em>, never as evidence</td>
+<td align="left">Legacy inference over the reviewer&#39;s own task</td>
+<td align="left">Legacy inference errors only</td>
+</tr>
+<tr>
+<td align="left"><strong><code>dispatch</code> <code>apply_winner</code></strong></td>
+<td align="left"><code>src/tools/dispatch-admission.ts</code></td>
+<td align="left">Not applicable. Branch application runs no worker</td>
+<td align="left">Not applicable</td>
+<td align="left">Branch-shape refusals only</td>
+</tr>
+<tr>
+<td align="left"><strong><code>from_scout</code> continuation</strong></td>
+<td align="left"><code>src/tools/dispatch-scout-admission.ts</code></td>
+<td align="left"><strong>None today.</strong> The compiled continuation plan carries no intent</td>
+<td align="left">Legacy inference per step</td>
+<td align="left">Legacy inference errors only</td>
+</tr>
+<tr>
+<td align="left"><strong>Fleet contract agent step (v4+ <code>writes:</code>)</strong></td>
+<td align="left"><code>src/domains/dispatch/fleet-run.ts</code></td>
+<td align="left">Declared. The contract&#39;s <code>writes:</code> compiles to <code>relevant_paths</code></td>
+<td align="left">Legacy inference for pre-v4 contracts and readonly steps</td>
+<td align="left">All codes</td>
+</tr>
+<tr>
+<td align="left"><strong>Fleet contract gate / plan step</strong></td>
+<td align="left"><code>src/domains/dispatch/fleet-run.ts</code></td>
+<td align="left">Declared, same path (<code>writes</code> is the gate path or the plan step&#39;s boundary)</td>
+<td align="left">Legacy inference when undeclared</td>
+<td align="left">All codes</td>
+</tr>
+<tr>
+<td align="left"><strong>Fleet delegation-plan spliced step</strong></td>
+<td align="left"><code>src/domains/dispatch/fleet-run.ts</code></td>
+<td align="left">Declared from the validated plan task&#39;s <code>writes</code></td>
+<td align="left">Legacy inference when the task declares none</td>
+<td align="left">All codes</td>
+</tr>
+<tr>
+<td align="left"><strong>Fleet code step</strong></td>
+<td align="left"><code>src/domains/dispatch/code-step.ts</code></td>
+<td align="left">Not applicable. Runs a declared command, not a worker</td>
+<td align="left">Not applicable</td>
+<td align="left">Not applicable</td>
+</tr>
+<tr>
+<td align="left"><strong>ACP delegation target</strong></td>
+<td align="left"><code>src/domains/dispatch/extension.ts</code></td>
+<td align="left">Accepted and carried into the plan, but the external agent runs its own tool surface</td>
+<td align="left">Legacy inference</td>
+<td align="left">All codes, plus a hard refusal of any resolved <code>writeRoots</code> on this transport</td>
+</tr>
+<tr>
+<td align="left"><strong>Custom agent recipe</strong></td>
+<td align="left"><code>src/domains/agents/</code></td>
+<td align="left">Not a producer. A recipe narrows the tool surface and capability class; it never declares dispatch scope</td>
+<td align="left">Not applicable</td>
+<td align="left">Not applicable</td>
+</tr>
+<tr>
+<td align="left"><strong>Extension-authored <code>DispatchRequest</code></strong></td>
+<td align="left">Any <code>DispatchContract</code> consumer</td>
+<td align="left">Declared, if the extension builds one through <code>declaredScopeIntent()</code> or the normalizer</td>
+<td align="left">Legacy inference</td>
+<td align="left">All codes</td>
+</tr>
+<tr>
+<td align="left"><strong><code>clio-coder run --agent</code></strong></td>
+<td align="left"><code>src/cli/run.ts</code></td>
+<td align="left"><strong>None today</strong></td>
+<td align="left">Legacy inference</td>
+<td align="left">Legacy inference errors only</td>
+</tr>
+<tr>
+<td align="left"><strong><code>clio-coder wiki generate</code></strong></td>
+<td align="left"><code>src/cli/wiki-generate.ts</code></td>
+<td align="left"><strong>None today.</strong> Sets legacy <code>writeRoots</code></td>
+<td align="left">Legacy inference plus a derived write boundary</td>
+<td align="left">Legacy inference errors only</td>
+</tr>
+<tr>
+<td align="left"><strong><code>clio-coder bootstrap generate</code></strong></td>
+<td align="left"><code>src/cli/bootstrap-generate.ts</code></td>
+<td align="left"><strong>None today</strong></td>
+<td align="left">Legacy inference</td>
+<td align="left">Legacy inference errors only</td>
+</tr>
+<tr>
+<td align="left"><strong>Interactive slash commands, overlays, watchdog</strong></td>
+<td align="left"><code>src/interactive/</code></td>
+<td align="left"><strong>None today</strong></td>
+<td align="left">Legacy inference</td>
+<td align="left">Legacy inference errors only</td>
+</tr>
+</tbody></table>
+<p>&quot;All codes&quot; means every terminal code in section 5 that can apply to the row&#39;s
+shape. &quot;Legacy inference errors only&quot; means the row cannot declare intent, so
+only malformed or absolute prose-path inference can refuse it.</p>
+<hr>
+<h2>4. Persisted and Serialized Contract Table</h2>
+<table>
+<thead>
+<tr>
+<th align="left">Contract</th>
+<th align="left">Version</th>
+<th align="left">Carries intent</th>
+<th align="left">Migration policy</th>
+</tr>
+</thead>
+<tbody><tr>
+<td align="left"><strong><code>DispatchIntent</code></strong></td>
+<td align="left"><code>2</code></td>
+<td align="left">It <em>is</em> the intent</td>
+<td align="left"><strong>Refused, never migrated.</strong> Any other version fails admission with <code>intent_version_unsupported</code>. A stored declaration is restated on a fresh call.</td>
+</tr>
+<tr>
+<td align="left"><strong><code>DispatchPathScopeProvenance</code></strong></td>
+<td align="left"><code>1</code></td>
+<td align="left">Resolved scope with field source and confidence, never source prose</td>
+<td align="left">Sealed inside the receipt; shares the receipt&#39;s policy.</td>
+</tr>
+<tr>
+<td align="left"><strong>Run Receipt</strong></td>
+<td align="left"><code>20</code></td>
+<td align="left"><code>intent</code> and <code>pathScope</code>, both inside the integrity digest</td>
+<td align="left"><strong>Refused, never migrated.</strong> A receipt below v20 is reported as retired: intact, but never read as evidence.</td>
+</tr>
+<tr>
+<td align="left"><strong><code>ResolvedDispatchPlanArtifact</code></strong></td>
+<td align="left"><code>3</code></td>
+<td align="left"><code>intent</code> and <code>resolvedVerification</code> per task</td>
+<td align="left"><strong>Refused, never migrated.</strong> <code>resolvedDispatchPlanFromArgs</code> returns <code>null</code> for any version but 3, and a task whose <code>intent</code> fails <code>isDispatchIntent</code> invalidates the whole artifact. The call falls back to unresolved admission rather than executing a half-understood plan.</td>
+</tr>
+<tr>
+<td align="left"><strong>Dispatch plan approval text and hash</strong></td>
+<td align="left">Rendered, hashed</td>
+<td align="left"><code>intent_sha256</code> for a declared task; the full inferred scope table for a legacy task</td>
+<td align="left">Not persisted across versions. The hash binds the exact rendering an operator approved.</td>
+</tr>
+<tr>
+<td align="left"><strong>Worker Spec</strong></td>
+<td align="left"><code>3</code></td>
+<td align="left"><strong>No.</strong> Carries the <em>resolved</em> <code>writeRoots</code>, not the declaration</td>
+<td align="left">Fail-closed preflight rejection. Deliberate: a worker receives an enforced boundary, never a statement of intent it could reinterpret.</td>
+</tr>
+<tr>
+<td align="left"><strong>Execution Plan</strong></td>
+<td align="left"><code>4</code></td>
+<td align="left"><strong>No.</strong> Carries per-step <code>writes</code></td>
+<td align="left">Preflight rejects unsupported plan versions. Intent is built from <code>writes</code> at request construction, so the plan hash is unchanged by this.</td>
+</tr>
+<tr>
+<td align="left"><strong>Fleet Contract</strong></td>
+<td align="left"><code>1..5</code></td>
+<td align="left"><strong>No.</strong> v4+ carries per-step <code>writes:</code></td>
+<td align="left">Reader refuses contracts whose version features it does not support. A pre-v4 contract declares nothing and stays on inference.</td>
+</tr>
+<tr>
+<td align="left"><strong>Fleet Run Record</strong></td>
+<td align="left"><code>1</code></td>
+<td align="left"><strong>No</strong></td>
+<td align="left">Resume refuses a changed plan hash. Adding intent to steps does not change the hash, so existing records stay resumable.</td>
+</tr>
+<tr>
+<td align="left"><strong>Durable Assignment Store</strong></td>
+<td align="left"><code>1</code></td>
+<td align="left"><strong>No</strong></td>
+<td align="left">Unsupported or unreadable store reads as empty.</td>
+</tr>
+<tr>
+<td align="left"><strong>Detached Batch Store</strong></td>
+<td align="left"><code>1</code></td>
+<td align="left"><strong>No</strong></td>
+<td align="left">Unsupported version reads as empty.</td>
+</tr>
+<tr>
+<td align="left"><strong>Code Step Record</strong></td>
+<td align="left"><code>1</code></td>
+<td align="left"><strong>No.</strong> Deterministic command, not a worker</td>
+<td align="left">Records at other versions are skipped.</td>
+</tr>
+</tbody></table>
+<p>Nothing is archived. Every affected structure either refuses an unsupported
+version or ignores the record; no reader rewrites a stored artifact in place, so
+a downgrade never encounters a file a newer build silently rewrote.</p>
+<h3>4.1 Determinism across source and installed-package paths</h3>
+<p><code>intent-compatibility.ts</code> and the version rules in <code>intent.ts</code> read no
+filesystem, no clock, no environment, and no package layout. The supported
+version set is a compiled-in constant, not a lookup. A source checkout, a global
+npm install, and a bundled <code>dist/</code> therefore classify identical input
+identically, which is what makes the version policy verifiable rather than
+environmental. <code>tests/contracts/dispatch-admission.test.ts</code> covers the current
+normalization and compatibility boundary.</p>
+<p>The one input that is legitimately environmental is the <em>verification catalog</em>:
+<code>check</code> ids resolve from the project&#39;s <code>package.json</code> scripts and
+<code>.clio-coder/verifiers.yaml</code>, which are properties of the workspace, not of the
+Clio installation. An undeclared id fails closed with
+<code>verification_check_undeclared</code> naming both sources.</p>
+<hr>
+<h2>5. Reason Codes</h2>
+<p>Active refusal codes are stable and appear as the prefix of their diagnostic, in
+the form <code>&lt;code&gt;: &lt;what is wrong and what to do about it&gt;</code>. The table also marks
+classifier-only findings and compatibility identifiers that have no current
+producer.</p>
+<table>
+<thead>
+<tr>
+<th align="left">Code</th>
+<th align="left">Decision</th>
+<th align="left">Meaning</th>
+</tr>
+</thead>
+<tbody><tr>
+<td align="left"><code>intent_absent_legacy_inference</code></td>
+<td align="left">classifier-only warn</td>
+<td align="left">No typed intent; scope came from legacy inference. Production admission does not emit it.</td>
+</tr>
+<tr>
+<td align="left"><code>intent_partial_verification_absent</code></td>
+<td align="left">classifier-only warn</td>
+<td align="left">Declares tree-changing work with no verification requirement. Production admission does not emit it.</td>
+</tr>
+<tr>
+<td align="left"><code>typed_scope_replaced_inferred_paths</code></td>
+<td align="left">warn</td>
+<td align="left">Typed intent was declared, so prose-only paths took no part in scope.</td>
+</tr>
+<tr>
+<td align="left"><code>legacy_scope_inferred</code></td>
+<td align="left">retained compatibility id</td>
+<td align="left">Accepted by the event projection for older producers; no current source emits it.</td>
+</tr>
+<tr>
+<td align="left"><code>legacy_scope_empty</code></td>
+<td align="left">retained compatibility id</td>
+<td align="left">Accepted by the event projection for older producers; no current source emits it.</td>
+</tr>
+<tr>
+<td align="left"><code>intent_version_unsupported</code></td>
+<td align="left">refuse</td>
+<td align="left"><code>intent.version</code> names a version this build does not speak.</td>
+</tr>
+<tr>
+<td align="left"><code>intent_malformed</code></td>
+<td align="left">refuse</td>
+<td align="left">Not a normalized intent for a reason other than its version.</td>
+</tr>
+<tr>
+<td align="left"><code>intent_write_roots_contradiction</code></td>
+<td align="left">refuse</td>
+<td align="left">Legacy <code>writeRoots</code> and <code>intent.write_roots</code> name different trees.</td>
+</tr>
+<tr>
+<td align="left"><code>intent_outputs_outside_write_roots</code></td>
+<td align="left">refuse</td>
+<td align="left">A declared output lies outside every declared write root.</td>
+</tr>
+<tr>
+<td align="left"><code>intent_write_without_authority</code></td>
+<td align="left">refuse</td>
+<td align="left">Write roots declared on a read-only request.</td>
+</tr>
+<tr>
+<td align="left"><code>intent_scope_widening</code></td>
+<td align="left">refuse</td>
+<td align="left">A narrowed intent reaches outside the intent it narrows.</td>
+</tr>
+<tr>
+<td align="left"><code>intent_path_absolute</code></td>
+<td align="left">refuse</td>
+<td align="left">A declared path is absolute rather than repository-relative.</td>
+</tr>
+<tr>
+<td align="left"><code>intent_path_escapes_root</code></td>
+<td align="left">refuse</td>
+<td align="left">A declared path escapes the repository root.</td>
+</tr>
+<tr>
+<td align="left"><code>intent_path_malformed</code></td>
+<td align="left">refuse</td>
+<td align="left">A declared path fails the boundary grammar.</td>
+</tr>
+<tr>
+<td align="left"><code>intent_path_over_cap</code></td>
+<td align="left">refuse</td>
+<td align="left">A list exceeds 32 entries or an entry exceeds 512 bytes.</td>
+</tr>
+<tr>
+<td align="left"><code>verification_malformed</code></td>
+<td align="left">refuse</td>
+<td align="left">A verification entry is not <code>{check, timeout_ms?}</code>.</td>
+</tr>
+<tr>
+<td align="left"><code>verification_over_cap</code></td>
+<td align="left">refuse</td>
+<td align="left">More than 8 verification entries.</td>
+</tr>
+<tr>
+<td align="left"><code>verification_check_undeclared</code></td>
+<td align="left">refuse</td>
+<td align="left">A <code>check</code> id is not declared by any catalog source.</td>
+</tr>
+<tr>
+<td align="left"><code>gate_and_intent_verification_conflict</code></td>
+<td align="left">refuse</td>
+<td align="left"><code>gate</code> combined with <code>intent.verification</code>.</td>
+</tr>
+<tr>
+<td align="left"><code>legacy_scope_path_absolute</code></td>
+<td align="left">refuse</td>
+<td align="left">Prose inference met an absolute path token.</td>
+</tr>
+<tr>
+<td align="left"><code>legacy_scope_path_malformed</code></td>
+<td align="left">refuse</td>
+<td align="left">Prose inference met a malformed path token.</td>
+</tr>
+</tbody></table>
+<hr>
+<h2>6. Examples</h2>
+<p>Typed intent is the default for every example below. A call that omits it still
+works without a dedicated warning; it resolves its scope from weaker evidence
+recorded in the approval artifact and receipt.</p>
+<h3>6.1 Main-agent call, single writer</h3>
+<pre><code class="language-jsonc">{
+  &quot;agent&quot;: &quot;coder&quot;,
+  &quot;task&quot;: &quot;Add the compatibility classifier and wire it into job-spec validation.&quot;,
+  &quot;intent&quot;: {
+    &quot;read_roots&quot;:     [&quot;src/domains/dispatch/&quot;],
+    &quot;write_roots&quot;:    [&quot;src/domains/dispatch/&quot;, &quot;tests/contracts/&quot;],
+    &quot;expected_outputs&quot;: [&quot;src/domains/dispatch/intent-compatibility.ts&quot;],
+    &quot;verification&quot;:   [{ &quot;check&quot;: &quot;typecheck&quot; }, { &quot;check&quot;: &quot;lint&quot; }]
+  }
+}
+</code></pre>
+<p>The <code>expected_outputs</code> entry sits under a declared write root, so it is
+producible. <code>verification</code> ids resolve before approval, and the orchestrator, not
+the worker, runs them.</p>
+<h3>6.2 Batch with a shared ceiling and per-task narrowing</h3>
+<pre><code class="language-jsonc">{
+  &quot;agent&quot;: &quot;coder&quot;,
+  &quot;intent&quot;: { &quot;read_roots&quot;: [&quot;src/&quot;], &quot;write_roots&quot;: [&quot;src/domains/&quot;] },
+  &quot;tasks&quot;: [
+    { &quot;task&quot;: &quot;Refactor the ledger hub.&quot;,  &quot;intent&quot;: { &quot;write_roots&quot;: [&quot;src/domains/dispatch/&quot;] } },
+    { &quot;task&quot;: &quot;Refactor rule selection.&quot;,  &quot;intent&quot;: { &quot;write_roots&quot;: [&quot;src/domains/context/&quot;] } }
+  ]
+}
+</code></pre>
+<p>Per-task intent shallow-merges over the top-level default and is then checked
+against it as a ceiling. <code>&quot;write_roots&quot;: [&quot;docs/&quot;]</code> on a task would be refused
+with <code>intent_scope_widening</code>; the top-level declaration is the maximum.</p>
+<h3>6.3 Read-only fan-out</h3>
+<pre><code class="language-jsonc">{
+  &quot;agent&quot;: &quot;scout&quot;,
+  &quot;tasks&quot;: [
+    { &quot;task&quot;: &quot;Map every reader of the fleet config and cite file paths.&quot;,
+      &quot;intent&quot;: { &quot;read_roots&quot;: [&quot;src/domains/agents/&quot;, &quot;src/cli/&quot;] } }
+  ]
+}
+</code></pre>
+<p>Declaring <code>read_roots</code> on a read-only dispatch does not grant anything. It
+selects the project rules that apply to those trees and pins the worker&#39;s
+context, which is what stops an applicable rule from being missed because the
+task text happened not to spell a path.</p>
+<h3>6.4 Fleet contract</h3>
+<p>A fleet contract declares scope in its own artifact; no <code>intent</code> key is written
+by hand.</p>
+<pre><code class="language-yaml">version: 5
+name: refactor-dispatch
+steps:
+  - id: implement
+    kind: agent
+    agent: coder
+    scope: workspace
+    writes: [&quot;src/domains/dispatch/&quot;, &quot;tests/contracts/&quot;]
+</code></pre>
+<p><code>writes:</code> is compiled into the step&#39;s typed intent as <code>relevant_paths</code>, so the
+contract&#39;s declaration selects project rules and compiles worker context. The
+declaration keeps being <em>enforced</em> by the fleet write-boundary enforcer after
+the step, which is why it is not restated as <code>write_roots</code>: that would mint a
+second grant, enforced at the per-tool worker seam, which refuses outright on
+the subprocess and ACP runtimes a fleet may legitimately route a step to.</p>
+<h3>6.5 Extension-authored request</h3>
+<p>An extension holding repository-relative paths builds intent through the domain
+rather than assembling the normalized object by hand:</p>
+<pre><code class="language-ts">import { declaredScopeIntent } from &quot;../domains/dispatch/index.js&quot;;
+
+const built = declaredScopeIntent({ readRoots: [&quot;src/&quot;], writeRoots: [&quot;src/generated/&quot;] });
+if (!built.ok) throw new Error(`${built.reason}: ${built.message}`);
+await dispatch.dispatch({ agentId: &quot;coder&quot;, executionRole: &quot;builder&quot;, task, intent: built.intent });
+</code></pre>
+<p><code>declaredScopeIntent</code> runs the same normalization, caps, and provenance
+construction the dispatch tool uses, so an extension cannot mint an intent shape
+the tool could not. It deliberately does not accept <code>verification</code>: a declared
+check id means nothing until it is resolved against the workspace catalog, and
+that resolution belongs to the admission controller that owns the catalog.</p>
+<h3>6.6 ACP delegation</h3>
+<p>Typed intent is accepted on a delegation request and is rendered into the
+approval artifact, so an operator sees the declared scope before an external
+agent starts. It grants nothing on that transport: the external agent runs its
+own tool surface, Clio mediates no per-tool call, and any resolved <code>writeRoots</code>
+is refused outright rather than accepted and left unenforced.</p>
+<hr>
+<h2>7. Retirement Criterion for Legacy Inference</h2>
+<p>Removing the inference fallback requires a later explicit issue. This is the
+gate that issue has to clear, and it is measured rather than argued.</p>
+<p><code>pathScope.mode</code> is sealed on every receipt, so the share of dispatches still
+resolving policy-bearing scope from prose is a fact in the evidence store.
+<code>dispatchIntentAdoption()</code> in <code>src/domains/dispatch/intent-compatibility.ts</code>
+computes it, reading nothing but that mode field so the aggregate is safe to
+report from receipts whose prose must not be quoted.</p>
+<p>The criterion is met when, over a window of receipts:</p>
+<ul>
+<li>at least <code>DISPATCH_INTENT_RETIREMENT_MIN_SAMPLE</code> (200) receipts carry a
+resolved <code>pathScope</code>, and</li>
+<li>at most <code>DISPATCH_INTENT_RETIREMENT_MAX_LEGACY_SHARE</code> (2%) of them have
+<code>mode: &quot;legacy-inferred&quot;</code>.</li>
+</ul>
+<p>A window with no measured receipts reports <code>legacyShare: null</code> and is never
+ready, so an empty evidence store cannot read as full adoption. The producer
+rows in section 3 marked <strong>None today</strong> are the concrete work that has to land
+before the share can fall: each is a producer that cannot currently declare, so
+each one contributes to the legacy count no matter how the model behaves.</p>
+        </article>
+        <nav class="related-nav" aria-label="Adjacent references">
+          <a class="nav-link-card" href="dispatch_rationale_blueprint.html"><span class="nav-label">Previous</span><span class="nav-title">Dispatch Architecture Rationale</span></a>
+          <a class="nav-link-card next" href="memory_blueprint.html"><span class="nav-label">Next</span><span class="nav-title">Evidence Corpus and Long-Term Memory</span></a>
+        </nav>
+        <p class="reference-footer-note">Canonical content lives in the mapped Markdown page. This visual counterpart adds navigation without changing the contract.</p>
+      </main>
+    </div>
+    <footer>Clio Coder documentation · source-aligned at v0.4.2</footer>
+  </div>
+  <script src="shared.js"></script>
+</body>
+</html>

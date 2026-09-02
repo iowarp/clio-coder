@@ -1,7 +1,7 @@
 # Observability Viewer
 
-> [!TIP]
-> **Interactive Spec Available:** A source-checkout dashboard is available at [docs/html/observability_blueprint.html](https://github.com/iowarp/clio-coder/blob/main/docs/html/observability_blueprint.html).
+> **Visual blueprint:** The source checkout includes the complete
+> [Observability Viewer visual reference](https://github.com/iowarp/clio-coder/blob/main/docs/html/observability_blueprint.html).
 
 `/view` is the interactive artifact viewer for a Clio session. It keeps the live transcript compact while preserving a full inspection path for durable artifacts, task ledgers, and successful workspace outputs.
 

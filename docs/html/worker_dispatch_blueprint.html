@@ -1,231 +1,371 @@
-<!DOCTYPE html>
+<!doctype html>
 <html lang="en">
 <head>
-  <meta charset="UTF-8">
-  <meta name="viewport" content="width=device-width, initial-scale=1.0">
-  <title>Worker Dispatch Mechanics Blueprint (v0.4.0)</title>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <meta name="clio-markdown-source" content="docs/architecture/worker-dispatch-mechanics.md">
+  <meta name="clio-docs-version" content="0.4.2">
+  <title>Worker Dispatch Mechanics · Clio Coder 0.4.2</title>
+  <link rel="icon" href="data:,">
   <link rel="stylesheet" href="shared.css">
-  <style>
-    /* Custom protocol simulator styles */
-    .protocol-scroller {
-      background: #060913;
-      border: 1px solid #1f354f;
-      border-radius: 8px;
-      padding: 1rem;
-      height: 300px;
-      overflow-y: auto;
-      font-family: var(--font-mono);
-      font-size: 0.8rem;
-      color: #b0c4de;
-    }
-    .stream-line {
-      margin-bottom: 0.5rem;
-      line-height: 1.4;
-      display: flex;
-      gap: 0.5rem;
-    }
-    .stream-dir {
-      font-weight: 700;
-    }
-    .dir-in { color: #bd00ff; }
-    .dir-out { color: #00d4db; }
-    .dir-sys { color: #6a7a85; }
-
-    .btn-group-grid {
-      display: grid;
-      grid-template-columns: repeat(auto-fit, minmax(130px, 1fr));
-      gap: 0.5rem;
-      margin-top: 1rem;
-    }
-  </style>
 </head>
-<body>
+<body data-doc-category="architecture">
+  <div class="reading-progress" aria-hidden="true"></div>
+  <a class="skip-link" href="#reference-content">Skip to reference</a>
   <div class="container">
-    <header>
+    <header class="document-header" data-category="Architecture">
       <div class="header-left">
-        <div class="header-logo">
-          <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" style="color: var(--color-cyan);"><title>Icon</title>
-            <path d="M17 21v-2a4 4 0 0 0-4-4H5a4 4 0 0 0-4 4v2"></path>
-            <circle cx="9" cy="7" r="4"></circle>
-            <path d="M23 21v-2a4 4 0 0 0-3-3.87"></path>
-            <path d="M16 3.13a4 4 0 0 1 0 7.75"></path>
+        <a class="header-logo" href="index.html" aria-label="Documentation index">
+          <svg viewBox="0 0 24 24" fill="none" aria-hidden="true">
+            <path d="M12 2 2 7l10 5 10-5-10-5Z" stroke="url(#clio-logo)" stroke-width="2" stroke-linejoin="round"/>
+            <path d="m2 12 10 5 10-5M2 17l10 5 10-5" stroke="url(#clio-logo)" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"/>
+            <defs><linearGradient id="clio-logo" x1="2" y1="2" x2="22" y2="22"><stop stop-color="#00d4db"/><stop offset="1" stop-color="#ff7e29"/></linearGradient></defs>
           </svg>
-        </div>
+        </a>
         <div class="header-title-wrapper">
+          <p class="document-kicker">Architecture / canonical reference</p>
           <h1>Worker Dispatch Mechanics</h1>
-          <p>Environment isolation, child process setup, and NDJSON stdin/stdout streams</p>
-          <div class="meta-chips-row">
-            <span class="chip">Source: docs/worker-dispatch-mechanics.md</span>
-            <span class="chip chip-orange">clio-coder docs worker_dispatch</span>
-          </div>
+          <p class="document-path">docs/architecture/worker-dispatch-mechanics.md</p>
         </div>
       </div>
       <div class="header-right">
-        <span class="version-badge">Clio Coder v0.4.0</span>
-        <a href="index.html" class="back-btn">
-          <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><title>Icon</title><line x1="19" y1="12" x2="5" y2="12"></line><polyline points="12 19 5 12 12 5"></polyline></svg>
-          Dashboard Hub
-        </a>
+        <a class="back-btn" href="index.html">← Index</a>
+        <span class="version-badge">v0.4.2</span>
       </div>
     </header>
-
-    <div class="page-layout-grid">
-      <nav class="sidebar" aria-label="Table of Contents">
-        <div class="toc-container">
-          <div class="toc-title">On This Page</div>
-          <ul class="toc-list">
-            <!-- Dynamically populated -->
-          </ul>
-        </div>
-      </nav>
-
-      <main>
-        <div class="glass-card">
-          <h2>Overview Summary</h2>
-          <p>Dispatched worker processes run completely headlessly in environment-scrubbed isolation, exchanging event payloads with the parent orchestrator via standard stdin/stdout JSON lines.</p>
-        </div>
-
-        <div class="tabs-nav">
-          <button type="button" class="tab-btn active" onclick="switchTab('simulator')">
-            Protocol Stream Simulator
-          </button>
-          <button type="button" class="tab-btn" onclick="switchTab('details')">
-            Exit Code Reference
-          </button>
-        </div>
-
-        <!-- Tab 1: Simulator -->
-        <div class="tab-pane active" id="pane-simulator">
-          <div class="blueprint-layout">
-            <div class="specs-col">
-              <div class="glass-card">
-                <h3>Sequence Controls</h3>
-                <p>Simulate parent-child messages:</p>
-
-                <div class="btn-group-grid">
-                  <button type="button" class="tab-btn" onclick="logEvent('spawn')">1. Spawn Worker</button>
-                  <button type="button" class="tab-btn" onclick="logEvent('spec')">2. Send Spec</button>
-                  <button type="button" class="tab-btn" onclick="logEvent('heartbeat')">3. Emit Heartbeat</button>
-                  <button type="button" class="tab-btn" onclick="logEvent('escalate')">4. Escalate Tool</button>
-                  <button type="button" class="tab-btn" onclick="logEvent('decision')">5. Decision Stdin</button>
-                  <button type="button" class="tab-btn" onclick="logEvent('finish')">6. Finish Run</button>
-                </div>
-
-                <button type="button" class="tab-btn" style="margin-top:1.5rem; width:100%; border-color:var(--color-rose); color:var(--color-rose);" onclick="clearStream()">Reset Log</button>
-              </div>
-            </div>
-
-            <div class="specs-col">
-              <div class="glass-card">
-                <h3>Live NDJSON Timeline</h3>
-                <p>Scroll down to see lines written to standard streams:</p>
-
-                <div class="protocol-scroller" id="scroller">
-                  <div class="stream-line"><span class="stream-dir dir-sys">[SYS]</span> Process idle. Click Spawn Worker to begin.</div>
-                </div>
-              </div>
-            </div>
-          </div>
-        </div>
-
-        <!-- Tab 2: Details -->
-        <div class="tab-pane" id="pane-details">
-          <div class="glass-card">
-            <h3>Worker Exit Codes Specs</h3>
-            <p>Parent checks exit codes when child process terminates:</p>
-
-            <table class="env-table" style="margin-top:1rem;">
-              <thead>
-                <tr>
-                  <th>Exit Code</th>
-                  <th>Symbolic Name</th>
-                  <th>Triggering Condition</th>
-                </tr>
-              </thead>
-              <tbody>
-                <tr>
-                  <td><code>0</code></td>
-                  <td><code>WORKER_EXIT_SUCCESS</code></td>
-                  <td>Run finished successfully with finish-contract evidence.</td>
-                </tr>
-                <tr>
-                  <td><code>1</code></td>
-                  <td><code>WORKER_EXIT_GENERIC_ERROR</code></td>
-                  <td>Unhandled exception or parsing crash during chat loop.</td>
-                </tr>
-                <tr>
-                  <td><code>3</code></td>
-                  <td><code>WORKER_EXIT_PERMISSION_REQUIRED</code></td>
-                  <td>A suggested tool required approval under strict non-interactive policy.</td>
-                </tr>
-                <tr>
-                  <td><code>4</code></td>
-                  <td><code>WORKER_EXIT_SIGTERM</code></td>
-                  <td>Watchdog timed out or operator aborted execution stream.</td>
-                </tr>
-              </tbody>
-            </table>
-          </div>
-        </div>
-
-        <!-- Related Navigation -->
-        <nav class="related-nav" aria-label="Related Pages">
-          <a href="tui_design_blueprint.html" class="nav-link-card">
-            <span class="nav-label">Previous Blueprint</span>
-            <span class="nav-title">TUI Design System</span>
-          </a>
-          <a href="evals_internal_blueprint.html" class="nav-link-card next">
-            <span class="nav-label">Next Blueprint</span>
-            <span class="nav-title">Internal Eval Suites</span>
-          </a>
+    <div class="page-layout-grid reference-layout">
+      <aside class="sidebar reference-sidebar" aria-label="On this page">
+        <nav class="toc-container">
+          <p class="toc-title">On this page</p>
+          <a class="sidebar-source" href="https://github.com/iowarp/clio-coder/blob/main/docs/architecture/worker-dispatch-mechanics.md">Canonical Markdown<br>docs/architecture/worker-dispatch-mechanics.md</a>
+          <ul class="toc-list"></ul>
         </nav>
+      </aside>
+      <main class="reference-main" id="reference-content">
+        <article class="reference-prose glass-card">
+<blockquote>
+<p><strong>Visual blueprint:</strong> The source checkout includes the complete
+<a href="worker_dispatch_blueprint.html">Worker Dispatch Mechanics visual reference</a>.</p>
+</blockquote>
+<p>This document describes the design and lifecycle of Clio Coder dispatched workers, focusing on the spawning sequence, execution isolation, the standard input/output NDJSON communication loop, and permission escalation routing.</p>
+<p>Source of truth:</p>
+<ul>
+<li>Subprocess entry: <a href="https://github.com/iowarp/clio-coder/blob/main/src/worker/entry.ts">src/worker/entry.ts</a></li>
+<li>Input demultiplexing: <a href="https://github.com/iowarp/clio-coder/blob/main/src/worker/stdin-demux.ts">src/worker/stdin-demux.ts</a></li>
+<li>Heartbeat loop: <a href="https://github.com/iowarp/clio-coder/blob/main/src/worker/heartbeat.ts">src/worker/heartbeat.ts</a></li>
+<li>Spec contracts and exit codes: <a href="https://github.com/iowarp/clio-coder/blob/main/src/worker/spec-contract.ts">src/worker/spec-contract.ts</a></li>
+<li>Dispatch orchestrator: <a href="https://github.com/iowarp/clio-coder/blob/main/src/domains/dispatch/index.ts">src/domains/dispatch/index.ts</a></li>
+<li>Engine worker runtime: <a href="https://github.com/iowarp/clio-coder/blob/main/src/engine/worker-runtime.ts">src/engine/worker-runtime.ts</a></li>
+</ul>
+<hr>
+<h2>1. Spawning Sequence &amp; Environment Isolation</h2>
+<p>When the orchestrator dispatches a task to a fleet agent (such as via the <code>dispatch</code> tool or <code>clio-coder eval</code> execution), it spins up a child process running the compiled worker entry.</p>
+<ol>
+<li><strong>Child Process Creation:</strong>
+The parent process spawns a Node.js subprocess pointing to <code>dist/worker/entry.js</code>.</li>
+<li><strong>Environment Scrubbing:</strong>
+To ensure clean execution, the child process runs with a sanitized environment. The orchestrator scrubs user-interactive flags (e.g., <code>CLIO_CODER_INTERACTIVE</code> is removed from <code>process.env</code>) to prevent child workers from attempting to mount TUI elements or intercept standard input signals.</li>
+<li><strong>Spec Injection &amp; Attestation Handshake:</strong>
+The orchestrator serializes a <code>WorkerSpec</code> JSON document and writes it as the very first line of <code>stdin</code> to the child worker. Before reaching a model, every worker announces its attestation on the structured stderr control lane (<code>@clio-control/1 </code> prefix): protocol version (<code>WORKER_PROTOCOL_VERSION = 1</code>), spec version, process ID, process group ID (or null), host, settings fingerprint, worker-computed spec digest (<code>specDigest</code>), runtime ID, target ID, endpoint identity hash (<code>endpointIdentityHash</code>), wire model ID, effective tool signature, and bounded node resource facts (labels, CPU count, total memory, free memory, GPU count, VRAM, and resident models). The orchestrator compares each field against the approved plan and terminates a drifting peer instead of running it. Bulk NDJSON on <code>stdout</code> is accepted only once that attestation verifies.</li>
+</ol>
+<pre><code class="language-mermaid">sequenceDiagram
+    participant Orchestrator
+    participant WorkerSubprocess as Worker (entry.ts)
+    participant Engine as Engine (worker-runtime.ts)
+
+    Orchestrator-&gt;&gt;WorkerSubprocess: Spawn (node entry.js)
+    Orchestrator-&gt;&gt;WorkerSubprocess: Send WorkerSpec (NDJSON on stdin)
+    WorkerSubprocess-&gt;&gt;Orchestrator: announce control frame (stderr @clio-control/1)
+    Note over WorkerSubprocess: Starts heartbeat on stderr control lane
+    WorkerSubprocess-&gt;&gt;Engine: startWorkerRun(input)
+    loop Execution Loop
+        Engine-&gt;&gt;WorkerSubprocess: Emit event
+        WorkerSubprocess-&gt;&gt;Orchestrator: NDJSON event (stdout bulk lane)
+    end
+</code></pre>
+<hr>
+<h2>2. Standard Input/Output NDJSON Protocol</h2>
+<p>Dispatched workers are non-interactive. Coordination between the orchestrator and the worker occurs across two dedicated communication lanes plus standard input:</p>
+<h3>2.1 Worker Output Lanes</h3>
+<p>Clio divides worker output into two isolated streams to protect control signals from bulk data starvation:</p>
+<ol>
+<li><p><strong>Bulk Lane (<code>stdout</code>)</strong>:
+Streams turn execution events as single-line NDJSON objects, capped by <code>WORKER_BULK_FRAME_MAX_BYTES</code> (4 MiB). To prevent quadratic payload explosion during streaming, <code>projectWorkerEventForStdout</code> (<code>src/worker/event-projection.ts</code>) slims <code>message_update</code> events by stripping cumulative message snapshots before emission. Major event kinds on stdout include:</p>
+<ul>
+<li><strong>Logs / Stream chunks:</strong> Output segments generated by the model during a turn.</li>
+<li><strong>Tool Invocation:</strong> Requests to run specific tools.</li>
+<li><strong>Permission Escalation:</strong> Emitted when a tool requires approval under the <code>escalate</code> posture.</li>
+<li><strong>Completion / Failure:</strong> Marks the final state of the run, providing execution receipts.</li>
+</ul>
+</li>
+<li><p><strong>Control Lane (<code>stderr</code>)</strong>:
+Emits out-of-band control frames prefixed by <code>@clio-control/1 </code>, capped at <code>WORKER_CONTROL_FRAME_MAX_BYTES</code> (16 KiB). Because control frames travel over <code>stderr</code>, they bypass backpressured bulk stdout streams and reach orchestrator watchdogs immediately. Control frame kinds include:</p>
+<ul>
+<li><strong>Announce:</strong> <code>{&quot;kind&quot;: &quot;announce&quot;, &quot;attestation&quot;: ...}</code> sent immediately upon startup.</li>
+<li><strong>Heartbeat:</strong> <code>{&quot;kind&quot;: &quot;heartbeat&quot;}</code> emitted every 1000 milliseconds. The frame carries no timestamp; the orchestrator stamps arrival on its own clock.</li>
+<li><strong>Steer / Cancel Acknowledgments:</strong> Confirming reception of stdin control directives.</li>
+</ul>
+</li>
+</ol>
+<h3>2.2 Worker Input (<code>stdin</code>)</h3>
+<p>The worker entry mounts a custom stdin demultiplexer (<code>createWorkerStdinDemux</code>) that parses lines arriving after the initial <code>WorkerSpec</code>. It processes two types of JSON messages:</p>
+<ol>
+<li><strong>Steering Commands:</strong>
+<code>{&quot;type&quot;: &quot;steer&quot;, &quot;text&quot;: &quot;guidance message&quot;, &quot;sequence&quot;: 1}</code>
+Instructs a live-input HTTP or SDK worker to alter course. Its runtime emits
+the receipt-bearing <code>clio_coder_steer_received</code> event only after accepting the
+message for the next turn boundary. Single-shot subprocess runtimes install
+no steering handler, drop unexpected guidance without claiming receipt, and
+are not offered steering by the dispatch contract or TUI.</li>
+<li><strong>Permission Decisions:</strong>
+<code>{&quot;type&quot;: &quot;permission_decision&quot;, &quot;requestId&quot;: &quot;req-xxx&quot;, &quot;decision&quot;: &quot;approve&quot;|&quot;deny&quot;}</code>
+Resolves a parked tool call that was escalated to the operator.</li>
+</ol>
+<p>Any stdin chunk that is not a valid JSON structure matching these schemas is logged as a dropped line and does not crash the worker.</p>
+<hr>
+<h2>3. Heartbeats and the Watchdog</h2>
+<p>Even when a model is processing a long thinking phase or generating a heavy output, the worker must prove it is alive to prevent the parent orchestrator&#39;s watchdog from reclaiming it.</p>
+<ul>
+<li><strong>Emission:</strong> The heartbeat loop (<code>startWorkerHeartbeat</code> in <code>src/worker/heartbeat.ts</code>) writes a heartbeat control frame (<code>{&quot;kind&quot;: &quot;heartbeat&quot;}</code>) to the <code>stderr</code> control lane every 1000 milliseconds.</li>
+<li><strong>Stream Isolation:</strong> Because heartbeats ride the control lane rather than <code>stdout</code>, a large bulk output or queued tool result cannot starve or delay the watchdog check.</li>
+<li><strong>Non-Blocking Timer:</strong> The heartbeat timer interval is explicitly <code>.unref()</code>&#39;d, ensuring the Node.js runtime is not kept alive past the natural lifetime of the worker run.</li>
+<li><strong>Termination:</strong> Once <code>startWorkerRun</code> resolves, the timer is cleared before returning the worker&#39;s exit code.</li>
+</ul>
+<hr>
+<h2>4. Permission Escalation and Parking</h2>
+<p>When a tool requires explicit confirmation (for example executing a mutating file change or running a bash command at <code>suggest</code> autonomy), the worker evaluates <code>onPermission</code>:</p>
+<pre><code class="language-mermaid">stateDiagram-v2
+    [*] --&gt; CheckPermission
+    CheckPermission --&gt; DenyPosture : onPermission = &quot;deny&quot;
+    CheckPermission --&gt; FailPosture : onPermission = &quot;fail&quot;
+    CheckPermission --&gt; EscalatePosture : onPermission = &quot;escalate&quot;
+
+    DenyPosture --&gt; ToolDenied : Return structured denial to model
+    FailPosture --&gt; AbortRun : Exit process with code 3 (WORKER_EXIT_PERMISSION_REQUIRED)
+
+    state EscalatePosture {
+        [*] --&gt; ParkCall
+        ParkCall --&gt; EmitEscalatedEvent : stdout &lt;- clio_coder_permission_escalated
+        EmitEscalatedEvent --&gt; WaitForInput
+        WaitForInput --&gt; ResolveApprove : stdin -&gt; permission_decision (approve)
+        WaitForInput --&gt; ResolveDeny : stdin -&gt; permission_decision (deny)
+        WaitForInput --&gt; TimeoutFallback : timeoutMs reached
+    }
+
+    ResolveApprove --&gt; RunTool : Execute tool
+    ResolveDeny --&gt; ToolDenied : Return structured denial to model
+    TimeoutFallback --&gt; ApplyFallback : Apply fallback posture (deny | fail)
+</code></pre>
+<ol>
+<li><strong>Deny:</strong> Immediately returns a structured denial to the model, allowing the run to continue without making the call.</li>
+<li><strong>Fail:</strong> Terminate the run immediately, exiting the worker subprocess with exit code <code>3</code> (<code>WORKER_EXIT_PERMISSION_REQUIRED</code>).</li>
+<li><strong>Escalate (Parking Loop):</strong><ul>
+<li>The worker parks the tool execution thread.</li>
+<li>It generates a unique <code>requestId</code> and emits a <code>clio_coder_permission_escalated</code> event to <code>stdout</code>.</li>
+<li>The parent process intercepts this event, displays the approval prompt in the interactive TUI, and waits for the operator.</li>
+<li>If the operator selects approve or deny, the parent writes <code>{&quot;type&quot;:&quot;permission_decision&quot;, &quot;requestId&quot;:&quot;...&quot;, &quot;decision&quot;:&quot;...&quot;}</code> to the worker&#39;s <code>stdin</code>.</li>
+<li>The demuxer resolves the parked promise, resuming tool execution.</li>
+<li><strong>Timeout Safety:</strong> If no decision arrives within <code>escalation.timeoutMs</code> (default <code>120000</code> ms), the worker resumes and applies the <code>escalation.fallback</code> posture (default <code>deny</code>). If running headlessly (no operator attached) or on runtimes that cannot support park loops, the posture collapses to the fallback immediately.</li>
+</ul>
+</li>
+</ol>
+<hr>
+<h2>5. Assignment-aware retry and failover</h2>
+<p>A worker process produces one immutable <strong>attempt</strong>. Dispatch groups attempts
+under a logical <strong>assignment</strong> whose id is the first attempt&#39;s
+<code>lineage.rootRunId</code>. Attached and batch <code>finalPromise</code> handles resolve to the
+terminal attempt receipt, not to an earlier failure that happened to trigger a
+retry. Receipt bytes and integrity versions remain unchanged; assignment state
+is maintained separately in <code>assignments.json</code> with the attempt ids, terminal
+run id, and status.</p>
+<p>Detached <code>monitor collect</code> resolves the assignment&#39;s terminal run and returns
+its complete <code>attemptRunIds</code> history. <code>status</code>, <code>wait</code>, <code>steer</code>, permission
+resolution, and cancellation also accept the assignment id and address the
+current attempt. Cancellation prevents queued or future attempts. Pipelines
+therefore receive terminal fallback output as their next-stage input.</p>
+<p>The assignment also owns the event stream. <code>dispatch()</code> returns a single
+stream carrying every attempt&#39;s frames in order, separated by a synthetic
+<code>attempt_start</code> frame (<code>attempt</code>, <code>runId</code>, <code>previousRunId</code>, <code>reason</code>). The
+stream ends when the assignment settles, not when one attempt&#39;s worker exits,
+so a consumer that drains it has seen exactly the run the terminal receipt
+describes. A canceled assignment ends its stream immediately.</p>
+<p>Retry timing is governed by <code>fleet.retry.maxRetries</code> and exponential backoff alone.
+Target cooldowns gate <em>new</em> dispatches to a known-bad target and are not
+applied to retries of an in-flight assignment, whose retry budget already
+bounds it. A retry refused at admission settles the assignment failed and
+records the denial reason in the assignment&#39;s <code>outcomeDetail</code>.</p>
+<p>Retry also requires evidence that reusing the same checkout is safe. Each
+receipt seals <code>safety.toolTelemetry</code>: coverage is <code>complete</code>, <code>partial</code>, or
+<code>unavailable</code>, with ingestion errors and unmatched tool starts preserved.
+Dispatch suppresses automatic retry after an executed state-changing call,
+after an unfinished state-changing call, or when an opaque mutation-capable
+runtime cannot prove that the failed attempt left the workspace unchanged.
+Claude CLI runs technically constrained to read-only tools retain retries;
+mutation-capable subprocess and ACP runs fail closed until isolated retry
+workspaces exist.</p>
+<p>Failover modes are:</p>
+<ul>
+<li><code>none</code>: exact pins remain fail-closed; retries can only repeat the same tuple.</li>
+<li><code>approved</code>: candidates must be exact members of the operator-approved
+agent/target/model/node envelope.</li>
+<li><code>automatic</code>: typed failures may replace only implicated route parts. Node
+channel failure excludes the node; target rate limiting excludes the target.</li>
+</ul>
+<p>Operator cancellation, policy rejection, permission refusal, and deterministic
+task failures do not retry. The first three are neutral to target/node
+infrastructure breakers.</p>
+<h3>5.1 Failure Taxonomy &amp; Route Exclusion</h3>
+<p>The coordinator classifies failures into 13 explicit categories (<code>src/domains/dispatch/failure-classification.ts</code>) to determine which route parts (<code>agent</code>, <code>target</code>, <code>model</code>, <code>node</code>, <code>runtime</code>) are excluded during an assignment retry:</p>
+<table>
+<thead>
+<tr>
+<th>Failure Class</th>
+<th>Trigger Pattern / Exit Code</th>
+<th>Excluded Route Part</th>
+<th>Retryable?</th>
+</tr>
+</thead>
+<tbody><tr>
+<td><code>operator-cancel</code></td>
+<td>User abort, <code>canceled</code> outcome</td>
+<td>None (Neutral)</td>
+<td>No</td>
+</tr>
+<tr>
+<td><code>policy</code></td>
+<td>Policy denial, <code>denied_by_policy</code></td>
+<td>None (Neutral)</td>
+<td>No</td>
+</tr>
+<tr>
+<td><code>permission</code></td>
+<td><code>WORKER_EXIT_PERMISSION_REQUIRED</code> (code 3)</td>
+<td>None (Neutral)</td>
+<td>No</td>
+</tr>
+<tr>
+<td><code>deterministic-task</code></td>
+<td><code>isDeterministicOutcomeCode()</code> (e.g. <code>result_contract_exhausted</code>)</td>
+<td>None</td>
+<td>No</td>
+</tr>
+<tr>
+<td><code>model-quality</code></td>
+<td>Quality gate failure</td>
+<td><code>agent, model</code></td>
+<td>Yes</td>
+</tr>
+<tr>
+<td><code>node-channel</code></td>
+<td>Stall killed, <code>spawn_failed</code>, SSH exit code 255</td>
+<td><code>node</code></td>
+<td>Yes</td>
+</tr>
+<tr>
+<td><code>node-resource</code></td>
+<td>VRAM/GPU OOM error pattern</td>
+<td><code>node</code></td>
+<td>Yes</td>
+</tr>
+<tr>
+<td><code>target-auth</code></td>
+<td>HTTP 401/403, invalid API key</td>
+<td><code>target</code></td>
+<td>Yes</td>
+</tr>
+<tr>
+<td><code>target-rate-limit</code></td>
+<td>HTTP 429, rate limit error pattern</td>
+<td><code>target</code></td>
+<td>Yes (Delayed)</td>
+</tr>
+<tr>
+<td><code>target-transient</code></td>
+<td>Timeout, HTTP 502/503/504</td>
+<td><code>target</code></td>
+<td>Yes</td>
+</tr>
+<tr>
+<td><code>capacity</code></td>
+<td>Queue full / overload pattern</td>
+<td><code>node</code></td>
+<td>Yes</td>
+</tr>
+<tr>
+<td><code>worker-runtime</code></td>
+<td><code>failed</code> outcome after more-specific classifiers do not match</td>
+<td><code>runtime</code></td>
+<td>Yes</td>
+</tr>
+<tr>
+<td><code>internal</code></td>
+<td>No more-specific termination evidence; coordinator fallback</td>
+<td>None</td>
+<td>Yes</td>
+</tr>
+</tbody></table>
+<h3>5.2 Canonical Receipt Integrity Serialization</h3>
+<p>Receipts carry the current integrity version (<code>RUN_RECEIPT_INTEGRITY_VERSION = 20</code>). Verification computes a cryptographic SHA-256 digest over a strictly sorted, canonical JSON representation (<code>serializeCanonical</code> in <code>src/domains/dispatch/receipt-integrity.ts</code>). A pre-v20 receipt is retired and cannot be read as current evidence; a malformed or digest-mismatched v20 receipt is invalid.</p>
+<ul>
+<li><strong>Object Key Sorting</strong>: Keys are sorted lexicographically before serialization (<code>Object.keys(obj).sort()</code>).</li>
+<li><strong>Strict Primitive Handling</strong>: <code>undefined</code> object properties are omitted; non-finite numbers (<code>NaN</code>, <code>Infinity</code>) or <code>bigint</code> throw an explicit serialization error.</li>
+<li><strong>Coverage</strong>: Includes every current receipt field and reconstructible ledger field, including route intent/decision/quality, execution role, worker identity, result-contract conformance, node/reroute/gate/plan/council provenance, briefing, steering, task worktree application, and <code>outcomeCode</code>.</li>
+</ul>
+<p>Integrity is only the artifact-integrity axis of the canonical trust status.
+The other axes are validation grounding, independent review, context
+provenance, autonomy enforcement, and completion evidence. Sealing proves that
+the receipt matches its covered ledger facts; it does not verify correctness,
+establish context authorship, turn a correlated review into an independent
+one, or prove completion. Every non-absent canonical fact retains a named
+source and authority plus bounded references to detailed artifacts. The full
+state vocabulary and compatibility map are documented in
+<a href="memory_blueprint.html#canonical-trust-status"><code>evidence-and-memory.md</code></a>.</p>
+<h3>5.3 Acceptance Coverage</h3>
+<p>The current reduced contract suite divides dispatch coverage by ownership:</p>
+<table>
+<thead>
+<tr>
+<th>Contract</th>
+<th>Current executable coverage</th>
+</tr>
+</thead>
+<tbody><tr>
+<td><code>tests/contracts/dispatch-lifecycle.test.ts</code></td>
+<td>Attached and detached lifecycle deduplication, durable transitions, terminal finalization, and orphan recovery from durable attempts.</td>
+</tr>
+<tr>
+<td><code>tests/contracts/dispatch-admission.test.ts</code></td>
+<td>Typed-scope authority, capability pairing, deterministic capacity admission, conservative slot defaults, and ACP authority boundaries.</td>
+</tr>
+<tr>
+<td><code>tests/contracts/dispatch-schema.test.ts</code></td>
+<td>Capability-shaped model schema, referenced <code>$defs</code>, and hidden-field compatibility.</td>
+</tr>
+</tbody></table>
+<p>Earlier releases carried separate envelope, assignment, detached-assignment,
+and failure-class test files for the detailed retry scenarios. Those files are
+not present in the current tree, so this page does not cite them as executable
+coverage. Retry and failover behavior remains owned by the dispatch source and
+the three maintained contracts above cover only the responsibilities stated in
+this table.</p>
+<h2>6. Worker Exit Codes</h2>
+<p>The child process exits with specific status codes to signal run outcomes to the orchestrator:</p>
+<ul>
+<li><strong><code>0</code></strong>: The worker process completed without a runtime error; dispatch still requires a nonempty receipt-sealed final answer before classifying the run as successful.</li>
+<li><strong><code>2</code></strong>: Worker runtime initialization failed (e.g., target runtime not registered, or <code>WorkerSpec</code> invalid/mismatched).</li>
+<li><strong><code>3</code> (<code>WORKER_EXIT_PERMISSION_REQUIRED</code>)</strong>: The run aborted because a tool required permission and <code>onPermission</code> was set to <code>fail</code> (or timed out to a <code>fail</code> fallback).</li>
+<li><strong>Other (e.g., <code>1</code> or uncaught exceptions)</strong>: Represents an unhandled crash or internal error within the runner.</li>
+</ul>
+        </article>
+        <nav class="related-nav" aria-label="Adjacent references">
+          <a class="nav-link-card" href="tui_design_blueprint.html"><span class="nav-label">Previous</span><span class="nav-title">Clio TUI Design System</span></a>
+          <a class="nav-link-card next" href="development_pipeline_blueprint.html"><span class="nav-label">Next</span><span class="nav-title">Development Pipeline</span></a>
+        </nav>
+        <p class="reference-footer-note">Canonical content lives in the mapped Markdown page. This visual counterpart adds navigation without changing the contract.</p>
       </main>
     </div>
-
-    <footer>
-      <p>Clio Coder Worker Dispatch Blueprint &bull; Version 0.4.0 &bull; Gnosis Research Center</p>
-    </footer>
+    <footer>Clio Coder documentation · source-aligned at v0.4.2</footer>
   </div>
-
   <script src="shared.js"></script>
-  <script>
-    function clearStream() {
-      const scr = document.getElementById("scroller");
-      scr.innerHTML = `<div class="stream-line"><span class="stream-dir dir-sys">[SYS]</span> Process reset. Click Spawn to begin.</div>`;
-    }
-
-    function logEvent(type) {
-      const scr = document.getElementById("scroller");
-      const stamp = Date.now();
-      let html = "";
-
-      if (type === 'spawn') {
-        html = `<div class="stream-line"><span class="stream-dir dir-sys">[SYS]</span> node dist/worker/entry.js (pid 48123) spawned with scrubbed process.env</div>`;
-      } else if (type === 'spec') {
-        html = `<div class="stream-line"><span class="stream-dir dir-in">stdin &gt;</span> <code>{"type":"spec","sessionId":"sess-9f2","autonomy":"suggest","model":"gpt-5.4"}</code></div>`;
-      } else if (type === 'heartbeat') {
-        html = `<div class="stream-line"><span class="stream-dir dir-out">&lt; stdout</span> <code>{"type":"heartbeat","at":${stamp}}</code></div>`;
-      } else if (type === 'escalate') {
-        html = `<div class="stream-line"><span class="stream-dir dir-out">&lt; stdout</span> <code>{"type":"permission_escalation","requestId":"req-ab5","tool":"bash","command":"rm -rf tmp"}</code></div>`;
-      } else if (type === 'decision') {
-        html = `<div class="stream-line"><span class="stream-dir dir-in">stdin &gt;</span> <code>{"type":"permission_decision","requestId":"req-ab5","decision":"approve"}</code></div>`;
-      } else if (type === 'finish') {
-        html = `<div class="stream-line"><span class="stream-dir dir-out">&lt; stdout</span> <code>{"type":"completion","exitCode":0,"findingsSummary":"Built targets successfully"}</code></div>\n`;
-        html += `<div class="stream-line"><span class="stream-dir dir-sys">[SYS]</span> Worker child process terminated with exit code 0.</div>`;
-      }
-
-      scr.innerHTML += html;
-      scr.scrollTop = scr.scrollHeight;
-
-      if (window.initTableOfContents) window.initTableOfContents();
-    }
-
-    // Init
-    window.onload = () => {
-      // Make functions globally available
-      window.clearStream = clearStream;
-      window.logEvent = logEvent;
-    };
-  </script>
 </body>
 </html>
