@@ -328,17 +328,17 @@ describe("compact prompt contracts", () => {
 			onPermission: "fail",
 			persona: persona(coder.body, "coder"),
 		});
-		strictEqual(worker.systemPrompt.length, 5_179);
-		strictEqual(worker.tokenEstimate, 1_295);
-		ok(worker.systemPrompt.length <= 5_300);
-		ok(worker.tokenEstimate <= 1_325);
+		strictEqual(worker.systemPrompt.length, 5_335);
+		strictEqual(worker.tokenEstimate, 1_334);
+		ok(worker.systemPrompt.length <= 5_400);
+		ok(worker.tokenEstimate <= 1_350);
 		strictEqual(Math.ceil(worker.systemPrompt.length / 4), worker.tokenEstimate);
 		deepStrictEqual(Object.fromEntries(worker.sections.map((section) => [section.id, section.tokenEstimate])), {
 			identity: 62,
 			"operating-contract": 257,
 			"tool-contract": 372,
 			safety: 253,
-			persona: 350,
+			persona: 389,
 		});
 	});
 });
