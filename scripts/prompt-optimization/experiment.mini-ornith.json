@@ -1,0 +1,55 @@
+{
+	"schema": "clio.eval.prompt-ab.config.v1",
+	"harnessVersion": 1,
+	"experimentId": "v042-crossmodel-mini",
+	"seed": 20260903,
+	"repetitions": 5,
+	"corpus": "development",
+	"phase": "tuning",
+	"strata": ["cold", "warm"],
+	"arms": [
+		{
+			"id": "A",
+			"label": "baseline v0.4.2 prompt (c754dd63)",
+			"checkout": "/tmp/clio-ab-arm-a",
+			"entry": "dist/cli/index.js",
+			"commit": "c754dd63"
+		},
+		{
+			"id": "B",
+			"label": "integrated prompt hardening (c2affe3a)",
+			"checkout": "/tmp/clio-ab-arm-b",
+			"entry": "dist/cli/index.js",
+			"commit": "c2affe3a"
+		}
+	],
+	"pinned": {
+		"target": "mini",
+		"model": "ornith1.5-35b-moe",
+		"runtime": "llamacpp",
+		"thinking": "medium",
+		"autonomy": "auto-edit",
+		"toolProfile": null,
+		"maxContextTokens": 262144,
+		"kvCacheMode": null,
+		"sampling": {
+			"temperature": 0,
+			"topP": 1,
+			"topK": 0,
+			"minP": 0,
+			"repeatPenalty": 1,
+			"presencePenalty": 0,
+			"frequencyPenalty": 0
+		},
+		"serverConcurrency": 1,
+		"targetUrl": "http://192.168.86.141:8080"
+	},
+	"warm": {
+		"prefixTurns": [
+			"You are about to help with a small task in this repository. Do not take any action yet; reply with the single word ready."
+		]
+	},
+	"outDir": "/tmp/clio-prompt-ab-runs/v042-crossmodel-mini",
+	"coldResetSettleMs": 2000,
+	"coldResetCommand": null
+}
