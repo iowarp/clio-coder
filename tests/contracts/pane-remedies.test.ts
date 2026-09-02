@@ -7,13 +7,11 @@ import { createPanesRuntime } from "../../src/interactive/panes-runtime.js";
 import { BUILTIN_SLASH_COMMANDS, type SlashCommandContext } from "../../src/interactive/slash-commands.js";
 
 describe("contracts/pane refusal remedies", () => {
-	it("names the canonical activation key when embedded mode is unavailable", async () => {
-		const result = await detectMux({ enabled: "embedded", env: {} });
-		strictEqual(result.detection.refused, true);
-		strictEqual(
-			result.detection.reason,
-			"embedded mode is not implemented yet; it ships in phase 5, so this session has no panes at all. Set interface.panes.enabled=auto for guest mode inside a herdr session.",
-		);
+	it("degrades embedded to guest detection instead of refusing every pane", async () => {
+		const outside = await detectMux({ enabled: "embedded", env: {} });
+		strictEqual(outside.detection.mode, "none");
+		strictEqual(outside.detection.refused ?? false, false);
+		strictEqual(outside.detection.reason, "HERDR_ENV is not 1, so Clio is not running inside a pane host");
 	});
 
 	it("names the canonical files-pane key when Yazi is disabled", async () => {

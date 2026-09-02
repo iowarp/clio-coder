@@ -126,19 +126,12 @@ export async function detectMux(options: DetectMuxOptions = {}): Promise<MuxDete
 		return { detection: none("panes are turned off"), client: null };
 	}
 	if (enabled === "embedded") {
-		// Phase 5 owns the session bootstrap. Until then the honest answer is that
-		// Clio cannot provide panes, not that it failed to find them, and the
-		// operator hears it: this degrade is marked a refusal so the boot says so
-		// out loud rather than logging a debug line nobody reads. The reason also
-		// names the rung that does work, because `embedded` costs guest mode too.
-		return {
-			detection: none(
-				"embedded mode is not implemented yet; it ships in phase 5, so this session has no panes at all. Set interface.panes.enabled=auto for guest mode inside a herdr session.",
-				[],
-				true,
-			),
-			client: null,
-		};
+		// Embedded mode (Clio owning the pane host) is not implemented yet. An
+		// operator who picked it wanted panes, so the rung degrades to guest
+		// detection instead of refusing everything; the notice below says which
+		// mode actually runs. When the guest ladder also fails, that failure is
+		// reported on its own terms.
+		log("info", "interface.panes.enabled=embedded is not implemented yet; detecting a guest pane host instead");
 	}
 	if (env.HERDR_ENV !== "1") {
 		return { detection: none("HERDR_ENV is not 1, so Clio is not running inside a pane host"), client: null };
