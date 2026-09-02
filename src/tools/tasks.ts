@@ -139,7 +139,7 @@ export function createTasksTool(deps: TasksToolDeps): ToolSpec {
 		description:
 			"Session task board. plan declares a titled board (replaces any prior board); add appends tasks; " +
 			"pick moves one operator task uN onto the board; start marks one task active (the current focus); " +
-			"done completes a started task and requires note as the " +
+			"done completes a task (started or still pending) and requires note as the " +
 			"evidence the work actually finished; block parks it with a required reason; drop cancels it; list shows the board. " +
 			"Work that did not happen is blocked or dropped, never done.",
 		parameters: Type.Object({
