@@ -13,6 +13,7 @@
  */
 
 import type { ThinkingBudgetByLevel, ThinkingEffortByLevel } from "../thinking-control-policy.js";
+import { type ThinkingLevel, VALID_THINKING_LEVELS } from "./capability-flags.js";
 
 export interface SamplingProfile {
 	temperature?: number;
@@ -45,6 +46,20 @@ export interface SamplingQuirks {
  */
 export type ThinkingMechanism = "effort-levels" | "budget-tokens" | "on-off" | "always-on" | "none";
 
+export type ChatTemplateKwargValue = string | number | boolean;
+
+export interface ChatTemplateKwargsByLevel {
+	key: string;
+	values: Partial<Record<ThinkingLevel, string | number>>;
+	lmstudio?: "unsupported" | string;
+}
+
+export interface ChatTemplateKwargsQuirks {
+	static?: Record<string, ChatTemplateKwargValue>;
+	byLevel?: ChatTemplateKwargsByLevel;
+	lmstudio?: "unsupported" | string | Record<string, string>;
+}
+
 export interface ThinkingQuirks {
 	mechanism: ThinkingMechanism;
 	/** Token budget for budget-tokens mechanism, keyed by Clio's thinking level. */
@@ -53,11 +68,13 @@ export interface ThinkingQuirks {
 	effortByLevel?: ThinkingEffortByLevel;
 	/** 2-5 line free-text guidance rendered into the Runtime prompt block. */
 	guidance?: string;
+	chatTemplateKwargs?: ChatTemplateKwargsQuirks;
 }
 
 export interface LocalModelQuirks {
 	sampling?: SamplingQuirks;
 	thinking?: ThinkingQuirks;
+	chatTemplateKwargs?: ChatTemplateKwargsQuirks;
 }
 
 function isRecord(value: unknown): value is Record<string, unknown> {
@@ -151,6 +168,66 @@ function extractEffortByLevel(raw: unknown): ThinkingQuirks["effortByLevel"] | u
 	return Object.keys(out).length > 0 ? out : undefined;
 }
 
+function extractChatTemplateKwargs(raw: unknown): ChatTemplateKwargsQuirks | undefined {
+	if (!isRecord(raw)) return undefined;
+	const out: ChatTemplateKwargsQuirks = {};
+
+	if (isRecord(raw.static)) {
+		const staticMap: Record<string, ChatTemplateKwargValue> = {};
+		for (const [k, v] of Object.entries(raw.static)) {
+			if (typeof v === "boolean") {
+				staticMap[k] = v;
+			} else if (typeof v === "number" && Number.isFinite(v)) {
+				staticMap[k] = v;
+			} else if (typeof v === "string" && v.length > 0) {
+				staticMap[k] = v;
+			}
+		}
+		if (Object.keys(staticMap).length > 0) out.static = staticMap;
+	}
+
+	if (isRecord(raw.byLevel)) {
+		const byLevelRaw = raw.byLevel;
+		if (typeof byLevelRaw.key === "string" && byLevelRaw.key.trim().length > 0 && isRecord(byLevelRaw.values)) {
+			const values: Partial<Record<ThinkingLevel, string | number>> = {};
+			for (const level of VALID_THINKING_LEVELS) {
+				const val = byLevelRaw.values[level];
+				if (typeof val === "string" && val.length > 0) {
+					values[level] = val;
+				} else if (typeof val === "number" && Number.isFinite(val)) {
+					values[level] = val;
+				}
+			}
+			if (Object.keys(values).length > 0) {
+				const byLevel: ChatTemplateKwargsByLevel = {
+					key: byLevelRaw.key.trim(),
+					values,
+				};
+				if (typeof byLevelRaw.lmstudio === "string" && byLevelRaw.lmstudio.trim().length > 0) {
+					byLevel.lmstudio = byLevelRaw.lmstudio.trim();
+				}
+				out.byLevel = byLevel;
+			}
+		}
+	}
+
+	if (typeof raw.lmstudio === "string" && raw.lmstudio.trim().length > 0) {
+		out.lmstudio = raw.lmstudio.trim();
+	} else if (isRecord(raw.lmstudio)) {
+		const lmstudioMap: Record<string, string> = {};
+		for (const [k, v] of Object.entries(raw.lmstudio)) {
+			if (typeof v === "string" && v.trim().length > 0) {
+				lmstudioMap[k] = v.trim();
+			}
+		}
+		if (Object.keys(lmstudioMap).length > 0) {
+			out.lmstudio = lmstudioMap;
+		}
+	}
+
+	return Object.keys(out).length > 0 ? out : undefined;
+}
+
 function extractThinkingQuirks(raw: unknown): ThinkingQuirks | undefined {
 	if (!isRecord(raw)) return undefined;
 	const mechanism = asThinkingMechanism(raw.mechanism);
@@ -161,6 +238,8 @@ function extractThinkingQuirks(raw: unknown): ThinkingQuirks | undefined {
 	const effortByLevel = extractEffortByLevel(raw.effortByLevel);
 	if (effortByLevel) out.effortByLevel = effortByLevel;
 	if (typeof raw.guidance === "string" && raw.guidance.length > 0) out.guidance = raw.guidance;
+	const chatTemplateKwargs = extractChatTemplateKwargs(raw.chatTemplateKwargs);
+	if (chatTemplateKwargs) out.chatTemplateKwargs = chatTemplateKwargs;
 	return out;
 }
 
@@ -176,5 +255,10 @@ export function extractLocalModelQuirks(raw: unknown): LocalModelQuirks | undefi
 	if (sampling) out.sampling = sampling;
 	const thinking = extractThinkingQuirks(raw.thinking);
 	if (thinking) out.thinking = thinking;
+	const chatTemplateKwargs =
+		extractChatTemplateKwargs(raw.chatTemplateKwargs) ??
+		extractChatTemplateKwargs(isRecord(raw.thinking) ? raw.thinking.chatTemplateKwargs : undefined) ??
+		extractChatTemplateKwargs(isRecord(raw.request) ? raw.request.chatTemplateKwargs : undefined);
+	if (chatTemplateKwargs) out.chatTemplateKwargs = chatTemplateKwargs;
 	return Object.keys(out).length > 0 ? out : undefined;
 }

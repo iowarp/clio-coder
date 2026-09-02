@@ -371,8 +371,23 @@ function applyThinkingPayload(
 	resolved: ResolvedModelRuntimeCapabilities,
 	model: Model<Api>,
 ): Record<string, unknown> {
-	if (applied.mechanism === "none") return stripThinkingRequestFields(payload);
-	if (applied.mechanism === "always-on") return payload;
+	if (applied.mechanism === "none") {
+		const next = stripThinkingRequestFields(payload);
+		if (resolved.request.chatTemplateKwargs && !chatTemplateKwargsUnsupported(model)) {
+			const existing = isPlainRecord(next.chat_template_kwargs) ? next.chat_template_kwargs : {};
+			next.chat_template_kwargs = { ...existing, ...resolved.request.chatTemplateKwargs };
+		}
+		return next;
+	}
+	if (applied.mechanism === "always-on") {
+		if (resolved.request.chatTemplateKwargs && !chatTemplateKwargsUnsupported(model)) {
+			const next: Record<string, unknown> = { ...payload };
+			const existing = isPlainRecord(next.chat_template_kwargs) ? next.chat_template_kwargs : {};
+			next.chat_template_kwargs = { ...existing, ...resolved.request.chatTemplateKwargs };
+			return next;
+		}
+		return payload;
+	}
 	const next: Record<string, unknown> = { ...payload };
 	if (
 		resolved.request.reasoningEffort &&
