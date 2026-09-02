@@ -6,7 +6,7 @@ import type { Migration } from "./index.js";
 
 export const EXTENSION_INSTALL_DIGESTS_MIGRATION_ID = "2026-09-01-extension-install-digests";
 
-export function migrateExtensionInstallDigests(stateDir: string, cwd = process.cwd()): void {
+function migrateExtensionInstallDigests(stateDir: string, cwd = process.cwd()): void {
 	const scopes = upgradeLegacyExtensionInstallState(cwd);
 	const reportDir = join(stateDir, "migration-reports");
 	mkdirSync(reportDir, { recursive: true });
