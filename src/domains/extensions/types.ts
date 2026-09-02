@@ -117,6 +117,50 @@ export interface ExtensionSnapshot {
 	diagnostics: ExtensionSnapshotDiagnostics;
 }
 
+export type ExtensionReloadRejectionReason = "build-failed" | "reentrant" | "stale";
+
+export interface ExtensionReloadRejection {
+	status: "rejected";
+	reason: ExtensionReloadRejectionReason;
+	/** Generation that remains committed. */
+	generation: number;
+	diagnostics: ExtensionSnapshotDiagnostics;
+}
+
+/**
+ * A fully built and validated generation that has not been published. The
+ * bundle holds at most one candidate at a time; commit publishes it with one
+ * reference assignment and discard releases it without any visible change.
+ */
+export interface ExtensionReloadCandidate {
+	generation: number;
+	previousGeneration: number;
+	snapshot: ExtensionSnapshot;
+	/** False when the candidate digest equals the committed digest. */
+	changed: boolean;
+	added: ReadonlyArray<string>;
+	removed: ReadonlyArray<string>;
+	modified: ReadonlyArray<string>;
+}
+
+export type ExtensionReloadPrepareResult =
+	| { status: "prepared"; candidate: ExtensionReloadCandidate }
+	| ExtensionReloadRejection;
+
+export interface ExtensionReloadCommitted {
+	status: "committed";
+	generation: number;
+	previousGeneration: number;
+	changed: boolean;
+	digest: string;
+	added: ReadonlyArray<string>;
+	removed: ReadonlyArray<string>;
+	modified: ReadonlyArray<string>;
+	diagnostics: ExtensionSnapshotDiagnostics;
+}
+
+export type ExtensionReloadResult = ExtensionReloadCommitted | ExtensionReloadRejection;
+
 export interface ExtensionListOptions {
 	scope?: ExtensionScope;
 	cwd?: string;
