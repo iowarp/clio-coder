@@ -200,6 +200,7 @@ import { type AskUserHandler, cancelledAskUserResult } from "../tools/ask-user.j
 import { registerAllTools } from "../tools/bootstrap.js";
 import { isGitRepository, recoverCleanupReadyCompeteGroups } from "../tools/compete-worktrees.js";
 import { createDispatchBackgroundRegistry } from "../tools/dispatch-background.js";
+import { dispatchSchemaCompositionFor } from "../tools/dispatch-schema.js";
 import { createFileMutationObserver, createSkillActivationObserver } from "../tools/observers.js";
 import { createRegistry } from "../tools/registry.js";
 import { sweepExpiredToolOffloads } from "../tools/result-shaping.js";
@@ -1509,6 +1510,7 @@ export async function bootOrchestrator(options: BootOptions = {}): Promise<BootR
 		...(panes && mux?.mode !== "none" ? { panes } : {}),
 		getCostCeilingUsd: () => result.getContract<SchedulingContract>("scheduling")?.ceilingUsd() ?? 0,
 		...(config ? { getWorkerRosters: () => config.get().fleet.rosters } : {}),
+		...(config ? { getDispatchSchemaComposition: () => dispatchSchemaCompositionFor(config.get().fleet) } : {}),
 		getSkillLoaderOptions: () => ({
 			trustProjectCompatRoots: config?.get().integrations.projectResources.trustProjectImports === true,
 			disableDiscovery: options.noSkills === true || options.headless?.noSkills === true,
