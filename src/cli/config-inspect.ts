@@ -281,9 +281,7 @@ function inspectHookReceipts(graph: CustomizationGraph): void {
 				count: receipts.length,
 				capacity: HOOK_RECEIPT_LOG_CAPACITY,
 				outcomes,
-				...(last === undefined
-					? {}
-					: { mostRecent: { at: last.at, hookId: last.hookId, outcome: last.outcome } }),
+				...(last === undefined ? {} : { mostRecent: { at: last.at, hookId: last.hookId, outcome: last.outcome } }),
 			},
 		});
 	} catch (err) {

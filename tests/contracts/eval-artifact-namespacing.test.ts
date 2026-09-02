@@ -13,9 +13,9 @@ import { join } from "node:path";
 import { after, before, describe, it } from "node:test";
 import { loadEvalArtifactV4, writeEvalArtifactV4 } from "../../src/domains/eval/artifacts/store.js";
 import { ZERO_EVAL_HARNESS_METRICS } from "../../src/domains/eval/harness-metrics.js";
+import type { EvalArtifactV4 } from "../../src/domains/eval/schema/artifact.js";
 import { loadEvalArtifact, writeEvalArtifact } from "../../src/domains/eval/store.js";
 import type { EvalRunArtifact } from "../../src/domains/eval/types.js";
-import type { EvalArtifactV4 } from "../../src/domains/eval/schema/artifact.js";
 
 const SHARED_EVAL_ID = "shared-namespacing-test-id";
 
@@ -57,7 +57,14 @@ function v4Fixture(): EvalArtifactV4 {
 		clioCoder: { version: "0.0.0-test", commit: null, entry: "test" },
 		environment: { platform: "test-platform", node: "test-node" },
 		matrix: { target: "test-target", model: null, thinking: null },
-		summary: { runs: 1, passed: 1, failed: 0, passRate: 1, tokens: { measured: false, runs: 1, measuredRuns: 0 }, wallTimeMs: 1000 },
+		summary: {
+			runs: 1,
+			passed: 1,
+			failed: 0,
+			passRate: 1,
+			tokens: { measured: false, runs: 1, measuredRuns: 0 },
+			wallTimeMs: 1000,
+		},
 		results: [],
 	};
 }
