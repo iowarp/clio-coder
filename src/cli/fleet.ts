@@ -373,7 +373,7 @@ async function runFleet(args: ReadonlyArray<string>): Promise<number> {
 		return fail("required domains unavailable (dispatch/agents/safety)");
 	}
 	const fleetSettings = config?.get() ?? readSettings();
-	// Install `panes.journal` the same way the interactive composition root
+	// Install `fleet.history.journal` the same way the interactive composition root
 	// does, so a fleet run honours the setting without the journal ever reading
 	// settings.yaml from the dispatch event path.
 	configureRunEventJournal(fleetSettings.fleet.history.journal);

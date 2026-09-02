@@ -207,13 +207,6 @@ entries:
     default: unset (Clio sets `1` itself when stdin is a TTY)
     controls: Exactly `1` marks and forces the interactive TUI; Clio sets it when stdin is a TTY, any other value suppresses the TUI, and bash-tool children never inherit it.
     verdict: keep
-  - name: CLIO_CODER_INTERNAL_DISPATCH_TIMEOUT_MS
-    kind: env
-    owner: core
-    default: "900000"
-    controls: Positive integer wall-clock cap in ms for one internal generator dispatch (wiki documenter, bootstrap scout), consumed by src/cli/internal-dispatch.ts.
-    precedence: env > `fleet.limits.internalRunTimeoutMs` > built-in default
-    verdict: keep
   - name: CLIO_CODER_LEGACY_MASK
     kind: env
     owner: interactive
@@ -225,13 +218,6 @@ entries:
     owner: engine
     default: "131072"
     controls: Positive integer ceiling on the context length requested when loading an LM Studio model next to another resident model; `off`, `0`, or `false` disables the clamp.
-    verdict: keep
-  - name: CLIO_CODER_MAX_DISPATCH_RUNS
-    kind: env
-    owner: core
-    default: "1000"
-    controls: Positive integer retention cap for the dispatch run ledger written by src/domains/dispatch/state.ts.
-    precedence: env > `fleet.history.maxRuns` > built-in default
     verdict: keep
   - name: CLIO_CODER_MEMORY_TRACE
     kind: env
@@ -253,25 +239,11 @@ entries:
     controls: Exactly `1` removes the network (RETRIEVE) tools from every registry built in the process; `clio-coder skills-eval` sets it for hermetic arms and `--allow-network` deletes it.
     precedence: "`skills-eval --allow-network` clears it for child arms; otherwise env only"
     verdict: keep
-  - name: CLIO_CODER_OBSERVATION_TURN_BUDGET_BYTES
-    kind: env
-    owner: core
-    default: "196608"
-    controls: Positive integer byte pool shared by all observation-producing tools in one turn, floored at a minimum slice by src/tools/observation.ts.
-    precedence: env > `safety.limits.observationBytesPerTurn` > built-in default
-    verdict: keep
   - name: CLIO_CODER_PACKAGE_ROOT
     kind: env
     owner: core
     default: auto-detected
     controls: Path used as the package root for bundled assets and docs instead of walking up to package.json; the docs engine re-reads it live, other callers cache the first answer.
-    verdict: keep
-  - name: CLIO_CODER_READ_MAX_BYTES
-    kind: env
-    owner: core
-    default: "51200"
-    controls: Positive integer per-call byte cap for the read tool, floored at 1024 by src/tools/read.ts.
-    precedence: env > `safety.limits.readBytesPerCall` > built-in default
     verdict: keep
   - name: CLIO_CODER_REDUCE_MOTION
     kind: env
@@ -307,14 +279,6 @@ entries:
     controls: "`high` or `normal` (case-insensitive) overrides the finish-contract evidence bar for the orchestrator and dispatched workers; any other value means no override."
     precedence: env > workspace validation contract file (`.clio-coder/validation.yaml`, `validation.yaml`, `VALIDATION.md` raise it to `high`) > `normal`; no settings key
     verdict: keep
-  - name: CLIO_CODER_RUN_JOURNAL
-    kind: env
-    owner: dispatch
-    default: settings value (`fleet.history.journal`, built-in on)
-    controls: "`1`/`true`/`on` or `0`/`false`/`off` turns the per-run NDJSON event journal under the state root on or off for this process; other values fall through."
-    precedence: env > `fleet.history.journal` > built-in on
-    verdict: keep
-    note: No page under docs/ mentions it. The hygiene scanner misses it because the constant is named RUN_EVENT_JOURNAL_ENV_VAR rather than *_ENV. The source comment at run-event-journal.ts:122 still calls the setting `panes.journal`, which config.ts:694 maps to `fleet.history.journal`.
   - name: CLIO_CODER_RUN_OVERRIDES
     kind: env
     owner: core
@@ -426,13 +390,6 @@ entries:
     precedence: "`integrations.projectResources.trustProjectImports: true` > env `1` > off; each layer only enables"
     verdict: keep
     note: docs said `1` overrides the setting; in code (loader.ts:222-224) an explicit true setting wins first and env cannot turn trust off.
-  - name: CLIO_CODER_TURN_TOOL_CALL_BUDGET
-    kind: env
-    owner: core
-    default: "60"
-    controls: Positive integer soft per-turn tool-call budget for the orchestrator, consumed by src/engine/loop-guard.ts; the hard interrupt ceiling sits 15 calls above it.
-    precedence: env > `safety.limits.chatToolCallsPerTurn` > built-in default
-    verdict: keep
   - name: CLIO_CODER_WORKER_FAUX
     kind: env
     owner: engine
@@ -484,13 +441,6 @@ entries:
     owner: resources
     default: unset
     controls: "Set to `1` by the worker entry on itself so every child sees it; `installSkillFromSource` stamps `installed-by: worker` when it is exactly `1`."
-    verdict: keep
-  - name: CLIO_CODER_WORKER_TOOL_CALL_CAP
-    kind: env
-    owner: core
-    default: "150"
-    controls: Positive integer lifetime cap on admitted tool calls per dispatched worker; recipe budgets may narrow it and refused calls never spend it.
-    precedence: env > `fleet.limits.toolCallsPerRun` > built-in default (same order in guardrails.ts and dispatch/extension.ts:1607)
     verdict: keep
   - name: CLIO_CODER_YAZI_PICK_TOKEN
     kind: env
@@ -1021,28 +971,28 @@ entries:
     owner: fleet
     default: "true"
     controls: Whether each dispatched run writes an `events.ndjson` journal under the state `runs/` directory (boolean); applies next dispatch.
-    precedence: "`CLIO_CODER_RUN_JOURNAL` > session override (`/settings` apply-this-session) > `.clio-coder/settings.local.yaml` > `.clio-coder/settings.yaml` > user settings.yaml > default"
+    precedence: session override (`/settings` apply-this-session) > `.clio-coder/settings.local.yaml` > `.clio-coder/settings.yaml` > user settings.yaml > default
     verdict: keep
   - name: fleet.history.maxRuns
     kind: setting
     owner: fleet
     default: "1000"
     controls: Retention cap on the durable dispatch run ledger (integer >= 1); applies next dispatch.
-    precedence: "`CLIO_CODER_MAX_DISPATCH_RUNS` > settings installed once at boot (a session override or hot reload never re-installs the guardrail registry, so the orchestrator needs a restart) > `.clio-coder/settings.local.yaml` > `.clio-coder/settings.yaml` > user settings.yaml > default"
+    precedence: session override (`/settings` apply-this-session) > `.clio-coder/settings.local.yaml` > `.clio-coder/settings.yaml` > user settings.yaml > default
     verdict: keep
   - name: fleet.limits.internalRunTimeoutMs
     kind: setting
     owner: fleet
     default: "900000"
     controls: Wall-clock cap in ms for one internal generator dispatch such as the wiki documenter or the bootstrap scout (integer >= 1); applies next dispatch.
-    precedence: "`CLIO_CODER_INTERNAL_DISPATCH_TIMEOUT_MS` > settings installed once at boot (a session override or hot reload never re-installs the guardrail registry, so the orchestrator needs a restart) > `.clio-coder/settings.local.yaml` > `.clio-coder/settings.yaml` > user settings.yaml > default"
+    precedence: session override (`/settings` apply-this-session) > `.clio-coder/settings.local.yaml` > `.clio-coder/settings.yaml` > user settings.yaml > default
     verdict: keep
   - name: fleet.limits.toolCallsPerRun
     kind: setting
     owner: fleet
     default: "150"
     controls: Lifetime cap on admitted tool calls for one dispatched worker (integer >= 1); a recipe budget can only narrow it; read from effective settings at dispatch, so applies next dispatch.
-    precedence: "`CLIO_CODER_WORKER_TOOL_CALL_CAP` (worker process) > session override (`/settings` apply-this-session) > `.clio-coder/settings.local.yaml` > `.clio-coder/settings.yaml` > user settings.yaml > default"
+    precedence: session override (`/settings` apply-this-session) > `.clio-coder/settings.local.yaml` > `.clio-coder/settings.yaml` > user settings.yaml > default
     verdict: keep
   - name: fleet.nodes
     kind: setting
@@ -1463,21 +1413,21 @@ entries:
     owner: safety
     default: "60"
     controls: Soft per-turn tool-call budget for the chat agent (integer >= 1); crossing it blocks further calls with a stop-and-summarize directive, the hard ceiling sits 15 above; applies next turn.
-    precedence: "`CLIO_CODER_TURN_TOOL_CALL_BUDGET` > settings installed once at boot (a session override or hot reload never re-installs the guardrail registry, so the orchestrator needs a restart) > `.clio-coder/settings.local.yaml` > `.clio-coder/settings.yaml` > user settings.yaml > default"
+    precedence: session override (`/settings` apply-this-session) > `.clio-coder/settings.local.yaml` > `.clio-coder/settings.yaml` > user settings.yaml > default
     verdict: keep
   - name: safety.limits.observationBytesPerTurn
     kind: setting
     owner: safety
     default: "196608"
     controls: Shared per-turn byte pool across all observation-producing tools (integer >= 1); applies next turn.
-    precedence: "`CLIO_CODER_OBSERVATION_TURN_BUDGET_BYTES` > settings installed once at boot (a session override or hot reload never re-installs the guardrail registry, so the orchestrator needs a restart) > `.clio-coder/settings.local.yaml` > `.clio-coder/settings.yaml` > user settings.yaml > default"
+    precedence: session override (`/settings` apply-this-session) > `.clio-coder/settings.local.yaml` > `.clio-coder/settings.yaml` > user settings.yaml > default
     verdict: keep
   - name: safety.limits.readBytesPerCall
     kind: setting
     owner: safety
     default: "51200"
     controls: Per-call byte cap for the read tool (integer >= 1; the tool clamps to a 1024-byte floor); applies next turn.
-    precedence: "`CLIO_CODER_READ_MAX_BYTES` > settings installed once at boot (a session override or hot reload never re-installs the guardrail registry, so the orchestrator needs a restart) > `.clio-coder/settings.local.yaml` > `.clio-coder/settings.yaml` > user settings.yaml > default"
+    precedence: session override (`/settings` apply-this-session) > `.clio-coder/settings.local.yaml` > `.clio-coder/settings.yaml` > user settings.yaml > default
     verdict: keep
   - name: safety.limits.sessionCostUsd
     kind: setting

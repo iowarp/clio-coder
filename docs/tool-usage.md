@@ -11,7 +11,7 @@ In the current source tree, `src/tools/agent-tools.ts` serves as the single agen
 
 The six OBSERVE tools (read, grep, find, ls, code_nav, context) share one result envelope, implemented in `src/tools/observation.ts`.
 
-Per-call byte caps: read 50KB (env `CLIO_CODER_READ_MAX_BYTES`), grep 16KB for mode=content and 8KB for mode=files/count, find 8KB, ls 8KB, code_nav 16KB, context 16KB for scope=docs and 50KB for scope=skills/workspace.
+Per-call byte caps: read 50KB (`safety.limits.readBytesPerCall`), grep 16KB for mode=content and 8KB for mode=files/count, find 8KB, ls 8KB, code_nav 16KB, context 16KB for scope=docs and 50KB for scope=skills/workspace.
 
 Truncated text results append exactly one notice line:
 
@@ -25,7 +25,7 @@ Offload: when the byte cap cut content that was already collected, the complete 
 
 JSON-format results (code_nav, context scope=docs/workspace) never get an appended notice. An oversize JSON payload is replaced whole by the parseable stub `{"error":"result exceeded <cap>","offloadPath":"...","next":"..."}` so the model never receives JSON cut mid-document. Empty results are also valid JSON with empty arrays and `next` populated.
 
-Turn budget: all six OBSERVE tools draw from one shared pool of 192KB per turn (env `CLIO_CODER_OBSERVATION_TURN_BUDGET_BYTES`, keyed on `sessionId:turnId`). When the remaining pool shrinks a call below its self cap, a note is appended naming the bytes already used. When the pool is exhausted, the call short-circuits with `[observation budget exhausted for this turn before <tool> ...]` instead of paying for a search whose output cannot be returned. Use narrower arguments or continue in a follow-up turn.
+Turn budget: all six OBSERVE tools draw from one shared pool of 192KB per turn (`safety.limits.observationBytesPerTurn`, keyed on `sessionId:turnId`). When the remaining pool shrinks a call below its self cap, a note is appended naming the bytes already used. When the pool is exhausted, the call short-circuits with `[observation budget exhausted for this turn before <tool> ...]` instead of paying for a search whose output cannot be returned. Use narrower arguments or continue in a follow-up turn.
 
 ## read: page through a file with offset, limit, and tail
 
@@ -38,7 +38,7 @@ Arguments:
 - `limit` (optional). Max lines to return.
 - `tail` (optional). Return the last N lines (jump to EOF). Overrides offset/limit.
 
-Each call is capped at 2000 lines or 50KB, whichever hits first (`CLIO_CODER_READ_MAX_BYTES` overrides the byte cap; the per-turn observation budget can shrink it further). Files larger than 20MB error outright; use grep/find to locate the relevant region instead. A missing file errors with a hint to locate it via code_nav, find, or ls.
+Each call is capped at 2000 lines or `safety.limits.readBytesPerCall`, whichever hits first; the per-turn observation budget can shrink it further. Files larger than 20MB error outright; use grep/find to locate the relevant region instead. A missing file errors with a hint to locate it via code_nav, find, or ls.
 
 Continuation: a truncated result's notice carries `next: offset=<first unshown line>`. read does not offload; the file itself is the continuation source. If a single line exceeds the byte cap, the result is that line's UTF-8 prefix plus an explanatory note suggesting grep with a narrower pattern or edit with exact surrounding text. An `offset` beyond EOF errors with the file's total line count.
 

@@ -15,7 +15,7 @@
 
 Point-in-time inventory of every tunable knob outside `settings.yaml`: environment variables, the compiled-in defaults behind them, and the CLI flags that bridge into them. Gathered 2026-07-03 by sweeping `src/` for `process.env` reads and cross-checking `scripts/`, `benchmarks/`, and `docs/`. Purpose: reason about which knobs earn their keep, which belong in `settings.yaml`, and which are dead.
 
-> **Status: findings 1-5 fixed on 2026-07-03.** The tool-call budget vars were renamed (`CLIO_CODER_TURN_TOOL_CALL_BUDGET`, `CLIO_CODER_WORKER_TOOL_CALL_CAP`); guardrail policy moved into a `guardrails:` settings section with env as emergency override (`src/core/guardrails.ts`); the run.ts/print.ts env bridges collapsed into one typed transport (`src/core/run-overrides.ts`, `CLIO_CODER_RUN_OVERRIDES`), retiring `CLIO_CODER_MAX_CONTEXT_TOKENS`, `CLIO_CODER_KV_CACHE_MODE`, and `CLIO_CODER_SAMPLING_OVERRIDES`; the dead `CLIO_CODER_NO_UPDATE_NOTIFIER` setters were deleted; and [environment-variables.md](environment-variables.md) is now the maintained reference. The tables below describe the pre-fix state and are kept for the remaining findings (6-7).
+> **Status: findings 1-5 fixed on 2026-07-03.** Guardrail policy moved into settings, and the transitional guardrail environment overrides were removed on 2026-09-02. The run.ts/print.ts env bridges collapsed into one typed transport (`src/core/run-overrides.ts`, `CLIO_CODER_RUN_OVERRIDES`), retiring `CLIO_CODER_MAX_CONTEXT_TOKENS`, `CLIO_CODER_KV_CACHE_MODE`, and `CLIO_CODER_SAMPLING_OVERRIDES`; the dead `CLIO_CODER_NO_UPDATE_NOTIFIER` setters were deleted; and [environment-variables.md](environment-variables.md) is now the maintained reference. The tables below preserve the pre-fix state.
 
 ## The pattern, first
 
@@ -106,8 +106,8 @@ All default off; all enabled with `1`.
 
 ## Findings and consolidation candidates
 
-1. **Naming: `CLIO_CODER_MAX_TOOL_CALLS` vs `CLIO_CODER_ORCH_MAX_TOOL_CALLS`.** These sound like the same knob but govern different axes (worker lifetime cap vs orchestrator per-turn budget). They were renamed to `CLIO_CODER_WORKER_TOOL_CALL_CAP` and `CLIO_CODER_TURN_TOOL_CALL_BUDGET`.
-2. **Operator policy living in env instead of settings.** The guard budgets, tool byte caps, and `CLIO_CODER_MAX_DISPATCH_RUNS` are durable operator policy, the same species as `compaction.threshold` or `budget.sessionCeilingUsd`, which live in `settings.yaml`. These moved to a `guardrails:` settings section, keeping env as an emergency override.
+1. **Naming: `CLIO_CODER_MAX_TOOL_CALLS` vs `CLIO_CODER_ORCH_MAX_TOOL_CALLS`.** These sounded like the same knob but governed different axes. Both transitional names were later removed in favor of the canonical settings paths.
+2. **Operator policy living in env instead of settings.** Guard budgets, tool byte caps, and run retention are durable operator policy. Their canonical version 2 paths now live under `safety.limits` and `fleet`, with no environment precedence layer.
 3. **The env-bridge pattern (§6) is the real implementation bloat.** Set-env / run / restore-env in `run.ts` and `print.ts` was collapsed into `CLIO_CODER_RUN_OVERRIDES`.
 4. **Undocumented knobs.** Many operator knobs were undocumented in v0.2.7. Whatever survived the audit was consolidated into [environment-variables.md](environment-variables.md).
 5. **Dead reference.** `CLIO_CODER_NO_UPDATE_NOTIFIER` (§7) was removed.

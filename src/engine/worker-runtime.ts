@@ -380,9 +380,8 @@ export function startWorkerRun(input: WorkerRunInput, emit: WorkerEventEmit): Wo
 	// already surfaced.
 	const workerSettings = validateSettingsFile().settings;
 	setGlobalDefaultMaxOutputTokens(workerSettings.chat.maxOutputTokens);
-	// Same mirroring for guardrail policy: the worker's loop-guard cap and tool
-	// byte caps resolve settings-first, so the fresh process needs the section
-	// installed before any registry or tool construction reads it.
+	// Same mirroring for guardrail policy: the fresh process needs its settings
+	// projection installed before any registry or tool construction reads it.
 	configureGuardrails(guardrailValuesFromSettings(workerSettings));
 	const fauxModel = registerFauxFromEnv();
 	// Workers are bounded runs against an admission-verified recipe surface.

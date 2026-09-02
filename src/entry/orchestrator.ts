@@ -1096,15 +1096,14 @@ export async function bootOrchestrator(options: BootOptions = {}): Promise<BootR
 		});
 	}
 
-	// Guardrail policy (tool-call budgets, tool byte caps, dispatch ledger cap)
-	// resolves settings-first with env as emergency override; install the
-	// settings section before any guard registration or tool reads it.
+	// Install guardrail policy before any guard registration or tool reads it.
+	// The effective session view replaces this boot projection below.
 	const resolvedSettings = config?.get() ?? readSettings();
 	configureGuardrails(guardrailValuesFromSettings(resolvedSettings));
 
-	// The run event journal resolves the same way for the same reason: the sink
-	// sits on the dispatch event path, where reading settings.yaml would be both
-	// a cost and a throw site, so the composition root installs the value once.
+	// The journal sink sits on the dispatch event path, where reading settings
+	// would be both a cost and a throw site. The effective session view replaces
+	// this boot projection below.
 	configureRunEventJournal(resolvedSettings.fleet.history.journal);
 
 	// Guard registrations on the middleware contract, in order: loop guard,
@@ -1118,7 +1117,7 @@ export async function bootOrchestrator(options: BootOptions = {}): Promise<BootR
 			safety,
 			bus,
 			turnBlockBudget: INTERACTIVE_LOOP_BLOCK_BUDGET,
-			turnToolCallBudget: readOrchTurnToolCallBudget(),
+			turnToolCallBudget: () => readOrchTurnToolCallBudget(),
 			// Interactive/headless/ACP all share this orchestrator guard: at the
 			// block budget, lock tools for the rest of the turn so the model
 			// answers from what it gathered instead of hard-cancelling a turn that
@@ -1556,9 +1555,10 @@ export async function bootOrchestrator(options: BootOptions = {}): Promise<BootR
 	let cachedSettingsView: ClioSettings | null = null;
 	const bumpSessionState = (): void => {
 		sessionStateGeneration += 1;
-		// Child-process seams read the effective setting from the environment,
-		// and the session view may override the saved value.
-		setGitCommitAttributionEnabled(getCurrentSettings().integrations.git.commitAttribution);
+		const settings = getCurrentSettings();
+		configureGuardrails(guardrailValuesFromSettings(settings));
+		configureRunEventJournal(settings.fleet.history.journal);
+		setGitCommitAttributionEnabled(settings.integrations.git.commitAttribution);
 	};
 	const getCurrentSettings = (): ClioSettings => {
 		// Recents live in the data dir (core/recent-models.ts), never in
@@ -1584,10 +1584,11 @@ export async function bootOrchestrator(options: BootOptions = {}): Promise<BootR
 	};
 	effectiveSettingsForDispatch = getCurrentSettings;
 	bumpSessionState();
-	// The config bundle publishes the saved value on reload; a session-scoped
-	// override must win, so re-derive from the session view after it.
-	const unsubscribeCommitAttributionSync = bus.on(BusChannels.ConfigHotReload, () => bumpSessionState());
-	termination.onDrain(() => unsubscribeCommitAttributionSync());
+	// The config bundle publishes saved values on reload; session-scoped
+	// overrides must win, so re-derive every process-local projection from the
+	// effective session view after it.
+	const unsubscribeSettingsProjectionSync = bus.on(BusChannels.ConfigHotReload, () => bumpSessionState());
+	termination.onDrain(() => unsubscribeSettingsProjectionSync());
 	const getTaskMemorySeedOffer = (): { source: string; count: number } | null => {
 		return taskMemoryHandoffSeedOffer(process.cwd(), getCurrentSettings().context.memory.enabled);
 	};

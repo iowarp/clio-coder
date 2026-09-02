@@ -9,7 +9,7 @@
  * operator cancel.
  */
 
-import { GUARDRAIL_ENV_VARS, resolveGuardrail } from "../core/guardrails.js";
+import { resolveGuardrail } from "../core/guardrails.js";
 import type { DispatchContract } from "../domains/dispatch/contract.js";
 
 export interface InternalDispatchDeadline {
@@ -25,10 +25,9 @@ export function armInternalDispatchDeadline(
 	dispatch: DispatchContract,
 	runId: string,
 	label: string,
-	env: NodeJS.ProcessEnv = process.env,
 	maxTimeoutMs?: number,
 ): InternalDispatchDeadline {
-	const configuredTimeoutMs = resolveGuardrail("internalDispatchTimeoutMs", env);
+	const configuredTimeoutMs = resolveGuardrail("internalDispatchTimeoutMs");
 	const timeoutMs =
 		maxTimeoutMs === undefined ? configuredTimeoutMs : Math.min(configuredTimeoutMs, Math.max(1, maxTimeoutMs));
 	const productCapped = timeoutMs < configuredTimeoutMs;
@@ -50,6 +49,6 @@ export function armInternalDispatchDeadline(
 			productCapped
 				? `${label} exceeded its ${Math.round(timeoutMs / 1000)}s latency ceiling and was aborted.`
 				: `${label} timed out after ${Math.round(timeoutMs / 1000)}s and was aborted. ` +
-					`Raise guardrails.internalDispatchTimeoutMs (env ${GUARDRAIL_ENV_VARS.internalDispatchTimeoutMs}) for slower targets.`,
+					"Raise fleet.limits.internalRunTimeoutMs for slower targets.",
 	};
 }

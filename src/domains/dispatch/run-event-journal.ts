@@ -51,9 +51,6 @@ export const RUN_EVENT_JOURNAL_FILE = "events.ndjson";
 export const RUN_EVENT_JOURNAL_CAP_BYTES = 2 * 1024 * 1024;
 /** Pending bytes that trigger a flush of droppable lines. */
 export const RUN_EVENT_JOURNAL_FLUSH_BYTES = 8 * 1024;
-/** Per-process env override, resolved ahead of settings (see runEventJournalEnabled). */
-export const RUN_EVENT_JOURNAL_ENV_VAR = "CLIO_CODER_RUN_JOURNAL";
-
 interface JournalLineBase {
 	seq: number;
 	at: string;
@@ -119,7 +116,7 @@ export interface RunEventJournal extends RunEventJournalSink {
 let configuredEnabled: boolean | undefined;
 
 /**
- * Install the `panes.journal` setting. Called from the composition root beside
+ * Install the `fleet.history.journal` setting. Called from the composition root beside
  * `configureGuardrails` so the journal never reads settings.yaml itself; a
  * settings read on the dispatch event path would be both a cost and a throw
  * site (readSettings rejects an invalid file).
@@ -128,17 +125,9 @@ export function configureRunEventJournal(enabled: boolean | undefined): void {
 	configuredEnabled = enabled;
 }
 
-function parseEnvFlag(raw: string | undefined): boolean | undefined {
-	if (raw === undefined) return undefined;
-	const normalized = raw.trim().toLowerCase();
-	if (normalized === "1" || normalized === "true" || normalized === "on") return true;
-	if (normalized === "0" || normalized === "false" || normalized === "off") return false;
-	return undefined;
-}
-
-/** env override > configured settings > on. */
-function runEventJournalEnabled(env: NodeJS.ProcessEnv = process.env): boolean {
-	return parseEnvFlag(env[RUN_EVENT_JOURNAL_ENV_VAR]) ?? configuredEnabled ?? true;
+/** Effective settings projection, then the shipped default. */
+function runEventJournalEnabled(): boolean {
+	return configuredEnabled ?? true;
 }
 
 // ---------------------------------------------------------------------------

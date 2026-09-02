@@ -372,7 +372,7 @@ async function runDispatch(
 	]);
 	const config = loaded.getContract<ConfigContract>("config");
 	const baseSettings = config?.get() ?? readSettings();
-	// Install `panes.journal` the same way the interactive composition root
+	// Install `fleet.history.journal` the same way the interactive composition root
 	// does. The journal never reads settings.yaml itself: it sits on the
 	// dispatch event path, where a settings read would be both a cost and a
 	// throw site.

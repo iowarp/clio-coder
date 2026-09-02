@@ -602,7 +602,7 @@ and SGLang, and for cloud targets with operator-provided credentials.
 
 ## Environment Variables
 
-Clio Coder's behavior can be customized or overridden using various environment variables (such as `CLIO_CODER_RIGOR`, `CLIO_CODER_HOME`, and guardrail overrides). For the complete, detailed, and maintained inventory of environment variables, please refer to [environment-variables.md](environment-variables.md).
+Clio Coder also reads environment variables for platform paths, diagnostics, lifecycle integration, tests, and process-local behavior such as `CLIO_CODER_RIGOR`. Durable guardrail policy lives only in settings. For the complete maintained inventory, see [environment-variables.md](environment-variables.md).
 
 ---
 
