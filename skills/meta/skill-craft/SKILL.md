@@ -1,13 +1,13 @@
 ---
 name: skill-craft
-description: Use when writing, reviewing, or pruning a SKILL.md — authoring a new skill, editing an installed one, or judging whether a skill's description, body, or length is earning its cost. Triggers on "write a skill", "improve this skill", "why isn't this skill firing", "is this skill too long".
+description: Writes, reviews, or prunes a SKILL.md, judging whether its description, body, and length earn their cost. Not for packaging a workflow that just happened; use workflow-distiller.
 triggers:
   - write a SKILL.md
   - create a new skill
   - improve this skill
   - why isn't this skill firing
   - prune a skill body
-version: 0.1.3
+version: 0.2.0
 license: Apache-2.0
 allowed-tools:
   - read
@@ -66,17 +66,19 @@ but the user must remember it exists: cognitive load. Keep a description only
 when the agent must reach the skill on its own or another skill requires it;
 if it only ever fires by hand, set `disable-model-invocation: true`.
 
-## Description: Triggers, Not Identity
+## Description and Triggers
 
-The description is the skill's trigger surface, so every word competes with
-every other skill's description:
+Two frontmatter fields share the trigger surface, and every word in both
+competes with every other skill's:
 
-- Front-load the strongest trigger word.
-- One trigger per distinct branch. Synonyms restating one branch ("API key",
-  "credential", "token") are duplication; keep the strongest.
-- Cut identity the body already states; keep triggers, plus one "Not for X;
-  use <other-skill>" clause per real boundary.
-- Word triggers with the language the user actually types.
+- `triggers`: the phrases a user actually types, one per distinct branch.
+  Synonyms restating one branch ("API key", "credential", "token") are
+  duplication; keep the strongest.
+- `description`: one lead sentence saying what the skill does, then one
+  "Not for X; use <other-skill>" clause per real boundary. It is what the
+  agent reads in the `context(scope="skills")` listing on every skill-shaped
+  turn, so it carries no trigger list and no identity the body already
+  states.
 
 ## Body: Steps and Reference
 
@@ -113,7 +115,8 @@ Before finishing any skill, pass the body line by line:
   or split the skill; a split description must earn its permanent context
   load.
 
-Done when: description is triggers-only, every step has a checkable
+Done when: the description is one sentence plus routing clauses and the
+triggers carry the phrases, every step has a checkable
 completion criterion, no line fails the relevance/duplication/no-op pass, and
 an `evals.md` records at least one RED-GREEN scenario distinguishing
 with-skill from without.

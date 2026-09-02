@@ -1,13 +1,13 @@
 ---
 name: context-prime
-description: Use when a coding session begins, when resuming work after a break, or when you land in an unfamiliar or in-progress repository and need to orient before acting. Loads the last handoff, git state, the project constitution, and active-work signals so a fresh agent reconstructs intent instead of guessing. Triggers on "prime", "catch me up", "where were we", "get up to speed", or the first substantive request in a new session.
+description: Orients a fresh session in a repository by loading the last handoff, git state, the project constitution, and active-work signals before acting. Not for writing the handoff; use context-handoff.
 triggers:
   - prime this repository
   - catch me up
   - where were we
   - get up to speed
   - resume repository work after a break
-version: 0.2.3
+version: 0.3.0
 license: Apache-2.0
 allowed-tools:
   - read

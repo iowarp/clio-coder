@@ -1,6 +1,6 @@
 ---
 name: credentials
-description: Use before running any tool or script that needs an API key, token, or other credential, when a command fails with an auth error, when the user must supply a new secret, or when a secret may have leaked into output. Covers facility surfaces such as kerberos tickets, globus and scheduler tokens, ssh agents, and netrc. Triggers on "API key", "credential", "token", "auth error", "permission denied", "add a secret", "leaked". Not for provider target configuration; use clio-coder auth and target settings.
+description: Handles API keys, tokens, and facility credentials (kerberos tickets, globus and scheduler tokens, ssh agents, netrc) before a tool needs one, after an auth error, when a new secret is supplied, or when one may have leaked. Not for provider target configuration; use clio-coder auth and target settings.
 triggers:
   - API key
   - credential missing
@@ -8,7 +8,7 @@ triggers:
   - permission denied
   - add a secret
   - secret leaked
-version: 0.1.3
+version: 0.2.0
 license: Apache-2.0
 allowed-tools:
   - read

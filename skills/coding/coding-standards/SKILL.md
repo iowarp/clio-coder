@@ -1,13 +1,13 @@
 ---
 name: coding-standards
-description: "Use when writing or refactoring TypeScript and the project has not pinned its own conflicting standards — new modules, error-handling design, schema parsing, module boundaries — or when another skill needs a TypeScript standards reference. Correct-by-construction rules: errors as values, parse don't validate, illegal states unrepresentable, deep modules, functional core / imperative shell."
+description: Correct-by-construction TypeScript rules (errors as values, parse don't validate, illegal states unrepresentable, deep modules) for writing or refactoring TypeScript when the project has not pinned its own standards.
 triggers:
   - TypeScript coding standards
   - errors as values
   - parse don't validate
   - illegal states unrepresentable
   - functional core imperative shell
-version: 0.1.1
+version: 0.2.0
 license: Apache-2.0
 allowed-tools:
   - read

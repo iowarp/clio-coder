@@ -230,7 +230,9 @@ Required shape for every catalog skill:
 ```yaml
 ---
 name: <name>                  # lowercase, hyphens, matches the folder
-description: Use when ...     # triggers only, third person, <=1024 chars
+description: <one sentence>   # what it does, plus "Not for X; use Y" routing, <=1024 chars
+triggers:                     # the phrases a user types that should reach it
+  - <phrase>
 version: 0.1.0
 license: Apache-2.0
 allowed-tools:                # optional; community-standard tool narrowing

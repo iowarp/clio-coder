@@ -1,13 +1,13 @@
 ---
 name: clio-coder-test
-description: Use when writing or modifying Clio Coder's own source under src/, or verifying a change end-to-end against the real test harness. Covers the three real layers (contracts / smoke / boundaries), choosing which to run for a given change, the mock-provider and ACP-over-stdio harness, and the hot-reload dev loop for picking up latest code. Activate on any src/ edit, before declaring a change verified, or when asked whether Clio still works.
+description: "Verifies a Clio Coder source change against the real test harness: the contract, smoke, and boundary layers, which to run for a change, the mock-provider and ACP-over-stdio harness, and the hot-reload dev loop. Not for deciding what may change; use clio-coder-dev."
 triggers:
   - test Clio Coder
   - verify a Clio source change
   - run Clio contract tests
   - test ACP over stdio
   - Clio mock provider harness
-version: 0.1.5
+version: 0.2.0
 license: Apache-2.0
 clio-coder:
   registry-id: iowarp/clio-coder

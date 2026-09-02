@@ -1,13 +1,13 @@
 ---
 name: clio-coder-dev
-description: Use when modifying Clio Coder's own source in this repository, evolving its harness (TUI, skills, agents, tools, prompts, domains), or deciding whether a change stays local versus becomes a contribution. Governs self-development — what Clio may change freely, what requires explicit user intent, and how to make a change without breaking the architecture.
+description: "Governs changes to Clio Coder's own source and harness (TUI, skills, agents, tools, prompts, domains): what may change freely, what needs explicit user intent, and how to change it without breaking the architecture. Not for verifying a change against the harness; use clio-coder-test."
 triggers:
   - modify Clio Coder
   - change the Clio harness
   - edit Clio skills or agents
   - evolve Clio tools or prompts
   - Clio contribution boundary
-version: 0.2.2
+version: 0.3.0
 license: Apache-2.0
 clio-coder:
   registry-id: iowarp/clio-coder
