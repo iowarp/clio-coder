@@ -51,7 +51,9 @@ export class ViewerDatabase {
 	}
 
 	runs(limit = 50) {
-		return this.db.prepare(`SELECT ${this.runsSourceExpr} FROM runs ORDER BY started_at DESC LIMIT ?`).all(clamp(limit, 1, 500));
+		return this.db
+			.prepare(`SELECT ${this.runsSourceExpr} FROM runs ORDER BY started_at DESC LIMIT ?`)
+			.all(clamp(limit, 1, 500));
 	}
 
 	run(runId) {
