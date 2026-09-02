@@ -284,7 +284,7 @@ describe("compact prompt contracts", () => {
 			.join("{STATE}");
 		strictEqual(normalizedMain.length, 10_504);
 		strictEqual(Math.ceil(normalizedMain.length / 4), 2_626);
-		ok(main.systemPrompt.length <= 10_800, `main prompt grew to ${main.systemPrompt.length} chars`);
+		ok(normalizedMain.length <= 10_800, `main prompt grew to ${normalizedMain.length} chars`);
 		ok(main.tokenEstimate <= 2_700, `main prompt grew to ${main.tokenEstimate} estimated tokens`);
 		strictEqual(Math.ceil(main.systemPrompt.length / 4), main.tokenEstimate);
 		const operatingContract = table.byId.get("operating.contract")?.body.trim();
