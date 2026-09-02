@@ -92,8 +92,7 @@ export const credentialPresentTool: ToolSpec = {
 		name: Type.String({ description: "Credential key name, e.g. OPENAI_API_KEY." }),
 		source: Type.Optional(
 			StringEnum(["auto", "environment", "env", "file"], {
-				description:
-					"auto checks the environment and the file when file is supplied; environment/env checks only the process environment; file checks only the file.",
+				description: "auto (default) checks the environment, then file when given; the others check one source.",
 			}),
 		),
 		file: Type.Optional(Type.String({ description: "Env-style file to check for NAME=, e.g. .env." })),

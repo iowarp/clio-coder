@@ -13,9 +13,7 @@ export const webFetchToolSurface = {
 		timeout_ms: Type.Optional(Type.Number({ description: "Timeout ms (default 30000)." })),
 		max_bytes: Type.Optional(Type.Number({ description: "Max bytes returned (default 600000)." })),
 		format: Type.Optional(
-			Type.String({
-				description: "auto (default: HTML is cleaned to Markdown, other content passes through) or raw (no conversion).",
-			}),
+			Type.String({ description: "auto (default) converts HTML to Markdown; raw returns the body unconverted." }),
 		),
 	}),
 	baseActionClass: "read",

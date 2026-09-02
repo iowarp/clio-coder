@@ -28,20 +28,14 @@ export const verifyToolSurface = {
 	parameters: Type.Object({
 		check: Type.Optional(
 			Type.String({
-				description: `Declared project check ID, package script (${VERIFICATION_SCRIPT_FAMILY_HINT}), or "frontend". Omit to list available checks.`,
+				description: `Check id, package script (${VERIFICATION_SCRIPT_FAMILY_HINT}), or "frontend"; omit to list.`,
 			}),
 		),
-		path: Type.Optional(Type.String({ description: "check=frontend: artifact file under the workspace root." })),
-		args: Type.Optional(
-			Type.Array(Type.String(), { description: "Package scripts only: extra arguments passed after --." }),
-		),
-		browser: Type.Optional(
-			StringEnum(BROWSER_MODES, { description: "check=frontend: headless browser mode (default auto)." }),
-		),
-		cwd: Type.Optional(Type.String({ description: "Package-script working directory; ignored by project checks." })),
-		timeout_ms: Type.Optional(
-			Type.Number({ description: "Package/frontend timeout in ms; project checks use their declared timeoutMs." }),
-		),
+		path: Type.Optional(Type.String({ description: "frontend: artifact file under the workspace root." })),
+		args: Type.Optional(Type.Array(Type.String(), { description: "Package scripts only: arguments after --." })),
+		browser: Type.Optional(StringEnum(BROWSER_MODES, { description: "frontend: headless browser mode (default auto)." })),
+		cwd: Type.Optional(Type.String({ description: "Package scripts only: working directory." })),
+		timeout_ms: Type.Optional(Type.Number({ description: "Package and frontend checks only: timeout in ms." })),
 		max_output_bytes: Type.Optional(Type.Number({ description: "Output cap in bytes (default 600000)." })),
 	}),
 	baseActionClass: "execute",

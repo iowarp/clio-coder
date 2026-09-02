@@ -1,7 +1,7 @@
 ---
 version: 1
 name: Provenance
-description: Shadow evidence, receipt, diff, and telemetry reader for source-backed handoffs.
+description: Reads receipts, diffs, and telemetry for evidence. Shadow agent for source-backed handoffs.
 tools:
   required: [read]
   optional: [grep, find, ls, git, ledger]

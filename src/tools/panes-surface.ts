@@ -15,23 +15,16 @@ import type { ToolSurface } from "./lazy-tool.js";
 export const panesToolSurface = {
 	name: ToolNames.Panes,
 	description:
-		"Look at, focus, and manage the terminal panes Clio owns beside this session. Use show to bring a dispatched run's live viewer pane to the front when the operator asks to see an agent (\"show me the tester\"). open starts one of the fixed utility presets; there is no way to run an arbitrary command. close removes a pane Clio created. list reports the current inventory and the pane layer's health.",
+		"Manage the terminal panes Clio owns beside this session: show focuses a dispatched run's viewer pane, open starts a fixed utility preset (never an arbitrary command), close removes a Clio-created pane, list reports the inventory and the pane layer's health.",
 	parameters: Type.Object({
-		action: StringEnum(["show", "open", "close", "list"], {
-			description:
-				"show focuses a run's viewer pane; open starts a preset utility pane; close removes a Clio-owned pane; list reports the inventory.",
-		}),
+		action: StringEnum(["show", "open", "close", "list"], { description: "Pane action." }),
 		target: Type.Optional(
 			Type.String({
 				description:
-					'action=show: an agent id or run id prefix, most recent match wins. action=close: a pane id, a pane label, an agent id, or "all".',
+					'show: an agent id or run id prefix, most recent match wins. close: a pane id, label, agent id, or "all".',
 			}),
 		),
-		preset: Type.Optional(
-			StringEnum([...PANES_PRESET_IDS], {
-				description: "action=open: which fixed utility pane to start.",
-			}),
-		),
+		preset: Type.Optional(StringEnum([...PANES_PRESET_IDS], { description: "open: which utility pane to start." })),
 	}),
 	baseActionClass: "read",
 	executionMode: "sequential",

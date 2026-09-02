@@ -3,7 +3,7 @@ import { describe, it } from "node:test";
 
 import { resolvePackageRoot } from "../../src/core/package-root.js";
 import { ALL_TOOL_NAMES, type ToolName, ToolNames } from "../../src/core/tool-names.js";
-import { FLEET_DELEGATION_RULE, renderFleetPromptSection } from "../../src/domains/agents/catalog.js";
+import { renderFleetPromptSection } from "../../src/domains/agents/catalog.js";
 import { discoverAgentRecipes } from "../../src/domains/agents/registry.js";
 import { normalizeAgentSpec } from "../../src/domains/agents/spec.js";
 import {
@@ -161,21 +161,23 @@ describe("compact prompt contracts", () => {
 			toolNames: ALL_TOOL_NAMES.filter((name) => name !== ToolNames.Ledger),
 		});
 		match(compiled.systemPrompt, /You are Clio, the coding agent in IOWarp's CLIO ecosystem/u);
-		match(compiled.systemPrompt, /paths are POSIX-relative to the installed package root/u);
+		match(compiled.systemPrompt, /Her documentation and source ship with the package/u);
 		match(compiled.systemPrompt, /Autonomy: auto-edit\./u);
-		match(compiled.systemPrompt, /hard blocks \(destructive git,/u);
+		match(compiled.systemPrompt, /Hard blocks\s+\(destructive git,/u);
 		match(compiled.systemPrompt, /A sealed run receipt is the durable record/u);
-		match(compiled.systemPrompt, /Receipt integrity verifies/u);
-		match(compiled.systemPrompt, /evidence verification separately describes validation/u);
-		match(compiled.systemPrompt, /Spot-check delegated claims before repeating them/u);
-		match(compiled.systemPrompt, /Report receipt integrity, evidence verification, briefing provenance/u);
+		match(compiled.systemPrompt, /advisory claim until its evidence is verified/u);
+		match(compiled.systemPrompt, /before repeating a "tests pass" claim/u);
+		match(compiled.systemPrompt, /report receipt integrity, evidence verification, briefing\s+provenance/u);
 		match(compiled.systemPrompt, /Provider: dynamo/u);
 		match(compiled.systemPrompt, /Model: qwen3\.8-27b/u);
 		match(compiled.systemPrompt, /Context window: 262144/u);
 		match(compiled.systemPrompt, /For this local model, reason compactly/u);
-		strictEqual(occurrences(compiled.systemPrompt, FLEET_DELEGATION_RULE), 1);
-		strictEqual(occurrences(compiled.systemPrompt, "only an explicit operator request activates it"), 1);
-		strictEqual(occurrences(compiled.systemPrompt, "The harness handles any consented marketplace install"), 1);
+		// The delegation threshold is stated once, at the top of the Delegation
+		// section, as a count taken before the first edit (the Fleet block no
+		// longer carries it); the skills protocol is stated once, in Skills.
+		strictEqual(occurrences(compiled.systemPrompt, "count the independent file-scoped changes"), 1);
+		match(compiled.systemPrompt, /only the operator\s+activates or installs a skill/u);
+		match(compiled.systemPrompt, /\[Marketplace\] reminder states its\s+own offer options/u);
 		strictEqual(occurrences(compiled.systemPrompt, "harness performs any install"), 0);
 		strictEqual(occurrences(compiled.systemPrompt, "A sealed run receipt is the durable record"), 1);
 	});
@@ -269,10 +271,10 @@ describe("compact prompt contracts", () => {
 		strictEqual(mainToolNames.length, 20);
 		const main = mainPrompt({ providerSupportsTools: true, toolNames: mainToolNames });
 		const normalizedMain = main.systemPrompt.split(resolvePackageRoot()).join("{PACKAGE_ROOT}");
-		strictEqual(normalizedMain.length, 12_547);
-		strictEqual(Math.ceil(normalizedMain.length / 4), 3_137);
-		ok(main.systemPrompt.length <= 12_800, `main prompt grew to ${main.systemPrompt.length} chars`);
-		ok(main.tokenEstimate <= 3_200, `main prompt grew to ${main.tokenEstimate} estimated tokens`);
+		strictEqual(normalizedMain.length, 10_313);
+		strictEqual(Math.ceil(normalizedMain.length / 4), 2_579);
+		ok(main.systemPrompt.length <= 10_600, `main prompt grew to ${main.systemPrompt.length} chars`);
+		ok(main.tokenEstimate <= 2_700, `main prompt grew to ${main.tokenEstimate} estimated tokens`);
 		strictEqual(Math.ceil(main.systemPrompt.length / 4), main.tokenEstimate);
 		const operatingContract = table.byId.get("operating.contract")?.body.trim();
 		if (!operatingContract) throw new Error("fixed main fixture requires the operating contract");
@@ -287,13 +289,13 @@ describe("compact prompt contracts", () => {
 				),
 			},
 			{
-				identity: 652,
-				"operating-contract": 252,
-				delegation: 460,
-				skills: 102,
+				identity: 317,
+				"operating-contract": 164,
+				delegation: 478,
+				skills: 181,
 				safety: 266,
-				"tool-contract": 798,
-				fleet: 528,
+				"tool-contract": 622,
+				fleet: 472,
 				"retrieval-hints": 36,
 				runtime: 43,
 			},
@@ -326,17 +328,17 @@ describe("compact prompt contracts", () => {
 			onPermission: "fail",
 			persona: persona(coder.body, "coder"),
 		});
-		strictEqual(worker.systemPrompt.length, 5_676);
-		strictEqual(worker.tokenEstimate, 1_419);
-		ok(worker.systemPrompt.length <= 5_800);
-		ok(worker.tokenEstimate <= 1_450);
+		strictEqual(worker.systemPrompt.length, 5_179);
+		strictEqual(worker.tokenEstimate, 1_295);
+		ok(worker.systemPrompt.length <= 5_300);
+		ok(worker.tokenEstimate <= 1_325);
 		strictEqual(Math.ceil(worker.systemPrompt.length / 4), worker.tokenEstimate);
 		deepStrictEqual(Object.fromEntries(worker.sections.map((section) => [section.id, section.tokenEstimate])), {
 			identity: 62,
-			"operating-contract": 346,
-			"tool-contract": 400,
+			"operating-contract": 257,
+			"tool-contract": 372,
 			safety: 253,
-			persona: 357,
+			persona: 350,
 		});
 	});
 });

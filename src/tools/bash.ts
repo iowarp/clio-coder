@@ -163,7 +163,7 @@ export const bashTool: ToolSpec = {
 		cwd: Type.Optional(
 			Type.String({
 				description:
-					"Omit this. The command already runs at the session workspace root. Set it only to run in a subdirectory of that root, as a relative path; an absolute path outside the root is blocked.",
+					"Omit unless the command must run in a subdirectory of the workspace root, given as a relative path; outside the root is blocked.",
 			}),
 		),
 		timeout_ms: Type.Optional(Type.Number({ description: "Timeout in milliseconds." })),

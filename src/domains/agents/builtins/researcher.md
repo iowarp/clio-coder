@@ -1,7 +1,7 @@
 ---
 version: 1
 name: Researcher
-description: Shadow external-source researcher for coding decisions, official docs, standards, release notes, and academic papers.
+description: Researches external docs, standards, and papers. Shadow agent for coding decisions, official documentation, release notes, and academic sources.
 tools:
   required: [read]
   optional: [web_fetch, context, ledger]

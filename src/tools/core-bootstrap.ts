@@ -38,6 +38,16 @@ export interface CoreToolBootstrapDeps {
 	taskBoard?: TaskBoardStore;
 	userTasks?: UserTasksStore;
 	agentLedger?: AgentLedgerPort;
+	/**
+	 * Register the ledger tool even without a port. A worker registry needs
+	 * this: `attestedToolSignature` signs the names a bare worker registry
+	 * produces, and the orchestrator admits `ledger` for every batch member,
+	 * so a registry that dropped the tool for want of a port drifted the
+	 * signature and admission refused every batch worker. The session never
+	 * sets it: it has no peers, and the schema was 444 tokens of every first
+	 * turn for a tool that could only answer "no ledger".
+	 */
+	includeLedgerTools?: boolean;
 	getSkillLoaderOptions?: () => Pick<
 		LoadSkillsInput,
 		"trustProjectCompatRoots" | "disableDiscovery" | "explicitSkillPaths"
@@ -49,6 +59,8 @@ export interface CoreToolRegistration {
 	includeNetworkTools: boolean;
 	includeSessionTools: boolean;
 	includeInteractiveTools: boolean;
+	/** True only when a worker bound its dispatch's agent-ledger port; the session never does. */
+	includeLedgerTools: boolean;
 }
 
 export function registerCoreTools(registry: ToolRegistry, deps: CoreToolBootstrapDeps = {}): CoreToolRegistration {
@@ -154,12 +166,21 @@ export function registerCoreTools(registry: ToolRegistry, deps: CoreToolBootstra
 	registry.register({
 		...builtin(createArtifactTool({ getCwd: skillToolDeps.getCwd }), { path: "src/tools/artifact.ts", scope: "core" }),
 	});
-	registry.register({
-		...builtin(createLedgerTool(deps.agentLedger ? { agentLedger: deps.agentLedger } : {}), {
-			path: "src/tools/ledger.ts",
-			scope: "core",
-		}),
-	});
+	// The coordination board exists only inside a dispatch: a worker process
+	// binds the port, the session never does, and without a port the tool can
+	// only answer "no ledger". Registering it on the session put its schema on
+	// every first turn, so the session registers it with a port or not at all;
+	// a worker registry asks for it explicitly, port or no port, because its
+	// attested surface must not depend on whether this run bound one.
+	const includeLedgerTools = deps.includeLedgerTools === true || deps.agentLedger !== undefined;
+	if (includeLedgerTools) {
+		registry.register({
+			...builtin(createLedgerTool(deps.agentLedger ? { agentLedger: deps.agentLedger } : {}), {
+				path: "src/tools/ledger.ts",
+				scope: "core",
+			}),
+		});
+	}
 	registry.register({
 		...builtin(
 			createTasksTool({
@@ -177,6 +198,7 @@ export function registerCoreTools(registry: ToolRegistry, deps: CoreToolBootstra
 		includeNetworkTools,
 		includeSessionTools: Boolean(session),
 		includeInteractiveTools: Boolean(deps.askUser),
+		includeLedgerTools,
 	};
 }
 

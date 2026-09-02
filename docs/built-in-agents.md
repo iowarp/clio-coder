@@ -47,23 +47,23 @@ User-facing agents visible in `clio-coder agents` and `/agents`.
 
 | Agent ID | Primary tools | Purpose | Capability | Latency |
 | --- | --- | --- | --- | --- |
-| `architect` | read, grep, find, ls, code_nav, git, artifact, context, ledger | Designs changes across boundaries, contracts, migrations, and validation gates. | `artifact-write` | `deep` |
-| `coder` | read, write, edit, grep, find, ls, web_fetch, git, bash, verify, code_nav, ledger | Implements bounded code changes and behavior-preserving refactors. | `workspace-edit` | `balanced` |
-| `debugger` | read, grep, find, ls, git, verify, code_nav, ledger | Diagnoses failing code, tests, or receipts without making edits. | `verification` | `balanced` |
-| `documenter` | read, write, edit, grep, find, ls, git, verify, code_nav, context, ledger | Updates developer-facing docs, examples, and operational runbooks. | `workspace-edit` | `balanced` |
-| `git-master` | read, write, edit, context, git, bash, grep, find, ls, code_nav, ledger | Executes bounded git operations: history, commits, worktrees, and PR prep. | `workspace-edit` | `balanced` |
-| `tester` | read, write, edit, grep, find, ls, git, verify, code_nav, ledger | Adds focused deterministic tests for regressions and missing coverage. | `workspace-edit` | `balanced` |
-| `verifier` | read, grep, find, ls, git, verify, code_nav, ledger | Independently runs and reports test, lint, build, review, and release gates. | `verification` | `fast` |
-| `wiki-writer` | read, write, edit, grep, find, ls, code_nav, context, ledger | Plans one repository wiki, or researches and writes one wiki page. | `workspace-edit` | `balanced` |
+| `architect` | read, grep, find, ls, code_nav, git, artifact, context, ledger | Designs a change across boundaries and slices it into a sprint: contracts, migrations, validation gates, and cut-it sprint slicing. | `artifact-write` | `deep` |
+| `coder` | read, write, edit, grep, find, ls, web_fetch, git, bash, verify, code_nav, ledger | Implements bounded code changes, repairs, and refactors, behavior-preserving by default. | `workspace-edit` | `balanced` |
+| `debugger` | read, grep, find, ls, git, verify, code_nav, ledger | Diagnoses failing code, tests, or runs without editing, reading receipts, logs, and runtime behavior. | `verification` | `balanced` |
+| `documenter` | read, write, edit, grep, find, ls, git, verify, code_nav, context, ledger | Updates developer docs, examples, and operational runbooks. | `workspace-edit` | `balanced` |
+| `git-master` | read, write, edit, context, git, bash, grep, find, ls, code_nav, ledger | Runs bounded git operations end to end: history, commits, worktrees, integration merges, and PR prep. | `workspace-edit` | `balanced` |
+| `tester` | read, write, edit, grep, find, ls, git, verify, code_nav, ledger | Adds focused deterministic regression and coverage tests. | `workspace-edit` | `balanced` |
+| `verifier` | read, grep, find, ls, git, verify, code_nav, ledger | Runs test, lint, build, review, and release gates and reports each independently. | `verification` | `fast` |
+| `wiki-writer` | read, write, edit, grep, find, ls, code_nav, context, ledger | Plans a repository wiki or writes one wiki page against a supplied plan. | `workspace-edit` | `balanced` |
 
 ### Shipped Shadow and Internal Agents
 Internal orchestration helpers and internal process agents. They are hidden from default displays (but visible via `clio-coder agents --all` and in a separate section of the prompt catalog).
 
 | Agent ID | Primary tools | Purpose | Capability | Latency |
 | --- | --- | --- | --- | --- |
-| `scout` | read, grep, find, ls, context, code_nav, git, ledger | Broad repository reconnaissance, codebase orientation, structure and entry-point mapping, and multi-file symbol hunting. | `read-only` | `fast` |
-| `researcher` | read, web_fetch, context, ledger | Shadow docs and external-source researcher for coding decisions. | `read-only` | `deep` |
-| `provenance` | read, grep, find, ls, git, ledger | Shadow evidence, receipt, diff, and telemetry reader for handoffs. | `read-only` | `balanced` |
+| `scout` | read, grep, find, ls, context, code_nav, git, ledger | Broad repository reconnaissance with cited findings: orientation, structure and entry-point mapping, multi-file symbol hunting. | `read-only` | `fast` |
+| `researcher` | read, web_fetch, context, ledger | Researches external docs, standards, and papers for coding decisions. | `read-only` | `deep` |
+| `provenance` | read, grep, find, ls, git, ledger | Reads receipts, diffs, and telemetry for evidence-backed handoffs. | `read-only` | `balanced` |
 | `oracle` | read, grep, find, ls, code_nav, context, ledger | Shadow advisor behind `/oracle` that protects consistency with prior decisions and returns the strongest challenge to a question. | `read-only` | `deep` |
 | `context-bootstrap` | read, grep, find, ls, context, code_nav, ledger | Internal agent behind `clio-coder context init` that parses repository and returns CLIO-CODER.md payload. | `read-only` | `balanced` |
 

@@ -81,6 +81,13 @@ const DISPATCH_BOUND_TOOLS = new Set<ToolName>([ToolNames.Dispatch, ToolNames.Mo
 const INTERACTIVE_BOUND_TOOLS = new Set<ToolName>([ToolNames.AskUser]);
 /** Registered only when a pane host answered detection and the mux is live. */
 const PANES_BOUND_TOOLS = new Set<ToolName>([ToolNames.Panes]);
+/**
+ * Registered only when a dispatch bound an agent-ledger port to this registry,
+ * which only a worker process does. The session has no peers to coordinate
+ * with, so on that surface the tool could only answer "no ledger" and its
+ * schema was 444 tokens of every first turn for nothing.
+ */
+const LEDGER_BOUND_TOOLS = new Set<ToolName>([ToolNames.Ledger]);
 /** The RETRIEVE plane, omitted wholesale by a hermetic run (tools/network-policy.ts). */
 const NETWORK_BOUND_TOOLS = new Set<ToolName>([ToolNames.WebFetch]);
 
@@ -89,8 +96,9 @@ export interface BuiltinToolPolicyOptions {
 	includeDispatchTools?: boolean;
 	includeInteractiveTools?: boolean;
 	includePanesTools?: boolean;
+	includeLedgerTools?: boolean;
 	/**
-	 * Unlike the other four, this defaults to true: every registry registers
+	 * Unlike the others, this defaults to true: every registry registers
 	 * the network plane unless a run explicitly asked to be hermetic, so an
 	 * unset option must keep demanding it.
 	 */
@@ -140,6 +148,7 @@ function validateBuiltinToolPolicy(specs: ReadonlyArray<ToolSpec>, options: Buil
 	const includeDispatchTools = options.includeDispatchTools ?? false;
 	const includeInteractiveTools = options.includeInteractiveTools ?? false;
 	const includePanesTools = options.includePanesTools ?? false;
+	const includeLedgerTools = options.includeLedgerTools ?? false;
 	const includeNetworkTools = options.includeNetworkTools ?? true;
 	const required = new Set<ToolName>(Object.values(ToolNames));
 	for (const tool of [...required]) {
@@ -147,6 +156,7 @@ function validateBuiltinToolPolicy(specs: ReadonlyArray<ToolSpec>, options: Buil
 		if (!includeDispatchTools && DISPATCH_BOUND_TOOLS.has(tool)) required.delete(tool);
 		if (!includeInteractiveTools && INTERACTIVE_BOUND_TOOLS.has(tool)) required.delete(tool);
 		if (!includePanesTools && PANES_BOUND_TOOLS.has(tool)) required.delete(tool);
+		if (!includeLedgerTools && LEDGER_BOUND_TOOLS.has(tool)) required.delete(tool);
 		if (!includeNetworkTools && NETWORK_BOUND_TOOLS.has(tool)) required.delete(tool);
 	}
 	for (const tool of required) {

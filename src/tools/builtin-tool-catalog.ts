@@ -147,7 +147,7 @@ const TOOL_METADATA: Readonly<Record<string, ToolMetadata>> = {
 		resultDisposition: BASH_DEFAULT_RESULT_DISPOSITION,
 		costLatency: "local_slow",
 		promptHint:
-			"Bash output_policy defaults to bounded diagnostic tail. Use summary for noisy commands, metadata-only when only outcome and retrieval matter, and full only when output is known to fit the bounded result budget.",
+			"bash output_policy: omit for a bounded tail; summary for noisy commands; metadata-only when only the outcome matters; full only when the output is known to fit.",
 	},
 	[ToolNames.Git]: {
 		objective: "Read-only git inspection: status, diff, or log.",
@@ -179,9 +179,8 @@ const TOOL_METADATA: Readonly<Record<string, ToolMetadata>> = {
 		},
 		costLatency: "local_fast",
 		promptHint:
-			'When a request contains three or more distinct steps, declare the board before your first edit: tasks action="plan" with a title and the task list. ' +
-			'Mark one task active with "start" before working it, close it with "done" plus an evidence note ' +
-			'(what proves it works), and use "block" with a reason instead of silently stalling.',
+			'For a request with three or more distinct steps, declare the board before the first edit: tasks(action="plan") with a title and the task list. ' +
+			"start one task before working it, close it with done plus an evidence note, and block with a reason instead of stalling.",
 	},
 	[ToolNames.Ledger]: {
 		objective: "Coordinate with the peer workers of this dispatch through typed claims, findings, and reviews.",
@@ -203,9 +202,10 @@ const TOOL_METADATA: Readonly<Record<string, ToolMetadata>> = {
 		resultSizePolicy: summaryPolicy(
 			"Use the dispatch receipt paths or ask a narrower worker follow-up for omitted output.",
 		),
+		// No hint: the Tool Contract's inventory line already says when
+		// dispatch(list:true) is the right answer, and the Fleet section says
+		// everything else about routing.
 		costLatency: "agent",
-		promptHint:
-			"Call dispatch with list:true only when the operator asks about agents, workers, or the fleet; never use it to inventory direct tools.",
 	},
 	[ToolNames.Monitor]: {
 		objective: "Inspect dispatched runs: state, recent events, receipts.",
@@ -238,7 +238,7 @@ const TOOL_METADATA: Readonly<Record<string, ToolMetadata>> = {
 		},
 		costLatency: "local_fast",
 		promptHint:
-			'When the operator asks to see a dispatched agent ("show me the tester"), call panes with action="show" and the agent id. Utility panes are presets only; an arbitrary command is the operator\'s own /panes open.',
+			'When the operator asks to see a dispatched agent ("show me the tester"), call panes(action="show", target=<agent id>).',
 	},
 	// RETRIEVE: network-class.
 	[ToolNames.WebFetch]: {
@@ -264,7 +264,7 @@ const TOOL_METADATA: Readonly<Record<string, ToolMetadata>> = {
 		},
 		costLatency: "local_slow",
 		promptHint:
-			'Use ask_user only when blocked on a decision the request does not answer; never ask about anything the operator already stated. One question per round in interview workflows, up to four tightly related questions otherwise, recommended option first. Finish with action="complete" and a compact decisions array before final prose. If cancelled, continue with defaults and do not ask again.',
+			'Use ask_user only when blocked on a decision the request does not answer, never about something the operator already stated: one question per round in interviews, up to four related questions otherwise, recommended option first, then action="complete" with the decisions before final prose.',
 	},
 	// ARTIFACT: terminal writers.
 	[ToolNames.Artifact]: {

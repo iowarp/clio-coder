@@ -1,7 +1,7 @@
 ---
 version: 1
 name: Git Master
-description: Executes bounded git operations end-to-end. Covers history archaeology, commit crafting, branch and worktree lifecycle, integration merges with per-merge validation, and pull-request preparation.
+description: Runs bounded git operations end to end. Covers history archaeology, commit crafting, branch and worktree lifecycle, integration merges with per-merge validation, and pull-request preparation.
 tools:
   required: [read, {anyOf: [write, edit]}, context, git]
   optional: [bash, grep, find, ls, code_nav, ledger]
