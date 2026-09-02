@@ -162,7 +162,7 @@ targets:
 chat:
   target: local-lmstudio
   model: your-model-id
-  thinkingLevel: off
+  thinkingLevel: low
   modelPicker:
     cycleSet: []
     favorites: []
@@ -545,7 +545,7 @@ This is the version-2 durable schema shipped in `DEFAULT_SETTINGS`. Validation i
 | --- | --- | --- | --- |
 | `chat.target` | `null` | configured target id or null | next session |
 | `chat.model` | `null` | string or null | next session |
-| `chat.thinkingLevel` | `off` | `off`, `minimal`, `low`, `medium`, `high`, `xhigh`, `max` | next session |
+| `chat.thinkingLevel` | `low` | `off`, `minimal`, `low`, `medium`, `high`, `xhigh`, `max` | next session |
 | `chat.modelPicker.cycleSet` | `[]` | list of target or target/model references | immediately for this session; next session as the saved default |
 | `chat.modelPicker.favorites` | `[]` | list of target/model references | immediately |
 | `chat.modelPicker.recentLimit` | `12` | integer ≥ 1 | immediately |

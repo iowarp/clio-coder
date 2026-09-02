@@ -447,7 +447,7 @@ export const DEFAULT_SETTINGS = {
 	chat: {
 		target: null as string | null,
 		model: null as string | null,
-		thinkingLevel: "off" as ThinkingLevel,
+		thinkingLevel: "low" as ThinkingLevel,
 		modelPicker: {
 			cycleSet: [] as string[],
 			favorites: [] as string[],
@@ -582,7 +582,7 @@ targets: []
 chat:
   target: null
   model: null
-  thinkingLevel: off
+  thinkingLevel: low
   modelPicker:
     cycleSet: []
     favorites: []
