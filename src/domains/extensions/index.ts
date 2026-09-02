@@ -23,6 +23,8 @@ export {
 	type ExtensionResourceKind,
 	type ExtensionResourceRoot,
 	type ExtensionScope,
+	type ExtensionSnapshot,
+	type ExtensionSnapshotDiagnostics,
 	type ExtensionStateUpgradeReport,
 	enabledExtensionResourceRoots,
 	enableExtension,
@@ -39,3 +41,10 @@ export {
 	upgradeLegacyExtensionInstallState,
 } from "./manager.js";
 export { ExtensionsManifest } from "./manifest.js";
+export {
+	buildExtensionSnapshot,
+	diffExtensionSnapshots,
+	EXTENSION_SNAPSHOT_DIAGNOSTIC_CAP,
+	EXTENSION_SNAPSHOT_DIAGNOSTIC_MESSAGE_CAP,
+	EXTENSION_SNAPSHOT_DIAGNOSTIC_PER_PACKAGE_CAP,
+} from "./snapshot.js";

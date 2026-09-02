@@ -1,53 +1,22 @@
-import { realpathSync, statSync } from "node:fs";
+import { realpathSync } from "node:fs";
 import path from "node:path";
-import { listInstalledExtensions } from "./state.js";
+import { buildExtensionSnapshot } from "./snapshot.js";
+import { committedExtensionSnapshot } from "./snapshot-store.js";
 import type { ExtensionResourceKind, ExtensionResourceRoot } from "./types.js";
-import { isLoadableExtension } from "./types.js";
 
-export function extensionResourcePath(rootPath: string, resourcePath: string): string | null {
-	const root = path.resolve(rootPath);
-	const full = path.resolve(root, resourcePath);
-	const relative = path.relative(root, full);
-	if (relative === "" || relative === ".." || relative.startsWith(`..${path.sep}`) || path.isAbsolute(relative))
-		return null;
-	try {
-		const rootReal = realpathSync(root);
-		const fullReal = realpathSync(full);
-		const canonicalRelative = path.relative(rootReal, fullReal);
-		if (
-			canonicalRelative === ".." ||
-			canonicalRelative.startsWith(`..${path.sep}`) ||
-			path.isAbsolute(canonicalRelative)
-		) {
-			return null;
-		}
-		if (!statSync(fullReal).isDirectory()) return null;
-		return fullReal;
-	} catch {
-		return null;
-	}
-}
+export { extensionResourcePath } from "./resource-path.js";
 
 export function enabledExtensionResourceRoots(
 	kind: ExtensionResourceKind,
 	cwd = process.cwd(),
 ): ExtensionResourceRoot[] {
-	const roots: ExtensionResourceRoot[] = [];
-	for (const entry of listInstalledExtensions(cwd)) {
-		if (!isLoadableExtension(entry)) continue;
-		const rel = entry.resources[kind];
-		if (!rel) continue;
-		const full = extensionResourcePath(entry.rootPath, rel);
-		if (!full) continue;
-		roots.push({
-			id: entry.id,
-			scope: entry.scope,
-			path: full,
-			rootPath: entry.rootPath,
-			source: `extension:${entry.scope}:${entry.id}`,
-			provenance: entry.provenance,
-			generation: 0,
-		});
+	const committed = committedExtensionSnapshot();
+	try {
+		if (committed !== null && committed.cwd === realpathSync(path.resolve(cwd))) {
+			return [...committed.resourceRoots[kind]];
+		}
+	} catch {
+		// Fall through to an ephemeral build, which retains the original error semantics.
 	}
-	return roots;
+	return [...buildExtensionSnapshot({ cwd, generation: 0 }).resourceRoots[kind]];
 }

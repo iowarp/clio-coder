@@ -90,6 +90,33 @@ export interface ExtensionResourceRoot {
 	generation: number;
 }
 
+export interface ExtensionHookSource {
+	provenance: ExtensionProvenance;
+	/** SHA-256 of the captured hooks.yaml bytes. */
+	declarationsDigest: string;
+	/** Parsed captured YAML, or an empty list when parsing failed. */
+	declarations: unknown;
+	parseError?: string;
+}
+
+export interface ExtensionSnapshotDiagnostics {
+	entries: ReadonlyArray<ExtensionDiagnostic & { extensionId?: string }>;
+	truncated: number;
+}
+
+export interface ExtensionSnapshot {
+	version: 1;
+	generation: number;
+	cwd: string;
+	builtAt: string;
+	/** Content identity; generation, timestamp, and diagnostic text are excluded. */
+	digest: string;
+	packages: ReadonlyArray<InstalledExtension>;
+	resourceRoots: Readonly<Record<ExtensionResourceKind, ReadonlyArray<ExtensionResourceRoot>>>;
+	hookSources: ReadonlyArray<ExtensionHookSource>;
+	diagnostics: ExtensionSnapshotDiagnostics;
+}
+
 export interface ExtensionListOptions {
 	scope?: ExtensionScope;
 	cwd?: string;

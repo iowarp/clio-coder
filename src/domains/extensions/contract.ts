@@ -7,6 +7,7 @@ import type {
 	ExtensionMutationResult,
 	ExtensionResourceKind,
 	ExtensionResourceRoot,
+	ExtensionSnapshot,
 	InstalledExtension,
 } from "./manager.js";
 
@@ -18,5 +19,7 @@ export interface ExtensionsContract extends DomainContract {
 	disable(id: string, options?: ExtensionListOptions): ExtensionMutationResult;
 	remove(id: string, options?: ExtensionListOptions): ExtensionMutationResult;
 	resourceRoots(kind: ExtensionResourceKind, cwd?: string): ExtensionResourceRoot[];
+	snapshot(): ExtensionSnapshot | null;
+	generation(): number;
 	reload(): Promise<void>;
 }

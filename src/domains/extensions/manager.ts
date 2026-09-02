@@ -29,6 +29,8 @@ export type {
 	ExtensionResourceKind,
 	ExtensionResourceRoot,
 	ExtensionScope,
+	ExtensionSnapshot,
+	ExtensionSnapshotDiagnostics,
 	ExtensionState,
 	ExtensionStateUpgradeReport,
 	InstalledExtension,
