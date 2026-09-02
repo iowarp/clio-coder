@@ -119,7 +119,7 @@ yazi   26.8.15  MIT         vendored  vendored .../tools/yazi/26.8.15/yazi (26.8
 <p>Or, for one session, start Clio with <code>clio-coder --with-panes</code> from a pane
 inside herdr; the flag beats the setting in both directions
 (<code>--no-panes</code> turns them off). <code>interface.panes.enabled: embedded</code> is
-accepted but not implemented: it resolves to no panes and says so at boot.</p>
+accepted but not implemented yet: it behaves as <code>auto</code> and logs that at boot.</p>
 <p>Guest mode needs three things, checked in this order: <code>HERDR_ENV=1</code> in the
 environment (herdr sets it in every pane it opens), a herdr socket that
 connects, and a ping answered inside one second. <code>HERDR_SOCKET_PATH</code> and
@@ -240,7 +240,7 @@ take those panes with it is tracked as an issue rather than decided here.</li>
 <tbody><tr>
 <td><code>interface.panes.enabled</code></td>
 <td><code>off</code></td>
-<td><code>auto</code> joins a detected herdr session; <code>off</code> skips detection; <code>embedded</code> is accepted and not implemented.</td>
+<td><code>auto</code> joins a detected herdr session; <code>off</code> skips detection; <code>embedded</code> is accepted and behaves as <code>auto</code> until implemented.</td>
 </tr>
 <tr>
 <td><code>interface.panes.files.enabled</code></td>

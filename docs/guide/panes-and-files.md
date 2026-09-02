@@ -94,7 +94,7 @@ interface:
 Or, for one session, start Clio with `clio-coder --with-panes` from a pane
 inside herdr; the flag beats the setting in both directions
 (`--no-panes` turns them off). `interface.panes.enabled: embedded` is
-accepted but not implemented: it resolves to no panes and says so at boot.
+accepted but not implemented yet: it behaves as `auto` and logs that at boot.
 
 Guest mode needs three things, checked in this order: `HERDR_ENV=1` in the
 environment (herdr sets it in every pane it opens), a herdr socket that
@@ -180,7 +180,7 @@ the draft`.
 
 | Key | Default | What it controls |
 | --- | --- | --- |
-| `interface.panes.enabled` | `off` | `auto` joins a detected herdr session; `off` skips detection; `embedded` is accepted and not implemented. |
+| `interface.panes.enabled` | `off` | `auto` joins a detected herdr session; `off` skips detection; `embedded` is accepted and behaves as `auto` until implemented. |
 | `interface.panes.files.enabled` | `false` | Whether `/files`, its key, `/panes open files`, and the `panes` tool may open the files pane. Refused with the key's name otherwise. |
 | `interface.panes.files.mode` | `companion` | `companion` keeps the pane open across picks; `chooser` closes it after one selection. |
 | `interface.panes.files.profile` | `managed` | `managed` runs the engine on Clio's generated, themed profile; `user` runs it on the operator's own configuration, in which case picks use the one-shot chooser. |
