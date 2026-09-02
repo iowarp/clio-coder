@@ -11,7 +11,10 @@ describe("task board done", () => {
 		ok(done.ok, done.ok ? "" : done.message);
 		if (!done.ok) return;
 		strictEqual(done.board.tasks.find((task) => task.id === "t2")?.status, "completed");
-		ok(done.notes.some((note) => note.includes("started t2 implicitly")), done.notes.join("; "));
+		ok(
+			done.notes.some((note) => note.includes("started t2 implicitly")),
+			done.notes.join("; "),
+		);
 	});
 
 	it("still refuses done without evidence", () => {
