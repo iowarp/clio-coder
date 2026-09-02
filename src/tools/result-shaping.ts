@@ -16,27 +16,30 @@ import {
 import { DEFAULT_MAX_BYTES, DEFAULT_MAX_LINES, formatSize, truncateTail } from "./truncate.js";
 import { byteLength, truncateUtf8 } from "./truncate-utf8.js";
 
-// Backstop for tools without an explicit resultSizePolicy. Sits above the
-// per-observation source cap (src/tools/truncate.ts) so a tool's own truncation
-// notice (with its precise continuation offset) survives shaping instead of
-// being cut again and replaced by a generic hint.
-export const DEFAULT_TOOL_RESULT_MAX_BYTES = DEFAULT_MAX_BYTES + 2 * 1024;
+// Backstop for tools without an explicit resultSizePolicy. Session settings may
+// lower or raise this fallback, while explicit per-tool policies remain tighter.
+export const DEFAULT_TOOL_RESULT_MAX_BYTES = DEFAULT_MAX_BYTES;
 const RESULT_TRUNCATION_MARKER = "\n[tool result truncated]";
 const RESULT_OFFLOAD_MAX_BYTES = 10 * 1024 * 1024;
 const TAIL_NOTICE_RESERVE_BYTES = 512;
 export const TOOL_OFFLOAD_MAX_AGE_MS = 14 * 24 * 60 * 60 * 1000;
 
-type ToolResultShapeContext = Pick<ToolInvokeOptions, "sessionId" | "toolCallId">;
+type ToolResultShapeContext = Pick<ToolInvokeOptions, "sessionId" | "toolCallId" | "toolResultMaxBytes">;
 
 function mergeDetails(details: ToolResultDetails | undefined, resultSize: Record<string, unknown>): ToolResultDetails {
 	return { ...(details ?? {}), resultSize };
 }
 
-function maxBytesFor(spec: ToolSpec): number {
+function maxBytesFor(spec: ToolSpec, context?: ToolResultShapeContext): number {
 	const configured = spec.metadata?.resultSizePolicy?.maxBytes;
-	return typeof configured === "number" && Number.isFinite(configured) && configured > 0
-		? Math.floor(configured)
-		: DEFAULT_TOOL_RESULT_MAX_BYTES;
+	const policyMax =
+		typeof configured === "number" && Number.isFinite(configured) && configured > 0
+			? Math.floor(configured)
+			: DEFAULT_TOOL_RESULT_MAX_BYTES;
+	const sessionMax = context?.toolResultMaxBytes;
+	return typeof sessionMax === "number" && Number.isFinite(sessionMax) && sessionMax > 0
+		? Math.min(policyMax, Math.floor(sessionMax))
+		: policyMax;
 }
 
 function followUpHint(spec: ToolSpec): string {
@@ -61,11 +64,12 @@ export function toolResultDigestFor(
 	spec: ToolSpec,
 	result: ToolResult,
 	requestedDisposition?: ToolResultDisposition,
+	context?: ToolResultShapeContext,
 ): ToolResultDigest {
 	const text = resultText(result);
-	const disposition = normalizeToolResultDisposition(spec, maxBytesFor(spec), requestedDisposition);
+	const disposition = normalizeToolResultDisposition(spec, maxBytesFor(spec, context), requestedDisposition);
 	if (disposition === null) {
-		const projected = shapeLegacyToolResult(spec, result);
+		const projected = shapeLegacyToolResult(spec, result, context);
 		return legacyToolResultDigest(resultText(projected), { outcome: result.kind });
 	}
 	const capturedBytes = capturedBytesFor(result, text);
@@ -298,7 +302,7 @@ function shapeLegacyToolResult(
 	overflow: "head" | "tail" = "head",
 ): ToolResult {
 	if (existingOffloadPath(result.details) !== null) return result;
-	const maxBytes = maxBytesFor(spec);
+	const maxBytes = maxBytesFor(spec, context);
 	const offloadMaxBytes = offloadMaxBytesFor(spec);
 	const text = result.kind === "ok" ? result.output : result.message;
 	const bytes = byteLength(text);
@@ -410,7 +414,7 @@ export function shapeToolResult(
 	requestedDisposition?: ToolResultDisposition,
 ): ToolResult {
 	if (existingDisposition(result.details) !== null) return result;
-	const hardMaxBytes = maxBytesFor(spec);
+	const hardMaxBytes = maxBytesFor(spec, context);
 	const disposition = normalizeToolResultDisposition(spec, hardMaxBytes, requestedDisposition);
 	if (disposition === null) return shapeLegacyToolResult(spec, result, context);
 

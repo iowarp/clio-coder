@@ -599,6 +599,7 @@ export function startWorkerRun(input: WorkerRunInput, emit: WorkerEventEmit): Wo
 		includeInteractiveTools: false,
 		invokeOptions: () => ({
 			correlationId: `worker-model-round-${workerModelRound}`,
+			toolResultMaxBytes: workerSettings.context.toolResultMaxBytes,
 			...(agentSkillPolicy ? { pendingSkillPolicy: agentSkillPolicy } : {}),
 		}),
 	});

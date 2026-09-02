@@ -412,6 +412,7 @@ export interface MemorySettings {
 }
 
 export interface ContextSettings {
+	toolResultMaxBytes: number;
 	workingSet: WorkingSetSettings;
 	compaction: DurableCompactionSettings;
 	memory: MemorySettings;
@@ -491,6 +492,7 @@ export const DEFAULT_SETTINGS = {
 		history: { maxRuns: GUARDRAIL_DEFAULTS.maxDispatchRuns, journal: true },
 	} as FleetSettings,
 	context: {
+		toolResultMaxBytes: 65536,
 		workingSet: DEFAULT_WORKING_SET_SETTINGS,
 		compaction: {
 			auto: true,
@@ -626,6 +628,7 @@ fleet:
     journal: true
 
 context:
+  toolResultMaxBytes: 65536
   workingSet:
     enabled: true
     policy: structural-v1
