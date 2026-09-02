@@ -8,10 +8,11 @@ import {
 	lockedSynthesisRepromptMessages,
 	sanitizeLockedSynthesisMessage,
 } from "../../src/engine/loop-guard.js";
-import { patchWorkerRequestPayload, synthesisLockModeFromEnv } from "../../src/engine/provider-payload.js";
+import { patchWorkerRequestPayload } from "../../src/engine/provider-payload.js";
 import type { AgentMessage, EngineModel } from "../../src/engine/types.js";
 
 const model = { id: "m", provider: "llamacpp", api: "openai-completions" } as unknown as EngineModel;
+const anthropicModel = { id: "m", provider: "anthropic", api: "anthropic-messages" } as unknown as EngineModel;
 const payload = () => ({
 	model: "m",
 	messages: [{ role: "user", content: "hi" }],
@@ -19,23 +20,36 @@ const payload = () => ({
 });
 
 describe("worker synthesis lock", () => {
-	it("strips the tool surface by default and keeps it under tool-choice mode", () => {
+	it("strips the tool surface on a locked round and keeps it under Anthropic's tool_choice", () => {
 		const stripped = patchWorkerRequestPayload(payload(), model, {
 			runtimeId: "llamacpp",
 			toolSurfaceLocked: true,
 		}) as Record<string, unknown>;
 		strictEqual("tools" in stripped, false);
 		strictEqual("tool_choice" in stripped, false);
-		const kept = patchWorkerRequestPayload(payload(), model, {
-			runtimeId: "llamacpp",
+		// Anthropic rejects a history carrying tool_use blocks unless tools are
+		// defined, so the lock stays on the tool_choice knob there.
+		const anthropic = patchWorkerRequestPayload(payload(), anthropicModel, {
+			runtimeId: "anthropic",
 			toolSurfaceLocked: true,
-			toolSurfaceLockMode: "tool-choice",
 		}) as Record<string, unknown>;
-		deepStrictEqual(kept.tools, payload().tools);
-		strictEqual(kept.tool_choice, "none");
-		strictEqual(synthesisLockModeFromEnv({}), "strip");
-		strictEqual(synthesisLockModeFromEnv({ CLIO_CODER_SYNTHESIS_LOCK: "tool-choice" }), "tool-choice");
-		strictEqual(synthesisLockModeFromEnv({ CLIO_CODER_SYNTHESIS_LOCK: "anything-else" }), "strip");
+		deepStrictEqual(anthropic.tools, payload().tools);
+		deepStrictEqual(anthropic.tool_choice, { type: "none" });
+	});
+
+	it("keeps the schemas and sends the string tool_choice none for a middleware lock", () => {
+		// The `lock_tools` middleware effect and the interactive synthesis lockout
+		// route here instead of the strip, and on a generic OpenAI-compatible
+		// server the spelling has to be the string: LM Studio and llama.cpp answer
+		// HTTP 400 on the object form ("Invalid tool_choice type: 'object'"), and
+		// "auto" would leave the turn calling tools past the lockout with nothing
+		// failing loudly.
+		const locked = patchWorkerRequestPayload(payload(), model, {
+			runtimeId: "llamacpp",
+			toolChoiceNone: true,
+		}) as Record<string, unknown>;
+		deepStrictEqual(locked.tools, payload().tools);
+		strictEqual(locked.tool_choice, "none");
 	});
 
 	it("recognizes a markup-only locked reply and shapes one paired re-prompt", () => {
