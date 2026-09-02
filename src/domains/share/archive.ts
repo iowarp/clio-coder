@@ -705,7 +705,7 @@ function prepareExtensionPackages(
 			);
 			const alreadyVerified =
 				existing?.valid === true &&
-				existing.installedContentDigest === contentDigest &&
+				existing.provenance?.contentDigest === contentDigest &&
 				existing.observedContentDigest === contentDigest;
 			if (existsSync(targetRoot) && !alreadyVerified && !options.force) {
 				diagnostics.push({
@@ -894,7 +894,7 @@ export function importShareArchive(filePath: string, options: ShareImportOptions
 			if (!result.extension || errors.length > 0) {
 				throw new Error(errors.map((diagnostic) => diagnostic.message).join("; ") || "canonical install failed");
 			}
-			if (result.extension.installedContentDigest !== extensionPackage.contentDigest) {
+			if (result.extension.provenance?.contentDigest !== extensionPackage.contentDigest) {
 				throw new Error(`canonical install digest mismatch for extension ${extensionPackage.id}`);
 			}
 			for (const diagnostic of result.diagnostics) {

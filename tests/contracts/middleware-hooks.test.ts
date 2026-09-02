@@ -60,12 +60,12 @@ describe("middleware hook boundary", () => {
 		);
 
 		const admitted = listInstalledExtensions(project)
-			.filter((extension) => extension.loadable)
+			.filter((extension) => extension.loadable && extension.provenance !== undefined)
 			.map((extension) => ({
 				id: extension.id,
 				rootPath: extension.rootPath,
 				scope: extension.scope,
-				installedContentDigest: extension.installedContentDigest as string,
+				installedContentDigest: extension.provenance?.contentDigest ?? "",
 			}));
 		deepStrictEqual(admitted, []);
 		deepStrictEqual(readHookSources({ cwd: project, extensions: admitted }).batches, []);
@@ -92,7 +92,7 @@ describe("middleware hook boundary", () => {
 		);
 		const installed = installExtension(source, { cwd: project, scope: "project" }).extension;
 		strictEqual(installed?.loadable, true);
-		const installedContentDigest = installed?.installedContentDigest as string;
+		const installedContentDigest = installed?.provenance?.contentDigest as string;
 		const { batches } = readHookSources({
 			cwd: project,
 			extensions: [

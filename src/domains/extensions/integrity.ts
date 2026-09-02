@@ -13,6 +13,16 @@ import {
 } from "node:fs";
 import path from "node:path";
 
+export interface ExtensionContentDigestOptions {
+	/** Root-relative regular files whose exact hashed bytes should be returned. */
+	capture?: ReadonlyArray<string>;
+}
+
+export interface ExtensionContentDigestResult {
+	digest: string;
+	captured: ReadonlyMap<string, Buffer>;
+}
+
 function contained(root: string, candidate: string): boolean {
 	const relative = path.relative(root, candidate);
 	return relative === "" || (!relative.startsWith(`..${path.sep}`) && relative !== ".." && !path.isAbsolute(relative));
@@ -120,7 +130,10 @@ function readStableDirectory(
  * Symlinks must resolve within the package so their content cannot drift outside
  * the tree without changing the digest.
  */
-export function extensionContentDigest(root: string): string {
+export function extensionContentDigestWithCapture(
+	root: string,
+	options: ExtensionContentDigestOptions = {},
+): ExtensionContentDigestResult {
 	const resolvedRoot = path.resolve(root);
 	const rootStat = lstatSync(resolvedRoot);
 	if (rootStat.isSymbolicLink()) {
@@ -135,6 +148,8 @@ export function extensionContentDigest(root: string): string {
 		throw new Error(`extension root changed while being canonicalized: ${resolvedRoot}`);
 	}
 	const hash = createHash("sha256");
+	const requested = new Set((options.capture ?? []).map((entry) => entry.replaceAll(path.sep, "/")));
+	const captured = new Map<string, Buffer>();
 	const visit = (absolutePath: string, relativePath: string): void => {
 		const stat = lstatSync(absolutePath);
 		if (stat.isSymbolicLink()) {
@@ -157,11 +172,18 @@ export function extensionContentDigest(root: string): string {
 			if (stat.nlink !== 1) {
 				throw new Error(`hard-linked file is unsupported in an extension: ${absolutePath}`);
 			}
-			digestFrame(hash, "file", relativePath, readStableRegularFile(absolutePath, stat));
+			const payload = readStableRegularFile(absolutePath, stat);
+			digestFrame(hash, "file", relativePath, payload);
+			const key = relativePath.replaceAll(path.sep, "/");
+			if (requested.has(key)) captured.set(key, payload);
 			return;
 		}
 		throw new Error(`unsupported filesystem entry in extension: ${absolutePath}`);
 	};
 	visit(resolvedRoot, "");
-	return hash.digest("hex");
+	return { digest: hash.digest("hex"), captured };
+}
+
+export function extensionContentDigest(root: string): string {
+	return extensionContentDigestWithCapture(root).digest;
 }

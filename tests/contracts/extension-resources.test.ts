@@ -1,5 +1,6 @@
 import { deepStrictEqual, notStrictEqual, ok, strictEqual, throws } from "node:assert/strict";
 import { spawnSync } from "node:child_process";
+import { createHash } from "node:crypto";
 import {
 	existsSync,
 	linkSync,
@@ -23,10 +24,11 @@ import {
 	loadManifestFromRoot,
 	parseExtensionManifest,
 } from "../../src/domains/extensions/discovery.js";
-import { extensionContentDigest } from "../../src/domains/extensions/integrity.js";
+import { extensionContentDigest, extensionContentDigestWithCapture } from "../../src/domains/extensions/integrity.js";
 import { enabledExtensionResourceRoots, extensionResourcePath } from "../../src/domains/extensions/resources.js";
 import {
 	installExtension,
+	listInstalledExtensionRecords,
 	listInstalledExtensions,
 	removeExtension,
 	upgradeLegacyExtensionInstallState,
@@ -412,7 +414,7 @@ describe("extension resource boundary", () => {
 		writeFileSync(join(original, "marker.txt"), "original\n");
 		const first = installExtension(original, { cwd: project, scope: "project" });
 		ok(first.extension?.loadable);
-		const originalDigest = first.extension.installedContentDigest;
+		const originalDigest = first.extension.provenance?.contentDigest;
 
 		writeManifest(replacement, "staged-rollback", "resources:\n  agents: agents\n");
 		mkdirSync(join(replacement, "real-agents"));
@@ -429,7 +431,7 @@ describe("extension resource boundary", () => {
 		strictEqual(readFileSync(join(installedRoot, "marker.txt"), "utf8"), "original\n");
 		const [preserved] = listInstalledExtensions(project, { scope: "project" });
 		strictEqual(preserved?.loadable, true);
-		strictEqual(preserved?.installedContentDigest, originalDigest);
+		strictEqual(preserved?.provenance?.contentDigest, originalDigest);
 		strictEqual(preserved?.observedContentDigest, originalDigest);
 	});
 
@@ -441,7 +443,7 @@ describe("extension resource boundary", () => {
 		writeFileSync(join(original, "marker.txt"), "original\n");
 		const first = installExtension(original, { cwd: project, scope: "project" });
 		strictEqual(first.extension?.loadable, true);
-		const originalDigest = first.extension?.installedContentDigest;
+		const originalDigest = first.extension?.provenance?.contentDigest;
 
 		writeManifest(replacement, "state-rollback");
 		writeFileSync(join(replacement, "marker.txt"), "replacement\n");
@@ -468,7 +470,7 @@ describe("extension resource boundary", () => {
 		strictEqual(readFileSync(join(installedRoot, "marker.txt"), "utf8"), "original\n");
 		const [preserved] = listInstalledExtensions(project, { scope: "project" });
 		strictEqual(preserved?.loadable, true);
-		strictEqual(preserved?.installedContentDigest, originalDigest);
+		strictEqual(preserved?.provenance?.contentDigest, originalDigest);
 	});
 
 	it("detects post-install content drift and prevents activation", () => {
@@ -485,10 +487,42 @@ describe("extension resource boundary", () => {
 		strictEqual(drifted?.valid, false);
 		strictEqual(drifted?.effective, false);
 		strictEqual(drifted?.loadable, false);
-		ok(drifted?.installedContentDigest);
+		strictEqual(drifted?.provenance, undefined);
+		ok(result.extension?.provenance?.contentDigest);
 		ok(drifted?.observedContentDigest);
-		ok(drifted?.installedContentDigest !== drifted?.observedContentDigest);
+		ok(result.extension?.provenance?.contentDigest !== drifted?.observedContentDigest);
 		ok(drifted?.diagnostics.some((diagnostic) => diagnostic.message.includes("content drift detected")));
+	});
+
+	it("captures manifest and hook bytes from the stable digest read and builds structured provenance", () => {
+		const project = scratch();
+		const source = scratch();
+		writeManifest(source, "captured-provenance");
+		const hookBytes = Buffer.from("- id: captured\n  on: turn_start\n  kind: prompt\n  message: captured bytes\n");
+		writeFileSync(join(source, "hooks.yaml"), hookBytes);
+		const direct = extensionContentDigestWithCapture(source, {
+			capture: ["clio-coder-extension.yaml", "hooks.yaml", "absent.txt"],
+		});
+		strictEqual(direct.digest, extensionContentDigest(source));
+		deepStrictEqual(direct.captured.get("hooks.yaml"), hookBytes);
+		strictEqual(direct.captured.has("absent.txt"), false);
+
+		const installed = installExtension(source, { cwd: project, scope: "project" }).extension;
+		ok(installed?.loadable);
+		const [record] = listInstalledExtensionRecords(project, { scope: "project", all: true });
+		ok(record?.entry.provenance);
+		strictEqual(record.entry.provenance.id, "captured-provenance");
+		strictEqual(record.entry.provenance.scope, "project");
+		strictEqual(record.entry.provenance.sourcePath, source);
+		strictEqual(record.entry.provenance.canonicalRoot, realpathSync(record.entry.rootPath));
+		strictEqual(record.entry.provenance.contentDigest, record.entry.observedContentDigest);
+		strictEqual(
+			record.entry.provenance.manifestDigest,
+			createHash("sha256")
+				.update(record.captured?.get("clio-coder-extension.yaml") ?? "")
+				.digest("hex"),
+		);
+		deepStrictEqual(record.captured?.get("hooks.yaml"), hookBytes);
 	});
 
 	it("distinguishes absent install state from corrupt install state and fails closed", () => {
@@ -667,8 +701,8 @@ describe("extension resource boundary", () => {
 		const [installed] = listInstalledExtensions(destination, { scope: "project" });
 		strictEqual(installed?.id, "shared-extension");
 		strictEqual(installed?.loadable, true);
-		ok(installed?.installedContentDigest);
-		strictEqual(installed?.observedContentDigest, installed?.installedContentDigest);
+		ok(installed?.provenance?.contentDigest);
+		strictEqual(installed?.observedContentDigest, installed?.provenance?.contentDigest);
 		deepStrictEqual(
 			enabledExtensionResourceRoots("prompts", destination).map((root) => root.id),
 			["shared-extension"],
