@@ -551,6 +551,16 @@ function resolveRequestCapability(
 	}
 	if (thinking.mechanism === "effort-levels" && !thinking.thinkingActive) {
 		request.chatTemplateKwargs = { ...(request.chatTemplateKwargs ?? {}), enable_thinking: false };
+		// LM Studio ignores chat_template_kwargs for these families and reads the
+		// off switch from reasoning_effort alone. Measured on 2026-09-02 against
+		// qwen3.8-27b on dynamo: enable_thinking:false left 63 reasoning tokens
+		// on a one-line arithmetic prompt, the same as no override, while
+		// reasoning_effort:"none" produced 0 and a shorter rendered prompt. An
+		// interactive session with thinking "off" had spent 37k reasoning tokens
+		// before this reached the wire.
+		if (REASONING_EFFORT_ON_OFF_RUNTIMES.has(runtimeId)) {
+			request.reasoningEffort = onOffReasoningEffort(false);
+		}
 	}
 	if (thinking.mechanism === "budget-tokens" && thinking.budgetTokens !== undefined) {
 		request.budgetTokens = thinking.budgetTokens;
