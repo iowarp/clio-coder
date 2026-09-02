@@ -1,6 +1,7 @@
 import { match, ok, strictEqual } from "node:assert/strict";
 import { execFileSync, spawn } from "node:child_process";
 import {
+	copyFileSync,
 	existsSync,
 	mkdirSync,
 	mkdtempSync,
@@ -149,25 +150,70 @@ describe("smoke/installed package", { concurrency: false }, () => {
 			const codeNavChild = `
 				import { pathToFileURL } from "node:url";
 				const loaded = await import(pathToFileURL(process.argv[1]).href);
-				const result = await loaded.codeNavTool.run({ source: "clio", mode: "symbol", query: "codeNavTool" });
-				process.stdout.write(JSON.stringify(result));
+				const symbol = await loaded.codeNavTool.run({ source: "clio", mode: "symbol", query: "codeNavTool" });
+				const continuation = await loaded.codeNavTool.run({ source: "clio", mode: "path", query: "src/", limit: 1 });
+				process.stdout.write(JSON.stringify({ symbol, continuation }));
 			`;
 			const rawCodeNavResult = execFileSync(
 				process.execPath,
 				["--input-type=module", "--eval", codeNavChild, codeNavChunk],
 				{ cwd: foreign, env: isolatedEnv(home), encoding: "utf8" },
 			);
-			const codeNavResult = JSON.parse(rawCodeNavResult) as { kind: string; output?: string; message?: string };
+			const codeNavResults = JSON.parse(rawCodeNavResult) as {
+				symbol: { kind: string; output?: string; message?: string };
+				continuation: { kind: string; output?: string; message?: string };
+			};
+			const codeNavResult = codeNavResults.symbol;
 			strictEqual(codeNavResult.kind, "ok", codeNavResult.message);
 			const codeNavPayload = JSON.parse(codeNavResult.output ?? "null") as {
 				symbols?: Array<{ name?: string; path?: string }>;
 			};
 			const stableSymbol = codeNavPayload.symbols?.find((symbol) => symbol.name === "codeNavTool");
-			strictEqual(stableSymbol?.path, join(packageRoot, "src", "tools", "codewiki", "code-nav.ts"));
+			strictEqual(
+				stableSymbol?.path,
+				join(packageRoot, "src", "tools", "codewiki", "code-nav.ts"),
+				"source=clio paths must resolve against the installed package root",
+			);
+			strictEqual(codeNavResults.continuation.kind, "ok", codeNavResults.continuation.message);
+			const continuationPayload = JSON.parse(codeNavResults.continuation.output ?? "null") as { next?: string };
+			strictEqual(
+				continuationPayload.next,
+				"source=clio limit=2",
+				"a bundled-map continuation must retain the closed source selector",
+			);
 			strictEqual(
 				existsSync(join(foreign, ".clio-coder")),
 				false,
 				"source=clio must not resolve, build, or write a workspace code map",
+			);
+
+			const overriddenPackageRoot = join(work, "overridden-package-root");
+			mkdirSync(join(overriddenPackageRoot, "dist", "assets"), { recursive: true });
+			copyFileSync(
+				join(packageRoot, "dist", "assets", "codewiki.json"),
+				join(overriddenPackageRoot, "dist", "assets", "codewiki.json"),
+			);
+			const rawOverriddenResult = execFileSync(
+				process.execPath,
+				["--input-type=module", "--eval", codeNavChild, codeNavChunk],
+				{
+					cwd: foreign,
+					env: { ...isolatedEnv(home), CLIO_CODER_PACKAGE_ROOT: overriddenPackageRoot },
+					encoding: "utf8",
+				},
+			);
+			const overriddenResults = JSON.parse(rawOverriddenResult) as {
+				symbol: { kind: string; output?: string; message?: string };
+			};
+			strictEqual(overriddenResults.symbol.kind, "ok", overriddenResults.symbol.message);
+			const overriddenPayload = JSON.parse(overriddenResults.symbol.output ?? "null") as {
+				symbols?: Array<{ name?: string; path?: string }>;
+			};
+			const overriddenSymbol = overriddenPayload.symbols?.find((symbol) => symbol.name === "codeNavTool");
+			strictEqual(
+				overriddenSymbol?.path,
+				join(overriddenPackageRoot, "src", "tools", "codewiki", "code-nav.ts"),
+				"source=clio must load and resolve paths from the explicit package-root override",
 			);
 
 			const lazyChunks = emittedFilesContaining(packageRoot, TREE_SITTER_MARKER);
