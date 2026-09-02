@@ -23,7 +23,14 @@ async function fixture(reply: string): Promise<OpenAICompatFixture> {
 	return started;
 }
 
-function model(server: OpenAICompatFixture, id: string): Model<"openai-completions"> {
+/**
+ * `family` is present exactly when the shipped catalog matched the wire id:
+ * `synthLocalModel` copies `kb.entry.family` onto `clioCoder` and omits the key
+ * otherwise, and `resolveModelRuntimeCapabilitiesForModel` rebuilds the
+ * knowledge-base hit from it. Passing it is what makes a case exercise a
+ * catalogued id rather than the unmatched fallback.
+ */
+function model(server: OpenAICompatFixture, id: string, family?: string): Model<"openai-completions"> {
 	return {
 		id,
 		name: id,
@@ -35,15 +42,19 @@ function model(server: OpenAICompatFixture, id: string): Model<"openai-completio
 		cost: { input: 0, output: 0, cacheRead: 0, cacheWrite: 0 },
 		contextWindow: 8192,
 		maxTokens: 1024,
-		clioCoder: { targetId: "fixture", runtimeId: "openai-compat" },
+		clioCoder: { targetId: "fixture", runtimeId: "openai-compat", ...(family ? { family } : {}) },
 	} as unknown as Model<"openai-completions">;
 }
 
-async function streamReply(server: OpenAICompatFixture, id: string): Promise<{ text: string; thinking: string }> {
+async function streamReply(
+	server: OpenAICompatFixture,
+	id: string,
+	family?: string,
+): Promise<{ text: string; thinking: string }> {
 	const text: string[] = [];
 	const thinking: string[] = [];
 	const stream = openAICompletionsApiProvider.streamSimple(
-		model(server, id),
+		model(server, id, family),
 		{ messages: [{ role: "user", content: "hello", timestamp: 0 }] },
 		{ apiKey: "fixture", reasoning: "low" },
 	);
@@ -84,6 +95,23 @@ describe("contracts/gemma-4 channel filtering", () => {
 		strictEqual(result.thinking, "private thought");
 		strictEqual(result.text.includes("<|channel>"), false);
 	});
+
+	// The two ids the mini router serves, with the catalog families issue #263
+	// gave them. The gate used to read `resolved.family === "gemma-4"`, which is
+	// what `capabilityFamily` returns only for a Gemma id the catalog does not
+	// match, so naming these ids in the catalog switched the filter off for
+	// exactly the deployments it was written for.
+	for (const [id, family] of [
+		["gemma4-26b-moe", "gemma4-26b-a4b"],
+		["gemma4-31b-dense", "gemma-4-31b-it-qat-mtp"],
+	] as const) {
+		it(`filters the channel for ${id} even though the catalog names it ${family}`, async () => {
+			const server = await fixture("<|channel>own-think\nprivate thought<channel|>Visible answer.");
+			const result = await streamReply(server, id, family);
+			strictEqual(result.text, "Visible answer.");
+			strictEqual(result.thinking, "private thought");
+		});
+	}
 
 	it("leaves the same marker bytes untouched for a non-gemma family", async () => {
 		const reply = "<|channel>thought\nprivate<channel|>visible";
