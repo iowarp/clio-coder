@@ -97,4 +97,4 @@ Hiding transient output from the working tree must not mean losing it.
 
 Related: [evidence-and-memory.md](evidence-and-memory.md),
 [trace-store.md](trace-store.md), [observability.md](observability.md),
-[development-pipeline.md](development-pipeline.md) for where RCAs are committed.
+[development-pipeline.md](../process/development-pipeline.md) for where RCAs are committed.

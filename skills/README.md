@@ -105,7 +105,7 @@ loads, Clio enforces that declaration at tool admission until the turn (or
 worker run) ends: calls outside the merged surface are blocked with reason
 code `skill_surface`, with `context` and `ask_user` always admitted. A
 skill can narrow its tool surface but never grant tools the host would not
-allow. Full semantics: docs/safety-model.md, "Skill tool surface narrowing".
+allow. Full semantics: docs/architecture/safety-model.md, "Skill tool surface narrowing".
 
 ## Install (activate a marketplace skill)
 

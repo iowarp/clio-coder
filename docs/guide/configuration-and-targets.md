@@ -7,7 +7,7 @@
 
 Clio Coder is target-first: chat and fleet dispatch resolve through configured targets in `settings.yaml`, not through provider-specific ad hoc flags. Chat and print targets are HTTP and native engine-backed runtimes. Fleet dispatch can also target the sanctioned Claude Code subscription runtimes described below.
 
-Clio's engine is built on the pi SDK (see [docs/pi-boundary.md](pi-boundary.md)). Broad provider/model support comes from engine-backed descriptors and from the generic `openai-compat` and `anthropic-compat` targets. Clio adds orchestration, local/native runtime ergonomics, target configuration, dispatch, safety, and receipts rather than creating a first-class descriptor for every provider.
+Clio's engine is built on the pi SDK (see [docs/architecture/pi-boundary.md](../architecture/pi-boundary.md)). Broad provider/model support comes from engine-backed descriptors and from the generic `openai-compat` and `anthropic-compat` targets. Clio adds orchestration, local/native runtime ergonomics, target configuration, dispatch, safety, and receipts rather than creating a first-class descriptor for every provider.
 
 Source of truth: `src/core/defaults.ts`, `src/core/config.ts`, `src/domains/providers/**`, `src/cli/configure.ts`, `src/cli/targets.ts`, `src/cli/models.ts`, and `src/cli/auth.ts`.
 
@@ -238,7 +238,7 @@ Target capability overrides may include `chat`, `tools`, `toolCallFormat`, `reas
 
 Set it only when discovery is wrong. Clio resolves the limit in this order: this override; then a `parallelSlots` count cached on the target's probe result; then one slot for any other `local-native` runtime; then no bound at all for a cloud runtime, vLLM, or SGLang. llama.cpp discovery reads `total_slots` from the router's `/props`, falls back to the selected worker's `/props?model=<id>` when the router reports none, and falls back again to the `--parallel` argv on the selected `/v1/models` entry. LM Studio reads `config.parallel` off the loaded instance and otherwise reports one; Ollama reads `OLLAMA_NUM_PARALLEL` from the environment the Clio process can see and otherwise reports one.
 
-The limit is keyed on the endpoint rather than the target, so two targets pointed at the same normalized URL share it. Raising it above what the server will actually serve does not create capacity; it removes the refusal that would have told you the server was full. See [capacity-and-scheduling.md](capacity-and-scheduling.md) for the admission model and the exact denial text.
+The limit is keyed on the endpoint rather than the target, so two targets pointed at the same normalized URL share it. Raising it above what the server will actually serve does not create capacity; it removes the refusal that would have told you the server was full. See [capacity-and-scheduling.md](../architecture/capacity-and-scheduling.md) for the admission model and the exact denial text.
 
 ### The `local-native` tier
 
@@ -248,7 +248,7 @@ The tier means "an inference server the operator runs, whose prefix cache and re
 
 - **Pre-warm** runs only here, whatever `chat.prewarm` says, because a cloud provider bills the request and caches on its own schedule. The check is made twice, once from configuration before any runtime is resolved and once against the resolved runtime, so an unreachable target does not pay for a capability probe at boot just to be told no.
 - **Endpoint capacity** defaults to one slot here when discovery reports nothing, and to unbounded elsewhere. vLLM and SGLang are the deliberate exceptions inside the tier: both serve genuinely concurrent requests, so an undiscovered limit is left unbounded rather than guessed at one.
-- **Five of the eight expected-cold reasons** are stamped only here, because a single-slot local cache is the only one an interleaved run actually displaces. The other three moved the prompt bytes themselves and are stamped on every tier. The full split is in [context-engine.md](context-engine.md#cache-divergence-honesty).
+- **Five of the eight expected-cold reasons** are stamped only here, because a single-slot local cache is the only one an interleaved run actually displaces. The other three moved the prompt bytes themselves and are stamped on every tier. The full split is in [context-engine.md](../architecture/context-engine.md#cache-divergence-honesty).
 
 The tool-prose-loop detector is keyed on the same tier, for the same reason: narrating a tool call instead of emitting one is a behavior of open-weight models served locally, and a list of server names would have left an Ollama or vLLM run with no cutoff at all.
 
@@ -341,7 +341,7 @@ fleet failures. Setting it to `0` disables retries.
 The setting `fleet.permissions.mode` decides how noninteractive workers handle
 a tool call that asks for permission. It supports three modes:
 - `deny`: Immediately returns a structured denial to the model, and the run continues.
-- `fail`: Finalizes the run as failed, exiting the worker subprocess with exit code 3 ([WORKER_EXIT_PERMISSION_REQUIRED](../src/worker/spec-contract.ts)).
+- `fail`: Finalizes the run as failed, exiting the worker subprocess with exit code 3 ([WORKER_EXIT_PERMISSION_REQUIRED](../../src/worker/spec-contract.ts)).
 - `escalate`: Parks the tool call, emits a `clio_coder_permission_escalated` event,
   and waits for an operator decision. If no decision arrives within
   `fleet.permissions.escalation.timeoutMs`, it applies the configured fallback.
@@ -724,7 +724,7 @@ are shown before confirmation.
 
 Decisions are recorded in `<CLIO_CODER_HOME>/state/interop.json`, schema v1, written atomically only when an explicit decision is taken; `doctor` and non-TTY `configure --interop` write nothing at all. Each decision is keyed by agent kind plus a fingerprint of the facts it was made against (version and path), so a declined agent stays silent while its binary path and version hold, and comes back as a fresh proposal when either moves. Accepting and declining in one review persists both decisions. A file this version cannot parse degrades to "no report" rather than acting on a half-read decision record. Project-scoped facts stay where they already live, in `.clio-coder/state.json` under `contextSources`.
 
-Clio never writes into a foreign agent's directory. The safety path policy carries a `noWritePaths` class populated from the same registry; see [safety-model.md](safety-model.md) for the enumerated classes.
+Clio never writes into a foreign agent's directory. The safety path policy carries a `noWritePaths` class populated from the same registry; see [safety-model.md](../architecture/safety-model.md) for the enumerated classes.
 
 ---
 
@@ -778,7 +778,7 @@ clio-coder configure \
   --max-tokens 4096
 ```
 
-See [alcf-provider.md](alcf-provider.md) for the Globus login and ALCF discovery
+See [alcf-provider.md](../architecture/alcf-provider.md) for the Globus login and ALCF discovery
 details.
 
 ### 3. Sanctioned Claude Code Worker Runtimes (Worker-Only)

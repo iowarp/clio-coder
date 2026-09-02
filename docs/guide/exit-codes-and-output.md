@@ -29,7 +29,7 @@ Every subcommand in Clio Coder adheres to the strict `--help` convention:
 
 ### Global vs Subcommand Flag Positioning
 
-Global options (such as `--api-key`, `--no-context-files`, and `-nc`) must precede the subcommand. Directory redirection is configured via the `CLIO_CODER_*_DIR` environment variables (see [docs/environment-variables.md](environment-variables.md)). If a global flag is placed after the subcommand name, Clio prints a remediation guide to `stderr` and exits with code `2`:
+Global options (such as `--api-key`, `--no-context-files`, and `-nc`) must precede the subcommand. Directory redirection is configured via the `CLIO_CODER_*_DIR` environment variables (see [docs/guide/environment-variables.md](environment-variables.md)). If a global flag is placed after the subcommand name, Clio prints a remediation guide to `stderr` and exits with code `2`:
 
 ```text
 --api-key is a global option and must come before the subcommand: clio-coder --api-key <key> <command> ...

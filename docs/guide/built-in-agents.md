@@ -245,7 +245,7 @@ over run:
   `pipeline` provenance (source run, step position, input bytes, whether the
   cap truncated it). Step 1 and every non-pipeline run get none. The `pipeline`
   and `personaOverride` field shapes and their stability labels are documented
-  in the [receipt provenance schema](./observability.md#receipt-fields-for-dispatch-provenance).
+  in the [receipt provenance schema](../architecture/observability.md#receipt-fields-for-dispatch-provenance).
 
 ---
 
@@ -276,7 +276,7 @@ A dispatched worker has no operator by default, so a tool call that requires int
 - `fail`: the run finalizes immediately with outcome `failed`/`permission_required`.
 - `escalate`: the parked call is handed up to the interactive operator. The worker emits a `clio_coder_permission_escalated` event over its stdout; the dispatch domain republishes it on the bus as a permission request tagged with the run id; the operator resolves it in the TUI permission overlay; and the decision travels back down the worker's stdin as a `permission_decision` line (the same pipe steers use). No model can approve a worker permission; resolution is human-only.
 
-Escalate is only meaningful with an interactive operator attached. Headless sessions have no subscriber, so the escalation resolves by the timeout fallback. The bounds are `fleet.permissions.escalation` (`{ timeoutMs, fallback }`, defaults 120000 ms and `deny`): a parked ask that no operator answers within `timeoutMs` applies the fallback deny/fail, so an escalate-posture run can never hang forever. The heartbeat timer runs independently of the parked call, so an escalated worker keeps reporting alive while it waits. Each escalation and its resolution (operator or timeout) is tallied on the receipt's `safety.decisions` escalation counters, documented with their stability labels in the [receipt provenance schema](./observability.md#receipt-fields-for-dispatch-provenance); a timed-out or denied escalation also raises an `escalation` finding in the evidence bundle. ACP delegations are out of scope: they resolve permissions through their own mediator and have no worker stdin channel.
+Escalate is only meaningful with an interactive operator attached. Headless sessions have no subscriber, so the escalation resolves by the timeout fallback. The bounds are `fleet.permissions.escalation` (`{ timeoutMs, fallback }`, defaults 120000 ms and `deny`): a parked ask that no operator answers within `timeoutMs` applies the fallback deny/fail, so an escalate-posture run can never hang forever. The heartbeat timer runs independently of the parked call, so an escalated worker keeps reporting alive while it waits. Each escalation and its resolution (operator or timeout) is tallied on the receipt's `safety.decisions` escalation counters, documented with their stability labels in the [receipt provenance schema](../architecture/observability.md#receipt-fields-for-dispatch-provenance); a timed-out or denied escalation also raises an `escalation` finding in the evidence bundle. ACP delegations are out of scope: they resolve permissions through their own mediator and have no worker stdin channel.
 
 ---
 

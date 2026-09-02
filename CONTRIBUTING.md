@@ -68,7 +68,7 @@ output in-process while the reporter runs.
 
 Releases are cut from a tag. The GitHub release is created by CI; the npm
 publish is a manual maintainer step. The ordered procedure for a cut lives in
-[docs/release-cut-checklist.md](docs/release-cut-checklist.md).
+[docs/history/release-cut-checklist.md](docs/history/release-cut-checklist.md).
 
 1. During development, keep the top changelog section at `## Unreleased` and
    bump `version` in `package.json` when opening the release branch. Before the

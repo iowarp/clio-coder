@@ -6,12 +6,12 @@
 This document describes the design and lifecycle of Clio Coder dispatched workers, focusing on the spawning sequence, execution isolation, the standard input/output NDJSON communication loop, and permission escalation routing.
 
 Source of truth:
-- Subprocess entry: [src/worker/entry.ts](../src/worker/entry.ts)
-- Input demultiplexing: [src/worker/stdin-demux.ts](../src/worker/stdin-demux.ts)
-- Heartbeat loop: [src/worker/heartbeat.ts](../src/worker/heartbeat.ts)
-- Spec contracts and exit codes: [src/worker/spec-contract.ts](../src/worker/spec-contract.ts)
-- Dispatch orchestrator: [src/domains/dispatch/index.ts](../src/domains/dispatch/index.ts)
-- Engine worker runtime: [src/engine/worker-runtime.ts](../src/engine/worker-runtime.ts)
+- Subprocess entry: [src/worker/entry.ts](../../src/worker/entry.ts)
+- Input demultiplexing: [src/worker/stdin-demux.ts](../../src/worker/stdin-demux.ts)
+- Heartbeat loop: [src/worker/heartbeat.ts](../../src/worker/heartbeat.ts)
+- Spec contracts and exit codes: [src/worker/spec-contract.ts](../../src/worker/spec-contract.ts)
+- Dispatch orchestrator: [src/domains/dispatch/index.ts](../../src/domains/dispatch/index.ts)
+- Engine worker runtime: [src/engine/worker-runtime.ts](../../src/engine/worker-runtime.ts)
 
 ---
 

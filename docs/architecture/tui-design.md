@@ -4,7 +4,7 @@
 > **Interactive spec available:** The source checkout includes the
 > [TUI design blueprint](https://github.com/iowarp/clio-coder/blob/main/docs/html/tui_design_blueprint.html).
 
-This document is the reference specification for the Clio Coder TUI visual layout, styling, and behavior. It describes color semantics, the glyph vocabulary, structural recipes, and state choreography for all surfaces under [src/interactive/](../src/interactive/).
+This document is the reference specification for the Clio Coder TUI visual layout, styling, and behavior. It describes color semantics, the glyph vocabulary, structural recipes, and state choreography for all surfaces under [src/interactive/](../../src/interactive/).
 
 The governing principle: **the user reads state from color, structure from frames, and identity from brand marks.** Everything that is not state or structure remains visually quiet.
 
@@ -12,7 +12,7 @@ The governing principle: **the user reads state from color, structure from frame
 
 ## 1. Color System
 
-All color styling is defined in [src/interactive/theme/tokens.ts](../src/interactive/theme/tokens.ts). No raw SGR sequences, `38;2;`/`38;5;` ANSI escape fragments, or hardcoded hex colors are allowed outside this theme module.
+All color styling is defined in [src/interactive/theme/tokens.ts](../../src/interactive/theme/tokens.ts). No raw SGR sequences, `38;2;`/`38;5;` ANSI escape fragments, or hardcoded hex colors are allowed outside this theme module.
 
 ### 1.1 Color Tokens
 
@@ -44,7 +44,7 @@ All color styling is defined in [src/interactive/theme/tokens.ts](../src/interac
 
 ## 2. Glyph Vocabulary
 
-All symbols are defined as constants in [src/interactive/theme/glyphs.ts](../src/interactive/theme/glyphs.ts). Rendering code reference these names instead of embedding hardcoded glyph literals.
+All symbols are defined as constants in [src/interactive/theme/glyphs.ts](../../src/interactive/theme/glyphs.ts). Rendering code reference these names instead of embedding hardcoded glyph literals.
 
 | Glyph | Name | Meaning | Used by |
 |---|---|---|---|
@@ -83,7 +83,7 @@ All symbols are defined as constants in [src/interactive/theme/glyphs.ts](../src
 
 ## 3. Formatting Rules
 
-Standardized formatters live in [src/interactive/theme/labels.ts](../src/interactive/theme/labels.ts) and other shared UI modules:
+Standardized formatters live in [src/interactive/theme/labels.ts](../../src/interactive/theme/labels.ts) and other shared UI modules:
 
 - **Duration**: `formatCompactMs` is the unified duration formatter, yielding compact outputs (`860ms`, `4.2s`, `42s`, `1m36s`).
 - **Token Counts**: `formatFooterTokens` formats footer and chip counts (`842`, `12.4k`, `1.2M`). Full numeric strings via `toLocaleString` are reserved for detailed tables like the context legend.
@@ -96,7 +96,7 @@ Standardized formatters live in [src/interactive/theme/labels.ts](../src/interac
 
 ### 4.1 The Island (Framed Block)
 
-Rendered via `frame()` in [src/interactive/theme/rules.ts](../src/interactive/theme/rules.ts):
+Rendered via `frame()` in [src/interactive/theme/rules.ts](../../src/interactive/theme/rules.ts):
 
 ```
 ┌─ Title ──────────────────────────── meta ─┐
@@ -267,7 +267,7 @@ Turn usage receipts rendered at the bottom of completed turns respect the output
 
 ### 6.7 Code Ink (Syntax Highlighting)
 
-Syntax highlighting within code blocks is handled by [src/interactive/renderers/code-ink.ts](../src/interactive/renderers/code-ink.ts). It maps a restricted set of four tokens to stay quiet:
+Syntax highlighting within code blocks is handled by [src/interactive/renderers/code-ink.ts](../../src/interactive/renderers/code-ink.ts). It maps a restricted set of four tokens to stay quiet:
 
 - **Comments**: `dim`
 - **String Literals**: `success`

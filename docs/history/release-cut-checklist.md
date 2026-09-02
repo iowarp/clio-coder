@@ -100,7 +100,7 @@ operator's explicit approval of the exact candidate SHA and commands.
 12. Confirm README quickstart and source-install commands name real commands,
     current paths, and `v0.4.1`. Confirm current eval documentation points to
     `src/domains/eval/` and `evals/`, not to a retired parallel tree.
-13. Confirm `docs/artifact-versions.md` includes every persisted artifact added
+13. Confirm `docs/architecture/artifact-versions.md` includes every persisted artifact added
     or re-versioned by the candidate, including any canonical naming schema
     identifiers. A compatibility reader does not make a newly emitted schema
     optional to document.

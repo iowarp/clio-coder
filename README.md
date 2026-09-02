@@ -58,7 +58,7 @@ looks wrong, `clio-coder doctor` performs a read-only health check.
 > [!NOTE]
 > Add `--omit=optional` to the npm install to skip the Claude Agent SDK's large
 > optional binary. Only the `claude-sdk` worker runtime needs it. See
-> [Optional dependencies](docs/installation-and-lifecycle.md#optional-dependency-the-claude-agent-sdk).
+> [Optional dependencies](docs/guide/installation-and-lifecycle.md#optional-dependency-the-claude-agent-sdk).
 
 | If you are… | Continue with… |
 | --- | --- |
@@ -131,7 +131,7 @@ Private `!!` command and output bytes remain visible in your transcript but are
 excluded from model replay, compaction, and context accounting.
 
 The complete interactive and CLI reference is
-[Commands and Modes](docs/commands-and-modes.md).
+[Commands and Modes](docs/guide/commands-and-modes.md).
 
 ## Choose where models run
 
@@ -176,7 +176,7 @@ Local hardware, quantization, context windows, tool calling, and reasoning
 behavior vary substantially by model and serving runtime. Clio records what it
 can probe, but it does not turn one successful configuration into a universal
 claim. Start with the measured field notes in the
-[Model Catalog](docs/model-catalog.md), then keep the serving configuration with
+[Model Catalog](docs/architecture/model-catalog.md), then keep the serving configuration with
 your own results.
 
 > [!NOTE]
@@ -186,8 +186,8 @@ your own results.
 > your discretion.
 
 The full target, auth, profile, and routing reference is
-[Configuration and Targets](docs/configuration-and-targets.md). The ALCF route
-has a separate [setup guide](docs/alcf-provider.md).
+[Configuration and Targets](docs/guide/configuration-and-targets.md). The ALCF route
+has a separate [setup guide](docs/architecture/alcf-provider.md).
 
 ## Project context that stays with the project
 
@@ -217,15 +217,15 @@ clio-coder context
 ```
 
 Project-generated runtime state lives under the gitignored `.clio-coder/`
-directory. See [Context Engine](docs/context-engine.md),
-[Working Set](docs/context-working-set.md), and
-[Proactive Memory](docs/proactive-memory.md) for the detailed contracts.
+directory. See [Context Engine](docs/architecture/context-engine.md),
+[Working Set](docs/architecture/context-working-set.md), and
+[Proactive Memory](docs/guide/proactive-memory.md) for the detailed contracts.
 
 The local skills marketplace may offer a matching shipped skill during a
 request. Promotion installs are restricted to Clio's own catalog or this
 repository and do not activate the skill automatically. Manual installs remain
 available for a source you deliberately choose. See
-[Skills Marketplace](docs/skills-marketplace.md).
+[Skills Marketplace](docs/guide/skills-marketplace.md).
 
 ## Delegate with bounds
 
@@ -257,8 +257,8 @@ completed steps can be resumed from durable evidence. Shared workspaces must
 appear at the same absolute path on every node, and `localhost` always means
 the node where that worker runs.
 
-Read [Fleet Dispatch](docs/fleet-dispatch.md) for configuration and invariants,
-or follow the [Fleet Demo Runbook](docs/fleet-demo-runbook.md) for an end-to-end
+Read [Fleet Dispatch](docs/guide/fleet-dispatch.md) for configuration and invariants,
+or follow the [Fleet Demo Runbook](docs/process/fleet-demo-runbook.md) for an end-to-end
 example.
 
 ## Safety and evidence
@@ -292,8 +292,8 @@ clio-coder trace tail <run-id>
 Evidence helps you audit a run; it does not prove that generated code is
 scientifically correct. Domain validation, reference results, and human review
 remain part of the job. The detailed boundaries are in
-[Safety Model](docs/safety-model.md), [Observability](docs/observability.md),
-and [Scientific Validation](docs/scientific-validation.md).
+[Safety Model](docs/architecture/safety-model.md), [Observability](docs/architecture/observability.md),
+and [Scientific Validation](docs/process/scientific-validation.md).
 
 ## Headless and editor use
 
@@ -309,8 +309,8 @@ clio-coder acp
 Text mode reserves stdout for the final answer. `--json` emits JSONL events for
 scripts, and `acp` serves Clio over stdio to Agent Client Protocol hosts. Exit
 codes and output guarantees are documented in
-[Exit Codes and Output](docs/exit-codes-and-output.md) and
-[ACP](docs/acp.md).
+[Exit Codes and Output](docs/guide/exit-codes-and-output.md) and
+[ACP](docs/architecture/acp.md).
 
 ## Settings and local state
 
@@ -330,8 +330,8 @@ Clio does not start or download them unless you explicitly enable
 
 Use `clio-coder paths --json` to locate configuration, durable data, state, and
 cache on the current machine. See the complete
-[Settings Inventory](docs/configuration-and-targets.md#settings-inventory) and
-[Artifact Placement](docs/artifact-placement.md).
+[Settings Inventory](docs/guide/configuration-and-targets.md#settings-inventory) and
+[Artifact Placement](docs/architecture/artifact-placement.md).
 
 ## Install
 
@@ -386,7 +386,7 @@ clio-coder uninstall --remove-binary --force
 ```
 
 The full directory, permission, reset, migration, and uninstall behavior is in
-[Installation and Lifecycle](docs/installation-and-lifecycle.md).
+[Installation and Lifecycle](docs/guide/installation-and-lifecycle.md).
 
 ## Project status
 
@@ -414,7 +414,7 @@ model-dependent results as measurements rather than promises.
 When reporting a problem, include `clio-coder --version`, `node --version`,
 `clio-coder doctor`, and `clio-coder targets`. Redact credentials, private
 prompts, proprietary code, and sensitive logs. The
-[Troubleshooting Guide](docs/troubleshooting.md) is keyed to user-facing errors.
+[Troubleshooting Guide](docs/guide/troubleshooting.md) is keyed to user-facing errors.
 
 ## For agents working on Clio Coder
 
@@ -438,13 +438,13 @@ Useful orientation:
 
 | Concern | Start here |
 | --- | --- |
-| Source layout and domain boundaries | [Architecture](docs/architecture.md) |
-| CLI and slash-command contracts | [Commands and Modes](docs/commands-and-modes.md) |
-| Tool schemas and bounded results | [Tool Usage](docs/tool-usage.md) |
-| Dispatch admission and worker mechanics | [Fleet Dispatch](docs/fleet-dispatch.md), [Worker Dispatch](docs/worker-dispatch-mechanics.md) |
-| Configuration schema and target resolution | [Configuration and Targets](docs/configuration-and-targets.md) |
-| Sessions, context, and persistence | [Session Lifecycle](docs/session-lifecycle.md), [Context Engine](docs/context-engine.md) |
-| Safety and evidence | [Safety Model](docs/safety-model.md), [Observability](docs/observability.md) |
+| Source layout and domain boundaries | [Architecture](docs/architecture/architecture.md) |
+| CLI and slash-command contracts | [Commands and Modes](docs/guide/commands-and-modes.md) |
+| Tool schemas and bounded results | [Tool Usage](docs/guide/tool-usage.md) |
+| Dispatch admission and worker mechanics | [Fleet Dispatch](docs/guide/fleet-dispatch.md), [Worker Dispatch](docs/architecture/worker-dispatch-mechanics.md) |
+| Configuration schema and target resolution | [Configuration and Targets](docs/guide/configuration-and-targets.md) |
+| Sessions, context, and persistence | [Session Lifecycle](docs/architecture/session-lifecycle.md), [Context Engine](docs/architecture/context-engine.md) |
+| Safety and evidence | [Safety Model](docs/architecture/safety-model.md), [Observability](docs/architecture/observability.md) |
 
 ## For contributors
 
@@ -481,14 +481,14 @@ the interactive blueprints locally. Frequently used pages:
 
 | Topic | Guide |
 | --- | --- |
-| Install, upgrade, reset, uninstall | [Installation and Lifecycle](docs/installation-and-lifecycle.md) |
-| Targets, auth, settings, fleet profiles | [Configuration and Targets](docs/configuration-and-targets.md) |
-| Commands, keybindings, and modes | [Commands and Modes](docs/commands-and-modes.md) |
-| Project context and context windows | [Context Engine](docs/context-engine.md) |
-| Safety rules and autonomy | [Safety Model](docs/safety-model.md) |
-| Fleet and multi-node execution | [Fleet Dispatch](docs/fleet-dispatch.md) |
-| Receipts, traces, and evidence | [Observability](docs/observability.md) |
-| Exact CLI output contracts | [Exit Codes and Output](docs/exit-codes-and-output.md) |
+| Install, upgrade, reset, uninstall | [Installation and Lifecycle](docs/guide/installation-and-lifecycle.md) |
+| Targets, auth, settings, fleet profiles | [Configuration and Targets](docs/guide/configuration-and-targets.md) |
+| Commands, keybindings, and modes | [Commands and Modes](docs/guide/commands-and-modes.md) |
+| Project context and context windows | [Context Engine](docs/architecture/context-engine.md) |
+| Safety rules and autonomy | [Safety Model](docs/architecture/safety-model.md) |
+| Fleet and multi-node execution | [Fleet Dispatch](docs/guide/fleet-dispatch.md) |
+| Receipts, traces, and evidence | [Observability](docs/architecture/observability.md) |
+| Exact CLI output contracts | [Exit Codes and Output](docs/guide/exit-codes-and-output.md) |
 
 ## Heritage
 

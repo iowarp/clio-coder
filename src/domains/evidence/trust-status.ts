@@ -939,7 +939,7 @@ export interface GroundedEvidenceValidationInput {
  * Project validation that the evidence linker grounded in an executed
  * artifact. Grounding requires at least one independently observed artifact:
  * a self-report of the run under inspection cannot ground its own validation
- * (docs/evidence-and-memory.md, "composition rules"), and an empty reference
+ * (docs/architecture/evidence-and-memory.md, "composition rules"), and an empty reference
  * list grounds
  * nothing at all.
  */

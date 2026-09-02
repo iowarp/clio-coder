@@ -109,7 +109,7 @@ Rule order is the policy. Each rung emits candidates newest-first, every candida
 
 Rungs 1 through 5 are unconditional: redundant content is free to drop, whatever the pressure. Rung 6 is the only one that looks at token counts, and it stops the moment the projected size reaches `context.workingSet.target × contextWindow`. Newest-first within a rung is a cost decision: evicting the youngest safe unit keeps the cold region after the eviction point small, so the turn that pays for the event pays least.
 
-A historical local long-trace sweep found that targets 0.4 and an exhaustive rung 6 produced identical results because the usable candidate pool ran out first. Relative to the 0.6 default, 0.4 reduced cold-prefix tokens by 2.8% at 64k and 7.3% at 128k, did not reduce summaries, and lowered retention covered by 0.00072 at 128k. The default therefore remained 0.6. The generated grid and reopening calculation were local artifacts and are not versioned in this repository; use the replay commands in [Commands and Modes](commands-and-modes.md#working-set-replay) to measure the current tree.
+A historical local long-trace sweep found that targets 0.4 and an exhaustive rung 6 produced identical results because the usable candidate pool ran out first. Relative to the 0.6 default, 0.4 reduced cold-prefix tokens by 2.8% at 64k and 7.3% at 128k, did not reduce summaries, and lowered retention covered by 0.00072 at 128k. The default therefore remained 0.6. The generated grid and reopening calculation were local artifacts and are not versioned in this repository; use the replay commands in [Commands and Modes](../guide/commands-and-modes.md#working-set-replay) to measure the current tree.
 
 The facts the rungs read come from `path-index.ts`, one deterministic pass over the active-path entries producing one observation per tool result that names a path: which file, which line range, which paths a listing surfaced, whether the call failed, and where in the turn sequence it sits. Tools that observe no path (dispatch, web fetch, tasks, ask user, context) produce no observation. There are no content fingerprints.
 
@@ -188,7 +188,7 @@ These are tracked follow-ups, not available behavior:
 
 ## See also
 
-- `clio-coder context replay --sessions <path>...` replays Clio ledgers, and `--synthetic <ids>` replays the seeded procedural corpora, through the same fold, projection, and policy code with `none`, `random`, and `oracle` controls; `clio-coder context working-set --session <id|path>` prints one session's fold and path index. Both are described under [Working-set replay](commands-and-modes.md#working-set-replay). Generated replay tables are local artifacts rather than versioned benchmark results.
+- `clio-coder context replay --sessions <path>...` replays Clio ledgers, and `--synthetic <ids>` replays the seeded procedural corpora, through the same fold, projection, and policy code with `none`, `random`, and `oracle` controls; `clio-coder context working-set --session <id|path>` prints one session's fold and path index. Both are described under [Working-set replay](../guide/commands-and-modes.md#working-set-replay). Generated replay tables are local artifacts rather than versioned benchmark results.
 - [context-engine.md](context-engine.md) for context window resolution, token accounting, and how this stage sits ahead of summary compaction.
 - [session-lifecycle.md](session-lifecycle.md) for the ledger format, active-path lineage, and branching.
-- [glossary.md](glossary.md) for the one-line definitions of these terms.
+- [glossary.md](../guide/glossary.md) for the one-line definitions of these terms.

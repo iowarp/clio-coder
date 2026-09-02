@@ -9,7 +9,7 @@ guarantee it makes locally: one admission path, one autonomy matrix, one
 receipt chain. This page covers the architecture, node setup, the doctor
 preflight, placement, topologies, failure semantics, and the residency
 default. For the end-to-end demo see
-[fleet-demo-runbook.md](fleet-demo-runbook.md).
+[fleet-demo-runbook.md](../process/fleet-demo-runbook.md).
 
 Source of truth: `src/domains/dispatch/**`, `src/domains/scheduling/cluster.ts`,
 `src/tools/dispatch.ts`, `src/tools/monitor.ts`, and the contract tests under
@@ -152,7 +152,7 @@ Placement and admission are separate, deterministic authorities:
    queue preserves priority/FIFO order until its finite deadline instead of
    silently selecting another node.
 
-The durable capacity state file (`dispatch-admission.json`) uses schema version 2 and owns global and per-node leases, heartbeats, reservation transfer, retry rebinding, and the TTL-bounded operator drain (`DEFAULT_CAPACITY_DRAIN_TTL_MS` = 3,600,000 ms). A lease acts as durable expiring authority (`DEFAULT_CAPACITY_LEASE_TTL_MS` = 30,000 ms) and is reclaimed only with owner-liveness evidence when a process birth token cannot prove process death. A plan reserves its peak wave, and a retry rebinds the same assignment member to its actual node and cost bound so that an assignment retry belongs to its existing plan slot and cannot queue behind or outspend itself. Full leasing schema and locking protocols are specified in [capacity-and-scheduling.md](capacity-and-scheduling.md).
+The durable capacity state file (`dispatch-admission.json`) uses schema version 2 and owns global and per-node leases, heartbeats, reservation transfer, retry rebinding, and the TTL-bounded operator drain (`DEFAULT_CAPACITY_DRAIN_TTL_MS` = 3,600,000 ms). A lease acts as durable expiring authority (`DEFAULT_CAPACITY_LEASE_TTL_MS` = 30,000 ms) and is reclaimed only with owner-liveness evidence when a process birth token cannot prove process death. A plan reserves its peak wave, and a retry rebinds the same assignment member to its actual node and cost bound so that an assignment retry belongs to its existing plan slot and cannot queue behind or outspend itself. Full leasing schema and locking protocols are specified in [capacity-and-scheduling.md](../architecture/capacity-and-scheduling.md).
 
 Use `clio-coder fleet drain [--json]` before maintenance to close that shared
 admission authority. Existing workers continue, but new plans and every new
@@ -160,7 +160,7 @@ execution start—including a retry or a previously reserved member—fail close
 The drain expires after one hour so an abandoned operator process cannot wedge
 future dispatch; repeating the command renews the deadline. `clio-coder fleet
 status [--json]` reports the active deadline, requesting PID, and request time.
-Use `clio-coder fleet resume [--json]` to reopen admission early. Detailed drain mechanics are documented in [capacity-and-scheduling.md](capacity-and-scheduling.md).
+Use `clio-coder fleet resume [--json]` to reopen admission early. Detailed drain mechanics are documented in [capacity-and-scheduling.md](../architecture/capacity-and-scheduling.md).
 
 With no fleet configured and nothing requested, placement resolves to the
 implicit local path and optional fleet-node provenance may remain absent.
@@ -239,7 +239,7 @@ legitimately route a step to, so restating the contract's boundary there would
 mint a second grant in a second place and fail closed on contracts that run
 correctly today. A pre-v4 contract and every readonly step declare nothing and
 keep the legacy inference path. See
-[dispatch-typed-intent.md](dispatch-typed-intent.md) for the full producer
+[dispatch-typed-intent.md](../architecture/dispatch-typed-intent.md) for the full producer
 table and the refusal reason codes.
 
 The first checkout writer acquires a process-owned lease under the Clio state
@@ -275,7 +275,7 @@ The singular request and every object in `tasks` accept an optional `intent`:
 {
   "read_roots": ["src/domains/dispatch"],
   "write_roots": ["src/tools"],
-  "relevant_paths": ["docs/fleet-dispatch.md"],
+  "relevant_paths": ["docs/guide/fleet-dispatch.md"],
   "expected_outputs": ["dist/cli.js"],
   "verification": [{ "check": "test", "timeout_ms": 600000 }]
 }
@@ -789,7 +789,7 @@ bounded `project_context` provenance are also rendered independently; neither
 hash substitutes for the other.
 
 The canonical terminology for these facts is the six-axis trust status in
-[`evidence-and-memory.md`](evidence-and-memory.md#canonical-trust-status).
+[`evidence-and-memory.md`](../architecture/evidence-and-memory.md#canonical-trust-status).
 Receipt integrity projects onto artifact integrity; receipt verification,
 typed quality, and validation grounding project onto validation grounding;
 gate decisions project onto independent review; briefing and project context
@@ -959,6 +959,6 @@ declines with a `will-not-fit` notice instead of stranding the configured model.
 Use `clio-coder fleet validate <name>` and `clio-coder fleet graph <name>` for
 model-free contract checks. An operator with configured targets can then run
 the contract explicitly with `clio-coder fleet run <name>` and retain its
-receipts. The [fleet demo runbook](fleet-demo-runbook.md) provides a bounded
+receipts. The [fleet demo runbook](../process/fleet-demo-runbook.md) provides a bounded
 end-to-end scenario, including reviewer gates and verification commands. Live
 fleet execution is not hidden inside deterministic CI.

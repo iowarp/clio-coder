@@ -6,12 +6,12 @@
 This cookbook guides developers through implementing custom model runtimes and inference server integrations within Clio Coder. It explains the runtime descriptor interfaces, probing protocols, model synthesis, and how to configure reasoning and thinking behaviors.
 
 Source of truth:
-- Runtime descriptor types: [src/domains/providers/types/runtime-descriptor.ts](../src/domains/providers/types/runtime-descriptor.ts)
-- Registry loader: [src/domains/providers/registry.ts](../src/domains/providers/registry.ts)
-- Probe reasoning helpers: [src/domains/providers/probe/reasoning.ts](../src/domains/providers/probe/reasoning.ts)
-- Model capabilities resolver: [src/domains/providers/model-capabilities.ts](../src/domains/providers/model-capabilities.ts)
-- Inference capability flags: [src/domains/providers/types/capability-flags.ts](../src/domains/providers/types/capability-flags.ts)
-- Model target resolution: [src/domains/providers/runtime-resolution.ts](../src/domains/providers/runtime-resolution.ts)
+- Runtime descriptor types: [src/domains/providers/types/runtime-descriptor.ts](../../src/domains/providers/types/runtime-descriptor.ts)
+- Registry loader: [src/domains/providers/registry.ts](../../src/domains/providers/registry.ts)
+- Probe reasoning helpers: [src/domains/providers/probe/reasoning.ts](../../src/domains/providers/probe/reasoning.ts)
+- Model capabilities resolver: [src/domains/providers/model-capabilities.ts](../../src/domains/providers/model-capabilities.ts)
+- Inference capability flags: [src/domains/providers/types/capability-flags.ts](../../src/domains/providers/types/capability-flags.ts)
+- Model target resolution: [src/domains/providers/runtime-resolution.ts](../../src/domains/providers/runtime-resolution.ts)
 
 ---
 
@@ -196,7 +196,7 @@ set is a valid value for `quirks.thinking.mechanism`.
 Once your runtime adapter descriptor is implemented:
 
 ### 5.1 Static Built-in Registration
-Add your descriptor to the static array export in [src/domains/providers/runtimes/builtins.ts](../src/domains/providers/runtimes/builtins.ts):
+Add your descriptor to the static array export in [src/domains/providers/runtimes/builtins.ts](../../src/domains/providers/runtimes/builtins.ts):
 ```typescript
 import { myCustomRuntime } from "./custom/my-custom-runtime.js";
 

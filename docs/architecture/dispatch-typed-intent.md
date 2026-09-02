@@ -11,8 +11,8 @@ omitted, partial, versioned differently, or contradictory, lists the stable
 reason codes an operator or integrator can branch on, and states the measurable
 condition under which the legacy inference fallback may be proposed for removal.
 
-Related pages: [tool-usage.md](tool-usage.md) for the `dispatch` tool arguments,
-[fleet-dispatch.md](fleet-dispatch.md) for fleet contracts,
+Related pages: [tool-usage.md](../guide/tool-usage.md) for the `dispatch` tool arguments,
+[fleet-dispatch.md](../guide/fleet-dispatch.md) for fleet contracts,
 [artifact-versions.md](artifact-versions.md) for the serialization registry, and
 [safety-model.md](safety-model.md) for how a resolved write boundary is enforced.
 
@@ -25,7 +25,7 @@ Related pages: [tool-usage.md](tool-usage.md) for the `dispatch` tool arguments,
   "intent": {
     "read_roots":     ["src/domains/dispatch/"],
     "write_roots":    ["src/domains/dispatch/", "tests/contracts/"],
-    "relevant_paths": ["docs/dispatch-typed-intent.md"],
+    "relevant_paths": ["docs/architecture/dispatch-typed-intent.md"],
     "expected_outputs": ["src/domains/dispatch/intent-compatibility.ts"],
     "verification":   [{ "check": "typecheck" }, { "check": "lint", "timeout_ms": 60000 }]
   }

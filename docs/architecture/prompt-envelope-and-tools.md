@@ -42,7 +42,7 @@ Prompt extensions can add dynamic fragments for project rules, the operator prof
 
 ## Prompt template expansion
 
-Prompt templates expand into the operator's user message before submission. They do not alter the compiled system prompt or bypass the trust check on project-scope compatibility roots. The prompt-root locations, frontmatter fields, and trust rules are documented in [extensions-and-sharing.md](extensions-and-sharing.md#prompt-templates).
+Prompt templates expand into the operator's user message before submission. They do not alter the compiled system prompt or bypass the trust check on project-scope compatibility roots. The prompt-root locations, frontmatter fields, and trust rules are documented in [extensions-and-sharing.md](../guide/extensions-and-sharing.md#prompt-templates).
 
 The first whitespace character after `/template-name` is the command delimiter; CRLF counts as one delimiter. Leading whitespace before the slash is also command framing. Every byte after that delimiter is the argument payload, including leading or trailing whitespace, repeated spaces, tabs, quotes, and line breaks.
 
@@ -180,7 +180,7 @@ Every envelope result carries `details.observation` (`{tool, unit, shownCount, t
 
 ## Description tiering
 
-Tool descriptions are tiered by how much a wrong call costs. The hot tools the model calls constantly (`read`, `grep`, `find`, `dispatch`) embed their operational contract in the description: caps, modes, ignore semantics, and how truncated results continue. Every other tool carries a one-to-two-sentence statement of what it does, and deep usage guidance lives in the bundled docs corpus ([tool-usage.md](tool-usage.md)) rather than the prompt prefix, retrievable on demand through `context(scope="docs")`. This keeps the serialized schema block small and byte-stable while still giving the model a path to depth when it needs one.
+Tool descriptions are tiered by how much a wrong call costs. The hot tools the model calls constantly (`read`, `grep`, `find`, `dispatch`) embed their operational contract in the description: caps, modes, ignore semantics, and how truncated results continue. Every other tool carries a one-to-two-sentence statement of what it does, and deep usage guidance lives in the bundled docs corpus ([tool-usage.md](../guide/tool-usage.md)) rather than the prompt prefix, retrievable on demand through `context(scope="docs")`. This keeps the serialized schema block small and byte-stable while still giving the model a path to depth when it needs one.
 
 ## The gateway reservation
 

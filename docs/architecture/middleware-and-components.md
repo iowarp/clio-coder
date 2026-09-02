@@ -51,7 +51,10 @@ It does not execute scanned files.
 | `eval-suite` | reserved kind | descriptive |
 
 > [!WARNING]
-> The current scanner still looks for `doc-spec` files under `docs/specs/`. Most public docs now live flat under `docs/*.md`, so public docs may not appear as `doc-spec` components until the scanner is updated.
+> The current scanner still looks for `doc-spec` files under `docs/specs/`.
+> Public reference pages now live under `docs/guide/`, `docs/architecture/`,
+> `docs/process/`, and `docs/history/`, so they do not appear as `doc-spec`
+> components unless the scanner's dedicated root is updated.
 
 ### Reload classes
 

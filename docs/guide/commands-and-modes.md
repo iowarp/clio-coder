@@ -398,7 +398,7 @@ stable board history and `userTaskId` pickup links survive `/resume` and `/fork`
 and can be audited from `current.jsonl`. Operator tasks persist separately in
 `.clio-coder/user-tasks.json`; the overlay can add, hand, finish, or drop them.
 The model-facing `tasks` tool's session-ledger and inbox bookkeeping is the
-documented read-class exception described in [the safety model](safety-model.md):
+documented read-class exception described in [the safety model](../architecture/safety-model.md):
 calls remain audited as `read` and do not grant workspace mutation authority.
 
 The `/decisions` overlay shows completed and cancelled `ask_user` interviews
@@ -534,7 +534,7 @@ Clio Coder operates with a single, unified tool surface. There are no separate t
 Tool and command execution is governed by:
 - **Target Capabilities:** What the selected model target actually supports (such as tools, streaming, and vision).
 - **Safety Net:** Granular rule packs loaded from `damage-control-rules.yaml`, project policies, and protected artifact paths; always on, identical at every autonomy level.
-- **Autonomy Mapping:** Once the net passes a call, the level decides whether it runs, asks, or is denied. See [safety-model.md](safety-model.md) for the full matrix.
+- **Autonomy Mapping:** Once the net passes a call, the level decides whether it runs, asks, or is denied. See [safety-model.md](../architecture/safety-model.md) for the full matrix.
 
 When an action asks for confirmation, whether from a safety-net rail or from the autonomy level, the call parks and three surfaces say so at once. The transcript row reads `⏸ awaiting approval` with `action ·`, `axis ·`, and `target ·` lines under it; the footer phase pill reads `⏸ confirm`; and a consequence-tier dialog opens with the tool, target, action, authenticated requester, one-shot authority, reversibility, and deny and stop effects. Titles distinguish workspace authority, outward consequences, safety-net confirmation, system changes, and worker escalations. The dialog sits at bottom center with five rows reserved for the composer and footer, and it re-anchors on resize. The composer rail switches to `CONFIRM` and repeats the keys while the prompt owns the keyboard.
 

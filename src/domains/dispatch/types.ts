@@ -584,7 +584,7 @@ export interface RunReceiptSafetySummary {
 	 * (reason code `guard_block`); a call that required permission and was denied
 	 * non-interactively is counted under `permissionRequested`, not `blocked`, so
 	 * scripts can tell "approval would have been needed" apart from a policy
-	 * block (see docs/safety-model.md). Such a call still appears in
+	 * block (see docs/architecture/safety-model.md). Such a call still appears in
 	 * `blockedAttempts` because its outcome was blocked, so `decisions.blocked`
 	 * is not a proxy for the number of blocked attempts; use `blockedAttempts`
 	 * or the `toolStats`/`toolActivity` blocked counts for that.

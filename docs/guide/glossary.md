@@ -187,7 +187,7 @@ This document defines the 50 core architectural concepts and terminology used th
 - **Owning Type**: `renderMarker` in `src/domains/context/working-set/marker.ts`.
 
 ### 46. Canonical Trust Status
-- **Definition**: The six-axis record of what is known about one run: artifact integrity, validation grounding, independent review, context provenance, autonomy enforcement, and completion evidence. It is an algebra, not a score: no axis promotes another, every non-absent state names its source and authority, and `absent`, `unknown`, and `not_applicable` are states in their own right. See [docs/evidence-and-memory.md](evidence-and-memory.md#canonical-trust-status) for the full state table.
+- **Definition**: The six-axis record of what is known about one run: artifact integrity, validation grounding, independent review, context provenance, autonomy enforcement, and completion evidence. It is an algebra, not a score: no axis promotes another, every non-absent state names its source and authority, and `absent`, `unknown`, and `not_applicable` are states in their own right. See [docs/architecture/evidence-and-memory.md](../architecture/evidence-and-memory.md#canonical-trust-status) for the full state table.
 - **Owning Type**: `CanonicalTrustStatus` in `src/domains/evidence/trust-status.ts`.
 
 ### 47. Trust Projection

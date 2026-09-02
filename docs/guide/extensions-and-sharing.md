@@ -228,7 +228,7 @@ inference over its task and briefing text, and the request is refused only when
 it states a contradiction, such as a legacy `writeRoots` disagreeing with a
 declared `write_roots`. Declaring is what stops an applicable project rule from
 being missed because the task text happened not to spell a path. See
-[dispatch-typed-intent.md](dispatch-typed-intent.md).
+[dispatch-typed-intent.md](../architecture/dispatch-typed-intent.md).
 
 ---
 

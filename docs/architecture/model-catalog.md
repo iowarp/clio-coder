@@ -43,7 +43,7 @@ worker spec and receipt are written.
 
 Clio's evaluation engine records target, runtime, wire model, thinking level,
 serving facts, and evidence with each run. Reviewable reference suites live
-under [`evals/`](../evals/); private prompts, external benchmark adapters, raw
+under [`evals/`](../../evals/); private prompts, external benchmark adapters, raw
 campaign artifacts, credentials, and non-reference private endpoint details
 belong outside this repository. Use `clio-coder eval run --suite <path> --target <id>` and retain
 the resulting execution envelope when comparing models or serving settings.

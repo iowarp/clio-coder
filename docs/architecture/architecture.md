@@ -322,7 +322,7 @@ subcommands never construct a lease; the established explicit
 
 Tracing is opt-in and content-free. Its bounded asynchronous writer never does
 filesystem append I/O on the render stack, and shutdown awaits a bounded flush.
-See [performance-methodology.md](performance-methodology.md) for vocabulary,
+See [performance-methodology.md](../process/performance-methodology.md) for vocabulary,
 commands, PTY limitations, and baseline evidence.
 
 ## Command spec

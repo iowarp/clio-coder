@@ -79,4 +79,4 @@ Run these contracts first on a Pi bump, before the full gate:
 - `tests/smoke/process-lifecycle.test.ts`
 
 The complete upgrade procedure lives in
-[Development Pipeline](development-pipeline.md#inheriting-a-pi-release).
+[Development Pipeline](../process/development-pipeline.md#inheriting-a-pi-release).
