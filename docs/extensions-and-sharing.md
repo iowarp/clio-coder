@@ -74,8 +74,7 @@ A Claude Code slash command in `.claude/commands`, a Codex prompt in `.codex/pro
 User-scope foreign prompts are trusted because they came from the operator's
 machine. A project-scope prompt lists in `/resources prompts` with an
 `untrusted` marker and refuses substitution until
-`integrations.projectResources.trustProjectImports: true` (or the
-`CLIO_CODER_TRUST_PROJECT_RESOURCES=1` process override) opts in. An untrusted
+`integrations.projectResources.trustProjectImports: true` opts in. An untrusted
 template sends nothing to the model. A token naming neither a command nor a
 template reports `is not a command`.
 
@@ -131,7 +130,7 @@ Recognized frontmatter fields:
 
 Shared user roots are model-visible by default, like the Clio user root. Project-local compatibility roots are discovered but **untrusted by default**: they appear in `/skill` with an `untrusted` marker, but they are excluded from the model-visible catalog and cannot be loaded through `context`. This prevents an unreviewed project checkout from injecting skills the model will act on.
 
-Opt in to model-visible project compatibility roots by setting `integrations.projectResources.trustProjectImports: true` in `settings.yaml`. `CLIO_CODER_TRUST_PROJECT_RESOURCES=1` remains an environment override. `.clio-coder/skills` is always trusted as the Clio-native project root.
+Opt in to model-visible project compatibility roots by setting `integrations.projectResources.trustProjectImports: true` in `settings.yaml`. `.clio-coder/skills` is always trusted as the Clio-native project root.
 
 ### Loading with context, writing directly
 

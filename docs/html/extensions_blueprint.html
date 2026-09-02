@@ -821,7 +821,7 @@ clio-kit/                  # Ext package root
         </div>
         <div class="glass-card">
           <h2>Diagnostics & Safety</h2>
-          <p style="margin-bottom: 0.75rem; font-size:0.95rem;"><strong>Untrusted project roots:</strong> Shared local project compatibility roots (like <code>.agents/skills</code>) are deactivated by default to prevent arbitrary code/instruction injections. Opt-in is configured via <code>integrations.projectResources.trustProjectImports: true</code> in <code>settings.yaml</code> or setting the environment variable <code>CLIO_CODER_TRUST_PROJECT_RESOURCES=1</code>.</p>
+          <p style="margin-bottom: 0.75rem; font-size:0.95rem;"><strong>Untrusted project roots:</strong> Shared local project compatibility roots (like <code>.agents/skills</code>) are deactivated by default to prevent arbitrary code/instruction injections. Opt-in is configured via <code>integrations.projectResources.trustProjectImports: true</code> in <code>settings.yaml</code>.</p>
           <p style="font-size:0.95rem;"><strong>Graceful Degradations:</strong> Only a missing <code>description</code> inside a skill frontmatter is a hard rejection. All other validation anomalies (consecutive hyphens in names, name-directory mismatches, frontmatter format failures) degrade to warnings, enabling the skill or template to still load with diagnostics.</p>
         </div>
       </div>

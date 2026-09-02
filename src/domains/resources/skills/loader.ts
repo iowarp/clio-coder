@@ -218,8 +218,7 @@ function defaultPrecedenceForScope(scope: ResourceScope): number {
  * Clio's context, so one opt-in covers both.
  */
 export function projectCompatTrusted(explicit?: boolean): boolean {
-	if (explicit === true) return true;
-	return process.env.CLIO_CODER_TRUST_PROJECT_RESOURCES === "1";
+	return explicit === true;
 }
 
 /**

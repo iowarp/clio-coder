@@ -37,7 +37,7 @@ import { createSlashCommandAutocompleteProvider } from "./slash-autocomplete.js"
 import { parseSlashCommand, type RunIo } from "./slash-commands.js";
 import { createStatusController, type StatusController, type TurnSummary } from "./status/index.js";
 import type { SmoothStreamingMode } from "./stream-pacer.js";
-import { processAutoPacingAllowed, resolveSmoothStreamingMode } from "./stream-pacing-policy.js";
+import { processAutoPacingAllowed } from "./stream-pacing-policy.js";
 import { formatTargetLabel } from "./theme/index.js";
 import { createWelcomeDashboard, type WelcomeDashboardComponent } from "./welcome-dashboard.js";
 import { readWorkerReceiptFacts } from "./worker-receipts.js";
@@ -452,7 +452,7 @@ export function createInteractivePresentation(deps: InteractivePresentationDeps)
 			? {
 					streamIngress: deps.resolveStreamIngress,
 					getSmoothStreamingMode: () => {
-						const mode = resolveSmoothStreamingMode(deps.getSettings?.().interface.smoothStreaming ?? "off");
+						const mode = deps.getSettings?.().interface.smoothStreaming ?? "off";
 						const autoAllowed = processAutoPacingAllowed(deps.hasObservedBackpressure?.() ?? false);
 						deps.onSmoothStreamingMode?.(mode, mode === "on" || (mode === "auto" && autoAllowed));
 						return mode;

@@ -12,7 +12,7 @@ Clio's engine discovers *runtime* skills from these roots (see
 - extension roots
 - `~/.agents`, `~/.claude`, `~/.codex`, `~/.config/opencode`, `~/.copilot` → their `skills/` subdir
 - `<clio-config>/skills` (per-user)
-- project `.agents` / `.claude` / `.codex` / `.opencode` / `.github` → their `skills/` subdir (model-visible only with `CLIO_CODER_TRUST_PROJECT_RESOURCES=1`; untrusted by default)
+- project `.agents` / `.claude` / `.codex` / `.opencode` / `.github` → their `skills/` subdir (model-visible only when `integrations.projectResources.trustProjectImports` is true; untrusted by default)
 - `.clio-coder/skills` (per-project)
 
 This repo's `skills/` directory is **not** one of those roots, so nothing here
