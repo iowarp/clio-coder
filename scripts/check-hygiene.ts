@@ -21,7 +21,6 @@ import {
 	readdirSync,
 	readFileSync,
 	rmSync,
-	statSync,
 	symlinkSync,
 	writeFileSync,
 } from "node:fs";
@@ -36,6 +35,7 @@ import { OPTIONAL_RECIPE_KEYS, RECIPE_KEYS } from "../src/domains/agents/recipe-
 import { loadFragments } from "../src/domains/prompts/fragment-loader.js";
 import { listDocsCorpus } from "../src/tools/context/docs-engine.js";
 import { runBoundaryCheck } from "../tests/boundaries/check-boundaries.js";
+import { checkKnobRegistry, loadRegistry as loadKnobRegistry } from "./knobs/check.js";
 
 const root = resolvePackageRoot(import.meta.url);
 const errors: string[] = [];
@@ -580,58 +580,33 @@ function checkSettingsInventory(): void {
 }
 
 // ---------------------------------------------------------------------------
-// environment-variable-inventory: docs/environment-variables.md claims to
-// list every CLIO_* variable src reads. Was
+// environment-variable-inventory: docs/environment-variables.md carries the
+// operator prose for every CLIO_* variable and NO_COLOR, so each such entry in
+// the knob registry needs a row there. The registry itself is held against the
+// source tree by the knob-registry check below, which is where the "every
+// variable src reads" guarantee now lives. Was
 // tests/contracts/environment-variable-inventory.test.ts.
 // ---------------------------------------------------------------------------
 const DOCUMENTED_ENV_FAMILIES: ReadonlyArray<RegExp> = [
 	/^CLIO_CODER_WORKER_FAUX(_[A-Z_]+)?$/, // documented as `CLIO_CODER_WORKER_FAUX` (+ suffixes)
-	/^CLIO_CODER_HOOK_BUDGET_[A-Z_]+_MS$/, // documented as `CLIO_CODER_HOOK_BUDGET_<PHASE>_MS`
+	/^CLIO_CODER_HOOK_BUDGET_<PHASE>_MS$/, // documented as `CLIO_CODER_HOOK_BUDGET_<PHASE>_MS`
 ];
-
-function sourceFiles(dir: string): string[] {
-	const found: string[] = [];
-	for (const entry of readdirSync(dir)) {
-		const full = join(dir, entry);
-		if (statSync(full).isDirectory()) {
-			found.push(...sourceFiles(full));
-			continue;
-		}
-		if (full.endsWith(".ts") || full.endsWith(".mts")) found.push(full);
-	}
-	return found;
-}
-
-function readEnvNames(): Map<string, string[]> {
-	const byName = new Map<string, string[]>();
-	const pattern =
-		/(?:env(?:\.(CLIO_[A-Z0-9_]+|NO_COLOR)|\[["'](CLIO_[A-Z0-9_]+|NO_COLOR)["']\])|(?:const\s+[A-Z0-9_]+_ENV\s*=\s*["'](CLIO_[A-Z0-9_]+)["']))/g;
-	for (const file of sourceFiles(join(root, "src"))) {
-		const source = readFileSync(file, "utf8");
-		for (const match of source.matchAll(pattern)) {
-			const name = match[1] ?? match[2] ?? match[3];
-			if (name === undefined) continue;
-			const relPath = file.slice(root.length);
-			const sites = byName.get(name) ?? [];
-			if (!sites.includes(relPath)) sites.push(relPath);
-			byName.set(name, sites);
-		}
-	}
-	return byName;
-}
 
 function checkEnvironmentVariableInventory(): void {
 	const doc = readRoot("docs/environment-variables.md");
+	const registry = loadKnobRegistry(root);
 	const missing: string[] = [];
-	for (const [name, sites] of readEnvNames()) {
-		if (doc.includes(`\`${name}\``)) continue;
-		if (DOCUMENTED_ENV_FAMILIES.some((family) => family.test(name))) continue;
-		missing.push(`${name} (read at ${sites.join(", ")})`);
+	for (const entry of registry.entries) {
+		if (entry.kind !== "env") continue;
+		if (!/^CLIO_/.test(entry.name) && entry.name !== "NO_COLOR") continue;
+		if (doc.includes(`\`${entry.name}\``)) continue;
+		if (DOCUMENTED_ENV_FAMILIES.some((family) => family.test(entry.name))) continue;
+		missing.push(entry.name);
 	}
 	if (missing.length > 0) {
 		fail(
 			"environment-variable-inventory",
-			`docs/environment-variables.md claims to list every variable src reads, and omits:\n  ${missing.join("\n  ")}`,
+			`docs/environment-variables.md claims to list every CLIO_* variable src reads, and omits:\n  ${missing.join("\n  ")}`,
 		);
 	}
 
@@ -656,6 +631,18 @@ function checkEnvironmentVariableInventory(): void {
 			`the CLIO_CODER_MEMORY_TRACE row must state it carries conversation text: ${memoryTraceRow}`,
 		);
 	}
+}
+
+// ---------------------------------------------------------------------------
+// knob-registry: docs/knobs.yaml is the one place a flag, setting, tool
+// argument, recipe key, model tag, or bounding constant is declared. The check
+// reads every surface off the tree (scripts/knobs/sources.ts) and fails when
+// the tree reads a knob the registry does not list, when the registry lists one
+// the tree no longer reads, when a settings or constant default disagrees with
+// the code, or when the rendered docs/knobs.md is stale (`npm run knobs`).
+// ---------------------------------------------------------------------------
+async function checkKnobRegistryDrift(): Promise<void> {
+	for (const error of await checkKnobRegistry(root)) fail("knob-registry", error);
 }
 
 // ---------------------------------------------------------------------------
@@ -1405,6 +1392,7 @@ const checks: ReadonlyArray<[string, () => void | Promise<void>]> = [
 	["defaults-yaml", checkDefaultsYaml],
 	["settings-inventory", checkSettingsInventory],
 	["environment-variable-inventory", checkEnvironmentVariableInventory],
+	["knob-registry", checkKnobRegistryDrift],
 	["theme-discipline", checkThemeDiscipline],
 	["readme-install-block", checkReadmeInstallBlock],
 	["packaging", checkPackaging],

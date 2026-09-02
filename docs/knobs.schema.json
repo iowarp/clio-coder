@@ -1,0 +1,116 @@
+{
+	"$schema": "https://json-schema.org/draft/2020-12/schema",
+	"$id": "https://iowarp.ai/clio-coder/knobs.schema.json",
+	"title": "Clio Coder knob registry",
+	"description": "Every flag, key, argument, and constant that changes what Clio Coder does. Held against the source tree by the knob-registry check in scripts/check-hygiene.ts; rendered to docs/knobs.md by `npm run knobs`.",
+	"type": "object",
+	"additionalProperties": false,
+	"required": ["version", "constantScopes", "toolArgScopes", "entries"],
+	"properties": {
+		"version": { "const": 1 },
+		"constantScopes": {
+			"description": "Source files whose top-level numeric constants (except *_VERSION) must all be registered.",
+			"type": "array",
+			"items": { "type": "string", "pattern": "^src/.*\\.ts$" }
+		},
+		"toolArgScopes": {
+			"description": "Tool names whose argument schemas must be fully registered.",
+			"type": "array",
+			"items": { "type": "string" }
+		},
+		"entries": {
+			"type": "array",
+			"items": { "$ref": "#/$defs/entry" }
+		}
+	},
+	"$defs": {
+		"entry": {
+			"type": "object",
+			"additionalProperties": false,
+			"required": ["name", "kind", "owner", "controls", "verdict"],
+			"properties": {
+				"name": {
+					"description": "The knob as the surface spells it: the variable, the dotted settings path, the --flag, the file key, the schema path, the frontmatter key, the YAML key path, or the constant identifier.",
+					"type": "string",
+					"minLength": 1
+				},
+				"kind": {
+					"enum": [
+						"env",
+						"setting",
+						"flag",
+						"project-file",
+						"tool-arg",
+						"recipe-key",
+						"fragment-key",
+						"model-tag",
+						"constant"
+					]
+				},
+				"owner": {
+					"description": "The command (flags) or domain (everything else) that owns the knob.",
+					"type": "string",
+					"minLength": 1
+				},
+				"command": {
+					"description": "Flags only: the subcommand that parses it, or `global` for a startup flag.",
+					"type": "string"
+				},
+				"file": {
+					"description": "project-file only: the path under .clio-coder/ the key lives in.",
+					"type": "string",
+					"pattern": "^\\.clio-coder/"
+				},
+				"source": {
+					"description": "constant only: the source file that declares it.",
+					"type": "string",
+					"pattern": "^src/.*\\.ts$"
+				},
+				"class": {
+					"description": "tool-arg only: whether the argument is a policy knob or the task payload.",
+					"enum": ["policy", "task"]
+				},
+				"default": {
+					"description": "What applies when nothing sets the knob. For settings and constants the check holds it against the code.",
+					"type": "string"
+				},
+				"controls": {
+					"description": "One sentence: what the knob changes and the values it takes.",
+					"type": "string",
+					"minLength": 1
+				},
+				"precedence": {
+					"description": "What beats what when several surfaces set the same value, most powerful first.",
+					"type": "string"
+				},
+				"verdict": {
+					"description": "keep; merge into `mergeWith`; deprecate behind a warning in favour of `mergeWith`; document (kept, and this row is its only documentation); remove.",
+					"enum": ["keep", "merge", "deprecate", "document", "remove"]
+				},
+				"mergeWith": {
+					"description": "For merge and deprecate: the canonical knob.",
+					"type": "string"
+				},
+				"pattern": {
+					"description": "A regular expression that matches every source-side spelling of a family (`CLIO_CODER_HOOK_BUDGET_<PHASE>_MS`).",
+					"type": "string"
+				},
+				"note": {
+					"description": "Evidence for the verdict or anything the row cannot say in `controls`.",
+					"type": "string"
+				}
+			},
+			"allOf": [
+				{ "if": { "properties": { "kind": { "const": "flag" } } }, "then": { "required": ["command"] } },
+				{ "if": { "properties": { "kind": { "const": "project-file" } } }, "then": { "required": ["file"] } },
+				{ "if": { "properties": { "kind": { "const": "constant" } } }, "then": { "required": ["source", "default"] } },
+				{ "if": { "properties": { "kind": { "const": "tool-arg" } } }, "then": { "required": ["class"] } },
+				{
+					"if": { "properties": { "verdict": { "enum": ["merge", "deprecate"] } } },
+					"then": { "required": ["mergeWith"] }
+				},
+				{ "if": { "properties": { "verdict": { "const": "remove" } } }, "then": { "required": ["note"] } }
+			]
+		}
+	}
+}

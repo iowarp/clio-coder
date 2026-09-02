@@ -72,6 +72,8 @@
 		"typecheck": "tsc -p tsconfig.tests.json",
 		"format": "biome format --write .",
 		"lint": "biome check . && node --import tsx scripts/check-hygiene.ts",
+		"knobs": "node --import tsx scripts/knobs/cli.ts render",
+		"knobs:check": "node --import tsx scripts/knobs/cli.ts check",
 		"pi:surface-diff": "node --import tsx scripts/pi-surface-diff.ts",
 		"pi:surface-snapshot": "node --import tsx scripts/pi-surface-diff.ts --write",
 		"test:file": "node --import tsx --import ./tests/harness/tmp-root.ts --test",
