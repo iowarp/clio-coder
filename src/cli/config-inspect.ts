@@ -16,7 +16,7 @@ import { basename, join } from "node:path";
 import type { ClioSettings } from "../core/config.js";
 import { resolvePackageRoot } from "../core/package-root.js";
 import { readLayeredSettings, type SettingsOrigin, settingsSourceFor } from "../core/settings-layers.js";
-import { clioDataDir } from "../core/xdg.js";
+import { clioDataDir, clioStateDir } from "../core/xdg.js";
 import {
 	loadOperatorProfile,
 	loadProjectClioMd,
@@ -26,7 +26,12 @@ import {
 } from "../domains/context/index.js";
 import { extensionSnapshotFor, listInstalledExtensions } from "../domains/extensions/index.js";
 import { loadMemoryRecordsSync, memoryStorePath } from "../domains/memory/index.js";
-import { loadUserHooks, readHookSources } from "../domains/middleware/index.js";
+import {
+	HOOK_RECEIPT_LOG_CAPACITY,
+	loadUserHooks,
+	readHookSources,
+	readPersistedHookReceipts,
+} from "../domains/middleware/index.js";
 import { classifyProjectPreload } from "../domains/prompts/preload.js";
 import { defaultScopedResourceRoots } from "../domains/resources/common-loader.js";
 import { ceilChars } from "../domains/session/context-accounting.js";
@@ -248,6 +253,44 @@ function inspectHooks(cwd: string, graph: CustomizationGraph): void {
 	}
 }
 
+/**
+ * Rolls up the durable hook-execution receipt log (`<stateDir>/hook-receipts.json`,
+ * written by `createHookReceiptLog` in `src/domains/middleware/hook-receipts.ts`)
+ * into one entry, since this process never held the live in-memory ring a
+ * running session's own invocation writes through. One entry rather than one
+ * per receipt: this graph explains configuration provenance, and a couple
+ * hundred execution rows would swamp that rather than answer it.
+ */
+function inspectHookReceipts(graph: CustomizationGraph): void {
+	const path = join(clioStateDir(), "hook-receipts.json");
+	try {
+		const receipts = existsSync(path) ? readPersistedHookReceipts(path) : [];
+		const outcomes: Record<string, number> = {};
+		for (const receipt of receipts) outcomes[receipt.outcome] = (outcomes[receipt.outcome] ?? 0) + 1;
+		const last = receipts.at(-1);
+		graph.entries.push({
+			category: "hook",
+			id: "hook-receipts",
+			scope: "user",
+			sourcePath: path,
+			reloadClass: "n/a",
+			trust: "n/a",
+			precedence: "single",
+			detail: {
+				present: existsSync(path),
+				count: receipts.length,
+				capacity: HOOK_RECEIPT_LOG_CAPACITY,
+				outcomes,
+				...(last === undefined
+					? {}
+					: { mostRecent: { at: last.at, hookId: last.hookId, outcome: last.outcome } }),
+			},
+		});
+	} catch (err) {
+		graph.issues.push(`hook-receipts: ${err instanceof Error ? err.message : String(err)}`);
+	}
+}
+
 function inspectExtensions(cwd: string, graph: CustomizationGraph): void {
 	try {
 		for (const ext of listInstalledExtensions(cwd, { all: true })) {
@@ -367,6 +410,7 @@ export function buildCustomizationGraph(cwd: string): CustomizationGraph {
 	inspectRules(cwd, graph);
 	inspectOperatorProfile(cwd, graph);
 	inspectHooks(cwd, graph);
+	inspectHookReceipts(graph);
 	inspectExtensions(cwd, graph);
 	inspectResourceRoots(cwd, graph);
 	inspectSafetyAndMemory(cwd, graph);
