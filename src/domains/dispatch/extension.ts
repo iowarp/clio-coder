@@ -182,7 +182,12 @@ import {
 	type HeartbeatStatus,
 	heartbeatMonotonicAt,
 } from "./heartbeat.js";
-import { hostVerificationRejection, runHostVerification } from "./host-verification.js";
+import {
+	type BatchVerificationGate,
+	createBatchVerificationGate,
+	hostVerificationRejection,
+	runHostVerification,
+} from "./host-verification.js";
 import { renderDispatchIntentRequirements } from "./intent-requirements.js";
 import { adaptJointRouteInput } from "./joint-route-adapter.js";
 import {
@@ -4384,6 +4389,7 @@ export function createDispatchBundle(
 	async function dispatchAttempt(
 		req: DispatchRequest,
 		observer?: DispatchAdmissionObserver,
+		settlement?: BatchVerificationGate,
 	): Promise<{
 		runId: string;
 		events: AsyncIterableIterator<unknown>;
@@ -4479,10 +4485,12 @@ export function createDispatchBundle(
 			}
 			rebindReservationSlot(req, "local", null, UNKNOWN_PRICING_ADMISSION_ESTIMATE_USD, settings);
 			routeObservation = observeShadowRoute(req, undefined, settings);
-			return attachRouteObservation({
-				...(await dispatchAcpDelegation(req, settings, timing, routeObservation.decision, observer)),
-				effectiveRequest: req,
-			});
+			const delegated = await dispatchAcpDelegation(req, settings, timing, routeObservation.decision, observer);
+			// An ACP member never runs host verification, so it can only ever leave
+			// the barrier. It still edits the checkout, so the barrier has to wait
+			// for it; dispatch() releases it when its finalPromise settles.
+			settlement?.live(delegated.runId);
+			return attachRouteObservation({ ...delegated, effectiveRequest: req });
 		}
 
 		req = routeAroundCoolingTarget(req, settings) ?? req;
@@ -5407,6 +5415,14 @@ export function createDispatchBundle(
 			return { assessment, rigor };
 		};
 
+		// The worker is spawned and its ledger row exists, so from here it can
+		// write and the batch barrier has to wait for it. Registered after the
+		// try/catch at 4939-5068, which aborts the worker and releases the lease on
+		// failure, so a run that never reaches the barrier is never made live.
+		// Paired with the abandon in dispatch(), which fires the moment
+		// finalPromise settles.
+		settlement?.live(envelope.id);
+
 		const finalPromise = (async (): Promise<RunReceipt> => {
 			try {
 				const result = await workerDone;
@@ -5531,12 +5547,21 @@ export function createDispatchBundle(
 					finalDetail = WORKER_FINAL_OUTPUT_MISSING_DETAIL;
 					failureMessage = finalDetail;
 				}
-				const hostVerification = await runHostVerification({
+				const hostVerificationInput = {
 					runId: envelope.id,
 					request: req,
 					workerSuccessful: finalOutcome === "succeeded",
-					onDiagnostic: (error) => reportDispatchDiagnostic(`write host verification memo for ${envelope.id}`, error),
-				});
+					onDiagnostic: (error: unknown) =>
+						reportDispatchDiagnostic(`write host verification memo for ${envelope.id}`, error),
+				};
+				// This await is the batch barrier. It already sits before
+				// buildReceiptDraft below, which is why batch settlement needs no
+				// receipt restructuring: every member parks here with its outcome
+				// resolved and nothing sealed.
+				const hostVerification =
+					settlement === undefined
+						? await runHostVerification(hostVerificationInput)
+						: await settlement.arrive(hostVerificationInput);
 				const hostRejection = hostVerificationRejection(hostVerification);
 				if (hostRejection !== null && finalOutcome === "succeeded") {
 					finalOutcome = "failed";
@@ -5729,6 +5754,7 @@ export function createDispatchBundle(
 	async function dispatch(
 		req: DispatchRequest,
 		observer?: DispatchAdmissionObserver,
+		settlement?: BatchVerificationGate,
 	): Promise<{
 		runId: string;
 		events: AsyncIterableIterator<unknown>;
@@ -5776,7 +5802,7 @@ export function createDispatchBundle(
 		}
 		let handle: Awaited<ReturnType<typeof dispatchAttempt>>;
 		try {
-			handle = await dispatchAttempt(prepared, observer);
+			handle = await dispatchAttempt(prepared, observer, settlement);
 		} catch (error) {
 			writerLease?.release();
 			if (createdWorktree !== undefined) {
@@ -5790,6 +5816,14 @@ export function createDispatchBundle(
 				rollbackDispatchReservation(req.reservation.ownerId, now());
 			}
 			throw error;
+		}
+		// A finalization that throws before the barrier, and an ACP handle that
+		// never reaches it at all, must not park their siblings forever. A member
+		// that already arrived is parked and abandon() is a no-op for it, so this
+		// fires harmlessly on the normal path.
+		if (settlement !== undefined) {
+			const release = (): void => settlement.abandon(handle.runId);
+			handle.finalPromise.then(release, release);
 		}
 		// Requests carrying lineage are internal attempts (retry or nested
 		// orchestration) and retain the per-attempt handle contract.
@@ -6164,10 +6198,19 @@ export function createDispatchBundle(
 		finalPromise: Promise<ReadonlyArray<RunReceipt>>;
 	}> {
 		if (reqs.length === 0) throw new Error("dispatch: batch requires at least one request");
+		// Two or more concurrent workers share one checkout, so a declared check
+		// run while a sibling is still editing judges a tree neither worker
+		// authored. The barrier only exists when there is both something to verify
+		// and something that could race it; a one-request batch and a batch with no
+		// declared check keep today's per-run path exactly.
+		const settlement =
+			reqs.length > 1 && reqs.some((req) => (req.resolvedVerification?.length ?? 0) > 0)
+				? createBatchVerificationGate()
+				: undefined;
 		const handles: Array<Awaited<ReturnType<typeof dispatch>> & { agentId: string }> = [];
 		try {
 			for (const req of reqs) {
-				const handle = await dispatch(req);
+				const handle = await dispatch(req, undefined, settlement);
 				handles.push({ ...handle, agentId: req.agentId });
 			}
 		} catch (err) {
