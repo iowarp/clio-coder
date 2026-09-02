@@ -1,6 +1,8 @@
 import type { CompiledSessionPrompt, SessionPromptInputs, WorkerPromptInputs } from "./compiler.js";
 
 export interface CompileSessionPromptInput {
+	/** Stable session identity that owns the compiler's frozen disk-input snapshot. */
+	sessionId: string;
 	sessionInputs: SessionPromptInputs;
 	autonomy?: string;
 	cwd?: string;
@@ -24,18 +26,20 @@ export interface CompileWorkerPromptInput extends WorkerPromptInputs {
 
 export interface PromptsContract {
 	/**
-	 * Revision of compiler-owned inputs that support live reload. Fragment and
-	 * agent-catalog components advance independently and are combined without
-	 * loss. Project handbooks, rules, and operator profile remain session-frozen
-	 * until a config invalidation or a new session.
+	 * Revision of compiler-owned inputs. Fragment, agent-catalog, and
+	 * session-source invalidation components advance independently and are
+	 * combined without loss. Project handbooks, rules, operator profile, and
+	 * repo awareness are frozen in a real per-session snapshot until a config
+	 * invalidation or a new session.
 	 */
 	inputEpoch(): string;
 
 	/**
 	 * Compile the session system prompt. Called once per session (and again
 	 * only on explicit, logged events: model/target change, autonomy-level
-	 * change, fragment reload, session switch). Inputs must be constant for
-	 * the session's lifetime.
+	 * change, fragment reload, session switch). Compiler-owned disk inputs are
+	 * selected from the session snapshot even when another identity input causes
+	 * a recompile.
 	 */
 	compileSessionPrompt(input: CompileSessionPromptInput): Promise<CompiledSessionPrompt>;
 

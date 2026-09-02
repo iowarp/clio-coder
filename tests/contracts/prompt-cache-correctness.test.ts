@@ -74,7 +74,13 @@ describe("main compiled-prompt cache identity", () => {
 
 		const variants: Array<[string, MainPromptCacheIdentityInput]> = [
 			["prompt input epoch", { ...identityInput(), promptInputEpoch: "2:1" }],
+			["target", { ...identityInput(), targetId: "remote" }],
 			["runtime", { ...identityInput(), runtimeId: "ollama" }],
+			["wire model", { ...identityInput(), wireModelId: "changed-model" }],
+			["autonomy", { ...identityInput(), autonomy: "suggest" }],
+			["session", { ...identityInput(), sessionId: "session-2" }],
+			["cwd", { ...identityInput(), cwd: "/other-workspace" }],
+			["working-context membership", { ...identityInput(), workingContextPaths: ["src/a.ts"] }],
 			[
 				"context window",
 				{ ...identityInput(), sessionInputs: { ...identityInput().sessionInputs, contextWindow: 16_384 } },
@@ -87,6 +93,10 @@ describe("main compiled-prompt cache identity", () => {
 			[
 				"thinking guidance",
 				{ ...identityInput(), sessionInputs: { ...identityInput().sessionInputs, thinkingGuidance: "Changed." } },
+			],
+			[
+				"tool names",
+				{ ...identityInput(), sessionInputs: { ...identityInput().sessionInputs, toolNames: ["read", "grep"] } },
 			],
 			[
 				"tool prompt hint",

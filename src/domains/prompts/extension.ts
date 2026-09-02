@@ -8,9 +8,11 @@ import type { AgentsContract } from "../agents/contract.js";
 import type { ConfigContract } from "../config/contract.js";
 import {
 	type ContextContract,
+	type LoadedOperatorProfile,
 	loadOperatorProfile,
 	loadProjectRules,
 	type ProjectPromptContext,
+	type ProjectRulesLoad,
 	renderOperatorProfile,
 	selectActiveRules,
 } from "../context/index.js";
@@ -28,12 +30,26 @@ export interface PromptsBundleOptions {
 const CLIO_REPO_AWARENESS_ID = "context.clio-repo-awareness";
 const WORKSPACE_ROOT_ID = "context.workspace-root";
 
+interface CustomizationSourceSnapshot {
+	rules: ProjectRulesLoad["rules"];
+	operatorProfile: LoadedOperatorProfile | null;
+}
+
+interface SessionPromptSourceSnapshot {
+	projectContext: ProjectPromptContext | null;
+	customization: CustomizationSourceSnapshot;
+	workspaceRoot: RenderedPromptFragment[];
+	clioRepoAwareness: RenderedPromptFragment[];
+}
+
 export function createPromptsBundle(
 	context: DomainContext,
 	options: PromptsBundleOptions = {},
 ): DomainBundle<PromptsContract> {
 	let table: FragmentTable | null = null;
 	let fragmentEpoch = 0;
+	let sessionSourceEpoch = 0;
+	const sessionSourceSnapshots = new Map<string, SessionPromptSourceSnapshot>();
 	const suppressContextFiles = options.noContextFiles === true;
 
 	function config(): ConfigContract | undefined {
@@ -75,9 +91,41 @@ export function createPromptsBundle(
 		return false;
 	}
 
+	function sessionSourceKey(sessionId: string, cwd: string): string {
+		return `${sessionId}\0${cwd}`;
+	}
+
+	function captureSessionSourceSnapshot(cwd: string): SessionPromptSourceSnapshot {
+		let projectContext: ProjectPromptContext | null = null;
+		if (!suppressContextFiles) {
+			projectContext = contextDomain()?.renderPromptContext(cwd) ?? null;
+			for (const warning of projectContext?.warnings ?? []) process.stderr.write(`${warning}\n`);
+		}
+		return {
+			projectContext,
+			customization: captureCustomizationSources(cwd),
+			workspaceRoot: workspaceRootFragment(cwd),
+			clioRepoAwareness: clioRepoAwarenessFragments(cwd),
+		};
+	}
+
+	function sessionSourceSnapshot(sessionId: string, cwd: string): SessionPromptSourceSnapshot {
+		const key = sessionSourceKey(sessionId, cwd);
+		const existing = sessionSourceSnapshots.get(key);
+		if (existing) return existing;
+		const captured = captureSessionSourceSnapshot(cwd);
+		sessionSourceSnapshots.set(key, captured);
+		return captured;
+	}
+
+	function invalidateSessionSources(): void {
+		sessionSourceSnapshots.clear();
+		sessionSourceEpoch += 1;
+	}
+
 	const contract: PromptsContract = {
 		inputEpoch() {
-			return `${fragmentEpoch}:${agentsDomain()?.revision() ?? 0}`;
+			return `${fragmentEpoch}:${agentsDomain()?.revision() ?? 0}:${sessionSourceEpoch}`;
 		},
 		async compileSessionPrompt(input: CompileSessionPromptInput) {
 			if (!table) throw new Error("prompts domain not started");
@@ -88,11 +136,12 @@ export function createPromptsBundle(
 			const settings: Readonly<ClioSettings> | undefined = configContract?.get();
 			const safety = input.autonomy ?? settings?.safety.autonomy ?? "auto-edit";
 			const cwd = input.cwd ?? process.cwd();
+			const sources = sessionSourceSnapshot(input.sessionId, cwd);
 			let contextFiles = "";
 			let projectPreload: ProjectPreloadClass | null = null;
 			let projectHandbookFiles: string[] = [];
 			if (!suppressContextFiles) {
-				const projectContext = contextDomain()?.renderPromptContext(cwd);
+				const projectContext = sources.projectContext;
 				contextFiles = projectContext
 					? selectProjectContext(projectContext, input.sessionInputs.providerSupportsTools ?? null)
 					: "";
@@ -103,7 +152,6 @@ export function createPromptsBundle(
 					});
 					projectHandbookFiles = projectContext.handbookFiles;
 				}
-				for (const warning of projectContext?.warnings ?? []) process.stderr.write(`${warning}\n`);
 			}
 			const roster = fleetRoster();
 			const sessionInputs = {
@@ -117,9 +165,9 @@ export function createPromptsBundle(
 				safety: `safety.${safety}`,
 				sessionInputs,
 				additionalFragments: [
-					...workspaceRootFragment(cwd),
-					...clioRepoAwarenessFragments(cwd),
-					...customizationFragments(cwd, input.workingContextPaths ?? []).fragments,
+					...sources.workspaceRoot,
+					...sources.clioRepoAwareness,
+					...renderCustomizationFragments(sources.customization, cwd, input.workingContextPaths ?? []).fragments,
 				],
 			});
 			return { ...compiled, projectPreload, projectHandbookFiles };
@@ -157,6 +205,7 @@ export function createPromptsBundle(
 				table = { byId: new Map(), rootDir: "" };
 			}
 			unsubscribeHotReload = context.bus.on(BusChannels.ConfigHotReload, (payload: unknown) => {
+				invalidateSessionSources();
 				const diff = (payload as { diff?: { hotReload?: string[] } } | undefined)?.diff;
 				const paths = diff?.hotReload ?? [];
 				if (!diffTouchesFragments(paths)) return;
@@ -166,6 +215,7 @@ export function createPromptsBundle(
 		async stop() {
 			unsubscribeHotReload?.();
 			unsubscribeHotReload = null;
+			sessionSourceSnapshots.clear();
 		},
 	};
 
@@ -196,12 +246,35 @@ export function customizationFragments(
 	cwd: string,
 	workingContextPaths: ReadonlyArray<string>,
 ): CustomizationFragmentsResult {
+	return renderCustomizationFragments(captureCustomizationSources(cwd), cwd, workingContextPaths);
+}
+
+function captureCustomizationSources(cwd: string): CustomizationSourceSnapshot {
+	let rules: ProjectRulesLoad["rules"] = [];
+	let operatorProfile: LoadedOperatorProfile | null = null;
+	try {
+		rules = loadProjectRules(cwd).rules;
+	} catch {
+		// Project rules are best-effort; a load failure freezes an empty set.
+	}
+	try {
+		operatorProfile = loadOperatorProfile(cwd);
+	} catch {
+		// The operator profile is best-effort; a load failure freezes no profile.
+	}
+	return { rules, operatorProfile };
+}
+
+function renderCustomizationFragments(
+	sources: CustomizationSourceSnapshot,
+	cwd: string,
+	workingContextPaths: ReadonlyArray<string>,
+): CustomizationFragmentsResult {
 	const fragments: RenderedPromptFragment[] = [];
 	let activeRuleIds: string[] = [];
 	let operatorProfileApplied = false;
 	try {
-		const loaded = loadProjectRules(cwd);
-		const active = selectActiveRules(loaded.rules, normalizeWorkingContextPaths(cwd, workingContextPaths));
+		const active = selectActiveRules(sources.rules, normalizeWorkingContextPaths(cwd, workingContextPaths));
 		if (active.length > 0) {
 			const body = ["# Project rules", ...active.map((rule) => rule.body)].join("\n\n");
 			fragments.push({
@@ -217,8 +290,7 @@ export function customizationFragments(
 		// Project rules are best-effort; a load failure must not block compilation.
 	}
 	try {
-		const profile = loadOperatorProfile(cwd);
-		const rendered = renderOperatorProfile(profile.profile);
+		const rendered = renderOperatorProfile(sources.operatorProfile?.profile ?? {});
 		if (rendered.text.length > 0) {
 			fragments.push({
 				id: "context.operator-profile",
