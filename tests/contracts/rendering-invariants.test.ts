@@ -83,6 +83,30 @@ describe("Clio rendering invariants", () => {
 		ok(firstReasoning < before && before < tool && tool < secondReasoning && secondReasoning < after, rendered);
 	});
 
+	it("hoists a skill-suggestion line the model wrote after its narration", () => {
+		const panel = createChatPanel({ now: () => 1_000 });
+		panel.applyEvent({ type: "message_start", message: { role: "assistant" } } as never);
+		const partial = "I checked the tests first.\nSuggested skill: /sk";
+		panel.applyEvent({ type: "text_delta", contentIndex: 0, delta: partial, partialText: partial });
+		// A half-streamed line is ordinary prose until it is whole.
+		const streaming = plainRender(panel);
+		ok(streaming.indexOf("I checked the tests first.") < streaming.indexOf("Suggested skill: /sk"), streaming);
+		const full = "I checked the tests first.\nSuggested skill: /skill tdd\nNow the failing test.";
+		panel.applyEvent({ type: "text_delta", contentIndex: 0, delta: full.slice(partial.length), partialText: full });
+		panel.applyEvent({
+			type: "message_end",
+			message: { role: "assistant", content: [{ type: "text", text: full }] },
+		} as never);
+		panel.applyEvent({ type: "agent_end", messages: [] } as never);
+		const rendered = plainRender(panel);
+		const suggestion = rendered.indexOf("Suggested skill: /skill tdd");
+		const narration = rendered.indexOf("I checked the tests first.");
+		const rest = rendered.indexOf("Now the failing test.");
+		ok(suggestion >= 0 && narration >= 0 && rest >= 0, rendered);
+		ok(suggestion < narration && narration < rest, rendered);
+		strictEqual(rendered.split("Suggested skill:").length, 2, rendered);
+	});
+
 	it("toggles the latest reasoning stretch while a tool remains live", () => {
 		const panel = createChatPanel({ now: () => 1_000 });
 		panel.applyEvent({

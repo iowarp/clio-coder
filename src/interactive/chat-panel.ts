@@ -603,30 +603,53 @@ function hasStreamingText(entry: Extract<TranscriptEntry, { role: "assistant" }>
 }
 
 /**
- * Split a reply that opens with the skill-suggestion protocol line into that
- * line and the answer beneath it.
+ * Locate the skill-suggestion protocol line inside a reply.
  *
- * The prompt asks the model to *begin its reply* with the suggestion, so the
- * usual shape is one segment holding both. Classifying that whole segment as
- * advisory left the turn with no voice glyph at all: the suggestion did not
- * claim it and the answer never got the chance. Returns null when the segment
- * is only a suggestion, which stays advisory in full.
+ * The prompt asks the model to begin its reply with the line, but a model
+ * that narrates its work first puts the line at the end of the final message
+ * about half the time (round-4 skill batches: 1/2 and 0/2 opened, 2/2 fired).
+ * The line is recognized at the start of any line, provided it is complete
+ * (a newline follows it, or the segment is finalized), so a partially
+ * streamed line stays ordinary prose until it is whole. Returns the line's
+ * byte range or null.
+ */
+function findSkillSuggestionLine(seg: TextSegment): { start: number; end: number } | null {
+	const text = seg.text;
+	let at = text.startsWith(SKILL_SUGGESTION_PREFIX) ? 0 : text.indexOf(`\n${SKILL_SUGGESTION_PREFIX}`);
+	if (at < 0) return null;
+	if (at > 0) at += 1;
+	const lineEnd = text.indexOf("\n", at);
+	if (lineEnd < 0) return seg.finalized ? { start: at, end: text.length } : null;
+	return { start: at, end: lineEnd };
+}
+
+/**
+ * Split a reply that carries the skill-suggestion protocol line into that
+ * line and the answer around it.
+ *
+ * The usual shape is one segment holding both. Classifying that whole segment
+ * as advisory left the turn with no voice glyph at all: the suggestion did not
+ * claim it and the answer never got the chance. The suggestion renders first
+ * wherever the model put it, and the answer is the rest of the segment with
+ * that line removed. Returns null when the segment is only a suggestion,
+ * which stays advisory in full.
  */
 function skillSuggestionSplit(seg: TextSegment): { suggestion: string; answer: TextSegment } | null {
-	if (!seg.text.startsWith(SKILL_SUGGESTION_PREFIX)) return null;
-	const breakIndex = seg.text.indexOf("\n");
-	if (breakIndex < 0) return null;
+	const found = findSkillSuggestionLine(seg);
+	if (!found) return null;
+	const before = seg.text.slice(0, found.start).replace(/\n+$/, "");
+	const after = seg.text.slice(found.end + 1).replace(/^\n+/, "");
 	// A model that puts a blank line between the suggestion and the answer left
 	// the remainder opening with a newline, so the first rendered row was empty
 	// and took the glyph the answer's own text row was owed.
-	const answerText = seg.text.slice(breakIndex + 1).replace(/^\n+/, "");
+	const answerText = before.length > 0 && after.length > 0 ? `${before}\n${after}` : before + after;
 	if (answerText.trim().length === 0) return null;
 	const split = seg.suggestionSplit ?? {
 		suggestion: "",
 		answer: { kind: "text", text: answerText, finalized: seg.finalized } as TextSegment,
 	};
 	seg.suggestionSplit = split;
-	split.suggestion = seg.text.slice(0, breakIndex);
+	split.suggestion = seg.text.slice(found.start, found.end).replace(/\r$/, "");
 	const answer = split.answer;
 	if (answer.text === answerText && answer.finalized === seg.finalized) return split;
 	// The answer half follows the same cache rules as any other segment: the
@@ -1113,7 +1136,7 @@ function renderEntryLines(
 		const rendered =
 			seg.kind === "text" ? renderTextSegmentLines(seg, proseWidth) : renderErrorSegmentLines(seg, proseWidth);
 		if (rendered.length === 0) continue;
-		const isSkillSuggestion = seg.kind === "text" && seg.text.startsWith(SKILL_SUGGESTION_PREFIX);
+		const isSkillSuggestion = seg.kind === "text" && findSkillSuggestionLine(seg) !== null;
 		if (!labeled && !isSkillSuggestion) {
 			lines.push(...hangProseLines(rendered, clioPrefix));
 			labeled = true;
