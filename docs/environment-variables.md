@@ -12,7 +12,6 @@ This page is the complete inventory, and the `environment-variable-inventory` ch
 | Variable | Default | Controls |
 | --- | --- | --- |
 | `NO_COLOR` | unset | Set to any non-empty value to drop every foreground and background color. Bold, dim, italic, and underline stay, because they are what is left to read the interface by (`src/interactive/theme/tokens.ts`). |
-| `CLIO_CODER_SYNTHESIS_LOCK` | strip | How a synthesis-locked worker round is enforced on OpenAI-family runtimes: `strip` removes the tool schemas from the request, `tool-choice` keeps them and sends `tool_choice: none`, which preserves the prompt prefix but relies on the model honoring the knob (`src/engine/provider-payload.ts`). |
 | `CLIO_CODER_RIGOR` | repo-derived | Finish-contract evidence bar, `normal` or `high`, layered over the repo-derived default (`src/domains/safety/rigor.ts`). |
 | `CLIO_CODER_ALLOW_EXTERNAL_FULL_ACCESS` | off | `1` lets full-auto pass through to external CLI runtimes with their own full access (`src/engine/claude/subprocess-runtime.ts`, `src/engine/antigravity/subprocess-runtime.ts`). |
 | `CLIO_CODER_FORCE_COMPACT` | off | `1` forces compaction before every interactive turn for as long as it is set (`src/interactive/chat-loop.ts`). |
