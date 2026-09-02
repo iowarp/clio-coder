@@ -243,6 +243,10 @@ export function upgradeLegacyExtensionInstallState(
 				backup: { path: backupPath },
 				beforeRename: () => {
 					for (const [id, expected] of verified) {
+						const candidate = loadManifestFromRoot(expected.root);
+						if (!candidate.valid || candidate.manifest?.id !== id) {
+							throw new Error(`extension ${id} became invalid during digest migration`);
+						}
 						const observed = extensionContentDigest(expected.root);
 						if (observed !== expected.digest) throw new Error(`extension ${id} changed during digest migration`);
 					}
