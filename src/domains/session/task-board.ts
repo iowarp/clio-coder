@@ -421,10 +421,8 @@ function applyMutation(
 	// Completion is the ledger's only load-bearing claim, so it carries two
 	// structural conditions rather than a bare status flip. Evidence is
 	// mandatory: a completed row becomes a passed validation record, and a row
-	// without evidence would assert a validation that nobody performed. The
-	// task must also have been started, because work that was never entered
-	// cannot have produced a result; the honest closes for it are block and
-	// drop, which record a reason instead.
+	// without evidence would assert a validation that nobody performed. Work
+	// that did not happen is closed with block or drop, which record a reason.
 	if (mutation.op === "done") {
 		if (mutation.evidence.trim().length === 0) {
 			return {
@@ -432,13 +430,16 @@ function applyMutation(
 					"done requires note as the evidence that the task actually finished (the command you ran, the file:line you verified). If the work did not happen, use block with a reason or drop it.",
 			};
 		}
-		if (target.status === "pending") {
-			return {
-				error: `task ${target.id} was never started, so it cannot be completed. Start it and do the work, or record the truth with block (reason) or drop.`,
-			};
-		}
 	}
 	const notes: string[] = [];
+	// A model that did the work without announcing it on the board closes
+	// several tasks in a row at the end of the turn. Refusing done on a pending
+	// task cost a live session six start/done pairs of pure ceremony; the
+	// evidence note is the load-bearing claim, so the start is recorded
+	// implicitly and named in the notes.
+	if (mutation.op === "done" && target.status === "pending") {
+		notes.push(`started ${target.id} implicitly: done on a pending task records the start and the completion together`);
+	}
 	const tasks = board.tasks.map((task): TaskBoardTask => {
 		if (task.id !== target.id) {
 			// One active task at a time: starting a task parks any other active
