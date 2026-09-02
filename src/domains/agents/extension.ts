@@ -1,3 +1,4 @@
+import { BusChannels } from "../../core/bus-events.js";
 import type { DomainBundle, DomainContext, DomainExtension } from "../../core/domain-loader.js";
 import { assertAgentIdNamespace } from "../config/agent-namespace.js";
 import type { ConfigContract } from "../config/contract.js";
@@ -21,11 +22,27 @@ export function createAgentsBundle(_context: DomainContext): DomainBundle<Agents
 		diagnostics = nextDiagnostics;
 	}
 
+	let unsubscribeExtensionsReload: (() => void) | null = null;
 	const extension: DomainExtension = {
 		async start() {
 			discover();
+			// Recipes are cached at start; extension agent roots come from the
+			// committed extension generation, so a changed generation rediscovers.
+			unsubscribeExtensionsReload = _context.bus.on(BusChannels.ExtensionsReloaded, (payload: unknown) => {
+				if ((payload as { changed?: unknown } | undefined)?.changed !== true) return;
+				try {
+					discover();
+				} catch (error) {
+					process.stderr.write(
+						`[clio-coder:agents] rediscovery after extension reload failed: ${error instanceof Error ? error.message : String(error)}\n`,
+					);
+				}
+			});
 		},
-		async stop() {},
+		async stop() {
+			unsubscribeExtensionsReload?.();
+			unsubscribeExtensionsReload = null;
+		},
 	};
 
 	const contract: AgentsContract = {
