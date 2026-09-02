@@ -36,7 +36,7 @@ export interface AppliedThinking {
 	mechanism: ThinkingMechanism;
 	effort?: string;
 	budgetTokens?: number;
-	chatTemplateKwargs?: Record<string, boolean>;
+	chatTemplateKwargs?: Record<string, boolean | string | number>;
 	noticeKind: AppliedThinkingNoticeKind;
 	notice: string;
 }
@@ -53,7 +53,7 @@ export interface ResolvedRequestCapability {
 	reasoningEffort?: string;
 	budgetTokens?: number;
 	budgetEnforcement: ThinkingBudgetEnforcement;
-	chatTemplateKwargs?: Record<string, boolean | string>;
+	chatTemplateKwargs?: Record<string, boolean | string | number>;
 }
 
 export interface ResolvedResponseCapability {
@@ -335,14 +335,15 @@ function supportedEffortLevels(
 ): ReadonlyArray<ThinkingLevel> {
 	if (harmony) return HARMONY_LEVELS;
 	const efforts = quirks?.thinking?.effortByLevel;
-	if (!efforts) return baseLevels;
+	const byLevelValues = (quirks?.chatTemplateKwargs ?? quirks?.thinking?.chatTemplateKwargs)?.byLevel?.values;
+	if (!efforts && !byLevelValues) return baseLevels;
 	const out: ThinkingLevel[] = [];
 	if (baseLevels.includes("off")) out.push("off");
-	if (efforts.minimal !== undefined) out.push("minimal");
-	if (efforts.low !== undefined) out.push("low");
-	if (efforts.medium !== undefined) out.push("medium");
-	if (efforts.high !== undefined) out.push("high");
-	if (efforts.xhigh !== undefined) out.push("xhigh");
+	if (efforts?.minimal !== undefined || byLevelValues?.minimal !== undefined) out.push("minimal");
+	if (efforts?.low !== undefined || byLevelValues?.low !== undefined) out.push("low");
+	if (efforts?.medium !== undefined || byLevelValues?.medium !== undefined) out.push("medium");
+	if (efforts?.high !== undefined || byLevelValues?.high !== undefined) out.push("high");
+	if (efforts?.xhigh !== undefined || byLevelValues?.xhigh !== undefined) out.push("xhigh");
 	return out.length > 0 ? out : baseLevels;
 }
 
@@ -540,12 +541,40 @@ function onOffReasoningEffort(thinkingActive: boolean): string {
 	return thinkingActive ? "low" : "none";
 }
 
+function resolveFamilyChatTemplateKwargs(
+	quirks: LocalModelQuirks | undefined,
+	effectiveLevel: ThinkingLevel,
+	configuredLevel: ThinkingLevel,
+): Record<string, boolean | string | number> | undefined {
+	const block = quirks?.chatTemplateKwargs ?? quirks?.thinking?.chatTemplateKwargs;
+	if (!block) return undefined;
+	const out: Record<string, boolean | string | number> = {};
+	if (block.static) {
+		for (const [k, v] of Object.entries(block.static)) {
+			out[k] = v;
+		}
+	}
+	if (block.byLevel) {
+		const byLevel = block.byLevel;
+		const val = byLevel.values[effectiveLevel] ?? byLevel.values[configuredLevel];
+		if (val !== undefined) {
+			out[byLevel.key] = val;
+		}
+	}
+	return Object.keys(out).length > 0 ? out : undefined;
+}
+
 function resolveRequestCapability(
 	thinking: ResolvedThinkingCapability,
 	parser: ResponseParserKind,
 	runtimeId: string,
+	quirks?: LocalModelQuirks,
 ): ResolvedRequestCapability {
 	const request: ResolvedRequestCapability = { budgetEnforcement: thinking.budgetEnforcement };
+	const familyKwargs = resolveFamilyChatTemplateKwargs(quirks, thinking.effectiveLevel, thinking.configuredLevel);
+	if (familyKwargs) {
+		request.chatTemplateKwargs = { ...familyKwargs };
+	}
 	if (thinking.mechanism === "effort-levels" && thinking.effort) {
 		request.reasoningEffort = thinking.effort;
 	}
@@ -566,7 +595,7 @@ function resolveRequestCapability(
 		request.budgetTokens = thinking.budgetTokens;
 	}
 	if (thinking.mechanism === "on-off" && thinking.chatTemplateKwargs) {
-		request.chatTemplateKwargs = { ...thinking.chatTemplateKwargs };
+		request.chatTemplateKwargs = { ...(request.chatTemplateKwargs ?? {}), ...thinking.chatTemplateKwargs };
 		if (REASONING_EFFORT_ON_OFF_RUNTIMES.has(runtimeId)) {
 			request.reasoningEffort = onOffReasoningEffort(thinking.thinkingActive);
 		}
@@ -593,7 +622,7 @@ export function resolveModelRuntimeCapabilities(
 		family,
 		capabilities: input.capabilities,
 		thinking,
-		request: resolveRequestCapability(thinking, parser, input.runtimeId),
+		request: resolveRequestCapability(thinking, parser, input.runtimeId, quirks),
 		response: {
 			parser,
 			stripTokenizerSentinels: true,

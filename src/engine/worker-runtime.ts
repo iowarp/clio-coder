@@ -81,7 +81,7 @@ import {
 	sanitizeLockedSynthesisMessage,
 	workerLoopBlockBudget,
 } from "./loop-guard.js";
-import { patchWorkerRequestPayload, synthesisLockModeFromEnv } from "./provider-payload.js";
+import { patchWorkerRequestPayload } from "./provider-payload.js";
 import type { AgentEvent, AgentMessage, EngineModel } from "./types.js";
 import type { ClioWorkerEvent } from "./worker-events.js";
 import { createWorkerSafety, createWorkerToolRegistry } from "./worker-tools.js";
@@ -413,9 +413,9 @@ export function startWorkerRun(input: WorkerRunInput, emit: WorkerEventEmit): Wo
 			: {}),
 	});
 	// Flipped by the loop guard's lockout callback; read by onPayload below to
-	// force the remaining model rounds text-only via tool_choice none.
+	// force the remaining model rounds text-only by removing the tool surface
+	// (tool_choice none on Anthropic; see patchToolSurfaceLockedPayload).
 	let synthesisToolLock = false;
-	const synthesisLockMode = synthesisLockModeFromEnv();
 	let lockedSynthesisReprompts = 0;
 	let workerBoundFailure: string | null = null;
 	let workerBoundAborted = false;
@@ -625,7 +625,6 @@ export function startWorkerRun(input: WorkerRunInput, emit: WorkerEventEmit): Wo
 				thinkingLevel: effectiveThinkingLevel,
 				...(input.responseSchema !== undefined ? { responseSchema: input.responseSchema } : {}),
 				toolSurfaceLocked: synthesisToolLock,
-				toolSurfaceLockMode: synthesisLockMode,
 				toolChoiceNone: middlewareChoice.kind === "none",
 				...(middlewareChoice.kind === "required" ? { toolChoiceName: middlewareChoice.toolName } : {}),
 			});
@@ -665,11 +664,12 @@ export function startWorkerRun(input: WorkerRunInput, emit: WorkerEventEmit): Wo
 			pendingReadCitations.delete(event.toolCallId);
 			if (request !== undefined && event.isError !== true) recordObservedRead(request, event.result);
 		}
-		// Synthesis-locked run: a model that ignores tool_choice none emits its
-		// chat template's tool-call syntax as plain text. Sanitize the finished
-		// message in place before it hits stdout; pi stores this same object in
-		// agent state, so the NDJSON event, the dispatch consumer's answer
-		// reconstruction, and any later provider round all see the same text.
+		// Synthesis-locked run: the round ships no tool surface, so a model that
+		// calls a tool anyway lands its chat template's tool-call syntax in the
+		// reply as plain text. Sanitize the finished message in place before it
+		// hits stdout; pi stores this same object in agent state, so the NDJSON
+		// event, the dispatch consumer's answer reconstruction, and any later
+		// provider round all see the same text.
 		// A markup-only locked reply re-prompted this round; the result-contract
 		// check below stands aside so the round costs the one re-prompt, not one
 		// of the contract's bounded repair slots (on ornith both were queued for
@@ -679,12 +679,11 @@ export function startWorkerRun(input: WorkerRunInput, emit: WorkerEventEmit): Wo
 		if (synthesisToolLock && event.type === "message_end") {
 			const stripped = sanitizeLockedSynthesisMessage(event.message);
 			// A model that calls a tool anyway hands its markup back as text and
-			// the sanitizer leaves only the fallback notice: under tool_choice none
-			// because the runtime still renders the schemas, and with the surface
-			// stripped because the training habit survives (Qwen3.8 did it in 1
-			// of 5 stripped runs). One re-prompt, delivered as a tool exchange
-			// like the result-contract repair, asks for the answer in prose; a
-			// second markup-only reply keeps the notice.
+			// the sanitizer leaves only the fallback notice: the training habit
+			// survives the strip (Qwen3.8 did it in 1 of 5 stripped runs). One
+			// re-prompt, delivered as a tool exchange like the result-contract
+			// repair, asks for the answer in prose; a second markup-only reply
+			// keeps the notice.
 			if (stripped && lockedSynthesisReprompts < 1 && isLockedSynthesisFallbackOnly(event.message)) {
 				lockedSynthesisReprompts += 1;
 				repromptedThisMessage = true;
