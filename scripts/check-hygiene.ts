@@ -499,7 +499,7 @@ function checkDefaultsYaml(): void {
 }
 
 // ---------------------------------------------------------------------------
-// settings-inventory: docs/configuration-and-targets.md's settings table held
+// settings-inventory: docs/guide/configuration-and-targets.md's settings table held
 // against the schema it claims to describe. Was
 // tests/contracts/settings-inventory.test.ts.
 // ---------------------------------------------------------------------------
@@ -523,10 +523,10 @@ function leafPaths(value: unknown, prefix = ""): string[] {
 }
 
 function settingsInventorySection(): string {
-	const doc = readRoot("docs/configuration-and-targets.md");
+	const doc = readRoot("docs/guide/configuration-and-targets.md");
 	const start = doc.indexOf("## Settings inventory");
 	if (start < 0) {
-		throw new Error("docs/configuration-and-targets.md has no ## Settings inventory section");
+		throw new Error("docs/guide/configuration-and-targets.md has no ## Settings inventory section");
 	}
 	const end = doc.indexOf("\n## ", start + 1);
 	return doc.slice(start, end === -1 ? undefined : end);
@@ -537,7 +537,10 @@ function checkSettingsInventory(): void {
 
 	const missing = leafPaths(DEFAULT_SETTINGS).filter((path) => !section.includes(`| \`${path}\` |`));
 	if (missing.length > 0) {
-		fail("settings-inventory", `docs/configuration-and-targets.md has no inventory row for:\n  ${missing.join("\n  ")}`);
+		fail(
+			"settings-inventory",
+			`docs/guide/configuration-and-targets.md has no inventory row for:\n  ${missing.join("\n  ")}`,
+		);
 	}
 
 	// Spot-checked across the value shapes a row can carry, including the one
@@ -580,7 +583,7 @@ function checkSettingsInventory(): void {
 }
 
 // ---------------------------------------------------------------------------
-// environment-variable-inventory: docs/environment-variables.md claims to
+// environment-variable-inventory: docs/guide/environment-variables.md claims to
 // list every CLIO_* variable src reads. Was
 // tests/contracts/environment-variable-inventory.test.ts.
 // ---------------------------------------------------------------------------
@@ -621,7 +624,7 @@ function readEnvNames(): Map<string, string[]> {
 }
 
 function checkEnvironmentVariableInventory(): void {
-	const doc = readRoot("docs/environment-variables.md");
+	const doc = readRoot("docs/guide/environment-variables.md");
 	const missing: string[] = [];
 	for (const [name, sites] of readEnvNames()) {
 		if (doc.includes(`\`${name}\``)) continue;
@@ -631,7 +634,7 @@ function checkEnvironmentVariableInventory(): void {
 	if (missing.length > 0) {
 		fail(
 			"environment-variable-inventory",
-			`docs/environment-variables.md claims to list every variable src reads, and omits:\n  ${missing.join("\n  ")}`,
+			`docs/guide/environment-variables.md claims to list every variable src reads, and omits:\n  ${missing.join("\n  ")}`,
 		);
 	}
 

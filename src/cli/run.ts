@@ -261,7 +261,7 @@ export async function runClioRun(
 				// A mistyped slash command is a usage error, not a task. Refusing it
 				// here keeps it from booting a session and spending a model turn on a
 				// command that was never run, which is what the TUI has always done
-				// and what docs/extensions-and-sharing.md documents for both surfaces.
+				// and what docs/guide/extensions-and-sharing.md documents for both surfaces.
 				const slashRefusal = await unknownSlashCommandRefusal(assembled.prompt);
 				if (slashRefusal !== null) {
 					process.stderr.write(`clio-coder run: ${slashRefusal}\n`);

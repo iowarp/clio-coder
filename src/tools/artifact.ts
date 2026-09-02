@@ -20,7 +20,7 @@ import type { ToolResult, ToolSpec } from "./registry.js";
  * tree holds files a human asked for, and everything Clio generates on its own
  * belongs in the gitignored project directory. An explicit `path` still writes
  * wherever the caller says, inside the workspace. See core/artifact-paths.ts
- * and docs/artifact-placement.md.
+ * and docs/architecture/artifact-placement.md.
  *
  * Skills are not artifacts: a skill is a SKILL.md folder written with the
  * ordinary write tool and validated by the skills loader on load. The

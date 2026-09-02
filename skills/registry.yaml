@@ -37,7 +37,7 @@ skills:
   - name: fix-issue
     path: git/fix-issue
     version: 0.2.0
-    sha256: b50154f0086c665b6f795785bbb188d752be0d1a2ccabf216570b4087822651d
+    sha256: ec5e6a00056041494f9b100da8f0775455124aebc7000ed0edb7c9b8493f74c8
   - name: resolve-merge-conflicts
     path: git/resolve-merge-conflicts
     version: 0.3.0

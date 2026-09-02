@@ -15,7 +15,7 @@
  * be checking a path the tool never writes. One artifact per kind is therefore
  * the contract; keep several by passing explicit paths.
  *
- * See docs/artifact-placement.md for the full taxonomy.
+ * See docs/architecture/artifact-placement.md for the full taxonomy.
  */
 
 /** Project-local directory holding everything Clio generates for one repo. */

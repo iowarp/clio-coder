@@ -77,7 +77,7 @@ Write a standalone RCA document only when the bug was hard: confidence LOW,
 a multi-cause chain, or a fix that changes behavior beyond the issue's
 scope. Routine fixes carry their why-chain in the final report, not a file.
 Either way the RCA's destination is the issue: `ship` posts it as the
-closing comment under the `rca` label (see docs/development-pipeline.md).
+closing comment under the `rca` label (see docs/process/development-pipeline.md).
 
 ## Step 3 — Fix test-first
 
