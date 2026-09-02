@@ -1,0 +1,256 @@
+import { deepStrictEqual, ok, strictEqual } from "node:assert/strict";
+import { execFileSync } from "node:child_process";
+import { mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs";
+import { tmpdir } from "node:os";
+import { join, resolve } from "node:path";
+import { afterEach, describe, it } from "node:test";
+import type { DispatchRequest } from "../../src/domains/dispatch/contract.js";
+import {
+	type BatchVerificationParticipant,
+	createBatchVerificationGate,
+	hostVerificationRejection,
+	runHostVerification,
+} from "../../src/domains/dispatch/host-verification.js";
+import { declaredScopeIntent } from "../../src/domains/dispatch/intent.js";
+
+type ResolvedCheck = NonNullable<DispatchRequest["resolvedVerification"]>[number];
+
+interface Scratch {
+	/** Git checkout the declared checks run in. */
+	project: string;
+	/** Isolated `stateDir` for the verification memo and the check artifacts. */
+	stateDir: string;
+	/** One line per actual command execution, written by the check itself. */
+	log: string;
+}
+
+const scratches: string[] = [];
+
+afterEach(() => {
+	while (scratches.length > 0) {
+		const dir = scratches.pop();
+		if (dir !== undefined) rmSync(dir, { recursive: true, force: true });
+	}
+});
+
+function git(root: string, ...args: string[]): void {
+	execFileSync("git", ["-C", root, ...args], { encoding: "utf8", stdio: ["ignore", "pipe", "pipe"] });
+}
+
+/**
+ * A committed scratch checkout plus an isolated state directory.
+ *
+ * `git init` runs inside `project/`, never at the scratch root or the run root:
+ * a `.git` at either of those levels flips `isInsideGitRepo()` for every
+ * `mkdtemp` scratch in the suite and fails the ignore-policy contracts from an
+ * unrelated file (issue #205, `tests/harness/tmp-git-guard.ts`).
+ */
+function makeScratch(): Scratch {
+	const root = mkdtempSync(join(tmpdir(), "clio-host-verification-"));
+	scratches.push(root);
+	const project = join(root, "project");
+	const stateDir = join(root, "state");
+	mkdirSync(join(project, "src"), { recursive: true });
+	mkdirSync(join(project, "tests"), { recursive: true });
+	mkdirSync(stateDir, { recursive: true });
+	writeFileSync(join(project, "src", "a.ts"), "export const a = 1;\n", "utf8");
+	writeFileSync(join(project, "src", "b.ts"), "export const b = 2;\n", "utf8");
+	writeFileSync(join(project, "tests", "a.test.ts"), "// a\n", "utf8");
+	writeFileSync(join(project, "tests", "b.test.ts"), "// b\n", "utf8");
+	git(project, "init", "-q", "-b", "main");
+	git(project, "config", "user.name", "Host Verification Contract");
+	git(project, "config", "user.email", "host-verification@example.invalid");
+	git(project, "add", "-A");
+	git(project, "commit", "-q", "-m", "baseline");
+	return { project, stateDir, log: join(root, "check-runs.log") };
+}
+
+/**
+ * A declared check that records every execution and then prints `message`.
+ *
+ * `process.execPath` rather than `"node"`: `runCodeStep` passes a closed
+ * environment allowlist (`code-step.ts` `FLEET_COMMAND_BASE_ENV`) and no
+ * test-supplied variable survives it, so the run counter lives in the argv the
+ * admission layer would have resolved.
+ */
+function check(input: { scratch: Scratch; id?: string; message: string; exitCode: number }): ResolvedCheck {
+	const script = [
+		`require("node:fs").appendFileSync(${JSON.stringify(input.scratch.log)}, "ran\\n");`,
+		`console.error(${JSON.stringify(input.message)});`,
+		`process.exit(${input.exitCode});`,
+	].join(" ");
+	return {
+		check: input.id ?? "test",
+		argv: [process.execPath, "-e", script],
+		cwd: input.scratch.project,
+		timeoutMs: 30_000,
+	};
+}
+
+function member(input: {
+	runId: string;
+	scratch: Scratch;
+	writeRoots?: ReadonlyArray<string>;
+	checks?: ReadonlyArray<ResolvedCheck>;
+	workerSuccessful?: boolean;
+}): BatchVerificationParticipant {
+	const declared = declaredScopeIntent({ writeRoots: input.writeRoots ?? [] });
+	ok(declared.ok, "scratch intent must normalize");
+	return {
+		runId: input.runId,
+		request: {
+			cwd: input.scratch.project,
+			intent: declared.intent,
+			...(input.checks === undefined ? {} : { resolvedVerification: input.checks }),
+		},
+		workerSuccessful: input.workerSuccessful ?? true,
+	};
+}
+
+/** Command executions recorded by the check itself, across the whole batch. */
+function runCount(scratch: Scratch): number {
+	try {
+		return readFileSync(scratch.log, "utf8")
+			.trim()
+			.split("\n")
+			.filter((line) => line.length > 0).length;
+	} catch {
+		return 0;
+	}
+}
+
+describe("batch-settled host verification", () => {
+	it("runs one batch check once and rejects only the worker whose write roots the failure names", async () => {
+		const scratch = makeScratch();
+		const failing = check({ scratch, message: "1) tests/b.test.ts > adds\nAssertionError", exitCode: 1 });
+		const gate = createBatchVerificationGate({ stateDir: scratch.stateDir });
+		gate.live("run-a");
+		gate.live("run-b");
+		const [a, b] = await Promise.all([
+			gate.arrive(member({ runId: "run-a", scratch, writeRoots: ["src/a.ts", "tests/a.test.ts"], checks: [failing] })),
+			gate.arrive(member({ runId: "run-b", scratch, writeRoots: ["src/b.ts", "tests/b.test.ts"], checks: [failing] })),
+		]);
+
+		strictEqual(a?.status, "verified");
+		strictEqual(a?.strategy, "batch-settled");
+		strictEqual(a?.reason, "batch_settled_not_implicated");
+		strictEqual(a?.checks[0]?.exitCode, 1);
+		strictEqual(b?.status, "rejected");
+		strictEqual(b?.strategy, "batch-settled");
+		strictEqual(b?.attribution?.[0]?.basis, "write_roots");
+		deepStrictEqual(b?.attribution?.[0]?.charged, ["run-b"]);
+		ok(b?.attribution?.[0]?.implicated.includes(resolve(scratch.project, "tests/b.test.ts")));
+		strictEqual(runCount(scratch), 1);
+		strictEqual(hostVerificationRejection(a), null);
+		strictEqual(hostVerificationRejection(b)?.outcomeCode, "host_verification_rejected");
+	});
+
+	it("charges every declaring worker when the failing check names no path", async () => {
+		const scratch = makeScratch();
+		const failing = check({ scratch, message: "boom", exitCode: 1 });
+		const gate = createBatchVerificationGate({ stateDir: scratch.stateDir });
+		gate.live("run-a");
+		gate.live("run-b");
+		const [a, b] = await Promise.all([
+			gate.arrive(member({ runId: "run-a", scratch, writeRoots: ["src/a.ts"], checks: [failing] })),
+			gate.arrive(member({ runId: "run-b", scratch, writeRoots: ["src/b.ts"], checks: [failing] })),
+		]);
+
+		strictEqual(a?.status, "rejected");
+		strictEqual(b?.status, "rejected");
+		strictEqual(a?.attribution?.[0]?.basis, "unattributable");
+		deepStrictEqual(a?.attribution?.[0]?.charged, ["run-a", "run-b"]);
+		deepStrictEqual(a?.attribution?.[0]?.implicated, []);
+		strictEqual(runCount(scratch), 1);
+	});
+
+	it("charges every declaring worker when the named paths fall outside every write root", async () => {
+		const scratch = makeScratch();
+		const failing = check({ scratch, message: "1) vendor/x.ts > adds", exitCode: 1 });
+		const gate = createBatchVerificationGate({ stateDir: scratch.stateDir });
+		gate.live("run-a");
+		gate.live("run-b");
+		const [a, b] = await Promise.all([
+			gate.arrive(member({ runId: "run-a", scratch, writeRoots: ["src/a.ts"], checks: [failing] })),
+			gate.arrive(member({ runId: "run-b", scratch, writeRoots: ["src/b.ts"], checks: [failing] })),
+		]);
+
+		strictEqual(a?.status, "rejected");
+		strictEqual(b?.status, "rejected");
+		strictEqual(a?.attribution?.[0]?.basis, "unattributable");
+		deepStrictEqual(a?.attribution?.[0]?.charged, ["run-a", "run-b"]);
+		deepStrictEqual(a?.attribution?.[0]?.implicated, [resolve(scratch.project, "vendor/x.ts")]);
+	});
+
+	it("keeps the single-run receipt shape unchanged", async () => {
+		const scratch = makeScratch();
+		const passing = check({ scratch, message: "ok", exitCode: 0 });
+		const result = await runHostVerification({
+			runId: "run-solo",
+			request: { resolvedVerification: [passing] },
+			workerSuccessful: true,
+			stateDir: scratch.stateDir,
+		});
+
+		deepStrictEqual(Object.keys(result ?? {}).sort(), ["checks", "status"]);
+		strictEqual(result?.status, "verified");
+		strictEqual(result?.checks[0]?.memo, false);
+		strictEqual(runCount(scratch), 1);
+	});
+
+	it("releases the barrier when a live sibling never reaches it", async () => {
+		const scratch = makeScratch();
+		const passing = check({ scratch, message: "ok", exitCode: 0 });
+		const gate = createBatchVerificationGate({ stateDir: scratch.stateDir });
+		gate.live("run-a");
+		gate.live("run-gone");
+		const pending = gate.arrive(member({ runId: "run-a", scratch, writeRoots: ["src/a.ts"], checks: [passing] }));
+		gate.abandon("run-gone");
+		const a = await pending;
+
+		strictEqual(a?.status, "verified");
+		strictEqual(a?.strategy, "batch-settled");
+	});
+
+	it("gives a member admitted after the batch settled the single-run strategy", async () => {
+		const scratch = makeScratch();
+		const passing = check({ scratch, message: "ok", exitCode: 0 });
+		const gate = createBatchVerificationGate({ stateDir: scratch.stateDir });
+		gate.live("run-a");
+		await gate.arrive(member({ runId: "run-a", scratch, writeRoots: ["src/a.ts"], checks: [passing] }));
+
+		gate.live("run-late");
+		const late = await gate.arrive(member({ runId: "run-late", scratch, writeRoots: ["src/b.ts"], checks: [passing] }));
+
+		strictEqual(late?.status, "verified");
+		strictEqual(late?.strategy, undefined);
+	});
+
+	it("parks a failed member and a member with no declared checks without running anything for them", async () => {
+		const scratch = makeScratch();
+		const passing = check({ scratch, message: "ok", exitCode: 0 });
+		const gate = createBatchVerificationGate({ stateDir: scratch.stateDir });
+		gate.live("run-a");
+		gate.live("run-none");
+		gate.live("run-failed");
+		const [a, none, failed] = await Promise.all([
+			gate.arrive(member({ runId: "run-a", scratch, writeRoots: ["src/a.ts"], checks: [passing] })),
+			gate.arrive(member({ runId: "run-none", scratch, writeRoots: ["src/b.ts"] })),
+			gate.arrive(
+				member({
+					runId: "run-failed",
+					scratch,
+					writeRoots: ["tests/b.test.ts"],
+					checks: [passing],
+					workerSuccessful: false,
+				}),
+			),
+		]);
+
+		strictEqual(a?.status, "verified");
+		strictEqual(a?.strategy, "batch-settled");
+		strictEqual(none, undefined);
+		deepStrictEqual(failed, { status: "skipped", reason: "worker_not_successful", checks: [] });
+		strictEqual(runCount(scratch), 1);
+	});
+});
