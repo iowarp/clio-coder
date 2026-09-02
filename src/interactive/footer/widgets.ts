@@ -368,6 +368,13 @@ function contextComposition(context: ContextEngineFacts): {
 	};
 }
 
+/** The live window after the percent; null when unknown or the row is too narrow to carry it. */
+export function compactContextWindowLabel(context: ContextEngineFacts, width: number): string | null {
+	if (width < 72) return null;
+	const window = finiteNonNegative(context.ledger?.contextWindow ?? context.contextWindow);
+	return window > 0 ? formatFooterTokens(window) : null;
+}
+
 export function compactSecondaryLine(
 	context: ContextEngineFacts,
 	agent: AgentWorkFacts,
@@ -403,6 +410,12 @@ export function compactSecondaryLine(
 	} else {
 		left = buildSegmentedContextBar(theme, barCells, context.contextWindow ?? 0, contextBreakdownForBar(context));
 	}
+	// A percentage alone does not say whether the window is 128k or 1M, so at
+	// widths that can afford it the live window follows the percent. It comes
+	// from the ledger when one is bound (the layer that answered the window is
+	// also the layer that produced the percent) and from the facts otherwise.
+	const windowLabel = compactContextWindowLabel(context, safeWidth);
+	if (windowLabel) left = `${left} ${theme.fg("dim", "of")} ${theme.fg("muted", windowLabel)}`;
 	const maxRightWidth = Math.max(0, safeWidth - visibleWidth(left) - 1);
 	const right = buildMetricStrip(
 		theme,
