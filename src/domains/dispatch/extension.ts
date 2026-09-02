@@ -202,6 +202,8 @@ import {
 	type DispatchPathScope,
 	declaredScopeReplacementDiagnostic,
 	declaredScopeReplacementNotice,
+	inferredScopeParentTokenDiagnostic,
+	inferredScopeParentTokenNotice,
 	resolveDispatchPathScope,
 } from "./path-scope.js";
 import { deriveEnvelopePhaseDurations, deriveRunPhaseDurations, recordRunTimingBestEffort } from "./phase-timing.js";
@@ -3386,6 +3388,23 @@ export function createDispatchBundle(
 		if (notice !== null) {
 			context.bus.emit(BusChannels.DispatchScopeNotice, {
 				...notice,
+				agentId: req.agentId,
+			});
+		}
+		// A reinterpreted "../" token is the one legacy-mode scope fact that earns
+		// the channel: it fires only where the dispatch used to fail outright, so
+		// it cannot warn on the ordinary intent-less dispatch the comment above
+		// keeps quiet. Anchoring is reported alongside dropping because it is the
+		// half that adds to scope, putting a path in working context that the
+		// prose never literally spelled.
+		const parentTokenDiagnostic = inferredScopeParentTokenDiagnostic(pathScope);
+		if (parentTokenDiagnostic !== null) {
+			reportDispatchDiagnostic("inferred scope parent tokens", new Error(parentTokenDiagnostic));
+		}
+		const parentTokenNotice = inferredScopeParentTokenNotice(pathScope);
+		if (parentTokenNotice !== null) {
+			context.bus.emit(BusChannels.DispatchScopeNotice, {
+				...parentTokenNotice,
 				agentId: req.agentId,
 			});
 		}
