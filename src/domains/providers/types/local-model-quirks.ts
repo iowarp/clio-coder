@@ -2,7 +2,7 @@
  * Engine-visible quirks extracted from a knowledge-base entry. The catalog YAML
  * keeps free-form `quirks` (gpu tiers, runtime preferences, serving notes), so
  * `KnowledgeBaseEntry.quirks` stays `Record<string, unknown>`. This module
- * narrows the slice the engine consumes (KV cache layout, per-mode sampling)
+ * narrows the slice the engine consumes (per-mode sampling and thinking)
  * into a typed shape that flows through `model.clioCoder.quirks` at synth time.
  *
  * Field naming follows the Hugging Face / model-card terminology so the YAML
@@ -14,19 +14,6 @@
 
 import type { ThinkingBudgetByLevel, ThinkingEffortByLevel } from "../thinking-control-policy.js";
 
-export const KV_CACHE_QUANTS = ["f32", "f16", "q8_0", "q4_0", "q4_1", "iq4_nl", "q5_0", "q5_1"] as const;
-
-export type KvCacheQuant = (typeof KV_CACHE_QUANTS)[number];
-
-export interface KvCacheQuirks {
-	/** Quantization type for the key cache. `false` disables quantization (full precision). */
-	kQuant?: KvCacheQuant | false;
-	/** Quantization type for the value cache. Requires flash attention to take effect. */
-	vQuant?: KvCacheQuant | false;
-	/** Force fp16 KV cache regardless of K/V quant settings. */
-	useFp16?: boolean;
-}
-
 export interface SamplingProfile {
 	temperature?: number;
 	topP?: number;
@@ -36,7 +23,6 @@ export interface SamplingProfile {
 	repeatPenalty?: number;
 	presencePenalty?: number;
 	frequencyPenalty?: number;
-	maxTokens?: number;
 }
 
 export interface SamplingQuirks {
@@ -70,19 +56,12 @@ export interface ThinkingQuirks {
 }
 
 export interface LocalModelQuirks {
-	kvCache?: KvCacheQuirks;
 	sampling?: SamplingQuirks;
 	thinking?: ThinkingQuirks;
 }
 
 function isRecord(value: unknown): value is Record<string, unknown> {
 	return value !== null && typeof value === "object" && !Array.isArray(value);
-}
-
-function asKvCacheQuant(value: unknown): KvCacheQuant | false | undefined {
-	if (value === false) return false;
-	if (typeof value !== "string") return undefined;
-	return (KV_CACHE_QUANTS as ReadonlyArray<string>).includes(value) ? (value as KvCacheQuant) : undefined;
 }
 
 function asPositive(value: unknown): number | undefined {
@@ -96,17 +75,6 @@ function asInteger(value: unknown): number | undefined {
 
 function asPenalty(value: unknown): number | undefined {
 	return typeof value === "number" && Number.isFinite(value) ? value : undefined;
-}
-
-function extractKvCache(raw: unknown): KvCacheQuirks | undefined {
-	if (!isRecord(raw)) return undefined;
-	const out: KvCacheQuirks = {};
-	const k = asKvCacheQuant(raw.kQuant);
-	if (k !== undefined) out.kQuant = k;
-	const v = asKvCacheQuant(raw.vQuant);
-	if (v !== undefined) out.vQuant = v;
-	if (typeof raw.useFp16 === "boolean") out.useFp16 = raw.useFp16;
-	return Object.keys(out).length > 0 ? out : undefined;
 }
 
 function extractSamplingProfile(raw: unknown): SamplingProfile | undefined {
@@ -129,8 +97,6 @@ function extractSamplingProfile(raw: unknown): SamplingProfile | undefined {
 	if (pp !== undefined) out.presencePenalty = pp;
 	const fp = asPenalty(raw.frequencyPenalty);
 	if (fp !== undefined) out.frequencyPenalty = fp;
-	const maxTokens = asInteger(raw.maxTokens);
-	if (maxTokens !== undefined) out.maxTokens = maxTokens;
 	return Object.keys(out).length > 0 ? out : undefined;
 }
 
@@ -206,8 +172,6 @@ function extractThinkingQuirks(raw: unknown): ThinkingQuirks | undefined {
 export function extractLocalModelQuirks(raw: unknown): LocalModelQuirks | undefined {
 	if (!isRecord(raw)) return undefined;
 	const out: LocalModelQuirks = {};
-	const kvCache = extractKvCache(raw.kvCache);
-	if (kvCache) out.kvCache = kvCache;
 	const sampling = extractSampling(raw.sampling);
 	if (sampling) out.sampling = sampling;
 	const thinking = extractThinkingQuirks(raw.thinking);

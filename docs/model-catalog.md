@@ -57,10 +57,10 @@ A model family is "sanctioned" only when we can say what was tested and under wh
 - hardware and serving configuration;
 - context window and max output actually exercised;
 - tool-use, reasoning, vision, embeddings/rerank/FIM behavior where relevant;
-- quirks needed by the engine (thinking mechanism, sampling, KV cache);
+- quirks needed by the engine (thinking mechanism and sampling), plus serving provenance such as KV cache;
 - failures and "do not use this route yet" notes.
 
-Engine-visible quirks belong in catalog YAML entries under `quirks.kvCache`, `quirks.sampling`, and `quirks.thinking`. Bundled entries under `src/domains/providers/models/**/*.yaml` are for curated Clio-supported families. User/lab/project experiments should start as overlays before they are promoted into source. Free-form notes can live alongside catalog entries and in this docs area for later cookbooks/blog posts. Catalog entries for LM Studio (`lmstudio`) no longer promise native SDK behavior or track SDK versions; all routing and capability reporting now reflects the strict HTTP adapter.
+Engine-visible quirks belong in catalog YAML entries under `quirks.sampling` and `quirks.thinking`. Serving calibration such as KV cache recommendations remains free-form provenance. Bundled entries under `src/domains/providers/models/**/*.yaml` are for curated Clio-supported families. User/lab/project experiments should start as overlays before they are promoted into source. Free-form notes can live alongside catalog entries and in this docs area for later cookbooks/blog posts. Catalog entries for LM Studio (`lmstudio`) no longer promise native SDK behavior or track SDK versions; all routing and capability reporting now reflects the strict HTTP adapter.
 
 ## Local catalog overlays
 
