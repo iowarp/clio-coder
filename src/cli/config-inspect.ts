@@ -30,6 +30,7 @@ import { loadUserHooks, readHookSources } from "../domains/middleware/index.js";
 import { classifyProjectPreload } from "../domains/prompts/preload.js";
 import { defaultScopedResourceRoots } from "../domains/resources/common-loader.js";
 import { ceilChars } from "../domains/session/context-accounting.js";
+import { capturedHookSourcesFor } from "../entry/extension-hook-sources.js";
 
 export type CustomizationCategory =
 	| "settings"
@@ -207,7 +208,10 @@ function inspectHooks(cwd: string, graph: CustomizationGraph): void {
 		// Extension declarations come from the same captured bytes a booted
 		// session admits; an inspecting process without a bound store builds an
 		// ephemeral generation-0 projection.
-		const { batches, fileIssues } = readHookSources({ cwd, extensionSnapshot: extensionSnapshotFor(cwd) });
+		const { batches, fileIssues } = readHookSources({
+			cwd,
+			capturedSources: capturedHookSourcesFor(extensionSnapshotFor(cwd)),
+		});
 		for (const issue of fileIssues) graph.issues.push(`hook ${issue.source.origin}: ${issue.message}`);
 		const loaded = loadUserHooks(batches, { workspaceRoot: cwd });
 		for (const issue of loaded.issues) {

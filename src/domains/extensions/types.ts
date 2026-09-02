@@ -117,7 +117,7 @@ export interface ExtensionSnapshot {
 	diagnostics: ExtensionSnapshotDiagnostics;
 }
 
-export type ExtensionReloadRejectionReason = "build-failed" | "reentrant" | "stale";
+export type ExtensionReloadRejectionReason = "build-failed" | "reentrant" | "stale" | "workspace-changed";
 
 export interface ExtensionReloadRejection {
 	status: "rejected";
@@ -129,8 +129,10 @@ export interface ExtensionReloadRejection {
 
 /**
  * A fully built and validated generation that has not been published. The
- * bundle holds at most one candidate at a time; commit publishes it with one
- * reference assignment and discard releases it without any visible change.
+ * bundle holds at most one candidate at a time. `publish` is one reference
+ * assignment that never validates, refuses, throws, or calls out; the caller
+ * checks `current()` on the same stack immediately before it. `discard`
+ * releases the candidate without any visible change.
  */
 export interface ExtensionReloadCandidate {
 	generation: number;
@@ -141,6 +143,10 @@ export interface ExtensionReloadCandidate {
 	added: ReadonlyArray<string>;
 	removed: ReadonlyArray<string>;
 	modified: ReadonlyArray<string>;
+	/** True while this is the in-flight candidate and the committed snapshot it was diffed against is still live. */
+	current(): boolean;
+	publish(): void;
+	discard(): void;
 }
 
 export type ExtensionReloadPrepareResult =

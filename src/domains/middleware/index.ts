@@ -56,6 +56,7 @@ export type {
 	UserHookLoadResult,
 	UserHookOrigin,
 	UserHookOutcome,
+	UserHookPackageProvenance,
 	UserHookSource,
 } from "./hooks.js";
 export {
@@ -71,7 +72,8 @@ export {
 	type BuildUserHookRegistrationsOptions,
 	type BuildUserHookRegistrationsResult,
 	buildUserHookRegistrations,
-	type ExtensionHookSnapshotView,
+	type CapturedHookDeclarations,
+	type CapturedHookSourceSet,
 	type HookFileIssue,
 	readHookSources,
 	spawnSyncCommandRunner,

@@ -18,6 +18,7 @@ import {
 } from "../../src/domains/middleware/runtime.js";
 import { createMiddlewareContractFromSnapshot } from "../../src/domains/middleware/snapshot.js";
 import type { MiddlewareEffect, MiddlewareHookInput } from "../../src/domains/middleware/types.js";
+import { capturedHookSourcesFor } from "../../src/entry/extension-hook-sources.js";
 
 function registration(
 	id: string,
@@ -68,7 +69,7 @@ describe("middleware hook boundary", () => {
 		const snapshot = buildExtensionSnapshot({ cwd: project, generation: 0 });
 		strictEqual(snapshot.packages[0]?.loadable, false);
 		deepStrictEqual(snapshot.hookSources, []);
-		deepStrictEqual(readHookSources({ cwd: project, extensionSnapshot: snapshot }).batches, []);
+		deepStrictEqual(readHookSources({ cwd: project, capturedSources: capturedHookSourcesFor(snapshot) }).batches, []);
 	});
 
 	it("builds extension hooks from captured bytes and attributes receipts to the admitting generation", () => {
@@ -104,7 +105,7 @@ describe("middleware hook boundary", () => {
 		const receipts: HookReceipt[] = [];
 		const built = buildUserHookRegistrations({
 			cwd: project,
-			extensionSnapshot: second,
+			capturedSources: capturedHookSourcesFor(second),
 			recordReceipt: (receipt) => receipts.push(receipt),
 			runCommand: () => ({ code: 0, timedOut: false, stdout: "", stderr: "" }),
 			now: () => 123,
@@ -137,7 +138,7 @@ describe("middleware hook boundary", () => {
 		strictEqual(middleware.replaceRegistrations("user-hooks", 2, built.registrations).applied, true);
 		const rebuilt = buildUserHookRegistrations({
 			cwd: project,
-			extensionSnapshot: third,
+			capturedSources: capturedHookSourcesFor(third),
 			recordReceipt: (receipt) => receipts.push(receipt),
 			runCommand: () => ({ code: 0, timedOut: false, stdout: "", stderr: "" }),
 			now: () => 456,
@@ -306,8 +307,8 @@ describe("middleware generation-owned registrations", () => {
 		if (prepared.status !== "prepared") return;
 		strictEqual(prepared.replacement.current(), true);
 		strictEqual(middleware.replaceRegistrations("user-hooks", 6, [emitting("h6")]).applied, true);
-		strictEqual(prepared.replacement.current(), false);
-		strictEqual(prepared.replacement.commit().applied, false, "a superseded prepared replacement never publishes");
+		strictEqual(prepared.replacement.current(), false, "a superseded prepared replacement is no longer current");
+		prepared.replacement.discard();
 		deepStrictEqual(middleware.runHook(PROBE).ruleIds, [FIXED_RULE_ID, "h6"]);
 		four.dispose();
 		deepStrictEqual(middleware.runHook(PROBE).ruleIds, [FIXED_RULE_ID, "h6"]);
@@ -316,7 +317,7 @@ describe("middleware generation-owned registrations", () => {
 		if (host.status !== "prepared") return;
 		middleware.registerHook(emitting("host.late"));
 		strictEqual(host.replacement.current(), false, "a host registration after prepare invalidates the prepared list");
-		strictEqual(host.replacement.commit().applied, false);
+		host.replacement.discard();
 		strictEqual(middleware.ownedGeneration("user-hooks"), 6);
 		const applied = middleware.replaceRegistrations("user-hooks", 8, []);
 		strictEqual(applied.applied, true);
@@ -455,5 +456,87 @@ describe("middleware generation-owned registrations", () => {
 				observe();
 			}
 		}
+	});
+});
+
+describe("middleware registration table publication", () => {
+	it("holds one copy-on-write state reference and publishes with an assignment that cannot refuse", () => {
+		const middleware = ownedBundle();
+		const before = middleware.runHook(PROBE);
+		const listBefore = middleware.listRules();
+		ok(listBefore.length > 0);
+		const prepared = middleware.prepareRegistrationReplacement("user-hooks", 1, [emitting("u")]);
+		strictEqual(prepared.status, "prepared");
+		if (prepared.status !== "prepared") return;
+		deepStrictEqual(middleware.runHook(PROBE).ruleIds, before.ruleIds, "prepare publishes nothing");
+		strictEqual(prepared.replacement.current(), true);
+		strictEqual(prepared.replacement.publish(), undefined, "publish returns nothing and cannot report a refusal");
+		deepStrictEqual(middleware.runHook(PROBE).ruleIds, [FIXED_RULE_ID, "u"]);
+		strictEqual(middleware.ownedGeneration("user-hooks"), 1);
+		// The published state is one frozen reference; a second publish of a
+		// newer prepared state swaps the reference, and the old one is intact.
+		const second = middleware.prepareRegistrationReplacement("user-hooks", 2, [emitting("v")]);
+		strictEqual(second.status, "prepared");
+		if (second.status !== "prepared") return;
+		second.replacement.publish();
+		deepStrictEqual(middleware.runHook(PROBE).ruleIds, [FIXED_RULE_ID, "v"]);
+		strictEqual(prepared.replacement.current(), false);
+		strictEqual(second.replacement.current(), false, "a published replacement is settled");
+	});
+
+	it("never invokes the diagnostic sink during preparation and survives a sink that registers a colliding host", () => {
+		const diagnostics: MiddlewareDiagnostic[] = [];
+		let sinkCalls = 0;
+		const middleware = createMiddlewareBundle({
+			ruleDefinitions: [FIXED_RULE],
+			onDiagnostic: (diagnostic) => {
+				sinkCalls += 1;
+				diagnostics.push(diagnostic);
+				// A hostile or careless sink registers a host hook that takes an id
+				// the owned set just accepted. Preparation must not have exposed the
+				// prepared list to this; publication must already be complete.
+				middleware.registerHook(emitting("v", "host-v"));
+			},
+		}).contract;
+		const prepared = middleware.prepareRegistrationReplacement("user-hooks", 1, [
+			emitting("u"),
+			emitting("u", "owned-u-duplicate"),
+			emitting("v", "owned-v"),
+		]);
+		strictEqual(sinkCalls, 0, "preparation emits nothing");
+		strictEqual(prepared.status, "prepared");
+		if (prepared.status !== "prepared") return;
+		deepStrictEqual(
+			prepared.replacement.conflicts.map((conflict) => [conflict.registrationId, conflict.conflictsWith, conflict.action]),
+			[["u", "owned", "dropped"]],
+		);
+		strictEqual(prepared.replacement.current(), true);
+		prepared.replacement.publish();
+		strictEqual(sinkCalls, 0, "publication emits nothing");
+		prepared.replacement.emitConflicts();
+		ok(sinkCalls >= 1);
+		const result = middleware.runHook(PROBE);
+		strictEqual(new Set(result.ruleIds).size, result.ruleIds.length, "no duplicate ids after sink re-entry");
+		deepStrictEqual(result.ruleIds, [FIXED_RULE_ID, "u", "v"]);
+		deepStrictEqual(
+			messages(result.effects),
+			[FIXED_RULE_ID, "u", "host-v"],
+			"the host registration evicted the owned v",
+		);
+		deepStrictEqual(
+			diagnostics.map((diagnostic) =>
+				diagnostic.kind === "registration_conflict" ? [diagnostic.registrationId, diagnostic.action] : diagnostic.kind,
+			),
+			[
+				["u", "dropped"],
+				["v", "evicted"],
+			],
+		);
+		strictEqual(middleware.ownedGeneration("user-hooks"), 1);
+		// The one-call form behaves identically: conflicts emit after publish.
+		sinkCalls = 0;
+		const report = middleware.replaceRegistrations("user-hooks", 2, [emitting("w"), emitting("w")]);
+		strictEqual(report.applied, true);
+		deepStrictEqual(middleware.runHook(PROBE).ruleIds, [FIXED_RULE_ID, "w", "v"]);
 	});
 });

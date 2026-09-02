@@ -53,8 +53,8 @@ export function createExtensionsBundle(
 		});
 	/**
 	 * The single prepared-but-unpublished candidate. Holding it here is what
-	 * makes prepare reentrancy-safe and lets commit refuse any candidate that
-	 * is not the one currently in flight.
+	 * makes prepare reentrancy-safe and lets a candidate tell whether it is
+	 * still the one in flight.
 	 */
 	let inFlight: ExtensionReloadCandidate | null = null;
 
@@ -70,8 +70,10 @@ export function createExtensionsBundle(
 
 	const extension: DomainExtension = {
 		start() {
-			const snapshot = build(store.nextGeneration());
-			if (!store.commit(snapshot)) throw new Error("initial extension snapshot generation was stale");
+			// Bind an empty store only. Until the composition root publishes the
+			// boot generation together with its user hooks, every reader takes
+			// the ephemeral generation-0 path, so no consumer can observe
+			// extension resources paired with hooks from another generation.
 			bindExtensionSnapshotStore(store);
 		},
 		stop() {
@@ -113,41 +115,30 @@ export function createExtensionsBundle(
 			// Reserve before building so a discarded candidate burns its number
 			// and generations stay strictly monotonic without a second counter.
 			const generation = store.nextGeneration();
-			let candidate: ExtensionReloadCandidate;
+			let snapshot: ReturnType<typeof build>;
 			try {
-				const snapshot = build(generation);
-				candidate = {
-					generation,
-					previousGeneration: previous?.generation ?? 0,
-					snapshot,
-					...diffExtensionSnapshots(previous, snapshot),
-				};
+				snapshot = build(generation);
 			} catch (error) {
 				return rejected("build-failed", failureDiagnostics(error));
 			}
+			const candidate: ExtensionReloadCandidate = {
+				generation,
+				previousGeneration: previous?.generation ?? 0,
+				snapshot,
+				...diffExtensionSnapshots(previous, snapshot),
+				// Identity on the committed reference covers every intervening
+				// publish; the in-flight check covers discard and double publish.
+				current: () => inFlight === candidate && store.current() === previous,
+				publish() {
+					store.publish(snapshot);
+					inFlight = null;
+				},
+				discard() {
+					if (inFlight === candidate) inFlight = null;
+				},
+			};
 			inFlight = candidate;
 			return { status: "prepared", candidate };
-		},
-		commitReload(candidate) {
-			if (candidate !== inFlight) return rejected("stale", candidate.snapshot.diagnostics);
-			inFlight = null;
-			// One assignment inside the store publishes the generation. Nothing
-			// between the stale check and the return can yield or throw.
-			if (!store.commit(candidate.snapshot)) return rejected("stale", candidate.snapshot.diagnostics);
-			return {
-				status: "committed",
-				generation: candidate.generation,
-				previousGeneration: candidate.previousGeneration,
-				changed: candidate.changed,
-				digest: candidate.snapshot.digest,
-				added: candidate.added,
-				removed: candidate.removed,
-				modified: candidate.modified,
-				diagnostics: candidate.snapshot.diagnostics,
-			};
-		},
-		discardReload(candidate) {
-			if (candidate === inFlight) inFlight = null;
 		},
 	};
 	return { extension, contract };
