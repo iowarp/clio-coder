@@ -1186,7 +1186,7 @@
         and nothing else, which this template does not read. on-off is what both
         measurements support. The cost is that resolveRequestCapability adds the
         reasoning_effort spelling for an on-off family only when runtimeId is
-        literally `lmstudio` (REASONING_EFFORT_ON_OFF_RUNTIMES), while an
+        literally `lmstudio` (REASONING_EFFORT_ONLY_RUNTIMES), while an
         effort-levels family emitted it on every runtime. An LM Studio server
         reached through a generic openai-compat, litellm or vllm target
         therefore now receives only the template flag, which that host ignores,
