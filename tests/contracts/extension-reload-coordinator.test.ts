@@ -671,6 +671,30 @@ describe("extension reload coordinator refusal paths", () => {
 		deepStrictEqual(events, []);
 	});
 
+	it("keeps a paired publication committed when its post-publication observer throws", () => {
+		const project = scratch();
+		installFixture(project, "ext-a");
+		const harness = liveHarness(project);
+		const coordinator = harness.coordinator({
+			onCommitted: () => {
+				throw new Error("observer exploded");
+			},
+		});
+
+		const outcome = coordinator.applyBoot();
+		strictEqual(outcome.status, "committed");
+		if (outcome.status !== "committed") return;
+		strictEqual(harness.extensions.generation(), 1);
+		strictEqual(harness.middleware.ownedGeneration("user-hooks"), 1);
+		deepStrictEqual(
+			harness.extensions.resourceRoots("skills").map((root) => root.generation),
+			[1],
+		);
+		deepStrictEqual(harness.middleware.runHook({ hook: "turn_start" }).ruleIds, ["ext-a.hook"]);
+		ok(outcome.lines.some((line) => line.includes("committed generation observer failed: observer exploded")));
+		harness.stop();
+	});
+
 	it("refuses callback re-entry while the paired generation is already live", () => {
 		const project = scratch();
 		installFixture(project, "ext-a");

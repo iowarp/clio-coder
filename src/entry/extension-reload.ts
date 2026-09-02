@@ -261,13 +261,22 @@ export function createExtensionReloadCoordinator(deps: ExtensionReloadCoordinato
 			replacement.publish();
 			// Both references are live. Observers may run from here on.
 			replacement.emitConflicts();
-			deps.onCommitted?.({
-				generation: candidate.generation,
-				previousGeneration: candidate.previousGeneration,
-				changed: candidate.changed,
-				digest: candidate.snapshot.digest,
-			});
 			const lines = issueLines(built, replacement.dropped);
+			try {
+				deps.onCommitted?.({
+					generation: candidate.generation,
+					previousGeneration: candidate.previousGeneration,
+					changed: candidate.changed,
+					digest: candidate.snapshot.digest,
+				});
+			} catch (error) {
+				// Publication is already complete. An observability callback cannot
+				// turn a live paired generation into a thrown or rejected outcome.
+				const message = error instanceof Error ? error.message : String(error);
+				lines.push(
+					`[clio-coder:extensions] committed generation observer failed: ${message.slice(0, EXTENSION_SNAPSHOT_DIAGNOSTIC_MESSAGE_CAP)}`,
+				);
+			}
 			emitLines(lines);
 			return {
 				status: "committed",
