@@ -11,13 +11,13 @@ The non-destructive eviction layer has its own guide: [context-working-set.md](c
 
 ## Context window resolution
 
-Each target has a declared, desired, and effective context window. The effective window is the operating ceiling used by budget checks and compaction. Sources rank most-live first: the window discovery reports the model is loaded at, then a probed window, then a target override, then a model hint, catalog knowledge, a local-native default, and finally a descriptor default.
+Each target has a declared, desired, and effective context window. The effective window is the operating ceiling used by budget checks and compaction. A one-run `--max-context-tokens` override wins when present. Otherwise sources rank most-live first: the window discovery reports the model is loaded at, then a probed window, a target capability override, a model hint, knowledge-base data, the built-in model catalog, a runtime descriptor default, and finally Clio's assumed fallback.
 
 The loaded window outranks the declared one because it is the only figure describing what the backend will serve. LM Studio routinely opens a model well below its `max_context_length`, and a run planned against the larger number overruns the server before compaction ever fires. Discovery carries that number per model in `discoveredModelStates[<model>].contextLength`, and the residency notice reads the same entry, so a model Clio is budgeting a loaded window for is never announced as absent.
 
 A resumed session carries the loaded window it already recorded. A resume re-resolves its target before discovery has reported what the backend has open, so the first turn used to budget against the probed figure, which on a multi-slot or multi-copy backend can be several times the real headroom, and corrected a turn later. `lastLoadedContextWindow` reads the last `loaded` window the session's own `context-snapshots.jsonl` recorded for the same target and model and hands it to resolution as `knownLoadedContextWindow`. It is used only when live discovery reports nothing, and it is scoped to that target and model, so a different selection re-probes and a model reloaded at a new size corrects as soon as discovery names the live window.
 
-Local-native runtimes use a recommended minimum desired window of 128,000 tokens. If the live model reports a smaller loaded context window, Clio re-resolves the target so accounting uses the actual ceiling.
+Clio uses 131,072 tokens as the minimum desired window and as the fallback when no source reports one, on every runtime tier. A reported effective window below 128,000 tokens triggers the undersized-window warning. If a live model reports a smaller loaded context window, Clio re-resolves the target so accounting uses the actual ceiling.
 
 The `/context` overlay states which layer answered, next to the token total: `loaded`, `probed`, `configured`, `declared`, or `assumed`.
 
@@ -39,13 +39,13 @@ The `/context` overlay and footer meter read the same ledger categories in displ
 
 ## Single-threshold compaction
 
-Auto-compaction is controlled by one pressure threshold. Pressure is `budgeted_tokens / context_window`, where the budgeted figure is the reconciled total when the provider has attested one and the chars/4 estimate otherwise. The default threshold is `0.8`.
+Auto-compaction is controlled by `context.compaction.threshold`. Pressure is `budgeted_tokens / context_window`, where the budgeted figure is the reconciled total when the provider has attested one and the chars/4 estimate otherwise. The default threshold is `0.8`.
 
 Crossing that threshold engages three mechanisms in a fixed order. The first two are cheap, reversible, and call no model. Only the third rewrites what the session says about itself.
 
 ### 1. Working-set eviction
 
-When `compaction.auto` is enabled and pressure crosses the threshold before a request, Clio applies the configured working-set policy first. The policy selects tool-result bodies and closed-turn thinking blocks, `runAutoCompact` appends one `contextEviction` ledger entry, and `refreshAgentMessagesFromSession` projects those units out of model replay behind a one-line marker. Nothing is deleted: the ledger keeps the original bodies, the transcript keeps showing them, and `/resume`, `/tree`, `/fork`, and the HTML export are unaffected.
+When `context.compaction.auto` is enabled and pressure crosses the threshold before a request, Clio applies the configured working-set policy first. The policy selects tool-result bodies and closed-turn thinking blocks, `runAutoCompact` appends one `contextEviction` ledger entry, and `refreshAgentMessagesFromSession` projects those units out of model replay behind a one-line marker. Nothing is deleted: the ledger keeps the original bodies, the transcript keeps showing them, and `/resume`, `/tree`, `/fork`, and the HTML export are unaffected.
 
 Already-evicted units are never selected again. Recent turns keep their full observations and thinking, governed by `context.workingSet.protectLastTurns`. Results whose estimated body is below `context.workingSet.minEvictableTokens` (200 tokens by default) are kept whatever their age as a low-yield churn guard. The engine separately refuses any candidate whose marker would save no tokens. The `age-horizon` policy is therefore the selection the old destructive mask made minus those small results, not a byte-identical reproduction of it; the default `structural-v1` policy applies its structural rules before any age rule.
 
@@ -85,7 +85,7 @@ When the ledger is replayed to the model, compaction summaries, branch summaries
 
 Every provider Clio targets caches by exact prefix. Anthropic hashes the cumulative prefix up to a `cache_control` breakpoint and looks back at most 20 blocks for an earlier write; the minimum cacheable prefix is 512 to 4,096 tokens by model, reads cost 0.1x input and writes 1.25x. OpenAI caches automatically from 1,024 tokens in 128-token increments on exact prefix matches at 0.1x. vLLM hashes each KV block from its parent block's hash, so a change in one block invalidates every later block. llama.cpp (and LM Studio on top of it) picks the slot with the longest common prefix and re-evaluates only the suffix, and `--cache-reuse` can shift later KV chunks back into place after a mid-prompt removal. The consequence is the same everywhere except on llama.cpp with cache reuse: whatever bytes change, everything after the earliest changed position is re-prefilled. That is why a marker is byte-stable, why a recall rides the tail instead of restoring the body in place, why `structural-v1` batches evictions down to `target` instead of trimming on every turn, and why the replay tables report cold prefix tokens per event next to tokens evicted: at a 32k budget one event re-prefills most of the window whichever policy chose the items, so the lever that protects a cloud cache is the number of events, not their contents. A local backend with cache reuse pays less for the same removal, which is where finer-grained eviction and recall earn their keep.
 
-The procedural replay target sweep measured 0.4, 0.5, 0.6, and an exhaustive rung-6 stop over 24 traces. Target 0.4 and exhaustive selection converged because un-evictable residue exhausted the candidate pool. Against 0.6, target 0.4 cut cold-prefix tokens by 2.8% at 64k and 7.3% at 128k, with no summary reduction and a 0.00072 reduction in retention covered at 128k. That is below the 10% cache-saving threshold set for changing a cross-tier default, so the default remains 0.6. The complete sweep and reopening rule are in the replay README.
+A historical local replay target sweep measured 0.4, 0.5, 0.6, and an exhaustive rung-6 stop over 24 traces. Target 0.4 and exhaustive selection converged because un-evictable residue exhausted the candidate pool. Against 0.6, target 0.4 cut cold-prefix tokens by 2.8% at 64k and 7.3% at 128k, with no summary reduction and a 0.00072 reduction in retention covered at 128k. That was below the 10% cache-saving threshold used for the experiment, so the default remained 0.6. The generated tables and reopening calculation were local artifacts and are not versioned in this repository; use the replay commands in [Commands and Modes](commands-and-modes.md#working-set-replay) to measure the current tree.
 
 The same arithmetic governs the compiled system prompt, which sits ahead of every message. Its sections are ordered stable prefix first, so a section that can change between two turns never sits ahead of one that cannot; the order and the rule behind it are in [prompt-envelope-and-tools.md](prompt-envelope-and-tools.md#section-order-stable-prefix-first).
 
@@ -141,7 +141,7 @@ The payload is the request the next turn would send minus the operator's text: t
 
 The pre-warm is refused rather than queued whenever it would compete with real work. It runs only on `local-native` targets, whatever `chat.prewarm` says, because a cloud provider bills the request and caches on its own schedule. It never runs while a turn is in flight, while any dispatch is outstanding, on a worker, or in headless `run`. The dispatch guard is a stand-in: without per-endpoint capacity accounting the pre-warm cannot tell whether a worker already occupies the server it would warm, so it stands down for all worker traffic. The round already claims one endpoint slot for as long as its request is out and releases it in a `finally`, through the `registerEndpointSlot` seam the chat loop wires from the endpoint-capacity registry, so capacity counts a pre-warm the same way it counts the orchestrator's streaming turn.
 
-Pressing Enter lets go of an in-flight pre-warm at the keystroke, before the admission gate. Whether it also aborts the HTTP request is gated on what the backend does with a cancelled one, and the measured backend does nothing. On the operator's llama.cpp router (build `b226-2115b73d8`, Qwen3.8-27B, `--parallel 1`), aborting 1.5 s into a 47,620-token prefill did not cancel the server's work: the server finished prefilling, so the prefix did survive the abort and the next request read 47,596 of 47,620 tokens from cache with `prompt_ms 927`, but that request also waited 89.5 s of wall clock for the abandoned one to leave the single slot. Letting the pre-warm complete instead cost 89.3 s plus a 1.3 s turn, the same wall clock. The abort therefore frees no slot and saves no time on this backend; all it does is discard the usage and timings of prefill the server performed. So a submit detaches the round instead: Clio stops calling it the current pre-warm, never waits on it, withholds its `/context` line because it no longer describes the prefix the next turn will send, and still records what it cost. `ABORT_ROUND_ON_SUBMIT` in `src/interactive/turn-prewarm.ts` carries the measurement and flips the behavior for a backend that honors cancellation.
+Pressing Enter lets go of an in-flight pre-warm at the keystroke, before the admission gate. Whether it also aborts the HTTP request is gated on what the backend does with a cancelled one, and the backend used for the original experiment did nothing. On an earlier single-slot llama.cpp deployment (build `b226-2115b73d8`, Qwen3.8-27B, `--parallel 1`), aborting 1.5 s into a 47,620-token prefill did not cancel the server's work: the server finished prefilling, so the prefix did survive the abort and the next request read 47,596 of 47,620 tokens from cache with `prompt_ms 927`, but that request also waited 89.5 s of wall clock for the abandoned one to leave the single slot. Letting the pre-warm complete instead cost 89.3 s plus a 1.3 s turn, the same wall clock. The abort therefore freed no slot and saved no time on that backend; all it did was discard the usage and timings of prefill the server performed. The current operator topology is different: `mini` is a llama.cpp router at `192.168.86.141:8080` serving `ornith1.5-35b-moe` with four parallel slots and 262,144 context tokens per slot, while `dynamo` is LM Studio at `192.168.86.143:1234` serving `qwen3.8-27b-dynamo` for chat. The cancellation result must be remeasured before it is generalized to either deployment. A submit currently detaches the round: Clio stops calling it the current pre-warm, never waits on it, withholds its `/context` line because it no longer describes the prefix the next turn will send, and still records what it cost. `ABORT_ROUND_ON_SUBMIT` in `src/interactive/turn-prewarm.ts` carries the historical measurement and flips the behavior for a backend that honors cancellation.
 
 Each round appends one `prewarm` custom ledger entry carrying its trigger, the backend prompt tokens, `timing`, and `promptCache`. The entry is never rendered and never becomes a model message, so it contributes zero tokens to the context estimate. `/context` shows `prewarmed: N tokens in X ms` until the next settled run answers the question it asked. `prewarm` is never an expected-cold reason: a pre-warm is the opposite of a disturbance. Its provider usage is real spend and is reported to `/cost` and `clio-coder usage report` under its own row, the way a `/btw` side question is.
 
@@ -150,12 +150,8 @@ Each round appends one `prewarm` custom ledger entry carrying its trigger, the b
 The public settings use one compaction threshold plus a non-destructive working-set stage:
 
 ```yaml
-compaction:
-  auto: true
-  threshold: 0.8
-  excludeLastTurns: 6
-  # model: provider/summary-model-id
-  # systemPrompt: ~/.config/clio-coder/prompts/compaction.md
+chat:
+  prewarm: true
 
 context:
   workingSet:
@@ -164,12 +160,14 @@ context:
     target: 0.6
     protectLastTurns: 6
     minEvictableTokens: 200
-
-prewarm:
-  enabled: true
+  compaction:
+    auto: true
+    threshold: 0.8
+    # model: provider/summary-model-id
+    # systemPrompt: ~/.config/clio-coder/prompts/compaction.md
 ```
 
-`compaction.auto` controls the pre-request trigger. Manual `/context compact` still runs when `auto` is false. `compaction.model` optionally selects a dedicated summarization model, and `compaction.systemPrompt` optionally points at a prompt override file. `compaction.excludeLastTurns` only governs the temporary legacy mask path; working-set protection uses `context.workingSet.protectLastTurns`.
+`context.compaction.auto` controls the pre-request trigger. Manual `/context compact` still runs when `auto` is false. `context.compaction.model` optionally selects a dedicated summarization model, and `context.compaction.systemPrompt` optionally points at a prompt override file. The retired `compaction.excludeLastTurns` key is not part of settings v2. The temporary legacy mask uses its compiled six-turn fallback, while working-set protection uses `context.workingSet.protectLastTurns`.
 
 | Key | Default | Accepted | Meaning |
 | --- | --- | --- | --- |
@@ -300,11 +298,13 @@ owns each entry's status and rewrites the file after every page, so a run that
 ends early records exactly which pages are still owed. Staging survives such a
 run and the next one resumes from it.
 
-Every page opens with front matter carrying `title`, `summary`, `sources`,
-`symbols`, `tests`, `invariants`, and `validate`. That is the retrieval layer:
-`quickstart.md`, every directory `index.md`, and the task-routing table are
-generated from it after each run, so navigation cannot drift or miss a page and
-no writer has to remember to update it.
+Every page opens with repaired front matter. Its metadata model has `title`,
+`summary`, `sources`, `symbols`, `tests`, `invariants`, and `validate`, but the
+serializer always writes only `title`, adds `summary` when non-empty, and omits
+empty list fields. That metadata is the retrieval layer: `quickstart.md`, every
+directory `index.md`, and the task-routing table are generated from the repaired
+values after each run, so navigation cannot drift or miss a page and no writer
+has to remember to update it.
 
 Assembly repairs rather than rejects. A missing H1, absent or malformed front
 matter, a dangling `sources` entry, a link to a page that was never written, and

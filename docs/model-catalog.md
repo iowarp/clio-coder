@@ -44,9 +44,16 @@ worker spec and receipt are written.
 Clio's evaluation engine records target, runtime, wire model, thinking level,
 serving facts, and evidence with each run. Reviewable reference suites live
 under [`evals/`](../evals/); private prompts, external benchmark adapters, raw
-campaign artifacts, credentials, and endpoint details belong outside this
-repository. Use `clio-coder eval run --suite <path> --target <id>` and retain
+campaign artifacts, credentials, and non-reference private endpoint details
+belong outside this repository. Use `clio-coder eval run --suite <path> --target <id>` and retain
 the resulting execution envelope when comparing models or serving settings.
+
+The current reference deployment has two local targets. `mini` is a llama.cpp
+router at `http://192.168.86.141:8080` serving `ornith1.5-35b-moe` with four
+slots and 262144 tokens of context per slot. `dynamo` is LM Studio at
+`http://192.168.86.143:1234`, serving `qwen3.8-27b-dynamo` for chat. These are
+operator-managed deployment facts, not compiled defaults; use a live probe to
+confirm availability before a run.
 
 ## What "sanctioned" means
 
@@ -97,23 +104,33 @@ catalog:
     reasoning: true
     thinkingFormat: qwen-chat-template
     structuredOutputs: json-schema
-    vision: false
+    vision: true
     audio: false
     embeddings: false
     rerank: false
     fim: false
     contextWindow: 262144
-    maxTokens: 32768
+    maxTokens: 131072
   quirks:
     sampling:
       thinking:
-        temperature: 0.6
+        temperature: 1.0
         topP: 0.95
         topK: 20
+        minP: 0.0
+        presencePenalty: 0.0
+        repetitionPenalty: 1.0
     thinking:
-      mechanism: always-on
+      mechanism: effort-levels
+      effortByLevel:
+        low: low
+        medium: medium
+        high: xhigh
+        xhigh: xhigh
       guidance: |
-        Official Qwen3.8-27B chat template. llama.cpp's qwen3_coder parser converts XML tool calls to standard tool_calls JSON.
+        The official template accepts only low, medium, and xhigh reasoning
+        effort values. Clio maps its higher levels to xhigh. Use the runtime's
+        explicit off mechanism to disable thinking.
 ```
 
 Use `settings.yaml` `wireModels` for target inventory. Use overlays for
@@ -160,6 +177,11 @@ Use this shape when testing a subscription model, homelab GPU target, research-l
 ## Reasoning Controls and Thinking Replay Semantics
 
 The Context Engine evaluates thinking mechanisms per model target and manages live reasoning streams. Depending on the runtime capabilities, Clio Coder employs specific thinking replay semantics to ensure chain-of-thought data is preserved or replayed correctly in the conversation history:
+
+The shipped interactive default is `chat.thinkingLevel: low`. The independent
+fleet worker default remains `fleet.default.thinkingLevel: off`; an explicit
+target, profile, roster member, command option, or in-session selection can
+override the applicable setting.
 
 - **Ollama Native (`ollama-native`):** Ollama utilizes the native `thinking` field in the request and response payloads. The engine handles Ollama-specific effort levels and streams reasoning increments cleanly through the native thinking channel.
 - **LM Studio (`lmstudio`):** Chat uses the OpenAI-compatible `/v1/chat/completions` surface, including its `reasoning` stream field. Clio controls thinking only with `reasoning_effort` and never sends `chat_template_kwargs` to LM Studio. See <https://lmstudio.ai/docs/developer/openai-compat/chat-completions>.

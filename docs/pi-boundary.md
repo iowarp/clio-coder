@@ -11,7 +11,7 @@ Clio-owned surface during a dependency bump.
 | Pi export or surface | Clio file or function | Action | Reason |
 | --- | --- | --- | --- |
 | pi-agent-core `truncateHead`, `truncateTail`, `truncateLine`, and `formatSize` | `src/tools/truncate.ts` | Route through Pi. | Pi owns UTF-8-safe truncation. Clio retains its 16 KiB default and `splitLinesForCounting`, which Pi does not export. |
-| pi-ai `StringEnum` | `src/engine/ai.ts` and the `src/tools/string-enum.ts` adapter | Route through Pi. | The former TypeBox implementation duplicated Pi's compact provider-safe schema. |
+| pi-ai `StringEnum` | `src/engine/ai.ts` | Route through Pi. | The deleted `src/tools/string-enum.ts` TypeBox adapter duplicated Pi's compact provider-safe schema. Tools now import the re-export from the engine boundary. |
 | pi-agent-core `COMPACTION_SUMMARY_PREFIX`, `COMPACTION_SUMMARY_SUFFIX`, `BRANCH_SUMMARY_PREFIX`, `BRANCH_SUMMARY_SUFFIX`, and `bashExecutionToText` | `src/interactive/chat-renderer.ts` through `src/engine/messages.ts` | Route through Pi. | Replay text must match Pi's `convertToLlm` wording while Clio keeps its `SessionEntry` mapping and replay bounds. |
 | pi-tui `stripTerminalSequences` | `src/domains/session/tree/preview.ts` | Keep the Clio sanitizer. | Pi removes SGR and OSC sequences but intentionally leaves private-mode CSI and character-set escapes that may occur in captured tool output. |
 | pi-ai `isRetryableAssistantError` | `src/domains/session/retry.ts` | Route generic classification through Pi and keep the Clio delta. | Clio additionally recognizes self-hosted model loading and enforces its separate 15-second floor. |

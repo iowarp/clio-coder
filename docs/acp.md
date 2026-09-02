@@ -22,7 +22,7 @@ graph LR
     client[External ACP Client] <-->|JSON-RPC 2.0 / stdio| server[Clio ACP Server]
     server --> mediator[Tool Mediator & Safety Net]
     mediator --> engine[Clio Execution Engine]
-    mediator --> session[Session Ledger v3]
+    mediator --> session[Session Ledger v4]
 ```
 
 ---
@@ -40,7 +40,7 @@ both spellings reach the same command dispatcher, option parser, stdout guard,
 and server boot path.
 
 - `--cwd PATH`: Workspace root the server boots in. The path is resolved and then canonicalized with `fs.realpath`, so a symlinked launch root, a trailing slash, and a `/.` suffix all name the same workspace. Clio changes into that canonical path before it reads settings, builds project context, or opens a session ledger, so a session opens at that root. A path that does not exist or that the process cannot enter exits 2 without starting the server. The canonical path is the server's workspace identity for its whole life: `session/new` must carry a `cwd` that canonicalizes to the same path, and nothing after boot ever changes the process directory.
-- `--permission-timeout MS`: The server-side fail-safe ceiling for one mediated permission request, as a whole number from 1 through Node's maximum schedulable timer delay (`2147483647`) milliseconds. Values outside that range are refused before the protocol server starts. If the timer wins, the approval expires, the active turn is aborted, every parked call for that turn is settled only so execution can unwind, and `session/prompt` fails with `permission_expired`. Expiry is audited as `expired`, never as a human denial, and no denial result is fed into a continuing model loop. The flag overrides `integrations.externalAgents.defaults.permissionTimeoutMs` for this server only, which itself defaults to `DEFAULT_DELEGATION_PERMISSION_TIMEOUT_MS = 120000` (`src/core/defaults.ts:149`). The source-checkout Workbench treats the remaining ACP request window as a hard ceiling on its own approval budget, projects that duration onto the Workbench clock, escalates immediately when the remaining window is shorter than its escalation delay, and cancels without publishing a card if the window has already elapsed. Other clients may enforce a shorter operator-facing policy by sending ordinary `session/cancel`.
+- `--permission-timeout MS`: The server-side fail-safe ceiling for one mediated permission request, as a whole number from 1 through Node's maximum schedulable timer delay (`2147483647`) milliseconds. Values outside that range are refused before the protocol server starts. If the timer wins, the approval expires, the active turn is aborted, every parked call for that turn is settled only so execution can unwind, and `session/prompt` fails with `permission_expired`. Expiry is audited as `expired`, never as a human denial, and no denial result is fed into a continuing model loop. The flag overrides `integrations.externalAgents.defaults.permissionTimeoutMs` for this server only, which itself defaults to `DEFAULT_DELEGATION_PERMISSION_TIMEOUT_MS = 120000` (`src/core/defaults.ts:290`). The source-checkout Workbench treats the remaining ACP request window as a hard ceiling on its own approval budget, projects that duration onto the Workbench clock, escalates immediately when the remaining window is shorter than its escalation delay, and cancels without publishing a card if the window has already elapsed. Other clients may enforce a shorter operator-facing policy by sending ordinary `session/cancel`.
 
 Transport frames are JSON-RPC 2.0 messages serialized over `stdin`/`stdout`. All logging and diagnostic output is strictly routed to `stderr` to preserve standard I/O framing integrity.
 
@@ -86,7 +86,7 @@ JSON-RPC layer codes stay standard: `-32700` parse, `-32600` invalid request, `-
  "data":{"_meta":{"clio-coder/error":{"version":1,"code":"<closed-set string>","reason":"<optional>","supported":[1]}}}}
 ```
 
-`data` never carries a stack, an echoed frame, a filesystem path, provider text, or a secret. Neither does `message`. Every message on the wire is authored by this process: `turn_failed` is always the fixed string `the prompt turn failed`, `internal_error` is always the fixed string `internal error`, and `method_not_found` is always the fixed string `method not found`, whatever the underlying failure said and whatever the peer called. A provider or engine failure body legitimately quotes the request URL it used, the settings file it read a credential from, or the credential itself, and bounding that text to one line still ships the secret. The client branches on `data._meta`'s `code`; the original message, bounded to one line, goes to stderr prefixed with `[clio:acp]`. The `code` values are a closed set:
+`data` never carries a stack, an echoed frame, a filesystem path, provider text, or a secret. Neither does `message`. Every message on the wire is authored by this process: `turn_failed` is always the fixed string `the prompt turn failed`, `internal_error` is always the fixed string `internal error`, and `method_not_found` is always the fixed string `method not found`, whatever the underlying failure said and whatever the peer called. A provider or engine failure body legitimately quotes the request URL it used, the settings file it read a credential from, or the credential itself, and bounding that text to one line still ships the secret. The client branches on `data._meta`'s `code`; the original message, bounded to one line, goes to stderr prefixed with `[clio-coder:acp]`. The `code` values are a closed set:
 
 | `data.code` | When |
 | :--- | :--- |
@@ -162,7 +162,7 @@ The values above are illustrative. Thinking is one of `off`, `minimal`, `low`, `
 
 A client opts into the first extension event with `initialize.params.clientCapabilities._meta["clio-coder/events"]={version:1,kinds:["safety.loopBlocked"]}`. The kinds array has at most 16 strings, each at most 64 UTF-8 bytes and C0/DEL-free; a malformed opt-in is ignored. Unknown bounded versions and kinds are ignored. Without a recognized opt-in, no `clio-coder/event` notification is sent.
 
-The v1 notification is `{version,workspaceInstanceId,sessionId,turnId,sequence,kind,terminal,payload}`. `workspaceInstanceId` is one opaque process UUID advertised at initialize, and `sequence` increases monotonically within it. The only kind is `safety.loopBlocked`, is emitted only during the hosted active prompt, and has `terminal:false`. Its payload is `{toolCallId:null,tool,repeatCount,blocksThisTurn,budget,disposition,interrupted,shape:null}`. Disposition is `block`, `lockout`, or `stop`, and `interrupted` is true exactly for `stop`. The detector fires before the blocked call executes, so no honest ACP tool-call id exists; the bus has no disclosure-safe normalized shape. Both fields therefore remain null rather than being fabricated.
+The v1 notification is `{version,workspaceInstanceId,sessionId,turnId,sequence,kind,terminal,payload}`. `workspaceInstanceId` is one opaque process UUID advertised at initialize, and `sequence` increases monotonically within it. Recognized kinds are `safety.loopBlocked`, `dispatch.enqueued`, `dispatch.started`, `dispatch.progress`, `dispatch.completed`, and `dispatch.failed`. A loop-blocked event is emitted only during the hosted active prompt and has `terminal:false`. Its payload is `{toolCallId:null,tool,repeatCount,blocksThisTurn,budget,disposition,interrupted,shape:null}`. Disposition is `block`, `lockout`, or `stop`, and `interrupted` is true exactly for `stop`. The detector fires before the blocked call executes, so no honest ACP tool-call id exists; the bus has no disclosure-safe normalized shape. Both fields therefore remain null rather than being fabricated. Dispatch events carry bounded run and agent identity plus the small lifecycle counters or terminal taxonomy appropriate to their kind; completed and failed events set `terminal:true`. Enqueued and started events may include `taskPreview`, a control-character-stripped prefix bounded to 160 UTF-8 bytes. The exact task and raw progress or failure prose never cross this boundary.
 
 ### Prompt input
 
@@ -176,7 +176,7 @@ Every frame the server writes is bounded (`src/engine/acp/types.ts`). Every cap 
 - Tool `content` text is truncated at 16 KiB with a trailing `…[truncated]`.
 - Live tool titles are at most 512 UTF-8 bytes. The bound applies identically to `tool_call`, `tool_call_update`, and `session/request_permission`; replay titles retain their stricter 64-byte stored-data bound.
 - Every string inside `rawInput` and `rawOutput` is truncated at 4 KiB with the same marker, and the walk stops at depth 8, replacing anything deeper with `"[depth]"`. The marker is reserved inside the cap, so a truncated value is at most the cap itself. If the bounded record still serializes past 32 KiB of UTF-8 it becomes `{"truncated":true,"bytes":<serialized UTF-8 length>}`, where the length is the record's serialization before any bounding, so the figure names the payload the engine produced rather than the shortened copy that was not sent. A record that does not serialize at all reports the bounded copy's length, or `0` when neither form serializes.
-- Every `toolCallId` is at most 128 UTF-8 bytes. An engine id longer than that, a missing one, or one that collides with an alias this turn already minted is replaced by a per-turn `clio-tool-<n>` alias, and the same alias is used for the call's `tool_call`, its `tool_call_update`, and its permission request, so one call never splits into two identities on the client. Identity runs one way: each engine tool-call id maps to exactly one emitted call. A turn that starts a second call under an engine id it already used mints a fresh alias for it rather than reusing the earlier wire id, so two calls never merge into one, and a `tool_execution_end` closes that id's most recently opened call first. An end that names an engine id is confined to that engine id's own calls: an id this turn never started binds to nothing, and the end is dropped and reported on the stderr tail rather than borrowing another call's wire id, which reported one tool's result under another tool's identity and closed a call that was still running. Every wire id receives exactly one terminal update. Once a `tool_call_update` with `completed` or `failed` has gone out for an id, the cancel/fail sweep included, that id never receives another, and a late or duplicate end for it is dropped and reported on the stderr tail instead of overwriting the result the client already rendered. An end arriving with no engine id binds to the most recently opened call still running, which is what makes a nested lifecycle close correctly: with an outer and an inner call open and the inner one already ended, the next unidentified end is the outer call's. With nothing still open it binds to the most recently emitted call of the turn, which drops it when that call is already terminal, and an end arriving before the turn has emitted any `tool_call` is dropped outright. Nothing on the end path mints a wire id, so a `tool_call_update` never announces an id the client never saw start.
+- Every `toolCallId` is at most 128 UTF-8 bytes. An engine id longer than that, a missing one, or one that collides with an alias this turn already minted is replaced by a per-turn `clio-coder-tool-<n>` alias, and the same alias is used for the call's `tool_call`, its `tool_call_update`, and its permission request, so one call never splits into two identities on the client. Identity runs one way: each engine tool-call id maps to exactly one emitted call. A turn that starts a second call under an engine id it already used mints a fresh alias for it rather than reusing the earlier wire id, so two calls never merge into one, and a `tool_execution_end` closes that id's most recently opened call first. An end that names an engine id is confined to that engine id's own calls: an id this turn never started binds to nothing, and the end is dropped and reported on the stderr tail rather than borrowing another call's wire id, which reported one tool's result under another tool's identity and closed a call that was still running. Every wire id receives exactly one terminal update. Once a `tool_call_update` with `completed` or `failed` has gone out for an id, the cancel/fail sweep included, that id never receives another, and a late or duplicate end for it is dropped and reported on the stderr tail instead of overwriting the result the client already rendered. An end arriving with no engine id binds to the most recently opened call still running, which is what makes a nested lifecycle close correctly: with an outer and an inner call open and the inner one already ended, the next unidentified end is the outer call's. With nothing still open it binds to the most recently emitted call of the turn, which drops it when that call is already terminal, and an end arriving before the turn has emitted any `tool_call` is dropped outright. Nothing on the end path mints a wire id, so a `tool_call_update` never announces an id the client never saw start.
 - `locations` carries the absolute path for the built-in path-bearing tools (`read`, `write`, `edit`, `ls`, `grep`, `find`) when the arguments name one, resolved against the pinned workspace and deliberately not realpath'ed, since an `edit` or `write` target may not exist yet. Each emitted path is at most 4 KiB of UTF-8, with `…[truncated]` inside that budget when the resolved value is longer. The exact bounded snapshot is reused by `session/request_permission`. When there is no recognizable path the field is omitted entirely rather than sent as `null` or `[]`.
 - A live prompt emits at most 128 `tool_call` starts. On the next start the server emits no 129th call, cancels the underlying Clio turn, suppresses subsequent chat events, terminally fails every already-rendered open call, and resolves `session/prompt` with standard stop reason `max_turn_requests`. This stop reason is emitted by the ACP bridge only for that presentation ceiling; Clio's separate configurable execution guard remains an engine policy rather than a wire-cardinality promise.
 - A cancelled or failed turn synthesizes a `tool_call_update` with `status: "failed"` for every call that received a `tool_call` and no terminal update, before the prompt request settles.
@@ -204,7 +204,9 @@ The shipped `clio-coder acp` composition supplies the session, settings, provide
 | `clio-coder/session` | `initialize` → `agentCapabilities._meta` | `{ close:true, list:true, label:true, delete:true, autonomy:true }` |
 | `clio-coder/settings` | `initialize` → `agentCapabilities._meta` | `{ get_safe:true, patch_safe:true }` |
 | `clio-coder/targets` | `initialize` → `agentCapabilities._meta` | `{ list:true, probe:true }` |
-| `clio-coder/events` | `initialize` → `agentCapabilities._meta` | `{ version:1, notification:"clio-coder/event", kinds:["safety.loopBlocked"], workspaceInstanceId }` |
+| `clio-coder/agent` | `initialize` → `agentCapabilities._meta` | `{ version:1, meta:"clio-coder/agent" }`, advertising per-frame agent attribution. |
+| `clio-coder/agent` | live and replayed `session/update.params._meta` | An array beginning with orchestrator attribution and including bounded delegated-agent attribution for a tool call when available. |
+| `clio-coder/events` | `initialize` → `agentCapabilities._meta` | `{ version:1, notification:"clio-coder/event", kinds:["safety.loopBlocked","dispatch.enqueued","dispatch.started","dispatch.progress","dispatch.completed","dispatch.failed"], workspaceInstanceId }` |
 | `clio-coder/session` | `session/new` / `session/load` result `_meta` | Bind-time `{sessionId,target,model,autonomy,createdAt,resumed,replayed?}` attribution. |
 | `clio-coder/replay` | replayed `session/update.params._meta` | `{ turn }`; absent on live updates. |
 | `clio-coder/truncated` | `clio-coder/targets/list` or `clio-coder/session/list` result `_meta` | `true` only when that method's aggregate byte budget omitted a target/model entry or session row; absent otherwise. |
@@ -214,29 +216,40 @@ The shipped `clio-coder acp` composition supplies the session, settings, provide
 
 ---
 
-## 5. Tool Mediation & Safety Governance
+## 5. Tool Presentation and Outbound Delegation Governance
 
-Tool execution entering through the ACP server is mediated by `src/engine/acp/tool-mediator.ts:createAcpToolMediator`.
+The hosted server presents ordinary Clio tool-registry activity to its client.
+Separately, when Clio delegates to an external ACP peer, it mediates that
+peer's permission requests before they can affect the workspace.
 
 ### Canonical Tool Mapping
 
-Clio tool names are mapped to the closed ACP `ToolKind` enumeration (`src/engine/acp/types.ts`):
+The hosted server maps Clio tool names to the closed ACP `ToolKind`
+enumeration in `src/engine/acp/server.ts`:
 
 | Clio Tool Name | ACP `ToolKind` | Primary Action Category |
 | :--- | :--- | :--- |
 | `read`, `ls`, `context` | `read` | Workspace inspection |
 | `write`, `edit`, `artifact` | `edit` | Workspace mutation |
 | `grep`, `find`, `code_nav` | `search` | Codebase exploration |
-| `bash`, `verify`, `git` | `execute` | Shell & command execution |
+| `bash`, `verify` | `execute` | Shell and verification execution |
 | `web_fetch` | `fetch` | Network retrieval |
-| Dynamic / MCP tools | `other` | Unmapped fallback |
+| `monitor` | `read` | Dispatch status inspection |
+| `git`, `dispatch`, `steer` | `other` | Specialized mapped tools |
+| `credential_present`, `tasks`, `ledger`, `panes`, `ask_user`, dynamic / MCP tools | `other` | Canonical or dynamic tools without a dedicated ACP mapping fall back to `other` |
 
-### Non-Stall Permission Mediation
+### Outbound Non-Stall Permission Mediation
 
-Under `clio-policy` governance:
+`src/engine/acp/adapter.ts` constructs `AcpToolMediator` when Clio acts as an
+ACP client for an outbound delegation. Under `clio-coder-policy` governance:
 1. Tool calls evaluate through the 10-step safety net policy engine.
 2. If the safety net or autonomy level yields an `ask` verdict (such as mutating actions at `suggest` level or unrecognized bash at `auto-edit` level), the mediator resolves the ask as a **non-stall denial** (`autonomyDenyRejection`).
 3. This non-stall behavior prevents external non-interactive client connections from hanging indefinitely while preserving safety boundaries.
+
+This outbound path is distinct from the hosted server's
+`installPermissionBridge`. The hosted server sends `session/request_permission`
+to its connected client and resumes a parked registry call when the client
+selects `allow-once`, subject to the timeout and binding rules above.
 
 ---
 

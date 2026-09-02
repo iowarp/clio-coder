@@ -139,9 +139,9 @@ clio-coder evidence inspect <evidenceId>
 run ledger; a tampered or mismatched receipt fails the build with the field
 that diverged. The receipts of the remote runs verify on the orchestrator host because the
 ledger and receipts live on the shared filesystem. Current receipts use strict
-v16 and authenticate every current receipt and reconstructed-ledger field.
-Every other receipt version is rejected rather than reported as partial; the
-current binary has no historical receipt reader.
+v20 and authenticate every current receipt and reconstructed-ledger field.
+Lower versions are reported as retired and are never read as evidence or
+migrated; malformed and future shapes fail verification.
 
 ## Provenance walkthrough: what a PI can verify from receipts alone
 
@@ -171,9 +171,10 @@ reconstruct:
    complete receipt schema and its stable ledger row. `clio-coder evidence build
    --run <id>` recomputes and cross-checks it; `verifyReceiptIntegrity` in
    `src/domains/dispatch/receipt-integrity.ts` is the reference
-	implementation. Current receipts use v16 and every other version fails
-	verification. Incompatible state must be archived or removed; it is never
-	read as evidence through a compatibility verifier.
+	implementation. Current receipts use v20. Lower versions are reported as
+	retired, while malformed and future shapes fail verification. Incompatible
+	state may be archived for inspection, but it is never read as evidence through
+	a compatibility verifier.
 
 The walkthrough for an audience is three commands: `clio-coder evidence build
 --run <id>` (it verifies), open the receipt JSON (read `node`, `gate`,

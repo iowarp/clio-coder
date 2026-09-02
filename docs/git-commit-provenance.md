@@ -4,9 +4,13 @@ Clio Coder adds evidence-aware role trailers to commits created through Clio.
 The feature is enabled by default:
 
 ```yaml
-attribution:
-  gitCommits: true
+integrations:
+  git:
+    commitAttribution: true
 ```
+
+The released `attribution.gitCommits` path is a migration alias. Current
+settings files and writers use `integrations.git.commitAttribution`.
 
 Settings -> Advanced exposes the same switch as **Clio commit provenance**, with
 `enabled` and `disabled` values. A change applies immediately to subsequent
@@ -49,11 +53,11 @@ Co-authored-by: Clio Coder <clio-coder@iowarp.ai>
 Existing human trailers stay in place. A Clio trailer already present in any
 letter case is respected rather than repeated, line endings are normalized only
 while attribution is enabled, and repeated processing is idempotent. When a directly relevant
-receipt-v19 digest passes integrity verification, Clio may additionally add the
+receipt-v20 digest passes integrity verification, Clio may additionally add the
 full digest:
 
 ```text
-Clio-Evidence: receipt-v19/sha256:<64-character digest>
+Clio-Evidence: receipt-v20/sha256:<64-character digest>
 ```
 
 Clio does not invent, shorten, or add an unrelated digest. The role trailers do

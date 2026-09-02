@@ -50,10 +50,10 @@ drop count instead of growing without bound. Append failures and append
 timeouts disable tracing without failing the application. Normal shutdown
 awaits the bounded final flush.
 
-With the instant shell active, textual `[clio:boot]` lines retain timestamps
+With the instant shell active, textual `[clio-coder:boot]` lines retain timestamps
 captured at the Stage 0 commit and Stage 1 committed hydration frame, but their
 stderr output is deliberately deferred until after the TUI stops and terminal
-protocols are restored. The PTY harness detects the visible Stage 0 bytes and
+protocols are restored. The retired PTY harness detected the visible Stage 0 bytes and
 Stage 1 frame directly, then parses those buffered timestamps after process
 exit. This keeps diagnostic output from corrupting the temporary shell without
 changing the measured endpoints.
@@ -65,15 +65,17 @@ CLIO_CODER_INTERACTIVE=1 \
 node dist/cli/index.js
 ```
 
-The deterministic contracts are
-`tests/contracts/render-pipeline-trace.test.ts`. The real built-CLI acceptance
-harness is `tests/smoke/render-trace-pty.test.ts`; it covers first frame, input
-correlation, resize, grouped writes, paused PTY output, adaptive pacing against
-a chunked hermetic provider, a controlled `stdout.write() === false`/`drain`
-boundary, final-frame settlement, and bounded process cleanup. Set
-`CLIO_CODER_PERF_REPORT=1` while running that test to print its observation
-records. Real PTY acceptance is currently unavailable on Windows; the
-fake-stream frame/backpressure contracts remain cross-platform.
+The measurement snapshot below was originally backed by
+`tests/contracts/render-pipeline-trace.test.ts` and
+`tests/smoke/render-trace-pty.test.ts`. Those harnesses and their
+`CLIO_CODER_PERF_REPORT` output switch were retired with the measurement-script
+suite. Their names remain in the dated command transcripts below only to make
+the recorded method auditable; the commands are not current invocations.
+Current correctness coverage lives in
+`tests/contracts/rendering-invariants.test.ts`, and
+`tests/smoke/real-binary-boot.test.ts` exercises the built binary. Neither is a
+replacement glass-latency benchmark. `CLIO_CODER_RENDER_TRACE` remains the
+supported way to capture a live render trace for a fresh measurement campaign.
 
 ## Import-graph method
 
@@ -118,7 +120,7 @@ With `NODE_DISABLE_COMPILE_CACHE=1`, five real-PTY samples produced:
 | 22.22.3 | 1013.9 / 1120.3 ms | 1030.615 / 1136.960 ms | 7.068 ms | 3 |
 | 24.9.0 | 1061.5 / 1082.3 ms | 1079.001 / 1102.019 ms | 6.549 ms | 3 |
 
-The corresponding command was:
+The corresponding historical command was:
 
 ```bash
 NODE_DISABLE_COMPILE_CACHE=1 CLIO_CODER_PERF_REPORT=1 \
@@ -156,13 +158,22 @@ The former 1,054 ms “first TUI paint” figure is not a before value: that mar
 was taken before `startInteractive()` and therefore did not measure a frame.
 It must not be compared numerically with this corrected baseline.
 
-## Graph-cut observations
+## Historical graph-cut observations
 
-Each graph reduction is measured and committed independently. Counts below use
-the import-graph method above with V8 compile caching disabled and a warm
-operating-system page cache. An unchanged translated-module count can still
-hide a meaningful bundled-code reduction: esbuild represents all bundled
-sources in one translated Clio chunk.
+Each graph reduction below was measured and committed independently. The
+runtime-graph and V8 harnesses cited throughout this section were later retired,
+so their absence and presence claims are dated evidence from the recorded cuts,
+not maintained release gates. Counts used the import-graph method above with V8
+compile caching disabled and a warm operating-system page cache. An unchanged
+translated-module count could still hide a meaningful bundled-code reduction:
+esbuild represented all bundled sources in one translated Clio chunk.
+
+Current installed-package smoke coverage is narrower. It packs Clio, runs
+`code_nav` from a foreign working directory, and verifies that a real context
+index evaluates the tree-sitter chunk. It does not reproduce the former
+all-four or all-seven lazy-tool graph checks, Pi closure checks, or worker graph
+exclusion proof. Re-establish those properties with a fresh explicit
+measurement campaign before using them as current release evidence.
 
 ### Node built-in fetch
 
@@ -181,11 +192,11 @@ Ten full-entry imports changed as follows:
 | 22.22.3 | 670.680 / 803.053 ms | 605.907 / 646.730 ms | lower in this sample |
 | 24.9.0 | 656.781 / 674.592 ms | 668.652 / 896.238 ms | no reproducible timing improvement; host noise dominated |
 
-The cut is justified by the deterministic graph and package-size reduction,
+At that cut, the justification was the deterministic graph and package-size reduction,
 not by claiming a universal boot saving. Localhost transport contracts cover
 methods, headers, bodies, redirects, streamed UTF-8 truncation and cancellation,
 external abort, timeout, HTTP preview errors, binary rejection, and transport
-errors on Node 22 and Node 24. The packed-install test invokes `web_fetch`
+errors on Node 22 and Node 24. The then-current packed-install test invoked `web_fetch`
 through a real installed headless tool turn from a foreign working directory
 and asserts that neither the packed chunks nor the installed dependency tree
 contains userland Undici.
@@ -203,12 +214,12 @@ per-workspace FIFO plus a cross-process file lease. The artifact and its state
 metadata commit under that lease, shutdown drains admitted session work, and a
 reset cannot be overtaken by an older build.
 
-The deterministic runtime-graph test locates the generated tree-sitter chunk by
-its bundled source marker, never its hash. V8 coverage proves that nested
+The retired deterministic runtime-graph test located the generated tree-sitter chunk by
+its bundled source marker, never its hash. V8 coverage proved that nested
 `context index --help` reaches the built index command without evaluating that
 chunk or creating `.clio-coder`, while a real one-file build evaluates it and
 extracts a generator declaration the regex fallback does not recognize. The
-same proof runs against an installed tarball from a foreign working directory.
+same proof ran against an installed tarball from a foreign working directory.
 
 The after-Undici graph was the before point for this cut. The translated module
 count changed from 1,332 files (54 Clio chunks) to 1,336 (58 Clio chunks): the
@@ -233,7 +244,7 @@ operating-system page cache on the same WSL2 host, produced:
 These are local import observations, not a universal startup saving or a CI
 threshold. `npm pack --dry-run --json` at this slice reports 6.08 MB packed,
 36.65 MB unpacked, and 1,095 entries. The independently blocking
-evidence is the source-built and installed runtime-coverage contract plus the
+evidence at that cut was the source-built and installed runtime-coverage contract plus the
 coordinator's generation-order, reset-resurrection, lease-failure, demand,
 incremental, wiki, refresh, and shutdown suites.
 
@@ -241,16 +252,16 @@ incremental, wiki, refresh, and shutdown suites.
 
 `context`, `code_nav`, `verify`, and `web_fetch` now register immutable schema
 and policy surfaces while importing their implementations only after registry
-admission. The runtime-graph harness makes a real tool-capable provider request
-and asserts that all four schemas were serialized while every implementation
-file stayed absent from V8 coverage. Four fresh processes then invoke one tool
-each, assert its implementation is covered and its semantic result reaches the
-provider, and assert the other three remain absent. The exact same harness runs
-against an installed tarball from a foreign working directory. A second copied
-install deletes the emitted `web_fetch` implementation by stable behavior
-provenance and proves the resulting tool error names the missing chunk and the
-two standard reinstall commands. No hash, size, source-map, or timing value is
-used as a correctness assertion.
+admission. The retired runtime-graph harness made a real tool-capable provider
+request and asserted that all four schemas were serialized while every
+implementation file stayed absent from V8 coverage. Four fresh processes then
+invoked one tool each, asserted its implementation was covered and its semantic
+result reached the provider, and asserted the other three remained absent. The
+same harness ran against an installed tarball from a foreign working directory.
+A second copied install deleted the emitted `web_fetch` implementation by
+stable behavior provenance and proved the resulting tool error named the
+missing chunk and the two standard reinstall commands. No hash, size,
+source-map, or timing value was used as a correctness assertion.
 
 The after-codewiki graph is the before point for this cut. Translated modules
 changed from 1,336 files (58 Clio chunks) to 1,357 files (79 Clio chunks), as
@@ -258,7 +269,7 @@ the split surfaces and dynamic-import boundaries create more, smaller generated
 modules. The evaluated Clio JavaScript nevertheless fell from 5,015,343 to
 4,929,030 bytes. The four discoverable implementation entries total 104,804
 bytes (`context` 33,919; `web_fetch` 24,979; `verify` 24,063; `code_nav`
-21,843) and are absent until invoked. Total built JavaScript rose from 99 files
+21,843) and were absent until invoked. Total built JavaScript rose from 99 files
 and 5,812,402 bytes to 125 files and 5,840,309 bytes because the package must
 ship every first-use path. `npm pack --dry-run --json` reports approximately
 6.09 MB packed, 36.69 MB unpacked, and 1,127 entries, versus the previous
@@ -272,12 +283,12 @@ operating-system page cache on the same WSL2 host, produced:
 | 22.22.3 | 525.656 / 539.633 ms | 545.576 / 565.551 ms | no timing improvement in this sample |
 | 24.9.0 | 539.056 / 574.139 ms | 553.733 / 582.703 ms | no timing improvement in this sample |
 
-The cut is justified by the deterministic absence/presence contract and the
-smaller evaluated graph, not by a startup-time claim. Registration, listing,
-provider serialization, and a safety-rejected call are separately held against
-loading in the registry contract; surface parity, single-flight first use,
-ordinary exception semantics, and Clio-owned versus external missing-module
-diagnostics are covered there as well.
+At that cut, the justification was the deterministic absence/presence contract
+and the smaller evaluated graph, not a startup-time claim. Separate registry
+contracts then held registration, listing, provider serialization, and a
+safety-rejected call against loading; they also covered surface parity,
+single-flight first use, ordinary exception semantics, and Clio-owned versus
+external missing-module diagnostics.
 
 ### Narrow Pi API registration and dispatch
 
@@ -293,14 +304,14 @@ Bedrock ambient credentials. A configured external runtime activates a dynamic
 bridge before plugin evaluation; it deliberately restores the shared Pi
 registry universe only for that plugin-bearing process.
 
-The source-built and installed-tarball foreign-working-directory harness runs
-real OpenAI-compatible turns under V8 coverage. It proves `compat.js` and
-`legacy-api-aliases.js` are absent, the invoked OpenAI implementation is
-present, and unrelated Anthropic, Bedrock, Google, Mistral, OAuth, and image
-implementation files remain absent. It also proves `providers/all` and sample
-unconfigured provider catalogs remain absent. A separate fresh-process contract
-registers a known-API override from an out-of-tree module and proves its result
-wins after the bridge; the installed-tarball lane repeats that semantic and
+The retired source-built and installed-tarball foreign-working-directory
+harness ran real OpenAI-compatible turns under V8 coverage. It proved
+`compat.js` and `legacy-api-aliases.js` were absent, the invoked OpenAI
+implementation was present, and unrelated Anthropic, Bedrock, Google, Mistral, OAuth, and image
+implementation files remained absent. It also proved `providers/all` and sample
+unconfigured provider catalogs remained absent. A separate retired
+fresh-process contract registered a known-API override from an out-of-tree
+module and proved its result won after the bridge; the installed-tarball lane repeated that semantic and
 coverage proof from a foreign working directory.
 
 The after-lazy-tools graph is the before point for this cut. Translated modules
@@ -322,9 +333,9 @@ operating-system page cache, and the same WSL2 host as the preceding cuts:
 | 24.9.0 | 553.733 / 582.703 ms | 522.001 / 554.388 ms | lower in this sample |
 
 These are local import observations, not a startup guarantee or CI threshold.
-The independently blocking evidence is the absence/presence graph contract,
-credential parity, plugin registry identity, provider behavior suites, and the
-installed foreign-cwd turn.
+The independently blocking evidence at that cut was the absence/presence graph
+contract, credential parity, plugin registry identity, provider behavior
+suites, and the installed foreign-cwd turn.
 
 ### Lazy orchestrator controls and worker graph separation
 
@@ -345,18 +356,18 @@ settlement. Monitor and steer use the same immutable-surface loader as the
 earlier four lazy tools. The worker entry imports the core bootstrap directly
 and therefore never registers or evaluates these orchestrator-only runners.
 
-The V8 coverage harness now advertises all seven lazy tool schemas in one real
-provider request, proves every implementation root absent, and invokes each in
-a fresh process. For the three orchestrator controls it recursively follows the
-emitted static-import graph, classifies the surface/worker-shared closure, and
-proves the whole runner-exclusive closure absent before admission and present
-after invocation. The three discoverable runner entries total 113,983 bytes
+The retired V8 coverage harness advertised all seven lazy tool schemas in one
+real provider request, proved every implementation root absent, and invoked
+each in a fresh process. For the three orchestrator controls it recursively
+followed the emitted static-import graph, classified the surface/worker-shared closure, and
+proved the whole runner-exclusive closure absent before admission and present
+after invocation. The three discoverable runner entries totaled 113,983 bytes
 (`dispatch` 83,800; `monitor` 27,209; `steer` 2,974). A separate run of the real
-built worker entry proves both those roots and their runner-exclusive closures
-absent. The complete proof repeats from an installed tarball in a foreign
+built worker entry proved both those roots and their runner-exclusive closures
+absent. The complete proof repeated from an installed tarball in a foreign
 working directory; stable behavior markers, rather than chunk hashes or file
-sizes, identify each entry. Shared dispatch-domain modules are reported as
-shared and are not misrepresented as runner-exclusive savings.
+sizes, identified each entry. Shared dispatch-domain modules were reported as
+shared and were not misrepresented as runner-exclusive savings.
 
 The after-Pi graph is the before point for this cut. Translated modules changed
 from 1,289 files (80 evaluated Clio chunks) to 1,307 files (98 Clio chunks), as
@@ -383,6 +394,10 @@ and the dispatch reservation, approval, gate, detach, monitor, and steer suites.
 
 ## Adaptive stream-pacer observations
 
+This subsection preserves the dated results and method of the retired
+fake-clock and PTY performance harnesses. It does not describe a currently
+runnable test command.
+
 `interface.smoothStreaming` is presentation-only. `off` is the exact existing
 16 ms coalescer and remains the 0.3.3 default. `auto` uses the pacer only on a
 capable local TTY with no accessibility, remote/multiplexer, CI, or observed
@@ -392,13 +407,13 @@ event bus: canonical events, persistence, replay/export, tool formation, and
 cumulative tool state remain synchronous while one presentation queue owns
 only derived visible text/thinking mutations.
 
-The deterministic fake-clock contracts cover semantic classification, FIFO
+The deterministic fake-clock contracts covered semantic classification, FIFO
 generation/epoch ordering, abort and stale-admission rejection, grapheme
 clusters, fractional arrival credit, event-loop suspension, catch-up, the
 oldest-visible deadline, absolute queue byte/grapheme bounds, idle shutdown,
 folded-thinking fidelity, reset/discard accounting, mode changes, final-frame
 settlement, fullscreen frozen scrolling through resize, and bounded no-drain
-cleanup. The PTY arm uses a built CLI, a four-delta localhost provider, a
+cleanup. The PTY arm used a built CLI, a four-delta localhost provider, a
 4 KiB reply, an 80x24 `xterm-256color` PTY whose reader is paused, and a
 test-only writable shim that makes exactly one real child `stdout.write()`
 return `false` before emitting a delayed `drain`. This is deterministic
@@ -414,7 +429,7 @@ five observations; they are diagnostic observations, not timing gates.
 | 22.22.3 | 5.530 / 8.896 ms | 62.909 / 70.274 ms | 37.798 / 56.412 ms | 403.809 / 426.570 ms |
 | 24.9.0 | 5.468 / 7.225 ms | 67.878 / 74.021 ms | 27.901 / 35.750 ms | 402.582 / 418.783 ms |
 
-The command was:
+The historical command was:
 
 ```bash
 NODE_DISABLE_COMPILE_CACHE=1 CLIO_CODER_PERF_REPORT=1 \
@@ -455,7 +470,7 @@ the same compile-cache-disabled, warm-page-cache method. Stage 1 remains a full
 hydration endpoint; the earlier visible/editor-ready Stage 0 does not erase or
 rename that work.
 
-The command was run five times for each explicit Node binary:
+The historical command was run five times for each explicit Node binary:
 
 ```bash
 NODE_DISABLE_COMPILE_CACHE=1 CLIO_CODER_PERF_REPORT=1 \
@@ -464,13 +479,13 @@ NODE_DISABLE_COMPILE_CACHE=1 CLIO_CODER_PERF_REPORT=1 \
   tests/smoke/render-trace-pty.test.ts
 ```
 
-The built-CLI PTY suite additionally covers immediate typing, multiple
+The retired built-CLI PTY suite additionally covered immediate typing, multiple
 submit-before-hydration admissions, a retained post-submit draft, resize across
 hydration, Ctrl+C on both sides of attachment, SIGTERM during hydration,
 injected Stage 1 failure, protocol-query single execution, raw-mode
 restoration, diagnostics, and bounded process cleanup. The fake lease contract
 checks object identity, FIFO admission, epoch rejection, signal-delegate
-transfer, and idempotent close. PTY receipt is still not literal glass latency.
+transfer, and idempotent close. PTY receipt was still not literal glass latency.
 
 ## Reporting checklist
 

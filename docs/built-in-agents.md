@@ -16,25 +16,27 @@ Clio's agent architecture distinguishes between authoring configurations and run
 *   **Recipe**: An authored Markdown file containing frontmatter configuration and an instruction body.
 *   **AgentSpec**: The normalized runtime and catalog policy object derived from a recipe.
 *   **audience**: Determines visibility and routing (`base` | `shadow` | `custom` | `internal`).
-*   **source**: Origin of the recipe (`builtin` | `user` | `project`).
+*   **source**: Origin of the recipe (`builtin` | `extension` | `user` | `project`).
 
 ### Discovery, Overrides, and Precedence
-At startup, Clio loads recipes from three roots:
+At startup, Clio loads recipes in four precedence tiers:
 
 | Source | Root | Notes |
 | --- | --- | --- |
 | **Built-in** | `src/domains/agents/builtins/*.md` in the installed package | Shipped defaults. |
+| **Extension** | Each enabled extension's `agents` resource root | Loaded in stable extension-source order. An extension recipe may bind only skills from the same extension. |
 | **User** | `<configDir>/agents/*.md` | Per-user recipes. `<configDir>` follows Clio's XDG/platform config directory. |
 | **Project** | `.clio-coder/agents/*.md` under the current repo | Repository-local overrides and additions (custom/domain agents). |
 
 Recipe IDs are derived from filenames (e.g., `architect.md` -> `architect`). Recipes must live directly under their respective directories.
 
 *   **Customization**: User-level agents can override/customize shipped base agents.
+*   **Extension Protection**: Extension recipes cannot override any shipped builtin.
 *   **Shadow Protection**: User or project agents can **never** override shadow or internal agents.
 *   **Built-in Protection**: Project agents cannot override any shipped built-ins; they are strictly treated as custom/domain agents.
-*   **Reserved IDs**: The IDs `worker` and `delegate` are strictly reserved for custom/internal contexts and cannot be registered as custom agent IDs.
+*   **Reserved IDs**: The IDs `worker`, `delegate`, and `auto` cannot be registered outside the builtin tier.
 *   **Local Ignored Custom Examples**: Local examples (e.g., `benchmark-runner`, `clio-dev`, `implementer`, `scientific-validator`) may exist under `.clio-coder/agents` for documentation or test purposes, but are ignored if they collide with reserved/built-in rules.
-*   **Fleet Contracts**: Shipped builtin fleet contracts (`build-test`, `build-review`, `sdlc`) live under `src/domains/agents/fleets/*.md`. Library-installed contracts live at `<configDir>/fleets/<name>.md`. Project contracts at `.clio-coder/fleets/<name>.md` take highest precedence. Deterministic code steps reference commands declared in `.clio-coder/fleets/commands.yaml`. Contract v4 requires per-step write boundaries (`writes`).
+*   **Fleet Contracts**: Shipped builtin fleet contracts (`build-test`, `build-review`, `sdlc`) live under `src/domains/agents/fleets/*.md`. Enabled-extension contracts load next, user contracts at `<configDir>/fleets/<name>.md` load after them, and project contracts at `.clio-coder/fleets/<name>.md` take highest precedence. The parser accepts contract versions 1 through 5. Version 4 introduces enforced per-step `writes` boundaries; version 5 adds plan and gate steps, per-step target or profile routes, and the `writers: 1` single-writer declaration. Deterministic code steps reference commands declared in `.clio-coder/fleets/commands.yaml`.
 
 ---
 
@@ -57,7 +59,7 @@ User-facing agents visible in `clio-coder agents` and `/agents`.
 | `wiki-writer` | read, write, edit, grep, find, ls, code_nav, context, ledger | Plans a repository wiki or writes one wiki page against a supplied plan. | `workspace-edit` | `balanced` |
 
 ### Shipped Shadow and Internal Agents
-Internal orchestration helpers and internal process agents. They are hidden from default displays (but visible via `clio-coder agents --all` and in a separate section of the prompt catalog).
+Internal orchestration helpers and internal process agents. They are hidden from default displays but visible via `clio-coder agents --all`. The full on-demand catalog has a separate shadow section and omits internal recipes; the compact session prompt likewise omits internal recipes and also excludes the operator-only `oracle`.
 
 | Agent ID | Primary tools | Purpose | Capability | Latency |
 | --- | --- | --- | --- | --- |
@@ -65,7 +67,7 @@ Internal orchestration helpers and internal process agents. They are hidden from
 | `researcher` | read, web_fetch, context, ledger | Researches external docs, standards, and papers for coding decisions. | `read-only` | `deep` |
 | `provenance` | read, grep, find, ls, git, ledger | Reads receipts, diffs, and telemetry for evidence-backed handoffs. | `read-only` | `balanced` |
 | `oracle` | read, grep, find, ls, code_nav, context, ledger | Shadow advisor behind `/oracle` that protects consistency with prior decisions and returns the strongest challenge to a question. | `read-only` | `deep` |
-| `context-bootstrap` | read, grep, find, ls, context, code_nav, ledger | Internal agent behind `clio-coder context init` that parses repository and returns CLIO-CODER.md payload. | `read-only` | `balanced` |
+| `context-bootstrap` | read, grep, find, ls, context, code_nav | Internal agent behind `clio-coder context init` that parses repository and returns CLIO-CODER.md payload. | `read-only` | `balanced` |
 
 The builtin `architect` also serves as the default author for a version 5 fleet `plan` step. In that role it returns the coordinator-owned `delegation-plan` result shape instead of writing its ordinary plan artifact. It may name only agents from the contract roster. The coordinator supplies the plan step's target or profile to every admitted task.
 
@@ -107,19 +109,19 @@ Two rounds only help when the reason is actionable, so a validator reason names 
 ```yaml
 ---
 version: 1                            # recipe schema version
-name: Coder                           # string; defaults to recipe id when absent
-description: Bounded code changes     # string; defaults to empty string
+name: Coder                           # required non-empty string
+description: Bounded code changes     # required non-empty string
 tools:                                # required/optional tool mapping, not a flat list
   required: [read, {anyOf: [write, edit]}, context]   # anyOf: at least one must admit
   optional: [grep, git, verify, bash, ledger]         # attached when the target carries them
 skills: [fix-issue, ship]             # knowledge attachments; require the context tool, never expand tool authority
-audience: base                        # base | shadow | internal
+audience: base                        # base | shadow | custom | internal
 category: implement                   # explore | plan | research | implement | quality | science | evolution | operations | internal
 capabilityClass: workspace-edit       # read-only | artifact-write | workspace-edit | verification | orchestration | internal
 latencyClass: balanced                # fast | balanced | deep
 projectContextTier: bounded           # how much project context the worker is briefed with
 tags: [implementation, repair]        # short lowercase routing hints for catalog display
-budget:                               # optional strict worker-loop phase policy
+budget:                               # required strict worker-loop phase policy
   toolCalls: 50                       # admitted calls before final response handling
   readReserve: 5                      # final admitted slots reserved for canonical read
   synthesis: true                     # true: text-only final round; false: stop immediately
@@ -133,7 +135,9 @@ optional `product` key also exists for product-scoped recipes. There are no
 `model`, `target`, `thinkingLevel`, or `output` frontmatter keys — target and
 model selection belong to dispatch, not the recipe.
 
-A custom source recipe may omit `budget`; admission then materializes a concrete WorkerSpec v3 budget from the operator's current `fleet.limits.toolCallsPerRun`. Built-in recipes declare the field and fail startup if their strict frontmatter is malformed. When a source recipe includes `budget`, it must be a non-null YAML object containing `toolCalls`, `readReserve`, and `synthesis` (plus an optional `maximum` ceiling object, e.g. architect's `maximum: {toolCalls: 150, readReserve: 16}`): the numeric fields must be safe integers, `toolCalls > 0`, and `0 <= readReserve < toolCalls`; `synthesis` must be a boolean. Unknown, missing, quoted-numeric, floating-point, null, and relationally invalid values reject the recipe with its source path and property. Scout declares `18/4/true`; Coder declares `50/5/true`. The model-visible catalog shows declared policy or `operator-default`, never a mutable effective cap.
+Every recipe must declare `name`, `description`, `budget`, and every other key in the required set; no display defaults are synthesized. `budget` must be a non-null YAML object containing `toolCalls`, `readReserve`, and `synthesis`, plus an optional `maximum` ceiling object such as architect's `maximum: {toolCalls: 150, readReserve: 16}`. The numeric fields must be safe integers, `toolCalls > 0`, and `0 <= readReserve < toolCalls`; `synthesis` must be a boolean. Unknown, missing, quoted-numeric, floating-point, null, and relationally invalid values reject the recipe with its source path and property. Scout declares `18/4/true`; Coder declares `50/5/true`. The model-visible catalog shows the declared policy, never a mutable effective cap.
+
+Only shipped recipes may declare the `base`, `shadow`, or `internal` audience. Extension, user, and project recipes must declare `audience: custom`; the discovery root determines that provenance and the parser refuses a conflicting claim.
 
 The operator cap is independent and cannot be widened by a recipe. Dispatch clamps `toolCalls` to that cap and clamps `readReserve` to zero when canonical `read` is absent after tool admission. Reserve slots admit only `read`, not every read-class tool. Blocked non-read attempts do not consume admitted reserve slots, but they still count toward the operator attempt ceiling.
 
@@ -157,7 +161,7 @@ Skills are knowledge attachments declared under `skills: [...]` in the YAML fron
 
 An assignment may request `agent: auto`, but agent choice is advisory by default and is independent of target/model/runtime/node route activation. The coordinator first removes recipes that fail audience, capability-class, execution-role, tool-surface, result-contract, target, or policy constraints. Those are hard constraints and never become score weights. The remaining recipes are ranked deterministically with measured evidence and bounded cold-start priors.
 
-Active agent selection requires an exact `{agentId, executionRole}` entry in `routing.agentAutomation.activeAgentRoles` and a passing readiness report for that same agent and role. Empty activation settings are the default. If no eligible agent is ready, active automation fails closed instead of falling back to the fixed requested recipe.
+Active agent selection requires an exact `{agentId, executionRole}` entry in `fleet.adaptiveRouting.agentRoles` and a passing readiness report for that same agent and role. Empty activation settings are the default. If no eligible agent is ready, active automation fails closed instead of falling back to the fixed requested recipe.
 
 Scout is the bounded escalation path for broad reconnaissance, not an authority shortcut. Its strict `scout-report` may return grounded findings or a split recommendation with typed subtasks. The coordinator validates the transition, assigns fresh authority and an absolute deadline to each child, and records the decision. A recovery attempt uses the dedicated recovery role and may not silently inherit broader builder authority.
 
@@ -179,7 +183,7 @@ In addition to standard HTTP targets and [Agent Client Protocol (ACP)](https://a
 - **`claude-code` (Claude Subprocess):** Runs `claude -p` as a subprocess worker, mapping autonomy levels to the CLI's permission modes. It is a black box: tool calls run inside the `claude` process and are not routed through Clio's per-tool mediation, so Clio cannot enforce a per-tool profile on it. Dispatching a narrowing `tool_profile` (`minimal-local` or `science-local`) to this runtime is refused; use `full-agent` (or a native / `claude-sdk` worker) instead.
 - **`antigravity-code` (Antigravity CLI):** Runs an Antigravity CLI subprocess as a subscription worker target for fleet dispatch. Like `claude-code`, it is a black box with no per-tool mediation and no per-tool allowlist, so a narrowing `tool_profile` is refused rather than silently ignored.
 
-Agent budgets follow the same mediation boundary. Native workers and `claude-sdk` enforce canonical call counting, the canonical-`read` reserve, and the synthesis transition. `claude-code` and `antigravity-code` reject recipes that explicitly declare `budget`, because silently ignoring numeric bounds would be unsafe; a custom source recipe without the field receives the concrete operator-default budget at admission. Claude vendor aliases never appear in recipes or prompt authority and cannot reintroduce a canonical tool removed by admission.
+Agent budgets follow the same mediation boundary. Native workers and `claude-sdk` enforce canonical call counting, the canonical-`read` reserve, and the synthesis transition. Every valid Markdown recipe declares a budget, so recipe-based runs are refused on `claude-code` and `antigravity-code`; those subprocess targets can accept only work that reaches admission without an explicit recipe or request budget. Silently ignoring numeric bounds would be unsafe. Claude vendor aliases never appear in recipes or prompt authority and cannot reintroduce a canonical tool removed by admission.
 
 Interactive TUI:
 
@@ -260,7 +264,7 @@ Subagent runs that terminate with retryable outcomes are placed in an in-memory 
 Scheduled retries use an exponential backoff state to calculate subsequent retry delays. Furthermore, targets that fail are subject to a cooldown period. The retry engine ensures that a retried task waits for the maximum of the exponential backoff delay or the remaining target cooldown duration. Retries are brand-new runs that must re-pass all admission checks. If target policies or budgets deny a retry, the task chain terminates as denied.
 
 ### 3. Concurrency Limits
-The setting `fleet.concurrency` restricts the number of concurrent subagent tasks. Setting it to `auto` determines the concurrency limit dynamically based on system capabilities.
+The setting `fleet.concurrency` restricts the number of concurrent subagent tasks. At this revision, `auto` resolves to the compiled default of four local workers; it does not probe the host dynamically.
 
 ### 4. Heartbeats and Reconciler
 For native subprocess workers, Clio uses a heartbeat mechanism. The reconciler monitors the active heartbeat timestamp. If a worker stops responding and updates no heartbeats, the reconciler terminates the stalled subprocess automatically.
@@ -270,7 +274,7 @@ A dispatched worker has no operator by default, so a tool call that requires int
 
 - `deny` (default): the parked call becomes a structured tool denial and the run continues.
 - `fail`: the run finalizes immediately with outcome `failed`/`permission_required`.
-- `escalate`: the parked call is handed up to the interactive operator. The worker emits a `clio_permission_escalated` event over its stdout; the dispatch domain republishes it on the bus as a permission request tagged with the run id; the operator resolves it in the TUI permission overlay; and the decision travels back down the worker's stdin as a `permission_decision` line (the same pipe steers use). No model can approve a worker permission; resolution is human-only.
+- `escalate`: the parked call is handed up to the interactive operator. The worker emits a `clio_coder_permission_escalated` event over its stdout; the dispatch domain republishes it on the bus as a permission request tagged with the run id; the operator resolves it in the TUI permission overlay; and the decision travels back down the worker's stdin as a `permission_decision` line (the same pipe steers use). No model can approve a worker permission; resolution is human-only.
 
 Escalate is only meaningful with an interactive operator attached. Headless sessions have no subscriber, so the escalation resolves by the timeout fallback. The bounds are `fleet.permissions.escalation` (`{ timeoutMs, fallback }`, defaults 120000 ms and `deny`): a parked ask that no operator answers within `timeoutMs` applies the fallback deny/fail, so an escalate-posture run can never hang forever. The heartbeat timer runs independently of the parked call, so an escalated worker keeps reporting alive while it waits. Each escalation and its resolution (operator or timeout) is tallied on the receipt's `safety.decisions` escalation counters, documented with their stability labels in the [receipt provenance schema](./observability.md#receipt-fields-for-dispatch-provenance); a timed-out or denied escalation also raises an `escalation` finding in the evidence bundle. ACP delegations are out of scope: they resolve permissions through their own mediator and have no worker stdin channel.
 
@@ -283,9 +287,21 @@ Create `.clio-coder/agents/my-agent.md`:
 
 ```md
 ---
+version: 1
 name: My Agent
 description: Focused local review helper.
-tools: [read, grep, find, ls, git, artifact]
+tools:
+  required: [read, artifact]
+  optional: [grep, find, ls, git]
+skills: []
+audience: custom
+category: quality
+capabilityClass: artifact-write
+latencyClass: balanced
+projectContextTier: bounded
+budget: {toolCalls: 20, readReserve: 4, synthesis: true}
+resultContract: {kind: artifact-report}
+tags: [review]
 ---
 
 You are My Agent. Inspect only the requested area. Never edit files. End by writing a concise review artifact (`artifact` kind="review") with risks, evidence, and follow-up tests.

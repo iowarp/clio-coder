@@ -2,8 +2,9 @@
 
 Every file Clio generates has one home, decided by who reads it. The rule that
 follows from that: **the repo working tree holds files a human asked for.**
-Anything Clio produced on its own initiative lands in the gitignored project
-directory or under the XDG dirs, never beside your source.
+Anything Clio produced on its own initiative lands in the project-local
+`.clio-coder/` directory or under the XDG directories, never beside your source.
+`context init` can add the recommended blanket ignore for `.clio-coder/`.
 
 This page is the contract. `src/core/artifact-paths.ts` is the code that
 implements the part of it the `artifact` tool owns.
@@ -13,7 +14,7 @@ implements the part of it the `artifact` tool owns.
 | Audience | What it means | Where it goes |
 | --- | --- | --- |
 | Human deliverable | A file the user asked to keep, and will read and commit | Repo working tree, at the path the user named |
-| Human transient | Something a human may want to read once; losing it costs nothing | Project-local `.clio-coder/` (gitignored) |
+| Human transient | Something a human may want to read once; losing it costs nothing | Project-local `.clio-coder/` (normally gitignored) |
 | Agent-to-agent state | Machine-read plumbing between turns, workers, and sessions | `.clio-coder/` for per-project state; XDG data/state/cache for per-machine state |
 
 A class is human-facing only if a person is expected to open it. A plan an
@@ -33,7 +34,7 @@ Markdown.
 | Task-memory handoffs | `.clio-coder/handoffs/` | Agent-to-agent |
 | Dispatch proposals | `.clio-coder/proposals/` | Agent-to-agent |
 | Compete worktrees | `.clio-coder/worktrees/` | Agent-to-agent |
-| Test scratch | `.clio-coder/test-scratch/` | Agent-to-agent |
+| Tool-result and harness scratch | XDG state `scratch/`, with tool offloads grouped by session | Agent-to-agent |
 | Evidence bundles | XDG data `evidence/` | Human transient (`clio-coder evidence`) |
 | Approved memory | XDG data `memory/` | Human transient (`clio-coder memory`) |
 | Eval artifacts | XDG data `evals/` | Human transient (`clio-coder eval`) |
@@ -41,7 +42,6 @@ Markdown.
 | Dispatch receipts | XDG state `receipts/` | Human transient (`clio-coder trace`) |
 | Audit records | XDG state `audit/` | Human transient |
 | Interview transcripts | XDG state `interviews/` | Agent-to-agent |
-| Harness scratch | XDG state `scratch/` | Agent-to-agent |
 | Caches | XDG cache | Agent-to-agent |
 
 `clio-coder paths` prints the resolved XDG directories for your machine.
@@ -63,27 +63,27 @@ first. Keep several by naming explicit paths.
 
 ## `.clio-coder/` and git
 
-`.clio-coder/` is gitignored in full. Everything above that lands there is
-generated, reproducible, and worthless in a diff, and the whole point of the
-contract is that a dogfooding session ends with `git status` clean.
+`clio-coder context init` checks for a blanket `.clio-coder/` ignore. With
+confirmation, or with `--yes`, it appends `.clio-coder/` to `.gitignore`; without
+confirmation it warns and leaves the file unchanged. A project that has never
+accepted or authored that rule can therefore see generated local state in
+`git status`.
 
 Some `.clio-coder/` content is authored rather than generated, and a project
-that wants it reviewed and shared commits it deliberately by adding negations
-next to the ignore:
+that wants it reviewed and shared commits exact files deliberately. With the
+blanket parent directory ignored, child negations alone are ineffective because
+Git does not descend into an excluded parent. Force-add an intentional asset,
+for example:
 
-```gitignore
-.clio-coder/
-!.clio-coder/fleets/          # fleet contracts: repo-owned dispatch policy
-!.clio-coder/fleets/**
-!.clio-coder/rules/           # path-scoped project rules
-!.clio-coder/rules/**
-!.clio-coder/safety.yaml      # project safety policy
-!.clio-coder/agents/          # project agent recipes
-!.clio-coder/agents/**
+```bash
+git add -f .clio-coder/fleets/build-review.md
+git add -f .clio-coder/rules/backend.md
+git add -f .clio-coder/safety.yaml
 ```
 
-This repository commits none of those, so its `.clio-coder/` stays fully
-ignored. Benchmark workspaces are temporary external repositories.
+Review the forced path before committing it. This repository commits none of
+those project-local assets, and its `.gitignore` contains the blanket rule.
+Benchmark workspaces are temporary external repositories.
 
 ## Finding what was hidden
 

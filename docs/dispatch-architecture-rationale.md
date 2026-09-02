@@ -5,8 +5,8 @@ irregular and is allowed to, and why the repository has no barrel-only import
 convention. No code moved as a result of this document. It exists so that a
 later split is argued from invariants rather than from file counts.
 
-Counts verified against the current tree: 65 TypeScript files in
-`src/domains/dispatch/`, a 137-line barrel at `src/domains/dispatch/index.ts`,
+Counts verified against the current tree: 85 TypeScript files in
+`src/domains/dispatch/`, a 199-line barrel at `src/domains/dispatch/index.ts`,
 and one dispatch → eval import.
 
 ---
@@ -28,7 +28,7 @@ split would use. They cross them.
 | Write-boundary attribution is per scheduling *window*, so the compiler refuses a wave with two writers | scheduling, write boundaries, plan compilation | `execution-plan.ts`, `write-boundary.ts` |
 | A loop's later nodes are `unneeded`, decided by the scheduler, not the plan | plan compilation, scheduling, receipts | `fleet-plan.ts`, `execution-scheduler.ts` |
 | Staleness revalidation re-runs a verification a later workspace step invalidated | scheduling, plan compilation, code steps | `execution-scheduler.ts` |
-| Receipt integrity v16 seals normalized routing intent | routing, receipts | `receipt-integrity.ts`, `routing-intent.ts` |
+| Receipt integrity v20 seals normalized routing intent | routing, receipts | `receipt-integrity.ts`, `routing-intent.ts` |
 
 The write-boundary and loop rows are the sharpest. Both are properties of a
 *wave*, which is a scheduling concept computed by the plan compiler and enforced
@@ -80,7 +80,7 @@ outward, because that is the one seam the invariants above actually respect.
 `../eval/artifacts/store.js`. The eval barrel does not export it. This is the
 only dispatch → eval import in the domain.
 
-This is coupling worth recording, not a violation. It breaks none of the five
+This is coupling worth recording, not a violation. It breaks none of the six
 enforced boundary rules, and the direction is defensible: the routing quality
 reducer treats an eval artifact as evidence, so it must parse one, and
 `parseEvalArtifactV4` is the strict fail-closed parser rather than a convenience
@@ -104,10 +104,10 @@ The evidence that decides it:
 
 - Measured across `src/domains/**`, counting an import as cross-domain when the
   importing file and the resolved target sit in different `src/domains/<name>`
-  directories: **110** cross-domain subpath imports against **29** cross-domain
-  barrel imports. Direct subpath import is the majority pattern by roughly four
+  directories: **228** cross-domain subpath imports against **41** cross-domain
+  barrel imports. Direct subpath import is the majority pattern by roughly six
   to one, not an exception to a rule.
-- All five enforced boundary rules
+- All six enforced boundary rules
   (`tests/boundaries/check-boundaries.ts`) constrain dependency **direction**:
   who may depend on whom. Not one constrains import **form**. There is no rule
   to be half-consistent with.
@@ -116,11 +116,11 @@ The evidence that decides it:
   it. A barrel-only rule would have to widen the agents barrel for no reason but
   import style.
 
-A barrel-only sixth rule would require widening many barrels to re-export
+A barrel-only seventh rule would require widening many barrels to re-export
 symbols currently reached directly. Every one of those is a public-surface
 addition justified by nothing but import style, and it would rewrite every
 affected import site for no behavioral gain. A boundary rule should protect an
 invariant. "Always import through the barrel" protects a preference.
 
-What is *not* permitted is anything the five direction rules forbid, and those
+What is *not* permitted is anything the six direction rules forbid, and those
 stay enforced by the boundary checker that `npm run lint` runs.

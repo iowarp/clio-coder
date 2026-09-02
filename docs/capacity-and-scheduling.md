@@ -76,7 +76,7 @@ export interface CapacityStateFile {
 
 ## 2. Capacity Lease Schema & TTLs
 
-Each in-flight worker holds one `CapacityLease` (`src/domains/dispatch/capacity-lease.ts:18-29`):
+Each in-flight worker holds one `CapacityLease` (`src/domains/dispatch/capacity-lease.ts:30-44`):
 
 ```typescript
 export interface CapacityLease {
@@ -84,6 +84,7 @@ export interface CapacityLease {
   assignmentId: string;         // Owning dispatch assignment ID
   nodeId: string;               // Execution node identifier ("local" or remote ID)
   endpointKey?: string;         // Canonical inference endpoint identifier
+  host?: string;                // Owner host; absent only on older records
   ownerPid: number;             // Process ID of the orchestrator/worker owner
   processBirthToken: string;    // OS-level token preventing PID reuse collisions
   acquiredAt: string;           // ISO-8601 acquisition timestamp
@@ -96,20 +97,26 @@ export interface CapacityLease {
 
 The orchestrator's active model stream is registered in memory against the same endpoint key, so its own turn consumes one endpoint slot before a worker is admitted. This foreground count is not written to `dispatch-admission.json`; process exit releases it. Durable leases and held reservation members carry `endpointKey`, and held members count their peak per wave for the endpoint just as they do for a node.
 
-Execution-plan waves also honor the endpoint bound. A plan with four available worker positions targeting one two-slot server packs at most two of them into a wave, or one when the orchestrator already holds the other slot. Endpoint saturation is refused rather than queued, because an endpoint-specific request queue would hold a dispatch open behind a stream whose length nobody knows. The refusal names the endpoint, both slot counts, why one slot is already gone, and the moves that actually free capacity:
+Execution-plan waves also honor the endpoint bound. A plan with four available worker positions targeting one two-slot server packs at most two of them into a wave, or one when the orchestrator already holds the other slot. Reservation preflight refuses a plan whose peak cannot fit because the scheduler must reserve the whole plan atomically. The refusal names the endpoint, both slot counts, why one slot is already gone, and the moves that actually free capacity:
 
 ```text
-dispatch: admission denied: endpoint '192.168.86.141:8080' capacity reached (1/1 slots): 1 foreground stream holds the slot; reduce the same-wave worker count, set this target's maxConcurrentRequests to the slot count the server was started with, collect in-flight runs, or point workers at a second server
+dispatch: admission denied: endpoint '127.0.0.1:8080' capacity reached (1/1 slots): 1 foreground stream holds the slot; reduce the same-wave worker count, set this target's maxConcurrentRequests to the slot count the server was started with, collect in-flight runs, or point workers at a second server
 ```
 
-That remedy is shared by all three paths that can refuse for this reason: lease acquisition (`src/domains/dispatch/capacity-lease.ts`), the admission gate (`src/domains/dispatch/admission.ts`), and reservation preflight (`src/domains/dispatch/reservation-store.ts`). The `1/1` above is the common local case rather than an example: a llama.cpp router started with `--parallel 1` discovers one slot, so any dispatch raised while the orchestrator is streaming is refused before a worker process starts.
+Direct lease acquisition in `src/domains/dispatch/capacity-lease.ts` reports saturation as `capacity reached`. The normal admission controller in `src/domains/dispatch/admission.ts` treats that signal as transient and leaves the assignment in its bounded shared queue, retrying until capacity opens or the request's deadline or 60-second queue ceiling wins. Capacity marked `unavailable`, drain mode, corrupt state, and other errors still fail immediately. Reservation preflight in `src/domains/dispatch/reservation-store.ts` refuses an over-capacity plan instead of queuing a partial reservation. The `1/1` example represents a generic llama.cpp server started with `--parallel 1`: a singular dispatch raised while the orchestrator is streaming waits for that slot, and a council reservation is refused before any worker starts.
+
+The reference `mini` target is not a one-slot example. It is a llama.cpp router
+at `192.168.86.141:8080` serving `ornith1.5-35b-moe` with four parallel slots
+and 262,144 context tokens per slot. One foreground stream on that endpoint
+leaves three slots for worker admission. The reference chat target, `dynamo`,
+is LM Studio at `192.168.86.143:1234` serving `qwen3.8-27b-dynamo`.
 
 ### What `/council` Needs on a Single-GPU Setup
 
 A council seats two to five members and runs the whole roster in one wave, so it needs at least two endpoint slots at once, plus a third if the orchestrator's own turn is streaming to the same server. It cannot answer a capacity denial by dispatching fewer members, which is why its denial says so instead of offering that move:
 
 ```text
-dispatch: admission denied: endpoint 'mini:8080' capacity exceeded (2/1 slots): no active lease, held reservation, or foreground stream currently holds a slot; a council runs its whole roster in one wave and cannot go below 2 members, so set this target's maxConcurrentRequests to the slot count the server was started with, collect in-flight runs, or point workers at a second server
+dispatch: admission denied: endpoint 'one-slot-local:8080' capacity exceeded (2/1 slots): no active lease, held reservation, or foreground stream currently holds a slot; a council runs its whole roster in one wave and cannot go below 2 members, so set this target's maxConcurrentRequests to the slot count the server was started with, collect in-flight runs, or point workers at a second server
 ```
 
 On a single-GPU box there are three ways to make `/council` work, in order of preference:
@@ -124,9 +131,9 @@ A server genuinely started with one slot cannot run a council, and admitting one
 
 | Constant | Value | Description | Source Reference |
 | :--- | :--- | :--- | :--- |
-| `MAX_CAPACITY_LEASES` | `1000` | Hard cap on simultaneous active capacity leases across all nodes. | `src/domains/dispatch/capacity-lease.ts:8` |
-| `DEFAULT_CAPACITY_LEASE_TTL_MS` | `30000` ms (30s) | Inactivity expiration window for leases without a refreshed heartbeat. | `src/domains/dispatch/capacity-lease.ts:9` |
-| `DEFAULT_CAPACITY_DRAIN_TTL_MS` | `3600000` ms (1h) | Automatic expiration window for operator drain mode. | `src/domains/dispatch/capacity-lease.ts:16` |
+| `MAX_CAPACITY_LEASES` | `1000` | Hard cap on simultaneous active capacity leases across all nodes. | `src/domains/dispatch/capacity-lease.ts:13` |
+| `DEFAULT_CAPACITY_LEASE_TTL_MS` | `30000` ms (30s) | Renewal and fallback expiry horizon when exact process identity is unavailable. A matching live process birth token keeps its lease valid beyond this timestamp. | `src/domains/dispatch/capacity-lease.ts:14` |
+| `DEFAULT_CAPACITY_DRAIN_TTL_MS` | `3600000` ms (1h) | Automatic expiration window for operator drain mode. | `src/domains/dispatch/capacity-lease.ts:28` |
 | `NODE_DEATH_FAILURE_THRESHOLD` | `2` consecutive failures | Channel failure count before a remote node is classified offline. | `src/domains/scheduling/cluster.ts:64` |
 
 ---
@@ -135,9 +142,10 @@ A server genuinely started with one slot cannot run a council, and admitting one
 
 To prevent leaked leases when workers or orchestrators crash:
 
-1. **Heartbeat Protocol**: Active workers emit heartbeats over their control channel every 1,000 ms (`src/worker/heartbeat.ts`). The orchestrator updates `heartbeatAt` and extends `expiresAt` by `DEFAULT_CAPACITY_LEASE_TTL_MS`.
-2. **PID Liveness & Birth Tokens**: The lease reconciler inspects `ownerPid` and validates `processBirthToken` against operating system process tables. If the PID has terminated or been recycled by the OS, the lease is immediately reclaimed.
-3. **Lazy Reaping**: Every admission attempt purges expired leases and dead process records inside the cross-process transaction lock before calculating available capacity.
+1. **Worker Heartbeat Protocol**: Active native workers emit control-channel heartbeats every 1,000 ms (`src/worker/heartbeat.ts`) for run liveness and stall detection.
+2. **Capacity-Lease Renewal**: Independently of worker control frames, the process-local admission controller renews every held durable lease every 10,000 ms. A renewal updates `heartbeatAt` and extends `expiresAt` by `DEFAULT_CAPACITY_LEASE_TTL_MS`.
+3. **PID Liveness & Birth Tokens**: The lease reconciler inspects `ownerPid` and validates `processBirthToken` against operating system process tables for records owned by this host. If the PID has terminated or been recycled by the OS, the lease is immediately reclaimed. A record naming another host is not adjudicated with the local process table.
+4. **Lazy Reaping**: Every admission attempt purges reclaimable leases and dead process records inside the cross-process transaction lock before calculating available capacity.
 
 ---
 

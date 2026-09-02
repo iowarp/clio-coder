@@ -1,11 +1,11 @@
 # Working Set
 
-The working set is the part of the session ledger the model actually receives on the next request. When context pressure crosses `compaction.threshold`, Clio narrows that view before it considers summarizing anything: selected tool-result bodies and closed-turn thinking blocks stop being replayed, and a one-line marker takes each body's place. Nothing is deleted. The ledger keeps every byte the tools produced, the transcript keeps showing them, and the model can ask for any evicted body back by ref.
+The working set is the part of the session ledger the model actually receives on the next request. When context pressure crosses `context.compaction.threshold`, Clio narrows that view before it considers summarizing anything: selected tool-result bodies and closed-turn thinking blocks stop being replayed, and a one-line marker takes each body's place. Nothing is deleted. The ledger keeps every byte the tools produced, the transcript keeps showing them, and the model can ask for any evicted body back by ref.
 
 Source of truth is `src/domains/context/working-set/` (`contract.ts`, `fold.ts`, `project.ts`, `marker.ts`, `protect.ts`, `engine.ts`, `recall.ts`, `policies/`), the ledger records in `src/domains/session/entries.ts`, and the compaction stage in `src/interactive/turn-context.ts` (`runAutoCompact`).
 
 > [!WARNING]
-> This is an experimental community alpha surface. The default policy is `structural-v1`; `age-horizon` reproduces the selection Clio made before this layer existed and stays available.
+> This is an experimental community alpha surface. The default policy is `structural-v1`; `age-horizon` preserves the old age-based selection except for the current low-yield token floor and stays available.
 
 ## Vocabulary
 
@@ -109,7 +109,7 @@ Rule order is the policy. Each rung emits candidates newest-first, every candida
 
 Rungs 1 through 5 are unconditional: redundant content is free to drop, whatever the pressure. Rung 6 is the only one that looks at token counts, and it stops the moment the projected size reaches `context.workingSet.target × contextWindow`. Newest-first within a rung is a cost decision: evicting the youngest safe unit keeps the cold region after the eviction point small, so the turn that pays for the event pays least.
 
-The long-trace sweep found that targets 0.4 and an exhaustive rung 6 produced identical results because the usable candidate pool ran out first. Relative to the 0.6 default, 0.4 reduced cold-prefix tokens by 2.8% at 64k and 7.3% at 128k, did not reduce summaries, and lowered retention covered by 0.00072 at 128k. The default therefore remains 0.6. The replay README records the full grid and the numeric reopening rule.
+A historical local long-trace sweep found that targets 0.4 and an exhaustive rung 6 produced identical results because the usable candidate pool ran out first. Relative to the 0.6 default, 0.4 reduced cold-prefix tokens by 2.8% at 64k and 7.3% at 128k, did not reduce summaries, and lowered retention covered by 0.00072 at 128k. The default therefore remained 0.6. The generated grid and reopening calculation were local artifacts and are not versioned in this repository; use the replay commands in [Commands and Modes](commands-and-modes.md#working-set-replay) to measure the current tree.
 
 The facts the rungs read come from `path-index.ts`, one deterministic pass over the active-path entries producing one observation per tool result that names a path: which file, which line range, which paths a listing surfaced, whether the call failed, and where in the turn sequence it sits. Tools that observe no path (dispatch, web fetch, tasks, ask user, context) produce no observation. There are no content fingerprints.
 
@@ -117,13 +117,13 @@ The facts the rungs read come from `path-index.ts`, one deterministic pass over 
 
 Recall is explicit and by ref. There is no auto-readmission: the marker tells the model exactly which call brings the body back, and the model decides.
 
-`resolveRecall(entries, view, ref, activeLeafTurnId)` resolves a ref against the fold at the live leaf and returns the original body byte-exact, read with the same field precedence the projection would have used. It fails in three typed ways, and each message names the nearest valid ref when one exists:
+`resolveRecall(entries, view, ref, activeLeafTurnId)` resolves a ref against the fold at the live leaf and returns the original body byte-exact, read with the same field precedence the projection would have used. It fails in three typed ways:
 
 - `invalid_ref` when the ref is empty or carries whitespace.
 - `not_on_active_path` when the session has no such turn on this branch, which includes a ref from a branch `/tree` abandoned.
 - `not_evicted` when the unit is still in context. An assistant turn reports separately that thinking is not recallable.
 
-Both messages end with the refs that can be recalled on the active path (tool results only, up to eight, then a count), because a failed recall is usually a mistyped ref and the listing is what the next call needs.
+The `not_on_active_path` and `not_evicted` messages end with the refs that can be recalled on the active path (tool results only, up to eight, then a count). `invalid_ref` reports only the malformed value. Clio deliberately lists valid refs instead of guessing a nearest ref, because similar time-ordered identifiers can name unrelated results.
 
 An LLM summary also preserves recall discovery across its cut. When an evicted tool result falls before `firstKeptTurnId`, the generated checkpoint carries a `<recallable-refs>` block with the same `ref (tool path)` rows used by recall failures, bounded to eight rows plus a remaining count. Results that stay after the cut keep their ordinary markers and are not repeated in the block.
 
@@ -131,7 +131,7 @@ An LLM summary also preserves recall discovery across its cut. When an evicted t
 
 That also makes recall the churn signal. `churn = recalls / itemsEvicted` over the active path. A high churn number means the policy keeps evicting content the session still needs, which is a reason to change the policy rather than to raise the threshold.
 
-The procedural replay does not synthesize churn from path reuse. Its reference graph maps each earlier observation to every later reread or discovery of the same path, while a real `contextRecall` is an explicit model choice of one ref. A later reread already returns current content at the tail, so also injecting the old body would duplicate data and misread stale or superseded observations as recall demand. Replay reports `recallTokens` as a one-time demand bound per evicted item and waits for explicit `contextRecall` records before reporting recall count, churn, or tail growth. The graph-density measurements and reopening condition are in the replay README.
+The procedural replay does not synthesize churn from path reuse. Its reference graph maps each earlier observation to every later reread or discovery of the same path, while a real `contextRecall` is an explicit model choice of one ref. A later reread already returns current content at the tail, so also injecting the old body would duplicate data and misread stale or superseded observations as recall demand. Replay reports `recallTokens` as a one-time demand bound per evicted item and waits for explicit `contextRecall` records before reporting recall count, churn, or tail growth. Graph-density measurements and reopening calculations are generated local artifacts rather than a versioned replay README.
 
 An offloaded result returns its pointer, never the file. The model gets the same `full: <path>` promise the original tool result ended with and reads it with `read` when it wants it.
 
@@ -164,7 +164,7 @@ context:
 | `context.workingSet.protectLastTurns` | `6` | integer ≥ 1 | Recent turns whose observations and thinking are never evicted. |
 | `context.workingSet.minEvictableTokens` | `200` | integer ≥ 0 | Results below this body estimate are never evicted. The default protects low-yield bodies; marker break-even is enforced separately. |
 
-`compaction.excludeLastTurns` governs only the temporary legacy mask path; working-set protection uses `protectLastTurns`. Settings validation is strict, so an unknown key under this block fails startup with its exact path.
+The retired `compaction.excludeLastTurns` key is not accepted by settings v2. The temporary legacy mask uses a compiled six-turn fallback; working-set protection uses `context.workingSet.protectLastTurns`. Settings validation is strict, so an unknown key under this block fails startup with its exact path.
 
 `CLIO_CODER_LEGACY_MASK=1` restores the destructive stale-observation stage for one release as a compatibility escape hatch. It rewrites the ledger, and it is removed in the next release.
 
@@ -181,7 +181,7 @@ context:
 These are tracked follow-ups, not available behavior:
 
 - **Auto-readmission.** Nothing brings an evicted body back on its own. There are no path fingerprints and no registry of what the model is likely to need next.
-- **Cost model and deferred scheduling.** Pressure is the only trigger, and it is `compaction.threshold`, not `target`. The replay tables price every applied event by the cold prefix it re-prefills (about 29k tokens per event at a 64k budget), and batching from the threshold down to the target is what keeps one event per cycle; a trigger at the target would make every turn above 60% with one newly redundant read an event of its own, and no row in the sweep shows fewer summaries in return. There is no break-even horizon, no deferred eviction plan, and no piggybacking beyond the fact that the working-set stage already runs first inside `runAutoCompact`.
+- **Cost model and deferred scheduling.** Pressure is the only trigger, and it is `context.compaction.threshold`, not `target`. Historical local replay tables priced every applied event by the cold prefix it re-prefilled (about 29k tokens per event at a 64k budget), and batching from the threshold down to the target kept one event per cycle; a trigger at the target would make every turn above 60% with one newly redundant read an event of its own. Those tables are not versioned benchmark results. There is no break-even horizon, no deferred eviction plan, and no piggybacking beyond the fact that the working-set stage already runs first inside `runAutoCompact`.
 - **Intra-turn eviction.** Eviction runs before a request is sent. A single turn whose tool results overflow the window is handled by the observation envelope's caps and by summary compaction, not by this layer.
 - **Worker runtimes.** Dispatched workers replay their own ledgers without the working-set stage.
 - **Digests.** A marker carries tool, size, and a first-line preview. The generated summaries from #165 are not embedded in it.

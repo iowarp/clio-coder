@@ -342,7 +342,7 @@ The setting `fleet.permissions.mode` decides how noninteractive workers handle
 a tool call that asks for permission. It supports three modes:
 - `deny`: Immediately returns a structured denial to the model, and the run continues.
 - `fail`: Finalizes the run as failed, exiting the worker subprocess with exit code 3 ([WORKER_EXIT_PERMISSION_REQUIRED](../src/worker/spec-contract.ts)).
-- `escalate`: Parks the tool call, emits a `clio_permission_escalated` event,
+- `escalate`: Parks the tool call, emits a `clio_coder_permission_escalated` event,
   and waits for an operator decision. If no decision arrives within
   `fleet.permissions.escalation.timeoutMs`, it applies the configured fallback.
   A headless worker or runtime without an operator channel collapses to that
@@ -607,7 +607,7 @@ This is the version-2 durable schema shipped in `DEFAULT_SETTINGS`. Validation i
 
 ### Safety
 
-The six limit leaves retain their one-process environment overrides where documented in [environment-variables.md](environment-variables.md); resolution is environment, then v2 settings, then compiled default.
+The safety-limit leaves have no one-process `CLIO_CODER_*` overrides in the current schema. Resolution follows the normal settings stack, from session or project layers where supported through user `settings.yaml`, then the compiled default.
 
 | Key | Default | Validation | When it applies |
 | --- | --- | --- | --- |
@@ -650,7 +650,7 @@ The six limit leaves retain their one-process environment overrides where docume
 | `integrations.externalAgents.defaults.connectTimeoutMs` | `30000` | integer ≥ 1 | next dispatch |
 | `integrations.externalAgents.defaults.turnTimeoutMs` | `300000` | integer ≥ 1 | next dispatch |
 | `integrations.externalAgents.defaults.permissionTimeoutMs` | `120000` | integer ≥ 1 | next dispatch |
-| `integrations.externalAgents.defaults.toolGovernance` | `clio-coder-policy` | `clio-policy`, `agent-managed`, `deny-all` | next dispatch |
+| `integrations.externalAgents.defaults.toolGovernance` | `clio-coder-policy` | `clio-coder-policy`, `agent-managed`, `deny-all` | next dispatch |
 | `integrations.runtimePlugins` | `[]` | list of plugin package names | restart |
 | `integrations.library.catalog` | `null` | string or null | next turn |
 | `integrations.library.remote` | `null` | string or null | next turn |
@@ -807,12 +807,13 @@ You can drive Claude Code as an external delegation agent over the Agent Client 
 - **Advisory Gating:** Under ACP, gating is **advisory** because Claude self-governs its tools; prefer `claude-sdk` for **enforced** per-tool safety where Clio's safety net intercepts every action class.
 - **Configuration Recipe:** Configure by adding a delegation agent in `settings.yaml` (a commented recipe is included by default):
 ```yaml
-delegation:
-  agents:
-    - id: claude-code
-      command: npx
-      args: ["-y", "@zed-industries/claude-code-acp"]
-      toolGovernance: clio-coder-policy
+integrations:
+  externalAgents:
+    entries:
+      - id: claude-code
+        command: npx
+        args: ["-y", "@zed-industries/claude-code-acp"]
+        toolGovernance: clio-coder-policy
 ```
 Then invoke it using `/delegate claude-code <task>`.
 
@@ -847,7 +848,7 @@ Useful flags:
 | `--api-key <literal>` | Store an API key in `credentials.yaml`. |
 | `--force` | Allow model/capability choices outside the local catalog guardrails. |
 | `--gateway` | Mark target as a gateway. |
-| `--lifecycle <user-managed|clio-managed>` | Resident model lifecycle policy. An explicit `user-managed` makes Clio observe-only on this target (never load/unload models); unset means Clio manages residency. |
+| `--lifecycle <user-managed|clio-coder-managed>` | Resident model lifecycle policy. An explicit `user-managed` makes Clio observe-only on this target (never load/unload models); unset means Clio manages residency. |
 | `--set-orchestrator` | Use this target as the chat default. |
 | `--set-fleet-default` | Use this target as the fleet default. |
 | `--context-window <N>` | Override the target context-window capability. |

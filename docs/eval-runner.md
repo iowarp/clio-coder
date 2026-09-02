@@ -21,6 +21,7 @@ clio-coder eval run --task-file <tasks.yaml> [--repeat <n>] [--out <path>] [--cl
 clio-coder eval report <evalId> --format text|json|md|swe-jsonl|junit
 clio-coder eval compare <baselineEvalId> <candidateEvalId> [--metric <name>] [--format text|json|md|junit] [--allow-config-drift]
 clio-coder eval gate <candidateEvalId> --baseline <baselineEvalId> [--thresholds <file>]
+clio-coder eval inventory --json
 ```
 
 ### Command Roles
@@ -34,6 +35,7 @@ clio-coder eval gate <candidateEvalId> --baseline <baselineEvalId> [--thresholds
   * `junit`: XML report for CI/CD integration.
 * **`compare`**: Compares two evaluation artifacts (baseline and candidate) by matching tasks.
 * **`gate`**: Compares candidate metrics against baseline and absolute thresholds. Correctness and safety regressions fail independently of informational budgets.
+* **`inventory`**: Prints the fixed machine-readable inventory used by GUI hosts. It includes stored report identity, provenance, serving facts, accounting, and per-scenario outcomes without report attachments.
 
 Exit codes:
 
@@ -43,7 +45,7 @@ Exit codes:
 | `eval run` | `0` when all task repetitions pass | `1` when any task fails, `2` for invalid configs |
 | `eval report` | `0` when artifact loads | `1` if artifact cannot be read, `2` for invalid ID |
 | `eval compare` | `0` when both artifacts compare and the behavioral hard gate passes | `1` for a hard regression or unreadable artifact, `2` for invalid ID |
-| `eval gate` | `0` when correctness, safety, and hard threshold assertions pass | `1` for any hard failure, `2` for config/invalid ID errors |
+| `eval gate` | `0` when correctness, safety, and hard threshold assertions pass | `1` for hard failures, unreadable inputs, and malformed threshold files; `2` for an invalid eval ID or usage error |
 
 ---
 
@@ -76,7 +78,7 @@ tasks:
       excludes:
         - "**/node_modules/**"
     runner:
-      kind: "clio-run" # clio-run | context-index | context-init | external-command
+      kind: "clio-coder-run" # clio-coder-run | context-index | context-init | external-command
       prompt: "Optimize the FFT tolerance bounds in solver.ts"
       timeoutMs: 60000
     verify:
@@ -104,12 +106,12 @@ tasks:
 | --- | --- | --- |
 | `version` | - | Must equal `2`. |
 | `suite` | `id`, `title`, `visibility`, `description` | Metadata identifying the evaluation suite. |
-| `matrix` | `targets[]`, `repeats`, `dimensions[]` | Matrix of execution targets, repetition count, and the execution-envelope fields intentionally varied by the suite. |
-| `workspace` | `kind`, `path`, `url`, `commit`, `checkout`, `excludes` | Workspace strategy: `local` (run in-place), `git` (clone from URL), or `temp-copy` (isolated copy of a directory). |
-| `runner` | `kind`, `prompt`, `command`, `commands`, `args`, `timeoutMs` | Runner type: `clio-run` (starts Clio agent loop), `context-index` (runs indexer), `context-init` (initializes context), `external-command` (spawns subprocess). |
-| `behavioral` | `schema`, `corpus`, `execution`, `expectedBehavior`, `forbiddenBehavior`, `judge` | Optional `clio.eval.scenario.v1` behavioral contract. Rules name a closed category and a typed predicate over transcript, tool, receipt, or grader facts. |
+| `matrix` | `targets[]`, `repeats`, `dimensions[]`, `maxCostUsd` | Matrix of execution targets, repetition count, execution-envelope fields intentionally varied by the suite, and an optional cumulative known-cost ceiling. |
+| `workspace` | `kind`, `path`, `url`, `commit`, `checkout`, `excludes`, `setup` | Workspace strategy: `local` (run in-place), `git` (clone from URL), or `temp-copy` (isolated copy of a directory). Optional `setup` commands prepare the workspace before the runner starts. |
+| `runner` | `kind`, `prompt`, `autonomy`, `agent`, `command`, `commands`, `args`, `timeoutMs` | Runner type: `clio-coder-run` (starts Clio's agent loop), `context-index` (runs the indexer), `context-init` (initializes context), or `external-command` (spawns a subprocess). `agent` selects a worker recipe and `autonomy` sets one-run headless authority. |
+| `behavioral` | `schema`, `corpus`, `execution`, `expectedBehavior`, `forbiddenBehavior`, `judge` | Optional `clio-coder.eval.scenario.v1` behavioral contract. Rules name a closed category and a typed predicate over transcript, tool, receipt, or grader facts. |
 | `verify` | `commands`, `measure`, `assertions`, `forbidPaths` | Validation steps: shell commands, a task-outcome grader, metric assertions (e.g. `op: lt` for max token counts), and files/directories that must not be created or modified (`forbidPaths`). |
-| `metrics` | `collect` | List of metric names to compile for the evaluation runs. |
+| `metrics` | `collect`, `readObservation` | Metric names to compile plus optional public allowlisted and decoy paths reduced to bounded read counters. Raw path strings do not enter behavioral facts. |
 
 ---
 
@@ -121,7 +123,7 @@ tasks:
 ---
 
 ## Runner Kinds
-* **`clio-run`**: Invokes the main Clio Coder agent loop with the task's prompt, tracing all tools.
+* **`clio-coder-run`**: Invokes the main Clio Coder agent loop with the task's prompt, tracing all tools. The released `clio-run` spelling is accepted only as a legacy input alias and is normalized before validation; writers and new suites use `clio-coder-run`.
 * **`context-index`**: Triggers the context engine to build index structures (`codewiki`).
 * **`context-init`**: Initializes workspace files (such as generating `CLIO-CODER.md`).
 * **`external-command`**: Spawns an external command or sequence of commands in the task workspace.
@@ -191,7 +193,7 @@ export interface EvalArtifactV4 {
   version: 4;
   evalId: string;
   suite: { id: string; hash: string };
-  clio: EvalClioProvenance;
+  clioCoder: EvalClioProvenance;
   environment: EvalEnvironmentProvenance;
   matrix: { target: string; model: string | null; thinking: string | null };
   summary: EvalArtifactSummaryV4;
@@ -207,11 +209,11 @@ export interface EvalArtifactV4 {
 
 ## The verdict envelope
 
-Every result carries a strictly parsed `clio.eval.verdict.v1` envelope (`src/domains/eval/schema/verdict.ts`). Suite v2 results are adapted into it at one explicit boundary (`src/domains/eval/schema/adapter.ts`) rather than by widening the artifact version, because the envelope carries no information a v4 artifact cannot hold.
+Every result carries a strictly parsed `clio-coder.eval.verdict.v1` envelope (`src/domains/eval/schema/verdict.ts`). Suite v2 results are adapted into it at one explicit boundary (`src/domains/eval/schema/adapter.ts`) rather than by widening the artifact version, because the envelope carries no information a v4 artifact cannot hold.
 
 ```json
 {
-  "schema": "clio.eval.verdict.v1",
+  "schema": "clio-coder.eval.verdict.v1",
   "scenarioId": "latency-nonnegative",
   "trialIndex": 0,
   "outcome": "pass",
@@ -231,7 +233,7 @@ The envelope is fail-closed by construction. `outcome` is one of `pass`, `fail`,
 
 ### Behavioral scenario and verdict documents
 
-Behavioral evaluation is additive and does not change the persisted `clio.eval.verdict.v1` reader. A Suite v2 task may declare a `clio.eval.scenario.v1` block, and its Artifact v4 result then carries a sibling `clio.eval.behavior.v1` document whose `verdictRef` names the verdict schema, scenario id, and trial index. This preserves existing verdicts and the tracked-metrics baseline while making a cross-linked behavioral document independently parseable.
+Behavioral evaluation is additive and does not change the persisted `clio-coder.eval.verdict.v1` reader. A Suite v2 task may declare a `clio-coder.eval.scenario.v1` block, and its Artifact v4 result then carries a sibling `clio-coder.eval.behavior.v1` document whose `verdictRef` names the verdict schema, scenario id, and trial index. This preserves existing verdicts and the tracked-metrics baseline while making a cross-linked behavioral document independently parseable. Readers normalize the released `clio.eval.*` identifiers for compatibility, but current writers emit only `clio-coder.eval.*` identifiers.
 
 The closed categories are `tool_choice`, `exploration`, `delegation`, `safety_comprehension`, `claim_grounding`, `denied_tool_recovery`, `completion_behavior`, and `task_correctness`. Each category result is exactly one of `satisfied`, `violated`, `unknown`, or `unmeasured`. The document outcome is `pass`, `behavioral_failure`, `unknown`, `unmeasured`, or `infrastructure_failure`; missing facts are never invented as successes, and an infrastructure failure cannot become a behavioral pass.
 
@@ -310,8 +312,8 @@ A dispatched worker's receipt reports `sessionId: null` and writes no session ar
 
 ### Behavioral multi-metric results
 
-A result with a `clio.eval.behavior.v1` verdict also carries the additive
-`clio.eval.behavior.metrics.v1` projection. The projection binds the scenario
+A result with a `clio-coder.eval.behavior.v1` verdict also carries the additive
+`clio-coder.eval.behavior.metrics.v1` projection. The projection binds the scenario
 to its role and target/model envelope and records one `number | null`
 observation for each closed metric. The source travels beside every value:
 
@@ -360,8 +362,8 @@ is emitted as testcase output rather than a failed testcase.
 ### Execution-envelope provenance and comparability
 
 Every newly written behavioral result carries an additive
-`clio.eval.execution-envelope.v1` sibling. Artifact v4,
-`clio.eval.verdict.v1`, and `clio.eval.behavior.metrics.v1` retain their
+`clio-coder.eval.execution-envelope.v1` sibling. Artifact v4,
+`clio-coder.eval.verdict.v1`, and `clio-coder.eval.behavior.metrics.v1` retain their
 existing identities. The envelope records the selected prompt fragment ids,
 authored versions or `unversioned` marker, fragment content hashes, prompt
 composition hash, recipe id/version/fingerprint when a worker recipe applies,
@@ -431,9 +433,11 @@ cannot offset a task or safety regression.
 
 ```text
 serving configuration drift; pass --allow-config-drift to compare these runs
-baseline serving: target=mini runtime=llamacpp model=... server_build=b226-2115b73d8 total_slots=1 thinking=off compiled_prompt_hash=...
+baseline serving: target=mini runtime=llamacpp model=ornith1.5-35b-moe server_build=... total_slots=4 thinking=off compiled_prompt_hash=...
 candidate serving: ...
 ```
+
+The current reference `mini` endpoint is the llama.cpp router at `192.168.86.141:8080`. It serves `ornith1.5-35b-moe` with four parallel slots and 262144 context tokens per slot. These deployment facts are reference topology, not defaults imposed on another target; retain the artifact's observed serving configuration with every comparison.
 
 `--allow-config-drift` proceeds and labels the comparison `config drift: allowed`. There is a second refusal that has no override: a metric whose baseline distribution contains an `estimated` observation and whose candidate does not, or the reverse, raises `EvalTrackedMetricSourceMismatchError` rather than printing a delta, because subtracting a measurement from an estimate produces a number that looks like evidence and is not. `--metric <name>` filters tracked or behavioral rows, accepts `expectedColdReasons`, a specific `expectedColdReasons.<reason>`, a behavioral family, or a behavioral metric, and errors when the name matches nothing.
 

@@ -78,7 +78,7 @@ or when `/settings targets` or `/model` is refreshed.
 ### 2.1 Endpoint Probing (`probe`)
 The `probe` method validates endpoint reachability and collects loaded models:
 
-* **Inputs:** `TargetDescriptor` (which holds target `url`, optional `apiKey`, and connection metadata) and `ProbeContext` (which provides timeout signals and credentials). Request paths that resolve OAuth through `providers.auth.resolveForTarget` must pass `{ signal }`; Pi 0.84's `AuthOperationOptions` keeps cancellation attached while Clio waits for or mutates its credential store.
+* **Inputs:** `TargetDescriptor` (which holds target `url`, optional `auth` metadata, and connection metadata) and `ProbeContext` (which provides timeout signals, credential-presence keys, and an optional resolved `authToken`). Request paths that resolve OAuth through `providers.auth.resolveForTarget` must pass `{ signal }`; Pi 0.84's `AuthOperationOptions` keeps cancellation attached while Clio waits for or mutates its credential store.
 * **Return Value:** A `ProbeResult` indicating:
   * `ok`: True if reachable.
   * `serverVersion`: String identifier of the backend (e.g. `"Ollama/0.1.48"`).
@@ -88,7 +88,10 @@ The `probe` method validates endpoint reachability and collects loaded models:
 ### 2.2 Reasoning Probing (`probeReasoning`)
 For local endpoints where models are loaded dynamically, the runtime can supply a `probeReasoning` method. It sends a short mock completion request to inspect whether the model outputs reasoning/thinking tags (such as `reasoning_content` in OpenAI completions or `<think>` tags in raw text streams).
 
-Clio caches this result under the session's provider cache, preventing redundant network requests.
+Clio caches this result in the providers domain by exact target and model id for
+the current process. Provider reinitialization, configuration reload, and target
+disconnect paths clear the relevant cache rather than persisting it in a
+session ledger.
 
 ### 2.3 Exact-ID Capability Selection (`probeCapabilitiesForModel`)
 `probeCapabilitiesForModel` is the one exact-id selector during capability resolution. When a router target serves several models, `probeCapabilitiesForModel` matches `probeModelCapabilities` keyed strictly to the requested wire model ID. A router serving multiple models thus answers only from the `/v1/models` row keyed to its own wire model, preventing capability flags or token limits from bleeding across different models on the same target.
@@ -125,14 +128,14 @@ The `synthesizeModel` method acts as the factory that creates the `pi-ai` compat
   ): Model<Api>
   ```
 * **Tasks:**
-  1. Retrieve configured API credentials using `providers.auth` persisted through `openAuthStorage()`.
-  2. Instantiate the adapter client (e.g., building a `pi-ai` OpenAI or Anthropic provider instance).
-  3. Bind custom prompt templates and FIM (Fill-in-the-Middle) properties where supported.
+  1. Combine target, catalog, probe, and capability metadata into a `pi-ai` model descriptor.
+  2. Select the API family, endpoint, pricing, token limits, and Clio runtime metadata required by the streaming adapter.
+  3. Leave secrets and request-time authentication to `providers.auth.resolveForTarget` at the call site. Optional FIM support belongs to the descriptor's separate `infill` method rather than to prompt binding in `synthesizeModel`.
 
 
 ### 3.1 Stream Filters and Sentinel Stripping
 
-When a model family requires response parsing or sentinel stripping before the payload reaches the core logic, Clio applies runtime-agnostic stream filters during model synthesis. For example, if the resolved model family is `gemma-4`, a dedicated `createGemmaChannelFilter` is applied to intercept and reclassify `<|channel>thought` markers directly from the `text_delta` stream into `thinking_delta` events, dropping orphan channel closers and own-thought labels seamlessly.
+When a model family requires response parsing or sentinel stripping before the payload reaches the core logic, Clio applies runtime-agnostic stream filters in the engine stream adapter after model synthesis. For example, if the resolved model family is `gemma-4`, a dedicated `createGemmaChannelFilter` intercepts and reclassifies `<|channel>thought` markers directly from the `text_delta` stream into `thinking_delta` events, dropping orphan channel closers and own-thought labels seamlessly.
 
 ### 3.2 OpenAI-compatible sampling and vLLM budgets
 
@@ -161,8 +164,10 @@ level onto `thinking.type: "adaptive"` plus `output_config.effort` (read from th
 `thinkingLevelMap` and `compat.forceAdaptiveThinking`) or onto a bounded `budget_tokens` for
 budget-based models. Clio's `onPayload` hook no longer rewrites those fields; it only sets the
 OpenAI Responses `reasoning.summary` verbosity, which the agent loop cannot express as an option.
-`tests/contracts/thinking-runtime.test.ts` captures the wire payload Pi builds and proves Clio
-leaves it untouched.
+`tests/contracts/thinking-off-wire.test.ts` locks the local LM Studio and
+llama.cpp controls used when thinking is off. Anthropic request assembly is
+inherited from the pinned Pi dependency; Clio no longer carries a separate
+contract test that reconstructs Pi's whole adaptive or budget payload.
 
 
 ---
@@ -173,11 +178,16 @@ Clio supports diverse thinking mechanisms. If your model family uses a custom fo
 
 | Mechanism | Behavior |
 | --- | --- |
-| `none` | **Reasoning-Never:** Clio strips thinking request fields (e.g., effort levels), avoids replaying thinking blocks in history, emits no TUI thinking events, and records no reasoning token usage metrics. |
-| `ollama-native` | Standard Ollama native thinking streams. |
-| `lmstudio` | Uses OpenAI-compatible chat and consumes streamed `reasoning`; thinking control uses only `reasoning_effort`. |
-| `openai-completions` | Replays thinking blocks via `reasoning_content` message parameters. |
-| `anthropic-max` | Anthropic extended thinking block protocol. |
+| `none` | The family does not reason; the effective level is `off` and thinking controls are omitted. |
+| `effort-levels` | Named levels map to provider effort values, such as LM Studio `reasoning_effort`. |
+| `budget-tokens` | Named levels map to explicit reasoning-token budgets. |
+| `on-off` | The runtime exposes a binary thinking switch rather than graduated effort. |
+| `always-on` | The model cannot disable reasoning; Clio reports the effective level as forced and allows extra completion headroom where required. |
+
+Wire formats such as `anthropic-extended`, `qwen-chat-template`, and
+`deepseek-r1` live in capability metadata. Runtime API families such as
+`openai-completions` and `ollama-native` are separate descriptor fields; neither
+set is a valid value for `quirks.thinking.mechanism`.
 
 ---
 

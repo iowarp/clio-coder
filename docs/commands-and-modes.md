@@ -415,24 +415,26 @@ and expanded dashboard summarize whether intervention is on, its rules or LLM
 tier, and current bank size.
 After `/resume`, Clio offers `/memory seed` when the newest handoff contains a
 structured snapshot. Seeding is explicit, deduplicated, and unavailable while
-`memory.intervention.enabled` is off.
+`context.memory.enabled` is false.
 
 The `/agents connect` overlay lists the other coding agents Clio found on this machine,
 grouped `Detected`, `Configured`, and `Declined`. A detected row's detail pane
 shows the exact `integrations.externalAgents.entries` entry that connecting it would append, plus
 the two facts a new peer inherits: `projectContext: none`, so the peer receives
 the task text and never the project projection, and `toolGovernance:
-clio-policy`, so its tool calls are gated by Clio safety. Press `a` to connect
+clio-coder-policy`, so its tool calls are gated by Clio safety. Press `a` to connect
 one or `d` to decline; the overlay reads the report this process already produced
 at boot and never probes on a keystroke. Accepting applies to the live session,
 because `delegation` hot-reloads.
 
-Boot adds at most one line about interop, in the shape `clio: codex detected on
-PATH and not configured. Run /agents connect to review.` It names only agents that are
-installed, unconfigured, and undecided, it appears at most once per set of facts,
-and it is never emitted in headless or ACP mode. Declining an agent silences it
-until its binary version or path changes, at which point it becomes a fresh
-proposal.
+Boot adds at most one line about interop, in the current source shape
+`clio-coder: codex detected on PATH and not configured. Run /interop to review.`
+The `/interop` name is retained only as a retired-command tombstone and answers
+`Use /agents connect.`, so operators can open `/agents connect` directly. The
+hint names only agents that are installed, unconfigured, and undecided, appears
+at most once per set of facts, and is never emitted in headless or ACP mode.
+Declining an agent silences it until its binary version or path changes, at which
+point it becomes a fresh proposal.
 
 `clio-coder doctor` reports interop and never proposes anything. It emits one
 `ok` row per detected agent naming its version, its path, and whether it is
@@ -521,7 +523,7 @@ The `Alt+W` Fleet Runs board makes this control path discoverable: use
 Up/Down or `j`/`k` to select a run, `s` to close the board and prefill its
 exact `@<runId> ` steering prefix, and `x` to cancel a live worker or queued
 retry. A steer first reports `queued`; only the worker's
-`clio_steer_received` acknowledgement reports `received`. Single-shot
+`clio_coder_steer_received` acknowledgement reports `received`. Single-shot
 subprocess runtimes and ACP delegation do not expose a live steering channel
 and are labeled accordingly.
 
@@ -557,6 +559,7 @@ Fleet dispatch runs focused agent recipes through configured targets. The final 
 | `scout` | `explore` / `shadow` | Read-only repository exploration, symbol mapping, and context assembly. |
 | `researcher` | `research` / `shadow` | Documentation, literature, and web-grounded investigation. |
 | `provenance` | `operations` / `shadow` | Reading evidence files, receipts, diffs, and telemetry for handoffs. |
+| `oracle` | `plan` / `shadow` | Challenging one question against the session's settled decisions through `/oracle`. |
 | `context-bootstrap` | `internal` / `internal` | Bootstrap agent behind `clio-coder context init` that inspects the repository and returns `CLIO-CODER.md`. |
 
 Examples:
@@ -567,9 +570,11 @@ clio-coder run --agent architect "Plan a minimal change to add JSON output to th
 clio-coder run --agent verifier "Run tests and confirm the build passes."
 ```
 
-Shadow agents (`scout`, `researcher`, `provenance`) are internal orchestration
-helpers. They appear in `clio-coder agents --all` and the main prompt catalog, but
-user-origin `/run` and `clio-coder run --agent` requests are rejected for them.
+Dispatchable shadow helpers (`scout`, `researcher`, `provenance`) appear in
+`clio-coder agents --all`, the full agent catalog, and the compact fleet prompt,
+but user-origin `/run` and `clio-coder run --agent` requests are rejected for
+them. `oracle` also appears in `--all` and the full catalog, but it is deliberately
+excluded from the compact prompt and is reached only through `/oracle`.
 For broad repository reconnaissance, the operating contract and Scout catalog
 description steer the model to author a Scout dispatch. The chat harness does
 not mechanically route the request. A threshold nudge advises Scout delegation

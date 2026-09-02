@@ -35,7 +35,7 @@ export interface ClioSessionMeta {
   endedAt: string | null;
   model: string | null;
   target: string | null;
-  clioVersion: string;
+  clioCoderVersion: string;
   piMonoVersion: string;
   platform: string;
   nodeVersion: string;
@@ -43,7 +43,7 @@ export interface ClioSessionMeta {
 }
 ```
 
-Format version `CURRENT_SESSION_FORMAT_VERSION = 4` (`src/engine/session.ts`) is stamped on all sessions created since the working-set layer landed. Version 4 adds the `contextEviction` and `contextRecall` ledger kinds. `runMigrations` in `src/domains/session/migrations/` rejects both directions on `/resume`: a missing or earlier version names the remedy (remove the session directory), and a version from the future says the session was written by a newer Clio and must not be read by this build.
+Format version `CURRENT_SESSION_FORMAT_VERSION = 4` (`src/engine/session.ts`) is stamped on all sessions created since the working-set layer landed. Version 4 adds the `contextEviction` and `contextRecall` ledger kinds. `runMigrations` in `src/domains/session/migrations/` performs the one supported additive migration from version 3 to version 4. A missing version or a version below 3 names the remedy (remove the session directory), while a version above 4 says the session was written by a newer Clio and must not be read by this build.
 
 ---
 
@@ -56,7 +56,7 @@ The session ledger `current.jsonl` records all conversation events, model turns,
 The first line of `current.jsonl` is the canonical session header:
 
 ```json
-{"type":"session","version":3,"id":"01912a34-b567-7890-abcd-ef0123456789","timestamp":"2026-08-14T12:00:00.000Z","cwd":"/path/to/project"}
+{"type":"session","version":4,"id":"01912a34-b567-7890-abcd-ef0123456789","timestamp":"2026-08-14T12:00:00.000Z","cwd":"/path/to/project"}
 ```
 
 ### Entry Taxonomy

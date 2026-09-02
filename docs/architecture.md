@@ -24,7 +24,12 @@ src/
 └── utils/           # small support utilities
 ```
 
-Registered domain modules include:
+Feature-domain directories include the following. Not every row is a loaded
+`DomainModule`: the orchestrator currently loads config, extensions, interop,
+resources, share, context, providers, toolchain, safety, prompts, agents,
+middleware, session, observability, scheduling, dispatch, and lifecycle, plus
+mux when the pane tier is active. The other rows are libraries or CLI-owned
+feature areas.
 
 | Domain | Primary source | Public surface |
 | --- | --- | --- |
@@ -49,6 +54,9 @@ Registered domain modules include:
 | scheduling | `src/domains/scheduling/**` | Budget ceilings, node cluster states, batch capacity checks. |
 | session | `src/domains/session/**` | Append-only JSONL transcripts, tree navigation, compaction. |
 | share | `src/domains/share/**` | Portable workspace and resource archive export/import. |
+| toolchain | `src/domains/toolchain/**` | Pinned external-tool discovery, installation, and resolution. |
+| user-tasks | `src/domains/user-tasks/**` | Library and CLI-owned durable user task list plus board handoff state. |
+| mux | `src/domains/mux/**` | Optional interactive pane-host integration. |
 
 The `interop` domain owns one question: which other coding agents are on this
 machine and in this project. `src/domains/interop/registry.ts` is pure data, one
@@ -161,16 +169,18 @@ Admission disposal is one registry-owned finally boundary, so a
 middleware guard block, ordinary return, or thrown body releases a provisional
 reservation exactly once.
 
-Only the admitted `run` step crosses `src/tools/lazy-tool.ts`. One cached promise
-owns the implementation import, including a deterministic failure, so concurrent
-first calls cannot initialize competing implementations. The loaded spec must
-match the advertised surface before its body can run. Ordinary body exceptions,
-result shaping, `after_tool` middleware, abort signals, and telemetry continue
-through the registry's existing path. This mechanism is built-in-only; it does
-not turn extension manifests or provider plugins into an executable tool loader.
-Source-built and installed-package coverage contracts locate implementations by
-stable behavior provenance, prove them absent during a real provider capability
-request, and prove only the invoked implementation present after first use.
+For ordinary lazy tools, only the admitted `run` step crosses
+`src/tools/lazy-tool.ts`. One cached promise owns the implementation import,
+including a deterministic failure, so concurrent first calls cannot initialize
+competing implementations. The loaded spec must match the advertised surface
+before its body can run. Ordinary body exceptions, result shaping, `after_tool`
+middleware, abort signals, and telemetry continue through the registry's
+existing path. This mechanism is built-in-only; it does not turn extension
+manifests or provider plugins into an executable tool loader. Dispatch is
+different: `registerAllTools` creates its lightweight admission surface eagerly,
+and `src/tools/dispatch.ts` owns a separate cached dynamic import of
+`dispatch-runner.ts` after admission succeeds. It does not pass through
+`lazy-tool.ts`.
 
 ## Boundary invariants
 
@@ -180,11 +190,11 @@ The enforced import rules below are complemented by the maintained
 [Pi SDK boundary table](pi-boundary.md), which records the semantic owner of
 each overlapping helper and the Clio deltas that must survive an SDK upgrade.
 
-These five enforced boundary rules constrain dependency **direction**, never import **form** (whether static vs dynamic, default vs named):
+These six enforced boundary rules constrain dependency **direction**, never import **form** (whether static vs dynamic, default vs named):
 
-### Rule 1: `@earendil-works/*` imports stay in `src/engine/**`
+### Rule 1: `@earendil-works/pi-*` imports stay in `src/engine/**`
 
-Only files under `src/engine/**` may import `@earendil-works/*` packages. Since the 0.83.0 engine-boundary rework, no file outside `src/engine/**` may import `@earendil-works/*` at all, value or type-only. Domain modules import erased engine shapes (`EngineModel`, `Api`, `Model`) directly from `src/engine/types.ts`.
+Only files under `src/engine/**` may import `@earendil-works/pi-*` packages. Since the 0.83.0 engine-boundary rework, no file outside `src/engine/**` may import those packages at all, value or type-only. Domain modules import erased engine shapes (`EngineModel`, `Api`, `Model`) directly from `src/engine/types.ts`.
 
 Why: provider SDKs and pi-ai engine values must remain swappable behind one engine boundary. Domains and presentation layers operate against Clio contracts rather than vendor or runtime implementations. `src/engine/api-registry.ts` composes Pi's public lazy API factories in their canonical order, retains provider-owned authentication/header dispatch, and lets Clio's local-runtime adapters override API families without importing the deprecated compatibility aggregate. The only `pi-ai/compat` edge is dynamic: before a configured out-of-tree runtime evaluates, Clio joins Pi's process-global registry and mirrors its overrides so external provider plugins retain the same registry identity and last-writer-wins order. No configured plugin means no compatibility aggregate. OpenAI-compatible sampler fields and vLLM thinking budgets flow through Pi's `samplingParams` and `supportsThinkingTokenBudget` contracts; Clio's adapter retains only catalog selection and runtime-specific payload deltas. Tool head/tail truncation, byte formatting, and grep-line clipping likewise flow through pi-agent-core's `truncateHead`, `truncateTail`, `formatSize`, and `truncateLine`; Clio retains only its 16 KiB per-observation default and its exported line-count helper. Tool string enums come from pi-ai's `StringEnum` (`src/engine/ai.ts`), the model-facing text for replayed bash executions and branch or compaction summaries comes from pi-agent-core's `bashExecutionToText` and summary prefixes (`src/engine/messages.ts`), and Anthropic thinking payloads are assembled by Pi's narrow lazy stream implementation with no Clio rewrite.
 
@@ -209,6 +219,16 @@ Files under `src/tools/**` may never import `src/interactive/**` (neither value 
 ### Rule 5: One-way entry point composition (`chat-loop.ts` never imports `src/entry/**`)
 
 Turn modules and state machine files in the chat loop (`src/interactive/turn-*.ts`, `chat-loop.ts`) may never import `src/entry/**`. Composition flows in one direction only: the entry point composes the chat loop, never the reverse.
+
+### Rule 6: Stage 0 remains behind declared seams
+
+Value importers outside the computed instant-shell Stage 0 closure and its
+`src/interactive/**` and `src/engine/**` trees may enter those protected trees
+only through a seam declared in `STAGE0_SEAMS`. A declared seam may not lead back
+into the Stage 0 closure unless the existing composition-root overlap is
+explicitly recorded. CLI type edges retain the declaration requirement. This
+keeps unrelated importers from creating another reacher into the cold-start
+chunk graph.
 
 ---
 
@@ -293,9 +313,10 @@ editor object and buffer. Submissions accepted before attachment are immutable
 FIFO records shown in the shell and admitted exactly once through the normal
 slash/bash/chat pipeline after attachment. A generation guard rejects a late
 hydration after shutdown; every failure path shares one idempotent close and
-terminal restoration transaction. The built-graph contract bounds the Stage 0
-closure and rejects provider, tool, codewiki, tree-sitter, and orchestrator
-implementation markers. ACP, headless, ordinary non-TTY invocation, help, and
+terminal restoration transaction. The source boundary checker protects the
+declared Stage 0 closure and seams. There is no committed built-chunk budget
+contract at this revision; the installed-package smoke test still exercises
+lazy codewiki loading. ACP, headless, ordinary non-TTY invocation, help, and
 subcommands never construct a lease; the established explicit
 `CLIO_CODER_INTERACTIVE=1` non-TTY override remains force-interactive.
 

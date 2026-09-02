@@ -336,7 +336,7 @@ Wrapping happens before the row cap, so the block is at most six rows tall at an
 
 ## 8. Shared Vocabulary
 
-One quantity gets one word, and every surface that shows it uses that word. A user comparing the transcript, the footer, and an overlay is checking whether Clio is telling a consistent story; a synonym reads as a discrepancy. `tests/contracts/usage-vocabulary.test.ts` holds the pairs that had drifted.
+One quantity gets one word, and every surface that shows it uses that word. A user comparing the transcript, the footer, and an overlay is checking whether Clio is telling a consistent story; a synonym reads as a discrepancy. The current vocabulary is owned by `src/interactive/chat-panel.ts`, `src/interactive/cost-overlay.ts`, `src/interactive/status/reasoning.ts`, and `src/interactive/thinking-level-policy.ts`; there is no standalone `usage-vocabulary` contract test in the current tree.
 
 | Concept | Word | Surfaces |
 | --- | --- | --- |

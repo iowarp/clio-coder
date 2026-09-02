@@ -71,7 +71,7 @@ The worker entry mounts a custom stdin demultiplexer (`createWorkerStdinDemux`) 
 1. **Steering Commands:**
    `{"type": "steer", "text": "guidance message", "sequence": 1}`
    Instructs a live-input HTTP or SDK worker to alter course. Its runtime emits
-   the receipt-bearing `clio_steer_received` event only after accepting the
+   the receipt-bearing `clio_coder_steer_received` event only after accepting the
    message for the next turn boundary. Single-shot subprocess runtimes install
    no steering handler, drop unexpected guidance without claiming receipt, and
    are not offered steering by the dispatch contract or TUI.
@@ -110,7 +110,7 @@ stateDiagram-v2
 
     state EscalatePosture {
         [*] --> ParkCall
-        ParkCall --> EmitEscalatedEvent : stdout <- clio_permission_escalated
+        ParkCall --> EmitEscalatedEvent : stdout <- clio_coder_permission_escalated
         EmitEscalatedEvent --> WaitForInput
         WaitForInput --> ResolveApprove : stdin -> permission_decision (approve)
         WaitForInput --> ResolveDeny : stdin -> permission_decision (deny)
@@ -126,7 +126,7 @@ stateDiagram-v2
 2. **Fail:** Terminate the run immediately, exiting the worker subprocess with exit code `3` (`WORKER_EXIT_PERMISSION_REQUIRED`).
 3. **Escalate (Parking Loop):**
    - The worker parks the tool execution thread.
-   - It generates a unique `requestId` and emits a `clio_permission_escalated` event to `stdout`.
+   - It generates a unique `requestId` and emits a `clio_coder_permission_escalated` event to `stdout`.
    - The parent process intercepts this event, displays the approval prompt in the interactive TUI, and waits for the operator.
    - If the operator selects approve or deny, the parent writes `{"type":"permission_decision", "requestId":"...", "decision":"..."}` to the worker's `stdin`.
    - The demuxer resolves the parked promise, resuming tool execution.
@@ -207,7 +207,7 @@ The coordinator classifies failures into 13 explicit categories (`src/domains/di
 
 ### 5.2 Canonical Receipt Integrity Serialization
 
-Receipts carry exactly one integrity version (`RUN_RECEIPT_INTEGRITY_VERSION = 19`); any other version is invalid. It computes a cryptographic SHA-256 digest over a strictly sorted, canonical JSON representation (`serializeCanonical` in `src/domains/dispatch/receipt-integrity.ts`).
+Receipts carry the current integrity version (`RUN_RECEIPT_INTEGRITY_VERSION = 20`). Verification computes a cryptographic SHA-256 digest over a strictly sorted, canonical JSON representation (`serializeCanonical` in `src/domains/dispatch/receipt-integrity.ts`). A pre-v20 receipt is retired and cannot be read as current evidence; a malformed or digest-mismatched v20 receipt is invalid.
 
 - **Object Key Sorting**: Keys are sorted lexicographically before serialization (`Object.keys(obj).sort()`).
 - **Strict Primitive Handling**: `undefined` object properties are omitted; non-finite numbers (`NaN`, `Infinity`) or `bigint` throw an explicit serialization error.
@@ -225,23 +225,20 @@ state vocabulary and compatibility map are documented in
 
 ### 5.3 Acceptance Coverage
 
-The assignment contract's acceptance scenarios map to deterministic contract
-tests as follows:
+The current reduced contract suite divides dispatch coverage by ownership:
 
-| # | Scenario | Contract test |
-| --- | --- | --- |
-| 1 | Remote stall, approved local fallback, attached success | `dispatch-envelope.test.ts`: "falls back from remote to local only within an approved envelope" |
-| 2 | Detached collection returns successful terminal fallback | `dispatch-assignment-detached.test.ts`: "collects the terminal retry…" |
-| 3 | Pipeline consumes terminal fallback output | `dispatch-assignment-detached.test.ts`: "threads the successful retry output…" |
-| 4 | Failed attempt remains visible and integrity-verifiable | `dispatch-assignment.test.ts`: "resolves attached dispatch…" (also covered by detached collection) |
-| 5 | Cancellation starts no retry | `dispatch-assignment.test.ts`: "canceling the root attempt starts no retry" |
-| 6 | Cancellation does not cool the target | `dispatch-failure-class.test.ts`: "keeps cancellation and permission neutral…" |
-| 7 | Permission/policy rejection is retry- and breaker-neutral | `dispatch-failure-class.test.ts`: classification/decision table and neutral-target test |
-| 8 | Node-channel failure changes node but retains model | `dispatch-failure-class.test.ts`: "moves only the node…" |
-| 9 | Rate limit retains agent/model and delays or changes target | `dispatch-failure-class.test.ts`: "changes target after rate limiting…" |
-| 10 | Exhaustion returns one failure with all attempt receipts | `dispatch-assignment.test.ts`: "settles exhausted retries…" |
-| 11 | Exact manual pin never falls back | `dispatch-envelope.test.ts`: "keeps a manual exact pin fail-closed…" |
-| 12 | Approved envelope never spawns outside its candidate list | `dispatch-envelope.test.ts`: "settles failed instead of spawning an unlisted candidate" |
+| Contract | Current executable coverage |
+| --- | --- |
+| `tests/contracts/dispatch-lifecycle.test.ts` | Attached and detached lifecycle deduplication, durable transitions, terminal finalization, and orphan recovery from durable attempts. |
+| `tests/contracts/dispatch-admission.test.ts` | Typed-scope authority, capability pairing, deterministic capacity admission, conservative slot defaults, and ACP authority boundaries. |
+| `tests/contracts/dispatch-schema.test.ts` | Capability-shaped model schema, referenced `$defs`, and hidden-field compatibility. |
+
+Earlier releases carried separate envelope, assignment, detached-assignment,
+and failure-class test files for the detailed retry scenarios. Those files are
+not present in the current tree, so this page does not cite them as executable
+coverage. Retry and failover behavior remains owned by the dispatch source and
+the three maintained contracts above cover only the responsibilities stated in
+this table.
 
 ## 6. Worker Exit Codes
 
