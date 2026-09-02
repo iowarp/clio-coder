@@ -712,14 +712,48 @@ export interface RunHostVerificationCheck {
 	memo: boolean;
 	outputTail: string;
 	artifactPath?: string;
-	/** Original evidence owner on a memo hit. */
+	/** Run that owns the evidence when it did not come from this run: a memo hit, or the batch member the shared check ran under. */
 	evidenceRunId?: string;
+}
+
+/**
+ * Why a batch-settled failing check was or was not charged to a run. It is a
+ * batch-wide fact and is sealed identically on every receipt in the batch; each
+ * receipt's own `status` is what that run is judged by.
+ */
+export interface RunHostVerificationAttribution {
+	/** Declared check id that failed. */
+	check: string;
+	/** Absolute repository paths the check's own output named, sorted, capped at 32. */
+	implicated: string[];
+	/** Run ids the failure is charged to, sorted. */
+	charged: string[];
+	/**
+	 * `write_roots` when at least one implicated path fell inside a charged run's
+	 * declared write roots. `unattributable` when the output named no path, or
+	 * named none that any declaring run's write roots cover, in which case every
+	 * run that declared the check is charged: a real failure with no owner is
+	 * charged to everyone rather than excused for everyone.
+	 */
+	basis: "write_roots" | "unattributable";
 }
 
 export interface RunHostVerification {
 	status: "verified" | "rejected" | "skipped";
 	reason?: string;
 	checks: RunHostVerificationCheck[];
+	/**
+	 * How the declared checks were run. Absent means the single-run strategy every
+	 * receipt carried before batch settlement existed: the checks ran for this run
+	 * alone, straight after it finished. `batch-settled` means they ran once for
+	 * the whole parallel batch after every live member had finished. The field is
+	 * omitted rather than stamped `"single"` so a single-task receipt digests
+	 * exactly as it did before (`receipt-integrity.ts:145-147` is the same
+	 * reasoning applied one field over).
+	 */
+	strategy?: "batch-settled";
+	/** Per-failing-check attribution for a batch-settled run; absent when nothing failed. */
+	attribution?: RunHostVerificationAttribution[];
 }
 
 export interface RunReceipt {
