@@ -19,7 +19,7 @@ then settings, then the built-in default. Resolution lives in
 | --- | --- | --- | --- |
 | `CLIO_CODER_TURN_TOOL_CALL_BUDGET` | `safety.limits.chatToolCallsPerTurn` | 60 | Orchestrator per-turn soft tool-call budget; the hard interrupt ceiling sits 15 above it (`src/engine/loop-guard.ts`). |
 | `CLIO_CODER_WORKER_TOOL_CALL_CAP` | `fleet.limits.toolCallsPerRun` | 150 | Lifetime ceiling on tool calls one dispatched worker may execute. Calls the harness refused (reserve steering, synthesis-lockout denials) never spend it. Agent recipe budgets may narrow but never widen it (`src/engine/loop-guard.ts`). |
-| `CLIO_CODER_MAX_DISPATCH_RUNS` | `fleet.history.maxRuns` | 1000 | Dispatch run-ledger retention cap (`src/domains/dispatch/state.ts`). The older `CLIO_CODER_MAX_RUNS` spelling still reads when the canonical name is unset and emits one deprecation warning per process. |
+| `CLIO_CODER_MAX_DISPATCH_RUNS` | `fleet.history.maxRuns` | 1000 | Dispatch run-ledger retention cap (`src/domains/dispatch/state.ts`). |
 | `CLIO_CODER_READ_MAX_BYTES` | `safety.limits.readBytesPerCall` | 51200 | Per-call byte cap for the read tool, floored at 1024 (`src/tools/read.ts`). |
 | `CLIO_CODER_OBSERVATION_TURN_BUDGET_BYTES` | `safety.limits.observationBytesPerTurn` | 196608 | Shared per-turn byte pool across observation tools (`src/tools/observation.ts`). |
 | `CLIO_CODER_INTERNAL_DISPATCH_TIMEOUT_MS` | `fleet.limits.internalRunTimeoutMs` | 900000 | Wall-clock cap for one internal generator dispatch: the wiki documenter and the bootstrap scout (`src/cli/internal-dispatch.ts`). |
@@ -33,7 +33,6 @@ then settings, then the built-in default. Resolution lives in
 | `CLIO_CODER_RIGOR` | repo-derived | Finish-contract evidence bar, `normal` or `high`, layered over the repo-derived default (`src/domains/safety/rigor.ts`). |
 | `CLIO_CODER_RESIDENCY` | managed | `observe`, `off`, `0`, `false`, `user`, or `user-managed` stops Clio managing model residency on every local runtime path, llama.cpp routers included; per-target opt-out via `lifecycle: user-managed`. The dispatch transport also exports it to SSH workers as the node's `residency` (`src/engine/apis/residency.ts`, `src/domains/dispatch/transport.ts`). |
 | `CLIO_CODER_TRUST_PROJECT_RESOURCES` | settings value | `1` trusts third-party project resource imports for this process when `integrations.projectResources.trustProjectImports` is false; the variable can only enable trust, never revoke a setting that already grants it (`src/domains/resources/skills/loader.ts`). |
-| `CLIO_CODER_TRUST_PROJECT_SKILLS` | off | Deprecated alias for `CLIO_CODER_TRUST_PROJECT_RESOURCES`; `1` still trusts third-party project resource imports and emits a deprecation warning (`src/domains/resources/skills/loader.ts`). |
 | `CLIO_CODER_ALLOW_EXTERNAL_FULL_ACCESS` | off | `1` lets full-auto pass through to external CLI runtimes with their own full access (`src/engine/claude/subprocess-runtime.ts`, `src/engine/antigravity/subprocess-runtime.ts`). |
 | `CLIO_CODER_FORCE_COMPACT` | off | `1` forces compaction before every interactive turn for as long as it is set (`src/interactive/chat-loop.ts`). |
 | `CLIO_CODER_LEGACY_MASK` | off | `1` temporarily restores the destructive stale-observation mask before summary compaction; remove it after compatibility diagnosis. |

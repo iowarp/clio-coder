@@ -16,7 +16,7 @@ import { EvalSuiteFileError, loadEvalSuiteFile, loadV1TaskFileAsSuite } from "..
 import { resolveSuiteForRun } from "../domains/eval/suites/resolve.js";
 import { runEvalSuiteV2 } from "../domains/eval/suites/run.js";
 import { EvalTaskFileError } from "../domains/eval/task-file.js";
-import { noteDeprecatedFlag, printError } from "./shared.js";
+import { printError } from "./shared.js";
 
 const HELP = `clio-coder eval <command>
 
@@ -115,9 +115,7 @@ function parseEvalArgs(args: ReadonlyArray<string>): ParsedEvalArgs {
 				index += 1;
 				continue;
 			}
-			// `--clio-entry` is the pre-0.3.1 spelling and still parses.
-			if (arg === "--clio-coder-entry" || arg === "--clio-entry") {
-				if (arg === "--clio-entry") noteDeprecatedFlag(arg, "--clio-coder-entry");
+			if (arg === "--clio-coder-entry") {
 				parsed.clioEntry = requiredValue(args, index, arg);
 				index += 1;
 				continue;

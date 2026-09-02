@@ -230,18 +230,9 @@ entries:
     kind: env
     owner: core
     default: "1000"
-    controls: Positive integer retention cap for the dispatch run ledger written by src/domains/dispatch/state.ts; the legacy `CLIO_CODER_MAX_RUNS` spelling reads when this is unset or invalid.
-    precedence: env > `CLIO_CODER_MAX_RUNS` > `fleet.history.maxRuns` > built-in default
+    controls: Positive integer retention cap for the dispatch run ledger written by src/domains/dispatch/state.ts.
+    precedence: env > `fleet.history.maxRuns` > built-in default
     verdict: keep
-  - name: CLIO_CODER_MAX_RUNS
-    kind: env
-    owner: core
-    default: "1000"
-    controls: Legacy spelling of `CLIO_CODER_MAX_DISPATCH_RUNS`, consulted only when the canonical variable is unset or invalid; same positive integer semantics.
-    precedence: "`CLIO_CODER_MAX_DISPATCH_RUNS` > env > `fleet.history.maxRuns` > built-in default"
-    verdict: deprecate
-    mergeWith: CLIO_CODER_MAX_DISPATCH_RUNS
-    note: Read only when the canonical name is unset; src/core/guardrails.ts emits one CLIO_CODER_DEPRECATED_ENV warning per process when it is used.
   - name: CLIO_CODER_MEMORY_TRACE
     kind: env
     owner: memory
@@ -432,16 +423,9 @@ entries:
     owner: resources
     default: settings value (built-in false)
     controls: Exactly `1` trusts third-party project resource imports (skills and prompts) for this process; it can only enable, never disable, what the setting says.
-    precedence: "`integrations.projectResources.trustProjectImports: true` > env `1` > `CLIO_CODER_TRUST_PROJECT_SKILLS=1` > off; each layer only enables"
+    precedence: "`integrations.projectResources.trustProjectImports: true` > env `1` > off; each layer only enables"
     verdict: keep
     note: docs said `1` overrides the setting; in code (loader.ts:222-224) an explicit true setting wins first and env cannot turn trust off.
-  - name: CLIO_CODER_TRUST_PROJECT_SKILLS
-    kind: env
-    owner: resources
-    default: off
-    controls: Deprecated alias of `CLIO_CODER_TRUST_PROJECT_RESOURCES`; exactly `1` still trusts project resource imports and emits one `CLIO_CODER_DEPRECATED_ENV` warning.
-    verdict: deprecate
-    mergeWith: CLIO_CODER_TRUST_PROJECT_RESOURCES
   - name: CLIO_CODER_TURN_TOOL_CALL_BUDGET
     kind: env
     owner: core
@@ -1044,7 +1028,7 @@ entries:
     owner: fleet
     default: "1000"
     controls: Retention cap on the durable dispatch run ledger (integer >= 1); applies next dispatch.
-    precedence: "`CLIO_CODER_MAX_DISPATCH_RUNS` (alias `CLIO_CODER_MAX_RUNS`) > settings installed once at boot (a session override or hot reload never re-installs the guardrail registry, so the orchestrator needs a restart) > `.clio-coder/settings.local.yaml` > `.clio-coder/settings.yaml` > user settings.yaml > default"
+    precedence: "`CLIO_CODER_MAX_DISPATCH_RUNS` > settings installed once at boot (a session override or hot reload never re-installs the guardrail registry, so the orchestrator needs a restart) > `.clio-coder/settings.local.yaml` > `.clio-coder/settings.yaml` > user settings.yaml > default"
     verdict: keep
   - name: fleet.limits.internalRunTimeoutMs
     kind: setting
@@ -2007,44 +1991,12 @@ entries:
     command: configure
     controls: Make the registered target the chat (orchestrator) target.
     verdict: keep
-  - name: --set-worker-default
-    kind: flag
-    owner: configure
-    command: configure
-    controls: Pre-rename alias the parser treats exactly like `--set-fleet-default`.
-    verdict: deprecate
-    mergeWith: --set-fleet-default
-    note: Parsed as --set-fleet-default; the command prints one deprecation note per process naming the canonical flag.
   - name: --url
     kind: flag
     owner: configure
     command: configure
     controls: Target base URL (http(s):// or ws://) for the runtime being registered.
     verdict: keep
-  - name: --worker-model
-    kind: flag
-    owner: configure
-    command: configure
-    controls: Pre-rename alias the parser treats exactly like `--fleet-model`.
-    verdict: deprecate
-    mergeWith: --fleet-model
-    note: Parsed as --fleet-model; the command prints one deprecation note per process naming the canonical flag.
-  - name: --worker-profile
-    kind: flag
-    owner: configure
-    command: configure
-    controls: Pre-rename alias the parser treats exactly like `--agent-profile`.
-    verdict: deprecate
-    mergeWith: --agent-profile
-    note: Parsed as --agent-profile; the command prints one deprecation note per process naming the canonical flag.
-  - name: --worker-profile-model
-    kind: flag
-    owner: configure
-    command: configure
-    controls: Pre-rename alias the parser treats exactly like `--agent-profile-model`.
-    verdict: deprecate
-    mergeWith: --agent-profile-model
-    note: Parsed as --agent-profile-model; the command prints one deprecation note per process naming the canonical flag.
   - name: -h
     kind: flag
     owner: configure
@@ -2264,14 +2216,6 @@ entries:
     default: the running entry (process.argv[1])
     controls: For `eval run`, path to the clio-coder CLI entry the runner executes; a relative path is pinned to the invoking directory.
     verdict: keep
-  - name: --clio-entry
-    kind: flag
-    owner: eval
-    command: eval
-    controls: Pre-0.3.1 spelling the parser treats exactly like `--clio-coder-entry`.
-    verdict: deprecate
-    mergeWith: --clio-coder-entry
-    note: Parsed as --clio-coder-entry; the command prints one deprecation note per process naming the canonical flag.
   - name: --format
     kind: flag
     owner: eval
@@ -3051,14 +2995,6 @@ entries:
     command: run
     controls: Require a target capability for dispatch. Repeatable.
     verdict: keep
-  - name: --runtime
-    kind: flag
-    owner: run
-    command: run
-    controls: Alias the parser treats exactly like `--agent-runtime` (the /run slash command documents this spelling).
-    verdict: deprecate
-    mergeWith: --agent-runtime
-    note: Parsed as --agent-runtime; `run` adds a warning diagnostic naming the canonical flag.
   - name: --session
     kind: flag
     owner: run
@@ -3118,30 +3054,6 @@ entries:
     controls: One-run nucleus-sampling override (0 to 1) when the selected runtime supports it.
     precedence: one-run override carried in `CLIO_CODER_RUN_OVERRIDES` (src/core/run-overrides.ts) > the target's sampling defaults, this run and its worker subprocesses
     verdict: keep
-  - name: --worker
-    kind: flag
-    owner: run
-    command: run
-    controls: Pre-rename alias the parser treats exactly like `--agent-profile`.
-    verdict: deprecate
-    mergeWith: --agent-profile
-    note: Parsed as --agent-profile; `run` adds a warning diagnostic naming the canonical flag.
-  - name: --worker-profile
-    kind: flag
-    owner: run
-    command: run
-    controls: Pre-rename alias the parser treats exactly like `--agent-profile`.
-    verdict: deprecate
-    mergeWith: --agent-profile
-    note: Parsed as --agent-profile; `run` adds a warning diagnostic naming the canonical flag.
-  - name: --worker-runtime
-    kind: flag
-    owner: run
-    command: run
-    controls: Pre-rename alias the parser treats exactly like `--agent-runtime`.
-    verdict: deprecate
-    mergeWith: --agent-runtime
-    note: Parsed as --agent-runtime; `run` adds a warning diagnostic naming the canonical flag.
   - name: -h
     kind: flag
     owner: run
@@ -3418,22 +3330,6 @@ entries:
     command: targets
     controls: "For `targets profile set`, the profile's thinking level: off, minimal, low, medium, high, xhigh, or max."
     verdict: keep
-  - name: --worker-model
-    kind: flag
-    owner: targets
-    command: targets
-    controls: Pre-rename alias the parser treats exactly like `--fleet-model`.
-    verdict: deprecate
-    mergeWith: --fleet-model
-    note: Parsed as --fleet-model; the command prints one deprecation note per process naming the canonical flag.
-  - name: --worker-target
-    kind: flag
-    owner: targets
-    command: targets
-    controls: Pre-rename alias the parser treats exactly like `--fleet-target`.
-    verdict: deprecate
-    mergeWith: --fleet-target
-    note: Parsed as --fleet-target; the command prints one deprecation note per process naming the canonical flag.
   - name: -h
     kind: flag
     owner: targets
