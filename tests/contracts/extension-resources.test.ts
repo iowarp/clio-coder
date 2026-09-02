@@ -42,6 +42,30 @@ describe("extension resource boundary", () => {
 		for (const root of roots.splice(0)) rmSync(root, { recursive: true, force: true });
 	});
 
+	it("accepts an omitted resources map and strictly validates a present value", () => {
+		const base = {
+			manifestVersion: 1,
+			id: "optional-resources",
+			name: "Optional Resources",
+			version: "1.0.0",
+			description: "Optional resources fixture.",
+		};
+		const omitted = parseExtensionManifest(base, "/fixture/clio-coder-extension.yaml");
+		deepStrictEqual(omitted.diagnostics, []);
+		deepStrictEqual(omitted.manifest?.resources, {});
+
+		for (const [resources, expected] of [
+			[null, "resources must be an object"],
+			[[], "resources must be an object"],
+			[{ prompts: "" }, "resources.prompts must be a non-empty string"],
+			[{ executable: "bin" }, "unknown resources key 'executable'"],
+		] as const) {
+			const parsed = parseExtensionManifest({ ...base, resources }, "/fixture/clio-coder-extension.yaml");
+			strictEqual(parsed.manifest, undefined);
+			ok(parsed.diagnostics.some((diagnostic) => diagnostic.message === expected));
+		}
+	});
+
 	it("accepts a strict compatible manifest and retains declared resource roots", () => {
 		const parsed = parseExtensionManifest(
 			{

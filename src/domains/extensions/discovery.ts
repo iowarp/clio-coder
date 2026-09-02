@@ -71,6 +71,7 @@ function normalizeResources(
 	manifestPath: string,
 	diagnostics: ExtensionDiagnostic[],
 ): ExtensionManifestResources {
+	if (value === undefined) return {};
 	if (!isRecord(value)) {
 		diagnostics.push({ type: "error", message: "resources must be an object", path: manifestPath });
 		return {};
