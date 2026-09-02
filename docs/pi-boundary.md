@@ -1,6 +1,6 @@
 # Pi SDK Boundary
 
-Clio Coder uses Pi 0.84.0 as its provider, agent-loop, and terminal SDK. This
+Clio Coder uses Pi 0.84.4 as its provider, agent-loop, and terminal SDK. This
 page records where Pi owns a reusable primitive and where Clio deliberately
 keeps product behavior. Review this table on every Pi upgrade. An action marked
 `Keep` is an explicit boundary decision, not an invitation to replace the
@@ -40,6 +40,17 @@ Clio-owned surface during a dependency bump.
 | pi-tui `CombinedAutocompleteProvider` | `src/interactive/slash-autocomplete.ts` | Keep Clio command composition. | Clio's declarative slash specification owns parsing, help, and completion consistency. |
 | pi-tui `KeybindingsManager`, `TUI_KEYBINDINGS`, and `Editor.addToHistory` | `src/domains/config/keybindings.ts` and interactive editor wiring | Route terminal actions through Pi. | Pi owns editor behavior while Clio owns the configured bindings and accepted-input policy. |
 | pi-tui `Markdown`, `renderLatex`, `visibleWidth`, `truncateToWidth`, `wrapTextWithAnsi`, and `stripTerminalSequences` | Interactive Markdown, Mermaid, layout, and width wiring | Route terminal primitives through Pi. | Clio retains theme tokens, Mermaid span styling, and application layout only. |
+| pi-agent-core `prepareNextTurn` / `prepareNextTurnWithContext` (0.84.4 ordering: runs only when the loop will start another assistant turn) | `src/interactive/turn-runtime.ts` continuation guard and `src/interactive/turn-context.ts` `postToolContinuationGuard` | Keep `prepareNextTurn`; no adaptation. | The guard already returned early unless the transcript tail was a tool result, so it was continuation-only on 0.84.0. Under 0.84.4 it also stops running after terminating batches and before `agent_end`, which removes a spurious guard failure after `artifact`-style terminal tool results. End-of-run work stays on `agent_end`. Locked by `tests/contracts/engine-lifecycle.test.ts`. |
+| pi-agent-core `Agent.reset()` (0.84.1 rejects during an active run) | `src/interactive/chat-loop.ts` `resetForSession` and `src/interactive/session-switch-settlement.ts` | Keep Clio's settle-then-replace reset. | Clio never calls `Agent.reset()`. Every session reset caller cancels and awaits `whenSettled()` first, then replaces `agent.state.messages`; the bang-command path waits on `isStreaming()` before refreshing. The contract test records that a mid-run reset is refused upstream. |
+| pi-agent-core `BeforeToolCallResult.terminate` (0.84.1) | `src/tools/agent-tools.ts` blocked-call path | Decline. | Clio blocks tools inside `execute` by throwing the model-facing rejection; a blocked call must not end the batch. Batch termination stays on `AgentToolResult.terminate` from successful terminal tools. |
+| pi-agent-core `streamProxy()` namespace metadata (0.84.2) and `ToolCall.namespace` | None | Decline. | Clio does not proxy assistant streams and does not use OpenAI Responses namespaced or deferred tools. |
+| pi-ai `SimpleStreamOptions.toolChoice` (0.84.3, `auto` / `none`) | `src/engine/provider-payload.ts` and the `onPayload` hook in `src/interactive/turn-runtime.ts` and `src/engine/worker-runtime.ts` | Keep the Clio payload patch. | Clio needs both `none` and a named required tool across every dialect it serves, including generic OpenAI-compatible servers that reject object `tool_choice`. Splitting `none` onto the neutral option would leave two mechanisms for one concern. |
+| pi-ai strict tool-schema conversion and null normalization (0.84.2) | `src/engine/ai.ts` `validateEngineToolArguments` | Inherit. | No Clio tool sets `constrainedSampling`, so strict conversion is inert. `null` for an optional non-nullable argument is now dropped instead of rejected; locked by the engine lifecycle contract. |
+| pi-ai OpenAI-compatible reasoning replay and signature serialization fixes (0.84.3, 0.84.4) | `src/engine/apis/openai-completions.ts` | Inherit. | The wrapper delegates `stream` and `streamSimple` to Pi's adapter, so replay fixes apply to in-run turns. Clio's ledger does not persist `thinkingSignature`, so resumed sessions still replay without signatures (pre-existing). |
+| pi-ai Anthropic server-side refusal fallback with returned-model pricing (0.84.3) | `src/interactive/turn-context.ts` `reconcileUsage` and `src/domains/observability/trace-store.ts` | Inherit. | Usage and cost arrive already priced for the returned model; Clio records `message.model` as reported. `fallbacks` is only sent for catalog models that declare `allowedFallbackModels`. |
+| pi-tui capability overrides (`PI_HYPERLINKS`, `PI_IMAGE_PROTOCOL`, `PI_TRUE_COLOR`, `setCapabilityOverrides`) and `PI_TUI_ESC_TIMEOUT` (0.84.2, 0.84.4) | `src/interactive/theme/tokens.ts` truecolor detection | Decline. | These govern pi-tui's own image, hyperlink, and escape-sequence handling. Clio's theme detects truecolor from `COLORTERM` and `TERM` independently and does not consume pi-tui capability detection. |
+| pi-tui `TuiAltScreenOptions.copyOnSelect` / `copySelection` and transcript search (`tui.altScreen.search*`, 0.84.2, 0.84.4) | `src/interactive/interactive-shell.ts` alt-screen construction and `src/domains/config/keybindings.ts` | Inherit defaults. | Selection copy stays on by default. Search is pi-tui's viewport listener and runs before Clio's router; `ctrl+g` advances a match only while the search overlay is focused, so the Clio leader chord is unavailable during a search and nowhere else. Locked by the engine lifecycle contract. |
+| pi-tui alternate-screen direct-row painting (0.84.2) | `src/engine/instrumented-tui.ts` | Inherit. | `compositeOverlays`, `extractCursorPosition`, and `applyLineResets` still run inside one `doRender`, so Clio's frame and phase measurements are unchanged. Locked by the engine lifecycle contract. |
 
 ## Thin-wrapper watch list
 
@@ -59,14 +70,13 @@ behavior and should not grow another implementation of an SDK primitive.
 
 Run these contracts first on a Pi bump, before the full gate:
 
-- `tests/contracts/thinking-runtime.test.ts`
-- `tests/contracts/openai-completions.test.ts`
-- `tests/contracts/lmstudio.test.ts`
-- `tests/contracts/lmstudio-instance-resolution.test.ts`
-- `tests/contracts/replay-pi-message-text.test.ts`
-- `tests/contracts/tool-string-enum.test.ts`
-- `tests/smoke/tui-width-matrix.test.ts`
-- The headless JSON stream contracts under `tests/contracts/`.
+- `tests/contracts/engine-lifecycle.test.ts` (agent-loop ordering, reset, tool-argument normalization, keybinding table, alt-screen render seams)
+- `tests/contracts/provider-transport.test.ts`
+- `tests/contracts/provider-context-boundary.test.ts`
+- `tests/contracts/gemma-channel-filter.test.ts`
+- `tests/contracts/tool-boundaries.test.ts`
+- `tests/contracts/session-durability.test.ts`
+- `tests/smoke/process-lifecycle.test.ts`
 
 The complete upgrade procedure lives in
 [Development Pipeline](development-pipeline.md#inheriting-a-pi-release).
