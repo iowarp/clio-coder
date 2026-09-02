@@ -103,7 +103,14 @@ export interface DispatchPlanView {
 	/** True when this call requires plan approval at supervised autonomy levels. */
 	planScale: boolean;
 	tasks: DispatchPlanTaskView[];
-	/** Rendered plan artifact, deterministic for identical arguments. */
+	/**
+	 * Rendered plan artifact, deterministic for identical arguments against an
+	 * unchanged working tree. The tree is an input because a legacy task's scope
+	 * lines resolve a "../"-leading prose token by probing the dispatch root, so
+	 * creating or deleting the probed file between two renders of the same call
+	 * changes this text and the hash below. Nothing re-derives the hash to compare
+	 * it; both renders of one call happen in the same synchronous admission pass.
+	 */
 	text: string;
 	/** sha256 of the rendered artifact. */
 	hash: string;
@@ -251,12 +258,24 @@ function safeField(value: string, bindChangedValue = true): string {
 	return `${result}{sha256=${createHash("sha256").update(value, "utf8").digest("hex")}}`;
 }
 
-function renderLegacyPathScope(task: DispatchPlanTaskView): string[] {
+/**
+ * The scope lines of the approval artifact, for a task with no typed intent.
+ *
+ * `cwd` is the dispatch's own working directory, not this process's: prose
+ * inference probes a "../"-leading token against the dispatch root, so a plan
+ * rendered against `process.cwd()` would show the operator a working context
+ * the run does not resolve whenever the call carries an explicit `cwd` (a
+ * worktree, most often). Passing it makes this render and admission read the
+ * same tree, which is also the sense in which the artifact is deterministic:
+ * identical arguments against an unchanged tree, not against any tree.
+ */
+function renderLegacyPathScope(task: DispatchPlanTaskView, cwd: string | undefined): string[] {
 	if (task.intent !== undefined) return [];
 	const scope = resolveDispatchPathScope({
 		agentId: task.agent,
 		executionRole: task.executionRole,
 		task: task.task,
+		...(cwd !== undefined ? { cwd } : {}),
 		...(task.briefing !== undefined ? { briefing: task.briefing } : {}),
 	});
 	const lines = ["    scope mode=legacy-inferred"];
@@ -274,6 +293,17 @@ function renderLegacyPathScope(task: DispatchPlanTaskView): string[] {
 	}
 	if (scope.provenance.workingContextPaths.length === 0 && scope.provenance.writeBoundaries.length === 0) {
 		lines.push("    scope policy_paths=none");
+	}
+	// Named here as well as on the dispatch-time notice, because this artifact is
+	// the surface an operator approves: a token the run anchored somewhere the
+	// prose did not spell, or discarded outright, would otherwise be visible in
+	// the plan only as a scope line that has no counterpart in the task text.
+	for (const entry of scope.parentTokens) {
+		lines.push(
+			`    scope parent_token raw=${JSON.stringify(safeField(entry.token))} resolved=${
+				entry.resolved === null ? "dropped" : JSON.stringify(safeField(entry.resolved))
+			} source=${entry.source}`,
+		);
 	}
 	return lines;
 }
@@ -365,6 +395,7 @@ function renderPlanText(
 	source: DispatchPlanSource,
 	maxWorkers: number | null,
 	onFailure: ResolvedDispatchPlanArtifact["onFailure"],
+	cwd: string | undefined,
 	confirmation?: ResolvedDispatchPlanArtifact["confirmation"],
 ): string {
 	const lines = [
@@ -453,7 +484,7 @@ function renderPlanText(
 			const serialized = JSON.stringify(task.intent);
 			lines.push(`    intent_sha256=${createHash("sha256").update(serialized, "utf8").digest("hex")}`);
 		}
-		lines.push(...renderLegacyPathScope(task));
+		lines.push(...renderLegacyPathScope(task, cwd));
 		for (const check of task.resolvedVerification ?? []) {
 			lines.push(
 				`    verification check=${safeField(check.check)} argv=${JSON.stringify(check.argv)} cwd=${JSON.stringify(check.cwd)} timeout_ms=${check.timeoutMs}`,
@@ -887,7 +918,20 @@ export function describeDispatchPlan(rawArgs: Record<string, unknown> | undefine
 			tasks.some((task) => task.failover === "approved") ||
 			confirmation !== undefined ||
 			isRecord(args.apply_winner));
-	const text = renderPlanText(topology, tasks, costCeilingUsd, deadlineMs, source, maxWorkers, onFailure, confirmation);
+	const text = renderPlanText(
+		topology,
+		tasks,
+		costCeilingUsd,
+		deadlineMs,
+		source,
+		maxWorkers,
+		onFailure,
+		// Read off the whole call rather than a task view: `cwd` is one top-level
+		// dispatch argument, so it survives on both the freshly parsed path and
+		// the resolved-artifact path, where the sealed task shape carries no cwd.
+		str(args.cwd),
+		confirmation,
+	);
 	return {
 		topology,
 		taskCount: Math.max(1, tasks.length),
