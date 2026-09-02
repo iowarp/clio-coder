@@ -7,7 +7,7 @@ import chalk from "chalk";
 import { resolvePackageRoot } from "../core/package-root.js";
 import { printError, printHeader } from "./argv.js";
 
-// Human-facing viewer over the bundled HTML blueprints. It binds an ephemeral
+// Human-facing viewer over the source-checkout HTML blueprints. It binds an ephemeral
 // static file server to 127.0.0.1 only, serves docs/html/index.html as the
 // menu plus the blueprint pages, prints the URL, and runs until SIGINT. It
 // uses only Node's built-in http and fs: zero new dependencies, no daemon, no
@@ -21,7 +21,8 @@ const HELP = `clio-coder docs [topic] [--no-open]
 
 Serve Clio Coder's interactive HTML documentation locally and open it in a
 browser. The blueprints live in docs/html of a source checkout; the npm package
-ships the Markdown guides in docs/ only. The server binds an ephemeral port on
+ships the categorized Markdown reference tree under docs/ and excludes HTML.
+The server binds an ephemeral port on
 127.0.0.1, keeps no state, runs no daemon, and reaches no external network.
 Press Ctrl+C to stop it.
 
@@ -64,7 +65,7 @@ export interface DocsMenuEntry {
 	label: string;
 }
 
-/** Resolve docs/html from the package root; present in a source checkout, absent from the npm package. */
+/** Resolve the source-checkout HTML root. The npm package deliberately excludes it. */
 function resolveDocsHtmlDir(): string {
 	return resolve(resolvePackageRoot(), "docs", "html");
 }
@@ -311,14 +312,14 @@ export async function runDocsCommand(args: ReadonlyArray<string> = []): Promise<
 	try {
 		htmlDir = resolveDocsHtmlDir();
 	} catch (err) {
-		printError(`could not resolve bundled docs: ${err instanceof Error ? err.message : String(err)}`);
+		printError(`could not resolve the docs HTML root: ${err instanceof Error ? err.message : String(err)}`);
 		return 1;
 	}
 	const files = listHtmlFiles(htmlDir);
 	if (files.length === 0) {
 		printError(`no HTML docs at ${htmlDir}`);
 		process.stdout.write(
-			`  the npm package ships the Markdown guides only: ${resolve(resolvePackageRoot(), "docs")}\n` +
+			`  the npm package ships only the categorized Markdown reference tree: ${resolve(resolvePackageRoot(), "docs")}\n` +
 				"  the interactive blueprints are in a source checkout and at https://github.com/iowarp/clio-coder/tree/main/docs/html\n",
 		);
 		return 1;
@@ -340,7 +341,7 @@ export async function runDocsCommand(args: ReadonlyArray<string> = []): Promise<
 	const handle = await startDocsServer({ htmlDir });
 	const landingUrl = landing === "index.html" ? handle.url : `${handle.url}${landing}`;
 	printHeader("Clio docs viewer");
-	process.stdout.write(`  serving ${htmlDir}\n`);
+	process.stdout.write(`  serving HTML root ${htmlDir}\n`);
 	process.stdout.write(`  open ${chalk.cyan(landingUrl)}\n`);
 	process.stdout.write("  bound to 127.0.0.1 only: no external network, no daemon, no state.\n");
 	process.stdout.write("  press Ctrl+C to stop.\n");

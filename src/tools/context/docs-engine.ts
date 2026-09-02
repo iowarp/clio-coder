@@ -1,5 +1,5 @@
 import { existsSync, readdirSync, readFileSync } from "node:fs";
-import { basename, join, resolve } from "node:path";
+import { basename, join, relative, resolve } from "node:path";
 import { resolvePackageRoot } from "../../core/package-root.js";
 
 // Deterministic, dependency-free retrieval over Clio's bundled human docs,
@@ -298,14 +298,27 @@ function indexSection(section: RawSection): IndexedSection {
 
 function candidateDocFiles(root: string): string[] {
 	const docsDir = join(root, "docs");
+	const htmlDir = join(docsDir, "html");
 	const files: string[] = [];
-	try {
-		for (const name of readdirSync(docsDir).sort((a, b) => a.localeCompare(b))) {
-			if (name.toLowerCase().endsWith(".md")) files.push(join("docs", name));
+	const walk = (dir: string): void => {
+		let entries: import("node:fs").Dirent[];
+		try {
+			entries = readdirSync(dir, { withFileTypes: true });
+		} catch {
+			return;
 		}
-	} catch {
-		// The caller reports a missing docs directory below if nothing can load.
-	}
+		for (const entry of entries.sort((a, b) => (a.name < b.name ? -1 : a.name > b.name ? 1 : 0))) {
+			const absolute = join(dir, entry.name);
+			if (entry.isDirectory()) {
+				if (absolute !== htmlDir) walk(absolute);
+				continue;
+			}
+			if (entry.isFile() && entry.name.toLowerCase().endsWith(".md")) {
+				files.push(relative(root, absolute).replaceAll("\\", "/"));
+			}
+		}
+	};
+	walk(docsDir);
 	for (const name of ["README.md", "CHANGELOG.md", "CLIO-CODER.md"]) {
 		if (existsSync(join(root, name))) files.push(name);
 	}
