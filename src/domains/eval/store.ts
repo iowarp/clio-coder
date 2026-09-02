@@ -60,9 +60,16 @@ export function evalRoot(dataDir: string): string {
 	return join(dataDir, "evals");
 }
 
+/**
+ * `skills-eval` is the only writer of this legacy version-1 shape; it nests
+ * under its own subdirectory so a legacy id that collides with a `clio-coder
+ * eval` run's version-4 id (evalArtifactPathV4, artifacts/store.ts) cannot
+ * clobber that artifact, and so `eval inventory`'s top-level readdir of
+ * evalRoot() never trips over a shape it does not parse.
+ */
 export function evalArtifactPath(dataDir: string, evalId: string): string {
 	assertSafeId(evalId, "eval");
-	return join(evalRoot(dataDir), `${evalId}.json`);
+	return join(evalRoot(dataDir), "skills-eval", `${evalId}.json`);
 }
 
 /**
