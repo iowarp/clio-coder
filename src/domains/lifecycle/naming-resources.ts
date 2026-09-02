@@ -9,12 +9,14 @@ import {
 	statSync,
 	writeFileSync,
 } from "node:fs";
+import { homedir } from "node:os";
 import path from "node:path";
 
 import { parse as parseYaml } from "yaml";
 import { resolvePackageRoot } from "../../core/package-root.js";
 import { fsyncDirectory } from "../../core/safe-resource-write.js";
 import { resolveClioDirs } from "../../core/xdg.js";
+import { INTEROP_AGENT_KINDS } from "../interop/registry.js";
 import { normalizedSkillHash, stripProvenanceFrontmatter } from "../resources/skills/content-hash.js";
 
 const LEGACY_SKILL_NAMES = [
@@ -35,6 +37,8 @@ export interface NamingResourceReport {
 export interface NamingResourceOptions {
 	cwd?: string;
 	configDir?: string;
+	/** Home directory whose interop skill roots are inspected; defaults to the OS home. */
+	home?: string;
 	packageRoot?: string;
 	fix?: boolean;
 }
@@ -206,14 +210,25 @@ function collectSkillFiles(root: string, current = root): string[] {
 	return out;
 }
 
-/** Read-only inventory of released skill metadata keys in selected Clio Coder roots. */
+/**
+ * Read-only inventory of released skill metadata keys in every root the skill
+ * loader reads: the Clio user and project roots plus each interop agent's
+ * user and project compatibility roots (`.claude/skills`, `.agents/skills`,
+ * ...). The loader warns for a legacy key in any of them, so the doctor has to
+ * look where the loader looks or it reports "canonical" while boot warns.
+ */
 export function inspectSkillMetadataNaming(
-	options: Pick<NamingResourceOptions, "cwd" | "configDir"> = {},
+	options: Pick<NamingResourceOptions, "cwd" | "configDir" | "home"> = {},
 ): SkillMetadataNamingInspection[] {
 	const cwd = options.cwd ?? process.cwd();
 	const configDir = options.configDir ?? resolveClioDirs().config;
-	const roots = [path.join(configDir, "skills"), path.join(cwd, ".clio-coder", "skills")];
-	return roots.flatMap((root) =>
+	const home = options.home ?? homedir();
+	const roots = new Set<string>([path.join(configDir, "skills"), path.join(cwd, ".clio-coder", "skills")]);
+	for (const kind of INTEROP_AGENT_KINDS) {
+		if (kind.userSkillRoot !== undefined) roots.add(path.join(home, kind.userSkillRoot));
+		if (kind.projectSkillRoot !== undefined) roots.add(path.join(cwd, kind.projectSkillRoot));
+	}
+	return [...roots].flatMap((root) =>
 		collectSkillFiles(root).map((file) => ({
 			path: file,
 			legacyMetadataKey: /^clio:\s*(?:#.*)?$/mu.test(readFileSync(file, "utf8")),

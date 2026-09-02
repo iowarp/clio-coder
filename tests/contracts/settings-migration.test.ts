@@ -407,6 +407,24 @@ integrations:
 		}
 	});
 
+	it("doctor names a legacy skill metadata key in an interop compatibility root the loader reads", () => {
+		const root = join(scratch.dir, "project-compat");
+		const skill = join(root, ".claude", "skills", "file-ticket", "SKILL.md");
+		mkdirSync(join(root, ".claude", "skills", "file-ticket"), { recursive: true });
+		writeFileSync(
+			skill,
+			["---", "name: file-ticket", "description: File a ticket.", "clio:", "  registry-id: iowarp/clio-coder", "---", "Body.", ""].join(
+				"\n",
+			),
+			"utf8",
+		);
+		const finding = namingFootprintFindings({ cwd: root }).find((entry) => entry.name === "naming resources");
+		strictEqual(finding?.level, "warn");
+		ok(finding?.detail.includes("1 legacy skill metadata keys"), finding?.detail);
+		ok(finding?.detail.includes(skill), finding?.detail);
+		ok(finding?.detail.includes("rename `clio:` to `clio-coder:`"), finding?.detail);
+	});
+
 	it("data reset removes both tool marker spellings only with their selected root", () => {
 		const versionDir = join(scratch.dir, "data", "tools", "yazi", "1.0.0");
 		mkdirSync(versionDir, { recursive: true });

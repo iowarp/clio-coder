@@ -88,7 +88,7 @@ function namingResourceFindings(options: NamingDoctorOptions): DoctorFinding[] {
 					`${renamed} proven skills renamed`,
 					`${renamable} proven skills await doctor --fix`,
 					`${conflicts} modified/conflicting skills left untouched`,
-					`${skillMetadata.length} legacy skill metadata keys`,
+					`${skillMetadata.length} legacy skill metadata keys${skillMetadata.length > 0 ? ` (rename \`clio:\` to \`clio-coder:\` in ${skillMetadata.map((entry) => entry.path).join(", ")})` : ""}`,
 					`${overlays.length} legacy model overlay files/metadata (manual migration required)`,
 				].join("; "),
 			},
