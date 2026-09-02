@@ -270,7 +270,7 @@ describe("main compiled-prompt cache identity", () => {
 					systemPrompt: "",
 					thinkingLevel: "off",
 					messages: [],
-					model: { clio: { quirks: { thinking: { guidance: "Use the runtime envelope." } } } },
+					model: { clioCoder: { quirks: { thinking: { guidance: "Use the runtime envelope." } } } },
 					tools: [
 						{
 							name: "read",

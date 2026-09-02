@@ -1035,7 +1035,7 @@ export function createTurnContext(deps: TurnContextDeps): TurnContext {
 			const sessionId = deps.session?.current()?.id ?? "";
 			const cwd = process.cwd();
 			const modelState = agentRuntime.agent.state.model as
-				| (typeof agentRuntime.agent.state.model & { clio?: { quirks?: LocalModelQuirks } })
+				| (typeof agentRuntime.agent.state.model & { clioCoder?: { quirks?: LocalModelQuirks } })
 				| undefined;
 			// `Context window: N` is the window the backend will actually serve
 			// this session, taken from the resolution the turn already ran rather
@@ -1053,7 +1053,7 @@ export function createTurnContext(deps: TurnContextDeps): TurnContext {
 			const contextWindow = typeof resolvedWindow === "number" && resolvedWindow > 0 ? resolvedWindow : null;
 			const contextWindowSource: ContextWindowSource | null =
 				contextWindow === null ? null : windowDetails.contextWindowSource;
-			const guidance = modelState?.clio?.quirks?.thinking?.guidance;
+			const guidance = modelState?.clioCoder?.quirks?.thinking?.guidance;
 			// Per-tool prompt hints come from registry metadata, derived once from
 			// the frozen surface per compile. The compiler renders them sorted by
 			// tool name, so the compiled text stays byte-stable for a given surface.

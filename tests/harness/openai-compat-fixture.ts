@@ -11,6 +11,9 @@ import { join } from "node:path";
 
 export async function closeServer(server: Server | null): Promise<void> {
 	if (!server) return;
+	// undici keeps idle keep-alive sockets open after a 404 (a residency probe
+	// that fell through /api/v1/models), and close() waits for them.
+	server.closeAllConnections();
 	await new Promise<void>((resolve) => server.close(() => resolve()));
 }
 
@@ -53,6 +56,13 @@ export interface OpenAICompatFixtureOptions {
 	 * call instead of text. Absent, the fixture behaves exactly as before.
 	 */
 	toolCall?: OpenAICompatToolCallScript;
+	/**
+	 * Reasoning text streamed before the reply, one SSE delta per chunk, under
+	 * `reasoningField`. LM Studio spells the field `reasoning` for gpt-oss and
+	 * `reasoning_content` for the rest; llama.cpp always `reasoning_content`.
+	 */
+	reasoningChunks?: readonly string[];
+	reasoningField?: "reasoning" | "reasoning_content" | "reasoning_text";
 }
 
 /** True once a request's message history carries a tool result or a tool call. */
@@ -153,6 +163,17 @@ export async function startOpenAICompatFixture(
 			);
 			res.end("data: [DONE]\n\n");
 			return;
+		}
+		for (const chunk of options.reasoningChunks ?? []) {
+			res.write(
+				`data: ${JSON.stringify({
+					id: "chatcmpl-clio-print",
+					object: "chat.completion.chunk",
+					created: 1,
+					model: "mock-model",
+					choices: [{ index: 0, delta: { [options.reasoningField ?? "reasoning_content"]: chunk } }],
+				})}\n\n`,
+			);
 		}
 		const replyChunks = options.replyChunks ?? [reply];
 		for (let index = 0; index < replyChunks.length; index += 1) {
