@@ -151,7 +151,10 @@ function inferredPaths(req: Pick<DispatchRequest, "task" | "briefing">): string[
 }
 
 function inferredPathToken(token: string): string {
-	return token.replace(/\.+$/u, "");
+	// A leading "./" is how prose quotes an import specifier ("./parser.js");
+	// it names the same repository path without the prefix, and the boundary
+	// grammar would otherwise refuse the whole dispatch for a dot segment.
+	return token.replace(/^\.\//u, "").replace(/\.+$/u, "");
 }
 
 function failMalformedText(text: string, source: "task" | "briefing"): void {

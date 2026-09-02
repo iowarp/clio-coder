@@ -234,7 +234,7 @@ Dispatches one or more tasks to Clio fleet agents and returns per-run receipt su
 Arguments:
 
 - `task` (required for the singular form unless `list:true`). One worker assignment/instruction string. It is distinct from briefing.
-- `tasks` (required for the batch form unless `list:true`). Array of task strings or `{task, agent, target, model, cwd, briefing, intent, gate}` objects. Per-item fields override the top-level defaults below. Supplying both `task` and `tasks` is an error.
+- `tasks` (required for the batch form unless `list:true`). Array of task strings or `{task, agent, target, model, node, briefing, intent, gate, budget, worktree}` objects. Per-item fields override the top-level defaults below; `persona`, `tool_profile`, `cwd`, and `apply` come from the batch defaults (an item that carries one is still honored, but the schema no longer advertises them per item). The `intent` and `budget` schemas are serialized once under `$defs` and referenced from the top level and from each item. Supplying both `task` and `tasks` is an error.
 - `mode` (optional). `parallel` (default) runs items concurrently; `sequential` runs them one at a time, each completing before the next dispatches. `pipeline`, `compete`, and `council` select their named topologies. A single ordinary task always runs down the sequential path.
 - `roster` (council only). Names one `fleet.rosters` entry. Supply exactly one of `roster` or `members`.
 - `members` (council only). Supplies two to five inline `{label,target,model?,thinking?}` entries.

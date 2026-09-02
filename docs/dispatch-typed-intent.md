@@ -39,7 +39,9 @@ globs are refused rather than interpreted. Each list is normalized,
 deduplicated, and sorted by code point, holds at most 32 entries, and each entry
 is at most 512 UTF-8 bytes. `verification` holds at most 8 entries and every
 `check` is a declared id resolved from package scripts or
-`.clio-coder/verifiers.yaml`, never a shell command.
+`.clio-coder/verifiers.yaml`, never a shell command. The one exception is
+`{ "check": "none" }`, which models write to mean "no verification"; it
+normalizes to an empty list instead of costing a refused round.
 
 Normalization is in `src/domains/dispatch/intent.ts`. The normalized object
 carries `version: 2` and a `pathProvenance` array binding every policy-bearing

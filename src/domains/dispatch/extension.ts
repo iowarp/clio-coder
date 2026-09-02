@@ -77,6 +77,7 @@ import type { PromptsContract } from "../prompts/contract.js";
 import { type EffectivePricing, resolveEffectivePricing } from "../providers/catalog.js";
 import {
 	type CapabilityFlags,
+	canonicalEndpointKey,
 	canonicalizeWireModelId,
 	type EndpointCapacity,
 	endpointCapacityFor,
@@ -2498,6 +2499,29 @@ export function createDispatchBundle(
 
 	function configuredEndpointLimits(): Readonly<Record<string, number>> {
 		return Object.fromEntries(Object.entries(configuredEndpointCapacities()).map(([key, value]) => [key, value.limit]));
+	}
+
+	/**
+	 * Endpoints still bound by the blind one-slot default have never been
+	 * probed by any process, or their record expired. A fresh home carried that
+	 * bound into its first batch and refused two tasks on a server running
+	 * four, until the operator happened to run `targets --probe`. Probe each
+	 * such endpoint once per process, in the background and without the
+	 * inference-based reasoning check: the slot count is a header read, and the
+	 * model's first dispatch call is seconds away at the earliest. The probe
+	 * lands in the provider statuses and the durable slot store, which is where
+	 * admission already looks.
+	 */
+	const probedDefaultBoundEndpoints = new Set<string>();
+	function probeEndpointsAtDefaultBound(): void {
+		const capacities = configuredEndpointCapacities();
+		for (const target of getEffectiveSettings()?.targets ?? []) {
+			const key = canonicalEndpointKey(target);
+			if (key === null || capacities[key]?.source !== "local-native-default") continue;
+			if (probedDefaultBoundEndpoints.has(key)) continue;
+			probedDefaultBoundEndpoints.add(key);
+			void providers.probeTarget(target.id, { reasoning: false }).catch(() => undefined);
+		}
 	}
 
 	function endpointCapacityForTarget(targetId: string): EndpointCapacity | null {
@@ -6346,6 +6370,7 @@ export function createDispatchBundle(
 				// Reconciliation is best-effort; a failure never blocks startup.
 			}
 			startHeartbeatWatchdog();
+			probeEndpointsAtDefaultBound();
 		},
 		async stop() {
 			// Shutdown is process-local. The durable machine-wide drain belongs to
