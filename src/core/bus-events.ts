@@ -61,6 +61,7 @@ export const BusChannels = {
 	CompactionBegin: "compaction.begin",
 	CompactionEnd: "compaction.end",
 	MiddlewareHookFailed: "middleware.hookFailed",
+	ExtensionsReloaded: "extensions.reloaded",
 	ContextActivity: "context.activity",
 	ContextWarning: "context.warning",
 	ContextPruned: "context.pruned",
@@ -678,6 +679,26 @@ export interface CompactionPayload {
 }
 
 // ---------------------------------------------------------------------------
+// Extensions
+// ---------------------------------------------------------------------------
+
+/**
+ * Published on {@link BusChannels.ExtensionsReloaded} by the composition
+ * root after a new extension generation and its user-hook registrations
+ * have both been committed. Consumers that cache extension-sourced data
+ * (prompt fragments, agent recipes, the session prompt) refresh on
+ * `changed`; an unchanged generation carries the previous digest and needs
+ * no work. Never published between the two commits.
+ */
+export interface ExtensionsReloadedPayload {
+	generation: number;
+	previousGeneration: number;
+	changed: boolean;
+	/** Content identity of the committed snapshot. */
+	digest: string;
+}
+
+// ---------------------------------------------------------------------------
 // Middleware
 // ---------------------------------------------------------------------------
 
@@ -803,6 +824,7 @@ export type BusPayloadMap = {
 	[BusChannels.CompactionBegin]: CompactionPayload;
 	[BusChannels.CompactionEnd]: CompactionPayload;
 	[BusChannels.MiddlewareHookFailed]: MiddlewareHookFailedPayload;
+	[BusChannels.ExtensionsReloaded]: ExtensionsReloadedPayload;
 	[BusChannels.ContextActivity]: ContextActivityPayload;
 	[BusChannels.ContextWarning]: ContextWarningPayload;
 	[BusChannels.ContextPruned]: ContextPrunedPayload;

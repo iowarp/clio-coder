@@ -84,7 +84,6 @@ import {
 	openDetachedBatchViews,
 } from "../domains/middleware/dispatch-nudge.js";
 import {
-	buildUserHookRegistrations,
 	createHookReceiptLog,
 	createMarketplaceOfferRegistration,
 	createMiddlewareToolChoiceControl,
@@ -181,6 +180,7 @@ import { createChatLoop } from "../interactive/chat-loop.js";
 import { type RunIo, startInteractive } from "../interactive/index.js";
 import { buildModelReplayAgentMessagesFromTurns } from "../interactive/model-session-replay.js";
 import type { BootOptions } from "./boot-options.js";
+import { createExtensionReloadCoordinator } from "./extension-reload.js";
 import { resolvePanesEnablement } from "./panes-activation.js";
 
 export type { BootOptions, HeadlessSamplingOverrides } from "./boot-options.js";
@@ -1313,29 +1313,24 @@ export async function bootOrchestrator(options: BootOptions = {}): Promise<BootR
 	// same effect machinery. They register after the guards, so safety stays
 	// authoritative: a hook may add effects (including request block_tool) but
 	// cannot grant a permission safety would deny. Loading is best-effort.
+	// The coordinator is the only writer of the "user-hooks" owner and the only
+	// caller of the extensions reload; it commits the extension generation and
+	// the hook registrations back-to-back on one stack and publishes
+	// extensions.reloaded only after both. Its owner slot is anchored here, so
+	// user hooks keep evaluating after the guards and before the assessors
+	// registered below.
 	const hookReceiptLog = createHookReceiptLog({ persistPath: join(clioStateDir(), "hook-receipts.json") });
-	const bootExtensionSnapshot = extensions?.snapshot() ?? null;
-	const userHooks = buildUserHookRegistrations({
-		cwd: process.cwd(),
-		...(bootExtensionSnapshot !== null ? { extensionSnapshot: bootExtensionSnapshot } : {}),
+	const extensionReload = createExtensionReloadCoordinator({
+		extensions,
+		middleware,
+		cwd: () => process.cwd(),
 		recordReceipt: (receipt) => hookReceiptLog.record(receipt),
+		report: (line) => {
+			if (!interactive) process.stderr.write(`${line}\n`);
+		},
+		onCommitted: (event) => bus.emit(BusChannels.ExtensionsReloaded, event),
 	});
-	const userHookReport = middleware.replaceRegistrations(
-		"user-hooks",
-		bootExtensionSnapshot?.generation ?? 1,
-		userHooks.registrations,
-	);
-	if (!interactive && !userHookReport.applied) {
-		process.stderr.write(`[clio-coder:hooks] user hooks were not applied: ${userHookReport.reason ?? "unknown"}\n`);
-	}
-	if (!interactive) {
-		for (const issue of userHooks.fileIssues) {
-			process.stderr.write(`[clio-coder:hooks] ${issue.message}\n`);
-		}
-		for (const issue of userHooks.issues) {
-			process.stderr.write(`[clio-coder:hooks] ${issue.source.sourcePath}#${issue.index}: ${issue.issues.join("; ")}\n`);
-		}
-	}
+	extensionReload.applyCurrent();
 	termination.onDrain(() => hookReceiptLog.flush());
 	// Autonomy is hot-reloaded for interactive and headless admissions. ACP
 	// server prompts use the snapshot captured at session/new.
