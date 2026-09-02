@@ -400,7 +400,10 @@ page-level audit lives in
 have a dedicated blueprint. <code>docs/html/index.html</code> groups those counterparts by
 the same Guide, Architecture, Process, and History tree, while a source meta tag
 provides the one-to-one machine-readable mapping. Every mapping must remain
-unique, complete, and free of orphaned Markdown or HTML pages.</p>
+unique, complete, and free of orphaned Markdown or HTML pages.
+<code>npm run lint</code> rejects any absent named blueprint, enforces that mapping, and
+compares every extractable <code>clio-coder &lt;command&gt;</code> string and <code>CLIO_CODER_*</code>
+name in each counterpart.</p>
 <hr>
 <h2>Update checklist</h2>
 <p>When a feature changes:</p>
@@ -411,6 +414,7 @@ unique, complete, and free of orphaned Markdown or HTML pages.</p>
 <li>If behavior affects safety, sessions, receipts, prompts, targets, or dispatch, update both README-level user docs and the deeper guide.</li>
 <li>Run a lightweight link check for changed Markdown.</li>
 <li>For release docs, verify version badges/sections match <code>package.json</code> and <code>CHANGELOG.md</code>.</li>
+<li>Run <code>npm run lint</code> to verify Markdown and HTML blueprint parity.</li>
 </ol>
 <p>Suggested local link check:</p>
 <pre><code class="language-bash">python3 - &lt;&lt;&#39;PY&#39;

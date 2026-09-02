@@ -138,6 +138,9 @@ have a dedicated blueprint. `docs/html/index.html` groups those counterparts by
 the same Guide, Architecture, Process, and History tree, while a source meta tag
 provides the one-to-one machine-readable mapping. Every mapping must remain
 unique, complete, and free of orphaned Markdown or HTML pages.
+`npm run lint` rejects any absent named blueprint, enforces that mapping, and
+compares every extractable `clio-coder <command>` string and `CLIO_CODER_*`
+name in each counterpart.
 
 ---
 
@@ -151,6 +154,7 @@ When a feature changes:
 4. If behavior affects safety, sessions, receipts, prompts, targets, or dispatch, update both README-level user docs and the deeper guide.
 5. Run a lightweight link check for changed Markdown.
 6. For release docs, verify version badges/sections match `package.json` and `CHANGELOG.md`.
+7. Run `npm run lint` to verify Markdown and HTML blueprint parity.
 
 Suggested local link check:
 
