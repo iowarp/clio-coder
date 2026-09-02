@@ -134,7 +134,10 @@ describe("local model family resolution", () => {
 		const resolved = resolveOn("llamacpp", "muse-30b-dense", "off");
 		strictEqual(resolved.thinking.thinkingActive, true);
 		strictEqual(resolved.thinking.display, "forced");
-		strictEqual(resolved.request.chatTemplateKwargs, undefined);
+		// The dial stays forced, but the family's level-keyed kwarg (#267) now
+		// carries the card's reasoning_strength on the wire instead of nothing.
+		strictEqual(resolved.request.chatTemplateKwargs?.enable_thinking, undefined);
+		strictEqual(typeof resolved.request.chatTemplateKwargs?.reasoning_strength, "string");
 	});
 
 	it("declares each match pattern in exactly one family", () => {

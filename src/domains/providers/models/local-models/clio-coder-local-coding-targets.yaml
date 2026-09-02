@@ -243,6 +243,11 @@
       parallelSlots: "Start the server with --parallel 4, and add --kv-unified unless each of the four slots is meant to get 204800 tokens rather than the whole 819200. Clio admits four concurrent requests on this endpoint once /props reports total_slots 4."
     thinking:
       mechanism: on-off
+      chatTemplateKwargs:
+        static:
+          # Card recipe for the reasoning mode (scratchpad/catalog/models/nvidia-Nemotron-3-Nano-Omni-30B-A3B-Reasoning-FP8.md:7): reasoning_budget=16384.
+          reasoning_budget: 16384
+        lmstudio: unsupported
       guidance: |
         Reasoning is template-driven and the switch is
         chat_template_kwargs.enable_thinking; intermediate levels coerce to on.
@@ -349,6 +354,11 @@
         enable_thinking: true
     thinking:
       mechanism: on-off
+      chatTemplateKwargs:
+        static:
+          # Card: "For coding agents, add extra_body={"chat_template_kwargs": {"force_nonempty_content": True}}" (scratchpad/catalog/models/nvidia-NVIDIA-Nemotron-3.5-Lightning-30B-A3B-BF16.md:21).
+          force_nonempty_content: true
+        lmstudio: unsupported
       guidance: |
         Nemotron 3.5 Lightning's chat template exposes thinking as on or off
         through enable_thinking; intermediate levels coerce to on. It reasons by
@@ -1724,6 +1734,17 @@
       specDraftNMax: 16
     thinking:
       mechanism: always-on
+      chatTemplateKwargs:
+        byLevel:
+          # Card: reasoning strength low|medium|high|xhigh (scratchpad/catalog/models/unsloth-Muse-Glimmer-30B.md:35). The per-family kwarg key the note above asked for.
+          key: reasoning_strength
+          values:
+            low: low
+            medium: medium
+            high: high
+            xhigh: xhigh
+          lmstudio: unsupported
+        lmstudio: unsupported
       guidance: |
         Muse Glimmer reasons on every turn and its strength scale has no off
         level, so Clio shows the dial as forced and budgets for a reasoning
