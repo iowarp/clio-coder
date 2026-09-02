@@ -41,7 +41,12 @@ export {
 } from "./dispatch-nudge.js";
 export type { MiddlewareBundleOptions } from "./extension.js";
 export { createEnvHookBudgetTracker, createMiddlewareBundle } from "./extension.js";
-export { createHookReceiptLog, HOOK_RECEIPT_LOG_CAPACITY, type HookReceiptLog } from "./hook-receipts.js";
+export {
+	createHookReceiptLog,
+	HOOK_RECEIPT_LOG_CAPACITY,
+	type HookReceiptLog,
+	readPersistedHookReceipts,
+} from "./hook-receipts.js";
 export type {
 	HookReceipt,
 	HookReceiptExtension,
