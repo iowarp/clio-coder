@@ -1,24 +1,3 @@
-import type { SmoothStreaming } from "../core/defaults.js";
-
-export const SMOOTH_STREAM_ENV = "CLIO_CODER_SMOOTH_STREAM";
-
-/**
- * One-process override precedence: a valid environment value wins, while an
- * invalid value can never accidentally enable animation. `0` is the immediate
- * escape hatch; `1` is accepted as the explicit `on` spelling.
- */
-export function resolveSmoothStreamingMode(
-	configured: SmoothStreaming,
-	env: NodeJS.ProcessEnv = process.env,
-): SmoothStreaming {
-	const raw = env[SMOOTH_STREAM_ENV]?.trim().toLowerCase();
-	if (!raw) return configured;
-	if (raw === "0" || raw === "off" || raw === "false") return "off";
-	if (raw === "auto") return "auto";
-	if (raw === "1" || raw === "on" || raw === "true") return "on";
-	return "off";
-}
-
 export interface AutoPacingEnvironment {
 	isTTY: boolean;
 	term?: string;

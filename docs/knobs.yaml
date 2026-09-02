@@ -311,13 +311,6 @@ entries:
     controls: Path to a skill-marketplace index file consulted after the catalog; an explicit indexPath option beats it and the built-in index path is the fallback.
     precedence: explicit indexPath option > env > default index path
     verdict: keep
-  - name: CLIO_CODER_SMOOTH_STREAM
-    kind: env
-    owner: interactive
-    default: settings value (built-in `off`)
-    controls: "Per-process override for `interface.smoothStreaming`: `0`/`off`/`false`, `auto`, or `1`/`on`/`true`; any other non-empty value fails safe to `off`."
-    precedence: env (any non-empty value) > `interface.smoothStreaming` > built-in `off`
-    verdict: keep
   - name: CLIO_CODER_STATE_DIR
     kind: env
     owner: cli
@@ -382,14 +375,6 @@ entries:
     controls: Integer of at least 1 giving the maximum age in days of terminal rows kept in the SQLite trace mirror; invalid values fall back.
     precedence: env > built-in default (no settings key)
     verdict: keep
-  - name: CLIO_CODER_TRUST_PROJECT_RESOURCES
-    kind: env
-    owner: resources
-    default: settings value (built-in false)
-    controls: Exactly `1` trusts third-party project resource imports (skills and prompts) for this process; it can only enable, never disable, what the setting says.
-    precedence: "`integrations.projectResources.trustProjectImports: true` > env `1` > off; each layer only enables"
-    verdict: keep
-    note: docs said `1` overrides the setting; in code (loader.ts:222-224) an explicit true setting wins first and env cannot turn trust off.
   - name: CLIO_CODER_WORKER_FAUX
     kind: env
     owner: engine
@@ -1281,7 +1266,7 @@ entries:
     owner: integrations
     default: "false"
     controls: Whether project-scope skills and prompts from other agents' compat roots become model-visible (boolean); applies next turn.
-    precedence: "`CLIO_CODER_TRUST_PROJECT_RESOURCES=1` (enables regardless of the file; the env cannot disable) > session override (`/settings` apply-this-session) > `.clio-coder/settings.local.yaml` > `.clio-coder/settings.yaml` > user settings.yaml > default"
+    precedence: session override (`/settings` apply-this-session) > `.clio-coder/settings.local.yaml` > `.clio-coder/settings.yaml` > user settings.yaml > default
     verdict: keep
   - name: integrations.runtimePlugins
     kind: setting
@@ -1392,7 +1377,7 @@ entries:
     owner: interface
     default: off
     controls: "Presentation-only pacing of streamed assistant text and thinking: `off`, `auto` (TTY heuristics), `on`; applies immediately."
-    precedence: "`CLIO_CODER_SMOOTH_STREAM` (an unrecognized value forces `off`) > session override (`/settings` apply-this-session) > `.clio-coder/settings.local.yaml` > `.clio-coder/settings.yaml` > user settings.yaml > default"
+    precedence: session override (`/settings` apply-this-session) > `.clio-coder/settings.local.yaml` > `.clio-coder/settings.yaml` > user settings.yaml > default
     verdict: keep
   - name: interface.terminalProgress
     kind: setting
@@ -3897,7 +3882,7 @@ entries:
     kind: project-file
     owner: resources
     file: .clio-coder/skills
-    controls: Project skills (`<name>/SKILL.md`); third-party imports are inert until `integrations.projectResources.trustProjectImports` or `CLIO_CODER_TRUST_PROJECT_RESOURCES=1` trusts them.
+    controls: Project skills (`<name>/SKILL.md`); third-party imports are inert until `integrations.projectResources.trustProjectImports` trusts them.
     precedence: explicit `--skill` paths > project skills > user skills > catalog skills, by name
     verdict: keep
   - name: (presence)

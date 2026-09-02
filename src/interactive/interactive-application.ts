@@ -57,7 +57,7 @@ import type {
 	SlashCommandContext,
 	TaskMemorySeedCommandResult,
 } from "./slash-commands.js";
-import { processAutoPacingAllowed, resolveSmoothStreamingMode } from "./stream-pacing-policy.js";
+import { processAutoPacingAllowed } from "./stream-pacing-policy.js";
 import type { TerminalLease } from "./terminal-lease.js";
 import type { createWatchPaneController } from "./watch-pane.js";
 import { createWorkspaceFacts } from "./workspace-facts.js";
@@ -451,7 +451,7 @@ export function routeInteractiveKey(data: string, deps: KeyBindingDeps): boolean
 }
 
 export async function createInteractiveApplication(deps: InteractiveDeps): Promise<number> {
-	const initialSmoothStreaming = resolveSmoothStreamingMode(deps.getSettings?.().interface.smoothStreaming ?? "off");
+	const initialSmoothStreaming = deps.getSettings?.().interface.smoothStreaming ?? "off";
 	const initialAutoPacingAllowed = processAutoPacingAllowed(false);
 	const lease = deps.terminalLease;
 	const shell =
@@ -675,7 +675,7 @@ export async function createInteractiveApplication(deps: InteractiveDeps): Promi
 		appendTranscriptNotice: (level, text) => appendNotice(level, text, busNoticeSink),
 		refreshSettingsOverlay: () => overlayLifecycle.refreshSettingsOverlay(),
 		onConfigHotReload: (settings) => {
-			const mode = resolveSmoothStreamingMode(settings.interface.smoothStreaming);
+			const mode = settings.interface.smoothStreaming;
 			const autoAllowed = processAutoPacingAllowed(shell.hasObservedBackpressure());
 			chatRenderer.setSmoothStreamingMode(mode);
 			shell.setStreamPacingActive(mode === "on" || (mode === "auto" && autoAllowed));

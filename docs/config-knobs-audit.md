@@ -111,5 +111,5 @@ All default off; all enabled with `1`.
 3. **The env-bridge pattern (§6) is the real implementation bloat.** Set-env / run / restore-env in `run.ts` and `print.ts` was collapsed into `CLIO_CODER_RUN_OVERRIDES`.
 4. **Undocumented knobs.** Many operator knobs were undocumented in v0.2.7. Whatever survived the audit was consolidated into [environment-variables.md](environment-variables.md).
 5. **Dead reference.** `CLIO_CODER_NO_UPDATE_NOTIFIER` (§7) was removed.
-6. **Overlap to check: project resource trust.** `CLIO_CODER_TRUST_PROJECT_RESOURCES` (env) and `integrations.projectResources.trustProjectImports` (settings) express the same trust decision through two precedence layers.
+6. **Resolved overlap: project resource trust.** `integrations.projectResources.trustProjectImports` is now the only trust-policy surface; the transitional environment override was removed.
 7. **Healthy as-is.** Directory overrides (§2), debug toggles (§3), internal plumbing (§4), and test-only vars (§5) are all conventional env usage and cheap to keep. The hook-budget family is five vars but one subsystem with sane defaults; fold into settings only if hook tuning becomes routine.
