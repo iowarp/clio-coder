@@ -1,64 +1,94 @@
-# Clio Coder documentation ownership
+# Documentation coverage and source-alignment audit
 
-This matrix maps every active top-level source directory and every domain under
-`src/domains/` to the guide that owns its public contract. It is an ownership
-map, not a substitute for those guides. Update the relevant row whenever a new
-source area or public contract is added.
+This is the page-level audit for Clio Coder 0.4.2. The source comparison is
+pinned to commit `ff56ea3e`. A disagreement means that a current factual claim,
+default, identifier, path, schema, or command differs from the implementation at
+that commit. Historical records are evaluated as dated evidence and are not
+treated as current operator guidance.
 
-## Top-level source areas
+## Headline
 
-| Source area | Responsibility | Owning guides |
-| --- | --- | --- |
-| `src/cli/` | CLI routing, flags, subcommands, exit behavior, and machine output | [Commands and Modes](commands-and-modes.md), [Exit Codes and Output](exit-codes-and-output.md) |
-| `src/core/` | Shared invariants, configuration, defaults, path handling, and runtime contracts | [Architecture](architecture.md), [Configuration and Targets](configuration-and-targets.md), [Installation and Lifecycle](installation-and-lifecycle.md) |
-| `src/engine/` | Main turn loop, provider execution, streaming, ACP, and worker runtimes | [Architecture](architecture.md), [Context Engine](context-engine.md), [ACP](acp.md) |
-| `src/entry/` | Process bootstrap and application composition | [Architecture](architecture.md), [Installation and Lifecycle](installation-and-lifecycle.md) |
-| `src/interactive/` | Terminal application, editor, overlays, panels, rendering, and keybindings | [TUI Design](tui-design.md), [Commands and Modes](commands-and-modes.md) |
-| `src/tools/` | Built-in tool registry, schemas, policy bindings, and bounded results | [Tool Usage](tool-usage.md), [Prompt Envelope and Tools](prompt-envelope-and-tools.md) |
-| `src/utils/` | Image, Git, and supporting utility functions | [Architecture](architecture.md), [Tool Usage](tool-usage.md) |
-| `src/worker/` | Worker subprocess protocol, steering, heartbeats, and spec contracts | [Worker Dispatch Mechanics](worker-dispatch-mechanics.md) |
+- Markdown pages audited: **51**.
+- Pages with a dedicated or explicitly shared HTML blueprint: **40**.
+- Pages without a blueprint: **11**. The HTML landing page represents the
+  documentation hub, while the other ten are parity gaps scheduled for the HTML
+  parity pass.
+- Pages with one or more source disagreements: **41**.
+- Pages with no source disagreement found: **10**.
 
-## Domain ownership
+`prompt-envelope-and-tools.md` currently has two HTML implementations.
+`proactive-memory.md` points at the shared evidence and memory blueprint. Those
+facts explain why 40 blueprint files cover 40 pages even though one pair shares
+a file and another page has a duplicate.
 
-| Domain | Responsibility | Owning guides |
-| --- | --- | --- |
-| `agents` | Thirteen built-in recipes, discovery, recipe/result schemas, and fleet contracts | [Built-in Agents](built-in-agents.md), [Fleet Dispatch](fleet-dispatch.md) |
-| `components` | Active component scanning, snapshots, hashing, and diffs | [Middleware and Components](middleware-and-components.md) |
-| `config` | Configuration contracts, classification, keybindings, and watchers | [Configuration and Targets](configuration-and-targets.md), [Commands and Modes](commands-and-modes.md) |
-| `context` | Project handbook, codewiki, project rules, compaction, and working set | [Context Engine](context-engine.md), [Context Working Set](context-working-set.md) |
-| `dispatch` | Admission, assignments, routing, fleet execution, receipts, and recovery | [Fleet Dispatch](fleet-dispatch.md), [Dispatch Typed Intent](dispatch-typed-intent.md), [Dispatch Architecture Rationale](dispatch-architecture-rationale.md) |
-| `eval` | Suite v2, runners, artifacts, verdicts, comparison, reports, and provenance | [Eval Runner](eval-runner.md), [Internal Evals](evals-internal.md) |
-| `evidence` | Evidence bundles, findings, failure attribution, and provenance | [Evidence and Memory](evidence-and-memory.md), [Observability](observability.md) |
-| `evolution` | Falsifiable change manifests and self-edit validation | [Evolution](evolution.md) |
-| `extensions` | Extension discovery, compatibility, resources, and state | [Extensions and Sharing](extensions-and-sharing.md) |
-| `interop` | Detection, consent, trust posture, and isolation for foreign coding agents | [Extensions and Sharing](extensions-and-sharing.md), [Configuration and Targets](configuration-and-targets.md) |
-| `lifecycle` | Doctor, install metadata, upgrade migrations, reset, and uninstall state | [Installation and Lifecycle](installation-and-lifecycle.md), [Artifact Versions](artifact-versions.md) |
-| `memory` | Task memory, reviewed promotion, spending, telemetry, and handoff | [Proactive Memory](proactive-memory.md), [Evidence and Memory](evidence-and-memory.md) |
-| `middleware` | Hook registration, budgets, reminders, watchdogs, and marketplace offers | [Middleware and Components](middleware-and-components.md), [Skills Marketplace](skills-marketplace.md) |
-| `mux` | Experimental pane host, docks, pane registry, and file-pane protocol | [TUI Design](tui-design.md), [Commands and Modes](commands-and-modes.md) |
-| `observability` | Trace store, accounting, cost, metrics, and evidence index | [Observability](observability.md), [Trace Store](trace-store.md) |
-| `prompts` | Prompt compiler, fragments, preload, hashing, and extension boundary | [Prompt Envelope and Tools](prompt-envelope-and-tools.md) |
-| `providers` | Runtime descriptors, probes, target resolution, auth, and model knowledge | [Configuration and Targets](configuration-and-targets.md), [Model Catalog](model-catalog.md), [Provider Adapter Cookbook](provider-adapter-cookbook.md), [ALCF Provider](alcf-provider.md) |
-| `resources` | Skills, prompts, libraries, collision policy, and installation provenance | [Skills Marketplace](skills-marketplace.md), [Resource Library](resource-library.md), [Extensions and Sharing](extensions-and-sharing.md) |
-| `safety` | Action classification, policy, damage control, audit, and finish contracts | [Safety Model](safety-model.md), [Scientific Validation](scientific-validation.md) |
-| `scheduling` | Cluster discovery, capacity budgets, and scheduling extension | [Capacity and Scheduling](capacity-and-scheduling.md), [Fleet Dispatch](fleet-dispatch.md) |
-| `session` | Session ledger, branching, checkpoints, compaction records, and recovery | [Session Lifecycle](session-lifecycle.md), [Context Working Set](context-working-set.md) |
-| `share` | Portable archive manifests and compatibility reads | [Extensions and Sharing](extensions-and-sharing.md), [Artifact Versions](artifact-versions.md) |
-| `toolchain` | Pinned external-tool registry, install, resolution, version, and removal | [Installation and Lifecycle](installation-and-lifecycle.md), [Commands and Modes](commands-and-modes.md) |
-| `user-tasks` | Durable operator task-board storage | [Commands and Modes](commands-and-modes.md), [Proactive Memory](proactive-memory.md) |
+## Page audit
 
-All active domain directories are represented above. A new domain is not
-documentation-complete until it has an owner here and its public behavior is
-described in that guide.
+| Markdown page | Primary source references | HTML blueprint at audit time | Disagreements with `ff56ea3e` |
+| --- | --- | --- | --- |
+| `README.md` | `package.json`; `src/cli/index.ts`; `src/cli/docs.ts`; `src/cli/doctor.ts`; CLI smoke tests | No dedicated blueprint. `html/index.html` is the landing page. | None found. |
+| `acp.md` | `src/engine/acp/**`; `src/cli/acp.ts`; `src/entry/orchestrator.ts` | `html/acp_blueprint.html` | Source line pointers and the log prefix are stale. The event and metadata allowlists omit dispatch events and agent attribution fields. Git is classified as `other`, while dispatch, steer, and monitor also have mappings. Tool aliases and the policy source use the `clio-coder-*` namespace, not `clio-*`. |
+| `alcf-provider.md` | `src/domains/providers/runtimes/cloud/alcf.ts`; `src/engine/alcf-oauth.ts`; `src/engine/apis/openai-completions.ts` | `html/alcf_blueprint.html` | The runtime stores `model.clioCoder.chatTemplateKwargsUnsupported`, but the request adapter reads the legacy `model.clio` location. The documented omission therefore is not current runtime behavior. |
+| `architecture.md` | `tests/boundaries/check-boundaries.ts`; `src/core/domain-loader.ts`; `src/entry/orchestrator.ts`; `src/engine/**`; `src/tools/bootstrap.ts`; `src/worker/**` | `html/architecture_blueprint.html` | The boundary checker has six rules, not five. The instant-shell import-graph test no longer exists. Dispatch is eagerly created by tool bootstrap and imports its runner directly, not through `lazy-tool`. The loaded-domain table omits toolchain and optional mux and labels several non-`DomainModule` areas as loaded modules. |
+| `artifact-placement.md` | `src/core/artifact-paths.ts`; `src/core/xdg.ts`; artifact stores under `src/domains/**`; `src/tools/artifact.ts` | `html/artifact_placement_blueprint.html` | `.clio-coder/test-scratch` has no source owner; scratch output lives below the state directory. `.clio-coder/` becomes ignored only when bootstrap writes the rule. Re-including children below an ignored parent does not implement the documented Git policy; deliberate assets require an explicit force-add. |
+| `artifact-versions.md` | `src/engine/session.ts`; `src/domains/session/migrations/**`; `src/domains/dispatch/receipt-integrity.ts`; dispatch state stores; `src/domains/eval/schema/**`; `src/domains/observability/trace-store.ts` | `html/artifact_versions_blueprint.html` | Sessions are format 4 and only format 3 migrates to 4. Eval artifacts live below the data directory and use `clio-coder.eval.*` schema identifiers; `EVAL_ARTIFACT_VERSION` no longer exists. Fleet contracts are Markdown in tiered roots, not YAML. A malformed checkout lease fails closed. Trace logs use `[clio-coder:trace]`. Receipt pseudocode names obsolete APIs and types and understates v20 verification. Out-of-turn usage also records prewarm and background memory. Not every persisted row is versioned. |
+| `built-in-agents.md` | `src/domains/agents/**`; `src/domains/dispatch/**`; `src/worker/**` | `html/agents_blueprint.html` | Discovery omits enabled extension roots and the reserved `auto` identifier. The compact prompt catalog excludes internal recipes and handles oracle separately. Name, description, budget, and other recipe fields are required, so the example recipe is invalid. Audience also permits `custom`. Adaptive routing uses `fleet.adaptiveRouting.agentRoles`. Event names use `clio_coder_*`. Fleet contract v5 is current. |
+| `capacity-and-scheduling.md` | `src/domains/scheduling/**`; `src/domains/dispatch/capacity-lease.ts`; `src/domains/dispatch/admission.ts`; `src/domains/dispatch/reservation-store.ts`; provider capacity probes | `html/capacity_scheduling_blueprint.html` | The lease schema omits the optional host field. Worker protocol heartbeats run each second, while durable capacity leases renew every ten seconds. Endpoint saturation can queue through the lease controller rather than always refusing immediately. The reference mini endpoint has four llama.cpp slots, not the stated one-slot common case. |
+| `commands-and-modes.md` | `src/cli/**`; `src/interactive/slash-commands.ts`; `src/domains/dispatch/**`; `src/tools/**` | `html/commands_blueprint.html` | Policy and event identifiers use `clio-coder-policy` and `clio_coder_*`. The interop boot prompt is not quoted accurately. The built-in-agent list omits the operator-only oracle. Memory settings use `context.memory.enabled`, not `memory.intervention.enabled`. |
+| `config-knobs-audit.md` | Historical snapshot of `src/core/config.ts`, runtime settings, and worker budgets | `html/config_knobs_audit_blueprint.html` | None found in its dated scope. Retired variables such as `CLIO_CODER_RESIDENCY` are historical evidence, not live guidance. |
+| `configuration-and-targets.md` | `src/core/defaults.ts`; `src/core/config.ts`; `src/domains/providers/**`; `src/cli/configure.ts`; `src/cli/targets.ts`; `src/cli/models.ts`; `src/cli/auth.ts` | `html/configuration_blueprint.html` | The six safety limit leaves no longer have environment overrides. Policy and managed-file identifiers use the `clio-coder-*` namespace. The external-agent example uses retired `delegation.agents` rather than `integrations.externalAgents.entries`. |
+| `configuration-reference.md` | `src/core/defaults.ts`; `src/core/config.ts`; all CLI parsers; tool schemas; agent recipe schema; local model catalogs | No; parity gap. | Several YAML string values named `off` were rendered as Boolean `False`, and environment defaults were rendered as booleans instead of presence semantics. `fleet.concurrency` defaults to the constant 4, not derived host capacity. Recipe precedence omits extensions and incorrectly permits project overrides of built-ins. `workers.rosters` is retired; the current key is `fleet.rosters`. |
+| `context-engine.md` | `src/domains/context/**`; `src/domains/session/**`; `src/domains/providers/**`; `src/domains/prompts/preload.ts`; interactive context and prewarm modules | `html/context_blueprint.html` | Context-window precedence and the unknown fallback are incomplete. The warning boundary is 128,000 while the desired floor is 131,072. Compaction and prewarm examples use v1 keys; `excludeLastTurns` is retired. A replay evidence path was deleted. The reference endpoint describes an obsolete one-slot Qwen route instead of mini with Ornith, four slots, and 262,144 context per slot. Codewiki frontmatter omits empty optional fields rather than always serializing seven. |
+| `context-working-set.md` | `src/domains/context/working-set/**`; `src/domains/session/**`; `src/interactive/turn-context.ts`; context CLI and tool modules | No; parity gap. | Settings use `context.compaction.threshold`, and `excludeLastTurns` is retired. `age-horizon` does not reproduce legacy selection because a minimum token floor was added. Recall never guesses the nearest reference; invalid-reference errors do not list candidates, while other errors list at most eight. Deleted replay evidence is cited as if shipped. |
+| `development-pipeline.md` | `package.json`; `scripts/check-hygiene.ts`; `.github/**`; `tests/**` | No; parity gap. | The width-matrix test, shard scripts, shard weights, and load harness do not exist. The test command now invokes contract and smoke tests directly and has no documented list, shard, serial lane, or `CLIO_TEST_CONCURRENCY` behavior. A named wire-capture fixture suite is no longer present. |
+| `dispatch-architecture-rationale.md` | `src/domains/dispatch/**`; `tests/boundaries/check-boundaries.ts` | `html/dispatch_rationale_blueprint.html` | File, barrel-line, and cross-domain import counts are stale. Receipt integrity is v20, not v16. The boundary checker has six rules, not five. |
+| `dispatch-typed-intent.md` | `src/domains/dispatch/intent*.ts`; `src/domains/dispatch/path-scope.ts`; `src/tools/dispatch-*.ts`; dispatch admission tests | No; parity gap. | Exact `.` and `./` roots normalize to repository root. `{check:"none"}` resolves a verifier actually named `none`. Absent or partial intent warnings are classified but deliberately not published in production. Two legacy reason codes have no current producer. Prose-path reporting is extension-filtered and capped. Output-versus-write-root and legacy contradiction checks run only when both relevant lists are nonempty. A cited compatibility test was deleted. |
+| `documentation-coverage.md` | `src/**`; `tests/**`; `docs/html/**` | No; parity gap. | None found in the former ownership claims, but the former page did not provide the required page-level source, blueprint, and drift audit. |
+| `documentation-guide.md` | `src/**`; `tests/**`; documentation and HTML inventories | `html/documentation_blueprint.html` | The map says 20 tools, receipt v16, 45 glossary terms, six trace commands, and nine artifact schemas; current values are 21 canonical tools, receipt v20, 50 glossary terms, eight trace commands, and 25 registry rows. Several pages with standalone HTML are described as lacking it. Nine existing Markdown pages are absent from the map. |
+| `environment-variables.md` | `src/core/guardrails.ts`; `src/core/xdg.ts`; all `process.env` reads; hygiene inventory | `html/environment_blueprint.html` | The page is complete for product `CLIO_CODER_*` variables plus `NO_COLOR`, not for every environment variable read by source. It omits standard directory, editor, terminal, CI, Ollama capacity, and dynamic credential variable families. |
+| `eval-runner.md` | `src/domains/eval/**`; `src/cli/eval.ts`; eval boundary and schema tests | `html/eval_blueprint.html` | Canonical runner kind is `clio-coder-run`, schema IDs use `clio-coder.eval.*`, and the artifact field is `clioCoder`; the old forms are compatibility inputs only. The command list omits `eval inventory --json`, and the schema reference omits current agent, autonomy, cost, workspace setup, and observation fields. Some threshold-file failures exit 1 rather than 2. The mini baseline has Ornith, four slots, and 262,144 context per slot. |
+| `evals-internal.md` | `src/domains/eval/**`; `evals/**` | `html/evals_internal_blueprint.html` | Examples use legacy `clio.eval.behavior.v1` and `clio-run`; canonical identifiers are `clio-coder.eval.behavior.v1` and `clio-coder-run`. |
+| `evidence-and-memory.md` | `src/domains/evidence/**`; `src/domains/memory/**`; `src/cli/evidence.ts`; `src/cli/memory.ts`; receipt integrity | `html/memory_blueprint.html` | The evidence vocabulary has 29 tags, not 25. Current receipt integrity is v20; older seals are retired rather than all being invalid. The exact not-found output and CLI inventory are incomplete. Forensic classification explicitly forbids task prose as causal evidence. |
+| `evolution.md` | `src/domains/evolution/**`; `src/cli/evolve.ts` | `html/evolution_blueprint.html` | None found. |
+| `exit-codes-and-output.md` | `src/cli/**`; `src/entry/**`; CLI smoke tests | `html/exit_codes_blueprint.html` | The JSON event table is described too broadly; full mode can pass additional `clio_coder_*` tool, permission, and plan frames. Core process exit codes are correct. |
+| `extensions-and-sharing.md` | `src/domains/extensions/**`; `src/domains/resources/**`; `src/domains/share/**`; extension and share CLIs | `html/extensions_blueprint.html` | Extensions discover skills, prompts, agents, fleets, and reserved themes, not only prompts and skills. Judge eval arms are not full-auto. Share archives use `clio-coder-share-archive`, `clio-coder.share.v1`, and `clioCoderVersion`; old names are compatibility inputs. The exported settings fragment contains current v2 leaves rather than the documented old scope. |
+| `fleet-demo-runbook.md` | `src/domains/dispatch/**`; `src/domains/scheduling/**`; `src/cli/doctor.ts` | No; parity gap. | Current receipts use integrity v20, not v16, and older versions are retired rather than universally failing verification. |
+| `fleet-dispatch.md` | `src/domains/dispatch/**`; `src/domains/scheduling/**`; dispatch tools | `html/fleet_dispatch_blueprint.html` | Current receipts use v20, not v19. Older receipts are retired and never read as evidence. Tool expansion provenance uses `clio-coder.tool.expand`, not `clio.tool.expand`. |
+| `git-commit-provenance.md` | `src/core/commit-attribution.ts`; `src/core/git-commit-attribution.ts`; `src/core/defaults.ts`; dispatch attribution tests | No; parity gap. | Canonical configuration is `integrations.git.commitAttribution`; `attribution.gitCommits` is migration-only. Commit trailers recognize and emit `receipt-v20`, not v19. |
+| `glossary.md` | Owning types in `src/domains/dispatch/**`, `src/domains/session/**`, `src/domains/context/**`, and `src/tools/**` | `html/glossary_blueprint.html` | Receipt integrity is v20. Dispatch run IDs are 12-character random base36 identifiers, not all UUIDv7. Route candidates contain more identity and policy fields than the four-field definition. Council is a current topology. `internal` is a dispatch request origin, not a worker run origin. Context ledger buckets are incomplete. |
+| `installation-and-lifecycle.md` | `src/cli/upgrade.ts`; `src/cli/doctor.ts`; `src/cli/reset.ts`; `src/cli/uninstall.ts`; `src/domains/lifecycle/**`; `src/core/xdg.ts` | `html/lifecycle_blueprint.html` | Install metadata omits `repairedAt`. The upgrade section presents a stale 0.3.x sequence as current and claims one migration, while the current registry has five migrations and 0.4.2 emits a generic notice. |
+| `middleware-and-components.md` | `src/domains/components/**`; `src/domains/middleware/**`; `src/cli/components.ts`; orchestrator registration | `html/middleware_blueprint.html` | Memory middleware uses the v2 `context.memory.*` settings, not `memory.intervention.*`. The built-in registration table omits `observer.marketplace-offer`. |
+| `model-catalog.md` | `src/domains/providers/catalog.ts`; `src/domains/providers/models/**`; provider probes and capability resolution; model CLI | `html/models_blueprint.html` | The Qwen3.8 sample disagrees with the bundled entry on maximum output tokens, vision, thinking mechanism, and sampler temperature. The page omits the default chat thinking level of `low`. Reference topology should identify mini as the four-slot Ornith llama.cpp route and dynamo as the Qwen3.8 LM Studio chat route. |
+| `observability.md` | `src/domains/observability/**`; `src/domains/evidence/**`; `src/core/bus-events.ts`; `src/interactive/view/**` | `html/observability_blueprint.html` | Receipt integrity references use v19 instead of v20. The completion-event sample has a nonexistent `status` field and omits current outcome fields. The named dynamo sample identifies the wrong served model; the reference chat model is `qwen3.8-27b-dynamo`. |
+| `performance-methodology.md` | `src/interactive/render-trace.ts`; `src/interactive/interactive-shell.ts`; terminal lease and pacing modules; current smoke tests | No; parity gap. | Two cited render tests were deleted, and `CLIO_CODER_PERF_REPORT` no longer exists. The documented commands and numeric reports belong to a retired harness and cannot be reproduced by the current suite. |
+| `pi-boundary.md` | `src/engine/ai.ts`; `src/engine/api-registry.ts`; `src/engine/provider-payload.ts`; `src/interactive/chat-loop.ts`; engine lifecycle tests | `html/pi_boundary_blueprint.html` | None found. The mention of the former string-enum adapter is explicitly historical. |
+| `proactive-memory.md` | `src/domains/memory/**`; `src/domains/middleware/memory-intervention.ts`; `src/core/defaults.ts`; `src/interactive/memory-overlay.ts` | Shared `html/memory_blueprint.html` | Canonical v2 settings are `context.memory.enabled`, `cadenceToolCalls`, `trajectorySteps`, `maxOutputTokens`, `timeoutMs`, `target`, and `model`. Defaults are true, 10, 8, 2,000, 60,000, null, and null. Retired `memory.intervention.*` and background keys, 400-token and 30-second defaults, and related cost claims are stale. The reference topology names a fictitious node and one-slot route instead of mini and dynamo. A cited proactive-memory eval test was deleted. Measurement tables conflict with one another and are not identified as dated external evidence. `qwopus` is cataloged, not selected as a shipped default. |
+| `prompt-envelope-and-tools.md` | `src/domains/prompts/compiler.ts`; `src/interactive/chat-loop.ts`; `src/core/tool-names.ts`; `src/tools/registry.ts`; `src/tools/agent-tools.ts` | `html/tools_blueprint.html`; duplicate `html/prompt_envelope_blueprint.html` | The compile cache key omits several current identity fields and tool-schema bytes. There are 21 canonical tools, not 20, and the minimal and science profiles include ledger. Pane exposure is also conditional. Default compaction first performs non-destructive working-set eviction; destructive masking is legacy-only behind `CLIO_CODER_LEGACY_MASK=1`. The exhaustive size-policy description omits ledger and panes. |
+| `provider-adapter-cookbook.md` | `src/domains/providers/registry.ts`; `src/domains/providers/types/runtime-descriptor.ts`; engine provider adapters | `html/provider_adapter_blueprint.html` | `TargetDescriptor` carries auth metadata rather than an API key. The reasoning cache belongs to the providers domain, not a session ledger. Credential resolution and infill binding do not occur in `synthesizeModel`. The thinking mechanism table lists wire/runtime formats rather than the actual mechanism enum. The cited `thinking-runtime.test.ts` was deleted; current off-wire coverage is narrower. |
+| `release-cut-checklist.md` | `scripts/check-release.mjs`; package smoke tests; workflows; `package.json` | No; parity gap. | None found in its explicitly historical v0.4.1 scope. |
+| `resource-library.md` | `src/domains/resources/library.ts`; `src/cli/library.ts`; Skills Hub integration | No; parity gap. | None found. |
+| `safety-model.md` | `src/domains/safety/**`; `src/tools/registry.ts`; `src/tools/policy.ts`; `src/entry/orchestrator.ts`; dispatch write boundaries | `html/safety_blueprint.html` | Saved autonomy is `safety.autonomy`, not a top-level `autonomy` leaf. The canonical tool surface has 21 entries and the table omits ledger and panes, whose registration is conditional. |
+| `scientific-validation.md` | `src/domains/safety/rigor.ts`; `src/domains/safety/finish-contract.ts`; verification authoring code | `html/validation_blueprint.html` | None found. |
+| `session-lifecycle.md` | `src/engine/session.ts`; `src/domains/session/**` | `html/session_lifecycle_blueprint.html` | Current session format is 4. Format 3 migrates additively to 4, while versions below 3 and above 4 are rejected. The example metadata header still uses version 3 and the compatibility prose says every older session is refused. |
+| `skills-marketplace.md` | `src/interactive/overlays/skills-hub.ts`; `src/domains/resources/skills/marketplace.ts` | `html/skills_blueprint.html` | None found. |
+| `time-conventions.md` | `src/interactive/format-time.ts`; dispatch capacity and scheduling modules; `src/core/state-file-lock.ts`; receipt and session stores | `html/time_conventions_blueprint.html` | In-process spans use either `performance.now()` or `hrtime.bigint()`, while persisted and cross-process deadlines use wall time. Not every clock has an injection seam or a global harness clock. Three cited source or test paths do not exist, and the agent-ledger path is wrong. |
+| `tool-usage.md` | `src/tools/agent-tools.ts`; `src/tools/registry.ts`; `src/tools/dispatch-arguments.ts`; per-tool implementations | `html/tool_usage_blueprint.html` | Dispatch rejects per-item `agent_id`, top-level `failover`, and top-level `allowed_candidates`; routing policy belongs below `routing`. Receipt examples use v19 rather than v20. Ledger and panes are missing from the reference. Docs corpus wording assumes a flat `docs/*.md` directory. Several cited dispatch, safety, and scheduler test paths were deleted. |
+| `trace-store.md` | `src/cli/trace.ts`; `src/domains/observability/trace-store.ts` | `html/trace_blueprint.html` | None found. |
+| `troubleshooting.md` | `src/core/**`; `src/cli/**`; `src/domains/**`; exact error strings | `html/troubleshooting_blueprint.html` | The local model catalog path is `src/domains/providers/models/local-models/clio-coder-local-coding-targets.yaml`, not the former `clio-local-coding-targets.yaml`. |
+| `tui-design.md` | `src/interactive/theme/tokens.ts`; `src/interactive/theme/glyphs.ts`; interactive renderer and view modules | `html/tui_design_blueprint.html` | The cited `tests/contracts/usage-vocabulary.test.ts` no longer exists. |
+| `worker-dispatch-mechanics.md` | `src/worker/**`; dispatch receipt, worker spec, heartbeat, and failure classification modules | `html/worker_dispatch_blueprint.html` | Receipt integrity is v20, not v19. A pre-v20 seal is retired and excluded from evidence rather than treated as a current invalid seal. |
 
-## Cross-cutting references
+## Blueprint gaps
 
-- [Artifact Versions](artifact-versions.md) owns persisted schema identities and
-  compatibility windows.
-- [Environment Variables](environment-variables.md) owns process-level
-  overrides and internal plumbing variables.
-- [Glossary](glossary.md) owns stable architectural vocabulary.
-- [Troubleshooting](troubleshooting.md) owns operator remediation keyed to
-  user-facing errors.
-- [Documentation Guide](documentation-guide.md) owns documentation style,
-  source alignment, and verification expectations.
+The eleven pages without a dedicated or shared blueprint are the documentation
+hub, configuration reference, context working set, development pipeline, typed
+dispatch intent, this coverage audit, fleet demo runbook, Git commit provenance,
+performance methodology, release checklist, and resource library. The landing
+page already serves the hub role; the other ten have no architectural reason to
+remain Markdown-only and should receive blueprints during the parity pass.
+
+## Audit disposition
+
+The next documentation change must correct all 41 affected Markdown pages from
+their owning sources. HTML is intentionally left untouched until the Markdown
+corpus is source-aligned, after which parity can be restored from the corrected
+text.
