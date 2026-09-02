@@ -619,6 +619,15 @@ export function adaptRunReceiptValidationStatus(
 	if (receipt.hostVerification?.status === "verified") {
 		return attributed("validated", receiptSource(receipt), { kind: "validator", id: "host-verification" }, artifacts);
 	}
+	// A batch member the failure was charged away from carries a check that
+	// exited non-zero, so the validator has no verdict for this run: neither the
+	// "failed" the exit code alone would suggest nor the "validated" a passing
+	// check earns. It stops here rather than falling through to receipt-quality,
+	// which cannot see that a declared host check failed on the tree this run
+	// shipped in.
+	if (receipt.hostVerification?.status === "not_implicated") {
+		return attributed("unknown", receiptSource(receipt), { kind: "validator", id: "host-verification" }, artifacts);
+	}
 	if (qualityHasFailure(receipt.quality)) {
 		return attributed("failed", receiptSource(receipt), { kind: "validator", id: "receipt-quality" }, artifacts);
 	}

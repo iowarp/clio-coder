@@ -121,7 +121,7 @@ export interface DispatchBoardRow {
 	gate?: { role: string; cycle: number };
 	council?: { group: string; label: string; color?: string; round: number };
 	/** Orchestrator-executed declared verification status. */
-	hostVerification?: "verified" | "rejected" | "skipped";
+	hostVerification?: "verified" | "rejected" | "skipped" | "not_implicated";
 	/**
 	 * The canonical trust projection of the sealed receipt, read back from
 	 * disk and authenticated against the ledger row. Absent while the run is

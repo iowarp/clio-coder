@@ -2,7 +2,7 @@ import { execFileSync } from "node:child_process";
 import { createHash, randomUUID } from "node:crypto";
 import { existsSync, mkdirSync, readFileSync, renameSync, writeFileSync } from "node:fs";
 import { dirname, join, resolve } from "node:path";
-import { pathBoundaryCovers, resolvePathBoundary } from "../../core/path-boundary.js";
+import { PATH_BOUNDARY_MAX_ENTRIES, pathBoundaryCovers, resolvePathBoundary } from "../../core/path-boundary.js";
 import { withStateFileLockSync } from "../../core/state-file-lock.js";
 import { clioStateDir } from "../../core/xdg.js";
 import { FLEET_COMMAND_BASE_ENV, type FleetCommand } from "../agents/fleet-commands.js";
@@ -28,7 +28,7 @@ const HTTP_URL_RE = /\bhttps?:\/\/\S+/gu;
 const CHECK_OUTPUT_PATH_RE =
 	/\/?(?:[A-Za-z0-9_.@+-]+\/)+[A-Za-z0-9_.@+-]*\.(?:[cm]?[jt]sx?|json|ya?ml|md|txt|py|go|rs|c|h|cc|cpp|hpp|java|rb|sh|toml|css|html|sql)\b/gu;
 /** Implicated paths recorded on a receipt, matching the intent path-list cap. */
-const IMPLICATED_PATH_CAP = 32;
+const IMPLICATED_PATH_CAP = PATH_BOUNDARY_MAX_ENTRIES;
 
 interface MemoEntry {
 	key: string;
@@ -257,16 +257,102 @@ export interface BatchVerificationGate {
 	abandon(runId: string): void;
 }
 
+interface ParkedMember {
+	participant: BatchVerificationParticipant;
+	settle: (value: RunHostVerification | undefined) => void;
+	/**
+	 * Reject the parked promise so the member's finalization takes the identical
+	 * path a single-task dispatch takes when its declared check cannot run at all
+	 * (`extension.ts:5544` throws into the finalization catch at 5669 and the run
+	 * is marked failed). Silently dropping a declared check must never look like
+	 * never having declared one.
+	 */
+	fail: (error: unknown) => void;
+}
+
 /**
- * One settlement barrier for a parallel dispatch batch.
+ * The member's declared write roots resolved in the frame its own request ran in.
+ *
+ * An empty result means UNCONFINED, never "writes nothing": `intent.ts:139`
+ * normalizes a `"."` scope entry to an empty list, a request may omit
+ * `write_roots` entirely, and `extension.ts:1949` only builds a write boundary
+ * for a non-empty list, so such a run executed with no write confinement at all.
+ */
+function memberBoundary(participant: BatchVerificationParticipant): string[] {
+	const writeRoots = participant.request.intent?.writeRoots ?? [];
+	return writeRoots.map((root) => resolvePathBoundary(participant.request.cwd ?? process.cwd(), root));
+}
+
+/**
+ * Charge one failing batch check to the members that own it.
+ *
+ * The charge follows write-root coverage across the whole wave, not just across
+ * the members that declared the check: a live sibling that declared no check, or
+ * whose own worker failed, still edited the shared checkout, so a named path
+ * inside its boundary and inside no declarer's is positive evidence that the
+ * declarers are innocent. That exculpation demands every named path be owned
+ * elsewhere; one path nobody claims leaves the failure unowned and every
+ * declarer is charged. When the owner is a member that declared no check the
+ * charge set comes out empty, because a run has nothing to reject on for a check
+ * it never asked for; that is the attribution rule applied faithfully, and the
+ * alternative is rejecting a worker the evidence points away from, which is the
+ * defect this gate exists to remove.
+ *
+ * Exculpation always requires positive evidence, so a declarer that ran
+ * unconfined is charged unconditionally: with no boundary there is nothing to
+ * test the failing paths against, and it is the member most able to have broken
+ * the tree. `basis` is the weakest evidence behind the charge set, never the
+ * strongest, so `write_roots` on a receipt means every charged run has a named
+ * path inside its own declared boundary.
+ */
+function attributeFailure(input: {
+	implicated: ReadonlyArray<string>;
+	declarers: ReadonlyArray<BatchVerificationParticipant>;
+	wave: ReadonlyArray<BatchVerificationParticipant>;
+}): { charged: Set<string>; basis: RunHostVerificationAttribution["basis"]; decisive: string[] } {
+	const declared = new Set(input.declarers.map((member) => member.runId));
+	const implicatedDeclarers = new Set<string>();
+	const unconfined = new Set<string>();
+	const decisive = new Set<string>();
+	for (const member of input.declarers) {
+		const boundary = memberBoundary(member);
+		if (boundary.length === 0) {
+			unconfined.add(member.runId);
+			continue;
+		}
+		const hits = input.implicated.filter((path) => pathBoundaryCovers(boundary, path));
+		if (hits.length === 0) continue;
+		implicatedDeclarers.add(member.runId);
+		for (const hit of hits) decisive.add(hit);
+	}
+	const others = input.wave.filter((member) => !declared.has(member.runId));
+	const ownedElsewhere =
+		input.implicated.length > 0 &&
+		input.implicated.every((path) => others.some((member) => pathBoundaryCovers(memberBoundary(member), path)));
+	const localized = implicatedDeclarers.size > 0 || ownedElsewhere;
+	const charged = localized ? new Set(implicatedDeclarers) : new Set(declared);
+	for (const runId of unconfined) charged.add(runId);
+	return {
+		charged,
+		basis:
+			!localized || unconfined.size > 0
+				? "unattributable"
+				: implicatedDeclarers.size > 0
+					? "write_roots"
+					: "attributed_elsewhere",
+		decisive: [...decisive].sort(),
+	};
+}
+
+/**
+ * One settlement barrier per wave of a parallel dispatch batch.
  *
  * A check run while a sibling is still editing the shared checkout judges a tree
  * neither worker authored: three coders on one kvlog batch (round 5, 2026-09-02)
  * all sealed `host_verification_rejected` for one worker's broken test. Every
  * live member parks at the verification step, each distinct resolved check runs
- * once for the whole batch on the settled tree, and a failure is charged only to
- * the members whose declared `intent.writeRoots` cover a path the check's own
- * output named.
+ * once for the whole wave on the settled tree, and a failure is charged by
+ * write-root coverage across the wave.
  *
  * Membership is what is LIVE, never what was requested. A run still queued for
  * capacity holds no lease and cannot write, and waiting on it would deadlock
@@ -275,8 +361,30 @@ export interface BatchVerificationGate {
  * `admit` would time out (`admission.ts:244-291`) and take the whole batch down
  * with it. Live-only membership still costs a queued member the difference
  * between the first live member finishing and the last, charged against the same
- * 60 s admission deadline (`extension.ts:2669`); that is a longer wait on a path
- * that is already deadline-bound today, not a new deadlock.
+ * 60 s admission deadline (`extension.ts:2669`). That wait is not free: a batch
+ * whose first member finishes inside the deadline and whose last does not now
+ * expires the queued member's `admit`, and `dispatchBatch` aborts every already
+ * dispatched run when one member's admission throws (`extension.ts:6197-6205`).
+ * Releasing the lease before parking would let a fresh writer into the checkout
+ * the settlement is about to judge, which is the defect itself, so the wait
+ * stands until the lease lifecycle is restructured.
+ *
+ * The gate is multi-shot: a batch larger than the effective capacity admits in
+ * waves, and each wave forms its own barrier from the members live at that
+ * moment. Latching after the first settlement would drop every later member onto
+ * the per-run path and reproduce the original defect verbatim, since those
+ * members are admitted together and would run the shared check concurrently on
+ * the checkout their siblings are still editing.
+ *
+ * One narrow window survives, and it is the reason `live()` registers as early
+ * as the worker spawn: a member that goes live WHILE a wave's checks are
+ * executing joins the next wave, so its edits can land in the tree the running
+ * check is judging. Reaching it takes either a lease freed mid-settlement, which
+ * means a sibling whose finalization failed before the barrier, or a member of
+ * `dispatchBatch`'s sequential loop (`extension.ts:6194`) whose worker had not
+ * spawned yet when every earlier member had already finished. The next wave
+ * re-runs the check on the settled tree, so a stale verdict is bounded to the
+ * one wave that raced.
  */
 export function createBatchVerificationGate(
 	options: { stateDir?: string; env?: NodeJS.ProcessEnv } = {},
@@ -284,12 +392,8 @@ export function createBatchVerificationGate(
 	const stateDir = options.stateDir ?? clioStateDir();
 	const env = options.env ?? process.env;
 	const liveMembers = new Set<string>();
-	const left = new Set<string>();
-	const parked = new Map<
-		string,
-		{ participant: BatchVerificationParticipant; settle: (value: RunHostVerification | undefined) => void }
-	>();
-	let settled = false;
+	const parked = new Map<string, ParkedMember>();
+	let settling = false;
 
 	const perRun = (participant: BatchVerificationParticipant): Promise<RunHostVerification | undefined> =>
 		runHostVerification({
@@ -308,28 +412,36 @@ export function createBatchVerificationGate(
 		return { status: "skipped", reason: "worker_not_successful", checks: [] };
 	};
 
-	async function settleBatch(): Promise<void> {
-		const contributors = [...parked.values()]
-			.map((entry) => entry.participant)
-			.filter((member) => member.workerSuccessful && (member.request.resolvedVerification?.length ?? 0) > 0);
-		const distinct = new Map<string, { resolvedCheck: ResolvedCheck; owner: string; index: number }>();
+	async function settleBatch(wave: ReadonlyArray<ParkedMember>): Promise<void> {
+		const members = wave.map((entry) => entry.participant);
+		const contributors = members.filter(
+			(member) => member.workerSuccessful && (member.request.resolvedVerification?.length ?? 0) > 0,
+		);
+		const distinct = new Map<
+			string,
+			{ resolvedCheck: ResolvedCheck; owner: BatchVerificationParticipant; index: number }
+		>();
 		for (const member of contributors) {
 			for (const resolvedCheck of member.request.resolvedVerification ?? []) {
 				const key = checkDedupeKey(resolvedCheck);
-				if (!distinct.has(key)) distinct.set(key, { resolvedCheck, owner: member.runId, index: distinct.size });
+				if (!distinct.has(key)) distinct.set(key, { resolvedCheck, owner: member, index: distinct.size });
 			}
 		}
 		const ran = new Map<string, { check: RunHostVerificationCheck; owner: string; outputExcerpt: string }>();
 		for (const [key, entry] of distinct) {
 			const outcome = await runResolvedCheck({
-				runId: entry.owner,
+				runId: entry.owner.runId,
 				index: entry.index,
 				resolvedCheck: entry.resolvedCheck,
 				stateDir,
 				env,
-				...(contributors[0]?.onDiagnostic !== undefined ? { onDiagnostic: contributors[0].onDiagnostic } : {}),
+				// The owning member's callback, because the artifact directory is
+				// named for that same run and the diagnostic text is closed over the
+				// run id it was built for (`extension.ts:5534`); any other member's
+				// callback would name a run whose artifacts the failure is not under.
+				...(entry.owner.onDiagnostic !== undefined ? { onDiagnostic: entry.owner.onDiagnostic } : {}),
 			});
-			ran.set(key, { check: outcome.check, owner: entry.owner, outputExcerpt: outcome.outputExcerpt });
+			ran.set(key, { check: outcome.check, owner: entry.owner.runId, outputExcerpt: outcome.outputExcerpt });
 		}
 		const attribution: RunHostVerificationAttribution[] = [];
 		const chargedByKey = new Map<string, Set<string>>();
@@ -339,28 +451,24 @@ export function createBatchVerificationGate(
 				(member.request.resolvedVerification ?? []).some((candidate) => checkDedupeKey(candidate) === key),
 			);
 			const implicated = implicatedPaths(entry.outputExcerpt, entry.check.cwd);
-			const charged = new Set<string>();
-			for (const member of declarers) {
-				const writeRoots = member.request.intent?.writeRoots ?? [];
-				// A member that declared no write roots cannot be exculpated: there is
-				// no boundary to test the failing paths against. Exculpation always
-				// requires positive evidence.
-				if (writeRoots.length === 0) continue;
-				const boundary = writeRoots.map((root) => resolvePathBoundary(member.request.cwd ?? process.cwd(), root));
-				if (implicated.some((path) => pathBoundaryCovers(boundary, path))) charged.add(member.runId);
-			}
-			const attributed = charged.size > 0;
-			if (!attributed) for (const member of declarers) charged.add(member.runId);
-			chargedByKey.set(key, charged);
+			const verdict = attributeFailure({ implicated, declarers, wave: members });
+			chargedByKey.set(key, verdict.charged);
+			const decisive = new Set(verdict.decisive);
 			attribution.push({
 				check: entry.check.check,
-				implicated: implicated.slice(0, IMPLICATED_PATH_CAP),
-				charged: [...charged].sort(),
-				basis: attributed ? "write_roots" : "unattributable",
+				// The paths that decided the charge lead the capped list. A large
+				// suite names more than 32 files and the sealed evidence has to
+				// contain the path a receipt was charged on, or it documents nothing.
+				implicated: [...verdict.decisive, ...implicated.filter((path) => !decisive.has(path))].slice(
+					0,
+					IMPLICATED_PATH_CAP,
+				),
+				charged: [...verdict.charged].sort(),
+				basis: verdict.basis,
 			});
 		}
 		attribution.sort((first, second) => (first.check < second.check ? -1 : first.check > second.check ? 1 : 0));
-		for (const entry of parked.values()) {
+		for (const entry of wave) {
 			const member = entry.participant;
 			if (!contributors.includes(member)) {
 				entry.settle(nothingToRun(member));
@@ -383,7 +491,12 @@ export function createBatchVerificationGate(
 				else unimplicated = true;
 			}
 			entry.settle({
-				status: rejected ? "rejected" : "verified",
+				// `verified` states that every declared check passed, which is what
+				// `trust-status.ts:619` certifies and what the board and
+				// `worker-evidence.ts:161` print. An exculpated member's checks array
+				// still carries a non-zero exit code, so it seals its own status
+				// instead of borrowing that claim.
+				status: rejected ? "rejected" : unimplicated ? "not_implicated" : "verified",
 				...(!rejected && unimplicated ? { reason: "batch_settled_not_implicated" } : {}),
 				checks: own,
 				strategy: "batch-settled",
@@ -402,42 +515,57 @@ export function createBatchVerificationGate(
 	}
 
 	function maybeSettle(): void {
-		if (settled || parked.size === 0) return;
+		if (settling || parked.size === 0) return;
 		for (const runId of liveMembers) {
-			if (!parked.has(runId) && !left.has(runId)) return;
+			if (!parked.has(runId)) return;
 		}
-		settled = true;
-		const waiting = [...parked.values()];
-		void settleBatch().catch(async (error) => {
-			// The barrier must never be the reason a receipt cannot seal. Falling
-			// back to the per-run path is exactly today's behavior.
-			for (const entry of waiting) {
-				entry.participant.onDiagnostic?.(error);
-				entry.settle(await perRun(entry.participant).catch(() => undefined));
-			}
-		});
+		settling = true;
+		// The wave closes here. Its members leave `liveMembers` so a member that
+		// arrives during the settlement forms the next barrier instead of joining
+		// one whose checks are already executing.
+		const wave = [...parked.values()];
+		for (const runId of parked.keys()) liveMembers.delete(runId);
+		parked.clear();
+		void settleBatch(wave)
+			.catch(async (error) => {
+				// The barrier must never be the reason a receipt cannot seal, so a
+				// member whose own checks still run gets today's per-run result. A
+				// member whose per-run attempt throws the same way takes the throw:
+				// swallowing it would seal a run that declared a check it never
+				// executed as `host_verification=not_requested` and succeeded, while
+				// the identical single-task dispatch fails the run.
+				for (const entry of wave) {
+					entry.participant.onDiagnostic?.(error);
+					try {
+						entry.settle(await perRun(entry.participant));
+					} catch (fallbackError) {
+						entry.fail(fallbackError);
+					}
+				}
+			})
+			.finally(() => {
+				settling = false;
+				maybeSettle();
+			});
 	}
 
 	return {
 		live(runId) {
-			if (settled) return;
 			liveMembers.add(runId);
 		},
 		abandon(runId) {
-			if (parked.has(runId) || settled) return;
-			left.add(runId);
+			// Dropping the id out of `liveMembers` rather than remembering it in a
+			// second set keeps the membership of a later wave exact: the same run
+			// abandons again when its finalPromise settles, long after its own wave.
+			if (parked.has(runId) || !liveMembers.delete(runId)) return;
 			maybeSettle();
 		},
 		arrive(input) {
-			// A member admitted after the batch settled was never part of it; it gets
-			// the single-run strategy, which is what its receipt would have carried
-			// with no gate at all.
-			if (settled) return perRun(input);
 			liveMembers.add(input.runId);
 			// The executor runs synchronously, so the member is registered before
 			// arrive() yields and two concurrent arrivals cannot miss each other.
-			const parkedPromise = new Promise<RunHostVerification | undefined>((settle) => {
-				parked.set(input.runId, { participant: input, settle });
+			const parkedPromise = new Promise<RunHostVerification | undefined>((settle, fail) => {
+				parked.set(input.runId, { participant: input, settle, fail });
 			});
 			maybeSettle();
 			return parkedPromise;

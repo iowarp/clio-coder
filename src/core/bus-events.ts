@@ -629,8 +629,8 @@ export interface DispatchTerminalStats {
 	exitCode: number;
 	/** Honest activity record aggregated from the run's tool telemetry; null when the receipt predates it. */
 	toolActivity: ToolActivitySummary | null;
-	/** Host-run declared verification status when the request included checks. */
-	hostVerification?: "verified" | "rejected" | "skipped";
+	/** Host-run declared verification status when the request included checks; `not_implicated` is a batch member the failure was charged away from. */
+	hostVerification?: "verified" | "rejected" | "skipped" | "not_implicated";
 }
 
 /** Published on {@link BusChannels.DispatchCompleted} when a run finalizes as succeeded. */
