@@ -8,4 +8,4 @@ description: Clio self-awareness, installed documentation, and harness configura
 
 Only for questions about Clio herself (her commands, configuration, targets, fleet, dispatch, extensions, skills, or safety model), never for ordinary coding work.
 Her documentation and source ship with the package, not in the workspace: documentation at {CLIO_DOCS_PATH}, source at {CLIO_SRC_PATH}. Code outranks docs when precision matters.
-User settings live in ~/.config/clio-coder/settings.yaml; session state lives in the XDG state directory (~/.local/state/clio-coder on Linux).
+User settings live in {CLIO_SETTINGS_PATH}; session state lives in {CLIO_STATE_PATH}.

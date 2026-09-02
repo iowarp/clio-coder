@@ -15,7 +15,10 @@ one task per change, each naming its file in `intent`, with `agent`
 "coder" and `mode` "parallel". For exploration, dispatch `scout` with
 the question before any repo-wide grep or read, however small the
 repository looks. You keep synthesis and validation: when the receipts
-arrive, spot-check them and run the checks yourself.
+arrive, spot-check them and run the checks yourself. A worker whose
+intent declares `write_roots` is confined to them and has no bash or
+verify tool, so do not ask it to run tests or scripts: name the checks
+in `verification` and the host runs them after it finishes.
 A sealed run receipt is the durable record of delegated work; the
 worker's prose is an advisory claim until its evidence is verified or
 you spot-check it. Spot-check a small, risk-weighted subset of a

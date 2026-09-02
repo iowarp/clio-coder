@@ -83,7 +83,7 @@ async function writeTerminalArtifact(
 export function createArtifactTool(deps: ArtifactToolDeps = {}): ToolSpec {
 	return {
 		name: ToolNames.Artifact,
-		description: `Write a named artifact: kind=plan|review|report writes a terminal Markdown document and completes the turn. Without an explicit path it lands in ${CLIO_ARTIFACT_DIR}/ (PLAN.md, REVIEW.md, REPORT.md); pass path only when the user asked for a file at a specific place.`,
+		description: `Write a named artifact: kind=plan|review|report writes a terminal Markdown document and completes the turn, so close the task board (tasks done/block/drop) before writing it. Without an explicit path it lands in ${CLIO_ARTIFACT_DIR}/ (PLAN.md, REVIEW.md, REPORT.md); pass path only when the user asked for a file at a specific place.`,
 		parameters: Type.Object({
 			kind: StringEnum(ARTIFACT_KINDS, { description: "Artifact kind." }),
 			content: Type.String({ description: "Full Markdown body." }),
