@@ -453,7 +453,7 @@ export const DEFAULT_SETTINGS = {
 			favorites: [] as string[],
 			recentLimit: 12,
 		} as ModelSelectorSettings,
-		maxOutputTokens: 32768,
+		maxOutputTokens: 0,
 		prewarm: true,
 		retry: {
 			enabled: true,
@@ -587,7 +587,7 @@ chat:
     cycleSet: []
     favorites: []
     recentLimit: 12
-  maxOutputTokens: 32768
+  maxOutputTokens: 0
   prewarm: true
   retry:
     enabled: true

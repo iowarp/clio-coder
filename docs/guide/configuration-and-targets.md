@@ -165,7 +165,7 @@ chat:
     cycleSet: []
     favorites: []
     recentLimit: 12
-  maxOutputTokens: 32768
+  maxOutputTokens: 0
   prewarm: true
 
 fleet:
@@ -326,12 +326,12 @@ block. Set them in LM Studio's My Models load settings or with `lms load`; the C
 configuration that `GET /api/v1/models` exposes instead of pretending it applied settings the REST
 load endpoint did not accept (<https://lmstudio.ai/docs/developer/rest/list>).
 
-`chat.maxOutputTokens` is a global output budget requested for every turn
-(default `32768`). At request time it is clamped to the model's known
-max-output cap and the remaining context window. A per-target
-`capabilities.maxTokens` override still records the model's true cap. Set
-`chat.maxOutputTokens: 0` to disable the global default and fall back to
-per-model caps only.
+`chat.maxOutputTokens` is a global output budget requested for every turn. Its
+default `0` uses each model's known maximum-output cap, still clamped to the
+remaining context window. Models with no known cap use a 32,768-token ceiling
+instead of the whole remaining context window. A per-target
+`capabilities.maxTokens` override records the model's true cap. Set a positive
+value to impose a smaller global ceiling.
 
 The setting `fleet.retry.maxRetries` controls automated retries for retryable
 fleet failures. Setting it to `0` disables retries.
@@ -547,7 +547,7 @@ This is the version-2 durable schema shipped in `DEFAULT_SETTINGS`. Validation i
 | `chat.modelPicker.cycleSet` | `[]` | list of target or target/model references | immediately for this session; next session as the saved default |
 | `chat.modelPicker.favorites` | `[]` | list of target/model references | immediately |
 | `chat.modelPicker.recentLimit` | `12` | integer ≥ 1 | immediately |
-| `chat.maxOutputTokens` | `32768` | integer ≥ 0 | next turn |
+| `chat.maxOutputTokens` | `0` | integer ≥ 0; `0` uses the model cap or the 32,768-token fallback when unknown | next turn |
 | `chat.prewarm` | `true` | boolean | next turn |
 | `chat.retry.enabled` | `true` | boolean | next turn |
 | `chat.retry.maxRetries` | `3` | integer ≥ 0 | next turn |

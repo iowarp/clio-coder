@@ -86,16 +86,23 @@ describe("contracts/metering integrity", () => {
 		strictEqual(estimatedUsageForInterruptedTurn({ ...message, stopReason: "stop" } as AgentMessage, 9_658), null);
 	});
 
-	it("honors explicit output budgets and the effective served-window boundary", () => {
+	it("resolves model, fallback, explicit, and served-window output budgets", () => {
 		type Model = Parameters<typeof remainingContextMaxTokens>[0];
 		type Context = Parameters<typeof remainingContextMaxTokens>[1];
-		setGlobalDefaultMaxOutputTokens(32_768);
-		const model = { contextWindow: 131_072, maxTokens: 131_072 } as Model;
+		const model = { contextWindow: 262_144, maxTokens: 131_072 } as Model;
+		const unknownCap = { contextWindow: 262_144, maxTokens: 0 } as Model;
+		const servedWindowModel = { contextWindow: 131_072, maxTokens: 131_072 } as Model;
 		const empty = { systemPrompt: "", messages: [], tools: [] } as unknown as Context;
 		const loaded = { systemPrompt: "x".repeat(480_000), messages: [], tools: [] } as unknown as Context;
 
+		setGlobalDefaultMaxOutputTokens(0);
+		strictEqual(remainingContextMaxTokens(model, empty, undefined), 131_072);
+		strictEqual(remainingContextMaxTokens(unknownCap, empty, undefined), 32_768);
+		setGlobalDefaultMaxOutputTokens(8_192);
+		strictEqual(remainingContextMaxTokens(model, empty, undefined), 8_192);
 		strictEqual(remainingContextMaxTokens(model, empty, { maxTokens: 4_096 }), 4_096);
-		strictEqual(remainingContextMaxTokens(model, loaded, undefined), 10_048);
+		setGlobalDefaultMaxOutputTokens(32_768);
+		strictEqual(remainingContextMaxTokens(servedWindowModel, loaded, undefined), 10_048);
 	});
 
 	it("resets process totals and reseeds only completed calls from the resumed ledger", () => {

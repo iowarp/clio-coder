@@ -239,7 +239,7 @@ chat:
     cycleSet: []
     favorites: []
     recentLimit: 12
-  maxOutputTokens: 32768
+  maxOutputTokens: 0
   prewarm: true
 
 fleet:
@@ -434,12 +434,12 @@ block. Set them in LM Studio&#39;s My Models load settings or with <code>lms loa
 <a href="https://lmstudio.ai/docs/typescript/api-reference/llm-load-model-config">https://lmstudio.ai/docs/typescript/api-reference/llm-load-model-config</a>. Clio reads back the load
 configuration that <code>GET /api/v1/models</code> exposes instead of pretending it applied settings the REST
 load endpoint did not accept (<a href="https://lmstudio.ai/docs/developer/rest/list">https://lmstudio.ai/docs/developer/rest/list</a>).</p>
-<p><code>chat.maxOutputTokens</code> is a global output budget requested for every turn
-(default <code>32768</code>). At request time it is clamped to the model&#39;s known
-max-output cap and the remaining context window. A per-target
-<code>capabilities.maxTokens</code> override still records the model&#39;s true cap. Set
-<code>chat.maxOutputTokens: 0</code> to disable the global default and fall back to
-per-model caps only.</p>
+<p><code>chat.maxOutputTokens</code> is a global output budget requested for every turn. Its
+default <code>0</code> uses each model&#39;s known maximum-output cap, still clamped to the
+remaining context window. Models with no known cap use a 32,768-token ceiling
+instead of the whole remaining context window. A per-target
+<code>capabilities.maxTokens</code> override records the model&#39;s true cap. Set a positive
+value to impose a smaller global ceiling.</p>
 <p>The setting <code>fleet.retry.maxRetries</code> controls automated retries for retryable
 fleet failures. Setting it to <code>0</code> disables retries.</p>
 <p>The setting <code>fleet.permissions.mode</code> decides how noninteractive workers handle
@@ -707,8 +707,8 @@ this guide remain the canonical version-2 paths in the inventory below.</p>
 </tr>
 <tr>
 <td><code>chat.maxOutputTokens</code></td>
-<td><code>32768</code></td>
-<td>integer ≥ 0</td>
+<td><code>0</code></td>
+<td>integer ≥ 0; <code>0</code> uses the model cap or the 32,768-token fallback when unknown</td>
 <td>next turn</td>
 </tr>
 <tr>
