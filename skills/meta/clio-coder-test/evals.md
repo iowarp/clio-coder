@@ -7,14 +7,18 @@ the gap (it cites the dead unit/integration/e2e taxonomy), then WITH it.
 Prompt: "I changed pure logic in `src/domains/dispatch/validation.ts`. What do I
 run and why?"
 Expected:
-- `npm run test:file -- 'tests/contracts/**/*.test.ts'` (and `npm run lint` if imports changed).
+- Locates the closest contract coverage and starts with
+  `npm run test:file -- tests/contracts/dispatch-admission.test.ts`, adding
+  other dispatch files only when the changed path reaches them.
+- Runs `npm run lint` if imports changed.
 - Explains contracts import `src` via tsx, so no build is needed.
 - Does NOT suggest `test:unit` / `test:e2e` (those don't exist).
 
 ## T2 — CLI change needs a build
-Prompt: "I edited `src/cli/skills.ts`. How do I verify end-to-end?"
+Prompt: "I edited `src/cli/run.ts`. How do I verify end-to-end?"
 Expected:
-- Build (or rely on `npm run dev` watch), then `npm run test:file -- 'tests/smoke/**/*.test.ts'`.
+- Builds (or relies on `npm run dev` watch), then starts with
+  `npm run test:file -- tests/smoke/cli-core.test.ts`.
 - Explains smoke spawns `dist/cli/index.js`, so it only sees built code.
 
 ## T3 — hot reload
@@ -33,7 +37,8 @@ Expected:
   suggest a `biome-ignore` or exclude.
 
 ## Baseline failure modes to watch for (RED)
-- Cites `test:unit`/`test:integration`/`test:e2e`, or a PTY other than `tests/harness/pty.ts`.
+- Cites `test:unit`/`test:integration`/`test:e2e`, the deleted shared spawn
+  helper, or the deleted PTY harness.
 - Claims smoke tests run against source (they run against `dist/`).
 - Invents a hot-reload feature that reloads a running session's code.
 

@@ -190,13 +190,13 @@
 				"Clio contribution boundary"
 			],
 			"sourceUrl": "https://github.com/iowarp/clio-coder/tree/main/skills/meta/clio-coder-dev",
-			"version": "0.3.0",
+			"version": "0.4.0",
 			"audit": "pass",
 			"category": "meta"
 		},
 		{
 			"name": "clio-coder-test",
-			"description": "Verifies a Clio Coder source change against the real test harness: the contract, smoke, and boundary layers, which to run for a change, the mock-provider and ACP-over-stdio harness, and the hot-reload dev loop. Not for deciding what may change; use clio-coder-dev.",
+			"description": "Verifies a Clio Coder source change against the current contract, smoke, boundary, and application test lanes, including temporary-state and local-provider harnesses. Not for deciding what may change; use clio-coder-dev.",
 			"triggers": [
 				"test Clio Coder",
 				"verify a Clio source change",
@@ -205,7 +205,7 @@
 				"Clio mock provider harness"
 			],
 			"sourceUrl": "https://github.com/iowarp/clio-coder/tree/main/skills/meta/clio-coder-test",
-			"version": "0.2.0",
+			"version": "0.3.0",
 			"audit": "pass",
 			"category": "meta"
 		},
@@ -266,7 +266,7 @@
 				"prune a skill body"
 			],
 			"sourceUrl": "https://github.com/iowarp/clio-coder/tree/main/skills/meta/skill-craft",
-			"version": "0.2.0",
+			"version": "0.3.0",
 			"audit": "pass",
 			"category": "meta"
 		},

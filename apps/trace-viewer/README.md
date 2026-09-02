@@ -14,8 +14,9 @@ npm run trace:ui -- --db /path/to/trace.sqlite --port 4600
 
 The server binds only to `127.0.0.1`. It accepts GET/HEAD, opens the database
 with SQLite's read-only flag, refuses unknown schema versions, and serves the
-rowid-cursor polling contract from `docs/architecture/trace-store.md`. The browser polls a
-running run every 500 ms; finished history uses the same API and reducer.
+[rowid-cursor polling contract](../../docs/architecture/trace-store.md). The
+browser polls a running run every 500 ms; finished history uses the same API
+and reducer.
 
 The viewer reads `trace.sqlite` plus two read-only sidecars beside it in the
 same state directory: `receipts/<runId>.json` and `evidence-index.json`, which

@@ -22,10 +22,10 @@ auto-loads. That gap is deliberate.
 |---|---|---|
 | Location | a discovery root above | `skills/<category>/<name>/` in this repo |
 | Author | any user or harness | Clio authors, reviewed |
-| Provenance | none required | `clio:` block with `registry-id` + `source-url` + `audit: pass` |
+| Provenance | none required | `clio-coder:` block with `registry-id` + `source-url` + `audit: pass` |
 | Auto-loaded | yes | no, as it must be installed |
 
-"Approved" is visible in the frontmatter: a maintainer set `clio.audit: pass`
+"Approved" is visible in the frontmatter: a maintainer set `clio-coder.audit: pass`
 and a `version`. A skill a user wrote themselves carries none of those fields.
 
 ## Catalog
@@ -105,7 +105,8 @@ loads, Clio enforces that declaration at tool admission until the turn (or
 worker run) ends: calls outside the merged surface are blocked with reason
 code `skill_surface`, with `context` and `ask_user` always admitted. A
 skill can narrow its tool surface but never grant tools the host would not
-allow. Full semantics: docs/architecture/safety-model.md, "Skill tool surface narrowing".
+allow. See [Skill tool surface narrowing](../docs/architecture/safety-model.md#skill-tool-surface-narrowing)
+for the full semantics.
 
 ## Install (activate a marketplace skill)
 
@@ -140,8 +141,8 @@ teammate cloning it gets the same behavior.
 
 | Set | Scope | Why |
 |---|---|---|
-| `context-prime`, `context-handoff` | user | Session boundaries follow the operator across every repo; a handoff written in one project is read at the start of the next. |
-| `find-skills`, `skill-craft` | user | Discovery and authoring are things you do to your toolkit, not things a project does. Installing `find-skills` at user scope is also what makes the Clio copy outrank the compat-root one. |
+| `context-prime`, `context-handoff` | user | The workflow is useful in every repo, while each handoff remains scoped to the project where it was written. |
+| `find-skills`, `skill-craft` | user | Discovery and authoring are things you do to your toolkit, not things a project does. A user install outranks copies in shared user compatibility roots. |
 | `credentials` | user | Credential handling is a personal-machine discipline; a repo does not get to define it. |
 | `clio-coder-dev`, `clio-coder-test` | project, in this repo only | They describe Clio's own source tree. Elsewhere they are noise. |
 | `--category git` | project, where `git-master` is used | Branch, PR, and worktree conventions are the repository's, and the recipe binds them by name. |
@@ -150,8 +151,11 @@ teammate cloning it gets the same behavior.
 | `--category coding` | project | `tdd` and `coding-standards` follow the language and the test seams of the checkout. |
 | `--category workflow` | either | `grill-me` and `cut-it` travel with the operator; `design-council` is worth pinning per project when the project has recurring design forks. |
 
-When both scopes carry the same name, project wins: `.clio-coder/skills` outranks the
-user root, which outranks every compat root.
+Collision precedence from lowest to highest is extension, shared user
+compatibility roots, the Clio user root, project compatibility roots,
+`.clio-coder/skills`, then an explicit CLI skill path. Project compatibility
+roots are model-visible only after the project-import trust opt-in; their
+collision rank is still above the user root.
 
 After install, confirm Clio sees it:
 
@@ -176,21 +180,23 @@ both route through `clio-coder skills`. A community skill of the same name is
 commonly present in the compat roots (`~/.agents/skills`,
 `~/.claude/skills`) and drives the external `npx skills` installer, which
 bypasses Clio. Compat roots stay enabled, and the loader resolves name
-collisions by precedence: the Clio user root and `.clio-coder/skills` outrank the
-compat roots. Install the catalog copy so it wins:
+collisions by the precedence above. A user install beats the shared user
+compatibility copy. A project install beats both project and user
+compatibility copies. Install at the scope where the catalog copy must win:
 
 ```bash
-clio-coder skills install find-skills --user   # or --project for one repo
+clio-coder skills install find-skills --user
+clio-coder skills install find-skills --project  # strongest discovered project copy
 ```
 
 ## Publishing: the marketplace index
 
 `npm run skills:pin` writes two files. `registry.yaml` pins content hashes and
 is what drift is measured against. `skill-marketplace.json` is the published
-index: one entry per skill with `name`, `description`, `sourceUrl` (the
-skill's own `clio.source-url`), `version`, `audit`, and `category`. It carries
-no hashes, because duplicating them into a second published artifact only
-creates a way for the two to disagree.
+index: one entry per skill with `name`, `description`, optional `triggers`,
+`sourceUrl` (the skill's own `clio-coder.source-url`), `version`, `audit`, and
+`category`. It carries no hashes, because duplicating them into a second
+published artifact only creates a way for the two to disagree.
 
 A Clio install anywhere points at it and gets bare-name installs from this
 catalog:
@@ -216,12 +222,12 @@ The frontmatter contract has two layers, and the split is the point:
 - **Core keys stay community-standard.** `name`, `description`, `version`,
   `license`, and `allowed-tools` mean exactly what Claude Code and other agent
   loaders expect. No Clio-specific key ever lives at the top level.
-- **Everything Clio-specific nests under one reserved `clio:` mapping.**
+- **Everything Clio-specific nests under one reserved `clio-coder:` mapping.**
   Registry identity, provenance, audit and eval status, agent bindings, model
   guidance — all of it.
 
 The invariant this buys: a Clio skill dropped into any `.claude/skills`
-directory loads and works in Claude Code, which ignores the `clio:` block as
+directory loads and works in Claude Code, which ignores the `clio-coder:` block as
 an unknown key. Loaded by Clio Coder, the same file carries its full
 marketplace metadata. One file, no forks, no lossy export.
 
@@ -250,7 +256,7 @@ clio-coder:
 ---
 ```
 
-Field semantics inside `clio:`:
+Field semantics inside `clio-coder:`:
 
 - `registry-id` names the audited catalog a skill claims membership of; it is
   content, participates in the pinned hash, and survives installs.
@@ -282,16 +288,16 @@ Field semantics inside `clio:`:
 `requires: [skill:<name>, ...]` stays top-level: Clio's loader consumes it for
 dependency warnings, and other harnesses ignore it like any unknown key.
 
-Legacy flat keys (`registry-id`, `source-url`, `audit` at the top level) are
-still read by the loader as a fallback for copies installed before the nested
-form existed; the catalog itself must use the nested form, and `npm run
+The deprecated nested `clio:` mapping and legacy flat keys (`registry-id`,
+`source-url`, `audit` at the top level) are still read as fallbacks for older
+installed copies. The catalog itself must use `clio-coder:`, and `npm run
 skills:check` enforces that.
 
 ### Versioning policy
 
-`version` describes the skill as a working instrument, and the pinned hash
-already records every byte, so the version only moves when the thing an
-operator runs changes:
+`version` describes the skill as a working instrument. The registry separately
+hashes the normalized contents of `SKILL.md`; it does not hash sibling files.
+Move the version whenever the workflow an operator runs changes:
 
 | Change | Version |
 |---|---|
@@ -307,11 +313,11 @@ a broken link or a typo in a step. Nothing in this catalog is 1.0: a major bump
 is reserved for a skill whose triggers change enough that an operator relying on
 the old one would be surprised.
 
-Metadata changes do not bump because `registry.yaml` pins a
-provenance-stripped hash, so content edits are already caught byte-exactly, and
-raising a version for an `eval-status` line would make the number mean two
-different things at once. The trade is deliberate: the version is coarse, the
-hash is exact, and drift detection uses the hash.
+Lifecycle metadata changes do not bump the workflow version. The normalized
+`SKILL.md` hash catches non-stripped frontmatter and body edits; install fields
+such as `source-url` and `audit` are stripped. A sibling `references/`,
+`scripts/`, or `evals.md` change is represented by the required version change
+inside `SKILL.md`, because sibling bytes are not hashed directly.
 
 ## Claude Code interop
 
@@ -319,7 +325,7 @@ The invariant is that a catalog skill dropped unmodified into `.claude/skills`
 loads and runs in Claude Code. Verified against Claude Code 2.1.231:
 `skills/git/ship` copied into a scratch project's
 `.claude/skills/`, invoked headlessly, loaded through the `Skill` tool and
-answered a question about its own body. The `clio:` block is an unknown
+answered a question about its own body. The `clio-coder:` block is an unknown
 frontmatter key there and is ignored.
 
 **`allowed-tools` means the opposite thing in each harness, and that is the one
@@ -355,7 +361,7 @@ The rest of the surface, read from the same build:
 | `allowed-tools` | Grants, as above. Accepts a YAML list or one comma/space-separated string, same as Clio. |
 | `disallowed-tools` | Not read. A Clio denial is not enforced there. |
 | `requires:` | Not read; ignored as an unknown key, so a dependency warning is Clio-only. |
-| `clio:` | Not read; ignored as an unknown key. This is the invariant. |
+| `clio-coder:` | Not read; ignored as an unknown key. This is the invariant. |
 | Unparseable frontmatter | The per-skill load is wrapped in a bare catch: the skill is skipped silently, with no diagnostic. Clio warns instead. |
 | Size | No cap on SKILL.md. Clio rejects over 1 MiB and warns over 50 KiB, the activation delivery cap. |
 | `references/`, `scripts/` subfolders | Not enumerated at load time; they are files the body tells the model to read, which works in both. |
@@ -372,7 +378,7 @@ A skill is "approved for the marketplace" when a maintainer:
 1. Reviews `SKILL.md` against [`skill-craft`](meta/skill-craft/) (trigger-only
    description, checkable completion criteria, progressive disclosure, pruning
    pass, evals present).
-2. Confirms it carries the frontmatter spec above with `clio.audit: pass`.
+2. Confirms it carries the frontmatter spec above with `clio-coder.audit: pass`.
 3. Sets / bumps `version`.
 
 Each skill ships an `evals.md` recording the baseline scenarios it was tested
@@ -398,10 +404,11 @@ catalog where any skill is missing the required frontmatter, `audit: pass`, or
 its `evals.md`, declares a tool name Clio does not have, or carries a
 `source-url` that no longer ends with its catalog path. `npm run skills:check`
 (run in CI) fails on any drift between the catalog and either generated file,
-`registry.yaml` or `skill-marketplace.json`. Pinned hashes are provenance-stripped
-(install-lifecycle stamps like `installed-at` do not count as drift; content
-and registry-identity edits do), so a copy installed via `clio-coder skills install`
-still verifies against its audited source at activation.
+`registry.yaml` or `skill-marketplace.json`. Each pin covers the normalized
+`SKILL.md`, not the whole skill directory. Install-lifecycle stamps such as
+`installed-at` do not count as drift; body, version, and registry-identity
+edits do. A copy installed via `clio-coder skills install` therefore still
+verifies against its audited source at activation.
 
 A skill may declare typed dependencies with `requires: [skill:<name>, ...]`
 frontmatter; the loader warns at load time when a required skill is not

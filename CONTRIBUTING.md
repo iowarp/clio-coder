@@ -49,12 +49,13 @@ node dist/cli/index.js run \
 
 ## Testing conventions
 
-CLI-facing contract tests drive the built binary through the child-process
-harness in `tests/harness/spawn.ts`: `makeScratchHome()` gives the run an
-isolated `CLIO_CODER_HOME`, and `runCli(args, { env, cwd })` spawns `dist/cli` and
-returns its captured `stdout`, `stderr`, and exit code. Rebuild `dist/` with
-`npm run build` after changing CLI source, since these tests exercise the
-built output.
+Contract tests import `src/` directly through tsx. The test scripts preload
+`tests/harness/tmp-root.ts`, which gives the run one guarded temporary root,
+and stateful tests use the helpers in `tests/harness/scratch-env.ts` to isolate
+Clio's data, config, state, and cache directories. Smoke tests exercise the
+built `dist/cli/index.js`; their files own the process drivers needed for each
+boundary. Rebuild `dist/` after changing CLI or entry-point source before
+running a focused smoke test.
 
 Do not assert a CLI subcommand's output by capturing `process.stdout.write`
 in-process. In-process stdout capture fights the node:test spec reporter:
@@ -67,8 +68,11 @@ output in-process while the reporter runs.
 ## Releasing
 
 Releases are cut from a tag. The GitHub release is created by CI; the npm
-publish is a manual maintainer step. The ordered procedure for a cut lives in
-[docs/history/release-cut-checklist.md](docs/history/release-cut-checklist.md).
+publish is a manual maintainer step. The current procedure is the sequence
+below together with `.github/workflows/release.yml` and
+`scripts/check-release.mjs`. The
+[v0.4.1 release-cut checklist](docs/history/release-cut-checklist.md) is a
+historical record, not a reusable current checklist.
 
 1. During development, keep the top changelog section at `## Unreleased` and
    bump `version` in `package.json` when opening the release branch. Before the
@@ -129,18 +133,26 @@ that needs them runs.
 
 ## Architecture Invariants
 
-The boundary checker enforces these:
+The boundary checker enforces these six rules:
 
-- Engine boundary: only `src/engine/**` value-imports pi SDK packages
-  (`@earendil-works/pi-*`, pinned in `package.json`).
-- Worker isolation: `src/worker/**` value-imports only the worker-safe
-  provider runtime rehydration modules under `src/domains/providers/**`;
-  all other worker domain imports must be type-only.
-- Domain independence: cross-domain flows go through `SafeEventBus`.
+- Engine boundary: only `src/engine/**` imports the
+  `@earendil-works/pi-*` packages, including type-only imports.
+- Worker isolation: `src/worker/**` may value-import only the declared
+  provider runtime rehydration seams under `src/domains/providers/**`; all
+  other worker imports from domains must be type-only.
+- Domain independence: one domain never imports another domain's
+  `extension.ts`; cross-domain behavior uses public contracts and event buses.
+- Tool substrate: `src/tools/**` never imports `src/interactive/**`.
+- Entry-point composition: `src/interactive/turn-*.ts` and `chat-loop.ts` never
+  import `src/entry/**`.
+- Stage 0 closure: external value importers enter the protected instant-shell
+  graph only through declared seams, and those seams may not create an
+  undeclared edge back into the closure.
 
 The checker runs as part of `npm run lint` (`scripts/check-hygiene.ts` imports
 `tests/boundaries/check-boundaries.ts`), so a boundary violation fails the
-same lint every PR runs.
+same lint every PR runs. The full definitions and exceptions live in
+[Architecture](docs/architecture/architecture.md#boundary-invariants).
 
 ## Branches
 
@@ -212,19 +224,24 @@ Agents should:
 `skills/` is the curated skills marketplace: maintainer-approved `SKILL.md`
 guides, distinct from the runtime skills any user can drop into a discovery
 root. It is not itself a discovery root, so nothing here auto-loads; skills
-activate only via `clio-coder skills install <name>`.
+activate after `clio-coder skills install <name>` or from an explicit
+`clio-coder --skill skills/<category>/<name>/SKILL.md` development path.
 
 To propose a skill:
 
-1. Add `skills/<name>/SKILL.md`. Follow the `superpowers:writing-skills`
-   methodology and Anthropic's skill-authoring guidance: a trigger-rich
-   `description` (third person, "Use when ..."), one excellent example, and
-   progressive disclosure (push heavy reference into `references/`).
-2. Include the provenance frontmatter (`registry-id`, `source-url`, `version`,
-   `license`) and ship an `evals.md` with the baseline scenarios you tested.
-3. Verify locally: `clio-coder skills validate skills/<name>/SKILL.md`, then
-   `clio-coder skills install <name>` and `clio-coder skills list`.
-4. Open a PR. A maintainer reviews against the rubric, then sets `audit: pass`
-   and the `version` to approve it for the catalog.
+1. Add `skills/<category>/<name>/SKILL.md`. Follow the local
+   [`skill-craft`](skills/meta/skill-craft/) guidance: put trigger phrases in
+   `triggers`, keep `description` to the job and explicit routing boundaries,
+   and move conditional detail into `references/`.
+2. Include the core `name`, `description`, `version`, and `license` fields plus
+   a nested `clio-coder:` block with `registry-id`, `source-url`, `provenance`,
+   and `eval-status`. Ship an `evals.md` with the baseline scenarios.
+3. Verify locally with
+   `clio-coder skills validate skills/<category>/<name>/SKILL.md`.
+4. Install the candidate by name and confirm it appears with
+   `clio-coder skills list`.
+5. Open a PR. A maintainer reviews against the rubric, sets `audit: pass`,
+   approves the catalog version, then regenerates and checks the catalog with
+   `npm run skills:pin` and `npm run skills:check`.
 
 Full catalog conventions and install options: [skills/README.md](skills/README.md).

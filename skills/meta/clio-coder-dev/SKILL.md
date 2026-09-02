@@ -7,7 +7,7 @@ triggers:
   - edit Clio skills or agents
   - evolve Clio tools or prompts
   - Clio contribution boundary
-version: 0.3.0
+version: 0.4.0
 license: Apache-2.0
 clio-coder:
   registry-id: iowarp/clio-coder
@@ -72,9 +72,13 @@ Follow in order for every change:
 3. **Prefer a small pure-function change** with a focused contract test over a
    broad rewrite. Side effects live in `extension.ts`; testable policy lives
    in sibling pure modules.
-4. **Respect the hard invariants** (rule1/2/3): no value-import of `pi-*`
-   outside `src/engine/**`; no importing another domain's `extension.ts`; the
-   worker never imports domains. Add or reuse a contract instead.
+4. **Respect all six boundary invariants.** Pi SDK imports stay in
+   `src/engine/**`; worker value imports from domains stay within the declared
+   provider rehydration seams; domains never import another domain's
+   `extension.ts`; tools never import the interactive layer;
+   `src/interactive/turn-*.ts` and `chat-loop.ts` never import entry modules;
+   Stage 0 is entered only through declared seams. Add or reuse a contract
+   instead.
 5. **Validate narrowly, then report.** Run the narrowest meaningful layer per
    `clio-coder-test`, then state exactly what ran and what remains unverified. Done
    when the report names both.

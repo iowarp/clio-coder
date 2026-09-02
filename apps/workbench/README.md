@@ -28,11 +28,12 @@ deno task start --port=0 --open      # any free port, then hand the URL to xdg-o
 `main.ts` accepts `--port=N`, `--open`, `--smoke-ms=N`, `--version`, and `--help`. The server binds only to `127.0.0.1`,
 and each browser tab authenticates with the token the page carries, so a second machine cannot reach it.
 
-Local state (recent projects, session labels, layout) lives in `$CLIO_CODER_GUI_STATE_DIR`, else
-`$XDG_STATE_HOME/clio-coder-gui`, else `~/.local/state/clio-coder-gui`. The deprecated `$CLIO_WORKBENCH_STATE_DIR`
-override remains a read-compatible fallback for two minor releases and emits one warning. On first start after an
-upgrade, the GUI atomically moves a lone `clio-workbench` state root. If legacy and canonical roots both exist, it backs
-up both `projects.json` inputs and merges valid recent projects by canonical path and newest `lastOpenedAt`.
+Local GUI state currently contains the recent-project list. Its root is the absolute `$CLIO_CODER_GUI_STATE_DIR` value,
+then the absolute deprecated `$CLIO_WORKBENCH_STATE_DIR` value, then absolute `$XDG_STATE_HOME/clio-coder-gui`, and
+finally `~/.local/state/clio-coder-gui`. Relative overrides are ignored. The deprecated override remains read-compatible
+for two minor releases and emits one warning. On first start after an upgrade, the GUI atomically moves a lone
+`clio-workbench` state root. If legacy and canonical roots both exist, it backs up both `projects.json` inputs and merges
+valid recent projects by canonical path and newest `lastOpenedAt`.
 
 The local host/renderer bridge emits `clio-coder.state`, `clio-coder-*` error codes, and
 `clioCoder`/`clioCoderVersion`/`clioCoderCommit` provenance fields. Its bounded readers accept and normalize the
@@ -114,4 +115,5 @@ cancels deliberately.
   acceptance floor every UI change must keep.
 - `HARNESS_COVERAGE.md` is the ledger of which Clio Coder harness facts reach the GUI through a typed boundary and which
   do not.
+- `PARITY.md` tracks the remaining product-parity work against the typed host and renderer boundary.
 - `PERFORMANCE.md` holds the measured rendering numbers, the exact workload, and what remains unmeasured.

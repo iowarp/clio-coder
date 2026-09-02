@@ -4376,7 +4376,7 @@
 <tr>
 <td><code>quirks</code></td>
 <td></td>
-<td>Free-form object per entry; <code>extractLocalModelQuirks</code> narrows only <code>sampling</code> and <code>thinking</code> into <code>model.clioCoder.quirks</code>, and every other key is provenance.</td>
+<td>Free-form object per entry; <code>extractLocalModelQuirks</code> narrows <code>sampling</code>, <code>thinking</code>, and accepted chat-template kwargs into <code>model.clioCoder.quirks</code>, while unrecognized keys remain provenance.</td>
 </tr>
 <tr>
 <td><code>quirks.chatTemplate</code></td>
@@ -4594,11 +4594,6 @@
 <td>Sampler profile applied when the thinking level is not <code>off</code>.</td>
 </tr>
 <tr>
-<td><code>quirks.sampling.thinking.gracePeriod</code></td>
-<td></td>
-<td>Documented grace tokens after the reasoning budget; it is not a <code>SamplingProfile</code> field, so the extractor drops it and nothing in src reads it.</td>
-</tr>
-<tr>
 <td><code>quirks.sampling.thinking.minP</code></td>
 <td></td>
 <td>Sent as <code>min_p</code> in <code>samplingParams</code> on OpenAI-compatible requests while thinking is active; Ollama native ignores it.</td>
@@ -4612,6 +4607,11 @@
 <td><code>quirks.sampling.thinking.reasoningBudget</code></td>
 <td></td>
 <td>Documented per-request reasoning budget; not a <code>SamplingProfile</code> field, so the extractor drops it and budgets come from <code>quirks.thinking.budgetByLevel</code> instead.</td>
+</tr>
+<tr>
+<td><code>quirks.sampling.thinking.repeatPenalty</code></td>
+<td></td>
+<td>Sent as <code>repeat_penalty</code> on OpenAI-compatible and Ollama requests while thinking is active; preferred over <code>repetitionPenalty</code> when both are present.</td>
 </tr>
 <tr>
 <td><code>quirks.sampling.thinking.repetitionPenalty</code></td>
@@ -4652,6 +4652,51 @@
 <td><code>quirks.thinking.budgetByLevel.&lt;budgetByLevel&gt;</code></td>
 <td></td>
 <td>Integer budget for one of <code>minimal</code>, <code>low</code>, <code>medium</code>, <code>high</code>, <code>xhigh</code>; levels without an entry are not offered.</td>
+</tr>
+<tr>
+<td><code>quirks.thinking.chatTemplateKwargs</code></td>
+<td></td>
+<td>Family-specific static and thinking-level template kwargs extracted into the request capability. Supported OpenAI-compatible adapters emit them as <code>chat_template_kwargs</code>; native LM Studio suppresses the map, and mechanism-owned thinking controls win key collisions.</td>
+</tr>
+<tr>
+<td><code>quirks.thinking.chatTemplateKwargs.byLevel</code></td>
+<td></td>
+<td>Declares one template kwarg whose value is selected from the effective thinking level, falling back to the configured level when needed.</td>
+</tr>
+<tr>
+<td><code>quirks.thinking.chatTemplateKwargs.byLevel.key</code></td>
+<td></td>
+<td>Non-empty wire key for the level-selected kwarg, such as <code>reasoning_strength</code>.</td>
+</tr>
+<tr>
+<td><code>quirks.thinking.chatTemplateKwargs.byLevel.lmstudio</code></td>
+<td></td>
+<td>Free-text runtime annotation retained in the extracted quirks but not used to build a request; native LM Studio suppresses all <code>chat_template_kwargs</code>.</td>
+</tr>
+<tr>
+<td><code>quirks.thinking.chatTemplateKwargs.byLevel.values</code></td>
+<td></td>
+<td>Map from accepted Clio thinking levels to non-empty strings or finite numbers; for an <code>effort-levels</code> family, its keys also constrain the levels offered.</td>
+</tr>
+<tr>
+<td><code>quirks.thinking.chatTemplateKwargs.byLevel.values.&lt;thinkingLevel&gt;</code></td>
+<td></td>
+<td>Wire value for one of <code>off</code>, <code>minimal</code>, <code>low</code>, <code>medium</code>, <code>high</code>, <code>xhigh</code>, <code>max</code>; unsupported keys and invalid values are dropped.</td>
+</tr>
+<tr>
+<td><code>quirks.thinking.chatTemplateKwargs.lmstudio</code></td>
+<td></td>
+<td>String or string map retained as runtime provenance; request builders do not branch on it, and native LM Studio omits the template-kwargs map.</td>
+</tr>
+<tr>
+<td><code>quirks.thinking.chatTemplateKwargs.static</code></td>
+<td></td>
+<td>Literal template kwargs merged into every request for the family before mechanism-owned thinking controls. Values may be booleans, non-empty strings, or finite numbers.</td>
+</tr>
+<tr>
+<td><code>quirks.thinking.chatTemplateKwargs.static.&lt;chatTemplateKwargs&gt;</code></td>
+<td></td>
+<td>One literal wire key and value, such as <code>force_nonempty_content: true</code> or numeric <code>reasoning_budget: 16384</code>.</td>
 </tr>
 <tr>
 <td><code>quirks.thinking.effortByLevel</code></td>

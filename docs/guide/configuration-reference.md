@@ -1081,7 +1081,7 @@ Keys of the local-model knowledge base in `src/domains/providers/models/local-mo
 | `capabilities.vision` |  | Boolean that sets the synthesized model's `input` to text plus image so image blocks are accepted. |
 | `family` |  | Canonical family id; a pattern equal to it counts as a `family` match, and the id lands on `model.clioCoder.family`, where `openai-gpt-oss` selects Harmony handling. |
 | `matchPatterns` |  | Lowercase substrings matched against the wire model id; the longest matching pattern across the whole knowledge base selects the entry. |
-| `quirks` |  | Free-form object per entry; `extractLocalModelQuirks` narrows only `sampling` and `thinking` into `model.clioCoder.quirks`, and every other key is provenance. |
+| `quirks` |  | Free-form object per entry; `extractLocalModelQuirks` narrows `sampling`, `thinking`, and accepted chat-template kwargs into `model.clioCoder.quirks`, while unrecognized keys remain provenance. |
 | `quirks.chatTemplate` |  | Names the chat-template dialect (`gemma-channel`) a family uses; provenance only; nothing in src reads it. |
 | `quirks.gpuTiers` |  | Map of GPU memory tier (`32gb`) to a free-text serving recommendation; provenance only; nothing in src reads it. |
 | `quirks.gpuTiers.<gpuTiers>` |  | One tier's recommendation text keyed by memory class; provenance only; nothing in src reads it. |
@@ -1125,10 +1125,10 @@ Keys of the local-model knowledge base in `src/domains/providers/models/local-mo
 | `quirks.sampling.instruct.topK` |  | Sent as `top_k` when thinking is off on OpenAI-compatible and Ollama requests. |
 | `quirks.sampling.instruct.topP` |  | Sent as `top_p` when thinking is off on OpenAI-compatible and Ollama requests. |
 | `quirks.sampling.thinking` |  | Sampler profile applied when the thinking level is not `off`. |
-| `quirks.sampling.thinking.gracePeriod` |  | Documented grace tokens after the reasoning budget; it is not a `SamplingProfile` field, so the extractor drops it and nothing in src reads it. |
 | `quirks.sampling.thinking.minP` |  | Sent as `min_p` in `samplingParams` on OpenAI-compatible requests while thinking is active; Ollama native ignores it. |
 | `quirks.sampling.thinking.presencePenalty` |  | Sent as `presence_penalty` while thinking is active on OpenAI-compatible and Ollama requests. |
 | `quirks.sampling.thinking.reasoningBudget` |  | Documented per-request reasoning budget; not a `SamplingProfile` field, so the extractor drops it and budgets come from `quirks.thinking.budgetByLevel` instead. |
+| `quirks.sampling.thinking.repeatPenalty` |  | Sent as `repeat_penalty` on OpenAI-compatible and Ollama requests while thinking is active; preferred over `repetitionPenalty` when both are present. |
 | `quirks.sampling.thinking.repetitionPenalty` |  | HF spelling of `repeatPenalty` for thinking mode, sent as `repeat_penalty`. |
 | `quirks.sampling.thinking.temperature` |  | Request `temperature` while thinking is active, applied only if the caller set none. |
 | `quirks.sampling.thinking.topK` |  | Sent as `top_k` while thinking is active on OpenAI-compatible and Ollama requests. |
@@ -1137,6 +1137,15 @@ Keys of the local-model knowledge base in `src/domains/providers/models/local-mo
 | `quirks.thinking` |  | Typed thinking-control block extracted into `model.clioCoder.quirks.thinking`; it decides which thinking fields a request carries and how the TUI labels levels. |
 | `quirks.thinking.budgetByLevel` |  | Map of Clio thinking level to a token budget for the `budget-tokens` mechanism; it feeds `thinking_token_budget` on vLLM and Pi `thinkingBudgets`, and limits the selectable levels. |
 | `quirks.thinking.budgetByLevel.<budgetByLevel>` |  | Integer budget for one of `minimal`, `low`, `medium`, `high`, `xhigh`; levels without an entry are not offered. |
+| `quirks.thinking.chatTemplateKwargs` |  | Family-specific static and thinking-level template kwargs extracted into the request capability. Supported OpenAI-compatible adapters emit them as `chat_template_kwargs`; native LM Studio suppresses the map, and mechanism-owned thinking controls win key collisions. |
+| `quirks.thinking.chatTemplateKwargs.byLevel` |  | Declares one template kwarg whose value is selected from the effective thinking level, falling back to the configured level when needed. |
+| `quirks.thinking.chatTemplateKwargs.byLevel.key` |  | Non-empty wire key for the level-selected kwarg, such as `reasoning_strength`. |
+| `quirks.thinking.chatTemplateKwargs.byLevel.lmstudio` |  | Free-text runtime annotation retained in the extracted quirks but not used to build a request; native LM Studio suppresses all `chat_template_kwargs`. |
+| `quirks.thinking.chatTemplateKwargs.byLevel.values` |  | Map from accepted Clio thinking levels to non-empty strings or finite numbers; for an `effort-levels` family, its keys also constrain the levels offered. |
+| `quirks.thinking.chatTemplateKwargs.byLevel.values.<thinkingLevel>` |  | Wire value for one of `off`, `minimal`, `low`, `medium`, `high`, `xhigh`, `max`; unsupported keys and invalid values are dropped. |
+| `quirks.thinking.chatTemplateKwargs.lmstudio` |  | String or string map retained as runtime provenance; request builders do not branch on it, and native LM Studio omits the template-kwargs map. |
+| `quirks.thinking.chatTemplateKwargs.static` |  | Literal template kwargs merged into every request for the family before mechanism-owned thinking controls. Values may be booleans, non-empty strings, or finite numbers. |
+| `quirks.thinking.chatTemplateKwargs.static.<chatTemplateKwargs>` |  | One literal wire key and value, such as `force_nonempty_content: true` or numeric `reasoning_budget: 16384`. |
 | `quirks.thinking.effortByLevel` |  | Map of Clio thinking level to the vendor `reasoning_effort` string for the `effort-levels` mechanism; it sets `request.reasoningEffort` and limits the selectable levels. |
 | `quirks.thinking.effortByLevel.<effortByLevel>` |  | Effort string sent for one of `off`, `minimal`, `low`, `medium`, `high`, `xhigh`; levels without an entry are not offered. |
 | `quirks.thinking.guidance` |  | Two to five lines of model-stable thinking guidance rendered into the compiled system prompt's Runtime block through `thinkingGuidance`. |

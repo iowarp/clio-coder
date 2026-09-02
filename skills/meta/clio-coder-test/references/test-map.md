@@ -1,69 +1,96 @@
 # Where Clio's tests live
 
-Three layers under `tests/`. Add a new test next to the closest existing file;
-create a new file only for a genuinely new domain cluster.
+The root repository has contract and smoke tests under `tests/`; import
+boundaries run through the lint hygiene checker. Add a test beside the closest
+current behavior, and create a new file only for a genuinely new cluster.
 
 ## Layout
 
-| Layer | Path | Runner | Build needed |
+| Lane | Path | Runner | Build needed |
 |---|---|---|---|
-| contracts | `tests/contracts/*.test.ts` | `npm run test:file -- <glob>` (tsx + scratch root) | no (imports `src`) |
-| smoke | `tests/smoke/*.test.ts` | `npm run test:file -- <glob>` | **yes** (spawns `dist/`) |
-| boundaries | `tests/boundaries/check-boundaries.ts` | `npm run lint` (hygiene) | no |
-| harness (not tests) | `tests/harness/*.ts` | imported by contracts and smoke | — |
+| Contracts | `tests/contracts/*.test.ts` | `npm run test:file -- <file-or-files>` through tsx and the temp-root preload | No; imports `src/` |
+| Smoke | `tests/smoke/*.test.ts` | `npm run test:file -- <file-or-files>` | Yes; spawns `dist/cli/index.js` |
+| Boundaries | `tests/boundaries/check-boundaries.ts` | `npm run lint` through `scripts/check-hygiene.ts` | No |
+| Root full suite | Contract and smoke files | `npm run test` | Yes for current smoke behavior |
+| Trace viewer | `apps/trace-viewer/tests/*.test.mjs` | `npm run test:trace-viewer` | No |
+| Workbench | `apps/workbench/tests/` | `deno task verify` from `apps/workbench` | The command builds the app |
 
-The harness modules: `spawn.ts` (run the built CLI with pipes), `scratch-env.ts`
-(isolated Clio home), `pty.ts` (a real pseudo-terminal), `openai-compat-fixture.ts`
-and `fake-lmstudio-server.ts` (stub providers), `fake-ssh.ts` (stub fleet node),
-`clock.ts` (steppable clock), plus dispatch, receipt, and module-graph helpers.
-Everything under `tests/` stubs the model. Real-model runs are
-`benchmarks/internal/` and never run under `npm test`.
+`npm run ci` orders typecheck, lint, skill-pin verification, build, the root
+suite, and trace-viewer tests. `npm run ci:release` adds the release audit. The
+Workbench gate is separate.
 
-## Contract test files
+## Contract files
 
-| Area | File |
+| Area | Current files under `tests/contracts/` |
 |---|---|
-| ACP contract | `tests/contracts/acp.test.ts` |
-| context bootstrap / CLIO-CODER.md parse+render | `tests/contracts/bootstrap.test.ts` |
-| config schema + hot-reload classification | `tests/contracts/config.test.ts` |
-| dispatch (validation / admission / ledger) | `tests/contracts/dispatch.test.ts` |
-| session / memory / evidence persistence | `tests/contracts/persistence.test.ts` |
-| prompt fragments + hashing | `tests/contracts/prompts.test.ts` |
-| provider catalog / matcher / resolver | `tests/contracts/providers.test.ts` |
-| safety classification | `tests/contracts/safety.test.ts` |
-| skills loader / collisions / provenance | `tests/contracts/skills.test.ts` |
-| skill activation + compaction interplay | `tests/contracts/skill-activation-compaction.test.ts` |
-| tool registry / names / profiles | `tests/contracts/tools.test.ts` |
+| Authentication | `auth-login-write-failure`, `auth-storage-durability` |
+| Context, session, and state | `context-lifecycle`, `memory-scope`, `project-bootstrap`, `session-durability`, `state-file-lock`, `task-board-done`, `working-set-core` |
+| Config, routing, and presentation | `footer-context-window`, `knob-aliases`, `pane-remedies`, `rendering-invariants`, `route-identity-keying`, `settings-migration` |
+| Dispatch, fleet, and workers | `dispatch-admission`, `dispatch-lifecycle`, `dispatch-schema`, `fleet-lifecycle`, `host-verification-batch`, `intent-requirements`, `worker-attestation-surface`, `worker-boundary` |
+| Prompts, engine loop, and middleware | `compact-prompt-contracts`, `engine-lifecycle`, `loop-detector`, `loop-guard-epoch`, `middleware-hooks`, `prompt-cache-correctness`, `prompt-prefix-layout`, `prompt-role-routing`, `prompt-session-snapshot`, `prompt-tool-hints` |
+| Providers and model policy | `gemma-channel-filter`, `llamacpp-router-probe`, `local-model-family-resolution`, `provider-context-boundary`, `provider-transport`, `synthesis-lock`, `thinking-off-wire` |
+| Safety and tools | `bash-exec-settlement`, `rejection-feedback`, `safe-resource-write`, `safety-gates`, `tool-boundaries` |
+| Evidence, eval, and release | `eval-boundary`, `evidence-integrity`, `metering-integrity`, `release-boundary` |
+| Extensions, interop, and skills | `extension-compatibility`, `extension-reload-coordinator`, `extension-reload-slash`, `extension-resources`, `extension-snapshot`, `interop-boundary`, `marketplace-offer`, `skill-install` |
+| Documentation server | `docs-server` |
 
-## Smoke + boundaries
+Append `.test.ts` to every stem in the table. Use `rg` over the files before
+choosing a lane; related behavior can span more than one focused contract.
 
-| Area | File |
+## Smoke files
+
+| Boundary | File under `tests/smoke/` |
 |---|---|
-| non-interactive CLI + ACP-over-stdio end-to-end | `tests/smoke/cli.test.ts` |
-| the package as installed from `npm pack` | `tests/smoke/pack-install.test.ts` |
-| TUI at real terminal sizes, NO_COLOR, Ctrl-C teardown (PTY) | `tests/smoke/tui-width-matrix.test.ts` |
-| instant shell before hydration, SIGTERM through the lease (PTY) | `tests/smoke/instant-shell-pty.test.ts` |
-| committed-frame render trace under PTY backpressure (PTY) | `tests/smoke/render-trace-pty.test.ts` |
-| import boundary rules (rule1/2/3), run under `npm run lint` | `tests/boundaries/check-boundaries.ts` |
+| ACP v1 over JSON-RPC stdio, permission requests, and text/image content | `acp-boundary.test.ts` |
+| Core CLI health, local-provider run, receipts, events, and autonomy | `cli-core.test.ts` |
+| `npm pack`, installed resources, and installed codewiki navigation | `installed-package.test.ts` |
+| Signal propagation through a real tool child | `process-lifecycle.test.ts` |
+| Real-binary setup, onboarding, migration, and launch behavior | `real-binary-boot.test.ts` |
+
+The smoke files own their child-process helpers. There is no shared
+`tests/harness/spawn.ts` and no PTY smoke lane in the current tree.
+
+## Harness and fixture modules
+
+| File | Purpose |
+|---|---|
+| `tests/harness/tmp-root.ts` | Preloaded guarded temp root and cleanup for every root test run |
+| `tests/harness/tmp-git-guard.ts` | Prevents accidental `.git` creation in the system or test temp root |
+| `tests/harness/scratch-env.ts` | Child-process and in-process Clio state isolation |
+| `tests/harness/dispatch.ts` | Dispatch bundle, fast reproducibility, isolated state, and event-loop helpers |
+| `tests/harness/dispatch-stub-context.ts` | Minimal domain context for dispatch contracts |
+| `tests/harness/receipt.ts` | Typed run-envelope and receipt fixtures |
+| `tests/harness/openai-compat-fixture.ts` | Loopback OpenAI-compatible server and target seeders |
+
+Child fixtures in `tests/fixtures/` are
+`capacity-lease-child.ts`, `codewiki-coordinator-child.ts`, and
+`evidence-index-writer.ts`.
 
 ## Running a subset
 
 ```bash
-# all contracts
-npm run test:file -- 'tests/contracts/**/*.test.ts'
-# one file
-npm run test:file -- tests/contracts/skills.test.ts
-# only it.only / describe.only within a file
-npm run test:file -- --test-only tests/contracts/skills.test.ts
+# all contracts (the shell expands the file pattern)
+npm run test:file -- tests/contracts/*.test.ts
+
+# one contract or smoke file
+npm run test:file -- tests/contracts/skill-install.test.ts
+npm run build
+npm run test:file -- tests/smoke/cli-core.test.ts
+
+# only it.only or describe.only within one file
+npm run test:file -- --test-only tests/contracts/skill-install.test.ts
 ```
 
 ## Writing tests
 
-- `node:test` + `node:assert/strict`. Group with `describe` / `it`.
-- Local imports end in `.js` (NodeNext), e.g. `from "../../src/domains/x/y.js"`.
-- `tsconfig.tests.json` is strict with `noUncheckedIndexedAccess` and
-  `exactOptionalPropertyTypes`; narrow array access before use.
-- Biome rejects `delete obj.key`; use `Reflect.deleteProperty(obj, "key")` when
-  cleaning env maps or object keys.
-- Filesystem tests use a scratch home via `makeScratchHome()` (smoke) or the
-  `CLIO_CODER_HOME` / `CLIO_CODER_*_DIR` env overrides (contracts); clean up in `finally`.
+- Use `node:test` and `node:assert/strict`.
+- End local TypeScript import specifiers in `.js` for NodeNext resolution.
+- Keep `tsconfig.tests.json` strict, including `noUncheckedIndexedAccess` and
+  `exactOptionalPropertyTypes`; narrow indexed values before use.
+- Let the package script preload `tmp-root.ts`. Tests that mutate Clio state or
+  `process.env` should use `scratch-env.ts` and restore in teardown.
+- Use a loopback fixture for provider behavior. Do not contact a configured or
+  public model from a deterministic test.
+- Build before a focused smoke run. `npm run ci` already builds before testing.
+- Keep a smoke process driver local to the boundary it exercises unless a
+  genuinely shared contract appears.
