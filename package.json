@@ -83,6 +83,7 @@
 		"ci": "npm run typecheck && npm run lint && npm run skills:check && npm run build && npm run test && npm run test:trace-viewer",
 		"ci:release": "npm run ci && node scripts/check-release.mjs",
 		"install:local": "bash scripts/install-local.sh",
+		"smoke:real-home": "bash scripts/smoke-real-home.sh",
 		"prepublishOnly": "CLIO_CODER_RELEASE_CONTEXT=publish npm run ci:release",
 		"skills:pin": "node --import tsx scripts/pin-skills.ts",
 		"skills:check": "node --import tsx scripts/pin-skills.ts --check"

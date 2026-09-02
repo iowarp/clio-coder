@@ -111,6 +111,18 @@ maintained reference suite, not a checked release baseline.</p>
 <p>Run it with an isolated <code>CLIO_CODER_HOME</code> containing only the test target.
 Record a missing or unauthorized target as a deferred live check; never
 substitute a model-dependent result for the deterministic gate.</p>
+<p>Then run the same two checks against a copy of your real settings:</p>
+<pre><code class="language-sh">npm run smoke:real-home -- --target &lt;id&gt;
+</code></pre>
+<p>The script copies <code>~/.config/clio-coder/settings.yaml</code> (and
+<code>credentials.yaml</code> when present) into a scratch <code>CLIO_CODER_HOME</code>, runs
+<code>doctor</code> and one headless turn there, fails on a doctor crash or
+deprecation warning, a turn that exits non-zero, a tool policy drift
+refusal, or a turn with no <code>agent_end</code> event, prints doctor's own failing
+rows for you to read, and deletes the scratch home. The 0.4.2 smoke ran only
+with isolated homes and missed two bugs a real settings file exposed on
+first launch: a raised <code>safety.limits.readBytesPerCall</code> refusing to boot,
+and a <code>clio:</code> skill metadata key warning.</p>
 </li>
 <li><p>Inspect the package twice: first with <code>npm pack --dry-run</code>, then with a real
 <code>npm pack</code> directed to a temporary directory. Record the filename, integrity,
