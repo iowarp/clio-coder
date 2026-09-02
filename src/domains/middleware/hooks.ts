@@ -51,12 +51,47 @@ export const USER_HOOK_COMMAND_OUTPUT_MAX_CHARS = 4_000;
 /** Cap on a prompt hook's injected message, in characters. */
 export const USER_HOOK_PROMPT_MAX_CHARS = 2_000;
 
+/**
+ * Provenance of an installed package that supplied hook declarations, as the
+ * composition root attributes it. Middleware treats it as opaque identity
+ * data; it neither reads packages nor knows how the digests were produced.
+ */
+export interface UserHookPackageProvenance {
+	id: string;
+	/** Install scope label of the package (for example "user" or "project"). */
+	scope: string;
+	/** Path recorded at install, when known. */
+	sourcePath?: string;
+	/** Canonical filesystem identity of the installed package root. */
+	canonicalRoot: string;
+	/** SHA-256 of the manifest bytes covered by the installed-tree digest. */
+	manifestDigest: string;
+	/** Installed-tree digest recorded at install and reverified by the supplier. */
+	contentDigest: string;
+}
+
+/**
+ * Attribution for a hook declared by an installed package. The declaration
+ * bytes behind `declarationsDigest` are the ones the supplier hashed during
+ * content verification and captured; nothing here was re-read from a mutable
+ * path after verification.
+ */
+export interface UserHookExtensionSource {
+	provenance: UserHookPackageProvenance;
+	/** Generation the declarations were admitted under; 0 for an ephemeral build. */
+	generation: number;
+	/** SHA-256 of the captured hooks.yaml bytes. */
+	declarationsDigest: string;
+}
+
 export interface UserHookSource {
 	origin: UserHookOrigin;
 	/** File path or `extensionId:path` the declaration was read from. */
 	sourcePath: string;
 	/** Extension id when origin is "extension". */
 	sourceId?: string;
+	/** Present exactly when origin is "extension". */
+	extension?: UserHookExtensionSource;
 }
 
 export interface NormalizedCommandHook {
@@ -314,6 +349,17 @@ export function loadUserHooks(
 
 export type UserHookOutcome = "emitted" | "command-ok" | "command-failed" | "command-timeout" | "skipped";
 
+/** Bounded extension attribution carried on every receipt of an extension hook. */
+export interface HookReceiptExtension {
+	id: string;
+	scope: string;
+	canonicalRoot: string;
+	manifestDigest: string;
+	contentDigest: string;
+	declarationsDigest: string;
+	generation: number;
+}
+
 export interface HookReceipt {
 	at: number;
 	hookId: string;
@@ -327,6 +373,7 @@ export interface HookReceipt {
 	exitCode?: number;
 	outputChars?: number;
 	toolName?: string;
+	extension?: HookReceiptExtension;
 }
 
 export type HookReceiptSink = (receipt: HookReceipt) => void;
@@ -372,6 +419,10 @@ export function userHookToRegistration(
 	deps: UserHookRegistrationDeps,
 ): MiddlewareHookRegistration {
 	const now = deps.now ?? Date.now;
+	// Attribution is fixed when the registration is built, so a receipt written
+	// by a registration from an older generation names that generation even
+	// after a newer one is active.
+	const extension = hook.source.extension === undefined ? undefined : receiptExtension(hook.source.extension);
 	const baseReceipt = (input: { toolName?: string }): Omit<HookReceipt, "outcome"> => ({
 		at: now(),
 		hookId: hook.id,
@@ -380,6 +431,7 @@ export function userHookToRegistration(
 		hash: hook.hash,
 		hook: hook.on,
 		kind: hook.spec.kind,
+		...(extension !== undefined ? { extension: { ...extension } } : {}),
 		...(input.toolName !== undefined ? { toolName: input.toolName } : {}),
 	});
 	const registration: MiddlewareHookRegistration = {
@@ -399,6 +451,18 @@ export function userHookToRegistration(
 	};
 	if (hook.tools !== undefined) registration.toolNames = [...hook.tools];
 	return registration;
+}
+
+function receiptExtension(source: UserHookExtensionSource): HookReceiptExtension {
+	return {
+		id: source.provenance.id,
+		scope: source.provenance.scope,
+		canonicalRoot: source.provenance.canonicalRoot,
+		manifestDigest: source.provenance.manifestDigest,
+		contentDigest: source.provenance.contentDigest,
+		declarationsDigest: source.declarationsDigest,
+		generation: source.generation,
+	};
 }
 
 function evaluateHook(

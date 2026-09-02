@@ -61,6 +61,7 @@ export const BusChannels = {
 	CompactionBegin: "compaction.begin",
 	CompactionEnd: "compaction.end",
 	MiddlewareHookFailed: "middleware.hookFailed",
+	ExtensionsReloaded: "extensions.reloaded",
 	ContextActivity: "context.activity",
 	ContextWarning: "context.warning",
 	ContextPruned: "context.pruned",
@@ -678,6 +679,26 @@ export interface CompactionPayload {
 }
 
 // ---------------------------------------------------------------------------
+// Extensions
+// ---------------------------------------------------------------------------
+
+/**
+ * Published on {@link BusChannels.ExtensionsReloaded} by the composition
+ * root after a new extension generation and its user-hook registrations
+ * have both been committed. Consumers that cache extension-sourced data
+ * (prompt fragments, agent recipes, the session prompt) refresh on
+ * `changed`; an unchanged generation carries the previous digest and needs
+ * no work. Never published between the two commits.
+ */
+export interface ExtensionsReloadedPayload {
+	generation: number;
+	previousGeneration: number;
+	changed: boolean;
+	/** Content identity of the committed snapshot. */
+	digest: string;
+}
+
+// ---------------------------------------------------------------------------
 // Middleware
 // ---------------------------------------------------------------------------
 
@@ -685,15 +706,17 @@ export interface CompactionPayload {
  * Published on {@link BusChannels.MiddlewareHookFailed} when a middleware hook
  * registration misbehaves: `hook_failed` for a thrown evaluate (its effects
  * are discarded and the turn proceeds), `budget_exceeded` for a soft
- * wall-time overrun (effects still apply). Diagnostics only; nothing
- * subscribing here may decide anything.
+ * wall-time overrun (effects still apply), `registration_conflict` when an
+ * owned registration set (user hooks) offered an id a builtin or host
+ * registration holds, or a host registration evicted an owned one.
+ * Diagnostics only; nothing subscribing here may decide anything.
  */
 export interface MiddlewareHookFailedPayload {
-	kind: "hook_failed" | "budget_exceeded";
+	kind: "hook_failed" | "budget_exceeded" | "registration_conflict";
 	registrationId: string;
 	hook: MiddlewareHook;
 	at: number;
-	/** Error text; hook_failed only. */
+	/** Error text for hook_failed; one formatted line for registration_conflict. */
 	message?: string | undefined;
 	/** Measured and allowed wall time in ms; budget_exceeded only. */
 	elapsedMs?: number | undefined;
@@ -801,6 +824,7 @@ export type BusPayloadMap = {
 	[BusChannels.CompactionBegin]: CompactionPayload;
 	[BusChannels.CompactionEnd]: CompactionPayload;
 	[BusChannels.MiddlewareHookFailed]: MiddlewareHookFailedPayload;
+	[BusChannels.ExtensionsReloaded]: ExtensionsReloadedPayload;
 	[BusChannels.ContextActivity]: ContextActivityPayload;
 	[BusChannels.ContextWarning]: ContextWarningPayload;
 	[BusChannels.ContextPruned]: ContextPrunedPayload;

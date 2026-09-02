@@ -24,12 +24,13 @@ import {
 	renderOperatorProfile,
 	renderPromptContext,
 } from "../domains/context/index.js";
-import { listInstalledExtensions } from "../domains/extensions/index.js";
+import { extensionSnapshotFor, listInstalledExtensions } from "../domains/extensions/index.js";
 import { loadMemoryRecordsSync, memoryStorePath } from "../domains/memory/index.js";
 import { loadUserHooks, readHookSources } from "../domains/middleware/index.js";
 import { classifyProjectPreload } from "../domains/prompts/preload.js";
 import { defaultScopedResourceRoots } from "../domains/resources/common-loader.js";
 import { ceilChars } from "../domains/session/context-accounting.js";
+import { capturedHookSourcesFor } from "../entry/extension-hook-sources.js";
 
 export type CustomizationCategory =
 	| "settings"
@@ -45,7 +46,8 @@ export type CustomizationCategory =
 	| "safety"
 	| "memory";
 
-export type ReloadClass = "hot" | "next-turn" | "restart" | "n/a";
+/** `reload` means an explicit `/resources extensions reload` (or a restart) publishes the change. */
+export type ReloadClass = "hot" | "next-turn" | "reload" | "restart" | "n/a";
 
 export interface CustomizationEntry {
 	category: CustomizationCategory;
@@ -203,10 +205,13 @@ function inspectOperatorProfile(cwd: string, graph: CustomizationGraph): void {
 
 function inspectHooks(cwd: string, graph: CustomizationGraph): void {
 	try {
-		const extensions = listInstalledExtensions(cwd)
-			.filter((ext) => ext.enabled && ext.effective)
-			.map((ext) => ({ id: ext.id, rootPath: ext.rootPath }));
-		const { batches, fileIssues } = readHookSources({ cwd, extensions });
+		// Extension declarations come from the same captured bytes a booted
+		// session admits; an inspecting process without a bound store builds an
+		// ephemeral generation-0 projection.
+		const { batches, fileIssues } = readHookSources({
+			cwd,
+			capturedSources: capturedHookSourcesFor(extensionSnapshotFor(cwd)),
+		});
 		for (const issue of fileIssues) graph.issues.push(`hook ${issue.source.origin}: ${issue.message}`);
 		const loaded = loadUserHooks(batches, { workspaceRoot: cwd });
 		for (const issue of loaded.issues) {
@@ -221,7 +226,7 @@ function inspectHooks(cwd: string, graph: CustomizationGraph): void {
 				hash: hook.hash,
 				trust: hook.source.origin === "extension" ? "untrusted" : "trusted",
 				precedence: "winner",
-				reloadClass: "restart",
+				reloadClass: "reload",
 				detail: { on: hook.on, kind: hook.spec.kind, enabled: hook.enabled, ...(hook.tools ? { tools: hook.tools } : {}) },
 			});
 		}
@@ -234,7 +239,7 @@ function inspectHooks(cwd: string, graph: CustomizationGraph): void {
 				hash: loser.hash,
 				trust: loser.source.origin === "extension" ? "untrusted" : "trusted",
 				precedence: "loser",
-				reloadClass: "restart",
+				reloadClass: "reload",
 				detail: { on: loser.on, kind: loser.spec.kind },
 			});
 		}
@@ -254,8 +259,14 @@ function inspectExtensions(cwd: string, graph: CustomizationGraph): void {
 				hash: shortHash(`${ext.id}@${ext.version}`),
 				trust: "untrusted",
 				precedence: ext.effective ? "winner" : "loser",
-				reloadClass: "restart",
-				detail: { version: ext.version, enabled: ext.enabled, effective: ext.effective },
+				reloadClass: "reload",
+				detail: {
+					version: ext.version,
+					enabled: ext.enabled,
+					valid: ext.valid,
+					effective: ext.effective,
+					loadable: ext.loadable,
+				},
 			});
 		}
 	} catch (err) {

@@ -1,3 +1,8 @@
+import type {
+	MiddlewareRegistrationOwner,
+	PrepareRegistrationReplacementResult,
+	ReplaceRegistrationsReport,
+} from "./registrations.js";
 import type { MiddlewareDiagnosticSink, MiddlewareHookRegistration } from "./runtime.js";
 import type {
 	MiddlewareEffect,
@@ -32,4 +37,25 @@ export interface MiddlewareContract {
 	 * stderr writer default.
 	 */
 	setDiagnosticSink(sink: MiddlewareDiagnosticSink): void;
+	/**
+	 * Validate an owner's replacement registration set against the current
+	 * builtin and host ids and build its evaluation list without publishing.
+	 * Rejected when `generation` is not strictly greater than the owner's
+	 * active generation. The returned replacement publishes with one reference
+	 * assignment that cannot refuse or call out, so a composition root can publish it
+	 * back-to-back with another domain's generation on the same stack.
+	 */
+	prepareRegistrationReplacement(
+		owner: MiddlewareRegistrationOwner,
+		generation: number,
+		registrations: ReadonlyArray<MiddlewareHookRegistration>,
+	): PrepareRegistrationReplacementResult;
+	/** Prepare, check currentness, publish, then emit any conflict diagnostics. */
+	replaceRegistrations(
+		owner: MiddlewareRegistrationOwner,
+		generation: number,
+		registrations: ReadonlyArray<MiddlewareHookRegistration>,
+	): ReplaceRegistrationsReport;
+	/** Active generation for an owner; 0 when nothing was ever applied. */
+	ownedGeneration(owner: MiddlewareRegistrationOwner): number;
 }

@@ -1,50 +1,30 @@
-import { lstatSync, realpathSync } from "node:fs";
+import { realpathSync } from "node:fs";
 import path from "node:path";
-import { listInstalledExtensions } from "./state.js";
-import type { ExtensionResourceKind, ExtensionResourceRoot } from "./types.js";
+import { buildExtensionSnapshot } from "./snapshot.js";
+import { committedExtensionSnapshot } from "./snapshot-store.js";
+import type { ExtensionResourceKind, ExtensionResourceRoot, ExtensionSnapshot } from "./types.js";
 
-export function extensionResourcePath(rootPath: string, resourcePath: string): string | null {
-	const root = path.resolve(rootPath);
-	const full = path.resolve(root, resourcePath);
-	const relative = path.relative(root, full);
-	if (relative === "" || relative === ".." || relative.startsWith(`..${path.sep}`) || path.isAbsolute(relative))
-		return null;
+export { extensionResourcePath } from "./resource-path.js";
+
+/**
+ * The committed snapshot when a store is bound for this cwd; otherwise an
+ * ephemeral generation-0 build that never touches the store. The ephemeral
+ * branch serves the CLI, `config inspect` with an explicit cwd, and any
+ * process that never booted the extensions bundle.
+ */
+export function extensionSnapshotFor(cwd = process.cwd()): ExtensionSnapshot {
+	const committed = committedExtensionSnapshot();
 	try {
-		const rootReal = realpathSync(root);
-		const fullReal = realpathSync(full);
-		const canonicalRelative = path.relative(rootReal, fullReal);
-		if (
-			canonicalRelative === ".." ||
-			canonicalRelative.startsWith(`..${path.sep}`) ||
-			path.isAbsolute(canonicalRelative)
-		) {
-			return null;
-		}
-		if (!lstatSync(full).isDirectory()) return null;
-		return full;
+		if (committed !== null && committed.cwd === realpathSync(path.resolve(cwd))) return committed;
 	} catch {
-		return null;
+		// Fall through to an ephemeral build, which retains the original error semantics.
 	}
+	return buildExtensionSnapshot({ cwd, generation: 0 });
 }
 
 export function enabledExtensionResourceRoots(
 	kind: ExtensionResourceKind,
 	cwd = process.cwd(),
 ): ExtensionResourceRoot[] {
-	const roots: ExtensionResourceRoot[] = [];
-	for (const entry of listInstalledExtensions(cwd)) {
-		if (!entry.enabled || !entry.compatible || !entry.effective) continue;
-		const rel = entry.resources[kind];
-		if (!rel) continue;
-		const full = extensionResourcePath(entry.rootPath, rel);
-		if (!full) continue;
-		roots.push({
-			id: entry.id,
-			scope: entry.scope,
-			path: full,
-			rootPath: entry.rootPath,
-			source: `extension:${entry.scope}:${entry.id}`,
-		});
-	}
-	return roots;
+	return [...extensionSnapshotFor(cwd).resourceRoots[kind]];
 }

@@ -10,7 +10,15 @@ export const EXTENSIONS_EMPTY =
 export function openExtensionsOverlay(tui: TUI, ctx: SlashCommandContext, onClose: () => void): OverlayHandle {
 	const list = ctx.listExtensions?.() ?? [];
 	const items: ListOverlayItem[] = list.map((ext) => {
-		const state = !ext.enabled ? "disabled" : ext.effective ? "active" : `shadowed:${ext.overriddenBy ?? "higher"}`;
+		const state = !ext.valid
+			? "invalid"
+			: !ext.compatible
+				? "incompatible"
+				: !ext.enabled
+					? "disabled"
+					: ext.loadable
+						? "active"
+						: `shadowed:${ext.overriddenBy ?? "higher"}`;
 
 		let meta = state;
 		if (state === "active") {

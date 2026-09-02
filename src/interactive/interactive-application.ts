@@ -54,6 +54,7 @@ import type {
 	InitCommandOptions,
 	RunIo,
 	SettingsAreaId,
+	SlashCommandContext,
 	TaskMemorySeedCommandResult,
 } from "./slash-commands.js";
 import { processAutoPacingAllowed, resolveSmoothStreamingMode } from "./stream-pacing-policy.js";
@@ -121,6 +122,8 @@ export interface InteractiveDeps {
 	initialNotices?: ReadonlyArray<string>;
 	resources?: ResourcesContract;
 	extensions?: ExtensionsContract;
+	/** `/resources extensions reload` seam; the composition root supplies the coordinator. */
+	reloadExtensions?: SlashCommandContext["reloadExtensions"];
 	interop?: InteropContract;
 	share?: ShareContract;
 	/**
@@ -702,6 +705,7 @@ export async function createInteractiveApplication(deps: InteractiveDeps): Promi
 		settleVisibleFrame: (reason) => chatRenderer.flushAndCommit(reason),
 		...(deps.resources ? { resources: deps.resources } : {}),
 		...(deps.extensions ? { extensions: deps.extensions } : {}),
+		...(deps.reloadExtensions ? { reloadExtensions: deps.reloadExtensions } : {}),
 		...(interopSurface ? { interop: interopSurface } : {}),
 		...(deps.agents ? { agents: deps.agents } : {}),
 		...(deps.share ? { share: deps.share } : {}),
