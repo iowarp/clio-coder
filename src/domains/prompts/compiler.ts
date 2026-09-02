@@ -148,13 +148,6 @@ export interface CompiledSessionPrompt {
 	operatorProfileApplied?: boolean;
 }
 
-export const FLEET_ROUTING_GUIDANCE_MAX_BYTES = 320;
-// Points at the Fleet section rather than describing routing in the abstract:
-// `agent:"auto"` baselines by task shape and can still land on a worker whose
-// capability class is wrong for the job, so a pinned id is the reliable path.
-export const FLEET_ROUTING_GUIDANCE =
-	'Fleet routing: pin the `agent` id from the Fleet section; agent:"auto" baselines from the task text and is a fallback, not a router.';
-
 /**
  * Worker-side mirror of the parent's `SPOT_CHECK_GUIDANCE`. The parent sentence
  * demonstrably works: in the E19 drive it is what caught a verifier reporting a
@@ -298,16 +291,14 @@ function renderToolContractBlock(inputs: SessionPromptInputs): string {
 	].sort();
 	const canDispatch = sessionCanDispatch(inputs);
 	const canListSkills = sessionHasContext(inputs);
+	// Asked twice in one session which tools it had, a live model gave two
+	// different answers and invented `web_find`. The authoritative list is one
+	// line above; pointing at it beats letting the model recall the schemas.
 	const admitted = new Set(names);
 	const inventoryGuidance = [
-		// Asked twice in one session which tools it had, a live model gave two
-		// different answers and invented `web_find`. The authoritative list is one
-		// line above; pointing at it beats letting the model recall the schemas.
-		"When answering capability-inventory questions, copy the Direct tools line above verbatim rather than recalling the attached schemas, and make no calls",
-		...(canDispatch ? ["add dispatch(list:true) only if agents or the fleet are requested"] : []),
-		...(canListSkills
-			? ['add context(scope="skills") only if skills are requested (it lists installed and marketplace skills)']
-			: []),
+		"When asked what tools you have, copy the Direct tools line verbatim and call nothing",
+		...(canDispatch ? ["dispatch(list:true) answers only a question about agents or the fleet"] : []),
+		...(canListSkills ? ['context(scope="skills") answers only a question about skills'] : []),
 	].join("; ");
 	const capabilityKinds = [
 		"direct tools are attached schemas",
@@ -322,12 +313,12 @@ function renderToolContractBlock(inputs: SessionPromptInputs): string {
 		...(names.length > 0 ? [`Direct tools: ${names.map((name) => `\`${name}\``).join(", ")}.`] : []),
 		`Harness model: ${capabilityKinds.join("; ")}. Keep these capability sets distinct.`,
 		`${inventoryGuidance}.`,
-		"Call tools only for concrete inspection or changes the task requires. If the user asks for a tool-free answer, simply answer without calling tools.",
+		"Call tools only for concrete inspection or changes the task requires; a tool-free question gets a tool-free answer.",
 		// The tool-specific instantiation of the operating contract's "narrow
 		// work: inspect directly" rule; the contract cannot name tools.
 		// Delegation, the tasks board, and skills are not restated here: the
-		// Delegation and Skills passages and the registry hints carry them, and
-		// each renders exactly when its tool does.
+		// Delegation, Fleet, and Skills passages and the registry hints carry
+		// them, and each renders exactly when its tool does.
 		...(orientationTools.length > 0
 			? [
 					`For narrow file or symbol orientation, prefer ${orientationTools.join(", ")} instead of assuming source-tree details were preloaded.`,
@@ -344,7 +335,6 @@ function renderToolContractBlock(inputs: SessionPromptInputs): string {
 	// of surface or registration order, and removing a tool from the surface
 	// removes its hint with no compiler edit.
 	const hints = canonicalToolPromptHints(inputs.toolPromptHints ?? [], new Set(names));
-	if (hints.some((entry) => entry.tool === "dispatch")) lines.push(FLEET_ROUTING_GUIDANCE);
 	for (const entry of hints) {
 		lines.push(entry.hint);
 	}

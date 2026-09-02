@@ -296,6 +296,35 @@ function errorMessage(err: unknown): string {
 	return err instanceof Error ? err.message : String(err);
 }
 
+/**
+ * The parameter schema as the provider should see it.
+ *
+ * TypeBox 1.x annotates every schema it builds with string-keyed markers
+ * (`~unsafe` on `Type.Unsafe`, `~optional` on `Type.Optional`, and so on).
+ * Unlike the older symbol keys they survive `JSON.stringify`, so each enum
+ * field reached the model as `{"~unsafe": null, "~optional": true, ...}`:
+ * 44 junk keys on the default surface, and a small model has no way to know
+ * that `"~unsafe": null` means nothing. Validation does not need them
+ * (`Value.Check` answers identically with and without), so the copy handed
+ * to the agent loop drops every `~`-prefixed key. Symbol keys are copied
+ * through untouched because pi-ai picks its coercion path by the TypeBox
+ * kind symbol on the root schema.
+ */
+function wireParameterSchema<T>(schema: T): T {
+	if (Array.isArray(schema)) return schema.map((entry) => wireParameterSchema(entry)) as T;
+	if (typeof schema !== "object" || schema === null) return schema;
+	const source = schema as Record<PropertyKey, unknown>;
+	const out: Record<PropertyKey, unknown> = {};
+	for (const key of Object.keys(source)) {
+		if (key.startsWith("~")) continue;
+		out[key] = wireParameterSchema(source[key]);
+	}
+	for (const symbol of Object.getOwnPropertySymbols(source)) {
+		out[symbol] = source[symbol];
+	}
+	return out as T;
+}
+
 function toAgentTool(
 	spec: ToolSpec,
 	registry: ToolRegistry,
@@ -305,7 +334,7 @@ function toAgentTool(
 	const tool: AgentTool<TSchema> = {
 		name: spec.name,
 		description: spec.description,
-		parameters: spec.parameters,
+		parameters: wireParameterSchema(spec.parameters),
 		label: spec.metadata?.uiLabel ?? spec.name,
 		async execute(
 			toolCallId: string,

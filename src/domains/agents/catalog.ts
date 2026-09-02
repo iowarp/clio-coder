@@ -23,19 +23,14 @@ export interface AgentCatalogSections {
 const FLEET_PROMPT_PURPOSE_MAX_CHARS = 64;
 
 /**
- * The delegation default stated as a rule the model can evaluate against the
- * task in front of it. The E19 drive found the previous phrasing lost to
- * inertia every time: an incentive ("dispatch is the cheap path") is not a
- * test, so a model that had already started reading simply kept reading. A
- * threshold it can count against is.
- */
-export const FLEET_DELEGATION_RULE =
-	"Delegate when the task has two or more independent file-scoped subtasks, or any broad exploration. You keep synthesis and validation; a single narrow change stays with you.";
-
-/**
  * S3 handed two files to a worker, then edited both itself before dispatching,
- * reverted one, and disclosed neither. The delegation rule above says what to
- * hand off; this says what handing off costs you.
+ * reverted one, and disclosed neither. The threshold that says what to hand
+ * off lives in the Delegation section (`operating.delegation`), stated once
+ * as a count taken before the first edit with the dispatch call shape next
+ * to it; the E19 drive found an incentive ("dispatch is the cheap path") lost
+ * to inertia every time, and the round-2 drive found the bare threshold here,
+ * after the tool contract and without a call shape, lost the same way on
+ * two of two runs. This line says what handing off costs you.
  */
 export const FLEET_HANDOFF_RULE =
 	"A file you assigned to a worker is not yours to edit while its dispatch is pending or after it succeeds; if you already changed it, say so in your report.";
@@ -104,11 +99,14 @@ export function renderFleetPromptSection(input: ReadonlyArray<AgentSpec>): strin
 
 	const lines: string[] = [
 		"# Fleet",
-		FLEET_DELEGATION_RULE,
 		FLEET_HANDOFF_RULE,
 		FLEET_ANTI_CHURN_RULE,
 		FLEET_REFUSAL_DISCLOSURE,
-		`Workers you reach with \`dispatch\`, by \`agent\` id (default ${DEFAULT_DISPATCH_AGENT_ID}). Capability class is what a worker may do: a read-only worker cannot edit.`,
+		// `agent:"auto"` baselines by task shape and can still land on a worker
+		// whose capability class is wrong for the job, so a pinned id is the
+		// reliable path; said here, next to the ids, rather than in the Tool
+		// Contract.
+		`Workers you reach with \`dispatch\` by \`agent\` id (default ${DEFAULT_DISPATCH_AGENT_ID}); agent:"auto" is a fallback, not a router. Capability class is what a worker may do: a read-only worker cannot edit.`,
 		FLEET_SPECIALIST_ROUTING,
 	];
 	if (publicSpecs.length > 0) {

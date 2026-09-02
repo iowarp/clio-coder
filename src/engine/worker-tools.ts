@@ -155,8 +155,10 @@ export function createWorkerToolRegistry(
 	// The ledger tool registers unconditionally. attestedToolSignature signs the
 	// names a bare registry produces, so a conditional registration would drift
 	// the signature and fail admission; only the injected port varies, and a run
-	// without one answers that it has no coordination ledger.
+	// without one answers that it has no coordination ledger. The explicit flag
+	// is what keeps that true now that the session registry omits the tool.
 	const registration = registerCoreTools(registry, {
+		includeLedgerTools: true,
 		...(agentLedger ? { agentLedger } : {}),
 		// A worker cannot install a skill or reach the operator who could, so
 		// its skill listing carries installed (or bound) skills only; the

@@ -186,7 +186,11 @@ function dispatchRequestFromArgs(
 	let rawIntent = args.intent;
 	if (Object.hasOwn(args, "gate")) {
 		if (typeof args.gate !== "string" || args.gate.trim().length === 0) {
-			return { ok: false, message: "gate must be a non-empty declared check id" };
+			return {
+				ok: false,
+				message:
+					"gate must be a non-empty declared check id: a check verify() lists, never a shell command; omit gate and run the check yourself after the receipt",
+			};
 		}
 		rawIntent = { ...(isRecord(rawIntent) ? rawIntent : {}), verification: [{ check: args.gate.trim() }] };
 	}

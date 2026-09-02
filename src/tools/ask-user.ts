@@ -92,13 +92,13 @@ export interface AskUserToolDeps {
 export const askUserParameters = Type.Object({
 	action: Type.Optional(
 		StringEnum(["ask", "complete"], {
-			description: "ask presents a round of questions; complete (exactly once) records decisions before final prose.",
+			description: "ask presents a round of questions; complete records the decisions, once, before final prose.",
 		}),
 	),
 	mode: Type.Optional(
 		StringEnum(["round", "single_question"], {
 			description:
-				"Caps how many questions this call may carry. single_question accepts exactly 1 and rejects the call otherwise (interviews); round accepts 1 to 4 tightly related confirmations. Default is round.",
+				"round (default) accepts 1 to 4 tightly related questions; single_question accepts exactly one, for interviews.",
 		}),
 	),
 	questions: Type.Optional(
@@ -135,7 +135,7 @@ export const askUserParameters = Type.Object({
 	exposure: Type.Optional(
 		StringEnum(["local", "outward"], {
 			description:
-				"Blast radius of this gate. local (default) stays inside the workspace. outward means answering it publishes or sends something the operator cannot take back (filing an issue or PR, posting a comment, pushing, releasing); at autonomy auto-edit an outward gate parks for the operator instead of being answered automatically.",
+				"local (default) stays inside the workspace; outward publishes or sends something the operator cannot take back (issue, PR, comment, push, release) and parks for the operator at auto-edit.",
 		}),
 	),
 });

@@ -1,7 +1,7 @@
 ---
 version: 1
 name: Wiki Writer
-description: Plans one repository wiki, or researches and writes one wiki page, against a supplied plan.
+description: Plans a repository wiki or writes one wiki page. Works against a supplied plan.
 tools:
   required: [read, {anyOf: [write, edit]}]
   optional: [grep, find, ls, code_nav, context, ledger]
