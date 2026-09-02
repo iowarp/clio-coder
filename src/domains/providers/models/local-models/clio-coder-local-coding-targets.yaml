@@ -358,6 +358,77 @@
         contains the final answer.
     serving: "Ornith-1.0-35B is an agentic coding model; the card recommends 262K context, qwen3 reasoning parsing, qwen3_coder/qwen3_xml tool parsing, and sampler temperature=0.6, top_p=0.95, top_k=20."
 
+- family: ornith-1.5
+  matchPatterns:
+    - ornith-1.5-35b-a3b
+    - ornith1.5-35b-moe
+    - ornith-1.5-35b
+    - ornith1.5-35b
+    - ornith-1.5
+    - ornith1.5
+  capabilities:
+    chat: true
+    tools: true
+    toolCallFormat: qwen
+    reasoning: true
+    thinkingFormat: qwen-chat-template
+    structuredOutputs: json-schema
+    vision: false
+    audio: false
+    embeddings: false
+    rerank: false
+    fim: false
+    contextWindow: 262144
+    maxTokens: 65536
+  quirks:
+    measuredUnder:
+      hardware: "mini fleet node, AMD GPU on the Vulkan backend, 4 request slots"
+      runtime: llamacpp
+      build: b1-c841aee
+      model: "Ornith-1.5-35B-A3B Q4_K_M (arch qwen35moe)"
+      llamaCpp: >-
+        --ctx-size 786432 --parallel 4 --no-kv-unified --cache-type-k q8_0
+        --cache-type-v q8_0 --batch-size 16384 --ubatch-size 2048 --jinja
+        --reasoning on
+      date: "2026-09-02"
+      source: "prompt-infrastructure round 2 (v0.4.2 development): live probe of the on-off switch, and a debugger dispatch receipt"
+      note: |
+        The 1.5 release is a Qwen3.5-MoE derivative and its chat template
+        honors enable_thinking, which the 1.0 measurement above did not find.
+        Measured on this date: with chat_template_kwargs.enable_thinking false
+        the model answered a one-line arithmetic prompt in 4 completion tokens
+        with no reasoning_content; with it true the same prompt spent 79
+        tokens, 158 characters of them reasoning. Under the inherited
+        always-on classification a debugger worker dispatched with thinking
+        off spent 1,061 of its 1,518 output tokens on a reasoning trace, and
+        the router itself advertises the model as reasoning:on_off. The
+        generic `ornith` pattern still routes 1.0 checkpoints to the entry
+        above; these longer patterns win for 1.5 ids.
+    kvCache:
+      kQuant: q8_0
+      vQuant: q8_0
+    sampling:
+      thinking:
+        temperature: 0.6
+        topP: 0.95
+        topK: 20
+        maxTokens: 16384
+        reasoningBudget: 4096
+      instruct:
+        temperature: 0.6
+        topP: 0.95
+        topK: 20
+        repeatPenalty: 1.05
+        maxTokens: 4096
+    thinking:
+      mechanism: on-off
+      guidance: |
+        Ornith 1.5's Qwen3.5 chat template exposes thinking as on or off
+        through enable_thinking; intermediate levels coerce to on. LM Studio
+        reads the same switch from reasoning_effort (none or low), which Clio
+        sends for on-off models on that runtime.
+    serving: "Ornith-1.5-35B-A3B follows the 1.0 card: 262K context, qwen3 reasoning parsing, qwen3_coder tool parsing, sampler temperature=0.6, top_p=0.95, top_k=20."
+
 - family: qwen3.6-27b
   matchPatterns:
     - qwen3.6-27b

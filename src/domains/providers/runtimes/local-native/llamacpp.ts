@@ -56,7 +56,15 @@ const llamacppRuntime: RuntimeDescriptor = {
 		const health = await (ctx.signal ? probeHttp({ ...healthOpts, signal: ctx.signal }) : probeHttp(healthOpts));
 		if (!health.ok) return health;
 		const status = await probeLlamaCppModelStatus(base, target, ctx);
-		const props = await probeLlamaCppProps(base, ctx, status.modelId ?? target.defaultModel);
+		// A router answers /props?model=<id> by loading that model, and with
+		// --models-max 1 that evicts whatever is resident: every probe of a
+		// fleet target's default model unloaded the chat model, so the next turn
+		// prefilled from zero (11,601 tokens, cache_n 0, on the round-3 resume
+		// run on mini). The router's model list already carries the worker's
+		// flags (--parallel, --ctx-size) for an unloaded model, so the worker is
+		// asked only when it is resident.
+		const resident = status.loadState === undefined || status.loadState === "loaded";
+		const props = await probeLlamaCppProps(base, ctx, resident ? (status.modelId ?? target.defaultModel) : undefined);
 		const catalog = await probeOpenAIModelCatalog(base, ctx);
 		const result: ProbeResult = { ok: true };
 		if (catalog.models.length > 0) result.models = catalog.models;

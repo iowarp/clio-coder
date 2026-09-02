@@ -374,6 +374,8 @@ export interface LlamaCppStatusEnrichment {
 	modelId?: string;
 	serverFlags?: LlamaCppServerFlags;
 	notes?: string[];
+	/** The router's own load state for the selected model, when it reports one. */
+	loadState?: ProbeModelStatus["state"];
 }
 
 function argsFromStatus(status: unknown): string[] {
@@ -490,8 +492,11 @@ export async function probeLlamaCppModelStatus(
 	const entries = await probeOpenAIModelEntries(base, ctx);
 	const selected = selectedModelEntry(entries, target);
 	if (!selected) return {};
+	const loadState = modelStateFromOpenAIModelEntry({ id: selected.id, status: selected.status })?.state;
+	const withState = (enrichment: LlamaCppStatusEnrichment): LlamaCppStatusEnrichment =>
+		loadState === undefined ? enrichment : { ...enrichment, loadState };
 	const args = argsFromStatus(selected.status);
-	if (args.length === 0) return { notes: statusNotes(selected.id, selected.status) };
+	if (args.length === 0) return withState({ notes: statusNotes(selected.id, selected.status) });
 	const flags = parseLlamaCppServerFlags(args);
 	const caps: Partial<CapabilityFlags> = {};
 	const window = llamaCppRequestContextWindow(flags);
@@ -512,7 +517,7 @@ export async function probeLlamaCppModelStatus(
 		);
 	}
 	if (notes.length > 0) enrichment.notes = notes;
-	return enrichment;
+	return withState(enrichment);
 }
 
 /**

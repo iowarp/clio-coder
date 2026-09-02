@@ -299,4 +299,52 @@ describe("smoke/built CLI core", { concurrency: false }, () => {
 			scratch.cleanup();
 		}
 	});
+
+	it("compiles a headless run at the --autonomy level instead of the saved one", async () => {
+		// The flag was keyed by the bare word in the session overrides, which
+		// wrote a top-level key nothing reads; a `run --autonomy full-auto` in a
+		// home saved at auto-edit compiled and admitted at auto-edit.
+		const scratch = home();
+		try {
+			const fixed = await runCli(["doctor", "--fix"], { env: scratch.env });
+			strictEqual(fixed.code, 0, fixed.stderr);
+			const configured = await runCli(
+				[
+					"configure",
+					"--id",
+					"local-smoke",
+					"--runtime",
+					"openai-compat",
+					"--url",
+					endpoint,
+					"--model",
+					"mock-model",
+					"--set-orchestrator",
+					"--context-window",
+					"32768",
+					"--reasoning",
+					"false",
+				],
+				{ env: scratch.env },
+			);
+			strictEqual(configured.code, 0, configured.stdout + configured.stderr);
+			const systemPromptOf = (request: Record<string, unknown> | undefined): string => {
+				const first = (request?.messages as Array<{ role?: string; content?: unknown }> | undefined)?.[0];
+				return first?.role === "system" && typeof first.content === "string" ? first.content : "";
+			};
+			const saved = await runCli(["--no-context-files", "--no-skills", "run", "--json", "CLI_CORE_SAVED_AUTONOMY"], {
+				env: scratch.env,
+			});
+			strictEqual(saved.code, 0, saved.stderr);
+			match(systemPromptOf(requests.at(-1)), /Autonomy: auto-edit\./u);
+			const overridden = await runCli(
+				["--no-context-files", "--no-skills", "run", "--autonomy", "full-auto", "--json", "CLI_CORE_FLAG_AUTONOMY"],
+				{ env: scratch.env },
+			);
+			strictEqual(overridden.code, 0, overridden.stderr);
+			match(systemPromptOf(requests.at(-1)), /Autonomy: full-auto\./u);
+		} finally {
+			scratch.cleanup();
+		}
+	});
 });

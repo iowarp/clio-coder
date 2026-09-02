@@ -29,6 +29,7 @@ then settings, then the built-in default. Resolution lives in
 | Variable | Default | Controls |
 | --- | --- | --- |
 | `NO_COLOR` | unset | Set to any non-empty value to drop every foreground and background color. Bold, dim, italic, and underline stay, because they are what is left to read the interface by (`src/interactive/theme/tokens.ts`). |
+| `CLIO_CODER_SYNTHESIS_LOCK` | strip | How a synthesis-locked worker round is enforced on OpenAI-family runtimes: `strip` removes the tool schemas from the request, `tool-choice` keeps them and sends `tool_choice: none`, which preserves the prompt prefix but relies on the model honoring the knob (`src/engine/provider-payload.ts`). |
 | `CLIO_CODER_RIGOR` | repo-derived | Finish-contract evidence bar, `normal` or `high`, layered over the repo-derived default (`src/domains/safety/rigor.ts`). |
 | `CLIO_CODER_RESIDENCY` | managed | `observe`/`off` stops Clio managing model residency on every local runtime path, llama.cpp routers included; per-target opt-out via `lifecycle: user-managed` (`src/engine/apis/residency.ts`). |
 | `CLIO_CODER_TRUST_PROJECT_RESOURCES` | settings value | `1` trusts third-party project resource imports for this process, overriding `integrations.projectResources.trustProjectImports`; otherwise the validated setting applies (`src/domains/resources/skills/loader.ts`). |

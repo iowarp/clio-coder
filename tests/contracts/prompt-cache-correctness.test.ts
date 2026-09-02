@@ -7,7 +7,9 @@ import type { CompiledSessionPrompt } from "../../src/domains/prompts/compiler.j
 import type { PromptsContract } from "../../src/domains/prompts/contract.js";
 import { canonicalJson, sha256 } from "../../src/domains/prompts/hash.js";
 import type { ProvidersContract } from "../../src/domains/providers/index.js";
+import type { SessionEntry } from "../../src/domains/session/entries.js";
 import { toolSignatureFromState } from "../../src/interactive/chat-loop-messages.js";
+import { buildReplayAgentMessagesFromTurns } from "../../src/interactive/chat-renderer.js";
 import {
 	attachedToolSchemaBytes,
 	attachedToolSchemasFromState,
@@ -418,5 +420,78 @@ describe("main compiled-prompt cache identity", () => {
 		};
 		deepStrictEqual(changedPayload.expectedColdReasons, ["prompt_recompiled"]);
 		context.dispose();
+	});
+});
+
+function ledgerEntry(seq: number, role: string, payload: unknown): SessionEntry {
+	return {
+		kind: "message",
+		role,
+		turnId: `t${seq}`,
+		parentTurnId: seq === 0 ? null : `t${seq - 1}`,
+		timestamp: `2026-09-02T00:00:${String(seq).padStart(2, "0")}.000Z`,
+		payload,
+	} as SessionEntry;
+}
+
+function toolCall(id: string, path: string): unknown {
+	return { type: "toolCall", id, name: "read", arguments: { path } };
+}
+
+function toolResult(id: string, text: string): unknown {
+	return { role: "toolResult", toolCallId: id, toolName: "read", content: [{ type: "text", text }], isError: false };
+}
+
+function toolCallIds(messages: ReadonlyArray<unknown>): string[] {
+	return messages.flatMap((message) => {
+		const record = message as { role?: string; toolCallId?: string };
+		return record.role === "toolResult" && typeof record.toolCallId === "string" ? [record.toolCallId] : [];
+	});
+}
+
+describe("session replay prefix stability", () => {
+	it("replays a parallel batch's tool results in call order, not ledger completion order", () => {
+		// The ledger appends a result when its tool finishes; the live loop sent
+		// the batch in the assistant's call order. A resume that followed the
+		// ledger swapped two messages and the provider prefix cache missed from
+		// there for the rest of the session.
+		const entries: SessionEntry[] = [
+			ledgerEntry(0, "user", { role: "user", content: [{ type: "text", text: "read both" }] }),
+			ledgerEntry(1, "assistant", {
+				role: "assistant",
+				content: [toolCall("call-a", "a.ts"), toolCall("call-b", "b.ts"), toolCall("call-c", "c.ts")],
+				stopReason: "toolUse",
+			}),
+			ledgerEntry(2, "tool_result", toolResult("call-c", "c body")),
+			ledgerEntry(3, "tool_result", toolResult("call-a", "a body")),
+			ledgerEntry(4, "tool_result", toolResult("call-b", "b body")),
+			ledgerEntry(5, "assistant", { role: "assistant", content: [{ type: "text", text: "done" }], stopReason: "stop" }),
+		];
+		const messages = buildReplayAgentMessagesFromTurns(entries);
+		deepStrictEqual(
+			messages.map((message) => message.role),
+			["user", "assistant", "toolResult", "toolResult", "toolResult", "assistant"],
+		);
+		deepStrictEqual(toolCallIds(messages), ["call-a", "call-b", "call-c"]);
+		// A result the batch never issued keeps its ledger position after the
+		// known ones; the batch boundary is the next non-result message.
+		const orphaned: SessionEntry[] = [
+			entries[0] as SessionEntry,
+			entries[1] as SessionEntry,
+			ledgerEntry(2, "tool_result", toolResult("call-x", "stray")),
+			ledgerEntry(3, "tool_result", toolResult("call-b", "b body")),
+			ledgerEntry(4, "tool_result", toolResult("call-a", "a body")),
+			ledgerEntry(5, "tool_result", toolResult("call-c", "c body")),
+			ledgerEntry(6, "user", { role: "user", content: [{ type: "text", text: "next" }] }),
+			ledgerEntry(7, "assistant", { role: "assistant", content: [toolCall("call-d", "d.ts")], stopReason: "toolUse" }),
+			ledgerEntry(8, "tool_result", toolResult("call-d", "d body")),
+		];
+		deepStrictEqual(toolCallIds(buildReplayAgentMessagesFromTurns(orphaned)), [
+			"call-a",
+			"call-b",
+			"call-c",
+			"call-x",
+			"call-d",
+		]);
 	});
 });

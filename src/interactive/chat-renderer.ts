@@ -460,15 +460,73 @@ function richMessageFromEntry(entry: MessageEntry, maxTextChars?: number): Agent
 	return message as unknown as AgentMessage;
 }
 
-function recordToolCallsFromMessage(message: AgentMessage, seen: Set<string>): void {
+function toolCallIdsFromMessage(message: AgentMessage): string[] {
 	const content = (message as { content?: unknown }).content;
-	if (!Array.isArray(content)) return;
+	if (!Array.isArray(content)) return [];
+	const ids: string[] = [];
 	for (const block of content) {
 		if (!block || typeof block !== "object") continue;
 		const b = block as Record<string, unknown>;
 		if (b.type !== "toolCall") continue;
-		if (typeof b.id === "string" && b.id.length > 0) seen.add(b.id);
+		if (typeof b.id === "string" && b.id.length > 0) ids.push(b.id);
 	}
+	return ids;
+}
+
+function recordToolCallsFromMessage(message: AgentMessage, seen: Set<string>): void {
+	for (const id of toolCallIdsFromMessage(message)) seen.add(id);
+}
+
+/**
+ * Replay sink that hands tool results to the model in the order the assistant
+ * issued the calls.
+ *
+ * The ledger appends a tool result when its tool finishes, while the live loop
+ * appends a parallel batch's results by call index (pi executes the batch and
+ * pushes results in the assistant's order). A two-call turn whose second call
+ * finished first is therefore recorded as [b, a] and was sent as [a, b]. A
+ * resume that replayed the ledger order sent different bytes from that point
+ * on, and the provider's prefix cache missed for the rest of the session.
+ * Results are staged until the next non-result message and released in call
+ * order; an id the staged assistant turn never issued keeps its ledger order
+ * after the known ones.
+ */
+function createOrderedReplaySink(): {
+	messages: AgentMessage[];
+	push(message: AgentMessage): void;
+	stageToolResult(message: AgentMessage): void;
+	flush(): void;
+} {
+	const messages: AgentMessage[] = [];
+	let callOrder: string[] = [];
+	let staged: AgentMessage[] = [];
+	const rank = (message: AgentMessage): number => {
+		const id = (message as { toolCallId?: unknown }).toolCallId;
+		const index = typeof id === "string" ? callOrder.indexOf(id) : -1;
+		return index < 0 ? Number.MAX_SAFE_INTEGER : index;
+	};
+	const flush = (): void => {
+		if (staged.length === 0) return;
+		staged.sort((a, b) => rank(a) - rank(b));
+		messages.push(...staged);
+		staged = [];
+		callOrder = [];
+	};
+	return {
+		messages,
+		flush,
+		push(message) {
+			flush();
+			messages.push(message);
+			// Consecutive assistant messages (one legacy standalone tool_call entry
+			// per call) share one batch; anything else starts a new one.
+			if (message.role === "assistant") callOrder.push(...toolCallIdsFromMessage(message));
+			else callOrder = [];
+		},
+		stageToolResult(message) {
+			staged.push(message);
+		},
+	};
 }
 
 function toolCallMessageFromEntry(entry: MessageEntry): AgentMessage {
@@ -998,7 +1056,12 @@ function bashContextText(entry: BashExecutionEntry): string {
 	return bashExecutionToText(message);
 }
 
-function appendContextMessage(out: AgentMessage[], role: "user" | "assistant", text: string, timestamp: string): void {
+function appendContextMessage(
+	out: { push(message: AgentMessage): void },
+	role: "user" | "assistant",
+	text: string,
+	timestamp: string,
+): void {
 	const trimmed = text.trim();
 	if (trimmed.length === 0) return;
 	out.push(makeTextMessage(role, truncateReplayText(trimmed), timestamp));
@@ -1014,7 +1077,7 @@ export function buildReplayAgentMessagesFromTurns(
 	turns: ReadonlyArray<SessionEntry>,
 	options: RehydrateChatPanelOptions = {},
 ): AgentMessage[] {
-	const out: AgentMessage[] = [];
+	const out = createOrderedReplaySink();
 	const seenToolCalls = new Set<string>();
 	for (const entry of selectReplayEntries(turns, options)) {
 		switch (entry.kind) {
@@ -1035,7 +1098,7 @@ export function buildReplayAgentMessagesFromTurns(
 						recordToolCallsFromMessage(message, seenToolCalls);
 					}
 				} else if (entry.role === "tool_result") {
-					out.push(toolResultMessageFromEntry(entry));
+					out.stageToolResult(toolResultMessageFromEntry(entry));
 				} else if (entry.role === "system") {
 					appendContextMessage(out, "user", `System note: ${text}`, entry.timestamp);
 				}
@@ -1082,7 +1145,8 @@ export function buildReplayAgentMessagesFromTurns(
 				break;
 		}
 	}
-	return out;
+	out.flush();
+	return out.messages;
 }
 
 /**
