@@ -37,6 +37,21 @@ describe("worker synthesis lock", () => {
 		deepStrictEqual(anthropic.tool_choice, { type: "none" });
 	});
 
+	it("keeps the schemas and sends the string tool_choice none for a middleware lock", () => {
+		// The `lock_tools` middleware effect and the interactive synthesis lockout
+		// route here instead of the strip, and on a generic OpenAI-compatible
+		// server the spelling has to be the string: LM Studio and llama.cpp answer
+		// HTTP 400 on the object form ("Invalid tool_choice type: 'object'"), and
+		// "auto" would leave the turn calling tools past the lockout with nothing
+		// failing loudly.
+		const locked = patchWorkerRequestPayload(payload(), model, {
+			runtimeId: "llamacpp",
+			toolChoiceNone: true,
+		}) as Record<string, unknown>;
+		deepStrictEqual(locked.tools, payload().tools);
+		strictEqual(locked.tool_choice, "none");
+	});
+
 	it("recognizes a markup-only locked reply and shapes one paired re-prompt", () => {
 		const message = {
 			role: "assistant",
