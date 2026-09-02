@@ -79,7 +79,8 @@
         temperature: 1
         topP: 1
     runtimePreference:
-      llamaCpp: "Use the OpenAI-compatible chat-completions surface with chat_template_kwargs.reasoning_effort set to low, medium, or high."
+      llamaCpp: "Use the OpenAI-compatible chat-completions surface with chat_template_kwargs.reasoning_effort set to low, medium, or high. The analysis channel arrives as reasoning_content."
+      lmstudio: "Reasoning effort travels as the top-level reasoning_effort field. The analysis channel arrives as the OpenAI-compatible `reasoning` field, on the streamed delta and on the final message, with reasoning_content absent (measured 2026-09-02 on dynamo, gpt-oss-20b and gpt-oss-120b); Clio reads both spellings into thinking content."
       openaiCompat: "Preferred for Harmony reasoning-effort control when the local gateway exposes chat_template_kwargs."
     thinking:
       mechanism: effort-levels
@@ -91,7 +92,9 @@
         GPT-OSS uses OpenAI Harmony formatting and supports low, medium, and
         high reasoning effort. Clio coerces off/minimal to low, captures
         non-final Harmony channels as ThinkingContent, and strips Harmony
-        control tokens from visible output.
+        control tokens from visible output. The analysis channel reaches Clio
+        as reasoning_content on llama.cpp and as reasoning on LM Studio; both
+        are captured the same way.
 
 - family: agenticqwen-30b-a3b-i1
   matchPatterns:
