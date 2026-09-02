@@ -16,6 +16,7 @@ targets:
     runtime: lmstudio
     url: http://127.0.0.1:1234
     defaultModel: release-model
+    lifecycle: user-managed
 orchestrator:
   target: release-local
   model: release-model
@@ -87,7 +88,6 @@ function isolatedHome(label: string): Home {
 			CLIO_CODER_STATE_DIR: under("state"),
 			CLIO_CODER_CACHE_DIR: under("cache"),
 			CLIO_CODER_REQUIRE_HOME_PREFIX: "1",
-			CLIO_CODER_RESIDENCY: "observe",
 		},
 		cleanup: () => rmSync(root, { recursive: true, force: true }),
 	};

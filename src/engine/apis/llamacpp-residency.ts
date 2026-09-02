@@ -5,7 +5,6 @@ import {
 	type ResidencyAdapter,
 	ResidencyPreconditionError,
 	reconcileResidency,
-	residencyManaged,
 	residentTagProtected,
 } from "./residency.js";
 
@@ -27,8 +26,8 @@ export interface LlamaCppResidencyInput {
 	runtimeId: string;
 	keepModelId: string;
 	/**
-	 * Combined env + target lifecycle opt-out verdict from the caller
-	 * (residencyManagedFor). Defaults to the env-only switch.
+	 * Target lifecycle verdict from the caller (residencyManagedFor). Defaults
+	 * to managed for direct adapter callers.
 	 */
 	managed?: boolean;
 	fetchImpl?: typeof fetch;
@@ -284,7 +283,7 @@ export async function ensureLlamaCppResidency(input: LlamaCppResidencyInput): Pr
 		targetId: input.targetId,
 		runtimeId: input.runtimeId,
 		keepModelId: input.keepModelId,
-		managed: input.managed ?? residencyManaged(),
+		managed: input.managed ?? true,
 		strategy: "router",
 		listResident: async () => {
 			const models = await fetchRouterModels(input, fetchImpl);

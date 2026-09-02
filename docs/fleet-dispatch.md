@@ -60,9 +60,10 @@ Design decisions that shape everything else:
   can be activated only for named roles/postures after exact-tuple readiness,
   and hard constraints always eliminate before any score.
 - Environment whitelist. The SSH command carries an explicit environment
-  (`CLIO_CODER_RESIDENCY=observe`, `CLIO_CODER_WORKER_PGID=$$`, and any configured
-  `CLIO_CODER_WORKER_LABELS`); the orchestrator's `process.env` never crosses the
-  wire. `CLIO_CODER_WORKER_PGID` names the remote process group so an abort escalates
+  (`CLIO_CODER_WORKER_PGID=$$` and any configured `CLIO_CODER_WORKER_LABELS`);
+  the orchestrator's `process.env` never crosses the wire. Node residency is
+  projected into the target lifecycle carried by the WorkerSpec.
+  `CLIO_CODER_WORKER_PGID` names the remote process group so an abort escalates
   against the whole group rather than one process.
 
 ## Worker prompt and budget admission
@@ -940,11 +941,12 @@ disabling it changes nothing else.
 
 ## Residency
 
-Remote workers default to residency observe: the SSH transport exports
-`CLIO_CODER_RESIDENCY=observe`, so a worker on a node that serves resident models
-(for example a GPU box running the operator's inference server) never evicts
-them. A node opts into management explicitly with `residency: manage` in its
-fleet entry.
+Remote workers default to residency observe. The SSH transport projects that
+posture as `lifecycle: user-managed` in the worker's target, so a worker on a
+node that serves resident models (for example a GPU box running the operator's
+inference server) never evicts them. A node opts into management explicitly
+with `residency: manage` in its fleet entry. An explicit target
+`lifecycle: user-managed` remains authoritative even on a managing node.
 
 A model the router tags as pinned (`pinned:true` or `role:scout`) is never
 evicted once resident, so Clio refuses to load it by evicting a resident that

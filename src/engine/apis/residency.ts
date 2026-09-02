@@ -26,8 +26,8 @@
  *
  * The reconciler is best-effort and non-blocking. A slow or unreachable
  * server, or a malformed resident listing, degrades to observe-only and never
- * crashes a turn. `CLIO_CODER_RESIDENCY=observe` and an explicit target
- * `lifecycle: user-managed` both force observe-only on every runtime path.
+ * crashes a turn. An explicit target `lifecycle: user-managed` forces
+ * observe-only on every runtime path.
  * Every collision or stress case emits a notice over the event bus instead of
  * a thrown error. One reconcile decision holds per (target, model) within a
  * TTL, and mutations for a target are serialized across processes through a
@@ -280,7 +280,7 @@ function evictionNotice(facts: ResidencyFacts, entry: ResidentClassified): Resid
 		facts,
 		"swap",
 		"warning",
-		`swapping resident '${entry.modelId}' for requested '${facts.keepModelId}' on '${facts.targetId}' (Clio did not load it; recorded transition instead of a silent unload; set CLIO_CODER_RESIDENCY=observe or lifecycle: user-managed to forbid swaps).`,
+		`swapping resident '${entry.modelId}' for requested '${facts.keepModelId}' on '${facts.targetId}' (Clio did not load it; recorded transition instead of a silent unload; set lifecycle: user-managed to forbid swaps).`,
 		{
 			...(entry.sizeVramBytes !== undefined ? { freedVramBytes: entry.sizeVramBytes } : {}),
 			swappedOut: entry.modelId,
@@ -775,29 +775,10 @@ export async function reconcileResidency(adapter: ResidencyAdapter): Promise<Rec
 }
 
 /**
- * The env-level residency opt-out. Clio manages residency for every
- * manageable runtime by default; `CLIO_CODER_RESIDENCY=observe` (or off/0/false/
- * user) flips the whole process to observe-only. Per-target opt-out goes
- * through {@link residencyManagedFor}.
+ * Residency policy for one target. An absent lifecycle means the operator made
+ * no choice and Clio manages by default; runtime synthesis only sets the
+ * metadata field when settings carry an explicit value.
  */
-export function residencyManaged(env: NodeJS.ProcessEnv = process.env): boolean {
-	const opt = (env.CLIO_CODER_RESIDENCY ?? "").trim().toLowerCase();
-	if (opt === "observe" || opt === "off" || opt === "0" || opt === "false" || opt === "user" || opt === "user-managed") {
-		return false;
-	}
-	return true;
-}
-
-/**
- * Combined residency opt-out for one target: the process-wide env switch plus
- * the target's explicit `lifecycle: user-managed`. An absent lifecycle means
- * the operator made no choice, and Clio manages by default; runtime synthesis
- * only sets the metadata field when settings carry an explicit value.
- */
-export function residencyManagedFor(
-	lifecycle: "user-managed" | "clio-coder-managed" | undefined,
-	env: NodeJS.ProcessEnv = process.env,
-): boolean {
-	if (lifecycle === "user-managed") return false;
-	return residencyManaged(env);
+export function residencyManagedFor(lifecycle: "user-managed" | "clio-coder-managed" | undefined): boolean {
+	return lifecycle !== "user-managed";
 }

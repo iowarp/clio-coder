@@ -10,9 +10,9 @@
  *
  * SSH tier invariants:
  *   - The remote environment is a whitelist, never the orchestrator's
- *     process.env. Remote workers default to CLIO_CODER_RESIDENCY=observe so a
- *     worker on a node that serves models for the operator can never evict a
- *     resident model.
+ *     process.env. Remote workers default to a user-managed target lifecycle
+ *     so a worker on a node that serves models for the operator can never
+ *     evict a resident model.
  *   - The orchestrator cwd is entered on the remote node (shared-filesystem
  *     assumption; path parity is a doctor preflight, and placement refuses
  *     nodes that have not passed it).
@@ -62,9 +62,9 @@ export interface SshNodeEndpoint {
 	 */
 	clioCoderEntry?: string;
 	/**
-	 * Residency posture exported to the remote worker. Defaults to "observe":
-	 * remote workers must never evict models resident on their node. "manage"
-	 * is an explicit per-node opt-in.
+	 * Residency posture projected into the remote worker's target lifecycle.
+	 * Defaults to "observe": remote workers must never evict models resident on
+	 * their node. "manage" is an explicit per-node opt-in.
 	 */
 	residency?: "observe" | "manage";
 	connectTimeoutSec?: number;
@@ -99,14 +99,33 @@ const DEFAULT_REMOTE_CLIO_ENTRY = "clio-coder worker";
  * orchestrator-supplied credential.
  */
 function remoteEnvAssignments(node: SshNodeEndpoint): string {
-	const residency = node.residency ?? "observe";
 	// `$$` is the login shell's pid, and it leads the process group the remote
 	// command runs in. `exec` replaces that shell in place, so the worker
 	// inherits both the pid and the group leadership, and the value it announces
 	// is the group an abort must signal.
 	const labels = (node.labels ?? []).map((label) => label.trim()).filter((label) => label.length > 0);
 	const labelAssignment = labels.length > 0 ? ` CLIO_CODER_WORKER_LABELS=${shellQuote(labels.join(","))}` : "";
-	return `AI_AGENT=${AI_AGENT_NAME} CLIO_CODER_RESIDENCY=${residency} CLIO_CODER_WORKER_PGID=$$${labelAssignment}`;
+	return `AI_AGENT=${AI_AGENT_NAME} CLIO_CODER_WORKER_PGID=$$${labelAssignment}`;
+}
+
+type TargetLifecycle = NonNullable<WorkerSpec["target"]["lifecycle"]>;
+
+export function resolveSshTargetLifecycle(
+	residency: SshNodeEndpoint["residency"],
+	targetLifecycle: WorkerSpec["target"]["lifecycle"],
+): TargetLifecycle {
+	if (targetLifecycle === "user-managed" || residency !== "manage") return "user-managed";
+	return "clio-coder-managed";
+}
+
+function workerSpecForSshNode(node: SshNodeEndpoint, spec: WorkerSpec): WorkerSpec {
+	return {
+		...spec,
+		target: {
+			...spec.target,
+			lifecycle: resolveSshTargetLifecycle(node.residency, spec.target.lifecycle),
+		},
+	};
 }
 
 function buildRemoteWorkerCommand(node: SshNodeEndpoint, cwd: string): string {
@@ -174,20 +193,25 @@ export function createSshWorkerTransport(node: SshNodeEndpoint, opts?: SshTransp
 			// are the transport's own and compose with the caller's rather than
 			// replacing them; every other option is forwarded as handed.
 			const { cwd: _consumedCwd, onAnnounce, onForcedKill, ...forwarded } = spawnOpts ?? {};
-			return spawnWorkerProcess(sshBinary, buildSshArgs(node, buildRemoteWorkerCommand(node, cwd)), spec, {
-				...(opts?.shutdownGraceMs !== undefined ? { shutdownGraceMs: opts.shutdownGraceMs } : {}),
-				...forwarded,
-				env: process.env,
-				onAnnounce: (attestation) => {
-					remote.pid = attestation.pid;
-					remote.processGroupId = attestation.processGroupId;
-					onAnnounce?.(attestation);
+			return spawnWorkerProcess(
+				sshBinary,
+				buildSshArgs(node, buildRemoteWorkerCommand(node, cwd)),
+				workerSpecForSshNode(node, spec),
+				{
+					...(opts?.shutdownGraceMs !== undefined ? { shutdownGraceMs: opts.shutdownGraceMs } : {}),
+					...forwarded,
+					env: process.env,
+					onAnnounce: (attestation) => {
+						remote.pid = attestation.pid;
+						remote.processGroupId = attestation.processGroupId;
+						onAnnounce?.(attestation);
+					},
+					onForcedKill: () => {
+						killRemote();
+						onForcedKill?.();
+					},
 				},
-				onForcedKill: () => {
-					killRemote();
-					onForcedKill?.();
-				},
-			});
+			);
 		},
 	};
 }
