@@ -14,6 +14,7 @@ import namingMigration, {
 	CLIO_CODER_NAMING_MIGRATION_ID,
 	CLIO_CODER_NAMING_SETTINGS_BACKUP_SUFFIX,
 } from "../../src/domains/lifecycle/migrations/2026-09-01-clio-coder-naming.js";
+import { EXTENSION_INSTALL_DIGESTS_MIGRATION_ID } from "../../src/domains/lifecycle/migrations/2026-09-01-extension-install-digests.js";
 import settingsV2, {
 	SETTINGS_V2_MIGRATION_ID,
 	SettingsV2CollisionError,
@@ -415,6 +416,7 @@ integrations:
 		const ids = listMigrations().map((migration) => migration.id);
 		const retiredPanes = "2026-09-01-retire-panes-knobs";
 		const lmstudio = "2026-08-18-lmstudio-runtime-id";
+		ok(ids.includes(EXTENSION_INSTALL_DIGESTS_MIGRATION_ID));
 		ok(ids.indexOf(SETTINGS_V2_MIGRATION_ID) < ids.indexOf(retiredPanes));
 		ok(ids.indexOf(SETTINGS_V2_MIGRATION_ID) < ids.indexOf(CLIO_CODER_NAMING_MIGRATION_ID));
 		ok(ids.indexOf(CLIO_CODER_NAMING_MIGRATION_ID) < ids.indexOf(retiredPanes));

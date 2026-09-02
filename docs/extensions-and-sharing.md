@@ -199,7 +199,7 @@ compatibility:
   clio: ">=0.2.0"
 ```
 
-Required fields are `manifestVersion: 1`, `id`, `version`, and `description`. `name` defaults to `id` when absent. Clio loads `prompts` and `skills`. A manifest may reserve a `themes` path for forward compatibility, but Clio does not load theme resources.
+Required fields are `manifestVersion: 1`, `id`, `version`, and `description`. `name` defaults to `id` when absent, and `resources` is optional. When `resources` is present it must be an object containing only supported resource keys with non-empty relative directory paths. Clio loads `prompts` and `skills`. A manifest may reserve a `themes` path for forward compatibility, but Clio does not load theme resources.
 
 IDs must be lowercase and may include numbers, dots, underscores, and hyphens; they must start/end alphanumeric.
 
@@ -250,6 +250,10 @@ Install locations:
 | project | `.clio-coder/extensions/<id>` |
 
 Project extensions shadow user extensions with the same ID. Use `--all` to list shadowed/disabled entries.
+
+Installed packages are admitted only when their current tree matches the SHA-256 digest in `extensions/state.json`. `clio-coder upgrade` adds digests to pre-digest v1 install records after validating and hashing each installed tree, preserves `disabled`, `source`, and `installedAt`, and backs up the original state before the atomic rewrite. Invalid or changing trees are not blessed: they stay visible and inactive with reinstall guidance. Listing extensions, booting Clio, inspection, and plain doctor runs never perform this migration.
+
+If extension state is corrupt, loading remains fail-closed. A normal reinstall refuses it; `extensions install <valid-source> --force` backs up the corrupt state and parks the previous package bytes before installing and recording the verified replacement. `extensions remove <id>` can also remove an unverifiable package from the load path while preserving both its bytes and any corrupt state in the paths printed by the command. These recovery backups are deliberately not treated as installed packages.
 
 ### Skill pack distribution
 

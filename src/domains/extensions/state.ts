@@ -1,4 +1,4 @@
-import { cpSync, existsSync, mkdirSync, readdirSync, readFileSync, renameSync, rmSync } from "node:fs";
+import { cpSync, existsSync, lstatSync, mkdirSync, readdirSync, readFileSync, renameSync, rmSync } from "node:fs";
 import path from "node:path";
 import { safeResourceWrite } from "../../core/safe-resource-write.js";
 import { clioConfigDir } from "../../core/xdg.js";
@@ -6,12 +6,14 @@ import { evaluateClioCompatibility } from "./compatibility.js";
 import { isRecord, loadManifestFromRoot, trimString } from "./discovery.js";
 import { extensionContentDigest } from "./integrity.js";
 import type {
+	ExtensionDiagnostic,
 	ExtensionInstallOptions,
 	ExtensionInstallResult,
 	ExtensionListOptions,
 	ExtensionMutationResult,
 	ExtensionScope,
 	ExtensionState,
+	ExtensionStateUpgradeReport,
 	InstalledExtension,
 } from "./types.js";
 
@@ -30,6 +32,21 @@ export function extensionBaseDir(scope: ExtensionScope, cwd = process.cwd()): st
 
 function statePath(scope: ExtensionScope, cwd = process.cwd()): string {
 	return path.join(extensionBaseDir(scope, cwd), "state.json");
+}
+
+function recoveryPath(filePath: string, label: string): string {
+	return `${filePath}.${label}-${process.pid}-${Date.now()}.bak`;
+}
+
+function packageRecoveryPath(root: string, label: string): string {
+	return path.join(path.dirname(root), `.${path.basename(root)}.${label}-${process.pid}-${Date.now()}.bak`);
+}
+
+function preserveFile(filePath: string, label: string): string | undefined {
+	if (!existsSync(filePath)) return undefined;
+	const backupPath = recoveryPath(filePath, label);
+	safeResourceWrite(backupPath, readFileSync(filePath));
+	return backupPath;
 }
 
 export function scopeRank(scope: ExtensionScope): number {
@@ -85,37 +102,38 @@ function installedFromRoot(
 	scope: ExtensionScope,
 	stateResult: StateReadResult,
 	cwd: string,
+	fallbackId: string,
 ): InstalledExtension | null {
 	const candidate = loadManifestFromRoot(root);
 	const manifest = candidate.manifest;
-	if (!manifest || !candidate.manifestPath) return null;
 	const diagnostics = [...candidate.diagnostics];
-	const provenance = stateResult.state.installed[manifest.id];
+	const id = manifest?.id ?? fallbackId;
+	const provenance = stateResult.state.installed[id];
 	const expectedDigest = provenance?.contentDigest;
 	let observedDigest: string | undefined;
 	let contentVerified = false;
 	if (stateResult.status === "corrupt") {
 		diagnostics.push({
 			type: "error",
-			message: `extension install state is corrupt: ${stateResult.message}`,
+			message: `extension install state is corrupt: ${stateResult.message}; reinstall with --force or remove the package to preserve the corrupt bytes and recover`,
 			path: statePath(scope, cwd),
 		});
 	} else if (stateResult.status === "absent") {
 		diagnostics.push({
 			type: "error",
-			message: "extension install state is absent; installed content cannot be verified",
+			message: "extension install state is absent; installed content cannot be verified; reinstall with --force",
 			path: statePath(scope, cwd),
 		});
 	} else if (!provenance) {
 		diagnostics.push({
 			type: "error",
-			message: `extension ${manifest.id} is not recorded in install state`,
+			message: `extension ${id} is not recorded in install state; reinstall with --force`,
 			path: statePath(scope, cwd),
 		});
 	} else if (!expectedDigest) {
 		diagnostics.push({
 			type: "error",
-			message: `extension ${manifest.id} install provenance has no content digest; reinstall required`,
+			message: `extension ${id} install provenance has no content digest; run clio-coder upgrade, then reinstall with --force if it remains unverifiable`,
 			path: statePath(scope, cwd),
 		});
 	} else {
@@ -137,24 +155,24 @@ function installedFromRoot(
 			});
 		}
 	}
-	const clioRange = manifest.compatibility?.clio;
+	const clioRange = manifest?.compatibility?.clio;
 	const compatible = clioRange === undefined || evaluateClioCompatibility(clioRange).satisfied;
 	return {
-		id: manifest.id,
-		name: manifest.name,
-		version: manifest.version,
-		description: manifest.description,
+		id,
+		name: manifest?.name ?? id,
+		version: manifest?.version ?? "unknown",
+		description: manifest?.description ?? "Installed extension has an invalid manifest.",
 		scope,
 		rootPath: root,
-		manifestPath: candidate.manifestPath,
-		enabled: !stateResult.state.disabled.includes(manifest.id),
-		valid: candidate.valid && contentVerified,
+		manifestPath: candidate.manifestPath ?? root,
+		enabled: !stateResult.state.disabled.includes(id),
+		valid: manifest !== undefined && candidate.valid && contentVerified,
 		compatible,
 		effective: false,
 		loadable: false,
 		...(expectedDigest ? { installedContentDigest: expectedDigest } : {}),
 		...(observedDigest ? { observedContentDigest: observedDigest } : {}),
-		resources: manifest.resources,
+		resources: manifest?.resources ?? {},
 		diagnostics,
 	};
 }
@@ -165,12 +183,76 @@ function listScope(scope: ExtensionScope, cwd = process.cwd()): InstalledExtensi
 	const state = readState(scope, cwd);
 	const out: InstalledExtension[] = [];
 	for (const entry of readdirSync(base, { withFileTypes: true }).sort((a, b) => a.name.localeCompare(b.name))) {
-		if (!entry.isDirectory()) continue;
+		if (!entry.isDirectory() || entry.name.startsWith(".")) continue;
 		const root = path.join(base, entry.name);
-		const installed = installedFromRoot(root, scope, state, cwd);
+		const installed = installedFromRoot(root, scope, state, cwd, entry.name);
 		if (installed) out.push(installed);
 	}
 	return out;
+}
+
+/**
+ * Add integrity digests to released v1 install records only after the installed
+ * tree validates and remains byte-identical through the atomic state rewrite.
+ * Refused records remain unchanged and therefore fail closed at load time.
+ */
+export function upgradeLegacyExtensionInstallState(
+	cwd = process.cwd(),
+	scopes: ReadonlyArray<ExtensionScope> = ["user", "project"],
+): ExtensionStateUpgradeReport[] {
+	const reports: ExtensionStateUpgradeReport[] = [];
+	for (const scope of scopes) {
+		const filePath = statePath(scope, cwd);
+		const report: ExtensionStateUpgradeReport = { scope, statePath: filePath, upgraded: [], refused: [] };
+		const stateResult = readState(scope, cwd);
+		if (stateResult.status === "absent") {
+			reports.push(report);
+			continue;
+		}
+		if (stateResult.status === "corrupt") {
+			report.refused.push({ id: "<state>", reason: `install state is corrupt: ${stateResult.message}` });
+			reports.push(report);
+			continue;
+		}
+		const next = structuredClone(stateResult.state);
+		const verified = new Map<string, { root: string; digest: string }>();
+		for (const [id, record] of Object.entries(next.installed)) {
+			if (record.contentDigest) continue;
+			const root = path.join(extensionBaseDir(scope, cwd), id);
+			try {
+				if (!lstatSync(root).isDirectory()) throw new Error("installed path is not a directory");
+				const candidate = loadManifestFromRoot(root);
+				if (!candidate.valid || !candidate.manifest) {
+					throw new Error(candidate.diagnostics.map((diagnostic) => diagnostic.message).join("; ") || "manifest is invalid");
+				}
+				if (candidate.manifest.id !== id) {
+					throw new Error(`manifest id ${candidate.manifest.id} does not match install record ${id}`);
+				}
+				const digest = extensionContentDigest(root);
+				record.contentDigest = digest;
+				verified.set(id, { root, digest });
+				report.upgraded.push(id);
+			} catch (error) {
+				report.refused.push({ id, reason: error instanceof Error ? error.message : String(error) });
+			}
+		}
+		if (report.upgraded.length > 0) {
+			const backupPath = `${filePath}.pre-digest.bak`;
+			safeResourceWrite(filePath, `${JSON.stringify(next, null, 2)}\n`, {
+				encoding: "utf8",
+				backup: { path: backupPath },
+				beforeRename: () => {
+					for (const [id, expected] of verified) {
+						const observed = extensionContentDigest(expected.root);
+						if (observed !== expected.digest) throw new Error(`extension ${id} changed during digest migration`);
+					}
+				},
+			});
+			report.backupPath = backupPath;
+		}
+		reports.push(report);
+	}
+	return reports;
 }
 
 export function listInstalledExtensions(cwd = process.cwd(), options: ExtensionListOptions = {}): InstalledExtension[] {
@@ -223,7 +305,11 @@ export function installExtension(sourcePath: string, options: ExtensionInstallOp
 		if (!options.force) {
 			return {
 				diagnostics: [
-					{ type: "error", message: `extension ${candidate.manifest.id} is already installed`, path: targetRoot },
+					{
+						type: "error",
+						message: `extension ${candidate.manifest.id} is already installed; retry with --force to replace it`,
+						path: targetRoot,
+					},
 				],
 			};
 		}
@@ -234,20 +320,23 @@ export function installExtension(sourcePath: string, options: ExtensionInstallOp
 	let installedReplacement = false;
 	let movedExisting = false;
 	const stateResult = readState(scope, cwd);
-	if (stateResult.status === "corrupt") {
+	if (stateResult.status === "corrupt" && !options.force) {
 		return {
 			diagnostics: [
 				{
 					type: "error",
-					message: `extension install state is corrupt: ${stateResult.message}`,
+					message: `extension install state is corrupt: ${stateResult.message}; retry with --force to back it up and reinstall safely`,
 					path: statePath(scope, cwd),
 				},
 			],
 		};
 	}
-	const state = stateResult.state;
+	const state = stateResult.status === "corrupt" ? structuredClone(DEFAULT_STATE) : stateResult.state;
+	let stateBackup: string | undefined;
+	let packageBackup: string | undefined;
 	try {
 		mkdirSync(parent, { recursive: true });
+		if (stateResult.status === "corrupt") stateBackup = preserveFile(statePath(scope, cwd), "corrupt");
 		rmSync(stagingRoot, { recursive: true, force: true });
 		rmSync(backupRoot, { recursive: true, force: true });
 		cpSync(source, stagingRoot, {
@@ -270,6 +359,7 @@ export function installExtension(sourcePath: string, options: ExtensionInstallOp
 		if (existsSync(targetRoot)) {
 			renameSync(targetRoot, backupRoot);
 			movedExisting = true;
+			packageBackup = backupRoot;
 		}
 		renameSync(stagingRoot, targetRoot);
 		installedReplacement = true;
@@ -285,8 +375,12 @@ export function installExtension(sourcePath: string, options: ExtensionInstallOp
 		if (installedReplacement) rmSync(targetRoot, { recursive: true, force: true });
 		if (movedExisting && existsSync(backupRoot) && !existsSync(targetRoot)) {
 			renameSync(backupRoot, targetRoot);
+			packageBackup = undefined;
 		}
 		return {
+			...(stateBackup || packageBackup
+				? { recovery: { ...(stateBackup ? { stateBackup } : {}), ...(packageBackup ? { packageBackup } : {}) } }
+				: {}),
 			diagnostics: [
 				{
 					type: "error",
@@ -297,18 +391,33 @@ export function installExtension(sourcePath: string, options: ExtensionInstallOp
 		};
 	}
 	const diagnostics = [...candidate.diagnostics];
-	try {
-		rmSync(backupRoot, { recursive: true, force: true });
-	} catch (error) {
+	if (movedExisting && stateResult.status !== "valid") {
 		diagnostics.push({
 			type: "warning",
-			message: `extension installed, but its backup could not be removed: ${error instanceof Error ? error.message : String(error)}`,
+			message: "previous unverifiable extension bytes were preserved during forced reinstall",
 			path: backupRoot,
 		});
+	} else {
+		try {
+			rmSync(backupRoot, { recursive: true, force: true });
+			packageBackup = undefined;
+		} catch (error) {
+			diagnostics.push({
+				type: "warning",
+				message: `extension installed, but its backup could not be removed: ${error instanceof Error ? error.message : String(error)}`,
+				path: backupRoot,
+			});
+		}
+	}
+	if (stateBackup) {
+		diagnostics.push({ type: "warning", message: "corrupt extension install state was preserved", path: stateBackup });
 	}
 	const installed = findInstalled(candidate.manifest.id, cwd, scope);
 	return {
 		...(installed ? { extension: installed } : {}),
+		...(stateBackup || packageBackup
+			? { recovery: { ...(stateBackup ? { stateBackup } : {}), ...(packageBackup ? { packageBackup } : {}) } }
+			: {}),
 		diagnostics,
 	};
 }
@@ -358,18 +467,44 @@ export function removeExtension(id: string, options: ExtensionListOptions = {}):
 	}
 	const stateResult = readState(target.scope, cwd);
 	if (stateResult.status !== "valid") {
-		return {
-			diagnostics: [
+		const filePath = statePath(target.scope, cwd);
+		const packageBackup = packageRecoveryPath(target.rootPath, "removed-unverifiable");
+		let stateBackup: string | undefined;
+		try {
+			if (stateResult.status === "corrupt") stateBackup = preserveFile(filePath, "corrupt");
+			renameSync(target.rootPath, packageBackup);
+			try {
+				writeState(target.scope, structuredClone(DEFAULT_STATE), cwd);
+			} catch (error) {
+				renameSync(packageBackup, target.rootPath);
+				throw error;
+			}
+			const diagnostics: ExtensionDiagnostic[] = [
 				{
-					type: "error",
-					message:
-						stateResult.status === "corrupt"
-							? `extension install state is corrupt: ${stateResult.message}`
-							: "extension install state is absent",
-					path: statePath(target.scope, cwd),
+					type: "warning",
+					message: "unverifiable extension bytes were preserved while removing the package from the load path",
+					path: packageBackup,
 				},
-			],
-		};
+			];
+			if (stateBackup) {
+				diagnostics.push({ type: "warning", message: "corrupt extension install state was preserved", path: stateBackup });
+			}
+			return {
+				removed: { id, scope: target.scope, path: target.rootPath },
+				recovery: { ...(stateBackup ? { stateBackup } : {}), packageBackup },
+				diagnostics,
+			};
+		} catch (error) {
+			return {
+				diagnostics: [
+					{
+						type: "error",
+						message: `extension ${id} could not be removed safely: ${error instanceof Error ? error.message : String(error)}`,
+						path: target.rootPath,
+					},
+				],
+			};
+		}
 	}
 	const state = stateResult.state;
 	rmSync(target.rootPath, { recursive: true, force: true });
