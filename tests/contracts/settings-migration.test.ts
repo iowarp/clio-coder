@@ -58,6 +58,10 @@ describe("settings and migration boundary", () => {
 		strictEqual(defaults.settings.interface.panes.enabled, "off");
 		strictEqual(defaults.settings.interface.panes.layout, "off");
 		strictEqual(defaults.settings.interface.panes.files.enabled, false);
+		strictEqual(defaults.settings.context.toolResultMaxBytes, 65_536);
+
+		const belowToolResultMinimum = validateSettings({ version: 2, context: { toolResultMaxBytes: 4_095 } });
+		ok(belowToolResultMinimum.issues.some((issue) => issue.path === "context.toolResultMaxBytes"));
 
 		const invalid = validateSettings({ version: 2, orchestrator: { target: "legacy" }, mystery: true });
 		ok(invalid.issues.some((issue) => issue.path === "orchestrator.target"));
@@ -92,6 +96,7 @@ targets:
 		strictEqual(readSettings().interface.panes.enabled, "off");
 		strictEqual(readSettings().interface.panes.layout, "off");
 		strictEqual(readSettings().interface.panes.files.enabled, false);
+		strictEqual(readSettings().context.toolResultMaxBytes, 65_536);
 	});
 
 	it("carries only explicit v1 pane choices into v2", async () => {

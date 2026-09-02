@@ -220,6 +220,8 @@ export interface ToolInvokeOptions {
 	turnId?: string;
 	toolCallId?: string;
 	correlationId?: string;
+	/** Session-effective ceiling for one tool result, read again before every invocation. */
+	toolResultMaxBytes?: number;
 	pendingSkillPolicy?: PendingSkillToolPolicy;
 	askUserPolicy?: AskUserToolPolicy;
 	/** Host-derived display copy for an ask_user round. It has no admission authority. */
@@ -463,14 +465,14 @@ export function createRegistry(deps: RegistryDeps): ToolRegistry {
 				const preparedArgs = prepareToolArgs(spec, call.args ?? {});
 				resultDisposition = resolveToolResultDisposition(spec, preparedArgs);
 				const result = await spec.run(preparedArgs, options);
-				const digest = toolResultDigestFor(spec, result, resultDisposition);
+				const digest = toolResultDigestFor(spec, result, resultDisposition, options);
 				const afterEffects = runToolHook("after_tool", spec, call, decision, options, result, digest);
 				const finalResult = shapeToolResult(spec, applyToolResultEffects(result, afterEffects), options, resultDisposition);
 				return { kind: "ok", result: finalResult, decision };
 			} catch (err) {
 				const message = err instanceof Error ? err.message : String(err);
 				const result: ToolResult = { kind: "error", message };
-				const digest = toolResultDigestFor(spec, result, resultDisposition);
+				const digest = toolResultDigestFor(spec, result, resultDisposition, options);
 				const afterEffects = runToolHook("after_tool", spec, call, decision, options, result, digest);
 				return {
 					kind: "ok",

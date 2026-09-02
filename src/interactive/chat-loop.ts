@@ -648,7 +648,9 @@ export function createChatLoop(deps: CreateChatLoopDeps): ChatLoop {
 	const retrySettings = (): RetrySettings => normalizeRetrySettings(deps.getSettings().chat.retry);
 
 	const currentToolInvokeOptions = (): Partial<ToolInvokeOptions> => {
-		const options: Partial<ToolInvokeOptions> = {};
+		const options: Partial<ToolInvokeOptions> = {
+			toolResultMaxBytes: deps.getSettings().context.toolResultMaxBytes,
+		};
 		const sessionId = deps.session?.current()?.id ?? null;
 		if (sessionId) options.sessionId = sessionId;
 		const turnId = state.activeUserTurnId ?? state.lastTurnId;

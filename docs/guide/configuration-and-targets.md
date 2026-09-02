@@ -165,7 +165,7 @@ chat:
     cycleSet: []
     favorites: []
     recentLimit: 12
-  maxOutputTokens: 32768
+  maxOutputTokens: 0
   prewarm: true
 
 fleet:
@@ -326,12 +326,20 @@ block. Set them in LM Studio's My Models load settings or with `lms load`; the C
 configuration that `GET /api/v1/models` exposes instead of pretending it applied settings the REST
 load endpoint did not accept (<https://lmstudio.ai/docs/developer/rest/list>).
 
-`chat.maxOutputTokens` is a global output budget requested for every turn
-(default `32768`). At request time it is clamped to the model's known
-max-output cap and the remaining context window. A per-target
-`capabilities.maxTokens` override still records the model's true cap. Set
-`chat.maxOutputTokens: 0` to disable the global default and fall back to
-per-model caps only.
+`chat.maxOutputTokens` is a global output budget requested for every turn. Its
+default `0` uses each model's known maximum-output cap, still clamped to the
+remaining context window. Models with no known cap use a 32,768-token ceiling
+instead of the whole remaining context window. A per-target
+`capabilities.maxTokens` override records the model's true cap. Set a positive
+value to impose a smaller global ceiling.
+
+`context.toolResultMaxBytes` caps one tool result before Clio truncates the
+visible body and spills the complete text to the session scratch file. It
+defaults to 65,536 bytes and accepts integers of at least 4,096. The setting is
+read before every tool result, so a session override or configuration reload
+applies to the next result. The separate
+`safety.limits.observationBytesPerTurn` guardrail remains 196,608 bytes. Three
+full-size results consume that shared turn pool, so a fourth finds it filled.
 
 The setting `fleet.retry.maxRetries` controls automated retries for retryable
 fleet failures. Setting it to `0` disables retries.
@@ -547,7 +555,7 @@ This is the version-2 durable schema shipped in `DEFAULT_SETTINGS`. Validation i
 | `chat.modelPicker.cycleSet` | `[]` | list of target or target/model references | immediately for this session; next session as the saved default |
 | `chat.modelPicker.favorites` | `[]` | list of target/model references | immediately |
 | `chat.modelPicker.recentLimit` | `12` | integer ≥ 1 | immediately |
-| `chat.maxOutputTokens` | `32768` | integer ≥ 0 | next turn |
+| `chat.maxOutputTokens` | `0` | integer ≥ 0; `0` uses the model cap or the 32,768-token fallback when unknown | next turn |
 | `chat.prewarm` | `true` | boolean | next turn |
 | `chat.retry.enabled` | `true` | boolean | next turn |
 | `chat.retry.maxRetries` | `3` | integer ≥ 0 | next turn |
@@ -586,6 +594,7 @@ This is the version-2 durable schema shipped in `DEFAULT_SETTINGS`. Validation i
 
 | Key | Default | Validation | When it applies |
 | --- | --- | --- | --- |
+| `context.toolResultMaxBytes` | `65536` | integer ≥ 4096; complete overflow spills to the session scratch file; three full-size results consume the default 196,608-byte turn pool, so a fourth finds it filled | next turn; a live session change applies to the next tool result |
 | `context.workingSet.enabled` | `true` | boolean | next turn |
 | `context.workingSet.policy` | `structural-v1` | `structural-v1` or `age-horizon` | next turn |
 | `context.workingSet.target` | `0.6` | number greater than 0 and less than 1 | next turn |
