@@ -18,25 +18,24 @@ export interface TokenThroughputSnapshot {
 }
 
 /**
- * One bounded, product-facing observability event. Notices are a redacted,
- * append-only stream: a runtime eviction, a blocked tool, a hook crash, a
- * pruned context window, and so on. They never carry raw worker output or tool
- * arguments; `message` is a short rendered line and `ref` links back to the
- * subject (a run, a target, an evidence bundle) without embedding its contents.
+ * One bounded, product-facing observability event: an evidence build that
+ * failed for a run, read by the Dispatch Board to explain why a run has no
+ * evidence bundle. This used to also carry runtime/middleware/safety/loop/
+ * tool-budget/context/budget notices classified off the same bus channels the
+ * interactive layer's own notice pipeline (bus-notices.ts and
+ * interactive-event-projection.ts) classifies independently for the toast
+ * surface a session actually shows; those seven kinds had no reader of their
+ * own here and were removed rather than kept as an unread second opinion.
+ * `message` is a short rendered line and `ref` links back to the run.
  */
 export interface ObservabilityNotice {
 	id: string;
 	at: number;
-	kind: "runtime" | "middleware" | "safety" | "loop" | "tool-budget" | "context" | "budget" | "provider" | "evidence";
+	kind: "evidence";
 	level: "info" | "warning" | "error";
 	message: string;
 	ref?: {
 		runId?: string;
-		agentId?: string;
-		targetId?: string;
-		modelId?: string;
-		evidenceId?: string;
-		tool?: string;
 	};
 }
 
