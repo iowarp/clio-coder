@@ -1384,6 +1384,184 @@ function checkPromptsDocLinks(): void {
 }
 
 // ---------------------------------------------------------------------------
+// docs-parity: every canonical Markdown page has one visual counterpart, every
+// blueprint points back to one canonical page, and the facts most likely to
+// cause an operator-facing mistake stay identical in both formats.
+// ---------------------------------------------------------------------------
+const BLUEPRINT_NAME = /\b[A-Za-z0-9_-]+_blueprint\.html\b/g;
+const CLIO_COMMAND_FACT =
+	/\bclio-coder[ \t]+(?:(?:[a-z][a-z0-9-]*)(?:[ \t]+[a-z][a-z0-9-]*){0,3}|--[a-z][a-z0-9-]*|<[A-Za-z][^>\n ]*>)/g;
+const CLIO_ENV_FACT =
+	/\bCLIO_CODER_(?:\*(?:_[A-Z0-9_*]+)?|\{[A-Z0-9_,]+\}[A-Z0-9_]*|(?:[A-Z0-9_]+|<[A-Z][A-Z0-9_-]*>)+(?:\*)?)/g;
+
+function htmlAttribute(tag: string, name: string): string | null {
+	const doubleQuoted = tag.match(new RegExp(`\\b${name}\\s*=\\s*"([^"]*)"`, "i"));
+	if (doubleQuoted) return doubleQuoted[1] as string;
+	const singleQuoted = tag.match(new RegExp(`\\b${name}\\s*=\\s*'([^']*)'`, "i"));
+	return singleQuoted?.[1] ?? null;
+}
+
+function markdownSourceMetadata(html: string): Array<string | null> {
+	return (html.match(/<meta\b[^>]*>/gi) ?? [])
+		.filter((tag) => htmlAttribute(tag, "name") === "clio-markdown-source")
+		.map((tag) => htmlAttribute(tag, "content"));
+}
+
+function referenceProseArticles(html: string): string[] {
+	return [
+		...html.matchAll(/<article\b[^>]*\bclass=["'][^"']*\breference-prose\b[^"']*["'][^>]*>([\s\S]*?)<\/article>/gi),
+	].map((match) => match[1] as string);
+}
+
+function decodeHtmlForFacts(text: string): string {
+	return text
+		.replaceAll("&lt;", "<")
+		.replaceAll("&gt;", ">")
+		.replaceAll("&quot;", '"')
+		.replaceAll("&#39;", "'")
+		.replaceAll("&apos;", "'")
+		.replace(/&#(\d+);/g, (_match, value: string) => String.fromCodePoint(Number(value)))
+		.replace(/&#x([0-9a-f]+);/gi, (_match, value: string) => String.fromCodePoint(Number.parseInt(value, 16)))
+		.replaceAll("&amp;", "&");
+}
+
+interface DocumentationFacts {
+	commands: Set<string>;
+	environmentNames: Set<string>;
+}
+
+function normalizeInlineCodeWhitespace(text: string): string {
+	return text.replace(/(?<!`)`(?!`)([\s\S]*?)(?<!`)`(?!`)/g, (_span, body: string) => {
+		return `\`${body.replaceAll(/\s+/g, " ")}\``;
+	});
+}
+
+function documentationFacts(text: string): DocumentationFacts {
+	const decoded = normalizeInlineCodeWhitespace(decodeHtmlForFacts(text));
+	return {
+		commands: new Set(decoded.match(CLIO_COMMAND_FACT) ?? []),
+		environmentNames: new Set(decoded.match(CLIO_ENV_FACT) ?? []),
+	};
+}
+
+function setDifference(left: Set<string>, right: Set<string>): string[] {
+	return [...left].filter((value) => !right.has(value)).sort();
+}
+
+function compareDocumentationFacts(
+	markdownPath: string,
+	blueprintName: string,
+	markdown: string,
+	article: string,
+): { commands: number; environmentNames: number } {
+	const markdownFacts = documentationFacts(markdown);
+	const blueprintFacts = documentationFacts(article);
+	const categories: ReadonlyArray<readonly [string, Set<string>, Set<string>]> = [
+		["clio-coder command", markdownFacts.commands, blueprintFacts.commands],
+		["CLIO_CODER environment", markdownFacts.environmentNames, blueprintFacts.environmentNames],
+	];
+	for (const [label, markdownValues, blueprintValues] of categories) {
+		const missingFromBlueprint = setDifference(markdownValues, blueprintValues);
+		const missingFromMarkdown = setDifference(blueprintValues, markdownValues);
+		if (missingFromBlueprint.length === 0 && missingFromMarkdown.length === 0) continue;
+		const details = [
+			missingFromBlueprint.length > 0 ? `missing from HTML: ${missingFromBlueprint.join(", ")}` : "",
+			missingFromMarkdown.length > 0 ? `missing from Markdown: ${missingFromMarkdown.join(", ")}` : "",
+		].filter((value) => value.length > 0);
+		fail(
+			"docs-parity",
+			`${markdownPath} and docs/html/${blueprintName} disagree on ${label} facts; ${details.join("; ")}`,
+		);
+	}
+	return {
+		commands: markdownFacts.commands.size,
+		environmentNames: markdownFacts.environmentNames.size,
+	};
+}
+
+function checkDocsParity(): void {
+	const markdownPaths = collectFiles([join(root, "docs")], [".md"])
+		.map((absolute) => relative(root, absolute).replaceAll("\\", "/"))
+		.filter((path) => !path.startsWith("docs/html/"))
+		.sort();
+	const markdownSet = new Set(markdownPaths);
+	const htmlRoot = join(root, "docs", "html");
+	const blueprintNames = readdirSync(htmlRoot, { withFileTypes: true })
+		.filter((entry) => entry.isFile() && entry.name.endsWith("_blueprint.html"))
+		.map((entry) => entry.name)
+		.sort();
+	const blueprintSet = new Set(blueprintNames);
+	const blueprintsBySource = new Map<string, string[]>();
+	const htmlByBlueprint = new Map<string, string>();
+
+	for (const blueprintName of blueprintNames) {
+		const html = readFileSync(join(htmlRoot, blueprintName), "utf8");
+		htmlByBlueprint.set(blueprintName, html);
+		const sources = markdownSourceMetadata(html);
+		if (sources.length !== 1 || sources[0] === null) {
+			fail(
+				"docs-parity",
+				`docs/html/${blueprintName} must declare exactly one complete meta[name="clio-markdown-source"], found ${sources.length}`,
+			);
+			continue;
+		}
+		const source = sources[0] as string;
+		if (!markdownSet.has(source)) {
+			fail("docs-parity", `docs/html/${blueprintName} names missing Markdown source ${source}`);
+		}
+		const mapped = blueprintsBySource.get(source) ?? [];
+		mapped.push(blueprintName);
+		blueprintsBySource.set(source, mapped);
+	}
+
+	let commandFacts = 0;
+	let environmentFacts = 0;
+	for (const markdownPath of markdownPaths) {
+		const markdown = readRoot(markdownPath);
+		const namedBlueprints = markdown.match(BLUEPRINT_NAME) ?? [];
+		if (namedBlueprints.length === 0) {
+			fail("docs-parity", `${markdownPath} must name its visual blueprint`);
+		}
+		for (const namedBlueprint of new Set(namedBlueprints)) {
+			if (!blueprintSet.has(namedBlueprint)) {
+				fail("docs-parity", `${markdownPath} names missing blueprint docs/html/${namedBlueprint}`);
+			}
+		}
+
+		const mappedBlueprints = blueprintsBySource.get(markdownPath) ?? [];
+		if (mappedBlueprints.length !== 1) {
+			fail(
+				"docs-parity",
+				`${markdownPath} must have exactly one blueprint source mapping, found ${mappedBlueprints.length}`,
+			);
+			continue;
+		}
+		const blueprintName = mappedBlueprints[0] as string;
+		if (namedBlueprints[0] !== blueprintName) {
+			fail(
+				"docs-parity",
+				`${markdownPath} must open with ${blueprintName}, found ${namedBlueprints[0] ?? "no blueprint name"}`,
+			);
+		}
+		const html = htmlByBlueprint.get(blueprintName) as string;
+		const articles = referenceProseArticles(html);
+		if (articles.length !== 1) {
+			fail(
+				"docs-parity",
+				`docs/html/${blueprintName} must contain exactly one reference-prose article, found ${articles.length}`,
+			);
+			continue;
+		}
+		const counts = compareDocumentationFacts(markdownPath, blueprintName, markdown, articles[0] as string);
+		commandFacts += counts.commands;
+		environmentFacts += counts.environmentNames;
+	}
+
+	if (commandFacts === 0) fail("docs-parity", "the Markdown corpus yielded no clio-coder command facts");
+	if (environmentFacts === 0) fail("docs-parity", "the Markdown corpus yielded no CLIO_CODER environment facts");
+}
+
+// ---------------------------------------------------------------------------
 // pi-surface: a normal lint run does not pay to build the full Pi declaration
 // graph. A dependency version mismatch activates scripts/pi-surface-diff.ts,
 // which fails when a symbol imported by Clio changed or disappeared and reports
@@ -1438,6 +1616,7 @@ const checks: ReadonlyArray<[string, () => void | Promise<void>]> = [
 	["packaging", checkPackaging],
 	["gitignored-reference", checkGitignoredReference],
 	["prompts", checkPromptsDocLinks],
+	["docs-parity", checkDocsParity],
 	["pi-surface", checkPiSurface],
 ];
 
