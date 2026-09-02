@@ -5,6 +5,7 @@ All notable changes to Clio Coder are documented in this file. The format follow
 ## Unreleased
 
 ### Changed
+- Updated the Pi engine SDK libraries (`pi-ai`, `pi-agent-core`, `pi-tui`) from 0.84.0 to 0.84.4. The agent loop now runs Clio's post-tool continuation guard only when another assistant turn is about to start, so a terminating tool batch no longer triggers the guard after its final result; Clio's guard was already continuation-only and needed no change. Inherited fixes include OpenAI-compatible reasoning replay and thinking-signature serialization, Anthropic server-side refusal fallback pricing, optional tool arguments sent as `null` being treated as omitted, fullscreen transcript search and half-page/line scrolling actions, the SSH-aware `PI_TUI_ESC_TIMEOUT` escape window, and lower alternate-screen per-frame allocation. While the fullscreen search overlay is focused, `ctrl+g` advances the match and the Clio leader chord is unavailable; Clio's own bindings do not otherwise overlap the new defaults. New engine lifecycle contracts lock these behaviors.
 - Rebuilt the product README and operator documentation around the current CLI, settings-v2 contract, package layout, and experimental boundaries so new users and repository agents have one concise, accurate route into the product.
 
 ## 0.4.1 - 2026-09-01
