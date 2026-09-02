@@ -1301,12 +1301,12 @@ export async function bootOrchestrator(options: BootOptions = {}): Promise<BootR
 	// cannot grant a permission safety would deny. Loading is best-effort.
 	const hookReceiptLog = createHookReceiptLog({ persistPath: join(clioStateDir(), "hook-receipts.json") });
 	const extensionHookRoots: ExtensionHookRoot[] = (extensions?.list(process.cwd()) ?? [])
-		.filter((ext) => ext.loadable)
+		.filter((ext) => ext.loadable && ext.provenance !== undefined)
 		.map((ext) => ({
 			id: ext.id,
 			rootPath: ext.rootPath,
 			scope: ext.scope,
-			installedContentDigest: ext.installedContentDigest as string,
+			installedContentDigest: ext.provenance?.contentDigest ?? "",
 		}));
 	const userHooks = installUserHooks({
 		cwd: process.cwd(),

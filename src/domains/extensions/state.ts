@@ -1,10 +1,21 @@
-import { cpSync, existsSync, lstatSync, mkdirSync, readdirSync, readFileSync, renameSync, rmSync } from "node:fs";
+import { createHash } from "node:crypto";
+import {
+	cpSync,
+	existsSync,
+	lstatSync,
+	mkdirSync,
+	readdirSync,
+	readFileSync,
+	realpathSync,
+	renameSync,
+	rmSync,
+} from "node:fs";
 import path from "node:path";
 import { safeResourceWrite } from "../../core/safe-resource-write.js";
 import { clioConfigDir } from "../../core/xdg.js";
 import { evaluateClioCompatibility } from "./compatibility.js";
 import { isRecord, loadManifestFromRoot, trimString } from "./discovery.js";
-import { extensionContentDigest } from "./integrity.js";
+import { extensionContentDigest, extensionContentDigestWithCapture } from "./integrity.js";
 import type {
 	ExtensionDiagnostic,
 	ExtensionInstallOptions,
@@ -23,6 +34,12 @@ type StateReadResult =
 	| { status: "absent"; state: ExtensionState }
 	| { status: "valid"; state: ExtensionState }
 	| { status: "corrupt"; state: ExtensionState; message: string };
+
+export interface InstalledExtensionRecord {
+	entry: InstalledExtension;
+	/** Exact file bytes captured by the stable tree-digest read. */
+	captured?: ReadonlyMap<string, Buffer>;
+}
 
 export function extensionBaseDir(scope: ExtensionScope, cwd = process.cwd()): string {
 	return scope === "user"
@@ -103,7 +120,7 @@ function installedFromRoot(
 	stateResult: StateReadResult,
 	cwd: string,
 	fallbackId: string,
-): InstalledExtension | null {
+): InstalledExtensionRecord | null {
 	const candidate = loadManifestFromRoot(root);
 	const manifest = candidate.manifest;
 	const diagnostics = [...candidate.diagnostics];
@@ -111,6 +128,7 @@ function installedFromRoot(
 	const provenance = stateResult.state.installed[id];
 	const expectedDigest = provenance?.contentDigest;
 	let observedDigest: string | undefined;
+	let captured: ReadonlyMap<string, Buffer> | undefined;
 	let contentVerified = false;
 	if (stateResult.status === "corrupt") {
 		diagnostics.push({
@@ -138,8 +156,13 @@ function installedFromRoot(
 		});
 	} else {
 		try {
-			observedDigest = extensionContentDigest(root);
+			const manifestName = candidate.manifestPath ? path.basename(candidate.manifestPath) : undefined;
+			const digestResult = extensionContentDigestWithCapture(root, {
+				capture: [...(manifestName ? [manifestName] : []), "hooks.yaml"],
+			});
+			observedDigest = digestResult.digest;
 			contentVerified = observedDigest === expectedDigest;
+			if (contentVerified) captured = digestResult.captured;
 			if (!contentVerified) {
 				diagnostics.push({
 					type: "error",
@@ -157,7 +180,20 @@ function installedFromRoot(
 	}
 	const clioRange = manifest?.compatibility?.clio;
 	const compatible = clioRange === undefined || evaluateClioCompatibility(clioRange).satisfied;
-	return {
+	const manifestName = candidate.manifestPath ? path.basename(candidate.manifestPath) : undefined;
+	const manifestBytes = manifestName ? captured?.get(manifestName) : undefined;
+	const extensionProvenance =
+		contentVerified && expectedDigest && manifestBytes
+			? {
+					id,
+					scope,
+					...(provenance?.source ? { sourcePath: provenance.source } : {}),
+					canonicalRoot: realpathSync(root),
+					manifestDigest: createHash("sha256").update(manifestBytes).digest("hex"),
+					contentDigest: expectedDigest,
+				}
+			: undefined;
+	const entry: InstalledExtension = {
 		id,
 		name: manifest?.name ?? id,
 		version: manifest?.version ?? "unknown",
@@ -170,18 +206,19 @@ function installedFromRoot(
 		compatible,
 		effective: false,
 		loadable: false,
-		...(expectedDigest ? { installedContentDigest: expectedDigest } : {}),
+		...(extensionProvenance ? { provenance: extensionProvenance } : {}),
 		...(observedDigest ? { observedContentDigest: observedDigest } : {}),
 		resources: manifest?.resources ?? {},
 		diagnostics,
 	};
+	return { entry, ...(extensionProvenance && captured ? { captured } : {}) };
 }
 
-function listScope(scope: ExtensionScope, cwd = process.cwd()): InstalledExtension[] {
+function listScope(scope: ExtensionScope, cwd = process.cwd()): InstalledExtensionRecord[] {
 	const base = extensionBaseDir(scope, cwd);
 	if (!existsSync(base)) return [];
 	const state = readState(scope, cwd);
-	const out: InstalledExtension[] = [];
+	const out: InstalledExtensionRecord[] = [];
 	for (const entry of readdirSync(base, { withFileTypes: true }).sort((a, b) => a.name.localeCompare(b.name))) {
 		if (!entry.isDirectory() || entry.name.startsWith(".")) continue;
 		const root = path.join(base, entry.name);
@@ -260,33 +297,42 @@ export function upgradeLegacyExtensionInstallState(
 }
 
 export function listInstalledExtensions(cwd = process.cwd(), options: ExtensionListOptions = {}): InstalledExtension[] {
+	return listInstalledExtensionRecords(cwd, options).map((record) => record.entry);
+}
+
+export function listInstalledExtensionRecords(
+	cwd = process.cwd(),
+	options: ExtensionListOptions = {},
+): InstalledExtensionRecord[] {
 	const scopes: ExtensionScope[] = options.scope ? [options.scope] : ["user", "project"];
-	const entries = scopes.flatMap((scope) => listScope(scope, cwd));
-	const byId = new Map<string, InstalledExtension[]>();
-	for (const entry of entries) {
+	const records = scopes.flatMap((scope) => listScope(scope, cwd));
+	const byId = new Map<string, InstalledExtensionRecord[]>();
+	for (const record of records) {
+		const entry = record.entry;
 		const list = byId.get(entry.id) ?? [];
-		list.push(entry);
+		list.push(record);
 		byId.set(entry.id, list);
 	}
 	for (const group of byId.values()) {
 		const winner = group
-			.filter((entry) => entry.valid && entry.compatible)
-			.sort((a, b) => scopeRank(a.scope) - scopeRank(b.scope))
+			.filter((record) => record.entry.valid && record.entry.compatible)
+			.sort((a, b) => scopeRank(a.entry.scope) - scopeRank(b.entry.scope))
 			.at(-1);
-		for (const entry of group) {
-			entry.effective = entry === winner;
+		for (const record of group) {
+			const entry = record.entry;
+			entry.effective = record === winner;
 			entry.loadable = entry.valid && entry.compatible && entry.enabled && entry.effective;
-			if (entry.valid && entry.compatible && !entry.effective && winner) entry.overriddenBy = winner.scope;
+			if (entry.valid && entry.compatible && !entry.effective && winner) entry.overriddenBy = winner.entry.scope;
 		}
 	}
 	// Invalid and incompatible packages remain visible by default so the load
 	// refusal and its diagnostic cannot disappear with the resources it suppresses.
 	const all =
-		options.all === true ? entries : entries.filter((entry) => entry.effective || !entry.valid || !entry.compatible);
+		options.all === true ? records : records.filter(({ entry }) => entry.effective || !entry.valid || !entry.compatible);
 	return all.sort((a, b) => {
-		const id = a.id.localeCompare(b.id);
+		const id = a.entry.id.localeCompare(b.entry.id);
 		if (id !== 0) return id;
-		return scopeRank(a.scope) - scopeRank(b.scope);
+		return scopeRank(a.entry.scope) - scopeRank(b.entry.scope);
 	});
 }
 

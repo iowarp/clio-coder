@@ -204,12 +204,12 @@ function inspectOperatorProfile(cwd: string, graph: CustomizationGraph): void {
 function inspectHooks(cwd: string, graph: CustomizationGraph): void {
 	try {
 		const extensions = listInstalledExtensions(cwd)
-			.filter((ext) => ext.loadable)
+			.filter((ext) => ext.loadable && ext.provenance !== undefined)
 			.map((ext) => ({
 				id: ext.id,
 				rootPath: ext.rootPath,
 				scope: ext.scope,
-				installedContentDigest: ext.installedContentDigest as string,
+				installedContentDigest: ext.provenance?.contentDigest ?? "",
 			}));
 		const { batches, fileIssues } = readHookSources({ cwd, extensions });
 		for (const issue of fileIssues) graph.issues.push(`hook ${issue.source.origin}: ${issue.message}`);

@@ -27,6 +27,19 @@ export interface ExtensionDiagnostic {
 	path?: string;
 }
 
+export interface ExtensionProvenance {
+	id: string;
+	scope: ExtensionScope;
+	/** Path recorded in install state, when known. */
+	sourcePath?: string;
+	/** Canonical filesystem identity of the installed package root. */
+	canonicalRoot: string;
+	/** SHA-256 of the manifest bytes covered by the installed-tree digest. */
+	manifestDigest: string;
+	/** Installed-tree digest recorded at install and reverified on this load. */
+	contentDigest: string;
+}
+
 export interface InstalledExtension {
 	id: string;
 	name: string;
@@ -43,13 +56,19 @@ export interface InstalledExtension {
 	effective: boolean;
 	/** The single admission decision for extension-owned resources and hooks. */
 	loadable: boolean;
-	/** Digest recorded when this package was transactionally installed. */
-	installedContentDigest?: string;
+	/** Present exactly when the installed tree and manifest bytes were reverified. */
+	provenance?: ExtensionProvenance;
 	/** Digest observed while checking installed content on this load. */
 	observedContentDigest?: string;
 	resources: ExtensionManifestResources;
 	overriddenBy?: ExtensionScope;
 	diagnostics: ExtensionDiagnostic[];
+}
+
+export type LoadableExtension = InstalledExtension & { loadable: true; provenance: ExtensionProvenance };
+
+export function isLoadableExtension(entry: InstalledExtension): entry is LoadableExtension {
+	return entry.loadable && entry.provenance !== undefined;
 }
 
 export interface ExtensionCandidate {
@@ -66,7 +85,9 @@ export interface ExtensionResourceRoot {
 	path: string;
 	rootPath: string;
 	source: string;
-	installedContentDigest: string;
+	provenance: ExtensionProvenance;
+	/** Zero denotes an ephemeral, uncommitted projection. */
+	generation: number;
 }
 
 export interface ExtensionListOptions {

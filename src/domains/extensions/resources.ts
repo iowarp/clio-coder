@@ -2,6 +2,7 @@ import { realpathSync, statSync } from "node:fs";
 import path from "node:path";
 import { listInstalledExtensions } from "./state.js";
 import type { ExtensionResourceKind, ExtensionResourceRoot } from "./types.js";
+import { isLoadableExtension } from "./types.js";
 
 export function extensionResourcePath(rootPath: string, resourcePath: string): string | null {
 	const root = path.resolve(rootPath);
@@ -33,7 +34,7 @@ export function enabledExtensionResourceRoots(
 ): ExtensionResourceRoot[] {
 	const roots: ExtensionResourceRoot[] = [];
 	for (const entry of listInstalledExtensions(cwd)) {
-		if (!entry.loadable) continue;
+		if (!isLoadableExtension(entry)) continue;
 		const rel = entry.resources[kind];
 		if (!rel) continue;
 		const full = extensionResourcePath(entry.rootPath, rel);
@@ -44,7 +45,8 @@ export function enabledExtensionResourceRoots(
 			path: full,
 			rootPath: entry.rootPath,
 			source: `extension:${entry.scope}:${entry.id}`,
-			installedContentDigest: entry.installedContentDigest as string,
+			provenance: entry.provenance,
+			generation: 0,
 		});
 	}
 	return roots;
