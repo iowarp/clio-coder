@@ -724,22 +724,40 @@ export interface RunHostVerificationCheck {
 export interface RunHostVerificationAttribution {
 	/** Declared check id that failed. */
 	check: string;
-	/** Absolute repository paths the check's own output named, sorted, capped at 32. */
+	/**
+	 * Absolute repository paths the check's own output named, capped at 32. The
+	 * paths that decided the charge come first so a truncated list still contains
+	 * the evidence behind the verdict; each group is sorted.
+	 */
 	implicated: string[];
-	/** Run ids the failure is charged to, sorted. */
+	/** Run ids the failure is charged to, sorted; empty when every named path belongs to a run that did not declare the check. */
 	charged: string[];
 	/**
-	 * `write_roots` when at least one implicated path fell inside a charged run's
-	 * declared write roots. `unattributable` when the output named no path, or
-	 * named none that any declaring run's write roots cover, in which case every
-	 * run that declared the check is charged: a real failure with no owner is
-	 * charged to everyone rather than excused for everyone.
+	 * The weakest evidence behind the charge set, never the strongest, so the
+	 * record cannot claim a certainty it does not have.
+	 *
+	 * `write_roots`: every charged run has an implicated path inside its own
+	 * declared write roots. `attributed_elsewhere`: nothing is charged because
+	 * every implicated path falls inside the write roots of a live batch member
+	 * that did not declare this check. `unattributable`: the charge is not backed
+	 * by per-run path evidence, which covers a failure that named no path, one
+	 * that named only paths no member claims, and one charged to a run that
+	 * declared no write roots at all. The first two of those charge every run that
+	 * declared the check: a real failure with no owner is charged to everyone
+	 * rather than excused for everyone.
 	 */
-	basis: "write_roots" | "unattributable";
+	basis: "write_roots" | "attributed_elsewhere" | "unattributable";
 }
 
 export interface RunHostVerification {
-	status: "verified" | "rejected" | "skipped";
+	/**
+	 * `verified` states that every declared check passed, which is the claim
+	 * `trust-status.ts:619` turns into "validated by host-verification".
+	 * `not_implicated` is the batch-settled exculpation: a declared check failed
+	 * for the batch and this run's `checks` carries its non-zero exit code, but
+	 * the failure was charged elsewhere, so no validator speaks for this run.
+	 */
+	status: "verified" | "rejected" | "skipped" | "not_implicated";
 	reason?: string;
 	checks: RunHostVerificationCheck[];
 	/**
