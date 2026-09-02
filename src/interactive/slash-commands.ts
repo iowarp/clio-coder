@@ -31,6 +31,7 @@ import type {
 import { parseSkillCommand } from "../domains/resources/index.js";
 import type { ShareImportPlan } from "../domains/share/index.js";
 import type { UserTask } from "../domains/user-tasks/store.js";
+import type { ExtensionReloadOutcome } from "../entry/extension-reload.js";
 import { isToolProfileName, TOOL_PROFILE_NAMES, type ToolProfileName } from "../tools/profiles.js";
 import type { NoticeLevel } from "./command-output.js";
 import {
@@ -115,7 +116,7 @@ type SlashCommandVariant =
 	/** `ref` is the turnId an `[evicted ...]` marker names. */
 	| { kind: "context-recall"; ref: string }
 	| { kind: "skill-selector" }
-	| { kind: "resources"; family?: "skills" | "prompts" | "extensions"; tab?: LibraryEntryKind }
+	| { kind: "resources"; family?: "skills" | "prompts" | "extensions"; tab?: LibraryEntryKind; action?: "reload" }
 	| { kind: "skill-invocation"; text: string }
 	| ShareCommandVariant
 	| ArchiveCommandVariant
@@ -599,6 +600,13 @@ export interface SlashCommandContext {
 	 */
 	expandPromptTemplate?: (text: string) => PromptTemplateExpansion;
 	listExtensions?: () => ReadonlyArray<InstalledExtension>;
+	/**
+	 * `/resources extensions reload`: build, validate, and commit the next
+	 * extension generation together with its user hooks, or report why it was
+	 * refused. Absent on a host without the reload coordinator, in which case
+	 * the command says so instead of pretending.
+	 */
+	reloadExtensions?: () => ExtensionReloadOutcome;
 	/** Detection report, pending proposals, and the two consent actions `/interop` drives. */
 	interop?: {
 		report: () => InteropReport | null;
@@ -937,22 +945,27 @@ export const BUILTIN_SLASH_COMMANDS: ReadonlyArray<BuiltinSlashCommand> = [
 			skills: "Browse installed skills",
 			prompts: "Browse prompt templates",
 			library: "Browse resource libraries",
-			extensions: "Browse installed extensions",
+			extensions: "Browse installed extensions; `reload` commits a new extension generation",
 		},
 		args: {
 			subcommands: {
 				skills: {},
 				prompts: {},
 				library: { positionals: [{ name: "kind", required: false }] },
-				extensions: {},
+				extensions: { positionals: [{ name: "action", required: false, values: ["reload"] }] },
 			},
 		},
 		fromArgs(parsed) {
 			if (parsed.error) return { kind: "usage-error", command: "resources", reason: parsed.error };
 			if (parsed.subcommand === undefined || parsed.subcommand === "skills")
 				return { kind: "resources", family: "skills" };
-			if (parsed.subcommand === "prompts" || parsed.subcommand === "extensions")
-				return { kind: "resources", family: parsed.subcommand };
+			if (parsed.subcommand === "prompts") return { kind: "resources", family: "prompts" };
+			if (parsed.subcommand === "extensions") {
+				const action = parsed.positionals[0];
+				if (action === undefined) return { kind: "resources", family: "extensions" };
+				if (action === "reload") return { kind: "resources", family: "extensions", action: "reload" };
+				return { kind: "usage-error", command: "resources", reason: `Unknown action: ${action} (one of reload)` };
+			}
 			const tab = parsed.positionals[0];
 			if (tab === undefined) return { kind: "resources" };
 			if (!isLibraryTab(tab)) {
@@ -964,8 +977,10 @@ export const BUILTIN_SLASH_COMMANDS: ReadonlyArray<BuiltinSlashCommand> = [
 		handle(command, ctx) {
 			if (command.kind !== "resources") return;
 			if (command.family === "prompts") ctx.openPrompts();
-			else if (command.family === "extensions") ctx.openExtensions();
-			else ctx.openSkillsHub?.(command.tab);
+			else if (command.family === "extensions") {
+				if (command.action === "reload") reloadExtensionsCommand(ctx);
+				else ctx.openExtensions();
+			} else ctx.openSkillsHub?.(command.tab);
 		},
 	},
 	{
@@ -2069,6 +2084,39 @@ function retiredCommandHint(token: string): string | undefined {
 }
 
 /** Pure slash-command parser: no I/O, no side effects. Walks the registry in order. */
+/**
+ * One notice line for a reload outcome. Success when the generation committed
+ * cleanly; warn when it committed with dropped hooks or declaration issues;
+ * error when it was refused and the previous generation stays active.
+ */
+export function formatExtensionReloadNotice(outcome: ExtensionReloadOutcome): [NoticeLevel, string] {
+	if (outcome.status !== "committed") {
+		return ["error", `extensions: reload rejected (${outcome.reason}); generation ${outcome.generation} stays active`];
+	}
+	const delta = outcome.changed
+		? `changed: +${outcome.added.length} -${outcome.removed.length} ~${outcome.modified.length}`
+		: "unchanged";
+	const issueCount = outcome.hooks.fileIssues + outcome.hooks.issues;
+	const hookParts = [`${outcome.hooks.registered} registered`];
+	if (outcome.hooks.dropped > 0) hookParts.push(`${outcome.hooks.dropped} dropped`);
+	if (issueCount > 0) hookParts.push(`${issueCount} issue${issueCount === 1 ? "" : "s"}`);
+	if (outcome.hooks.overridden > 0) hookParts.push(`${outcome.hooks.overridden} overridden`);
+	const level: NoticeLevel = outcome.hooks.dropped > 0 || issueCount > 0 ? "warn" : "success";
+	return [level, `extensions: generation ${outcome.generation} committed (${delta}); hooks: ${hookParts.join(", ")}`];
+}
+
+function reloadExtensionsCommand(ctx: SlashCommandContext): void {
+	if (!ctx.reloadExtensions) {
+		ctx.notice("warn", "extensions: reload is unavailable in this session; restart to pick up installed changes");
+		return;
+	}
+	const outcome = ctx.reloadExtensions();
+	const [level, text] = formatExtensionReloadNotice(outcome);
+	ctx.notice(level, text);
+	for (const line of outcome.lines) ctx.notice("warn", line);
+	if (outcome.status === "committed") ctx.openExtensions();
+}
+
 export function parseSlashCommand(input: string): SlashCommand {
 	const trimmed = input.trim();
 	if (trimmed.length === 0) return { kind: "empty" };
