@@ -135,6 +135,14 @@ function normalizePathList(
 	}
 	const normalized: string[] = [];
 	for (const [index, entry] of value.entries()) {
+		// A scope entry of "." or "./" names the repository root, which is what
+		// an empty scope list already means. Local models write it to say "the
+		// whole repository" and then spend a round on the rejection, so it is
+		// read as that rather than refused; an output path must still name a
+		// file, so the leniency stops at scope fields.
+		if (normalizeEntry === normalizeScopePathEntry && typeof entry === "string" && /^\.\/?$/u.test(entry.trim())) {
+			continue;
+		}
 		const result = normalizeEntry(entry, field, index);
 		if (typeof result !== "string") return result;
 		normalized.push(result);
@@ -286,10 +294,19 @@ export function normalizeDispatchIntent(
 		}
 		const check = entry.check.trim();
 		const declared = checks.get(check);
+		// The word a model writes to say "no verification". It is not a check
+		// id, and refusing it cost a dispatch round every time it appeared, so
+		// it reads as the empty declaration it means unless the project really
+		// declared a check by that name.
+		if (declared === undefined && check.toLowerCase() === "none") continue;
 		if (declared === undefined) {
+			// The model that hits this most often has put a shell command here
+			// ("git diff src/x.ts"), so the message has to say what an entry is
+			// and offer the move that always works: leave verification out and
+			// run the check after the receipt.
 			return fail(
 				"verification_check_undeclared",
-				`verification check '${check}' is undeclared; add a package.json verification script or .clio-coder/verifiers.yaml entry`,
+				`verification check '${check}' is undeclared: intent.verification takes only check ids that verify() lists (package.json verification scripts or .clio-coder/verifiers.yaml entries), never a shell command; omit verification and run the check yourself after the receipt, or declare the check first`,
 			);
 		}
 		if (

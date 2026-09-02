@@ -12,7 +12,13 @@ import { assessCapabilityMismatch } from "../../src/domains/dispatch/capability-
 import { isBoundedGateRolePrompt, REVIEWER_GATE_PROMPT } from "../../src/domains/dispatch/gate-role-prompts.js";
 import { normalizeDispatchIntent } from "../../src/domains/dispatch/intent.js";
 import { classifyDispatchIntentCompatibility } from "../../src/domains/dispatch/intent-compatibility.js";
+import { resolveDispatchPathScope } from "../../src/domains/dispatch/path-scope.js";
 import { endpointCapacityFor } from "../../src/domains/providers/endpoint-capacity.js";
+import {
+	EMPTY_CAPABILITIES,
+	type ProvidersContract,
+	type RuntimeDescriptor,
+} from "../../src/domains/providers/index.js";
 import { createDispatchTool } from "../../src/tools/dispatch.js";
 import { isolateDispatchState, makeDispatchBundle, restoreDispatchState } from "../harness/dispatch.js";
 import { dispatchStubContext } from "../harness/dispatch-stub-context.js";
@@ -91,6 +97,99 @@ describe("dispatch admission boundary", () => {
 		);
 		strictEqual(capacityLimit(endpointCapacityFor({ target, runtime, discoveredSlots: 2 }, {})), 2);
 		strictEqual(capacityLimit(endpointCapacityFor({ target, runtime }, {})), 1);
+	});
+
+	it("reads a dot scope entry as the repository root instead of refusing the declaration", () => {
+		// Local models write read_roots: ["."] to say "the whole repository" and
+		// then spend a round on the rejection; the root is what an empty scope
+		// already means, so the entry is dropped rather than refused. An output
+		// path still has to name a file.
+		const scoped = normalizeDispatchIntent({ version: 2, read_roots: [".", "src/"], write_roots: ["./"] }, new Map());
+		ok(scoped.ok);
+		deepStrictEqual(scoped.intent.readRoots, ["src/"]);
+		deepStrictEqual(scoped.intent.writeRoots, []);
+		const output = normalizeDispatchIntent({ version: 2, expected_outputs: ["."] }, new Map());
+		strictEqual(output.ok, false);
+	});
+
+	it("infers a path from a briefing that quotes an import specifier instead of refusing the dispatch", () => {
+		// "./parser.js" in prose is the same repository path without the prefix;
+		// a live orchestrator lost two dispatch rounds to the dot-segment refusal.
+		const scope = resolveDispatchPathScope({
+			task: "Make parseLine trim trailing whitespace",
+			briefing: "tests/round-trip.test.ts imports ./parser.js and index.ts re-exports it",
+		} as Parameters<typeof resolveDispatchPathScope>[0]);
+		strictEqual(scope.source, "inferred");
+		ok(scope.workingContextPaths.includes("parser.js"));
+	});
+
+	it("reads a verification check of none as the empty declaration unless a project declared that id", () => {
+		// The word every model reaches for to say "no verification". Refusing it
+		// as undeclared cost a dispatch round each time; it is not a check.
+		const none = normalizeDispatchIntent(
+			{ version: 2, write_roots: ["src/"], verification: [{ check: "none" }] },
+			new Map([["typecheck", { id: "typecheck", timeoutMs: 30_000 }]]),
+		);
+		ok(none.ok);
+		deepStrictEqual(none.intent.verification, []);
+		const declared = normalizeDispatchIntent(
+			{ version: 2, verification: [{ check: "none" }] },
+			new Map([["none", { id: "none", timeoutMs: 5_000 }]]),
+		);
+		ok(declared.ok);
+		deepStrictEqual(declared.intent.verification, [{ check: "none", timeoutMs: 5_000 }]);
+		const still = normalizeDispatchIntent({ version: 2, verification: [{ check: "git diff" }] }, new Map());
+		strictEqual(still.ok, false);
+	});
+
+	it("probes an endpoint still at the blind slot default once when the domain starts", async () => {
+		// A fresh home has no slot record, so admission bound llama.cpp targets
+		// to one slot and refused a two-task batch until `targets --probe` ran.
+		const settings = structuredClone(DEFAULT_SETTINGS);
+		settings.targets = [
+			{ id: "mini", runtime: "llama.cpp", url: "http://127.0.0.1:8080", defaultModel: "m" },
+			{
+				id: "mini-pinned",
+				runtime: "llama.cpp",
+				url: "http://127.0.0.1:8081",
+				defaultModel: "m",
+				maxConcurrentRequests: 2,
+			},
+		];
+		settings.fleet.default.target = "mini";
+		settings.fleet.default.model = "m";
+		const runtime: RuntimeDescriptor = {
+			id: "llama.cpp",
+			displayName: "llama.cpp",
+			kind: "http",
+			tier: "local-native",
+			apiFamily: "openai-completions",
+			auth: "none",
+			defaultCapabilities: { ...EMPTY_CAPABILITIES, chat: true, tools: true },
+			synthesizeModel: () => ({ id: "m", provider: "llama.cpp" }) as never,
+		};
+		const stub = dispatchStubContext({ settings, runtime });
+		const providers = stub.getContract<ProvidersContract>("providers");
+		if (!providers) throw new Error("stub providers missing");
+		const probed: Array<[string, unknown]> = [];
+		const wrapped: ProvidersContract = {
+			...providers,
+			probeTarget: async (id, options) => {
+				probed.push([id, options]);
+				return providers.probeTarget(id, options);
+			},
+		};
+		const bundle = makeDispatchBundle({
+			bus: stub.bus,
+			getContract: ((name: string) =>
+				name === "providers" ? wrapped : stub.getContract(name)) as typeof stub.getContract,
+		});
+		await bundle.extension.start?.();
+		try {
+			deepStrictEqual(probed, [["mini", { reasoning: false }]]);
+		} finally {
+			await bundle.extension.stop?.();
+		}
 	});
 
 	it("refuses write authority on a read-only request without widening or dropping it", () => {
