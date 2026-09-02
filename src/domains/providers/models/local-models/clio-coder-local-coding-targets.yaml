@@ -163,6 +163,7 @@
     - nvidia-nemotron-3-nano-omni-30b-a3b-reasoning
     - nemotron-3-nano-omni-30b-a3b-reasoning-ud-q4_k_m
     - nemotron-3-nano-omni-30b-a3b-reasoning
+    - nemotron3-30b-moe-omni
     - nemotron-3-nano-omni
     - nemotron-nano-omni
   capabilities:
@@ -211,6 +212,10 @@
         low: 1024
         medium: 4096
         high: 16384
+      chatTemplateKwargs:
+        static:
+          # scratchpad/catalog/models/nvidia-Nemotron-3-Nano-Omni-30B-A3B-Reasoning-FP8.md:7
+          reasoning_budget: 16384
       guidance: |
         Reasoning is template-driven; thinking blocks emit through the qwen
         chat template. Preserve thinking across coding-task turns when the
@@ -1336,3 +1341,47 @@
         32GB-class MoE families because this is the 16GB emulation target;
         budget for a reasoning preamble ahead of every answer.
     serving: "LM Studio reports trained_for_tool_use for the local qwopus3.5-9b-v3 target. Configure residency through LM Studio or explicit lmstudio.load settings."
+
+- family: nemotron-3.5-lightning
+  matchPatterns:
+    - nemo3.5-30b-moe
+    - nvidia-nemotron-3.5-lightning-30b-a3b
+  capabilities:
+    chat: true
+    tools: true
+    reasoning: false
+    contextWindow: 262144
+    maxTokens: 32768
+  quirks:
+    thinking:
+      mechanism: none
+      chatTemplateKwargs:
+        static:
+          # scratchpad/catalog/models/nvidia-NVIDIA-Nemotron-3.5-Lightning-30B-A3B-BF16.md:21
+          force_nonempty_content: true
+
+- family: muse-glimmer
+  matchPatterns:
+    - muse-30b-dense
+    - muse-glimmer-30b
+  capabilities:
+    chat: true
+    tools: true
+    reasoning: true
+    contextWindow: 131072
+    maxTokens: 32768
+  quirks:
+    thinking:
+      mechanism: effort-levels
+      chatTemplateKwargs:
+        byLevel:
+          # scratchpad/catalog/models/unsloth-Muse-Glimmer-30B.md:35
+          key: reasoning_strength
+          values:
+            low: low
+            medium: medium
+            high: high
+            xhigh: xhigh
+          lmstudio: unsupported
+        lmstudio: unsupported
+
