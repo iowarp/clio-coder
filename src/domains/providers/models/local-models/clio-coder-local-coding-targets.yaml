@@ -223,8 +223,6 @@
         temperature: 0.6
         topP: 0.95
         topK: 20
-        reasoningBudget: 16384
-        gracePeriod: 1024
       instruct:
         temperature: 0.2
         topK: 1
@@ -249,9 +247,8 @@
         Reasoning is template-driven and the switch is
         chat_template_kwargs.enable_thinking; intermediate levels coerce to on.
         The checkpoint reasons when nothing is sent, so off has to be carried on
-        the wire rather than omitted. reasoning_effort is inert here on
-        llama.cpp; LM Studio reads the same on-off switch from reasoning_effort
-        none or low, which Clio sends for on-off models on that runtime.
+        the wire rather than omitted. reasoning_effort is inert on llama.cpp;
+        LM Studio reads the same on-off switch from that field instead.
     serving: "Use qwen3_coder tool parsing when served through OpenAI-compatible HTTP. LM Studio uses the same OpenAI-compatible tool surface."
 
 # NVIDIA's 3.5 Lightning generation, not a requant of the Nano Omni family
@@ -262,9 +259,12 @@
 # the same as sharing weights.
 - family: nemotron-3.5-lightning-30b-a3b
   matchPatterns:
+    # No bare `nemotron-3.5-lightning`: the 30b spelling is the shortest one
+    # that cannot swallow a future 8B or 70B Lightning id, which would inherit
+    # this checkpoint's sampler, its 1M window and a dial measured elsewhere.
     - nvidia-nemotron-3.5-lightning-30b-a3b
     - nemotron-3.5-lightning-30b-a3b
-    - nemotron-3.5-lightning
+    - nemotron-3.5-lightning-30b
     - nemo3.5-30b-moe
   capabilities:
     chat: true
@@ -991,6 +991,16 @@
   # reached the wire (issue #263). The matcher in knowledge-base.ts ranks by
   # pattern length and ignores file order, so the only durable guard against the
   # next `qwopus3.6-*` id landing here is not to declare the short pattern.
+  #
+  # The cost is real and is chosen deliberately, here and at the other four
+  # families that keep only their full spellings. An unlisted `qwopus3.6-*` id
+  # now matches nothing, and a model with no family gets whatever
+  # `inferThinkingMechanism` reads off the live probe: `none` with the dial
+  # pinned to off and every thinking field stripped when the server reports no
+  # reasoning, `on-off` when it reports some. Both are honest about knowing
+  # nothing. Inheriting a sibling's measured dial is not, and it is the failure
+  # mode that costs a session its reasoning silently. Adding the id is a
+  # one-line catalog edit; noticing that a dial reaches nothing takes a sweep.
   matchPatterns:
     - qwopus3.6-27b-v1-preview
     - qwopus3.6-27b
@@ -1147,7 +1157,29 @@
         slot 196608 tokens, and served text-only with no mmproj and no MTP draft
         where the block below recommends 262144 at parallel 1 with both active.
         The vision capability stays the checkpoint's; that run simply did not
-        load the projector.
+        load the projector. That has a consequence for any projector-less
+        deployment, because the model Clio builds takes vision from this entry
+        and from a target-level override only: synthLocalModel merges the
+        runtime defaults, this entry and target.capabilities and passes no probe
+        layer, then sets input to ["text","image"] whenever vision is true. Once
+        this id resolves here rather than to the 27B preview it did before issue
+        #263, mini's text-only preset would be offered image input it rejects,
+        so a target serving this checkpoint without --mmproj needs
+        capabilities.vision false on the target entry.
+
+        Why on-off replaced the four-level effort map, and what it costs. The
+        map gave LM Studio a low/medium/high granularity nothing had measured,
+        and gave llama.cpp an active level that put reasoning_effort on the wire
+        and nothing else, which this template does not read. on-off is what both
+        measurements support. The cost is that resolveRequestCapability adds the
+        reasoning_effort spelling for an on-off family only when runtimeId is
+        literally `lmstudio` (REASONING_EFFORT_ON_OFF_RUNTIMES), while an
+        effort-levels family emitted it on every runtime. An LM Studio server
+        reached through a generic openai-compat, litellm or vllm target
+        therefore now receives only the template flag, which that host ignores,
+        and the model reasons at every level. Point such a target at the
+        `lmstudio` runtime, which is what the 2026-08-08 finding above was taken
+        on and what carries the spelling that reaches it.
     sampling:
       instruct:
         temperature: 0.2
@@ -1181,19 +1213,11 @@
     thinking:
       mechanism: on-off
       guidance: |
-        Qwopus3.6 35B-A3B Coder has one switch and two spellings of it. On
-        llama.cpp it is chat_template_kwargs.enable_thinking and reasoning_effort
-        is inert; on LM Studio's OpenAI-compatible port it is reasoning_effort
-        ("none" off, "low" on) and the template flag is inert. Clio's on-off
-        mechanism sends the template flag everywhere and adds the LM Studio
-        spelling on that runtime, so both surfaces get a dial that reaches the
-        model; intermediate levels coerce to on. The four-level effort map this
-        family used to declare gave LM Studio a low/medium/high granularity
-        nothing had measured, and gave llama.cpp an active level that put
-        reasoning_effort on the wire and nothing else, which this template does
-        not read. The LM Studio native transport still has no field for either
-        spelling, so a native-routed run follows the server's own default
-        whatever the configured level says.
+        One switch, two spellings: chat_template_kwargs.enable_thinking on
+        llama.cpp, reasoning_effort ("none" off, "low" on) on LM Studio, each
+        inert on the other host. Intermediate levels coerce to on, and off has
+        to be carried on the wire because the checkpoint reasons unless told
+        not to, whatever its card says about thinking-off execution.
     serving: "Jackrong Qwopus3.6 35B-A3B Coder MTP, Q4_K_M. Thinking-off coder/agent tuned for tool-use loops. Served as a local router default with MTP speculative decoding (spec-type draft-mtp, n_max 2) and F32 mmproj vision both active at 262k."
 
 - family: qwopus3.6-27b-coder
@@ -1332,13 +1356,12 @@
       hardware: "mini fleet node, AMD Radeon AI PRO R9700 32 GB, Vulkan backend, 1 request slot"
       runtime: llamacpp
       build: "worker llama-server from /home/akougkas/src/llama.cpp-b10687/build-vulkan/bin, behind a router reporting build_info b1-c841aee"
-      model: "Gemma-4-26B-A4B-it-qat UD-Q4_K_XL with mtp-gemma-4-26B-A4B-it draft and mmproj-F16 (arch gemma4)"
+      model: "Gemma-4-26B-A4B-it-qat UD-Q4_K_XL with mmproj-F16, no draft model (arch gemma4)"
       llamaCpp: >-
         --ctx-size 262144 --parallel 1 --kv-unified --cache-type-k f16
         --cache-type-v f16 --batch-size 16384 --ubatch-size 2048 --flash-attn
-        true --n-gpu-layers 99 --spec-type draft-mtp --spec-draft-n 4 --jinja
-        --reasoning off --temperature 0.8 --top-k 64 --top-p 0.95
-        --repeat-penalty 1.05
+        true --n-gpu-layers 99 --jinja --reasoning off --temperature 0.8
+        --top-k 64 --top-p 0.95 --repeat-penalty 1.05
       date: "2026-09-02"
       source: "issue #263 thinking sweep: one non-streaming POST /v1/chat/completions per variant on a one-line arithmetic prompt, max_tokens 4096"
       note: |
@@ -1352,13 +1375,20 @@
         runtime. The router serves it with --reasoning off, which is why the
         no-field baseline is silent.
 
-        Two serving facts differ from the recommended profile below. The
+        Three serving facts differ from the recommended profile below. The
         measuring server ran f16 KV where the block below recommends q8_0, and
-        it ran at batch 16384 and ubatch 2048. Separately, the round-5 cache
-        sweep on this same date measured the Gemma 4 tokenizer rendering Clio's
-        full-capability first prompt at 7,353 tokens against roughly 8.4k for
-        the Qwen tokenizer on the identical prompt, so this family buys about a
-        thousand tokens of headroom per turn over the Qwen-tokenized families.
+        it ran at batch 16384 and ubatch 2048. It also ran without speculative
+        decoding: the preset's --tags string advertises
+        spec:mtp,spec_draft_n:4,draft:mtp-gemma-4-26B-A4B-it, but the argv
+        carries no --model-draft, --spec-type or --spec-draft-n-max, so the
+        token counts above come from a plain decode. The 31B qat sibling above
+        does pass those flags, which is where the tags were copied from.
+
+        Separately, the round-5 cache sweep on this same date measured the
+        Gemma 4 tokenizer rendering Clio's full-capability first prompt at 7,353
+        tokens against roughly 8.4k for the Qwen tokenizer on the identical
+        prompt, so this family buys about a thousand tokens of headroom per turn
+        over the Qwen-tokenized families.
     sampling:
       thinking:
         temperature: 0.3
@@ -1600,9 +1630,10 @@
 # measuredUnder note below records what was tried.
 - family: muse-glimmer-30b
   matchPatterns:
+    # No bare `muse-glimmer`: it would swallow a future Muse Glimmer of another
+    # size, which shares neither this 131072 window nor a measured dial.
     - unsloth/muse-glimmer-30b-gguf
     - muse-glimmer-30b
-    - muse-glimmer
     # The mini router serves the same weights under both this short id and the
     # unsloth repo name above.
     - muse-30b-dense
@@ -1703,14 +1734,20 @@
 
 # ThinkingCap is a brevity finetune of Qwen3.6-27B and not the base model, so it
 # keeps its own family rather than borrowing qwen3.6-27b's. No pattern here may
-# contain `qwen3.6`, which would steal ids from that family.
+# be a bare `qwen3.6` spelling: `lookup` is a substring test, so `qwen3.6` alone
+# would match every base-model id too and win or lose on length rather than on
+# which checkpoint the id names. The `thinkingcap-` prefixed spellings below all
+# contain `qwen3.6` harmlessly, because a longer pattern only matches ids that
+# contain the whole longer string.
 - family: thinkingcap-qwen3.6-27b
   matchPatterns:
+    # No bare `thinkingcap`: it would swallow a ThinkingCap built on another
+    # base, such as a Qwen3.8 32B, and hand it this q4's sampler, its 131072
+    # window and a dial measured on a different checkpoint.
     - thinkingcap-qwen3.6-27b
     - thinkingcap-27b-dense-q4
     - thinkingcap-27b-dense
     - thinkingcap-27b
-    - thinkingcap
   capabilities:
     chat: true
     tools: true
@@ -1813,8 +1850,7 @@
       guidance: |
         ThinkingCap keeps the Qwen3.6 chat template's enable_thinking switch;
         intermediate levels coerce to on. The router serves it with thinking on
-        by default, so off has to be carried on the wire rather than omitted.
-        reasoning_effort is inert here on llama.cpp. The finetune's whole point
-        is a shorter chain rather than no chain, so an active level costs about
-        what the base model's does per answer with far fewer thinking tokens.
+        by default, so off has to be carried on the wire rather than omitted,
+        and reasoning_effort is inert on llama.cpp. The finetune's point is a
+        shorter chain rather than no chain, so an active level is cheap.
     serving: "BottleCapAI ThinkingCap-Qwen3.6-27B, a brevity finetune of Qwen3.6-27B that holds accuracy at roughly 40 to 46 percent fewer thinking tokens (the quantizer measured a 15-prompt reasoning set at mean 675 tokens against 1401 for base Qwen3.6-27B). Served on mini as the Q4_K_M gguf with the MTP draft head embedded in the file, so speculative decoding needs no second model."
