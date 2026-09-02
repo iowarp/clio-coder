@@ -64,11 +64,6 @@
 <td>Set to any non-empty value to drop every foreground and background color. Bold, dim, italic, and underline stay, because they are what is left to read the interface by (<code>src/interactive/theme/tokens.ts</code>).</td>
 </tr>
 <tr>
-<td><code>CLIO_CODER_SYNTHESIS_LOCK</code></td>
-<td>strip</td>
-<td>How a synthesis-locked worker round is enforced on OpenAI-family runtimes: <code>strip</code> removes the tool schemas from the request, <code>tool-choice</code> keeps them and sends <code>tool_choice: none</code>, which preserves the prompt prefix but relies on the model honoring the knob (<code>src/engine/provider-payload.ts</code>).</td>
-</tr>
-<tr>
 <td><code>CLIO_CODER_RIGOR</code></td>
 <td>repo-derived</td>
 <td>Finish-contract evidence bar, <code>normal</code> or <code>high</code>, layered over the repo-derived default (<code>src/domains/safety/rigor.ts</code>).</td>
