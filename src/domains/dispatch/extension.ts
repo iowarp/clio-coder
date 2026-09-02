@@ -202,6 +202,8 @@ import {
 	type DispatchPathScope,
 	declaredScopeReplacementDiagnostic,
 	declaredScopeReplacementNotice,
+	inferredScopeDroppedPathDiagnostic,
+	inferredScopeDroppedPathNotice,
 	resolveDispatchPathScope,
 } from "./path-scope.js";
 import { deriveEnvelopePhaseDurations, deriveRunPhaseDurations, recordRunTimingBestEffort } from "./phase-timing.js";
@@ -3386,6 +3388,21 @@ export function createDispatchBundle(
 		if (notice !== null) {
 			context.bus.emit(BusChannels.DispatchScopeNotice, {
 				...notice,
+				agentId: req.agentId,
+			});
+		}
+		// A dropped "../" token is the one legacy-mode scope fact that earns the
+		// channel: it fires only where the dispatch used to fail outright, so it
+		// cannot warn on the ordinary intent-less dispatch the comment above keeps
+		// quiet.
+		const droppedDiagnostic = inferredScopeDroppedPathDiagnostic(pathScope);
+		if (droppedDiagnostic !== null) {
+			reportDispatchDiagnostic("inferred scope dropped paths", new Error(droppedDiagnostic));
+		}
+		const droppedNotice = inferredScopeDroppedPathNotice(pathScope);
+		if (droppedNotice !== null) {
+			context.bus.emit(BusChannels.DispatchScopeNotice, {
+				...droppedNotice,
 				agentId: req.agentId,
 			});
 		}
