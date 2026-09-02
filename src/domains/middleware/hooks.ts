@@ -22,6 +22,7 @@
 
 import { createHash } from "node:crypto";
 import { isAbsolute, resolve } from "node:path";
+import type { ExtensionProvenance, ExtensionScope } from "../extensions/index.js";
 import type { MiddlewareHookRegistration } from "./runtime.js";
 import {
 	isMiddlewareHook,
@@ -51,16 +52,28 @@ export const USER_HOOK_COMMAND_OUTPUT_MAX_CHARS = 4_000;
 /** Cap on a prompt hook's injected message, in characters. */
 export const USER_HOOK_PROMPT_MAX_CHARS = 2_000;
 
+/**
+ * Attribution for a hook declared by an installed extension. The declaration
+ * bytes behind `declarationsDigest` are the ones hashed during install-digest
+ * verification and captured into the extension snapshot; nothing here was
+ * re-read from a mutable path after verification.
+ */
+export interface UserHookExtensionSource {
+	provenance: ExtensionProvenance;
+	/** Extension snapshot generation the declarations were admitted under; 0 for an ephemeral build. */
+	generation: number;
+	/** SHA-256 of the captured hooks.yaml bytes. */
+	declarationsDigest: string;
+}
+
 export interface UserHookSource {
 	origin: UserHookOrigin;
 	/** File path or `extensionId:path` the declaration was read from. */
 	sourcePath: string;
 	/** Extension id when origin is "extension". */
 	sourceId?: string;
-	/** Install scope when origin is "extension". */
-	extensionScope?: "user" | "project";
-	/** Verified installed tree digest when origin is "extension". */
-	installedContentDigest?: string;
+	/** Present exactly when origin is "extension". */
+	extension?: UserHookExtensionSource;
 }
 
 export interface NormalizedCommandHook {
@@ -318,6 +331,17 @@ export function loadUserHooks(
 
 export type UserHookOutcome = "emitted" | "command-ok" | "command-failed" | "command-timeout" | "skipped";
 
+/** Bounded extension attribution carried on every receipt of an extension hook. */
+export interface HookReceiptExtension {
+	id: string;
+	scope: ExtensionScope;
+	canonicalRoot: string;
+	manifestDigest: string;
+	contentDigest: string;
+	declarationsDigest: string;
+	generation: number;
+}
+
 export interface HookReceipt {
 	at: number;
 	hookId: string;
@@ -331,8 +355,7 @@ export interface HookReceipt {
 	exitCode?: number;
 	outputChars?: number;
 	toolName?: string;
-	extensionScope?: "user" | "project";
-	installedContentDigest?: string;
+	extension?: HookReceiptExtension;
 }
 
 export type HookReceiptSink = (receipt: HookReceipt) => void;
@@ -378,6 +401,10 @@ export function userHookToRegistration(
 	deps: UserHookRegistrationDeps,
 ): MiddlewareHookRegistration {
 	const now = deps.now ?? Date.now;
+	// Attribution is fixed when the registration is built, so a receipt written
+	// by a registration from an older generation names that generation even
+	// after a newer one is active.
+	const extension = hook.source.extension === undefined ? undefined : receiptExtension(hook.source.extension);
 	const baseReceipt = (input: { toolName?: string }): Omit<HookReceipt, "outcome"> => ({
 		at: now(),
 		hookId: hook.id,
@@ -386,10 +413,7 @@ export function userHookToRegistration(
 		hash: hook.hash,
 		hook: hook.on,
 		kind: hook.spec.kind,
-		...(hook.source.extensionScope !== undefined ? { extensionScope: hook.source.extensionScope } : {}),
-		...(hook.source.installedContentDigest !== undefined
-			? { installedContentDigest: hook.source.installedContentDigest }
-			: {}),
+		...(extension !== undefined ? { extension: { ...extension } } : {}),
 		...(input.toolName !== undefined ? { toolName: input.toolName } : {}),
 	});
 	const registration: MiddlewareHookRegistration = {
@@ -409,6 +433,18 @@ export function userHookToRegistration(
 	};
 	if (hook.tools !== undefined) registration.toolNames = [...hook.tools];
 	return registration;
+}
+
+function receiptExtension(source: UserHookExtensionSource): HookReceiptExtension {
+	return {
+		id: source.provenance.id,
+		scope: source.provenance.scope,
+		canonicalRoot: source.provenance.canonicalRoot,
+		manifestDigest: source.provenance.manifestDigest,
+		contentDigest: source.provenance.contentDigest,
+		declarationsDigest: source.declarationsDigest,
+		generation: source.generation,
+	};
 }
 
 function evaluateHook(

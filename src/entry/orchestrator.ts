@@ -84,13 +84,12 @@ import {
 	openDetachedBatchViews,
 } from "../domains/middleware/dispatch-nudge.js";
 import {
+	buildUserHookRegistrations,
 	createHookReceiptLog,
 	createMarketplaceOfferRegistration,
 	createMiddlewareToolChoiceControl,
 	createSkillsReminderRegistration,
-	type ExtensionHookRoot,
 	formatRegistrationConflict,
-	installUserHooks,
 	type MiddlewareContract,
 	MiddlewareDomainModule,
 	writeMiddlewareDiagnosticToStderr,
@@ -1315,20 +1314,20 @@ export async function bootOrchestrator(options: BootOptions = {}): Promise<BootR
 	// authoritative: a hook may add effects (including request block_tool) but
 	// cannot grant a permission safety would deny. Loading is best-effort.
 	const hookReceiptLog = createHookReceiptLog({ persistPath: join(clioStateDir(), "hook-receipts.json") });
-	const extensionHookRoots: ExtensionHookRoot[] = (extensions?.list(process.cwd()) ?? [])
-		.filter((ext) => ext.loadable && ext.provenance !== undefined)
-		.map((ext) => ({
-			id: ext.id,
-			rootPath: ext.rootPath,
-			scope: ext.scope,
-			installedContentDigest: ext.provenance?.contentDigest ?? "",
-		}));
-	const userHooks = installUserHooks({
+	const bootExtensionSnapshot = extensions?.snapshot() ?? null;
+	const userHooks = buildUserHookRegistrations({
 		cwd: process.cwd(),
-		extensions: extensionHookRoots,
-		registerHook: (registration) => middleware.registerHook(registration),
+		...(bootExtensionSnapshot !== null ? { extensionSnapshot: bootExtensionSnapshot } : {}),
 		recordReceipt: (receipt) => hookReceiptLog.record(receipt),
 	});
+	const userHookReport = middleware.replaceRegistrations(
+		"user-hooks",
+		bootExtensionSnapshot?.generation ?? 1,
+		userHooks.registrations,
+	);
+	if (!interactive && !userHookReport.applied) {
+		process.stderr.write(`[clio-coder:hooks] user hooks were not applied: ${userHookReport.reason ?? "unknown"}\n`);
+	}
 	if (!interactive) {
 		for (const issue of userHooks.fileIssues) {
 			process.stderr.write(`[clio-coder:hooks] ${issue.message}\n`);

@@ -4,7 +4,7 @@ export {
 	findExtensionManifestPath,
 	parseExtensionManifest,
 } from "./discovery.js";
-export { enabledExtensionResourceRoots, extensionResourcePath } from "./resources.js";
+export { enabledExtensionResourceRoots, extensionResourcePath, extensionSnapshotFor } from "./resources.js";
 export type { InstalledExtensionRecord } from "./state.js";
 export {
 	disableExtension,
@@ -20,6 +20,7 @@ export type {
 	ClioExtensionManifest,
 	ExtensionCandidate,
 	ExtensionDiagnostic,
+	ExtensionHookSource,
 	ExtensionInstallOptions,
 	ExtensionInstallResult,
 	ExtensionListOptions,

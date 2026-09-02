@@ -44,11 +44,13 @@ export { createEnvHookBudgetTracker, createMiddlewareBundle } from "./extension.
 export { createHookReceiptLog, HOOK_RECEIPT_LOG_CAPACITY, type HookReceiptLog } from "./hook-receipts.js";
 export type {
 	HookReceipt,
+	HookReceiptExtension,
 	HookReceiptSink,
 	NormalizedUserHook,
 	UserHookCommandResult,
 	UserHookCommandRunner,
 	UserHookDeclarationBatch,
+	UserHookExtensionSource,
 	UserHookKind,
 	UserHookLoadIssue,
 	UserHookLoadResult,
@@ -66,10 +68,11 @@ export {
 	userHookToRegistration,
 } from "./hooks.js";
 export {
-	type ExtensionHookRoot,
+	type BuildUserHookRegistrationsOptions,
+	type BuildUserHookRegistrationsResult,
+	buildUserHookRegistrations,
+	type ExtensionHookSnapshotView,
 	type HookFileIssue,
-	type InstallUserHooksResult,
-	installUserHooks,
 	readHookSources,
 	spawnSyncCommandRunner,
 } from "./hooks-io.js";

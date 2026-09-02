@@ -24,7 +24,7 @@ import {
 	renderOperatorProfile,
 	renderPromptContext,
 } from "../domains/context/index.js";
-import { listInstalledExtensions } from "../domains/extensions/index.js";
+import { extensionSnapshotFor, listInstalledExtensions } from "../domains/extensions/index.js";
 import { loadMemoryRecordsSync, memoryStorePath } from "../domains/memory/index.js";
 import { loadUserHooks, readHookSources } from "../domains/middleware/index.js";
 import { classifyProjectPreload } from "../domains/prompts/preload.js";
@@ -203,15 +203,10 @@ function inspectOperatorProfile(cwd: string, graph: CustomizationGraph): void {
 
 function inspectHooks(cwd: string, graph: CustomizationGraph): void {
 	try {
-		const extensions = listInstalledExtensions(cwd)
-			.filter((ext) => ext.loadable && ext.provenance !== undefined)
-			.map((ext) => ({
-				id: ext.id,
-				rootPath: ext.rootPath,
-				scope: ext.scope,
-				installedContentDigest: ext.provenance?.contentDigest ?? "",
-			}));
-		const { batches, fileIssues } = readHookSources({ cwd, extensions });
+		// Extension declarations come from the same captured bytes a booted
+		// session admits; an inspecting process without a bound store builds an
+		// ephemeral generation-0 projection.
+		const { batches, fileIssues } = readHookSources({ cwd, extensionSnapshot: extensionSnapshotFor(cwd) });
 		for (const issue of fileIssues) graph.issues.push(`hook ${issue.source.origin}: ${issue.message}`);
 		const loaded = loadUserHooks(batches, { workspaceRoot: cwd });
 		for (const issue of loaded.issues) {

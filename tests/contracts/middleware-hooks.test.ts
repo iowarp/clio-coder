@@ -3,10 +3,11 @@ import { mkdirSync, mkdtempSync, rmSync, symlinkSync, writeFileSync } from "node
 import { tmpdir } from "node:os";
 import path from "node:path";
 import { afterEach, describe, it } from "node:test";
-import { installExtension, listInstalledExtensions } from "../../src/domains/extensions/state.js";
+import { buildExtensionSnapshot } from "../../src/domains/extensions/snapshot.js";
+import { installExtension } from "../../src/domains/extensions/state.js";
 import { createMiddlewareBundle } from "../../src/domains/middleware/extension.js";
-import { type HookReceipt, loadUserHooks, userHookToRegistration } from "../../src/domains/middleware/hooks.js";
-import { readHookSources } from "../../src/domains/middleware/hooks-io.js";
+import type { HookReceipt } from "../../src/domains/middleware/hooks.js";
+import { buildUserHookRegistrations, readHookSources } from "../../src/domains/middleware/hooks-io.js";
 import { BUILTIN_MIDDLEWARE_RULE_IDS } from "../../src/domains/middleware/rules.js";
 import {
 	type MiddlewareDiagnostic,
@@ -64,19 +65,13 @@ describe("middleware hook boundary", () => {
 			"- id: must-not-load\n  on: before_tool\n  kind: prompt\n  message: unsafe\n",
 		);
 
-		const admitted = listInstalledExtensions(project)
-			.filter((extension) => extension.loadable && extension.provenance !== undefined)
-			.map((extension) => ({
-				id: extension.id,
-				rootPath: extension.rootPath,
-				scope: extension.scope,
-				installedContentDigest: extension.provenance?.contentDigest ?? "",
-			}));
-		deepStrictEqual(admitted, []);
-		deepStrictEqual(readHookSources({ cwd: project, extensions: admitted }).batches, []);
+		const snapshot = buildExtensionSnapshot({ cwd: project, generation: 0 });
+		strictEqual(snapshot.packages[0]?.loadable, false);
+		deepStrictEqual(snapshot.hookSources, []);
+		deepStrictEqual(readHookSources({ cwd: project, extensionSnapshot: snapshot }).batches, []);
 	});
 
-	it("carries verified install scope and content digest into extension hook receipts", () => {
+	it("builds extension hooks from captured bytes and attributes receipts to the admitting generation", () => {
 		const project = scratch();
 		const source = scratch();
 		writeFileSync(
@@ -97,31 +92,62 @@ describe("middleware hook boundary", () => {
 		);
 		const installed = installExtension(source, { cwd: project, scope: "project" }).extension;
 		strictEqual(installed?.loadable, true);
-		const installedContentDigest = installed?.provenance?.contentDigest as string;
-		const { batches } = readHookSources({
-			cwd: project,
-			extensions: [
-				{
-					id: installed?.id as string,
-					rootPath: installed?.rootPath as string,
-					scope: "project",
-					installedContentDigest,
-				},
-			],
-		});
-		const loaded = loadUserHooks(batches, { workspaceRoot: project });
-		strictEqual(loaded.hooks.length, 1);
-		const [hook] = loaded.hooks;
-		if (!hook) throw new Error("expected one loaded extension hook");
+		const second = buildExtensionSnapshot({ cwd: project, generation: 2 });
+		const [captured] = second.hookSources;
+		ok(captured);
+		// The bytes admitted are the ones the digest covered; a rewrite after the
+		// snapshot was built cannot reach this generation's registrations.
+		writeFileSync(
+			path.join(project, ".clio-coder", "extensions", "receipt-hooks", "hooks.yaml"),
+			"- id: rewritten\n  on: before_tool\n  kind: prompt\n  message: tampered\n",
+		);
 		const receipts: HookReceipt[] = [];
-		const registration = userHookToRegistration(hook, {
+		const built = buildUserHookRegistrations({
+			cwd: project,
+			extensionSnapshot: second,
 			recordReceipt: (receipt) => receipts.push(receipt),
 			runCommand: () => ({ code: 0, timedOut: false, stdout: "", stderr: "" }),
 			now: () => 123,
 		});
+		deepStrictEqual(built.fileIssues, []);
+		deepStrictEqual(
+			built.hooks.map((hook) => [hook.id, hook.source.origin, hook.source.extension?.generation]),
+			[["receipted", "extension", 2]],
+		);
+		const [registration] = built.registrations;
+		ok(registration);
 		registration.evaluate({ hook: "before_tool", toolName: "read" });
-		strictEqual(receipts[0]?.extensionScope, "project");
-		strictEqual(receipts[0]?.installedContentDigest, installedContentDigest);
+		deepStrictEqual(receipts[0]?.extension, {
+			id: "receipt-hooks",
+			scope: "project",
+			canonicalRoot: captured.provenance.canonicalRoot,
+			manifestDigest: captured.provenance.manifestDigest,
+			contentDigest: captured.provenance.contentDigest,
+			declarationsDigest: captured.declarationsDigest,
+			generation: 2,
+		});
+		strictEqual(receipts[0]?.extension?.contentDigest, installed?.provenance?.contentDigest);
+
+		// The rewritten tree no longer verifies, so the next generation admits no
+		// extension hooks at all, while a registration built under generation 2
+		// keeps writing generation 2 into its receipts.
+		const third = buildExtensionSnapshot({ cwd: project, generation: 3 });
+		deepStrictEqual(third.hookSources, []);
+		const middleware = createMiddlewareBundle().contract;
+		strictEqual(middleware.replaceRegistrations("user-hooks", 2, built.registrations).applied, true);
+		const rebuilt = buildUserHookRegistrations({
+			cwd: project,
+			extensionSnapshot: third,
+			recordReceipt: (receipt) => receipts.push(receipt),
+			runCommand: () => ({ code: 0, timedOut: false, stdout: "", stderr: "" }),
+			now: () => 456,
+		});
+		deepStrictEqual(rebuilt.registrations, []);
+		strictEqual(middleware.replaceRegistrations("user-hooks", 3, rebuilt.registrations).applied, true);
+		deepStrictEqual(middleware.runHook({ hook: "before_tool", toolName: "read" }).ruleIds, []);
+		registration.evaluate({ hook: "before_tool", toolName: "read" });
+		strictEqual(receipts.length, 2);
+		strictEqual(receipts[1]?.extension?.generation, 2);
 	});
 
 	it("evaluates matching registrations in order and exposes prior effects", () => {

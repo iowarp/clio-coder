@@ -1,11 +1,17 @@
 /**
- * Filesystem loading for user-defined middleware hooks and the production
- * command runner. Hooks live in dedicated, secrets-free files so they stay out
- * of the strict settings schema:
+ * Loading for user-defined middleware hooks and the production command
+ * runner. Hooks live in dedicated, secrets-free files so they stay out of the
+ * strict settings schema:
  *
  *   - `.clio-coder/hooks.yaml`        committed project hooks (origin "project"),
  *   - `.clio-coder/hooks.local.yaml`  gitignored local hooks (origin "project.local"),
  *   - `<extensionRoot>/hooks.yaml`  hooks shipped by an installed extension.
+ *
+ * Project files are read from disk here. Extension declarations are never
+ * read here: they arrive already parsed from the extension snapshot, which
+ * captured the bytes during install-digest verification, so a hooks.yaml
+ * rewritten after verification cannot be admitted until the next generation
+ * re-verifies the tree.
  *
  * Reads are best-effort: a missing file is skipped silently, and a malformed
  * file is reported as an issue without aborting anything.
@@ -19,6 +25,7 @@ import {
 	reportCommitAttributionDiagnostic,
 	withManagedGitCommitAttributionEnvironment,
 } from "../../core/git-commit-attribution.js";
+import type { ExtensionHookSource } from "../extensions/index.js";
 import {
 	type HookReceiptSink,
 	loadUserHooks,
@@ -43,17 +50,17 @@ export interface ReadHookSourcesResult {
 	fileIssues: HookFileIssue[];
 }
 
-export interface ExtensionHookRoot {
-	id: string;
-	rootPath: string;
-	scope: "user" | "project";
-	installedContentDigest: string;
+/** The captured hook declarations of one extension snapshot generation. */
+export interface ExtensionHookSnapshotView {
+	/** 0 for an ephemeral (uncommitted) build. */
+	generation: number;
+	hookSources: ReadonlyArray<ExtensionHookSource>;
 }
 
 export interface ReadHookSourcesOptions {
 	cwd: string;
-	/** Installed extension roots, in dependency order. */
-	extensions?: ReadonlyArray<ExtensionHookRoot>;
+	/** Captured extension declarations; absent means no extension hooks. */
+	extensionSnapshot?: ExtensionHookSnapshotView;
 }
 
 function readBatch(
@@ -88,16 +95,23 @@ export function readHookSources(options: ReadHookSourcesOptions): ReadHookSource
 	const fileIssues: HookFileIssue[] = [];
 	const batches: UserHookDeclarationBatch[] = [];
 
-	for (const extension of options.extensions ?? []) {
+	const snapshot = options.extensionSnapshot;
+	for (const captured of snapshot?.hookSources ?? []) {
 		const source: UserHookSource = {
 			origin: "extension",
-			sourcePath: `${extension.id}:hooks.yaml`,
-			sourceId: extension.id,
-			extensionScope: extension.scope,
-			installedContentDigest: extension.installedContentDigest,
+			sourcePath: `${captured.provenance.id}:hooks.yaml`,
+			sourceId: captured.provenance.id,
+			extension: {
+				provenance: captured.provenance,
+				generation: snapshot?.generation ?? 0,
+				declarationsDigest: captured.declarationsDigest,
+			},
 		};
-		const batch = readBatch(source, join(extension.rootPath, "hooks.yaml"), fileIssues);
-		if (batch) batches.push(batch);
+		if (captured.parseError !== undefined) {
+			fileIssues.push({ source, message: `failed to parse ${source.sourcePath}: ${captured.parseError}` });
+			continue;
+		}
+		batches.push({ source, declarations: captured.declarations });
 	}
 
 	const projectBatch = readBatch(
@@ -117,44 +131,48 @@ export function readHookSources(options: ReadHookSourcesOptions): ReadHookSource
 	return { batches, fileIssues };
 }
 
-export interface InstallUserHooksOptions {
+export interface BuildUserHookRegistrationsOptions {
 	cwd: string;
 	/** Absolute workspace root a command `cwd` must resolve under; defaults to `cwd`. */
 	workspaceRoot?: string;
-	extensions?: ReadonlyArray<ExtensionHookRoot>;
-	registerHook: (registration: MiddlewareHookRegistration) => void;
+	extensionSnapshot?: ExtensionHookSnapshotView;
 	recordReceipt: HookReceiptSink;
 	/** Injected for tests; defaults to the spawnSync runner. */
 	runCommand?: UserHookCommandRunner;
 	now?: () => number;
 }
 
-export interface InstallUserHooksResult extends UserHookLoadResult {
+export interface BuildUserHookRegistrationsResult extends UserHookLoadResult {
 	fileIssues: HookFileIssue[];
+	/** One registration per admitted hook, in merged precedence order. Nothing is registered here. */
+	registrations: MiddlewareHookRegistration[];
 }
 
 /**
- * Read, normalize, and register every user hook on the middleware contract. The
- * returned hooks and issues feed `clio-coder config inspect`. Best-effort throughout:
- * a malformed file or hook is reported, never thrown.
+ * Read project files, merge them with the captured extension declarations,
+ * normalize, and build one registration per admitted hook. Pure with respect
+ * to the middleware contract: the caller decides when the set is published,
+ * which is what lets extension and hook state commit on one stack. The
+ * returned hooks and issues feed `clio-coder config inspect`. Best-effort
+ * throughout: a malformed file or hook is reported, never thrown.
  */
-export function installUserHooks(options: InstallUserHooksOptions): InstallUserHooksResult {
+export function buildUserHookRegistrations(
+	options: BuildUserHookRegistrationsOptions,
+): BuildUserHookRegistrationsResult {
 	const workspaceRoot = options.workspaceRoot ?? options.cwd;
 	const readOptions: ReadHookSourcesOptions = { cwd: options.cwd };
-	if (options.extensions !== undefined) readOptions.extensions = options.extensions;
+	if (options.extensionSnapshot !== undefined) readOptions.extensionSnapshot = options.extensionSnapshot;
 	const { batches, fileIssues } = readHookSources(readOptions);
 	const loaded = loadUserHooks(batches, { workspaceRoot });
 	const runCommand = options.runCommand ?? spawnSyncCommandRunner();
-	for (const hook of loaded.hooks) {
-		options.registerHook(
-			userHookToRegistration(hook, {
-				recordReceipt: options.recordReceipt,
-				runCommand,
-				...(options.now !== undefined ? { now: options.now } : {}),
-			}),
-		);
-	}
-	return { ...loaded, fileIssues };
+	const registrations = loaded.hooks.map((hook) =>
+		userHookToRegistration(hook, {
+			recordReceipt: options.recordReceipt,
+			runCommand,
+			...(options.now !== undefined ? { now: options.now } : {}),
+		}),
+	);
+	return { ...loaded, fileIssues, registrations };
 }
 
 /**
