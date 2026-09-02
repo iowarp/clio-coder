@@ -1,5 +1,14 @@
 import { deepStrictEqual, ok, strictEqual } from "node:assert/strict";
-import { mkdirSync, mkdtempSync, readFileSync, realpathSync, rmSync, symlinkSync, writeFileSync } from "node:fs";
+import {
+	existsSync,
+	mkdirSync,
+	mkdtempSync,
+	readFileSync,
+	realpathSync,
+	rmSync,
+	symlinkSync,
+	writeFileSync,
+} from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { afterEach, describe, it } from "node:test";
@@ -10,7 +19,12 @@ import {
 	parseExtensionManifest,
 } from "../../src/domains/extensions/discovery.js";
 import { enabledExtensionResourceRoots, extensionResourcePath } from "../../src/domains/extensions/resources.js";
-import { installExtension, listInstalledExtensions } from "../../src/domains/extensions/state.js";
+import {
+	installExtension,
+	listInstalledExtensions,
+	removeExtension,
+	upgradeLegacyExtensionInstallState,
+} from "../../src/domains/extensions/state.js";
 import { expandPromptTemplateInput, loadPromptTemplates } from "../../src/domains/resources/prompts/loader.js";
 
 const roots: string[] = [];
@@ -276,6 +290,134 @@ describe("extension resource boundary", () => {
 		const [corrupt] = listInstalledExtensions(corruptProject, { scope: "project" });
 		strictEqual(corrupt?.loadable, false);
 		ok(corrupt?.diagnostics.some((diagnostic) => diagnostic.message.includes("install state is corrupt")));
+	});
+
+	it("keeps legacy inspection read-only, then upgrades digests once with a backup", () => {
+		const project = scratch();
+		const base = join(project, ".clio-coder", "extensions");
+		const installed = join(base, "legacy-digest");
+		writeManifest(installed, "legacy-digest");
+		writeFileSync(join(installed, "marker.txt"), "legacy bytes\n", "utf8");
+		const originalState = `${JSON.stringify(
+			{
+				version: 1,
+				disabled: ["legacy-digest"],
+				installed: {
+					"legacy-digest": {
+						installedAt: "2026-08-31T12:34:56.000Z",
+						source: "/original/source",
+					},
+				},
+			},
+			null,
+			2,
+		)}\n`;
+		const statePath = join(base, "state.json");
+		writeFileSync(statePath, originalState, "utf8");
+
+		const [before] = listInstalledExtensions(project, { scope: "project" });
+		strictEqual(before?.loadable, false);
+		ok(before?.diagnostics.some((diagnostic) => diagnostic.message.includes("run clio-coder upgrade")));
+		strictEqual(readFileSync(statePath, "utf8"), originalState, "plain list must not migrate state");
+
+		const [first] = upgradeLegacyExtensionInstallState(project, ["project"]);
+		deepStrictEqual(first?.upgraded, ["legacy-digest"]);
+		deepStrictEqual(first?.refused, []);
+		strictEqual(first?.backupPath, `${statePath}.pre-digest.bak`);
+		strictEqual(readFileSync(`${statePath}.pre-digest.bak`, "utf8"), originalState);
+		const migratedBytes = readFileSync(statePath, "utf8");
+		const migrated = JSON.parse(migratedBytes) as {
+			disabled: string[];
+			installed: Record<string, { installedAt: string; source?: string; contentDigest?: string }>;
+		};
+		deepStrictEqual(migrated.disabled, ["legacy-digest"]);
+		strictEqual(migrated.installed["legacy-digest"]?.installedAt, "2026-08-31T12:34:56.000Z");
+		strictEqual(migrated.installed["legacy-digest"]?.source, "/original/source");
+		ok(/^[a-f0-9]{64}$/u.test(migrated.installed["legacy-digest"]?.contentDigest ?? ""));
+		const [after] = listInstalledExtensions(project, { scope: "project" });
+		strictEqual(after?.valid, true);
+		strictEqual(after?.enabled, false, "migration preserves disabled state");
+
+		const [second] = upgradeLegacyExtensionInstallState(project, ["project"]);
+		deepStrictEqual(second?.upgraded, []);
+		deepStrictEqual(second?.refused, []);
+		strictEqual(readFileSync(statePath, "utf8"), migratedBytes);
+		strictEqual(readFileSync(`${statePath}.pre-digest.bak`, "utf8"), originalState);
+	});
+
+	it("refuses to bless an invalid legacy tree and leaves it visible but non-loadable", () => {
+		const project = scratch();
+		const outside = scratch();
+		const base = join(project, ".clio-coder", "extensions");
+		const installed = join(base, "invalid-legacy");
+		writeManifest(installed, "invalid-legacy", "resources:\n  prompts: prompts\n");
+		mkdirSync(join(outside, "prompts"));
+		symlinkSync(join(outside, "prompts"), join(installed, "prompts"), "dir");
+		const statePath = join(base, "state.json");
+		const original = `${JSON.stringify({
+			version: 1,
+			disabled: [],
+			installed: { "invalid-legacy": { installedAt: "2026-08-31T00:00:00.000Z" } },
+		})}\n`;
+		writeFileSync(statePath, original, "utf8");
+
+		const [report] = upgradeLegacyExtensionInstallState(project, ["project"]);
+		deepStrictEqual(report?.upgraded, []);
+		strictEqual(report?.refused[0]?.id, "invalid-legacy");
+		ok(report?.refused[0]?.reason.includes("symbolic link"));
+		strictEqual(readFileSync(statePath, "utf8"), original);
+		strictEqual(existsSync(`${statePath}.pre-digest.bak`), false);
+		const [entry] = listInstalledExtensions(project, { scope: "project" });
+		strictEqual(entry?.id, "invalid-legacy");
+		strictEqual(entry?.loadable, false);
+	});
+
+	it("backs up corrupt state and unverifiable bytes during remove and forced reinstall recovery", () => {
+		const removeProject = scratch();
+		const removeBase = join(removeProject, ".clio-coder", "extensions");
+		const removeRoot = join(removeBase, "corrupt-remove");
+		writeManifest(removeRoot, "corrupt-remove");
+		writeFileSync(join(removeRoot, "marker.txt"), "preserve remove bytes\n", "utf8");
+		const corruptState = "{ definitely-not-json\n";
+		writeFileSync(join(removeBase, "state.json"), corruptState, "utf8");
+		listInstalledExtensions(removeProject, { scope: "project" });
+		strictEqual(readFileSync(join(removeBase, "state.json"), "utf8"), corruptState, "inspection stays read-only");
+
+		const removed = removeExtension("corrupt-remove", { cwd: removeProject, scope: "project" });
+		strictEqual(removed.removed?.id, "corrupt-remove");
+		ok(removed.recovery?.stateBackup);
+		ok(removed.recovery?.packageBackup);
+		strictEqual(readFileSync(removed.recovery?.stateBackup as string, "utf8"), corruptState);
+		strictEqual(
+			readFileSync(join(removed.recovery?.packageBackup as string, "marker.txt"), "utf8"),
+			"preserve remove bytes\n",
+		);
+		strictEqual(existsSync(removeRoot), false);
+		deepStrictEqual(listInstalledExtensions(removeProject, { scope: "project" }), []);
+
+		const reinstallProject = scratch();
+		const reinstallBase = join(reinstallProject, ".clio-coder", "extensions");
+		const oldRoot = join(reinstallBase, "corrupt-reinstall");
+		writeManifest(oldRoot, "corrupt-reinstall");
+		writeFileSync(join(oldRoot, "marker.txt"), "old unverifiable bytes\n", "utf8");
+		writeFileSync(join(reinstallBase, "state.json"), corruptState, "utf8");
+		const replacement = scratch();
+		writeManifest(replacement, "corrupt-reinstall");
+		writeFileSync(join(replacement, "marker.txt"), "verified replacement\n", "utf8");
+
+		const refused = installExtension(replacement, { cwd: reinstallProject, scope: "project" });
+		strictEqual(refused.extension, undefined);
+		ok(refused.diagnostics.some((diagnostic) => diagnostic.message.includes("retry with --force")));
+		const reinstalled = installExtension(replacement, { cwd: reinstallProject, scope: "project", force: true });
+		strictEqual(reinstalled.extension?.loadable, true);
+		ok(reinstalled.recovery?.stateBackup);
+		ok(reinstalled.recovery?.packageBackup);
+		strictEqual(readFileSync(reinstalled.recovery?.stateBackup as string, "utf8"), corruptState);
+		strictEqual(
+			readFileSync(join(reinstalled.recovery?.packageBackup as string, "marker.txt"), "utf8"),
+			"old unverifiable bytes\n",
+		);
+		strictEqual(readFileSync(join(oldRoot, "marker.txt"), "utf8"), "verified replacement\n");
 	});
 
 	it("preserves every payload byte after the command delimiter", () => {

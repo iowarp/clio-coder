@@ -7,6 +7,9 @@ All notable changes to Clio Coder are documented in this file. The format follow
 ### Changed
 - Rebuilt the product README and operator documentation around the current CLI, settings-v2 contract, package layout, and experimental boundaries so new users and repository agents have one concise, accurate route into the product.
 
+### Fixed
+- Extension manifests once again permit the documented omission of `resources` while strictly validating any value that is present. Upgrade now backs up and atomically adds verified content digests to valid pre-digest install records without changing their source, timestamp, or disabled state; invalid legacy trees remain visible but inactive. Corrupt extension state stays fail-closed but no longer traps operators: forced reinstall and removal preserve corrupt state and unverifiable package bytes before recovery.
+
 ## 0.4.1 - 2026-09-01
 
 This grew beyond the bug-fix-only patch originally planned. v0.4.1 is a full release led by the version-2 `settings.yaml` contract, its automatic migration, and a smaller grammar-driven slash-command surface. It adds editor and marketplace workflows; fixes the release-blocking configuration, CLI, TUI, and Workbench failures found in final testing; replaces the oversized test and CI machinery with one fast deterministic gate; consolidates evaluation around the shipping eval domain and `evals/` reference suites; and moves machine-facing names into the `clio-coder` namespace without changing the product persona.

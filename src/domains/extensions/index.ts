@@ -22,6 +22,7 @@ export {
 	type ExtensionResourceKind,
 	type ExtensionResourceRoot,
 	type ExtensionScope,
+	type ExtensionStateUpgradeReport,
 	enabledExtensionResourceRoots,
 	enableExtension,
 	extensionManifestYaml,
@@ -30,5 +31,6 @@ export {
 	listInstalledExtensions,
 	parseExtensionManifest,
 	removeExtension,
+	upgradeLegacyExtensionInstallState,
 } from "./manager.js";
 export { ExtensionsManifest } from "./manifest.js";

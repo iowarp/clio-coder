@@ -12,6 +12,7 @@ export {
 	installExtension,
 	listInstalledExtensions,
 	removeExtension,
+	upgradeLegacyExtensionInstallState,
 } from "./state.js";
 export type {
 	ClioExtensionManifest,
@@ -26,5 +27,6 @@ export type {
 	ExtensionResourceRoot,
 	ExtensionScope,
 	ExtensionState,
+	ExtensionStateUpgradeReport,
 	InstalledExtension,
 } from "./types.js";

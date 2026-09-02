@@ -81,13 +81,23 @@ export interface ExtensionInstallOptions extends ExtensionListOptions {
 
 export interface ExtensionInstallResult {
 	extension?: InstalledExtension;
+	recovery?: { stateBackup?: string; packageBackup?: string };
 	diagnostics: ExtensionDiagnostic[];
 }
 
 export interface ExtensionMutationResult {
 	extension?: InstalledExtension;
 	removed?: { id: string; scope: ExtensionScope; path: string };
+	recovery?: { stateBackup?: string; packageBackup?: string };
 	diagnostics: ExtensionDiagnostic[];
+}
+
+export interface ExtensionStateUpgradeReport {
+	scope: ExtensionScope;
+	statePath: string;
+	backupPath?: string;
+	upgraded: string[];
+	refused: Array<{ id: string; reason: string }>;
 }
 
 export interface ExtensionState {
