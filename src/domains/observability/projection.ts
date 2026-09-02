@@ -17,8 +17,10 @@
  */
 
 import { BusChannels } from "../../core/bus-events.js";
+import { resolveDispatchFailureStatus } from "../../core/dispatch-outcome.js";
 import type { SafeEventBus } from "../../core/event-bus.js";
 import type { TargetStatus } from "../providers/contract.js";
+import { resolveCostProvenance } from "../providers/types/cost-provenance.js";
 import type { AccountabilitySummary } from "./accountability.js";
 import type {
 	ObservabilityNotice,
@@ -92,13 +94,6 @@ function resolveHeartbeat(status: unknown): ObservabilityRunSummary["status"] | 
 	if (status === "stale") return "stale";
 	if (status === "dead") return "dead";
 	return null;
-}
-
-/** Map a DispatchFailed outcome/reason to a summary status, mirroring the board. */
-function resolveFailedStatus(reason: unknown): ObservabilityRunSummary["status"] {
-	if (reason === "dead" || reason === "stalled") return "dead";
-	if (reason === "interrupted" || reason === "canceled") return "aborted";
-	return "failed";
 }
 
 /** Build a notice ref from candidate parts, dropping anything non-string/empty. */
@@ -212,22 +207,20 @@ export function createObservabilityProjection(bus: SafeEventBus, deps: Projectio
 		if (typeof id.runtimeKind === "string" && id.runtimeKind.length > 0) summary.runtimeKind = id.runtimeKind;
 	}
 
+	// num()'s Number.isFinite check matters here specifically: a NaN or
+	// Infinity costUsd/tokenCount from a payload used to pass the bare
+	// `typeof === "number"` check this function had instead, so the projection
+	// could corrupt a run's running total on a malformed terminal payload while
+	// the dispatch board's parseFiniteNumber (an identical check) rejected it.
 	function applyTerminalTokens(summary: ObservabilityRunSummary, payload: Record<string, unknown>): void {
-		if (typeof payload.tokenCount === "number") summary.tokens.total = payload.tokenCount;
+		summary.tokens.total = num(payload.tokenCount, summary.tokens.total);
 		if (typeof payload.inputTokenCount === "number") {
-			summary.tokens.input = payload.inputTokenCount + num(payload.cacheReadTokenCount, 0);
+			summary.tokens.input = num(payload.inputTokenCount, summary.tokens.input) + num(payload.cacheReadTokenCount, 0);
 		}
-		if (typeof payload.outputTokenCount === "number") summary.tokens.output = payload.outputTokenCount;
-		if (typeof payload.reasoningTokenCount === "number") summary.tokens.reasoning = payload.reasoningTokenCount;
-		if (typeof payload.costUsd === "number") summary.costUsd = payload.costUsd;
-		if (
-			payload.costProvenance === "known" ||
-			payload.costProvenance === "known_free" ||
-			payload.costProvenance === "estimated" ||
-			payload.costProvenance === "unknown"
-		) {
-			summary.costProvenance = payload.costProvenance;
-		}
+		summary.tokens.output = num(payload.outputTokenCount, summary.tokens.output);
+		summary.tokens.reasoning = num(payload.reasoningTokenCount, summary.tokens.reasoning);
+		summary.costUsd = num(payload.costUsd, summary.costUsd);
+		summary.costProvenance = resolveCostProvenance(payload.costProvenance, summary.costProvenance);
 	}
 
 	function pushNotice(
@@ -333,7 +326,7 @@ export function createObservabilityProjection(bus: SafeEventBus, deps: Projectio
 			const now = Date.now();
 			const summary = runs.get(runId) ?? emptyRun(runId, now);
 			applyIdentity(summary, payload);
-			summary.status = resolveFailedStatus(payload.reason);
+			summary.status = resolveDispatchFailureStatus(payload.reason);
 			summary.updatedAtMs = now;
 			summary.finishedAtMs = now;
 			summary.durationMs = num(payload.durationMs, Math.max(0, now - summary.startedAtMs));
