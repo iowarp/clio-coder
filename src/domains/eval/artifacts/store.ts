@@ -11,6 +11,11 @@ import { parseEvalVerdictEnvelopeV1 } from "../schema/verdict.js";
 import { evalRoot } from "../store.js";
 import { redactArtifactForStorage } from "./redact.js";
 
+// This is the documented location (docs/architecture/artifact-versions.md's
+// Eval Artifact row): <dataDir>/evals/<evalId>.json, flat. The legacy version-1
+// shape skills-eval writes lives at evalRoot()/skills-eval/ instead
+// (store.ts's evalArtifactPath) so the two writers can never resolve to the
+// same file for the same id.
 function evalArtifactPathV4(dataDir: string, evalId: string): string {
 	assertSafeId(evalId, "eval");
 	return join(evalRoot(dataDir), `${evalId}.json`);

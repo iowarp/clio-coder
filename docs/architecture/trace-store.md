@@ -28,7 +28,12 @@ try to change it, because changing journal mode is a database write.
 The seven Clio trace tables are `runs`, `phases`, `events`, `envelopes`,
 `gate_results`, `agent_sessions`, and `processes`; `meta` carries the schema
 version. Runs use terminal run ids. Interactive session turns are also recorded
-as `runs` rows using `assignment_id = "session"`. A phase belongs to a run and carries its
+as `runs` rows, distinguished by `runs.source` (`'dispatch'` or `'session'`;
+a session turn also carries the historical sentinel `assignment_id =
+"session"`, which predates the column and is unchanged). `runs.source` is an
+additive column: a database created before it existed gains it in place on
+next open, backfilled from that sentinel, the same way `processes.host` and
+`processes.birth_token` were added without a schema-version bump. A phase belongs to a run and carries its
 assignment/worker-facing name, kind, owner, attempt, timing, status, itemized
 token spend, optional itemized dollar spend, total dollar spend, and context
 occupancy. Missing historical or unavailable component costs are `NULL`, never
@@ -107,7 +112,7 @@ When resolving the SQLite database path:
 
 ### Subcommand Specifications
 
-1. **`runs`**: Lists recent dispatch runs from the trace store. `--limit` sets maximum rows (1 to 500, default 50); `--json` emits the selected trace rows as an array. Formats status, start time, total tokens, total USD cost, and run ID in text mode.
+1. **`runs`**: Lists recent dispatch runs and interactive session turns from the trace store. `--limit` sets maximum rows (1 to 500, default 50); `--json` emits the selected trace rows as an array. Formats status, `source` (`dispatch` or `session`), start time, total tokens, total USD cost, and run ID in text mode.
 2. **`inspect`**: Emits only `--json`, from the default database, with no caller-controlled path or window. The version-1 snapshot carries at most eight newest runs and bounded phase, event-kind, and process-kind aggregates. It omits request text, phase error prose, event payloads, command lines, PIDs, hosts, and database paths, and distinguishes an unavailable database from an available empty one through `available`.
 3. **`phases`**: Lists sequence phases for a designated `runId`. Displays status, attempt, owner, total tokens, USD cost, and phase name.
 4. **`tail`**: Displays append-ordered event rows for a designated `runId`. When `--follow` is specified, polls for new events every 500 ms until two consecutive idle polls observe a finished run status.

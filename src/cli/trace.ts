@@ -302,10 +302,10 @@ function formatEvent(row: TraceEventRow): string {
 }
 
 function printRuns(rows: TraceRunRow[]): void {
-	process.stdout.write("STATUS   STARTED                      TOKENS       COST RUN\n");
+	process.stdout.write("STATUS   SOURCE   STARTED                      TOKENS       COST RUN\n");
 	for (const row of rows) {
 		process.stdout.write(
-			`${row.status.padEnd(8)} ${row.started_at.padEnd(28)} ${formatNumber(row.total_tokens).padStart(8)} ${formatCost(row.total_cost_usd).padStart(10)} ${row.run_id}\n`,
+			`${row.status.padEnd(8)} ${row.source.padEnd(8)} ${row.started_at.padEnd(28)} ${formatNumber(row.total_tokens).padStart(8)} ${formatCost(row.total_cost_usd).padStart(10)} ${row.run_id}\n`,
 		);
 	}
 }

@@ -56,9 +56,9 @@ or wire frame. Source version constants and their readers remain authoritative.<
 <p>Clio Coder gives its compatibility-sensitive persistent and network contracts an
 explicit version or schema identity. This table also calls out selected
 unversioned stores whose handling matters to operators. It does not enumerate
-every internal contract, such as the worker wire protocol, detached-batch,
-code-step, agent-ledger, and route-history stores, or the unversioned run
-ledger. Depending on the artifact, an incompatible reader fails closed, skips
+every internal contract, such as the worker wire protocol, <code>batches.json</code>
+(detached batch records), code-step, agent-ledger, and route-history stores.
+Depending on the artifact, an incompatible reader fails closed, skips
 an invalid record, or uses an explicitly documented compatibility
 normalization.</p>
 <table>
@@ -231,6 +231,14 @@ normalization.</p>
 <td align="left"><code>&lt;stateDir&gt;/fleet-runs/&lt;runId&gt;.json</code></td>
 <td align="left">Durable record of one fleet run: contract name, plan hash, static step ids and steps, <code>--var</code> values, replayed and settled step results, and the delegation plan hash a <code>kind: plan</code> step produced. Read by <code>fleet run --resume</code>.</td>
 <td align="left">Resume refuses a changed plan hash with a per-step diff and refuses differing <code>--var</code> values.</td>
+</tr>
+<tr>
+<td align="left"><strong>Dispatch Run Ledger</strong></td>
+<td align="left">unversioned JSON array</td>
+<td align="left"><code>RunEnvelope</code><br><code>src/domains/dispatch/state.ts</code></td>
+<td align="left"><code>&lt;stateDir&gt;/runs.json</code></td>
+<td align="left">In-memory mirror of recent dispatch runs (id, agent, target, model, runtime, status, timing, receipt path, budget/briefing/steering provenance), newest-first, persisted as a settings-bounded ring (default 1000 runs). Read by the eval, evidence, CLI (<code>usage</code>), and TUI (Dispatch Board) domains, among others.</td>
+<td align="left">A missing file reads as empty; a non-array top-level JSON value reads as empty; malformed JSON throws. There is no per-record version field to check or reject on, since <code>RunEnvelope</code> carries none.</td>
 </tr>
 <tr>
 <td align="left"><strong>Durable Assignment Store</strong></td>

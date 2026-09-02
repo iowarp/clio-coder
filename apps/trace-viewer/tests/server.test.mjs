@@ -65,6 +65,24 @@ describe("trace viewer server", () => {
 		}
 	});
 
+	it("derives source from assignment_id on a database predating the source column", () => {
+		const path = fixture();
+		const db = new DatabaseSync(path);
+		db.exec(
+			`INSERT INTO runs VALUES('run-session','session','turn','running','main','local','gpt','sdk',NULL,'2026-01-01T00:00:00Z',NULL,3,.01);`,
+		);
+		db.close();
+		const reader = new ViewerDatabase(path);
+		try {
+			assert.equal(reader.run("run-1").source, "dispatch");
+			assert.equal(reader.run("run-session").source, "session");
+			const bySource = Object.fromEntries(reader.runs(10).map((row) => [row.run_id, row.source]));
+			assert.deepEqual(bySource, { "run-1": "dispatch", "run-session": "session" });
+		} finally {
+			reader.close();
+		}
+	});
+
 	it("binds only to localhost and exposes GET-only JSON", async () => {
 		const viewer = await startTraceViewer({ db: fixture(), port: 0 });
 		try {

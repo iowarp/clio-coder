@@ -6,6 +6,7 @@ import {
 	type DispatchProgressPayload,
 	type DispatchRunIdentity,
 } from "../core/bus-events.js";
+import { resolveDispatchFailureStatus } from "../core/dispatch-outcome.js";
 import type { SafeEventBus } from "../core/event-bus.js";
 import { rawDurationMs } from "../core/timers.js";
 import type { AgentAudience } from "../domains/agents/spec.js";
@@ -37,7 +38,7 @@ import {
 	type ObservabilityNotice,
 	type ObservabilitySnapshot,
 } from "../domains/observability/index.js";
-import { type CostProvenance, foregroundStreamUsage } from "../domains/providers/index.js";
+import { type CostProvenance, foregroundStreamUsage, resolveCostProvenance } from "../domains/providers/index.js";
 import { sanitizeCallTargetText } from "../domains/safety/call-target.js";
 import { type Component, truncateToWidth, visibleWidth, wrapTextWithAnsi } from "../engine/tui.js";
 import { formatWorkerContextMeter } from "./context-meter.js";
@@ -1285,12 +1286,6 @@ function resolveAgentEndStatus(rawMessages: unknown): DispatchBoardStatus | null
 	return null;
 }
 
-function resolveFailedStatus(reason: unknown): DispatchBoardStatus {
-	if (reason === "dead" || reason === "stalled") return "dead";
-	if (reason === "interrupted" || reason === "canceled") return "aborted";
-	return "failed";
-}
-
 function resolveFailureDetail(
 	payload: Partial<DispatchFailedPayload>,
 	fallback: string | null | undefined,
@@ -1601,7 +1596,7 @@ export function createDispatchBoardStore(
 			entry.durationMs = parseFiniteNumber(payload.durationMs, Math.max(0, rawDurationMs(entry.startedAtMs, now)));
 			entry.tokenCount = parseFiniteNumber(payload.tokenCount, entry.tokenCount);
 			entry.costUsd = parseFiniteNumber(payload.costUsd, entry.costUsd);
-			entry.costProvenance = payload.costProvenance ?? "unknown";
+			entry.costProvenance = resolveCostProvenance(payload.costProvenance, entry.costProvenance ?? "unknown");
 			entry.outcomeDetail = null;
 			if (payload.hostVerification !== undefined) entry.hostVerification = payload.hostVerification;
 			settleFromReceipt(entry);
@@ -1621,7 +1616,7 @@ export function createDispatchBoardStore(
 			const payload: Partial<DispatchFailedPayload> = raw ?? {};
 			const runId = parseRunId(payload.runId);
 			const previousStatus = runId !== null ? entries.get(runId)?.status : undefined;
-			const resolvedStatus = resolveFailedStatus(payload.reason);
+			const resolvedStatus = resolveDispatchFailureStatus(payload.reason);
 			const status = previousStatus === "dead" && resolvedStatus === "failed" ? "dead" : resolvedStatus;
 			const entry = upsertBase(payload, status, now);
 			if (!entry) return;
@@ -1630,7 +1625,7 @@ export function createDispatchBoardStore(
 			entry.durationMs = parseFiniteNumber(payload.durationMs, Math.max(0, rawDurationMs(entry.startedAtMs, now)));
 			entry.tokenCount = parseFiniteNumber(payload.tokenCount, entry.tokenCount);
 			entry.costUsd = parseFiniteNumber(payload.costUsd, entry.costUsd);
-			entry.costProvenance = payload.costProvenance ?? "unknown";
+			entry.costProvenance = resolveCostProvenance(payload.costProvenance, entry.costProvenance ?? "unknown");
 			entry.outcomeDetail = resolveFailureDetail(payload, entry.outcomeDetail);
 			if (payload.hostVerification !== undefined) entry.hostVerification = payload.hostVerification;
 			settleFromReceipt(entry);

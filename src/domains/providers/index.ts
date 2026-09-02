@@ -161,7 +161,7 @@ export {
 	VALID_THINKING_LEVELS,
 } from "./types/capability-flags.js";
 export { type ContextWindowSlots, formatContextWindowSlots } from "./types/context-window-slots.js";
-export { type CostProvenance, normalizeCostProvenance } from "./types/cost-provenance.js";
+export { type CostProvenance, normalizeCostProvenance, resolveCostProvenance } from "./types/cost-provenance.js";
 export type { KnowledgeBase, KnowledgeBaseEntry, KnowledgeBaseHit } from "./types/knowledge-base.js";
 export type {
 	ProbeContext,
