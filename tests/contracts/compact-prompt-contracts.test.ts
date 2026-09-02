@@ -1,8 +1,10 @@
 import { deepStrictEqual, match, ok, strictEqual, throws } from "node:assert/strict";
+import { join } from "node:path";
 import { describe, it } from "node:test";
 
 import { resolvePackageRoot } from "../../src/core/package-root.js";
 import { ALL_TOOL_NAMES, type ToolName, ToolNames } from "../../src/core/tool-names.js";
+import { resolveClioDirs } from "../../src/core/xdg.js";
 import { renderFleetPromptSection } from "../../src/domains/agents/catalog.js";
 import { discoverAgentRecipes } from "../../src/domains/agents/registry.js";
 import { normalizeAgentSpec } from "../../src/domains/agents/spec.js";
@@ -270,10 +272,19 @@ describe("compact prompt contracts", () => {
 		const mainToolNames = ALL_TOOL_NAMES.filter((name) => name !== ToolNames.Ledger);
 		strictEqual(mainToolNames.length, 20);
 		const main = mainPrompt({ providerSupportsTools: true, toolNames: mainToolNames });
-		const normalizedMain = main.systemPrompt.split(resolvePackageRoot()).join("{PACKAGE_ROOT}");
-		strictEqual(normalizedMain.length, 10_313);
-		strictEqual(Math.ceil(normalizedMain.length / 4), 2_579);
-		ok(main.systemPrompt.length <= 10_600, `main prompt grew to ${main.systemPrompt.length} chars`);
+		// The self-awareness paths are machine facts: the package root, the
+		// settings file, and the state directory of the live home.
+		const dirs = resolveClioDirs();
+		const normalizedMain = main.systemPrompt
+			.split(resolvePackageRoot())
+			.join("{PACKAGE_ROOT}")
+			.split(join(dirs.config, "settings.yaml"))
+			.join("{SETTINGS}")
+			.split(dirs.state)
+			.join("{STATE}");
+		strictEqual(normalizedMain.length, 10_504);
+		strictEqual(Math.ceil(normalizedMain.length / 4), 2_626);
+		ok(main.systemPrompt.length <= 10_800, `main prompt grew to ${main.systemPrompt.length} chars`);
 		ok(main.tokenEstimate <= 2_700, `main prompt grew to ${main.tokenEstimate} estimated tokens`);
 		strictEqual(Math.ceil(main.systemPrompt.length / 4), main.tokenEstimate);
 		const operatingContract = table.byId.get("operating.contract")?.body.trim();
@@ -289,12 +300,12 @@ describe("compact prompt contracts", () => {
 				),
 			},
 			{
-				identity: 317,
+				identity: 298,
 				"operating-contract": 164,
-				delegation: 478,
+				delegation: 532,
 				skills: 181,
 				safety: 266,
-				"tool-contract": 622,
+				"tool-contract": 635,
 				fleet: 472,
 				"retrieval-hints": 36,
 				runtime: 43,

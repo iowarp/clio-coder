@@ -2,6 +2,7 @@ import { join } from "node:path";
 import { resolvePackageRoot } from "../../core/package-root.js";
 import { normalizePromptHint } from "../../core/prompt-hint.js";
 import type { ToolName } from "../../core/tool-names.js";
+import { resolveClioDirs } from "../../core/xdg.js";
 import type { AutonomyLevel } from "../safety/autonomy.js";
 import { ceilChars } from "../session/context-accounting.js";
 import type { FragmentTable, LoadedFragment } from "./fragment-loader.js";
@@ -297,7 +298,11 @@ function renderToolContractBlock(inputs: SessionPromptInputs): string {
 	const admitted = new Set(names);
 	const inventoryGuidance = [
 		"When asked what tools you have, copy the Direct tools line verbatim and call nothing",
-		...(canDispatch ? ["dispatch(list:true) answers only a question about agents or the fleet"] : []),
+		...(canDispatch
+			? [
+					"dispatch(list:true) answers a question about agents, the fleet, or which target and model run this session and its workers",
+				]
+			: []),
 		...(canListSkills ? ['context(scope="skills") answers only a question about skills'] : []),
 	].join("; ");
 	const capabilityKinds = [
@@ -571,10 +576,15 @@ export function compile(table: FragmentTable, inputs: CompileInputs): CompiledSe
 	const docsRouting = selfAwareness && sessionHasContext(session) ? table.byId.get("identity.docs-routing") : undefined;
 	if (selfAwareness) {
 		const packageRoot = resolvePackageRoot();
+		// The live home, not the XDG default: an isolated CLIO_CODER_HOME or a
+		// CLIO_CODER_CONFIG_DIR override moves the file the operator would edit.
+		const clioDirs = resolveClioDirs();
 		const rendered = selfAwareness.body
 			.replace("{CLIO_DOCS_PATH}", join(packageRoot, "docs"))
 			.replace("{CLIO_SRC_PATH}", join(packageRoot, "src"))
-			.replace("{CLIO_CODEWIKI_PATH}", join(packageRoot, "dist", "assets", "codewiki.json"));
+			.replace("{CLIO_CODEWIKI_PATH}", join(packageRoot, "dist", "assets", "codewiki.json"))
+			.replace("{CLIO_SETTINGS_PATH}", join(clioDirs.config, "settings.yaml"))
+			.replace("{CLIO_STATE_PATH}", clioDirs.state);
 		identityBody = [identity.body.trim(), rendered.trim(), ...(docsRouting ? [docsRouting.body.trim()] : [])].join(
 			"\n\n",
 		);
