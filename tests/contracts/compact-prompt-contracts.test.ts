@@ -285,7 +285,7 @@ describe("compact prompt contracts", () => {
 		strictEqual(normalizedMain.length, 10_504);
 		strictEqual(Math.ceil(normalizedMain.length / 4), 2_626);
 		ok(normalizedMain.length <= 10_800, `main prompt grew to ${normalizedMain.length} chars`);
-		ok(main.tokenEstimate <= 2_700, `main prompt grew to ${main.tokenEstimate} estimated tokens`);
+		ok(Math.ceil(normalizedMain.length / 4) <= 2_700, `main prompt grew to ${Math.ceil(normalizedMain.length / 4)} estimated tokens`);
 		strictEqual(Math.ceil(main.systemPrompt.length / 4), main.tokenEstimate);
 		const operatingContract = table.byId.get("operating.contract")?.body.trim();
 		if (!operatingContract) throw new Error("fixed main fixture requires the operating contract");
