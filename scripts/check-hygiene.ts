@@ -927,20 +927,36 @@ interface ReleaseManifest {
 }
 
 function shippedBy(packageFiles: string[], path: string): boolean {
+	const matches = (pattern: string): boolean => {
+		if (!pattern.includes("*")) return path === pattern || path.startsWith(`${pattern}/`);
+		let source = "^";
+		for (let index = 0; index < pattern.length; index += 1) {
+			const char = pattern[index] ?? "";
+			if (char !== "*") {
+				source += /[\\^$.*+?()[\]{}|]/.test(char) ? `\\${char}` : char;
+				continue;
+			}
+			if (pattern[index + 1] !== "*") {
+				source += "[^/]*";
+				continue;
+			}
+			index += 1;
+			if (pattern[index + 1] === "/") {
+				source += "(?:[^/]+/)*";
+				index += 1;
+			} else {
+				source += ".*";
+			}
+		}
+		return new RegExp(`${source}$`, "u").test(path);
+	};
+	let shipped = false;
 	for (const pattern of packageFiles) {
-		if (pattern.startsWith("!")) continue;
-		if (pattern === path) return true;
-		if (pattern.endsWith("/**") && path.startsWith(pattern.slice(0, -2))) {
-			return true;
-		}
-		if (!pattern.includes("*") && path.startsWith(`${pattern}/`)) return true;
-		const star = pattern.indexOf("*");
-		if (star !== -1 && !pattern.includes("**")) {
-			const [dir, suffix] = [pattern.slice(0, star), pattern.slice(star + 1)];
-			if (path.startsWith(dir) && path.endsWith(suffix) && !path.slice(dir.length).includes("/")) return true;
-		}
+		const excluded = pattern.startsWith("!");
+		const candidate = excluded ? pattern.slice(1) : pattern;
+		if (matches(candidate)) shipped = !excluded;
 	}
-	return false;
+	return shipped;
 }
 
 function shipsUnder(packageFiles: string[], dir: string): boolean {
@@ -1329,21 +1345,24 @@ function checkPromptsDocLinks(): void {
 			'identity.docs-routing must direct the model to call context(scope="docs") before answering, not merely note that docs exist',
 		);
 	}
-	const named = [...selfAwareness.body.matchAll(/docs\/[a-zA-Z0-9_-]+\.md/g)].map((m) => m[0]);
+	const named = [...selfAwareness.body.matchAll(/docs\/(?:[a-zA-Z0-9_-]+\/)*[a-zA-Z0-9_-]+\.md/g)].map((m) => m[0]);
 	for (const docRel of named) {
 		if (!existsSync(join(root, docRel))) {
 			fail("prompts", `${docRel}, named in identity.self-awareness, must exist in the checkout`);
 		}
 	}
 	const pkg = JSON.parse(readRoot("package.json")) as { files: string[] };
-	if (!pkg.files.includes("docs/*.md")) {
-		fail("prompts", "package.json files must include docs/*.md");
+	if (!pkg.files.includes("docs/**/*.md")) {
+		fail("prompts", "package.json files must include docs/**/*.md");
+	}
+	if (!pkg.files.includes("!docs/html/**")) {
+		fail("prompts", "package.json files must exclude docs/html/**");
 	}
 
 	// Corpus coverage: the directive promises every bundled doc is one call away.
-	const onDisk = readdirSync(join(root, "docs"))
-		.filter((name) => name.endsWith(".md"))
-		.map((name) => `docs/${name}`)
+	const onDisk = collectFiles([join(root, "docs")], [".md"])
+		.map((absolute) => relative(root, absolute).replaceAll("\\", "/"))
+		.filter((path) => !path.startsWith("docs/html/"))
 		.sort();
 	const corpus = listDocsCorpus();
 	if (!corpus.ok) {
@@ -1354,6 +1373,12 @@ function checkPromptsDocLinks(): void {
 	for (const docRel of onDisk) {
 		if (!listed.has(docRel)) {
 			fail("prompts", `${docRel} is in the checkout but not in the context(scope="docs") corpus`);
+		}
+	}
+	const onDiskSet = new Set(onDisk);
+	for (const docRel of listed) {
+		if (docRel.startsWith("docs/") && !onDiskSet.has(docRel)) {
+			fail("prompts", `${docRel} is in the context(scope="docs") corpus but not in the Markdown reference tree`);
 		}
 	}
 }
