@@ -293,15 +293,17 @@ export function resolveDispatchPathScope(req: DispatchRequest): DispatchPathScop
  * The prose token grammar also matches version numbers, ratios, and Latin
  * abbreviations ("0.5", "v24.9", "e.g", "dead/raw"). Those never select a rule
  * or a boundary, so the replacement notice names only tokens that read as
- * repository paths: a segment with a file extension of two or more letters,
- * or a trailing directory separator. A live three-task dispatch printed 27
+ * repository paths: a segment with a source or document file extension, or
+ * a trailing directory separator. Method names (`Store.fromText`, `store.set`)
+ * share the dotted shape and are excluded by the extension list. A live three-task dispatch printed 27
  * "omitted paths" per task, most of them numbers, three times over.
  */
-const REPORTABLE_OMITTED_PATH_RE = /\.[a-z][a-z0-9]+(?:\/|$)|\/$/iu;
+const REPORTABLE_OMITTED_PATH_RE =
+	/\.(?:[cm]?[jt]sx?|json|ya?ml|md|txt|py|go|rs|c|h|cc|cpp|hpp|java|rb|sh|toml|css|html|sql|lock)(?:\/|$)|\/$/u;
 const OMITTED_PATH_REPORT_CAP = 12;
 
 /** Omitted prose paths worth telling the operator about, capped for the transcript. */
-export function reportableOmittedPaths(scope: DispatchPathScope): string[] {
+function reportableOmittedPaths(scope: DispatchPathScope): string[] {
 	return scope.inferredOnlyPaths.filter((path) => REPORTABLE_OMITTED_PATH_RE.test(path));
 }
 

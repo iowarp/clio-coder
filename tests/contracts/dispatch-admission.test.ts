@@ -76,7 +76,8 @@ describe("dispatch admission boundary", () => {
 
 	it("lets a typed intent that declares no writes outrank the prose classifier for a read-only recipe", () => {
 		const specs = [agent("scout", "read-only"), agent("coder", "workspace-edit")];
-		const task = "Reconnaissance question: find every caller of shouldCompact; the fix will write the failing test first.";
+		const task =
+			"Reconnaissance question: find every caller of shouldCompact; the fix will write the failing test first.";
 		strictEqual(
 			assessCapabilityMismatch({
 				agentId: "scout",
@@ -165,7 +166,8 @@ describe("dispatch admission boundary", () => {
 
 	it("reports only path-looking tokens when a typed intent replaces prose inference", () => {
 		const scope = resolveDispatchPathScope({
-			task: "Fix #15 in src/compaction.ts: dead/raw > 0.5 at ratio 0.5, e.g. 4/10 lines on node v24.9 with tsc 6.0; pin it in tests/compaction.test.ts",
+			task:
+				"Fix #15 in src/compaction.ts: dead/raw > 0.5 at ratio 0.5, e.g. 4/10 lines on node v24.9 with tsc 6.0; Store.fromText and store.set stay; pin it in tests/compaction.test.ts",
 			intent: {
 				version: 2,
 				readRoots: [],
@@ -180,7 +182,7 @@ describe("dispatch admission boundary", () => {
 		const notice = declaredScopeReplacementNotice(scope);
 		ok(notice, "the omitted test file is worth a notice");
 		ok(notice.omittedPaths.includes("tests/compaction.test.ts"), notice.omittedPaths.join(","));
-		for (const token of ["0.5", "4/10", "v24.9", "6.0", "e.g", "dead/raw"]) {
+		for (const token of ["0.5", "4/10", "v24.9", "6.0", "e.g", "dead/raw", "Store.fromText", "store.set"]) {
 			ok(!notice.omittedPaths.includes(token), `${token} is not a path`);
 		}
 	});
