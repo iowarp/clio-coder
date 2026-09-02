@@ -10,6 +10,7 @@ import type { CompeteMuxWorktrees } from "./compete-worktrees.js";
 import { assertRegisteredBuiltinTools, type CoreToolBootstrapDeps, registerCoreTools } from "./core-bootstrap.js";
 import { createDispatchRunEventRegistry, createDispatchTool } from "./dispatch.js";
 import type { DispatchBackgroundRegistry } from "./dispatch-background.js";
+import type { DispatchSchemaComposition } from "./dispatch-schema.js";
 import { lazyTool } from "./lazy-tool.js";
 import { monitorToolSurface } from "./monitor-surface.js";
 import { panesToolSurface } from "./panes-surface.js";
@@ -27,6 +28,8 @@ export interface ToolBootstrapDeps extends CoreToolBootstrapDeps {
 	getAutonomy?: () => AutonomyLevel;
 	getCostCeilingUsd?: () => number;
 	getWorkerRosters?: () => WorkerRosters;
+	/** Which optional `dispatch` schema blocks this session advertises; absent means every block. */
+	getDispatchSchemaComposition?: () => DispatchSchemaComposition;
 	dispatchBackground?: DispatchBackgroundRegistry;
 	/** Optional herdr worktree lifecycle for compete candidates. */
 	competeMuxWorktrees?: CompeteMuxWorktrees;
@@ -61,6 +64,7 @@ export function registerAllTools(registry: ToolRegistry, deps: ToolBootstrapDeps
 			...(deps.getAutonomy ? { getAutonomy: deps.getAutonomy } : {}),
 			...(deps.getCostCeilingUsd ? { getCostCeilingUsd: deps.getCostCeilingUsd } : {}),
 			...(deps.getWorkerRosters ? { getWorkerRosters: deps.getWorkerRosters } : {}),
+			...(deps.getDispatchSchemaComposition ? { getSchemaComposition: deps.getDispatchSchemaComposition } : {}),
 			...(deps.dispatchBackground ? { background: deps.dispatchBackground } : {}),
 			...(deps.competeMuxWorktrees ? { competeWorktrees: { mux: deps.competeMuxWorktrees } } : {}),
 		};

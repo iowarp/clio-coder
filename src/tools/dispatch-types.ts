@@ -13,6 +13,7 @@ import type {
 import type { DispatchBackgroundRegistry } from "./dispatch-background.js";
 import type { DispatchPlanView, ResolvedDispatchPlanArtifact } from "./dispatch-plan.js";
 import type { DispatchRunEventRegistry } from "./dispatch-run-events.js";
+import type { DispatchSchemaComposition } from "./dispatch-schema.js";
 
 export type DispatchMode = "parallel" | "sequential" | "pipeline" | "compete" | "council";
 
@@ -105,4 +106,6 @@ export interface DispatchToolDeps {
 	getAutonomy?: () => AutonomyLevel;
 	getCostCeilingUsd?: () => number;
 	getWorkerRosters?: () => Readonly<Record<string, { members: ReadonlyArray<DispatchCouncilMember> }>>;
+	/** Which optional schema blocks this session advertises; absent means every block. */
+	getSchemaComposition?: () => DispatchSchemaComposition;
 }
