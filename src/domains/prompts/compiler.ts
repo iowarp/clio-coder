@@ -462,8 +462,7 @@ function renderRetrievalHintsBlock(inputs: SessionPromptInputs): string {
 	// preloaded.
 	return [
 		"# Retrieval Hints",
-		"Compact CLIO-CODER.md project instructions may be preloaded above; everything else about the repository must be fetched, not assumed.",
-		"Never invent file paths, automatic tool behavior, or mutable repo details from the system prompt.",
+		"Repository details not included above must be fetched, never invented; compact CLIO-CODER.md instructions may be preloaded.",
 	].join("\n");
 }
 
