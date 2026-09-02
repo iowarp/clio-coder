@@ -388,7 +388,8 @@
     rerank: false
     fim: false
     contextWindow: 262144
-    maxTokens: 65536
+    # Vendor maximum for complex problems. Evidence: scratchpad/catalog/models/Qwen-Qwen3.6-35B-A3B.md.
+    maxTokens: 81920
   quirks:
     sampling:
       thinking:
@@ -579,7 +580,8 @@
     rerank: false
     fim: false
     contextWindow: 262144
-    maxTokens: 32768
+    # Vendor maximum for complex problems. Evidence: scratchpad/catalog/models/Qwen-Qwen3.6-27B.md.
+    maxTokens: 81920
   quirks:
     measuredUnder:
       hardware: unknown
@@ -645,6 +647,7 @@
     rerank: false
     fim: false
     contextWindow: 262144
+    # Vendor maximum for final responses. Evidence: scratchpad/catalog/models/Qwen-Qwen3.8-27B.md.
     maxTokens: 131072
   quirks:
     measuredUnder:

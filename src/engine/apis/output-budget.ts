@@ -13,7 +13,7 @@ const DEFAULT_MAX_OUTPUT_TOKENS = CLIO_MIN_MAX_OUTPUT_TOKENS;
 
 /**
  * Process-wide default output budget requested per turn, sourced from
- * settings.defaults.maxTokens at session start (see
+ * chat.maxOutputTokens at session start (see
  * {@link setGlobalDefaultMaxOutputTokens}). 0 means unset: callers fall back to
  * the model's advertised cap as before.
  */
@@ -29,19 +29,6 @@ let globalDefaultMaxOutputTokens = 0;
 export function setGlobalDefaultMaxOutputTokens(value: number): void {
 	globalDefaultMaxOutputTokens = Number.isFinite(value) && value > 0 ? Math.floor(value) : 0;
 }
-
-/**
- * Output ceiling applied to a llama.cpp tool-bearing turn when the caller did
- * not request an explicit limit. It bounds a genuinely runaway local
- * generation without muzzling real work: a single tool call that writes a
- * sizable file (a full HTML page, a multi-function source module) needs far
- * more than a few thousand tokens of argument, and the tool-call argument
- * counts against this same response budget. Narration loops where a local
- * model keeps saying it will call a tool without emitting one are caught
- * separately by assessToolProseLoop, so this number only has to be large
- * enough to let legitimate large outputs through.
- */
-export const LOCAL_TOOL_TURN_MAX_OUTPUT_TOKENS = CLIO_MIN_MAX_OUTPUT_TOKENS;
 
 /**
  * Tokens a preflight context check should hold back for the response: the
@@ -84,15 +71,18 @@ export function remainingContextMaxTokens(
 	const modelLimit = model.maxTokens > 0 ? model.maxTokens : Number.POSITIVE_INFINITY;
 	// Precedence for the requested ceiling when the caller gave no explicit
 	// maxTokens: a more-specific tool-turn limit, then the global default, then
-	// the model's advertised cap. Math.min below clamps the result down to the
-	// model cap and the remaining context budget regardless, so the global
-	// default never lets a small model overshoot what it supports.
+	// the model's advertised cap. A model that advertises no cap uses the product
+	// floor instead of requesting its entire remaining context window. Math.min
+	// below clamps the result down to every known boundary, so frontier providers
+	// with a known cap never receive a larger max_tokens value.
 	const defaultLimit =
 		limits?.maxOutputTokens !== undefined && limits.maxOutputTokens > 0
 			? limits.maxOutputTokens
 			: globalDefaultMaxOutputTokens > 0
 				? globalDefaultMaxOutputTokens
-				: modelLimit;
+				: model.maxTokens > 0
+					? modelLimit
+					: DEFAULT_MAX_OUTPUT_TOKENS;
 	const requested = options?.maxTokens ?? defaultLimit;
 	const resolved = Math.min(requested, modelLimit, budget);
 	return Number.isFinite(resolved) ? resolved : DEFAULT_MAX_OUTPUT_TOKENS;
