@@ -17,7 +17,7 @@ import { normalizeDispatchIntent } from "../../src/domains/dispatch/intent.js";
 import { classifyDispatchIntentCompatibility } from "../../src/domains/dispatch/intent-compatibility.js";
 import {
 	declaredScopeReplacementNotice,
-	inferredScopeDroppedPathNotice,
+	inferredScopeParentTokenNotice,
 	resolveDispatchPathScope,
 } from "../../src/domains/dispatch/path-scope.js";
 import { endpointCapacityFor } from "../../src/domains/providers/endpoint-capacity.js";
@@ -27,6 +27,7 @@ import {
 	type RuntimeDescriptor,
 } from "../../src/domains/providers/index.js";
 import { createDispatchTool } from "../../src/tools/dispatch.js";
+import { describeDispatchPlan } from "../../src/tools/dispatch-plan.js";
 import { isolateDispatchState, makeDispatchBundle, restoreDispatchState } from "../harness/dispatch.js";
 import { dispatchStubContext } from "../harness/dispatch-stub-context.js";
 
@@ -171,7 +172,7 @@ describe("dispatch admission boundary", () => {
 		ok(scope.workingContextPaths.includes("parser.js"));
 	});
 
-	it("anchors a quoted ../ specifier that names a real file, drops one that does not, and still refuses an escape", () => {
+	it("anchors a quoted ../ specifier that names a real file, drops one that does not, and names both rewrites", () => {
 		// Round-5 run 3: a coder briefing quoted `import { Store } from "../src/store.js"`
 		// out of test/store.test.ts and admission failed the whole dispatch with
 		// legacy_scope_path_malformed. Inference never sees the quote's origin, so
@@ -188,22 +189,128 @@ describe("dispatch admission boundary", () => {
 			strictEqual(scope.source, "inferred");
 			ok(scope.workingContextPaths.includes("src/store.js"), scope.workingContextPaths.join(","));
 			ok(!scope.workingContextPaths.includes("../src/absent.js"), scope.workingContextPaths.join(","));
-			deepStrictEqual(
-				scope.droppedPaths.map((entry) => entry.path),
-				["../src/absent.js"],
-			);
-			const notice = inferredScopeDroppedPathNotice(scope);
-			ok(notice, "a dropped prose token is named in the scope notice");
+			deepStrictEqual(scope.parentTokens, [
+				{ token: "../src/store.js", resolved: "src/store.js", source: "briefing" },
+				{ token: "../src/absent.js", resolved: null, source: "briefing" },
+			]);
+			// Neither half of the reinterpretation is silent: the anchored token is
+			// the one that put a path in working context the prose never spelled.
+			const notice = inferredScopeParentTokenNotice(scope);
+			ok(notice, "a reinterpreted prose token is named in the scope notice");
 			ok(notice.message.startsWith("[dispatch scope] "), notice.message);
-			ok(notice.message.includes("../src/absent.js"), notice.message);
-			throws(
-				() =>
-					resolveDispatchPathScope({
-						cwd: root,
-						task: "read src/../../etc/passwd now",
-					} as Parameters<typeof resolveDispatchPathScope>[0]),
-				/legacy_scope_path_malformed/u,
+			ok(notice.message.includes("../src/store.js -> src/store.js"), notice.message);
+			ok(notice.message.includes("../src/absent.js -> dropped"), notice.message);
+		} finally {
+			rmSync(root, { recursive: true, force: true });
+		}
+	});
+
+	it("names a ../ token once when the task and the briefing both quote it", () => {
+		// An orchestrator restating the file it is asking about quotes the same
+		// specifier twice; two of the notice's twelve slots must not go to one token.
+		const root = mkdtempSync(join(tmpdir(), "clio-path-scope-"));
+		try {
+			const scope = resolveDispatchPathScope({
+				cwd: root,
+				task: "check ../src/absent.js now",
+				briefing: "also ../src/absent.js here",
+			} as Parameters<typeof resolveDispatchPathScope>[0]);
+			deepStrictEqual(scope.parentTokens, [{ token: "../src/absent.js", resolved: null, source: "task" }]);
+			const notice = inferredScopeParentTokenNotice(scope);
+			ok(notice, "the token is still named once");
+			strictEqual(notice.message.split("../src/absent.js").length - 1, 1, notice.message);
+		} finally {
+			rmSync(root, { recursive: true, force: true });
+		}
+	});
+
+	it("drops a leading ../ run that names nothing and lets neither outcome widen authority", () => {
+		// The deliberate reading of issue #266, pinned so a later edit cannot flip
+		// it silently: a leading run's origin never reaches prose inference, so
+		// criterion 1 (never reject) decides and criterion 2 (refuse an escape)
+		// cannot. Both outcomes stay off the write boundary, which is what makes
+		// the leniency safe.
+		const root = mkdtempSync(join(tmpdir(), "clio-path-scope-"));
+		try {
+			const leaves = resolveDispatchPathScope({
+				cwd: root,
+				task: "read ../../../etc/passwd now",
+			} as Parameters<typeof resolveDispatchPathScope>[0]);
+			deepStrictEqual(leaves.workingContextPaths, []);
+			deepStrictEqual(leaves.writeBoundaries, []);
+			deepStrictEqual(leaves.parentTokens, [{ token: "../../../etc/passwd", resolved: null, source: "task" }]);
+			// The same token in a checkout that happens to carry etc/passwd anchors
+			// under the root instead, which cannot escape it and is never silent.
+			mkdirSync(join(root, "etc"), { recursive: true });
+			writeFileSync(join(root, "etc", "passwd"), "root:x:0:0\n", "utf8");
+			const collides = resolveDispatchPathScope({
+				cwd: root,
+				task: "read ../../../etc/passwd now",
+			} as Parameters<typeof resolveDispatchPathScope>[0]);
+			deepStrictEqual(collides.workingContextPaths, ["etc/passwd"]);
+			deepStrictEqual(collides.writeBoundaries, []);
+			deepStrictEqual(collides.parentTokens, [{ token: "../../../etc/passwd", resolved: "etc/passwd", source: "task" }]);
+			ok(
+				inferredScopeParentTokenNotice(collides)?.message.includes("../../../etc/passwd -> etc/passwd"),
+				"the rewrite the operator would otherwise never see is named",
 			);
+		} finally {
+			rmSync(root, { recursive: true, force: true });
+		}
+	});
+
+	it("refuses a ../ token whose remaining segments walk back out of what it anchored", () => {
+		// The guard the leniency rests on. Each of these enters the leading-run
+		// branch and must leave it refused: a later "..", a later ".", and a run
+		// with no remainder to probe at all. The fourth token never reaches that
+		// branch and is here to pin the pre-existing refusal it keeps.
+		const root = mkdtempSync(join(tmpdir(), "clio-path-scope-"));
+		try {
+			for (const task of [
+				"read ../src/../../etc/passwd now",
+				"read ../src/./store.js now",
+				"read ../.. now",
+				"read src/../../etc/passwd now",
+			]) {
+				throws(
+					() => resolveDispatchPathScope({ cwd: root, task } as Parameters<typeof resolveDispatchPathScope>[0]),
+					/legacy_scope_path_malformed/u,
+					task,
+				);
+			}
+		} finally {
+			rmSync(root, { recursive: true, force: true });
+		}
+	});
+
+	it("resolves the plan artifact's legacy scope against the dispatch cwd, not the process cwd", () => {
+		// The approval artifact is the surface an operator acts on, so it has to
+		// probe the root the run will probe. Rendered against process.cwd() it
+		// showed no line at all for a token the dispatch anchors into working
+		// context.
+		const root = mkdtempSync(join(tmpdir(), "clio-plan-scope-"));
+		try {
+			mkdirSync(join(root, "src"), { recursive: true });
+			writeFileSync(join(root, "src", "store-probe.js"), "export const store = 1;\n", "utf8");
+			const args = {
+				agent: "coder",
+				tasks: [
+					{ task: "Make the store durable", briefing: 'test/store.test.ts imports "../src/store-probe.js"' },
+					{ task: "Review the change" },
+				],
+			};
+			const anchored = describeDispatchPlan({ ...args, cwd: root });
+			ok(anchored.text.includes('scope working_context path="src/store-probe.js"'), anchored.text);
+			ok(
+				anchored.text.includes('scope parent_token raw="../src/store-probe.js" resolved="src/store-probe.js"'),
+				anchored.text,
+			);
+			// No cwd: the same call resolves against this process, where the probed
+			// file does not exist, and the token is named as dropped rather than
+			// vanishing from the artifact.
+			const dropped = describeDispatchPlan(args);
+			ok(!dropped.text.includes('scope working_context path="src/store-probe.js"'), dropped.text);
+			ok(dropped.text.includes('scope parent_token raw="../src/store-probe.js" resolved=dropped'), dropped.text);
 		} finally {
 			rmSync(root, { recursive: true, force: true });
 		}
@@ -221,6 +328,36 @@ describe("dispatch admission boundary", () => {
 		const outputs = normalizeDispatchIntent({ version: 2, expected_outputs: ["../src/store.js"] }, new Map());
 		ok(!outputs.ok);
 		strictEqual(outputs.reason, "intent_path_escapes_root");
+	});
+
+	it("leaves a declared scope with no parent-token notice of its own", () => {
+		// A declaration is the scope, so no "../" token changed what the worker
+		// sees and the legacy notice has nothing to add. The dropped token still
+		// reaches the replacement notice through inferredOnlyPaths.
+		const root = mkdtempSync(join(tmpdir(), "clio-path-scope-"));
+		try {
+			const scope = resolveDispatchPathScope({
+				cwd: root,
+				task: "Make the store durable",
+				briefing: "see ../src/absent.js",
+				intent: {
+					version: 2,
+					readRoots: [],
+					writeRoots: ["src/"],
+					relevantPaths: [],
+					pathProvenance: [],
+					expectedOutputs: [],
+					verification: [],
+				},
+			} as unknown as Parameters<typeof resolveDispatchPathScope>[0]);
+			strictEqual(scope.source, "declared");
+			deepStrictEqual(scope.parentTokens, []);
+			strictEqual(inferredScopeParentTokenNotice(scope), null);
+			ok(scope.inferredOnlyPaths.includes("../src/absent.js"), scope.inferredOnlyPaths.join(","));
+			ok(declaredScopeReplacementNotice(scope)?.message.includes("../src/absent.js"));
+		} finally {
+			rmSync(root, { recursive: true, force: true });
+		}
 	});
 
 	it("reports only path-looking tokens when a typed intent replaces prose inference", () => {
