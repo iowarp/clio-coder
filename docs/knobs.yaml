@@ -4774,7 +4774,7 @@ entries:
   - name: quirks
     kind: model-tag
     owner: providers
-    controls: Free-form object per entry; `extractLocalModelQuirks` narrows only `kvCache`, `sampling` and `thinking` into `model.clioCoder.quirks`, and every other key is provenance.
+    controls: Free-form object per entry; `extractLocalModelQuirks` narrows only `sampling` and `thinking` into `model.clioCoder.quirks`, and every other key is provenance.
     verdict: keep
   - name: quirks.chatTemplate
     kind: model-tag
@@ -4790,22 +4790,6 @@ entries:
     kind: model-tag
     owner: providers
     controls: One tier's recommendation text keyed by memory class; provenance only; nothing in src reads it.
-    verdict: document
-  - name: quirks.kvCache
-    kind: model-tag
-    owner: providers
-    controls: Typed KV-cache block extracted into `model.clioCoder.quirks.kvCache`; no request builder or server-start path reads the extracted value.
-    verdict: keep
-    note: Parsed but unconsumed; the KV flags a server actually runs with are read from its argv by the probe.
-  - name: quirks.kvCache.kQuant
-    kind: model-tag
-    owner: providers
-    controls: Key-cache quantization (`f32`, `f16`, `q8_0`, `q4_0`, `q4_1`, `iq4_nl`, `q5_0`, `q5_1`, or `false`); parsed into the typed quirks but not applied to any request or server command.
-    verdict: document
-  - name: quirks.kvCache.vQuant
-    kind: model-tag
-    owner: providers
-    controls: Value-cache quantization from the same set, needing flash attention to take effect; parsed into the typed quirks but not applied anywhere.
     verdict: document
   - name: quirks.leakageNote
     kind: model-tag
@@ -4972,11 +4956,6 @@ entries:
     owner: providers
     controls: Sampler profile applied when the thinking level is `off`, and the fallback when no `thinking` profile exists.
     verdict: document
-  - name: quirks.sampling.instruct.maxTokens
-    kind: model-tag
-    owner: providers
-    controls: Advisory output cap for instruct mode; parsed into the typed profile but no request builder reads it, since the real cap is `capabilities.maxTokens`.
-    verdict: keep
   - name: quirks.sampling.instruct.minP
     kind: model-tag
     owner: providers
@@ -5023,11 +5002,6 @@ entries:
     controls: Documented grace tokens after the reasoning budget; it is not a `SamplingProfile` field, so the extractor drops it and nothing in src reads it.
     verdict: document
     note: Provenance only.
-  - name: quirks.sampling.thinking.maxTokens
-    kind: model-tag
-    owner: providers
-    controls: Advisory output cap for thinking mode; parsed into the typed profile but no request builder reads it.
-    verdict: keep
   - name: quirks.sampling.thinking.minP
     kind: model-tag
     owner: providers

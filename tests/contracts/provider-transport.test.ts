@@ -17,6 +17,7 @@ import {
 	synthesizeOpenAICompatModel,
 } from "../../src/domains/providers/runtimes/protocol/openai-compat.js";
 import { EMPTY_CAPABILITIES } from "../../src/domains/providers/types/capability-flags.js";
+import { extractLocalModelQuirks } from "../../src/domains/providers/types/local-model-quirks.js";
 import { openAICompletionsApiProvider } from "../../src/engine/apis/openai-completions.js";
 import type { OverlayHandle, TUI } from "../../src/engine/tui.js";
 import type { OverlayState } from "../../src/interactive/overlay-key-routing.js";
@@ -156,6 +157,26 @@ describe("provider transport boundary", () => {
 		strictEqual(registry.get("lmstudio-native"), canonical);
 		strictEqual(registry.list().filter((runtime) => runtime.id === "lmstudio").length, 1);
 		strictEqual(registry.get("not-installed"), null);
+	});
+
+	it("projects only model quirks consumed by the engine", () => {
+		deepStrictEqual(
+			extractLocalModelQuirks({
+				kvCache: { kQuant: "q8_0", vQuant: "q4_0" },
+				sampling: {
+					thinking: { temperature: 0.6, maxTokens: 32_768 },
+					instruct: { topP: 0.9, maxTokens: 4_096 },
+				},
+				thinking: { mechanism: "on-off" },
+			}),
+			{
+				sampling: {
+					thinking: { temperature: 0.6 },
+					instruct: { topP: 0.9 },
+				},
+				thinking: { mechanism: "on-off" },
+			},
+		);
 	});
 
 	it("sends one normalized OpenAI-compatible request and returns the streamed answer", async () => {

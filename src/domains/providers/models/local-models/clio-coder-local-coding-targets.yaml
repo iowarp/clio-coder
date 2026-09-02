@@ -26,8 +26,7 @@
 # not be established from git history or the release-test reports under
 # docs/release-notes/ read `unknown` rather than a plausible guess. A
 # `measuredUnder` block is provenance for a reader; nothing in the engine
-# consumes it (`extractLocalModelQuirks` narrows only kvCache, sampling, and
-# thinking).
+# consumes it (`extractLocalModelQuirks` narrows only sampling and thinking).
 #
 # `llamaCpp.parallel` is the recommended `--parallel` value for starting the
 # server, and families that carry one also carry a `parallelSlots` note. It is
@@ -73,11 +72,9 @@
       thinking:
         temperature: 1
         topP: 1
-        maxTokens: 32768
       instruct:
         temperature: 1
         topP: 1
-        maxTokens: 8192
     runtimePreference:
       llamaCpp: "Use the OpenAI-compatible chat-completions surface with chat_template_kwargs.reasoning_effort set to low, medium, or high."
       openaiCompat: "Preferred for Harmony reasoning-effort control when the local gateway exposes chat_template_kwargs."
@@ -130,13 +127,11 @@
         temperature: 0.5
         topP: 0.9
         topK: 20
-        maxTokens: 16384
         reasoningBudget: 4096
       instruct:
         temperature: 0.5
         topP: 0.9
         topK: 20
-        maxTokens: 4096
     gpuTiers:
       "32gb": "Default 32 GB local llama.cpp orchestrator profile; benchmarked with roughly 1 GiB VRAM headroom on a 32 GiB class card."
     runtimePreference:
@@ -190,13 +185,11 @@
         temperature: 0.6
         topP: 0.95
         topK: 20
-        maxTokens: 20480
         reasoningBudget: 16384
         gracePeriod: 1024
       instruct:
         temperature: 0.2
         topK: 1
-        maxTokens: 1024
     gpuTiers:
       "24gb": "Use a 4-bit quant with reduced load context for evaluation. Prefer the 32GB tier for sustained Clio writes."
       "32gb": "Primary strong local model for multimodal main-agent work. Keep openai-compat available for tool-call fallback."
@@ -252,7 +245,6 @@
         temperature: 0.6
         topP: 0.95
         topK: 20
-        maxTokens: 16384
         reasoningBudget: 4096
       instruct:
         temperature: 0.7
@@ -318,22 +310,17 @@
         family of behavior as qwopus3.6-35b-a3b-coder. The recommended
         llama.cpp serving profile below is the model card's, not that
         measurement's, and no argv from the measuring host survives.
-    kvCache:
-      kQuant: q8_0
-      vQuant: q8_0
     sampling:
       thinking:
         temperature: 0.6
         topP: 0.95
         topK: 20
-        maxTokens: 16384
         reasoningBudget: 4096
       instruct:
         temperature: 0.6
         topP: 0.95
         topK: 20
         repeatPenalty: 1.05
-        maxTokens: 4096
     gpuTiers:
       "32gb": "32 GB local profile with Q4_K_M, ctx=262144, q8 KV, flash attention, and parallel=1."
     runtimePreference:
@@ -404,22 +391,17 @@
         the router itself advertises the model as reasoning:on_off. The
         generic `ornith` pattern still routes 1.0 checkpoints to the entry
         above; these longer patterns win for 1.5 ids.
-    kvCache:
-      kQuant: q8_0
-      vQuant: q8_0
     sampling:
       thinking:
         temperature: 0.6
         topP: 0.95
         topK: 20
-        maxTokens: 16384
         reasoningBudget: 4096
       instruct:
         temperature: 0.6
         topP: 0.95
         topK: 20
         repeatPenalty: 1.05
-        maxTokens: 4096
     thinking:
       mechanism: on-off
       guidance: |
@@ -471,7 +453,6 @@
         minP: 0.0
         presencePenalty: 0.0
         repetitionPenalty: 1.0
-        maxTokens: 32768
       instruct:
         temperature: 0.7
         topP: 0.80
@@ -479,7 +460,6 @@
         minP: 0.0
         presencePenalty: 1.5
         repetitionPenalty: 1.0
-        maxTokens: 32768
     gpuTiers:
       "32gb": "Fits at f16 KV with parallel=1 and ctx=262144 (Q4_K_XL weights ~19.5 GB plus ~32 GB KV)."
     runtimePreference:
@@ -539,9 +519,6 @@
         control were established earlier, on 2026-08-18, from a llama.cpp host
         and an LM Studio host whose build strings were not recorded; treat those
         two findings as unknown-build.
-    kvCache:
-      kQuant: q8_0
-      vQuant: q8_0
     sampling:
       thinking:
         temperature: 1.0
@@ -550,7 +527,6 @@
         minP: 0.0
         presencePenalty: 0.0
         repetitionPenalty: 1.0
-        maxTokens: 32768
       instruct:
         temperature: 0.7
         topP: 0.80
@@ -558,7 +534,6 @@
         minP: 0.0
         presencePenalty: 1.5
         repetitionPenalty: 1.0
-        maxTokens: 32768
     gpuTiers:
       "24gb-rocm": "24 GB ROCm class: IQ4_NL uses about 17.3 GB and UD-Q4_K_XL uses about 19.5 GB. Serve ctx=131072 with q8_0/q8_0 KV, parallel=2, and draft-mtp speculative decoding."
       "32gb-cuda": "32 GB CUDA class: Q6_K uses about 23.8 GB. Serve ctx=131072 with parallel=4 because the full 262144-token context is VRAM-bound."
@@ -661,9 +636,6 @@
         exact NVFP4 build it was seen on. The KV-budget arithmetic in the
         gpuTiers and the serving note is derived from the official Google
         Gemma 4 31B card.
-    kvCache:
-      kQuant: q8_0
-      vQuant: q8_0
     sampling:
       thinking:
         temperature: 1.0
@@ -672,13 +644,11 @@
         minP: 0.0
         presencePenalty: 0.0
         repetitionPenalty: 1.0
-        maxTokens: 32768
       instruct:
         temperature: 0.7  # 0.7 keeps tool-call JSON parseable; gemma card's 1.0 is for chat
         topP: 0.95
         topK: 64
         minP: 0.0
-        maxTokens: 32768
     chatTemplate: "gemma-channel"
     leakageNote: |
       LM Studio's gemma4 chat template emits chain-of-thought as plain text
@@ -729,9 +699,6 @@
     contextWindow: 262144
     maxTokens: 32768
   quirks:
-    kvCache:
-      kQuant: q8_0
-      vQuant: q8_0
     sampling:
       thinking:
         temperature: 1.0
@@ -740,14 +707,12 @@
         minP: 0.0
         presencePenalty: 0.0
         repetitionPenalty: 1.0
-        maxTokens: 32768
       instruct:
         temperature: 0.7  # 0.7 keeps tool-call JSON parseable; router profiles may serve this qat build at 0.8
         topP: 0.95
         topK: 64
         minP: 0.0
         repeatPenalty: 1.05
-        maxTokens: 32768
     chatTemplate: "gemma-channel"
     gpuTiers:
       "32gb": "32 GB Vulkan llama.cpp profile with UD-Q4_K_XL weights, ctx=262144, q8 KV, flash attention, parallel=1, F16 gemma4v mmproj (vision), and MTP draft (spec-type draft-mtp, n_max 4) both active."
@@ -797,9 +762,6 @@
     contextWindow: 122880
     maxTokens: 32768
   quirks:
-    kvCache:
-      kQuant: q8_0
-      vQuant: q8_0
     sampling:
       thinking:
         temperature: 1.0
@@ -808,13 +770,11 @@
         minP: 0.0
         presencePenalty: 0.0
         repetitionPenalty: 1.0
-        maxTokens: 32768
       instruct:
         temperature: 0.7  # 0.7 keeps tool-call JSON parseable; gemma card's 1.0 is for chat
         topP: 0.95
         topK: 64
         minP: 0.0
-        maxTokens: 32768
     chatTemplate: "gemma-channel"
     measuredUnder:
       hardware: unknown
@@ -889,7 +849,6 @@
         minP: 0.0
         presencePenalty: 0.0
         repetitionPenalty: 1.0
-        maxTokens: 32768
       instruct:
         temperature: 0.7
         topP: 0.80
@@ -897,7 +856,6 @@
         minP: 0.0
         presencePenalty: 1.5
         repetitionPenalty: 1.0
-        maxTokens: 32768
     gpuTiers:
       "32gb": "Fits at f16 KV with parallel=1 and ctx=262144 thanks to the Q4_K_M weights (~16.5 GB)."
     runtimePreference:
@@ -984,7 +942,6 @@
         # code_nav call into the loop-guard abort on 3 of 3 runs; with it the
         # same task passed 3 of 3 with clean edit-then-validate trajectories.
         presencePenalty: 1.5
-        maxTokens: 32768
     gpuTiers:
       "32gb": "Default 32 GB local profile: Q4_K_M, ctx=262144, q8 KV, flash attention, parallel=1, with F32 mmproj (vision) and draft-mtp speculative decoding both active. Leaves several GiB free at 262k on a 32 GiB class card."
     runtimePreference:
@@ -1065,7 +1022,6 @@
         # Same Coder-MTP non-thinking design as the 35B; see the measured
         # presence-penalty note there.
         presencePenalty: 1.5
-        maxTokens: 32768
     runtimePreference:
       llamaCpp: "A local llama.cpp router serves it with --jinja and enable_thinking false; coder sampler temperature 0.2, top_p 0.9, top_k 20."
       lmstudio: "Dense 27B Coder-MTP; configure MTP in LM Studio's per-model load settings."
@@ -1115,7 +1071,6 @@
         topP: 0.9
         topK: 20
         repeatPenalty: 1.05
-        maxTokens: 32768
     runtimePreference:
       llamaCpp: "A local llama.cpp router serves it with --jinja and enable_thinking false; coder sampler temperature 0.2, top_p 0.9, top_k 20."
     thinking:
@@ -1153,7 +1108,6 @@
         temperature: 0.3
         topP: 0.9
         topK: 20
-        maxTokens: 8192
         reasoningBudget: 4096
       instruct:
         temperature: 0.7  # 0.7 keeps tool-call JSON parseable; gemma card's 1.0 is for chat
@@ -1224,7 +1178,6 @@
         temperature: 0.3
         topP: 0.9
         topK: 20
-        maxTokens: 8192
     gpuTiers:
       "32gb": "Preferred local worker model when a text-only worker is enough."
     runtimePreference:
@@ -1292,13 +1245,11 @@
         temperature: 0.6
         topP: 0.95
         topK: 20
-        maxTokens: 16384
         reasoningBudget: 4096
       instruct:
         temperature: 0.2
         topP: 0.9
         topK: 20
-        maxTokens: 4096
     gpuTiers:
       "32gb": "Distilled Opus-style reasoning at Qwen3.5 35B A3B scale. Use as a strong local main agent when GPU room is available."
     runtimePreference:
@@ -1359,12 +1310,10 @@
         temperature: 0.2
         topP: 0.9
         topK: 20
-        maxTokens: 4096
       thinking:
         temperature: 0.6
         topP: 0.95
         topK: 20
-        maxTokens: 8192
         reasoningBudget: 2048
     gpuTiers:
       "16gb": "Use this as the local 16GB emulation target. It keeps the output cap below the 32GB-class MoE defaults."
