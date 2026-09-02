@@ -289,24 +289,48 @@ export function resolveDispatchPathScope(req: DispatchRequest): DispatchPathScop
 	};
 }
 
+/**
+ * The prose token grammar also matches version numbers, ratios, and Latin
+ * abbreviations ("0.5", "v24.9", "e.g", "dead/raw"). Those never select a rule
+ * or a boundary, so the replacement notice names only tokens that read as
+ * repository paths: a segment with a file extension of two or more letters,
+ * or a trailing directory separator. A live three-task dispatch printed 27
+ * "omitted paths" per task, most of them numbers, three times over.
+ */
+const REPORTABLE_OMITTED_PATH_RE = /\.[a-z][a-z0-9]+(?:\/|$)|\/$/iu;
+const OMITTED_PATH_REPORT_CAP = 12;
+
+/** Omitted prose paths worth telling the operator about, capped for the transcript. */
+export function reportableOmittedPaths(scope: DispatchPathScope): string[] {
+	return scope.inferredOnlyPaths.filter((path) => REPORTABLE_OMITTED_PATH_RE.test(path));
+}
+
+function renderOmittedPaths(paths: ReadonlyArray<string>): string {
+	if (paths.length <= OMITTED_PATH_REPORT_CAP) return paths.join(", ");
+	return `${paths.slice(0, OMITTED_PATH_REPORT_CAP).join(", ")} and ${paths.length - OMITTED_PATH_REPORT_CAP} more`;
+}
+
 /** Render the named diagnostic for the declared-scope replacement tradeoff. */
 export function declaredScopeReplacementDiagnostic(scope: DispatchPathScope): string | null {
-	if (scope.source !== "declared" || scope.inferredOnlyPaths.length === 0) return null;
-	return `typed_scope_replaced_inferred_paths: typed intent omitted prose-inferred paths ${scope.inferredOnlyPaths.join(
-		", ",
+	if (scope.source !== "declared") return null;
+	const omitted = reportableOmittedPaths(scope);
+	if (omitted.length === 0) return null;
+	return `typed_scope_replaced_inferred_paths: typed intent omitted prose-inferred paths ${renderOmittedPaths(
+		omitted,
 	)}; those paths did not select project rules or expand worker authority`;
 }
 
 /** Render the interactive warning for the declared-scope replacement tradeoff. */
 export function declaredScopeReplacementNotice(scope: DispatchPathScope): DeclaredScopeReplacementNotice | null {
-	if (scope.source !== "declared" || scope.inferredOnlyPaths.length === 0) return null;
-	const omittedPaths = [...scope.inferredOnlyPaths];
+	if (scope.source !== "declared") return null;
+	const omittedPaths = reportableOmittedPaths(scope);
+	if (omittedPaths.length === 0) return null;
 	return {
 		code: "typed_scope_replaced_inferred_paths",
 		level: "warning",
 		omittedPaths,
-		message: `[dispatch scope] typed intent replaced prose path inference; omitted paths: ${omittedPaths.join(
-			", ",
+		message: `[dispatch scope] typed intent replaced prose path inference; omitted paths: ${renderOmittedPaths(
+			omittedPaths,
 		)}. Those paths did not select project rules or expand worker authority.`,
 	};
 }

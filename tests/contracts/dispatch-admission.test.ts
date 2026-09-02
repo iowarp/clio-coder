@@ -12,7 +12,7 @@ import { assessCapabilityMismatch } from "../../src/domains/dispatch/capability-
 import { isBoundedGateRolePrompt, REVIEWER_GATE_PROMPT } from "../../src/domains/dispatch/gate-role-prompts.js";
 import { normalizeDispatchIntent } from "../../src/domains/dispatch/intent.js";
 import { classifyDispatchIntentCompatibility } from "../../src/domains/dispatch/intent-compatibility.js";
-import { resolveDispatchPathScope } from "../../src/domains/dispatch/path-scope.js";
+import { declaredScopeReplacementNotice, resolveDispatchPathScope } from "../../src/domains/dispatch/path-scope.js";
 import { endpointCapacityFor } from "../../src/domains/providers/endpoint-capacity.js";
 import {
 	EMPTY_CAPABILITIES,
@@ -74,6 +74,46 @@ describe("dispatch admission boundary", () => {
 		);
 	});
 
+	it("lets a typed intent that declares no writes outrank the prose classifier for a read-only recipe", () => {
+		const specs = [agent("scout", "read-only"), agent("coder", "workspace-edit")];
+		const task = "Reconnaissance question: find every caller of shouldCompact; the fix will write the failing test first.";
+		strictEqual(
+			assessCapabilityMismatch({
+				agentId: "scout",
+				capabilityClass: "read-only",
+				task,
+				autoSelected: false,
+				resultContractKind: "scout-report",
+				specs,
+			})?.verdict,
+			"refuse",
+		);
+		strictEqual(
+			assessCapabilityMismatch({
+				agentId: "scout",
+				capabilityClass: "read-only",
+				task,
+				autoSelected: false,
+				resultContractKind: "scout-report",
+				specs,
+				intent: { writeRoots: [], expectedOutputs: [] },
+			}),
+			null,
+		);
+		strictEqual(
+			assessCapabilityMismatch({
+				agentId: "scout",
+				capabilityClass: "read-only",
+				task,
+				autoSelected: false,
+				resultContractKind: "scout-report",
+				specs,
+				intent: { writeRoots: ["src/"], expectedOutputs: [] },
+			})?.verdict,
+			"refuse",
+		);
+	});
+
 	it("orders capacity requests deterministically and fails closed at the queue bound", async () => {
 		deepStrictEqual(
 			orderAdmissionRequests([queued("b"), queued("a"), queued("urgent", 1)]).map((entry) => entry.requestId),
@@ -121,6 +161,28 @@ describe("dispatch admission boundary", () => {
 		} as Parameters<typeof resolveDispatchPathScope>[0]);
 		strictEqual(scope.source, "inferred");
 		ok(scope.workingContextPaths.includes("parser.js"));
+	});
+
+	it("reports only path-looking tokens when a typed intent replaces prose inference", () => {
+		const scope = resolveDispatchPathScope({
+			task: "Fix #15 in src/compaction.ts: dead/raw > 0.5 at ratio 0.5, e.g. 4/10 lines on node v24.9 with tsc 6.0; pin it in tests/compaction.test.ts",
+			intent: {
+				version: 2,
+				readRoots: [],
+				writeRoots: ["src/compaction.ts"],
+				relevantPaths: [],
+				pathProvenance: [],
+				expectedOutputs: ["src/compaction.ts"],
+				verification: [],
+			},
+		} as unknown as Parameters<typeof resolveDispatchPathScope>[0]);
+		strictEqual(scope.source, "declared");
+		const notice = declaredScopeReplacementNotice(scope);
+		ok(notice, "the omitted test file is worth a notice");
+		ok(notice.omittedPaths.includes("tests/compaction.test.ts"), notice.omittedPaths.join(","));
+		for (const token of ["0.5", "4/10", "v24.9", "6.0", "e.g", "dead/raw"]) {
+			ok(!notice.omittedPaths.includes(token), `${token} is not a path`);
+		}
 	});
 
 	it("reads a verification check of none as the empty declaration unless a project declared that id", () => {

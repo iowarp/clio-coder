@@ -3422,6 +3422,7 @@ export function createDispatchBundle(
 						autoSelected: req.agentSelection?.mode === "auto",
 						resultContractKind: spec.resultContract.kind,
 						specs: agents.listSpecs(),
+						intent: req.intent ?? null,
 					});
 		if (capabilityMismatch?.verdict === "refuse") throw new Error(capabilityMismatch.detail);
 		const pathScope = resolveDispatchPathScope(req);
