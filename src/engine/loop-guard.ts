@@ -580,6 +580,12 @@ export function createLoopGuardRegistration(options: CreateLoopGuardRegistration
 	const blocksByTurn = new Map<string, number>();
 	const callsByTurn = new Map<string, number>();
 	/**
+	 * Per-turn count of successful write or edit calls. The identical-call key
+	 * carries it, so a check rerun after a change (fix-verify) is a fresh call
+	 * while a verbatim repeat with nothing changed in between still counts.
+	 */
+	const mutationEpochByTurn = new Map<string, number>();
+	/**
 	 * Turns whose tool use is locked to synthesis after reaching the block
 	 * budget. Key present means locked; the value carries the block that tripped
 	 * the lockout (so the backstop's stop message names the looping tool) plus a
@@ -657,6 +663,9 @@ export function createLoopGuardRegistration(options: CreateLoopGuardRegistration
 	// (admission returns before execution), so only real results anchor.
 	const recordSuccessfulResult = (input: MiddlewareHookInput): void => {
 		if (input.metadata?.resultKind !== "ok") return;
+		if (input.toolName === ToolNames.Write || input.toolName === ToolNames.Edit) {
+			bumpBoundedCounter(mutationEpochByTurn, input.turnId ?? NO_TURN_BUCKET);
+		}
 		if (!resultCarriesEvidence(input.toolResultDetails)) return;
 		const tool = input.toolName;
 		if (typeof tool !== "string" || tool.length === 0) return;
@@ -1149,7 +1158,13 @@ export function createLoopGuardRegistration(options: CreateLoopGuardRegistration
 				// regardless of age, so an unscoped key would let one identical call
 				// per user turn (rerunning a build across turns) accumulate into a
 				// false loop.
-				const verdict = options.safety.observeLoop(`${turnKey}|${fingerprint}`, now);
+				// The epoch scopes repeats to "since the last successful write or
+				// edit": a live session repeated a batch of eleven read-only bash
+				// calls five times, every one admitted, because the detector kept
+				// only a 30 s window or the last four attempts and no batch ever
+				// showed a third repeat inside either.
+				const epoch = mutationEpochByTurn.get(turnKey) ?? 0;
+				const verdict = options.safety.observeLoop(`${turnKey}|${epoch}|${fingerprint}`, now);
 				if (verdict.looping) {
 					const tool = input.toolName ?? "unknown";
 					const priorSuccesses = succeededFingerprints.get(fingerprint) ?? 0;

@@ -33,10 +33,12 @@ const DEFAULT_WINDOW_MS = 30_000;
 // stops them before they burn a turn. Callers that need a different cadence
 // pass `maxRepeats` explicitly.
 const DEFAULT_MAX_REPEATS = 3;
-// Sized so a consecutive or single-interleaved verbatim spiral still counts
-// its third repeat at any call latency, while an identical check separated by
-// two or more other calls (a fix-verify loop) stays below the threshold.
-const DEFAULT_KEEP_LAST_ATTEMPTS = 4;
+// Sized so a batch-shaped spiral still counts its third repeat at any call
+// latency: a model that re-emits the same parallel batch of up to sixteen
+// calls three times has every key inside the retained tail. Fix-verify loops
+// are not this detector's concern any more; the loop guard keys attempts by
+// the turn's write/edit epoch, so a check rerun after a change is a new key.
+const DEFAULT_KEEP_LAST_ATTEMPTS = 48;
 
 export function createLoopState(opts?: {
 	windowMs?: number;
@@ -138,6 +140,7 @@ export function observe(state: LoopDetectorState, key: string, now: number): [Lo
 		recent: next,
 		windowMs: state.windowMs,
 		maxRepeats: state.maxRepeats,
+		keepLastAttempts: keepLast,
 	};
 	return [newState, { looping, key, count }];
 }
