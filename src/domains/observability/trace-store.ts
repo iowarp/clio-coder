@@ -341,6 +341,8 @@ export interface TraceRunRow {
 	ended_at: string | null;
 	total_tokens: number | null;
 	total_cost_usd: number | null;
+	/** 'dispatch' for a worker run, 'session' for an interactive chat-loop turn. */
+	source: "dispatch" | "session";
 }
 
 export interface TracePhaseRow {
@@ -423,7 +425,8 @@ CREATE TABLE runs (
   started_at TEXT NOT NULL,
   ended_at TEXT,
   total_tokens INTEGER,
-  total_cost_usd REAL
+  total_cost_usd REAL,
+  source TEXT NOT NULL DEFAULT 'dispatch' CHECK(source IN ('dispatch','session'))
 );
 
 CREATE TABLE phases (
@@ -525,6 +528,23 @@ function ensureProcessOwnerColumns(db: DatabaseSync): void {
 }
 
 /**
+ * Additive discriminator between a dispatched run and an interactive session
+ * turn; older version-1 databases gain it in place. `runs`/`phases` held both
+ * kinds under one undocumented schema before this column existed, distinguishable
+ * only by the sentinel `assignment_id = SESSION_TRACE_ASSIGNMENT_ID` a session
+ * turn's row carries (recordSessionTurn's startSessionTurn) versus a real
+ * dispatch assignment id (upsertRun). The backfill reads that existing
+ * sentinel once; every row written after this migration sets `source`
+ * directly instead of relying on it.
+ */
+function ensureRunSourceColumn(db: DatabaseSync): void {
+	const columns = db.prepare("PRAGMA table_info(runs)").all() as { name: string }[];
+	if (columns.some((column) => column.name === "source")) return;
+	db.exec("ALTER TABLE runs ADD COLUMN source TEXT NOT NULL DEFAULT 'dispatch';");
+	db.prepare("UPDATE runs SET source = 'session' WHERE assignment_id = ?").run(SESSION_TRACE_ASSIGNMENT_ID);
+}
+
+/**
  * Finalize `running` rows whose recorded owner is on this host and provably
  * dead (pid gone, or alive under a different birth token, i.e. reused). Rows
  * with no owner identity, or an owner recorded by another host, are left for
@@ -570,6 +590,7 @@ export class TraceStore {
 		else if (version !== TRACE_SCHEMA_VERSION) throw new TraceSchemaVersionError(version);
 		this.transaction(() => {
 			ensureProcessOwnerColumns(this.db);
+			ensureRunSourceColumn(this.db);
 			reconcileAbandonedRuns(this.db);
 		});
 	}
@@ -673,8 +694,8 @@ export class TraceStore {
 		this.transaction(() => {
 			this.db
 				.prepare(`INSERT INTO runs
-          (run_id, assignment_id, request, status, agent, target, model, runtime, node, started_at)
-          VALUES (?, ?, ?, 'queued', ?, ?, ?, ?, ?, ?)
+          (run_id, assignment_id, request, status, agent, target, model, runtime, node, started_at, source)
+          VALUES (?, ?, ?, 'queued', ?, ?, ?, ?, ?, ?, 'dispatch')
           ON CONFLICT(run_id) DO UPDATE SET request=excluded.request, agent=excluded.agent,
             target=excluded.target, model=excluded.model, runtime=excluded.runtime, node=excluded.node`)
 				.run(
@@ -1046,8 +1067,8 @@ export class TraceStore {
 		this.transaction(() => {
 			this.db
 				.prepare(`INSERT INTO runs
-          (run_id, assignment_id, request, status, agent, target, model, runtime, node, started_at)
-          VALUES (?, ?, ?, 'running', ?, ?, ?, ?, NULL, ?)
+          (run_id, assignment_id, request, status, agent, target, model, runtime, node, started_at, source)
+          VALUES (?, ?, ?, 'running', ?, ?, ?, ?, NULL, ?, 'session')
           ON CONFLICT(run_id) DO NOTHING`)
 				.run(
 					input.runId,
@@ -1167,6 +1188,15 @@ function traceDatabaseFootprintBytes(path: string): number {
 
 export class TraceReader {
 	readonly db: DatabaseSync;
+	/**
+	 * `runs.source` is an additive column (see ensureRunSourceColumn) a
+	 * TraceStore writer backfills in place. A read-only reader can open a
+	 * database no writer has touched since before the column existed — the
+	 * trace viewer opening a dormant install's trace.sqlite fresh is the
+	 * realistic case — and cannot ALTER TABLE to fix that itself, so it
+	 * derives the same value the migration would have written instead.
+	 */
+	private readonly runsSourceExpr: string;
 
 	constructor(readonly path: string) {
 		this.db = new (databaseSyncConstructor())(path, { readOnly: true });
@@ -1177,6 +1207,10 @@ export class TraceReader {
 		const mode = this.db.prepare("PRAGMA journal_mode").get() as { journal_mode: string };
 		if (mode.journal_mode.toLowerCase() !== "wal")
 			throw new Error(`trace database journal mode is ${mode.journal_mode}, expected WAL`);
+		const runColumns = this.db.prepare("PRAGMA table_info(runs)").all() as { name: string }[];
+		this.runsSourceExpr = runColumns.some((column) => column.name === "source")
+			? "*"
+			: `*, CASE WHEN assignment_id = '${SESSION_TRACE_ASSIGNMENT_ID}' THEN 'session' ELSE 'dispatch' END AS source`;
 	}
 
 	close(): void {
@@ -1185,13 +1219,15 @@ export class TraceReader {
 
 	runs(limit = 50): TraceRunRow[] {
 		return this.db
-			.prepare("SELECT * FROM runs ORDER BY started_at DESC LIMIT ?")
+			.prepare(`SELECT ${this.runsSourceExpr} FROM runs ORDER BY started_at DESC LIMIT ?`)
 			.all(clampInt(limit, 1, 500)) as unknown as TraceRunRow[];
 	}
 
 	run(runId: string): TraceRunRow | null {
 		return (
-			(this.db.prepare("SELECT * FROM runs WHERE run_id=?").get(runId) as unknown as TraceRunRow | undefined) ?? null
+			(this.db.prepare(`SELECT ${this.runsSourceExpr} FROM runs WHERE run_id=?`).get(runId) as unknown as
+				| TraceRunRow
+				| undefined) ?? null
 		);
 	}
 

@@ -15,6 +15,8 @@ export const EVIDENCE_INDEX_FILE = "evidence-index.json";
  * response bounded without hiding anything the page would have displayed.
  */
 export const RECEIPT_OMITTED_FIELDS = ["output", "upstreamResponses", "routeDecision", "briefing", "steering"];
+/** Mirrors SESSION_TRACE_ASSIGNMENT_ID in src/domains/observability/trace-store.ts; this app cannot import that module. */
+const SESSION_TRACE_ASSIGNMENT_ID = "session";
 const root = dirname(fileURLToPath(import.meta.url));
 const publicRoot = join(root, "public");
 const assetRoot = resolve(root, "..", "..", "assets");
@@ -34,6 +36,14 @@ export class ViewerDatabase {
 			this.db.close();
 			throw new Error(`trace database journal mode is ${mode?.journal_mode ?? "unknown"}; expected WAL`);
 		}
+		// runs.source is an additive column a writer backfills in place; this
+		// viewer is read-only and may open a database no writer has touched
+		// since before the column existed, so it derives the same value from
+		// the column's own historical replacement, assignment_id, instead.
+		const runColumns = this.db.prepare("PRAGMA table_info(runs)").all();
+		this.runsSourceExpr = runColumns.some((column) => column.name === "source")
+			? "*"
+			: `*, CASE WHEN assignment_id = '${SESSION_TRACE_ASSIGNMENT_ID}' THEN 'session' ELSE 'dispatch' END AS source`;
 	}
 
 	close() {
@@ -41,11 +51,11 @@ export class ViewerDatabase {
 	}
 
 	runs(limit = 50) {
-		return this.db.prepare("SELECT * FROM runs ORDER BY started_at DESC LIMIT ?").all(clamp(limit, 1, 500));
+		return this.db.prepare(`SELECT ${this.runsSourceExpr} FROM runs ORDER BY started_at DESC LIMIT ?`).all(clamp(limit, 1, 500));
 	}
 
 	run(runId) {
-		return this.db.prepare("SELECT * FROM runs WHERE run_id=?").get(runId) ?? null;
+		return this.db.prepare(`SELECT ${this.runsSourceExpr} FROM runs WHERE run_id=?`).get(runId) ?? null;
 	}
 
 	phases(runId) {
