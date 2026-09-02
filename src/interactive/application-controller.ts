@@ -18,11 +18,12 @@ const CLOSED_ACTION_ORDER = [
 	"clio-coder.thinking.expandAll",
 ] as const satisfies ReadonlyArray<ClioKeybinding>;
 
-const GLOBAL_ACTION_ORDER = [
+export const GLOBAL_ACTION_ORDER = [
 	"clio-coder.status.toggle",
 	"clio-coder.thinking.cycle",
 	"clio-coder.session.tree",
 	"clio-coder.dispatchBoard.toggle",
+	"clio-coder.files.toggle",
 	"clio-coder.tasks.open",
 	"clio-coder.decisions.open",
 	"clio-coder.dispatch.background",

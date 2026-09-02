@@ -14,13 +14,19 @@
  * shell-escape territory (spec 4.8, and the risk register's "tool misuse" row).
  */
 
-/** Utility pane presets, in the order `/panes open` lists them. */
+/**
+ * Utility pane presets, in the order `/panes open` lists them.
+ *
+ * The files preset is a Clio Coder surface named for what it does; yazi is
+ * the engine behind it and shows up only in the install command, because
+ * that is the registry id an operator types.
+ */
 export const PANES_PRESETS = [
 	{
-		id: "yazi",
+		id: "files",
 		/** Probed through the toolchain resolution ladder before the pane is split. */
 		binary: "yazi",
-		summary: "file manager rooted at the workspace",
+		summary: "file view rooted at the workspace; picks land in the composer",
 		/** Printed verbatim when the probe finds nothing. */
 		installHint: "clio-coder tools install yazi",
 	},
@@ -42,8 +48,21 @@ export type PanesPresetId = (typeof PANES_PRESETS)[number]["id"];
 
 export const PANES_PRESET_IDS: ReadonlyArray<PanesPresetId> = PANES_PRESETS.map((preset) => preset.id);
 
-export function isPanesPresetId(value: string): value is PanesPresetId {
+function isPanesPresetId(value: string): value is PanesPresetId {
 	return PANES_PRESETS.some((preset) => preset.id === value);
+}
+
+/**
+ * Retired preset spellings that still parse. The files preset shipped as
+ * `yazi` in 0.4.0 and 0.4.1, so an operator's muscle memory and any script
+ * that says `/panes open yazi` keeps working and lands on the same pane.
+ */
+export const PANES_PRESET_ALIASES: Readonly<Record<string, PanesPresetId>> = { yazi: "files" };
+
+/** The canonical preset id for an operator-typed name, or null when it is not a preset. */
+export function resolvePanesPresetId(value: string): PanesPresetId | null {
+	if (isPanesPresetId(value)) return value;
+	return PANES_PRESET_ALIASES[value] ?? null;
 }
 
 /** One pane Clio owns, flattened for display. */
@@ -135,7 +154,8 @@ export interface PanesWatchController {
 }
 
 export type PanesOpenResult =
-	| { status: "opened"; label: string; paneId: string | null }
+	/** `existing` is true when the preset already had a live pane and it was focused instead of split again. */
+	| { status: "opened"; label: string; paneId: string | null; existing?: boolean }
 	| { status: "missing-binary"; preset: string; binary: string; installHint: string; detail: string }
 	| { status: "refused"; reason: string }
 	| { status: "unavailable"; reason: string };
@@ -166,8 +186,20 @@ export interface PanesYaziController {
 		| { status: "profile-error"; reason: string }
 		| { status: "unavailable"; reason: string }
 	>;
+	/** Close the files pane if it is open; false when nothing was open. */
+	close(): Promise<boolean>;
+	/** True while a files pane the host still reports is open. */
+	isOpen(): boolean;
 	status(): Readonly<PanesYaziStatus>;
 }
+
+/** What `/files` and the files keybinding settle to. */
+export type PanesFilesResult =
+	| { status: "opened"; paneId: string | null; existing: boolean }
+	| { status: "closed" }
+	| { status: "missing-binary"; binary: string; installHint: string; detail: string }
+	| { status: "refused"; reason: string }
+	| { status: "unavailable"; reason: string };
 
 /**
  * The operations both callers drive. The tool sees a narrower door: its schema
@@ -185,6 +217,13 @@ export interface PanesOperations {
 	 */
 	zoom(target: string): Promise<PanesZoomResult>;
 	close(target: string): Promise<PanesCloseResult>;
+	/**
+	 * The files pane as one operator verb. `toggle` opens it when closed and
+	 * closes it when open, which is what a keybinding needs; `open` and
+	 * `close` are the explicit halves; `pick` borrows the pane for one
+	 * selection and closes it afterwards.
+	 */
+	files(action: "toggle" | "open" | "close" | "pick"): Promise<PanesFilesResult>;
 	/** Bind the composer-facing Yazi bridge without rebuilding this shared object. */
 	attachYazi(controller: PanesYaziController): () => void;
 	/** Bind the workers-view watch controller; `show` routes runs through it. */

@@ -145,7 +145,7 @@ function yaziNamingFinding(fix: boolean, enabled: boolean): DoctorFinding {
 	if (!enabled) {
 		return {
 			ok: true,
-			name: "naming yazi profile",
+			name: "naming files profile",
 			detail: "disabled by settings",
 		};
 	}
@@ -154,7 +154,7 @@ function yaziNamingFinding(fix: boolean, enabled: boolean): DoctorFinding {
 	if (legacy === 0) {
 		return {
 			ok: true,
-			name: "naming yazi profile",
+			name: "naming files profile",
 			detail: inspection.present
 				? `${inspection.profileDir} uses canonical event and environment identifiers`
 				: `${inspection.profileDir} is absent; the next managed open will generate canonical identifiers`,
@@ -164,7 +164,7 @@ function yaziNamingFinding(fix: boolean, enabled: boolean): DoctorFinding {
 		return {
 			ok: true,
 			level: "warn",
-			name: "naming yazi profile",
+			name: "naming files profile",
 			detail: `${inspection.profileDir}: ${inspection.legacyEvents} legacy events and ${inspection.legacyEnvironmentNames} legacy environment names (run \`clio-coder doctor --fix\`)`,
 		};
 	}
@@ -172,7 +172,7 @@ function yaziNamingFinding(fix: boolean, enabled: boolean): DoctorFinding {
 	return {
 		ok: report.status !== "regeneration-failed",
 		...(report.status === "regeneration-failed" ? {} : { level: "ok" as const }),
-		name: "naming yazi profile",
+		name: "naming files profile",
 		detail: report.detail,
 	};
 }

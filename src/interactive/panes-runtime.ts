@@ -27,6 +27,7 @@ import type { MuxContract, MuxPaneRecord } from "../domains/mux/index.js";
 import {
 	PANES_PRESETS,
 	type PanesCloseResult,
+	type PanesFilesResult,
 	type PanesInventoryEntry,
 	type PanesOpenResult,
 	type PanesOperations,
@@ -36,6 +37,7 @@ import {
 	type PanesYaziController,
 	type PanesYaziStatus,
 	type PanesZoomResult,
+	resolvePanesPresetId,
 } from "../domains/mux/operations.js";
 import { resolveBinary } from "../tools/executables.js";
 import { type PaneWatchSource, paneWatchDecision } from "./pane-policy.js";
@@ -54,7 +56,16 @@ export interface PanesRuntimeDeps {
 	newestJournalRunId?: () => string | null;
 }
 
-const UNAVAILABLE = "the pane layer is not available in this session";
+/**
+ * Why there is no pane layer, in the operator's terms. Detection already
+ * knows (no `HERDR_ENV`, no socket, a refused rung); repeating that reason
+ * beside the refusal is what turns "unavailable" into a next step, and the
+ * `--with-panes` hint covers the session that never asked for panes.
+ */
+function unavailableReason(mux: MuxContract): string {
+	const reason = mux.detection().reason;
+	return `the pane layer is not available in this session: ${reason}. Start Clio inside a herdr session with \`clio-coder --with-panes\` to get panes`;
+}
 
 /** Fuzzy operator addressing shared by `close` and `zoom`: id, label, purpose; newest first. */
 function matchOwnedPane(owned: ReadonlyArray<MuxPaneRecord>, target: string): MuxPaneRecord | null {
@@ -143,7 +154,7 @@ export function createPanesRuntime(deps: PanesRuntimeDeps): PanesOperations {
 	};
 
 	const show = async (target: string, source: PaneWatchSource): Promise<PanesShowResult> => {
-		if (!deps.mux.available()) return { status: "unavailable", reason: UNAVAILABLE };
+		if (!deps.mux.available()) return { status: "unavailable", reason: unavailableReason(deps.mux) };
 		const match = matchRun(target);
 		if (match === null) {
 			// The candidate list is what turns a miss into a next step: it names
@@ -164,7 +175,58 @@ export function createPanesRuntime(deps: PanesRuntimeDeps): PanesOperations {
 		return { status: "watching", runId: match.runId, agentId: match.agentId, opened: watched.opened };
 	};
 
+	/**
+	 * The files pane's open half, shared by `/files`, `/panes open files`, the
+	 * keybinding, and the model tool. The settings gate and the missing-engine
+	 * message live here so every door says the same thing.
+	 */
+	const openFiles = async (once: boolean): Promise<Exclude<PanesFilesResult, { status: "closed" }>> => {
+		const preset = PANES_PRESETS[0];
+		if (!deps.getSettings().interface.panes.files.enabled) {
+			return { status: "refused", reason: "the files pane is disabled by interface.panes.files.enabled" };
+		}
+		if (!yaziController) {
+			return { status: "unavailable", reason: "the files pane return path is not ready" };
+		}
+		const pendingId = beginPendingOpen(preset.id);
+		try {
+			const result = await yaziController.open(once ? { once: true } : undefined);
+			if (result.status === "opened") {
+				return { status: "opened", paneId: result.paneId, existing: result.existing };
+			}
+			if (result.status === "missing-binary") {
+				return {
+					status: "missing-binary",
+					binary: result.binary,
+					installHint: preset.installHint,
+					// The engine's own resolution sentence, prefixed with the surface it
+					// serves: an operator who typed `/files` should not have to know the
+					// name of the program to read the answer.
+					detail: `the files pane engine is not available: ${result.detail}`,
+				};
+			}
+			return {
+				status: result.status === "profile-error" ? "refused" : "unavailable",
+				reason: result.reason,
+			};
+		} finally {
+			pendingOpens.delete(pendingId);
+		}
+	};
+
 	return {
+		async files(action): Promise<PanesFilesResult> {
+			if (action === "close") {
+				await yaziController?.close();
+				return { status: "closed" };
+			}
+			if (action === "toggle" && yaziController?.isOpen()) {
+				await yaziController.close();
+				return { status: "closed" };
+			}
+			return openFiles(action === "pick");
+		},
+
 		status(): PanesStatus {
 			const detection = deps.mux.detection();
 			const settings = deps.getSettings();
@@ -201,41 +263,31 @@ export function createPanesRuntime(deps: PanesRuntimeDeps): PanesOperations {
 		async open(request: { preset?: string; argv?: ReadonlyArray<string>; once?: boolean }): Promise<PanesOpenResult> {
 			const cwd = deps.getCwd();
 			if (request.preset !== undefined) {
-				const preset = PANES_PRESETS.find((entry) => entry.id === request.preset);
+				const presetId = resolvePanesPresetId(request.preset);
+				const preset = presetId === null ? undefined : PANES_PRESETS.find((entry) => entry.id === presetId);
 				if (!preset) {
 					return { status: "refused", reason: `unknown preset: ${request.preset}` };
 				}
-				if (preset.id === "yazi") {
-					if (!deps.getSettings().interface.panes.files.enabled) {
-						return { status: "refused", reason: "the files pane is disabled by interface.panes.files.enabled" };
+				if (preset.id === "files") {
+					const result = await openFiles(request.once === true);
+					if (result.status === "opened") {
+						return { status: "opened", label: preset.id, paneId: result.paneId, existing: result.existing };
 					}
-					if (!yaziController) {
-						return { status: "unavailable", reason: "the files-pane return path is not ready" };
+					if (result.status === "missing-binary") {
+						return { ...result, preset: preset.id };
 					}
-					const pendingId = beginPendingOpen(preset.id);
-					try {
-						const result = await yaziController.open(request.once ? { once: true } : undefined);
-						if (result.status === "opened") {
-							return { status: "opened", label: preset.id, paneId: result.paneId };
-						}
-						if (result.status === "missing-binary") {
-							return {
-								status: "missing-binary",
-								preset: preset.id,
-								binary: result.binary,
-								installHint: preset.installHint,
-								detail: result.detail,
-							};
-						}
-						return {
-							status: result.status === "profile-error" ? "refused" : "unavailable",
-							reason: result.reason,
-						};
-					} finally {
-						pendingOpens.delete(pendingId);
-					}
+					return result;
 				}
-				if (!deps.mux.available()) return { status: "unavailable", reason: UNAVAILABLE };
+				if (!deps.mux.available()) return { status: "unavailable", reason: unavailableReason(deps.mux) };
+				// One pane per preset. A second `/panes open shell` is a request to
+				// see the shell that is already there, not to split the screen again;
+				// the pane host is asked for focus so the operator lands in it.
+				const live = deps.mux.list().find((record) => record.purpose === "utility" && record.label === preset.id);
+				if (live) {
+					await deps.mux.unzoomSelf();
+					await deps.mux.focusPane(live.ref.paneId);
+					return { status: "opened", label: preset.id, paneId: live.ref.paneId, existing: true };
+				}
 				const binaryPath = probe(preset.binary);
 				if (binaryPath === null) {
 					return {
@@ -248,7 +300,10 @@ export function createPanesRuntime(deps: PanesRuntimeDeps): PanesOperations {
 				}
 				const argv = presetArgv(preset.id, binaryPath);
 				if (argv === null) {
-					return { status: "refused", reason: `preset ${preset.id} has nothing to show yet` };
+					return {
+						status: "refused",
+						reason: `no dispatched run has written a journal under ${journalRoot()} yet; the logs pane follows the newest run once one starts`,
+					};
 				}
 				const pendingId = beginPendingOpen(preset.id);
 				try {
@@ -259,7 +314,7 @@ export function createPanesRuntime(deps: PanesRuntimeDeps): PanesOperations {
 					pendingOpens.delete(pendingId);
 				}
 			}
-			if (!deps.mux.available()) return { status: "unavailable", reason: UNAVAILABLE };
+			if (!deps.mux.available()) return { status: "unavailable", reason: unavailableReason(deps.mux) };
 			const argv = request.argv ?? [];
 			if (argv.length === 0) return { status: "refused", reason: "nothing to run" };
 			const label = argv[0] ?? "pane";
@@ -274,7 +329,7 @@ export function createPanesRuntime(deps: PanesRuntimeDeps): PanesOperations {
 		},
 
 		async zoom(target: string): Promise<PanesZoomResult> {
-			if (!deps.mux.available()) return { status: "unavailable", reason: UNAVAILABLE };
+			if (!deps.mux.available()) return { status: "unavailable", reason: unavailableReason(deps.mux) };
 			const match = matchOwnedPane(deps.mux.list(), target.trim().length === 0 ? "watch" : target);
 			if (!match) return { status: "not-found", target: target.trim().length === 0 ? "watch" : target };
 			const changed = await deps.mux.zoomPane(match.ref.paneId, "toggle");
@@ -285,7 +340,7 @@ export function createPanesRuntime(deps: PanesRuntimeDeps): PanesOperations {
 		},
 
 		async close(target: string): Promise<PanesCloseResult> {
-			if (!deps.mux.available()) return { status: "unavailable", reason: UNAVAILABLE };
+			if (!deps.mux.available()) return { status: "unavailable", reason: unavailableReason(deps.mux) };
 			const owned = deps.mux.list();
 			if (target === "all") {
 				const labels: string[] = [];

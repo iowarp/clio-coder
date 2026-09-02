@@ -13,12 +13,12 @@ import type { ReceiptIntegrityOutcome } from "../domains/evidence/trust-status.j
 import type { InstalledExtension } from "../domains/extensions/index.js";
 import type { InteropAgentId, InteropProposal, InteropReport } from "../domains/interop/index.js";
 import {
-	isPanesPresetId,
 	PANES_PRESET_IDS,
 	PANES_PRESETS,
 	type PanesOperations,
 	type PanesPresetId,
 	type PanesStatus,
+	resolvePanesPresetId,
 } from "../domains/mux/operations.js";
 import type { ProvidersContract, ResolvedModelRef } from "../domains/providers/index.js";
 import { resolveModelReference } from "../domains/providers/index.js";
@@ -162,6 +162,9 @@ type SlashCommandVariant =
 	| { kind: "panes-zoom"; target: string }
 	| { kind: "panes-close"; target: string }
 	| { kind: "panes-usage"; reason?: string }
+	/** `/files`: toggle the files pane; `pick` borrows it for one selection; `close` closes it. */
+	| { kind: "files"; action: "toggle" | "open" | "close" | "pick" }
+	| { kind: "files-usage"; reason: string }
 	| { kind: "thinking-set"; level: string }
 	| { kind: "thinking-picker" }
 	| { kind: "output-set"; verbosity: string }
@@ -1658,7 +1661,7 @@ export const BUILTIN_SLASH_COMMANDS: ReadonlyArray<BuiltinSlashCommand> = [
 		},
 		subcommandDescriptions: {
 			show: "watch a live run or agent in the watch pane",
-			open: `open a utility pane (${PANES_PRESET_IDS.join(", ")}, or a command)`,
+			open: `open a utility pane (${PANES_PRESET_IDS.join(", ")}, \`files --once\` for one pick, or a command)`,
 			zoom: "toggle zoom on a Clio-owned pane (default: the watch pane)",
 			close: "close a Clio-owned pane, or all of them",
 		},
@@ -1674,9 +1677,10 @@ export const BUILTIN_SLASH_COMMANDS: ReadonlyArray<BuiltinSlashCommand> = [
 				const first = argv[0] ?? "";
 				// A bare preset name is a preset; anything else is operator argv,
 				// which the tool surface deliberately cannot ask for.
-				if (argv.length === 1 && isPanesPresetId(first)) return { kind: "panes-open", preset: first };
-				if (argv.length === 2 && first === "yazi" && argv[1] === "--once") {
-					return { kind: "panes-open", preset: "yazi", once: true };
+				const preset = resolvePanesPresetId(first);
+				if (argv.length === 1 && preset !== null) return { kind: "panes-open", preset };
+				if (argv.length === 2 && preset === "files" && argv[1] === "--once") {
+					return { kind: "panes-open", preset: "files", once: true };
 				}
 				return { kind: "panes-open", argv };
 			}
@@ -1743,7 +1747,14 @@ export const BUILTIN_SLASH_COMMANDS: ReadonlyArray<BuiltinSlashCommand> = [
 						// The in-terminal chooser has already restored the TUI by the
 						// time this resolves. A pick emitted its composer notice; an empty
 						// chooser was cancellation and deliberately stays silent.
-						if (result.paneId !== null) ctx.notice("success", `opened pane ${result.label} (${result.paneId})`);
+						if (result.paneId !== null) {
+							ctx.notice(
+								"success",
+								result.existing
+									? `focused pane ${result.label} (${result.paneId})`
+									: `opened pane ${result.label} (${result.paneId})`,
+							);
+						}
 					} else if (result.status === "missing-binary") {
 						// This is a synchronous slash-surface line, not a transient pane-host
 						// notification. It remains visible when no pane was ever created and
@@ -1777,6 +1788,62 @@ export const BUILTIN_SLASH_COMMANDS: ReadonlyArray<BuiltinSlashCommand> = [
 					ctx.notice(result.closed > 0 ? "success" : "info", `closed ${result.closed} pane(s)${what}`);
 				} else if (result.status === "not-found") {
 					ctx.notice("warn", `no Clio-owned pane matches ${result.target}`);
+				} else {
+					ctx.notice("warn", result.reason);
+				}
+			});
+		},
+	},
+	{
+		name: "files",
+		description: "Toggle the files pane; picks land in the composer as @ mentions",
+		group: "Inspect",
+		kinds: ["files", "files-usage"],
+		args: { positionals: [{ name: "action", required: false }] },
+		subcommandDescriptions: {
+			open: "open the files pane, or focus it when it is already open",
+			close: "close the files pane",
+			pick: "borrow the files pane for one selection, then close it",
+		},
+		fromArgs(parsed) {
+			if (parsed.error) return { kind: "files-usage", reason: parsed.error };
+			const action = parsed.positionals[0];
+			if (action === undefined) return { kind: "files", action: "toggle" };
+			if (action === "open" || action === "close" || action === "pick" || action === "toggle") {
+				return { kind: "files", action };
+			}
+			return { kind: "files-usage", reason: `Unexpected argument: ${action}` };
+		},
+		handle(command, ctx) {
+			if (command.kind === "files-usage") {
+				ctx.notice("info", `${command.reason}\nusage: /files [open|close|pick]`);
+				return;
+			}
+			if (command.kind !== "files") return;
+			const panes = ctx.panes;
+			if (!panes) {
+				ctx.notice(
+					"info",
+					"the files pane is inactive: this session started without panes. Restart with `clio-coder --with-panes`, or set interface.panes.enabled=auto",
+				);
+				return;
+			}
+			const runLocal = ctx.runLocalOperation ?? ((operation: () => Promise<void>) => void operation());
+			runLocal(async () => {
+				const result = await panes.files(command.action);
+				if (result.status === "opened") {
+					// The in-terminal chooser reports through its own composer notice.
+					if (result.paneId !== null) {
+						ctx.notice(
+							"success",
+							result.existing ? `files pane focused (${result.paneId})` : `files pane opened (${result.paneId})`,
+						);
+					}
+				} else if (result.status === "closed") {
+					ctx.notice("info", "files pane closed");
+				} else if (result.status === "missing-binary") {
+					ctx.io.stdout(`${result.detail}\n`);
+					ctx.render();
 				} else {
 					ctx.notice("warn", result.reason);
 				}

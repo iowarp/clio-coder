@@ -54,10 +54,14 @@ export function regenerateYaziNamingProfile(options: YaziNamingOptions = {}): Ya
 	const cacheDir = options.cacheDir ?? resolveClioDirs().cache;
 	const before = inspectYaziNaming(cacheDir);
 	if (!before.present) {
-		return { ...before, status: "absent", detail: "managed Yazi profile is absent; next open writes canonical names" };
+		return {
+			...before,
+			status: "absent",
+			detail: "managed files pane profile is absent; next open writes canonical names",
+		};
 	}
 	if (before.legacyEvents === 0 && before.legacyEnvironmentNames === 0) {
-		return { ...before, status: "canonical", detail: "managed Yazi profile already uses canonical names" };
+		return { ...before, status: "canonical", detail: "managed files pane profile already uses canonical names" };
 	}
 	const yaziPath = options.yaziPath === undefined ? resolveToolBinary("yazi").binaryPath : options.yaziPath;
 	const yaPath = options.yaPath === undefined ? resolveToolBinary("ya").binaryPath : options.yaPath;
@@ -66,7 +70,8 @@ export function regenerateYaziNamingProfile(options: YaziNamingOptions = {}): Ya
 		return {
 			...before,
 			status: "removed-unresolved",
-			detail: "legacy managed profile removed; Yazi/ya is unresolved, so the next managed open will regenerate it",
+			detail:
+				"legacy managed profile removed; the files pane engine is unresolved, so the next managed open will regenerate it",
 		};
 	}
 	const profile = ensureYaziProfile({ yaziPath, yaPath, profileDir: before.profileDir });
@@ -74,8 +79,8 @@ export function regenerateYaziNamingProfile(options: YaziNamingOptions = {}): Ya
 		return {
 			...before,
 			status: "regeneration-failed",
-			detail: "legacy managed profile removed, but current Yazi rejected the regenerated profile",
+			detail: "legacy managed profile removed, but the files pane engine rejected the regenerated profile",
 		};
 	}
-	return { ...before, status: "regenerated", detail: "managed Yazi profile regenerated with canonical names" };
+	return { ...before, status: "regenerated", detail: "managed files pane profile regenerated with canonical names" };
 }
