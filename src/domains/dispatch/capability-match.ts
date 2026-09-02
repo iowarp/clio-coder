@@ -34,6 +34,7 @@
 import type { ResultContract } from "../agents/result-contract.js";
 import type { AgentCapabilityClass, AgentSpec } from "../agents/spec.js";
 import { type AgentTaskType, classifyAgentTask } from "./agent-candidates.js";
+import type { DispatchIntent } from "./intent.js";
 
 /** Capability classes that cannot change the workspace, whatever the task says. */
 const READ_ONLY_CAPABILITY_CLASSES: ReadonlySet<AgentCapabilityClass> = new Set(["read-only", "verification"]);
@@ -112,6 +113,14 @@ export interface CapabilityMismatchInput {
 	resultContractKind: ResultContract["kind"] | null;
 	/** Installed recipes, used only to name a suggestion that actually resolves. */
 	specs: ReadonlyArray<AgentSpec>;
+	/**
+	 * The caller's typed intent, when it sent one. An intent that declares no
+	 * write roots and no expected outputs is the caller saying in the schema
+	 * that this run changes nothing, which outranks a verb the prose classifier
+	 * read as mutating ("write the failing test first" inside a survey question
+	 * refused a scout and cost the orchestrator a round).
+	 */
+	intent?: Pick<DispatchIntent, "writeRoots" | "expectedOutputs"> | null;
 }
 
 function suggestedSpecialist(taskType: AgentTaskType, specs: ReadonlyArray<AgentSpec>): string | null {
@@ -130,6 +139,7 @@ function suggestedSpecialist(taskType: AgentTaskType, specs: ReadonlyArray<Agent
  */
 export function assessCapabilityMismatch(input: CapabilityMismatchInput): CapabilityMismatch | null {
 	if (!READ_ONLY_CAPABILITY_CLASSES.has(input.capabilityClass)) return null;
+	if (input.intent && input.intent.writeRoots.length === 0 && input.intent.expectedOutputs.length === 0) return null;
 	const features = classifyAgentTask(input.task);
 	if (!MUTATING_TASK_TYPES.has(features.taskType)) return null;
 	const readShaped = READ_SHAPED_PATTERNS.some((pattern) => pattern.test(input.task));
