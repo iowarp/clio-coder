@@ -26,6 +26,7 @@ import {
 	upgradeLegacyExtensionInstallState,
 } from "../../src/domains/extensions/state.js";
 import { expandPromptTemplateInput, loadPromptTemplates } from "../../src/domains/resources/prompts/loader.js";
+import { createShareArchive, importShareArchive, planShareImport } from "../../src/domains/share/archive.js";
 
 const roots: string[] = [];
 
@@ -418,6 +419,100 @@ describe("extension resource boundary", () => {
 			"old unverifiable bytes\n",
 		);
 		strictEqual(readFileSync(join(oldRoot, "marker.txt"), "utf8"), "verified replacement\n");
+	});
+
+	it("routes share-imported extension trees through verified installation and activates their resources", () => {
+		const exporter = scratch();
+		const source = scratch();
+		writeManifest(source, "shared-extension", "resources:\n  prompts: prompts\n");
+		mkdirSync(join(source, "prompts"));
+		writeFileSync(join(source, "prompts", "shared.md"), "# Shared prompt\n", "utf8");
+		const exportedInstall = installExtension(source, { cwd: exporter, scope: "project" });
+		strictEqual(exportedInstall.extension?.loadable, true);
+		const archive = createShareArchive({ cwd: exporter, scope: "project", includeExtensions: true });
+		ok(archive.files.every((file) => file.type === "extension"));
+		ok(archive.files.every((file) => !file.relativePath.endsWith("state.json")));
+		const archivePath = join(scratch(), "extensions.clio-coder-share.json");
+		writeFileSync(archivePath, `${JSON.stringify(archive)}\n`, "utf8");
+
+		const destination = scratch();
+		const destinationBase = join(destination, ".clio-coder", "extensions");
+		const dryRun = planShareImport(archivePath, { cwd: destination, scope: "project", dryRun: true });
+		deepStrictEqual(
+			dryRun.diagnostics.filter((diagnostic) => diagnostic.type !== "warning"),
+			[],
+		);
+		strictEqual(existsSync(destinationBase), false, "share inspection must not mutate extension state");
+
+		const imported = importShareArchive(archivePath, { cwd: destination, scope: "project" });
+		deepStrictEqual(
+			imported.diagnostics.filter((diagnostic) => diagnostic.type !== "warning"),
+			[],
+		);
+		const [installed] = listInstalledExtensions(destination, { scope: "project" });
+		strictEqual(installed?.id, "shared-extension");
+		strictEqual(installed?.loadable, true);
+		ok(installed?.installedContentDigest);
+		strictEqual(installed?.observedContentDigest, installed?.installedContentDigest);
+		deepStrictEqual(
+			enabledExtensionResourceRoots("prompts", destination).map((root) => root.id),
+			["shared-extension"],
+		);
+	});
+
+	it("refuses invalid shared packages and force-recovers an unverified destination transactionally", () => {
+		const invalidExporter = scratch();
+		const invalidRoot = join(invalidExporter, ".clio-coder", "extensions", "invalid-shared");
+		writeManifest(invalidRoot, "invalid-shared", "resources:\n  prompts: missing-prompts\n");
+		const invalidArchive = createShareArchive({
+			cwd: invalidExporter,
+			scope: "project",
+			includeExtensions: true,
+		});
+		const invalidArchivePath = join(scratch(), "invalid.clio-coder-share.json");
+		writeFileSync(invalidArchivePath, `${JSON.stringify(invalidArchive)}\n`, "utf8");
+		const invalidDestination = scratch();
+		const refused = importShareArchive(invalidArchivePath, { cwd: invalidDestination, scope: "project" });
+		ok(refused.diagnostics.some((diagnostic) => diagnostic.message.includes("share archive is invalid")));
+		strictEqual(existsSync(join(invalidDestination, ".clio-coder", "extensions")), false);
+
+		const exporter = scratch();
+		const source = scratch();
+		writeManifest(source, "shared-recovery");
+		writeFileSync(join(source, "marker.txt"), "verified archive bytes\n", "utf8");
+		strictEqual(installExtension(source, { cwd: exporter, scope: "project" }).extension?.loadable, true);
+		const archive = createShareArchive({ cwd: exporter, scope: "project", includeExtensions: true });
+		const archivePath = join(scratch(), "recovery.clio-coder-share.json");
+		writeFileSync(archivePath, `${JSON.stringify(archive)}\n`, "utf8");
+
+		const destination = scratch();
+		const destinationBase = join(destination, ".clio-coder", "extensions");
+		const oldRoot = join(destinationBase, "shared-recovery");
+		writeManifest(oldRoot, "shared-recovery");
+		writeFileSync(join(oldRoot, "marker.txt"), "unverified destination bytes\n", "utf8");
+		const corruptState = "{ corrupt-share-state\n";
+		writeFileSync(join(destinationBase, "state.json"), corruptState, "utf8");
+		const blocked = importShareArchive(archivePath, { cwd: destination, scope: "project" });
+		ok(blocked.diagnostics.some((diagnostic) => diagnostic.type === "conflict"));
+		strictEqual(readFileSync(join(oldRoot, "marker.txt"), "utf8"), "unverified destination bytes\n");
+		strictEqual(readFileSync(join(destinationBase, "state.json"), "utf8"), corruptState);
+
+		const recovered = importShareArchive(archivePath, { cwd: destination, scope: "project", force: true });
+		deepStrictEqual(
+			recovered.diagnostics.filter((diagnostic) => diagnostic.type === "error" || diagnostic.type === "conflict"),
+			[],
+		);
+		ok(recovered.recovery?.backups.some((backup) => readFileSync(backup, "utf8") === corruptState));
+		ok(
+			recovered.recovery?.backups.some(
+				(backup) =>
+					existsSync(join(backup, "marker.txt")) &&
+					readFileSync(join(backup, "marker.txt"), "utf8") === "unverified destination bytes\n",
+			),
+		);
+		const [installed] = listInstalledExtensions(destination, { scope: "project" });
+		strictEqual(installed?.loadable, true);
+		strictEqual(readFileSync(join(oldRoot, "marker.txt"), "utf8"), "verified archive bytes\n");
 	});
 
 	it("preserves every payload byte after the command delimiter", () => {
