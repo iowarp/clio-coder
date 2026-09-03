@@ -193,7 +193,7 @@ Runs a series of health sweeps across the environment:
 ### B. Upgrades (`clio-coder upgrade`)
 Refreshes state metadata and applies pending lifecycle migrations, which may update settings, state, or extension data.
 ```bash
-clio-coder upgrade [--dry-run] [--channel=<latest|beta|dev>] [--skip-migrations]
+clio-coder upgrade [--dry-run] [--channel=<latest|beta|dev>] [--skip-migrations] [--json]
 ```
 The command detects the install method from the running binary. On a source
 checkout it never runs `npm install -g`: it performs its safe local duties
@@ -289,7 +289,7 @@ keyboard-facing text; all other target versions use the generic form
 ### C. System Resets (`clio-coder reset`)
 Selective recovery wipes:
 ```bash
-clio-coder reset [--state|--data|--cache|--auth|--config|--all] [--dry-run] [--force]
+clio-coder reset [--state|--data|--cache|--auth|--config|--all] [--dry-run] [--force] [--json]
 ```
 Levels are combinable except `--all`. Each level clears exactly the root or file it names and nothing else, then bootstraps the missing structure again unless `--dry-run` is present. `--force` is required only for destructive execution.
 
@@ -311,7 +311,7 @@ new artifact is written into a root.
 removes all four roots (config, data, state, cache):
 
 ```bash
-clio-coder uninstall [--remove-binary] [--dry-run] [--force]
+clio-coder uninstall [--remove-binary] [--keep-config] [--keep-data] [--dry-run] [--force] [--json]
 ```
 
 Preview first, then remove:
@@ -325,7 +325,9 @@ hash -r
 `--dry-run` prints the roots and the optional launcher action without changing
 anything, and enumerates the same resolved absolute paths the real run would
 remove. It prints binary-removal guidance for the active launcher, npm-global
-installs, npm links, and the local source symlink.
+installs, npm links, and the local source symlink. Use `--keep-config` to preserve
+`settings.yaml` and `credentials.yaml`, or `--keep-data` to preserve memory and
+evidence.
 
 #### Per-project `.clio-coder/` directories
 
@@ -378,6 +380,37 @@ resisted, and the command exits 1 with the exact invocation to rerun. Both
 commands are idempotent, so the recovery is always the same: fix the permission
 or release the handle, then run the identical command again and it resumes from
 whatever is left. A partial delete never reports global success.
+
+### E. Interactive Configuration (`clio-coder configure`)
+`clio-coder configure` provides a structured, multi-section configuration wizard
+for model targets, runtime defaults, fleet limits, permissions, panes, and
+integrations:
+
+```bash
+clio-coder configure [--section <name>] [--json] [--interop] [--list] [--all]
+```
+
+When run against an unconfigured home (or when launched interactively with no
+model target), it routes immediately to the target category selection menu. Once
+targets are configured, launching `clio-coder configure` presents the 8 top-level
+runtime sections:
+
+1. **Targets & Auth**: manage providers, endpoints, credentials, and models.
+2. **Models & Thinking**: default models, thinking levels, model favorites, cycle set.
+3. **Chat Defaults**: smooth streaming, terminal progress, token limits, compaction.
+4. **Fleet**: concurrency, retries, tool call caps, worker timeouts, profiles.
+5. **Permissions & Autonomy**: autonomy level, worker permissions, cost limits, review watchdog.
+6. **Panes & Layout**: terminal panes capability, dock layout, TUI display mode, notifications.
+7. **Skills & Extensions**: trust project imports, external ACP agents, plugins, library sync.
+8. **Diagnostics**: version information, resolved directories, doctor check, raw settings inspection.
+
+Every section header indicates the exact settings file path being modified
+(`Source: ~/.config/clio-coder/settings.yaml`), prints the current active values,
+and provides a safe back/exit option (`b` or `q`).
+
+The `--section <name>` flag jumps directly into any section (e.g.,
+`clio-coder configure --section models` or `clio-coder configure --section fleet`).
+The `--json` flag emits the active settings in formatted JSON for scripting.
 
 ---
 
