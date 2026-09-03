@@ -70,6 +70,7 @@ For process exit codes, stdout deliverable guarantees, and machine-readable JSON
 | `clio-coder trace phases <runId> [--db PATH]` | Show one run's recorded phases. |
 | `clio-coder trace tail <runId> [--follow] [--db PATH]` | Tail one run's recorded events; `--follow` streams as they land. |
 | `clio-coder trace procs <runId> [--db PATH]` | Show the processes one run spawned. |
+| `clio-coder trace code-steps <rootId> [--json]` | Show the deterministic code-step records one fleet root wrote (argv, cwd, env names, exit code, duration, output digest, artifact paths). They are files beside the ledger, not rows in the mirror, so `--db` does not apply. |
 | `clio-coder trace prune [--max-age-days N] [--max-bytes N] [--db PATH] [--json]` | Apply the trace-retention policy while protecting queued and running runs; JSON reports the resolved policy, rows, runs and bytes removed, protected runs, and whether vacuum ran. |
 | `clio-coder trace sql <SELECT query> [--db PATH]` | Run one read-only query against the mirror. Only a single `SELECT` or read-only `WITH` statement is accepted; anything else exits 2. |
 | `clio-coder trace ui [--db PATH] [--port N]` | Serve the localhost-only waterfall viewer. The viewer is not part of the published package. |

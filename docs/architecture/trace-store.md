@@ -88,7 +88,7 @@ writes before slower evidence builds.
 
 ## CLI Commands
 
-The `clio-coder trace` command surfaces 8 subcommands for inspecting, bounding, and querying the SQLite trace mirror:
+The `clio-coder trace` command surfaces 9 subcommands for inspecting, bounding, and querying the SQLite trace mirror, plus the code-step record files beside it:
 
 ```bash
 clio-coder trace runs [--db PATH] [--limit N] [--json]
@@ -96,12 +96,15 @@ clio-coder trace inspect --json
 clio-coder trace phases <runId> [--db PATH]
 clio-coder trace tail <runId> [--follow] [--db PATH]
 clio-coder trace procs <runId> [--db PATH]
+clio-coder trace code-steps <rootId> [--json]
 clio-coder trace prune [--max-age-days N] [--max-bytes N] [--db PATH] [--json]
 clio-coder trace sql <SELECT query> [--db PATH]
 clio-coder trace ui [--db PATH] [--port N]
 ```
 
 `clio-coder trace --help` and every subcommand `--help` print usage and exit with code 0.
+
+`trace code-steps` is the one subcommand that does not read the mirror. A deterministic fleet code step is a subprocess, not a model run, so `src/domains/dispatch/code-step-store.ts` writes its `CodeStepRecord` to `<stateDir>/code-steps/<rootId>/<runId>.json` instead of fabricating route rows in the ledger. The command reads those files back oldest first, prints the record verbatim under `--json`, and treats an absent root directory as the empty state with exit 0. `--db` is ignored.
 
 ### Database Resolution and Error Handling
 

@@ -279,6 +279,10 @@ For process exit codes, stdout deliverable guarantees, and machine-readable JSON
 <td>Show the processes one run spawned.</td>
 </tr>
 <tr>
+<td><code>clio-coder trace code-steps &lt;rootId&gt; [--json]</code></td>
+<td>Show the deterministic code-step records one fleet root wrote (argv, cwd, env names, exit code, duration, output digest, artifact paths). They are files beside the ledger, not rows in the mirror, so <code>--db</code> does not apply.</td>
+</tr>
+<tr>
 <td><code>clio-coder trace prune [--max-age-days N] [--max-bytes N] [--db PATH] [--json]</code></td>
 <td>Apply the trace-retention policy while protecting queued and running runs; JSON reports the resolved policy, rows, runs and bytes removed, protected runs, and whether vacuum ran.</td>
 </tr>
