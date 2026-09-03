@@ -7,7 +7,7 @@ triggers:
   - define this feature
   - structure this product brain dump
   - create milestone prompts
-version: 0.3.0
+version: 0.4.0
 license: Apache-2.0
 allowed-tools:
   - read
@@ -37,13 +37,47 @@ milestone prompts. The discipline is the phase gate: each phase produces a
 small locked artifact that the next phase builds on. No phase reopens without
 the user saying so. Markdown only, no external templates, repo-aware.
 
+## Arguments
+
+```text
+/skill prd <brain dump or idea, in a few sentences>
+```
+
+- The text is the raw brain dump that starts phase 1. An existing intent
+  doc, PRD, or evidence file named or pathed in the request is material to
+  read first (see "Read the repo before asking" below), not more arguments.
+- Nothing is required beyond some text; a blank invocation gets phase 1's
+  own prompt — let the user describe the idea raw — rather than an invented
+  idea.
+
+There is no operator in a headless run: `ask_user` is either not registered
+or nothing answers it, and stalling a gate to wait for it never resolves.
+When a gate goes unanswered, do not skip the phase and do not go quiet: run
+it as a monologue instead — state the phase's question, your
+recommendation (grounded in the repo and any evidence read, or the most
+defensible product default when nothing grounds it), and the reasoning,
+adopt the recommendation, mark it `assumed — confirm`, and move to the next
+phase. All nine phases still run, end to end, in one turn — the phase list
+below is the plan to execute, not an outline to abbreviate because no one
+answered the first gate. Never invent evidence or a fact to back an
+assumption; anything genuinely unknown stays an open item, marked as such,
+not a plausible guess.
+
+The nine phases below are the plan; do not open a task list for them.
+`tasks` sits outside this skill's tool surface and any call to it is
+refused. `bash` is also outside this skill's tool surface — verify what you
+wrote with `grep`, `read`, and `find`, never `bash`.
+
 ## Interview mechanics
 
 - Use the `ask_user` tool for every confirmation and choice, with your
-  recommendation as the first option. Without `ask_user`, ask in plain text,
-  one focused exchange per phase.
+  recommendation as the first option: post the question, stop, wait for the
+  answer. See Arguments above for what a gate that goes unanswered means and
+  how to carry every phase through anyway.
 - **Read the repo before asking.** Stack, conventions, existing entities, and
-  integrations are facts; discover them and *confirm*, never ask cold.
+  integrations are facts; discover them and *confirm*, never ask cold. An
+  entity or module that already exists gets reused and marked as such, never
+  re-specced as new work.
 - Keep each phase to one or two exchanges. Synthesize, propose, lock, move on.
 
 ## The phases (in order, each locks before the next)
@@ -71,7 +105,8 @@ the user saying so. Markdown only, no external templates, repo-aware.
 
 - **`PRD.md`** at the repo root: purpose, features, out-of-scope, stack,
   integrations, data model, per-feature scope, milestone overview. Markdown
-  only.
+  only. Never write it anywhere else or under another name — a nested
+  `docs/PRD.md`, a slugged filename, or a report-style name are all wrong.
 - **`milestones/N-<slug>/prompt.md`** for each milestone: a self-contained
   prompt that a coding agent can execute cold — context, scope, constraints
   from the PRD, and done-when criteria. A reader must not need the PRD open
@@ -83,6 +118,11 @@ into a sprint.
 ## Red flags (you are doing it wrong)
 
 - Asking about the stack when package.json answers it.
-- A phase "locked" without the user confirming it.
+- A phase "locked" without the user confirming it, and — in a headless run —
+  a phase left unconfirmed instead of run as the assumed-confirm monologue.
 - Out-of-scope list that is empty or generic ("no mobile app").
 - Milestone prompts that say "see PRD for details".
+- An existing entity or module re-specced as new work instead of reused.
+- Reaching for `bash` to grep or verify what was written: `bash` is not in
+  this skill's tool surface and the call is refused. Use `grep`/`read`/`find`.
+- Opening a task list for the nine phases; `tasks` is refused.
