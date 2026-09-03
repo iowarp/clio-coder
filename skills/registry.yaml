@@ -128,8 +128,8 @@ skills:
     sha256: d3742221f0ace1f1b62c07f5902030e478496059a58ef194e7cb3303ccdff05e
   - name: design-council
     path: workflow/design-council
-    version: 0.4.0
-    sha256: 1ecd53397ce97ec78294cc9e8c7291b20e2e7d740bcde8ea999739d359c91055
+    version: 0.5.0
+    sha256: c279a94a4cd66d46980f9a5024aedac3e673144fadc9d36b53ad87fc2ee63501
   - name: grill-me
     path: workflow/grill-me
     version: 0.5.0
