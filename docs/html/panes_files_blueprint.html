@@ -303,6 +303,16 @@ per-pane styling on its socket. <code>clio-coder panes theme</code> prints Clio&
 as a herdr <code>[theme.custom]</code> block to paste into that file; Clio does not edit
 another program&#39;s configuration. With <code>interface.panes.files.profile: user</code>,
 nothing is themed and the engine runs on your own configuration.</p>
+<p>That is the limit of what 0.4.2 can do, and it is herdr&#39;s, not Clio&#39;s. Checked
+against herdr 0.8.2: <code>herdr api schema --json</code> (protocol 21) has no method in
+the pane family that takes a color, accent, or style, and <code>herdr --help</code> has
+no theme command; herdr&#39;s theme is global and read from <code>[theme]</code> in its own
+<code>config.toml</code>. So Clio&#39;s chrome inside herdr (sidebar, tab bar, borders, agent
+rows) can only follow the block you paste. Writing or merging that block into
+herdr&#39;s config on your behalf would cross Clio&#39;s rule of writing nothing
+outside its own roots, and is not offered (#273). If a later herdr exposes a
+per-pane accent or a color field on <code>pane.report_metadata</code>, Clio can mark its
+own panes without touching the global theme.</p>
 <p>Clio&#39;s generated profile lives under the cache root at <code>yazi/profile</code> and
 never touches <code>~/.config/yazi</code>. <code>clio-coder tools status yazi --reset-profile</code>
 deletes it; the next open rebuilds it.</p>
