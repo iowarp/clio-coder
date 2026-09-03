@@ -91,7 +91,7 @@ describe("contracts/engine reads model.clioCoder", () => {
 		strictEqual(request.chat_template_kwargs, undefined);
 	});
 
-	it("uses LM Studio's advertised on/off vocabulary instead of unsupported effort aliases", async () => {
+	it("omits active effort for LM Studio binary models and uses none to disable", async () => {
 		const id = "ornith-1.5-35b-a3b";
 		const server = await fixture(id);
 		const target = model(server, id, "lmstudio", {
@@ -100,9 +100,9 @@ describe("contracts/engine reads model.clioCoder", () => {
 			lmstudioReasoningOptions: ["on", "off"],
 		});
 		const on = await lastRequest(server, target, "low");
-		strictEqual(on.reasoning_effort, "on");
+		strictEqual(on.reasoning_effort, undefined);
 		const off = await lastRequest(server, target, "off");
-		strictEqual(off.reasoning_effort, "off");
+		strictEqual(off.reasoning_effort, "none");
 	});
 
 	it("applies the family sampling profile from clioCoder.quirks", async () => {
