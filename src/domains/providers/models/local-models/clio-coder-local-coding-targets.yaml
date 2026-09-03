@@ -561,8 +561,12 @@
       guidance: |
         Ornith 1.5's Qwen3.5 chat template exposes thinking as on or off
         through enable_thinking; intermediate levels coerce to on. LM Studio
-        reads the same switch from reasoning_effort (none or low), which Clio
-        sends for on-off models on that runtime.
+        2026-09-03 exposed a split vocabulary on this exact Q4_K_M: native
+        discovery advertised {off,on}, while its OpenAI-compatible request
+        validator rejected literal `on` and accepted only effort-level values.
+        `low` ran only after a warning and fallback to on, so Clio now omits an
+        active override for this default-on model and sends `reasoning_effort:
+        none` only when disabling it.
     serving: "Ornith-1.5-35B-A3B follows the 1.0 card: 262K context, qwen3 reasoning parsing, qwen3_coder tool parsing, sampler temperature=0.6, top_p=0.95, top_k=20."
 
 - family: qwen3.6-27b
@@ -747,7 +751,12 @@
         three-worker fleet step, and a ten-task eval suite totalling 116 model
         calls, none of which repeated a tool call into a loop. The catalog
         therefore imposes no thinking floor and coerces no level for this
-        family. If a future build or quantization regresses into the loop
+        family. A provisional 2026-09-03 LM Studio A/B on the heavily quantized
+        `qwen3.8-27b-gsq-rco` alias corroborated the switch: four thinking-off
+        scenarios reported zero reasoning tokens and no repeated-tool loop,
+        versus visible reasoning at the active level. The host had LM Link
+        enabled, so this records behavior only—not hardware throughput or a
+        controlled quality claim. If a future build or quantization regresses into the loop
         JetBrains describe, the guards that catch it are Clio's own, not a
         catalog setting: the tool-prose-loop detector
         (src/interactive/tool-prose-loop.ts), which is armed on the
