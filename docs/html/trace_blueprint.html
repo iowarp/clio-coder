@@ -114,17 +114,19 @@ Write/open/schema failures emit one bounded <code>[clio:trace]</code> warning an
 the mirror without failing the run. The Node.js <code>node:sqlite</code> <code>ExperimentalWarning</code> is suppressed by default via a scoped listener filter, which can be carved out by passing <code>--trace-warnings</code>. Domain shutdown prioritizes flushing trace
 writes before slower evidence builds.</p>
 <h2>CLI Commands</h2>
-<p>The <code>clio-coder trace</code> command surfaces 8 subcommands for inspecting, bounding, and querying the SQLite trace mirror:</p>
+<p>The <code>clio-coder trace</code> command surfaces 9 subcommands for inspecting, bounding, and querying the SQLite trace mirror, plus the code-step record files beside it:</p>
 <pre><code class="language-bash">clio-coder trace runs [--db PATH] [--limit N] [--json]
 clio-coder trace inspect --json
 clio-coder trace phases &lt;runId&gt; [--db PATH]
 clio-coder trace tail &lt;runId&gt; [--follow] [--db PATH]
 clio-coder trace procs &lt;runId&gt; [--db PATH]
+clio-coder trace code-steps &lt;rootId&gt; [--json]
 clio-coder trace prune [--max-age-days N] [--max-bytes N] [--db PATH] [--json]
 clio-coder trace sql &lt;SELECT query&gt; [--db PATH]
 clio-coder trace ui [--db PATH] [--port N]
 </code></pre>
 <p><code>clio-coder trace --help</code> and every subcommand <code>--help</code> print usage and exit with code 0.</p>
+<p><code>trace code-steps</code> is the one subcommand that does not read the mirror. A deterministic fleet code step is a subprocess, not a model run, so <code>src/domains/dispatch/code-step-store.ts</code> writes its <code>CodeStepRecord</code> to <code>&lt;stateDir&gt;/code-steps/&lt;rootId&gt;/&lt;runId&gt;.json</code> instead of fabricating route rows in the ledger. The command reads those files back oldest first, prints the record verbatim under <code>--json</code>, and treats an absent root directory as the empty state with exit 0. <code>--db</code> is ignored.</p>
 <h3>Database Resolution and Error Handling</h3>
 <p>When resolving the SQLite database path:</p>
 <ul>

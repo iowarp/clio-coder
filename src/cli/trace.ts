@@ -3,6 +3,8 @@ import { access } from "node:fs/promises";
 import { resolve } from "node:path";
 import { fileURLToPath, pathToFileURL } from "node:url";
 import { clioStatePath } from "../core/xdg.js";
+import type { CodeStepRecord } from "../domains/dispatch/code-step.js";
+import { codeStepDir, readCodeStepRecords } from "../domains/dispatch/code-step-store.js";
 import {
 	assertTraceSelectOnly,
 	DEFAULT_TRACE_RETENTION_POLICY,
@@ -24,12 +26,16 @@ const HELP = `Usage:
   clio-coder trace phases <runId> [--db PATH]
   clio-coder trace tail <runId> [--follow] [--db PATH]
   clio-coder trace procs <runId> [--db PATH]
+  clio-coder trace code-steps <rootId> [--json]   deterministic code steps of one fleet root
   clio-coder trace prune [--max-age-days N] [--max-bytes N] [--db PATH] [--json]
   clio-coder trace sql <SELECT query> [--db PATH]
   clio-coder trace ui [--db PATH] [--port N]        source checkout only
 
 The viewer ships with the repository, not the npm package, so from an installed
-Clio the subcommands above are the way in. They read the same database.
+Clio the subcommands above are the way in. They read the same database, except
+code-steps, which reads the per-root record files under the state directory's
+code-steps/ tree (a code step is a subprocess, not a model run, so it never
+enters the SQLite mirror).
 Pruning keeps ${DEFAULT_TRACE_RETENTION_POLICY.maxAgeDays} days and at most ${DEFAULT_TRACE_RETENTION_POLICY.maxBytes} bytes by default. Set
 CLIO_CODER_TRACE_RETENTION_DAYS or CLIO_CODER_TRACE_MAX_BYTES to change the automatic
 policy; prune flags override those values for one command.
@@ -97,7 +103,7 @@ function parseTraceArgs(args: string[]): ParsedTraceArgs {
 }
 
 /** Every subcommand `trace` answers to. Anything else is a usage error. */
-const TRACE_COMMANDS = new Set(["runs", "inspect", "phases", "tail", "procs", "prune", "sql", "ui"]);
+const TRACE_COMMANDS = new Set(["runs", "inspect", "phases", "tail", "procs", "code-steps", "prune", "sql", "ui"]);
 
 /** The subcommands whose first positional is a run id. */
 const TRACE_COMMANDS_NEEDING_RUN_ID = new Set(["phases", "tail", "procs"]);
@@ -119,6 +125,10 @@ function invocationError(command: string, runId: string | undefined): number | n
 		return 2;
 	}
 	if (TRACE_COMMANDS_NEEDING_RUN_ID.has(command) && !runId) return missingRunId(command);
+	if (command === "code-steps" && !runId) {
+		process.stderr.write("trace code-steps requires a fleet root id\n");
+		return 2;
+	}
 	return null;
 }
 
@@ -160,6 +170,12 @@ export async function runTraceCommand(args: string[]): Promise<number> {
 	}
 
 	if (command === "ui") return runTraceUi(parsed.db, parsed.port);
+
+	// Code-step records live in flat per-root JSON files beside the ledger, not
+	// in the SQLite mirror, so this answers before the database is consulted and
+	// ignores --db. An absent root directory is the empty state: the root either
+	// never ran a code step or its records were pruned with the state tree.
+	if (command === "code-steps") return runTraceCodeSteps(runId ?? "", parsed.json);
 
 	// `inspect` answers ahead of the no-database courtesy below, because its
 	// answer to a state tree nothing has written to is a JSON snapshot saying
@@ -240,6 +256,41 @@ export async function runTraceCommand(args: string[]): Promise<number> {
 	} finally {
 		reader.close();
 	}
+}
+
+/**
+ * Print every `CodeStepRecord` one fleet root wrote, oldest first. The record
+ * is the code step's stand-in for a receipt (argv, cwd, env names, exit code,
+ * duration, output digest, artifact paths), and until this command nothing
+ * read it back. JSON is the record verbatim; the table keeps the fields an
+ * operator scans for and leaves argv last because it is the widest.
+ */
+function runTraceCodeSteps(rootId: string, json: boolean): number {
+	let records: CodeStepRecord[];
+	try {
+		records = readCodeStepRecords(rootId);
+	} catch (error) {
+		process.stderr.write(`code-step records: ${error instanceof Error ? error.message : String(error)}\n`);
+		return 1;
+	}
+	if (json) {
+		process.stdout.write(`${JSON.stringify(records, null, 2)}\n`);
+		return 0;
+	}
+	if (records.length === 0) {
+		process.stdout.write(
+			`no code-step records for fleet root ${rootId} under ${codeStepDir(rootId)}. a record is written when a fleet plan runs a deterministic code step.\n`,
+		);
+		return 0;
+	}
+	process.stdout.write("EXIT  DURATION STARTED                  STEP                 COMMAND              ARGV\n");
+	for (const record of records) {
+		const exit = record.timedOut ? "timeout" : record.signal !== null ? `sig:${record.signal}` : String(record.exitCode);
+		process.stdout.write(
+			`${exit.padEnd(5)} ${`${record.durationMs}ms`.padStart(8)} ${record.startedAt.padEnd(24)} ${record.stepId.slice(0, 20).padEnd(20)} ${record.commandId.slice(0, 20).padEnd(20)} ${record.argv.join(" ")}\n`,
+		);
+	}
+	return 0;
 }
 
 function runTracePrune(parsed: ParsedTraceArgs): number {
