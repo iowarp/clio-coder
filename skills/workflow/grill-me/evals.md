@@ -183,3 +183,49 @@ tool's return value. Two consecutive clean runs on the primary model and
 one clean cross-model run is reasonable but not exhaustive evidence that
 v3's failure mode is fully closed rather than just less frequent; only a
 larger run count would raise that confidence further.
+
+## Live interactive confirmation (2026-09-03, Herdr pane)
+
+The headless harness can only prove the assumed-confirm monologue path; it
+cannot produce a genuine "whatever you think" or "stop" reply because
+`ask_user` always auto-cancels with no operator. To exercise S3 and S5 for
+real, this session ran the hardened 0.5.0 skill interactively: a Herdr pane
+running `clio-coder` (target `mini`, model `ornith1.5-35b-moe`, switched
+in-session via `/model`) against the same fixture repo the battletest used
+(`/home/akougkas/eval-temp/grillme-final`, skill installed project-locally
+at `.clio-coder/skills/grill-me/` so the live session resolved this
+repo's edited SKILL.md rather than the separately npm-installed package
+copy — `/skill grill-me` has no path-override flag the way `clio-coder run
+--skill` does), with a human answering each `ask_user` round live via the
+TUI's modal.
+
+Result: Step 1 scanned the repo before asking anything (architecture doc,
+scanner.py, sample log). Round 1 asked a single root-decision question
+(trigger model) with the recommended option first and real tradeoffs on
+the alternatives. After the human's real answer came back, the model's own
+reasoning explicitly named the distinction the whole hardening pass turned
+on: *"The modal returned round_answered — there is an operator here...
+this is a live interview, not headless. I'll continue with one question
+per round and wait for your answers."* — proof the headless/live branch is
+a real fork in the model's behavior, not just prose it echoes. Five rounds
+ran in priority order (trigger, success measure, non-goals, delivery/
+secrets, payload shape); round 3 was answered "whatever you think is
+best" and recorded the stated recommendation as the decision (S3,
+confirmed live, not just implied by the monologue path); round 5 was
+answered with an appended stop signal ("...; stop") and the model called
+`ask_user` `action: "complete"` immediately, with no confirmation question
+(S5, confirmed live). The final decision log matched the Step 5 shape
+exactly (numbered decisions, Deferred, Open risks, Recommended next step)
+and, unprompted, flagged a real cross-cutting risk the fixture didn't
+spell out: the alerting feature's success measure depends on Phase 2's
+ranking/CLI, which doesn't exist in `scanner.py` yet — a genuine "hole
+poked," not filler. Zero safety blocks; zero `tasks` calls. One aside, not
+a skill defect: the TUI's own usage nudge fired ("9+ read-only exploration
+calls without a successful Scout dispatch") — Step 1's repo scan currently
+reaches for `read`/`grep`/`ls` directly rather than delegating broad
+reconnaissance to a Scout dispatch, worth a look in a future pass but out
+of scope for this one since the scan itself was correct and grounded.
+
+This closes the S3/S5-not-directly-run gap noted above for the specific
+case of a genuine live operator; the headless assumed-confirm path
+remains separately and repeatedly confirmed on its own terms.
