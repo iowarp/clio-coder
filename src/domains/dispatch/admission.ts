@@ -107,6 +107,27 @@ const PUMP_MAX_MS = 500;
  * waiting or dispatching fewer runs is the way past it, so it retries the same
  * shape and burns the deadline again.
  */
+export function foregroundEndpointBlock(input: {
+	endpointKey?: string;
+	limits: CapacityLimits;
+	usage: {
+		endpoints: Readonly<Record<string, number>>;
+		endpointHolders?: Readonly<Record<string, EndpointCapacityHolders>>;
+	};
+}): string | null {
+	if (input.endpointKey === undefined) return null;
+	const limit = input.limits.endpoints[input.endpointKey];
+	const active = input.usage.endpoints[input.endpointKey] ?? 0;
+	const holders = input.usage.endpointHolders?.[input.endpointKey];
+	if (limit === undefined || active < limit || !holders || holders.foregroundStreams < 1) return null;
+	return [
+		`dispatch: admission denied: endpoint '${endpointLabel(input.endpointKey)}' cannot open a worker slot`,
+		` while ${describeEndpointCapacityHolders(holders)} (${active}/${limit} slots).`,
+		" The foreground agent cannot release its slot until this tool call returns, so waiting here would deadlock.",
+		" Point workers at a second endpoint or raise this target's maxConcurrentRequests to the server's actual slot count.",
+	].join("");
+}
+
 function describeAdmissionFailure(input: {
 	state: "canceled" | "timed_out";
 	nodeId: string;
@@ -245,6 +266,14 @@ export function createCapacityAdmissionController(options: {
 	const controller: CapacityAdmissionController = {
 		async admit(input) {
 			if (draining) throw new Error("dispatch: admission denied: this process is shutting down");
+			const limits = options.limits();
+			const usage = options.usage?.() ?? capacityLeaseUsage({ nowMs: now() });
+			const foregroundBlock = foregroundEndpointBlock({
+				...(input.endpointKey !== undefined ? { endpointKey: input.endpointKey } : {}),
+				limits,
+				usage,
+			});
+			if (foregroundBlock !== null) throw new Error(foregroundBlock);
 			const queuedAt = now();
 			const requestId = `admit-${queuedAt.toString(36)}-${randomBytes(5).toString("hex")}`;
 			pending.set(input.assignmentId, requestId);

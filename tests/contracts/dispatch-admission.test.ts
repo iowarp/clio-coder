@@ -6,6 +6,7 @@ import { afterEach, beforeEach, describe, it } from "node:test";
 
 import { DEFAULT_SETTINGS } from "../../src/core/defaults.js";
 import type { AgentSpec } from "../../src/domains/agents/spec.js";
+import { foregroundEndpointBlock } from "../../src/domains/dispatch/admission.js";
 import {
 	type AdmissionQueueRequest,
 	createAdmissionQueue,
@@ -54,6 +55,34 @@ function capacityLimit(capacity: ReturnType<typeof endpointCapacityFor>): number
 }
 
 describe("dispatch admission boundary", () => {
+	it("refuses a same-endpoint foreground deadlock without spending the queue timeout", () => {
+		const detail = foregroundEndpointBlock({
+			endpointKey: "http://127.0.0.1:1234/v1",
+			limits: { global: 4, nodes: {}, endpoints: { "http://127.0.0.1:1234/v1": 1 } },
+			usage: {
+				endpoints: { "http://127.0.0.1:1234/v1": 1 },
+				endpointHolders: {
+					"http://127.0.0.1:1234/v1": { leases: 0, reservations: 0, foregroundStreams: 1 },
+				},
+			},
+		});
+		match(detail ?? "", /cannot release its slot.*deadlock/u);
+	});
+
+	it("keeps ordinary worker saturation queueable", () => {
+		strictEqual(
+			foregroundEndpointBlock({
+				endpointKey: "endpoint",
+				limits: { global: 4, nodes: {}, endpoints: { endpoint: 1 } },
+				usage: {
+					endpoints: { endpoint: 1 },
+					endpointHolders: { endpoint: { leases: 1, reservations: 0, foregroundStreams: 0 } },
+				},
+			}),
+			null,
+		);
+	});
+
 	beforeEach(async () => isolateDispatchState());
 	afterEach(() => restoreDispatchState());
 
