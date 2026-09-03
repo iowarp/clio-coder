@@ -37,6 +37,11 @@ type DispatchTerminalLike = {
 	[K in keyof DispatchCompletedPayload]?: DispatchCompletedPayload[K] | undefined;
 };
 
+/** Pre-admission failures have an announced run id but never create a run ledger. */
+export function dispatchHasEvidenceLedger(payload: DispatchTerminalLike): boolean {
+	return payload.lineage !== undefined;
+}
+
 function recordDispatchCost(
 	telemetry: ReturnType<typeof createTelemetry>,
 	cost: ReturnType<typeof createCostTracker>,
@@ -222,7 +227,7 @@ export function createObservabilityBundle(
 					recordDispatchCost(telemetry, cost, payload);
 					// A failed run is never a first-pass success; still build the
 					// bundle so its failure-cause tags exist for the index.
-					if (typeof payload.runId === "string" && payload.runId.length > 0) {
+					if (typeof payload.runId === "string" && payload.runId.length > 0 && dispatchHasEvidenceLedger(payload)) {
 						trackBuild(payload.runId, false, payload.lineage?.attempt);
 					}
 				}),
