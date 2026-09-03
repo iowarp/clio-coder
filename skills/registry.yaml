@@ -23,8 +23,8 @@ skills:
   # ── context ──
   - name: context-handoff
     path: context/context-handoff
-    version: 0.4.0
-    sha256: ba0568719d0b58bb3e1631eee72094ec0165bf2fb7f69e1e67d223ff50b364d8
+    version: 0.5.0
+    sha256: e69adb1533a6a850cb83babe7e580dd260e034781d7c35e65921453e3fa191a5
   - name: context-prime
     path: context/context-prime
     version: 0.4.0
