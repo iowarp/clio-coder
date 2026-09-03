@@ -5,10 +5,12 @@ import { delimiter, dirname, isAbsolute, join, resolve, sep } from "node:path";
 
 import { resolvePackageRoot } from "../core/package-root.js";
 import { resetXdgCache, resolveClioDirs } from "../core/xdg.js";
+import { detectInstallMethod } from "../domains/lifecycle/install-method.js";
+import { createLifecyclePresenter, type LifecycleItem, measurePath, shortenPath } from "./lifecycle-presenter.js";
 import { type RemovalFailure, removePath, reportRemovalFailures } from "./removal.js";
-import { printError, printHeader, printOk } from "./shared.js";
+import { printError } from "./shared.js";
 
-const HELP = `clio-coder uninstall [--remove-binary] [--dry-run] [--force]
+const HELP = `clio-coder uninstall [--remove-binary] [--keep-config] [--keep-data] [--dry-run] [--force] [--json]
 
 Remove all Clio Coder state: the config, data, state, and cache roots.
 
@@ -18,25 +20,35 @@ the real run and --dry-run list them and name the command that clears one,
 before the launcher is touched.
 
 Flags:
+  --keep-config    preserve the configuration root (settings.yaml, credentials)
+  --keep-data      preserve the data root (memory, evidence, vendored tools)
   --remove-binary  also remove the launcher symlink when it points at this
                    installation. A real file, or a link into a different clio-coder
                    installation, is kept and reported.
   --dry-run        print what would be removed without changing anything
-  --force          required for destructive execution
+  --force, -f      skip confirmation prompt and proceed immediately
+  --json           emit machine-readable JSON output
+  --help, -h       show this message
 `;
 
 interface ParsedUninstallArgs {
 	removeBinary: boolean;
+	keepConfig: boolean;
+	keepData: boolean;
 	force: boolean;
 	dryRun: boolean;
+	json: boolean;
 	help: boolean;
 }
 
 function parseUninstallArgs(argv: ReadonlyArray<string>): ParsedUninstallArgs {
 	const parsed: ParsedUninstallArgs = {
 		removeBinary: false,
+		keepConfig: false,
+		keepData: false,
 		force: false,
 		dryRun: false,
+		json: false,
 		help: false,
 	};
 	for (const arg of argv) {
@@ -44,12 +56,21 @@ function parseUninstallArgs(argv: ReadonlyArray<string>): ParsedUninstallArgs {
 			case "--remove-binary":
 				parsed.removeBinary = true;
 				break;
+			case "--keep-config":
+				parsed.keepConfig = true;
+				break;
+			case "--keep-data":
+				parsed.keepData = true;
+				break;
 			case "--force":
 			case "-f":
 				parsed.force = true;
 				break;
 			case "--dry-run":
 				parsed.dryRun = true;
+				break;
+			case "--json":
+				parsed.json = true;
 				break;
 			case "--help":
 			case "-h":
@@ -60,10 +81,6 @@ function parseUninstallArgs(argv: ReadonlyArray<string>): ParsedUninstallArgs {
 		}
 	}
 	return parsed;
-}
-
-function report(label: string, path: string): void {
-	process.stdout.write(`  ${label.padEnd(8)} remove ${path}${existsSync(path) ? "" : "  (absent)"}\n`);
 }
 
 export interface ProjectContextInventory {
@@ -78,17 +95,6 @@ export interface ProjectContextInventory {
 /**
  * The projects Clio has run in, read from the session metadata under
  * `<stateDir>/sessions/`.
- *
- * Uninstall removes four roots under the home directory and nothing else, so
- * every `.clio-coder/` it ever wrote inside a repository survived it, unlisted. The
- * operator was left to remember which repositories those were, after the
- * command that could have told them had deleted the record and, with
- * `--remove-binary`, the binary that reads it.
- *
- * One `meta.json` per cwd-hash directory is enough: every session under a hash
- * shares the `cwd` that produced it, so this reads one small file per project
- * rather than one per session. Directories whose `.clio-coder/` is already gone are
- * dropped, because an inventory of nothing to do is noise.
  */
 function projectContextInventory(stateDir: string): ProjectContextInventory {
 	const root = join(stateDir, "sessions");
@@ -129,37 +135,6 @@ function firstRecordedCwd(hashDir: string): string | null {
 	return null;
 }
 
-/**
- * Print the project inventory and the command that clears one.
- *
- * Ordering is the point. This runs before the roots are removed, because the
- * record it reads is inside one of them, and before the launcher is removed,
- * because `clio-coder context reset --all` needs the binary that is about to go.
- */
-function reportProjectContext(inventory: ProjectContextInventory, removeBinary: boolean): void {
-	process.stdout.write("\nPer-project context (not removed by uninstall):\n");
-	if (inventory.storeAbsent) {
-		process.stdout.write("  no session store to read; any .clio-coder/ directories must be found by hand\n");
-		return;
-	}
-	if (inventory.dirs.length === 0) {
-		process.stdout.write(
-			`  none: ${inventory.recorded} project director${inventory.recorded === 1 ? "y" : "ies"} recorded, none still has a .clio-coder/\n`,
-		);
-		return;
-	}
-	for (const dir of inventory.dirs) process.stdout.write(`  ${join(dir, ".clio-coder")}\n`);
-	// The cleaner is a clio subcommand, so with --remove-binary this run is
-	// taking the thing that would have run it. Saying "clear these first" after
-	// the launcher is already gone would be advice the operator cannot follow.
-	process.stdout.write(
-		removeBinary
-			? "\nThis run also removes the launcher. Clear each one from inside it first, then re-run:\n"
-			: "\nClear each one from inside it, while clio still runs:\n",
-	);
-	process.stdout.write("  clio-coder context reset --all\n\n");
-}
-
 function launcherLinkPath(): string {
 	const binDir = process.env.CLIO_CODER_BIN_DIR?.trim() || join(homedir(), ".local", "bin");
 	return join(binDir, "clio-coder");
@@ -171,32 +146,12 @@ function ownedCliEntry(): string {
 	try {
 		return realpathSync(entry);
 	} catch {
-		// A source checkout with no build yet, or a dist this process was not
-		// launched from. The unresolved path is still the right identity.
 		return entry;
 	}
 }
 
 type LauncherVerdict = { kind: "absent" } | { kind: "keep"; detail: string } | { kind: "remove"; detail: string };
 
-/**
- * Decide whether the launcher at `linkPath` belongs to this installation.
- *
- * Ownership is identity, not shape. The previous rule accepted any symlink
- * whose target path ended in `dist/cli/index.js`, which is a string test three
- * ways too broad: it matched a live symlink into a *different* clio checkout,
- * and it matched a target that is not even a file, so `clio-coder uninstall
- * --remove-binary` from one installation would silently unlink another one's
- * launcher and leave that installation on disk with no way to start it.
- *
- * A link that resolves to this installation's own entry is ours and goes. A
- * link that resolves anywhere else is somebody's, so it stays with the path it
- * points at and the command that removes it deliberately. A dangling link is
- * the one case with no owner to defer to: the installation it named is gone,
- * unlinking it cannot touch a target that does not exist, and leaving it puts
- * a broken `clio-coder` on PATH after an uninstall that claimed to finish. Those are
- * removed when the name they carry is a clio entry, and reported as dangling.
- */
 function classifyLauncher(linkPath: string): LauncherVerdict {
 	let isSymlink: boolean;
 	try {
@@ -235,22 +190,15 @@ function classifyLauncher(linkPath: string): LauncherVerdict {
 	};
 }
 
-/** Returns the failure when the owned launcher existed but could not be unlinked. */
 function removeLauncher(dryRun: boolean): RemovalFailure | null {
 	const linkPath = launcherLinkPath();
 	const verdict = classifyLauncher(linkPath);
 	if (verdict.kind === "absent") {
-		process.stdout.write(`  binary   absent ${linkPath}\n`);
 		return null;
 	}
 	if (verdict.kind === "keep") {
-		process.stdout.write(`  binary   keep   ${linkPath} (${verdict.detail})\n`);
 		return null;
 	}
-	process.stdout.write(`  binary   remove ${linkPath} ${verdict.detail}\n`);
-	// Shares removePath so the launcher gets the same unlink-the-link handling
-	// every other removed path gets. Removing the link with `rmSync` left a
-	// dangling one in place while reporting that it had gone.
 	return removePath("binary", linkPath, dryRun);
 }
 
@@ -273,11 +221,6 @@ function readNpmPrefix(): string | null {
 			encoding: "utf8",
 			timeout: 5000,
 			stdio: ["ignore", "pipe", "ignore"],
-			// A read-only probe that writes. npm drops a debug log into
-			// $HOME/.npm/_logs on every invocation, so the documented
-			// side-effect-free `--dry-run` path left a file behind in the home
-			// directory it had just finished promising not to touch. `logs-max=0`
-			// keeps npm from retaining any; the notifier is off for the same reason.
 			env: { ...process.env, npm_config_logs_max: "0", npm_config_update_notifier: "false" },
 		});
 		if (result.status !== 0) return null;
@@ -288,16 +231,6 @@ function readNpmPrefix(): string | null {
 	}
 }
 
-/**
- * The `clio` a shell will find, when that is not the launcher this uninstall
- * was about.
- *
- * Both paths are resolved through their symlinks before they are compared: the
- * PATH entry is normally a link into this checkout, and comparing the link to
- * its own target reported two installations where there is one. A PATH entry
- * that cannot be resolved is dangling, which is still something the operator
- * will hit and still not this installation.
- */
 function otherClioOnPath(pathClio: string | null, localLink: string): string | null {
 	if (pathClio === null) return null;
 	if (pathClio === localLink) return null;
@@ -313,10 +246,27 @@ function otherClioOnPath(pathClio: string | null, localLink: string): string | n
 	return pathClio;
 }
 
-function printRemovalGuidance(removeBinaryRequested: boolean): void {
+function detectShellRcEdits(): Array<{ file: string; hasEntry: boolean }> {
+	const candidates = [join(homedir(), ".bashrc"), join(homedir(), ".zshrc"), join(homedir(), ".profile")];
+	const results: Array<{ file: string; hasEntry: boolean }> = [];
+	for (const file of candidates) {
+		if (existsSync(file)) {
+			try {
+				const content = readFileSync(file, "utf8");
+				if (content.includes("clio-coder") || content.includes("CLIO_CODER")) {
+					results.push({ file, hasEntry: true });
+				}
+			} catch {
+				// ignore unreadable
+			}
+		}
+	}
+	return results;
+}
+
+function printRemovalGuidance(removeBinaryRequested: boolean, method: "source" | "npm", localLink: string): void {
 	const pathClio = findClioOnPath();
 	const npmPrefix = readNpmPrefix();
-	const localLink = launcherLinkPath();
 	const currentLauncher = process.argv[1];
 
 	process.stdout.write("\nBinary removal guidance:\n");
@@ -324,10 +274,6 @@ function printRemovalGuidance(removeBinaryRequested: boolean): void {
 	process.stdout.write(`  PATH lookup:      ${pathClio ?? "not currently found"}\n`);
 	if (npmPrefix) process.stdout.write(`  npm prefix bin:   ${join(npmPrefix, "bin")}\n`);
 	process.stdout.write(`  local source bin: ${localLink}${existsSync(localLink) ? "" : "  (absent)"}\n`);
-	// The two lines above are adjacent and were left for the reader to compare.
-	// When they differ they are two installations, and the operator who just read
-	// "removed Clio Coder state" will type `clio-coder` next and reach the other one.
-	// Saying so is the whole point of printing both paths.
 	const survivor = otherClioOnPath(pathClio, localLink);
 	if (survivor !== null) {
 		process.stdout.write(`\nanother clio-coder remains on your PATH at ${survivor}\n`);
@@ -335,9 +281,7 @@ function printRemovalGuidance(removeBinaryRequested: boolean): void {
 		process.stdout.write(`  check it with: ${survivor} --version\n`);
 	}
 	process.stdout.write("\nUse the removal path that matches how you installed Clio Coder:\n");
-	// Re-suggesting the flag the operator just passed reads as though it had not
-	// run, so the source-symlink line only appears when it is still an option.
-	if (!removeBinaryRequested) {
+	if (!removeBinaryRequested && method === "source") {
 		process.stdout.write("  source symlink:  clio-coder uninstall --remove-binary --force\n");
 	}
 	process.stdout.write("  npm global:      npm uninstall -g @iowarp/clio-coder\n");
@@ -347,7 +291,7 @@ function printRemovalGuidance(removeBinaryRequested: boolean): void {
 	process.stdout.write("  rehash    # Zsh\n");
 }
 
-export function runUninstallCommand(argv: ReadonlyArray<string>): number {
+export async function runUninstallCommand(argv: ReadonlyArray<string>): Promise<number> {
 	let args: ParsedUninstallArgs;
 	try {
 		args = parseUninstallArgs(argv);
@@ -360,46 +304,182 @@ export function runUninstallCommand(argv: ReadonlyArray<string>): number {
 		process.stdout.write(HELP);
 		return 0;
 	}
-	if (!args.dryRun && !args.force) {
-		printError("`clio-coder uninstall` requires --force unless you are using --dry-run");
+
+	const isInteractive = Boolean(process.stdin.isTTY);
+	if (!args.dryRun && !args.force && !isInteractive) {
+		printError("`clio-coder uninstall` requires confirmation or --force in non-interactive environments");
 		process.stdout.write(HELP);
 		return 2;
 	}
 
 	const dirs = resolveClioDirs();
-	printHeader("Clio Coder uninstall");
-	const roots = [
-		["config", dirs.config],
-		["data", dirs.data],
-		["state", dirs.state],
-		["cache", dirs.cache],
-	] as const;
-	for (const [label, path] of roots) report(label, path);
+	const method = detectInstallMethod();
+	const presenter = createLifecyclePresenter({ json: args.json });
 
-	// Read the session store before it is removed and report it before the
-	// launcher is: both halves of that ordering are load-bearing.
-	reportProjectContext(projectContextInventory(dirs.state), args.removeBinary);
+	presenter.header("Uninstall Clio Coder", "uninstall");
+	presenter.step(`Installation method: ${method === "source" ? "source symlink" : "npm global"}`);
 
-	// Every root is attempted even after one fails, so a single unwritable
-	// subtree cannot leave the other three behind unreported.
+	const configSize = measurePath(dirs.config);
+	const dataSize = measurePath(dirs.data);
+	const stateSize = measurePath(dirs.state);
+	const cacheSize = measurePath(dirs.cache);
+	const logsPath = join(dirs.state, "audit");
+	const logsSize = measurePath(logsPath);
+	const sessionsPath = join(dirs.state, "sessions");
+	const sessionsSize = measurePath(sessionsPath);
+	const linkPath = launcherLinkPath();
+	const linkSize = measurePath(linkPath);
+	const shellEdits = detectShellRcEdits();
+
+	const items: LifecycleItem[] = [
+		{
+			label: "Data",
+			path: dirs.data,
+			bytes: dataSize.bytes,
+			status: args.keepData ? "keep" : dataSize.exists ? "remove" : "absent",
+			detail: args.keepData ? "kept by --keep-data" : undefined,
+		},
+		{
+			label: "Cache",
+			path: dirs.cache,
+			bytes: cacheSize.bytes,
+			status: cacheSize.exists ? "remove" : "absent",
+		},
+		{
+			label: "Config",
+			path: dirs.config,
+			bytes: configSize.bytes,
+			status: args.keepConfig ? "keep" : configSize.exists ? "remove" : "absent",
+			detail: args.keepConfig ? "kept by --keep-config" : undefined,
+		},
+		{
+			label: "State",
+			path: dirs.state,
+			bytes: stateSize.bytes,
+			status: stateSize.exists ? "remove" : "absent",
+		},
+		{
+			label: "Logs",
+			path: logsPath,
+			bytes: logsSize.bytes,
+			status: logsSize.exists ? "remove" : "absent",
+		},
+		{
+			label: "Sessions",
+			path: sessionsPath,
+			bytes: sessionsSize.bytes,
+			status: sessionsSize.exists ? "remove" : "absent",
+		},
+		{
+			label: "Binary",
+			path: linkPath,
+			bytes: linkSize.bytes,
+			status: linkSize.exists ? (args.removeBinary ? "remove" : "skip") : "absent",
+			detail: !args.removeBinary && linkSize.exists ? "kept (use --remove-binary to unlink)" : undefined,
+		},
+	];
+
+	if (shellEdits.length > 0) {
+		for (const edit of shellEdits) {
+			items.push({
+				label: "Shell PATH",
+				path: edit.file,
+				status: "clean",
+				detail: `in ${shortenPath(edit.file)}`,
+			});
+		}
+	} else {
+		items.push({
+			label: "Shell PATH",
+			path: join(homedir(), ".bashrc"),
+			status: "clean",
+			detail: "no shell configuration edits detected",
+		});
+	}
+
+	presenter.listItems("The following will be removed", items);
+
+	const projectInv = projectContextInventory(dirs.state);
+	if (projectInv.dirs.length > 0) {
+		presenter.rail("Per-project context (not removed by uninstall):");
+		for (const dir of projectInv.dirs) {
+			presenter.substep(shortenPath(join(dir, ".clio-coder")), "–");
+		}
+		presenter.commandAdvice(
+			"To clear project context, run inside each project before removing binary:",
+			"clio-coder context reset --all",
+		);
+		presenter.rail();
+	}
+
+	if (args.dryRun) {
+		presenter.warn("Dry run - no changes made");
+		presenter.done("Done");
+		if (!args.json) printRemovalGuidance(args.removeBinary, method, linkPath);
+		return 0;
+	}
+
+	if (!args.force) {
+		const confirmed = await presenter.confirm("Are you sure you want to uninstall?", false);
+		if (!confirmed) {
+			presenter.warn("Uninstall cancelled");
+			presenter.done("Cancelled");
+			return 0;
+		}
+	}
+
 	const failures: RemovalFailure[] = [];
-	for (const [label, path] of roots) {
-		const failure = removePath(label, path, args.dryRun);
+
+	if (cacheSize.exists) {
+		const failure = removePath("cache", dirs.cache, false);
 		if (failure) failures.push(failure);
+		else presenter.completedStep("Removed Cache");
 	}
-	if (args.removeBinary) {
-		const failure = removeLauncher(args.dryRun);
+
+	if (!args.keepData && dataSize.exists) {
+		const failure = removePath("data", dirs.data, false);
 		if (failure) failures.push(failure);
+		else presenter.completedStep("Removed Data");
 	}
+
+	if (!args.keepConfig && configSize.exists) {
+		const failure = removePath("config", dirs.config, false);
+		if (failure) failures.push(failure);
+		else presenter.completedStep("Removed Config");
+	}
+
+	if (stateSize.exists) {
+		const failure = removePath("state", dirs.state, false);
+		if (failure) failures.push(failure);
+		else presenter.completedStep("Removed State");
+	}
+
+	if (args.removeBinary && linkSize.exists) {
+		const failure = removeLauncher(false);
+		if (failure) failures.push(failure);
+		else presenter.completedStep("Removed Binary launcher");
+	}
+
 	resetXdgCache();
 
 	if (failures.length > 0) {
-		printError("uninstall did not remove everything");
-		reportRemovalFailures(`clio-coder uninstall${args.removeBinary ? " --remove-binary" : ""} --force`, failures);
+		presenter.fail("uninstall did not remove everything");
+		reportRemovalFailures(
+			`clio-coder uninstall${args.removeBinary ? " --remove-binary" : ""}${args.keepConfig ? " --keep-config" : ""}${args.keepData ? " --keep-data" : ""} --force`,
+			failures,
+		);
 		return 1;
 	}
 
-	printOk(args.dryRun ? "uninstall preview complete" : "removed Clio Coder state");
-	printRemovalGuidance(args.removeBinary);
+	if (!args.removeBinary) {
+		if (method === "source") {
+			presenter.commandAdvice("To finish removing the binary, run:", `rm "${linkPath}"`);
+		} else {
+			presenter.commandAdvice("To finish removing the binary, run:", "npm uninstall -g @iowarp/clio-coder");
+		}
+	}
+
+	presenter.message("Thank you for using Clio Coder!");
+	presenter.done("Done");
 	return 0;
 }
