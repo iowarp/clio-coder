@@ -38,7 +38,19 @@ function resolveTargets(targets: ReadonlyArray<EvalSuiteTargetV2>, options: Reso
 	const filtered =
 		options.target === undefined ? [...targets] : targets.filter((target) => target.id === options.target);
 	const selected =
-		filtered.length > 0 ? filtered : options.target === undefined ? [...targets] : [{ id: options.target }];
+		filtered.length > 0
+			? filtered
+			: options.target === undefined
+				? [...targets]
+				: [
+						{
+							id: options.target,
+							// A one-row suite still owns its thinking dimension when the CLI
+							// substitutes the target/model pair. Dropping it silently changes
+							// an off baseline into the target's configured default.
+							...(targets.length === 1 && targets[0]?.thinking !== undefined ? { thinking: targets[0].thinking } : {}),
+						},
+					];
 	return selected.map((target) => ({
 		...target,
 		...(options.model === undefined ? {} : { model: options.model }),

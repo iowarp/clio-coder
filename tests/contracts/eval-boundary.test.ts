@@ -3,6 +3,7 @@ import test from "node:test";
 import { parseEvalArtifactV4 } from "../../src/domains/eval/artifacts/store.js";
 import { compareEvalArtifactsV4, EvalServingConfigurationDriftError } from "../../src/domains/eval/compare/compare.js";
 import type { EvalArtifactV4 } from "../../src/domains/eval/schema/artifact.js";
+import type { EvalSuiteV2 } from "../../src/domains/eval/schema/suite.js";
 import { validateEvalSuiteV2 } from "../../src/domains/eval/schema/validate.js";
 import {
 	EVAL_VERDICT_SCHEMA_V1,
@@ -11,6 +12,7 @@ import {
 	parseEvalVerdictEnvelopeV1,
 	safeParseEvalVerdictEnvelopeV1,
 } from "../../src/domains/eval/schema/verdict.js";
+import { resolveSuiteForRun } from "../../src/domains/eval/suites/resolve.js";
 
 const DIGEST = "a".repeat(64);
 
@@ -42,6 +44,23 @@ test("eval suites fail closed at the versioned schema boundary", () => {
 		contradictoryResult.issues.some((issue) => issue.path === "$.tasks[0].runner.agent"),
 		true,
 	);
+});
+
+test("target/model overrides preserve a single-row suite's thinking dimension", () => {
+	const suite = validSuite() as unknown as EvalSuiteV2;
+	suite.matrix.targets = [{ id: "mini", model: "baseline-model", thinking: "off" }];
+	const resolved = resolveSuiteForRun(suite, { target: "lmstudio", model: "candidate-model" });
+	deepStrictEqual(resolved.matrix.targets, [{ id: "lmstudio", model: "candidate-model", thinking: "off" }]);
+});
+
+test("a target override does not invent thinking when a matrix has multiple source rows", () => {
+	const suite = validSuite() as unknown as EvalSuiteV2;
+	suite.matrix.targets = [
+		{ id: "first", thinking: "off" },
+		{ id: "second", thinking: "high" },
+	];
+	const resolved = resolveSuiteForRun(suite, { target: "lmstudio", model: "candidate-model" });
+	deepStrictEqual(resolved.matrix.targets, [{ id: "lmstudio", model: "candidate-model" }]);
 });
 
 test("eval readers normalize released schema, runner, and provenance identifiers in memory", () => {
