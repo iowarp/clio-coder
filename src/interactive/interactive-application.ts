@@ -46,6 +46,7 @@ import type { createMuxBridge } from "./mux-bridge.js";
 import { createOverlayLifecycle, type OverlayLifecycleController, type OverlayState } from "./overlay-lifecycle.js";
 import { interopOverlaySurface } from "./overlays/interop.js";
 import { paneWatchDecision } from "./pane-policy.js";
+import { describePanesLeftBehind } from "./panes-runtime.js";
 import { writeInputWedgeDump } from "./render-trace.js";
 import { settleChatBeforeSessionSwitch } from "./session-switch-settlement.js";
 import { createSessionTranscript } from "./session-transcript.js";
@@ -1166,6 +1167,11 @@ export async function createInteractiveApplication(deps: InteractiveDeps): Promi
 		},
 		cancelParkedCalls: (reason) => deps.toolRegistry?.cancelParkedCalls(reason),
 		onShutdown: async () => {
+			// The terminal is already stopped here and the domains have not, so this
+			// is the one moment a plain line about the pane host can both be read
+			// and still see the registry that shutdown is about to forget.
+			const leftBehind = mux && mux.mode !== "none" && mux.available() ? describePanesLeftBehind(mux) : null;
+			if (leftBehind !== null) process.stderr.write(`${leftBehind}\n`);
 			try {
 				if (dumpInputWedgeOnTerminate) process.off("SIGTERM", dumpInputWedgeOnTerminate);
 				await deps.onShutdown();

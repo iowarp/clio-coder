@@ -171,10 +171,17 @@ the draft`.
 - `/panes close shell`, `/panes close logs`, `/panes close all` close the
   utility panes.
 - `/quit` closes the docks Clio manages, the files pane and the workers
-  watch pane, and leaves a shell or logs pane you opened. That pane carries
-  Clio's owner token but is not reclaimed by the next session; close it with
-  `/panes close all` before quitting, or from herdr. Whether `/quit` should
-  take those panes with it is tracked as an issue rather than decided here.
+  watch pane, and leaves a shell or logs pane you opened. That is the
+  decided policy (#272): a dock is a Clio surface and goes with the session,
+  while a utility pane is a terminal you may be typing in, and Clio does not
+  kill it behind your back. The next session does not reclaim it either, so
+  `/quit` prints what it left, one line after the terminal is restored:
+
+  ```text
+  Clio left 1 pane open in herdr: bash in panes (wK:p2A). Utility panes stay when a session ends; the docks closed with it. Next time run `/panes close all` before `/quit` to take them with you, or close it now with `herdr pane close <paneId>`.
+  ```
+
+  Nothing is printed when only docks were open.
 
 ## Settings
 
