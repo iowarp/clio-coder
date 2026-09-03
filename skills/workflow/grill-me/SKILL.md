@@ -7,7 +7,7 @@ triggers:
   - stress-test this design
   - poke holes in this idea
   - clarify this plan one question at a time
-version: 0.4.0
+version: 0.5.0
 license: Apache-2.0
 allowed-tools:
   - read
@@ -33,9 +33,54 @@ Run a rigorous, repo-aware interview that turns a vague plan into explicit
 decisions. The point is not to interrogate for sport; it is to surface hidden
 branches before anyone writes code.
 
+## Arguments
+
+```text
+grill me on <plan, feature, or idea>
+```
+
+There is no flag syntax; the trigger is conversational — "grill me on X",
+"stress-test this design", "poke holes in this idea". Whatever the user
+names is the subject. A referenced file, doc, or repo path in the same
+request is Step 1's grounding to read first, not a separate argument.
+
+**This run has no back-and-forth.** There is no second turn in which a user
+reads your question and replies to it — whatever you ask, you must also
+answer yourself, in this same turn, before it ends. Do not write a question
+and stop to wait for a reply, in `ask_user` or in plain chat text; nothing
+is coming. Ending the turn on an open question — even one question, even a
+well-posed one — is this skill's single most common failure and worse than
+skipping the interview format entirely.
+
+There is no operator in a headless run. `ask_user` still executes — it is
+registered and the call succeeds — but nothing answers it: every round
+returns `{cancelled: true}` immediately, as an ordinary result, not an
+error, every time, with no exceptions. Calling it again will not produce a
+different result, so one call is enough to confirm it (not required —
+reasoning from this paragraph alone is just as valid as calling it and
+observing the cancellation). Whichever phase this lands in — even round
+1 — switch immediately to the assumed-confirm monologue for every phase
+from here on, in the same turn: state the question you would have asked,
+give your own best/recommended answer with the reasoning behind it, mark
+it `assumed — confirm`, and move to the next phase. Do not re-call
+`ask_user` hoping a later round behaves differently — that only burns the
+`max_rounds` budget without ever converging. Keep working the phase map,
+phase by phase, all the way through Step 5's decision log before ending
+the turn — never end on "Answer 1/2/3" or any other place a reply is
+expected.
+
+The phase map below is the plan; do not open a task list for it. This
+skill's tool surface is exactly `read`, `grep`, `ls`, `find`, `git`,
+`context`, `code_nav`, and `ask_user` (`context` and `ask_user` are always
+available regardless). `tasks` and `bash` both sit outside it and any call
+to either is refused — inspect a file with `read`, not `bash cat`/`bash
+head`/`bash wc`; locate files with `find` or `ls`, not `bash find`/`bash
+ls`; check repo state with the `git` tool, not shell `git`.
+
 ## Operating Contract
 
-- Use `ask_user` for the interview whenever it is active.
+- In a live session, use `ask_user` for the interview and actually wait for
+  the user's answer between rounds. In a headless run, see Arguments above.
 - For every interview round, call `ask_user` with `mode: "single_question"` and
   exactly one question.
 - On the first ask for a normal grill-me run, set `max_rounds` to a bounded
@@ -45,8 +90,6 @@ branches before anyone writes code.
   alternatives with short tradeoff descriptions.
 - The user answers in natural language. You translate answers into compact
   decision keys and rationale when you call `ask_user` with `action: "complete"`.
-- If `ask_user` is unavailable, ask in plain text, still one question at a
-  time, and keep an internal decision log.
 
 ## Phase Map
 
@@ -69,7 +112,11 @@ or "fill" when the decision is genuinely missing.
 
 Read what the user already gave you. If the task references files, plans, code,
 tests, or project conventions, inspect them before asking. Prefer
-`context(scope="workspace")`, `grep`, `read`, and codewiki tools over guessing.
+`context(scope="workspace")`, `grep`, `read`, `code_nav` (symbol and call-graph
+lookups), and codewiki tools over guessing. Use the `git` tool (`status`,
+`log`, not shell `git`) when the plan references repo state — recent
+history, uncommitted changes, what "decided" actually means for this repo
+right now.
 
 Privately build a phase map:
 
@@ -112,10 +159,26 @@ Good: "Which user should v1 optimize for first?"
 If an answer is vague, ask a follow-up on the same branch. Do not jump to a new
 branch while the current one is still unresolved.
 
+**Headless: there is no reply coming, whether `ask_user` comes back
+`cancelled` or you never call it at all.** Neither is a vague answer to
+follow up on and neither is a signal to try again or to wait — both mean
+there is no operator this run, from round 1 on. Do not call `ask_user`
+again for this or any later phase, and do not phrase a question in plain
+text as if a reply is pending. From here, run every remaining phase
+(including this one) as the assumed-confirm monologue described in
+Arguments, in this same turn, through to the Step 5 decision log. See
+Arguments for the exact treatment.
+
 ### Step 4 - Respect Stop Signals
 
-Stop immediately when the user says "stop", "enough", "later", "done", "next
-time", or cancels the modal. Do not ask another question to confirm stopping.
+This step applies to a live session with a real operator. Stop immediately
+when the user says "stop", "enough", "later", "done", "next time", or cancels
+the modal. Do not ask another question to confirm stopping.
+
+A headless `cancelled` result is not a stop signal from a user — it is the
+absence of an operator (see Step 3). Do not treat it as "the user cancelled
+this session"; treat it as the cue to switch to the assumed-confirm
+monologue and keep going to a complete decision log, not to stop early.
 
 If you have enough decisions to be useful, call:
 
@@ -140,8 +203,11 @@ state the partial decisions and the next unresolved root question.
 
 ### Step 5 - Complete
 
-Before final prose, call `ask_user` with `action: "complete"` and a compact
-`decisions` array. Then write the final decision log:
+In a live session, close with `ask_user` `action: "complete"` and a compact
+`decisions` array before final prose. In a headless run where `ask_user`
+already came back cancelled, skip straight to the decision log below — do
+not attempt another `ask_user` call just to close out; it will cancel too
+and adds nothing. Write the final decision log:
 
 ```markdown
 ## Decision Log - <topic>
@@ -189,4 +255,14 @@ Use this ordering when several questions are possible:
 - Asking about facts discoverable from the repo.
 - Letting `ask_user` hit the round limit without completing the interview.
 - Ending with a summary paragraph instead of the decision log.
-- Treating cancellation as permission to keep asking.
+- Re-calling `ask_user` for a later phase after an earlier round already came
+  back `cancelled` — the answer will not be different; that budget is wasted.
+- Ending a turn on "Answer 1/2/3", "let me know which you prefer", or any
+  other wording that expects a reply in a headless run — there is no next
+  turn for a reply to land in. This is the single most common failure mode
+  of this skill and the one to watch hardest for: asking one question, then
+  stopping, instead of running the assumed-confirm monologue through every
+  remaining phase to the decision log in the same turn.
+- Opening a `tasks` list for the phase map; `tasks` is refused.
+- Treating a headless `cancelled` result as the user's stop signal (Step 4)
+  instead of the absence-of-operator cue it actually is.
