@@ -85,6 +85,15 @@ package ships the engine&#39;s configuration (the profile under
 when an operator asks, from a registry that pins each release&#39;s URL and
 sha256 per platform. A copy already on <code>PATH</code> wins over a vendored one when it
 clears the registry&#39;s minimum version.</p>
+<p>On-demand install is the decision, not a gap (#274). Bundling the two
+programs would add roughly 22 MB for herdr and 32 MB for yazi per platform
+across five platforms, and the release audit in <code>scripts/check-release.mjs</code>
+holds the tarball to 10 MB and the unpacked package to 50 MB as its tripwire
+against packaging defects; one bundled platform alone would trip it. Both
+programs also carry their own licenses and notices, which the package would
+then have to ship. So the first <code>/files</code> on a clean machine is a refusal that
+names the install command, <code>doctor</code> warns row by row with the same command,
+and the download happens only when you ask for it.</p>
 <pre><code class="language-bash">npm install -g @iowarp/clio-coder
 clio-coder configure
 clio-coder tools install herdr     # or: clio-coder panes install
