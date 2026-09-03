@@ -44,16 +44,16 @@ skills:
     sha256: a1df7dee85ef788f257f8b8fbf4c2564cac245c3010d3f60d3b62d721d185f5e
   - name: ship
     path: git/ship
-    version: 0.2.0
-    sha256: 8a22f74e56a6e98c85a38051550d1e1a70c9ca5bb5cf271f4e6448f0f791e0ed
+    version: 0.3.0
+    sha256: f1520cf5888882ce7a0a02f5cb29319b8ea63cff260f201f94a2bc9c9529ce56
   - name: worktree-create
     path: git/worktree-create
-    version: 0.3.0
-    sha256: d40bb0bb9152c4f2e391de1285b6cbd2e67a45492e2cf865b1f82910e30a6bcc
+    version: 0.4.0
+    sha256: 4951bb366342a3e671ad06383da4424061644ddecebdcb11cf5a62a6a2dc1ca5
   - name: worktree-merge
     path: git/worktree-merge
-    version: 0.3.0
-    sha256: bca803a2484b0eac90939377c81f9e66928242f36ac2d86cef9381b1ff997f3e
+    version: 0.4.0
+    sha256: 1bdb12a8045acd28191819616560a5cf4969935bca20c3ccaa9be6a952e0df65
   # ── meta ──
   - name: clio-coder-dev
     path: meta/clio-coder-dev

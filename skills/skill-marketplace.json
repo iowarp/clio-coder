@@ -147,7 +147,7 @@
 				"get this up for review"
 			],
 			"sourceUrl": "https://github.com/iowarp/clio-coder/tree/main/skills/git/ship",
-			"version": "0.2.0",
+			"version": "0.3.0",
 			"audit": "pass",
 			"category": "git"
 		},
@@ -161,7 +161,7 @@
 				"prepare parallel worktrees"
 			],
 			"sourceUrl": "https://github.com/iowarp/clio-coder/tree/main/skills/git/worktree-create",
-			"version": "0.3.0",
+			"version": "0.4.0",
 			"audit": "pass",
 			"category": "git"
 		},
@@ -175,7 +175,7 @@
 				"land finished worktrees"
 			],
 			"sourceUrl": "https://github.com/iowarp/clio-coder/tree/main/skills/git/worktree-merge",
-			"version": "0.3.0",
+			"version": "0.4.0",
 			"audit": "pass",
 			"category": "git"
 		},

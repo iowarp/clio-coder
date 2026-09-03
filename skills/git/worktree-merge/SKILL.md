@@ -6,7 +6,7 @@ triggers:
   - integrate these worktree branches
   - combine parallel branches
   - land finished worktrees
-version: 0.3.0
+version: 0.4.0
 license: Apache-2.0
 allowed-tools:
   - read
@@ -76,20 +76,37 @@ lint). Any failure: report and roll back as above. All green:
 `git checkout <original> && git merge --no-ff <integration>`, then delete
 the integration branch.
 
-## Step 6 — Offer cleanup
+## Step 6 — Close out integration scaffolding
 
-Ask (via `ask_user` when active): remove the merged worktrees and delete
-their feature branches, or keep them? On yes, per branch:
-`git worktree remove worktrees/<branch> && git branch -d <branch>`. Never
-clean up without the answer.
+Delete the throwaway integration branch after the green landing. Then ask
+(via `ask_user` when active) whether to close the merged source branches and
+worktrees; never infer that approval from approval to merge.
+
+On yes, resolve each registered path from `git worktree list --porcelain`
+rather than assuming `worktrees/<branch>`. Inspect tracked changes, untracked
+files, and ignored state that may be evidence rather than rebuildable output.
+For each approved branch:
+
+1. Confirm its result is represented on `<original>`. Ancestry is sufficient
+   for the `--no-ff` merges this skill created; otherwise require the merged PR
+   and resulting commit as evidence rather than trusting a subject match.
+2. Remove its registered path with `git worktree remove <path>`, never `rm -rf`.
+   Use `--force` only when the user explicitly approved discarding the
+   remaining artifacts.
+3. Delete the local branch with `git branch -d <branch>`. A forced branch
+   deletion and any remote branch deletion each require separate approval.
+
+A remote branch, stash, local-only tag, and published release tag are outside
+this cleanup unless the user names them explicitly.
 
 ## Step 7 — Report
 
 Success: integration branch used, each branch with its post-merge test
-result, the full-gate result, the merge into `<original>`, cleanup status
-(with manual commands if kept). Failure: the exact step and branch, current
-state, rollback commands, and how to continue after fixing. Done when one
-of those two reports is delivered and the repo is on `<original>`.
+result, the full-gate result, the merge into `<original>`, and cleanup status.
+Always list the remaining worktrees, local branches, stashes, and local-only
+tags; every survivor needs a named purpose. Failure: the exact step and branch,
+current state, rollback commands, and how to continue after fixing. Done when
+one of those two reports is delivered and the repo is on `<original>`.
 
 ## Red flags
 
@@ -97,4 +114,7 @@ of those two reports is delivered and the repo is on `<original>`.
 - Running a guessed test command instead of the repo's own.
 - Auto-resolving conflicts.
 - Deleting worktrees or branches nobody approved.
+- Assuming a worktree path from its branch name instead of reading Git's
+  registry.
+- Deleting a remote branch, stash, or tag as part of local cleanup.
 - A red full gate absorbed into "mostly passing".
