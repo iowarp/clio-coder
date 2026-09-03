@@ -12,6 +12,7 @@ import { describe, it } from "node:test";
 import { BusChannels, type DispatchFailedPayload } from "../../src/core/bus-events.js";
 import { createSafeEventBus } from "../../src/core/event-bus.js";
 import { emptyCostAggregate } from "../../src/domains/observability/cost.js";
+import { dispatchHasEvidenceLedger } from "../../src/domains/observability/extension.js";
 import type { MetricsView } from "../../src/domains/observability/metrics.js";
 import { createObservabilityProjection, type ProjectionReadModel } from "../../src/domains/observability/projection.js";
 
@@ -49,6 +50,16 @@ function baseFailedPayload(overrides: Partial<DispatchFailedPayload> = {}): Disp
 }
 
 describe("observability run summary: dispatch-failed terminal fields", () => {
+	it("does not auto-build evidence for a pre-admission failure that created no ledger", () => {
+		strictEqual(dispatchHasEvidenceLedger(baseFailedPayload()), false);
+		strictEqual(
+			dispatchHasEvidenceLedger(
+				baseFailedPayload({ lineage: { parentRunId: null, rootRunId: "run-1", attempt: 0, depth: 0 } }),
+			),
+			true,
+		);
+	});
+
 	it("resolves reason to status through the shared resolver (stalled -> dead)", () => {
 		const bus = createSafeEventBus();
 		const projection = createObservabilityProjection(bus, stubReadModel());
