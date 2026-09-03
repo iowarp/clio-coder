@@ -300,11 +300,12 @@ export function lmStudioReasoningLevels(options: ReadonlyArray<string> | undefin
 export function lmStudioReasoningEffort(
 	level: ThinkingLevel,
 	options?: ReadonlyArray<string>,
-): "none" | "off" | "on" | "low" | "medium" | "high" {
-	// LM Studio exposes each model's exact vocabulary through
-	// capabilities.reasoning.allowed_options. Binary models reject the
-	// effort-level spellings (`none`/`low`) even though they mean the same thing.
-	if (options?.includes("on") && options.includes("off")) return level === "off" ? "off" : "on";
+): "none" | "low" | "medium" | "high" | undefined {
+	// `allowed_options` describes the model's binary setting, but LM Studio's
+	// OpenAI-compatible request schema still accepts only effort-level values.
+	// Omit an active override for binary/default-on models; sending `low` works
+	// only through a warning and sending the advertised literal `on` is a 400.
+	if (options?.includes("on") && options.includes("off")) return level === "off" ? "none" : undefined;
 	if (level === "off") return "none";
 	if (level === "medium" && options?.includes("medium") !== false) return "medium";
 	if ((level === "high" || level === "xhigh" || level === "max") && options?.includes("high") !== false) return "high";
