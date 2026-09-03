@@ -140,6 +140,10 @@ export class LifecyclePresenter {
 		return this.report;
 	}
 
+	setMethod(method: string): void {
+		this.report.method = method;
+	}
+
 	header(title: string, command = ""): void {
 		this.report.title = title;
 		this.report.command = command;
