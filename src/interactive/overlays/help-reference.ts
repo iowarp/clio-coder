@@ -110,7 +110,7 @@ export function openHelpOverlay(
 				"**Where it works**: a session started inside a herdr pane with `clio-coder --with-panes` (or `interface.panes.enabled: auto`). Outside herdr `/files` still works as a full-screen pick that returns to the composer; `/panes open logs|shell` do not.",
 				"**Files pane**: `/files` or the Files toggle key (Alt+E by default) opens the file view below the session and moves the keyboard into it; the same key or command closes it. `/files pick` borrows it for one selection. It is off until `interface.panes.files.enabled` is `true`.",
 				"**Picking**: navigate, select with Space for several, then Ctrl+Y (or Enter in pick mode). The paths land in the composer as `@file` mentions and the keyboard returns to the composer.",
-				"**Logs and shell**: `/panes open logs` follows the newest dispatched run's journal; `/panes open shell` opens a shell in the workspace. A second open focuses the pane that is already there. `/panes close <name|all>` closes them; `/quit` closes the docks it manages (files, workers) and leaves a shell or logs pane you opened.",
+				"**Logs and shell**: `/panes open logs` follows the newest dispatched run's journal; `/panes open shell` opens a shell in the workspace. A second open focuses the pane that is already there. `/panes close <name|all>` closes them; `/quit` closes the docks it manages (files, workers), leaves a shell or logs pane you opened, and prints which panes it left and how to close them.",
 				"**Engine**: the files pane runs a vendored file manager installed with `clio-coder tools install yazi`; `clio-coder doctor` and `/panes` say whether it resolved.",
 			],
 		},

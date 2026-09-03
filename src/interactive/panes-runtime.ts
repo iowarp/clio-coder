@@ -89,6 +89,27 @@ function inventory(records: ReadonlyArray<MuxPaneRecord>): ReadonlyArray<PanesIn
 	}));
 }
 
+/**
+ * The sentence `/quit` prints about the panes it did not close, or null when
+ * there are none.
+ *
+ * Policy (#272): docks close with the session and utility panes stay. A dock
+ * is a Clio surface (the files pane, the workers watch pane), so it goes the
+ * way a native application's windows go. A pane opened with `/panes open
+ * shell|logs|<argv>` is a terminal the operator may be typing in, and killing
+ * it on quit is the one thing a pane host must never do behind the operator's
+ * back. The next session does not adopt it either, so without this line the
+ * pane simply sat there with nothing naming it. Computed before the mux
+ * domain stops, because shutdown forgets its registry.
+ */
+export function describePanesLeftBehind(mux: Pick<MuxContract, "list" | "docks">): string | null {
+	const dockIds = new Set(mux.docks().map((dock) => dock.paneId));
+	const left = mux.list().filter((record) => !dockIds.has(record.ref.paneId));
+	if (left.length === 0) return null;
+	const named = left.map((record) => `${record.label} (${record.ref.paneId})`).join(", ");
+	return `Clio left ${left.length} ${left.length === 1 ? "pane" : "panes"} open in herdr: ${named}. Utility panes stay when a session ends; the docks closed with it. Next time run \`/panes close all\` before \`/quit\` to take them with you, or close ${left.length === 1 ? "it" : "them"} now with \`herdr pane close <paneId>\`.`;
+}
+
 export function createPanesRuntime(deps: PanesRuntimeDeps): PanesOperations {
 	const probe = deps.resolveBinaryPath ?? resolveBinary;
 	const journalRoot = deps.journalRoot ?? runEventJournalRoot;
