@@ -91,6 +91,20 @@ describe("contracts/engine reads model.clioCoder", () => {
 		strictEqual(request.chat_template_kwargs, undefined);
 	});
 
+	it("uses LM Studio's advertised on/off vocabulary instead of unsupported effort aliases", async () => {
+		const id = "ornith-1.5-35b-a3b";
+		const server = await fixture(id);
+		const target = model(server, id, "lmstudio", {
+			family: "ornith-1.5",
+			chatTemplateKwargsUnsupported: true,
+			lmstudioReasoningOptions: ["on", "off"],
+		});
+		const on = await lastRequest(server, target, "low");
+		strictEqual(on.reasoning_effort, "on");
+		const off = await lastRequest(server, target, "off");
+		strictEqual(off.reasoning_effort, "off");
+	});
+
 	it("applies the family sampling profile from clioCoder.quirks", async () => {
 		const id = "qwen3.8-27b-dynamo";
 		const server = await fixture(id);

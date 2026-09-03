@@ -433,15 +433,15 @@ function applyLmStudioPayload(
 	if (request?.ttlSeconds !== undefined) next.ttl = request.ttlSeconds;
 	if (request?.draftModel !== undefined) next.draft_model = request.draftModel;
 	if (resolved.thinking.mechanism === "none" || resolved.thinking.mechanism === "always-on") return next;
-	const resolvedEffort =
-		resolved.request.reasoningEffort ??
-		lmStudioReasoningEffort(resolved.thinking.effectiveLevel, runtimeMetadata(model)?.lmstudioReasoningOptions);
+	const resolvedEffort = runtimeMetadata(model)?.lmstudioReasoningOptions
+		? lmStudioReasoningEffort(resolved.thinking.effectiveLevel, runtimeMetadata(model)?.lmstudioReasoningOptions)
+		: (resolved.request.reasoningEffort ?? lmStudioReasoningEffort(resolved.thinking.effectiveLevel));
 	switch (request?.reasoning) {
 		case "off":
-			next.reasoning_effort = "none";
+			next.reasoning_effort = lmStudioReasoningEffort("off", runtimeMetadata(model)?.lmstudioReasoningOptions);
 			break;
 		case "on":
-			next.reasoning_effort = "low";
+			next.reasoning_effort = lmStudioReasoningEffort("low", runtimeMetadata(model)?.lmstudioReasoningOptions);
 			break;
 		case "low":
 		case "medium":

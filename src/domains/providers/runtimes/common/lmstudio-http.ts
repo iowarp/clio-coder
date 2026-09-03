@@ -300,9 +300,12 @@ export function lmStudioReasoningLevels(options: ReadonlyArray<string> | undefin
 export function lmStudioReasoningEffort(
 	level: ThinkingLevel,
 	options?: ReadonlyArray<string>,
-): "none" | "low" | "medium" | "high" {
+): "none" | "off" | "on" | "low" | "medium" | "high" {
+	// LM Studio exposes each model's exact vocabulary through
+	// capabilities.reasoning.allowed_options. Binary models reject the
+	// effort-level spellings (`none`/`low`) even though they mean the same thing.
+	if (options?.includes("on") && options.includes("off")) return level === "off" ? "off" : "on";
 	if (level === "off") return "none";
-	if (options?.includes("on") && !options.includes("medium") && !options.includes("high")) return "low";
 	if (level === "medium" && options?.includes("medium") !== false) return "medium";
 	if ((level === "high" || level === "xhigh" || level === "max") && options?.includes("high") !== false) return "high";
 	return "low";
