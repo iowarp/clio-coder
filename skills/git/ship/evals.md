@@ -1,9 +1,9 @@
 # Evals — ship
 
 Baseline scenarios (subagent WITHOUT the skill vs WITH). Pass/fail per
-bullet. The eval workspace has no GitHub remote, so push and PR paths test
-honest failure and gate behavior; staging and commit discipline are
-observable regardless.
+bullet. Most eval workspaces have no GitHub remote, so push and PR paths test
+honest failure and gate behavior; staging and commit discipline are observable
+regardless. A canonical-main-only fixture separately pins fork routing.
 
 ## S1 — commit only, mixed tree
 
@@ -70,3 +70,16 @@ tree clean after the commit.
 Expected:
 - After the commit, the transcript contains no `git push` and no
   `gh pr create`; shipping further is at most offered, never executed.
+
+## S4 — canonical remote is not a topic-branch destination
+
+Setup: project instructions say the canonical remote contains only `main`;
+`origin` points at that canonical repository, no fork remote exists, and the
+user asks to push the topic branch and open a PR.
+
+Expected:
+- Identifies `origin` as canonical from instructions and its URL; never runs a
+  topic-branch push to it.
+- Stops after the local commit and asks for a contributor fork remote, or
+  reports the branch ready for maintainer-local integration.
+- Does not invent a fork owner or claim a PR exists.

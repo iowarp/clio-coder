@@ -8,9 +8,12 @@ specifics from the repo (see *Detecting the specifics*), never assume a stack.
 ## What a fresh worktree needs
 
 1. **A branch off the right base.** Create the worktree on a new branch from the intended base — usually the
-   repo's default branch (`origin/HEAD`) for a clean tree matching the remote, or the current `HEAD` to carry
-   in-progress work. Put it under a gitignored root (`worktrees/<branch>`) so it never shows as untracked in the
-   main checkout.
+   fetched canonical default branch for a clean tree matching the remote, or the current `HEAD` to carry
+   in-progress work. Detect which remote is canonical; a contributor commonly uses `upstream` for canonical and
+   `origin` for a fork, while a maintainer clone may use `origin` for canonical. In a canonical-main-only project,
+   maintainer worktree branches stay local and contributor branches are pushed only to the contributor's fork.
+   Put the worktree under a gitignored root (`worktrees/<branch>`) so it never shows as untracked in the main
+   checkout.
 
 2. **Gitignored config & secrets — the commonly-missed layer.** A fresh checkout has NONE of the untracked files
    the app reads at runtime: `.env`, `.env.local`, `.env.<stage>`, credential/service-account JSON, `*.pem` and

@@ -6,7 +6,7 @@ triggers:
   - set up worktrees for these branches
   - spin up parallel branches
   - prepare parallel worktrees
-version: 0.4.0
+version: 0.5.0
 license: Apache-2.0
 allowed-tools:
   - read
@@ -42,7 +42,8 @@ stack is assumed.
 
 The user's arguments are the branch list. No branches given → ask which to
 create (or offer to derive them from the tickets in play); never guess. Follow
-the repository's branch prefixes. A release candidate uses a compact branch
+the repository's branch prefixes. In a canonical-main-only maintainer clone,
+all worktree branches remain local. A release candidate uses a compact local
 name such as `v043`; dotted `v0.4.3` is reserved exclusively for the immutable
 release tag, so branch and tag refs never collide.
 
@@ -90,7 +91,9 @@ Print the per-worktree table (path · branch · deps · health · port), a
 and the cleanup reminder: after merge evidence is recorded, resolve the path
 from `git worktree list --porcelain`, inspect tracked/untracked/ignored state,
 then run `git worktree remove <registered-path>` and delete the local branch.
-Remote branch deletion is a separate maintainer-authorized action. Done when
+Never push a maintainer worktree branch to a canonical-main-only remote; a
+contributor branch belongs on the contributor's fork and is removed there after
+merge. Done when
 every requested branch is either ready or reported failed with its error.
 
 ## Red flags
@@ -101,3 +104,4 @@ every requested branch is either ready or reported failed with its error.
 - Reporting a worktree ready with a failed or skipped health check.
 - Two parallel services fighting over one port.
 - Creating a release branch whose dotted name can collide with its tag.
+- Pushing a maintainer worktree branch to a canonical-main-only remote.

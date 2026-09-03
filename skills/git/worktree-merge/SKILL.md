@@ -6,7 +6,7 @@ triggers:
   - integrate these worktree branches
   - combine parallel branches
   - land finished worktrees
-version: 0.4.0
+version: 0.5.0
 license: Apache-2.0
 allowed-tools:
   - read
@@ -93,18 +93,24 @@ For each approved branch:
 2. Remove its registered path with `git worktree remove <path>`, never `rm -rf`.
    Use `--force` only when the user explicitly approved discarding the
    remaining artifacts.
-3. Delete the local branch with `git branch -d <branch>`. A forced branch
-   deletion and any remote branch deletion each require separate approval.
+3. Delete the local branch with `git branch -d <branch>`. A forced deletion
+   requires separate approval. If the work came through a contributor PR,
+   separately offer to delete only its merged branch on that contributor's
+   fork; canonical remote branches are never cleanup targets.
 
-A remote branch, stash, local-only tag, and published release tag are outside
-this cleanup unless the user names them explicitly.
+Maintainer source and integration branches remain local throughout; never push
+them to a canonical-main-only remote. For contributor work, only the merged
+branch on the contributor's fork is eligible for remote cleanup, and only when
+authorized. A stash, local-only tag, and published release tag are outside this
+cleanup unless the user names them explicitly.
 
 ## Step 7 — Report
 
 Success: integration branch used, each branch with its post-merge test
 result, the full-gate result, the merge into `<original>`, and cleanup status.
-Always list the remaining worktrees, local branches, stashes, and local-only
-tags; every survivor needs a named purpose. Failure: the exact step and branch,
+Always list the remaining worktrees, local branches, stashes, local-only tags,
+and canonical remote heads; a canonical-main-only project expects exactly its
+base branch. Every survivor needs a named purpose. Failure: the exact step and branch,
 current state, rollback commands, and how to continue after fixing. Done when
 one of those two reports is delivered and the repo is on `<original>`.
 
@@ -116,5 +122,7 @@ one of those two reports is delivered and the repo is on `<original>`.
 - Deleting worktrees or branches nobody approved.
 - Assuming a worktree path from its branch name instead of reading Git's
   registry.
-- Deleting a remote branch, stash, or tag as part of local cleanup.
+- Pushing an integration or maintainer source branch to a canonical-main-only
+  remote.
+- Deleting a canonical branch, stash, or tag as part of local cleanup.
 - A red full gate absorbed into "mostly passing".

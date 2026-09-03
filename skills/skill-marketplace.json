@@ -138,7 +138,7 @@
 		},
 		{
 			"name": "ship",
-			"description": "Ships finished work: stages reviewed paths, writes one atomic conventional commit referencing the issue, then pushes and opens the PR only on explicit intent. Not for producing the change; use fix-issue.",
+			"description": "Ships finished work: writes one reviewed atomic commit, keeps maintainer branches local, or pushes a contributor branch to their fork and opens a PR only on explicit intent. Not for producing the change; use fix-issue.",
 			"triggers": [
 				"ship this",
 				"commit this",
@@ -147,7 +147,7 @@
 				"get this up for review"
 			],
 			"sourceUrl": "https://github.com/iowarp/clio-coder/tree/main/skills/git/ship",
-			"version": "0.3.0",
+			"version": "0.4.0",
 			"audit": "pass",
 			"category": "git"
 		},
@@ -161,7 +161,7 @@
 				"prepare parallel worktrees"
 			],
 			"sourceUrl": "https://github.com/iowarp/clio-coder/tree/main/skills/git/worktree-create",
-			"version": "0.4.0",
+			"version": "0.5.0",
 			"audit": "pass",
 			"category": "git"
 		},
@@ -175,7 +175,7 @@
 				"land finished worktrees"
 			],
 			"sourceUrl": "https://github.com/iowarp/clio-coder/tree/main/skills/git/worktree-merge",
-			"version": "0.4.0",
+			"version": "0.5.0",
 			"audit": "pass",
 			"category": "git"
 		},
