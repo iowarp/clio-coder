@@ -7,18 +7,15 @@ triggers:
   - parse don't validate
   - illegal states unrepresentable
   - functional core imperative shell
-version: 0.2.0
+version: 0.3.0
 license: Apache-2.0
-allowed-tools:
-  - read
-  - grep
 clio-coder:
   registry-id: iowarp/clio-coder
   source-url: https://github.com/iowarp/clio-coder/tree/main/skills/coding/coding-standards
   audit: pass
   provenance: adapted
   origin: https://github.com/dmmulroy/skills/tree/main/coding-standards
-  eval-status: smoke-checked
+  eval-status: scenarios-recorded
   model-size: any
   provisional: true
   agents:
@@ -35,6 +32,44 @@ existing patterns at the nearest boundary instead of copying them into new
 code, and never rewrite unrelated old code without an explicit migration
 request. **The host project's own documented standards always win over
 this file.**
+
+This skill declares no tool surface on purpose: it rides along with
+whatever task is in flight (writing, refactoring, reviewing), so it must
+not narrow the tools that task needs.
+
+## Arguments
+
+```text
+/skill coding-standards [<task>]
+```
+
+- With a task: do the task, and hold every new or changed TypeScript line
+  to the rules below. Keep using the ordinary `write`, `edit`, and `bash`
+  tools; the standards change what you write, not how you write it.
+- Without a task: answer as a reference. Quote the relevant rule and show
+  a before/after snippet; do not touch the repository.
+
+## How to apply
+
+1. Read the host project's instruction file and one or two existing
+   modules near the change. If the project pins its own conventions on
+   errors, validation, or module layout, those win; note the conflict in
+   one line and follow the host.
+2. Before writing, state in your reply which rules the change touches (for
+   a parser: errors, parse-don't-validate, illegal states; for a service:
+   modules). This is the checklist for the code you are about to write.
+3. Write the code. Then run the project's typecheck (`npx tsc --noEmit` or
+   the repo script) with one plain `bash` call; never use `$(...)` or
+   backticks in the command.
+4. If you want runtime evidence beyond the typecheck, prefer a single
+   `node -e` (or the project's runtime) call. If you must write a smoke
+   script, put it under `.clio-coder/scratch/` and remove it with plain
+   `rm <file>`; `rm -f`, `rm -r`, `find -delete`, and moving files to
+   `/tmp` are all refused by the safety net in a headless run, and every
+   refused attempt is a wasted turn.
+5. Finish with a short audit of the diff against the checklist: each rule
+   either satisfied, or deliberately not, with the reason. `git status`
+   must show only the files the task asked for.
 
 ## Errors
 

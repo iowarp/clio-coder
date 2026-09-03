@@ -6,20 +6,20 @@ skills:
   # ── coding ──
   - name: ast-grep
     path: coding/ast-grep
-    version: 0.2.0
-    sha256: d21a4b330d1488c43348eaee7fbeec24bb8a1d7c4e536059db02fd9377c62dfa
+    version: 0.3.0
+    sha256: 0a72f4c906303f550be78f80a927da7e24e5c2076f058ccafdec80dfbed275af
   - name: coding-standards
     path: coding/coding-standards
-    version: 0.2.0
-    sha256: da21ad373252575934ad484a2926e8c7827880c9d91b4e0c656fe92d71335063
+    version: 0.3.0
+    sha256: 3ee3481430591a8f8d041bd1c5fa078becd301d88eb49610e41d056494d3413d
   - name: prototype
     path: coding/prototype
-    version: 0.3.0
-    sha256: 151bd153752874d5970dd06bc15df14c0037631283d148195a8fa75c5a59a45b
+    version: 0.4.0
+    sha256: 0f82df386c2ee565b0e968216ece746b1a11b4acd79676812074c1a406b698e1
   - name: tdd
     path: coding/tdd
-    version: 0.3.0
-    sha256: f3a03655864d4981791218b085d09f8fe836d0795012cf4c8c07b430730abb2a
+    version: 0.4.0
+    sha256: 63b88f29424091a92a8d8c0cc94474ae7e78af76491aea17e6f54af66f32db2d
   # ── context ──
   - name: context-handoff
     path: context/context-handoff

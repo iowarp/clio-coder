@@ -12,7 +12,7 @@
 				"grep returns too much noise"
 			],
 			"sourceUrl": "https://github.com/iowarp/clio-coder/tree/main/skills/coding/ast-grep",
-			"version": "0.2.0",
+			"version": "0.3.0",
 			"audit": "pass",
 			"category": "coding"
 		},
@@ -27,7 +27,7 @@
 				"functional core imperative shell"
 			],
 			"sourceUrl": "https://github.com/iowarp/clio-coder/tree/main/skills/coding/coding-standards",
-			"version": "0.2.0",
+			"version": "0.3.0",
 			"audit": "pass",
 			"category": "coding"
 		},
@@ -42,7 +42,7 @@
 				"what should this UI look like"
 			],
 			"sourceUrl": "https://github.com/iowarp/clio-coder/tree/main/skills/coding/prototype",
-			"version": "0.3.0",
+			"version": "0.4.0",
 			"audit": "pass",
 			"category": "coding"
 		},
@@ -57,7 +57,7 @@
 				"reproduce the bug with a test"
 			],
 			"sourceUrl": "https://github.com/iowarp/clio-coder/tree/main/skills/coding/tdd",
-			"version": "0.3.0",
+			"version": "0.4.0",
 			"audit": "pass",
 			"category": "coding"
 		},
