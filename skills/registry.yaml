@@ -90,8 +90,8 @@ skills:
     sha256: e9017412b6261492b987fe27f7573b72013a340c0d3eb0e7e568fd588b22a214
   - name: backlog
     path: planning/backlog
-    version: 0.3.0
-    sha256: af92244d2ba8723b656ce00d531df88850c7886915653751e7ba59957b5454be
+    version: 0.4.0
+    sha256: e634e2fb5035731e7daa2ef246ae4ab3ef5d792b0b604f4216dfe10335ee10c0
   - name: prd
     path: planning/prd
     version: 0.4.0
