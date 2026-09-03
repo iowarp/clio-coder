@@ -7,7 +7,7 @@ triggers:
   - code-shaped contracts
   - implementation-ready technical specification
   - specify execution flows
-version: 0.2.0
+version: 0.3.0
 license: Apache-2.0
 disable-model-invocation: true
 allowed-tools:
@@ -42,6 +42,46 @@ TypeScript pseudocode plus end-to-end execution flows. Prose explains why;
 types and call stacks define what changes. Design only — never implement,
 and save a file only when the user asks; otherwise return the spec inline.
 
+## Arguments
+
+```text
+/skill tech-spec <the change, in a few sentences, or a path to read first>
+```
+
+- The text is the design problem: what's changing and why. A doc or file
+  path named in the request (a PRD, an architecture decision, a module) is
+  context to read, not more arguments — see "Load local context" below.
+- Nothing is required beyond some text; a blank invocation falls straight
+  to Path B's first question rather than inventing a change to spec.
+- **Output defaults to inline.** Write a file only when the request says
+  so explicitly — "save it", "write it to `<path>`", "put it in `docs/`".
+  Absent that, the finished spec is the reply itself: no file, in this run
+  or a prior one in the same session, gets created for it. This holds
+  regardless of which path below runs or how long the spec is — length is
+  never itself a reason to write a file.
+- Disabled for model self-invocation and requires the `tdd` skill be
+  installed to reference in the TDD Test Plan section; both are frontmatter
+  facts, not something to explain to the user unless asked.
+
+There is no operator in a headless run: `ask_user` either isn't registered
+or nothing answers it, and a call that goes unanswered will not resolve
+differently on a second try. In Path B (below), that means: state the
+question, your recommendation grounded in the codebase and any docs read
+(or the most defensible engineering default when nothing grounds it), and
+the reasoning; adopt the recommendation; mark it `assumed — confirm`; move
+to the next question. Run every question this way, end to end, not just
+the first — the interview is the plan to execute, not an outline to
+abbreviate because no one answered the opening question. Never invent a
+fact or a codebase detail to back an assumption; anything genuinely
+unknown becomes an Open Question in the spec, not a plausible guess. This
+degrades the interview only — it never licenses writing a file that
+wasn't asked for.
+
+The steps below are the plan; do not open a task list for them. `tasks`
+sits outside this skill's tool surface and any call to it is refused.
+`bash` is also outside this skill's tool surface — verify what you wrote
+with `grep`, `read`, and `find`, never `bash`.
+
 ## Choose the path
 
 - **Path A — convert context to spec**: the conversation, docs, or codebase
@@ -51,6 +91,8 @@ and save a file only when the user asks; otherwise return the spec inline.
   with a recommended answer per question (the grill-me posture); anything
   answerable by exploring the codebase is explored, not asked. When context
   suffices, run Path A. Never invent requirements to skip the interview.
+  See Arguments above for how a headless run carries every question
+  through instead of stalling on the first one.
 
 ## Path A
 
@@ -110,7 +152,8 @@ contracts, seams, call stacks, or the test plan for being hard):
 
 The spec follows the outline, every boundary has a typed contract or a
 stated reason it needs none, every behavior has a call stack, unknowns are
-open questions rather than invented design, and nothing was implemented.
+open questions rather than invented design, nothing was implemented, and
+no file was written unless the request asked for one.
 
 ## Red flags
 
@@ -119,3 +162,11 @@ open questions rather than invented design, and nothing was implemented.
 - Speculative seams no invariant, boundary, or test earns.
 - The same rule restated in three sections.
 - "While I'm here" implementation.
+- Writing the spec to a file when nothing in the request asked for one —
+  the default output is always the inline reply.
+- A Path B question left unanswered instead of run as the assumed-confirm
+  monologue, or an interview skipped straight into Path A without ever
+  asking the first question.
+- Opening a task list for the steps above; `tasks` is refused. Reaching for
+  `bash` to grep or verify the spec; `bash` is not in this skill's tool
+  surface and the call is refused — use `grep`/`read`/`find`.
