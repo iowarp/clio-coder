@@ -132,8 +132,8 @@ skills:
     sha256: 1ecd53397ce97ec78294cc9e8c7291b20e2e7d740bcde8ea999739d359c91055
   - name: grill-me
     path: workflow/grill-me
-    version: 0.4.0
-    sha256: 9cc07b89a4a8a3ecd4fb73d2cd9f7893d272d26f592ea3eb9883ff44069a2cea
+    version: 0.5.0
+    sha256: f48687566a8419aa52f30f8234f8dcfd050eaefdfdcfa281723d3603f3e08fcc
   - name: workflow-distiller
     path: workflow/workflow-distiller
     version: 0.3.0

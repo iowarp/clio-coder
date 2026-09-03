@@ -464,7 +464,7 @@
 				"clarify this plan one question at a time"
 			],
 			"sourceUrl": "https://github.com/iowarp/clio-coder/tree/main/skills/workflow/grill-me",
-			"version": "0.4.0",
+			"version": "0.5.0",
 			"audit": "pass",
 			"category": "workflow"
 		},
