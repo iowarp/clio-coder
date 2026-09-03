@@ -7,7 +7,7 @@ triggers:
   - where were we
   - get up to speed
   - resume repository work after a break
-version: 0.3.0
+version: 0.4.0
 license: Apache-2.0
 allowed-tools:
   - read
@@ -45,23 +45,43 @@ reconstructs orientation a transcript alone doesn't carry.
 
 Skip it for a one-line question in a repo you already have full context on.
 
+## Arguments
+
+```text
+/skill context-prime [<focus hint>]
+```
+
+- With a focus hint: treat it as a candidate for the orientation's `Next`
+  line, not as ground truth — confirm or contradict it against the handoff
+  and git state, the same as any other suggested focus.
+- Without one: orient from the handoff, constitution, and git state alone.
+
+The six steps below are the plan; do not open a task list for them. `tasks`
+sits outside this skill's tool surface and any call to it is refused.
+
 ## Procedure
 
 Work top to bottom; stop early once you have enough to state where things stand.
 
-1. **Constitution.** Read the project's instruction file if present, in order of
-   preference: `CLIO-CODER.md`, then `AGENTS.md`, `CLAUDE.md`, else `README.md`. Note
-   hard invariants and workflow rules. Do not re-derive what it already states.
+1. **Constitution.** Read exactly one: the first of `CLIO-CODER.md`,
+   `AGENTS.md`, `CLAUDE.md`, `README.md` that exists, in that order. Note
+   hard invariants and workflow rules, then stop — do not also open the
+   others "for completeness"; a fallback file is read only when every
+   name ahead of it is absent.
 
 2. **Last handoff.** Read the newest `.clio-coder/handoffs/handoff-*.md`; if none,
    fall back to `NEXT-SESSION.md` at the repo root. This is the previous
    session's brief: focus, work-in-progress, blockers, suggested skills.
 
-3. **Git state.** Capture branch, uncommitted changes, and recent commits
-   (`context(scope="workspace")` and `git` (op=status) when available, else
-   `git status -sb` and `git log --oneline -10`). Reconcile against the
-   handoff's "work in progress" — flag anything that drifted (committed
-   since, reverted, conflicts).
+3. **Git state.** `context(scope="workspace")` already carries a git
+   snapshot; read it first. Fill any gap with the `git` tool directly:
+   `op="status"` for branch and dirty files, `op="log"` (`limit: 10`) for
+   recent commits. `bash` is not in this skill's tool surface — there is no
+   shell fallback, "run `git status` yourself" is never the move here.
+   Reconcile against the handoff's "work in progress": flag anything that
+   drifted — work committed since the handoff, work reverted, a WIP item
+   that is now finished, or a "completed" claim the code plainly doesn't
+   back up.
 
 4. **Active signals.** Check `.clio-coder/state.json` and codewiki freshness if
    present. Treat stale summaries as hints, never as authority over source.
@@ -72,11 +92,17 @@ Work top to bottom; stop early once you have enough to state where things stand.
    any the handoff suggested for the next step; do not scan the filesystem
    for them.
 
-6. **Orient.** Produce a short orientation (template below) and **confirm the
-   focus with the user before non-trivial action** — via `ask_user` with the
-   handoff's suggested focus as the first option when the tool is available,
-   else in plain text. If the handoff and git state disagree, surface the
-   conflict rather than picking silently.
+6. **Orient and confirm.** Produce the short orientation (template below)
+   ending with the focus to confirm. `ask_user` is only registered in an
+   interactive session with an operator present; call it there, offering
+   the handoff's suggested focus as the first option. **A headless run has
+   no operator: `ask_user` is not registered and nothing will answer it
+   even if you call it.** If it is not among your available tools, do not
+   attempt it and do not keep re-reading files hoping for more certainty
+   first — state the focus as the orientation's `Next` line, in plain
+   text, and stop; that written statement is the confirmation for this
+   run. If the handoff and git state disagree, surface the conflict rather
+   than picking silently.
 
 ## Orientation template
 
@@ -94,7 +120,11 @@ Work top to bottom; stop early once you have enough to state where things stand.
 ## Boundaries
 
 - Bounded by design: summarize and reference by path; do not dump file trees or
-  copy long documents into context.
+  copy long documents into context. Read only what the steps above name — the
+  one constitution file that wins the fallback order, the newest handoff, git
+  and context state, `.clio-coder/state.json`/codewiki freshness. A source
+  file, script, or doc none of those steps named stays unread; curiosity
+  reads work against the read-only design as surely as an edit would.
 - Read-only. context-prime orients; it does not start editing. The user confirms
   the focus first.
 - Degrade gracefully: missing `CLIO-CODER.md` → next constitution file; missing Clio
