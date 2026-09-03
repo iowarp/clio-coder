@@ -385,6 +385,14 @@
 <td>Skips npm install during upgrade tests (<code>src/cli/upgrade.ts</code>).</td>
 </tr>
 <tr>
+<td><code>CLIO_CODER_TEST_UPGRADE_AVAILABLE</code></td>
+<td>Sets mock available version for upgrade tests (<code>src/cli/upgrade.ts</code>).</td>
+</tr>
+<tr>
+<td><code>CLIO_CODER_TEST_UPGRADE_FAIL</code></td>
+<td>Injects mock failures (<code>npm</code> or <code>migration</code>) for upgrade tests (<code>src/cli/upgrade.ts</code>).</td>
+</tr>
+<tr>
 <td><code>CLIO_CODER_TEST_STAGE1_DELAY_MS</code>, <code>CLIO_CODER_TEST_STAGE1_FAIL</code></td>
 <td><code>NODE_ENV=test</code>-only, bounded instant-shell interleaving and injected hydration failure seams for the built PTY acceptance suite (<code>src/cli/clio.ts</code>).</td>
 </tr>

@@ -2,32 +2,30 @@ import { spawn } from "node:child_process";
 import { initializeClioHome } from "../core/init.js";
 import { clioStateDir } from "../core/xdg.js";
 import { detectInstallMethod } from "../domains/lifecycle/install-method.js";
-import { listMigrations, runPending } from "../domains/lifecycle/migrations/index.js";
+import { listMigrations, readMigrationManifest, runPending } from "../domains/lifecycle/migrations/index.js";
 import { readStateInfo } from "../domains/lifecycle/state.js";
 import { getVersionInfo } from "../domains/lifecycle/version.js";
-import { printError, printHeader, printOk } from "./shared.js";
+import { createLifecyclePresenter, shortenPath } from "./lifecycle-presenter.js";
+import { printError } from "./shared.js";
 
 const CHANNELS = ["latest", "beta", "dev"] as const;
 type Channel = (typeof CHANNELS)[number];
 
-const HELP = `clio-coder upgrade [--dry-run] [--channel=<latest|beta|dev>] [--skip-migrations]
+const HELP = `clio-coder upgrade [--dry-run] [--channel=<latest|beta|dev>] [--skip-migrations] [--json]
 
-Refresh state metadata and apply pending data-dir migrations. An npm-installed
-binary is also reinstalled via npm; a source-checkout install instead prints
+Upgrade Clio Coder and apply pending state migrations. An npm-installed
+binary is reinstalled via npm; a source-checkout install instead prints
 the git-based update steps and never touches the global npm prefix.
 
 Flags:
   --dry-run             print planned actions without changing anything
   --channel=<chan>      npm dist-tag to install (latest|beta|dev). npm installs only.
   --skip-migrations     skip migrations after the install step
+  --json                emit machine-readable JSON output
+  --help, -h            show this message
 `;
 
 const SOURCE_UPGRADE_STEPS = ["git pull", "npm run install:local", "hash -r"] as const;
-
-function printSourceUpgradeSteps(): void {
-	process.stdout.write("[upgrade] source checkout install: update the code with:\n");
-	for (const step of SOURCE_UPGRADE_STEPS) process.stdout.write(`  ${step}\n`);
-}
 
 interface UpgradeOptions {
 	dryRun: boolean;
@@ -35,6 +33,7 @@ interface UpgradeOptions {
 	skipMigrations: boolean;
 	help: boolean;
 	postInstall: boolean;
+	json: boolean;
 }
 
 function parseUpgradeArgs(argv: ReadonlyArray<string>): UpgradeOptions {
@@ -43,6 +42,7 @@ function parseUpgradeArgs(argv: ReadonlyArray<string>): UpgradeOptions {
 	let skipMigrations = false;
 	let help = false;
 	let postInstall = false;
+	let json = false;
 	for (const arg of argv) {
 		if (arg === "upgrade") continue;
 		if (arg === "--help" || arg === "-h") {
@@ -61,6 +61,10 @@ function parseUpgradeArgs(argv: ReadonlyArray<string>): UpgradeOptions {
 			postInstall = true;
 			continue;
 		}
+		if (arg === "--json") {
+			json = true;
+			continue;
+		}
 		if (arg.startsWith("--channel=")) {
 			const value = arg.slice("--channel=".length);
 			if (!(CHANNELS as ReadonlyArray<string>).includes(value)) {
@@ -71,35 +75,34 @@ function parseUpgradeArgs(argv: ReadonlyArray<string>): UpgradeOptions {
 		}
 		throw new Error(`unknown upgrade argument: ${arg}`);
 	}
-	return { dryRun, channel, skipMigrations, help, postInstall };
+	return { dryRun, channel, skipMigrations, help, postInstall, json };
 }
 
-function streamPrefixed(source: NodeJS.ReadableStream, sink: NodeJS.WritableStream): void {
-	let buffered = "";
-	source.on("data", (chunk: Buffer | string) => {
-		buffered += typeof chunk === "string" ? chunk : chunk.toString("utf8");
-		let idx = buffered.indexOf("\n");
-		while (idx !== -1) {
-			const line = buffered.slice(0, idx);
-			buffered = buffered.slice(idx + 1);
-			// A spawned `clio-coder upgrade --post-install` prefixes its own lines;
-			// wrapping those again printed `[upgrade] [upgrade] ...` for every row.
-			sink.write(line.startsWith("[upgrade] ") ? `${line}\n` : `[upgrade] ${line}\n`);
-			idx = buffered.indexOf("\n");
-		}
-	});
-	source.on("end", () => {
-		if (buffered.length > 0) sink.write(`[upgrade] ${buffered}\n`);
-	});
+async function fetchAvailableVersion(channel: Channel, noNetwork: boolean): Promise<string | null> {
+	if (process.env.CLIO_CODER_TEST_UPGRADE_AVAILABLE) {
+		return process.env.CLIO_CODER_TEST_UPGRADE_AVAILABLE;
+	}
+	if (noNetwork) return null;
+	try {
+		const res = await fetch(`https://registry.npmjs.org/@iowarp/clio-coder/${channel}`, {
+			headers: { Accept: "application/json" },
+			signal: AbortSignal.timeout(2500),
+		});
+		if (!res.ok) return null;
+		const data = (await res.json()) as { version?: unknown };
+		return typeof data.version === "string" ? data.version : null;
+	} catch {
+		return null;
+	}
 }
 
 async function runNpmInstall(channel: Channel): Promise<void> {
+	if (process.env.CLIO_CODER_TEST_UPGRADE_FAIL === "npm") {
+		throw new Error("npm ERR! 404 Not Found - mock failure");
+	}
 	const args = ["install", "-g", `@iowarp/clio-coder@${channel}`];
-	process.stdout.write(`[upgrade] npm ${args.join(" ")}\n`);
 	await new Promise<void>((resolve, reject) => {
 		const child = spawn("npm", args, { stdio: ["ignore", "pipe", "pipe"] });
-		streamPrefixed(child.stdout, process.stdout);
-		streamPrefixed(child.stderr, process.stderr);
 		child.on("error", reject);
 		child.on("exit", (code) => {
 			if (code === 0) resolve();
@@ -109,12 +112,12 @@ async function runNpmInstall(channel: Channel): Promise<void> {
 }
 
 async function runDoctorFixAfterInstall(): Promise<void> {
+	if (process.env.CLIO_CODER_TEST_UPGRADE_FAIL === "doctor") {
+		throw new Error("mock doctor fix failure");
+	}
 	const args = ["doctor", "--fix"];
-	process.stdout.write(`[upgrade] clio-coder ${args.join(" ")}\n`);
 	await new Promise<void>((resolve, reject) => {
 		const child = spawn("clio-coder", args, { stdio: ["ignore", "pipe", "pipe"] });
-		streamPrefixed(child.stdout, process.stdout);
-		streamPrefixed(child.stderr, process.stderr);
 		child.on("error", reject);
 		child.on("exit", (code) => {
 			if (code === 0) resolve();
@@ -126,11 +129,8 @@ async function runDoctorFixAfterInstall(): Promise<void> {
 async function runPostInstallUpgrade(opts: UpgradeOptions): Promise<void> {
 	const args = ["upgrade", "--post-install", `--channel=${opts.channel}`];
 	if (opts.skipMigrations) args.push("--skip-migrations");
-	process.stdout.write(`[upgrade] clio-coder ${args.join(" ")}\n`);
 	await new Promise<void>((resolve, reject) => {
 		const child = spawn("clio-coder", args, { stdio: ["ignore", "pipe", "pipe"] });
-		streamPrefixed(child.stdout, process.stdout);
-		streamPrefixed(child.stderr, process.stderr);
 		child.on("error", reject);
 		child.on("exit", (code) => {
 			if (code === 0) resolve();
@@ -152,25 +152,40 @@ export async function runUpgradeCommand(argv: ReadonlyArray<string>): Promise<nu
 		return 0;
 	}
 
+	const presenter = createLifecyclePresenter({ json: opts.json });
+	presenter.header("Upgrade", "upgrade");
+
 	const before = getVersionInfo().clio;
 	const stateDir = clioStateDir();
 	const method = detectInstallMethod();
-	printHeader("Clio Coder upgrade");
-	process.stdout.write(`install     ${method === "source" ? "source checkout" : "npm"}\n`);
-	if (method === "npm") process.stdout.write(`channel     ${opts.channel}\n`);
-	process.stdout.write(`current     ${before}\n`);
-	process.stdout.write(`state dir   ${stateDir}\n`);
+	const methodLabel = method === "source" ? "source checkout" : "npm global";
+	presenter.setMethod(methodLabel);
 
 	const noNetwork = Boolean(process.env.CLIO_CODER_TEST_UPGRADE_NO_NETWORK);
+	const availableVersion = await fetchAvailableVersion(opts.channel, noNetwork || method === "source");
+
+	presenter.step(`Installation method: ${methodLabel}`);
+	presenter.step(`Current version: ${before}`);
+	if (availableVersion !== null) {
+		presenter.step(`Available version: ${availableVersion}`);
+	} else if (noNetwork) {
+		presenter.step("Available version: (network check skipped)");
+	} else {
+		presenter.step("Available version: unknown (registry check failed)");
+	}
+
+	if (method === "npm") {
+		presenter.rail(`Channel: ${opts.channel}`);
+	}
+	presenter.rail(`State dir: ${shortenPath(stateDir)}`);
+	presenter.rail();
+
 	const migrations = listMigrations();
 	const migrationIds = migrations.map((m) => m.id);
-	// What the state root says it is on, as distinct from the binary answering.
-	// After `npm install -g` the two differ until the refresh below, and that
-	// difference is the upgrade this command reports.
+	const appliedIds = new Set(readMigrationManifest(stateDir).applied);
+	const pendingMigrationIds = opts.skipMigrations ? [] : migrationIds.filter((id) => !appliedIds.has(id));
+
 	const recorded = readStateInfo()?.version ?? null;
-	// Both the dry run and the real run print this, so it stays in the mood the
-	// call site sets with "would refresh" or "refreshed". The null branch used to
-	// bake in "would write it", which a real upgrade printed after writing it.
 	const describeRefresh = (): string =>
 		recorded === null
 			? "state metadata (none recorded)"
@@ -178,104 +193,120 @@ export async function runUpgradeCommand(argv: ReadonlyArray<string>): Promise<nu
 				? `state metadata (already ${before})`
 				: `state metadata ${recorded} -> ${before}`;
 
+	const isAlreadyCurrentVersion =
+		(availableVersion === null || availableVersion === before) && (recorded === null || recorded === before);
+	const hasPendingMigrations = pendingMigrationIds.length > 0;
+
+	// Already current path
+	if (isAlreadyCurrentVersion && !hasPendingMigrations) {
+		presenter.warn(`clio-coder upgrade skipped: ${before} is already installed (no pending migrations)`);
+		if (method === "source") {
+			presenter.commandAdvice("To update source code, run:", SOURCE_UPGRADE_STEPS.join("\n"));
+		}
+		if (opts.dryRun) {
+			presenter.warn("Dry run - no changes made");
+		}
+		presenter.done("Done");
+		return 0;
+	}
+
 	if (opts.dryRun) {
 		if (method === "source") {
-			printSourceUpgradeSteps();
+			presenter.commandAdvice("Source checkout install: update the code with:", SOURCE_UPGRADE_STEPS.join("\n"));
 		} else {
-			process.stdout.write(`[upgrade] would run: npm install -g @iowarp/clio-coder@${opts.channel}\n`);
+			presenter.rail(`would run: npm install -g @iowarp/clio-coder@${opts.channel}`);
 		}
 		if (opts.skipMigrations) {
-			process.stdout.write("[upgrade] would skip migrations (--skip-migrations)\n");
-		} else if (migrationIds.length === 0) {
-			process.stdout.write("[upgrade] no migrations registered; the manifest would be written as is\n");
+			presenter.rail("would skip migrations (--skip-migrations)");
+		} else if (pendingMigrationIds.length === 0) {
+			presenter.rail("no pending migrations; the manifest would be written as is");
 		} else {
-			process.stdout.write(`[upgrade] would consider ${migrationIds.length} migration(s):\n`);
-			for (const id of migrationIds) process.stdout.write(`  - ${id}\n`);
+			presenter.rail(`would consider ${pendingMigrationIds.length} migration(s):`);
+			for (const id of pendingMigrationIds) presenter.rail(`  - ${id}`);
 		}
-		process.stdout.write(`[upgrade] would refresh ${describeRefresh()}\n`);
-		printOk("dry run complete, no changes made");
+		presenter.rail(`would refresh ${describeRefresh()}`);
+		presenter.warn("Dry run - no changes made");
+		presenter.done("upgrade preview complete");
 		return 0;
 	}
 
 	if (opts.postInstall) {
-		process.stdout.write("[upgrade] running post-install checks with the active clio binary\n");
+		presenter.rail("running post-install checks with the active clio binary");
 	} else if (method === "source") {
-		process.stdout.write("[upgrade] source checkout install detected; skipping npm install\n");
+		presenter.rail("source checkout install detected; skipping npm install");
 	} else if (noNetwork) {
-		process.stdout.write("[upgrade] CLIO_CODER_TEST_UPGRADE_NO_NETWORK set, skipping npm install\n");
+		presenter.rail("CLIO_CODER_TEST_UPGRADE_NO_NETWORK set, skipping npm install");
 	} else {
 		try {
 			await runNpmInstall(opts.channel);
+			presenter.completedStep(`Installed @iowarp/clio-coder@${opts.channel}`);
 		} catch (err) {
-			printError(err instanceof Error ? err.message : String(err));
+			presenter.fail("npm install failed", err instanceof Error ? err.message : String(err));
+			presenter.commandAdvice(
+				"To upgrade manually, run:",
+				`npm install -g @iowarp/clio-coder@${opts.channel}\nclio-coder doctor --fix`,
+			);
 			return 1;
 		}
 		try {
 			await runPostInstallUpgrade(opts);
-			printOk(`${before} -> post-install checks complete`);
+			presenter.done(`${before} -> post-install checks complete`);
 			return 0;
 		} catch (err) {
-			printError(err instanceof Error ? err.message : String(err));
+			presenter.fail("post-install checks failed", err instanceof Error ? err.message : String(err));
+			presenter.commandAdvice("To complete upgrade manually, run:", "clio-coder doctor --fix");
 			return 1;
 		}
 	}
 
 	let appliedCount = 0;
-	let appliedIds: string[] = [];
 	if (opts.skipMigrations) {
-		process.stdout.write("[upgrade] skipping migrations (--skip-migrations)\n");
+		presenter.rail("skipping migrations (--skip-migrations)");
 	} else {
-		// Migrations run on the state tree directly rather than through the
-		// lifecycle domain. Loading that domain pulls in `config`, whose start
-		// runs the strict settings reader, and a settings-repairing migration is
-		// precisely the one that cannot get past it: `clio-coder upgrade` on a
-		// home whose settings.yaml names a retired key failed the domain load and
-		// never reached the migration that removes the key. A runner that needs
-		// valid config in order to repair invalid config can never run. The
-		// domain's `runMigrations` is a passthrough to this same function, so
-		// nothing is lost by calling it where the circularity does not exist.
 		let result: Awaited<ReturnType<typeof runPending>>;
 		try {
+			if (process.env.CLIO_CODER_TEST_UPGRADE_FAIL === "migration") {
+				throw new Error("mock migration failure in 2026-09-01-settings-v2");
+			}
 			result = await runPending(stateDir);
 		} catch (err) {
-			// A migration reports why it could not run, but on its own that reads
-			// as the whole upgrade being impossible. It is not: the rest of the
-			// upgrade is independent of it, and naming the flag that runs the rest
-			// is the difference between a stuck operator and a moved one.
-			printError(
-				`migration failed: ${err instanceof Error ? err.message : String(err)}`,
-				"the rest of the upgrade does not depend on it; run `clio-coder upgrade --skip-migrations` to continue, then fix the cause and re-run `clio-coder upgrade`.",
+			presenter.fail("migration failed", err instanceof Error ? err.message : String(err));
+			presenter.commandAdvice(
+				"The rest of the upgrade does not depend on it. To continue, run:",
+				"clio-coder upgrade --skip-migrations",
 			);
 			return 1;
 		}
-		appliedIds = [...result.applied];
-		appliedCount = appliedIds.length;
+		const applied = [...result.applied];
+		appliedCount = applied.length;
 		if (appliedCount === 0) {
-			process.stdout.write("[upgrade] no pending migrations\n");
+			presenter.rail("no pending migrations");
 		} else {
-			for (const id of appliedIds) process.stdout.write(`[upgrade] applied migration ${id}\n`);
+			for (const id of applied) {
+				presenter.completedStep(`applied migration ${id}`);
+			}
 		}
 	}
 
 	if (method === "source" || noNetwork) {
 		const refresh = describeRefresh();
 		initializeClioHome();
-		process.stdout.write(`[upgrade] refreshed ${refresh}\n`);
+		presenter.completedStep(`refreshed ${refresh}`);
 	} else {
 		try {
 			await runDoctorFixAfterInstall();
 		} catch (err) {
-			printError(err instanceof Error ? err.message : String(err));
+			presenter.fail("doctor fix failed", err instanceof Error ? err.message : String(err));
+			presenter.commandAdvice("To resolve issues manually, run:", "clio-coder doctor --fix");
 			return 1;
 		}
 	}
 
-	if (method === "source") printSourceUpgradeSteps();
+	if (method === "source") {
+		presenter.commandAdvice("To update source checkout code, run:", SOURCE_UPGRADE_STEPS.join("\n"));
+	}
 
-	// `before` is the binary that ran; on the post-install and local paths that
-	// is already the new version, and `0.3.1 -> 0.3.1` was a claim about a
-	// transition that never happened. The version that moved is the recorded one.
 	const after = getVersionInfo().clio;
-	printOk(`${recorded ?? before} -> ${after} (migrations: ${appliedCount})`);
+	presenter.done(`${recorded ?? before} -> ${after} (migrations: ${appliedCount})`);
 	return 0;
 }
