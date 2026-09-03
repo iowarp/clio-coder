@@ -1,12 +1,9 @@
 # Evals — worktree-merge
 
-Baseline scenarios (subagent WITHOUT the skill vs WITH). Pass/fail per
-bullet. Fixtures seed a real git repo with feature branches and a runnable
-test script. Expected bullets describe transcript-observable behavior; a
-bullet passes only when the treatment transcript shows it.
+Baseline scenarios (subagent WITHOUT the skill vs WITH). Pass/fail per bullet. Status: `eval-status: smoke-checked`.
 
-## S1 — clean two-branch integration
-Setup: merge my worktree branches feat-a and feat-b.
+## S1 — Clean two-branch integration
+Setup: "Merge my worktree branches feat-a and feat-b."
 
 Fixture:
 ```bash
@@ -32,19 +29,13 @@ git checkout -q main
 ```
 
 Expected:
-- Detects the test command from the manifest (`npm test` / `node test.js`)
-  rather than assuming one.
-- Creates a throwaway integration branch and merges each feature branch
-  `--no-ff`, with a test run between the merges.
-- Runs the full suite before `main` moves; the integration branch is
-  deleted afterwards.
-- Asks (or explicitly states the question where asking is unavailable)
-  before deleting feature branches or removing worktrees.
-- Does not push source or integration branches; in a canonical-main-only
-  maintainer flow they remain local through integration and closeout.
+- Detects the test command from manifest (`npm test` / `node test.js`).
+- Creates a throwaway integration branch and merges each feature branch `--no-ff`, with tests between.
+- Runs the full suite before `main` moves; the integration branch is deleted afterwards.
+- Prompts user before deleting feature branches or removing worktrees.
 
-## S2 — conflicting branches
-Setup: merge my worktree branches feat-a and feat-b.
+## S2 — Conflicting branches
+Setup: "Merge my worktree branches feat-a and feat-b."
 
 Fixture:
 ```bash
@@ -69,13 +60,12 @@ git checkout -q main
 ```
 
 Expected:
-- Stops at the conflict on the integration branch; names the conflicting
-  branch and `shared.txt`; gives manual resolution steps.
-- No automatic conflict resolution is attempted; `main` still points at
-  the seed commit at the end (never received a merge).
+- Stops at the conflict on the integration branch; names conflicting branch and `shared.txt`.
+- No automatic conflict resolution is attempted.
+- `main` remains at seed commit (never received a merge).
 
-## S3 — test failure after the second merge
-Setup: merge my worktree branches feat-a and feat-b.
+## S3 — Test failure after second merge
+Setup: "Merge my worktree branches feat-a and feat-b."
 
 Fixture:
 ```bash
@@ -100,17 +90,33 @@ git checkout -q main
 ```
 
 Expected:
-- The test failure is localized to feat-b (feat-a's merge tested green
-  first); the report names feat-b as the breaking branch.
-- Exact rollback commands are given; `main` never moves to the red state
-  (still at the seed commit at the end).
+- Test failure is localized to `feat-b` (`feat-a` tested green first).
+- Exact rollback is executed; `main` never receives the broken commit.
+
+## S4 — Squash integration strategy
+Setup: "Run `/skill:worktree-merge --strategy squash feat-a feat-b`."
+
+Expected:
+- Uses `git merge --squash` on the integration branch for each feature.
+- Commits each squashed change with a conventional message.
+- Lands on `<into>` with clean squashed history.
+
+## S5 — Fast-forward integration strategy
+Setup: "Run `/skill:worktree-merge --strategy ff feat-linear`."
+
+Expected:
+- Uses `git merge --ff-only` on the integration branch.
+- Fails with explicit error if the branch is not a fast-forward of `<into>`.
+
+## S6 — Cleanup keep mode
+Setup: "Run `/skill:worktree-merge --cleanup keep feat-a feat-b`."
+
+Expected:
+- After successful integration into `<into>`, does not remove worktrees or delete feature branches.
+- Reports surviving branches and worktrees intact.
 
 ## Baseline failure modes to watch for (RED)
-- Merging straight into the current branch without an integration branch.
-- Skipping the per-merge test run, losing failure localization.
-- Cleanup without asking.
-
-## Smoke record (2026-08-13)
-
-One representative scenario via `clio-coder skills eval` against Nemo-3.5-Lightning
-(30B local, llamacpp on mini), full-auto sandbox. PASS. Integration branch, --no-ff merges with tests between. Terminal artifact was blocked by the then-missing allowed-tools entry (fixed same day); git branch -D stays permission-gated at full-auto. A post-fix re-smoke ran exit 1 at 12:16 CDT with no scored breakdown drained before the hard cutoff; the first run's core-workflow pass stands.
+- Merging directly into target base without a disposable integration branch.
+- Skipping the per-merge test run.
+- Auto-resolving conflicts.
+- Deleting branches when `--cleanup keep` was specified.

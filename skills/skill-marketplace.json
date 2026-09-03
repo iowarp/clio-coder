@@ -92,6 +92,21 @@
 			"category": "context"
 		},
 		{
+			"name": "branch-closeout",
+			"description": "Proves merged work on the canonical base, inspects and removes associated worktrees through Git, deletes local branches safely, and audits surviving repository refs. Not for creating worktrees; use worktree-create. Not for integrating branches; use worktree-merge.",
+			"triggers": [
+				"close out this branch",
+				"clean up merged branch",
+				"remove merged worktree",
+				"closeout branch",
+				"branch-closeout"
+			],
+			"sourceUrl": "https://github.com/iowarp/clio-coder/tree/main/skills/git/branch-closeout",
+			"version": "0.1.0",
+			"audit": "pass",
+			"category": "git"
+		},
+		{
 			"name": "file-ticket",
 			"description": "Turns something noticed mid-session into a tracker issue: captures evidence, dedups against existing issues, composes a labeled issue with acceptance criteria, confirms, and creates it via gh. Not for batch ticket creation from a PRD; use backlog. Not for diagnosing an existing issue; use fix-issue.",
 			"triggers": [
@@ -102,7 +117,7 @@
 				"create a tracker issue"
 			],
 			"sourceUrl": "https://github.com/iowarp/clio-coder/tree/main/skills/git/file-ticket",
-			"version": "0.2.0",
+			"version": "0.3.0",
 			"audit": "pass",
 			"category": "git"
 		},
@@ -117,7 +132,7 @@
 				"fix a GitHub issue end to end"
 			],
 			"sourceUrl": "https://github.com/iowarp/clio-coder/tree/main/skills/git/fix-issue",
-			"version": "0.2.0",
+			"version": "0.3.0",
 			"audit": "pass",
 			"category": "git"
 		},
@@ -132,7 +147,7 @@
 				"resolve conflict markers"
 			],
 			"sourceUrl": "https://github.com/iowarp/clio-coder/tree/main/skills/git/resolve-merge-conflicts",
-			"version": "0.3.0",
+			"version": "0.4.0",
 			"audit": "pass",
 			"category": "git"
 		},
@@ -147,13 +162,13 @@
 				"get this up for review"
 			],
 			"sourceUrl": "https://github.com/iowarp/clio-coder/tree/main/skills/git/ship",
-			"version": "0.4.0",
+			"version": "0.5.0",
 			"audit": "pass",
 			"category": "git"
 		},
 		{
 			"name": "worktree-create",
-			"description": "Stands up one or more git worktrees for parallel work, each on its own branch with gitignored config copied in, dependencies installed, and a verified health check. Not for merging finished worktrees; use worktree-merge.",
+			"description": "Stands up one or more git worktrees for parallel work, each on its own branch with gitignored config copied in, dependencies installed, and a verified health check. Not for merging finished worktrees; use worktree-merge. Not for closeout; use branch-closeout.",
 			"triggers": [
 				"create a git worktree",
 				"set up worktrees for these branches",
@@ -161,13 +176,13 @@
 				"prepare parallel worktrees"
 			],
 			"sourceUrl": "https://github.com/iowarp/clio-coder/tree/main/skills/git/worktree-create",
-			"version": "0.5.0",
+			"version": "0.6.0",
 			"audit": "pass",
 			"category": "git"
 		},
 		{
 			"name": "worktree-merge",
-			"description": "Integrates finished worktree branches through one throwaway integration branch, testing after each merge and running the full suite before the main line moves, with exact rollback on failure. Not for creating worktrees; use worktree-create.",
+			"description": "Integrates finished worktree branches through one throwaway integration branch, testing after each merge and running the full suite before the main line moves, with exact rollback on failure. Not for creating worktrees; use worktree-create. Not for closeout; use branch-closeout.",
 			"triggers": [
 				"merge my worktrees",
 				"integrate these worktree branches",
@@ -175,7 +190,7 @@
 				"land finished worktrees"
 			],
 			"sourceUrl": "https://github.com/iowarp/clio-coder/tree/main/skills/git/worktree-merge",
-			"version": "0.5.0",
+			"version": "0.6.0",
 			"audit": "pass",
 			"category": "git"
 		},

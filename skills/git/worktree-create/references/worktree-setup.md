@@ -1,69 +1,62 @@
-# Worktree Setup — the general checklist
+# Worktree Setup Reference
 
-A git worktree shares the repository's object store and **tracked** files, but is otherwise a *fresh checkout*. It
-is missing everything git does not track and everything that is machine-local state. To be genuinely ready to
-develop, run, and validate in, a worktree needs the items below. The list is **project-agnostic** — detect the
-specifics from the repo (see *Detecting the specifics*), never assume a stack.
+A git worktree shares the repository's object store and tracked files, but operates as an independent working tree. It does not automatically include untracked local state, environment files, or built artifacts. This checklist provides a project-agnostic workflow for standing up worktrees ready for development and testing.
 
-## What a fresh worktree needs
+## 1. Branch Base and Safe Path Derivation
 
-1. **A branch off the right base.** Create the worktree on a new branch from the intended base — usually the
-   fetched canonical default branch for a clean tree matching the remote, or the current `HEAD` to carry
-   in-progress work. Detect which remote is canonical; a contributor commonly uses `upstream` for canonical and
-   `origin` for a fork, while a maintainer clone may use `origin` for canonical. In a canonical-main-only project,
-   maintainer worktree branches stay local and contributor branches are pushed only to the contributor's fork.
-   Put the worktree under a gitignored root (`worktrees/<branch>`) so it never shows as untracked in the main
-   checkout.
+- **Base ref**: Create the branch from the intended base ref (`--base <ref>`, defaulting to the canonical default branch or `HEAD`). Validate the ref with `git rev-parse --verify <ref>`.
+- **Worktree root**: Worktrees are placed under `--root <path>` (default: `worktrees/`). Ensure the root path is included in `.gitignore` so it does not appear as untracked in the primary checkout.
+- **Safe filesystem paths**: Branch names may contain slashes (e.g., `feat/auth/login`) or characters that require sanitization on disk. Derive filesystem paths under the worktree root safely:
+  - Keep paths strictly inside the declared root; reject paths containing directory traversal (`..`).
+  - Map branch names to safe relative paths or subdirectories (e.g. `<root>/feat-auth-login` or `<root>/feat/auth/login`).
+  - Validate the branch name format using `git check-ref-format --branch <branch>`.
 
-2. **Gitignored config & secrets — the commonly-missed layer.** A fresh checkout has NONE of the untracked files
-   the app reads at runtime: `.env`, `.env.local`, `.env.<stage>`, credential/service-account JSON, `*.pem` and
-   other keys, `.npmrc` / `.pypirc`, local settings (`.claude/settings.local.json`, `.clio-coder/` state), and anything similar. Copy
-   these from the main working tree into the worktree. Confirm each is actually ignored (`git check-ignore <f>`)
-   so tracked files are never duplicated. If the repo ships a `.worktreeinclude`, use that list as the source of
-   truth for what to copy.
+## 2. Gitignored Config & Secret Handling
 
-3. **Dependencies.** Install with the project's own package manager, detected from the manifests/lockfiles
-   present. A monorepo needs an install per package (e.g. a backend and a frontend). Install *into* the worktree
-   so its environment is isolated from the main checkout.
+A fresh worktree lacks the untracked runtime configuration files necessary for the application to boot:
+- Candidate files: `.env`, `.env.local`, `.env.<stage>`, local credentials, certificates (`*.pem`), or local tool configs.
+- **Rule**: Never copy tracked files.
+- **Verification**: Run `git check-ignore <file>` on every candidate file in the main tree before copying it to the worktree.
+- If the repository provides `.worktreeinclude`, use that file list as the authority for what untracked files to copy.
 
-4. **Language runtime & an isolated environment.** Use the runtime version the project pins (`.python-version`,
-   `.nvmrc`, `.tool-versions`, the `go`/`node` field in the manifest). Create the virtualenv / `node_modules`
-   *inside* the worktree — never share the main checkout's — so versions can diverge per branch.
+## 3. Dependency Installation (Project-Agnostic Detection)
 
-5. **Generated or downloaded artifacts install won't produce.** If the app needs codegen (protobuf, GraphQL, ORM
-   clients), compiled assets, or downloaded models/caches to boot, run the project's generate/build step. Skip if
-   there is none.
+Inspect repository manifests and lockfiles to determine the appropriate package manager:
+- **Node.js**:
+  - `package-lock.json` -> `npm ci`
+  - `pnpm-lock.yaml` -> `pnpm install --frozen-lockfile`
+  - `yarn.lock` -> `yarn install --frozen-lockfile`
+  - `bun.lockb` / `bun.lock` -> `bun install --frozen-lockfile`
+- **Python**:
+  - `uv.lock` -> `uv sync`
+  - `poetry.lock` -> `poetry install`
+  - `Pipfile.lock` -> `pipenv install`
+  - `requirements.txt` -> `pip install -r requirements.txt`
+- **Rust**:
+  - `Cargo.lock` / `Cargo.toml` -> `cargo build`
+- **Go**:
+  - `go.mod` / `go.sum` -> `go mod download`
+- **Ruby**:
+  - `Gemfile.lock` -> `bundle install`
+- **PHP**:
+  - `composer.lock` -> `composer install`
 
-6. **Isolation for concurrent runs.** Only if you will actually *run* services in several worktrees at once: give
-   each worktree a distinct **port** per long-running service so they don't collide, and where the app writes to a
-   shared local database, a separate **database or schema** (or a disposable containerized DB) per worktree. If
-   you are only building and testing, not serving, skip this.
+For monorepos, run install in each workspace package directory as defined in the top-level manifest.
 
-7. **Verification — a detected health check.** Prove the worktree works before handing it off. Use the cheapest
-   meaningful check the project supports, in order: start the app and hit its health endpoint if it exposes one →
-   else a fast build / typecheck / test-collection smoke → else at minimum confirm dependencies resolved and the
-   app imports/builds. Detect the command; do not assume one.
+## 4. Setup Mode (`--setup auto|none`)
 
-8. **Registration & later cleanup.** The worktree is now tracked (`git worktree list`). Know it exists so it can be
-   removed (`git worktree remove <path>`) once its branch is merged, so stale worktrees don't pile up.
+- **`auto`** (default): Runs detected config copy, package installation, codegen/build steps, and health verification.
+- **`none`**: Checks out the worktree branch only without copying files or running commands. Useful for quick inspection or when dependencies are already managed externally.
 
-## Detecting the specifics (per repo, not assumed)
+## 5. Service Port Isolation
 
-- **Install command** — from the lockfile/manifest present: `uv.lock`/`pyproject.toml` → `uv sync`; `poetry.lock`
-  → `poetry install`; `requirements.txt` → `pip install -r requirements.txt`; `package-lock.json` → `npm ci`;
-  `pnpm-lock.yaml` → `pnpm install`; `yarn.lock` → `yarn`; `bun.lockb` → `bun install`; `Cargo.toml` →
-  `cargo build`; `go.mod` → `go mod download`; `Gemfile` → `bundle install`; `composer.json` → `composer install`.
-  Several present → monorepo; install each in its own package dir.
-- **Env/config files to copy** — intersect the repo's ignored, untracked files with common secret/config patterns:
-  `git ls-files --others --ignored --exclude-standard` filtered to `.env*`, `*.local`, key/credential files. Or
-  read `.worktreeinclude` if present. Check subdirectories too (e.g. `backend/.env`, `app/.env`).
-- **Run command + port** — check the README, the manifest's scripts (`package.json` `scripts`, `pyproject` entry
-  points), a `Procfile`, `docker-compose.yml`, or a `Makefile`; read a `PORT` / `*_PORT` from env or config.
-- **Health endpoint** — grep the code/README for a health route (`/health`, `/api/health`, `/healthz`, `/ping`) or
-  a `healthcheck` in `docker-compose.yml`. None → fall back to the build/test smoke.
-- **Validation commands** — prefer **what CI already runs**: read `.github/workflows/*`, a `Makefile`, or the
-  manifest's test/lint scripts and reuse those exact commands (test runner, type checker, linter). CI is the
-  project's own source of truth for "what proves this code works" — don't invent `pytest`/`mypy` if the repo uses
-  something else.
+If the worktree health check or execution starts long-running network daemons:
+- Assign unique ports per worktree (`base_port + worktree_index`) via environment variables (e.g. `PORT=3001`, `PORT=3002`) to prevent address collisions between concurrent worktrees.
 
-> **Detect, don't hardcode** — everything above is discovered from the target repo at runtime.
+## 6. Verification and Health Checks
+
+Prefer existing verification defined in CI workflows (`.github/workflows/*`), Makefile targets, or package scripts:
+1. Hit an application health check endpoint if defined (e.g. `/healthz`).
+2. Run the fast test/build smoke suite (e.g. `npm test`, `cargo test`, `pytest`).
+3. Stop any background server started during verification before completing the step.
+4. Report health status as PASS or FAIL per worktree. Failures must name the exact command and error.

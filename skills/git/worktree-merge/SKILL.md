@@ -1,21 +1,22 @@
 ---
 name: worktree-merge
-description: Integrates finished worktree branches through one throwaway integration branch, testing after each merge and running the full suite before the main line moves, with exact rollback on failure. Not for creating worktrees; use worktree-create.
+description: Integrates finished worktree branches through one throwaway integration branch, testing after each merge and running the full suite before the main line moves, with exact rollback on failure. Not for creating worktrees; use worktree-create. Not for closeout; use branch-closeout.
 triggers:
   - merge my worktrees
   - integrate these worktree branches
   - combine parallel branches
   - land finished worktrees
-version: 0.5.0
+version: 0.6.0
 license: Apache-2.0
+compatibility: git >=2.30.0, POSIX-compatible shell
 allowed-tools:
   - read
   - grep
   - ls
   - git
   - bash
+  - tasks
   - ask_user
-  - artifact
 clio-coder:
   registry-id: iowarp/clio-coder
   source-url: https://github.com/iowarp/clio-coder/tree/main/skills/git/worktree-merge
@@ -31,98 +32,116 @@ clio-coder:
 
 # Worktree Merge
 
-Integrate finished branches through a disposable integration branch. The
-original branch moves only after every merge lands and the full suite
-passes; nothing reaches it red.
+Integrate finished branches through a disposable integration branch. The target branch moves only after every branch integrates cleanly and the project's full validation suite passes; nothing reaches the main line broken.
 
-## Step 1 — Inputs and preconditions
+See [merge strategies](references/merge-strategies.md) for strategy mechanics (`merge`, `squash`, `ff`), rollback details, and protected base guards.
 
-- Fewer than two branches named → ask which to integrate; never guess.
-- Confirm you are at the repository root, not inside `worktrees/`
-  (`pwd` containing `/worktrees/` is an abort).
-- Store the current branch as `<original>`.
-- `git rev-parse --verify <branch>` for every branch in the list; any
-  missing branch aborts before anything is created.
-- Uncommitted changes on `<original>` → stop: commit or stash first.
+## Arguments
 
-## Step 2 — Detect the validation commands ONCE
+Arguments are passed in the user invocation message. Interpret them structurally from the prompt:
 
-Reuse exactly what CI runs: read `.github/workflows/*`, the Makefile, or
-the manifest's scripts for the test, type-check, and lint commands. Never
-substitute a generic runner for the project's own. Identify the fast test
-command (per-merge) and the full suite (final gate).
+```text
+/skill:worktree-merge [--into branch] [--strategy merge|squash|ff] [--cleanup ask|keep] <branch...>
+```
 
-## Step 3 — Integration branch
+### Examples
+- `/skill:worktree-merge feat-a feat-b`
+- `/skill:worktree-merge --into main --strategy squash feat/payments feat/invoicing`
+- `/skill:worktree-merge --strategy ff --cleanup keep feat/docs-update`
 
-Create one throwaway branch off `<original>`, named for the set
-(`integration-<first-branch>`, suffixed if needed, filesystem-safe). All
-merging happens here.
+### Positional Arguments
+- `<branch...>`: Two or more branch names to integrate in order (or at least one when integrating into a distinct target branch).
+  - Required. If fewer than the necessary branches are specified, prompt the user for the branch list; never guess.
+  - Validation: Verify each ref exists via `git rev-parse --verify <branch>`.
 
-## Step 4 — Merge each branch in order
+### Options
+- `--into <branch>`: Target base branch receiving the merges.
+  - Default: the current branch at invocation time (`<original>`).
+  - Validation: Must be a verified local branch.
+- `--strategy <merge|squash|ff>`: Git integration strategy.
+  - `merge` (default): Uses `git merge --no-ff <branch>` to preserve commit topology.
+  - `squash`: Uses `git merge --squash <branch>`, followed by an atomic conventional commit.
+  - `ff`: Uses `git merge --ff-only <branch>`. Fails if the branch has diverged.
+- `--cleanup <ask|keep>`: Post-integration scaffolding cleanup policy.
+  - `ask` (default): Prompt the user via `ask_user` before removing worktrees or deleting branches.
+  - `keep`: Retain all source worktrees and branches after integration.
 
-Per branch: `git merge --no-ff <branch>`, then run the fast test command,
-so a break is localized to the branch that caused it.
+### Unknown Arguments and Ref Validation
+- Unknown flags must be rejected with an error. Validate all branch names before creating integration branches. Never interpolate unvalidated user input into shell strings without safe quoting.
 
-- **Conflict** → stop. Name the conflicting branch and files, give the
-  resolution steps (resolve → `git add` → `git commit` → re-run with the
-  same list), and do not attempt automatic resolution.
-- **Test failure** → stop. Report which tests failed and the rollback:
-  `git checkout <original> && git branch -D <integration>`.
+## Step 1 — Preconditions and Base Guards
 
-## Step 5 — Full gate, then land
+1. Verify working directory is the repository root (fail if currently inside a worktree directory).
+2. Record current branch as `<into>` (or use `--into <branch>`).
+3. Verify no uncommitted changes exist on `<into>`. If dirty, STOP: commit or stash first.
+4. **Base Guard**: Check if `<into>` is a protected or canonical default branch. In canonical-main-only repositories (such as `CONTRIBUTING.md`), maintainer integration is strictly local; never push integration or topic branches to the canonical remote.
+5. Verify every branch in `<branch...>` with `git rev-parse --verify <branch>`. Any missing branch aborts the run before anything is created.
 
-All branches merged → run the full detected suite (tests, type checks,
-lint). Any failure: report and roll back as above. All green:
-`git checkout <original> && git merge --no-ff <integration>`, then delete
-the integration branch.
+## Step 2 — Detect Validation Commands Once
 
-## Step 6 — Close out integration scaffolding
+Detect the project's test and validation suite per repository manifests and CI workflows (`.github/workflows/*`, Makefile, npm scripts):
+- **Fast test command**: run immediately after each branch merge to localize failures.
+- **Full validation suite**: run after all branches have merged (unit tests, typecheck, lint).
 
-Delete the throwaway integration branch after the green landing. Then ask
-(via `ask_user` when active) whether to close the merged source branches and
-worktrees; never infer that approval from approval to merge.
+## Step 3 — Stand Up Disposable Integration Branch
 
-On yes, resolve each registered path from `git worktree list --porcelain`
-rather than assuming `worktrees/<branch>`. Inspect tracked changes, untracked
-files, and ignored state that may be evidence rather than rebuildable output.
-For each approved branch:
+Create a disposable integration branch off `<into>`:
+```bash
+git checkout -b integration-<first-branch> <into>
+```
+All integration and intermediate test runs occur exclusively on this branch.
 
-1. Confirm its result is represented on `<original>`. Ancestry is sufficient
-   for the `--no-ff` merges this skill created; otherwise require the merged PR
-   and resulting commit as evidence rather than trusting a subject match.
-2. Remove its registered path with `git worktree remove <path>`, never `rm -rf`.
-   Use `--force` only when the user explicitly approved discarding the
-   remaining artifacts.
-3. Delete the local branch with `git branch -d <branch>`. A forced deletion
-   requires separate approval. If the work came through a contributor PR,
-   separately offer to delete only its merged branch on that contributor's
-   fork; canonical remote branches are never cleanup targets.
+## Step 4 — Merge Each Branch in Order
 
-Maintainer source and integration branches remain local throughout; never push
-them to a canonical-main-only remote. For contributor work, only the merged
-branch on the contributor's fork is eligible for remote cleanup, and only when
-authorized. A stash, local-only tag, and published release tag are outside this
-cleanup unless the user names them explicitly.
+For each branch in `<branch...>`:
+1. Apply the specified `--strategy`:
+   - **`merge`**: `git merge --no-ff <branch>`
+   - **`squash`**: `git merge --squash <branch> && git commit -m "feat: squash <branch>"`
+   - **`ff`**: `git merge --ff-only <branch>`
+2. **Conflict**: STOP immediately. Name conflicting branch and files, report manual resolution steps, and do not attempt automatic resolution.
+3. **Run fast test command**:
+   - If tests fail: STOP immediately. Localize the failure to this branch and execute exact rollback:
+     ```bash
+     git checkout <into> && git branch -D integration-<first-branch>
+     ```
+   - Report the breaking branch, test failures, and that `<into>` remains untouched.
+
+## Step 5 — Full Gate, Land, and Rollback Safety
+
+1. Once all branches are merged, run the full validation suite (tests, typecheck, lint).
+2. If any check fails: report failures and execute rollback as in Step 4.
+3. If all checks pass:
+   - Land integration branch into `<into>`:
+     ```bash
+     git checkout <into>
+     git merge --no-ff integration-<first-branch>
+     ```
+   - Delete the disposable integration branch: `git branch -d integration-<first-branch>`.
+
+## Step 6 — Cleanup Scaffolding
+
+If `--cleanup ask` is active, prompt the user via `ask_user` whether to clean up the merged branches and worktrees:
+- On approval, delegate to or execute `branch-closeout`:
+  - Locate registered worktree paths via `git worktree list --porcelain`.
+  - Inspect tracked and untracked worktree state.
+  - Remove worktrees with `git worktree remove` (never `rm -rf`).
+  - Delete local source branches with `git branch -d`.
+  - Audit and report surviving worktrees, local branches, and remote heads.
+- If `--cleanup keep` is active, leave worktrees and branches intact.
 
 ## Step 7 — Report
 
-Success: integration branch used, each branch with its post-merge test
-result, the full-gate result, the merge into `<original>`, and cleanup status.
-Always list the remaining worktrees, local branches, stashes, local-only tags,
-and canonical remote heads; a canonical-main-only project expects exactly its
-base branch. Every survivor needs a named purpose. Failure: the exact step and branch,
-current state, rollback commands, and how to continue after fixing. Done when
-one of those two reports is delivered and the repo is on `<original>`.
+Deliver a comprehensive completion report:
+- Strategy used (`merge`, `squash`, or `ff`)
+- Per-branch fast test outcomes
+- Full gate results
+- Merge commit SHA on `<into>`
+- Cleanup status and inventory of remaining local refs
 
-## Red flags
+## Red Flags
 
-- Merging directly into `<original>` "to save a step".
-- Running a guessed test command instead of the repo's own.
-- Auto-resolving conflicts.
-- Deleting worktrees or branches nobody approved.
-- Assuming a worktree path from its branch name instead of reading Git's
-  registry.
-- Pushing an integration or maintainer source branch to a canonical-main-only
-  remote.
-- Deleting a canonical branch, stash, or tag as part of local cleanup.
-- A red full gate absorbed into "mostly passing".
+- Merging directly into `<into>` without a disposable integration branch.
+- Auto-resolving conflicts without user intervention.
+- Skipping the fast test between merges, losing failure localization.
+- Deleting worktrees or branches when `--cleanup keep` was passed or without confirmation.
+- Pushing integration or topic branches to a canonical-main-only remote.

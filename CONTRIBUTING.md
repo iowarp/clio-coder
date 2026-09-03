@@ -204,7 +204,8 @@ forks return to a small steady state.
 ### Branch closeout
 
 Branch and worktree cleanup is part of finishing work, not optional future
-housekeeping. After a PR is merged or a release is tagged:
+housekeeping. Use `branch-closeout` (or `ship closeout`) to automate this
+verification and teardown safely. After a PR is merged or a release is tagged:
 
 1. Fetch and prune remote-tracking refs, then verify the PR is merged and its
    result is represented on `origin/main`. An ancestry check is sufficient for

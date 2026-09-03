@@ -7,16 +7,17 @@ triggers:
   - commit and open the PR
   - push and open a pull request
   - get this up for review
-version: 0.4.0
+version: 0.5.0
 license: Apache-2.0
+compatibility: git >=2.30.0, gh CLI >=2.0.0 (required for pr mode), POSIX-compatible shell
 allowed-tools:
   - read
   - grep
   - ls
   - git
   - bash
+  - tasks
   - ask_user
-  - artifact
 clio-coder:
   registry-id: iowarp/clio-coder
   source-url: https://github.com/iowarp/clio-coder/tree/main/skills/git/ship
@@ -32,114 +33,102 @@ clio-coder:
 
 # Ship
 
-Move finished, verified work out as one atomic commit. In a maintainer clone
-whose canonical remote must contain only `main`, topic and release-candidate
-branches stay local for gated integration. A contributor pushes to their own
-fork and opens a PR into the canonical repository. Never push with uncommitted
-changes, never push a working branch to a canonical-main-only remote, and never
-open a PR the user did not ask for. Invoking ship for "commit this" means
-commit only; any push and PR require explicit intent.
+Move finished, verified work out safely. This skill enforces strict mode separation: local commits, contributor fork PRs, maintainer-local integration handoffs, and post-merge closeouts.
 
-## Step 1 — Project conventions win
+See [remote and branch policy](references/remote-and-branch-policy.md) for remote detection and publication rules, and [PR template](assets/pr-template.md) for standard pull request layout.
 
-Read the project instruction file (`CLIO-CODER.md`, `AGENTS.md`,
-`CLAUDE.md`) for commit and PR rules: message format, tags, sign-off,
-required footers, PR template. Whatever it specifies overrides the
-defaults below.
+## Arguments
 
-## Step 2 — Commit
-
-See everything before staging anything: `git status --porcelain`,
-`git diff HEAD`, and the untracked list file by file. Exclude
-secret-shaped files (`.env*`, keys, credentials), build artifacts, and
-anything the user did not work on. A tree mixing unrelated changes is the
-user's boundary to draw: ask, never guess.
-
-Stage by explicit path — no `git add -A`. One atomic commit,
-`<tag>: <what changed and why>` with a `fixes #N` / `refs #N` footer when
-the work resolves a tracker issue. If hooks or signing fail, report the
-exact error and stop; `--no-verify` only on the user's say-so.
-
-If the user asked only to commit, report `git log -1 --stat` and end here.
-
-## Step 3 — Classify remotes and gate publication
-
-Detect the canonical repository and base branch from project instructions,
-`gh repo view`, and remote URLs. In a contributor clone, `origin` normally
-names the contributor's fork and `upstream` the canonical repository; do not
-assume either name. In a maintainer clone, `origin` may be canonical.
-
-| State | Action |
-|---|---|
-| On the base branch | STOP: the work needs its own branch first. |
-| Uncommitted changes remain | STOP: commit or set them aside explicitly. |
-| No commits ahead of the fetched canonical base | STOP: nothing to ship. |
-| Canonical remote is main-only and no contributor fork remote exists | Commit only; do not push the local branch. Report it ready for local integration. |
-| Proposed push remote is the canonical main-only repository | STOP: add/select the contributor's fork instead. |
-| An open PR already exists for this branch | STOP and print its URL. |
-| A merged PR exists and the user asked for closeout | Continue to Step 6 with its merge commit as evidence. |
-| A closed, unmerged PR exists | STOP and print its URL and state. |
-
-Every STOP is final for this run: report the reason and end.
-
-## Step 4 — Contributor fork push and PR
-
-Only contributors take this path. Push the topic branch to the verified fork
-remote with an explicit refspec, then open the PR against the verified
-canonical repository and base. Never use a bare `git push -u origin HEAD`
-because `origin` may be canonical. The effective shape is:
+Arguments are passed in the user invocation message. Interpret them structurally from the prompt:
 
 ```text
-git push -u <fork-remote> refs/heads/<topic>:refs/heads/<topic>
-gh pr create --repo <canonical-owner/repo> --base <base> --head <fork-owner>:<topic>
+/skill:ship commit|pr|closeout [--base branch] [--fork remote] [--issue number] [paths...]
 ```
 
-Body from `.github/PULL_REQUEST_TEMPLATE.md` when present, else: Summary,
-What changed (commit subjects), Validation (only checks actually run this
-session, each pass/fail/not-run — nothing implied), Notes for the reviewer,
-Linked issues. `--draft` when the user says it is not review-ready.
+### Examples
+- `/skill:ship commit src/cli/run.ts tests/run.test.ts`
+- `/skill:ship pr --base main --fork fork --issue 105`
+- `/skill:ship commit --issue 42`
+- `/skill:ship closeout --base main`
 
-## Step 5 — Report
+### Positional Arguments
+- `mode`: The operational mode. Must be one of:
+  - `commit`: Review and stage changes, then create one atomic conventional commit. Never pushes; never opens a PR.
+  - `pr`: Validate clean tree, push topic branch to contributor fork remote, and open a pull request against canonical base.
+  - `closeout`: Clean up local worktrees and branches after a PR is verified merged; delegates to `branch-closeout`.
+- `paths...`: Optional explicit file paths to stage for `commit`. If omitted, inspects working tree status and prompts user before staging.
 
-Done when the user has the PR number and URL, base ← head, and one line on
-what review happens next. Merging is a human decision; the ordinary shipping
-loop ends at an open PR.
+### Options
+- `--base <branch>`: Target base branch on the canonical remote (e.g. `main`, `master`).
+  - Default: detected default branch from `gh repo view` or remote tracking.
+  - Validation: Must be a valid git ref name (`git check-ref-format --branch <branch>`).
+- `--fork <remote>`: Remote name pointing to the contributor's personal fork.
+  - Default: detected fork remote from Git URLs.
+  - Refusal Guard: Never assumed to be `origin`. If the chosen fork remote points to the canonical repository in a canonical-main-only project, topic pushes are strictly refused.
+- `--issue <number>`: Issue number or identifier to reference in commit footer (`fixes #N`) and PR description.
 
-## Step 6 — Close out merged work
+### Unknown Arguments and Validation
+- Reject unknown options with an error. Validate ref names and file paths before executing git commands. Never interpolate unvalidated user strings into raw shell commands.
 
-This is a later re-entry, never something inferred while opening the PR. When
-the user asks to clean up after merge:
+## Step 1 — Project Conventions Win
 
-1. Run `git fetch --prune`, inspect the PR's merged state, and record its merge
-   or squash commit on the base branch. A matching subject is not proof.
-2. Inspect the source worktree's tracked, untracked, and ignored state. If any
-   non-rebuildable artifact remains, stop and ask whether to preserve it.
-3. Remove a registered worktree with `git worktree remove <path>`, never raw
-   filesystem deletion. `--force` requires explicit approval to discard the
-   remaining state.
-4. Delete the local source branch. For a contributor PR, delete the merged
-   branch from the contributor's fork when authorized. A canonical-main-only
-   remote must never have had the topic branch.
-5. Report remaining worktrees, local branches, stashes, local-only tags, and
-   canonical remote heads; the expected canonical head set is only the base.
+Inspect project instructions (`CLIO-CODER.md`, `AGENTS.md`, `CONTRIBUTING.md`, `CLAUDE.md`) for commit formats, PR templates, and branching policy. Detected repository policy overrides default assumptions.
 
-Maintainer release candidates are local-only compact branches (`v043`), while
-dotted names (`v0.4.3`) are reserved for immutable release tags. Gate the
-candidate, fast-forward local `main` with `--ff-only`, recheck fetched
-`origin/main`, and push only the fully qualified `main` ref with explicit
-maintainer authorization. After CI succeeds, push only the fully qualified
-annotated tag. Verify its peeled commit, then delete the local candidate.
-Never push a release-candidate branch or delete/move a published tag.
+## Step 2 — Commit Mode (`commit`)
 
-## Red flags
+Review the entire working tree before staging:
+1. Run `git status --porcelain` and `git diff HEAD`.
+2. Exclude secret-shaped files (`.env*`, credentials, keys), generated build outputs, and unrelated files.
+3. Stage explicit paths only (using `paths...` or prompted list). Never run `git add -A` blindly.
+4. Compose one atomic conventional commit:
+   `<type>(<scope>): <imperative summary>`
+   Include `fixes #N` or `refs #N` footer when `--issue <number>` is provided.
+5. If hooks or commit signing fail, report the exact error and halt. Use `--no-verify` only upon explicit user instruction.
+6. If the selected mode is `commit`, report `git log -1 --stat` and finish here.
 
-- `git add -A` with unreviewed untracked files present.
-- A push that left uncommitted changes behind.
-- Pushing a topic or release-candidate branch to a canonical-main-only remote.
-- Assuming a remote named `origin` is the contributor's fork.
-- A PR nobody asked for, or a Validation section claiming checks never run.
-- Two unrelated changes in one commit because asking felt slow.
-- A commit message that lists files instead of naming the change.
-- Treating a similar subject or patch id as proof that a PR merged.
-- Deleting a remote branch, published tag, stash, or local artifact under an
-  approval that covered only local branch cleanup.
+## Step 3 — Classify Remotes and Gate Publication
+
+For `pr` mode, classify remotes per [remote and branch policy](references/remote-and-branch-policy.md):
+1. Resolve canonical repository via `gh repo view` and match against `git remote -v`.
+2. Resolve `--fork <remote>`.
+3. Evaluate publication gates:
+   - **On base branch directly**: STOP. Work must be on a topic branch.
+   - **Uncommitted changes remain**: STOP. Stash or commit before pushing.
+   - **Canonical remote is main-only**:
+     - Maintainer clones keeping branches local: Report commit complete and ready for local integration (e.g. fast-forward or `worktree-merge`). Refuse to push topic branch to canonical remote.
+     - Contributor clones: Require push to fork remote `<fork>`, never canonical.
+   - **Open PR exists**: STOP and print the existing PR URL.
+   - **Merged PR exists**: Report merged status; suggest `closeout` mode.
+
+## Step 4 — Contributor Fork Push and PR (`pr`)
+
+1. Push topic branch to the verified fork remote using an explicit refspec:
+   ```bash
+   git push -u <fork> refs/heads/<topic>:refs/heads/<topic>
+   ```
+2. Open the pull request against the canonical repository:
+   ```bash
+   gh pr create --repo <canonical-owner/repo> --base <base> --head <fork-owner>:<topic> --title "..." --body-file "$pr_body_file"
+   ```
+3. Use repository `.github/PULL_REQUEST_TEMPLATE.md` or [standard PR template](assets/pr-template.md). Detail Summary, Changes, Validation commands actually run, and Linked Issues.
+4. Report PR URL, number, and review instructions.
+
+## Step 5 — Closeout Mode (`closeout`)
+
+When invoked as `ship closeout` (or when user requests cleanup of merged work):
+1. Ensure the user explicitly requested closeout.
+2. Delegate to `/skill:branch-closeout` or execute the closeout protocol:
+   - Verify merge/squash landing evidence on canonical base branch.
+   - Inspect worktree for uncommitted or untracked changes.
+   - Remove worktree with `git worktree remove` (never `rm -rf`).
+   - Safely delete local branch (`git branch -d`).
+   - Audit remaining worktrees, local branches, stashes, and remote heads.
+
+## Red Flags
+
+- Blurring commit and PR phases: running `git push` or `gh pr create` when user only asked to commit.
+- Assuming a remote named `origin` is a fork or canonical without checking its URL.
+- Pushing a topic branch to a canonical-main-only repository.
+- Staging files with `git add -A` without inspecting untracked files.
+- Claiming validation checks passed when they were never run.
+- Automatically deleting branches or worktrees without verifying merge evidence.

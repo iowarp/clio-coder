@@ -30,30 +30,34 @@ skills:
     version: 0.3.0
     sha256: d8413255688f1697d40231df830ce3c8947ac2a551f3e6fbb0d10158c4fa8d0e
   # ── git ──
+  - name: branch-closeout
+    path: git/branch-closeout
+    version: 0.1.0
+    sha256: 3227f31b0693bb6428abb20a2d4f449aeba1d8e45a79cf0c2c7c333c30c10664
   - name: file-ticket
     path: git/file-ticket
-    version: 0.2.0
-    sha256: 07b5d996d459c6c8c99ea44f44421d418f4738075cccd0e4b759a6f8a7daf720
+    version: 0.3.0
+    sha256: 65029c2d9d545728750c8a713f92035bd6bdbfa9874de442df72bd059846cb7a
   - name: fix-issue
     path: git/fix-issue
-    version: 0.2.0
-    sha256: ec5e6a00056041494f9b100da8f0775455124aebc7000ed0edb7c9b8493f74c8
+    version: 0.3.0
+    sha256: 626e3aa8ca95bc603f2e0cdd2e7502aa96be85af6bfa92b635c39ef99d3845a5
   - name: resolve-merge-conflicts
     path: git/resolve-merge-conflicts
-    version: 0.3.0
-    sha256: a1df7dee85ef788f257f8b8fbf4c2564cac245c3010d3f60d3b62d721d185f5e
+    version: 0.4.0
+    sha256: 901f482aa2231552d64a721e0d1c58dc8f211347543b5a91fd2ab3c7e413c11c
   - name: ship
     path: git/ship
-    version: 0.4.0
-    sha256: cc6ab29a84923946efa28af8784a7ad595956e532fd3bb023e53a31092b42705
+    version: 0.5.0
+    sha256: 4d626718fdb8b67cf3f22d09ac5a228e5c8103befa1295a672587a6605f038b1
   - name: worktree-create
     path: git/worktree-create
-    version: 0.5.0
-    sha256: 4f5b7ebe26cb2dee63b49069c6c3e1f31a00ed867321e9234fbf85427ecdee11
+    version: 0.6.0
+    sha256: a4ae790d916a170977814b4334e14aef4f96fb304e3289f7beb5e31e8fb83881
   - name: worktree-merge
     path: git/worktree-merge
-    version: 0.5.0
-    sha256: 0c5b7232cd29553d5f14c51eb7d535ad73954688a18ccebabb02e0d8830dc4d3
+    version: 0.6.0
+    sha256: 0fbe2297622ed955b2e4fb14306d75a51bd36db7eebf59e8e92fac1da5b6e64e
   # ── meta ──
   - name: clio-coder-dev
     path: meta/clio-coder-dev
