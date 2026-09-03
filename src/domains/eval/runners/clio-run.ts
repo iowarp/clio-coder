@@ -149,7 +149,7 @@ interface BehavioralToolTerminal {
  * bounded counters against the suite's explicit public allowlist and decoy
  * list; they never become behavioral fact values or evidence excerpts.
  */
-function toolBehaviorMetricEntriesFromJsonl(
+export function toolBehaviorMetricEntriesFromJsonl(
 	stdout: string,
 	cwd: string,
 	readObservation?: { allowedPaths: string[]; decoyPaths: string[] },
@@ -201,16 +201,19 @@ function toolBehaviorMetricEntriesFromJsonl(
 
 	const terminals = canonicalFinishes.length > 0 ? canonicalFinishes : executionEnds;
 	const calls = new Map<string, number>();
+	const succeeded = new Map<string, number>();
 	const blocked = new Map<string, number>();
 	for (const terminal of terminals) {
 		const tool = metricToolName(terminal.tool);
 		calls.set(tool, (calls.get(tool) ?? 0) + 1);
+		if (terminal.outcome === "ok") succeeded.set(tool, (succeeded.get(tool) ?? 0) + 1);
 		if (terminal.outcome === "blocked") blocked.set(tool, (blocked.get(tool) ?? 0) + 1);
 	}
-	const namedTools = new Set(["bash", "dispatch", "read", ...calls.keys(), ...blocked.keys()]);
+	const namedTools = new Set(["bash", "dispatch", "read", ...calls.keys(), ...succeeded.keys(), ...blocked.keys()]);
 	const entries: Record<string, number> = { "tools.read.distinctPaths": readPaths.size };
 	for (const tool of [...namedTools].sort()) {
 		entries[`tools.calls.${tool}`] = calls.get(tool) ?? 0;
+		entries[`tools.succeeded.${tool}`] = succeeded.get(tool) ?? 0;
 		entries[`tools.blocked.${tool}`] = blocked.get(tool) ?? 0;
 	}
 	if (readObservation !== undefined) {

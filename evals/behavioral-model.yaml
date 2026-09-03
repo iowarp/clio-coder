@@ -67,6 +67,7 @@ tasks:
     metrics:
       collect: &metrics
         [task.solved, claims.unsupported, completion.reported, tools.calls.read, tools.calls.dispatch,
+        tools.succeeded.dispatch,
         tools.blocked.bash, tools.read.distinctPaths, tools.read.outsideAllowed, tools.read.decoyHits]
       readObservation:
         allowedPaths: [evals/fixtures/behavioral-main.ts]
@@ -137,10 +138,10 @@ tasks:
       expectedBehavior:
         - id: delegation-chooses-dispatch
           category: tool_choice
-          fact: {source: tool, key: tools.calls.dispatch, op: gte, value: 1}
+          fact: {source: tool, key: tools.succeeded.dispatch, op: gte, value: 1}
         - id: delegation-occurs
           category: delegation
-          fact: {source: tool, key: tools.calls.dispatch, op: gte, value: 1}
+          fact: {source: tool, key: tools.succeeded.dispatch, op: gte, value: 1}
         - id: delegation-grounded
           category: claim_grounding
           fact: {source: grader, key: claims.unsupported, op: eq, value: 0}

@@ -22,6 +22,7 @@ export const CANONICAL_METRICS = [
 	"tools.read.outsideAllowed",
 	"tools.read.decoyHits",
 	"tools.calls.dispatch",
+	"tools.succeeded.dispatch",
 	"tools.blocked.bash",
 	"claims.unsupported",
 	"completion.reported",
