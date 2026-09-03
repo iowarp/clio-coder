@@ -124,8 +124,8 @@ skills:
   # ── workflow ──
   - name: cut-it
     path: workflow/cut-it
-    version: 0.3.0
-    sha256: 6429a4725acf874379c1df7736dd95db07acd97ad5bd6f6226649370cd03d177
+    version: 0.4.0
+    sha256: d3742221f0ace1f1b62c07f5902030e478496059a58ef194e7cb3303ccdff05e
   - name: design-council
     path: workflow/design-council
     version: 0.4.0
