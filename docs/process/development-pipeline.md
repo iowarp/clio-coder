@@ -20,7 +20,7 @@ under pressure; git mechanics alone never justify a stage.
 | --- | --- | --- |
 | 1. File | [`file-ticket`](../../skills/git/file-ticket/) | A labeled GitHub issue with evidence and acceptance criteria |
 | 2. Fix | [`fix-issue`](../../skills/git/fix-issue/) | An uncommitted, verified change where failing tests preceded the fix, self-reviewed against the issue's acceptance criteria |
-| 3. Ship | [`ship`](../../skills/git/ship/) | An atomic conventional commit referencing the issue (`fixes #N`), a gated push, and an open PR; merge is a human decision |
+| 3. Ship | [`ship`](../../skills/git/ship/) | An atomic conventional commit referencing the issue (`fixes #N`); contributors push it to their fork and open a PR, while maintainer work stays local for gated integration; merge is a human decision |
 
 Releases follow [release-cut-checklist.md](../history/release-cut-checklist.md) as a
 human-gated checklist, not a skill. Worktrees
@@ -47,19 +47,24 @@ closed. After the human merge decision:
    ignored state that carries evidence rather than rebuildable output. Remove
    it through `git worktree remove`; forcing removal requires explicit approval
    to discard what remains.
-3. Delete the local source and integration branches. A remote branch is a
-   separate remote write and is deleted only with maintainer authorization.
+3. Delete the local source and integration branches. For a contributor PR,
+   delete the merged branch from the contributor's fork. The canonical
+   repository never hosts topic, integration, or release-candidate branches.
 4. Turn unfinished experimental findings into an issue with evidence and a
    next decision. Do not use indefinite `work/`, `wip/`, `keep/`, or temporary
    tags as a substitute for backlog state.
-5. Report the remaining worktrees, local branches, stashes, and local-only
-   tags. Every survivor needs an owner and purpose.
+5. Report the remaining worktrees, local branches, stashes, local-only tags,
+   and canonical remote heads. The expected canonical head set is exactly
+   `refs/heads/main`; every survivor needs an owner and purpose.
 
-Release candidates use a compact branch name that cannot collide with their
-tag: branch `v043`, tag `v0.4.3`. Once the tag's peeled commit equals the
-reviewed commit on `main` and the release succeeds, close the candidate branch
-by the same procedure. Published dotted release tags are immutable history and
-are never cleanup targets.
+Maintainer release candidates are local-only and use a compact branch name
+that cannot collide with their tag: branch `v043`, tag `v0.4.3`. Gate the exact
+candidate, require fetched `origin/main` to be its ancestor, fast-forward local
+`main`, fetch again, and push only `refs/heads/main:refs/heads/main` with
+explicit authorization. After CI passes, push only the fully qualified
+annotated tag. Once the tag's peeled commit equals the reviewed commit on
+`main` and the release succeeds, delete the local candidate branch. Published
+dotted release tags are immutable history and are never cleanup targets.
 
 ## Inheriting a Pi release
 

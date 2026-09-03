@@ -40,6 +40,8 @@ Expected:
   deleted afterwards.
 - Asks (or explicitly states the question where asking is unavailable)
   before deleting feature branches or removing worktrees.
+- Does not push source or integration branches; in a canonical-main-only
+  maintainer flow they remain local through integration and closeout.
 
 ## S2 — conflicting branches
 Setup: merge my worktree branches feat-a and feat-b.

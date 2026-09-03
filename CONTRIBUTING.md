@@ -74,22 +74,34 @@ below together with `.github/workflows/release.yml` and
 [v0.4.1 release-cut checklist](docs/history/release-cut-checklist.md) is a
 historical record, not a reusable current checklist.
 
-1. During development, keep the top changelog section at `## Unreleased` and
-   bump `version` in `package.json` when opening the release branch. Before the
-   cut, retitle that section `## <version> - YYYY-MM-DD`.
-2. Run `npm run ci:release`. It runs the full `ci` gate, then
-   `scripts/check-release.mjs`, which verifies the built `dist/` and audits
-   the exact npm package contents.
-3. Land the release commit on `main`. There is no need to wait on the `ci`
-   workflow before tagging: the release workflow runs the same gate itself.
-4. Tag and push: `git tag -a vX.Y.Z && git push origin vX.Y.Z`. The tag must
-   match `package.json`'s version; the release workflow refuses mismatches.
-5. `.github/workflows/release.yml` verifies the tag against `package.json`,
-   runs `npm run ci:release` on the tagged tree, and creates the GitHub
-   release with the tarball attached and the version's `CHANGELOG.md` section
-   as the body. It does not publish to npm.
-6. A maintainer publishes from the tagged commit with `npm publish`;
+1. During development, keep the top changelog section at `## Unreleased`. A
+   maintainer collects release work on a **local-only** compact candidate
+   branch (`v043` for `v0.4.3`) and bumps `version` there. Never push this
+   candidate branch to the canonical repository. Before the cut, retitle the
+   changelog section `## <version> - YYYY-MM-DD`.
+2. Run `npm run ci:release` on the exact candidate. It runs the full `ci` gate,
+   then `scripts/check-release.mjs`, which verifies the built `dist/` and
+   audits the exact npm package contents.
+3. Fetch `origin`, require the fetched `origin/main` to be the candidate's
+   ancestor, then fast-forward local `main` with `git merge --ff-only v043`.
+   Re-run the release gate if the candidate changed and verify local `main`
+   equals the reviewed candidate SHA.
+4. Fetch once more and stop on unexpected movement. With explicit maintainer
+   authorization, push only `refs/heads/main:refs/heads/main`; no topic or
+   release-candidate branch is pushed to canonical `origin`.
+5. Require CI for that exact `main` SHA to pass. Create the annotated tag on
+   that commit and push only it: `git tag -a v0.4.3` followed by
+   `git push origin refs/tags/v0.4.3`. The tag must match `package.json`; the
+   release workflow refuses mismatches.
+6. `.github/workflows/release.yml` verifies the tag against `package.json`,
+   runs `npm run ci:release` on the tagged tree, and creates the GitHub release
+   with the tarball attached and the version's `CHANGELOG.md` section as the
+   body. It does not publish to npm.
+7. A maintainer publishes from the tagged commit with `npm publish`;
    `prepublishOnly` runs the same `ci:release` gate in release mode first.
+8. Verify the release and tag, then delete the local compact candidate branch.
+   The canonical remote returns to its steady state: `main` plus immutable
+   release tags and GitHub releases, with no release branch.
 
 What `scripts/check-release.mjs` enforces, and how to respond when it fails:
 
@@ -122,14 +134,22 @@ that needs them runs.
 
 ## Hard Rules
 
-1. Do not push to `main`.
-2. Open pull requests against `main`.
-3. `main` requires review by `@akougkas`.
+1. The canonical repository's only branch is `main`. Maintainer topic,
+   integration, and release-candidate branches stay local and are never pushed
+   to canonical `origin`.
+2. Contributors push topic branches to their own forks and open pull requests
+   from the fork into canonical `main`; they never push a topic branch to the
+   canonical repository.
+3. A maintainer may update canonical `main` only by an explicitly authorized,
+   reviewed fast-forward from the exact locally gated candidate. Everyone else
+   changes `main` through a pull request reviewed by `@akougkas`.
 4. Keep every PR focused. Split unrelated docs, runtime, CLI, and TUI work.
 5. Update `CHANGELOG.md` for user-visible behavior, developer workflow, or
    release status changes.
 6. Run `npm run ci` before requesting review.
 7. Do not commit secrets, local config, generated `dist/`, or scratch plans.
+8. Push release tags as fully qualified `refs/tags/vX.Y.Z`; never push a
+   similarly named branch.
 
 ## Architecture Invariants
 
@@ -170,11 +190,16 @@ Examples:
 - `fix/session-resume-replay`
 - `docs/github-governance`
 
-A temporary release-candidate branch, when one is needed, uses the compact
-version spelling with no dots: `v043` for release tag `v0.4.3`. Never create a
-branch named `v0.4.3`; dotted `vX.Y.Z` names belong exclusively to immutable
-release tags, so ordinary commands cannot resolve a branch when the caller
-meant the tag. The release branch is scaffolding, not a permanent release ref.
+Maintainer branches are local-only. A temporary release candidate uses the
+compact version spelling with no dots: `v043` for release tag `v0.4.3`. Never
+create or push a branch named `v0.4.3`; dotted `vX.Y.Z` names belong exclusively
+to immutable release tags. The compact branch is local scaffolding and is
+deleted after its reviewed commit reaches `main` and the release succeeds.
+
+Contributors use the same topic prefixes in their own forks. The pull request
+head is `<contributor-fork>:<topic>` and its base is canonical `main`. Delete
+the fork branch after merge so both the canonical repository and contributor
+forks return to a small steady state.
 
 ### Branch closeout
 
@@ -189,13 +214,14 @@ housekeeping. After a PR is merged or a release is tagged:
    Remove a registered worktree with `git worktree remove <path>`, never
    `rm -rf`; use `--force` only after explicitly authorizing disposal of the
    remaining local artifacts.
-3. Delete the local topic or release branch. Delete its remote branch only when
-   the maintainer explicitly authorizes that remote write; never infer remote
-   deletion from approval to clean locally.
+3. Delete the local topic or release branch. For a contributor PR, delete its
+   branch from the contributor's fork after merge. A topic branch must never be
+   created on canonical `origin`, and canonical `main` is never deleted.
 4. Preserve unfinished experiments by filing their result and next decision in
    an issue, not by accumulating anonymous `work/`, `wip/`, or `tmp` refs.
-5. Report the remaining local branches, worktrees, stashes, and local-only tags.
-   A nonempty remainder must be intentional and named.
+5. Report the remaining local branches, worktrees, stashes, local-only tags,
+   and canonical remote heads. The expected canonical head set is exactly
+   `refs/heads/main`; every additional head is a cleanup failure.
 
 For a release, first verify `refs/tags/vX.Y.Z^{commit}` equals the reviewed
 commit on `main`, then close the compact candidate branch such as `v043`.

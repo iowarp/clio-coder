@@ -78,7 +78,7 @@ under pressure; git mechanics alone never justify a stage.</p>
 <tr>
 <td>3. Ship</td>
 <td><a href="https://github.com/iowarp/clio-coder/tree/main/skills/git/ship/"><code>ship</code></a></td>
-<td>An atomic conventional commit referencing the issue (<code>fixes #N</code>), a gated push, and an open PR; merge is a human decision</td>
+<td>An atomic conventional commit referencing the issue (<code>fixes #N</code>); contributors push it to their fork and open a PR, while maintainer work stays local for gated integration; merge is a human decision</td>
 </tr>
 </tbody></table>
 <p>Releases follow <a href="release_cut_checklist_blueprint.html">release-cut-checklist.md</a> as a
@@ -104,19 +104,24 @@ patch identity can both change during integration.</li>
 ignored state that carries evidence rather than rebuildable output. Remove
 it through <code>git worktree remove</code>; forcing removal requires explicit approval
 to discard what remains.</li>
-<li>Delete the local source and integration branches. A remote branch is a
-separate remote write and is deleted only with maintainer authorization.</li>
+<li>Delete the local source and integration branches. For a contributor PR,
+delete the merged branch from the contributor&#39;s fork. The canonical
+repository never hosts topic, integration, or release-candidate branches.</li>
 <li>Turn unfinished experimental findings into an issue with evidence and a
 next decision. Do not use indefinite <code>work/</code>, <code>wip/</code>, <code>keep/</code>, or temporary
 tags as a substitute for backlog state.</li>
-<li>Report the remaining worktrees, local branches, stashes, and local-only
-tags. Every survivor needs an owner and purpose.</li>
+<li>Report the remaining worktrees, local branches, stashes, local-only tags,
+and canonical remote heads. The expected canonical head set is exactly
+<code>refs/heads/main</code>; every survivor needs an owner and purpose.</li>
 </ol>
-<p>Release candidates use a compact branch name that cannot collide with their
-tag: branch <code>v043</code>, tag <code>v0.4.3</code>. Once the tag&#39;s peeled commit equals the
-reviewed commit on <code>main</code> and the release succeeds, close the candidate branch
-by the same procedure. Published dotted release tags are immutable history and
-are never cleanup targets.</p>
+<p>Maintainer release candidates are local-only and use a compact branch name
+that cannot collide with their tag: branch <code>v043</code>, tag <code>v0.4.3</code>. Gate the exact
+candidate, require fetched <code>origin/main</code> to be its ancestor, fast-forward local
+<code>main</code>, fetch again, and push only <code>refs/heads/main:refs/heads/main</code> with
+explicit authorization. After CI passes, push only the fully qualified
+annotated tag. Once the tag&#39;s peeled commit equals the reviewed commit on
+<code>main</code> and the release succeeds, delete the local candidate branch. Published
+dotted release tags are immutable history and are never cleanup targets.</p>
 <h2>Inheriting a Pi release</h2>
 <p>Pi dependency upgrades use a fixed five-step review so that upstream fixes
 replace Clio copies without crossing the product boundary:</p>

@@ -1,13 +1,13 @@
 ---
 name: ship
-description: "Ships finished work: stages reviewed paths, writes one atomic conventional commit referencing the issue, then pushes and opens the PR only on explicit intent. Not for producing the change; use fix-issue."
+description: "Ships finished work: writes one reviewed atomic commit, keeps maintainer branches local, or pushes a contributor branch to their fork and opens a PR only on explicit intent. Not for producing the change; use fix-issue."
 triggers:
   - ship this
   - commit this
   - commit and open the PR
   - push and open a pull request
   - get this up for review
-version: 0.3.0
+version: 0.4.0
 license: Apache-2.0
 allowed-tools:
   - read
@@ -32,11 +32,13 @@ clio-coder:
 
 # Ship
 
-Move finished, verified work out: one atomic commit, then push and PR.
-Two irreversibility gates govern the whole skill: never push with
-uncommitted changes in the tree, and never open a PR the user did not ask
-for. Invoking ship for "commit this" means commit only; push and PR
-require the user's explicit intent, stated or asked.
+Move finished, verified work out as one atomic commit. In a maintainer clone
+whose canonical remote must contain only `main`, topic and release-candidate
+branches stay local for gated integration. A contributor pushes to their own
+fork and opens a PR into the canonical repository. Never push with uncommitted
+changes, never push a working branch to a canonical-main-only remote, and never
+open a PR the user did not ask for. Invoking ship for "commit this" means
+commit only; any push and PR require explicit intent.
 
 ## Step 1 — Project conventions win
 
@@ -60,26 +62,38 @@ exact error and stop; `--no-verify` only on the user's say-so.
 
 If the user asked only to commit, report `git log -1 --stat` and end here.
 
-## Step 3 — Gate the push
+## Step 3 — Classify remotes and gate publication
 
-Detect the base branch; never hardcode `main`:
-`git symbolic-ref refs/remotes/origin/HEAD`, else
-`git remote show origin | grep 'HEAD branch'`, else ask.
+Detect the canonical repository and base branch from project instructions,
+`gh repo view`, and remote URLs. In a contributor clone, `origin` normally
+names the contributor's fork and `upstream` the canonical repository; do not
+assume either name. In a maintainer clone, `origin` may be canonical.
 
 | State | Action |
 |---|---|
 | On the base branch | STOP: the work needs its own branch first. |
 | Uncommitted changes remain | STOP: commit or set them aside explicitly. |
-| No commits ahead of base | STOP: nothing to ship. |
+| No commits ahead of the fetched canonical base | STOP: nothing to ship. |
+| Canonical remote is main-only and no contributor fork remote exists | Commit only; do not push the local branch. Report it ready for local integration. |
+| Proposed push remote is the canonical main-only repository | STOP: add/select the contributor's fork instead. |
 | An open PR already exists for this branch | STOP and print its URL. |
 | A merged PR exists and the user asked for closeout | Continue to Step 6 with its merge commit as evidence. |
 | A closed, unmerged PR exists | STOP and print its URL and state. |
 
 Every STOP is final for this run: report the reason and end.
 
-## Step 4 — Push and open the PR
+## Step 4 — Contributor fork push and PR
 
-`git push -u origin HEAD`, then `gh pr create` against the detected base.
+Only contributors take this path. Push the topic branch to the verified fork
+remote with an explicit refspec, then open the PR against the verified
+canonical repository and base. Never use a bare `git push -u origin HEAD`
+because `origin` may be canonical. The effective shape is:
+
+```text
+git push -u <fork-remote> refs/heads/<topic>:refs/heads/<topic>
+gh pr create --repo <canonical-owner/repo> --base <base> --head <fork-owner>:<topic>
+```
+
 Body from `.github/PULL_REQUEST_TEMPLATE.md` when present, else: Summary,
 What changed (commit subjects), Validation (only checks actually run this
 session, each pass/fail/not-run — nothing implied), Notes for the reviewer,
@@ -103,19 +117,26 @@ the user asks to clean up after merge:
 3. Remove a registered worktree with `git worktree remove <path>`, never raw
    filesystem deletion. `--force` requires explicit approval to discard the
    remaining state.
-4. Delete the local source branch. Delete the remote source branch only when
-   the maintainer explicitly authorized that separate remote write.
-5. Report remaining worktrees, local branches, stashes, and local-only tags.
+4. Delete the local source branch. For a contributor PR, delete the merged
+   branch from the contributor's fork when authorized. A canonical-main-only
+   remote must never have had the topic branch.
+5. Report remaining worktrees, local branches, stashes, local-only tags, and
+   canonical remote heads; the expected canonical head set is only the base.
 
-Release candidates use compact branch names (`v043`) while dotted names
-(`v0.4.3`) are reserved for immutable release tags. After a successful release,
-verify the peeled tag commit equals the reviewed commit on the base branch
-before closing the candidate branch. Never delete or move a published tag.
+Maintainer release candidates are local-only compact branches (`v043`), while
+dotted names (`v0.4.3`) are reserved for immutable release tags. Gate the
+candidate, fast-forward local `main` with `--ff-only`, recheck fetched
+`origin/main`, and push only the fully qualified `main` ref with explicit
+maintainer authorization. After CI succeeds, push only the fully qualified
+annotated tag. Verify its peeled commit, then delete the local candidate.
+Never push a release-candidate branch or delete/move a published tag.
 
 ## Red flags
 
 - `git add -A` with unreviewed untracked files present.
 - A push that left uncommitted changes behind.
+- Pushing a topic or release-candidate branch to a canonical-main-only remote.
+- Assuming a remote named `origin` is the contributor's fork.
 - A PR nobody asked for, or a Validation section claiming checks never run.
 - Two unrelated changes in one commit because asking felt slow.
 - A commit message that lists files instead of naming the change.
