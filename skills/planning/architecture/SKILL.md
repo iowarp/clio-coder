@@ -7,7 +7,7 @@ triggers:
   - architecture for this feature
   - decide the engineering approach
   - compare architecture options
-version: 0.3.0
+version: 0.4.0
 license: Apache-2.0
 allowed-tools:
   - read
@@ -51,17 +51,48 @@ stack they know beats a "better" one they don't), leanness (decide only
 what is needed to move), and reversibility (spend deliberation on the
 expensive calls only).
 
-When asking is unavailable (headless or worker run), do not skip the loop
-and do not go quiet: for each decision, state the options, the
-recommendation, and the reasoning inline, adopt the recommendation, and
-mark it `assumed — confirm`. Every other rule still applies, including the
-output path below.
+## Arguments
+
+```text
+/skill architecture <the intent — a PRD path, a brief, or a few sentences>
+```
+
+- The text is what to decide the engineering approach for. A PRD path,
+  brief, or reference doc named or pathed in the request is Step 0's
+  grounding to read first, not more arguments.
+- Nothing is required beyond some text; a blank invocation falls straight
+  to Step 0's own question — what are we building, and is there a written
+  intent to read — rather than inventing a project to architect.
+
+There is no operator in a headless run: `ask_user` still executes, but with
+nothing to answer it every call returns immediately with no answers, every
+time — calling it again will not produce a different result. From wherever
+the first empty response lands — Step 0's "ask whether reference docs
+exist", Step 1's greenfield/brownfield call, or any decision in Step 2 —
+switch immediately to the treatment already described above (state the
+options, the recommendation, the reasoning, adopt it, mark it `assumed —
+confirm`) and keep running every remaining step through Step 3 in the same
+turn. Never stop at the first unanswered gate and never go silent; a
+one-shot document produced without ever attempting the loop is also wrong
+in the other direction — always investigate and state the loop out loud
+first, degrading only once a gate actually goes unanswered. Never invent a
+fact, evidence, or a codebase detail to back an assumption; anything
+genuinely uncertain becomes an open question or a spike, never a plausible
+guess.
+
+The steps below (Step 0 through Step 3) are the plan; do not open a task
+list for them. `tasks` sits outside this skill's tool surface and any call
+to it is refused. `bash` is also outside this skill's tool surface —
+investigate with `read`, `grep`, `find`, `git`, and `code_nav` instead;
+reaching for `bash` to explore or verify is refused.
 
 ## Step 0 — Ground
 
 Read the intent (PRD path, brief, or the user's words). Read any reference
 docs passed alongside; if none were passed, ask whether any exist — the
-context needed is usually already written down.
+context needed is usually already written down. To see what exists in the
+repo before reading it, use the `find` tool (e.g. pattern `**/*`) or `ls`,
+never `bash find`/`bash ls` — `bash` is refused outright, see Arguments.
 
 ## Step 1 — Greenfield or brownfield
 
@@ -99,11 +130,17 @@ user's call. Skip what does not apply and say that you skipped it:
 
 ## Step 3 — Write the decision doc
 
-Only after the calls are made. Default location: `docs/architecture-<slug>.md`
-(or folded into the PRD as an `## Architecture` section when the user
-prefers one document; a tracker page when the user names one and an
-integration exists). Never invent another filename — `final_report.md`,
-`REPORT.md`, and similar are wrong. Shape:
+Only after the calls are made. There are exactly three valid locations, in
+order of default preference — pick one, never a fourth:
+
+1. `docs/architecture-<slug>.md` — the default, no exceptions needed.
+2. An `## Architecture` section folded into the named PRD, only when the
+   user said they prefer one document.
+3. A tracker page, only when the user names one and an integration exists.
+
+No other filename or location is ever correct. `final_report.md`,
+`REPORT.md`, `summary.md`, and anything similar are hard misses, not
+stylistic variants — if none of the three above fit, use option 1. Shape:
 
 ```markdown
 # Architecture — <intent name>
@@ -133,3 +170,15 @@ sprint (`cut-it`), spike a flagged risk now, or keep refining here.
 - One foregone conclusion instead of real alternatives.
 - File-by-file edit lists (that is cut-it's altitude).
 - A one-way door decided by vibe instead of a spike.
+- A decision doc at any filename other than the three valid locations
+  above — `final_report.md`, `REPORT.md`, and similar are wrong every time.
+- A headless run that stops at the first unanswered `ask_user` call instead
+  of running the assumed-confirm treatment through every remaining step, or
+  one that skips straight to Step 3 without ever running the loop out loud.
+- Opening a task list for Steps 0-3; `tasks` is refused. Reaching for
+  `bash` to explore the repo or verify the written doc; `bash` is not in
+  this skill's tool surface and the call is refused — use `read`, `grep`,
+  `find`, `git`, and `code_nav` instead.
+- A claim in the doc that traces to neither the read intent/codebase nor a
+  fact marked `assumed — confirm` — an invented detail reads as confident
+  and is the hardest failure to catch after the fact.
