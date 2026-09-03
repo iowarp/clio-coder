@@ -98,8 +98,8 @@ skills:
     sha256: 505460dcac23b762a87fd0f7f3aaa99806e3b0fbedeaa54f9c48608c49c16356
   - name: product-intent
     path: planning/product-intent
-    version: 0.3.0
-    sha256: d34300e6e2422fc1071e352f3e0f1b13a4e65dbcfd4eaf6dd9ef2b61f18d72ad
+    version: 0.4.0
+    sha256: d41689db9a8c9b2dad0cd630412bebaed5792f9d22d4edb18770e4b1b3308699
   - name: tech-spec
     path: planning/tech-spec
     version: 0.2.0
