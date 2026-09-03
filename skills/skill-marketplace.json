@@ -326,7 +326,7 @@
 				"create milestone prompts"
 			],
 			"sourceUrl": "https://github.com/iowarp/clio-coder/tree/main/skills/planning/prd",
-			"version": "0.3.0",
+			"version": "0.4.0",
 			"audit": "pass",
 			"category": "planning"
 		},

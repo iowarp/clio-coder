@@ -94,8 +94,8 @@ skills:
     sha256: af92244d2ba8723b656ce00d531df88850c7886915653751e7ba59957b5454be
   - name: prd
     path: planning/prd
-    version: 0.3.0
-    sha256: 505460dcac23b762a87fd0f7f3aaa99806e3b0fbedeaa54f9c48608c49c16356
+    version: 0.4.0
+    sha256: 39fe417f495be4153541dd70c886cf773265636dc9fa1844cfc7012b71cbbec1
   - name: product-intent
     path: planning/product-intent
     version: 0.4.0
