@@ -27,8 +27,8 @@ skills:
     sha256: ba0568719d0b58bb3e1631eee72094ec0165bf2fb7f69e1e67d223ff50b364d8
   - name: context-prime
     path: context/context-prime
-    version: 0.3.0
-    sha256: d8413255688f1697d40231df830ce3c8947ac2a551f3e6fbb0d10158c4fa8d0e
+    version: 0.4.0
+    sha256: 21587263297a7ee9e81a2d66f6fc800a1ee6db15f76de1e650563b71fdf19d8e
   # ── git ──
   - name: branch-closeout
     path: git/branch-closeout

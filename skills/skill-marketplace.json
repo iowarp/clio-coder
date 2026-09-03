@@ -87,7 +87,7 @@
 				"resume repository work after a break"
 			],
 			"sourceUrl": "https://github.com/iowarp/clio-coder/tree/main/skills/context/context-prime",
-			"version": "0.3.0",
+			"version": "0.4.0",
 			"audit": "pass",
 			"category": "context"
 		},
