@@ -195,18 +195,20 @@ export class LifecyclePresenter {
 		if (this.plain) {
 			this.out.write(`  ${header}:\n\n`);
 			for (const item of items) {
-				const sizeStr = item.bytes !== undefined && item.bytes !== null ? ` (${formatBytes(item.bytes)})` : "";
-				const statusSuffix =
-					item.status === "keep"
-						? " (kept)"
-						: item.status === "absent"
-							? " (absent)"
-							: item.status === "skip"
-								? " (skipped)"
-								: "";
+				const sizeStr =
+					item.status !== "absent" && item.bytes !== undefined && item.bytes !== null ? ` (${formatBytes(item.bytes)})` : "";
+				let suffix = "";
+				if (item.status === "keep") {
+					suffix = item.detail ? ` (${item.detail})` : " (kept)";
+				} else if (item.status === "absent") {
+					suffix = " (absent)";
+				} else if (item.status === "skip") {
+					suffix = item.detail ? ` (${item.detail})` : " (skipped)";
+				} else if (item.detail) {
+					suffix = ` (${item.detail})`;
+				}
 				const glyph = item.status === "keep" || item.status === "absent" || item.status === "skip" ? "–" : "✓";
-				const detail = item.detail ? ` - ${item.detail}` : "";
-				this.out.write(`    ${glyph} ${item.label}: ${shortenPath(item.path)}${sizeStr}${statusSuffix}${detail}\n`);
+				this.out.write(`    ${glyph} ${item.label}: ${shortenPath(item.path)}${sizeStr}${suffix}\n`);
 			}
 			this.out.write("\n");
 			return;
@@ -214,22 +216,24 @@ export class LifecyclePresenter {
 
 		this.out.write(`${chalk.cyan("│")}  ${header}:\n${chalk.cyan("│")}\n`);
 		for (const item of items) {
-			const sizeStr = item.bytes !== undefined && item.bytes !== null ? ` (${formatBytes(item.bytes)})` : "";
+			const sizeStr =
+				item.status !== "absent" && item.bytes !== undefined && item.bytes !== null ? ` (${formatBytes(item.bytes)})` : "";
 			let glyph = chalk.green("✓");
 			let suffix = "";
 			if (item.status === "keep") {
 				glyph = chalk.dim("–");
-				suffix = ` ${chalk.dim("(kept)")}`;
+				suffix = item.detail ? ` ${chalk.dim(`(${item.detail})`)}` : ` ${chalk.dim("(kept)")}`;
 			} else if (item.status === "absent") {
 				glyph = chalk.dim("–");
 				suffix = ` ${chalk.dim("(absent)")}`;
 			} else if (item.status === "skip") {
 				glyph = chalk.yellow("–");
-				suffix = ` ${chalk.yellow("(skipped)")}`;
+				suffix = item.detail ? ` ${chalk.yellow(`(${item.detail})`)}` : ` ${chalk.yellow("(skipped)")}`;
+			} else if (item.detail) {
+				suffix = ` ${chalk.dim(`(${item.detail})`)}`;
 			}
-			const detail = item.detail ? ` ${chalk.dim(item.detail)}` : "";
 			this.out.write(
-				`${chalk.blue("●")}    ${glyph} ${chalk.bold(item.label)}: ${shortenPath(item.path)}${sizeStr}${suffix}${detail}\n`,
+				`${chalk.blue("●")}    ${glyph} ${chalk.bold(item.label)}: ${shortenPath(item.path)}${sizeStr}${suffix}\n`,
 			);
 		}
 		this.out.write(`${chalk.cyan("│")}\n`);
