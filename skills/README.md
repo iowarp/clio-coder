@@ -63,6 +63,7 @@ folder is presentation and provenance, not a namespace.
 | [`worktree-create`](git/worktree-create/) | workflow | Stand up isolated worktrees for parallel branches: detected install/config/health-check, per-worktree verification. |
 | [`worktree-merge`](git/worktree-merge/) | workflow | Integrate finished worktree branches through a throwaway integration branch with per-merge tests and a full final gate. |
 | [`resolve-merge-conflicts`](git/resolve-merge-conflicts/) | workflow | A merge/rebase is stopped on conflicts. Resolves from both sides' reconstructed intent, validates, completes the operation. |
+| [`branch-closeout`](git/branch-closeout/) | workflow | Proves merged work on the canonical base, inspects and removes associated worktrees through Git, deletes local branches safely, and audits surviving repository refs. |
 
 ### `research/` — scientific and literature work
 

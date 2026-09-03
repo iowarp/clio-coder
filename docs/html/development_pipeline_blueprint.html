@@ -85,6 +85,7 @@ under pressure; git mechanics alone never justify a stage.</p>
 human-gated checklist, not a skill. Worktrees
 (<a href="https://github.com/iowarp/clio-coder/tree/main/skills/git/worktree-create/"><code>worktree-create</code></a>,
 <a href="https://github.com/iowarp/clio-coder/tree/main/skills/git/worktree-merge/"><code>worktree-merge</code></a>),
+<a href="https://github.com/iowarp/clio-coder/tree/main/skills/git/branch-closeout/"><code>branch-closeout</code></a>,
 <a href="https://github.com/iowarp/clio-coder/tree/main/skills/git/resolve-merge-conflicts/"><code>resolve-merge-conflicts</code></a>, and
 <a href="https://github.com/iowarp/clio-coder/tree/main/skills/coding/tdd/"><code>tdd</code></a> are à-la-carte tools reached for when the
 situation calls for them, not stages every change passes through. An RCA
@@ -94,7 +95,7 @@ bypasses stage 1 and uses <a href="https://github.com/iowarp/clio-coder/tree/mai
 instead; everything downstream is identical.</p>
 <h2>Closeout</h2>
 <p>A merged PR is not operationally finished until its local scaffolding is
-closed. After the human merge decision:</p>
+closed. The reusable <a href="https://github.com/iowarp/clio-coder/tree/main/skills/git/branch-closeout/"><code>branch-closeout</code></a> skill automates this verification and teardown safely. After the human merge decision:</p>
 <ol>
 <li>Fetch and prune, confirm the PR&#39;s merged state, and identify the resulting
 commit on <code>origin/main</code>. Direct ancestry proves an ordinary merge; a squash

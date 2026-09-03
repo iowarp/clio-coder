@@ -1,13 +1,9 @@
 # Evals — worktree-create
 
-Baseline scenarios (subagent WITHOUT the skill vs WITH). Pass/fail per
-bullet. Fixtures seed a real Node git repo (valid empty lockfile so
-`npm ci` succeeds offline; gitignored `.env`; CI workflow declaring the
-commands). Expected bullets describe transcript-observable behavior; a
-bullet passes only when the treatment transcript shows it.
+Baseline scenarios (subagent WITHOUT the skill vs WITH). Pass/fail per bullet. Status: `eval-status: smoke-checked`.
 
-## S1 — two worktrees on a Node repo
-Setup: set up worktrees for feat-a and feat-b.
+## S1 — Two worktrees on a Node repo
+Setup: "Set up worktrees for feat-a and feat-b."
 
 Fixture:
 ```bash
@@ -28,17 +24,13 @@ git commit -qm "chore: seed node app"
 ```
 
 Expected:
-- Detects the install and health-check commands from the CI workflow and
-  manifest (`npm ci`, `npm test`) rather than assuming them.
-- Creates `worktrees/feat-a` and `worktrees/feat-b`, each on its own
-  branch (git worktree add appears for both).
-- Copies `.env` into the worktrees only after a `git check-ignore` (or
-  equivalent ignore check) confirms it is untracked-by-design.
-- Runs the health check in each worktree and reports per-worktree
-  PASS/FAIL.
+- Detects the install and health-check commands from the CI workflow and manifest (`npm ci`, `npm test`) rather than assuming them.
+- Creates `worktrees/feat-a` and `worktrees/feat-b`, each on its own branch.
+- Copies `.env` into the worktrees only after `git check-ignore` confirms it is gitignored.
+- Runs the health check in each worktree and reports per-worktree PASS/FAIL.
 
-## S2 — no branches given
-Setup: set up worktrees for me.
+## S2 — No branches given
+Setup: "Set up worktrees for me."
 
 Fixture:
 ```bash
@@ -54,12 +46,10 @@ git commit -qm "chore: seed node app"
 ```
 
 Expected:
-- Asks which branches to create (an ask, or an explicit statement of the
-  question where asking is unavailable); no `git worktree add` and no new
-  branch appears in the transcript.
+- Prompts the user for which branches to create; no `git worktree add` appears in the transcript without branch input.
 
-## S3 — health check fails in one worktree
-Setup: set up worktrees for feat-ok and feat-broken.
+## S3 — Health check fails in one worktree
+Setup: "Set up worktrees for feat-ok and feat-broken."
 
 Fixture:
 ```bash
@@ -82,16 +72,33 @@ git checkout -q main
 ```
 
 Expected:
-- `worktrees/feat-broken` is reported FAILED with the actual health-check
-  error; `worktrees/feat-ok` still completes and is reported PASS; the
-  final summary never claims "all ready".
+- `worktrees/feat-broken` is reported FAILED with the actual health-check error; `worktrees/feat-ok` completes with PASS; the final summary never claims "all ready".
+
+## S4 — Configurable worktree root
+Setup: "Run `/skill:worktree-create --root .custom-trees feat-custom`."
+
+Expected:
+- Structurally parses `--root .custom-trees`.
+- Places the worktree inside `.custom-trees/feat-custom`.
+- Checks or ensures `.custom-trees` is included in `.gitignore`.
+
+## S5 — Safe branch path derivation
+Setup: "Create a worktree for `feat/subsystem/module-x`."
+
+Expected:
+- Validates ref format via `git check-ref-format --branch feat/subsystem/module-x`.
+- Derives a safe filesystem path under the root without directory traversal escapes.
+
+## S6 — Setup mode none
+Setup: "Run `/skill:worktree-create --setup none feat-quick`."
+
+Expected:
+- Creates the worktree on branch `feat-quick`.
+- Skips package installation, config copying, and health check commands.
+- Reports the worktree ready with setup marked as skipped/none.
 
 ## Baseline failure modes to watch for (RED)
-- Hardcoded package-manager or test commands.
-- Secrets/config missing so the app fails at boot later.
-- Untracked-vs-tracked confusion duplicating tracked files.
-
-## Smoke record (2026-08-13)
-
-One representative scenario via `clio-coder skills eval` against Nemo-3.5-Lightning
-(30B local, llamacpp on mini), full-auto sandbox. PASS. Commands detected from CI, worktrees created, check-ignore before .env copy, per-worktree health checks. Judge truncation caused the harness exit 1.
+- Hardcoding package manager or test commands.
+- Duplicating tracked files across checkouts.
+- Copying secrets without `git check-ignore` verification.
+- Allowing path traversal outside the designated worktree root.

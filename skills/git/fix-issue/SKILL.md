@@ -7,8 +7,9 @@ triggers:
   - resolve the bug in issue
   - implement this tracker issue
   - fix a GitHub issue end to end
-version: 0.2.0
+version: 0.3.0
 license: Apache-2.0
+compatibility: git >=2.30.0, gh CLI >=2.0.0 (authenticated for issue viewing), POSIX-compatible shell
 allowed-tools:
   - read
   - grep
@@ -19,9 +20,9 @@ allowed-tools:
   - context
   - code_nav
   - dispatch
+  - tasks
   - write
   - edit
-  - artifact
 clio-coder:
   registry-id: iowarp/clio-coder
   source-url: https://github.com/iowarp/clio-coder/tree/main/skills/git/fix-issue
@@ -36,78 +37,100 @@ clio-coder:
 
 # Fix Issue
 
-Resolve one tracker issue: diagnose only as much as the issue leaves
-unknown, fix test-first, verify against the issue's own acceptance
-criteria. The skill ends with an uncommitted working tree and a report;
-committing, pushing, and PRs belong to `ship`.
+Resolve one tracker issue: diagnose only as much as the issue leaves unknown, fix test-first, verify against the issue's own acceptance criteria. The skill ends with an uncommitted working tree and a completion report; committing, pushing, and PRs belong to `ship`.
 
-## Step 1 — Fetch and gate
+See [diagnosis and RCA](references/diagnosis-and-rca.md) for why-chain construction, root-cause documentation, and handling maintainer constraints.
 
-`gh issue view <id>`; if that fails (older gh, GraphQL changes), fall back
-to `gh api repos/<owner>/<repo>/issues/<id>` and `.../issues/<id>/comments`.
-Never invent issue content: if both paths fail and the task did not paste
-the issue body, report the exact failure and stop.
+## Arguments
 
-Gates before any code:
+Arguments are passed in the user invocation message. Interpret them structurally from the prompt:
 
-- Issue closed → report it; continue only on explicit confirmation.
-- A linked PR already exists → warn and confirm before continuing.
-- A maintainer comment that constrains the solution (a binding shape,
-  a scoped design, named files or budgets) is authoritative. Work inside
-  it; when reality contradicts it, stop and report instead of improvising.
-
-## Step 2 — Diagnose only the unknown
-
-Read the issue's evidence first. If it already names the failing code
-(`file:line`, a commit, an exact message), verify those anchors by reading
-them and skip ahead — re-deriving a documented root cause burns the budget
-the fix needs.
-
-When the cause is genuinely unknown, close the gap with a why-chain, each
-link carrying evidence you actually read:
-
-```
-WHY <symptom>?  → because <cause>   (evidence: file.ts:123)
-ROOT CAUSE: <the exact code to change>  (evidence: file.ts:789)
+```text
+/skill:fix-issue [--repo owner/repo] <issue-number|issue-url>
 ```
 
-A link without a cited line is a hypothesis. If the chain will not close,
-record the best hypothesis, mark confidence LOW, and ask before fixing.
-Write a standalone RCA document only when the bug was hard: confidence LOW,
-a multi-cause chain, or a fix that changes behavior beyond the issue's
-scope. Routine fixes carry their why-chain in the final report, not a file.
-Either way the RCA's destination is the issue: `ship` posts it as the
-closing comment under the `rca` label (see docs/process/development-pipeline.md).
+### Examples
+- `/skill:fix-issue 42`
+- `/skill:fix-issue #105`
+- `/skill:fix-issue https://github.com/iowarp/clio-coder/issues/271`
+- `/skill:fix-issue --repo acme/widgets 88`
 
-## Step 3 — Fix test-first
+### Positional Arguments
+- `<issue-number|issue-url>`: The GitHub issue identifier to fix.
+  - Allowed forms:
+    - Pure integer: `42`
+    - Hash-prefixed integer: `#42`
+    - Full GitHub issue URL: `https://github.com/<owner>/<repo>/issues/<number>`
+  - Required. If omitted, prompt the user for the issue number or URL.
 
-Write the test that reproduces the defect and watch it fail for the stated
-reason. Then make the smallest change that fixes the root cause, not the
-symptom. Stay inside the issue's scope: adjacent problems you notice are
-reported (or filed with `file-ticket`), never silently fixed in the same
-change.
+### Options
+- `--repo <owner/repo>`: Target GitHub repository.
+  - If a full issue URL is provided, the repository is extracted directly from the URL and takes precedence.
+  - If only an issue number is provided, `--repo` overrides the default.
+  - Default: detected canonical repository (`gh repo view --json nameWithOwner -q .nameWithOwner` or Git remote tracking).
+  - Validation: Must match `^[A-Za-z0-9_.-]+/[A-Za-z0-9_.-]+$`.
+
+### Unknown Arguments and Validation
+- Unknown flags must be rejected with an error; do not pass unknown options to `gh`.
+- Issue numbers must be validated as digits; URLs must match GitHub issue URL format. Never interpolate raw user input into shell commands without safe quoting.
+
+## Step 1 — Fetch and Gate
+
+1. Deterministically resolve repository and issue ID.
+2. Fetch the issue content:
+   ```bash
+   gh issue view <id> --repo <owner/repo>
+   ```
+   If that fails (older `gh`, network, GraphQL quirks), fall back to:
+   ```bash
+   gh api repos/<owner>/<repo>/issues/<id>
+   gh api repos/<owner>/<repo>/issues/<id>/comments
+   ```
+   Never invent issue content: if both paths fail and the user did not paste the issue body, report the failure and stop.
+3. Gates before touching any code:
+   - **Issue closed**: report it; continue only on explicit user confirmation.
+   - **Linked PR exists**: report it and confirm before duplicating effort.
+   - **Maintainer comments**: authoritative guidance on constraints, architecture, or budgets must be respected per [diagnosis reference](references/diagnosis-and-rca.md).
+
+## Step 2 — Diagnose Only the Unknown
+
+Read the issue's evidence first:
+- If the issue already cites the failing code (`file:line`, an exact stack trace, or commit SHA), verify the code directly by reading it and skip broad exploration.
+- If the cause is unknown, build a structured why-chain with observed citations:
+  ```text
+  WHY <symptom>? -> because <cause> (evidence: file.ts:123)
+  ROOT CAUSE: <exact code to change> (evidence: file.ts:789)
+  ```
+- Routine fixes keep their why-chain in the completion report. For complex bugs, format a standalone RCA. Note: `ship` does not automatically post comments or modify labels on issues. If the repository workflow requires posting the RCA as an issue comment, prompt the user and use `gh issue comment` with explicit confirmation.
+
+## Step 3 — Fix Test-First
+
+1. Write a focused reproducing test before editing implementation code.
+2. Run the test and observe it fail for the stated defect reason.
+3. Make the smallest necessary change to resolve the root cause.
+4. Stay strictly within the issue scope. Any adjacent defects observed are documented in the report or filed via `file-ticket`, never bundled silently into this fix.
 
 ## Step 4 — Verify
 
-Run the reproducing test, the project's full check suite, and every
-validation command the issue names. Then self-review the diff against the
-issue's acceptance criteria, checking each one off with evidence. Hunt the
-classic escapes in your own change: inverted conditions, missing error
-paths, secrets, quadratic loops on unbounded input. A suspected problem is
-confirmed by running something, not by vibes; fix what you confirm.
+1. Run the reproducing test to verify it now passes.
+2. Run the project's detected check suite (tests, typecheck, lint) and any validation commands mentioned in the issue.
+3. Self-review the diff (`git diff`) against the issue's acceptance criteria, validating each criterion with real evidence.
 
-## Step 5 — Report and stop
+## Step 5 — Report and Stop
 
-Leave the change uncommitted. Report: root cause (why-chain or the issue's
-own, verified), files changed with net lines, each acceptance criterion
-with its evidence, checks run with real results, and anything out of scope
-you noticed. Failing or skipped checks are stated as such — never implied
-green. Hand off to `ship` only when the user asks.
+Leave the working tree uncommitted. Deliver a structured report:
+- Root cause (why-chain or verified issue evidence)
+- Files modified with net line diffs
+- Acceptance criteria checklist with verification evidence
+- Validation commands executed and their actual outputs
+- Out-of-scope observations or follow-ups
 
-## Red flags
+Handoff: Inform the user that the change is verified and uncommitted, ready for `ship`.
 
-- Re-deriving a root cause the issue already documents.
-- A fix with no failing test that preceded it.
-- "All checks pass" without naming the checks and their output.
-- Silently widening scope beyond the issue.
-- Committing, pushing, or opening a PR from this skill.
+## Red Flags
+
+- Re-deriving a root cause the issue already accurately documents.
+- Changing implementation code before a reproducing test fails.
+- Bundling out-of-scope refactoring or fixes into the change.
+- Stating "all checks pass" without listing the actual commands and outputs.
+- Committing, pushing, or creating pull requests from this skill.

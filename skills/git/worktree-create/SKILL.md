@@ -1,13 +1,14 @@
 ---
 name: worktree-create
-description: Stands up one or more git worktrees for parallel work, each on its own branch with gitignored config copied in, dependencies installed, and a verified health check. Not for merging finished worktrees; use worktree-merge.
+description: Stands up one or more git worktrees for parallel work, each on its own branch with gitignored config copied in, dependencies installed, and a verified health check. Not for merging finished worktrees; use worktree-merge. Not for closeout; use branch-closeout.
 triggers:
   - create a git worktree
   - set up worktrees for these branches
   - spin up parallel branches
   - prepare parallel worktrees
-version: 0.5.0
+version: 0.6.0
 license: Apache-2.0
+compatibility: git >=2.30.0, POSIX-compatible shell
 allowed-tools:
   - read
   - grep
@@ -16,8 +17,8 @@ allowed-tools:
   - git
   - bash
   - write
+  - tasks
   - ask_user
-  - artifact
 clio-coder:
   registry-id: iowarp/clio-coder
   source-url: https://github.com/iowarp/clio-coder/tree/main/skills/git/worktree-create
@@ -33,75 +34,94 @@ clio-coder:
 
 # Worktree Create
 
-Stand up isolated git worktrees, each on its own branch, genuinely ready to
-develop and validate in: config copied, dependencies installed, health
-check passed. Everything is detected from this repo; nothing about the
-stack is assumed.
+Stand up isolated git worktrees, each on its own branch, ready for immediate development and validation: gitignored configuration copied, dependencies installed, and health checks verified. Everything is detected from the repository; nothing about the tech stack is assumed.
 
-## Step 1 — Branch list
+See [worktree setup](references/worktree-setup.md) for package manager detection, configuration files, and health checks.
 
-The user's arguments are the branch list. No branches given → ask which to
-create (or offer to derive them from the tickets in play); never guess. Follow
-the repository's branch prefixes. In a canonical-main-only maintainer clone,
-all worktree branches remain local. A release candidate uses a compact local
-name such as `v043`; dotted `v0.4.3` is reserved exclusively for the immutable
-release tag, so branch and tag refs never collide.
+## Arguments
 
-## Step 2 — Detect the project setup ONCE
+Arguments are passed in the user invocation message. Interpret them structurally from the prompt:
 
-Read `references/worktree-setup.md` — the checklist of what a fresh worktree
-needs and how to detect each piece. From this repo, determine one time:
+```text
+/skill:worktree-create [--base ref] [--root path] [--setup auto|none] <branch...>
+```
 
-- install command(s), from manifests and lockfiles (one per package in a
-  monorepo);
-- gitignored env/config files to copy (or the repo's `.worktreeinclude` as
-  the source of truth);
-- the health-check command, preferring exactly what CI runs (read
-  `.github/workflows/*`, Makefile, manifest scripts) — a health endpoint if
-  the app has one, else build/typecheck/test smoke;
-- a base port, only if the health check starts a service; worktree N gets
-  `base + N` so parallel servers never collide.
+### Examples
+- `/skill:worktree-create feat/user-profiles feat/billing-portal`
+- `/skill:worktree-create --base main --root .worktrees feat/api-v2`
+- `/skill:worktree-create --setup none chore/refactor-docs`
 
-Worktree root is `worktrees/<branch>`, gitignored. If `worktrees/` is not
-ignored, add it to `.gitignore` first.
+### Positional Arguments
+- `<branch...>`: One or more branch names to create and check out.
+  - Required. If omitted, prompt the user for the list of branches; never guess or invent branch names.
+  - Validation: Each branch must be a valid ref name (`git check-ref-format --branch <branch>`).
 
-## Step 3 — Set up each worktree sequentially
+### Options
+- `--base <ref>`: Base git reference to branch from.
+  - Default: detected canonical default branch (e.g. `main` or `master`) for clean branches, or `HEAD` if the user requested carrying current commits.
+  - Validation: Must resolve via `git rev-parse --verify <ref>`.
+- `--root <path>`: Directory path under which worktrees will be created.
+  - Default: `worktrees/` relative to the repository root.
+  - Path safety: Must remain within the repository boundary; reject paths containing directory traversal (`..`).
+- `--setup <auto|none>`: Setup behavior for newly created worktrees.
+  - `auto` (default): Detects and copies gitignored config, installs dependencies, runs codegen/build if needed, and executes health checks.
+  - `none`: Checks out the worktree only without copying files or executing commands.
 
-For each branch, in order:
+### Unknown Arguments and Path Validation
+- Unknown flags must be rejected with an error.
+- Ref names and filesystem paths must be validated before execution. Never interpolate untrusted user strings into shell commands without safe quoting.
 
-1. `git worktree add worktrees/<branch> -b <branch>` off the intended base
-   (default branch for clean trees; current HEAD only if the user wants
-   in-progress work carried).
-2. Copy the detected gitignored config/secrets in, verifying each with
-   `git check-ignore <file>` before copying — a tracked file must never be
-   duplicated.
-3. Run the detected install command(s) inside the worktree.
-4. Run any generate/build step the app needs to boot; skip if none.
-5. Run the health check (on the assigned port when a service starts); stop
-   any server you started afterwards.
-6. Record: path · branch · deps installed · health PASS/FAIL · errors.
+## Step 1 — Validate Arguments and Ignore Root
 
-A failed step fails that worktree; continue with the rest and report the
-failure. Do not mark a worktree ready that did not pass its health check.
+> [!IMPORTANT]
+> Execute steps directly; do not declare task boards or write artifact files. Run discrete git commands sequentially; never nest commands inside `$(...)` command substitutions or subshells.
+
+1. Validate branch names and `--base <ref>`.
+2. Ensure `--root <path>` is gitignored in the main repository. If not already ignored, add it to `.gitignore` and notify the user.
+3. Derive safe filesystem paths under `--root` for each branch:
+   - Handle slashes in branch names safely (e.g. `feat/auth` maps to safe directory `<root>/feat-auth` or `<root>/feat/auth` without escaping `<root>`).
+
+## Step 2 — Detect Project Setup Once
+
+If `--setup auto` is active, detect environment requirements from the repository per [worktree setup](references/worktree-setup.md):
+- **Install command**: detected from manifests and lockfiles (`package-lock.json`, `pnpm-lock.yaml`, `Cargo.lock`, `uv.lock`, `poetry.lock`, etc.).
+- **Gitignored config**: candidate files (`.env*`, local config) verified with `git check-ignore <file>`. Never copy tracked files. If `.worktreeinclude` exists, use it as the source of truth.
+- **Health-check command**: prefer existing CI commands (`.github/workflows/*`), Makefile targets, or manifest scripts.
+- **Base port**: assign unique ports (`base_port + index`) if health checks start network daemons.
+
+## Step 3 — Stand Up Each Worktree Sequentially
+
+For each `<branch>` in order:
+1. Create the worktree:
+   ```bash
+   git worktree add <safe-worktree-path> -b <branch> <base>
+   ```
+2. If `--setup auto`:
+   - Copy verified gitignored config files into `<safe-worktree-path>`.
+   - Run detected package manager install command inside the worktree directory.
+   - Run any necessary build/codegen steps.
+   - Execute the detected health check. Stop any background servers started during verification.
+3. Record status for the worktree: path, branch, dependencies installed, health status (PASS/FAIL), and any errors.
+
+A failure in one worktree does not abort setup for subsequent branches; continue setup and report the failure.
 
 ## Step 4 — Report
 
-Print the per-worktree table (path · branch · deps · health · port), a
-`N worktree(s) ready, M failed` line, the next step (start work in each),
-and the cleanup reminder: after merge evidence is recorded, resolve the path
-from `git worktree list --porcelain`, inspect tracked/untracked/ignored state,
-then run `git worktree remove <registered-path>` and delete the local branch.
-Never push a maintainer worktree branch to a canonical-main-only remote; a
-contributor branch belongs on the contributor's fork and is removed there after
-merge. Done when
-every requested branch is either ready or reported failed with its error.
+Output a structured summary table:
+- Branch name and filesystem path
+- Dependency installation status
+- Health check result (PASS/FAIL with error output if failed)
+- Port assignment (if applicable)
 
-## Red flags
+Remind the user:
+- Start development in the ready worktrees.
+- When finished, merge using `worktree-merge` and close out using `branch-closeout`. Never remove worktrees via `rm -rf`; always use `git worktree remove`. In canonical-main-only repositories, maintainer worktree branches stay local.
 
-- Assuming npm/pytest/anything instead of detecting from the repo.
-- Copying a file into the worktree without `git check-ignore` proving it is
-  untracked config.
-- Reporting a worktree ready with a failed or skipped health check.
-- Two parallel services fighting over one port.
-- Creating a release branch whose dotted name can collide with its tag.
-- Pushing a maintainer worktree branch to a canonical-main-only remote.
+## Red Flags
+
+- Assuming package managers or test runners instead of detecting them from the repository.
+- Copying files into the worktree without verifying `git check-ignore`.
+- Duplicating tracked files across worktrees.
+- Escaping the worktree root via unsanitized branch name path traversal.
+- Reporting a worktree ready when its health check failed.
+- Using `rm -rf` on a registered worktree.

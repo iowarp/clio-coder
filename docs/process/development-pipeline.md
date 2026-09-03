@@ -26,6 +26,7 @@ Releases follow [release-cut-checklist.md](../history/release-cut-checklist.md) 
 human-gated checklist, not a skill. Worktrees
 ([`worktree-create`](../../skills/git/worktree-create/),
 [`worktree-merge`](../../skills/git/worktree-merge/)),
+[`branch-closeout`](../../skills/git/branch-closeout/),
 [`resolve-merge-conflicts`](../../skills/git/resolve-merge-conflicts/), and
 [`tdd`](../../skills/coding/tdd/) are à-la-carte tools reached for when the
 situation calls for them, not stages every change passes through. An RCA
@@ -37,7 +38,7 @@ instead; everything downstream is identical.
 ## Closeout
 
 A merged PR is not operationally finished until its local scaffolding is
-closed. After the human merge decision:
+closed. The reusable [`branch-closeout`](../../skills/git/branch-closeout/) skill automates this verification and teardown safely. After the human merge decision:
 
 1. Fetch and prune, confirm the PR's merged state, and identify the resulting
    commit on `origin/main`. Direct ancestry proves an ordinary merge; a squash
