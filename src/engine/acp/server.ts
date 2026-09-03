@@ -2,6 +2,7 @@ import { randomUUID } from "node:crypto";
 import { realpathSync } from "node:fs";
 import { isAbsolute, resolve as resolvePath } from "node:path";
 import {
+	type AccountabilityEvidenceReadyPayload,
 	BusChannels,
 	type DispatchCompletedPayload,
 	type DispatchEnqueuedPayload,
@@ -335,7 +336,10 @@ const ACP_MAX_REPLAY_TOOL_CALLS = 8192;
  * the list is the allowlist, and a client's requested kinds are intersected
  * with it rather than trusted. `safety.loopBlocked` was the first member; the
  * dispatch lifecycle joined it so a client can draw a live fleet board from
- * reported facts instead of inferring one from tool titles or timing.
+ * reported facts instead of inferring one from tool titles or timing;
+ * `accountability.evidenceReady` follows a run's terminal event once its
+ * evidence bundle has landed, so the board can show first-pass success and a
+ * finding count without reading Clio's state tree.
  */
 const ACP_FORWARDABLE_EVENT_KINDS = [
 	"safety.loopBlocked",
@@ -344,6 +348,7 @@ const ACP_FORWARDABLE_EVENT_KINDS = [
 	"dispatch.progress",
 	"dispatch.completed",
 	"dispatch.failed",
+	"accountability.evidenceReady",
 ] as const;
 
 type AcpForwardableEventKind = (typeof ACP_FORWARDABLE_EVENT_KINDS)[number];
@@ -361,6 +366,9 @@ const ACP_MAX_DISPATCH_TASK_PREVIEW_BYTES = 160;
 
 /** Wire bound for the short identifiers a dispatch event carries. */
 const ACP_MAX_DISPATCH_ID_BYTES = 128;
+/** Evidence tags are a closed vocabulary of short identifiers; anything wider is not a tag. */
+const ACP_MAX_EVIDENCE_TAGS = 32;
+const ACP_MAX_EVIDENCE_TAG_BYTES = 64;
 
 /**
  * Progress events forwarded per run before the stream is capped. One run
@@ -1874,6 +1882,29 @@ export async function serveClioAcpAgent(options: ClioAcpServerOptions): Promise<
 					outcome: safeStoredIdentifier(payload.outcome, 64),
 					reason: safeStoredIdentifier(payload.reason, 64),
 					durationMs: safeCount(payload.durationMs),
+				});
+			}),
+		);
+		unsubscribeEvents.push(
+			bus.on(BusChannels.AccountabilityEvidenceReady, (payload: AccountabilityEvidenceReadyPayload) => {
+				// Arrives after dispatch.completed or dispatch.failed for the same run,
+				// so it is terminal too: nothing about that run follows it. The
+				// bundle's prose (findings, overview) stays behind; only the summary
+				// counters the projection itself carries cross, and the tags are
+				// filtered to bounded identifiers rather than truncated into new ones.
+				const runId = safeStoredIdentifier(payload.runId, ACP_MAX_DISPATCH_ID_BYTES);
+				const evidenceId = safeStoredIdentifier(payload.evidenceId, ACP_MAX_DISPATCH_ID_BYTES);
+				if (runId === null || evidenceId === null) return;
+				const tags = (Array.isArray(payload.tags) ? payload.tags : [])
+					.map((tag) => safeStoredIdentifier(tag, ACP_MAX_EVIDENCE_TAG_BYTES))
+					.filter((tag): tag is string => tag !== null)
+					.slice(0, ACP_MAX_EVIDENCE_TAGS);
+				forwardEvent("accountability.evidenceReady", null, true, {
+					runId,
+					evidenceId,
+					firstPassSuccess: payload.firstPassSuccess === true,
+					findingCount: safeCount(payload.findingCount),
+					tags,
 				});
 			}),
 		);
