@@ -86,8 +86,8 @@ skills:
   # ── planning ──
   - name: architecture
     path: planning/architecture
-    version: 0.3.0
-    sha256: 0da15631b3a60946e90b63047047e0ee1d84b6705e4f9f5405036b87fc849454
+    version: 0.4.0
+    sha256: e9017412b6261492b987fe27f7573b72013a340c0d3eb0e7e568fd588b22a214
   - name: backlog
     path: planning/backlog
     version: 0.3.0
