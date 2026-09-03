@@ -6,7 +6,7 @@ triggers:
   - set up worktrees for these branches
   - spin up parallel branches
   - prepare parallel worktrees
-version: 0.3.0
+version: 0.4.0
 license: Apache-2.0
 allowed-tools:
   - read
@@ -41,7 +41,10 @@ stack is assumed.
 ## Step 1 — Branch list
 
 The user's arguments are the branch list. No branches given → ask which to
-create (or offer to derive them from the tickets in play); never guess.
+create (or offer to derive them from the tickets in play); never guess. Follow
+the repository's branch prefixes. A release candidate uses a compact branch
+name such as `v043`; dotted `v0.4.3` is reserved exclusively for the immutable
+release tag, so branch and tag refs never collide.
 
 ## Step 2 — Detect the project setup ONCE
 
@@ -84,9 +87,11 @@ failure. Do not mark a worktree ready that did not pass its health check.
 
 Print the per-worktree table (path · branch · deps · health · port), a
 `N worktree(s) ready, M failed` line, the next step (start work in each),
-and the cleanup reminder: `git worktree remove worktrees/<branch>` once a
-branch is merged. Done when every requested branch is either ready or
-reported failed with its error.
+and the cleanup reminder: after merge evidence is recorded, resolve the path
+from `git worktree list --porcelain`, inspect tracked/untracked/ignored state,
+then run `git worktree remove <registered-path>` and delete the local branch.
+Remote branch deletion is a separate maintainer-authorized action. Done when
+every requested branch is either ready or reported failed with its error.
 
 ## Red flags
 
@@ -95,3 +100,4 @@ reported failed with its error.
   untracked config.
 - Reporting a worktree ready with a failed or skipped health check.
 - Two parallel services fighting over one port.
+- Creating a release branch whose dotted name can collide with its tag.

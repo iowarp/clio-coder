@@ -170,6 +170,37 @@ Examples:
 - `fix/session-resume-replay`
 - `docs/github-governance`
 
+A temporary release-candidate branch, when one is needed, uses the compact
+version spelling with no dots: `v043` for release tag `v0.4.3`. Never create a
+branch named `v0.4.3`; dotted `vX.Y.Z` names belong exclusively to immutable
+release tags, so ordinary commands cannot resolve a branch when the caller
+meant the tag. The release branch is scaffolding, not a permanent release ref.
+
+### Branch closeout
+
+Branch and worktree cleanup is part of finishing work, not optional future
+housekeeping. After a PR is merged or a release is tagged:
+
+1. Fetch and prune remote-tracking refs, then verify the PR is merged and its
+   result is represented on `origin/main`. An ancestry check is sufficient for
+   merge commits; squash and cherry-pick landings require the merged PR and
+   resulting commit as evidence rather than a matching subject alone.
+2. Confirm the source worktree has no tracked or untracked work worth keeping.
+   Remove a registered worktree with `git worktree remove <path>`, never
+   `rm -rf`; use `--force` only after explicitly authorizing disposal of the
+   remaining local artifacts.
+3. Delete the local topic or release branch. Delete its remote branch only when
+   the maintainer explicitly authorizes that remote write; never infer remote
+   deletion from approval to clean locally.
+4. Preserve unfinished experiments by filing their result and next decision in
+   an issue, not by accumulating anonymous `work/`, `wip/`, or `tmp` refs.
+5. Report the remaining local branches, worktrees, stashes, and local-only tags.
+   A nonempty remainder must be intentional and named.
+
+For a release, first verify `refs/tags/vX.Y.Z^{commit}` equals the reviewed
+commit on `main`, then close the compact candidate branch such as `v043`.
+Published tags are never deleted, moved, or recreated during cleanup.
+
 ## Commits
 
 Use concise conventional subjects:

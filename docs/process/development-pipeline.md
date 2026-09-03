@@ -34,6 +34,33 @@ hard bugs, not a mandatory toll booth. Batch ticket creation from a PRD
 bypasses stage 1 and uses [`backlog`](../../skills/planning/backlog/)
 instead; everything downstream is identical.
 
+## Closeout
+
+A merged PR is not operationally finished until its local scaffolding is
+closed. After the human merge decision:
+
+1. Fetch and prune, confirm the PR's merged state, and identify the resulting
+   commit on `origin/main`. Direct ancestry proves an ordinary merge; a squash
+   or cherry-pick needs the PR-to-result evidence because commit identity and
+   patch identity can both change during integration.
+2. Inspect every associated worktree for tracked changes, untracked files, and
+   ignored state that carries evidence rather than rebuildable output. Remove
+   it through `git worktree remove`; forcing removal requires explicit approval
+   to discard what remains.
+3. Delete the local source and integration branches. A remote branch is a
+   separate remote write and is deleted only with maintainer authorization.
+4. Turn unfinished experimental findings into an issue with evidence and a
+   next decision. Do not use indefinite `work/`, `wip/`, `keep/`, or temporary
+   tags as a substitute for backlog state.
+5. Report the remaining worktrees, local branches, stashes, and local-only
+   tags. Every survivor needs an owner and purpose.
+
+Release candidates use a compact branch name that cannot collide with their
+tag: branch `v043`, tag `v0.4.3`. Once the tag's peeled commit equals the
+reviewed commit on `main` and the release succeeds, close the candidate branch
+by the same procedure. Published dotted release tags are immutable history and
+are never cleanup targets.
+
 ## Inheriting a Pi release
 
 Pi dependency upgrades use a fixed five-step review so that upstream fixes

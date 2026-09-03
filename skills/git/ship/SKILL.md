@@ -7,7 +7,7 @@ triggers:
   - commit and open the PR
   - push and open a pull request
   - get this up for review
-version: 0.2.0
+version: 0.3.0
 license: Apache-2.0
 allowed-tools:
   - read
@@ -71,7 +71,9 @@ Detect the base branch; never hardcode `main`:
 | On the base branch | STOP: the work needs its own branch first. |
 | Uncommitted changes remain | STOP: commit or set them aside explicitly. |
 | No commits ahead of base | STOP: nothing to ship. |
-| A PR already exists for this branch | STOP and print its URL. |
+| An open PR already exists for this branch | STOP and print its URL. |
+| A merged PR exists and the user asked for closeout | Continue to Step 6 with its merge commit as evidence. |
+| A closed, unmerged PR exists | STOP and print its URL and state. |
 
 Every STOP is final for this run: report the reason and end.
 
@@ -86,8 +88,29 @@ Linked issues. `--draft` when the user says it is not review-ready.
 ## Step 5 — Report
 
 Done when the user has the PR number and URL, base ← head, and one line on
-what review happens next. Merging is a human decision; the loop ends at an
-open PR.
+what review happens next. Merging is a human decision; the ordinary shipping
+loop ends at an open PR.
+
+## Step 6 — Close out merged work
+
+This is a later re-entry, never something inferred while opening the PR. When
+the user asks to clean up after merge:
+
+1. Run `git fetch --prune`, inspect the PR's merged state, and record its merge
+   or squash commit on the base branch. A matching subject is not proof.
+2. Inspect the source worktree's tracked, untracked, and ignored state. If any
+   non-rebuildable artifact remains, stop and ask whether to preserve it.
+3. Remove a registered worktree with `git worktree remove <path>`, never raw
+   filesystem deletion. `--force` requires explicit approval to discard the
+   remaining state.
+4. Delete the local source branch. Delete the remote source branch only when
+   the maintainer explicitly authorized that separate remote write.
+5. Report remaining worktrees, local branches, stashes, and local-only tags.
+
+Release candidates use compact branch names (`v043`) while dotted names
+(`v0.4.3`) are reserved for immutable release tags. After a successful release,
+verify the peeled tag commit equals the reviewed commit on the base branch
+before closing the candidate branch. Never delete or move a published tag.
 
 ## Red flags
 
@@ -96,3 +119,6 @@ open PR.
 - A PR nobody asked for, or a Validation section claiming checks never run.
 - Two unrelated changes in one commit because asking felt slow.
 - A commit message that lists files instead of naming the change.
+- Treating a similar subject or patch id as proof that a PR merged.
+- Deleting a remote branch, published tag, stash, or local artifact under an
+  approval that covered only local branch cleanup.

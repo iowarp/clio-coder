@@ -2,6 +2,11 @@
 
 All notable changes to Clio Coder are documented in this file. The format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/) and versions follow Semantic Versioning; pre-1.0 minor releases may include incompatible changes.
 
+## Unreleased
+
+### Changed
+- Branch and worktree closeout is now an explicit final development step: prove the merged result, inspect local state, remove registered worktrees through Git, delete local scaffolding, keep remote deletion behind separate maintainer authorization, and report every surviving branch, stash, and local-only tag. Release candidate branches use compact names such as `v043`, while dotted names such as `v0.4.3` are reserved for immutable release tags.
+
 ## 0.4.2 - 2026-09-02
 
 ### Added
