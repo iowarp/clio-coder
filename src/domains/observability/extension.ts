@@ -1,7 +1,8 @@
 /**
  * Observability domain wire-up. Listens to dispatch + safety bus channels and
- * folds payloads into telemetry/cost trackers. Emits nothing; other domains
- * read the snapshot through the contract.
+ * folds payloads into telemetry/cost trackers. Other domains read the snapshot
+ * through the contract; the one thing it emits is
+ * `accountability.evidenceReady`, once per run whose evidence bundle landed.
  */
 
 import { BusChannels, type DispatchCompletedPayload } from "../../core/bus-events.js";
@@ -171,7 +172,14 @@ export function createObservabilityBundle(
 	const trackBuild = (runId: string, succeeded: boolean, attempt: number | undefined): void => {
 		projection.evidenceBuildStarted(runId);
 		const build = buildAndIndexEvidence(runId, succeeded, attempt, {
-			onReady: (id, evidence) => projection.evidenceBuildSucceeded(id, evidence),
+			onReady: (id, evidence) => {
+				projection.evidenceBuildSucceeded(id, evidence);
+				// The same fact, once, for listeners outside this closure (the ACP
+				// server forwards it as the opt-in `accountability.evidenceReady`
+				// kind). The payload spreads the evidence object the projection just
+				// received rather than rebuilding it, so the two cannot drift.
+				context.bus.emit(BusChannels.AccountabilityEvidenceReady, { runId: id, ...evidence });
+			},
 			onFailed: (id, message) => projection.evidenceBuildFailed(id, message),
 		});
 		pendingBuilds.add(build);
