@@ -102,8 +102,8 @@ skills:
     sha256: d41689db9a8c9b2dad0cd630412bebaed5792f9d22d4edb18770e4b1b3308699
   - name: tech-spec
     path: planning/tech-spec
-    version: 0.2.0
-    sha256: 28b1b0a0a3e9b48b29f679ab2377ee66d719c9a670eed622a38ac69be8b72b2e
+    version: 0.3.0
+    sha256: 5f9add0d01e43feb6808b2eaeae9ac68075cf369cbfc793e020181a642d4d2c4
   # ── research ──
   - name: arxiv-literature
     path: research/arxiv-literature

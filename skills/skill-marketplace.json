@@ -356,7 +356,7 @@
 				"specify execution flows"
 			],
 			"sourceUrl": "https://github.com/iowarp/clio-coder/tree/main/skills/planning/tech-spec",
-			"version": "0.2.0",
+			"version": "0.3.0",
 			"audit": "pass",
 			"category": "planning"
 		},
