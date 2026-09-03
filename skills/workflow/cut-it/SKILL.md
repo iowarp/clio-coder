@@ -7,7 +7,7 @@ triggers:
   - make this plan executable
   - turn this milestone into a sprint
   - write dependency-ordered vertical slices
-version: 0.3.0
+version: 0.4.0
 license: Apache-2.0
 allowed-tools:
   - read
@@ -18,7 +18,6 @@ allowed-tools:
   - context
   - code_nav
   - write
-  - artifact
   - ask_user
 clio-coder:
   registry-id: iowarp/clio-coder
@@ -38,6 +37,43 @@ Transform an existing plan into ordered execution slices that a coding agent
 can run one at a time, leaving the build green after every slice. The output
 is a `SPRINT.md` another agent can execute cold — no conversation context
 required.
+
+## Arguments
+
+```text
+cut it [<path to plan>]
+```
+
+There is no flag syntax; the trigger is conversational — "cut it", "slice
+this plan", "turn this milestone into a sprint". A path the user names in
+the same request (a specific `PLAN.md`, `PRD.md`, or `milestones/*/prompt.md`)
+is the plan to slice; a path with no plan words near it, or a bare
+destination like "write it to docs/SPRINT.md", is Step 3's output location,
+not the input. When neither is named, Step 1 finds the plan and Step 3
+writes to the repo-root default.
+
+This run has no back-and-forth. `ask_user` still executes — it is registered
+and the call succeeds — but nothing answers it in a headless run: every round
+returns `{cancelled: true}` immediately, as an ordinary result, not an error.
+The happy path here rarely needs a question at all — Step 1's "stop and say
+so" for a missing or vague plan is already headless-safe, and Step 3's output
+path defaults without asking. If several plans or milestones are plausible
+candidates and the choice matters, do not stop on an open question: pick the
+most recently modified or most specifically named one, state that choice and
+the alternative you set aside, mark it `assumed — confirm`, and keep going in
+the same turn. Do not end a turn on an unanswered question in `ask_user` or
+in plain text.
+
+The steps below are the plan; do not open a task list for them. This skill's
+tool surface is exactly `read`, `grep`, `ls`, `find`, `git`, `context`,
+`code_nav`, `write`, and `ask_user` (`context` and `ask_user` are always
+available regardless). `tasks` and `bash` both sit outside it and any call to
+either is refused — track progress by walking the steps below, not a task
+board; check for a build/test/lint setup (a `package.json`, a Makefile, a
+node/toolchain version) with `find`, `ls`, and `read`, not `bash node
+--version` or `bash find`. The read-only `git` tool (`status`, `log`) is
+useful in Step 1 when locating the plan benefits from recent history or
+uncommitted changes.
 
 ## Step 1 — Locate the plan
 
@@ -60,10 +96,14 @@ slicing of a vague plan hides gaps; flagging them is the deliverable.
 - **Self-contained.** Real file paths, real commands, concrete steps. A reader
   with zero conversation context can execute it.
 
-## Step 3 — Write the artifact
+## Step 3 — Write SPRINT.md
 
-Default output is `SPRINT.md` at the repo root (honor a caller-supplied path).
-Format:
+Use the `write` tool. `SPRINT.md` is a plain file in the working tree, not a
+generated report — do not call a tool literally named `artifact` for this;
+that tool is not on this skill's surface and, in this harness, is a
+terminal call that ends the run the instant it is invoked, before you can
+report back. Default output path is `SPRINT.md` at the repo root; honor a
+caller-supplied path from Arguments instead. Format:
 
 ```markdown
 # Sprint: <name>
@@ -86,9 +126,29 @@ Format:
 "Done when" is the contract, not decoration. If you cannot write a testable
 done-when for a slice, the slice is not ready to cut — go back to the plan.
 
+## Step 4 — Report back
+
+End the turn with a short final reply, not silence after the write: the path
+you wrote (`SPRINT.md` or the caller-supplied path), the number of slices,
+and a one-line summary of the battle order. This is the only confirmation
+the caller gets that the write actually happened.
+
 ## Red flags (you are doing it wrong)
 
 - A slice whose steps say "and related changes" or "etc."
 - Done-when criteria that restate the goal instead of naming a check.
 - A slice that only compiles when a later slice lands.
 - Slicing a plan you had to invent on the spot.
+- Calling a tool literally named `artifact` because Step 3 talks about "the
+  artifact" — that word here means "the deliverable document," not the
+  `artifact` tool. That tool is off this skill's surface and, in this
+  harness, terminates the run on the spot, writes to
+  `.clio-coder/artifacts/` instead of `SPRINT.md`, and skips Step 4 entirely.
+  Use `write`.
+- Ending the run right after the write with no final reply — Step 4 is not
+  optional.
+- Opening a `tasks` list for the steps above; `tasks` is refused.
+- Reaching for `bash` (`node --version`, `find`, `ls -la`, ...) to check the
+  repo's toolchain or structure; `bash` is refused, use `find`/`ls`/`read`.
+- Stopping to wait for an `ask_user` reply that headless runs never send;
+  see Arguments.
