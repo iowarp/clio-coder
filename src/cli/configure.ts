@@ -1,3 +1,4 @@
+import { existsSync, readFileSync } from "node:fs";
 import { stdin as input, stdout as output } from "node:process";
 import { createInterface } from "node:readline/promises";
 import {
@@ -7,7 +8,19 @@ import {
 	settingsPath,
 	updateSettings,
 } from "../core/config.js";
+import {
+	type AutonomyLevel,
+	type OutputVerbosity,
+	type PanesSettings,
+	type SmoothStreaming,
+	THINKING_LEVELS,
+	type ThinkingLevel,
+	type TuiMode,
+	type WorkerPermissionMode,
+} from "../core/defaults.js";
 import { initializeClioHome } from "../core/init.js";
+import { resolveClioDirs } from "../core/xdg.js";
+import { getVersionInfo } from "../domains/lifecycle/version.js";
 import { openAuthStorage, resolveAuthTarget, targetRequiresAuth } from "../domains/providers/auth/index.js";
 import { getCatalogModelForRuntime } from "../domains/providers/catalog.js";
 import { credentialsPresent } from "../domains/providers/credentials.js";
@@ -47,6 +60,7 @@ import {
 	matchCategoryChoice,
 	type RuntimeListRow,
 } from "./configure-layout.js";
+import { shortenPath } from "./lifecycle-presenter.js";
 import { createDelayedManualCodeInput } from "./oauth-manual-input.js";
 import { promptOAuthSelection } from "./oauth-select.js";
 import { credentialWriteFailed, printError, printOk, printPlaintextCredentialWarning } from "./shared.js";
@@ -55,10 +69,14 @@ import { type LiveModelInventory, validateModelChoice } from "./validate-model.j
 
 const HELP = `clio-coder configure
 
-Configure model targets for chat and fleet-agent dispatch.
+Configure model targets and runtime settings for chat and fleet dispatch.
 
 Usage:
-  clio-coder configure                   interactive wizard
+  clio-coder configure                   interactive configuration wizard
+  clio-coder configure --section <name>  jump directly to a section:
+                                         targets, models, chat, fleet,
+                                         permissions, panes, skills, diagnostics
+  clio-coder configure --json            emit settings in JSON format
   clio-coder configure --interop         review detected coding agents as delegation peers
   clio-coder configure --list            list target runtimes (user-facing only)
   clio-coder configure --list --all      list every registered runtime including aliases
@@ -114,6 +132,8 @@ interface ParsedArgs {
 	list: boolean;
 	all: boolean;
 	interop: boolean;
+	json: boolean;
+	section?: string;
 	remove?: string;
 	renameOld?: string;
 	renameNew?: string;
@@ -146,6 +166,7 @@ function parseSetupArgs(argv: ReadonlyArray<string>): ParsedArgs {
 		list: false,
 		all: false,
 		interop: false,
+		json: false,
 		force: false,
 		gateway: false,
 		setOrchestrator: false,
@@ -164,6 +185,12 @@ function parseSetupArgs(argv: ReadonlyArray<string>): ParsedArgs {
 			case "--help":
 			case "-h":
 				out.help = true;
+				break;
+			case "--json":
+				out.json = true;
+				break;
+			case "--section":
+				out.section = need();
 				break;
 			case "--list":
 				out.list = true;
@@ -1143,16 +1170,11 @@ async function maybeSteerToNativeRuntime(
 	return native;
 }
 
-async function runInteractive(
+async function runTargetSetupInteractive(
 	rl: ReturnType<typeof createInterface>,
-	preselectedRuntime: RuntimeDescriptor | null,
+	runtime: RuntimeDescriptor,
 	defaults: ParsedArgs,
 ): Promise<number> {
-	let runtime = preselectedRuntime ?? (await pickRuntimeViaCategory(rl));
-	if (!runtime) {
-		printError("configuration cancelled");
-		return 130;
-	}
 	const auth = openAuthStorage();
 	const settings = readSettings();
 	let support = buildProviderSupportEntry(runtime);
@@ -1510,7 +1532,663 @@ export function runTargetRename(oldId: string, newId: string): number {
 	return 0;
 }
 
-export async function runConfigureCommand(argv: ReadonlyArray<string>): Promise<number> {
+function renderSectionHeader(title: string, out: NodeJS.WritableStream = output): void {
+	const confPath = shortenPath(settingsPath());
+	out.write(`\n┌  ${title}\n│  Source: ${confPath}\n│\n`);
+}
+
+async function runSectionTargetsAuth(
+	rl: ReturnType<typeof createInterface>,
+	out: NodeJS.WritableStream = output,
+): Promise<void> {
+	for (;;) {
+		const settings = readSettings();
+		renderSectionHeader("Targets & Auth", out);
+		out.write("●  Configured Targets:\n");
+		if (settings.targets.length === 0) {
+			out.write("   (no targets registered)\n");
+		} else {
+			for (const t of settings.targets) {
+				const isChat = settings.chat.target === t.id ? " [chat]" : "";
+				const isFleet = settings.fleet.default.target === t.id ? " [fleet]" : "";
+				out.write(`   - ${t.id} (runtime: ${t.runtime}, model: ${t.defaultModel ?? "default"}${isChat}${isFleet})\n`);
+			}
+		}
+		out.write("│\n");
+		out.write("●  Active Assignments:\n");
+		out.write(`   Chat target:  ${settings.chat.target ?? "(none)"} (model: ${settings.chat.model ?? "(default)"})\n`);
+		out.write(
+			`   Fleet target: ${settings.fleet.default.target ?? "(none)"} (model: ${settings.fleet.default.model ?? "(default)"})\n`,
+		);
+		out.write("│\n");
+		out.write("   1. Add / configure new target\n");
+		out.write("   2. Set active Chat target & model\n");
+		out.write("   3. Set active Fleet default target & model\n");
+		out.write("   4. Remove a target\n");
+		out.write("   b. Back to main menu\n");
+
+		const choice = await ask(rl, "\nAction", "b");
+		if (choice === null || choice === "b" || choice === "back") break;
+		if (choice === "1") {
+			const runtime = await pickRuntimeViaCategory(rl);
+			if (runtime) {
+				await runTargetSetupInteractive(rl, runtime, {
+					positional: [],
+					help: false,
+					list: false,
+					all: false,
+					interop: false,
+					json: false,
+					force: false,
+					gateway: false,
+					setOrchestrator: false,
+					setBackground: false,
+					setWorkerDefault: false,
+				});
+			}
+		} else if (choice === "2") {
+			if (settings.targets.length === 0) {
+				out.write("No targets available. Add a target first.\n");
+				continue;
+			}
+			const targetIds = settings.targets.map((t) => t.id);
+			out.write(`Available targets: ${targetIds.join(", ")}\n`);
+			const chosen = await ask(rl, "Choose Chat target id", settings.chat.target ?? targetIds[0]);
+			if (chosen && targetIds.includes(chosen)) {
+				const targetObj = settings.targets.find((t) => t.id === chosen);
+				const chosenModel = await ask(rl, "Chat model (leave blank for target default)", targetObj?.defaultModel ?? "");
+				updateSettings((draft) => {
+					draft.chat.target = chosen;
+					draft.chat.model = chosenModel && chosenModel.length > 0 ? chosenModel : null;
+				});
+				out.write(`✓ Active chat target set to ${chosen}\n`);
+			}
+		} else if (choice === "3") {
+			if (settings.targets.length === 0) {
+				out.write("No targets available. Add a target first.\n");
+				continue;
+			}
+			const targetIds = settings.targets.map((t) => t.id);
+			out.write(`Available targets: ${targetIds.join(", ")}\n`);
+			const chosen = await ask(rl, "Choose Fleet target id", settings.fleet.default.target ?? targetIds[0]);
+			if (chosen && targetIds.includes(chosen)) {
+				const targetObj = settings.targets.find((t) => t.id === chosen);
+				const chosenModel = await ask(rl, "Fleet model (leave blank for target default)", targetObj?.defaultModel ?? "");
+				updateSettings((draft) => {
+					draft.fleet.default.target = chosen;
+					draft.fleet.default.model = chosenModel && chosenModel.length > 0 ? chosenModel : null;
+				});
+				out.write(`✓ Active fleet target set to ${chosen}\n`);
+			}
+		} else if (choice === "4") {
+			if (settings.targets.length === 0) {
+				out.write("No targets to remove.\n");
+				continue;
+			}
+			const targetIds = settings.targets.map((t) => t.id);
+			out.write(`Available targets: ${targetIds.join(", ")}\n`);
+			const chosen = await ask(rl, "Target id to remove");
+			if (chosen && targetIds.includes(chosen)) {
+				const confirm = await askYesNo(rl, `Remove target '${chosen}'?`, false);
+				if (confirm) {
+					runTargetRemove(chosen);
+				}
+			}
+		}
+	}
+}
+
+async function runSectionModelsThinking(
+	rl: ReturnType<typeof createInterface>,
+	out: NodeJS.WritableStream = output,
+): Promise<void> {
+	for (;;) {
+		const settings = readSettings();
+		renderSectionHeader("Models & Thinking", out);
+		out.write("●  Current Values:\n");
+		out.write(`   Chat Default Model:    ${settings.chat.model ?? "(target default)"}\n`);
+		out.write(`   Chat Thinking Level:   ${settings.chat.thinkingLevel}\n`);
+		out.write(`   Fleet Thinking Level:  ${settings.fleet.default.thinkingLevel}\n`);
+		out.write(`   Model Favorites:       ${settings.chat.modelPicker.favorites.join(", ") || "(none)"}\n`);
+		out.write(`   Cycle Set (Alt+J/K):   ${settings.chat.modelPicker.cycleSet.join(", ") || "(none)"}\n`);
+		out.write("│\n");
+		out.write("   1. Change Chat thinking level (off | minimal | low | medium | high | xhigh | max)\n");
+		out.write("   2. Change Fleet thinking level (off | minimal | low | medium | high | xhigh | max)\n");
+		out.write("   3. Set Chat default model override\n");
+		out.write("   4. Set Model Favorites (comma-separated)\n");
+		out.write("   5. Set Cycle Set (comma-separated)\n");
+		out.write("   b. Back to main menu\n");
+
+		const choice = await ask(rl, "\nAction", "b");
+		if (choice === null || choice === "b" || choice === "back") break;
+		if (choice === "1") {
+			out.write(`Allowed levels: ${THINKING_LEVELS.join(", ")}\n`);
+			const level = await ask(rl, "Chat thinking level", settings.chat.thinkingLevel);
+			if (level && (THINKING_LEVELS as ReadonlyArray<string>).includes(level.toLowerCase())) {
+				updateSettings((draft) => {
+					draft.chat.thinkingLevel = level.toLowerCase() as ThinkingLevel;
+				});
+				out.write(`✓ Chat thinking level set to ${level.toLowerCase()}\n`);
+			}
+		} else if (choice === "2") {
+			out.write(`Allowed levels: ${THINKING_LEVELS.join(", ")}\n`);
+			const level = await ask(rl, "Fleet thinking level", settings.fleet.default.thinkingLevel);
+			if (level && (THINKING_LEVELS as ReadonlyArray<string>).includes(level.toLowerCase())) {
+				updateSettings((draft) => {
+					draft.fleet.default.thinkingLevel = level.toLowerCase() as ThinkingLevel;
+				});
+				out.write(`✓ Fleet thinking level set to ${level.toLowerCase()}\n`);
+			}
+		} else if (choice === "3") {
+			const model = await ask(rl, "Chat default model (blank to reset to target default)", settings.chat.model ?? "");
+			updateSettings((draft) => {
+				draft.chat.model = model && model.length > 0 ? model : null;
+			});
+			out.write("✓ Chat default model updated\n");
+		} else if (choice === "4") {
+			const input = await ask(rl, "Model favorites (comma-separated)", settings.chat.modelPicker.favorites.join(", "));
+			if (input !== null) {
+				const favs = input
+					.split(",")
+					.map((s) => s.trim())
+					.filter((s) => s.length > 0);
+				updateSettings((draft) => {
+					draft.chat.modelPicker.favorites = favs;
+				});
+				out.write(`✓ Model favorites updated (${favs.length} entries)\n`);
+			}
+		} else if (choice === "5") {
+			const input = await ask(rl, "Cycle set (comma-separated)", settings.chat.modelPicker.cycleSet.join(", "));
+			if (input !== null) {
+				const cycle = input
+					.split(",")
+					.map((s) => s.trim())
+					.filter((s) => s.length > 0);
+				updateSettings((draft) => {
+					draft.chat.modelPicker.cycleSet = cycle;
+				});
+				out.write(`✓ Cycle set updated (${cycle.length} entries)\n`);
+			}
+		}
+	}
+}
+
+async function runSectionChatDefaults(
+	rl: ReturnType<typeof createInterface>,
+	out: NodeJS.WritableStream = output,
+): Promise<void> {
+	for (;;) {
+		const settings = readSettings();
+		renderSectionHeader("Chat Defaults", out);
+		out.write("●  Current Values:\n");
+		out.write(`   Smooth Streaming:      ${settings.interface.smoothStreaming}\n`);
+		out.write(`   Terminal Progress:     ${settings.interface.terminalProgress ? "enabled" : "disabled"}\n`);
+		out.write(`   Max Output Tokens:     ${settings.chat.maxOutputTokens || "(unlimited)"}\n`);
+		out.write(`   Prompt Prewarm:        ${settings.chat.prewarm ? "enabled" : "disabled"}\n`);
+		out.write(
+			`   Auto-Compaction:       ${settings.context.compaction.auto ? `enabled (threshold: ${Math.round(settings.context.compaction.threshold * 100)}%)` : "disabled"}\n`,
+		);
+		out.write(
+			`   Working-Set Eviction:  ${settings.context.workingSet.enabled ? `enabled (${settings.context.workingSet.policy})` : "disabled"}\n`,
+		);
+		out.write("│\n");
+		out.write("   1. Change Smooth Streaming (off | auto | on)\n");
+		out.write("   2. Toggle Terminal Progress Indicator\n");
+		out.write("   3. Set Max Output Tokens (0 for runtime default)\n");
+		out.write("   4. Toggle Prompt Prewarm\n");
+		out.write("   5. Toggle Auto-Compaction\n");
+		out.write("   b. Back to main menu\n");
+
+		const choice = await ask(rl, "\nAction", "b");
+		if (choice === null || choice === "b" || choice === "back") break;
+		if (choice === "1") {
+			const stream = await ask(rl, "Smooth streaming [off|auto|on]", settings.interface.smoothStreaming);
+			if (stream && ["off", "auto", "on"].includes(stream.toLowerCase())) {
+				updateSettings((draft) => {
+					draft.interface.smoothStreaming = stream.toLowerCase() as SmoothStreaming;
+				});
+				out.write(`✓ Smooth streaming set to ${stream.toLowerCase()}\n`);
+			}
+		} else if (choice === "2") {
+			updateSettings((draft) => {
+				draft.interface.terminalProgress = !draft.interface.terminalProgress;
+			});
+			out.write("✓ Terminal progress toggled\n");
+		} else if (choice === "3") {
+			const tokens = await ask(rl, "Max output tokens (0 for unlimited)", String(settings.chat.maxOutputTokens));
+			if (tokens !== null) {
+				const n = Number(tokens);
+				if (Number.isFinite(n) && n >= 0) {
+					updateSettings((draft) => {
+						draft.chat.maxOutputTokens = Math.floor(n);
+					});
+					out.write(`✓ Max output tokens set to ${Math.floor(n)}\n`);
+				}
+			}
+		} else if (choice === "4") {
+			updateSettings((draft) => {
+				draft.chat.prewarm = !draft.chat.prewarm;
+			});
+			out.write("✓ Prompt prewarm toggled\n");
+		} else if (choice === "5") {
+			updateSettings((draft) => {
+				draft.context.compaction.auto = !draft.context.compaction.auto;
+			});
+			out.write("✓ Auto-compaction toggled\n");
+		}
+	}
+}
+
+async function runSectionFleet(
+	rl: ReturnType<typeof createInterface>,
+	out: NodeJS.WritableStream = output,
+): Promise<void> {
+	for (;;) {
+		const settings = readSettings();
+		renderSectionHeader("Fleet", out);
+		out.write("●  Current Values:\n");
+		out.write(`   Concurrency Limit:     ${settings.fleet.concurrency}\n`);
+		out.write(`   Max Retries:           ${settings.fleet.retry.maxRetries}\n`);
+		out.write(`   Tool Calls per Run:    ${settings.fleet.limits.toolCallsPerRun}\n`);
+		out.write(`   Run Timeout:           ${settings.fleet.limits.internalRunTimeoutMs / 1000}s\n`);
+		out.write(
+			`   Worker Profiles:       ${Object.keys(settings.fleet.profiles).length > 0 ? Object.keys(settings.fleet.profiles).join(", ") : "(none)"}\n`,
+		);
+		out.write(
+			`   Subagent Pins:         ${
+				Object.keys(settings.fleet.agentProfiles).length > 0
+					? Object.entries(settings.fleet.agentProfiles)
+							.map(([k, v]) => `${k}->${v}`)
+							.join(", ")
+					: "(none)"
+			}\n`,
+		);
+		out.write(
+			`   Remote Fleet Nodes:    ${settings.fleet.nodes.length > 0 ? settings.fleet.nodes.map((n) => n.id).join(", ") : "(none)"}\n`,
+		);
+		out.write("│\n");
+		out.write("   1. Set Concurrency Limit (auto or integer)\n");
+		out.write("   2. Set Max Retries\n");
+		out.write("   3. Set Tool Calls Limit per Run\n");
+		out.write("   4. Set Run Timeout (seconds)\n");
+		out.write("   b. Back to main menu\n");
+
+		const choice = await ask(rl, "\nAction", "b");
+		if (choice === null || choice === "b" || choice === "back") break;
+		if (choice === "1") {
+			const conc = await ask(rl, "Concurrency limit [auto or number]", String(settings.fleet.concurrency));
+			if (conc !== null) {
+				if (conc.toLowerCase() === "auto") {
+					updateSettings((draft) => {
+						draft.fleet.concurrency = "auto";
+					});
+					out.write("✓ Concurrency set to auto\n");
+				} else {
+					const n = Number(conc);
+					if (Number.isFinite(n) && n > 0) {
+						updateSettings((draft) => {
+							draft.fleet.concurrency = Math.floor(n);
+						});
+						out.write(`✓ Concurrency set to ${Math.floor(n)}\n`);
+					}
+				}
+			}
+		} else if (choice === "2") {
+			const retries = await ask(rl, "Max retries", String(settings.fleet.retry.maxRetries));
+			if (retries !== null) {
+				const n = Number(retries);
+				if (Number.isFinite(n) && n >= 0) {
+					updateSettings((draft) => {
+						draft.fleet.retry.maxRetries = Math.floor(n);
+					});
+					out.write(`✓ Max retries set to ${Math.floor(n)}\n`);
+				}
+			}
+		} else if (choice === "3") {
+			const limit = await ask(rl, "Tool calls per run", String(settings.fleet.limits.toolCallsPerRun));
+			if (limit !== null) {
+				const n = Number(limit);
+				if (Number.isFinite(n) && n > 0) {
+					updateSettings((draft) => {
+						draft.fleet.limits.toolCallsPerRun = Math.floor(n);
+					});
+					out.write(`✓ Tool calls limit set to ${Math.floor(n)}\n`);
+				}
+			}
+		} else if (choice === "4") {
+			const timeoutSec = await ask(
+				rl,
+				"Run timeout in seconds",
+				String(settings.fleet.limits.internalRunTimeoutMs / 1000),
+			);
+			if (timeoutSec !== null) {
+				const n = Number(timeoutSec);
+				if (Number.isFinite(n) && n > 0) {
+					updateSettings((draft) => {
+						draft.fleet.limits.internalRunTimeoutMs = Math.floor(n * 1000);
+					});
+					out.write(`✓ Run timeout set to ${Math.floor(n)}s\n`);
+				}
+			}
+		}
+	}
+}
+
+async function runSectionPermissionsAutonomy(
+	rl: ReturnType<typeof createInterface>,
+	out: NodeJS.WritableStream = output,
+): Promise<void> {
+	for (;;) {
+		const settings = readSettings();
+		renderSectionHeader("Permissions & Autonomy", out);
+		out.write("●  Current Values:\n");
+		out.write(`   Autonomy Level:        ${settings.safety.autonomy}\n`);
+		out.write(`   Worker Permission:     ${settings.fleet.permissions.mode}\n`);
+		out.write(`   Session Cost Limit:    $${settings.safety.limits.sessionCostUsd} USD\n`);
+		out.write(`   Turn Tool Budget:      ${settings.safety.limits.chatToolCallsPerTurn}\n`);
+		out.write(`   Review Watchdog:       ${settings.safety.review.enabled ? "enabled" : "disabled"}\n`);
+		out.write("│\n");
+		out.write("   1. Change Autonomy Level (interactive | assisted | auto-edit | full)\n");
+		out.write("   2. Change Worker Permission Mode (deny | fail | escalate)\n");
+		out.write("   3. Set Session Cost Limit ($ USD)\n");
+		out.write("   4. Set Turn Tool Budget\n");
+		out.write("   5. Toggle Turn-end Review Watchdog\n");
+		out.write("   b. Back to main menu\n");
+
+		const choice = await ask(rl, "\nAction", "b");
+		if (choice === null || choice === "b" || choice === "back") break;
+		if (choice === "1") {
+			out.write(
+				"Levels: interactive (prompt everything), assisted (auto read, confirm write), auto-edit (auto edit files, confirm bash), full (autonomous)\n",
+			);
+			const level = await ask(rl, "Autonomy level [interactive|assisted|auto-edit|full]", settings.safety.autonomy);
+			if (level && ["interactive", "assisted", "auto-edit", "full"].includes(level.toLowerCase())) {
+				updateSettings((draft) => {
+					draft.safety.autonomy = level.toLowerCase() as AutonomyLevel;
+				});
+				out.write(`✓ Autonomy level set to ${level.toLowerCase()}\n`);
+			}
+		} else if (choice === "2") {
+			const mode = await ask(rl, "Worker permission mode [deny|fail|escalate]", settings.fleet.permissions.mode);
+			if (mode && ["deny", "fail", "escalate"].includes(mode.toLowerCase())) {
+				updateSettings((draft) => {
+					draft.fleet.permissions.mode = mode.toLowerCase() as WorkerPermissionMode;
+				});
+				out.write(`✓ Worker permission mode set to ${mode.toLowerCase()}\n`);
+			}
+		} else if (choice === "3") {
+			const cost = await ask(rl, "Session cost limit in USD", String(settings.safety.limits.sessionCostUsd));
+			if (cost !== null) {
+				const n = Number(cost);
+				if (Number.isFinite(n) && n > 0) {
+					updateSettings((draft) => {
+						draft.safety.limits.sessionCostUsd = n;
+					});
+					out.write(`✓ Session cost limit set to $${n} USD\n`);
+				}
+			}
+		} else if (choice === "4") {
+			const budget = await ask(rl, "Turn tool calls budget", String(settings.safety.limits.chatToolCallsPerTurn));
+			if (budget !== null) {
+				const n = Number(budget);
+				if (Number.isFinite(n) && n > 0) {
+					updateSettings((draft) => {
+						draft.safety.limits.chatToolCallsPerTurn = Math.floor(n);
+					});
+					out.write(`✓ Turn tool budget set to ${Math.floor(n)}\n`);
+				}
+			}
+		} else if (choice === "5") {
+			updateSettings((draft) => {
+				draft.safety.review.enabled = !draft.safety.review.enabled;
+			});
+			out.write("✓ Review watchdog toggled\n");
+		}
+	}
+}
+
+async function runSectionPanesLayout(
+	rl: ReturnType<typeof createInterface>,
+	out: NodeJS.WritableStream = output,
+): Promise<void> {
+	for (;;) {
+		const settings = readSettings();
+		renderSectionHeader("Panes & Layout", out);
+		out.write("●  Current Values:\n");
+		out.write(`   Panes Capability:      ${settings.interface.panes.enabled}\n`);
+		out.write(`   Startup Layout:        ${settings.interface.panes.layout}\n`);
+		out.write(`   TUI Mode:              ${settings.interface.mode}\n`);
+		out.write(`   Output Detail:         ${settings.interface.outputDetail}\n`);
+		out.write(`   Desktop Notifications: ${settings.interface.desktopNotifications ? "enabled" : "disabled"}\n`);
+		out.write(`   Git Commit Attribution: ${settings.integrations.git.commitAttribution ? "enabled" : "disabled"}\n`);
+		out.write("│\n");
+		out.write("   1. Change Panes Capability (off | auto | embedded)\n");
+		out.write("   2. Change Startup Layout (off | workers | cockpit)\n");
+		out.write("   3. Change TUI Mode (regular | fullscreen)\n");
+		out.write("   4. Change Output Detail (minimal | default | verbose)\n");
+		out.write("   5. Toggle Desktop Notifications\n");
+		out.write("   6. Toggle Git Commit Attribution\n");
+		out.write("   b. Back to main menu\n");
+
+		const choice = await ask(rl, "\nAction", "b");
+		if (choice === null || choice === "b" || choice === "back") break;
+		if (choice === "1") {
+			const val = await ask(rl, "Panes capability [off|auto|embedded]", settings.interface.panes.enabled);
+			if (val && ["off", "auto", "embedded"].includes(val.toLowerCase())) {
+				updateSettings((draft) => {
+					draft.interface.panes.enabled = val.toLowerCase() as PanesSettings["enabled"];
+				});
+				out.write(`✓ Panes capability set to ${val.toLowerCase()}\n`);
+			}
+		} else if (choice === "2") {
+			const val = await ask(rl, "Startup layout [off|workers|cockpit]", settings.interface.panes.layout);
+			if (val && ["off", "workers", "cockpit"].includes(val.toLowerCase())) {
+				updateSettings((draft) => {
+					draft.interface.panes.layout = val.toLowerCase() as PanesSettings["layout"];
+				});
+				out.write(`✓ Startup layout set to ${val.toLowerCase()}\n`);
+			}
+		} else if (choice === "3") {
+			const val = await ask(rl, "TUI mode [regular|fullscreen]", settings.interface.mode);
+			if (val && ["regular", "fullscreen"].includes(val.toLowerCase())) {
+				updateSettings((draft) => {
+					draft.interface.mode = val.toLowerCase() as TuiMode;
+				});
+				out.write(`✓ TUI mode set to ${val.toLowerCase()}\n`);
+			}
+		} else if (choice === "4") {
+			const val = await ask(rl, "Output detail [minimal|default|verbose]", settings.interface.outputDetail);
+			if (val && ["minimal", "default", "verbose"].includes(val.toLowerCase())) {
+				updateSettings((draft) => {
+					draft.interface.outputDetail = val.toLowerCase() as OutputVerbosity;
+				});
+				out.write(`✓ Output detail set to ${val.toLowerCase()}\n`);
+			}
+		} else if (choice === "5") {
+			updateSettings((draft) => {
+				draft.interface.desktopNotifications = !draft.interface.desktopNotifications;
+			});
+			out.write("✓ Desktop notifications toggled\n");
+		} else if (choice === "6") {
+			updateSettings((draft) => {
+				draft.integrations.git.commitAttribution = !draft.integrations.git.commitAttribution;
+			});
+			out.write("✓ Git commit attribution toggled\n");
+		}
+	}
+}
+
+async function runSectionSkillsExtensions(
+	rl: ReturnType<typeof createInterface>,
+	out: NodeJS.WritableStream = output,
+): Promise<void> {
+	for (;;) {
+		const settings = readSettings();
+		renderSectionHeader("Skills & Extensions", out);
+		out.write("●  Current Values:\n");
+		out.write(
+			`   Trust Project Imports: ${settings.integrations.projectResources.trustProjectImports ? "trusted" : "untrusted"}\n`,
+		);
+		out.write(`   External ACP Agents:   ${settings.integrations.externalAgents.entries.length} registered\n`);
+		for (const agent of settings.integrations.externalAgents.entries) {
+			out.write(`     - ${agent.id} (command: ${agent.command}, governance: ${agent.toolGovernance ?? "default"})\n`);
+		}
+		out.write(`   Runtime Plugins:       ${settings.integrations.runtimePlugins.join(", ") || "(none)"}\n`);
+		out.write(`   Library Remote Sync:   ${settings.integrations.library.sync ? "enabled" : "disabled"}\n`);
+		out.write("│\n");
+		out.write("   1. Toggle Trust Project Imports\n");
+		out.write("   2. Review External ACP Agents (runs interop review)\n");
+		out.write("   3. Toggle Library Remote Sync\n");
+		out.write("   b. Back to main menu\n");
+
+		const choice = await ask(rl, "\nAction", "b");
+		if (choice === null || choice === "b" || choice === "back") break;
+		if (choice === "1") {
+			updateSettings((draft) => {
+				draft.integrations.projectResources.trustProjectImports = !draft.integrations.projectResources.trustProjectImports;
+			});
+			out.write("✓ Trust project imports toggled\n");
+		} else if (choice === "2") {
+			await runInteropReview(rl);
+		} else if (choice === "3") {
+			updateSettings((draft) => {
+				draft.integrations.library.sync = !draft.integrations.library.sync;
+			});
+			out.write("✓ Library remote sync toggled\n");
+		}
+	}
+}
+
+async function runSectionDiagnostics(
+	rl: ReturnType<typeof createInterface>,
+	out: NodeJS.WritableStream = output,
+): Promise<void> {
+	for (;;) {
+		const dirs = resolveClioDirs();
+		const info = getVersionInfo();
+		renderSectionHeader("Diagnostics", out);
+		out.write("●  System Information:\n");
+		out.write(`   Clio Coder Version:    ${info.clio}\n`);
+		out.write(`   Node.js Version:       ${info.node}\n`);
+		out.write(`   Platform:              ${info.platform}\n`);
+		out.write(`   Config Directory:      ${shortenPath(dirs.config)}\n`);
+		out.write(`   State Directory:       ${shortenPath(dirs.state)}\n`);
+		out.write(`   Data Directory:        ${shortenPath(dirs.data)}\n`);
+		out.write(`   Cache Directory:       ${shortenPath(dirs.cache)}\n`);
+		out.write("│\n");
+		out.write("   1. Run Doctor Check\n");
+		out.write("   2. Display raw settings.yaml contents\n");
+		out.write("   b. Back to main menu\n");
+
+		const choice = await ask(rl, "\nAction", "b");
+		if (choice === null || choice === "b" || choice === "back") break;
+		if (choice === "1") {
+			const { runDoctorCommand } = await import("./doctor.js");
+			await runDoctorCommand([]);
+		} else if (choice === "2") {
+			const settingsFile = settingsPath();
+			if (existsSync(settingsFile)) {
+				out.write(`\n--- ${shortenPath(settingsFile)} ---\n`);
+				out.write(readFileSync(settingsFile, "utf8"));
+				out.write("-----------------------------------\n");
+			} else {
+				out.write("settings.yaml does not exist yet.\n");
+			}
+		}
+	}
+}
+
+async function runConfigSectionsMenu(
+	rl: ReturnType<typeof createInterface>,
+	out: NodeJS.WritableStream = output,
+): Promise<number> {
+	for (;;) {
+		const confPath = shortenPath(settingsPath());
+		out.write(`\n┌  Clio Coder Configuration\n│  Source: ${confPath}\n│\n`);
+		out.write("●  Configure runtime sections:\n│\n");
+		out.write("   1. Targets & Auth          (providers, endpoints, credentials, models)\n");
+		out.write("   2. Models & Thinking       (default model, thinking level, model aliases)\n");
+		out.write("   3. Chat Defaults           (streaming, terminal progress, compaction)\n");
+		out.write("   4. Fleet                   (concurrency, retry limits, worker timeouts)\n");
+		out.write("   5. Permissions & Autonomy  (autonomy level, worker permissions, cost limits)\n");
+		out.write("   6. Panes & Layout          (terminal panes, dock layout, TUI display mode)\n");
+		out.write("   7. Skills & Extensions     (project skills, external ACP agents, plugins)\n");
+		out.write("   8. Diagnostics             (self-test, doctor check, raw settings)\n");
+		out.write("│\n");
+		out.write("   q. Quit / Exit\n");
+
+		const answer = await ask(rl, "\nSelection", "1");
+		if (answer === null || answer.toLowerCase() === "q" || answer.toLowerCase() === "quit") {
+			printError("configuration cancelled");
+			return 130;
+		}
+		const trimmed = answer.trim();
+		if (trimmed === "1") {
+			await runSectionTargetsAuth(rl, out);
+		} else if (trimmed === "2") {
+			await runSectionModelsThinking(rl, out);
+		} else if (trimmed === "3") {
+			await runSectionChatDefaults(rl, out);
+		} else if (trimmed === "4") {
+			await runSectionFleet(rl, out);
+		} else if (trimmed === "5") {
+			await runSectionPermissionsAutonomy(rl, out);
+		} else if (trimmed === "6") {
+			await runSectionPanesLayout(rl, out);
+		} else if (trimmed === "7") {
+			await runSectionSkillsExtensions(rl, out);
+		} else if (trimmed === "8") {
+			await runSectionDiagnostics(rl, out);
+		} else {
+			process.stderr.write(`invalid selection: ${answer}\n`);
+		}
+	}
+}
+
+async function runInteractive(
+	rl: ReturnType<typeof createInterface>,
+	preselectedRuntime: RuntimeDescriptor | null,
+	defaults: ParsedArgs,
+	out: NodeJS.WritableStream = output,
+): Promise<number> {
+	if (preselectedRuntime) {
+		return await runTargetSetupInteractive(rl, preselectedRuntime, defaults);
+	}
+	if (defaults.section) {
+		const s = defaults.section.toLowerCase();
+		if (s.includes("target") || s.includes("auth")) await runSectionTargetsAuth(rl, out);
+		else if (s.includes("model") || s.includes("thinking")) await runSectionModelsThinking(rl, out);
+		else if (s.includes("chat")) await runSectionChatDefaults(rl, out);
+		else if (s.includes("fleet")) await runSectionFleet(rl, out);
+		else if (s.includes("perm") || s.includes("autonomy")) await runSectionPermissionsAutonomy(rl, out);
+		else if (s.includes("pane") || s.includes("layout")) await runSectionPanesLayout(rl, out);
+		else if (s.includes("skill") || s.includes("ext")) await runSectionSkillsExtensions(rl, out);
+		else if (s.includes("diag") || s.includes("doctor")) await runSectionDiagnostics(rl, out);
+		else {
+			printError(`unknown section: ${defaults.section}`);
+			return 2;
+		}
+		return 0;
+	}
+
+	const settings = readSettings();
+	if (settings.targets.length === 0) {
+		const runtime = await pickRuntimeViaCategory(rl);
+		if (!runtime) {
+			printError("configuration cancelled");
+			return 130;
+		}
+		return await runTargetSetupInteractive(rl, runtime, defaults);
+	}
+
+	return await runConfigSectionsMenu(rl, out);
+}
+
+export async function runConfigureCommand(
+	argv: ReadonlyArray<string>,
+	inStream: NodeJS.ReadableStream = input,
+	outStream: NodeJS.WritableStream = output,
+): Promise<number> {
 	let args: ParsedArgs;
 	try {
 		args = parseSetupArgs(argv);
@@ -1525,6 +2203,12 @@ export async function runConfigureCommand(argv: ReadonlyArray<string>): Promise<
 	}
 	initializeClioHome();
 	ensureRegistryPopulated();
+
+	if (args.json) {
+		const settings = readSettings();
+		outStream.write(`${JSON.stringify(settings, null, 2)}\n`);
+		return 0;
+	}
 
 	if (args.list) {
 		printRuntimeList(args.all);
@@ -1595,9 +2279,9 @@ export async function runConfigureCommand(argv: ReadonlyArray<string>): Promise<
 		return 2;
 	}
 
-	const rl = createInterface({ input, output });
+	const rl = createInterface({ input: inStream, output: outStream });
 	try {
-		return await runInteractive(rl, runtime, args);
+		return await runInteractive(rl, runtime, args, outStream);
 	} catch (err) {
 		printError(err instanceof Error ? err.message : String(err));
 		return 1;
