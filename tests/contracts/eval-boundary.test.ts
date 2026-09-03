@@ -2,6 +2,7 @@ import { deepStrictEqual, match, strictEqual, throws } from "node:assert/strict"
 import test from "node:test";
 import { parseEvalArtifactV4 } from "../../src/domains/eval/artifacts/store.js";
 import { compareEvalArtifactsV4, EvalServingConfigurationDriftError } from "../../src/domains/eval/compare/compare.js";
+import { toolBehaviorMetricEntriesFromJsonl } from "../../src/domains/eval/runners/clio-run.js";
 import type { EvalArtifactV4 } from "../../src/domains/eval/schema/artifact.js";
 import type { EvalSuiteV2 } from "../../src/domains/eval/schema/suite.js";
 import { validateEvalSuiteV2 } from "../../src/domains/eval/schema/validate.js";
@@ -15,6 +16,18 @@ import {
 import { resolveSuiteForRun } from "../../src/domains/eval/suites/resolve.js";
 
 const DIGEST = "a".repeat(64);
+
+test("behavioral tool facts distinguish successful dispatch from attempts", () => {
+	const stdout = [
+		{ type: "tool_execution_end", toolCallId: "failed", toolName: "dispatch", outcome: "error" },
+		{ type: "tool_execution_end", toolCallId: "passed", toolName: "dispatch", outcome: "ok" },
+	]
+		.map((event) => JSON.stringify(event))
+		.join("\n");
+	const metrics = toolBehaviorMetricEntriesFromJsonl(stdout, process.cwd());
+	strictEqual(metrics["tools.calls.dispatch"], 2);
+	strictEqual(metrics["tools.succeeded.dispatch"], 1);
+});
 
 test("eval suites fail closed at the versioned schema boundary", () => {
 	const accepted = validateEvalSuiteV2(validSuite());
