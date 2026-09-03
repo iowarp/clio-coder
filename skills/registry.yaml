@@ -136,5 +136,5 @@ skills:
     sha256: f48687566a8419aa52f30f8234f8dcfd050eaefdfdcfa281723d3603f3e08fcc
   - name: workflow-distiller
     path: workflow/workflow-distiller
-    version: 0.3.0
-    sha256: 6aa6bb3088f0e4925946aaba3f217dfc5a6e4b8e31f2f051abeda599da91cd48
+    version: 0.4.0
+    sha256: dd7c312d6904f861fa105334c7c2f18c9d6e26a70a76874c85858cee90bede58

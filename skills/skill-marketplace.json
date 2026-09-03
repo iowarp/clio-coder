@@ -479,7 +479,7 @@
 				"create a skill from this session"
 			],
 			"sourceUrl": "https://github.com/iowarp/clio-coder/tree/main/skills/workflow/workflow-distiller",
-			"version": "0.3.0",
+			"version": "0.4.0",
 			"audit": "pass",
 			"category": "workflow"
 		}
