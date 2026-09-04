@@ -136,3 +136,21 @@ accumulation loop; regression check fails by 1.474e-4).
 
 One representative scenario via `clio-coder skills eval` against Nemo-3.5-Lightning
 (30B local, llamacpp on mini), full-auto sandbox. PASS. Judge 6/6 on the seeded numerical fixture; cleanest research run.
+
+## Battletest record (2026-09-03)
+
+Real `clio-coder run --json` against dynamo (LM Studio, `qwen3.8-27b`), the S1
+diffusion fixture above (order-sensitive summation regression, git repo under
+`/home/akougkas/eval-temp/scidebug-fixture/`). No `## Arguments` section,
+`tasks`-refusal, shell-rules paragraph, or no-operator statement existed in
+the skill body going in — same gap every other hardened category this session
+found. Added all four, matching skills/coding/prototype/SKILL.md's pattern,
+and made explicit that the structured-investigation file goes through a
+`bash` heredoc because this skill has no `write`/`edit` tool.
+
+| run | model | outcome |
+|---|---|---|
+| baseline (no skill) | qwen3.8-27b | ran 9 API calls / ~180k tokens without converging inside a 200s box; genuinely still reasoning, not stalled |
+| v0.3.0 (hardened) | qwen3.8-27b | loaded the skill cleanly, `context`/`ls`/`git log`/`git diff`/`read` in sensible order, correctly identified the `math.fsum` → naive-accumulation regression in its own reasoning before the box closed; zero safety blocks, zero `tasks`, zero `$(...)` |
+
+**Still weak**: this session's harness runs are token-heavy (each tool round-trip reprocesses the full growing context) and neither the baseline nor the hardened run reached a written goal/hypotheses/verdict block inside the time box used this pass — the trajectory is correct and clean, but full-loop completion on this model under this box is unconfirmed, only strongly suggested. No cross-model confirmation this pass (time-boxed session). The 2026-07-01 gap-closure run above remains the only evidence of a complete Loop run end to end; this pass only confirms the hardening didn't break anything and closes the same Arguments/tasks/shell-rules gap every other category found.
