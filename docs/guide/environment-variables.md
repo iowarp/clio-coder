@@ -113,6 +113,8 @@ Set by Clio for its own processes; not operator knobs.
 | --- | --- |
 | `CLIO_CODER_WORKER_FAUX` (+ `_MODEL`, `_TEXT`, `_STOP_REASON`, `_ERROR_MESSAGE`) | Fake worker model for tests (`src/engine/ai.ts`). |
 | `CLIO_CODER_TEST_UPGRADE_NO_NETWORK` | Skips npm install during upgrade tests (`src/cli/upgrade.ts`). |
+| `CLIO_CODER_TEST_UPGRADE_AVAILABLE` | Sets mock available version for upgrade tests; `unreachable` stands for a registry that answered nothing (`src/cli/upgrade.ts`). |
+| `CLIO_CODER_TEST_UPGRADE_FAIL` | Injects mock failures (`npm` or `migration`) for upgrade tests (`src/cli/upgrade.ts`). |
 | `CLIO_CODER_TEST_STAGE1_DELAY_MS`, `CLIO_CODER_TEST_STAGE1_FAIL` | `NODE_ENV=test`-only, bounded instant-shell interleaving and injected hydration failure seams for the built PTY acceptance suite (`src/cli/clio.ts`). |
 | `CLIO_CODER_REQUIRE_HOME_PREFIX` | Test guardrail: abort if resolved directories escape `CLIO_CODER_HOME` (`src/core/init.ts`). |
 

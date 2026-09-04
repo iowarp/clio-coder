@@ -432,12 +432,12 @@ integrations:
 		ok(finding?.detail.includes("rename `clio:` to `clio-coder:`"), finding?.detail);
 	});
 
-	it("data reset removes both tool marker spellings only with their selected root", () => {
+	it("data reset removes both tool marker spellings only with their selected root", async () => {
 		const versionDir = join(scratch.dir, "data", "tools", "yazi", "1.0.0");
 		mkdirSync(versionDir, { recursive: true });
 		writeFileSync(join(versionDir, LEGACY_TOOL_MARKER), "legacy", "utf8");
 		writeFileSync(join(versionDir, CANONICAL_TOOL_MARKER), "canonical", "utf8");
-		strictEqual(runResetCommand(["--data", "--force"]), 0);
+		strictEqual(await runResetCommand(["--data", "--force"]), 0);
 		strictEqual(existsSync(join(versionDir, LEGACY_TOOL_MARKER)), false);
 		strictEqual(existsSync(join(versionDir, CANONICAL_TOOL_MARKER)), false);
 	});
