@@ -10,16 +10,21 @@ export interface LifecyclePresenterOptions {
 	plain?: boolean;
 	stream?: NodeJS.WritableStream;
 	inputStream?: NodeJS.ReadableStream;
+	/** Terminal width used to wrap prose. Defaults to the stream's columns, else 80. */
+	columns?: number;
 }
 
 export type LifecycleItemStatus = "remove" | "keep" | "absent" | "skip" | "clean";
 
+// `| undefined` on every optional field is required, not decorative: the repo
+// compiles with exactOptionalPropertyTypes, and every inventory in reset and
+// uninstall builds these rows from a conditional that can produce undefined.
 export interface LifecycleItem {
 	label: string;
 	path: string;
-	bytes?: number | null;
-	status?: LifecycleItemStatus;
-	detail?: string;
+	bytes?: number | null | undefined;
+	status?: LifecycleItemStatus | undefined;
+	detail?: string | undefined;
 }
 
 export interface LifecycleReport {
@@ -35,6 +40,11 @@ export interface LifecycleReport {
 	summary?: string;
 }
 
+/**
+ * One decimal above the byte range, which is the precision a size on a lifecycle
+ * listing is read at: the operator wants to know whether a root is megabytes or
+ * gigabytes before agreeing to delete it, not its third significant figure.
+ */
 export function formatBytes(bytes: number): string {
 	if (bytes < 1024) return `${bytes} B`;
 	const units = ["KB", "MB", "GB", "TB"];
@@ -44,7 +54,7 @@ export function formatBytes(bytes: number): string {
 		value /= 1024;
 		unitIndex += 1;
 	}
-	return `${value.toFixed(value >= 10 ? 1 : 2)} ${units[unitIndex]}`;
+	return `${value.toFixed(1)} ${units[unitIndex]}`;
 }
 
 export function measurePath(targetPath: string): {
@@ -67,6 +77,9 @@ export function measurePath(targetPath: string): {
 	}
 
 	let total = 0;
+	// A symlinked subdirectory is counted as the link it is and never descended
+	// into, so a root that links out to a shared tree reports its own footprint
+	// and the walk cannot loop.
 	function walk(dir: string): void {
 		let entries: Dirent[];
 		try {
@@ -77,14 +90,10 @@ export function measurePath(targetPath: string): {
 		for (const entry of entries) {
 			const full = join(dir, entry.name);
 			try {
-				const st = lstatSync(full);
-				if (st.isDirectory() && !st.isSymbolicLink()) {
-					walk(full);
-				} else {
-					total += st.size;
-				}
+				if (entry.isDirectory()) walk(full);
+				else total += lstatSync(full).size;
 			} catch {
-				// Ignore unreadable entries
+				// An entry that vanished or cannot be read contributes nothing.
 			}
 		}
 	}
@@ -101,21 +110,53 @@ export function shortenPath(targetPath: string, home = homedir()): string {
 	return targetPath;
 }
 
+/** Break `text` on word boundaries so no line exceeds `width` columns. */
+function wrap(text: string, width: number): string[] {
+	if (width <= 0 || text.length <= width) return [text];
+	const lines: string[] = [];
+	let line = "";
+	for (const word of text.split(" ")) {
+		if (line.length === 0) {
+			line = word;
+		} else if (line.length + 1 + word.length <= width) {
+			line = `${line} ${word}`;
+		} else {
+			lines.push(line);
+			line = word;
+		}
+	}
+	if (line.length > 0) lines.push(line);
+	return lines;
+}
+
+/**
+ * The kinds of block the rail knows how to space. One blank rail separates two
+ * adjacent blocks of different kinds; consecutive blocks of the same kind (a run
+ * of detected facts, a run of completed steps) stay together, which is what
+ * makes the transcript read as groups rather than as one padded line per call.
+ * Spacing lives here rather than in each emitter so no caller can produce a
+ * transcript with a doubled or a missing separator.
+ */
+type Block = "header" | "step" | "list" | "warn" | "note" | "advice" | "completed" | "message" | "confirm";
+
 export class LifecyclePresenter {
 	private readonly json: boolean;
 	private readonly plain: boolean;
 	private readonly out: NodeJS.WritableStream;
 	private readonly in: NodeJS.ReadableStream;
+	private readonly columns: number;
 	private readonly report: LifecycleReport;
+	private lastBlock: Block | null = null;
+	private emitted = false;
 
 	constructor(options: LifecyclePresenterOptions = {}) {
 		this.json = Boolean(options.json);
-		const isTty = Boolean(
-			(options.stream as { isTTY?: boolean } | undefined)?.isTTY ?? (defaultOutput as { isTTY?: boolean }).isTTY,
-		);
+		const stream = options.stream ?? defaultOutput;
+		const isTty = Boolean((stream as { isTTY?: boolean }).isTTY);
 		this.plain = options.plain ?? (!isTty || Boolean(process.env.NO_COLOR));
-		this.out = options.stream ?? defaultOutput;
+		this.out = stream;
 		this.in = options.inputStream ?? defaultInput;
+		this.columns = options.columns ?? (stream as { columns?: number }).columns ?? 80;
 		this.report = {
 			command: "",
 			title: "",
@@ -144,49 +185,60 @@ export class LifecyclePresenter {
 		this.report.method = method;
 	}
 
+	/** Open a block, writing the one separator that belongs before it. */
+	private open(block: Block): void {
+		if (this.lastBlock !== null && this.lastBlock !== block) this.separator();
+		this.lastBlock = block;
+	}
+
+	private separator(): void {
+		this.out.write(this.plain ? "\n" : `${chalk.cyan("│")}\n`);
+	}
+
+	/** Rail-level prose, wrapped to the terminal so the rail survives a narrow window. */
+	private prose(text: string): void {
+		const prefix = this.plain ? "  " : `${chalk.cyan("│")}  `;
+		for (const line of wrap(text, this.columns - 3)) this.out.write(`${prefix}${line}\n`);
+	}
+
 	header(title: string, command = ""): void {
 		this.report.title = title;
 		this.report.command = command;
 		if (this.json) return;
 		if (this.plain) {
-			this.out.write(`=== ${title} ===\n\n`);
-			return;
-		}
-		this.out.write(`\n${chalk.cyan("┌")}  ${chalk.bold(title)}\n${chalk.cyan("│")}\n`);
-	}
-
-	rail(text = ""): void {
-		if (this.json) return;
-		if (this.plain) {
-			if (text.length > 0) this.out.write(`  ${text}\n`);
-			else this.out.write("\n");
-			return;
-		}
-		if (text.length > 0) {
-			this.out.write(`${chalk.cyan("│")}  ${text}\n`);
+			this.out.write(`\n${title}\n`);
 		} else {
-			this.out.write(`${chalk.cyan("│")}\n`);
+			this.out.write(`\n${chalk.cyan("┌")}  ${chalk.bold(title)}\n`);
 		}
+		this.lastBlock = "header";
 	}
 
+	/** One detected fact. Consecutive facts group into a single block. */
 	step(text: string): void {
 		this.report.steps.push({ type: "step", message: text });
 		if (this.json) return;
-		if (this.plain) {
-			this.out.write(`* ${text}\n`);
-			return;
-		}
-		this.out.write(`${chalk.blue("●")}  ${text}\n${chalk.cyan("│")}\n`);
+		this.open("step");
+		if (this.plain) this.out.write(`  ${text}\n`);
+		else this.out.write(`${chalk.blue("●")}  ${text}\n`);
+	}
+
+	/** A line of prose on the rail, not a detected fact. */
+	note(text: string): void {
+		this.report.steps.push({ type: "note", message: text });
+		if (this.json) return;
+		this.open("note");
+		this.prose(text);
 	}
 
 	substep(text: string, glyph = "✓"): void {
 		this.report.steps.push({ type: "substep", message: text });
 		if (this.json) return;
+		this.open("list");
 		if (this.plain) {
 			this.out.write(`    ${glyph} ${text}\n`);
 			return;
 		}
-		const coloredGlyph = glyph === "✓" ? chalk.green(glyph) : glyph;
+		const coloredGlyph = glyph === "✓" ? chalk.green(glyph) : chalk.dim(glyph);
 		this.out.write(`${chalk.blue("●")}    ${coloredGlyph} ${text}\n`);
 	}
 
@@ -196,80 +248,68 @@ export class LifecyclePresenter {
 		}
 		if (this.json) return;
 
-		if (this.plain) {
-			this.out.write(`  ${header}:\n\n`);
-			for (const item of items) {
-				const sizeStr =
-					item.status !== "absent" && item.bytes !== undefined && item.bytes !== null ? ` (${formatBytes(item.bytes)})` : "";
-				let suffix = "";
-				if (item.status === "keep") {
-					suffix = item.detail ? ` (${item.detail})` : " (kept)";
-				} else if (item.status === "absent") {
-					suffix = " (absent)";
-				} else if (item.status === "skip") {
-					suffix = item.detail ? ` (${item.detail})` : " (skipped)";
-				} else if (item.detail) {
-					suffix = ` (${item.detail})`;
-				}
-				const glyph = item.status === "keep" || item.status === "absent" || item.status === "skip" ? "–" : "✓";
-				this.out.write(`    ${glyph} ${item.label}: ${shortenPath(item.path)}${sizeStr}${suffix}\n`);
-			}
-			this.out.write("\n");
-			return;
-		}
+		this.open("note");
+		this.prose(`${header}:`);
+		this.open("list");
 
-		this.out.write(`${chalk.cyan("│")}  ${header}:\n${chalk.cyan("│")}\n`);
 		for (const item of items) {
 			const sizeStr =
 				item.status !== "absent" && item.bytes !== undefined && item.bytes !== null ? ` (${formatBytes(item.bytes)})` : "";
-			let glyph = chalk.green("✓");
+			const removes = item.status === undefined || item.status === "remove";
 			let suffix = "";
-			if (item.status === "keep") {
-				glyph = chalk.dim("–");
-				suffix = item.detail ? ` ${chalk.dim(`(${item.detail})`)}` : ` ${chalk.dim("(kept)")}`;
-			} else if (item.status === "absent") {
-				glyph = chalk.dim("–");
-				suffix = ` ${chalk.dim("(absent)")}`;
-			} else if (item.status === "skip") {
-				glyph = chalk.yellow("–");
-				suffix = item.detail ? ` ${chalk.yellow(`(${item.detail})`)}` : ` ${chalk.yellow("(skipped)")}`;
-			} else if (item.detail) {
-				suffix = ` ${chalk.dim(`(${item.detail})`)}`;
+			if (item.status === "keep") suffix = item.detail ? ` (${item.detail})` : " (kept)";
+			else if (item.status === "absent") suffix = item.detail ? ` (${item.detail})` : " (absent)";
+			else if (item.status === "skip") suffix = item.detail ? ` (${item.detail})` : " (skipped)";
+			else if (item.status === "clean") suffix = item.detail ? ` (${item.detail})` : " (nothing to remove)";
+			else if (item.detail) suffix = ` (${item.detail})`;
+
+			const body = `${item.label}: ${shortenPath(item.path)}${sizeStr}`;
+			if (this.plain) {
+				this.out.write(`    ${removes ? "✓" : "–"} ${body}${suffix}\n`);
+				continue;
 			}
+			const glyph = removes ? chalk.green("✓") : item.status === "skip" ? chalk.yellow("–") : chalk.dim("–");
+			const tail = suffix.length === 0 ? "" : item.status === "skip" ? chalk.yellow(suffix) : chalk.dim(suffix);
 			this.out.write(
-				`${chalk.blue("●")}    ${glyph} ${chalk.bold(item.label)}: ${shortenPath(item.path)}${sizeStr}${suffix}\n`,
+				`${chalk.blue("●")}    ${glyph} ${chalk.bold(item.label)}: ${shortenPath(item.path)}${sizeStr}${tail}\n`,
 			);
 		}
-		this.out.write(`${chalk.cyan("│")}\n`);
 	}
 
+	/** One action that has already happened. Consecutive results group together. */
 	completedStep(text: string): void {
 		this.report.steps.push({ type: "completed", message: text });
 		if (this.json) return;
-		if (this.plain) {
-			this.out.write(`✓ ${text}\n`);
-			return;
-		}
-		this.out.write(`${chalk.green("◇")}  ${text}\n`);
+		this.open("completed");
+		if (this.plain) this.out.write(`  ✓ ${text}\n`);
+		else this.out.write(`${chalk.green("◇")}  ${text}\n`);
 	}
 
 	warn(text: string): void {
 		this.report.warnings.push(text);
 		if (this.json) return;
+		this.open("warn");
 		if (this.plain) {
-			this.out.write(`! Warning: ${text}\n`);
+			for (const line of wrap(text, this.columns - 3)) this.out.write(`  ${line}\n`);
 			return;
 		}
-		this.out.write(`${chalk.yellow("▲")}  ${chalk.yellow(text)}\n${chalk.cyan("│")}\n`);
+		const prefix = `${chalk.yellow("▲")}  `;
+		const continuation = `${chalk.cyan("│")}  `;
+		wrap(text, this.columns - 3).forEach((line, index) => {
+			this.out.write(`${index === 0 ? prefix : continuation}${chalk.yellow(line)}\n`);
+		});
 	}
 
+	/**
+	 * Record a failure and say it once on stderr. The JSON report is not written
+	 * here: a command that fails still has advice to add, and emitting mid-flight
+	 * either dropped it or put a second document on stdout. Callers end on
+	 * `finish()`.
+	 */
 	fail(message: string, detail?: string): void {
 		this.report.status = "error";
 		this.report.errors.push(detail ? `${message}: ${detail}` : message);
-		if (this.json) {
-			this.out.write(`${JSON.stringify(this.report, null, 2)}\n`);
-			return;
-		}
+		if (this.json) return;
 		if (this.plain) {
 			process.stderr.write(`error: ${message}\n`);
 			if (detail) process.stderr.write(`  ${detail}\n`);
@@ -282,69 +322,92 @@ export class LifecyclePresenter {
 	commandAdvice(lead: string, command: string): void {
 		this.report.advice.push({ lead, command });
 		if (this.json) return;
-		const lines = command.split("\n");
-		if (this.plain) {
-			this.out.write(`  ${lead}\n`);
-			for (const line of lines) {
-				this.out.write(`    ${line}\n`);
-			}
-			return;
-		}
-		this.out.write(`${chalk.cyan("│")}  ${lead}\n`);
-		for (const line of lines) {
-			this.out.write(`${chalk.blue("●")}    ${chalk.cyan(line)}\n`);
+		this.open("advice");
+		this.prose(lead);
+		for (const line of command.split("\n")) {
+			if (this.plain) this.out.write(`    ${line}\n`);
+			else this.out.write(`${chalk.blue("●")}    ${chalk.cyan(line)}\n`);
 		}
 	}
 
 	message(text: string): void {
 		this.report.steps.push({ type: "message", message: text });
 		if (this.json) return;
-		if (this.plain) {
-			this.out.write(`  ${text}\n`);
-			return;
-		}
-		this.out.write(`${chalk.cyan("◆")}  ${chalk.bold(text)}\n`);
+		this.open("message");
+		if (this.plain) this.out.write(`  ${text}\n`);
+		else this.out.write(`${chalk.cyan("◆")}  ${chalk.bold(text)}\n`);
 	}
 
+	/**
+	 * Ask once, and treat a closed input as a refusal.
+	 *
+	 * `rl.question()` from readline/promises settles on an answer and on an abort
+	 * signal, but not on the input ending: at EOF the interface emits `close` and
+	 * the promise is simply never resolved. Every caller here guards a delete, so
+	 * the failure mode was a `clio-coder uninstall` that printed its prompt and
+	 * then hung forever on Ctrl-D. Racing the `close` event settles that case as
+	 * "no", which is the only safe reading of an input that stopped talking.
+	 */
 	async confirm(question: string, defaultYes = false): Promise<boolean> {
 		if (this.json) return false;
 		const hint = defaultYes ? "Y/n" : "y/N";
+		this.open("confirm");
 		const rl = createInterface({ input: this.in, output: this.out });
 		try {
 			const promptStr = this.plain
-				? `${question} [${hint}]: `
+				? `  ${question} [${hint}]: `
 				: `${chalk.cyan("◇")}  ${chalk.bold(question)} [${hint}]\n${chalk.cyan("│")}  `;
-			const answer = (await rl.question(promptStr)).trim().toLowerCase();
-			let confirmed: boolean;
-			if (answer.length === 0) {
-				confirmed = defaultYes;
-			} else {
-				confirmed = answer === "y" || answer === "yes";
-			}
-			if (!this.plain) {
-				this.out.write(`${chalk.cyan("│")}  ${confirmed ? "Yes" : "No"}\n`);
-			} else {
-				this.out.write(`  ${confirmed ? "Yes" : "No"}\n`);
-			}
+			const answer = await new Promise<string | null>((resolve) => {
+				let settled = false;
+				const settle = (value: string | null): void => {
+					if (settled) return;
+					settled = true;
+					resolve(value);
+				};
+				rl.once("close", () => settle(null));
+				rl.question(promptStr).then(
+					(value) => settle(value),
+					() => settle(null),
+				);
+			});
+			if (answer === null) return false;
+			const normalized = answer.trim().toLowerCase();
+			const confirmed = normalized.length === 0 ? defaultYes : normalized === "y" || normalized === "yes";
+			this.out.write(this.plain ? `  ${confirmed ? "Yes" : "No"}\n` : `${chalk.cyan("│")}  ${confirmed ? "Yes" : "No"}\n`);
 			return confirmed;
-		} catch {
-			return false;
 		} finally {
 			rl.close();
 		}
 	}
 
+	/**
+	 * Close the transcript. Every command ends here, on success and on failure,
+	 * so `--json` emits exactly one document containing everything that was
+	 * recorded, including advice added after a failure.
+	 */
 	done(summary = "Done"): void {
 		this.report.summary = summary;
 		if (this.json) {
-			this.out.write(`${JSON.stringify(this.report, null, 2)}\n`);
+			this.emit();
 			return;
 		}
 		if (this.plain) {
-			this.out.write(`=== ${summary} ===\n`);
+			this.out.write(`\n${summary}\n`);
 			return;
 		}
+		this.separator();
 		this.out.write(`${chalk.cyan("└")}  ${chalk.bold(summary)}\n\n`);
+	}
+
+	/** Emit the JSON report without a closing line, for paths that ended in an error. */
+	finish(): void {
+		if (this.json) this.emit();
+	}
+
+	private emit(): void {
+		if (this.emitted) return;
+		this.emitted = true;
+		this.out.write(`${JSON.stringify(this.report, null, 2)}\n`);
 	}
 }
 
