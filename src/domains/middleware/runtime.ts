@@ -110,9 +110,13 @@ export type MiddlewareDiagnostic =
 export type MiddlewareDiagnosticSink = (diagnostic: MiddlewareDiagnostic) => void;
 
 /**
- * Default diagnostic sink. stderr-only for now; once the typed bus lands a
- * `middleware.hookFailed` channel, the composition root supplies a sink that
- * also emits there.
+ * Default diagnostic sink, and the one the domain loader constructs the
+ * bundle with. It writes to stderr only. The composition root
+ * (src/entry/orchestrator.ts) replaces it through setDiagnosticSink with a
+ * sink that publishes every diagnostic on the typed bus as
+ * `middleware.hookFailed`, which the interactive warn notice consumes, and
+ * that still calls this writer for non-interactive runs, which have no
+ * notice subscriber.
  */
 export function writeMiddlewareDiagnosticToStderr(diagnostic: MiddlewareDiagnostic): void {
 	if (diagnostic.kind === "hook_failed") {
