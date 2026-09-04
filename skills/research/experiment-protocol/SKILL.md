@@ -8,7 +8,7 @@ triggers:
   - define numerical tolerances
   - reproduce these results
   - compare solver accuracy
-version: 0.2.0
+version: 0.3.0
 license: Apache-2.0
 allowed-tools:
   - read
@@ -38,6 +38,25 @@ mode this protocol exists to prevent.
 
 Anti-trigger: if the question is "why is this output wrong", that is a
 diagnosis, not an experiment; use scientific-debugging.
+
+## Arguments
+
+```text
+/skill experiment-protocol <what to benchmark, compare, or sweep>
+```
+
+There is no operator in a headless run — `ask_user` is not in this skill's
+tool surface. If a threshold, tolerance, or environment detail is unstated,
+pick the most defensible default, record it as an explicit assumption in the
+pre-registration, and proceed; never stall Phase 0 waiting for confirmation.
+
+The phases below are the plan; do not open a task list for them — `tasks`
+sits outside this skill's tool surface and any call to it is refused.
+
+Shell rules for every `bash` call: one command per call, plain and direct.
+Never use `$(...)` or backticks; they trigger an approval gate that ends a
+headless run. Capture checksums and environment facts with direct calls
+(`sha256sum data/mesh.h5`), never command substitution.
 
 ## Phase 0 - Pre-register
 

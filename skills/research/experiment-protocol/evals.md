@@ -89,3 +89,26 @@ Prompt: "Make this kernel faster."
 
 One representative scenario via `clio-coder skills eval` against Nemo-3.5-Lightning
 (30B local, llamacpp on mini), full-auto sandbox. PASS. Pre-registration written before touching the seeded kernel; judge 5/5.
+
+## Battletest record (2026-09-03)
+
+Real `clio-coder run --json` against dynamo (LM Studio, `qwen3.8-27b`), the S1
+kernel.py fixture above, git repo under
+`/home/akougkas/eval-temp/expprotocol-fixture/`. Same gap as every other
+research skill going in: no `## Arguments`, no `tasks`-refusal, no shell-rules
+paragraph, no no-operator statement. Added all four.
+
+| run | model | outcome |
+|---|---|---|
+| v0.3.0 (hardened) | qwen3.8-27b | environment capture (`python3 --version`, `uname -a`, CPU model), `numpy` version check, `sha256sum` on the input array and the frozen baseline copy, `.clio-coder/validation.yaml` written with thresholds/tolerance semantics before any benchmark, a real 20-rep baseline vs. a vectorized candidate, a bit-exact accuracy check between them, then a correctness spot-check on a second slice-based candidate before timing it — 34 tool calls, zero safety blocks, zero `$(...)`, zero `tasks`, `write`/`edit` used correctly (in this skill's surface, unlike scientific-debugging) instead of a heredoc |
+
+The run did not reach a final Phase 3 verdict/report inside the 280s box used
+this pass (31 API calls, ~750k cumulative input tokens — the box closes on
+context-reprocessing volume, not model slowness); everything observed up to
+that point followed Phase 0-2 exactly as specified, including registering a
+100x stretch target, measuring ~13x, and correctly continuing to iterate
+rather than declaring victory early.
+
+**Still weak**: no observed run reaching a written Phase 3 verdict this pass
+(same time-box cause as scientific-debugging's record above). No cross-model
+confirmation this pass.
