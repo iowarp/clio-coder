@@ -28,7 +28,7 @@ import type {
 	PromptTemplateExpansion,
 	ResourceList,
 } from "../domains/resources/index.js";
-import { parseSkillCommand } from "../domains/resources/index.js";
+import { parseSkillCommand, SKILL_SURFACE_CLEAR_ARG } from "../domains/resources/index.js";
 import type { ShareImportPlan } from "../domains/share/index.js";
 import type { UserTask } from "../domains/user-tasks/store.js";
 import type { ExtensionReloadOutcome } from "../entry/extension-reload.js";
@@ -118,6 +118,8 @@ type SlashCommandVariant =
 	| { kind: "skill-selector" }
 	| { kind: "resources"; family?: "skills" | "prompts" | "extensions"; tab?: LibraryEntryKind; action?: "reload" }
 	| { kind: "skill-invocation"; text: string }
+	/** `/skill off`: drop the tool surface an activated skill armed for the session. */
+	| { kind: "skill-surface-clear" }
 	| ShareCommandVariant
 	| ArchiveCommandVariant
 	/** `source` is the line the operator typed, echoed above the run's transcript block. */
@@ -595,6 +597,12 @@ export interface SlashCommandContext {
 	 */
 	runContextRecall?: (ref: string) => void;
 	openSkillsHub?: (tab?: LibraryEntryKind) => void;
+	/**
+	 * `/skill off`: drop the tool surface an activated skill armed for the
+	 * session. Returns the names that were armed. Absent on a host with no
+	 * chat loop, where nothing can be armed in the first place.
+	 */
+	clearSkillSurface?: () => ReadonlyArray<string>;
 	listPrompts: () => ResourceList<PromptTemplate>;
 	/**
 	 * Resolve a `/name` against the loaded prompt templates. Absent when the host
@@ -912,9 +920,9 @@ export const BUILTIN_SLASH_COMMANDS: ReadonlyArray<BuiltinSlashCommand> = [
 	},
 	{
 		name: "skill",
-		description: "Open the Skills Hub or invoke a skill",
+		description: "Open the Skills Hub, invoke a skill, or `off` to drop an active skill's tool surface",
 		group: "Work",
-		kinds: ["skill-selector", "skill-invocation"],
+		kinds: ["skill-selector", "skill-invocation", "skill-surface-clear"],
 		args: {
 			positionals: [
 				{ name: "name", required: false },
@@ -926,16 +934,26 @@ export const BUILTIN_SLASH_COMMANDS: ReadonlyArray<BuiltinSlashCommand> = [
 				return { kind: "skill-selector" };
 			}
 			const command = parseSkillCommand(trimmed);
-			if (command) {
-				return { kind: "skill-invocation", text: trimmed };
+			if (!command) return null;
+			// `off` is the one reserved name: an installed skill called `off`
+			// would still be reachable from the hub, and clearing the armed
+			// surface has to stay typeable without a second command.
+			if (command.name === SKILL_SURFACE_CLEAR_ARG && command.args.length === 0) {
+				return { kind: "skill-surface-clear" };
 			}
-			return null;
+			return { kind: "skill-invocation", text: trimmed };
 		},
 		handle(command, ctx) {
 			if (command.kind === "skill-selector") {
 				ctx.openSkillsHub?.();
 			} else if (command.kind === "skill-invocation") {
 				ctx.submitChat(command.text);
+			} else if (command.kind === "skill-surface-clear") {
+				const cleared = ctx.clearSkillSurface?.() ?? [];
+				ctx.notice(
+					"info",
+					cleared.length > 0 ? `Skill tool surface cleared: ${cleared.join(", ")}.` : "No skill tool surface is active.",
+				);
 			}
 		},
 	},

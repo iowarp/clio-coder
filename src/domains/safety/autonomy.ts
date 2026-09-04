@@ -69,6 +69,21 @@ export interface AutonomyMappingOptions {
 }
 
 /**
+ * Whether the model may activate an installed skill itself rather than
+ * emitting the suggestion anchor and waiting for the operator to type
+ * `/skill <name>`.
+ *
+ * At `read-only` and `suggest` the operator asked to be consulted before the
+ * agent acts, and activation is an action. At `auto-edit` and `full-auto` they
+ * already said otherwise, and a skill can only narrow the tool surface, never
+ * widen it, so the gate buys no safety there. The level is the opt-in; there is
+ * no per-skill frontmatter flag for this.
+ */
+export function modelMayActivateSkills(level: AutonomyLevel): boolean {
+	return level === "auto-edit" || level === "full-auto";
+}
+
+/**
  * The §2.3 level-dependent matrix. `git_destructive` never reaches this
  * mapping in practice (the safety net blocks it first); it maps to deny
  * defensively.
