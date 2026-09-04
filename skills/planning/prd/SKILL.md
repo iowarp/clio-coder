@@ -7,7 +7,7 @@ triggers:
   - define this feature
   - structure this product brain dump
   - create milestone prompts
-version: 0.4.0
+version: 0.4.1
 license: Apache-2.0
 allowed-tools:
   - read
@@ -50,8 +50,9 @@ the user saying so. Markdown only, no external templates, repo-aware.
   own prompt — let the user describe the idea raw — rather than an invented
   idea.
 
-There is no operator in a headless run: `ask_user` is either not registered
-or nothing answers it, and stalling a gate to wait for it never resolves.
+There is no operator in a headless run: `ask_user` is not registered, so
+any call is refused as an unregistered tool rather than answered, and
+stalling a gate to wait for it never resolves.
 When a gate goes unanswered, do not skip the phase and do not go quiet: run
 it as a monologue instead — state the phase's question, your
 recommendation (grounded in the repo and any evidence read, or the most

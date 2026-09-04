@@ -7,7 +7,7 @@ triggers:
   - get multiple expert perspectives
   - weigh the architecture options
   - what would experts say
-version: 0.5.0
+version: 0.5.1
 license: Apache-2.0
 allowed-tools:
   - dispatch
@@ -52,10 +52,9 @@ argument.
 **Headless is the enforced default, not a suggestion.** A council is several
 worker runs; nobody is waiting between rounds in a headless run, and every
 round that actually runs costs real wall-clock time on top of the
-orchestrator's own turns. `ask_user` still executes here even though it is
-not in the list below — it is always available regardless — but nothing
-answers it: the single question Step 1 asks comes back `{cancelled: true}`
-immediately, as an ordinary result, not an error. Treat that cancellation (or
+orchestrator's own turns. `ask_user` is not registered in a headless run,
+so the single question Step 1 asks is refused as an unregistered tool
+rather than answered. Treat that refusal (or
 skip the call and reason from this paragraph directly — one is not more valid
 than the other) as the fixed answer **quick mode: exactly three perspectives,
 exactly one round (Positions) plus synthesis.** Do not compose four or five

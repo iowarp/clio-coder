@@ -7,7 +7,7 @@ triggers:
   - stress-test this design
   - poke holes in this idea
   - clarify this plan one question at a time
-version: 0.5.0
+version: 0.5.1
 license: Apache-2.0
 allowed-tools:
   - read
@@ -52,13 +52,12 @@ is coming. Ending the turn on an open question — even one question, even a
 well-posed one — is this skill's single most common failure and worse than
 skipping the interview format entirely.
 
-There is no operator in a headless run. `ask_user` still executes — it is
-registered and the call succeeds — but nothing answers it: every round
-returns `{cancelled: true}` immediately, as an ordinary result, not an
-error, every time, with no exceptions. Calling it again will not produce a
-different result, so one call is enough to confirm it (not required —
-reasoning from this paragraph alone is just as valid as calling it and
-observing the cancellation). Whichever phase this lands in — even round
+There is no operator in a headless run: `ask_user` is not registered, so
+any call is refused as an unregistered tool rather than answered, every
+time, with no exceptions. Calling it again will not produce a different
+result, so one call is enough to confirm it (not required: reasoning from
+this paragraph alone is just as valid as calling it and observing the
+refusal). Whichever phase this lands in — even round
 1 — switch immediately to the assumed-confirm monologue for every phase
 from here on, in the same turn: state the question you would have asked,
 give your own best/recommended answer with the reasoning behind it, mark
@@ -160,7 +159,7 @@ If an answer is vague, ask a follow-up on the same branch. Do not jump to a new
 branch while the current one is still unresolved.
 
 **Headless: there is no reply coming, whether `ask_user` comes back
-`cancelled` or you never call it at all.** Neither is a vague answer to
+refused as unregistered or you never call it at all.** Neither is a vague answer to
 follow up on and neither is a signal to try again or to wait — both mean
 there is no operator this run, from round 1 on. Do not call `ask_user`
 again for this or any later phase, and do not phrase a question in plain
@@ -175,7 +174,7 @@ This step applies to a live session with a real operator. Stop immediately
 when the user says "stop", "enough", "later", "done", "next time", or cancels
 the modal. Do not ask another question to confirm stopping.
 
-A headless `cancelled` result is not a stop signal from a user — it is the
+A headless refusal of `ask_user` is not a stop signal from a user — it is the
 absence of an operator (see Step 3). Do not treat it as "the user cancelled
 this session"; treat it as the cue to switch to the assumed-confirm
 monologue and keep going to a complete decision log, not to stop early.
@@ -205,9 +204,9 @@ state the partial decisions and the next unresolved root question.
 
 In a live session, close with `ask_user` `action: "complete"` and a compact
 `decisions` array before final prose. In a headless run where `ask_user`
-already came back cancelled, skip straight to the decision log below — do
-not attempt another `ask_user` call just to close out; it will cancel too
-and adds nothing. Write the final decision log:
+already came back refused, skip straight to the decision log below — do
+not attempt another `ask_user` call just to close out; it will be refused
+too and adds nothing. Write the final decision log:
 
 ```markdown
 ## Decision Log - <topic>
@@ -256,7 +255,7 @@ Use this ordering when several questions are possible:
 - Letting `ask_user` hit the round limit without completing the interview.
 - Ending with a summary paragraph instead of the decision log.
 - Re-calling `ask_user` for a later phase after an earlier round already came
-  back `cancelled` — the answer will not be different; that budget is wasted.
+  back refused — the answer will not be different; that budget is wasted.
 - Ending a turn on "Answer 1/2/3", "let me know which you prefer", or any
   other wording that expects a reply in a headless run — there is no next
   turn for a reply to land in. This is the single most common failure mode
@@ -264,5 +263,5 @@ Use this ordering when several questions are possible:
   stopping, instead of running the assumed-confirm monologue through every
   remaining phase to the decision log in the same turn.
 - Opening a `tasks` list for the phase map; `tasks` is refused.
-- Treating a headless `cancelled` result as the user's stop signal (Step 4)
+- Treating a headless `ask_user` refusal as the user's stop signal (Step 4)
   instead of the absence-of-operator cue it actually is.

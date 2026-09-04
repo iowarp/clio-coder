@@ -8,7 +8,7 @@ triggers:
   - diagnose NaNs
   - debug with falsifiable hypotheses
   - scientific root cause
-version: 0.3.0
+version: 0.3.1
 license: Apache-2.0
 allowed-tools:
   - read
@@ -46,7 +46,8 @@ below is for failures that survived the first obvious fix.
 
 Everything after the skill name is the failure report: the observed wrong
 behavior and whatever has already been tried. There is no operator in a
-headless run — `ask_user` is not in this skill's tool surface. If the goal,
+headless run: `ask_user` is not registered, so any call is refused as an
+unregistered tool rather than answered. If the goal,
 a fault-class split, or a ranking call is ambiguous, state your best reading
 in Step 1 or Step 3 and proceed; never stall a step waiting for confirmation.
 

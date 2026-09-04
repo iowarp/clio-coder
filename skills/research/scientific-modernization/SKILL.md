@@ -8,7 +8,7 @@ triggers:
   - migrate the scientific build system
   - create a maintained fork
   - preserve scientific parity
-version: 0.4.0
+version: 0.4.1
 license: Apache-2.0
 allowed-tools:
   - read
@@ -42,8 +42,8 @@ has an explicit exit condition.
 /skill scientific-modernization <what to modernize, port, rewrite, or replace, and why>
 ```
 
-There is no operator in a headless run — `ask_user` is not in this skill's
-tool surface. Stage 1's "the user has seen them" exit condition means,
+There is no operator in a headless run: `ask_user` is not registered, so
+any call is refused as an unregistered tool rather than answered. Stage 1's "the user has seen them" exit condition means,
 headlessly: state the four bullets in your reply and proceed, never stall
 waiting for acknowledgment. Every other stage gate below works the same way
 — state the decision and its reasoning, then continue.

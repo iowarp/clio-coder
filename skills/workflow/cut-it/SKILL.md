@@ -7,7 +7,7 @@ triggers:
   - make this plan executable
   - turn this milestone into a sprint
   - write dependency-ordered vertical slices
-version: 0.4.0
+version: 0.4.1
 license: Apache-2.0
 allowed-tools:
   - read
@@ -52,9 +52,8 @@ destination like "write it to docs/SPRINT.md", is Step 3's output location,
 not the input. When neither is named, Step 1 finds the plan and Step 3
 writes to the repo-root default.
 
-This run has no back-and-forth. `ask_user` still executes — it is registered
-and the call succeeds — but nothing answers it in a headless run: every round
-returns `{cancelled: true}` immediately, as an ordinary result, not an error.
+This run has no back-and-forth. `ask_user` is not registered in a headless
+run, so any call is refused as an unregistered tool rather than answered.
 The happy path here rarely needs a question at all — Step 1's "stop and say
 so" for a missing or vague plan is already headless-safe, and Step 3's output
 path defaults without asking. If several plans or milestones are plausible

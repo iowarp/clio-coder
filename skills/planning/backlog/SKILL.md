@@ -7,7 +7,7 @@ triggers:
   - build the backlog
   - decompose this plan into tickets
   - create GitHub issues from this architecture
-version: 0.4.0
+version: 0.4.1
 license: Apache-2.0
 allowed-tools:
   - read
@@ -47,9 +47,9 @@ tracker. Decomposition is tracker-agnostic; creation branches on the target.
   (Step 1's own rule picks it — see below) and a milestone/epic to attach
   tickets to.
 
-There is no operator in a headless run: `ask_user` resolves immediately
-with no answer, every time it is called — not a stall, and calling it again
-will not produce a different result. **This skill treats headless
+There is no operator in a headless run: `ask_user` is not registered, so
+any call is refused as an unregistered tool rather than answered; that is
+not a stall, and calling it again will not produce a different result. **This skill treats headless
 degradation differently at each step below, because Step 3 gates an
 outward, not-cleanly-reversible action — real tickets, GitHub issues or
 persisted local tasks — not a document write:**

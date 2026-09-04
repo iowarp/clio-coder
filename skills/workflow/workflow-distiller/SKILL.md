@@ -7,7 +7,7 @@ triggers:
   - turn this into a reusable workflow
   - distill this repeated process
   - create a skill from this session
-version: 0.4.0
+version: 0.4.1
 license: Apache-2.0
 allowed-tools:
   - read
@@ -50,10 +50,10 @@ whichever workflow just ran in this session. Everything else in the request
 not more arguments.
 
 A live operator can answer Phase 2's interview and Phase 4's design gate for
-real - treat a real, non-cancelled `ask_user` reply as proof an operator is
+real - treat a real, answered `ask_user` reply as proof an operator is
 present and continue asking one question per round. There is no operator in
-a headless run: `ask_user` is not registered and every call resolves
-`cancelled` immediately, whether or not it is ever called at all. When that
+a headless run: `ask_user` is not registered, so any call is refused as an
+unregistered tool rather than answered. When that
 is the run's condition, do not wait for a reply that cannot come: answer
 every remaining interview question and the Phase 4 gate yourself as an
 assumed-confirm monologue (state the question, give your best-grounded

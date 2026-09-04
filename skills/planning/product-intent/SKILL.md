@@ -7,7 +7,7 @@ triggers:
   - problem-first PRD
   - define a falsifiable product hypothesis
   - greenfield product intent
-version: 0.4.0
+version: 0.4.1
 license: Apache-2.0
 allowed-tools:
   - read
@@ -50,10 +50,10 @@ decisions (library, data model, boundaries) never enter it; they belong to
 - Nothing is required beyond some text; a blank invocation gets Step 0's own
   "What do you want to build? A few sentences." question.
 
-There is no operator in a headless run: `ask_user` still executes, but with
-nothing to answer it every call returns immediately with no answers, every
-time — calling it again will not produce a different result. Treat the
-first empty response exactly like the user saying "just write it" (see "If
+There is no operator in a headless run: `ask_user` is not registered, so
+any call is refused as an unregistered tool rather than answered, every
+time; calling it again will not produce a different result. Treat the
+first refusal exactly like the user saying "just write it" (see "If
 the user declines the interview" below), and apply that treatment from
 wherever it happened onward — Step 0's evidence check included, not just
 the five clusters: state the question, your best evidence-grounded answer
@@ -89,8 +89,8 @@ the same turn. Thin answers get reflected back and dug into.
 If the user declines the interview ("just write it"): honor it, name what
 you will have to leave TBD, ask only the two or three highest-leverage
 questions, and mark everything else "TBD — needs validation". This is also
-the headless default: see Arguments above for what an empty `ask_user`
-response means and how to apply this same treatment cluster by cluster
+the headless default: see Arguments above for what a refused `ask_user`
+call means and how to apply this same treatment cluster by cluster
 instead of stopping after the first one.
 
 1. **Initiate.** Input given → restate and confirm. Blank → "What do you
@@ -159,7 +159,7 @@ outcome-shaped metrics · explicit non-goals · zero engineering decisions.
   counter-signal.
 - The literal filename `PRD.md`, or anything outside `docs/`, instead of
   `docs/<kebab-slug>.prd.md`.
-- Calling `ask_user` again after an empty response, instead of switching to
+- Calling `ask_user` again after a refusal, instead of switching to
   the decline treatment for every step from there on.
 - Opening a task list for the interview clusters; `tasks` is refused.
 - Reaching Generate without ever attempting Step 0 or the first cluster —

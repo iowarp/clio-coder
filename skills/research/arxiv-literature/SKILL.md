@@ -7,7 +7,7 @@ triggers:
   - compare these papers
   - find recent research papers
   - build a literature survey
-version: 0.5.0
+version: 0.5.1
 license: Apache-2.0
 allowed-tools:
   - web_fetch
@@ -40,8 +40,8 @@ immediately; only paper cards reach the user.
 ```
 
 The request is free text: a paper URL/ID, a topic, or two or more IDs to
-compare. There is no operator in a headless run — `ask_user` is not in this
-skill's tool surface and nothing answers it. If the request is ambiguous (no
+compare. There is no operator in a headless run: `ask_user` is not registered, so
+any call is refused as an unregistered tool rather than answered. If the request is ambiguous (no
 clear topic, an ID that doesn't resolve), state your best reading and
 proceed; never stall waiting for clarification. `tasks` sits outside this
 skill's tool surface and is refused; the steps below are the whole plan, do
