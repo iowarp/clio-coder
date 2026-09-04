@@ -7,8 +7,17 @@ triggers:
   - parse don't validate
   - illegal states unrepresentable
   - functional core imperative shell
-version: 0.3.0
+version: 0.4.0
 license: Apache-2.0
+allowed-tools:
+  - read
+  - grep
+  - find
+  - ls
+  - code_nav
+  - bash
+  - write
+  - edit
 clio-coder:
   registry-id: iowarp/clio-coder
   source-url: https://github.com/iowarp/clio-coder/tree/main/skills/coding/coding-standards
@@ -33,9 +42,10 @@ code, and never rewrite unrelated old code without an explicit migration
 request. **The host project's own documented standards always win over
 this file.**
 
-This skill declares no tool surface on purpose: it rides along with
-whatever task is in flight (writing, refactoring, reviewing), so it must
-not narrow the tools that task needs.
+This skill's tool surface covers the whole write-code loop (read, grep,
+find, ls, code_nav, bash, write, edit) so a solo run can apply the rules
+it names. When it rides along with another skill, the surfaces merge as a
+union, so it never narrows the tools the task in flight needs.
 
 ## Arguments
 
