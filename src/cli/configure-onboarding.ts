@@ -23,8 +23,15 @@
 import { createInterface } from "node:readline/promises";
 import chalk from "chalk";
 
-import { type ClioSettings, readSettings, settingsPath, updateSettings } from "../core/config.js";
+import {
+	bindAgentProfileInSettings,
+	type ClioSettings,
+	readSettings,
+	settingsPath,
+	updateSettings,
+} from "../core/config.js";
 import { THINKING_LEVELS, type ThinkingLevel } from "../core/defaults.js";
+import { resolveOnPath } from "../domains/interop/detect.js";
 import { authStoragePath, openAuthStorage, targetRequiresAuth } from "../domains/providers/auth/index.js";
 import {
 	buildProviderSupportEntry,
@@ -61,6 +68,7 @@ import {
 	runtimesForCategory,
 	setOrchestratorPointer,
 	setWorkerDefaultPointer,
+	setWorkerProfilePointer,
 	type WireModelInventory,
 } from "./configure-target.js";
 import { createLifecyclePresenter, type LifecyclePresenter, shortenPath } from "./lifecycle-presenter.js";
@@ -106,6 +114,7 @@ interface Answers {
 	model?: string | undefined;
 	thinking?: ThinkingLevel | undefined;
 	probe?: ProbeResult | null | undefined;
+	antigravity?: { targetId: string; model: string } | undefined;
 	wiredPeers?: string[] | undefined;
 }
 
@@ -219,8 +228,12 @@ const RUNTIME_STEP: Step = {
 	applies: () => true,
 	run: async (wizard, answers) => {
 		const registry = getRuntimeRegistry();
-		const entries = answers.category ? runtimesForCategory(allEntries(), answers.category) : allEntries();
-		const usable = entries.length > 0 ? entries : allEntries();
+		const chatEntries = allEntries().filter((entry) => {
+			const runtime = registry.get(entry.runtimeId);
+			return runtime !== null && isOrchestratorEligibleRuntime(runtime);
+		});
+		const entries = answers.category ? runtimesForCategory(chatEntries, answers.category) : chatEntries;
+		const usable = entries.length > 0 ? entries : chatEntries;
 		const previous = usable.findIndex((entry) => entry.runtimeId === answers.runtime?.id);
 		const featured = usable.findIndex((entry) => entry.featured);
 		const result = await promptSelect<string>({
@@ -575,7 +588,10 @@ const MODEL_STEP: Step = {
 		// 38 ids is `gpt-4` because g sorts early.
 		const catalogOrdered = support.modelSource === "catalog";
 		const preferred =
-			answers.model ?? support.defaultModel ?? (catalogOrdered ? undefined : inventory.models[0]) ?? undefined;
+			answers.model ??
+			(inventory.source === "probe" ? inventory.models[0] : support.defaultModel) ??
+			(catalogOrdered ? undefined : inventory.models[0]) ??
+			undefined;
 
 		if (inventory.models.length === 0) {
 			wizard.presenter.warn(inventoryGap(runtime, { url: answers.url }));
@@ -603,12 +619,23 @@ const MODEL_STEP: Step = {
 			heading: [
 				"",
 				chalk.bold("Which model?"),
-				chalk.dim(inventory.source === "probe" ? "read from the server just now" : "from the provider catalog"),
+				chalk.dim(
+					inventory.source === "probe"
+						? "read live from the target just now"
+						: inventory.source === "cache"
+							? "cached model snapshot; not verified in this run"
+							: "model hints; not a live account catalog",
+				),
 			],
 			choices: inventory.models.map((model) => {
 				const state = inventory.modelStates?.[model]?.state;
 				const hint = model === preferred ? "default" : state !== undefined && state !== "unknown" ? state : undefined;
-				return { value: model, label: model, ...(hint === undefined ? {} : { hint }) };
+				const label = inventory.labels?.[model];
+				return {
+					value: model,
+					label: label && label !== model ? `${model} — ${label}` : model,
+					...(hint === undefined ? {} : { hint }),
+				};
 			}),
 			initialIndex: selected >= 0 ? selected : 0,
 			railPrefix: wizard.rail,
@@ -645,7 +672,9 @@ async function readModelCapabilities(answers: Answers, runtime: RuntimeDescripto
 	const descriptor = draftDescriptor(answers, runtime, true);
 	const probe = await runtimeProbe(runtime, descriptor);
 	answers.probe = probe;
-	if (probe?.ok && probe.models) recordTargetModelSnapshot(descriptor, probe.models);
+	if (probe?.ok && probe.models) {
+		recordTargetModelSnapshot(descriptor, probe.models, probe.modelLabels ? { modelLabels: probe.modelLabels } : {});
+	}
 }
 
 const THINKING_HINTS: Readonly<Record<ThinkingLevel, string>> = {
@@ -689,6 +718,73 @@ const THINKING_STEP: Step = {
 	},
 };
 
+const ANTIGRAVITY_COLLEAGUE_STEP: Step = {
+	id: "antigravity-colleague",
+	applies: (answers) =>
+		answers.runtime !== undefined &&
+		isOrchestratorEligibleRuntime(answers.runtime) &&
+		resolveOnPath(["agy"]).presence === "present" &&
+		!readSettings().targets.some((target) => target.runtime === "antigravity-code"),
+	run: async (wizard, answers) => {
+		const runtime = getRuntimeRegistry().get("antigravity-code");
+		if (!runtime) return "next";
+		const choice = await promptSelect<boolean>({
+			heading: [
+				"",
+				chalk.bold("Add your local Antigravity research colleague?"),
+				chalk.dim("optional, experimental, dispatch-only; Clio does not authenticate or inspect its session"),
+			],
+			choices: [
+				{ value: false, label: "Not now", hint: "your primary Clio target is unchanged" },
+				{ value: true, label: "Add read-only colleague", hint: "probe the non-generating model catalog" },
+			],
+			initialIndex: answers.antigravity ? 1 : 0,
+			railPrefix: wizard.rail,
+			backLabel: "back",
+			clearOnExit: true,
+			input: wizard.input,
+			output: wizard.output,
+		});
+		if (choice.kind === "quit") return "quit";
+		if (choice.kind === "back") return "back";
+		if (!choice.value) {
+			answers.antigravity = undefined;
+			wizard.answer("Colleague", "not added");
+			return "next";
+		}
+		const targetId = deriveTargetId(runtime.id, readSettings().targets);
+		const descriptor = buildDescriptor(runtime, targetId, {});
+		const inventory = await resolveSupportedWireModels(runtime, descriptor);
+		if (inventory.source !== "probe" || inventory.models.length === 0) {
+			answers.antigravity = undefined;
+			wizard.presenter.warn(
+				inventory.probeError ??
+					"Antigravity did not return a live catalog. Run `agy` yourself, complete sign-in, then add it from Configure → Targets.",
+			);
+			wizard.answer("Colleague", "not added; sign in with agy first");
+			return "next";
+		}
+		const picked = await promptSelect<string>({
+			heading: ["", chalk.bold("Antigravity research model"), chalk.dim("live account catalog")],
+			choices: inventory.models.map((model) => ({
+				value: model,
+				label: inventory.labels?.[model] ? `${model} — ${inventory.labels[model]}` : model,
+			})),
+			initialIndex: 0,
+			railPrefix: wizard.rail,
+			backLabel: "back",
+			clearOnExit: true,
+			input: wizard.input,
+			output: wizard.output,
+		});
+		if (picked.kind === "quit") return "quit";
+		if (picked.kind === "back") return "back";
+		answers.antigravity = { targetId, model: picked.value };
+		wizard.answer("Colleague", `${targetId}/${picked.value} → world-knowledge`);
+		return "next";
+	},
+};
+
 const PEERS_STEP: Step = {
 	id: "peers",
 	applies: () => true,
@@ -724,6 +820,7 @@ const STEPS: ReadonlyArray<Step> = [
 	DETECTED_RUNTIME_STEP,
 	MODEL_STEP,
 	THINKING_STEP,
+	ANTIGRAVITY_COLLEAGUE_STEP,
 	PEERS_STEP,
 ];
 
@@ -739,6 +836,16 @@ function persist(answers: Answers, descriptor: TargetDescriptor, chatEligible: b
 		if (answers.thinking !== undefined) {
 			settings.chat.thinkingLevel = answers.thinking;
 			settings.fleet.default.thinkingLevel = answers.thinking;
+		}
+		if (answers.antigravity !== undefined) {
+			const antigravityRuntime = getRuntimeRegistry().get("antigravity-code");
+			if (!antigravityRuntime) throw new Error("Antigravity runtime disappeared before settings were written");
+			const external = buildDescriptor(antigravityRuntime, answers.antigravity.targetId, {
+				model: answers.antigravity.model,
+			});
+			applyTarget(settings, external);
+			setWorkerProfilePointer(settings, "world-knowledge-external", external, answers.antigravity.model);
+			bindAgentProfileInSettings(settings, "world-knowledge", "world-knowledge-external");
 		}
 	});
 }
@@ -852,6 +959,11 @@ function finish(wizard: Wizard, answers: Answers): number {
 	if (answers.thinking !== undefined) presenter.completedStep(`thinking level ${answers.thinking}`);
 	for (const peer of answers.wiredPeers ?? []) {
 		presenter.completedStep(`delegation agent ${peer} added; use \`/delegate ${peer} <task>\``);
+	}
+	if (answers.antigravity !== undefined) {
+		presenter.completedStep(
+			`world-knowledge bound read-only to ${answers.antigravity.targetId}/${answers.antigravity.model}`,
+		);
 	}
 	presenter.completedStep(`settings written to ${shortenPath(settingsPath())}`);
 

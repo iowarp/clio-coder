@@ -47,7 +47,7 @@
 <p><strong>Visual blueprint:</strong> The source checkout includes the complete
 <a href="configuration_blueprint.html">Configuration, Targets, Runtimes, and Auth visual reference</a>.</p>
 </blockquote>
-<p>Clio Coder is target-first: chat and fleet dispatch resolve through configured targets in <code>settings.yaml</code>, not through provider-specific ad hoc flags. Chat and print targets are HTTP and native engine-backed runtimes. Fleet dispatch can also target the sanctioned Claude Code subscription runtimes described below.</p>
+<p>Clio Coder is target-first: chat and fleet dispatch resolve through configured targets in <code>settings.yaml</code>, not through provider-specific ad hoc flags. Chat and print targets are HTTP and native engine-backed runtimes. Fleet dispatch can also target sanctioned subscription and external-worker runtimes described below.</p>
 <p>Clio&#39;s engine is built on the pi SDK (see <a href="pi_boundary_blueprint.html">docs/architecture/pi-boundary.md</a>). Broad provider/model support comes from engine-backed descriptors and from the generic <code>openai-compat</code> and <code>anthropic-compat</code> targets. Clio adds orchestration, local/native runtime ergonomics, target configuration, dispatch, safety, and receipts rather than creating a first-class descriptor for every provider.</p>
 <p>Source of truth: <code>src/core/defaults.ts</code>, <code>src/core/config.ts</code>, <code>src/domains/providers/**</code>, <code>src/cli/configure.ts</code>, <code>src/cli/targets.ts</code>, <code>src/cli/models.ts</code>, and <code>src/cli/auth.ts</code>.</p>
 <hr>
@@ -117,7 +117,15 @@ clio-coder configure --list
 <li><strong><a href="https://github.com/ggerganov/llama.cpp">llama.cpp</a>:</strong> A minimal C/C++ implementation for local LLM inference. Target runtime ID: <code>llamacpp</code>.</li>
 <li><strong><a href="https://github.com/vllm-project/vllm">vLLM</a>:</strong> A high-throughput and memory-efficient LLM serving engine. Target runtime ID: <code>vllm</code>.</li>
 <li><strong><a href="https://github.com/sgl-project/sglang">SGLang</a>:</strong> A fast serving framework for large language models. Target runtime ID: <code>sglang</code>.</li>
+<li><strong><a href="https://docs.litellm.ai">LiteLLM</a>:</strong> An OpenAI-compatible gateway that publishes routed models across multiple inference endpoints. Target runtime ID: <code>litellm</code>.</li>
 </ul>
+<p>First-run onboarding always completes a valid orchestrator before it offers any
+worker-only colleague. If <code>agy</code> is already on <code>PATH</code>, the final optional step is
+named <strong>Antigravity CLI — experimental local delegation</strong>. It runs only the
+non-generating model-catalog probe, explains that Clio uses the operator&#39;s
+existing local session without inspecting credentials, and can create and bind a
+read-only <code>world-knowledge-external</code> profile. Skipping or failing that step does
+not change the primary chat, background, or fleet-default pointers.</p>
 <p>Common local runtime IDs and default URLs are:</p>
 <table>
 <thead>
@@ -1369,12 +1377,31 @@ clio-coder configure --id claude-code-worker --runtime claude-code --model sonne
         toolGovernance: clio-coder-policy
 </code></pre>
 <p>Then invoke it using <code>/delegate claude-code &lt;task&gt;</code>.</p>
-<h3>5. Google Antigravity CLI Runtime (Worker-Only)</h3>
-<p>The <code>antigravity-code</code> runtime drives your local Google Antigravity CLI (<code>agy</code>) installation to execute subagent tasks. It runs the CLI as a subprocess using the <code>agy --print</code> command and maps Clio autonomy levels onto the CLI&#39;s permission flags.</p>
-<p>Google Antigravity supports a context window of up to 1,000,000 tokens and is suitable for large-context codebase reasoning. Because <code>agy</code> emits plain text without structured events, Clio cannot perform fine-grained tool call interception. Gating is applied coarsely: read-only runs pass both <code>--mode plan</code> (the no-change agent posture) and <code>--sandbox</code> (terminal restrictions). Full-auto passes <code>--dangerously-skip-permissions</code> only when the environment variable <code>CLIO_CODER_ALLOW_EXTERNAL_FULL_ACCESS=1</code> is explicitly set.</p>
-<p>Configured targets use your existing local <code>agy</code> login and credentials. Supported model names include <code>Gemini 3.5 Flash (High)</code> as the default tier, <code>Gemini 3.5 Flash (Medium)</code>, <code>Gemini 3.5 Flash (Low)</code>, <code>Gemini 3.1 Pro (High)</code>, <code>Gemini 3.1 Pro (Low)</code>, <code>Claude Sonnet 4.6 (Thinking)</code>, <code>Claude Opus 4.6 (Thinking)</code>, and <code>GPT-OSS 120B (Medium)</code>.</p>
-<p><strong>Configuration Example:</strong></p>
-<pre><code class="language-bash">clio-coder configure --id agy-worker --runtime antigravity-code --model &quot;Gemini 3.5 Flash (High)&quot;
+<h3>5. Antigravity CLI — Experimental Local Delegation (Worker-Only)</h3>
+<p>The <code>antigravity-code</code> runtime is a local external delegation agent. It lets Clio ask an official Antigravity CLI (<code>agy</code>) installed and authenticated by the operator for research, world knowledge, a second opinion, or a bounded subtask. It is deliberately <strong>not</strong> a Gemini chat provider and can never become the Clio orchestrator.</p>
+<p>This integration is experimental and intended only for personal use on your own machine. Clio does not install Antigravity, initiate Google sign-in, copy credentials, or read the CLI&#39;s credential store. Install the <a href="https://antigravity.google/docs/cli/overview">official Antigravity CLI</a>, run <code>agy</code> yourself to sign in, and keep it current. Clio then starts that same local executable for an explicit delegation. The integration feature-probes the required structured catalog; if the installed CLI lacks it, Clio asks the operator to update <code>agy</code> rather than relying on a hard-coded minimum version.</p>
+<p>Clio sends one literal prompt as a <code>stream-json</code> stdin record, closes stdin, and validates agy&#39;s init, delta, and single terminal-result sequence, including the opaque conversation identifier and provider-reported token counts. Prompt text never appears in argv and slash-command expansion is disabled. <code>clio-coder targets --probe --target &lt;id&gt;</code> runs the non-generating <code>agy --output-format json models</code> command and distinguishes missing CLI, sign-in required, CLI update required, unavailable live catalog, and configured-model disappearance. A successful account catalog is authoritative. The five built-in slugs are cold-start hints only; live <code>{id,label}</code> rows and last-good cached labels are displayed without replacing the stable model slug, and cached fallback is marked stale.</p>
+<p>Antigravity remains an external agent loop: Clio cannot intercept each tool call. Every launch disables slash-command expansion and sets an explicit posture rather than inheriting mutable CLI defaults:</p>
+<table>
+<thead><tr><th>Clio autonomy</th><th>Antigravity launch posture</th></tr></thead>
+<tbody>
+<tr><td><code>read-only</code></td><td><code>--mode plan --sandbox</code></td></tr>
+<tr><td><code>auto-edit</code></td><td><code>--mode accept-edits</code></td></tr>
+<tr><td><code>suggest</code></td><td>Refused because a headless subprocess cannot pause for Clio approval</td></tr>
+<tr><td><code>full-auto</code></td><td>Capped at <code>accept-edits</code> unless the external full-access gate is explicitly enabled</td></tr>
+</tbody></table>
+<p>Only <code>full-auto</code> together with <code>CLIO_CODER_ALLOW_EXTERNAL_FULL_ACCESS=1</code> passes <code>--dangerously-skip-permissions</code>. Treat that as an external safety bypass: agy, not Clio&#39;s tool registry, controls the resulting filesystem, shell, network, prompts, and approvals. The gate is never enabled by onboarding. A <code>world-knowledge</code> dispatch remains read-only even if the caller requests a stronger posture; use another agent for mutation work.</p>
+<p><strong>Setup and verification:</strong></p>
+<pre><code class="language-bash"># Install using Google&#39;s instructions, then authenticate directly in the CLI.
+agy
+agy models
+
+# Use a live model slug, then create and bind a read-only research profile.
+clio-coder configure --id agy-research --runtime antigravity-code \
+  --model gemini-3.8-flash-high \
+  --agent-profile world-knowledge-external \
+  --bind-agent world-knowledge
+clio-coder targets --probe --target agy-research
 </code></pre>
 <p>Useful flags:</p>
 <table>
@@ -1415,6 +1442,10 @@ clio-coder configure --id claude-code-worker --runtime claude-code --model sonne
 <tr>
 <td><code>--agent-profile-model &lt;id&gt;</code></td>
 <td>Model to save for the named fleet profile.</td>
+</tr>
+<tr>
+<td><code>--bind-agent &lt;agentId&gt;</code></td>
+<td>Bind the agent to <code>--agent-profile</code> in the same configuration write; requires <code>--agent-profile</code>.</td>
 </tr>
 <tr>
 <td><code>--api-key-env &lt;VAR&gt;</code></td>
@@ -1546,6 +1577,10 @@ traces.</p>
 <li>runtime-discovered models from probes;</li>
 <li>known models from bundled/provider catalogs.</li>
 </ol>
+<p>Each row reports its stable model id, optional human label, and source
+(<code>live</code>, cached, configured/default, or catalog). When a live authoritative
+catalog exists, a disappeared configured model is unavailable rather than being
+resurrected by a descriptor hint.</p>
 <p>Capability badges in CLI output are compact:</p>
 <table>
 <thead>
@@ -1603,7 +1638,7 @@ traces.</p>
 </tr>
 <tr>
 <td>Subscription and worker harnesses</td>
-<td><code>openai-codex</code> for ChatGPT OAuth, <code>anthropic-max</code> for Anthropic OAuth, <code>claude-sdk</code> for Claude Agent SDK workers, <code>claude-code</code> for <code>claude -p</code> subprocess workers, and <code>antigravity-code</code> for <code>agy --print</code> subprocess workers</td>
+<td><code>openai-codex</code> for ChatGPT OAuth, <code>anthropic-max</code> for Anthropic OAuth, <code>claude-sdk</code> for Claude Agent SDK workers, <code>claude-code</code> for <code>claude -p</code> subprocess workers, and <code>antigravity-code</code> for structured <code>agy</code> external delegation</td>
 </tr>
 <tr>
 <td>Local native</td>

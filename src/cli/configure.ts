@@ -2,6 +2,7 @@ import { existsSync, readFileSync } from "node:fs";
 import { stdin as input, stdout as output } from "node:process";
 import { createInterface } from "node:readline/promises";
 import {
+	bindAgentProfileInSettings,
 	type ClioSettings,
 	readSettings,
 	removeTargetFromSettings,
@@ -113,6 +114,7 @@ Non-interactive flags:
                                    (mutually exclusive with --agent-profile)
   --agent-profile <name>           save this target as a named fleet profile
   --agent-profile-model <id>       model to use for --agent-profile
+  --bind-agent <agentId>           bind this --agent-profile to an agent
   --api-key-env <VAR>              read API key from this env var at call time
   --api-key <literal>              store API key in credentials.yaml
   --force                          save a model outside the runtime catalog, or one the
@@ -148,6 +150,7 @@ interface ParsedArgs {
 	workerModel?: string;
 	workerProfile?: string;
 	workerProfileModel?: string;
+	bindAgent?: string;
 	apiKeyEnv?: string;
 	apiKey?: string;
 	force: boolean;
@@ -236,6 +239,9 @@ function parseSetupArgs(argv: ReadonlyArray<string>): ParsedArgs {
 				break;
 			case "--agent-profile-model":
 				out.workerProfileModel = need();
+				break;
+			case "--bind-agent":
+				out.bindAgent = need();
 				break;
 			case "--api-key-env":
 				out.apiKeyEnv = need();
@@ -412,6 +418,10 @@ async function runNonInteractive(runtime: RuntimeDescriptor, args: ParsedArgs): 
 		printError("--agent-profile-model requires --agent-profile");
 		return 2;
 	}
+	if (args.bindAgent !== undefined && args.workerProfile === undefined) {
+		printError("--bind-agent requires --agent-profile");
+		return 2;
+	}
 	if (args.workerProfile !== undefined && args.workerProfile.trim().length === 0) {
 		printError("--agent-profile must be non-empty");
 		return 2;
@@ -489,7 +499,7 @@ async function runNonInteractive(runtime: RuntimeDescriptor, args: ParsedArgs): 
 	const model =
 		args.model ??
 		existing?.defaultModel ??
-		support.defaultModel ??
+		(inventory.source === "probe" ? wireModels[0] : support.defaultModel) ??
 		(support.modelSource === "catalog" ? undefined : wireModels[0]);
 	if (model === undefined && support.modelSource === "catalog") {
 		refuseCatalogSeededModel(runtime, support);
@@ -553,6 +563,7 @@ async function runNonInteractive(runtime: RuntimeDescriptor, args: ParsedArgs): 
 				descriptor,
 				args.workerProfileModel ?? descriptor.defaultModel ?? null,
 			);
+			if (args.bindAgent !== undefined) bindAgentProfileInSettings(target, args.bindAgent, args.workerProfile);
 		}
 	};
 	// Apply to the local snapshot for the summary below, then persist the same
@@ -561,7 +572,9 @@ async function runNonInteractive(runtime: RuntimeDescriptor, args: ParsedArgs): 
 	applyConfiguration(settings);
 	updateSettings(applyConfiguration);
 	const probe = await runtimeProbe(runtime, descriptor);
-	if (probe?.ok && probe.models) recordTargetModelSnapshot(descriptor, probe.models);
+	if (probe?.ok && probe.models) {
+		recordTargetModelSnapshot(descriptor, probe.models, probe.modelLabels ? { modelLabels: probe.modelLabels } : {});
+	}
 	printSummary(settings, descriptor, probe);
 	if (
 		runtime.auth === "oauth" &&
@@ -843,7 +856,7 @@ async function runTargetSetupInteractive(
 		...(existing?.litellm ? { litellm: existing.litellm } : {}),
 	});
 
-	if (runtime.kind === "http") {
+	if (runtime.kind === "http" || runtime.externalAgentLoop?.modelCatalog === "live-authoritative") {
 		inventory = await resolveSupportedWireModels(runtime, tentative, existing ?? undefined);
 	}
 	const wireModels = inventory.models;
@@ -851,12 +864,21 @@ async function runTargetSetupInteractive(
 	// --model here the way the non-interactive path does. It does need to stop
 	// offering the alphabetically first id as though it were the recommended one.
 	const catalogOrdered = support.modelSource === "catalog";
-	model = model ?? existing?.defaultModel ?? support.defaultModel ?? (catalogOrdered ? undefined : wireModels[0]);
+	model =
+		model ??
+		existing?.defaultModel ??
+		(inventory.source === "probe" ? wireModels[0] : support.defaultModel) ??
+		(catalogOrdered ? undefined : wireModels[0]);
 	if (wireModels.length > 0) {
 		process.stdout.write("\nSelectable models:\n");
 		for (const [index, wireModel] of wireModels.entries()) {
-			process.stdout.write(`  ${index + 1}. ${wireModel}${wireModel === model ? "  [default]" : ""}\n`);
+			const label = inventory.labels?.[wireModel];
+			process.stdout.write(
+				`  ${index + 1}. ${wireModel}${label && label !== wireModel ? ` — ${label}` : ""}${wireModel === model ? "  [default]" : ""}\n`,
+			);
 		}
+		if (inventory.source === "cache") process.stdout.write("  cached model snapshot (not verified in this run)\n");
+		if (inventory.probeError) process.stdout.write(`  live probe unavailable: ${inventory.probeError}\n`);
 		if (!model && catalogOrdered) {
 			process.stdout.write(`  listed in provider catalog order, which recommends none of them; pick one.\n`);
 		}

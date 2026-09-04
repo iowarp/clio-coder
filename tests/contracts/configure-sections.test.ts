@@ -413,6 +413,25 @@ function fakeAgentOnPath(root: string, binary: string): string {
 	return binDir;
 }
 
+/** A non-generating Antigravity fixture with the official JSON catalog shape. */
+function fakeAntigravityOnPath(root: string): string {
+	const binDir = join(root, "fake-agy-bin");
+	mkdirSync(binDir, { recursive: true });
+	const file = join(binDir, "agy");
+	writeFileSync(
+		file,
+		`#!/bin/sh
+if [ "$*" = "--output-format json models" ]; then
+  printf '%s\\n' '{"status":"SUCCESS","command":{"name":"models","data":{"models":[{"id":"agy-alpha","label":"Agy Alpha"},{"id":"agy-beta","label":"Agy Beta"}]}}}'
+  exit 0
+fi
+printf '%s\\n' 'agy 1.2.3'
+`,
+		{ encoding: "utf8", mode: 0o755 },
+	);
+	return binDir;
+}
+
 describe("contracts/configure-onboarding", () => {
 	it("takes a fresh home through the wizard on arrow keys alone and writes what it says it wrote", async () => {
 		const testEnv = unconfiguredEnv();
@@ -501,6 +520,42 @@ describe("contracts/configure-onboarding", () => {
 			const settings = readFileSync(testEnv.settingsFile, "utf8");
 			match(settings, /id: opencode/u);
 			match(settings, /toolGovernance: clio-coder-policy/u);
+		} finally {
+			await server.close();
+			testEnv.cleanup();
+		}
+	});
+
+	it("offers Antigravity only after a primary target and binds the read-only world-knowledge profile", async () => {
+		const testEnv = unconfiguredEnv();
+		const server = await modelServer();
+		const env = { ...testEnv.env, PATH: fakeAntigravityOnPath(testEnv.root) };
+		try {
+			const result = await runWizard(env, [
+				{ waitFor: "How will you connect Clio to a model?", keys: [DOWN, ENTER] },
+				{ waitFor: "Which runtime?", keys: [...stepsDownToRuntime("openai-compat"), ENTER] },
+				{ waitFor: "Target id", keys: [CLEAR_LINE, ...`primary-target`.split(""), ENTER] },
+				{ waitFor: "How should Clio get the API key?", keys: [ENTER] },
+				{ waitFor: "Where is the server?", keys: [CLEAR_LINE, ...server.url.split(""), ENTER] },
+				{ waitFor: "Which model?", keys: [ENTER] },
+				{ waitFor: "How hard should it think?", keys: [ENTER] },
+				{ waitFor: "Add your local Antigravity research colleague?", keys: [DOWN, ENTER] },
+				{ waitFor: "Antigravity research model", keys: [ENTER] },
+				{ waitFor: "Delegate to any of these?", keys: [ENTER], optional: true },
+			]);
+			strictEqual(result.code, 0, `${result.stderr}\n${plainText(result.transcript())}`);
+
+			const screen = plainText(result.transcript());
+			ok(screen.includes("optional, experimental, dispatch-only"), screen);
+			ok(screen.includes("agy-alpha — Agy Alpha"), screen);
+			const settings = readFileSync(testEnv.settingsFile, "utf8");
+			match(settings, /id: primary-target/u);
+			match(settings, /chat:[\s\S]*target: primary-target/u);
+			match(settings, /id: antigravity-code/u);
+			match(settings, /runtime: antigravity-code/u);
+			match(settings, /defaultModel: agy-alpha/u);
+			match(settings, /world-knowledge-external:[\s\S]*target: antigravity-code/u);
+			match(settings, /world-knowledge: world-knowledge-external/u);
 		} finally {
 			await server.close();
 			testEnv.cleanup();
@@ -655,6 +710,57 @@ describe("contracts/configure-onboarding: credential before reachability", () =>
 });
 
 describe("contracts/configure-sections", () => {
+	it("creates and binds an agent profile in the same noninteractive write", async () => {
+		const testEnv = isolatedEnv();
+		const server = await modelServer();
+		try {
+			const res = await captureConfigure(
+				[
+					"--id",
+					"external-research",
+					"--runtime",
+					"openai-compat",
+					"--url",
+					server.url,
+					"--model",
+					"alpha-1",
+					"--agent-profile",
+					"world-knowledge-external",
+					"--bind-agent",
+					"world-knowledge",
+				],
+				testEnv.env,
+			);
+			strictEqual(res.code, 0, res.stderr);
+			const settings = readFileSync(testEnv.settingsFile, "utf8");
+			match(settings, /world-knowledge-external:/u);
+			match(settings, /world-knowledge: world-knowledge-external/u);
+			match(settings, /target: external-research/u);
+			match(settings, /model: alpha-1/u);
+
+			const refused = await captureConfigure(
+				[
+					"--id",
+					"unbound",
+					"--runtime",
+					"openai-compat",
+					"--url",
+					server.url,
+					"--model",
+					"alpha-1",
+					"--bind-agent",
+					"world-knowledge",
+				],
+				testEnv.env,
+			);
+			strictEqual(refused.code, 2);
+			match(refused.stderr, /--bind-agent requires --agent-profile/u);
+		} finally {
+			await server.close();
+			testEnv.cleanup();
+		}
+	});
+
 	it("emits the effective settings as JSON, unchanged by the flag", async () => {
 		const testEnv = isolatedEnv();
 		try {
