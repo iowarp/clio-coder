@@ -47,6 +47,8 @@ export interface OpenAICompatToolCallScript {
 
 export interface OpenAICompatFixtureOptions {
 	models?: Array<Record<string, unknown> & { id: string }>;
+	/** Fail the first streaming requests before following the normal script. */
+	initialErrors?: { count: number; status: number; message: string };
 	/** Split a text reply into provider-visible SSE deltas for pacing/ordering tests. */
 	replyChunks?: readonly string[];
 	/** Optional deterministic delay between text chunks. */
@@ -94,6 +96,7 @@ export async function startOpenAICompatFixture(
 ): Promise<OpenAICompatFixture> {
 	const models = options.models ?? [{ id: "mock-model", object: "model" }];
 	const requests: Array<Record<string, unknown>> = [];
+	let streamingRequests = 0;
 	const server = createServer(async (req: IncomingMessage, res: ServerResponse) => {
 		if (req.method === "GET" && req.url === "/v1/models") {
 			res.writeHead(200, { "content-type": "application/json" });
@@ -118,6 +121,12 @@ export async function startOpenAICompatFixture(
 					choices: [{ index: 0, message: { role: "assistant", content: reply }, finish_reason: "stop" }],
 				}),
 			);
+			return;
+		}
+		streamingRequests += 1;
+		if (options.initialErrors !== undefined && streamingRequests <= options.initialErrors.count) {
+			res.writeHead(options.initialErrors.status, { "content-type": "application/json" });
+			res.end(JSON.stringify({ error: { message: options.initialErrors.message, type: "fixture_error" } }));
 			return;
 		}
 		res.writeHead(200, {
