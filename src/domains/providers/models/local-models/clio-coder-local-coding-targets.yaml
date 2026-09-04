@@ -1704,15 +1704,16 @@
         card's dial is reasoning strength with levels low, medium, high, and
         xhigh, set through the system prompt as "Reasoning strength: <value>",
         and the router passes it as chat_template_kwargs.reasoning_strength
-        pinned to xhigh. There is no off level on that scale, and no
-        ThinkingMechanism in this engine emits that key:
-        resolveRequestCapability populates chat_template_kwargs only with
-        enable_thinking or, on the harmony path, reasoning_effort. Encoding this
-        family as on-off would put a flag on the wire that this template does
-        not read while the TUI showed a working off/on dial, which is the
-        failure qwopus3.5-9b-v3 above was reclassified to stop. A real dial for
-        this family needs a per-family kwarg key in the engine, not a catalog
-        edit.
+        pinned to xhigh. There is no off level on that scale, so the family
+        stays always-on: encoding it as on-off would put an enable_thinking
+        flag on the wire that this template does not read while the TUI showed
+        a working off/on dial, which is the failure qwopus3.5-9b-v3 above was
+        reclassified to stop. The strength dial itself is driven per request:
+        thinking.chatTemplateKwargs.byLevel below maps Clio's thinking level to
+        chat_template_kwargs.reasoning_strength on llama.cpp, and LM Studio,
+        which drops chat_template_kwargs, reports that kwarg as undeliverable
+        instead of sending it. No per-level output has been measured yet, so
+        the always-on classification above stands until one is.
 
         Sampler provenance: temperature 1.0, top_p 0.95 and top_k 64 are the
         card's Best Practices values and the router preset uses the same three.
@@ -1732,7 +1733,7 @@
     gpuTiers:
       "32gb": "Agent-role target on a 32 GB card: UD-Q4_K_XL weights, q8_0 KV at ctx=131072, parallel=1, with the Q8_0 perception encoder and the DFlash drafter both resident."
     runtimePreference:
-      llamaCpp: "OpenAI-compatible chat completions with --jinja. Set the reasoning budget at launch with --chat-template-kwargs {\"reasoning_strength\": \"...\"}; there is no per-request field Clio can send for it."
+      llamaCpp: "OpenAI-compatible chat completions with --jinja. Clio drives the reasoning budget per request through chat_template_kwargs.reasoning_strength, mapped from the thinking level by thinking.chatTemplateKwargs.byLevel; a --chat-template-kwargs launch value is only the server default for requests that send none."
       openaiCompat: "Use when a gateway fronts the same llama.cpp chat-completions surface. Expect a reasoning trace on every response whatever the configured thinking level says."
     llamaCpp:
       ctxSize: 131072
@@ -1751,7 +1752,7 @@
       mechanism: always-on
       chatTemplateKwargs:
         byLevel:
-          # Card: reasoning strength low|medium|high|xhigh (scratchpad/catalog/models/unsloth-Muse-Glimmer-30B.md:35). The per-family kwarg key the note above asked for.
+          # Card: reasoning strength low|medium|high|xhigh (scratchpad/catalog/models/unsloth-Muse-Glimmer-30B.md:35). The per-family kwarg key the note above describes.
           key: reasoning_strength
           values:
             low: low
@@ -1763,9 +1764,10 @@
       guidance: |
         Muse Glimmer reasons on every turn and its strength scale has no off
         level, so Clio shows the dial as forced and budgets for a reasoning
-        preamble ahead of every answer. Change the amount of thinking at the
-        server, with the reasoning_strength chat-template kwarg; a per-request
-        thinking level cannot reach this model.
+        preamble ahead of every answer. The thinking level still sets how much
+        it thinks: on llama.cpp Clio sends reasoning_strength (low, medium,
+        high, xhigh) as a chat-template kwarg per request. LM Studio drops that
+        kwarg, so there the strength stays at the server's own default.
     serving: "Meta Superintelligence Lab Muse-Glimmer-30B, a dense 29.6B causal transformer with a ~1.8B ViT-G/14 perception encoder, interleaved local and global attention with a 2048 sliding window, and a DFlash block-diffusion drafter that proposes 16 tokens per forward pass. Card context length is 131072. Input is text plus image; the mini router additionally tags video, which the card does not claim, so the catalog follows the card."
 
 # ThinkingCap is a brevity finetune of Qwen3.6-27B and not the base model, so it

@@ -62,7 +62,7 @@ const mustNotResolveTo = [
 	{ id: "qwopus3.6-49b-moe", family: "qwopus3.6-27b-v1-preview" },
 ] as const;
 
-function resolveOn(runtimeId: string, modelId: string, level: "off" | "medium") {
+function resolveOn(runtimeId: string, modelId: string, level: "off" | "medium" | "high") {
 	const kbHit = kb.lookup(modelId);
 	ok(kbHit, `${modelId} resolves to no knowledge-base family`);
 	return resolveModelRuntimeCapabilities({
@@ -138,6 +138,20 @@ describe("local model family resolution", () => {
 		// carries the card's reasoning_strength on the wire instead of nothing.
 		strictEqual(resolved.request.chatTemplateKwargs?.enable_thinking, undefined);
 		strictEqual(typeof resolved.request.chatTemplateKwargs?.reasoning_strength, "string");
+	});
+
+	it("drives the muse reasoning_strength dial per request through chatTemplateKwargs.byLevel", () => {
+		// The catalog note for this family says the dial is per request on
+		// llama.cpp and undeliverable on LM Studio; this pins both halves so
+		// the text cannot drift back to "there is no per-request field".
+		const high = resolveOn("llamacpp", "muse-30b-dense", "high");
+		strictEqual(high.thinking.mechanism, "always-on");
+		strictEqual(high.request.chatTemplateKwargs?.reasoning_strength, "high");
+		strictEqual(high.request.reasoningEffort, undefined);
+		const lmstudio = resolveOn("lmstudio", "muse-30b-dense", "high");
+		strictEqual(lmstudio.request.chatTemplateKwargs?.reasoning_strength, undefined);
+		ok(lmstudio.request.undeliverableChatTemplateKwargs?.keys.includes("reasoning_strength"));
+		strictEqual(lmstudio.request.undeliverableChatTemplateKwargs?.declaredUnsupported, true);
 	});
 
 	it("declares each match pattern in exactly one family", () => {
