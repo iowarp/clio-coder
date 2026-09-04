@@ -1,23 +1,29 @@
 /**
  * Abbreviate a wire model id for chips and dashboards without amputating a
- * version suffix. Whole dash-separated parts are kept while the joined result
- * stays within 18 characters, so `claude-sonnet-5` and `claude-opus-4-8`
- * survive intact and `qwen3-coder-30b-a3b-instruct` collapses to
- * `qwen3-coder-30b`. A single part longer than 18 characters is hard-clipped.
+ * meaningful placement prefix or version suffix. `dynamo/qwen3.8-27b` remains
+ * visible as selected; only the leaf is shortened when the complete route is
+ * wider than 24 characters.
  */
 export function abbreviateModelId(modelId: string | null | undefined): string {
-	const base = (modelId ?? "").trim().split("/").filter(Boolean).pop() ?? "";
+	const segments = (modelId ?? "").trim().split("/").filter(Boolean);
+	const base = segments.pop() ?? "";
 	if (base.length === 0) return "model";
+	const prefix = segments[0];
+	const maxLeaf = prefix ? Math.max(8, 24 - prefix.length - 1) : 18;
 	const parts = base.split("-").filter((part) => part.length > 0);
-	if (parts.length <= 1) return base.length > 18 ? base.slice(0, 18) : base;
-	const kept: string[] = [];
-	for (const part of parts) {
-		const next = [...kept, part].join("-");
-		if (kept.length > 0 && next.length > 18) break;
-		kept.push(part);
+	let leaf: string;
+	if (parts.length <= 1) leaf = base.length > maxLeaf ? base.slice(0, maxLeaf) : base;
+	else {
+		const kept: string[] = [];
+		for (const part of parts) {
+			const next = [...kept, part].join("-");
+			if (kept.length > 0 && next.length > maxLeaf) break;
+			kept.push(part);
+		}
+		const joined = kept.join("-");
+		leaf = joined.length > maxLeaf ? joined.slice(0, maxLeaf) : joined;
 	}
-	const joined = kept.join("-");
-	return joined.length > 18 ? joined.slice(0, 18) : joined;
+	return prefix ? `${prefix}/${leaf}` : leaf;
 }
 
 export interface TargetLabelOptions {

@@ -72,7 +72,7 @@ Start one local runtime and register exactly one target first. Clio integrates w
 - **[llama.cpp](https://github.com/ggerganov/llama.cpp):** A minimal C/C++ implementation for local LLM inference. Target runtime ID: `llamacpp`.
 - **[vLLM](https://github.com/vllm-project/vllm):** A high-throughput and memory-efficient LLM serving engine. Target runtime ID: `vllm`.
 - **[SGLang](https://github.com/sgl-project/sglang):** A fast serving framework for large language models. Target runtime ID: `sglang`.
-- **[LiteLLM](https://docs.litellm.ai):** An OpenAI-compatible gateway that publishes model aliases across multiple inference endpoints. Target runtime ID: `litellm`.
+- **[LiteLLM](https://docs.litellm.ai):** An OpenAI-compatible gateway that publishes routed models across multiple inference endpoints. Target runtime ID: `litellm`.
 
 Common local runtime IDs and default URLs are:
 
@@ -235,24 +235,26 @@ Target capability overrides may include `chat`, `tools`, `toolCallFormat`, `reas
 ### LiteLLM gateways
 
 Register LiteLLM with its first-class runtime so discovery reads
-`/v1/model/info` rather than treating semantic aliases as bare OpenAI models:
+`/v1/model/info` rather than treating routed names as bare OpenAI models. For a
+gateway where placement matters, publish one deterministic `node/model` name
+per deployment instead of task categories such as `chat` or `code`:
 
 ```yaml
 targets:
   - id: ai-gateway
     runtime: litellm
     url: http://gateway.example:4000
-    defaultModel: chat
+    defaultModel: dynamo/qwen3.8-27b
     auth:
       apiKeyEnvVar: CLIO_AI_GATEWAY_KEY
     litellm:
       request:
         tags: [homelab]
         sendSessionId: true
-        # Optional proxy overrides; omit them to keep server policy.
+        # Optional proxy overrides. Keep retries at zero for physical routes.
         timeoutSeconds: 300
         streamTimeoutSeconds: 180
-        numRetries: 1
+        numRetries: 0
 ```
 
 Clio adds the `clio-coder` request tag and forwards its stable session id by
@@ -260,17 +262,23 @@ default. Explicit `x-litellm-*` headers on the target or request take
 precedence. Set `sendSessionId: false` when the gateway must not correlate calls.
 The timeout values and `numRetries` become LiteLLM request headers and override
 the proxy's defaults only for this target. Clio disables the OpenAI SDK's
-client-side retry layer on LiteLLM requests, leaving retries and fallbacks with
-the gateway where they are visible in response headers; Clio's operator-visible
-turn and fleet recovery policies still apply above the request.
+client-side retry layer on LiteLLM requests. A failed interactive LiteLLM call
+also bypasses Clio's transient retry ladder even when `chat.retry` is enabled:
+the provider error names the selected route and tells the operator to choose a
+different one with `/model`. Configure `numRetries: 0` and no server fallback
+maps when `node/model` is a placement guarantee. Context-overflow compaction is
+still a local correction, not a route substitution.
 
 For every response, Clio records LiteLLM's selected model group, physical model,
 sanitized upstream host, fallback/retry counts, and proxy timing in the session
 and worker receipt. A nonzero fallback or retry is also announced in the live
-transcript. If an alias has multiple deployments, discovered capabilities are
-the conservative intersection and numerical limits are the smallest limits
-published by every deployment, so routing cannot select a weaker backend than
-Clio planned for.
+transcript, making server-policy drift visible. Self-describing physical routes
+are summarized in probe diagnostics instead of expanding into a giant list of
+tautological mappings. If a genuine alias has multiple deployments, discovered
+capabilities are the conservative intersection and numerical limits are the
+smallest limits published by every deployment, so routing cannot select a
+weaker backend than Clio planned for. If `/v1/model/info` omits a capability,
+Clio does not invent it; that includes structured-output support.
 
 ### `maxConcurrentRequests`
 

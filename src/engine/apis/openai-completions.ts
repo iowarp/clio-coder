@@ -17,7 +17,11 @@ import {
 } from "@earendil-works/pi-ai";
 import { openAICompletionsApi } from "@earendil-works/pi-ai/api/openai-completions.lazy";
 import type { BackendCompletionTimings, BackendTimingsSource } from "../../core/cache-telemetry.js";
-import { type GatewayRoutingObservation, liteLLMGatewayRoutingFromHeaders } from "../../core/gateway-routing.js";
+import {
+	type GatewayRoutingObservation,
+	liteLLMGatewayRoutingFromHeaders,
+	liteLLMRouteFailureMessage,
+} from "../../core/gateway-routing.js";
 import type { ResponseModelIdObservation } from "../../core/response-model-id.js";
 import {
 	type AppliedThinking,
@@ -280,6 +284,31 @@ function withResponseModelIdCapture<TOptions extends StreamOptions>(
 		}
 	})();
 	return annotated;
+}
+
+/** Make a failed physical gateway route final and useful to an operator. */
+function withLiteLLMRouteFailureAdvice(
+	model: Model<"openai-completions">,
+	source: AssistantMessageEventStream,
+): AssistantMessageEventStream {
+	const metadata = runtimeMetadata(model);
+	if (metadata?.runtimeId !== "litellm") return source;
+	const advised = createAssistantMessageEventStream();
+	(async () => {
+		try {
+			for await (const event of source) {
+				if (event.type === "error") {
+					event.error.errorMessage = liteLLMRouteFailureMessage(event.error.errorMessage, metadata.targetId, model.id);
+				}
+				advised.push(event as AssistantMessageEvent);
+			}
+			advised.end();
+		} catch (err) {
+			const message = err instanceof Error ? err.message : String(err);
+			throw new Error(liteLLMRouteFailureMessage(message, metadata.targetId, model.id));
+		}
+	})();
+	return advised;
 }
 
 function samplingParamsFromProfile(profile: SamplingProfile): Record<string, unknown> {
@@ -607,7 +636,8 @@ function hasHeader(headers: Readonly<Record<string, unknown>> | undefined, name:
  * The OpenAI SDK otherwise retries twice below Clio's visible recovery loop and
  * below LiteLLM's own router, multiplying a single failure into several hidden
  * attempts. Gateway requests use zero client retries by default; optional
- * `numRetries` controls the proxy router itself, where fallbacks are observable.
+ * `numRetries` controls the proxy router itself, where any configured attempts
+ * remain observable. A physical-routing gateway should leave it at zero.
  */
 function withLiteLLMRequestOptions<TOptions extends StreamOptions>(
 	model: Model<"openai-completions">,
@@ -631,8 +661,9 @@ function withLiteLLMRequestOptions<TOptions extends StreamOptions>(
 	return {
 		...options,
 		headers,
-		// Let the gateway perform and report retries/fallbacks instead of hiding
-		// duplicate attempts inside the OpenAI SDK beneath Clio's retry notices.
+		// Never hide duplicate attempts inside the OpenAI SDK beneath Clio's
+		// operator-visible failure. The gateway may still be configured to retry,
+		// but physical-routing deployments should keep that policy at zero too.
 		maxRetries: options.maxRetries ?? 0,
 	} as TOptions;
 }
@@ -983,14 +1014,17 @@ export const openAICompletionsApiProvider: EngineApiProvider<"openai-completions
 				stripSentinelsFromStream(
 					stripNeverReasoningFromStream(
 						filterGemmaChannelStream(
-							withResponseModelIdCapture(model, withGatewayOptions, (capturedOptions) =>
-								withLocalResidency(
-									model,
-									{
-										...(options?.apiKey !== undefined ? { apiKey: options.apiKey } : {}),
-										...(options?.signal !== undefined ? { signal: options.signal } : {}),
-									},
-									(requestModel) => piOpenAICompletions.stream(requestModel, effectiveContext, capturedOptions),
+							withLiteLLMRouteFailureAdvice(
+								model,
+								withResponseModelIdCapture(model, withGatewayOptions, (capturedOptions) =>
+									withLocalResidency(
+										model,
+										{
+											...(options?.apiKey !== undefined ? { apiKey: options.apiKey } : {}),
+											...(options?.signal !== undefined ? { signal: options.signal } : {}),
+										},
+										(requestModel) => piOpenAICompletions.stream(requestModel, effectiveContext, capturedOptions),
+									),
 								),
 							),
 							usesGemmaChannelMarkers(resolved.modelId),
@@ -1017,14 +1051,17 @@ export const openAICompletionsApiProvider: EngineApiProvider<"openai-completions
 				stripSentinelsFromStream(
 					stripNeverReasoningFromStream(
 						filterGemmaChannelStream(
-							withResponseModelIdCapture(model, withGatewayOptions, (capturedOptions) =>
-								withLocalResidency(
-									model,
-									{
-										...(options?.apiKey !== undefined ? { apiKey: options.apiKey } : {}),
-										...(options?.signal !== undefined ? { signal: options.signal } : {}),
-									},
-									(requestModel) => piOpenAICompletions.streamSimple(requestModel, effectiveContext, capturedOptions),
+							withLiteLLMRouteFailureAdvice(
+								model,
+								withResponseModelIdCapture(model, withGatewayOptions, (capturedOptions) =>
+									withLocalResidency(
+										model,
+										{
+											...(options?.apiKey !== undefined ? { apiKey: options.apiKey } : {}),
+											...(options?.signal !== undefined ? { signal: options.signal } : {}),
+										},
+										(requestModel) => piOpenAICompletions.streamSimple(requestModel, effectiveContext, capturedOptions),
+									),
 								),
 							),
 							usesGemmaChannelMarkers(resolved.modelId),

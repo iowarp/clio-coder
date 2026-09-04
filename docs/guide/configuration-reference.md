@@ -165,7 +165,7 @@ Precedence, where several surfaces set the same value: a one-run CLI flag beats 
 | `targets[].lmstudio.request.draftModel` |  | Sends `draft_model` on OpenAI-compatible chat requests for speculative decoding (model id string). |  |
 | `targets[].lmstudio.request.reasoning` |  | How `reasoning_effort` is sent: `auto` maps the active thinking level, `off` sends `none`, `on` sends `low`, `low`/`medium`/`high` are literal but clamped to the efforts the model advertises. |  |
 | `targets[].lmstudio.request.ttlSeconds` |  | Sends `ttl` on chat requests so LM Studio auto-evicts the model after this idle time in seconds (integer >= 1). |  |
-| `targets[].litellm.request.numRetries` |  | Optional LiteLLM router retry override sent as `x-litellm-num-retries` (integer >= 0); omit it to keep gateway policy. The OpenAI SDK retry layer remains disabled for LiteLLM requests. |  |
+| `targets[].litellm.request.numRetries` |  | Optional LiteLLM router retry override sent as `x-litellm-num-retries` (integer >= 0); use `0` for deterministic physical routes. The OpenAI SDK and Clio interactive transient-retry layers remain disabled for LiteLLM failures. |  |
 | `targets[].litellm.request.sendSessionId` | `true` | Whether Clio forwards its stable session id as `x-litellm-session-id` (boolean); applies when the next LiteLLM agent runtime is created. |  |
 | `targets[].litellm.request.streamTimeoutSeconds` |  | Optional LiteLLM streaming timeout override sent as `x-litellm-stream-timeout` (number from 0.001 through 86400); omit it to keep gateway policy. |  |
 | `targets[].litellm.request.tags` | `[clio-coder]` | Additional LiteLLM request tags (list of non-empty strings without commas); Clio always adds `clio-coder`. |  |

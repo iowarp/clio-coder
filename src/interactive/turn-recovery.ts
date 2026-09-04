@@ -217,6 +217,14 @@ export function createTurnRecovery(deps: TurnRecoveryDeps): TurnRecovery {
 		text: string,
 		initialFailure: TerminalAssistantFailure,
 	): Promise<boolean> => {
+		// A LiteLLM model id can be a deliberate physical route. Retrying it in
+		// Clio obscures the failure, delays operator recovery, and can multiply
+		// attempts beneath a gateway. Preserve and emit the one terminal failure;
+		// the operator can choose another advertised route with /model.
+		if (agentRuntime.runtimeId === "litellm") {
+			ensureFailureVisibleAndPersisted(initialFailure);
+			return true;
+		}
 		const settings = deps.retrySettings();
 		if (!settings.enabled || settings.maxRetries <= 0) return false;
 		if (initialFailure.stopReason === "aborted" || !isRetryableErrorMessage(initialFailure.errorMessage)) return false;

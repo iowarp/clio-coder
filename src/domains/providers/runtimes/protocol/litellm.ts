@@ -4,11 +4,11 @@
  * This is a separate runtime from `openai-compat` rather than a target flag on
  * it, because a gateway answers two questions the generic protocol cannot.
  *
- * First, capability discovery. A gateway publishes semantic aliases: the client
- * asks for `code` and the proxy decides that means `katcoder2.5-35b-moe` on one
- * particular host. LiteLLM's `/v1/models` is the plain OpenAI listing, so every
- * row flattens to a bare id and the context window, tool support, and modality
- * of the model actually behind the alias are all erased. Reached over
+ * First, capability discovery. A gateway may publish aliases or truthful
+ * physical names such as `dynamo/qwen3.8-27b`. LiteLLM's `/v1/models` is the
+ * plain OpenAI listing, so every row flattens to a bare id and the context
+ * window, tool support, and modality of the model behind it are all erased.
+ * Reached over
  * `openai-compat`, a 262k tool-calling coder is indistinguishable from a 4k
  * chat toy, and Clio plans the session against its own assumed floor. LiteLLM
  * publishes the real numbers on `/v1/model/info` instead, which is what this
@@ -26,7 +26,8 @@
  * and rejected HTTP 400 by LM Studio, and the same prompt with no
  * `response_format` returned plain prose. `drop_params: true` did not strip
  * either spelling. The standard `json_schema` dialect is therefore the one that
- * holds across every upstream, and it is what this runtime declares.
+ * holds across every measured upstream, and a gateway must publish that fact
+ * explicitly per route in `model_info` before Clio relies on it.
  */
 
 import { CLIO_MIN_CONTEXT_WINDOW, CLIO_MIN_MAX_OUTPUT_TOKENS } from "../../../../core/context-floor.js";
@@ -55,7 +56,7 @@ const defaultCapabilities: CapabilityFlags = {
 	embeddings: false,
 	rerank: false,
 	fim: false,
-	structuredOutputs: "json-schema",
+	structuredOutputs: "none",
 	contextWindow: CLIO_MIN_CONTEXT_WINDOW,
 	maxTokens: CLIO_MIN_MAX_OUTPUT_TOKENS,
 };
@@ -317,9 +318,19 @@ const litellmRuntime: RuntimeDescriptor = {
 		if (configured && !catalog.models.includes(configured)) {
 			notes.push(`configured model '${configured}' is not in the gateway catalog`);
 		}
-		// Naming the physical model behind each alias is the difference between a
-		// catalog an operator can audit and a list of words.
-		const routed = Object.entries(catalog.deployments)
+		// A node/model catalog already names placement. Summarize those one-to-one
+		// routes instead of flooding target diagnostics with dozens of tautologies;
+		// retain the explicit mapping for genuine aliases and multi-deployments.
+		const routeEntries = Object.entries(catalog.deployments);
+		const physical = routeEntries.filter(([alias, deployments]) => {
+			const slash = alias.indexOf("/");
+			if (slash <= 0 || deployments.length !== 1) return false;
+			const upstream = deployments[0]?.model.replace(/^openai\//u, "");
+			return upstream === alias.slice(slash + 1);
+		});
+		if (physical.length > 0) notes.push(`physical routes: ${physical.length} node/model names map one-to-one`);
+		const routed = routeEntries
+			.filter(([alias]) => !physical.some(([physicalAlias]) => physicalAlias === alias))
 			.map(([alias, deployments]) => {
 				const models = [...new Set(deployments.map((deployment) => deployment.model))];
 				return `${alias}=${models.join("|")}`;

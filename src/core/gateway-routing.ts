@@ -22,6 +22,24 @@ export interface LiteLLMGatewayRoutingObservation {
 
 export type GatewayRoutingObservation = LiteLLMGatewayRoutingObservation;
 
+/**
+ * Preserve the provider's diagnostic while making Clio's failure policy
+ * explicit and actionable. LiteLLM targets deliberately do not enter Clio's
+ * transient retry ladder: a named route is an operator choice, not permission
+ * to substitute another model behind their back.
+ */
+export function liteLLMRouteFailureMessage(
+	errorMessage: string | null | undefined,
+	targetId: string,
+	modelId: string,
+): string {
+	const providerMessage = errorMessage?.trim() || "LiteLLM request failed.";
+	const advice =
+		`LiteLLM route '${modelId}' on target '${targetId}' failed. ` +
+		"Clio did not retry or substitute another model; select a different route with /model, then resend.";
+	return providerMessage.includes(advice) ? providerMessage : `${providerMessage}\n\n${advice}`;
+}
+
 interface HeaderReader {
 	get(name: string): string | null;
 }

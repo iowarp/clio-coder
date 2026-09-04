@@ -226,7 +226,7 @@ describe("provider transport boundary", () => {
 		deepStrictEqual(done.message.content, [{ type: "text", text: "wire-ok" }]);
 	});
 
-	it("uses LiteLLM as the retry authority and records its physical route", async () => {
+	it("applies LiteLLM request controls and records its physical route", async () => {
 		const model = litellmRuntime.synthesizeModel(
 			{
 				id: "blade",
@@ -241,7 +241,7 @@ describe("provider transport boundary", () => {
 					},
 				},
 			},
-			"chat",
+			"dynamo/qwen3.8-27b",
 			null,
 		) as Model<"openai-completions">;
 		let requestHeaders = new Headers();
@@ -254,7 +254,7 @@ describe("provider transport boundary", () => {
 				requestHeaders = new Headers(init?.headers);
 				return completionResponse("gateway-ok", {
 					"x-litellm-call-id": "call-1",
-					"x-litellm-model-group": "chat",
+					"x-litellm-model-group": "dynamo/qwen3.8-27b",
 					"x-litellm-model-name": "openai/qwen3.8-27b",
 					"x-litellm-model-api-base": "http://user:secret@dynamo.example:1234/v1?token=secret",
 					"x-litellm-model-id": "deployment-1",
@@ -276,7 +276,7 @@ describe("provider transport boundary", () => {
 		deepStrictEqual(done.message.gatewayRouting, {
 			gateway: "litellm",
 			callId: "call-1",
-			modelGroup: "chat",
+			modelGroup: "dynamo/qwen3.8-27b",
 			modelName: "openai/qwen3.8-27b",
 			apiBaseHost: "dynamo.example:1234",
 			deploymentId: "deployment-1",
@@ -286,16 +286,17 @@ describe("provider transport boundary", () => {
 		});
 	});
 
-	it("does not stack OpenAI SDK retries beneath the LiteLLM router", async () => {
+	it("fails a LiteLLM physical route once with an actionable model-selection error", async () => {
 		const model = litellmRuntime.synthesizeModel(
 			{ id: "blade", runtime: "litellm", url: "http://blade.example:4000" },
-			"chat",
+			"dynamo/qwen3.8-27b",
 			null,
 		) as Model<"openai-completions">;
 		let requests = 0;
+		let failure = "";
 		const context = { messages: [{ role: "user", content: "hello", timestamp: 0 }] } as unknown as Context;
 		try {
-			for await (const _event of openAICompletionsApiProvider.streamSimple(model, context, {
+			for await (const event of openAICompletionsApiProvider.streamSimple(model, context, {
 				apiKey: "test-key",
 				fetch: async () => {
 					requests += 1;
@@ -305,12 +306,21 @@ describe("provider transport boundary", () => {
 					});
 				},
 			})) {
-				// The adapter may represent the terminal provider failure as an event.
+				if (event.type === "error") failure = event.error.errorMessage ?? "";
 			}
-		} catch {
-			// Or the event stream may reject. The transport-attempt count is the contract here.
+		} catch (error) {
+			failure = error instanceof Error ? error.message : String(error);
 		}
 		strictEqual(requests, 1);
+		ok(failure.includes("unavailable"), failure);
+		ok(failure.includes("dynamo/qwen3.8-27b"), failure);
+		ok(failure.includes("target 'blade'"), failure);
+		ok(failure.includes("/model"), failure);
+		ok(failure.includes("did not retry or substitute"), failure);
+	});
+
+	it("does not claim structured output when LiteLLM publishes no capability metadata", () => {
+		strictEqual(litellmRuntime.defaultCapabilities.structuredOutputs, "none");
 	});
 
 	it("aggregates a LiteLLM alias to capabilities guaranteed by every deployment", () => {
