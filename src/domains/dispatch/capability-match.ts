@@ -76,6 +76,7 @@ const REPORTING_CONTRACT_KINDS: ReadonlySet<ResultContract["kind"]> = new Set([
 	"scout-report",
 	"verifier-report",
 	"research-report",
+	"world-knowledge-report",
 	"provenance-report",
 	"debugger-report",
 	"oracle-report",

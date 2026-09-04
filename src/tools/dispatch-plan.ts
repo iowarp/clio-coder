@@ -637,6 +637,7 @@ const RESULT_CONTRACT_KINDS = new Set<ResultContract["kind"]>([
 	"council-report",
 	"debugger-report",
 	"research-report",
+	"world-knowledge-report",
 	"mutation-report",
 	"provenance-report",
 	"oracle-report",

@@ -268,7 +268,7 @@ describe("compact prompt contracts", () => {
 	});
 
 	it("holds fixed compact main and worker token budgets", () => {
-		strictEqual(builtinRecipes.length, 13, "the fixed Fleet fixture requires the 13 shipped recipes");
+		strictEqual(builtinRecipes.length, 14, "the fixed Fleet fixture requires the 14 shipped recipes");
 		const mainToolNames = ALL_TOOL_NAMES.filter((name) => name !== ToolNames.Ledger);
 		strictEqual(mainToolNames.length, 20);
 		const main = mainPrompt({ providerSupportsTools: true, toolNames: mainToolNames });
@@ -282,8 +282,8 @@ describe("compact prompt contracts", () => {
 			.join("{SETTINGS}")
 			.split(dirs.state)
 			.join("{STATE}");
-		strictEqual(normalizedMain.length, 10_504);
-		strictEqual(Math.ceil(normalizedMain.length / 4), 2_626);
+		strictEqual(normalizedMain.length, 10_674);
+		strictEqual(Math.ceil(normalizedMain.length / 4), 2_669);
 		ok(normalizedMain.length <= 10_800, `main prompt grew to ${normalizedMain.length} chars`);
 		ok(
 			Math.ceil(normalizedMain.length / 4) <= 2_700,
@@ -309,7 +309,7 @@ describe("compact prompt contracts", () => {
 				skills: 181,
 				safety: 266,
 				"tool-contract": 635,
-				fleet: 472,
+				fleet: 514,
 				"retrieval-hints": 36,
 				runtime: 43,
 			},
