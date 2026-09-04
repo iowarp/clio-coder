@@ -1,5 +1,5 @@
-import { ok, strictEqual } from "node:assert/strict";
-import { mkdtempSync, rmSync, writeFileSync } from "node:fs";
+import { deepStrictEqual, match, ok, strictEqual } from "node:assert/strict";
+import { lstatSync, mkdirSync, mkdtempSync, rmSync, symlinkSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { PassThrough } from "node:stream";
@@ -7,15 +7,33 @@ import { describe, it } from "node:test";
 
 import { createLifecyclePresenter, formatBytes, measurePath, shortenPath } from "../../src/cli/lifecycle-presenter.js";
 
+/**
+ * Drop SGR escapes so a rail assertion compares glyphs, not colors. A fresh
+ * regex per call: a shared `/g` one carries `lastIndex` between tests.
+ */
+function stripAnsi(text: string): string {
+	return text.replace(new RegExp(`${String.fromCharCode(27)}\\[[0-9;]*m`, "gu"), "");
+}
+
+/** Collect everything a presenter writes, so a test can assert the whole transcript. */
+function capture(): { stream: PassThrough; text: () => string } {
+	const stream = new PassThrough();
+	let captured = "";
+	stream.on("data", (chunk) => {
+		captured += chunk.toString("utf8");
+	});
+	return { stream, text: () => captured };
+}
+
 describe("contracts/lifecycle-presenter", () => {
-	it("formats byte sizes correctly across orders of magnitude", () => {
+	it("formats byte sizes with one decimal above the byte range", () => {
 		strictEqual(formatBytes(0), "0 B");
 		strictEqual(formatBytes(512), "512 B");
-		strictEqual(formatBytes(1024), "1.00 KB");
+		strictEqual(formatBytes(1024), "1.0 KB");
 		strictEqual(formatBytes(12888), "12.6 KB");
-		strictEqual(formatBytes(1048576), "1.00 MB");
+		strictEqual(formatBytes(1048576), "1.0 MB");
 		strictEqual(formatBytes(21181235), "20.2 MB");
-		strictEqual(formatBytes(1073741824), "1.00 GB");
+		strictEqual(formatBytes(4509715660), "4.2 GB");
 	});
 
 	it("shortens home directory paths to tilde notation", () => {
@@ -25,15 +43,14 @@ describe("contracts/lifecycle-presenter", () => {
 		strictEqual(shortenPath("/var/log/clio.log", fakeHome), "/var/log/clio.log");
 	});
 
-	it("measures path sizes accurately for files, directories, and absent entries", () => {
+	it("measures files, directories, and absent entries", () => {
 		const tempDir = mkdtempSync(join(tmpdir(), "presenter-measure-"));
 		try {
-			const fileA = join(tempDir, "fileA.txt");
-			writeFileSync(fileA, "1234567890", "utf8"); // 10 bytes
-			const fileB = join(tempDir, "fileB.txt");
-			writeFileSync(fileB, "12345", "utf8"); // 5 bytes
+			writeFileSync(join(tempDir, "fileA.txt"), "1234567890", "utf8");
+			mkdirSync(join(tempDir, "nested"));
+			writeFileSync(join(tempDir, "nested", "fileB.txt"), "12345", "utf8");
 
-			const measuredFile = measurePath(fileA);
+			const measuredFile = measurePath(join(tempDir, "fileA.txt"));
 			strictEqual(measuredFile.exists, true);
 			strictEqual(measuredFile.isDirectory, false);
 			strictEqual(measuredFile.bytes, 10);
@@ -41,7 +58,7 @@ describe("contracts/lifecycle-presenter", () => {
 			const measuredDir = measurePath(tempDir);
 			strictEqual(measuredDir.exists, true);
 			strictEqual(measuredDir.isDirectory, true);
-			strictEqual(measuredDir.bytes, 15);
+			strictEqual(measuredDir.bytes, 15, "the walk descends into real subdirectories");
 
 			const absent = measurePath(join(tempDir, "nonexistent"));
 			strictEqual(absent.exists, false);
@@ -51,112 +68,159 @@ describe("contracts/lifecycle-presenter", () => {
 		}
 	});
 
-	it("renders clean plain-text output without ANSI escapes", () => {
-		const stream = new PassThrough();
-		let captured = "";
-		stream.on("data", (chunk) => {
-			captured += chunk.toString("utf8");
-		});
+	it("counts a symlinked subdirectory as the link and never descends through it", () => {
+		const tempDir = mkdtempSync(join(tmpdir(), "presenter-symlink-"));
+		try {
+			const outside = join(tempDir, "outside");
+			mkdirSync(outside);
+			writeFileSync(join(outside, "big.bin"), "x".repeat(4096), "utf8");
+			const root = join(tempDir, "root");
+			mkdirSync(root);
+			writeFileSync(join(root, "own.txt"), "1234567890", "utf8");
+			symlinkSync(outside, join(root, "linked"));
 
-		const presenter = createLifecyclePresenter({
-			plain: true,
-			stream,
-		});
+			// A root that links out to a shared tree reports its own footprint plus
+			// the link inode, never the tree behind it. The alternative bills the
+			// operator for bytes the delete would not free, and a link back into
+			// the root would make the walk loop.
+			const rootBytes = measurePath(root).bytes;
+			strictEqual(rootBytes, 10 + lstatSync(join(root, "linked")).size);
+			ok(rootBytes < 4096, `the 4 KB behind the symlink must not be counted, got ${rootBytes}`);
 
-		presenter.header("Uninstall Clio Coder");
+			const link = measurePath(join(root, "linked"));
+			strictEqual(link.exists, true);
+			strictEqual(link.isSymbolicLink, true);
+		} finally {
+			rmSync(tempDir, { recursive: true, force: true });
+		}
+	});
+
+	it("renders plain text with no rail, no ANSI, and the same facts as the rail", () => {
+		const { stream, text } = capture();
+		const presenter = createLifecyclePresenter({ plain: true, stream, columns: 100 });
+
+		presenter.header("Uninstall Clio Coder", "uninstall");
 		presenter.step("Installation method: npm global");
 		presenter.listItems("The following will be removed", [
-			{ label: "Config", path: "/tmp/config", bytes: 1024, status: "remove" },
-			{ label: "Data", path: "/tmp/data", bytes: 2048, status: "keep" },
-			{ label: "State", path: "/tmp/state", bytes: 0, status: "absent" },
+			{ label: "Config", path: "/x/config", bytes: 1024, status: "remove" },
+			{ label: "Data", path: "/x/data", bytes: 2048, status: "keep", detail: "kept by --keep-data" },
+			{ label: "State", path: "/x/state", bytes: 0, status: "absent" },
+			{ label: "Shell config", path: "/x/.bashrc", status: "skip", detail: "edit it by hand" },
 		]);
-		presenter.warn("Dry run - no changes made");
-		presenter.completedStep("Removed cache");
-		presenter.commandAdvice("To remove binary manually", "rm /usr/local/bin/clio-coder");
-		presenter.message("Thank you for using Clio Coder!");
+		presenter.completedStep("Removed Config");
+		presenter.commandAdvice("To remove the launcher, run:", "rm /usr/local/bin/clio-coder");
+		presenter.message("Thank you for using Clio Coder.");
 		presenter.done("Done");
 
-		ok(!captured.includes("["), "plain-text output must not contain ANSI escape codes");
-		ok(captured.includes("=== Uninstall Clio Coder ==="));
-		ok(captured.includes("* Installation method: npm global"));
-		ok(captured.includes("The following will be removed:"));
-		ok(captured.includes("Config: /tmp/config (1.00 KB)"));
-		ok(captured.includes("(kept)"));
-		ok(captured.includes("(absent)"));
-		ok(captured.includes("! Warning: Dry run - no changes made"));
-		ok(captured.includes("✓ Removed cache"));
-		ok(captured.includes("To remove binary manually"));
-		ok(captured.includes("rm /usr/local/bin/clio-coder"));
-		ok(captured.includes("Thank you for using Clio Coder!"));
-		ok(captured.includes("=== Done ==="));
+		const out = text();
+		strictEqual(stripAnsi(out), out, "plain-text output must carry no ANSI escapes");
+		for (const glyph of ["┌", "│", "└", "●", "▲", "◆", "◇"]) {
+			ok(!out.includes(glyph), `plain-text output must carry no rail glyph (${glyph})`);
+		}
+		ok(out.includes("Uninstall Clio Coder"));
+		ok(out.includes("  Installation method: npm global"));
+		ok(out.includes("  The following will be removed:"));
+		ok(out.includes("    ✓ Config: /x/config (1.0 KB)"));
+		ok(out.includes("    – Data: /x/data (2.0 KB) (kept by --keep-data)"));
+		ok(out.includes("    – State: /x/state (absent)"), "an absent row shows no size");
+		ok(out.includes("    – Shell config: /x/.bashrc (edit it by hand)"));
+		ok(out.includes("  ✓ Removed Config"));
+		ok(out.includes("    rm /usr/local/bin/clio-coder"));
+		ok(out.includes("Thank you for using Clio Coder."));
+		match(out, /\nDone\n$/u);
 	});
 
-	it("renders box-drawing rail glyphs in TTY mode", () => {
-		const stream = new PassThrough();
-		let captured = "";
-		stream.on("data", (chunk) => {
-			captured += chunk.toString("utf8");
-		});
+	it("separates unlike blocks with exactly one rail line and keeps like blocks together", () => {
+		const { stream, text } = capture();
+		const presenter = createLifecyclePresenter({ plain: false, stream, columns: 100 });
 
-		const presenter = createLifecyclePresenter({
-			plain: false,
-			stream,
-		});
-
-		presenter.header("Upgrade");
-		presenter.step("Using method: source checkout");
-		presenter.warn("Already current");
+		presenter.header("Upgrade", "upgrade");
+		presenter.step("Installation method: source checkout");
+		presenter.step("Current version: 0.4.2");
+		presenter.warn("Already on 0.4.2");
 		presenter.done("Done");
 
-		ok(captured.includes("┌"), "Header should use top box rail");
-		ok(captured.includes("│"), "Rail line should be present");
-		ok(captured.includes("●"), "Step glyph should be bullet");
-		ok(captured.includes("▲"), "Warning glyph should be triangle");
-		ok(captured.includes("└"), "Done should use bottom box rail");
+		const lines = stripAnsi(text()).split("\n");
+		deepStrictEqual(lines, [
+			"",
+			"┌  Upgrade",
+			"│",
+			"●  Installation method: source checkout",
+			"●  Current version: 0.4.2",
+			"│",
+			"▲  Already on 0.4.2",
+			"│",
+			"└  Done",
+			"",
+			"",
+		]);
 	});
 
-	it("produces valid structured JSON in json mode", () => {
-		const stream = new PassThrough();
-		let captured = "";
-		stream.on("data", (chunk) => {
-			captured += chunk.toString("utf8");
-		});
+	it("wraps rail prose so a narrow terminal keeps its rail", () => {
+		const { stream, text } = capture();
+		const presenter = createLifecyclePresenter({ plain: false, stream, columns: 40 });
+		presenter.header("Reset Clio Coder", "reset");
+		presenter.note("State holds every session transcript and the audit trail beside it.");
 
-		const presenter = createLifecyclePresenter({
-			json: true,
-			stream,
-		});
+		const lines = stripAnsi(text())
+			.split("\n")
+			.filter((line) => line.length > 0);
+		const prose = lines.filter((line) => line.startsWith("│  "));
+		ok(prose.length > 1, "the long note must wrap onto more than one line");
+		for (const line of prose) ok(line.length <= 40, `wrapped line exceeded the terminal: ${JSON.stringify(line)}`);
+	});
 
-		presenter.header("Reset", "reset");
+	it("emits one JSON document that includes advice recorded after a failure", () => {
+		const { stream, text } = capture();
+		const presenter = createLifecyclePresenter({ json: true, stream });
+
+		presenter.header("Reset Clio Coder", "reset");
 		presenter.step("Inspecting roots");
-		presenter.listItems("Roots", [{ label: "Config", path: "/test/config", bytes: 4096, status: "remove" }]);
-		presenter.warn("Cache was empty");
-		presenter.completedStep("Reset complete");
-		presenter.done("Reset finished");
+		presenter.listItems("Roots", [{ label: "Config", path: "/x/config", bytes: 4096, status: "remove" }]);
+		presenter.fail("reset did not clear everything", "EACCES: permission denied");
+		presenter.commandAdvice("Fix the permission, then run:", "clio-coder reset --all --force");
+		presenter.finish();
+		// A second close must not put another document on stdout.
+		presenter.finish();
 
-		const parsed = JSON.parse(captured);
+		const parsed = JSON.parse(text());
 		strictEqual(parsed.command, "reset");
-		strictEqual(parsed.title, "Reset");
-		strictEqual(parsed.status, "success");
+		strictEqual(parsed.status, "error");
 		strictEqual(parsed.items.length, 1);
-		strictEqual(parsed.items[0].label, "Config");
-		strictEqual(parsed.warnings[0], "Cache was empty");
-		strictEqual(parsed.summary, "Reset finished");
+		strictEqual(parsed.errors[0], "reset did not clear everything: EACCES: permission denied");
+		strictEqual(parsed.advice[0].lead, "Fix the permission, then run:");
+		strictEqual(parsed.advice[0].command, "clio-coder reset --all --force");
 	});
 
-	it("handles confirmation with user input", async () => {
+	it("writes no rail to stdout in json mode", () => {
+		const { stream, text } = capture();
+		const presenter = createLifecyclePresenter({ json: true, stream });
+		presenter.header("Upgrade", "upgrade");
+		presenter.step("Current version: 0.4.2");
+		presenter.warn("Dry run: no changes made");
+		presenter.done("Done");
+		const out = text();
+		strictEqual(out.trimEnd().startsWith("{"), true);
+		strictEqual(JSON.parse(out).summary, "Done");
+	});
+
+	it("reads a confirmation from the input stream", async () => {
 		const inStream = new PassThrough();
 		const outStream = new PassThrough();
-
-		const presenter = createLifecyclePresenter({
-			plain: true,
-			inputStream: inStream,
-			stream: outStream,
-		});
+		const presenter = createLifecyclePresenter({ plain: true, inputStream: inStream, stream: outStream });
 
 		const promise = presenter.confirm("Proceed with uninstall?", false);
 		inStream.write("y\n");
-		const result = await promise;
-		strictEqual(result, true);
+		strictEqual(await promise, true);
+	});
+
+	it("treats a closed stdin as a refusal rather than a confirmation", async () => {
+		const inStream = new PassThrough();
+		const outStream = new PassThrough();
+		const presenter = createLifecyclePresenter({ plain: true, inputStream: inStream, stream: outStream });
+
+		const promise = presenter.confirm("Proceed with uninstall?", false);
+		inStream.end();
+		strictEqual(await promise, false);
 	});
 });
