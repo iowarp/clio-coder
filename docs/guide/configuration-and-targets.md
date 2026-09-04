@@ -3,7 +3,7 @@
 > **Visual blueprint:** The source checkout includes the complete
 > [Configuration, Targets, Runtimes, and Auth visual reference](https://github.com/iowarp/clio-coder/blob/main/docs/html/configuration_blueprint.html).
 
-Clio Coder is target-first: chat and fleet dispatch resolve through configured targets in `settings.yaml`, not through provider-specific ad hoc flags. Chat and print targets are HTTP and native engine-backed runtimes. Fleet dispatch can also target the sanctioned Claude Code subscription runtimes described below.
+Clio Coder is target-first: chat and fleet dispatch resolve through configured targets in `settings.yaml`, not through provider-specific ad hoc flags. Chat and print targets are HTTP and native engine-backed runtimes. Fleet dispatch can also target sanctioned subscription and external-worker runtimes described below.
 
 Clio's engine is built on the pi SDK (see [docs/architecture/pi-boundary.md](../architecture/pi-boundary.md)). Broad provider/model support comes from engine-backed descriptors and from the generic `openai-compat` and `anthropic-compat` targets. Clio adds orchestration, local/native runtime ergonomics, target configuration, dispatch, safety, and receipts rather than creating a first-class descriptor for every provider.
 
@@ -73,6 +73,14 @@ Start one local runtime and register exactly one target first. Clio integrates w
 - **[vLLM](https://github.com/vllm-project/vllm):** A high-throughput and memory-efficient LLM serving engine. Target runtime ID: `vllm`.
 - **[SGLang](https://github.com/sgl-project/sglang):** A fast serving framework for large language models. Target runtime ID: `sglang`.
 - **[LiteLLM](https://docs.litellm.ai):** An OpenAI-compatible gateway that publishes routed models across multiple inference endpoints. Target runtime ID: `litellm`.
+
+First-run onboarding always completes a valid orchestrator before it offers any
+worker-only colleague. If `agy` is already on `PATH`, the final optional step is
+named **Antigravity CLI — experimental local delegation**. It runs only the
+non-generating model-catalog probe, explains that Clio uses the operator's
+existing local session without inspecting credentials, and can create and bind a
+read-only `world-knowledge-external` profile. Skipping or failing that step does
+not change the primary chat, background, or fleet-default pointers.
 
 Common local runtime IDs and default URLs are:
 
@@ -874,13 +882,13 @@ integrations:
 ```
 Then invoke it using `/delegate claude-code <task>`.
 
-### 5. Google Antigravity CLI Runtime (Experimental, Worker-Only)
+### 5. Antigravity CLI — Experimental Local Delegation (Worker-Only)
 
 The `antigravity-code` runtime is a local external delegation agent. It lets Clio ask an official Antigravity CLI (`agy`) installed and authenticated by the operator for research, world knowledge, a second opinion, or a bounded subtask. It is deliberately **not** a Gemini chat provider and can never become the Clio orchestrator.
 
-This integration is experimental and intended only for personal use on your own machine. Clio does not install Antigravity, initiate Google sign-in, copy credentials, or read the CLI's credential store. Install the [official Antigravity CLI](https://antigravity.google/docs/cli/overview), run `agy` yourself to sign in, and keep it current. Clio then starts that same local executable for an explicit delegation. The current structured driver requires a recent CLI with `--output-format stream-json` support; version 1.1.15 or newer is recommended.
+This integration is experimental and intended only for personal use on your own machine. Clio does not install Antigravity, initiate Google sign-in, copy credentials, or read the CLI's credential store. Install the [official Antigravity CLI](https://antigravity.google/docs/cli/overview), run `agy` yourself to sign in, and keep it current. Clio then starts that same local executable for an explicit delegation. The integration feature-probes the required structured catalog; if the installed CLI lacks it, Clio asks the operator to update `agy` rather than relying on a hard-coded minimum version.
 
-Clio uses agy's structured print stream, including the terminal status, conversation identifier, response, and provider-reported token counts. `clio-coder targets --probe --target <id>` runs the non-generating `agy --output-format json models` command, verifies that the CLI is installed and authenticated, and refreshes the model slugs from the account's live catalog. The built-in model list is only a cold-start fallback, so prefer a slug reported by `agy models` instead of a display label.
+Clio sends one literal prompt as a `stream-json` stdin record, closes stdin, and validates agy's init, delta, and single terminal-result sequence, including the opaque conversation identifier and provider-reported token counts. Prompt text never appears in argv and slash-command expansion is disabled. `clio-coder targets --probe --target <id>` runs the non-generating `agy --output-format json models` command and distinguishes missing CLI, sign-in required, CLI update required, unavailable live catalog, and configured-model disappearance. A successful account catalog is authoritative. The five built-in slugs are cold-start hints only; live `{id,label}` rows and last-good cached labels are displayed without replacing the stable model slug, and cached fallback is marked stale.
 
 Antigravity remains an external agent loop: Clio cannot intercept each tool call. Every launch disables slash-command expansion and sets an explicit posture rather than inheriting mutable CLI defaults:
 
@@ -891,7 +899,7 @@ Antigravity remains an external agent loop: Clio cannot intercept each tool call
 | `suggest` | Refused because a headless subprocess cannot pause for Clio approval |
 | `full-auto` | Capped at `accept-edits` unless the external full-access gate is explicitly enabled |
 
-Only `full-auto` together with `CLIO_CODER_ALLOW_EXTERNAL_FULL_ACCESS=1` passes `--dangerously-skip-permissions`. Treat that as an external safety bypass: agy, not Clio's tool registry, controls the resulting filesystem, shell, and network actions. Prefer `read-only` with Clio's `researcher` agent for world-knowledge delegation.
+Only `full-auto` together with `CLIO_CODER_ALLOW_EXTERNAL_FULL_ACCESS=1` passes `--dangerously-skip-permissions`. Treat that as an external safety bypass: agy, not Clio's tool registry, controls the resulting filesystem, shell, network, prompts, and approvals. The gate is never enabled by onboarding. A `world-knowledge` dispatch remains read-only even if the caller requests a stronger posture; use another agent for mutation work.
 
 **Setup and verification:**
 ```bash
@@ -899,9 +907,11 @@ Only `full-auto` together with `CLIO_CODER_ALLOW_EXTERNAL_FULL_ACCESS=1` passes 
 agy
 agy models
 
-# Use a live model slug, not a stale display name.
+# Use a live model slug, then create and bind a read-only research profile.
 clio-coder configure --id agy-research --runtime antigravity-code \
-  --model gemini-3.8-flash-high --set-fleet-default
+  --model gemini-3.8-flash-high \
+  --agent-profile world-knowledge-external \
+  --bind-agent world-knowledge
 clio-coder targets --probe --target agy-research
 ```
 
@@ -919,6 +929,7 @@ Useful flags:
 | `--fleet-model <id>` | Model to save for fleet default. |
 | `--agent-profile <name>` | Save this target/model as a named fleet profile. |
 | `--agent-profile-model <id>` | Model to save for the named fleet profile. |
+| `--bind-agent <agentId>` | Bind the agent to `--agent-profile` in the same configuration write; requires `--agent-profile`. |
 | `--api-key-env <VAR>` | Read API key from the environment at call time. |
 | `--api-key <literal>` | Store an API key in `credentials.yaml`. |
 | `--force` | Allow model/capability choices outside the local catalog guardrails. |
@@ -1036,6 +1047,11 @@ Model rows combine:
 2. runtime-discovered models from probes;
 3. known models from bundled/provider catalogs.
 
+Each row reports its stable model id, optional human label, and source
+(`live`, cached, configured/default, or catalog). When a live authoritative
+catalog exists, a disappeared configured model is unavailable rather than being
+resurrected by a descriptor hint.
+
 Capability badges in CLI output are compact:
 
 | Badge | Capability |
@@ -1058,7 +1074,7 @@ Representative built-in runtime IDs:
 | --- | --- |
 | Protocol-compatible | `openai-compat`, `anthropic-compat` generic surfaces for additional OpenAI-compatible or Anthropic-compatible APIs, including APIs such as InceptionAI when configured with the appropriate base URL and credentials. |
 | Cloud | `alcf`, `anthropic`, `bedrock`, `deepseek`, `google`, `groq`, `mistral`, `openai`, `openrouter` |
-| Subscription and worker harnesses | `openai-codex` for ChatGPT OAuth, `anthropic-max` for Anthropic OAuth, `claude-sdk` for Claude Agent SDK workers, `claude-code` for `claude -p` subprocess workers, and `antigravity-code` for `agy --print` subprocess workers |
+| Subscription and worker harnesses | `openai-codex` for ChatGPT OAuth, `anthropic-max` for Anthropic OAuth, `claude-sdk` for Claude Agent SDK workers, `claude-code` for `claude -p` subprocess workers, and `antigravity-code` for structured `agy` external delegation |
 | Local native | `llamacpp`, `lmstudio`, `ollama-native`, `vllm`, `sglang`, `lemonade`, `lemonade-anthropic` |
 
 Some hidden aliases exist for backward compatibility or special surfaces; use `clio-coder configure --list --all` to see them.
