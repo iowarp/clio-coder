@@ -58,6 +58,44 @@ export interface PendingSkillToolPolicy {
 	loadedSkillNames: Set<string>;
 	/** Declared tool policy per successfully loaded skill, recorded by context(scope=skills). */
 	loadedSkillPolicies: Map<string, SkillDeclaredToolPolicy>;
+	/**
+	 * True once this policy is a surface that outlived the turn that armed it.
+	 * The narrowing is identical; the flag exists so a load request the policy
+	 * does not cover reads as "only the operator activates skills" rather than
+	 * claiming a pending request that no longer exists.
+	 */
+	carriedSurface?: boolean;
+}
+
+/**
+ * The surface that stays armed after an interactive turn ends.
+ *
+ * A skill an operator loaded narrows the tools for the workflow it started,
+ * and a multi-turn workflow (an interview skill asking a question per turn)
+ * is still inside that workflow on the operator's next message. Dropping the
+ * narrowing at turn end handed the workflow back the full surface partway
+ * through, which is how a `bash` call correctly refused in turn one ran in
+ * turn six. Returns undefined when nothing declared a narrowing, which is the
+ * signal to clear whatever surface was armed before.
+ */
+export function armedSkillSurface(policy: PendingSkillToolPolicy | undefined): PendingSkillToolPolicy | undefined {
+	if (!policy) return undefined;
+	const declared = [...policy.loadedSkillPolicies.entries()].filter(
+		([, declaration]) => (declaration.allowedTools?.length ?? 0) > 0 || (declaration.disallowedTools?.length ?? 0) > 0,
+	);
+	if (declared.length === 0) return undefined;
+	return {
+		allowedSkillNames: [...policy.allowedSkillNames],
+		requests: [...policy.requests],
+		loadedSkillNames: new Set(policy.loadedSkillNames),
+		loadedSkillPolicies: new Map(declared),
+		carriedSurface: true,
+	};
+}
+
+/** Skill names contributing a declaration to an armed surface, for the operator notice. */
+export function skillSurfaceNames(policy: PendingSkillToolPolicy | undefined): ReadonlyArray<string> {
+	return policy ? [...policy.loadedSkillPolicies.keys()] : [];
 }
 
 /**
@@ -75,6 +113,8 @@ export interface SkillToolSurfaceViolation {
 	mergedAllowedTools: ReadonlyArray<string> | null;
 	/** Skills whose disallowed-tools name the tool directly. */
 	disallowedBy: ReadonlyArray<string>;
+	/** True when the surface outlived the turn that armed it, which changes the lifetime the block message states. */
+	carriedSurface: boolean;
 }
 
 /**
@@ -98,15 +138,16 @@ export function evaluateSkillToolSurface(
 	if (SKILL_SURFACE_EXEMPT_TOOLS.has(tool)) return null;
 	const entries = [...policy.loadedSkillPolicies.entries()];
 	const skills = entries.map(([name]) => name);
+	const carriedSurface = policy.carriedSurface === true;
 	const disallowedBy = entries
 		.filter(([, declared]) => declared.disallowedTools?.includes(tool) === true)
 		.map(([name]) => name);
-	if (disallowedBy.length > 0) return { skills, mergedAllowedTools: null, disallowedBy };
+	if (disallowedBy.length > 0) return { skills, mergedAllowedTools: null, disallowedBy, carriedSurface };
 	const allowLists = entries.map(([, declared]) => declared.allowedTools);
 	if (allowLists.some((list) => list === undefined || list.length === 0)) return null;
 	const merged = [...new Set(allowLists.flatMap((list) => [...(list ?? [])]))];
 	if (merged.includes(tool)) return null;
-	return { skills, mergedAllowedTools: merged, disallowedBy: [] };
+	return { skills, mergedAllowedTools: merged, disallowedBy: [], carriedSurface };
 }
 
 /**

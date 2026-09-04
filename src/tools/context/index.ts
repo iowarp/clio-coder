@@ -187,14 +187,17 @@ function pendingSkillPolicyError(name: string, options: ToolInvokeOptions | unde
 	}
 	const recipeBound = policyIsRecipeBound(policy);
 	if (!allowed.includes(name)) {
-		return recipeBound
-			? `context: this agent run may load only its declared skill(s): ${allowed.join(", ")}.`
-			: `context: this turn has pending skill request(s): ${allowed.join(", ")}. Load only those before doing anything else.`;
+		if (recipeBound) return `context: this agent run may load only its declared skill(s): ${allowed.join(", ")}.`;
+		// A carried surface is a skill the operator activated on an earlier
+		// turn, not a request waiting to be loaded now. Claiming a pending
+		// request here would invite a retry of a load nothing asked for.
+		if (policy.carriedSurface === true) return NO_PENDING_SKILL_DENIAL;
+		return `context: this turn has pending skill request(s): ${allowed.join(", ")}. Load only those before doing anything else.`;
 	}
 	if (policy.loadedSkillNames.has(name)) {
-		return recipeBound
-			? `context: skill ${name} is already loaded in this run; continue with its workflow.`
-			: `context: pending skill ${name} already loaded this turn; continue with the loaded workflow and call ask_user if an interview/choice is needed.`;
+		if (recipeBound) return `context: skill ${name} is already loaded in this run; continue with its workflow.`;
+		const window = policy.carriedSurface === true ? "in this session" : "this turn";
+		return `context: pending skill ${name} already loaded ${window}; continue with the loaded workflow and call ask_user if an interview/choice is needed.`;
 	}
 	return null;
 }

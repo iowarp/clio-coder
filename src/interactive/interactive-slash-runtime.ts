@@ -62,7 +62,7 @@ export interface InteractiveSlashSubmitExpansion {
 	pendingSkillRequests: PendingSkillRequest[];
 }
 
-type SlashChat = Pick<ChatLoop, "getSessionId" | "isStreaming" | "submit">;
+type SlashChat = Pick<ChatLoop, "clearSkillSurface" | "getSessionId" | "isStreaming" | "submit">;
 type SlashChatPanel = Pick<ChatPanel, "appendReplayBlock" | "appendUser" | "clearFoldOverrides">;
 type UserTurnStatus = import("./chat-panel.js").UserTurnStatus;
 type SlashResources = Pick<ResourcesContract, "prompts" | "expandPromptTemplate" | "reload">;
@@ -389,6 +389,7 @@ export function createInteractiveSlashRuntime(deps: InteractiveSlashRuntimeDeps)
 		listPrompts: () => deps.resources?.prompts(cwd()) ?? { items: [], diagnostics: [] },
 		...(resources ? { expandPromptTemplate: (text: string) => resources.expandPromptTemplate(text, cwd()) } : {}),
 		openSkillsHub: deps.openSkillsHub,
+		clearSkillSurface: () => deps.chat.clearSkillSurface(),
 		listExtensions: () => deps.extensions?.list(cwd(), { all: true }) ?? [],
 		listAgents: () => deps.agents?.listSpecs().filter((spec) => spec.audience !== "internal") ?? [],
 		listDelegationAgents: () => deps.getSettings?.().integrations.externalAgents.entries ?? [],
