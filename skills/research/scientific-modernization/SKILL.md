@@ -8,7 +8,7 @@ triggers:
   - migrate the scientific build system
   - create a maintained fork
   - preserve scientific parity
-version: 0.3.0
+version: 0.4.0
 license: Apache-2.0
 allowed-tools:
   - read
@@ -35,6 +35,31 @@ Modernization preserves scientific behavior and stewardship; it is not source
 translation. Faster code, a clean build, and passing self-authored unit tests
 do not establish scientific equivalence. Work the stages below in order; each
 has an explicit exit condition.
+
+## Arguments
+
+```text
+/skill scientific-modernization <what to modernize, port, rewrite, or replace, and why>
+```
+
+There is no operator in a headless run — `ask_user` is not in this skill's
+tool surface. Stage 1's "the user has seen them" exit condition means,
+headlessly: state the four bullets in your reply and proceed, never stall
+waiting for acknowledgment. Every other stage gate below works the same way
+— state the decision and its reasoning, then continue.
+
+The six stages are the plan; do not open a task list for them — `tasks` sits
+outside this skill's tool surface and any call to it is refused.
+
+Shell rules for every `bash` call: one command per call, plain and direct.
+Never use `$(...)` or backticks; they trigger an approval gate that ends a
+headless run.
+
+This is a long, multi-stage process on a small model or a time-boxed run. If
+you are approaching your tool-call or time budget before reaching Stage 6,
+stop at the current stage, state exactly which stage you reached and why you
+stopped, and report the work as an incomplete prototype — never fabricate
+completion of stages you did not actually reach.
 
 ## Stage 1 — Decide whether this work should exist
 
