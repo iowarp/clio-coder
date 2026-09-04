@@ -1,4 +1,4 @@
-import { match, strictEqual } from "node:assert";
+import { match, ok, strictEqual } from "node:assert/strict";
 import { mkdirSync, readFileSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
@@ -105,18 +105,30 @@ integrations:
 	};
 }
 
+/**
+ * Drive `configure` over a pair of pipes.
+ *
+ * Neither stream is a terminal, so the menus take the numbered readline path
+ * rather than the arrow-key one; that is the contract this file covers, and the
+ * keypress path has its own file. Answers are fed one per prompt: readline
+ * writes the prompt, so a write ending in ": " is the cue that the next line is
+ * wanted.
+ */
 async function captureConfigure(
 	argv: ReadonlyArray<string>,
 	extraEnv: Record<string, string> = {},
-	inputLines: string[] = ["b\n"],
+	inputLines: ReadonlyArray<string> = ["b\n"],
 ): Promise<{ code: number; stdout: string; stderr: string }> {
-	const origEnv = { ...process.env };
+	const saved = new Map(Object.keys(extraEnv).map((key) => [key, process.env[key]]));
 	const origStderrWrite = process.stderr.write;
 
 	let stdout = "";
 	let stderr = "";
 
-	Object.assign(process.env, extraEnv);
+	for (const [key, value] of Object.entries(extraEnv)) {
+		if (value === "") delete process.env[key];
+		else process.env[key] = value;
+	}
 	resetXdgCache();
 
 	process.stderr.write = ((chunk: unknown) => {
@@ -130,7 +142,7 @@ async function captureConfigure(
 	outStream.on("data", (chunk: Buffer | string) => {
 		const str = String(chunk);
 		stdout += str;
-		if (str.includes(": ") && inputIdx < inputLines.length) {
+		if (str.trimEnd().endsWith(":") && inputIdx < inputLines.length) {
 			const next = inputLines[inputIdx++];
 			setImmediate(() => {
 				inStream.write(next);
@@ -143,126 +155,144 @@ async function captureConfigure(
 		return { code, stdout, stderr };
 	} finally {
 		process.stderr.write = origStderrWrite;
-		for (const key of Object.keys(extraEnv)) {
-			if (origEnv[key] === undefined) delete process.env[key];
-			else process.env[key] = origEnv[key];
+		// Restored key by key: assigning to process.env detaches Node's env proxy
+		// and freezes os.homedir() for every later test in this process.
+		for (const [key, value] of saved) {
+			if (value === undefined) delete process.env[key];
+			else process.env[key] = value;
 		}
 		resetXdgCache();
 	}
 }
 
 describe("contracts/configure-sections", () => {
-	it("emits machine-readable settings in JSON format via --json", async () => {
+	it("emits the effective settings as JSON, unchanged by the flag", async () => {
 		const testEnv = isolatedEnv();
 		try {
+			const before = readFileSync(testEnv.settingsFile, "utf8");
 			const res = await captureConfigure(["--json"], testEnv.env);
 			strictEqual(res.code, 0, res.stderr);
-			const parsed = JSON.parse(res.stdout);
+			const parsed = JSON.parse(res.stdout) as {
+				version: number;
+				targets: Array<{ id: string }>;
+				chat: { target: string };
+			};
 			strictEqual(parsed.version, 2);
-			strictEqual(parsed.targets[0].id, "test-target");
+			strictEqual(parsed.targets[0]?.id, "test-target");
 			strictEqual(parsed.chat.target, "test-target");
+			strictEqual(readFileSync(testEnv.settingsFile, "utf8"), before, "--json is a read");
 		} finally {
 			testEnv.cleanup();
 		}
 	});
 
-	it("renders models section directly with source path and current values", async () => {
+	it("prints a section and exits when there is no terminal to answer a prompt", async () => {
 		const testEnv = isolatedEnv();
 		try {
-			const res = await captureConfigure(["--section", "models"], testEnv.env, ["b\n"]);
+			// The previous build wrote `Action [b]: ` into the pipe and then exited
+			// on EOF, which reads as a hang to anything scripting it.
+			const res = await captureConfigure(["--section", "models"], testEnv.env, []);
 			strictEqual(res.code, 0, res.stderr);
 			match(res.stdout, /Models & Thinking/u);
-			match(res.stdout, /settings\.yaml/u);
-			match(res.stdout, /Chat Thinking Level:\s+low/u);
-			match(res.stdout, /Fleet Thinking Level:\s+off/u);
+			match(res.stdout, /Source: .*settings\.yaml/u);
+			match(res.stdout, /Chat thinking\s+low/u);
+			match(res.stdout, /Fleet thinking\s+off/u);
+			ok(!/Action \[/u.test(res.stdout), `no prompt belongs in a pipe:\n${res.stdout}`);
 		} finally {
 			testEnv.cleanup();
 		}
 	});
 
-	it("renders fleet section directly with source path and current limits", async () => {
+	it("renders every section's current values from settings.yaml", async () => {
+		const expected: ReadonlyArray<readonly [string, RegExp]> = [
+			["targets", /Chat target\s+test-target/u],
+			["models", /Chat model\s+mock-model/u],
+			["chat", /Smooth streaming\s+off/u],
+			["fleet", /Concurrency limit\s+auto/u],
+			["permissions", /Autonomy level\s+auto-edit/u],
+			["panes", /TUI mode\s+regular/u],
+			["skills", /Trust project imports\s+untrusted/u],
+			["diagnostics", /Config dir\s+\S/u],
+		];
+		for (const [section, pattern] of expected) {
+			const testEnv = isolatedEnv();
+			try {
+				const res = await captureConfigure(["--section", section], testEnv.env, []);
+				strictEqual(res.code, 0, `${section}: ${res.stderr}`);
+				match(res.stdout, pattern, `${section} must show its current values`);
+				match(res.stdout, /Source: /u, `${section} must name the file its values live in`);
+			} finally {
+				testEnv.cleanup();
+			}
+		}
+	});
+
+	it("accepts a section by its canonical name or a listed alias, and nothing else", async () => {
 		const testEnv = isolatedEnv();
 		try {
-			const res = await captureConfigure(["--section", "fleet"], testEnv.env, ["b\n"]);
-			strictEqual(res.code, 0, res.stderr);
-			match(res.stdout, /Fleet/u);
-			match(res.stdout, /settings\.yaml/u);
-			match(res.stdout, /Concurrency Limit:\s+auto/u);
-			match(res.stdout, /Max Retries:\s+2/u);
+			for (const name of ["permissions", "autonomy", "safety"]) {
+				const res = await captureConfigure(["--section", name], testEnv.env, []);
+				strictEqual(res.code, 0, `${name}: ${res.stderr}`);
+				match(res.stdout, /Permissions & Autonomy/u);
+			}
+			// Substring matching used to accept anything containing "perm", so
+			// `--section permanent` silently opened this screen.
+			for (const name of ["permanent", "models,chat", "", "diagnostics-extra"]) {
+				const res = await captureConfigure(["--section", name], testEnv.env, []);
+				strictEqual(res.code, 2, `${name} must be rejected`);
+				match(res.stderr, /unknown section/u);
+				match(res.stderr, /targets, models, chat, fleet, permissions, panes, skills, diagnostics/u);
+			}
 		} finally {
 			testEnv.cleanup();
 		}
 	});
 
-	it("renders permissions section with autonomy level and cost limits", async () => {
-		const testEnv = isolatedEnv();
-		try {
-			const res = await captureConfigure(["--section", "permissions"], testEnv.env, ["b\n"]);
-			strictEqual(res.code, 0, res.stderr);
-			match(res.stdout, /Permissions & Autonomy/u);
-			match(res.stdout, /Autonomy Level:\s+auto-edit/u);
-			match(res.stdout, /Session Cost Limit:\s+\$5 USD/u);
-		} finally {
-			testEnv.cleanup();
-		}
-	});
-
-	it("renders panes & layout section with capability and display mode", async () => {
-		const testEnv = isolatedEnv();
-		try {
-			const res = await captureConfigure(["--section", "panes"], testEnv.env, ["b\n"]);
-			strictEqual(res.code, 0, res.stderr);
-			match(res.stdout, /Panes & Layout/u);
-			match(res.stdout, /Panes Capability:\s+off/u);
-			match(res.stdout, /TUI Mode:\s+regular/u);
-		} finally {
-			testEnv.cleanup();
-		}
-	});
-
-	it("renders diagnostics section with system version and directories", async () => {
-		const testEnv = isolatedEnv();
-		try {
-			const res = await captureConfigure(["--section", "diagnostics"], testEnv.env, ["b\n"]);
-			strictEqual(res.code, 0, res.stderr);
-			match(res.stdout, /Diagnostics/u);
-			match(res.stdout, /Clio Coder Version:/u);
-			match(res.stdout, /Node\.js Version:/u);
-		} finally {
-			testEnv.cleanup();
-		}
-	});
-
-	it("presents all 8 runtime sections at the top-level configure menu and exits cleanly on quit", async () => {
+	it("lists all eight sections on the top menu and leaves on q with exit 0", async () => {
 		const testEnv = isolatedEnv();
 		try {
 			const res = await captureConfigure([], testEnv.env, ["q\n"]);
-			strictEqual(res.code, 130);
-			match(res.stdout, /Configure runtime sections:/u);
-			match(res.stdout, /1\. Targets & Auth/u);
-			match(res.stdout, /2\. Models & Thinking/u);
-			match(res.stdout, /3\. Chat Defaults/u);
-			match(res.stdout, /4\. Fleet/u);
-			match(res.stdout, /5\. Permissions & Autonomy/u);
-			match(res.stdout, /6\. Panes & Layout/u);
-			match(res.stdout, /7\. Skills & Extensions/u);
-			match(res.stdout, /8\. Diagnostics/u);
-			match(res.stderr, /configuration cancelled/u);
+			// Quitting a settings menu you only looked at is not a cancellation.
+			// This used to exit 130 with "error: configuration cancelled".
+			strictEqual(res.code, 0, res.stderr);
+			strictEqual(res.stderr, "", "leaving the menu is not an error");
+			for (const title of [
+				"Targets & Auth",
+				"Models & Thinking",
+				"Chat Defaults",
+				"Fleet",
+				"Permissions & Autonomy",
+				"Panes & Layout",
+				"Skills & Extensions",
+				"Diagnostics",
+			]) {
+				ok(res.stdout.includes(title), `${title} missing from the top menu`);
+			}
 		} finally {
 			testEnv.cleanup();
 		}
 	});
 
-	it("updates a setting in settings.yaml when edited in section menu", async () => {
+	it("writes an edited setting through to settings.yaml", async () => {
 		const testEnv = isolatedEnv();
 		try {
-			// In models section: choose '1' (thinking level), enter 'high', then 'b' to exit
-			const res = await captureConfigure(["--section", "models"], testEnv.env, ["1\n", "high\n", "b\n"]);
+			// Top menu -> Models & Thinking -> chat thinking level -> high -> back -> quit.
+			const res = await captureConfigure([], testEnv.env, ["2\n", "1\n", "high\n", "b\n", "q\n"]);
 			strictEqual(res.code, 0, res.stderr);
 			match(res.stdout, /Chat thinking level set to high/u);
+			match(readFileSync(testEnv.settingsFile, "utf8"), /thinkingLevel: high/u);
+		} finally {
+			testEnv.cleanup();
+		}
+	});
 
-			const saved = readFileSync(testEnv.settingsFile, "utf8");
-			match(saved, /thinkingLevel: high/u);
+	it("leaves a setting alone, and says so, when the answer is not one of its values", async () => {
+		const testEnv = isolatedEnv();
+		try {
+			const res = await captureConfigure([], testEnv.env, ["2\n", "1\n", "sideways\n", "b\n", "q\n"]);
+			strictEqual(res.code, 0, res.stderr);
+			match(res.stdout, /must be one of/u);
+			match(readFileSync(testEnv.settingsFile, "utf8"), /thinkingLevel: low/u);
 		} finally {
 			testEnv.cleanup();
 		}
