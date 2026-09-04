@@ -67,6 +67,7 @@ export {
 	modelVisibleSkills,
 	parsePendingSkillRequests,
 	parseSkillCommand,
+	SKILL_SURFACE_CLEAR_ARG,
 	type Skill,
 	type SkillCatalogInvalidReason,
 	type SkillCatalogValidity,

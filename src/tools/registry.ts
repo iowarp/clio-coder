@@ -527,9 +527,12 @@ export function createRegistry(deps: RegistryDeps): ToolRegistry {
 		}
 		// Stage 1.5, the skill tool surface: a loaded SKILL.md that declares
 		// allowed-tools or disallowed-tools narrows the surface until the
-		// policy's lifetime ends (turn end for the main agent, run end for
-		// workers). Narrowing only blocks; it never grants, and an out-of-
-		// surface call blocks terminally instead of parking for confirmation.
+		// policy's lifetime ends. Interactively that is the session: the
+		// narrowing stays armed across the operator's later turns until a
+		// different skill replaces it, `/skill off` clears it, or the session
+		// ends. A worker keeps the run-scoped lifetime. Narrowing only blocks;
+		// it never grants, and an out-of-surface call blocks terminally
+		// instead of parking for confirmation.
 		const surfaceViolation = evaluateSkillToolSurface(options?.pendingSkillPolicy, call.tool);
 		if (surfaceViolation) {
 			const verdict = skillSurfaceBlockedVerdict(decision, call.tool, surfaceViolation);
@@ -1090,10 +1093,13 @@ function skillSurfaceBlockedVerdict(
 	tool: string,
 	violation: SkillToolSurfaceViolation,
 ): Extract<RegistryVerdict, { kind: "blocked" }> {
+	const lifetime = violation.carriedSurface
+		? "The narrowing stays active for the rest of the session, across the operator's later turns, until a different skill replaces it or the operator clears it with /skill off."
+		: "The narrowing ends when the skill policy's turn or worker run ends.";
 	const reason =
 		violation.disallowedBy.length > 0
-			? `${tool} is disallowed by the active skill(s) ${violation.disallowedBy.join(", ")} (disallowed-tools). The narrowing ends when the skill policy's turn or worker run ends. Work within the skill workflow; if it genuinely needs this step, use ask_user when available or state the blocker in your reply.`
-			: `${tool} is outside the tool surface declared by the active skill(s) ${violation.skills.join(", ")}. Tools are narrowed to: ${(violation.mergedAllowedTools ?? []).join(", ")} (plus context and ask_user). The narrowing ends when the skill policy's turn or worker run ends. Work within the skill workflow; if it genuinely needs this step, use ask_user when available or state the blocker in your reply.`;
+			? `${tool} is disallowed by the active skill(s) ${violation.disallowedBy.join(", ")} (disallowed-tools). ${lifetime} Work within the skill workflow; if it genuinely needs this step, use ask_user when available or state the blocker in your reply.`
+			: `${tool} is outside the tool surface declared by the active skill(s) ${violation.skills.join(", ")}. Tools are narrowed to: ${(violation.mergedAllowedTools ?? []).join(", ")} (plus context and ask_user). ${lifetime} Work within the skill workflow; if it genuinely needs this step, use ask_user when available or state the blocker in your reply.`;
 	const blocked: SafetyDecision = {
 		kind: "block",
 		classification: decision.classification,

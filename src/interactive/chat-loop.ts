@@ -16,7 +16,12 @@
 import { BusChannels, type RunAbortSource } from "../core/bus-events.js";
 import type { ClioSettings } from "../core/config.js";
 import type { SafeEventBus } from "../core/event-bus.js";
-import type { PendingSkillRequest } from "../core/skill-activation.js";
+import {
+	armedSkillSurface,
+	type PendingSkillRequest,
+	type PendingSkillToolPolicy,
+	skillSurfaceNames,
+} from "../core/skill-activation.js";
 import { clioStateDir } from "../core/xdg.js";
 import {
 	createMiddlewareToolChoiceControl,
@@ -285,6 +290,12 @@ export interface ChatLoop {
 	 * queues the text for the next slot instead.
 	 */
 	interruptRefusal(): string | null;
+	/**
+	 * `/skill off`: drop the tool surface an activated skill armed, so the next
+	 * turn runs with the full surface again. Returns the skill names that were
+	 * armed, or an empty list when nothing was.
+	 */
+	clearSkillSurface(): ReadonlyArray<string>;
 	clearQueuedFollowUps(): string[];
 	queuedMessages(): QueuedMessagesSnapshot;
 	cancel(options?: ChatCancelOptions): void;
@@ -620,6 +631,31 @@ export function createChatLoop(deps: CreateChatLoopDeps): ChatLoop {
 	 */
 	const emitNotice = (text: string, level: ChatNoticeEvent["level"] = "info", key?: string): void => {
 		emit({ type: "notice", level, surface: "transcript", text, ...(key === undefined ? {} : { key }) });
+	};
+
+	/**
+	 * Carry (or drop) the tool surface a skill declared once the turn that
+	 * loaded it settles, and say so once on the transcript. The operator needs
+	 * to know a narrowing is armed across their next messages, and needs one
+	 * line back when it lifts; the skill-activation ledger entry already
+	 * records provenance, so this is the notice, not a second UI.
+	 */
+	const armSkillSurface = (policy: PendingSkillToolPolicy | undefined, loadedBefore?: ReadonlySet<string>): void => {
+		const previous = skillSurfaceNames(state.activeSkillSurface).join(", ");
+		const next = armedSkillSurface(policy);
+		const current = skillSurfaceNames(next).join(", ");
+		state.activeSkillSurface = next;
+		const activated = skillSurfaceNames(policy).filter((name) => !loadedBefore?.has(name));
+		if (activated.length > 0) {
+			emitNotice(
+				current.length > 0
+					? `[Clio Coder] Skill activated: ${activated.join(", ")}. Its tool surface stays armed across your next turns until another skill replaces it or you run /skill off.`
+					: `[Clio Coder] Skill activated: ${activated.join(", ")}. It declares no tool narrowing.`,
+			);
+		}
+		if (current !== previous && current.length === 0 && previous.length > 0) {
+			emitNotice(`[Clio Coder] Skill tool surface cleared: ${previous}. The full tool surface is back.`);
+		}
 	};
 
 	/**
@@ -959,6 +995,11 @@ export function createChatLoop(deps: CreateChatLoopDeps): ChatLoop {
 		steer: (text) => queues.steer(text),
 		queueFollowUp: (text) => queues.queueFollowUp(text),
 		interruptRefusal: () => (state.streaming ? interruptRefusalReason() : null),
+		clearSkillSurface: () => {
+			const cleared = skillSurfaceNames(state.activeSkillSurface);
+			armSkillSurface(undefined);
+			return cleared;
+		},
 		clearQueuedFollowUps: () => queues.clearQueuedMirror().map((entry) => entry.text),
 		queuedMessages: () => queues.queuedMessages(),
 
@@ -1043,7 +1084,15 @@ export function createChatLoop(deps: CreateChatLoopDeps): ChatLoop {
 			const images = options.images && options.images.length > 0 ? [...options.images] : undefined;
 			const pendingSkillRequests = options.pendingSkillRequests ?? [];
 			context.addWorkingContextPaths(options.workingContextPaths ?? []);
-			const pendingSkillPolicy = createPendingSkillToolPolicy(pendingSkillRequests);
+			// A skill the operator activated narrows the tools for the workflow
+			// it started, and that workflow outlives the turn it began in. A
+			// fresh /skill this turn replaces the armed surface; otherwise the
+			// armed surface is what this turn runs under.
+			const pendingSkillPolicy = createPendingSkillToolPolicy(pendingSkillRequests) ?? state.activeSkillSurface;
+			// What was already loaded when this turn started, so the settle-time
+			// notice names the skills this turn activated and not the ones a
+			// carried surface has been holding since an earlier message.
+			const skillsLoadedBeforeTurn = new Set(pendingSkillPolicy?.loadedSkillNames ?? []);
 			// Resolve the frozen session tool surface before turn_start so intent
 			// middleware sees the exact tools this request can actually call.
 			agentRuntime.agent.state.tools = resolveSessionTools(
@@ -1310,6 +1359,7 @@ export function createChatLoop(deps: CreateChatLoopDeps): ChatLoop {
 				}
 				state.currentPendingSkillPolicy = priorPendingSkillPolicy;
 				state.currentAskUserPolicy = priorAskUserPolicy;
+				armSkillSurface(pendingSkillPolicy, skillsLoadedBeforeTurn);
 				state.activeUserTurnId = null;
 				// Safety net for thrown paths where agent_end never delivered;
 				// no-op when the agent_end flush already ran.
