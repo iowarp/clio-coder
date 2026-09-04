@@ -73,6 +73,20 @@ function parseUpgradeArgs(argv: ReadonlyArray<string>): UpgradeOptions {
 			channel = value as Channel;
 			continue;
 		}
+		if (arg === "--channel") {
+			const nextIdx = argv.indexOf(arg) + 1;
+			const value = argv[nextIdx];
+			if (!value || !(CHANNELS as ReadonlyArray<string>).includes(value)) {
+				throw new Error(`--channel must be one of ${CHANNELS.join("|")}, got '${value ?? ""}'`);
+			}
+			channel = value as Channel;
+			continue;
+		}
+		// If previous arg was --channel, skip this value
+		const prevIdx = argv.indexOf(arg) - 1;
+		if (prevIdx >= 0 && argv[prevIdx] === "--channel") {
+			continue;
+		}
 		throw new Error(`unknown upgrade argument: ${arg}`);
 	}
 	return { dryRun, channel, skipMigrations, help, postInstall, json };

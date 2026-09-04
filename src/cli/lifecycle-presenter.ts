@@ -282,11 +282,18 @@ export class LifecyclePresenter {
 	commandAdvice(lead: string, command: string): void {
 		this.report.advice.push({ lead, command });
 		if (this.json) return;
+		const lines = command.split("\n");
 		if (this.plain) {
-			this.out.write(`  ${lead}\n    ${command}\n`);
+			this.out.write(`  ${lead}\n`);
+			for (const line of lines) {
+				this.out.write(`    ${line}\n`);
+			}
 			return;
 		}
-		this.out.write(`${chalk.cyan("│")}  ${lead}\n${chalk.blue("●")}    ${chalk.cyan(command)}\n`);
+		this.out.write(`${chalk.cyan("│")}  ${lead}\n`);
+		for (const line of lines) {
+			this.out.write(`${chalk.blue("●")}    ${chalk.cyan(line)}\n`);
+		}
 	}
 
 	message(text: string): void {
