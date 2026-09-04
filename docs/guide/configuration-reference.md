@@ -165,6 +165,11 @@ Precedence, where several surfaces set the same value: a one-run CLI flag beats 
 | `targets[].lmstudio.request.draftModel` |  | Sends `draft_model` on OpenAI-compatible chat requests for speculative decoding (model id string). |  |
 | `targets[].lmstudio.request.reasoning` |  | How `reasoning_effort` is sent: `auto` maps the active thinking level, `off` sends `none`, `on` sends `low`, `low`/`medium`/`high` are literal but clamped to the efforts the model advertises. |  |
 | `targets[].lmstudio.request.ttlSeconds` |  | Sends `ttl` on chat requests so LM Studio auto-evicts the model after this idle time in seconds (integer >= 1). |  |
+| `targets[].litellm.request.numRetries` |  | Optional LiteLLM router retry override sent as `x-litellm-num-retries` (integer >= 0); omit it to keep gateway policy. The OpenAI SDK retry layer remains disabled for LiteLLM requests. |  |
+| `targets[].litellm.request.sendSessionId` | `true` | Whether Clio forwards its stable session id as `x-litellm-session-id` (boolean); applies when the next LiteLLM agent runtime is created. |  |
+| `targets[].litellm.request.streamTimeoutSeconds` |  | Optional LiteLLM streaming timeout override sent as `x-litellm-stream-timeout` (number from 0.001 through 86400); omit it to keep gateway policy. |  |
+| `targets[].litellm.request.tags` | `[clio-coder]` | Additional LiteLLM request tags (list of non-empty strings without commas); Clio always adds `clio-coder`. |  |
+| `targets[].litellm.request.timeoutSeconds` |  | Optional LiteLLM request/upstream timeout override sent as `x-litellm-timeout` (number from 0.001 through 86400); omit it to keep gateway policy. |  |
 | `targets[].maxConcurrentRequests` |  | Explicit request-slot limit for this inference endpoint (integer >= 1); overrides live slot discovery and is shared by every target on the same normalized URL; applies next turn. |  |
 | `targets[].pricing.cacheRead` | `0` | USD rate for cache-read tokens (number >= 0); 0 when absent. |  |
 | `targets[].pricing.cacheWrite` | `0` | USD rate for cache-write tokens (number >= 0); 0 when absent. |  |

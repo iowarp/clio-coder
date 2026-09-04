@@ -17,6 +17,7 @@ import {
 } from "@earendil-works/pi-ai";
 import { openAICompletionsApi } from "@earendil-works/pi-ai/api/openai-completions.lazy";
 import type { BackendCompletionTimings, BackendTimingsSource } from "../../core/cache-telemetry.js";
+import { type GatewayRoutingObservation, liteLLMGatewayRoutingFromHeaders } from "../../core/gateway-routing.js";
 import type { ResponseModelIdObservation } from "../../core/response-model-id.js";
 import {
 	type AppliedThinking,
@@ -27,7 +28,7 @@ import {
 import { lmStudioReasoningEffort } from "../../domains/providers/runtimes/common/lmstudio-http.js";
 import type { ThinkingLevel } from "../../domains/providers/types/capability-flags.js";
 import type { LocalModelQuirks, SamplingProfile } from "../../domains/providers/types/local-model-quirks.js";
-import type { LmStudioTargetSettings } from "../../domains/providers/types/target-descriptor.js";
+import type { LiteLLMTargetSettings, LmStudioTargetSettings } from "../../domains/providers/types/target-descriptor.js";
 import { filterGemmaChannelStream, usesGemmaChannelMarkers } from "../gemma-channel-filter.js";
 import { HarmonyResponseParser } from "../harmony-response.js";
 import { createSentinelStripper, stripTokenizerSentinels } from "../strip-tokenizer-sentinels.js";
@@ -42,6 +43,8 @@ declare module "@earendil-works/pi-ai" {
 	interface AssistantMessage {
 		/** Direct observation of model-id presence in an OpenAI-compatible response. */
 		responseModelIdObservation?: ResponseModelIdObservation;
+		/** Route, fallback, retry, and proxy timing facts reported by LiteLLM. */
+		gatewayRouting?: GatewayRoutingObservation;
 		/** Backend-reported prefill and prediction timings when available. */
 		backendTimings?: BackendCompletionTimings;
 	}
@@ -69,6 +72,7 @@ interface ClioRuntimeMetadata {
 		quirks?: LocalModelQuirks;
 		chatTemplateKwargsUnsupported?: boolean;
 		lmstudio?: LmStudioTargetSettings;
+		litellm?: LiteLLMTargetSettings;
 		lmstudioReasoningOptions?: ReadonlyArray<string>;
 		lmstudioDefaultModel?: string;
 	};
@@ -101,6 +105,7 @@ interface ResponseModelIdCapture {
 	modelIdDone: boolean;
 	backendTimings: BackendCompletionTimings | null;
 	backendTimingsSource: BackendTimingsSource | null;
+	gatewayRouting: GatewayRoutingObservation | null;
 	buffer: string;
 	decoder: TextDecoder | null;
 }
@@ -199,7 +204,10 @@ function observeResponseModelIdBytes(
 	if (captureCanStopEarly(capture) || flush) capture.decoder = null;
 }
 
-function captureResponseModelId(response: Response, capture: ResponseModelIdCapture): Response {
+function captureResponseModelId(response: Response, capture: ResponseModelIdCapture, model: Model<Api>): Response {
+	if (runtimeMetadata(model)?.runtimeId === "litellm") {
+		capture.gatewayRouting = liteLLMGatewayRoutingFromHeaders(response.headers);
+	}
 	if (!response.body || !response.headers.get("content-type")?.toLowerCase().includes("text/event-stream")) {
 		return response;
 	}
@@ -234,6 +242,7 @@ function withResponseModelIdCapture<TOptions extends StreamOptions>(
 		modelIdDone: false,
 		backendTimings: null,
 		backendTimingsSource: backendTimingsSourceForModel(model),
+		gatewayRouting: null,
 		buffer: "",
 		decoder: new TextDecoder(),
 	};
@@ -241,7 +250,7 @@ function withResponseModelIdCapture<TOptions extends StreamOptions>(
 		options.fetch ?? ((input, init) => globalThis.fetch(input, init));
 	const capturedOptions = {
 		...options,
-		fetch: async (input, init) => captureResponseModelId(await fetchImpl(input, init), capture),
+		fetch: async (input, init) => captureResponseModelId(await fetchImpl(input, init), capture, model),
 	} as TOptions;
 	const source = sourceFactory(capturedOptions);
 	const annotated = createAssistantMessageEventStream();
@@ -255,9 +264,11 @@ function withResponseModelIdCapture<TOptions extends StreamOptions>(
 					: { state: "not-observed" };
 				if (event.type === "done") {
 					event.message.responseModelIdObservation = observation;
+					if (capture.gatewayRouting !== null) event.message.gatewayRouting = capture.gatewayRouting;
 					if (capture.backendTimings !== null) event.message.backendTimings = capture.backendTimings;
 				} else if (event.type === "error") {
 					event.error.responseModelIdObservation = observation;
+					if (capture.gatewayRouting !== null) event.error.gatewayRouting = capture.gatewayRouting;
 					if (capture.backendTimings !== null) event.error.backendTimings = capture.backendTimings;
 				}
 				annotated.push(event as AssistantMessageEvent);
@@ -581,6 +592,48 @@ function withRemainingContextBudget<TOptions extends StreamOptions>(
 	return {
 		...(options ?? {}),
 		maxTokens: remainingContextMaxTokens(model, context, options),
+	} as TOptions;
+}
+
+function hasHeader(headers: Readonly<Record<string, unknown>> | undefined, name: string): boolean {
+	if (!headers) return false;
+	const wanted = name.toLowerCase();
+	return Object.keys(headers).some((key) => key.toLowerCase() === wanted);
+}
+
+/**
+ * Apply LiteLLM's request-control headers at the final transport boundary.
+ *
+ * The OpenAI SDK otherwise retries twice below Clio's visible recovery loop and
+ * below LiteLLM's own router, multiplying a single failure into several hidden
+ * attempts. Gateway requests use zero client retries by default; optional
+ * `numRetries` controls the proxy router itself, where fallbacks are observable.
+ */
+function withLiteLLMRequestOptions<TOptions extends StreamOptions>(
+	model: Model<"openai-completions">,
+	options: TOptions,
+): TOptions {
+	const metadata = runtimeMetadata(model);
+	if (metadata?.runtimeId !== "litellm") return options;
+	const request = metadata.litellm?.request;
+	const modelHeaders = model.headers as Readonly<Record<string, unknown>> | undefined;
+	const optionHeaders = options.headers as Readonly<Record<string, unknown>> | undefined;
+	const headers: Record<string, string | null> = { ...(options.headers ?? {}) };
+	const setDefault = (name: string, value: string | undefined): void => {
+		if (value === undefined || hasHeader(modelHeaders, name) || hasHeader(optionHeaders, name)) return;
+		headers[name] = value;
+	};
+	setDefault("x-litellm-tags", ["clio-coder", ...(request?.tags ?? [])].join(","));
+	if (request?.sendSessionId !== false) setDefault("x-litellm-session-id", options.sessionId);
+	setDefault("x-litellm-timeout", request?.timeoutSeconds?.toString());
+	setDefault("x-litellm-stream-timeout", request?.streamTimeoutSeconds?.toString());
+	setDefault("x-litellm-num-retries", request?.numRetries?.toString());
+	return {
+		...options,
+		headers,
+		// Let the gateway perform and report retries/fallbacks instead of hiding
+		// duplicate attempts inside the OpenAI SDK beneath Clio's retry notices.
+		maxRetries: options.maxRetries ?? 0,
 	} as TOptions;
 }
 
@@ -921,23 +974,24 @@ export const openAICompletionsApiProvider: EngineApiProvider<"openai-completions
 		const resolved = resolvedCapabilitiesForModel(model, defaultLevel);
 		const effectiveContext = stripsThinking(resolved) ? stripThinkingFromContext(context) : context;
 		const withSamplers = withSamplingOverrides(model, options, resolved);
+		const withGatewayOptions = withLiteLLMRequestOptions(
+			model,
+			withRemainingContextBudget(model, effectiveContext, withSamplers),
+		);
 		return guardMalformedToolCalls(
 			withReasoningTokenEstimate(
 				stripSentinelsFromStream(
 					stripNeverReasoningFromStream(
 						filterGemmaChannelStream(
-							withResponseModelIdCapture(
-								model,
-								withRemainingContextBudget(model, effectiveContext, withSamplers),
-								(capturedOptions) =>
-									withLocalResidency(
-										model,
-										{
-											...(options?.apiKey !== undefined ? { apiKey: options.apiKey } : {}),
-											...(options?.signal !== undefined ? { signal: options.signal } : {}),
-										},
-										(requestModel) => piOpenAICompletions.stream(requestModel, effectiveContext, capturedOptions),
-									),
+							withResponseModelIdCapture(model, withGatewayOptions, (capturedOptions) =>
+								withLocalResidency(
+									model,
+									{
+										...(options?.apiKey !== undefined ? { apiKey: options.apiKey } : {}),
+										...(options?.signal !== undefined ? { signal: options.signal } : {}),
+									},
+									(requestModel) => piOpenAICompletions.stream(requestModel, effectiveContext, capturedOptions),
+								),
 							),
 							usesGemmaChannelMarkers(resolved.modelId),
 						),
@@ -954,23 +1008,24 @@ export const openAICompletionsApiProvider: EngineApiProvider<"openai-completions
 		const resolved = resolvedCapabilitiesForModel(model, thinkingLevelFromSimple(options));
 		const effectiveContext = stripsThinking(resolved) ? stripThinkingFromContext(context) : context;
 		const withSamplers = withSamplingOverrides(model, options, resolved);
+		const withGatewayOptions = withLiteLLMRequestOptions(
+			model,
+			withRemainingContextBudget(model, effectiveContext, withSamplers),
+		);
 		return guardMalformedToolCalls(
 			withReasoningTokenEstimate(
 				stripSentinelsFromStream(
 					stripNeverReasoningFromStream(
 						filterGemmaChannelStream(
-							withResponseModelIdCapture(
-								model,
-								withRemainingContextBudget(model, effectiveContext, withSamplers),
-								(capturedOptions) =>
-									withLocalResidency(
-										model,
-										{
-											...(options?.apiKey !== undefined ? { apiKey: options.apiKey } : {}),
-											...(options?.signal !== undefined ? { signal: options.signal } : {}),
-										},
-										(requestModel) => piOpenAICompletions.streamSimple(requestModel, effectiveContext, capturedOptions),
-									),
+							withResponseModelIdCapture(model, withGatewayOptions, (capturedOptions) =>
+								withLocalResidency(
+									model,
+									{
+										...(options?.apiKey !== undefined ? { apiKey: options.apiKey } : {}),
+										...(options?.signal !== undefined ? { signal: options.signal } : {}),
+									},
+									(requestModel) => piOpenAICompletions.streamSimple(requestModel, effectiveContext, capturedOptions),
+								),
 							),
 							usesGemmaChannelMarkers(resolved.modelId),
 						),

@@ -106,7 +106,7 @@ function boolean(value: unknown): boolean | undefined {
  * so the caller can tell "the gateway says this model has no vision" apart from
  * "the gateway did not say", and merge accordingly.
  */
-function capabilitiesFromLiteLLMModelInfo(info: Record<string, unknown>): Partial<CapabilityFlags> {
+export function capabilitiesFromLiteLLMModelInfo(info: Record<string, unknown>): Partial<CapabilityFlags> {
 	const caps: Partial<CapabilityFlags> = {};
 	const contextWindow = positiveInteger(info.max_input_tokens) ?? positiveInteger(info.max_tokens);
 	if (contextWindow !== undefined) caps.contextWindow = contextWindow;
@@ -132,9 +132,49 @@ function capabilitiesFromLiteLLMModelInfo(info: Record<string, unknown>): Partia
 		caps.rerank = true;
 	}
 	if (info.mode === "chat") caps.chat = true;
-	// Measured, not inferred: see the module header.
-	if (boolean(info.supports_response_schema) === true) caps.structuredOutputs = "json-schema";
+	// Measured, not inferred: see the module header. An explicit false must
+	// override this runtime's measured default for an upstream that cannot
+	// preserve the schema contract.
+	const responseSchema = boolean(info.supports_response_schema);
+	if (responseSchema !== undefined) caps.structuredOutputs = responseSchema ? "json-schema" : "none";
 	return caps;
+}
+
+const BOOLEAN_CAPABILITIES = [
+	"chat",
+	"tools",
+	"reasoning",
+	"vision",
+	"audio",
+	"embeddings",
+	"rerank",
+	"fim",
+] as const satisfies ReadonlyArray<keyof CapabilityFlags>;
+
+/**
+ * One alias may load-balance across heterogeneous deployments. Clio can only
+ * promise what every possible route supports: numerical limits take the
+ * smallest fully-published value, booleans require unanimous publication, and
+ * one explicit false defeats a true. Missing data never becomes a capability.
+ */
+export function aggregateLiteLLMCapabilities(rows: ReadonlyArray<Partial<CapabilityFlags>>): Partial<CapabilityFlags> {
+	if (rows.length === 0) return {};
+	const aggregate: Partial<CapabilityFlags> = {};
+	for (const key of ["contextWindow", "maxTokens"] as const) {
+		const values = rows.map((row) => row[key]);
+		if (values.every((value): value is number => typeof value === "number")) {
+			aggregate[key] = Math.min(...values);
+		}
+	}
+	for (const key of BOOLEAN_CAPABILITIES) {
+		const values = rows.map((row) => row[key]);
+		if (values.some((value) => value === false)) aggregate[key] = false;
+		else if (values.every((value) => value === true)) aggregate[key] = true;
+	}
+	const structuredOutputs = rows.map((row) => row.structuredOutputs);
+	if (structuredOutputs.some((value) => value === "none")) aggregate.structuredOutputs = "none";
+	else if (structuredOutputs.every((value) => value === "json-schema")) aggregate.structuredOutputs = "json-schema";
+	return aggregate;
 }
 
 interface LiteLLMCatalog {
@@ -142,7 +182,7 @@ interface LiteLLMCatalog {
 	modelCapabilities: Record<string, Partial<CapabilityFlags>>;
 	modelStates: Record<string, ProbeModelStatus>;
 	/** Physical deployment behind each alias, for display. */
-	deployments: Record<string, { model: string; apiBase?: string }>;
+	deployments: Record<string, Array<{ model: string; apiBase?: string }>>;
 	/** Whether the empty catalog is specifically because the gateway rejected the key. */
 	authFailed: boolean;
 }
@@ -183,23 +223,27 @@ async function fetchCatalog(base: string, ctx: ProbeContext, headers: Record<str
 			deployments: {},
 			authFailed: false,
 		};
+		const capabilityRows: Record<string, Array<Partial<CapabilityFlags>>> = {};
 		for (const row of detail.data.data) {
 			if (typeof row?.model_name !== "string" || row.model_name.length === 0) continue;
 			const alias = row.model_name;
-			// One alias can carry several deployments. They share a name and Clio
-			// addresses them as one model, so the first row establishes the entry
-			// and later rows for the same alias are the load-balancing pool behind
-			// it rather than separate models.
-			if (catalog.deployments[alias] !== undefined) continue;
-			catalog.models.push(alias);
+			if (catalog.deployments[alias] === undefined) {
+				catalog.models.push(alias);
+				catalog.deployments[alias] = [];
+				capabilityRows[alias] = [];
+			}
 			const caps = row.model_info ? capabilitiesFromLiteLLMModelInfo(row.model_info) : {};
-			if (Object.keys(caps).length > 0) catalog.modelCapabilities[alias] = caps;
+			capabilityRows[alias]?.push(caps);
 			const upstream = row.litellm_params?.model;
 			const apiBase = row.litellm_params?.api_base;
-			catalog.deployments[alias] = {
+			catalog.deployments[alias]?.push({
 				model: typeof upstream === "string" ? upstream : alias,
 				...(typeof apiBase === "string" ? { apiBase } : {}),
-			};
+			});
+		}
+		for (const alias of catalog.models) {
+			const caps = aggregateLiteLLMCapabilities(capabilityRows[alias] ?? []);
+			if (Object.keys(caps).length > 0) catalog.modelCapabilities[alias] = caps;
 		}
 		if (catalog.models.length > 0) return catalog;
 	}
@@ -276,7 +320,10 @@ const litellmRuntime: RuntimeDescriptor = {
 		// Naming the physical model behind each alias is the difference between a
 		// catalog an operator can audit and a list of words.
 		const routed = Object.entries(catalog.deployments)
-			.map(([alias, deployment]) => `${alias}=${deployment.model}`)
+			.map(([alias, deployments]) => {
+				const models = [...new Set(deployments.map((deployment) => deployment.model))];
+				return `${alias}=${models.join("|")}`;
+			})
 			.sort();
 		if (routed.length > 0) notes.push(`routes: ${routed.join(", ")}`);
 		if (notes.length > 0) result.notes = notes;

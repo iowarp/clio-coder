@@ -39,6 +39,24 @@ export interface LmStudioTargetSettings {
 	request?: LmStudioRequestSettings;
 }
 
+/** Per-request controls understood by a LiteLLM proxy. Values are optional so server policy remains authoritative by default. */
+export interface LiteLLMRequestSettings {
+	/** Extra LiteLLM request tags. Clio always adds `clio-coder`. */
+	tags?: string[];
+	/** Forward Clio's stable session id as `x-litellm-session-id`. Defaults to true. */
+	sendSessionId?: boolean;
+	/** Override the proxy/upstream request timeout through `x-litellm-timeout`. */
+	timeoutSeconds?: number;
+	/** Override LiteLLM's streamed-response timeout through `x-litellm-stream-timeout`. */
+	streamTimeoutSeconds?: number;
+	/** Override LiteLLM router retries for this request; this does not enable client-side SDK retries. */
+	numRetries?: number;
+}
+
+export interface LiteLLMTargetSettings {
+	request?: LiteLLMRequestSettings;
+}
+
 /**
  * Persisted target specification from settings.yaml (`targets:`). It binds a
  * user-facing target id to a RuntimeDescriptor id, target URL/auth metadata,
@@ -57,6 +75,7 @@ export interface TargetDescriptor {
 	gateway?: boolean;
 	pricing?: TargetPricing;
 	lmstudio?: LmStudioTargetSettings;
+	litellm?: LiteLLMTargetSettings;
 	/** Explicit request-slot limit for this inference endpoint. It overrides live discovery. */
 	maxConcurrentRequests?: number;
 }

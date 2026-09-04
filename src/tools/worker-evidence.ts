@@ -9,7 +9,7 @@ import type { ReceiptIntegrityResult } from "../domains/dispatch/receipt-integri
 import type { RunReceipt, RunReceiptVerification } from "../domains/dispatch/types.js";
 import { formatTrustAxes, formatTrustSummary } from "../domains/evidence/trust-projection.js";
 import { adaptRunReceiptTrustStatus, type CanonicalTrustStatus } from "../domains/evidence/trust-status.js";
-import { receiptResponseModelIdObservationLabel } from "./dispatch-event-text.js";
+import { receiptGatewayRoutingLabel, receiptResponseModelIdObservationLabel } from "./dispatch-event-text.js";
 
 /** Matches a source citation the parent can independently spot-check. */
 const SOURCE_CITATION_PATTERN = /([\w./~-]+):(\d+)/g;
@@ -145,6 +145,7 @@ export function receiptEvidenceLabels(
 		}${receipt.projectContext.contentHash !== undefined ? ` sha256:${receipt.projectContext.contentHash}` : ""}`;
 	}
 	const responseModelIdObservation = receiptResponseModelIdObservationLabel(receipt);
+	const gatewayRouting = receiptGatewayRoutingLabel(receipt);
 	const budget =
 		receipt.budget === undefined
 			? []
@@ -160,6 +161,7 @@ export function receiptEvidenceLabels(
 		`evidence_verification=${verification.state}/${verification.basis}`,
 		`host_verification=${receipt.hostVerification?.status ?? "not_requested"}`,
 		...(responseModelIdObservation ? [responseModelIdObservation] : []),
+		...(gatewayRouting ? [gatewayRouting] : []),
 		...budget,
 		...receiptAdmissionLabels(receipt),
 		...receiptActivityLabels(receipt, status),

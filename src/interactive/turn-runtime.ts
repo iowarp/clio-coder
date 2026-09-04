@@ -8,6 +8,7 @@
 import { performance } from "node:perf_hooks";
 import type { BackendCompletionTimings } from "../core/cache-telemetry.js";
 import type { ClioSettings } from "../core/config.js";
+import { gatewayRoutingObservationFromRecord, gatewayRoutingObservationLabel } from "../core/gateway-routing.js";
 import { attributedModelId } from "../core/response-model-id.js";
 import type { MiddlewareToolChoiceControl } from "../domains/middleware/index.js";
 import type { ObservabilityContract } from "../domains/observability/contract.js";
@@ -130,6 +131,8 @@ export interface TurnRuntimeDeps {
 	context: TurnContext;
 	middleware: TurnMiddleware;
 	retrySettings: () => RetrySettings;
+	/** Stable Clio session id forwarded only to gateway runtimes that understand it. */
+	sessionId?: () => string | undefined;
 	emit: (event: AgentEvent | AssistantDeltaEvent) => void;
 	emitNotice: (text: string) => void;
 	/** Tool-call id to its `performance.now()` start mark; spans only, never an instant. */
@@ -447,6 +450,7 @@ export function createTurnRuntime(deps: TurnRuntimeDeps): TurnRuntime {
 			cleanupSessionResources(state.runtime.agent.sessionId);
 		}
 		let getCurrentAgentSignal: () => AbortSignal | undefined = () => undefined;
+		const gatewaySessionId = target.runtime.id === "litellm" ? deps.sessionId?.() : undefined;
 		const handle = deps.createAgent({
 			initialState: {
 				systemPrompt: fallbackIdentityPrompt(),
@@ -456,6 +460,7 @@ export function createTurnRuntime(deps: TurnRuntimeDeps): TurnRuntime {
 				messages: priorMessages,
 			},
 			maxRetryDelayMs: deps.retrySettings().maxDelayMs,
+			...(gatewaySessionId ? { sessionId: gatewaySessionId } : {}),
 			onPayload: async (payload, currentModel) => {
 				const thinkingPatched = patchProviderThinkingPayload(payload, currentModel, state.currentThinkingLevel);
 				const basePayload = thinkingPatched ?? payload;
@@ -669,6 +674,15 @@ export function createTurnRuntime(deps: TurnRuntimeDeps): TurnRuntime {
 			}
 			let publicEvent = enrichedEvent;
 			if (enrichedEvent.type === "message_end" && enrichedEvent.message?.role === "assistant") {
+				const gatewayRouting = gatewayRoutingObservationFromRecord(
+					enrichedEvent.message as unknown as Record<string, unknown>,
+				);
+				if (
+					gatewayRouting !== null &&
+					((gatewayRouting.attemptedFallbacks ?? 0) > 0 || (gatewayRouting.attemptedRetries ?? 0) > 0)
+				) {
+					deps.emitNotice(`[Clio Coder] ${gatewayRoutingObservationLabel(gatewayRouting)}`);
+				}
 				const interruptedUsage = estimatedUsageForInterruptedTurn(enrichedEvent.message, context.promptSideTokens());
 				if (interruptedUsage !== null) {
 					// Persistence records the same estimate, but it does so after the

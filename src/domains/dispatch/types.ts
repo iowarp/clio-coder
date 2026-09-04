@@ -6,6 +6,7 @@
  * are pure data: no class methods, no engine refs.
  */
 
+import type { GatewayRoutingObservation } from "../../core/gateway-routing.js";
 import type { ResponseModelIdObservation } from "../../core/response-model-id.js";
 import type { SkillActivation } from "../../core/skill-activation.js";
 import type { ToolProfileName } from "../../tools/profiles.js";
@@ -652,6 +653,8 @@ export interface RunReceiptUpstreamResponse {
 	responseModelIdObservation: ResponseModelIdObservation;
 	differingResponseModelId: string | null;
 	providerResponseId: string | null;
+	/** Physical route and proxy attempts reported by LiteLLM, when this call used that gateway. */
+	gatewayRouting?: GatewayRoutingObservation;
 }
 
 /**

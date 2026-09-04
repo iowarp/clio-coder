@@ -490,7 +490,16 @@ export function assistantSessionPayload(
 	if (Array.isArray(raw.content)) payload.content = raw.content;
 	if (thinking.length > 0) payload.thinking = thinking;
 	payload.responseModelIdObservation = responseModelIdObservationFromRecord(raw, "not-observed");
-	for (const key of ["usage", "api", "provider", "model", "responseModel", "responseId", "diagnostics"]) {
+	for (const key of [
+		"usage",
+		"api",
+		"provider",
+		"model",
+		"responseModel",
+		"responseId",
+		"gatewayRouting",
+		"diagnostics",
+	]) {
 		if (raw[key] !== undefined) payload[key] = raw[key];
 	}
 	if (failure && !isSelfExplainingAbort({ stopReason: raw.stopReason, errorMessage: raw.errorMessage, text })) {

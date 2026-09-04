@@ -1,3 +1,4 @@
+import { gatewayRoutingObservationFromRecord, gatewayRoutingObservationLabel } from "../core/gateway-routing.js";
 import { responseModelIdObservationFromRecord } from "../core/response-model-id.js";
 import { durableAssistantTextFromEvent } from "../domains/dispatch/event-pump.js";
 import type { RunReceipt } from "../domains/dispatch/types.js";
@@ -22,4 +23,13 @@ export function receiptResponseModelIdObservationLabel(receipt: Pick<RunReceipt,
 		return `legacy-difference-only:${observation.differingModelId ?? "none"}`;
 	});
 	return `response_model_id_observation=${labels.join(",")}`;
+}
+
+/** Human projection of gateway routes carried by a receipt. */
+export function receiptGatewayRoutingLabel(receipt: Pick<RunReceipt, "upstreamResponses">): string | null {
+	const observations = (receipt.upstreamResponses ?? [])
+		.map((response) => gatewayRoutingObservationFromRecord(response as unknown as Record<string, unknown>))
+		.filter((observation) => observation !== null);
+	if (observations.length === 0) return null;
+	return observations.map(gatewayRoutingObservationLabel).join(" | ");
 }
