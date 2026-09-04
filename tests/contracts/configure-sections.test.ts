@@ -1,12 +1,18 @@
 import { match, ok, strictEqual } from "node:assert/strict";
-import { mkdirSync, readFileSync, rmSync, writeFileSync } from "node:fs";
+import { existsSync, mkdirSync, readFileSync, rmSync, writeFileSync } from "node:fs";
+import { createServer, type Server } from "node:http";
+import type { AddressInfo } from "node:net";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { PassThrough } from "node:stream";
 import { describe, it } from "node:test";
 
 import { runConfigureCommand } from "../../src/cli/configure.js";
+import { runtimesForCategory } from "../../src/cli/configure-target.js";
 import { resetXdgCache } from "../../src/core/xdg.js";
+import { listProviderSupportEntries } from "../../src/domains/providers/index.js";
+import { getRuntimeRegistry } from "../../src/domains/providers/registry.js";
+import { registerBuiltinRuntimes } from "../../src/domains/providers/runtimes/builtins.js";
 
 function isolatedEnv(): {
 	root: string;
@@ -164,6 +170,356 @@ async function captureConfigure(
 		resetXdgCache();
 	}
 }
+
+/**
+ * A home with no targets, which is what makes `configure` open the first-run
+ * wizard rather than the settings menu.
+ *
+ * PATH is emptied so the interop detection at the end of the wizard resolves no
+ * coding agents: it reads the real PATH, and whether the developer happens to
+ * have Codex installed must not decide how many prompts this test answers.
+ */
+function unconfiguredEnv(): { root: string; settingsFile: string; env: Record<string, string>; cleanup: () => void } {
+	const rand = Math.random().toString(36).slice(2, 8);
+	const root = join(tmpdir(), `clio-test-onboarding-${rand}`);
+	const configDir = join(root, ".config", "clio-coder");
+	mkdirSync(configDir, { recursive: true });
+	return {
+		root,
+		settingsFile: join(configDir, "settings.yaml"),
+		env: {
+			HOME: root,
+			CLIO_CODER_HOME: "",
+			CLIO_CODER_CONFIG_DIR: configDir,
+			CLIO_CODER_DATA_DIR: join(root, ".local", "share", "clio-coder"),
+			CLIO_CODER_STATE_DIR: join(root, ".local", "state", "clio-coder"),
+			CLIO_CODER_CACHE_DIR: join(root, ".cache", "clio-coder"),
+			TERM: "xterm-256color",
+			PATH: "",
+		},
+		cleanup: () => {
+			resetXdgCache();
+			try {
+				rmSync(root, { recursive: true, force: true });
+			} catch {
+				// Ignore cleanup
+			}
+		},
+	};
+}
+
+/** An OpenAI-compatible endpoint with two models, so the model step has a real list. */
+async function modelServer(): Promise<{ url: string; close: () => Promise<void> }> {
+	const server: Server = createServer((req, res) => {
+		if (req.url?.endsWith("/v1/models")) {
+			res.writeHead(200, { "content-type": "application/json" });
+			res.end(JSON.stringify({ object: "list", data: [{ id: "alpha-1" }, { id: "beta-2" }] }));
+			return;
+		}
+		res.writeHead(404).end();
+	});
+	await new Promise<void>((resolve) => server.listen(0, "127.0.0.1", resolve));
+	const { port } = server.address() as AddressInfo;
+	return {
+		url: `http://127.0.0.1:${port}`,
+		close: () => new Promise<void>((resolve) => server.close(() => resolve())),
+	};
+}
+
+const ESC = String.fromCharCode(27);
+const DOWN = `${ESC}[B`;
+const ENTER = "\r";
+const ESCAPE = ESC;
+const CLEAR_LINE = String.fromCharCode(21);
+
+function fakeTty(
+	columns = 100,
+	rows = 40,
+): {
+	input: NodeJS.ReadStream;
+	output: NodeJS.WriteStream;
+	transcript: () => string;
+} {
+	const input = new PassThrough() as unknown as NodeJS.ReadStream;
+	const output = new PassThrough() as unknown as NodeJS.WriteStream;
+	Object.assign(input, { isTTY: true, setRawMode: () => input });
+	Object.assign(output, { isTTY: true, columns, rows });
+	let raw = "";
+	output.on("data", (chunk: Buffer) => {
+		raw += chunk.toString("utf8");
+	});
+	return { input, output, transcript: () => raw };
+}
+
+/** One screen of the wizard: what to wait for, and what to press once it is up. */
+interface ScriptStep {
+	/**
+	 * Words this screen puts up. Omit where the screen repeats one already seen,
+	 * because every keypress redraws the frame and a second showing of the same
+	 * heading is indistinguishable from the first in a flat transcript.
+	 */
+	waitFor?: string;
+	/** Milliseconds to let a screen redraw when there is no new text to wait for. */
+	settleMs?: number;
+	keys: ReadonlyArray<string>;
+	/** The step is allowed not to appear, and the keys are then not sent. */
+	optional?: boolean;
+}
+
+/**
+ * Drive the wizard by watching for each screen before answering it.
+ *
+ * Fixed delays cannot work here: the URL step probes over the network and the
+ * model step reads a list back, so the moment a prompt is ready is not a moment
+ * a timer knows. Every step waits for the words the screen puts up.
+ */
+async function runWizard(
+	env: Record<string, string>,
+	script: ReadonlyArray<ScriptStep>,
+): Promise<{ code: number; transcript: () => string; stderr: string }> {
+	const saved = new Map(Object.keys(env).map((key) => [key, process.env[key]]));
+	const origStderrWrite = process.stderr.write;
+	let stderr = "";
+	for (const [key, value] of Object.entries(env)) {
+		if (value === "") delete process.env[key];
+		else process.env[key] = value;
+	}
+	resetXdgCache();
+	process.stderr.write = ((chunk: unknown) => {
+		stderr += String(chunk);
+		return true;
+	}) as typeof process.stderr.write;
+
+	const tty = fakeTty();
+	const pending = runConfigureCommand([], tty.input, tty.output);
+	let settled = false;
+	void pending.then(() => {
+		settled = true;
+	});
+
+	try {
+		for (const step of script) {
+			if (step.waitFor !== undefined) {
+				const cue = step.waitFor;
+				const deadline = Date.now() + (step.optional ? 2_000 : 20_000);
+				while (!tty.transcript().includes(cue) && !settled && Date.now() < deadline) {
+					await new Promise((resolve) => setTimeout(resolve, 10));
+				}
+				if (!tty.transcript().includes(cue)) {
+					if (step.optional) continue;
+					throw new Error(`wizard never showed ${JSON.stringify(cue)}:\n${plainText(tty.transcript())}`);
+				}
+			} else {
+				await new Promise((resolve) => setTimeout(resolve, step.settleMs ?? 100));
+			}
+			for (const key of step.keys) {
+				tty.input.push(key);
+				await new Promise((resolve) => setImmediate(resolve));
+			}
+		}
+		return { code: await pending, transcript: tty.transcript, stderr };
+	} finally {
+		process.stderr.write = origStderrWrite;
+		for (const [key, value] of saved) {
+			if (value === undefined) delete process.env[key];
+			else process.env[key] = value;
+		}
+		resetXdgCache();
+	}
+}
+
+/** Arrow presses from the top of the runtime list to one runtime, by id. */
+function stepsDownToRuntime(runtimeId: string): string[] {
+	const registry = getRuntimeRegistry();
+	if (registry.list().length === 0) registerBuiltinRuntimes(registry);
+	const entries = runtimesForCategory(listProviderSupportEntries(registry.list()), "local-http");
+	const index = entries.findIndex((entry) => entry.runtimeId === runtimeId);
+	ok(index >= 0, `${runtimeId} is not in the local HTTP category`);
+	return Array.from({ length: index }, () => DOWN);
+}
+
+/** Everything the terminal drew, with the cursor and color escapes taken out. */
+function plainText(transcript: string): string {
+	return transcript.replace(new RegExp(`${ESC}\\[[0-9;?]*[A-Za-z]`, "gu"), "");
+}
+
+/**
+ * Put one detectable coding agent on PATH.
+ *
+ * Interop detection resolves binaries by name, so a stub that answers
+ * `--version` is a real detection as far as the review is concerned, and it is
+ * the only way to reach the delegation step without depending on what the
+ * developer happens to have installed.
+ */
+function fakeAgentOnPath(root: string, binary: string): string {
+	const binDir = join(root, "fake-bin");
+	mkdirSync(binDir, { recursive: true });
+	const file = join(binDir, binary);
+	writeFileSync(file, "#!/bin/sh\necho '1.2.3'\n", { encoding: "utf8", mode: 0o755 });
+	return binDir;
+}
+
+describe("contracts/configure-onboarding", () => {
+	it("takes a fresh home through the wizard on arrow keys alone and writes what it says it wrote", async () => {
+		const testEnv = unconfiguredEnv();
+		const server = await modelServer();
+		try {
+			const result = await runWizard(testEnv.env, [
+				{ waitFor: "How will you connect Clio to a model?", keys: [DOWN, ENTER] },
+				{ waitFor: "Which runtime?", keys: [...stepsDownToRuntime("openai-compat"), ENTER] },
+				{ waitFor: "Target id", keys: [CLEAR_LINE, ...`wizard-target`.split(""), ENTER] },
+				{ waitFor: "Where is the server?", keys: [CLEAR_LINE, ...server.url.split(""), ENTER] },
+				{ waitFor: "How should Clio get the API key?", keys: [ENTER] },
+				{ waitFor: "Which model?", keys: [DOWN, ENTER] },
+				{ waitFor: "How hard should it think?", keys: [DOWN, ENTER] },
+				{ waitFor: "Delegate to any of these?", keys: [ENTER], optional: true },
+			]);
+			strictEqual(result.code, 0, `${result.stderr}\n${plainText(result.transcript())}`);
+
+			const screen = plainText(result.transcript());
+			for (const expected of [
+				"Welcome to Clio Coder",
+				"How will you connect Clio to a model?",
+				"↑/↓ move",
+				"reachable, 2 models",
+				"target wizard-target saved",
+				"chat runs on wizard-target",
+				"fleet default is wizard-target",
+				"settings written to",
+				"clio-coder configure",
+				"Done",
+			]) {
+				ok(screen.includes(expected), `${JSON.stringify(expected)} missing from:\n${screen}`);
+			}
+			// The whole point: not one readline prompt survives on this path.
+			ok(!/Selection \[/u.test(screen), `a numbered prompt is still here:\n${screen}`);
+			ok(!/\[y\/N\]|\[Y\/n\]/u.test(screen), `a yes/no prompt is still here:\n${screen}`);
+			ok(!/\[env\|stored\|keep\|skip\]/u.test(screen), `the credential paragraph is still here:\n${screen}`);
+
+			ok(existsSync(testEnv.settingsFile), "the wizard must write settings.yaml");
+			const settings = readFileSync(testEnv.settingsFile, "utf8");
+			match(settings, /id: wizard-target/u);
+			match(settings, /runtime: openai-compat/u);
+			match(settings, /defaultModel: beta-2/u, "the model the arrow keys landed on is the one saved");
+			match(settings, /target: wizard-target/u);
+			// The level picker opens on `low`, so one press down is `medium`.
+			match(settings, /thinkingLevel: medium/u);
+			// openai-compat reports nothing about reasoning, so the thinking answer
+			// is also what records whether the model has it.
+			match(settings, /reasoning: true/u);
+		} finally {
+			await server.close();
+			testEnv.cleanup();
+		}
+	});
+
+	it("offers the detected delegation peers as one list instead of a y/N each", async () => {
+		const testEnv = unconfiguredEnv();
+		const server = await modelServer();
+		const env = { ...testEnv.env, PATH: fakeAgentOnPath(testEnv.root, "opencode") };
+		try {
+			const result = await runWizard(env, [
+				{ waitFor: "How will you connect Clio to a model?", keys: [DOWN, ENTER] },
+				{ waitFor: "Which runtime?", keys: [...stepsDownToRuntime("openai-compat"), ENTER] },
+				{ waitFor: "Target id", keys: [CLEAR_LINE, ...`peer-target`.split(""), ENTER] },
+				{ waitFor: "Where is the server?", keys: [CLEAR_LINE, ...server.url.split(""), ENTER] },
+				{ waitFor: "How should Clio get the API key?", keys: [ENTER] },
+				{ waitFor: "Which model?", keys: [ENTER] },
+				{ waitFor: "How hard should it think?", keys: [ENTER] },
+				// Space ticks the row, enter confirms the whole list at once.
+				{ waitFor: "Delegate to any of these?", keys: [" ", ENTER] },
+			]);
+			strictEqual(result.code, 0, `${result.stderr}\n${plainText(result.transcript())}`);
+
+			const screen = plainText(result.transcript());
+			ok(screen.includes("space toggle"), `the list must say how to tick a row:\n${screen}`);
+			ok(screen.includes("OpenCode"), `the detected agent is missing:\n${screen}`);
+			ok(!/\[y\/N\]/u.test(screen), `a per-agent yes/no question survived:\n${screen}`);
+			// The paragraph each proposal used to carry said the same two facts every
+			// time. They are stated once above the list now, and the row carries what
+			// actually differs.
+			ok(
+				!screen.includes("is installed and not configured as a delegation agent"),
+				`the per-agent paragraph survived:\n${screen}`,
+			);
+			ok(screen.includes("delegation agent opencode added"), `the wired peer is not in the results:\n${screen}`);
+
+			const settings = readFileSync(testEnv.settingsFile, "utf8");
+			match(settings, /id: opencode/u);
+			match(settings, /toolGovernance: clio-coder-policy/u);
+		} finally {
+			await server.close();
+			testEnv.cleanup();
+		}
+	});
+
+	it("goes back from the third step without losing the first two", async () => {
+		const testEnv = unconfiguredEnv();
+		try {
+			const result = await runWizard(testEnv.env, [
+				{ waitFor: "How will you connect Clio to a model?", keys: [DOWN, ENTER] },
+				{ waitFor: "Which runtime?", keys: [...stepsDownToRuntime("llamacpp"), ENTER] },
+				{ waitFor: "Target id", keys: [ESCAPE] },
+				// The runtime list is back, drawing the same words it drew before, so
+				// these two wait on the redraw rather than on text. The wait is longer
+				// than readline's 500ms escape-sequence timeout: a lone Escape is only
+				// delivered once that has passed, and two sent inside one window arrive
+				// together and are read as a meta prefix instead of two keys.
+				{ settleMs: 800, keys: [ESCAPE] },
+				{ settleMs: 800, keys: [ESCAPE] },
+			]);
+			strictEqual(result.code, 130, "backing out of the first step leaves Clio unconfigured");
+
+			const screen = plainText(result.transcript());
+			const askedTargetId = screen.lastIndexOf("Target id");
+			const reopened = screen.indexOf("Which runtime?", askedTargetId);
+			ok(reopened > 0, `escape on step 3 did not reopen step 2:\n${screen}`);
+			// Reopened on the runtime that was already chosen, which is what "without
+			// losing the earlier answers" has to mean for a list step.
+			ok(
+				/❯ llamacpp/u.test(screen.slice(reopened)),
+				`step 2 reopened at the top of the list instead of on its answer:\n${screen.slice(reopened)}`,
+			);
+			// Step 1's answer was on the rail the whole time, and step 3 left no row
+			// behind when it was abandoned.
+			ok(screen.slice(0, reopened).includes("Local HTTP server"), `step 1's answer was lost:\n${screen}`);
+			ok(!/Target id\s{4,}\S/u.test(screen), "the abandoned step must not leave an answer row behind");
+			ok(screen.includes("Cancelled, nothing written"), `no closing line:\n${screen}`);
+			match(readFileSync(testEnv.settingsFile, "utf8"), /targets: \[\]/u, "a cancelled wizard registers no target");
+		} finally {
+			testEnv.cleanup();
+		}
+	});
+
+	it("exits 130 when the very first step is cancelled, because nothing is configured", async () => {
+		const testEnv = unconfiguredEnv();
+		try {
+			const result = await runWizard(testEnv.env, [{ waitFor: "How will you connect Clio to a model?", keys: [ESCAPE] }]);
+			strictEqual(result.code, 130);
+			match(result.stderr, /configuration cancelled/u);
+			// The home is initialized before the wizard opens, so the file exists; a
+			// cancel is the difference between a template and a configured target.
+			match(readFileSync(testEnv.settingsFile, "utf8"), /targets: \[\]/u);
+		} finally {
+			testEnv.cleanup();
+		}
+	});
+
+	it("degrades to the numbered prompts where no key can be read", async () => {
+		const testEnv = unconfiguredEnv();
+		try {
+			// Pipes, not a terminal: the wizard cannot run, and the readline flow it
+			// replaced is still the only way to answer, so it must still be there.
+			const res = await captureConfigure([], testEnv.env, ["q\n"]);
+			strictEqual(res.code, 130, res.stderr);
+			match(res.stderr, /configuration cancelled/u);
+			match(res.stdout, /Selection \[1\]/u);
+			ok(!res.stdout.includes("Welcome to Clio Coder"), "the arrow-key wizard must not open on a pipe");
+		} finally {
+			testEnv.cleanup();
+		}
+	});
+});
 
 describe("contracts/configure-sections", () => {
 	it("emits the effective settings as JSON, unchanged by the flag", async () => {
