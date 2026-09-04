@@ -399,6 +399,7 @@ export interface DescriptorParts {
 	maxTokens?: number;
 	reasoning?: boolean;
 	lmstudio?: TargetDescriptor["lmstudio"];
+	litellm?: TargetDescriptor["litellm"];
 }
 
 export function buildDescriptor(runtime: RuntimeDescriptor, id: string, parts: DescriptorParts): TargetDescriptor {
@@ -418,6 +419,7 @@ export function buildDescriptor(runtime: RuntimeDescriptor, id: string, parts: D
 	if (parts.reasoning !== undefined) caps.reasoning = parts.reasoning;
 	if (Object.keys(caps).length > 0) descriptor.capabilities = caps;
 	if (parts.lmstudio) descriptor.lmstudio = parts.lmstudio;
+	if (parts.litellm) descriptor.litellm = parts.litellm;
 	return descriptor;
 }
 

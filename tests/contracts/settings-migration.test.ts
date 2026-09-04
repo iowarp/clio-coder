@@ -69,6 +69,49 @@ describe("settings and migration boundary", () => {
 		strictEqual(invalid.settings.chat.target, null, "retired paths never execute as aliases");
 	});
 
+	it("validates LiteLLM request controls without admitting arbitrary target keys", () => {
+		const valid = validateSettings({
+			version: 2,
+			targets: [
+				{
+					id: "blade",
+					runtime: "litellm",
+					litellm: {
+						request: {
+							tags: ["homelab", "homelab", "interactive"],
+							sendSessionId: true,
+							timeoutSeconds: 90.5,
+							streamTimeoutSeconds: 180,
+							numRetries: 0,
+						},
+					},
+				},
+			],
+		});
+		deepStrictEqual(valid.issues, []);
+		deepStrictEqual(valid.settings.targets[0]?.litellm?.request, {
+			tags: ["homelab", "interactive"],
+			sendSessionId: true,
+			timeoutSeconds: 90.5,
+			streamTimeoutSeconds: 180,
+			numRetries: 0,
+		});
+
+		const invalid = validateSettings({
+			version: 2,
+			targets: [
+				{
+					id: "blade",
+					runtime: "litellm",
+					litellm: { request: { tags: ["bad,tag"], numRetries: -1, timeoutSeconds: 0 } },
+				},
+			],
+		});
+		ok(invalid.issues.some((issue) => issue.path === "targets[0].litellm.request.tags"));
+		ok(invalid.issues.some((issue) => issue.path === "targets[0].litellm.request.numRetries"));
+		ok(invalid.issues.some((issue) => issue.path === "targets[0].litellm.request.timeoutSeconds"));
+	});
+
 	it("migrates v1 atomically, keeps the original backup, and is idempotent", async () => {
 		const original = `version: 1
 orchestrator: { target: local, model: qwen }

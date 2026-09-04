@@ -790,6 +790,7 @@ export function createChatLoop(deps: CreateChatLoopDeps): ChatLoop {
 		context,
 		middleware,
 		retrySettings,
+		sessionId: () => deps.session?.current()?.id,
 		emit: emitRuntimeEvent,
 		emitNotice,
 		toolStartTimes,

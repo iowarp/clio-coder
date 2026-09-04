@@ -482,6 +482,7 @@ async function runNonInteractive(runtime: RuntimeDescriptor, args: ParsedArgs): 
 		...(args.maxTokens !== undefined ? { maxTokens: args.maxTokens } : {}),
 		...(args.reasoning !== undefined ? { reasoning: args.reasoning } : {}),
 		...(existing?.lmstudio ? { lmstudio: existing.lmstudio } : {}),
+		...(existing?.litellm ? { litellm: existing.litellm } : {}),
 	});
 	const inventory = await resolveSupportedWireModels(runtime, seed, existing, args.apiKey);
 	const wireModels = inventory.models;
@@ -512,6 +513,7 @@ async function runNonInteractive(runtime: RuntimeDescriptor, args: ParsedArgs): 
 		...(args.maxTokens !== undefined ? { maxTokens: args.maxTokens } : {}),
 		...(args.reasoning !== undefined ? { reasoning: args.reasoning } : {}),
 		...(existing?.lmstudio ? { lmstudio: existing.lmstudio } : {}),
+		...(existing?.litellm ? { litellm: existing.litellm } : {}),
 	});
 	const setOrchestrator = args.setOrchestrator || args.orchestratorModel !== undefined;
 	const setBackground = args.setBackground || args.backgroundModel !== undefined;
@@ -838,6 +840,7 @@ async function runTargetSetupInteractive(
 		...(defaults.maxTokens !== undefined ? { maxTokens: defaults.maxTokens } : {}),
 		...(defaults.reasoning !== undefined ? { reasoning: defaults.reasoning } : {}),
 		...(existing?.lmstudio ? { lmstudio: existing.lmstudio } : {}),
+		...(existing?.litellm ? { litellm: existing.litellm } : {}),
 	});
 
 	if (runtime.kind === "http") {
@@ -924,6 +927,7 @@ async function runTargetSetupInteractive(
 		...(defaults.maxTokens !== undefined ? { maxTokens: defaults.maxTokens } : {}),
 		...(reasoningChoice !== undefined ? { reasoning: reasoningChoice } : {}),
 		...(existing?.lmstudio ? { lmstudio: existing.lmstudio } : {}),
+		...(existing?.litellm ? { litellm: existing.litellm } : {}),
 	});
 	try {
 		assertOrchestratorReplacementEligible(settings, descriptor);

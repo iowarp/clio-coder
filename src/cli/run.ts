@@ -29,7 +29,11 @@ import { SafetyDomainModule } from "../domains/safety/index.js";
 import { SchedulingDomainModule } from "../domains/scheduling/index.js";
 import { SessionDomainModule } from "../domains/session/index.js";
 import type { ImageContent } from "../engine/types.js";
-import { assistantTextFromEvent, receiptResponseModelIdObservationLabel } from "../tools/dispatch-event-text.js";
+import {
+	assistantTextFromEvent,
+	receiptGatewayRoutingLabel,
+	receiptResponseModelIdObservationLabel,
+} from "../tools/dispatch-event-text.js";
 import { isToolProfileName } from "../tools/profiles.js";
 import { parseRunCliArgs, type RunCliArgs } from "./args.js";
 import { runClioCommand } from "./clio.js";
@@ -562,7 +566,8 @@ function formatReceipt(r: RunReceipt): string {
 		typeof r.reasoningTokenCount === "number" && r.reasoningTokenCount > 0 ? ` reasoning=${r.reasoningTokenCount}` : "";
 	const failure = r.failureMessage ? ` error=${r.failureMessage}` : "";
 	const responseModelIdObservation = receiptResponseModelIdObservationLabel(r);
-	return `receipt: ${r.runId} agent=${r.agentId} exit=${r.exitCode} target=${r.targetId} requested_model_id=${r.wireModelId}${responseModelIdObservation ? ` ${responseModelIdObservation}` : ""} tokens=${r.tokenCount}${reasoning}${failure} start=${r.startedAt} end=${r.endedAt}`;
+	const gatewayRouting = receiptGatewayRoutingLabel(r);
+	return `receipt: ${r.runId} agent=${r.agentId} exit=${r.exitCode} target=${r.targetId} requested_model_id=${r.wireModelId}${responseModelIdObservation ? ` ${responseModelIdObservation}` : ""}${gatewayRouting ? ` ${gatewayRouting}` : ""} tokens=${r.tokenCount}${reasoning}${failure} start=${r.startedAt} end=${r.endedAt}`;
 }
 
 function mapExitCode(r: RunReceipt): number {

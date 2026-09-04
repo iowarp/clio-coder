@@ -12,6 +12,10 @@ import type { SafeEventBus } from "../../src/core/event-bus.js";
 import type { ProvidersContract } from "../../src/domains/providers/index.js";
 import { createRuntimeRegistry } from "../../src/domains/providers/registry.js";
 import { registerBuiltinRuntimes } from "../../src/domains/providers/runtimes/builtins.js";
+import litellmRuntime, {
+	aggregateLiteLLMCapabilities,
+	capabilitiesFromLiteLLMModelInfo,
+} from "../../src/domains/providers/runtimes/protocol/litellm.js";
 import {
 	makeOpenAICompatRuntime,
 	synthesizeOpenAICompatModel,
@@ -31,7 +35,7 @@ afterEach(() => {
 	for (const directory of temporaryDirectories.splice(0)) rmSync(directory, { recursive: true, force: true });
 });
 
-function completionResponse(text: string): Response {
+function completionResponse(text: string, headers?: Record<string, string>): Response {
 	const chunks = [
 		{ model: "wire-model", choices: [{ index: 0, delta: { content: text } }] },
 		{
@@ -41,7 +45,10 @@ function completionResponse(text: string): Response {
 		},
 	];
 	const body = [...chunks.map((chunk) => `data: ${JSON.stringify(chunk)}`), "data: [DONE]", ""].join("\n\n");
-	return new Response(body, { status: 200, headers: { "content-type": "text/event-stream" } });
+	return new Response(body, {
+		status: 200,
+		headers: { "content-type": "text/event-stream", ...Object.fromEntries(new Headers(headers)) },
+	});
 }
 
 function inertOverlayHandle(onHide?: () => void): OverlayHandle {
@@ -217,6 +224,120 @@ describe("provider transport boundary", () => {
 		const done = events.find((event) => event.type === "done");
 		ok(done?.type === "done");
 		deepStrictEqual(done.message.content, [{ type: "text", text: "wire-ok" }]);
+	});
+
+	it("uses LiteLLM as the retry authority and records its physical route", async () => {
+		const model = litellmRuntime.synthesizeModel(
+			{
+				id: "blade",
+				runtime: "litellm",
+				url: "http://blade.example:4000",
+				litellm: {
+					request: {
+						tags: ["homelab"],
+						timeoutSeconds: 90,
+						streamTimeoutSeconds: 180,
+						numRetries: 1,
+					},
+				},
+			},
+			"chat",
+			null,
+		) as Model<"openai-completions">;
+		let requestHeaders = new Headers();
+		const events: AssistantMessageEvent[] = [];
+		const context = { messages: [{ role: "user", content: "hello", timestamp: 0 }] } as unknown as Context;
+		for await (const event of openAICompletionsApiProvider.streamSimple(model, context, {
+			apiKey: "test-key",
+			sessionId: "session-stable-1234",
+			fetch: async (_input, init) => {
+				requestHeaders = new Headers(init?.headers);
+				return completionResponse("gateway-ok", {
+					"x-litellm-call-id": "call-1",
+					"x-litellm-model-group": "chat",
+					"x-litellm-model-name": "openai/qwen3.8-27b",
+					"x-litellm-model-api-base": "http://user:secret@dynamo.example:1234/v1?token=secret",
+					"x-litellm-model-id": "deployment-1",
+					"x-litellm-attempted-fallbacks": "0",
+					"x-litellm-attempted-retries": "0",
+					"x-litellm-overhead-duration-ms": "1.4",
+				});
+			},
+		})) {
+			events.push(event);
+		}
+		strictEqual(requestHeaders.get("x-litellm-tags"), "clio-coder,homelab");
+		strictEqual(requestHeaders.get("x-litellm-session-id"), "session-stable-1234");
+		strictEqual(requestHeaders.get("x-litellm-timeout"), "90");
+		strictEqual(requestHeaders.get("x-litellm-stream-timeout"), "180");
+		strictEqual(requestHeaders.get("x-litellm-num-retries"), "1");
+		const done = events.find((event) => event.type === "done");
+		ok(done?.type === "done");
+		deepStrictEqual(done.message.gatewayRouting, {
+			gateway: "litellm",
+			callId: "call-1",
+			modelGroup: "chat",
+			modelName: "openai/qwen3.8-27b",
+			apiBaseHost: "dynamo.example:1234",
+			deploymentId: "deployment-1",
+			attemptedFallbacks: 0,
+			attemptedRetries: 0,
+			overheadMs: 1.4,
+		});
+	});
+
+	it("does not stack OpenAI SDK retries beneath the LiteLLM router", async () => {
+		const model = litellmRuntime.synthesizeModel(
+			{ id: "blade", runtime: "litellm", url: "http://blade.example:4000" },
+			"chat",
+			null,
+		) as Model<"openai-completions">;
+		let requests = 0;
+		const context = { messages: [{ role: "user", content: "hello", timestamp: 0 }] } as unknown as Context;
+		try {
+			for await (const _event of openAICompletionsApiProvider.streamSimple(model, context, {
+				apiKey: "test-key",
+				fetch: async () => {
+					requests += 1;
+					return new Response(JSON.stringify({ error: { message: "unavailable", type: "server_error" } }), {
+						status: 503,
+						headers: { "content-type": "application/json" },
+					});
+				},
+			})) {
+				// The adapter may represent the terminal provider failure as an event.
+			}
+		} catch {
+			// Or the event stream may reject. The transport-attempt count is the contract here.
+		}
+		strictEqual(requests, 1);
+	});
+
+	it("aggregates a LiteLLM alias to capabilities guaranteed by every deployment", () => {
+		const strong = capabilitiesFromLiteLLMModelInfo({
+			mode: "chat",
+			max_input_tokens: 262_144,
+			max_output_tokens: 65_536,
+			supports_function_calling: true,
+			supports_vision: true,
+			supports_response_schema: true,
+		});
+		const narrow = capabilitiesFromLiteLLMModelInfo({
+			mode: "chat",
+			max_input_tokens: 131_072,
+			max_output_tokens: 32_768,
+			supports_function_calling: true,
+			supports_vision: false,
+			supports_response_schema: false,
+		});
+		deepStrictEqual(aggregateLiteLLMCapabilities([strong, narrow]), {
+			chat: true,
+			tools: true,
+			vision: false,
+			structuredOutputs: "none",
+			contextWindow: 131_072,
+			maxTokens: 32_768,
+		});
 	});
 
 	it("reports an unavailable probe instead of inventing a healthy target", async () => {

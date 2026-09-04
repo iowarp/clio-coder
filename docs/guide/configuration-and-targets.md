@@ -72,6 +72,7 @@ Start one local runtime and register exactly one target first. Clio integrates w
 - **[llama.cpp](https://github.com/ggerganov/llama.cpp):** A minimal C/C++ implementation for local LLM inference. Target runtime ID: `llamacpp`.
 - **[vLLM](https://github.com/vllm-project/vllm):** A high-throughput and memory-efficient LLM serving engine. Target runtime ID: `vllm`.
 - **[SGLang](https://github.com/sgl-project/sglang):** A fast serving framework for large language models. Target runtime ID: `sglang`.
+- **[LiteLLM](https://docs.litellm.ai):** An OpenAI-compatible gateway that publishes model aliases across multiple inference endpoints. Target runtime ID: `litellm`.
 
 Common local runtime IDs and default URLs are:
 
@@ -82,6 +83,7 @@ Common local runtime IDs and default URLs are:
 | llama.cpp server | `llamacpp` | `http://127.0.0.1:8080` |
 | vLLM | `vllm` | `http://127.0.0.1:8000` |
 | SGLang | `sglang` | `http://127.0.0.1:30000` |
+| LiteLLM gateway | `litellm` | `http://127.0.0.1:4000` |
 
 
 Example registration:
@@ -229,6 +231,46 @@ integrations:
 ```
 
 Target capability overrides may include `chat`, `tools`, `toolCallFormat`, `reasoning`, `thinkingFormat`, `structuredOutputs`, `vision`, `audio`, `embeddings`, `rerank`, `fim`, `contextWindow`, and `maxTokens`.
+
+### LiteLLM gateways
+
+Register LiteLLM with its first-class runtime so discovery reads
+`/v1/model/info` rather than treating semantic aliases as bare OpenAI models:
+
+```yaml
+targets:
+  - id: ai-gateway
+    runtime: litellm
+    url: http://gateway.example:4000
+    defaultModel: chat
+    auth:
+      apiKeyEnvVar: CLIO_AI_GATEWAY_KEY
+    litellm:
+      request:
+        tags: [homelab]
+        sendSessionId: true
+        # Optional proxy overrides; omit them to keep server policy.
+        timeoutSeconds: 300
+        streamTimeoutSeconds: 180
+        numRetries: 1
+```
+
+Clio adds the `clio-coder` request tag and forwards its stable session id by
+default. Explicit `x-litellm-*` headers on the target or request take
+precedence. Set `sendSessionId: false` when the gateway must not correlate calls.
+The timeout values and `numRetries` become LiteLLM request headers and override
+the proxy's defaults only for this target. Clio disables the OpenAI SDK's
+client-side retry layer on LiteLLM requests, leaving retries and fallbacks with
+the gateway where they are visible in response headers; Clio's operator-visible
+turn and fleet recovery policies still apply above the request.
+
+For every response, Clio records LiteLLM's selected model group, physical model,
+sanitized upstream host, fallback/retry counts, and proxy timing in the session
+and worker receipt. A nonzero fallback or retry is also announced in the live
+transcript. If an alias has multiple deployments, discovered capabilities are
+the conservative intersection and numerical limits are the smallest limits
+published by every deployment, so routing cannot select a weaker backend than
+Clio planned for.
 
 ### `maxConcurrentRequests`
 

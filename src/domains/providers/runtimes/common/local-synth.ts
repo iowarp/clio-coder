@@ -24,6 +24,7 @@ export interface ClioLocalModelMetadata {
 		quirks?: LocalModelQuirks;
 		chatTemplateKwargsUnsupported?: boolean;
 		lmstudio?: TargetDescriptor["lmstudio"];
+		litellm?: TargetDescriptor["litellm"];
 	};
 }
 
@@ -109,6 +110,7 @@ export function synthLocalModel(input: LocalSynthesisInput): Model<Api> {
 			...(kb?.entry.family ? { family: kb.entry.family } : {}),
 			...(quirks ? { quirks } : {}),
 			...(target.lmstudio ? { lmstudio: target.lmstudio } : {}),
+			...(target.litellm ? { litellm: target.litellm } : {}),
 		},
 	};
 	if (headers) model.headers = headers;

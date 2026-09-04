@@ -16,6 +16,7 @@ import { performance } from "node:perf_hooks";
 import { BusChannels, type DispatchCompletedPayload, type DispatchRunIdentity } from "../../core/bus-events.js";
 import { DEFAULT_SETTINGS, type DelegationToolGovernance } from "../../core/defaults.js";
 import type { DomainBundle, DomainContext, DomainExtension } from "../../core/domain-loader.js";
+import { gatewayRoutingObservationFromRecord } from "../../core/gateway-routing.js";
 import { GUARDRAIL_DEFAULTS } from "../../core/guardrails.js";
 import { readClioVersion, readPiMonoVersion } from "../../core/package-root.js";
 import { canonicalizeExistingPath } from "../../core/path-canonical.js";
@@ -3827,11 +3828,13 @@ export function createDispatchBundle(
 				const responseModelIdObservation = responseModelIdObservationFromRecord(event.message, "not-observed");
 				const differingResponseModelId = readStringOrNull(event.message.responseModel);
 				const providerResponseId = readStringOrNull(event.message.responseId);
+				const gatewayRouting = gatewayRoutingObservationFromRecord(event.message);
 				upstreamResponses.push({
 					requestedModelId,
 					responseModelIdObservation,
 					differingResponseModelId,
 					providerResponseId,
+					...(gatewayRouting !== null ? { gatewayRouting } : {}),
 				});
 				if (event.message.stopReason === "error") {
 					const message = readStringOrNull(event.message.errorMessage);
@@ -4865,11 +4868,13 @@ export function createDispatchBundle(
 				const responseModelIdObservation = responseModelIdObservationFromRecord(event.message, "not-observed");
 				const differingResponseModelId = readStringOrNull(event.message.responseModel);
 				const providerResponseId = readStringOrNull(event.message.responseId);
+				const gatewayRouting = gatewayRoutingObservationFromRecord(event.message);
 				upstreamResponses.push({
 					requestedModelId,
 					responseModelIdObservation,
 					differingResponseModelId,
 					providerResponseId,
+					...(gatewayRouting !== null ? { gatewayRouting } : {}),
 				});
 				if (event.message.stopReason === "error") {
 					const message = readStringOrNull(event.message.errorMessage);

@@ -525,6 +525,57 @@ function validateLmStudioSettings(
 	return Object.keys(out).length > 0 ? out : undefined;
 }
 
+function validateLiteLLMSettings(
+	issues: Issues,
+	path: string,
+	value: unknown,
+): ClioSettings["targets"][number]["litellm"] | undefined {
+	if (!isPlainObject(value)) {
+		issues.add(path, `expected a map, got ${describe(value)}`);
+		return undefined;
+	}
+	issues.unknownKeys(path, value, ["request"]);
+	const out: NonNullable<ClioSettings["targets"][number]["litellm"]> = {};
+	if ("request" in value) {
+		if (!isPlainObject(value.request)) {
+			issues.add(`${path}.request`, `expected a map, got ${describe(value.request)}`);
+		} else {
+			issues.unknownKeys(`${path}.request`, value.request, [
+				"tags",
+				"sendSessionId",
+				"timeoutSeconds",
+				"streamTimeoutSeconds",
+				"numRetries",
+			]);
+			const request: NonNullable<typeof out.request> = {};
+			if ("tags" in value.request) {
+				const parsed = expectStringArray(issues, `${path}.request.tags`, value.request.tags);
+				if (parsed !== undefined) {
+					const invalidTag = parsed.find((tag) => tag.includes(","));
+					if (invalidTag) issues.add(`${path}.request.tags`, "tags may not contain commas");
+					else if (parsed.length > 0) request.tags = [...new Set(parsed)];
+				}
+			}
+			if ("sendSessionId" in value.request) {
+				const parsed = expectBoolean(issues, `${path}.request.sendSessionId`, value.request.sendSessionId);
+				if (parsed !== undefined) request.sendSessionId = parsed;
+			}
+			for (const key of ["timeoutSeconds", "streamTimeoutSeconds"] as const) {
+				if (key in value.request) {
+					const parsed = expectNumber(issues, `${path}.request.${key}`, value.request[key], { min: 0.001, max: 86_400 });
+					if (parsed !== undefined) request[key] = parsed;
+				}
+			}
+			if ("numRetries" in value.request) {
+				const parsed = expectInteger(issues, `${path}.request.numRetries`, value.request.numRetries, { min: 0, max: 100 });
+				if (parsed !== undefined) request.numRetries = parsed;
+			}
+			if (Object.keys(request).length > 0) out.request = request;
+		}
+	}
+	return Object.keys(out).length > 0 ? out : undefined;
+}
+
 function validateTarget(issues: Issues, path: string, value: unknown): ClioSettings["targets"][number] | null {
 	if (!isPlainObject(value)) {
 		issues.add(path, `expected a map, got ${describe(value)}`);
@@ -542,6 +593,7 @@ function validateTarget(issues: Issues, path: string, value: unknown): ClioSetti
 		"gateway",
 		"pricing",
 		"lmstudio",
+		"litellm",
 		"maxConcurrentRequests",
 	]);
 	const id = "id" in value ? expectString(issues, `${path}.id`, value.id) : undefined;
@@ -592,6 +644,10 @@ function validateTarget(issues: Issues, path: string, value: unknown): ClioSetti
 	if ("lmstudio" in value) {
 		const v = validateLmStudioSettings(issues, `${path}.lmstudio`, value.lmstudio);
 		if (v !== undefined) target.lmstudio = v;
+	}
+	if ("litellm" in value) {
+		const v = validateLiteLLMSettings(issues, `${path}.litellm`, value.litellm);
+		if (v !== undefined) target.litellm = v;
 	}
 	if ("maxConcurrentRequests" in value) {
 		const v = expectInteger(issues, `${path}.maxConcurrentRequests`, value.maxConcurrentRequests, { min: 1 });

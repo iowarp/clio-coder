@@ -451,6 +451,7 @@ function richMessageFromEntry(entry: MessageEntry, maxTextChars?: number): Agent
 			"responseModelIdObservation",
 			"responseModel",
 			"responseId",
+			"gatewayRouting",
 			"diagnostics",
 			"contextUsageInvalidated",
 		]) {
