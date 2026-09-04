@@ -24,7 +24,7 @@ export const SKILLS_REMINDER_REGISTRATION_ID = "observer.skills-reminder";
 
 export { SKILL_SUGGESTION_ANCHOR };
 
-export function skillsReminderMessage(installed: number, installable = 0): string {
+export function skillsReminderMessage(installed: number, installable = 0, modelActivation = false): string {
 	// Unconditional imperative, deliberately: the skill-mastery batteries
 	// showed literal local models comply with "list and check" but never act
 	// on wording that first asks them to classify the task as skill-shaped.
@@ -37,6 +37,17 @@ export function skillsReminderMessage(installed: number, installable = 0): strin
 	// operator" as the whole job, spent a 40-second turn deliberating over the
 	// suggestion, and ended without one repository read. The suggestion is one
 	// line, the task continues in the same turn, and only the operator loads.
+	// At auto-edit and full-auto the model activates installed skills itself,
+	// so the reminder must not repeat "only the operator loads a skill": the
+	// literal models this line exists for act on it over the listing footer.
+	if (modelActivation) {
+		return (
+			`[Skills] ${counts}. Start this task by listing them with context(scope="skills") ` +
+			'and checking for a match; if one matches, load it with context(scope="skills", name="<name>") and ' +
+			"continue the task in the same turn. A marketplace skill is not installed and is offered for install " +
+			"when the operator runs it. If none match, do not mention skills and continue with the task."
+		);
+	}
 	return (
 		`[Skills] ${counts}. Start this task by listing them with context(scope="skills") ` +
 		"and checking for a match; if one matches, open your reply with the line " +
@@ -55,6 +66,12 @@ export interface SkillsReminderDeps {
 	 * zero. Either count above zero arms the reminder.
 	 */
 	countInstallableSkills?(): number;
+	/**
+	 * True when the session's autonomy level lets the model activate an
+	 * installed skill itself. Absent reads as false, the operator-gated wording
+	 * every surface taught before the level became the opt-in.
+	 */
+	modelMayActivateSkills?(): boolean;
 }
 
 const NO_EFFECTS: ReadonlyArray<MiddlewareEffect> = [];
@@ -211,7 +228,19 @@ export function createSkillsReminderRegistration(deps: SkillsReminderDeps): Midd
 				return NO_EFFECTS;
 			}
 			if (installed <= 0 && installable <= 0) return NO_EFFECTS;
-			return [{ kind: "inject_reminder", severity: "info", message: skillsReminderMessage(installed, installable) }];
+			let modelActivation = false;
+			try {
+				modelActivation = deps.modelMayActivateSkills?.() ?? false;
+			} catch {
+				// An unreadable autonomy level falls back to the operator-gated wording.
+			}
+			return [
+				{
+					kind: "inject_reminder",
+					severity: "info",
+					message: skillsReminderMessage(installed, installable, modelActivation),
+				},
+			];
 		},
 	};
 }

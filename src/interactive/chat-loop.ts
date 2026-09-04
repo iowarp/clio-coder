@@ -20,7 +20,9 @@ import {
 	armedSkillSurface,
 	type PendingSkillRequest,
 	type PendingSkillToolPolicy,
+	skillSurfaceLabels,
 	skillSurfaceNames,
+	withModelSkillActivation,
 } from "../core/skill-activation.js";
 import { clioStateDir } from "../core/xdg.js";
 import {
@@ -41,6 +43,7 @@ import {
 	runtimeTargetSnapshot,
 	targetRequiresAuth,
 } from "../domains/providers/index.js";
+import { type AutonomyLevel, modelMayActivateSkills } from "../domains/safety/autonomy.js";
 import type { ProtectedArtifactState } from "../domains/safety/protected-artifacts.js";
 import type { CompactResult } from "../domains/session/compaction/compact.js";
 import type { ContextSnapshot, ContextUsageSnapshot } from "../domains/session/context-accounting.js";
@@ -379,6 +382,12 @@ export interface ChatLoop {
 
 export interface CreateChatLoopDeps {
 	getSettings: () => Readonly<ClioSettings>;
+	/**
+	 * The same effective autonomy level registry admission resolves, so the
+	 * skill-activation gate and the tool gate can never disagree. Absent falls
+	 * back to the settings value.
+	 */
+	getAutonomy?: () => AutonomyLevel;
 	providers: ProvidersContract;
 	/**
 	 * Whitelist of target ids that the chat-loop is allowed to drive. The
@@ -645,7 +654,7 @@ export function createChatLoop(deps: CreateChatLoopDeps): ChatLoop {
 		const next = armedSkillSurface(policy);
 		const current = skillSurfaceNames(next).join(", ");
 		state.activeSkillSurface = next;
-		const activated = skillSurfaceNames(policy).filter((name) => !loadedBefore?.has(name));
+		const activated = skillSurfaceLabels(policy).filter((label) => !loadedBefore?.has(label.split(" ")[0] ?? label));
 		if (activated.length > 0) {
 			emitNotice(
 				current.length > 0
@@ -1088,7 +1097,10 @@ export function createChatLoop(deps: CreateChatLoopDeps): ChatLoop {
 			// it started, and that workflow outlives the turn it began in. A
 			// fresh /skill this turn replaces the armed surface; otherwise the
 			// armed surface is what this turn runs under.
-			const pendingSkillPolicy = createPendingSkillToolPolicy(pendingSkillRequests) ?? state.activeSkillSurface;
+			const pendingSkillPolicy = withModelSkillActivation(
+				createPendingSkillToolPolicy(pendingSkillRequests) ?? state.activeSkillSurface,
+				modelMayActivateSkills(deps.getAutonomy?.() ?? deps.getSettings().safety.autonomy),
+			);
 			// What was already loaded when this turn started, so the settle-time
 			// notice names the skills this turn activated and not the ones a
 			// carried surface has been holding since an earlier message.

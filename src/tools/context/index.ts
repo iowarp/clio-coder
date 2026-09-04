@@ -181,11 +181,21 @@ function pendingSkillPolicyError(name: string, options: ToolInvokeOptions | unde
 	if (!policy) {
 		return NO_PENDING_SKILL_DENIAL;
 	}
+	const recipeBound = policyIsRecipeBound(policy);
+	// auto-edit / full-auto: the operator already chose to let the model act
+	// without being asked, and a skill only ever narrows the tool surface, so
+	// the model activates an installed skill itself under the same per-run
+	// policy `/skill` produces. A skill that is not installed still fails the
+	// lookup below with the operator-gated marketplace message.
+	if (policy.modelActivation === true && !recipeBound) {
+		if (!policy.loadedSkillNames.has(name)) return null;
+		const window = policy.carriedSurface === true ? "in this session" : "this turn";
+		return `context: skill ${name} already loaded ${window}; continue with the loaded workflow and call ask_user if an interview/choice is needed.`;
+	}
 	const allowed = [...new Set(policy.allowedSkillNames.map((entry) => entry.trim()).filter(Boolean))];
 	if (allowed.length === 0) {
 		return NO_PENDING_SKILL_DENIAL;
 	}
-	const recipeBound = policyIsRecipeBound(policy);
 	if (!allowed.includes(name)) {
 		if (recipeBound) return `context: this agent run may load only its declared skill(s): ${allowed.join(", ")}.`;
 		// A carried surface is a skill the operator activated on an earlier
@@ -277,6 +287,7 @@ function renderSkillsList(
 	skills: ReadonlyArray<Skill>,
 	marketplace: ReadonlyArray<MarketplaceSkill>,
 	marketplaceOffered: boolean,
+	modelActivation: boolean,
 ): string {
 	if (skills.length === 0 && marketplace.length === 0) {
 		// A registry that never offers the marketplace (a worker) must not
@@ -311,7 +322,9 @@ function renderSkillsList(
 	// template where they skip conditional prose in the header.
 	lines.push(
 		"",
-		`If one skill above matches the current task, begin your reply with the line \`${SKILL_SUGGESTION_ANCHOR}\` (a comma-separated sequence, in order, when several compose), then continue the task in the same turn without it; only the operator can run it. If none match, do not mention skills.`,
+		modelActivation
+			? `If one skill above matches the current task, load it now with context(scope="skills", name="<name>") and continue in the same turn; at this autonomy level you activate installed skills yourself and do not wait for the operator. Marketplace rows below are not installed and still need the operator. If none match, do not mention skills.`
+			: `If one skill above matches the current task, begin your reply with the line \`${SKILL_SUGGESTION_ANCHOR}\` (a comma-separated sequence, in order, when several compose), then continue the task in the same turn without it; only the operator can run it. If none match, do not mention skills.`,
 	);
 	if (marketplace.length > 0) {
 		// The offer protocol mirrors the marketplace-offer middleware: fixed
@@ -426,7 +439,12 @@ function runSkillsScope(
 		const list = loadSkills({ cwd: cwdFromDeps(deps), ...(deps.getSkillLoaderOptions?.() ?? {}) });
 		const visible = modelVisibleSkills(list.items);
 		const marketplace = marketplaceRowsFor(deps, list.items, options);
-		const rendered = renderSkillsList(visible, marketplace, deps.skillMarketplace !== false);
+		const rendered = renderSkillsList(
+			visible,
+			marketplace,
+			deps.skillMarketplace !== false,
+			options?.pendingSkillPolicy?.modelActivation === true,
+		);
 		// The catalog is bounded but not small: the whole listing must fit the
 		// per-call cap like any observation, and a cut list says so instead of
 		// silently dropping the marketplace tail.

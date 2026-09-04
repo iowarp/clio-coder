@@ -135,7 +135,12 @@ import {
 import { DEFAULT_RECENT_ENTRY_LIMIT } from "../domains/safety/finish-contract.js";
 import { createFinishContractRegistration } from "../domains/safety/finish-contract-registration.js";
 import type { AutonomyLevel, SafetyContract } from "../domains/safety/index.js";
-import { parseRigorOverride, resolveRigor, SafetyDomainModule } from "../domains/safety/index.js";
+import {
+	modelMayActivateSkills,
+	parseRigorOverride,
+	resolveRigor,
+	SafetyDomainModule,
+} from "../domains/safety/index.js";
 import type { ProtectedArtifactState } from "../domains/safety/protected-artifacts.js";
 import {
 	createProtectedArtifactsRegistration,
@@ -1167,24 +1172,6 @@ export async function bootOrchestrator(options: BootOptions = {}): Promise<BootR
 	middleware.registerHook(
 		createSkillActivationObserver((activation) => appendSkillActivationRegistryEvent(session, activation)),
 	);
-	// First-turn skills reminder: user-message-visible text is the one channel
-	// the battery-tested local models act on; suggestion protocol only, the
-	// operator load gate is untouched.
-	if (resources) {
-		middleware.registerHook(
-			createSkillsReminderRegistration({
-				countModelVisibleSkills: () => modelVisibleSkills(resources.skills(process.cwd()).items).length,
-				// Same lookup context(scope="skills") lists under its Marketplace
-				// heading, minus what is already installed, so the count the
-				// reminder quotes is the count the listing will show.
-				countInstallableSkills: () => {
-					const installed = new Set(resources.skills(process.cwd()).items.map((skill) => skill.name));
-					return discoverMarketplaceSkills({ cwd: process.cwd() }).skills.filter((skill) => !installed.has(skill.name))
-						.length;
-				},
-			}),
-		);
-	}
 	// Task-board reminder: same user-message-visible channel, fired once per
 	// session when a request literally enumerates three or more steps. The
 	// static routing line and tasks hint ask for the same board; battery-tested
@@ -1346,6 +1333,26 @@ export async function bootOrchestrator(options: BootOptions = {}): Promise<BootR
 		(config?.get() ?? readSettings()).safety.autonomy ??
 		"auto-edit";
 	const resolveEffectiveAutonomy = (): AutonomyLevel => activeAcpSessionAutonomy ?? resolveBaselineAutonomy();
+	// First-turn skills reminder: user-message-visible text is the one channel
+	// the battery-tested local models act on. Which protocol it teaches follows
+	// the effective autonomy level, resolved one line up: suggest-and-wait at
+	// read-only and suggest, load-it-yourself at auto-edit and full-auto.
+	if (resources) {
+		middleware.registerHook(
+			createSkillsReminderRegistration({
+				countModelVisibleSkills: () => modelVisibleSkills(resources.skills(process.cwd()).items).length,
+				// Same lookup context(scope="skills") lists under its Marketplace
+				// heading, minus what is already installed, so the count the
+				// reminder quotes is the count the listing will show.
+				countInstallableSkills: () => {
+					const installed = new Set(resources.skills(process.cwd()).items.map((skill) => skill.name));
+					return discoverMarketplaceSkills({ cwd: process.cwd() }).skills.filter((skill) => !installed.has(skill.name))
+						.length;
+				},
+				modelMayActivateSkills: () => modelMayActivateSkills(resolveEffectiveAutonomy()),
+			}),
+		);
+	}
 	// Marketplace self-promotion: coordinator-only by this wiring (never a
 	// dispatch worker), local matcher, consented installs and full-auto
 	// autonomous installs both pass the own-marketplace source gate inside the
@@ -1835,6 +1842,7 @@ export async function bootOrchestrator(options: BootOptions = {}): Promise<BootR
 			return key === null ? null : registerForegroundStream(key);
 		},
 		getSettings: getCurrentSettings,
+		getAutonomy: resolveEffectiveAutonomy,
 		providers,
 		middleware,
 		middlewareToolChoice,

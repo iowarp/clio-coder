@@ -11,9 +11,11 @@ import {
 	evaluateSkillToolSurface,
 	type PendingSkillToolPolicy,
 	skillSurfaceNames,
+	withModelSkillActivation,
 } from "../../src/core/skill-activation.js";
 import { ToolNames } from "../../src/core/tool-names.js";
 import { loadSkills, parsePendingSkillRequests } from "../../src/domains/resources/skills/loader.js";
+import { type AutonomyLevel, modelMayActivateSkills } from "../../src/domains/safety/autonomy.js";
 import { CONFIRMED_SCOPE, READONLY_SCOPE, WORKSPACE_SCOPE } from "../../src/domains/safety/scope.js";
 import { createPendingSkillToolPolicy } from "../../src/interactive/chat-loop-messages.js";
 import {
@@ -81,16 +83,18 @@ function bashSpec(): ToolSpec {
 
 /**
  * The chat loop's per-turn composition, condensed: an operator `/skill` this
- * turn wins, otherwise the turn runs under the surface an earlier turn armed.
+ * turn wins, otherwise the turn runs under the surface an earlier turn armed,
+ * and the autonomy level stamps model activation on whichever it is.
  */
 function turnPolicy(
 	input: string,
 	root: string,
 	armed: PendingSkillToolPolicy | undefined,
+	autonomy: AutonomyLevel = "suggest",
 ): PendingSkillToolPolicy | undefined {
 	const list = loadSkills({ cwd: root, disableDiscovery: true, explicitSkillPaths: explicitPaths });
 	const requests = parsePendingSkillRequests(input, list, { cwd: root }).pendingSkillRequests;
-	return createPendingSkillToolPolicy(requests) ?? armed;
+	return withModelSkillActivation(createPendingSkillToolPolicy(requests) ?? armed, modelMayActivateSkills(autonomy));
 }
 
 let explicitPaths: string[] = [];
@@ -215,5 +219,80 @@ describe("skill tool surface lifetime", () => {
 		// The replaced skill's surface is gone, not unioned with the new one.
 		strictEqual(evaluateSkillToolSurface(replaced, ToolNames.Write), null);
 		ok(evaluateSkillToolSurface(replaced, ToolNames.Read) !== null);
+	});
+});
+
+describe("model skill activation by autonomy level", () => {
+	const priorCatalogDir = process.env.CLIO_CODER_SKILL_CATALOG_DIR;
+
+	afterEach(() => {
+		explicitPaths = [];
+		if (priorCatalogDir === undefined) delete process.env.CLIO_CODER_SKILL_CATALOG_DIR;
+		else process.env.CLIO_CODER_SKILL_CATALOG_DIR = priorCatalogDir;
+		for (const root of roots.splice(0)) rmSync(root, { recursive: true, force: true });
+	});
+
+	for (const autonomy of ["auto-edit", "full-auto"] as const) {
+		it(`activates an installed skill on a model call at ${autonomy}`, async () => {
+			const root = scratchRoot();
+			explicitPaths = [writeNarrowingSkill(root, "interview", ["allowed-tools: read, grep"])];
+			const context = contextToolFor(root);
+			// No /skill this turn: the model calls context(scope="skills") itself.
+			const policy = turnPolicy("look at the failing test", root, undefined, autonomy);
+			ok(policy !== undefined);
+			strictEqual(policy.modelActivation, true);
+			const activated = await context.run({ scope: "skills", name: "interview" }, invokeOptions(policy));
+			strictEqual(activated.kind, "ok");
+			if (activated.kind === "ok") match(activated.output, /Run interview\./u);
+
+			// The narrowing it declared binds the very next call of the same turn.
+			const recorded: { reasonCode?: string; decision?: string }[] = [];
+			const registry = createRegistry({ safety: allowAllSafety(recorded) });
+			registry.register(bashSpec());
+			const verdict = await registry.invoke({ tool: ToolNames.Bash, args: {} }, invokeOptions(policy));
+			strictEqual(verdict.kind, "blocked");
+			strictEqual(recorded.at(-1)?.reasonCode, "skill_surface");
+		});
+	}
+
+	for (const autonomy of ["read-only", "suggest"] as const) {
+		it(`keeps activation operator-gated at ${autonomy}`, async () => {
+			const root = scratchRoot();
+			explicitPaths = [writeNarrowingSkill(root, "interview", ["allowed-tools: read, grep"])];
+			const context = contextToolFor(root);
+			const policy = turnPolicy("look at the failing test", root, undefined, autonomy);
+			strictEqual(policy, undefined);
+			const refused = await context.run({ scope: "skills", name: "interview" }, invokeOptions(policy));
+			strictEqual(refused.kind, "error");
+			if (refused.kind === "error") {
+				match(refused.message, /only the operator can activate a skill/u);
+				match(refused.message, /Suggested skill: \/skill/u);
+			}
+		});
+	}
+
+	it("still refuses an uninstalled marketplace skill at full-auto", async () => {
+		const root = scratchRoot();
+		explicitPaths = [writeNarrowingSkill(root, "interview", ["allowed-tools: read, grep"])];
+		// A catalog the operator could install from, holding a skill that is not installed here.
+		const catalog = join(root, "catalog");
+		mkdirSync(catalog, { recursive: true });
+		writeNarrowingSkill(catalog, "marketplace-only", []);
+		process.env.CLIO_CODER_SKILL_CATALOG_DIR = catalog;
+
+		// Marketplace rows only appear when discovery is on, which is what makes
+		// this the real not-installed path rather than an unknown-name miss.
+		const context = createContextTool({
+			getCwd: () => root,
+			getSkillLoaderOptions: () => ({ explicitSkillPaths: explicitPaths }),
+		});
+		const policy = turnPolicy("do the thing", root, undefined, "full-auto");
+		ok(policy !== undefined);
+		const refused = await context.run({ scope: "skills", name: "marketplace-only" }, invokeOptions(policy));
+		strictEqual(refused.kind, "error");
+		if (refused.kind === "error") {
+			match(refused.message, /is not installed; it is available in the marketplace/u);
+			match(refused.message, /Ask the operator to run \/skill marketplace-only/u);
+		}
 	});
 });

@@ -65,6 +65,15 @@ export interface PendingSkillToolPolicy {
 	 * claiming a pending request that no longer exists.
 	 */
 	carriedSurface?: boolean;
+	/**
+	 * True when the session's autonomy level lets the model activate an
+	 * installed skill itself instead of emitting the suggestion anchor and
+	 * waiting for `/skill`. Activation is the same per-run policy the operator's
+	 * path produces: skills only ever narrow the tool surface, so this grants
+	 * nothing the level had not already granted. Marketplace (not yet
+	 * installed) skills stay operator-gated at every level.
+	 */
+	modelActivation?: boolean;
 }
 
 /**
@@ -96,6 +105,43 @@ export function armedSkillSurface(policy: PendingSkillToolPolicy | undefined): P
 /** Skill names contributing a declaration to an armed surface, for the operator notice. */
 export function skillSurfaceNames(policy: PendingSkillToolPolicy | undefined): ReadonlyArray<string> {
 	return policy ? [...policy.loadedSkillPolicies.keys()] : [];
+}
+
+/**
+ * The same names, each tagged with who activated it. A skill the operator
+ * named arrives as a pending request; anything else was activated by the model
+ * under `modelActivation`, and the operator's one line about the surface is
+ * where that distinction has to be visible.
+ */
+export function skillSurfaceLabels(policy: PendingSkillToolPolicy | undefined): ReadonlyArray<string> {
+	if (!policy) return [];
+	return [...policy.loadedSkillPolicies.keys()].map((name) =>
+		policy.requests.some((request) => request.name === name) ? `${name} (operator)` : `${name} (model)`,
+	);
+}
+
+/**
+ * Stamp (or clear) the model-activation grant on the policy this turn runs
+ * under, creating one when nothing else did. Mutates in place so a surface
+ * carried from an earlier turn keeps its identity, and re-stamps every turn so
+ * a level change takes effect on the next message rather than the next skill.
+ */
+export function withModelSkillActivation(
+	policy: PendingSkillToolPolicy | undefined,
+	enabled: boolean,
+): PendingSkillToolPolicy | undefined {
+	if (policy) {
+		policy.modelActivation = enabled;
+		return policy;
+	}
+	if (!enabled) return undefined;
+	return {
+		allowedSkillNames: [],
+		requests: [],
+		loadedSkillNames: new Set<string>(),
+		loadedSkillPolicies: new Map<string, SkillDeclaredToolPolicy>(),
+		modelActivation: true,
+	};
 }
 
 /**
