@@ -1,176 +1,187 @@
-import { match, ok, strictEqual } from "node:assert";
-import { mkdirSync, rmSync, writeFileSync } from "node:fs";
-import { tmpdir } from "node:os";
+import { match, ok, strictEqual } from "node:assert/strict";
+import { writeFileSync } from "node:fs";
 import { join } from "node:path";
 import { describe, it } from "node:test";
 
 import { runUpgradeCommand } from "../../src/cli/upgrade.js";
 import { resetXdgCache } from "../../src/core/xdg.js";
 import { getVersionInfo } from "../../src/domains/lifecycle/version.js";
+import { createLifecycleHome, type LifecycleHome, runInHome } from "../harness/lifecycle-home.js";
 
-function isolatedEnv(): {
-	root: string;
-	stateDir: string;
-	env: Record<string, string>;
-	cleanup: () => void;
-} {
-	const rand = Math.random().toString(36).slice(2, 8);
-	const root = join(tmpdir(), `clio-test-upgrade-${rand}`);
-	const configDir = join(root, ".config", "clio-coder");
-	const dataDir = join(root, ".local", "share", "clio-coder");
-	const stateDir = join(root, ".local", "state", "clio-coder");
-	const cacheDir = join(root, ".cache", "clio-coder");
+const MIGRATION_IDS = [
+	"2026-09-01-settings-v2",
+	"2026-09-01-extension-install-digests",
+	"2026-09-01-clio-coder-naming",
+	"2026-09-01-retire-panes-knobs",
+	"2026-08-18-lmstudio-runtime-id",
+] as const;
 
-	mkdirSync(configDir, { recursive: true });
-	mkdirSync(dataDir, { recursive: true });
-	mkdirSync(stateDir, { recursive: true });
-	mkdirSync(cacheDir, { recursive: true });
-
-	const env: Record<string, string> = {
-		HOME: root,
-		CLIO_CODER_HOME: "",
-		CLIO_CODER_CONFIG_DIR: configDir,
-		CLIO_CODER_DATA_DIR: dataDir,
-		CLIO_CODER_STATE_DIR: stateDir,
-		CLIO_CODER_CACHE_DIR: cacheDir,
-		CLIO_CODER_TEST_UPGRADE_NO_NETWORK: "1",
-	};
-
-	return {
-		root,
-		stateDir,
-		env,
-		cleanup: () => {
-			resetXdgCache();
-			try {
-				rmSync(root, { recursive: true, force: true });
-			} catch {
-				// Ignore cleanup errors
-			}
-		},
-	};
-}
-
-async function captureUpgrade(
+/** Upgrade caches the resolved state dir, so every run gets a fresh resolution. */
+async function upgrade(
+	temp: LifecycleHome,
 	argv: ReadonlyArray<string>,
 	extraEnv: Record<string, string> = {},
-): Promise<{ code: number; stdout: string; stderr: string }> {
-	const origEnv = { ...process.env };
-	const origStdoutWrite = process.stdout.write;
-	const origStderrWrite = process.stderr.write;
-
-	let stdout = "";
-	let stderr = "";
-
-	Object.assign(process.env, extraEnv);
+): Promise<{ code: number; stdout: string }> {
 	resetXdgCache();
-
-	process.stdout.write = ((chunk: unknown) => {
-		stdout += String(chunk);
-		return true;
-	}) as typeof process.stdout.write;
-
-	process.stderr.write = ((chunk: unknown) => {
-		stderr += String(chunk);
-		return true;
-	}) as typeof process.stderr.write;
-
 	try {
-		const code = await runUpgradeCommand(argv);
-		return { code, stdout, stderr };
+		return await runInHome({ ...temp, env: { ...temp.env, ...extraEnv } }, () => runUpgradeCommand(argv));
 	} finally {
-		process.stdout.write = origStdoutWrite;
-		process.stderr.write = origStderrWrite;
-		for (const key of Object.keys(extraEnv)) {
-			if (origEnv[key] === undefined) delete process.env[key];
-			else process.env[key] = origEnv[key];
-		}
 		resetXdgCache();
 	}
 }
 
+/** A home whose migration manifest and recorded version are already up to date. */
+function currentHome(): LifecycleHome {
+	const temp = createLifecycleHome("clio-test-upgrade-");
+	writeFileSync(join(temp.stateDir, "migrations.json"), JSON.stringify({ applied: [...MIGRATION_IDS] }), "utf8");
+	writeFileSync(join(temp.stateDir, "install.json"), JSON.stringify({ version: getVersionInfo().clio }), "utf8");
+	return temp;
+}
+
+const NO_NETWORK = { CLIO_CODER_TEST_UPGRADE_NO_NETWORK: "1" };
+
 describe("contracts/upgrade-lifecycle", () => {
-	it("skips upgrade and exits 0 when version is already current with no pending migrations", async () => {
-		const testEnv = isolatedEnv();
-		const version = getVersionInfo().clio;
+	it("reports the detected facts before doing anything", async () => {
+		const temp = currentHome();
 		try {
-			// Pre-mark all migrations as applied and state as current version
-			const manifest = {
-				applied: [
-					"2026-09-01-settings-v2",
-					"2026-09-01-extension-install-digests",
-					"2026-09-01-clio-coder-naming",
-					"2026-09-01-retire-panes-knobs",
-					"2026-08-18-lmstudio-runtime-id",
-				],
+			const version = getVersionInfo().clio;
+			const { code, stdout } = await upgrade(temp, [], { ...NO_NETWORK, CLIO_CODER_TEST_UPGRADE_AVAILABLE: version });
+			strictEqual(code, 0);
+			match(stdout, /Installation method: (source checkout|npm global)/u);
+			match(stdout, new RegExp(`Current version: ${version}`, "u"));
+			match(stdout, new RegExp(`Available version: ${version}`, "u"));
+			match(stdout, /State dir: /u);
+		} finally {
+			temp.cleanup();
+		}
+	});
+
+	it("exits 0 with one sentence when the version is current and no migration is pending", async () => {
+		const temp = currentHome();
+		try {
+			const version = getVersionInfo().clio;
+			const { code, stdout } = await upgrade(temp, [], { ...NO_NETWORK, CLIO_CODER_TEST_UPGRADE_AVAILABLE: version });
+			strictEqual(code, 0);
+			match(stdout, new RegExp(`Already on ${version}, with no pending migrations`, "u"));
+			ok(!/Applied migration/u.test(stdout), `nothing ran:\n${stdout}`);
+		} finally {
+			temp.cleanup();
+		}
+	});
+
+	it("does not claim to be current when the registry was asked and could not answer", async () => {
+		const temp = currentHome();
+		try {
+			// A lookup that failed compared nothing. Treating its null as "same as
+			// installed" told an offline user they were up to date and skipped the
+			// install they had asked for.
+			const failed = await upgrade(temp, ["--dry-run"], { CLIO_CODER_TEST_UPGRADE_AVAILABLE: "unreachable" });
+			ok(!/Already on /u.test(failed.stdout), `an unanswered lookup is not a current version:\n${failed.stdout}`);
+			match(failed.stdout, /Available version: unknown \(the registry could not be reached\)/u);
+
+			// A lookup that was never owed is a different fact, and says so.
+			const skipped = await upgrade(temp, ["--dry-run"], NO_NETWORK);
+			match(skipped.stdout, /Available version: not checked/u);
+		} finally {
+			temp.cleanup();
+		}
+	});
+
+	it("previews the install step and every pending migration by id, changing nothing", async () => {
+		const temp = createLifecycleHome("clio-test-upgrade-dry-");
+		try {
+			const { code, stdout } = await upgrade(temp, ["--dry-run"], NO_NETWORK);
+			strictEqual(code, 0);
+			match(stdout, /Would apply 5 pending migrations:/u);
+			for (const id of MIGRATION_IDS) match(stdout, new RegExp(id.replace(/\./gu, "\\."), "u"));
+			match(stdout, /Would refresh state metadata/u);
+			match(stdout, /Dry run: no changes made/u);
+			ok(!/✓ Applied migration/u.test(stdout), `a preview applies nothing:\n${stdout}`);
+		} finally {
+			temp.cleanup();
+		}
+	});
+
+	it("puts the dry-run plan in the JSON report, not only in the prose", async () => {
+		const temp = createLifecycleHome("clio-test-upgrade-json-");
+		try {
+			const { code, stdout } = await upgrade(temp, ["--dry-run", "--json"], NO_NETWORK);
+			strictEqual(code, 0);
+
+			const parsed = JSON.parse(stdout) as {
+				command: string;
+				method: string;
+				steps: Array<{ type: string; message: string }>;
+				warnings: string[];
 			};
-			writeFileSync(join(testEnv.stateDir, "migrations.json"), JSON.stringify(manifest), "utf8");
-			writeFileSync(join(testEnv.stateDir, "install.json"), JSON.stringify({ version }), "utf8");
-
-			const res = await captureUpgrade([], {
-				...testEnv.env,
-				CLIO_CODER_TEST_UPGRADE_AVAILABLE: version,
-			});
-
-			strictEqual(res.code, 0, res.stderr);
-			match(res.stdout, /Installation method:/u);
-			match(res.stdout, new RegExp(`Current version: ${version}`, "u"));
-			match(res.stdout, new RegExp(`upgrade skipped: ${version} is already installed`, "u"));
-			match(res.stdout, /Done/u);
-		} finally {
-			testEnv.cleanup();
-		}
-	});
-
-	it("previews upgrade in dry-run mode without modifying state", async () => {
-		const testEnv = isolatedEnv();
-		try {
-			const res = await captureUpgrade(["--dry-run"], testEnv.env);
-			strictEqual(res.code, 0, res.stderr);
-			match(res.stdout, /Upgrade/u);
-			match(res.stdout, /Installation method:/u);
-			match(res.stdout, /Current version:/u);
-			match(res.stdout, /Dry run - no changes made/u);
-		} finally {
-			testEnv.cleanup();
-		}
-	});
-
-	it("emits structured JSON when --json flag is provided", async () => {
-		const testEnv = isolatedEnv();
-		try {
-			const res = await captureUpgrade(["--dry-run", "--json"], testEnv.env);
-			strictEqual(res.code, 0, res.stderr);
-			const parsed = JSON.parse(res.stdout);
 			strictEqual(parsed.command, "upgrade");
 			strictEqual(typeof parsed.method, "string");
-			ok(parsed.steps.length > 0);
+			const messages = parsed.steps.map((step) => step.message);
+			// A scripted caller has to be able to see which migrations a real run
+			// would apply; the old report carried only the three detected facts.
+			for (const id of MIGRATION_IDS) ok(messages.includes(id), `${id} missing from the JSON plan`);
+			ok(parsed.warnings.includes("Dry run: no changes made"));
 		} finally {
-			testEnv.cleanup();
+			temp.cleanup();
 		}
 	});
 
-	it("rejects invalid channel arguments with exit code 2", async () => {
-		const res = await captureUpgrade(["--channel=unknown-chan"]);
-		strictEqual(res.code, 2);
-		match(res.stderr, /--channel must be one of/u);
+	it("applies pending migrations and reports the count", async () => {
+		const temp = createLifecycleHome("clio-test-upgrade-run-");
+		try {
+			const { code, stdout } = await upgrade(temp, [], NO_NETWORK);
+			strictEqual(code, 0);
+			for (const id of MIGRATION_IDS) match(stdout, new RegExp(`✓ Applied migration ${id}`, "u"));
+			match(stdout, /5 migrations applied/u);
+		} finally {
+			temp.cleanup();
+		}
 	});
 
-	it("provides clear manual recovery instructions on migration failure", async () => {
-		const testEnv = isolatedEnv();
+	it("parses --channel in both spellings and rejects anything else", async () => {
+		const temp = currentHome();
 		try {
-			const res = await captureUpgrade([], {
-				...testEnv.env,
-				CLIO_CODER_TEST_UPGRADE_FAIL: "migration",
-			});
-			strictEqual(res.code, 1);
-			match(res.stderr, /migration failed/u);
-			ok(
-				res.stdout.includes("clio-coder upgrade --skip-migrations") ||
-					res.stderr.includes("clio-coder upgrade --skip-migrations"),
-			);
+			for (const argv of [
+				["--channel=beta", "--dry-run"],
+				["--channel", "beta", "--dry-run"],
+			]) {
+				const { code, stdout } = await upgrade(temp, argv, NO_NETWORK);
+				strictEqual(code, 0, `${argv.join(" ")} must parse`);
+				// Only meaningful on an npm install; a source checkout prints no
+				// channel line, so assert it is never the wrong one.
+				ok(!/Channel: latest/u.test(stdout), `--channel beta must not read as latest:\n${stdout}`);
+			}
+			for (const argv of [["--channel=unknown"], ["--channel"], ["--channel", "--dry-run"]]) {
+				const { code } = await upgrade(temp, argv, NO_NETWORK);
+				strictEqual(code, 2, `${argv.join(" ")} must be a usage error`);
+			}
+			strictEqual((await upgrade(temp, ["--nope"], NO_NETWORK)).code, 2);
 		} finally {
-			testEnv.cleanup();
+			temp.cleanup();
+		}
+	});
+
+	it("names the command to run by hand when a migration fails, and says so in JSON", async () => {
+		const temp = createLifecycleHome("clio-test-upgrade-fail-");
+		try {
+			const plain = await upgrade(temp, [], { ...NO_NETWORK, CLIO_CODER_TEST_UPGRADE_FAIL: "migration" });
+			strictEqual(plain.code, 1);
+			match(plain.stdout, /clio-coder upgrade --skip-migrations/u);
+
+			// fail() used to serialize the report before the advice was recorded,
+			// so a scripted caller got the error and not the recovery.
+			const json = await upgrade(temp, ["--json"], { ...NO_NETWORK, CLIO_CODER_TEST_UPGRADE_FAIL: "migration" });
+			strictEqual(json.code, 1);
+			const parsed = JSON.parse(json.stdout) as {
+				status: string;
+				errors: string[];
+				advice: Array<{ command: string }>;
+			};
+			strictEqual(parsed.status, "error");
+			match(parsed.errors[0] ?? "", /migration failed/u);
+			strictEqual(parsed.advice[0]?.command, "clio-coder upgrade --skip-migrations");
+		} finally {
+			temp.cleanup();
 		}
 	});
 });
