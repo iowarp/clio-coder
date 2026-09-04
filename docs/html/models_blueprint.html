@@ -207,14 +207,18 @@ override the applicable setting.</p>
 <li><strong>Ollama Native (<code>ollama-native</code>):</strong> Ollama utilizes the native <code>thinking</code> field in the request and response payloads. The engine handles Ollama-specific effort levels and streams reasoning increments cleanly through the native thinking channel.</li>
 <li><strong>LM Studio (<code>lmstudio</code>):</strong> Chat uses the OpenAI-compatible <code>/v1/chat/completions</code> surface, including its <code>reasoning</code> stream field. Clio controls thinking only with <code>reasoning_effort</code> and never sends <code>chat_template_kwargs</code> to LM Studio. See <a href="https://lmstudio.ai/docs/developer/openai-compat/chat-completions">https://lmstudio.ai/docs/developer/openai-compat/chat-completions</a>.</li>
 <li><strong>LiteLLM (<code>litellm</code>):</strong> This is a gateway runtime, not an <code>openai-compat</code>
-alias. Discovery checks <code>/health/liveliness</code>, reads aliases and capability
+alias. Discovery checks <code>/health/liveliness</code>, reads routed names and capability
 metadata from <code>/v1/model/info</code>, and records the physical deployment reported
-by <code>x-litellm-*</code> response headers. Defaults stay conservative when metadata is
-absent: tools, vision, and reasoning are not inferred. The runtime advertises
-standard <code>json_schema</code> structured output and treats schema-plus-tools as a
-conflict because the gateway alias does not identify one stable upstream.
-Residency is observe-only because LiteLLM owns loading and eviction behind the
-alias.</li>
+by <code>x-litellm-*</code> response headers. Deterministic gateways should publish one
+<code>node/model</code> name per deployment; genuine multi-deployment aliases expose only
+the capabilities guaranteed by every route and use the smallest unanimously published
+context/output limits. Defaults stay conservative when metadata is absent: tools,
+vision, reasoning, and structured output are not inferred. Explicitly advertised schema
+support uses standard <code>json_schema</code> on the wire. Gateway requests use no hidden
+OpenAI SDK retries, and LiteLLM failures bypass Clio's interactive transient retry ladder
+so the operator can select another route. Stable session ids, request tags, optional
+request-level timeouts, and observed server retry/fallback headers remain supported.
+Residency is observe-only because LiteLLM owns loading and eviction behind the route.</li>
 <li><strong>OpenAI Completions (<code>openai-completions</code>):</strong> The OpenAI-compatible completions provider preserves reasoning blocks within assistant messages. It replays thinking blocks via the <code>reasoning_content</code> parameter in the message history, ensuring that the model maintains its chain-of-thought across conversational turns without stripping the data.</li>
 <li><strong>Anthropic OAuth / API (<code>anthropic-max</code>):</strong> Uses the <code>anthropic-extended</code> thinking format. The engine supports Anthropic&#39;s native extended thinking block protocol, streaming thinking increments and outputting them wrapped appropriately or natively depending on target capabilities.</li>
 <li><strong>Reasoning-Never Models (<code>thinking.mechanism: none</code>):</strong> When a model is configured or cataloged with <code>thinking.mechanism: none</code>, it is treated as a reasoning-never model. For these models, Clio must not send any thinking fields or parameters in requests, must not replay thinking blocks, must not surface thinking events to the TUI, and must not preserve or log reasoning token usage in metrics.</li>
