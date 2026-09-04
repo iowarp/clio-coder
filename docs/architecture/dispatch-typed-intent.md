@@ -250,7 +250,7 @@ producer.
 | `intent_absent_legacy_inference` | classifier-only warn | No typed intent; scope came from legacy inference. Production admission does not emit it. |
 | `intent_partial_verification_absent` | classifier-only warn | Declares tree-changing work with no verification requirement. Production admission does not emit it. |
 | `typed_scope_replaced_inferred_paths` | warn | Typed intent was declared, so prose-only paths took no part in scope. |
-| `legacy_scope_inferred` | retained compatibility id | Accepted by the event projection for older producers; no current source emits it. |
+| `legacy_scope_inferred` | warn | Emitted by `path-scope.ts` when prose inference resolves a leading `../` run against the dispatch root. The detail lists each token as `<raw token> -> <path or dropped>`. |
 | `legacy_scope_empty` | retained compatibility id | Accepted by the event projection for older producers; no current source emits it. |
 | `intent_version_unsupported` | refuse | `intent.version` names a version this build does not speak. |
 | `intent_malformed` | refuse | Not a normalized intent for a reason other than its version. |
