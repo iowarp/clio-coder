@@ -14,6 +14,9 @@ All notable changes to Clio Coder are documented in this file. The format follow
 - Hardened the entire Git skill suite under `skills/git/` (`file-ticket`, `fix-issue`, `ship`, `worktree-create`, `worktree-merge`, `resolve-merge-conflicts`). Added formal argument contracts with structural parsing; made workflow bodies project-agnostic without hardcoding repos, remotes, or branch names while preserving the canonical-main-only policy in `CONTRIBUTING.md`; required confirmation before every outward ticket action including duplicate issue comments; decoupled unsupported RCA automation claims from `fix-issue`; separated `ship` into explicit `commit`, `pr`, maintainer-local, and `closeout` modes; corrected rebase ours/theirs reversal semantics and added conflict matrices covering binary, rename, modify/delete, and lockfile conflicts; supported configurable roots, safe path derivation, and strategy controls in worktree operations; and expanded evals across all skills.
 - Branch and worktree closeout is now an explicit final development step: prove the merged result, inspect local state, remove registered worktrees through Git, delete local scaffolding, and report every surviving branch, stash, local-only tag, and canonical remote head. The canonical repository keeps only `main`: maintainer topic and compact release-candidate branches such as `v043` stay local, contributors submit branches from their forks, and dotted names such as `v0.4.3` are reserved for immutable release tags.
 
+### Fixed
+- Headless runs that recover from a provider failure with a successful tool-only artifact completion no longer retain the earlier error and fail evaluation despite producing the required artifact. Terminal errors, failed artifacts, cancellation, and shutdown still fail truthfully; recovered runs retain their failure history and reported spend (#275).
+
 ## 0.4.2 - 2026-09-02
 
 ### Added

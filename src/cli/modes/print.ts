@@ -153,10 +153,14 @@ function resultFromEvent(event: ChatLoopEvent, current: HeadlessMainAgentResult)
 	}
 	if (event.type !== "message_end") return current;
 	const message = event.message;
+	if (message?.role !== "assistant") return current;
 	const error = assistantError(message);
 	if (error) return { ...current, text: "", error };
 	const text = assistantText(message).trimEnd();
-	if (text.length === 0) return current;
+	// A successful retry may contain only tool calls. It supersedes the prior
+	// provider error even without prose; the terminal tool/answer checks still
+	// decide whether the task completed. Tool-result messages cannot clear it.
+	if (text.length === 0) return { ...current, error: null };
 	return { ...current, text, error: null };
 }
 
