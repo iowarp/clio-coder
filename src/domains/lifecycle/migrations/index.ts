@@ -72,6 +72,10 @@ export function listMigrations(): ReadonlyArray<Migration> {
 	return REGISTRY;
 }
 
+export function readMigrationManifest(stateDir: string): MigrationManifest {
+	return readManifest(manifestPath(stateDir));
+}
+
 function manifestPath(stateDir: string): string {
 	return join(stateDir, "migrations.json");
 }

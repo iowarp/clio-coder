@@ -215,7 +215,7 @@ describe("smoke/real built binary boot", { concurrency: false }, () => {
 			const env = { ...home.env, CLIO_CODER_TEST_UPGRADE_NO_NETWORK: "1" };
 			const first = await run(["upgrade"], env);
 			strictEqual(first.code, 0, first.output);
-			match(first.output, /migrations: 5/u);
+			match(first.output, /5 migrations applied/u);
 			strictEqual(readFileSync(join(home.root, "config", "settings.yaml.v1.bak"), "utf8"), V1_SETTINGS);
 			const manifest = JSON.parse(readFileSync(join(home.root, "state", "migrations.json"), "utf8"));
 			deepStrictEqual(manifest.applied, [
