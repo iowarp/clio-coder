@@ -33,8 +33,12 @@ export interface InteropAgentKind {
 	binaryNames: ReadonlyArray<string>;
 	/** Home-relative directory the agent owns. */
 	userDir: string;
+	/** Older home-relative roots still owned by supported installations. */
+	legacyUserDirs?: ReadonlyArray<string>;
 	/** Project-relative directory the agent owns, when it has one distinct from the repo's own. */
 	projectDir?: string;
+	/** Older project-relative roots still protected from Clio writes. */
+	legacyProjectDirs?: ReadonlyArray<string>;
 	userSkillRoot?: string;
 	projectSkillRoot?: string;
 	userPromptRoot?: string;

@@ -24,6 +24,18 @@ const ENV_ALLOWLIST = [
 	"TMP",
 	"CI",
 	"NO_COLOR",
+	// Platform/session location variables needed by installed local CLIs. These
+	// locate operator-owned state; provider keys and Clio gates are deliberately
+	// absent from this allowlist.
+	"XDG_CONFIG_HOME",
+	"XDG_CACHE_HOME",
+	"XDG_STATE_HOME",
+	"APPDATA",
+	"LOCALAPPDATA",
+	"SYSTEMROOT",
+	"WINDIR",
+	"COMSPEC",
+	"PATHEXT",
 ] as const;
 
 export interface SafeCommandResult {
@@ -49,10 +61,13 @@ export interface RunCommandVectorOptions {
 	env?: Record<string, string>;
 }
 
-export function buildSafeToolEnv(extra: Record<string, string> = {}): NodeJS.ProcessEnv {
+export function buildSafeToolEnv(
+	extra: Record<string, string> = {},
+	source: NodeJS.ProcessEnv = process.env,
+): NodeJS.ProcessEnv {
 	const env: NodeJS.ProcessEnv = {};
 	for (const key of ENV_ALLOWLIST) {
-		const value = process.env[key];
+		const value = source[key];
 		if (value !== undefined) env[key] = value;
 	}
 	for (const [key, value] of Object.entries(extra)) {

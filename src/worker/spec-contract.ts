@@ -213,6 +213,7 @@ const RUNTIME_API_FAMILIES = [
 	"embeddings-http",
 	"claude-agent-sdk",
 	"claude-code-subprocess",
+	"external-agent-subprocess",
 ] as const satisfies ReadonlyArray<RuntimeApiFamily>;
 const RUNTIME_AUTHS = [
 	"api-key",

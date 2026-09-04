@@ -22,7 +22,8 @@ export type RuntimeApiFamily =
 	| "rerank-http"
 	| "embeddings-http"
 	| "claude-agent-sdk"
-	| "claude-code-subprocess";
+	| "claude-code-subprocess"
+	| "external-agent-subprocess";
 
 export type RuntimeAuth = "api-key" | "oauth" | "aws-sdk" | "vertex-adc" | "claude-cli" | "none";
 
@@ -97,6 +98,10 @@ export interface ProbeResult {
 	authFailed?: boolean;
 	serverVersion?: string;
 	models?: string[];
+	/** Human-readable labels keyed by the exact wire id returned in `models`. */
+	modelLabels?: Record<string, string>;
+	/** Stable cause class for setup UX; `error` remains the redacted human diagnostic. */
+	failureKind?: "missing" | "authentication" | "unsupported-feature" | "catalog-unavailable" | "cancelled" | "generic";
 	/** Probe-only per-model load state when the runtime exposes it. */
 	modelStates?: Record<string, ProbeModelStatus>;
 	discoveredCapabilities?: Partial<CapabilityFlags>;
@@ -157,6 +162,18 @@ export interface RuntimeDescriptor {
 	headlessCommand?: string;
 	outputParser?: string;
 	defaultCapabilities: CapabilityFlags;
+	/**
+	 * Declares a black-box agent loop owned by an external executable. `tools`
+	 * in CapabilityFlags stays false because Clio neither sends nor observes
+	 * typed calls on this path; this field records the distinct external fact.
+	 */
+	externalAgentLoop?: {
+		tools: "externally-governed-unobserved";
+		network: "externally-governed-unobserved";
+		budget: "external-one-shot";
+		generatingRetry: "forbidden";
+		modelCatalog: "live-authoritative" | "static";
+	};
 	/**
 	 * When true, this id is a real, distinct runtime (e.g. `llamacpp-anthropic`,
 	 * the Anthropic Messages surface on llama.cpp, or the embed/rerank runtimes)

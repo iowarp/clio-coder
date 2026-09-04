@@ -6,6 +6,7 @@ export type ProviderModelSource = "configured" | "live" | "catalog" | "default";
 
 export interface ProviderModelCandidate {
 	id: string;
+	label?: string;
 	source: ProviderModelSource;
 	loadState?: string;
 	loadStateDetail?: string;
@@ -100,6 +101,7 @@ export function modelCandidatesForStatus(status: TargetStatus): ProviderModelCan
 		const state = status.discoveredModelStates?.[trimmed];
 		out.push({
 			id: trimmed,
+			...(status.discoveredModelLabels?.[trimmed] ? { label: status.discoveredModelLabels[trimmed] } : {}),
 			source,
 			...(state ? { loadState: state.state } : {}),
 			...(state?.detail ? { loadStateDetail: state.detail } : {}),

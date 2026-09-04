@@ -29,6 +29,7 @@ import { extractLocalModelQuirks } from "../../src/domains/providers/types/local
 import {
 	antigravitySubprocessConfigForAutonomy,
 	buildAgyArgs,
+	buildAgyStdinLine,
 	parseAntigravityStreamLine,
 } from "../../src/engine/antigravity/subprocess-runtime.js";
 import { openAICompletionsApiProvider } from "../../src/engine/apis/openai-completions.js";
@@ -179,6 +180,10 @@ describe("provider transport boundary", () => {
 		strictEqual(antigravityCodeRuntime.kind, "subprocess");
 		strictEqual(isOrchestratorEligibleRuntime(antigravityCodeRuntime), false);
 		strictEqual(antigravityCodeRuntime.outputParser, "antigravity-stream-json");
+		strictEqual(antigravityCodeRuntime.apiFamily, "external-agent-subprocess");
+		strictEqual(antigravityCodeRuntime.externalAgentLoop?.tools, "externally-governed-unobserved");
+		strictEqual(antigravityCodeRuntime.externalAgentLoop?.budget, "external-one-shot");
+		strictEqual(antigravityCodeRuntime.externalAgentLoop?.generatingRetry, "forbidden");
 		deepStrictEqual(
 			parseAntigravityModelCatalog(
 				JSON.stringify({
@@ -226,17 +231,23 @@ describe("provider transport boundary", () => {
 			autonomy: "read-only" as const,
 		};
 		const args = buildAgyArgs(base);
-		deepStrictEqual(args.slice(0, 7), [
+		deepStrictEqual(args.slice(0, 9), [
 			"--mode",
 			"plan",
 			"--sandbox",
+			"--input-format",
+			"stream-json",
 			"--output-format",
 			"stream-json",
 			"--disable-slash-commands",
 			"--model",
 		]);
-		strictEqual(args.at(-2), "--print");
-		ok(args.at(-1)?.includes("Compare the two standards."));
+		ok(!args.includes("--print"));
+		ok(!args.some((arg) => arg.includes("Compare the two standards.")));
+		deepStrictEqual(JSON.parse(buildAgyStdinLine(base)), {
+			event: "user",
+			message: { content: "Use primary sources.\n\nCompare the two standards." },
+		});
 		strictEqual(antigravitySubprocessConfigForAutonomy("full-auto", {}).externalMode, "accept-edits");
 		strictEqual(
 			antigravitySubprocessConfigForAutonomy("full-auto", { CLIO_CODER_ALLOW_EXTERNAL_FULL_ACCESS: "1" }).externalMode,

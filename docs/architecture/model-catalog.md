@@ -20,7 +20,11 @@ Configured `wireModels` and a target `defaultModel` remain selectable before a
 live catalog is known; Clio labels those rows as `configured` or `default`.
 Once a target returns a live catalog, that catalog is authoritative and models
 the runtime no longer reports stop resolving. Live probe discoveries are labeled
-`live` and carry load-state metadata when the runtime exposes it. This preserves
+`live` and carry load-state metadata when the runtime exposes it. Runtime model
+labels are separate metadata: the stable slug remains the wire identity while
+`clio-coder models` and target status may show the human label beside it. Slugs,
+labels, source, and freshness round-trip through the generic target model
+snapshot; a cached label never replaces a live slug. This preserves
 operator-curated defaults while still letting runtime discovery take over after
 newly installed local models or newly entitled cloud models appear. Catalog YAML
 entries are loaded when the provider domain is built, so bundled or overlay
@@ -32,8 +36,9 @@ Live provider probes are the preferred source for loaded context and per-model m
 `probeCapabilitiesForModel` is the one exact-id selector. When a router serves several models, capability resolution queries `probeCapabilitiesForModel` to ensure probe data is extracted only from the `/v1/models` row keyed to its own exact wire model ID.
 
 Transient probe failures preserve the last-good catalog, load states,
-capabilities, and notes for the same target identity, but the target health is
-reported as down or unavailable with the probe error as the reason. Worker
+labels, capabilities, and notes for the same target identity, but those model
+rows are marked cached/stale and target health is reported as down or unavailable
+with the probe error as the reason. Worker
 dispatch canonicalizes requested model ids against the live catalog when one is
 available, so a short alias can resolve to the canonical live id before the
 worker spec and receipt are written.
@@ -211,7 +216,7 @@ Subscription models are registered and managed as standard HTTP/cloud targets:
 - **`openai-codex` (ChatGPT Plus/Pro OAuth):** Maps to catalog-backed Codex model ids surfaced by `clio-coder configure --list` and `clio-coder models` via a browser-minted subscription OAuth token, supporting complete chat, vision, and tool-use capabilities.
 - **`anthropic-max` (Claude Pro/Max OAuth):** Powers chat and workers using catalog-backed Claude model ids surfaced by `clio-coder configure --list` and `clio-coder models`. It relies on the engine's Anthropic OAuth provider. During auth initialization, it alerts the operator to usage-terms caveat via:
   `Connects with your Claude Pro/Max subscription via OAuth (the same path Claude Code uses). Using subscription credentials outside Anthropic's first-party apps may not align with their terms of service; enable at your own discretion.`
-- **`antigravity-code` (experimental local delegation):** Is not an HTTP model provider and is never orchestrator-eligible. It invokes the operator's own authenticated official `agy` executable only for dispatch work, consumes `stream-json` results and token accounting, and discovers model slugs from the non-generating JSON `models` command. Descriptor models are a cold-start fallback; a successful target probe is authoritative for that account.
+- **`antigravity-code` (experimental local delegation):** Is not an HTTP model provider and is never orchestrator-eligible. It invokes the operator's own authenticated official `agy` executable only for dispatch work, consumes structured `stream-json` results and token accounting, and discovers model slugs and labels from the non-generating JSON `models` command. Descriptor models are cold-start hints only; a successful target probe is authoritative for that account, including the disappearance of a former model.
 
 ---
 

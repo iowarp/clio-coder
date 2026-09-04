@@ -64,7 +64,11 @@ re-probes that target.</li>
 live catalog is known; Clio labels those rows as <code>configured</code> or <code>default</code>.
 Once a target returns a live catalog, that catalog is authoritative and models
 the runtime no longer reports stop resolving. Live probe discoveries are labeled
-<code>live</code> and carry load-state metadata when the runtime exposes it. This preserves
+<code>live</code> and carry load-state metadata when the runtime exposes it. Runtime model
+labels are separate metadata: the stable slug remains the wire identity while
+<code>clio-coder models</code> and target status may show the human label beside it. Slugs,
+labels, source, and freshness round-trip through the generic target model
+snapshot; a cached label never replaces a live slug. This preserves
 operator-curated defaults while still letting runtime discovery take over after
 newly installed local models or newly entitled cloud models appear. Catalog YAML
 entries are loaded when the provider domain is built, so bundled or overlay
@@ -73,8 +77,9 @@ matching.</p>
 <p>Live provider probes are the preferred source for loaded context and per-model metadata. Clio keeps a 128k local-coding context recommendation, but it no longer treats that recommendation as provider truth for unknown local models: effective context comes from live probe data, an explicit target override, a model catalog/KB entry, or the runtime descriptor default. If the live target is below the recommendation, Clio reports a warning rather than silently inflating the displayed window.</p>
 <p><code>probeCapabilitiesForModel</code> is the one exact-id selector. When a router serves several models, capability resolution queries <code>probeCapabilitiesForModel</code> to ensure probe data is extracted only from the <code>/v1/models</code> row keyed to its own exact wire model ID.</p>
 <p>Transient probe failures preserve the last-good catalog, load states,
-capabilities, and notes for the same target identity, but the target health is
-reported as down or unavailable with the probe error as the reason. Worker
+labels, capabilities, and notes for the same target identity, but those model
+rows are marked cached/stale and target health is reported as down or unavailable
+with the probe error as the reason. Worker
 dispatch canonicalizes requested model ids against the live catalog when one is
 available, so a short alias can resolve to the canonical live id before the
 worker spec and receipt are written.</p>
@@ -230,6 +235,7 @@ Residency is observe-only because LiteLLM owns loading and eviction behind the r
 <li><strong><code>openai-codex</code> (ChatGPT Plus/Pro OAuth):</strong> Maps to catalog-backed Codex model ids surfaced by <code>clio-coder configure --list</code> and <code>clio-coder models</code> via a browser-minted subscription OAuth token, supporting complete chat, vision, and tool-use capabilities.</li>
 <li><strong><code>anthropic-max</code> (Claude Pro/Max OAuth):</strong> Powers chat and workers using catalog-backed Claude model ids surfaced by <code>clio-coder configure --list</code> and <code>clio-coder models</code>. It relies on the engine&#39;s Anthropic OAuth provider. During auth initialization, it alerts the operator to usage-terms caveat via:
 <code>Connects with your Claude Pro/Max subscription via OAuth (the same path Claude Code uses). Using subscription credentials outside Anthropic&#39;s first-party apps may not align with their terms of service; enable at your own discretion.</code></li>
+<li><strong><code>antigravity-code</code> (experimental local delegation):</strong> Is not an HTTP model provider and is never orchestrator-eligible. It invokes the operator&#39;s own authenticated official <code>agy</code> executable only for dispatch work, consumes structured <code>stream-json</code> results and token accounting, and discovers model slugs and labels from the non-generating JSON <code>models</code> command. Descriptor models are cold-start hints only; a successful target probe is authoritative for that account, including the disappearance of a former model.</li>
 </ul>
 <hr>
 <h2>Local Runtime Resolution &amp; Quirks</h2>

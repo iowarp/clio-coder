@@ -25,6 +25,7 @@ export interface TargetModelSnapshot {
 	runtimeId: string;
 	url: string | null;
 	models: string[];
+	modelLabels?: Record<string, string>;
 	observedAt: string;
 }
 
@@ -32,6 +33,7 @@ interface TargetModelCacheOptions {
 	cacheDir?: string;
 	nowMs?: number;
 	ttlMs?: number;
+	modelLabels?: Readonly<Record<string, string>>;
 }
 
 function targetCacheKey(targetId: string): string {
@@ -55,6 +57,22 @@ function normalizedModels(models: ReadonlyArray<string>): string[] {
 	return out;
 }
 
+function normalizedLabels(models: ReadonlyArray<string>, labels: unknown): Record<string, string> | undefined {
+	if (typeof labels !== "object" || labels === null || Array.isArray(labels)) return undefined;
+	const source = labels as Record<string, unknown>;
+	const out: Record<string, string> = {};
+	for (const id of models) {
+		const label = source[id];
+		if (typeof label !== "string") continue;
+		const trimmed = label.trim();
+		if (trimmed.length === 0 || trimmed.length > TARGET_MODEL_CACHE_MAX_MODEL_ID_CHARS || /[\r\n\0]/u.test(trimmed)) {
+			continue;
+		}
+		out[id] = trimmed;
+	}
+	return Object.keys(out).length > 0 ? out : undefined;
+}
+
 function parseSnapshot(value: unknown): TargetModelSnapshot | null {
 	if (typeof value !== "object" || value === null || Array.isArray(value)) return null;
 	const row = value as Partial<TargetModelSnapshot>;
@@ -66,7 +84,7 @@ function parseSnapshot(value: unknown): TargetModelSnapshot | null {
 	if (typeof row.observedAt !== "string" || !Number.isFinite(Date.parse(row.observedAt))) return null;
 	const models = normalizedModels(row.models);
 	if (models.length !== row.models.length) return null;
-	return {
+	const snapshot: TargetModelSnapshot = {
 		version: TARGET_MODEL_CACHE_VERSION,
 		targetId: row.targetId,
 		runtimeId: row.runtimeId,
@@ -74,6 +92,9 @@ function parseSnapshot(value: unknown): TargetModelSnapshot | null {
 		models,
 		observedAt: row.observedAt,
 	};
+	const modelLabels = normalizedLabels(models, row.modelLabels);
+	if (modelLabels !== undefined) snapshot.modelLabels = modelLabels;
+	return snapshot;
 }
 
 /** Read a fresh snapshot only when it still describes this target identity. */
@@ -102,7 +123,7 @@ export function readTargetModelSnapshot(
 export function recordTargetModelSnapshot(
 	target: Pick<TargetDescriptor, "id" | "runtime" | "url">,
 	models: ReadonlyArray<string>,
-	options: Pick<TargetModelCacheOptions, "cacheDir" | "nowMs"> = {},
+	options: Pick<TargetModelCacheOptions, "cacheDir" | "nowMs" | "modelLabels"> = {},
 ): boolean {
 	if (target.id.length === 0 || target.runtime.length === 0) return false;
 	const snapshot: TargetModelSnapshot = {
@@ -113,6 +134,8 @@ export function recordTargetModelSnapshot(
 		models: normalizedModels(models),
 		observedAt: new Date(options.nowMs ?? Date.now()).toISOString(),
 	};
+	const modelLabels = normalizedLabels(snapshot.models, options.modelLabels);
+	if (modelLabels !== undefined) snapshot.modelLabels = modelLabels;
 	try {
 		safeResourceWrite(targetModelSnapshotPath(target.id, options.cacheDir), `${JSON.stringify(snapshot, null, 2)}\n`, {
 			encoding: "utf8",
