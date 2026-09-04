@@ -13,7 +13,7 @@ import { isOrchestratorEligibleRuntime } from "../../src/domains/providers/eligi
 import type { ProvidersContract } from "../../src/domains/providers/index.js";
 import { createRuntimeRegistry } from "../../src/domains/providers/registry.js";
 import antigravityCodeRuntime, {
-	parseAntigravityModelCatalog,
+	parseAntigravityModelCatalogDetails,
 } from "../../src/domains/providers/runtimes/antigravity/antigravity-code.js";
 import { registerBuiltinRuntimes } from "../../src/domains/providers/runtimes/builtins.js";
 import litellmRuntime, {
@@ -185,7 +185,7 @@ describe("provider transport boundary", () => {
 		strictEqual(antigravityCodeRuntime.externalAgentLoop?.budget, "external-one-shot");
 		strictEqual(antigravityCodeRuntime.externalAgentLoop?.generatingRetry, "forbidden");
 		deepStrictEqual(
-			parseAntigravityModelCatalog(
+			parseAntigravityModelCatalogDetails(
 				JSON.stringify({
 					status: "SUCCESS",
 					command: {
@@ -198,10 +198,10 @@ describe("provider transport boundary", () => {
 						},
 					},
 				}),
-			),
+			).models,
 			["gemini-live-high", "gemini-live-low"],
 		);
-		throws(() => parseAntigravityModelCatalog('{"status":"SUCCESS"}'), /unsupported model catalog/);
+		throws(() => parseAntigravityModelCatalogDetails('{"status":"SUCCESS"}'), /unsupported model catalog/);
 		deepStrictEqual(
 			parseAntigravityStreamLine(
 				'{"event":"step_update","step_update":{"conversation_id":"c-1","step_type":"agent_response","text_delta":"hello"}}',
