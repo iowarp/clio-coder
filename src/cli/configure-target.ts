@@ -498,9 +498,12 @@ export async function resolveSupportedWireModels(
 	authToken?: string,
 ): Promise<WireModelInventory> {
 	const known = listKnownModelsForRuntime(runtime.id);
-	const shouldProbeFirst = runtime.externalAgentLoop?.modelCatalog === "live-authoritative";
+	const liveAuthoritative = runtime.externalAgentLoop?.modelCatalog === "live-authoritative";
+	// A static catalog stays authoritative unless the runtime declares its live
+	// catalog authoritative; only then are the known ids demoted to hints.
+	if (known.length > 0 && !liveAuthoritative) return { models: known, source: "catalog" };
 	let probeError: string | undefined;
-	if (runtime.kind === "http" || shouldProbeFirst) {
+	if (runtime.kind === "http" || liveAuthoritative) {
 		// The full probe carries load state alongside the ids; a runtime that
 		// lists models only through probeModels still gets its ids checked.
 		const probe = await runtimeProbe(runtime, target, authToken);

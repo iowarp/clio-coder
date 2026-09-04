@@ -240,6 +240,26 @@ describe("Antigravity external subprocess contract", () => {
 		match(modelChoiceRefusal(runtime, target, "gemini-3.8-flash-high", inventory) ?? "", /does not advertise/);
 	});
 
+	it("keeps a static catalog authoritative for runtimes that do not declare live discovery", async () => {
+		isolated = await isolateClioEnv("clio-catalog-first-");
+		let probed = 0;
+		const { externalAgentLoop: _external, ...base } = antigravityCodeRuntime;
+		const runtime = {
+			...base,
+			id: "openai",
+			kind: "http" as const,
+			probe: async () => {
+				probed += 1;
+				return { ok: true, models: ["live-only"] };
+			},
+		};
+		const inventory = await resolveSupportedWireModels(runtime, { id: "oa", runtime: "openai" });
+		equal(inventory.source, "catalog");
+		equal(probed, 0);
+		ok(inventory.models.length > 0);
+		ok(!inventory.models.includes("live-only"));
+	});
+
 	it("sends a literal one-turn stdin record and only allowlisted environment values", async () => {
 		const { root, binary, home } = scratch();
 		writeScenario(root, {
