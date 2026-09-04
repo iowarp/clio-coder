@@ -8,7 +8,7 @@ triggers:
   - diagnose NaNs
   - debug with falsifiable hypotheses
   - scientific root cause
-version: 0.2.0
+version: 0.3.0
 license: Apache-2.0
 allowed-tools:
   - read
@@ -37,6 +37,28 @@ learned nothing, and when it does not you have contaminated the evidence.
 Anti-trigger: if the failure is a typo, a missing import, or an error message
 that names its own cause, fix it directly and skip this workflow. The loop
 below is for failures that survived the first obvious fix.
+
+## Arguments
+
+```text
+/skill scientific-debugging <failure description>
+```
+
+Everything after the skill name is the failure report: the observed wrong
+behavior and whatever has already been tried. There is no operator in a
+headless run — `ask_user` is not in this skill's tool surface. If the goal,
+a fault-class split, or a ranking call is ambiguous, state your best reading
+in Step 1 or Step 3 and proceed; never stall a step waiting for confirmation.
+
+The Loop below is the plan; do not open a task list for it — `tasks` sits
+outside this skill's tool surface and any call to it is refused.
+
+Shell rules for every `bash` call: one command per call, plain and direct.
+Never use `$(...)` or backticks; they trigger an approval gate that ends a
+headless run. This skill has no `write`/`edit` tool — the structured-
+investigation file in the Tiers section below is written with a `bash`
+heredoc (`cat > file <<'EOF' ... EOF`), never through an edit tool that
+isn't in this skill's surface.
 
 ## The Loop
 

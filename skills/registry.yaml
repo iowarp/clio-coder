@@ -111,16 +111,16 @@ skills:
     sha256: 0bc6b39d12934568804fc11b23219de4c6c2172e28c4bfedcee3104e2217aae6
   - name: experiment-protocol
     path: research/experiment-protocol
-    version: 0.2.0
-    sha256: 126e0f6dc3534a141978f2ccd1c6ea659df447beb1015bc92e41856d318584a2
+    version: 0.3.0
+    sha256: 235256cbdf44ebdd25d87cce60940e00ad1fca42a1b2b4e534bfc245f0d1135c
   - name: scientific-debugging
     path: research/scientific-debugging
-    version: 0.2.0
-    sha256: f2b2b6442740ef23270fad94f75ba95ce522da1877a468ba112cbaff68e5fa2a
+    version: 0.3.0
+    sha256: 9c29d70b4b82a440640b41665c23731b4112125915bde0e91016fc60aec67207
   - name: scientific-modernization
     path: research/scientific-modernization
-    version: 0.3.0
-    sha256: 66a99f38b38232735bb70d7924a85d0ab5addabfe3935cc82c0aaa3303d68773
+    version: 0.4.0
+    sha256: 491522d547fa0bddef19d2ec92bc35236b169787bded6ecc3a29dfec19892886
   # ── workflow ──
   - name: cut-it
     path: workflow/cut-it
