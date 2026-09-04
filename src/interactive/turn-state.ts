@@ -127,6 +127,12 @@ export interface ChatTurnState {
 	/** A middleware request_continuation is waiting to resubmit after settle. */
 	pendingRequestContinuation: boolean;
 	currentPendingSkillPolicy: PendingSkillToolPolicy | undefined;
+	/**
+	 * Tool surface an activated skill narrowed, held across the operator's
+	 * later turns. Replaced when the operator activates a different skill,
+	 * cleared by `/skill off`, gone with the session.
+	 */
+	activeSkillSurface: PendingSkillToolPolicy | undefined;
 	currentAskUserPolicy: AskUserToolPolicy | undefined;
 	lastRunSnapshot: ChatLoopRunSnapshot | null;
 }
@@ -153,6 +159,7 @@ export function createTurnState(initialThinkingLevel: ThinkingLevel): ChatTurnSt
 		stalledTurnNudgeSpent: false,
 		pendingRequestContinuation: false,
 		currentPendingSkillPolicy: undefined,
+		activeSkillSurface: undefined,
 		currentAskUserPolicy: undefined,
 		lastRunSnapshot: null,
 	};

@@ -58,6 +58,90 @@ export interface PendingSkillToolPolicy {
 	loadedSkillNames: Set<string>;
 	/** Declared tool policy per successfully loaded skill, recorded by context(scope=skills). */
 	loadedSkillPolicies: Map<string, SkillDeclaredToolPolicy>;
+	/**
+	 * True once this policy is a surface that outlived the turn that armed it.
+	 * The narrowing is identical; the flag exists so a load request the policy
+	 * does not cover reads as "only the operator activates skills" rather than
+	 * claiming a pending request that no longer exists.
+	 */
+	carriedSurface?: boolean;
+	/**
+	 * True when the session's autonomy level lets the model activate an
+	 * installed skill itself instead of emitting the suggestion anchor and
+	 * waiting for `/skill`. Activation is the same per-run policy the operator's
+	 * path produces: skills only ever narrow the tool surface, so this grants
+	 * nothing the level had not already granted. Marketplace (not yet
+	 * installed) skills stay operator-gated at every level.
+	 */
+	modelActivation?: boolean;
+}
+
+/**
+ * The surface that stays armed after an interactive turn ends.
+ *
+ * A skill an operator loaded narrows the tools for the workflow it started,
+ * and a multi-turn workflow (an interview skill asking a question per turn)
+ * is still inside that workflow on the operator's next message. Dropping the
+ * narrowing at turn end handed the workflow back the full surface partway
+ * through, which is how a `bash` call correctly refused in turn one ran in
+ * turn six. Returns undefined when nothing declared a narrowing, which is the
+ * signal to clear whatever surface was armed before.
+ */
+export function armedSkillSurface(policy: PendingSkillToolPolicy | undefined): PendingSkillToolPolicy | undefined {
+	if (!policy) return undefined;
+	const declared = [...policy.loadedSkillPolicies.entries()].filter(
+		([, declaration]) => (declaration.allowedTools?.length ?? 0) > 0 || (declaration.disallowedTools?.length ?? 0) > 0,
+	);
+	if (declared.length === 0) return undefined;
+	return {
+		allowedSkillNames: [...policy.allowedSkillNames],
+		requests: [...policy.requests],
+		loadedSkillNames: new Set(policy.loadedSkillNames),
+		loadedSkillPolicies: new Map(declared),
+		carriedSurface: true,
+	};
+}
+
+/** Skill names contributing a declaration to an armed surface, for the operator notice. */
+export function skillSurfaceNames(policy: PendingSkillToolPolicy | undefined): ReadonlyArray<string> {
+	return policy ? [...policy.loadedSkillPolicies.keys()] : [];
+}
+
+/**
+ * The same names, each tagged with who activated it. A skill the operator
+ * named arrives as a pending request; anything else was activated by the model
+ * under `modelActivation`, and the operator's one line about the surface is
+ * where that distinction has to be visible.
+ */
+export function skillSurfaceLabels(policy: PendingSkillToolPolicy | undefined): ReadonlyArray<string> {
+	if (!policy) return [];
+	return [...policy.loadedSkillPolicies.keys()].map((name) =>
+		policy.requests.some((request) => request.name === name) ? `${name} (operator)` : `${name} (model)`,
+	);
+}
+
+/**
+ * Stamp (or clear) the model-activation grant on the policy this turn runs
+ * under, creating one when nothing else did. Mutates in place so a surface
+ * carried from an earlier turn keeps its identity, and re-stamps every turn so
+ * a level change takes effect on the next message rather than the next skill.
+ */
+export function withModelSkillActivation(
+	policy: PendingSkillToolPolicy | undefined,
+	enabled: boolean,
+): PendingSkillToolPolicy | undefined {
+	if (policy) {
+		policy.modelActivation = enabled;
+		return policy;
+	}
+	if (!enabled) return undefined;
+	return {
+		allowedSkillNames: [],
+		requests: [],
+		loadedSkillNames: new Set<string>(),
+		loadedSkillPolicies: new Map<string, SkillDeclaredToolPolicy>(),
+		modelActivation: true,
+	};
 }
 
 /**
@@ -75,6 +159,8 @@ export interface SkillToolSurfaceViolation {
 	mergedAllowedTools: ReadonlyArray<string> | null;
 	/** Skills whose disallowed-tools name the tool directly. */
 	disallowedBy: ReadonlyArray<string>;
+	/** True when the surface outlived the turn that armed it, which changes the lifetime the block message states. */
+	carriedSurface: boolean;
 }
 
 /**
@@ -98,15 +184,16 @@ export function evaluateSkillToolSurface(
 	if (SKILL_SURFACE_EXEMPT_TOOLS.has(tool)) return null;
 	const entries = [...policy.loadedSkillPolicies.entries()];
 	const skills = entries.map(([name]) => name);
+	const carriedSurface = policy.carriedSurface === true;
 	const disallowedBy = entries
 		.filter(([, declared]) => declared.disallowedTools?.includes(tool) === true)
 		.map(([name]) => name);
-	if (disallowedBy.length > 0) return { skills, mergedAllowedTools: null, disallowedBy };
+	if (disallowedBy.length > 0) return { skills, mergedAllowedTools: null, disallowedBy, carriedSurface };
 	const allowLists = entries.map(([, declared]) => declared.allowedTools);
 	if (allowLists.some((list) => list === undefined || list.length === 0)) return null;
 	const merged = [...new Set(allowLists.flatMap((list) => [...(list ?? [])]))];
 	if (merged.includes(tool)) return null;
-	return { skills, mergedAllowedTools: merged, disallowedBy: [] };
+	return { skills, mergedAllowedTools: merged, disallowedBy: [], carriedSurface };
 }
 
 /**

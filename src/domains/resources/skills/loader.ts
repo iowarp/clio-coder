@@ -949,6 +949,13 @@ export function skillCatalogValidity(list: SkillList): SkillCatalogValidity {
 	return { ok: true, reason: null };
 }
 
+/**
+ * The one argument `/skill` reserves for itself: `/skill off` clears the tool
+ * surface an activated skill armed for the session instead of loading a skill
+ * by that name.
+ */
+export const SKILL_SURFACE_CLEAR_ARG = "off";
+
 export function parseSkillCommand(input: string): { name: string; args: string } | null {
 	const trimmed = input.trim();
 	if (!trimmed.startsWith("/skill ")) return null;

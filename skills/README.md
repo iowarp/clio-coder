@@ -102,11 +102,12 @@ folder is presentation and provenance, not a namespace.
 | [`herdr`](meta/herdr/) | integration | The user asks to launch, drive, or inspect another agent or command in a Herdr pane — including a second Clio Coder instance. Requires `HERDR_ENV=1`. |
 
 Each SKILL.md may declare `allowed-tools` / `disallowed-tools`. After a skill
-loads, Clio enforces that declaration at tool admission until the turn (or
-worker run) ends: calls outside the merged surface are blocked with reason
-code `skill_surface`, with `context` and `ask_user` always admitted. A
-skill can narrow its tool surface but never grant tools the host would not
-allow. See [Skill tool surface narrowing](../docs/architecture/safety-model.md#skill-tool-surface-narrowing)
+loads, Clio enforces that declaration at tool admission for the rest of the
+session, across the operator's later turns, until another skill replaces it or
+the operator runs `/skill off` (a worker run keeps the run-scoped lifetime):
+calls outside the merged surface are blocked with reason code `skill_surface`,
+with `context` and `ask_user` always admitted. A skill can narrow its tool
+surface but never grant tools the host would not allow. See [Skill tool surface narrowing](../docs/architecture/safety-model.md#skill-tool-surface-narrowing)
 for the full semantics.
 
 ## Install (activate a marketplace skill)
