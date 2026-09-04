@@ -64,7 +64,8 @@ Internal orchestration helpers and internal process agents. They are hidden from
 | Agent ID | Primary tools | Purpose | Capability | Latency |
 | --- | --- | --- | --- | --- |
 | `scout` | read, grep, find, ls, context, code_nav, git, ledger | Broad repository reconnaissance with cited findings: orientation, structure and entry-point mapping, multi-file symbol hunting. | `read-only` | `fast` |
-| `researcher` | read, web_fetch, context, ledger | Researches external docs, standards, and papers for coding decisions. | `read-only` | `deep` |
+| `researcher` | read, web_fetch, context, ledger | Extracts and compares concrete supplied URLs, standards, release notes, and papers through Clio-observed reads and URL retrieval. | `read-only` | `deep` |
+| `world-knowledge` | optional web_fetch, read, context, ledger | Current open-world discovery, ecosystem comparison, broad external context, and an advisory second opinion; reports when discovery is unavailable. | `read-only` | `deep` |
 | `provenance` | read, grep, find, ls, git, ledger | Reads receipts, diffs, and telemetry for evidence-backed handoffs. | `read-only` | `balanced` |
 | `oracle` | read, grep, find, ls, code_nav, context, ledger | Shadow advisor behind `/oracle` that protects consistency with prior decisions and returns the strongest challenge to a question. | `read-only` | `deep` |
 | `context-bootstrap` | read, grep, find, ls, context, code_nav | Internal agent behind `clio-coder context init` that parses repository and returns CLIO-CODER.md payload. | `read-only` | `balanced` |
@@ -74,6 +75,19 @@ The builtin `architect` also serves as the default author for a version 5 fleet 
 `scout` is bound by a live-grounding contract: its whole final response is one `scout-report` object whose every finding carries the `claim` it observed and the `path:line` that grounds it, a lead it could not confirm live is simply left out, and wiki or index content is orientation only, never citable as evidence. It has an 18-call exploration phase followed by a tool-free synthesis phase; wide parallel batches cannot consume the synthesis backstop as separate violations. Dispatch labels its answer `reconnaissance output (advisory leads, not validation evidence):`.
 
 Grounding is checked against the run's own reads, not just against the file. The worker records the exact line span every successful read returned, and a cited line must fall inside one. A line that exists in the file but was never read fails, which is what stops an approximated or inferred line number from passing as observation. `grep` and `code_nav` hits are leads: read the file before citing what they point at.
+
+The three discovery roles are deliberately non-overlapping. `scout` is
+repository-only reconnaissance with live `path:line` grounding and never browses
+external sources. `researcher` starts from concrete URLs or documents and uses
+Clio-observed `read`/`web_fetch` calls to extract and compare them; `web_fetch` is
+URL retrieval, not search. `world-knowledge` is for current open-world discovery,
+ecosystem comparison, broad context, and an independent advisory opinion. Its
+tools are all optional so it can run on a native Clio target or an opaque external
+worker. A native target without discovery must use caller-supplied sources or say
+discovery was unavailable. Its `world-knowledge-report` separates supported
+facts and supplied source identifiers from synthesis, uncertainty, and follow-up
+verification; it never fabricates citations. The capability class remains
+`read-only` regardless of the caller's requested autonomy.
 
 `oracle` is the only shadow agent an operator reaches directly, and only through
 `/oracle <question>`. It never receives a forked transcript. `/oracle` packs a
@@ -181,9 +195,9 @@ To ensure security and proper boundary isolation, shadow and internal agents are
 In addition to standard HTTP targets and [Agent Client Protocol (ACP)](https://agentclientprotocol.com) delegation agents, Clio dispatches subagents to sanctioned subscription worker runtimes:
 - **`claude-sdk` (Claude Agent SDK):** Serves as a main worker runtime for driving fleet agents. It integrates with [@anthropic-ai/claude-agent-sdk](https://www.npmjs.com/package/@anthropic-ai/claude-agent-sdk) alongside Clio's native subagent workers (like a local [llama.cpp](https://github.com/ggerganov/llama.cpp), [Ollama](https://ollama.com), [LM Studio](https://lmstudio.ai), [vLLM](https://github.com/vllm-project/vllm), or [SGLang](https://github.com/sgl-project/sglang) fleet) to execute tasks under a Claude subscription. Every tool call is mediated by Clio (`canUseTool` plus a `PreToolUse` hook): the safety net and autonomy matrix apply, and the run's admitted tool surface, which is narrowed by any `tool_profile`, is enforced authoritatively. Consequently, an out-of-profile tool (for example `bash` under `minimal-local`) is denied even though the underlying preset offers it. The narrowed surface is also translated into the SDK's `disallowedTools` option as defense in depth. Because it routes tool calls through Clio safety, it behaves as a native worker.
 - **`claude-code` (Claude Subprocess):** Runs `claude -p` as a subprocess worker, mapping autonomy levels to the CLI's permission modes. It is a black box: tool calls run inside the `claude` process and are not routed through Clio's per-tool mediation, so Clio cannot enforce a per-tool profile on it. Dispatching a narrowing `tool_profile` (`minimal-local` or `science-local`) to this runtime is refused; use `full-agent` (or a native / `claude-sdk` worker) instead.
-- **`antigravity-code` (Antigravity CLI, experimental):** Runs the operator-installed and authenticated official `agy` command as a local external delegation worker. It is useful for a researcher's world-knowledge pass, a second opinion, or a bounded subtask; it is never an orchestrator or Gemini chat backend. Clio consumes agy's structured print stream and live model catalog but cannot mediate individual tools, so a narrowing `tool_profile` is refused rather than silently ignored. Prefer the `researcher` agent at `read-only` unless a task explicitly needs workspace edits.
+- **`antigravity-code` (Antigravity CLI — experimental local delegation):** Runs the operator-installed and authenticated official `agy` command as a local external delegation worker. It is useful for a `world-knowledge` pass, a second opinion, or another bounded one-shot subtask; it is never an orchestrator or Gemini chat backend. Clio consumes agy's structured stream and live model catalog but cannot mediate individual tools, so a narrowing `tool_profile` is refused rather than silently ignored. The `world-knowledge` binding is permanently read-only.
 
-Agent budgets follow the same mediation boundary. Native workers and `claude-sdk` enforce canonical call counting, the canonical-`read` reserve, and the synthesis transition. Every valid Markdown recipe declares a budget, so recipe-based runs are refused on `claude-code` and `antigravity-code`; those subprocess targets can accept only work that reaches admission without an explicit recipe or request budget. Silently ignoring numeric bounds would be unsafe. Claude vendor aliases never appear in recipes or prompt authority and cannot reintroduce a canonical tool removed by admission.
+Agent budgets follow the same mediation boundary. Native workers and `claude-sdk` enforce canonical call counting, the canonical-`read` reserve, and the synthesis transition. An opaque external loop instead receives an `external-one-shot` enforcement classification: Clio enforces one subprocess launch, its deadline, output cap, cancellation, and result-contract validation, while recording recipe per-tool numbers as `unobserved-not-enforced`. Receipts and status never label those internal per-tool limits enforced, and Clio never automatically retries a generating external-agent run. Claude vendor aliases never appear in recipes or prompt authority and cannot reintroduce a canonical tool removed by admission.
 
 Interactive TUI:
 

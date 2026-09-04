@@ -59,6 +59,7 @@ const PRESENTED_RESULT_CONTRACTS: ReadonlyArray<WorkerPresentedResultContract> =
 	"debugger-report",
 	"verifier-report",
 	"research-report",
+	"world-knowledge-report",
 	"scout-report",
 ];
 

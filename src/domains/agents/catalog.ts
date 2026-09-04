@@ -58,7 +58,7 @@ export const FLEET_ANTI_CHURN_RULE =
  * directly below this line.
  */
 export const FLEET_SPECIALIST_ROUTING =
-	"Pick by job: receipts, diffs, or telemetry -> provenance; external docs -> researcher; broad recon -> scout; tests -> tester; gates or review -> verifier.";
+	"Pick by job: supplied URLs, standards, or papers -> researcher; current ecosystems or an open-world second opinion -> world-knowledge; repository recon -> scout; receipts -> provenance; tests -> tester; gates -> verifier.";
 
 function fleetPromptPurpose(description: string): string {
 	const trimmed = description.trim().replace(/\s+/gu, " ");

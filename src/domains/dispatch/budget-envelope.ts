@@ -28,6 +28,17 @@ export interface BudgetEnvelopeReason {
 
 export interface RunToolBudgetEnvelope {
 	version: 1;
+	enforcement:
+		| {
+				classification: "native-per-tool";
+				perTool: "enforced";
+				clioControls: ReadonlyArray<"tool-calls" | "read-reserve" | "synthesis" | "attempt-cap">;
+		  }
+		| {
+				classification: "external-one-shot";
+				perTool: "unobserved-not-enforced";
+				clioControls: ReadonlyArray<"single-launch" | "wall-clock" | "output-cap" | "cancellation" | "result-contract">;
+		  };
 	policy: {
 		recipeId: string;
 		default: AgentBudgetPhase & { synthesis: boolean };
@@ -38,6 +49,15 @@ export interface RunToolBudgetEnvelope {
 	effective: WorkerBudget;
 	reasons: ReadonlyArray<BudgetEnvelopeReason>;
 }
+
+const NATIVE_CLIO_CONTROLS = ["tool-calls", "read-reserve", "synthesis", "attempt-cap"] as const;
+const EXTERNAL_CLIO_CONTROLS = [
+	"single-launch",
+	"wall-clock",
+	"output-cap",
+	"cancellation",
+	"result-contract",
+] as const;
 
 export type BudgetAdmissionDenialCode =
 	| "exact-recipe-policy"
@@ -94,6 +114,8 @@ export function cloneDispatchBudgetRequest(value: unknown, prefix = "budget"): D
 }
 
 function freezeEnvelope(envelope: RunToolBudgetEnvelope): RunToolBudgetEnvelope {
+	Object.freeze(envelope.enforcement.clioControls);
+	Object.freeze(envelope.enforcement);
 	Object.freeze(envelope.policy.default);
 	Object.freeze(envelope.policy.maximum);
 	Object.freeze(envelope.policy);
@@ -172,6 +194,7 @@ export interface ResolveToolBudgetEnvelopeInput {
 	hasReadTool: boolean;
 	retry: boolean;
 	revision: boolean;
+	enforcement?: "native-per-tool" | "external-one-shot";
 }
 
 /** Resolve the one immutable envelope used by admission, enforcement, and evidence. */
@@ -253,6 +276,18 @@ export function resolveToolBudgetEnvelope(input: ResolveToolBudgetEnvelopeInput)
 	const authoredMaximum = input.policy.maximum ?? input.policy;
 	return freezeEnvelope({
 		version: 1,
+		enforcement:
+			input.enforcement === "external-one-shot"
+				? {
+						classification: "external-one-shot",
+						perTool: "unobserved-not-enforced",
+						clioControls: [...EXTERNAL_CLIO_CONTROLS],
+					}
+				: {
+						classification: "native-per-tool",
+						perTool: "enforced",
+						clioControls: [...NATIVE_CLIO_CONTROLS],
+					},
 		policy: {
 			recipeId: input.recipeId,
 			default: {
@@ -297,7 +332,11 @@ export function formatEffectiveBudget(envelope: RunToolBudgetEnvelope): string {
 	const revision = budget.revision
 		? `, result revision ${budget.revision.toolCalls}/${budget.revision.readReserve}`
 		: "";
-	return `${budget.toolCalls}/${budget.readReserve}${revision}, lifetime cap ${budget.hardCap}, synthesis=${budget.synthesis ? "on" : "off"}`;
+	const enforcement =
+		envelope.enforcement.classification === "external-one-shot"
+			? "external one-shot; per-tool unobserved/not enforced"
+			: "native per-tool enforced";
+	return `${budget.toolCalls}/${budget.readReserve}${revision}, lifetime cap ${budget.hardCap}, synthesis=${budget.synthesis ? "on" : "off"}; ${enforcement}`;
 }
 
 export function formatBudgetReasons(envelope: RunToolBudgetEnvelope): string {
@@ -313,6 +352,10 @@ const BUDGET_REASON_CODES: ReadonlySet<string> = new Set<BudgetEnvelopeReasonCod
 	"revision-growth-authorized",
 	"revision-growth-denied",
 ]);
+
+function isExactStringArray(value: unknown[], expected: readonly string[]): boolean {
+	return value.length === expected.length && value.every((item, index) => item === expected[index]);
+}
 
 /** Safely project an envelope that crossed a persistence or event boundary. */
 export function cloneRunToolBudgetEnvelope(value: unknown): RunToolBudgetEnvelope | undefined {
@@ -373,8 +416,50 @@ export function cloneRunToolBudgetEnvelope(value: unknown): RunToolBudgetEnvelop
 			}
 			reasons.push({ code: reason.code as BudgetEnvelopeReasonCode, detail: reason.detail });
 		}
+		const enforcement = (() => {
+			if (value.enforcement === undefined) {
+				return {
+					classification: "native-per-tool" as const,
+					perTool: "enforced" as const,
+					clioControls: [...NATIVE_CLIO_CONTROLS],
+				};
+			}
+			if (!isRecord(value.enforcement) || !Array.isArray(value.enforcement.clioControls)) return null;
+			if (
+				Object.keys(value.enforcement).some(
+					(key) => key !== "classification" && key !== "perTool" && key !== "clioControls",
+				)
+			) {
+				return null;
+			}
+			if (
+				value.enforcement.classification === "external-one-shot" &&
+				value.enforcement.perTool === "unobserved-not-enforced" &&
+				isExactStringArray(value.enforcement.clioControls, EXTERNAL_CLIO_CONTROLS)
+			) {
+				return {
+					classification: "external-one-shot" as const,
+					perTool: "unobserved-not-enforced" as const,
+					clioControls: [...EXTERNAL_CLIO_CONTROLS],
+				};
+			}
+			if (
+				value.enforcement.classification === "native-per-tool" &&
+				value.enforcement.perTool === "enforced" &&
+				isExactStringArray(value.enforcement.clioControls, NATIVE_CLIO_CONTROLS)
+			) {
+				return {
+					classification: "native-per-tool" as const,
+					perTool: "enforced" as const,
+					clioControls: [...NATIVE_CLIO_CONTROLS],
+				};
+			}
+			return null;
+		})();
+		if (enforcement === null) return undefined;
 		return freezeEnvelope({
 			version: 1,
+			enforcement,
 			policy: {
 				recipeId,
 				default: { ...defaultPhase, synthesis: value.policy.default.synthesis },

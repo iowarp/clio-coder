@@ -31,6 +31,7 @@ export type ResultContract =
 	| { kind: "council-ballot" }
 	| { kind: "debugger-report" }
 	| { kind: "research-report" }
+	| { kind: "world-knowledge-report" }
 	| { kind: "mutation-report" }
 	| { kind: "provenance-report" }
 	| { kind: "delegation-plan" }
@@ -594,6 +595,7 @@ const RESULT_CONTRACT_KINDS: ReadonlyArray<ResultContract["kind"]> = [
 	"council-report",
 	"debugger-report",
 	"research-report",
+	"world-knowledge-report",
 	"mutation-report",
 	"provenance-report",
 	"external-delegation",
@@ -1268,6 +1270,69 @@ function validateResearch(
 	return success(contract, "unmeasured", value);
 }
 
+function validateWorldKnowledge(
+	contract: ResultContract,
+	output: string | null,
+	externalSourcesAllowed: boolean,
+): ResultContractValidation {
+	const parsed = parseJson(output);
+	if (!parsed.ok) return failure(contract, "unmeasured", `World-knowledge payload failed: ${parsed.reason}`);
+	const value = parsed.value;
+	const legal = ["discovery", "facts", "synthesis", "uncertainties", "followUpVerification"];
+	const unknown = Object.keys(value).filter((key) => !legal.includes(key));
+	if (unknown.length > 0) {
+		return failure(contract, "unmeasured", `World-knowledge field '${unknown[0]}' is not legal`);
+	}
+	if (
+		value.discovery !== "performed" &&
+		value.discovery !== "caller-supplied-only" &&
+		value.discovery !== "unavailable"
+	) {
+		return failure(
+			contract,
+			"unmeasured",
+			'World-knowledge field "discovery" must be one of: performed | caller-supplied-only | unavailable',
+		);
+	}
+	if (value.discovery === "performed" && !externalSourcesAllowed) {
+		return failure(
+			contract,
+			"unmeasured",
+			'World-knowledge field "discovery" is performed but this run had no external-source posture',
+		);
+	}
+	if (!Array.isArray(value.facts)) {
+		return failure(contract, "unmeasured", 'World-knowledge field "facts" must be an array');
+	}
+	for (const [index, finding] of value.facts.entries()) {
+		if (!finding || typeof finding !== "object" || Array.isArray(finding)) {
+			return failure(contract, "unmeasured", `World-knowledge field "facts[${index}]" must be an object`);
+		}
+		const fact = finding as Record<string, unknown>;
+		const factUnknown = Object.keys(fact).filter((key) => !["claim", "evidence", "sources"].includes(key));
+		if (factUnknown.length > 0) {
+			return failure(contract, "unmeasured", `World-knowledge field "facts[${index}].${factUnknown[0]}" is not legal`);
+		}
+		if (!string(fact.claim) || !string(fact.evidence) || !Array.isArray(fact.sources)) {
+			return failure(
+				contract,
+				"unmeasured",
+				`World-knowledge field "facts[${index}]" requires non-empty claim/evidence strings and a sources array`,
+			);
+		}
+		if (fact.sources.some((source) => !string(source))) {
+			return failure(contract, "unmeasured", `World-knowledge field "facts[${index}].sources" must contain strings`);
+		}
+	}
+	for (const field of ["synthesis", "uncertainties", "followUpVerification"] as const) {
+		const entries = value[field];
+		if (!Array.isArray(entries) || entries.some((entry) => !string(entry))) {
+			return failure(contract, "unmeasured", `World-knowledge field "${field}" must be an array of non-empty strings`);
+		}
+	}
+	return success(contract, "unmeasured", value);
+}
+
 /** Paths this run wrote, as workspace-relative names, for a validator reason. */
 function describeWriteSet(effects: ObservedRunEffects, cwd: string): string {
 	if (effects.mutatedPaths.size === 0) return "this run wrote nothing";
@@ -1465,6 +1530,8 @@ export function validateResultContract(input: ResultContractValidationInput): Re
 			return validateDebugger(input.contract, input.output);
 		case "research-report":
 			return validateResearch(input.contract, input.output, input.networkAllowed);
+		case "world-knowledge-report":
+			return validateWorldKnowledge(input.contract, input.output, input.networkAllowed);
 		case "mutation-report":
 			return validateMutation(input.contract, input);
 		case "provenance-report":
@@ -1566,6 +1633,8 @@ export function resultContractShape(contract: ResultContract): string {
 			return 'one of {"diagnosis":"...","reproduction":"reproduced","evidence":["..."]}, {"diagnosis":"...","reproduction":"not-reproduced","evidence":["..."]}, or {"diagnosis":"...","reproduction":"unknown","evidence":["..."]}; reproduction legal values are reproduced | not-reproduced | unknown';
 		case "research-report":
 			return 'one of {"source":"local","findings":[{"claim":"...","evidence":"..."}]} or {"source":"external","findings":[{"claim":"...","evidence":"..."}]}; source legal values are local | external';
+		case "world-knowledge-report":
+			return '{"discovery":"performed|caller-supplied-only|unavailable","facts":[{"claim":"...","evidence":"...","sources":["URL or document id"]}],"synthesis":["comparison or advisory conclusion"],"uncertainties":["..."],"followUpVerification":["..."]}';
 		case "mutation-report":
 			return '{"mutatedPaths":["src/file.ts"],"validations":[{"name":"npm test","passed":true,"evidence":"exit 0"}],"commitMessage":"optional: the commit message for this change","summary":"optional: one line"}';
 		case "provenance-report":
@@ -1685,6 +1754,7 @@ const RECIPE_DECLARABLE_KINDS = [
 	"council-report",
 	"debugger-report",
 	"research-report",
+	"world-knowledge-report",
 	"mutation-report",
 	"provenance-report",
 	"oracle-report",

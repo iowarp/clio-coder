@@ -1440,6 +1440,13 @@ function runtimeLimitations(runtimeKind: RunKind, runtimeId: string): string[] {
 			"Claude CLI subprocess executes Claude Code tools; Clio constrains permission mode and forbids dangerous bypass unless explicitly gated",
 		];
 	}
+	if (runtimeKind === "subprocess" && runtimeId === "antigravity-code") {
+		return [
+			"Antigravity CLI owns its internal tools, network activity, prompts, and approvals; Clio observes only structured stream output and does not provide per-tool mediation or complete tool telemetry",
+			"Antigravity conversation ids are recorded only as opaque provider observations; Clio does not resume them",
+			"Antigravity runs are one-shot and never retried automatically",
+		];
+	}
 	// HTTP/native runtimes run through pi-agent-core, which Clio observes and
 	// controls directly, so there are no runtime-imposed dispatch limitations.
 	return [];
@@ -1477,13 +1484,6 @@ function assertWriteRootsEnforceable(runtime: RuntimeDescriptor, writeRoots: Rea
 	if (runtime.kind !== "subprocess") return;
 	throw new Error(
 		`dispatch: runtime '${runtime.id}' cannot enforce writeRoots: subprocess workers run their own tool surface without Clio per-tool mediation. Dispatch to a native or claude-sdk worker.`,
-	);
-}
-
-function assertWorkerBudgetEnforceable(runtime: RuntimeDescriptor, hasDeclaredBudget: boolean): void {
-	if (!hasDeclaredBudget || runtime.kind !== "subprocess") return;
-	throw new Error(
-		`dispatch: runtime '${runtime.id}' cannot enforce an explicit dispatch budget because subprocess workers do not expose per-tool mediation; choose a native or claude-sdk worker`,
 	);
 }
 
@@ -1621,6 +1621,7 @@ function resolveEffectiveWorkerBudget(input: {
 	declared: ReturnType<typeof normalizeAgentSpec>["budget"];
 	allowedTools: ReadonlyArray<ToolName>;
 	settings: EffectiveSettings;
+	runtime: RuntimeDescriptor;
 }): RunToolBudgetEnvelope {
 	const hardCap = workerToolCallHardCap(input.settings);
 	const declared = input.declared ?? {
@@ -1636,6 +1637,7 @@ function resolveEffectiveWorkerBudget(input: {
 		hasReadTool: input.allowedTools.includes(ToolNames.Read),
 		retry: (input.req.lineage?.attempt ?? 0) > 0,
 		revision: input.req.gate?.role === "builder" && input.req.gate.cycle > 1 && input.req.gate.verdict === "revise",
+		enforcement: input.runtime.externalAgentLoop?.budget ?? "native-per-tool",
 	});
 }
 
@@ -1974,6 +1976,15 @@ const AUTONOMY_ORDER: Record<AutonomyLevel, number> = {
 function clampWorkerAutonomy(session: AutonomyLevel, requested: AutonomyLevel | undefined): AutonomyLevel {
 	if (requested === undefined) return session;
 	return AUTONOMY_ORDER[requested] < AUTONOMY_ORDER[session] ? requested : session;
+}
+
+/** Read-only recipes are an authority boundary, including on opaque external loops. */
+export function effectiveWorkerAutonomy(
+	session: AutonomyLevel,
+	requested: AutonomyLevel | undefined,
+	capabilityClass: AgentCapabilityClass,
+): AutonomyLevel {
+	return clampWorkerAutonomy(session, capabilityClass === "read-only" ? "read-only" : requested);
 }
 
 function requestedAutonomyEvidence(
@@ -2850,6 +2861,14 @@ export function createDispatchBundle(
 		if (draining) return { scheduled: false };
 		const rootRunId = run.lineage.rootRunId;
 		if (!retryChainIsLive(run)) return { scheduled: false };
+		if (providers.getRuntime(run.runtimeId)?.externalAgentLoop?.generatingRetry === "forbidden") {
+			retryBackoff.delete(rootRunId);
+			return {
+				scheduled: false,
+				settlementDetail:
+					"automatic retry suppressed because this external agent loop is one-shot and Clio cannot prove replay is side-effect-free",
+			};
+		}
 		if (!RETRYABLE_OUTCOMES.has(outcome)) {
 			retryBackoff.delete(rootRunId);
 			return { scheduled: false };
@@ -3465,11 +3484,9 @@ export function createDispatchBundle(
 		);
 		enforceCapabilityGate(target.target.id, target.modelCapabilities, req.requiredCapabilities);
 		assertRuntimeCanHonorWorkerPermissionMode(target.runtime, settings?.fleet.permissions.mode ?? "deny");
-		assertWorkerBudgetEnforceable(target.runtime, spec.budget !== null || req.budget !== undefined);
-
 		const cwd = req.cwd ?? process.cwd();
 		const sessionAutonomy = settings?.safety.autonomy ?? "auto-edit";
-		const effectiveAutonomy = clampWorkerAutonomy(sessionAutonomy, req.autonomy);
+		const effectiveAutonomy = effectiveWorkerAutonomy(sessionAutonomy, req.autonomy, spec.capabilityClass);
 		const effectiveTools = withLedgerToolNarrowing(
 			effectiveToolNames(admission.allowedTools, target, pathScope.writeBoundaries.length > 0, deniedToolNames(req)),
 			req,
@@ -3508,6 +3525,7 @@ export function createDispatchBundle(
 			declared: spec.budget,
 			allowedTools: effectiveTools,
 			settings,
+			runtime: target.runtime,
 		});
 		// Fetch structured project context only for tiers that receive it, so
 		// read-only scouts never pay the CLIO-CODER.md read. The tier is spec policy
@@ -5498,7 +5516,9 @@ export function createDispatchBundle(
 					reachedTerminalResult: resultContractWasDue(finalOutcome, outcomeCode),
 					output: capturedOutput?.state === "final" ? capturedOutput.text : null,
 					cwd: lifecycle.cwd,
-					networkAllowed: lifecycle.admission.allowedTools.includes(ToolNames.WebFetch),
+					networkAllowed:
+						lifecycle.admission.allowedTools.includes(ToolNames.WebFetch) ||
+						lifecycle.target.runtime.externalAgentLoop?.network === "externally-governed-unobserved",
 					observedRunEffects,
 					filesystem: nodeResultContractFilesystem(),
 				});
@@ -5934,7 +5954,6 @@ export function createDispatchBundle(
 		);
 		assertPostRuntimeToolCompatibility(req.agentId, agentSpec, effectiveTools, target);
 		assertRuntimeCanHonorWorkerPermissionMode(target.runtime, settings?.fleet.permissions.mode ?? "deny");
-		assertWorkerBudgetEnforceable(target.runtime, agentSpec.budget !== null || req.budget !== undefined);
 		assertResponseSchemaEnforceable(target.runtime, target.modelCapabilities, req.responseSchema, effectiveTools.length);
 		assertWriteRootsEnforceable(target.runtime, pathScope.writeBoundaries);
 		assertProtectedArtifactsEnforceable(
@@ -5948,6 +5967,7 @@ export function createDispatchBundle(
 			declared: agentSpec.budget,
 			allowedTools: effectiveTools,
 			settings,
+			runtime: target.runtime,
 		});
 		const endpoint = endpointCapacityForTarget(target.target.id);
 		return {

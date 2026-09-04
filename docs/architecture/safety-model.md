@@ -237,7 +237,8 @@ Path-policy behavior:
 The default damage-control policy populates `noWritePaths` from the interop
 agent registry: `~/.claude/`, `.claude/`, `~/.codex/`, `.codex/`, `~/.config/opencode/`,
 `.opencode/`, `~/.gemini/`, `.gemini/`, `~/.copilot/`, `~/.cursor/`, `.cursor/`,
-`~/.antigravitycli/`, `.antigravitycli/`, `~/.agents/`, and `.agents/`. Clio never writes
+`~/.gemini/antigravity-cli/`, `.gemini/antigravity-cli/`, the legacy
+`~/.antigravitycli/` and `.antigravitycli/`, `~/.agents/`, and `.agents/`. Clio never writes
 into another coding agent's directory. It reads those roots for skills, prompts, and
 rule prose and has no reason to author them. A `write` or `edit` targeting any of
 these paths is refused at every posture including `auto-edit` and `full-auto`, with reason
@@ -291,13 +292,21 @@ Fleet dispatch is admitted only when the requested worker scope is a subset of t
 
 Dispatch workers can run the same HTTP or native runtimes as the orchestrator. Clio observes and governs those tool calls directly, so every worker run is subject to the same safety mapping and receipt accounting as an interactive turn.
 
-Three integration paths exist for driving Claude Code, ranging from fully enforced to advisory gating:
+Three worker-runtime safety categories range from fully enforced to advisory gating:
 
 - **`claude-sdk` (Enforced Safety):** Drives [@anthropic-ai/claude-agent-sdk](https://www.npmjs.com/package/@anthropic-ai/claude-agent-sdk) directly. This is the **strong safety path** because Clio enforces tool gating before execution. Clio registers a `PreToolUse` hook (which fires for all tool uses, including auto-allowed reads) and wraps `canUseTool` for permission paths. Every tool request is mapped into a Clio tool/action class, evaluated by the safety net, and passed through the active autonomy matrix. Because a dispatched worker is noninteractive, any `ask` decision is resolved as a non-stall denial (`fleet.permissions.mode=deny` returns denial; `fleet.permissions.mode=fail` terminates the run with a permission-required code).
-- **External CLI subprocesses:** `claude-code` drives `claude -p`; the experimental, dispatch-only `antigravity-code` runtime drives the operator's local `agy --print`. Neither exposes a callback through which Clio can evaluate each tool invocation, so Clio maps autonomy onto each CLI's command-line controls. Antigravity launches always name an explicit mode and disable print-mode slash expansion rather than inheriting mutable interactive settings. Dispatch at autonomy `suggest` is refused outright: a subprocess cannot park a tool call for approval, so `suggest` has no honest mapping and the runner fails closed before launch. A dangerous bypass (`--allow-dangerously-skip-permissions` for Claude or `--dangerously-skip-permissions` for Antigravity) is sent only when autonomy is `full-auto` and `CLIO_CODER_ALLOW_EXTERNAL_FULL_ACCESS=1`; otherwise Antigravity full-auto is capped at `accept-edits`. A bypass is never silent: the run's receipt records it (see the enforcement grades below) and evidence raises an external-bypass finding.
+- **External CLI subprocesses:** `claude-code` drives `claude -p`; the experimental, dispatch-only `antigravity-code` runtime drives the operator's local `agy` through one literal stdin `stream-json` work order. Neither exposes a callback through which Clio can evaluate each tool invocation, so Clio maps autonomy onto each CLI's command-line controls. Antigravity launches always name an explicit mode and disable slash-command expansion rather than inheriting mutable interactive settings. Dispatch at autonomy `suggest` is refused outright: a subprocess cannot park a tool call for approval, so `suggest` has no honest mapping and the runner fails closed before launch. A dangerous bypass (`--allow-dangerously-skip-permissions` for Claude or `--dangerously-skip-permissions` for Antigravity) is sent only when autonomy is `full-auto` and `CLIO_CODER_ALLOW_EXTERNAL_FULL_ACCESS=1`; otherwise Antigravity full-auto is capped at `accept-edits`. A bypass is never silent: the run's receipt records it (see the enforcement grades below) and evidence raises an external-bypass finding. Clio sends an allowlisted child environment rather than its provider keys or external-full-access gate, bounds stdout/stderr and persisted diagnostics, validates the admitted workspace, and owns the deadline and cancellation. POSIX cancellation targets the process group with direct-child fallback and bounded SIGTERM-to-SIGKILL escalation; Windows uses the strongest honest direct-child termination available here.
 - **Claude Code over ACP (Advisory Gating):** Drives Zed's `@zed-industries/claude-code-acp` (or `@agentclientprotocol/claude-agent-acp`) bridge as an [Agent Client Protocol (ACP)](https://agentclientprotocol.com) delegation agent. Clio's ACP mediator intercepts tool calls and filters them against the safety net, but gating is ultimately **advisory** as Claude governs its own runtime execution. For strict, code-enforced per-tool safety, `claude-sdk` is preferred over ACP.
 
 All Claude Code runtimes rely on the user's existing CLI authentication and store no credentials in Clio.
+
+External one-shot receipts also say what budget Clio can and cannot enforce. Clio
+controls one process launch, its wall-clock deadline, cumulative output cap,
+cancellation, and result-contract validation. Recipe per-tool calls, read reserve,
+and synthesis numbers remain in the envelope but are explicitly
+`unobserved-not-enforced`, because Antigravity owns its internal tools, network,
+prompts, and approvals. Clio schedules no automatic retry of an external
+generating agent loop.
 
 ### Autonomy enforcement grades
 

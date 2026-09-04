@@ -32,6 +32,7 @@ export type AgentTaskType =
 	| "docs"
 	| "config"
 	| "research"
+	| "world_knowledge"
 	| "unknown";
 export type AgentTaskComplexity = "trivial" | "simple" | "moderate" | "complex";
 export type AgentTaskDomain = "frontend" | "backend" | "infra" | "data" | "security" | "general";
@@ -53,6 +54,10 @@ const TASK_TYPE_RULES: ReadonlyArray<readonly [AgentTaskType, RegExp]> = [
 	["debug", /\b(debug|fix|bug|crash|failure|broken|regression)\b/i],
 	["refactor", /\b(refactor|clean ?up|restructure|rename|extract|simplify)\b/i],
 	["config", /\b(config|configuration|settings|setup|install|ci pipeline|workflow file)\b/i],
+	[
+		"world_knowledge",
+		/\b(?:open[- ]world|ecosystem landscape|industry landscape|state of (?:the )?art|current alternatives|latest alternatives|advisory second opinion)\b/i,
+	],
 	["research", /\b(research|investigate|explore|survey|compare|find out)\b/i],
 	["code_read", /\b(read|explain|understand|summarize|describe|walk through|map|locate|trace)\b/i],
 	["code_write", /\b(write|implement|add|create|build|develop|introduce)\b/i],
@@ -202,6 +207,11 @@ const TASK_SIGNALS: Readonly<
 > = {
 	code_read: { ids: ["scout"], tags: ["reconnaissance", "symbols", "codewiki"], contracts: ["scout-report"] },
 	research: { ids: ["researcher"], tags: ["sources", "external-context", "papers"], contracts: ["research-report"] },
+	world_knowledge: {
+		ids: ["world-knowledge"],
+		tags: ["open-world", "ecosystem", "current-context", "second-opinion"],
+		contracts: ["world-knowledge-report"],
+	},
 	code_review: { ids: ["verifier"], tags: ["review", "verification"], contracts: ["verifier-report"] },
 	debug: { ids: ["debugger"], tags: ["debugging", "root-cause"], contracts: ["debugger-report"] },
 	test: { ids: ["verifier", "tester"], tags: ["tests", "validation", "regression"], contracts: ["verifier-report"] },

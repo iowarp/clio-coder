@@ -62,7 +62,12 @@ export interface WorkerAttempt {
 export type WorkerResultContract = "pass" | "fail" | "not-reached" | "unmeasured";
 
 /** Result kinds whose parsed envelopes have a dedicated transcript presentation. */
-export type WorkerPresentedResultContract = "debugger-report" | "verifier-report" | "research-report" | "scout-report";
+export type WorkerPresentedResultContract =
+	| "debugger-report"
+	| "verifier-report"
+	| "research-report"
+	| "world-knowledge-report"
+	| "scout-report";
 
 /**
  * Terminal facts a worker block reports. Sealed by the receipt when it can be

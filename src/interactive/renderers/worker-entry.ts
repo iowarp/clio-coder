@@ -206,6 +206,36 @@ function researchReport(value: Record<string, unknown>): PresentedContractAnswer
 	return { lines: lines.length === 0 ? ["No findings reported."] : lines, footer: `source ${value.source}` };
 }
 
+function worldKnowledgeReport(value: Record<string, unknown>): PresentedContractAnswer | null {
+	if (
+		(value.discovery !== "performed" &&
+			value.discovery !== "caller-supplied-only" &&
+			value.discovery !== "unavailable") ||
+		!Array.isArray(value.facts) ||
+		!isStringArray(value.synthesis) ||
+		!isStringArray(value.uncertainties) ||
+		!isStringArray(value.followUpVerification)
+	) {
+		return null;
+	}
+	const lines: string[] = [];
+	for (const raw of value.facts) {
+		if (typeof raw !== "object" || raw === null || Array.isArray(raw)) return null;
+		const fact = raw as Record<string, unknown>;
+		const claim = reportString(fact.claim);
+		const evidence = reportString(fact.evidence);
+		if (claim === null || evidence === null || !isStringArray(fact.sources)) return null;
+		lines.push(`- ${claim}`, `  support: ${evidence}`);
+		if (fact.sources.length > 0) lines.push(`  sources: ${fact.sources.join(", ")}`);
+	}
+	if (value.synthesis.length > 0) lines.push("Synthesis:", ...value.synthesis.map((item) => `- ${item}`));
+	if (value.uncertainties.length > 0) lines.push("Uncertainties:", ...value.uncertainties.map((item) => `- ${item}`));
+	if (value.followUpVerification.length > 0) {
+		lines.push("Verify next:", ...value.followUpVerification.map((item) => `- ${item}`));
+	}
+	return { lines: lines.length === 0 ? ["No findings reported."] : lines, footer: `discovery ${value.discovery}` };
+}
+
 function scoutReport(value: Record<string, unknown>): PresentedContractAnswer | null {
 	if (!Array.isArray(value.findings) || typeof value.needsSplit !== "boolean") return null;
 	const lines: string[] = [];
@@ -250,6 +280,8 @@ function presentedContractAnswer(entry: WorkerEntryState): PresentedContractAnsw
 			return verifierReport(value);
 		case "research-report":
 			return researchReport(value);
+		case "world-knowledge-report":
+			return worldKnowledgeReport(value);
 		case "scout-report":
 			return scoutReport(value);
 	}

@@ -50,6 +50,7 @@ const AUTO_BASELINE_BY_TASK_TYPE: Readonly<Record<AgentTaskType, string>> = {
 	// Read-only shapes.
 	code_review: "verifier",
 	research: "researcher",
+	world_knowledge: "world-knowledge",
 	code_read: "scout",
 	unknown: "scout",
 };
