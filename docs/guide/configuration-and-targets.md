@@ -874,17 +874,35 @@ integrations:
 ```
 Then invoke it using `/delegate claude-code <task>`.
 
-### 5. Google Antigravity CLI Runtime (Worker-Only)
+### 5. Google Antigravity CLI Runtime (Experimental, Worker-Only)
 
-The `antigravity-code` runtime drives your local Google Antigravity CLI (`agy`) installation to execute subagent tasks. It runs the CLI as a subprocess using the `agy --print` command and maps Clio autonomy levels onto the CLI's permission flags.
+The `antigravity-code` runtime is a local external delegation agent. It lets Clio ask an official Antigravity CLI (`agy`) installed and authenticated by the operator for research, world knowledge, a second opinion, or a bounded subtask. It is deliberately **not** a Gemini chat provider and can never become the Clio orchestrator.
 
-Google Antigravity supports a context window of up to 1,000,000 tokens and is suitable for large-context codebase reasoning. Because `agy` emits plain text without structured events, Clio cannot perform fine-grained tool call interception. Gating is applied coarsely: read-only runs pass both `--mode plan` (the no-change agent posture) and `--sandbox` (terminal restrictions). Full-auto passes `--dangerously-skip-permissions` only when the environment variable `CLIO_CODER_ALLOW_EXTERNAL_FULL_ACCESS=1` is explicitly set.
+This integration is experimental and intended only for personal use on your own machine. Clio does not install Antigravity, initiate Google sign-in, copy credentials, or read the CLI's credential store. Install the [official Antigravity CLI](https://antigravity.google/docs/cli/overview), run `agy` yourself to sign in, and keep it current. Clio then starts that same local executable for an explicit delegation. The current structured driver requires a recent CLI with `--output-format stream-json` support; version 1.1.15 or newer is recommended.
 
-Configured targets use your existing local `agy` login and credentials. Supported model names include `Gemini 3.5 Flash (High)` as the default tier, `Gemini 3.5 Flash (Medium)`, `Gemini 3.5 Flash (Low)`, `Gemini 3.1 Pro (High)`, `Gemini 3.1 Pro (Low)`, `Claude Sonnet 4.6 (Thinking)`, `Claude Opus 4.6 (Thinking)`, and `GPT-OSS 120B (Medium)`.
+Clio uses agy's structured print stream, including the terminal status, conversation identifier, response, and provider-reported token counts. `clio-coder targets --probe --target <id>` runs the non-generating `agy --output-format json models` command, verifies that the CLI is installed and authenticated, and refreshes the model slugs from the account's live catalog. The built-in model list is only a cold-start fallback, so prefer a slug reported by `agy models` instead of a display label.
 
-**Configuration Example:**
+Antigravity remains an external agent loop: Clio cannot intercept each tool call. Every launch disables slash-command expansion and sets an explicit posture rather than inheriting mutable CLI defaults:
+
+| Clio autonomy | Antigravity launch posture |
+| --- | --- |
+| `read-only` | `--mode plan --sandbox` |
+| `auto-edit` | `--mode accept-edits` |
+| `suggest` | Refused because a headless subprocess cannot pause for Clio approval |
+| `full-auto` | Capped at `accept-edits` unless the external full-access gate is explicitly enabled |
+
+Only `full-auto` together with `CLIO_CODER_ALLOW_EXTERNAL_FULL_ACCESS=1` passes `--dangerously-skip-permissions`. Treat that as an external safety bypass: agy, not Clio's tool registry, controls the resulting filesystem, shell, and network actions. Prefer `read-only` with Clio's `researcher` agent for world-knowledge delegation.
+
+**Setup and verification:**
 ```bash
-clio-coder configure --id agy-worker --runtime antigravity-code --model "Gemini 3.5 Flash (High)"
+# Install using Google's instructions, then authenticate directly in the CLI.
+agy
+agy models
+
+# Use a live model slug, not a stale display name.
+clio-coder configure --id agy-research --runtime antigravity-code \
+  --model gemini-3.8-flash-high --set-fleet-default
+clio-coder targets --probe --target agy-research
 ```
 
 

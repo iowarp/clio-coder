@@ -211,6 +211,7 @@ Subscription models are registered and managed as standard HTTP/cloud targets:
 - **`openai-codex` (ChatGPT Plus/Pro OAuth):** Maps to catalog-backed Codex model ids surfaced by `clio-coder configure --list` and `clio-coder models` via a browser-minted subscription OAuth token, supporting complete chat, vision, and tool-use capabilities.
 - **`anthropic-max` (Claude Pro/Max OAuth):** Powers chat and workers using catalog-backed Claude model ids surfaced by `clio-coder configure --list` and `clio-coder models`. It relies on the engine's Anthropic OAuth provider. During auth initialization, it alerts the operator to usage-terms caveat via:
   `Connects with your Claude Pro/Max subscription via OAuth (the same path Claude Code uses). Using subscription credentials outside Anthropic's first-party apps may not align with their terms of service; enable at your own discretion.`
+- **`antigravity-code` (experimental local delegation):** Is not an HTTP model provider and is never orchestrator-eligible. It invokes the operator's own authenticated official `agy` executable only for dispatch work, consumes `stream-json` results and token accounting, and discovers model slugs from the non-generating JSON `models` command. Descriptor models are a cold-start fallback; a successful target probe is authoritative for that account.
 
 ---
 

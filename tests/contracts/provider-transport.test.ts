@@ -1,4 +1,4 @@
-import { deepStrictEqual, ok, strictEqual } from "node:assert/strict";
+import { deepStrictEqual, ok, strictEqual, throws } from "node:assert/strict";
 import { mkdtempSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
@@ -9,8 +9,12 @@ import type { AssistantMessageEvent, Context, Model } from "@earendil-works/pi-a
 import type { ClioSettings } from "../../src/core/config.js";
 import { DEFAULT_SETTINGS } from "../../src/core/defaults.js";
 import type { SafeEventBus } from "../../src/core/event-bus.js";
+import { isOrchestratorEligibleRuntime } from "../../src/domains/providers/eligibility.js";
 import type { ProvidersContract } from "../../src/domains/providers/index.js";
 import { createRuntimeRegistry } from "../../src/domains/providers/registry.js";
+import antigravityCodeRuntime, {
+	parseAntigravityModelCatalog,
+} from "../../src/domains/providers/runtimes/antigravity/antigravity-code.js";
 import { registerBuiltinRuntimes } from "../../src/domains/providers/runtimes/builtins.js";
 import litellmRuntime, {
 	aggregateLiteLLMCapabilities,
@@ -22,6 +26,11 @@ import {
 } from "../../src/domains/providers/runtimes/protocol/openai-compat.js";
 import { EMPTY_CAPABILITIES } from "../../src/domains/providers/types/capability-flags.js";
 import { extractLocalModelQuirks } from "../../src/domains/providers/types/local-model-quirks.js";
+import {
+	antigravitySubprocessConfigForAutonomy,
+	buildAgyArgs,
+	parseAntigravityStreamLine,
+} from "../../src/engine/antigravity/subprocess-runtime.js";
 import { openAICompletionsApiProvider } from "../../src/engine/apis/openai-completions.js";
 import type { OverlayHandle, TUI } from "../../src/engine/tui.js";
 import type { OverlayState } from "../../src/interactive/overlay-key-routing.js";
@@ -164,6 +173,76 @@ describe("provider transport boundary", () => {
 		strictEqual(registry.get("lmstudio-native"), canonical);
 		strictEqual(registry.list().filter((runtime) => runtime.id === "lmstudio").length, 1);
 		strictEqual(registry.get("not-installed"), null);
+	});
+
+	it("keeps Antigravity dispatch-only and consumes its structured CLI contracts", () => {
+		strictEqual(antigravityCodeRuntime.kind, "subprocess");
+		strictEqual(isOrchestratorEligibleRuntime(antigravityCodeRuntime), false);
+		strictEqual(antigravityCodeRuntime.outputParser, "antigravity-stream-json");
+		deepStrictEqual(
+			parseAntigravityModelCatalog(
+				JSON.stringify({
+					status: "SUCCESS",
+					command: {
+						name: "models",
+						data: {
+							models: [
+								{ id: "gemini-live-high", label: "Gemini Live (High)" },
+								{ id: "gemini-live-low", label: "Gemini Live (Low)" },
+							],
+						},
+					},
+				}),
+			),
+			["gemini-live-high", "gemini-live-low"],
+		);
+		throws(() => parseAntigravityModelCatalog('{"status":"SUCCESS"}'), /unsupported model catalog/);
+		deepStrictEqual(
+			parseAntigravityStreamLine(
+				'{"event":"step_update","step_update":{"conversation_id":"c-1","step_type":"agent_response","text_delta":"hello"}}',
+			),
+			{
+				event: "text",
+				conversationId: "c-1",
+				delta: "hello",
+			},
+		);
+		deepStrictEqual(parseAntigravityStreamLine('{"event":"result","result":{"status":"SUCCESS","response":"hello"}}'), {
+			event: "result",
+			result: { status: "SUCCESS", response: "hello" },
+		});
+	});
+
+	it("launches Antigravity with explicit structured and autonomy controls", () => {
+		const base = {
+			systemPrompt: "Use primary sources.",
+			agentId: "researcher",
+			task: "Compare the two standards.",
+			target: { id: "agy-research", runtime: "antigravity-code" },
+			runtime: antigravityCodeRuntime,
+			wireModelId: "gemini-3.8-flash-high",
+			allowedTools: [],
+			budget: { toolCalls: 18, readReserve: 0, synthesis: true, hardCap: 50 },
+			autonomy: "read-only" as const,
+		};
+		const args = buildAgyArgs(base);
+		deepStrictEqual(args.slice(0, 7), [
+			"--mode",
+			"plan",
+			"--sandbox",
+			"--output-format",
+			"stream-json",
+			"--disable-slash-commands",
+			"--model",
+		]);
+		strictEqual(args.at(-2), "--print");
+		ok(args.at(-1)?.includes("Compare the two standards."));
+		strictEqual(antigravitySubprocessConfigForAutonomy("full-auto", {}).externalMode, "accept-edits");
+		strictEqual(
+			antigravitySubprocessConfigForAutonomy("full-auto", { CLIO_CODER_ALLOW_EXTERNAL_FULL_ACCESS: "1" }).externalMode,
+			"bypassPermissions",
+		);
+		throws(() => antigravitySubprocessConfigForAutonomy("suggest", {}), /cannot enforce autonomy 'suggest'/);
 	});
 
 	it("projects only model quirks consumed by the engine", () => {
