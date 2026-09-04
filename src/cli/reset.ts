@@ -1,5 +1,4 @@
 import { type Dirent, readdirSync } from "node:fs";
-import { homedir } from "node:os";
 import { join } from "node:path";
 
 import { initializeClioHome } from "../core/init.js";
@@ -10,8 +9,9 @@ import { printError } from "./shared.js";
 
 const HELP = `clio-coder reset [--state|--data|--cache|--auth|--config|--all] [--dry-run] [--force] [--json]
 
-Recover or wipe Clio Coder state while keeping the clio binary installed.
-Each level clears exactly the root (or file) it names and nothing else.
+Recover or wipe Clio Coder state while keeping the clio-coder launcher installed.
+Each level clears exactly the root (or file) it names and nothing else, then the
+empty roots are recreated so the next run has somewhere to write.
 
 Levels (combinable except --all):
   --state       state root only (default). Holds every session transcript, so a
@@ -20,7 +20,8 @@ Levels (combinable except --all):
   --cache       cache root only
   --auth        credentials.yaml only
   --config      settings.yaml only
-  --all         all four roots: config, data, state, and cache
+  --all         all four roots whole: config (settings, credentials, and anything
+                else under it), data, state, and cache
 
 Safety:
   --force, -f   required for destructive execution in non-interactive environments
@@ -29,16 +30,14 @@ Safety:
   --help, -h    show this message
 `;
 
-const ROOT_NOTES: Readonly<Record<string, string>> = {
-	state:
-		"the state root holds every session transcript and the audit trail beside it; resume and /view lose their history",
-	data:
-		"the data root holds durable products (memory, evidence, evals, and vendored tools, which must be re-downloaded)",
-	config: "reverts settings.yaml preferences to default",
-	auth: "removes saved API keys and credentials in credentials.yaml",
-	cache: "clears disposable temporary caches",
-	all: "wipes all local state, caches, settings, and credentials, then bootstraps a clean default environment",
-};
+const ROOT_NOTES = {
+	state: "State holds every session transcript and the audit trail; resume and /view lose their history.",
+	data: "Data holds memory, evidence, evals, and vendored tools; the tools have to be downloaded again.",
+	config: "Settings return to their defaults.",
+	auth: "Saved API keys are gone; each target has to be authenticated again.",
+	cache: "Cache is disposable and rebuilds itself.",
+	all: "Everything goes: settings, credentials, memory, evidence, transcripts, and caches. A clean install remains.",
+} as const;
 
 interface ParsedResetArgs {
 	state: boolean;
@@ -114,25 +113,24 @@ function parseResetArgs(argv: ReadonlyArray<string>): ParsedResetArgs {
 	return parsed;
 }
 
-function rootContents(path: string): string[] {
+/**
+ * What sits directly under a root, named so the operator recognizes what the
+ * reset takes. Directories keep their trailing slash; the list is capped so one
+ * crowded root cannot push the decision off the screen.
+ */
+function rootContents(path: string, limit = 4): string | undefined {
 	let entries: Dirent[];
 	try {
 		entries = readdirSync(path, { withFileTypes: true });
 	} catch {
-		return [];
+		return undefined;
 	}
-	return entries
-		.map((entry) => {
-			if (!entry.isDirectory()) return entry.name;
-			let count: number;
-			try {
-				count = readdirSync(join(path, entry.name)).length;
-			} catch {
-				return `${entry.name}/`;
-			}
-			return `${entry.name}/ (${count})`;
-		})
+	if (entries.length === 0) return undefined;
+	const names = entries
+		.map((entry) => (entry.isDirectory() ? `${entry.name}/` : entry.name))
 		.sort((left, right) => left.localeCompare(right));
+	const shown = names.slice(0, limit).join(", ");
+	return names.length > limit ? `${shown}, +${names.length - limit} more` : shown;
 }
 
 function resetInvocation(args: ParsedResetArgs): string {
@@ -151,18 +149,13 @@ function resetInvocation(args: ParsedResetArgs): string {
 	return `clio-coder reset ${levels.join(" ")} --force`;
 }
 
-function launcherLinkPath(): string {
-	const binDir = process.env.CLIO_CODER_BIN_DIR?.trim() || join(homedir(), ".local", "bin");
-	return join(binDir, "clio-coder");
-}
-
 export async function runResetCommand(argv: ReadonlyArray<string>): Promise<number> {
 	let args: ParsedResetArgs;
 	try {
 		args = parseResetArgs(argv);
 	} catch (error) {
 		printError(error instanceof Error ? error.message : String(error));
-		process.stdout.write(HELP);
+		process.stderr.write(HELP);
 		return 2;
 	}
 	if (args.help) {
@@ -170,10 +163,11 @@ export async function runResetCommand(argv: ReadonlyArray<string>): Promise<numb
 		return 0;
 	}
 
+	// One sentence, and nothing on stdout: a caller that piped this run is
+	// parsing stdout, and a help dump there is indistinguishable from output.
 	const isInteractive = Boolean(process.stdin.isTTY);
 	if (!args.dryRun && !args.force && !isInteractive) {
-		printError("`clio-coder reset` requires confirmation or --force in non-interactive environments");
-		process.stdout.write(HELP);
+		printError("`clio-coder reset` needs a terminal to confirm; pass --force to skip the prompt");
 		return 2;
 	}
 
@@ -193,21 +187,17 @@ export async function runResetCommand(argv: ReadonlyArray<string>): Promise<numb
 	const dataSize = measurePath(dirs.data);
 	const stateSize = measurePath(dirs.state);
 	const cacheSize = measurePath(dirs.cache);
-	const binPath = launcherLinkPath();
-	const binSize = measurePath(binPath);
 
 	const items: LifecycleItem[] = [];
 
 	// State
 	if (resetState) {
-		const contents = rootContents(dirs.state);
-		const detail = contents.length > 0 ? contents.slice(0, 4).join(", ") + (contents.length > 4 ? "..." : "") : undefined;
 		items.push({
 			label: "State",
 			path: dirs.state,
 			bytes: stateSize.bytes,
 			status: stateSize.exists ? "remove" : "absent",
-			detail,
+			detail: rootContents(dirs.state),
 		});
 	} else {
 		items.push({
@@ -301,39 +291,32 @@ export async function runResetCommand(argv: ReadonlyArray<string>): Promise<numb
 		});
 	}
 
-	// Binary launcher always survives reset
-	items.push({
-		label: "Binary",
-		path: binPath,
-		bytes: binSize.bytes,
-		status: binSize.exists ? "keep" : "absent",
-		detail: binSize.exists ? "survives" : undefined,
-	});
+	// The launcher is not listed. Reset never touches it, and a row for a path a
+	// command cannot act on is one more line between the operator and the four
+	// that decide whether to go ahead.
+	presenter.listItems("The following will be cleared", items);
 
-	presenter.listItems("State and components inventory", items);
+	// One consequence line, not one per scope. `--all` states the whole outcome,
+	// so the per-root notes underneath it would only repeat it.
+	const notes: string[] = args.all
+		? [ROOT_NOTES.all]
+		: [
+				resetState ? ROOT_NOTES.state : null,
+				resetData ? ROOT_NOTES.data : null,
+				args.config ? ROOT_NOTES.config : null,
+				args.auth ? ROOT_NOTES.auth : null,
+			].filter((note): note is NonNullable<typeof note> => note !== null);
+	for (const note of notes) presenter.note(note);
 
-	// Print note about what will be reset and what survives
-	const activeNotes = [
-		resetState ? ROOT_NOTES.state : null,
-		resetData ? ROOT_NOTES.data : null,
-		args.config ? ROOT_NOTES.config : null,
-		args.auth ? ROOT_NOTES.auth : null,
-		args.all ? ROOT_NOTES.all : null,
-	].filter((n): n is string => Boolean(n));
-
-	for (const note of activeNotes) {
-		presenter.rail(`Note: ${note}`);
-	}
-
-	const survivingItems = items.filter((item) => item.status === "keep").map((item) => item.label);
-	if (survivingItems.length > 0) {
-		presenter.rail(`Surviving components: ${survivingItems.join(", ")}`);
-	}
-	presenter.rail();
+	// Only when something actually survives. On `--all` the note above already
+	// says nothing does, and on a scoped reset over an empty home every row is
+	// absent, which is not the same claim as "it was there and it is going".
+	const surviving = items.filter((item) => item.status === "keep").map((item) => item.label);
+	if (surviving.length > 0) presenter.note(`Survives: ${surviving.join(", ")}`);
 
 	if (args.dryRun) {
-		presenter.warn("Dry run - no changes made");
-		presenter.done(args.all ? "reset --all preview complete" : "reset preview complete");
+		presenter.warn("Dry run: no changes made");
+		presenter.done("Done");
 		return 0;
 	}
 
@@ -349,36 +332,47 @@ export async function runResetCommand(argv: ReadonlyArray<string>): Promise<numb
 	const toRemove: Array<{ label: string; path: string }> = [];
 	if (args.all) {
 		toRemove.push(
-			{ label: "config", path: dirs.config },
-			{ label: "data", path: dirs.data },
-			{ label: "state", path: dirs.state },
-			{ label: "cache", path: dirs.cache },
+			{ label: "Config", path: dirs.config },
+			{ label: "Data", path: dirs.data },
+			{ label: "State", path: dirs.state },
+			{ label: "Cache", path: dirs.cache },
 		);
 	} else {
-		if (args.config) toRemove.push({ label: "settings", path: settingsPath });
-		if (args.auth) toRemove.push({ label: "credentials", path: credentialsPath });
-		if (args.data) toRemove.push({ label: "data", path: dirs.data });
-		if (args.state) toRemove.push({ label: "state", path: dirs.state });
-		if (args.cache) toRemove.push({ label: "cache", path: dirs.cache });
+		if (args.config) toRemove.push({ label: "Settings", path: settingsPath });
+		if (args.auth) toRemove.push({ label: "Credentials", path: credentialsPath });
+		if (args.data) toRemove.push({ label: "Data", path: dirs.data });
+		if (args.state) toRemove.push({ label: "State", path: dirs.state });
+		if (args.cache) toRemove.push({ label: "Cache", path: dirs.cache });
 	}
 
+	// `removePath` returns null both for a path it deleted and for one that was
+	// never there, so presence is asked here. Announcing "Reset Cache" over an
+	// absent cache is the one result line an operator cannot check.
 	const failures: RemovalFailure[] = [];
+	let cleared = 0;
 	for (const entry of toRemove) {
+		const existed = measurePath(entry.path).exists;
 		const failure = removePath(entry.label, entry.path, false);
 		if (failure) failures.push(failure);
-		else presenter.completedStep(`Reset ${entry.label}`);
+		else if (existed) {
+			presenter.completedStep(`Cleared ${entry.label}`);
+			cleared += 1;
+		}
 	}
+	if (failures.length === 0 && cleared === 0)
+		presenter.completedStep("Nothing to clear; every selected root was already empty");
 
 	resetXdgCache();
 	initializeClioHome();
-	presenter.completedStep("Bootstrapped fresh environment skeletons");
+	presenter.completedStep("Recreated the empty roots");
 
 	if (failures.length > 0) {
-		presenter.fail("reset did not remove everything");
+		presenter.fail("reset did not clear everything");
 		reportRemovalFailures(resetInvocation(args), failures);
+		presenter.finish();
 		return 1;
 	}
 
-	presenter.done(args.all ? "reset config, data, state, and cache" : "reset complete");
+	presenter.done("Done");
 	return 0;
 }
