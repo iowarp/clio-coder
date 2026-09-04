@@ -53,11 +53,6 @@ export interface AntigravityRuntimeDependencies {
 	workspaceRoot?: string;
 	environment?: NodeJS.ProcessEnv;
 	killGraceMs?: number;
-	spawnProcess?: (
-		file: string,
-		args: ReadonlyArray<string>,
-		options: { cwd: string; env: NodeJS.ProcessEnv; detached: boolean; stdio: ["pipe", "pipe", "pipe"] },
-	) => AntigravityChildProcess;
 }
 
 /**
@@ -366,14 +361,6 @@ function buildAssistantMessage(input: {
 	return message;
 }
 
-function defaultSpawn(
-	file: string,
-	args: ReadonlyArray<string>,
-	options: { cwd: string; env: NodeJS.ProcessEnv; detached: boolean; stdio: ["pipe", "pipe", "pipe"] },
-): AntigravityChildProcess {
-	return spawn(file, [...args], options);
-}
-
 export function startAntigravityWorkerRun(
 	input: WorkerRunInput,
 	emit: WorkerEventEmit,
@@ -384,7 +371,7 @@ export function startAntigravityWorkerRun(
 	const stdinLine = buildAgyStdinLine(input);
 	const workspaceRoot = dependencies.workspaceRoot ?? process.cwd();
 	const cwd = resolveSafeCwd(input.cwd, workspaceRoot);
-	const child = (dependencies.spawnProcess ?? defaultSpawn)(dependencies.binary ?? ANTIGRAVITY_BINARY, args, {
+	const child: AntigravityChildProcess = spawn(dependencies.binary ?? ANTIGRAVITY_BINARY, args, {
 		cwd,
 		env: buildSafeToolEnv({}, sourceEnv),
 		detached: process.platform !== "win32",

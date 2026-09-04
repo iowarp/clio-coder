@@ -146,11 +146,6 @@ export function parseAntigravityModelCatalogDetails(output: string): Antigravity
 	return { models, labels };
 }
 
-/** Backward-compatible slug-only projection for callers that do not render labels. */
-export function parseAntigravityModelCatalog(output: string): string[] {
-	return parseAntigravityModelCatalogDetails(output).models;
-}
-
 function classifyAntigravityDiagnostic(detail: string): AntigravityProbeFailureKind {
 	if (/(?:enoent|not found|cannot find|could not start|spawn .*agy)/iu.test(detail)) return "missing";
 	if (/(?:sign[ -]?in|log[ -]?in|unauthori[sz]ed|authenticat|credential|account.*required)/iu.test(detail)) {
