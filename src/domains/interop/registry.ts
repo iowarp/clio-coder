@@ -94,8 +94,8 @@ export const INTEROP_AGENT_KINDS: ReadonlyArray<InteropAgentKind> = [
 		id: "antigravity",
 		label: "Antigravity CLI",
 		binaryNames: ["agy"],
-		userDir: ".antigravitycli",
-		projectDir: ".antigravitycli",
+		userDir: ".gemini/antigravity-cli",
+		projectDir: ".gemini",
 		instructionFiles: [],
 	},
 	{

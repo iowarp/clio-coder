@@ -44,6 +44,7 @@ const SUMMARY_BY_RUNTIME_ID: Readonly<Record<string, string>> = {
 	alcf: "ALCF inference gateway (Sophia/Metis) via Globus",
 	anthropic: "Anthropic API",
 	"anthropic-max": "Claude Pro/Max subscription via Anthropic OAuth",
+	"antigravity-code": "Experimental local delegation via the installed Antigravity CLI",
 	bedrock: "Amazon Bedrock",
 	"claude-code": "Claude Code subscription via installed claude CLI",
 	"claude-sdk": "Claude Code subscription via Claude Agent SDK",
