@@ -1615,6 +1615,29 @@ function workerToolCallHardCap(settings: EffectiveSettings): number {
 	return settings?.fleet.limits.toolCallsPerRun ?? GUARDRAIL_DEFAULTS.workerToolCallCap;
 }
 
+/**
+ * Only a runtime that declares its external agent loop may accept a declared
+ * per-tool budget: Clio records that budget as unobserved rather than enforced.
+ * Any other subprocess runtime cannot mediate tool calls, so a declared budget
+ * would be a claim nobody enforces.
+ */
+export function assertWorkerBudgetEnforceable(
+	runtime: Pick<RuntimeDescriptor, "id" | "kind" | "externalAgentLoop">,
+	hasDeclaredBudget: boolean,
+): void {
+	if (!hasDeclaredBudget || runtime.kind !== "subprocess" || runtime.externalAgentLoop !== undefined) return;
+	throw new Error(
+		`dispatch: runtime '${runtime.id}' cannot enforce an explicit dispatch budget because subprocess workers do not expose per-tool mediation; choose a native or claude-sdk worker`,
+	);
+}
+
+/** Per-tool budget enforcement is real only where Clio observes each tool call. */
+export function budgetEnforcementForRuntime(
+	runtime: Pick<RuntimeDescriptor, "kind">,
+): "native-per-tool" | "external-one-shot" {
+	return runtime.kind === "subprocess" ? "external-one-shot" : "native-per-tool";
+}
+
 function resolveEffectiveWorkerBudget(input: {
 	req: DispatchRequest;
 	recipeId: string;
@@ -1623,6 +1646,7 @@ function resolveEffectiveWorkerBudget(input: {
 	settings: EffectiveSettings;
 	runtime: RuntimeDescriptor;
 }): RunToolBudgetEnvelope {
+	assertWorkerBudgetEnforceable(input.runtime, input.declared !== null || input.req.budget !== undefined);
 	const hardCap = workerToolCallHardCap(input.settings);
 	const declared = input.declared ?? {
 		toolCalls: hardCap,
@@ -1637,7 +1661,7 @@ function resolveEffectiveWorkerBudget(input: {
 		hasReadTool: input.allowedTools.includes(ToolNames.Read),
 		retry: (input.req.lineage?.attempt ?? 0) > 0,
 		revision: input.req.gate?.role === "builder" && input.req.gate.cycle > 1 && input.req.gate.verdict === "revise",
-		enforcement: input.runtime.externalAgentLoop?.budget ?? "native-per-tool",
+		enforcement: budgetEnforcementForRuntime(input.runtime),
 	});
 }
 
