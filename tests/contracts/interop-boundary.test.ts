@@ -102,7 +102,17 @@ describe("contracts/interop boundary", () => {
 		for (const provider of ["claude-code", "agents", "codex", "gemini", "cursor", "copilot", "opencode"]) {
 			strictEqual(INTEROP_AGENT_KINDS.filter((kind) => kind.adoptionProvider === provider).length, 1);
 		}
-		for (const root of ["~/.claude/", "~/.codex/", "~/.gemini/", "~/.cursor/", "~/.config/opencode/"]) {
+		for (const root of [
+			"~/.claude/",
+			"~/.codex/",
+			"~/.gemini/",
+			"~/.gemini/antigravity-cli/",
+			".gemini/antigravity-cli/",
+			"~/.antigravitycli/",
+			".antigravitycli/",
+			"~/.cursor/",
+			"~/.config/opencode/",
+		]) {
 			ok(foreignAgentDirs().includes(root), `${root} is not protected`);
 		}
 		strictEqual(readInteropReport(), null);

@@ -372,6 +372,17 @@ export function probeReadings(probe: ProbeResult): string[] {
 export function probeLines(descriptor: TargetDescriptor, probe: ProbeResult): string[] {
 	const latency = probe.latencyMs !== undefined ? ` (${probe.latencyMs}ms)` : "";
 	if (!probe.ok) {
+		if (descriptor.runtime === "antigravity-code") {
+			const next =
+				probe.failureKind === "missing"
+					? "install the official Antigravity CLI and put `agy` on PATH"
+					: probe.failureKind === "authentication"
+						? "run `agy` yourself and complete sign-in; Clio never reads or manages that session"
+						: probe.failureKind === "unsupported-feature"
+							? "update `agy`; this integration requires its structured JSON model catalog"
+							: "run `agy` directly to inspect setup, then re-run `clio-coder targets --probe`";
+			return [`probe failed${latency}: ${probe.error ?? "unknown"}`, `  ${next}`];
+		}
 		const where = descriptor.url ? ` ${descriptor.url}` : "";
 		return [
 			`probe failed${latency}:${where} ${probe.error ?? "unknown"}`,
@@ -444,6 +455,9 @@ export function describeAuthStatus(runtime: RuntimeDescriptor): string {
 export interface WireModelInventory {
 	models: string[];
 	source: "catalog" | "probe" | "cache" | "legacy" | "none";
+	labels?: Readonly<Record<string, string>>;
+	/** Redacted explanation when a live catalog could not replace cache/hints. */
+	probeError?: string;
 	/** Per-model load state when the probe reported it. */
 	modelStates?: Readonly<Record<string, ProbeModelStatus>> | undefined;
 }
@@ -484,15 +498,22 @@ export async function resolveSupportedWireModels(
 	authToken?: string,
 ): Promise<WireModelInventory> {
 	const known = listKnownModelsForRuntime(runtime.id);
-	if (known.length > 0) return { models: known, source: "catalog" };
-	if (runtime.kind === "http") {
+	const shouldProbeFirst = runtime.externalAgentLoop?.modelCatalog === "live-authoritative";
+	let probeError: string | undefined;
+	if (runtime.kind === "http" || shouldProbeFirst) {
 		// The full probe carries load state alongside the ids; a runtime that
 		// lists models only through probeModels still gets its ids checked.
 		const probe = await runtimeProbe(runtime, target, authToken);
 		if (probe?.ok && probe.models && probe.models.length > 0) {
-			recordTargetModelSnapshot(target, probe.models);
-			return { models: [...probe.models], source: "probe", modelStates: probe.modelStates };
+			recordTargetModelSnapshot(target, probe.models, probe.modelLabels ? { modelLabels: probe.modelLabels } : {});
+			return {
+				models: [...probe.models],
+				source: "probe",
+				modelStates: probe.modelStates,
+				...(probe.modelLabels ? { labels: probe.modelLabels } : {}),
+			};
 		}
+		probeError = probe?.error;
 		const discovered = await runtimeProbeModels(runtime, target, authToken);
 		if (discovered.length > 0) {
 			recordTargetModelSnapshot(target, discovered);
@@ -500,16 +521,27 @@ export async function resolveSupportedWireModels(
 		}
 	}
 	const cached = readTargetModelSnapshot(target);
-	if (cached && cached.models.length > 0) return { models: [...cached.models], source: "cache" };
+	if (cached && cached.models.length > 0) {
+		return {
+			models: [...cached.models],
+			source: "cache",
+			...(cached.modelLabels ? { labels: cached.modelLabels } : {}),
+			...(probeError ? { probeError } : {}),
+		};
+	}
+	if (known.length > 0) return { models: known, source: "catalog", ...(probeError ? { probeError } : {}) };
 	if (existing?.wireModels && existing.wireModels.length > 0) {
 		recordTargetModelSnapshot(target, existing.wireModels);
 		return { models: [...existing.wireModels], source: "legacy" };
 	}
-	return { models: [], source: "none" };
+	return { models: [], source: "none", ...(probeError ? { probeError } : {}) };
 }
 
 /** Why a target offered no model list, in the words the screen shows. */
 export function inventoryGap(runtime: RuntimeDescriptor, target: { url?: string | undefined }): string {
+	if (runtime.externalAgentLoop?.modelCatalog === "live-authoritative") {
+		return "Antigravity returned no live model catalog; run `agy` yourself, complete sign-in, then probe again";
+	}
 	if (runtime.kind !== "http") return `${runtime.id} does not list its models; type the id the provider documents`;
 	return `${target.url ?? runtime.id} answered no model list; type the id the server serves`;
 }

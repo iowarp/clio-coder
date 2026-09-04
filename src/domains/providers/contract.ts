@@ -59,6 +59,8 @@ export interface TargetStatus {
 	probeSurfaces?: Readonly<ProbeSurfaceMap>;
 	/** Ids returned by the last successful probeModels() call. */
 	discoveredModels: ReadonlyArray<string>;
+	/** Human-readable live/cache labels keyed by exact model slug. */
+	discoveredModelLabels?: Readonly<Record<string, string>>;
 	/**
 	 * Source for `discoveredModels`. `probe` means the target just returned a
 	 * live catalog, `cache` is a previously probed catalog preserved across a

@@ -1003,6 +1003,7 @@ function formatUrl(status: TargetStatus): string {
 
 function formatAuth(providers: ProvidersContract, status: TargetStatus): string {
 	if (!status.runtime) return "-";
+	if (status.runtime.externalAgentLoop !== undefined) return "operator session";
 	if (status.runtime.auth !== "api-key" && status.runtime.auth !== "oauth") return status.runtime.auth;
 	const auth = providers.auth.statusForTarget(status.target, status.runtime);
 	if (!auth.available) return "disconnected";
@@ -1138,6 +1139,7 @@ interface SerializedStatus {
 	probeNotes?: TargetStatus["probeNotes"];
 	probeSurfaces?: TargetStatus["probeSurfaces"];
 	discoveredModels: TargetStatus["discoveredModels"];
+	discoveredModelLabels?: TargetStatus["discoveredModelLabels"];
 	discoveredModelsSource?: TargetStatus["discoveredModelsSource"];
 	discoveredModelStates?: TargetStatus["discoveredModelStates"];
 	tier: ProviderOutputTier;
@@ -1165,6 +1167,7 @@ function serializeStatus(
 		detectedReasoning: extras.detectedReasoning,
 		reasoningCandidateModelId: extras.candidateModelId,
 	};
+	if (status.discoveredModelLabels !== undefined) out.discoveredModelLabels = status.discoveredModelLabels;
 	const endpointCapacity = endpointCapacityForStatus(status);
 	if (endpointCapacity !== null) out.endpointCapacity = endpointCapacity;
 	if (status.contextWindowProvenance !== undefined) {

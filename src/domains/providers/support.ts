@@ -5,7 +5,7 @@ import { getRuntimeRegistry } from "./registry.js";
 import type { RuntimeDescriptor } from "./types/runtime-descriptor.js";
 import type { TargetDescriptor } from "./types/target-descriptor.js";
 
-export type ProviderSupportGroup = "featured" | "cloud-api" | "subscription" | "local-http";
+export type ProviderSupportGroup = "featured" | "external-worker" | "cloud-api" | "subscription" | "local-http";
 
 /**
  * Where a runtime's model ids come from, which decides whether their order
@@ -67,12 +67,14 @@ function groupPriority(group: ProviderSupportGroup): number {
 	switch (group) {
 		case "featured":
 			return 0;
-		case "subscription":
+		case "external-worker":
 			return 1;
-		case "cloud-api":
+		case "subscription":
 			return 2;
-		case "local-http":
+		case "cloud-api":
 			return 3;
+		case "local-http":
+			return 4;
 	}
 }
 
@@ -80,6 +82,8 @@ export function supportGroupLabel(group: ProviderSupportGroup): string {
 	switch (group) {
 		case "featured":
 			return "Featured";
+		case "external-worker":
+			return "External delegation";
 		case "subscription":
 			return "Subscriptions";
 		case "cloud-api":
@@ -91,6 +95,7 @@ export function supportGroupLabel(group: ProviderSupportGroup): string {
 
 function classifyGroup(runtime: RuntimeDescriptor): ProviderSupportGroup {
 	if (runtime.id === "openai-codex") return "featured";
+	if (runtime.externalAgentLoop !== undefined) return "external-worker";
 	if (runtime.id === "alcf") return "cloud-api";
 	if (runtime.auth === "oauth" || runtime.auth === "claude-cli") return "subscription";
 	if (catalogProviderForRuntime(runtime.id) || (runtime.auth === "api-key" && !runtime.probe)) {

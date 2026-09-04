@@ -14,6 +14,8 @@ export interface ModelRow {
 	targetId: string;
 	runtimeId: string;
 	modelId: string;
+	label?: string;
+	source: string;
 	caps: string;
 	contextWindow: number;
 	maxTokens: number;
@@ -128,6 +130,7 @@ function collectRows(entries: ReadonlyArray<TargetStatus>, providers: ProvidersC
 				targetId: status.target.id,
 				runtimeId,
 				modelId: "(no models)",
+				source: status.discoveredModelsSource ?? "none",
 				state: "-",
 				...formatCapabilities(caps),
 			});
@@ -140,6 +143,8 @@ function collectRows(entries: ReadonlyArray<TargetStatus>, providers: ProvidersC
 				targetId: status.target.id,
 				runtimeId,
 				modelId,
+				...(candidate.label ? { label: candidate.label } : {}),
+				source: candidate.source,
 				state: candidate.loadState ?? "-",
 				...formatCapabilities(caps),
 			});
@@ -219,11 +224,14 @@ function truncateModelId(id: string): string {
 
 function modelTableLines(rows: ReadonlyArray<ModelRow>): string[] {
 	const includeState = rows.some((row) => row.state && row.state !== "-");
+	const includeLabel = rows.some((row) => row.label && row.label !== row.modelId);
 	const headers = includeState
-		? ["target", "runtime", "model", "state", "caps", "ctx", "max"]
-		: ["target", "runtime", "model", "caps", "ctx", "max"];
+		? ["target", "runtime", "model", ...(includeLabel ? ["label"] : []), "source", "state", "caps", "ctx", "max"]
+		: ["target", "runtime", "model", ...(includeLabel ? ["label"] : []), "source", "caps", "ctx", "max"];
 	const cells = rows.map((row) => {
 		const base = [row.targetId, row.runtimeId, truncateModelId(row.modelId)];
+		if (includeLabel) base.push(row.label ?? "-");
+		base.push(row.source);
 		if (includeState) base.push(row.state || "-");
 		base.push(row.caps, compactTokenCount(row.contextWindow), compactTokenCount(row.maxTokens));
 		return base;

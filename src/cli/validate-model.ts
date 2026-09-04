@@ -15,9 +15,8 @@ export interface ValidateModelInput {
 	modelId: string;
 	knownModels: ReadonlyArray<string>;
 	/**
-	 * The live list, when one was fetched. It is consulted only when the static
-	 * catalog is empty, so the catalog stays the authority for cloud runtimes
-	 * and the probe becomes the authority where there is nothing else.
+	 * The live list, when one was fetched. Callers provide it only when that
+	 * runtime declares live discovery authoritative for the concrete target.
 	 */
 	live?: LiveModelInventory | undefined;
 	force: boolean;
@@ -50,6 +49,7 @@ function formatUnadvertisedModelReason(modelId: string, live: LiveModelInventory
 
 export function validateModelChoice(input: ValidateModelInput): ValidateModelResult {
 	const { runtimeId, modelId, knownModels, live, force } = input;
+	if (live !== undefined) return validateAgainstLive(modelId, live, force);
 	if (knownModels.length === 0) return validateAgainstLive(modelId, live, force);
 	if (knownModels.includes(modelId)) return { ok: true };
 	if (force) {

@@ -156,6 +156,7 @@ function sameProbeIdentity(previous: TargetDescriptor, next: TargetDescriptor): 
 
 export interface ProbeMerge {
 	discoveredModels: string[];
+	discoveredModelLabels: Readonly<Record<string, string>>;
 	discoveredModelsSource: "probe" | "cache" | "runtime" | "none";
 	discoveredModelStates: NonNullable<TargetStatus["discoveredModelStates"]> | null;
 	probeCapabilities: NonNullable<TargetStatus["probeCapabilities"]> | null;
@@ -179,6 +180,7 @@ function mergeProbeResult(
 	probe: ProbeResult | null,
 	previous: TargetStatus | undefined,
 	cachedModels: ReadonlyArray<string> = [],
+	cachedModelLabels: Readonly<Record<string, string>> = {},
 ): ProbeMerge {
 	const probeSucceeded = probe?.ok ?? false;
 	const preservePrevious = !probeSucceeded && previous !== undefined && sameProbeIdentity(previous.target, target);
@@ -201,8 +203,14 @@ function mergeProbeResult(
 			[],
 	);
 	const discoveredModelStates = probe?.modelStates ?? (preservePrevious ? previous.discoveredModelStates : null) ?? null;
+	const discoveredModelLabels =
+		probe?.modelLabels ??
+		(preservePrevious ? previous.discoveredModelLabels : undefined) ??
+		(cachedModels.length > 0 ? cachedModelLabels : undefined) ??
+		{};
 	const merge: ProbeMerge = {
 		discoveredModels,
+		discoveredModelLabels,
 		discoveredModelsSource: discoveredModelsSource(probe, preservePrevious, previous, cachedModels, desc),
 		discoveredModelStates,
 		probeCapabilities,
@@ -225,14 +233,16 @@ function mergeProbeResult(
  * there is no live evidence either way.
  */
 function unservedDefaultModelReason(
-	desc: Pick<RuntimeDescriptor, "id">,
+	desc: Pick<RuntimeDescriptor, "id" | "externalAgentLoop">,
 	target: Pick<TargetDescriptor, "defaultModel">,
 	merge: Pick<ProbeMerge, "discoveredModels" | "discoveredModelsSource" | "discoveredModelStates">,
 ): string | null {
 	const model = target.defaultModel;
 	if (!model) return null;
 	if (merge.discoveredModelsSource !== "probe" || merge.discoveredModels.length === 0) return null;
-	if (listKnownModelsForRuntime(desc.id).length > 0) return null;
+	if (listKnownModelsForRuntime(desc.id).length > 0 && desc.externalAgentLoop?.modelCatalog !== "live-authoritative") {
+		return null;
+	}
 	if (merge.discoveredModels.includes(model)) return null;
 	// LM Studio lists a loaded model under its instance id and keeps the model
 	// key in the state map; the request path resolves either.
@@ -325,8 +335,9 @@ export function createProvidersBundle(context: DomainContext): DomainBundle<Prov
 			return out;
 		}
 		const availability = availabilityFor(desc, target, authStatusFor);
-		const cachedModels = readTargetModelSnapshot(target)?.models ?? [];
-		const merge = mergeProbeResult(desc, target, probe, previous, cachedModels);
+		const cachedSnapshot = readTargetModelSnapshot(target);
+		const cachedModels = cachedSnapshot?.models ?? [];
+		const merge = mergeProbeResult(desc, target, probe, previous, cachedModels, cachedSnapshot?.modelLabels ?? {});
 		const { capabilities, contextWindowProvenance } = capabilitiesFor(desc, target, merge, kb);
 		const healthy = probe !== null ? probe.ok : null;
 		const unservedDefault = probe?.ok ? unservedDefaultModelReason(desc, target, merge) : null;
@@ -353,6 +364,7 @@ export function createProvidersBundle(context: DomainContext): DomainBundle<Prov
 			probeModelCapabilities: merge.probeModelCapabilities,
 			probeModelId: merge.probeModelId,
 			discoveredModels: merge.discoveredModels,
+			discoveredModelLabels: merge.discoveredModelLabels,
 			discoveredModelsSource: merge.discoveredModelsSource,
 			discoveredModelStates: merge.discoveredModelStates,
 		};
@@ -425,7 +437,11 @@ export function createProvidersBundle(context: DomainContext): DomainBundle<Prov
 		const status = buildStatus(target, desc, probeResult, previous);
 		statuses.set(target.id, status);
 		if (probeResult.ok && probeResult.models !== undefined) {
-			recordTargetModelSnapshot(target, probeResult.models);
+			recordTargetModelSnapshot(
+				target,
+				probeResult.models,
+				probeResult.modelLabels ? { modelLabels: probeResult.modelLabels } : {},
+			);
 		}
 		// Durable so the next process resolves this endpoint's real slot count
 		// instead of the conservative default. Fire and forget: the probe's answer

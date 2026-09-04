@@ -95,7 +95,9 @@ export const INTEROP_AGENT_KINDS: ReadonlyArray<InteropAgentKind> = [
 		label: "Antigravity CLI",
 		binaryNames: ["agy"],
 		userDir: ".gemini/antigravity-cli",
-		projectDir: ".gemini",
+		legacyUserDirs: [".antigravitycli"],
+		projectDir: ".gemini/antigravity-cli",
+		legacyProjectDirs: [".antigravitycli"],
 		instructionFiles: [],
 	},
 	{
@@ -133,7 +135,9 @@ export function foreignAgentDirs(): ReadonlyArray<string> {
 	const dirs: string[] = [];
 	for (const kind of INTEROP_AGENT_KINDS) {
 		dirs.push(`~/${kind.userDir}/`);
+		for (const legacy of kind.legacyUserDirs ?? []) dirs.push(`~/${legacy}/`);
 		if (kind.projectDir !== undefined) dirs.push(`${kind.projectDir}/`);
+		for (const legacy of kind.legacyProjectDirs ?? []) dirs.push(`${legacy}/`);
 	}
 	return [...new Set(dirs)];
 }
