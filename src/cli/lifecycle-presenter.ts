@@ -5,6 +5,8 @@ import { stdin as defaultInput, stdout as defaultOutput } from "node:process";
 import { createInterface } from "node:readline/promises";
 import chalk from "chalk";
 
+import { terminalColumns, wrapPlain } from "./text-layout.js";
+
 export interface LifecyclePresenterOptions {
 	json?: boolean;
 	plain?: boolean;
@@ -44,6 +46,12 @@ export interface LifecycleReport {
  * One decimal above the byte range, which is the precision a size on a lifecycle
  * listing is read at: the operator wants to know whether a root is megabytes or
  * gigabytes before agreeing to delete it, not its third significant figure.
+ *
+ * Not `formatSize` from pi-agent-core, which this otherwise matches. That one
+ * stops at megabytes, so a data root holding evidence and vendored tools reads
+ * as `4300.8MB` where the question being asked is whether it is gigabytes; and
+ * it writes no space before the unit, which is fine inside a tool observation
+ * and wrong in a column of paths a person is scanning.
  */
 export function formatBytes(bytes: number): string {
 	if (bytes < 1024) return `${bytes} B`;
@@ -110,25 +118,6 @@ export function shortenPath(targetPath: string, home = homedir()): string {
 	return targetPath;
 }
 
-/** Break `text` on word boundaries so no line exceeds `width` columns. */
-function wrap(text: string, width: number): string[] {
-	if (width <= 0 || text.length <= width) return [text];
-	const lines: string[] = [];
-	let line = "";
-	for (const word of text.split(" ")) {
-		if (line.length === 0) {
-			line = word;
-		} else if (line.length + 1 + word.length <= width) {
-			line = `${line} ${word}`;
-		} else {
-			lines.push(line);
-			line = word;
-		}
-	}
-	if (line.length > 0) lines.push(line);
-	return lines;
-}
-
 /**
  * The kinds of block the rail knows how to space. One blank rail separates two
  * adjacent blocks of different kinds; consecutive blocks of the same kind (a run
@@ -156,7 +145,9 @@ export class LifecyclePresenter {
 		this.plain = options.plain ?? (!isTty || Boolean(process.env.NO_COLOR));
 		this.out = stream;
 		this.in = options.inputStream ?? defaultInput;
-		this.columns = options.columns ?? (stream as { columns?: number }).columns ?? 80;
+		// terminalColumns also reads $COLUMNS, so a piped or captured run can be
+		// told how wide it is instead of being pinned to 80.
+		this.columns = options.columns ?? terminalColumns(stream as { columns?: number | undefined });
 		this.report = {
 			command: "",
 			title: "",
@@ -195,10 +186,22 @@ export class LifecyclePresenter {
 		this.out.write(this.plain ? "\n" : `${chalk.cyan("│")}\n`);
 	}
 
+	/**
+	 * Close the current block, for a caller that is about to draw its own lines
+	 * on the rail. `configure` hands the rail to the arrow-key selector after
+	 * rendering a screen's values, and the selector cannot know what came before
+	 * it.
+	 */
+	blank(): void {
+		if (this.json) return;
+		this.separator();
+		this.lastBlock = null;
+	}
+
 	/** Rail-level prose, wrapped to the terminal so the rail survives a narrow window. */
 	private prose(text: string): void {
 		const prefix = this.plain ? "  " : `${chalk.cyan("│")}  `;
-		for (const line of wrap(text, this.columns - 3)) this.out.write(`${prefix}${line}\n`);
+		for (const line of wrapPlain(text, this.columns - 3)) this.out.write(`${prefix}${line}\n`);
 	}
 
 	header(title: string, command = ""): void {
@@ -228,6 +231,23 @@ export class LifecyclePresenter {
 		if (this.json) return;
 		this.open("note");
 		this.prose(text);
+	}
+
+	/**
+	 * Aligned label/value rows for a settings screen. Not `note()`, because
+	 * these must not reflow: the column is what makes eight values scannable,
+	 * and a wrap would put the value under the wrong label.
+	 */
+	fields(rows: ReadonlyArray<readonly [string, string]>): void {
+		for (const [label, value] of rows) this.report.steps.push({ type: "field", message: `${label}: ${value}` });
+		if (this.json || rows.length === 0) return;
+		this.open("step");
+		const width = Math.max(...rows.map(([label]) => label.length));
+		for (const [label, value] of rows) {
+			const padded = `${label}${" ".repeat(width - label.length)}`;
+			if (this.plain) this.out.write(`  ${padded}  ${value}\n`);
+			else this.out.write(`${chalk.blue("●")}  ${chalk.dim(padded)}  ${value}\n`);
+		}
 	}
 
 	substep(text: string, glyph = "✓"): void {
@@ -290,12 +310,12 @@ export class LifecyclePresenter {
 		if (this.json) return;
 		this.open("warn");
 		if (this.plain) {
-			for (const line of wrap(text, this.columns - 3)) this.out.write(`  ${line}\n`);
+			for (const line of wrapPlain(text, this.columns - 3)) this.out.write(`  ${line}\n`);
 			return;
 		}
 		const prefix = `${chalk.yellow("▲")}  `;
 		const continuation = `${chalk.cyan("│")}  `;
-		wrap(text, this.columns - 3).forEach((line, index) => {
+		wrapPlain(text, this.columns - 3).forEach((line, index) => {
 			this.out.write(`${index === 0 ? prefix : continuation}${chalk.yellow(line)}\n`);
 		});
 	}

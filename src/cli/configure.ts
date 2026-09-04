@@ -1,6 +1,7 @@
 import { existsSync, readFileSync } from "node:fs";
 import { stdin as input, stdout as output } from "node:process";
 import { createInterface } from "node:readline/promises";
+import chalk from "chalk";
 import {
 	type ClioSettings,
 	readSettings,
@@ -60,9 +61,10 @@ import {
 	matchCategoryChoice,
 	type RuntimeListRow,
 } from "./configure-layout.js";
-import { shortenPath } from "./lifecycle-presenter.js";
+import { createLifecyclePresenter, type LifecyclePresenter, shortenPath } from "./lifecycle-presenter.js";
 import { createDelayedManualCodeInput } from "./oauth-manual-input.js";
 import { promptOAuthSelection } from "./oauth-select.js";
+import { canSelect, promptSelect } from "./select.js";
 import { credentialWriteFailed, printError, printOk, printPlaintextCredentialWarning } from "./shared.js";
 import { terminalColumns, wrapPlain } from "./text-layout.js";
 import { type LiveModelInventory, validateModelChoice } from "./validate-model.js";
@@ -73,14 +75,21 @@ Configure model targets and runtime settings for chat and fleet dispatch.
 
 Usage:
   clio-coder configure                   interactive configuration wizard
-  clio-coder configure --section <name>  jump directly to a section:
+  clio-coder configure --section <name>  open one section directly:
                                          targets, models, chat, fleet,
                                          permissions, panes, skills, diagnostics
-  clio-coder configure --json            emit settings in JSON format
+                                         Without a terminal this prints the
+                                         section's values and exits.
+  clio-coder configure --json            emit the effective settings as JSON
   clio-coder configure --interop         review detected coding agents as delegation peers
   clio-coder configure --list            list target runtimes (user-facing only)
   clio-coder configure --list --all      list every registered runtime including aliases
   clio-coder configure --id <targetId> [flags] --runtime <runtimeId>
+  clio-coder configure --help, -h        show this message
+
+In the interactive menus: arrow keys move, enter opens, escape goes back, q
+quits. Where the terminal cannot support that, the same menus are numbered and
+answered by typing a number, b for back, or q to quit.
 
 Non-interactive flags:
   --id <targetId>                  target id to register (required when non-interactive)
@@ -1532,647 +1541,953 @@ export function runTargetRename(oldId: string, newId: string): number {
 	return 0;
 }
 
-function renderSectionHeader(title: string, out: NodeJS.WritableStream = output): void {
-	const confPath = shortenPath(settingsPath());
-	out.write(`\n┌  ${title}\n│  Source: ${confPath}\n│\n`);
+/**
+ * The runtime configuration screens.
+ *
+ * Every screen is one `SectionSpec`: a title, the values it shows, and the
+ * actions that change them. Rendering goes through the lifecycle presenter, so
+ * `configure` degrades on a pipe and under NO_COLOR exactly as `reset`,
+ * `upgrade`, and `uninstall` do. Navigation goes through `pickEntry`, which
+ * uses the arrow-key selector on a terminal and the numbered readline prompt
+ * everywhere else, so Escape leaves a screen without the screen having to teach
+ * a token for it, and a scripted run still has a way to answer.
+ */
+
+interface SectionIo {
+	rl: ReturnType<typeof createInterface>;
+	out: NodeJS.WritableStream;
+	/** Confirm one change on the transcript, in the presenter's voice. */
+	ok: (text: string) => void;
 }
 
-async function runSectionTargetsAuth(
-	rl: ReturnType<typeof createInterface>,
-	out: NodeJS.WritableStream = output,
-): Promise<void> {
-	for (;;) {
-		const settings = readSettings();
-		renderSectionHeader("Targets & Auth", out);
-		out.write("●  Configured Targets:\n");
-		if (settings.targets.length === 0) {
-			out.write("   (no targets registered)\n");
-		} else {
-			for (const t of settings.targets) {
-				const isChat = settings.chat.target === t.id ? " [chat]" : "";
-				const isFleet = settings.fleet.default.target === t.id ? " [fleet]" : "";
-				out.write(`   - ${t.id} (runtime: ${t.runtime}, model: ${t.defaultModel ?? "default"}${isChat}${isFleet})\n`);
-			}
-		}
-		out.write("│\n");
-		out.write("●  Active Assignments:\n");
-		out.write(`   Chat target:  ${settings.chat.target ?? "(none)"} (model: ${settings.chat.model ?? "(default)"})\n`);
-		out.write(
-			`   Fleet target: ${settings.fleet.default.target ?? "(none)"} (model: ${settings.fleet.default.model ?? "(default)"})\n`,
-		);
-		out.write("│\n");
-		out.write("   1. Add / configure new target\n");
-		out.write("   2. Set active Chat target & model\n");
-		out.write("   3. Set active Fleet default target & model\n");
-		out.write("   4. Remove a target\n");
-		out.write("   b. Back to main menu\n");
+interface SectionAction {
+	label: string;
+	hint?: string;
+	run: (io: SectionIo) => Promise<void>;
+}
 
-		const choice = await ask(rl, "\nAction", "b");
-		if (choice === null || choice === "b" || choice === "back") break;
-		if (choice === "1") {
-			const runtime = await pickRuntimeViaCategory(rl);
-			if (runtime) {
-				await runTargetSetupInteractive(rl, runtime, {
-					positional: [],
-					help: false,
-					list: false,
-					all: false,
-					interop: false,
-					json: false,
-					force: false,
-					gateway: false,
-					setOrchestrator: false,
-					setBackground: false,
-					setWorkerDefault: false,
-				});
-			}
-		} else if (choice === "2") {
-			if (settings.targets.length === 0) {
-				out.write("No targets available. Add a target first.\n");
-				continue;
-			}
-			const targetIds = settings.targets.map((t) => t.id);
-			out.write(`Available targets: ${targetIds.join(", ")}\n`);
-			const chosen = await ask(rl, "Choose Chat target id", settings.chat.target ?? targetIds[0]);
-			if (chosen && targetIds.includes(chosen)) {
-				const targetObj = settings.targets.find((t) => t.id === chosen);
-				const chosenModel = await ask(rl, "Chat model (leave blank for target default)", targetObj?.defaultModel ?? "");
-				updateSettings((draft) => {
-					draft.chat.target = chosen;
-					draft.chat.model = chosenModel && chosenModel.length > 0 ? chosenModel : null;
-				});
-				out.write(`✓ Active chat target set to ${chosen}\n`);
-			}
-		} else if (choice === "3") {
-			if (settings.targets.length === 0) {
-				out.write("No targets available. Add a target first.\n");
-				continue;
-			}
-			const targetIds = settings.targets.map((t) => t.id);
-			out.write(`Available targets: ${targetIds.join(", ")}\n`);
-			const chosen = await ask(rl, "Choose Fleet target id", settings.fleet.default.target ?? targetIds[0]);
-			if (chosen && targetIds.includes(chosen)) {
-				const targetObj = settings.targets.find((t) => t.id === chosen);
-				const chosenModel = await ask(rl, "Fleet model (leave blank for target default)", targetObj?.defaultModel ?? "");
-				updateSettings((draft) => {
-					draft.fleet.default.target = chosen;
-					draft.fleet.default.model = chosenModel && chosenModel.length > 0 ? chosenModel : null;
-				});
-				out.write(`✓ Active fleet target set to ${chosen}\n`);
-			}
-		} else if (choice === "4") {
-			if (settings.targets.length === 0) {
-				out.write("No targets to remove.\n");
-				continue;
-			}
-			const targetIds = settings.targets.map((t) => t.id);
-			out.write(`Available targets: ${targetIds.join(", ")}\n`);
-			const chosen = await ask(rl, "Target id to remove");
-			if (chosen && targetIds.includes(chosen)) {
-				const confirm = await askYesNo(rl, `Remove target '${chosen}'?`, false);
-				if (confirm) {
-					runTargetRemove(chosen);
+interface SectionSpec {
+	/** Canonical `--section` name. */
+	id: string;
+	title: string;
+	/** What the main menu says this screen covers. */
+	summary: string;
+	/** Other spellings `--section` accepts. */
+	aliases?: ReadonlyArray<string>;
+	fields: () => Array<readonly [string, string]>;
+	actions: ReadonlyArray<SectionAction>;
+}
+
+const NONE = "(none)";
+const onOff = (value: boolean): string => (value ? "enabled" : "disabled");
+const listOr = (values: ReadonlyArray<string>, fallback = NONE): string =>
+	values.length > 0 ? values.join(", ") : fallback;
+
+/** Read a bounded integer, leaving the setting alone when the answer is not one. */
+async function askInteger(
+	io: SectionIo,
+	label: string,
+	current: number,
+	apply: (value: number) => void,
+	min = 0,
+): Promise<void> {
+	const answer = await ask(io.rl, label, String(current));
+	if (answer === null) return;
+	const parsed = Number(answer);
+	if (!Number.isFinite(parsed) || parsed < min) {
+		io.out.write(`  ${label} must be a number of at least ${min}; left at ${current}\n`);
+		return;
+	}
+	const value = Math.floor(parsed);
+	apply(value);
+	io.ok(`${label} set to ${value}`);
+}
+
+/** Read one of a fixed set of words, leaving the setting alone otherwise. */
+async function askChoice(
+	io: SectionIo,
+	label: string,
+	allowed: ReadonlyArray<string>,
+	current: string,
+	apply: (value: string) => void,
+): Promise<void> {
+	const answer = await ask(io.rl, `${label} [${allowed.join("|")}]`, current);
+	if (answer === null) return;
+	const value = answer.trim().toLowerCase();
+	if (!allowed.includes(value)) {
+		io.out.write(`  ${label} must be one of ${allowed.join(", ")}; left at ${current}\n`);
+		return;
+	}
+	apply(value);
+	io.ok(`${label} set to ${value}`);
+}
+
+const SECTIONS: ReadonlyArray<SectionSpec> = [
+	{
+		id: "targets",
+		title: "Targets & Auth",
+		summary: "providers, endpoints, credentials, models",
+		aliases: ["auth", "target", "providers"],
+		fields: () => {
+			const settings = readSettings();
+			const rows: Array<readonly [string, string]> = [
+				["Chat target", `${settings.chat.target ?? NONE} (model: ${settings.chat.model ?? "target default"})`],
+				[
+					"Fleet target",
+					`${settings.fleet.default.target ?? NONE} (model: ${settings.fleet.default.model ?? "target default"})`,
+				],
+			];
+			if (settings.targets.length === 0) rows.push(["Registered", "(no targets registered)"]);
+			else
+				for (const target of settings.targets) {
+					rows.push([
+						`  ${target.id}`,
+						`${target.runtime}, model ${target.defaultModel ?? "unset"}${
+							settings.chat.target === target.id ? " [chat]" : ""
+						}${settings.fleet.default.target === target.id ? " [fleet]" : ""}`,
+					]);
 				}
-			}
-		}
-	}
-}
-
-async function runSectionModelsThinking(
-	rl: ReturnType<typeof createInterface>,
-	out: NodeJS.WritableStream = output,
-): Promise<void> {
-	for (;;) {
-		const settings = readSettings();
-		renderSectionHeader("Models & Thinking", out);
-		out.write("●  Current Values:\n");
-		out.write(`   Chat Default Model:    ${settings.chat.model ?? "(target default)"}\n`);
-		out.write(`   Chat Thinking Level:   ${settings.chat.thinkingLevel}\n`);
-		out.write(`   Fleet Thinking Level:  ${settings.fleet.default.thinkingLevel}\n`);
-		out.write(`   Model Favorites:       ${settings.chat.modelPicker.favorites.join(", ") || "(none)"}\n`);
-		out.write(`   Cycle Set (Alt+J/K):   ${settings.chat.modelPicker.cycleSet.join(", ") || "(none)"}\n`);
-		out.write("│\n");
-		out.write("   1. Change Chat thinking level (off | minimal | low | medium | high | xhigh | max)\n");
-		out.write("   2. Change Fleet thinking level (off | minimal | low | medium | high | xhigh | max)\n");
-		out.write("   3. Set Chat default model override\n");
-		out.write("   4. Set Model Favorites (comma-separated)\n");
-		out.write("   5. Set Cycle Set (comma-separated)\n");
-		out.write("   b. Back to main menu\n");
-
-		const choice = await ask(rl, "\nAction", "b");
-		if (choice === null || choice === "b" || choice === "back") break;
-		if (choice === "1") {
-			out.write(`Allowed levels: ${THINKING_LEVELS.join(", ")}\n`);
-			const level = await ask(rl, "Chat thinking level", settings.chat.thinkingLevel);
-			if (level && (THINKING_LEVELS as ReadonlyArray<string>).includes(level.toLowerCase())) {
-				updateSettings((draft) => {
-					draft.chat.thinkingLevel = level.toLowerCase() as ThinkingLevel;
-				});
-				out.write(`✓ Chat thinking level set to ${level.toLowerCase()}\n`);
-			}
-		} else if (choice === "2") {
-			out.write(`Allowed levels: ${THINKING_LEVELS.join(", ")}\n`);
-			const level = await ask(rl, "Fleet thinking level", settings.fleet.default.thinkingLevel);
-			if (level && (THINKING_LEVELS as ReadonlyArray<string>).includes(level.toLowerCase())) {
-				updateSettings((draft) => {
-					draft.fleet.default.thinkingLevel = level.toLowerCase() as ThinkingLevel;
-				});
-				out.write(`✓ Fleet thinking level set to ${level.toLowerCase()}\n`);
-			}
-		} else if (choice === "3") {
-			const model = await ask(rl, "Chat default model (blank to reset to target default)", settings.chat.model ?? "");
-			updateSettings((draft) => {
-				draft.chat.model = model && model.length > 0 ? model : null;
-			});
-			out.write("✓ Chat default model updated\n");
-		} else if (choice === "4") {
-			const input = await ask(rl, "Model favorites (comma-separated)", settings.chat.modelPicker.favorites.join(", "));
-			if (input !== null) {
-				const favs = input
-					.split(",")
-					.map((s) => s.trim())
-					.filter((s) => s.length > 0);
-				updateSettings((draft) => {
-					draft.chat.modelPicker.favorites = favs;
-				});
-				out.write(`✓ Model favorites updated (${favs.length} entries)\n`);
-			}
-		} else if (choice === "5") {
-			const input = await ask(rl, "Cycle set (comma-separated)", settings.chat.modelPicker.cycleSet.join(", "));
-			if (input !== null) {
-				const cycle = input
-					.split(",")
-					.map((s) => s.trim())
-					.filter((s) => s.length > 0);
-				updateSettings((draft) => {
-					draft.chat.modelPicker.cycleSet = cycle;
-				});
-				out.write(`✓ Cycle set updated (${cycle.length} entries)\n`);
-			}
-		}
-	}
-}
-
-async function runSectionChatDefaults(
-	rl: ReturnType<typeof createInterface>,
-	out: NodeJS.WritableStream = output,
-): Promise<void> {
-	for (;;) {
-		const settings = readSettings();
-		renderSectionHeader("Chat Defaults", out);
-		out.write("●  Current Values:\n");
-		out.write(`   Smooth Streaming:      ${settings.interface.smoothStreaming}\n`);
-		out.write(`   Terminal Progress:     ${settings.interface.terminalProgress ? "enabled" : "disabled"}\n`);
-		out.write(`   Max Output Tokens:     ${settings.chat.maxOutputTokens || "(unlimited)"}\n`);
-		out.write(`   Prompt Prewarm:        ${settings.chat.prewarm ? "enabled" : "disabled"}\n`);
-		out.write(
-			`   Auto-Compaction:       ${settings.context.compaction.auto ? `enabled (threshold: ${Math.round(settings.context.compaction.threshold * 100)}%)` : "disabled"}\n`,
-		);
-		out.write(
-			`   Working-Set Eviction:  ${settings.context.workingSet.enabled ? `enabled (${settings.context.workingSet.policy})` : "disabled"}\n`,
-		);
-		out.write("│\n");
-		out.write("   1. Change Smooth Streaming (off | auto | on)\n");
-		out.write("   2. Toggle Terminal Progress Indicator\n");
-		out.write("   3. Set Max Output Tokens (0 for runtime default)\n");
-		out.write("   4. Toggle Prompt Prewarm\n");
-		out.write("   5. Toggle Auto-Compaction\n");
-		out.write("   b. Back to main menu\n");
-
-		const choice = await ask(rl, "\nAction", "b");
-		if (choice === null || choice === "b" || choice === "back") break;
-		if (choice === "1") {
-			const stream = await ask(rl, "Smooth streaming [off|auto|on]", settings.interface.smoothStreaming);
-			if (stream && ["off", "auto", "on"].includes(stream.toLowerCase())) {
-				updateSettings((draft) => {
-					draft.interface.smoothStreaming = stream.toLowerCase() as SmoothStreaming;
-				});
-				out.write(`✓ Smooth streaming set to ${stream.toLowerCase()}\n`);
-			}
-		} else if (choice === "2") {
-			updateSettings((draft) => {
-				draft.interface.terminalProgress = !draft.interface.terminalProgress;
-			});
-			out.write("✓ Terminal progress toggled\n");
-		} else if (choice === "3") {
-			const tokens = await ask(rl, "Max output tokens (0 for unlimited)", String(settings.chat.maxOutputTokens));
-			if (tokens !== null) {
-				const n = Number(tokens);
-				if (Number.isFinite(n) && n >= 0) {
-					updateSettings((draft) => {
-						draft.chat.maxOutputTokens = Math.floor(n);
-					});
-					out.write(`✓ Max output tokens set to ${Math.floor(n)}\n`);
-				}
-			}
-		} else if (choice === "4") {
-			updateSettings((draft) => {
-				draft.chat.prewarm = !draft.chat.prewarm;
-			});
-			out.write("✓ Prompt prewarm toggled\n");
-		} else if (choice === "5") {
-			updateSettings((draft) => {
-				draft.context.compaction.auto = !draft.context.compaction.auto;
-			});
-			out.write("✓ Auto-compaction toggled\n");
-		}
-	}
-}
-
-async function runSectionFleet(
-	rl: ReturnType<typeof createInterface>,
-	out: NodeJS.WritableStream = output,
-): Promise<void> {
-	for (;;) {
-		const settings = readSettings();
-		renderSectionHeader("Fleet", out);
-		out.write("●  Current Values:\n");
-		out.write(`   Concurrency Limit:     ${settings.fleet.concurrency}\n`);
-		out.write(`   Max Retries:           ${settings.fleet.retry.maxRetries}\n`);
-		out.write(`   Tool Calls per Run:    ${settings.fleet.limits.toolCallsPerRun}\n`);
-		out.write(`   Run Timeout:           ${settings.fleet.limits.internalRunTimeoutMs / 1000}s\n`);
-		out.write(
-			`   Worker Profiles:       ${Object.keys(settings.fleet.profiles).length > 0 ? Object.keys(settings.fleet.profiles).join(", ") : "(none)"}\n`,
-		);
-		out.write(
-			`   Subagent Pins:         ${
-				Object.keys(settings.fleet.agentProfiles).length > 0
-					? Object.entries(settings.fleet.agentProfiles)
-							.map(([k, v]) => `${k}->${v}`)
-							.join(", ")
-					: "(none)"
-			}\n`,
-		);
-		out.write(
-			`   Remote Fleet Nodes:    ${settings.fleet.nodes.length > 0 ? settings.fleet.nodes.map((n) => n.id).join(", ") : "(none)"}\n`,
-		);
-		out.write("│\n");
-		out.write("   1. Set Concurrency Limit (auto or integer)\n");
-		out.write("   2. Set Max Retries\n");
-		out.write("   3. Set Tool Calls Limit per Run\n");
-		out.write("   4. Set Run Timeout (seconds)\n");
-		out.write("   b. Back to main menu\n");
-
-		const choice = await ask(rl, "\nAction", "b");
-		if (choice === null || choice === "b" || choice === "back") break;
-		if (choice === "1") {
-			const conc = await ask(rl, "Concurrency limit [auto or number]", String(settings.fleet.concurrency));
-			if (conc !== null) {
-				if (conc.toLowerCase() === "auto") {
-					updateSettings((draft) => {
-						draft.fleet.concurrency = "auto";
-					});
-					out.write("✓ Concurrency set to auto\n");
-				} else {
-					const n = Number(conc);
-					if (Number.isFinite(n) && n > 0) {
-						updateSettings((draft) => {
-							draft.fleet.concurrency = Math.floor(n);
-						});
-						out.write(`✓ Concurrency set to ${Math.floor(n)}\n`);
+			return rows;
+		},
+		actions: [
+			{
+				label: "Add a target",
+				hint: "register a provider endpoint",
+				run: async (io) => {
+					const runtime = await pickRuntimeViaCategory(io.rl);
+					if (runtime) await runTargetSetupInteractive(io.rl, runtime, emptyArgs());
+				},
+			},
+			{
+				label: "Set the chat target",
+				hint: "which target answers in chat",
+				run: async (io) => {
+					await assignTarget(io, "chat");
+				},
+			},
+			{
+				label: "Set the fleet default target",
+				hint: "which target dispatched workers use",
+				run: async (io) => {
+					await assignTarget(io, "fleet");
+				},
+			},
+			{
+				label: "Remove a target",
+				run: async (io) => {
+					const settings = readSettings();
+					const ids = settings.targets.map((target) => target.id);
+					if (ids.length === 0) {
+						io.out.write("  No targets to remove.\n");
+						return;
 					}
-				}
-			}
-		} else if (choice === "2") {
-			const retries = await ask(rl, "Max retries", String(settings.fleet.retry.maxRetries));
-			if (retries !== null) {
-				const n = Number(retries);
-				if (Number.isFinite(n) && n >= 0) {
-					updateSettings((draft) => {
-						draft.fleet.retry.maxRetries = Math.floor(n);
+					io.out.write(`  Registered: ${ids.join(", ")}\n`);
+					const chosen = await ask(io.rl, "Target id to remove");
+					if (chosen === null || !ids.includes(chosen)) return;
+					if (await askYesNo(io.rl, `Remove target '${chosen}'?`, false)) {
+						runTargetRemove(chosen);
+					}
+				},
+			},
+		],
+	},
+	{
+		id: "models",
+		title: "Models & Thinking",
+		summary: "default model, thinking level, favorites",
+		aliases: ["model", "thinking"],
+		fields: () => {
+			const settings = readSettings();
+			return [
+				["Chat model", settings.chat.model ?? "(target default)"],
+				["Chat thinking", settings.chat.thinkingLevel],
+				["Fleet thinking", settings.fleet.default.thinkingLevel],
+				["Favorites", listOr(settings.chat.modelPicker.favorites)],
+				["Cycle set (Alt+J/K)", listOr(settings.chat.modelPicker.cycleSet)],
+			];
+		},
+		actions: [
+			{
+				label: "Chat thinking level",
+				hint: THINKING_LEVELS.join(" | "),
+				run: async (io) => {
+					await askChoice(io, "Chat thinking level", THINKING_LEVELS, readSettings().chat.thinkingLevel, (value) => {
+						updateSettings((draft) => {
+							draft.chat.thinkingLevel = value as ThinkingLevel;
+						});
 					});
-					out.write(`✓ Max retries set to ${Math.floor(n)}\n`);
-				}
-			}
-		} else if (choice === "3") {
-			const limit = await ask(rl, "Tool calls per run", String(settings.fleet.limits.toolCallsPerRun));
-			if (limit !== null) {
-				const n = Number(limit);
-				if (Number.isFinite(n) && n > 0) {
+				},
+			},
+			{
+				label: "Fleet thinking level",
+				hint: THINKING_LEVELS.join(" | "),
+				run: async (io) => {
+					await askChoice(
+						io,
+						"Fleet thinking level",
+						THINKING_LEVELS,
+						readSettings().fleet.default.thinkingLevel,
+						(value) => {
+							updateSettings((draft) => {
+								draft.fleet.default.thinkingLevel = value as ThinkingLevel;
+							});
+						},
+					);
+				},
+			},
+			{
+				label: "Chat default model",
+				hint: "blank clears the override",
+				run: async (io) => {
+					const model = await ask(
+						io.rl,
+						"Chat default model (blank for the target default)",
+						readSettings().chat.model ?? "",
+					);
+					if (model === null) return;
 					updateSettings((draft) => {
-						draft.fleet.limits.toolCallsPerRun = Math.floor(n);
+						draft.chat.model = model.length > 0 ? model : null;
 					});
-					out.write(`✓ Tool calls limit set to ${Math.floor(n)}\n`);
-				}
+					io.ok(model.length > 0 ? `Chat default model set to ${model}` : "Chat default model cleared");
+				},
+			},
+			{
+				label: "Model favorites",
+				hint: "comma-separated",
+				run: async (io) => {
+					await askList(io, "Model favorites", readSettings().chat.modelPicker.favorites, (values) => {
+						updateSettings((draft) => {
+							draft.chat.modelPicker.favorites = values;
+						});
+					});
+				},
+			},
+			{
+				label: "Cycle set",
+				hint: "comma-separated, Alt+J/K walks it",
+				run: async (io) => {
+					await askList(io, "Cycle set", readSettings().chat.modelPicker.cycleSet, (values) => {
+						updateSettings((draft) => {
+							draft.chat.modelPicker.cycleSet = values;
+						});
+					});
+				},
+			},
+		],
+	},
+	{
+		id: "chat",
+		title: "Chat Defaults",
+		summary: "streaming, progress, compaction",
+		fields: () => {
+			const settings = readSettings();
+			return [
+				["Smooth streaming", settings.interface.smoothStreaming],
+				["Terminal progress", onOff(settings.interface.terminalProgress)],
+				[
+					"Max output tokens",
+					settings.chat.maxOutputTokens > 0 ? String(settings.chat.maxOutputTokens) : "(runtime default)",
+				],
+				["Prompt prewarm", onOff(settings.chat.prewarm)],
+				[
+					"Auto-compaction",
+					settings.context.compaction.auto
+						? `enabled at ${Math.round(settings.context.compaction.threshold * 100)}%`
+						: "disabled",
+				],
+				[
+					"Working-set eviction",
+					settings.context.workingSet.enabled ? `enabled (${settings.context.workingSet.policy})` : "disabled",
+				],
+			];
+		},
+		actions: [
+			{
+				label: "Smooth streaming",
+				hint: "off | auto | on",
+				run: async (io) => {
+					await askChoice(
+						io,
+						"Smooth streaming",
+						["off", "auto", "on"],
+						readSettings().interface.smoothStreaming,
+						(value) => {
+							updateSettings((draft) => {
+								draft.interface.smoothStreaming = value as SmoothStreaming;
+							});
+						},
+					);
+				},
+			},
+			{
+				label: "Terminal progress indicator",
+				hint: "toggle",
+				run: async (io) => {
+					let next = false;
+					updateSettings((draft) => {
+						draft.interface.terminalProgress = !draft.interface.terminalProgress;
+						next = draft.interface.terminalProgress;
+					});
+					io.ok(`Terminal progress ${onOff(next)}`);
+				},
+			},
+			{
+				label: "Max output tokens",
+				hint: "0 for the runtime default",
+				run: async (io) => {
+					await askInteger(io, "Max output tokens", readSettings().chat.maxOutputTokens, (value) => {
+						updateSettings((draft) => {
+							draft.chat.maxOutputTokens = value;
+						});
+					});
+				},
+			},
+			{
+				label: "Prompt prewarm",
+				hint: "toggle",
+				run: async (io) => {
+					let next = false;
+					updateSettings((draft) => {
+						draft.chat.prewarm = !draft.chat.prewarm;
+						next = draft.chat.prewarm;
+					});
+					io.ok(`Prompt prewarm ${onOff(next)}`);
+				},
+			},
+			{
+				label: "Auto-compaction",
+				hint: "toggle",
+				run: async (io) => {
+					let next = false;
+					updateSettings((draft) => {
+						draft.context.compaction.auto = !draft.context.compaction.auto;
+						next = draft.context.compaction.auto;
+					});
+					io.ok(`Auto-compaction ${onOff(next)}`);
+				},
+			},
+		],
+	},
+	{
+		id: "fleet",
+		title: "Fleet",
+		summary: "concurrency, retries, worker timeouts",
+		fields: () => {
+			const settings = readSettings();
+			return [
+				["Concurrency limit", String(settings.fleet.concurrency)],
+				["Max retries", String(settings.fleet.retry.maxRetries)],
+				["Tool calls per run", String(settings.fleet.limits.toolCallsPerRun)],
+				["Run timeout", `${settings.fleet.limits.internalRunTimeoutMs / 1000}s`],
+				["Worker profiles", listOr(Object.keys(settings.fleet.profiles))],
+				[
+					"Subagent pins",
+					listOr(Object.entries(settings.fleet.agentProfiles).map(([agent, profile]) => `${agent} -> ${profile}`)),
+				],
+				["Remote nodes", listOr(settings.fleet.nodes.map((node) => node.id))],
+			];
+		},
+		actions: [
+			{
+				label: "Concurrency limit",
+				hint: "auto, or a positive integer",
+				run: async (io) => {
+					const current = String(readSettings().fleet.concurrency);
+					const answer = await ask(io.rl, "Concurrency limit [auto or a number]", current);
+					if (answer === null) return;
+					if (answer.trim().toLowerCase() === "auto") {
+						updateSettings((draft) => {
+							draft.fleet.concurrency = "auto";
+						});
+						io.ok("Concurrency limit set to auto");
+						return;
+					}
+					const parsed = Number(answer);
+					if (!Number.isFinite(parsed) || parsed < 1) {
+						io.out.write(`  Concurrency limit must be auto or at least 1; left at ${current}\n`);
+						return;
+					}
+					updateSettings((draft) => {
+						draft.fleet.concurrency = Math.floor(parsed);
+					});
+					io.ok(`Concurrency limit set to ${Math.floor(parsed)}`);
+				},
+			},
+			{
+				label: "Max retries",
+				run: async (io) => {
+					await askInteger(io, "Max retries", readSettings().fleet.retry.maxRetries, (value) => {
+						updateSettings((draft) => {
+							draft.fleet.retry.maxRetries = value;
+						});
+					});
+				},
+			},
+			{
+				label: "Tool calls per run",
+				run: async (io) => {
+					await askInteger(
+						io,
+						"Tool calls per run",
+						readSettings().fleet.limits.toolCallsPerRun,
+						(value) => {
+							updateSettings((draft) => {
+								draft.fleet.limits.toolCallsPerRun = value;
+							});
+						},
+						1,
+					);
+				},
+			},
+			{
+				label: "Run timeout",
+				hint: "seconds",
+				run: async (io) => {
+					const current = readSettings().fleet.limits.internalRunTimeoutMs / 1000;
+					const answer = await ask(io.rl, "Run timeout in seconds", String(current));
+					if (answer === null) return;
+					const parsed = Number(answer);
+					if (!Number.isFinite(parsed) || parsed < 1) {
+						io.out.write(`  Run timeout must be at least 1 second; left at ${current}s\n`);
+						return;
+					}
+					updateSettings((draft) => {
+						draft.fleet.limits.internalRunTimeoutMs = Math.floor(parsed * 1000);
+					});
+					io.ok(`Run timeout set to ${Math.floor(parsed)}s`);
+				},
+			},
+		],
+	},
+	{
+		id: "permissions",
+		title: "Permissions & Autonomy",
+		summary: "autonomy level, worker permissions, cost limits",
+		aliases: ["autonomy", "safety"],
+		fields: () => {
+			const settings = readSettings();
+			return [
+				["Autonomy level", settings.safety.autonomy],
+				["Worker permissions", settings.fleet.permissions.mode],
+				["Session cost limit", `$${settings.safety.limits.sessionCostUsd} USD`],
+				["Turn tool budget", String(settings.safety.limits.chatToolCallsPerTurn)],
+				["Review watchdog", onOff(settings.safety.review.enabled)],
+			];
+		},
+		actions: [
+			{
+				label: "Autonomy level",
+				hint: "interactive | assisted | auto-edit | full",
+				run: async (io) => {
+					io.out.write(
+						"  interactive prompts for everything, assisted auto-reads and confirms writes,\n  auto-edit confirms only bash, full runs unattended.\n",
+					);
+					await askChoice(
+						io,
+						"Autonomy level",
+						["interactive", "assisted", "auto-edit", "full"],
+						readSettings().safety.autonomy,
+						(value) => {
+							updateSettings((draft) => {
+								draft.safety.autonomy = value as AutonomyLevel;
+							});
+						},
+					);
+				},
+			},
+			{
+				label: "Worker permission mode",
+				hint: "deny | fail | escalate",
+				run: async (io) => {
+					await askChoice(
+						io,
+						"Worker permission mode",
+						["deny", "fail", "escalate"],
+						readSettings().fleet.permissions.mode,
+						(value) => {
+							updateSettings((draft) => {
+								draft.fleet.permissions.mode = value as WorkerPermissionMode;
+							});
+						},
+					);
+				},
+			},
+			{
+				label: "Session cost limit",
+				hint: "USD",
+				run: async (io) => {
+					const current = readSettings().safety.limits.sessionCostUsd;
+					const answer = await ask(io.rl, "Session cost limit in USD", String(current));
+					if (answer === null) return;
+					const parsed = Number(answer);
+					if (!Number.isFinite(parsed) || parsed <= 0) {
+						io.out.write(`  Session cost limit must be greater than 0; left at $${current}\n`);
+						return;
+					}
+					updateSettings((draft) => {
+						draft.safety.limits.sessionCostUsd = parsed;
+					});
+					io.ok(`Session cost limit set to $${parsed} USD`);
+				},
+			},
+			{
+				label: "Turn tool budget",
+				run: async (io) => {
+					await askInteger(
+						io,
+						"Turn tool budget",
+						readSettings().safety.limits.chatToolCallsPerTurn,
+						(value) => {
+							updateSettings((draft) => {
+								draft.safety.limits.chatToolCallsPerTurn = value;
+							});
+						},
+						1,
+					);
+				},
+			},
+			{
+				label: "Turn-end review watchdog",
+				hint: "toggle",
+				run: async (io) => {
+					let next = false;
+					updateSettings((draft) => {
+						draft.safety.review.enabled = !draft.safety.review.enabled;
+						next = draft.safety.review.enabled;
+					});
+					io.ok(`Review watchdog ${onOff(next)}`);
+				},
+			},
+		],
+	},
+	{
+		id: "panes",
+		title: "Panes & Layout",
+		summary: "terminal panes, startup layout, display mode",
+		aliases: ["layout", "interface", "pane"],
+		fields: () => {
+			const settings = readSettings();
+			return [
+				["Panes capability", settings.interface.panes.enabled],
+				["Startup layout", settings.interface.panes.layout],
+				["TUI mode", settings.interface.mode],
+				["Output detail", settings.interface.outputDetail],
+				["Desktop notifications", onOff(settings.interface.desktopNotifications)],
+				["Git commit attribution", onOff(settings.integrations.git.commitAttribution)],
+			];
+		},
+		actions: [
+			{
+				label: "Panes capability",
+				hint: "off | auto | embedded",
+				run: async (io) => {
+					await askChoice(
+						io,
+						"Panes capability",
+						["off", "auto", "embedded"],
+						readSettings().interface.panes.enabled,
+						(value) => {
+							updateSettings((draft) => {
+								draft.interface.panes.enabled = value as PanesSettings["enabled"];
+							});
+						},
+					);
+				},
+			},
+			{
+				label: "Startup layout",
+				hint: "off | workers | cockpit",
+				run: async (io) => {
+					await askChoice(
+						io,
+						"Startup layout",
+						["off", "workers", "cockpit"],
+						readSettings().interface.panes.layout,
+						(value) => {
+							updateSettings((draft) => {
+								draft.interface.panes.layout = value as PanesSettings["layout"];
+							});
+						},
+					);
+				},
+			},
+			{
+				label: "TUI mode",
+				hint: "regular | fullscreen",
+				run: async (io) => {
+					await askChoice(io, "TUI mode", ["regular", "fullscreen"], readSettings().interface.mode, (value) => {
+						updateSettings((draft) => {
+							draft.interface.mode = value as TuiMode;
+						});
+					});
+				},
+			},
+			{
+				label: "Output detail",
+				hint: "minimal | default | verbose",
+				run: async (io) => {
+					await askChoice(
+						io,
+						"Output detail",
+						["minimal", "default", "verbose"],
+						readSettings().interface.outputDetail,
+						(value) => {
+							updateSettings((draft) => {
+								draft.interface.outputDetail = value as OutputVerbosity;
+							});
+						},
+					);
+				},
+			},
+			{
+				label: "Desktop notifications",
+				hint: "toggle",
+				run: async (io) => {
+					let next = false;
+					updateSettings((draft) => {
+						draft.interface.desktopNotifications = !draft.interface.desktopNotifications;
+						next = draft.interface.desktopNotifications;
+					});
+					io.ok(`Desktop notifications ${onOff(next)}`);
+				},
+			},
+			{
+				label: "Git commit attribution",
+				hint: "toggle",
+				run: async (io) => {
+					let next = false;
+					updateSettings((draft) => {
+						draft.integrations.git.commitAttribution = !draft.integrations.git.commitAttribution;
+						next = draft.integrations.git.commitAttribution;
+					});
+					io.ok(`Git commit attribution ${onOff(next)}`);
+				},
+			},
+		],
+	},
+	{
+		id: "skills",
+		title: "Skills & Extensions",
+		summary: "project imports, ACP peers, plugins",
+		aliases: ["extensions", "skill", "interop"],
+		fields: () => {
+			const settings = readSettings();
+			const rows: Array<readonly [string, string]> = [
+				["Trust project imports", settings.integrations.projectResources.trustProjectImports ? "trusted" : "untrusted"],
+				["External ACP agents", String(settings.integrations.externalAgents.entries.length)],
+			];
+			for (const agent of settings.integrations.externalAgents.entries) {
+				rows.push([`  ${agent.id}`, `${agent.command} (governance: ${agent.toolGovernance ?? "default"})`]);
 			}
-		} else if (choice === "4") {
-			const timeoutSec = await ask(
-				rl,
-				"Run timeout in seconds",
-				String(settings.fleet.limits.internalRunTimeoutMs / 1000),
+			rows.push(
+				["Runtime plugins", listOr(settings.integrations.runtimePlugins)],
+				["Library remote sync", onOff(settings.integrations.library.sync)],
 			);
-			if (timeoutSec !== null) {
-				const n = Number(timeoutSec);
-				if (Number.isFinite(n) && n > 0) {
+			return rows;
+		},
+		actions: [
+			{
+				label: "Trust project imports",
+				hint: "toggle",
+				run: async (io) => {
+					let next = false;
 					updateSettings((draft) => {
-						draft.fleet.limits.internalRunTimeoutMs = Math.floor(n * 1000);
+						draft.integrations.projectResources.trustProjectImports =
+							!draft.integrations.projectResources.trustProjectImports;
+						next = draft.integrations.projectResources.trustProjectImports;
 					});
-					out.write(`✓ Run timeout set to ${Math.floor(n)}s\n`);
-				}
-			}
-		}
-	}
-}
-
-async function runSectionPermissionsAutonomy(
-	rl: ReturnType<typeof createInterface>,
-	out: NodeJS.WritableStream = output,
-): Promise<void> {
-	for (;;) {
-		const settings = readSettings();
-		renderSectionHeader("Permissions & Autonomy", out);
-		out.write("●  Current Values:\n");
-		out.write(`   Autonomy Level:        ${settings.safety.autonomy}\n`);
-		out.write(`   Worker Permission:     ${settings.fleet.permissions.mode}\n`);
-		out.write(`   Session Cost Limit:    $${settings.safety.limits.sessionCostUsd} USD\n`);
-		out.write(`   Turn Tool Budget:      ${settings.safety.limits.chatToolCallsPerTurn}\n`);
-		out.write(`   Review Watchdog:       ${settings.safety.review.enabled ? "enabled" : "disabled"}\n`);
-		out.write("│\n");
-		out.write("   1. Change Autonomy Level (interactive | assisted | auto-edit | full)\n");
-		out.write("   2. Change Worker Permission Mode (deny | fail | escalate)\n");
-		out.write("   3. Set Session Cost Limit ($ USD)\n");
-		out.write("   4. Set Turn Tool Budget\n");
-		out.write("   5. Toggle Turn-end Review Watchdog\n");
-		out.write("   b. Back to main menu\n");
-
-		const choice = await ask(rl, "\nAction", "b");
-		if (choice === null || choice === "b" || choice === "back") break;
-		if (choice === "1") {
-			out.write(
-				"Levels: interactive (prompt everything), assisted (auto read, confirm write), auto-edit (auto edit files, confirm bash), full (autonomous)\n",
-			);
-			const level = await ask(rl, "Autonomy level [interactive|assisted|auto-edit|full]", settings.safety.autonomy);
-			if (level && ["interactive", "assisted", "auto-edit", "full"].includes(level.toLowerCase())) {
-				updateSettings((draft) => {
-					draft.safety.autonomy = level.toLowerCase() as AutonomyLevel;
-				});
-				out.write(`✓ Autonomy level set to ${level.toLowerCase()}\n`);
-			}
-		} else if (choice === "2") {
-			const mode = await ask(rl, "Worker permission mode [deny|fail|escalate]", settings.fleet.permissions.mode);
-			if (mode && ["deny", "fail", "escalate"].includes(mode.toLowerCase())) {
-				updateSettings((draft) => {
-					draft.fleet.permissions.mode = mode.toLowerCase() as WorkerPermissionMode;
-				});
-				out.write(`✓ Worker permission mode set to ${mode.toLowerCase()}\n`);
-			}
-		} else if (choice === "3") {
-			const cost = await ask(rl, "Session cost limit in USD", String(settings.safety.limits.sessionCostUsd));
-			if (cost !== null) {
-				const n = Number(cost);
-				if (Number.isFinite(n) && n > 0) {
+					io.ok(`Project imports ${next ? "trusted" : "untrusted"}`);
+				},
+			},
+			{
+				label: "Review external ACP agents",
+				hint: "runs the interop review",
+				run: async (io) => {
+					await runInteropReview(io.rl);
+				},
+			},
+			{
+				label: "Library remote sync",
+				hint: "toggle",
+				run: async (io) => {
+					let next = false;
 					updateSettings((draft) => {
-						draft.safety.limits.sessionCostUsd = n;
+						draft.integrations.library.sync = !draft.integrations.library.sync;
+						next = draft.integrations.library.sync;
 					});
-					out.write(`✓ Session cost limit set to $${n} USD\n`);
-				}
-			}
-		} else if (choice === "4") {
-			const budget = await ask(rl, "Turn tool calls budget", String(settings.safety.limits.chatToolCallsPerTurn));
-			if (budget !== null) {
-				const n = Number(budget);
-				if (Number.isFinite(n) && n > 0) {
-					updateSettings((draft) => {
-						draft.safety.limits.chatToolCallsPerTurn = Math.floor(n);
-					});
-					out.write(`✓ Turn tool budget set to ${Math.floor(n)}\n`);
-				}
-			}
-		} else if (choice === "5") {
-			updateSettings((draft) => {
-				draft.safety.review.enabled = !draft.safety.review.enabled;
-			});
-			out.write("✓ Review watchdog toggled\n");
-		}
-	}
+					io.ok(`Library remote sync ${onOff(next)}`);
+				},
+			},
+		],
+	},
+	{
+		id: "diagnostics",
+		title: "Diagnostics",
+		summary: "version, directories, doctor, raw settings",
+		aliases: ["doctor", "diag"],
+		fields: () => {
+			const dirs = resolveClioDirs();
+			const info = getVersionInfo();
+			return [
+				["Clio Coder", info.clio],
+				["Node.js", info.node],
+				["Platform", info.platform],
+				["Config dir", shortenPath(dirs.config)],
+				["Data dir", shortenPath(dirs.data)],
+				["State dir", shortenPath(dirs.state)],
+				["Cache dir", shortenPath(dirs.cache)],
+			];
+		},
+		actions: [
+			{
+				label: "Run doctor",
+				hint: "read-only health check",
+				run: async () => {
+					const { runDoctorCommand } = await import("./doctor.js");
+					await runDoctorCommand([]);
+				},
+			},
+			{
+				label: "Show raw settings.yaml",
+				run: async (io) => {
+					const file = settingsPath();
+					if (!existsSync(file)) {
+						io.out.write("  settings.yaml does not exist yet.\n");
+						return;
+					}
+					io.out.write(`\n--- ${shortenPath(file)} ---\n${readFileSync(file, "utf8")}--- end ---\n`);
+				},
+			},
+		],
+	},
+];
+
+/** A `ParsedArgs` with nothing set, for the target wizard called from a section. */
+function emptyArgs(): ParsedArgs {
+	return {
+		positional: [],
+		help: false,
+		list: false,
+		all: false,
+		interop: false,
+		json: false,
+		force: false,
+		gateway: false,
+		setOrchestrator: false,
+		setBackground: false,
+		setWorkerDefault: false,
+	};
 }
 
-async function runSectionPanesLayout(
-	rl: ReturnType<typeof createInterface>,
-	out: NodeJS.WritableStream = output,
+async function askList(
+	io: SectionIo,
+	label: string,
+	current: ReadonlyArray<string>,
+	apply: (values: string[]) => void,
 ): Promise<void> {
-	for (;;) {
-		const settings = readSettings();
-		renderSectionHeader("Panes & Layout", out);
-		out.write("●  Current Values:\n");
-		out.write(`   Panes Capability:      ${settings.interface.panes.enabled}\n`);
-		out.write(`   Startup Layout:        ${settings.interface.panes.layout}\n`);
-		out.write(`   TUI Mode:              ${settings.interface.mode}\n`);
-		out.write(`   Output Detail:         ${settings.interface.outputDetail}\n`);
-		out.write(`   Desktop Notifications: ${settings.interface.desktopNotifications ? "enabled" : "disabled"}\n`);
-		out.write(`   Git Commit Attribution: ${settings.integrations.git.commitAttribution ? "enabled" : "disabled"}\n`);
-		out.write("│\n");
-		out.write("   1. Change Panes Capability (off | auto | embedded)\n");
-		out.write("   2. Change Startup Layout (off | workers | cockpit)\n");
-		out.write("   3. Change TUI Mode (regular | fullscreen)\n");
-		out.write("   4. Change Output Detail (minimal | default | verbose)\n");
-		out.write("   5. Toggle Desktop Notifications\n");
-		out.write("   6. Toggle Git Commit Attribution\n");
-		out.write("   b. Back to main menu\n");
-
-		const choice = await ask(rl, "\nAction", "b");
-		if (choice === null || choice === "b" || choice === "back") break;
-		if (choice === "1") {
-			const val = await ask(rl, "Panes capability [off|auto|embedded]", settings.interface.panes.enabled);
-			if (val && ["off", "auto", "embedded"].includes(val.toLowerCase())) {
-				updateSettings((draft) => {
-					draft.interface.panes.enabled = val.toLowerCase() as PanesSettings["enabled"];
-				});
-				out.write(`✓ Panes capability set to ${val.toLowerCase()}\n`);
-			}
-		} else if (choice === "2") {
-			const val = await ask(rl, "Startup layout [off|workers|cockpit]", settings.interface.panes.layout);
-			if (val && ["off", "workers", "cockpit"].includes(val.toLowerCase())) {
-				updateSettings((draft) => {
-					draft.interface.panes.layout = val.toLowerCase() as PanesSettings["layout"];
-				});
-				out.write(`✓ Startup layout set to ${val.toLowerCase()}\n`);
-			}
-		} else if (choice === "3") {
-			const val = await ask(rl, "TUI mode [regular|fullscreen]", settings.interface.mode);
-			if (val && ["regular", "fullscreen"].includes(val.toLowerCase())) {
-				updateSettings((draft) => {
-					draft.interface.mode = val.toLowerCase() as TuiMode;
-				});
-				out.write(`✓ TUI mode set to ${val.toLowerCase()}\n`);
-			}
-		} else if (choice === "4") {
-			const val = await ask(rl, "Output detail [minimal|default|verbose]", settings.interface.outputDetail);
-			if (val && ["minimal", "default", "verbose"].includes(val.toLowerCase())) {
-				updateSettings((draft) => {
-					draft.interface.outputDetail = val.toLowerCase() as OutputVerbosity;
-				});
-				out.write(`✓ Output detail set to ${val.toLowerCase()}\n`);
-			}
-		} else if (choice === "5") {
-			updateSettings((draft) => {
-				draft.interface.desktopNotifications = !draft.interface.desktopNotifications;
-			});
-			out.write("✓ Desktop notifications toggled\n");
-		} else if (choice === "6") {
-			updateSettings((draft) => {
-				draft.integrations.git.commitAttribution = !draft.integrations.git.commitAttribution;
-			});
-			out.write("✓ Git commit attribution toggled\n");
-		}
-	}
+	const answer = await ask(io.rl, `${label} (comma-separated, blank clears)`, current.join(", "));
+	if (answer === null) return;
+	const values = answer
+		.split(",")
+		.map((entry) => entry.trim())
+		.filter((entry) => entry.length > 0);
+	apply(values);
+	io.ok(values.length === 0 ? `${label} cleared` : `${label} set to ${values.join(", ")}`);
 }
 
-async function runSectionSkillsExtensions(
+async function assignTarget(io: SectionIo, role: "chat" | "fleet"): Promise<void> {
+	const settings = readSettings();
+	const ids = settings.targets.map((target) => target.id);
+	if (ids.length === 0) {
+		io.out.write("  No targets registered yet. Add one first.\n");
+		return;
+	}
+	io.out.write(`  Registered: ${ids.join(", ")}\n`);
+	const currentTarget = role === "chat" ? settings.chat.target : settings.fleet.default.target;
+	const chosen = await ask(io.rl, `${role === "chat" ? "Chat" : "Fleet"} target id`, currentTarget ?? ids[0] ?? "");
+	if (chosen === null) return;
+	if (!ids.includes(chosen)) {
+		io.out.write(`  ${chosen} is not a registered target; nothing changed.\n`);
+		return;
+	}
+	const target = settings.targets.find((entry) => entry.id === chosen);
+	const model = await ask(io.rl, "Model (blank for the target default)", target?.defaultModel ?? "");
+	if (model === null) return;
+	updateSettings((draft) => {
+		if (role === "chat") {
+			draft.chat.target = chosen;
+			draft.chat.model = model.length > 0 ? model : null;
+		} else {
+			draft.fleet.default.target = chosen;
+			draft.fleet.default.model = model.length > 0 ? model : null;
+		}
+	});
+	io.ok(`${role === "chat" ? "Chat" : "Fleet"} target set to ${chosen}`);
+}
+
+/** The rail prefix the selector draws on, matching the presenter's. */
+function railPrefix(plain: boolean): string {
+	return plain ? "  " : `${chalk.cyan("│")}  `;
+}
+
+interface MenuEntry {
+	label: string;
+	hint?: string;
+}
+
+type MenuChoice = { kind: "index"; index: number } | { kind: "back" } | { kind: "quit" };
+
+/**
+ * Pick one entry, by arrow keys on a terminal and by number everywhere else.
+ * The numbered fallback is not a lesser path: it is what a recorded session, a
+ * pipe, and a dumb terminal get, and it accepts the same `b`/`q` tokens the rest
+ * of this CLI uses.
+ */
+async function pickEntry(
 	rl: ReturnType<typeof createInterface>,
-	out: NodeJS.WritableStream = output,
-): Promise<void> {
-	for (;;) {
-		const settings = readSettings();
-		renderSectionHeader("Skills & Extensions", out);
-		out.write("●  Current Values:\n");
-		out.write(
-			`   Trust Project Imports: ${settings.integrations.projectResources.trustProjectImports ? "trusted" : "untrusted"}\n`,
-		);
-		out.write(`   External ACP Agents:   ${settings.integrations.externalAgents.entries.length} registered\n`);
-		for (const agent of settings.integrations.externalAgents.entries) {
-			out.write(`     - ${agent.id} (command: ${agent.command}, governance: ${agent.toolGovernance ?? "default"})\n`);
-		}
-		out.write(`   Runtime Plugins:       ${settings.integrations.runtimePlugins.join(", ") || "(none)"}\n`);
-		out.write(`   Library Remote Sync:   ${settings.integrations.library.sync ? "enabled" : "disabled"}\n`);
-		out.write("│\n");
-		out.write("   1. Toggle Trust Project Imports\n");
-		out.write("   2. Review External ACP Agents (runs interop review)\n");
-		out.write("   3. Toggle Library Remote Sync\n");
-		out.write("   b. Back to main menu\n");
-
-		const choice = await ask(rl, "\nAction", "b");
-		if (choice === null || choice === "b" || choice === "back") break;
-		if (choice === "1") {
-			updateSettings((draft) => {
-				draft.integrations.projectResources.trustProjectImports = !draft.integrations.projectResources.trustProjectImports;
-			});
-			out.write("✓ Trust project imports toggled\n");
-		} else if (choice === "2") {
-			await runInteropReview(rl);
-		} else if (choice === "3") {
-			updateSettings((draft) => {
-				draft.integrations.library.sync = !draft.integrations.library.sync;
-			});
-			out.write("✓ Library remote sync toggled\n");
-		}
+	io: ConfigureStreams,
+	entries: ReadonlyArray<MenuEntry>,
+	backLabel: string,
+	plain: boolean,
+): Promise<MenuChoice> {
+	const out = io.out;
+	if (canSelect(io.in as NodeJS.ReadStream, out as NodeJS.WriteStream)) {
+		const result = await promptSelect({
+			choices: entries.map((entry, index) => ({
+				value: index,
+				label: entry.label,
+				...(entry.hint === undefined ? {} : { hint: entry.hint }),
+			})),
+			railPrefix: railPrefix(plain),
+			backLabel,
+			input: io.in as NodeJS.ReadStream,
+			output: out as NodeJS.WriteStream,
+		});
+		if (result.kind === "selected") return { kind: "index", index: result.value };
+		return result.kind === "quit" ? { kind: "quit" } : { kind: "back" };
 	}
+
+	const rail = railPrefix(plain);
+	entries.forEach((entry, index) => {
+		out.write(`${rail}${index + 1}. ${entry.label}${entry.hint === undefined ? "" : `  (${entry.hint})`}\n`);
+	});
+	out.write(`${rail}b. ${backLabel}\n${rail}q. Quit\n`);
+	const answer = await ask(rl, "\nSelection", "b");
+	if (answer === null) return { kind: "quit" };
+	const trimmed = answer.trim().toLowerCase();
+	if (trimmed === "b" || trimmed === "back" || trimmed.length === 0) return { kind: "back" };
+	if (trimmed === "q" || trimmed === "quit") return { kind: "quit" };
+	const index = Number.parseInt(trimmed, 10) - 1;
+	if (Number.isInteger(index) && index >= 0 && index < entries.length) return { kind: "index", index };
+	out.write(`${rail}Not one of the choices: ${answer}\n`);
+	return { kind: "back" };
 }
 
-async function runSectionDiagnostics(
+/** Header, source file, and current values for one screen. */
+function renderSection(spec: SectionSpec, out: NodeJS.WritableStream): LifecyclePresenter {
+	const presenter = createLifecyclePresenter({ stream: out });
+	presenter.header(spec.title, "configure");
+	presenter.note(`Source: ${shortenPath(settingsPath())}`);
+	presenter.fields(spec.fields());
+	return presenter;
+}
+
+/** Show one screen and stay on it until the operator leaves or quits. */
+async function runSection(
 	rl: ReturnType<typeof createInterface>,
-	out: NodeJS.WritableStream = output,
-): Promise<void> {
+	streams: ConfigureStreams,
+	spec: SectionSpec,
+	backLabel: string,
+): Promise<"back" | "quit"> {
 	for (;;) {
-		const dirs = resolveClioDirs();
-		const info = getVersionInfo();
-		renderSectionHeader("Diagnostics", out);
-		out.write("●  System Information:\n");
-		out.write(`   Clio Coder Version:    ${info.clio}\n`);
-		out.write(`   Node.js Version:       ${info.node}\n`);
-		out.write(`   Platform:              ${info.platform}\n`);
-		out.write(`   Config Directory:      ${shortenPath(dirs.config)}\n`);
-		out.write(`   State Directory:       ${shortenPath(dirs.state)}\n`);
-		out.write(`   Data Directory:        ${shortenPath(dirs.data)}\n`);
-		out.write(`   Cache Directory:       ${shortenPath(dirs.cache)}\n`);
-		out.write("│\n");
-		out.write("   1. Run Doctor Check\n");
-		out.write("   2. Display raw settings.yaml contents\n");
-		out.write("   b. Back to main menu\n");
-
-		const choice = await ask(rl, "\nAction", "b");
-		if (choice === null || choice === "b" || choice === "back") break;
-		if (choice === "1") {
-			const { runDoctorCommand } = await import("./doctor.js");
-			await runDoctorCommand([]);
-		} else if (choice === "2") {
-			const settingsFile = settingsPath();
-			if (existsSync(settingsFile)) {
-				out.write(`\n--- ${shortenPath(settingsFile)} ---\n`);
-				out.write(readFileSync(settingsFile, "utf8"));
-				out.write("-----------------------------------\n");
-			} else {
-				out.write("settings.yaml does not exist yet.\n");
-			}
-		}
+		const presenter = renderSection(spec, streams.out);
+		const io: SectionIo = {
+			rl,
+			out: streams.out,
+			ok: (text) => {
+				presenter.completedStep(text);
+			},
+		};
+		presenter.blank();
+		const choice = await pickEntry(rl, streams, spec.actions, backLabel, presenter.isPlain());
+		if (choice.kind !== "index") return choice.kind;
+		const action = spec.actions[choice.index];
+		if (action !== undefined) await action.run(io);
 	}
 }
 
+/** The top-level screen. Leaving it is an ordinary exit, not a cancellation. */
 async function runConfigSectionsMenu(
 	rl: ReturnType<typeof createInterface>,
-	out: NodeJS.WritableStream = output,
+	streams: ConfigureStreams,
 ): Promise<number> {
 	for (;;) {
-		const confPath = shortenPath(settingsPath());
-		out.write(`\n┌  Clio Coder Configuration\n│  Source: ${confPath}\n│\n`);
-		out.write("●  Configure runtime sections:\n│\n");
-		out.write("   1. Targets & Auth          (providers, endpoints, credentials, models)\n");
-		out.write("   2. Models & Thinking       (default model, thinking level, model aliases)\n");
-		out.write("   3. Chat Defaults           (streaming, terminal progress, compaction)\n");
-		out.write("   4. Fleet                   (concurrency, retry limits, worker timeouts)\n");
-		out.write("   5. Permissions & Autonomy  (autonomy level, worker permissions, cost limits)\n");
-		out.write("   6. Panes & Layout          (terminal panes, dock layout, TUI display mode)\n");
-		out.write("   7. Skills & Extensions     (project skills, external ACP agents, plugins)\n");
-		out.write("   8. Diagnostics             (self-test, doctor check, raw settings)\n");
-		out.write("│\n");
-		out.write("   q. Quit / Exit\n");
-
-		const answer = await ask(rl, "\nSelection", "1");
-		if (answer === null || answer.toLowerCase() === "q" || answer.toLowerCase() === "quit") {
-			printError("configuration cancelled");
-			return 130;
-		}
-		const trimmed = answer.trim();
-		if (trimmed === "1") {
-			await runSectionTargetsAuth(rl, out);
-		} else if (trimmed === "2") {
-			await runSectionModelsThinking(rl, out);
-		} else if (trimmed === "3") {
-			await runSectionChatDefaults(rl, out);
-		} else if (trimmed === "4") {
-			await runSectionFleet(rl, out);
-		} else if (trimmed === "5") {
-			await runSectionPermissionsAutonomy(rl, out);
-		} else if (trimmed === "6") {
-			await runSectionPanesLayout(rl, out);
-		} else if (trimmed === "7") {
-			await runSectionSkillsExtensions(rl, out);
-		} else if (trimmed === "8") {
-			await runSectionDiagnostics(rl, out);
-		} else {
-			process.stderr.write(`invalid selection: ${answer}\n`);
-		}
+		const presenter = createLifecyclePresenter({ stream: streams.out });
+		presenter.header("Clio Coder Configuration", "configure");
+		presenter.note(`Source: ${shortenPath(settingsPath())}`);
+		presenter.blank();
+		const choice = await pickEntry(
+			rl,
+			streams,
+			SECTIONS.map((section) => ({ label: section.title, hint: section.summary })),
+			"quit",
+			presenter.isPlain(),
+		);
+		// Escape and q both leave the top screen, and leaving a settings menu you
+		// only looked at is not a failure: this used to exit 130 and print
+		// "error: configuration cancelled" over a run that did exactly what was
+		// asked. The first-run wizard still exits 130, because there a cancel
+		// really does leave Clio unconfigured.
+		if (choice.kind !== "index") return 0;
+		const spec = SECTIONS[choice.index];
+		if (spec === undefined) continue;
+		if ((await runSection(rl, streams, spec, "back")) === "quit") return 0;
 	}
+}
+
+/** Resolve a `--section` value to exactly one screen, by id or listed alias. */
+function findSection(name: string): SectionSpec | undefined {
+	const wanted = name.trim().toLowerCase();
+	return SECTIONS.find((section) => section.id === wanted || (section.aliases ?? []).includes(wanted));
+}
+
+const SECTION_IDS: ReadonlyArray<string> = SECTIONS.map((section) => section.id);
+
+/** The streams this run reads from and writes to, which the tests replace. */
+interface ConfigureStreams {
+	in: NodeJS.ReadableStream;
+	out: NodeJS.WritableStream;
 }
 
 async function runInteractive(
 	rl: ReturnType<typeof createInterface>,
 	preselectedRuntime: RuntimeDescriptor | null,
 	defaults: ParsedArgs,
-	out: NodeJS.WritableStream = output,
+	streams: ConfigureStreams,
 ): Promise<number> {
 	if (preselectedRuntime) {
 		return await runTargetSetupInteractive(rl, preselectedRuntime, defaults);
 	}
-	if (defaults.section) {
-		const s = defaults.section.toLowerCase();
-		if (s.includes("target") || s.includes("auth")) await runSectionTargetsAuth(rl, out);
-		else if (s.includes("model") || s.includes("thinking")) await runSectionModelsThinking(rl, out);
-		else if (s.includes("chat")) await runSectionChatDefaults(rl, out);
-		else if (s.includes("fleet")) await runSectionFleet(rl, out);
-		else if (s.includes("perm") || s.includes("autonomy")) await runSectionPermissionsAutonomy(rl, out);
-		else if (s.includes("pane") || s.includes("layout")) await runSectionPanesLayout(rl, out);
-		else if (s.includes("skill") || s.includes("ext")) await runSectionSkillsExtensions(rl, out);
-		else if (s.includes("diag") || s.includes("doctor")) await runSectionDiagnostics(rl, out);
-		else {
-			printError(`unknown section: ${defaults.section}`);
+
+	if (defaults.section !== undefined) {
+		const spec = findSection(defaults.section);
+		if (spec === undefined) {
+			printError(`unknown section: ${defaults.section}. Sections: ${SECTION_IDS.join(", ")}`);
 			return 2;
 		}
+		// Without a terminal there is nobody to answer, and printing a prompt into
+		// a pipe is a dead end that reads as a hang. The screen is still worth
+		// showing, so a scripted `configure --section fleet` is a read of that
+		// section rather than a refusal.
+		if ((streams.in as { isTTY?: boolean }).isTTY !== true) {
+			renderSection(spec, streams.out).done("Done");
+			return 0;
+		}
+		await runSection(rl, streams, spec, "quit");
 		return 0;
 	}
 
-	const settings = readSettings();
-	if (settings.targets.length === 0) {
+	if (readSettings().targets.length === 0) {
 		const runtime = await pickRuntimeViaCategory(rl);
 		if (!runtime) {
 			printError("configuration cancelled");
@@ -2181,7 +2496,7 @@ async function runInteractive(
 		return await runTargetSetupInteractive(rl, runtime, defaults);
 	}
 
-	return await runConfigSectionsMenu(rl, out);
+	return await runConfigSectionsMenu(rl, streams);
 }
 
 export async function runConfigureCommand(
@@ -2281,7 +2596,7 @@ export async function runConfigureCommand(
 
 	const rl = createInterface({ input: inStream, output: outStream });
 	try {
-		return await runInteractive(rl, runtime, args, outStream);
+		return await runInteractive(rl, runtime, args, { in: inStream, out: outStream });
 	} catch (err) {
 		printError(err instanceof Error ? err.message : String(err));
 		return 1;
