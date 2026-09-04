@@ -143,9 +143,22 @@ interface LiteLLMCatalog {
 	modelStates: Record<string, ProbeModelStatus>;
 	/** Physical deployment behind each alias, for display. */
 	deployments: Record<string, { model: string; apiBase?: string }>;
+	/** Whether the empty catalog is specifically because the gateway rejected the key. */
+	authFailed: boolean;
 }
 
-const EMPTY_CATALOG: LiteLLMCatalog = { models: [], modelCapabilities: {}, modelStates: {}, deployments: {} };
+const EMPTY_CATALOG: LiteLLMCatalog = {
+	models: [],
+	modelCapabilities: {},
+	modelStates: {},
+	deployments: {},
+	authFailed: false,
+};
+
+/** Whether a failed probe leg failed specifically on the credential, not on reachability. */
+function isAuthError(leg: { ok: boolean; error?: string }): boolean {
+	return !leg.ok && /^HTTP 40[13]\b/u.test(leg.error ?? "");
+}
 
 /**
  * Read the catalog from `/v1/model/info`, falling back to `/v1/models`.
@@ -163,7 +176,13 @@ async function fetchCatalog(base: string, ctx: ProbeContext, headers: Record<str
 		: probeJson<LiteLLMModelInfoResponse>(detailOpts));
 
 	if (detail.ok && Array.isArray(detail.data?.data)) {
-		const catalog: LiteLLMCatalog = { models: [], modelCapabilities: {}, modelStates: {}, deployments: {} };
+		const catalog: LiteLLMCatalog = {
+			models: [],
+			modelCapabilities: {},
+			modelStates: {},
+			deployments: {},
+			authFailed: false,
+		};
 		for (const row of detail.data.data) {
 			if (typeof row?.model_name !== "string" || row.model_name.length === 0) continue;
 			const alias = row.model_name;
@@ -184,16 +203,19 @@ async function fetchCatalog(base: string, ctx: ProbeContext, headers: Record<str
 		}
 		if (catalog.models.length > 0) return catalog;
 	}
+	const detailAuthFailed = isAuthError(detail);
 
 	const listOpts = { url: `${base}/v1/models`, timeoutMs: ctx.httpTimeoutMs, headers } as const;
 	const list = await (ctx.signal
 		? probeJson<LiteLLMModelsResponse>({ ...listOpts, signal: ctx.signal })
 		: probeJson<LiteLLMModelsResponse>(listOpts));
-	if (!list.ok || !Array.isArray(list.data?.data)) return EMPTY_CATALOG;
+	if (!list.ok || !Array.isArray(list.data?.data)) {
+		return { ...EMPTY_CATALOG, authFailed: detailAuthFailed || isAuthError(list) };
+	}
 	const models = list.data.data
 		.map((row) => (typeof row?.id === "string" ? row.id : null))
 		.filter((id): id is string => id !== null && id.length > 0);
-	return { models, modelCapabilities: {}, modelStates: {}, deployments: {} };
+	return { models, modelCapabilities: {}, modelStates: {}, deployments: {}, authFailed: false };
 }
 
 const litellmRuntime: RuntimeDescriptor = {
@@ -226,8 +248,11 @@ const litellmRuntime: RuntimeDescriptor = {
 		if (catalog.models.length === 0) {
 			const result: ProbeResult = {
 				ok: false,
-				error: "gateway is live but served no model catalog; check the target's API key",
+				error: catalog.authFailed
+					? "gateway rejected the key"
+					: "gateway is live but served no model catalog; check the target's API key",
 			};
+			if (catalog.authFailed) result.authFailed = true;
 			if (live.latencyMs !== undefined) result.latencyMs = live.latencyMs;
 			return result;
 		}

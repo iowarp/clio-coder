@@ -93,6 +93,8 @@ export interface ProbeResult {
 	ok: boolean;
 	latencyMs?: number;
 	error?: string;
+	/** Set when `error` is specifically the server rejecting the credential, not a reachability failure. */
+	authFailed?: boolean;
 	serverVersion?: string;
 	models?: string[];
 	/** Probe-only per-model load state when the runtime exposes it. */

@@ -226,6 +226,60 @@ async function modelServer(): Promise<{ url: string; close: () => Promise<void> 
 	};
 }
 
+/**
+ * A LiteLLM gateway: alive on the unauthenticated liveness check, but its
+ * catalog endpoints (`/v1/model/info`, then the `/v1/models` fallback) answer
+ * 401 without the bearer token and a 3-model catalog with it. This is the
+ * shape the onboarding bug reproduces against: a gateway that is up, but
+ * whose model list depends on a credential the wizard did not have yet when
+ * it probed.
+ */
+async function litellmServer(token: string): Promise<{ url: string; close: () => Promise<void> }> {
+	const server: Server = createServer((req, res) => {
+		if (req.url?.endsWith("/health/liveliness")) {
+			res.writeHead(200, { "content-type": "application/json" });
+			res.end(JSON.stringify({ status: "healthy" }));
+			return;
+		}
+		const authorized = req.headers.authorization === `Bearer ${token}`;
+		if (req.url?.endsWith("/v1/model/info")) {
+			if (!authorized) {
+				res.writeHead(401, { "content-type": "application/json" });
+				res.end(JSON.stringify({ error: "unauthorized" }));
+				return;
+			}
+			res.writeHead(200, { "content-type": "application/json" });
+			res.end(
+				JSON.stringify({
+					data: [
+						{ model_name: "gateway-a", litellm_params: { model: "upstream-a" }, model_info: {} },
+						{ model_name: "gateway-b", litellm_params: { model: "upstream-b" }, model_info: {} },
+						{ model_name: "gateway-c", litellm_params: { model: "upstream-c" }, model_info: {} },
+					],
+				}),
+			);
+			return;
+		}
+		if (req.url?.endsWith("/v1/models")) {
+			if (!authorized) {
+				res.writeHead(401, { "content-type": "application/json" });
+				res.end(JSON.stringify({ error: "unauthorized" }));
+				return;
+			}
+			res.writeHead(200, { "content-type": "application/json" });
+			res.end(JSON.stringify({ data: [{ id: "gateway-a" }, { id: "gateway-b" }, { id: "gateway-c" }] }));
+			return;
+		}
+		res.writeHead(404).end();
+	});
+	await new Promise<void>((resolve) => server.listen(0, "127.0.0.1", resolve));
+	const { port } = server.address() as AddressInfo;
+	return {
+		url: `http://127.0.0.1:${port}`,
+		close: () => new Promise<void>((resolve) => server.close(() => resolve())),
+	};
+}
+
 const ESC = String.fromCharCode(27);
 const DOWN = `${ESC}[B`;
 const ENTER = "\r";
@@ -368,8 +422,8 @@ describe("contracts/configure-onboarding", () => {
 				{ waitFor: "How will you connect Clio to a model?", keys: [DOWN, ENTER] },
 				{ waitFor: "Which runtime?", keys: [...stepsDownToRuntime("openai-compat"), ENTER] },
 				{ waitFor: "Target id", keys: [CLEAR_LINE, ...`wizard-target`.split(""), ENTER] },
-				{ waitFor: "Where is the server?", keys: [CLEAR_LINE, ...server.url.split(""), ENTER] },
 				{ waitFor: "How should Clio get the API key?", keys: [ENTER] },
+				{ waitFor: "Where is the server?", keys: [CLEAR_LINE, ...server.url.split(""), ENTER] },
 				{ waitFor: "Which model?", keys: [DOWN, ENTER] },
 				{ waitFor: "How hard should it think?", keys: [DOWN, ENTER] },
 				{ waitFor: "Delegate to any of these?", keys: [ENTER], optional: true },
@@ -422,8 +476,8 @@ describe("contracts/configure-onboarding", () => {
 				{ waitFor: "How will you connect Clio to a model?", keys: [DOWN, ENTER] },
 				{ waitFor: "Which runtime?", keys: [...stepsDownToRuntime("openai-compat"), ENTER] },
 				{ waitFor: "Target id", keys: [CLEAR_LINE, ...`peer-target`.split(""), ENTER] },
-				{ waitFor: "Where is the server?", keys: [CLEAR_LINE, ...server.url.split(""), ENTER] },
 				{ waitFor: "How should Clio get the API key?", keys: [ENTER] },
+				{ waitFor: "Where is the server?", keys: [CLEAR_LINE, ...server.url.split(""), ENTER] },
 				{ waitFor: "Which model?", keys: [ENTER] },
 				{ waitFor: "How hard should it think?", keys: [ENTER] },
 				// Space ticks the row, enter confirms the whole list at once.
@@ -516,6 +570,85 @@ describe("contracts/configure-onboarding", () => {
 			match(res.stdout, /Selection \[1\]/u);
 			ok(!res.stdout.includes("Welcome to Clio Coder"), "the arrow-key wizard must not open on a pipe");
 		} finally {
+			testEnv.cleanup();
+		}
+	});
+});
+
+/**
+ * The bug this covers: `litellm` needs a key to serve a catalog, and the URL
+ * step used to probe reachability before the wizard had asked for one, so an
+ * authenticated gateway read as unreachable and the model step had nothing to
+ * offer. Both cases below drive the real keypress wizard against a mock
+ * gateway that only answers its catalog endpoints with a bearer token.
+ */
+describe("contracts/configure-onboarding: credential before reachability", () => {
+	it("asks for the key before probing, and the env-var path reaches the gateway's catalog", async () => {
+		const testEnv = unconfiguredEnv();
+		const token = "sk-test-litellm-token";
+		const envVar = "CLIO_TEST_LITELLM_TOKEN";
+		const server = await litellmServer(token);
+		const env = { ...testEnv.env, [envVar]: token };
+		try {
+			const result = await runWizard(env, [
+				{ waitFor: "How will you connect Clio to a model?", keys: [DOWN, ENTER] },
+				{ waitFor: "Which runtime?", keys: [...stepsDownToRuntime("litellm"), ENTER] },
+				{ waitFor: "Target id", keys: [CLEAR_LINE, ...`litellm-env-target`.split(""), ENTER] },
+				// Skip's default highlight wraps one DOWN to "Environment variable".
+				{ waitFor: "How should Clio get the API key?", keys: [DOWN, ENTER] },
+				{ waitFor: "Which environment variable?", keys: [CLEAR_LINE, ...envVar.split(""), ENTER] },
+				{ waitFor: "Where is the server?", keys: [CLEAR_LINE, ...server.url.split(""), ENTER] },
+				{ waitFor: "Which model?", keys: [ENTER] },
+				{ waitFor: "Delegate to any of these?", keys: [ENTER], optional: true },
+			]);
+			strictEqual(result.code, 0, `${result.stderr}\n${plainText(result.transcript())}`);
+
+			const screen = plainText(result.transcript());
+			const credAt = screen.indexOf("How should Clio get the API key?");
+			const urlAt = screen.indexOf("Where is the server?");
+			ok(credAt >= 0 && urlAt > credAt, `credential step must come before the URL step:\n${screen}`);
+			ok(screen.includes("reachable, 3 models"), `the probe must succeed once it has the key:\n${screen}`);
+			ok(screen.includes(`$${envVar}`), `the credential rail row must name the env var:\n${screen}`);
+			ok(!screen.includes("served no model catalog"), `must not report the pre-credential failure:\n${screen}`);
+			ok(!screen.includes("not reachable"), `an authenticated gateway must not read as unreachable:\n${screen}`);
+
+			const settings = readFileSync(testEnv.settingsFile, "utf8");
+			match(settings, /id: litellm-env-target/u);
+			match(settings, /runtime: litellm/u);
+			match(settings, /defaultModel: gateway-a/u, "the model picker must show the gateway's own catalog");
+			match(settings, new RegExp(`apiKeyEnvVar: ${envVar}`, "u"));
+		} finally {
+			await server.close();
+			testEnv.cleanup();
+		}
+	});
+
+	it("reports a rejected key rather than an unreachable gateway, and still completes", async () => {
+		const testEnv = unconfiguredEnv();
+		const server = await litellmServer("sk-a-key-this-run-never-sends");
+		try {
+			const result = await runWizard(testEnv.env, [
+				{ waitFor: "How will you connect Clio to a model?", keys: [DOWN, ENTER] },
+				{ waitFor: "Which runtime?", keys: [...stepsDownToRuntime("litellm"), ENTER] },
+				{ waitFor: "Target id", keys: [CLEAR_LINE, ...`litellm-nokey-target`.split(""), ENTER] },
+				// "No key" is already the default highlight for a fresh target.
+				{ waitFor: "How should Clio get the API key?", keys: [ENTER] },
+				{ waitFor: "Where is the server?", keys: [CLEAR_LINE, ...server.url.split(""), ENTER] },
+				{ waitFor: "Which model?", keys: [CLEAR_LINE, ...`manual-model`.split(""), ENTER] },
+				{ waitFor: "Delegate to any of these?", keys: [ENTER], optional: true },
+			]);
+			strictEqual(result.code, 0, `${result.stderr}\n${plainText(result.transcript())}`);
+
+			const screen = plainText(result.transcript());
+			ok(screen.includes("rejected the key"), `an auth failure must say so plainly:\n${screen}`);
+			ok(!screen.includes("served no model catalog"), `the generic message must not survive an auth failure:\n${screen}`);
+
+			const settings = readFileSync(testEnv.settingsFile, "utf8");
+			match(settings, /id: litellm-nokey-target/u);
+			match(settings, /runtime: litellm/u);
+			match(settings, /defaultModel: manual-model/u, "declining a key still lets the wizard finish");
+		} finally {
+			await server.close();
 			testEnv.cleanup();
 		}
 	});

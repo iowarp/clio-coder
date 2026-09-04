@@ -331,11 +331,17 @@ async function reportReachability(
 	url: string,
 ): Promise<void> {
 	const draft = draftDescriptor(answers, runtime, false);
-	const probe = await runtimeProbe(runtime, draft);
+	// A freshly typed "store the key" answer is not on disk yet (that write
+	// happens at the end of the wizard), so it has to ride along as an explicit
+	// token the same way the model step already does; env and stored-from-before
+	// credentials resolve on their own through the descriptor's auth fields.
+	const probe = await runtimeProbe(runtime, draft, answers.apiKeyLiteral);
 	if (probe !== null) {
 		if (probe.ok) {
 			const readings = probeReadings(probe);
 			wizard.presenter.step(`reachable, ${readings.length > 0 ? readings.join(", ") : "no model list offered"}`);
+		} else if (probe.authFailed) {
+			wizard.presenter.warn("rejected the key");
 		} else {
 			wizard.presenter.warn(`not reachable, you can fix this later: ${probe.error ?? "no reply"}`);
 		}
@@ -702,14 +708,20 @@ const PEERS_STEP: Step = {
 	},
 };
 
+// Credential steps come before the URL step: a runtime that needs or may need a
+// key (litellm, every cloud runtime, keyed openai-compat) has to have one in
+// hand before the URL step probes reachability, or the probe reads as
+// unreachable when the gateway is live and only the key was missing. A runtime
+// with no credential at all skips both credential steps and keeps this order
+// exactly as it was.
 const STEPS: ReadonlyArray<Step> = [
 	CATEGORY_STEP,
 	RUNTIME_STEP,
 	TARGET_ID_STEP,
-	URL_STEP,
-	DETECTED_RUNTIME_STEP,
 	CREDENTIAL_STEP,
 	CREDENTIAL_VALUE_STEP,
+	URL_STEP,
+	DETECTED_RUNTIME_STEP,
 	MODEL_STEP,
 	THINKING_STEP,
 	PEERS_STEP,
