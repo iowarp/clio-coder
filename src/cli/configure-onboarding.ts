@@ -687,21 +687,18 @@ const PEERS_STEP: Step = {
 	id: "peers",
 	applies: () => true,
 	run: async (wizard, answers) => {
-		const rl = createInterface({ input: wizard.streams.in, output: wizard.streams.out });
-		try {
-			const outcome = await reviewInteropAgents({
-				rl,
-				streams: wizard.streams,
-				presenter: wizard.presenter,
-				rail: wizard.rail,
-				quiet: true,
-			});
-			if (outcome.back) return "back";
-			answers.wiredPeers = outcome.wired;
-			return "next";
-		} finally {
-			rl.close();
-		}
+		// No readline: the multi-select reads keys directly, and an interface left
+		// open would echo them over the frame it is drawing.
+		const outcome = await reviewInteropAgents({
+			rl: null,
+			streams: wizard.streams,
+			presenter: wizard.presenter,
+			rail: wizard.rail,
+			quiet: true,
+		});
+		if (outcome.back) return "back";
+		answers.wiredPeers = outcome.wired;
+		return "next";
 	},
 };
 

@@ -343,6 +343,22 @@ function plainText(transcript: string): string {
 	return transcript.replace(new RegExp(`${ESC}\\[[0-9;?]*[A-Za-z]`, "gu"), "");
 }
 
+/**
+ * Put one detectable coding agent on PATH.
+ *
+ * Interop detection resolves binaries by name, so a stub that answers
+ * `--version` is a real detection as far as the review is concerned, and it is
+ * the only way to reach the delegation step without depending on what the
+ * developer happens to have installed.
+ */
+function fakeAgentOnPath(root: string, binary: string): string {
+	const binDir = join(root, "fake-bin");
+	mkdirSync(binDir, { recursive: true });
+	const file = join(binDir, binary);
+	writeFileSync(file, "#!/bin/sh\necho '1.2.3'\n", { encoding: "utf8", mode: 0o755 });
+	return binDir;
+}
+
 describe("contracts/configure-onboarding", () => {
 	it("takes a fresh home through the wizard on arrow keys alone and writes what it says it wrote", async () => {
 		const testEnv = unconfiguredEnv();
@@ -391,6 +407,46 @@ describe("contracts/configure-onboarding", () => {
 			// openai-compat reports nothing about reasoning, so the thinking answer
 			// is also what records whether the model has it.
 			match(settings, /reasoning: true/u);
+		} finally {
+			await server.close();
+			testEnv.cleanup();
+		}
+	});
+
+	it("offers the detected delegation peers as one list instead of a y/N each", async () => {
+		const testEnv = unconfiguredEnv();
+		const server = await modelServer();
+		const env = { ...testEnv.env, PATH: fakeAgentOnPath(testEnv.root, "opencode") };
+		try {
+			const result = await runWizard(env, [
+				{ waitFor: "How will you connect Clio to a model?", keys: [DOWN, ENTER] },
+				{ waitFor: "Which runtime?", keys: [...stepsDownToRuntime("openai-compat"), ENTER] },
+				{ waitFor: "Target id", keys: [CLEAR_LINE, ...`peer-target`.split(""), ENTER] },
+				{ waitFor: "Where is the server?", keys: [CLEAR_LINE, ...server.url.split(""), ENTER] },
+				{ waitFor: "How should Clio get the API key?", keys: [ENTER] },
+				{ waitFor: "Which model?", keys: [ENTER] },
+				{ waitFor: "How hard should it think?", keys: [ENTER] },
+				// Space ticks the row, enter confirms the whole list at once.
+				{ waitFor: "Delegate to any of these?", keys: [" ", ENTER] },
+			]);
+			strictEqual(result.code, 0, `${result.stderr}\n${plainText(result.transcript())}`);
+
+			const screen = plainText(result.transcript());
+			ok(screen.includes("space toggle"), `the list must say how to tick a row:\n${screen}`);
+			ok(screen.includes("OpenCode"), `the detected agent is missing:\n${screen}`);
+			ok(!/\[y\/N\]/u.test(screen), `a per-agent yes/no question survived:\n${screen}`);
+			// The paragraph each proposal used to carry said the same two facts every
+			// time. They are stated once above the list now, and the row carries what
+			// actually differs.
+			ok(
+				!screen.includes("is installed and not configured as a delegation agent"),
+				`the per-agent paragraph survived:\n${screen}`,
+			);
+			ok(screen.includes("delegation agent opencode added"), `the wired peer is not in the results:\n${screen}`);
+
+			const settings = readFileSync(testEnv.settingsFile, "utf8");
+			match(settings, /id: opencode/u);
+			match(settings, /toolGovernance: clio-coder-policy/u);
 		} finally {
 			await server.close();
 			testEnv.cleanup();
