@@ -194,6 +194,10 @@ export interface AcpDelegationUsage {
 	cacheReadTokens: number;
 	cacheWriteTokens: number;
 	reasoningTokens: number;
+	/** Peer-reported total when present, otherwise input+output+cacheRead+cacheWrite, matching the ACP server side. */
+	totalTokens: number;
+	/** Sum of the peer's `usage.cost.total`; stays 0 when the peer reports no cost. */
+	costUsd: number;
 }
 
 export interface AcpDelegationResult {

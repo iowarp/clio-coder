@@ -134,13 +134,15 @@ function flattenPrompt(input: AcpDelegationRunInput): string {
 	return parts.join("\n\n");
 }
 
-function emptyUsage(): AcpDelegationUsage {
+export function emptyUsage(): AcpDelegationUsage {
 	return {
 		inputTokens: 0,
 		outputTokens: 0,
 		cacheReadTokens: 0,
 		cacheWriteTokens: 0,
 		reasoningTokens: 0,
+		totalTokens: 0,
+		costUsd: 0,
 	};
 }
 
@@ -148,13 +150,29 @@ function finite(value: unknown): number {
 	return typeof value === "number" && Number.isFinite(value) && value > 0 ? value : 0;
 }
 
-function mergeUsage(into: AcpDelegationUsage, raw: unknown): void {
+/** Same field the ACP server side and `sumRunUsage` read for a dollar figure; cost is never re-derived here. */
+function costTotal(raw: Record<string, unknown>): number {
+	const cost = raw.cost;
+	return isRecord(cost) ? finite(cost.total) : 0;
+}
+
+export function mergeUsage(into: AcpDelegationUsage, raw: unknown): void {
 	if (!isRecord(raw)) return;
-	into.inputTokens += finite(raw.input) + finite(raw.inputTokens) + finite(raw.input_tokens);
-	into.outputTokens += finite(raw.output) + finite(raw.outputTokens) + finite(raw.output_tokens);
-	into.cacheReadTokens += finite(raw.cacheRead) + finite(raw.cacheReadTokens) + finite(raw.cache_read_tokens);
-	into.cacheWriteTokens += finite(raw.cacheWrite) + finite(raw.cacheWriteTokens) + finite(raw.cache_write_tokens);
+	const input = finite(raw.input) + finite(raw.inputTokens) + finite(raw.input_tokens);
+	const output = finite(raw.output) + finite(raw.outputTokens) + finite(raw.output_tokens);
+	const cacheRead = finite(raw.cacheRead) + finite(raw.cacheReadTokens) + finite(raw.cache_read_tokens);
+	const cacheWrite = finite(raw.cacheWrite) + finite(raw.cacheWriteTokens) + finite(raw.cache_write_tokens);
+	into.inputTokens += input;
+	into.outputTokens += output;
+	into.cacheReadTokens += cacheRead;
+	into.cacheWriteTokens += cacheWrite;
 	into.reasoningTokens += finite(raw.reasoning) + finite(raw.reasoningTokens) + finite(raw.reasoning_tokens);
+	// Same rule as the ACP server accumulator: prefer the peer's explicit total,
+	// otherwise sum the four billed categories (reasoning excluded, since a peer
+	// that reports it separately still counts it inside output).
+	const explicitTotal = finite(raw.totalTokens) + finite(raw.total_tokens);
+	into.totalTokens += explicitTotal > 0 ? explicitTotal : input + output + cacheRead + cacheWrite;
+	into.costUsd += costTotal(raw);
 }
 
 function errorMessage(value: unknown): string {
