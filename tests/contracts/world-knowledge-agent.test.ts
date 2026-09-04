@@ -1,4 +1,4 @@
-import { deepStrictEqual, equal, match, ok } from "node:assert/strict";
+import { deepStrictEqual, equal, match, ok, throws } from "node:assert/strict";
 import { describe, it } from "node:test";
 
 import { renderFleetPromptSection } from "../../src/domains/agents/catalog.js";
@@ -12,7 +12,11 @@ import {
 	formatEffectiveBudget,
 	resolveToolBudgetEnvelope,
 } from "../../src/domains/dispatch/budget-envelope.js";
-import { effectiveWorkerAutonomy } from "../../src/domains/dispatch/extension.js";
+import {
+	assertWorkerBudgetEnforceable,
+	budgetEnforcementForRuntime,
+	effectiveWorkerAutonomy,
+} from "../../src/domains/dispatch/extension.js";
 
 function worldResult(discovery: "performed" | "caller-supplied-only" | "unavailable") {
 	return JSON.stringify({
@@ -103,6 +107,23 @@ describe("world-knowledge agent contract", () => {
 		equal(native.enforcement.classification, "native-per-tool");
 		equal(native.enforcement.perTool, "enforced");
 		match(formatEffectiveBudget(native), /native per-tool enforced/u);
+
+		const externalLoop = {
+			tools: "externally-governed-unobserved",
+			network: "externally-governed-unobserved",
+			budget: "external-one-shot",
+			generatingRetry: "forbidden",
+			modelCatalog: "live-authoritative",
+		} as const;
+		equal(budgetEnforcementForRuntime({ kind: "http" }), "native-per-tool");
+		equal(budgetEnforcementForRuntime({ kind: "sdk" }), "native-per-tool");
+		equal(budgetEnforcementForRuntime({ kind: "subprocess" }), "external-one-shot");
+		assertWorkerBudgetEnforceable({ id: "antigravity-code", kind: "subprocess", externalAgentLoop: externalLoop }, true);
+		assertWorkerBudgetEnforceable({ id: "claude-code", kind: "subprocess" }, false);
+		throws(
+			() => assertWorkerBudgetEnforceable({ id: "claude-code", kind: "subprocess" }, true),
+			/cannot enforce an explicit dispatch budget/u,
+		);
 
 		const external = resolveToolBudgetEnvelope({ ...input, hasReadTool: false, enforcement: "external-one-shot" });
 		equal(external.enforcement.classification, "external-one-shot");
