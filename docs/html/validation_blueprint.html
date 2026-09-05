@@ -137,10 +137,7 @@ checks:
 <td align="left">Unit in the Last Place. Measures floating-point representation steps.</td>
 </tr>
 </tbody></table>
-<blockquote>
-<p>[!NOTE]
-Clio core does not currently execute tolerance comparisons and does not apply a default numerical tolerance. Put defaults directly in project validators or contract text.</p>
-</blockquote>
+<p>Tolerances become executable through a <code>kind: numeric-compare</code> entry in <code>.clio-coder/verifiers.yaml</code> (catalog version 2). The entry&#39;s <code>command</code> prints a JSON object of <code>string -&gt; number | number[]</code> on stdout, <code>reference</code> names a repository-relative JSON file of the same shape, and <code>tolerance</code> names at least one of <code>relative</code>, <code>absolute</code>, or <code>ulp</code>. A value passes only when it satisfies every tolerance given; a key missing on either side fails with the key named, arrays compare elementwise and fail on length mismatch, and any <code>NaN</code> or infinity fails. The report lists each key&#39;s worst deviation and which tolerance it failed, and it is recorded on the <code>verify</code> result and on the host-verification check of a dispatch receipt. Clio applies no default tolerance: the catalog entry states it. <code>clio-coder verifiers author</code> proposes one such entry for every contract artifact that declares <code>numerical_tolerances</code>, with the command left for the operator to fill, so nothing runs until the operator confirms an exact argv. A <code>kind: perf-budget</code> entry judges the command&#39;s wall time the same way against a <code>budget</code> or a recorded baseline; see <a href="tool_usage_blueprint.html">Tool usage</a>.</p>
 <hr>
 <h2>Common Scientific Artifact Families</h2>
 <p>The following labels are useful project conventions for validation contracts and reports. They are not a closed, core-enforced enum in the current source tree:</p>

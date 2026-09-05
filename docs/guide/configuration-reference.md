@@ -899,7 +899,12 @@ Keys read from files under `.clio-coder/` in the repository.
 | `checks[].id` | Check id, at most 64 bytes; `frontend` is reserved for the built-in artifact check. |  |
 | `checks[].tags` | Free-form labels, at most 16 of 32 bytes, shown in the listing. |  |
 | `checks[].timeoutMs` | Required wall-clock cap for the check in ms, a positive integer at most 900000; a `verify` call may shorten it with `timeout_ms` but not exceed it. |  |
-| `version` | Catalog schema version; must equal the version this build speaks. |  |
+| `checks[].kind` | `command` (default, exit code), `numeric-compare` (stdout JSON judged against `reference` under `tolerance`), or `perf-budget` (wall time judged against `budget` or `baseline`). Requires `version: 2`. |  |
+| `checks[].reference` | `numeric-compare` only: repository-relative JSON file of `string -> number \| number[]` the command output is compared against. |  |
+| `checks[].tolerance` | `numeric-compare`: at least one of `relative`, `absolute`, `ulp`; every named bound must hold. `perf-budget` with `baseline`: `{relative}` headroom over the recorded time. |  |
+| `checks[].budget` | `perf-budget` only: `{wallTimeMs, tolerance?: {relative}}`; exclusive with `baseline`. |  |
+| `checks[].baseline` | `perf-budget` only: repository-relative JSON `{wallTimeMs}` written by `clio-coder verifiers baseline <id>`; exclusive with `budget`. |  |
+| `version` | Catalog schema version, `1` or `2`; version 1 files load with every check as `kind: command`. |  |
 
 ## Agent recipe frontmatter
 

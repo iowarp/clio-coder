@@ -311,7 +311,7 @@ Arguments:
 Projects may commit a versioned executable catalog at `.clio-coder/verifiers.yaml`:
 
 ```yaml
-version: 1
+version: 2
 checks:
   - id: rust-workspace
     description: Run the Rust workspace tests
@@ -319,9 +319,29 @@ checks:
     cwd: .
     timeoutMs: 600000
     tags: [rust, test]
+  - id: grid-metadata
+    description: Compare the regional grid statistics against the reference
+    kind: numeric-compare
+    command: [python, tools/grid_stats.py, out/region_west.nc]
+    reference: tests/reference/region_west.json
+    tolerance: { relative: 1.0e-6, ulp: 4 }
+    cwd: .
+    timeoutMs: 120000
+    tags: [scientific, netcdf]
+  - id: solver-time
+    description: Keep the solver inside its wall-time budget
+    kind: perf-budget
+    command: [python, tools/solve.py, --small]
+    baseline: .clio-coder/baselines/solver-time.json
+    tolerance: { relative: 0.25 }
+    cwd: .
+    timeoutMs: 600000
+    tags: [scientific, performance]
 ```
 
-Version 1 is strict. Every root and check field shown above is required, unknown fields fail, and duplicate IDs fail. A project ID uses lowercase letters, digits, `.`, `_`, `:`, or `-`, begins with a letter or digit, and is at most 64 UTF-8 bytes. `frontend` is reserved. Descriptions are trimmed single-line text capped at 512 bytes. `command` is a nonempty argv array with at most 64 entries and 4096 bytes per entry. A shell command string is invalid, and explicit shell executables such as `sh`, `bash`, `pwsh`, and `cmd` are rejected. `cwd` is a repository-relative existing directory capped at 512 bytes; absolute paths, `..` escapes, and symbolic-link escapes fail. `timeoutMs` is a positive integer capped at 900000. A check may carry at most 16 distinct lowercase tags of at most 32 bytes each. The whole file is capped at 262144 bytes and may contain at most 128 checks. YAML aliases are disabled.
+Every check has a `kind`, absent or `command` by default. A version 1 file still loads and every check there is `kind: command`; the kind fields require `version: 2`. `kind: command` reads the exit code. `kind: numeric-compare` runs the command, parses its stdout as a JSON object of `string -> number | number[]`, and judges it against `reference` (a repository-relative JSON file of the same shape) under `tolerance`, which names at least one of `relative`, `absolute`, or `ulp`; a value passes only when every named tolerance holds, a key missing on either side fails with the key named, arrays compare elementwise and fail on length mismatch, and `NaN` or infinity fails. `kind: perf-budget` runs the command and judges the wall time the harness measured against either `budget: {wallTimeMs, tolerance?: {relative}}` or `baseline`, a repository-relative JSON `{wallTimeMs}` that `clio-coder verifiers baseline <id>` records from one clean run, with an optional `tolerance: {relative}` of headroom over it. Exactly one of `budget` and `baseline` is present. A command that exits non-zero, times out, or is aborted fails before any judgement. Both kinds record a structured `report` on the `verify` result details and on the host-verification check of a dispatch receipt (per-key worst deviation and the failed tolerance, or measured time, effective budget, and ratio); a failing judgement is a check failure, not a new evidence category.
+
+Version 2 keeps version 1's strictness. Every root and check field shown above is required, unknown fields fail, and duplicate IDs fail. A project ID uses lowercase letters, digits, `.`, `_`, `:`, or `-`, begins with a letter or digit, and is at most 64 UTF-8 bytes. `frontend` is reserved. Descriptions are trimmed single-line text capped at 512 bytes. `command` is a nonempty argv array with at most 64 entries and 4096 bytes per entry. A shell command string is invalid, and explicit shell executables such as `sh`, `bash`, `pwsh`, and `cmd` are rejected. `cwd` is a repository-relative existing directory capped at 512 bytes; absolute paths, `..` escapes, and symbolic-link escapes fail. `timeoutMs` is a positive integer capped at 900000. A check may carry at most 16 distinct lowercase tags of at most 32 bytes each. The whole file is capped at 262144 bytes and may contain at most 128 checks. YAML aliases are disabled.
 
 Provider IDs share one namespace. If a catalog ID collides with a discovered package script, listing and execution fail and identify both source files. Catalog parsing also fails closed before any package or project check runs.
 
@@ -348,7 +368,10 @@ clio-coder verifiers author
 clio-coder verifiers author --exclude cmake-build-debug --rename go-test=go-suite
 clio-coder verifiers author --dry-run go-suite --yes
 clio-coder verifiers validate
+clio-coder verifiers baseline solver-time
 ```
+
+`author` also lists one incomplete `numeric-compare` check for every validation-contract artifact that declares `numerical_tolerances`, with the reference and tolerance filled in and the exact `verifiers add` line to complete; the command is the operator's to supply, so the proposal never enters the catalog on its own. `baseline <id>` runs a `perf-budget` check once and writes its wall time to the check's `baseline` path; a failing or timed-out command records nothing.
 
 `validate` reads the committed file with the same parser used by `verify()`. `dry-run <id>` is an explicit request to execute one admitted check through the production `verify` path. `author --dry-run <id> --yes` writes only after confirmation and starts the selected dry run only after the write is accepted by production discovery.
 
@@ -362,7 +385,7 @@ clio-coder verifiers rename validate-grid validate-regional-grid --yes
 clio-coder verifiers remove validate-regional-grid --yes
 ```
 
-The `add` command is the explicit path for an unsupported or ambiguous project. `--command` must be a JSON argv array, so manual entry still cannot turn a shell command string into executable catalog authority.
+The `add` command is the explicit path for an unsupported or ambiguous project. `--command` must be a JSON argv array, so manual entry still cannot turn a shell command string into executable catalog authority. `--kind numeric-compare` takes `--reference <path>` and `--tolerance '<json>'`; `--kind perf-budget` takes either `--budget-ms <n>` with optional `--budget-relative <r>` or `--baseline <path>` with optional `--tolerance '{"relative": r}'`. `edit` accepts the same options to change a check's kind.
 
 `verify(check="frontend", path=<file>)` validates an HTML, CSS, or JavaScript artifact without shell access. The path must stay inside the workspace root and end in `.html`, `.htm`, `.css`, `.js`, `.mjs`, or `.cjs`. Checks per type: HTML tag balance (comment-aware, HTML5 optional end tags honored), inline and referenced script syntax (classic scripts parsed in-process, modules via `node --check`), inline and linked CSS brace/string/comment balance, local script and stylesheet references resolved and existence-checked (external and root-relative references are skipped), and an optional headless browser load. `browser="auto"` warns when no chromium/chrome/edge executable is on PATH, `"required"` fails, `"off"` skips. Each check reports pass, warn, fail, or skip; any fail makes the whole result an error. `details = {action: "verify", check: "frontend", path, browserMode, status, checks}`.
 
