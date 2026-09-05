@@ -6,6 +6,7 @@ import {
 	type MarketplaceSkill,
 	modelVisibleSkills,
 	type ResourceDiagnostic,
+	resolveMarketplaceShaping,
 	type Skill,
 	type SkillUpdateReport,
 	skillCatalogValidity,
@@ -444,7 +445,11 @@ export async function runSkillsCommand(argv: ReadonlyArray<string>): Promise<num
 				return 2;
 			}
 			try {
-				const reports = updateSkills(name ? { name, force: parsed.force } : { all: true, force: parsed.force });
+				const reports = updateSkills({
+					...(name ? { name } : { all: true }),
+					force: parsed.force,
+					resolveShaping: resolveMarketplaceShaping(),
+				});
 				return printUpdateReports(reports);
 			} catch (err) {
 				printError(err instanceof Error ? err.message : String(err));
@@ -453,7 +458,9 @@ export async function runSkillsCommand(argv: ReadonlyArray<string>): Promise<num
 		}
 		case "sync": {
 			try {
-				return printUpdateReports(updateSkills({ all: true, force: parsed.force }));
+				return printUpdateReports(
+					updateSkills({ all: true, force: parsed.force, resolveShaping: resolveMarketplaceShaping() }),
+				);
 			} catch (err) {
 				printError(err instanceof Error ? err.message : String(err));
 				return 1;

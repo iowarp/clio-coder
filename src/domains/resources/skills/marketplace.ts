@@ -9,6 +9,7 @@ import {
 	installSkillFromSource,
 	isSkillName,
 	parseSkillSourceSpec,
+	type SkillInstallShaping,
 } from "./install.js";
 import { loadSkills, type Skill } from "./loader.js";
 
@@ -60,6 +61,14 @@ export interface MarketplaceSkill {
 	triggers?: string[];
 	origin: MarketplaceSkillOrigin;
 	requires?: LibraryRequirementRef[];
+	/**
+	 * Remote entry: a package-root-relative directory whose files are copied
+	 * over the fetched upstream tree at install. Clio owns only the overlay
+	 * (typically a wrapper SKILL.md); the upstream renderer is never vendored.
+	 */
+	overlay?: string;
+	/** Remote entry: top-level upstream members dropped at install. */
+	exclude?: string[];
 }
 
 export type MarketplaceStatus = "installed" | "installable" | "unavailable";
@@ -181,6 +190,12 @@ function parseMarketplaceIndex(indexPath: string, diagnostics: string[] = []): M
 			const requires = Array.isArray(record.requires)
 				? record.requires.filter((entry): entry is LibraryRequirementRef => typeof entry === "string")
 				: undefined;
+			const overlay = optionalString(record.overlay);
+			if (overlay && (path.isAbsolute(overlay) || overlay.split("/").includes(".."))) {
+				diagnostics.push(`skill marketplace index entry has an overlay outside the package: ${skill.name}`);
+				return [];
+			}
+			const exclude = optionalTriggerList(record.exclude);
 			return [
 				{
 					kind,
@@ -192,6 +207,8 @@ function parseMarketplaceIndex(indexPath: string, diagnostics: string[] = []): M
 					...(category ? { category } : {}),
 					...(triggers ? { triggers } : {}),
 					...(requires ? { requires } : {}),
+					...(overlay ? { overlay } : {}),
+					...(exclude ? { exclude } : {}),
 					origin: "index" as const,
 				},
 			];
@@ -284,25 +301,32 @@ export function discoverMarketplaceSkills(options: DiscoverMarketplaceOptions = 
 	const skills: MarketplaceSkill[] = [];
 	const seen = new Set<string>();
 
+	const indexPath =
+		options.indexPath === null ? null : (options.indexPath ?? process.env.CLIO_CODER_SKILL_MARKETPLACE_INDEX ?? null);
+	const resolvedIndexPath = indexPath ?? defaultIndexPath();
+	const indexSkills =
+		options.indexPath !== null && resolvedIndexPath && existsSync(resolvedIndexPath)
+			? parseMarketplaceIndex(resolvedIndexPath, diagnostics)
+			: [];
+	// A remote entry's overlay folder is also a catalog package on disk, but
+	// installing that folder alone would land the wrapper without the upstream
+	// it wraps. The index entry that names the overlay is the whole skill.
+	const overlayNames = new Set(indexSkills.filter((skill) => skill.overlay).map((skill) => skill.name));
+
 	// Catalog packages first: real local files beat index pointers on name collisions.
 	const catalogDir = resolveCatalogDir(options);
 	if (catalogDir) {
 		for (const skill of catalogSkills(catalogDir, diagnostics)) {
-			if (seen.has(skill.name)) continue;
+			if (seen.has(skill.name) || overlayNames.has(skill.name)) continue;
 			seen.add(skill.name);
 			skills.push(skill);
 		}
 	}
 
-	const indexPath =
-		options.indexPath === null ? null : (options.indexPath ?? process.env.CLIO_CODER_SKILL_MARKETPLACE_INDEX ?? null);
-	const resolvedIndexPath = indexPath ?? defaultIndexPath();
-	if (options.indexPath !== null && resolvedIndexPath && existsSync(resolvedIndexPath)) {
-		for (const skill of parseMarketplaceIndex(resolvedIndexPath, diagnostics)) {
-			if (seen.has(skill.name)) continue;
-			seen.add(skill.name);
-			skills.push(skill);
-		}
+	for (const skill of indexSkills) {
+		if (seen.has(skill.name)) continue;
+		seen.add(skill.name);
+		skills.push(skill);
 	}
 
 	if (skills.length === 0 && diagnostics.length === 0) {
@@ -313,6 +337,34 @@ export function discoverMarketplaceSkills(options: DiscoverMarketplaceOptions = 
 
 export function getMarketplaceSkills(options: DiscoverMarketplaceOptions = {}): MarketplaceSkill[] {
 	return discoverMarketplaceSkills(options).skills;
+}
+
+/**
+ * The install shaping a marketplace entry carries, with its overlay resolved
+ * to an absolute directory under the package root. An entry with neither
+ * field shapes nothing, so the caller can spread the result unconditionally.
+ */
+export function marketplaceInstallShaping(skill: MarketplaceSkill): SkillInstallShaping {
+	const shaping: SkillInstallShaping = {};
+	if (skill.overlay) shaping.overlay = path.join(resolvePackageRoot(), skill.overlay);
+	if (skill.exclude && skill.exclude.length > 0) shaping.exclude = [...skill.exclude];
+	return shaping;
+}
+
+/**
+ * Recover the shaping for an installed skill by name and recorded source URL,
+ * for `updateSkills`. Only a marketplace entry that still points at the same
+ * upstream URL applies; a skill installed from a URL the index no longer
+ * carries updates bare, as it was installed.
+ */
+export function resolveMarketplaceShaping(options: DiscoverMarketplaceOptions = {}) {
+	return (installed: { name: string; sourceUrl: string }): SkillInstallShaping | undefined => {
+		const entry = getMarketplaceSkills(options).find(
+			(skill) => skill.name === installed.name && skill.sourceUrl === installed.sourceUrl,
+		);
+		if (!entry || (!entry.overlay && !entry.exclude)) return undefined;
+		return marketplaceInstallShaping(entry);
+	};
 }
 
 /**
@@ -339,7 +391,7 @@ export function installSkill(input: InstallSkillInput): InstallSkillResult {
 		if (!skill) {
 			throw new Error(`"${source}" is neither an existing local path nor available in the local marketplace`);
 		}
-		return installSkillFromSource({ ...input, source: skill.sourceUrl });
+		return installSkillFromSource({ ...input, ...marketplaceInstallShaping(skill), source: skill.sourceUrl });
 	}
 	return installSkillFromSource({ ...input, source });
 }
