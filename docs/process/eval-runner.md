@@ -297,13 +297,17 @@ Eleven numbers plus a reason histogram, each carrying the source it came from. `
 | `generatedTokens` | ledger |
 | `reasoningTokens` | receipt; nullable, because absent and zero are different claims |
 | `toolCalls`, `toolErrors` | ledger when present, otherwise receipt |
-| `ttftMsFirstCall` | ledger |
+| `ttftMsFirstCall` | ledger; nullable when first-call timing is absent |
 | `wallClockMs` | receipt |
 | `contextTokensAtEnd` | ledger |
 | `compactions` | ledger |
 | `expectedColdReasons` | ledger, one sourced count per reason |
 
 A dispatched worker's receipt reports `sessionId: null` and writes no session archive, which is why the ledger source exists at all: the runner folds structured usage, backend timing, cache, and monotonic TTFT facts out of the worker's `message_end` events. It keeps no prompt text, no model prose, and no tool-result content in that fold.
+
+First-call TTFT uses the earliest recorded assistant-call timestamp across the selected ledgers; equal timestamps retain their observed order. Missing or invalid timing, or an invalid timestamp that prevents ordering the calls, yields `{ value: null, source: "estimated" }`. A measured zero remains `{ value: 0, source: "ledger" }`. Stream timing requires an observed call start and first output delta; a completion alone supplies neither a zero duration nor a first-token measurement. Verdict v1 consumers must accept nullable TTFT. Historical numeric values, including estimated zeros, remain readable and are not rewritten.
+
+When a stream message lacks a valid timestamp, its ledger payload marks `timestampEstimated: true` beside the legacy ISO placeholder. This leaves first-call chronology unmeasured while preserving any observed per-call monotonic timing.
 
 ### Scenario aggregates
 

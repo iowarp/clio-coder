@@ -39,7 +39,7 @@ export interface EvalTrackedMetricsV1 {
 	reasoningTokens: EvalSourcedNullableNumber;
 	toolCalls: EvalSourcedNumber;
 	toolErrors: EvalSourcedNumber;
-	ttftMsFirstCall: EvalSourcedNumber;
+	ttftMsFirstCall: EvalSourcedNullableNumber;
 	wallClockMs: EvalSourcedNumber;
 	contextTokensAtEnd: EvalSourcedNumber;
 	compactions: EvalSourcedNumber;
@@ -125,7 +125,7 @@ function parseTrackedMetrics(value: unknown, source: string): EvalTrackedMetrics
 		reasoningTokens: readSourcedNullableNumber(record.reasoningTokens, `${source}.reasoningTokens`),
 		toolCalls: readSourcedNumber(record.toolCalls, `${source}.toolCalls`),
 		toolErrors: readSourcedNumber(record.toolErrors, `${source}.toolErrors`),
-		ttftMsFirstCall: readSourcedNumber(record.ttftMsFirstCall, `${source}.ttftMsFirstCall`),
+		ttftMsFirstCall: readSourcedNullableNumber(record.ttftMsFirstCall, `${source}.ttftMsFirstCall`),
 		wallClockMs: readSourcedNumber(record.wallClockMs, `${source}.wallClockMs`),
 		contextTokensAtEnd: readSourcedNumber(record.contextTokensAtEnd, `${source}.contextTokensAtEnd`),
 		compactions: readSourcedNumber(record.compactions, `${source}.compactions`),

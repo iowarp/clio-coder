@@ -2,6 +2,7 @@ import { deepStrictEqual, match, strictEqual, throws } from "node:assert/strict"
 import test from "node:test";
 import { parseEvalArtifactV4 } from "../../src/domains/eval/artifacts/store.js";
 import { compareEvalArtifactsV4, EvalServingConfigurationDriftError } from "../../src/domains/eval/compare/compare.js";
+import { aggregateEvalVerdicts } from "../../src/domains/eval/metrics/aggregate.js";
 import { toolBehaviorMetricEntriesFromJsonl } from "../../src/domains/eval/runners/clio-run.js";
 import type { EvalArtifactV4 } from "../../src/domains/eval/schema/artifact.js";
 import type { EvalSuiteV2 } from "../../src/domains/eval/schema/suite.js";
@@ -156,6 +157,23 @@ test("eval comparison refuses serving drift until the operator explicitly allows
 	strictEqual(allowed.configDrift, true);
 	strictEqual(allowed.baselineServingConfiguration.serverBuild, "server-a");
 	strictEqual(allowed.candidateServingConfiguration.serverBuild, "server-b");
+});
+
+test("eval artifact readers and comparison preserve null first-call timing", () => {
+	const baseline = artifact("eval-baseline", "server-a");
+	const candidate = artifact("eval-candidate", "server-a");
+	const previous = verdict();
+	previous.trackedMetrics.ttftMsFirstCall = { value: 0, source: "estimated" };
+	const absent = structuredClone(previous);
+	absent.trackedMetrics.ttftMsFirstCall.value = null;
+	baseline.aggregates = aggregateEvalVerdicts([previous]);
+	candidate.aggregates = aggregateEvalVerdicts([parseEvalVerdictEnvelopeV1(absent)]);
+	const parsed = parseEvalArtifactV4(JSON.parse(JSON.stringify(candidate)), "candidate");
+	const comparison = compareEvalArtifactsV4(baseline, parsed, { metric: "ttftMsFirstCall" }).trackedMetrics[0];
+	strictEqual(comparison?.candidate.measured, 0);
+	strictEqual(comparison?.candidate.mean, null);
+	strictEqual(comparison?.meanDelta, null);
+	strictEqual(comparison?.change, "incomparable");
 });
 
 function validSuite() {
