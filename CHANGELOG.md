@@ -21,6 +21,7 @@ Trust spine: typed claims, executable validation, and decision provenance. Answe
 - The dispatch board reads observability's run projection. One fold owns lifecycle events, worker progress, receipt trust, retries, cancellation, fleet positions, and evidence readiness; the board keeps ordering, selection, and rendering. Terminal status and accounting come from the same projection the observability contract publishes.
 
 ### Fixed
+- ACP stdout now waits for drain before sending more frames and closes with a typed error when stalled output exceeds the existing 1 MiB buffer budget (#309).
 - Dispatch to a subprocess worker no longer fails at prompt compilation when the recipe offers the canonical `context` tool. The Claude CLI declares tool support, so `context` survived tool narrowing while the compiler correctly treated the subprocess surface as unattached, and every built-in recipe that lists `context` (architect, scout, oracle, researcher, and others) was refused with a `hasCanonicalContext` mismatch. The attached-context fact is now derived from the runtime kind, and bound skills are neither promised in the prompt nor stamped on the worker spec for a runtime that never receives Clio's tools.
 - Ollama eviction now releases only models this Clio process successfully pinned on the same server, preserving models loaded by operators or other clients (#313).
 - Deprecation warnings for the legacy lmstudio-native runtime id now route through warnLegacyNaming, reporting the planned v0.7.0 removal and deduping per process.
