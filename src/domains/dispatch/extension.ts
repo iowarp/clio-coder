@@ -2759,13 +2759,13 @@ export function createDispatchBundle(
 	}
 
 	/** Retries only: the first attempt's member was consumed with the planned bound. */
-	function rebindReservationSlot(
+	async function rebindReservationSlot(
 		req: DispatchRequest,
 		nodeId: string,
 		endpoint: EndpointCapacity | null,
 		costUsd: number,
 		settings: EffectiveSettings,
-	): void {
+	): Promise<void> {
 		if (req.reservation === undefined || req.lineage === undefined) return;
 		const capacity = reservationCapacitySnapshot(settings);
 		const rebind = {
@@ -2776,7 +2776,7 @@ export function createDispatchBundle(
 			capacity,
 			nowMs: now(),
 		};
-		rebindDispatchReservationMember(rebind);
+		await rebindDispatchReservationMember(rebind);
 	}
 
 	/** Process-local retry queue keyed by finished run; backoff is keyed by assignment root. */
@@ -4574,7 +4574,7 @@ export function createDispatchBundle(
 					"dispatch: writeRoots cannot be enforced on an ACP delegation target; the external agent runs its own tool surface. Dispatch to a native or claude-sdk worker.",
 				);
 			}
-			rebindReservationSlot(req, "local", null, UNKNOWN_PRICING_ADMISSION_ESTIMATE_USD, settings);
+			await rebindReservationSlot(req, "local", null, UNKNOWN_PRICING_ADMISSION_ESTIMATE_USD, settings);
 			routeObservation = observeShadowRoute(req, undefined, settings);
 			const delegated = await dispatchAcpDelegation(req, settings, timing, routeObservation.decision, observer);
 			// An ACP member never runs host verification, so it can only ever leave
@@ -4615,7 +4615,7 @@ export function createDispatchBundle(
 		};
 		const endpoint = endpointCapacityForTarget(lifecycle.target.target.id);
 		assertRouteWithinApprovedEnvelope(req, effectiveRoute);
-		rebindReservationSlot(
+		await rebindReservationSlot(
 			req,
 			effectiveRoute.node,
 			endpoint,

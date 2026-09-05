@@ -1,5 +1,5 @@
 import { randomBytes } from "node:crypto";
-import { withStateFileLockSync } from "../../core/state-file-lock.js";
+import { withStateFileLock, withStateFileLockSync } from "../../core/state-file-lock.js";
 import { endpointLabel } from "../providers/endpoint-capacity.js";
 import {
 	acquireCapacityLease,
@@ -361,8 +361,10 @@ export function rebindDispatchReservationMember(input: {
 	costUpperBoundUsd: number;
 	capacity: ReservationCapacitySnapshot;
 	nowMs?: number;
-}): DispatchReservationRecord {
-	return withStateFileLockSync(capacityStateLockPath(), () => {
+}): Promise<DispatchReservationRecord> {
+	// Retry admission runs inside the async dispatch attempt, so it can yield
+	// while waiting for the cross-process lock instead of blocking the event loop.
+	return withStateFileLock(capacityStateLockPath(), () => {
 		const nowMs = input.nowMs ?? Date.now();
 		const records = expireRecords(readStore(), nowMs, false);
 		const record = records.find((entry) => entry.ownerId === input.ownerId);
