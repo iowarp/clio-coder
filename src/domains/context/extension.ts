@@ -2,9 +2,13 @@ import { existsSync } from "node:fs";
 import { isAbsolute, join, relative, resolve } from "node:path";
 import { BusChannels, type ContextActivityPayload } from "../../core/bus-events.js";
 import type { DomainBundle, DomainContext, DomainExtension } from "../../core/domain-loader.js";
-import { clioDataDir } from "../../core/xdg.js";
+import { clioDataDir, clioStateDir } from "../../core/xdg.js";
 import { loadMemoryRecordsSync } from "../memory/index.js";
 import { describeValidationContract, loadValidationContract } from "../safety/index.js";
+import { readSessionEntriesForId } from "../session/archive-readers.js";
+import type { SessionContract } from "../session/contract.js";
+import { foldDecisionBoard } from "../session/decision-board.js";
+import { filterEntriesToActivePath } from "../session/tree/active-path.js";
 import { detectProjectType, type ProjectType } from "../session/workspace/project-type.js";
 import { adoptionSourcesChanged } from "./adoption.js";
 import { runBootstrap } from "./bootstrap.js";
@@ -297,9 +301,11 @@ export function createContextBundle(
 				input?.onProgress?.(event);
 			};
 			try {
-				const result = await runContextRefresh(
-					input ? { ...input, onProgress: emitProgress } : { onProgress: emitProgress },
-				);
+				const result = await runContextRefresh({
+					...input,
+					...(input?.wiki ? { decisions: input.decisions ?? (await currentDecisions(_context)) } : {}),
+					onProgress: emitProgress,
+				});
 				const cwd = input?.cwd ?? process.cwd();
 				contextState.invalidate(cwd);
 				if (cwd === lastCwd) startupHints = collectStartupHints(cwd, options);
@@ -320,9 +326,11 @@ export function createContextBundle(
 				input?.onProgress?.(event);
 			};
 			try {
-				return await runWikiGenerate(
-					input ? { ...input, onProgress: emitProgress } : { model: "configured-clio-target", onProgress: emitProgress },
-				);
+				return await runWikiGenerate({
+					...(input ?? { model: "configured-clio-target" }),
+					decisions: input?.decisions ?? (await currentDecisions(_context)),
+					onProgress: emitProgress,
+				});
 			} catch (err) {
 				emitProgress({
 					phase: "done",
@@ -359,4 +367,13 @@ export function createContextBundle(
 	};
 
 	return { extension, contract };
+}
+
+async function currentDecisions(context: DomainContext) {
+	const session = context.getContract<SessionContract>("session");
+	const current = session?.current();
+	if (!session || !current) return [];
+	session.flushAppends?.();
+	const read = await readSessionEntriesForId(clioStateDir(), current.id);
+	return foldDecisionBoard(filterEntriesToActivePath(read.entries, session.tree(current.id).leafId ?? undefined));
 }

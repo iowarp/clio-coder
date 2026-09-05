@@ -13,6 +13,7 @@
  */
 
 import type { OracleResult } from "../domains/agents/index.js";
+import { decisionRationale } from "../domains/session/decision-board.js";
 import type { DecisionLedgerEntry } from "../domains/session/entries.js";
 import type { TaskBoardTask } from "../domains/session/task-board.js";
 
@@ -89,12 +90,14 @@ function clamp(text: string, maxBytes: number): { text: string; truncated: boole
 
 /** One decision line. Superseded decisions carry their correction so a reversal is visible. */
 function decisionLine(decision: DecisionLedgerEntry["decisions"][number]): string {
+	const argument = decisionRationale(decision);
+	const details = argument ? `\n  ${argument}` : "";
 	const label = decision.label ? ` (${decision.label})` : "";
 	if (decision.status === "superseded") {
 		const correction = decision.correction ? `; corrected to ${decision.correction}` : "";
-		return `- ${decision.key}${label}: ${decision.value} [superseded${correction}]`;
+		return `- ${decision.key}${label}: ${decision.value} [superseded${correction}]${details}`;
 	}
-	return `- ${decision.key}${label}: ${decision.value}`;
+	return `- ${decision.key}${label}: ${decision.value}${details}`;
 }
 
 function taskLine(task: TaskBoardTask): string {

@@ -1,5 +1,6 @@
 import { writeFileSync } from "node:fs";
 import { join } from "node:path";
+import type { DecisionLedgerEntry } from "../session/entries.js";
 import { detectProjectType } from "../session/workspace/project-type.js";
 import { type BootstrapIo, type BootstrapProgressSink, codewikiSections } from "./bootstrap.js";
 import { serializeClioMd, tryReadClioMd } from "./clio-md.js";
@@ -18,6 +19,7 @@ import { wikiCompleteness, wikiStaleness } from "./wiki/staleness.js";
  */
 
 export interface RunContextRefreshInput {
+	decisions?: ReadonlyArray<DecisionLedgerEntry>;
 	cwd?: string;
 	io?: BootstrapIo;
 	now?: () => Date;
@@ -146,6 +148,7 @@ export async function runContextRefresh(input: RunContextRefreshInput = {}): Pro
 		wikiResult = await runWikiGenerate({
 			cwd,
 			mode: "update",
+			...(input.decisions ? { decisions: input.decisions } : {}),
 			model: input.wikiModel ?? "unresolved-documenter-target",
 			...(input.wikiGenerate ? { generate: input.wikiGenerate } : {}),
 			...(input.onProgress ? { onProgress: input.onProgress } : {}),

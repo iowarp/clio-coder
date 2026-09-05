@@ -35,6 +35,8 @@ export interface WikiPageMetadata {
 	invariants: string[];
 	/** Narrowest non-destructive commands that check this area. */
 	validate: string[];
+	/** Stable refs for recorded decisions cited in the body. */
+	decisions?: string[];
 }
 
 export interface WikiPageDocument {
@@ -47,7 +49,7 @@ export interface WikiPageDocument {
 
 const FRONTMATTER_BLOCK = /^---\r?\n([\s\S]*?)\r?\n---(?:\r?\n|$)/;
 
-const LIST_FIELDS = ["sources", "symbols", "tests", "invariants", "validate"] as const;
+const LIST_FIELDS = ["sources", "symbols", "tests", "invariants", "validate", "decisions"] as const;
 
 /** Longest generated summary, so an index line stays one line. */
 const SUMMARY_MAX_CHARS = 240;
@@ -166,6 +168,7 @@ export function readWikiPage(input: ReadWikiPageInput): WikiPageDocument {
 		tests: [],
 		invariants: stringList(authored.invariants),
 		validate: stringList(authored.validate),
+		...(authored.decisions === undefined ? {} : { decisions: stringList(authored.decisions) }),
 	};
 	const unresolvedPaths: string[] = [];
 	for (const field of ["sources", "tests"] as const) {
@@ -189,7 +192,7 @@ function renderList(name: string, values: ReadonlyArray<string>): string[] {
 function renderFrontmatter(metadata: WikiPageMetadata): string {
 	const lines = [`title: ${JSON.stringify(metadata.title)}`];
 	if (metadata.summary.length > 0) lines.push(`summary: ${JSON.stringify(metadata.summary)}`);
-	for (const field of LIST_FIELDS) lines.push(...renderList(field, metadata[field]));
+	for (const field of LIST_FIELDS) lines.push(...renderList(field, metadata[field] ?? []));
 	return `---\n${lines.join("\n")}\n---\n`;
 }
 

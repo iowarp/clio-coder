@@ -30,6 +30,8 @@ export interface AuditReadResult {
 }
 
 export interface SessionReadResult {
+	/** Persisted /tree selection, when the session has not appended past it. */
+	leafTurnId?: string;
 	entries: SessionEntry[];
 	missing: boolean;
 	errors: string[];
@@ -142,7 +144,14 @@ export async function readSessionEntriesForId(stateDir: string, sessionId: strin
 				return { entries: [], missing: false, errors: [`${currentPath}: ${err.message ?? String(err)}`] };
 			}
 		}
-		return parseSessionEntries(raw, source);
+		const result = parseSessionEntries(raw, source);
+		try {
+			const meta: unknown = JSON.parse(await readFile(join(root, cwdHash, sessionId, "meta.json"), "utf8"));
+			if (isRecord(meta) && typeof meta.pinnedLeafTurnId === "string") result.leafTurnId = meta.pinnedLeafTurnId;
+		} catch {
+			// Legacy archives without metadata fall back to the newest message branch.
+		}
+		return result;
 	}
 	return { entries: [], missing: true, errors: [] };
 }
