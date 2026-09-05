@@ -159,6 +159,7 @@ import type {
 	DispatchAdmissionObserver,
 	DispatchContract,
 	DispatchPlanTaskResolution,
+	DispatchPreparationOptions,
 	DispatchRequest,
 	DispatchSnapshot,
 } from "./contract.js";
@@ -298,6 +299,7 @@ import {
 	validateJobSpec,
 } from "./validation.js";
 import { describeUngroundedValidations, groundClaimedValidations, invalidatesQuality } from "./validation-grounding.js";
+import { prepareWorkerModelMetadata } from "./worker-model-metadata.js";
 import {
 	type AgentLedgerBody,
 	computeSettingsFingerprint,
@@ -2698,6 +2700,7 @@ export function createDispatchBundle(
 		nodeId: string,
 		timing: RunPhaseMarks,
 		endpoint?: EndpointCapacity | null,
+		signal?: AbortSignal,
 	) {
 		const queuedAt = now();
 		timing.queuedAt = new Date(queuedAt).toISOString();
@@ -2713,7 +2716,12 @@ export function createDispatchBundle(
 				: planQueueSlot(req.reservation.ownerId, req.reservation.memberId, (error) =>
 						reportDispatchDiagnostic("read plan queue identity", error),
 					);
+		const cancel = (): void => {
+			capacityAdmission.cancel(assignmentId);
+		};
+		signal?.addEventListener("abort", cancel, { once: true });
 		try {
+			signal?.throwIfAborted();
 			const admitted = await capacityAdmission.admit({
 				assignmentId,
 				nodeId,
@@ -2736,6 +2744,8 @@ export function createDispatchBundle(
 				else await failQueuedAssignment(assignmentId);
 			}
 			throw error;
+		} finally {
+			signal?.removeEventListener("abort", cancel);
 		}
 	}
 
@@ -3462,7 +3472,12 @@ export function createDispatchBundle(
 		}
 	}
 
-	async function resolveLifecycle(req: DispatchRequest, settings: EffectiveSettings): Promise<DispatchLifecycleStage> {
+	async function resolveLifecycle(
+		req: DispatchRequest,
+		settings: EffectiveSettings,
+		metadataDeadlineAt: number,
+		signal?: AbortSignal,
+	): Promise<DispatchLifecycleStage> {
 		const recipe = agents.get(req.agentId);
 		if (!recipe) {
 			throw new Error(`dispatch: unknown agent recipe: ${req.agentId}`);
@@ -3500,15 +3515,30 @@ export function createDispatchBundle(
 		publishDispatchPathScope(req, pathScope);
 		const admission = resolveDispatchAdmissionStage(req, recipe, safety, pathScope);
 		const targets = readWorkerTargets(settings);
-		const target = resolveDispatchTarget(
-			req,
-			recipe,
-			targets.workerDefault,
-			targets.workerProfiles,
-			targets.agentBindings,
-			targets.targetOrder,
-			providers,
-		);
+		const resolveTarget = () =>
+			resolveDispatchTarget(
+				req,
+				recipe,
+				targets.workerDefault,
+				targets.workerProfiles,
+				targets.agentBindings,
+				targets.targetOrder,
+				providers,
+			);
+		let target = resolveTarget();
+		const identity = (resolved: ResolvedTarget): string =>
+			JSON.stringify([
+				resolved.target.id,
+				resolved.runtime.id,
+				resolved.wireModelId,
+				endpointIdentityHash(resolved.target.url),
+			]);
+		const selectedIdentity = identity(target);
+		await prepareWorkerModelMetadata(providers, target.target.id, metadataDeadlineAt, signal, now);
+		target = resolveTarget();
+		if (identity(target) !== selectedIdentity) {
+			throw new Error("dispatch: worker route changed during model metadata preparation; request a fresh admission");
+		}
 		enforceCapabilityGate(target.target.id, target.modelCapabilities, req.requiredCapabilities);
 		assertRuntimeCanHonorWorkerPermissionMode(target.runtime, settings?.fleet.permissions.mode ?? "deny");
 		const cwd = req.cwd ?? process.cwd();
@@ -4437,6 +4467,7 @@ export function createDispatchBundle(
 	async function dispatchAttempt(
 		req: DispatchRequest,
 		observer?: DispatchAdmissionObserver,
+		preparation?: DispatchPreparationOptions,
 		settlement?: BatchVerificationGate,
 	): Promise<{
 		runId: string;
@@ -4542,7 +4573,10 @@ export function createDispatchBundle(
 		}
 
 		req = routeAroundCoolingTarget(req, settings) ?? req;
-		const lifecycle = await resolveLifecycle(req, settings);
+		const metadataDeadlineAt =
+			req.assignmentDeadlineAt ?? Date.parse(requestedAt) + (req.routingIntent?.deadlineMs ?? 60_000);
+		const lifecycle = await resolveLifecycle(req, settings, metadataDeadlineAt, preparation?.signal);
+		preparation?.signal?.throwIfAborted();
 		timing.decisionCompletedAt = new Date(now()).toISOString();
 		assertResponseSchemaEnforceable(
 			lifecycle.target.runtime,
@@ -4619,7 +4653,13 @@ export function createDispatchBundle(
 		if (queuedIdentity !== null) publishCapacityQueued(queuedIdentity, timing, placement?.node ?? null);
 		let capacityLease: Awaited<ReturnType<typeof admitAssignmentCapacity>>;
 		try {
-			capacityLease = await admitAssignmentCapacity(req, placement?.node.id ?? "local", timing, endpoint);
+			capacityLease = await admitAssignmentCapacity(
+				req,
+				placement?.node.id ?? "local",
+				timing,
+				endpoint,
+				preparation?.signal,
+			);
 		} catch (error) {
 			if (queuedIdentity !== null) publishCapacityAdmissionFailure(queuedIdentity, error);
 			throw error;
@@ -4630,6 +4670,7 @@ export function createDispatchBundle(
 
 		const ledgerRef = (() => {
 			try {
+				preparation?.signal?.throwIfAborted();
 				return requireLedger();
 			} catch (error) {
 				leaseSlot.release();
@@ -4692,6 +4733,7 @@ export function createDispatchBundle(
 		};
 		let worker: SpawnedWorker;
 		try {
+			preparation?.signal?.throwIfAborted();
 			worker = (placement?.spawn ?? spawnWorker)(spec, {
 				cwd: lifecycle.cwd,
 				now,
@@ -5806,13 +5848,20 @@ export function createDispatchBundle(
 	async function dispatch(
 		req: DispatchRequest,
 		observer?: DispatchAdmissionObserver,
+		preparation?: DispatchPreparationOptions,
 		settlement?: BatchVerificationGate,
 	): Promise<{
 		runId: string;
 		events: AsyncIterableIterator<unknown>;
 		finalPromise: Promise<RunReceipt>;
 	}> {
-		let prepared = req;
+		let prepared =
+			preparation?.deadlineAt === undefined
+				? req
+				: {
+						...req,
+						assignmentDeadlineAt: Math.min(req.assignmentDeadlineAt ?? Number.POSITIVE_INFINITY, preparation.deadlineAt),
+					};
 		let createdWorktree: DispatchRequest["taskWorktree"];
 		let writerLease: CheckoutWriterLease | undefined;
 		const writerRecipe = agents.get(req.agentId);
@@ -5844,7 +5893,7 @@ export function createDispatchBundle(
 				return rel === ".." || rel.startsWith(`..${sep}`) || isAbsolute(rel) ? entry : resolvePath(taskWorktree.path, rel);
 			});
 			prepared = {
-				...req,
+				...prepared,
 				runIdHint: runId,
 				taskWorktree,
 				cwd: workerCwd,
@@ -5854,7 +5903,8 @@ export function createDispatchBundle(
 		}
 		let handle: Awaited<ReturnType<typeof dispatchAttempt>>;
 		try {
-			handle = await dispatchAttempt(prepared, observer, settlement);
+			preparation?.signal?.throwIfAborted();
+			handle = await dispatchAttempt(prepared, observer, preparation, settlement);
 		} catch (error) {
 			writerLease?.release();
 			if (createdWorktree !== undefined) {
@@ -6243,7 +6293,10 @@ export function createDispatchBundle(
 		})();
 	}
 
-	async function dispatchBatch(reqs: ReadonlyArray<DispatchRequest>): Promise<{
+	async function dispatchBatch(
+		reqs: ReadonlyArray<DispatchRequest>,
+		preparation?: DispatchPreparationOptions,
+	): Promise<{
 		batchId: string;
 		assignmentIds: ReadonlyArray<string>;
 		events: AsyncIterableIterator<unknown>;
@@ -6262,7 +6315,7 @@ export function createDispatchBundle(
 		const handles: Array<Awaited<ReturnType<typeof dispatch>> & { agentId: string }> = [];
 		try {
 			for (const req of reqs) {
-				const handle = await dispatch(req, undefined, settlement);
+				const handle = await dispatch(req, undefined, preparation, settlement);
 				handles.push({ ...handle, agentId: req.agentId });
 			}
 		} catch (err) {
