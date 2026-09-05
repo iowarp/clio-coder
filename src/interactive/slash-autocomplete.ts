@@ -69,16 +69,14 @@ export interface SlashCompletionItem extends AutocompleteItem {
 export interface SlashAutocompleteOptions {
 	basePath?: string;
 	fdPath?: string | null;
-	/** Slice 11 replaces the named no-op sources with read-only runtime sources. */
+	/** Read-only runtime values for the named grammar slots. */
 	completionSources?: CompletionSources;
 	/** Replace the default workspace-aware `@` source without adding a second composer provider. */
 	fileReferenceSource?: FileReferenceCompletionSource;
-	/** @deprecated Dynamic skill values move to the named `skills` slot in slice 11. */
-	listSkills?: () => unknown;
 }
 
-/** Complete provider surface now, deliberately inert until slice 11 wiring. */
-function stubCompletionSources(): Record<CompletionSlotName, CompletionSource> {
+/** Slots without an in-app source return no dynamic values. */
+function emptyCompletionSources(): Record<CompletionSlotName, CompletionSource> {
 	const sources = {} as Record<CompletionSlotName, CompletionSource>;
 	for (const slot of COMPLETION_SLOT_NAMES) sources[slot] = async () => [];
 	return sources;
@@ -308,7 +306,7 @@ class ClioAutocompleteProvider implements AutocompleteProvider {
 	) {
 		this.files = new CombinedAutocompleteProvider([], basePath, fdPath);
 		this.fileReferences = fileReferenceSource ?? createFileReferenceCompletionSource({ basePath });
-		this.sourceBySlot = { ...stubCompletionSources(), ...sources };
+		this.sourceBySlot = { ...emptyCompletionSources(), ...sources };
 	}
 
 	async getSuggestions(
