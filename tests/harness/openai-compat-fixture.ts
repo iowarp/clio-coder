@@ -66,8 +66,12 @@ export interface OpenAICompatFixtureOptions {
 	/**
 	 * When set, answer the tool-free completion of every turn with this tool
 	 * call instead of text. Absent, the fixture behaves exactly as before.
+	 * A function is asked on every streaming request, tool exchange or not,
+	 * so a script can drive a multi-step turn (dispatch, then artifact) and
+	 * answer a worker's conversation differently from the main agent's.
+	 * Returning null falls through to the text reply.
 	 */
-	toolCall?: OpenAICompatToolCallScript;
+	toolCall?: OpenAICompatToolCallScript | ((request: Record<string, unknown>) => OpenAICompatToolCallScript | null);
 	/**
 	 * Reasoning text streamed before the reply, one SSE delta per chunk, under
 	 * `reasoningField`. LM Studio spells the field `reasoning` for gpt-oss and
@@ -78,7 +82,7 @@ export interface OpenAICompatFixtureOptions {
 }
 
 /** True once a request's message history carries a tool result or a tool call. */
-function hasToolExchange(request: Record<string, unknown>): boolean {
+export function hasToolExchange(request: Record<string, unknown>): boolean {
 	const messages = request.messages;
 	if (!Array.isArray(messages)) return false;
 	return messages.some((message) => {
@@ -146,8 +150,13 @@ export async function startOpenAICompatFixture(
 			"cache-control": "no-cache",
 			connection: "keep-alive",
 		});
-		if (options.toolCall !== undefined && !hasToolExchange(request)) {
-			const script = options.toolCall;
+		const script =
+			typeof options.toolCall === "function"
+				? options.toolCall(request)
+				: options.toolCall !== undefined && !hasToolExchange(request)
+					? options.toolCall
+					: null;
+		if (script !== null) {
 			res.write(
 				`data: ${JSON.stringify({
 					id: "chatcmpl-clio-tool",
