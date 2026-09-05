@@ -15,6 +15,7 @@ import { resolveSafeCwd, SAFE_EXEC_DEFAULT_TIMEOUT_MS } from "../../core/safe-ex
 import { parseTomlDocument, tomlTableAt } from "../../core/toml.js";
 import { isVerificationScriptName } from "../../core/verification-scripts.js";
 import { compareCodepoints } from "../../domains/evidence/ordering.js";
+import { loadValidationContract, VALIDATION_CONTRACT_MARKDOWN_PATH } from "../../domains/safety/validation-contract.js";
 import type { ToolResult } from "../registry.js";
 import {
 	type DeclaredCheck,
@@ -168,12 +169,6 @@ interface RawProposal {
 }
 
 const DECLARED_FILE_CAP_BYTES = 1024 * 1024;
-const VALIDATION_CONTRACT_PATHS = [
-	".clio-coder/validation.yaml",
-	".clio-coder/validation.yml",
-	"validation.yaml",
-	"validation.yml",
-] as const;
 
 function manualEntryInstruction(): string {
 	return (
@@ -626,18 +621,6 @@ function shellLikeArgv(command: string): string[] | Error {
 	return argv;
 }
 
-function validatorArgv(value: unknown): string[] | Error {
-	if (typeof value === "string") return shellLikeArgv(value);
-	if (
-		!Array.isArray(value) ||
-		value.length === 0 ||
-		value.some((entry) => typeof entry !== "string" || entry.length === 0)
-	) {
-		return new Error("validator must be a command string or a non-empty argv string array");
-	}
-	return [...(value as string[])];
-}
-
 function validationPreferredId(argv: ReadonlyArray<string>): string {
 	const executable = path.basename(argv[0] ?? "check").replace(/\.[^.]+$/u, "");
 	const script = argv.find((entry, index) => index > 0 && /\.(?:py|js|mjs|sh)$/u.test(entry));
@@ -647,82 +630,35 @@ function validationPreferredId(argv: ReadonlyArray<string>): string {
 
 function validationContractProposals(workspaceRoot: string, diagnostics: string[]): RawProposal[] {
 	const proposals: RawProposal[] = [];
-	for (const relative of VALIDATION_CONTRACT_PATHS) {
-		const text = regularFileText(path.join(workspaceRoot, relative), workspaceRoot);
-		if (text === null) continue;
-		if (text instanceof Error) {
-			diagnostics.push(`${relative}: ${text.message}; validation command discovery skipped.`);
-			continue;
-		}
-		const document = parseDocument(text, { prettyErrors: false, strict: true, uniqueKeys: true });
-		if (document.errors.length > 0) {
-			diagnostics.push(`${relative}: invalid YAML; validation command discovery skipped.`);
-			continue;
-		}
-		let parsed: unknown;
-		try {
-			parsed = document.toJS({ maxAliasCount: 0 }) as unknown;
-		} catch (error) {
-			diagnostics.push(`${relative}: invalid YAML (${error instanceof Error ? error.message : String(error)}).`);
-			continue;
-		}
-		if (parsed === null || typeof parsed !== "object" || Array.isArray(parsed)) continue;
-		const validators = (parsed as Record<string, unknown>).validators;
-		if (!Array.isArray(validators)) continue;
-		for (const [index, validator] of validators.entries()) {
-			const record =
-				validator !== null && typeof validator === "object" && !Array.isArray(validator)
-					? (validator as Record<string, unknown>)
-					: null;
-			if (record !== null) {
-				const typedFields: ReadonlyArray<readonly [string, (value: unknown) => boolean]> = [
-					["id", (value: unknown) => typeof value === "string"],
-					["description", (value: unknown) => typeof value === "string"],
-					["cwd", (value: unknown) => typeof value === "string"],
-					["timeoutMs", (value: unknown) => typeof value === "number"],
-					["tags", (value: unknown) => Array.isArray(value) && value.every((tag) => typeof tag === "string")],
-				];
-				const invalidField = typedFields.find(([field, valid]) => Object.hasOwn(record, field) && !valid(record[field]));
-				if (invalidField !== undefined) {
-					diagnostics.push(
-						`${relative}: validators[${index}].${String(invalidField[0])} has an ambiguous type; use manual argv entry.`,
-					);
-					continue;
-				}
-			}
-			const commandValue = record === null ? validator : record.command;
-			const argv = validatorArgv(commandValue);
+	const loaded = loadValidationContract(workspaceRoot);
+	if (!loaded.ok) {
+		diagnostics.push(`${loaded.path}: ${loaded.reason}; validation command discovery skipped.`);
+	} else if (loaded.contract !== null) {
+		for (const [index, validator] of (loaded.contract.validators ?? []).entries()) {
+			const argv = shellLikeArgv(validator);
 			if (argv instanceof Error) {
-				diagnostics.push(`${relative}: validators[${index}] is ambiguous (${argv.message}); use manual argv entry.`);
+				diagnostics.push(`${loaded.path}: validators[${index}] is ambiguous (${argv.message}); use manual argv entry.`);
 				continue;
 			}
-			const declaredId = typeof record?.id === "string" ? record.id : validationPreferredId(argv);
-			const description =
-				typeof record?.description === "string"
-					? record.description
-					: `Run validation contract command ${JSON.stringify(argv)}`;
-			const cwd = typeof record?.cwd === "string" ? record.cwd : ".";
-			const timeoutMs = typeof record?.timeoutMs === "number" ? record.timeoutMs : SAFE_EXEC_DEFAULT_TIMEOUT_MS;
-			const tags = Array.isArray(record?.tags) ? record.tags.filter((tag): tag is string => typeof tag === "string") : [];
 			proposals.push({
-				preferredId: declaredId,
-				description,
+				preferredId: validationPreferredId(argv),
+				description: `Run validation contract command ${JSON.stringify(argv)}`,
 				command: argv,
-				cwd,
-				timeoutMs,
-				tags: tags.length > 0 ? tags : ["scientific", "validation"],
+				cwd: ".",
+				timeoutMs: SAFE_EXEC_DEFAULT_TIMEOUT_MS,
+				tags: ["scientific", "validation"],
 				provenance: {
 					kind: "validation-contract",
-					path: relative,
+					path: loaded.path,
 					detail: `validators[${index}]`,
 					authority: "project-declared",
 				},
 			});
 		}
 	}
-	if (existsSync(path.join(workspaceRoot, "VALIDATION.md"))) {
+	if (existsSync(path.join(workspaceRoot, VALIDATION_CONTRACT_MARKDOWN_PATH))) {
 		diagnostics.push(
-			"VALIDATION.md is advisory prose; enter an exact argv vector manually instead of inferring a command.",
+			`${VALIDATION_CONTRACT_MARKDOWN_PATH} is advisory prose; enter an exact argv vector manually instead of inferring a command.`,
 		);
 	}
 	return proposals;
