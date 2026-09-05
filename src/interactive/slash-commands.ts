@@ -2160,32 +2160,6 @@ const COMMAND_SHAPED_TOKEN = /^[A-Za-z][A-Za-z0-9:-]*$/u;
  */
 const COMMAND_ESCAPE = "\\/";
 
-const RETIRED_COMMAND_HINTS: Readonly<Record<string, string>> = Object.freeze({
-	status: "Use the footer or Alt+U for status; /cost, /context, and /fleet inspect their own domains.",
-	receipts: "Use /view or /view verify <run-id>.",
-	"context-init": "Use /context init.",
-	"context-clear": "Use /context reset for project context or /new for a fresh session.",
-	"context-view": "Use /context.",
-	compact: "Use /context compact [instructions].",
-	skills: "Use /skill or /resources skills.",
-	exit: "Use /quit.",
-	config: "Use /settings.",
-	ctx: "Use /context.",
-	models: "Use /model.",
-	clear: "Use /new for a fresh session or /context reset for project context.",
-	library: "Use /resources library [kind].",
-	prompts: "Use /resources prompts.",
-	extensions: "Use /resources extensions.",
-	interop: "Use /agents connect.",
-	targets: "Use /settings targets.",
-	"scoped-models": "Use /settings chat model-picker.",
-});
-
-function retiredCommandHint(token: string): string | undefined {
-	if (/^skills?:[^\s]+$/u.test(token)) return "Use /skill <name> [task].";
-	return RETIRED_COMMAND_HINTS[token];
-}
-
 /** Pure slash-command parser: no I/O, no side effects. Walks the registry in order. */
 /**
  * One notice line for a reload outcome. Success when the generation committed
@@ -2248,12 +2222,6 @@ export function dispatchSlashCommand(command: SlashCommand, ctx: SlashCommandCon
 		return "accepted";
 	}
 	if (command.kind === "unknown-command") {
-		const retiredHint = retiredCommandHint(command.token);
-		if (retiredHint) {
-			ctx.notice("error", `/${command.token} is retired and did not run. ${retiredHint}`);
-			ctx.render();
-			return "rejected";
-		}
 		// The registry does not own the token, but a prompt template might. The
 		// parser stays pure, so the lookup happens here, and only for a spelling
 		// that matched no command: `/name` is how every other agent invokes the

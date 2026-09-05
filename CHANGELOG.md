@@ -26,6 +26,7 @@ Trust spine: typed claims, executable validation, and decision provenance. Answe
 - The `muse-glimmer-30b` catalog notes, runtime preference, and guidance now say the reasoning strength dial is driven per request through `chatTemplateKwargs.byLevel` on llama.cpp and reported as undeliverable on LM Studio, instead of claiming no per-request field exists.
 
 ### Removed
+- Retired slash command hints for former command spellings are removed so unrecognized commands fall through to the standard unknown command error.
 - The unused `--kv-cache-mode` command-line flag and its run override field are removed because no runtime reads them.
 
 ## 0.4.3 - 2026-09-05
