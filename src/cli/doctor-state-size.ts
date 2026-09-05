@@ -2,6 +2,7 @@ import { lstatSync, readdirSync } from "node:fs";
 import { join } from "node:path";
 import { resolveClioDirs } from "../core/xdg.js";
 import type { DoctorFinding } from "../domains/lifecycle/doctor.js";
+import { formatBytes } from "./lifecycle-presenter.js";
 
 interface MeasuredEntry {
 	bytes: number;
@@ -67,16 +68,4 @@ function measureEntry(path: string): MeasuredEntry {
 		bytes += child.bytes;
 	}
 	return { bytes, error: null };
-}
-
-function formatBytes(bytes: number): string {
-	if (bytes < 1024) return `${bytes} B`;
-	const units = ["KiB", "MiB", "GiB", "TiB"];
-	let value = bytes;
-	let unit = -1;
-	do {
-		value /= 1024;
-		unit += 1;
-	} while (value >= 1024 && unit < units.length - 1);
-	return `${value.toFixed(value >= 10 ? 1 : 2)} ${units[unit]}`;
 }
