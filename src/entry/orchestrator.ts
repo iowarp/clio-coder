@@ -1551,6 +1551,7 @@ export async function bootOrchestrator(options: BootOptions = {}): Promise<BootR
 	if (resources) {
 		middleware.registerHook(
 			createMarketplaceOfferRegistration({
+				interactive,
 				listInstalledSkillNames: () => resources.skills(process.cwd()).items.map((skill) => skill.name),
 				listMarketplaceEntries: () => discoverMarketplaceSkills({ cwd: process.cwd() }).skills,
 				installEntry: (entry, scope) => {

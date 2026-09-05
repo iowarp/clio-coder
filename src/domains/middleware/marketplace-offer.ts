@@ -53,6 +53,8 @@ export interface MarketplaceOfferInstallResult {
 }
 
 export interface MarketplaceOfferDeps {
+	/** Whether the session can render ask_user. Defaults to interactive offers. */
+	interactive?: boolean;
 	/** Installed skill names the matcher must exclude. */
 	listInstalledSkillNames(): ReadonlyArray<string>;
 	/** The local marketplace lookup (catalog + index); already local-only. */
@@ -307,6 +309,15 @@ export function createMarketplaceOfferRegistration(deps: MarketplaceOfferDeps): 
 			const match = bestMatch(input.text ?? "");
 			if (!match) return NO_EFFECTS;
 			offeredNames.add(match.entry.name);
+			if (deps.interactive === false) {
+				return [
+					{
+						kind: "inject_reminder",
+						severity: "info",
+						message: `[Marketplace] Skill "${match.entry.name}" matches this request; install with clio-coder skills install ${match.entry.name}.`,
+					},
+				];
+			}
 			const tag = newOfferTag();
 			pendingOffer = { entry: match.entry, tag };
 			return [{ kind: "inject_reminder", severity: "info", message: marketplaceOfferReminder(match.entry, tag) }];
