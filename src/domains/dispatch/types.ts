@@ -443,6 +443,7 @@ export interface RunReceiptFindingsSummary {
 }
 
 export interface RunEnvelope {
+	version: 1;
 	id: string;
 	agentId: string;
 	/** Semantic role this attempt's route statistics belong to. */

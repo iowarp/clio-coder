@@ -600,10 +600,10 @@ const SETTINGS_VALUE_HELP_BY_ID: Partial<Record<EditableSettingId, Record<string
 		false: "context is only compacted when you run /context compact",
 	},
 	// `embedded` is a declared rung with no implementation behind it yet; it
-	// runs as `auto` until Clio can own a pane host, and the hint says so.
+	// refuses until Clio can own a pane host, and the hint says so.
 	"panes.enabled": {
 		auto: "detect a herdr session and join it as a guest; no pane host, no panes",
-		embedded: "not implemented yet; behaves as auto (guest mode inside herdr) until Clio can own a pane host",
+		embedded: "not implemented yet; use auto or guest",
 		off: "never detect or open a pane",
 	},
 	"retry.enabled": {

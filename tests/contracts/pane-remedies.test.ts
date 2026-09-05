@@ -7,11 +7,18 @@ import { createPanesRuntime } from "../../src/interactive/panes-runtime.js";
 import { BUILTIN_SLASH_COMMANDS, type SlashCommandContext } from "../../src/interactive/slash-commands.js";
 
 describe("contracts/pane refusal remedies", () => {
-	it("degrades embedded to guest detection instead of refusing every pane", async () => {
+	it("refuses embedded pane hosting with an actionable reason", async () => {
 		const outside = await detectMux({ enabled: "embedded", env: {} });
 		strictEqual(outside.detection.mode, "none");
-		strictEqual(outside.detection.refused ?? false, false);
-		strictEqual(outside.detection.reason, "HERDR_ENV is not 1, so Clio is not running inside a pane host");
+		strictEqual(outside.detection.refused, true);
+		strictEqual(outside.detection.reason, "embedded pane hosting is not implemented; use auto or guest");
+		strictEqual(outside.client, null);
+
+		const inside = await detectMux({ enabled: "embedded", env: { HERDR_ENV: "1" } });
+		strictEqual(inside.detection.mode, "none");
+		strictEqual(inside.detection.refused, true);
+		strictEqual(inside.detection.reason, "embedded pane hosting is not implemented; use auto or guest");
+		strictEqual(inside.client, null);
 	});
 
 	it("names the canonical files-pane key when Yazi is disabled", async () => {

@@ -52,6 +52,7 @@ export interface LedgerOptions {
 
 export type CreateRunInput = Omit<
 	RunEnvelope,
+	| "version"
 	| "id"
 	| "startedAt"
 	| "endedAt"
@@ -143,6 +144,10 @@ export function listFleetRuns(limit = MAX_FLEET_RUN_SCAN): FleetRunRecord[] {
 	return records.slice(0, Math.max(0, limit));
 }
 
+function isRecord(value: unknown): value is Record<string, unknown> {
+	return typeof value === "object" && value !== null && !Array.isArray(value);
+}
+
 // `RunEnvelope.heartbeatAt` deliberately persists only the absolute wall-clock
 // anchor used for operator display and crash recovery. The monotonic heartbeat
 // stamp belongs to the live transport in this process; serializing it would
@@ -152,9 +157,16 @@ function readRuns(): RunEnvelope[] {
 	if (!existsSync(path)) return [];
 	const raw = readFileSync(path, "utf8").trim();
 	if (raw.length === 0) return [];
-	const parsed = JSON.parse(raw) as RunEnvelope[];
+	const parsed = JSON.parse(raw) as unknown;
 	if (!Array.isArray(parsed)) return [];
-	return parsed;
+	const envelopes: RunEnvelope[] = [];
+	for (const entry of parsed) {
+		if (!isRecord(entry)) continue;
+		const version = entry.version === undefined ? 1 : entry.version;
+		if (version !== 1) continue;
+		envelopes.push({ ...(entry as unknown as RunEnvelope), version: 1 });
+	}
+	return envelopes;
 }
 
 function resolveMaxRuns(opt?: number | undefined): number {
@@ -241,6 +253,7 @@ export function openLedger(opts?: LedgerOptions): Ledger {
 	return {
 		create(input: CreateRunInput): RunEnvelope {
 			const envelope: RunEnvelope = {
+				version: 1,
 				id: input.id ?? newRunId(),
 				agentId: input.agentId,
 				executionRole: input.executionRole,

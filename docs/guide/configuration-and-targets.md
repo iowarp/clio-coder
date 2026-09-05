@@ -903,6 +903,8 @@ Antigravity remains an external agent loop: Clio cannot intercept each tool call
 | `suggest` | Refused because a headless subprocess cannot pause for Clio approval |
 | `full-auto` | Capped at `accept-edits` unless the external full-access gate is explicitly enabled |
 
+Launch flags are a request to agy rather than a guarantee. Headless agy reports `permission_mode: always-proceed` even under `--mode plan --sandbox`, and Clio grades autonomy enforcement as `approximated` in execution receipts. The only Clio-enforced read-only boundary is the receipt grade.
+
 Only `full-auto` together with `CLIO_CODER_ALLOW_EXTERNAL_FULL_ACCESS=1` passes `--dangerously-skip-permissions`. Treat that as an external safety bypass: agy, not Clio's tool registry, controls the resulting filesystem, shell, network, prompts, and approvals. The gate is never enabled by onboarding. A `world-knowledge` dispatch remains read-only even if the caller requests a stronger posture; use another agent for mutation work.
 
 **Setup and verification:**
