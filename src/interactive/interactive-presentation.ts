@@ -248,13 +248,11 @@ export function createInteractivePresentation(deps: InteractivePresentationDeps)
 		bus: deps.bus,
 		...(deps.getSettings ? { getSettings: deps.getSettings } : {}),
 	});
-	// The board settles a finished run on the same sealed receipt the transcript
-	// block reads, so the two surfaces agree on a worker's terminal answer.
-	const dispatchBoardStore = factories.createDispatchBoardStore(
-		deps.bus,
-		() => deps.dispatch.snapshot(),
-		(runId) => readWorkerReceiptFacts(runId),
-	);
+	const unbindRunReaders = deps.observability.bindRunReaders({
+		dispatchSnapshot: () => deps.dispatch.snapshot(),
+		readReceipt: (runId) => readWorkerReceiptFacts(runId),
+	});
+	const dispatchBoardStore = factories.createDispatchBoardStore(deps.observability);
 	const contextActivityStore = factories.createContextActivityStore(deps.bus);
 
 	const footerToolCounts = new Map<string, number>();
@@ -539,6 +537,7 @@ export function createInteractivePresentation(deps: InteractivePresentationDeps)
 		unsubscribeObservability();
 		contextActivityStore.unsubscribe();
 		dispatchBoardStore.unsubscribe();
+		unbindRunReaders();
 	};
 	const disposeStatus = (): void => {
 		if (statusDisposed) return;

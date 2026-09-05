@@ -1,4 +1,10 @@
 import type { ResponseModelIdObservationCounts } from "../../core/response-model-id.js";
+import type { AgentAudience } from "../agents/spec.js";
+import type { RunToolBudgetEnvelope } from "../dispatch/budget-envelope.js";
+import type { DispatchSnapshot } from "../dispatch/contract.js";
+import type { DispatchRequestOrigin, RunKind } from "../dispatch/types.js";
+import type { TrustSummaryProjection } from "../evidence/trust-projection.js";
+import type { CanonicalTrustStatus } from "../evidence/trust-status.js";
 import type { TargetStatus } from "../providers/contract.js";
 import type { CostProvenance } from "../providers/index.js";
 import type { AccountabilitySummary } from "./accountability.js";
@@ -6,6 +12,7 @@ import type { CostAggregate, CostEntry, CostEntryLabel, UsageBreakdown } from ".
 import type { MetricsView } from "./metrics.js";
 import type { TelemetrySnapshot } from "./telemetry.js";
 import type { SessionTurnTrace } from "./trace-store.js";
+import type { WorkerProgressSnapshot } from "./worker-progress.js";
 
 export interface TokenThroughputSnapshot {
 	tokensPerSecond: number;
@@ -41,9 +48,9 @@ export interface ObservabilityNotice {
 
 /**
  * Compact lifecycle summary for a recent dispatch run. Projected from the
- * dispatch bus channels; the raw transcript, tool arguments, and worker output
- * are intentionally absent. `evidence` is populated asynchronously once the
- * forensic bundle for the run finalizes.
+ * dispatch bus channels; raw tool arguments and reasoning are absent. Worker
+ * progress is a bounded, redacted presentation of the live stream. `evidence`
+ * is populated asynchronously once the forensic bundle for the run finalizes.
  */
 export interface ObservabilityRunSummary {
 	runId: string;
@@ -51,8 +58,29 @@ export interface ObservabilityRunSummary {
 	targetId?: string;
 	modelId?: string;
 	runtimeId?: string;
-	runtimeKind?: string;
-	status: "enqueued" | "running" | "completed" | "failed" | "aborted" | "dead" | "stale";
+	runtimeKind?: RunKind;
+	status: "enqueued" | "running" | "completed" | "failed" | "aborted" | "dead" | "stale" | "cancelling" | "retrying";
+	agentAudience?: AgentAudience;
+	requestOrigin?: DispatchRequestOrigin;
+	endpoint?: { key: string; label: string; limit: number };
+	taskSummary?: string;
+	budget?: RunToolBudgetEnvelope;
+	ttftMs?: number | null;
+	node?: string;
+	gate?: { role: string; cycle: number };
+	council?: { group: string; label: string; color?: string; round: number };
+	hostVerification?: "verified" | "rejected" | "skipped" | "not_implicated";
+	trust?: TrustSummaryProjection;
+	rerouteCount?: number;
+	failoverHops?: number;
+	contextWindow?: number;
+	lastContextTokens?: number;
+	progress?: WorkerProgressSnapshot;
+	receiptId?: string;
+	retry?: { attempt: number; dueAtMs: number; reason: string };
+	steerAcknowledgement?: { receivedAtMs: number; chars: number };
+	writeRecordDowngrade?: { reason: "opaque_tool_succeeded"; tool: string; toolCallId: string };
+	phase?: { wave: number; stepId: string };
 	startedAtMs: number;
 	updatedAtMs: number;
 	finishedAtMs: number | null;
@@ -101,7 +129,23 @@ export interface ObservabilitySnapshot {
 	pendingEvidenceBuildRunIds: readonly string[];
 }
 
-export interface ObservabilityContract {
+/** Runtime readers supplied after dispatch is composed, avoiding a domain dependency cycle. */
+export interface ObservabilityRunReaders {
+	dispatchSnapshot?: () => DispatchSnapshot;
+	readReceipt?: (runId: string) => { text?: string; trust?: CanonicalTrustStatus } | null;
+}
+
+/** Run projection controls shared by the contract and the in-memory projection. */
+export interface ObservabilityRunProjection {
+	/** Bind live dispatch and receipt readers; disposal detaches this binding only. */
+	bindRunReaders(readers: ObservabilityRunReaders): () => void;
+	/** Fold retry timers and live counters from the dispatch reader. */
+	reconcileRuns(): void;
+	/** Record an explicit fleet position, including before a run's first event. */
+	setFleetPhase(runId: string, phase: NonNullable<ObservabilityRunSummary["phase"]>): void;
+}
+
+export interface ObservabilityContract extends ObservabilityRunProjection {
 	/** Raw counter + histogram view. */
 	telemetry(): TelemetrySnapshot;
 	/** Aggregated view the TUI consumes. */

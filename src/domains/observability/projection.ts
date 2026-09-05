@@ -9,28 +9,38 @@
  *   mutates in-memory state and marks the projection changed; the actual
  *   snapshot build and listener fan-out happen on a short debounce so a burst
  *   of DispatchProgress events coalesces into one notification.
- * - The snapshot never stores raw worker output, tool arguments, or transcript
- *   text. Run summaries carry compact lifecycle fields; notices carry a short
- *   rendered message and a reference id, nothing more.
+ * - Worker progress retains only bounded answer text and redacted action
+ *   descriptors. Tool arguments and reasoning are never stored.
  * - Run summaries and notices are bounded rings so a long-lived session cannot
  *   grow the projection without limit.
  */
 
-import { BusChannels } from "../../core/bus-events.js";
+import { performance } from "node:perf_hooks";
+import { BusChannels, type DispatchRunIdentity } from "../../core/bus-events.js";
 import { resolveDispatchFailureStatus } from "../../core/dispatch-outcome.js";
 import type { SafeEventBus } from "../../core/event-bus.js";
+import { truncateToWidth } from "../../engine/tui-primitives.js";
+import type { AgentAudience } from "../agents/spec.js";
+import { cloneRunToolBudgetEnvelope, type RunToolBudgetEnvelope } from "../dispatch/budget-envelope.js";
+import type { DispatchSnapshot } from "../dispatch/contract.js";
+import type { DispatchRequestOrigin, RunKind } from "../dispatch/types.js";
+import { summarizeTrustStatus } from "../evidence/trust-projection.js";
 import type { TargetStatus } from "../providers/contract.js";
-import { resolveCostProvenance } from "../providers/types/cost-provenance.js";
+import { type CostProvenance, resolveCostProvenance } from "../providers/types/cost-provenance.js";
+import { sanitizeCallTargetText } from "../safety/call-target.js";
 import type { AccountabilitySummary } from "./accountability.js";
 import type {
 	ObservabilityNotice,
 	ObservabilityRunEvidence,
+	ObservabilityRunProjection,
+	ObservabilityRunReaders,
 	ObservabilityRunSummary,
 	ObservabilitySnapshot,
 	TokenThroughputSnapshot,
 } from "./contract.js";
 import type { CostAggregate, UsageBreakdown } from "./cost.js";
 import type { MetricsView } from "./metrics.js";
+import { createWorkerProgressFold, type WorkerProgressFold } from "./worker-progress.js";
 
 /** Recent run summaries retained. Mirrors the dispatch board's window. */
 export const MAX_PROJECTION_RUNS = 50;
@@ -46,7 +56,7 @@ export const PROJECTION_FLUSH_DEBOUNCE_MS = 16;
  * own bus handlers never matters (both run synchronously before the debounced
  * build).
  */
-export interface ProjectionReadModel {
+export interface ProjectionReadModel extends ObservabilityRunReaders {
 	metrics(): MetricsView;
 	sessionCost(): number;
 	sessionCostSummary(): CostAggregate;
@@ -55,15 +65,13 @@ export interface ProjectionReadModel {
 	readAccountability(): AccountabilitySummary;
 }
 
-export interface ObservabilityProjection {
+export interface ObservabilityProjection extends ObservabilityRunProjection {
 	snapshot(): ObservabilitySnapshot;
 	subscribe(listener: (snapshot: ObservabilitySnapshot) => void): () => void;
 	/** Recompute after a direct session mutation (recordTokens/resetSession/safety counter). */
 	refresh(): void;
 	/** A forensic evidence build for `runId` has started. */
 	evidenceBuildStarted(runId: string): void;
-	/** The evidence bundle for `runId` finalized and its index row landed. */
-	evidenceBuildSucceeded(runId: string, evidence: ObservabilityRunEvidence): void;
 	/** The evidence build for `runId` failed; surface a bounded notice. */
 	evidenceBuildFailed(runId: string, message: string): void;
 	/** Detach bus listeners and cancel any pending flush. */
@@ -105,17 +113,180 @@ function makeRef(parts: Record<string, unknown>): ObservabilityNotice["ref"] | u
 	return Object.keys(ref).length > 0 ? (ref as ObservabilityNotice["ref"]) : undefined;
 }
 
-/** Shared identity fields carried on every dispatch lifecycle event. */
-interface RunIdentityLike {
-	agentId?: unknown;
-	targetId?: unknown;
-	wireModelId?: unknown;
-	runtimeId?: unknown;
-	runtimeKind?: unknown;
+interface RunEntry extends ObservabilityRunSummary {
+	progressFold: WorkerProgressFold;
+	startedAtClockMs: number | null;
+}
+
+const TASK_SUMMARY_MAX_WIDTH = 240;
+
+function finiteOrZero(value: unknown): number {
+	return num(value, 0);
+}
+
+function parseRuntimeKind(value: unknown): RunKind {
+	if (value === "sdk" || value === "subprocess" || value === "acp-delegation") return value;
+	return "http";
+}
+
+function parseAgentAudience(value: unknown, fallback: AgentAudience | undefined): AgentAudience | undefined {
+	if (value === "base" || value === "shadow" || value === "custom" || value === "internal") return value;
+	return fallback;
+}
+
+function parseRequestOrigin(
+	value: unknown,
+	fallback: DispatchRequestOrigin | undefined,
+): DispatchRequestOrigin | undefined {
+	if (value === "user" || value === "agent" || value === "internal") return value;
+	return fallback;
+}
+
+function parseNonEmptyString(value: unknown): string | undefined {
+	return typeof value === "string" && value.length > 0 ? value : undefined;
+}
+
+function parseTaskSummary(
+	raw: Partial<DispatchRunIdentity> & { task?: unknown; taskSummary?: unknown },
+	fallback: string | undefined,
+): string | undefined {
+	return sanitizeDispatchTaskSummary(raw.task) ?? sanitizeDispatchTaskSummary(raw.taskSummary) ?? fallback;
+}
+
+function parsePositiveInt(value: unknown): number | undefined {
+	return typeof value === "number" && Number.isFinite(value) && value > 0 ? Math.floor(value) : undefined;
+}
+
+function parseGateBadge(value: unknown): { role: string; cycle: number } | undefined {
+	if (typeof value !== "object" || value === null) return undefined;
+	const record = value as { role?: unknown; cycle?: unknown };
+	if (typeof record.role !== "string" || record.role.length === 0) return undefined;
+	const cycle = parsePositiveInt(record.cycle) ?? 1;
+	return { role: record.role, cycle };
+}
+
+function parseEndpointCapacity(value: unknown): ObservabilityRunSummary["endpoint"] | undefined {
+	if (typeof value !== "object" || value === null) return undefined;
+	const record = value as { key?: unknown; label?: unknown; limit?: unknown };
+	const key = parseNonEmptyString(record.key);
+	const label = parseNonEmptyString(record.label);
+	const limit = parsePositiveInt(record.limit);
+	return key === undefined || label === undefined || limit === undefined ? undefined : { key, label, limit };
+}
+
+function parseCouncilBadge(value: unknown): ObservabilityRunSummary["council"] | undefined {
+	if (typeof value !== "object" || value === null) return undefined;
+	const record = value as { group?: unknown; label?: unknown; color?: unknown; round?: unknown };
+	const group = parseNonEmptyString(record.group);
+	const label = parseNonEmptyString(record.label);
+	const round = parsePositiveInt(record.round);
+	if (group === undefined || label === undefined || round === undefined) return undefined;
+	return {
+		group,
+		label,
+		...(typeof record.color === "string" && record.color.length > 0 ? { color: record.color } : {}),
+		round,
+	};
+}
+
+function sanitizeDispatchTaskSummary(value: unknown): string | undefined {
+	if (typeof value !== "string") return undefined;
+	const sanitized = sanitizeCallTargetText(value);
+	if (sanitized.length === 0) return undefined;
+	// pi-tui's truncator appends reset sequences when it elides. Strip those
+	// again so the stored projection remains plain text, not terminal styling.
+	return sanitizeCallTargetText(truncateToWidth(sanitized, TASK_SUMMARY_MAX_WIDTH, "…", false));
+}
+
+function parseRetrySnapshot(
+	value: DispatchSnapshot["retrying"][number],
+): NonNullable<ObservabilityRunSummary["retry"]> | null {
+	const attempt = parsePositiveInt(value.attempt);
+	const dueAtMs = Date.parse(value.dueAt);
+	if (attempt === undefined || !Number.isFinite(dueAtMs)) return null;
+	return {
+		attempt,
+		dueAtMs,
+		reason: sanitizeCallTargetText(value.reason),
+	};
+}
+
+function readRetrySnapshot(
+	snapshot: DispatchSnapshot,
+): Map<string, { agentId: string; taskSummary?: string; retry: NonNullable<ObservabilityRunSummary["retry"]> }> {
+	const retrying = new Map<
+		string,
+		{ agentId: string; taskSummary?: string; retry: NonNullable<ObservabilityRunSummary["retry"]> }
+	>();
+	try {
+		for (const value of snapshot.retrying) {
+			const runId = asRunId(value.runId);
+			const agentId = parseNonEmptyString(value.agentId);
+			const retry = parseRetrySnapshot(value);
+			const taskSummary = sanitizeDispatchTaskSummary(value.task);
+			if (runId && agentId && retry) {
+				retrying.set(runId, {
+					agentId,
+					...(taskSummary !== undefined ? { taskSummary } : {}),
+					retry,
+				});
+			}
+		}
+	} catch {
+		// The projection remains lifecycle-event driven if an optional snapshot fails.
+	}
+	return retrying;
+}
+
+function readRunningSnapshot(snapshot: DispatchSnapshot): Map<
+	string,
+	{
+		inputTokens: number;
+		outputTokens: number;
+		tokenCount: number;
+		costUsd: number;
+		costProvenance: CostProvenance;
+		outcomePhase: string;
+		budget?: RunToolBudgetEnvelope;
+	}
+> {
+	const running = new Map<
+		string,
+		{
+			inputTokens: number;
+			outputTokens: number;
+			tokenCount: number;
+			costUsd: number;
+			costProvenance: CostProvenance;
+			outcomePhase: string;
+			budget?: RunToolBudgetEnvelope;
+		}
+	>();
+	try {
+		for (const value of snapshot.running) {
+			const runId = asRunId(value.runId);
+			if (!runId) continue;
+			const budget = cloneRunToolBudgetEnvelope(value.budget);
+			running.set(runId, {
+				inputTokens: finiteOrZero(value.tokens.input),
+				outputTokens: finiteOrZero(value.tokens.output),
+				tokenCount: finiteOrZero(value.tokens.total),
+				costUsd: finiteOrZero(value.costUsd),
+				costProvenance: value.costProvenance ?? "unknown",
+				outcomePhase: value.outcomePhase,
+				...(budget !== undefined ? { budget } : {}),
+			});
+		}
+	} catch {
+		// Lifecycle/progress events remain authoritative if the optional snapshot fails.
+	}
+	return running;
 }
 
 export function createObservabilityProjection(bus: SafeEventBus, deps: ProjectionReadModel): ObservabilityProjection {
-	const runs = new Map<string, ObservabilityRunSummary>();
+	const runs = new Map<string, RunEntry>();
+	const fleetPhases = new Map<string, NonNullable<ObservabilityRunSummary["phase"]>>();
+	let runReaders: ObservabilityRunReaders = deps;
 	const notices: ObservabilityNotice[] = [];
 	const providerHealth = new Map<string, TargetStatus>();
 	const pendingEvidence = new Set<string>();
@@ -142,7 +313,14 @@ export function createObservabilityProjection(bus: SafeEventBus, deps: Projectio
 			accountability,
 			// Newest-first: Map preserves first-seen (enqueue) order, so reversing
 			// surfaces the most recently started runs at the head of the list.
-			runs: [...runs.values()].reverse(),
+			runs: [...runs.values()].reverse().map((entry) => {
+				const { progressFold, startedAtClockMs: _clock, ...summary } = entry;
+				return structuredClone({
+					...summary,
+					status: entry.retry ? "retrying" : entry.status,
+					progress: progressFold.snapshot(),
+				});
+			}),
 			providerHealth: providerHealthRecord,
 			notices: [...notices],
 			pendingEvidenceBuildRunIds: [...pendingEvidence],
@@ -175,19 +353,27 @@ export function createObservabilityProjection(bus: SafeEventBus, deps: Projectio
 		scheduleFlush();
 	}
 
-	function putRun(runId: string, summary: ObservabilityRunSummary): void {
+	function putRun(runId: string, summary: RunEntry): void {
 		runs.set(runId, summary);
 		while (runs.size > MAX_PROJECTION_RUNS) {
 			const oldest = runs.keys().next().value;
 			if (oldest === undefined) break;
 			runs.delete(oldest);
+			fleetPhases.delete(oldest);
 		}
 	}
 
-	function emptyRun(runId: string, now: number): ObservabilityRunSummary {
+	function emptyRun(runId: string, now: number): RunEntry {
+		const phase = fleetPhases.get(runId);
 		return {
 			runId,
 			agentId: "-",
+			runtimeKind: "http",
+			progressFold: createWorkerProgressFold(),
+			startedAtClockMs: null,
+			ttftMs: null,
+			lastContextTokens: 0,
+			...(phase !== undefined ? { phase: { ...phase } } : {}),
 			status: "enqueued",
 			startedAtMs: now,
 			updatedAtMs: now,
@@ -199,12 +385,27 @@ export function createObservabilityProjection(bus: SafeEventBus, deps: Projectio
 		};
 	}
 
-	function applyIdentity(summary: ObservabilityRunSummary, id: RunIdentityLike): void {
+	function applyIdentity(summary: RunEntry, id: Partial<DispatchRunIdentity>): void {
+		// A lifecycle update must earn its trust again from the current receipt.
+		delete summary.trust;
 		if (typeof id.agentId === "string" && id.agentId.length > 0) summary.agentId = id.agentId;
 		if (typeof id.targetId === "string" && id.targetId.length > 0) summary.targetId = id.targetId;
 		if (typeof id.wireModelId === "string" && id.wireModelId.length > 0) summary.modelId = id.wireModelId;
 		if (typeof id.runtimeId === "string" && id.runtimeId.length > 0) summary.runtimeId = id.runtimeId;
-		if (typeof id.runtimeKind === "string" && id.runtimeKind.length > 0) summary.runtimeKind = id.runtimeKind;
+		summary.runtimeKind = parseRuntimeKind(id.runtimeKind ?? summary.runtimeKind);
+		const additions = {
+			agentAudience: parseAgentAudience(id.agentAudience, summary.agentAudience),
+			requestOrigin: parseRequestOrigin(id.requestOrigin, summary.requestOrigin),
+			node: parseNonEmptyString(id.node) ?? summary.node,
+			endpoint: parseEndpointCapacity(id.endpoint) ?? summary.endpoint,
+			gate: parseGateBadge(id.gate) ?? summary.gate,
+			council: parseCouncilBadge(id.council) ?? summary.council,
+			rerouteCount: parsePositiveInt(id.rerouteCount) ?? summary.rerouteCount,
+			contextWindow: parsePositiveInt(id.contextWindow) ?? summary.contextWindow,
+			taskSummary: parseTaskSummary(id, summary.taskSummary),
+			budget: cloneRunToolBudgetEnvelope(id.budget) ?? summary.budget,
+		};
+		Object.assign(summary, Object.fromEntries(Object.entries(additions).filter(([, value]) => value !== undefined)));
 	}
 
 	// num()'s Number.isFinite check matters here specifically: a NaN or
@@ -244,6 +445,85 @@ export function createObservabilityProjection(bus: SafeEventBus, deps: Projectio
 		markChanged();
 	}
 
+	function settleFromReceipt(summary: RunEntry): void {
+		try {
+			const facts = runReaders.readReceipt?.(summary.runId);
+			// A failed or retired seal cannot supply the board's terminal answer.
+			const text = facts?.trust?.artifactIntegrity.state === "verified" ? facts.text : undefined;
+			summary.progressFold.settle(typeof text === "string" && text.trim().length > 0 ? text : undefined);
+			if (facts?.trust !== undefined) summary.trust = summarizeTrustStatus(facts.trust);
+		} catch {
+			summary.progressFold.settle();
+		}
+	}
+
+	function applyTerminalDetail(summary: RunEntry, payload: Record<string, unknown>): void {
+		const host = payload.hostVerification;
+		if (host === "verified" || host === "rejected" || host === "skipped" || host === "not_implicated")
+			summary.hostVerification = host;
+		if (payload.reason !== "retry_denied") summary.receiptId = summary.runId;
+		delete summary.retry;
+		settleFromReceipt(summary);
+	}
+
+	function reconcileRuns(): void {
+		if (!runReaders.dispatchSnapshot) return;
+		let current: DispatchSnapshot;
+		try {
+			current = runReaders.dispatchSnapshot();
+		} catch {
+			return;
+		}
+		if (!Array.isArray(current?.retrying) || !Array.isArray(current?.running)) return;
+		const retrying = readRetrySnapshot(current);
+		const running = readRunningSnapshot(current);
+		const now = Date.now();
+		let changed = false;
+		for (const entry of runs.values()) {
+			if (entry.retry && !retrying.has(entry.runId)) {
+				delete entry.retry;
+				changed = true;
+			}
+		}
+		for (const [runId, retry] of retrying) {
+			const existing = runs.get(runId);
+			if (existing && existing.status !== "failed" && existing.status !== "dead") continue;
+			const entry = existing ?? emptyRun(runId, now);
+			if (!existing) {
+				entry.agentId = retry.agentId;
+				entry.status = "failed";
+			}
+			entry.retry = { ...retry.retry };
+			if (entry.taskSummary === undefined && retry.taskSummary !== undefined) entry.taskSummary = retry.taskSummary;
+			putRun(runId, entry);
+			changed = true;
+		}
+		for (const [runId, live] of running) {
+			const entry = runs.get(runId);
+			if (!entry || (isTerminal(entry.status) && live.outcomePhase !== "aborting")) continue;
+			entry.tokens.input = live.inputTokens;
+			entry.tokens.output = live.outputTokens;
+			entry.tokens.total = live.tokenCount;
+			entry.costUsd = live.costUsd;
+			entry.costProvenance = live.costProvenance;
+			if (live.budget !== undefined) entry.budget = live.budget;
+			if (live.outcomePhase === "aborting" && entry.status !== "completed" && entry.status !== "aborted") {
+				entry.status = "cancelling";
+				delete entry.retry;
+			}
+			changed = true;
+		}
+		if (changed) markChanged();
+	}
+
+	function evidenceBuildSucceeded(runId: string, evidence: ObservabilityRunEvidence): void {
+		pendingEvidence.delete(runId);
+		const summary = runs.get(runId);
+		if (summary) summary.evidence = { ...evidence, tags: [...evidence.tags] };
+		accountability = deps.readAccountability();
+		markChanged();
+	}
+
 	const unsubscribes: Array<() => void> = [
 		bus.on(BusChannels.DispatchEnqueued, (raw: unknown) => {
 			const payload = (raw ?? {}) as Record<string, unknown>;
@@ -251,8 +531,9 @@ export function createObservabilityProjection(bus: SafeEventBus, deps: Projectio
 			if (!runId) return;
 			const now = Date.now();
 			const summary = runs.get(runId) ?? emptyRun(runId, now);
-			applyIdentity(summary, payload);
+			applyIdentity(summary, payload as Partial<DispatchRunIdentity>);
 			summary.status = "enqueued";
+			delete summary.retry;
 			summary.updatedAtMs = now;
 			putRun(runId, summary);
 			markChanged();
@@ -263,9 +544,11 @@ export function createObservabilityProjection(bus: SafeEventBus, deps: Projectio
 			if (!runId) return;
 			const now = Date.now();
 			const summary = runs.get(runId) ?? emptyRun(runId, now);
-			applyIdentity(summary, payload);
+			applyIdentity(summary, payload as Partial<DispatchRunIdentity>);
 			summary.status = "running";
 			summary.startedAtMs = now;
+			summary.startedAtClockMs = performance.now();
+			delete summary.retry;
 			summary.updatedAtMs = now;
 			summary.finishedAtMs = null;
 			summary.durationMs = null;
@@ -276,8 +559,6 @@ export function createObservabilityProjection(bus: SafeEventBus, deps: Projectio
 			const payload = (raw ?? {}) as Record<string, unknown>;
 			const runId = asRunId(payload.runId);
 			if (!runId) return;
-			// Only track progress for a run we already know; a bare progress relay
-			// carries no identity to seed a summary from.
 			const summary = runs.get(runId);
 			if (!summary) return;
 			const now = Date.now();
@@ -286,9 +567,47 @@ export function createObservabilityProjection(bus: SafeEventBus, deps: Projectio
 			const type = typeof event.type === "string" ? event.type : "";
 			if (type === "heartbeat_status") {
 				const status = resolveHeartbeat(event.status);
-				if (status && !isTerminal(summary.status)) summary.status = status;
+				if (status && !isTerminal(summary.status) && summary.status !== "cancelling") summary.status = status;
+				if (status === "dead") summary.progressFold.settle();
 				markChanged();
 				return;
+			}
+			if (type === "attempt_start") {
+				summary.failoverHops = (summary.failoverHops ?? 0) + 1;
+				summary.status = "running";
+				summary.finishedAtMs = null;
+				summary.durationMs = null;
+				summary.progressFold.restart();
+				delete summary.retry;
+				markChanged();
+				return;
+			}
+			// Agent startup provides the monotonic origin for TTFT. Lifecycle
+			// timestamps remain owned by DispatchStarted.
+			if (type === "agent_start") summary.startedAtClockMs = performance.now();
+			if (type === "message_update") {
+				const assistantEvent = (event.assistantMessageEvent ?? {}) as Record<string, unknown>;
+				const hasDelta = ["text_delta", "thinking_delta", "toolcall_start", "toolcall_delta"].includes(
+					String(assistantEvent.type),
+				);
+				if (hasDelta && summary.ttftMs === null && summary.startedAtClockMs !== null)
+					summary.ttftMs = Math.round(performance.now() - summary.startedAtClockMs);
+			}
+			if (type === "clio_coder_write_record_downgraded") {
+				const detail = (event.payload ?? {}) as Record<string, unknown>;
+				const tool = parseNonEmptyString(detail.tool);
+				const toolCallId = parseNonEmptyString(detail.toolCallId);
+				if (detail.reason === "opaque_tool_succeeded" && tool !== undefined && toolCallId !== undefined)
+					summary.writeRecordDowngrade = {
+						reason: "opaque_tool_succeeded",
+						tool: sanitizeCallTargetText(tool),
+						toolCallId: sanitizeCallTargetText(toolCallId),
+					};
+			}
+			summary.progressFold.observe(payload.event);
+			if (type === "clio_coder_steer_received") {
+				const detail = (event.payload ?? {}) as Record<string, unknown>;
+				summary.steerAcknowledgement = { receivedAtMs: now, chars: Math.max(0, Math.floor(num(detail.chars, 0))) };
 			}
 			if (type === "message_end" && !isTerminal(summary.status)) {
 				const message = (event.message ?? {}) as { role?: unknown; usage?: Record<string, unknown> };
@@ -298,8 +617,12 @@ export function createObservabilityProjection(bus: SafeEventBus, deps: Projectio
 					summary.tokens.input += input;
 					summary.tokens.output += output;
 					summary.tokens.total += input + output + num(message.usage.cacheWrite, 0);
+					summary.lastContextTokens = input + output;
 				}
 			}
+			// A worker's agent_end settles its displayed progress; only a terminal
+			// dispatch event changes the canonical run outcome.
+			if (type === "agent_end") summary.progressFold.settle();
 			markChanged();
 		}),
 		bus.on(BusChannels.DispatchCompleted, (raw: unknown) => {
@@ -308,12 +631,13 @@ export function createObservabilityProjection(bus: SafeEventBus, deps: Projectio
 			if (!runId) return;
 			const now = Date.now();
 			const summary = runs.get(runId) ?? emptyRun(runId, now);
-			applyIdentity(summary, payload);
+			applyIdentity(summary, payload as Partial<DispatchRunIdentity>);
 			summary.status = "completed";
 			summary.updatedAtMs = now;
 			summary.finishedAtMs = now;
 			summary.durationMs = num(payload.durationMs, Math.max(0, now - summary.startedAtMs));
 			applyTerminalTokens(summary, payload);
+			applyTerminalDetail(summary, payload);
 			summary.outcome = str(payload.outcome, "succeeded");
 			summary.outcomeDetail = typeof payload.outcomeDetail === "string" ? payload.outcomeDetail : null;
 			putRun(runId, summary);
@@ -325,16 +649,39 @@ export function createObservabilityProjection(bus: SafeEventBus, deps: Projectio
 			if (!runId) return;
 			const now = Date.now();
 			const summary = runs.get(runId) ?? emptyRun(runId, now);
-			applyIdentity(summary, payload);
+			applyIdentity(summary, payload as Partial<DispatchRunIdentity>);
 			summary.status = resolveDispatchFailureStatus(payload.reason);
 			summary.updatedAtMs = now;
 			summary.finishedAtMs = now;
 			summary.durationMs = num(payload.durationMs, Math.max(0, now - summary.startedAtMs));
 			applyTerminalTokens(summary, payload);
+			applyTerminalDetail(summary, payload);
 			summary.outcome = str(payload.outcome, str(payload.reason, "failed"));
 			summary.outcomeDetail = typeof payload.outcomeDetail === "string" ? payload.outcomeDetail : null;
 			putRun(runId, summary);
 			markChanged();
+		}),
+		bus.on(BusChannels.RunAborted, (raw) => {
+			const runId = asRunId(raw?.runId);
+			const summary = runId ? runs.get(runId) : undefined;
+			if (!summary) return;
+			const wasRetrying = summary.retry !== undefined;
+			delete summary.retry;
+			if (wasRetrying && raw.startedAt === null) {
+				summary.status = "aborted";
+				summary.finishedAtMs = Date.now();
+				summary.progressFold.settle();
+			} else {
+				if (isTerminal(summary.status) && !wasRetrying) return;
+				summary.status = "cancelling";
+			}
+			summary.outcomeDetail = typeof raw.reason === "string" ? raw.reason : (summary.outcomeDetail ?? null);
+			summary.updatedAtMs = Date.now();
+			markChanged();
+		}),
+		bus.on(BusChannels.AccountabilityEvidenceReady, (payload) => {
+			const runId = asRunId(payload?.runId);
+			if (runId) evidenceBuildSucceeded(runId, payload);
 		}),
 		bus.on(BusChannels.ProviderHealth, (raw: unknown) => {
 			const payload = (raw ?? {}) as Record<string, unknown>;
@@ -348,6 +695,24 @@ export function createObservabilityProjection(bus: SafeEventBus, deps: Projectio
 
 	return {
 		snapshot: buildSnapshot,
+		bindRunReaders(readers) {
+			runReaders = readers;
+			return () => {
+				if (runReaders === readers) runReaders = deps;
+			};
+		},
+		reconcileRuns,
+		setFleetPhase(runId, phase) {
+			fleetPhases.set(runId, { ...phase });
+			while (fleetPhases.size > MAX_PROJECTION_RUNS) {
+				const oldest = fleetPhases.keys().next().value;
+				if (oldest === undefined) break;
+				fleetPhases.delete(oldest);
+			}
+			const summary = runs.get(runId);
+			if (summary) summary.phase = { ...phase };
+			markChanged();
+		},
 		subscribe(listener) {
 			listeners.add(listener);
 			listener(buildSnapshot());
@@ -361,22 +726,6 @@ export function createObservabilityProjection(bus: SafeEventBus, deps: Projectio
 		evidenceBuildStarted(runId) {
 			if (typeof runId !== "string" || runId.length === 0) return;
 			pendingEvidence.add(runId);
-			markChanged();
-		},
-		evidenceBuildSucceeded(runId, evidence) {
-			pendingEvidence.delete(runId);
-			const summary = runs.get(runId);
-			if (summary) {
-				summary.evidence = {
-					evidenceId: evidence.evidenceId,
-					firstPassSuccess: evidence.firstPassSuccess,
-					findingCount: evidence.findingCount,
-					tags: [...evidence.tags],
-				};
-			}
-			// The index row that feeds accountability was written before this fires,
-			// so refresh the cached summary from the sidecar index.
-			accountability = deps.readAccountability();
 			markChanged();
 		},
 		evidenceBuildFailed(runId, message) {
