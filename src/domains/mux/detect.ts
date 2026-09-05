@@ -126,12 +126,9 @@ export async function detectMux(options: DetectMuxOptions = {}): Promise<MuxDete
 		return { detection: none("panes are turned off"), client: null };
 	}
 	if (enabled === "embedded") {
-		// Embedded mode (Clio owning the pane host) is not implemented yet. An
-		// operator who picked it wanted panes, so the rung degrades to guest
-		// detection instead of refusing everything; the notice below says which
-		// mode actually runs. When the guest ladder also fails, that failure is
-		// reported on its own terms.
-		log("info", "interface.panes.enabled=embedded is not implemented yet; detecting a guest pane host instead");
+		const reason = "embedded pane hosting is not implemented; use auto or guest";
+		log("warning", reason);
+		return { detection: none(reason, [], true), client: null };
 	}
 	if (env.HERDR_ENV !== "1") {
 		return { detection: none("HERDR_ENV is not 1, so Clio is not running inside a pane host"), client: null };

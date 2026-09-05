@@ -21,6 +21,7 @@ Trust spine: typed claims, executable validation, and decision provenance. Answe
 - The dispatch board reads observability's run projection. One fold owns lifecycle events, worker progress, receipt trust, retries, cancellation, fleet positions, and evidence readiness; the board keeps ordering, selection, and rendering. Terminal status and accounting come from the same projection the observability contract publishes.
 
 ### Fixed
+- Setting interface.panes.enabled=embedded refuses with a visible reason instead of silently degrading to guest detection (#294).
 - Deprecation warnings for the legacy lmstudio-native runtime id now route through warnLegacyNaming, reporting the planned v0.7.0 removal and deduping per process.
 - Fleet run preview diagnostics and approval overlays now format cost totals through the shared formatter so amounts at or above one cent render with two decimals instead of four.
 - Default path policy now marks project and user skill roots read-only for workers and the orchestrator, alongside the existing skill-authority guard; operator installs continue through the CLI (#300).
