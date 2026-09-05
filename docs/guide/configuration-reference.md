@@ -226,7 +226,7 @@ Read from the process environment at boot unless the row says otherwise.
 | `CLIO_CODER_RENDER_TRACE` | `unset (disabled)` | File path for the versioned JSONL render-pipeline trace (timing only, no conversation text), truncated on open; off when unset or empty. |  |
 | `CLIO_CODER_REQUIRE_HOME_PREFIX` | `unset (disabled)` | Exactly `1` aborts startup when any resolved Clio directory lies outside `CLIO_CODER_HOME`; a test-harness guardrail that does nothing when `CLIO_CODER_HOME` is unset. |  |
 | `CLIO_CODER_RIGOR` | `repo-derived` | `high` or `normal` (case-insensitive) overrides the finish-contract evidence bar for the orchestrator and dispatched workers; any other value means no override. | env > a parsed workspace validation contract (`.clio-coder/validation.yaml` or `validation.yaml`, version 1) raises it to `high`; an invalid contract or a Markdown-only `VALIDATION.md` leaves `normal` > `normal`; no settings key |
-| `CLIO_CODER_RUN_OVERRIDES` | `unset` | JSON object (`maxContextTokens`, `kvCacheMode`, `sampling`) that `clio-coder run` and print modes write via `withRunOverrides` for the run's scope; workers inherit it and malformed input is dropped. |  |
+| `CLIO_CODER_RUN_OVERRIDES` | `unset` | JSON object (`maxContextTokens`, `sampling`) that `clio-coder run` and print modes write via `withRunOverrides` for the run's scope; workers inherit it and malformed input is dropped. |  |
 | `CLIO_CODER_SCREEN_READER` | `unset (disabled)` | Exactly `1` makes smooth-streaming `auto` use the immediate coalescer so a screen reader gets the low-motion update behavior; explicit `on` is unaffected. |  |
 | `CLIO_CODER_SHUTDOWN_HOOK_MS` | `500` | Positive integer milliseconds each shutdown and domain `stop()` hook may run before the coordinator moves on; non-positive or unparsable values use the default. |  |
 | `CLIO_CODER_SKILL_CATALOG_DIR` | `unset` | Path to a local skill catalog used by the marketplace and the provenance pin manifest; beats `<cwd>/skills` and the packaged catalog but not an explicit catalogDir option. | explicit catalogDir option > env > `<cwd>/skills` > packaged catalog |
@@ -615,7 +615,6 @@ Grouped by command. Global flags appear under `global`.
 | `--help` | Print the command's usage and exit. |
 | `--json` | Stream JSONL events for the main-agent turn (dispatch streams events plus the receipt JSON) instead of text output. |
 | `--json-events` | Main-agent JSON stream mode: `full` or `terminal`; implies `--json`. |
-| `--kv-cache-mode` | One-run KV-cache override for supported local runtimes: `f16`, `f32`, `none`, `false`, `q8_0`, `q4_0`, `q4_1`, `iq4_nl`, `q5_0`, or `q5_1`. |
 | `--max-context-tokens` | One-run context-window override (positive integer tokens) for supported local runtimes. |
 | `--min-p` | One-run min-p override (0 to 1) when the selected runtime supports it. |
 | `--model` | Wire model id for this run's main agent or dispatched worker instead of the target's default. |

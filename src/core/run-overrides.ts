@@ -18,8 +18,6 @@ export const RUN_OVERRIDES_ENV = "CLIO_CODER_RUN_OVERRIDES";
 export interface RunOverrides {
 	/** One-run context-window override for supported local runtimes. */
 	maxContextTokens?: number;
-	/** One-run KV-cache quantization mode; the consuming runtime validates it. */
-	kvCacheMode?: string;
 	/**
 	 * One-run sampling parameter overrides. Kept as a loose numeric record
 	 * here (undefined fields are dropped at serialization);
@@ -44,9 +42,6 @@ export function runOverrides(env: NodeJS.ProcessEnv = process.env): RunOverrides
 	const maxContextTokens = record.maxContextTokens;
 	if (typeof maxContextTokens === "number" && Number.isInteger(maxContextTokens) && maxContextTokens > 0) {
 		out.maxContextTokens = maxContextTokens;
-	}
-	if (typeof record.kvCacheMode === "string" && record.kvCacheMode.length > 0) {
-		out.kvCacheMode = record.kvCacheMode;
 	}
 	const sampling = record.sampling;
 	if (sampling !== null && typeof sampling === "object" && !Array.isArray(sampling)) {

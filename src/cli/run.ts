@@ -62,7 +62,6 @@ Flags:
   --frequency-penalty <N>   one-run frequency penalty override
   --repeat-penalty <N>      one-run repeat penalty override
   --max-context-tokens <N>  one-run context-window override for supported local runtimes
-  --kv-cache-mode <mode>    one-run KV-cache mode override: f16|f32|none|false|q8_0|q4_0|q4_1|iq4_nl|q5_0|q5_1
   --json                    stream JSONL events for the main-agent path; dispatch streams events and receipt JSON
   --json-events <mode>      main-agent JSON stream mode: full|terminal; implies --json
   --steer-channel <path>    read live steering lines from a FIFO or appended regular file
@@ -213,7 +212,6 @@ export async function runClioRun(
 	return withRunOverrides(
 		{
 			...(parsed.maxContextTokens !== undefined ? { maxContextTokens: parsed.maxContextTokens } : {}),
-			...(parsed.kvCacheMode !== undefined ? { kvCacheMode: parsed.kvCacheMode } : {}),
 		},
 		async () => {
 			if (parsed.help) {
