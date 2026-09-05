@@ -128,6 +128,23 @@ function areaId(key: string): string {
 	return /^[a-z]/.test(body) ? body : `a-${body}`;
 }
 
+/** Keep readable ids, reserving every preferred spelling before adding collision suffixes. */
+function uniqueIds(preferred: ReadonlyArray<string>): string[] {
+	const reserved = new Set(preferred);
+	const used = new Set<string>();
+	return preferred.map((base) => {
+		let id = base;
+		if (used.has(id)) {
+			let suffix = 2;
+			do {
+				id = `${base}-${suffix++}`;
+			} while (reserved.has(id) || used.has(id));
+		}
+		used.add(id);
+		return id;
+	});
+}
+
 function componentTypeFor(area: Area): SeedComponentType {
 	const last = area.key.split("/").filter(Boolean).at(-1) ?? "";
 	if (DATABASE_DIR.test(last)) return "database";
@@ -417,10 +434,11 @@ function placeAndRoute(
 		size: [CELL_W, CELL_H],
 		...(node.sources ? { sources: node.sources } : {}),
 	}));
-	const connections: SeedConnection[] = plans.map((plan) => {
+	const connectionIds = uniqueIds(plans.map(({ edge }) => `${edge.from}-to-${edge.to}`));
+	const connections: SeedConnection[] = plans.map((plan, index) => {
 		const { edge } = plan;
 		const base: SeedConnection = {
-			id: `${edge.from}-to-${edge.to}`,
+			id: connectionIds[index] as string,
 			from: edge.from,
 			to: edge.to,
 			label: `${edge.weight} import${edge.weight === 1 ? "" : "s"}`,
@@ -470,7 +488,6 @@ export function buildArchitectureSeed(codewiki: Codewiki, options: BuildArchitec
 	const lines = firstSymbolLines(codewiki.symbols);
 	const areaByFile = new Map<string, string>();
 	for (const area of areas) for (const file of area.files) areaByFile.set(file.id, area.key);
-	const idByArea = new Map(areas.map((area) => [area.key, areaId(area.key)]));
 
 	// Archify's repository-evidence contract: `sources` are only legal when
 	// `meta.repository` pins the revision they were read at. Without a GitHub
@@ -481,16 +498,6 @@ export function buildArchitectureSeed(codewiki: Codewiki, options: BuildArchitec
 		repository && GITHUB_REPOSITORY_URL.test(repository.url) && FULL_REVISION.test(repository.revision)
 			? { url: repository.url, revision: repository.revision.toLowerCase() }
 			: undefined;
-	const nodes: Unplaced[] = areas.map((area) => {
-		const sources = pinned ? sourcesFor(area, lines) : [];
-		return {
-			id: idByArea.get(area.key) as string,
-			type: componentTypeFor(area),
-			label: area.key,
-			sublabel: `${area.files.length} file${area.files.length === 1 ? "" : "s"}, ${area.loc} LOC`,
-			...(sources.length > 0 ? { sources } : {}),
-		};
-	});
 
 	// External packages: one component per top external module by import
 	// count, so the map shows what the repository leans on beyond itself.
@@ -509,7 +516,24 @@ export function buildArchitectureSeed(codewiki: Codewiki, options: BuildArchitec
 		.sort((a, b) => b[1] - a[1] || a[0].localeCompare(b[0]))
 		.slice(0, MAX_SEED_EXTERNALS)
 		.map(([module]) => module);
-	const idByExternal = new Map(externals.map((module) => [module, `ext-${areaId(module)}`]));
+	// Both component kinds share one identity namespace. Reserve all readable
+	// spellings before allocating suffixes, including names already ending in -2.
+	const componentIds = uniqueIds([
+		...areas.map((area) => areaId(area.key)),
+		...externals.map((module) => `ext-${areaId(module)}`),
+	]);
+	const idByArea = new Map(areas.map((area, index) => [area.key, componentIds[index] as string]));
+	const idByExternal = new Map(externals.map((module, index) => [module, componentIds[areas.length + index] as string]));
+	const nodes: Unplaced[] = areas.map((area) => {
+		const sources = pinned ? sourcesFor(area, lines) : [];
+		return {
+			id: idByArea.get(area.key) as string,
+			type: componentTypeFor(area),
+			label: area.key,
+			sublabel: `${area.files.length} file${area.files.length === 1 ? "" : "s"}, ${area.loc} LOC`,
+			...(sources.length > 0 ? { sources } : {}),
+		};
+	});
 	for (const module of externals) {
 		const count = externalCounts.get(module) ?? 0;
 		nodes.push({
@@ -521,29 +545,30 @@ export function buildArchitectureSeed(codewiki: Codewiki, options: BuildArchitec
 	}
 
 	// Internal edges collapsed area to area; self edges are the area's own
-	// internal structure and say nothing about boundaries.
+	// internal structure and say nothing about boundaries. Preserve destination
+	// kind in the weight key: a local area and a package may have the same name.
 	const weights = new Map<string, number>();
 	for (const edge of codewiki.edges) {
 		if (!isInternalEdge(edge)) continue;
 		const from = areaByFile.get(edge.fileId);
 		const to = areaByFile.get(edge.toFileId);
 		if (from === undefined || to === undefined || from === to) continue;
-		const key = `${from}\0${to}`;
+		const key = `${from}\0${to}\0internal`;
 		weights.set(key, (weights.get(key) ?? 0) + 1);
 	}
 	for (const module of externals) {
 		for (const area of areas) {
 			const weight = externalWeights.get(`${area.key}\0${module}`);
-			if (weight) weights.set(`${area.key}\0${module}`, weight);
+			if (weight) weights.set(`${area.key}\0${module}\0external`, weight);
 		}
 	}
 	const edges: WeightedEdge[] = [...weights.entries()]
 		.sort((a, b) => b[1] - a[1] || a[0].localeCompare(b[0]))
 		.slice(0, MAX_SEED_CONNECTIONS)
 		.map(([key, weight]) => {
-			const [fromKey, toKey] = key.split("\0") as [string, string];
+			const [fromKey, toKey, kind] = key.split("\0") as [string, string, "internal" | "external"];
 			const from = idByArea.get(fromKey) as string;
-			const to = idByArea.get(toKey) ?? (idByExternal.get(toKey) as string);
+			const to = (kind === "internal" ? idByArea : idByExternal).get(toKey) as string;
 			return { from, to, weight };
 		});
 	const { layout, components, connections } = placeAndRoute(nodes, edges);
