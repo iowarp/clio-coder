@@ -26,7 +26,7 @@ import {
 	extractCommandWriteTargets,
 	inlineShellScript,
 	invokesClioSkillMutation,
-	tokenizeShellLike,
+	scanShellLike,
 } from "./protected-artifacts.js";
 import { formatRejection, type RejectionMessage } from "./rejection-feedback.js";
 import { getCachedDefaultRulePacks, type PackId, type RulePacks } from "./rule-pack-loader.js";
@@ -512,10 +512,10 @@ function stripQuotes(token: string): string {
  */
 function bashPathTokenCandidates(command: string): string[] {
 	const candidates: string[] = [];
-	for (const token of tokenizeShellLike(command)) {
+	for (const scanned of scanShellLike(command)) {
+		if (scanned.operator) continue;
+		const token = scanned.value;
 		if (token.length === 0) continue;
-		if (token === ";" || token === "&&" || token === "||" || token === "|" || token === ">" || token === ">>") continue;
-		if (token === "<" || token === "<<") continue;
 		// A token containing whitespace came from a quoted string of prose, not
 		// a path argument; and flags are not paths unless they embed one
 		// (--file=~/.aws/credentials).
@@ -845,9 +845,6 @@ function matchingProjectCommand(
 	return null;
 }
 
-/** Operators that end chain recognition; only `&&` keeps a chain readable. */
-const CHAIN_BREAKING_TOKENS: ReadonlySet<string> = new Set([";", "|", "||", ">", ">>", "<", "<<"]);
-
 /** Chain length ceiling. Real compound calls are two or three steps. */
 const CHAIN_MAX_SEGMENTS = 6;
 
@@ -880,14 +877,16 @@ function recognizeCommandChain(
 ): ChainRecognition | null {
 	const segments: string[][] = [];
 	let current: string[] = [];
-	for (const token of tokenizeShellLike(command)) {
-		if (token === "&&") {
+	for (const token of scanShellLike(command)) {
+		if (token.operator && token.value === "&&") {
 			segments.push(current);
 			current = [];
 			continue;
 		}
-		if (CHAIN_BREAKING_TOKENS.has(token)) return null;
-		current.push(token);
+		// Only an actual && operator joins recognizable commands. Quoted words
+		// remain argv and every other real operator makes this chain unrecognized.
+		if (token.operator) return null;
+		current.push(token.value);
 	}
 	segments.push(current);
 	if (segments.length < 2 || segments.length > CHAIN_MAX_SEGMENTS) return null;
