@@ -24,6 +24,7 @@ Trust spine: typed claims, executable validation, and decision provenance. Answe
 - The dispatch board reads observability's run projection. One fold owns lifecycle events, worker progress, receipt trust, retries, cancellation, fleet positions, and evidence readiness; the board keeps ordering, selection, and rendering. Terminal status and accounting come from the same projection the observability contract publishes.
 
 ### Fixed
+- Sessions without interactive ask_user now receive one passive marketplace reminder per matching skill per session, including its installation command, without starting an interview or recording a decline (#317).
 - Setting interface.panes.enabled=embedded refuses with a visible reason instead of silently degrading to guest detection (#294).
 - ACP stdout now waits for drain before sending more frames and closes with a typed error when stalled output exceeds the existing 1 MiB buffer budget (#309).
 - Dispatch to a subprocess worker no longer fails at prompt compilation when the recipe offers the canonical `context` tool. The Claude CLI declares tool support, so `context` survived tool narrowing while the compiler correctly treated the subprocess surface as unattached, and every built-in recipe that lists `context` (architect, scout, oracle, researcher, and others) was refused with a `hasCanonicalContext` mismatch. The attached-context fact is now derived from the runtime kind, and bound skills are neither promised in the prompt nor stamped on the worker spec for a runtime that never receives Clio's tools.

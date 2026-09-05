@@ -185,6 +185,49 @@ function reminderText(effects: ReadonlyArray<MiddlewareEffect>): string {
 }
 
 describe("contracts/marketplace-offer registration", () => {
+	it("emits one passive reminder in headless sessions without arming an interview or recording a decline", () => {
+		let offerTags = 0;
+		const { deps, installs, nevers } = makeDeps({
+			interactive: false,
+			newOfferTag: () => {
+				offerTags += 1;
+				return TEST_OFFER_TAG;
+			},
+		});
+		const registration = createMarketplaceOfferRegistration(deps);
+		strictEqual(registration.evaluate(turnStart("hello")).length, 0);
+		const effects = registration.evaluate(turnStart("resolve this merge conflict"));
+		deepStrictEqual(effects, [
+			{
+				kind: "inject_reminder",
+				severity: "info",
+				message:
+					'[Marketplace] Skill "resolve-merge-conflicts" matches this request; install with clio-coder skills install resolve-merge-conflicts.',
+			},
+		]);
+		strictEqual(registration.evaluate(turnStart("another merge conflict please")).length, 0);
+		strictEqual(
+			registration.evaluate({
+				hook: "after_tool",
+				sessionId: "s1",
+				toolName: "ask_user",
+				toolResultDetails: { cancelled: true },
+			}).length,
+			0,
+		);
+		for (const label of [
+			SKILL_INSTALL_OFFER_OPTION_NOT_NOW,
+			SKILL_INSTALL_OFFER_OPTION_NEVER,
+			SKILL_INSTALL_OFFER_OPTION_PROJECT,
+		]) {
+			strictEqual(registration.evaluate(askUserAnswer(label)).length, 0);
+		}
+		strictEqual(offerTags, 0);
+		deepStrictEqual(installs, []);
+		deepStrictEqual(nevers, []);
+		deepStrictEqual(registration.evaluate(turnStart("resolve this merge conflict", "s2")), effects);
+	});
+
 	it("bounds multiline catalog descriptions and strips directive markers from reminders", () => {
 		const { deps } = makeDeps({
 			listMarketplaceEntries: () => [
@@ -228,7 +271,7 @@ describe("contracts/marketplace-offer registration", () => {
 	});
 
 	it("offers a matching uninstalled skill once per session, on substantive turns only", () => {
-		const { deps } = makeDeps();
+		const { deps } = makeDeps({ interactive: true });
 		const registration = createMarketplaceOfferRegistration(deps);
 		strictEqual(registration.id, MARKETPLACE_OFFER_REGISTRATION_ID);
 		strictEqual(registration.evaluate(turnStart("hello")).length, 0);
@@ -237,6 +280,8 @@ describe("contracts/marketplace-offer registration", () => {
 		const message = reminderText(effects);
 		ok(message.includes("[Marketplace]"));
 		ok(message.includes("resolve-merge-conflicts"));
+		ok(message.includes("ask_user"));
+		ok(message.includes(offerBindingTag(TEST_OFFER_TAG)));
 		for (const label of [
 			SKILL_INSTALL_OFFER_OPTION_PROJECT,
 			SKILL_INSTALL_OFFER_OPTION_USER,
