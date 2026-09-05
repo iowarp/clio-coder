@@ -344,7 +344,7 @@ integrations:
 </ul>
 <p>The tool-prose-loop detector is keyed on the same tier, for the same reason: narrating a tool call instead of emitting one is a behavior of open-weight models served locally, and a list of server names would have left an Ollama or vLLM run with no cutoff at all.</p>
 <h3>LM Studio transport and settings</h3>
-<p>The canonical runtime id is <code>lmstudio</code>. The former <code>lmstudio-native</code> id remains an accepted alias,
+<p>The canonical runtime id is <code>lmstudio</code>. The former <code>lmstudio-native</code> id remains an accepted alias scheduled for removal in v0.7.0,
 and <code>clio-coder upgrade</code> rewrites persisted targets to the canonical id. It also converts <code>ws:</code> URLs
 to <code>http:</code> and <code>wss:</code> URLs to <code>https:</code> because this adapter is entirely HTTP. Chat uses LM Studio&#39;s
 OpenAI-compatible <code>POST /v1/chat/completions</code> endpoint

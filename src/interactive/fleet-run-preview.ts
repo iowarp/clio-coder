@@ -38,6 +38,7 @@ import {
 } from "../domains/dispatch/execution-role.js";
 import { compileFleetExecutionPlan } from "../domains/dispatch/fleet-plan.js";
 import { preflightWriteBoundaries } from "../domains/dispatch/write-boundary-enforcer.js";
+import { formatUsd } from "./footer/widgets.js";
 
 /** Where a step would run, as the dispatch domain resolves it today. */
 export interface FleetRunPreviewRoute {
@@ -263,7 +264,7 @@ export function compileFleetRunPreview(input: FleetRunPreviewInput): FleetRunPre
 	};
 	if (input.budget) {
 		if (input.budget.verdict === "over" || input.budget.verdict === "at") {
-			diagnostics.push(`budget ceiling crossed: $${budget.currentUsd.toFixed(4)} / $${budget.ceilingUsd.toFixed(4)}`);
+			diagnostics.push(`budget ceiling crossed: ${formatUsd(budget.currentUsd)} / ${formatUsd(budget.ceilingUsd)}`);
 		} else if (contract.budgetUsd !== null) {
 			const remaining = budget.ceilingUsd - budget.currentUsd;
 			if (contract.budgetUsd > remaining) {

@@ -1,6 +1,5 @@
 import { existsSync, statSync } from "node:fs";
 import { join } from "node:path";
-import { shellQuote } from "../../../core/shell-quote.js";
 import type { EvalRunnerV2, EvalSuiteTargetV2 } from "../schema/suite.js";
 import { type EvalRunnerOutput, runShellCommand } from "./external-command.js";
 
@@ -13,7 +12,7 @@ export async function runContextInitRunner(
 	env?: NodeJS.ProcessEnv,
 ): Promise<EvalRunnerOutput> {
 	const extraArgs = runner.args ?? [];
-	const command = [
+	const args: [string, ...string[]] = [
 		process.execPath,
 		clioEntry,
 		"context",
@@ -25,10 +24,8 @@ export async function runContextInitRunner(
 		...(target.model === undefined ? [] : ["--model", target.model]),
 		...(target.thinking === undefined ? [] : ["--thinking", target.thinking]),
 		...extraArgs,
-	]
-		.map(shellQuote)
-		.join(" ");
-	const result = await runShellCommand(command, cwd, runner.timeoutMs ?? timeoutMs, env);
+	];
+	const result = await runShellCommand(args, cwd, runner.timeoutMs ?? timeoutMs, env);
 	const payload = parseInitPayload(result.stdout);
 	const candidateGeneration = recordField(payload, "generation");
 	const generation = isValidGenerationPayload(payload, candidateGeneration) ? candidateGeneration : null;
