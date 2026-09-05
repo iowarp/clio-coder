@@ -34,6 +34,8 @@ export interface TaskMemoryModelRequest {
 	userPrompt: string;
 	maxTokens: number;
 	signal: AbortSignal;
+	/** Known usage may arrive even when completion rejects or the policy has been canceled. */
+	onUsage?: (usage: TaskMemoryStepUsage) => void;
 }
 
 /**
@@ -139,7 +141,9 @@ export type TaskMemoryPolicyReason =
 	/** Rules tier: the turn ended with no repeated failure worth reporting. */
 	| "no_repeated_failure"
 	/** Rules tier: compaction reactivation found no knowledge entries to restore. */
-	| "bank_empty";
+	| "bank_empty"
+	/** The owning session/branch generation was invalidated. */
+	| "scope_changed";
 
 /**
  * The model's own words for one step, handed to an observer before they are
@@ -161,6 +165,12 @@ export interface TaskMemoryEnvelope {
 }
 
 export interface TaskMemoryPolicyInput {
+	/** Content authority, checked after inference and before any bank write. */
+	isCurrent?: () => boolean;
+	/** Cancellation releases policy bookkeeping even if the transport ignores abort. */
+	signal?: AbortSignal;
+	/** Reports actual provider usage, including responses arriving after cancellation/deadline. */
+	onStepUsage?: (usage: TaskMemoryStepUsage) => void;
 	task: string;
 	trajectory: ReadonlyArray<TaskMemoryTrajectoryStep>;
 	deterministicTrigger: boolean;
@@ -246,10 +256,31 @@ export async function runTaskMemoryPolicy(
 	const timeoutMs = positiveInteger(input.timeoutMs, TASK_MEMORY_POLICY_DEFAULT_TIMEOUT_MS);
 	const timeoutMarker = Symbol("task-memory-timeout");
 	let timer: NodeJS.Timeout | undefined;
+	const cancelledMarker = Symbol("task-memory-cancelled");
+	let cancel: () => void = () => {};
+	const cancelled = new Promise<typeof cancelledMarker>((resolve) => {
+		cancel = () => {
+			controller.abort();
+			resolve(cancelledMarker);
+		};
+	});
+	input.signal?.addEventListener("abort", cancel, { once: true });
+	if (input.signal?.aborted) cancel();
 	let userPrompt = "";
 	let rawResponse = "";
 	let clientError: string | null = null;
 	let stepUsage: TaskMemoryStepUsage | null = null;
+	let usageReported = false;
+	const reportUsage = (usage: TaskMemoryStepUsage): void => {
+		if (usageReported) return;
+		usageReported = true;
+		stepUsage = usage;
+		try {
+			input.onStepUsage?.(usage);
+		} catch {
+			/* Accounting cannot steer content. */
+		}
+	};
 	// Every exit reports through here so the trace sees the same envelope the
 	// telemetry row summarizes, including the paths that used to throw away both.
 	const settle = (
@@ -263,54 +294,64 @@ export async function runTaskMemoryPolicy(
 			bankOperations: parts.bankOperations ?? 0,
 			droppedOperations: parts.droppedOperations ?? 0,
 			reminder: parts.reminder ?? null,
-			inputTokens: parts.inputTokens ?? 0,
-			outputTokens: parts.outputTokens ?? 0,
+			inputTokens: parts.inputTokens ?? stepUsage?.input ?? 0,
+			outputTokens: parts.outputTokens ?? stepUsage?.output ?? 0,
 			usage: stepUsage,
 		};
 		try {
-			input.onEnvelope?.({
-				systemPrompt: MEMORY_INTERVENTION_SYSTEM_PROMPT,
-				userPrompt,
-				response: rawResponse,
-				decision,
-				reason,
-				bankOperations: result.bankOperations,
-				droppedOperations: result.droppedOperations,
-				reminder: result.reminder,
-				error: clientError,
-			});
+			if (input.isCurrent?.() !== false)
+				input.onEnvelope?.({
+					systemPrompt: MEMORY_INTERVENTION_SYSTEM_PROMPT,
+					userPrompt,
+					response: rawResponse,
+					decision,
+					reason,
+					bankOperations: result.bankOperations,
+					droppedOperations: result.droppedOperations,
+					reminder: result.reminder,
+					error: clientError,
+				});
 		} catch {
 			// A failing observer is an operator's diagnostic, never the policy's problem.
 		}
 		return result;
 	};
 	try {
+		if (input.signal?.aborted || input.isCurrent?.() === false) return settle("silent", "scope_changed");
 		userPrompt = buildMemoryInterventionUserPrompt({
 			task: input.task.slice(0, TASK_PROMPT_MAX_CHARS),
 			bank: bank.render(input.maxTokens),
 			trajectory: renderTrajectory(input.trajectory),
 		});
-		const completion = client.complete({
-			systemPrompt: MEMORY_INTERVENTION_SYSTEM_PROMPT,
-			userPrompt,
-			maxTokens: positiveInteger(input.modelMaxTokens, input.maxTokens),
-			signal: controller.signal,
-		});
+		const completion = client
+			.complete({
+				systemPrompt: MEMORY_INTERVENTION_SYSTEM_PROMPT,
+				userPrompt,
+				maxTokens: positiveInteger(input.modelMaxTokens, input.maxTokens),
+				signal: controller.signal,
+				onUsage: reportUsage,
+			})
+			.then((response) => {
+				if (response.usage !== undefined) reportUsage(response.usage);
+				return response;
+			});
 		const timeout = new Promise<typeof timeoutMarker>((resolve) => {
 			timer = setTimeout(() => resolve(timeoutMarker), timeoutMs);
 		});
-		const response = await Promise.race([completion, timeout]);
+		const response = await Promise.race([completion, timeout, cancelled]);
+		if (response === cancelledMarker) return settle("silent", "scope_changed");
 		if (response === timeoutMarker) {
 			controller.abort();
 			void completion.catch(() => undefined);
 			return settle("timeout", "deadline");
 		}
 		rawResponse = typeof response.text === "string" ? response.text : "";
-		stepUsage = response.usage ?? null;
+		stepUsage = response.usage ?? stepUsage;
 		const usage = {
 			inputTokens: nonNegativeInteger(response.inputTokens ?? stepUsage?.input),
 			outputTokens: nonNegativeInteger(response.outputTokens ?? stepUsage?.output),
 		};
+		if (input.signal?.aborted || input.isCurrent?.() === false) return settle("silent", "scope_changed", usage);
 		const read = readPolicyStep(rawResponse);
 		if (!read.ok) return settle("malformed", read.reason, { ...usage, droppedOperations: read.dropped });
 		const operations = resolveOperations(bank, read.step.operations);
@@ -345,6 +386,7 @@ export async function runTaskMemoryPolicy(
 		return settle("silent", "client_error");
 	} finally {
 		if (timer !== undefined) clearTimeout(timer);
+		input.signal?.removeEventListener("abort", cancel);
 	}
 }
 

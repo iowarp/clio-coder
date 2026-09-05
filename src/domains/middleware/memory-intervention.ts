@@ -92,6 +92,8 @@ export interface MemoryInterventionDeps {
 	 * routes it to the cost ledger; the middleware never prices anything.
 	 */
 	onStepUsage?: (usage: TaskMemoryStepUsage) => void;
+	/** Capture immutable accounting ownership at launch, before awaiting inference. */
+	captureStepUsage?: () => (usage: TaskMemoryStepUsage, isCurrent: boolean) => void;
 	/**
 	 * Bank entries an llm-tier reminder cited when it reached the operator. The
 	 * composition root proposes them into the durable memory store, which is what
@@ -139,6 +141,10 @@ export interface MemoryPromptedStepResult extends TaskMemoryPolicyResult {
 }
 
 export interface MemoryInterventionRegistration extends MiddlewareHookRegistration {
+	/** Invalidate pending content and discard all transient session/branch state. */
+	reset(): void;
+	/** Invalidate immediately without waiting for the model; refuse further work. */
+	dispose(): void;
 	evaluateAsync(
 		input: MiddlewareHookInput,
 		context?: MiddlewareHookEvaluationContext,
@@ -154,10 +160,9 @@ export interface MemoryInterventionRegistration extends MiddlewareHookRegistrati
 	/** True while a detached background memory step is still running. */
 	stepInFlight(): boolean;
 	/**
-	 * Resolves once no detached memory step is outstanding. Teardown does not
-	 * await it: a step runs tens of seconds on a local route and shutdown cannot
-	 * wait that long, which is why a surface with no next turn declines to start
-	 * one at all rather than starting one it will abandon.
+	 * Resolves when this generation's detached policy settles. Reset/shutdown
+	 * release the policy immediately; an abort-ignoring transport can still
+	 * finish later, with authority only to report its originating usage.
 	 */
 	whenIdle(): Promise<void>;
 }
@@ -167,6 +172,10 @@ export interface MemoryInterventionRegistration extends MiddlewareHookRegistrati
  * emits only cited, advisory reminders through the existing visible channel.
  */
 export function createMemoryInterventionRegistration(deps: MemoryInterventionDeps): MemoryInterventionRegistration {
+	let generation = 0;
+	let generationController = new AbortController();
+	let observedSessionId: string | undefined;
+	let disposed = false;
 	const pending = new Map<string, PendingToolStep>();
 	const trajectory: TrajectoryStep[] = [];
 	const failures = new Map<string, FailedAttempt>();
@@ -194,11 +203,17 @@ export function createMemoryInterventionRegistration(deps: MemoryInterventionDep
 	let consecutiveLlmTimeouts = 0;
 
 	return {
+		reset,
+		dispose(): void {
+			disposed = true;
+			reset();
+		},
 		id: MEMORY_INTERVENTION_REGISTRATION_ID,
 		description: "maintain bounded task execution memory and selectively remind after repeated failures or compaction",
 		hooks: ["before_tool", "after_tool", "turn_start", "turn_end", "on_compaction"],
 		evaluate(input): ReadonlyArray<MiddlewareEffect> {
-			if (!settings().enabled) return NO_EFFECTS;
+			observeSession(input);
+			if (disposed || !settings().enabled) return NO_EFFECTS;
 			try {
 				switch (input.hook) {
 					case "before_tool":
@@ -274,7 +289,8 @@ export function createMemoryInterventionRegistration(deps: MemoryInterventionDep
 		 * would have been buffered anyway.
 		 */
 		async evaluateAsync(input, context): Promise<ReadonlyArray<MiddlewareEffect>> {
-			if (!settings().enabled || input.hook !== "turn_end" || pendingTriggers.size === 0) return NO_EFFECTS;
+			observeSession(input);
+			if (disposed || !settings().enabled || input.hook !== "turn_end" || pendingTriggers.size === 0) return NO_EFFECTS;
 			const boundary = input.turnId ?? input.metadata?.userTurnId?.toString() ?? `tool-step:${toolStep}`;
 			if (boundary === lastPromptedBoundary) return NO_EFFECTS;
 			// One row rather than none, so a headless operator reading the log sees
@@ -316,6 +332,7 @@ export function createMemoryInterventionRegistration(deps: MemoryInterventionDep
 				) ??
 					false);
 			rulesInjectedSincePromptedStep = false;
+			const stepGeneration = generation;
 			promptedStepInFlight = true;
 			outstandingStep = runPromptedStep({
 				deterministicTrigger: triggers.some((trigger) => trigger !== "interval"),
@@ -323,6 +340,7 @@ export function createMemoryInterventionRegistration(deps: MemoryInterventionDep
 				triggerReasons: triggers,
 			})
 				.then((result) => {
+					if (stepGeneration !== generation || disposed) return;
 					// A rules-only reminder can win the visible boundary while the optional
 					// background route resolves to null. Preserve the operator-visible
 					// injected outcome instead of overwriting it with that no-client silence.
@@ -336,19 +354,56 @@ export function createMemoryInterventionRegistration(deps: MemoryInterventionDep
 					// covers a throwing delivery sink, which must not surface anywhere.
 				})
 				.finally(() => {
-					promptedStepInFlight = false;
+					if (stepGeneration === generation) promptedStepInFlight = false;
 				});
 			return NO_EFFECTS;
 		},
 		runPromptedStep,
 		signalLoop(): void {
-			if (settings().enabled) pendingTriggers.add("loop_signal");
+			if (!disposed && settings().enabled) pendingTriggers.add("loop_signal");
 		},
 		lastDecision: () => lastDecision,
 		recentActivity: () => [...activity],
 		stepInFlight: () => promptedStepInFlight,
 		whenIdle: () => outstandingStep,
 	};
+
+	function observeSession(input: MiddlewareHookInput): void {
+		if (input.sessionId === undefined) return;
+		if (observedSessionId !== undefined && observedSessionId !== input.sessionId) reset();
+		observedSessionId = input.sessionId;
+	}
+
+	function reset(): void {
+		generation += 1;
+		generationController.abort();
+		generationController = new AbortController();
+		deps.bank.clear();
+		pending.clear();
+		trajectory.length = 0;
+		failures.clear();
+		toolStep = 0;
+		lastTurnEndStep = 0;
+		reactivateAfterCompaction = false;
+		lastInjectedOperationFingerprint = null;
+		currentTask = "(current task unavailable)";
+		toolsSinceMemoryStep = 0;
+		consecutiveErrors = 0;
+		lastPromptedBoundary = null;
+		lastInjectedMessage = null;
+		lastDecision = null;
+		pendingTriggers.clear();
+		activity.length = 0;
+		annotatedThisTurn.clear();
+		telemetryBankSnapshot = deps.bank.snapshot();
+		promptedStepInFlight = false;
+		promptedStepTier = "rules";
+		outstandingStep = Promise.resolve();
+		rulesInjectedSincePromptedStep = false;
+		annotatedSinceTurnEnd = false;
+		consecutiveLlmTimeouts = 0;
+		observedSessionId = undefined;
+	}
 
 	function settings(): MemoryInterventionSettings {
 		const live = deps.getSettings?.();
@@ -377,7 +432,10 @@ export function createMemoryInterventionRegistration(deps: MemoryInterventionDep
 			effects: NO_EFFECTS,
 		});
 		const live = settings();
-		if (!live.enabled) {
+		const stepGeneration = generation;
+		const isCurrent = () => !disposed && stepGeneration === generation;
+		const usageSink = deps.captureStepUsage?.();
+		if (disposed || !live.enabled) {
 			const result = silent("no_client");
 			lastDecision = result.decision;
 			return result;
@@ -408,6 +466,12 @@ export function createMemoryInterventionRegistration(deps: MemoryInterventionDep
 					tier = "llm";
 					promptedStepTier = tier;
 					promptedResult = await runTaskMemoryPolicy(deps.bank, client, {
+						isCurrent,
+						signal: generationController.signal,
+						onStepUsage: (usage) => {
+							if (usageSink) usageSink(usage, isCurrent());
+							else deps.onStepUsage?.(usage);
+						},
 						task: input.task?.trim() || currentTask,
 						trajectory: [...trajectory],
 						deterministicTrigger: input.deterministicTrigger,
@@ -436,16 +500,10 @@ export function createMemoryInterventionRegistration(deps: MemoryInterventionDep
 				error: error instanceof Error ? error.message : "resolving the background model client failed",
 			});
 		}
+		if (!isCurrent()) return { ...promptedResult, reminder: null, effects: NO_EFFECTS };
 		if (tier === "llm" && promptedResult.decision === "timeout") consecutiveLlmTimeouts += 1;
 		else if (tier === "llm" && telemetryDecision !== "dropped") consecutiveLlmTimeouts = 0;
 		lastDecision = promptedResult.decision;
-		if (promptedResult.usage !== null) {
-			try {
-				deps.onStepUsage?.(promptedResult.usage);
-			} catch {
-				// Accounting is bookkeeping. A failing sink never changes memory behavior.
-			}
-		}
 		if (promptedResult.decision === "injected") reportInjectedEntries(promptedResult.reminder);
 		emitTelemetry(
 			triggers,

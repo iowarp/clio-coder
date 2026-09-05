@@ -59,6 +59,8 @@ export interface EngineTextCompletionInput {
 	signal: AbortSignal;
 	timeoutMs: number;
 	apiKey?: string;
+	/** Accounting only: observed before terminal errors throw, never carries response content. */
+	onUsage?: (observation: Pick<EngineTextCompletionResult, "usage" | "backend">) => void;
 }
 
 export interface EngineTextCompletionResult {
@@ -98,16 +100,11 @@ export async function completeEngineText(input: EngineTextCompletionInput): Prom
 			...(input.apiKey === undefined ? {} : { apiKey: input.apiKey }),
 		},
 	);
-	if (response.stopReason === "error" || response.stopReason === "aborted") {
+	const failed = response.stopReason === "error" || response.stopReason === "aborted";
+	if (failed && !response.usage) {
 		throw new Error(response.errorMessage ?? `model completion ${response.stopReason}`);
 	}
-	return {
-		text: response.content
-			.filter((block): block is Extract<(typeof response.content)[number], { type: "text" }> => block.type === "text")
-			.map((block) => block.text)
-			.join(""),
-		inputTokens: response.usage.input,
-		outputTokens: response.usage.output,
+	const observation: Pick<EngineTextCompletionResult, "usage" | "backend"> = {
 		usage: {
 			input: response.usage.input,
 			output: response.usage.output,
@@ -118,6 +115,27 @@ export async function completeEngineText(input: EngineTextCompletionInput): Prom
 			costUsd: response.usage.cost.total,
 		},
 		backend: response.backendTimings ?? null,
+	};
+	// Pi synthesizes all-zero usage for failures with no provider accounting.
+	// Do not turn that placeholder into a measured zero-spend call.
+	if (!failed || Object.values(observation.usage).some((value) => Number.isFinite(value) && value > 0)) {
+		try {
+			input.onUsage?.(observation);
+		} catch {
+			// Accounting observers cannot change completion success/error behavior.
+		}
+	}
+	if (failed) {
+		throw new Error(response.errorMessage ?? `model completion ${response.stopReason}`);
+	}
+	return {
+		text: response.content
+			.filter((block): block is Extract<(typeof response.content)[number], { type: "text" }> => block.type === "text")
+			.map((block) => block.text)
+			.join(""),
+		inputTokens: response.usage.input,
+		outputTokens: response.usage.output,
+		...observation,
 	};
 }
 

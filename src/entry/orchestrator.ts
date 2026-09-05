@@ -100,7 +100,7 @@ import { createTaskNudgeRegistration } from "../domains/middleware/task-nudge.js
 import { createWatchdogRegistration } from "../domains/middleware/watchdog.js";
 import type { MuxContract } from "../domains/mux/index.js";
 import type { ObservabilityContract } from "../domains/observability/index.js";
-import { ObservabilityDomainModule, recordBackgroundMemoryStep } from "../domains/observability/index.js";
+import { ObservabilityDomainModule } from "../domains/observability/index.js";
 import type { PromptsContract } from "../domains/prompts/contract.js";
 import { createPromptsDomainModule } from "../domains/prompts/index.js";
 import type { ProvidersContract, TargetDescriptor, ThinkingLevel } from "../domains/providers/index.js";
@@ -172,7 +172,7 @@ import { ToolchainDomainModule } from "../domains/toolchain/index.js";
 import { createUserTasksStore } from "../domains/user-tasks/store.js";
 import { type AcpSafeSettingsPatch, type AcpSafeSettingsSnapshot, serveClioAcpAgent } from "../engine/acp/server.js";
 import { createStdioServerTransport } from "../engine/acp/transport.js";
-import { completeEngineText } from "../engine/ai.js";
+import { completeEngineText, type EngineTextCompletionResult } from "../engine/ai.js";
 import { setProtectedModelsProvider } from "../engine/apis/residency.js";
 import {
 	createLoopGuardRegistration,
@@ -187,6 +187,7 @@ import { buildModelReplayAgentMessagesFromTurns } from "../interactive/model-ses
 import type { BootOptions } from "./boot-options.js";
 import { createExtensionReloadCoordinator } from "./extension-reload.js";
 import { resolvePanesEnablement } from "./panes-activation.js";
+import { bindTaskMemoryLifecycle, captureTaskMemoryUsage } from "./task-memory-lifecycle.js";
 
 export type { BootOptions, HeadlessSamplingOverrides } from "./boot-options.js";
 
@@ -349,7 +350,7 @@ interface BackgroundMemoryRoute {
 	modelMaxTokens(configuredMaxTokens: number): number;
 }
 
-function createBackgroundMemoryModelClient(
+export function createBackgroundMemoryModelClient(
 	providers: ProvidersContract,
 	settings: Readonly<ClioSettings>,
 	timeoutMs: number,
@@ -404,6 +405,15 @@ function createBackgroundMemoryModelClient(
 					? (await providers.auth.resolveForTarget(refined.target, refined.runtime, { signal: request.signal })).apiKey
 					: LOCAL_API_KEY_FALLBACK;
 				const startedAt = Date.now();
+				let observedUsage: TaskMemoryStepUsage | undefined;
+				const mapUsage = (completion: Pick<EngineTextCompletionResult, "usage" | "backend">): TaskMemoryStepUsage => ({
+					...completion.usage,
+					targetId,
+					attributedModelId: refined.wireModelId,
+					costProvenance,
+					durationMs: Date.now() - startedAt,
+					backend: completion.backend,
+				});
 				const completion = await completeEngineText({
 					model,
 					systemPrompt: request.systemPrompt,
@@ -415,6 +425,10 @@ function createBackgroundMemoryModelClient(
 					thinkingLevel: "off",
 					signal: request.signal,
 					timeoutMs,
+					onUsage: (observation) => {
+						observedUsage = mapUsage(observation);
+						request.onUsage?.(observedUsage);
+					},
 					...(apiKey === undefined ? {} : { apiKey }),
 				});
 				// The step is billed here whatever the policy later decides about the
@@ -424,20 +438,7 @@ function createBackgroundMemoryModelClient(
 					text: completion.text,
 					inputTokens: completion.inputTokens,
 					outputTokens: completion.outputTokens,
-					usage: {
-						targetId,
-						attributedModelId: refined.wireModelId,
-						input: completion.usage.input,
-						output: completion.usage.output,
-						cacheRead: completion.usage.cacheRead,
-						cacheWrite: completion.usage.cacheWrite,
-						reasoning: completion.usage.reasoning,
-						totalTokens: completion.usage.totalTokens,
-						costUsd: completion.usage.costUsd,
-						costProvenance,
-						durationMs: Date.now() - startedAt,
-						backend: completion.backend,
-					},
+					usage: observedUsage ?? mapUsage(completion),
 				};
 			}),
 		},
@@ -1178,13 +1179,6 @@ export async function bootOrchestrator(options: BootOptions = {}): Promise<BootR
 	// local models only comply when the instruction rides the user message.
 	middleware.registerHook(createTaskBoardReminderRegistration());
 	const taskMemoryBank = new TaskMemoryBank();
-	let taskMemorySessionId = session?.current()?.id ?? null;
-	const ensureTaskMemorySession = (): void => {
-		const currentSessionId = session?.current()?.id ?? null;
-		if (currentSessionId === taskMemorySessionId) return;
-		taskMemoryBank.clear();
-		taskMemorySessionId = currentSessionId;
-	};
 	const memorySettings = (config?.get() ?? readSettings()).context.memory;
 	// Bound late: the registration is built here, but the buffer a deferred
 	// reminder lands in belongs to the chat loop that has not been composed yet.
@@ -1208,23 +1202,16 @@ export async function bootOrchestrator(options: BootOptions = {}): Promise<BootR
 	 *
 	 * Accounting only. The client wrapper (`announceMemoryStepEndpoint`) holds the
 	 * endpoint slot and publishes the disturbance; it sees the timed-out and
-	 * thrown steps this sink never hears about because their usage stays null.
+	 * thrown steps that report no usage. Late reported usage still reaches this sink.
 	 */
-	const recordBackgroundMemoryUsage = (usage: TaskMemoryStepUsage): void => {
+	const captureBackgroundMemoryUsage = () => {
 		const meta = session?.current() ?? null;
-		try {
-			recordBackgroundMemoryStep({
-				usage,
-				stateDir: clioStateDir(),
-				sessionId: meta?.id ?? null,
-				// The identity the session ledger is filed under, so `usage report
-				// --repo` selects these rows with the same hash it selects ledgers with.
-				repoIdentity: meta ? meta.cwdHash || cwdHash(meta.cwd || process.cwd()) : null,
-				...(observability === undefined ? {} : { observability }),
-			});
-		} catch {
-			// Accounting is bookkeeping. Its failure never reaches the memory step.
-		}
+		return captureTaskMemoryUsage({
+			stateDir: clioStateDir(),
+			sessionId: meta?.id ?? null,
+			repoIdentity: meta ? meta.cwdHash || cwdHash(meta.cwd || process.cwd()) : null,
+			...(observability === undefined ? {} : { observability }),
+		});
 	};
 	const proposeInjectedMemoryEntries = (entries: ReadonlyArray<TaskMemoryEntry>): void => {
 		const meta = session?.current() ?? null;
@@ -1253,7 +1240,6 @@ export async function bootOrchestrator(options: BootOptions = {}): Promise<BootR
 		deliversDeferredReminders: options.headless === undefined,
 		onDeferredReminder: (message) => deferredMemoryReminderSink?.(message),
 		getSettings: () => {
-			ensureTaskMemorySession();
 			const memory = effectiveSettingsForDispatch?.().context.memory ?? memorySettings;
 			return {
 				enabled: memory.enabled,
@@ -1285,12 +1271,16 @@ export async function bootOrchestrator(options: BootOptions = {}): Promise<BootR
 			// count contains other requests only and the step cannot refuse itself.
 			return (foregroundStreamUsage()[endpointKey] ?? 0) > 0;
 		},
-		onStepUsage: (usage) => recordBackgroundMemoryUsage(usage),
+		captureStepUsage: captureBackgroundMemoryUsage,
 		onInjectedEntries: (entries) => proposeInjectedMemoryEntries(entries),
 	});
 	middleware.registerHook(memoryIntervention);
 	const unsubscribeMemoryLoop = bus.on(BusChannels.LoopBlocked, () => memoryIntervention.signalLoop());
-	termination.onDrain(() => unsubscribeMemoryLoop());
+	const disposeMemoryLifecycle = bindTaskMemoryLifecycle(bus, memoryIntervention);
+	termination.onDrain(() => {
+		unsubscribeMemoryLoop();
+		disposeMemoryLifecycle();
+	});
 	if (contextDomain) {
 		middleware.registerHook(createFileMutationObserver(({ paths }) => contextDomain.noteFileChanges(paths)));
 	}
@@ -1600,7 +1590,6 @@ export async function bootOrchestrator(options: BootOptions = {}): Promise<BootR
 		return taskMemoryHandoffSeedOffer(process.cwd(), getCurrentSettings().context.memory.enabled);
 	};
 	const seedCurrentTaskMemoryFromHandoff = () => {
-		ensureTaskMemorySession();
 		return seedTaskMemoryFromNewestHandoff(taskMemoryBank, process.cwd(), getCurrentSettings().context.memory.enabled);
 	};
 	if (resumedSessionAtBoot) {
@@ -1871,7 +1860,6 @@ export async function bootOrchestrator(options: BootOptions = {}): Promise<BootR
 			}
 		},
 		getTaskMemoryHandoffSource: () => {
-			ensureTaskMemorySession();
 			const meta = session?.current();
 			if (!meta) throw new Error("task memory handoff requires an active session");
 			const settings = getCurrentSettings();
@@ -2173,7 +2161,6 @@ export async function bootOrchestrator(options: BootOptions = {}): Promise<BootR
 		supersedeDecision: (interviewId, key, correction) => decisionBoard.supersede(interviewId, key, correction),
 		userTasks,
 		getTaskMemoryStatus: () => {
-			ensureTaskMemorySession();
 			const settings = getCurrentSettings();
 			const bank = taskMemoryBank.snapshot();
 			return {
@@ -2327,10 +2314,8 @@ export async function bootOrchestrator(options: BootOptions = {}): Promise<BootR
 			? {
 					onResumeSession: (sessionId) => {
 						try {
-							const previousSessionId = session.current()?.id ?? null;
 							session.resume(sessionId);
 							taskBoard.snapshot();
-							if (previousSessionId !== sessionId) ensureTaskMemorySession();
 						} catch (err) {
 							process.stderr.write(
 								`[/resume] failed to resume ${sessionId}: ${err instanceof Error ? err.message : String(err)}\n`,
@@ -2344,13 +2329,11 @@ export async function bootOrchestrator(options: BootOptions = {}): Promise<BootR
 						if (settings.chat.model) input.model = settings.chat.model;
 						session.create(input);
 						taskBoard.snapshot();
-						ensureTaskMemorySession();
 					},
 					onForkSession: (parentTurnId) => {
 						try {
 							session.fork(parentTurnId);
 							taskBoard.snapshot();
-							ensureTaskMemorySession();
 						} catch (err) {
 							process.stderr.write(
 								`[/fork] failed at turn ${parentTurnId}: ${err instanceof Error ? err.message : String(err)}\n`,
