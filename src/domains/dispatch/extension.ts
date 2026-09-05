@@ -4265,7 +4265,6 @@ export function createDispatchBundle(
 		const assessDispatchFinishContract = (): DispatchFinishContractSnapshot | null => {
 			if (finishContractAssistantText.trim().length === 0) return null;
 			const assessment = assessFinishContract({
-				assistantText: finishContractAssistantText,
 				sessionEntries: finishContractEntries,
 				assistantTurnId: finishContractAssistantTurnId,
 			});
@@ -5444,7 +5443,6 @@ export function createDispatchBundle(
 		const assessDispatchFinishContract = (): DispatchFinishContractSnapshot | null => {
 			if (finishContractAssistantText.trim().length === 0) return null;
 			const assessment = assessFinishContract({
-				assistantText: finishContractAssistantText,
 				sessionEntries: finishContractEntries,
 				assistantTurnId: finishContractAssistantTurnId,
 			});

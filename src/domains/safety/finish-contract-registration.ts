@@ -4,8 +4,8 @@
  * The chat-loop fires `turn_end` with the final assistant text and this
  * registration emits an advisory `inject_reminder` (severity "warn") when the
  * turn mutated workspace state but recorded no validation evidence and no
- * explicit limitation. The trigger is the observed mutation, not the wording of
- * the assistant's text. The chat-loop's generic effect application renders the
+ * `limitation` receipt. The trigger is the observed mutation, not the wording
+ * of the assistant's text, and the text never enters the assessment. The chat-loop's generic effect application renders the
  * notice, persists the session entry, and flushes the reminder into the next
  * model request. Every decision is also written to the audit ledger.
  */
@@ -21,15 +21,15 @@ export const FINISH_CONTRACT_REGISTRATION_ID = "assessor.finish-contract";
 /**
  * High-rigor re-prompt directive. Injected dynamically via effects (never added
  * to the static system prompt) so the prompt prefix stays byte-stable. It tells
- * the model to validate with a verification-family command or to state what
- * could not be verified before claiming done. The command hint mirrors the
+ * the model to validate with a verification-family command or to record a
+ * `limitation` receipt before claiming done. The command hint mirrors the
  * vocabulary `detectValidationCommand` and `isVerificationScriptName` accept.
  */
 export const HIGH_RIGOR_REVALIDATION_MESSAGE =
 	`[Clio Coder] high-rigor finish gate: this completion claim has no validation evidence. ` +
 	`Before claiming done, run a verification command (the ${VERIFICATION_SCRIPT_FAMILY_HINT} family, ` +
-	`e.g. "npm run test", "npm run lint", "npm run build") or explicitly state what could not be verified ` +
-	`and why. Do not end the turn until you have validated or recorded the limitation.`;
+	`e.g. "npm run test", "npm run lint", "npm run build") or call the limitation tool with the scope ` +
+	`and reason of what could not be verified. Do not end the turn until you have validated or recorded the limitation.`;
 
 export interface CreateFinishContractRegistrationOptions {
 	/**
@@ -59,7 +59,7 @@ export function createFinishContractRegistration(
 ): MiddlewareHookRegistration {
 	return {
 		id: FINISH_CONTRACT_REGISTRATION_ID,
-		description: "advise when a turn mutated files without validation evidence or an explicit limitation",
+		description: "advise when a turn mutated files without validation evidence or a limitation receipt",
 		hooks: ["turn_end"],
 		evaluate(input: MiddlewareHookInput, context): ReadonlyArray<MiddlewareEffect> {
 			if (input.hook !== "turn_end") return [];
@@ -70,8 +70,9 @@ export function createFinishContractRegistration(
 			// finalAssistantStopMessage.
 			const stopReason = input.metadata?.stopReason;
 			if (stopReason !== undefined && stopReason !== "stop") return [];
-			const assistantText = input.text?.trim() ?? "";
-			if (assistantText.length === 0) return [];
+			// An empty final text is not a completion claim. The assessor reads
+			// only ledger receipts, so the text is otherwise unused here.
+			if ((input.text?.trim() ?? "").length === 0) return [];
 			let entries: ReadonlyArray<unknown> | null;
 			try {
 				entries = options.readSessionEntries();
@@ -80,7 +81,6 @@ export function createFinishContractRegistration(
 			}
 			if (entries === null) return [];
 			const assessment = assessFinishContract({
-				assistantText,
 				sessionEntries: entries,
 				assistantTurnId: input.turnId ?? null,
 			});
