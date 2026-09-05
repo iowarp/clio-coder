@@ -21,7 +21,7 @@ export function createEvalCallLedgerFold(now: () => number = () => performance.n
 			activeFirstOutputAt = null;
 			return;
 		}
-		if (event.type === "message_update" && activeStartedAt !== null && activeFirstOutputAt === null) {
+		if (isAssistantOutput(event) && activeStartedAt !== null && activeFirstOutputAt === null) {
 			activeFirstOutputAt = now();
 			return;
 		}
@@ -42,19 +42,25 @@ export function createEvalCallLedgerFold(now: () => number = () => performance.n
 		};
 		if (isRecord(message.backendTimings)) promptCache.backend = structuredClone(message.backendTimings);
 		const previous = entries.at(-1);
+		const timestamp = messageTimestamp(message.timestamp);
 		entries.push({
 			kind: "message",
 			role: "assistant",
 			turnId: `eval-call-${entries.length + 1}`,
 			parentTurnId: previous?.turnId ?? null,
-			timestamp: messageTimestamp(message.timestamp),
+			timestamp: timestamp ?? new Date(0).toISOString(),
 			payload: {
+				// Retain the legacy ISO placeholder without treating it as observed
+				// chronology. Per-call monotonic timing remains usable on its own.
+				...(timestamp === null ? { timestampEstimated: true } : {}),
 				promptCache,
-				timing: {
-					ttftMs:
-						activeStartedAt === null ? null : Math.round(Math.max(0, (activeFirstOutputAt ?? endedAt) - activeStartedAt)),
-					apiMs: activeStartedAt === null ? 0 : Math.round(Math.max(0, endedAt - activeStartedAt)),
-				},
+				timing:
+					activeStartedAt === null
+						? null
+						: {
+								ttftMs: activeFirstOutputAt === null ? null : Math.round(Math.max(0, activeFirstOutputAt - activeStartedAt)),
+								apiMs: Math.round(Math.max(0, endedAt - activeStartedAt)),
+							},
 				usage: structuredClone(usage),
 			},
 		});
@@ -82,15 +88,28 @@ export function createEvalCallLedgerFold(now: () => number = () => performance.n
 	};
 }
 
+function isAssistantOutput(event: Record<string, unknown>): boolean {
+	// Headless chat projects updates to text/thinking deltas; worker stdout
+	// retains the nested update. Structural events are not token observations.
+	const output = event.type === "message_update" ? event.assistantMessageEvent : event;
+	if (!isRecord(output)) return false;
+	if (output.type === "toolcall_start") return event.type === "message_update";
+	return (
+		(output.type === "text_delta" || output.type === "thinking_delta" || output.type === "toolcall_delta") &&
+		typeof output.delta === "string" &&
+		output.delta.length > 0
+	);
+}
+
 function isAssistantMessage(value: unknown): value is Record<string, unknown> & { role: "assistant" } {
 	return isRecord(value) && value.role === "assistant";
 }
 
-function messageTimestamp(value: unknown): string {
+function messageTimestamp(value: unknown): string | null {
 	const milliseconds = nonNegativeNumber(value);
-	if (milliseconds === null) return new Date(0).toISOString();
+	if (milliseconds === null) return null;
 	const date = new Date(milliseconds);
-	return Number.isFinite(date.getTime()) ? date.toISOString() : new Date(0).toISOString();
+	return Number.isFinite(date.getTime()) ? date.toISOString() : null;
 }
 
 function nonNegativeNumber(value: unknown): number | null {

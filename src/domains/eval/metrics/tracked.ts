@@ -47,6 +47,7 @@ export interface BuildEvalTrackedMetricsInput {
 }
 
 interface AssistantCall {
+	timestamp: string | null;
 	payload: Record<string, unknown>;
 	promptCache: Record<string, unknown> | null;
 	backend: Record<string, unknown> | null;
@@ -197,7 +198,7 @@ export function emptyEvalTrackedMetrics(source: EvalMetricSource = "estimated"):
 		reasoningTokens: { value: null, source },
 		toolCalls: zero(),
 		toolErrors: zero(),
-		ttftMsFirstCall: zero(),
+		ttftMsFirstCall: { value: null, source: "estimated" },
 		wallClockMs: zero(),
 		contextTokensAtEnd: zero(),
 		compactions: zero(),
@@ -214,6 +215,7 @@ function assistantCalls(entries: ReadonlyArray<SessionEntry>): AssistantCall[] {
 		if (promptCache === null && timing === null && usage === null) return [];
 		return [
 			{
+				timestamp: entry.payload.timestampEstimated === true ? null : entry.timestamp,
 				payload: entry.payload,
 				promptCache,
 				backend: promptCache === null ? null : recordField(promptCache, "backend"),
@@ -282,10 +284,22 @@ function reasoningMetric(
 	return measured ? { value: total, source: "ledger" } : { value: null, source: "estimated" };
 }
 
-function firstCallTtft(calls: ReadonlyArray<AssistantCall>): EvalSourcedNumber {
-	const first = calls[0];
+function firstCallTtft(calls: ReadonlyArray<AssistantCall>): EvalSourcedNullableNumber {
+	// Session directories are read by name, not by call time. Select without
+	// reordering the evidence or borrowing a later call's available timing.
+	let first: AssistantCall | undefined;
+	let firstAt = Number.POSITIVE_INFINITY;
+	for (const call of calls) {
+		if (call.timestamp === null) return { value: null, source: "estimated" };
+		const at = Date.parse(call.timestamp);
+		if (!Number.isFinite(at)) return { value: null, source: "estimated" };
+		if (at < firstAt) {
+			first = call;
+			firstAt = at;
+		}
+	}
 	const value = first?.timing === null || first?.timing === undefined ? null : nonNegativeNumber(first.timing.ttftMs);
-	return value === null ? { value: 0, source: "estimated" } : { value, source: "ledger" };
+	return value === null ? { value: null, source: "estimated" } : { value, source: "ledger" };
 }
 
 function wallClockMetric(receipt: RunReceipt | null, fallback: number): EvalSourcedNumber {
