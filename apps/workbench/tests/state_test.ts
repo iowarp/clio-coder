@@ -2,9 +2,12 @@ import { deepStrictEqual, equal, ok, throws } from "node:assert/strict";
 import type { WirePendingPermission } from "../src/protocol.ts";
 import {
 	appReducer,
+	DESKTOP_NOTIFICATIONS_STORAGE_KEY,
 	initialAppState,
 	isPromptBlocked,
+	loadDesktopNotificationsPreference,
 	parseBootstrapPayload,
+	saveDesktopNotificationsPreference,
 	workspaceConsistencyError,
 } from "../src/state.ts";
 import {
@@ -620,20 +623,62 @@ Deno.test("a select that succeeds or is forgotten clears the pending selection",
 	equal(forgotten.pendingProjectSelect, null);
 });
 
-Deno.test("the desktop notification preference is in-memory only and defaults to on", () => {
-	equal(initialAppState.desktopNotifications, true);
-	const muted = appReducer(readyState(), { type: "notifications.set", enabled: false });
-	equal(muted.desktopNotifications, false);
-	equal(appReducer(muted, { type: "notifications.set", enabled: true }).desktopNotifications, true);
-	// The bootstrap payload carries no such field, so re-bootstrapping over a live
-	// socket neither sets nor clears what the operator just chose. A real page
-	// reload starts from the initial state, where it is on and the browser's own
-	// permission is still the thing that decides whether anything is posted.
-	const bootstrapped = appReducer(muted, {
-		type: "bootstrap.loaded",
-		payload: parseBootstrapPayload(structuredClone(bootstrapFixture()) as unknown),
-	});
-	equal(bootstrapped.desktopNotifications, false);
+Deno.test("the desktop notification preference defaults to on and persists across reloads", () => {
+	try {
+		localStorage.clear();
+		equal(initialAppState.desktopNotifications, true);
+		const muted = appReducer(readyState(), { type: "notifications.set", enabled: false });
+		equal(muted.desktopNotifications, false);
+		equal(localStorage.getItem(DESKTOP_NOTIFICATIONS_STORAGE_KEY), "false");
+		// A page reload rehydrates the persisted mute preference into initialAppState.
+		equal(initialAppState.desktopNotifications, false);
+
+		const unmuted = appReducer(muted, { type: "notifications.set", enabled: true });
+		equal(unmuted.desktopNotifications, true);
+		equal(localStorage.getItem(DESKTOP_NOTIFICATIONS_STORAGE_KEY), "true");
+		equal(initialAppState.desktopNotifications, true);
+
+		// Re-bootstrapping over a live socket preserves the active preference.
+		const bootstrapped = appReducer(muted, {
+			type: "bootstrap.loaded",
+			payload: parseBootstrapPayload(structuredClone(bootstrapFixture()) as unknown),
+		});
+		equal(bootstrapped.desktopNotifications, false);
+	} finally {
+		localStorage.clear();
+	}
+});
+
+Deno.test("desktop notification storage helpers tolerate unavailable or throwing storage", () => {
+	try {
+		localStorage.clear();
+		equal(loadDesktopNotificationsPreference(), true);
+
+		saveDesktopNotificationsPreference(false);
+		equal(loadDesktopNotificationsPreference(), false);
+
+		saveDesktopNotificationsPreference(true);
+		equal(loadDesktopNotificationsPreference(), true);
+
+		// Missing storage or unexpected storage failures must not throw.
+		const originalGetItem = Storage.prototype.getItem;
+		const originalSetItem = Storage.prototype.setItem;
+		try {
+			Storage.prototype.getItem = () => {
+				throw new DOMException("The operation is insecure.", "SecurityError");
+			};
+			Storage.prototype.setItem = () => {
+				throw new DOMException("The operation is insecure.", "SecurityError");
+			};
+			equal(loadDesktopNotificationsPreference(), true);
+			saveDesktopNotificationsPreference(false);
+		} finally {
+			Storage.prototype.getItem = originalGetItem;
+			Storage.prototype.setItem = originalSetItem;
+		}
+	} finally {
+		localStorage.clear();
+	}
 });
 
 Deno.test("fleet activity keys the strip by run and replaces a run's row in place", () => {

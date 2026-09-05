@@ -7,6 +7,7 @@ All notable changes to Clio Coder are documented in this file. The format follow
 Trust spine: typed claims, executable validation, and decision provenance. Answers the NSF "Beyond Code" findings where the harness still trusted prose or sniffed files.
 
 ### Added
+- A Deno test validates that class tokens used across Workbench components exist in the stylesheet (#311).
 - Lint holds `docs/guide/configuration-reference.md` against `DEFAULT_SETTINGS`: the new `configuration-reference` hygiene check fails when a settings key has no row in the settings-key table or a row names a key path the defaults no longer carry.
 - The `limitation` tool records what a turn could not verify and why. The finish contract settles on a successful `limitation` receipt inside the same window as the mutation scan; the seven prose patterns that used to satisfy it are gone, so wording alone can no longer pass the gate. The tool is on the six mutating recipes, and the operating contract tells the model to call it.
 - One strict loader for the version-1 scientific validation contract (`src/domains/safety/validation-contract.ts`), shared by rigor, `verifiers author`, doctor, and the startup hint. Rigor rises to `high` only when the contract parses; an invalid contract is diagnosed with the field and cap named, and `VALIDATION.md` is advisory prose that never raises rigor on its own.
@@ -28,6 +29,7 @@ Trust spine: typed claims, executable validation, and decision provenance. Answe
 - The dispatch board reads observability's run projection. One fold owns lifecycle events, worker progress, receipt trust, retries, cancellation, fleet positions, and evidence readiness; the board keeps ordering, selection, and rendering. Terminal status and accounting come from the same projection the observability contract publishes.
 
 ### Fixed
+- Workbench desktop notification mute preference now persists in local storage across page reloads (#322).
 - ACP `session/close` releases the bound session slot so a host can create another session on the same child process.
 - Sessions without interactive ask_user now receive one passive marketplace reminder per matching skill per session, including its installation command, without starting an interview or recording a decline (#317).
 - Setting interface.panes.enabled=embedded refuses with a visible reason instead of silently degrading to guest detection (#294).

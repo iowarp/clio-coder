@@ -139,9 +139,8 @@ export interface AppState {
 	readonly leftDrawerOpen: boolean;
 	readonly settingsOpen: boolean;
 	/**
-	 * Whether an approval may post a desktop notification. Held in memory only,
-	 * because the browser's own permission is the durable half of this decision
-	 * and Workbench must not keep a second, staler copy of it.
+	 * Whether an approval may post a desktop notification. Persisted to local
+	 * storage so a reload preserves the operator choice.
 	 */
 	readonly desktopNotifications: boolean;
 	readonly announcement: string;
@@ -239,6 +238,37 @@ export type AppAction =
 	| { readonly type: "host.events"; readonly events: readonly ServerEvent[] }
 	| { readonly type: "host.event"; readonly event: ServerEvent };
 
+export const DESKTOP_NOTIFICATIONS_STORAGE_KEY = "clio-coder.workbench.desktop-notifications";
+
+export function loadDesktopNotificationsPreference(): boolean {
+	try {
+		if (typeof localStorage === "undefined") {
+			return true;
+		}
+		const raw = localStorage.getItem(DESKTOP_NOTIFICATIONS_STORAGE_KEY);
+		if (raw === "false") {
+			return false;
+		}
+		if (raw === "true") {
+			return true;
+		}
+		return true;
+	} catch {
+		return true;
+	}
+}
+
+export function saveDesktopNotificationsPreference(enabled: boolean): void {
+	try {
+		if (typeof localStorage === "undefined") {
+			return;
+		}
+		localStorage.setItem(DESKTOP_NOTIFICATIONS_STORAGE_KEY, enabled ? "true" : "false");
+	} catch {
+		// Missing, restricted, or quota-exceeded storage must not throw.
+	}
+}
+
 export const initialAppState: AppState = {
 	boot: "loading",
 	bootError: null,
@@ -265,7 +295,9 @@ export const initialAppState: AppState = {
 	browse: null,
 	leftDrawerOpen: false,
 	settingsOpen: false,
-	desktopNotifications: true,
+	get desktopNotifications() {
+		return loadDesktopNotificationsPreference();
+	},
 	announcement: `Loading ${PRODUCT_NAME}`,
 	notice: null,
 	pendingTurnStart: null,
@@ -781,6 +813,7 @@ export function appReducer(state: AppState, action: AppAction): AppState {
 		case "settings.opened":
 			return { ...state, settingsOpen: action.open };
 		case "notifications.set":
+			saveDesktopNotificationsPreference(action.enabled);
 			return { ...state, desktopNotifications: action.enabled };
 		case "browse.dismissed":
 			return { ...state, browse: null };
