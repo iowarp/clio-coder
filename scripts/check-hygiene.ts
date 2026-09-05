@@ -659,6 +659,61 @@ function checkEnvironmentVariableInventory(): void {
 }
 
 // ---------------------------------------------------------------------------
+// configuration-reference: docs/guide/configuration-reference.md's settings-key
+// table held against DEFAULT_SETTINGS. The table lists every default at leaf
+// depth plus schema-shaped sub-rows (`targets[].id`, `fleet.profiles.<key>.model`)
+// and optional keys with no default (`context.compaction.model`), so a row is
+// anchored at its first `[]` or `<key>` segment and that anchor, or its parent
+// for a defaultless optional key, must be a node of DEFAULT_SETTINGS.
+// ---------------------------------------------------------------------------
+function configurationReferenceRows(): string[] {
+	const doc = readRoot("docs/guide/configuration-reference.md");
+	const start = doc.indexOf("## Settings keys");
+	if (start < 0) {
+		throw new Error("docs/guide/configuration-reference.md has no ## Settings keys section");
+	}
+	const end = doc.indexOf("\n## ", start + 1);
+	return doc
+		.slice(start, end === -1 ? undefined : end)
+		.split("\n")
+		.flatMap((line) => {
+			const match = /^\| `([^`]+)` \|/.exec(line);
+			return match?.[1] === undefined ? [] : [match[1]];
+		});
+}
+
+function checkConfigurationReference(): void {
+	const rows = configurationReferenceRows();
+	const rowSet = new Set(rows);
+	const leaves = leafPaths(DEFAULT_SETTINGS);
+
+	const missing = leaves.filter((path) => !rowSet.has(path));
+	if (missing.length > 0) {
+		fail(
+			"configuration-reference",
+			`docs/guide/configuration-reference.md has no settings-key row for:\n  ${missing.join("\n  ")}`,
+		);
+	}
+
+	const nodes = new Set<string>();
+	for (const leaf of leaves) {
+		const segments = leaf.split(".");
+		for (let depth = 1; depth <= segments.length; depth += 1) nodes.add(segments.slice(0, depth).join("."));
+	}
+	const parentOf = (path: string): string => path.slice(0, Math.max(0, path.lastIndexOf(".")));
+	const stale = rows.filter((path) => {
+		const anchor = path.replace(/(\[\]|\.<key>).*$/, "");
+		return !nodes.has(anchor) && !nodes.has(parentOf(anchor));
+	});
+	if (stale.length > 0) {
+		fail(
+			"configuration-reference",
+			`docs/guide/configuration-reference.md rows name settings keys that DEFAULT_SETTINGS no longer has:\n  ${stale.join("\n  ")}`,
+		);
+	}
+}
+
+// ---------------------------------------------------------------------------
 // theme-discipline: src/interactive outside theme/ carries no raw color
 // escapes. Was tests/contracts/theme-discipline.test.ts.
 // ---------------------------------------------------------------------------
@@ -1608,6 +1663,7 @@ const checks: ReadonlyArray<[string, () => void | Promise<void>]> = [
 	["defaults-yaml", checkDefaultsYaml],
 	["settings-inventory", checkSettingsInventory],
 	["environment-variable-inventory", checkEnvironmentVariableInventory],
+	["configuration-reference", checkConfigurationReference],
 	["theme-discipline", checkThemeDiscipline],
 	["readme-install-block", checkReadmeInstallBlock],
 	["packaging", checkPackaging],
