@@ -32,11 +32,20 @@ Local and GitHub PR gate (fast, deterministic):
 npm run ci
 ```
 
+This runs type checking, lint (including boundaries, documentation drift and
+skill pins), one build, the contract/smoke suite, and the trace-viewer suite.
+Use `npm run skills:check` when checking skill pins on their own; it is already
+included in `lint` and `ci`.
+
 Release gate (for maintainers before tags or release artifacts):
 
 ```bash
 npm run ci:release
 ```
+
+The release gate includes `ci` and adds the package audit. Running `ci` again
+on the same unchanged tree is unnecessary. Run a focused regression while
+developing a repair, then the full gate for the candidate being reviewed.
 
 Live provider validation (manual/opt-in, after `npm run build`):
 
@@ -117,7 +126,7 @@ What `scripts/check-release.mjs` enforces, and how to respond when it fails:
 - Runtime resources must resolve from the installed package root: prompt
   fragments, builtin agents, model catalogs, the Markdown guides in `docs/`, the 128px logo,
   and `damage-control-rules.yaml`. A new runtime resource must be listed in
-  both package.json `files` and the required list in `check-release.mjs`.
+  both package.json `files` and `scripts/release-manifest.json`.
   The double bookkeeping is deliberate: neither edit can silently drop a
   resource the CLI needs at runtime.
 - Size budgets: 10 MB tarball, 50 MB unpacked, set in `check-release.mjs`.

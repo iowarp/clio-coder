@@ -45,7 +45,7 @@ jobs:
             exit 1
           fi
       # The gate the maintainer ran locally, run again on the tagged tree:
-      # typecheck, Biome, hygiene, skill pins, build, the sharded suite, the
+      # typecheck, Biome, hygiene (including skill pins), build, the contract/smoke suite, the
       # trace-viewer suite, and the packaging audit. This also leaves dist/ in
       # place for npm pack below.
       - name: Release gate

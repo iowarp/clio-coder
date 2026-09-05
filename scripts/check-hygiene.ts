@@ -410,10 +410,7 @@ function checkCiScripts(): void {
 			fail("ci-scripts", `package.json scripts.${name} must be "${expected}", got "${scripts[name]}"`);
 		}
 	};
-	expectScript(
-		"ci",
-		"npm run typecheck && npm run lint && npm run skills:check && npm run build && npm run test && npm run test:trace-viewer",
-	);
+	expectScript("ci", "npm run typecheck && npm run lint && npm run build && npm run test && npm run test:trace-viewer");
 	expectScript("skills:check", "node --import tsx scripts/pin-skills.ts --check");
 	expectScript("ci:release", "npm run ci && node scripts/check-release.mjs");
 	expectScript("prepublishOnly", "CLIO_CODER_RELEASE_CONTEXT=publish npm run ci:release");
