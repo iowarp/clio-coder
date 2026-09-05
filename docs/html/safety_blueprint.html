@@ -211,7 +211,7 @@
 <hr>
 <h2>Operating Posture and Visible Tools</h2>
 <p>Clio operates under a single operating posture. The canonical catalog contains
-21 built-in tools organized in seven planes; each plane is one policy unit for
+24 built-in tools organized in seven planes; each plane is one policy unit for
 action class, size posture, and concurrency, asserted at bootstrap by
 <code>src/tools/policy.ts</code> so the classifier and registered specs cannot drift apart
 silently. Dependency wiring, target capability, worker profile, and recipe
@@ -226,7 +226,7 @@ policy determine which subset is visible in a particular context.</p>
 </thead>
 <tbody><tr>
 <td>OBSERVE</td>
-<td><code>read</code>, <code>grep</code>, <code>find</code>, <code>ls</code>, <code>code_nav</code>, <code>context</code>, <code>credential_present</code></td>
+<td><code>evidence</code>, <code>read</code>, <code>grep</code>, <code>find</code>, <code>ls</code>, <code>code_nav</code>, <code>context</code>, <code>credential_present</code></td>
 <td><code>read</code></td>
 </tr>
 <tr>
@@ -251,7 +251,7 @@ policy determine which subset is visible in a particular context.</p>
 </tr>
 <tr>
 <td>ORCHESTRATE</td>
-<td><code>monitor</code>, <code>tasks</code>, <code>ledger</code>, <code>panes</code></td>
+<td><code>monitor</code>, <code>tasks</code>, <code>ledger</code>, <code>panes</code>, <code>limitation</code>, <code>decide</code></td>
 <td><code>read</code></td>
 </tr>
 <tr>
@@ -270,7 +270,7 @@ policy determine which subset is visible in a particular context.</p>
 <td><code>write</code></td>
 </tr>
 </tbody></table>
-<p><code>git</code> is read-only inspection on the safe-exec spine, so it carries the read class despite living in the EXECUTE plane. <code>monitor</code> does not mutate a run or the workspace. The model-facing <code>tasks</code> tool is an intentional bookkeeping exception to the everyday meaning of &quot;read&quot;: board mutations append full <code>taskLedger</code> snapshots to Clio&#39;s session ledger, and any action may reconcile the project-local <code>.clio-coder/user-tasks.json</code> inbox while <code>pick</code> and linked <code>done</code> update its durable correlation. Those Clio-owned ledger and inbox mutations intentionally remain audited with <code>actionClass: &quot;read&quot;</code>, so task planning and pickup stay available at every autonomy level without an approval card. <code>ledger</code> reads a worker-local mirror and posts through the dispatch control lane; it registers only for a worker with an agent-ledger port. <code>panes</code> controls Clio-owned terminal panes and registers only when a pane host and live mux are available. Both are read class and sequential because their coordination state must not interleave. This classification grants no source-workspace, command-execution, or run-mutation authority; those operations still require their own tools and action classes. <code>gateway</code> is a design-reserved name only (see <code>src/core/tool-names.ts</code>), not a registered tool.</p>
+<p><code>git</code> is read-only inspection on the safe-exec spine, so it carries the read class despite living in the EXECUTE plane. <code>monitor</code> does not mutate a run or the workspace. The model-facing <code>tasks</code> tool is an intentional bookkeeping exception to the everyday meaning of &quot;read&quot;: board mutations append full <code>taskLedger</code> snapshots to Clio&#x27;s session ledger, and any action may reconcile the project-local <code>.clio-coder/user-tasks.json</code> inbox while <code>pick</code> and linked <code>done</code> update its durable correlation. Those Clio-owned ledger and inbox mutations intentionally remain audited with <code>actionClass: &quot;read&quot;</code>, so task planning and pickup stay available at every autonomy level without an approval card. <code>ledger</code> reads a worker-local mirror and posts through the dispatch control lane; it registers only for a worker with an agent-ledger port. <code>panes</code> controls Clio-owned terminal panes and registers only when a pane host and live mux are available. Both are read class and sequential because their coordination state must not interleave. <code>evidence</code> reads canonical evidence bundles, trust status, gate decisions, and findings; it touches no workspace, and it is sequential because <code>run</code> mode may materialize a bundle under Clio&#x27;s data directory. <code>limitation</code> records a typed receipt of what a turn could not verify and why; it touches no filesystem and runs no shell, so it is read class and parallel. <code>decide</code> appends the model&#x27;s own design decision, with its rejected alternatives and rationale, to the session decision board; dispatch seals every active decision&#x27;s ref onto the run envelope and receipt, and commit seams write them as <code>Clio-Decision:</code> trailers. It is read class and sequential. This classification grants no source-workspace, command-execution, or run-mutation authority; those operations still require their own tools and action classes. <code>gateway</code> is a design-reserved name only (see <code>src/core/tool-names.ts</code>), not a registered tool.</p>
 <p>Target capability, dispatch tool profiles, and recipe constraints can further narrow the tools available to a run. That narrowing is convenience and budget control; safety still lives in code gates.</p>
 <h3>Workspace artifact reads</h3>
 <p>The <code>/view</code> workspace category treats a recorded successful write as a durable fact, not as permanent read authority over that pathname. Immediately before every file load, the viewer resolves both the recorded workspace root and selected target through the live filesystem, checks canonical path-segment containment, and reads the canonical target. It does not cache the canonical workspace root between provider construction and load. A file or ancestor directory swapped to a symlink outside the current workspace is refused without reading the outside target. An <code>ENOENT</code> from re-resolution or loading keeps the durable <code>file no longer on disk (recorded at ...)</code> result instead of dropping the artifact row.</p>
@@ -518,7 +518,7 @@ generating agent loop.</p>
 <ol>
 <li><p><strong>Explicit Override</strong>: Checked via the <code>CLIO_CODER_RIGOR</code> environment variable. It is trimmed and parsed case-insensitively. A value of <code>&quot;high&quot;</code> or <code>&quot;normal&quot;</code> overrides any other setting.</p>
 </li>
-<li><p><strong>Repository-Derived Default</strong>: If no override is present, Clio loads the first of <code>.clio-coder/validation.yaml</code>, <code>.clio-coder/validation.yml</code>, <code>validation.yaml</code>, or <code>validation.yml</code> at the workspace root through the strict version-1 loader in <code>src/domains/safety/validation-contract.ts</code>. A contract that parses raises the default to <code>high</code>. A contract that does not parse leaves the default at <code>normal</code> and carries the fault as a diagnostic that <code>clio-coder doctor</code> and the interactive startup notices print. <code>VALIDATION.md</code> is advisory prose: it is recognised as present but never parsed and never raises rigor. <code>rigorResolution()</code> returns the rigor with its source (<code>override</code>, <code>validation-contract</code>, <code>invalid-contract</code>, <code>markdown-advisory</code>, or <code>none</code>) and the diagnostic; <code>resolveRigor()</code> is the thin wrapper that returns the rigor alone. See <a href="validation_blueprint.html">Scientific Validation</a> for the schema.</p>
+<li><p><strong>Repository-Derived Default</strong>: If no override is present, Clio loads the first of <code>.clio-coder/validation.yaml</code>, <code>.clio-coder/validation.yml</code>, <code>validation.yaml</code>, or <code>validation.yml</code> at the workspace root through the strict version-1 loader in <code>src/domains/safety/validation-contract.ts</code>. A contract that parses raises the default to <code>high</code>. A contract that does not parse leaves the default at <code>normal</code> and carries the fault as a diagnostic that <code>clio-coder doctor</code> and the interactive startup notices print. <code>VALIDATION.md</code> is advisory prose: it is recognized as present but never parsed and never raises rigor. <code>rigorResolution()</code> returns the rigor with its source (<code>override</code>, <code>validation-contract</code>, <code>invalid-contract</code>, <code>markdown-advisory</code>, or <code>none</code>) and the diagnostic; <code>resolveRigor()</code> is the thin wrapper that returns the rigor alone. See <a href="validation_blueprint.html">Scientific Validation</a> for the schema.</p>
 </li>
 </ol>
 <hr>
@@ -528,7 +528,7 @@ generating agent loop.</p>
 <ol>
 <li>If the window has no successful mutating receipt or settled mutating <code>!</code> bash execution, the contract passes with <code>no_mutation</code>.</li>
 <li>If the window has validation evidence, the contract passes with <code>validation_evidence</code>. Evidence includes successful validation commands, <code>verify</code> checks (declared package scripts, admitted project-catalog entries, and the frontend check), passed dispatch receipts, and protected-artifact validation records.</li>
-<li>If the assistant explicitly states what could not be verified and why, the contract passes with <code>explicit_limitation</code>.</li>
+<li>If the window has a successful <code>limitation</code> tool receipt (a <code>limitation</code> tool_call paired with a non-error tool_result, carrying the scope, a reason from <code>no-runner</code>, <code>blocked</code>, <code>out-of-scope</code>, <code>environment</code>, or <code>other</code>, and optional unverified paths), the contract passes with <code>explicit_limitation</code>. A call the tool rejected leaves no receipt and does not count.</li>
 <li>Otherwise, the contract engages with <code>unvalidated_mutation</code>.</li>
 </ol>
 <p>The finish assessment projects only onto the canonical completion-evidence
@@ -546,7 +546,7 @@ persisted-format compatibility table are documented in
 <h4>Exemptions and Safety Precautions</h4>
 <ul>
 <li><strong>No-Mutation Turns</strong>: Read-only status, alignment, and inspection turns are exempt because there is no successful workspace mutation in the recent window.</li>
-<li><strong>Limitation Claims</strong>: If the model explicitly states what could not be verified and why, the assessor accepts the statement as an explicit limitation and allows the turn to settle cleanly.</li>
+<li><strong>Limitation Receipts</strong>: A successful <code>limitation</code> tool receipt in the window settles the contract with <code>explicit_limitation</code>. The assistant&#x27;s prose never does, so wording alone cannot pass the gate and a real limitation is never missed for its phrasing.</li>
 <li><strong>Dynamic Injection</strong>: All gate directives are injected dynamically through middleware effects. This ensures that the static system prompt prefix remains byte-stable, preserving prompt caches.</li>
 <li><strong>Prior Hard-Block Preservation</strong>: If a prior middleware hook has already emitted a hard block (e.g. tool-prose violation), the high-rigor continuation is suppressed so that critical error guidance is not overwritten.</li>
 </ul>

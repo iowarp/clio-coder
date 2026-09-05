@@ -650,6 +650,58 @@ panes(action="open", preset="logs")
 panes(action="close", target="all")
 ```
 
+## evidence: inspect canonical evidence and trust status
+
+Reads evidence bundles as JSON. Source: `src/tools/evidence.ts`. Read class; sequential, because `run` mode may materialize a bundle under Clio's data directory. It shares the inventory and trust projections behind `clio-coder evidence inventory` and `clio-coder evidence inspect`, so the model and the operator read the same record.
+
+Arguments:
+
+- `mode` (required). `list`, `inspect`, or `run`.
+- `id` (required for `inspect`). An evidence bundle id.
+- `runId` (required for `run`). A dispatch run id; the bundle is built first when none exists.
+
+`list` returns the bounded newest-first inventory: provenance, tags, totals, and a worst-run trust verdict per bundle. `inspect` returns the bundle overview, the per-run trust axes and verdict, the gate decisions, and the findings. `run` resolves `run-<runId>` and builds the bundle when it is absent; a run with no ledger row is reported absent with `artifactAbsent: true` in the details. Results are capped at 16KB, and a truncated result stays valid JSON with a `preview`. Provenance requires this tool and Verifier may use it.
+
+```text
+evidence(mode="list")
+evidence(mode="inspect", id="run-r-42")
+evidence(mode="run", runId="r-42")
+```
+
+## limitation: record what a turn could not verify
+
+Records a typed limitation receipt for the finish contract. Source: `src/tools/limitation.ts`. Read class; parallel. The tool is pure: it touches no filesystem and runs no shell, so the successful receipt in the session ledger is its whole effect.
+
+Arguments:
+
+- `scope` (required). What could not be verified, in one sentence.
+- `reason` (required). `no-runner`, `blocked`, `out-of-scope`, `environment`, or `other`.
+- `paths` (optional). Repository-relative paths left unverified.
+
+Call it once, before the final reply, when files changed and validation could not run. The finish contract accepts a successful `limitation` receipt inside the same window as the mutation scan in place of validation evidence. A rejected call (empty scope, unknown reason) leaves no receipt and does not count, and the assistant's prose never does. The six mutating recipes carry the tool and the operating contract tells the model to call it; see [the finish gate](../architecture/safety-model.md#the-finish-gate-and-re-prompt-behavior).
+
+```text
+limitation(scope="CUDA kernels changed but no GPU is available here", reason="environment", paths=["src/kernels/solve.cu"])
+```
+
+## decide: record a design decision
+
+Appends the model's own design choice to the session decision board beside operator `ask_user` answers. Source: `src/tools/decide.ts`. Read class; sequential, so two decisions in one batch cannot race the supersede lookup. The call succeeds only in a session with a decision board; a worker's call is refused.
+
+Arguments:
+
+- `key` (required). Stable kebab-case name, at most 64 bytes.
+- `value` (required). The option chosen, at most 512 bytes.
+- `alternatives` (required). One to six rejected options, at most 256 bytes each.
+- `rationale` (required). Why the choice won, at most 1024 bytes.
+- `label` (optional). Short title, at most 128 bytes.
+
+The call appends one `decisionLedger` entry with `origin: "agent"` and returns the decision ref `<interviewId>/<key>`. A repeat key supersedes the earlier agent decision with the new rationale as its correction; an operator decision with the same key is never overwritten and the call fails. Dispatch seals every active ref onto the run request, envelope, and receipt, and Clio-controlled commits carry one `Clio-Decision:` trailer per ref; see [commit provenance](../process/git-commit-provenance.md).
+
+```text
+decide(key="cache-key-shape", value="capability tuple", alternatives=["node id"], rationale="matches the existing buckets and survives fleet changes", label="Cache key")
+```
+
 ## ask_user: host-owned operator interviews
 
 Runs a host-owned interactive interview or single-question prompt with the operator, recording decisions and/or free-form answers. Source: `src/tools/ask-user.ts`. Read class; sequential.
