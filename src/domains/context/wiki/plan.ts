@@ -92,13 +92,13 @@ interface Area {
  * filename is dropped first, so a file sitting directly in `src` joins the
  * `src` area instead of becoming an area of its own named after itself.
  */
-function areaForPath(path: string, maxDepth: number): string {
+export function areaForPath(path: string, maxDepth: number): string {
 	const directories = path.split("/").filter(Boolean).slice(0, -1);
 	if (directories.length === 0) return ".";
 	return directories.slice(0, Math.max(1, maxDepth)).join("/");
 }
 
-function classifyDepth(sourceFiles: number, sourceLines: number): ResolvedWikiDepth {
+export function classifyDepth(sourceFiles: number, sourceLines: number): ResolvedWikiDepth {
 	if (sourceFiles <= 150 && sourceLines <= 30_000) return "simple";
 	if (sourceFiles <= 800 && sourceLines <= 150_000) return "medium";
 	return "detailed";
