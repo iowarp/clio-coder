@@ -10,8 +10,8 @@ skills:
     sha256: 0a72f4c906303f550be78f80a927da7e24e5c2076f058ccafdec80dfbed275af
   - name: coding-standards
     path: coding/coding-standards
-    version: 0.3.0
-    sha256: 3ee3481430591a8f8d041bd1c5fa078becd301d88eb49610e41d056494d3413d
+    version: 0.4.0
+    sha256: d573cdc5b430ae94ebfb5ef69c4a0ac9ac074aae815959ab4e6515012846ce3b
   - name: prototype
     path: coding/prototype
     version: 0.4.0
