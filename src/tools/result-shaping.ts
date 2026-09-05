@@ -127,11 +127,17 @@ function offloadBody(text: string, bytes: number, maxBytes: number): string {
 	return `${truncateUtf8(text, Math.max(0, prefixBudget), "")}${notice}`;
 }
 
+export interface ToolOffloadSweepResult {
+	removed: number;
+	skipped: number;
+}
+
 /** Remove regular offload files older than the boot retention cap. */
-export function sweepExpiredToolOffloads(now = Date.now()): number {
+export function sweepExpiredToolOffloads(now = Date.now()): ToolOffloadSweepResult {
 	const root = join(clioStateDir(), "scratch");
 	const cutoff = now - TOOL_OFFLOAD_MAX_AGE_MS;
 	let removed = 0;
+	let skipped = 0;
 	try {
 		for (const session of readdirSync(root, { withFileTypes: true })) {
 			if (!session.isDirectory()) continue;
@@ -143,14 +149,20 @@ export function sweepExpiredToolOffloads(now = Date.now()): number {
 					if (statSync(path).mtimeMs >= cutoff) continue;
 					rmSync(path, { force: true });
 					removed += 1;
-				} catch {}
+				} catch (error) {
+					if ((error as NodeJS.ErrnoException)?.code !== "ENOENT") skipped += 1;
+				}
 			}
 			try {
 				if (readdirSync(sessionDir).length === 0) rmdirSync(sessionDir);
-			} catch {}
+			} catch (error) {
+				if ((error as NodeJS.ErrnoException)?.code !== "ENOENT") skipped += 1;
+			}
 		}
-	} catch {}
-	return removed;
+	} catch (error) {
+		if ((error as NodeJS.ErrnoException)?.code !== "ENOENT") skipped += 1;
+	}
+	return { removed, skipped };
 }
 
 /**
