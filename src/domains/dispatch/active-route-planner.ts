@@ -37,6 +37,9 @@ export function routeValidationProjection(
 		// Presentation-only parentage stamped by the calling tool, on the same
 		// terms: a model must not be able to author it.
 		parentToolCallId,
+		// Sealed from the parent decision board by the dispatch tool; a model
+		// must not be able to author which decisions a receipt claims.
+		decisionRefs,
 		resolvedVerification,
 		resultContractOverride,
 		fleetGateReceipt,
@@ -60,6 +63,7 @@ export function routeValidationProjection(
 			...(assignmentDeadlineAt !== undefined ? { assignmentDeadlineAt } : {}),
 			...(ledger !== undefined ? { ledger } : {}),
 			...(parentToolCallId !== undefined ? { parentToolCallId } : {}),
+			...(decisionRefs !== undefined ? { decisionRefs } : {}),
 			...(resolvedVerification !== undefined
 				? { resolvedVerification: resolvedVerification.map((check) => ({ ...check, argv: [...check.argv] })) }
 				: {}),

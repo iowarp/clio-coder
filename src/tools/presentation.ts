@@ -70,6 +70,7 @@ export const TOOL_PRESENTATION: Readonly<Record<string, ToolPresentationPolicy>>
 	[ToolNames.Ledger]: FOLDED,
 	[ToolNames.Panes]: FOLDED,
 	[ToolNames.Limitation]: FOLDED,
+	[ToolNames.Decide]: FOLDED,
 	[ToolNames.WebFetch]: FOLDED,
 	[ToolNames.AskUser]: FOLDED,
 	[ToolNames.Artifact]: FOLDED,

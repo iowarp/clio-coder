@@ -50,6 +50,7 @@ import { extractRunProvenance, provenanceCompactSuffix } from "../domains/eviden
 import { summarizeTrustStatus } from "../domains/evidence/trust-projection.js";
 import { adaptRunReceiptTrustStatus } from "../domains/evidence/trust-status.js";
 import type { AutonomyLevel } from "../domains/safety/autonomy.js";
+import { activeDecisionRefs } from "../domains/session/decision-board.js";
 import {
 	type CandidateWorktree,
 	type CompeteGroupOwnership,
@@ -802,6 +803,7 @@ async function runReviewGated(
 				...(review.target !== undefined ? { target: review.target } : {}),
 				...(base.plan !== undefined ? { plan: base.plan } : {}),
 				...(base.parentToolCallId !== undefined ? { parentToolCallId: base.parentToolCallId } : {}),
+				...(base.decisionRefs !== undefined ? { decisionRefs: base.decisionRefs } : {}),
 				...(base.reservation !== undefined
 					? { reservation: { ownerId: base.reservation.ownerId, memberId: base.reservation.memberId } }
 					: {}),
@@ -1367,6 +1369,7 @@ async function runCompete(
 				...(compete.judge?.node !== undefined ? { node: compete.judge.node } : {}),
 				...(base.plan !== undefined ? { plan: base.plan } : {}),
 				...(base.parentToolCallId !== undefined ? { parentToolCallId: base.parentToolCallId } : {}),
+				...(base.decisionRefs !== undefined ? { decisionRefs: base.decisionRefs } : {}),
 				...(base.reservation !== undefined
 					? { reservation: { ownerId: base.reservation.ownerId, memberId: base.reservation.memberId } }
 					: {}),
@@ -2010,6 +2013,7 @@ async function runCouncil(
 			...(council.judge?.node ? { node: council.judge.node } : {}),
 			...(base.plan ? { plan: base.plan } : {}),
 			...(base.parentToolCallId ? { parentToolCallId: base.parentToolCallId } : {}),
+			...(base.decisionRefs !== undefined ? { decisionRefs: base.decisionRefs } : {}),
 		};
 		const pinned = council.resolvedTasks?.find((task) => task.role === "synthesis");
 		const judgeRun = await runMember(
@@ -2189,6 +2193,12 @@ export async function runDispatchTool(
 		parentToolCallId === undefined || parentToolCallId.length === 0
 			? structuredClone(snapshot.requests)
 			: snapshot.requests.map((request) => ({ ...structuredClone(request), parentToolCallId }));
+	// Seal the parent board's active decisions onto every request on the same
+	// terms as the parent id: from the live board here, never from model
+	// arguments (the validation projection strips the field). Derived reviewer,
+	// judge, and synthesis requests copy it from their base explicitly.
+	const decisionRefs = activeDecisionRefs(deps.getDecisionBoard?.() ?? []);
+	if (decisionRefs.length > 0) requests = requests.map((request) => ({ ...request, decisionRefs }));
 	if (planView.planScale && deps.dispatch.preview !== undefined && resolvedPlan === null) {
 		return { kind: "error", message: "dispatch: resolved plan is missing after admission" };
 	}

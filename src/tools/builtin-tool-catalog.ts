@@ -258,6 +258,19 @@ const TOOL_METADATA: Readonly<Record<string, ToolMetadata>> = {
 		},
 		costLatency: "local_fast",
 	},
+	[ToolNames.Decide]: {
+		objective: "Record a design decision with its rejected alternatives and rationale on the session decision board.",
+		uiLabel: "Decide",
+		// A repeated call with the same key supersedes the earlier record, so
+		// the surface as a whole is not retry safe.
+		retrySafety: "not_retry_safe",
+		resultSizePolicy: {
+			kind: "exact",
+			maxBytes: 4_096,
+			followUpHint: "The decision ref in the result is what receipts and commits cite.",
+		},
+		costLatency: "local_fast",
+	},
 	// RETRIEVE: network-class.
 	[ToolNames.WebFetch]: {
 		objective: "Fetch HTTP(S) text for explicit external research.",

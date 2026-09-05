@@ -97,6 +97,7 @@ function envelopeFromReceipt(receipt: RunReceipt, status: RunStatus, receiptPath
 	if (receipt.gate !== undefined) envelope.gate = receipt.gate;
 	if (receipt.plan !== undefined) envelope.plan = receipt.plan;
 	if (receipt.personaOverride !== undefined) envelope.personaOverride = receipt.personaOverride;
+	if (receipt.decisionRefs !== undefined) envelope.decisionRefs = receipt.decisionRefs;
 	return envelope;
 }
 

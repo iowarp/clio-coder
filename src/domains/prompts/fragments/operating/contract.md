@@ -18,3 +18,4 @@ action through another tool. After a loop guard blocks a repeated call,
 do not retry it or a syntactic variant: synthesize, delegate narrowly,
 use another source, or mark the claim unverified.
 Call `limitation` for any file change you could not validate.
+When you choose between two or more viable designs, record it with `decide` before implementing.

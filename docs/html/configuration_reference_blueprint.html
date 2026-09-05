@@ -1075,6 +1075,12 @@
 <td></td>
 </tr>
 <tr>
+<td><code>CLIO_CODER_COMMIT_DECISIONS</code></td>
+<td><code>unset</code></td>
+<td>Set by Clio per spawn to the space-separated decision refs (<code>&lt;interviewId&gt;/&lt;key&gt;</code>) active on the session decision board; the managed <code>prepare-commit-msg</code> hook writes one <code>Clio-Decision:</code> trailer per well-formed ref, and nested seams strip it.</td>
+<td></td>
+</tr>
+<tr>
 <td><code>CLIO_CODER_CONFIG_DIR</code></td>
 <td><code>platform default (</code>$XDG_CONFIG_HOME/clio-coder<code>, else </code>~/.config/clio-coder<code>)</code></td>
 <td>Absolute path for the config root; beats <code>CLIO_CODER_HOME/config</code> and the platform default, and the fleet-view pane child re-pins it from argv.</td>

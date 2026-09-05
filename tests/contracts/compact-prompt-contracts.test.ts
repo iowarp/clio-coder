@@ -270,7 +270,7 @@ describe("compact prompt contracts", () => {
 	it("holds fixed compact main and worker token budgets", () => {
 		strictEqual(builtinRecipes.length, 14, "the fixed Fleet fixture requires the 14 shipped recipes");
 		const mainToolNames = ALL_TOOL_NAMES.filter((name) => name !== ToolNames.Ledger);
-		strictEqual(mainToolNames.length, 22);
+		strictEqual(mainToolNames.length, 23);
 		const main = mainPrompt({ providerSupportsTools: true, toolNames: mainToolNames });
 		// The self-awareness paths are machine facts: the package root, the
 		// settings file, and the state directory of the live home.
@@ -282,11 +282,11 @@ describe("compact prompt contracts", () => {
 			.join("{SETTINGS}")
 			.split(dirs.state)
 			.join("{STATE}");
-		strictEqual(normalizedMain.length, 10_762);
-		strictEqual(Math.ceil(normalizedMain.length / 4), 2_691);
-		ok(normalizedMain.length <= 10_800, `main prompt grew to ${normalizedMain.length} chars`);
+		strictEqual(normalizedMain.length, 10_869);
+		strictEqual(Math.ceil(normalizedMain.length / 4), 2_718);
+		ok(normalizedMain.length <= 10_900, `main prompt grew to ${normalizedMain.length} chars`);
 		ok(
-			Math.ceil(normalizedMain.length / 4) <= 2_700,
+			Math.ceil(normalizedMain.length / 4) <= 2_725,
 			`main prompt grew to ${Math.ceil(normalizedMain.length / 4)} estimated tokens`,
 		);
 		strictEqual(Math.ceil(main.systemPrompt.length / 4), main.tokenEstimate);
@@ -304,11 +304,11 @@ describe("compact prompt contracts", () => {
 			},
 			{
 				identity: 298,
-				"operating-contract": 179,
+				"operating-contract": 203,
 				delegation: 532,
 				skills: 181,
 				safety: 266,
-				"tool-contract": 642,
+				"tool-contract": 644,
 				fleet: 514,
 				"retrieval-hints": 36,
 				runtime: 43,
@@ -342,14 +342,14 @@ describe("compact prompt contracts", () => {
 			onPermission: "fail",
 			persona: persona(coder.body, "coder"),
 		});
-		strictEqual(worker.systemPrompt.length, 5_397);
-		strictEqual(worker.tokenEstimate, 1_350);
-		ok(worker.systemPrompt.length <= 5_400);
-		ok(worker.tokenEstimate <= 1_350);
+		strictEqual(worker.systemPrompt.length, 5_494);
+		strictEqual(worker.tokenEstimate, 1_374);
+		ok(worker.systemPrompt.length <= 5_500);
+		ok(worker.tokenEstimate <= 1_375);
 		strictEqual(Math.ceil(worker.systemPrompt.length / 4), worker.tokenEstimate);
 		deepStrictEqual(Object.fromEntries(worker.sections.map((section) => [section.id, section.tokenEstimate])), {
 			identity: 62,
-			"operating-contract": 273,
+			"operating-contract": 297,
 			"tool-contract": 372,
 			safety: 253,
 			persona: 389,

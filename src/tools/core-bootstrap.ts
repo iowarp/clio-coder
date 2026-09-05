@@ -1,6 +1,7 @@
 import type { ContextRecalledPayload } from "../core/bus-events.js";
 import type { LoadSkillsInput } from "../domains/resources/index.js";
 import type { SessionContract } from "../domains/session/contract.js";
+import type { DecisionBoardStore } from "../domains/session/decision-board.js";
 import type { SessionEntry } from "../domains/session/entries.js";
 import { createTaskBoardStore, type TaskBoardStore } from "../domains/session/task-board.js";
 import type { UserTasksStore } from "../domains/user-tasks/store.js";
@@ -12,6 +13,7 @@ import { builtin } from "./builtin-tool-catalog.js";
 import { codeNavToolSurface } from "./codewiki/code-nav-surface.js";
 import { contextToolSurface } from "./context/surface.js";
 import { credentialPresentTool } from "./credential-present.js";
+import { createDecideTool } from "./decide.js";
 import { editTool } from "./edit.js";
 import { evidenceTool } from "./evidence.js";
 import { findTool } from "./find.js";
@@ -38,6 +40,8 @@ export interface CoreToolBootstrapDeps {
 	onContextRecalled?: (payload: ContextRecalledPayload) => void;
 	askUser?: AskUserHandler;
 	taskBoard?: TaskBoardStore;
+	/** The session decision board the `decide` tool appends to; absent in worker registries, where the tool refuses. */
+	decisionBoard?: DecisionBoardStore;
 	userTasks?: UserTasksStore;
 	agentLedger?: AgentLedgerPort;
 	/**
@@ -130,6 +134,12 @@ export function registerCoreTools(registry: ToolRegistry, deps: CoreToolBootstra
 	});
 	registry.register({
 		...builtin(limitationTool, { path: "src/tools/limitation.ts", scope: "core" }),
+	});
+	registry.register({
+		...builtin(createDecideTool(deps.decisionBoard ? { decisionBoard: deps.decisionBoard } : {}), {
+			path: "src/tools/decide.ts",
+			scope: "core",
+		}),
 	});
 	const session = deps.session;
 	const readSessionEntries = deps.readSessionEntries;

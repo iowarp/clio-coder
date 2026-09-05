@@ -12,7 +12,7 @@ import { DEFAULT_DELEGATION_PERMISSION_TIMEOUT_MS } from "../core/defaults.js";
 import { loadDomains } from "../core/domain-loader.js";
 import type { SafeEventBus } from "../core/event-bus.js";
 import { expandInlineFileReferencesAsync } from "../core/file-references.js";
-import { setGitCommitAttributionEnabled } from "../core/git-commit-attribution.js";
+import { setCommitDecisionRefsProvider, setGitCommitAttributionEnabled } from "../core/git-commit-attribution.js";
 import { configureGuardrails, guardrailValuesFromSettings } from "../core/guardrails.js";
 import { HEADLESS_PERMISSION_DENIED_REASON } from "../core/headless-permission.js";
 import { rememberRecentModel } from "../core/recent-models.js";
@@ -162,7 +162,7 @@ import { collectSessionEntries } from "../domains/session/compaction/session-ent
 import { estimateTokens } from "../domains/session/compaction/tokens.js";
 import { ceilChars } from "../domains/session/context-accounting.js";
 import type { SessionContract, SessionMeta } from "../domains/session/contract.js";
-import { createDecisionBoardStore } from "../domains/session/decision-board.js";
+import { activeDecisionRefs, createDecisionBoardStore } from "../domains/session/decision-board.js";
 import type { CompactionSummaryEntry, CompactionTrigger, SessionEntry } from "../domains/session/entries.js";
 import { SessionDomainModule } from "../domains/session/index.js";
 import {
@@ -1627,6 +1627,9 @@ export async function bootOrchestrator(options: BootOptions = {}): Promise<BootR
 			session.appendEntry(entry);
 		},
 	});
+	// Every Clio-spawned commit from this session is stamped with the decisions
+	// active on the board at spawn time, the same way it is stamped as assisted.
+	setCommitDecisionRefsProvider(() => activeDecisionRefs(decisionBoard.snapshot()));
 	// getSessionId alone never notices a /tree switch: it moves the active
 	// append point inside the same session, so the id-keyed cache above kept
 	// showing the abandoned branch's board (issue #94). SessionTurnSwitched is
@@ -1686,6 +1689,8 @@ export async function bootOrchestrator(options: BootOptions = {}): Promise<BootR
 				}
 			: {}),
 		taskBoard,
+		decisionBoard,
+		getDecisionBoard: () => decisionBoard.snapshot(),
 		userTasks,
 		dispatch,
 		bus,
