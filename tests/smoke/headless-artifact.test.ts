@@ -31,7 +31,7 @@ function run(args: string[], cwd: string, env: NodeJS.ProcessEnv) {
 	});
 }
 
-for (const scenario of ["clean", "recovered", "terminal-error"] as const) {
+for (const scenario of ["clean", "recovered", "recovered-gated", "terminal-error"] as const) {
 	test(`built headless artifact and eval: ${scenario}`, async () => {
 		const scratch = makeScratchHome("clio-headless-artifact-");
 		const fixture = await startOpenAICompatFixture("unexpected follow-up", {
@@ -48,7 +48,7 @@ for (const scenario of ["clean", "recovered", "terminal-error"] as const) {
 				: {
 						initialErrors: {
 							count: 1,
-							status: scenario === "recovered" ? 503 : 401,
+							status: scenario.startsWith("recovered") ? 503 : 401,
 							message: "fixture provider unavailable",
 						},
 					}),
@@ -72,6 +72,9 @@ for (const scenario of ["clean", "recovered", "terminal-error"] as const) {
 				version: 2,
 				suite: { id: `artifact-${scenario}`, title: "Artifact settlement", visibility: "public" },
 				matrix: { targets: [{ id: "mock-chat", model: "mock-model" }], repeats: 1 },
+				...(scenario === "recovered-gated"
+					? { thresholds: { fail: [{ metric: "provider.stopReason.error", op: "gt", value: 0 }] } }
+					: {}),
 				tasks: [
 					{
 						id: "report",
@@ -138,14 +141,17 @@ for (const scenario of ["clean", "recovered", "terminal-error"] as const) {
 					),
 				);
 			}
-			if (scenario === "recovered") {
+			if (scenario.startsWith("recovered")) {
 				match(stdout, /"stopReason":"error"/u);
 				match(stdout, /"phase":"recovered"/u);
 			}
 			strictEqual(result.pass, succeeded, JSON.stringify({ failureClass: result.failureClass, stderr }));
 			strictEqual(result.failureClass, succeeded ? null : "runner_failed");
-			strictEqual(evaluated.code, succeeded ? 0 : 1, evaluated.stderr);
-			strictEqual(fixture.requests.filter((request) => request.stream !== false).length, scenario === "recovered" ? 2 : 1);
+			strictEqual(evaluated.code, succeeded && scenario !== "recovered-gated" ? 0 : 1, evaluated.stderr);
+			strictEqual(
+				fixture.requests.filter((request) => request.stream !== false).length,
+				scenario.startsWith("recovered") ? 2 : 1,
+			);
 			const calls = JSON.parse(String(result.artifacts.callLedger)) as unknown[];
 			const tracked = result.verdict?.trackedMetrics;
 			ok(tracked);
@@ -155,9 +161,28 @@ for (const scenario of ["clean", "recovered", "terminal-error"] as const) {
 			strictEqual(sources.streamCalls, calls.length);
 			strictEqual(result.metrics["ledger.sessionCount"], 1);
 			strictEqual(tracked.modelCalls.value, calls.length, JSON.stringify({ tracked, metrics: result.metrics }));
-			strictEqual(tracked.generatedTokens.value, result.metrics["tokens.output"]);
-			strictEqual(tracked.uncachedPrefillTokens.value, result.metrics["tokens.input"]);
-			strictEqual(tracked.cacheReadTokens.value, result.metrics["tokens.cacheRead"]);
+			strictEqual(result.metrics["provider.measured"], true);
+			strictEqual(result.metrics["provider.stopReason.error"], scenario === "clean" ? 0 : 1);
+			strictEqual(result.metrics["provider.stopReason.toolUse"], succeeded ? 1 : 0);
+			strictEqual(result.metrics["provider.retryScheduled"], scenario.startsWith("recovered") ? 1 : 0);
+			strictEqual(result.metrics["provider.retryStarted"], scenario.startsWith("recovered") ? 1 : 0);
+			strictEqual(result.metrics["provider.retryRecovered"], scenario.startsWith("recovered") ? 1 : 0);
+			strictEqual(result.metrics["provider.retryExhausted"], 0);
+			if (scenario !== "clean") {
+				// This HTTP fault creates synthetic zero usage, not measured free work.
+				strictEqual(result.metrics["provider.errorUsageUnobservedCalls"], 1);
+				strictEqual(result.metrics["provider.errorTokens.total"], undefined);
+			}
+			if (succeeded) {
+				strictEqual(tracked.generatedTokens.value, result.metrics["tokens.output"]);
+				strictEqual(tracked.uncachedPrefillTokens.value, result.metrics["tokens.input"]);
+				strictEqual(tracked.cacheReadTokens.value, result.metrics["tokens.cacheRead"]);
+			} else {
+				strictEqual(result.metrics["tokens.measured"], false);
+				strictEqual(result.metrics["tokens.total"], undefined);
+				strictEqual(report.summary.tokens.measured, false);
+			}
+			if (scenario === "recovered-gated") match(evaluated.stdout, /gate: fail/u);
 			strictEqual(tracked.compactions.value, 0);
 			if (succeeded) {
 				strictEqual(tracked.generatedTokens.value, 5);

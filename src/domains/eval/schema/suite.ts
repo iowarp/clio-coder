@@ -13,6 +13,33 @@ export const CANONICAL_METRICS = [
 	// are absent in that case rather than zero, so a gate on cost can require
 	// measurement instead of reading silence as free.
 	"tokens.measured",
+	// Observed stdout terminal/retry facts, independent of task success. Opaque
+	// runs carry measured:false and no counters. Errored usage stays in inclusive
+	// tokens.* totals; errorTokens/errorCostUsd are known subtotals with coverage.
+	"provider.measured",
+	"provider.stopReason.stop",
+	"provider.stopReason.toolUse",
+	"provider.stopReason.length",
+	"provider.stopReason.error",
+	"provider.stopReason.aborted",
+	"provider.stopReason.other",
+	"provider.retryScheduled",
+	"provider.retryStarted",
+	"provider.retryCancelled",
+	"provider.retryExhausted",
+	"provider.retryRecovered",
+	"provider.errorUsageObservedCalls",
+	"provider.errorUsageUnobservedCalls",
+	"provider.errorUsageIncompleteCalls",
+	"provider.errorCostUnobservedCalls",
+	"provider.errorReasoningUnobservedCalls",
+	"provider.errorReasoningTokens",
+	"provider.errorTokens.input",
+	"provider.errorTokens.output",
+	"provider.errorTokens.total",
+	"provider.errorTokens.cacheRead",
+	"provider.errorTokens.cacheWrite",
+	"provider.errorCostUsd",
 	"latency.wallMs",
 	"latency.modelMs",
 	"tools.totalCalls",
