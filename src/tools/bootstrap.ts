@@ -5,6 +5,7 @@ import type { DispatchContract } from "../domains/dispatch/contract.js";
 import type { AgentRoleFactsResolver } from "../domains/dispatch/execution-role.js";
 import type { PanesOperations } from "../domains/mux/operations.js";
 import type { AutonomyLevel } from "../domains/safety/autonomy.js";
+import type { DecisionLedgerEntry } from "../domains/session/entries.js";
 import { builtin, toolPromptHintsForNames } from "./builtin-tool-catalog.js";
 import type { CompeteMuxWorktrees } from "./compete-worktrees.js";
 import { assertRegisteredBuiltinTools, type CoreToolBootstrapDeps, registerCoreTools } from "./core-bootstrap.js";
@@ -31,6 +32,8 @@ export interface ToolBootstrapDeps extends CoreToolBootstrapDeps {
 	/** Which optional `dispatch` schema blocks this session advertises; absent means every block. */
 	getDispatchSchemaComposition?: () => DispatchSchemaComposition;
 	dispatchBackground?: DispatchBackgroundRegistry;
+	/** Live decision board snapshot; dispatch seals its active refs onto every request. */
+	getDecisionBoard?: () => ReadonlyArray<DecisionLedgerEntry>;
 	/** Optional herdr worktree lifecycle for compete candidates. */
 	competeMuxWorktrees?: CompeteMuxWorktrees;
 	/**
@@ -66,6 +69,7 @@ export function registerAllTools(registry: ToolRegistry, deps: ToolBootstrapDeps
 			...(deps.getWorkerRosters ? { getWorkerRosters: deps.getWorkerRosters } : {}),
 			...(deps.getDispatchSchemaComposition ? { getSchemaComposition: deps.getDispatchSchemaComposition } : {}),
 			...(deps.dispatchBackground ? { background: deps.dispatchBackground } : {}),
+			...(deps.getDecisionBoard ? { getDecisionBoard: deps.getDecisionBoard } : {}),
 			...(deps.competeMuxWorktrees ? { competeWorktrees: { mux: deps.competeMuxWorktrees } } : {}),
 		};
 		registry.register({

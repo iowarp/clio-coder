@@ -3,6 +3,7 @@ import type { AgentSpec } from "../domains/agents/spec.js";
 import type { DispatchContract, DispatchRequest } from "../domains/dispatch/contract.js";
 import type { AgentRoleFactsResolver } from "../domains/dispatch/execution-role.js";
 import type { AutonomyLevel } from "../domains/safety/autonomy.js";
+import type { DecisionLedgerEntry } from "../domains/session/entries.js";
 import type {
 	CandidateWorktree,
 	CompeteGroupOwnership,
@@ -108,4 +109,9 @@ export interface DispatchToolDeps {
 	getWorkerRosters?: () => Readonly<Record<string, { members: ReadonlyArray<DispatchCouncilMember> }>>;
 	/** Which optional schema blocks this session advertises; absent means every block. */
 	getSchemaComposition?: () => DispatchSchemaComposition;
+	/**
+	 * Live decision board snapshot. Every request the tool builds carries the
+	 * active decisions' refs, sealed here and never from model arguments.
+	 */
+	getDecisionBoard?: () => ReadonlyArray<DecisionLedgerEntry>;
 }

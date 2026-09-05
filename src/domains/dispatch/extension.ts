@@ -1350,6 +1350,8 @@ interface DispatchLifecycleStage {
 	pipeline: RunPipelineProvenance | null;
 	briefing: RunBriefingProvenance | null;
 	personaOverride: RunPersonaOverride | null;
+	/** Decision refs sealed on the request by the dispatch tool; null when the parent board was empty. */
+	decisionRefs: ReadonlyArray<string> | null;
 	projectContext: RunProjectContextProvenance;
 	/** Rule ids the worker prompt compiler selected into this run's system prompt; [] when none matched. */
 	rulesApplied: string[];
@@ -1382,6 +1384,8 @@ interface AcpDelegationLifecycleStage {
 	pipeline: RunPipelineProvenance | null;
 	briefing: RunBriefingProvenance | null;
 	personaOverride: RunPersonaOverride | null;
+	/** Decision refs sealed on the request by the dispatch tool; null when the parent board was empty. */
+	decisionRefs: ReadonlyArray<string> | null;
 	projectContext: RunProjectContextProvenance;
 	/** ACP delegation bypasses the worker prompt compiler entirely, so this is always []. */
 	rulesApplied: string[];
@@ -3639,6 +3643,7 @@ export function createDispatchBundle(
 			pipeline: pipelineProvenanceFor(req),
 			briefing: briefingProvenanceFor(req),
 			personaOverride,
+			decisionRefs: req.decisionRefs ?? null,
 			projectContext: projectContextProvenance,
 			rulesApplied: compiledWorkerPrompt.rulesApplied ?? [],
 			operatorProfileApplied: compiledWorkerPrompt.operatorProfileApplied ?? false,
@@ -3728,6 +3733,7 @@ export function createDispatchBundle(
 			pipeline: pipelineProvenanceFor(req),
 			briefing: briefingProvenanceFor(req),
 			personaOverride,
+			decisionRefs: req.decisionRefs ?? null,
 			projectContext: projectContextProvenance,
 			rulesApplied: [],
 			operatorProfileApplied: false,
@@ -4009,6 +4015,7 @@ export function createDispatchBundle(
 				...(req.council !== undefined ? { council: req.council } : {}),
 				...(req.plan !== undefined ? { plan: req.plan } : {}),
 				...(lifecycle.personaOverride ? { personaOverride: lifecycle.personaOverride } : {}),
+				...(lifecycle.decisionRefs ? { decisionRefs: lifecycle.decisionRefs } : {}),
 			});
 			observer?.onAdmitted({
 				runId: envelope.id,
@@ -4170,6 +4177,7 @@ export function createDispatchBundle(
 				...(req.council !== undefined ? { council: req.council } : {}),
 				...(req.plan !== undefined ? { plan: req.plan } : {}),
 				...(lifecycle.personaOverride ? { personaOverride: lifecycle.personaOverride } : {}),
+				...(lifecycle.decisionRefs ? { decisionRefs: lifecycle.decisionRefs } : {}),
 				projectContext: lifecycle.projectContext,
 				rulesApplied: lifecycle.rulesApplied,
 				operatorProfileApplied: lifecycle.operatorProfileApplied,
@@ -5109,6 +5117,7 @@ export function createDispatchBundle(
 				...(req.council !== undefined ? { council: req.council } : {}),
 				...(req.plan !== undefined ? { plan: req.plan } : {}),
 				...(lifecycle.personaOverride ? { personaOverride: lifecycle.personaOverride } : {}),
+				...(lifecycle.decisionRefs ? { decisionRefs: lifecycle.decisionRefs } : {}),
 				...(heartbeatAt ? { heartbeatAt: heartbeatIso(heartbeatAt) } : {}),
 			});
 			observer?.onAdmitted({
@@ -5342,6 +5351,7 @@ export function createDispatchBundle(
 				...(req.plan !== undefined ? { plan: req.plan } : {}),
 				...(fleetGate !== null ? { fleetGate } : {}),
 				...(lifecycle.personaOverride ? { personaOverride: lifecycle.personaOverride } : {}),
+				...(lifecycle.decisionRefs ? { decisionRefs: lifecycle.decisionRefs } : {}),
 				projectContext: lifecycle.projectContext,
 				rulesApplied: lifecycle.rulesApplied,
 				operatorProfileApplied: lifecycle.operatorProfileApplied,
