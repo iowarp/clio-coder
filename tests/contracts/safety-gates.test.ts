@@ -169,7 +169,7 @@ describe("safety gate boundary", () => {
 			"clio-coder skills install ./draft-skills/example",
 			"clio-coder --no-skills skills install example",
 			"env CLIO_CODER_CONFIG_DIR=/tmp/elsewhere clio-coder skills update --all --force",
-			"command clio-coder library install skill:example --yes",
+			"command clio-coder library add skill:example --yes",
 			"sh -lc 'clio-coder skills install example --user'",
 			"node /opt/clio/dist/cli/index.js skills install example",
 			"npx @iowarp/clio-coder skills install example",
@@ -182,11 +182,95 @@ describe("safety gate boundary", () => {
 		for (const command of [
 			"clio-coder skills list",
 			"clio-coder skills install --help",
-			"clio-coder skills get example",
+			"clio-coder skills inspect example",
 			"clio-coder skills validate draft-skills/example/SKILL.md",
 			"clio-coder library list",
 			"printf 'clio-coder skills install example'",
 			"node script.js skills install example",
+		])
+			strictEqual(policy.evaluate({ tool: ToolNames.Bash, args: { command } }).kind, "allow", command);
+	});
+
+	it("blocks every installed-skill update spelling with subcommand flags in main and worker admissions", () => {
+		for (const policy of [engine(), createWorkerSafety({ cwd: scratch })]) {
+			for (const command of [
+				"clio-coder skills sync --force",
+				"clio-coder skills --force sync",
+				"clio-coder skills --user --name renamed install ./draft-skills/example",
+				"clio-coder skills --all update --force",
+				"clio-coder --all --help skills sync --force",
+				"env CLIO_CODER_CONFIG_DIR=/tmp/elsewhere clio-coder skills sync --force",
+				"command clio-coder skills sync",
+				"sh -lc 'clio-coder skills sync --force'",
+				"node /opt/clio/dist/cli/index.js skills sync --force",
+				"tsx /opt/clio/src/cli/index.ts skills sync --force",
+				"npx --yes @iowarp/clio-coder skills sync --force",
+				"npm exec -- clio-coder skills sync --force",
+			]) {
+				const call = { tool: ToolNames.Bash, args: { command } };
+				const decision = policy.evaluate(call);
+				strictEqual(decision.kind, "block", command);
+				strictEqual(
+					"reasonCode" in decision ? decision.reasonCode : decision.policy?.reasonCode,
+					"skill-authority",
+					command,
+				);
+				strictEqual(policy.evaluate(call, "confirmed").kind, "block", command);
+			}
+		}
+	});
+
+	it("reserves confirmed library additions and their skill dependencies for operators", () => {
+		for (const policy of [engine(), createWorkerSafety({ cwd: scratch })]) {
+			for (const command of [
+				"clio-coder library add skill:example --yes",
+				"clio-coder library --yes add skill:example",
+				"clio-coder library --from ./catalog.json --yes add example",
+				"clio-coder library add agent:example --with-requirements --yes",
+				"clio-coder library --with-requirements add fleet:example --yes",
+				"clio-coder library add prompt:example --yes --with-requirements",
+				"clio-coder library add skill:example --from --help --yes",
+				"env CLIO_CODER_CONFIG_DIR=/tmp/elsewhere clio-coder library add skill:example --yes",
+				"command clio-coder library add skill:example --yes",
+				"sh -lc 'clio-coder library add skill:example --yes'",
+				"node /opt/clio/dist/cli/index.js library add skill:example --yes",
+				"npx --yes @iowarp/clio-coder library add skill:example --yes",
+				"npm exec -- clio-coder library add skill:example --yes",
+			]) {
+				const call = { tool: ToolNames.Bash, args: { command } };
+				const decision = policy.evaluate(call);
+				strictEqual(decision.kind, "block", command);
+				strictEqual(
+					"reasonCode" in decision ? decision.reasonCode : decision.policy?.reasonCode,
+					"skill-authority",
+					command,
+				);
+				strictEqual(policy.evaluate(call, "confirmed").kind, "block", command);
+			}
+		}
+	});
+
+	it("preserves library discovery and unconfirmed plans through the same CLI wrappers", () => {
+		const policy = engine();
+		for (const command of [
+			"clio-coder --help skills sync --force",
+			"clio-coder --no-skills --help skills sync --force",
+			"clio-coder skills sync -v",
+			"clio-coder skills sync --help",
+			"clio-coder skills --json inventory",
+			"clio-coder library search example --kind skill --json",
+			"clio-coder library use skill example",
+			"clio-coder library add skill:example --json",
+			"clio-coder library --from ./catalog.json add skill:example --with-requirements",
+			"clio-coder library add agent:example --with-requirements",
+			"clio-coder library add skill:example --from --yes",
+			"clio-coder library add skill:example --yes --help",
+			"env CLIO_CODER_CONFIG_DIR=/tmp/elsewhere clio-coder library list",
+			"command clio-coder library add skill:example",
+			"sh -lc 'clio-coder library add skill:example --with-requirements'",
+			"node /opt/clio/dist/cli/index.js library add skill:example --json",
+			"npx --yes @iowarp/clio-coder library add skill:example",
+			"npm exec -- clio-coder library search example",
 		])
 			strictEqual(policy.evaluate({ tool: ToolNames.Bash, args: { command } }).kind, "allow", command);
 	});
