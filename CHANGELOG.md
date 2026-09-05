@@ -20,6 +20,7 @@ Trust spine: typed claims, executable validation, and decision provenance. Answe
 - The dispatch board reads observability's run projection. One fold owns lifecycle events, worker progress, receipt trust, retries, cancellation, fleet positions, and evidence readiness; the board keeps ordering, selection, and rendering. Terminal status and accounting come from the same projection the observability contract publishes.
 
 ### Fixed
+- Ollama eviction now releases only models this Clio process successfully pinned on the same server, preserving models loaded by operators or other clients (#313).
 - Default path policy now marks project and user skill roots read-only for workers and the orchestrator, alongside the existing skill-authority guard; operator installs continue through the CLI (#300).
 - Scratch offload sweeps now report non-ENOENT filesystem errors in a skipped count instead of silently swallowing them.
 - Model discovery no longer treats target status with an undefined model source as a live catalog.

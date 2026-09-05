@@ -41,6 +41,7 @@ import { mergeSamplingOverride } from "./sampling-overrides.js";
 import type { EngineApiProvider } from "./types.js";
 
 const REASONING_CHARS_PER_TOKEN = 4;
+const ownedModelsByTarget = new Map<string, Set<string>>();
 
 interface ClioRuntimeMetadata {
 	clioCoder?: {
@@ -293,7 +294,10 @@ async function listResidentOllamaModels(client: OllamaEvictClient): Promise<Resi
  * weights release.
  */
 async function unloadOllamaModel(baseUrl: string, modelId: string, headers?: Record<string, string>): Promise<void> {
+	const owned = ownedModelsByTarget.get(residencyTargetKey("ollama-native", baseUrl));
+	if (!owned?.has(modelId)) return;
 	await ollamaEvictClient(baseUrl, headers).generate({ model: modelId, prompt: "", keep_alive: 0, stream: false });
+	owned.delete(modelId);
 }
 
 function mapStopReason(reason: string | undefined, hadToolCall: boolean): AssistantMessage["stopReason"] {
@@ -466,8 +470,19 @@ function runStream(
 					else emitText(segment.content);
 				}
 			};
+			let recordedOwnership = false;
 			for await (const chunk of iterator) {
 				const response = chunk as ChatResponse;
+				if (!recordedOwnership && model.baseUrl) {
+					const targetKey = residencyTargetKey("ollama-native", model.baseUrl);
+					let owned = ownedModelsByTarget.get(targetKey);
+					if (!owned) {
+						owned = new Set<string>();
+						ownedModelsByTarget.set(targetKey, owned);
+					}
+					owned.add(response.model || model.id);
+					recordedOwnership = true;
+				}
 				const msg = response.message;
 				if (msg?.thinking && msg.thinking.length > 0) {
 					emitThinking(msg.thinking);
