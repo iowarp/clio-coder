@@ -20,6 +20,7 @@ import {
 	type WorkerPermissionMode,
 } from "../core/defaults.js";
 import { initializeClioHome } from "../core/init.js";
+import { warnLegacyNaming } from "../core/naming-compat.js";
 import { resolveClioDirs } from "../core/xdg.js";
 import { getVersionInfo } from "../domains/lifecycle/version.js";
 import { openAuthStorage, targetRequiresAuth } from "../domains/providers/auth/index.js";
@@ -2113,7 +2114,7 @@ export async function runConfigureCommand(
 			return 2;
 		}
 		if (runtimeId === "lmstudio-native" && runtime.id === "lmstudio") {
-			process.stderr.write("warning: runtime 'lmstudio-native' is deprecated; using 'lmstudio'\n");
+			warnLegacyNaming(runtimeId, runtime.id);
 		}
 	}
 	const hasTargetSetupFlag =

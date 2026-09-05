@@ -892,4 +892,37 @@ describe("contracts/configure-sections", () => {
 			testEnv.cleanup();
 		}
 	});
+
+	it("warns about deprecated lmstudio-native via warnLegacyNaming and dedups per process", async () => {
+		const testEnv = isolatedEnv();
+		const warnings: { message: string; code?: string | undefined; name: string }[] = [];
+		const onWarning = (warning: Error) => {
+			warnings.push({
+				message: warning.message,
+				code: (warning as unknown as { code?: string }).code,
+				name: warning.name,
+			});
+		};
+		process.on("warning", onWarning);
+		try {
+			await captureConfigure(["--runtime", "lmstudio-native"], testEnv.env, []);
+			await new Promise((resolve) => setImmediate(resolve));
+			const matching = warnings.filter((w) => w.code === "CLIO_CODER_LEGACY_NAMING");
+			strictEqual(matching.length, 1);
+			const first = matching[0];
+			ok(first !== undefined);
+			ok(first.message.includes("lmstudio-native"));
+			ok(first.message.includes("lmstudio"));
+			ok(first.message.includes("v0.7.0"));
+			strictEqual(first.name, "DeprecationWarning");
+
+			await captureConfigure(["--runtime", "lmstudio-native"], testEnv.env, []);
+			await new Promise((resolve) => setImmediate(resolve));
+			const afterSecond = warnings.filter((w) => w.code === "CLIO_CODER_LEGACY_NAMING");
+			strictEqual(afterSecond.length, 1);
+		} finally {
+			process.off("warning", onWarning);
+			testEnv.cleanup();
+		}
+	});
 });

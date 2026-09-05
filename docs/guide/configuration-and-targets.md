@@ -312,7 +312,7 @@ The tool-prose-loop detector is keyed on the same tier, for the same reason: nar
 
 ### LM Studio transport and settings
 
-The canonical runtime id is `lmstudio`. The former `lmstudio-native` id remains an accepted alias,
+The canonical runtime id is `lmstudio`. The former `lmstudio-native` id remains an accepted alias scheduled for removal in v0.7.0,
 and `clio-coder upgrade` rewrites persisted targets to the canonical id. It also converts `ws:` URLs
 to `http:` and `wss:` URLs to `https:` because this adapter is entirely HTTP. Chat uses LM Studio's
 OpenAI-compatible `POST /v1/chat/completions` endpoint
