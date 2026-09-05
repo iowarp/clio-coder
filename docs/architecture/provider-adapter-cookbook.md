@@ -180,7 +180,10 @@ state, even when two targets share a gateway URL. A successful unknown or mixed
 runtime declaration remains unknown and is not repeatedly probed for a preferred
 answer. Memory includes discovery and auth in its existing generation/deadline
 boundary; cancellation cannot launch a later completion or mark the endpoint
-down. Fresh discovered output limits also bound its request. Compaction checks
+down. Fresh discovered output limits also bound its request. After metadata and auth,
+memory rechecks actual endpoint occupancy immediately before registering its
+inference hold. Late saturation stays a dropped `endpoint_busy` boundary with
+no usage or cache-disturbance claim. Compaction checks
 the originating session/branch after preparation and uses the existing simple
 stream API with thinking off, rather than inferring an active level from the
 model's reasoning capability. Cold worker admission is a separate caller and

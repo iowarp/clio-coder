@@ -29,6 +29,9 @@ export interface TaskMemoryTrajectoryStep {
 	resultDigestProvenance: ToolResultDigestProvenance;
 }
 
+/** Admission changed while a client prepared; no inference request was sent. */
+export class TaskMemoryEndpointBusyError extends Error {}
+
 export interface TaskMemoryModelRequest {
 	systemPrompt: string;
 	userPrompt: string;
@@ -375,6 +378,7 @@ export async function runTaskMemoryPolicy(
 		bank.recordInjection(citedIds);
 		return settle("injected", "intervened", { ...counts, reminder });
 	} catch (error) {
+		if (error instanceof TaskMemoryEndpointBusyError) return settle("silent", "endpoint_busy");
 		clientError = errorMessage(error);
 		// A transport that aborted at its own deadline spent the whole budget and
 		// produced nothing. Reporting it as silence made a step that held a local

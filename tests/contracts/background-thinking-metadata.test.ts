@@ -1,13 +1,22 @@
 import { deepStrictEqual, ok, strictEqual } from "node:assert/strict";
 import { test } from "node:test";
+import { BusChannels } from "../../src/core/bus-events.js";
 import { DEFAULT_SETTINGS } from "../../src/core/defaults.js";
+import { createSafeEventBus } from "../../src/core/event-bus.js";
+import { endpointCapacityUsage } from "../../src/domains/dispatch/capacity-lease.js";
 import { TaskMemoryBank } from "../../src/domains/memory/task-bank.js";
 import { runTaskMemoryPolicy, type TaskMemoryModelClient } from "../../src/domains/memory/task-memory-policy.js";
+import { createMemoryInterventionRegistration } from "../../src/domains/middleware/memory-intervention.js";
+import { canonicalEndpointKey, registerForegroundStream } from "../../src/domains/providers/endpoint-capacity.js";
 import { createProvidersBundle } from "../../src/domains/providers/extension.js";
 import litellm from "../../src/domains/providers/runtimes/protocol/litellm.js";
 import type { SessionContract } from "../../src/domains/session/contract.js";
 import { appendEntry, appendTurn, startSession } from "../../src/domains/session/manager.js";
-import { createBackgroundMemoryModelClient, createProductionAutoCompact } from "../../src/entry/orchestrator.js";
+import {
+	createBackgroundMemoryModelClient,
+	createBackgroundMemoryRouting,
+	createProductionAutoCompact,
+} from "../../src/entry/orchestrator.js";
 import { dispatchStubContext } from "../harness/dispatch-stub-context.js";
 import { startGatewayThinkingFixture } from "../harness/gateway-thinking-fixture.js";
 import { isolateClioEnv } from "../harness/scratch-env.js";
@@ -242,7 +251,9 @@ test("memory refuses an endpoint changed while metadata was pending", async () =
 			signal: new AbortController().signal,
 		});
 		await started;
-		f.settings.targets[0]!.url = "http://changed.invalid:4000";
+		const target = f.settings.targets[0];
+		ok(target);
+		target.url = "http://changed.invalid:4000";
 		release();
 		let error: unknown;
 		try {
@@ -257,3 +268,86 @@ test("memory refuses an endpoint changed while metadata was pending", async () =
 		await f.close();
 	}
 });
+
+for (const stage of ["metadata", "auth"] as const) {
+	for (const capacity of [1, 2, undefined]) {
+		test(`memory rechecks ${capacity ?? "unbounded"} endpoint capacity after ${stage}`, { timeout: 5000 }, async () => {
+			let release!: () => void;
+			let entered!: () => void;
+			const gate = new Promise<void>((resolve) => {
+				release = resolve;
+			});
+			const started = new Promise<void>((resolve) => {
+				entered = resolve;
+			});
+			const delay = async () => {
+				entered();
+				await gate;
+			};
+			const f = await setup("lm-studio", stage === "metadata" ? delay : undefined);
+			const target = f.settings.targets[0];
+			ok(target);
+			if (capacity !== undefined) target.maxConcurrentRequests = capacity;
+			if (stage === "auth") {
+				target.auth = { apiKeyEnvVar: "CLIO_BACKGROUND_FIXTURE_KEY" };
+				const resolve = f.providers.auth.resolveForTarget;
+				f.providers.auth.resolveForTarget = async (...args) => {
+					await delay();
+					return resolve(...args);
+				};
+			}
+			const key = canonicalEndpointKey(target);
+			ok(key);
+			const occupancy: number[] = [];
+			const push = f.fixture.requests.push.bind(f.fixture.requests);
+			f.fixture.requests.push = (...requests) => {
+				occupancy.push(endpointCapacityUsage()[key] ?? 0);
+				return push(...requests);
+			};
+			const bus = createSafeEventBus();
+			let disturbances = 0;
+			bus.on(BusChannels.MemoryStepCompleted, () => {
+				disturbances++;
+			});
+			const telemetry: Array<{ decision: string; reason: string }> = [];
+			const routing = createBackgroundMemoryRouting(f.providers, () => f.settings, bus);
+			const intervention = createMemoryInterventionRegistration({
+				bank: new TaskMemoryBank(),
+				...routing,
+				timeoutMs: 2000,
+				telemetry: {
+					record: (row) => {
+						telemetry.push(row);
+					},
+				},
+			});
+			let releaseForeground = () => {};
+			try {
+				const pending = intervention.runPromptedStep({ task: "fixture", deterministicTrigger: true });
+				await started;
+				strictEqual(endpointCapacityUsage()[key] ?? 0, 0, "metadata/auth is not inference capacity");
+				releaseForeground = registerForegroundStream(key);
+				strictEqual(routing.backgroundEndpointBusy(), capacity === 1);
+				release();
+				const result = await pending;
+				strictEqual(f.fixture.requests.length, capacity === 1 ? 0 : 1);
+				deepStrictEqual(occupancy, capacity === 1 ? [] : [2]);
+				strictEqual(endpointCapacityUsage()[key] ?? 0, 1, "only the foreground hold remains");
+				strictEqual(disturbances, capacity === 1 ? 0 : 1);
+				if (capacity === 1) {
+					strictEqual(result.reason, "endpoint_busy");
+					strictEqual(result.usage, null);
+					strictEqual(telemetry.at(-1)?.decision, "dropped");
+				} else {
+					strictEqual(result.usage?.reasoning, 0);
+					strictEqual(f.fixture.requests[0]?.reasoning_effort, "none");
+				}
+			} finally {
+				release();
+				releaseForeground();
+				intervention.dispose();
+				await f.close();
+			}
+		});
+	}
+}
