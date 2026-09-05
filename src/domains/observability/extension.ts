@@ -183,11 +183,7 @@ export function createObservabilityBundle(
 		projection.evidenceBuildStarted(runId);
 		const build = buildAndIndexEvidence(runId, succeeded, attempt, {
 			onReady: (id, evidence) => {
-				projection.evidenceBuildSucceeded(id, evidence);
-				// The same fact, once, for listeners outside this closure (the ACP
-				// server forwards it as the opt-in `accountability.evidenceReady`
-				// kind). The payload spreads the evidence object the projection just
-				// received rather than rebuilding it, so the two cannot drift.
+				// The projection and ACP consume the same evidence-ready event.
 				context.bus.emit(BusChannels.AccountabilityEvidenceReady, { runId: id, ...evidence });
 			},
 			onFailed: (id, message) => projection.evidenceBuildFailed(id, message),
@@ -291,6 +287,9 @@ export function createObservabilityBundle(
 			telemetry.record("histogram", "tokens.ttft_ms", snapshot.ttftMs ?? 0);
 			projection.refresh();
 		},
+		bindRunReaders: (readers) => projection.bindRunReaders(readers),
+		reconcileRuns: () => projection.reconcileRuns(),
+		setFleetPhase: (runId, phase) => projection.setFleetPhase(runId, phase),
 		snapshot: () => projection.snapshot(),
 		subscribe: (listener) => projection.subscribe(listener),
 	};

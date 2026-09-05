@@ -1,36 +1,15 @@
-import { performance } from "node:perf_hooks";
-import {
-	BusChannels,
-	type DispatchCompletedPayload,
-	type DispatchFailedPayload,
-	type DispatchProgressPayload,
-	type DispatchRunIdentity,
-} from "../core/bus-events.js";
-import { resolveDispatchFailureStatus } from "../core/dispatch-outcome.js";
-import type { SafeEventBus } from "../core/event-bus.js";
-import { rawDurationMs } from "../core/timers.js";
 import type { AgentAudience } from "../domains/agents/spec.js";
 import {
-	cloneRunToolBudgetEnvelope,
 	formatBudgetPolicy,
 	formatBudgetReasons,
 	formatBudgetRequest,
 	formatEffectiveBudget,
 	type RunToolBudgetEnvelope,
 } from "../domains/dispatch/budget-envelope.js";
-import type { DispatchSnapshot } from "../domains/dispatch/contract.js";
-import {
-	type DispatchRequestOrigin,
-	type RunKind,
-	type RunStatus,
-	runKindSupportsLiveSteering,
-} from "../domains/dispatch/types.js";
+import { type DispatchRequestOrigin, type RunKind, runKindSupportsLiveSteering } from "../domains/dispatch/types.js";
 import { describeWriteBoundaryAttributionDowngrade } from "../domains/dispatch/write-boundary.js";
-import {
-	summarizeTrustStatus,
-	type TrustSummaryProjection,
-	type TrustVerdict,
-} from "../domains/evidence/trust-projection.js";
+import type { TrustSummaryProjection, TrustVerdict } from "../domains/evidence/trust-projection.js";
+import type { ObservabilityContract, ObservabilityRunSummary } from "../domains/observability/contract.js";
 import {
 	COST_NOT_MEASURED,
 	costAggregateForAmount,
@@ -38,7 +17,7 @@ import {
 	type ObservabilityNotice,
 	type ObservabilitySnapshot,
 } from "../domains/observability/index.js";
-import { type CostProvenance, foregroundStreamUsage, resolveCostProvenance } from "../domains/providers/index.js";
+import { type CostProvenance, foregroundStreamUsage } from "../domains/providers/index.js";
 import { sanitizeCallTargetText } from "../domains/safety/call-target.js";
 import { type Component, truncateToWidth, visibleWidth, wrapTextWithAnsi } from "../engine/tui.js";
 import { formatWorkerContextMeter } from "./context-meter.js";
@@ -59,20 +38,9 @@ import {
 	screenTitle,
 	spinnerFrame,
 } from "./theme/index.js";
-import {
-	createWorkerProgressFold,
-	type WorkerAction,
-	type WorkerProgressFold,
-	type WorkerProgressSnapshot,
-} from "./worker-progress.js";
-import type { WorkerReceiptReader } from "./worker-stream.js";
+import type { WorkerAction, WorkerProgressSnapshot } from "./worker-progress.js";
 
-export type DispatchBoardStatus =
-	| Extract<RunStatus, "running" | "completed" | "failed" | "stale" | "dead">
-	| "aborted"
-	| "cancelling"
-	| "enqueued"
-	| "retrying";
+export type DispatchBoardStatus = ObservabilityRunSummary["status"];
 
 export interface DispatchRetryPresentation {
 	attempt: number;
@@ -206,55 +174,8 @@ export function isDispatchBoardRowCancellable(row: DispatchBoardRow): boolean {
 	return row.status === "running" || row.status === "stale" || row.status === "enqueued" || row.status === "retrying";
 }
 
-interface DispatchBoardEntry
-	extends Omit<
-		DispatchBoardRow,
-		"elapsedMs" | "recentTools" | "lastContextTokens" | "currentTool" | "retry" | "progress"
-	> {
-	sequence: number;
-	enqueuedAtMs: number;
-	startedAtMs: number | null;
-	/**
-	 * The monotonic twin of `startedAtMs`, set from the same observation. TTFT
-	 * is a span, so it is measured against this and never against the wall
-	 * stamps, which exist to order and label rows.
-	 */
-	startedAtClockMs: number | null;
-	finishedAtMs: number | null;
-	durationMs: number | null;
-	lastContextTokens: number;
-	/**
-	 * The one fold that reads this run's worker events. Tool activity and the
-	 * answer tail are its output, so the board no longer interprets the stream
-	 * alongside the transcript.
-	 */
-	progress: WorkerProgressFold;
-	retry?: DispatchRetryPresentation;
-}
-
-/** Keep raw task text out of long-lived TUI rows and bound hostile/user-sized input. */
-const TASK_SUMMARY_MAX_WIDTH = 240;
 /** Rows of worker prose an expanded card shows before it defers to `/view`. */
 const WORKER_PROGRESS_CARD_ROWS = 6;
-
-interface WorkerEventShape {
-	type?: unknown;
-	message?: {
-		role?: unknown;
-		usage?: {
-			input?: unknown;
-			output?: unknown;
-			cacheRead?: unknown;
-			cacheWrite?: unknown;
-		};
-	};
-	messages?: unknown;
-}
-
-interface AssistantMessageShape {
-	role?: unknown;
-	stopReason?: unknown;
-}
 
 export const TASK_ISLAND_WIDTH = 44;
 
@@ -269,7 +190,6 @@ const STATUS_ORDER: Record<DispatchBoardStatus, number> = {
 	aborted: 7,
 	completed: 8,
 };
-const MAX_DISPATCH_BOARD_ROWS = 50;
 
 /**
  * The agent's own name, unadorned. Audience is carried by
@@ -509,16 +429,6 @@ function evidenceCardLine(theme: ClioTheme, evidence: RunEvidencePresentation, c
 	if (evidence.state === "failed" && evidence.reason) units.push(theme.fg("muted", evidence.reason));
 	units.push(theme.fg("dim", evidence.viewFilter));
 	return cardUnitsLine(theme, "proof", units, contentWidth);
-}
-
-/** Sanitize lifecycle task text at the terminal boundary and collapse it to one bounded line. */
-function sanitizeDispatchTaskSummary(value: unknown): string | undefined {
-	if (typeof value !== "string") return undefined;
-	const sanitized = sanitizeCallTargetText(value);
-	if (sanitized.length === 0) return undefined;
-	// pi-tui's truncator appends reset sequences when it elides. Strip those
-	// again so the stored projection remains plain text, not terminal styling.
-	return sanitizeCallTargetText(truncateToWidth(sanitized, TASK_SUMMARY_MAX_WIDTH, "…", false));
 }
 
 function retryCountdown(retry: DispatchRetryPresentation, now = Date.now()): string {
@@ -1154,87 +1064,6 @@ export function formatTaskIslandLines(rows: ReadonlyArray<DispatchBoardRow>, max
 	return frame(clioTheme(), "Fleet runs", body, TASK_ISLAND_WIDTH + 4);
 }
 
-function parseRunId(value: unknown): string | null {
-	return typeof value === "string" && value.length > 0 ? value : null;
-}
-
-function parseText(value: unknown, fallback: string): string {
-	return typeof value === "string" && value.length > 0 ? value : fallback;
-}
-
-function parseRuntimeKind(value: unknown): RunKind {
-	if (value === "sdk" || value === "subprocess" || value === "acp-delegation") return value;
-	return "http";
-}
-
-function parseAgentAudience(value: unknown, fallback: AgentAudience | undefined): AgentAudience | undefined {
-	if (value === "base" || value === "shadow" || value === "custom" || value === "internal") return value;
-	return fallback;
-}
-
-function parseRequestOrigin(
-	value: unknown,
-	fallback: DispatchRequestOrigin | undefined,
-): DispatchRequestOrigin | undefined {
-	if (value === "user" || value === "agent" || value === "internal") return value;
-	return fallback;
-}
-
-function parseFiniteNumber(value: unknown, fallback: number): number {
-	return typeof value === "number" && Number.isFinite(value) ? value : fallback;
-}
-
-function parseNonEmptyString(value: unknown): string | undefined {
-	return typeof value === "string" && value.length > 0 ? value : undefined;
-}
-
-function parseTaskSummary(
-	raw: Partial<DispatchRunIdentity> & { task?: unknown; taskSummary?: unknown },
-	fallback: string | undefined,
-): string | undefined {
-	return sanitizeDispatchTaskSummary(raw.task) ?? sanitizeDispatchTaskSummary(raw.taskSummary) ?? fallback;
-}
-
-function parsePositiveInt(value: unknown): number | undefined {
-	return typeof value === "number" && Number.isFinite(value) && value > 0 ? Math.floor(value) : undefined;
-}
-
-function parseGateBadge(value: unknown): { role: string; cycle: number } | undefined {
-	if (typeof value !== "object" || value === null) return undefined;
-	const record = value as { role?: unknown; cycle?: unknown };
-	if (typeof record.role !== "string" || record.role.length === 0) return undefined;
-	const cycle = parsePositiveInt(record.cycle) ?? 1;
-	return { role: record.role, cycle };
-}
-
-function parseEndpointCapacity(value: unknown): DispatchBoardRow["endpoint"] | undefined {
-	if (typeof value !== "object" || value === null) return undefined;
-	const record = value as { key?: unknown; label?: unknown; limit?: unknown };
-	const key = parseNonEmptyString(record.key);
-	const label = parseNonEmptyString(record.label);
-	const limit = parsePositiveInt(record.limit);
-	return key === undefined || label === undefined || limit === undefined ? undefined : { key, label, limit };
-}
-
-function parseCouncilBadge(value: unknown): DispatchBoardRow["council"] | undefined {
-	if (typeof value !== "object" || value === null) return undefined;
-	const record = value as { group?: unknown; label?: unknown; color?: unknown; round?: unknown };
-	const group = parseNonEmptyString(record.group);
-	const label = parseNonEmptyString(record.label);
-	const round = parsePositiveInt(record.round);
-	if (group === undefined || label === undefined || round === undefined) return undefined;
-	return {
-		group,
-		label,
-		...(typeof record.color === "string" && record.color.length > 0 ? { color: record.color } : {}),
-		round,
-	};
-}
-
-function parseFiniteNumberOrZero(value: unknown): number {
-	return typeof value === "number" && Number.isFinite(value) ? value : 0;
-}
-
 function parseOptionalDetail(value: unknown): string | null {
 	if (typeof value !== "string") return null;
 	const detail = value.replace(/\s+/g, " ").trim();
@@ -1273,150 +1102,34 @@ function terminalDetail(row: DispatchBoardRow): string | null {
 	return parseOptionalDetail(row.outcomeDetail);
 }
 
-function resolveAgentEndStatus(rawMessages: unknown): DispatchBoardStatus | null {
-	if (!Array.isArray(rawMessages)) return null;
-	for (let index = rawMessages.length - 1; index >= 0; index -= 1) {
-		const message = (rawMessages[index] ?? {}) as AssistantMessageShape;
-		if (message.role !== "assistant") continue;
-		if (message.stopReason === "stop") return "completed";
-		if (message.stopReason === "error") return "failed";
-		if (message.stopReason === "aborted") return "aborted";
-		return null;
-	}
-	return null;
-}
-
-function resolveFailureDetail(
-	payload: Partial<DispatchFailedPayload>,
-	fallback: string | null | undefined,
-): string | null {
-	const detail = parseOptionalDetail(payload.outcomeDetail);
-	if (detail !== null) return detail;
-	if (payload.reason === "timed_out") return "turn timeout exceeded";
-	return fallback ?? null;
-}
-
-function resolveHeartbeatStatus(status: unknown): DispatchBoardStatus | null {
-	if (status === "alive") return "running";
-	if (status === "stale" || status === "dead") return status;
-	return null;
-}
-
 function isTerminalStatus(status: DispatchBoardStatus): boolean {
 	return status === "completed" || status === "failed" || status === "aborted" || status === "dead";
 }
 
-function parseRetrySnapshot(value: DispatchSnapshot["retrying"][number]): DispatchRetryPresentation | null {
-	const attempt = parsePositiveInt(value.attempt);
-	const dueAtMs = Date.parse(value.dueAt);
-	if (attempt === undefined || !Number.isFinite(dueAtMs)) return null;
-	return {
-		attempt,
-		dueAtMs,
-		reason: sanitizeCallTargetText(value.reason),
-	};
-}
-
-function readRetrySnapshot(
-	snapshot: DispatchSnapshot,
-): Map<string, { agentId: string; taskSummary?: string; retry: DispatchRetryPresentation }> {
-	const retrying = new Map<string, { agentId: string; taskSummary?: string; retry: DispatchRetryPresentation }>();
-	try {
-		for (const value of snapshot.retrying) {
-			const runId = parseRunId(value.runId);
-			const agentId = parseNonEmptyString(value.agentId);
-			const retry = parseRetrySnapshot(value);
-			const taskSummary = sanitizeDispatchTaskSummary(value.task);
-			if (runId && agentId && retry) {
-				retrying.set(runId, {
-					agentId,
-					...(taskSummary !== undefined ? { taskSummary } : {}),
-					retry,
-				});
-			}
-		}
-	} catch {
-		// The board remains lifecycle-event driven if an optional snapshot fails.
-	}
-	return retrying;
-}
-
-function readRunningSnapshot(snapshot: DispatchSnapshot): Map<
-	string,
-	{
-		inputTokens: number;
-		outputTokens: number;
-		tokenCount: number;
-		costUsd: number;
-		costProvenance: CostProvenance;
-		outcomePhase: string;
-		budget?: RunToolBudgetEnvelope;
-	}
-> {
-	const running = new Map<
-		string,
-		{
-			inputTokens: number;
-			outputTokens: number;
-			tokenCount: number;
-			costUsd: number;
-			costProvenance: CostProvenance;
-			outcomePhase: string;
-			budget?: RunToolBudgetEnvelope;
-		}
-	>();
-	try {
-		for (const value of snapshot.running) {
-			const runId = parseRunId(value.runId);
-			if (!runId) continue;
-			const budget = cloneRunToolBudgetEnvelope(value.budget);
-			running.set(runId, {
-				inputTokens: parseFiniteNumberOrZero(value.tokens.input),
-				outputTokens: parseFiniteNumberOrZero(value.tokens.output),
-				tokenCount: parseFiniteNumberOrZero(value.tokens.total),
-				costUsd: parseFiniteNumberOrZero(value.costUsd),
-				costProvenance: value.costProvenance ?? "unknown",
-				outcomePhase: value.outcomePhase,
-				...(budget !== undefined ? { budget } : {}),
-			});
-		}
-	} catch {
-		// Lifecycle/progress events remain authoritative if the optional snapshot fails.
-	}
-	return running;
-}
-
-function resolveElapsedMs(entry: DispatchBoardEntry, now: number): number {
-	const startedAtMs = entry.startedAtMs ?? entry.enqueuedAtMs;
-	if (entry.durationMs !== null) return entry.durationMs;
-	const endMs = entry.finishedAtMs ?? now;
-	return Math.max(0, rawDurationMs(startedAtMs, endMs));
-}
-
-function toRow(entry: DispatchBoardEntry, now: number): DispatchBoardRow {
+function toRow(entry: ObservabilityRunSummary, now: number): DispatchBoardRow {
 	const retry = entry.retry;
-	const progress = entry.progress.snapshot();
+	const progress = entry.progress;
 	return {
-		progress,
+		...(progress !== undefined ? { progress } : {}),
 		runId: entry.runId,
 		agentId: entry.agentId,
 		...(entry.agentAudience !== undefined ? { agentAudience: entry.agentAudience } : {}),
 		...(entry.requestOrigin !== undefined ? { requestOrigin: entry.requestOrigin } : {}),
-		runtimeKind: entry.runtimeKind,
-		runtimeId: entry.runtimeId,
-		targetId: entry.targetId,
-		wireModelId: entry.wireModelId,
+		runtimeKind: entry.runtimeKind ?? "http",
+		runtimeId: entry.runtimeId ?? "-",
+		targetId: entry.targetId ?? "-",
+		wireModelId: entry.modelId ?? "-",
 		...(entry.endpoint !== undefined ? { endpoint: { ...entry.endpoint } } : {}),
 		...(entry.taskSummary !== undefined ? { taskSummary: entry.taskSummary } : {}),
 		...(entry.budget !== undefined ? { budget: entry.budget } : {}),
-		status: retry ? "retrying" : entry.status,
-		elapsedMs: resolveElapsedMs(entry, now),
-		tokenCount: entry.tokenCount,
+		status: entry.status,
+		elapsedMs: entry.durationMs ?? Math.max(0, (entry.finishedAtMs ?? now) - entry.startedAtMs),
+		tokenCount: entry.tokens.total,
 		costUsd: entry.costUsd,
 		...(entry.costProvenance !== undefined ? { costProvenance: entry.costProvenance } : {}),
-		inputTokens: entry.inputTokens,
-		outputTokens: entry.outputTokens,
-		ttftMs: entry.ttftMs,
+		inputTokens: entry.tokens.input,
+		outputTokens: entry.tokens.output,
+		ttftMs: entry.ttftMs ?? null,
 		...(entry.outcomeDetail !== undefined ? { outcomeDetail: entry.outcomeDetail } : {}),
 		...(entry.node !== undefined ? { node: entry.node } : {}),
 		...(entry.gate !== undefined ? { gate: { ...entry.gate } } : {}),
@@ -1426,439 +1139,55 @@ function toRow(entry: DispatchBoardEntry, now: number): DispatchBoardRow {
 		...(entry.rerouteCount !== undefined ? { rerouteCount: entry.rerouteCount } : {}),
 		...(entry.failoverHops !== undefined ? { failoverHops: entry.failoverHops } : {}),
 		...(entry.contextWindow !== undefined ? { contextWindow: entry.contextWindow } : {}),
-		lastContextTokens: entry.lastContextTokens,
+		lastContextTokens: entry.lastContextTokens ?? 0,
 		...(entry.receiptId !== undefined ? { receiptId: entry.receiptId } : {}),
 		...(entry.phase !== undefined ? { phase: { ...entry.phase } } : {}),
 		// Both tool fields are views of the one projection, so the compact card and
 		// the expanded detail can never disagree about what is running.
-		currentTool: retry ? null : (progress.currentAction?.tool ?? null),
-		recentTools: progress.recentActions.map((action) => action.tool),
+		currentTool: retry ? null : (progress?.currentAction?.tool ?? null),
+		recentTools: progress?.recentActions.map((action) => action.tool) ?? [],
 		...(retry ? { retry: { ...retry } } : {}),
 		...(entry.steerAcknowledgement ? { steerAcknowledgement: { ...entry.steerAcknowledgement } } : {}),
 		...(entry.writeRecordDowngrade ? { writeRecordDowngrade: { ...entry.writeRecordDowngrade } } : {}),
 	};
 }
 
-function sortEntries(a: DispatchBoardEntry, b: DispatchBoardEntry): number {
-	const aStatus = a.retry ? "retrying" : a.status;
-	const bStatus = b.retry ? "retrying" : b.status;
-	const rank = STATUS_ORDER[aStatus] - STATUS_ORDER[bStatus];
-	if (rank !== 0) return rank;
-	const aTime = a.finishedAtMs ?? a.startedAtMs ?? a.enqueuedAtMs;
-	const bTime = b.finishedAtMs ?? b.startedAtMs ?? b.enqueuedAtMs;
-	if (aTime !== bTime) return bTime - aTime;
-	return a.sequence - b.sequence;
-}
-
-function pruneEntries(entries: Map<string, DispatchBoardEntry>, onEvict?: (runId: string) => void): void {
-	if (entries.size <= MAX_DISPATCH_BOARD_ROWS) return;
-	const terminalEntries = [...entries.values()]
-		.filter((entry) => !entry.retry && isTerminalStatus(entry.status))
-		.sort((a, b) => a.sequence - b.sequence);
-	const evictionQueue =
-		terminalEntries.length > 0 ? terminalEntries : [...entries.values()].sort((a, b) => a.sequence - b.sequence);
-	for (const entry of evictionQueue) {
-		if (entries.size <= MAX_DISPATCH_BOARD_ROWS) break;
-		entries.delete(entry.runId);
-		onEvict?.(entry.runId);
-	}
-}
-
+/** The board keeps display order and reads every run fact from observability. */
 export function createDispatchBoardStore(
-	bus: SafeEventBus,
-	snapshot?: () => DispatchSnapshot,
-	/**
-	 * Sealed terminal facts for a finished run. Settlement replaces the
-	 * provisional live tail with the receipt's answer where one can be read; the
-	 * run's own durable message stands in where it cannot.
-	 */
-	readReceipt?: WorkerReceiptReader,
+	projection: Pick<ObservabilityContract, "snapshot" | "subscribe" | "reconcileRuns" | "setFleetPhase">,
 ): {
 	rows(): ReadonlyArray<DispatchBoardRow>;
 	activeRows(): ReadonlyArray<DispatchBoardRow>;
 	reconcile(): void;
-	/**
-	 * Record the fleet-plan position of a run the caller just dispatched. The
-	 * board never infers a position: a run carries one only because whoever
-	 * dispatched the plan said so, which is why a non-fleet run can never grow
-	 * a phase cell.
-	 */
 	setFleetPhase(runId: string, phase: DispatchBoardPhase): void;
 	unsubscribe(): void;
 } {
-	const entries = new Map<string, DispatchBoardEntry>();
-	// Positions arrive from the fleet-run path, which may hand one over before
-	// the run's first lifecycle event creates the entry.
-	const fleetPhases = new Map<string, DispatchBoardPhase>();
-	let nextSequence = 0;
-	let reconciledAtMs = Date.now();
-
-	/**
-	 * Seal a run's projection on the sealed receipt's answer. Only for the
-	 * terminal bus events: the dispatch domain writes `receipts/<runId>.json`
-	 * before it publishes one, so this is the first moment the file exists.
-	 */
-	const settleFromReceipt = (entry: DispatchBoardEntry): void => {
-		const facts = readReceipt?.(entry.runId);
-		const text = facts?.text;
-		entry.progress.settle(typeof text === "string" && text.trim().length > 0 ? text : undefined);
-		if (facts?.trust !== undefined) entry.trust = summarizeTrustStatus(facts.trust);
-	};
-
-	// Payloads arrive typed off the bus, but the board keeps its runtime
-	// parsing (parse* helpers) because events are not validated at runtime.
-	const upsertBase = (
-		raw: Partial<DispatchRunIdentity>,
-		status: DispatchBoardStatus,
-		now: number,
-	): DispatchBoardEntry | null => {
-		const runId = parseRunId(raw.runId);
-		if (!runId) return null;
-		const previous = entries.get(runId);
-		const agentAudience = parseAgentAudience(raw.agentAudience, previous?.agentAudience);
-		const requestOrigin = parseRequestOrigin(raw.requestOrigin, previous?.requestOrigin);
-		const node = parseNonEmptyString(raw.node) ?? previous?.node;
-		const endpoint = parseEndpointCapacity(raw.endpoint) ?? previous?.endpoint;
-		const gate = parseGateBadge(raw.gate) ?? previous?.gate;
-		const council = parseCouncilBadge(raw.council) ?? previous?.council;
-		const rerouteCount = parsePositiveInt(raw.rerouteCount) ?? previous?.rerouteCount;
-		const contextWindow = parsePositiveInt(raw.contextWindow) ?? previous?.contextWindow;
-		const taskSummary = parseTaskSummary(raw, previous?.taskSummary);
-		const budget = cloneRunToolBudgetEnvelope(raw.budget) ?? previous?.budget;
-		const phase = fleetPhases.get(runId) ?? previous?.phase;
-		const entry: DispatchBoardEntry = {
-			runId,
-			agentId: parseText(raw.agentId, previous?.agentId ?? "-"),
-			...(agentAudience !== undefined ? { agentAudience } : {}),
-			...(requestOrigin !== undefined ? { requestOrigin } : {}),
-			runtimeKind: parseRuntimeKind(raw.runtimeKind ?? previous?.runtimeKind),
-			runtimeId: parseText(raw.runtimeId, previous?.runtimeId ?? "-"),
-			targetId: parseText(raw.targetId, previous?.targetId ?? "-"),
-			wireModelId: parseText(raw.wireModelId, previous?.wireModelId ?? "-"),
-			...(endpoint !== undefined ? { endpoint } : {}),
-			...(taskSummary !== undefined ? { taskSummary } : {}),
-			...(budget !== undefined ? { budget } : {}),
-			status,
-			tokenCount: previous?.tokenCount ?? 0,
-			costUsd: previous?.costUsd ?? 0,
-			costProvenance: previous?.costProvenance ?? "unknown",
-			sequence: previous?.sequence ?? nextSequence++,
-			enqueuedAtMs: previous?.enqueuedAtMs ?? now,
-			startedAtMs: previous?.startedAtMs ?? null,
-			startedAtClockMs: previous?.startedAtClockMs ?? null,
-			finishedAtMs: previous?.finishedAtMs ?? null,
-			durationMs: previous?.durationMs ?? null,
-			inputTokens: previous?.inputTokens ?? 0,
-			outputTokens: previous?.outputTokens ?? 0,
-			ttftMs: previous?.ttftMs ?? null,
-			outcomeDetail: previous?.outcomeDetail ?? null,
-			...(node !== undefined ? { node } : {}),
-			...(gate !== undefined ? { gate } : {}),
-			...(council !== undefined ? { council } : {}),
-			...(previous?.hostVerification !== undefined ? { hostVerification: previous.hostVerification } : {}),
-			...(rerouteCount !== undefined ? { rerouteCount } : {}),
-			...(contextWindow !== undefined ? { contextWindow } : {}),
-			lastContextTokens: previous?.lastContextTokens ?? 0,
-			...(previous?.receiptId !== undefined ? { receiptId: previous.receiptId } : {}),
-			...(phase !== undefined ? { phase } : {}),
-			progress: previous?.progress ?? createWorkerProgressFold(),
-			...(previous?.retry ? { retry: { ...previous.retry } } : {}),
-			...(previous?.steerAcknowledgement ? { steerAcknowledgement: { ...previous.steerAcknowledgement } } : {}),
-			...(previous?.writeRecordDowngrade ? { writeRecordDowngrade: { ...previous.writeRecordDowngrade } } : {}),
-		};
-		entries.set(runId, entry);
-		pruneEntries(entries, (evicted) => fleetPhases.delete(evicted));
-		return entry;
-	};
-
-	const unsubscribers = [
-		bus.on(BusChannels.DispatchEnqueued, (raw) => {
-			const entry = upsertBase(raw ?? {}, "enqueued", Date.now());
-			if (entry) delete entry.retry;
-		}),
-		bus.on(BusChannels.DispatchStarted, (raw) => {
-			const now = Date.now();
-			const entry = upsertBase(raw ?? {}, "running", now);
-			if (!entry) return;
-			entry.startedAtMs ??= now;
-			entry.startedAtClockMs ??= performance.now();
-			entry.finishedAtMs = null;
-			entry.durationMs = null;
-			delete entry.retry;
-		}),
-		bus.on(BusChannels.DispatchCompleted, (raw) => {
-			const now = Date.now();
-			const payload: Partial<DispatchCompletedPayload> = raw ?? {};
-			const entry = upsertBase(payload, "completed", now);
-			if (!entry) return;
-			entry.startedAtMs ??= entry.enqueuedAtMs;
-			entry.finishedAtMs = now;
-			entry.durationMs = parseFiniteNumber(payload.durationMs, Math.max(0, rawDurationMs(entry.startedAtMs, now)));
-			entry.tokenCount = parseFiniteNumber(payload.tokenCount, entry.tokenCount);
-			entry.costUsd = parseFiniteNumber(payload.costUsd, entry.costUsd);
-			entry.costProvenance = resolveCostProvenance(payload.costProvenance, entry.costProvenance ?? "unknown");
-			entry.outcomeDetail = null;
-			if (payload.hostVerification !== undefined) entry.hostVerification = payload.hostVerification;
-			settleFromReceipt(entry);
-			// A terminal dispatch event is published only after the run's receipt is
-			// sealed at receipts/<runId>.json, so the run id is the receipt id here.
-			entry.receiptId = entry.runId;
-			delete entry.retry;
-			if (typeof payload.inputTokenCount === "number") {
-				entry.inputTokens = payload.inputTokenCount + parseFiniteNumberOrZero(payload.cacheReadTokenCount);
-			}
-			if (typeof payload.outputTokenCount === "number") {
-				entry.outputTokens = payload.outputTokenCount;
-			}
-		}),
-		bus.on(BusChannels.DispatchFailed, (raw) => {
-			const now = Date.now();
-			const payload: Partial<DispatchFailedPayload> = raw ?? {};
-			const runId = parseRunId(payload.runId);
-			const previousStatus = runId !== null ? entries.get(runId)?.status : undefined;
-			const resolvedStatus = resolveDispatchFailureStatus(payload.reason);
-			const status = previousStatus === "dead" && resolvedStatus === "failed" ? "dead" : resolvedStatus;
-			const entry = upsertBase(payload, status, now);
-			if (!entry) return;
-			entry.startedAtMs ??= entry.enqueuedAtMs;
-			entry.finishedAtMs = now;
-			entry.durationMs = parseFiniteNumber(payload.durationMs, Math.max(0, rawDurationMs(entry.startedAtMs, now)));
-			entry.tokenCount = parseFiniteNumber(payload.tokenCount, entry.tokenCount);
-			entry.costUsd = parseFiniteNumber(payload.costUsd, entry.costUsd);
-			entry.costProvenance = resolveCostProvenance(payload.costProvenance, entry.costProvenance ?? "unknown");
-			entry.outcomeDetail = resolveFailureDetail(payload, entry.outcomeDetail);
-			if (payload.hostVerification !== undefined) entry.hostVerification = payload.hostVerification;
-			settleFromReceipt(entry);
-			// A denied retry never reached a run, so no receipt was sealed for it;
-			// every other failure finalized through recordReceipt like a success.
-			if (payload.reason !== "retry_denied") entry.receiptId = entry.runId;
-			delete entry.retry;
-			if (typeof payload.inputTokenCount === "number") {
-				entry.inputTokens = payload.inputTokenCount + parseFiniteNumberOrZero(payload.cacheReadTokenCount);
-			}
-			if (typeof payload.outputTokenCount === "number") {
-				entry.outputTokens = payload.outputTokenCount;
-			}
-		}),
-		bus.on(BusChannels.RunAborted, (raw) => {
-			const runId = parseRunId(raw?.runId);
-			if (!runId) return;
-			const entry = entries.get(runId);
-			if (!entry) return;
-			const wasRetrying = entry.retry !== undefined;
-			delete entry.retry;
-			if (wasRetrying && raw?.startedAt === null) {
-				// Canceling a retry timer is synchronous: there is no worker left to
-				// wind down, so the history row can become terminal immediately.
-				entry.status = "aborted";
-				entry.finishedAtMs = Date.now();
-				entry.progress.settle();
-			} else {
-				if (isTerminalStatus(entry.status) && !wasRetrying) return;
-				entry.status = "cancelling";
-			}
-			entry.outcomeDetail = parseOptionalDetail(raw?.reason) ?? entry.outcomeDetail ?? null;
-		}),
-		bus.on(BusChannels.DispatchProgress, (raw) => {
-			const payload: Partial<DispatchProgressPayload> = raw ?? {};
-			const runId = parseRunId(payload.runId);
-			if (!runId) return;
-			const entry = entries.get(runId);
-			if (!entry) return;
-			const workerEvent = (payload.event ?? {}) as WorkerEventShape;
-			const type = typeof workerEvent.type === "string" ? workerEvent.type : "";
-			if (type === "heartbeat_status") {
-				if (isTerminalStatus(entry.status) || entry.status === "cancelling") return;
-				const status = resolveHeartbeatStatus((workerEvent as { status?: unknown }).status);
-				if (!status) return;
-				entry.status = status;
-				if (status === "dead") {
-					entry.finishedAtMs ??= Date.now();
-					// A worker-side terminal signal arrives before any receipt is
-					// sealed, so the run's own last durable message is the best truth
-					// there is; the terminal bus event replaces it with the sealed one.
-					entry.progress.settle();
-					delete entry.retry;
-				}
-				return;
-			}
-			if (type === "attempt_start") {
-				// The assignment stream hands the root run a failover hop: a later
-				// attempt took over, so the row is live again on the new route.
-				entry.failoverHops = (entry.failoverHops ?? 0) + 1;
-				entry.status = "running";
-				entry.finishedAtMs = null;
-				// The projection keeps the tail the operator is reading and drops the
-				// finished attempt's live state, exactly as the transcript block does.
-				entry.progress.restart();
-				delete entry.retry;
-				return;
-			}
-			if (type === "agent_start") {
-				entry.startedAtMs = Date.now();
-				entry.startedAtClockMs = performance.now();
-			}
-			if (type === "message_update") {
-				const assistantEvent =
-					"assistantMessageEvent" in workerEvent &&
-					typeof workerEvent.assistantMessageEvent === "object" &&
-					workerEvent.assistantMessageEvent !== null
-						? (workerEvent.assistantMessageEvent as { type?: unknown })
-						: {};
-				const hasDelta =
-					assistantEvent.type === "text_delta" ||
-					assistantEvent.type === "thinking_delta" ||
-					assistantEvent.type === "toolcall_start" ||
-					assistantEvent.type === "toolcall_delta";
-				if (hasDelta && entry.ttftMs === null && entry.startedAtClockMs !== null) {
-					entry.ttftMs = Math.round(performance.now() - entry.startedAtClockMs);
-				}
-			}
-			if (type === "clio_coder_write_record_downgraded") {
-				const rawPayload = (workerEvent as { payload?: unknown }).payload;
-				const payload =
-					typeof rawPayload === "object" && rawPayload !== null ? (rawPayload as Record<string, unknown>) : null;
-				const tool = payload === null ? undefined : parseNonEmptyString(payload.tool);
-				const toolCallId = payload === null ? undefined : parseNonEmptyString(payload.toolCallId);
-				if (payload?.reason === "opaque_tool_succeeded" && tool !== undefined && toolCallId !== undefined) {
-					entry.writeRecordDowngrade = {
-						reason: "opaque_tool_succeeded",
-						tool: sanitizeCallTargetText(tool),
-						toolCallId: sanitizeCallTargetText(toolCallId),
-					};
-				}
-			}
-			// The one fold that reads worker prose and tool activity. Everything the
-			// board says about what a worker is saying or touching comes from here,
-			// so the board and the transcript block cannot tell two stories.
-			entry.progress.observe(payload.event);
-			if (type === "clio_coder_steer_received") {
-				const steerPayload = (workerEvent as { payload?: { chars?: unknown } }).payload;
-				entry.steerAcknowledgement = {
-					receivedAtMs: Date.now(),
-					chars: Math.max(0, Math.floor(parseFiniteNumberOrZero(steerPayload?.chars))),
-				};
-			}
-			if (isTerminalStatus(entry.status)) return;
-			if (type === "message_end" && workerEvent.message?.role === "assistant") {
-				const usage = workerEvent.message.usage;
-				const input = parseFiniteNumberOrZero(usage?.input) + parseFiniteNumberOrZero(usage?.cacheRead);
-				const output = parseFiniteNumberOrZero(usage?.output);
-				entry.inputTokens += input;
-				entry.outputTokens += output;
-				entry.tokenCount += input + output + parseFiniteNumberOrZero(usage?.cacheWrite);
-				// The last assistant message's input+cacheRead+output approximates the
-				// worker's current context occupancy for the per-worker meter.
-				entry.lastContextTokens = input + output;
-			}
-			if (type === "agent_end") {
-				const status = resolveAgentEndStatus(workerEvent.messages);
-				if (!status) return;
-				entry.status = status;
-				entry.finishedAtMs ??= Date.now();
-				// The worker says it is done before the domain seals its receipt. Settle
-				// on the durable message now so the card stops reading as live; the
-				// terminal bus event seals it on the receipt shortly after.
-				entry.progress.settle();
-				delete entry.retry;
-			}
-		}),
-	];
-
-	let closed = false;
-	const reconcile = (): void => {
-		const now = Date.now();
-		if (!snapshot) {
-			reconciledAtMs = now;
-			return;
-		}
-		let currentSnapshot: DispatchSnapshot;
-		try {
-			currentSnapshot = snapshot();
-		} catch {
-			// Lifecycle and progress events remain authoritative if snapshot polling fails.
-			return;
-		}
-		if (!Array.isArray(currentSnapshot?.retrying) || !Array.isArray(currentSnapshot?.running)) return;
-		reconciledAtMs = now;
-		const retrying = readRetrySnapshot(currentSnapshot);
-		const running = readRunningSnapshot(currentSnapshot);
-		for (const entry of entries.values()) {
-			if (entry.retry && !retrying.has(entry.runId)) {
-				// The timer left the queue (launched or was otherwise consumed). The
-				// parent attempt's original terminal state becomes visible again; the
-				// successor gets its own row.
-				delete entry.retry;
-			}
-		}
-		for (const [runId, projection] of retrying) {
-			const existing = entries.get(runId);
-			if (existing && existing.status !== "failed" && existing.status !== "dead") {
-				continue;
-			}
-			const entry =
-				existing ??
-				upsertBase(
-					{
-						runId,
-						agentId: projection.agentId,
-						...(projection.taskSummary !== undefined ? { task: projection.taskSummary } : {}),
-					},
-					"failed",
-					now,
-				);
-			if (entry) {
-				// A waiting retry has no live worker; the row projection already
-				// renders a retrying row with no current tool.
-				entry.retry = { ...projection.retry };
-				if (entry.taskSummary === undefined && projection.taskSummary !== undefined) {
-					entry.taskSummary = projection.taskSummary;
-				}
-			}
-		}
-		for (const [runId, live] of running) {
-			const entry = entries.get(runId);
-			if (!entry) continue;
-			if (isTerminalStatus(entry.status) && live.outcomePhase !== "aborting") continue;
-			entry.inputTokens = live.inputTokens;
-			entry.outputTokens = live.outputTokens;
-			entry.tokenCount = live.tokenCount;
-			entry.costUsd = live.costUsd;
-			entry.costProvenance = live.costProvenance;
-			if (live.budget !== undefined) entry.budget = live.budget;
-			if (live.outcomePhase === "aborting") {
-				if (entry.status !== "completed" && entry.status !== "aborted") {
-					entry.status = "cancelling";
-					delete entry.retry;
-				}
-			}
-		}
-	};
-
+	let current = projection.snapshot();
+	const unsubscribe = projection.subscribe((snapshot) => {
+		current = snapshot;
+	});
 	const projectRows = (activeOnly: boolean): ReadonlyArray<DispatchBoardRow> => {
-		return [...entries.values()]
-			.sort(sortEntries)
-			.map((entry) => toRow(entry, reconciledAtMs))
+		return [...current.runs]
+			.reverse()
+			.sort(
+				(a, b) =>
+					STATUS_ORDER[a.status] - STATUS_ORDER[b.status] ||
+					(b.finishedAtMs ?? b.startedAtMs) - (a.finishedAtMs ?? a.startedAtMs),
+			)
+			.map((run) => toRow(run, current.generatedAt))
 			.filter((row) => !activeOnly || !isTerminalStatus(row.status));
 	};
-
 	return {
-		rows() {
-			return projectRows(false);
+		rows: () => projectRows(false),
+		activeRows: () => projectRows(true),
+		reconcile() {
+			projection.reconcileRuns();
+			current = projection.snapshot();
 		},
-		activeRows() {
-			return projectRows(true);
+		setFleetPhase(runId, phase) {
+			projection.setFleetPhase(runId, phase);
+			current = projection.snapshot();
 		},
-		reconcile,
-		setFleetPhase(runId: string, phase: DispatchBoardPhase): void {
-			fleetPhases.set(runId, phase);
-			const entry = entries.get(runId);
-			if (entry) entry.phase = { ...phase };
-		},
-		unsubscribe() {
-			if (closed) return;
-			closed = true;
-			for (const unsubscribe of unsubscribers) unsubscribe();
-		},
+		unsubscribe,
 	};
 }
