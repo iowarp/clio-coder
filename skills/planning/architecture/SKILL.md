@@ -7,7 +7,7 @@ triggers:
   - architecture for this feature
   - decide the engineering approach
   - compare architecture options
-version: 0.4.0
+version: 0.4.1
 license: Apache-2.0
 allowed-tools:
   - read
@@ -64,10 +64,10 @@ expensive calls only).
   to Step 0's own question — what are we building, and is there a written
   intent to read — rather than inventing a project to architect.
 
-There is no operator in a headless run: `ask_user` still executes, but with
-nothing to answer it every call returns immediately with no answers, every
-time — calling it again will not produce a different result. From wherever
-the first empty response lands — Step 0's "ask whether reference docs
+There is no operator in a headless run: `ask_user` is not registered, so
+any call is refused as an unregistered tool rather than answered, every
+time; calling it again will not produce a different result. From wherever
+the first refusal lands — Step 0's "ask whether reference docs
 exist", Step 1's greenfield/brownfield call, or any decision in Step 2 —
 switch immediately to the treatment already described above (state the
 options, the recommendation, the reasoning, adopt it, mark it `assumed —

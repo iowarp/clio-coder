@@ -7,7 +7,7 @@ triggers:
   - handoff to another agent
   - context is about to be lost
   - write a continuation brief
-version: 0.5.0
+version: 0.5.1
 license: Apache-2.0
 allowed-tools:
   - read
@@ -65,8 +65,8 @@ Distinct from two things it is often confused with:
   actionable one as the focus; state that reading in the draft's "Next
   session focus" line rather than leaving it blank.
 
-There is no operator in a headless run: `ask_user` is not registered and
-nothing will answer it even if you call it. If the focus, slug, or a
+There is no operator in a headless run: `ask_user` is not registered, so
+any call is refused as an unregistered tool rather than answered. If the focus, slug, or a
 redaction call is ambiguous, state your best reading in the draft and in your
 final reply, and proceed — never stall a step waiting on `ask_user`.
 

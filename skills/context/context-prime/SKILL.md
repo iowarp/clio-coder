@@ -7,7 +7,7 @@ triggers:
   - where were we
   - get up to speed
   - resume repository work after a break
-version: 0.4.0
+version: 0.4.1
 license: Apache-2.0
 allowed-tools:
   - read
@@ -96,8 +96,8 @@ Work top to bottom; stop early once you have enough to state where things stand.
    ending with the focus to confirm. `ask_user` is only registered in an
    interactive session with an operator present; call it there, offering
    the handoff's suggested focus as the first option. **A headless run has
-   no operator: `ask_user` is not registered and nothing will answer it
-   even if you call it.** If it is not among your available tools, do not
+   no operator: `ask_user` is not registered, so any call is refused as an
+   unregistered tool rather than answered.** If it is not among your available tools, do not
    attempt it and do not keep re-reading files hoping for more certainty
    first — state the focus as the orientation's `Next` line, in plain
    text, and stop; that written statement is the confirmation for this

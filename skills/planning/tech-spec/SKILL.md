@@ -7,7 +7,7 @@ triggers:
   - code-shaped contracts
   - implementation-ready technical specification
   - specify execution flows
-version: 0.3.0
+version: 0.3.1
 license: Apache-2.0
 disable-model-invocation: true
 allowed-tools:
@@ -63,9 +63,9 @@ and save a file only when the user asks; otherwise return the spec inline.
   installed to reference in the TDD Test Plan section; both are frontmatter
   facts, not something to explain to the user unless asked.
 
-There is no operator in a headless run: `ask_user` either isn't registered
-or nothing answers it, and a call that goes unanswered will not resolve
-differently on a second try. In Path B (below), that means: state the
+There is no operator in a headless run: `ask_user` is not registered, so
+any call is refused as an unregistered tool rather than answered, and a
+second try will not resolve differently. In Path B (below), that means: state the
 question, your recommendation grounded in the codebase and any docs read
 (or the most defensible engineering default when nothing grounds it), and
 the reasoning; adopt the recommendation; mark it `assumed — confirm`; move

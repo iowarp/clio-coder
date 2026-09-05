@@ -23,12 +23,12 @@ skills:
   # ── context ──
   - name: context-handoff
     path: context/context-handoff
-    version: 0.5.0
-    sha256: e69adb1533a6a850cb83babe7e580dd260e034781d7c35e65921453e3fa191a5
+    version: 0.5.1
+    sha256: e05a8dc9d09b4decbf79afade1f530d7c81d5412112723faab104a83893c34f8
   - name: context-prime
     path: context/context-prime
-    version: 0.4.0
-    sha256: 21587263297a7ee9e81a2d66f6fc800a1ee6db15f76de1e650563b71fdf19d8e
+    version: 0.4.1
+    sha256: 3e6783d3fd95bd5635fe274ea0b9f73f3c4606ce64b832524cc242b114d8ef12
   # ── git ──
   - name: branch-closeout
     path: git/branch-closeout
@@ -90,55 +90,55 @@ skills:
     sha256: d9e891eb5f3c27678de14165a0eb35d1eb2289be480e55009f9a57bcfe55be2d
   - name: architecture
     path: planning/architecture
-    version: 0.4.0
-    sha256: e9017412b6261492b987fe27f7573b72013a340c0d3eb0e7e568fd588b22a214
+    version: 0.4.1
+    sha256: 0d62ded74021d148f3091e044c32d205edfa3d1298706e68c84ad0f032d0feba
   - name: backlog
     path: planning/backlog
-    version: 0.4.0
-    sha256: e634e2fb5035731e7daa2ef246ae4ab3ef5d792b0b604f4216dfe10335ee10c0
+    version: 0.4.1
+    sha256: 8fc700ad8f1b2f44fb6ea013c54ce06314cf9c4fdee63bd65c36686f5c25d092
   - name: prd
     path: planning/prd
-    version: 0.4.0
-    sha256: 39fe417f495be4153541dd70c886cf773265636dc9fa1844cfc7012b71cbbec1
+    version: 0.4.1
+    sha256: 3841f2f9635229c8208382e40123de1b5a496ec562cb851758d2ac013921c069
   - name: product-intent
     path: planning/product-intent
-    version: 0.4.0
-    sha256: d41689db9a8c9b2dad0cd630412bebaed5792f9d22d4edb18770e4b1b3308699
+    version: 0.4.1
+    sha256: 95d629fe8688003a9816a0774674f0c9fd5a922a82835415c3c1806799436832
   - name: tech-spec
     path: planning/tech-spec
-    version: 0.3.0
-    sha256: 5f9add0d01e43feb6808b2eaeae9ac68075cf369cbfc793e020181a642d4d2c4
+    version: 0.3.1
+    sha256: e8e6a1326aeb8b010647fc9fa9dc5ff827e13550f54524555f5e6a83341eb27f
   # ── research ──
   - name: arxiv-literature
     path: research/arxiv-literature
-    version: 0.5.0
-    sha256: 0bc6b39d12934568804fc11b23219de4c6c2172e28c4bfedcee3104e2217aae6
+    version: 0.5.1
+    sha256: 4668827aa0f13527de5fc34914911ef942d2103ed3d139008fbd1c0ce2c4bd3d
   - name: experiment-protocol
     path: research/experiment-protocol
-    version: 0.3.0
-    sha256: 235256cbdf44ebdd25d87cce60940e00ad1fca42a1b2b4e534bfc245f0d1135c
+    version: 0.3.1
+    sha256: da151931fb1961b19fcb6d4ae1957cef908f8b35692e301f109125488ad65302
   - name: scientific-debugging
     path: research/scientific-debugging
-    version: 0.3.0
-    sha256: 9c29d70b4b82a440640b41665c23731b4112125915bde0e91016fc60aec67207
+    version: 0.3.1
+    sha256: ba94f8ad2655396a3791c7599631513f16651ffa61c8148044b996a25c0bc1cc
   - name: scientific-modernization
     path: research/scientific-modernization
-    version: 0.4.0
-    sha256: 491522d547fa0bddef19d2ec92bc35236b169787bded6ecc3a29dfec19892886
+    version: 0.4.1
+    sha256: eb31099d764cba913c19726f6ba85d7081c5e01c81a3b2cd45eb136a4e47b858
   # ── workflow ──
   - name: cut-it
     path: workflow/cut-it
-    version: 0.4.0
-    sha256: d3742221f0ace1f1b62c07f5902030e478496059a58ef194e7cb3303ccdff05e
+    version: 0.4.1
+    sha256: d0ce7dc6ea633d87e9e68c6b59ad402c24644b9eac580774410b235e0ca1c93f
   - name: design-council
     path: workflow/design-council
-    version: 0.5.0
-    sha256: c279a94a4cd66d46980f9a5024aedac3e673144fadc9d36b53ad87fc2ee63501
+    version: 0.5.1
+    sha256: 3064446073a993517a0320c3f70edf4b7dc71993e54e63df40830e459667b24d
   - name: grill-me
     path: workflow/grill-me
-    version: 0.5.0
-    sha256: f48687566a8419aa52f30f8234f8dcfd050eaefdfdcfa281723d3603f3e08fcc
+    version: 0.5.1
+    sha256: 3844770b507f9b2904aaa5c944c2b26f9ecf114383758dfff3bd7f39b2c717a6
   - name: workflow-distiller
     path: workflow/workflow-distiller
-    version: 0.4.0
-    sha256: dd7c312d6904f861fa105334c7c2f18c9d6e26a70a76874c85858cee90bede58
+    version: 0.4.1
+    sha256: 067b097299b0b630729a4a6ddde629dec5c798d5b4634f90f7feab380b8575e1
