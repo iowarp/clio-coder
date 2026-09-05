@@ -3,6 +3,7 @@ import { ToolNames } from "../core/tool-names.js";
 import type { DecisionBoardStore } from "../domains/session/decision-board.js";
 import { decisionRef } from "../domains/session/entries.js";
 import type { ToolResult, ToolSpec } from "./registry.js";
+import { byteLength } from "./truncate-utf8.js";
 
 /**
  * The model's own design decisions, recorded on the session decision board
@@ -29,15 +30,11 @@ export interface DecideToolDeps {
 	decisionBoard?: DecisionBoardStore;
 }
 
-function utf8Bytes(value: string): number {
-	return Buffer.byteLength(value, "utf8");
-}
-
 function boundedText(value: unknown, field: string, cap: number): string | Error {
 	if (typeof value !== "string") return new Error(`decide: ${field} must be a string`);
 	const trimmed = value.trim();
 	if (trimmed.length === 0) return new Error(`decide: ${field} is required`);
-	if (utf8Bytes(trimmed) > cap) return new Error(`decide: ${field} exceeds the ${cap}-byte cap`);
+	if (byteLength(trimmed) > cap) return new Error(`decide: ${field} exceeds the ${cap}-byte cap`);
 	return trimmed;
 }
 

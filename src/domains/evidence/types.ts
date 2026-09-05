@@ -2,6 +2,7 @@ import type { GateDecisionArtifact, RunEnvelope, RunReceipt, ToolCallStat } from
 import type { RunPersonaOverride, RunPipelineProvenance, RunReceiptAutonomyEnforcement } from "../dispatch/types.js";
 import type { EvalCommandPhase, EvalFailureClass, EvalRunRecord } from "../eval/index.js";
 import type { ProtectedArtifact } from "../safety/protected-artifacts.js";
+import type { DecisionRecord } from "../session/entries.js";
 import type { RunEscalationCounts } from "./provenance.js";
 import type { CanonicalTrustStatus } from "./trust-status.js";
 
@@ -85,7 +86,7 @@ export interface EvidenceDecision {
 	runId: string;
 	sessionId: string;
 	ref: string;
-	record: import("../session/entries.js").DecisionRecord;
+	record: DecisionRecord;
 }
 
 export interface EvidenceOverview {

@@ -4,7 +4,7 @@
  *
  * The surface is organized in seven planes; each plane is one policy unit
  * (action class, size posture, details schema, concurrency rule):
- *   OBSERVE      read, grep, find, ls, code_nav, context, credential_present
+ *   OBSERVE      evidence, read, grep, find, ls, code_nav, context, credential_present
  *   MUTATE       write, edit
  *   EXECUTE      bash, git, verify
  *   ORCHESTRATE  dispatch, monitor, steer, tasks, ledger, panes, limitation, decide

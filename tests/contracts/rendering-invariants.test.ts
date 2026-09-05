@@ -1,14 +1,14 @@
 import { deepStrictEqual, doesNotMatch, match, ok, strictEqual } from "node:assert/strict";
 import { describe, it } from "node:test";
-import type { WorkerRunEntry } from "../../src/domains/session/index.js";
-import { stripTerminalSequences } from "../../src/engine/tui.js";
-import { type ChatPanel, createChatPanel } from "../../src/interactive/chat-panel.js";
-import { renderWorkerEntryLines } from "../../src/interactive/renderers/worker-entry.js";
 import {
 	createWorkerProgressFold,
 	WORKER_ACTION_TRAIL_LIMIT,
 	WORKER_TOOL_NAME_LIMIT,
-} from "../../src/interactive/worker-progress.js";
+} from "../../src/domains/observability/worker-progress.js";
+import type { WorkerRunEntry } from "../../src/domains/session/index.js";
+import { stripTerminalSequences } from "../../src/engine/tui.js";
+import { type ChatPanel, createChatPanel } from "../../src/interactive/chat-panel.js";
+import { renderWorkerEntryLines } from "../../src/interactive/renderers/worker-entry.js";
 import { workerEntriesFromRunEntries } from "../../src/interactive/worker-replay.js";
 import { createWorkerStream, type WorkerReceiptFacts } from "../../src/interactive/worker-stream.js";
 
