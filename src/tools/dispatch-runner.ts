@@ -2153,6 +2153,18 @@ export async function runDispatchTool(
 	if (options?.signal?.aborted) return { kind: "error", message: "dispatch: aborted" };
 	const maxOutputBytes = snapshot.maxOutputBytes;
 	const timeoutMs = snapshot.timeoutMs;
+	// All modes, including derived Scout/review runs, share the invocation's
+	// admission bounds. Keep these off the serializable approved request.
+	const dispatch = deps.dispatch;
+	const preparation = {
+		...(options?.signal === undefined ? {} : { signal: options.signal }),
+		...(timeoutMs === undefined ? {} : { deadlineAt: Date.now() + timeoutMs }),
+	};
+	deps.dispatch = {
+		...dispatch,
+		dispatch: (request, observer) => dispatch.dispatch(request, observer, preparation),
+		dispatchBatch: (requests) => dispatch.dispatchBatch(requests, preparation),
+	};
 	let review = snapshot.review === undefined ? undefined : structuredClone(snapshot.review);
 	let council = snapshot.council === undefined ? undefined : structuredClone(snapshot.council);
 

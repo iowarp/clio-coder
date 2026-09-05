@@ -50,8 +50,9 @@ export function announceMemoryStepEndpoint<Request, Response>(
 	const { bus, endpointKey, targetId } = deps;
 	if (endpointKey === null) return complete;
 	return async (request: Request): Promise<Response> => {
-		// `runPromptedStep` performs its busy check before it invokes `complete`,
-		// so this registration counts the outgoing request without self-refusing.
+		// The production client rechecks capacity after asynchronous preparation,
+		// immediately before calling this wrapper. Register synchronously so no
+		// local foreground launch can interleave between that check and this hold.
 		const releaseEndpointSlot = registerForegroundStream(endpointKey);
 		try {
 			return await complete(request);

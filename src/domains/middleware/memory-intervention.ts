@@ -537,6 +537,7 @@ export function createMemoryInterventionRegistration(deps: MemoryInterventionDep
 			});
 		}
 		if (!isCurrent()) return { ...promptedResult, reminder: null, effects: NO_EFFECTS };
+		if (promptedResult.reason === "endpoint_busy") telemetryDecision = "dropped";
 		if (tier === "llm" && promptedResult.decision === "timeout") consecutiveLlmTimeouts += 1;
 		else if (tier === "llm" && telemetryDecision !== "dropped") consecutiveLlmTimeouts = 0;
 		lastDecision = promptedResult.decision;

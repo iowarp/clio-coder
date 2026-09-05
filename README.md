@@ -138,7 +138,13 @@ The complete interactive and CLI reference is
 Clio stores each model connection as a named **target**: runtime, endpoint,
 model, credentials, and any verified capability overrides. Interactive chat,
 proactive memory, fleet defaults, and individual worker profiles can route
-independently.
+independently. A LiteLLM target keeps the gateway in charge of physical routing,
+authentication, and backend residency; distinct model routes can share one URL.
+Set `context.memory.target` and `context.memory.model` to opt into a dedicated
+memory model. Unset memory roles remain rules-only; a configured route can fall
+back to active chat when unavailable and request capacity permits.
+`context.compaction.model` selects a dedicated summary model; leaving it unset
+uses active chat. An invalid explicit compaction model fails visibly.
 
 | Target family | Supported routes |
 | --- | --- |
@@ -147,7 +153,7 @@ independently.
 | Cloud APIs | OpenAI, Anthropic, Google, Groq, Mistral, DeepSeek, OpenRouter, Amazon Bedrock |
 | Institutional gateways | Argonne ALCF Sophia and Metis over Globus OAuth |
 | Subscriptions | ChatGPT Plus/Pro through `openai-codex`; Claude Pro/Max through `anthropic-max` |
-| Worker integrations | Claude SDK, Claude Code, Google Antigravity, and configured ACP agents |
+| Worker integrations | Claude SDK, Claude Code, experimental Google Antigravity delegation, and configured ACP agents |
 
 The interactive wizard is the easiest path:
 
@@ -222,10 +228,23 @@ directory. See [Context Engine](docs/architecture/context-engine.md),
 [Proactive Memory](docs/guide/proactive-memory.md) for the detailed contracts.
 
 The local skills marketplace may offer a matching shipped skill during a
-request. Promotion installs are restricted to Clio's own catalog or this
-repository and do not activate the skill automatically. Manual installs remain
-available for a source you deliberately choose. See
+request. Every promotion install requires an explicit bound operator answer,
+including in full-auto. Promotion installs retain their catalog source gate,
+and installation does not activate the skill. Active
+project and user skill trees are operator-owned: main and worker tool admissions
+refuse direct and recognized shell mutations. Draft skill changes outside those
+roots, then use the operator's installation or update workflow. This bounded
+command inspection does not confine arbitrary programs or dynamic shell paths.
+Manual installs remain available for a source you deliberately choose. See
 [Skills Marketplace](docs/guide/skills-marketplace.md).
+
+For a repository architecture map, run `clio-coder context index` followed by
+`clio-coder context map`. The latter writes a deterministic JSON seed from the
+index's directory areas and imports. The operator-installed `archify` remote
+skill validates and delivers the interactive diagram; Clio ships its wrapper
+and pinned install metadata, while the renderer comes from upstream. Source
+citations require a pinned GitHub revision. Validation can still report
+composition warnings that need human edits.
 
 ## Delegate with bounds
 
@@ -288,6 +307,16 @@ clio-coder evidence inspect <evidence-id>
 clio-coder trace phases <run-id>
 clio-coder trace tail <run-id>
 ```
+
+`clio-coder usage report` preserves known failed-compaction spending and labels
+missing coverage. Adapter prices are estimates, and numeric spending ceilings
+bound the known sum; absent telemetry does not prove a call was free. Eval's
+provider-health checks are opt-in and separate from task success. Partial or
+mixed session/stdout evidence and inherited fork history are not reconciled;
+full reconciliation is deferred to v0.4.5 or later, and 0.4.3 does not add an
+automatic cost-comparison rejection. See the
+[Eval Runner](docs/process/eval-runner.md#token-accounting--provenance) for source
+and timing limits.
 
 Evidence helps you audit a run; it does not prove that generated code is
 scientifically correct. Domain validation, reference results, and human review
@@ -354,7 +383,7 @@ clio-coder --version
 From source, pinned to this version:
 
 ```bash
-git clone --branch v0.4.2 https://github.com/iowarp/clio-coder.git
+git clone --branch v0.4.3 https://github.com/iowarp/clio-coder.git
 cd clio-coder
 npm ci
 npm run install:local

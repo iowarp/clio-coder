@@ -173,6 +173,32 @@ contract test that reconstructs Pi's whole adaptive or budget payload.
 
 ### 3.3 Thinking controls through LiteLLM
 
+Dedicated memory and compaction roles read a cold LiteLLM target's metadata
+before synthesizing the completion model. The read disables reasoning probes;
+it does not run an extra inference request. Each selected target owns its probe
+state, even when two targets share a gateway URL. A successful unknown or mixed
+runtime declaration remains unknown and is not repeatedly probed for a preferred
+answer. Memory includes discovery and auth in its existing generation/deadline
+boundary; cancellation cannot launch a later completion or mark the endpoint
+down. Fresh discovered output limits also bound its request. After metadata and auth,
+memory rechecks actual endpoint occupancy immediately before registering its
+inference hold. Late saturation stays a dropped `endpoint_busy` boundary with
+no usage or cache-disturbance claim. Compaction checks
+the originating session/branch after preparation and uses the existing simple
+stream API with thinking off, rather than inferring an active level from the
+model's reasoning capability.
+
+Native worker admission also prepares the selected cold LiteLLM target before
+freezing its capabilities and thinking controls into the worker specification
+and receipt. Tool cancellation and the original admission deadline bound that
+wait, including a delayed metadata response body. Failed preparation releases
+the existing plan reservation and cannot launch a late worker or publish
+cancelled health data. The approved target, model, endpoint and node remain
+binding; changed route identity requires fresh admission. Metadata discovery
+does not infer capacity or residency from another route sharing the gateway,
+and does not bypass the existing capacity or approved tool-surface checks.
+
+
 A gateway alias is not an upstream runtime identity. Clio consumes the optional
 `model_info.runtime` deployment declaration from LiteLLM's `/v1/model/info` only
 when every deployment of the alias names the same recognized control runtime:
