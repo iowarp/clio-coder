@@ -111,9 +111,8 @@ export function appendTurn(state: SessionManagerState, input: TurnInput): ClioTu
 
 /**
  * Append a rich SessionEntry via the engine writer. Non-message kinds are
- * written as JSON lines to current.jsonl; they do not project into tree.json
- * in slice 12a. Slice 12b extends the tree model so /fork can pick non-message
- * branch points too.
+ * written as JSON lines to current.jsonl and do not project into tree.json;
+ * the /fork picker offers assistant message turns only.
  */
 export function appendEntry(state: SessionManagerState, input: SessionEntryInput): SessionEntry {
 	const turnId = input.turnId ?? newTurnId();

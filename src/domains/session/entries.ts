@@ -5,10 +5,13 @@
  * carries its `kind` discriminant, a `turnId` (uuid v7 where possible so
  * entries sort by creation), a parent pointer, and an ISO timestamp.
  *
- * Later slices extend this union:
- *   - compactionSummary is produced by compaction/compact.ts (slice 12c).
- *   - branchSummary is produced by the fork path (slice 12b).
- *   - bashExecution / fileEntry become the wire shape for Phase 14 extensions.
+ * Non-message kinds and where they come from:
+ *   - compactionSummary is produced by compaction/compact.ts.
+ *   - branchSummary is produced by the fork path.
+ *   - bashExecution is produced by the editor bash path
+ *     (interactive/editor-bash.ts).
+ *   - fileEntry is consumed by the renderer, compaction, handoff, and
+ *     evidence builders but has no in-tree producer.
  */
 
 import { isSkillActivation, type SkillActivation } from "../../core/skill-activation.js";

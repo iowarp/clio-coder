@@ -228,8 +228,8 @@ export interface InteractiveDeps {
 	onNewSession?: () => void;
 	/**
 	 * Fork from a parent assistant turn picked in /fork. Default wiring
-	 * delegates to session.fork(parentTurnId); the override exists so
-	 * future slices can layer telemetry or settings merging on top.
+	 * delegates to session.fork(parentTurnId); the override exists so a
+	 * host can layer telemetry or settings merging on top.
 	 */
 	onForkSession?: (parentTurnId: string) => void;
 	/**

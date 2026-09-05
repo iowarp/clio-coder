@@ -14,8 +14,7 @@ import { entryBelongsToPath } from "./active-path.js";
  * install it as current.
  *
  * Used by SessionContract.fork (current session) and the /fork message
- * picker path that lands in slice 12b-3. Kept out of extension.ts so the
- * bundle wiring stays thin.
+ * picker overlay. Kept out of extension.ts so the bundle wiring stays thin.
  */
 export interface ForkInput {
 	/** The state we are forking from. Must carry a live writer. */

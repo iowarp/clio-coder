@@ -25,8 +25,8 @@ const PREVIEW_WIDTH = 60;
  * calls onFork(parentTurnId); the caller wires that through
  * SessionContract.fork(parentTurnId).
  *
- * Phase 12 slice 12b-3 scope: current-session turns only. Multi-session picker
- * lives in a later slice once TreeSnapshot grows a payload preview field.
+ * Scope: current-session turns only. A multi-session picker is not
+ * implemented; it would need TreeSnapshot to carry a payload preview field.
  */
 export interface OpenMessagePickerOverlayDeps {
 	session: SessionContract;

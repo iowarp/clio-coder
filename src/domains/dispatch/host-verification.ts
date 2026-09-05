@@ -368,6 +368,12 @@ function memberBoundary(participant: BatchVerificationParticipant): string[] {
  * the tree. `basis` is the weakest evidence behind the charge set, never the
  * strongest, so `write_roots` on a receipt means every charged run has a named
  * path inside its own declared boundary.
+ *
+ * A `worktree: true` member's write roots resolve against its own checkout
+ * (`request.cwd`) while the shared check ran in the parent frame, so none of
+ * its roots can cover a path the check named: attribution cannot exculpate
+ * anyone on its account and every declarer is charged, the conservative
+ * fallback those receipts sealed before batch settlement existed.
  */
 function attributeFailure(input: {
 	implicated: ReadonlyArray<string>;

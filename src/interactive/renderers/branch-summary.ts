@@ -1,5 +1,5 @@
 /**
- * Renderer for BranchSummary session entries (Phase 12 / slice 12b).
+ * Renderer for BranchSummary session entries.
  *
  * A branchSummary entry is produced when a fork inherits a compacted parent
  * context: the new session opens with a single summary block standing in for

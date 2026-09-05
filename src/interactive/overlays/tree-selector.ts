@@ -16,14 +16,14 @@ export const TREE_OVERLAY_WIDTH = 88;
 const VISIBLE_ROWS = 16;
 
 /**
- * /tree navigator overlay. Phase 12 slice 12b-2 behaviors only:
+ * /tree navigator overlay. Behaviors:
  *   - One row per node, indented two spaces per branch level (not per message)
  *   - Shift+T toggles operator-local timestamps on/off
  *   - `e` enters label edit submode (Enter commits, Esc cancels)
  *   - Enter on a row switches the active append point to that turn id
  *   - Esc closes the overlay
  *
- * Cwd-toggle (`p`) and sort-order (`s`) land in Phase 18.
+ * Cwd-toggle (`p`) and sort-order (`s`) are not implemented.
  *
  * The overlay queries `session.tree()` on open and after any mutation so
  * label edits are reflected without a close/reopen cycle.

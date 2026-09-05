@@ -282,10 +282,10 @@ export function createSessionBundle(context: DomainContext): DomainBundle<Sessio
 			return snapshotFor(id);
 		},
 		switchBranch(sessionId) {
-			// /tree-driven branch switch currently delegates to resume. Kept as a
-			// distinct contract method so later slices can layer telemetry or
-			// chat-loop rewiring without changing resume's semantics. Same
-			// open-before-close ordering as resume() above and for the same reason.
+			// /tree-driven branch switch delegates to resume. Kept as a distinct
+			// contract method so telemetry or chat-loop rewiring can be layered on
+			// without changing resume's semantics. Same open-before-close ordering
+			// as resume() above and for the same reason.
 			if (state?.meta.id === sessionId) return state.meta;
 			const resumed = resumeSessionState(sessionId);
 			if (state) {

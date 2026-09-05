@@ -6,7 +6,7 @@ import type { ResolvedLabel } from "./manager.js";
  * Purely functional tree-walk helpers. Given the raw SessionTreeNode[] that
  * the engine persists plus a label map and a leaf pointer, produce a
  * render-friendly snapshot. No I/O. Used by SessionContract.tree() to
- * deliver a serializable structure to overlay renderers in slice 12b-2.
+ * deliver a serializable structure to the /tree overlay renderer.
  */
 
 /**

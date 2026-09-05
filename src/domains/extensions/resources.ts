@@ -22,6 +22,13 @@ export function extensionSnapshotFor(cwd = process.cwd()): ExtensionSnapshot {
 	return buildExtensionSnapshot({ cwd, generation: 0 });
 }
 
+/**
+ * The canonical accessor for the enabled roots of one extension resource
+ * kind. The agent registry, fleet contract, skill and common resource
+ * loaders, and the extensions contract all read through it, so each of them
+ * sees the committed snapshot for the booted cwd or the ephemeral
+ * generation-0 build otherwise. Returns a fresh array the caller may mutate.
+ */
 export function enabledExtensionResourceRoots(
 	kind: ExtensionResourceKind,
 	cwd = process.cwd(),
