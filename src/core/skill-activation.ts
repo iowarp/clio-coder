@@ -189,6 +189,9 @@ export function evaluateSkillToolSurface(
 		.filter(([, declared]) => declared.disallowedTools?.includes(tool) === true)
 		.map(([name]) => name);
 	if (disallowedBy.length > 0) return { skills, mergedAllowedTools: null, disallowedBy, carriedSurface };
+	// A finish receipt records a limitation without performing another action.
+	// Keep it available under allow-narrowing, while honoring explicit denials.
+	if (tool === "limitation") return null;
 	const allowLists = entries.map(([, declared]) => declared.allowedTools);
 	if (allowLists.some((list) => list === undefined || list.length === 0)) return null;
 	const merged = [...new Set(allowLists.flatMap((list) => [...(list ?? [])]))];

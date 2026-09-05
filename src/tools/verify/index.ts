@@ -36,6 +36,7 @@ export const verifyTool: ToolSpec = {
 				message: `verify: '${check}' is not a verification check (${VERIFICATION_SCRIPT_FAMILY_HINT} or "frontend"); run it through bash.`,
 			};
 		}
-		return runScriptCheck(check, args, options);
+		const result = await runScriptCheck(check, args, options);
+		return declared ? { ...result, details: { ...result.details, check, source: { ...declared.source } } } : result;
 	},
 };

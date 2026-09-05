@@ -1,5 +1,5 @@
 import { deepStrictEqual, match, ok, strictEqual } from "node:assert/strict";
-import { mkdirSync, mkdtempSync, rmSync, writeFileSync } from "node:fs";
+import { copyFileSync, mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { afterEach, describe, it } from "node:test";
@@ -16,6 +16,7 @@ import {
 import { ToolNames } from "../../src/core/tool-names.js";
 import { loadSkills, parsePendingSkillRequests } from "../../src/domains/resources/skills/loader.js";
 import { type AutonomyLevel, modelMayActivateSkills } from "../../src/domains/safety/autonomy.js";
+import { assessFinishContract } from "../../src/domains/safety/finish-contract.js";
 import { CONFIRMED_SCOPE, READONLY_SCOPE, WORKSPACE_SCOPE } from "../../src/domains/safety/scope.js";
 import { createPendingSkillToolPolicy } from "../../src/interactive/chat-loop-messages.js";
 import {
@@ -23,8 +24,12 @@ import {
 	parseSlashCommand,
 	type SlashCommandContext,
 } from "../../src/interactive/slash-commands.js";
+import { bashTool } from "../../src/tools/bash.js";
 import { createContextTool } from "../../src/tools/context/index.js";
+import { limitationTool } from "../../src/tools/limitation.js";
 import { createRegistry, type ToolSpec } from "../../src/tools/registry.js";
+import { verifyTool } from "../../src/tools/verify/index.js";
+import { writeTool } from "../../src/tools/write.js";
 
 const roots: string[] = [];
 
@@ -118,6 +123,69 @@ describe("skill tool surface lifetime", () => {
 		for (const root of roots.splice(0)) rmSync(root, { recursive: true, force: true });
 	});
 
+	it("lets the shipped coding-standards workflow record a scoped finish limitation", async () => {
+		const root = scratchRoot();
+		const originalCwd = process.cwd();
+		process.chdir(root);
+		try {
+			const directory = join(root, "coding-standards");
+			mkdirSync(directory);
+			copyFileSync(new URL("../../skills/coding/coding-standards/SKILL.md", import.meta.url), join(directory, "SKILL.md"));
+			explicitPaths = [directory];
+			const policy = turnPolicy("/skill coding-standards update the fixture", root, undefined);
+			ok(policy);
+			strictEqual(
+				(await contextToolFor(root).run({ scope: "skills", name: "coding-standards" }, invokeOptions(policy))).kind,
+				"ok",
+			);
+			const registry = createRegistry({ safety: allowAllSafety([]) });
+			for (const tool of [writeTool, verifyTool, limitationTool, bashTool]) registry.register(tool);
+			const entries: unknown[] = [];
+			async function invoke(tool: string, args: Record<string, unknown>) {
+				const toolCallId = `call-${entries.length}`;
+				entries.push({ kind: "message", role: "tool_call", payload: { name: tool, toolCallId, args } });
+				const verdict = await registry.invoke({ tool, args }, invokeOptions(policy));
+				entries.push({
+					kind: "message",
+					role: "tool_result",
+					payload: {
+						toolCallId,
+						isError: verdict.kind !== "ok",
+						result: verdict.kind === "ok" ? verdict.result : { kind: "error" },
+					},
+				});
+				return verdict;
+			}
+			const path = join(root, "solver.ts");
+			strictEqual((await invoke(ToolNames.Write, { path, content: "export const solver = 1;\n" })).kind, "ok");
+			strictEqual(readFileSync(path, "utf8"), "export const solver = 1;\n");
+			strictEqual((await invoke(ToolNames.Verify, { check: "test:solver" })).kind, "blocked");
+			const unavailable = await invoke(ToolNames.Bash, { command: "npm run test:solver" });
+			ok(unavailable.kind === "ok" && unavailable.result.kind === "error", "the scratch project has no test runner");
+			strictEqual(assessFinishContract({ sessionEntries: entries }).kind, "engage");
+			const recorded = await invoke(ToolNames.Limitation, {
+				scope: "The scratch project declares no test runner",
+				reason: "no-runner",
+				paths: ["test:solver"],
+			});
+			strictEqual(recorded.kind, "ok", "a mutating skill must be able to record a finish limitation");
+			ok(recorded.kind === "ok" && recorded.result.kind === "ok");
+			strictEqual(assessFinishContract({ sessionEntries: entries }).reason, "explicit_limitation");
+			strictEqual(
+				assessFinishContract({
+					sessionEntries: entries,
+					rigor: "high",
+					activeAcceptance: { expectedOutputs: ["solver.ts"], verification: [{ check: "test:solver", timeoutMs: 1000 }] },
+				}).reason,
+				"explicit_limitation",
+			);
+			ok(evaluateSkillToolSurface(policy, ToolNames.Verify));
+			ok(evaluateSkillToolSurface(policy, ToolNames.Dispatch));
+		} finally {
+			process.chdir(originalCwd);
+		}
+	});
+
 	it("keeps a loaded skill's narrowing armed on the operator's next turn", async () => {
 		const root = scratchRoot();
 		explicitPaths = [writeNarrowingSkill(root, "interview", ["allowed-tools: read, grep"])];
@@ -151,6 +219,51 @@ describe("skill tool surface lifetime", () => {
 		if (verdict.kind === "blocked") {
 			match(verdict.reason, /stays active for the rest of the session/u);
 			match(verdict.reason, /\/skill off/u);
+		}
+	});
+
+	it("keeps related shipped coding workflows able to record limitations", async () => {
+		for (const name of ["tdd", "prototype", "ast-grep"]) {
+			const root = scratchRoot();
+			const directory = join(root, name);
+			mkdirSync(directory);
+			copyFileSync(new URL(`../../skills/coding/${name}/SKILL.md`, import.meta.url), join(directory, "SKILL.md"));
+			explicitPaths = [directory];
+			const policy = turnPolicy(`/skill ${name} inspect the fixture`, root, undefined);
+			strictEqual((await contextToolFor(root).run({ scope: "skills", name }, invokeOptions(policy))).kind, "ok");
+			strictEqual(evaluateSkillToolSurface(policy, ToolNames.Limitation), null, name);
+			ok(evaluateSkillToolSurface(policy, ToolNames.Dispatch), name);
+		}
+	});
+
+	it("preserves read-only narrowing and explicit limitation denials", async () => {
+		for (const deniesLimitation of [false, true]) {
+			const root = scratchRoot();
+			explicitPaths = [
+				writeNarrowingSkill(root, "reader", [
+					"allowed-tools: read, grep",
+					...(deniesLimitation ? ["disallowed-tools: limitation"] : []),
+				]),
+			];
+			const policy = turnPolicy("/skill reader inspect the fixture", root, undefined);
+			strictEqual((await contextToolFor(root).run({ scope: "skills", name: "reader" }, invokeOptions(policy))).kind, "ok");
+			const registry = createRegistry({ safety: allowAllSafety([]) });
+			registry.register(writeTool);
+			registry.register(limitationTool);
+			strictEqual(
+				(
+					await registry.invoke(
+						{ tool: ToolNames.Write, args: { path: join(root, "refused.ts"), content: "refused" } },
+						invokeOptions(policy),
+					)
+				).kind,
+				"blocked",
+			);
+			const result = await registry.invoke(
+				{ tool: ToolNames.Limitation, args: { scope: "No changes were requested", reason: "out-of-scope" } },
+				invokeOptions(policy),
+			);
+			strictEqual(result.kind, deniesLimitation ? "blocked" : "ok");
 		}
 	});
 

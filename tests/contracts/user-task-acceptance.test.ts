@@ -32,20 +32,34 @@ const base = { timestamp, parentTurnId: null };
 function call(id: string, name: string, args: Record<string, unknown>) {
 	return { ...base, kind: "message", role: "tool_call", turnId: id, payload: { name, toolCallId: id, args } };
 }
-function result(id: string, isError = false) {
+function result(id: string, isError = false, details?: Record<string, unknown>) {
 	return {
 		...base,
 		kind: "message",
 		role: "tool_result",
 		turnId: `${id}-result`,
-		payload: { toolCallId: id, isError, result: { kind: isError ? "error" : "ok" } },
+		payload: {
+			toolCallId: id,
+			isError,
+			...(details ? { toolName: "verify" } : {}),
+			result: { kind: isError ? "error" : "ok", details },
+		},
 	};
 }
 function mutation() {
 	return [call("write", "write", { path: "src/solver.ts", content: "fixed" }), result("write")];
 }
 function passed(check: string) {
-	return [call(check, "verify", { check }), result(check)];
+	return [
+		call(check, "verify", { check }),
+		result(check, false, {
+			check,
+			source: { kind: "package.json", path: "/workspace/package.json" },
+			cwd: "/workspace",
+			argv: ["npm", "run", check],
+			exitCode: 0,
+		}),
+	];
 }
 function limited(paths: string[], error = false) {
 	return [
@@ -231,7 +245,12 @@ describe("operator task acceptance", () => {
 
 describe("high-rigor acceptance finish contract", () => {
 	const assess = (entries: unknown[]) =>
-		assessFinishContract({ sessionEntries: entries, rigor: "high", activeAcceptance: acceptance });
+		assessFinishContract({
+			sessionEntries: entries,
+			rigor: "high",
+			activeAcceptance: acceptance,
+			workspaceRoot: "/workspace",
+		});
 	it("requires every check, accepts mixed passing and named limitation receipts, and ignores prose or unrelated evidence", () => {
 		strictEqual(assess([...mutation(), ...passed("test:solver"), ...passed("lint")]).reason, "validation_evidence");
 		strictEqual(assess([...mutation(), ...passed("test:solver")]).kind, "engage");
@@ -271,10 +290,58 @@ describe("high-rigor acceptance finish contract", () => {
 			"ok",
 		);
 	});
+	it("requires execution identity and respects the acceptance timeout for each requirement", () => {
+		strictEqual(
+			assess([
+				...mutation(),
+				call("test:solver", "verify", { check: "test:solver" }),
+				result("test:solver"),
+				...passed("lint"),
+			]).kind,
+			"engage",
+		);
+		const entries = [...mutation(), ...passed("test:solver"), ...passed("lint")];
+		strictEqual(
+			assessFinishContract({ sessionEntries: entries, rigor: "high", activeAcceptance: acceptance }).kind,
+			"engage",
+		);
+		const run = result("test:solver", false, {
+			check: "test:solver",
+			source: { kind: "package.json", path: "/workspace/package.json" },
+			cwd: "/workspace",
+			argv: ["npm", "run", "test:solver"],
+			exitCode: 0,
+			durationMs: 2000,
+		});
+		const sessionEntries = [...mutation(), call("test:solver", "verify", { check: "test:solver" }), run];
+		const activeAcceptance = {
+			expectedOutputs: [],
+			verification: [
+				{ check: "test:solver", timeoutMs: 60000 },
+				{ check: "test:solver", timeoutMs: 1000 },
+			],
+		};
+		strictEqual(
+			assessFinishContract({ sessionEntries, rigor: "high", activeAcceptance, workspaceRoot: "/workspace" }).kind,
+			"engage",
+		);
+		strictEqual(
+			assessFinishContract({
+				sessionEntries: [...sessionEntries, ...limited(["test:solver"])],
+				rigor: "high",
+				activeAcceptance,
+				workspaceRoot: "/workspace",
+			}).reason,
+			"explicit_limitation",
+		);
+	});
 	it("admits a declared custom package script and refuses a nonzero receipt", () => {
 		const activeAcceptance = { expectedOutputs: [], verification: [{ check: "custom", timeoutMs: 1000 }] };
 		const sessionEntries = [...mutation(), call("custom", "bash", { command: "npm run custom" }), result("custom")];
-		strictEqual(assessFinishContract({ sessionEntries, rigor: "high", activeAcceptance }).reason, "validation_evidence");
+		strictEqual(
+			assessFinishContract({ sessionEntries, rigor: "high", activeAcceptance, workspaceRoot: "/workspace" }).reason,
+			"validation_evidence",
+		);
 		const failed = {
 			...base,
 			kind: "message",
