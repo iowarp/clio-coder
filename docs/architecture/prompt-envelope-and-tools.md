@@ -104,6 +104,7 @@ engine assumes.
 | ORCHESTRATE | `ledger` | read | sequential |
 | ORCHESTRATE | `panes` | read | sequential |
 | ORCHESTRATE | `limitation` | read | parallel |
+| ORCHESTRATE | `decide` | read | sequential |
 | RETRIEVE | `web_fetch` | read | parallel |
 | INTERACT | `ask_user` | read | sequential |
 | ARTIFACT | `artifact` | write | sequential |

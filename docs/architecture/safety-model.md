@@ -97,7 +97,7 @@ Escalation can never hang a run. Every escalated ask resolves by an operator dec
 ## Operating Posture and Visible Tools
 
 Clio operates under a single operating posture. The canonical catalog contains
-22 built-in tools organized in seven planes; each plane is one policy unit for
+23 built-in tools organized in seven planes; each plane is one policy unit for
 action class, size posture, and concurrency, asserted at bootstrap by
 `src/tools/policy.ts` so the classifier and registered specs cannot drift apart
 silently. Dependency wiring, target capability, worker profile, and recipe
@@ -110,12 +110,12 @@ policy determine which subset is visible in a particular context.
 | EXECUTE | `bash`, `verify` | `execute` |
 | EXECUTE | `git` | `read` |
 | ORCHESTRATE | `dispatch`, `steer` | `dispatch` |
-| ORCHESTRATE | `monitor`, `tasks`, `ledger`, `panes`, `limitation` | `read` |
+| ORCHESTRATE | `monitor`, `tasks`, `ledger`, `panes`, `limitation`, `decide` | `read` |
 | RETRIEVE | `web_fetch` | `read` |
 | INTERACT | `ask_user` | `read` |
 | ARTIFACT | `artifact` | `write` |
 
-`git` is read-only inspection on the safe-exec spine, so it carries the read class despite living in the EXECUTE plane. `monitor` does not mutate a run or the workspace. The model-facing `tasks` tool is an intentional bookkeeping exception to the everyday meaning of "read": board mutations append full `taskLedger` snapshots to Clio's session ledger, and any action may reconcile the project-local `.clio-coder/user-tasks.json` inbox while `pick` and linked `done` update its durable correlation. Those Clio-owned ledger and inbox mutations intentionally remain audited with `actionClass: "read"`, so task planning and pickup stay available at every autonomy level without an approval card. `ledger` reads a worker-local mirror and posts through the dispatch control lane; it registers only for a worker with an agent-ledger port. `panes` controls Clio-owned terminal panes and registers only when a pane host and live mux are available. Both are read class and sequential because their coordination state must not interleave. `limitation` records a typed receipt of what a turn could not verify and why; it touches no filesystem and runs no shell, so it is read class and parallel. This classification grants no source-workspace, command-execution, or run-mutation authority; those operations still require their own tools and action classes. `gateway` is a design-reserved name only (see `src/core/tool-names.ts`), not a registered tool.
+`git` is read-only inspection on the safe-exec spine, so it carries the read class despite living in the EXECUTE plane. `monitor` does not mutate a run or the workspace. The model-facing `tasks` tool is an intentional bookkeeping exception to the everyday meaning of "read": board mutations append full `taskLedger` snapshots to Clio's session ledger, and any action may reconcile the project-local `.clio-coder/user-tasks.json` inbox while `pick` and linked `done` update its durable correlation. Those Clio-owned ledger and inbox mutations intentionally remain audited with `actionClass: "read"`, so task planning and pickup stay available at every autonomy level without an approval card. `ledger` reads a worker-local mirror and posts through the dispatch control lane; it registers only for a worker with an agent-ledger port. `panes` controls Clio-owned terminal panes and registers only when a pane host and live mux are available. Both are read class and sequential because their coordination state must not interleave. `limitation` records a typed receipt of what a turn could not verify and why; it touches no filesystem and runs no shell, so it is read class and parallel. `decide` appends the model's own design decision, with its rejected alternatives and rationale, to the session decision board; dispatch seals every active decision's ref onto the run envelope and receipt, and commit seams write them as `Clio-Decision:` trailers. It is read class and sequential. This classification grants no source-workspace, command-execution, or run-mutation authority; those operations still require their own tools and action classes. `gateway` is a design-reserved name only (see `src/core/tool-names.ts`), not a registered tool.
 
 Target capability, dispatch tool profiles, and recipe constraints can further narrow the tools available to a run. That narrowing is convenience and budget control; safety still lives in code gates.
 

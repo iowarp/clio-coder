@@ -328,8 +328,8 @@
 <td>Carries the effective <code>integrations.git.commitAttribution</code> setting to Clio-controlled child-process seams. It is set from validated settings and is not an operator override (<code>src/core/git-commit-attribution.ts</code>).</td>
 </tr>
 <tr>
-<td><code>CLIO_CODER_COMMIT_ASSISTED</code>, <code>CLIO_CODER_COMMIT_AUTHORED</code></td>
-<td>Per-spawn inputs to the managed <code>prepare-commit-msg</code> hook, which also requires <code>AI_AGENT=clio-coder</code> and <code>CLIO_CODER_GIT_COMMITS_ENABLED=1</code>; normal external shells never receive this set. Only assistance and authorship cross the environment. Testing, review, and receipt trailers are composed in process by the fleet seam, so a child shell cannot forge them by exporting a variable (<code>src/core/git-commit-attribution.ts</code>).</td>
+<td><code>CLIO_CODER_COMMIT_ASSISTED</code>, <code>CLIO_CODER_COMMIT_AUTHORED</code>, <code>CLIO_CODER_COMMIT_DECISIONS</code></td>
+<td>Per-spawn inputs to the managed <code>prepare-commit-msg</code> hook, which also requires <code>AI_AGENT=clio-coder</code> and <code>CLIO_CODER_GIT_COMMITS_ENABLED=1</code>; normal external shells never receive this set. Only assistance, authorship, and the space-separated decision refs the spawn was made under cross the environment. Testing, review, and receipt trailers are composed in process by the fleet seam, so a child shell cannot forge them by exporting a variable (<code>src/core/git-commit-attribution.ts</code>).</td>
 </tr>
 <tr>
 <td><code>CLIO_CODER_GIT_CONFIG_BASE_COUNT</code>, <code>CLIO_CODER_GIT_DEFAULT_HOOKS_EQUIVALENT</code></td>
