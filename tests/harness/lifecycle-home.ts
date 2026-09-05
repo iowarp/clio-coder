@@ -58,6 +58,7 @@ export function createLifecycleHome(prefix: string, options: LifecycleHomeOption
 		binDir,
 		env: {
 			HOME: root,
+			NODE_ENV: "test",
 			CLIO_CODER_HOME: "",
 			CLIO_CODER_CONFIG_DIR: configDir,
 			CLIO_CODER_DATA_DIR: dataDir,
