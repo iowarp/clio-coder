@@ -76,10 +76,7 @@ export function modelResidencyForStatus(status: DiscoveryStatus | null | undefin
 }
 
 export function hasLiveModelCatalog(status: TargetStatus): boolean {
-	if (status.discoveredModelsSource === "probe" || status.discoveredModelsSource === "cache") return true;
-	// Unit-test and plugin mocks from before `discoveredModelsSource` still use
-	// `discoveredModels` to mean "this came from discovery".
-	return status.discoveredModelsSource === undefined && status.discoveredModels.length > 0;
+	return status.discoveredModelsSource === "probe" || status.discoveredModelsSource === "cache";
 }
 
 /**
