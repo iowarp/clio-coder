@@ -487,7 +487,7 @@ function renderPlanText(
 		lines.push(...renderLegacyPathScope(task, cwd));
 		for (const check of task.resolvedVerification ?? []) {
 			lines.push(
-				`    verification check=${safeField(check.check)} argv=${JSON.stringify(check.argv)} cwd=${JSON.stringify(check.cwd)} timeout_ms=${check.timeoutMs}`,
+				`    verification check=${safeField(check.check)}${check.kind !== undefined ? ` kind=${check.kind}` : ""} argv=${JSON.stringify(check.argv)} cwd=${JSON.stringify(check.cwd)} timeout_ms=${check.timeoutMs}`,
 			);
 		}
 	}
@@ -616,7 +616,10 @@ function isResolvedTask(value: unknown): value is ResolvedDispatchPlanArtifact["
 					Array.isArray(check.argv) &&
 					check.argv.every((arg) => typeof arg === "string") &&
 					typeof check.cwd === "string" &&
-					typeof check.timeoutMs === "number",
+					typeof check.timeoutMs === "number" &&
+					(check.kind === undefined || check.kind === "numeric-compare" || check.kind === "perf-budget") &&
+					(check.numeric === undefined || (isRecord(check.numeric) && typeof check.numeric.reference === "string")) &&
+					(check.perf === undefined || isRecord(check.perf)),
 			))
 	)
 		return false;

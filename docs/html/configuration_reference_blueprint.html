@@ -3605,8 +3605,33 @@
 <td></td>
 </tr>
 <tr>
+<td><code>checks[].kind</code></td>
+<td><code>command</code> (default, exit code), <code>numeric-compare</code> (stdout JSON judged against <code>reference</code> under <code>tolerance</code>), or <code>perf-budget</code> (wall time judged against <code>budget</code> or <code>baseline</code>). Requires <code>version: 2</code>.</td>
+<td></td>
+</tr>
+<tr>
+<td><code>checks[].reference</code></td>
+<td><code>numeric-compare</code> only: repository-relative JSON file of <code>string -&gt; number | number[]</code> the command output is compared against.</td>
+<td></td>
+</tr>
+<tr>
+<td><code>checks[].tolerance</code></td>
+<td><code>numeric-compare</code>: at least one of <code>relative</code>, <code>absolute</code>, <code>ulp</code>; every named bound must hold. <code>perf-budget</code> with <code>baseline</code>: <code>{relative}</code> headroom over the recorded time.</td>
+<td></td>
+</tr>
+<tr>
+<td><code>checks[].budget</code></td>
+<td><code>perf-budget</code> only: <code>{wallTimeMs, tolerance?: {relative}}</code>; exclusive with <code>baseline</code>.</td>
+<td></td>
+</tr>
+<tr>
+<td><code>checks[].baseline</code></td>
+<td><code>perf-budget</code> only: repository-relative JSON <code>{wallTimeMs}</code> written by <code>clio-coder verifiers baseline &lt;id&gt;</code>; exclusive with <code>budget</code>.</td>
+<td></td>
+</tr>
+<tr>
 <td><code>version</code></td>
-<td>Catalog schema version; must equal the version this build speaks.</td>
+<td>Catalog schema version, <code>1</code> or <code>2</code>; version 1 files load with every check as <code>kind: command</code>.</td>
 <td></td>
 </tr>
 </tbody></table>

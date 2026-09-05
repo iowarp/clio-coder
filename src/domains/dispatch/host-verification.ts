@@ -5,6 +5,7 @@ import { dirname, join, resolve } from "node:path";
 import { PATH_BOUNDARY_MAX_ENTRIES, pathBoundaryCovers, resolvePathBoundary } from "../../core/path-boundary.js";
 import { withStateFileLockSync } from "../../core/state-file-lock.js";
 import { clioStateDir } from "../../core/xdg.js";
+import { judgeNumericTexts, judgePerfTexts } from "../../tools/verify/scripts.js";
 import { FLEET_COMMAND_BASE_ENV, type FleetCommand } from "../agents/fleet-commands.js";
 import { runCodeStep } from "./code-step.js";
 import type { DispatchRequest } from "./contract.js";
@@ -124,8 +125,69 @@ export function hostVerificationRejection(
 		detail:
 			failedCheck === undefined
 				? "host verification rejected"
-				: `host verification check '${failedCheck.check}' rejected with exit code ${failedCheck.exitCode}`,
+				: failedCheck.report !== undefined
+					? `host verification check '${failedCheck.check}' rejected: ${failedCheck.report.summary}`
+					: `host verification check '${failedCheck.check}' rejected with exit code ${failedCheck.exitCode}`,
 	};
+}
+
+function readSealedFile(absolutePath: string): string | undefined {
+	try {
+		return readFileSync(absolutePath, "utf8");
+	} catch {
+		return undefined;
+	}
+}
+
+/**
+ * The kind-specific verdict for a resolved check that already ran. A command
+ * check keeps its exit code. A numeric-compare check reads the captured output
+ * artifact (the command's stdout and stderr as one stream) and judges it
+ * against the sealed reference; a perf-budget check judges the measured
+ * duration against the sealed budget or baseline. Either judgement turns a
+ * clean exit into exit 1 when it fails, and a judgement that cannot be made
+ * (missing reference, unparseable output) fails with the reason in the tail.
+ */
+function judgeResolvedCheck(
+	resolvedCheck: ResolvedCheck,
+	exitCode: number,
+	durationMs: number,
+	artifactPath: string | undefined,
+): { exitCode: number; report?: RunHostVerificationCheck["report"]; outputTail?: string } {
+	if (resolvedCheck.kind === undefined || resolvedCheck.kind === "command" || exitCode !== 0) return { exitCode };
+	if (resolvedCheck.kind === "numeric-compare" && resolvedCheck.numeric !== undefined) {
+		const artifact = artifactPath === undefined ? undefined : readSealedFile(artifactPath);
+		if (artifact === undefined)
+			return { exitCode: 1, outputTail: "numeric-compare: captured command output is unreadable" };
+		// The artifact opens with the code-step header (`$ argv`, cwd, exit,
+		// duration, timed_out) and a blank line; the command's own output follows.
+		const separator = artifact.indexOf("\n\n");
+		const captured = separator === -1 ? artifact : artifact.slice(separator + 2);
+		const referenceText = readSealedFile(resolvedCheck.numeric.reference);
+		if (referenceText === undefined) {
+			return { exitCode: 1, outputTail: `numeric-compare: reference '${resolvedCheck.numeric.reference}' cannot be read` };
+		}
+		const report = judgeNumericTexts(
+			captured,
+			referenceText,
+			resolvedCheck.numeric.tolerance,
+			`reference '${resolvedCheck.numeric.reference}'`,
+		);
+		if (report instanceof Error) return { exitCode: 1, outputTail: `numeric-compare: ${report.message}` };
+		return { exitCode: report.passed ? 0 : 1, report, outputTail: outputTail(report.summary) };
+	}
+	if (resolvedCheck.kind === "perf-budget" && resolvedCheck.perf !== undefined) {
+		const baselinePath = resolvedCheck.perf.baseline;
+		const report = judgePerfTexts(
+			durationMs,
+			resolvedCheck.perf,
+			baselinePath === undefined ? undefined : readSealedFile(baselinePath),
+			`baseline '${baselinePath ?? ""}'`,
+		);
+		if (report instanceof Error) return { exitCode: 1, outputTail: `perf-budget: ${report.message}` };
+		return { exitCode: report.passed ? 0 : 1, report, outputTail: outputTail(report.summary) };
+	}
+	return { exitCode: 1, outputTail: `${resolvedCheck.kind}: sealed check carries no parameters` };
 }
 
 async function runResolvedCheck(input: {
@@ -168,15 +230,17 @@ async function runResolvedCheck(input: {
 		env: input.env,
 	});
 	const artifactPath = outcome.record.artifactPaths[0];
+	const judgement = judgeResolvedCheck(resolvedCheck, outcome.record.exitCode, outcome.record.durationMs, artifactPath);
 	const check: RunHostVerificationCheck = {
 		check: resolvedCheck.check,
 		argv: [...outcome.record.argv],
 		cwd: outcome.record.cwd,
-		exitCode: outcome.record.exitCode,
+		exitCode: judgement.exitCode,
 		durationMs: outcome.record.durationMs,
 		memo: false,
-		outputTail: outputTail(outcome.report.outputExcerpt),
+		outputTail: judgement.outputTail ?? outputTail(outcome.report.outputExcerpt),
 		...(artifactPath !== undefined ? { artifactPath } : {}),
+		...(judgement.report !== undefined ? { report: judgement.report } : {}),
 	};
 	if (check.exitCode === 0 && key !== null) {
 		try {

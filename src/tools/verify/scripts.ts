@@ -1,17 +1,30 @@
-import { existsSync, readFileSync } from "node:fs";
+import { existsSync, mkdirSync, readFileSync, writeFileSync } from "node:fs";
 import path from "node:path";
-import { resolveSafeCwd } from "../../core/safe-exec.js";
+import { resolveSafeCwd, runCommandVector, type SafeCommandResult } from "../../core/safe-exec.js";
 import { declaredVerificationScripts, VERIFICATION_SCRIPT_FAMILY_HINT } from "../../core/verification-scripts.js";
 import type { ToolResult } from "../registry.js";
 import { runVectorTool } from "../safe-exec.js";
 import {
 	type DeclaredCheck,
 	type DeclaredCheckSource,
+	type DeclaredNumericCompare,
+	type DeclaredPerfBudget,
 	loadProjectVerifierCatalog,
 	PROJECT_VERIFIER_CATALOG_RELATIVE_PATH,
 	packageDeclaredCheck,
 	resolveProjectVerifierExecutionCwd,
 } from "./catalog.js";
+import { compareNumeric, type NumericCompareReport, parseNumericPayload, renderNumericReport } from "./numeric.js";
+import {
+	evaluatePerfBudget,
+	type PerfBaseline,
+	type PerfBudgetReport,
+	parsePerfBaseline,
+	renderPerfBaseline,
+} from "./perf.js";
+
+/** The structured verdict a numeric-compare or perf-budget check records beside the command facts. */
+export type DeclaredCheckReport = NumericCompareReport | PerfBudgetReport;
 
 /**
  * Package scripts and the project catalog meet here as one canonical check
@@ -197,6 +210,7 @@ function withDeclaredEvidence(result: ToolResult, check: DeclaredCheck): ToolRes
 			...result.details,
 			action: "verify",
 			check: check.id,
+			kind: check.kind,
 			source: { ...check.source },
 			description: check.description,
 			declaredCommand: [...check.command],
@@ -207,13 +221,226 @@ function withDeclaredEvidence(result: ToolResult, check: DeclaredCheck): ToolRes
 	};
 }
 
+/**
+ * The JSON object a numeric-compare command printed. The whole text is tried
+ * first; when the command also wrote diagnostics around it, the span from the
+ * first `{` to the last `}` is tried once more, so a preamble line does not
+ * turn a correct payload into a parse failure.
+ */
+export function extractNumericPayloadText(output: string): string {
+	const trimmed = output.trim();
+	try {
+		JSON.parse(trimmed);
+		return trimmed;
+	} catch {
+		const start = trimmed.indexOf("{");
+		const end = trimmed.lastIndexOf("}");
+		return start >= 0 && end > start ? trimmed.slice(start, end + 1) : trimmed;
+	}
+}
+
+/** Read a repository-relative check file inside the workspace root, as text. */
+function readCheckFile(workspaceRoot: string, relative: string, label: string): string | Error {
+	let resolved: string;
+	try {
+		resolved = resolveSafeCwd(relative, workspaceRoot);
+	} catch (error) {
+		return new Error(`${label} ${error instanceof Error ? error.message : String(error)}`);
+	}
+	if (!existsSync(resolved)) return new Error(`${label} '${relative}' does not exist`);
+	try {
+		return readFileSync(resolved, "utf8");
+	} catch (error) {
+		return new Error(`${label} '${relative}' cannot be read (${error instanceof Error ? error.message : String(error)})`);
+	}
+}
+
+/** Judge a numeric-compare command's stdout against reference text already read from disk. Pure. */
+export function judgeNumericTexts(
+	stdout: string,
+	referenceText: string,
+	tolerance: DeclaredNumericCompare["tolerance"],
+	referenceLabel: string,
+): NumericCompareReport | Error {
+	const reference = parseNumericPayload(referenceText, referenceLabel);
+	if (reference instanceof Error) return reference;
+	const actual = parseNumericPayload(extractNumericPayloadText(stdout), "command output");
+	if (actual instanceof Error) return actual;
+	return compareNumeric(actual, reference, tolerance);
+}
+
+/** Judge a numeric-compare command's stdout against the declared reference under the workspace root. */
+function judgeNumericCompare(
+	stdout: string,
+	numeric: DeclaredNumericCompare,
+	workspaceRoot: string,
+): NumericCompareReport | Error {
+	const referenceText = readCheckFile(workspaceRoot, numeric.reference, "reference");
+	if (referenceText instanceof Error) return referenceText;
+	return judgeNumericTexts(stdout, referenceText, numeric.tolerance, `reference '${numeric.reference}'`);
+}
+
+/** Judge a measured wall time against a budget, or against baseline text already read from disk. Pure. */
+export function judgePerfTexts(
+	measuredMs: number,
+	perf: DeclaredPerfBudget,
+	baselineText: string | undefined,
+	baselineLabel: string,
+): PerfBudgetReport | Error {
+	let baseline: PerfBaseline | undefined;
+	if (perf.baseline !== undefined) {
+		if (baselineText === undefined) {
+			return new Error(`${baselineLabel} is missing; record it with \`clio-coder verifiers baseline <id>\``);
+		}
+		const parsed = parsePerfBaseline(baselineText, baselineLabel);
+		if (parsed instanceof Error) return parsed;
+		baseline = parsed;
+	}
+	return evaluatePerfBudget(measuredMs, {
+		...(perf.budget !== undefined ? { budget: perf.budget } : {}),
+		...(baseline !== undefined ? { baseline } : {}),
+		...(perf.tolerance?.relative !== undefined ? { relative: perf.tolerance.relative } : {}),
+	});
+}
+
+/** Judge a measured wall time against the declared budget or the recorded baseline under the workspace root. */
+function judgePerfBudget(
+	measuredMs: number,
+	perf: DeclaredPerfBudget,
+	workspaceRoot: string,
+): PerfBudgetReport | Error {
+	let baselineText: string | undefined;
+	if (perf.baseline !== undefined) {
+		const text = readCheckFile(workspaceRoot, perf.baseline, "baseline");
+		if (text instanceof Error) {
+			return new Error(`${text.message}; record it with \`clio-coder verifiers baseline <id>\``);
+		}
+		baselineText = text;
+	}
+	return judgePerfTexts(measuredMs, perf, baselineText, `baseline '${perf.baseline ?? ""}'`);
+}
+
+function commandFacts(result: SafeCommandResult): Record<string, unknown> {
+	return {
+		command: [result.file, ...result.args].join(" "),
+		argv: [result.file, ...result.args],
+		cwd: result.cwd,
+		exitCode: result.exitCode,
+		durationMs: result.durationMs,
+		aborted: result.aborted,
+		timedOut: result.timedOut,
+		outputCapped: result.outputCapped,
+	};
+}
+
+/**
+ * Run a numeric-compare or perf-budget check: the command through the same
+ * safe-exec spine as a command check, then the pure judgement. A command that
+ * exits non-zero, times out, or is aborted fails before any comparison, so a
+ * crashed validator never reads as a tolerance verdict.
+ */
+async function runJudgedCheck(
+	check: DeclaredCheck,
+	file: string,
+	vector: ReadonlyArray<string>,
+	cwd: string,
+	options?: { signal?: AbortSignal },
+): Promise<ToolResult> {
+	let result: SafeCommandResult;
+	try {
+		result = await runCommandVector(file, vector, {
+			cwd,
+			timeoutMs: check.timeoutMs,
+			...(options?.signal !== undefined ? { signal: options.signal } : {}),
+		});
+	} catch (error) {
+		return { kind: "error", message: `verify: ${error instanceof Error ? error.message : String(error)}` };
+	}
+	const facts = commandFacts(result);
+	const tail = `${result.stdout}${result.stderr}`.trim().slice(-2_000);
+	if (result.aborted) return { kind: "error", message: "verify: aborted", details: facts };
+	if (result.timedOut) return { kind: "error", message: `verify: timed out after ${check.timeoutMs}ms`, details: facts };
+	if (result.exitCode !== 0) {
+		return {
+			kind: "error",
+			message: `verify: ${check.kind} command exited with code ${result.exitCode ?? "?"} before judgement: ${tail}`,
+			details: facts,
+		};
+	}
+	const report =
+		check.kind === "numeric-compare" && check.numeric !== undefined
+			? judgeNumericCompare(result.stdout, check.numeric, process.cwd())
+			: check.kind === "perf-budget" && check.perf !== undefined
+				? judgePerfBudget(result.durationMs, check.perf, process.cwd())
+				: new Error(`declared check '${check.id}' has kind ${check.kind} without its parameters`);
+	if (report instanceof Error) return { kind: "error", message: `verify: ${report.message}`, details: facts };
+	const rendered = report.kind === "numeric-compare" ? renderNumericReport(report) : report.summary;
+	const details = { ...facts, report };
+	if (!report.passed) return { kind: "error", message: `verify: ${rendered}`, details };
+	return { kind: "ok", output: `${rendered}\n`, details };
+}
+
 export async function runProjectCheck(check: DeclaredCheck, options?: { signal?: AbortSignal }): Promise<ToolResult> {
 	const [file, ...vector] = check.command;
 	if (file === undefined) return { kind: "error", message: `verify: declared check '${check.id}' has empty argv` };
 	const cwd = resolveProjectVerifierExecutionCwd(check.cwd, process.cwd());
 	if (cwd instanceof Error) return { kind: "error", message: `verify: ${cwd.message}` };
+	if (check.kind !== "command") {
+		return withDeclaredEvidence(await runJudgedCheck(check, file, vector, cwd, options), check);
+	}
 	const result = await runVectorTool("verify", file, vector, { cwd, timeout_ms: check.timeoutMs }, options);
 	return withDeclaredEvidence(result, check);
+}
+
+/**
+ * Run a perf-budget check once and write its wall time as the baseline the
+ * check's `baseline` path names. The command must exit cleanly; a failed run
+ * records nothing, so a baseline never encodes a broken command's timing.
+ */
+export async function recordPerfBaseline(
+	check: DeclaredCheck,
+	options?: { signal?: AbortSignal; now?: () => Date },
+): Promise<{ ok: true; path: string; wallTimeMs: number } | { ok: false; message: string }> {
+	if (check.kind !== "perf-budget" || check.perf?.baseline === undefined) {
+		return { ok: false, message: `check '${check.id}' is not a perf-budget check with a baseline path` };
+	}
+	const [file, ...vector] = check.command;
+	if (file === undefined) return { ok: false, message: `declared check '${check.id}' has empty argv` };
+	const cwd = resolveProjectVerifierExecutionCwd(check.cwd, process.cwd());
+	if (cwd instanceof Error) return { ok: false, message: cwd.message };
+	let result: SafeCommandResult;
+	try {
+		result = await runCommandVector(file, vector, {
+			cwd,
+			timeoutMs: check.timeoutMs,
+			...(options?.signal !== undefined ? { signal: options.signal } : {}),
+		});
+	} catch (error) {
+		return { ok: false, message: error instanceof Error ? error.message : String(error) };
+	}
+	if (result.aborted || result.timedOut || result.exitCode !== 0) {
+		return {
+			ok: false,
+			message: `command ${result.timedOut ? "timed out" : result.aborted ? "was aborted" : `exited with code ${result.exitCode ?? "?"}`}; no baseline recorded`,
+		};
+	}
+	let target: string;
+	try {
+		target = resolveSafeCwd(check.perf.baseline, process.cwd());
+	} catch (error) {
+		return { ok: false, message: `baseline ${error instanceof Error ? error.message : String(error)}` };
+	}
+	const recordedAt = (options?.now?.() ?? new Date()).toISOString();
+	try {
+		mkdirSync(path.dirname(target), { recursive: true });
+		writeFileSync(target, renderPerfBaseline({ wallTimeMs: result.durationMs, check: check.id, recordedAt }), "utf8");
+	} catch (error) {
+		return {
+			ok: false,
+			message: `cannot write baseline '${check.perf.baseline}' (${error instanceof Error ? error.message : String(error)})`,
+		};
+	}
+	return { ok: true, path: check.perf.baseline, wallTimeMs: result.durationMs };
 }
 
 export async function runScriptCheck(

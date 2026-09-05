@@ -6,8 +6,15 @@ import {
 	runVerifierAuthoringWorkflow,
 	type VerifierRevision,
 } from "../tools/verify/authoring.js";
-import { loadProjectVerifierCatalog, PROJECT_VERIFIER_CATALOG_RELATIVE_PATH } from "../tools/verify/catalog.js";
+import {
+	DECLARED_CHECK_KINDS,
+	type DeclaredCheckKind,
+	loadProjectVerifierCatalog,
+	PROJECT_VERIFIER_CATALOG_RELATIVE_PATH,
+} from "../tools/verify/catalog.js";
 import { verifyTool } from "../tools/verify/index.js";
+import { normalizeNumericTolerance } from "../tools/verify/numeric.js";
+import { recordPerfBaseline } from "../tools/verify/scripts.js";
 import { printError, printOk } from "./argv.js";
 import { runVerifiersInspect } from "./verifiers-inspect.js";
 
@@ -23,11 +30,22 @@ Usage:
   clio-coder verifiers edit <id> [--description <text>] [--command <json-argv>] [fields] [--yes]
   clio-coder verifiers rename <old> <new> [--yes]
   clio-coder verifiers remove <id> [--yes]
+  clio-coder verifiers baseline <id>
 
 Fields:
   --cwd <path>            repository-relative working directory (default .)
   --timeout-ms <number>   bounded timeout in milliseconds (default 120000)
   --tags <a,b>            comma-separated catalog tags
+  --kind <kind>           command (default), numeric-compare, or perf-budget
+  --reference <path>      numeric-compare: repository-relative reference JSON of string -> number | number[]
+  --tolerance <json>      numeric-compare: {"relative"?,"absolute"?,"ulp"?}, at least one;
+                          perf-budget with --baseline: {"relative"} headroom over the baseline
+  --budget-ms <number>    perf-budget: wall-time bound in milliseconds
+  --budget-relative <r>   perf-budget with --budget-ms: fractional headroom over the bound
+  --baseline <path>       perf-budget: repository-relative baseline JSON written by 'verifiers baseline <id>'
+
+baseline runs a perf-budget check once and records its wall time at the check's
+baseline path; a failing or timed-out command records nothing.
 
 Discovery and every preview are read-only. Mutating commands write only with
 --yes after printing the exact argv, cwd, timeout, tags, source provenance, and
@@ -48,6 +66,12 @@ const VALUE_OPTIONS = new Set([
 	"--exclude",
 	"--rename",
 	"--dry-run",
+	"--kind",
+	"--reference",
+	"--tolerance",
+	"--budget-ms",
+	"--budget-relative",
+	"--baseline",
 ]);
 
 interface ParsedAuthoringArgs {
@@ -124,6 +148,93 @@ function tags(value: string | undefined): string[] {
 				.filter((tag) => tag.length > 0);
 }
 
+type KindFields = Pick<Extract<VerifierRevision, { kind: "add" }>["check"], "kind" | "numeric" | "perf">;
+
+function parseJsonObject(value: string, option: string): Record<string, unknown> | Error {
+	try {
+		const parsed = JSON.parse(value) as unknown;
+		if (parsed === null || typeof parsed !== "object" || Array.isArray(parsed)) {
+			return new Error(`${option} must be a JSON object`);
+		}
+		return parsed as Record<string, unknown>;
+	} catch (error) {
+		return new Error(`${option} must be valid JSON: ${error instanceof Error ? error.message : String(error)}`);
+	}
+}
+
+/**
+ * The kind and its parameters from the option set. Returns `{}` when no kind
+ * option was given so a plain command check keeps the version-1 shape, and an
+ * Error when the options disagree with the kind the way the catalog parser
+ * would refuse them, so the operator reads one message here instead of a
+ * rejected preview.
+ */
+function kindFieldsFromArgs(parsed: ParsedAuthoringArgs): KindFields | Error {
+	const kindValue = oneValue(parsed, "--kind") ?? "command";
+	if (!(DECLARED_CHECK_KINDS as ReadonlyArray<string>).includes(kindValue)) {
+		return new Error(`--kind must be one of ${DECLARED_CHECK_KINDS.join(", ")}`);
+	}
+	const kind = kindValue as DeclaredCheckKind;
+	const reference = oneValue(parsed, "--reference");
+	const toleranceValue = oneValue(parsed, "--tolerance");
+	const budgetMs = oneValue(parsed, "--budget-ms");
+	const budgetRelative = oneValue(parsed, "--budget-relative");
+	const baseline = oneValue(parsed, "--baseline");
+	if (kind === "command") {
+		const stray = [
+			["--reference", reference],
+			["--tolerance", toleranceValue],
+			["--budget-ms", budgetMs],
+			["--budget-relative", budgetRelative],
+			["--baseline", baseline],
+		].filter(([, value]) => value !== undefined);
+		if (stray.length > 0)
+			return new Error(`${stray.map(([name]) => name).join(", ")} require --kind numeric-compare or perf-budget`);
+		return {};
+	}
+	if (kind === "numeric-compare") {
+		if (budgetMs !== undefined || budgetRelative !== undefined || baseline !== undefined) {
+			return new Error("--budget-ms, --budget-relative, and --baseline belong to --kind perf-budget");
+		}
+		if (reference === undefined) return new Error("--reference is required for --kind numeric-compare");
+		if (toleranceValue === undefined) return new Error("--tolerance is required for --kind numeric-compare");
+		const toleranceJson = parseJsonObject(toleranceValue, "--tolerance");
+		if (toleranceJson instanceof Error) return toleranceJson;
+		const tolerance = normalizeNumericTolerance(toleranceJson);
+		if (tolerance instanceof Error) return new Error(`--tolerance ${tolerance.message}`);
+		return { kind, numeric: { reference, tolerance } };
+	}
+	if (reference !== undefined) return new Error("--reference belongs to --kind numeric-compare");
+	if ((budgetMs === undefined) === (baseline === undefined)) {
+		return new Error("--kind perf-budget requires exactly one of --budget-ms or --baseline");
+	}
+	if (budgetMs !== undefined) {
+		if (toleranceValue !== undefined) return new Error("use --budget-relative for headroom over --budget-ms");
+		const wallTimeMs = Number(budgetMs);
+		if (!Number.isFinite(wallTimeMs) || wallTimeMs <= 0) return new Error("--budget-ms must be a positive number");
+		const budget: NonNullable<KindFields["perf"]>["budget"] = { wallTimeMs };
+		if (budgetRelative !== undefined) {
+			const relative = Number(budgetRelative);
+			if (!Number.isFinite(relative) || relative < 0) return new Error("--budget-relative must be a non-negative number");
+			budget.tolerance = { relative };
+		}
+		return { kind, perf: { budget } };
+	}
+	if (budgetRelative !== undefined)
+		return new Error("--budget-relative belongs with --budget-ms; use --tolerance with --baseline");
+	const perf: NonNullable<KindFields["perf"]> = { baseline: baseline as string };
+	if (toleranceValue !== undefined) {
+		const toleranceJson = parseJsonObject(toleranceValue, "--tolerance");
+		if (toleranceJson instanceof Error) return toleranceJson;
+		const relative = toleranceJson.relative;
+		if (typeof relative !== "number" || !Number.isFinite(relative) || relative < 0) {
+			return new Error('--tolerance for a baseline must be {"relative": <non-negative number>}');
+		}
+		perf.tolerance = { relative };
+	}
+	return { kind, perf };
+}
+
 function requiredValue(parsed: ParsedAuthoringArgs, option: string): string | Error {
 	const value = oneValue(parsed, option);
 	return value === undefined || value.length === 0 ? new Error(`${option} is required`) : value;
@@ -151,6 +262,8 @@ function addRevision(parsed: ParsedAuthoringArgs): VerifierRevision | Error {
 	if (command instanceof Error) return command;
 	const timeoutMs = parseTimeout(oneValue(parsed, "--timeout-ms"));
 	if (timeoutMs instanceof Error) return timeoutMs;
+	const kindFields = kindFieldsFromArgs(parsed);
+	if (kindFields instanceof Error) return kindFields;
 	return {
 		kind: "add",
 		check: {
@@ -160,6 +273,7 @@ function addRevision(parsed: ParsedAuthoringArgs): VerifierRevision | Error {
 			cwd: oneValue(parsed, "--cwd") ?? ".",
 			timeoutMs,
 			tags: tags(oneValue(parsed, "--tags")),
+			...kindFields,
 		},
 	};
 }
@@ -186,6 +300,13 @@ function editRevision(parsed: ParsedAuthoringArgs): VerifierRevision | Error {
 	}
 	const tagValue = oneValue(parsed, "--tags");
 	if (tagValue !== undefined) changes.tags = tags(tagValue);
+	if (oneValue(parsed, "--kind") !== undefined) {
+		const kindFields = kindFieldsFromArgs(parsed);
+		if (kindFields instanceof Error) return kindFields;
+		changes.kind = kindFields.kind ?? "command";
+		if (kindFields.numeric !== undefined) changes.numeric = kindFields.numeric;
+		if (kindFields.perf !== undefined) changes.perf = kindFields.perf;
+	}
 	if (Object.keys(changes).length === 0) return new Error("edit requires at least one changed field");
 	return { kind: "edit", id, changes };
 }
@@ -260,6 +381,30 @@ async function executeWorkflow(
 	return code;
 }
 
+async function baselineCommand(id: string | undefined): Promise<number> {
+	if (id === undefined) {
+		printError("baseline requires a check ID");
+		return 2;
+	}
+	const loaded = loadProjectVerifierCatalog(process.cwd());
+	if (!loaded.ok) {
+		printError(`production catalog parser rejected ${loaded.reason}`);
+		return 1;
+	}
+	const check = loaded.source?.checks.find((candidate) => candidate.id === id);
+	if (check === undefined) {
+		printError(`no catalog check '${id}' in ${PROJECT_VERIFIER_CATALOG_RELATIVE_PATH}`);
+		return 1;
+	}
+	const recorded = await recordPerfBaseline(check);
+	if (!recorded.ok) {
+		printError(`baseline '${id}' not recorded: ${recorded.message}`);
+		return 1;
+	}
+	printOk(`recorded baseline for '${id}': ${Math.round(recorded.wallTimeMs)}ms at ${recorded.path}`);
+	return 0;
+}
+
 async function discoverCommand(): Promise<number> {
 	const discovery = discoverVerifierAuthoring();
 	if (!discovery.ok) {
@@ -304,6 +449,7 @@ export async function runVerifiersCommand(argv: string[]): Promise<number> {
 	const command = parsed.positional[0];
 	if (command === "discover") return discoverCommand();
 	if (command === "validate") return validateCommand();
+	if (command === "baseline") return baselineCommand(parsed.positional[1]);
 	if (command === "dry-run") {
 		const id = parsed.positional[1];
 		if (id === undefined) {

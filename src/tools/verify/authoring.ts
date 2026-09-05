@@ -19,12 +19,16 @@ import { loadValidationContract, VALIDATION_CONTRACT_MARKDOWN_PATH } from "../..
 import type { ToolResult } from "../registry.js";
 import {
 	type DeclaredCheck,
+	type DeclaredCheckKind,
+	type DeclaredNumericCompare,
+	type DeclaredPerfBudget,
 	PROJECT_VERIFIER_CATALOG_CAPS,
 	PROJECT_VERIFIER_CATALOG_RELATIVE_PATH,
 	PROJECT_VERIFIER_CATALOG_VERSION,
 	parseProjectVerifierCatalogText,
 } from "./catalog.js";
 import { verifyTool } from "./index.js";
+import { type NumericTolerance, normalizeNumericTolerance } from "./numeric.js";
 import { discoverDeclaredChecksAtRoot, discoverDeclaredProjectEntriesAtRoot } from "./scripts.js";
 
 export type VerifierProposalAuthority = "project-declared" | "toolchain-defined";
@@ -55,10 +59,29 @@ export interface AuthoringCheck {
 	cwd: string;
 	timeoutMs: number;
 	tags: string[];
+	/** Absent means `command`. Written to the catalog only when it is not the default. */
+	kind?: DeclaredCheckKind;
+	numeric?: DeclaredNumericCompare;
+	perf?: DeclaredPerfBudget;
 	provenance: VerifierProvenance;
 	state: "active" | "existing" | "proposed" | "manual";
 	/** The id this check has in the on-disk catalog, so a rename still edits its node in place. */
 	catalogId?: string;
+}
+
+/**
+ * A numeric-compare check the validation contract implies but cannot make
+ * executable: the artifact declared tolerances, so the reference and the
+ * tolerance are known, and the command is the operator's to supply. It never
+ * enters the draft, so nothing about it runs until an explicit `add`.
+ */
+export interface NumericProposal {
+	id: string;
+	artifactPath: string;
+	reference: string;
+	tolerance: NumericTolerance;
+	/** The exact `clio-coder verifiers add` invocation with `--command` left to fill. */
+	addCommand: string;
 }
 
 export interface VerifierAuthoringDiscovery {
@@ -68,6 +91,8 @@ export interface VerifierAuthoringDiscovery {
 	activeChecks: AuthoringCheck[];
 	existingChecks: AuthoringCheck[];
 	proposals: AuthoringCheck[];
+	/** Tolerance-bearing contract artifacts, each rendered as an incomplete numeric-compare check. */
+	numericProposals: NumericProposal[];
 	diagnostics: string[];
 	manualEntry: string;
 	/** The catalog file as found, when one exists; revisions are written into it in place. */
@@ -87,6 +112,8 @@ export interface VerifierDraft {
 	catalogPath: string;
 	activeChecks: AuthoringCheck[];
 	checks: AuthoringCheck[];
+	/** Rendered in the preview beneath the executable checks; never serialized. */
+	numericProposals: NumericProposal[];
 	diagnostics: string[];
 	manualEntry: string;
 	catalogText?: string;
@@ -97,7 +124,9 @@ export type VerifierRevision =
 	| {
 			kind: "edit";
 			id: string;
-			changes: Partial<Pick<AuthoringCheck, "description" | "command" | "cwd" | "timeoutMs" | "tags">>;
+			changes: Partial<
+				Pick<AuthoringCheck, "description" | "command" | "cwd" | "timeoutMs" | "tags" | "kind" | "numeric" | "perf">
+			>;
 	  }
 	| { kind: "rename"; id: string; newId: string }
 	| { kind: "remove"; id: string };
@@ -182,7 +211,22 @@ function cloneCheck(check: AuthoringCheck): AuthoringCheck {
 		...check,
 		command: [...check.command],
 		tags: [...check.tags],
+		...(check.numeric !== undefined ? { numeric: structuredClone(check.numeric) } : {}),
+		...(check.perf !== undefined ? { perf: structuredClone(check.perf) } : {}),
 		provenance: { ...check.provenance },
+	};
+}
+
+/** The kind fields of a declared or authored check, absent for a plain command check. */
+function kindFields(
+	check: Pick<DeclaredCheck, "kind" | "numeric" | "perf"> | Pick<AuthoringCheck, "kind" | "numeric" | "perf">,
+): Pick<AuthoringCheck, "kind" | "numeric" | "perf"> {
+	const kind = check.kind ?? "command";
+	if (kind === "command") return {};
+	return {
+		kind,
+		...(check.numeric !== undefined ? { numeric: structuredClone(check.numeric) } : {}),
+		...(check.perf !== undefined ? { perf: structuredClone(check.perf) } : {}),
 	};
 }
 
@@ -278,6 +322,7 @@ function projectedCheck(workspaceRoot: string, check: DeclaredCheck): AuthoringC
 		cwd: check.cwd,
 		timeoutMs: check.timeoutMs,
 		tags: [...check.tags],
+		...kindFields(check),
 		provenance: sourceProvenance(workspaceRoot, check),
 		state: check.source.kind === "package.json" ? "active" : "existing",
 		...(check.source.kind === "package.json" ? {} : { catalogId: check.id }),
@@ -664,6 +709,42 @@ function validationContractProposals(workspaceRoot: string, diagnostics: string[
 	return proposals;
 }
 
+/**
+ * One incomplete numeric-compare check per contract artifact that declares
+ * `numerical_tolerances`. The reference path is the artifact's path with a
+ * `.reference.json` suffix, a suggestion the operator may change; the
+ * command is deliberately absent, so the proposal cannot become executable
+ * until the operator confirms an exact argv through `verifiers add`.
+ */
+function numericContractProposals(workspaceRoot: string): NumericProposal[] {
+	const loaded = loadValidationContract(workspaceRoot);
+	if (!loaded.ok || loaded.contract === null) return [];
+	const proposals: NumericProposal[] = [];
+	const seen = new Set<string>();
+	for (const artifact of loaded.contract.artifacts ?? []) {
+		if (artifact.numerical_tolerances === undefined) continue;
+		const tolerance = normalizeNumericTolerance(artifact.numerical_tolerances);
+		if (tolerance instanceof Error) continue;
+		const base = slug(path.basename(artifact.path).replace(/\.[^.]+$/u, ""), "artifact");
+		const preferred = boundedId(`numeric-${base}`);
+		let id = preferred;
+		for (let suffix = 2; seen.has(id); suffix += 1) id = `${boundedId(preferred, `-${suffix}`)}-${suffix}`;
+		seen.add(id);
+		const reference = `${artifact.path}.reference.json`;
+		proposals.push({
+			id,
+			artifactPath: artifact.path,
+			reference,
+			tolerance,
+			addCommand:
+				`clio-coder verifiers add --id ${id} --kind numeric-compare --reference ${JSON.stringify(reference)} ` +
+				`--tolerance '${JSON.stringify(tolerance)}' --description ${JSON.stringify(`Compare ${artifact.path} against its reference within tolerance`)} ` +
+				`--command '["<executable>","<arg>"]'`,
+		});
+	}
+	return proposals;
+}
+
 function deduplicatedRawProposals(proposals: RawProposal[], diagnostics: string[]): RawProposal[] {
 	const seen = new Map<string, RawProposal>();
 	for (const proposal of proposals.sort(rawProposalSort)) {
@@ -761,6 +842,7 @@ export function discoverVerifierAuthoring(workspaceRoot = process.cwd()): Verifi
 		activeChecks,
 		existingChecks,
 		proposals,
+		numericProposals: numericContractProposals(workspaceRoot),
 		diagnostics,
 		manualEntry,
 		...(typeof catalogText === "string" ? { catalogText } : {}),
@@ -778,14 +860,30 @@ export function createVerifierDraft(
 		checks: [...discovery.existingChecks, ...(options.includeProposals === false ? [] : discovery.proposals)]
 			.map(cloneCheck)
 			.sort((left, right) => compareCodepoints(left.id, right.id)),
+		numericProposals:
+			options.includeProposals === false ? [] : discovery.numericProposals.map((proposal) => ({ ...proposal })),
 		diagnostics: [...discovery.diagnostics],
 		manualEntry: discovery.manualEntry,
 		...(discovery.catalogText === undefined ? {} : { catalogText: discovery.catalogText }),
 	};
 }
 
-function catalogEntry({ id, description, command, cwd, timeoutMs, tags }: AuthoringCheck): Record<string, unknown> {
-	return { id, description, command: [...command], cwd, timeoutMs, tags: [...tags] };
+function catalogEntry(check: AuthoringCheck): Record<string, unknown> {
+	const { id, description, command, cwd, timeoutMs, tags } = check;
+	const entry: Record<string, unknown> = { id, description, command: [...command], cwd, timeoutMs, tags: [...tags] };
+	const kind = check.kind ?? "command";
+	if (kind === "command") return entry;
+	entry.kind = kind;
+	if (check.numeric !== undefined) {
+		entry.reference = check.numeric.reference;
+		entry.tolerance = { ...check.numeric.tolerance };
+	}
+	if (check.perf !== undefined) {
+		if (check.perf.budget !== undefined) entry.budget = structuredClone(check.perf.budget);
+		if (check.perf.baseline !== undefined) entry.baseline = check.perf.baseline;
+		if (check.perf.tolerance !== undefined) entry.tolerance = { ...check.perf.tolerance };
+	}
+	return entry;
 }
 
 /**
@@ -821,8 +919,20 @@ function serializeVerifierDraft(draft: VerifierDraft): string {
 			node.set(field, value);
 			changed = true;
 		}
+		// A check that returned to a plain command drops the kind fields it no longer carries.
+		for (const field of ["kind", "reference", "tolerance", "budget", "baseline"]) {
+			if (Object.hasOwn(current, field) && !Object.hasOwn(entry, field)) {
+				node.delete(field);
+				changed = true;
+			}
+		}
 	}
 	if (!changed && appended.length === 0 && kept.size === sequence.items.length) return draft.catalogText as string;
+	// The edited file speaks this build's schema version: a version-1 file that
+	// gains a judged check would otherwise be rejected by its own version line.
+	if (document.get("version") !== PROJECT_VERIFIER_CATALOG_VERSION) {
+		document.set("version", PROJECT_VERIFIER_CATALOG_VERSION);
+	}
 	sequence.items = [...sequence.items.filter((node) => isMap(node) && kept.has(node)), ...appended];
 	return document.toString({ lineWidth: 0 });
 }
@@ -855,6 +965,7 @@ function validateVerifierDraft(draft: VerifierDraft): VerifierDraftValidation {
 			cwd: check.cwd,
 			timeoutMs: check.timeoutMs,
 			tags: [...check.tags],
+			...kindFields(check),
 			provenance:
 				original?.provenance ??
 				({
@@ -875,6 +986,7 @@ function cloneDraft(draft: VerifierDraft): VerifierDraft {
 		...draft,
 		activeChecks: draft.activeChecks.map(cloneCheck),
 		checks: draft.checks.map(cloneCheck),
+		numericProposals: draft.numericProposals.map((proposal) => ({ ...proposal })),
 		diagnostics: [...draft.diagnostics],
 	};
 }
@@ -941,6 +1053,17 @@ function reviseVerifierDraft(draft: VerifierDraft, revisions: ReadonlyArray<Veri
 		if (revision.changes.cwd !== undefined) check.cwd = revision.changes.cwd;
 		if (revision.changes.timeoutMs !== undefined) check.timeoutMs = revision.changes.timeoutMs;
 		if (revision.changes.tags !== undefined) check.tags = [...revision.changes.tags];
+		if (revision.changes.kind !== undefined) {
+			const next = kindFields({
+				kind: revision.changes.kind,
+				...(revision.changes.numeric !== undefined ? { numeric: revision.changes.numeric } : {}),
+				...(revision.changes.perf !== undefined ? { perf: revision.changes.perf } : {}),
+			});
+			delete check.kind;
+			delete check.numeric;
+			delete check.perf;
+			Object.assign(check, next);
+		}
 		diagnostics.push(`Edited check '${revision.id}' without changing its deterministic ID.`);
 	}
 	next.checks.sort((left, right) => compareCodepoints(left.id, right.id));
@@ -970,8 +1093,24 @@ function renderCheck(check: AuthoringCheck, destinationPath: string): string[] {
 		`  cwd: ${check.cwd}`,
 		`  timeoutMs: ${check.timeoutMs}`,
 		`  tags: ${JSON.stringify(check.tags)}`,
+		...renderKind(check),
 		`  effective execution authority: ${authorityDescription(check)}`,
 	];
+}
+
+function renderKind(check: AuthoringCheck): string[] {
+	const kind = check.kind ?? "command";
+	if (kind === "command") return [];
+	const lines = [`  kind: ${kind}`];
+	if (check.numeric !== undefined) {
+		lines.push(`  reference: ${check.numeric.reference}`, `  tolerance: ${JSON.stringify(check.numeric.tolerance)}`);
+	}
+	if (check.perf !== undefined) {
+		if (check.perf.budget !== undefined) lines.push(`  budget: ${JSON.stringify(check.perf.budget)}`);
+		if (check.perf.baseline !== undefined) lines.push(`  baseline: ${check.perf.baseline}`);
+		if (check.perf.tolerance !== undefined) lines.push(`  tolerance: ${JSON.stringify(check.perf.tolerance)}`);
+	}
+	return lines;
 }
 
 export interface VerifierPreviewOptions {
@@ -994,6 +1133,18 @@ export function previewVerifierDraft(draft: VerifierDraft, options: VerifierPrev
 	lines.push("", "Catalog checks after confirmation:");
 	if (draft.checks.length === 0) lines.push("(none)");
 	else for (const check of draft.checks) lines.push(...renderCheck(check, draft.catalogPath));
+	if (draft.numericProposals.length > 0) {
+		lines.push("", "Numeric-compare checks the validation contract implies (command required before they can be added):");
+		for (const proposal of draft.numericProposals) {
+			lines.push(
+				`- ${proposal.id}`,
+				`  artifact: ${proposal.artifactPath}`,
+				`  reference: ${proposal.reference}`,
+				`  tolerance: ${JSON.stringify(proposal.tolerance)}`,
+				`  add with: ${proposal.addCommand}`,
+			);
+		}
+	}
 	if (draft.diagnostics.length > 0) {
 		lines.push("", "Diagnostics:");
 		for (const diagnostic of draft.diagnostics) lines.push(`- ${diagnostic}`);

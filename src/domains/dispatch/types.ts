@@ -10,6 +10,7 @@ import type { GatewayRoutingObservation } from "../../core/gateway-routing.js";
 import type { ResponseModelIdObservation } from "../../core/response-model-id.js";
 import type { SkillActivation } from "../../core/skill-activation.js";
 import type { ToolProfileName } from "../../tools/profiles.js";
+import type { DeclaredCheckReport } from "../../tools/verify/scripts.js";
 import type { AgentAudience } from "../agents/spec.js";
 import type { EvidenceTag } from "../evidence/index.js";
 import type { CostProvenance, RuntimeTargetSnapshot } from "../providers/index.js";
@@ -712,11 +713,14 @@ export interface RunHostVerificationCheck {
 	check: string;
 	argv: string[];
 	cwd: string;
+	/** For a numeric-compare or perf-budget check, 1 when the judgement failed even though the command exited 0. */
 	exitCode: number;
 	durationMs: number;
 	memo: boolean;
 	outputTail: string;
 	artifactPath?: string;
+	/** Structured verdict of a numeric-compare or perf-budget check; absent for a command check. Covered by the receipt digest through `hostVerification`. */
+	report?: DeclaredCheckReport;
 	/** Run that owns the evidence when it did not come from this run: a memo hit, or the batch member the shared check ran under. */
 	evidenceRunId?: string;
 }

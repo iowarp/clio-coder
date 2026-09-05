@@ -4,9 +4,13 @@ import { parseDocument } from "yaml";
 import { resolveSafeCwd, SAFE_EXEC_DEFAULT_TIMEOUT_MS } from "../../core/safe-exec.js";
 import { isProjectVerifierCheckId } from "../../core/verification-scripts.js";
 import { compareCodepoints } from "../../domains/evidence/ordering.js";
+import { type NumericTolerance, normalizeNumericTolerance } from "./numeric.js";
+import { normalizePerfBudget, normalizePerfTolerance, type PerfBudgetSpec } from "./perf.js";
 
 export const PROJECT_VERIFIER_CATALOG_RELATIVE_PATH = ".clio-coder/verifiers.yaml";
-export const PROJECT_VERIFIER_CATALOG_VERSION = 1;
+/** The version this build writes. Version 1 files still load; every check there is `kind: command`. */
+export const PROJECT_VERIFIER_CATALOG_VERSION = 2;
+const SUPPORTED_CATALOG_VERSIONS: ReadonlyArray<number> = [1, PROJECT_VERIFIER_CATALOG_VERSION];
 
 /** Public schema limits. Diagnostics cite these values instead of hiding policy. */
 export const PROJECT_VERIFIER_CATALOG_CAPS = Object.freeze({
@@ -21,6 +25,31 @@ export const PROJECT_VERIFIER_CATALOG_CAPS = Object.freeze({
 	tags: 16,
 	tagBytes: 32,
 });
+
+/**
+ * What a check proves. `command` reads the exit code. `numeric-compare` runs
+ * the command, parses its stdout as `string -> number | number[]`, and judges
+ * it against a reference file under a tolerance. `perf-budget` runs the
+ * command and judges its wall time against a budget or a recorded baseline.
+ */
+export type DeclaredCheckKind = "command" | "numeric-compare" | "perf-budget";
+
+export const DECLARED_CHECK_KINDS: ReadonlyArray<DeclaredCheckKind> = ["command", "numeric-compare", "perf-budget"];
+
+export interface DeclaredNumericCompare {
+	/** Repository-relative JSON file of the same shape as the command's stdout. */
+	reference: string;
+	tolerance: NumericTolerance;
+}
+
+export interface DeclaredPerfBudget {
+	/** Declared bound; exactly one of `budget` and `baseline` is present. */
+	budget?: PerfBudgetSpec;
+	/** Repository-relative JSON file written by `clio-coder verifiers baseline <id>`. */
+	baseline?: string;
+	/** Headroom over a recorded baseline; only with `baseline`. */
+	tolerance?: { relative?: number };
+}
 
 export type DeclaredCheckSourceKind = "package.json" | "project-catalog";
 
@@ -38,6 +67,9 @@ export interface DeclaredCheck {
 	timeoutMs: number;
 	tags: string[];
 	source: DeclaredCheckSourceRef;
+	kind: DeclaredCheckKind;
+	numeric?: DeclaredNumericCompare;
+	perf?: DeclaredPerfBudget;
 }
 
 export interface DeclaredCheckSource extends DeclaredCheckSourceRef {
@@ -48,6 +80,8 @@ export type ProjectCatalogLoadResult = { ok: true; source: DeclaredCheckSource |
 
 const ROOT_FIELDS = new Set(["version", "checks"]);
 const CHECK_FIELDS = new Set(["id", "description", "command", "cwd", "timeoutMs", "tags"]);
+/** Version 2 adds the kind and its parameters; every one is optional and kind-gated. */
+const CHECK_FIELDS_V2 = new Set([...CHECK_FIELDS, "kind", "reference", "tolerance", "budget", "baseline"]);
 const TAG_PATTERN = /^[a-z0-9][a-z0-9._-]*$/;
 const SHELL_EXECUTABLES = new Set([
 	"bash",
@@ -128,6 +162,85 @@ function safelyResolveCatalogCwd(
 		return new Error(`${location} cannot be resolved as a repository directory: '${rawCwd}' (${message})`);
 	}
 	return { declared: relativeCwd(workspaceRoot, resolved), execution: realCwd };
+}
+
+/**
+ * A repository-relative file the check reads or writes at run time. It need
+ * not exist when the catalog loads (a baseline is written later), so only the
+ * shape is checked: relative, NUL-free, bounded, and unable to escape the root.
+ */
+function validateRepositoryFile(value: unknown, location: string): string | Error {
+	if (typeof value !== "string" || value.length === 0) {
+		return new Error(`${location} must be a non-empty repository-relative path`);
+	}
+	if (value.includes("\0")) return new Error(`${location} must not contain a NUL byte`);
+	if (utf8Bytes(value) > PROJECT_VERIFIER_CATALOG_CAPS.cwdBytes) {
+		return new Error(`${location} exceeds the ${PROJECT_VERIFIER_CATALOG_CAPS.cwdBytes}-byte cap`);
+	}
+	if (path.isAbsolute(value) || path.win32.isAbsolute(value)) {
+		return new Error(`${location} must be repository-relative; absolute path '${value}' is not allowed`);
+	}
+	const normalized = path.posix.normalize(value.split(path.sep).join("/"));
+	if (normalized === ".." || normalized.startsWith("../")) {
+		return new Error(`${location} escapes the workspace root: '${value}'`);
+	}
+	return normalized;
+}
+
+/**
+ * The kind-specific fields of one check. Version 1 admits no such field, so a
+ * version-1 check is always `command`. Under version 2 the kind gates which
+ * parameters may appear, and each kind requires its own.
+ */
+function validateCheckKind(
+	value: Record<string, unknown>,
+	location: string,
+	version: number,
+): Pick<DeclaredCheck, "kind" | "numeric" | "perf"> | Error {
+	const kindValue = Object.hasOwn(value, "kind") ? value.kind : "command";
+	if (typeof kindValue !== "string" || !(DECLARED_CHECK_KINDS as ReadonlyArray<string>).includes(kindValue)) {
+		return new Error(`${location}.kind must be one of ${DECLARED_CHECK_KINDS.join(", ")}`);
+	}
+	const kind = kindValue as DeclaredCheckKind;
+	const present = (field: string): boolean => Object.hasOwn(value, field);
+	const accepted: Record<DeclaredCheckKind, ReadonlyArray<string>> = {
+		command: [],
+		"numeric-compare": ["reference", "tolerance"],
+		"perf-budget": ["budget", "baseline", "tolerance"],
+	};
+	const stray = ["reference", "tolerance", "budget", "baseline"].filter(
+		(field) => present(field) && !accepted[kind].includes(field),
+	);
+	if (stray.length > 0) return new Error(`${location} kind '${kind}' does not accept ${stray.join(", ")}`);
+	if (version === 1 && kind !== "command") return new Error(`${location}.kind requires catalog version 2`);
+	if (kind === "command") return { kind };
+	if (kind === "numeric-compare") {
+		if (!present("reference")) return new Error(`${location}.reference is required for kind numeric-compare`);
+		if (!present("tolerance")) return new Error(`${location}.tolerance is required for kind numeric-compare`);
+		const reference = validateRepositoryFile(value.reference, `${location}.reference`);
+		if (reference instanceof Error) return reference;
+		const tolerance = normalizeNumericTolerance(value.tolerance);
+		if (tolerance instanceof Error) return new Error(`${location}.${tolerance.message}`);
+		return { kind, numeric: { reference, tolerance } };
+	}
+	if (present("budget") === present("baseline")) {
+		return new Error(`${location} kind 'perf-budget' requires exactly one of budget or baseline`);
+	}
+	if (present("budget")) {
+		if (present("tolerance")) return new Error(`${location}.tolerance belongs inside budget when budget is given`);
+		const budget = normalizePerfBudget(value.budget);
+		if (budget instanceof Error) return new Error(`${location}.${budget.message}`);
+		return { kind, perf: { budget } };
+	}
+	const baseline = validateRepositoryFile(value.baseline, `${location}.baseline`);
+	if (baseline instanceof Error) return baseline;
+	const perf: DeclaredPerfBudget = { baseline };
+	if (present("tolerance")) {
+		const tolerance = normalizePerfTolerance(value.tolerance, `${location}.tolerance`);
+		if (tolerance instanceof Error) return tolerance;
+		perf.tolerance = tolerance;
+	}
+	return { kind, perf };
 }
 
 /** Revalidate a stored catalog cwd and return its canonical in-workspace execution path. */
@@ -276,11 +389,12 @@ export function parseProjectVerifierCatalogText(
 	const rootUnknown = unknownFields(parsed, ROOT_FIELDS);
 	if (rootUnknown.length > 0) return catalogDiagnostic(`root has unknown field(s): ${rootUnknown.join(", ")}`);
 	if (!Object.hasOwn(parsed, "version")) return catalogDiagnostic("root.version is required");
-	if (parsed.version !== PROJECT_VERIFIER_CATALOG_VERSION) {
+	if (typeof parsed.version !== "number" || !SUPPORTED_CATALOG_VERSIONS.includes(parsed.version)) {
 		return catalogDiagnostic(
-			`unsupported version ${JSON.stringify(parsed.version)}; supported version is ${PROJECT_VERIFIER_CATALOG_VERSION}`,
+			`unsupported version ${JSON.stringify(parsed.version)}; supported versions are ${SUPPORTED_CATALOG_VERSIONS.join(" and ")}`,
 		);
 	}
+	const version = parsed.version;
 	if (!Object.hasOwn(parsed, "checks")) return catalogDiagnostic("root.checks is required");
 	if (!Array.isArray(parsed.checks)) return catalogDiagnostic("root.checks must be an array");
 	if (parsed.checks.length > PROJECT_VERIFIER_CATALOG_CAPS.checks) {
@@ -293,7 +407,7 @@ export function parseProjectVerifierCatalogText(
 	for (const [index, value] of parsed.checks.entries()) {
 		const location = `checks[${index}]`;
 		if (!isRecord(value)) return catalogDiagnostic(`${location} must be an object`);
-		const checkUnknown = unknownFields(value, CHECK_FIELDS);
+		const checkUnknown = unknownFields(value, version === 1 ? CHECK_FIELDS : CHECK_FIELDS_V2);
 		if (checkUnknown.length > 0) {
 			return catalogDiagnostic(`${location} has unknown field(s): ${checkUnknown.join(", ")}`);
 		}
@@ -325,9 +439,11 @@ export function parseProjectVerifierCatalogText(
 		if (timeoutMs instanceof Error) return catalogDiagnostic(timeoutMs.message);
 		const tags = validateTags(value.tags, `${location}.tags`);
 		if (tags instanceof Error) return catalogDiagnostic(tags.message);
+		const kindFields = validateCheckKind(value, location, version);
+		if (kindFields instanceof Error) return catalogDiagnostic(kindFields.message);
 
 		ids.set(id, index);
-		checks.push({ id, description, command, cwd, timeoutMs, tags, source: { ...sourceRef } });
+		checks.push({ id, description, command, cwd, timeoutMs, tags, source: { ...sourceRef }, ...kindFields });
 	}
 	checks.sort((left, right) => compareCodepoints(left.id, right.id));
 	return { ok: true, source: { ...sourceRef, checks } };
@@ -342,5 +458,6 @@ export function packageDeclaredCheck(id: string, packagePath: string, cwd: strin
 		timeoutMs: SAFE_EXEC_DEFAULT_TIMEOUT_MS,
 		tags,
 		source: { kind: "package.json", path: packagePath },
+		kind: "command",
 	};
 }
