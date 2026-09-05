@@ -31,7 +31,7 @@ Trust spine: typed claims, executable validation, and decision provenance. Answe
 ### Fixed
 - Slash argument completion now reads loaded agent recipes, configured targets and known models, installed skills, and session tasks from the interactive app contracts (#303).
 - Workbench desktop notification mute preference now persists in local storage across page reloads (#322).
-- ACP `session/close` releases the bound session slot so a host can create another session on the same child process.
+- ACP close and reopen starts a fresh conversation on the same child process, clearing provider history and turn ancestry while switching the task board to the new session. Explicit session loading still restores the saved conversation and tasks (#312).
 - Sessions without interactive ask_user now receive one passive marketplace reminder per matching skill per session, including its installation command, without starting an interview or recording a decline (#317).
 - Setting interface.panes.enabled=embedded refuses with a visible reason instead of silently degrading to guest detection (#294).
 - ACP stdout now waits for drain before sending more frames and closes with a typed error when stalled output exceeds the existing 1 MiB buffer budget (#309).
