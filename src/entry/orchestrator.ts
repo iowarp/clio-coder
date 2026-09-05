@@ -124,6 +124,7 @@ import {
 } from "../domains/providers/index.js";
 import { memoryInterventionModelMaxTokens } from "../domains/providers/model-runtime-capabilities.js";
 import { getRuntimeRegistry } from "../domains/providers/registry.js";
+import { resolveModelReference } from "../domains/providers/resolver.js";
 import { registerBuiltinRuntimes } from "../domains/providers/runtimes/builtins.js";
 import {
 	createResourcesDomainModule,
@@ -185,6 +186,7 @@ import { createChatLoop } from "../interactive/chat-loop.js";
 import { type RunIo, startInteractive } from "../interactive/index.js";
 import { buildModelReplayAgentMessagesFromTurns } from "../interactive/model-session-replay.js";
 import type { BootOptions } from "./boot-options.js";
+import { readCompactionSystemPrompt } from "./compaction-prompt.js";
 import { createExtensionReloadCoordinator } from "./extension-reload.js";
 import { resolvePanesEnablement } from "./panes-activation.js";
 import { bindTaskMemoryLifecycle, captureTaskMemoryUsage } from "./task-memory-lifecycle.js";
@@ -293,6 +295,8 @@ interface CompactionResolution {
 	model: EngineModel;
 	targetId: string;
 	endpointKey: string | null;
+	wireModelId: string;
+	headers?: Record<string, string>;
 	apiKey?: string;
 }
 
@@ -317,23 +321,6 @@ function advanceThinkingLevel(current: ThinkingLevel, available: ReadonlyArray<T
  * works without the user inventing a credential.
  */
 const LOCAL_API_KEY_FALLBACK = "clio-coder-local-target";
-
-async function resolveApiKeyForTarget(
-	target: TargetDescriptor,
-	providers: ProvidersContract,
-	signal?: AbortSignal,
-): Promise<string | undefined> {
-	const runtime = providers.getRuntime(target.runtime);
-	if (!runtime) return undefined;
-	// A target that needs no credential still needs the placeholder. Returning
-	// nothing here left compaction as the one path that did not send it, so
-	// `/context compact` and every automatic compaction at the window threshold
-	// failed on exactly the local runtimes Clio is built for, while ordinary
-	// turns against the same target succeeded.
-	if (!targetRequiresAuth(target, runtime)) return LOCAL_API_KEY_FALLBACK;
-	const resolved = await providers.auth.resolveForTarget(target, runtime, signal ? { signal } : undefined);
-	return resolved.apiKey;
-}
 
 /**
  * The background memory role, resolved to the endpoint it would call.
@@ -502,50 +489,83 @@ function backgroundSharesReasoningModelWithOrchestrator(
 	}
 }
 
-function synthesizeOrchestratorModel(
-	providers: ProvidersContract,
-	target: TargetDescriptor,
-	wireModelId: string,
-): EngineModel | null {
-	const runtime = providers.getRuntime(target.runtime);
-	if (!runtime) return null;
-	let model: EngineModel;
-	try {
-		const kbHit = providers.knowledgeBase?.lookup(wireModelId) ?? null;
-		model = runtime.synthesizeModel(target, wireModelId, kbHit);
-	} catch {
-		return null;
-	}
-	try {
-		const status = providers.list().find((entry) => entry.target.id === target.id);
-		if (status) {
-			const caps = resolveModelCapabilities(status, wireModelId, providers.knowledgeBase, {
-				detectedReasoning: providers.getDetectedReasoning(target.id, wireModelId),
-			});
-			applyModelCapabilityPatch(model, caps);
-		}
-	} catch {
-		// Older test doubles and degraded provider bundles may not expose live
-		// status. The synthesized model still carries runtime and catalog caps.
-	}
-	return model;
-}
-
 async function resolveCompactionModel(
 	settings: ClioSettings,
 	providers: ProvidersContract,
 ): Promise<CompactionResolution | null> {
-	const targetId = settings.chat?.target ?? null;
-	const wireModelId = settings.chat?.model ?? null;
+	const override = settings.context.compaction.model;
+	let targetId = settings.chat.target;
+	let wireModelId = settings.chat.model;
+	if (override !== undefined && override !== null) {
+		let selected: ReturnType<typeof resolveModelReference>;
+		try {
+			selected = resolveModelReference(override, providers);
+		} catch {
+			throw new Error("context.compaction.model is an invalid pattern; set a unique target/model reference");
+		}
+		if (!selected.ref || selected.warning) {
+			throw new Error(
+				"context.compaction.model must match exactly one configured model; set a unique target/model reference",
+			);
+		}
+		targetId = selected.ref.target;
+		wireModelId = selected.ref.model;
+	}
 	if (!targetId || !wireModelId) return null;
-	const target = resolveTarget(providers, targetId);
-	if (!target) return null;
-	const model = synthesizeOrchestratorModel(providers, target, wireModelId);
-	if (!model) return null;
-	const apiKey = await resolveApiKeyForTarget(target, providers);
-	const resolution: CompactionResolution = { model, targetId, endpointKey: canonicalEndpointKey(target) };
-	if (apiKey !== undefined) resolution.apiKey = apiKey;
-	return resolution;
+	const status = providers.list().find((entry) => entry.target.id === targetId);
+	if (!status?.available) {
+		throw new Error("context.compaction.model target is unavailable; check the selected target with clio-coder targets");
+	}
+	const resolved = resolveRuntimeTarget(providers, {
+		targetId,
+		wireModelId,
+		use: "orchestrator",
+		requestedThinkingLevel: "off",
+		requireTools: false,
+		requireStreaming: true,
+		requireOutputBudget: true,
+	});
+	if (!resolved.ok) {
+		// Configured identifiers and provider diagnostics can contain terminal controls.
+		// Keep the failure actionable without echoing arbitrary provider/config text.
+		throw new Error(
+			"context.compaction.model cannot run as a summarizer; select an available HTTP chat model with an output budget",
+		);
+	}
+	const route = resolved.target;
+	let model: EngineModel;
+	try {
+		model = route.runtime.synthesizeModel(
+			route.target,
+			route.wireModelId,
+			providers.knowledgeBase?.lookup(route.wireModelId) ?? null,
+		);
+	} catch {
+		throw new Error("context.compaction.model could not be prepared; check the selected target/model configuration");
+	}
+	const refined = refineRuntimeTargetWithModelHints(route, model, providers.knowledgeBase);
+	if (refined.capabilityDecisions.maxTokens <= 0) {
+		throw new Error("context.compaction.model has no output budget; select a model with a known positive output limit");
+	}
+	applyModelCapabilityPatch(model, refined.capabilities);
+	let apiKey: string | undefined = LOCAL_API_KEY_FALLBACK;
+	if (targetRequiresAuth(route.target, route.runtime)) {
+		const auth = await providers.auth.resolveForTarget(route.target, route.runtime);
+		if (!auth.available || !auth.apiKey) {
+			throw new Error(
+				"context.compaction.model authentication is unavailable; authenticate the selected target with clio-coder auth",
+			);
+		}
+		apiKey = auth.apiKey;
+	}
+	return {
+		model,
+		targetId: route.targetId,
+		wireModelId: route.wireModelId,
+		endpointKey: canonicalEndpointKey(route.target),
+		apiKey,
+		...(route.target.auth?.headers ? { headers: route.target.auth.headers } : {}),
+	};
 }
 
 function readSessionEntriesForCompact(sessionId: string): SessionEntry[] {
@@ -655,6 +675,7 @@ async function runCompactionFlow(
 	if (!meta) {
 		throw new Error("no current session to compact; start one with /new or /resume first");
 	}
+	const systemPrompt = await readCompactionSystemPrompt(settings.context.compaction.systemPrompt, meta.cwd);
 	const resolved = await resolveCompactionModel(settings, providers);
 	if (!resolved) {
 		throw new Error("no model configured; set chat.target + chat.model");
@@ -671,7 +692,7 @@ async function runCompactionFlow(
 	const entries = filterEntriesToActivePath(readSessionEntriesForCompact(meta.id), activeLeafTurnId);
 	if (entries.length === 0) return null;
 
-	// A compaction summary is a full streamed request against the chat target.
+	// A compaction summary is a full streamed request against its resolved target.
 	// Hold the same canonical endpoint slot as an ordinary turn, /btw round, or
 	// pre-warm so dispatch admission and background memory see its real usage.
 	const releaseEndpointSlot = resolved.endpointKey === null ? () => {} : registerForegroundStream(resolved.endpointKey);
@@ -680,6 +701,8 @@ async function runCompactionFlow(
 		result = await compact({
 			entries,
 			model: resolved.model,
+			...(systemPrompt !== undefined ? { systemPrompt } : {}),
+			...(resolved.headers !== undefined ? { headers: resolved.headers } : {}),
 			...(resolved.apiKey !== undefined ? { apiKey: resolved.apiKey } : {}),
 			...(instructions !== undefined ? { instructions } : {}),
 		});
@@ -687,6 +710,9 @@ async function runCompactionFlow(
 		releaseEndpointSlot();
 	}
 	if (result.messagesSummarized === 0 || result.summary.length === 0) return null;
+	if (result.usage) {
+		result.usage = { ...result.usage, targetId: resolved.targetId, modelId: resolved.wireModelId };
+	}
 
 	const entry: Omit<CompactionSummaryEntry, "turnId" | "timestamp"> = {
 		kind: "compactionSummary",
@@ -713,7 +739,7 @@ async function runCompactionFlow(
  * a thrown read/model/persistence failure from the legitimate null no-op that
  * `runCompactionFlow` returns for an empty session or an unavailable cut.
  */
-function createProductionAutoCompact(
+export function createProductionAutoCompact(
 	session: SessionContract,
 	getSettings: () => ClioSettings,
 	providers: ProvidersContract,
