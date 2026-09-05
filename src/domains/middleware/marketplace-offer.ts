@@ -80,10 +80,18 @@ export function offerBindingTag(offerTag: string): string {
 	return `[clio-install:${offerTag}]`;
 }
 
+function boundedDescription(text: string): string {
+	return text
+		.replace(/\[[^[\]]*\]/gu, " ")
+		.replace(/\s+/gu, " ")
+		.trim()
+		.slice(0, 200);
+}
+
 export function marketplaceOfferReminder(entry: MarketplaceSkill, offerTag: string): string {
 	return (
 		`[Marketplace] This request may need expertise no installed skill covers. The local marketplace has ` +
-		`"${entry.name}" (not installed): ${entry.description} ` +
+		`"${entry.name}" (not installed): ${boundedDescription(entry.description)} ` +
 		`First check the installed side with context(scope="skills"); if ${entry.name} is genuinely the right fit ` +
 		`and nothing installed serves, ask the operator with ask_user (mode=single_question, header "Install skill") ` +
 		`whether to install ${entry.name}, offering exactly these options in this order: ` +
