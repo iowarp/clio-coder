@@ -11,6 +11,7 @@ import type { RunEnvelope, RunReceiptDraft } from "../../src/domains/dispatch/ty
 
 export function fixtureEnvelope(runId = "run-1"): RunEnvelope {
 	return {
+		version: 1,
 		id: runId,
 		agentId: "coder",
 		executionRole: "builder",

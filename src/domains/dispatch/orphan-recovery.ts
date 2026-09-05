@@ -49,6 +49,7 @@ function receiptsDir(): string {
  */
 function envelopeFromReceipt(receipt: RunReceipt, status: RunStatus, receiptPath: string): RunEnvelope {
 	const envelope: RunEnvelope = {
+		version: 1,
 		id: receipt.runId,
 		agentId: receipt.agentId,
 		executionRole: receipt.executionRole,

@@ -1620,6 +1620,7 @@ function parseRunEnvelope(value: unknown, source: string): RunEnvelope {
 	// tampered. The validated reads below still gate the fields evidence uses.
 	return {
 		...(value as Partial<RunEnvelope>),
+		version: 1,
 		id: readString(value, source, "id"),
 		agentId: readString(value, source, "agentId"),
 		executionRole: readExecutionRole(value, source),
