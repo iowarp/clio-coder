@@ -1,11 +1,13 @@
 import { ToolNames } from "../../core/tool-names.js";
 import { isProjectVerifierCheckId, isVerificationScriptName } from "../../core/verification-scripts.js";
+import type { UserTaskAcceptance } from "../user-tasks/acceptance.js";
 import {
 	detectValidationCommand,
 	extractCommandDeleteTargets,
 	extractCommandWriteTargets,
 	toolMutationPaths,
 } from "./protected-artifacts.js";
+import type { Rigor } from "./rigor.js";
 
 export const FINISH_CONTRACT_ADVISORY_MESSAGE =
 	"[Clio Coder] finish-contract advisory: you changed files this turn without recording validation evidence or a limitation receipt. Run a verification command or call limitation with the scope and reason.";
@@ -26,6 +28,8 @@ export type FinishContractEvidenceKind =
 export interface FinishContractEvidence {
 	kind: FinishContractEvidenceKind;
 	summary: string;
+	check?: string;
+	paths?: ReadonlyArray<string>;
 	turnId?: string;
 }
 
@@ -55,12 +59,16 @@ export interface FinishContractInput {
 	sessionEntries?: ReadonlyArray<unknown>;
 	assistantTurnId?: string | null;
 	recentEntryLimit?: number;
+	rigor?: Rigor;
+	activeAcceptance?: UserTaskAcceptance;
 }
 
 interface ToolCallEvidenceCandidate {
 	turnId?: string;
 	toolCallId: string;
 	command: string;
+	check?: string;
+	paths?: string[];
 }
 
 interface MutationCandidate {
@@ -97,12 +105,35 @@ export function assessFinishContract(input: FinishContractInput): FinishContract
 		return { kind: "ok", reason: "no_mutation", evidence: [], mutatedPaths };
 	}
 
-	const evidence = collectValidationEvidence(window);
+	const acceptanceChecks = new Set(input.activeAcceptance?.verification.map((item) => item.check) ?? []);
+	const evidence = collectValidationEvidence(window, acceptanceChecks);
+	const limitations = collectLimitationEvidence(window);
+	const required = input.rigor === "high" ? (input.activeAcceptance?.verification ?? []) : [];
+	if (required.length > 0) {
+		const passes = new Set(evidence.filter((item) => item.kind === "validation_command").map((item) => item.check));
+		const limited = new Set(limitations.flatMap((item) => item.paths ?? []));
+		const missing = [...new Set(required.map((item) => item.check))].filter(
+			(check) => !passes.has(check) && !limited.has(check),
+		);
+		if (missing.length > 0)
+			return {
+				kind: "engage",
+				reason: "unvalidated_mutation",
+				message: `[Clio Coder] high-rigor finish gate: operator acceptance still requires passing validation for: ${missing.join(", ")}. Run each named check or include its exact id in limitation.paths.`,
+				evidence: [...evidence, ...limitations],
+				mutatedPaths,
+			};
+		return {
+			kind: "ok",
+			reason: required.every((item) => passes.has(item.check)) ? "validation_evidence" : "explicit_limitation",
+			evidence: [...evidence, ...limitations],
+			mutatedPaths,
+		};
+	}
 	if (evidence.length > 0) {
 		return { kind: "ok", reason: "validation_evidence", evidence, mutatedPaths };
 	}
 
-	const limitations = collectLimitationEvidence(window);
 	if (limitations.length > 0) {
 		return { kind: "ok", reason: "explicit_limitation", evidence: limitations, mutatedPaths };
 	}
@@ -138,7 +169,11 @@ function collectLimitationEvidence(recent: ReadonlyArray<unknown>): FinishContra
 		if (resultId === null) continue;
 		const candidate = calls.get(resultId);
 		if (candidate === undefined) continue;
-		const item: FinishContractEvidence = { kind: "limitation", summary: candidate.command };
+		const item: FinishContractEvidence = {
+			kind: "limitation",
+			summary: candidate.command,
+			...(candidate.paths ? { paths: candidate.paths } : {}),
+		};
 		if (candidate.turnId !== undefined) item.turnId = candidate.turnId;
 		pushEvidence(evidence, seen, item);
 	}
@@ -160,6 +195,9 @@ function limitationToolCall(entry: unknown): ToolCallEvidenceCandidate | null {
 	const reason = typeof args?.reason === "string" ? args.reason.trim() : "";
 	const candidate: ToolCallEvidenceCandidate = {
 		toolCallId,
+		paths: Array.isArray(args?.paths)
+			? args.paths.filter((item): item is string => typeof item === "string").map((item) => item.trim())
+			: [],
 		command: `limitation recorded: ${scope.length > 0 ? scope : "unspecified"} (reason=${reason.length > 0 ? reason : "unspecified"})`,
 	};
 	const turnId = turnIdOf(entry);
@@ -263,7 +301,10 @@ function pushPath(paths: string[], seen: Set<string>, path: string): void {
  * Inspection was removed because inspecting the repo is never a mutation, so it
  * can no longer be on the path to engaging the contract.
  */
-function collectValidationEvidence(recent: ReadonlyArray<unknown>): FinishContractEvidence[] {
+function collectValidationEvidence(
+	recent: ReadonlyArray<unknown>,
+	acceptanceChecks: ReadonlySet<string>,
+): FinishContractEvidence[] {
 	const evidence: FinishContractEvidence[] = [];
 	const toolCalls = new Map<string, ToolCallEvidenceCandidate>();
 	const dispatchCalls = new Map<string, ToolCallEvidenceCandidate>();
@@ -276,7 +317,7 @@ function collectValidationEvidence(recent: ReadonlyArray<unknown>): FinishContra
 			continue;
 		}
 
-		const call = bashValidationCall(entry);
+		const call = bashValidationCall(entry, acceptanceChecks);
 		if (call !== null) {
 			toolCalls.set(call.toolCallId, call);
 			continue;
@@ -309,14 +350,14 @@ function collectValidationEvidence(recent: ReadonlyArray<unknown>): FinishContra
 			continue;
 		}
 
-		const bashExecution = bashExecutionEvidence(entry);
+		const bashExecution = bashExecutionEvidence(entry, acceptanceChecks);
 		if (bashExecution !== null) pushEvidence(evidence, seen, bashExecution);
 	}
 
 	return evidence;
 }
 
-function recentEntries(
+export function recentEntries(
 	entries: ReadonlyArray<unknown>,
 	assistantTurnId: string | null,
 	recentEntryLimit: number,
@@ -336,7 +377,7 @@ function recentEntries(
 	return entries.slice(startInclusive, endExclusive);
 }
 
-function bashValidationCall(entry: unknown): ToolCallEvidenceCandidate | null {
+function bashValidationCall(entry: unknown, acceptanceChecks: ReadonlySet<string>): ToolCallEvidenceCandidate | null {
 	const record = asRecord(entry);
 	if (record?.kind !== "message" || record.role !== "tool_call") return null;
 	const payload = asRecord(record.payload);
@@ -346,13 +387,14 @@ function bashValidationCall(entry: unknown): ToolCallEvidenceCandidate | null {
 	const args = asRecord(payload.args ?? payload.arguments ?? payload.input);
 	const command = typeof args?.command === "string" ? args.command : null;
 	if (command === null) return null;
-	const detected = detectValidationCommand(command);
+	const detected = acceptanceValidationCommand(command, acceptanceChecks);
 	if (detected.kind !== "validation") return null;
 	const toolCallId = stringFromFirst(payload, ["toolCallId", "tool_call_id", "id"]) ?? turnIdOf(entry);
 	if (toolCallId === null) return null;
 	const candidate: ToolCallEvidenceCandidate = {
 		toolCallId,
 		command: detected.matched,
+		...validationCheckFields(detected.matched),
 	};
 	const turnId = turnIdOf(entry);
 	if (turnId !== null) candidate.turnId = turnId;
@@ -417,6 +459,7 @@ function validationToolCall(entry: unknown): ToolCallEvidenceCandidate | null {
 	const candidate: ToolCallEvidenceCandidate = {
 		toolCallId,
 		command: summary,
+		...validationCheckFields(summary),
 	};
 	const turnId = turnIdOf(entry);
 	if (turnId !== null) candidate.turnId = turnId;
@@ -451,7 +494,8 @@ function successfulToolResultId(entry: unknown): string | null {
 	if (payload.isError === true || payload.error === true) return null;
 	const result = asRecord(payload.result);
 	const details = asRecord(result?.details);
-	if (details?.kind === "error") return null;
+	if (result?.kind === "error" || details?.kind === "error") return null;
+	if (typeof details?.exitCode === "number" && details.exitCode !== 0) return null;
 	return stringFromFirst(payload, ["toolCallId", "tool_call_id", "id"]);
 }
 
@@ -519,18 +563,19 @@ function dispatchReceiptAgentId(
 	return candidate?.command.match(/^agent=([^\s]+)/)?.[1] ?? "unknown";
 }
 
-function bashExecutionEvidence(entry: unknown): FinishContractEvidence | null {
+function bashExecutionEvidence(entry: unknown, acceptanceChecks: ReadonlySet<string>): FinishContractEvidence | null {
 	const record = asRecord(entry);
 	if (record?.kind !== "bashExecution") return null;
 	if (typeof record.command !== "string") return null;
 	if (record.cancelled === true) return null;
 	if (record.exitCode !== 0) return null;
-	const detected = detectValidationCommand(record.command);
+	const detected = acceptanceValidationCommand(record.command, acceptanceChecks);
 	if (detected.kind !== "validation") return null;
 	const contextMarker = record.excludeFromContext === true ? " [not sent to model]" : "";
 	const evidence: FinishContractEvidence = {
 		kind: "validation_command",
 		summary: `validation command passed: ${detected.matched}${contextMarker}`,
+		...validationCheckFields(detected.matched),
 	};
 	const turnId = turnIdOf(entry);
 	if (turnId !== null) evidence.turnId = turnId;
@@ -556,6 +601,7 @@ function validationEvidence(candidate: ToolCallEvidenceCandidate): FinishContrac
 	const evidence: FinishContractEvidence = {
 		kind: "validation_command",
 		summary: `validation command passed: ${candidate.command}`,
+		...(candidate.check ? { check: candidate.check } : {}),
 	};
 	if (candidate.turnId !== undefined) evidence.turnId = candidate.turnId;
 	return evidence;
@@ -590,4 +636,28 @@ function stringFromFirst(record: Record<string, unknown>, keys: ReadonlyArray<st
 
 function asRecord(value: unknown): Record<string, unknown> | null {
 	return value !== null && typeof value === "object" ? (value as Record<string, unknown>) : null;
+}
+
+/** Exact check ids, never substring matches against rendered evidence summaries. */
+function validationCheckId(command: string): string | undefined {
+	return (
+		/^(?:npm|pnpm|yarn|bun) (?:run )?([a-z0-9][a-z0-9._:-]*)$/.exec(command)?.[1] ??
+		/^verify ([a-z0-9][a-z0-9._:-]*)$/.exec(command)?.[1]
+	);
+}
+
+function validationCheckFields(command: string): { check?: string } {
+	const check = validationCheckId(command);
+	return check ? { check } : {};
+}
+
+/** Additional package scripts are admitted only by the operator's typed acceptance. */
+function acceptanceValidationCommand(
+	command: string,
+	checks: ReadonlySet<string>,
+): ReturnType<typeof detectValidationCommand> {
+	const exact = command.trim();
+	const check = /^npm run ([a-z0-9][a-z0-9._:-]*)$/.exec(exact)?.[1];
+	if (check && checks.has(check)) return { kind: "validation", matched: exact };
+	return detectValidationCommand(command);
 }

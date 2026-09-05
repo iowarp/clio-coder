@@ -271,13 +271,34 @@ export function normalizeDispatchIntent(
 	if (!Array.isArray(writeRoots)) return writeRoots;
 	const relevantPaths = normalizePathList(raw.relevant_paths, "intent.relevant_paths");
 	if (!Array.isArray(relevantPaths)) return relevantPaths;
-	const expectedOutputs = normalizePathList(
-		raw.expected_outputs,
-		"intent.expected_outputs",
-		normalizeExpectedOutputEntry,
-	);
+	const expectedOutputs = normalizeIntentExpectedOutputs(raw.expected_outputs);
 	if (!Array.isArray(expectedOutputs)) return expectedOutputs;
-	const rawVerification = raw.verification ?? [];
+	const verification = normalizeIntentVerification(raw.verification, checks);
+	if (!Array.isArray(verification)) return verification;
+
+	return {
+		ok: true,
+		intent: {
+			version: 2,
+			readRoots,
+			writeRoots,
+			relevantPaths,
+			pathProvenance: declaredIntentPathProvenance({ readRoots, writeRoots, relevantPaths }),
+			expectedOutputs,
+			verification,
+		},
+	};
+}
+
+export function normalizeIntentExpectedOutputs(raw: unknown): string[] | DispatchIntentNormalizationResult {
+	return normalizePathList(raw, "intent.expected_outputs", normalizeExpectedOutputEntry);
+}
+
+export function normalizeIntentVerification(
+	raw: unknown,
+	checks: ReadonlyMap<string, DispatchIntentCheckBound>,
+): DispatchIntentVerification[] | DispatchIntentNormalizationResult {
+	const rawVerification = raw ?? [];
 	if (!Array.isArray(rawVerification)) {
 		return fail("verification_malformed", "intent.verification must be an array");
 	}
@@ -321,16 +342,5 @@ export function normalizeDispatchIntent(
 			timeoutMs: Math.min(declared.timeoutMs, Math.max(DISPATCH_INTENT_TIMEOUT_MIN_MS, requested)),
 		});
 	}
-	return {
-		ok: true,
-		intent: {
-			version: 2,
-			readRoots,
-			writeRoots,
-			relevantPaths,
-			pathProvenance: declaredIntentPathProvenance({ readRoots, writeRoots, relevantPaths }),
-			expectedOutputs,
-			verification,
-		},
-	};
+	return verification;
 }

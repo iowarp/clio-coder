@@ -29,6 +29,7 @@ export interface TaskBoardTask {
 	status: TaskLedgerStatus;
 	origin?: "agent" | "user";
 	userTaskId?: string;
+	requiredValidationEvidence?: TaskLedgerValidationEvidence[];
 	/** Block or drop reason; empty for pending/active/completed tasks. */
 	reason?: string;
 	/** Evidence note recorded when the task was completed. */
@@ -64,7 +65,7 @@ export interface TaskBoardCounts {
 export type TaskBoardMutation =
 	| { op: "plan"; title: string; tasks: ReadonlyArray<string> }
 	| { op: "add"; tasks: ReadonlyArray<string> }
-	| { op: "pick"; title: string; userTaskId: string }
+	| { op: "pick"; title: string; userTaskId: string; verification?: ReadonlyArray<{ check: string; timeoutMs: number }> }
 	| { op: "start"; id: string }
 	| { op: "done"; id: string; evidence: string }
 	| { op: "block"; id: string; reason: string }
@@ -179,6 +180,7 @@ function boardStatus(tasks: ReadonlyArray<TaskBoardTask>): TaskLedgerStatus {
 export function toTaskLedgerEntryFields(board: TaskBoardSnapshot, now: Date): TaskLedgerEntryFields {
 	const evidence: TaskLedgerValidationEvidence[] = [];
 	const subgoals: TaskLedgerGoal[] = board.tasks.map((task) => {
+		evidence.push(...(task.requiredValidationEvidence ?? []).map((item) => ({ ...item })));
 		if (task.status === "completed" && task.evidence) {
 			evidence.push({
 				id: `${task.id}.evidence`,
@@ -308,6 +310,8 @@ function toEntryView(entry: {
 				origin: goal.origin ?? "agent",
 			};
 			if (goal.userTaskId) task.userTaskId = goal.userTaskId;
+			const required = entry.requiredValidationEvidence.filter((item) => item.id.startsWith(`${goal.id}.acceptance.`));
+			if (required.length > 0) task.requiredValidationEvidence = required.map((item) => ({ ...item }));
 			if (goal.description) task.reason = goal.description;
 			const evidence = evidenceByTask.get(goal.id);
 			if (evidence) task.evidence = evidence;
@@ -390,6 +394,15 @@ function applyMutation(
 			origin: "user",
 			userTaskId: mutation.userTaskId,
 		};
+		if (mutation.verification && mutation.verification.length > 0) {
+			picked.requiredValidationEvidence = mutation.verification.map((item, index) => ({
+				id: `${picked.id}.acceptance.${index}`,
+				description: `Operator acceptance: ${item.check}`,
+				command: item.check,
+				status: "pending",
+				notes: `timeoutMs=${item.timeoutMs}`,
+			}));
+		}
 		return {
 			board: {
 				boardId: board?.boardId ?? "",

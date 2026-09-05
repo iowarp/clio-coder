@@ -1,3 +1,4 @@
+import { acceptanceFromTaskFlags } from "../cli/tasks.js";
 import { BusChannels } from "../core/bus-events.js";
 import { THINKING_LEVELS } from "../core/defaults.js";
 import type { SafeEventBus } from "../core/event-bus.js";
@@ -30,6 +31,7 @@ import type {
 } from "../domains/resources/index.js";
 import { parseSkillCommand, SKILL_SURFACE_CLEAR_ARG } from "../domains/resources/index.js";
 import type { ShareImportPlan } from "../domains/share/index.js";
+import type { UserTaskAcceptance } from "../domains/user-tasks/acceptance.js";
 import type { UserTask } from "../domains/user-tasks/store.js";
 import type { ExtensionReloadOutcome } from "../entry/extension-reload.js";
 import { isToolProfileName, TOOL_PROFILE_NAMES, type ToolProfileName } from "../tools/profiles.js";
@@ -146,7 +148,7 @@ type SlashCommandVariant =
 	| { kind: "context-view" }
 	| { kind: "tasks" }
 	| { kind: "decisions" }
-	| { kind: "tasks-add"; text: string }
+	| { kind: "tasks-add"; text: string; expectedOutputs?: string[]; verification?: string[] }
 	| { kind: "tasks-hand"; id: string }
 	| { kind: "tasks-done"; id: string }
 	| { kind: "tasks-drop"; id: string }
@@ -690,7 +692,7 @@ export interface SlashCommandContext {
 	openDecisions: () => void;
 	/** Project-scoped operator task inbox backing `/tasks` mutations. */
 	userTasks?: {
-		add(title: string): UserTask;
+		add(title: string, acceptance?: UserTaskAcceptance): UserTask;
 		hand(id: string): UserTask;
 		done(id: string): UserTask;
 		drop(id: string): UserTask;
@@ -790,9 +792,10 @@ function formatReceiptVerificationBlock(runId: string, result: SlashReceiptVerif
 }
 
 /** The one operator-authored turn used by slash and overlay handoff paths. */
-export function formatUserTaskHandoff(task: Pick<UserTask, "id" | "title" | "note">): string {
+export function formatUserTaskHandoff(task: Pick<UserTask, "id" | "title" | "note" | "acceptance">): string {
 	const note = task.note ? ` ${task.note}.` : "";
-	return `Operator task ${task.id}: ${task.title}.${note} Pick it up with tasks action="pick" id="${task.id}" and work it when appropriate.`;
+	const acceptance = task.acceptance ? ` Acceptance: ${JSON.stringify(task.acceptance)}.` : "";
+	return `Operator task ${task.id}: ${task.title}.${note}${acceptance} Pick it up with tasks action="pick" id="${task.id}" and work it when appropriate.`;
 }
 
 /** The verb a command performs, in the order /help lists the groups. */
@@ -1519,7 +1522,14 @@ export const BUILTIN_SLASH_COMMANDS: ReadonlyArray<BuiltinSlashCommand> = [
 		},
 		args: {
 			subcommands: {
-				add: { positionals: [{ name: "text", required: true, rest: true }] },
+				add: {
+					parseFlagsInRest: true,
+					flags: [
+						{ name: "--expect", takesValue: true, repeatable: true, valueName: "path" },
+						{ name: "--verify", takesValue: true, repeatable: true, valueName: "checkId[:timeoutMs]" },
+					],
+					positionals: [{ name: "text", required: true, rest: true }],
+				},
 				hand: { positionals: [{ name: "id", required: true }] },
 				done: { positionals: [{ name: "id", required: true }] },
 				drop: { positionals: [{ name: "id", required: true }] },
@@ -1530,7 +1540,12 @@ export const BUILTIN_SLASH_COMMANDS: ReadonlyArray<BuiltinSlashCommand> = [
 			switch (parsed.subcommand) {
 				case "add":
 					return parsed.rest
-						? { kind: "tasks-add", text: parsed.rest }
+						? {
+								kind: "tasks-add",
+								text: parsed.rest,
+								...(parsed.flagValues.has("--expect") ? { expectedOutputs: parsed.flagValues.get("--expect") ?? [] } : {}),
+								...(parsed.flagValues.has("--verify") ? { verification: parsed.flagValues.get("--verify") ?? [] } : {}),
+							}
 						: { kind: "usage-error", command: "tasks", reason: "add requires task text" };
 				case "hand":
 				case "done":
@@ -1558,7 +1573,10 @@ export const BUILTIN_SLASH_COMMANDS: ReadonlyArray<BuiltinSlashCommand> = [
 			}
 			try {
 				if (command.kind === "tasks-add") {
-					const task = ctx.userTasks.add(command.text);
+					const task = ctx.userTasks.add(
+						command.text,
+						acceptanceFromTaskFlags(process.cwd(), command.expectedOutputs ?? [], command.verification ?? []),
+					);
 					ctx.notice("success", `logged operator task ${task.id}: ${task.title}`);
 					return;
 				}

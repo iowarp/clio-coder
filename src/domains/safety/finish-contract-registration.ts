@@ -12,8 +12,14 @@
 
 import { VERIFICATION_SCRIPT_FAMILY_HINT } from "../../core/verification-scripts.js";
 import type { MiddlewareEffect, MiddlewareHookInput, MiddlewareHookRegistration } from "../middleware/index.js";
+import type { UserTaskAcceptance } from "../user-tasks/acceptance.js";
 import type { CompletionContractAuditInput } from "./audit.js";
-import { assessFinishContract, type FinishContractAssessment } from "./finish-contract.js";
+import {
+	assessFinishContract,
+	DEFAULT_RECENT_ENTRY_LIMIT,
+	type FinishContractAssessment,
+	recentEntries,
+} from "./finish-contract.js";
 import type { Rigor } from "./rigor.js";
 
 export const FINISH_CONTRACT_REGISTRATION_ID = "assessor.finish-contract";
@@ -45,6 +51,7 @@ export interface CreateFinishContractRegistrationOptions {
 	 * limitation instead of merely warning.
 	 */
 	resolveRigor?: () => Rigor;
+	readActiveAcceptance?: (window: ReadonlyArray<unknown>) => UserTaskAcceptance | undefined;
 	/**
 	 * Record the contract's decision to the audit ledger. Optional; when wired
 	 * (production passes the safety audit sink), every turn_end decision — each
@@ -80,20 +87,27 @@ export function createFinishContractRegistration(
 				return [];
 			}
 			if (entries === null) return [];
+			const rigor = options.resolveRigor?.() ?? "normal";
+			const activeAcceptance =
+				rigor === "high"
+					? options.readActiveAcceptance?.(recentEntries(entries, input.turnId ?? null, DEFAULT_RECENT_ENTRY_LIMIT))
+					: undefined;
 			const assessment = assessFinishContract({
 				sessionEntries: entries,
+				rigor,
+				...(activeAcceptance ? { activeAcceptance } : {}),
 				assistantTurnId: input.turnId ?? null,
 			});
-			const rigor = options.resolveRigor?.() ?? "normal";
 			recordDecision(options, input.turnId ?? null, assessment, rigor);
 			if (assessment.kind !== "engage") return [];
 			if (rigor === "high") {
 				// Withhold the completion and force a re-prompt: a continuation
 				// request carries the turn onward, and the paired reminder gives
 				// the directive its own visible system-reminder line.
+				const message = activeAcceptance?.verification.length ? assessment.message : HIGH_RIGOR_REVALIDATION_MESSAGE;
 				return [
-					{ kind: "request_continuation", message: HIGH_RIGOR_REVALIDATION_MESSAGE },
-					{ kind: "inject_reminder", message: HIGH_RIGOR_REVALIDATION_MESSAGE, severity: "warn" },
+					{ kind: "request_continuation", message },
+					{ kind: "inject_reminder", message, severity: "warn" },
 				];
 			}
 			return [{ kind: "inject_reminder", message: assessment.message, severity: "warn" }];

@@ -178,6 +178,7 @@ import { createTaskBoardStore } from "../domains/session/task-board.js";
 import { filterEntriesToActivePath } from "../domains/session/tree/active-path.js";
 import { type ShareContract, ShareDomainModule } from "../domains/share/index.js";
 import { ToolchainDomainModule } from "../domains/toolchain/index.js";
+import { activeUserTaskAcceptance } from "../domains/user-tasks/active-acceptance.js";
 import { createUserTasksStore } from "../domains/user-tasks/store.js";
 import { type AcpSafeSettingsPatch, type AcpSafeSettingsSnapshot, serveClioAcpAgent } from "../engine/acp/server.js";
 import { createStdioServerTransport } from "../engine/acp/transport.js";
@@ -2021,6 +2022,8 @@ export async function bootOrchestrator(options: BootOptions = {}): Promise<BootR
 				},
 				resolveRigor: () =>
 					resolveRigor({ cwd: process.cwd(), override: parseRigorOverride(process.env.CLIO_CODER_RIGOR) }),
+				readActiveAcceptance: (window) =>
+					activeUserTaskAcceptance(userTasks.snapshot(), taskBoard.snapshot(), session.current()?.id ?? null, window),
 				recordDecision: (record) => safety.audit.recordCompletionContract?.(record),
 			}),
 		);
