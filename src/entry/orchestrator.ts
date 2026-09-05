@@ -80,6 +80,7 @@ import {
 	taskMemoryTracePath,
 } from "../domains/memory/index.js";
 import { TaskMemoryBank } from "../domains/memory/task-bank.js";
+import { TaskMemoryEndpointBusyError } from "../domains/memory/task-memory-policy.js";
 import {
 	createDetachedDispatchNudgeRegistration,
 	createReadOnlyExplorationNudgeRegistration,
@@ -417,6 +418,21 @@ function prepareBackgroundMemoryModel(providers: ProvidersContract, targetId: st
 	return { model, refined };
 }
 
+function backgroundMemoryEndpointBusy(
+	providers: ProvidersContract,
+	endpointKey: string | null,
+	targets: ReadonlyArray<TargetDescriptor>,
+): boolean {
+	if (endpointKey === null) return false;
+	const capacity = resolveEndpointCapacities({
+		statuses: providers.list(),
+		targets,
+		runtimeFor: (id) => providers.getRuntime(id),
+	})[endpointKey];
+	// Gateways and non-fixed schedulers have no invented local one-slot cap.
+	return capacity !== undefined && (endpointCapacityUsage()[endpointKey] ?? 0) >= capacity.limit;
+}
+
 function prepareBackgroundMemoryRoute(
 	providers: ProvidersContract,
 	targetId: string,
@@ -454,6 +470,12 @@ function prepareBackgroundMemoryRoute(
 					? (await providers.auth.resolveForTarget(refined.target, refined.runtime, { signal: request.signal })).apiKey
 					: LOCAL_API_KEY_FALLBACK;
 				request.signal.throwIfAborted();
+				// Preparation yielded after the middleware's first check. Recheck current
+				// occupancy immediately before the synchronous foreground-slot registration;
+				// no await may separate this admission from announceMemoryStepEndpoint.
+				if (backgroundMemoryEndpointBusy(providers, endpointKey, [refined.target])) {
+					throw new TaskMemoryEndpointBusyError("background memory endpoint is busy");
+				}
 				return announceMemoryStepEndpoint({ bus, endpointKey, targetId }, async () => {
 					const startedAt = Date.now();
 					let observedUsage: TaskMemoryStepUsage | undefined;
@@ -551,14 +573,7 @@ export function createBackgroundMemoryRouting(
 		getModelMaxTokens: (configured: number): number => route?.modelMaxTokens(configured) ?? configured,
 		backgroundEndpointBusy: (): boolean => {
 			if (route?.endpointKey == null || snapshot === undefined) return false;
-			const capacity = resolveEndpointCapacities({
-				statuses: providers.list(),
-				targets: snapshot.targets,
-				runtimeFor: (id) => providers.getRuntime(id),
-			})[route.endpointKey];
-			// Gateways and non-fixed schedulers have no invented local one-slot cap.
-			if (capacity === undefined) return false;
-			return (endpointCapacityUsage()[route.endpointKey] ?? 0) >= capacity.limit;
+			return backgroundMemoryEndpointBusy(providers, route.endpointKey, snapshot.targets);
 		},
 	};
 }
