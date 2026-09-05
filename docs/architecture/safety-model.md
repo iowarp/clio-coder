@@ -97,7 +97,7 @@ Escalation can never hang a run. Every escalated ask resolves by an operator dec
 ## Operating Posture and Visible Tools
 
 Clio operates under a single operating posture. The canonical catalog contains
-21 built-in tools organized in seven planes; each plane is one policy unit for
+22 built-in tools organized in seven planes; each plane is one policy unit for
 action class, size posture, and concurrency, asserted at bootstrap by
 `src/tools/policy.ts` so the classifier and registered specs cannot drift apart
 silently. Dependency wiring, target capability, worker profile, and recipe
@@ -110,12 +110,12 @@ policy determine which subset is visible in a particular context.
 | EXECUTE | `bash`, `verify` | `execute` |
 | EXECUTE | `git` | `read` |
 | ORCHESTRATE | `dispatch`, `steer` | `dispatch` |
-| ORCHESTRATE | `monitor`, `tasks`, `ledger`, `panes` | `read` |
+| ORCHESTRATE | `monitor`, `tasks`, `ledger`, `panes`, `limitation` | `read` |
 | RETRIEVE | `web_fetch` | `read` |
 | INTERACT | `ask_user` | `read` |
 | ARTIFACT | `artifact` | `write` |
 
-`git` is read-only inspection on the safe-exec spine, so it carries the read class despite living in the EXECUTE plane. `monitor` does not mutate a run or the workspace. The model-facing `tasks` tool is an intentional bookkeeping exception to the everyday meaning of "read": board mutations append full `taskLedger` snapshots to Clio's session ledger, and any action may reconcile the project-local `.clio-coder/user-tasks.json` inbox while `pick` and linked `done` update its durable correlation. Those Clio-owned ledger and inbox mutations intentionally remain audited with `actionClass: "read"`, so task planning and pickup stay available at every autonomy level without an approval card. `ledger` reads a worker-local mirror and posts through the dispatch control lane; it registers only for a worker with an agent-ledger port. `panes` controls Clio-owned terminal panes and registers only when a pane host and live mux are available. Both are read class and sequential because their coordination state must not interleave. This classification grants no source-workspace, command-execution, or run-mutation authority; those operations still require their own tools and action classes. `gateway` is a design-reserved name only (see `src/core/tool-names.ts`), not a registered tool.
+`git` is read-only inspection on the safe-exec spine, so it carries the read class despite living in the EXECUTE plane. `monitor` does not mutate a run or the workspace. The model-facing `tasks` tool is an intentional bookkeeping exception to the everyday meaning of "read": board mutations append full `taskLedger` snapshots to Clio's session ledger, and any action may reconcile the project-local `.clio-coder/user-tasks.json` inbox while `pick` and linked `done` update its durable correlation. Those Clio-owned ledger and inbox mutations intentionally remain audited with `actionClass: "read"`, so task planning and pickup stay available at every autonomy level without an approval card. `ledger` reads a worker-local mirror and posts through the dispatch control lane; it registers only for a worker with an agent-ledger port. `panes` controls Clio-owned terminal panes and registers only when a pane host and live mux are available. Both are read class and sequential because their coordination state must not interleave. `limitation` records a typed receipt of what a turn could not verify and why; it touches no filesystem and runs no shell, so it is read class and parallel. This classification grants no source-workspace, command-execution, or run-mutation authority; those operations still require their own tools and action classes. `gateway` is a design-reserved name only (see `src/core/tool-names.ts`), not a registered tool.
 
 Target capability, dispatch tool profiles, and recipe constraints can further narrow the tools available to a run. That narrowing is convenience and budget control; safety still lives in code gates.
 
@@ -386,13 +386,13 @@ The effective rigor level for a session or dispatch run is resolved at boot time
 
 ### The Finish Gate and Re-Prompt Behavior
 
-On every settled `turn_end`, the finish-contract assessor scans entries since the last user message, capped at 80 entries. The trigger is action-scoped: the gate engages only when that window contains successful workspace mutation evidence and no validation evidence or explicit limitation. The model does not have to type a phrase such as `done` or `fixed`; the settled turn after mutation is the completion signal.
+On every settled `turn_end`, the finish-contract assessor scans entries since the last user message, capped at 80 entries. The trigger is action-scoped: the gate engages only when that window contains successful workspace mutation evidence and no validation evidence or `limitation` receipt. The model does not have to type a phrase such as `done` or `fixed`; the settled turn after mutation is the completion signal. The assistant's prose never enters the decision.
 
 The assessor decision order is:
 
 1. If the window has no successful mutating receipt or settled mutating `!` bash execution, the contract passes with `no_mutation`.
 2. If the window has validation evidence, the contract passes with `validation_evidence`. Evidence includes successful validation commands, `verify` checks (declared package scripts, admitted project-catalog entries, and the frontend check), passed dispatch receipts, and protected-artifact validation records.
-3. If the assistant explicitly states what could not be verified and why, the contract passes with `explicit_limitation`.
+3. If the window has a successful `limitation` tool receipt (a `limitation` tool_call paired with a non-error tool_result, carrying the scope, a reason from `no-runner`, `blocked`, `out-of-scope`, `environment`, or `other`, and optional unverified paths), the contract passes with `explicit_limitation`. A call the tool rejected leaves no receipt and does not count.
 4. Otherwise, the contract engages with `unvalidated_mutation`.
 
 The finish assessment projects only onto the canonical completion-evidence
@@ -405,7 +405,7 @@ persisted-format compatibility table are documented in
 [`evidence-and-memory.md`](evidence-and-memory.md#canonical-trust-status).
 
 - **Normal Rigor**: Clio issues a soft advisory warning (`FINISH_CONTRACT_ADVISORY_MESSAGE`) injected as a reminder for the next turn, but permits the turn to settle.
-- **High Rigor**: Clio withholds completion. The assessor emits `request_continuation` and a warning `inject_reminder` carrying `HIGH_RIGOR_REVALIDATION_MESSAGE`, instructing the model to run a verification-family command (e.g. `npm test`, `npm run build`) or explicitly declare a limitation before ending.
+- **High Rigor**: Clio withholds completion. The assessor emits `request_continuation` and a warning `inject_reminder` carrying `HIGH_RIGOR_REVALIDATION_MESSAGE`, instructing the model to run a verification-family command (e.g. `npm test`, `npm run build`) or call `limitation` before ending.
 
 #### Exemptions and Safety Precautions
 - **No-Mutation Turns**: Read-only status, alignment, and inspection turns are exempt because there is no successful workspace mutation in the recent window.

@@ -8,7 +8,7 @@ import {
 } from "./protected-artifacts.js";
 
 export const FINISH_CONTRACT_ADVISORY_MESSAGE =
-	"[Clio Coder] finish-contract advisory: you changed files this turn without recording validation evidence or an explicit limitation. Run a verification command or state what could not be verified.";
+	"[Clio Coder] finish-contract advisory: you changed files this turn without recording validation evidence or a limitation receipt. Run a verification command or call limitation with the scope and reason.";
 
 /**
  * The recent-window cap (entries since the last user message). Exported so a
@@ -17,7 +17,11 @@ export const FINISH_CONTRACT_ADVISORY_MESSAGE =
  */
 export const DEFAULT_RECENT_ENTRY_LIMIT = 80;
 
-export type FinishContractEvidenceKind = "validation_command" | "protected_artifact" | "dispatch_receipt";
+export type FinishContractEvidenceKind =
+	| "validation_command"
+	| "protected_artifact"
+	| "dispatch_receipt"
+	| "limitation";
 
 export interface FinishContractEvidence {
 	kind: FinishContractEvidenceKind;
@@ -48,7 +52,6 @@ export type FinishContractAssessment =
 	  };
 
 export interface FinishContractInput {
-	assistantText: string;
 	sessionEntries?: ReadonlyArray<unknown>;
 	assistantTurnId?: string | null;
 	recentEntryLimit?: number;
@@ -65,32 +68,26 @@ interface MutationCandidate {
 	paths: string[];
 }
 
-const LIMITATION_PATTERNS: ReadonlyArray<RegExp> = [
-	/\b(?:blocked by|blocker|blockers|unable to|not able to|could not|couldn't|cannot|can't)\b/i,
-	/\b(?:did not|didn't|have not|haven't|has not|hasn't|was not able|wasn't able)\b/i,
-	/\b(?:not complete|incomplete)\b/i,
-	/\b(?:not|un)(?:\s|-)?(?:validated|verified|tested)\b/i,
-	/^\s*Tests\s*:\s*(?:not run|not executed|not available|failed|blocked|skipped)\b/im,
-	/^\s*Known gaps?\s*:\s*(?!\s*(?:none|no\b|n\/a|not applicable)\b).+/im,
-	/\bremaining(?:\s+\w+){0,3}\s+(?:work|issue|issues|gap|gaps|blocker|blockers)\b/i,
-];
-
 /**
  * Action-scoped completion contract. The engine keys off what the turn actually
  * DID, not how the prompt was phrased: it engages only when the recent window
  * mutated workspace state and then settled (turn_end) without recording
- * validation evidence or an explicit limitation. The turn settling is itself
+ * validation evidence or a limitation receipt. The turn settling is itself
  * the completion signal, so the model never has to type "done" to be gated, and
  * a work request phrased as a question cannot bypass the gate.
  *
  * Decision order (pure function of ledger receipts):
  *   1. no mutating receipt in the window        -> ok/no_mutation
  *   2. validation evidence present              -> ok/validation_evidence
- *   3. explicit limitation stated in the text   -> ok/explicit_limitation
+ *   3. successful `limitation` receipt present  -> ok/explicit_limitation
  *   4. otherwise                                -> engage/unvalidated_mutation
+ *
+ * The assistant's prose never enters the decision. A limitation counts only
+ * as a `limitation` tool_call paired with a non-error tool_result inside the
+ * same window the mutation scan uses, so a run cannot satisfy the contract by
+ * wording alone and a real limitation is never missed for its phrasing.
  */
 export function assessFinishContract(input: FinishContractInput): FinishContractAssessment {
-	const assistantText = input.assistantText.trim();
 	const sessionEntries = input.sessionEntries ?? [];
 	const assistantTurnId = input.assistantTurnId ?? null;
 	const window = recentEntries(sessionEntries, assistantTurnId, input.recentEntryLimit ?? DEFAULT_RECENT_ENTRY_LIMIT);
@@ -105,8 +102,9 @@ export function assessFinishContract(input: FinishContractInput): FinishContract
 		return { kind: "ok", reason: "validation_evidence", evidence, mutatedPaths };
 	}
 
-	if (hasExplicitLimitation(assistantText)) {
-		return { kind: "ok", reason: "explicit_limitation", evidence: [], mutatedPaths };
+	const limitations = collectLimitationEvidence(window);
+	if (limitations.length > 0) {
+		return { kind: "ok", reason: "explicit_limitation", evidence: limitations, mutatedPaths };
 	}
 
 	return {
@@ -119,15 +117,54 @@ export function assessFinishContract(input: FinishContractInput): FinishContract
 }
 
 /**
- * The single retained text escape valve: the assistant explicitly states what
- * it could not verify. Everything else about the contract is receipt-grounded;
- * this is the one place prose still drives the decision. Candidate for a future
- * structured "limitation" signal so the whole gate becomes text-independent.
+ * Successful `limitation` receipts over the recent window. A receipt is a
+ * `limitation` tool_call whose tool_result in the same window is not an
+ * error, judged by the same `successfulToolResultId` rule the mutation and
+ * validation scans use. A call the tool rejected (bad reason, empty scope)
+ * leaves no receipt, so it cannot settle the contract.
  */
-function hasExplicitLimitation(text: string): boolean {
-	const normalized = text.trim();
-	if (normalized.length === 0) return false;
-	return LIMITATION_PATTERNS.some((pattern) => pattern.test(normalized));
+function collectLimitationEvidence(recent: ReadonlyArray<unknown>): FinishContractEvidence[] {
+	const evidence: FinishContractEvidence[] = [];
+	const calls = new Map<string, ToolCallEvidenceCandidate>();
+	const seen = new Set<string>();
+
+	for (const entry of recent) {
+		const call = limitationToolCall(entry);
+		if (call !== null) {
+			calls.set(call.toolCallId, call);
+			continue;
+		}
+		const resultId = successfulToolResultId(entry);
+		if (resultId === null) continue;
+		const candidate = calls.get(resultId);
+		if (candidate === undefined) continue;
+		const item: FinishContractEvidence = { kind: "limitation", summary: candidate.command };
+		if (candidate.turnId !== undefined) item.turnId = candidate.turnId;
+		pushEvidence(evidence, seen, item);
+	}
+
+	return evidence;
+}
+
+function limitationToolCall(entry: unknown): ToolCallEvidenceCandidate | null {
+	const record = asRecord(entry);
+	if (record?.kind !== "message" || record.role !== "tool_call") return null;
+	const payload = asRecord(record.payload);
+	if (payload === null) return null;
+	const toolName = stringFromFirst(payload, ["name", "toolName", "tool"]);
+	if (toolName !== ToolNames.Limitation) return null;
+	const toolCallId = stringFromFirst(payload, ["toolCallId", "tool_call_id", "id"]) ?? turnIdOf(entry);
+	if (toolCallId === null) return null;
+	const args = asRecord(payload.args ?? payload.arguments ?? payload.input);
+	const scope = typeof args?.scope === "string" ? args.scope.trim() : "";
+	const reason = typeof args?.reason === "string" ? args.reason.trim() : "";
+	const candidate: ToolCallEvidenceCandidate = {
+		toolCallId,
+		command: `limitation recorded: ${scope.length > 0 ? scope : "unspecified"} (reason=${reason.length > 0 ? reason : "unspecified"})`,
+	};
+	const turnId = turnIdOf(entry);
+	if (turnId !== null) candidate.turnId = turnId;
+	return candidate;
 }
 
 /**

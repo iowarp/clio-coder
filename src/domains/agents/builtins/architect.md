@@ -4,7 +4,7 @@ name: Architect
 description: Designs a change across boundaries and slices it into a sprint. Covers contracts, migrations, and validation gates, and turns an existing plan into a dependency-ordered sprint through its bound cut-it skill.
 tools:
   required: [artifact, context]
-  optional: [read, grep, find, ls, code_nav, git, ledger]
+  optional: [read, grep, find, ls, code_nav, git, ledger, limitation]
 skills: [cut-it]
 audience: base
 category: plan

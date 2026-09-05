@@ -110,6 +110,9 @@ function baseClassify(tool: string): ActionClass | null {
 		// or survives the session, so it is reversible, local, and never gated
 		// behind a confirmation.
 		case ToolNames.Panes:
+		// limitation appends a typed receipt to the session ledger and touches
+		// nothing else, so it is never gated behind a confirmation.
+		case ToolNames.Limitation:
 			return "read";
 		case ToolNames.Write:
 		case ToolNames.Edit:

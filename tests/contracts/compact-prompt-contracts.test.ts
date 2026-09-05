@@ -270,7 +270,7 @@ describe("compact prompt contracts", () => {
 	it("holds fixed compact main and worker token budgets", () => {
 		strictEqual(builtinRecipes.length, 14, "the fixed Fleet fixture requires the 14 shipped recipes");
 		const mainToolNames = ALL_TOOL_NAMES.filter((name) => name !== ToolNames.Ledger);
-		strictEqual(mainToolNames.length, 20);
+		strictEqual(mainToolNames.length, 21);
 		const main = mainPrompt({ providerSupportsTools: true, toolNames: mainToolNames });
 		// The self-awareness paths are machine facts: the package root, the
 		// settings file, and the state directory of the live home.
@@ -282,8 +282,8 @@ describe("compact prompt contracts", () => {
 			.join("{SETTINGS}")
 			.split(dirs.state)
 			.join("{STATE}");
-		strictEqual(normalizedMain.length, 10_674);
-		strictEqual(Math.ceil(normalizedMain.length / 4), 2_669);
+		strictEqual(normalizedMain.length, 10_750);
+		strictEqual(Math.ceil(normalizedMain.length / 4), 2_688);
 		ok(normalizedMain.length <= 10_800, `main prompt grew to ${normalizedMain.length} chars`);
 		ok(
 			Math.ceil(normalizedMain.length / 4) <= 2_700,
@@ -304,11 +304,11 @@ describe("compact prompt contracts", () => {
 			},
 			{
 				identity: 298,
-				"operating-contract": 164,
+				"operating-contract": 179,
 				delegation: 532,
 				skills: 181,
 				safety: 266,
-				"tool-contract": 635,
+				"tool-contract": 639,
 				fleet: 514,
 				"retrieval-hints": 36,
 				runtime: 43,
@@ -342,14 +342,14 @@ describe("compact prompt contracts", () => {
 			onPermission: "fail",
 			persona: persona(coder.body, "coder"),
 		});
-		strictEqual(worker.systemPrompt.length, 5_335);
-		strictEqual(worker.tokenEstimate, 1_334);
+		strictEqual(worker.systemPrompt.length, 5_397);
+		strictEqual(worker.tokenEstimate, 1_350);
 		ok(worker.systemPrompt.length <= 5_400);
 		ok(worker.tokenEstimate <= 1_350);
 		strictEqual(Math.ceil(worker.systemPrompt.length / 4), worker.tokenEstimate);
 		deepStrictEqual(Object.fromEntries(worker.sections.map((section) => [section.id, section.tokenEstimate])), {
 			identity: 62,
-			"operating-contract": 257,
+			"operating-contract": 273,
 			"tool-contract": 372,
 			safety: 253,
 			persona: 389,

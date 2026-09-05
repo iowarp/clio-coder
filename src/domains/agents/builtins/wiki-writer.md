@@ -4,7 +4,7 @@ name: Wiki Writer
 description: Plans a repository wiki or writes one wiki page. Works against a supplied plan.
 tools:
   required: [read, {anyOf: [write, edit]}]
-  optional: [grep, find, ls, code_nav, context, ledger]
+  optional: [grep, find, ls, code_nav, context, ledger, limitation]
 skills: []
 audience: base
 category: implement
@@ -37,5 +37,6 @@ over a batch of parallel guesses. Never read `.env` files or other secret-bearin
 Write the file as soon as you can ground it, then improve it in place. A written page is worth
 more than a researched one, and your budget is sized for a single subject, not a repository tour.
 
-The file you wrote is your result. When it is on disk, stop and say in one line what you wrote
-and what you could not ground. There is no report to file and no JSON to emit.
+The file you wrote is your result. When it is on disk, call `limitation` with the scope and reason
+for anything you could not ground, then stop and say in one line what you wrote. There is no
+report to file and no JSON to emit.

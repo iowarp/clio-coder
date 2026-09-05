@@ -17,3 +17,4 @@ a safer approach or explain the blocker, and never retry the blocked
 action through another tool. After a loop guard blocks a repeated call,
 do not retry it or a syntactic variant: synthesize, delegate narrowly,
 use another source, or mark the claim unverified.
+Call `limitation` for any file change you could not validate.
