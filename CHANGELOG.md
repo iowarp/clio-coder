@@ -16,6 +16,7 @@ Trust spine: typed claims, executable validation, and decision provenance. Answe
 - Operator tasks carry optional acceptance through repeatable `--expect` and `--verify` flags in the CLI and `/tasks add`. Shared dispatch normalizers validate paths and bounded checks, pickup persists required board evidence, and high rigor requires a passing receipt or a limitation naming each acceptance check.
 
 ### Changed
+- Retry admission rebinds a held plan-reservation member under the async state-file lock, so a dispatch attempt waiting on the cross-process capacity lock yields the event loop instead of spinning in `Atomics.wait` (#319). Plan preparation still takes the synchronous lock because the tool registry's `prepareAdmissionArguments` hook cannot yield.
 - Document that headless Antigravity reports permission_mode always-proceed under mode plan and sandbox, and that Clio grades enforcement as approximated (#281).
 - The runs.json ledger carries version 1 on RunEnvelope records, treating legacy unversioned rows as version 1 and skipping records with any other version.
 - Claude CLI workers now accept the built-in recipes. The `claude-code` runtime declares its external agent loop the way Antigravity does, so a recipe budget is admitted as `external-one-shot` with the per-tool count recorded as unobserved instead of refusing the dispatch. Claude Code CLI stays under Subscriptions in `configure --list` and keeps its `claude-cli` auth status; retries and orchestrator eligibility are unchanged (#280).
