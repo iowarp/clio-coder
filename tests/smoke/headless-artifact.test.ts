@@ -36,6 +36,13 @@ for (const scenario of ["clean", "recovered", "terminal-error"] as const) {
 		const scratch = makeScratchHome("clio-headless-artifact-");
 		const fixture = await startOpenAICompatFixture("unexpected follow-up", {
 			toolCall: { name: "artifact", arguments: { kind: "report", content: "fixture report\n" } },
+			usage: {
+				prompt_tokens: 17,
+				completion_tokens: 5,
+				total_tokens: 22,
+				prompt_tokens_details: { cached_tokens: 10 },
+				completion_tokens_details: { reasoning_tokens: 2 },
+			},
 			...(scenario === "clean"
 				? {}
 				: {
@@ -139,6 +146,27 @@ for (const scenario of ["clean", "recovered", "terminal-error"] as const) {
 			strictEqual(result.failureClass, succeeded ? null : "runner_failed");
 			strictEqual(evaluated.code, succeeded ? 0 : 1, evaluated.stderr);
 			strictEqual(fixture.requests.filter((request) => request.stream !== false).length, scenario === "recovered" ? 2 : 1);
+			const calls = JSON.parse(String(result.artifacts.callLedger)) as unknown[];
+			const tracked = result.verdict?.trackedMetrics;
+			ok(tracked);
+			const sources = JSON.parse(String(result.artifacts.trackedMetricSources));
+			strictEqual(sources.assistantCalls, "session");
+			strictEqual(sources.sessionCalls, calls.length);
+			strictEqual(sources.streamCalls, calls.length);
+			strictEqual(result.metrics["ledger.sessionCount"], 1);
+			strictEqual(tracked.modelCalls.value, calls.length, JSON.stringify({ tracked, metrics: result.metrics }));
+			strictEqual(tracked.generatedTokens.value, result.metrics["tokens.output"]);
+			strictEqual(tracked.uncachedPrefillTokens.value, result.metrics["tokens.input"]);
+			strictEqual(tracked.cacheReadTokens.value, result.metrics["tokens.cacheRead"]);
+			strictEqual(tracked.compactions.value, 0);
+			if (succeeded) {
+				strictEqual(tracked.generatedTokens.value, 5);
+				strictEqual(tracked.uncachedPrefillTokens.value, 7);
+				strictEqual(tracked.cacheReadTokens.value, 10);
+				// This compat adapter does not expose wire reasoning-token details.
+				// Keep that unknown; the structured-stream contract covers nonzero reasoning.
+				strictEqual(tracked.reasoningTokens.value, null);
+			}
 			// A separate clean built run keeps its pinned journal available, so we
 			// inspect the actual sealed outcome, not just the eval's invariant.
 			if (scenario === "clean") {

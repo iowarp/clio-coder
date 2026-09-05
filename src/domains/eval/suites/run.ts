@@ -18,7 +18,12 @@ import {
 import { wallTimeMetric } from "../metrics/latency.js";
 import { tokenAccountingFrom } from "../metrics/tokens.js";
 import { zeroToolCallMetrics } from "../metrics/tool-calls.js";
-import { buildEvalTrackedMetrics, emptyEvalTrackedMetrics, readEvalLedgerSnapshot } from "../metrics/tracked.js";
+import {
+	buildEvalTrackedMetrics,
+	emptyEvalTrackedMetrics,
+	readEvalLedgerSnapshot,
+	selectEvalLedgerEntries,
+} from "../metrics/tracked.js";
 import {
 	type EvalServingObservation,
 	evalClioProvenance,
@@ -234,11 +239,27 @@ async function runMatrixItem(
 			},
 		};
 		const snapshot = await readEvalLedgerSnapshot(stateDir);
-		const ledgerEntries = [...snapshot.entries, ...(runner.ledgerEntries ?? [])];
+		const selected = selectEvalLedgerEntries(snapshot.entries, runner.ledgerEntries ?? []);
+		result.artifacts.trackedMetricSources = JSON.stringify({
+			assistantCalls: selected.source,
+			sessionCalls: selected.sessionCalls,
+			streamCalls: selected.streamCalls,
+			compactions: "session",
+		});
+		if (selected.sessionCalls > 0 && selected.streamCalls > 0) {
+			// Preserve the unmerged evidence for opaque runners too. The native
+			// runner already publishes this artifact before stdout truncation.
+			result.artifacts.callLedger ??= JSON.stringify(runner.ledgerEntries);
+			if (selected.sessionCalls !== selected.streamCalls || task.runner.kind === "external-command") {
+				result.artifacts.trackedMetricWarning =
+					"Session and stream call coverage may differ; tracked metrics use session calls, not a reconciled union. " +
+					"Inspect callLedger before treating these counts as complete: no shared call identity proves overlap.";
+			}
+		}
 		result.verdict = adaptSuiteV2ResultToVerdictV1(
 			result,
 			buildEvalTrackedMetrics({
-				ledgerEntries,
+				ledgerEntries: selected.entries,
 				receipt: receipt ?? null,
 				fallbackWallClockMs: runner.wallTimeMs,
 			}),

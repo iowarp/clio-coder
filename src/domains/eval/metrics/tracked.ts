@@ -59,6 +59,28 @@ interface NumericReading {
 	source: EvalMetricSource;
 }
 
+/**
+ * The session ledger and stdout fold observe the same assistant calls on the
+ * native runner. Prefer the durable calls (including their richer timing and
+ * cache facts), with stdout as a fallback only when no durable calls exist.
+ * Keep non-call entries in either case: compaction is billed but not streamed.
+ * Counts are observations, NOT identities or evidence of matching coverage;
+ * partial/mixed ledgers cannot be unioned without a shared call identity.
+ */
+export function selectEvalLedgerEntries(
+	durable: ReadonlyArray<SessionEntry>,
+	stream: ReadonlyArray<SessionEntry>,
+): { entries: ReadonlyArray<SessionEntry>; source: "session" | "stream"; sessionCalls: number; streamCalls: number } {
+	const sessionCalls = assistantCalls(durable).length;
+	const streamCalls = assistantCalls(stream).length;
+	return {
+		entries: sessionCalls > 0 ? durable : [...durable, ...stream],
+		source: sessionCalls > 0 ? "session" : "stream",
+		sessionCalls,
+		streamCalls,
+	};
+}
+
 /** Read every isolated session ledger and its prompt manifest before cleanup. */
 export async function readEvalLedgerSnapshot(stateDir: string): Promise<EvalLedgerSnapshot> {
 	const refs = await listSessionLedgerRefs(stateDir);

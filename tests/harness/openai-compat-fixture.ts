@@ -47,6 +47,14 @@ export interface OpenAICompatToolCallScript {
 
 export interface OpenAICompatFixtureOptions {
 	models?: Array<Record<string, unknown> & { id: string }>;
+	/** Explicit wire usage for accounting regressions; defaults retain existing fixtures. */
+	usage?: {
+		prompt_tokens: number;
+		completion_tokens: number;
+		total_tokens: number;
+		prompt_tokens_details?: { cached_tokens: number };
+		completion_tokens_details?: { reasoning_tokens: number };
+	};
 	/** Fail the first streaming requests before following the normal script. */
 	initialErrors?: { count: number; status: number; message: string };
 	/** Split a text reply into provider-visible SSE deltas for pacing/ordering tests. */
@@ -167,7 +175,7 @@ export async function startOpenAICompatFixture(
 					created: 1,
 					model: "mock-model",
 					choices: [{ index: 0, delta: {}, finish_reason: "tool_calls" }],
-					usage: { prompt_tokens: 7, completion_tokens: 5, total_tokens: 12 },
+					usage: options.usage ?? { prompt_tokens: 7, completion_tokens: 5, total_tokens: 12 },
 				})}\n\n`,
 			);
 			res.end("data: [DONE]\n\n");
@@ -207,7 +215,7 @@ export async function startOpenAICompatFixture(
 				created: 1,
 				model: "mock-model",
 				choices: [{ index: 0, delta: {}, finish_reason: "stop" }],
-				usage: { prompt_tokens: 5, completion_tokens: 3, total_tokens: 8 },
+				usage: options.usage ?? { prompt_tokens: 5, completion_tokens: 3, total_tokens: 8 },
 			})}\n\n`,
 		);
 		res.end("data: [DONE]\n\n");
