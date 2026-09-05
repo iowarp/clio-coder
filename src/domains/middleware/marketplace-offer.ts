@@ -15,7 +15,6 @@ import {
 	readPromotionDeclines,
 	recordPromotionNeverDecline,
 } from "../resources/skills/promotion.js";
-import type { AutonomyLevel } from "../safety/autonomy.js";
 import type { MiddlewareHookRegistration } from "./runtime.js";
 import { isSubstantiveUserTurn } from "./skills-reminder.js";
 import { type MiddlewareEffect, type MiddlewareHookInput, metadataNumber } from "./types.js";
@@ -34,9 +33,8 @@ import { type MiddlewareEffect, type MiddlewareHookInput, metadataNumber } from 
  * becomes a nag. Detection is the local lexical matcher in
  * resources/skills/promotion.ts — no request text leaves the machine.
  *
- * At full-auto the offer collapses into an autonomous install, but ONLY from
- * Clio's own marketplace: every promotion-flow install (consented or
- * autonomous) passes `assertPromotionInstallSource`, the hard runtime gate
+ * Every autonomy level requires an explicit operator answer. Each consented
+ * promotion-flow install passes `assertPromotionInstallSource`, the hard runtime gate
  * that rejects public registries in code rather than prompt text.
  *
  * Coordinator-only by wiring: this registration is created in the
@@ -48,7 +46,7 @@ export const MARKETPLACE_OFFER_REGISTRATION_ID = "observer.marketplace-offer";
 
 export interface MarketplaceOfferInstallResult {
 	path: string;
-	/** The source the skill was fetched from; surfaced so an autonomous install stays auditable. */
+	/** The source the skill was fetched from; retained with the installation result for provenance. */
 	sourceUrl: string;
 	/** Normalized content hash of what was written; the integrity record the consent overlay would have shown. */
 	installedHash: string;
@@ -59,8 +57,6 @@ export interface MarketplaceOfferDeps {
 	listInstalledSkillNames(): ReadonlyArray<string>;
 	/** The local marketplace lookup (catalog + index); already local-only. */
 	listMarketplaceEntries(): ReadonlyArray<MarketplaceSkill>;
-	/** The session's effective autonomy at evaluation time. */
-	getAutonomy(): AutonomyLevel;
 	/** Perform the install; the registration gates the source before calling. */
 	installEntry(entry: MarketplaceSkill, scope: "user" | "project"): MarketplaceOfferInstallResult;
 	/** Decline persistence; defaults to the promotion module's config-dir store. Keyed by name+version. */
@@ -97,19 +93,6 @@ export function marketplaceOfferReminder(entry: MarketplaceSkill, offerTag: stri
 		`the answer to this offer; the harness acts only on an answer carrying this tag. ` +
 		`Then continue the task in the same turn. The harness handles the answer; never install or load a skill yourself. ` +
 		`If it is not actually needed, do not mention it.`
-	);
-}
-
-export function marketplaceAutoInstallReminder(entry: MarketplaceSkill, result: MarketplaceOfferInstallResult): string {
-	// Full-auto skips the operator's yes/no, never the integrity record. The
-	// consent overlay states the source and the SHA-256 of what it writes; the
-	// autonomous path computes the same hash and must surface it here, so an
-	// install nobody was asked about is still traceable to its source and bytes.
-	return (
-		`[Marketplace] Installed skill "${entry.name}" from Clio's own local marketplace (full-auto) to ${result.path}. ` +
-		`Source ${result.sourceUrl}, sha256 ${result.installedHash}. ${entry.description} ` +
-		`It is installed but not active — activation stays operator-gated. If it fits this task, ` +
-		`suggest /skill ${entry.name} to the operator; never load it yourself.`
 	);
 }
 
@@ -316,21 +299,6 @@ export function createMarketplaceOfferRegistration(deps: MarketplaceOfferDeps): 
 			const match = bestMatch(input.text ?? "");
 			if (!match) return NO_EFFECTS;
 			offeredNames.add(match.entry.name);
-			if (deps.getAutonomy() === "full-auto") {
-				try {
-					const result = installGated(match.entry, "project");
-					return [
-						{
-							kind: "inject_reminder",
-							severity: "info",
-							message: marketplaceAutoInstallReminder(match.entry, result),
-						},
-					];
-				} catch {
-					// Gate refusal or install failure: fall back to the consent offer
-					// so the operator still hears about the match.
-				}
-			}
 			const tag = newOfferTag();
 			pendingOffer = { entry: match.entry, tag };
 			return [{ kind: "inject_reminder", severity: "info", message: marketplaceOfferReminder(match.entry, tag) }];

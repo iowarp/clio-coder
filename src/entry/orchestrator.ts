@@ -1511,16 +1511,13 @@ export async function bootOrchestrator(options: BootOptions = {}): Promise<BootR
 		);
 	}
 	// Marketplace self-promotion: coordinator-only by this wiring (never a
-	// dispatch worker), local matcher, consented installs and full-auto
-	// autonomous installs both pass the own-marketplace source gate inside the
-	// registration. Registered here because it needs the effective-autonomy
-	// resolution defined one line up.
+	// dispatch worker), local matcher and operator-consented installs at every autonomy level. The
+	// registration also checks the own-marketplace source gate before installing.
 	if (resources) {
 		middleware.registerHook(
 			createMarketplaceOfferRegistration({
 				listInstalledSkillNames: () => resources.skills(process.cwd()).items.map((skill) => skill.name),
 				listMarketplaceEntries: () => discoverMarketplaceSkills({ cwd: process.cwd() }).skills,
-				getAutonomy: resolveEffectiveAutonomy,
 				installEntry: (entry, scope) => {
 					const installed = installSkill({ source: entry.sourceUrl, scope, name: entry.name, cwd: process.cwd() });
 					return { path: installed.path, sourceUrl: installed.sourceUrl, installedHash: installed.installedHash };

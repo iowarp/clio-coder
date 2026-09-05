@@ -289,7 +289,7 @@ clio-coder components diff --from before.json --to after.json
 <tr>
 <td><code>observer.marketplace-offer</code></td>
 <td><code>turn_start</code>, <code>after_tool</code></td>
-<td>On coordinator sessions, locally matches a substantive request against undeclined, uninstalled skills in Clio&#39;s marketplace and offers each matching skill at most once per session. Ordinary autonomy asks the operator through a tag-bound <code>ask_user</code> choice; <code>Not now</code> lasts for the session and <code>Never offer this skill</code> persists for that skill version. <code>full-auto</code> installs the match at project scope without the question. Both consented and autonomous installs pass the Clio-marketplace source gate, and installation never activates the skill; activation remains operator-gated.</td>
+<td>On coordinator sessions, locally matches a substantive request against undeclined, uninstalled skills in Clio&#39;s marketplace and offers each matching skill at most once per session. Every autonomy level, including <code>full-auto</code>, asks the operator through a tag-bound <code>ask_user</code> choice; <code>Not now</code> lasts for the session and <code>Never offer this skill</code> persists for that skill version. Only an explicit answer to the bound offer can install a skill. Consented installs pass the Clio-marketplace source gate; installation does not itself load the skill.</td>
 </tr>
 <tr>
 <td><code>observer.task-board-reminder</code></td>

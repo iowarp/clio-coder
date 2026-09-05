@@ -369,6 +369,40 @@ export function extractCommandDeleteTargets(command: string): string[] {
 	return targets.filter(isInterestingWriteTarget);
 }
 
+/** Recognizable operator CLI installation paths invoked through a model shell.
+ * This is command inspection, not confinement of arbitrary scripts or aliases.
+ */
+export function invokesClioSkillMutation(command: string): boolean {
+	for (const segment of expandedSegments(command)) {
+		const index = commandTokenIndex(segment);
+		if (index === null) continue;
+		let args = segment.slice(index);
+		const executable = basenameToken(args[0]);
+		if (executable === "npx" || (executable === "npm" && args[1] === "exec")) {
+			args = args.slice(executable === "npm" ? 2 : 1);
+			while (args[0]?.startsWith("-")) args = args.slice(1);
+		}
+		const program = args[0] ?? "";
+		if (basenameToken(program) === "node" || basenameToken(program) === "tsx") {
+			// The checked-in and built entry points are also operator CLIs.
+			if (!/(?:^|\/)(?:src|dist)\/cli\/index\.(?:js|ts)$/.test(args[1] ?? "")) continue;
+			args = args.slice(2);
+		} else if (/^(?:@iowarp\/)?clio-coder(?:@[^/]+)?$/.test(program) || basenameToken(program) === "clio-coder") {
+			args = args.slice(1);
+		} else continue;
+		if (args.includes("--help") || args.includes("-h") || args.includes("--version")) continue;
+		while (args[0]?.startsWith("-")) {
+			const flag = args[0];
+			args = args.slice(flag === "--skill" || flag === "--api-key" || flag === "--panes" ? 2 : 1);
+		}
+		if (args[0] === "skills" && (args[1] === "install" || args[1] === "update")) return true;
+		// Library installs may include skill dependencies, even when the requested
+		// resource is an agent or fleet. The operator owns that admission too.
+		if (args[0] === "library" && args[1] === "install") return true;
+	}
+	return false;
+}
+
 const STANDARD_DEV_TARGETS = new Set(["/dev/null", "/dev/stdout", "/dev/stderr", "/dev/tty", "/dev/zero"]);
 
 function collectRedirectTargets(segment: ReadonlyArray<string>, out: string[]): void {

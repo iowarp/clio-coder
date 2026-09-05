@@ -5,6 +5,14 @@
 
 The Skills Hub (`/skill`) shows project skills, user skills, and the marketplace. Every marketplace row comes from the same local lookup that `clio-coder skills install <name>` and `/skill <name>` resolve through, so the hub lists nothing it cannot install.
 
+## Operator ownership of installed skills
+
+The active project `.clio-coder/skills/` tree and the resolved user `<configDir>/skills/` tree are operator-owned. Main-agent and worker tool admissions refuse writes, edits, artifacts and recognized shell mutations to either tree, including ancestor deletion and current symlink aliases. This boundary stays active at every autonomy level, even when the general default path policy is disabled. Reads and loading already installed skills retain their existing rules.
+
+Draft a proposed skill outside these active trees, for example in `draft-skills/`. The operator installs or updates it through `clio-coder skills install` / `clio-coder skills update`, the Skills Hub, `/skill <name>`, or an explicitly accepted marketplace offer. Even `full-auto` must wait for that offer's bound operator answer; a task match alone no longer installs a skill. Model shell calls to recognizable Clio skill or library installation commands are refused, while inventory and validation commands remain available.
+
+This is a tool-admission boundary, not an operating-system sandbox. Shell inspection covers literal paths and recognized command forms; it cannot prove the effects of arbitrary scripts, dynamically constructed paths, aliases, or concurrent filesystem changes. Keep shell execution supervised when stronger confinement is required.
+
 ## Where marketplace rows come from
 
 There is one source, `discoverMarketplaceSkills()` in `src/domains/resources/skills/marketplace.ts`, and it reads two kinds of real local data:
