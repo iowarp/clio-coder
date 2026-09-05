@@ -31,6 +31,7 @@ import {
 import claudeCodeRuntime from "../../src/domains/providers/runtimes/claude/claude-code.js";
 import { createDispatchTool } from "../../src/tools/dispatch.js";
 import { describeDispatchPlan } from "../../src/tools/dispatch-plan.js";
+import type { WorkerSpec } from "../../src/worker/spec-contract.js";
 import { isolateDispatchState, makeDispatchBundle, restoreDispatchState } from "../harness/dispatch.js";
 import { dispatchStubContext } from "../harness/dispatch-stub-context.js";
 
@@ -524,9 +525,11 @@ describe("dispatch admission boundary", () => {
 		settings.fleet.default.model = "sonnet";
 		const spawn = (runtime: RuntimeDescriptor) => {
 			let spawned = 0;
+			const specs: WorkerSpec[] = [];
 			const bundle = makeDispatchBundle(dispatchStubContext({ settings, runtime }), {
-				spawnWorker: (): SpawnedWorker => {
+				spawnWorker: (spec): SpawnedWorker => {
 					spawned += 1;
+					specs.push(spec);
 					return {
 						pid: null,
 						promise: Promise.resolve({ exitCode: 0, signal: null }),
@@ -538,12 +541,15 @@ describe("dispatch admission boundary", () => {
 					};
 				},
 			});
-			return { bundle, spawned: () => spawned };
+			return { bundle, specs, spawned: () => spawned };
 		};
+		// architect requires the canonical `context` tool and binds a skill through
+		// it. A subprocess runtime never receives Clio's tool surface, so admission
+		// must compile without promising either.
 		const request = {
-			agentId: "verifier",
-			task: "Run the contract suite and report which checks passed.",
-			executionRole: "verifier" as const,
+			agentId: "architect",
+			task: "Draft a design note for splitting the dispatch ledger into two files.",
+			executionRole: "builder" as const,
 			target: "claude-worker",
 			model: "sonnet",
 		};
@@ -559,6 +565,10 @@ describe("dispatch admission boundary", () => {
 			strictEqual(envelope.runtimeId, "claude-code");
 			strictEqual(envelope.budget?.enforcement.classification, "external-one-shot");
 			strictEqual(envelope.budget?.enforcement.perTool, "unobserved-not-enforced");
+			const spec = declared.specs[0];
+			ok(spec);
+			strictEqual(spec.agentSkills, undefined);
+			ok(!spec.systemPrompt.includes("# Agent-Bound Skills"), "no bound-skill block without an attached context tool");
 		} finally {
 			await declared.bundle.extension.stop?.();
 		}
