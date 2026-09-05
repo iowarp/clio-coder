@@ -33,6 +33,7 @@ Markdown.
 | RCA write-ups for shipped fixes | the GitHub issue's closing comment, never a committed file | Human deliverable |
 | Codewiki index | `.clio-coder/codewiki.json` | Agent-to-agent |
 | Markdown wiki | `.clio-coder/wiki/` | Human transient |
+| Architecture maps: `context map` seeds and archify-delivered HTML | `.clio-coder/artifacts/maps/` | Human transient |
 | Session context state | `.clio-coder/state.json` | Agent-to-agent |
 | Task-memory handoffs | `.clio-coder/handoffs/` | Agent-to-agent |
 | Dispatch proposals | `.clio-coder/proposals/` | Agent-to-agent |

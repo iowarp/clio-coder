@@ -62,6 +62,16 @@ creation. Extension resource roots and share archives are documented in
 [extensions-and-sharing.md](extensions-and-sharing.md); this page owns the TUI
 Hub and marketplace behavior.
 
+## Remote entries and overlays
+
+Some skills are worth carrying in the catalog without vendoring their content. `skills/remote.yaml` lists them: each entry names a skill, its category, a `sourceUrl` that must be a GitHub tree URL at a pinned tag, an `overlay` package inside the catalog, and an optional `exclude` list of upstream top-level members. `npm run skills:pin` publishes such an entry into `skills/skill-marketplace.json` with `origin: "remote"`, the upstream URL as its `sourceUrl`, and the `overlay` and `exclude` fields attached. The overlay's `SKILL.md` is pinned in `skills/registry.yaml` like every other catalog skill, so `npm run skills:check` fails when it drifts.
+
+`archify` is the worked example. Its entry points at `https://github.com/tt-a1i/archify/tree/v2.16.0/archify`, overlays `skills/planning/archify`, and excludes `test` and `package-lock.json`. Running `clio-coder skills install archify --project` clones that tag, drops the excluded members, copies the overlay over the clone so Clio's wrapper `SKILL.md` replaces the upstream one, validates the shaped tree, and swaps it into `.clio-coder/skills/archify/` with the usual provenance stamps. The renderer, its schemas, and its brand-mark notices come from upstream at install time and never enter the npm tarball. The wrapper omits upstream's update-awareness step on purpose: that step performs a network request during a chat turn, and no Clio chat turn depends on the network.
+
+Discovery treats the overlay folder as part of the remote entry rather than as a skill of its own, so a bare-name install never lands the wrapper without the renderer it wraps. `clio-coder skills update` recovers the same overlay and exclude list from the marketplace, so an update refetches the pinned upstream and re-applies the wrapper instead of replacing it.
+
+Two operational notes. A copy dropped into a project-scope `.claude/skills/archify` is a compat import and stays untrusted until `integrations.projectResources.trustProjectImports` is on; install through Clio to get a trusted, provenance-stamped copy. And since the skill's authoring loop is several `bash` calls (validate, deliver, verify), `auto-edit` is the sensible permission posture for a mapping session; full manual approval works but prompts on every command.
+
 ## Publishing a skill
 
 Add a directory under `skills/<category>/<name>/` (or `skills/<name>/`) in the repo containing a `SKILL.md` with `name` and `description` frontmatter. The directory name must match `[A-Za-z0-9][A-Za-z0-9._-]*`. Run `npm run skills:pin` to republish `skills/skill-marketplace.json`, which is the index consumers point `CLIO_CODER_SKILL_MARKETPLACE_INDEX` at or copy to `<configDir>/skill-marketplace.json`. Scientific and niche coding domains are the marketplace's focus; see the existing `skills/` tree for the house format.
