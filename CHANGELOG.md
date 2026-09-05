@@ -16,6 +16,7 @@ All notable changes to Clio Coder are documented in this file. The format follow
 
 ### Fixed
 - Headless runs that recover from a provider failure with a successful tool-only artifact completion no longer retain the earlier error and fail evaluation despite producing the required artifact. Terminal errors, failed artifacts, cancellation, and shutdown still fail truthfully; recovered runs retain their failure history and reported spend (#275).
+- Transient task memory and its observer state now reset on explicit session and branch switches, including same-session `/tree` navigation. Late background completions cannot mutate the successor bank, deliver reminders, or propose durable memory. Reported usage keeps its originating session identity without inflating the successor's live cost. Ordinary forward turns and compaction retain continuity; abort-ignoring transports may still finish, but their stale content is discarded (#323).
 
 ## 0.4.2 - 2026-09-02
 

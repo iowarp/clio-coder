@@ -229,6 +229,7 @@ const REASONS = new Set<TaskMemoryPolicyReason>([
 	"llm_timeout_backoff",
 	"no_repeated_failure",
 	"bank_empty",
+	"scope_changed",
 ]);
 
 function entryDelta(

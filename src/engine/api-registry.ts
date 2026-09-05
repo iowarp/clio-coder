@@ -176,6 +176,9 @@ export async function completeEngineSimple(
 	return engineStreamSimple(model, context, options).result();
 }
 
+/** Engine-owned fixture seam for decorating a faux transport before registration. */
+export { createFauxCore as createEngineFauxCore };
+
 export function registerEngineFauxProvider(options: RegisterFauxProviderOptions = {}): FauxProviderRegistration {
 	registerEngineBuiltins();
 	const core = createFauxCore(options);
