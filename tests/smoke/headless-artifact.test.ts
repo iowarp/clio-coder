@@ -1,12 +1,15 @@
 import { doesNotMatch, match, ok, strictEqual } from "node:assert/strict";
 import { execFile } from "node:child_process";
-import { mkdirSync, readFileSync, writeFileSync } from "node:fs";
+import { existsSync, mkdirSync, mkdtempSync, readFileSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
 import { test } from "node:test";
 import { readRunJournal, receiptInvariantMetrics } from "../../src/domains/eval/metrics/invariants.js";
 import type { EvalArtifactV4 } from "../../src/domains/eval/schema/artifact.js";
+import { evidenceDirectory } from "../../src/domains/evidence/store.js";
+import { readEvidenceIndex } from "../../src/domains/observability/evidence-index.js";
 import {
 	closeServer,
+	hasToolExchange,
 	seedOpenAICompatToolOrchestrator,
 	startOpenAICompatFixture,
 } from "../harness/openai-compat-fixture.js";
@@ -210,6 +213,67 @@ for (const scenario of ["clean", "recovered", "recovered-gated", "terminal-error
 		}
 	});
 }
+
+// Issue #331 reported `[clio-coder:evidence] auto-build failed for run <id>:
+// run ledger not found` on a healthy headless run under a fresh pinned state
+// directory whose dispatch reached DispatchCompleted. The evidence auto-build
+// starts on that event and reads `<stateDir>/runs.json`, which the emitting
+// finalizer persists first. This drives that exact shape without a model: the
+// main agent dispatches one worker whose terminal text satisfies its result
+// contract, then ends the turn with the artifact tool.
+test("built headless artifact: a completed dispatch builds its evidence under a fresh pinned state dir", async () => {
+	const scratch = makeScratchHome("clio-headless-artifact-dispatch-");
+	const hasTool = (request: Record<string, unknown>, name: string): boolean =>
+		Array.isArray(request.tools) &&
+		request.tools.some((tool) => (tool as { function?: { name?: string } })?.function?.name === name);
+	const fixture = await startOpenAICompatFixture("worker done: nothing to change\n", {
+		// The worker's own conversation has no dispatch tool and gets the text
+		// reply, which the artifact-report contract accepts as-is.
+		toolCall: (request) => {
+			if (!hasTool(request, "dispatch")) return null;
+			if (!hasToolExchange(request)) return { name: "dispatch", arguments: { task: "Say hello", agent: "wiki-writer" } };
+			return { name: "artifact", arguments: { kind: "report", content: "fixture report\n" }, id: "call-clio-tool-2" };
+		},
+	});
+	try {
+		const env = {
+			...process.env,
+			...scratch.env,
+			TMPDIR: scratch.dir,
+			NODE_ENV: "test",
+			CLIO_CODER_TEST_OPENAI_KEY: "fixture-key",
+		};
+		const workspace = join(scratch.dir, "workspace");
+		mkdirSync(workspace);
+		const doctor = await run(["doctor", "--fix"], workspace, env);
+		strictEqual(doctor.code, 0, doctor.stderr);
+		seedOpenAICompatToolOrchestrator(join(scratch.dir, "config"), fixture.url, "full-auto");
+		// Pinned the way an eval item pins it: an empty directory with no runs.json.
+		const stateDir = mkdtempSync(join(scratch.dir, "pinned-state-"));
+		const direct = await run(
+			["run", "--json", "--autonomy", "full-auto", "Dispatch a worker, then write a report artifact"],
+			workspace,
+			{ ...env, CLIO_CODER_STATE_DIR: stateDir },
+		);
+		strictEqual(direct.code, 0, direct.stderr);
+		doesNotMatch(direct.stderr, /auto-build failed|receipt write failed/u);
+		match(direct.stdout, /"toolName":"dispatch"/u);
+		match(direct.stdout, /"toolName":"artifact"/u);
+		const journal = readRunJournal(stateDir);
+		ok(journal);
+		const dispatched = journal.receipts.filter((receipt) => receipt.agentId === "wiki-writer");
+		strictEqual(dispatched.length, 1);
+		strictEqual(dispatched[0]?.outcome, "succeeded");
+		strictEqual(journal.receipts.filter((receipt) => receipt.agentId === "main-agent").length, 1);
+		const rows = readEvidenceIndex(stateDir).filter((row) => row.runId === dispatched[0]?.runId);
+		strictEqual(rows.length, 1, JSON.stringify(readEvidenceIndex(stateDir)));
+		strictEqual(rows[0]?.succeeded, true);
+		ok(existsSync(join(evidenceDirectory(join(scratch.dir, "data"), rows[0]?.evidenceId ?? ""), "overview.json")));
+	} finally {
+		await closeServer(fixture.server);
+		scratch.cleanup();
+	}
+});
 
 // The task deadline is the eval's own; it has to end the run it is timing.
 // Spawned through `sh -c`, dash kept the shell as the parent, so the deadline's
