@@ -246,6 +246,27 @@ export function createDispatchAdmissionController(deps: DispatchToolDeps): Dispa
 							argv: [...check.command],
 							cwd: resolve(process.cwd(), check.cwd),
 							timeoutMs: entry.timeoutMs,
+							// A judged check seals its kind and absolute file paths here, so
+							// host verification judges against what the catalog declared at
+							// admission rather than whatever the file says at run time.
+							...(check.kind !== "command" ? { kind: check.kind } : {}),
+							...(check.numeric !== undefined
+								? {
+										numeric: {
+											reference: resolve(process.cwd(), check.numeric.reference),
+											tolerance: { ...check.numeric.tolerance },
+										},
+									}
+								: {}),
+							...(check.perf !== undefined
+								? {
+										perf: {
+											...(check.perf.budget !== undefined ? { budget: structuredClone(check.perf.budget) } : {}),
+											...(check.perf.baseline !== undefined ? { baseline: resolve(process.cwd(), check.perf.baseline) } : {}),
+											...(check.perf.tolerance !== undefined ? { tolerance: { ...check.perf.tolerance } } : {}),
+										},
+									}
+								: {}),
 						};
 					}),
 				};

@@ -1,4 +1,7 @@
 import type { SafeEventBus } from "../../core/event-bus.js";
+import type { DeclaredCheckKind } from "../../tools/verify/catalog.js";
+import type { NumericTolerance } from "../../tools/verify/numeric.js";
+import type { PerfBudgetSpec } from "../../tools/verify/perf.js";
 import type { ResultContract } from "../agents/result-contract.js";
 import type { AgentAutomationAuthority, AgentSpec } from "../agents/spec.js";
 import type { CostProvenance } from "../providers/index.js";
@@ -14,6 +17,19 @@ import type { RouteDecisionV1 } from "./route-decision.js";
 import type { RunEnvelope, RunLineage, RunNodeIdentity, RunPhaseDurations, RunReceipt, RunStatus } from "./types.js";
 import type { DispatchFailoverCandidate, JobSpec } from "./validation.js";
 import type { WriteBoundaryAttribution } from "./write-boundary.js";
+
+export interface ResolvedVerificationCheck {
+	check: string;
+	argv: ReadonlyArray<string>;
+	cwd: string;
+	timeoutMs: number;
+	/** Absent means `command`, the exit-code check every receipt carried before kinds existed. */
+	kind?: DeclaredCheckKind;
+	/** Sealed at admission with the reference as an absolute path. */
+	numeric?: { reference: string; tolerance: NumericTolerance };
+	/** Sealed at admission with the baseline as an absolute path. */
+	perf?: { budget?: PerfBudgetSpec; baseline?: string; tolerance?: { relative?: number } };
+}
 
 export interface DispatchRequest extends JobSpec {
 	/** Coordinator-owned result contract override for a fleet plan step. */
@@ -33,13 +49,13 @@ export interface DispatchRequest extends JobSpec {
 	runIdHint?: string;
 	/** Parent checkout frozen by plan approval for task worktree application. */
 	taskWorktreeDestination?: string;
-	/** Admission-resolved commands. Model text never enters these argv vectors. */
-	resolvedVerification?: ReadonlyArray<{
-		check: string;
-		argv: ReadonlyArray<string>;
-		cwd: string;
-		timeoutMs: number;
-	}>;
+	/**
+	 * Admission-resolved commands. Model text never enters these argv vectors.
+	 * A numeric-compare or perf-budget check also seals its kind and the
+	 * absolute reference or baseline path it will judge against, so host
+	 * verification runs exactly the check the catalog declared at admission.
+	 */
+	resolvedVerification?: ReadonlyArray<ResolvedVerificationCheck>;
 	/**
 	 * Semantic role this request's first attempt runs under. Derived once by
 	 * `execution-role.ts` at request construction, never authored by a model, and
