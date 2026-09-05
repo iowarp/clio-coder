@@ -101,6 +101,10 @@ export type CompactionTrigger = "auto" | "force" | "overflow";
  * `usage` carries and the ledger usage fold reads both from one place.
  */
 export interface CompactionUsage {
+	/** Executing route; absent on legacy checkpoints that used the active chat model. */
+	targetId?: string;
+	/** Requested wire model ID, not a verified physical backend identity. */
+	modelId?: string;
 	input: number;
 	output: number;
 	cacheRead: number;
@@ -515,6 +519,8 @@ function isOptionalCompactionUsage(value: unknown): boolean {
 	if (!isRecord(value)) return false;
 	const cost = value.cost;
 	return (
+		isOptionalString(value.targetId) &&
+		isOptionalString(value.modelId) &&
 		isNumber(value.input) &&
 		isNumber(value.output) &&
 		isNumber(value.cacheRead) &&

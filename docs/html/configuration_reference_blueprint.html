@@ -147,13 +147,13 @@
 <tr>
 <td><code>context.compaction.model</code></td>
 <td></td>
-<td>Optional <code>provider/model</code> pattern resolved for the summary model when compaction runs; absent means the chat target summarizes; applies next turn.</td>
+<td>Optional model pattern (prefer exact <code>target/model</code>) resolved when compaction runs. Must uniquely match an available HTTP chat model; invalid, ambiguous, unavailable, and worker-only selections fail explicitly. Absent means the current chat route summarizes.</td>
 <td></td>
 </tr>
 <tr>
 <td><code>context.compaction.systemPrompt</code></td>
 <td></td>
-<td>Optional path to a prompt-override file read at compaction time to replace the built-in summary prompt; applies next turn.</td>
+<td>Optional UTF-8 prompt file read on every compaction to replace the built-in system prompt. Relative paths use the current session workspace (<code>cwd</code>); absolute paths are supported. Must be a nonempty regular file of at most 65,536 bytes; read failures are explicit. <code>/context compact</code> focus instructions remain separate.</td>
 <td></td>
 </tr>
 <tr>

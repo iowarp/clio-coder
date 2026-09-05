@@ -101,9 +101,9 @@ export function ledgerUsageCalls(
 			const usage = entry.usage;
 			if (!usage || usage.totalTokens <= 0) continue;
 			calls.push({
-				providerId: currentTarget ?? "unknown",
-				attributedModelId: currentModel ?? "unknown",
-				requestedModelId: currentModel ?? "unknown",
+				providerId: usage.targetId ?? currentTarget ?? "unknown",
+				attributedModelId: usage.modelId ?? currentModel ?? "unknown",
+				requestedModelId: usage.modelId ?? currentModel ?? "unknown",
 				responseModelIdObservation: { state: "not-observed" },
 				input: usage.input,
 				output: usage.output,
