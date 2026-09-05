@@ -2529,6 +2529,7 @@ export async function serveClioAcpAgent(options: ClioAcpServerOptions): Promise<
 		if (options.session?.current()?.id === session.id) await options.session.close();
 		sessions.delete(session.id);
 		if (boundSessionId === session.id) boundSessionId = null;
+		sessionCreated = false;
 		closedSessionIds.add(session.id);
 		return {};
 	});

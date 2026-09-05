@@ -24,6 +24,7 @@ Trust spine: typed claims, executable validation, and decision provenance. Answe
 - The dispatch board reads observability's run projection. One fold owns lifecycle events, worker progress, receipt trust, retries, cancellation, fleet positions, and evidence readiness; the board keeps ordering, selection, and rendering. Terminal status and accounting come from the same projection the observability contract publishes.
 
 ### Fixed
+- ACP `session/close` releases the bound session slot so a host can create another session on the same child process.
 - Sessions without interactive ask_user now receive one passive marketplace reminder per matching skill per session, including its installation command, without starting an interview or recording a decline (#317).
 - Setting interface.panes.enabled=embedded refuses with a visible reason instead of silently degrading to guest detection (#294).
 - ACP stdout now waits for drain before sending more frames and closes with a typed error when stalled output exceeds the existing 1 MiB buffer budget (#309).
