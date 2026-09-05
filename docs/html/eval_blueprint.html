@@ -235,7 +235,29 @@ tasks:
 <li><code>eq</code> (equal)</li>
 <li><code>neq</code> (not equal)</li>
 </ul>
-<p>Metrics that can be validated include <code>tokens.input</code>, <code>tokens.output</code>, <code>tokens.total</code>, <code>latency.wallMs</code>, <code>tools.totalCalls</code>, <code>tools.failed</code>, <code>tools.blocked</code>, <code>verifier.exitCode</code>, and <code>result.pass</code>.</p>
+<p>Metrics that can be validated include <code>tokens.input</code>, <code>tokens.output</code>, <code>tokens.total</code>, <code>latency.wallMs</code>, <code>tools.totalCalls</code>, <code>tools.failed</code>, <code>tools.blocked</code>, <code>verifier.exitCode</code>, <code>result.pass</code>, and the <code>provider.*</code> metrics below. Each <code>verify.assertions</code> condition must hold; an unavailable metric fails closed.</p>
+<h3>Optional Provider-Health Gates</h3>
+<p>A task that recovers from a provider error can still pass its task checks by default. Provider health is a separate, opt-in requirement. To require observed provider events and no observed terminal errors, add these assertions to the task:</p>
+<pre><code class="language-yaml">verify:
+  assertions:
+    - metric: &quot;provider.measured&quot;
+      op: &quot;eq&quot;
+      value: true
+    - metric: &quot;provider.stopReason.error&quot;
+      op: &quot;eq&quot;
+      value: 0
+</code></pre>
+<p>Suite-level <code>thresholds.fail</code> uses the opposite condition: a matching condition is a failure. The corresponding hard gate checks each run as follows:</p>
+<pre><code class="language-yaml">thresholds:
+  fail:
+    - metric: &quot;provider.measured&quot;
+      op: &quot;eq&quot;
+      value: false
+    - metric: &quot;provider.stopReason.error&quot;
+      op: &quot;gt&quot;
+      value: 0
+</code></pre>
+<p>Unavailable metrics also fail closed in a hard threshold. <code>thresholds.informational</code> records findings without changing exit status. These examples reject an observed error followed by a successful recovery while leaving the default ungated task-pass policy unchanged. To reject any observed retry start or assistant abort as well, add conditions on <code>provider.retryStarted</code> or <code>provider.stopReason.aborted</code> with the same assertion-versus-failure polarity.</p>
 <hr>
 <h2>Failure Classes</h2>
 <p>Evaluation tasks may fail with one of the following classes:</p>
@@ -283,11 +305,77 @@ tasks:
 <h2>Token Accounting &amp; Provenance</h2>
 <p>Clio maintains two distinct token accounting streams with different provenances. These accounts are never merged, reconciled, or treated as interchangeable:</p>
 <ol>
-<li><strong><code>tokens.*</code> (Wire Streaming)</strong>: Folded live off stdout from assistant <code>message_end</code> events watched by <code>token-stream.ts</code> / <code>createStreamInvariantFold</code>. This represents usage reported by the provider for assistant messages watched over the wire. On surfaces without stdout streaming (such as <code>clio-coder fleet run --json</code>), <code>tokens.measured</code> is <code>false</code>.</li>
+<li><strong><code>tokens.*</code> (Wire Streaming)</strong>: Folded live off stdout from assistant <code>message_end</code> events. These totals include all known usage on errored calls as well as successful calls; recovery never subtracts earlier spend. Only finite, nonnegative usage facts are admitted. On surfaces without the relevant stdout events (such as <code>clio-coder fleet run --json</code>), <code>tokens.measured</code> is <code>false</code>.</li>
 <li><strong><code>receiptUsage.*</code> (Journal Receipts)</strong>: Summed from an evaluation item&#39;s run journal. Every attempt writes a receipt carrying token counts and USD cost authenticated against its own ledger envelope.</li>
 </ol>
 <h3>Fail-Closed Reporting</h3>
 <p>Both accounting streams report unmeasured state with no counts at all rather than a numeric zero. Reporting zero for an unmeasured run would falsely claim the run cost nothing. On an unmeasured run, <code>tokens.total</code> resolves to <code>null</code> and fails closed on metric threshold comparisons.</p>
+<p>An errored call must carry at least one positive reported token, reasoning, or cost fact before its usage is considered observed. Reasoning-only or cost-only observations do not establish ordinary token totals. A stream containing only errored calls with missing or synthetic all-zero usage remains <code>tokens.measured: false</code>. The current event shape cannot distinguish synthetic all-zero failures from genuinely reported zero usage, so it cannot establish measured zero spending in either case. Partial positive usage remains included as known spend. On failed calls, adapters can also initialize individual absent fields to zero; those zeros remain unattributed and make coverage incomplete. The existing inclusive numeric fields are known subtotals, so their zeros do not prove complete zero spending when failed usage is incomplete.</p>
+<h3>Provider Observations and Failed-Call Share</h3>
+<p>The <code>provider.*</code> metrics describe events observed on live stdout, folded before diagnostic output is truncated. Native runs and multi-command external runners retain these observations from their executed commands. They do not enumerate SDK-internal retries or network attempts that were never emitted. Filtered or opaque output can leave provider health unobserved even when the process exits successfully or a receipt reports task success.</p>
+<table>
+<thead>
+<tr>
+<th>Metric</th>
+<th>Meaning</th>
+</tr>
+</thead>
+<tbody><tr>
+<td><code>provider.measured</code></td>
+<td>Whether an assistant terminal reason or a counted retry phase was observed. With no such observations this is <code>false</code>, and provider counters are absent. It does not certify complete provider coverage.</td>
+</tr>
+<tr>
+<td><code>provider.stopReason.stop</code>, <code>provider.stopReason.toolUse</code>, <code>provider.stopReason.length</code></td>
+<td>Counts of these terminal reasons on assistant <code>message_end</code> events.</td>
+</tr>
+<tr>
+<td><code>provider.stopReason.error</code>, <code>provider.stopReason.aborted</code>, <code>provider.stopReason.other</code></td>
+<td>Separate counts of errored, aborted, and other observed terminal reasons. An unrecognized terminal reason goes into <code>other</code>. Partial updates and repeated messages in <code>turn_end</code> or <code>agent_end</code> do not add counts.</td>
+</tr>
+<tr>
+<td><code>provider.retryScheduled</code></td>
+<td>Observed <code>scheduled</code> phases: planned retries, including ones cancelled before execution.</td>
+</tr>
+<tr>
+<td><code>provider.retryStarted</code></td>
+<td>Observed <code>retrying</code> phases: retry execution starts. Repeated <code>waiting</code> countdown frames do not count as attempts.</td>
+</tr>
+<tr>
+<td><code>provider.retryCancelled</code>, <code>provider.retryExhausted</code>, <code>provider.retryRecovered</code></td>
+<td>Counts of the corresponding observed phases. They describe retry-chain outcomes and do not fabricate additional assistant calls. Attempt numbers can restart for each chain.</td>
+</tr>
+<tr>
+<td><code>provider.errorUsageObservedCalls</code></td>
+<td>Errored calls with at least one positive reported token, reasoning, or cost fact.</td>
+</tr>
+<tr>
+<td><code>provider.errorUsageUnobservedCalls</code></td>
+<td>Errored calls with no positive reported token, reasoning, or cost fact, including absent or all-zero usage.</td>
+</tr>
+<tr>
+<td><code>provider.errorUsageIncompleteCalls</code></td>
+<td>Errored calls with unobserved usage, incomplete token fields, or ambiguous normalized zero fields. This can overlap <code>errorUsageObservedCalls</code> when only part of the usage is known.</td>
+</tr>
+<tr>
+<td><code>provider.errorCostUnobservedCalls</code></td>
+<td>Errored calls without a positive cost fact. Zero or absent cost does not prove that an error was free, including when some token usage is known.</td>
+</tr>
+<tr>
+<td><code>provider.errorTokens.input</code>, <code>provider.errorTokens.output</code>, <code>provider.errorTokens.total</code>, <code>provider.errorTokens.cacheRead</code>, <code>provider.errorTokens.cacheWrite</code></td>
+<td>Known positive token subtotals for errored calls. Absent or ambiguous zero fields remain unattributed; when total usage is absent, a total can still be summed from known token fields and remains incomplete.</td>
+</tr>
+<tr>
+<td><code>provider.errorCostUsd</code></td>
+<td>Known positive cost subtotal from errored calls&#39; stream usage objects. Cost can come from adapter pricing; it is not independently certified provider billing.</td>
+</tr>
+<tr>
+<td><code>provider.errorReasoningTokens</code>, <code>provider.errorReasoningUnobservedCalls</code></td>
+<td>Known failed-call reasoning subtotal and calls without attributable reported reasoning. Reasoning can overlap output, so it is never added to ordinary token totals.</td>
+</tr>
+</tbody></table>
+<p>The failed-call share covers <code>stopReason: error</code>; aborted calls remain separately labeled. Failed-share amounts and usage-coverage counters appear only after an errored terminal message is observed. These share metrics supplement the inclusive <code>tokens.*</code> totals without changing the summary token shape, receipt schema, or verdict schema. Missing or partial failed usage makes them known subtotals, not a complete amount to subtract from total spend. The native runner&#39;s <code>cost.usd</code> can use receipt evidence, so equality with the stream-based <code>provider.errorCostUsd</code> is not guaranteed.</p>
+<p>Positive reported reasoning uses the normalized <code>usage.reasoning</code> field, <code>reasoning_tokens</code>, and supported nested provider-detail fields. The root <code>reasoningTokens</code> alias can be an adapter estimate without a provenance marker, so it is left unattributed rather than promoted to reported provider usage. Normalized zero reasoning is also unattributed because adapters can fill it when provider detail is absent. A reasoning-only failure is observed but has incomplete ordinary-token coverage; no output or total is inferred from it.</p>
+<p>These observations also do not reconcile the separate <code>trackedMetrics</code> ledger selection (#276). Tracked metrics prefer durable assistant-call facts when available, retain durable compaction and tool records, and otherwise fall back to stream calls. Artifacts expose source counts and warnings, but partial or mixed ledgers can omit stream-only calls and fork-inherited history remains unreconciled. Neither those tracked values nor the new provider counters prove complete run accounting; missing failed-compaction usage is not recovered by this fold.</p>
 <hr>
 <h2>Eval Artifact Format (v4)</h2>
 <p>Evaluation artifacts use format version 4 (<code>EvalArtifactV4</code>). Summary token metrics report <code>measuredRuns</code> out of total <code>runs</code>:</p>
