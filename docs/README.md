@@ -135,8 +135,9 @@ repository.
 
 The [configuration-knob audit](history/config-knobs-audit.md) is a dated historical
 inventory, not the current settings reference. The
-[v0.4.1 release-cut checklist](history/release-cut-checklist.md) is retained as release
-engineering history and must not be reused unchanged for a future release.
+[release-cut checklist](process/release-cut-checklist.md) is the current release
+procedure; the earlier [v0.4.1 release-cut checklist](history/release-cut-checklist.md)
+is retained as release engineering history.
 
 ## Developer quick start
 
