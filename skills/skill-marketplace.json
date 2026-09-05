@@ -286,6 +286,29 @@
 			"category": "meta"
 		},
 		{
+			"name": "archify",
+			"description": "Validated interactive system maps and diagrams as standalone HTML from a typed JSON spec, for one of five diagram types (architecture, workflow, sequence, dataflow, lifecycle). Use when the user asks to visualize architecture, a workflow, a call sequence, a data pipeline, or a state machine, or to map this repository. Not for ad hoc drawings or slide art, and not for Mermaid output; use the artifact tool for plain Markdown.",
+			"triggers": [
+				"architecture diagram",
+				"system map",
+				"map this repository",
+				"sequence diagram",
+				"data flow diagram",
+				"state machine diagram",
+				"visualize the architecture"
+			],
+			"sourceUrl": "https://github.com/tt-a1i/archify/tree/v2.16.0/archify",
+			"version": "0.1.0",
+			"audit": "pass",
+			"category": "planning",
+			"origin": "remote",
+			"overlay": "skills/planning/archify",
+			"exclude": [
+				"test",
+				"package-lock.json"
+			]
+		},
+		{
 			"name": "architecture",
 			"description": "Decides the engineering approach for an intent in an interactive session: investigates, proposes two or three genuinely different approaches with trade-offs, recommends, lets the user decide, and writes the decision doc. Not a task-by-task plan; use cut-it. Not a multi-perspective debate; use design-council. Not product intent; use product-intent. Not a typed implementation handoff; use tech-spec.",
 			"triggers": [

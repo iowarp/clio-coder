@@ -1,0 +1,13 @@
+# Skills whose content lives in another repository at a pinned ref.
+# Clio never vendors these. `npm run skills:pin` publishes each entry into
+# skill-marketplace.json with the upstream tree as its sourceUrl, the catalog
+# overlay whose files land on top of that tree at install, and the upstream
+# top-level members the install drops. The overlay SKILL.md is pinned in
+# registry.yaml like every other catalog skill.
+version: 1
+skills:
+  - name: archify
+    category: planning
+    sourceUrl: https://github.com/tt-a1i/archify/tree/v2.16.0/archify
+    overlay: skills/planning/archify
+    exclude: [test, package-lock.json]
