@@ -1,6 +1,6 @@
 import { match, ok, strictEqual } from "node:assert/strict";
 import { writeFileSync } from "node:fs";
-import { join } from "node:path";
+import { join, resolve } from "node:path";
 import { describe, it } from "node:test";
 
 import { runUpgradeCommand } from "../../src/cli/upgrade.js";
@@ -181,6 +181,29 @@ describe("contracts/upgrade-lifecycle", () => {
 			match(parsed.errors[0] ?? "", /migration failed/u);
 			strictEqual(parsed.advice[0]?.command, "clio-coder upgrade --skip-migrations");
 		} finally {
+			temp.cleanup();
+		}
+	});
+
+	it("ignores test seams when NODE_ENV is unset", async () => {
+		const temp = createLifecycleHome("clio-test-upgrade-ungated-");
+		const savedArgv1 = process.argv[1] ?? "";
+		process.argv[1] = resolve("dist/cli/index.js");
+		try {
+			const { code, stdout } = await upgrade(temp, [], {
+				NODE_ENV: "",
+				CLIO_CODER_TEST_UPGRADE_AVAILABLE: "99.99.99",
+				CLIO_CODER_TEST_UPGRADE_FAIL: "migration",
+				CLIO_CODER_TEST_UPGRADE_NO_NETWORK: "1",
+			});
+			strictEqual(code, 0);
+			ok(!/99\.99\.99/u.test(stdout), "mock version was ignored");
+			ok(!/mock migration failure/u.test(stdout), "mock migration failure was ignored");
+			ok(!/CLIO_CODER_TEST_UPGRADE_NO_NETWORK is set/u.test(stdout), "no-network seam was ignored");
+			match(stdout, /Available version: not checked \(source checkout\)/u);
+			match(stdout, /5 migrations applied/u);
+		} finally {
+			process.argv[1] = savedArgv1;
 			temp.cleanup();
 		}
 	});

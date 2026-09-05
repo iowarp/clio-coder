@@ -133,6 +133,7 @@ export function dispatchStubContext(): DomainContext {
 		health: { status: "healthy", lastCheckAt: null, lastError: null, latencyMs: null },
 		capabilities: { ...runtime.defaultCapabilities },
 		discoveredModels: [],
+		discoveredModelsSource: "none",
 	}));
 	const fallbackStatus = statuses[0];
 	if (fallbackStatus === undefined) throw new Error("behavioral machinery requires one target");

@@ -88,12 +88,17 @@ type RegistryLookup =
 	| { asked: false; reason: "source checkout" | "network checks are disabled" }
 	| { asked: true; version: string | null };
 
+function testSeam(name: string): string | undefined {
+	if (process.env.NODE_ENV !== "test") return undefined;
+	return process.env[name];
+}
+
 async function lookUpAvailableVersion(
 	channel: Channel,
 	method: "source" | "npm",
 	noNetwork: boolean,
 ): Promise<RegistryLookup> {
-	const seam = process.env.CLIO_CODER_TEST_UPGRADE_AVAILABLE;
+	const seam = testSeam("CLIO_CODER_TEST_UPGRADE_AVAILABLE");
 	// `unreachable` stands in for a registry that answered nothing, which is the
 	// only way to reach that branch without a network in the test.
 	if (seam) return { asked: true, version: seam === "unreachable" ? null : seam };
@@ -143,14 +148,14 @@ async function runChild(command: string, args: ReadonlyArray<string>, label: str
 }
 
 async function runNpmInstall(channel: Channel): Promise<void> {
-	if (process.env.CLIO_CODER_TEST_UPGRADE_FAIL === "npm") {
+	if (testSeam("CLIO_CODER_TEST_UPGRADE_FAIL") === "npm") {
 		throw new Error("npm ERR! 404 Not Found (mock failure)");
 	}
 	await runChild("npm", ["install", "-g", `@iowarp/clio-coder@${channel}`], "npm install");
 }
 
 async function runDoctorFixAfterInstall(): Promise<void> {
-	if (process.env.CLIO_CODER_TEST_UPGRADE_FAIL === "doctor") {
+	if (testSeam("CLIO_CODER_TEST_UPGRADE_FAIL") === "doctor") {
 		throw new Error("mock doctor fix failure");
 	}
 	await runChild("clio-coder", ["doctor", "--fix"], "clio-coder doctor --fix");
@@ -184,7 +189,7 @@ export async function runUpgradeCommand(argv: ReadonlyArray<string>): Promise<nu
 	const methodLabel = method === "source" ? "source checkout" : "npm global";
 	presenter.setMethod(methodLabel);
 
-	const noNetwork = Boolean(process.env.CLIO_CODER_TEST_UPGRADE_NO_NETWORK);
+	const noNetwork = Boolean(testSeam("CLIO_CODER_TEST_UPGRADE_NO_NETWORK"));
 	const lookup = await lookUpAvailableVersion(opts.channel, method, noNetwork);
 	const availableVersion = lookup.asked ? lookup.version : null;
 
@@ -285,7 +290,7 @@ export async function runUpgradeCommand(argv: ReadonlyArray<string>): Promise<nu
 	} else {
 		let result: Awaited<ReturnType<typeof runPending>>;
 		try {
-			if (process.env.CLIO_CODER_TEST_UPGRADE_FAIL === "migration") {
+			if (testSeam("CLIO_CODER_TEST_UPGRADE_FAIL") === "migration") {
 				throw new Error("mock migration failure in 2026-09-01-settings-v2");
 			}
 			result = await runPending(stateDir);

@@ -19,6 +19,9 @@ Trust spine: typed claims, executable validation, and decision provenance. Answe
 - The dispatch board reads observability's run projection. One fold owns lifecycle events, worker progress, receipt trust, retries, cancellation, fleet positions, and evidence readiness; the board keeps ordering, selection, and rendering. Terminal status and accounting come from the same projection the observability contract publishes.
 
 ### Fixed
+- Scratch offload sweeps now report non-ENOENT filesystem errors in a skipped count instead of silently swallowing them.
+- Model discovery no longer treats target status with an undefined model source as a live catalog.
+- The upgrade command now gates test seams behind NODE_ENV=test so testing environment variables are ignored in production.
 - Marketplace offer reminders now collapse catalog descriptions to one line, strip square-bracketed directive markers, and cap description text at 200 characters (#316).
 - Damage-control no longer treats command quotations in `dispatch` and `tasks` prose as shell execution. Execute-class calls still use the same blocked command patterns (#286).
 - Doctor state storage inspection now shares the lifecycle presenter byte formatting helper instead of keeping a private copy with differing units, printing consistent byte sizes across doctor, reset, and uninstall.

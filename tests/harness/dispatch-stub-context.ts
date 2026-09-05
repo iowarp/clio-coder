@@ -59,6 +59,7 @@ export function dispatchStubContext(options: DispatchStubOptions = {}): DomainCo
 		health: { status: "healthy", lastCheckAt: null, lastError: null, latencyMs: null },
 		capabilities: { ...runtime.defaultCapabilities },
 		discoveredModels: [],
+		discoveredModelsSource: "none",
 	}));
 	const fallbackStatus = statuses[0];
 	if (!fallbackStatus) throw new Error("dispatch stub requires at least one target status");
