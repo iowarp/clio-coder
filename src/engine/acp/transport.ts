@@ -534,6 +534,9 @@ export function createStdioTransport(
 }
 
 class StreamJsonRpcPeerTransport implements AcpJsonRpcPeerTransport {
+	private outputPaused = false;
+	private queuedOutputBytes = 0;
+	private readonly outputQueue: string[] = [];
 	private nextId = 1;
 	private buffer = "";
 	/** True while the bytes of an oversized line are being dropped up to its terminating newline. */
@@ -626,17 +629,49 @@ class StreamJsonRpcPeerTransport implements AcpJsonRpcPeerTransport {
 	}
 
 	private write(message: AcpJsonRpcMessage): void {
+		if (this.closed) return;
 		const line = `${JSON.stringify(message)}\n`;
 		if (this.writeOverride) {
 			this.writeOverride(line);
 			return;
 		}
-		// A `false` return means the stream buffered rather than flushed. Honoring
-		// it means pausing frame production, which changes turn timing, so the
-		// decision to keep writing is deferred rather than forgotten (CONTRACT
-		// C001 §6 leaves stdout backpressure out of this profile).
-		this.output.write(line);
+		if (this.outputPaused) {
+			const bytes = Buffer.byteLength(line, "utf8");
+			// Include bytes already held by the sink in the existing frame budget.
+			if (this.queuedOutputBytes + this.output.writableLength + bytes > ACP_MAX_INPUT_LINE_BYTES) {
+				this.markClosed(new AcpProcessError("ACP output buffer exceeded byte limit"));
+				return;
+			}
+			this.outputQueue.push(line);
+			this.queuedOutputBytes += bytes;
+			return;
+		}
+		try {
+			if (!this.output.write(line) && !this.closed) {
+				this.outputPaused = true;
+				this.output.once("drain", this.flushOutput);
+			}
+		} catch (err) {
+			this.markClosed(new AcpProcessError(`ACP output write failed: ${errorMessage(err)}`));
+		}
 	}
+
+	private readonly flushOutput = (): void => {
+		this.outputPaused = false;
+		while (!this.closed && !this.outputPaused && this.outputQueue.length > 0) {
+			const line = this.outputQueue.shift();
+			if (line === undefined) break;
+			this.queuedOutputBytes -= Buffer.byteLength(line, "utf8");
+			try {
+				if (!this.output.write(line) && !this.closed) {
+					this.outputPaused = true;
+					this.output.once("drain", this.flushOutput);
+				}
+			} catch (err) {
+				this.markClosed(new AcpProcessError(`ACP output write failed: ${errorMessage(err)}`));
+			}
+		}
+	};
 
 	private consume(chunk: string): void {
 		this.buffer += chunk;
@@ -757,6 +792,9 @@ class StreamJsonRpcPeerTransport implements AcpJsonRpcPeerTransport {
 	private markClosed(reason: unknown): void {
 		if (this.isClosed) return;
 		this.isClosed = true;
+		this.output.removeListener("drain", this.flushOutput);
+		this.outputQueue.length = 0;
+		this.queuedOutputBytes = 0;
 		this.failAll(reason);
 		for (const handler of this.closeHandlers) handler();
 	}

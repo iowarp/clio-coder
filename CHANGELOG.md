@@ -20,6 +20,7 @@ Trust spine: typed claims, executable validation, and decision provenance. Answe
 - The dispatch board reads observability's run projection. One fold owns lifecycle events, worker progress, receipt trust, retries, cancellation, fleet positions, and evidence readiness; the board keeps ordering, selection, and rendering. Terminal status and accounting come from the same projection the observability contract publishes.
 
 ### Fixed
+- ACP stdout now waits for drain before sending more frames and closes with a typed error when stalled output exceeds the existing 1 MiB buffer budget (#309).
 - Ollama eviction now releases only models this Clio process successfully pinned on the same server, preserving models loaded by operators or other clients (#313).
 - Deprecation warnings for the legacy lmstudio-native runtime id now route through warnLegacyNaming, reporting the planned v0.7.0 removal and deduping per process.
 - Fleet run preview diagnostics and approval overlays now format cost totals through the shared formatter so amounts at or above one cent render with two decimals instead of four.
