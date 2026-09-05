@@ -118,10 +118,8 @@ export type TaskMemoryPolicyReason =
 	 */
 	| "timed_out"
 	/**
-	 * The step would have run on the endpoint the chat target is streaming
-	 * against, so it never started. A single-slot local server queues the memory
-	 * call behind the operator's own turn, or evicts the resident model to serve
-	 * it; neither is a cost a background step may impose.
+	 * Known occupancy exhausts the endpoint request capacity, so no step starts.
+	 * A shared gateway URL alone does not establish a one-slot capacity bound.
 	 */
 	| "endpoint_busy"
 	/** The model client threw: unreachable route, auth failure, malformed request. */

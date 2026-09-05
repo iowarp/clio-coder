@@ -46,6 +46,7 @@ import { ConfigDomainModule, createConfigDomainModule } from "../domains/config/
 import type { ContextContract } from "../domains/context/contract.js";
 import { bootstrapInputFromInitOptions } from "../domains/context/init-options.js";
 import { createContextDomainModule } from "../domains/context/runtime.js";
+import { endpointCapacityUsage } from "../domains/dispatch/capacity-lease.js";
 import type { DispatchContract } from "../domains/dispatch/contract.js";
 import { createDispatchDedupRegistration } from "../domains/dispatch/dedup.js";
 import { agentRoleFactsResolver } from "../domains/dispatch/execution-role.js";
@@ -113,12 +114,12 @@ import {
 	applyModelCapabilityPatch,
 	canonicalEndpointKey,
 	firstRuntimeResolutionError,
-	foregroundStreamUsage,
 	isOrchestratorEligibleRuntime,
 	normalizeCostProvenance,
 	ProvidersDomainModule,
 	refineRuntimeTargetWithModelHints,
 	registerForegroundStream,
+	resolveEndpointCapacities,
 	resolveModelCapabilities,
 	resolveModelRuntimeCapabilitiesForProviders,
 	resolveRuntimeTarget,
@@ -126,6 +127,7 @@ import {
 	targetRequiresAuth,
 	VALID_THINKING_LEVELS,
 } from "../domains/providers/index.js";
+import { hasLiveModelCatalog, modelResidencyForStatus } from "../domains/providers/model-discovery.js";
 import { memoryInterventionModelMaxTokens } from "../domains/providers/model-runtime-capabilities.js";
 import { getRuntimeRegistry } from "../domains/providers/registry.js";
 import { resolveModelReference } from "../domains/providers/resolver.js";
@@ -330,12 +332,14 @@ const LOCAL_API_KEY_FALLBACK = "clio-coder-local-target";
 /**
  * The background memory role, resolved to the endpoint it would call.
  *
- * The endpoint key is what lets the middleware decline a step that would land
- * on the same inference scheduler the chat target is streaming against (#229,
- * #250), and it is the same key dispatch admission counts slots on.
+ * The endpoint key joins the existing dispatch capacity evidence and local
+ * request holds. A gateway key does not identify one physical model server or
+ * imply a one-slot limit; the configured protocol owns downstream routing.
  */
 interface BackgroundMemoryRoute {
 	client: TaskMemoryModelClient;
+	selection: "dedicated" | "chat-fallback";
+	fallbackReason?: string;
 	targetId: string;
 	wireModelId: string;
 	endpointKey: string | null;
@@ -347,16 +351,56 @@ export function createBackgroundMemoryModelClient(
 	settings: Readonly<ClioSettings>,
 	timeoutMs: number,
 	bus: Pick<SafeEventBus, "emit"> | null,
+	fallbackOnly = false,
 ): BackgroundMemoryRoute | null {
-	const targetId = settings.context.memory.target?.trim();
-	const wireModelId = settings.context.memory.model?.trim();
-	if (!targetId || !wireModelId) return null;
-	// One model cannot both drive the action agent and think its way through a
-	// memory step: the memory call would contend with the agent's own decoding on
-	// the same server, and a reasoning model spends most of a memory step
-	// deliberating over a task it is not executing. Memory falls back to its free
-	// deterministic tier rather than degrading the work the operator asked for.
-	if (backgroundSharesReasoningModelWithOrchestrator(providers, settings)) return null;
+	const configuredTarget = settings.context.memory.target?.trim();
+	const configuredModel = settings.context.memory.model?.trim();
+	if (!configuredTarget || !configuredModel) return null;
+	const chatTarget = settings.chat.target?.trim();
+	const chatModel = settings.chat.model?.trim();
+	const sameRoute = configuredTarget === chatTarget && configuredModel === chatModel;
+	if (fallbackOnly && sameRoute) return null;
+	let fallbackReason: string | undefined;
+	if (!fallbackOnly) {
+		try {
+			return prepareBackgroundMemoryRoute(providers, configuredTarget, configuredModel, timeoutMs, bus, "dedicated");
+		} catch {
+			fallbackReason = "configured route unavailable";
+		}
+	} else fallbackReason = "configured route client error";
+	if (!chatTarget || !chatModel || sameRoute) {
+		if (fallbackOnly) return null;
+		throw new Error("configured memory route is unavailable and no distinct chat fallback can run");
+	}
+	try {
+		return {
+			...prepareBackgroundMemoryRoute(providers, chatTarget, chatModel, timeoutMs, bus, "chat-fallback"),
+			fallbackReason,
+		};
+	} catch {
+		if (fallbackOnly) return null;
+		throw new Error("neither the configured memory route nor the active chat fallback is available");
+	}
+}
+
+function prepareBackgroundMemoryRoute(
+	providers: ProvidersContract,
+	targetId: string,
+	wireModelId: string,
+	timeoutMs: number,
+	bus: Pick<SafeEventBus, "emit"> | null,
+	selection: BackgroundMemoryRoute["selection"],
+): BackgroundMemoryRoute {
+	const status = providers.list().find((entry) => entry.target.id === targetId);
+	if (
+		status &&
+		(!status.available ||
+			status.health.status === "down" ||
+			(hasLiveModelCatalog(status) && !status.discoveredModels.includes(wireModelId)) ||
+			modelResidencyForStatus(status, wireModelId) === "absent" ||
+			modelResidencyForStatus(status, wireModelId) === "loading")
+	)
+		throw new Error("background memory route is unavailable");
 	const resolved = resolveRuntimeTarget(providers, {
 		targetId,
 		wireModelId,
@@ -379,6 +423,7 @@ export function createBackgroundMemoryModelClient(
 	const costProvenance = normalizeCostProvenance(refined.costProvenance);
 	const endpointKey = canonicalEndpointKey(refined.target);
 	return {
+		selection,
 		targetId,
 		wireModelId: refined.wireModelId,
 		endpointKey,
@@ -422,6 +467,7 @@ export function createBackgroundMemoryModelClient(
 						request.onUsage?.(observedUsage);
 					},
 					...(apiKey === undefined ? {} : { apiKey }),
+					...(refined.target.auth?.headers ? { headers: refined.target.auth.headers } : {}),
 				});
 				// The step is billed here whatever the policy later decides about the
 				// answer. A model that read a trajectory and chose silence spent the
@@ -433,6 +479,68 @@ export function createBackgroundMemoryModelClient(
 					usage: observedUsage ?? mapUsage(completion),
 				};
 			}),
+		},
+	};
+}
+
+/** Production callback composition shared with routing/capacity contracts. */
+export function createBackgroundMemoryRouting(
+	providers: ProvidersContract,
+	getSettings: () => Readonly<ClioSettings> | undefined,
+	bus: Pick<SafeEventBus, "emit"> | null,
+) {
+	let route: BackgroundMemoryRoute | null = null;
+	let snapshot: Readonly<ClioSettings> | undefined;
+	let lastNotice: string | null = null;
+	const noteFallback = (): void => {
+		if (route?.selection !== "chat-fallback") {
+			lastNotice = null;
+			return;
+		}
+		const message = `Memory: ${route.fallbackReason}; selected chat fallback ${route.targetId}/${route.wireModelId} for this step, subject to available endpoint capacity.`;
+		if (message === lastNotice) return;
+		lastNotice = message;
+		try {
+			bus?.emit(BusChannels.RuntimeNotice, {
+				kind: "degraded",
+				level: "info",
+				message,
+				targetId: route.targetId,
+				runtimeId: providers.getTarget(route.targetId)?.runtime ?? "unknown",
+				model: route.wireModelId,
+			});
+		} catch {
+			/* Advisory only. */
+		}
+	};
+	return {
+		getModelClient: (): TaskMemoryModelClient | null => {
+			const current = getSettings();
+			snapshot = current === undefined ? undefined : structuredClone(current);
+			route =
+				snapshot === undefined
+					? null
+					: createBackgroundMemoryModelClient(providers, snapshot, snapshot.context.memory.timeoutMs, bus);
+			noteFallback();
+			return route?.client ?? null;
+		},
+		getFallbackModelClient: (): TaskMemoryModelClient | null => {
+			if (route?.selection !== "dedicated" || snapshot === undefined) return null;
+			route = createBackgroundMemoryModelClient(providers, snapshot, snapshot.context.memory.timeoutMs, bus, true);
+			noteFallback();
+			return route?.client ?? null;
+		},
+		getModelMaxTokens: (configured: number): number => route?.modelMaxTokens(configured) ?? configured,
+		backgroundEndpointBusy: (): boolean => {
+			if (route?.endpointKey == null || snapshot === undefined) return false;
+			const capacity = resolveEndpointCapacities({
+				statuses: providers.list(),
+				targets: snapshot.targets,
+				runtimeFor: (id) => providers.getRuntime(id),
+			})[route.endpointKey];
+			// Gateways and non-fixed schedulers have no invented local one-slot cap.
+			if (capacity === undefined) return false;
+			return (endpointCapacityUsage()[route.endpointKey] ?? 0) >= capacity.limit;
 		},
 	};
 }
@@ -468,30 +576,6 @@ function agentRoleToolWarnings(providers: ProvidersContract, settings: Readonly<
 		}
 	}
 	return warnings;
-}
-
-/**
- * True when the background role names the same model the orchestrator runs and
- * that model reasons. Distinct models, or a non-reasoning shared model, are both
- * fine; this only catches the one-model-does-everything configuration.
- */
-function backgroundSharesReasoningModelWithOrchestrator(
-	providers: ProvidersContract,
-	settings: Readonly<ClioSettings>,
-): boolean {
-	const backgroundModel = settings.context.memory.model?.trim();
-	const orchestratorModel = settings.chat.model?.trim();
-	if (!backgroundModel || backgroundModel !== orchestratorModel) return false;
-	if (settings.context.memory.target?.trim() !== settings.chat.target?.trim()) return false;
-	try {
-		const status = providers.list().find((entry) => entry.target.id === settings.context.memory.target?.trim());
-		if (!status) return false;
-		return resolveModelCapabilities(status, backgroundModel, providers.knowledgeBase).reasoning === true;
-	} catch {
-		// An unresolvable capability is not evidence of a reasoning model; the
-		// operator's explicit configuration stands.
-		return false;
-	}
 }
 
 async function resolveCompactionModel(
@@ -1298,7 +1382,6 @@ export async function bootOrchestrator(options: BootOptions = {}): Promise<BootR
 	const memoryTrace = memoryTracePath === null ? null : createTaskMemoryTrace(memoryTracePath);
 	// The route the last resolved memory client would call, kept so the endpoint
 	// check and the cost row read the same resolution the step itself used.
-	let backgroundMemoryRoute: BackgroundMemoryRoute | null = null;
 	/**
 	 * Account for one background memory step exactly as a `/btw` side question is
 	 * accounted for: the in-process cost tracker under its own label so `/cost`
@@ -1354,28 +1437,7 @@ export async function bootOrchestrator(options: BootOptions = {}): Promise<BootR
 				timeoutMs: memory.timeoutMs,
 			};
 		},
-		getModelClient: () => {
-			const settings = effectiveSettingsForDispatch?.();
-			backgroundMemoryRoute =
-				settings === undefined
-					? null
-					: createBackgroundMemoryModelClient(providers, settings, settings.context.memory.timeoutMs, bus);
-			return backgroundMemoryRoute?.client ?? null;
-		},
-		getModelMaxTokens: (configuredMaxTokens) =>
-			backgroundMemoryRoute?.modelMaxTokens(configuredMaxTokens) ?? configuredMaxTokens,
-		// A single-slot local server serves one request at a time, so a memory step
-		// started while the operator's turn is streaming either waits behind it or
-		// makes the server swap the resident model out to answer. The chat loop
-		// registers its stream on the endpoint it streams against, so the two are
-		// compared by the same canonical key dispatch admission counts slots on.
-		backgroundEndpointBusy: () => {
-			const endpointKey = backgroundMemoryRoute?.endpointKey ?? null;
-			if (endpointKey === null) return false;
-			// This runs before the client wrapper registers the admitted step, so the
-			// count contains other requests only and the step cannot refuse itself.
-			return (foregroundStreamUsage()[endpointKey] ?? 0) > 0;
-		},
+		...createBackgroundMemoryRouting(providers, () => effectiveSettingsForDispatch?.(), bus),
 		captureStepUsage: captureBackgroundMemoryUsage,
 		onInjectedEntries: (entries) => proposeInjectedMemoryEntries(entries),
 	});
