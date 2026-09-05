@@ -35,7 +35,7 @@
 		"lineWidth": 120,
 		"semiColons": true,
 		"singleQuote": false,
-		"exclude": ["dist", "node_modules", ".workbench-data", ".desktop"]
+		"exclude": ["dist", "node_modules", ".desktop"]
 	},
 	"lint": {
 		"include": [
@@ -55,7 +55,7 @@
 			"tests",
 			"vite.config.ts"
 		],
-		"exclude": ["dist", "node_modules", ".workbench-data", ".desktop"]
+		"exclude": ["dist", "node_modules", ".desktop"]
 	},
 	"desktop": {
 		"app": {

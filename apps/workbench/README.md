@@ -32,8 +32,8 @@ Local GUI state currently contains the recent-project list. Its root is the abso
 then the absolute deprecated `$CLIO_WORKBENCH_STATE_DIR` value, then absolute `$XDG_STATE_HOME/clio-coder-gui`, and
 finally `~/.local/state/clio-coder-gui`. Relative overrides are ignored. The deprecated override remains read-compatible
 for two minor releases and emits one warning. On first start after an upgrade, the GUI atomically moves a lone
-`clio-workbench` state root. If legacy and canonical roots both exist, it backs up both `projects.json` inputs and merges
-valid recent projects by canonical path and newest `lastOpenedAt`.
+`clio-workbench` state root. If legacy and canonical roots both exist, it backs up both `projects.json` inputs and
+merges valid recent projects by canonical path and newest `lastOpenedAt`.
 
 The local host/renderer bridge emits `clio-coder.state`, `clio-coder-*` error codes, and
 `clioCoder`/`clioCoderVersion`/`clioCoderCommit` provenance fields. Its bounded readers accept and normalize the

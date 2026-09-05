@@ -4,7 +4,7 @@ const EXPECTED_ASSETS = new Map([
 	["clio-coder-logo-64.webp", "35ad057367ed924a3b5be022a624b263521128ff38a34942c96eedc9523f71b4"],
 	["clio-coder-logo-128.webp", "ad7c5736458496bc65da8544db780bd11bb4c71ab1e138ece5946445c0ca83ac"],
 ]);
-const NON_PRODUCT_DIRECTORIES = new Set([".artifacts", ".workbench-data", ".desktop", "dist", "node_modules", "tests"]);
+const NON_PRODUCT_DIRECTORIES = new Set([".artifacts", ".desktop", "dist", "node_modules", "tests"]);
 
 function bytesToHex(bytes: ArrayBuffer): string {
 	return [...new Uint8Array(bytes)].map((byte) => byte.toString(16).padStart(2, "0")).join("");
