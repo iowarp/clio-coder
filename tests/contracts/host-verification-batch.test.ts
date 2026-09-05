@@ -10,6 +10,7 @@ import {
 	createBatchVerificationGate,
 	hostVerificationRejection,
 	runHostVerification,
+	workspaceFingerprint,
 } from "../../src/domains/dispatch/host-verification.js";
 import { declaredScopeIntent } from "../../src/domains/dispatch/intent.js";
 import { adaptRunReceiptValidationStatus } from "../../src/domains/evidence/trust-status.js";
@@ -128,6 +129,206 @@ function runCount(scratch: Scratch): number {
 		return 0;
 	}
 }
+
+describe("host verification judgment identity", () => {
+	function measurement(scratch: Scratch): ResolvedCheck {
+		return {
+			check: "value",
+			argv: [
+				process.execPath,
+				"-e",
+				[
+					`require("node:fs").appendFileSync(${JSON.stringify(scratch.log)}, "ran\\n");`,
+					"console.log(JSON.stringify({ value: 2 }));",
+				].join(" "),
+			],
+			cwd: scratch.project,
+			timeoutMs: 30_000,
+		};
+	}
+
+	function verify(scratch: Scratch, runId: string, resolvedCheck: ResolvedCheck) {
+		return runHostVerification({
+			runId,
+			request: { resolvedVerification: [resolvedCheck] },
+			workerSuccessful: true,
+			stateDir: scratch.stateDir,
+		});
+	}
+
+	for (const kind of ["numeric-compare", "perf-budget"] as const) {
+		it(`does not reuse an exit-only pass for a ${kind} judgment`, async () => {
+			const scratch = makeScratch();
+			const reference = join(scratch.project, "reference.json");
+			writeFileSync(reference, '{"value":1}');
+			const base = measurement(scratch);
+			const command = await verify(scratch, "exit-only", { ...base, check: "exit-only", kind: "command" });
+			strictEqual(command?.status, "verified");
+			const judged = await verify(scratch, "judged", {
+				...base,
+				kind,
+				...(kind === "numeric-compare"
+					? { numeric: { reference, tolerance: { absolute: 0 } } }
+					: { perf: { budget: { wallTimeMs: 0.001 } } }),
+			});
+			strictEqual(judged?.status, "rejected");
+			strictEqual(judged?.checks[0]?.check, "value");
+			strictEqual(judged?.checks[0]?.memo, false);
+			strictEqual(judged?.checks[0]?.report?.kind, kind);
+			strictEqual(runCount(scratch), 2);
+		});
+	}
+
+	for (const bound of [
+		"numeric tolerance",
+		"performance budget",
+		"budget tolerance",
+		"baseline tolerance",
+		"timeout",
+	] as const) {
+		it(`invalidates a memo pass when the ${bound} changes`, async () => {
+			const scratch = makeScratch();
+			const reference = join(scratch.project, "reference.json");
+			const baseline = join(scratch.project, "baseline.json");
+			writeFileSync(reference, '{"value":1}');
+			writeFileSync(baseline, '{"version":1,"wallTimeMs":0.001}');
+			const base = measurement(scratch);
+			const pairs: Record<typeof bound, [ResolvedCheck, ResolvedCheck]> = {
+				"numeric tolerance": [
+					{ ...base, kind: "numeric-compare", numeric: { reference, tolerance: { absolute: 1 } } },
+					{ ...base, kind: "numeric-compare", numeric: { reference, tolerance: { absolute: 0 } } },
+				],
+				"performance budget": [
+					{ ...base, kind: "perf-budget", perf: { budget: { wallTimeMs: 60_000 } } },
+					{ ...base, kind: "perf-budget", perf: { budget: { wallTimeMs: 0.001 } } },
+				],
+				"budget tolerance": [
+					{ ...base, kind: "perf-budget", perf: { budget: { wallTimeMs: 0.001, tolerance: { relative: 60_000_000 } } } },
+					{ ...base, kind: "perf-budget", perf: { budget: { wallTimeMs: 0.001, tolerance: { relative: 0 } } } },
+				],
+				"baseline tolerance": [
+					{ ...base, kind: "perf-budget", perf: { baseline, tolerance: { relative: 60_000_000 } } },
+					{ ...base, kind: "perf-budget", perf: { baseline, tolerance: { relative: 0 } } },
+				],
+				timeout: [base, { ...base, timeoutMs: 60_000 }],
+			};
+			const [loose, strict] = pairs[bound];
+			const first = await verify(scratch, "loose", loose);
+			strictEqual(first?.status, "verified");
+			const second = await verify(scratch, "strict", strict);
+			strictEqual(second?.checks[0]?.memo, false);
+			strictEqual(second?.status, bound === "timeout" ? "verified" : "rejected");
+			strictEqual(runCount(scratch), 2);
+		});
+	}
+
+	for (const kind of ["numeric-compare", "perf-budget"] as const) {
+		it(`invalidates ${kind} evidence when an ignored reference or baseline changes`, async () => {
+			const scratch = makeScratch();
+			writeFileSync(join(scratch.project, ".gitignore"), "measurements/\n");
+			mkdirSync(join(scratch.project, "measurements"));
+			const path = join(scratch.project, "measurements", "reference.json");
+			writeFileSync(path, kind === "numeric-compare" ? '{"value":2}' : '{"version":1,"wallTimeMs":60000}');
+			const resolved: ResolvedCheck = {
+				...measurement(scratch),
+				kind,
+				...(kind === "numeric-compare"
+					? { numeric: { reference: path, tolerance: { absolute: 0 } } }
+					: { perf: { baseline: path } }),
+			};
+			const fingerprint = workspaceFingerprint(scratch.project);
+			ok(fingerprint);
+			const first = await verify(scratch, "original", resolved);
+			strictEqual(first?.status, "verified");
+			const reused = await verify(scratch, "identical", structuredClone(resolved));
+			strictEqual(reused?.checks[0]?.memo, true);
+			strictEqual(reused?.checks[0]?.evidenceRunId, "original");
+			deepStrictEqual(reused?.checks[0]?.report, first?.checks[0]?.report);
+			writeFileSync(path, kind === "numeric-compare" ? '{"value":1}' : '{"version":1,"wallTimeMs":0.001}');
+			strictEqual(
+				workspaceFingerprint(scratch.project),
+				fingerprint,
+				"ignored data does not change the workspace fingerprint",
+			);
+			const changed = await verify(scratch, "changed", resolved);
+			strictEqual(changed?.status, "rejected");
+			strictEqual(changed?.checks[0]?.memo, false);
+			rmSync(path);
+			const missing = await verify(scratch, "missing", resolved);
+			strictEqual(missing?.status, "rejected");
+			strictEqual(missing?.checks[0]?.memo, false);
+			strictEqual(runCount(scratch), 3);
+		});
+	}
+
+	it("preserves check names and reuses identical command evidence with provenance", async () => {
+		const scratch = makeScratch();
+		const base = measurement(scratch);
+		const first = await verify(scratch, "first", base);
+		strictEqual(first?.status, "verified");
+		const renamed = await verify(scratch, "renamed", { ...base, check: "energy" });
+		strictEqual(renamed?.checks[0]?.check, "energy");
+		strictEqual(renamed?.checks[0]?.memo, false);
+		const reused = await verify(scratch, "reused", { ...base, kind: "command" });
+		strictEqual(reused?.checks[0]?.check, "value");
+		strictEqual(reused?.checks[0]?.memo, true);
+		strictEqual(reused?.checks[0]?.evidenceRunId, "first");
+		strictEqual(reused?.checks[0]?.artifactPath, first?.checks[0]?.artifactPath);
+		strictEqual(runCount(scratch), 2);
+	});
+
+	it("retains every batch judgment sharing argv and only deduplicates identical declarations", async () => {
+		const scratch = makeScratch();
+		const reference = join(scratch.project, "reference.json");
+		const alternate = join(scratch.project, "alternate.json");
+		writeFileSync(reference, '{"value":1}');
+		writeFileSync(alternate, '{"value":2}');
+		const base = measurement(scratch);
+		const checks: ResolvedCheck[] = [
+			base,
+			{ ...base, check: "energy" },
+			{ ...base, kind: "numeric-compare", numeric: { reference, tolerance: { absolute: 1 } } },
+			{ ...base, kind: "numeric-compare", numeric: { reference, tolerance: { absolute: 0 } } },
+			{ ...base, kind: "numeric-compare", numeric: { reference: alternate, tolerance: { absolute: 0 } } },
+			{ ...base, kind: "perf-budget", perf: { budget: { wallTimeMs: 60_000 } } },
+			{ ...base, kind: "perf-budget", perf: { budget: { wallTimeMs: 0.001 } } },
+			{ ...base, timeoutMs: 60_000 },
+		];
+		const gate = createBatchVerificationGate({ stateDir: scratch.stateDir });
+		gate.live("owner");
+		gate.live("sibling");
+		const [owner, sibling] = await Promise.all([
+			gate.arrive(member({ runId: "owner", scratch, checks })),
+			gate.arrive(member({ runId: "sibling", scratch, checks: structuredClone(checks) })),
+		]);
+		for (const result of [owner, sibling]) {
+			strictEqual(result?.status, "rejected");
+			deepStrictEqual(
+				result?.checks.map((entry) => entry.check),
+				checks.map((entry) => entry.check),
+			);
+			deepStrictEqual(
+				result?.checks.map((entry) => entry.exitCode),
+				[0, 0, 0, 1, 0, 0, 1, 0],
+			);
+			deepStrictEqual(
+				result?.checks.map((entry) => entry.report?.kind),
+				[
+					undefined,
+					undefined,
+					"numeric-compare",
+					"numeric-compare",
+					"numeric-compare",
+					"perf-budget",
+					"perf-budget",
+					undefined,
+				],
+			);
+		}
+		ok(sibling?.checks.every((entry) => entry.evidenceRunId === "owner"));
+		strictEqual(runCount(scratch), checks.length);
+	});
+});
 
 describe("batch-settled host verification", () => {
 	it("runs one batch check once and rejects only the worker whose write roots the failure names", async () => {

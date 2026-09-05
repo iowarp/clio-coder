@@ -29,6 +29,8 @@ Trust spine: typed claims, executable validation, and decision provenance. Answe
 - The dispatch board reads observability's run projection. One fold owns lifecycle events, worker progress, receipt trust, retries, cancellation, fleet positions, and evidence readiness; the board keeps ordering, selection, and rendering. Terminal status and accounting come from the same projection the observability contract publishes.
 
 ### Fixed
+- Host verification memoization and batch deduplication now include the check identity, kind, execution timeout, numerical tolerances, performance bounds, and reference or baseline contents. Different judgments cannot inherit an earlier pass, while identical valid checks retain evidence reuse and provenance (#333).
+- Host numerical verification now judges bounded command stdout, matching ordinary verify. JSON diagnostics on stderr cannot supply a missing measurement or invalidate valid stdout; stderr remains available in the command artifact (#334).
 - Slash argument completion now reads loaded agent recipes, configured targets and known models, installed skills, and session tasks from the interactive app contracts (#303).
 - Workbench desktop notification mute preference now persists in local storage across page reloads (#322).
 - ACP `session/close` releases the bound session slot so a host can create another session on the same child process.

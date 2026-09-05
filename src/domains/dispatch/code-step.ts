@@ -107,6 +107,8 @@ export interface CodeStepRecord {
 export interface CodeStepOutcome {
 	report: CodeReportResult;
 	record: CodeStepRecord;
+	/** Stdout retained within the shared capture cap, for structured command judgments. */
+	stdout: string;
 	/** Canonical JSON of the report; this is the text that crosses plan edges. */
 	output: string;
 }
@@ -210,6 +212,7 @@ interface SpawnOutcome {
 	signal: string | null;
 	timedOut: boolean;
 	captured: Buffer;
+	stdout: Buffer;
 	outputBytes: number;
 	spawnError: string | null;
 }
@@ -226,6 +229,7 @@ async function spawnCommand(input: CodeStepRunInput, cwd: string, argv: Readonly
 		});
 		reportCommitAttributionDiagnostic(attribution.diagnostic);
 		const chunks: Buffer[] = [];
+		const stdoutChunks: Buffer[] = [];
 		let outputBytes = 0;
 		let captured = 0;
 		let settled = false;
@@ -239,16 +243,17 @@ async function spawnCommand(input: CodeStepRunInput, cwd: string, argv: Readonly
 			// whole tree rather than orphaning a test runner's children.
 			detached: process.platform !== "win32",
 		});
-		const collect = (chunk: Buffer): void => {
+		const collect = (chunk: Buffer, stdout: boolean): void => {
 			outputBytes += chunk.length;
 			if (captured >= CODE_STEP_CAPTURE_MAX_BYTES) return;
 			const room = CODE_STEP_CAPTURE_MAX_BYTES - captured;
 			const slice = chunk.length <= room ? chunk : chunk.subarray(0, room);
 			chunks.push(slice);
+			if (stdout) stdoutChunks.push(slice);
 			captured += slice.length;
 		};
-		child.stdout?.on("data", collect);
-		child.stderr?.on("data", collect);
+		child.stdout?.on("data", (chunk: Buffer) => collect(chunk, true));
+		child.stderr?.on("data", (chunk: Buffer) => collect(chunk, false));
 		const kill = (): void => {
 			if (child.pid === undefined) return;
 			try {
@@ -276,6 +281,7 @@ async function spawnCommand(input: CodeStepRunInput, cwd: string, argv: Readonly
 				signal,
 				timedOut,
 				captured: Buffer.concat(chunks),
+				stdout: Buffer.concat(stdoutChunks),
 				outputBytes,
 				spawnError,
 			});
@@ -317,6 +323,7 @@ export async function runCodeStep(input: CodeStepRunInput): Promise<CodeStepOutc
 				signal: null,
 				timedOut: false,
 				captured: Buffer.from(`${CODE_STEP_EMPTY_DIFF_MESSAGE}\n`, "utf8"),
+				stdout: Buffer.alloc(0),
 				outputBytes: 0,
 				spawnError: null,
 			}
@@ -383,5 +390,5 @@ export async function runCodeStep(input: CodeStepRunInput): Promise<CodeStepOutc
 		artifactPaths,
 		reportDigest: codeReportDigest(report),
 	};
-	return { report, record, output: canonicalCodeReport(report) };
+	return { report, record, stdout: spawned.stdout.toString("utf8"), output: canonicalCodeReport(report) };
 }
