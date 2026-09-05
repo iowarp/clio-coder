@@ -483,6 +483,8 @@ export interface RunEnvelope {
 	plan?: RunPlanProvenance;
 	/** Ad-hoc specialist provenance; present only when a persona override composed the stable prompt. */
 	personaOverride?: RunPersonaOverride;
+	/** Decision refs active on the parent decision board at dispatch; absent when the board was empty. */
+	decisionRefs?: ReadonlyArray<string>;
 	exitCode: number | null;
 	pid: number | null;
 	heartbeatAt: string | null;
@@ -828,6 +830,8 @@ export interface RunReceipt {
 	fleetGate?: { path: string; pathHash: string };
 	/** Ad-hoc specialist provenance; present only when a persona override composed the stable prompt. */
 	personaOverride?: RunPersonaOverride;
+	/** Decision refs active on the parent decision board at dispatch; absent when the board was empty. */
+	decisionRefs?: ReadonlyArray<string>;
 	/** Effective project-context tier for this run; absent on receipts written before this field landed. */
 	projectContext?: RunProjectContextProvenance;
 	/**

@@ -37,6 +37,12 @@ export interface CommitAttributionEvidence {
 	materiallyAuthored?: boolean;
 	/** Optional sealed receipt for a directly relevant fact above. */
 	receipt?: CommitReceiptEvidence;
+	/**
+	 * Decision refs (`<interviewId>/<key>`) the committed work was done under,
+	 * read from the session decision board or a sealed receipt's
+	 * `decisionRefs`. Each becomes one `Clio-Decision:` trailer.
+	 */
+	decisions?: ReadonlyArray<string>;
 }
 
 const TRAILER_LINE = /^([A-Za-z0-9][A-Za-z0-9-]*):[ \t]+(.+)$/u;

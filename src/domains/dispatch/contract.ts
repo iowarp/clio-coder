@@ -79,6 +79,14 @@ export interface DispatchRequest extends JobSpec {
 	 * validation projection strips it like the reservation and ledger refs.
 	 */
 	parentToolCallId?: string;
+	/**
+	 * Decision refs (`<interviewId>/<key>`) active on the parent session's
+	 * decision board when this request was built. Sealed by the orchestrator
+	 * from the board snapshot, never by model arguments: the validation
+	 * projection strips it like `reservation` and `ledger`. Copied onto the run
+	 * envelope and receipt so a receipt names the decisions it worked under.
+	 */
+	decisionRefs?: ReadonlyArray<string>;
 }
 
 /** Internal, non-serializable admission hook for transactional resource owners. */

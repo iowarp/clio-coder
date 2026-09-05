@@ -99,6 +99,9 @@ export const RECEIPT_INTEGRITY_FIELD_COVERAGE = {
 	plan: true,
 	fleetGate: true,
 	personaOverride: true,
+	// Absent unless the parent board held decisions, so older receipts and
+	// decision-free runs digest exactly as before.
+	decisionRefs: true,
 	projectContext: true,
 	// Always set on receipts written after #104 landed; absent only on older
 	// receipts, which omit these fields from canonical serialization.
@@ -193,6 +196,7 @@ function ledgerDigestFields(envelope: RunEnvelope): Record<string, unknown> {
 		executionRole: envelope.executionRole,
 		task: envelope.task,
 		...(envelope.budget !== undefined ? { budget: envelope.budget } : {}),
+		...(envelope.decisionRefs !== undefined ? { decisionRefs: envelope.decisionRefs } : {}),
 		targetId: envelope.targetId,
 		wireModelId: envelope.wireModelId,
 		runtimeId: envelope.runtimeId,

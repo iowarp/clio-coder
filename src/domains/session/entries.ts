@@ -213,6 +213,14 @@ export interface TaskLedgerEntry extends BaseSessionEntry {
 
 export type DecisionStatus = "active" | "superseded";
 
+/**
+ * Who settled a decision. `operator` is an answer the operator gave in an
+ * `ask_user` interview. `agent` is a design choice the model recorded itself
+ * through the `decide` tool, with the alternatives it rejected and why. Absent
+ * on entries written before agent decisions existed, which were all operator.
+ */
+export type DecisionSource = "operator" | "agent";
+
 export interface DecisionRecord {
 	key: string;
 	value: string;
@@ -222,11 +230,33 @@ export interface DecisionRecord {
 	decidedAt: string;
 	revisedAt?: string;
 	correction?: string;
+	source?: DecisionSource;
+	/** Options considered and not taken. Only agent decisions carry these. */
+	alternatives?: string[];
+	/** Why `value` won over `alternatives`. Only agent decisions carry this. */
+	rationale?: string;
 }
 
-/** One complete, branch-anchored snapshot of a settled operator interview. */
+/**
+ * Stable reference to one decision: `<interviewId>/<key>`. Both halves are
+ * already unique on the active path, so the pair needs no third id. Run
+ * envelopes, receipts, and commit trailers cite decisions by this string.
+ */
+export type DecisionRef = string;
+
+export function decisionRef(interviewId: string, key: string): DecisionRef {
+	return `${interviewId}/${key}`;
+}
+
+/**
+ * One complete, branch-anchored snapshot of a settled decision set. An
+ * `interview` origin is an operator `ask_user` round; an `agent` origin is a
+ * set the model recorded with the `decide` tool, where `interviewId` is the
+ * agent decision set id and `roundCount` is 0. Absent origin means interview.
+ */
 export interface DecisionLedgerEntry extends BaseSessionEntry {
 	kind: "decisionLedger";
+	origin?: "interview" | "agent";
 	interviewId: string;
 	interviewStatus: "complete" | "cancelled";
 	startedAt: string;
