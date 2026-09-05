@@ -1,6 +1,6 @@
-import { match, ok, strictEqual } from "node:assert/strict";
+import { doesNotMatch, match, notStrictEqual, ok, strictEqual } from "node:assert/strict";
 import { type ChildProcessWithoutNullStreams, spawn } from "node:child_process";
-import { existsSync, mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs";
+import { existsSync, mkdirSync, mkdtempSync, readdirSync, readFileSync, rmSync, writeFileSync } from "node:fs";
 import { createServer, type IncomingMessage, type Server } from "node:http";
 import type { AddressInfo } from "node:net";
 import { tmpdir } from "node:os";
@@ -182,7 +182,9 @@ async function provider(options: {
 	reply: string;
 	tool?: boolean;
 	toolCallId?: string;
-}): Promise<{ server: Server; url: string }> {
+	next?: () => { reply?: string; tool?: { name: string; args: Record<string, unknown> } };
+}): Promise<{ server: Server; url: string; requests: Array<Record<string, unknown>> }> {
+	const requests: Array<Record<string, unknown>> = [];
 	const server = createServer(async (request, response) => {
 		if (request.method === "GET" && request.url === "/v1/models") {
 			response.writeHead(200, { "content-type": "application/json" });
@@ -200,8 +202,10 @@ async function provider(options: {
 			response.end(JSON.stringify({ choices: [{ message: { role: "assistant", content: options.reply } }] }));
 			return;
 		}
+		requests.push(payload);
+		const next = options.next?.();
 		const messages = payload.messages as Array<{ role?: string }>;
-		const callTool = options.tool && !messages.some((message) => message.role === "tool");
+		const callTool = next?.tool !== undefined || (options.tool && !messages.some((message) => message.role === "tool"));
 		const delta = callTool
 			? {
 					role: "assistant",
@@ -210,11 +214,13 @@ async function provider(options: {
 							index: 0,
 							id: options.toolCallId ?? "call-write",
 							type: "function",
-							function: { name: "write", arguments: '{"path":"note.txt","content":"from ACP"}' },
+							function: next?.tool
+								? { name: next.tool.name, arguments: JSON.stringify(next.tool.args) }
+								: { name: "write", arguments: '{"path":"note.txt","content":"from ACP"}' },
 						},
 					],
 				}
-			: { role: "assistant", content: options.reply };
+			: { role: "assistant", content: next?.reply ?? options.reply };
 		response.writeHead(200, { "content-type": "text/event-stream" });
 		response.write(`data: ${JSON.stringify({ choices: [{ index: 0, delta }] })}\n\n`);
 		response.write(
@@ -226,7 +232,7 @@ async function provider(options: {
 		response.end("data: [DONE]\n\n");
 	});
 	await new Promise<void>((resolve) => server.listen(0, "127.0.0.1", resolve));
-	return { server, url: `http://127.0.0.1:${(server.address() as AddressInfo).port}` };
+	return { server, url: `http://127.0.0.1:${(server.address() as AddressInfo).port}`, requests };
 }
 async function closeServer(server: Server): Promise<void> {
 	server.closeAllConnections();
@@ -277,6 +283,95 @@ describe("smoke/ACP stdio boundary", { concurrency: false }, () => {
 			await closeServer(fixture.server);
 			configured.cleanup();
 			empty.cleanup();
+		}
+	});
+
+	it("starts a fresh conversation after close and still resumes the original session", async () => {
+		const target = home();
+		let phase: "first" | "second" | "resume" = "first";
+		let step = 0;
+		const fixture = await provider({
+			reply: "ACP_FIRST_ANSWER",
+			next: () => {
+				const current = step++;
+				if (phase === "first" && current === 0) {
+					return { tool: { name: "tasks", args: { action: "plan", title: "ACP_FIRST_BOARD", tasks: ["ACP_FIRST_TASK"] } } };
+				}
+				if (phase === "first" && current === 1) return { tool: { name: "tasks", args: { action: "start", id: "t1" } } };
+				if (phase !== "first" && current === 0) return { tool: { name: "tasks", args: { action: "list" } } };
+				return {
+					reply: phase === "first" ? "ACP_FIRST_ANSWER" : phase === "second" ? "ACP_SECOND_ANSWER" : "ACP_RESUME_ANSWER",
+				};
+			},
+		});
+		let client: AcpClient | undefined;
+		try {
+			await initialize(target);
+			seedTarget(target, fixture.url);
+			const project = join(target.root, "project");
+			mkdirSync(project);
+			client = launch(target, project);
+			const first = await openSession(client, project);
+			const prompt = async (sessionId: string, text: string): Promise<void> => {
+				const turn = await client?.request<{ stopReason: string }>("session/prompt", {
+					sessionId,
+					prompt: [{ type: "text", text }],
+				});
+				strictEqual(turn?.stopReason, "end_turn");
+			};
+			const ledger = (sessionId: string): Array<Record<string, unknown>> => {
+				const root = join(target.root, "state", "sessions");
+				const path = readdirSync(root, { recursive: true }).find((name) =>
+					String(name).endsWith(`${sessionId}/current.jsonl`),
+				);
+				ok(path, "scratch session ledger exists");
+				return readFileSync(join(root, String(path)), "utf8")
+					.trim()
+					.split("\n")
+					.map((line) => JSON.parse(line));
+			};
+			await prompt(first, "ACP_FIRST_PROMPT");
+			match(JSON.stringify(client.updates), /ACP_FIRST_ANSWER/);
+			match(JSON.stringify(fixture.requests.at(-1)), /\[>\] t1 ACP_FIRST_TASK/);
+			await client.request("session/close", { sessionId: first });
+			const firstEntries = ledger(first);
+			const firstTurnIds = new Set(firstEntries.map((entry) => entry.turnId).filter(Boolean));
+			ok(firstTurnIds.size > 0);
+
+			phase = "second";
+			step = 0;
+			const second = await client.request<{ sessionId: string }>("session/new", { cwd: project, mcpServers: [] });
+			notStrictEqual(second.sessionId, first);
+			const secondStart = fixture.requests.length;
+			client.updates.length = 0;
+			await prompt(second.sessionId, "ACP_SECOND_PROMPT");
+			match(JSON.stringify(client.updates), /ACP_SECOND_ANSWER/);
+			const secondRequests = fixture.requests.slice(secondStart);
+			ok(secondRequests.length >= 2, "second turn used the real tasks tool");
+			doesNotMatch(JSON.stringify(secondRequests), /ACP_FIRST_(PROMPT|ANSWER|BOARD|TASK)/);
+			await client.request("session/close", { sessionId: second.sessionId });
+			const secondEntries = ledger(second.sessionId);
+			doesNotMatch(JSON.stringify(secondEntries), /ACP_FIRST_(PROMPT|ANSWER|BOARD|TASK)/);
+			for (const entry of secondEntries) {
+				strictEqual(firstTurnIds.has(entry.turnId), false, "turn identity belongs to the new session");
+				strictEqual(firstTurnIds.has(entry.parentTurnId), false, "turn ancestry belongs to the new session");
+			}
+
+			phase = "resume";
+			step = 0;
+			await client.request("session/load", { sessionId: first, cwd: project, mcpServers: [] });
+			const resumeStart = fixture.requests.length;
+			await prompt(first, "ACP_RESUME_PROMPT");
+			const resumed = JSON.stringify(fixture.requests.slice(resumeStart));
+			match(resumed, /ACP_FIRST_PROMPT/);
+			match(resumed, /ACP_FIRST_ANSWER/);
+			match(resumed, /\[>\] t1 ACP_FIRST_TASK/);
+			doesNotMatch(resumed, /ACP_SECOND_(PROMPT|ANSWER)/);
+			await client.close(first);
+		} finally {
+			client?.kill();
+			await closeServer(fixture.server);
+			target.cleanup();
 		}
 	});
 

@@ -89,7 +89,6 @@ export function createProcessTreeTerminator(
 	let sent = false;
 	let timer: ReturnType<typeof setTimeout> | null = null;
 	const signal = (name: NodeJS.Signals): void => {
-		if (child.exitCode !== null) return;
 		if (child.pid && process.platform !== "win32") {
 			try {
 				process.kill(-child.pid, name);
@@ -98,6 +97,7 @@ export function createProcessTreeTerminator(
 				// The child may not have established its group yet.
 			}
 		}
+		if (child.exitCode !== null) return;
 		child.kill(name);
 	};
 	return {
@@ -105,11 +105,19 @@ export function createProcessTreeTerminator(
 			if (sent) return;
 			sent = true;
 			signal("SIGTERM");
-			timer = setTimeout(() => signal("SIGKILL"), graceMs);
+			timer = setTimeout(() => {
+				timer = null;
+				signal("SIGKILL");
+			}, graceMs);
 		},
 		cleanup() {
-			if (timer) clearTimeout(timer);
-			timer = null;
+			if (timer) {
+				clearTimeout(timer);
+				timer = null;
+				// A closed leader can leave descendants with independent stdio.
+				// Finish the requested cancellation before releasing its escalation.
+				signal("SIGKILL");
+			}
 		},
 	};
 }

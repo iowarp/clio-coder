@@ -60,7 +60,7 @@ export interface AcpServerChat {
 	onEvent(handler: (event: AcpServerEvent) => void): () => void;
 	isStreaming(): boolean;
 	getSessionId(): string | null;
-	/** Replace provider context and the next persisted parent after session/load. */
+	/** Replace provider context and the next persisted parent for a new or loaded session. */
 	resetForSession?(leafTurnId: string | null, replayMessages?: ReadonlyArray<AgentMessage>): void;
 	dispose?(): void;
 }
@@ -2128,9 +2128,8 @@ export async function serveClioAcpAgent(options: ClioAcpServerOptions): Promise<
 
 	options.transport.onRequest("session/new", (params) => {
 		requireInitialized();
-		// One chat instance, one provider context, one ledger ancestry. A second
-		// session id over the same process would share all three with the first,
-		// so the honest answer is to refuse and let the client start a process.
+		// The chat instance can bind only one session at a time. Closing that
+		// session releases the slot; the next creation resets its conversation.
 		if (sessionCreated) {
 			throw new AcpRequestError(-32000, "this server hosts one session per process", { code: "session_limit" });
 		}
@@ -2144,6 +2143,7 @@ export async function serveClioAcpAgent(options: ClioAcpServerOptions): Promise<
 		if (safeStoredIdentifier(id, ACP_MAX_SESSION_ID_BYTES) === null) {
 			throw new AcpRequestError(-32000, "session creation failed", { code: "internal_error" });
 		}
+		options.chat.resetForSession?.(null);
 		const autonomy = options.autonomy?.() ?? DEFAULT_AUTONOMY_LEVEL;
 		const boundTarget = safeConfiguredIdentifier(meta?.target ?? route.target, ACP_MAX_TARGET_ID_BYTES);
 		const boundModel = safeConfiguredIdentifier(meta?.model ?? route.model, ACP_MAX_MODEL_ID_BYTES);

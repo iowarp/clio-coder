@@ -298,10 +298,11 @@ export function startClaudeCodeWorkerRun(
 		result: null as Record<string, unknown> | null,
 	};
 	let aborted = false;
+	let settled = false;
 	let transportError = "";
 	const terminator = createProcessTreeTerminator(child, dependencies.killGraceMs ?? 1500);
 	const abort = (): void => {
-		if (child.exitCode !== null) return;
+		if (settled) return;
 		aborted = true;
 		terminator.terminate();
 	};
@@ -352,6 +353,7 @@ export function startClaudeCodeWorkerRun(
 			}
 			return { messages, exitCode: finalMessage.stopReason === "stop" ? 0 : 1 };
 		} finally {
+			settled = true;
 			terminator.cleanup();
 			input.signal?.removeEventListener("abort", onAbort);
 		}

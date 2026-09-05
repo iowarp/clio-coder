@@ -35,7 +35,23 @@ writeFileSync(join(process.cwd(), "observed.json"), JSON.stringify({
     CLIO_CODER_ALLOW_EXTERNAL_FULL_ACCESS: process.env.CLIO_CODER_ALLOW_EXTERNAL_FULL_ACCESS }
 }));
 if (scenario.stderr) process.stderr.write(scenario.stderr);
-if (scenario.hang) {
+if (scenario.exitLeader) {
+  writeFileSync(join(process.cwd(), "leader.pid"), String(process.pid));
+  const grandchild = spawn(process.execPath, ["--input-type=module", "-e", \`
+    import { writeFileSync } from "node:fs";
+    process.on("SIGTERM", () => {});
+    writeFileSync("grandchild.pid", String(process.pid));
+    setInterval(() => {}, 1000);
+  \`], { stdio: scenario.inheritStdio ? "inherit" : "ignore" });
+  writeFileSync("grandchild.spawned.pid", String(grandchild.pid));
+  const exit = () => process.exit(0);
+  process.on("SIGTERM", exit);
+  if (scenario.exitBeforeAbort) {
+    const poll = setInterval(() => {
+      try { readFileSync("grandchild.pid"); clearInterval(poll); exit(); } catch {}
+    }, 5);
+  }
+} else if (scenario.hang) {
   const grandchild = spawn(process.execPath, ["-e", "process.on('SIGTERM',()=>{});setInterval(()=>{},1000)"], { stdio: "ignore" });
   writeFileSync(join(process.cwd(), "grandchild.pid"), String(grandchild.pid));
   process.on("SIGTERM", () => {});
@@ -197,6 +213,84 @@ describe("Claude Code external subprocess contract", () => {
 		equal(assistant(cumulativeResult).stopReason, "error");
 		match(assistant(cumulativeResult).errorMessage ?? "", /cumulative output limit/);
 	});
+
+	for (const scenario of [
+		{ inheritStdio: false, exitBeforeAbort: false },
+		{ inheritStdio: true, exitBeforeAbort: false },
+		{ inheritStdio: true, exitBeforeAbort: true },
+	]) {
+		it(`finishes cancellation after the CLI exits (inherited stdio: ${scenario.inheritStdio}, already exited: ${scenario.exitBeforeAbort})`, {
+			skip: process.platform === "win32",
+		}, async () => {
+			const { root, binary, home } = scratch();
+			writeScenario(root, { exitLeader: true, ...scenario });
+			const handle = startClaudeCodeWorkerRun(workerInput(root), () => undefined, {
+				binary,
+				workspaceRoot: root,
+				environment: { PATH: process.env.PATH, HOME: home },
+				killGraceMs: 50,
+			});
+			const readPid = (name: string): number | null => {
+				try {
+					const pid = Number(readFileSync(join(root, name), "utf8"));
+					return Number.isSafeInteger(pid) && pid > 0 ? pid : null;
+				} catch {
+					return null;
+				}
+			};
+			const running = (pid: number): boolean => {
+				try {
+					process.kill(pid, 0);
+					if (process.platform === "linux") {
+						return !/\) Z /.test(readFileSync(`/proc/${pid}/stat`, "utf8"));
+					}
+					return true;
+				} catch {
+					return false;
+				}
+			};
+			const waitUntil = async (ready: () => boolean): Promise<boolean> => {
+				const deadline = performance.now() + 2_000;
+				while (!ready() && performance.now() < deadline) await new Promise((resolve) => setTimeout(resolve, 5));
+				return ready();
+			};
+			try {
+				ok(await waitUntil(() => readPid("grandchild.pid") !== null), "grandchild installed its signal handler");
+				const pid = readPid("grandchild.pid");
+				ok(pid);
+				if (scenario.exitBeforeAbort) {
+					ok(
+						await waitUntil(() => {
+							const leader = readPid("leader.pid");
+							return leader !== null && !running(leader);
+						}),
+					);
+				}
+				let settled = false;
+				void handle.promise.then(() => {
+					settled = true;
+				});
+				handle.abort();
+				ok(await waitUntil(() => settled && !running(pid)), "cancelled worker and grandchild settle within two seconds");
+				const result = await handle.promise;
+				equal(result.exitCode, 1);
+				equal(assistant(result).stopReason, "aborted");
+			} finally {
+				// These PIDs come only from this test's freshly created worker tree.
+				for (const name of ["grandchild.spawned.pid", "leader.pid"]) {
+					const pid = readPid(name);
+					if (pid && running(pid)) {
+						try {
+							process.kill(pid, "SIGKILL");
+						} catch {
+							/* Already exited. */
+						}
+					}
+				}
+				await handle.promise;
+			}
+		});
+	}
 
 	it("cancels the POSIX process group, escalates, and removes its abort listener", {
 		skip: process.platform === "win32",
