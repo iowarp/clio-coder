@@ -3,8 +3,11 @@ import type { AddressInfo } from "node:net";
 import { closeServer } from "./openai-compat-fixture.js";
 
 /** Controlled reproduction of LiteLLM filtering before an LM Studio upstream. */
-export async function startGatewayThinkingFixture(runtime: string | undefined = "lm-studio") {
-	const modelId = "dynamo/qwen3.8-27b";
+export async function startGatewayThinkingFixture(
+	runtime: string | undefined = "lm-studio",
+	modelId = "dynamo/qwen3.8-27b",
+	beforeMetadata?: () => Promise<void>,
+) {
 	const requests: Array<Record<string, unknown>> = [];
 	const paths: string[] = [];
 	const server = createServer(async (req, res) => {
@@ -13,6 +16,9 @@ export async function startGatewayThinkingFixture(runtime: string | undefined = 
 		if (req.url === "/health/liveliness") return res.end("{}");
 		if (req.url === "/v1/models") return res.end(JSON.stringify({ data: [{ id: modelId }] }));
 		if (req.url === "/v1/model/info") {
+			// Delay the body after headers to exercise late metadata, too.
+			if (beforeMetadata) res.flushHeaders();
+			await beforeMetadata?.();
 			return res.end(
 				JSON.stringify({
 					data: [

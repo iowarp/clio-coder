@@ -268,14 +268,22 @@ export function createProvidersBundle(context: DomainContext): DomainBundle<Prov
 		return readSettings();
 	}
 
-	async function buildProbeContextForTarget(target: TargetDescriptor, desc: RuntimeDescriptor): Promise<ProbeContext> {
+	async function buildProbeContextForTarget(
+		target: TargetDescriptor,
+		desc: RuntimeDescriptor,
+		signal?: AbortSignal,
+	): Promise<ProbeContext> {
 		const probeCtx: ProbeContext = {
 			credentialsPresent: credentialsPresent(),
 			httpTimeoutMs: DEFAULT_PROBE_TIMEOUT_MS,
+			...(signal ? { signal } : {}),
 		};
 		if (!targetRequiresAuth(target, desc)) return probeCtx;
 		try {
-			const resolution = await authStore.resolveForTarget(resolveAuthTarget(target, desc), { includeFallback: false });
+			const resolution = await authStore.resolveForTarget(resolveAuthTarget(target, desc), {
+				includeFallback: false,
+				...(signal ? { signal } : {}),
+			});
 			if (resolution.apiKey) probeCtx.authToken = resolution.apiKey;
 		} catch {
 			// Authenticated probes should still return a runtime-specific missing-auth error.
@@ -376,8 +384,9 @@ export function createProvidersBundle(context: DomainContext): DomainBundle<Prov
 	async function probeTargetInternal(
 		target: TargetDescriptor,
 		live: boolean,
-		options?: { reasoning?: boolean },
+		options?: { reasoning?: boolean; signal?: AbortSignal },
 	): Promise<TargetStatus> {
+		options?.signal?.throwIfAborted();
 		const previous = statuses.get(target.id);
 		const desc = registry.get(target.runtime);
 		if (!desc) {
@@ -391,13 +400,15 @@ export function createProvidersBundle(context: DomainContext): DomainBundle<Prov
 			statuses.set(target.id, status);
 			return status;
 		}
-		const probeCtx = await buildProbeContextForTarget(target, desc);
+		const probeCtx = await buildProbeContextForTarget(target, desc, options?.signal);
+		options?.signal?.throwIfAborted();
 		let probeResult: ProbeResult;
 		try {
 			probeResult = await desc.probe(target, probeCtx);
 		} catch (err) {
 			probeResult = { ok: false, error: err instanceof Error ? err.message : String(err) };
 		}
+		options?.signal?.throwIfAborted();
 		if (probeResult.ok && typeof desc.probeModels === "function" && !probeResult.models) {
 			try {
 				const ids = await desc.probeModels(target, probeCtx);
@@ -406,6 +417,7 @@ export function createProvidersBundle(context: DomainContext): DomainBundle<Prov
 				// model discovery is best-effort; keep probe as-is.
 			}
 		}
+		options?.signal?.throwIfAborted();
 		if (probeResult.ok && options?.reasoning !== false && typeof desc.probeReasoning === "function") {
 			const settings = readConfig();
 			const orchestratorTarget = settings.chat.target === target.id ? settings.chat.model : null;
@@ -413,6 +425,7 @@ export function createProvidersBundle(context: DomainContext): DomainBundle<Prov
 			if (candidateModelId) {
 				try {
 					const result = await desc.probeReasoning(target, candidateModelId, probeCtx);
+					options?.signal?.throwIfAborted();
 					reasoningCache.set(reasoningCacheKey(target.id, candidateModelId), result.reasoning);
 					const capabilityModelId = probeResult.capabilityModelId ?? null;
 					if (capabilityModelId === null || capabilityModelId === candidateModelId) {
@@ -434,6 +447,8 @@ export function createProvidersBundle(context: DomainContext): DomainBundle<Prov
 				}
 			}
 		}
+		// A cancelled role preparation must not publish failed/stale target state.
+		options?.signal?.throwIfAborted();
 		const status = buildStatus(target, desc, probeResult, previous);
 		statuses.set(target.id, status);
 		if (probeResult.ok && probeResult.models !== undefined) {

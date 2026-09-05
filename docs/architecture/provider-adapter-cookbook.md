@@ -173,6 +173,20 @@ contract test that reconstructs Pi's whole adaptive or budget payload.
 
 ### 3.3 Thinking controls through LiteLLM
 
+Dedicated memory and compaction roles read a cold LiteLLM target's metadata
+before synthesizing the completion model. The read disables reasoning probes;
+it does not run an extra inference request. Each selected target owns its probe
+state, even when two targets share a gateway URL. A successful unknown or mixed
+runtime declaration remains unknown and is not repeatedly probed for a preferred
+answer. Memory includes discovery and auth in its existing generation/deadline
+boundary; cancellation cannot launch a later completion or mark the endpoint
+down. Fresh discovered output limits also bound its request. Compaction checks
+the originating session/branch after preparation and uses the existing simple
+stream API with thinking off, rather than inferring an active level from the
+model's reasoning capability. Cold worker admission is a separate caller and
+must be validated independently.
+
+
 A gateway alias is not an upstream runtime identity. Clio consumes the optional
 `model_info.runtime` deployment declaration from LiteLLM's `/v1/model/info` only
 when every deployment of the alias names the same recognized control runtime:

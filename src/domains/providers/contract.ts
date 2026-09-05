@@ -95,7 +95,8 @@ export interface ProvidersContract {
 	 * `reasoning: false` skips an inference-based reasoning-capability probe while
 	 * retaining the target's liveness and model-catalog checks.
 	 */
-	probeTarget(id: string, options?: { reasoning?: boolean }): Promise<TargetStatus | null>;
+	/** Optional cancellation covers auth and metadata; a cancelled probe does not publish health. */
+	probeTarget(id: string, options?: { reasoning?: boolean; signal?: AbortSignal }): Promise<TargetStatus | null>;
 
 	/** Clear in-memory live connection state for a configured target. */
 	disconnectTarget(id: string): TargetStatus | null;
