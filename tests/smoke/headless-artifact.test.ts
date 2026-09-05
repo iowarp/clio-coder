@@ -210,3 +210,87 @@ for (const scenario of ["clean", "recovered", "recovered-gated", "terminal-error
 		}
 	});
 }
+
+// The task deadline is the eval's own; it has to end the run it is timing.
+// Spawned through `sh -c`, dash kept the shell as the parent, so the deadline's
+// SIGTERM stopped the shell while Clio finished the turn after the deadline,
+// wrote the artifact, sealed a succeeded receipt with exit 0, and exited 0.
+// The item was then recorded as runner_failed beside an ok receipt, with
+// `receipt.outcomeMatchesExit` false (issue #275). Delivered to Clio itself,
+// the deadline cancels the turn and the receipt records that cancellation
+// with the exit status the runner reports.
+test("built headless artifact and eval: task deadline ends the Clio run it is timing", async () => {
+	const scratch = makeScratchHome("clio-headless-artifact-deadline-");
+	// The model answers the artifact call only long after the deadline. A run
+	// the deadline never reached would go on to write the artifact.
+	const fixture = await startOpenAICompatFixture("unexpected follow-up", {
+		toolCall: { name: "artifact", arguments: { kind: "report", content: "fixture report\n" } },
+		responseHeaderDelaysMs: [30_000],
+	});
+	try {
+		const env = {
+			...process.env,
+			...scratch.env,
+			TMPDIR: scratch.dir,
+			NODE_ENV: "test",
+			CLIO_CODER_TEST_OPENAI_KEY: "fixture-key",
+		};
+		const workspace = join(scratch.dir, "workspace");
+		mkdirSync(workspace);
+		const doctor = await run(["doctor", "--fix"], workspace, env);
+		strictEqual(doctor.code, 0, doctor.stderr);
+		seedOpenAICompatToolOrchestrator(join(scratch.dir, "config"), fixture.url, "full-auto");
+		const suite = {
+			version: 2,
+			suite: { id: "artifact-deadline", title: "Artifact deadline", visibility: "public" },
+			matrix: { targets: [{ id: "mock-chat", model: "mock-model" }], repeats: 1 },
+			tasks: [
+				{
+					id: "report",
+					tags: ["regression"],
+					workspace: { kind: "temp-copy", path: workspace },
+					runner: {
+						kind: "clio-coder-run",
+						autonomy: "full-auto",
+						prompt: "Write a report artifact containing exactly: fixture report",
+					},
+					verify: {
+						measure: ["test -f .clio-coder/artifacts/REPORT.md"],
+						assertions: [],
+					},
+					metrics: { collect: ["result.pass", "task.solved", "receipt.outcomeMatchesExit"] },
+					timeoutMs: 8_000,
+				},
+			],
+		};
+		const suitePath = join(scratch.dir, "suite.yaml");
+		const output = join(scratch.dir, "eval.json");
+		writeFileSync(suitePath, JSON.stringify(suite));
+		const evaluated = await run(
+			["eval", "run", "--suite", suitePath, "--out", output, "--clio-coder-entry", CLI],
+			workspace,
+			env,
+		);
+		const report = JSON.parse(readFileSync(output, "utf8")) as EvalArtifactV4;
+		const result = report.results[0];
+		ok(result, evaluated.stderr);
+		const detail = JSON.stringify({
+			failureClass: result.failureClass,
+			metrics: result.metrics,
+			stderr: result.artifacts.stderr,
+		});
+		strictEqual(evaluated.code, 1, evaluated.stderr);
+		strictEqual(result.pass, false, detail);
+		strictEqual(result.failureClass, "runner_failed", detail);
+		strictEqual(result.metrics["task.solved"], false, detail);
+		doesNotMatch(String(result.artifacts.stdout), /"toolName":"artifact"/u);
+		strictEqual(result.metrics["receipt.sealed"], true, detail);
+		strictEqual(result.metrics["receipt.count"], 1, detail);
+		strictEqual(result.metrics["receipt.integrityValid"], true, detail);
+		strictEqual(result.metrics["receipt.outcomeMatchesExit"], true, detail);
+		ok(Number(result.metrics["latency.wallMs"]) < 30_000, detail);
+	} finally {
+		await closeServer(fixture.server);
+		scratch.cleanup();
+	}
+});

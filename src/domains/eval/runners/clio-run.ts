@@ -1,6 +1,5 @@
 import { isAbsolute, relative, resolve, sep } from "node:path";
 import { normalizeClioCoderEventRecord } from "../../../core/naming-events.js";
-import { shellQuote } from "../../../core/shell-quote.js";
 import { clioStateDir } from "../../../core/xdg.js";
 import {
 	evidenceMetricsFromReceipt,
@@ -22,19 +21,23 @@ export async function runClioRunRunner(
 	readObservation?: { allowedPaths: string[]; decoyPaths: string[] },
 ): Promise<EvalRunnerOutput> {
 	const prompt = runner.prompt ?? "";
-	const args = [
-		shellQuote(clioEntry),
+	// Spawned as an argv, not a shell line: the task timeout has to reach the
+	// Clio process itself so the receipt it seals and the exit code this
+	// runner reports describe the same ending. See runShellCommand.
+	const args: [string, ...string[]] = [
+		process.execPath,
+		clioEntry,
 		"run",
 		"--json",
-		...(runner.agent === undefined ? [] : ["--agent", shellQuote(runner.agent)]),
+		...(runner.agent === undefined ? [] : ["--agent", runner.agent]),
 		"--target",
-		shellQuote(target.id),
-		...(target.model === undefined ? [] : ["--model", shellQuote(target.model)]),
-		...(target.thinking === undefined ? [] : ["--thinking", shellQuote(target.thinking)]),
+		target.id,
+		...(target.model === undefined ? [] : ["--model", target.model]),
+		...(target.thinking === undefined ? [] : ["--thinking", target.thinking]),
 		...(runner.autonomy === undefined ? [] : ["--autonomy", runner.autonomy]),
-		shellQuote(prompt),
+		prompt,
 	];
-	const result = await runShellCommand(`${process.execPath} ${args.join(" ")}`, cwd, runner.timeoutMs ?? timeoutMs, env);
+	const result = await runShellCommand(args, cwd, runner.timeoutMs ?? timeoutMs, env);
 	// Usage is folded from the live stream, not from the bounded stdout
 	// artifact: a verbose run's `message_end` events do not survive truncation.
 	const tokens = result.usage;

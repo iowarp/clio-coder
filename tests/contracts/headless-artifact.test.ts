@@ -1,8 +1,10 @@
-import { deepStrictEqual, ok, strictEqual } from "node:assert/strict";
+import { deepStrictEqual, doesNotMatch, match, ok, strictEqual } from "node:assert/strict";
+import { writeFileSync } from "node:fs";
 import { join } from "node:path";
 import { test } from "node:test";
 import { type HeadlessShutdownHooks, runHeadlessMainAgent } from "../../src/cli/modes/print.js";
 import { readRunJournal, receiptInvariantMetrics } from "../../src/domains/eval/metrics/invariants.js";
+import { runClioRunRunner } from "../../src/domains/eval/runners/clio-run.js";
 import type { AgentMessage } from "../../src/engine/types.js";
 import type { ChatLoop, ChatLoopEvent } from "../../src/interactive/chat-loop.js";
 import { isolateClioEnv } from "../harness/scratch-env.js";
@@ -181,3 +183,34 @@ for (const scenario of [
 		}
 	});
 }
+
+// The eval runner's exit code is the invariant's process-side witness, so it
+// has to be the Clio process's own. Through `sh -c` on dash the shell stayed
+// the parent: the deadline's SIGTERM stopped the shell, Clio ran on to seal a
+// succeeded receipt and exit 0, and the runner reported 124 (issue #275). A
+// stand-in entry script shows both halves without a model: its own exit code
+// is reported, and the deadline signal reaches it rather than a shell.
+test("eval clio-coder-run runner: the deadline and the exit code belong to the Clio process", async () => {
+	const scratch = await isolateClioEnv("clio-run-runner-");
+	try {
+		const entry = join(scratch.dir, "fake-clio.mjs");
+		writeFileSync(
+			entry,
+			[
+				'if (process.env.FAKE_CLIO_MODE === "exit-7") process.exit(7);',
+				'process.on("SIGTERM", () => { process.stdout.write("terminated\\n"); process.exit(143); });',
+				'setTimeout(() => { process.stdout.write("finished\\n"); process.exit(0); }, 5000);',
+			].join("\n"),
+		);
+		const runner = { kind: "clio-coder-run", prompt: "fixture" } as const;
+		const target = { id: "fixture" };
+		const own = await runClioRunRunner(runner, scratch.dir, entry, 5_000, target, { FAKE_CLIO_MODE: "exit-7" });
+		strictEqual(own.exitCode, 7);
+		const timedOut = await runClioRunRunner(runner, scratch.dir, entry, 500, target, { FAKE_CLIO_MODE: "linger" });
+		strictEqual(timedOut.exitCode, 143, timedOut.stderr);
+		match(timedOut.stdout, /terminated/u);
+		doesNotMatch(timedOut.stdout, /finished/u);
+	} finally {
+		scratch.restore();
+	}
+});
