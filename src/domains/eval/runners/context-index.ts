@@ -1,4 +1,3 @@
-import { shellQuote } from "../../../core/shell-quote.js";
 import type { EvalSuiteTargetV2 } from "../schema/suite.js";
 import { type EvalRunnerOutput, runShellCommand } from "./external-command.js";
 
@@ -9,12 +8,8 @@ export async function runContextIndexRunner(
 	target: EvalSuiteTargetV2,
 	env?: NodeJS.ProcessEnv,
 ): Promise<EvalRunnerOutput> {
-	const result = await runShellCommand(
-		`${shellQuote(process.execPath)} ${shellQuote(clioEntry)} context index --json`,
-		cwd,
-		timeoutMs,
-		env,
-	);
+	const args: [string, ...string[]] = [process.execPath, clioEntry, "context", "index", "--json"];
+	const result = await runShellCommand(args, cwd, timeoutMs, env);
 	const parsed = parseContextIndexOutput(result.stdout);
 	return {
 		assignmentId: null,
