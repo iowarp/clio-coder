@@ -818,8 +818,14 @@ export interface RunReceipt {
 	node?: RunNodeIdentity;
 	/**
 	 * Route and node identity attested by the worker process that executed the
-	 * run. Absent only when no worker announced, which is the stubbed-spawn path
-	 * contract tests use; every native and remote transport attests.
+	 * run. Every native and remote worker transport attests, so a receipt from
+	 * the worker path carries this field. It is legitimately absent on receipts
+	 * that no worker process produced: the print-mode main-agent receipt
+	 * (src/cli/modes/print.ts), which runs in the orchestrator process, and ACP
+	 * delegation receipts, whose external agent never sends an announce frame.
+	 * The eval process invariants (src/domains/eval/metrics/invariants.ts) rely
+	 * on that absence to skip the main-agent path when counting orphaned
+	 * workers. Contract tests that stub the spawn also leave it absent.
 	 */
 	attestation?: RunReceiptAttestation;
 	/** Dead-node failover hops, oldest first; absent when the run was never rerouted. */
