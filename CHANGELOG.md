@@ -19,6 +19,7 @@ Trust spine: typed claims, executable validation, and decision provenance. Answe
 - The dispatch board reads observability's run projection. One fold owns lifecycle events, worker progress, receipt trust, retries, cancellation, fleet positions, and evidence readiness; the board keeps ordering, selection, and rendering. Terminal status and accounting come from the same projection the observability contract publishes.
 
 ### Fixed
+- Default path policy now marks project and user skill roots read-only for workers and the orchestrator, alongside the existing skill-authority guard; operator installs continue through the CLI (#300).
 - Marketplace offer reminders now collapse catalog descriptions to one line, strip square-bracketed directive markers, and cap description text at 200 characters (#316).
 - Damage-control no longer treats command quotations in `dispatch` and `tasks` prose as shell execution. Execute-class calls still use the same blocked command patterns (#286).
 - Doctor state storage inspection now shares the lifecycle presenter byte formatting helper instead of keeping a private copy with differing units, printing consistent byte sizes across doctor, reset, and uninstall.

@@ -204,12 +204,15 @@ export function createSafetyPolicyEngine(options: SafetyPolicyEngineOptions = {}
 	const pathPolicyInput = projectPolicy.disableDefaultPathPolicy
 		? projectPolicy.pathPolicy
 		: mergePathPolicyInputs(DEFAULT_DAMAGE_CONTROL_PATH_POLICY, projectPolicy.pathPolicy);
-	// Clio's own secret store, by absolute path. The static default list carries
-	// the `credentials.yaml` literal; the expansion has to happen here because
+	// Clio's own secret store and user skills, by absolute path.
+	// Config directory expansion has to happen here because
 	// the list cannot call config helpers at module scope.
 	const expandedDefaults = projectPolicy.disableDefaultPathPolicy
 		? pathPolicyInput
-		: mergePathPolicyInputs(pathPolicyInput, { zeroAccessPaths: clioCredentialStorePaths() });
+		: mergePathPolicyInputs(pathPolicyInput, {
+				zeroAccessPaths: clioCredentialStorePaths(),
+				readOnlyPaths: clioSkillsRootPaths(),
+			});
 	const pathPolicy = compilePathPolicy(expandedDefaults, projectPolicyRoot);
 	// Bash-read scanning tests argument tokens against zero-access entries only:
 	// read-only paths stay readable from bash by design, secrets do not.
@@ -473,6 +476,15 @@ export function createSafetyPolicyEngine(options: SafetyPolicyEngineOptions = {}
 function clioCredentialStorePaths(): string[] {
 	try {
 		return [path.join(clioConfigDir(), "credentials.yaml")];
+	} catch {
+		return [];
+	}
+}
+
+/** Absolute path of Clio's user skills, when resolvable. */
+function clioSkillsRootPaths(): string[] {
+	try {
+		return [path.join(clioConfigDir(), "skills")];
 	} catch {
 		return [];
 	}
