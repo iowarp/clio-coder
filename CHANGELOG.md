@@ -19,6 +19,7 @@ Trust spine: typed claims, executable validation, and decision provenance. Answe
 - The dispatch board reads observability's run projection. One fold owns lifecycle events, worker progress, receipt trust, retries, cancellation, fleet positions, and evidence readiness; the board keeps ordering, selection, and rendering. Terminal status and accounting come from the same projection the observability contract publishes.
 
 ### Fixed
+- Default path policy now marks project and user skill roots read-only for workers and the orchestrator, alongside the existing skill-authority guard; operator installs continue through the CLI (#300).
 - Scratch offload sweeps now report non-ENOENT filesystem errors in a skipped count instead of silently swallowing them.
 - Model discovery no longer treats target status with an undefined model source as a live catalog.
 - The upgrade command now gates test seams behind NODE_ENV=test so testing environment variables are ignored in production.

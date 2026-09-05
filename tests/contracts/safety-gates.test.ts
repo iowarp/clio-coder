@@ -121,6 +121,22 @@ describe("safety gate boundary", () => {
 		strictEqual(destructive.reasonCode.startsWith("damage-control:"), true);
 	});
 
+	it("blocks project and user skill writes and redirects in worker and orchestrator admissions", () => {
+		const main = engine();
+		const worker = createWorkerSafety({ cwd: scratch });
+		for (const skill of [".clio-coder/skills/x/SKILL.md", join(clioConfigDir(), "skills", "x", "SKILL.md")]) {
+			for (const policy of [main, worker]) {
+				for (const call of [
+					{ tool: ToolNames.Write, args: { path: skill, content: "Model instructions." } },
+					{ tool: ToolNames.Bash, args: { command: `echo instructions > '${skill}'` } },
+				]) {
+					strictEqual(policy.evaluate(call).kind, "block", JSON.stringify(call));
+					strictEqual(policy.evaluate(call, "confirmed").kind, "block", JSON.stringify(call));
+				}
+			}
+		}
+	});
+
 	it("protects active project and resolved user skills in main and worker admissions even without path defaults", () => {
 		writeFileSync(join(scratch, ".clio-coder", "safety.yaml"), "version: 1\ndisableDefaultPathPolicy: true\n");
 		const main = engine();
