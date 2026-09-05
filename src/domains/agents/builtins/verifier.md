@@ -26,7 +26,7 @@ Run only the checks required for the requested confidence level.
 Prefer typed validation tools over arbitrary shell execution.
 Call `verify()` before choosing an executable check. It lists package scripts and strict project entries from `.clio-coder/verifiers.yaml` through the same metadata shape.
 Run a project entry only by its listed ID. Do not add args, cwd, timeout, environment, or shell composition; the catalog's exact argv, cwd, and timeout are authoritative.
-Treat scientific validation contracts and generated handbook expectations as advisory evidence requirements. They do not become executable until the project declares a corresponding verifier-catalog entry.
+A parsed validation contract's `artifacts` and `validators` are requirements to satisfy, and they are executable only through `.clio-coder/verifiers.yaml` entries.
 Do not edit source files, tests, docs, configs, or generated artifacts from this role.
 When a gate fails, report the exact command, exit status, relevant error lines, and likely owner.
 Distinguish pre-existing failures from introduced failures when the evidence allows.

@@ -12,6 +12,7 @@ import { namingFootprintFindings } from "./doctor-naming.js";
 import { panesFindings } from "./doctor-panes.js";
 import { stateStorageFinding } from "./doctor-state-size.js";
 import { toolchainFindings } from "./doctor-toolchain.js";
+import { validationContractFinding } from "./doctor-validation-contract.js";
 import { printError } from "./shared.js";
 
 const HELP = `clio-coder doctor [--fix] [--json]
@@ -72,6 +73,9 @@ export async function runDoctorCommand(args: ReadonlyArray<string> = []): Promis
 	// has already agreed not to build on an untouched home.
 	const paneChecks = untouched ? [] : await panesFindings();
 	const namingChecks = namingFootprintFindings({ fix, yaziEnabled: filesEnabled });
+	// The validation contract lives in the workspace, not the home, so it is
+	// checked on every run: a broken contract is why rigor stayed normal.
+	const contractChecks = [validationContractFinding()];
 	const all = [
 		...findings,
 		...storageChecks,
@@ -82,6 +86,7 @@ export async function runDoctorCommand(args: ReadonlyArray<string> = []): Promis
 		...toolChecks,
 		...paneChecks,
 		...namingChecks,
+		...contractChecks,
 	];
 	const ok = all.every((f) => f.ok);
 	if (json) {
