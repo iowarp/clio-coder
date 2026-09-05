@@ -1,9 +1,28 @@
 import assert from "node:assert/strict";
+import { execFile } from "node:child_process";
 import { PassThrough, Writable } from "node:stream";
 import { test } from "node:test";
 import { setImmediate } from "node:timers/promises";
+import { promisify } from "node:util";
 import { AcpProcessError } from "../../src/engine/acp/errors.js";
 import { ACP_MAX_INPUT_LINE_BYTES, createStdioServerTransport } from "../../src/engine/acp/transport.js";
+import { makeScratchHome } from "../harness/scratch-env.js";
+
+for (const scenario of ["drain", "overflow", "initial", "initial-ascii", "write-error", "fast"] as const) {
+	test(`ACP guarded production stdout handles ${scenario}`, async () => {
+		const home = makeScratchHome("clio-acp-output-");
+		try {
+			const env = { ...process.env, ...home.env };
+			delete env.NODE_TEST_CONTEXT;
+			await promisify(execFile)(process.execPath, ["--import", "tsx", "tests/fixtures/acp-output.mjs", scenario], {
+				env,
+				timeout: 5_000,
+			});
+		} finally {
+			home.cleanup();
+		}
+	});
+}
 
 test("ACP pauses output until drain and delivers queued UTF-8 frames in order", async () => {
 	const received: string[] = [];
@@ -102,6 +121,25 @@ test("ACP fast sinks receive frames immediately", () => {
 			received.map((line) => JSON.parse(line).method),
 			["first", "second"],
 		);
+		assert.equal(output.listenerCount("drain"), 0);
+	} finally {
+		transport.close();
+		input.destroy();
+		output.destroy();
+	}
+});
+
+test("ACP rejects the first oversized frame that stalls an ordinary sink", async () => {
+	const input = new PassThrough();
+	const output = new Writable({ highWaterMark: 1, write() {} });
+	const transport = createStdioServerTransport({ input, output });
+	try {
+		await assert.rejects(transport.request("large", "界".repeat(400_000), 2_000), (error: unknown) => {
+			assert.ok(error instanceof AcpProcessError);
+			assert.match(error.message, /output buffer exceeded byte limit/);
+			return true;
+		});
+		assert.equal(transport.closed, true);
 		assert.equal(output.listenerCount("drain"), 0);
 	} finally {
 		transport.close();

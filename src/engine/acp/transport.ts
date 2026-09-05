@@ -536,6 +536,7 @@ export function createStdioTransport(
 class StreamJsonRpcPeerTransport implements AcpJsonRpcPeerTransport {
 	private outputPaused = false;
 	private queuedOutputBytes = 0;
+	private sinkOutputBytes = 0;
 	private readonly outputQueue: string[] = [];
 	private nextId = 1;
 	private buffer = "";
@@ -631,29 +632,17 @@ class StreamJsonRpcPeerTransport implements AcpJsonRpcPeerTransport {
 	private write(message: AcpJsonRpcMessage): void {
 		if (this.closed) return;
 		const line = `${JSON.stringify(message)}\n`;
-		if (this.writeOverride) {
-			this.writeOverride(line);
-			return;
-		}
 		if (this.outputPaused) {
 			const bytes = Buffer.byteLength(line, "utf8");
 			// Include bytes already held by the sink in the existing frame budget.
-			if (this.queuedOutputBytes + this.output.writableLength + bytes > ACP_MAX_INPUT_LINE_BYTES) {
+			if (this.queuedOutputBytes + this.sinkOutputBytes + bytes > ACP_MAX_INPUT_LINE_BYTES) {
 				this.markClosed(new AcpProcessError("ACP output buffer exceeded byte limit"));
 				return;
 			}
-			this.outputQueue.push(line);
-			this.queuedOutputBytes += bytes;
-			return;
 		}
-		try {
-			if (!this.output.write(line) && !this.closed) {
-				this.outputPaused = true;
-				this.output.once("drain", this.flushOutput);
-			}
-		} catch (err) {
-			this.markClosed(new AcpProcessError(`ACP output write failed: ${errorMessage(err)}`));
-		}
+		this.outputQueue.push(line);
+		this.queuedOutputBytes += Buffer.byteLength(line, "utf8");
+		if (!this.outputPaused) this.flushOutput();
 	}
 
 	private readonly flushOutput = (): void => {
@@ -663,7 +652,25 @@ class StreamJsonRpcPeerTransport implements AcpJsonRpcPeerTransport {
 			if (line === undefined) break;
 			this.queuedOutputBytes -= Buffer.byteLength(line, "utf8");
 			try {
-				if (!this.output.write(line) && !this.closed) {
+				// Stdout can count buffered strings in UTF-16 units rather than bytes.
+				// Retain their byte count until drain, bounding earlier writes by at
+				// most three UTF-8 bytes per unit still held by the sink.
+				this.sinkOutputBytes = Math.min(this.sinkOutputBytes, this.output.writableLength * 3);
+				let ready: boolean;
+				if (this.writeOverride) {
+					this.writeOverride(line);
+					// The stdout guard writes to this sink but does not return write's boolean.
+					ready = !this.output.writableNeedDrain;
+				} else {
+					ready = this.output.write(line);
+				}
+				this.sinkOutputBytes =
+					this.output.writableLength === 0 ? 0 : this.sinkOutputBytes + Buffer.byteLength(line, "utf8");
+				if (!ready && !this.closed) {
+					if (this.queuedOutputBytes + this.sinkOutputBytes > ACP_MAX_INPUT_LINE_BYTES) {
+						this.markClosed(new AcpProcessError("ACP output buffer exceeded byte limit"));
+						return;
+					}
 					this.outputPaused = true;
 					this.output.once("drain", this.flushOutput);
 				}
