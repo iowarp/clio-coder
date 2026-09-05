@@ -9,7 +9,12 @@ import { clioConfigDir } from "../../src/core/xdg.js";
 import { mapAutonomy } from "../../src/domains/safety/autonomy.js";
 import { createSafetyPolicyEngine, type SafetyPolicyEngine } from "../../src/domains/safety/policy-engine.js";
 import { loadProjectSafetyPolicy } from "../../src/domains/safety/project-policy.js";
-import { tokenizeShellLike } from "../../src/domains/safety/protected-artifacts.js";
+import {
+	extractCommandDeleteTargets,
+	extractCommandWriteTargets,
+	tokenizeShellLike,
+} from "../../src/domains/safety/protected-artifacts.js";
+import { createRunEffectsRecorder } from "../../src/domains/safety/run-effects.js";
 import { createWorkerSafety } from "../../src/engine/worker-tools.js";
 import { createRegistry } from "../../src/tools/registry.js";
 import { writeTool } from "../../src/tools/write.js";
@@ -64,6 +69,7 @@ describe("safety gate boundary", () => {
 			"cd pkg && npm test && curl http://example.com",
 			"npm test | tee output.txt",
 			"cd pkg && npm test $(cat args)",
+			"npm test '&&' git status",
 		]) {
 			strictEqual(policy.evaluate({ tool: ToolNames.Bash, args: { command } }).execRecognition, "unrecognized");
 		}
@@ -277,12 +283,12 @@ describe("safety gate boundary", () => {
 			strictEqual(policy.evaluate({ tool: ToolNames.Bash, args: { command } }).kind, "allow", command);
 	});
 
-	function shellArgv(command: string): string[] {
+	function shellArgv(command: string, program: "clio-coder" | "rm" | "cp" | "sed" | "grep" = "clio-coder"): string[] {
 		// Capture literal Bash argv on a separate descriptor even when the tested
 		// command redirects stdout. This function never runs the actual CLI.
 		const result = spawnSync(
 			"bash",
-			["--noprofile", "--norc", "-c", `clio-coder() { printf '%s\\0' "$@" >&3; }\n${command}`],
+			["--noprofile", "--norc", "-c", `${program}() { printf '%s\\0' "$@" >&3; }\n${command}`],
 			{
 				cwd: scratch,
 				env: { PATH: process.env.PATH, TMPDIR: tmpdir() },
@@ -378,6 +384,74 @@ describe("safety gate boundary", () => {
 			const command = "cd .clio-coder/skills && cat example/SKILL.md 2>&1";
 			strictEqual(policy.evaluate({ tool: ToolNames.Bash, args: { command } }).kind, "allow", command);
 		}
+	});
+
+	it("keeps quoted shell syntax as path operands before protected rm, cp and sed destinations", () => {
+		const target = ".clio-coder/skills/example/SKILL.md";
+		const main = engine();
+		const worker = createWorkerSafety({ cwd: scratch });
+		for (const literal of ["&", "&&", "||", "|", ";", ">", ">>", "&>", ">&"]) {
+			for (const quoted of [`'${literal}'`, literal.replace(/[&|;<>]/gu, "\\$&")]) {
+				for (const [program, command, expected] of [
+					["rm", `rm ${quoted} ${target}`, [literal, target]],
+					["cp", `cp ${quoted} ${target}`, [literal, target]],
+					["sed", `sed -i -e 's/old/new/' ${quoted} ${target}`, ["-i", "-e", "s/old/new/", literal, target]],
+				] as const) {
+					deepStrictEqual(shellArgv(command, program), expected, command);
+					const targets = program === "rm" ? extractCommandDeleteTargets(command) : extractCommandWriteTargets(command);
+					strictEqual(targets.includes(target), true, command);
+					for (const policy of [main, worker]) {
+						const call = { tool: ToolNames.Bash, args: { command } };
+						strictEqual(policy.evaluate(call).kind, "block", command);
+						strictEqual(policy.evaluate(call, "confirmed").kind, "block", command);
+					}
+				}
+			}
+		}
+	});
+
+	it("allows quoted and escaped grep patterns that are not actual redirect operators", () => {
+		const target = ".clio-coder/skills/example/SKILL.md";
+		const main = engine();
+		const worker = createWorkerSafety({ cwd: scratch });
+		const protectedWorker = createWorkerSafety({
+			cwd: scratch,
+			protectedArtifactState: {
+				artifacts: [{ path: target, protectedAt: "2026-09-05T00:00:00Z", reason: "fixture", source: "user" }],
+			},
+		});
+		for (const literal of ["&", "&&", "||", "|", ";", ">", ">>", "&>", ">&", "<>"]) {
+			for (const quoted of [`'${literal}'`, literal.replace(/[&|;<>]/gu, "\\$&")]) {
+				const command = `grep -F ${quoted} ${target}`;
+				deepStrictEqual(shellArgv(command, "grep"), ["-F", literal, target], command);
+				deepStrictEqual(extractCommandWriteTargets(command), [], command);
+				for (const policy of [main, worker, protectedWorker])
+					strictEqual(policy.evaluate({ tool: ToolNames.Bash, args: { command } }).kind, "allow", command);
+			}
+		}
+	});
+
+	it("protects literal ampersand filenames under a shell cwd without treating them as descriptors", () => {
+		mkdirSync(join(scratch, ".clio-coder", "skills"));
+		const command = "cd .clio-coder/skills && rm '&'";
+		deepStrictEqual(shellArgv(command, "rm"), ["&"]);
+		deepStrictEqual(extractCommandDeleteTargets(command), ["&"]);
+		for (const policy of [engine(), createWorkerSafety({ cwd: scratch })])
+			strictEqual(policy.evaluate({ tool: ToolNames.Bash, args: { command } }).kind, "block", command);
+	});
+
+	it("retains literal Git path operands and actual redirects in observed run effects", () => {
+		const recorder = createRunEffectsRecorder(scratch);
+		recorder.start("quoted-git-paths", ToolNames.Bash, {
+			command: "git rm '|' kept.txt > output.log && git rm '>&' second.txt",
+		});
+		recorder.finish("quoted-git-paths", false);
+		const effects = recorder.snapshot();
+		deepStrictEqual(
+			[...effects.mutatedPaths].sort(),
+			["|", "kept.txt", "output.log", ">&", "second.txt"].map((name) => join(scratch, name)).sort(),
+		);
+		strictEqual(effects.writeRecordComplete, false);
 	});
 
 	it("keeps destructive transitions blocked while allowing explicit one-shot rails once", () => {

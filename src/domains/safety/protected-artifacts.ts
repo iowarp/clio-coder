@@ -79,7 +79,7 @@ const SHELL_WRAPPERS = new Set(["command", "builtin", "sudo", "doas"]);
 const SHELL_REDIRECTIONS = new Set([">", ">>", "<", "<<", "<<<", "<&", ">&", "<>", ">|", "&>", "&>>"]);
 const SHELL_WRITE_REDIRECTIONS = new Set([">", ">>", ">&", "<>", ">|", "&>", "&>>"]);
 
-interface ShellToken {
+export interface ShellToken {
 	value: string;
 	operator: boolean;
 	quoted: boolean;
@@ -160,8 +160,8 @@ function classifyDestructiveCommand(
 	if (artifacts.length === 0) return { kind: "benign", matches: [] };
 
 	for (const tokens of splitSegments(scanShellLike(command))) {
-		const segment = tokens.map((token) => token.value);
-		const redirect = classifyRedirect(segment, artifacts);
+		const segment = shellCommandArguments(tokens);
+		const redirect = classifyRedirect(tokens, artifacts);
 		if (redirect.kind === "destructive") return redirect;
 
 		const commandIndex = commandTokenIndex(segment);
@@ -228,7 +228,7 @@ export function detectValidationCommand(
 	scope: ValidationCommandScope = "finish-contract",
 ): ValidationCommandDetection {
 	for (const tokens of splitSegments(scanShellLike(command))) {
-		const segment = tokens.map((token) => token.value);
+		const segment = shellCommandArguments(tokens);
 		const commandIndex = commandTokenIndex(segment);
 		if (commandIndex === null) continue;
 		const executable = basenameToken(segment[commandIndex]);
@@ -258,10 +258,11 @@ export function detectValidationCommand(
  */
 export function extractCommandWriteTargets(command: string): string[] {
 	const targets: string[] = [];
-	for (const segment of expandedSegments(command)) {
+	for (const segment of expandedShellSegments(command)) {
 		collectRedirectTargets(segment, targets);
-		collectInvokedWriteTargets(segment, targets);
-		collectInPlaceEditTargets(segment, targets);
+		const argv = shellCommandArguments(segment);
+		collectInvokedWriteTargets(argv, targets);
+		collectInPlaceEditTargets(argv, targets);
 	}
 	return targets.filter(isInterestingWriteTarget);
 }
@@ -305,10 +306,6 @@ function segmentShellScript(segment: ReadonlyArray<string>): string | null {
  * segments of the script it runs. The wrapper segment itself is kept: a
  * scanner that reads its operands (`cp`, `tee`) must still see them.
  */
-function expandedSegments(command: string, depth = 0): string[][] {
-	return expandedShellSegments(command, depth).map((segment) => segment.map((token) => token.value));
-}
-
 function expandedShellSegments(command: string, depth = 0): ShellToken[][] {
 	const segments = splitSegments(scanShellLike(command));
 	if (depth >= INNER_SHELL_MAX_DEPTH) return segments;
@@ -345,7 +342,8 @@ export function inlineShellScript(command: string): string | null {
  */
 export function extractCommandCdTargets(command: string): string[] {
 	const targets: string[] = [];
-	for (const segment of expandedSegments(command)) {
+	for (const tokens of expandedShellSegments(command)) {
+		const segment = shellCommandArguments(tokens);
 		const commandIndex = commandTokenIndex(segment);
 		if (commandIndex === null) continue;
 		const executable = basenameToken(segment[commandIndex]);
@@ -363,7 +361,8 @@ export function extractCommandCdTargets(command: string): string[] {
  */
 export function extractCommandDeleteTargets(command: string): string[] {
 	const targets: string[] = [];
-	for (const segment of expandedSegments(command)) {
+	for (const tokens of expandedShellSegments(command)) {
+		const segment = shellCommandArguments(tokens);
 		const commandIndex = commandTokenIndex(segment);
 		if (commandIndex === null) continue;
 		const executable = basenameToken(segment[commandIndex]);
@@ -469,19 +468,20 @@ function resourceCliMutatesSkills(resource: "skills" | "library", args: Readonly
 
 const STANDARD_DEV_TARGETS = new Set(["/dev/null", "/dev/stdout", "/dev/stderr", "/dev/tty", "/dev/zero"]);
 
-function collectRedirectTargets(segment: ReadonlyArray<string>, out: string[]): void {
+function collectRedirectTargets(segment: ReadonlyArray<ShellToken>, out: string[]): void {
 	for (let index = 0; index < segment.length - 1; index += 1) {
 		const target = redirectWriteTarget(segment[index], segment[index + 1]);
 		if (target !== null) out.push(target);
 	}
 }
 
-function redirectWriteTarget(operator: string | undefined, target: string | undefined): string | null {
-	if (operator === undefined || target === undefined || !SHELL_WRITE_REDIRECTIONS.has(operator)) return null;
+function redirectWriteTarget(operator: ShellToken | undefined, target: ShellToken | undefined): string | null {
+	if (!operator?.operator || target === undefined || target.operator || !SHELL_WRITE_REDIRECTIONS.has(operator.value))
+		return null;
 	// >& duplicates or closes a descriptor when its operand is a number or -;
 	// Bash also accepts a filename here, redirecting stdout and stderr to it.
-	if (operator === ">&" && /^(?:\d+-?|-)$/u.test(target)) return null;
-	return target;
+	if (operator.value === ">&" && /^(?:\d+-?|-)$/u.test(target.value)) return null;
+	return target.value;
 }
 
 function collectInvokedWriteTargets(segment: ReadonlyArray<string>, out: string[]): void {
@@ -534,7 +534,6 @@ function hasSedInPlaceFlag(segment: ReadonlyArray<string>, cmdIndex: number): bo
 	for (let index = cmdIndex + 1; index < segment.length; index += 1) {
 		const token = segment[index];
 		if (token === undefined) continue;
-		if (COMMAND_SEPARATORS.has(token)) break;
 		if (token === "--") break;
 		if (token === "--in-place" || token.startsWith("--in-place=")) return true;
 		if (token.startsWith("--")) continue;
@@ -557,7 +556,6 @@ function sedFileOperands(segment: ReadonlyArray<string>, cmdIndex: number): stri
 	for (let index = cmdIndex + 1; index < segment.length; index += 1) {
 		const token = segment[index];
 		if (token === undefined) continue;
-		if (COMMAND_SEPARATORS.has(token)) break;
 		if (!endOfOptions && token === "--") {
 			endOfOptions = true;
 			continue;
@@ -591,19 +589,18 @@ function sedFileOperands(segment: ReadonlyArray<string>, cmdIndex: number): stri
 
 function isInterestingWriteTarget(target: string): boolean {
 	if (target.length === 0) return false;
-	if (target.startsWith("&")) return false;
 	if (STANDARD_DEV_TARGETS.has(target)) return false;
 	if (target.startsWith("/dev/fd/")) return false;
 	return true;
 }
 
 function classifyRedirect(
-	segment: ReadonlyArray<string>,
+	segment: ReadonlyArray<ShellToken>,
 	artifacts: ReadonlyArray<NormalizedArtifact>,
 ): DestructiveCommandClassification {
 	for (let index = 0; index < segment.length; index += 1) {
 		// Keep the existing distinction between overwriting and appending here.
-		if (segment[index] === ">>" || segment[index] === "&>>") continue;
+		if (segment[index]?.value === ">>" || segment[index]?.value === "&>>") continue;
 		const target = redirectWriteTarget(segment[index], segment[index + 1]);
 		if (target === null) continue;
 		const matches = matchesForPaths([target], artifacts, "target", "redirect can overwrite protected artifacts");
@@ -843,33 +840,35 @@ function isPythonExecutable(executable: string): boolean {
 	return executable === "python" || executable === "python3" || /^python3\.\d+$/.test(executable);
 }
 
+/** Input is one command's argv. Literal words must never be reparsed as shell syntax. */
 function pathArgs(segment: ReadonlyArray<string>, commandIndex: number): string[] {
 	const args: string[] = [];
 	let endOfOptions = false;
 	for (let index = commandIndex + 1; index < segment.length; index += 1) {
 		const token = segment[index];
 		if (token === undefined) continue;
-		if (COMMAND_SEPARATORS.has(token)) break;
 		if (!endOfOptions && token === "--") {
 			endOfOptions = true;
 			continue;
 		}
 		if (!endOfOptions && token.startsWith("-")) continue;
-		if (SHELL_REDIRECTIONS.has(token)) {
-			index += 1;
-			continue;
-		}
 		args.push(token);
 	}
 	return args;
 }
 
+/** Flat compatibility values; use scanShellLike when operator identity matters. */
 export function tokenizeShellLike(command: string): string[] {
 	return scanShellLike(command).map((token) => token.value);
 }
 
+/** Literal argv by command, with actual operators and redirections removed. */
+export function commandArgumentSegments(command: string): string[][] {
+	return splitSegments(scanShellLike(command)).map(shellCommandArguments);
+}
+
 /** Literal shell words and operators only; no expansion or script execution. */
-function scanShellLike(command: string): ShellToken[] {
+export function scanShellLike(command: string): ShellToken[] {
 	const tokens: ShellToken[] = [];
 	let current = "";
 	let wordStart: number | null = null;

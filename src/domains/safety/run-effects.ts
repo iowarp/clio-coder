@@ -3,10 +3,10 @@ import { ToolNames } from "../../core/tool-names.js";
 import { classify } from "./action-classifier.js";
 import { typedValidationSummary } from "./finish-contract.js";
 import {
+	commandArgumentSegments,
 	detectValidationCommand,
 	extractCommandDeleteTargets,
 	extractCommandWriteTargets,
-	tokenizeShellLike,
 	toolMutationPaths,
 	type ValidationCommandScope,
 } from "./protected-artifacts.js";
@@ -155,7 +155,7 @@ const GIT_PATH_MUTATIONS: ReadonlySet<string> = new Set(["mv", "rm"]);
 
 function gitPathOperands(command: string): string[] {
 	const targets: string[] = [];
-	for (const segment of splitCommandSegments(command)) {
+	for (const segment of commandArgumentSegments(command)) {
 		if (segment[0] !== "git") continue;
 		const subcommand = segment[1];
 		if (subcommand === undefined || !GIT_PATH_MUTATIONS.has(subcommand)) continue;
@@ -165,26 +165,6 @@ function gitPathOperands(command: string): string[] {
 		}
 	}
 	return targets;
-}
-
-/**
- * Split the shared tokenizer's output on command separators. Only the
- * git-operand scan above needs segments, and it needs them after tokenization
- * rather than off the raw string.
- */
-function splitCommandSegments(command: string): string[][] {
-	const segments: string[][] = [];
-	let current: string[] = [];
-	for (const token of tokenizeShellLike(command)) {
-		if (token === ";" || token === "&&" || token === "||" || token === "|") {
-			if (current.length > 0) segments.push(current);
-			current = [];
-			continue;
-		}
-		current.push(token);
-	}
-	if (current.length > 0) segments.push(current);
-	return segments;
 }
 
 function commandOf(args: Record<string, unknown> | undefined): string | null {
