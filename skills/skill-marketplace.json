@@ -303,10 +303,7 @@
 			"category": "planning",
 			"origin": "remote",
 			"overlay": "skills/planning/archify",
-			"exclude": [
-				"test",
-				"package-lock.json"
-			]
+			"exclude": ["test", "package-lock.json"]
 		},
 		{
 			"name": "architecture",

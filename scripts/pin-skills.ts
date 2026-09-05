@@ -414,7 +414,40 @@ function renderIndex(entries: ReadonlyArray<CatalogEntry>): string {
 				}
 			: {}),
 	}));
-	return `${JSON.stringify({ generatedBy: "npm run skills:pin", skills }, null, "\t")}\n`;
+	return `${collapseShortArrays(JSON.stringify({ generatedBy: "npm run skills:pin", skills }, null, "\t"))}\n`;
+}
+
+/** biome's configured line width, which decides whether a JSON array stays on one line. */
+const BIOME_FORMAT = (() => {
+	try {
+		const config = JSON.parse(readFileSync(path.join(repoRoot, "biome.json"), "utf8")) as {
+			formatter?: { lineWidth?: number; indentWidth?: number };
+		};
+		return { lineWidth: config.formatter?.lineWidth ?? 80, indentWidth: config.formatter?.indentWidth ?? 2 };
+	} catch {
+		return { lineWidth: 80, indentWidth: 2 };
+	}
+})();
+
+/**
+ * Print string arrays that fit the line width on one line, the way biome
+ * formats them, so `skills:check` compares against exactly what `lint` accepts.
+ * A tab counts as biome's configured indent width toward the line width.
+ */
+function collapseShortArrays(json: string): string {
+	return json.replace(
+		/^(\t*)("[^"\n]*": )\[\n((?:\t+"[^"\n]*",?\n)+)\1\]/gm,
+		(whole, indent: string, key: string, body: string) => {
+			const items = body
+				.split("\n")
+				.map((line) => line.trim().replace(/,$/, ""))
+				.filter((line) => line.length > 0);
+			const inline = `${indent}${key}[${items.join(", ")}]`;
+			const width = inline.length - indent.length + indent.length * BIOME_FORMAT.indentWidth;
+			// The trailing comma or closing brace after the array shares the line.
+			return width + 1 <= BIOME_FORMAT.lineWidth ? inline : whole;
+		},
+	);
 }
 
 /** Human drift summary: which pins are missing, stale, or orphaned. */

@@ -274,6 +274,10 @@ reads only the changed indexable files for path-based updates, replaces their fi
 deleted records, and rebuilds edges from the merged import set. Non-indexable
 paths are no-ops.
 
+### Architecture seed
+
+`clio-coder context map` derives an archify architecture specification from the structural index with no model call and writes it to `.clio-coder/artifacts/maps/<repo>.architecture.json` (or `--out <path>`). The seed guarantees that every component is a real directory area of the index under the wiki plan's area-depth rule, capped at twelve by file count plus at most three external packages; that every connection is an import edge the index recorded, collapsed area to area and labeled with its count; that every `sources` entry names an indexed file and its first declared symbol's line; and that `meta.repository` appears only when the origin remote is a GitHub URL and `HEAD` is a full revision. Placement is layered by import direction with explicit routes, so the seed validates with zero errors under archify's standard profile before anyone edits it. It refuses, naming `clio-coder context index`, when no index exists. Clio never renders the seed: the archify skill validates and delivers it with `--repo-root .`, which re-verifies every cited path against the working tree.
+
 ### Markdown Wiki & `code_nav` Resolution
 
 The wiki lives under `.clio-coder/wiki/` as a nested tree and is written by the

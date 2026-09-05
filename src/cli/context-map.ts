@@ -19,7 +19,7 @@ Options:
 `;
 
 /** Where the seed lands when the operator names no path: a human-transient map artifact. */
-export function defaultMapSeedPath(cwd: string): string {
+function defaultMapSeedPath(cwd: string): string {
 	return path.join(cwd, CLIO_ARTIFACT_DIR, "maps", `${path.basename(cwd)}.architecture.json`);
 }
 
