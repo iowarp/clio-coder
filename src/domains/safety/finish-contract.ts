@@ -1,5 +1,7 @@
+import { resolve } from "node:path";
 import { ToolNames } from "../../core/tool-names.js";
 import { isProjectVerifierCheckId, isVerificationScriptName } from "../../core/verification-scripts.js";
+import { type DeclaredCheckSourceRef, PROJECT_VERIFIER_CATALOG_RELATIVE_PATH } from "../../tools/verify/catalog.js";
 import type { UserTaskAcceptance } from "../user-tasks/acceptance.js";
 import {
 	detectValidationCommand,
@@ -25,7 +27,14 @@ export type FinishContractEvidenceKind =
 	| "dispatch_receipt"
 	| "limitation";
 
-export interface FinishContractEvidence {
+interface ValidationExecutionEvidence {
+	source?: DeclaredCheckSourceRef;
+	cwd?: string;
+	argv?: ReadonlyArray<string>;
+	durationMs?: number;
+}
+
+export interface FinishContractEvidence extends ValidationExecutionEvidence {
 	kind: FinishContractEvidenceKind;
 	summary: string;
 	check?: string;
@@ -61,6 +70,8 @@ export interface FinishContractInput {
 	recentEntryLimit?: number;
 	rigor?: Rigor;
 	activeAcceptance?: UserTaskAcceptance;
+	/** Owning session workspace, supplied by the finish registration. */
+	workspaceRoot?: string;
 }
 
 interface ToolCallEvidenceCandidate {
@@ -69,6 +80,7 @@ interface ToolCallEvidenceCandidate {
 	command: string;
 	check?: string;
 	paths?: string[];
+	execution?: ValidationExecutionEvidence;
 }
 
 interface MutationCandidate {
@@ -106,15 +118,17 @@ export function assessFinishContract(input: FinishContractInput): FinishContract
 	}
 
 	const acceptanceChecks = new Set(input.activeAcceptance?.verification.map((item) => item.check) ?? []);
-	const evidence = collectValidationEvidence(window, acceptanceChecks);
+	const evidence = collectValidationEvidence(window, acceptanceChecks, input.workspaceRoot);
 	const limitations = collectLimitationEvidence(window);
 	const required = input.rigor === "high" ? (input.activeAcceptance?.verification ?? []) : [];
 	if (required.length > 0) {
-		const passes = new Set(evidence.filter((item) => item.kind === "validation_command").map((item) => item.check));
-		const limited = new Set(limitations.flatMap((item) => item.paths ?? []));
-		const missing = [...new Set(required.map((item) => item.check))].filter(
-			(check) => !passes.has(check) && !limited.has(check),
+		const passes = new Set(
+			required.filter((check) => evidence.some((item) => acceptanceCheckPassed(item, check, input.workspaceRoot))),
 		);
+		const limited = new Set(limitations.flatMap((item) => item.paths ?? []));
+		const missing = [
+			...new Set(required.filter((check) => !passes.has(check) && !limited.has(check.check)).map((item) => item.check)),
+		];
 		if (missing.length > 0)
 			return {
 				kind: "engage",
@@ -125,7 +139,7 @@ export function assessFinishContract(input: FinishContractInput): FinishContract
 			};
 		return {
 			kind: "ok",
-			reason: required.every((item) => passes.has(item.check)) ? "validation_evidence" : "explicit_limitation",
+			reason: passes.size === required.length ? "validation_evidence" : "explicit_limitation",
 			evidence: [...evidence, ...limitations],
 			mutatedPaths,
 		};
@@ -145,6 +159,24 @@ export function assessFinishContract(input: FinishContractInput): FinishContract
 		evidence: [],
 		mutatedPaths,
 	};
+}
+
+function acceptanceCheckPassed(
+	evidence: FinishContractEvidence,
+	required: UserTaskAcceptance["verification"][number],
+	workspaceRoot: string | undefined,
+): boolean {
+	if (evidence.kind !== "validation_command" || evidence.check !== required.check || !workspaceRoot || !evidence.source)
+		return false;
+	if (evidence.durationMs !== undefined && evidence.durationMs > required.timeoutMs) return false;
+	const root = resolve(workspaceRoot);
+	if (evidence.source.kind === "project-catalog")
+		return evidence.source.path === resolve(root, PROJECT_VERIFIER_CATALOG_RELATIVE_PATH);
+	return (
+		evidence.source.path === resolve(root, "package.json") &&
+		evidence.cwd === root &&
+		validationCheckId(evidence.argv?.join(" ") ?? "") === required.check
+	);
 }
 
 /**
@@ -304,6 +336,7 @@ function pushPath(paths: string[], seen: Set<string>, path: string): void {
 function collectValidationEvidence(
 	recent: ReadonlyArray<unknown>,
 	acceptanceChecks: ReadonlySet<string>,
+	workspaceRoot: string | undefined,
 ): FinishContractEvidence[] {
 	const evidence: FinishContractEvidence[] = [];
 	const toolCalls = new Map<string, ToolCallEvidenceCandidate>();
@@ -317,7 +350,7 @@ function collectValidationEvidence(
 			continue;
 		}
 
-		const call = bashValidationCall(entry, acceptanceChecks);
+		const call = bashValidationCall(entry, acceptanceChecks, workspaceRoot);
 		if (call !== null) {
 			toolCalls.set(call.toolCallId, call);
 			continue;
@@ -345,12 +378,12 @@ function collectValidationEvidence(
 			}
 			const candidate = toolCalls.get(resultId);
 			if (candidate !== undefined) {
-				pushEvidence(evidence, seen, validationEvidence(candidate));
+				pushEvidence(evidence, seen, validationEvidence(candidate, entry));
 			}
 			continue;
 		}
 
-		const bashExecution = bashExecutionEvidence(entry, acceptanceChecks);
+		const bashExecution = bashExecutionEvidence(entry, acceptanceChecks, workspaceRoot);
 		if (bashExecution !== null) pushEvidence(evidence, seen, bashExecution);
 	}
 
@@ -377,7 +410,11 @@ export function recentEntries(
 	return entries.slice(startInclusive, endExclusive);
 }
 
-function bashValidationCall(entry: unknown, acceptanceChecks: ReadonlySet<string>): ToolCallEvidenceCandidate | null {
+function bashValidationCall(
+	entry: unknown,
+	acceptanceChecks: ReadonlySet<string>,
+	workspaceRoot: string | undefined,
+): ToolCallEvidenceCandidate | null {
 	const record = asRecord(entry);
 	if (record?.kind !== "message" || record.role !== "tool_call") return null;
 	const payload = asRecord(record.payload);
@@ -395,6 +432,7 @@ function bashValidationCall(entry: unknown, acceptanceChecks: ReadonlySet<string
 		toolCallId,
 		command: detected.matched,
 		...validationCheckFields(detected.matched),
+		execution: packageCommandExecution(command, args?.cwd, workspaceRoot),
 	};
 	const turnId = turnIdOf(entry);
 	if (turnId !== null) candidate.turnId = turnId;
@@ -563,7 +601,11 @@ function dispatchReceiptAgentId(
 	return candidate?.command.match(/^agent=([^\s]+)/)?.[1] ?? "unknown";
 }
 
-function bashExecutionEvidence(entry: unknown, acceptanceChecks: ReadonlySet<string>): FinishContractEvidence | null {
+function bashExecutionEvidence(
+	entry: unknown,
+	acceptanceChecks: ReadonlySet<string>,
+	workspaceRoot: string | undefined,
+): FinishContractEvidence | null {
 	const record = asRecord(entry);
 	if (record?.kind !== "bashExecution") return null;
 	if (typeof record.command !== "string") return null;
@@ -576,6 +618,7 @@ function bashExecutionEvidence(entry: unknown, acceptanceChecks: ReadonlySet<str
 		kind: "validation_command",
 		summary: `validation command passed: ${detected.matched}${contextMarker}`,
 		...validationCheckFields(detected.matched),
+		...packageCommandExecution(record.command, record.cwd, workspaceRoot),
 	};
 	const turnId = turnIdOf(entry);
 	if (turnId !== null) evidence.turnId = turnId;
@@ -597,18 +640,80 @@ function protectedArtifactEvidence(entry: unknown): FinishContractEvidence | nul
 	return evidence;
 }
 
-function validationEvidence(candidate: ToolCallEvidenceCandidate): FinishContractEvidence {
+function validationEvidence(candidate: ToolCallEvidenceCandidate, entry: unknown): FinishContractEvidence {
 	const evidence: FinishContractEvidence = {
 		kind: "validation_command",
 		summary: `validation command passed: ${candidate.command}`,
 		...(candidate.check ? { check: candidate.check } : {}),
+		...(candidate.execution ?? declaredCheckExecution(entry, candidate.check)),
 	};
 	if (candidate.turnId !== undefined) evidence.turnId = candidate.turnId;
 	return evidence;
 }
 
+/** Preserve the verifier's execution facts only when they identify the declared check. */
+function declaredCheckExecution(entry: unknown, check: string | undefined): ValidationExecutionEvidence {
+	const payload = asRecord(asRecord(entry)?.payload);
+	const details = asRecord(asRecord(payload?.result)?.details);
+	const source = asRecord(details?.source);
+	if (
+		!details ||
+		details.check !== check ||
+		details.exitCode !== 0 ||
+		details.aborted === true ||
+		details.timedOut === true ||
+		details.outputCapped === true ||
+		(source?.kind !== "package.json" && source?.kind !== "project-catalog") ||
+		typeof source.path !== "string" ||
+		typeof details.cwd !== "string" ||
+		!Array.isArray(details.argv) ||
+		!details.argv.every((arg): arg is string => typeof arg === "string")
+	)
+		return {};
+	if (source.kind === "project-catalog") {
+		const argv = details.argv;
+		if (
+			!Array.isArray(details.declaredCommand) ||
+			details.declaredCommand.length !== details.argv.length ||
+			!details.declaredCommand.every((arg, index) => arg === argv[index]) ||
+			typeof details.declaredCwd !== "string" ||
+			typeof details.declaredTimeoutMs !== "number" ||
+			typeof details.durationMs !== "number" ||
+			details.durationMs > details.declaredTimeoutMs ||
+			resolve(source.path, "../..", details.declaredCwd) !== details.cwd
+		)
+			return {};
+	}
+	return {
+		source: { kind: source.kind, path: source.path },
+		cwd: details.cwd,
+		argv: details.argv,
+		...(typeof details.durationMs === "number" ? { durationMs: details.durationMs } : {}),
+	};
+}
+
+/** Exact package commands retain their execution cwd; a matched substring proves no project identity. */
+function packageCommandExecution(
+	command: string,
+	cwd: unknown,
+	workspaceRoot: string | undefined,
+): ValidationExecutionEvidence {
+	if (
+		!workspaceRoot ||
+		!/^(?:npm|pnpm|yarn|bun) /u.test(command.trim()) ||
+		validationCheckId(command.trim()) === undefined
+	)
+		return {};
+	const executionCwd = resolve(workspaceRoot, typeof cwd === "string" ? cwd : ".");
+	return {
+		source: { kind: "package.json", path: resolve(executionCwd, "package.json") },
+		cwd: executionCwd,
+		argv: command.trim().split(/\s+/u),
+	};
+}
+
 function pushEvidence(evidence: FinishContractEvidence[], seen: Set<string>, item: FinishContractEvidence): void {
-	const key = `${item.kind}\0${item.summary}\0${item.turnId ?? ""}`;
+	const key = JSON.stringify(item);
 	if (seen.has(key)) return;
 	seen.add(key);
 	evidence.push(item);

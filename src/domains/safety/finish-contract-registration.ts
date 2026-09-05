@@ -94,6 +94,7 @@ export function createFinishContractRegistration(
 					: undefined;
 			const assessment = assessFinishContract({
 				sessionEntries: entries,
+				workspaceRoot: process.cwd(),
 				rigor,
 				...(activeAcceptance ? { activeAcceptance } : {}),
 				assistantTurnId: input.turnId ?? null,

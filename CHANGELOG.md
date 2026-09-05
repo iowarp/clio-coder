@@ -29,6 +29,7 @@ Trust spine: typed claims, executable validation, and decision provenance. Answe
 - The dispatch board reads observability's run projection. One fold owns lifecycle events, worker progress, receipt trust, retries, cancellation, fleet positions, and evidence readiness; the board keeps ordering, selection, and rendering. Terminal status and accounting come from the same projection the observability contract publishes.
 
 ### Fixed
+- High-rigor task acceptance now requires validation evidence from the owning workspace. Verifier receipts retain declaration source and execution details, so a passing same-named examples check cannot satisfy a root check. Intended package and catalog checks, exact root package commands, and scoped limitation receipts remain supported (#335).
 - Slash argument completion now reads loaded agent recipes, configured targets and known models, installed skills, and session tasks from the interactive app contracts (#303).
 - Workbench desktop notification mute preference now persists in local storage across page reloads (#322).
 - ACP `session/close` releases the bound session slot so a host can create another session on the same child process.
