@@ -261,7 +261,7 @@ normalization.</p>
 <td align="left">unversioned JSONL</td>
 <td align="left"><code>OutOfTurnUsageRow</code><br><code>src/domains/observability/out-of-turn-usage.ts</code></td>
 <td align="left"><code>&lt;stateDir&gt;/usage/out-of-turn.jsonl</code></td>
-<td align="left">One row per priced side question, handoff, prompt prewarm, or background-memory call. Each row records its <code>side-question</code>, <code>handoff</code>, <code>prewarm</code>, or <code>background-memory</code> label plus session id, repository identity, timestamp, target, attributed model, and provider usage. The ledger is a bounded ring of <code>MAX_OUT_OF_TURN_USAGE_ROWS = 1000</code>, rewritten atomically under the state-file lock.</td>
+<td align="left">One row per recorded side question, handoff, prompt prewarm, background-memory call, or summary stream in an unsuccessful compaction. Labels are <code>side-question</code>, <code>handoff</code>, <code>prewarm</code>, <code>background-memory</code>, and <code>failed-compaction</code>; rows retain session/repository identity, timestamp, selected target/model, and observed usage. New failed-compaction rows add <code>callOutcome</code>, nullable unknown usage fields, and estimated/unknown cost provenance; legacy numeric rows remain readable. Successful compactions keep usage on their checkpoint. The ledger is a bounded ring of <code>MAX_OUT_OF_TURN_USAGE_ROWS = 1000</code>, rewritten atomically under the state-file lock.</td>
 <td align="left">Unparseable rows are skipped and counted by <code>usage report</code>; the session ledger is never affected.</td>
 </tr>
 <tr>

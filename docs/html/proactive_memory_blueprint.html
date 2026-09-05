@@ -346,7 +346,9 @@ prediction of when a route answers.</li>
 <h3>Dedicated routing, chat fallback and endpoint capacity</h3>
 <p>Clio prefers the explicitly configured memory target and model. If that route is known unavailable (missing target/runtime, down target, absent model in a known catalog, or a model reported unloaded/loading), Clio selects the active chat route for that step. A runtime client error on the dedicated route permits one chat attempt within the original remaining deadline. It does not retry after a timeout, cancellation, session/branch switch, malformed envelope, or a model&#x27;s explicit silence. The fallback never falls back again. Both routes unavailable produce a visible <code>client_error</code> outcome. An unset memory role remains rules-only; chat fallback does not enable model-based memory by default.</p>
 <p>A runtime notice names the selected chat fallback and its reason. Routing stays session-local and does not edit saved settings. Each attempted call records its own known usage under its actual target/model and emits its own telemetry outcome; failed dedicated usage is retained alongside fallback usage. The final policy result describes the final attempt, without merging different provider identities. A generation change discards late content while preserving the original usage owner.</p>
-<p>Capacity follows the same existing evidence as dispatch: explicit target <code>maxConcurrentRequests</code>, current discovery, a valid discovery prior, then the conservative one-slot default for a local-native runtime. Known occupancy includes this process&#x27;s foreground requests, active dispatch leases and held reservation waves. A two-slot endpoint with one foreground request can admit memory; a full one-slot endpoint skips it. Larger declared capacities work without a new constant.</p>
+<p>Capacity follows the same existing evidence as dispatch: explicit target <code>maxConcurrentRequests</code>, current discovery, a valid discovery prior, then the conservative one-slot default for a local-native runtime. Known occupancy includes this process&#x27;s foreground requests, active dispatch leases and held reservation waves. A two-slot endpoint with one foreground request can admit memory; a full
+one-slot endpoint skips it. Known dedicated saturation does not itself initiate
+chat fallback. Larger declared capacities work without a new constant.</p>
 <p>LiteLLM is a gateway protocol, so Clio does not invent a local one-slot limit for its URL. Distinct model routes such as dynamo, mini and zbook can share that URL; the gateway owns their physical routing and backend residency. An explicit or observed endpoint-wide bound still applies when present. Clio&#x27;s process-local foreground holds and observed dispatch state are not a global scheduler for every client using the gateway. Slot holds are released on success, failure and abort.</p>
 <p>The existing <code>background_memory</code> expected-cold stamp remains keyed by endpoint URL. It records a possible shared-endpoint cache disturbance, including after a failed request, rather than proving that a different model behind the gateway actually evicted the chat prefix.</p>
 <h2>Choosing a background model</h2>
@@ -354,9 +356,11 @@ prediction of when a route answers.</li>
 does not need to be clever. A small non-reasoning model is the right choice, and
 Clio always requests the memory route with thinking off. Version 2 therefore
 has no configurable memory thinking-level key.</p>
-<p>That request reaches the wire wherever the runtime carries a thinking control:
+<p>The off request depends on the resolved runtime and model metadata:
 llama.cpp reads <code>chat_template_kwargs.enable_thinking</code>, and LM Studio reads
-<code>reasoning_effort</code>, where <code>none</code> is the off value.</p>
+<code>reasoning_effort</code>, with the off value selected by the model family. A gateway
+needs a recognized, unanimous upstream runtime declaration; unknown metadata
+does not establish a dialect. Requesting off does not prove server compliance.</p>
 <p>A model that reasons anyway still works. Some genuinely cannot be silenced, and
 the catalog records those as always-on so the level reads <code>forced</code> rather than
 <code>off</code>; the shipped model catalog classifies <code>qwopus3.5-9b-v3</code> that way. No model

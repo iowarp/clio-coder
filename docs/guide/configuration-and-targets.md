@@ -277,7 +277,7 @@ different one with `/model`. Configure `numRetries: 0` and no server fallback
 maps when `node/model` is a placement guarantee. Context-overflow compaction is
 still a local correction, not a route substitution.
 
-For every response, Clio records LiteLLM's selected model group, physical model,
+When the gateway reports these fields, Clio records LiteLLM's selected model group, physical model,
 sanitized upstream host, fallback/retry counts, and proxy timing in the session
 and worker receipt. A nonzero fallback or retry is also announced in the live
 transcript, making server-policy drift visible. Self-describing physical routes
@@ -288,11 +288,13 @@ smallest limits published by every deployment, so routing cannot select a
 weaker backend than Clio planned for. If `/v1/model/info` omits a capability,
 Clio does not invent it; that includes structured-output support.
 
+Upstream `model_info.runtime` declarations may identify the thinking-control dialect of a routed model. Clio accepts only recognized declarations shared by every deployment of that alias; unknown or mixed declarations remain unguessed. A resolved LM Studio dialect uses its explicit off effort, while llama.cpp uses template controls. This metadata does not turn the target into a native management endpoint: LiteLLM continues to own authentication, routing, loading and eviction. Thinking off is a request to the selected runtime/model, not evidence that the server complied or that every route has been live-validated.
+
 ### `maxConcurrentRequests`
 
 `maxConcurrentRequests` is a per-target integer of at least 1, validated with the rest of the target block, and it is the operator's override for how many requests the inference endpoint behind that target can serve at once. It is not a settings-file default and has no shipped value, so it does not appear in the settings inventory below.
 
-Set it only when discovery is wrong. Clio resolves the limit in this order: this override; then a `parallelSlots` count cached on the target's probe result; then one slot for any other `local-native` runtime; then no bound at all for a cloud runtime, vLLM, or SGLang. llama.cpp discovery reads `total_slots` from the router's `/props`, falls back to the selected worker's `/props?model=<id>` when the router reports none, and falls back again to the `--parallel` argv on the selected `/v1/models` entry. LM Studio reads `config.parallel` off the loaded instance and otherwise reports one; Ollama reads `OLLAMA_NUM_PARALLEL` from the environment the Clio process can see and otherwise reports one.
+Set it only when discovery is wrong. Clio resolves the limit in this order: this override; then a `parallelSlots` count cached on the target's probe result; then one slot for any other `local-native` runtime; then no invented endpoint bound for a cloud runtime, LiteLLM, vLLM, or SGLang. llama.cpp discovery reads `total_slots` from the router's `/props`, falls back to the selected worker's `/props?model=<id>` when the router reports none, and falls back again to the `--parallel` argv on the selected `/v1/models` entry. LM Studio reads `config.parallel` off the loaded instance and otherwise reports one; Ollama reads `OLLAMA_NUM_PARALLEL` from the environment the Clio process can see and otherwise reports one.
 
 The limit is keyed on the endpoint rather than the target, so two targets pointed at the same normalized URL share it. Raising it above what the server will actually serve does not create capacity; it removes the refusal that would have told you the server was full. See [capacity-and-scheduling.md](../architecture/capacity-and-scheduling.md) for the admission model and the exact denial text.
 
@@ -669,6 +671,8 @@ This is the version-2 durable schema shipped in `DEFAULT_SETTINGS`. Validation i
 | `context.memory.trajectorySteps` | `8` | integer ≥ 1 | next turn |
 | `context.memory.maxOutputTokens` | `2000` | integer ≥ 1 | next turn |
 | `context.memory.timeoutMs` | `60000` | integer ≥ 1 | next turn |
+
+The compaction and memory controls serve different roles. An unset `context.compaction.model` uses active chat; an explicit model must uniquely resolve to an available eligible summary route or fail visibly. `context.compaction.systemPrompt` is a nonempty UTF-8 prompt file, at most 65,536 bytes, read at compaction time and resolved relative to the session workspace. Configure `context.memory.target` and `context.memory.model` to opt into model-based memory; unset roles remain rules-only. Memory prefers its dedicated route and can use active chat when that route is unavailable and request capacity permits. Known dedicated saturation skips the step rather than initiating failover; neither routing choice edits saved settings.
 
 ### Safety
 

@@ -78,7 +78,7 @@ For process exit codes, stdout deliverable guarantees, and machine-readable JSON
 | `clio-coder extensions list\|discover\|install\|enable\|disable\|remove` | Manage installed extension packages and resource roots. `clio-coder ext` is an accepted alias. |
 | `clio-coder skills list\|search\|inspect\|validate\|install\|update\|sync\|eval` | Manage discovered skills, Clio-native skills, and local marketplace installs. |
 | `clio-coder docs [topic] [--no-open]` | Serve the interactive HTML docs of a source checkout on 127.0.0.1; the npm package ships the Markdown guides only. |
-| `clio-coder usage report [--repo <path>] [--days <n>] [--json]` | Cross-session usage facts and opportunities from the session and run ledgers. The window defaults to 30 days and the JSON schema is marked experimental. |
+| `clio-coder usage report [--repo <path>] [--days <n>] [--json]` | Cross-session usage facts from session/run ledgers and retained out-of-turn calls, including known failed-compaction spending and missing coverage. The window defaults to 30 days and the JSON schema is marked experimental. |
 | `clio-coder dev share export --out <path> [--project\|--user\|--both] [--context] [--prompts] [--skills] [--settings] [--extensions]` | Export project context, prompts, skills, settings fragments, and extension bundles. |
 | `clio-coder dev share import <path> [--dry-run] [--force] [--project\|--user] [--json]` | Import a share archive with conflict reporting. |
 | `clio-coder dev share inspect <path> [--json]` | Inspect a share archive without importing it. |
