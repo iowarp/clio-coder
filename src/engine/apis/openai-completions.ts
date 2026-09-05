@@ -435,6 +435,17 @@ function applyThinkingPayload(
 	) {
 		next.reasoning_effort = resolved.request.reasoningEffort;
 	}
+	// LiteLLM generic openai/<local model> routes otherwise drop this standard
+	// parameter. Allow only the effort this model/runtime actually resolved;
+	// unknown off controls and unrelated caller parameters gain no allowance.
+	if (
+		resolved.runtimeId === "litellm" &&
+		resolved.request.reasoningEffort &&
+		next.reasoning_effort === resolved.request.reasoningEffort
+	) {
+		const allowed = Array.isArray(next.allowed_openai_params) ? next.allowed_openai_params : [];
+		next.allowed_openai_params = [...new Set([...allowed, "reasoning_effort"])];
+	}
 	if (resolved.request.chatTemplateKwargs && !chatTemplateKwargsUnsupported(model)) {
 		const existing = isPlainRecord(next.chat_template_kwargs) ? next.chat_template_kwargs : {};
 		next.chat_template_kwargs = { ...existing, ...resolved.request.chatTemplateKwargs };

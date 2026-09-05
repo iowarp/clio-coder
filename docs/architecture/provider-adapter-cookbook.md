@@ -170,6 +170,43 @@ inherited from the pinned Pi dependency; Clio no longer carries a separate
 contract test that reconstructs Pi's whole adaptive or budget payload.
 
 
+
+### 3.3 Thinking controls through LiteLLM
+
+A gateway alias is not an upstream runtime identity. Clio consumes the optional
+`model_info.runtime` deployment declaration from LiteLLM's `/v1/model/info` only
+when every deployment of the alias names the same recognized control runtime:
+`lm-studio` or `llama.cpp`. Missing, unknown, or mixed declarations produce no
+runtime-specific control hint. The probe-only `thinkingControlRuntime` capability
+travels through the existing main, background and worker model capability path;
+`runtimeId`, authentication, the gateway URL and residency ownership stay LiteLLM.
+Clio never infers this declaration from ports or model names and never loads or
+unloads the gateway's upstream models.
+
+The family still determines whether thinking is switchable and which active
+levels exist. A declared LM Studio route receives `reasoning_effort: "none"` for
+an effective off choice; a llama.cpp route uses its template switch. LiteLLM's
+generic OpenAI adapter may silently filter a resolved effort for local model
+names. Clio therefore adds `allowed_openai_params: ["reasoning_effort"]` only when
+it sends that model/runtime's resolved `reasoning_effort`; unrelated parameters
+and unknown off mechanisms are not newly allowed. This is a request control,
+not a change to gateway configuration. See [LiteLLM parameter forwarding](https://docs.litellm.ai/docs/completion/drop_params).
+
+[Qwen3.8-27B's pinned template](https://huggingface.co/Qwen/Qwen3.8-27B/blob/1d4bf0f2ff6012fd82039f2fa52739d0dd7c60c0/chat_template.jinja)
+accepts active `low`, `medium`, and `xhigh`, with thinking enabled and `xhigh`
+when the template receives no override. Clio shows off/low/medium/xhigh and maps
+released high/max selections to xhigh. That vendor default does not overwrite
+Clio's explicit chat preference or saved low setting. Disabling thinking does
+not remove historical reasoning or discard reasoning a server actually returns.
+
+Controlled gateway filtering tests cover discovery, capability transfer, actual
+HTTP payloads, off/on switching, and built CLI persistence. Live same-route
+probes on the selected LiteLLM deployment returned reasoning with the flag or
+none alone, zero reasoning on two calls with none plus the explicit allowance,
+and positive reasoning for an allowed low control. This verifies the measured
+route and request contract; unknown or heterogeneous gateway aliases need their
+own declared capabilities and acceptance.
+
 ---
 
 ## 4. Configuring Reasoning & Thinking Formats

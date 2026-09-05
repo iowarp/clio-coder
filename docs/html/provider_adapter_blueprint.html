@@ -191,6 +191,28 @@ OpenAI Responses <code>reasoning.summary</code> verbosity, which the agent loop 
 llama.cpp controls used when thinking is off. Anthropic request assembly is
 inherited from the pinned Pi dependency; Clio no longer carries a separate
 contract test that reconstructs Pi&#39;s whole adaptive or budget payload.</p>
+<h3>3.3 Thinking controls through LiteLLM</h3>
+<p>A gateway alias is not an upstream runtime identity. Clio consumes <code>model_info.runtime</code>
+from <code>/v1/model/info</code> only when every deployment of the alias declares the same recognized
+control runtime: <code>lm-studio</code> or <code>llama.cpp</code>. Missing, unknown, or mixed declarations
+produce no hint. The probe-only <code>thinkingControlRuntime</code> capability travels through the
+main, background and worker capability path. Runtime ID, authentication, gateway URL and residency
+ownership stay LiteLLM; ports and model names never imply runtime identity or authorize upstream loading.</p>
+<p>The family determines whether thinking is switchable and its active levels. A declared LM Studio
+route receives <code>reasoning_effort: "none"</code> for off; llama.cpp uses its template switch.
+LiteLLM may filter effort for local names through its generic OpenAI adapter. Clio adds
+<code>allowed_openai_params: ["reasoning_effort"]</code> only when sending the model/runtime's resolved
+effort, without newly allowing unrelated parameters or unknown off mechanisms. This changes the request,
+not gateway configuration. See <a href="https://docs.litellm.ai/docs/completion/drop_params">LiteLLM parameter forwarding</a>.</p>
+<p><a href="https://huggingface.co/Qwen/Qwen3.8-27B/blob/1d4bf0f2ff6012fd82039f2fa52739d0dd7c60c0/chat_template.jinja">Qwen3.8-27B's pinned template</a>
+accepts low, medium and xhigh, defaulting to thinking enabled/xhigh without an override. Clio shows
+off/low/medium/xhigh and normalizes released high/max choices to xhigh. The vendor default never
+overwrites an explicit chat preference or saved low setting. Off neither erases historical reasoning
+nor discards reasoning actually returned by a server.</p>
+<p>Controlled tests cover discovery, capability transfer, actual HTTP controls, off/on switching and built
+CLI persistence. Live same-route LiteLLM probes reasoned with the flag or none alone, returned zero
+reasoning twice with none plus the allowance, and reasoned with allowed low. This verifies the measured
+route and request contract; unknown or heterogeneous aliases need their own declarations and acceptance.</p>
 <hr>
 <h2>4. Configuring Reasoning &amp; Thinking Formats</h2>
 <p>Clio supports diverse thinking mechanisms. If your model family uses a custom format, it must be mapped to one of the following mechanisms in the model&#39;s catalog YAML entry (<code>quirks.thinking.mechanism</code>):</p>

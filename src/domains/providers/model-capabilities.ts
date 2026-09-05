@@ -14,6 +14,7 @@ export interface ModelCapabilityPatchTarget {
 	contextWindow?: number;
 	maxTokens?: number;
 	reasoning?: boolean;
+	clioCoder?: Record<string, unknown>;
 }
 
 /**
@@ -30,6 +31,14 @@ export function applyModelCapabilityPatch<T extends ModelCapabilityPatchTarget>(
 	if (typeof caps.contextWindow === "number") model.contextWindow = caps.contextWindow;
 	if (typeof caps.maxTokens === "number") model.maxTokens = caps.maxTokens;
 	if (typeof caps.reasoning === "boolean") model.reasoning = caps.reasoning;
+	// Refresh the probe-only control hint together with the capability snapshot.
+	// Missing metadata after a later probe must not retain an earlier route claim.
+	if (model.clioCoder || caps.thinkingControlRuntime !== undefined) {
+		const metadata = { ...model.clioCoder };
+		delete metadata.thinkingControlRuntime;
+		if (caps.thinkingControlRuntime !== undefined) metadata.thinkingControlRuntime = caps.thinkingControlRuntime;
+		model.clioCoder = metadata;
+	}
 	return model;
 }
 

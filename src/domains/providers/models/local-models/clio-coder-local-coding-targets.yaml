@@ -700,7 +700,7 @@
       "128gb-unified-vulkan": "128 GB unified-memory Vulkan class: IQ4_NL uses about 17.3 GB and fits ctx=262144 with parallel=4. Vulkan backends show much slower prefill than ROCm/CUDA on this family; prefer ROCm where available."
     runtimePreference:
       llamaCpp: "Primary verified path. OpenAI-compatible chat completions with --jinja, --reasoning on, --reasoning-effort medium as server defaults; reasoning_content and tool_calls both confirmed to parse correctly. A request can override to off with chat_template_kwargs.enable_thinking:false, or to a different active level with reasoning_effort in {low, medium, xhigh} (never minimal/high/max on the wire; the stock template raises a fatal jinja exception on those and Clio's landed capability resolver already clamps to this set)."
-      lmstudioOpenaiCompat: "Clio sends reasoning_effort over LM Studio's OpenAI-compatible HTTP port and omits chat_template_kwargs because LM Studio does not use that field for this model. With no override, LM Studio defaults this model to thinking off, unlike raw llama.cpp's template default of thinking on/xhigh. reasoning_effort:'none' explicitly disables it."
+      lmstudioOpenaiCompat: "Clio sends reasoning_effort over LM Studio's OpenAI-compatible HTTP port and omits chat_template_kwargs because LM Studio does not use that field for this model. The upstream template defaults to thinking on/xhigh; an LM Studio deployment may configure another default. reasoning_effort:'none' explicitly disables it. Through LiteLLM, this control also requires allowed_openai_params:['reasoning_effort']; Clio selects the LM Studio spelling only when every deployment of that alias explicitly declares model_info.runtime: lm-studio."
       lmstudioNative: "Clio's LM Studio runtime uses the OpenAI-compatible HTTP chat adapter with native REST model discovery and residency management."
     llamaCpp:
       ctxSize: 131072
@@ -722,7 +722,6 @@
       effortByLevel:
         low: low
         medium: medium
-        high: xhigh
         xhigh: xhigh
       guidance: |
         Official Qwen3.8-27B chat template (chat_template.jinja) validates
@@ -730,19 +729,32 @@
         fatal jinja exception (hard 500, not a graceful fallback) on anything
         else, including minimal/high/max. The 27B card gives no /think or
         /no_think soft switch for this model; unlike Qwen3, that idiom has no
-        effect here. Off must go through chat_template_kwargs.enable_thinking:
-        false, never through reasoning_effort. preserve_thinking should stay
+        effect here. The template defaults to xhigh with thinking enabled.
+        The picker offers off/low/medium/xhigh; released high and max choices
+        normalize to xhigh rather than reaching the strict template unchanged.
+        Template-level off uses chat_template_kwargs.enable_thinking:false.
+        preserve_thinking should stay
         on for an agentic harness (the template's own recommendation for
         agent scenarios; improves KV cache reuse). llama.cpp's own
         reasoning_effort:"none" also disables reasoning at the server layer
         and is a separate mechanism from the template's enable_thinking flag;
-        both were verified independently on llama.cpp and on LM Studio's HTTP
-        port.
+        the none sentinel is consumed before strict template effort validation.
+        LM Studio's HTTP port also accepts none. A 2026-09-05 same-route
+        LiteLLM probe showed none and the template flag alone still reasoned
+        because the generic OpenAI route filtered the effort parameter. Adding
+        allowed_openai_params:["reasoning_effort"] produced zero reasoning
+        twice; an allowed low control still reasoned. Clio forwards only an
+        effort resolved from the model/runtime contract, and never infers the
+        upstream control runtime from a host name, port, or model alias.
 
         Thinking off is verified for this family, and no floor is imposed on
-        it. JetBrains report that Qwen3.8 without reasoning gets stuck in a
+        it. The official card and template were rechecked at revision
+        1d4bf0f2ff6012fd82039f2fa52739d0dd7c60c0:
+        https://huggingface.co/Qwen/Qwen3.8-27B/blob/1d4bf0f2ff6012fd82039f2fa52739d0dd7c60c0/chat_template.jinja
+        JetBrains report that Qwen3.8 without reasoning gets stuck in a
         loop repeating the same tool call indefinitely under Junie. Clio's
-        shipped default is orchestrator.thinkingLevel: off, which on llama.cpp
+        shipped default is chat.thinkingLevel: off, an explicit Clio preference
+        rather than the vendor's template default. On llama.cpp it
         sends chat_template_kwargs.enable_thinking:false and on LM Studio's
         OpenAI-compatible port sends reasoning_effort:"none". Clio 0.3.8 ran
         that configuration on both runtimes (llama.cpp build b226-2115b73d8 on
@@ -750,8 +762,7 @@
         2026-08-29 and 2026-08-30: an interactive build-and-resume session, a
         three-worker fleet step, and a ten-task eval suite totalling 116 model
         calls, none of which repeated a tool call into a loop. The catalog
-        therefore imposes no thinking floor and coerces no level for this
-        family. A provisional 2026-09-03 LM Studio A/B on the heavily quantized
+        therefore imposes no thinking floor for this family. A provisional 2026-09-03 LM Studio A/B on the heavily quantized
         `qwen3.8-27b-gsq-rco` alias corroborated the switch: four thinking-off
         scenarios reported zero reasoning tokens and no repeated-tool loop,
         versus visible reasoning at the active level. The host had LM Link

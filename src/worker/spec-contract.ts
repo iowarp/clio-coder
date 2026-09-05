@@ -413,6 +413,9 @@ function validateCapabilityPatch(value: unknown, source: string): void {
 	for (const key of ["contextWindow", "maxTokens"] as const) {
 		readOptionalNumber(caps, key, source);
 	}
+	if (caps.thinkingControlRuntime !== undefined) {
+		readEnum(caps.thinkingControlRuntime, `${source}.thinkingControlRuntime`, ["lmstudio", "llamacpp"]);
+	}
 	for (const key of ["toolCallFormat", "thinkingFormat", "structuredOutputs"] as const) {
 		readOptionalString(caps, key, source);
 	}
