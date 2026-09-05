@@ -583,6 +583,7 @@ export async function createInteractiveApplication(deps: InteractiveDeps): Promi
 			: {}),
 		...(deps.getSettings ? { getSettings: deps.getSettings } : {}),
 		...(deps.resources ? { resources: deps.resources } : {}),
+		...(deps.agents ? { agents: deps.agents } : {}),
 		...(deps.session ? { session: deps.session } : {}),
 		...(deps.getSessionId ? { getSessionId: deps.getSessionId } : {}),
 		...(deps.getTaskBoard ? { getTaskBoard: deps.getTaskBoard } : {}),

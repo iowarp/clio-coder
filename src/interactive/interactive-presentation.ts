@@ -2,6 +2,8 @@ import { performance } from "node:perf_hooks";
 import type { ClioSettings } from "../core/config.js";
 import { DEFAULT_SETTINGS } from "../core/defaults.js";
 import type { SafeEventBus } from "../core/event-bus.js";
+import type { AgentsContract } from "../domains/agents/contract.js";
+import { isUserVisibleAgent } from "../domains/agents/spec.js";
 import type { ContextState } from "../domains/context/index.js";
 import type { DispatchContract } from "../domains/dispatch/contract.js";
 import type { TaskMemoryOperatorStatus } from "../domains/memory/index.js";
@@ -12,7 +14,6 @@ import type {
 } from "../domains/observability/index.js";
 import { type ProvidersContract, resolveModelRuntimeCapabilitiesForProviders } from "../domains/providers/index.js";
 import type { ResourcesContract } from "../domains/resources/index.js";
-import { getMarketplaceSkills } from "../domains/resources/skills/marketplace.js";
 import { ceilChars, contentChars } from "../domains/session/context-accounting.js";
 import type { SessionContract, TaskBoardSnapshot } from "../domains/session/index.js";
 import type { Component, TUI } from "../engine/tui.js";
@@ -88,6 +89,7 @@ export interface InteractivePresentationDeps {
 	bootPending?: Component;
 	getSettings?: () => Readonly<ClioSettings>;
 	resources?: Pick<ResourcesContract, "skills">;
+	agents?: Pick<AgentsContract, "listSpecs">;
 	session?: Pick<SessionContract, "current">;
 	getSessionId?: () => string | null;
 	getTaskBoard?: () => TaskBoardSnapshot | null;
@@ -432,10 +434,52 @@ export function createInteractivePresentation(deps: InteractivePresentationDeps)
 	const editor = deps.editor ?? factories.createEditor(deps.tui, editorChrome);
 	editor.focused = true;
 	const autocomplete: AutocompleteProvider = factories.createAutocomplete({
-		listSkills: () => ({
-			installed: deps.resources?.skills(getCwd()).items ?? [],
-			marketplace: getMarketplaceSkills(),
-		}),
+		completionSources: {
+			agents: async () =>
+				(deps.agents?.listSpecs() ?? []).filter(isUserVisibleAgent).map((agent) => ({
+					id: agent.id,
+					value: agent.id,
+					label: agent.id,
+					description: agent.description,
+				})),
+			targets: async () =>
+				deps.providers.list().map(({ target, reason }) => ({
+					id: target.id,
+					value: target.id,
+					label: target.id,
+					description: reason,
+				})),
+			models: async () =>
+				deps.providers.list().flatMap(({ target, discoveredModels, discoveredModelLabels }) =>
+					[
+						...new Set([
+							...(target.defaultModel ? [target.defaultModel] : []),
+							...(target.wireModels ?? []),
+							...discoveredModels,
+						]),
+					].map((model) => ({
+						id: `${target.id}/${model}`,
+						value: model,
+						label: discoveredModelLabels?.[model] ?? model,
+						description: target.id,
+					})),
+				),
+			skills: async () =>
+				(deps.resources?.skills(getCwd()).items ?? []).map((skill) => ({
+					id: skill.name,
+					value: skill.name,
+					label: skill.name,
+					description: skill.description,
+				})),
+			tasks: async () =>
+				(deps.getTaskBoard?.()?.tasks ?? []).map((task) => ({
+					id: task.id,
+					value: task.id,
+					label: task.title,
+					description: task.status,
+				})),
+			// Other slots remain empty when this presentation has no read-only catalog for them.
+		},
 	});
 	editor.setAutocompleteProvider(autocomplete);
 
