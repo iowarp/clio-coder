@@ -966,10 +966,16 @@ function cwdArg(args: Record<string, unknown> | undefined, fallback: string): st
 }
 
 /**
- * Tools whose arguments are a file's contents rather than a command line.
- * Their damage-control scan is the destination path alone.
+ * Tools whose arguments carry file contents or task prose, not command lines.
+ * Their damage-control scan is the destination path alone, when present.
  */
-const CONTENT_BEARING_TOOLS: ReadonlySet<string> = new Set([ToolNames.Write, ToolNames.Edit, ToolNames.Artifact]);
+const CONTENT_BEARING_TOOLS: ReadonlySet<string> = new Set([
+	ToolNames.Write,
+	ToolNames.Edit,
+	ToolNames.Artifact,
+	ToolNames.Dispatch,
+	ToolNames.Tasks,
+]);
 
 /**
  * The text damage-control rules are matched against.
@@ -991,6 +997,8 @@ const CONTENT_BEARING_TOOLS: ReadonlySet<string> = new Set([ToolNames.Write, Too
  * full. Only the destination path is scanned for a mutation tool, which keeps
  * any path-shaped rule working; where the file may land is the write tool's own
  * gate in `writePathClass`.
+ * Dispatch and task-board prose likewise does not execute; worker commands
+ * are scanned when the worker calls an execute-class tool.
  */
 function damageControlScan(call: ClassifierCall): string {
 	if (!CONTENT_BEARING_TOOLS.has(call.tool)) return serializeArgs(call.args);

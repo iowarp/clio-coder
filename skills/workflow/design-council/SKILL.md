@@ -7,7 +7,7 @@ triggers:
   - get multiple expert perspectives
   - weigh the architecture options
   - what would experts say
-version: 0.5.1
+version: 0.6.0
 license: Apache-2.0
 allowed-tools:
   - dispatch
@@ -84,11 +84,7 @@ Declare `intent: {read_roots: [...], relevant_paths: [...]}` with paths
 relative to the repo root on every dispatch call instead of pasting an
 absolute path into `task`/`briefing` prose (a config value, a mount point).
 An absolute path token in briefing/task text with no declared `intent` is
-rejected as `legacy_scope_path_absolute`. Keep a persona's argument in prose,
-never literal shell syntax — a phrase like "you can `rm -rf` the directory"
-inside a dispatch call's text can trip the same damage-control pattern that
-blocks a real destructive shell command, even though nothing executes; say
-"delete the directory" instead.
+rejected as `legacy_scope_path_absolute`.
 
 A dispatch call's own synchronous result already carries every worker's
 output — do not follow it with a `bash`/`read` pass over the receipt file on

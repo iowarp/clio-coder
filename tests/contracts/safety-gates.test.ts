@@ -79,6 +79,30 @@ describe("safety gate boundary", () => {
 		);
 	});
 
+	it("admits destructive command quotations in task prose while blocking bash execution", () => {
+		const policy = engine();
+		const command = "rm -rf /";
+		const prose = `Explain why ${command} is dangerous.`;
+		for (const args of [
+			{ task: prose },
+			{ task: "Review safety", briefing: prose, persona: prose, intent: { goal: prose } },
+			{ mode: "parallel", tasks: [{ task: prose, briefing: prose }] },
+		]) {
+			const decision = policy.evaluate({ tool: ToolNames.Dispatch, args });
+			strictEqual(decision.kind, "allow");
+			strictEqual(decision.actionClass, "dispatch");
+		}
+		for (const args of [
+			{ action: "plan", title: prose, tasks: [prose] },
+			{ action: "done", id: "t1", note: prose },
+		]) {
+			strictEqual(policy.evaluate({ tool: ToolNames.Tasks, args }).kind, "allow");
+		}
+		const destructive = policy.evaluate({ tool: ToolNames.Bash, args: { command } });
+		strictEqual(destructive.kind, "block");
+		strictEqual(destructive.reasonCode, "damage-control:rm-rf-root");
+	});
+
 	it("protects verifier authority and scans catalog argv before execution", () => {
 		const catalogPath = join(scratch, ".clio-coder", "verifiers.yaml");
 		const policyPath = join(scratch, ".clio-coder", "safety.yaml");

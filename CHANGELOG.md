@@ -19,6 +19,7 @@ Trust spine: typed claims, executable validation, and decision provenance. Answe
 - The dispatch board reads observability's run projection. One fold owns lifecycle events, worker progress, receipt trust, retries, cancellation, fleet positions, and evidence readiness; the board keeps ordering, selection, and rendering. Terminal status and accounting come from the same projection the observability contract publishes.
 
 ### Fixed
+- Damage-control no longer treats command quotations in `dispatch` and `tasks` prose as shell execution. Execute-class calls still use the same blocked command patterns (#286).
 - The `coding-standards` skill (0.4.0) declares an `allowed-tools` surface again (`read`, `grep`, `find`, `ls`, `code_nav`, `bash`, `write`, `edit`) instead of no narrowing at all, so a solo run can both read and write code.
 - ACP delegation usage now carries `totalTokens` and `costUsd`, merged with the same rule the ACP server uses: an explicit total or cost from the peer is taken as reported, otherwise the total is the sum of input, output, and cache tokens and the cost stays 0.
 - The dispatch typed-intent reason-code table now documents `legacy_scope_inferred` as the warn that `path-scope.ts` emits when prose inference resolves a leading `../` run against the dispatch root, instead of calling it an unemitted compatibility id.
