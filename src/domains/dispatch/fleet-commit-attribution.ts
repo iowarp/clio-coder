@@ -6,6 +6,8 @@ export interface FleetCommitPriorResult {
 	succeeded: boolean;
 	integrityValid: boolean;
 	receiptDigest: string;
+	/** Decision refs from the step's sealed receipt; they become `Clio-Decision:` trailers. */
+	decisionRefs?: ReadonlyArray<string>;
 }
 
 /**
@@ -23,6 +25,7 @@ export function deriveFleetCommitAttribution(input: {
 	const byId = new Map(input.plan.steps.map((step) => [step.id, step] as const));
 	let materiallyAuthored = false;
 	let receipt: CommitAttributionEvidence["receipt"];
+	let decisions: CommitAttributionEvidence["decisions"];
 	for (const candidate of input.step.commitFrom ?? []) {
 		const source = byId.get(candidate);
 		const result = input.priorResults.get(candidate);
@@ -35,6 +38,7 @@ export function deriveFleetCommitAttribution(input: {
 			continue;
 		}
 		materiallyAuthored = true;
+		if (result.decisionRefs !== undefined && result.decisionRefs.length > 0) decisions = [...result.decisionRefs];
 		if (/^[0-9a-f]{64}$/u.test(result.receiptDigest)) {
 			receipt = {
 				version: RUN_RECEIPT_INTEGRITY_VERSION,
@@ -52,5 +56,6 @@ export function deriveFleetCommitAttribution(input: {
 		validationSucceeded: input.validationFresh,
 		independentReviewPassed: input.independentReviewFresh,
 		...(receipt === undefined ? {} : { receipt }),
+		...(decisions === undefined ? {} : { decisions }),
 	};
 }

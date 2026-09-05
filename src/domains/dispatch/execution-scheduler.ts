@@ -13,6 +13,8 @@ import {
 export interface ExecutionStepResult extends ExecutionHandoff {
 	succeeded: boolean;
 	integrityValid: boolean;
+	/** Decision refs the step's sealed receipt was made under; absent for code steps and decision-free runs. */
+	decisionRefs?: ReadonlyArray<string>;
 	/**
 	 * The step changed the workspace outside its declared boundary. Sealed by
 	 * the orchestrator after the fact, never by the step: a run that reports on

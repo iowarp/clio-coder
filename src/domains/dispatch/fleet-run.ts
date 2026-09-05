@@ -657,6 +657,7 @@ export async function executeFleetRun(input: ExecuteFleetRunInput): Promise<Flee
 							output: receipt.output?.state === "final" ? receipt.output.text : "",
 							succeeded: stepSucceeded,
 							integrityValid,
+							...(receipt.decisionRefs !== undefined ? { decisionRefs: receipt.decisionRefs } : {}),
 							...(failureReason !== undefined ? { failureReason } : {}),
 							...(gatePathHash !== undefined ? { gatePathHash } : {}),
 							...(delegationPlanHash !== undefined ? { delegationPlanHash } : {}),

@@ -12,17 +12,24 @@ import {
 } from "node:fs";
 import { join, resolve } from "node:path";
 import { AI_AGENT_NAME } from "./agent-environment.js";
-import { CLIO_COMMIT_TRAILERS, type CommitAttributionEvidence } from "./commit-attribution.js";
+import {
+	CLIO_COMMIT_TRAILERS,
+	CLIO_DECISION_TRAILER_KEY,
+	type CommitAttributionEvidence,
+	decisionTrailerRefs,
+} from "./commit-attribution.js";
 import { clioStateDir } from "./xdg.js";
 
 /** Effective `attribution.gitCommits` for child-process seams. Internal state, not an operator override. */
 export const CLIO_GIT_COMMITS_ENABLED_ENV = "CLIO_CODER_GIT_COMMITS_ENABLED";
 const ASSISTED_ENV = "CLIO_CODER_COMMIT_ASSISTED";
 const AUTHORED_ENV = "CLIO_CODER_COMMIT_AUTHORED";
+/** Space-separated decision refs the spawn was made under; each becomes one `Clio-Decision:` trailer. */
+const DECISIONS_ENV = "CLIO_CODER_COMMIT_DECISIONS";
 /** Present iff this environment carries Clio's command-scope core.hooksPath pair; holds the count below it. */
 const CONFIG_BASE_COUNT_ENV = "CLIO_CODER_GIT_CONFIG_BASE_COUNT";
 const DEFAULT_HOOKS_EQUIVALENT_ENV = "CLIO_CODER_GIT_DEFAULT_HOOKS_EQUIVALENT";
-const MANAGED_HOOK_VERSION = 2;
+const MANAGED_HOOK_VERSION = 3;
 const DIAGNOSTIC_MAX_CHARS = 300;
 const COUNT = /^(?:0|[1-9][0-9]*)$/u;
 const reportedDiagnostics = new Set<string>();
@@ -45,7 +52,33 @@ type RepositoryProbe =
 const probeCache = new Map<string, { at: number; probe: RepositoryProbe }>();
 let installedHooksDirectory: string | null = null;
 
-const PER_SPAWN_ENV_NAMES = [ASSISTED_ENV, AUTHORED_ENV, CONFIG_BASE_COUNT_ENV, DEFAULT_HOOKS_EQUIVALENT_ENV] as const;
+const PER_SPAWN_ENV_NAMES = [
+	ASSISTED_ENV,
+	AUTHORED_ENV,
+	DECISIONS_ENV,
+	CONFIG_BASE_COUNT_ENV,
+	DEFAULT_HOOKS_EQUIVALENT_ENV,
+] as const;
+
+let decisionRefsProvider: (() => ReadonlyArray<string>) | null = null;
+
+/**
+ * Register the live decision board's active refs for the session seam. Each
+ * Clio-spawned commit is then stamped with the decisions it was made under,
+ * the same way `ASSISTED_ENV` carries assistance. Explicit `evidence.decisions`
+ * on a spawn still wins over the provider.
+ */
+export function setCommitDecisionRefsProvider(provider: (() => ReadonlyArray<string>) | null): void {
+	decisionRefsProvider = provider;
+}
+
+function providedDecisionRefs(): ReadonlyArray<string> {
+	try {
+		return decisionRefsProvider?.() ?? [];
+	} catch {
+		return [];
+	}
+}
 
 export interface ManagedCommitAttributionOptions {
 	cwd?: string;
@@ -242,6 +275,14 @@ if [ "$${ASSISTED_ENV}" = '1' ] || [ "$${AUTHORED_ENV}" = '1' ]; then
   append_trailer '${CLIO_COMMIT_TRAILERS.assisted}'
 fi
 if [ "$${AUTHORED_ENV}" = '1' ]; then append_trailer '${CLIO_COMMIT_TRAILERS.coAuthored}'; fi
+# Decision refs are validated again here: only <id>/<kebab-key> shapes become
+# trailers, so a stray value cannot inject a second line into the message.
+for decision_ref in $${DECISIONS_ENV}; do
+  case "$decision_ref" in
+    *[!A-Za-z0-9:._/-]* | */*/* | /* | */ | *-*-) continue ;;
+    */*) append_trailer "${CLIO_DECISION_TRAILER_KEY}: $decision_ref" ;;
+  esac
+done
 exit 0
 `;
 
@@ -344,6 +385,8 @@ export function withManagedGitCommitAttributionEnvironment(
 	const evidence = options.evidence ?? { materiallyAssisted: true, materiallyAuthored: true };
 	env[ASSISTED_ENV] = evidence.materiallyAssisted === true ? "1" : "0";
 	env[AUTHORED_ENV] = evidence.materiallyAuthored === true ? "1" : "0";
+	const decisions = decisionTrailerRefs(evidence.decisions ?? providedDecisionRefs());
+	if (decisions.length > 0) env[DECISIONS_ENV] = decisions.join(" ");
 
 	const countRaw = env.GIT_CONFIG_COUNT;
 	const count = countRaw === undefined ? 0 : COUNT.test(countRaw) ? Number(countRaw) : Number.NaN;

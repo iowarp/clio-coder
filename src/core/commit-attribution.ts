@@ -15,6 +15,19 @@ export const CLIO_COMMIT_TRAILERS = {
 	coAuthored: `Co-authored-by: ${CLIO_COMMIT_IDENTITY}`,
 } as const;
 
+export const CLIO_DECISION_TRAILER_KEY = "Clio-Decision";
+
+/** Most `Clio-Decision:` trailers one commit carries; matches the receipt cap. */
+export const CLIO_DECISION_TRAILER_CAP = 32;
+
+/**
+ * A decision ref is `<interviewId>/<key>`: an `ask_user` interview id or an
+ * `agent:<uuid>` decision-set id, then a kebab-case key. Only refs of this
+ * shape become trailers, so a malformed value can never inject a second
+ * trailer line or a stray control character into a commit message.
+ */
+export const DECISION_REF_PATTERN = /^[A-Za-z0-9][A-Za-z0-9:._-]{0,127}\/[a-z0-9]+(?:-[a-z0-9]+)*$/u;
+
 export interface CommitReceiptEvidence {
 	version: 20;
 	algorithm: "sha256";
@@ -64,7 +77,25 @@ const KNOWN_CLIO_TRAILERS = new Set(
 );
 
 function isClioTrailer(key: string): boolean {
-	return KNOWN_CLIO_TRAILERS.has(key) || key.startsWith("clio-evidence:receipt-v20/sha256:");
+	return (
+		KNOWN_CLIO_TRAILERS.has(key) ||
+		key.startsWith("clio-evidence:receipt-v20/sha256:") ||
+		key.startsWith(`${CLIO_DECISION_TRAILER_KEY.toLowerCase()}:`)
+	);
+}
+
+/** Well-formed decision refs from the evidence, deduplicated, sorted, and capped. */
+export function decisionTrailerRefs(decisions: ReadonlyArray<string> | undefined): string[] {
+	if (decisions === undefined) return [];
+	const refs = new Set<string>();
+	for (const ref of decisions) {
+		if (typeof ref === "string" && DECISION_REF_PATTERN.test(ref)) refs.add(ref);
+	}
+	return [...refs].sort().slice(0, CLIO_DECISION_TRAILER_CAP);
+}
+
+function decisionTrailer(ref: string): string {
+	return `${CLIO_DECISION_TRAILER_KEY}: ${ref}`;
 }
 
 /**
@@ -144,6 +175,7 @@ export function attributeCommitMessage(
 	if (evidence.materiallyAuthored === true) desired.push(CLIO_COMMIT_TRAILERS.coAuthored);
 	const receipt = receiptTrailer(evidence.receipt);
 	if (receipt !== null) desired.push(receipt);
+	for (const ref of decisionTrailerRefs(evidence.decisions)) desired.push(decisionTrailer(ref));
 
 	const existing = new Set(
 		(blockStart === null ? [] : retained.slice(blockStart))
