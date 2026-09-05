@@ -34,7 +34,7 @@ Every runtime-tunable value needs both halves; the pair is one knob, not two. Th
 | `CLIO_CODER_MAX_TOOL_CALLS` | 50 | `src/engine/loop-guard.ts` → `src/engine/worker-runtime.ts` | Worker lifetime tool-call cap for a dispatched run. Different axis than the orchestrator budget despite the near-identical name. |
 | `CLIO_CODER_MAX_DISPATCH_RUNS` | 1000 | `src/domains/dispatch/state.ts` | Dispatch run-ledger retention cap. |
 | `CLIO_CODER_MAX_CONTEXT_TOKENS` | unset | `src/domains/providers/runtime-resolution.ts` | Context-window override for local runtimes. Also set internally by `clio-coder run --max-context-tokens` (see §6). |
-| `CLIO_CODER_KV_CACHE_MODE` | unset | retired | KV-cache quantization mode. Also set internally by the former `clio-coder run --kv-cache-mode` path. |
+| `CLIO_CODER_KV_CACHE_MODE` | unset | retired | KV-cache quantization mode. Also set internally by the former `clio-coder run` path. |
 | `CLIO_CODER_SAMPLING_OVERRIDES` | unset | `src/engine/apis/sampling-overrides.ts` | JSON sampling-parameter override. Set internally by print-mode sampling flags. |
 | `CLIO_CODER_READ_MAX_BYTES` | 51200 (50 KB) | `src/tools/read.ts` | Per-call byte cap for the read tool. |
 | `CLIO_CODER_OBSERVATION_TURN_BUDGET_BYTES` | 196608 (192 KB) | `src/tools/observation.ts` | Shared per-turn byte pool across all observation tools. |
@@ -93,7 +93,7 @@ All default off; all enabled with `1`.
 
 ## 6. CLI flags that bridge through env vars (Pre-consolidated State)
 
-`clio-coder run --max-context-tokens` and `--kv-cache-mode` (`src/cli/run.ts:143-234`) and the print-mode sampling flags (`src/cli/modes/print.ts:306-333`) do not plumb their values through function arguments. They mutate `process.env` (`CLIO_CODER_MAX_CONTEXT_TOKENS`, `CLIO_CODER_KV_CACHE_MODE`, `CLIO_CODER_SAMPLING_OVERRIDES`), run the command, then restore the previous value in a `finally`. The env var is the transport between the CLI layer and deep engine code.
+`clio-coder run --max-context-tokens` (`src/cli/run.ts:143-234`) and the print-mode sampling flags (`src/cli/modes/print.ts:306-333`) do not plumb their values through function arguments. They mutate `process.env` (`CLIO_CODER_MAX_CONTEXT_TOKENS`, `CLIO_CODER_KV_CACHE_MODE`, `CLIO_CODER_SAMPLING_OVERRIDES`), run the command, then restore the previous value in a `finally`. The env var is the transport between the CLI layer and deep engine code.
 
 ## 7. Script- and benchmark-only vars (Pre-consolidated State)
 

@@ -37,7 +37,6 @@ export interface RunCliArgs {
 	noSkills: boolean;
 	skillPaths: string[];
 	maxContextTokens?: number;
-	kvCacheMode?: string;
 	steerChannel?: string;
 	/** Resume this exact session and append the turn to it. */
 	sessionId?: string;
@@ -204,13 +203,6 @@ export function parseRunCliArgs(argv: ReadonlyArray<string>): RunCliArgs {
 				} else {
 					parsed.diagnostics.push({ type: "error", message: "--max-context-tokens must be a positive integer" });
 				}
-			}
-			continue;
-		}
-		if (arg === "--kv-cache-mode") {
-			const value = need(arg);
-			if (value !== null) {
-				parsed.kvCacheMode = value;
 			}
 			continue;
 		}

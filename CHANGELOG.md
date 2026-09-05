@@ -25,6 +25,9 @@ Trust spine: typed claims, executable validation, and decision provenance. Answe
 - The dispatch typed-intent reason-code table now documents `legacy_scope_inferred` as the warn that `path-scope.ts` emits when prose inference resolves a leading `../` run against the dispatch root, instead of calling it an unemitted compatibility id.
 - The `muse-glimmer-30b` catalog notes, runtime preference, and guidance now say the reasoning strength dial is driven per request through `chatTemplateKwargs.byLevel` on llama.cpp and reported as undeliverable on LM Studio, instead of claiming no per-request field exists.
 
+### Removed
+- The unused `--kv-cache-mode` command-line flag and its run override field are removed because no runtime reads them.
+
 ## 0.4.3 - 2026-09-05
 
 This release adds Archify architecture maps and experimental Antigravity research delegation, and tightens thinking controls, session memory, compaction and execution evidence. Usage and cost reports retain explicit coverage limits; full evidence reconciliation is deferred to v0.4.5 or later.

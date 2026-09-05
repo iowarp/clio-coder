@@ -103,7 +103,6 @@ For process exit codes, stdout deliverable guarantees, and machine-readable JSON
 | `--temperature <n>` / `--top-p <n>` / `--top-k <n>` / `--min-p <n>` | One-run sampler overrides when the selected runtime supports them. |
 | `--presence-penalty <n>` / `--frequency-penalty <n>` / `--repeat-penalty <n>` | One-run penalty overrides when the selected runtime supports them. |
 | `--max-context-tokens <n>` | One-run context-window override for supported local runtimes. |
-| `--kv-cache-mode <mode>` | One-run KV-cache override for supported local runtimes: `f16`, `f32`, `none`, `false`, `q8_0`, `q4_0`, `q4_1`, `iq4_nl`, `q5_0`, or `q5_1`. |
 | `--json` | Stream JSONL events for main-agent runs; dispatch streams events and receipt JSON. |
 | `--json-events <mode>` | Main-agent JSON stream mode: `full` or `terminal`; implies `--json`. |
 | `--session <id>` | Append this turn to an existing session identified by `<id>`. |
