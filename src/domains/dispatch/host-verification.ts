@@ -13,7 +13,7 @@ import type { RunHostVerification, RunHostVerificationAttribution, RunHostVerifi
 import { captureWorkspaceSnapshot } from "./write-boundary.js";
 
 const OUTPUT_TAIL_BYTES = 2_048;
-const MEMO_VERSION = 1;
+const MEMO_VERSION = 2;
 
 type ResolvedCheck = NonNullable<DispatchRequest["resolvedVerification"]>[number];
 
@@ -38,7 +38,7 @@ interface MemoEntry {
 }
 
 interface MemoFile {
-	version: 1;
+	version: typeof MEMO_VERSION;
 	entries: MemoEntry[];
 }
 
@@ -109,10 +109,10 @@ function storeMemoEntry(stateDir: string, entry: MemoEntry): void {
 	});
 }
 
-function memoKey(command: FleetCommand, fingerprint: string, env: NodeJS.ProcessEnv): string {
+function memoKey(command: FleetCommand, judgment: string, fingerprint: string, env: NodeJS.ProcessEnv): string {
 	const names = [...FLEET_COMMAND_BASE_ENV, ...command.env];
 	const values = Object.fromEntries(names.map((name) => [name, env[name] ?? null]));
-	return sha256(JSON.stringify({ fingerprint, argv: command.argv, cwd: command.cwd, env: values }));
+	return sha256(JSON.stringify({ fingerprint, judgment, env: values }));
 }
 
 export function hostVerificationRejection(
@@ -141,8 +141,7 @@ function readSealedFile(absolutePath: string): string | undefined {
 
 /**
  * The kind-specific verdict for a resolved check that already ran. A command
- * check keeps its exit code. A numeric-compare check reads the captured output
- * artifact (the command's stdout and stderr as one stream) and judges it
+ * check keeps its exit code. A numeric-compare check judges captured stdout
  * against the sealed reference; a perf-budget check judges the measured
  * duration against the sealed budget or baseline. Either judgement turns a
  * clean exit into exit 1 when it fails, and a judgement that cannot be made
@@ -152,23 +151,16 @@ function judgeResolvedCheck(
 	resolvedCheck: ResolvedCheck,
 	exitCode: number,
 	durationMs: number,
-	artifactPath: string | undefined,
+	stdout: string,
 ): { exitCode: number; report?: RunHostVerificationCheck["report"]; outputTail?: string } {
 	if (resolvedCheck.kind === undefined || resolvedCheck.kind === "command" || exitCode !== 0) return { exitCode };
 	if (resolvedCheck.kind === "numeric-compare" && resolvedCheck.numeric !== undefined) {
-		const artifact = artifactPath === undefined ? undefined : readSealedFile(artifactPath);
-		if (artifact === undefined)
-			return { exitCode: 1, outputTail: "numeric-compare: captured command output is unreadable" };
-		// The artifact opens with the code-step header (`$ argv`, cwd, exit,
-		// duration, timed_out) and a blank line; the command's own output follows.
-		const separator = artifact.indexOf("\n\n");
-		const captured = separator === -1 ? artifact : artifact.slice(separator + 2);
 		const referenceText = readSealedFile(resolvedCheck.numeric.reference);
 		if (referenceText === undefined) {
 			return { exitCode: 1, outputTail: `numeric-compare: reference '${resolvedCheck.numeric.reference}' cannot be read` };
 		}
 		const report = judgeNumericTexts(
-			captured,
+			stdout,
 			referenceText,
 			resolvedCheck.numeric.tolerance,
 			`reference '${resolvedCheck.numeric.reference}'`,
@@ -207,9 +199,9 @@ async function runResolvedCheck(input: {
 		env: [],
 		description: `Host verification check ${resolvedCheck.check}.`,
 	};
+	const judgmentKey = checkDedupeKey(resolvedCheck);
 	const fingerprint = workspaceFingerprint(resolvedCheck.cwd);
-	const key =
-		fingerprint === null ? null : memoKey({ ...command, cwd: resolve(resolvedCheck.cwd) }, fingerprint, input.env);
+	const key = fingerprint === null ? null : memoKey(command, judgmentKey, fingerprint, input.env);
 	const hit =
 		key === null
 			? undefined
@@ -230,7 +222,12 @@ async function runResolvedCheck(input: {
 		env: input.env,
 	});
 	const artifactPath = outcome.record.artifactPaths[0];
-	const judgement = judgeResolvedCheck(resolvedCheck, outcome.record.exitCode, outcome.record.durationMs, artifactPath);
+	const judgement = judgeResolvedCheck(
+		resolvedCheck,
+		outcome.record.exitCode,
+		outcome.record.durationMs,
+		outcome.stdout,
+	);
 	const check: RunHostVerificationCheck = {
 		check: resolvedCheck.check,
 		argv: [...outcome.record.argv],
@@ -242,7 +239,7 @@ async function runResolvedCheck(input: {
 		...(artifactPath !== undefined ? { artifactPath } : {}),
 		...(judgement.report !== undefined ? { report: judgement.report } : {}),
 	};
-	if (check.exitCode === 0 && key !== null) {
+	if (check.exitCode === 0 && key !== null && checkDedupeKey(resolvedCheck) === judgmentKey) {
 		try {
 			storeMemoEntry(input.stateDir, { key, runId: input.runId, check });
 		} catch (error) {
@@ -293,14 +290,45 @@ function implicatedPaths(outputExcerpt: string, checkCwd: string): string[] {
 	return [...paths].sort();
 }
 
-/** Identity of a resolved check across batch members: same command, same cwd, same bound. */
+/** Identity shared by memo reuse and batch deduplication, including the declared judgment and its input files. */
 function checkDedupeKey(resolvedCheck: ResolvedCheck): string {
+	const numeric = resolvedCheck.numeric;
+	const perf = resolvedCheck.perf;
 	return sha256(
 		JSON.stringify({
 			check: resolvedCheck.check,
 			argv: [...resolvedCheck.argv],
 			cwd: resolve(resolvedCheck.cwd),
 			timeoutMs: resolvedCheck.timeoutMs,
+			kind: resolvedCheck.kind ?? "command",
+			numeric:
+				numeric === undefined
+					? undefined
+					: {
+							reference: numeric.reference,
+							referenceDigest: sha256(JSON.stringify(readSealedFile(numeric.reference) ?? null)),
+							tolerance: {
+								absolute: numeric.tolerance.absolute,
+								relative: numeric.tolerance.relative,
+								ulp: numeric.tolerance.ulp,
+							},
+						},
+			perf:
+				perf === undefined
+					? undefined
+					: {
+							budget:
+								perf.budget === undefined
+									? undefined
+									: {
+											wallTimeMs: perf.budget.wallTimeMs,
+											tolerance: perf.budget.tolerance,
+										},
+							baseline: perf.baseline,
+							baselineDigest:
+								perf.baseline === undefined ? undefined : sha256(JSON.stringify(readSealedFile(perf.baseline) ?? null)),
+							tolerance: perf.tolerance,
+						},
 		}),
 	);
 }
@@ -491,9 +519,11 @@ export function createBatchVerificationGate(
 			string,
 			{ resolvedCheck: ResolvedCheck; owner: BatchVerificationParticipant; index: number }
 		>();
+		const checkKeys = new Map<ResolvedCheck, string>();
 		for (const member of contributors) {
 			for (const resolvedCheck of member.request.resolvedVerification ?? []) {
 				const key = checkDedupeKey(resolvedCheck);
+				checkKeys.set(resolvedCheck, key);
 				if (!distinct.has(key)) distinct.set(key, { resolvedCheck, owner: member, index: distinct.size });
 			}
 		}
@@ -518,7 +548,7 @@ export function createBatchVerificationGate(
 		for (const [key, entry] of ran) {
 			if (entry.check.exitCode === 0) continue;
 			const declarers = contributors.filter((member) =>
-				(member.request.resolvedVerification ?? []).some((candidate) => checkDedupeKey(candidate) === key),
+				(member.request.resolvedVerification ?? []).some((candidate) => checkKeys.get(candidate) === key),
 			);
 			const implicated = implicatedPaths(entry.outputExcerpt, entry.check.cwd);
 			const verdict = attributeFailure({ implicated, declarers, wave: members });
@@ -548,7 +578,8 @@ export function createBatchVerificationGate(
 			let rejected = false;
 			let unimplicated = false;
 			for (const resolvedCheck of member.request.resolvedVerification ?? []) {
-				const key = checkDedupeKey(resolvedCheck);
+				const key = checkKeys.get(resolvedCheck);
+				if (key === undefined) throw new Error("host verification: declared check has no batch identity");
 				const shared = ran.get(key);
 				if (shared === undefined) continue;
 				own.push(

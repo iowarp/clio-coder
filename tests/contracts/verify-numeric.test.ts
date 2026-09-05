@@ -1,5 +1,5 @@
 import { deepStrictEqual, match, ok, strictEqual } from "node:assert/strict";
-import { mkdirSync, mkdtempSync, realpathSync, rmSync, writeFileSync } from "node:fs";
+import { mkdirSync, mkdtempSync, readFileSync, realpathSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { afterEach, describe, it } from "node:test";
@@ -309,6 +309,62 @@ describe("numeric-compare through the verify runner", () => {
 });
 
 describe("numeric-compare under host verification", () => {
+	for (const stdout of ["", '{"value":1}\n']) {
+		it(`agrees with ordinary verify when stdout is ${stdout === "" ? "empty" : "valid"} and stderr contains diagnostic JSON`, async () => {
+			const diagnostic = '{"value":1}\n';
+			const argv = [
+				process.execPath,
+				"-e",
+				`process.stdout.write(${JSON.stringify(stdout)}); process.stderr.write(${JSON.stringify(diagnostic)});`,
+			];
+			const root = workspace({
+				"ref.json": '{"value":1}',
+				".clio-coder/verifiers.yaml": catalog({
+					id: "value",
+					description: "Measurement with diagnostics",
+					kind: "numeric-compare",
+					command: argv,
+					reference: "ref.json",
+					tolerance: { absolute: 0 },
+					cwd: ".",
+					timeoutMs: 30_000,
+					tags: [],
+				}),
+			});
+			process.chdir(root);
+			const loaded = loadProjectVerifierCatalog(root);
+			if (!loaded.ok || loaded.source === null) throw new Error("catalog must load");
+			const declared = loaded.source.checks[0];
+			ok(declared);
+			const ordinary = await runProjectCheck(declared);
+			strictEqual(ordinary.kind, stdout === "" ? "error" : "ok");
+			const host = await runHostVerification({
+				runId: "diagnostic-json",
+				request: {
+					resolvedVerification: [
+						{
+							check: "value",
+							argv,
+							cwd: root,
+							timeoutMs: 30_000,
+							kind: "numeric-compare",
+							numeric: { reference: join(root, "ref.json"), tolerance: { absolute: 0 } },
+						},
+					],
+				},
+				workerSuccessful: true,
+				stateDir: join(root, "state"),
+			});
+			strictEqual(host?.status, stdout === "" ? "rejected" : "verified");
+			const result = host?.checks[0];
+			strictEqual(result?.exitCode, stdout === "" ? 1 : 0);
+			if (stdout === "") match(result?.outputTail ?? "", /command output.*not valid JSON/u);
+			else deepStrictEqual(result?.report, ordinary.details?.report);
+			ok(result?.artifactPath);
+			ok(readFileSync(result.artifactPath, "utf8").includes(diagnostic), "stderr remains in the diagnostic artifact");
+		});
+	}
+
 	it("seals the report on the check and turns a failed judgement into a rejection", async () => {
 		const root = workspace({ "ref.json": JSON.stringify({ energy: [1, 2] }) });
 		const stateDir = join(root, "state");
