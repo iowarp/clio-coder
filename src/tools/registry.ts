@@ -1099,7 +1099,7 @@ function skillSurfaceBlockedVerdict(
 	const reason =
 		violation.disallowedBy.length > 0
 			? `${tool} is disallowed by the active skill(s) ${violation.disallowedBy.join(", ")} (disallowed-tools). ${lifetime} Work within the skill workflow; if it genuinely needs this step, use ask_user when available or state the blocker in your reply.`
-			: `${tool} is outside the tool surface declared by the active skill(s) ${violation.skills.join(", ")}. Tools are narrowed to: ${(violation.mergedAllowedTools ?? []).join(", ")} (plus context and ask_user). ${lifetime} Work within the skill workflow; if it genuinely needs this step, use ask_user when available or state the blocker in your reply.`;
+			: `${tool} is outside the tool surface declared by the active skill(s) ${violation.skills.join(", ")}. Tools are narrowed to: ${(violation.mergedAllowedTools ?? []).join(", ")} (plus context and ask_user). The limitation receipt is also available unless explicitly disallowed. ${lifetime} Work within the skill workflow; if it genuinely needs this step, use ask_user when available or state the blocker in your reply.`;
 	const blocked: SafetyDecision = {
 		kind: "block",
 		classification: decision.classification,

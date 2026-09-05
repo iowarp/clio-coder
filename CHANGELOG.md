@@ -30,6 +30,7 @@ Trust spine: typed claims, executable validation, and decision provenance. Answe
 
 ### Fixed
 - High-rigor task acceptance now requires validation evidence from the owning workspace. Verifier receipts retain declaration source and execution details, so a passing same-named examples check cannot satisfy a root check. Intended package and catalog checks, exact root package commands, and scoped limitation receipts remain supported (#335).
+- Skills with an allowed-tools list, including coding-standards and the related coding workflows, can record the finish contract's limitation receipt. Explicit tool denials and restrictions on unrelated actions remain enforced (#336).
 - Slash argument completion now reads loaded agent recipes, configured targets and known models, installed skills, and session tasks from the interactive app contracts (#303).
 - Workbench desktop notification mute preference now persists in local storage across page reloads (#322).
 - ACP `session/close` releases the bound session slot so a host can create another session on the same child process.
