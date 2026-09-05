@@ -469,7 +469,7 @@
 				"what would experts say"
 			],
 			"sourceUrl": "https://github.com/iowarp/clio-coder/tree/main/skills/workflow/design-council",
-			"version": "0.5.1",
+			"version": "0.6.0",
 			"audit": "pass",
 			"category": "workflow"
 		},
