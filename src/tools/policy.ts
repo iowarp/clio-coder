@@ -53,6 +53,10 @@ export const TOOL_PLANES: Readonly<Record<BuiltinToolName, PlaneExpectation>> = 
 	// panes. It mutates no workspace, so it stays read class; sequential because
 	// two pane operations in one batch would race the same pane registry.
 	[ToolNames.Panes]: { plane: "orchestrate", actionClass: "read", executionMode: "sequential" },
+	// limitation records a typed receipt in the session ledger and nothing
+	// else: no filesystem, no shell. Read class so it never trips a safety
+	// gate; parallel because the call is pure and idempotent.
+	[ToolNames.Limitation]: { plane: "orchestrate", actionClass: "read", executionMode: "parallel" },
 	[ToolNames.WebFetch]: { plane: "retrieve", actionClass: "read", executionMode: "parallel" },
 	[ToolNames.AskUser]: { plane: "interact", actionClass: "read", executionMode: "sequential" },
 	[ToolNames.Artifact]: { plane: "artifact", actionClass: "write", executionMode: "sequential" },

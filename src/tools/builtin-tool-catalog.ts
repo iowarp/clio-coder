@@ -240,6 +240,17 @@ const TOOL_METADATA: Readonly<Record<string, ToolMetadata>> = {
 		promptHint:
 			'When the operator asks to see a dispatched agent ("show me the tester"), call panes(action="show", target=<agent id>).',
 	},
+	[ToolNames.Limitation]: {
+		objective: "Record what the turn could not verify and why as a ledger receipt.",
+		uiLabel: "Limitation",
+		retrySafety: "idempotent",
+		resultSizePolicy: {
+			kind: "exact",
+			maxBytes: 4_096,
+			followUpHint: "Call limitation again with a narrower scope if the first call was rejected.",
+		},
+		costLatency: "local_fast",
+	},
 	// RETRIEVE: network-class.
 	[ToolNames.WebFetch]: {
 		objective: "Fetch HTTP(S) text for explicit external research.",

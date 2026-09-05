@@ -4,7 +4,7 @@ name: Documenter
 description: Updates developer docs, examples, and operational runbooks.
 tools:
   required: [read, {anyOf: [write, edit]}]
-  optional: [grep, find, ls, git, verify, code_nav, context, ledger]
+  optional: [grep, find, ls, git, verify, code_nav, context, ledger, limitation]
 skills: []
 audience: base
 category: implement

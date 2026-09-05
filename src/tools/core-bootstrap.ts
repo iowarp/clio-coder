@@ -17,6 +17,7 @@ import { findTool } from "./find.js";
 import { grepTool } from "./grep.js";
 import { lazyTool } from "./lazy-tool.js";
 import { createLedgerTool } from "./ledger.js";
+import { limitationTool } from "./limitation.js";
 import { lsTool } from "./ls.js";
 import { networkToolsDisabled } from "./network-policy.js";
 import { assertBuiltinToolPolicy } from "./policy.js";
@@ -124,6 +125,9 @@ export function registerCoreTools(registry: ToolRegistry, deps: CoreToolBootstra
 	}
 	registry.register({
 		...builtin(credentialPresentTool, { path: "src/tools/credential-present.ts", scope: "core" }),
+	});
+	registry.register({
+		...builtin(limitationTool, { path: "src/tools/limitation.ts", scope: "core" }),
 	});
 	const session = deps.session;
 	const readSessionEntries = deps.readSessionEntries;

@@ -4,7 +4,7 @@ name: Git Master
 description: Runs bounded git operations end to end. Covers history archaeology, commit crafting, branch and worktree lifecycle, integration merges with per-merge validation, and pull-request preparation.
 tools:
   required: [read, {anyOf: [write, edit]}, context, git]
-  optional: [bash, grep, find, ls, code_nav, ledger]
+  optional: [bash, grep, find, ls, code_nav, ledger, limitation]
 skills: [fix-issue, ship, worktree-create, worktree-merge]
 audience: base
 category: implement

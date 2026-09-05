@@ -4,7 +4,7 @@ name: Tester
 description: Adds focused deterministic regression and coverage tests.
 tools:
   required: [read, {anyOf: [write, edit]}]
-  optional: [grep, find, ls, git, verify, code_nav, ledger]
+  optional: [grep, find, ls, git, verify, code_nav, ledger, limitation]
 skills: []
 audience: base
 category: quality

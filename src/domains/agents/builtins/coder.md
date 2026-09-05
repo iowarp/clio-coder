@@ -4,7 +4,7 @@ name: Coder
 description: Implements bounded code changes, repairs, and refactors. Behavior-preserving by default.
 tools:
   required: [read, {anyOf: [write, edit]}, context]
-  optional: [grep, find, ls, web_fetch, git, verify, code_nav, bash, ledger]
+  optional: [grep, find, ls, web_fetch, git, verify, code_nav, bash, ledger, limitation]
 skills: [fix-issue, ship]
 audience: base
 category: implement
