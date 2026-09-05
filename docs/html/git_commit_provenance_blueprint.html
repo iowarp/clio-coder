@@ -93,6 +93,17 @@ full digest:</p>
 </code></pre>
 <p>Clio does not invent, shorten, or add an unrelated digest. The role trailers do
 not depend on this optional line.</p>
+<p>A commit also names the decisions it was made under, one trailer per active
+decision on the session decision board (an <code>ask_user</code> answer or a design
+choice the agent recorded with <code>decide</code>):</p>
+<pre><code class="language-text">Clio-Decision: &lt;interviewId&gt;/&lt;key&gt;
+</code></pre>
+<p>The refs come from the sealed receipt&#39;s <code>decisionRefs</code> at the fleet seam and
+from the live board at the session seam. They are sorted, capped at 32, added
+once, and only refs of the <code>&lt;id&gt;/&lt;key&gt;</code> shape are written, where the key is an
+operator <code>snake_case</code> key or an agent <code>kebab-case</code> key. A decision trailer
+records rationale provenance; it is not evidence that the decision was correct
+or that its work was validated.</p>
 <h2>Commit paths and hooks</h2>
 <p>The deterministic SDLC fleet attributes its plan, code, and documentation
 commits at the controlled commit seam. Material agent work supplies assistance

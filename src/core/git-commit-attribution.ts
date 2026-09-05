@@ -275,7 +275,7 @@ if [ "$${ASSISTED_ENV}" = '1' ] || [ "$${AUTHORED_ENV}" = '1' ]; then
   append_trailer '${CLIO_COMMIT_TRAILERS.assisted}'
 fi
 if [ "$${AUTHORED_ENV}" = '1' ]; then append_trailer '${CLIO_COMMIT_TRAILERS.coAuthored}'; fi
-# Decision refs are validated again here: only <id>/<kebab-key> shapes become
+# Decision refs are validated again here: only <id>/<key> shapes become
 # trailers, so a stray value cannot inject a second line into the message.
 for decision_ref in $${DECISIONS_ENV}; do
   case "$decision_ref" in

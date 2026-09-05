@@ -22,11 +22,13 @@ export const CLIO_DECISION_TRAILER_CAP = 32;
 
 /**
  * A decision ref is `<interviewId>/<key>`: an `ask_user` interview id or an
- * `agent:<uuid>` decision-set id, then a kebab-case key. Only refs of this
- * shape become trailers, so a malformed value can never inject a second
- * trailer line or a stray control character into a commit message.
+ * `agent:<uuid>` decision-set id, then the decision key. Operator keys are
+ * snake_case and agent keys are kebab-case, the same shape `isDecisionRecord`
+ * admits. Only refs of this shape become trailers, so a malformed value can
+ * never inject a second trailer line or a stray control character into a
+ * commit message.
  */
-export const DECISION_REF_PATTERN = /^[A-Za-z0-9][A-Za-z0-9:._-]{0,127}\/[a-z0-9]+(?:-[a-z0-9]+)*$/u;
+export const DECISION_REF_PATTERN = /^[A-Za-z0-9][A-Za-z0-9:._-]{0,127}\/[a-z0-9]+(?:[_-][a-z0-9]+)*$/u;
 
 export interface CommitReceiptEvidence {
 	version: 20;

@@ -16,7 +16,7 @@ import {
 import type { ExecutionPlan, ExecutionPlanCodeStep } from "../../src/domains/dispatch/execution-plan.js";
 import { deriveFleetCommitAttribution } from "../../src/domains/dispatch/fleet-commit-attribution.js";
 
-const REFS = ["interview-1/db", "agent:a1b2/cache-key-shape"];
+const REFS = ["interview-1/db_engine", "agent:a1b2/cache-key-shape"];
 
 describe("Clio-Decision commit trailer", () => {
 	it("renders one sorted trailer per ref, idempotently, after the role trailers", () => {
@@ -29,7 +29,7 @@ describe("Clio-Decision commit trailer", () => {
 				CLIO_COMMIT_TRAILERS.assisted,
 				CLIO_COMMIT_TRAILERS.coAuthored,
 				"Clio-Decision: agent:a1b2/cache-key-shape",
-				"Clio-Decision: interview-1/db",
+				"Clio-Decision: interview-1/db_engine",
 				"",
 			].join("\n"),
 		);
@@ -43,10 +43,10 @@ describe("Clio-Decision commit trailer", () => {
 	});
 
 	it("writes only well-formed refs and caps the count", () => {
-		deepStrictEqual(decisionTrailerRefs(["b/k", "a/k", "a/k", "nokey", "a/Bad Key", "x/k\nInjected: y", "/k", "a/"]), [
-			"a/k",
-			"b/k",
-		]);
+		deepStrictEqual(
+			decisionTrailerRefs(["b/k", "a/k", "a/k", "nokey", "a/Bad Key", "x/k\nInjected: y", "/k", "a/", "a/_k", "a/k-"]),
+			["a/k", "b/k"],
+		);
 		const many = Array.from(
 			{ length: CLIO_DECISION_TRAILER_CAP + 5 },
 			(_, index) => `i/k-${String(index).padStart(2, "0")}`,
