@@ -10,7 +10,7 @@
  * boundary; this module does not import pi-ai directly.
  */
 
-import { stream } from "../../../engine/ai.js";
+import { streamSimple } from "../../../engine/ai.js";
 import type { EngineModel, Usage } from "../../../engine/types.js";
 import { foldWorkingSet } from "../../context/working-set/fold.js";
 import { recallableRefListing } from "../../context/working-set/recall.js";
@@ -418,10 +418,12 @@ async function runSummaryStream(
 	let reported: Record<string, unknown> = {};
 	let outcome: CompactionCallObservation["outcome"] = "error";
 	try {
-		const events = stream(
+		// Summarization requests thinking off, as its resolver does. Bare stream
+		// infers an active level from model.reasoning and would undo that choice.
+		const events = streamSimple(
 			input.model,
-			context as unknown as Parameters<typeof stream>[1],
-			options as unknown as Parameters<typeof stream>[2],
+			context as unknown as Parameters<typeof streamSimple>[1],
+			options as unknown as Parameters<typeof streamSimple>[2],
 		);
 		for await (const event of events) {
 			// Some transports throw after yielding a partial response. Retain the

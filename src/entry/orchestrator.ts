@@ -192,6 +192,7 @@ import type { EngineModel } from "../engine/types.js";
 import { createChatLoop } from "../interactive/chat-loop.js";
 import { type RunIo, startInteractive } from "../interactive/index.js";
 import { buildModelReplayAgentMessagesFromTurns } from "../interactive/model-session-replay.js";
+import { prepareBackgroundModelMetadata } from "./background-model-metadata.js";
 import type { BootOptions } from "./boot-options.js";
 import { readCompactionSystemPrompt } from "./compaction-prompt.js";
 import { createExtensionReloadCoordinator } from "./extension-reload.js";
@@ -383,14 +384,7 @@ export function createBackgroundMemoryModelClient(
 	}
 }
 
-function prepareBackgroundMemoryRoute(
-	providers: ProvidersContract,
-	targetId: string,
-	wireModelId: string,
-	timeoutMs: number,
-	bus: Pick<SafeEventBus, "emit"> | null,
-	selection: BackgroundMemoryRoute["selection"],
-): BackgroundMemoryRoute {
+function prepareBackgroundMemoryModel(providers: ProvidersContract, targetId: string, wireModelId: string) {
 	const status = providers.list().find((entry) => entry.target.id === targetId);
 	if (
 		status &&
@@ -420,7 +414,19 @@ function prepareBackgroundMemoryRoute(
 	const model = resolved.target.runtime.synthesizeModel(resolved.target.target, resolved.target.wireModelId, kbHit);
 	const refined = refineRuntimeTargetWithModelHints(resolved.target, model, providers.knowledgeBase);
 	applyModelCapabilityPatch(model, refined.capabilities);
-	const costProvenance = normalizeCostProvenance(refined.costProvenance);
+	return { model, refined };
+}
+
+function prepareBackgroundMemoryRoute(
+	providers: ProvidersContract,
+	targetId: string,
+	wireModelId: string,
+	timeoutMs: number,
+	bus: Pick<SafeEventBus, "emit"> | null,
+	selection: BackgroundMemoryRoute["selection"],
+): BackgroundMemoryRoute {
+	const initial = prepareBackgroundMemoryModel(providers, targetId, wireModelId);
+	const { refined } = initial;
 	const endpointKey = canonicalEndpointKey(refined.target);
 	return {
 		selection,
@@ -437,48 +443,60 @@ function prepareBackgroundMemoryRoute(
 			// Wrapped at the layer that knows a request left the process: the step
 			// holds endpoint capacity while it is out and publishes the cache
 			// disturbance even when a timeout means the usage sink never sees it.
-			complete: announceMemoryStepEndpoint({ bus, endpointKey, targetId }, async (request) => {
+			complete: async (request) => {
+				await prepareBackgroundModelMetadata(providers, targetId, request.signal);
+				const { model, refined } = prepareBackgroundMemoryModel(providers, targetId, wireModelId);
+				if (refined.runtimeId !== initial.refined.runtimeId || canonicalEndpointKey(refined.target) !== endpointKey) {
+					throw new Error("background memory target changed during preparation");
+				}
+				const costProvenance = normalizeCostProvenance(refined.costProvenance);
 				const apiKey = targetRequiresAuth(refined.target, refined.runtime)
 					? (await providers.auth.resolveForTarget(refined.target, refined.runtime, { signal: request.signal })).apiKey
 					: LOCAL_API_KEY_FALLBACK;
-				const startedAt = Date.now();
-				let observedUsage: TaskMemoryStepUsage | undefined;
-				const mapUsage = (completion: Pick<EngineTextCompletionResult, "usage" | "backend">): TaskMemoryStepUsage => ({
-					...completion.usage,
-					targetId,
-					attributedModelId: refined.wireModelId,
-					costProvenance,
-					durationMs: Date.now() - startedAt,
-					backend: completion.backend,
-				});
-				const completion = await completeEngineText({
-					model,
-					systemPrompt: request.systemPrompt,
-					userPrompt: request.userPrompt,
-					maxTokens: request.maxTokens,
-					// Always off, never the operator's chat thinking level. A model that
-					// reasons anyway still works: `completeEngineText` keeps only text
-					// blocks, and the memory output budget leaves room for the preamble.
-					thinkingLevel: "off",
-					signal: request.signal,
-					timeoutMs,
-					onUsage: (observation) => {
-						observedUsage = mapUsage(observation);
-						request.onUsage?.(observedUsage);
-					},
-					...(apiKey === undefined ? {} : { apiKey }),
-					...(refined.target.auth?.headers ? { headers: refined.target.auth.headers } : {}),
-				});
-				// The step is billed here whatever the policy later decides about the
-				// answer. A model that read a trajectory and chose silence spent the
-				// same prefill as one that produced a reminder.
-				return {
-					text: completion.text,
-					inputTokens: completion.inputTokens,
-					outputTokens: completion.outputTokens,
-					usage: observedUsage ?? mapUsage(completion),
-				};
-			}),
+				request.signal.throwIfAborted();
+				return announceMemoryStepEndpoint({ bus, endpointKey, targetId }, async () => {
+					const startedAt = Date.now();
+					let observedUsage: TaskMemoryStepUsage | undefined;
+					const mapUsage = (completion: Pick<EngineTextCompletionResult, "usage" | "backend">): TaskMemoryStepUsage => ({
+						...completion.usage,
+						targetId,
+						attributedModelId: refined.wireModelId,
+						costProvenance,
+						durationMs: Date.now() - startedAt,
+						backend: completion.backend,
+					});
+					const completion = await completeEngineText({
+						model,
+						systemPrompt: request.systemPrompt,
+						userPrompt: request.userPrompt,
+						maxTokens:
+							refined.capabilityDecisions.maxTokens > 0
+								? Math.min(request.maxTokens, refined.capabilityDecisions.maxTokens)
+								: request.maxTokens,
+						// Always off, never the operator's chat thinking level. A model that
+						// reasons anyway still works: `completeEngineText` keeps only text
+						// blocks, and the memory output budget leaves room for the preamble.
+						thinkingLevel: "off",
+						signal: request.signal,
+						timeoutMs,
+						onUsage: (observation) => {
+							observedUsage = mapUsage(observation);
+							request.onUsage?.(observedUsage);
+						},
+						...(apiKey === undefined ? {} : { apiKey }),
+						...(refined.target.auth?.headers ? { headers: refined.target.auth.headers } : {}),
+					});
+					// The step is billed here whatever the policy later decides about the
+					// answer. A model that read a trajectory and chose silence spent the
+					// same prefill as one that produced a reminder.
+					return {
+						text: completion.text,
+						inputTokens: completion.inputTokens,
+						outputTokens: completion.outputTokens,
+						usage: observedUsage ?? mapUsage(completion),
+					};
+				})(request);
+			},
 		},
 	};
 }
@@ -601,6 +619,7 @@ async function resolveCompactionModel(
 		wireModelId = selected.ref.model;
 	}
 	if (!targetId || !wireModelId) return null;
+	await prepareBackgroundModelMetadata(providers, targetId);
 	const status = providers.list().find((entry) => entry.target.id === targetId);
 	if (!status?.available) {
 		throw new Error("context.compaction.model target is unavailable; check the selected target with clio-coder targets");

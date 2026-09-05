@@ -192,6 +192,7 @@ llama.cpp controls used when thinking is off. Anthropic request assembly is
 inherited from the pinned Pi dependency; Clio no longer carries a separate
 contract test that reconstructs Pi&#39;s whole adaptive or budget payload.</p>
 <h3>3.3 Thinking controls through LiteLLM</h3>
+<p>Dedicated memory and compaction roles read a cold LiteLLM target’s metadata before synthesizing the completion model, with reasoning probes disabled and no extra inference. Each selected target owns its probe state even when targets share a gateway URL. Successful unknown or mixed declarations remain unknown. Memory includes discovery and auth within its existing generation/deadline boundary; cancellation cannot launch later inference or mark the endpoint down, and fresh output limits bound its request. Compaction rechecks its session/branch after preparation and uses the simple stream API with thinking off instead of inferring an active level from model capability. Cold worker admission remains a separate caller requiring independent validation.</p>
 <p>A gateway alias is not an upstream runtime identity. Clio consumes <code>model_info.runtime</code>
 from <code>/v1/model/info</code> only when every deployment of the alias declares the same recognized
 control runtime: <code>lm-studio</code> or <code>llama.cpp</code>. Missing, unknown, or mixed declarations
