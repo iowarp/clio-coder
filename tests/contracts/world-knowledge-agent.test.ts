@@ -119,6 +119,8 @@ describe("world-knowledge agent contract", () => {
 		equal(budgetEnforcementForRuntime({ kind: "sdk" }), "native-per-tool");
 		equal(budgetEnforcementForRuntime({ kind: "subprocess" }), "external-one-shot");
 		assertWorkerBudgetEnforceable({ id: "antigravity-code", kind: "subprocess", externalAgentLoop: externalLoop }, true);
+		const claudeLoop = { ...externalLoop, generatingRetry: "allowed", modelCatalog: "static" } as const;
+		assertWorkerBudgetEnforceable({ id: "claude-code", kind: "subprocess", externalAgentLoop: claudeLoop }, true);
 		assertWorkerBudgetEnforceable({ id: "claude-code", kind: "subprocess" }, false);
 		throws(
 			() => assertWorkerBudgetEnforceable({ id: "claude-code", kind: "subprocess" }, true),

@@ -10,12 +10,13 @@ import type { ClioSettings } from "../../src/core/config.js";
 import { DEFAULT_SETTINGS } from "../../src/core/defaults.js";
 import type { SafeEventBus } from "../../src/core/event-bus.js";
 import { isOrchestratorEligibleRuntime } from "../../src/domains/providers/eligibility.js";
-import type { ProvidersContract } from "../../src/domains/providers/index.js";
+import { listProviderSupportEntries, type ProvidersContract } from "../../src/domains/providers/index.js";
 import { createRuntimeRegistry } from "../../src/domains/providers/registry.js";
 import antigravityCodeRuntime, {
 	parseAntigravityModelCatalogDetails,
 } from "../../src/domains/providers/runtimes/antigravity/antigravity-code.js";
 import { registerBuiltinRuntimes } from "../../src/domains/providers/runtimes/builtins.js";
+import claudeCodeRuntime from "../../src/domains/providers/runtimes/claude/claude-code.js";
 import litellmRuntime, {
 	aggregateLiteLLMCapabilities,
 	capabilitiesFromLiteLLMModelInfo,
@@ -174,6 +175,22 @@ describe("provider transport boundary", () => {
 		strictEqual(registry.get("lmstudio-native"), canonical);
 		strictEqual(registry.list().filter((runtime) => runtime.id === "lmstudio").length, 1);
 		strictEqual(registry.get("not-installed"), null);
+	});
+
+	it("declares the Claude CLI agent loop without changing its subscription identity", () => {
+		strictEqual(claudeCodeRuntime.kind, "subprocess");
+		strictEqual(claudeCodeRuntime.auth, "claude-cli");
+		strictEqual(isOrchestratorEligibleRuntime(claudeCodeRuntime), false);
+		strictEqual(claudeCodeRuntime.externalAgentLoop?.tools, "externally-governed-unobserved");
+		strictEqual(claudeCodeRuntime.externalAgentLoop?.network, "externally-governed-unobserved");
+		strictEqual(claudeCodeRuntime.externalAgentLoop?.budget, "external-one-shot");
+		strictEqual(claudeCodeRuntime.externalAgentLoop?.generatingRetry, "allowed");
+		strictEqual(claudeCodeRuntime.externalAgentLoop?.modelCatalog, "static");
+		const registry = createRuntimeRegistry();
+		registerBuiltinRuntimes(registry);
+		const groups = new Map(listProviderSupportEntries(registry.list()).map((entry) => [entry.runtimeId, entry.group]));
+		strictEqual(groups.get("claude-code"), "subscription");
+		strictEqual(groups.get("antigravity-code"), "external-worker");
 	});
 
 	it("keeps Antigravity dispatch-only and consumes its structured CLI contracts", () => {

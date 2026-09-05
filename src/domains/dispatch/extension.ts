@@ -844,14 +844,19 @@ function renderBoundSkillBlock(recipe: AgentRecipe): string {
 	].join("\n");
 }
 
-function workerPersonaBody(
-	req: DispatchRequest,
-	recipe: AgentRecipe | null,
-	allowedTools: ReadonlyArray<ToolName>,
-): string {
+/**
+ * Whether Clio's canonical `context` tool is attached to this worker. A
+ * subprocess runtime runs its own tool loop and never receives Clio's tool
+ * surface, so the recipe's `context` entry does not make the tool available
+ * there, and bound skills must not be promised through it.
+ */
+function canonicalContextAttached(runtime: Pick<RuntimeDescriptor, "kind">, tools: ReadonlyArray<ToolName>): boolean {
+	return runtime.kind !== "subprocess" && tools.includes(ToolNames.Context);
+}
+
+function workerPersonaBody(req: DispatchRequest, recipe: AgentRecipe | null, contextAttached: boolean): string {
 	const base = req.systemPrompt && req.systemPrompt.length > 0 ? req.systemPrompt : (recipe?.body ?? "");
-	const skillBlock =
-		recipe && req.noSkills !== true && allowedTools.includes(ToolNames.Context) ? renderBoundSkillBlock(recipe) : "";
+	const skillBlock = recipe && req.noSkills !== true && contextAttached ? renderBoundSkillBlock(recipe) : "";
 	return [base, skillBlock].filter((part) => part.trim().length > 0).join("\n\n");
 }
 
@@ -1958,7 +1963,7 @@ function buildDispatchWorkerSpec(input: DispatchWorkerSpecInput, config?: Config
 	if (
 		input.req.noSkills !== true &&
 		recipeSkills.length > 0 &&
-		input.admission.allowedTools.includes(ToolNames.Context)
+		canonicalContextAttached(input.target.runtime, input.admission.allowedTools)
 	) {
 		spec.agentSkills = [...new Set(recipeSkills)];
 	}
@@ -3557,8 +3562,8 @@ export function createDispatchBundle(
 			...admission,
 			allowedTools: effectiveTools,
 		};
-		const personaBody = workerPersonaBody(req, recipe, effectiveTools);
-		const hasCanonicalContext = effectiveTools.includes(ToolNames.Context);
+		const hasCanonicalContext = canonicalContextAttached(target.runtime, effectiveTools);
+		const personaBody = workerPersonaBody(req, recipe, hasCanonicalContext);
 		const hasBoundSkills =
 			hasCanonicalContext && recipe.skills !== undefined && recipe.skills.length > 0 && req.noSkills !== true;
 		const compiledWorkerPrompt = await prompts.compileWorkerPrompt({
@@ -3691,7 +3696,7 @@ export function createDispatchBundle(
 		}
 		const cwd = req.cwd ?? process.cwd();
 		const pathScope = resolveDispatchPathScope(req);
-		const personaBody = workerPersonaBody(req, null, []);
+		const personaBody = workerPersonaBody(req, null, false);
 		// ACP owns an unknown external tool inventory, so it receives the raw
 		// bounded persona rather than a native Clio schema-harness claim.
 		const systemPrompt = personaBody;
