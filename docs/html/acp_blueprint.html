@@ -510,6 +510,21 @@ export class AcpProcessError extends AcpError {
   }
 }
 </code></pre>
+<hr>
+<h2>9. Registry Submission</h2>
+<p>To list Clio Coder in the upstream Agent Client Protocol registry (such as the registry used by the Zed editor), repository submission assets are maintained under <code>assets/acp-registry/</code>:</p>
+<ul>
+<li><code>assets/acp-registry/agent.json</code>: Agent registry manifest containing the agent identifier, display name, release version, description, repository URLs, and distribution specification launching <code>clio-coder acp</code>.</li>
+<li><code>assets/acp-registry/icon.svg</code>: A 16x16 monochrome icon using <code>currentColor</code> stroke and fill derived from the Clio logo.</li>
+</ul>
+<p>The submission procedure follows these steps:</p>
+<ol>
+<li>Fork the upstream registry repository at <code>https://github.com/agentclientprotocol/registry</code>.</li>
+<li>Create an entry directory matching the agent identifier: <code>mkdir clio-coder</code>.</li>
+<li>Copy <code>assets/acp-registry/agent.json</code> and <code>assets/acp-registry/icon.svg</code> into that directory.</li>
+<li>Verify that <code>agent.json</code> adheres to the registry schema and that <code>icon.svg</code> remains monochrome with viewBox <code>0 0 16 16</code>.</li>
+<li>Submit a pull request to the upstream registry repository. Once merged, clients that consume the ACP registry discover and install Clio Coder automatically.</li>
+</ol>
         </article>
         <nav class="related-nav" aria-label="Adjacent references">
           <a class="nav-link-card" href="troubleshooting_blueprint.html"><span class="nav-label">Previous</span><span class="nav-title">Troubleshooting &amp; Error Remediation</span></a>

@@ -11,11 +11,13 @@
 # home is never written. Fails on a doctor crash or deprecation warning, on a
 # turn that exits non-zero, refuses to boot (tool policy drift), or ends with
 # no agent_end event; doctor's own failing rows are printed for the operator.
+# Under --strict, doctor exit 1 also fails the smoke.
 #
-# Usage: scripts/smoke-real-home.sh [--settings <path>] [--target <id>] [--model <wireId>]
+# Usage: scripts/smoke-real-home.sh [--settings <path>] [--target <id>] [--model <wireId>] [--strict]
 #   --settings  settings file to copy (default: the platform config dir's settings.yaml)
 #   --target    one-run target override for the turn (default: the settings' orchestrator target)
 #   --model     one-run model override for the turn
+#   --strict    fail when doctor exits 1 instead of tolerating failing rows
 set -euo pipefail
 
 root="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
@@ -24,11 +26,13 @@ config_dir="${XDG_CONFIG_HOME:-$HOME/.config}/clio-coder"
 settings="$config_dir/settings.yaml"
 target=""
 model=""
+strict=0
 while [ $# -gt 0 ]; do
 	case "$1" in
 		--settings) settings="$2"; shift 2 ;;
 		--target) target="$2"; shift 2 ;;
 		--model) model="$2"; shift 2 ;;
+		--strict) strict=1; shift 1 ;;
 		*) echo "smoke-real-home: unknown argument $1" >&2; exit 2 ;;
 	esac
 done
@@ -74,8 +78,14 @@ if [ "$doctor_status" -ge 2 ]; then
 	echo "smoke-real-home: doctor exited $doctor_status"
 	failures=$((failures + 1))
 elif [ "$doctor_status" -eq 1 ]; then
-	echo "smoke-real-home: doctor exited 1 with these failing rows (fleet state, not a smoke failure):"
-	grep -E "^!!" "$doctor_log" || true
+	if [ "$strict" -eq 1 ]; then
+		echo "smoke-real-home: doctor exited 1 under --strict with these failing rows:"
+		grep -E "^!!" "$doctor_log" || true
+		failures=$((failures + 1))
+	else
+		echo "smoke-real-home: doctor exited 1 with these failing rows (fleet state, not a smoke failure):"
+		grep -E "^!!" "$doctor_log" || true
+	fi
 else
 	echo "smoke-real-home: doctor exited 0"
 fi

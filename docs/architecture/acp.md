@@ -330,3 +330,20 @@ export class AcpProcessError extends AcpError {
   }
 }
 ```
+
+---
+
+## 9. Registry Submission
+
+To list Clio Coder in the upstream Agent Client Protocol registry (such as the registry used by the Zed editor), repository submission assets are maintained under `assets/acp-registry/`:
+
+- `assets/acp-registry/agent.json`: Agent registry manifest containing the agent identifier, display name, release version, description, repository URLs, and distribution specification launching `clio-coder acp`.
+- `assets/acp-registry/icon.svg`: A 16x16 monochrome icon using `currentColor` stroke and fill derived from the Clio logo.
+
+The submission procedure follows these steps:
+
+1. Fork the upstream registry repository at `https://github.com/agentclientprotocol/registry`.
+2. Create an entry directory matching the agent identifier: `mkdir clio-coder`.
+3. Copy `assets/acp-registry/agent.json` and `assets/acp-registry/icon.svg` into that directory.
+4. Verify that `agent.json` adheres to the registry schema and that `icon.svg` remains monochrome with viewBox `0 0 16 16`.
+5. Submit a pull request to the upstream registry repository. Once merged, clients that consume the ACP registry discover and install Clio Coder automatically.

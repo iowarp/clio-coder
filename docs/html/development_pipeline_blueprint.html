@@ -81,7 +81,7 @@ under pressure; git mechanics alone never justify a stage.</p>
 <td>An atomic conventional commit referencing the issue (<code>fixes #N</code>); contributors push it to their fork and open a PR, while maintainer work stays local for gated integration; merge is a human decision</td>
 </tr>
 </tbody></table>
-<p>Releases follow <a href="release_cut_checklist_blueprint.html">release-cut-checklist.md</a> as a
+<p>Releases follow <a href="release_checklist_blueprint.html">release-cut-checklist.md</a> as a
 human-gated checklist, not a skill. Worktrees
 (<a href="https://github.com/iowarp/clio-coder/tree/main/skills/git/worktree-create/"><code>worktree-create</code></a>,
 <a href="https://github.com/iowarp/clio-coder/tree/main/skills/git/worktree-merge/"><code>worktree-merge</code></a>),
@@ -155,6 +155,10 @@ absent. Run one focused file while iterating with:</p>
 <p>There is no committed weighted-shard or special serial-lane runner. Keep timing
 claims within the focused contract that owns them, and use the full <code>npm run ci</code>
 gate before handoff.</p>
+<p>The release smoke script <code>scripts/smoke-real-home.sh</code> (invoked via
+<code>npm run smoke:real-home</code>) tests booting the built CLI binary against a copy of
+the operator settings in a scratch home. An optional <code>--strict</code> flag makes doctor
+exit 1 fail the smoke run on failing rows instead of tolerating fleet state.</p>
 <h2>Issue conventions</h2>
 <ul>
 <li><strong>Title</strong>: conventional tag plus imperative summary (<code>fix: memory overlay cannot scroll</code>), matching <code>.github/ISSUE_TEMPLATE/</code> prefixes.</li>

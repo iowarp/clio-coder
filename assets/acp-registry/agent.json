@@ -1,0 +1,19 @@
+{
+	"$schema": "https://cdn.agentclientprotocol.com/registry/v1/latest/agent.schema.json",
+	"id": "clio-coder",
+	"name": "Clio Coder",
+	"version": "0.4.3",
+	"description": "The terminal coding agent for people who maintain the code that science runs on, with user-chosen models and inspectable evidence.",
+	"repository": "https://github.com/iowarp/clio-coder",
+	"website": "https://iowarp.ai",
+	"license": "Apache-2.0",
+	"authors": ["Anthony Kougkas <a.kougkas@gmail.com>"],
+	"command": "clio-coder",
+	"args": ["acp"],
+	"distribution": {
+		"npx": {
+			"package": "@iowarp/clio-coder",
+			"args": ["acp"]
+		}
+	}
+}
