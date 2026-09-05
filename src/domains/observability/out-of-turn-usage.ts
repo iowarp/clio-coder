@@ -27,7 +27,7 @@
  * skipped, never fatal.
  */
 
-import { closeSync, mkdirSync, openSync, readFileSync, writeSync } from "node:fs";
+import { closeSync, fsyncSync, mkdirSync, openSync, readFileSync, writeSync } from "node:fs";
 import { dirname, join } from "node:path";
 import { safeResourceWrite } from "../../core/safe-resource-write.js";
 import { withStateFileLockSync } from "../../core/state-file-lock.js";
@@ -74,13 +74,13 @@ export interface OutOfTurnPromptCache {
 
 /** Provider-reported usage for one out-of-turn call. */
 export interface OutOfTurnUsage {
-	input: number;
-	output: number;
-	cacheRead: number;
-	cacheWrite: number;
-	reasoning: number;
-	totalTokens: number;
-	costUsd: number;
+	input: number | null;
+	output: number | null;
+	cacheRead: number | null;
+	cacheWrite: number | null;
+	reasoning: number | null;
+	totalTokens: number | null;
+	costUsd: number | null;
 	costProvenance: CostProvenance;
 }
 
@@ -97,6 +97,8 @@ export interface OutOfTurnUsageRow {
 	target: string;
 	attributedModelId: string;
 	usage: OutOfTurnUsage;
+	/** New failed-compaction rows preserve unknown usage as null. Legacy rows are unchanged. */
+	callOutcome?: "success" | "error" | "aborted";
 	/** Present when the caller measured the call. */
 	timing?: OutOfTurnTiming;
 	/** Present when the serving backend reported prefill facts. */
@@ -115,21 +117,31 @@ export function outOfTurnUsagePath(stateDir: string): string {
 let appendsSinceBoundCheck = BOUND_CHECK_INTERVAL;
 
 /**
- * Append one priced out-of-turn call. Never throws: this runs on the same path
- * that answers an operator's side question, and a failed bookkeeping write must
- * not take the answer down with it.
+ * Append one out-of-turn call. Optional bookkeeping keeps its existing diagnostic
+ * write policy. Required failed-compaction records flush the append and throw on
+ * a failed or incomplete write, so their caller cannot report recorded spending.
  */
-export function appendOutOfTurnUsageRow(stateDir: string, row: OutOfTurnUsageRow): void {
+export function appendOutOfTurnUsageRow(
+	stateDir: string,
+	row: OutOfTurnUsageRow,
+	options: { required?: boolean } = {},
+): void {
 	const path = outOfTurnUsagePath(stateDir);
 	try {
 		mkdirSync(dirname(path), { recursive: true });
 		const fd = openSync(path, "a");
 		try {
-			writeSync(fd, `${JSON.stringify(row)}\n`);
+			const line = `${JSON.stringify(row)}\n`;
+			const written = writeSync(fd, line);
+			if (options.required) {
+				if (written !== Buffer.byteLength(line)) throw new Error("incomplete usage row write");
+				fsyncSync(fd);
+			}
 		} finally {
 			closeSync(fd);
 		}
 	} catch (error) {
+		if (options.required) throw new Error(`compaction usage row not written: ${messageOf(error)}`, { cause: error });
 		process.stderr.write(`[clio-coder:usage] out-of-turn usage row not written: ${messageOf(error)}\n`);
 		return;
 	}
@@ -205,11 +217,25 @@ export function readOutOfTurnUsageRows(stateDir: string): OutOfTurnUsageReadResu
 function asOutOfTurnUsageRow(value: unknown): OutOfTurnUsageRow | null {
 	if (!isRecord(value)) return null;
 	const label = value.label;
-	if (label !== "side-question" && label !== "handoff" && label !== "prewarm" && label !== "background-memory")
+	if (
+		label !== "side-question" &&
+		label !== "handoff" &&
+		label !== "prewarm" &&
+		label !== "background-memory" &&
+		label !== "failed-compaction"
+	)
 		return null;
 	if (typeof value.timestamp !== "string" || value.timestamp.length === 0) return null;
 	if (!isRecord(value.usage)) return null;
 	const usage = value.usage;
+	if (
+		label === "failed-compaction" &&
+		value.callOutcome !== "success" &&
+		value.callOutcome !== "error" &&
+		value.callOutcome !== "aborted"
+	)
+		return null;
+	const reading = label === "failed-compaction" ? nullableNumber : numberOr0;
 	const timing = asTiming(value.timing);
 	const promptCache = asPromptCache(value.promptCache);
 	return {
@@ -223,15 +249,16 @@ function asOutOfTurnUsageRow(value: unknown): OutOfTurnUsageRow | null {
 				? value.attributedModelId
 				: "unknown",
 		usage: {
-			input: numberOr0(usage.input),
-			output: numberOr0(usage.output),
-			cacheRead: numberOr0(usage.cacheRead),
-			cacheWrite: numberOr0(usage.cacheWrite),
-			reasoning: numberOr0(usage.reasoning),
-			totalTokens: numberOr0(usage.totalTokens),
-			costUsd: numberOr0(usage.costUsd),
+			input: reading(usage.input),
+			output: reading(usage.output),
+			cacheRead: reading(usage.cacheRead),
+			cacheWrite: reading(usage.cacheWrite),
+			reasoning: reading(usage.reasoning),
+			totalTokens: reading(usage.totalTokens),
+			costUsd: reading(usage.costUsd),
 			costProvenance: asCostProvenance(usage.costProvenance),
 		},
+		...(label === "failed-compaction" ? { callOutcome: value.callOutcome as "success" | "error" | "aborted" } : {}),
 		...(timing === null ? {} : { timing }),
 		...(promptCache === null ? {} : { promptCache }),
 	};
@@ -257,6 +284,10 @@ function asPromptCache(value: unknown): OutOfTurnPromptCache | null {
 
 function asCostProvenance(value: unknown): CostProvenance {
 	return value === "known" || value === "known_free" || value === "estimated" ? value : "unknown";
+}
+
+function nullableNumber(value: unknown): number | null {
+	return typeof value === "number" && Number.isFinite(value) && value >= 0 ? value : null;
 }
 
 function numberOr0(value: unknown): number {

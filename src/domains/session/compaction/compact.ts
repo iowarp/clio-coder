@@ -14,6 +14,7 @@ import { stream } from "../../../engine/ai.js";
 import type { EngineModel, Usage } from "../../../engine/types.js";
 import { foldWorkingSet } from "../../context/working-set/fold.js";
 import { recallableRefListing } from "../../context/working-set/recall.js";
+import { extractReasoningTokens } from "../context-accounting.js";
 import type { CompactionUsage, SessionEntry } from "../entries.js";
 import { serializeConversation } from "./branch-summary.js";
 import { findCutPoint } from "./cut-point.js";
@@ -86,6 +87,14 @@ In addition to that carried-forward context, summarize ONLY the active-turn deta
 
 Do NOT answer the user. Do NOT summarize unrelated older history.`;
 
+/** One invoked summary stream, including failed calls that produce no checkpoint. */
+export interface CompactionCallObservation {
+	outcome: "success" | "error" | "aborted";
+	usage: unknown;
+	timestamp: string;
+	durationMs: number;
+}
+
 export interface CompactInput {
 	/** Ordered session entries to compact. The caller reads these from the session domain. */
 	entries: ReadonlyArray<SessionEntry>;
@@ -105,6 +114,8 @@ export interface CompactInput {
 	reserveTokens?: number;
 	/** Override the built-in keep-recent default (DEFAULT_KEEP_RECENT_TOKENS). */
 	keepRecentTokens?: number;
+	/** Accounting observer; called once per invoked stream, including failures. */
+	onCall?: (call: CompactionCallObservation) => void;
 }
 
 export interface CompactResult {
@@ -367,6 +378,24 @@ function addCompactionUsage(total: CompactionUsage | undefined, raw: unknown): C
 	};
 }
 
+/** Keep attributable partial facts if a failed terminal object resets missing fields to zero. */
+function retainReportedUsage(previous: Record<string, unknown>, raw: unknown): Record<string, unknown> {
+	if (!raw || typeof raw !== "object" || Array.isArray(raw)) return previous;
+	const usage = raw as Record<string, unknown>;
+	const known = { ...previous };
+	for (const field of ["input", "output", "cacheRead", "cacheWrite", "totalTokens"]) {
+		const value = numberOrZero(usage[field]);
+		if (value > 0) known[field] = value;
+	}
+	const reasoning = extractReasoningTokens({ ...usage, reasoningTokens: undefined });
+	if (reasoning !== null && reasoning > 0) known.reasoning = reasoning;
+	if (usage.cost && typeof usage.cost === "object" && "total" in usage.cost) {
+		const cost = numberOrZero(usage.cost.total);
+		if (cost > 0) known.cost = { total: cost };
+	}
+	return known;
+}
+
 async function runSummaryStream(
 	input: CompactInput,
 	userText: string,
@@ -383,26 +412,45 @@ async function runSummaryStream(
 		messages: [buildUserMessage(userText)],
 	};
 
-	const events = stream(
-		input.model,
-		context as unknown as Parameters<typeof stream>[1],
-		options as unknown as Parameters<typeof stream>[2],
-	);
-
-	let summary = "";
+	const timestamp = new Date().toISOString();
+	const started = performance.now();
 	let usage: unknown;
-	for await (const event of events) {
-		if (event.type === "done") {
-			summary = textFromAssistant(event.message);
-			usage = (event.message as { usage?: unknown }).usage;
-			break;
+	let reported: Record<string, unknown> = {};
+	let outcome: CompactionCallObservation["outcome"] = "error";
+	try {
+		const events = stream(
+			input.model,
+			context as unknown as Parameters<typeof stream>[1],
+			options as unknown as Parameters<typeof stream>[2],
+		);
+		for await (const event of events) {
+			// Some transports throw after yielding a partial response. Retain the
+			// last reported usage even without a terminal error message.
+			if ("partial" in event) {
+				usage = event.partial.usage ?? usage;
+				reported = retainReportedUsage(reported, usage);
+			}
+			if (event.type === "done") {
+				usage = event.message.usage ?? usage;
+				outcome = "success";
+				return { text: textFromAssistant(event.message).trim(), usage };
+			}
+			if (event.type === "error") {
+				usage = event.error.usage ?? usage;
+				reported = retainReportedUsage(reported, usage);
+				outcome = event.error.stopReason === "aborted" ? "aborted" : "error";
+				throw new Error(`compaction stream failed: ${event.error.errorMessage ?? "unknown error"}`);
+			}
 		}
-		if (event.type === "error") {
-			const reason = event.error.errorMessage ?? "unknown error";
-			throw new Error(`compaction stream failed: ${reason}`);
-		}
+		throw new Error("compaction stream ended without a terminal response");
+	} finally {
+		input.onCall?.({
+			outcome: outcome === "error" && input.signal?.aborted ? "aborted" : outcome,
+			usage: outcome === "success" ? usage : reported,
+			timestamp,
+			durationMs: Math.max(0, performance.now() - started),
+		});
 	}
-	return { text: summary.trim(), usage };
 }
 
 /**
@@ -464,16 +512,16 @@ export async function compact(input: CompactInput): Promise<CompactResult> {
 		const userText = buildUserText(conversationText, input.instructions, previousContextText);
 		const historySummary = await runSummaryStream(input, userText, systemPrompt, maxTokens);
 		usage = addCompactionUsage(usage, historySummary.usage);
-		if (historySummary.text.length > 0) summaryParts.push(historySummary.text);
+		if (historySummary.text.length === 0) throw new Error("compaction returned an empty history summary");
+		summaryParts.push(historySummary.text);
 	}
 	if (turnPrefix.length > 0) {
 		const conversationText = serializeConversation(turnPrefix);
 		const userText = buildTurnPrefixUserText(conversationText, input.instructions, previousContextText);
 		const prefixSummary = await runSummaryStream(input, userText, systemPrompt, maxTokens);
 		usage = addCompactionUsage(usage, prefixSummary.usage);
-		if (prefixSummary.text.length > 0) {
-			summaryParts.push(`**Turn Context (split turn):**\n\n${prefixSummary.text}`);
-		}
+		if (prefixSummary.text.length === 0) throw new Error("compaction returned an empty split-turn summary");
+		summaryParts.push(`**Turn Context (split turn):**\n\n${prefixSummary.text}`);
 	}
 
 	const summary = `${summaryParts.join("\n\n---\n\n").trim()}${formatFileOperations(fileOps)}${formatRecallableRefs(

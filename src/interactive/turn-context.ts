@@ -641,8 +641,8 @@ export function createTurnContext(deps: TurnContextDeps): TurnContext {
 		if (!usage || !deps.observability) return;
 		if (usage.totalTokens <= 0 && usage.cost.total <= 0) return;
 		deps.observability.recordTokens(
-			agentRuntime.targetId,
-			agentRuntime.wireModelId,
+			usage.targetId ?? agentRuntime.targetId,
+			usage.modelId ?? agentRuntime.wireModelId,
 			usage.totalTokens,
 			usage.cost.total,
 			{
@@ -654,7 +654,11 @@ export function createTurnContext(deps: TurnContextDeps): TurnContext {
 				totalTokens: usage.totalTokens,
 				apiCalls: Math.max(1, Math.round(usage.apiCalls)),
 			},
-			agentRuntime.runtimeResolution.costProvenance,
+			usage.targetId === undefined && usage.modelId === undefined
+				? agentRuntime.runtimeResolution.costProvenance
+				: usage.cost.total > 0
+					? "estimated"
+					: "unknown",
 		);
 	};
 
@@ -915,8 +919,8 @@ export function createTurnContext(deps: TurnContextDeps): TurnContext {
 		if (!summaryLifecycleStarted) startSummaryLifecycle();
 		deps.bus?.emit(BusChannels.CompactionEnd, { trigger, at: Date.now() });
 
-		// The summarization call spends tokens on the same target the turn would
-		// have. The ledger entry carries its usage for a later reseed; this is the
+		// The checkpoint identifies the selected summary route; older results
+		// fall back to the active chat route. The ledger carries usage for reseed; this is the
 		// live sink, so `/cost` and the footer move the moment /context compact
 		// returns instead of staying byte-identical to before it ran.
 		recordCompactionUsage(agentRuntime, result);
