@@ -41,7 +41,7 @@ export function isSameOrDescendant(candidatePath: string, policyPath: string): b
 	const candidate = path.resolve(candidatePath);
 	const policy = path.resolve(policyPath);
 	const relative = path.relative(policy, candidate);
-	return relative === "" || (!relative.startsWith("..") && !path.isAbsolute(relative));
+	return relative === "" || (relative !== ".." && !relative.startsWith(`..${path.sep}`) && !path.isAbsolute(relative));
 }
 
 function expandTilde(rawPath: string): string {

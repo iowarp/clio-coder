@@ -139,7 +139,6 @@ function makeDeps(overrides: Partial<MarketplaceOfferDeps> = {}): {
 	const deps: MarketplaceOfferDeps = {
 		listInstalledSkillNames: () => [],
 		listMarketplaceEntries: () => [entry()],
-		getAutonomy: () => "auto-edit",
 		installEntry: (skill, scope) => {
 			installs.push({ name: skill.name, scope });
 			return { path: `/tmp/${skill.name}/SKILL.md`, sourceUrl: skill.sourceUrl, installedHash: `sha256:${skill.name}` };
@@ -305,29 +304,20 @@ describe("contracts/marketplace-offer registration", () => {
 		strictEqual(registration.evaluate(turnStart("resolve this merge conflict", "s-new")).length, 1);
 	});
 
-	it("installs autonomously at full-auto only through the own-marketplace gate", () => {
-		const { deps, installs } = makeDeps({ getAutonomy: () => "full-auto" });
+	it("requires the bound operator answer before installing independently of task autonomy", () => {
+		const { deps, installs } = makeDeps();
 		const registration = createMarketplaceOfferRegistration(deps);
 		const effects = registration.evaluate(turnStart("resolve this merge conflict"));
 		strictEqual(effects.length, 1);
-		ok(reminderText(effects).includes("full-auto"));
+		ok(reminderText(effects).includes("ask_user"));
+		deepStrictEqual(installs, []);
+		registration.evaluate(askUserAnswer(SKILL_INSTALL_OFFER_OPTION_PROJECT));
 		deepStrictEqual(installs, [{ name: "resolve-merge-conflicts", scope: "project" }]);
 	});
 
-	it("surfaces the source and content hash on an autonomous install (integrity is never skipped)", () => {
-		const { deps } = makeDeps({ getAutonomy: () => "full-auto" });
-		const registration = createMarketplaceOfferRegistration(deps);
-		const message = reminderText(registration.evaluate(turnStart("resolve this merge conflict")));
-		// Autonomy drops the operator's yes/no but keeps the integrity record the
-		// consent overlay would have shown: the source and the SHA-256 of the bytes.
-		ok(message.includes("/opt/clio/skills/git/resolve-merge-conflicts"), "names the install source");
-		ok(message.includes("sha256:resolve-merge-conflicts"), "surfaces the content hash");
-	});
-
-	it("falls back to a consent offer when full-auto hits the source gate", () => {
+	it("retains the source gate after an operator accepts an offer", () => {
 		const foreign = entry({ origin: "index", sourceUrl: "https://github.com/someone/skills" });
 		const { deps, installs } = makeDeps({
-			getAutonomy: () => "full-auto",
 			listMarketplaceEntries: () => [foreign],
 		});
 		const registration = createMarketplaceOfferRegistration(deps);

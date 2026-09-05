@@ -88,7 +88,6 @@ export {
 	createMarketplaceOfferRegistration,
 	MARKETPLACE_OFFER_REGISTRATION_ID,
 	type MarketplaceOfferDeps,
-	marketplaceAutoInstallReminder,
 	marketplaceOfferReminder,
 } from "./marketplace-offer.js";
 export {

@@ -25,10 +25,12 @@ import {
 	extractCommandDeleteTargets,
 	extractCommandWriteTargets,
 	inlineShellScript,
+	invokesClioSkillMutation,
 	tokenizeShellLike,
 } from "./protected-artifacts.js";
 import { formatRejection, type RejectionMessage } from "./rejection-feedback.js";
 import { getCachedDefaultRulePacks, type PackId, type RulePacks } from "./rule-pack-loader.js";
+import { activeClioSkillRoots, skillMutationReason } from "./skill-authority.js";
 
 export type SafetyPolicySource =
 	| "damage-control:base"
@@ -194,6 +196,7 @@ export function createSafetyPolicyEngine(options: SafetyPolicyEngineOptions = {}
 	// cwd and roots to compare like against like (the design mandates no symlink chasing).
 	const writeRootCwd = path.resolve(options.cwd ?? process.cwd());
 	const writeRoots = (options.writeRoots ?? []).map((root) => resolvePathBoundary(writeRootCwd, root));
+	const skillRoots = activeClioSkillRoots(cwd);
 	const packs = options.rulePacks ?? getCachedDefaultRulePacks();
 	const projectPolicy = options.projectPolicy ?? loadProjectSafetyPolicy(cwd);
 	const projectPolicyRoot =
@@ -306,6 +309,27 @@ export function createSafetyPolicyEngine(options: SafetyPolicyEngineOptions = {}
 				if (projectPolicy.hash !== null) blockInput.policyHash = projectPolicy.hash;
 				if (projectPolicy.path !== null) blockInput.projectPolicyPath = projectPolicy.path;
 				return blockDecision(base, blockInput);
+			}
+
+			// Editing active instructions is an operator privilege at every autonomy
+			// level, in both the coordinator and the shared worker safety contract.
+			const mutationCommand = call.tool === ToolNames.Bash ? command : catalogCommand;
+			const skillReason =
+				mutationCommand !== null && invokesClioSkillMutation(mutationCommand)
+					? "skill installation and updates require the operator CLI or an explicit operator install choice; draft outside active skill roots"
+					: skillMutationReason(
+							skillRoots,
+							pathPolicyTargets(catalogCommand === null ? call : { tool: ToolNames.Bash, args: { command: catalogCommand } }),
+							callCwd,
+							mutationCommand,
+						);
+			if (skillReason !== null) {
+				return blockDecision(base, {
+					ruleId: "skill-authority",
+					reasonCode: "skill-authority",
+					reasons: [skillReason],
+					policySource: "builtin-classifier",
+				});
 			}
 
 			// The path policy runs regardless of project policy validity. When
