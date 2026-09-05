@@ -1,3 +1,5 @@
+import { randomUUID } from "node:crypto";
+import { readFileSync } from "node:fs";
 import { join } from "node:path";
 import chalk from "chalk";
 import { modelBootstrapGenerate, resolveBootstrapRoute } from "../cli/bootstrap-generate.js";
@@ -99,6 +101,8 @@ import { createTaskBoardReminderRegistration } from "../domains/middleware/task-
 import { createTaskNudgeRegistration } from "../domains/middleware/task-nudge.js";
 import { createWatchdogRegistration } from "../domains/middleware/watchdog.js";
 import type { MuxContract } from "../domains/mux/index.js";
+import type { BackgroundMemoryUsageSink } from "../domains/observability/background-memory-usage.js";
+import { recordFailedCompactionCalls } from "../domains/observability/compaction-usage.js";
 import type { ObservabilityContract } from "../domains/observability/index.js";
 import { ObservabilityDomainModule } from "../domains/observability/index.js";
 import type { PromptsContract } from "../domains/prompts/contract.js";
@@ -149,6 +153,7 @@ import {
 } from "../domains/safety/protected-artifacts-registration.js";
 import type { SchedulingContract } from "../domains/scheduling/contract.js";
 import { SchedulingDomainModule } from "../domains/scheduling/index.js";
+import type { CompactionCallObservation } from "../domains/session/compaction/compact.js";
 import { type CompactResult, compact } from "../domains/session/compaction/compact.js";
 import { collectSessionEntries } from "../domains/session/compaction/session-entries.js";
 import { estimateTokens } from "../domains/session/compaction/tokens.js";
@@ -670,11 +675,18 @@ async function runCompactionFlow(
 	providers: ProvidersContract,
 	instructions?: string,
 	trigger?: CompactionTrigger,
+	observability?: BackgroundMemoryUsageSink,
 ): Promise<CompactResult | null> {
 	const meta = session.current();
 	if (!meta) {
 		throw new Error("no current session to compact; start one with /new or /resume first");
 	}
+	const stateDir = clioStateDir();
+	const activeLeafTurnId = session.tree(meta.id).leafId ?? undefined;
+	const isOriginCurrent = () =>
+		session.current()?.id === meta.id && (session.tree(meta.id).leafId ?? undefined) === activeLeafTurnId;
+	const entries = filterEntriesToActivePath(readSessionEntriesForCompact(meta.id), activeLeafTurnId);
+	if (entries.length === 0) return null;
 	const systemPrompt = await readCompactionSystemPrompt(settings.context.compaction.systemPrompt, meta.cwd);
 	const resolved = await resolveCompactionModel(settings, providers);
 	if (!resolved) {
@@ -688,9 +700,20 @@ async function runCompactionFlow(
 	// read the full file too (last taskLedger entry in file order, with no
 	// branch filter at all), which was a second, independent instance of this
 	// same bug. See the taskBoard wiring below for the fix.
-	const activeLeafTurnId = session.tree(meta.id).leafId ?? undefined;
-	const entries = filterEntriesToActivePath(readSessionEntriesForCompact(meta.id), activeLeafTurnId);
-	if (entries.length === 0) return null;
+	if (!isOriginCurrent()) throw new Error("compaction session or branch changed before summarization");
+	const calls: CompactionCallObservation[] = [];
+	const preserveCalls = () =>
+		recordFailedCompactionCalls(
+			{
+				stateDir,
+				sessionId: meta.id,
+				repoIdentity: meta.cwdHash || cwdHash(meta.cwd),
+				target: resolved.targetId,
+				model: resolved.wireModelId,
+			},
+			calls,
+			isOriginCurrent() ? observability : undefined,
+		);
 
 	// A compaction summary is a full streamed request against its resolved target.
 	// Hold the same canonical endpoint slot as an ordinary turn, /btw round, or
@@ -700,22 +723,39 @@ async function runCompactionFlow(
 	try {
 		result = await compact({
 			entries,
+			onCall: (call) => calls.push(call),
 			model: resolved.model,
 			...(systemPrompt !== undefined ? { systemPrompt } : {}),
 			...(resolved.headers !== undefined ? { headers: resolved.headers } : {}),
 			...(resolved.apiKey !== undefined ? { apiKey: resolved.apiKey } : {}),
 			...(instructions !== undefined ? { instructions } : {}),
 		});
+	} catch (error) {
+		try {
+			preserveCalls();
+		} catch (recordingError) {
+			throw new AggregateError([error, recordingError], "compaction failed and its usage could not be fully recorded");
+		}
+		throw error;
 	} finally {
 		releaseEndpointSlot();
 	}
-	if (result.messagesSummarized === 0 || result.summary.length === 0) return null;
+	if (!isOriginCurrent()) {
+		preserveCalls();
+		throw new Error("compaction session or branch changed; summary discarded and originating usage retained");
+	}
+	if (result.messagesSummarized === 0 || result.summary.length === 0) {
+		preserveCalls();
+		if (calls.length > 0) throw new Error("compaction returned no summary; reported usage retained without a checkpoint");
+		return null;
+	}
 	if (result.usage) {
 		result.usage = { ...result.usage, targetId: resolved.targetId, modelId: resolved.wireModelId };
 	}
 
-	const entry: Omit<CompactionSummaryEntry, "turnId" | "timestamp"> = {
+	const entry: Omit<CompactionSummaryEntry, "timestamp"> = {
 		kind: "compactionSummary",
+		turnId: randomUUID(),
 		parentTurnId: result.firstKeptTurnId ?? null,
 		summary: result.summary,
 		tokensBefore: result.tokensBefore,
@@ -729,8 +769,45 @@ async function runCompactionFlow(
 		...(result.usage !== undefined ? { usage: result.usage } : {}),
 	};
 	if (trigger !== undefined) entry.trigger = trigger;
-	session.appendEntry(entry);
+	try {
+		session.appendEntry(entry);
+	} catch (error) {
+		// A write may have reached the ledger before its caller threw. Reconcile
+		// this exact checkpoint identity before choosing a second accounting store.
+		try {
+			if (!compactionCheckpointWasWritten(sessionPaths(meta).current, entry.turnId)) preserveCalls();
+		} catch (recordingError) {
+			throw new AggregateError(
+				[error, recordingError],
+				"compaction checkpoint persistence is unresolved; usage was not duplicated",
+			);
+		}
+		throw error;
+	}
 	return result;
+}
+
+function compactionCheckpointWasWritten(path: string, turnId: string): boolean {
+	let malformed = false;
+	for (const line of readFileSync(path, "utf8").split("\n")) {
+		if (line.trim().length === 0) continue;
+		try {
+			const entry: unknown = JSON.parse(line);
+			if (
+				entry &&
+				typeof entry === "object" &&
+				"turnId" in entry &&
+				entry.turnId === turnId &&
+				"kind" in entry &&
+				entry.kind === "compactionSummary"
+			)
+				return true;
+		} catch {
+			malformed = true;
+		}
+	}
+	if (malformed) throw new Error("cannot prove checkpoint absence in a malformed session ledger");
+	return false;
 }
 
 /**
@@ -743,8 +820,10 @@ export function createProductionAutoCompact(
 	session: SessionContract,
 	getSettings: () => ClioSettings,
 	providers: ProvidersContract,
+	observability?: BackgroundMemoryUsageSink,
 ): (instructions?: string, trigger?: CompactionTrigger) => Promise<CompactResult | null> {
-	return (instructions, trigger) => runCompactionFlow(session, getSettings(), providers, instructions, trigger);
+	return (instructions, trigger) =>
+		runCompactionFlow(session, getSettings(), providers, instructions, trigger, observability);
 }
 
 function estimateTokensFromSummary(summary: string): number {
@@ -1910,7 +1989,7 @@ export async function bootOrchestrator(options: BootOptions = {}): Promise<BootR
 		...(session
 			? {
 					readSessionEntries: readCurrentSessionEntries,
-					autoCompact: createProductionAutoCompact(session, getCurrentSettings, providers),
+					autoCompact: createProductionAutoCompact(session, getCurrentSettings, providers, observability),
 				}
 			: {}),
 		toolRegistry,

@@ -8,6 +8,7 @@ import {
 } from "../core/response-model-id.js";
 import { clioDataDir, clioStateDir } from "../core/xdg.js";
 import { loadMemoryRecordsSync, type MemoryRecord } from "../domains/memory/index.js";
+import { summarizeFailedCompactionUsage } from "../domains/observability/compaction-usage.js";
 import { readEvidenceIndex } from "../domains/observability/evidence-index.js";
 import { type OutOfTurnUsageRow, readOutOfTurnUsageRows } from "../domains/observability/out-of-turn-usage.js";
 import { loadSkills } from "../domains/resources/index.js";
@@ -119,18 +120,32 @@ interface CallOrigins {
 	handoffs: number;
 	prewarms: number;
 	backgroundMemory: number;
+	failedCompaction: number;
 }
 
 function emptyCallOrigins(): CallOrigins {
-	return { rows: 0, sideQuestions: 0, handoffs: 0, prewarms: 0, backgroundMemory: 0 };
+	return { rows: 0, sideQuestions: 0, handoffs: 0, prewarms: 0, backgroundMemory: 0, failedCompaction: 0 };
 }
 
 function turnsOf(origins: CallOrigins): number {
-	return origins.rows - origins.sideQuestions - origins.handoffs - origins.prewarms - origins.backgroundMemory;
+	return (
+		origins.rows -
+		origins.sideQuestions -
+		origins.handoffs -
+		origins.prewarms -
+		origins.backgroundMemory -
+		origins.failedCompaction
+	);
 }
 
 function hasLabelledCall(origins: CallOrigins): boolean {
-	return origins.sideQuestions > 0 || origins.handoffs > 0 || origins.prewarms > 0 || origins.backgroundMemory > 0;
+	return (
+		origins.sideQuestions > 0 ||
+		origins.handoffs > 0 ||
+		origins.prewarms > 0 ||
+		origins.backgroundMemory > 0 ||
+		origins.failedCompaction > 0
+	);
 }
 
 function addOutOfTurnRow(origins: CallOrigins, row: OutOfTurnUsageRow): void {
@@ -138,6 +153,7 @@ function addOutOfTurnRow(origins: CallOrigins, row: OutOfTurnUsageRow): void {
 	if (row.label === "side-question") origins.sideQuestions += 1;
 	else if (row.label === "prewarm") origins.prewarms += 1;
 	else if (row.label === "background-memory") origins.backgroundMemory += 1;
+	else if (row.label === "failed-compaction") origins.failedCompaction += 1;
 	else origins.handoffs += 1;
 }
 
@@ -148,14 +164,30 @@ function outOfTurnUsageCall(row: OutOfTurnUsageRow): LedgerUsageCall {
 		attributedModelId: row.attributedModelId,
 		requestedModelId: row.attributedModelId,
 		responseModelIdObservation: { state: "not-observed" },
-		input: row.usage.input,
-		output: row.usage.output,
-		cacheRead: row.usage.cacheRead,
-		cacheWrite: row.usage.cacheWrite,
-		reasoningTokens: row.usage.reasoning,
-		totalTokens: row.usage.totalTokens,
-		costUsd: row.usage.costUsd,
+		input: row.usage.input ?? 0,
+		output: row.usage.output ?? 0,
+		cacheRead: row.usage.cacheRead ?? 0,
+		cacheWrite: row.usage.cacheWrite ?? 0,
+		reasoningTokens: row.usage.reasoning ?? 0,
+		totalTokens: row.usage.totalTokens ?? 0,
+		costUsd: row.usage.costUsd ?? 0,
 	};
+}
+
+/** Existing numeric accumulators sum known contributions; the report retains missing coverage. */
+function reportedUsageTotals(totals: UsageTotals, rows: ReadonlyArray<OutOfTurnUsageRow>) {
+	const failedCompaction = summarizeFailedCompactionUsage(rows);
+	if (failedCompaction.calls === 0) return totals;
+	const reported: Record<string, unknown> = { ...totals, knownSubtotals: true, failedCompaction };
+	for (const [field, missing] of Object.entries(failedCompaction.unobservedUsageCalls)) {
+		const key = field === "reasoning" ? "reasoningTokens" : field;
+		if (missing > 0 && reported[key] === 0) reported[key] = null;
+	}
+	return reported;
+}
+
+function usageAmount(value: unknown): string {
+	return typeof value === "number" ? String(value) : "unknown";
 }
 
 function addUsageCall(totals: UsageTotals, call: LedgerUsageCall): void {
@@ -442,6 +474,8 @@ export async function runUsageCommand(argv: ReadonlyArray<string>): Promise<numb
 	// session store is gone can still have recorded out-of-turn spend, and
 	// dropping those rows would report money that was spent as nothing at all.
 	const usageMeasurable = presence.sessionsPresent || outOfTurnRows.length > 0;
+	const reportedTotals = reportedUsageTotals(usageTotals, outOfTurnRows);
+	const failedCompaction = summarizeFailedCompactionUsage(outOfTurnRows);
 	const usageRows = [...usageByModel.values()].sort(
 		(a, b) => b.totals.totalTokens - a.totals.totalTokens || a.providerId.localeCompare(b.providerId),
 	);
@@ -533,7 +567,7 @@ export async function runUsageCommand(argv: ReadonlyArray<string>): Promise<numb
 			emit({
 				kind: "fact",
 				fact: "tokens",
-				...usageTotals,
+				...reportedTotals,
 				...(hasLabelledCall(callOrigins)
 					? {
 							turns: turnsOf(callOrigins),
@@ -541,6 +575,7 @@ export async function runUsageCommand(argv: ReadonlyArray<string>): Promise<numb
 							handoffs: callOrigins.handoffs,
 							prewarms: callOrigins.prewarms,
 							backgroundMemorySteps: callOrigins.backgroundMemory,
+							...(callOrigins.failedCompaction > 0 ? { failedCompactionCalls: callOrigins.failedCompaction } : {}),
 						}
 					: {}),
 			});
@@ -552,7 +587,12 @@ export async function runUsageCommand(argv: ReadonlyArray<string>): Promise<numb
 					attributedModelId: row.attributedModelId,
 					requestedModelIds: [...row.requestedModelIds].sort(),
 					responseModelIdObservationCounts: row.responseModelIdObservationCounts,
-					...row.totals,
+					...reportedUsageTotals(
+						row.totals,
+						outOfTurnRows.filter(
+							(call) => call.target === row.providerId && call.attributedModelId === row.attributedModelId,
+						),
+					),
 				});
 			}
 			for (const session of cacheSessions) {
@@ -615,7 +655,7 @@ export async function runUsageCommand(argv: ReadonlyArray<string>): Promise<numb
 	out(`  audited tool calls in window: ${auditToolCalls.length} (${auditBlocked.length} blocked/denied)`);
 	if (usageMeasurable) {
 		out(
-			`  tokens in window: ${usageTotals.totalTokens} over ${usageTotals.apiCalls} model calls (input ${usageTotals.input}, output ${usageTotals.output}, cache read ${usageTotals.cacheRead}, cache write ${usageTotals.cacheWrite}, reasoning ${usageTotals.reasoningTokens})`,
+			`  tokens in window: ${usageAmount(reportedTotals.totalTokens)} over ${usageTotals.apiCalls} model calls (input ${usageAmount(reportedTotals.input)}, output ${usageAmount(reportedTotals.output)}, cache read ${usageAmount(reportedTotals.cacheRead)}, cache write ${usageAmount(reportedTotals.cacheWrite)}, reasoning ${usageAmount(reportedTotals.reasoningTokens)})`,
 		);
 		if (hasLabelledCall(callOrigins)) {
 			// Only printed when a labelled call is in the window. Over an archive
@@ -629,7 +669,18 @@ export async function runUsageCommand(argv: ReadonlyArray<string>): Promise<numb
 				out(`  background memory steps in window: ${callOrigins.backgroundMemory}`);
 			}
 		}
-		out(`  provider-reported cost in window: $${usageTotals.costUsd.toFixed(4)}`);
+		if (failedCompaction.calls > 0) {
+			out(
+				`  failed-compaction streams: ${failedCompaction.calls} (${failedCompaction.erroredCalls} errored, ${failedCompaction.abortedCalls} aborted, ${failedCompaction.successfulCalls} completed before the attempt failed)`,
+			);
+			out("  usage figures are known subtotals; missing compaction usage is not zero or a complete spending bound");
+			out(
+				`  errored compaction known cost: ${failedCompaction.erroredKnownUsage.costUsd === null ? "unknown" : `$${failedCompaction.erroredKnownUsage.costUsd.toFixed(4)}`}`,
+			);
+		}
+		out(
+			`  ${failedCompaction.calls > 0 ? "known reported/estimated" : "provider-reported"} cost in window: ${typeof reportedTotals.costUsd === "number" ? `$${reportedTotals.costUsd.toFixed(4)}` : "unknown"}`,
+		);
 	}
 	if (usageRows.length > 0) {
 		out("");
@@ -650,19 +701,27 @@ export async function runUsageCommand(argv: ReadonlyArray<string>): Promise<numb
 						"tokens",
 						"cost",
 					],
-					...usageRows.map((row) => [
-						row.providerId,
-						row.attributedModelId,
-						[...row.requestedModelIds].sort().join(","),
-						responseModelIdObservationCountsLabel(row.responseModelIdObservationCounts),
-						String(row.totals.apiCalls),
-						String(row.totals.input),
-						String(row.totals.output),
-						String(row.totals.cacheRead),
-						String(row.totals.reasoningTokens),
-						String(row.totals.totalTokens),
-						`$${row.totals.costUsd.toFixed(4)}`,
-					]),
+					...usageRows.map((row) => {
+						const reported = reportedUsageTotals(
+							row.totals,
+							outOfTurnRows.filter(
+								(call) => call.target === row.providerId && call.attributedModelId === row.attributedModelId,
+							),
+						);
+						return [
+							row.providerId,
+							row.attributedModelId,
+							[...row.requestedModelIds].sort().join(","),
+							responseModelIdObservationCountsLabel(row.responseModelIdObservationCounts),
+							String(row.totals.apiCalls),
+							usageAmount(reported.input),
+							usageAmount(reported.output),
+							usageAmount(reported.cacheRead),
+							usageAmount(reported.reasoningTokens),
+							usageAmount(reported.totalTokens),
+							typeof reported.costUsd === "number" ? `$${reported.costUsd.toFixed(4)}` : "unknown",
+						];
+					}),
 				]),
 			),
 		);
