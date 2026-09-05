@@ -103,6 +103,7 @@ engine assumes.
 | ORCHESTRATE | `tasks` | read | sequential |
 | ORCHESTRATE | `ledger` | read | sequential |
 | ORCHESTRATE | `panes` | read | sequential |
+| ORCHESTRATE | `limitation` | read | parallel |
 | RETRIEVE | `web_fetch` | read | parallel |
 | INTERACT | `ask_user` | read | sequential |
 | ARTIFACT | `artifact` | write | sequential |
