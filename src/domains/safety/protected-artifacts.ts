@@ -390,17 +390,48 @@ export function invokesClioSkillMutation(command: string): boolean {
 		} else if (/^(?:@iowarp\/)?clio-coder(?:@[^/]+)?$/.test(program) || basenameToken(program) === "clio-coder") {
 			args = args.slice(1);
 		} else continue;
-		if (args.includes("--help") || args.includes("-h") || args.includes("--version")) continue;
+		if (args.includes("--version") || args.includes("-v")) continue;
+		let rootHelp = false;
+		let firstRootFlag: string | undefined;
 		while (args[0]?.startsWith("-")) {
 			const flag = args[0];
-			args = args.slice(flag === "--skill" || flag === "--api-key" || flag === "--panes" ? 2 : 1);
+			// Startup flags are consumed before dispatch. Help is terminal only
+			// when it is the first flag left in the root dispatcher's argv.
+			if (flag === "--all" || flag === "--help" || flag === "-h") firstRootFlag ??= flag;
+			rootHelp = firstRootFlag === "--help" || firstRootFlag === "-h";
+			args = args.slice(flag === "--skill" || flag === "--api-key" ? 2 : 1);
 		}
-		if (args[0] === "skills" && (args[1] === "install" || args[1] === "update")) return true;
-		// Library installs may include skill dependencies, even when the requested
-		// resource is an agent or fleet. The operator owns that admission too.
-		if (args[0] === "library" && args[1] === "install") return true;
+		if (rootHelp) continue;
+		if (args[0] !== "skills" && args[0] !== "library") continue;
+		if (resourceCliMutatesSkills(args[0], args.slice(1))) return true;
 	}
 	return false;
+}
+
+function resourceCliMutatesSkills(resource: "skills" | "library", args: ReadonlyArray<string>): boolean {
+	// Both resource parsers accept flags before the verb. Consume their value
+	// options so a catalog path called --yes or --help is not treated as a flag.
+	const valueOptions =
+		resource === "skills"
+			? ["--name", "--category", "--scenario", "--target", "--workspace", "--timeout"]
+			: ["--kind", "--from"];
+	let verb: string | undefined;
+	let confirmed = false;
+	for (let index = 0; index < args.length; index += 1) {
+		const arg = args[index];
+		if (arg === undefined) continue;
+		if (valueOptions.includes(arg)) {
+			index += 1;
+			continue;
+		}
+		if (arg === "--help" || arg === "-h") return false;
+		if (arg === "--yes") confirmed = true;
+		if (!arg.startsWith("-")) verb ??= arg;
+	}
+	if (resource === "skills") return verb === "install" || verb === "update" || verb === "sync";
+	// Unconfirmed library add only prints a plan. A confirmed add can install
+	// skill dependencies of any resource kind, or resolve an untyped skill ref.
+	return verb === "add" && confirmed;
 }
 
 const STANDARD_DEV_TARGETS = new Set(["/dev/null", "/dev/stdout", "/dev/stderr", "/dev/tty", "/dev/zero"]);
