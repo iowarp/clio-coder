@@ -12,6 +12,8 @@ import type {
 } from "../dispatch/index.js";
 import { type ExecutionRole, isExecutionRole, readGateDecisionArtifactsForRunIds } from "../dispatch/index.js";
 import { detectValidationCommand } from "../safety/protected-artifacts.js";
+import { foldDecisionBoard } from "../session/decision-board.js";
+import { type DecisionLedgerEntry, decisionRef } from "../session/entries.js";
 import {
 	type AuditJsonRow,
 	type BashExecutionEntry,
@@ -23,6 +25,7 @@ import {
 	readSessionEntriesForId,
 	type SessionEntry,
 } from "../session/index.js";
+import { filterEntriesToActivePath } from "../session/tree/active-path.js";
 import { attributeEvidenceFailure } from "./failure-attribution.js";
 import { renderEvidenceFindingsMarkdown } from "./findings-markdown.js";
 import { compareCodepoints as compareStrings } from "./ordering.js";
@@ -37,6 +40,7 @@ import {
 	type EvidenceAuditLinkedRow,
 	type EvidenceBuildResult,
 	type EvidenceCleanTraceRow,
+	type EvidenceDecision,
 	type EvidenceFinding,
 	type EvidenceGateDecisionsFile,
 	type EvidenceLinkConfidence,
@@ -94,6 +98,7 @@ interface LinkedSessionEntry {
 }
 
 interface SessionLinkResult {
+	decisionBoards: Map<string, DecisionLedgerEntry[]>;
 	entries: LinkedSessionEntry[];
 	attemptedSessionIds: string[];
 	missingSessionIds: string[];
@@ -163,7 +168,10 @@ export async function buildEvidence(options: BuildEvidenceOptions): Promise<Evid
 		gateDecisions: gateDecisions.decisions,
 		validationEvidence,
 	});
-	const findings = buildFindings(runSources, trustStatusRaw, sessionLinks, auditLinks, protectedArtifactsRaw);
+	const decisionLinks = resolveReceiptDecisions(runSources, sessionLinks);
+	const rawFindings = buildFindings(runSources, trustStatusRaw, sessionLinks, auditLinks, protectedArtifactsRaw);
+	for (const row of decisionLinks.findings)
+		rawFindings.push({ ...row, id: `finding-${String(rawFindings.length + 1).padStart(3, "0")}` });
 	// Export-boundary redaction (cold path): secret-shaped values are scrubbed
 	// from everything the bundle serializes: envelopes, receipts (including
 	// delegation toolCallLog arguments), tool-event previews, audit rows,
@@ -171,6 +179,7 @@ export async function buildEvidence(options: BuildEvidenceOptions): Promise<Evid
 	// session files are untouched; the bundle is the boundary, and the
 	// overview's redactionCount keeps the bundle honest about its filtering.
 	const tally = createRedactionTally();
+	const findings = redactSecretsDeep(rawFindings, tally);
 	const redactedRunSources: EvidenceRunSource[] = runSources.map((item) => ({
 		...item,
 		envelope: redactSecretsDeep(item.envelope, tally),
@@ -187,18 +196,21 @@ export async function buildEvidence(options: BuildEvidenceOptions): Promise<Evid
 	};
 	const protectedArtifacts = redactSecretsDeep(protectedArtifactsRaw, tally);
 	const trustStatus = redactSecretsDeep(trustStatusRaw, tally);
-	const overview = buildOverview(
-		evidenceId,
-		source,
-		redactedRunSources,
-		findings,
-		sessionLinks,
-		redactedAuditLinks,
-		redactedToolEvents,
-		protectedArtifacts,
-	);
+	const overview: EvidenceOverview = {
+		...buildOverview(
+			evidenceId,
+			source,
+			redactedRunSources,
+			findings,
+			sessionLinks,
+			redactedAuditLinks,
+			redactedToolEvents,
+			protectedArtifacts,
+		),
+		decisions: redactSecretsDeep(decisionLinks.decisions, tally),
+	};
 	const transcript = redactSecretsText(
-		renderTranscript(overview, redactedRunSources, sessionLinks, trustStatusRaw),
+		renderTranscript(overview, redactedRunSources, sessionLinks, trustStatusRaw, findings),
 		tally,
 	);
 	const finalOverview: EvidenceOverview = { ...overview, redactionCount: tally.count };
@@ -632,7 +644,7 @@ async function writeEvidenceFiles(
 	await writeJson(join(directory, "overview.json"), overview);
 	await writeFile(
 		join(directory, "transcript.md"),
-		transcript ?? renderTranscript(overview, runSources, sessionLinks, trustStatus),
+		transcript ?? renderTranscript(overview, runSources, sessionLinks, trustStatus, findings),
 		"utf8",
 	);
 	await writeJsonl(join(directory, "trace.raw.jsonl"), rawTraceRows(runSources));
@@ -749,6 +761,7 @@ async function linkSessionEntries(
 	const attemptedSessionIds = sourceSessionIds(source, runSources);
 	const windows = attributionWindows(ledger, runSources, attemptedSessionIds);
 	const result: SessionLinkResult = {
+		decisionBoards: new Map(),
 		entries: [],
 		attemptedSessionIds,
 		missingSessionIds: [],
@@ -761,6 +774,7 @@ async function linkSessionEntries(
 			continue;
 		}
 		result.readErrors.push(...read.errors);
+		result.decisionBoards.set(sessionId, foldDecisionBoard(filterEntriesToActivePath(read.entries, read.leafTurnId)));
 		for (const entry of read.entries) {
 			const link = linkSessionEntry(entry, windows);
 			if (source.kind === "run" && !linkCoversRun(link, source.runId)) continue;
@@ -1293,6 +1307,7 @@ function renderTranscript(
 	runSources: ReadonlyArray<EvidenceRunSource>,
 	sessionLinks: SessionLinkResult,
 	trustStatus: EvidenceTrustStatusFile,
+	findings: ReadonlyArray<EvidenceFinding>,
 ): string {
 	const trustByRun = new Map(trustStatus.runs.map((entry) => [entry.runId, entry.status]));
 	const lines = [
@@ -1317,6 +1332,21 @@ function renderTranscript(
 			for (const line of provenanceTranscriptLines(extractRunProvenance(source.receipt), status)) {
 				lines.push(`  ${line}`);
 			}
+		}
+	}
+	const decisionFindings = findings.filter(
+		(row) => row.tag === "context-provenance" && row.message.startsWith("Decision ref "),
+	);
+	if (decisionFindings.length > 0) {
+		lines.push("", "## Decision provenance");
+		for (const row of decisionFindings) lines.push(`- [${row.severity}] ${row.runId}: ${row.message}`);
+		for (const decision of overview.decisions ?? []) {
+			lines.push(
+				`\n### ${decision.ref} (run ${decision.runId}, session ${decision.sessionId})`,
+				"```json",
+				JSON.stringify(decision.record, null, 2),
+				"```",
+			);
 		}
 	}
 	if (sessionLinks.entries.length > 0) {
@@ -1886,4 +1916,47 @@ function truncateText(text: string, maxChars: number): string {
 function sanitizeEvidenceId(value: string): string {
 	const clean = value.replace(/[^A-Za-z0-9._-]+/g, "-").replace(/^-+|-+$/g, "");
 	return clean.length === 0 ? "unknown" : clean;
+}
+
+/** Receipt refs authenticate the link, while the session ledger supplies the recorded argument. */
+function resolveReceiptDecisions(
+	runSources: ReadonlyArray<EvidenceRunSource>,
+	sessions: SessionLinkResult,
+): {
+	decisions: EvidenceDecision[];
+	findings: EvidenceFinding[];
+} {
+	const decisions: EvidenceDecision[] = [];
+	const findings: EvidenceFinding[] = [];
+	for (const source of runSources) {
+		const receipt = authenticatedReceipt(source);
+		if (!receipt?.decisionRefs?.length) continue;
+		const sessionId = receipt.sessionId;
+		const board = sessionId === null ? [] : (sessions.decisionBoards.get(sessionId) ?? []);
+		const records = new Map(
+			board.flatMap((entry) =>
+				entry.decisions.map(
+					(record) =>
+						[
+							decisionRef(entry.interviewId, record.key),
+							{ ...record, source: record.source ?? (entry.origin === "agent" ? ("agent" as const) : ("operator" as const)) },
+						] as const,
+				),
+			),
+		);
+		for (const ref of new Set(receipt.decisionRefs)) {
+			const record = records.get(ref);
+			if (record && sessionId !== null) decisions.push({ runId: receipt.runId, sessionId, ref, record });
+			findings.push(
+				finding(
+					findings.length,
+					record ? "info" : "warn",
+					"context-provenance",
+					receipt.runId,
+					`Decision ref ${ref} ${record ? "resolved" : "does not resolve"} on session ${sessionId ?? "(unlinked)"} active path`,
+				),
+			);
+		}
+	}
+	return { decisions, findings };
 }

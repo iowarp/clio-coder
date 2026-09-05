@@ -22,6 +22,7 @@
  */
 
 import { isAbsolute, normalize, relative, resolve } from "node:path";
+import { decisionRationale } from "./decision-board.js";
 import type { DecisionLedgerEntry, SessionEntry } from "./entries.js";
 import { filterEntriesToActivePath } from "./tree/active-path.js";
 
@@ -480,7 +481,7 @@ export function mergeHandoffDecisions(
 			if (decision.status !== "active") continue;
 			const name = decision.label ?? decision.key;
 			const summary = boundHandoffString(`${name}: ${decision.value}`).text;
-			const rationale = decision.source_question ?? decision.correction;
+			const rationale = decisionRationale(decision);
 			settled.push({
 				summary,
 				...(rationale ? { rationale: boundHandoffString(rationale).text } : {}),

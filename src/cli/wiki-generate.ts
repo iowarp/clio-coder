@@ -336,6 +336,7 @@ async function runPagePhase(
 			codewiki: input.codewiki,
 			page,
 			siblings: plan.pages,
+			...(input.decisions ? { decisions: input.decisions } : {}),
 			outputDir: input.outputDir,
 			seeded,
 		}),

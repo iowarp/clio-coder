@@ -14,6 +14,7 @@ import {
 } from "node:fs";
 import { dirname, join } from "node:path";
 import type { ContextActivityPayload } from "../../../core/bus-events.js";
+import type { DecisionLedgerEntry } from "../../session/entries.js";
 import { detectProjectType } from "../../session/workspace/project-type.js";
 import type { BootstrapProgressSink } from "../bootstrap.js";
 import { coordinateCodewikiWrite } from "../codewiki/coordinator.js";
@@ -44,6 +45,8 @@ import { changedPathsSince } from "./staleness.js";
 export type { WikiDepth, WikiGenerateMode };
 
 export interface WikiGenerateInput {
+	/** The current session board, already scoped to its active branch. */
+	decisions?: ReadonlyArray<DecisionLedgerEntry>;
 	cwd: string;
 	mode: WikiGenerateMode;
 	/**
@@ -76,6 +79,8 @@ export interface WikiGenerateInput {
 export type WikiGenerate = (input: WikiGenerateInput) => void | Promise<void>;
 
 export interface RunWikiGenerateInput {
+	/** The current session board, already scoped to its active branch. */
+	decisions?: ReadonlyArray<DecisionLedgerEntry>;
 	cwd?: string;
 	mode?: WikiGenerateMode;
 	/** Repository-detail policy. Auto scales decomposition from indexed files and lines. */
@@ -473,6 +478,7 @@ export async function runWikiGenerate(
 				plan: resolved.plan,
 				resumed: resolved.resumed,
 				unclaimedAreas: resolved.unclaimedAreas,
+				...(input.decisions ? { decisions: input.decisions } : {}),
 				gitHead: existingMeta?.gitHead ?? null,
 				...(input.onProgress ? { progress: input.onProgress } : {}),
 			});

@@ -282,3 +282,12 @@ export function createDecisionBoardStore(deps: DecisionBoardStoreDeps = {}): Dec
 	};
 	return store;
 }
+
+/** Preserve the recorded argument wherever a decision is carried into another prompt. */
+export function decisionRationale(decision: DecisionRecord): string | undefined {
+	const parts: string[] = [];
+	if (decision.alternatives?.length) parts.push(`Alternatives: ${decision.alternatives.join("; ")}`);
+	if (decision.rationale) parts.push(`Rationale: ${decision.rationale}`);
+	if (parts.length > 0) return parts.join(". ");
+	return decision.source_question ?? decision.correction;
+}

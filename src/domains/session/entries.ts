@@ -533,11 +533,14 @@ function isTaskLedgerEvidence(value: unknown): value is TaskLedgerValidationEvid
 	);
 }
 
-function isDecisionRecord(value: unknown): value is DecisionRecord {
+export function isDecisionRecord(value: unknown): value is DecisionRecord {
 	if (!isRecord(value)) return false;
-	if (!isString(value.key) || !/^[a-z0-9]+(?:_[a-z0-9]+)*$/.test(value.key)) return false;
+	if (!isString(value.key) || !/^[a-z0-9]+(?:[_-][a-z0-9]+)*$/.test(value.key)) return false;
 	if (!isString(value.value) || !isOneOf(value.status, DECISION_STATUSES) || !isString(value.decidedAt)) return false;
 	if (!isOptionalString(value.label) || !isOptionalString(value.source_question)) return false;
+	if (value.source !== undefined && !isOneOf(value.source, ["operator", "agent"])) return false;
+	if (value.alternatives !== undefined && !isStringArray(value.alternatives)) return false;
+	if (!isOptionalString(value.rationale)) return false;
 	if (!isOptionalString(value.revisedAt) || !isOptionalString(value.correction)) return false;
 	return value.status === "superseded"
 		? isString(value.revisedAt)
@@ -672,6 +675,7 @@ export function isSessionEntry(value: unknown): value is SessionEntry {
 			);
 		case "decisionLedger":
 			return (
+				(v.origin === undefined || isOneOf(v.origin, ["interview", "agent"])) &&
 				isString(v.interviewId) &&
 				isOneOf(v.interviewStatus, DECISION_INTERVIEW_STATUSES) &&
 				isString(v.startedAt) &&

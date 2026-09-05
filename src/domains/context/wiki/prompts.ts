@@ -14,6 +14,7 @@ import { execFileSync } from "node:child_process";
 import { existsSync, realpathSync, statSync } from "node:fs";
 import { isAbsolute, join, relative } from "node:path";
 import { loadFragments } from "../../prompts/fragment-loader.js";
+import { type DecisionLedgerEntry, decisionRef } from "../../session/entries.js";
 import { renderCodewikiDigest } from "../codewiki/digest.js";
 import type { Codewiki } from "../codewiki/schema.js";
 import { WIKI_PLAN_FILE } from "./layout.js";
@@ -229,6 +230,8 @@ function scopedSymbols(codewiki: Codewiki, sources: ReadonlyArray<string>, limit
 }
 
 export interface BuildWikiPagePromptInput {
+	/** The current session board, already scoped to its active branch. */
+	decisions?: ReadonlyArray<DecisionLedgerEntry>;
 	cwd: string;
 	mode: WikiGenerateMode;
 	codewiki: Codewiki;
@@ -272,6 +275,8 @@ export function buildWikiPagePrompt(input: BuildWikiPagePromptInput): string {
 		"## Repository guidance",
 		repositoryGuidance(input.cwd),
 	];
+	const decisions = recordedDecisions(input);
+	if (decisions.length > 0) sections.push("# Recorded decisions", "```json", JSON.stringify(decisions, null, 2), "```");
 	if (input.seeded) {
 		sections.push(
 			"## Revision",
@@ -280,4 +285,42 @@ export function buildWikiPagePrompt(input: BuildWikiPagePromptInput): string {
 		);
 	}
 	return `${sections.join("\n\n")}\n`;
+}
+
+/** Match a source itself or a descendant, without accepting similarly named siblings. */
+function underSource(path: string, source: string): boolean {
+	const root = source.replace(/^\.\//, "").replace(/\/$/, "");
+	const candidate = path.replace(/^\.\//, "");
+	return candidate === root || candidate.startsWith(`${root}/`);
+}
+
+function recordedDecisions(input: BuildWikiPagePromptInput) {
+	const files = new Set(
+		input.codewiki.files
+			.filter((file) => input.page.sources.some((source) => underSource(file.path, source)))
+			.map((file) => file.id),
+	);
+	const symbols = new Set(
+		input.codewiki.symbols.filter((symbol) => files.has(symbol.fileId)).map((symbol) => symbol.name),
+	);
+	return (input.decisions ?? [])
+		.flatMap((entry) =>
+			entry.decisions
+				.filter((record) => {
+					if (record.status !== "active") return false;
+					if (symbols.has(record.key)) return true;
+					const paths = [record.rationale ?? "", ...(record.alternatives ?? [])].join(" ").match(/[\w@./-]+/g) ?? [];
+					return paths.some((path) => input.page.sources.some((source) => underSource(path.replace(/\.$/, ""), source)));
+				})
+				.map((record) => ({
+					ref: decisionRef(entry.interviewId, record.key),
+					key: record.key,
+					value: record.value,
+					alternatives: record.alternatives ?? [],
+					rationale: record.rationale ?? record.source_question ?? "",
+					decidedAt: record.decidedAt,
+					source: record.source ?? (entry.origin === "agent" ? "agent" : "operator"),
+				})),
+		)
+		.slice(0, 12);
 }

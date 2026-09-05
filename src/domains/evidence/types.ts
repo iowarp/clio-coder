@@ -81,7 +81,16 @@ export interface EvidenceTotals {
 	wallTimeMs: number;
 }
 
+export interface EvidenceDecision {
+	runId: string;
+	sessionId: string;
+	ref: string;
+	record: import("../session/entries.js").DecisionRecord;
+}
+
 export interface EvidenceOverview {
+	/** Recorded arguments resolved from authenticated receipts on the linked active session path. */
+	decisions?: EvidenceDecision[];
 	version: 1;
 	evidenceId: string;
 	source: EvidenceSource;

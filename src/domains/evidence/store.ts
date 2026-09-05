@@ -2,6 +2,7 @@ import { readdir, readFile } from "node:fs/promises";
 import { join } from "node:path";
 import { assertSafeId } from "../../core/safe-id.js";
 import { type GateDecisionArtifact, verifyGateDecisionArtifact } from "../dispatch/index.js";
+import { isDecisionRecord } from "../session/entries.js";
 import { compareCodepoints as compareStrings } from "./ordering.js";
 import { hasRunProvenance, type RunProvenanceView, runProvenanceFromUnknown } from "./provenance.js";
 import { normalizeTrustStatus } from "./trust-status.js";
@@ -230,6 +231,7 @@ function parseOverview(value: unknown, source: string): EvidenceOverview {
 		tags,
 		files,
 		...(redactionCount === undefined ? {} : { redactionCount }),
+		...(value.decisions === undefined ? {} : { decisions: readDecisions(value.decisions, `${source}.decisions`) }),
 	};
 }
 
@@ -334,4 +336,18 @@ function isRecord(value: unknown): value is Record<string, unknown> {
 
 export function findingsFile(evidenceId: string, findings: EvidenceFinding[]): EvidenceFindingsFile {
 	return { version: 1, evidenceId, findings };
+}
+
+function readDecisions(value: unknown, source: string): NonNullable<EvidenceOverview["decisions"]> {
+	if (!Array.isArray(value)) throw new Error(`${source}: expected array`);
+	return value.map((entry: unknown, index) => {
+		const path = `${source}[${index}]`;
+		if (!isRecord(entry) || !isDecisionRecord(entry.record)) throw new Error(`${path}: expected recorded decision`);
+		return {
+			runId: readString(entry, path, "runId"),
+			sessionId: readString(entry, path, "sessionId"),
+			ref: readString(entry, path, "ref"),
+			record: entry.record,
+		};
+	});
 }
