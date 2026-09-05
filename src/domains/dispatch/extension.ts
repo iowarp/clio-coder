@@ -3268,6 +3268,9 @@ export function createDispatchBundle(
 		const tickMonotonic = monotonicNow();
 		for (const run of active.values()) {
 			if (run.aborted || run.stallKilled || !run.heartbeatAt) continue;
+			// Finalizers retain active entries while awaiting ledger persistence.
+			// Their terminal status is already sealed into the receipt digest.
+			if (ledger.get(run.runId)?.endedAt !== null) continue;
 			const heartbeatMonotonic = heartbeatMonotonicAt(run.heartbeatAt);
 			if (!Number.isFinite(heartbeatMonotonic) || !Number.isFinite(run.heartbeatAt.current)) continue;
 			if (run.runtimeKind === "acp-delegation") {
