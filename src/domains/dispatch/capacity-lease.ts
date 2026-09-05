@@ -481,6 +481,23 @@ export function capacityLeaseUsage(options?: { nowMs?: number; probe?: LeaseOwne
 	return { global: leases.length, nodes, endpoints, endpointHolders };
 }
 
+/** Coherent current endpoint occupancy, including held reservation waves.
+ * The caller still owns admission; process-local streams are not global leases.
+ */
+export function endpointCapacityUsage(): Readonly<Record<string, number>> {
+	return withStateFileLockSync(capacityStateLockPath(), () => {
+		const file = readCapacityStateUnsafe();
+		reclaim(file, Date.now(), defaultProbe);
+		const held = heldReservationUsage(file.reservations);
+		const usage: Record<string, number> = { ...foregroundStreamUsage() };
+		for (const [key, count] of Object.entries(held.endpoints)) usage[key] = (usage[key] ?? 0) + count;
+		for (const lease of file.leases) {
+			if (lease.endpointKey !== undefined) usage[lease.endpointKey] = (usage[lease.endpointKey] ?? 0) + 1;
+		}
+		return usage;
+	});
+}
+
 /**
  * Per-node lease counts for display and for advisory placement spreading. Every
  * read takes the admission state lock, so a render loop or a multi-node

@@ -175,7 +175,7 @@ malformed response, or telemetry failure is silent and never blocks a tool.</p>
 <li><code>context.memory.cadenceToolCalls</code> (default <code>10</code>): Minimum completed-tool interval between background interventions.</li>
 <li><code>context.memory.trajectorySteps</code> (default <code>8</code>): Completed tool-trajectory window analyzed during background evaluation.</li>
 <li><code>context.memory.maxOutputTokens</code> (default <code>2000</code>): Bounds the rendered memory-bank context and the ordinary policy-model completion. An always-on-thinking model receives additional reasoning headroom, at least <code>4,000</code> tokens when its model cap permits, so it can still reach the strict envelope.</li>
-<li><code>context.memory.timeoutMs</code> (default <code>60000</code>): Wall-clock limit for one background memory-policy request. The step is detached, so this deadline never delays a turn, but it does hold a request slot on a real inference endpoint that your own turns and dispatched workers queue against. Raise it only after inspecting the timeout and hit-rate evidence for the selected route.</li>
+<li><code>context.memory.timeoutMs</code> (default <code>60000</code>): Wall-clock limit for one background memory-policy step, including its one permitted chat fallback attempt. The step is detached, so this deadline never delays a turn, but it does hold a request slot on a real inference endpoint that your own turns and dispatched workers queue against. Raise it only after inspecting the timeout and hit-rate evidence for the selected route.</li>
 </ul>
 <h2>Trigger semantics</h2>
 <p>Memory does not call a model after every tool. Signals accumulate and coalesce at
@@ -341,34 +341,14 @@ considered a 30-second counterfactual: two of six observed injections, at
 would not have been spent. The current 60-second deadline is the source-backed
 bound on what one optional call may hold a shared local server for, not a
 prediction of when a route answers.</li>
-<li>A step that would run on the endpoint the chat target is streaming against is
-skipped with reason <code>endpoint_busy</code>, and the skip is recorded. On a single-slot
-llama.cpp router the alternative is queueing behind the operator&#39;s own decoding
-or evicting the resident model, and neither is a cost an optional call may
-impose.</li>
+<li>A step whose known endpoint occupancy exhausts the resolved request capacity is skipped with reason <code>endpoint_busy</code>. The same gateway URL alone does not imply a single request slot or a single physical model server.</li>
 </ul>
-<h3>What a background target costs on a shared local server</h3>
-<p>If <code>context.memory.target</code> names the same server as <code>chat.target</code>, that
-server&#39;s slots are shared. On a llama.cpp router started with <code>--parallel 1</code>
-there is exactly one, and the memory step and the operator&#39;s turn contend for it.</p>
-<p>The consequence is worth stating plainly: a shared endpoint suppresses the model
-tier rather than merely delaying it. A step is started from the <code>turn_end</code> hook,
-which fires inside the streaming run at <code>agent_end</code>
-(<code>src/interactive/turn-runtime.ts</code>), while the chat loop still holds its
-foreground registration on that endpoint; the loop releases the hold afterwards,
-in the <code>finally</code> around the run (<code>src/interactive/chat-loop.ts</code>). Every boundary
-therefore finds the endpoint busy and records <code>dropped</code>/<code>endpoint_busy</code>. That is
-the intended trade: an optional call may not take the one slot the operator&#39;s own
-turn is using, and it may not make the server swap the resident model out. The
-<code>/memory</code> step list and <code>steps.jsonl</code> say so on every boundary, so the tier is
-visibly declining rather than quietly idle.</p>
-<p>The second mechanism is an <code>expected cold</code> stamp, for the case where a step did
-run on the chat endpoint. Its prompt is a trajectory rather than the chat prefix,
-so the next turn&#39;s prefill is expected to be cold; <code>/context</code> names
-<code>background_memory</code> as the reason instead of reporting an unexplained cold
-prefix.</p>
-<p>Pointing the background role at a second machine avoids both effects and is the
-arrangement the tier is designed for.</p>
+<h3>Dedicated routing, chat fallback and endpoint capacity</h3>
+<p>Clio prefers the explicitly configured memory target and model. If that route is known unavailable (missing target/runtime, down target, absent model in a known catalog, or a model reported unloaded/loading), Clio selects the active chat route for that step. A runtime client error on the dedicated route permits one chat attempt within the original remaining deadline. It does not retry after a timeout, cancellation, session/branch switch, malformed envelope, or a model&#x27;s explicit silence. The fallback never falls back again. Both routes unavailable produce a visible <code>client_error</code> outcome. An unset memory role remains rules-only; chat fallback does not enable model-based memory by default.</p>
+<p>A runtime notice names the selected chat fallback and its reason. Routing stays session-local and does not edit saved settings. Each attempted call records its own known usage under its actual target/model and emits its own telemetry outcome; failed dedicated usage is retained alongside fallback usage. The final policy result describes the final attempt, without merging different provider identities. A generation change discards late content while preserving the original usage owner.</p>
+<p>Capacity follows the same existing evidence as dispatch: explicit target <code>maxConcurrentRequests</code>, current discovery, a valid discovery prior, then the conservative one-slot default for a local-native runtime. Known occupancy includes this process&#x27;s foreground requests, active dispatch leases and held reservation waves. A two-slot endpoint with one foreground request can admit memory; a full one-slot endpoint skips it. Larger declared capacities work without a new constant.</p>
+<p>LiteLLM is a gateway protocol, so Clio does not invent a local one-slot limit for its URL. Distinct model routes such as dynamo, mini and zbook can share that URL; the gateway owns their physical routing and backend residency. An explicit or observed endpoint-wide bound still applies when present. Clio&#x27;s process-local foreground holds and observed dispatch state are not a global scheduler for every client using the gateway. Slot holds are released on success, failure and abort.</p>
+<p>The existing <code>background_memory</code> expected-cold stamp remains keyed by endpoint URL. It records a possible shared-endpoint cache disturbance, including after a failed request, rather than proving that a different model behind the gateway actually evicted the chat prefix.</p>
 <h2>Choosing a background model</h2>
 <p>Memory reads a trajectory and writes a fixed envelope. It does not plan, and it
 does not need to be clever. A small non-reasoning model is the right choice, and
@@ -384,12 +364,8 @@ is selected for background memory by default. Reasoning
 blocks are discarded and only the envelope is kept, and the output budget is
 sized to let a reasoning preamble run its course first. The cost is latency,
 which the detached step absorbs.</p>
-<p>One configuration is refused rather than degraded. If the background role names
-the same target and model as the orchestrator, and that model reasons, the LLM
-memory tier stays off and memory runs on its free deterministic tier. A single
-reasoning model already driving chat, workers, and shadow agents cannot also
-deliberate over memory steps without contending with the work the operator
-actually asked for.</p>
+<p>The active chat model may also serve memory, including a reasoning model, when request capacity permits. Memory still requests thinking off and uses its own bounded envelope and output budget. A dedicated small model is preferred for latency and resource use; sharing a model is a capacity decision rather than an unconditional refusal.</p>
+
 <p>This is a mix-and-match plane, not a local-only one. The background role resolves
 through the same target machinery as every other role, so the useful shapes are:</p>
 <ul>
@@ -427,46 +403,22 @@ background-memory target is the Memory target row in Settings → Orchestrator,
 independent of the chat target and the fleet default. A running session owns
 its routing snapshot, while the saved
 selection becomes the default for new sessions.</p>
-<p>The reference topology separates chat from memory work:</p>
-<table>
-<thead>
-<tr>
-<th>Role</th>
-<th>Target</th>
-<th>Runtime and endpoint</th>
-<th>Model</th>
-<th>Capacity</th>
-</tr>
-</thead>
-<tbody><tr>
-<td>Chat</td>
-<td><code>dynamo</code></td>
-<td>LM Studio at <code>192.168.86.143:1234</code></td>
-<td><code>qwen3.8-27b-dynamo</code></td>
-<td>Reported by the LM Studio probe</td>
-</tr>
-<tr>
-<td>Background memory</td>
-<td><code>mini</code></td>
-<td>llama.cpp router at <code>192.168.86.141:8080</code></td>
-<td><code>ornith1.5-35b-moe</code></td>
-<td>4 parallel slots, 262,144 context tokens per slot</td>
-</tr>
+<p>An example gateway topology keeps the three backend routes distinct:</p>
+<table><thead><tr><th>Role</th><th>Target</th><th>Runtime and endpoint</th><th>Model</th><th>Capacity</th></tr></thead><tbody>
+<tr><td>Chat and memory fallback</td><td><code>dynamo</code></td><td>LiteLLM at <code>http://gateway:4000</code></td><td><code>dynamo/qwen3.8-27b</code></td><td>Gateway-owned unless an explicit or observed endpoint bound is available</td></tr>
+<tr><td>Preferred background memory</td><td><code>zbook</code></td><td>Same LiteLLM gateway</td><td><code>zbook/ornith-1.5-35b-a3b</code></td><td>Same capacity evidence rules</td></tr>
+<tr><td>Alternative memory candidate</td><td><code>mini</code></td><td>Same LiteLLM gateway</td><td><code>mini/ornith1.5-35b-moe</code></td><td>Same capacity evidence rules</td></tr>
 </tbody></table>
-<p>The corresponding saved role selection is:</p>
+<p>The corresponding role selection is:</p>
 <pre><code class="language-yaml">chat:
   target: dynamo
-  model: qwen3.8-27b-dynamo
+  model: dynamo/qwen3.8-27b
 context:
   memory:
-    target: mini
-    model: ornith1.5-35b-moe
+    target: zbook
+    model: zbook/ornith-1.5-35b-a3b
 </code></pre>
-<p>A smaller, efficient model is the intended shape for this role. The current
-reference uses a separate multi-slot endpoint so memory does not compete with
-the LM Studio chat stream. Capability is not the only constraint; latency and
-endpoint contention still matter, and the detached step above bounds their
-effect on the operator&#39;s turn.</p>
+<p>These are example configured target/model IDs, not built-in routes. Compare a slow dedicated model with an alternative using actual step latency, valid bank writes and known usage; the active chat route remains the fallback. Do not create aliases or change endpoint URLs just to bypass capacity accounting.</p>
 <p>The deadline is a bound on what an optional call may hold that server for, not a
 figure sized to capture the tail. The shipped <code>60000</code> is a bounded compromise,
 and a step that exceeds it records <code>timeout</code> with
@@ -555,7 +507,7 @@ injection attribution for the new session, and the master kill switch disables
 both the offer and writes. <code>/new</code>, <code>/fork</code>, <code>/resume</code>, and ACP session changes
 clear the prior heap bank before the new session can observe it.</p>
 <h2>Telemetry</h2>
-<p>Each completed memory step appends one content-free record to:</p>
+<p>Each completed memory-policy attempt appends one content-free record to:</p>
 <pre><code class="language-text">&lt;stateDir&gt;/memory/steps.jsonl
 </code></pre>
 <p>Use <code>clio-coder paths --json</code> to resolve the state directory (the <code>&quot;state&quot;</code> property). The log rotates after 1 MiB and
@@ -574,7 +526,7 @@ folds out of this file.</p>
 <p><code>dropped</code> is the one outcome that ran no step. It has two causes, separated by
 the row&#39;s reason: <code>step_in_flight</code> means the boundary triggered while an earlier
 step still held the single in-flight slot, and <code>endpoint_busy</code> means the step
-would have called the endpoint the chat target was streaming against. Both cost
+found the known endpoint request capacity exhausted. Both cost
 no tokens and no latency, both leave their triggers pending for the next free
 boundary, and neither replaces the operator-visible last decision. Counting
 <code>dropped</code> rows against <code>llm</code> rows over a session is how a starved cadence becomes

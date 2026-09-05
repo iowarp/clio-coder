@@ -78,13 +78,13 @@ export interface MemoryInterventionDeps {
 	everyNTools?: number;
 	/** Lazily resolves the explicitly configured background role. Null means rules-only. */
 	getModelClient?: () => TaskMemoryModelClient | null;
+	/** One alternative route after a client error; never used after timeout, cancellation or model output. */
+	getFallbackModelClient?: () => TaskMemoryModelClient | null;
 	/** Completion budget derived from the resolved background model capability. */
 	getModelMaxTokens?: (configuredMaxTokens: number) => number;
 	/**
-	 * True when the background target's inference endpoint is already serving the
-	 * chat target's stream. A memory step then either queues behind the operator's
-	 * own turn on a single-slot server or makes the server evict the resident
-	 * model to serve it, so the boundary is skipped and the skip is recorded.
+	 * True when known endpoint occupancy exhausts the resolved capacity bound.
+	 * A shared gateway URL alone is not evidence that its request slots are full.
 	 */
 	backgroundEndpointBusy?: () => boolean;
 	/**
@@ -441,6 +441,7 @@ export function createMemoryInterventionRegistration(deps: MemoryInterventionDep
 			return result;
 		}
 		const started = process.hrtime.bigint();
+		let attemptStarted = started;
 		const triggers = input.triggerReasons?.length ? input.triggerReasons : ["manual" as const];
 		let tier: TaskMemoryTelemetryTier = "rules";
 		promptedStepTier = tier;
@@ -465,23 +466,58 @@ export function createMemoryInterventionRegistration(deps: MemoryInterventionDep
 				} else {
 					tier = "llm";
 					promptedStepTier = tier;
-					promptedResult = await runTaskMemoryPolicy(deps.bank, client, {
-						isCurrent,
-						signal: generationController.signal,
-						onStepUsage: (usage) => {
-							if (usageSink) usageSink(usage, isCurrent());
-							else deps.onStepUsage?.(usage);
-						},
-						task: input.task?.trim() || currentTask,
-						trajectory: [...trajectory],
-						deterministicTrigger: input.deterministicTrigger,
-						maxTokens: live.maxTokens,
-						modelMaxTokens: positiveInteger(deps.getModelMaxTokens?.(live.maxTokens), live.maxTokens),
-						...(input.suppressIntervention === undefined ? {} : { suppressIntervention: input.suppressIntervention }),
-						previousReminder: lastInjectedMessage,
-						timeoutMs: live.timeoutMs,
-						...(deps.onEnvelope === undefined ? {} : { onEnvelope: deps.onEnvelope }),
-					});
+					const runClient = (selected: TaskMemoryModelClient, timeoutMs: number) =>
+						runTaskMemoryPolicy(deps.bank, selected, {
+							isCurrent,
+							signal: generationController.signal,
+							onStepUsage: (usage) => {
+								if (usageSink) usageSink(usage, isCurrent());
+								else deps.onStepUsage?.(usage);
+							},
+							task: input.task?.trim() || currentTask,
+							trajectory: [...trajectory],
+							deterministicTrigger: input.deterministicTrigger,
+							maxTokens: live.maxTokens,
+							modelMaxTokens: positiveInteger(deps.getModelMaxTokens?.(live.maxTokens), live.maxTokens),
+							...(input.suppressIntervention === undefined ? {} : { suppressIntervention: input.suppressIntervention }),
+							previousReminder: lastInjectedMessage,
+							timeoutMs,
+							...(deps.onEnvelope === undefined ? {} : { onEnvelope: deps.onEnvelope }),
+						});
+					const remainingMs = () => Math.floor(live.timeoutMs - Number(process.hrtime.bigint() - started) / 1_000_000);
+					const initialTimeoutMs = remainingMs();
+					promptedResult =
+						initialTimeoutMs <= 0
+							? { ...silent("deadline"), decision: "timeout" }
+							: await runClient(client, initialTimeoutMs);
+					if (promptedResult.reason === "client_error" && isCurrent() && remainingMs() > 0) {
+						let fallback: TaskMemoryModelClient | null = null;
+						let fallbackReady = false;
+						try {
+							fallback = deps.getFallbackModelClient?.() ?? null;
+							fallbackReady = fallback !== null && deps.backgroundEndpointBusy?.() !== true;
+						} catch {
+							/* Fail closed and preserve the original call if routing or capacity is unreadable. */
+						}
+						const fallbackTimeoutMs = remainingMs();
+						if (fallback !== null && fallbackReady && isCurrent() && fallbackTimeoutMs > 0) {
+							// Each attempted call keeps its own telemetry and origin usage.
+							// The returned policy result describes the final attempt only.
+							emitTelemetry(
+								triggers,
+								tier,
+								promptedResult.decision,
+								promptedResult.reason,
+								0,
+								promptedResult.inputTokens,
+								promptedResult.outputTokens,
+								started,
+								{ bankOperations: promptedResult.bankOperations, droppedOperations: promptedResult.droppedOperations },
+							);
+							attemptStarted = process.hrtime.bigint();
+							promptedResult = await runClient(fallback, fallbackTimeoutMs);
+						}
+					}
 				}
 			}
 		} catch (error) {
@@ -513,7 +549,7 @@ export function createMemoryInterventionRegistration(deps: MemoryInterventionDep
 			citedEntryCount(promptedResult.reminder),
 			promptedResult.inputTokens,
 			promptedResult.outputTokens,
-			started,
+			attemptStarted,
 			{ bankOperations: promptedResult.bankOperations, droppedOperations: promptedResult.droppedOperations },
 		);
 		return {
