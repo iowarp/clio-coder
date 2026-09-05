@@ -4088,6 +4088,12 @@ export function createDispatchBundle(
 		});
 
 		const startedAt = envelope.startedAt;
+		let resolveFinal!: (receipt: RunReceipt) => void;
+		let rejectFinal!: (error: unknown) => void;
+		const finalPromise = new Promise<RunReceipt>((res, rej) => {
+			resolveFinal = res;
+			rejectFinal = rej;
+		});
 		const activeRun: ActiveRun = {
 			runId: envelope.id,
 			req,
@@ -4119,7 +4125,7 @@ export function createDispatchBundle(
 			meter: tokenMeter,
 			pricing: null,
 			costProvenance: "unknown",
-			finalPromise: undefined as unknown as Promise<RunReceipt>,
+			finalPromise,
 		};
 
 		const buildReceiptDraft = (
@@ -4323,7 +4329,7 @@ export function createDispatchBundle(
 			return { assessment, rigor };
 		};
 
-		const finalPromise = (async (): Promise<RunReceipt> => {
+		(async (): Promise<RunReceipt> => {
 			try {
 				const result = await acp.promise;
 				// The receipt reads meters the domain pump fills. Finalization
@@ -4459,9 +4465,7 @@ export function createDispatchBundle(
 			} finally {
 				leaseSlot.release();
 			}
-		})();
-
-		activeRun.finalPromise = finalPromise;
+		})().then(resolveFinal, rejectFinal);
 		active.set(envelope.id, activeRun);
 
 		return {
@@ -5221,6 +5225,13 @@ export function createDispatchBundle(
 
 		const startedAt = envelope.startedAt;
 
+		let resolveFinal!: (receipt: RunReceipt) => void;
+		let rejectFinal!: (error: unknown) => void;
+		const finalPromise = new Promise<RunReceipt>((res, rej) => {
+			resolveFinal = res;
+			rejectFinal = rej;
+		});
+
 		const activeRun: ActiveRun = {
 			runId: envelope.id,
 			req,
@@ -5256,7 +5267,7 @@ export function createDispatchBundle(
 			meter: tokenMeter,
 			pricing: lifecycle.target.effectivePricing.rates,
 			costProvenance: lifecycle.target.effectivePricing.provenance,
-			finalPromise: undefined as unknown as Promise<RunReceipt>,
+			finalPromise,
 		};
 
 		const buildReceiptDraft = (
@@ -5523,7 +5534,7 @@ export function createDispatchBundle(
 		// finalPromise settles.
 		settlement?.live(envelope.id);
 
-		const finalPromise = (async (): Promise<RunReceipt> => {
+		(async (): Promise<RunReceipt> => {
 			try {
 				const result = await workerDone;
 				// The receipt reads meters the domain pump fills. Finalization
@@ -5840,9 +5851,8 @@ export function createDispatchBundle(
 				unsubscribeAgentLedger?.();
 				leaseSlot.release();
 			}
-		})();
+		})().then(resolveFinal, rejectFinal);
 
-		activeRun.finalPromise = finalPromise;
 		active.set(envelope.id, activeRun);
 
 		return attachRouteObservation({
