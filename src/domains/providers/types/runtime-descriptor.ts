@@ -171,7 +171,7 @@ export interface RuntimeDescriptor {
 		tools: "externally-governed-unobserved";
 		network: "externally-governed-unobserved";
 		budget: "external-one-shot";
-		generatingRetry: "forbidden";
+		generatingRetry: "forbidden" | "allowed";
 		modelCatalog: "live-authoritative" | "static";
 	};
 	/**

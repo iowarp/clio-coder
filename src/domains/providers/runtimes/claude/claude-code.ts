@@ -23,6 +23,15 @@ const claudeCodeRuntime: RuntimeDescriptor = {
 	headlessCommand: "claude -p --output-format stream-json",
 	outputParser: "claude-code-stream-json",
 	defaultCapabilities: claudeCodeCapabilities,
+	// The Claude CLI runs its own tool loop. Clio observes only the stream, so a
+	// declared per-tool budget is recorded as external-one-shot, never enforced.
+	externalAgentLoop: {
+		tools: "externally-governed-unobserved",
+		network: "externally-governed-unobserved",
+		budget: "external-one-shot",
+		generatingRetry: "allowed",
+		modelCatalog: "static",
+	},
 	synthesizeModel(target: TargetDescriptor, wireModelId: string, kb: KnowledgeBaseHit | null): Model<Api> {
 		return synthesizeClaudeDelegatedModel({
 			target,

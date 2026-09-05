@@ -1003,7 +1003,7 @@ function formatUrl(status: TargetStatus): string {
 
 function formatAuth(providers: ProvidersContract, status: TargetStatus): string {
 	if (!status.runtime) return "-";
-	if (status.runtime.externalAgentLoop !== undefined) return "operator session";
+	if (status.runtime.externalAgentLoop !== undefined && status.runtime.auth !== "claude-cli") return "operator session";
 	if (status.runtime.auth !== "api-key" && status.runtime.auth !== "oauth") return status.runtime.auth;
 	const auth = providers.auth.statusForTarget(status.target, status.runtime);
 	if (!auth.available) return "disconnected";

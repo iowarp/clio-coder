@@ -21,12 +21,14 @@ import {
 	inferredScopeParentTokenNotice,
 	resolveDispatchPathScope,
 } from "../../src/domains/dispatch/path-scope.js";
+import type { SpawnedWorker } from "../../src/domains/dispatch/worker-spawn.js";
 import { endpointCapacityFor } from "../../src/domains/providers/endpoint-capacity.js";
 import {
 	EMPTY_CAPABILITIES,
 	type ProvidersContract,
 	type RuntimeDescriptor,
 } from "../../src/domains/providers/index.js";
+import claudeCodeRuntime from "../../src/domains/providers/runtimes/claude/claude-code.js";
 import { createDispatchTool } from "../../src/tools/dispatch.js";
 import { describeDispatchPlan } from "../../src/tools/dispatch-plan.js";
 import { isolateDispatchState, makeDispatchBundle, restoreDispatchState } from "../harness/dispatch.js";
@@ -513,6 +515,63 @@ describe("dispatch admission boundary", () => {
 			isBoundedGateRolePrompt({ role: "reviewer", autonomy: "read-only", systemPrompt: "caller persona" }),
 			false,
 		);
+	});
+
+	it("admits a budget-declaring recipe on a Claude CLI target as an external one-shot budget", async () => {
+		const settings = structuredClone(DEFAULT_SETTINGS);
+		settings.targets = [{ id: "claude-worker", runtime: "claude-code", defaultModel: "sonnet" }];
+		settings.fleet.default.target = "claude-worker";
+		settings.fleet.default.model = "sonnet";
+		const spawn = (runtime: RuntimeDescriptor) => {
+			let spawned = 0;
+			const bundle = makeDispatchBundle(dispatchStubContext({ settings, runtime }), {
+				spawnWorker: (): SpawnedWorker => {
+					spawned += 1;
+					return {
+						pid: null,
+						promise: Promise.resolve({ exitCode: 0, signal: null }),
+						heartbeatAt: { current: Date.now(), monotonic: 0 },
+						events: (async function* () {
+							yield { type: "message_end", message: { role: "assistant", stopReason: "stop", content: "done" } };
+						})(),
+						abort() {},
+					};
+				},
+			});
+			return { bundle, spawned: () => spawned };
+		};
+		const request = {
+			agentId: "verifier",
+			task: "Run the contract suite and report which checks passed.",
+			executionRole: "verifier" as const,
+			target: "claude-worker",
+			model: "sonnet",
+		};
+
+		const declared = spawn(claudeCodeRuntime);
+		await declared.bundle.extension.start();
+		try {
+			const handle = await declared.bundle.contract.dispatch(request);
+			strictEqual(declared.spawned(), 1);
+			await handle.finalPromise.catch(() => undefined);
+			const envelope = declared.bundle.contract.getRun(handle.runId);
+			ok(envelope);
+			strictEqual(envelope.runtimeId, "claude-code");
+			strictEqual(envelope.budget?.enforcement.classification, "external-one-shot");
+			strictEqual(envelope.budget?.enforcement.perTool, "unobserved-not-enforced");
+		} finally {
+			await declared.bundle.extension.stop?.();
+		}
+
+		const { externalAgentLoop: _loop, ...undeclaredRuntime } = claudeCodeRuntime;
+		const undeclared = spawn(undeclaredRuntime);
+		await undeclared.bundle.extension.start();
+		try {
+			await rejects(undeclared.bundle.contract.dispatch(request), /cannot enforce an explicit dispatch budget/u);
+			strictEqual(undeclared.spawned(), 0);
+		} finally {
+			await undeclared.bundle.extension.stop?.();
+		}
 	});
 
 	it("rejects unmediated ACP autonomy narrowing before any worker starts", async () => {
