@@ -238,16 +238,10 @@ export interface DecisionRecord {
 }
 
 /**
- * Stable reference to one decision: `<interviewId>/<key>`. Both halves are
- * already unique on the active path, so the pair needs no third id. Run
- * envelopes, receipts, and commit trailers cite decisions by this string.
+ * A decision is cited elsewhere (run envelopes, receipts, commit trailers) by
+ * the string `<interviewId>/<key>`. Both halves are already unique on the
+ * active path, so the pair needs no third id.
  */
-export type DecisionRef = string;
-
-export function decisionRef(interviewId: string, key: string): DecisionRef {
-	return `${interviewId}/${key}`;
-}
-
 /**
  * One complete, branch-anchored snapshot of a settled decision set. An
  * `interview` origin is an operator `ask_user` round; an `agent` origin is a
