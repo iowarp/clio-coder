@@ -451,6 +451,10 @@ export function createTurnRuntime(deps: TurnRuntimeDeps): TurnRuntime {
 		}
 		let getCurrentAgentSignal: () => AbortSignal | undefined = () => undefined;
 		const gatewaySessionId = target.runtime.id === "litellm" ? deps.sessionId?.() : undefined;
+		// message_start can follow response headers. Keep each invocation's
+		// monotonic anchor before that wait, including custom stream delegates.
+		let apiCallStartedAt: number | null = null;
+		let apiCallFirstDeltaAt: number | null = null;
 		const handle = deps.createAgent({
 			initialState: {
 				systemPrompt: fallbackIdentityPrompt(),
@@ -461,6 +465,10 @@ export function createTurnRuntime(deps: TurnRuntimeDeps): TurnRuntime {
 			},
 			maxRetryDelayMs: deps.retrySettings().maxDelayMs,
 			...(gatewaySessionId ? { sessionId: gatewaySessionId } : {}),
+			onStreamInvocation: () => {
+				apiCallStartedAt = performance.now();
+				apiCallFirstDeltaAt = null;
+			},
 			onPayload: async (payload, currentModel) => {
 				const thinkingPatched = patchProviderThinkingPayload(payload, currentModel, state.currentThinkingLevel);
 				const basePayload = thinkingPatched ?? payload;
@@ -580,10 +588,6 @@ export function createTurnRuntime(deps: TurnRuntimeDeps): TurnRuntime {
 
 		let streamStartedAt: number | null = null;
 		let firstAssistantDeltaAt: number | null = null;
-		// Per-API-call timing (T3.2): one assistant message per provider call,
-		// bounded by message_start/message_end; the first delta marks TTFT.
-		let apiCallStartedAt: number | null = null;
-		let apiCallFirstDeltaAt: number | null = null;
 		// First call of the run is the one whose verdict says whether the
 		// backend reused the session prefix; later calls in a tool loop are
 		// trivially warm.
@@ -732,17 +736,15 @@ export function createTurnRuntime(deps: TurnRuntimeDeps): TurnRuntime {
 			// mediator, a dropped frame) therefore stops suspending the watchdog
 			// at the turn that issued it instead of for the rest of the run.
 			if (publicEvent?.type === "turn_end") toolsInFlight = 0;
-			if (publicEvent?.type === "message_start" && publicEvent.message?.role === "assistant") {
-				apiCallStartedAt = eventClock;
-				apiCallFirstDeltaAt = null;
-			}
 			if (publicEvent?.type === "message_update") {
 				const assistantEvent = publicEvent.assistantMessageEvent as { type?: string; delta?: unknown };
 				const hasDelta =
-					assistantEvent.type === "text_delta" ||
-					assistantEvent.type === "thinking_delta" ||
 					assistantEvent.type === "toolcall_start" ||
-					assistantEvent.type === "toolcall_delta";
+					((assistantEvent.type === "text_delta" ||
+						assistantEvent.type === "thinking_delta" ||
+						assistantEvent.type === "toolcall_delta") &&
+						typeof assistantEvent.delta === "string" &&
+						assistantEvent.delta.length > 0);
 				if (hasDelta && firstAssistantDeltaAt === null) firstAssistantDeltaAt = eventClock;
 				if (hasDelta && apiCallFirstDeltaAt === null) apiCallFirstDeltaAt = eventClock;
 			}

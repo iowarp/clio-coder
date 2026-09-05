@@ -201,6 +201,8 @@ Compaction rewrites history, so the next turn on a local single-slot backend is 
 
 Timing and cache behavior are persisted per API call, so a finished session can be inspected from its stored artifacts alone. Each assistant entry in the session ledger (`current.jsonl`, under the directory reported by `clio-coder paths`) carries `timing { ttftMs, apiMs }` and `promptCache { input, cacheRead, cacheWrite, backendVerdict }`, and the run's first persisted call also carries `expectedColdReasons`. Cache verdicts are `hot`, `partial`, `cold`, or `small`.
 
+Native session timing uses a monotonic clock from each stream invocation, before the provider's response-header wait, to its first observed output (`ttftMs`) and completion (`apiMs`). A tool-loop continuation starts a new clock; no output leaves TTFT null, and a genuine rounded zero remains zero. Historical values are not rewritten and may omit the pre-header wait. Eval prefers these durable native call records. Its stdout-only fallback starts at the provider's `message_start` event, which can arrive after headers, so fallback spans are not complete request latency and must not be compared as equivalent measurements.
+
 For aggregate cost and token facts across sessions, use `clio-coder usage report --days <n>`. Inside the TUI, `/cost` shows session totals and `/context` opens the context-window ledger overlay.
 
 ## Self-documentation retrieval
