@@ -109,6 +109,9 @@ function boolean(value: unknown): boolean | undefined {
  */
 export function capabilitiesFromLiteLLMModelInfo(info: Record<string, unknown>): Partial<CapabilityFlags> {
 	const caps: Partial<CapabilityFlags> = {};
+	// This is a deployment declaration, never inferred from a URL, port or alias.
+	if (info.runtime === "lm-studio") caps.thinkingControlRuntime = "lmstudio";
+	else if (info.runtime === "llama.cpp") caps.thinkingControlRuntime = "llamacpp";
 	const contextWindow = positiveInteger(info.max_input_tokens) ?? positiveInteger(info.max_tokens);
 	if (contextWindow !== undefined) caps.contextWindow = contextWindow;
 	const maxTokens = positiveInteger(info.max_output_tokens);
@@ -171,6 +174,10 @@ export function aggregateLiteLLMCapabilities(rows: ReadonlyArray<Partial<Capabil
 		const values = rows.map((row) => row[key]);
 		if (values.some((value) => value === false)) aggregate[key] = false;
 		else if (values.every((value) => value === true)) aggregate[key] = true;
+	}
+	const controlRuntime = rows[0]?.thinkingControlRuntime;
+	if (controlRuntime !== undefined && rows.every((row) => row.thinkingControlRuntime === controlRuntime)) {
+		aggregate.thinkingControlRuntime = controlRuntime;
 	}
 	const structuredOutputs = rows.map((row) => row.structuredOutputs);
 	if (structuredOutputs.some((value) => value === "none")) aggregate.structuredOutputs = "none";

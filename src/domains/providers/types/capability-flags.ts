@@ -20,6 +20,8 @@ export interface CapabilityFlags {
 	toolCallFormat?: ToolCallFormat;
 	reasoning: boolean;
 	thinkingFormat?: ThinkingFormat;
+	/** Probe-declared upstream control dialect only; never changes gateway routing or residency. */
+	thinkingControlRuntime?: "lmstudio" | "llamacpp";
 	structuredOutputs?: StructuredOutputMode;
 	vision: boolean;
 	audio: boolean;

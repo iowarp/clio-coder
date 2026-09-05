@@ -131,6 +131,7 @@ interface ClioRuntimeMetadata {
 		lifecycle?: "user-managed" | "clio-coder-managed";
 		gateway?: boolean;
 		family?: string;
+		thinkingControlRuntime?: CapabilityFlags["thinkingControlRuntime"];
 		quirks?: LocalModelQuirks;
 	};
 	/** Released in-memory metadata name accepted at plugin/runtime read boundaries. */
@@ -140,6 +141,7 @@ interface ClioRuntimeMetadata {
 		lifecycle?: "user-managed" | "clio-coder-managed";
 		gateway?: boolean;
 		family?: string;
+		thinkingControlRuntime?: CapabilityFlags["thinkingControlRuntime"];
 		quirks?: LocalModelQuirks;
 	};
 	compat?: {
@@ -381,9 +383,10 @@ export function effectiveThinkingLevel(
 	const fallback = available[0] ?? "off";
 	if (!configured) return fallback;
 	if (available.includes(configured)) return configured;
-	// Catalog effort maps intentionally stop at xhigh; `max` must clamp to that
-	// supported ceiling instead of falling through to the generic low fallback.
-	if (configured === "max" && available.includes("xhigh")) return "xhigh";
+	// A family with xhigh but no high keeps the released high alias at its
+	// supported ceiling; neither high nor max may fall through to low.
+	if ((configured === "max" || (configured === "high" && !available.includes("high"))) && available.includes("xhigh"))
+		return "xhigh";
 	if ((configured === "high" || configured === "xhigh" || configured === "max") && available.includes("high")) {
 		return "high";
 	}
@@ -553,7 +556,7 @@ function resolveThinkingCapability(
  */
 const REASONING_EFFORT_ONLY_RUNTIMES: ReadonlySet<string> = new Set(["lmstudio"]);
 
-/** `none` is LM Studio's documented off value; on-off models have no finer dial than `low`. */
+/** `none` is the observed LM Studio HTTP off value; on-off models have no finer dial than `low`. */
 function onOffReasoningEffort(thinkingActive: boolean): string {
 	return thinkingActive ? "low" : "none";
 }
@@ -647,7 +650,12 @@ export function resolveModelRuntimeCapabilities(
 		family,
 		capabilities: input.capabilities,
 		thinking,
-		request: resolveRequestCapability(thinking, parser, input.runtimeId, quirks),
+		request: resolveRequestCapability(
+			thinking,
+			parser,
+			input.runtimeId === "litellm" ? (input.capabilities.thinkingControlRuntime ?? input.runtimeId) : input.runtimeId,
+			quirks,
+		),
 		response: {
 			parser,
 			stripTokenizerSentinels: true,
@@ -735,6 +743,7 @@ function thinkingFormatFromModelApi(api: Api): CapabilityFlags["thinkingFormat"]
 
 function capabilitiesFromModel(model: Model<Api> & ClioRuntimeMetadata): CapabilityFlags {
 	const format = model.compat?.thinkingFormat ?? thinkingFormatFromModelApi(model.api);
+	const controlRuntime = (model.clioCoder ?? model.clio)?.thinkingControlRuntime;
 	const caps: CapabilityFlags = {
 		chat: true,
 		tools: true,
@@ -746,6 +755,7 @@ function capabilitiesFromModel(model: Model<Api> & ClioRuntimeMetadata): Capabil
 		fim: false,
 		contextWindow: model.contextWindow,
 		maxTokens: model.maxTokens,
+		...(controlRuntime ? { thinkingControlRuntime: controlRuntime } : {}),
 	};
 	if (
 		format === "qwen-chat-template" ||
