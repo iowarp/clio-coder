@@ -137,6 +137,8 @@ export interface EvidenceBuildResult {
 	overview: EvidenceOverview;
 	findings: EvidenceFinding[];
 	trustStatus: EvidenceTrustStatusFile;
+	/** Total claims without matching commands, from integrity-verified receipts only. */
+	ungroundedClaims: number;
 }
 
 export interface EvidenceInspectable {

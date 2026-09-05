@@ -8,6 +8,7 @@ import {
 } from "../core/response-model-id.js";
 import { clioDataDir, clioStateDir } from "../core/xdg.js";
 import { loadMemoryRecordsSync, type MemoryRecord } from "../domains/memory/index.js";
+import { summarizeEvidenceIndex } from "../domains/observability/accountability.js";
 import { summarizeFailedCompactionUsage } from "../domains/observability/compaction-usage.js";
 import { readEvidenceIndex } from "../domains/observability/evidence-index.js";
 import { type OutOfTurnUsageRow, readOutOfTurnUsageRows } from "../domains/observability/out-of-turn-usage.js";
@@ -358,6 +359,7 @@ export async function runUsageCommand(argv: ReadonlyArray<string>): Promise<numb
 		return decision === "blocked" || decision === "denied";
 	});
 	const evidenceRows = readEvidenceIndex(stateDir).filter((row) => inWindow(row.generatedAt, windowStart, now));
+	const accountability = summarizeEvidenceIndex(evidenceRows);
 	let memoryRecords: MemoryRecord[] = [];
 	try {
 		memoryRecords = loadMemoryRecordsSync(clioDataDir());
@@ -559,6 +561,8 @@ export async function runUsageCommand(argv: ReadonlyArray<string>): Promise<numb
 		else emit({ kind: "fact", fact: "session-store-missing", path: presence.sessionsPath });
 		if (presence.receiptsPresent) emit({ kind: "fact", fact: "dispatch-runs", value: receipts.length });
 		else emit({ kind: "fact", fact: "receipt-store-missing", path: presence.receiptsPath });
+		emit({ kind: "fact", fact: "unverified-successes", value: accountability.unverifiedSuccesses });
+		emit({ kind: "fact", fact: "ungrounded-claims", value: accountability.ungroundedClaims });
 		emit({ kind: "fact", fact: "audit-tool-calls", value: auditToolCalls.length, blocked: auditBlocked.length });
 		if (usageMeasurable) {
 			// The origin split is emitted only when something out of turn was
@@ -806,6 +810,8 @@ export async function runUsageCommand(argv: ReadonlyArray<string>): Promise<numb
 			),
 		);
 	}
+	out(`  unverified successes: ${accountability.unverifiedSuccesses}`);
+	out(`  ungrounded claims: ${accountability.ungroundedClaims}`);
 	if (tagCounts.size > 0) {
 		out("");
 		out("  failure tags (from evidence index)");

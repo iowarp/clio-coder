@@ -130,6 +130,11 @@ function evidenceIndexRow(
 		tags: [...tags],
 		firstPassSuccess,
 		findingCount: result.findings.length,
+		succeeded,
+		completionEvidenceWarning: result.findings.some(
+			(finding) => finding.tag === "completion-evidence" && finding.severity === "warn",
+		),
+		ungroundedClaims: result.ungroundedClaims,
 		generatedAt: new Date().toISOString(),
 	};
 }

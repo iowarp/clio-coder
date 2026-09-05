@@ -21,6 +21,7 @@ interface PlaneExpectation {
 
 /** One row per registered tool: plane, action class, and concurrency rule. */
 export const TOOL_PLANES: Readonly<Record<BuiltinToolName, PlaneExpectation>> = {
+	[ToolNames.Evidence]: { plane: "observe", actionClass: "read", executionMode: "sequential" },
 	[ToolNames.Read]: { plane: "observe", actionClass: "read", executionMode: "parallel" },
 	[ToolNames.Grep]: { plane: "observe", actionClass: "read", executionMode: "parallel" },
 	[ToolNames.Find]: { plane: "observe", actionClass: "read", executionMode: "parallel" },

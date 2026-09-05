@@ -45,6 +45,13 @@ const exactMutationPolicy = {
 // declares its posture explicitly.
 const TOOL_METADATA: Readonly<Record<string, ToolMetadata>> = {
 	// OBSERVE: read-class, parallel, envelope + shared turn budget.
+	[ToolNames.Evidence]: {
+		objective: "Inspect canonical evidence, trust status, gate decisions, and findings.",
+		uiLabel: "Evidence",
+		retrySafety: "idempotent",
+		resultSizePolicy: summaryPolicy("Inspect one run with evidence(mode=run, runId=<id>) to narrow the output."),
+		costLatency: "local_medium",
+	},
 	[ToolNames.Read]: {
 		objective: "Read exact UTF-8 file content with line and byte bounds.",
 		uiLabel: "Read",

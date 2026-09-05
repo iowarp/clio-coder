@@ -13,6 +13,7 @@ import { codeNavToolSurface } from "./codewiki/code-nav-surface.js";
 import { contextToolSurface } from "./context/surface.js";
 import { credentialPresentTool } from "./credential-present.js";
 import { editTool } from "./edit.js";
+import { evidenceTool } from "./evidence.js";
 import { findTool } from "./find.js";
 import { grepTool } from "./grep.js";
 import { lazyTool } from "./lazy-tool.js";
@@ -66,6 +67,7 @@ export interface CoreToolRegistration {
 
 export function registerCoreTools(registry: ToolRegistry, deps: CoreToolBootstrapDeps = {}): CoreToolRegistration {
 	const includeNetworkTools = !networkToolsDisabled();
+	registry.register(builtin(evidenceTool, { path: "src/tools/evidence.ts", scope: "core" }));
 	registry.register({
 		...builtin(readTool, { path: "src/tools/read.ts", scope: "core" }),
 	});

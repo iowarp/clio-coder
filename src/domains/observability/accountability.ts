@@ -27,6 +27,8 @@ export interface AccountabilitySummary {
 	totalRuns: number;
 	firstPassRuns: number;
 	firstPassRate: number;
+	unverifiedSuccesses: number;
+	ungroundedClaims: number;
 	failureCauses: ReadonlyArray<{ tag: EvidenceTag; count: number }>;
 }
 
@@ -38,9 +40,19 @@ export interface AccountabilitySummary {
 export function summarizeEvidenceIndex(rows: ReadonlyArray<EvidenceIndexRow>): AccountabilitySummary {
 	const totalRuns = rows.length;
 	let firstPassRuns = 0;
+	let unverifiedSuccesses = 0;
+	let ungroundedClaims = 0;
 	const counts = new Map<EvidenceTag, number>();
 	for (const row of rows) {
 		if (row.firstPassSuccess) firstPassRuns += 1;
+		if (
+			row.succeeded === true &&
+			(row.tags.includes("no-validation") ||
+				row.tags.includes("proxy-validation") ||
+				row.completionEvidenceWarning === true)
+		)
+			unverifiedSuccesses += 1;
+		ungroundedClaims += row.ungroundedClaims ?? 0;
 		for (const tag of row.tags) {
 			if (!FAILURE_CAUSE_TAGS.has(tag)) continue;
 			counts.set(tag, (counts.get(tag) ?? 0) + 1);
@@ -53,6 +65,8 @@ export function summarizeEvidenceIndex(rows: ReadonlyArray<EvidenceIndexRow>): A
 		totalRuns,
 		firstPassRuns,
 		firstPassRate: totalRuns === 0 ? 0 : firstPassRuns / totalRuns,
+		unverifiedSuccesses,
+		ungroundedClaims,
 		failureCauses,
 	};
 }
@@ -60,7 +74,7 @@ export function summarizeEvidenceIndex(rows: ReadonlyArray<EvidenceIndexRow>): A
 /**
  * Read the sidecar index from the state dir and summarize it. Tolerant by way of
  * `readEvidenceIndex`: a missing or corrupt index yields the empty summary
- * (`{ totalRuns: 0, firstPassRuns: 0, firstPassRate: 0, failureCauses: [] }`).
+ * with zero counters and an empty failure-cause histogram.
  */
 export function readAccountabilitySummary(stateDir: string): AccountabilitySummary {
 	return summarizeEvidenceIndex(readEvidenceIndex(stateDir));

@@ -4,7 +4,7 @@ name: Verifier
 description: Runs test, lint, build, review, and release gates. Reports each gate independently.
 tools:
   required: [verify]
-  optional: [read, grep, find, ls, git, code_nav, ledger]
+  optional: [evidence, read, grep, find, ls, git, code_nav, ledger]
 skills: []
 audience: base
 category: quality
