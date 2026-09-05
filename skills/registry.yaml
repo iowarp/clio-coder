@@ -87,7 +87,7 @@ skills:
   - name: archify
     path: planning/archify
     version: 0.1.0
-    sha256: 6233a13f47261e2b8f203ae4d61ba6fa579147f0436c46911eb6199166d0ead7
+    sha256: d9e891eb5f3c27678de14165a0eb35d1eb2289be480e55009f9a57bcfe55be2d
   - name: architecture
     path: planning/architecture
     version: 0.4.0

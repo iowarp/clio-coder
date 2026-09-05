@@ -80,7 +80,11 @@ export interface ArchitectureSeed {
 
 export interface BuildArchitectureSeedOptions {
 	title: string;
-	/** Included only when it is a GitHub repository URL at a full 40-hex revision. */
+	/**
+	 * Recorded as `meta.repository` only when it is a GitHub repository URL at
+	 * a full 40-hex revision. Components carry `sources` only in that case,
+	 * since archify accepts source citations only against a pinned revision.
+	 */
 	repository?: { url: string; revision: string } | undefined;
 }
 
@@ -468,8 +472,17 @@ export function buildArchitectureSeed(codewiki: Codewiki, options: BuildArchitec
 	for (const area of areas) for (const file of area.files) areaByFile.set(file.id, area.key);
 	const idByArea = new Map(areas.map((area) => [area.key, areaId(area.key)]));
 
+	// Archify's repository-evidence contract: `sources` are only legal when
+	// `meta.repository` pins the revision they were read at. Without a GitHub
+	// origin at a full sha the seed cites nothing rather than citing what the
+	// validator would reject.
+	const repository = options.repository;
+	const pinned =
+		repository && GITHUB_REPOSITORY_URL.test(repository.url) && FULL_REVISION.test(repository.revision)
+			? { url: repository.url, revision: repository.revision.toLowerCase() }
+			: undefined;
 	const nodes: Unplaced[] = areas.map((area) => {
-		const sources = sourcesFor(area, lines);
+		const sources = pinned ? sourcesFor(area, lines) : [];
 		return {
 			id: idByArea.get(area.key) as string,
 			type: componentTypeFor(area),
@@ -535,13 +548,10 @@ export function buildArchitectureSeed(codewiki: Codewiki, options: BuildArchitec
 		});
 	const { layout, components, connections } = placeAndRoute(nodes, edges);
 
-	const repository = options.repository;
 	const meta: ArchitectureSeed["meta"] = {
 		title: options.title,
 		quality_profile: "standard",
-		...(repository && GITHUB_REPOSITORY_URL.test(repository.url) && FULL_REVISION.test(repository.revision)
-			? { repository: { url: repository.url, revision: repository.revision.toLowerCase() } }
-			: {}),
+		...(pinned ? { repository: pinned } : {}),
 	};
 	return {
 		schema_version: 1,

@@ -99,8 +99,14 @@ export async function runContextMapCommand(args: string[]): Promise<number> {
 	process.stdout.write(
 		[
 			`clio-coder context map wrote ${target}`,
-			`  ${payload.components} components, ${payload.connections} connections${payload.repository ? `, revision ${payload.repository.revision.slice(0, 12)}` : ", no GitHub revision recorded"}`,
-			"  next: validate and deliver it with the archify skill, passing --repo-root .",
+			`  ${payload.components} components, ${payload.connections} connections${
+				payload.repository
+					? `, sources pinned at ${payload.repository.revision.slice(0, 12)}`
+					: "; no GitHub origin at a full revision, so no source citations"
+			}`,
+			payload.repository
+				? "  next: validate and deliver it with the archify skill, passing --repo-root ."
+				: "  next: validate and deliver it with the archify skill (without --repo-root)",
 			"",
 		].join("\n"),
 	);
