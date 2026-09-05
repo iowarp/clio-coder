@@ -11,7 +11,7 @@ The active project `.clio-coder/skills/` tree and the resolved user `<configDir>
 
 Draft a proposed skill outside these active trees, for example in `draft-skills/`. The operator installs or updates it through `clio-coder skills install`, `skills update`, `skills sync`, `library add --yes`, the Skills Hub, `/skill <name>`, or an explicitly accepted marketplace offer. Even `full-auto` must wait for that offer's bound operator answer; a task match alone no longer installs a skill. Model shell calls to recognizable Clio skill installation, update and sync commands are refused. Confirmed `library add --yes` commands are also reserved for operators, including additions of other resource kinds that may install skill dependencies. An unconfirmed `library add` only prints a plan and remains available, as do inventory, search, inspection and validation commands.
 
-This is a tool-admission boundary, not an operating-system sandbox. Shell inspection covers literal paths and recognized command forms; it cannot prove the effects of arbitrary scripts, dynamically constructed paths, aliases, or concurrent filesystem changes. Keep shell execution supervised when stronger confinement is required.
+This is a tool-admission boundary, not an operating-system sandbox. Shell inspection covers literal paths and recognized command forms, respecting comments, quoted words and redirection operands when identifying Clio commands. It cannot prove the effects of arbitrary scripts, dynamically constructed paths, aliases, or concurrent filesystem changes. Keep shell execution supervised when stronger confinement is required.
 
 ## Where marketplace rows come from
 

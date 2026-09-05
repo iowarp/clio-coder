@@ -1,4 +1,5 @@
-import { strictEqual } from "node:assert/strict";
+import { deepStrictEqual, strictEqual } from "node:assert/strict";
+import { spawnSync } from "node:child_process";
 import { existsSync, mkdirSync, mkdtempSync, readFileSync, rmSync, symlinkSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
@@ -8,6 +9,7 @@ import { clioConfigDir } from "../../src/core/xdg.js";
 import { mapAutonomy } from "../../src/domains/safety/autonomy.js";
 import { createSafetyPolicyEngine, type SafetyPolicyEngine } from "../../src/domains/safety/policy-engine.js";
 import { loadProjectSafetyPolicy } from "../../src/domains/safety/project-policy.js";
+import { tokenizeShellLike } from "../../src/domains/safety/protected-artifacts.js";
 import { createWorkerSafety } from "../../src/engine/worker-tools.js";
 import { createRegistry } from "../../src/tools/registry.js";
 import { writeTool } from "../../src/tools/write.js";
@@ -273,6 +275,109 @@ describe("safety gate boundary", () => {
 			"npm exec -- clio-coder library search example",
 		])
 			strictEqual(policy.evaluate({ tool: ToolNames.Bash, args: { command } }).kind, "allow", command);
+	});
+
+	function shellArgv(command: string): string[] {
+		// Capture literal Bash argv on a separate descriptor even when the tested
+		// command redirects stdout. This function never runs the actual CLI.
+		const result = spawnSync(
+			"bash",
+			["--noprofile", "--norc", "-c", `clio-coder() { printf '%s\\0' "$@" >&3; }\n${command}`],
+			{
+				cwd: scratch,
+				env: { PATH: process.env.PATH, TMPDIR: tmpdir() },
+				stdio: ["ignore", "pipe", "pipe", "pipe"],
+			},
+		);
+		strictEqual(result.status, 0, result.stderr?.toString());
+		return result.output[3]?.toString().split("\0").slice(0, -1) ?? [];
+	}
+
+	it("ignores commented help and version text without losing later literal skill mutations", () => {
+		const main = engine();
+		const worker = createWorkerSafety({ cwd: scratch });
+		for (const [command, argv] of [
+			["clio-coder skills sync --force # --help", ["skills", "sync", "--force"]],
+			["clio-coder skills sync --force # -v", ["skills", "sync", "--force"]],
+			["clio-coder library add skill:example --yes # --help", ["library", "add", "skill:example", "--yes"]],
+			["clio-coder library add skill:example --yes # --version", ["library", "add", "skill:example", "--yes"]],
+			["# --help\nclio-coder skills sync --force # -v", ["skills", "sync", "--force"]],
+			["clio-coder skills --help # comment\nclio-coder skills sync", ["skills", "--help", "skills", "sync"]],
+			[
+				"clio-coder library add 'skill:example#suffix' --yes # --help",
+				["library", "add", "skill:example#suffix", "--yes"],
+			],
+		] as const) {
+			deepStrictEqual(shellArgv(command), argv, command);
+			for (const policy of [main, worker]) {
+				const call = { tool: ToolNames.Bash, args: { command } };
+				const decision = policy.evaluate(call);
+				strictEqual(decision.kind, "block", command);
+				strictEqual(
+					"reasonCode" in decision ? decision.reasonCode : decision.policy?.reasonCode,
+					"skill-authority",
+					command,
+				);
+				strictEqual(policy.evaluate(call, "confirmed").kind, "block", command);
+			}
+		}
+	});
+
+	it("reads help from CLI words rather than redirections or another shell command", () => {
+		const main = engine();
+		const worker = createWorkerSafety({ cwd: scratch });
+		for (const [command, argv] of [
+			["clio-coder skills sync --force > --help", ["skills", "sync", "--force"]],
+			["clio-coder library > --version add skill:example --yes", ["library", "add", "skill:example", "--yes"]],
+			["2> --help clio-coder skills sync --force", ["skills", "sync", "--force"]],
+			["clio-coder skills sy\\\nnc --force", ["skills", "sync", "--force"]],
+			["clio-coder skills sync & clio-coder --help; wait", null],
+		] as const) {
+			const actual = shellArgv(command);
+			if (argv !== null) deepStrictEqual(actual, argv, command);
+			else strictEqual(actual.includes("sync"), true, command);
+			for (const policy of [main, worker]) {
+				const call = { tool: ToolNames.Bash, args: { command } };
+				const decision = policy.evaluate(call);
+				strictEqual(decision.kind, "block", command);
+				strictEqual(
+					"reasonCode" in decision ? decision.reasonCode : decision.policy?.reasonCode,
+					"skill-authority",
+					command,
+				);
+				strictEqual(policy.evaluate(call, "confirmed").kind, "block", command);
+			}
+		}
+	});
+
+	it("preserves real help arguments following quoted, escaped and embedded hash words", () => {
+		const policy = engine();
+		for (const command of [
+			"clio-coder skills sync '#' --help",
+			"clio-coder skills sync \\# --help",
+			"clio-coder skills sync ''#suffix --help",
+			"clio-coder skills sync x#suffix --help",
+			"clio-coder skills sync '|' --help",
+			"clio-coder skills sync ';' --help",
+			"clio-coder skills sync '>' --help",
+			"clio-coder skills sync --help # harmless comment",
+		]) {
+			strictEqual(shellArgv(command).includes("--help"), true, command);
+			strictEqual(policy.evaluate({ tool: ToolNames.Bash, args: { command } }).kind, "allow", command);
+		}
+		const command = 'clio-coder "" \'\' "\\#" "--he\\lp" \\# word#suffix # dropped\n';
+		deepStrictEqual(tokenizeShellLike(command), ["clio-coder", ...shellArgv(command), ";"]);
+	});
+
+	it("keeps compound redirects to active skills blocked while allowing descriptor duplication on reads", () => {
+		for (const policy of [engine(), createWorkerSafety({ cwd: scratch })]) {
+			for (const operator of ["&>", "&>>", ">|", "<>", ">&"]) {
+				const command = `printf changed ${operator} .clio-coder/skills/example/SKILL.md`;
+				strictEqual(policy.evaluate({ tool: ToolNames.Bash, args: { command } }).kind, "block", command);
+			}
+			const command = "cd .clio-coder/skills && cat example/SKILL.md 2>&1";
+			strictEqual(policy.evaluate({ tool: ToolNames.Bash, args: { command } }).kind, "allow", command);
+		}
 	});
 
 	it("keeps destructive transitions blocked while allowing explicit one-shot rails once", () => {
