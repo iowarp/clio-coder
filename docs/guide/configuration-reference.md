@@ -224,7 +224,7 @@ Read from the process environment at boot unless the row says otherwise.
 | `CLIO_CODER_REDUCE_MOTION` | `unset (disabled)` | Exactly `1` makes smooth-streaming `auto` use the immediate coalescer; explicit `on` is unaffected. |  |
 | `CLIO_CODER_RENDER_TRACE` | `unset (disabled)` | File path for the versioned JSONL render-pipeline trace (timing only, no conversation text), truncated on open; off when unset or empty. |  |
 | `CLIO_CODER_REQUIRE_HOME_PREFIX` | `unset (disabled)` | Exactly `1` aborts startup when any resolved Clio directory lies outside `CLIO_CODER_HOME`; a test-harness guardrail that does nothing when `CLIO_CODER_HOME` is unset. |  |
-| `CLIO_CODER_RIGOR` | `repo-derived` | `high` or `normal` (case-insensitive) overrides the finish-contract evidence bar for the orchestrator and dispatched workers; any other value means no override. | env > workspace validation contract file (`.clio-coder/validation.yaml`, `validation.yaml`, `VALIDATION.md` raise it to `high`) > `normal`; no settings key |
+| `CLIO_CODER_RIGOR` | `repo-derived` | `high` or `normal` (case-insensitive) overrides the finish-contract evidence bar for the orchestrator and dispatched workers; any other value means no override. | env > a parsed workspace validation contract (`.clio-coder/validation.yaml` or `validation.yaml`, version 1) raises it to `high`; an invalid contract or a Markdown-only `VALIDATION.md` leaves `normal` > `normal`; no settings key |
 | `CLIO_CODER_RUN_OVERRIDES` | `unset` | JSON object (`maxContextTokens`, `kvCacheMode`, `sampling`) that `clio-coder run` and print modes write via `withRunOverrides` for the run's scope; workers inherit it and malformed input is dropped. |  |
 | `CLIO_CODER_SCREEN_READER` | `unset (disabled)` | Exactly `1` makes smooth-streaming `auto` use the immediate coalescer so a screen reader gets the low-motion update behavior; explicit `on` is unaffected. |  |
 | `CLIO_CODER_SHUTDOWN_HOOK_MS` | `500` | Positive integer milliseconds each shutdown and domain `stop()` hook may run before the coordinator moves on; non-positive or unparsable values use the default. |  |
@@ -885,7 +885,7 @@ Keys read from files under `.clio-coder/` in the repository.
 
 | Key | Controls | Precedence |
 |---|---|---|
-| `(presence)` | The file's presence (also `validation.yml`, root `validation.yaml`, or `VALIDATION.md`) raises the repo-derived rigor default from `normal` to `high`; its content is not read. | `CLIO_CODER_RIGOR` > presence of a validation contract > `normal` |
+| `version`, `task`, `runtime`, `artifacts`, `validators`, `notes` | The version-1 scientific validation contract (also `validation.yml`, root `validation.yaml`, or `validation.yml`). A contract that parses raises the repo-derived rigor default from `normal` to `high`; one that does not parse is diagnosed by `clio-coder doctor` and at interactive startup and leaves `normal`. `VALIDATION.md` is advisory prose and never raises rigor. Schema in [Scientific Validation](../process/scientific-validation.md). | `CLIO_CODER_RIGOR` > parsed validation contract > `normal` |
 
 ### `.clio-coder/verifiers.yaml`
 

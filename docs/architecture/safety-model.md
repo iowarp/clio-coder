@@ -373,14 +373,7 @@ It is critical to distinguish these two control axes:
 The effective rigor level for a session or dispatch run is resolved at boot time using the following prioritization:
 
 1. **Explicit Override**: Checked via the `CLIO_CODER_RIGOR` environment variable. It is trimmed and parsed case-insensitively. A value of `"high"` or `"normal"` overrides any other setting.
-2. **Repository-Derived Default**: If no override is present, Clio checks the workspace root for the presence of any of the following validation contract files:
-   - `.clio-coder/validation.yaml`
-   - `.clio-coder/validation.yml`
-   - `validation.yaml`
-   - `validation.yml`
-   - `VALIDATION.md`
-   
-   If any of these files are present, the default rigor level is raised to `high`. Otherwise, the default is `normal`.
+2. **Repository-Derived Default**: If no override is present, Clio loads the first of `.clio-coder/validation.yaml`, `.clio-coder/validation.yml`, `validation.yaml`, or `validation.yml` at the workspace root through the strict version-1 loader in `src/domains/safety/validation-contract.ts`. A contract that parses raises the default to `high`. A contract that does not parse leaves the default at `normal` and carries the fault as a diagnostic that `clio-coder doctor` and the interactive startup notices print. `VALIDATION.md` is advisory prose: it is recognised as present but never parsed and never raises rigor. `rigorResolution()` returns the rigor with its source (`override`, `validation-contract`, `invalid-contract`, `markdown-advisory`, or `none`) and the diagnostic; `resolveRigor()` is the thin wrapper that returns the rigor alone. See [Scientific Validation](../process/scientific-validation.md) for the schema.
 
 ---
 
