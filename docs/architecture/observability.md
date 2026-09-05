@@ -172,7 +172,7 @@ Clio resolves directories under platform-specific XDG defaults (on Linux, these 
 
 | Category | Description | Backing Path |
 | --- | --- | --- |
-| **Accountability** | Rolling first-pass-success rate and failure-cause histogram. | `<stateDir>/evidence-index.json` |
+| **Accountability** | Rolling first-pass-success rate, unverified successes, ungrounded claims, and failure-cause histogram. | `<stateDir>/evidence-index.json` |
 | **Evidence bundles** | Deterministic run or session overviews, findings, totals, and linked files. | `<dataDir>/evidence/<evidenceId>/` |
 | **Receipts** | Durable run receipts verified by SHA-256 integrity digests. | `<stateDir>/receipts/<runId>.json` |
 | **Dispatch outputs** | Logs and ledger records detailing worker execution. | `<stateDir>/runs.json` and `<stateDir>/receipts/<runId>.json` |
@@ -200,6 +200,12 @@ A run is marked as a first-pass success when:
 
 The TUI displays this rate as:
 `first-pass success: <succeeded-attempts>/<total-attempts> (<pct>%)`
+
+### Unverified Successes and Ungrounded Claims
+Two counters sit beside the rate in `/view`, `clio-coder usage`, and the observability contract. An unverified success is a run whose terminal outcome succeeded while its bundle carries the `no-validation` or `proxy-validation` tag or a warning-level `completion-evidence` finding. Ungrounded claims are the sum, over integrity-verified receipts, of validation claims with no matching command (`validationGrounding.claimed` minus `grounded`). Both fold only the fields an index row holds: a historical row without `succeeded`, `completionEvidenceWarning`, or `ungroundedClaims` contributes zero.
+
+The TUI displays them as:
+`unverified successes: <count>` and `ungrounded claims: <count>`
 
 ### Failure-Cause Histogram
 The TUI lists the top failure causes sorted by frequency (descending), then by tag name (ascending). The histogram filters out provenance and quality tags (such as `audit-linked`, `session-linked`, and `no-validation`) and displays only real failure causes:

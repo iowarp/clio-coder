@@ -93,8 +93,8 @@ attached tool-schema bytes. <code>mainPromptCacheIdentity</code> in
 <p>The operator-editable layer reaches a worker through <code>additionalFragments</code>, the same channel <code>compile()</code> uses for the session, so nothing splices into an existing section. The operator profile renders unconditionally, capped, the same as it does for the session: it governs how the worker should do the task (validation preference, commit-message style, local-only paths), not only how the orchestrator talks to the operator. Project rules are scoped to the worker&#39;s working context rather than shipped wholesale. That context is <code>writeRoots</code>, when the caller sets them, plus path-like tokens recalled from the task and briefing text, since the model-facing dispatch tool has no structured path field. A missed path token means a rule can go unseen; it can never fabricate one, because <code>selectActiveRules</code> still requires a real glob match.</p>
 <p>The compiler runs after target capability and tool-profile admission. Its canonical tool names are the same names transported in <code>WorkerSpec.allowedTools</code> and attached as schemas; routine non-Scout work removes <code>code_nav</code>, narrow profiles remove their excluded schemas and guidance, tool-incapable targets get an explicit no-tools contract, and Claude SDK aliases are filtered from the same canonical set. ACP&#39;s external inventory is unknown, so ACP bounded-role admission continues to validate the unchanged raw persona rather than fabricating a complete native schema list.</p>
 <p>Project context, memory, bounded dispatch briefing, pipeline input, the assigned task, and the per-run safety-posture reminder remain dynamic user messages. A briefing is a separately delimited message labeled as untrusted task context/data; it is never concatenated into the task or stable system prompt. Dynamic ordering is project, safety, memory, briefing, then pipeline input, with pipeline input last. These messages do not affect the stable composition hash. Persona, effective autonomy, target tool capability, or final toolkit changes do affect it.</p>
-<h2>Seven planes, twenty-one tools</h2>
-<p>The canonical builtin catalog contains 21 tools organized in seven planes. A
+<h2>Seven planes, twenty-four tools</h2>
+<p>The canonical builtin catalog contains 24 tools organized in seven planes. A
 particular session or worker receives the subset whose dependencies and policy
 allow it to register. Each plane is one policy unit: its tools share an action
 class, a size posture, a details schema, and a concurrency rule.
@@ -116,6 +116,12 @@ engine assumes.</p>
 <td><code>read</code>, <code>grep</code>, <code>find</code>, <code>ls</code>, <code>code_nav</code>, <code>context</code>, <code>credential_present</code></td>
 <td>read</td>
 <td>parallel</td>
+</tr>
+<tr>
+<td>OBSERVE</td>
+<td><code>evidence</code></td>
+<td>read</td>
+<td>sequential</td>
 </tr>
 <tr>
 <td>MUTATE</td>
@@ -166,6 +172,18 @@ engine assumes.</p>
 <td>sequential</td>
 </tr>
 <tr>
+<td>ORCHESTRATE</td>
+<td><code>limitation</code></td>
+<td>read</td>
+<td>parallel</td>
+</tr>
+<tr>
+<td>ORCHESTRATE</td>
+<td><code>decide</code></td>
+<td>read</td>
+<td>sequential</td>
+</tr>
+<tr>
 <td>RETRIEVE</td>
 <td><code>web_fetch</code></td>
 <td>read</td>
@@ -188,8 +206,8 @@ engine assumes.</p>
 read-only inspection (op=status/diff/log) that runs on the safe-exec spine, so
 it lives in the EXECUTE plane with read-class safety disposition. <code>monitor</code>
 never mutates a run, so it stays read class and parallel inside the ORCHESTRATE
-plane. <code>tasks</code> orchestrates the agent&#39;s own work rather than workers: it mutates
-only the session&#39;s task ledger, never the workspace, so it keeps read class
+plane. <code>tasks</code> orchestrates the agent&#x27;s own work rather than workers: it mutates
+only the session&#x27;s task ledger, never the workspace, so it keeps read class
 (never gated behind a confirmation) but runs sequential so two board mutations
 in one batch cannot interleave. <code>ledger</code> is the agent ledger, the coordination
 board concurrent dispatch workers share: a post reaches a one-way control lane
@@ -197,7 +215,14 @@ and a read answers from a local mirror, so it touches no workspace and stays
 read class, and reviewers and judges are pinned to read-only autonomy where a
 write class would block the peer review the board exists for. <code>panes</code> controls
 only Clio-owned terminal panes through the live mux; it stays read class but is
-sequential so two operations cannot race the same pane registry.</p>
+sequential so two operations cannot race the same pane registry. <code>evidence</code> sits in the OBSERVE plane
+because it only reads canonical evidence, trust status, gate decisions, and
+findings, but it is sequential because <code>run</code> mode may materialize a bundle
+under Clio&#x27;s data directory. <code>limitation</code> and <code>decide</code> sit in the ORCHESTRATE
+plane as read class: each appends one typed receipt or decision-board entry
+to the session ledger and touches nothing else. <code>limitation</code> is parallel
+because the call is pure; <code>decide</code> is sequential so two decisions in one batch
+cannot race the supersede lookup.</p>
 <p>Registration is conditional on wiring: <code>context</code> gains its workspace scope only
 when a session contract is bound, <code>dispatch</code>/<code>monitor</code>/<code>steer</code> register only
 with a dispatch contract, <code>ask_user</code> registers only when an interactive handler
@@ -224,7 +249,7 @@ the runtime registered and the recipe allows.</p>
 <h3>One ignore policy for path walkers</h3>
 <p><code>grep</code>, <code>find</code>, and their pure-Node fallbacks answer &quot;which parts of the tree are visible&quot; from one shared policy in <code>src/tools/ignore-policy.ts</code>. Three layers apply: <code>.clio-coder</code>, <code>.fallow</code>, and <code>.git</code> are always excluded; <code>.gitignore</code> is honored natively by rg/fd; and one generated-dirs list (<code>node_modules</code>, <code>dist</code>, <code>build</code>, <code>coverage</code>, <code>.venv</code>, and similar) is force-excluded even when a project forgot to gitignore it. <code>include_ignored: true</code> lifts the gitignore and generated-dirs layers together. The clio-internal layer always stands, except that pointing a tool directly at one of those directories means the caller wants those paths.</p>
 <h2>The observation envelope</h2>
-<p>The six content-returning OBSERVE tools (<code>read</code>, <code>grep</code>, <code>find</code>, <code>ls</code>, <code>code_nav</code>, <code>context</code>) close every result through one shared envelope in <code>src/tools/observation.ts</code>. <code>credential_present</code> sits in the OBSERVE plane but returns a typed boolean and carries no envelope cap. The envelope owns four guarantees.</p>
+<p>The six content-returning OBSERVE tools (<code>read</code>, <code>grep</code>, <code>find</code>, <code>ls</code>, <code>code_nav</code>, <code>context</code>) close every result through one shared envelope in <code>src/tools/observation.ts</code>. <code>credential_present</code> sits in the OBSERVE plane but returns a typed boolean and carries no envelope cap, and <code>evidence</code> returns bounded JSON under its own 16KB summary policy. The envelope owns four guarantees.</p>
 <p><strong>One notice line, one format.</strong> A truncated text result appends exactly one notice:</p>
 <pre><code class="language-text">[&lt;tool&gt;: &lt;shown&gt;/&lt;total&gt; &lt;unit&gt; shown (&lt;shownSize&gt; of &lt;totalSize&gt;) | full: &lt;offloadPath&gt; | next: &lt;exact-call&gt;]
 </code></pre>
@@ -243,7 +268,7 @@ the runtime registered and the recipe allows.</p>
 <h2>Context protection</h2>
 <p>Clio uses two context-protection mechanisms.</p>
 <ol>
-<li>Tool results are capped at the source and again at the registry boundary. OBSERVE tools use the envelope caps above. Exact mutation tools (<code>write</code>, <code>edit</code>, <code>artifact</code>) use 8KB; <code>steer</code> and <code>credential_present</code> use 4KB; <code>ledger</code> uses 16KB; <code>panes</code> uses 8KB; and <code>ask_user</code> has a 20KB policy. Summary-kind tools (<code>bash</code>, <code>git</code>, <code>verify</code>, <code>dispatch</code>, <code>monitor</code>) use 16KB at the registry boundary. Bash also exposes the canonical per-call <code>output_policy</code>: omitted/<code>bounded</code> keeps its diagnostic tail, <code>summary</code> selects stable redacted head/error/tail evidence, <code>metadata-only</code> keeps facts and retrieval without stdout/stderr context, and <code>full</code> succeeds only inside the same hard result budget or records a typed downgrade. This model-context choice does not change the folded tail-biased operator presentation. <code>web_fetch</code> is bounded at 16KB after shaping and may read more before it: its <code>max_bytes</code> argument defaults to 600KB and is hard-capped at 5MB. Tools without an explicit result-size policy use an approximately 18KB generic backstop. Over-cap generic results are shown briefly and, when possible, saved under <code>&lt;stateDir&gt;/scratch/&lt;sessionId&gt;/&lt;sha256 of the captured text&gt;.txt</code> with an <code>offloadPath</code> detail and a 10MB scratch-file cap.</li>
+<li>Tool results are capped at the source and again at the registry boundary. OBSERVE tools use the envelope caps above. Exact mutation tools (<code>write</code>, <code>edit</code>, <code>artifact</code>) use 8KB; <code>steer</code> and <code>credential_present</code> use 4KB; <code>ledger</code> uses 16KB; <code>panes</code> uses 8KB; <code>limitation</code> and <code>decide</code> use 4KB; and <code>ask_user</code> has a 20KB policy. Summary-kind tools (<code>bash</code>, <code>git</code>, <code>verify</code>, <code>dispatch</code>, <code>monitor</code>, <code>evidence</code>) use 16KB at the registry boundary. Bash also exposes the canonical per-call <code>output_policy</code>: omitted/<code>bounded</code> keeps its diagnostic tail, <code>summary</code> selects stable redacted head/error/tail evidence, <code>metadata-only</code> keeps facts and retrieval without stdout/stderr context, and <code>full</code> succeeds only inside the same hard result budget or records a typed downgrade. This model-context choice does not change the folded tail-biased operator presentation. <code>web_fetch</code> is bounded at 16KB after shaping and may read more before it: its <code>max_bytes</code> argument defaults to 600KB and is hard-capped at 5MB. Tools without an explicit result-size policy use an approximately 18KB generic backstop. Over-cap generic results are shown briefly and, when possible, saved under <code>&lt;stateDir&gt;/scratch/&lt;sessionId&gt;/&lt;sha256 of the captured text&gt;.txt</code> with an <code>offloadPath</code> detail and a 10MB scratch-file cap.</li>
 <li>Auto-compaction uses one pressure threshold. The default threshold is 0.8. When pressure crosses the threshold, Clio first applies a non-destructive working-set eviction and records the evicted items in the session ledger. If pressure remains above the threshold, it runs the LLM summary compaction path and replays from the compacted session view. The older destructive observation/thinking mask is available only as a compatibility escape hatch when <code>CLIO_CODER_LEGACY_MASK=1</code>.</li>
 </ol>
 <p>Manual <code>/context compact</code>, <code>CLIO_CODER_FORCE_COMPACT=1</code>, and overflow recovery force the LLM summary path directly.</p>

@@ -81,9 +81,9 @@ The compiler runs after target capability and tool-profile admission. Its canoni
 
 Project context, memory, bounded dispatch briefing, pipeline input, the assigned task, and the per-run safety-posture reminder remain dynamic user messages. A briefing is a separately delimited message labeled as untrusted task context/data; it is never concatenated into the task or stable system prompt. Dynamic ordering is project, safety, memory, briefing, then pipeline input, with pipeline input last. These messages do not affect the stable composition hash. Persona, effective autonomy, target tool capability, or final toolkit changes do affect it.
 
-## Seven planes, twenty-one tools
+## Seven planes, twenty-four tools
 
-The canonical builtin catalog contains 21 tools organized in seven planes. A
+The canonical builtin catalog contains 24 tools organized in seven planes. A
 particular session or worker receives the subset whose dependencies and policy
 allow it to register. Each plane is one policy unit: its tools share an action
 class, a size posture, a details schema, and a concurrency rule.
@@ -95,6 +95,7 @@ engine assumes.
 | Plane | Tools | Action class | Concurrency |
 | --- | --- | --- | --- |
 | OBSERVE | `read`, `grep`, `find`, `ls`, `code_nav`, `context`, `credential_present` | read | parallel |
+| OBSERVE | `evidence` | read | sequential |
 | MUTATE | `write`, `edit` | write | sequential |
 | EXECUTE | `bash`, `verify` | execute | sequential |
 | EXECUTE | `git` | read | parallel |
@@ -122,7 +123,14 @@ and a read answers from a local mirror, so it touches no workspace and stays
 read class, and reviewers and judges are pinned to read-only autonomy where a
 write class would block the peer review the board exists for. `panes` controls
 only Clio-owned terminal panes through the live mux; it stays read class but is
-sequential so two operations cannot race the same pane registry.
+sequential so two operations cannot race the same pane registry. `evidence` sits in the OBSERVE plane
+because it only reads canonical evidence, trust status, gate decisions, and
+findings, but it is sequential because `run` mode may materialize a bundle
+under Clio's data directory. `limitation` and `decide` sit in the ORCHESTRATE
+plane as read class: each appends one typed receipt or decision-board entry
+to the session ledger and touches nothing else. `limitation` is parallel
+because the call is pure; `decide` is sequential so two decisions in one batch
+cannot race the supersede lookup.
 
 Registration is conditional on wiring: `context` gains its workspace scope only
 when a session contract is bound, `dispatch`/`monitor`/`steer` register only
@@ -156,7 +164,7 @@ Several tools absorb what used to be separate tools:
 
 ## The observation envelope
 
-The six content-returning OBSERVE tools (`read`, `grep`, `find`, `ls`, `code_nav`, `context`) close every result through one shared envelope in `src/tools/observation.ts`. `credential_present` sits in the OBSERVE plane but returns a typed boolean and carries no envelope cap. The envelope owns four guarantees.
+The six content-returning OBSERVE tools (`read`, `grep`, `find`, `ls`, `code_nav`, `context`) close every result through one shared envelope in `src/tools/observation.ts`. `credential_present` sits in the OBSERVE plane but returns a typed boolean and carries no envelope cap, and `evidence` returns bounded JSON under its own 16KB summary policy. The envelope owns four guarantees.
 
 **One notice line, one format.** A truncated text result appends exactly one notice:
 
@@ -192,7 +200,7 @@ Tool descriptions are tiered by how much a wrong call costs. The hot tools the m
 
 Clio uses two context-protection mechanisms.
 
-1. Tool results are capped at the source and again at the registry boundary. OBSERVE tools use the envelope caps above. Exact mutation tools (`write`, `edit`, `artifact`) use 8KB; `steer` and `credential_present` use 4KB; `ledger` uses 16KB; `panes` uses 8KB; and `ask_user` has a 20KB policy. Summary-kind tools (`bash`, `git`, `verify`, `dispatch`, `monitor`) use 16KB at the registry boundary. Bash also exposes the canonical per-call `output_policy`: omitted/`bounded` keeps its diagnostic tail, `summary` selects stable redacted head/error/tail evidence, `metadata-only` keeps facts and retrieval without stdout/stderr context, and `full` succeeds only inside the same hard result budget or records a typed downgrade. This model-context choice does not change the folded tail-biased operator presentation. `web_fetch` is bounded at 16KB after shaping and may read more before it: its `max_bytes` argument defaults to 600KB and is hard-capped at 5MB. Tools without an explicit result-size policy use an approximately 18KB generic backstop. Over-cap generic results are shown briefly and, when possible, saved under `<stateDir>/scratch/<sessionId>/<sha256 of the captured text>.txt` with an `offloadPath` detail and a 10MB scratch-file cap.
+1. Tool results are capped at the source and again at the registry boundary. OBSERVE tools use the envelope caps above. Exact mutation tools (`write`, `edit`, `artifact`) use 8KB; `steer` and `credential_present` use 4KB; `ledger` uses 16KB; `panes` uses 8KB; `limitation` and `decide` use 4KB; and `ask_user` has a 20KB policy. Summary-kind tools (`bash`, `git`, `verify`, `dispatch`, `monitor`, `evidence`) use 16KB at the registry boundary. Bash also exposes the canonical per-call `output_policy`: omitted/`bounded` keeps its diagnostic tail, `summary` selects stable redacted head/error/tail evidence, `metadata-only` keeps facts and retrieval without stdout/stderr context, and `full` succeeds only inside the same hard result budget or records a typed downgrade. This model-context choice does not change the folded tail-biased operator presentation. `web_fetch` is bounded at 16KB after shaping and may read more before it: its `max_bytes` argument defaults to 600KB and is hard-capped at 5MB. Tools without an explicit result-size policy use an approximately 18KB generic backstop. Over-cap generic results are shown briefly and, when possible, saved under `<stateDir>/scratch/<sessionId>/<sha256 of the captured text>.txt` with an `offloadPath` detail and a 10MB scratch-file cap.
 2. Auto-compaction uses one pressure threshold. The default threshold is 0.8. When pressure crosses the threshold, Clio first applies a non-destructive working-set eviction and records the evicted items in the session ledger. If pressure remains above the threshold, it runs the LLM summary compaction path and replays from the compacted session view. The older destructive observation/thinking mask is available only as a compatibility escape hatch when `CLIO_CODER_LEGACY_MASK=1`.
 
 Manual `/context compact`, `CLIO_CODER_FORCE_COMPACT=1`, and overflow recovery force the LLM summary path directly.

@@ -527,6 +527,43 @@ panes(action=&quot;show&quot;, target=&quot;tester&quot;)
 panes(action=&quot;open&quot;, preset=&quot;logs&quot;)
 panes(action=&quot;close&quot;, target=&quot;all&quot;)
 </code></pre>
+<h2>evidence: inspect canonical evidence and trust status</h2>
+<p>Reads evidence bundles as JSON. Source: <code>src/tools/evidence.ts</code>. Read class; sequential, because <code>run</code> mode may materialize a bundle under Clio&#x27;s data directory. It shares the inventory and trust projections behind <code>clio-coder evidence inventory</code> and <code>clio-coder evidence inspect</code>, so the model and the operator read the same record.</p>
+<p>Arguments:</p>
+<ul>
+<li><code>mode</code> (required). <code>list</code>, <code>inspect</code>, or <code>run</code>.</li>
+<li><code>id</code> (required for <code>inspect</code>). An evidence bundle id.</li>
+<li><code>runId</code> (required for <code>run</code>). A dispatch run id; the bundle is built first when none exists.</li>
+</ul>
+<p><code>list</code> returns the bounded newest-first inventory: provenance, tags, totals, and a worst-run trust verdict per bundle. <code>inspect</code> returns the bundle overview, the per-run trust axes and verdict, the gate decisions, and the findings. <code>run</code> resolves <code>run-&lt;runId&gt;</code> and builds the bundle when it is absent; a run with no ledger row is reported absent with <code>artifactAbsent: true</code> in the details. Results are capped at 16KB, and a truncated result stays valid JSON with a <code>preview</code>. Provenance requires this tool and Verifier may use it.</p>
+<pre><code class="language-text">evidence(mode=&quot;list&quot;)
+evidence(mode=&quot;inspect&quot;, id=&quot;run-r-42&quot;)
+evidence(mode=&quot;run&quot;, runId=&quot;r-42&quot;)
+</code></pre>
+<h2>limitation: record what a turn could not verify</h2>
+<p>Records a typed limitation receipt for the finish contract. Source: <code>src/tools/limitation.ts</code>. Read class; parallel. The tool is pure: it touches no filesystem and runs no shell, so the successful receipt in the session ledger is its whole effect.</p>
+<p>Arguments:</p>
+<ul>
+<li><code>scope</code> (required). What could not be verified, in one sentence.</li>
+<li><code>reason</code> (required). <code>no-runner</code>, <code>blocked</code>, <code>out-of-scope</code>, <code>environment</code>, or <code>other</code>.</li>
+<li><code>paths</code> (optional). Repository-relative paths left unverified.</li>
+</ul>
+<p>Call it once, before the final reply, when files changed and validation could not run. The finish contract accepts a successful <code>limitation</code> receipt inside the same window as the mutation scan in place of validation evidence. A rejected call (empty scope, unknown reason) leaves no receipt and does not count, and the assistant&#x27;s prose never does. The six mutating recipes carry the tool and the operating contract tells the model to call it; see <a href="safety_blueprint.html">the finish gate</a>.</p>
+<pre><code class="language-text">limitation(scope=&quot;CUDA kernels changed but no GPU is available here&quot;, reason=&quot;environment&quot;, paths=[&quot;src/kernels/solve.cu&quot;])
+</code></pre>
+<h2>decide: record a design decision</h2>
+<p>Appends the model&#x27;s own design choice to the session decision board beside operator <code>ask_user</code> answers. Source: <code>src/tools/decide.ts</code>. Read class; sequential, so two decisions in one batch cannot race the supersede lookup. The call succeeds only in a session with a decision board; a worker&#x27;s call is refused.</p>
+<p>Arguments:</p>
+<ul>
+<li><code>key</code> (required). Stable kebab-case name, at most 64 bytes.</li>
+<li><code>value</code> (required). The option chosen, at most 512 bytes.</li>
+<li><code>alternatives</code> (required). One to six rejected options, at most 256 bytes each.</li>
+<li><code>rationale</code> (required). Why the choice won, at most 1024 bytes.</li>
+<li><code>label</code> (optional). Short title, at most 128 bytes.</li>
+</ul>
+<p>The call appends one <code>decisionLedger</code> entry with <code>origin: &quot;agent&quot;</code> and returns the decision ref <code>&lt;interviewId&gt;/&lt;key&gt;</code>. A repeat key supersedes the earlier agent decision with the new rationale as its correction; an operator decision with the same key is never overwritten and the call fails. Dispatch seals every active ref onto the run request, envelope, and receipt, and Clio-controlled commits carry one <code>Clio-Decision:</code> trailer per ref; see <a href="git_commit_provenance_blueprint.html">commit provenance</a>.</p>
+<pre><code class="language-text">decide(key=&quot;cache-key-shape&quot;, value=&quot;capability tuple&quot;, alternatives=[&quot;node id&quot;], rationale=&quot;matches the existing buckets and survives fleet changes&quot;, label=&quot;Cache key&quot;)
+</code></pre>
 <h2>ask_user: host-owned operator interviews</h2>
 <p>Runs a host-owned interactive interview or single-question prompt with the operator, recording decisions and/or free-form answers. Source: <code>src/tools/ask-user.ts</code>. Read class; sequential.</p>
 <p>Arguments:</p>

@@ -1,7 +1,5 @@
 import { evidenceDetailSnapshot } from "../domains/evidence/detail.js";
 
-export * from "../domains/evidence/detail.js";
-
 /**
  * `clio-coder evidence inspect <id> --json`.
  *

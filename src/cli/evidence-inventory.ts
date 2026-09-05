@@ -1,7 +1,5 @@
 import { evidenceInventorySnapshot } from "../domains/evidence/inventory.js";
 
-export * from "../domains/evidence/inventory.js";
-
 /**
  * `clio-coder evidence inventory --json`, and nothing else.
  *

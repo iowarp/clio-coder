@@ -17,6 +17,7 @@ import {
 	type ObservabilityNotice,
 	type ObservabilitySnapshot,
 } from "../domains/observability/index.js";
+import type { WorkerAction, WorkerProgressSnapshot } from "../domains/observability/worker-progress.js";
 import { type CostProvenance, foregroundStreamUsage } from "../domains/providers/index.js";
 import { sanitizeCallTargetText } from "../domains/safety/call-target.js";
 import { type Component, truncateToWidth, visibleWidth, wrapTextWithAnsi } from "../engine/tui.js";
@@ -38,7 +39,6 @@ import {
 	screenTitle,
 	spinnerFrame,
 } from "./theme/index.js";
-import type { WorkerAction, WorkerProgressSnapshot } from "./worker-progress.js";
 
 export type DispatchBoardStatus = ObservabilityRunSummary["status"];
 

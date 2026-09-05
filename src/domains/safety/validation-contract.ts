@@ -2,6 +2,7 @@ import { existsSync, readFileSync, realpathSync, statSync } from "node:fs";
 import path from "node:path";
 import { parseDocument } from "yaml";
 import { resolveSafeCwd } from "../../core/safe-exec.js";
+import { byteLength } from "../../tools/truncate-utf8.js";
 import { compareCodepoints } from "../evidence/ordering.js";
 
 /**
@@ -23,7 +24,7 @@ export const VALIDATION_CONTRACT_YAML_PATHS: ReadonlyArray<string> = [
 	"validation.yml",
 ];
 
-/** Markdown is recognised as present but never parsed and never raises rigor. */
+/** Markdown is recognized as present but never parsed and never raises rigor. */
 export const VALIDATION_CONTRACT_MARKDOWN_PATH = "VALIDATION.md";
 
 /** Public schema limits. Diagnostics cite these values instead of hiding policy. */
@@ -101,10 +102,6 @@ function isRecord(value: unknown): value is Record<string, unknown> {
 	return value !== null && typeof value === "object" && !Array.isArray(value);
 }
 
-function utf8Bytes(value: string): number {
-	return Buffer.byteLength(value, "utf8");
-}
-
 function unknownFields(record: Record<string, unknown>, allowed: ReadonlySet<string>): string[] {
 	return Object.keys(record)
 		.filter((key) => !allowed.has(key))
@@ -114,7 +111,7 @@ function unknownFields(record: Record<string, unknown>, allowed: ReadonlySet<str
 function boundedText(value: unknown, location: string, cap: number): string | Error {
 	if (typeof value !== "string" || value.length === 0) return new Error(`${location} must be a non-empty string`);
 	if (value.includes("\0")) return new Error(`${location} must not contain a NUL byte`);
-	if (utf8Bytes(value) > cap) return new Error(`${location} exceeds the ${cap}-byte cap`);
+	if (byteLength(value) > cap) return new Error(`${location} exceeds the ${cap}-byte cap`);
 	return value;
 }
 
@@ -158,7 +155,7 @@ function boundedMap<T>(
 	for (const key of keys.sort(compareCodepoints)) {
 		const entryLocation = `${location}.${key}`;
 		if (key.length === 0) return new Error(`${location} has an empty key`);
-		if (utf8Bytes(key) > VALIDATION_CONTRACT_CAPS.mapKeyBytes) {
+		if (byteLength(key) > VALIDATION_CONTRACT_CAPS.mapKeyBytes) {
 			return new Error(`${entryLocation} key exceeds the ${VALIDATION_CONTRACT_CAPS.mapKeyBytes}-byte cap`);
 		}
 		const entry = validateEntry(value[key], entryLocation);

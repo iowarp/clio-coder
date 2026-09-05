@@ -221,7 +221,7 @@ clio-coder trace prune --json
 </thead>
 <tbody><tr>
 <td><strong>Accountability</strong></td>
-<td>Rolling first-pass-success rate and failure-cause histogram.</td>
+<td>Rolling first-pass-success rate, unverified successes, ungrounded claims, and failure-cause histogram.</td>
 <td><code>&lt;stateDir&gt;/evidence-index.json</code></td>
 </tr>
 <tr>
@@ -288,6 +288,10 @@ clio-coder trace prune --json
 </ul>
 <p>The TUI displays this rate as:
 <code>first-pass success: &lt;succeeded-attempts&gt;/&lt;total-attempts&gt; (&lt;pct&gt;%)</code></p>
+<h3>Unverified Successes and Ungrounded Claims</h3>
+<p>Two counters sit beside the rate in <code>/view</code>, <code>clio-coder usage</code>, and the observability contract. An unverified success is a run whose terminal outcome succeeded while its bundle carries the <code>no-validation</code> or <code>proxy-validation</code> tag or a warning-level <code>completion-evidence</code> finding. Ungrounded claims are the sum, over integrity-verified receipts, of validation claims with no matching command (<code>validationGrounding.claimed</code> minus <code>grounded</code>). Both fold only the fields an index row holds: a historical row without <code>succeeded</code>, <code>completionEvidenceWarning</code>, or <code>ungroundedClaims</code> contributes zero.</p>
+<p>The TUI displays them as:
+<code>unverified successes: &lt;count&gt;</code> and <code>ungrounded claims: &lt;count&gt;</code></p>
 <h3>Failure-Cause Histogram</h3>
 <p>The TUI lists the top failure causes sorted by frequency (descending), then by tag name (ascending). The histogram filters out provenance and quality tags (such as <code>audit-linked</code>, <code>session-linked</code>, and <code>no-validation</code>) and displays only real failure causes:</p>
 <ul>

@@ -314,7 +314,7 @@ The `/settings` overlay is a full-screen transactional control center:
 
 ### 7.2 Fleet Runs Board
 
-The `Alt+W` board renders one card per run. The default list is compact: run id, route, task, status, telemetry, retry, tool names, and proof. `Enter` opens the selected run's worker detail, which adds two rows to that card and nothing to any other:
+The `Alt+W` board renders one card per run from the observability run projection, which owns lifecycle, worker progress, receipt trust, retries, cancellation, fleet positions, and evidence readiness; the board owns only ordering, selection, and rendering. The default list is compact: run id, route, task, status, telemetry, retry, tool names, and proof. `Enter` opens the selected run's worker detail, which adds two rows to that card and nothing to any other:
 
 - **`doing`**: the phase (`◐ thinking` in `reason`, `◑ writing` in `accent`, `⚙ tool` in `action`, `◔ waiting` in `info`) followed by the running call as `<tool> <verb> <object>`, or the last finished call as `last <tool> <verb> <object>`. The verb and object come from a descriptor composed at the worker seam; raw arguments never reach the renderer.
 - **`answer`**: the newest rows of the worker's bounded prose on a `│` rail with a hanging indent under the key, then a dim row naming the lines and bytes the bounds refused and the `/view dispatch:<runId>` deep link.
