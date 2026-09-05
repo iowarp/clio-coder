@@ -270,7 +270,7 @@ describe("compact prompt contracts", () => {
 	it("holds fixed compact main and worker token budgets", () => {
 		strictEqual(builtinRecipes.length, 14, "the fixed Fleet fixture requires the 14 shipped recipes");
 		const mainToolNames = ALL_TOOL_NAMES.filter((name) => name !== ToolNames.Ledger);
-		strictEqual(mainToolNames.length, 20);
+		strictEqual(mainToolNames.length, 21);
 		const main = mainPrompt({ providerSupportsTools: true, toolNames: mainToolNames });
 		// The self-awareness paths are machine facts: the package root, the
 		// settings file, and the state directory of the live home.
@@ -282,8 +282,8 @@ describe("compact prompt contracts", () => {
 			.join("{SETTINGS}")
 			.split(dirs.state)
 			.join("{STATE}");
-		strictEqual(normalizedMain.length, 10_674);
-		strictEqual(Math.ceil(normalizedMain.length / 4), 2_669);
+		strictEqual(normalizedMain.length, 10_686);
+		strictEqual(Math.ceil(normalizedMain.length / 4), 2_672);
 		ok(normalizedMain.length <= 10_800, `main prompt grew to ${normalizedMain.length} chars`);
 		ok(
 			Math.ceil(normalizedMain.length / 4) <= 2_700,
@@ -308,7 +308,7 @@ describe("compact prompt contracts", () => {
 				delegation: 532,
 				skills: 181,
 				safety: 266,
-				"tool-contract": 635,
+				"tool-contract": 638,
 				fleet: 514,
 				"retrieval-hints": 36,
 				runtime: 43,

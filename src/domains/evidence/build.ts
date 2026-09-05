@@ -215,7 +215,17 @@ export async function buildEvidence(options: BuildEvidenceOptions): Promise<Evid
 		protectedArtifacts,
 		transcript,
 	);
-	return { evidenceId, directory, overview: finalOverview, findings, trustStatus };
+	return {
+		evidenceId,
+		directory,
+		overview: finalOverview,
+		findings,
+		trustStatus,
+		ungroundedClaims: runSources.reduce((total, source) => {
+			const grounding = authenticatedReceipt(source)?.validationGrounding;
+			return total + (grounding === undefined ? 0 : Math.max(0, grounding.claimed - grounding.grounded));
+		}, 0),
+	};
 }
 
 function buildOverview(
@@ -229,7 +239,10 @@ function buildOverview(
 	protectedArtifacts: EvidenceProtectedArtifactsFile,
 ): EvidenceOverview {
 	const envelopes = runSources.map((item) => item.envelope);
-	const receipts = runSources.flatMap((item) => (item.receipt === null ? [] : [item.receipt]));
+	const receipts = runSources.flatMap((item) => {
+		const receipt = authenticatedReceipt(item);
+		return receipt === null ? [] : [receipt];
+	});
 	const toolStats = receipts.flatMap((receipt) => receipt.toolStats);
 	const runIds = envelopes.map((envelope) => envelope.id).sort(compareStrings);
 	const sessionIds = uniqueStrings(

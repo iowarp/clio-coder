@@ -114,7 +114,8 @@ export interface ObservabilityContract {
 	/** Running session cost log entries. */
 	costEntries(): ReadonlyArray<CostEntry>;
 	/**
-	 * Rolling first-pass-success rate and failure-cause histogram, aggregated
+	 * Rolling first-pass-success rate, unverified successes, ungrounded claims,
+	 * and failure-cause histogram, aggregated
 	 * from the sidecar evidence index on call. Read-only: it folds rows Slice 2
 	 * already wrote and recomputes no evidence.
 	 */

@@ -50,6 +50,7 @@ const FOLDED_WITH_DIFF: ToolPresentationPolicy = {
  * tools, folds the same way.
  */
 export const TOOL_PRESENTATION: Readonly<Record<string, ToolPresentationPolicy>> = {
+	[ToolNames.Evidence]: FOLDED,
 	[ToolNames.Read]: FOLDED,
 	[ToolNames.Grep]: FOLDED,
 	[ToolNames.Find]: FOLDED,

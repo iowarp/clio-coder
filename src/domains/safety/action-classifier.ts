@@ -84,6 +84,7 @@ function isUnderPrefix(abs: string, prefix: string): boolean {
 
 function baseClassify(tool: string): ActionClass | null {
 	switch (tool) {
+		case ToolNames.Evidence:
 		case ToolNames.Read:
 		case ToolNames.Grep:
 		case ToolNames.Find:

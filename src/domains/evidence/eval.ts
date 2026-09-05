@@ -9,6 +9,7 @@ import { renderEvidenceFindingsMarkdown } from "./findings-markdown.js";
 import { compareCodepoints as compareStrings } from "./ordering.js";
 import { buildEvidenceTrustStatusFile } from "./run-trust.js";
 import { evidenceDirectory, findingsFile } from "./store.js";
+import { inspectRunReceiptTrustStatus } from "./trust-status.js";
 import {
 	EVIDENCE_VERSION,
 	type EvidenceAuditLinkedRow,
@@ -107,7 +108,18 @@ export async function buildEvalEvidence(options: BuildEvalEvidenceOptions): Prom
 		gateDecisions,
 		trustStatus,
 	);
-	return { evidenceId, directory, overview, findings, trustStatus };
+	return {
+		evidenceId,
+		directory,
+		overview,
+		findings,
+		trustStatus,
+		ungroundedClaims: linkedRuns.runSources.reduce((total, source) => {
+			if (!inspectRunReceiptTrustStatus(source.receipt, source.envelope).integrity.ok) return total;
+			const grounding = source.receipt?.validationGrounding;
+			return total + (grounding === undefined ? 0 : Math.max(0, grounding.claimed - grounding.grounded));
+		}, 0),
+	};
 }
 
 export function evalEvidenceId(evalId: string): string {

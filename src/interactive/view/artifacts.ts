@@ -1382,6 +1382,8 @@ function renderAccountabilitySummary(summary: AccountabilitySummary): string[] {
 		"# Accountability",
 		"",
 		`first-pass success: ${summary.firstPassRuns}/${summary.totalRuns} (${pct}%)`,
+		`unverified successes: ${summary.unverifiedSuccesses}`,
+		`ungrounded claims: ${summary.ungroundedClaims}`,
 		"",
 		"## Top failure causes",
 		"",

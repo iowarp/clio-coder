@@ -16,6 +16,7 @@
 export const ToolNames = {
 	// OBSERVE
 	Read: "read",
+	Evidence: "evidence",
 	Grep: "grep",
 	Find: "find",
 	Ls: "ls",

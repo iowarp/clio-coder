@@ -42,6 +42,10 @@ export interface EvidenceIndexRow {
 	tags: EvidenceTag[];
 	firstPassSuccess: boolean;
 	findingCount: number;
+	/** Absent on historical rows; never infer success from firstPassSuccess. */
+	succeeded?: boolean;
+	completionEvidenceWarning?: boolean;
+	ungroundedClaims?: number;
 	/** ISO-8601 timestamp the row was written. */
 	generatedAt: string;
 }
@@ -60,6 +64,12 @@ function isEvidenceIndexRow(value: unknown): value is EvidenceIndexRow {
 		row.tags.every((tag) => typeof tag === "string") &&
 		typeof row.firstPassSuccess === "boolean" &&
 		typeof row.findingCount === "number" &&
+		(row.succeeded === undefined || typeof row.succeeded === "boolean") &&
+		(row.completionEvidenceWarning === undefined || typeof row.completionEvidenceWarning === "boolean") &&
+		(row.ungroundedClaims === undefined ||
+			(typeof row.ungroundedClaims === "number" &&
+				Number.isSafeInteger(row.ungroundedClaims) &&
+				row.ungroundedClaims >= 0)) &&
 		typeof row.generatedAt === "string"
 	);
 }
