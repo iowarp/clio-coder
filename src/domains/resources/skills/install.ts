@@ -40,6 +40,20 @@ export interface InstallSkillInput {
 	force?: boolean;
 	/** Override the Clio config dir used for the user root (testing). */
 	configDir?: string;
+	/**
+	 * Absolute path of a local directory whose files are copied over the fetched
+	 * source before the install lands. Its SKILL.md becomes the installed skill
+	 * text, so the provenance stamps and the pinned hash describe the overlay.
+	 */
+	overlay?: string;
+	/** Top-level names dropped from the fetched source before the overlay is applied. */
+	exclude?: string[];
+}
+
+/** The overlay and exclude list a marketplace entry attaches to a source URL. */
+export interface SkillInstallShaping {
+	overlay?: string;
+	exclude?: string[];
 }
 
 export interface InstallSkillResult {
@@ -68,6 +82,12 @@ export interface UpdateSkillsInput {
 	all?: boolean;
 	/** Overwrite local modifications. */
 	force?: boolean;
+	/**
+	 * Recovers the overlay and exclude list an installed skill was shaped with,
+	 * keyed by its name and recorded source URL. Without it an update of a
+	 * remote-entry skill would refetch bare upstream and drop the wrapper.
+	 */
+	resolveShaping?: (skill: { name: string; sourceUrl: string }) => SkillInstallShaping | undefined;
 }
 
 /**
@@ -252,15 +272,49 @@ function fetchSource(spec: SkillSourceSpec): FetchedSource {
 	}
 }
 
-function copySkillDir(from: string, to: string): void {
+function copySkillDir(from: string, to: string, exclude: ReadonlyArray<string> = []): void {
 	mkdirSync(path.dirname(to), { recursive: true });
+	const excluded = new Set(exclude);
 	cpSync(from, to, {
 		recursive: true,
 		filter: (source) => {
 			const base = path.basename(source);
-			return base !== ".git" && base !== "node_modules";
+			if (base === ".git" || base === "node_modules") return false;
+			// `exclude` names top-level members only, so a nested `test/` inside
+			// a renderer stays where the upstream package put it.
+			return !(excluded.size > 0 && path.dirname(source) === from && excluded.has(base));
 		},
 	});
+}
+
+/**
+ * Shape a fetched source the way a marketplace remote entry asks: drop the
+ * excluded top-level members, then lay the overlay's files on top. The result
+ * is a fresh temporary tree so the fetched source (which may be an operator's
+ * own local directory) is never modified, and validation runs against what
+ * will actually be installed.
+ */
+function shapeSource(fetched: FetchedSource, shaping: SkillInstallShaping): FetchedSource {
+	const exclude = shaping.exclude ?? [];
+	if (!shaping.overlay && exclude.length === 0) return fetched;
+	if (shaping.overlay && !existsSync(shaping.overlay)) {
+		fetched.cleanup();
+		throw new Error(`skill overlay directory does not exist: ${shaping.overlay}`);
+	}
+	const tmp = mkdtempSync(path.join(tmpdir(), "clio-coder-skill-shape-"));
+	const shaped = path.join(tmp, "skill");
+	const cleanup = (): void => {
+		rmSync(tmp, { recursive: true, force: true });
+		fetched.cleanup();
+	};
+	try {
+		copySkillDir(fetched.skillDir, shaped, exclude);
+		if (shaping.overlay) copySkillDir(shaping.overlay, shaped);
+		return { skillDir: resolveSkillDir(shaped), cleanup };
+	} catch (err) {
+		cleanup();
+		throw err instanceof Error ? err : new Error(String(err));
+	}
 }
 
 let skillSwapSequence = 0;
@@ -328,7 +382,7 @@ export function installSkillFromSource(input: InstallSkillInput): InstallSkillRe
 	const cwd = input.cwd ?? process.cwd();
 	const scope = input.scope ?? "project";
 
-	const fetched = fetchSource(spec);
+	const fetched = shapeSource(fetchSource(spec), input);
 	try {
 		const { skill, warnings } = validateSourceSkill(fetched.skillDir);
 		const name = (input.name ?? skill.name).trim();
@@ -385,13 +439,18 @@ function managedSkills(cwd: string, configDir?: string): Skill[] {
 	);
 }
 
-function updateOne(skill: Skill, force: boolean): SkillUpdateReport {
+function updateOne(skill: Skill, force: boolean, shaping: SkillInstallShaping = {}): SkillUpdateReport {
 	const sourceUrl = skill.provenance?.installUrl;
 	if (!sourceUrl) return { name: skill.name, status: "no-source", detail: "no source-url provenance recorded" };
 	const spec = parseSkillSourceSpec(sourceUrl);
 	if (!spec) return { name: skill.name, status: "error", detail: `unsupported source-url: ${sourceUrl}` };
 
-	const fetched = fetchSource(spec);
+	let fetched: FetchedSource;
+	try {
+		fetched = shapeSource(fetchSource(spec), shaping);
+	} catch (err) {
+		return { name: skill.name, status: "error", detail: err instanceof Error ? err.message : String(err) };
+	}
 	try {
 		// The same gate a fresh install passes. Upstream may have moved on to a
 		// SKILL.md that no longer loads, and without this an update replaces a
@@ -441,11 +500,17 @@ function updateOne(skill: Skill, force: boolean): SkillUpdateReport {
 export function updateSkills(input: UpdateSkillsInput = {}): SkillUpdateReport[] {
 	const cwd = input.cwd ?? process.cwd();
 	const skills = managedSkills(cwd, input.configDir);
+	const shapingFor = (skill: Skill): SkillInstallShaping =>
+		(skill.provenance?.installUrl &&
+			input.resolveShaping?.({ name: skill.name, sourceUrl: skill.provenance.installUrl })) ||
+		{};
 	if (input.name) {
 		const skill = skills.find((entry) => entry.name === input.name);
 		if (!skill) return [{ name: input.name, status: "error", detail: "not found in Clio-managed skill roots" }];
-		return [updateOne(skill, input.force === true)];
+		return [updateOne(skill, input.force === true, shapingFor(skill))];
 	}
 	if (input.all !== true) throw new Error("updateSkills requires a name or all=true");
-	return skills.filter((skill) => skill.provenance?.installUrl).map((skill) => updateOne(skill, input.force === true));
+	return skills
+		.filter((skill) => skill.provenance?.installUrl)
+		.map((skill) => updateOne(skill, input.force === true, shapingFor(skill)));
 }

@@ -90,6 +90,8 @@ export {
 	type MarketplaceSkill,
 	type MarketplaceSkillOrigin,
 	type MarketplaceStatus,
+	marketplaceInstallShaping,
+	resolveMarketplaceShaping,
 } from "./skills/marketplace.js";
 export {
 	checkSkillDrift,
