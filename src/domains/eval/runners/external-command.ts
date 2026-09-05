@@ -65,6 +65,11 @@ const OUTPUT_HEAD_LIMIT = 20_000;
 const OUTPUT_TRUNCATION_MARKER = "\n[output middle truncated; tail preserved]\n";
 const METRIC_JSONL_LIMIT = 256_000;
 const METRIC_JSONL_LINE_LIMIT = 64_000;
+// After the deadline's SIGTERM, how long a run gets to end on its own terms
+// before SIGKILL. Clio seals the interrupted run's receipt inside its
+// coordinated shutdown, which budgets 500ms per hook across several hooks; a
+// one-second grace killed it mid-seal and the timed-out run left no receipt.
+const TIMEOUT_KILL_GRACE_MS = 5_000;
 
 export async function runExternalCommandRunner(
 	runner: EvalRunnerV2,
@@ -133,8 +138,23 @@ export async function runExternalCommandRunner(
 	};
 }
 
+/**
+ * Run one eval subprocess to completion or to the timeout.
+ *
+ * A string runs through the shell, which is what an operator's
+ * `external-command` line and the verifier commands are. An argv array spawns
+ * the program directly, with no shell between the runner and the process
+ * whose exit code it reports. That distinction matters on the timeout path:
+ * `/bin/sh -c` on dash keeps the shell as the parent, so SIGTERM to the shell
+ * stops the shell alone while the program runs on to completion. A
+ * `clio-coder run` spawned that way finished its turn after the deadline,
+ * sealed a succeeded receipt with exit 0, and exited 0, and this runner
+ * reported the shell's signal death as exit 124 (issue #275). With an argv the
+ * signal reaches Clio itself, which seals the run as canceled with the exit
+ * status it then reports, so the receipt and the exit code agree either way.
+ */
 export function runShellCommand(
-	command: string,
+	command: string | readonly [string, ...string[]],
 	cwd: string,
 	timeoutMs: number,
 	env?: NodeJS.ProcessEnv,
@@ -153,14 +173,12 @@ export function runShellCommand(
 		const callLedgerFold = createEvalCallLedgerFold();
 		let timedOut = false;
 		let settled = false;
-		const child = spawn(command, {
-			cwd,
-			shell: true,
-			stdio: ["ignore", "pipe", "pipe"],
-			// The overlay is additive: an eval item pins where Clio writes its
-			// journal, and inherits everything else the operator's shell provides.
-			env: env === undefined ? process.env : { ...process.env, ...env },
-		});
+		// The overlay is additive: an eval item pins where Clio writes its
+		// journal, and inherits everything else the operator's shell provides.
+		const spawnEnv = env === undefined ? process.env : { ...process.env, ...env };
+		const [file, args, shell] = typeof command === "string" ? [command, [], true] : [command[0], command.slice(1), false];
+		const child = spawn(file, args, { cwd, shell, stdio: ["ignore", "pipe", "pipe"], env: spawnEnv });
+		const commandLine = typeof command === "string" ? command : command.join(" ");
 		child.stdout.setEncoding("utf8");
 		child.stderr.setEncoding("utf8");
 		child.stdout.on("data", (chunk: string) => {
@@ -177,14 +195,14 @@ export function runShellCommand(
 		const timer = setTimeout(() => {
 			timedOut = true;
 			child.kill("SIGTERM");
-			setTimeout(() => child.kill("SIGKILL"), 1000);
+			setTimeout(() => child.kill("SIGKILL"), TIMEOUT_KILL_GRACE_MS);
 		}, timeoutMs);
 		const finish = (exitCode: number): void => {
 			if (settled) return;
 			settled = true;
 			clearTimeout(timer);
 			resolve({
-				command,
+				command: commandLine,
 				exitCode,
 				stdout,
 				metricJsonl: metricCapture.finish(),
