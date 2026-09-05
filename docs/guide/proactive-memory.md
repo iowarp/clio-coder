@@ -282,7 +282,8 @@ Capacity follows the same existing evidence as dispatch: explicit target
 conservative one-slot default for a local-native runtime. Known occupancy includes
 this process's foreground requests, active dispatch leases and held reservation
 waves. A two-slot endpoint with one foreground request can admit memory; a full
-one-slot endpoint skips it. Larger declared capacities work without a new constant.
+one-slot endpoint skips it. Known dedicated saturation does not itself initiate
+chat fallback. Larger declared capacities work without a new constant.
 
 LiteLLM is a gateway protocol, so Clio does not invent a local one-slot limit for
 its URL. Distinct model routes such as dynamo, mini and zbook can share that URL;
@@ -303,9 +304,11 @@ does not need to be clever. A small non-reasoning model is the right choice, and
 Clio always requests the memory route with thinking off. Version 2 therefore
 has no configurable memory thinking-level key.
 
-That request reaches the wire wherever the runtime carries a thinking control:
+The off request depends on the resolved runtime and model metadata:
 llama.cpp reads `chat_template_kwargs.enable_thinking`, and LM Studio reads
-`reasoning_effort`, where `none` is the off value.
+`reasoning_effort`, with the off value selected by the model family. A gateway
+needs a recognized, unanimous upstream runtime declaration; unknown metadata
+does not establish a dialect. Requesting off does not prove server compliance.
 
 A model that reasons anyway still works. Some genuinely cannot be silenced, and
 the catalog records those as always-on so the level reads `forced` rather than

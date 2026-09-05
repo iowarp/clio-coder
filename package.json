@@ -1,6 +1,6 @@
 {
 	"name": "@iowarp/clio-coder",
-	"version": "0.4.2",
+	"version": "0.4.3",
 	"description": "The terminal coding agent for people who maintain the code that science runs on, with user-chosen models and inspectable evidence.",
 	"keywords": [
 		"ai",
