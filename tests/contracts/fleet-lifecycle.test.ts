@@ -20,6 +20,7 @@ import { createFleetPlacementResolver } from "../../src/domains/dispatch/placeme
 import type { FleetRunRecord } from "../../src/domains/dispatch/state.js";
 import { resolveSshTargetLifecycle, type WorkerTransport } from "../../src/domains/dispatch/transport.js";
 import { createFleetRegistry } from "../../src/domains/scheduling/cluster.js";
+import { formatBudgetLine } from "../../src/interactive/overlays/fleet-run-approval.js";
 import {
 	claimCompeteGroup,
 	cleanupCompeteGroup,
@@ -310,5 +311,41 @@ printf '%s\\n' 'clio-coder-preflight/1' 'cwd=ok' 'clioCoder=custom-entry' 'state
 		strictEqual(legacy.ok, true);
 		strictEqual(legacy.checks.reachable, true);
 		strictEqual(legacy.checks.clioPresent, true);
+	});
+
+	it("formats fleet run approval budget line with shared cost formatting", () => {
+		const preview = {
+			budget: {
+				ceilingUsd: 5,
+				currentUsd: 1.25,
+				contractUsd: 2,
+			},
+		};
+		strictEqual(
+			formatBudgetLine(preview as unknown as Parameters<typeof formatBudgetLine>[0]),
+			"budget: admitted under $5.00 session ceiling, $1.25 spent, contract ceiling $2.00",
+		);
+		const subCent = {
+			budget: {
+				ceilingUsd: 5,
+				currentUsd: 0.0034,
+				contractUsd: null,
+			},
+		};
+		strictEqual(
+			formatBudgetLine(subCent as unknown as Parameters<typeof formatBudgetLine>[0]),
+			"budget: admitted under $5.00 session ceiling, $0.0034 spent, contract declares no ceiling",
+		);
+		const zero = {
+			budget: {
+				ceilingUsd: 5,
+				currentUsd: 0,
+				contractUsd: 1,
+			},
+		};
+		strictEqual(
+			formatBudgetLine(zero as unknown as Parameters<typeof formatBudgetLine>[0]),
+			"budget: admitted under $5.00 session ceiling, $0.00 spent, contract ceiling $1.00",
+		);
 	});
 });

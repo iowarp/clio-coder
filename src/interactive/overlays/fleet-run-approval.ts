@@ -21,6 +21,7 @@ import {
 	wrapTextWithAnsi,
 } from "../../engine/tui.js";
 import type { FleetRunPreview, FleetRunPreviewStep } from "../fleet-run-preview.js";
+import { formatUsd } from "../footer/widgets.js";
 import { buildResponsiveHint, FocusBox, showClioOverlayFrame } from "../overlay-frame.js";
 import { clioTheme, rule } from "../theme/index.js";
 
@@ -83,12 +84,12 @@ function formatFleetRunPreviewStep(step: FleetRunPreviewStep): string {
 	return `agent ${step.stepId}${loop} · ${step.agentId ?? "?"} · ${route}${node}${declaredRoute}${gate}${dynamicPlan} · ${step.scope} · ${formatWriteBoundary(step.writes)}`;
 }
 
-function formatBudgetLine(preview: FleetRunPreview): string {
+export function formatBudgetLine(preview: FleetRunPreview): string {
 	const contract =
 		preview.budget.contractUsd === null
 			? "contract declares no ceiling"
 			: `contract ceiling $${preview.budget.contractUsd.toFixed(2)}`;
-	return `budget: admitted under $${preview.budget.ceilingUsd.toFixed(2)} session ceiling, $${preview.budget.currentUsd.toFixed(4)} spent, ${contract}`;
+	return `budget: admitted under $${preview.budget.ceilingUsd.toFixed(2)} session ceiling, ${formatUsd(preview.budget.currentUsd)} spent, ${contract}`;
 }
 
 /**
