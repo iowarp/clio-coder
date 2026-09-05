@@ -74,8 +74,18 @@ interface NormalizedArtifact {
 	artifact: ProtectedArtifact;
 }
 
-const COMMAND_SEPARATORS = new Set([";", "&&", "||", "|"]);
+const COMMAND_SEPARATORS = new Set([";", "&", "&&", "||", "|"]);
 const SHELL_WRAPPERS = new Set(["command", "builtin", "sudo", "doas"]);
+const SHELL_REDIRECTIONS = new Set([">", ">>", "<", "<<", "<<<", "<&", ">&", "<>", ">|", "&>", "&>>"]);
+const SHELL_WRITE_REDIRECTIONS = new Set([">", ">>", ">&", "<>", ">|", "&>", "&>>"]);
+
+interface ShellToken {
+	value: string;
+	operator: boolean;
+	quoted: boolean;
+	start: number;
+	end: number;
+}
 
 /**
  * Paths a tool call would mutate, derived from the tool's path argument.
@@ -149,8 +159,8 @@ function classifyDestructiveCommand(
 	const artifacts = normalizedArtifacts(protectedArtifacts);
 	if (artifacts.length === 0) return { kind: "benign", matches: [] };
 
-	const tokens = tokenizeShellLike(command);
-	for (const segment of splitSegments(tokens)) {
+	for (const tokens of splitSegments(scanShellLike(command))) {
+		const segment = tokens.map((token) => token.value);
 		const redirect = classifyRedirect(segment, artifacts);
 		if (redirect.kind === "destructive") return redirect;
 
@@ -217,8 +227,8 @@ export function detectValidationCommand(
 	command: string,
 	scope: ValidationCommandScope = "finish-contract",
 ): ValidationCommandDetection {
-	const tokens = tokenizeShellLike(command);
-	for (const segment of splitSegments(tokens)) {
+	for (const tokens of splitSegments(scanShellLike(command))) {
+		const segment = tokens.map((token) => token.value);
 		const commandIndex = commandTokenIndex(segment);
 		if (commandIndex === null) continue;
 		const executable = basenameToken(segment[commandIndex]);
@@ -296,13 +306,17 @@ function segmentShellScript(segment: ReadonlyArray<string>): string | null {
  * scanner that reads its operands (`cp`, `tee`) must still see them.
  */
 function expandedSegments(command: string, depth = 0): string[][] {
-	const segments = splitSegments(tokenizeShellLike(command));
+	return expandedShellSegments(command, depth).map((segment) => segment.map((token) => token.value));
+}
+
+function expandedShellSegments(command: string, depth = 0): ShellToken[][] {
+	const segments = splitSegments(scanShellLike(command));
 	if (depth >= INNER_SHELL_MAX_DEPTH) return segments;
-	const out: string[][] = [];
+	const out: ShellToken[][] = [];
 	for (const segment of segments) {
 		out.push(segment);
-		const script = segmentShellScript(segment);
-		if (script !== null) out.push(...expandedSegments(script, depth + 1));
+		const script = segmentShellScript(shellCommandArguments(segment));
+		if (script !== null) out.push(...expandedShellSegments(script, depth + 1));
 	}
 	return out;
 }
@@ -313,11 +327,11 @@ function expandedSegments(command: string, depth = 0): string[][] {
  * script rather than treating `sh` as an unrecognized executable.
  */
 export function inlineShellScript(command: string): string | null {
-	const segments = splitSegments(tokenizeShellLike(command));
+	const segments = splitSegments(scanShellLike(command));
 	if (segments.length !== 1) return null;
 	const segment = segments[0];
 	if (segment === undefined) return null;
-	return segmentShellScript(segment);
+	return segmentShellScript(shellCommandArguments(segment));
 }
 
 /**
@@ -373,10 +387,11 @@ export function extractCommandDeleteTargets(command: string): string[] {
  * This is command inspection, not confinement of arbitrary scripts or aliases.
  */
 export function invokesClioSkillMutation(command: string): boolean {
-	for (const segment of expandedSegments(command)) {
-		const index = commandTokenIndex(segment);
+	for (const segment of expandedShellSegments(command)) {
+		const argv = shellCommandArguments(segment);
+		const index = commandTokenIndex(argv);
 		if (index === null) continue;
-		let args = segment.slice(index);
+		let args = argv.slice(index);
 		const executable = basenameToken(args[0]);
 		if (executable === "npx" || (executable === "npm" && args[1] === "exec")) {
 			args = args.slice(executable === "npm" ? 2 : 1);
@@ -406,6 +421,24 @@ export function invokesClioSkillMutation(command: string): boolean {
 		if (resourceCliMutatesSkills(args[0], args.slice(1))) return true;
 	}
 	return false;
+}
+
+function shellCommandArguments(segment: ReadonlyArray<ShellToken>): string[] {
+	const args: ShellToken[] = [];
+	for (let index = 0; index < segment.length; index += 1) {
+		const token = segment[index];
+		if (token === undefined) continue;
+		if (token.operator && SHELL_REDIRECTIONS.has(token.value)) {
+			// A redirection target is consumed by the shell, not passed to Clio.
+			// Only an adjacent, unquoted number is its optional file descriptor.
+			const previous = args.at(-1);
+			if (previous && previous.end === token.start && !previous.quoted && /^\d+$/.test(previous.value)) args.pop();
+			if (segment[index + 1]?.operator === false) index += 1;
+			continue;
+		}
+		args.push(token);
+	}
+	return args.map((token) => token.value);
 }
 
 function resourceCliMutatesSkills(resource: "skills" | "library", args: ReadonlyArray<string>): boolean {
@@ -438,11 +471,17 @@ const STANDARD_DEV_TARGETS = new Set(["/dev/null", "/dev/stdout", "/dev/stderr",
 
 function collectRedirectTargets(segment: ReadonlyArray<string>, out: string[]): void {
 	for (let index = 0; index < segment.length - 1; index += 1) {
-		const token = segment[index];
-		if (token !== ">" && token !== ">>") continue;
-		const target = segment[index + 1];
-		if (target !== undefined) out.push(target);
+		const target = redirectWriteTarget(segment[index], segment[index + 1]);
+		if (target !== null) out.push(target);
 	}
+}
+
+function redirectWriteTarget(operator: string | undefined, target: string | undefined): string | null {
+	if (operator === undefined || target === undefined || !SHELL_WRITE_REDIRECTIONS.has(operator)) return null;
+	// >& duplicates or closes a descriptor when its operand is a number or -;
+	// Bash also accepts a filename here, redirecting stdout and stderr to it.
+	if (operator === ">&" && /^(?:\d+-?|-)$/u.test(target)) return null;
+	return target;
 }
 
 function collectInvokedWriteTargets(segment: ReadonlyArray<string>, out: string[]): void {
@@ -563,9 +602,10 @@ function classifyRedirect(
 	artifacts: ReadonlyArray<NormalizedArtifact>,
 ): DestructiveCommandClassification {
 	for (let index = 0; index < segment.length; index += 1) {
-		if (segment[index] !== ">") continue;
-		const target = segment[index + 1];
-		if (target === undefined) continue;
+		// Keep the existing distinction between overwriting and appending here.
+		if (segment[index] === ">>" || segment[index] === "&>>") continue;
+		const target = redirectWriteTarget(segment[index], segment[index + 1]);
+		if (target === null) continue;
 		const matches = matchesForPaths([target], artifacts, "target", "redirect can overwrite protected artifacts");
 		if (matches.length > 0) {
 			return {
@@ -815,7 +855,7 @@ function pathArgs(segment: ReadonlyArray<string>, commandIndex: number): string[
 			continue;
 		}
 		if (!endOfOptions && token.startsWith("-")) continue;
-		if (token === ">" || token === ">>" || token === "<" || token === "<<") {
+		if (SHELL_REDIRECTIONS.has(token)) {
 			index += 1;
 			continue;
 		}
@@ -825,14 +865,23 @@ function pathArgs(segment: ReadonlyArray<string>, commandIndex: number): string[
 }
 
 export function tokenizeShellLike(command: string): string[] {
-	const tokens: string[] = [];
+	return scanShellLike(command).map((token) => token.value);
+}
+
+/** Literal shell words and operators only; no expansion or script execution. */
+function scanShellLike(command: string): ShellToken[] {
+	const tokens: ShellToken[] = [];
 	let current = "";
+	let wordStart: number | null = null;
+	let quoted = false;
 	let quote: "'" | '"' | null = null;
 
-	const pushCurrent = (): void => {
-		if (current.length === 0) return;
-		tokens.push(current);
+	const pushCurrent = (end: number): void => {
+		if (wordStart === null) return;
+		tokens.push({ value: current, operator: false, quoted, start: wordStart, end });
 		current = "";
+		wordStart = null;
+		quoted = false;
 	};
 
 	for (let index = 0; index < command.length; index += 1) {
@@ -844,80 +893,70 @@ export function tokenizeShellLike(command: string): string[] {
 				continue;
 			}
 			if (quote === '"' && char === "\\" && index + 1 < command.length) {
-				index += 1;
-				current += command[index] ?? "";
-				continue;
+				const next = command[index + 1] ?? "";
+				if (next === "\n" || '$`"\\'.includes(next)) {
+					index += 1;
+					if (next !== "\n") current += next;
+					continue;
+				}
 			}
 			current += char;
 			continue;
 		}
 
 		if (char === "'" || char === '"') {
+			wordStart ??= index;
+			quoted = true;
 			quote = char;
 			continue;
 		}
 		if (char === "\\" && index + 1 < command.length) {
+			// Backslash-newline joins lines before tokenization, even between words.
+			if (command[index + 1] !== "\n") {
+				wordStart ??= index;
+				quoted = true;
+				current += command[index + 1] ?? "";
+			}
 			index += 1;
-			current += command[index] ?? "";
+			continue;
+		}
+		if (char === "#" && wordStart === null) {
+			// A comment starts only at an unquoted word boundary. Leave its newline
+			// for normal separation so a following command is still inspected.
+			while (index + 1 < command.length && command[index + 1] !== "\n") index += 1;
 			continue;
 		}
 		if (/\s/.test(char)) {
-			pushCurrent();
-			if (char === "\n") tokens.push(";");
+			pushCurrent(index);
+			if (char === "\n") tokens.push({ value: ";", operator: true, quoted: false, start: index, end: index + 1 });
 			continue;
 		}
-		if (char === ";") {
-			pushCurrent();
-			tokens.push(";");
+		if (";&|><".includes(char)) {
+			pushCurrent(index);
+			const three = command.slice(index, index + 3);
+			const two = command.slice(index, index + 2);
+			const value =
+				SHELL_REDIRECTIONS.has(three) || COMMAND_SEPARATORS.has(three)
+					? three
+					: SHELL_REDIRECTIONS.has(two) || COMMAND_SEPARATORS.has(two)
+						? two
+						: char;
+			tokens.push({ value, operator: true, quoted: false, start: index, end: index + value.length });
+			index += value.length - 1;
 			continue;
 		}
-		if (char === "&" && command[index + 1] === "&") {
-			pushCurrent();
-			tokens.push("&&");
-			index += 1;
-			continue;
-		}
-		if (char === "|") {
-			pushCurrent();
-			if (command[index + 1] === "|") {
-				tokens.push("||");
-				index += 1;
-			} else {
-				tokens.push("|");
-			}
-			continue;
-		}
-		if (char === ">") {
-			pushCurrent();
-			if (command[index + 1] === ">") {
-				tokens.push(">>");
-				index += 1;
-			} else {
-				tokens.push(">");
-			}
-			continue;
-		}
-		if (char === "<") {
-			pushCurrent();
-			if (command[index + 1] === "<") {
-				tokens.push("<<");
-				index += 1;
-			} else {
-				tokens.push("<");
-			}
-			continue;
-		}
+		wordStart ??= index;
 		current += char;
 	}
-	pushCurrent();
+	pushCurrent(command.length);
 	return tokens;
 }
 
-function splitSegments(tokens: ReadonlyArray<string>): string[][] {
-	const segments: string[][] = [];
-	let current: string[] = [];
+function splitSegments(tokens: ReadonlyArray<ShellToken>): ShellToken[][] {
+	const segments: ShellToken[][] = [];
+	let current: ShellToken[] = [];
 	for (const token of tokens) {
-		if (COMMAND_SEPARATORS.has(token)) {
+		if (token.operator && COMMAND_SEPARATORS.has(token.value)) {
 			if (current.length > 0) segments.push(current);
 			current = [];
 			continue;
