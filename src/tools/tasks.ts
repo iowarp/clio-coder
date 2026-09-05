@@ -60,6 +60,10 @@ function renderTaskBoardText(board: TaskBoardSnapshot, userTasks: ReadonlyArray<
 		if (task.status === "blocked" && task.reason) line += ` — blocked: ${task.reason}`;
 		if (task.status === "cancelled" && task.reason) line += ` — dropped: ${task.reason}`;
 		lines.push(line);
+		const outputs = userTasks.find((item) => item.id === task.userTaskId)?.acceptance?.expectedOutputs;
+		if (outputs?.length) lines.push(`  expected outputs: ${outputs.join(", ")}`);
+		for (const item of task.requiredValidationEvidence ?? [])
+			lines.push(`  acceptance: ${item.command} (${item.status}; ${item.notes})`);
 	}
 	if (counts.open > 0 && counts.active === 0) {
 		lines.push(`next: start a task with action="start" before working it`);
@@ -210,7 +214,12 @@ export function createTasksTool(deps: TasksToolDeps): ToolSpec {
 				if (userTask.status !== "open" && userTask.status !== "handed") {
 					return { kind: "error", message: `tasks: operator task ${id} is ${userTask.status}; it cannot be picked` };
 				}
-				const result = deps.board.apply({ op: "pick", title: userTask.title, userTaskId: userTask.id });
+				const result = deps.board.apply({
+					op: "pick",
+					title: userTask.title,
+					userTaskId: userTask.id,
+					...(userTask.acceptance ? { verification: userTask.acceptance.verification } : {}),
+				});
 				if (!result.ok) return { kind: "error", message: `tasks: ${result.message}` };
 				const picked = result.board.tasks.find((task) => task.userTaskId === userTask.id && task.status === "pending");
 				if (!picked) return { kind: "error", message: `tasks: durable pickup for ${id} did not produce a board row` };

@@ -7,6 +7,7 @@ All notable changes to Clio Coder are documented in this file. The format follow
 Trust spine: typed claims, executable validation, and decision provenance. Answers the NSF "Beyond Code" findings where the harness still trusted prose or sniffed files.
 
 ### Added
+- Operator tasks carry optional acceptance through repeatable `--expect` and `--verify` flags in the CLI and `/tasks add`. Shared dispatch normalizers validate paths and bounded checks, pickup persists required board evidence, and high rigor requires a passing receipt or a limitation naming each acceptance check.
 - Carry recorded decision arguments into wiki prompts, handoff and oracle briefings, and authenticated receipt evidence with active-path reference findings.
 - The read-only `evidence` tool shares the CLI inventory and trust projections, with overview, findings, and verified gate decisions for provenance inspections. Provenance requires this tool, and Verifier can use it. Accountability reports unverified successful runs and ungrounded validation claims in `/view`, `clio-coder usage`, and the observability contract. Historical index rows contribute zero to the new counters when the required fields are absent.
 - The `limitation` tool records what a turn could not verify and why. The finish contract settles on a successful `limitation` receipt inside the same window as the mutation scan; the seven prose patterns that used to satisfy it are gone, so wording alone can no longer pass the gate. The tool is on the six mutating recipes, and the operating contract tells the model to call it.

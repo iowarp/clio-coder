@@ -72,6 +72,8 @@ export interface CommandArgsSpec {
 	 * keep their byte-for-byte parsing.
 	 */
 	parseFlagsBeforeRest?: boolean;
+	/** Recognize flags throughout a rest positional (operator task acceptance). */
+	parseFlagsInRest?: boolean;
 }
 
 export interface ParsedArgs {
@@ -260,6 +262,32 @@ export function parseArgs(spec: CommandArgsSpec, argsLine: string): ParsedArgs {
 	while (index < argsLine.length) {
 		const currentPositionalSpec = positionalSpecs[positionalIndex];
 		if (currentPositionalSpec?.rest) {
+			if (currentSpec.parseFlagsInRest) {
+				const text: string[] = [];
+				while (index < argsLine.length) {
+					const start = index;
+					const read = readToken();
+					if (!read) break;
+					if (read.token === "--") {
+						text.push(argsLine.slice(index).trim());
+						index = argsLine.length;
+						break;
+					}
+					const flag = flagSpecs.find((item) => item.name === read.token);
+					if (flag) {
+						const error = consumeFlag(flag, read.token);
+						if (error) return errorResult(error);
+					} else if (read.token.startsWith("--")) return errorResult(`Unknown flag: ${read.token}`);
+					else text.push(argsLine.slice(start, index));
+					skipWhitespace();
+				}
+				const restVal = text.join(" ").trim();
+				if (!restVal) return errorResult(`Missing required argument: ${currentPositionalSpec.name}`);
+				positionals.push(restVal);
+				rest = restVal;
+				positionalIndex++;
+				break;
+			}
 			if (currentSpec.parseFlagsBeforeRest) {
 				while (index < argsLine.length) {
 					const tokenStart = index;

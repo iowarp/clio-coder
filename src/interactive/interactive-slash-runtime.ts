@@ -24,6 +24,7 @@ import type { SessionContract, SessionEntry } from "../domains/session/index.js"
 import { foldTaskBoard } from "../domains/session/task-board.js";
 import { filterEntriesToActivePath } from "../domains/session/tree/active-path.js";
 import type { ShareContract } from "../domains/share/index.js";
+import type { UserTaskAcceptance } from "../domains/user-tasks/acceptance.js";
 import type { UserTasksStore } from "../domains/user-tasks/store.js";
 import { stripTerminalSequences } from "../engine/tui.js";
 import type { ImageContent } from "../engine/types.js";
@@ -432,7 +433,7 @@ export function createInteractiveSlashRuntime(deps: InteractiveSlashRuntimeDeps)
 		...(userTasks
 			? {
 					userTasks: {
-						add: (title: string) => userTasks.add(title),
+						add: (title: string, acceptance?: UserTaskAcceptance) => userTasks.add(title, undefined, acceptance),
 						hand: (id: string) => userTasks.hand(id, deps.chat.getSessionId() ?? undefined),
 						done: (id: string) => userTasks.done(id),
 						drop: (id: string) => userTasks.drop(id),

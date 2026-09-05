@@ -182,7 +182,7 @@ The registry table below lists the available interactive slash commands. On a ba
 | `/context` | `/context compact [instructions] \| /context recall <ref> \| /context init \| /context refresh \| /context reset` | Context hub: window overlay plus compact, recall, init, refresh, and reset |
 | `/fleet` | `/fleet run [--var <key=value>] <name>` | Open Settings → Fleet, or run a fleet contract with an approval preview |
 | `/decisions` | `/decisions` | Show settled interview decisions and operator revisions |
-| `/tasks` | `/tasks add <text> \| /tasks hand <id> \| /tasks done <id> \| /tasks drop <id>` | Show the session board or manage project operator tasks |
+| `/tasks` | `/tasks add [--expect <path>] [--verify <checkId>[:timeoutMs]] <text> \| /tasks hand <id> \| /tasks done <id> \| /tasks drop <id>` | Show the session board or manage project operator tasks |
 | `/memory` | `/memory seed` | Inspect, promote, or seed task memory |
 | `/view` | `/view [filter] \| /view verify <runId>` | Browse session artifacts and verify receipts |
 | `/panes` | `/panes show <run-or-agent> \| /panes open <preset-or-argv> \| /panes zoom [target] \| /panes close [target]` | Inspect the pane layer, watch a live run in a pane, or open a utility pane (`files`, `logs`, `shell`, `files --once`, or a command); a second open focuses the pane already there |
@@ -197,6 +197,22 @@ The registry table below lists the available interactive slash commands. On a ba
 | `/tree` | `/tree` | Open session tree navigator |
 | `/fork` | `/fork` | Fork from an assistant turn |
 | `/export` | `/export [path]` | Export a self-contained HTML transcript by default; a `.md` path writes Markdown |
+
+Operator tasks are durable project work in `.clio-coder/user-tasks.json`. Use
+`clio-coder tasks add "Fix the solver" --expect src/solver.ts --verify test:solver:60000`
+or `/tasks add Fix the solver --expect src/solver.ts --verify test:solver:60000`.
+Both `--expect <path>` and `--verify <checkId>[:timeoutMs]` are repeatable. Expected
+outputs use repository-relative paths; verification ids must exist in the project
+verifier catalog or package scripts when added. An omitted timeout uses the
+check's declared timeout, and requested timeouts are bounded as in dispatch
+intent. If a complete value matches a declared id containing colons, it names
+that check; otherwise the final numeric suffix is the timeout. Acceptance travels
+with the task when handed and picked, and seeds the board's required validation
+evidence. Under high rigor, a turn that changes files while this task is active
+must record a passing validation receipt for every named check or a successful
+`limitation` receipt whose `paths` array includes the exact check id. A task's
+completion note alone does not satisfy acceptance. `clio-coder tasks list`,
+`hand <uN>`, `done <uN>`, and `drop <uN>` manage the same inbox as `/tasks`.
 
 Retired spellings fail closed and print their exact replacement. In particular,
 `/targets` points to `/settings targets`, `/scoped-models` points to

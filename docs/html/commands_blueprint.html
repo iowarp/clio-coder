@@ -588,7 +588,7 @@ when Clio is already inside a reachable herdr session.</p>
 </tr>
 <tr>
 <td><code>/tasks</code></td>
-<td><code>/tasks add &lt;text&gt; | /tasks hand &lt;id&gt; | /tasks done &lt;id&gt; | /tasks drop &lt;id&gt;</code></td>
+<td><code>/tasks add [--expect &lt;path&gt;] [--verify &lt;checkId&gt;[:timeoutMs]] &lt;text&gt; | /tasks hand &lt;id&gt; | /tasks done &lt;id&gt; | /tasks drop &lt;id&gt;</code></td>
 <td>Show the session board or manage project operator tasks</td>
 </tr>
 <tr>
@@ -662,6 +662,21 @@ when Clio is already inside a reachable herdr session.</p>
 <td>Export a self-contained HTML transcript by default; a <code>.md</code> path writes Markdown</td>
 </tr>
 </tbody></table>
+<p>Operator tasks are durable project work in <code>.clio-coder/user-tasks.json</code>. Use
+<code>clio-coder tasks add &quot;Fix the solver&quot; --expect src/solver.ts --verify test:solver:60000</code>
+or <code>/tasks add Fix the solver --expect src/solver.ts --verify test:solver:60000</code>.
+Both <code>--expect &lt;path&gt;</code> and <code>--verify &lt;checkId&gt;[:timeoutMs]</code> are repeatable. Expected
+outputs use repository-relative paths; verification ids must exist in the project
+verifier catalog or package scripts when added. An omitted timeout uses the
+check&#x27;s declared timeout, and requested timeouts are bounded as in dispatch
+intent. If a complete value matches a declared id containing colons, it names
+that check; otherwise the final numeric suffix is the timeout. Acceptance travels
+with the task when handed and picked, and seeds the board&#x27;s required validation
+evidence. Under high rigor, a turn that changes files while this task is active
+must record a passing validation receipt for every named check or a successful
+<code>limitation</code> receipt whose <code>paths</code> array includes the exact check id. A task&#x27;s
+completion note alone does not satisfy acceptance. <code>clio-coder tasks list</code>,
+<code>hand &lt;uN&gt;</code>, <code>done &lt;uN&gt;</code>, and <code>drop &lt;uN&gt;</code> manage the same inbox as <code>/tasks</code>.</p>
 <p>Retired spellings fail closed and print their exact replacement. In particular,
 <code>/targets</code> points to <code>/settings targets</code>, <code>/scoped-models</code> points to
 <code>/settings chat model-picker</code>, and <code>/library</code>, <code>/prompts</code>, and <code>/extensions</code>

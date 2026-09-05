@@ -2,6 +2,7 @@ import { existsSync, readFileSync } from "node:fs";
 import { join } from "node:path";
 import { CLIO_PROJECT_DIR } from "../../core/artifact-paths.js";
 import { atomicWrite } from "../../engine/session.js";
+import { normalizeUserTaskAcceptance, type UserTaskAcceptance } from "./acceptance.js";
 
 export const USER_TASKS_FILE_VERSION = 1 as const;
 export const USER_TASKS_RELATIVE_PATH = `${CLIO_PROJECT_DIR}/user-tasks.json`;
@@ -12,6 +13,7 @@ export interface UserTask {
 	id: string;
 	title: string;
 	note?: string;
+	acceptance?: UserTaskAcceptance;
 	status: UserTaskStatus;
 	createdAt: string;
 	updatedAt: string;
@@ -37,7 +39,8 @@ export interface UserTasksStore {
 	readonly path: string;
 	snapshot(): ReadonlyArray<UserTask>;
 	get(id: string): UserTask | null;
-	add(title: string, note?: string): UserTask;
+	add(title: string, note?: string, acceptance?: UserTaskAcceptance): UserTask;
+	setAcceptance(id: string, acceptance: UserTaskAcceptance): UserTask;
 	hand(id: string, sessionId?: string): UserTask;
 	done(id: string): UserTask;
 	drop(id: string): UserTask;
@@ -65,6 +68,7 @@ const TASK_KEYS = new Set([
 	"id",
 	"title",
 	"note",
+	"acceptance",
 	"status",
 	"createdAt",
 	"updatedAt",
@@ -86,6 +90,13 @@ function isOptionalString(value: unknown): boolean {
 
 function isUserTask(value: unknown): value is UserTask {
 	if (!isRecord(value) || !hasOnlyKeys(value, TASK_KEYS)) return false;
+	if (value.acceptance !== undefined) {
+		try {
+			normalizeUserTaskAcceptance(value.acceptance);
+		} catch {
+			return false;
+		}
+	}
 	return (
 		typeof value.id === "string" &&
 		/^u[1-9]\d*$/.test(value.id) &&
@@ -138,7 +149,7 @@ function parseFile(body: string, path: string): UserTasksFile {
 }
 
 function copyTask(task: UserTask): UserTask {
-	return { ...task };
+	return { ...task, ...(task.acceptance ? { acceptance: normalizeUserTaskAcceptance(task.acceptance) } : {}) };
 }
 
 function initialFile(): UserTasksFile {
@@ -219,7 +230,8 @@ export function createUserTasksStore(deps: UserTasksStoreDeps): UserTasksStore {
 			const task = load().tasks.find((candidate) => candidate.id === id);
 			return task ? copyTask(task) : null;
 		},
-		add(title: string, note?: string): UserTask {
+		add(title: string, note?: string, acceptance?: UserTaskAcceptance): UserTask {
+			const normalizedAcceptance = acceptance === undefined ? undefined : normalizeAcceptance(acceptance);
 			const normalizedTitle = title.trim();
 			if (normalizedTitle.length === 0) throw new UserTasksStoreError("operator task title cannot be empty");
 			const normalizedNote = note?.trim();
@@ -229,12 +241,23 @@ export function createUserTasksStore(deps: UserTasksStoreDeps): UserTasksStore {
 				id: `u${file.nextId}`,
 				title: normalizedTitle,
 				...(normalizedNote ? { note: normalizedNote } : {}),
+				...(normalizedAcceptance ? { acceptance: normalizedAcceptance } : {}),
 				status: "open",
 				createdAt: timestamp,
 				updatedAt: timestamp,
 			};
 			file.nextId += 1;
 			file.tasks.push(task);
+			save(file);
+			return copyTask(task);
+		},
+		setAcceptance(id: string, acceptance: UserTaskAcceptance): UserTask {
+			const normalized = normalizeAcceptance(acceptance);
+			const file = load();
+			const task = file.tasks.find((item) => item.id === id);
+			if (!task) throw new UserTasksStoreError(`operator task ${id} was not found`);
+			task.acceptance = normalized;
+			task.updatedAt = now();
 			save(file);
 			return copyTask(task);
 		},
@@ -294,4 +317,12 @@ export function createUserTasksStore(deps: UserTasksStoreDeps): UserTasksStore {
 			return file.tasks.map(copyTask);
 		},
 	};
+}
+
+function normalizeAcceptance(raw: unknown): UserTaskAcceptance {
+	try {
+		return normalizeUserTaskAcceptance(raw);
+	} catch (error) {
+		throw new UserTasksStoreError(error instanceof Error ? error.message : String(error), { cause: error });
+	}
 }

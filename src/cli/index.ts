@@ -71,6 +71,7 @@ Usage:
   clio-coder extensions           install, list, enable, disable, or remove extension packages
   clio-coder skills               list, inspect, validate, or install skills
   clio-coder library              list, search, add, or sync agents, prompts, fleets, and skills from catalogs
+  clio-coder tasks                list, add, hand, finish, or drop project operator tasks
   clio-coder verifiers            discover, inspect, author, validate, edit, or dry-run project checks
   clio-coder tools list|status|install|remove <id>  pinned external programs Clio can drive
   clio-coder interop inspect --json  detected external coding agents and how far each one is wired
@@ -259,6 +260,7 @@ const COMMAND_HANDLERS = new Map<string, CommandHandler>([
 	["fleet", async (subArgs) => (await import("./fleet.js")).runFleetCommand(subArgs)],
 	["skills", async (subArgs) => (await import("./skills.js")).runSkillsCommand(subArgs)],
 	["library", async (subArgs) => (await import("./library.js")).runLibraryCommand(subArgs)],
+	["tasks", async (subArgs) => (await import("./tasks.js")).runTasksCommand(subArgs)],
 	["verifiers", async (subArgs) => (await import("./verifiers.js")).runVerifiersCommand(subArgs)],
 	["docs", async (subArgs) => (await import("./docs.js")).runDocsCommand(subArgs)],
 	["share", async (subArgs) => (await import("./share.js")).runShareCommand(subArgs)],
