@@ -81,6 +81,85 @@ const SHA = "0123456789abcdef0123456789abcdef01234567";
 const PINNED = { url: "https://github.com/iowarp/clio-coder", revision: SHA };
 
 describe("context map architecture seed", () => {
+	it("keeps distinct directory and package identities when their display slugs collide", () => {
+		const names = ["foo-bar", "foo_bar", "FOO-BAR", "foo-bar-2", "ext-react"];
+		const files = names.map((name, index) => file(`f${index}`, `${name}/index.ts`, 10));
+		const wiki: Codewiki = {
+			version: 5,
+			language: "typescript",
+			files,
+			symbols: [],
+			edges: [
+				{ fileId: "f0", toFileId: "f1" },
+				...["react", "@scope/a", "scope-a"].map((externalModule) => ({ fileId: "f0", externalModule })),
+			],
+		};
+		const seed = buildArchitectureSeed(wiki, { title: "colliding names" });
+		strictEqual(seed.components.length, 8);
+		strictEqual(seed.components.find((component) => component.label === "foo-bar-2")?.id, "foo-bar-2");
+		strictEqual(seed.components.find((component) => component.label === "ext-react")?.id, "ext-react");
+		strictEqual(new Set(seed.components.map((component) => component.id)).size, 8);
+		strictEqual(new Set(seed.components.map((component) => `${component.row},${component.col}`)).size, 8);
+		const from = seed.components.find((component) => component.label === "foo-bar");
+		const to = seed.components.find((component) => component.label === "foo_bar");
+		ok(from && to && from.id !== to.id);
+		ok(seed.connections.some((edge) => edge.from === from.id && edge.to === to.id));
+		ok(seed.components.every((component) => /^[a-z][a-z0-9_-]*$/i.test(component.id)));
+		const permuted = { ...wiki, files: [...wiki.files].reverse(), edges: [...wiki.edges].reverse() };
+		strictEqual(
+			serializeArchitectureSeed(seed),
+			serializeArchitectureSeed(buildArchitectureSeed(permuted, { title: "colliding names" })),
+		);
+	});
+
+	it("keeps internal and external import counts separate when a directory matches a package", () => {
+		const seed = buildArchitectureSeed(
+			{
+				version: 5,
+				language: "typescript",
+				symbols: [],
+				files: [file("app", "app/index.ts", 10), file("react", "react/index.ts", 10)],
+				edges: [
+					{ fileId: "app", toFileId: "react" },
+					{ fileId: "app", toFileId: "react" },
+					{ fileId: "app", externalModule: "react" },
+				],
+			},
+			{ title: "internal and external names" },
+		);
+		const internal = seed.components.find((component) => component.label === "react" && component.type !== "external");
+		const external = seed.components.find((component) => component.label === "react" && component.type === "external");
+		ok(internal && external);
+		strictEqual(seed.connections.length, 2);
+		strictEqual(seed.connections.find((edge) => edge.to === internal.id)?.label, "2 imports");
+		strictEqual(seed.connections.find((edge) => edge.to === external.id)?.label, "1 import");
+	});
+
+	it("gives distinct connections unique ids when endpoint names contain the connection delimiter", () => {
+		const seed = buildArchitectureSeed(
+			{
+				version: 5,
+				language: "typescript",
+				symbols: [],
+				files: ["a", "a-to-b", "b-to-c", "b-to-c-2", "c"].map((name) => file(name, `${name}/index.ts`, 10)),
+				edges: [
+					{ fileId: "a", toFileId: "b-to-c" },
+					{ fileId: "a-to-b", toFileId: "c" },
+					{ fileId: "a", toFileId: "b-to-c-2" },
+				],
+			},
+			{ title: "connection identities" },
+		);
+		strictEqual(seed.connections.length, 3);
+		strictEqual(new Set(seed.connections.map((edge) => edge.id)).size, 3);
+		strictEqual(seed.connections.find((edge) => edge.from === "a" && edge.to === "b-to-c-2")?.id, "a-to-b-to-c-2");
+		deepStrictEqual(seed.connections.map(({ from, to }) => [from, to]).sort(), [
+			["a", "b-to-c"],
+			["a", "b-to-c-2"],
+			["a-to-b", "c"],
+		]);
+	});
+
 	it("caps primary components, maps types from directories and roles, and cites first-symbol lines", () => {
 		const seed = buildArchitectureSeed(detailedFixture(), { title: "fixture", repository: PINNED });
 		strictEqual(seed.schema_version, 1);
