@@ -10,6 +10,7 @@ const HELP = `Usage:
                     [--target <id>] [--model <id>] [--thinking off|low|medium|high]
   clio-coder context reset [--all] [--yes]
   clio-coder context index [--json]
+  clio-coder context map [--out <path>] [--json]
   clio-coder context replay --sessions <path>... [options]
   clio-coder context working-set --session <id|path>
 
@@ -20,6 +21,7 @@ Project context commands:
   clio-coder context wiki         generate or inspect the agent-authored Markdown wiki
   clio-coder context reset        clear accumulated project context artifacts
   clio-coder context index        build the codewiki index without model calls
+  clio-coder context map          write an archify architecture seed from the codewiki index
   clio-coder context replay       compare working-set policies over Clio ledgers
   clio-coder context working-set  inspect one session's working-set fold and path index
 `;
@@ -317,6 +319,8 @@ export async function runContextCommand(args: string[]): Promise<number> {
 			return (await import("./context-clear.js")).runContextClearCommand(rest);
 		case "index":
 			return (await import("./context-index.js")).runContextIndexCommand(rest);
+		case "map":
+			return (await import("./context-map.js")).runContextMapCommand(rest);
 		case "replay":
 			return (await import("./context-working-set.js")).runContextReplayCommand(rest);
 		case "working-set":
