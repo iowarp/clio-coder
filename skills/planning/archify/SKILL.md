@@ -148,16 +148,21 @@ clio-coder context map --json
 
 It reads the codewiki index and writes
 `.clio-coder/artifacts/maps/<repo>.architecture.json`: an architecture spec
-whose components are the repository's largest directory areas, whose
-connections are collapsed import edges, and whose `sources` point at real
-files and lines. If it reports that no index exists, run
+whose components are the repository's largest directory areas and whose
+connections are collapsed import edges. When the origin remote is a GitHub
+URL and `HEAD` is a full revision, the seed also carries `meta.repository`
+and per-component `sources` pointing at real files and lines; otherwise it
+carries neither, because archify accepts source citations only against a
+pinned revision. If it reports that no index exists, run
 `clio-coder context index` and retry. Then refine the seed: rename labels to
 what the areas mean, drop noise edges, and keep `meta.repository` and every
 `sources` entry that came from the seed. Cite additional line ranges only
-from `code_nav mode=outline` results, never from memory. Keep at most 12
-primary components; fold smaller areas into their parent rather than adding
-nodes. Pass `--repo-root .` to both `validate` and `deliver` so the source
-paths and line numbers are verified against the working tree.
+from `code_nav mode=outline` results, never from memory, and only when
+`meta.repository` is present. Keep at most 12 primary components; fold
+smaller areas into their parent rather than adding nodes. When the seed
+carries `meta.repository`, pass `--repo-root .` to both `validate` and
+`deliver` so the source paths and line numbers are verified against the
+working tree; without it, run both commands without `--repo-root`.
 
 ## Delivery and verification
 

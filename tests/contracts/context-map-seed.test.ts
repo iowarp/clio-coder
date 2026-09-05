@@ -77,9 +77,12 @@ function detailedFixture(): Codewiki {
 	return { ...base, files: [...base.files, ...padding] };
 }
 
+const SHA = "0123456789abcdef0123456789abcdef01234567";
+const PINNED = { url: "https://github.com/iowarp/clio-coder", revision: SHA };
+
 describe("context map architecture seed", () => {
 	it("caps primary components, maps types from directories and roles, and cites first-symbol lines", () => {
-		const seed = buildArchitectureSeed(detailedFixture(), { title: "fixture" });
+		const seed = buildArchitectureSeed(detailedFixture(), { title: "fixture", repository: PINNED });
 		strictEqual(seed.schema_version, 1);
 		strictEqual(seed.diagram_type, "architecture");
 		strictEqual(seed.meta.quality_profile, "standard");
@@ -146,23 +149,28 @@ describe("context map architecture seed", () => {
 		]);
 	});
 
-	it("records meta.repository only for a GitHub remote at a full revision", () => {
-		const sha = "0123456789abcdef0123456789abcdef01234567";
+	it("records meta.repository only for a GitHub remote at a full revision, and cites sources only then", () => {
 		const github = buildArchitectureSeed(fixture(), {
 			title: "fixture",
-			repository: { url: "https://github.com/iowarp/clio-coder", revision: sha.toUpperCase() },
+			repository: { url: PINNED.url, revision: SHA.toUpperCase() },
 		});
-		deepStrictEqual(github.meta.repository, { url: "https://github.com/iowarp/clio-coder", revision: sha });
+		deepStrictEqual(github.meta.repository, PINNED);
+		ok(github.components.some((component) => component.sources !== undefined));
 		const gitlab = buildArchitectureSeed(fixture(), {
 			title: "fixture",
-			repository: { url: "https://gitlab.com/iowarp/clio-coder", revision: sha },
+			repository: { url: "https://gitlab.com/iowarp/clio-coder", revision: SHA },
 		});
 		strictEqual(gitlab.meta.repository, undefined);
 		const short = buildArchitectureSeed(fixture(), {
 			title: "fixture",
-			repository: { url: "https://github.com/iowarp/clio-coder", revision: "abc1234" },
+			repository: { url: PINNED.url, revision: "abc1234" },
 		});
 		strictEqual(short.meta.repository, undefined);
-		strictEqual(buildArchitectureSeed(fixture(), { title: "fixture" }).meta.repository, undefined);
+		const none = buildArchitectureSeed(fixture(), { title: "fixture" });
+		strictEqual(none.meta.repository, undefined);
+		// Archify rejects `sources` without a pinned repository, so an unpinned
+		// seed cites nothing instead of failing validation.
+		ok(none.components.every((component) => component.sources === undefined));
+		ok(gitlab.components.every((component) => component.sources === undefined));
 	});
 });

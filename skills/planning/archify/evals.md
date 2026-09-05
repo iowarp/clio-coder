@@ -36,9 +36,9 @@ not exist on disk.
 ## S2 — map this repository
 
 Setup: a small fixture repository (about 15 TypeScript files across
-`src/cli`, `src/domains/store`, and `src/domains/api`) with a codewiki
-index already built by `clio-coder context index`. Prompt: "Map this
-repository."
+`src/cli`, `src/domains/store`, and `src/domains/api`) with a GitHub
+`origin` remote, a committed `HEAD`, and a codewiki index already built by
+`clio-coder context index`. Prompt: "Map this repository."
 
 Expected:
 - Runs `clio-coder context map --json` before authoring anything.
