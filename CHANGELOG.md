@@ -16,6 +16,7 @@ Trust spine: typed claims, executable validation, and decision provenance. Answe
 - Operator tasks carry optional acceptance through repeatable `--expect` and `--verify` flags in the CLI and `/tasks add`. Shared dispatch normalizers validate paths and bounded checks, pickup persists required board evidence, and high rigor requires a passing receipt or a limitation naming each acceptance check.
 - An opt-in `--strict` switch for `scripts/smoke-real-home.sh` causes the real-home release smoke to fail when doctor exits 1 on failing rows, while default runs continue to tolerate operator fleet state (#293).
 - A current release-cut checklist in `docs/process/release-cut-checklist.md` and paired blueprint for maintainers to verify and publish releases (#298).
+- ACP registry submission assets including `assets/acp-registry/agent.json` and `assets/acp-registry/icon.svg` with submission documentation in `docs/architecture/acp.md` (#314).
 
 ### Changed
 - Document that headless Antigravity reports permission_mode always-proceed under mode plan and sandbox, and that Clio grades enforcement as approximated (#281).
