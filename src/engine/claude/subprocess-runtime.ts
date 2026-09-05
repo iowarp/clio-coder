@@ -1,17 +1,30 @@
 import { type ChildProcessByStdio, spawn } from "node:child_process";
-import { createInterface } from "node:readline";
-import type { Readable } from "node:stream";
+import type { Readable, Writable } from "node:stream";
 
+import { boundedExternalDiagnostic } from "../../core/external-diagnostic.js";
+import { buildSafeToolEnv, resolveSafeCwd } from "../../core/safe-exec.js";
 import type { AutonomyLevel } from "../../domains/safety/autonomy.js";
 import { assertToolProfileEnforceable } from "../../tools/profiles.js";
-import { readStderr, waitForClose } from "../external-subprocess.js";
+import { createProcessTreeTerminator, readBoundedLines, readStderr, waitForClose } from "../external-subprocess.js";
 import type { AgentEvent, AgentMessage, Usage } from "../types.js";
 import type { WorkerEventEmit, WorkerRunHandle, WorkerRunInput, WorkerRunResult } from "../worker-runtime.js";
 import { isClaudeCodeSessionId } from "./session-id.js";
 
 const READ_ONLY_CLAUDE_TOOLS = ["Read", "Grep", "Glob", "LS", "WebFetch", "WebSearch"] as const;
 
-type ClaudeChildProcess = ChildProcessByStdio<null, Readable, Readable>;
+/** Official CLI binary, resolved from the operator's PATH. */
+const CLAUDE_BINARY = "claude";
+export const CLAUDE_MAX_STREAM_LINE_BYTES = 1024 * 1024;
+export const CLAUDE_MAX_STREAM_BYTES = 8 * 1024 * 1024;
+
+type ClaudeChildProcess = ChildProcessByStdio<Writable, Readable, Readable>;
+
+export interface ClaudeRuntimeDependencies {
+	binary?: string;
+	workspaceRoot?: string;
+	environment?: NodeJS.ProcessEnv;
+	killGraceMs?: number;
+}
 
 export interface ClaudeSubprocessPermissionConfig {
 	permissionMode: "plan" | "dontAsk" | "acceptEdits" | "default" | "bypassPermissions";
@@ -48,15 +61,20 @@ export function claudeSubprocessPermissionConfigForAutonomy(
 	return { permissionMode: "default", extraArgs: [], dangerousBypass: false };
 }
 
-function buildClaudeCodePrompt(input: WorkerRunInput): string {
+export function buildClaudeCodePrompt(input: WorkerRunInput): string {
 	const parts = (input.dynamicPromptMessages ?? []).map((message) => message.body.trim()).filter(Boolean);
 	parts.push(input.task);
 	return parts.join("\n\n");
 }
 
-function buildClaudeCodeArgs(input: WorkerRunInput): string[] {
+/**
+ * `claude -p` reads the user prompt from stdin when no positional prompt is
+ * given, so the prompt never appears in argv. The system prompt stays on
+ * `--append-system-prompt`: stdin carries only the user turn.
+ */
+export function buildClaudeCodeArgs(input: WorkerRunInput, gateEnv: NodeJS.ProcessEnv = process.env): string[] {
 	assertToolProfileEnforceable(input.toolProfile, "claude-code");
-	const permission = claudeSubprocessPermissionConfigForAutonomy(input.autonomy);
+	const permission = claudeSubprocessPermissionConfigForAutonomy(input.autonomy, gateEnv);
 	const args = [
 		"-p",
 		"--output-format",
@@ -71,7 +89,6 @@ function buildClaudeCodeArgs(input: WorkerRunInput): string[] {
 	const systemPrompt = input.systemPrompt.trim();
 	if (systemPrompt.length > 0) args.push("--append-system-prompt", systemPrompt);
 	if (isClaudeCodeSessionId(input.sessionId)) args.push("--session-id", input.sessionId.trim());
-	args.push(buildClaudeCodePrompt(input));
 	return args;
 }
 
@@ -170,8 +187,11 @@ function buildAssistantMessage(input: {
 	exitCode: number;
 	aborted: boolean;
 	stderr: string;
+	transportError?: string;
 }): AgentMessage & { role: "assistant" } {
-	const errorMessage = input.exitCode === 0 ? "" : resultError(input.result, input.stderr);
+	const transportError = input.transportError ?? "";
+	const failed = input.exitCode !== 0 || transportError.length > 0;
+	const errorMessage = !failed ? "" : transportError || resultError(input.result, input.stderr);
 	const message: AgentMessage & { role: "assistant" } = {
 		role: "assistant",
 		content: [{ type: "text", text: input.text }],
@@ -179,12 +199,12 @@ function buildAssistantMessage(input: {
 		provider: "anthropic",
 		model: input.model,
 		usage: normalizeUsage(input.result?.usage, finite(input.result?.total_cost_usd)),
-		stopReason: input.aborted ? "aborted" : input.exitCode === 0 ? "stop" : "error",
+		stopReason: input.aborted ? "aborted" : failed ? "error" : "stop",
 		timestamp: Date.now(),
 	} as AgentMessage & { role: "assistant" };
 	if (typeof input.result?.request_id === "string") message.responseId = input.result.request_id;
 	if (typeof input.result?.model === "string") message.responseModel = input.result.model;
-	if (errorMessage.length > 0) message.errorMessage = errorMessage;
+	if (errorMessage.length > 0) message.errorMessage = boundedExternalDiagnostic(errorMessage);
 	return message;
 }
 
@@ -224,9 +244,14 @@ async function readJsonLines(
 	emit: WorkerEventEmit,
 	state: { started: boolean; text: string; model: string; result: Record<string, unknown> | null },
 ): Promise<void> {
-	const rl = createInterface({ input: child.stdout });
-	for await (const line of rl) {
-		const trimmed = line.trim();
+	for await (const bounded of readBoundedLines(child.stdout, {
+		maxLineBytes: CLAUDE_MAX_STREAM_LINE_BYTES,
+		maxTotalBytes: CLAUDE_MAX_STREAM_BYTES,
+	})) {
+		if (bounded.kind === "oversized") {
+			throw new Error(`claude stream-json line exceeded ${CLAUDE_MAX_STREAM_LINE_BYTES} bytes`);
+		}
+		const trimmed = bounded.line.trim();
 		if (trimmed.length === 0) continue;
 		let parsed: unknown;
 		try {
@@ -250,12 +275,21 @@ async function readJsonLines(
 	}
 }
 
-export function startClaudeCodeWorkerRun(input: WorkerRunInput, emit: WorkerEventEmit): WorkerRunHandle {
-	const args = buildClaudeCodeArgs(input);
-	const child = spawn("claude", args, {
-		cwd: process.cwd(),
-		env: process.env,
-		stdio: ["ignore", "pipe", "pipe"],
+export function startClaudeCodeWorkerRun(
+	input: WorkerRunInput,
+	emit: WorkerEventEmit,
+	dependencies: ClaudeRuntimeDependencies = {},
+): WorkerRunHandle {
+	const sourceEnv = dependencies.environment ?? process.env;
+	const args = buildClaudeCodeArgs(input, sourceEnv);
+	const prompt = buildClaudeCodePrompt(input);
+	const workspaceRoot = dependencies.workspaceRoot ?? process.cwd();
+	const cwd = resolveSafeCwd(input.cwd, workspaceRoot);
+	const child: ClaudeChildProcess = spawn(dependencies.binary ?? CLAUDE_BINARY, args, {
+		cwd,
+		env: buildSafeToolEnv({}, sourceEnv),
+		detached: process.platform !== "win32",
+		stdio: ["pipe", "pipe", "pipe"],
 	});
 	const streamState = {
 		started: false,
@@ -264,53 +298,64 @@ export function startClaudeCodeWorkerRun(input: WorkerRunInput, emit: WorkerEven
 		result: null as Record<string, unknown> | null,
 	};
 	let aborted = false;
-	let killTimer: NodeJS.Timeout | null = null;
-
+	let transportError = "";
+	const terminator = createProcessTreeTerminator(child, dependencies.killGraceMs ?? 1500);
 	const abort = (): void => {
+		if (child.exitCode !== null) return;
 		aborted = true;
-		if (child.killed) return;
-		child.kill("SIGTERM");
-		killTimer = setTimeout(() => {
-			if (!child.killed) child.kill("SIGKILL");
-		}, 1500);
+		terminator.terminate();
 	};
-	if (input.signal) {
-		if (input.signal.aborted) abort();
-		else input.signal.addEventListener("abort", abort, { once: true });
-	}
+	const onAbort = (): void => abort();
+	if (input.signal?.aborted) abort();
+	else input.signal?.addEventListener("abort", onAbort, { once: true });
+	child.once("error", (cause) => {
+		transportError ||=
+			(cause as NodeJS.ErrnoException).code === "ENOENT"
+				? "Claude Code CLI (`claude`) is not installed or not on PATH."
+				: cause.message;
+	});
+	child.stdin.on("error", (cause) => {
+		if (!aborted) transportError ||= `could not send prompt to Claude Code CLI: ${cause.message}`;
+	});
+	child.stdin.end(prompt);
 
 	const promise = (async (): Promise<WorkerRunResult> => {
 		emit({ type: "agent_start" } as AgentEvent);
-		const stderrPromise = readStderr(child);
-		const stdoutPromise = readJsonLines(child, emit, streamState);
-		const exitCode = await waitForClose(child);
-		await stdoutPromise.catch(() => {});
-		const stderr = await stderrPromise.catch(() => "");
-		if (killTimer) clearTimeout(killTimer);
-		const finalText =
-			streamState.text ||
-			resultText(streamState.result) ||
-			(exitCode === 0 ? "" : resultError(streamState.result, stderr));
-		const finalMessage = buildAssistantMessage({
-			model: streamState.model,
-			text: finalText,
-			result: streamState.result,
-			exitCode,
-			aborted,
-			stderr,
-		});
-		if (!streamState.started) emit({ type: "message_start", message: finalMessage } as AgentEvent);
-		emit({ type: "message_end", message: finalMessage } as AgentEvent);
-		const messages: AgentMessage[] = [finalMessage];
-		emit({ type: "agent_end", messages } as AgentEvent);
-		if (exitCode !== 0 && stderr.trim().length > 0 && !aborted) {
-			process.stderr.write(`[worker:claude-code] ${stderr.trim()}\n`);
+		try {
+			const stderrPromise = readStderr(child);
+			const stdoutPromise = readJsonLines(child, emit, streamState).catch((cause) => {
+				transportError ||= cause instanceof Error ? cause.message : String(cause);
+				terminator.terminate();
+			});
+			const exitCode = await waitForClose(child);
+			await stdoutPromise;
+			const stderr = await stderrPromise.catch(() => "");
+			const finalText =
+				streamState.text ||
+				resultText(streamState.result) ||
+				(exitCode === 0 ? "" : resultError(streamState.result, stderr));
+			const finalMessage = buildAssistantMessage({
+				model: streamState.model,
+				text: finalText,
+				result: streamState.result,
+				exitCode,
+				aborted,
+				stderr,
+				transportError,
+			});
+			if (!streamState.started) emit({ type: "message_start", message: finalMessage } as AgentEvent);
+			emit({ type: "message_end", message: finalMessage } as AgentEvent);
+			const messages: AgentMessage[] = [finalMessage];
+			emit({ type: "agent_end", messages } as AgentEvent);
+			if (finalMessage.stopReason === "error" && finalMessage.errorMessage && !aborted) {
+				process.stderr.write(`[worker:claude-code] ${finalMessage.errorMessage}\n`);
+			}
+			return { messages, exitCode: finalMessage.stopReason === "stop" ? 0 : 1 };
+		} finally {
+			terminator.cleanup();
+			input.signal?.removeEventListener("abort", onAbort);
 		}
-		return { messages, exitCode: exitCode === 0 ? 0 : 1 };
 	})();
 
-	return {
-		promise,
-		abort,
-	};
+	return { promise, abort };
 }

@@ -16,6 +16,7 @@ Trust spine: typed claims, executable validation, and decision provenance. Answe
 - Operator tasks carry optional acceptance through repeatable `--expect` and `--verify` flags in the CLI and `/tasks add`. Shared dispatch normalizers validate paths and bounded checks, pickup persists required board evidence, and high rigor requires a passing receipt or a limitation naming each acceptance check.
 
 ### Changed
+- The Claude Code CLI worker now uses the same hardened transport as the Antigravity worker. `claude` receives only the allowlisted environment instead of the whole process environment, so provider keys and Clio gates no longer reach it. The prompt travels on stdin rather than argv, the admitted `cwd` is honored and refused when it escapes the workspace root, stdout is read through the bounded line reader (1 MiB per line, 8 MiB total) and a violation ends the run as an error, and cancellation terminates the whole process group (#279).
 - The dispatch board reads observability's run projection. One fold owns lifecycle events, worker progress, receipt trust, retries, cancellation, fleet positions, and evidence readiness; the board keeps ordering, selection, and rendering. Terminal status and accounting come from the same projection the observability contract publishes.
 
 ### Fixed
