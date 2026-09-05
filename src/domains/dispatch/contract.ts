@@ -86,6 +86,12 @@ export interface DispatchAdmissionObserver {
 	onAdmitted(run: { runId: string; pid: number | null; runtimeKind: RunEnvelope["runtimeKind"] }): void;
 }
 
+/** Invocation-owned admission bounds; never serialized into model-authored requests. */
+export interface DispatchPreparationOptions {
+	signal?: AbortSignal;
+	deadlineAt?: number;
+}
+
 /** Side-effect-free effective routing used to construct a dispatch approval artifact. */
 export interface DispatchPlanTaskResolution {
 	agentId: string;
@@ -225,6 +231,7 @@ export interface DispatchContract {
 	dispatch(
 		req: DispatchRequest,
 		observer?: DispatchAdmissionObserver,
+		preparation?: DispatchPreparationOptions,
 	): Promise<{
 		runId: string;
 		events: AsyncIterableIterator<unknown>;
@@ -232,7 +239,10 @@ export interface DispatchContract {
 	}>;
 
 	/** Spawn a group of dispatches and expose one merged batch event stream. */
-	dispatchBatch(reqs: ReadonlyArray<DispatchRequest>): Promise<{
+	dispatchBatch(
+		reqs: ReadonlyArray<DispatchRequest>,
+		preparation?: DispatchPreparationOptions,
+	): Promise<{
 		batchId: string;
 		/** Logical work ids, one per request in admission order. */
 		assignmentIds: ReadonlyArray<string>;

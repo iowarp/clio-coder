@@ -186,8 +186,17 @@ inference hold. Late saturation stays a dropped `endpoint_busy` boundary with
 no usage or cache-disturbance claim. Compaction checks
 the originating session/branch after preparation and uses the existing simple
 stream API with thinking off, rather than inferring an active level from the
-model's reasoning capability. Cold worker admission is a separate caller and
-must be validated independently.
+model's reasoning capability.
+
+Native worker admission also prepares the selected cold LiteLLM target before
+freezing its capabilities and thinking controls into the worker specification
+and receipt. Tool cancellation and the original admission deadline bound that
+wait, including a delayed metadata response body. Failed preparation releases
+the existing plan reservation and cannot launch a late worker or publish
+cancelled health data. The approved target, model, endpoint and node remain
+binding; changed route identity requires fresh admission. Metadata discovery
+does not infer capacity or residency from another route sharing the gateway,
+and does not bypass the existing capacity or approved tool-surface checks.
 
 
 A gateway alias is not an upstream runtime identity. Clio consumes the optional
