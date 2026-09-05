@@ -6,7 +6,11 @@ export interface EvalCallLedgerFold {
 	entries(): SessionEntry[];
 }
 
-/** Fold structured assistant completions into the eval's per-call ledger. */
+/**
+ * Fold stdout assistant completions into a fallback ledger. These spans start
+ * at the provider's message_start, which may follow its response-header wait;
+ * they are not complete request latency. Native eval prefers session timing.
+ */
 export function createEvalCallLedgerFold(now: () => number = () => performance.now()): EvalCallLedgerFold {
 	const entries: SessionEntry[] = [];
 	let pending = "";

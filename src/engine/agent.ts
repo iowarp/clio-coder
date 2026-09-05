@@ -14,7 +14,11 @@ import { Agent, type AgentOptions, type StreamFn } from "@earendil-works/pi-agen
 import { isDispositionedToolResultError } from "../tools/result-disposition.js";
 import { engineStreamSimple } from "./api-registry.js";
 
-export type EngineAgentOptions = Omit<AgentOptions, "streamFn"> & { streamFn?: StreamFn };
+export type EngineAgentOptions = Omit<AgentOptions, "streamFn"> & {
+	streamFn?: StreamFn;
+	/** Called immediately before each native stream delegate invocation. */
+	onStreamInvocation?: () => void;
+};
 
 export interface EngineAgentHandle {
 	agent: Agent;
@@ -34,9 +38,15 @@ function dispositionAwareAfterToolCall(
 }
 
 export function createEngineAgent(options: EngineAgentOptions = {}): EngineAgentHandle {
+	const { streamFn = engineStreamSimple, onStreamInvocation, ...agentOptions } = options;
 	const agent = new Agent({
-		streamFn: engineStreamSimple,
-		...options,
+		...agentOptions,
+		streamFn: onStreamInvocation
+			? (...args) => {
+					onStreamInvocation();
+					return streamFn(...args);
+				}
+			: streamFn,
 		afterToolCall: dispositionAwareAfterToolCall(options.afterToolCall),
 	});
 	return {

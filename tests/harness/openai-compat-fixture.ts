@@ -61,6 +61,8 @@ export interface OpenAICompatFixtureOptions {
 	replyChunks?: readonly string[];
 	/** Optional deterministic delay between text chunks. */
 	chunkDelayMs?: number;
+	/** Delay response headers for each streaming request; omitted entries have no delay. */
+	responseHeaderDelaysMs?: readonly number[];
 	/**
 	 * When set, answer the tool-free completion of every turn with this tool
 	 * call instead of text. Absent, the fixture behaves exactly as before.
@@ -137,6 +139,8 @@ export async function startOpenAICompatFixture(
 			res.end(JSON.stringify({ error: { message: options.initialErrors.message, type: "fixture_error" } }));
 			return;
 		}
+		const headerDelayMs = options.responseHeaderDelaysMs?.[streamingRequests - 1] ?? 0;
+		if (headerDelayMs > 0) await new Promise<void>((resolve) => setTimeout(resolve, headerDelayMs));
 		res.writeHead(200, {
 			"content-type": "text/event-stream",
 			"cache-control": "no-cache",

@@ -471,11 +471,11 @@ export function backendCacheVerdict(
 	return classifyCacheUsage(input, cacheRead);
 }
 
-/** Per-API-call latency captured from the agent event stream (T3.2). */
+/** Native stream-invocation latency, measured on one monotonic clock. */
 export interface AssistantCallTiming {
-	/** message_start → first assistant delta; null when no delta arrived. */
+	/** Invocation to first assistant output; null when no output arrived. */
 	ttftMs: number | null;
-	/** message_start → message_end for the same assistant API call. */
+	/** Invocation to message_end for the same assistant API call. */
 	apiMs: number;
 }
 
