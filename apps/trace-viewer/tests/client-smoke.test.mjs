@@ -1,6 +1,6 @@
 import { strict as assert } from "node:assert";
 import { describe, it } from "node:test";
-import { adoptServerClock, escapeHtml, runPage } from "../public/app.js";
+import { adoptServerClock, escapeHtml, runCard, runPage } from "../public/app.js";
 
 describe("trace viewer client", () => {
 	it("renders waterfall, tool span, gate evidence, attempts, and truthful missing spend", () => {
@@ -439,5 +439,35 @@ describe("trace viewer client", () => {
 		assert.match(htmlSubcent, /\$0\.0036/);
 		assert.match(htmlSubcent, /\$0\.0024/);
 		assert.match(htmlSubcent, /\$0\.0012/);
+	});
+
+	// runs.source (commit 0281ef95) is the one column that says whether a row
+	// is a dispatched run or an interactive session turn. The CLI table shows
+	// it; the viewer must too, on both the list row and the run page, and a
+	// row from a mirror without the field must not render a stray badge.
+	it("shows the run source badge on the list row and run page, and nothing when absent", () => {
+		const base = {
+			run_id: "run-src",
+			status: "success",
+			agent: "coder",
+			target: "local",
+			model: "gpt",
+			node: "blade",
+			started_at: "2026-01-01T00:00:00Z",
+			ended_at: "2026-01-01T00:01:00Z",
+		};
+		const dispatch = { ...base, source: "dispatch" };
+		const session = { ...base, run_id: "run-turn", source: "session" };
+		const absent = { ...base };
+
+		assert.match(runCard(dispatch), /<span class="source-badge dispatch">dispatch<\/span>/);
+		assert.match(runPage(dispatch, [], [], []), /<span class="source-badge dispatch">dispatch<\/span>/);
+		assert.match(runCard(session), /<span class="source-badge session">session<\/span>/);
+		assert.match(runPage(session, [], [], []), /<span class="source-badge session">session<\/span>/);
+
+		assert.doesNotMatch(runCard(absent), /source-badge/);
+		assert.doesNotMatch(runPage(absent, [], [], []), /source-badge/);
+		assert.doesNotMatch(runCard(absent), /undefined/);
+		assert.doesNotMatch(runPage(absent, [], [], []), /undefined/);
 	});
 });

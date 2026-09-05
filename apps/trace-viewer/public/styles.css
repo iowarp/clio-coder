@@ -580,6 +580,31 @@ main,
 	border: 1px solid rgba(255, 180, 84, 0.3);
 }
 
+.source-badge {
+	display: inline-block;
+	margin-left: 0.5rem;
+	padding: 0.1rem 0.45rem;
+	border-radius: 4px;
+	font-family: var(--font-mono);
+	font-size: 0.675rem;
+	font-weight: 700;
+	text-transform: uppercase;
+	letter-spacing: 0.05em;
+	vertical-align: middle;
+}
+
+.source-badge.dispatch {
+	background: rgba(var(--color-cyan-rgb), 0.12);
+	color: var(--color-cyan);
+	border: 1px solid rgba(var(--color-cyan-rgb), 0.3);
+}
+
+.source-badge.session {
+	background: rgba(189, 0, 255, 0.12);
+	color: var(--color-purple);
+	border: 1px solid rgba(189, 0, 255, 0.3);
+}
+
 .run-head {
 	margin-bottom: 2rem;
 }

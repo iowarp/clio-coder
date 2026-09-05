@@ -186,10 +186,11 @@ async function drainEvents(runId) {
 	} while (more);
 }
 
-function runCard(run) {
+/** @internal Exported so a test can render a list row without a DOM. */
+export function runCard(run) {
 	const duration = runDuration(run);
 	const request = typeof run.request === "string" && run.request.length > 0 ? run.request : null;
-	return `<a class="run ${statusClass(run.status)}" href="#/run/${encodeURIComponent(run.run_id)}"><i class="status-mark"></i><div><div class="run-id">${escapeHtml(run.run_id)}</div>${request === null ? "" : `<div class="run-task" title="${escapeHtml(request)}">${escapeHtml(request)}</div>`}<div class="secondary">${escapeHtml(run.agent)} · ${escapeHtml(run.model)}</div></div><div><div class="status">${escapeHtml(run.status)}</div><div class="secondary">${formatTime(run.started_at)}</div><div class="secondary">${duration === null ? "" : formatDuration(duration)}</div></div><div><div class="metric">${formatTokens(run.total_tokens)}</div><div class="label">tokens</div></div><div><div class="metric">${formatCost(run.total_cost_usd)}</div><div class="label">cost</div></div><div><div class="metric">${escapeHtml(run.node ?? "local")}</div><div class="label">node</div></div></a>`;
+	return `<a class="run ${statusClass(run.status)}" href="#/run/${encodeURIComponent(run.run_id)}"><i class="status-mark"></i><div><div class="run-id">${escapeHtml(run.run_id)}${sourceBadge(run)}</div>${request === null ? "" : `<div class="run-task" title="${escapeHtml(request)}">${escapeHtml(request)}</div>`}<div class="secondary">${escapeHtml(run.agent)} · ${escapeHtml(run.model)}</div></div><div><div class="status">${escapeHtml(run.status)}</div><div class="secondary">${formatTime(run.started_at)}</div><div class="secondary">${duration === null ? "" : formatDuration(duration)}</div></div><div><div class="metric">${formatTokens(run.total_tokens)}</div><div class="label">tokens</div></div><div><div class="metric">${formatCost(run.total_cost_usd)}</div><div class="label">cost</div></div><div><div class="metric">${escapeHtml(run.node ?? "local")}</div><div class="label">node</div></div></a>`;
 }
 
 export function runPage(
@@ -221,7 +222,19 @@ function runHeadline(run) {
 			: "",
 	];
 	const timing = `${formatTime(run.started_at)}${run.ended_at ? ` → ${formatTime(run.ended_at)}` : " → live"}${duration === null ? "" : ` · ${formatDuration(duration)}`}`;
-	return `<div class="eyebrow"><span class="status-badge ${statusClass(run.status)}">${escapeHtml(run.status)}</span> · ${escapeHtml(timing)}</div><h1>${escapeHtml(run.run_id)}</h1>${request === null ? "" : `<p class="task" title="${escapeHtml(request)}">${escapeHtml(request)}</p>`}<div class="chips">${chips.join("")}</div>`;
+	return `<div class="eyebrow"><span class="status-badge ${statusClass(run.status)}">${escapeHtml(run.status)}</span>${sourceBadge(run)} · ${escapeHtml(timing)}</div><h1>${escapeHtml(run.run_id)}</h1>${request === null ? "" : `<p class="task" title="${escapeHtml(request)}">${escapeHtml(request)}</p>`}<div class="chips">${chips.join("")}</div>`;
+}
+
+/**
+ * `runs.source` says whether a row is a dispatched run or an interactive
+ * session turn. The value is one of two known words, so it doubles as the
+ * class name. A mirror the viewer opened without the field renders no badge
+ * rather than an empty or "undefined" one.
+ */
+function sourceBadge(run) {
+	const source = run.source;
+	if (source !== "dispatch" && source !== "session") return "";
+	return `<span class="source-badge ${source}">${source}</span>`;
 }
 
 /** Wall clock for the run; a live run measures against now, as the waterfall does. */
