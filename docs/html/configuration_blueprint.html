@@ -1411,6 +1411,7 @@ clio-coder configure --id claude-code-worker --runtime claude-code --model sonne
 <tr><td><code>suggest</code></td><td>Refused because a headless subprocess cannot pause for Clio approval</td></tr>
 <tr><td><code>full-auto</code></td><td>Capped at <code>accept-edits</code> unless the external full-access gate is explicitly enabled</td></tr>
 </tbody></table>
+<p>Launch flags are a request to agy rather than a guarantee. Headless agy reports <code>permission_mode: always-proceed</code> even under <code>--mode plan --sandbox</code>, and Clio grades autonomy enforcement as <code>approximated</code> in execution receipts. The only Clio-enforced read-only boundary is the receipt grade.</p>
 <p>Only <code>full-auto</code> together with <code>CLIO_CODER_ALLOW_EXTERNAL_FULL_ACCESS=1</code> passes <code>--dangerously-skip-permissions</code>. Treat that as an external safety bypass: agy, not Clio&#39;s tool registry, controls the resulting filesystem, shell, network, prompts, and approvals. The gate is never enabled by onboarding. A <code>world-knowledge</code> dispatch remains read-only even if the caller requests a stronger posture; use another agent for mutation work.</p>
 <p><strong>Setup and verification:</strong></p>
 <pre><code class="language-bash"># Install using Google&#39;s instructions, then authenticate directly in the CLI.
