@@ -4,6 +4,7 @@ import { BusChannels, type ContextActivityPayload } from "../../core/bus-events.
 import type { DomainBundle, DomainContext, DomainExtension } from "../../core/domain-loader.js";
 import { clioDataDir } from "../../core/xdg.js";
 import { loadMemoryRecordsSync } from "../memory/index.js";
+import { describeValidationContract, loadValidationContract } from "../safety/index.js";
 import { detectProjectType, type ProjectType } from "../session/workspace/project-type.js";
 import { adoptionSourcesChanged } from "./adoption.js";
 import { runBootstrap } from "./bootstrap.js";
@@ -147,6 +148,12 @@ function collectStartupHints(cwd: string, options: ContextBundleOptions = {}): s
 	}
 	for (const issue of clio.errors) {
 		hints.push(`clio-coder: malformed ${issue.path} ignored: ${issue.error}`);
+	}
+	// An invalid validation contract leaves rigor at normal; say so once here
+	// rather than letting the finish gate quietly behave as if no contract existed.
+	const contract = loadValidationContract(cwd);
+	if (!contract.ok) {
+		hints.push(`clio-coder: validation contract ignored, rigor stays normal: ${describeValidationContract(contract)}`);
 	}
 	const state = readClioState(cwd);
 	if (!state) return hints;

@@ -1246,7 +1246,7 @@
 <td><code>CLIO_CODER_RIGOR</code></td>
 <td><code>repo-derived</code></td>
 <td><code>high</code> or <code>normal</code> (case-insensitive) overrides the finish-contract evidence bar for the orchestrator and dispatched workers; any other value means no override.</td>
-<td>env &gt; workspace validation contract file (<code>.clio-coder/validation.yaml</code>, <code>validation.yaml</code>, <code>VALIDATION.md</code> raise it to <code>high</code>) &gt; <code>normal</code>; no settings key</td>
+<td>env &gt; a parsed workspace validation contract (<code>.clio-coder/validation.yaml</code> or <code>validation.yaml</code>, version 1) raises it to <code>high</code>; an invalid contract or a Markdown-only <code>VALIDATION.md</code> leaves <code>normal</code> &gt; <code>normal</code>; no settings key</td>
 </tr>
 <tr>
 <td><code>CLIO_CODER_RUN_OVERRIDES</code></td>
@@ -3549,9 +3549,9 @@
 </tr>
 </thead>
 <tbody><tr>
-<td><code>(presence)</code></td>
-<td>The file&#39;s presence (also <code>validation.yml</code>, root <code>validation.yaml</code>, or <code>VALIDATION.md</code>) raises the repo-derived rigor default from <code>normal</code> to <code>high</code>; its content is not read.</td>
-<td><code>CLIO_CODER_RIGOR</code> &gt; presence of a validation contract &gt; <code>normal</code></td>
+<td><code>version</code>, <code>task</code>, <code>runtime</code>, <code>artifacts</code>, <code>validators</code>, <code>notes</code></td>
+<td>The version-1 scientific validation contract (also <code>validation.yml</code>, root <code>validation.yaml</code>, or <code>validation.yml</code>). A contract that parses raises the repo-derived rigor default from <code>normal</code> to <code>high</code>; one that does not parse is diagnosed by <code>clio-coder doctor</code> and at interactive startup and leaves <code>normal</code>. <code>VALIDATION.md</code> is advisory prose and never raises rigor. Schema in <a href="validation_blueprint.html">Scientific Validation</a>.</td>
+<td><code>CLIO_CODER_RIGOR</code> &gt; parsed validation contract &gt; <code>normal</code></td>
 </tr>
 </tbody></table>
 <h3><code>.clio-coder/verifiers.yaml</code></h3>

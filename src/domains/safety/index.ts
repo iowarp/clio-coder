@@ -42,4 +42,23 @@ export {
 	type PathPolicyKind,
 	type PathPolicyOperation,
 } from "./path-policy.js";
-export { parseRigorOverride, type Rigor, resolveRigor } from "./rigor.js";
+export {
+	parseRigorOverride,
+	type Rigor,
+	type RigorResolution,
+	type RigorSource,
+	resolveRigor,
+	rigorResolution,
+} from "./rigor.js";
+export {
+	describeValidationContract,
+	loadValidationContract,
+	parseValidationContractText,
+	VALIDATION_CONTRACT_CAPS,
+	VALIDATION_CONTRACT_MARKDOWN_PATH,
+	VALIDATION_CONTRACT_YAML_PATHS,
+	type ValidationContract,
+	type ValidationContractArtifact,
+	type ValidationContractLoadResult,
+	type ValidationContractRuntime,
+} from "./validation-contract.js";

@@ -518,15 +518,7 @@ generating agent loop.</p>
 <ol>
 <li><p><strong>Explicit Override</strong>: Checked via the <code>CLIO_CODER_RIGOR</code> environment variable. It is trimmed and parsed case-insensitively. A value of <code>&quot;high&quot;</code> or <code>&quot;normal&quot;</code> overrides any other setting.</p>
 </li>
-<li><p><strong>Repository-Derived Default</strong>: If no override is present, Clio checks the workspace root for the presence of any of the following validation contract files:</p>
-<ul>
-<li><code>.clio-coder/validation.yaml</code></li>
-<li><code>.clio-coder/validation.yml</code></li>
-<li><code>validation.yaml</code></li>
-<li><code>validation.yml</code></li>
-<li><code>VALIDATION.md</code></li>
-</ul>
-<p>If any of these files are present, the default rigor level is raised to <code>high</code>. Otherwise, the default is <code>normal</code>.</p>
+<li><p><strong>Repository-Derived Default</strong>: If no override is present, Clio loads the first of <code>.clio-coder/validation.yaml</code>, <code>.clio-coder/validation.yml</code>, <code>validation.yaml</code>, or <code>validation.yml</code> at the workspace root through the strict version-1 loader in <code>src/domains/safety/validation-contract.ts</code>. A contract that parses raises the default to <code>high</code>. A contract that does not parse leaves the default at <code>normal</code> and carries the fault as a diagnostic that <code>clio-coder doctor</code> and the interactive startup notices print. <code>VALIDATION.md</code> is advisory prose: it is recognised as present but never parsed and never raises rigor. <code>rigorResolution()</code> returns the rigor with its source (<code>override</code>, <code>validation-contract</code>, <code>invalid-contract</code>, <code>markdown-advisory</code>, or <code>none</code>) and the diagnostic; <code>resolveRigor()</code> is the thin wrapper that returns the rigor alone. See <a href="validation_blueprint.html">Scientific Validation</a> for the schema.</p>
 </li>
 </ol>
 <hr>
