@@ -58,6 +58,10 @@ export const TOOL_PLANES: Readonly<Record<BuiltinToolName, PlaneExpectation>> = 
 	// else: no filesystem, no shell. Read class so it never trips a safety
 	// gate; parallel because the call is pure and idempotent.
 	[ToolNames.Limitation]: { plane: "orchestrate", actionClass: "read", executionMode: "parallel" },
+	// decide appends one decision-board entry to the session ledger and
+	// nothing else. Read class so it never trips a safety gate; sequential so
+	// two decisions in one batch never race the supersede lookup.
+	[ToolNames.Decide]: { plane: "orchestrate", actionClass: "read", executionMode: "sequential" },
 	[ToolNames.WebFetch]: { plane: "retrieve", actionClass: "read", executionMode: "parallel" },
 	[ToolNames.AskUser]: { plane: "interact", actionClass: "read", executionMode: "sequential" },
 	[ToolNames.Artifact]: { plane: "artifact", actionClass: "write", executionMode: "sequential" },
