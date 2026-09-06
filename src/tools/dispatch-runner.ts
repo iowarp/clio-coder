@@ -1336,7 +1336,11 @@ async function runCompete(
 				const receipt = candidateRuns[index]?.receipt;
 				const failed = receipt !== undefined && isPipelineStepFailure(receipt);
 				if (failed) return "builder failed";
-				commitCandidateWork(worktree, `clio-coder compete ${group} candidate ${worktree.index}`);
+				// The receipt records the candidate's effective authority after recipe
+				// and invocation narrowing, independently of the coordinator's autonomy.
+				if (receipt?.autonomyEnforcement?.autonomy !== "read-only") {
+					commitCandidateWork(worktree, `clio-coder compete ${group} candidate ${worktree.index}`);
+				}
 				return candidateDiffStat(root, worktree.branch);
 			});
 			if (candidateRuns.every((run) => isPipelineStepFailure(run.receipt))) {

@@ -57,9 +57,19 @@ export function isCanonicalWorktreePathInside(parent: string, candidate: string)
 	return rel.length > 0 && rel !== ".." && !rel.startsWith(`..${sep}`) && !isAbsolute(rel);
 }
 
-export function commitWorktreePath(path: string, identity: string, message: string): boolean {
-	git(path, ["add", "-A"]);
-	if (git(path, ["status", "--porcelain"]).length === 0) return false;
+export function commitWorktreePath(
+	path: string,
+	identity: string,
+	message: string,
+	excludedPaths: ReadonlyArray<string> = [],
+): boolean {
+	// Runtime state can already be staged by a worker. Reset only these exact
+	// index entries, leaving their working files and every authored path intact.
+	if (excludedPaths.length > 0) {
+		git(path, ["reset", "-q", "HEAD", "--", ...excludedPaths.map((entry) => `:(top,literal)${entry}`)]);
+	}
+	git(path, ["add", "-A", "--", ".", ...excludedPaths.map((entry) => `:(top,exclude,literal)${entry}`)]);
+	if (git(path, ["diff", "--cached", "--name-only", "-z"]).length === 0) return false;
 	git(path, [
 		"-c",
 		`user.name=${identity}`,
