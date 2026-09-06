@@ -71,10 +71,11 @@ import {
 	resolveAgentToolCompatibility,
 } from "../agents/spec.js";
 import type { ConfigContract } from "../config/contract.js";
-import type { ContextContract, ProjectStructuredContext } from "../context/contract.js";
+import type { ContextContract, ProjectPromptContext, ProjectStructuredContext } from "../context/contract.js";
 import type { MiddlewareContract } from "../middleware/contract.js";
 import { workerSafetyOneLiner } from "../prompts/compiler.js";
 import type { PromptsContract } from "../prompts/contract.js";
+import { selectProjectPreload } from "../prompts/preload.js";
 import { type EffectivePricing, resolveEffectivePricing } from "../providers/catalog.js";
 import {
 	type CapabilityFlags,
@@ -1112,6 +1113,12 @@ export interface WorkerDynamicContext {
 	autonomy?: AutonomyLevel | null;
 	/** Effective approval routing; defaults to deny for legacy direct callers. */
 	onPermission?: WorkerPermissionMode | null;
+	/** Captured authored handbooks; preferred over the legacy structured projection. */
+	projectPrompt?: ProjectPromptContext | null;
+	/** Admitted native read capability; null for an unknown external inventory. */
+	projectReadTools?: boolean | null;
+	/** External runtimes do not promise the native read schema. */
+	projectExternalReadTools?: boolean;
 	/** Structured CLIO-CODER.md fields; null when CLIO-CODER.md is absent or malformed. */
 	project?: ProjectStructuredContext | null;
 	/** The run's own working directory and top-level layout; sent at every tier. */
@@ -1165,10 +1172,10 @@ function renderWorkerProjectContext(
 
 /** True when the rendered project message body includes the verification block. */
 function workerProjectContextIncludesVerification(body: string): boolean {
-	return body.includes("\nVerification expectations:\n");
+	return body.startsWith("# Project Context\n") && body.includes("\nVerification expectations:\n");
 }
 
-function buildDynamicPromptMessages(
+export function buildDynamicPromptMessages(
 	req: DispatchRequest,
 	dynamicContext: WorkerDynamicContext = {},
 ): WorkerPromptMessage[] {
@@ -1177,10 +1184,22 @@ function buildDynamicPromptMessages(
 		const body = renderWorkerWorkspaceContext(dynamicContext.workspace);
 		messages.push({ id: "dispatch-workspace", body, contentHash: sha256(body) });
 	}
-	if (dynamicContext.project && dynamicContext.projectContextTier === "bounded") {
-		const body = renderWorkerProjectContext(dynamicContext.project, {
-			includeVerification: dynamicContext.capabilityClass === "verification",
-		});
+	if (dynamicContext.projectContextTier === "bounded") {
+		const authored = dynamicContext.projectPrompt;
+		// Authored instructions remain verbatim, including test guidance. Never
+		// duplicate them with a second projection of conventions or verification.
+		const body = authored
+			? authored.handbookSources.length > 0
+				? selectProjectPreload(authored, dynamicContext.projectReadTools ?? null, {
+						maxChars: WORKER_PROJECT_CONTEXT_MAX_CHARS,
+						externalReadTools: dynamicContext.projectExternalReadTools === true,
+					}).text
+				: ""
+			: dynamicContext.project
+				? renderWorkerProjectContext(dynamicContext.project, {
+						includeVerification: dynamicContext.capabilityClass === "verification",
+					})
+				: "";
 		if (body.length > 0) {
 			messages.push({ id: "dispatch-project-context", body, contentHash: sha256(body) });
 		}
@@ -3606,17 +3625,24 @@ export function createDispatchBundle(
 			settings,
 			runtime: target.runtime,
 		});
-		// Fetch structured project context only for tiers that receive it, so
+		// Fetch captured project context only for tiers that receive it, so
 		// read-only scouts never pay the CLIO-CODER.md read. The tier is spec policy
 		// (capability-class default, recipe frontmatter override).
 		const tier = spec.projectContextTier;
-		const project = projectContext && tier === "bounded" ? projectContext.projectStructuredContext(cwd) : null;
+		const projectPrompt = projectContext && tier === "bounded" ? projectContext.renderPromptContext(cwd) : null;
 		const dynamicPromptMessages = buildDynamicPromptMessages(req, {
 			capabilityClass: spec.capabilityClass,
 			projectContextTier: tier,
 			autonomy: effectiveAutonomy,
 			onPermission: settings?.fleet.permissions.mode ?? "deny",
-			project,
+			projectPrompt,
+			projectReadTools:
+				target.runtime.kind === "subprocess"
+					? null
+					: effectiveTools.includes(ToolNames.Read)
+						? targetToolCapability(target)
+						: false,
+			projectExternalReadTools: target.runtime.kind === "subprocess",
 			workspace: readWorkspaceRootFacts(cwd),
 		});
 		const projectContextProvenance = projectContextProvenanceFor(tier, dynamicPromptMessages);
@@ -3716,14 +3742,17 @@ export function createDispatchBundle(
 		// ACP delegation defaults to no project context: repo conventions and
 		// invariants never leave the machine unless this agent's config opts in
 		// with projectContext: "bounded". No recipe means no capability class,
-		// so the verification section can never ride along. The safety posture
+		// so no derived verification supplement is added. Authored test guidance
+		// stays intact within the opted-in source budget. The safety posture
 		// line still rides along for every worker run.
 		const tier: AgentProjectContextTier = configured.projectContext ?? "none";
-		const project = projectContext && tier === "bounded" ? projectContext.projectStructuredContext(cwd) : null;
+		const projectPrompt = projectContext && tier === "bounded" ? projectContext.renderPromptContext(cwd) : null;
 		const dynamicPromptMessages = buildDynamicPromptMessages(req, {
 			projectContextTier: tier,
 			autonomy,
-			project,
+			projectPrompt,
+			projectReadTools: null,
+			projectExternalReadTools: true,
 			workspace: readWorkspaceRootFacts(cwd),
 		});
 		const projectContextProvenance = projectContextProvenanceFor(tier, dynamicPromptMessages);

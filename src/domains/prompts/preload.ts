@@ -36,8 +36,6 @@ export interface ProjectPreloadClass {
 	providerSupportsTools?: boolean | null;
 }
 const renderedLines = (text: string): number => (text.length === 0 ? 0 : text.split("\n").length);
-const fits = (text: string): boolean =>
-	text.length <= FULL_PROJECT_CONTEXT_MAX_CHARS && renderedLines(text) <= FULL_PROJECT_CONTEXT_MAX_LINES;
 
 function coverage(path: string, source: string, included: string): ProjectPreloadSource {
 	const availableLines = sourceLineCount(source);
@@ -59,7 +57,11 @@ function coverage(path: string, source: string, included: string): ProjectPreloa
 export function selectProjectPreload(
 	context: ProjectPromptContext,
 	providerSupportsTools: boolean | null = null,
+	options: { maxChars?: number; externalReadTools?: boolean } = {},
 ): { text: string; classification: ProjectPreloadClass } {
+	const maxChars = options.maxChars ?? FULL_PROJECT_CONTEXT_MAX_CHARS;
+	const fits = (text: string): boolean =>
+		text.length <= maxChars && renderedLines(text) <= FULL_PROJECT_CONTEXT_MAX_LINES;
 	const chars = context.text.length;
 	const lines = renderedLines(context.text);
 	const classify = (
@@ -80,9 +82,8 @@ export function selectProjectPreload(
 			sources,
 			omittedSupportFragments,
 			providerSupportsTools,
-			reason: mode !== "partial" ? null : chars > FULL_PROJECT_CONTEXT_MAX_CHARS ? "size" : "lines",
-			nearLimit:
-				mode === "full" && (chars > FULL_PROJECT_CONTEXT_MAX_CHARS * 0.9 || lines > FULL_PROJECT_CONTEXT_MAX_LINES * 0.9),
+			reason: mode !== "partial" ? null : chars > maxChars ? "size" : "lines",
+			nearLimit: mode === "full" && (chars > maxChars * 0.9 || lines > FULL_PROJECT_CONTEXT_MAX_LINES * 0.9),
 			label: `${mode} (included ${includedChars}/${chars} UTF-16 units, ${includedLines}/${lines} rendered lines; ${incomplete} of ${sources.length} handbook sources incomplete${providerSupportsTools === null ? "; tool capability unknown" : ""})`,
 		};
 	};
@@ -96,7 +97,9 @@ export function selectProjectPreload(
 	const retrieval =
 		providerSupportsTools === false
 			? "Remaining source text is unavailable to this target and cannot be recovered with tools in this session. Paths are source references."
-			: `${providerSupportsTools === null ? "If tools are available, read" : "Read"} each omitted suffix with read({path: ABSOLUTE_PATH, offset: FIRST_OMITTED_LINE, limit: 200}); continue as needed. Reads use current disk content, which may differ from the captured source.`;
+			: options.externalReadTools
+				? "External read tools are unknown. If available and permitted, read the listed omitted physical lines with your file-reading tool. Otherwise report the missing guidance to the parent. Reads use current disk content, which may differ from the captured source."
+				: `${providerSupportsTools === null ? "If tools are available, read" : "Read"} each omitted suffix with read({path: ABSOLUTE_PATH, offset: FIRST_OMITTED_LINE, limit: 200}); continue as needed. Reads use current disk content, which may differ from the captured source.`;
 	const header = [
 		"<project-preload>",
 		"Incomplete authored prefixes/excerpts: omitted guidance is not known from this preload. Read the selected sources before relying on project guidance.",
@@ -122,7 +125,7 @@ export function selectProjectPreload(
 		const entry = context.handbookSources[index];
 		if (!entry) continue;
 		const { path, source } = entry;
-		for (const offset of safePrefixOffsets(source, FULL_PROJECT_CONTEXT_MAX_CHARS).slice(1)) {
+		for (const offset of safePrefixOffsets(source, maxChars).slice(1)) {
 			const previous = fragments[index] ?? "";
 			fragments[index] = renderProjectContextFragment(source.slice(0, offset), path);
 			if (!fits(assemble(reservedNotice))) {
