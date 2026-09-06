@@ -14,6 +14,8 @@ export interface WikiPageEvidenceResult {
 	ok: boolean;
 	/** At most eight actionable diagnostics, each bounded for the persisted retry reason. */
 	reasons: string[];
+	/** Canonical repository-relative evidence files, present only after successful validation. */
+	dependencies?: string[];
 }
 
 function within(root: string, path: string): boolean {
@@ -107,6 +109,7 @@ export function validateWikiPageEvidence(input: WikiPageEvidenceInput): WikiPage
 		fail("Repository root is unavailable; restore access and retry evidence validation.");
 		return { ok: false, reasons };
 	}
+	const dependencies = new Set<string>();
 	const linesByFile = new Map<string, number>();
 	let readBytes = 0;
 	for (const reference of references) {
@@ -132,6 +135,7 @@ export function validateWikiPageEvidence(input: WikiPageEvidenceInput): WikiPage
 				continue;
 			}
 			accessSync(real, constants.R_OK);
+			dependencies.add(relative(root, real).split("\\").join("/"));
 			const startText = match[2] ?? match[4];
 			if (startText !== undefined) {
 				if (stat.size > 4 * 1024 * 1024) {
@@ -163,5 +167,5 @@ export function validateWikiPageEvidence(input: WikiPageEvidenceInput): WikiPage
 			fail(`Cannot inspect ${label}; restore readable repository evidence or remove the unsupported reference.`);
 		}
 	}
-	return { ok: reasons.length === 0, reasons };
+	return reasons.length === 0 ? { ok: true, reasons, dependencies: [...dependencies].sort() } : { ok: false, reasons };
 }

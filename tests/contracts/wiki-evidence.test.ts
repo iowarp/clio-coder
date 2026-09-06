@@ -31,8 +31,22 @@ describe("wiki mechanical evidence gate", () => {
 		deepStrictEqual(check(page("src/main.js", "See `src/main.js:1-3` and `tests/main.test.ts#L1`.")), {
 			ok: true,
 			reasons: [],
+			dependencies: ["src/main.ts", "tests/main.test.ts"],
 		});
 		strictEqual(check("See `package.json:1` and `Makefile`. No frontmatter is required.").ok, true);
+	});
+
+	it("returns canonical body-only evidence for source checkpoints and no dependencies on failure", () => {
+		symlinkSync(join(root, "src/main.ts"), join(root, "src/alias.ts"));
+		deepStrictEqual(check("See `src/main.js:1`, `src/alias.ts`, and `package.json`."), {
+			ok: true,
+			reasons: [],
+			dependencies: ["package.json", "src/main.ts"],
+		});
+		const failed = check(page("src/main.ts", "See `missing.py`."));
+		strictEqual(failed.ok, false);
+		strictEqual(failed.dependencies, undefined);
+		deepStrictEqual(check("See `package.json`.").dependencies, ["package.json"]);
 	});
 
 	it("rejects empty, metadata-only, headings-only and comments-only bodies", () => {
