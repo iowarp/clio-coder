@@ -1,0 +1,558 @@
+{
+	"initial": {
+		"timeline": [
+			{
+				"id": "turn-1:request",
+				"kind": "request",
+				"title": "Request",
+				"summary": "Remember the nonsecret marker CLIO_ACP_FIRST_codex only in this conversation. Reply exactly WORKBENCH_LIVE_OK. Do not use tools.",
+				"status": "complete",
+				"turnId": "turn-1",
+				"origin": "live",
+				"startedAt": "2026-09-06T00:47:15.774Z",
+				"endedAt": "2026-09-06T00:47:18.870Z",
+				"sequence": 1,
+				"source": "observed-by-workbench"
+			},
+			{
+				"id": "turn-1:text:2",
+				"kind": "narrative",
+				"title": "Clio Coder",
+				"summary": "WORKBENCH_LIVE_OK",
+				"status": "complete",
+				"turnId": "turn-1",
+				"origin": "live",
+				"startedAt": "2026-09-06T00:47:18.610Z",
+				"sequence": 2,
+				"agents": [
+					{
+						"role": "orchestrator",
+						"agentId": "orchestrator",
+						"runId": null,
+						"node": null
+					}
+				],
+				"source": "observed-on-acp"
+			},
+			{
+				"id": "turn-1:terminal",
+				"kind": "outcome",
+				"title": "Turn complete",
+				"summary": "Clio Coder finished this turn.",
+				"detail": "end_turn",
+				"status": "complete",
+				"turnId": "turn-1",
+				"origin": "live",
+				"startedAt": "2026-09-06T00:47:18.870Z",
+				"endedAt": "2026-09-06T00:47:18.870Z",
+				"sequence": 3,
+				"usage": {
+					"input": 517,
+					"output": 10,
+					"cacheRead": 6656,
+					"cacheWrite": 0,
+					"reasoning": 0
+				},
+				"source": "reported-by-clio"
+			}
+		],
+		"clioCoder": {
+			"phase": "idle",
+			"agent": {
+				"name": "clio-coder",
+				"version": "0.4.3"
+			},
+			"capabilities": {
+				"load": true,
+				"list": true,
+				"label": true,
+				"delete": true,
+				"autonomy": true,
+				"settings": true,
+				"targets": true,
+				"loopBlocked": true,
+				"dispatchEvents": true,
+				"agentAttribution": true
+			},
+			"session": {
+				"id": "session-ca784933-de9e-4af8-969c-f129422f03af",
+				"target": "codex",
+				"model": "gpt-5.6-terra",
+				"autonomy": "full-auto",
+				"autonomySource": "settings",
+				"resumed": false,
+				"replayedTurns": 0,
+				"replayTruncated": false,
+				"createdAt": "2026-09-06T00:47:15.443Z"
+			},
+			"lastFailure": null,
+			"checkedAt": "2026-09-06T00:49:31.033Z"
+		},
+		"processGeneration": "generation-28da4e4f-2c70-424b-97da-2ff26116fa49"
+	},
+	"events": [
+		{
+			"protocolVersion": 4,
+			"workspaceInstanceId": "workspace-b8eb772d-c69a-4dd6-b77f-793f75fce3ac",
+			"sequence": 4,
+			"eventId": "event-000004",
+			"kind": "clio-coder.state",
+			"projectId": "project-4e6077ef-929b-4df0-843e-eb762ddec242",
+			"terminal": false,
+			"payload": {
+				"snapshot": {
+					"phase": "starting",
+					"agent": null,
+					"capabilities": null,
+					"session": null,
+					"lastFailure": null,
+					"checkedAt": "2026-09-06T00:49:32.933Z"
+				}
+			}
+		},
+		{
+			"protocolVersion": 4,
+			"workspaceInstanceId": "workspace-b8eb772d-c69a-4dd6-b77f-793f75fce3ac",
+			"sequence": 5,
+			"eventId": "event-000005",
+			"kind": "clio-coder.state",
+			"projectId": "project-4e6077ef-929b-4df0-843e-eb762ddec242",
+			"terminal": false,
+			"payload": {
+				"snapshot": {
+					"phase": "unbound",
+					"agent": {
+						"name": "clio-coder",
+						"version": "0.4.3"
+					},
+					"capabilities": {
+						"load": true,
+						"list": true,
+						"label": true,
+						"delete": true,
+						"autonomy": true,
+						"settings": true,
+						"targets": true,
+						"loopBlocked": true,
+						"dispatchEvents": true,
+						"agentAttribution": true
+					},
+					"session": null,
+					"lastFailure": null,
+					"checkedAt": "2026-09-06T00:49:34.163Z"
+				}
+			}
+		},
+		{
+			"protocolVersion": 4,
+			"workspaceInstanceId": "workspace-b8eb772d-c69a-4dd6-b77f-793f75fce3ac",
+			"sequence": 7,
+			"eventId": "event-000007",
+			"kind": "clio-coder.state",
+			"projectId": "project-4e6077ef-929b-4df0-843e-eb762ddec242",
+			"terminal": false,
+			"payload": {
+				"snapshot": {
+					"phase": "idle",
+					"agent": {
+						"name": "clio-coder",
+						"version": "0.4.3"
+					},
+					"capabilities": {
+						"load": true,
+						"list": true,
+						"label": true,
+						"delete": true,
+						"autonomy": true,
+						"settings": true,
+						"targets": true,
+						"loopBlocked": true,
+						"dispatchEvents": true,
+						"agentAttribution": true
+					},
+					"session": {
+						"id": "session-4c4e7d51-5c65-4229-83f1-d514f274b48f",
+						"target": "codex",
+						"model": "gpt-5.6-terra",
+						"autonomy": "full-auto",
+						"autonomySource": "settings",
+						"resumed": false,
+						"replayedTurns": 0,
+						"replayTruncated": false,
+						"createdAt": "2026-09-06T00:49:34.220Z"
+					},
+					"lastFailure": null,
+					"checkedAt": "2026-09-06T00:49:34.349Z"
+				}
+			}
+		},
+		{
+			"protocolVersion": 4,
+			"workspaceInstanceId": "workspace-b8eb772d-c69a-4dd6-b77f-793f75fce3ac",
+			"sequence": 9,
+			"eventId": "event-000009",
+			"kind": "clio-coder.state",
+			"projectId": "project-4e6077ef-929b-4df0-843e-eb762ddec242",
+			"terminal": false,
+			"payload": {
+				"snapshot": {
+					"phase": "running",
+					"agent": {
+						"name": "clio-coder",
+						"version": "0.4.3"
+					},
+					"capabilities": {
+						"load": true,
+						"list": true,
+						"label": true,
+						"delete": true,
+						"autonomy": true,
+						"settings": true,
+						"targets": true,
+						"loopBlocked": true,
+						"dispatchEvents": true,
+						"agentAttribution": true
+					},
+					"session": {
+						"id": "session-4c4e7d51-5c65-4229-83f1-d514f274b48f",
+						"target": "codex",
+						"model": "gpt-5.6-terra",
+						"autonomy": "full-auto",
+						"autonomySource": "settings",
+						"resumed": false,
+						"replayedTurns": 0,
+						"replayTruncated": false,
+						"createdAt": "2026-09-06T00:49:34.220Z"
+					},
+					"lastFailure": null,
+					"checkedAt": "2026-09-06T00:49:34.704Z"
+				}
+			}
+		},
+		{
+			"protocolVersion": 4,
+			"workspaceInstanceId": "workspace-b8eb772d-c69a-4dd6-b77f-793f75fce3ac",
+			"sequence": 10,
+			"eventId": "event-000010",
+			"kind": "turn.started",
+			"projectId": "project-4e6077ef-929b-4df0-843e-eb762ddec242",
+			"processGeneration": "generation-bcbf7a3d-577c-4a34-bfc7-a62a7601b649",
+			"sessionId": "session-4c4e7d51-5c65-4229-83f1-d514f274b48f",
+			"turnId": "turn-1",
+			"terminal": false,
+			"payload": {
+				"promptSummary": "Remember the nonsecret marker CLIO_ACP_FIRST_codex only in this conversation. Reply exactly WORKBENCH_LIVE_OK. Do not use tools.",
+				"origin": "live",
+				"startedAt": "2026-09-06T00:49:34.704Z",
+				"source": "observed-by-workbench"
+			}
+		},
+		{
+			"protocolVersion": 4,
+			"workspaceInstanceId": "workspace-b8eb772d-c69a-4dd6-b77f-793f75fce3ac",
+			"sequence": 11,
+			"eventId": "event-000011",
+			"kind": "turn.text",
+			"projectId": "project-4e6077ef-929b-4df0-843e-eb762ddec242",
+			"processGeneration": "generation-bcbf7a3d-577c-4a34-bfc7-a62a7601b649",
+			"sessionId": "session-4c4e7d51-5c65-4229-83f1-d514f274b48f",
+			"turnId": "turn-1",
+			"terminal": false,
+			"payload": {
+				"text": "WORK",
+				"agents": [
+					{
+						"role": "orchestrator",
+						"agentId": "orchestrator",
+						"runId": null,
+						"node": null
+					}
+				],
+				"source": "observed-on-acp"
+			}
+		},
+		{
+			"protocolVersion": 4,
+			"workspaceInstanceId": "workspace-b8eb772d-c69a-4dd6-b77f-793f75fce3ac",
+			"sequence": 12,
+			"eventId": "event-000012",
+			"kind": "turn.text",
+			"projectId": "project-4e6077ef-929b-4df0-843e-eb762ddec242",
+			"processGeneration": "generation-bcbf7a3d-577c-4a34-bfc7-a62a7601b649",
+			"sessionId": "session-4c4e7d51-5c65-4229-83f1-d514f274b48f",
+			"turnId": "turn-1",
+			"terminal": false,
+			"payload": {
+				"text": "BEN",
+				"agents": [
+					{
+						"role": "orchestrator",
+						"agentId": "orchestrator",
+						"runId": null,
+						"node": null
+					}
+				],
+				"source": "observed-on-acp"
+			}
+		},
+		{
+			"protocolVersion": 4,
+			"workspaceInstanceId": "workspace-b8eb772d-c69a-4dd6-b77f-793f75fce3ac",
+			"sequence": 13,
+			"eventId": "event-000013",
+			"kind": "turn.text",
+			"projectId": "project-4e6077ef-929b-4df0-843e-eb762ddec242",
+			"processGeneration": "generation-bcbf7a3d-577c-4a34-bfc7-a62a7601b649",
+			"sessionId": "session-4c4e7d51-5c65-4229-83f1-d514f274b48f",
+			"turnId": "turn-1",
+			"terminal": false,
+			"payload": {
+				"text": "CH",
+				"agents": [
+					{
+						"role": "orchestrator",
+						"agentId": "orchestrator",
+						"runId": null,
+						"node": null
+					}
+				],
+				"source": "observed-on-acp"
+			}
+		},
+		{
+			"protocolVersion": 4,
+			"workspaceInstanceId": "workspace-b8eb772d-c69a-4dd6-b77f-793f75fce3ac",
+			"sequence": 14,
+			"eventId": "event-000014",
+			"kind": "turn.text",
+			"projectId": "project-4e6077ef-929b-4df0-843e-eb762ddec242",
+			"processGeneration": "generation-bcbf7a3d-577c-4a34-bfc7-a62a7601b649",
+			"sessionId": "session-4c4e7d51-5c65-4229-83f1-d514f274b48f",
+			"turnId": "turn-1",
+			"terminal": false,
+			"payload": {
+				"text": "_L",
+				"agents": [
+					{
+						"role": "orchestrator",
+						"agentId": "orchestrator",
+						"runId": null,
+						"node": null
+					}
+				],
+				"source": "observed-on-acp"
+			}
+		},
+		{
+			"protocolVersion": 4,
+			"workspaceInstanceId": "workspace-b8eb772d-c69a-4dd6-b77f-793f75fce3ac",
+			"sequence": 15,
+			"eventId": "event-000015",
+			"kind": "turn.text",
+			"projectId": "project-4e6077ef-929b-4df0-843e-eb762ddec242",
+			"processGeneration": "generation-bcbf7a3d-577c-4a34-bfc7-a62a7601b649",
+			"sessionId": "session-4c4e7d51-5c65-4229-83f1-d514f274b48f",
+			"turnId": "turn-1",
+			"terminal": false,
+			"payload": {
+				"text": "IVE",
+				"agents": [
+					{
+						"role": "orchestrator",
+						"agentId": "orchestrator",
+						"runId": null,
+						"node": null
+					}
+				],
+				"source": "observed-on-acp"
+			}
+		},
+		{
+			"protocolVersion": 4,
+			"workspaceInstanceId": "workspace-b8eb772d-c69a-4dd6-b77f-793f75fce3ac",
+			"sequence": 16,
+			"eventId": "event-000016",
+			"kind": "turn.text",
+			"projectId": "project-4e6077ef-929b-4df0-843e-eb762ddec242",
+			"processGeneration": "generation-bcbf7a3d-577c-4a34-bfc7-a62a7601b649",
+			"sessionId": "session-4c4e7d51-5c65-4229-83f1-d514f274b48f",
+			"turnId": "turn-1",
+			"terminal": false,
+			"payload": {
+				"text": "_OK",
+				"agents": [
+					{
+						"role": "orchestrator",
+						"agentId": "orchestrator",
+						"runId": null,
+						"node": null
+					}
+				],
+				"source": "observed-on-acp"
+			}
+		},
+		{
+			"protocolVersion": 4,
+			"workspaceInstanceId": "workspace-b8eb772d-c69a-4dd6-b77f-793f75fce3ac",
+			"sequence": 17,
+			"eventId": "event-000017",
+			"kind": "turn.terminal",
+			"projectId": "project-4e6077ef-929b-4df0-843e-eb762ddec242",
+			"processGeneration": "generation-bcbf7a3d-577c-4a34-bfc7-a62a7601b649",
+			"sessionId": "session-4c4e7d51-5c65-4229-83f1-d514f274b48f",
+			"turnId": "turn-1",
+			"terminal": true,
+			"payload": {
+				"outcome": "completed",
+				"code": "clio-coder-completed",
+				"summary": "Clio Coder finished this turn.",
+				"stopReason": "end_turn",
+				"usage": {
+					"input": 517,
+					"output": 10,
+					"cacheRead": 6656,
+					"cacheWrite": 0,
+					"reasoning": 0
+				},
+				"source": "reported-by-clio"
+			}
+		},
+		{
+			"protocolVersion": 4,
+			"workspaceInstanceId": "workspace-b8eb772d-c69a-4dd6-b77f-793f75fce3ac",
+			"sequence": 18,
+			"eventId": "event-000018",
+			"kind": "clio-coder.state",
+			"projectId": "project-4e6077ef-929b-4df0-843e-eb762ddec242",
+			"terminal": false,
+			"payload": {
+				"snapshot": {
+					"phase": "idle",
+					"agent": {
+						"name": "clio-coder",
+						"version": "0.4.3"
+					},
+					"capabilities": {
+						"load": true,
+						"list": true,
+						"label": true,
+						"delete": true,
+						"autonomy": true,
+						"settings": true,
+						"targets": true,
+						"loopBlocked": true,
+						"dispatchEvents": true,
+						"agentAttribution": true
+					},
+					"session": {
+						"id": "session-4c4e7d51-5c65-4229-83f1-d514f274b48f",
+						"target": "codex",
+						"model": "gpt-5.6-terra",
+						"autonomy": "full-auto",
+						"autonomySource": "settings",
+						"resumed": false,
+						"replayedTurns": 0,
+						"replayTruncated": false,
+						"createdAt": "2026-09-06T00:49:34.220Z"
+					},
+					"lastFailure": null,
+					"checkedAt": "2026-09-06T00:49:37.334Z"
+				}
+			}
+		}
+	],
+	"completed": {
+		"timeline": [
+			{
+				"id": "turn-1:request",
+				"kind": "request",
+				"title": "Request",
+				"summary": "Remember the nonsecret marker CLIO_ACP_FIRST_codex only in this conversation. Reply exactly WORKBENCH_LIVE_OK. Do not use tools.",
+				"status": "complete",
+				"turnId": "turn-1",
+				"origin": "live",
+				"startedAt": "2026-09-06T00:49:34.704Z",
+				"endedAt": "2026-09-06T00:49:37.333Z",
+				"sequence": 1,
+				"source": "observed-by-workbench"
+			},
+			{
+				"id": "turn-1:text:2",
+				"kind": "narrative",
+				"title": "Clio Coder",
+				"summary": "WORKBENCH_LIVE_OK",
+				"status": "complete",
+				"turnId": "turn-1",
+				"origin": "live",
+				"startedAt": "2026-09-06T00:49:37.031Z",
+				"sequence": 2,
+				"agents": [
+					{
+						"role": "orchestrator",
+						"agentId": "orchestrator",
+						"runId": null,
+						"node": null
+					}
+				],
+				"source": "observed-on-acp"
+			},
+			{
+				"id": "turn-1:terminal",
+				"kind": "outcome",
+				"title": "Turn complete",
+				"summary": "Clio Coder finished this turn.",
+				"detail": "end_turn",
+				"status": "complete",
+				"turnId": "turn-1",
+				"origin": "live",
+				"startedAt": "2026-09-06T00:49:37.333Z",
+				"endedAt": "2026-09-06T00:49:37.333Z",
+				"sequence": 3,
+				"usage": {
+					"input": 517,
+					"output": 10,
+					"cacheRead": 6656,
+					"cacheWrite": 0,
+					"reasoning": 0
+				},
+				"source": "reported-by-clio"
+			}
+		],
+		"clioCoder": {
+			"phase": "idle",
+			"agent": {
+				"name": "clio-coder",
+				"version": "0.4.3"
+			},
+			"capabilities": {
+				"load": true,
+				"list": true,
+				"label": true,
+				"delete": true,
+				"autonomy": true,
+				"settings": true,
+				"targets": true,
+				"loopBlocked": true,
+				"dispatchEvents": true,
+				"agentAttribution": true
+			},
+			"session": {
+				"id": "session-4c4e7d51-5c65-4229-83f1-d514f274b48f",
+				"target": "codex",
+				"model": "gpt-5.6-terra",
+				"autonomy": "full-auto",
+				"autonomySource": "settings",
+				"resumed": false,
+				"replayedTurns": 0,
+				"replayTruncated": false,
+				"createdAt": "2026-09-06T00:49:34.220Z"
+			},
+			"lastFailure": null,
+			"checkedAt": "2026-09-06T00:49:37.699Z"
+		},
+		"processGeneration": "generation-bcbf7a3d-577c-4a34-bfc7-a62a7601b649",
+		"timelineTruncated": false,
+		"activeTurn": null,
+		"pendingPermission": null
+	}
+}
