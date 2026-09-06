@@ -1,16 +1,24 @@
 import { deepStrictEqual, doesNotMatch, match, ok, strictEqual } from "node:assert/strict";
 import { describe, it } from "node:test";
+import { withReceiptIntegrity } from "../../src/domains/dispatch/receipt-integrity.js";
+import { inspectRunReceiptTrustStatus } from "../../src/domains/evidence/trust-status.js";
 import {
 	createWorkerProgressFold,
 	WORKER_ACTION_TRAIL_LIMIT,
 	WORKER_TOOL_NAME_LIMIT,
 } from "../../src/domains/observability/worker-progress.js";
 import type { WorkerRunEntry } from "../../src/domains/session/index.js";
-import { stripTerminalSequences } from "../../src/engine/tui.js";
+import { stripTerminalSequences, visibleWidth } from "../../src/engine/tui.js";
 import { type ChatPanel, createChatPanel } from "../../src/interactive/chat-panel.js";
 import { renderWorkerEntryLines } from "../../src/interactive/renderers/worker-entry.js";
 import { workerEntriesFromRunEntries } from "../../src/interactive/worker-replay.js";
-import { createWorkerStream, type WorkerReceiptFacts } from "../../src/interactive/worker-stream.js";
+import {
+	createWorkerStream,
+	type WorkerEntryState,
+	type WorkerReceiptFacts,
+} from "../../src/interactive/worker-stream.js";
+
+import { fixtureEnvelope, fixtureReceiptDraft } from "../harness/receipt.js";
 
 function plainRender(panel: ChatPanel, width = 120): string {
 	return panel.render(width).map(stripTerminalSequences).join("\n");
@@ -225,6 +233,42 @@ describe("worker rendering invariants", () => {
 		);
 		match(JSON.stringify(snapshot), /redacted-target-11/u);
 		doesNotMatch(JSON.stringify(snapshot), /raw-secret/u);
+	});
+
+	it("fits folded execution and quality at narrow widths with an expand hint", () => {
+		const envelope = fixtureEnvelope("width-run");
+		const draft = fixtureReceiptDraft(envelope);
+		draft.quality.resultContract = {
+			sourceId: "agent-result-contract:mutation-report:fixture",
+			validatorDigest: "a".repeat(64),
+			conformance: "pass",
+			quality: "fail",
+		};
+		const receipt = withReceiptIntegrity(draft, envelope);
+		const entry: WorkerEntryState = {
+			assignmentId: envelope.id,
+			runId: envelope.id,
+			origin: "user",
+			agentId: "coder",
+			runtime: { kind: "clio", targetId: "codex", wireModelId: "gpt-5.6-luna" },
+			text: "",
+			droppedLines: 0,
+			tools: [],
+			attempts: [],
+			pending: false,
+			receipt: { outcome: "succeeded", durationMs: 21000, trust: inspectRunReceiptTrustStatus(receipt, envelope).status },
+		};
+		for (const width of [24, 44, 76]) {
+			const lines = renderWorkerEntryLines(entry, width, { folded: true, expandKey: "Ctrl+O" });
+			ok(
+				lines.every((line) => visibleWidth(line) <= width),
+				`width ${width}: ${lines.map(visibleWidth)}`,
+			);
+			const plain = lines.map(stripTerminalSequences).join(" ").replace(/│/gu, " ").replace(/\s+/gu, " ");
+			match(plain, /execution ok/u);
+			match(plain, /quality: validation failed/u);
+			if (width >= 44) match(plain, /Ctrl\+O/u);
+		}
 	});
 
 	it("renders the same sealed outcome facts live and on replay", () => {

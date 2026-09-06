@@ -400,8 +400,12 @@ function foldedLine(entry: WorkerEntryState, width: number, expandKey: string | 
 		entry.receipt?.durationMs === undefined ? "" : dim(`${SEPARATOR}${formatCompactMs(entry.receipt.durationMs)}`);
 	const hint = expandKey === undefined || expandKey.length === 0 ? "" : dim(` (${expandKey})`);
 	const full = ` ${status}${elapsed}${hint}`;
-	const tail = visibleWidth(identity) + visibleWidth(full) <= width ? full : ` ${status}${hint}`;
-	return `${truncateToWidth(identity, Math.max(1, width - visibleWidth(tail)), GLYPH.ellipsis, false)}${tail}`;
+	let tail = visibleWidth(identity) + visibleWidth(full) <= width ? full : ` ${status}${hint}`;
+	// Reserve one identity cell. The optional hint yields before execution
+	// status when the suffix alone would exhaust the header's width.
+	if (visibleWidth(tail) >= width) tail = ` ${status}`;
+	const header = `${truncateToWidth(identity, Math.max(1, width - visibleWidth(tail)), GLYPH.ellipsis, false)}${tail}`;
+	return truncateToWidth(header, width, GLYPH.ellipsis, false);
 }
 
 export function renderWorkerEntryLines(
