@@ -415,16 +415,19 @@ function checkCiScripts(): void {
 	expectScript("ci:release", "npm run ci && node scripts/check-release.mjs");
 	expectScript("prepublishOnly", "CLIO_CODER_RELEASE_CONTEXT=publish npm run ci:release");
 
-	// Hosted CI stays deliberately small: one Node 22 job, cancellation for
-	// superseded runs, dependency installation, and the full release gate.
+	// Hosted CI stays deliberately small: the Node 22 release gate plus a
+	// deterministic Windows subprocess subset, with superseded runs cancelled.
 	const ciPath = ".github/workflows/ci.yml";
 	if (!existsSync(join(root, ciPath))) {
 		fail("ci-scripts", "ci.yml must exist as the single fast CI workflow");
 	} else {
 		const ci = workflow(ciPath);
 		const jobs = (ci.jobs ?? {}) as Record<string, WorkflowJob>;
-		if (JSON.stringify(Object.keys(jobs)) !== JSON.stringify(["ci"])) {
-			fail("ci-scripts", `ci.yml must contain only the ci job, got: ${Object.keys(jobs).join(", ")}`);
+		if (JSON.stringify(Object.keys(jobs)) !== JSON.stringify(["ci", "windows-subprocess"])) {
+			fail(
+				"ci-scripts",
+				`ci.yml must contain only the ci and windows-subprocess jobs, got: ${Object.keys(jobs).join(", ")}`,
+			);
 		}
 		const ciJob = jobs.ci;
 		if (ciJob) {
@@ -436,6 +439,23 @@ function checkCiScripts(): void {
 			if (!ciCommands.includes("npm run ci:release")) {
 				fail("ci-scripts", "ci.yml must run npm run ci:release");
 			}
+		}
+		if (
+			!isDeepStrictEqual(jobs["windows-subprocess"], {
+				"runs-on": "windows-latest",
+				"timeout-minutes": 10,
+				steps: [
+					{ uses: "actions/checkout@v6", with: { "persist-credentials": false } },
+					{ uses: "actions/setup-node@v6", with: { "node-version": 22, cache: "npm" } },
+					{ run: "npm ci --prefer-offline --no-audit --no-fund" },
+					{ run: "npm run typecheck" },
+					{
+						run: "npm run test:file -- tests/contracts/antigravity-subprocess.test.ts tests/contracts/bash-exec-settlement.test.ts",
+					},
+				],
+			})
+		) {
+			fail("ci-scripts", "ci.yml windows-subprocess must run only the Node 22 typecheck and subprocess contract gate");
 		}
 		const concurrency = ci.concurrency as { group?: unknown; "cancel-in-progress"?: unknown } | undefined;
 		if (typeof concurrency?.group !== "string" || concurrency["cancel-in-progress"] !== true) {

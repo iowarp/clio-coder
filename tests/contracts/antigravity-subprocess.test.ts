@@ -1,9 +1,11 @@
 import { deepStrictEqual, doesNotMatch, equal, match, ok, rejects, throws } from "node:assert/strict";
-import { chmodSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs";
+import { execFileSync } from "node:child_process";
+import { chmodSync, copyFileSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
-import { join } from "node:path";
+import { dirname, join } from "node:path";
 import { Readable } from "node:stream";
-import { afterEach, describe, it } from "node:test";
+import { after, afterEach, before, describe, it } from "node:test";
+import { fileURLToPath } from "node:url";
 
 import { modelChoiceRefusal, resolveSupportedWireModels } from "../../src/cli/configure-target.js";
 import { boundedExternalDiagnostic } from "../../src/core/external-diagnostic.js";
@@ -28,6 +30,30 @@ import { type IsolatedClioEnv, isolateClioEnv } from "../harness/scratch-env.js"
 
 const scratchDirectories: string[] = [];
 let isolated: IsolatedClioEnv | null = null;
+let windowsLauncher: string | null = null;
+
+before(() => {
+	if (process.platform !== "win32") return;
+	const windowsRoot = process.env.SystemRoot;
+	ok(windowsRoot, "SystemRoot must locate the Windows .NET Framework compiler");
+	windowsLauncher = join(mkdtempSync(join(tmpdir(), "clio-agy-launcher-")), "agy.exe");
+	// windows-latest includes this compiler. A real executable keeps the
+	// production shell-free spawn path intact; Node refuses .cmd launchers.
+	execFileSync(
+		join(windowsRoot, "Microsoft.NET", "Framework64", "v4.0.30319", "csc.exe"),
+		[
+			"/nologo",
+			"/target:exe",
+			`/out:${windowsLauncher}`,
+			fileURLToPath(new URL("../fixtures/antigravity-launcher.cs", import.meta.url)),
+		],
+		{ timeout: 30_000, windowsHide: true },
+	);
+});
+
+after(() => {
+	if (windowsLauncher !== null) rmSync(dirname(windowsLauncher), { recursive: true, force: true });
+});
 
 afterEach(() => {
 	isolated?.restore();
@@ -61,12 +87,19 @@ if (scenario.hang) {
 `;
 
 function scratch(): { root: string; binary: string; home: string } {
-	const root = mkdtempSync(join(tmpdir(), "clio-fake-agy-"));
+	const root = mkdtempSync(join(tmpdir(), "clio fake agy-"));
 	scratchDirectories.push(root);
-	const binary = join(root, "agy");
+	const binary = join(root, process.platform === "win32" ? "agy.exe" : "agy");
 	const home = join(root, "home");
-	writeFileSync(binary, FAKE_AGY_SOURCE);
-	chmodSync(binary, 0o755);
+	if (process.platform === "win32") {
+		ok(windowsLauncher, "the Windows executable fixture must be compiled before tests run");
+		copyFileSync(windowsLauncher, binary);
+		writeFileSync(join(root, "node-executable.txt"), process.execPath);
+		writeFileSync(join(root, "fake.mjs"), FAKE_AGY_SOURCE);
+	} else {
+		writeFileSync(binary, FAKE_AGY_SOURCE);
+		chmodSync(binary, 0o755);
+	}
 	return { root, binary, home };
 }
 
@@ -266,7 +299,7 @@ describe("Antigravity external subprocess contract", () => {
 			lines: [INIT, DELTA, { ...DELTA, step_update: { ...DELTA.step_update, text_delta: "world" } }, SUCCESS],
 		});
 		const events: Array<{ type: string }> = [];
-		const input = workerInput(root);
+		const input = workerInput(root, { wireModelId: 'model "quoted" trailing\\' });
 		const handle = startAntigravityWorkerRun(input, (event) => events.push(event), {
 			binary,
 			workspaceRoot: root,
