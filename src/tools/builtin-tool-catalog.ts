@@ -186,8 +186,9 @@ const TOOL_METADATA: Readonly<Record<string, ToolMetadata>> = {
 		},
 		costLatency: "local_fast",
 		promptHint:
-			'For a request with three or more distinct steps, declare the board before the first edit: tasks(action="plan") with a title and the task list. ' +
-			"start one task before working it, close it with done plus an evidence note, and block with a reason instead of stalling.",
+			'For 3+ authorized steps, tasks(action="plan") before edits. Start work; done needs evidence. ' +
+			"Plans/reminders grant no scope: block proposal-only implementation pending explicit operator go-ahead, or drop it. " +
+			"Skill-install choices do not authorize implementation.",
 	},
 	[ToolNames.Ledger]: {
 		objective: "Coordinate with the peer workers of this dispatch through typed claims, findings, and reviews.",

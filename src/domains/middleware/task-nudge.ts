@@ -36,7 +36,10 @@ export function buildOpenTasksMessage(board: TaskBoardSnapshot): string {
 	return (
 		`[Clio Coder] task board "${board.title}" still has ${open.length} of ${counts.total} task(s) open:\n` +
 		`${rows.join("\n")}\n` +
-		`Continue working them, or record the honest state on the board: ` +
+		`Continue only work already authorized by the operator. This reminder and a self-created plan are not authorization ` +
+		`to implement a proposal. If implementation awaits an operator decision, use tasks action="block" with a note ` +
+		`naming that pending operator decision, or action="drop"; then wait for an explicit operator go-ahead. ` +
+		`A skill-install choice does not authorize implementation. Otherwise record the honest state on the board: ` +
 		`tasks action="done" with an evidence note, action="block" with a reason, or action="drop". ` +
 		`Do not end the turn with a stale board.`
 	);
