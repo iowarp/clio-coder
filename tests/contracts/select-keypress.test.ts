@@ -101,13 +101,23 @@ const CTRL_C = String.fromCharCode(3);
 const BACKSPACE = String.fromCharCode(127);
 
 describe("contracts/select-keypress", () => {
-	it("refuses the interactive path unless both ends are a terminal", () => {
-		const terminal = fakeTerminal();
-		strictEqual(canSelect(terminal.input, terminal.output), true);
+	it("refuses the interactive path unless both ends are a terminal and TERM supports it", () => {
+		const previousTerm = process.env.TERM;
+		try {
+			process.env.TERM = "xterm-256color";
+			const terminal = fakeTerminal();
+			strictEqual(canSelect(terminal.input, terminal.output), true);
 
-		const pipe = new PassThrough() as unknown as NodeJS.ReadStream;
-		strictEqual(canSelect(pipe, terminal.output), false, "a piped stdin has no raw mode");
-		strictEqual(canSelect(terminal.input, new PassThrough() as unknown as NodeJS.WriteStream), false);
+			const pipe = new PassThrough() as unknown as NodeJS.ReadStream;
+			strictEqual(canSelect(pipe, terminal.output), false, "a piped stdin has no raw mode");
+			strictEqual(canSelect(terminal.input, new PassThrough() as unknown as NodeJS.WriteStream), false);
+
+			process.env.TERM = "dumb";
+			strictEqual(canSelect(terminal.input, terminal.output), false, "a dumb terminal cannot select interactively");
+		} finally {
+			if (previousTerm === undefined) delete process.env.TERM;
+			else process.env.TERM = previousTerm;
+		}
 	});
 
 	it("moves with the arrow keys and selects with enter", async () => {

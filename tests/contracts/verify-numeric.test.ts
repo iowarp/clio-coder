@@ -53,6 +53,104 @@ describe("numeric-compare tolerance math", () => {
 		match(outside.summary, /numeric-compare failed: 1 of 1 key\(s\) out of tolerance \(e\)/u);
 	});
 
+	it("agrees with an unscaled reference at extreme relative-tolerance boundaries", () => {
+		// These binary fractions scale exactly. Cancel the common MAX_VALUE
+		// factor in the reference calculation so its subtraction cannot overflow.
+		const pairs = [
+			[-0.5, 1],
+			[0.5, -1],
+			[-1, 0.5],
+			[1, -0.5],
+			[-1, 1],
+			[1, -1],
+			[0.5, 1],
+			[-0.5, -1],
+			[1, 0.5],
+			[-1, -0.5],
+			[1, 1],
+			[-1, -1],
+			[0, 1],
+			[0, -1],
+		] as const;
+		for (const [a, e] of pairs) {
+			const relative = Math.abs(a - e) / Math.abs(e);
+			const step = Number.EPSILON * Math.max(1, relative);
+			const bounds = relative === 0 ? [0, step] : [relative, relative - step, relative + step];
+			for (const bound of bounds) {
+				const label = `actual=${a}*MAX_VALUE expected=${e}*MAX_VALUE tolerance=${bound}`;
+				const report = compareNumeric({ v: a * Number.MAX_VALUE }, { v: e * Number.MAX_VALUE }, { relative: bound });
+				const passed = relative <= bound;
+				strictEqual(report.passed, passed, label);
+				strictEqual(report.keys[0]?.passed, passed, label);
+				strictEqual(report.keys[0]?.worst?.relative, relative, label);
+				deepStrictEqual(report.failedKeys, passed ? [] : ["v"], label);
+				deepStrictEqual(report.keys[0]?.failed, passed ? [] : ["relative"], label);
+			}
+		}
+	});
+
+	it("preserves relative precision between adjacent values near MAX_VALUE", () => {
+		// The significands differ by one: (2^53 - 1) versus (2^53 - 2).
+		const relative = 1 / (2 ** 53 - 2);
+		for (const sign of [-1, 1]) {
+			const actual = { v: sign * Number.MAX_VALUE };
+			const expected = { v: sign * (Number.MAX_VALUE - 2 ** 971) };
+			const report = compareNumeric(actual, expected, { relative });
+			strictEqual(report.passed, true);
+			strictEqual(report.keys[0]?.worst?.relative, relative);
+			strictEqual(compareNumeric(actual, expected, { relative: relative * (1 - Number.EPSILON) }).passed, false);
+		}
+	});
+
+	it("preserves signed-zero and subnormal relative comparisons", () => {
+		for (const actual of [0, -0]) {
+			for (const expected of [0, -0]) {
+				const report = compareNumeric({ v: actual }, { v: expected }, { relative: 0 });
+				strictEqual(report.passed, true);
+				strictEqual(report.keys[0]?.worst?.relative, 0);
+			}
+			for (const expected of [Number.MIN_VALUE, -Number.MIN_VALUE]) {
+				strictEqual(compareNumeric({ v: actual }, { v: expected }, { relative: 1 }).passed, true);
+				strictEqual(compareNumeric({ v: actual }, { v: expected }, { relative: 1 - Number.EPSILON }).passed, false);
+				const reversed = compareNumeric({ v: expected }, { v: actual }, { relative: Number.MAX_VALUE });
+				strictEqual(reversed.passed, false);
+				strictEqual(reversed.keys[0]?.worst?.relative, null);
+			}
+		}
+		const actual = { v: -Number.MIN_VALUE };
+		const expected = { v: Number.MIN_VALUE };
+		strictEqual(compareNumeric(actual, expected, { relative: 2 }).passed, true);
+		strictEqual(compareNumeric(actual, expected, { relative: 2 - Number.EPSILON }).passed, false);
+	});
+
+	it("still rejects unrepresentable relative errors and independent absolute or ulp failures", () => {
+		const unbounded = compareNumeric({ v: Number.MAX_VALUE }, { v: Number.MIN_VALUE }, { relative: Number.MAX_VALUE });
+		strictEqual(unbounded.passed, false);
+		strictEqual(unbounded.keys[0]?.worst?.relative, Number.POSITIVE_INFINITY);
+		deepStrictEqual(unbounded.keys[0]?.failed, ["relative"]);
+		const report = compareNumeric(
+			{ v: -Number.MAX_VALUE / 2 },
+			{ v: Number.MAX_VALUE },
+			{ relative: 1.5, absolute: Number.MAX_VALUE, ulp: Number.MAX_SAFE_INTEGER },
+		);
+		strictEqual(report.passed, false);
+		strictEqual(report.keys[0]?.worst?.relative, 1.5);
+		strictEqual(report.keys[0]?.worst?.absolute, Number.POSITIVE_INFINITY);
+		deepStrictEqual(report.keys[0]?.failed, ["absolute", "ulp"]);
+	});
+
+	it("judges extreme array elements and reports the out-of-tolerance element", () => {
+		const actual = { v: [Number.MAX_VALUE, -Number.MAX_VALUE / 2, -Number.MAX_VALUE] };
+		const expected = { v: [Number.MAX_VALUE, Number.MAX_VALUE, Number.MAX_VALUE] };
+		strictEqual(compareNumeric(actual, expected, { relative: 2 }).passed, true);
+		const report = compareNumeric(actual, expected, { relative: 1.5 });
+		strictEqual(report.passed, false);
+		deepStrictEqual(report.failedKeys, ["v"]);
+		deepStrictEqual(report.keys[0]?.failed, ["relative"]);
+		strictEqual(report.keys[0]?.worst?.index, 2);
+		strictEqual(report.keys[0]?.worst?.relative, 2);
+	});
+
 	it("judges absolute tolerance, including against a zero reference", () => {
 		strictEqual(compareNumeric({ z: 0.004 }, { z: 0 }, { absolute: 0.005 }).passed, true);
 		strictEqual(compareNumeric({ z: 0.006 }, { z: 0 }, { absolute: 0.005 }).passed, false);
