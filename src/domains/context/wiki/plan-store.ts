@@ -201,6 +201,7 @@ export interface ScopeUpdateInput {
 export function scopePlanForUpdate(input: ScopeUpdateInput): WikiPlan {
 	const changedPrefixes = [...input.changedPaths];
 	const pages = input.plan.pages.map((page): WikiPlanPage => {
+		if (page.status !== "written") return page;
 		if (!input.existingPages.has(page.path)) return { ...page, status: "pending", attempts: 0 };
 		const claimed = [...(input.pageSources.get(page.path) ?? []), ...page.sources];
 		const touched = claimed.some((source) =>

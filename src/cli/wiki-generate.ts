@@ -351,9 +351,9 @@ async function runPagePhase(
 				detail: `page deadline ${Math.round(PAGE_DEADLINE_MS / 60000)}m`,
 			}),
 	});
-	// The file on disk is the postcondition, not what the writer reported. A run
-	// that ended on its budget after writing the page still wrote the page.
-	const written = existsSync(join(input.outputDir, page.path));
+	// A seeded page is available even when its refresh fails. Only a successful
+	// dispatch can validate it, including an explicitly unchanged page.
+	const written = outcome.ok && existsSync(join(input.outputDir, page.path));
 	const next: WikiPlan = {
 		...plan,
 		pages: plan.pages.map((entry) =>

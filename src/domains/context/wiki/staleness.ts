@@ -155,12 +155,21 @@ export function wikiCompleteness(cwd: string): WikiCompleteness | null {
 	return wikiCompletenessFromMeta(readWikiMeta(cwd));
 }
 
+/** Available old prose is not fresh while its refresh is still owed. */
+function pendingRefresh(meta: WikiMeta): WikiStaleness | null {
+	const available = new Set(meta.pages.map((page) => page.path));
+	if (!meta.plan?.pages.some((page) => page.status !== "written" && available.has(page.path))) return null;
+	return { state: "stale", changedFiles: 0, warning: "wiki has published pages awaiting successful validation" };
+}
+
 const MISSING_RECORDED_HEAD = "wiki staleness unavailable: recorded gitHead is missing";
 const MISSING_CURRENT_HEAD = "wiki staleness unavailable: current git HEAD is missing";
 
 export function wikiStaleness(cwd: string): WikiStaleness {
 	const meta = readWikiMeta(cwd);
 	if (!meta) return { state: "absent" };
+	const pending = pendingRefresh(meta);
+	if (pending) return pending;
 	if (!meta.gitHead) return { state: "fresh", warning: MISSING_RECORDED_HEAD };
 	const head = currentGitHead(cwd);
 	if (!head) return { state: "fresh", warning: MISSING_CURRENT_HEAD };
@@ -183,6 +192,8 @@ export function wikiStaleness(cwd: string): WikiStaleness {
 export async function wikiStalenessAsync(cwd: string): Promise<WikiStaleness> {
 	const meta = readWikiMeta(cwd);
 	if (!meta) return { state: "absent" };
+	const pending = pendingRefresh(meta);
+	if (pending) return pending;
 	if (!meta.gitHead) return { state: "fresh", warning: MISSING_RECORDED_HEAD };
 	const head = await currentGitHeadAsync(cwd);
 	if (!head) return { state: "fresh", warning: MISSING_CURRENT_HEAD };

@@ -28,6 +28,7 @@ import {
 	computeWikiContentHashOfDir,
 	currentWikiGitHead,
 	readWikiMeta,
+	type WikiMeta,
 	wikiMetaPath,
 	writeWikiMeta,
 } from "./meta.js";
@@ -376,7 +377,7 @@ function resolvePlan(input: {
 /**
  * Reconcile the plan against the tree that actually exists. A page whose file
  * the assembly pass dropped, or that was never written, is owed again; a page
- * on disk is recorded as written whatever the writer reported. A page that
+ * on disk retains its recorded dispatch outcome. A page that
  * exists without a plan entry is adopted, because a page on disk is a page: the
  * alternative is a plan that keeps re-dispatching a subject already covered.
  */
@@ -397,9 +398,7 @@ function reconcilePlan(plan: WikiPlan, stagingDir: string): WikiPlan {
 	return {
 		...plan,
 		pages: [
-			...plan.pages.map((page) =>
-				onDisk.has(page.path) ? { ...page, status: "written" as const } : { ...page, status: "pending" as const },
-			),
+			...plan.pages.map((page) => (onDisk.has(page.path) ? page : { ...page, status: "pending" as const })),
 			...adopted,
 		],
 	};
@@ -409,8 +408,6 @@ export async function runWikiGenerate(
 	input: RunWikiGenerateInput = { model: "configured-clio-target" },
 ): Promise<RunWikiGenerateResult> {
 	const cwd = input.cwd ?? process.cwd();
-	const existingMeta = readWikiMeta(cwd);
-	const mode = input.mode ?? (existingMeta ? "update" : "init");
 
 	const lock = acquireWikiLock(cwd);
 	if (!lock.ok) {
@@ -420,6 +417,8 @@ export async function runWikiGenerate(
 	}
 
 	try {
+		const existingMeta = readWikiMeta(cwd);
+		const mode = input.mode ?? (existingMeta ? "update" : "init");
 		progress(input, { phase: "codewiki", status: "started", message: "loading codewiki for wiki generation" });
 		const { codewiki, fingerprint } = await loadOrBuildCodewiki(cwd);
 		const sourceTreeHash = fingerprint.treeHash;
@@ -501,7 +500,7 @@ export async function runWikiGenerate(
 		}
 		progress(input, { phase: "generate", status: "completed", message: "wiki generator completed" });
 
-		const workedPlan = readWikiPlanFile(staging.dir, resolved.plan) ?? resolved.plan;
+		const workedPlan = readWikiPlanFile(staging.dir) ?? resolved.plan;
 		const report = assembleWikiTree({ dir: staging.dir, sourceRoot: cwd, plan: workedPlan });
 		const finalPlan = reconcilePlan(workedPlan, staging.dir);
 		const pendingCount = finalPlan.pages.filter((page) => page.status !== "written").length;
@@ -515,8 +514,6 @@ export async function runWikiGenerate(
 				(pendingCount > 0 ? `; ${pendingCount} page${pendingCount === 1 ? "" : "s"} still to write` : ""),
 		});
 
-		// The plan lives on in meta.json, so the staged working copy must not be
-		// promoted into the wiki tree alongside the pages.
 		rmSync(join(staging.dir, WIKI_PLAN_FILE), { force: true });
 		const afterHash = computeWikiContentHashOfDir(staging.dir);
 		const stagedPages = listWikiPagesInDir(staging.dir);
@@ -525,25 +522,31 @@ export async function runWikiGenerate(
 		// reach the operator and the next update run without costing this one.
 		const problems = report.issues.map((issue) => `${issue.page} has an unresolved ${issue.kind}: ${issue.reference}`);
 
-		const writeMeta = (): void => {
-			writeWikiMeta(cwd, {
-				version: 1,
-				updatedAt: new Date().toISOString(),
-				gitHead: currentWikiGitHead(cwd),
-				sourceTreeHash,
-				model: input.model,
-				contentHash: afterHash,
-				pages: stagedPages,
-				generation: {
-					requestedDepth: generation.requestedDepth,
-					depth: generation.depth,
-					sourceFiles: generation.sourceFiles,
-					sourceLines: generation.sourceLines,
-					pagesPlanned: finalPlan.pages.length,
-					pagesWritten: finalPlan.pages.length - pendingCount,
-				},
-				plan: finalPlan,
-			});
+		const unchanged = afterHash === beforeHash && existingMeta !== null;
+		const pendingPublishedPage = finalPlan.pages.some(
+			(page) => page.status !== "written" && stagedPages.some((available) => available.path === page.path),
+		);
+		const meta: WikiMeta = {
+			version: 1,
+			updatedAt: unchanged ? existingMeta.updatedAt : new Date().toISOString(),
+			gitHead: pendingPublishedPage ? (existingMeta?.gitHead ?? null) : currentWikiGitHead(cwd),
+			...(pendingPublishedPage
+				? existingMeta?.sourceTreeHash
+					? { sourceTreeHash: existingMeta.sourceTreeHash }
+					: {}
+				: { sourceTreeHash }),
+			model: unchanged ? existingMeta.model : input.model,
+			contentHash: afterHash,
+			pages: stagedPages,
+			generation: {
+				requestedDepth: generation.requestedDepth,
+				depth: generation.depth,
+				sourceFiles: generation.sourceFiles,
+				sourceLines: generation.sourceLines,
+				pagesPlanned: finalPlan.pages.length,
+				pagesWritten: finalPlan.pages.length - pendingCount,
+			},
+			plan: finalPlan,
 		};
 
 		const done = (status: "generated" | "noop"): RunWikiGenerateResult => ({
@@ -558,14 +561,12 @@ export async function runWikiGenerate(
 		// the assembled tree matches the live wiki byte for byte there is nothing
 		// to swap, so metadata is refreshed in place.
 		if (afterHash === beforeHash && computeWikiContentHash(cwd) === beforeHash && existingMeta) {
+			writeWikiMeta(cwd, meta);
 			removeDir(staging.dir);
-			// Metadata is left exactly as it was. Rewriting it would churn
-			// `updatedAt` and `model` on a run that changed nothing, which makes
-			// every no-op look like a regeneration to anything reading the file.
 			progress(input, {
 				phase: "state",
 				status: "completed",
-				message: "wiki unchanged; metadata preserved",
+				message: "wiki unchanged; progress recorded",
 				detail: wikiMetaPath(cwd),
 			});
 			progress(input, { phase: "done", status: "completed", message: "wiki unchanged" });
@@ -573,7 +574,7 @@ export async function runWikiGenerate(
 		}
 
 		progress(input, { phase: "state", status: "running", message: "promoting wiki" });
-		const promoted = promoteStaging(cwd, staging.dir, writeMeta);
+		const promoted = promoteStaging(cwd, staging.dir, () => writeWikiMeta(cwd, meta));
 		if (!promoted.ok) {
 			progress(input, {
 				phase: "done",
