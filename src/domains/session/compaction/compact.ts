@@ -12,9 +12,11 @@
 
 import { streamSimple } from "../../../engine/ai.js";
 import type { EngineModel, Usage } from "../../../engine/types.js";
+import type { WorkingSetView } from "../../context/working-set/contract.js";
 import { foldWorkingSet } from "../../context/working-set/fold.js";
+import { projectWorkingSet } from "../../context/working-set/project.js";
 import { recallableRefListing } from "../../context/working-set/recall.js";
-import { extractReasoningTokens } from "../context-accounting.js";
+import { estimateAgentContextTokens, extractReasoningTokens } from "../context-accounting.js";
 import type { CompactionUsage, SessionEntry } from "../entries.js";
 import { serializeConversation } from "./branch-summary.js";
 import { findCutPoint } from "./cut-point.js";
@@ -96,7 +98,7 @@ export interface CompactionCallObservation {
 }
 
 export interface CompactInput {
-	/** Ordered session entries to compact. The caller reads these from the session domain. */
+	/** Ordered active-path session entries to compact; returned cut indexes address this same array. */
 	entries: ReadonlyArray<SessionEntry>;
 	/** Resolved orchestrator or compaction-override model. */
 	model: EngineModel;
@@ -320,13 +322,16 @@ function formatFileOperations(fileOps: FileOperations): string {
 	return sections.length > 0 ? `\n\n${sections.join("\n\n")}` : "";
 }
 
-function formatRecallableRefs(entries: ReadonlyArray<SessionEntry>, firstKeptEntryIndex: number): string {
+function formatRecallableRefs(
+	entries: ReadonlyArray<SessionEntry>,
+	firstKeptEntryIndex: number,
+	view: WorkingSetView,
+): string {
 	const entryIndexes = new Map<string, number>();
 	for (let index = 0; index < entries.length; index += 1) {
 		const entry = entries[index];
 		if (entry) entryIndexes.set(entry.turnId, index);
 	}
-	const view = foldWorkingSet(entries);
 	const evictedBeforeCut = new Map(
 		[...view.evicted].filter(([ref]) => (entryIndexes.get(ref) ?? Number.POSITIVE_INFINITY) < firstKeptEntryIndex),
 	);
@@ -411,6 +416,20 @@ async function runSummaryStream(
 		systemPrompt,
 		messages: [buildUserMessage(userText)],
 	};
+	// Price the complete serialized request, including templates, previous
+	// context, custom instructions and message overhead. This is the shared
+	// estimate, not provider-exact tokenization; never truncate constraints to
+	// make an oversized projected conversation fit.
+	const estimatedInput = estimateAgentContextTokens(context);
+	const contextWindow = input.model.contextWindow;
+	if (!Number.isFinite(contextWindow) || contextWindow <= 0) {
+		throw new Error("compaction requires a positive finite model context window");
+	}
+	if (estimatedInput + maxTokens > contextWindow) {
+		throw new Error(
+			`compaction estimated input ${estimatedInput} tokens plus output ${maxTokens} tokens exceeds model context window ${contextWindow}; use a larger compaction model or reduce the working set`,
+		);
+	}
 
 	const timestamp = new Date().toISOString();
 	const started = performance.now();
@@ -465,6 +484,12 @@ async function runSummaryStream(
 export async function compact(input: CompactInput): Promise<CompactResult> {
 	const reserveTokens = input.reserveTokens ?? DEFAULT_RESERVE_TOKENS;
 	const keepRecentTokens = input.keepRecentTokens ?? DEFAULT_KEEP_RECENT_TOKENS;
+	// Apply the same ledger decisions as live replay before pricing or
+	// serializing any slice, including the prior checkpoint's retained suffix.
+	// Projection preserves positions and turn IDs; cuts still address the raw
+	// input, which remains untouched and available for exact recall.
+	const workingSet = foldWorkingSet(input.entries);
+	const entries = projectWorkingSet(input.entries, workingSet);
 	// Iterative compaction: when a prior `compactionSummary` exists, the
 	// summary is canonical history. Restrict the cut search and the new-history
 	// slice to entries strictly after that boundary; the canonical summary and
@@ -472,26 +497,29 @@ export async function compact(input: CompactInput): Promise<CompactResult> {
 	// than rediscovering already-compacted raw history. Mirrors pi-coding-agent's
 	// `boundaryStart = prevCompactionIndex + 1` and `usageStart = prevCompactionIndex`
 	// in compaction.ts:619-628.
-	const prevCompactionIndex = findLatestCompactionIndex(input.entries);
+	const prevCompactionIndex = findLatestCompactionIndex(entries);
 	const boundaryStart = prevCompactionIndex + 1;
-	const protectedStart = findLatestSkillActivationProtectionStart(input.entries, boundaryStart);
+	const protectedStart = findLatestSkillActivationProtectionStart(entries, boundaryStart);
 	const usageStart = prevCompactionIndex >= 0 ? prevCompactionIndex : 0;
-	const usageEntries = input.entries.slice(usageStart);
+	const usageEntries = entries.slice(usageStart);
 	const lastUsage = getLastAssistantUsage(usageEntries);
 	const tokensBefore = calculateContextTokens(usageEntries, lastUsage);
-	const rawCut = findCutPoint(input.entries, keepRecentTokens, { startIndex: boundaryStart });
+	const rawCut = findCutPoint(entries, keepRecentTokens, { startIndex: boundaryStart });
 	const cut =
 		protectedStart !== null && rawCut.firstKeptEntryIndex > protectedStart
 			? { firstKeptEntryIndex: protectedStart, turnStartIndex: -1, isSplitTurn: false }
 			: rawCut;
 	const historyEnd = cut.isSplitTurn ? cut.turnStartIndex : cut.firstKeptEntryIndex;
-	const pre = input.entries.slice(boundaryStart, Math.max(boundaryStart, historyEnd));
+	const pre = entries.slice(boundaryStart, Math.max(boundaryStart, historyEnd));
 	const turnPrefix = cut.isSplitTurn
-		? input.entries.slice(Math.max(boundaryStart, cut.turnStartIndex), cut.firstKeptEntryIndex)
+		? entries.slice(Math.max(boundaryStart, cut.turnStartIndex), cut.firstKeptEntryIndex)
 		: [];
-	const previousContextEntries = priorCompactionContextEntries(input.entries, prevCompactionIndex);
+	const previousContextEntries = priorCompactionContextEntries(entries, prevCompactionIndex);
 	const previousContextText = serializeConversation(previousContextEntries);
-	const fileOps = extractFileOps([...previousContextEntries, ...pre, ...turnPrefix]);
+	const fileOps = extractFileOps([
+		...priorCompactionContextEntries(input.entries, prevCompactionIndex),
+		...input.entries.slice(boundaryStart, cut.firstKeptEntryIndex),
+	]);
 	const firstKept = input.entries[cut.firstKeptEntryIndex] ?? null;
 
 	if (pre.length === 0 && turnPrefix.length === 0) {
@@ -506,7 +534,13 @@ export async function compact(input: CompactInput): Promise<CompactResult> {
 	}
 
 	const systemPrompt = input.systemPrompt ?? COMPACTION_SYSTEM_PROMPT;
-	const maxTokens = Math.max(1024, Math.floor(reserveTokens * 0.8));
+	if (!Number.isFinite(reserveTokens) || reserveTokens <= 0) {
+		throw new Error("compaction requires a positive finite reserve token budget");
+	}
+	if (!Number.isFinite(input.model.maxTokens) || input.model.maxTokens < 1) {
+		throw new Error("compaction requires a positive finite model output token limit");
+	}
+	const maxTokens = Math.min(Math.floor(input.model.maxTokens), Math.max(1024, Math.floor(reserveTokens * 0.8)));
 	const summaryParts: string[] = [];
 	let usage: CompactionUsage | undefined;
 	if (pre.length > 0) {
@@ -529,6 +563,7 @@ export async function compact(input: CompactInput): Promise<CompactResult> {
 	const summary = `${summaryParts.join("\n\n---\n\n").trim()}${formatFileOperations(fileOps)}${formatRecallableRefs(
 		input.entries,
 		cut.firstKeptEntryIndex,
+		workingSet,
 	)}`.trim();
 
 	return {
