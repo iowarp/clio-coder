@@ -1,6 +1,8 @@
 import { join, resolve } from "node:path";
 import type { BootstrapProgressEvent } from "../domains/context/index.js";
 import type { BootstrapGenerationState } from "../domains/context/state.js";
+import type { RunWikiGenerateResult } from "../domains/context/wiki/generate.js";
+import type { WikiMeta } from "../domains/context/wiki/meta.js";
 
 const HELP = `Usage:
   clio-coder context
@@ -30,6 +32,20 @@ function printWikiProgress(event: BootstrapProgressEvent): void {
 	if (event.status === "completed") return;
 	const detail = event.detail ? ` (${event.detail})` : "";
 	process.stderr.write(`clio-coder context wiki: ${event.message}${detail}\n`);
+}
+
+function printWikiOutcome(prefix: string, result: RunWikiGenerateResult, meta: WikiMeta | null): void {
+	const pending = result.pending ?? meta?.plan?.pages.filter((page) => page.status !== "written").length ?? 0;
+	const complete = meta?.plan
+		? meta.plan.pages.filter((page) => page.status === "written").length
+		: (meta?.generation?.pagesWritten ?? Math.max(0, result.pages - pending));
+	const published = `${result.pages} published page${result.pages === 1 ? "" : "s"}`;
+	const progress = `${complete} complete, ${pending} pending`;
+	const outcome = pending > 0 ? "incomplete" : result.status === "noop" ? "unchanged" : "generated";
+	process.stdout.write(`${prefix}: ${outcome} (${published}; ${progress})\n`);
+	if (pending > 0) {
+		process.stdout.write("Run `clio-coder context wiki --update` to continue pending pages.\n");
+	}
 }
 
 function compactMetric(value: number, suffix: string): string {
@@ -131,7 +147,7 @@ async function runRefreshCommand(args: string[]): Promise<number> {
 		return 2;
 	}
 	try {
-		const { runContextRefresh } = await import("../domains/context/index.js");
+		const { runContextRefresh, readWikiMeta } = await import("../domains/context/index.js");
 		const wikiEntry = updateWiki ? await import("./wiki-generate.js") : null;
 		const result = await runContextRefresh({
 			cwd: process.cwd(),
@@ -152,11 +168,7 @@ async function runRefreshCommand(args: string[]): Promise<number> {
 				);
 				return 1;
 			}
-			process.stdout.write(
-				result.wiki.status === "noop"
-					? `clio-coder context refresh: wiki unchanged (${result.wiki.pages} page${result.wiki.pages === 1 ? "" : "s"})\n`
-					: `clio-coder context refresh: wiki updated (${result.wiki.pages} page${result.wiki.pages === 1 ? "" : "s"})\n`,
-			);
+			printWikiOutcome("clio-coder context refresh: wiki", result.wiki, readWikiMeta(process.cwd()));
 		}
 		return 0;
 	} catch (err) {
@@ -283,11 +295,7 @@ async function runWikiCommand(args: string[]): Promise<number> {
 			process.stderr.write(`clio-coder context wiki failed: ${(result.problems ?? ["unknown failure"]).join("; ")}\n`);
 			return 1;
 		}
-		process.stdout.write(
-			result.status === "noop"
-				? `clio-coder context wiki: unchanged (${result.pages} page${result.pages === 1 ? "" : "s"})\n`
-				: `clio-coder context wiki: generated ${result.pages} page${result.pages === 1 ? "" : "s"}\n`,
-		);
+		printWikiOutcome("clio-coder context wiki", result, context.readWikiMeta(process.cwd()));
 		return 0;
 	} catch (err) {
 		process.stderr.write(`clio-coder context wiki failed: ${err instanceof Error ? err.message : String(err)}\n`);
