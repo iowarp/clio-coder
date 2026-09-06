@@ -268,7 +268,9 @@ export function createTurnMiddleware(deps: TurnMiddlewareDeps): TurnMiddleware {
 
 		flushPendingReminders(): string {
 			if (pendingReminders.length === 0) return "";
-			const messages = pendingReminders.map((entry) => entry.message);
+			// Severity affects host actions, not the text delivered to the model.
+			// A paired continuation/info and reminder/warn still needs one copy.
+			const messages = [...new Set(pendingReminders.map((entry) => entry.message))];
 			pendingReminders.length = 0;
 			return `<system-reminder>\n${messages.join("\n\n")}\n</system-reminder>`;
 		},
