@@ -35,4 +35,6 @@ the ones that are easy to find. Never read `.env` files or other secret-bearing 
 
 Do not write files, run commands, or reach the network. Your entire output is one assistant
 message containing the handbook JSON and nothing else: no prose, no code fences, no commentary
-before or after it.
+before or after it. Once you have evidence for two short sections (about six bullet lines total),
+return the JSON immediately. Keep the combined section bodies under 2500 UTF-8 bytes, use inline
+commands, and leave conventions and invariants empty as the task requires.
