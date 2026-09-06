@@ -833,6 +833,22 @@ Deno.test("the session rail renders state, attribution, and the actions each ses
 	ok(!html.includes("fixture-session"));
 });
 
+Deno.test("long session previews and labels retain their full heading and tooltip text", () => {
+	const preview =
+		"Remember the nonsecret marker CLIO_ACP_FIRST_codex only in this conversation. Reply exactly WORKBENCH_LIVE_OK. Do not use tools.";
+	const label = "A distinct session with a long label " + "convergence study ".repeat(10).trim();
+	const workspace = workspaceFixture(FIXTURE_PROJECT_ID, "Alpha", {
+		sessions: [
+			sessionSummaryFixture("session-long-preview", { label: null, preview }),
+			sessionSummaryFixture("session-long-label", { label, preview }),
+		],
+	});
+	const html = render(stateWith(workspace));
+	for (const title of [preview, label]) {
+		ok(html.includes(`<h3 title="${title}">${title}</h3>`));
+	}
+});
+
 Deno.test("a resumed session with truncated replay says so without claiming lost context", () => {
 	const workspace = workspaceFixture(FIXTURE_PROJECT_ID, "Alpha", {
 		clioCoder: clioSnapshotFixture("idle", {

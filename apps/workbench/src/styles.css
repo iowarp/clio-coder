@@ -649,6 +649,8 @@ kbd {
 
 .session-list {
 	display: grid;
+	/* Keep intrinsic row heights when the rail's scroll viewport is shorter. */
+	grid-auto-rows: max-content;
 	align-content: start;
 	gap: 3px;
 }
@@ -2274,7 +2276,16 @@ kbd {
 	background: rgb(31 183 166 / 6%);
 }
 
+.session-row__body {
+	min-width: 0;
+	overflow-wrap: anywhere;
+}
+
 .session-row h3 {
+	display: -webkit-box;
+	-webkit-box-orient: vertical;
+	-webkit-line-clamp: 3;
+	overflow: hidden;
 	margin: 0;
 	font-size: 0.86rem;
 }
@@ -2488,8 +2499,13 @@ kbd {
 	align-items: center;
 }
 
+.session-row__rename label,
 .session-row__rename input {
 	min-width: 0;
+}
+
+.session-row__rename input {
+	width: 100%;
 	font-size: 0.82rem;
 }
 

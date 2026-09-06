@@ -747,7 +747,7 @@ function SessionRow({ session, open, actions, busy, onDelete }: {
 							</button>
 						</form>
 					)
-					: <h3>{title}</h3>}
+					: <h3 title={title}>{title}</h3>}
 				<p className="session-row__meta">
 					{SESSION_STATE_LABELS[session.state]} · {session.turns} turns · {formatTimestamp(session.updatedAt)}
 					{session.target === null ? "" : ` · ${session.target}`}
