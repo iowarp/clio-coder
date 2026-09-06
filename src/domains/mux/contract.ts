@@ -61,7 +61,13 @@ const TOKEN_VALUE_MAX = 80;
 /** How long `available()` stays false after a transport failure before probing again. */
 const DEGRADE_COOLDOWN_MS = 5_000;
 
+export type MuxPaneOpenFailure =
+	| { source: "mux"; kind: MuxError["kind"]; wireCode: string | null; method: string | null; message: string }
+	| { source: "local"; message: string };
+
 export interface MuxOpenUtilityPaneRequest {
+	/** Request-scoped diagnostics; the pane-or-null best-effort result is unchanged. */
+	onFailure?: (failure: MuxPaneOpenFailure) => void;
 	argv: ReadonlyArray<string>;
 	cwd: string;
 	label: string;
@@ -230,7 +236,12 @@ export function createMuxRuntime(options: MuxRuntimeOptions): MuxRuntime {
 	 * is what the caller sees when the pane layer is not there, which is the same
 	 * value it sees in `none` mode.
 	 */
-	const attempt = async <T>(what: string, run: (live: MuxClient) => Promise<T>, fallback: T): Promise<T> => {
+	const attempt = async <T>(
+		what: string,
+		run: (live: MuxClient) => Promise<T>,
+		fallback: T,
+		onError?: (error: unknown) => void,
+	): Promise<T> => {
 		if (!usable() || client === null) return fallback;
 		try {
 			const value = await run(client);
@@ -238,6 +249,7 @@ export function createMuxRuntime(options: MuxRuntimeOptions): MuxRuntime {
 			return value;
 		} catch (error) {
 			degrade(what, error);
+			onError?.(error);
 			return fallback;
 		}
 	};
@@ -301,6 +313,13 @@ export function createMuxRuntime(options: MuxRuntimeOptions): MuxRuntime {
 		},
 
 		async openUtilityPane(request: MuxOpenUtilityPaneRequest): Promise<MuxPaneRef | null> {
+			const report = (failure: MuxPaneOpenFailure): void => {
+				try {
+					request.onFailure?.(failure);
+				} catch {
+					// Diagnostics must not break the best-effort contract.
+				}
+			};
 			// Idempotence for docks: a slot that already has a pane answers with it.
 			const dockSlot = request.dock?.slot;
 			if (dockSlot && docks) {
@@ -314,6 +333,7 @@ export function createMuxRuntime(options: MuxRuntimeOptions): MuxRuntime {
 					let ref: MuxPaneRef;
 					if (request.dock && docks) {
 						const placed = await docks.open(request.dock.slot, {
+							onRefused: (message) => report({ source: "local", message }),
 							...(request.dock.share === undefined ? {} : { share: request.dock.share }),
 							cwd: request.cwd,
 							...(request.env ? { env: request.env } : {}),
@@ -356,6 +376,19 @@ export function createMuxRuntime(options: MuxRuntimeOptions): MuxRuntime {
 					return ref;
 				},
 				null,
+				(error) => {
+					if (error instanceof MuxError) {
+						report({
+							source: "mux",
+							kind: error.kind,
+							wireCode: error.wireCode,
+							method: error.method,
+							message: error.message,
+						});
+					} else {
+						report({ source: "local", message: error instanceof Error ? error.message : String(error) });
+					}
+				},
 			);
 		},
 

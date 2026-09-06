@@ -21,6 +21,7 @@ export type {
 	MuxContract,
 	MuxNotifyRequest,
 	MuxOpenUtilityPaneRequest,
+	MuxPaneOpenFailure,
 	MuxRuntime,
 	MuxRuntimeOptions,
 } from "./contract.js";
