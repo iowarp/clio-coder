@@ -8,7 +8,7 @@ import { modelWikiGenerate } from "../../src/cli/wiki-generate.js";
 import { runWikiGenerate } from "../../src/domains/context/wiki/generate.js";
 import { computeWikiContentHash, readWikiMeta } from "../../src/domains/context/wiki/meta.js";
 import type { WikiPlan, WikiPlanPage } from "../../src/domains/context/wiki/plan.js";
-import { readWikiPlanFile, writeWikiPlanFile } from "../../src/domains/context/wiki/plan-store.js";
+import { readWikiPlanFile, sanitizeWikiPlan, writeWikiPlanFile } from "../../src/domains/context/wiki/plan-store.js";
 import { wikiCompleteness, wikiStaleness, wikiStalenessAsync } from "../../src/domains/context/wiki/staleness.js";
 import type { DispatchContract } from "../../src/domains/dispatch/contract.js";
 import type { JobSpec } from "../../src/domains/dispatch/validation.js";
@@ -359,6 +359,62 @@ describe("wiki generation outcomes", () => {
 		);
 		assert.equal(attempted.length, 1);
 		assert.ok(attempted[0]?.endsWith("b.md"));
+	});
+	for (const change of ["unchanged", "changed source", "failed Git comparison", "legacy checkpoint"] as const) {
+		it(`resumes the first publication checkpoint with ${change}`, async () => {
+			const stopped = await runWikiGenerate({
+				cwd,
+				model: "fixture",
+				generate: generator((spec, path) => {
+					if (!path)
+						writeWikiPlanFile(spec.writeRoots?.[0] as string, {
+							version: 1,
+							overview: "Fixture project",
+							pages: [page("a"), page("b")],
+						});
+					else writeFileSync(path, content("a", 1));
+				}),
+				onProgress(event) {
+					if (event.message === "wrote a.md (1/2)") throw new Error("interrupted before first publication");
+				},
+			});
+			assert.equal(stopped.status, "failed");
+			assert.equal(readWikiMeta(cwd), null, "no published Git baseline exists yet");
+			const dir = readdirSync(join(cwd, ".clio-coder")).find((name) => name.startsWith("wiki-staging-"));
+			assert.ok(dir);
+			const staged = readWikiPlanFile(join(cwd, ".clio-coder", dir));
+			assert.ok(staged);
+			assert.deepEqual(
+				staged?.pages.map((entry) => entry.status),
+				["written", "pending"],
+			);
+			assert.equal(staged.sourceGitHead, git("rev-parse", "HEAD").trim());
+			if (change === "changed source") writeFileSync(join(cwd, "src/a.ts"), "export const a = 2;\n");
+			if (change === "failed Git comparison") writeFileSync(join(cwd, ".git/index"), "invalid index");
+			if (change === "legacy checkpoint") {
+				delete staged.sourceGitHead;
+				writeWikiPlanFile(join(cwd, ".clio-coder", dir), staged);
+			}
+			const attempted: string[] = [];
+			const result = await run(
+				generator((_spec, path) => {
+					assert.ok(path, "a resumed checkpoint does not repeat planning");
+					const name = path.endsWith("a.md") ? "a" : "b";
+					attempted.push(name);
+					writeFileSync(path, content(name, 2));
+				}),
+			);
+			assert.deepEqual(attempted, change === "unchanged" ? ["b"] : ["a", "b"]);
+			assert.equal(result.pending, 0);
+		});
+	}
+	it("keeps checkpoint Git identity harness-owned across authored replanning", () => {
+		const sourceGitHead = git("rev-parse", "HEAD").trim();
+		const previous: WikiPlan = { version: 1, overview: "Fixture", pages: [page("a")], sourceGitHead };
+		const authored = { ...previous, sourceGitHead: "0".repeat(40) };
+		assert.equal(sanitizeWikiPlan(authored, previous, { trustStatus: false })?.sourceGitHead, sourceGitHead);
+		assert.equal(sanitizeWikiPlan(authored, undefined, { trustStatus: false })?.sourceGitHead, undefined);
+		assert.equal(sanitizeWikiPlan({ ...authored, sourceGitHead: "HEAD" })?.sourceGitHead, undefined);
 	});
 	it("revalidates old checkpoints with no source identity", async () => {
 		await initialize();

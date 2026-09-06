@@ -376,7 +376,7 @@ function resolvePlan(input: {
 	const previous = staged ?? (input.mode === "update" ? input.previousPlan : undefined);
 	if (previous) {
 		const pageSources = pageSourceIndex(input.stagingDir, input.cwd);
-		const gitAvailable = changedPathsSince(input.cwd, input.gitHead) !== null;
+		const gitAvailable = changedPathsSince(input.cwd, staged?.sourceGitHead ?? input.gitHead) !== null;
 		const existing = new Set(wikiMarkdownFilesInDir(input.stagingDir));
 		const plan = {
 			...previous,
@@ -458,6 +458,7 @@ export async function runWikiGenerate(
 		});
 
 		const staging = adoptOrCreateStaging(cwd);
+		const sourceGitHead = currentWikiGitHead(cwd) ?? undefined;
 		const sourceContent = captureWikiSourceContent(cwd);
 		const resolved = resolvePlan({
 			cwd,
@@ -479,7 +480,7 @@ export async function runWikiGenerate(
 				`${resolved.plan.pages.length} pages planned; ${owed} to write` +
 				(resolved.resumed ? "; resuming an interrupted run" : ""),
 		});
-		resolved.plan = { ...resolved.plan, sourceTreeHash, sourceContent };
+		resolved.plan = { ...resolved.plan, sourceTreeHash, sourceGitHead, sourceContent };
 		writeWikiPlanFile(staging.dir, resolved.plan);
 
 		const beforeHash = computeWikiContentHash(cwd);
@@ -540,6 +541,7 @@ export async function runWikiGenerate(
 		const workedPlan: WikiPlan = {
 			...checkpoint,
 			sourceTreeHash,
+			sourceGitHead,
 			sourceContent,
 			pages: checkpoint.pages.map((page) => {
 				const dependencies = [...new Set([...(page.dependencies ?? []), ...(citedSources.get(page.path) ?? [])])];

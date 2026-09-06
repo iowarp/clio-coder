@@ -144,11 +144,15 @@ export function sanitizeWikiPlan(
 	const sourceContent =
 		previous?.sourceContent ?? (options.trustStatus ? parseWikiSourceContent(value.sourceContent) : undefined);
 	const sourceTreeHash = previous?.sourceTreeHash ?? (options.trustStatus ? value.sourceTreeHash : undefined);
+	const sourceGitHead = previous?.sourceGitHead ?? (options.trustStatus ? value.sourceGitHead : undefined);
 	return {
 		version: 1,
 		...(sourceContent ? { sourceContent } : {}),
 		...(retiredPages.length ? { retiredPages } : {}),
 		...(typeof sourceTreeHash === "string" && /^[a-f0-9]{64}$/.test(sourceTreeHash) ? { sourceTreeHash } : {}),
+		...(typeof sourceGitHead === "string" && /^(?:[a-f0-9]{40}|[a-f0-9]{64})$/.test(sourceGitHead)
+			? { sourceGitHead }
+			: {}),
 		overview: usableString(value.overview) ?? previous?.overview ?? "",
 		pages,
 	};

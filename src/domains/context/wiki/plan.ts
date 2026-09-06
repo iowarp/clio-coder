@@ -44,6 +44,8 @@ export interface WikiPlan {
 	version: 1;
 	/** Source revision observed before dispatch; stale checkpoints must be revalidated. */
 	sourceTreeHash?: string;
+	/** Harness-captured Git baseline for resuming before any wiki has been published. */
+	sourceGitHead?: string;
 	/** Source bytes observed before dispatch, shared across page dependencies. */
 	sourceContent?: WikiSourceContent;
 	/** Harness-owned retirements from authored replanning; explicit reintroduction clears a path. */
