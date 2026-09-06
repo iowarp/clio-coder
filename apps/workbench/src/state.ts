@@ -671,8 +671,17 @@ function applyToOpen(
 			};
 		case "fs.delete.challenge":
 			return { ...open, deleteChallenge: event.payload };
-		case "clio-coder.state":
-			return { ...open, clioCoder: event.payload.snapshot };
+		case "clio-coder.state": {
+			const snapshot = event.payload.snapshot;
+			// New/load/close retire the bound child before starting a fresh one.
+			// Its turn ids restart at turn-1, so retire the previous projection
+			// here, before replay or live text arrives. Binding after replay must
+			// preserve that replay, as must ordinary same-session state updates.
+			const projection = snapshot.phase === "starting" && snapshot.session === null
+				? emptyTurnProjection
+				: open.projection;
+			return { ...open, clioCoder: snapshot, projection };
+		}
 		case "session.list":
 			return {
 				...open,
