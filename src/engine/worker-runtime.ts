@@ -215,6 +215,14 @@ function assistantMessageText(message: AgentMessage | undefined): string | null 
  */
 function isTerminalAssistantMessage(message: AgentMessage | undefined): boolean {
 	if (!isAssistantMessage(message)) return false;
+	// pi refuses truncated tool calls and continues with their error results.
+	// That turn has no final artifact/report to repair yet.
+	if (
+		message.stopReason === "length" &&
+		Array.isArray(message.content) &&
+		message.content.some((block) => block.type === "toolCall")
+	)
+		return false;
 	return message.stopReason !== "toolUse" && message.stopReason !== "error";
 }
 

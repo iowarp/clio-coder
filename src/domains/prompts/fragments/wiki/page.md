@@ -88,10 +88,14 @@ Grounding rules:
   must come from source you inspected. Skip it otherwise; a decorative diagram is a stale claim
   waiting to happen.
 
-Discipline: read the anchor sources first, write the file once you can ground the page, then
-improve it in place with further reads. Only publish behavior you can support with those reads. When the page is
-written and grounded, stop and say so in one line; there is no report to file, because the file
-you wrote is the result.
+Discipline: read the anchor sources first, then write valid front matter and a useful grounded
+section. Build the page with small, complete writes and focused edits as you inspect further
+evidence; do not hold the whole page for one large tool call. A response's output limit is a
+per-call boundary, not the end of this page's work. If a tool result says a call was truncated
+and not executed, inspect the file as needed and reissue a smaller complete call. Preserve
+sections already written, and keep front matter consistent with the finished body. Only
+publish behavior you can support with source reads. When the page is written and grounded,
+stop and say so in one line; there is no report to file, because the file you wrote is the result.
 
 Style: dense, factual, complete sentences, no marketing prose. Do not use the pattern
 "[noun] - [parenthetical clause]"; use a full sentence or a colon instead.

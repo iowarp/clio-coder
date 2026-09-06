@@ -922,11 +922,17 @@ function guardMalformedToolCalls(
 	(async () => {
 		try {
 			for await (const event of source) {
-				if (event.type === "toolcall_end") {
-					const required = requiredByTool.get(event.toolCall.name);
-					if (required && hasEmptyArguments(event.toolCall.arguments)) {
-						const message = malformedToolArgsMessage(model, event.toolCall.name, required);
-						const error = finalErrorFromPartial(event.partial, message);
+				// The final stop reason distinguishes malformed output from a token
+				// limit. pi rejects every call in a length-truncated message (even
+				// salvage-parsed arguments) and continues with error tool results.
+				// Turning that into an error here aborts the worker before recovery.
+				if (event.type === "done" && event.message.stopReason !== "length") {
+					const malformed = event.message.content.find(
+						(block) => block.type === "toolCall" && requiredByTool.has(block.name) && hasEmptyArguments(block.arguments),
+					);
+					if (malformed?.type === "toolCall") {
+						const message = malformedToolArgsMessage(model, malformed.name, requiredByTool.get(malformed.name) ?? []);
+						const error = finalErrorFromPartial(event.message, message);
 						guarded.push({ type: "error", reason: "error", error });
 						guarded.end(error);
 						return;
