@@ -84,6 +84,15 @@ class AcpClient {
 		});
 		this.exit = new Promise((resolve) => child.once("close", (code, signal) => resolve({ code, signal })));
 	}
+	assertRunningChild(expectedPid?: number): number {
+		const pid = this.child.pid;
+		ok(pid !== undefined && Number.isSafeInteger(pid) && pid > 1, "ACP child has an OS process identity");
+		if (expectedPid !== undefined) strictEqual(pid, expectedPid, "ACP close/new keeps the same child");
+		strictEqual(this.child.exitCode, null, "ACP child has not exited");
+		strictEqual(this.child.signalCode, null, "ACP child has not been terminated");
+		process.kill(pid, 0);
+		return pid;
+	}
 	private consume(text: string): void {
 		this.buffer += text;
 		for (;;) {
@@ -152,6 +161,20 @@ class AcpClient {
 	}
 	kill(): void {
 		if (this.child.exitCode === null && this.child.signalCode === null) this.child.kill("SIGKILL");
+	}
+	async killAndWait(): Promise<void> {
+		this.kill();
+		let timer: ReturnType<typeof setTimeout> | undefined;
+		try {
+			await Promise.race([
+				this.exit,
+				new Promise<never>((_, reject) => {
+					timer = setTimeout(() => reject(new Error("ACP child cleanup exceeded 5 seconds")), 5_000);
+				}),
+			]);
+		} finally {
+			clearTimeout(timer);
+		}
 	}
 }
 function launch(target: Home, project: string): AcpClient {
@@ -286,7 +309,7 @@ describe("smoke/ACP stdio boundary", { concurrency: false }, () => {
 		}
 	});
 
-	it("starts a fresh conversation after close and still resumes the original session", async () => {
+	it("direct ACP close/new resets history, ancestry and tasks on the same child and still resumes the original session", async (t) => {
 		const target = home();
 		let phase: "first" | "second" | "resume" = "first";
 		let step = 0;
@@ -312,6 +335,7 @@ describe("smoke/ACP stdio boundary", { concurrency: false }, () => {
 			mkdirSync(project);
 			client = launch(target, project);
 			const first = await openSession(client, project);
+			const childPid = client.assertRunningChild();
 			const prompt = async (sessionId: string, text: string): Promise<void> => {
 				const turn = await client?.request<{ stopReason: string }>("session/prompt", {
 					sessionId,
@@ -334,6 +358,7 @@ describe("smoke/ACP stdio boundary", { concurrency: false }, () => {
 			match(JSON.stringify(client.updates), /ACP_FIRST_ANSWER/);
 			match(JSON.stringify(fixture.requests.at(-1)), /\[>\] t1 ACP_FIRST_TASK/);
 			await client.request("session/close", { sessionId: first });
+			client.assertRunningChild(childPid);
 			const firstEntries = ledger(first);
 			const firstTurnIds = new Set(firstEntries.map((entry) => entry.turnId).filter(Boolean));
 			ok(firstTurnIds.size > 0);
@@ -341,6 +366,7 @@ describe("smoke/ACP stdio boundary", { concurrency: false }, () => {
 			phase = "second";
 			step = 0;
 			const second = await client.request<{ sessionId: string }>("session/new", { cwd: project, mcpServers: [] });
+			client.assertRunningChild(childPid);
 			notStrictEqual(second.sessionId, first);
 			const secondStart = fixture.requests.length;
 			client.updates.length = 0;
@@ -348,9 +374,12 @@ describe("smoke/ACP stdio boundary", { concurrency: false }, () => {
 			match(JSON.stringify(client.updates), /ACP_SECOND_ANSWER/);
 			const secondRequests = fixture.requests.slice(secondStart);
 			ok(secondRequests.length >= 2, "second turn used the real tasks tool");
+			match(JSON.stringify(secondRequests), /no task board yet/, "the new session has no task board");
 			doesNotMatch(JSON.stringify(secondRequests), /ACP_FIRST_(PROMPT|ANSWER|BOARD|TASK)/);
 			await client.request("session/close", { sessionId: second.sessionId });
 			const secondEntries = ledger(second.sessionId);
+			ok(secondEntries.length > 0, "new-session ancestry assertions inspect a nonempty ledger");
+			match(JSON.stringify(secondEntries), /ACP_SECOND_PROMPT/);
 			doesNotMatch(JSON.stringify(secondEntries), /ACP_FIRST_(PROMPT|ANSWER|BOARD|TASK)/);
 			for (const entry of secondEntries) {
 				strictEqual(firstTurnIds.has(entry.turnId), false, "turn identity belongs to the new session");
@@ -367,9 +396,11 @@ describe("smoke/ACP stdio boundary", { concurrency: false }, () => {
 			match(resumed, /ACP_FIRST_ANSWER/);
 			match(resumed, /\[>\] t1 ACP_FIRST_TASK/);
 			doesNotMatch(resumed, /ACP_SECOND_(PROMPT|ANSWER)/);
+			client.assertRunningChild(childPid);
+			t.diagnostic(`direct ACP same child: pid=${childPid}; sessions=${first} -> ${second.sessionId} -> ${first}`);
 			await client.close(first);
 		} finally {
-			client?.kill();
+			await client?.killAndWait();
 			await closeServer(fixture.server);
 			target.cleanup();
 		}

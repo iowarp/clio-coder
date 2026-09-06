@@ -92,8 +92,9 @@ function fixtureLaunch(
 	scenario: string,
 	callLogPath?: string,
 	permissionLogPath?: string,
+	pidPath?: string,
 ): AcpLaunchSpec {
-	const writable = [callLogPath, permissionLogPath].filter((path): path is string => path !== undefined);
+	const writable = [callLogPath, permissionLogPath, pidPath].filter((path): path is string => path !== undefined);
 	return {
 		command: Deno.execPath(),
 		args: [
@@ -106,6 +107,7 @@ function fixtureLaunch(
 			`--scenario=${scenario}`,
 			...(callLogPath === undefined ? [] : [`--call-log=${callLogPath}`]),
 			...(permissionLogPath === undefined ? [] : [`--permission-log=${permissionLogPath}`]),
+			...(pidPath === undefined ? [] : [`--pid-file=${pidPath}`]),
 		],
 		cwd: root,
 		clearEnv: true,
@@ -118,6 +120,7 @@ function fixtureLauncher(
 	scenario: string,
 	callLogPath?: string,
 	permissionLogPath?: string,
+	pidPath?: string,
 ): FixtureLauncherHarness {
 	const launchedRoots: string[] = [];
 	return {
@@ -125,7 +128,7 @@ function fixtureLauncher(
 		launcher: {
 			launch(trustedRoot) {
 				launchedRoots.push(trustedRoot);
-				return fixtureLaunch(trustedRoot, scenario, callLogPath, permissionLogPath);
+				return fixtureLaunch(trustedRoot, scenario, callLogPath, permissionLogPath, pidPath);
 			},
 		},
 	};
@@ -200,6 +203,7 @@ interface Harness {
 	readonly launchedRoots: string[];
 	readonly callLogPath: string;
 	readonly permissionLogPath: string;
+	readonly pidPath: string;
 	dispose(): Promise<void>;
 }
 
@@ -207,6 +211,7 @@ interface HarnessOptions {
 	readonly sink?: RecordingSink;
 	readonly callLog?: boolean;
 	readonly permissionLog?: boolean;
+	readonly pidFile?: boolean;
 	readonly bind?: boolean;
 	readonly promptTimeoutMs?: number;
 	readonly permissionEscalateMs?: number;
@@ -220,10 +225,12 @@ async function harness(scenario: string, options: HarnessOptions = {}): Promise<
 	const root = await Deno.makeTempDir({ prefix: `workbench-host-${scenario}-` });
 	const callLogPath = join(root, "acp-calls.json");
 	const permissionLogPath = join(root, "acp-permissions.json");
+	const pidPath = join(root, "child.pid");
 	const launcher = fixtureLauncher(
 		scenario,
 		options.callLog === true ? callLogPath : undefined,
 		options.permissionLog === true ? permissionLogPath : undefined,
+		options.pidFile === true ? pidPath : undefined,
 	);
 	const sink = options.sink ?? new RecordingSink();
 	const host = new ClioProjectHost({
@@ -249,7 +256,7 @@ async function harness(scenario: string, options: HarnessOptions = {}): Promise<
 			throw error;
 		}
 	}
-	return { root, sink, host, launchedRoots: launcher.launchedRoots, callLogPath, permissionLogPath, dispose };
+	return { root, sink, host, launchedRoots: launcher.launchedRoots, callLogPath, permissionLogPath, pidPath, dispose };
 }
 
 /** The fixture writes its call log as it exits, so tests wait for the file. */
@@ -1519,20 +1526,85 @@ Deno.test("max turn requests projects exactly 128 tool starts and suppresses the
 	}
 });
 
-Deno.test("closing a session retires its child and leaves the project ready for a new one", async () => {
-	const test = await harness("conversation");
+Deno.test("Workbench host open/turn/close/new changes child identity and completes a fresh turn", async () => {
+	const test = await harness("conversation", { bind: false, callLog: true, pidFile: true });
+	const readPid = async (): Promise<number> => {
+		const pid = Number(await Deno.readTextFile(test.pidPath));
+		ok(Number.isSafeInteger(pid) && pid > 1);
+		return pid;
+	};
+	const assertRetired = async (pid: number): Promise<void> => {
+		if (Deno.build.os === "windows") return;
+		const status = await new Deno.Command("kill", {
+			args: ["-s", "0", String(pid)],
+			stdout: "null",
+			stderr: "null",
+		}).output();
+		equal(status.success, false, `fixture child ${pid} must have exited`);
+	};
 	try {
+		await test.host.open();
+		equal(test.host.phase, "unbound");
+		const firstPid = await readPid();
+		const firstGeneration = test.host.generation;
+		ok(firstGeneration);
+		await test.host.newSession();
 		const first = test.host.boundSessionPublicId;
+		ok(first);
+		const firstTurn = await test.host.startTurn("First host session.");
+		const firstTerminal = await waitForEvent(
+			test.sink,
+			"turn.terminal",
+			(event) => event.context.generation === firstGeneration,
+		);
+		equal(firstTerminal.payload.outcome, "completed");
+		deepStrictEqual(firstTerminal.context, firstTurn);
+		equal(await readPid(), firstPid);
+		equal(test.launchedRoots.length, 1);
+
 		await test.host.closeSession();
 		equal(test.host.boundSessionPublicId, null);
+		equal(test.host.snapshot().session, null);
 		equal(test.host.phase, "unbound");
+		await waitForCallLog(test.callLogPath);
+		const firstMethods = await callMethods(test.callLogPath);
+		deepStrictEqual(
+			firstMethods.filter((method) => ["session/new", "session/prompt", "session/close"].includes(method)),
+			[
+				"session/new",
+				"session/prompt",
+				"session/close",
+			],
+		);
+		await assertRetired(firstPid);
+		const secondPid = await readPid();
+		ok(secondPid !== firstPid, "host close replaces the actual subprocess, not just its session");
+		const secondGeneration = test.host.generation;
+		ok(secondGeneration && secondGeneration !== firstGeneration);
+		equal(test.launchedRoots.length, 2, "close already initialized the unbound replacement");
+
 		await test.host.newSession();
 		const second = test.host.boundSessionPublicId;
 		ok(second);
 		equal(second, first, "the fixture reuses one session id, so the public id must be stable");
-		// Closing a session retires the child and spawns its replacement; binding a
-		// new session on that fresh, unbound process does not spawn again.
-		equal(test.launchedRoots.length, 2);
+		const secondTurn = await test.host.startTurn("Second host session.");
+		const secondTerminal = await waitForEvent(
+			test.sink,
+			"turn.terminal",
+			(event) => event.context.generation === secondGeneration,
+		);
+		equal(secondTerminal.payload.outcome, "completed");
+		deepStrictEqual(secondTerminal.context, secondTurn);
+		equal(secondTurn.turnId, firstTurn.turnId, "per-session turn numbering restarts; generation distinguishes it");
+		equal(await readPid(), secondPid);
+		equal(test.host.generation, secondGeneration);
+		deepStrictEqual(test.launchedRoots, [test.root, test.root]);
+		equal(test.host.phase, "idle");
+		await test.host.close();
+		await assertRetired(secondPid);
+		console.log(
+			`host restart: child ${firstPid} -> ${secondPid}; generation ${firstGeneration} -> ${secondGeneration}`,
+		);
 	} finally {
 		await test.dispose();
 	}
