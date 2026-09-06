@@ -2,6 +2,7 @@ using System;
 using System.Diagnostics;
 using System.IO;
 using System.Text;
+using System.Threading.Tasks;
 
 // A Windows executable fixture for the shell-free Antigravity spawn contract.
 // Forward the original argv, cwd, environment, stdio, and exit code to the same
@@ -44,12 +45,24 @@ internal static class AntigravityLauncher
             Arguments = arguments.ToString(),
             WorkingDirectory = Environment.CurrentDirectory,
             UseShellExecute = false,
-            CreateNoWindow = true
+            CreateNoWindow = true,
+            RedirectStandardInput = true,
+            RedirectStandardOutput = true,
+            RedirectStandardError = true
         };
-        // With redirection disabled, the child inherits the runtime's pipes.
+        // .NET Framework does not reliably forward Node's inherited Windows
+        // pipe handles. Bridge bytes explicitly and close stdin after its EOF.
         using (Process child = Process.Start(start))
         {
+            Task input = Console.OpenStandardInput().CopyToAsync(child.StandardInput.BaseStream)
+                .ContinueWith(completed => {
+                    child.StandardInput.Close();
+                    completed.GetAwaiter().GetResult();
+                });
+            Task output = child.StandardOutput.BaseStream.CopyToAsync(Console.OpenStandardOutput());
+            Task error = child.StandardError.BaseStream.CopyToAsync(Console.OpenStandardError());
             child.WaitForExit();
+            Task.WaitAll(input, output, error);
             return child.ExitCode;
         }
     }
