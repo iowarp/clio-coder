@@ -31,6 +31,8 @@ export interface WikiPlanPage {
 	intent: string;
 	/** Repository-relative source files that ground the page. */
 	sources: string[];
+	/** Harness-owned cited source/test paths retained even after routing repair drops a missing path. */
+	dependencies?: string[];
 	/** Harness-owned: whether this page has been written in a completed dispatch. */
 	status: WikiPageStatus;
 	/** Harness-owned: how many dispatches have tried to write this page. */
@@ -39,6 +41,8 @@ export interface WikiPlanPage {
 
 export interface WikiPlan {
 	version: 1;
+	/** Source revision observed before dispatch; stale checkpoints must be revalidated. */
+	sourceTreeHash?: string;
 	/** One paragraph describing what this repository is; opens the generated quickstart. */
 	overview: string;
 	pages: WikiPlanPage[];

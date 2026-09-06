@@ -168,7 +168,11 @@ export function isWikiMeta(value: unknown): value is WikiMeta {
 }
 
 export function readWikiMeta(cwd: string): WikiMeta | null {
-	const filePath = wikiMetaPath(cwd);
+	return readWikiMetaInDir(wikiDir(cwd));
+}
+
+export function readWikiMetaInDir(dir: string): WikiMeta | null {
+	const filePath = join(dir, "meta.json");
 	if (!existsSync(filePath)) return null;
 	let parsed: unknown;
 	try {
@@ -181,6 +185,10 @@ export function readWikiMeta(cwd: string): WikiMeta | null {
 }
 
 export function writeWikiMeta(cwd: string, meta: WikiMeta): void {
+	writeWikiMetaInDir(wikiDir(cwd), meta);
+}
+
+export function writeWikiMetaInDir(dir: string, meta: WikiMeta): void {
 	const normalized: WikiMeta = {
 		version: 1,
 		updatedAt: meta.updatedAt,
@@ -192,7 +200,7 @@ export function writeWikiMeta(cwd: string, meta: WikiMeta): void {
 		...(meta.generation !== undefined ? { generation: { ...meta.generation } } : {}),
 		...(meta.plan !== undefined ? { plan: meta.plan } : {}),
 	};
-	safeResourceWrite(wikiMetaPath(cwd), `${JSON.stringify(normalized)}\n`, { encoding: "utf8" });
+	safeResourceWrite(join(dir, "meta.json"), `${JSON.stringify(normalized)}\n`, { encoding: "utf8" });
 }
 
 /**
