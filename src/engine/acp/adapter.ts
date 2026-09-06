@@ -5,6 +5,7 @@ import {
 	type DelegationAgentConfig,
 } from "../../core/defaults.js";
 import type { HeartbeatStamp } from "../../domains/dispatch/heartbeat.js";
+import { resolveCostProvenance } from "../../domains/providers/types/cost-provenance.js";
 import type { AutonomyLevel } from "../../domains/safety/autonomy.js";
 import type { SafetyContract } from "../../domains/safety/contract.js";
 import type { AgentEvent } from "../types.js";
@@ -136,6 +137,7 @@ function flattenPrompt(input: AcpDelegationRunInput): string {
 
 export function emptyUsage(): AcpDelegationUsage {
 	return {
+		tokensReported: false,
 		inputTokens: 0,
 		outputTokens: 0,
 		cacheReadTokens: 0,
@@ -150,14 +152,33 @@ function finite(value: unknown): number {
 	return typeof value === "number" && Number.isFinite(value) && value > 0 ? value : 0;
 }
 
-/** Same field the ACP server side and `sumRunUsage` read for a dollar figure; cost is never re-derived here. */
-function costTotal(raw: Record<string, unknown>): number {
-	const cost = raw.cost;
-	return isRecord(cost) ? finite(cost.total) : 0;
+/** Presence matters: an explicit zero must not fall back to another observation. */
+function nonnegative(value: unknown): number | undefined {
+	return typeof value === "number" && Number.isFinite(value) && value >= 0 ? value : undefined;
 }
 
 export function mergeUsage(into: AcpDelegationUsage, raw: unknown): void {
 	if (!isRecord(raw)) return;
+	const tokensReported = [
+		raw.input,
+		raw.inputTokens,
+		raw.input_tokens,
+		raw.output,
+		raw.outputTokens,
+		raw.output_tokens,
+		raw.cacheRead,
+		raw.cacheReadTokens,
+		raw.cache_read_tokens,
+		raw.cacheWrite,
+		raw.cacheWriteTokens,
+		raw.cache_write_tokens,
+		raw.reasoning,
+		raw.reasoningTokens,
+		raw.reasoning_tokens,
+		raw.totalTokens,
+		raw.total_tokens,
+	].some((value) => nonnegative(value) !== undefined);
+	into.tokensReported ||= tokensReported;
 	const input = finite(raw.input) + finite(raw.inputTokens) + finite(raw.input_tokens);
 	const output = finite(raw.output) + finite(raw.outputTokens) + finite(raw.output_tokens);
 	const cacheRead = finite(raw.cacheRead) + finite(raw.cacheReadTokens) + finite(raw.cache_read_tokens);
@@ -167,12 +188,23 @@ export function mergeUsage(into: AcpDelegationUsage, raw: unknown): void {
 	into.cacheReadTokens += cacheRead;
 	into.cacheWriteTokens += cacheWrite;
 	into.reasoningTokens += finite(raw.reasoning) + finite(raw.reasoningTokens) + finite(raw.reasoning_tokens);
-	// Same rule as the ACP server accumulator: prefer the peer's explicit total,
+	// Prefer the peer's explicit total, including zero,
 	// otherwise sum the four billed categories (reasoning excluded, since a peer
 	// that reports it separately still counts it inside output).
-	const explicitTotal = finite(raw.totalTokens) + finite(raw.total_tokens);
-	into.totalTokens += explicitTotal > 0 ? explicitTotal : input + output + cacheRead + cacheWrite;
-	into.costUsd += costTotal(raw);
+	const explicitTotal = nonnegative(raw.totalTokens) ?? nonnegative(raw.total_tokens);
+	into.totalTokens += explicitTotal ?? input + output + cacheRead + cacheWrite;
+	// Clio metadata uses costUsd; legacy message usage uses cost.total. These
+	// are alternate representations of one amount, never additive sources.
+	const cost = (isRecord(raw.cost) ? nonnegative(raw.cost.total) : undefined) ?? nonnegative(raw.costUsd);
+	into.costUsd += cost ?? 0;
+	if (tokensReported || cost !== undefined) {
+		const provenance = cost === undefined ? "unknown" : resolveCostProvenance(raw.costProvenance, "unknown");
+		const previous = into.costProvenance;
+		if (previous === undefined || previous === provenance) into.costProvenance = provenance;
+		else if (previous === "unknown" || provenance === "unknown") into.costProvenance = "unknown";
+		else if (previous === "estimated" || provenance === "estimated") into.costProvenance = "estimated";
+		else into.costProvenance = "known";
+	}
 }
 
 function errorMessage(value: unknown): string {

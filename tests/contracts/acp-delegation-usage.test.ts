@@ -46,3 +46,63 @@ describe("ACP delegation usage accumulator carries cost and a combined total", (
 		strictEqual(usage.totalTokens, 4);
 	});
 });
+
+describe("ACP usage presence and provenance", () => {
+	it("distinguishes valid zero counts from absent or malformed usage", () => {
+		const usage = emptyUsage();
+		for (const raw of [undefined, {}, { totalTokens: -1 }, { totalTokens: Number.NaN }, { input: "0" }]) {
+			mergeUsage(usage, raw);
+			strictEqual(usage.tokensReported, false);
+		}
+		mergeUsage(usage, { input_tokens: 0 });
+		strictEqual(usage.tokensReported, true);
+		strictEqual(usage.totalTokens, 0);
+		strictEqual(usage.costProvenance, "unknown");
+	});
+
+	it("prefers explicit zero and treats total/cost aliases as alternate representations", () => {
+		const usage = emptyUsage();
+		mergeUsage(usage, {
+			input: 10,
+			totalTokens: 0,
+			total_tokens: 25,
+			cost: { total: 0 },
+			costUsd: 1,
+			costProvenance: "known",
+		});
+		strictEqual(usage.totalTokens, 0);
+		strictEqual(usage.inputTokens, 10);
+		strictEqual(usage.costUsd, 0);
+		strictEqual(usage.costProvenance, "known");
+	});
+
+	it("retains a numeric amount without inventing pricing provenance", () => {
+		const usage = emptyUsage();
+		mergeUsage(usage, { costUsd: 0.0123 });
+		strictEqual(usage.tokensReported, false);
+		strictEqual(usage.costUsd, 0.0123);
+		strictEqual(usage.costProvenance, "unknown");
+	});
+
+	it("does not treat malformed cost as measured zero", () => {
+		for (const cost of [-1, Number.NaN, Number.POSITIVE_INFINITY, "0"]) {
+			const usage = emptyUsage();
+			mergeUsage(usage, { input: 1, cost: { total: cost }, costProvenance: "known_free" });
+			strictEqual(usage.costUsd, 0);
+			strictEqual(usage.costProvenance, "unknown");
+		}
+	});
+
+	it("keeps accumulated provenance conservative across priced and unpriced reports", () => {
+		const usage = emptyUsage();
+		mergeUsage(usage, { totalTokens: 0, costUsd: 0, costProvenance: "known_free" });
+		mergeUsage(usage, { totalTokens: 5, costUsd: 0.01, costProvenance: "known" });
+		strictEqual(usage.costProvenance, "known");
+		mergeUsage(usage, { totalTokens: 3, costUsd: 0.02, costProvenance: "estimated" });
+		strictEqual(usage.costProvenance, "estimated");
+		mergeUsage(usage, { totalTokens: 2 });
+		strictEqual(usage.costProvenance, "unknown");
+		strictEqual(usage.totalTokens, 10);
+		strictEqual(usage.costUsd, 0.03);
+	});
+});

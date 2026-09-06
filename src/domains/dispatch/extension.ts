@@ -4158,8 +4158,7 @@ export function createDispatchBundle(
 			// the same messages, so adding both would double-count. Event-metered
 			// values survive only when the adapter reported nothing.
 			const usage = result.usage;
-			const adapterReportedUsage =
-				usage.inputTokens + usage.outputTokens + usage.cacheReadTokens + usage.cacheWriteTokens + usage.reasoningTokens > 0;
+			const adapterReportedUsage = usage.tokensReported;
 			if (adapterReportedUsage) {
 				tokenMeter.inputTokens = usage.inputTokens;
 				tokenMeter.outputTokens = usage.outputTokens;
@@ -4167,8 +4166,9 @@ export function createDispatchBundle(
 				tokenMeter.cacheWriteTokens = usage.cacheWriteTokens;
 				tokenMeter.reasoningTokens = usage.reasoningTokens;
 			}
-			const tokenCount =
-				tokenMeter.inputTokens + tokenMeter.outputTokens + tokenMeter.cacheReadTokens + tokenMeter.cacheWriteTokens;
+			const tokenCount = adapterReportedUsage
+				? usage.totalTokens
+				: tokenMeter.inputTokens + tokenMeter.outputTokens + tokenMeter.cacheReadTokens + tokenMeter.cacheWriteTokens;
 			const safetyMetadata = safety.policy?.metadata() ?? null;
 			const init = result.delegation.initialize;
 			const agentInfo = init?.agentInfo;
@@ -4220,8 +4220,8 @@ export function createDispatchBundle(
 				reasoningTokenCount: tokenMeter.reasoningTokens,
 				...(upstreamResponses.length > 0 ? { upstreamResponses: [...upstreamResponses] } : {}),
 				...(capturedOutput !== undefined ? { output: capturedOutput } : {}),
-				costUsd: 0,
-				costProvenance: "unknown",
+				costUsd: usage.costUsd,
+				costProvenance: usage.costProvenance ?? "unknown",
 				compiledPromptHash: lifecycle.compiledPromptHash,
 				staticCompositionHash: lifecycle.staticCompositionHash,
 				staticShellHash: lifecycle.staticCompositionHash,
