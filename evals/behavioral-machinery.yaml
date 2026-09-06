@@ -12,7 +12,7 @@ suite:
 matrix:
   dimensions: []
   targets:
-    - id: local
+    - id: default
   repeats: 1
 tasks:
   - id: architect-positive

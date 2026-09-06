@@ -1,4 +1,4 @@
-import { match, ok, strictEqual } from "node:assert/strict";
+import { deepStrictEqual, match, ok, strictEqual, throws } from "node:assert/strict";
 import { spawn } from "node:child_process";
 import { existsSync, mkdtempSync, readdirSync, readFileSync, rmSync } from "node:fs";
 import { createServer, type IncomingMessage, type Server } from "node:http";
@@ -6,6 +6,8 @@ import type { AddressInfo } from "node:net";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { after, before, describe, it } from "node:test";
+import { loadEvalArtifactV4, parseEvalArtifactV4 } from "../../src/domains/eval/artifacts/store.js";
+import type { EvalCompareV4Summary } from "../../src/domains/eval/compare/compare.js";
 
 const ROOT = new URL("../..", import.meta.url).pathname;
 const CLI = join(ROOT, "dist", "cli", "index.js");
@@ -181,6 +183,86 @@ describe("smoke/built CLI core", { concurrency: false }, () => {
 			strictEqual(unknown.code, 2);
 			strictEqual(unknown.stdout, "");
 			match(unknown.stderr, /unknown subcommand: not-a-command/u);
+		} finally {
+			scratch.cleanup();
+		}
+	});
+
+	it("round-trips all shipped machinery cases through eval report and self-comparison", async () => {
+		const scratch = home("clio-eval-machinery-");
+		try {
+			const run = await runCli(["eval", "run", "--suite", "evals/behavioral-machinery.yaml", "--clio-coder-entry", CLI], {
+				env: scratch.env,
+				timeoutMs: 300_000,
+			});
+			strictEqual(run.code, 0, run.stdout + run.stderr);
+			const evalId = /^eval: (\S+)$/mu.exec(run.stdout)?.[1];
+			ok(evalId, run.stdout);
+
+			const report = await runCli(["eval", "report", evalId, "--format", "md"], { env: scratch.env });
+			strictEqual(report.code, 0, report.stderr);
+			ok(report.stdout.startsWith(`# Eval ${evalId}\n`), report.stdout);
+			match(report.stdout, /Pass rate: 100\.00%/u);
+
+			const artifact = await loadEvalArtifactV4(join(scratch.root, "data"), evalId);
+			strictEqual(artifact.summary.runs, 26);
+			strictEqual(artifact.summary.passed, 26);
+			strictEqual(artifact.summary.failed, 0);
+			const roles = [
+				"architect",
+				"coder",
+				"context-bootstrap",
+				"debugger",
+				"documenter",
+				"git-master",
+				"oracle",
+				"provenance",
+				"researcher",
+				"scout",
+				"tester",
+				"verifier",
+				"wiki-writer",
+			];
+			deepStrictEqual(
+				artifact.results.map((result) => result.taskId),
+				roles.flatMap((role) => [`${role}-positive`, `${role}-adversarial`]),
+			);
+			for (const result of artifact.results) {
+				strictEqual(result.pass, true, result.taskId);
+				strictEqual(result.failureClass, null, result.taskId);
+				strictEqual(result.verdict?.outcome, "pass", result.taskId);
+				strictEqual(result.verdict.machinery, "ok", result.taskId);
+				strictEqual(result.verdict.reason, null, result.taskId);
+				strictEqual(result.behavioral?.outcome, "pass", result.taskId);
+				ok(result.executionEnvelope, result.taskId);
+				strictEqual(result.executionEnvelope.target, result.target.id, result.taskId);
+				deepStrictEqual(result.executionEnvelope.corpus, result.behavioral?.corpus, result.taskId);
+				ok(report.stdout.includes(`| ${result.taskId} |`), result.taskId);
+			}
+
+			const compared = await runCli(["eval", "compare", evalId, evalId, "--format", "json"], { env: scratch.env });
+			strictEqual(compared.code, 0, compared.stderr);
+			const comparison = JSON.parse(compared.stdout) as EvalCompareV4Summary;
+			strictEqual(comparison.baselineEvalId, evalId);
+			strictEqual(comparison.candidateEvalId, evalId);
+			strictEqual(comparison.hardGate.pass, true);
+			strictEqual(comparison.configDrift, false);
+			strictEqual(comparison.passRateDelta, 0);
+			deepStrictEqual(comparison.envelopeMismatches, []);
+
+			for (const field of ["target", "corpus.id", "corpus.version"] as const) {
+				const inconsistent = structuredClone(artifact);
+				const envelope = inconsistent.results[0]?.executionEnvelope;
+				ok(envelope);
+				if (field === "target") envelope.target = "conflicting-target";
+				else if (field === "corpus.id") envelope.corpus.id = "conflicting-corpus";
+				else envelope.corpus.version = "0.0.0";
+				throws(
+					() => parseEvalArtifactV4(inconsistent, evalId),
+					/results\[0\]\.executionEnvelope: conflicts with result target or behavioral corpus/u,
+					field,
+				);
+			}
 		} finally {
 			scratch.cleanup();
 		}
