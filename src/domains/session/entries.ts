@@ -232,6 +232,8 @@ export interface DecisionRecord {
 	status: DecisionStatus;
 	decidedAt: string;
 	revisedAt?: string;
+	/** Who made this revision, independently of the original decision source. Absent on legacy revisions. */
+	revisionSource?: DecisionSource;
 	correction?: string;
 	source?: DecisionSource;
 	/** Options considered and not taken. Only agent decisions carry these. */
@@ -542,12 +544,13 @@ export function isDecisionRecord(value: unknown): value is DecisionRecord {
 	if (!isString(value.value) || !isOneOf(value.status, DECISION_STATUSES) || !isString(value.decidedAt)) return false;
 	if (!isOptionalString(value.label) || !isOptionalString(value.source_question)) return false;
 	if (value.source !== undefined && !isOneOf(value.source, ["operator", "agent"])) return false;
+	if (value.revisionSource !== undefined && !isOneOf(value.revisionSource, ["operator", "agent"])) return false;
 	if (value.alternatives !== undefined && !isStringArray(value.alternatives)) return false;
 	if (!isOptionalString(value.rationale)) return false;
 	if (!isOptionalString(value.revisedAt) || !isOptionalString(value.correction)) return false;
 	return value.status === "superseded"
 		? isString(value.revisedAt)
-		: value.revisedAt === undefined && value.correction === undefined;
+		: value.revisedAt === undefined && value.revisionSource === undefined && value.correction === undefined;
 }
 
 function isOptionalCompactionUsage(value: unknown): boolean {

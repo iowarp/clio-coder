@@ -1473,11 +1473,13 @@ function renderSessionTranscriptEntry(linked: LinkedSessionEntry): string[] {
 				const label = decision.label === undefined ? "" : ` label=${previewUnknown(decision.label)}`;
 				const sourceQuestion =
 					decision.source_question === undefined ? "" : ` sourceQuestion=${previewUnknown(decision.source_question)}`;
-				const revision = decision.revisedAt === undefined ? "" : ` revisedAt=${decision.revisedAt} revisionSource=operator`;
+				const revisionSource = decision.revisionSource ?? "unknown";
+				const revision =
+					decision.revisedAt === undefined ? "" : ` revisedAt=${decision.revisedAt} revisionSource=${revisionSource}`;
 				const correction =
 					decision.correction === undefined
 						? ""
-						: ` correctionSource=operator correction=${previewUnknown(decision.correction)}`;
+						: ` correctionSource=${revisionSource} correction=${previewUnknown(decision.correction)}`;
 				return `  decision key=${decision.key} status=${decision.status} decidedAt=${decision.decidedAt}${revision}${label}${sourceQuestion} value=${previewUnknown(decision.value)}${correction}`;
 			}),
 		];

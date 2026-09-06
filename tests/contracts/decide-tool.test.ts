@@ -7,7 +7,7 @@ import {
 	type DecisionBoardStore,
 	type DecisionLedgerEntryFields,
 } from "../../src/domains/session/decision-board.js";
-import type { DecisionLedgerEntry } from "../../src/domains/session/entries.js";
+import { type DecisionLedgerEntry, isDecisionRecord, isSessionEntry } from "../../src/domains/session/entries.js";
 import { builtin } from "../../src/tools/builtin-tool-catalog.js";
 import { createDecideTool, DECIDE_CAPS } from "../../src/tools/decide.js";
 import { validateBuiltinToolPolicy } from "../../src/tools/policy.js";
@@ -109,6 +109,8 @@ describe("decide tool", () => {
 		// Three appends: the first set, its superseded revision, the new set.
 		strictEqual(f.entries.length, 3);
 		const revision = f.entries[1];
+		strictEqual(revision?.origin, "agent");
+		strictEqual(revision?.decisions[0]?.revisionSource, "agent");
 		strictEqual(revision?.interviewId, firstRef.split("/")[0]);
 		deepStrictEqual(
 			revision?.decisions.map((decision) => [decision.status, decision.correction]),
@@ -116,6 +118,21 @@ describe("decide tool", () => {
 		);
 		deepStrictEqual(activeDecisionRefs(f.board.snapshot()), [details.ref]);
 		ok(details.ref !== firstRef);
+	});
+
+	it("records an operator supersession without a correction and validates revision authors", async () => {
+		const f = fixture();
+		await f.tool.run(GOOD_ARGS);
+		const initial = f.entries[0];
+		if (!initial) throw new Error("expected decision");
+		f.board.supersede(initial.interviewId, GOOD_ARGS.key);
+		const revision = f.entries[1];
+		ok(isSessionEntry(revision));
+		const record = revision.decisions[0];
+		strictEqual(record?.revisionSource, "operator");
+		strictEqual(record?.correction, undefined);
+		strictEqual(isDecisionRecord({ ...record, revisionSource: "model" }), false);
+		strictEqual(isDecisionRecord({ ...initial.decisions[0], revisionSource: "agent" }), false);
 	});
 
 	it("refuses to overwrite an operator decision with the same key", async () => {
