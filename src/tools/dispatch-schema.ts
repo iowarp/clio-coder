@@ -112,7 +112,7 @@ const DispatchIntentSchema = Type.Object(
 	{
 		additionalProperties: false,
 		description:
-			"Repository-relative paths and outputs. Declare it on every dispatch: it selects the project rules that apply and pins worker context, where omitting it falls back to path tokens scraped from the task text. verification entries are declared check ids from package scripts or .clio-coder/verifiers.yaml. Per-task intent must fit inside the top-level intent.",
+			"Repository-relative paths and outputs. Declare it on every dispatch: it selects the project rules that apply and pins worker context, where omitting it falls back to path tokens scraped from the task text. verification entries are declared check ids from package scripts or .clio-coder/verifiers.yaml. Per-task intent fields override inherited top-level fields within its scope. For disjoint parallel writes, set each task's write_roots to only its assigned outputs; expected_outputs alone does not narrow write access.",
 	},
 );
 
