@@ -1,6 +1,6 @@
 import assert from "node:assert/strict";
 import { mkdirSync, writeFileSync } from "node:fs";
-import { join } from "node:path";
+import { join, relative } from "node:path";
 import { it } from "node:test";
 import { modelWikiGenerate } from "../../src/cli/wiki-generate.js";
 import { asDirectoryPathBoundary } from "../../src/core/path-boundary.js";
@@ -62,6 +62,15 @@ it("admits production wiki planner and page scope without interpreting absolute 
 		const generate = modelWikiGenerate({ dispatch });
 		await generate(input);
 		assert.equal(requests.length, 2);
+		assert.equal(requests[0]?.resultContractOverride, undefined, "planner checkpoint remains unbound");
+		assert.deepEqual(
+			requests[1]?.resultContractOverride,
+			{
+				kind: "artifact-report",
+				path: relative(cwd, join(outputDir, page.path)),
+			},
+			"seeded page writer is bound to its exact planned file",
+		);
 		for (const spec of requests) {
 			const scope = resolveDispatchPathScope(spec);
 			assert.equal(scope.source, "declared");

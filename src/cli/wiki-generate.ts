@@ -200,6 +200,8 @@ async function runWikiDispatch(input: {
 	cwd: string;
 	outputDir: string;
 	task: string;
+	/** Caller-owned page path, relative to cwd; the planner remains unbound. */
+	artifactPath?: string;
 	route: WikiModelRoute;
 	deadline: WikiDeadline | undefined;
 	/** Liveness signal while the dispatch runs, already throttled by the caller. */
@@ -222,6 +224,9 @@ async function runWikiDispatch(input: {
 			agentId: WIKI_AGENT_ID,
 			executionRole: "builder",
 			task: input.task,
+			...(input.artifactPath !== undefined
+				? { resultContractOverride: { kind: "artifact-report" as const, path: input.artifactPath } }
+				: {}),
 			cwd: input.cwd,
 			requestOrigin: "internal",
 			noSkills: true,
@@ -367,6 +372,7 @@ async function runPagePhase(
 		dispatch,
 		cwd: input.cwd,
 		outputDir: input.outputDir,
+		artifactPath: relative(input.cwd, join(input.outputDir, page.path)),
 		task: buildWikiPagePrompt({
 			depth: input.generation.depth,
 			cwd: input.cwd,

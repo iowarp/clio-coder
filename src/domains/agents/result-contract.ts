@@ -54,16 +54,19 @@ export type ResultContract =
 	| { kind: "external-delegation" }
 	/**
 	 * The run's postcondition is the artifact it left on disk, so its terminal
-	 * text carries no claim to validate. Only the caller that named the output
-	 * location can check the artifact, and it does so by reading the location
-	 * rather than by believing a report. A writer asked for a typed report
-	 * instead has to invent one: a small model handed `mutation-report` for a
+	 * text carries no claim to validate. A caller may bind a workspace-relative
+	 * path to check readability and nonempty content during terminal repair.
+	 * Recipes remain unbound and leave
+	 * artifact validation to the caller. Neither check establishes freshness,
+	 * writer authorship, citations, or semantic accuracy. A writer asked for a
+	 * typed report instead has to invent one: a small model handed
+	 * `mutation-report` for a
 	 * documentation pass routinely seals a fabricated passing `npm test` entry,
 	 * which is a false correctness signal produced purely to satisfy a shape.
 	 * Recipes may declare this kind; Scout subtasks may not request it, because
 	 * a subtask's result is consumed as data by its dependents.
 	 */
-	| { kind: "artifact-report" }
+	| { kind: "artifact-report"; path?: string }
 	/**
 	 * The CLIO-CODER.md handbook payload `clio-coder context init` parses. It exists as its
 	 * own kind because the alternative was dispatching Scout and telling it in
@@ -1652,12 +1655,24 @@ export function validateResultContract(input: ResultContractValidationInput): Re
 			return validateOracle(input.contract, input.output);
 		case "external-delegation":
 			return success(input.contract, "unmeasured", { external: true });
-		case "artifact-report":
-			// Nothing here can be measured: the artifact lives at a location only
-			// the caller knows, so the caller checks it. Any terminal text
-			// conforms, which is what stops a bounded repair round from being
-			// spent teaching a writer a JSON shape that proves nothing.
+		case "artifact-report": {
+			if (input.contract.path !== undefined) {
+				const content = input.filesystem.readFile(path.resolve(input.cwd, input.contract.path));
+				if (content === null) {
+					return failure(
+						input.contract,
+						"unmeasured",
+						`Required artifact is missing or unreadable: ${JSON.stringify(input.contract.path)}`,
+					);
+				}
+				if (content.trim().length === 0) {
+					return failure(input.contract, "unmeasured", `Required artifact is empty: ${JSON.stringify(input.contract.path)}`);
+				}
+			}
+			// A preexisting seed can satisfy this check; correctness and freshness
+			// remain the caller's responsibility. Unbound reports retain any text.
 			return success(input.contract, "unmeasured", { artifact: true });
+		}
 		case "context-handbook":
 			return validateContextHandbook(input.contract, input.output);
 		case "code-report":
@@ -1749,7 +1764,9 @@ export function resultContractShape(contract: ResultContract): string {
 		case "external-delegation":
 			return "any final text";
 		case "artifact-report":
-			return "any final text; the artifact you wrote at the location the task named is the result";
+			return contract.path === undefined
+				? "any final text; the artifact you wrote at the location the task named is the result"
+				: `any final text; the required artifact at ${JSON.stringify(contract.path)} must be readable and non-empty on disk`;
 		case "context-handbook":
 			return '{"projectName":"string","identity":"one sentence","conventions":[],"invariants":[],"sections":[{"title":"Architecture","body":"markdown that cites `real/path.ts` tokens"}]}';
 		case "code-report":
@@ -1775,6 +1792,7 @@ export interface ResultContractRepairInput {
  */
 function resultContractRepairMessage(input: ResultContractRepairInput): string {
 	const last = input.attempt >= RESULT_CONTRACT_REPAIR_LIMIT;
+	const boundArtifact = input.contract.kind === "artifact-report" && input.contract.path !== undefined;
 	const lines = [
 		last
 			? "FINAL RESULT REQUIRED IN THIS RESPONSE. Your previous response still did not satisfy this run's result contract."
@@ -1783,8 +1801,17 @@ function resultContractRepairMessage(input: ResultContractRepairInput): string {
 		input.toolsAvailable === true
 			? "You may use the admitted tools to repair this validator failure, then emit the required terminal result."
 			: "Tool use is over. Answer from the evidence you already gathered.",
-		`Emit exactly this shape and nothing else: ${resultContractShape(input.contract)}`,
-		"Do not add prose, code fences, or commentary around it. Do not describe work you intend to do next.",
+		...(boundArtifact
+			? [
+					`Required result: ${resultContractShape(input.contract)}`,
+					input.toolsAvailable === true
+						? "Repair the required artifact on disk, then give a brief final status. Literal tool-call markup in final text does not write a file."
+						: "State the limitation in a brief final status; the required artifact remains unsatisfied.",
+				]
+			: [
+					`Emit exactly this shape and nothing else: ${resultContractShape(input.contract)}`,
+					"Do not add prose, code fences, or commentary around it. Do not describe work you intend to do next.",
+				]),
 	];
 	if (input.anchors.length > 0) {
 		lines.push(
@@ -1881,7 +1908,12 @@ const RECIPE_DECLARABLE_KINDS = [
  */
 const COORDINATOR_AUTHORED_KINDS = ["council-ballot"] as const;
 
-function parseContract(value: unknown, sourcePath: string, kinds: ReadonlyArray<string>): ResultContract {
+function parseContract(
+	value: unknown,
+	sourcePath: string,
+	kinds: ReadonlyArray<string>,
+	callerBoundArtifacts = false,
+): ResultContract {
 	if (value === null || typeof value !== "object" || Array.isArray(value)) {
 		throw new Error(`agent recipe: ${sourcePath}: resultContract must be an object`);
 	}
@@ -1897,6 +1929,24 @@ function parseContract(value: unknown, sourcePath: string, kinds: ReadonlyArray<
 			throw new Error(`agent recipe: ${sourcePath}: architect-plan path must be workspace-relative`);
 		}
 		return { kind: "architect-plan", path: record.path };
+	}
+	if (record.kind === "artifact-report" && callerBoundArtifacts) {
+		if (!only("kind", "path")) {
+			throw new Error(`agent recipe: ${sourcePath}: artifact-report admits only kind and path`);
+		}
+		if (record.path === undefined) return { kind: "artifact-report" };
+		if (!string(record.path) || record.path.includes("\0")) {
+			throw new Error(`agent recipe: ${sourcePath}: artifact-report requires a non-empty path without NUL`);
+		}
+		if (
+			path.posix.isAbsolute(record.path) ||
+			path.win32.isAbsolute(record.path) ||
+			/^[a-z]:/iu.test(record.path) ||
+			record.path.split(/[\\/]/u).includes("..")
+		) {
+			throw new Error(`agent recipe: ${sourcePath}: artifact-report path must be workspace-relative`);
+		}
+		return { kind: "artifact-report", path: record.path };
 	}
 	if (record.kind === "mutation-report") {
 		if (!only("kind", "maxSummaryBytes")) {
@@ -1931,5 +1981,5 @@ export function parseResultContract(value: unknown, sourcePath: string): ResultC
  * parser strict is the point: a recipe still cannot claim a coordinator's kind.
  */
 export function parseWorkerResultContract(value: unknown, sourcePath: string): ResultContract {
-	return parseContract(value, sourcePath, [...RECIPE_DECLARABLE_KINDS, ...COORDINATOR_AUTHORED_KINDS]);
+	return parseContract(value, sourcePath, [...RECIPE_DECLARABLE_KINDS, ...COORDINATOR_AUTHORED_KINDS], true);
 }
