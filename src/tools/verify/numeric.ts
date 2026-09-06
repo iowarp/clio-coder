@@ -156,7 +156,12 @@ export function parseNumericPayload(text: string, label: string): NumericPayload
 function deviation(actual: number, expected: number, index?: number): NumericDeviation {
 	const finite = Number.isFinite(actual) && Number.isFinite(expected);
 	const absolute = finite ? Math.abs(actual - expected) : Number.POSITIVE_INFINITY;
-	const relative = !finite ? null : expected === 0 ? (absolute === 0 ? 0 : null) : absolute / Math.abs(expected);
+	let relative = !finite ? null : expected === 0 ? (absolute === 0 ? 0 : null) : absolute / Math.abs(expected);
+	if (finite && !Number.isFinite(absolute)) {
+		// Finite subtraction overflows only across signs, where division first
+		// is safe. Keep subtraction first for nearby values to preserve precision.
+		relative = Math.abs(actual / expected - 1);
+	}
 	return {
 		...(index !== undefined ? { index } : {}),
 		actual,
