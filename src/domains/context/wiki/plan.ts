@@ -184,8 +184,9 @@ function collectAreas(source: ReadonlyArray<CodewikiFile>, areaDepth: number): A
 
 /**
  * The architecture page every wiki gets. It is the one page whose subject is
- * the repository rather than a directory, so it is anchored on indexed entry
- * points instead of an area.
+ * the repository rather than a directory. With separate area pages it is
+ * anchored on indexed entry points; a combined simple page uses its full
+ * ownership group's ranked anchors instead.
  */
 function overviewPage(source: ReadonlyArray<CodewikiFile>): WikiPlanPage {
 	const entries = source.filter((file) => file.role === "entry");
@@ -193,12 +194,25 @@ function overviewPage(source: ReadonlyArray<CodewikiFile>): WikiPlanPage {
 		path: "architecture.md",
 		title: "Architecture",
 		intent:
-			"Explain what this repository is, its top-level composition, how a request or command flows through it, " +
-			"and where the boundaries between its major areas are.",
+			"Explain what this repository is and its top-level composition; describe relationships, boundaries, " +
+			"and request or command flow where the inspected source establishes them.",
 		sources: rankedSources(entries.length > 0 ? entries : source),
 		status: "pending",
 		attempts: 0,
 	};
+}
+
+/** Counts describe assigned indexed coverage, not the bounded prompt anchors. */
+function intentForScope(files: ReadonlyArray<CodewikiFile>, areaDepth: number): string {
+	const lines = files.reduce((total, file) => total + Math.max(0, file.loc), 0);
+	const scopes = [...new Set(files.map((file) => areaForPath(file.path, areaDepth)))];
+	return (
+		`Assigned scope (${files.length} indexed files, ${lines} lines): document responsibilities and key entry points/symbols; ` +
+		"explain lifecycle rules, callers, dependencies, and specific test cases only where inspected source or tests " +
+		"establish them. Anchors are starting points, not the full assignment. Assigned areas: " +
+		scopes.join(", ") +
+		"."
+	);
 }
 
 /**
@@ -213,9 +227,8 @@ export function buildCandidatePlan(codewiki: Codewiki, depth: ResolvedWikiDepth)
 	const threshold = Math.max(minAreaLines, Math.floor(totalLines * areaShare));
 	const areas = collectAreas(source, areaDepth);
 	const included = areas.filter((area) => area.lines >= threshold);
-	// A repository whose areas are all below threshold still gets pages: the
-	// largest area always earns one, so a small repo is never reduced to a
-	// single architecture page with nothing under it.
+	// If every area is below threshold, the largest hosts the folded coverage.
+	// At simple depth a single ownership group shares the architecture page.
 	const selected = included.length > 0 ? included : areas.slice(0, 1);
 	const selectedKeys = new Set(selected.map((area) => area.key));
 	const extras = new Map<string, CodewikiFile[]>();
@@ -226,25 +239,39 @@ export function buildCandidatePlan(codewiki: Codewiki, depth: ResolvedWikiDepth)
 		if (host === undefined) continue;
 		extras.set(host, [...(extras.get(host) ?? []), ...area.files]);
 	}
+	const overview = overviewPage(source);
+	const [onlyArea] = selected;
+	if (depth === "simple" && selected.length === 1 && onlyArea) {
+		const files = [...onlyArea.files, ...(extras.get(onlyArea.key) ?? [])];
+		return {
+			version: 1,
+			depth,
+			overview: "",
+			pages: [
+				{ ...overview, intent: `${overview.intent} ${intentForScope(files, areaDepth)}`, sources: rankedSources(files) },
+			],
+		};
+	}
 	const pages = selected.map((area): WikiPlanPage => {
 		const files = [...area.files, ...(extras.get(area.key) ?? [])];
 		return {
 			path: pagePathForArea(area.key),
 			title: titleForArea(area.key),
-			intent:
-				`Document ${area.key} (${area.files.length} indexed files, ${area.lines} lines): what it owns, its entry ` +
-				"points and important symbols, the state and lifecycle invariants it enforces, an upstream caller and a " +
-				"downstream dependency, the focused tests that prove its behavior, and what to watch when editing it.",
+			intent: intentForScope(files, areaDepth),
 			sources: rankedSources(files),
 			status: "pending",
 			attempts: 0,
 		};
 	});
+	if (pages.length > 0) {
+		overview.intent +=
+			" Link to the area pages for detailed behavior; keep this page focused on their composition and relationships.";
+	}
 	return dedupePagePaths({
 		version: 1,
 		depth,
 		overview: "",
-		pages: [overviewPage(source), ...pages],
+		pages: [overview, ...pages],
 	});
 }
 
