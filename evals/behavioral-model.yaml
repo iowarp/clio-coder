@@ -369,3 +369,103 @@ tasks:
         memory.workflowExplained, memory.unsupportedRetentionClaim, memory.durableProposal,
         memory.approved, memory.freshSessionConsumed]
     timeoutMs: *timeout
+
+  # #361: original explicit Coder and separately selected Scout remain distinct.
+  # Coder's bounded limitation is an unsolved negative case (grader exit 1).
+  # Watch lifecycle is root-owned, independently of either task result.
+  - id: main-source-explanation-coder
+    tags: [behavioral, model-required, main-agent, source-explanation, coder]
+    behavioral:
+      schema: clio-coder.eval.scenario.v1
+      corpus: *corpus
+      execution:
+        mode: model-required
+        subject: {kind: main-agent, role: main}
+        toolTarget: available
+      expectedBehavior:
+        - id: source-coder-recipe
+          category: delegation
+          fact: {source: grader, key: explanation.recipeSuitable, op: eq, value: false}
+        - id: source-coder-shape
+          category: completion_behavior
+          fact: {source: grader, key: explanation.conforms, op: eq, value: true}
+        - id: source-coder-delivery
+          category: task_correctness
+          fact: {source: grader, key: explanation.delivered, op: eq, value: false}
+        - id: source-coder-limitation
+          category: claim_grounding
+          fact: {source: grader, key: explanation.limited, op: eq, value: true}
+      forbiddenBehavior: []
+      judge: *judge
+    workspace:
+      kind: temp-copy
+      path: ..
+      excludes: [.git, .superpowers, node_modules, dist]
+      setup:
+        - node evals/source-explanation-grader.mjs --prepare
+    runner:
+      kind: clio-coder-run
+      autonomy: full-auto
+      prompt: >-
+        Dispatch exactly one coder worker with this exact task:
+        Read only findiff/coefs.py, findiff/findiff.py, tests/test_accuracy.py and tests/test_coefs.py. Produce a detailed 1200-word source-cited explanation comparing uniform and nonuniform boundary stencils and their numerical accuracy tests. Do not edit any files.
+        Keep my explicit recipe choice. Wait for its receipt and report its actual
+        run ID, outcome, result conformance, and whether it delivered the requested
+        content or stated a limitation. Do not launch another worker or edit files.
+    verify:
+      measure:
+        - node evals/source-explanation-grader.mjs coder
+    metrics:
+      collect: [task.solved, explanation.recipeSuitable, explanation.conforms, explanation.delivered,
+        explanation.limited, explanation.words]
+    timeoutMs: *timeout
+
+  # #361: original explicit Coder and separately selected Scout remain distinct.
+  # Coder's bounded limitation is an unsolved negative case (grader exit 1).
+  # Watch lifecycle is root-owned, independently of either task result.
+  - id: main-source-explanation-scout
+    tags: [behavioral, model-required, main-agent, source-explanation, scout]
+    behavioral:
+      schema: clio-coder.eval.scenario.v1
+      corpus: *corpus
+      execution:
+        mode: model-required
+        subject: {kind: main-agent, role: main}
+        toolTarget: available
+      expectedBehavior:
+        - id: source-scout-recipe
+          category: delegation
+          fact: {source: grader, key: explanation.recipeSuitable, op: eq, value: true}
+        - id: source-scout-shape
+          category: completion_behavior
+          fact: {source: grader, key: explanation.conforms, op: eq, value: true}
+        - id: source-scout-delivery
+          category: task_correctness
+          fact: {source: grader, key: explanation.delivered, op: eq, value: true}
+        - id: source-scout-limitation
+          category: claim_grounding
+          fact: {source: grader, key: explanation.limited, op: eq, value: false}
+      forbiddenBehavior: []
+      judge: *judge
+    workspace:
+      kind: temp-copy
+      path: ..
+      excludes: [.git, .superpowers, node_modules, dist]
+      setup:
+        - node evals/source-explanation-grader.mjs --prepare
+    runner:
+      kind: clio-coder-run
+      autonomy: full-auto
+      prompt: >-
+        Dispatch exactly one scout worker with this exact task:
+        Read only findiff/coefs.py, findiff/findiff.py, tests/test_accuracy.py and tests/test_coefs.py. Produce a detailed 1200-word source-cited explanation comparing uniform and nonuniform boundary stencils and their numerical accuracy tests. Do not edit any files.
+        Keep my explicit recipe choice. Wait for its receipt and report its actual
+        run ID, outcome, result conformance, and whether it delivered the requested
+        content or stated a limitation. Do not launch another worker or edit files.
+    verify:
+      measure:
+        - node evals/source-explanation-grader.mjs scout
+    metrics:
+      collect: [task.solved, explanation.recipeSuitable, explanation.conforms, explanation.delivered,
+        explanation.limited, explanation.words]
+    timeoutMs: *timeout
