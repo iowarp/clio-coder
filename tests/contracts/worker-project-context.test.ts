@@ -27,6 +27,7 @@ for (const scenario of [
 			{
 				id: "external-fixture",
 				command: "unused-fixture",
+				args: [],
 				...(scenario.tier === "bounded" ? { projectContext: "bounded" as const } : {}),
 			},
 		];
@@ -97,7 +98,7 @@ test("worker authored prefixes retain safe text, disclose omissions, and honor r
 			[null, true],
 		] as const) {
 			const messages = buildDynamicPromptMessages(
-				{ agentId: "coder", task: "Inspect." },
+				{ agentId: "coder", task: "Inspect.", executionRole: "researcher" },
 				{
 					projectContextTier: "bounded",
 					projectPrompt,
@@ -137,9 +138,10 @@ test("derived verification remains gated while authored verification prose is un
 		};
 		for (const capabilityClass of ["workspace-edit", "verification"] as const) {
 			const context = { projectContextTier: "bounded" as const, capabilityClass, project };
-			const legacy = buildDynamicPromptMessages({ agentId: "coder", task: "Inspect." }, context);
+			const request = { agentId: "coder", task: "Inspect.", executionRole: "researcher" as const };
+			const legacy = buildDynamicPromptMessages(request, context);
 			strictEqual(legacy[0]?.body.includes("DERIVED CHECK"), capabilityClass === "verification");
-			const raw = buildDynamicPromptMessages({ agentId: "coder", task: "Inspect." }, { ...context, projectPrompt });
+			const raw = buildDynamicPromptMessages(request, { ...context, projectPrompt });
 			ok(raw[0]?.body.includes(authored));
 			strictEqual(raw[0]?.body.includes("Derived convention"), false);
 			strictEqual(raw[0]?.body.includes("DERIVED CHECK"), false);
