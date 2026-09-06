@@ -28,9 +28,11 @@ import {
 	computeWikiContentHashOfDir,
 	currentWikiGitHead,
 	readWikiMeta,
+	readWikiMetaInDir,
 	type WikiMeta,
 	wikiMetaPath,
 	writeWikiMeta,
+	writeWikiMetaInDir,
 } from "./meta.js";
 import {
 	planWikiGeneration,
@@ -300,13 +302,29 @@ function adoptOrCreateStaging(cwd: string): { dir: string; adopted: boolean } {
 
 type PromoteResult = { ok: true } | { ok: false; problems: string[] };
 
-/**
- * Atomically swap staging into place: move the current wiki aside to
- * .clio-coder/wiki-prev, rename staging to .clio-coder/wiki, then write meta.json. On any
- * failure after the old wiki is moved aside, restore it; if the restore fails,
- * the recovered content is left at wiki-prev and its path is surfaced.
- */
-function promoteStaging(cwd: string, stagingDir: string, writeMeta: () => void): PromoteResult {
+/** Resolve a previous process crash before reading metadata or cleaning staging. */
+function recoverPublication(cwd: string): void {
+	const wiki = wikiDir(cwd);
+	const prev = join(clioDir(cwd), WIKI_PREV_DIR);
+	if (!existsSync(prev)) return;
+	const valid = (dir: string): boolean => {
+		const meta = readWikiMetaInDir(dir);
+		return meta !== null && meta.contentHash === computeWikiContentHashOfDir(dir);
+	};
+	if (valid(wiki)) {
+		removeDir(prev);
+		return;
+	}
+	if (!valid(prev)) throw new Error(`wiki recovery requires a valid publication; preserved ${wiki} and ${prev}`);
+	if (existsSync(wiki)) {
+		const interrupted = mkdtempSync(join(clioDir(cwd), "wiki-interrupted-"));
+		renameSync(wiki, join(interrupted, "wiki"));
+	}
+	renameSync(prev, wiki);
+}
+
+/** Promote a prepared content/metadata pair; restore the old pair on rename failure. */
+function promoteStaging(cwd: string, stagingDir: string): PromoteResult {
 	const wiki = wikiDir(cwd);
 	const prev = join(clioDir(cwd), WIKI_PREV_DIR);
 	removeDir(prev);
@@ -314,7 +332,6 @@ function promoteStaging(cwd: string, stagingDir: string, writeMeta: () => void):
 	if (hadWiki) renameSync(wiki, prev);
 	try {
 		renameSync(stagingDir, wiki);
-		writeMeta();
 	} catch (err) {
 		const problems = [`wiki promotion failed: ${err instanceof Error ? err.message : String(err)}`];
 		removeDir(stagingDir);
@@ -338,9 +355,9 @@ function promoteStaging(cwd: string, stagingDir: string, writeMeta: () => void):
  * interrupted run, then the plan the last promoted wiki recorded, then the
  * candidate skeleton the index just produced.
  *
- * A resumed plan is used exactly as it was left. It was settled when the wiki
- * was planned, and the pages already written link to its paths, so changing it
- * mid-flight would strand those links. Areas the index has since found that no
+ * A resumed plan retains its structure because finished pages link to its
+ * paths. Completed dispatches are reusable only when the checkpoint source
+ * fingerprint matches; missing or changed evidence requeues the pages. Areas the index has since found that no
  * page covers are carried separately and offered to a planning pass, which is
  * the only thing allowed to change a plan's shape.
  */
@@ -352,9 +369,19 @@ function resolvePlan(input: {
 	candidate: WikiPlan;
 	previousPlan: WikiPlan | undefined;
 	gitHead: string | null;
+	sourceTreeHash: string;
 }): { plan: WikiPlan; resumed: boolean; unclaimedAreas: WikiPlanPage[] } {
 	const staged = input.adopted ? readWikiPlanFile(input.stagingDir) : null;
-	if (staged !== null) return { plan: staged, resumed: true, unclaimedAreas: [] };
+	if (staged !== null) {
+		const plan =
+			staged.sourceTreeHash === input.sourceTreeHash
+				? staged
+				: {
+						...staged,
+						pages: staged.pages.map((page) => ({ ...page, status: "pending" as const, attempts: 0 })),
+					};
+		return { plan, resumed: true, unclaimedAreas: [] };
+	}
 	if (input.mode === "update" && input.previousPlan !== undefined) {
 		const pageSources = pageSourceIndex(input.stagingDir, input.cwd);
 		const changed = new Set(
@@ -417,6 +444,7 @@ export async function runWikiGenerate(
 	}
 
 	try {
+		recoverPublication(cwd);
 		const existingMeta = readWikiMeta(cwd);
 		const mode = input.mode ?? (existingMeta ? "update" : "init");
 		progress(input, { phase: "codewiki", status: "started", message: "loading codewiki for wiki generation" });
@@ -440,6 +468,7 @@ export async function runWikiGenerate(
 			candidate: generation.plan,
 			previousPlan: existingMeta?.plan,
 			gitHead: existingMeta?.gitHead ?? null,
+			sourceTreeHash,
 		});
 		const owed = resolved.plan.pages.filter((page) => page.status !== "written").length;
 		progress(input, {
@@ -451,6 +480,7 @@ export async function runWikiGenerate(
 				`${resolved.plan.pages.length} pages planned; ${owed} to write` +
 				(resolved.resumed ? "; resuming an interrupted run" : ""),
 		});
+		resolved.plan = { ...resolved.plan, sourceTreeHash };
 		writeWikiPlanFile(staging.dir, resolved.plan);
 
 		const beforeHash = computeWikiContentHash(cwd);
@@ -514,7 +544,6 @@ export async function runWikiGenerate(
 				(pendingCount > 0 ? `; ${pendingCount} page${pendingCount === 1 ? "" : "s"} still to write` : ""),
 		});
 
-		rmSync(join(staging.dir, WIKI_PLAN_FILE), { force: true });
 		const afterHash = computeWikiContentHashOfDir(staging.dir);
 		const stagedPages = listWikiPagesInDir(staging.dir);
 		// Unresolved references are reported, not fatal. They are repaired in the
@@ -562,6 +591,7 @@ export async function runWikiGenerate(
 		// to swap, so metadata is refreshed in place.
 		if (afterHash === beforeHash && computeWikiContentHash(cwd) === beforeHash && existingMeta) {
 			writeWikiMeta(cwd, meta);
+			rmSync(join(wikiDir(cwd), WIKI_PLAN_FILE), { force: true });
 			removeDir(staging.dir);
 			progress(input, {
 				phase: "state",
@@ -573,8 +603,12 @@ export async function runWikiGenerate(
 			return done("noop");
 		}
 
+		// Keep the checkpoint until the complete publication is prepared. A crash
+		// during either rename can then recover the last good content/metadata pair.
+		writeWikiPlanFile(staging.dir, finalPlan);
+		writeWikiMetaInDir(staging.dir, meta);
 		progress(input, { phase: "state", status: "running", message: "promoting wiki" });
-		const promoted = promoteStaging(cwd, staging.dir, () => writeWikiMeta(cwd, meta));
+		const promoted = promoteStaging(cwd, staging.dir);
 		if (!promoted.ok) {
 			progress(input, {
 				phase: "done",
@@ -584,6 +618,7 @@ export async function runWikiGenerate(
 			});
 			return failed(promoted.problems, listWikiPagesInDir(wikiDir(cwd)).length);
 		}
+		rmSync(join(wikiDir(cwd), WIKI_PLAN_FILE), { force: true });
 		progress(input, { phase: "state", status: "completed", message: "wiki metadata written" });
 		progress(input, {
 			phase: "done",

@@ -39,6 +39,8 @@ export interface WikiPlanPage {
 
 export interface WikiPlan {
 	version: 1;
+	/** Source revision observed before dispatch; stale checkpoints must be revalidated. */
+	sourceTreeHash?: string;
 	/** One paragraph describing what this repository is; opens the generated quickstart. */
 	overview: string;
 	pages: WikiPlanPage[];

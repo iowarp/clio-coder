@@ -122,7 +122,13 @@ export function sanitizeWikiPlan(
 		});
 	}
 	if (pages.length === 0) return null;
-	return { version: 1, overview: usableString(value.overview) ?? previous?.overview ?? "", pages };
+	const sourceTreeHash = previous?.sourceTreeHash ?? (options.trustStatus ? value.sourceTreeHash : undefined);
+	return {
+		version: 1,
+		...(typeof sourceTreeHash === "string" && /^[a-f0-9]{64}$/.test(sourceTreeHash) ? { sourceTreeHash } : {}),
+		overview: usableString(value.overview) ?? previous?.overview ?? "",
+		pages,
+	};
 }
 
 function readPlanDocument(dir: string): unknown {

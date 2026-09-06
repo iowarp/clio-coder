@@ -1,11 +1,12 @@
 import assert from "node:assert/strict";
 import { execFileSync } from "node:child_process";
-import { mkdirSync, readFileSync, writeFileSync } from "node:fs";
+import { existsSync, mkdirSync, readdirSync, readFileSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
 import { afterEach, beforeEach, describe, it } from "node:test";
+import { fileURLToPath } from "node:url";
 import { modelWikiGenerate } from "../../src/cli/wiki-generate.js";
 import { runWikiGenerate } from "../../src/domains/context/wiki/generate.js";
-import { readWikiMeta } from "../../src/domains/context/wiki/meta.js";
+import { computeWikiContentHash, readWikiMeta } from "../../src/domains/context/wiki/meta.js";
 import type { WikiPlan, WikiPlanPage } from "../../src/domains/context/wiki/plan.js";
 import { readWikiPlanFile, writeWikiPlanFile } from "../../src/domains/context/wiki/plan-store.js";
 import { wikiCompleteness, wikiStaleness, wikiStalenessAsync } from "../../src/domains/context/wiki/staleness.js";
@@ -60,6 +61,25 @@ describe("wiki generation outcomes", () => {
 	}
 	function run(generate: ReturnType<typeof generator>) {
 		return runWikiGenerate({ cwd, model: "fixture", generate });
+	}
+	function crash(step: "backup" | "publish") {
+		let signal: string | null | undefined;
+		try {
+			execFileSync(
+				process.execPath,
+				["--import", "tsx", fileURLToPath(new URL("../fixtures/wiki/publication-crash.ts", import.meta.url)), cwd, step],
+				{
+					cwd: process.cwd(),
+					env: process.env,
+					encoding: "utf8",
+					stdio: ["ignore", "pipe", "pipe"],
+					timeout: 30_000,
+				},
+			);
+		} catch (error) {
+			signal = (error as { signal?: string | null }).signal;
+		}
+		assert.equal(signal, "SIGKILL");
 	}
 	async function initialize() {
 		const plan: WikiPlan = { version: 1, overview: "Fixture project", pages: [page("a"), page("b")] };
@@ -138,5 +158,125 @@ describe("wiki generation outcomes", () => {
 		assert.equal(result.pending, 0);
 		assert.equal(readWikiMeta(cwd)?.plan?.pages[0]?.attempts, 1);
 		assert.equal(wikiStaleness(cwd).state, "fresh");
+	});
+	it("revalidates staged completed pages when sources change before resume", async () => {
+		await initialize();
+		const stopped = await runWikiGenerate({
+			cwd,
+			model: "fixture",
+			generate(input) {
+				writeWikiPlanFile(input.outputDir, {
+					...input.plan,
+					pages: input.plan.pages.map((entry) => ({ ...entry, status: entry.path === "a.md" ? "written" : "pending" })),
+				});
+				throw new Error("interrupted before B");
+			},
+		});
+		assert.equal(stopped.status, "failed");
+		writeFileSync(join(cwd, "src/a.ts"), "export const a = 2;\n");
+		const attempted: string[] = [];
+		const result = await run(
+			generator((_spec, path) => {
+				assert.ok(path);
+				const name = path.endsWith("a.md") ? "a" : "b";
+				attempted.push(name);
+				writeFileSync(path, content(name, 2));
+			}),
+		);
+		assert.deepEqual(attempted, ["a", "b"]);
+		assert.equal(result.pending, 0);
+	});
+	it("restores the last publication after SIGKILL between publication renames", async () => {
+		await initialize();
+		crash("backup");
+		assert.equal(existsSync(join(cwd, ".clio-coder/wiki")), false);
+		assert.equal(existsSync(join(cwd, ".clio-coder/wiki-prev/b.md")), true);
+		const result = await runWikiGenerate({
+			cwd,
+			model: "fixture",
+			generate(input) {
+				const plan: WikiPlan = { version: 1, overview: "Fixture project", pages: [page("a"), page("b")] };
+				writeWikiPlanFile(input.outputDir, plan);
+				writeFileSync(join(input.outputDir, "a.md"), content("a", 3));
+			},
+		});
+		assert.notEqual(result.status, "failed");
+		assert.match(readFileSync(join(cwd, ".clio-coder/wiki/b.md"), "utf8"), /b version 1/u);
+		assert.ok(readWikiMeta(cwd));
+	});
+	it("resumes a matching checkpoint without repeating completed dispatches", async () => {
+		await initialize();
+		await runWikiGenerate({
+			cwd,
+			model: "fixture",
+			generate(input) {
+				writeWikiPlanFile(input.outputDir, {
+					...input.plan,
+					pages: input.plan.pages.map((entry) => ({ ...entry, status: entry.path === "a.md" ? "written" : "pending" })),
+				});
+				throw new Error("stop before B");
+			},
+		});
+		const attempted: string[] = [];
+		await run(
+			generator((_spec, path) => {
+				assert.ok(path);
+				attempted.push(path);
+			}),
+		);
+		assert.equal(attempted.length, 1);
+		assert.ok(attempted[0]?.endsWith("b.md"));
+	});
+	it("revalidates old checkpoints with no source identity", async () => {
+		await initialize();
+		const dir = join(cwd, ".clio-coder/wiki-staging-legacy");
+		mkdirSync(dir);
+		writeWikiPlanFile(dir, { version: 1, overview: "Fixture", pages: [{ ...page("a"), status: "written" }, page("b")] });
+		writeFileSync(join(dir, "a.md"), content("a", 1));
+		const attempted: string[] = [];
+		await run(
+			generator((_spec, path) => {
+				assert.ok(path);
+				attempted.push(path);
+				writeFileSync(path, content(path.endsWith("a.md") ? "a" : "b", 2));
+			}),
+		);
+		assert.equal(attempted.length, 2);
+	});
+	it("keeps the complete new pair after SIGKILL following the second rename", async () => {
+		await initialize();
+		crash("publish");
+		assert.equal(existsSync(join(cwd, ".clio-coder/wiki-prev/b.md")), true);
+		const published = readWikiMeta(cwd);
+		assert.ok(published);
+		assert.equal(published.contentHash, computeWikiContentHash(cwd));
+		assert.match(readFileSync(join(cwd, ".clio-coder/wiki/a.md"), "utf8"), /Additional detail before interruption/u);
+		mkdirSync(join(cwd, ".clio-coder/wiki-staging-orphan"));
+		await runWikiGenerate({ cwd, model: "fixture" });
+		assert.deepEqual(readWikiMeta(cwd), published);
+		assert.equal(existsSync(join(cwd, ".clio-coder/wiki-prev")), false);
+	});
+	it("restores the valid backup and preserves an invalid live tree for inspection", async () => {
+		await initialize();
+		const previous = readWikiMeta(cwd);
+		crash("publish");
+		writeFileSync(join(cwd, ".clio-coder/wiki/meta.json"), "incomplete metadata");
+		await runWikiGenerate({ cwd, model: "fixture" });
+		assert.deepEqual(readWikiMeta(cwd), previous);
+		assert.match(readFileSync(join(cwd, ".clio-coder/wiki/b.md"), "utf8"), /b version 1/u);
+		const retained = readdirSync(join(cwd, ".clio-coder")).find((name) => name.startsWith("wiki-interrupted-"));
+		assert.ok(retained);
+		assert.match(
+			readFileSync(join(cwd, ".clio-coder", retained, "wiki/a.md"), "utf8"),
+			/Additional detail before interruption/u,
+		);
+	});
+	it("preserves both damaged publication trees when neither validates", async () => {
+		await initialize();
+		crash("publish");
+		for (const dir of ["wiki", "wiki-prev"])
+			writeFileSync(join(cwd, ".clio-coder", dir, "meta.json"), "incomplete metadata");
+		await assert.rejects(runWikiGenerate({ cwd, model: "fixture" }), /wiki recovery requires a valid publication/u);
+		for (const dir of ["wiki", "wiki-prev"]) assert.equal(existsSync(join(cwd, ".clio-coder", dir, "b.md")), true);
 	});
 });
