@@ -3,10 +3,11 @@ import { join } from "node:path";
 import type { DecisionLedgerEntry } from "../session/entries.js";
 import { detectProjectType } from "../session/workspace/project-type.js";
 import { type BootstrapIo, type BootstrapProgressSink, codewikiSections } from "./bootstrap.js";
-import { serializeClioMd, tryReadClioMd } from "./clio-md.js";
+import { tryReadClioMd } from "./clio-md.js";
 import { coordinateCodewikiWrite } from "./codewiki/coordinator.js";
 import type { Codewiki } from "./codewiki/schema.js";
 import type { Fingerprint } from "./fingerprint.js";
+import { curateHandbookSource } from "./handbook-curation.js";
 import { readClioState, writeClioState } from "./state.js";
 import { type RunWikiGenerateResult, runWikiGenerate, type WikiGenerate } from "./wiki/generate.js";
 import { readWikiMeta } from "./wiki/meta.js";
@@ -53,40 +54,18 @@ export interface RunContextRefreshResult {
 /**
  * Re-derive the index-owned sections of an existing handbook against the codewiki
  * this run just built. Only sections whose title the index authors are replaced,
- * and only when they are already present, so a human's handbook is never grown a
- * section it did not ask for and never loses one it wrote. Best-effort by
- * construction: nothing here may turn a routine refresh into a failure.
+ * and only when they are already present and unambiguous. The legacy title is
+ * still the ownership signal: authored edits inside that section can be replaced,
+ * but every byte outside its body is preserved. Best-effort by construction:
+ * nothing here may turn a routine refresh into a failure.
  */
 function curateClioMd(cwd: string, codewiki: Codewiki): ClioMdCuration {
 	try {
 		const parsed = tryReadClioMd(cwd);
 		if (!parsed?.ok) return "absent";
-		const handbook = parsed.value;
-		const fresh = new Map(codewikiSections(codewiki).map((section) => [section.title, section.body] as const));
-		let changed = false;
-		const sections = handbook.sections.map((section) => {
-			const body = fresh.get(section.title);
-			if (body === undefined || body === section.body) return section;
-			changed = true;
-			return { title: section.title, body };
-		});
-		// Rewrite only when an index-owned body actually moved. Serializing on every
-		// refresh would silently reformat a hand-written handbook into the generator's
-		// canonical rendering, which is a diff the author never asked for.
-		if (!changed) return "unchanged";
-		writeFileSync(
-			join(cwd, "CLIO-CODER.md"),
-			serializeClioMd({
-				projectName: handbook.projectName,
-				identity: handbook.identity,
-				conventions: handbook.conventions,
-				invariants: handbook.invariants,
-				sections,
-				...(handbook.importedAgentContext ? { importedAgentContext: handbook.importedAgentContext } : {}),
-				fingerprint: handbook.fingerprint,
-			}),
-			"utf8",
-		);
+		const curated = curateHandbookSource(parsed.source, codewikiSections(codewiki));
+		if (curated === parsed.source) return "unchanged";
+		writeFileSync(join(cwd, "CLIO-CODER.md"), curated, "utf8");
 		return "updated";
 	} catch {
 		return "absent";

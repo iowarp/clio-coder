@@ -28,6 +28,8 @@ export interface ParsedClioMd {
 
 export interface LoadedClioMdFile {
 	path: string;
+	/** Exact UTF-8 source for prompt rendering; value is only a structured projection. */
+	source: string;
 	value: ParsedClioMd;
 }
 
@@ -112,7 +114,7 @@ function parseFooter(source: string): {
 
 	const footerEnd = match.index + match[0].length;
 	const trailing = source.slice(footerEnd).trim();
-	if (trailing.length > 0) warnings.push("trailing content after fingerprint footer ignored");
+	if (trailing.length > 0) warnings.push("trailing content after fingerprint footer omitted from structured fields");
 	let parsed: unknown;
 	try {
 		parsed = JSON.parse(match[1] ?? "");
@@ -317,7 +319,9 @@ function escapeXmlAttribute(value: string): string {
 	return value.replaceAll("&", "&amp;").replaceAll('"', "&quot;").replaceAll("<", "&lt;").replaceAll(">", "&gt;");
 }
 
-export function renderProjectContextFragment(parsed: ParsedClioMd, sourcePath?: string): string {
+export function renderProjectContextFragment(parsed: ParsedClioMd | string, sourcePath?: string): string {
+	const source = sourcePath ? ` path="${escapeXmlAttribute(sourcePath)}"` : "";
+	if (typeof parsed === "string") return `<project-context${source}>\n${parsed}\n</project-context>`;
 	const sections: string[] = [`# ${parsed.projectName}`, parsed.identity];
 	if (parsed.conventions.length > 0) {
 		sections.push("## Conventions", ...parsed.conventions.map((item) => `- ${item}`));
@@ -331,7 +335,6 @@ export function renderProjectContextFragment(parsed: ParsedClioMd, sourcePath?: 
 	if (parsed.importedAgentContext) {
 		sections.push("## Imported agent context", parsed.importedAgentContext);
 	}
-	const source = sourcePath ? ` path="${escapeXmlAttribute(sourcePath)}"` : "";
 	return `<project-context${source}>\n${sections.join("\n\n")}\n</project-context>`;
 }
 
@@ -352,7 +355,9 @@ function selectedClioMdPath(directory: string): string | null {
 	return null;
 }
 
-function readClioMdPath(filePath: string): { ok: true; value: ParsedClioMd } | { ok: false; error: string } {
+function readClioMdPath(
+	filePath: string,
+): { ok: true; source: string; value: ParsedClioMd } | { ok: false; error: string } {
 	let content: string;
 	try {
 		content = readFileSync(filePath, "utf8");
@@ -361,7 +366,7 @@ function readClioMdPath(filePath: string): { ok: true; value: ParsedClioMd } | {
 	}
 	const parsed = parseClioMd(content);
 	if (!parsed.ok) return { ok: false, error: parsed.errors.join("; ") };
-	return { ok: true, value: parsed.value };
+	return { ok: true, source: content, value: parsed.value };
 }
 
 function mergeClioMdFiles(files: ReadonlyArray<LoadedClioMdFile>): ParsedClioMd | null {
@@ -416,13 +421,15 @@ export function loadProjectClioMd(cwd: string): LoadedProjectClioMd {
 	const errors: ClioMdLoadError[] = [];
 	for (const filePath of selectedPaths) {
 		const read = readClioMdPath(filePath);
-		if (read.ok) files.push({ path: filePath, value: read.value });
+		if (read.ok) files.push({ path: filePath, source: read.source, value: read.value });
 		else errors.push({ path: filePath, error: read.error });
 	}
 	return { files, errors, value: mergeClioMdFiles(files) };
 }
 
-export function tryReadClioMd(cwd: string): { ok: true; value: ParsedClioMd } | { ok: false; error: string } | null {
+export function tryReadClioMd(
+	cwd: string,
+): { ok: true; source: string; value: ParsedClioMd } | { ok: false; error: string } | null {
 	const filePath = join(cwd, "CLIO-CODER.md");
 	if (!existsSync(filePath)) return null;
 	return readClioMdPath(filePath);

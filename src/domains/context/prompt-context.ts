@@ -30,7 +30,7 @@ export function renderPromptContext(cwd: string): ProjectPromptContext {
 	const warnings: string[] = [];
 	const loadedClioMd = loadProjectClioMd(cwd);
 	const clioMd: ParsedClioMd | null = loadedClioMd.value;
-	for (const file of loadedClioMd.files) pieces.push(renderProjectContextFragment(file.value, file.path));
+	for (const file of loadedClioMd.files) pieces.push(renderProjectContextFragment(file.source, file.path));
 	for (const issue of loadedClioMd.errors) {
 		warnings.push(`clio-coder: malformed ${issue.path} ignored: ${issue.error}`);
 	}
