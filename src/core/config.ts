@@ -2118,12 +2118,14 @@ export interface UseTargetOptions {
 	backgroundModel?: string;
 }
 
-/** Route chat (and fleet dispatch, unless split) to `targetId`. Null when a named target is missing. */
+export type TargetSelectionRole = "chat" | "fleet" | "memory";
+
+/** Select only explicitly named roles; without role options retain chat/fleet selection. */
 export function useTargetInSettings(
 	settings: ClioSettings,
 	targetId: string,
 	options: UseTargetOptions = {},
-): { workerTargetId: string } | null {
+): { workerTargetId: string; roles: TargetSelectionRole[]; changedRoles: TargetSelectionRole[] } | null {
 	const target = settings.targets.find((entry) => entry.id === targetId);
 	if (!target) return null;
 	// A worker target of its own is the split topology; its model defaults to that node's own default.
@@ -2132,17 +2134,31 @@ export function useTargetInSettings(
 			? settings.targets.find((entry) => entry.id === options.workerTargetId)
 			: target;
 	if (!workerTarget) return null;
+	const scoped =
+		options.orchestratorModel !== undefined ||
+		options.workerModel !== undefined ||
+		options.workerTargetId !== undefined ||
+		options.backgroundModel !== undefined;
+	const roles: TargetSelectionRole[] = [];
+	if (!scoped || options.orchestratorModel !== undefined) roles.push("chat");
+	if (!scoped || options.workerModel !== undefined || options.workerTargetId !== undefined) roles.push("fleet");
+	if (options.backgroundModel !== undefined) roles.push("memory");
+	const changedRoles: TargetSelectionRole[] = [];
 	const sharedModel = options.model ?? target.defaultModel ?? null;
-	settings.chat.target = target.id;
-	settings.chat.model = options.orchestratorModel ?? sharedModel;
-	settings.fleet.default.target = workerTarget.id;
-	settings.fleet.default.model =
-		options.workerModel ?? (workerTarget === target ? sharedModel : (workerTarget.defaultModel ?? null));
-	if (options.backgroundModel !== undefined) {
-		settings.context.memory.target = target.id;
-		settings.context.memory.model = options.backgroundModel;
+	for (const role of roles) {
+		const current = role === "chat" ? settings.chat : role === "fleet" ? settings.fleet.default : settings.context.memory;
+		const nextTarget = role === "fleet" ? workerTarget.id : target.id;
+		const nextModel =
+			role === "chat"
+				? (options.orchestratorModel ?? sharedModel)
+				: role === "fleet"
+					? (options.workerModel ?? (workerTarget === target ? sharedModel : (workerTarget.defaultModel ?? null)))
+					: (options.backgroundModel ?? null);
+		if (current.target !== nextTarget || current.model !== nextModel) changedRoles.push(role);
+		current.target = nextTarget;
+		current.model = nextModel;
 	}
-	return { workerTargetId: workerTarget.id };
+	return { workerTargetId: workerTarget.id, roles, changedRoles };
 }
 
 /** Drop a target and every routing field, profile, and scope entry that named it. */

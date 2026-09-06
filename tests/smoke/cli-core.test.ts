@@ -1,6 +1,6 @@
 import { deepStrictEqual, match, ok, strictEqual, throws } from "node:assert/strict";
 import { execFileSync, spawn } from "node:child_process";
-import { existsSync, mkdtempSync, readdirSync, readFileSync, rmSync, writeFileSync } from "node:fs";
+import { existsSync, mkdirSync, mkdtempSync, readdirSync, readFileSync, rmSync, writeFileSync } from "node:fs";
 import { createServer, type IncomingMessage, type Server } from "node:http";
 import type { AddressInfo } from "node:net";
 import { tmpdir } from "node:os";
@@ -86,6 +86,127 @@ async function runCli(
 		});
 	});
 }
+
+describe("CLI targets use role selection", { concurrency: false }, () => {
+	let server: Server;
+	let endpoint: string;
+	const requests: string[] = [];
+	const defaultModel = "dynamo/qwen3.8-27b";
+	const backgroundModel = "zbook-lemonade/LFM2.5-8B-A1B";
+	const prefixedModel = "zbook-lemonade/Gemma-4-26B-A4B-it-MTP-GGUF";
+	before(async () => {
+		server = createServer((request, response) => {
+			requests.push(`${request.method} ${request.url}`);
+			if (request.method === "GET" && request.url === "/v1/models") {
+				response.writeHead(200, { "content-type": "application/json" });
+				response.end(JSON.stringify({ data: [defaultModel, backgroundModel, prefixedModel].map((id) => ({ id })) }));
+			} else {
+				response.writeHead(404);
+				response.end("not found");
+			}
+		});
+		await new Promise<void>((resolve) => server.listen(0, "127.0.0.1", resolve));
+		endpoint = `http://127.0.0.1:${(server.address() as AddressInfo).port}`;
+	});
+	after(async () => {
+		await new Promise<void>((resolve, reject) => server.close((error) => (error ? reject(error) : resolve())));
+		ok(requests.some((request) => request === "GET /v1/models"));
+		strictEqual(
+			requests.some((request) => request.startsWith("POST ")),
+			false,
+			"selection must not request inference",
+		);
+	});
+	function fixture() {
+		const scratch = home("clio-target-roles-");
+		mkdirSync(join(scratch.root, "config"), { recursive: true });
+		const path = join(scratch.root, "config", "settings.yaml");
+		const initial = {
+			version: 2,
+			targets: [{ id: "blade-gateway", runtime: "litellm", url: endpoint, defaultModel }],
+			chat: { target: "blade-gateway", model: defaultModel, thinkingLevel: "medium" },
+			fleet: { default: { target: "blade-gateway", model: "mini/ornith1.5-35b-moe", thinkingLevel: "low" } },
+			context: { memory: { target: "blade-gateway", model: "zbook/ornith-1.5-35b-a3b" } },
+		};
+		writeFileSync(path, JSON.stringify(initial));
+		return { scratch, path, initial, options: { env: scratch.env, cwd: scratch.root } };
+	}
+	for (const [flag, role, label] of [
+		["--background-model", "memory", "background memory"],
+		["--fleet-model", "fleet", "fleet dispatch"],
+		["--orchestrator-model", "chat", "chat"],
+	] as const) {
+		it(`${flag} updates only its role and names only that role`, async () => {
+			const { scratch, path, initial, options } = fixture();
+			try {
+				const result = await runCli(["targets", "use", "blade-gateway", flag, backgroundModel], options);
+				strictEqual(result.code, 0, result.stderr);
+				const expected = structuredClone(initial);
+				const route = role === "chat" ? expected.chat : role === "fleet" ? expected.fleet.default : expected.context.memory;
+				route.model = backgroundModel;
+				deepStrictEqual(parseYaml(readFileSync(path, "utf8")), expected);
+				strictEqual(result.stdout.trim(), `ok: using target blade-gateway for ${label}`);
+				const repeated = await runCli(["targets", "use", "blade-gateway", flag, backgroundModel], options);
+				strictEqual(repeated.code, 0, repeated.stderr);
+				strictEqual(repeated.stdout.trim(), "ok: no role settings changed");
+			} finally {
+				scratch.cleanup();
+			}
+		});
+	}
+	it("no flags select chat and fleet defaults, preserve memory/thinking, and report actual changes", async () => {
+		const { scratch, path, initial, options } = fixture();
+		try {
+			initial.chat.model = "previous/main";
+			writeFileSync(path, JSON.stringify(initial));
+			const result = await runCli(["targets", "use", "blade-gateway"], options);
+			strictEqual(result.code, 0, result.stderr);
+			const expected = structuredClone(initial);
+			expected.chat.model = defaultModel;
+			expected.fleet.default.model = defaultModel;
+			deepStrictEqual(parseYaml(readFileSync(path, "utf8")), expected);
+			strictEqual(result.stdout.trim(), "ok: using target blade-gateway for chat and fleet dispatch");
+			initial.chat.model = defaultModel;
+			writeFileSync(path, JSON.stringify(initial));
+			const fleetOnlyChanged = await runCli(["targets", "use", "blade-gateway"], options);
+			strictEqual(fleetOnlyChanged.code, 0, fleetOnlyChanged.stderr);
+			strictEqual(fleetOnlyChanged.stdout.trim(), "ok: using target blade-gateway for fleet dispatch");
+		} finally {
+			scratch.cleanup();
+		}
+	});
+	it("rejects unadvertised gateway aliases atomically and saves the exact advertised id", async () => {
+		const { scratch, path, initial, options } = fixture();
+		try {
+			const before = readFileSync(path, "utf8");
+			const rejected = await runCli(
+				[
+					"targets",
+					"use",
+					"blade-gateway",
+					"--orchestrator-model",
+					backgroundModel,
+					"--background-model",
+					"Gemma-4-26B-A4B-it-MTP-GGUF",
+				],
+				options,
+			);
+			strictEqual(rejected.code, 1, rejected.stderr);
+			match(rejected.stderr, /does not list model 'Gemma-4-26B-A4B-it-MTP-GGUF'/);
+			ok(rejected.stderr.includes(prefixedModel));
+			strictEqual(rejected.stdout.includes("ok:"), false);
+			strictEqual(readFileSync(path, "utf8"), before, "rejection cannot partially update another selected role");
+			const accepted = await runCli(["targets", "use", "blade-gateway", "--background-model", prefixedModel], options);
+			strictEqual(accepted.code, 0, accepted.stderr);
+			const expected = structuredClone(initial);
+			expected.context.memory.model = prefixedModel;
+			deepStrictEqual(parseYaml(readFileSync(path, "utf8")), expected);
+			strictEqual(accepted.stdout.trim(), "ok: using target blade-gateway for background memory");
+		} finally {
+			scratch.cleanup();
+		}
+	});
+});
 
 it("CLI tasks hand retains JSON state and emits the explicit headless pickup turn", async () => {
 	const scratch = home("clio-task-handoff-");

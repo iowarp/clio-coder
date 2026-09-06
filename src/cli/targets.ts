@@ -5,6 +5,8 @@ import {
 	readSettings,
 	removeFleetProfileFromSettings,
 	setFleetProfileInSettings,
+	type TargetSelectionRole,
+	type UseTargetOptions,
 	updateSettings,
 	useTargetInSettings,
 } from "../core/config.js";
@@ -24,6 +26,7 @@ import { registerBuiltinRuntimes } from "../domains/providers/runtimes/builtins.
 import type { CapabilityFlags } from "../domains/providers/types/capability-flags.js";
 import type { RuntimeTier } from "../domains/providers/types/runtime-descriptor.js";
 import { runConfigureCommand, runTargetRemove, runTargetRename } from "./configure.js";
+import { resolveSupportedWireModels } from "./configure-target.js";
 import { printError, printOk } from "./shared.js";
 import { column, terminalColumns, truncate, wrapPlain } from "./text-layout.js";
 
@@ -259,7 +262,7 @@ function parseUseArgs(args: ReadonlyArray<string>): UseArgs | null {
 	return parsed;
 }
 
-function runUse(args: ReadonlyArray<string>): number {
+async function runUse(args: ReadonlyArray<string>): Promise<number> {
 	if (wantsHelp(args)) return printUsage(USE_USAGE);
 	let parsed: UseArgs | null;
 	try {
@@ -281,42 +284,91 @@ function runUse(args: ReadonlyArray<string>): number {
 	}
 	const registry = getRuntimeRegistry();
 	if (registry.list().length === 0) registerBuiltinRuntimes(registry);
-	const runtime = registry.get(target.runtime);
-	if (!runtime) {
-		printError(
-			`cannot use target '${target.id}' as orchestrator target because runtime '${target.runtime}' is not registered`,
-		);
+	const options: UseTargetOptions = {
+		...(parsed.model !== undefined ? { model: parsed.model } : {}),
+		...(parsed.orchestratorModel !== undefined ? { orchestratorModel: parsed.orchestratorModel } : {}),
+		...(parsed.workerModel !== undefined ? { workerModel: parsed.workerModel } : {}),
+		...(parsed.workerTarget !== undefined ? { workerTargetId: parsed.workerTarget } : {}),
+		...(parsed.backgroundModel !== undefined ? { backgroundModel: parsed.backgroundModel } : {}),
+	};
+	const candidate = structuredClone(settings);
+	const selection = useTargetInSettings(candidate, target.id, options);
+	if (!selection) {
+		printError(`no target with id ${parsed.workerTarget}`);
 		return 1;
 	}
-	if (!isOrchestratorEligibleRuntime(runtime)) {
-		printError(
-			`cannot use target '${target.id}' as orchestrator target because runtime '${runtime.id}' is not an HTTP/native runtime`,
-		);
-		return 1;
+	const labels: Record<TargetSelectionRole, string> = {
+		chat: "chat",
+		fleet: "fleet dispatch",
+		memory: "background memory",
+	};
+	const routes = { chat: candidate.chat, fleet: candidate.fleet.default, memory: candidate.context.memory };
+	const inventories = new Map<string, Awaited<ReturnType<typeof resolveSupportedWireModels>>>();
+	const checkedTargets = new Map<string, string>();
+	for (const role of selection.roles) {
+		const route = routes[role];
+		const selectedTarget = candidate.targets.find((entry) => entry.id === route.target);
+		if (!selectedTarget) throw new Error("selected target disappeared");
+		const runtime = registry.get(selectedTarget.runtime);
+		if (!runtime || !(role === "fleet" ? isDispatchEligibleRuntime(runtime) : isOrchestratorEligibleRuntime(runtime))) {
+			printError(
+				`cannot use target '${selectedTarget.id}' for ${labels[role]}: runtime '${selectedTarget.runtime}' is not eligible`,
+			);
+			return 1;
+		}
+		checkedTargets.set(selectedTarget.id, JSON.stringify(selectedTarget));
+		if (route.model === null) continue;
+		let inventory = inventories.get(selectedTarget.id);
+		if (!inventory) {
+			inventory = await resolveSupportedWireModels(runtime, selectedTarget, selectedTarget);
+			inventories.set(selectedTarget.id, inventory);
+		}
+		if (inventory.models.length > 0 && !inventory.models.includes(route.model)) {
+			printError(
+				`target '${selectedTarget.id}' does not list model '${route.model}' for ${labels[role]} (${inventory.source} inventory). Use an exact listed model id: ${inventory.models.slice(0, 10).join(", ")}`,
+			);
+			return 1;
+		}
+		if (inventory.models.length === 0) {
+			// Keep offline selection possible, but never imply that an unknown id was verified.
+			process.stderr.write(
+				`warning: could not verify model '${route.model}' for ${labels[role]}: target '${selectedTarget.id}' returned no model list; saving the id as written\n`,
+			);
+		} else if (inventory.source === "cache" || inventory.source === "legacy") {
+			process.stderr.write(
+				`warning: using ${inventory.source} model inventory for target '${selectedTarget.id}'; live availability was not verified\n`,
+			);
+		}
 	}
-	let workerTarget = target;
-	if (parsed.workerTarget !== undefined && parsed.workerTarget !== target.id) {
-		const resolved = resolveDispatchProfileTarget(settings, parsed.workerTarget, "fleet worker target");
-		if ("exitCode" in resolved) return resolved.exitCode;
-		workerTarget = resolved.target;
-	}
-	const backgroundModel = parsed.backgroundModel;
-	// Locked read-modify-write so a concurrent session's field-level
-	// write-through (Shift+Tab, Alt+L, …) cannot be lost between our read
-	// above and this save.
-	updateSettings((fresh) => {
-		useTargetInSettings(fresh, target.id, {
-			...(parsed.model !== undefined ? { model: parsed.model } : {}),
-			...(parsed.orchestratorModel !== undefined ? { orchestratorModel: parsed.orchestratorModel } : {}),
-			...(parsed.workerModel !== undefined ? { workerModel: parsed.workerModel } : {}),
-			workerTargetId: workerTarget.id,
-			...(backgroundModel !== undefined ? { backgroundModel } : {}),
+	// Re-read under the settings lock. A changed endpoint/default invalidates the
+	// checked inventory; unrelated concurrent role edits are preserved by the scoped mutation.
+	let changedRoles: TargetSelectionRole[] = [];
+	try {
+		updateSettings((fresh) => {
+			for (const [id, descriptor] of checkedTargets) {
+				if (JSON.stringify(fresh.targets.find((entry) => entry.id === id)) !== descriptor) {
+					throw new Error(`target '${id}' changed while checking models; retry targets use`);
+				}
+			}
+			const applied = useTargetInSettings(fresh, target.id, options);
+			if (!applied) throw new Error("target changed while checking models; retry targets use");
+			changedRoles = applied.changedRoles;
 		});
-	});
-	const dispatchWhere = workerTarget === target ? "" : ` and ${workerTarget.id} for fleet dispatch`;
-	const chatWhere = workerTarget === target ? "for chat and fleet dispatch" : "for chat";
+	} catch (error) {
+		printError(error instanceof Error ? error.message : String(error));
+		return 1;
+	}
+	const changedByTarget = new Map<string, string[]>();
+	for (const role of changedRoles) {
+		const id = routes[role].target as string;
+		const names = changedByTarget.get(id) ?? [];
+		names.push(labels[role]);
+		changedByTarget.set(id, names);
+	}
 	printOk(
-		`using target ${target.id} ${chatWhere}${dispatchWhere}${backgroundModel === undefined ? "" : ", and background memory"}`,
+		changedRoles.length === 0
+			? "no role settings changed"
+			: `using ${[...changedByTarget].map(([id, names]) => `target ${id} for ${names.join(" and ")}`).join("; ")}`,
 	);
 	return 0;
 }
