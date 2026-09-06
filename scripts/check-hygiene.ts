@@ -660,12 +660,47 @@ function checkEnvironmentVariableInventory(): void {
 
 // ---------------------------------------------------------------------------
 // configuration-reference: docs/guide/configuration-reference.md's settings-key
-// table held against DEFAULT_SETTINGS. The table lists every default at leaf
-// depth plus schema-shaped sub-rows (`targets[].id`, `fleet.profiles.<key>.model`)
-// and optional keys with no default (`context.compaction.model`), so a row is
-// anchored at its first `[]` or `<key>` segment and that anchor, or its parent
-// for a defaultless optional key, must be a node of DEFAULT_SETTINGS.
+// table covers every default leaf. Membership comes from the existing typed
+// settings shape, including defaultless optional fields and array/map elements.
 // ---------------------------------------------------------------------------
+function configurationReferenceMembership(): (path: string) => boolean {
+	const file = join(root, "src/core/defaults.ts");
+	const program = ts.createProgram([file], {
+		module: ts.ModuleKind.NodeNext,
+		moduleResolution: ts.ModuleResolutionKind.NodeNext,
+		strict: true,
+		skipLibCheck: true,
+		noEmit: true,
+	});
+	const checker = program.getTypeChecker();
+	const source = program.getSourceFile(file);
+	const module = source && checker.getSymbolAtLocation(source);
+	const settings = module && checker.getExportsOfModule(module).find((symbol) => symbol.name === "DEFAULT_SETTINGS");
+	if (!settings || !source) throw new Error("cannot resolve DEFAULT_SETTINGS schema");
+	const schema = checker.getTypeOfSymbolAtLocation(settings, source);
+	return (path) => {
+		// Keep container syntax significant: an array is not an object or a map.
+		const tokens = path.match(/[^.[\]]+|\[\]/g) ?? [];
+		if (tokens.map((token, index) => (index > 0 && token !== "[]" ? `.${token}` : token)).join("") !== path) return false;
+		let current: ts.Type | undefined = schema;
+		for (const token of tokens) {
+			current = checker.getNonNullableType(current);
+			if (token === "[]") {
+				if (!checker.isArrayType(current) && !checker.isTupleType(current)) return false;
+				current = checker.getIndexTypeOfType(current, ts.IndexKind.Number);
+			} else if (token === "<key>") {
+				current = checker.getIndexTypeOfType(current, ts.IndexKind.String);
+			} else {
+				if (!(current.flags & ts.TypeFlags.Object) || checker.isArrayType(current)) return false;
+				const property = checker.getPropertyOfType(current, token);
+				current = property && checker.getTypeOfSymbolAtLocation(property, source);
+			}
+			if (!current || current.flags & (ts.TypeFlags.Any | ts.TypeFlags.Unknown | ts.TypeFlags.Never)) return false;
+		}
+		return tokens.length > 0;
+	};
+}
+
 function configurationReferenceRows(): string[] {
 	const doc = readRoot("docs/guide/configuration-reference.md");
 	const start = doc.indexOf("## Settings keys");
@@ -695,20 +730,12 @@ function checkConfigurationReference(): void {
 		);
 	}
 
-	const nodes = new Set<string>();
-	for (const leaf of leaves) {
-		const segments = leaf.split(".");
-		for (let depth = 1; depth <= segments.length; depth += 1) nodes.add(segments.slice(0, depth).join("."));
-	}
-	const parentOf = (path: string): string => path.slice(0, Math.max(0, path.lastIndexOf(".")));
-	const stale = rows.filter((path) => {
-		const anchor = path.replace(/(\[\]|\.<key>).*$/, "");
-		return !nodes.has(anchor) && !nodes.has(parentOf(anchor));
-	});
+	const isSupported = configurationReferenceMembership();
+	const stale = rows.filter((path) => !isSupported(path));
 	if (stale.length > 0) {
 		fail(
 			"configuration-reference",
-			`docs/guide/configuration-reference.md rows name settings keys that DEFAULT_SETTINGS no longer has:\n  ${stale.join("\n  ")}`,
+			`docs/guide/configuration-reference.md rows name settings keys absent from the DEFAULT_SETTINGS schema:\n  ${stale.join("\n  ")}`,
 		);
 	}
 }
