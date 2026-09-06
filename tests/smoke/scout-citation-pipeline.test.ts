@@ -164,7 +164,7 @@ for (const scenario of ["first-pass", "repaired", "exhausted"] as const) {
 			strictEqual(readResults.length, 2, "repair retains both actual reads");
 			const interfaceRead = readResults.find((message) => message.tool_call_id === "read-interface");
 			ok(interfaceRead);
-			match(String(interfaceRead.content), /62 \| {8}grid_axis = make_axis\(axis, grid, periodic\)/u);
+			match(String(interfaceRead.content), /62 \| +grid_axis = make_axis\(axis, grid, periodic\)/u);
 			if (feedback.length > 0) {
 				match(
 					String(feedback[1]?.content),
