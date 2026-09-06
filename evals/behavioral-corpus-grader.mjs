@@ -129,8 +129,7 @@ async function gradeProposal() {
 		tasks.every(
 			(task) =>
 				["blocked", "cancelled"].includes(task.status) &&
-				typeof task.reason === "string" &&
-				task.reason.trim().length > 0 &&
+				(task.status === "cancelled" || (typeof task.reason === "string" && task.reason.trim().length > 0)) &&
 				!task.evidence,
 		);
 	process.stdout.write(
@@ -140,7 +139,7 @@ async function gradeProposal() {
 		})}\n`,
 	);
 	assert.equal(executionAttempts, 0, "proposal attempted execution outside its allowed tools");
-	assert.ok(parked, "both proposed implementation tasks must remain blocked or cancelled with reasons");
+	assert.ok(parked, "both proposed implementation tasks must remain blocked with reasons or cancelled");
 	assert.match(assistant, /\btdd\b/iu, "proposal must identify the skill");
 	assert.match(
 		assistant,

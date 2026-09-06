@@ -65,7 +65,10 @@ describe("proposal-only task continuation (#365)", () => {
 			}
 			deepStrictEqual(board.snapshot(), before, "a reminder must not start a task");
 			for (const id of ["t1", "t2"]) {
-				const parked = await tool.run({ action, id, note: "Awaiting explicit operator go-ahead to implement" }, {});
+				const parked = await tool.run(
+					{ action, id, ...(action === "block" ? { note: "Awaiting explicit operator go-ahead to implement" } : {}) },
+					{},
+				);
 				strictEqual(parked.kind, "ok");
 			}
 			board.invalidate();
@@ -73,7 +76,14 @@ describe("proposal-only task continuation (#365)", () => {
 				board.snapshot()?.tasks.map((task) => task.status),
 				[action === "block" ? "blocked" : "cancelled", action === "block" ? "blocked" : "cancelled"],
 			);
-			ok(board.snapshot()?.tasks.every((task) => task.reason?.includes("operator go-ahead") && !task.evidence));
+			ok(
+				board
+					.snapshot()
+					?.tasks.every(
+						(task) =>
+							!task.evidence && (action === "block" ? task.reason?.includes("operator go-ahead") : task.reason === undefined),
+					),
+			);
 			deepStrictEqual(nudge.evaluate(turnEnd), []);
 			const listed = await tool.run({ action: "list" }, {});
 			ok(listed.kind === "ok");
@@ -117,7 +127,7 @@ describe("proposal-only behavioral corpus grading", () => {
 		ok(task.workspace?.setup?.some((command) => command.endsWith("--prepare")));
 	});
 
-	it("accepts parked proposals and rejects execution, stale rows, missing evidence, and confounded fixtures", (t) => {
+	it("accepts parked proposals and rejects execution, stale rows, missing evidence, and confounded fixtures", async (t) => {
 		const scratch = makeScratchHome("proposal-corpus-");
 		t.after(scratch.cleanup);
 		const stdout = join(scratch.dir, "runner.jsonl");
@@ -154,9 +164,17 @@ describe("proposal-only behavioral corpus grading", () => {
 		const pass = grade([boardEvent, ...proposal]);
 		strictEqual(pass.status, 0, pass.stderr);
 		match(pass.stdout, /"proposal.implementationParked":true/);
-		const cancelled = structuredClone(boardEvent);
-		for (const task of cancelled.result.details.tasks) task.status = "cancelled";
-		strictEqual(grade([cancelled, ...proposal]).status, 0);
+		const board = createTaskBoardStore();
+		const tool = createTasksTool({ board });
+		strictEqual((await tool.run({ action: "plan", title: "clamp proposal", tasks: ["RED", "GREEN"] }, {})).kind, "ok");
+		for (const id of ["t1", "t2"]) strictEqual((await tool.run({ action: "drop", id }, {})).kind, "ok");
+		const cancelledTasks = board.snapshot()?.tasks;
+		ok(cancelledTasks);
+		ok(cancelledTasks.every((task) => task.status === "cancelled" && task.reason === undefined));
+		const cancelled = { ...boardEvent, result: { details: { tasks: cancelledTasks } } };
+		const cancelledPass = grade([cancelled, ...proposal]);
+		strictEqual(cancelledPass.status, 0, cancelledPass.stderr);
+		match(cancelledPass.stdout, /"proposal.implementationParked":true/);
 		for (const status of ["pending", "active", "completed"]) {
 			const stale = structuredClone(boardEvent);
 			const first = stale.result.details.tasks[0];
@@ -164,11 +182,21 @@ describe("proposal-only behavioral corpus grading", () => {
 			first.status = status;
 			strictEqual(grade([stale, ...proposal]).status, 1, status);
 		}
+		const cancelledWithReasons = structuredClone(boardEvent);
+		for (const task of cancelledWithReasons.result.details.tasks) task.status = "cancelled";
+		strictEqual(grade([cancelledWithReasons, ...proposal]).status, 0);
 		const noReason = structuredClone(boardEvent);
 		const firstWithoutReason = noReason.result.details.tasks[0];
 		ok(firstWithoutReason);
-		firstWithoutReason.reason = "";
-		strictEqual(grade([noReason, ...proposal]).status, 1);
+		for (const reason of ["", "   "]) {
+			firstWithoutReason.reason = reason;
+			strictEqual(grade([noReason, ...proposal]).status, 1);
+		}
+		for (const event of [boardEvent, cancelled]) {
+			const withEvidence = structuredClone(event);
+			Object.assign(withEvidence.result.details.tasks[0] ?? {}, { evidence: "Implemented" });
+			strictEqual(grade([withEvidence, ...proposal]).status, 1);
+		}
 		strictEqual(grade(proposal).status, 1, "prose alone is not typed parked state");
 		strictEqual(grade([boardEvent]).status, 1, "missing final answer is not success");
 		strictEqual(grade([boardEvent, proposal[0]]).status, 1, "interrupted answer is not success");
