@@ -17,5 +17,5 @@ export function buildModelReplayAgentMessagesFromTurns(
 ): AgentMessage[] {
 	const activeLeafTurnId = options.activeLeafTurnId ?? options.uptoTurnId;
 	const projected = projectWorkingSet(entries, foldWorkingSet(entries, activeLeafTurnId), activeLeafTurnId);
-	return buildReplayAgentMessagesFromTurns(projected, options);
+	return buildReplayAgentMessagesFromTurns(projected, { ...options, skillContextEntries: entries });
 }

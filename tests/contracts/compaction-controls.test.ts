@@ -328,7 +328,7 @@ describe("production compaction controls", () => {
 		match(activeText, /Run one two-task public pipeline \(mode pipeline\): Scout first, dependent Documenter second/);
 		const checkpoint = f.entries().find((entry) => entry.kind === "compactionSummary");
 		ok(checkpoint?.kind === "compactionSummary");
-		const verbatim = checkpoint.summary.split("Active user instructions (verbatim):\n")[1];
+		const verbatim = checkpoint.userContext?.text;
 		ok(verbatim);
 		ok(verbatim.startsWith(activeText), "canonical operator text is preserved exactly");
 		doesNotMatch(verbatim, /system-reminder|marketplace|Suggested skill/);

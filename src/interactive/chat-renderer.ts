@@ -17,6 +17,7 @@ import { existsSync } from "node:fs";
 import { ToolNames } from "../core/tool-names.js";
 import { foldWorkingSet } from "../domains/context/working-set/fold.js";
 import { compactionCut } from "../domains/context/working-set/visible.js";
+import { captureSkillContext } from "../domains/session/compaction/compact.js";
 import type {
 	BashExecutionEntry,
 	BranchSummaryEntry,
@@ -31,6 +32,7 @@ import type {
 	ThinkingLevelChangeEntry,
 	WorkerRunEntry,
 } from "../domains/session/entries.js";
+import { latestSkillContextState, verifiedSkillContextCheckpoint } from "../domains/session/entries.js";
 import {
 	HANDOFF_NOTE_CUSTOM_TYPE,
 	HANDOFF_SEED_CUSTOM_TYPE,
@@ -334,6 +336,8 @@ export function createCoalescingChatRenderer(deps: CreateCoalescingChatRendererD
  * Options for the rehydrate helper used by /resume and /fork.
  */
 export interface RehydrateChatPanelOptions {
+	/** Unprojected ledger for verifying historical skill receipts after eviction projection. */
+	skillContextEntries?: ReadonlyArray<SessionEntry>;
 	/**
 	 * Select the active branch ancestry without truncating later sidecars.
 	 * Live compaction replay uses this so a summary appended after the current
@@ -1080,6 +1084,16 @@ export function buildReplayAgentMessagesFromTurns(
 ): AgentMessage[] {
 	const out = createOrderedReplaySink();
 	const seenToolCalls = new Set<string>();
+	const activeEntries = truncateAtTurn(
+		filterEntriesToActivePath(turns, options.activeLeafTurnId ?? options.uptoTurnId),
+		options.uptoTurnId,
+	);
+	const skillState = latestSkillContextState(activeEntries);
+	const evidence = truncateAtTurn(
+		filterEntriesToActivePath(options.skillContextEntries ?? turns, options.activeLeafTurnId ?? options.uptoTurnId),
+		options.uptoTurnId,
+	);
+	const verified = captureSkillContext(evidence, skillState);
 	for (const entry of selectReplayEntries(turns, options)) {
 		switch (entry.kind) {
 			case "message": {
@@ -1113,8 +1127,26 @@ export function buildReplayAgentMessagesFromTurns(
 				break;
 			case "compactionSummary":
 				appendContextMessage(out, "user", compactionContextText(entry), entry.timestamp);
+				if (entry.userContext)
+					out.push(
+						makeTextMessage("user", `Active user instructions (verbatim):\n${entry.userContext.text}`, entry.timestamp),
+					);
+				if (entry.skillContext !== undefined) {
+					if (!verifiedSkillContextCheckpoint(entry.skillContext)) break;
+					for (const skill of entry.skillContext.skills) {
+						const receipt = verified?.skills.find((candidate) => candidate.activationRef === skill.activationRef);
+						if (!receipt || JSON.stringify(receipt) !== JSON.stringify(skill)) continue;
+						// This is historical instruction context, not a generated summary or a tool result.
+						// Keep the exact captured blocks outside summary replay's text cap.
+						out.push(makeTextMessage("user", `Preserved skill request (verbatim):\n${skill.requestText}`, entry.timestamp));
+						out.push(makeTextMessage("user", `Verified loaded skill: ${JSON.stringify(skill.activation)}`, entry.timestamp));
+						for (const block of skill.content) out.push(makeTextMessage("user", block.text, entry.timestamp));
+					}
+				}
 				break;
 			case "skillActivation":
+				if (entry.activation.runId !== undefined || (skillState && !skillState.activationRefs.includes(entry.turnId)))
+					break;
 				appendContextMessage(out, "user", skillActivationContextText(entry), entry.timestamp);
 				break;
 			// The one custom entry that becomes a model message. `/handoff` seeds a

@@ -17,7 +17,16 @@ import { foldWorkingSet } from "../../context/working-set/fold.js";
 import { projectWorkingSet } from "../../context/working-set/project.js";
 import { recallableRefListing } from "../../context/working-set/recall.js";
 import { estimateAgentContextTokens, extractReasoningTokens } from "../context-accounting.js";
-import type { CompactionUsage, SessionEntry } from "../entries.js";
+import {
+	type CompactionUsage,
+	latestSkillContextState,
+	type PreservedUserContext,
+	type SessionEntry,
+	type SkillContextCheckpoint,
+	type SkillContextState,
+	skillContextContentHash,
+	verifiedSkillContextCheckpoint,
+} from "../entries.js";
 import { serializeConversation } from "./branch-summary.js";
 import { findCutPoint } from "./cut-point.js";
 import { DEFAULT_KEEP_RECENT_TOKENS, DEFAULT_RESERVE_TOKENS } from "./defaults.js";
@@ -100,6 +109,15 @@ export interface CompactionCallObservation {
 export interface CompactInput {
 	/** Ordered active-path session entries to compact; returned cut indexes address this same array. */
 	entries: ReadonlyArray<SessionEntry>;
+	/** Authoritative main-agent selection; omitted for unknown legacy state. */
+	skillContextState?: SkillContextState | null;
+	/** Pure source-test seam. Production uses the existing summary stream. */
+	summarize?: (request: {
+		systemPrompt: string;
+		userText: string;
+		maxTokens: number;
+	}) => Promise<{ text: string; usage?: unknown }>;
+
 	/** Resolved orchestrator or compaction-override model. */
 	model: EngineModel;
 	/** API key for the model. Optional because local engines accept a fallback handled upstream. */
@@ -123,6 +141,8 @@ export interface CompactInput {
 }
 
 export interface CompactResult {
+	skillContext?: SkillContextCheckpoint;
+	userContext?: PreservedUserContext;
 	/** Generated summary text. Empty when there was nothing to summarize. */
 	summary: string;
 	/**
@@ -193,6 +213,157 @@ function findTurnStartForProtection(
 		if (entry.kind === "message" && entry.role === "user") return i;
 	}
 	return -1;
+}
+
+/** Recover only complete, uniquely paired historical main-agent loads. Never consult current disk. */
+export function captureSkillContext(
+	entries: ReadonlyArray<SessionEntry>,
+	selection: SkillContextState | undefined,
+): SkillContextCheckpoint | undefined {
+	if (!selection || selection.unknown) return undefined;
+	const newestSelected = Math.max(
+		-1,
+		...selection.activationRefs.map((ref) => entries.findIndex((entry) => entry.turnId === ref)),
+	);
+	if (
+		selection.activationRefs.length > 0 &&
+		entries
+			.slice(newestSelected + 1)
+			.some((entry) => entry.kind === "skillActivation" && entry.activation.runId === undefined)
+	)
+		return undefined;
+	const skills: SkillContextCheckpoint["skills"] = [];
+	for (const ref of selection.activationRefs) {
+		const matches = entries.filter((entry) => entry.turnId === ref);
+		const entry = matches[0];
+		if (matches.length !== 1 || entry?.kind !== "skillActivation") return undefined;
+		const activation = entry.activation;
+		if (
+			activation.runId !== undefined ||
+			activation.triggeredBy !== "tool" ||
+			!activation.turnId ||
+			activation.drift === "mismatch"
+		)
+			return undefined;
+		// A later load with the same name supersedes this receipt, even if the later evidence is incomplete.
+		if (
+			entries
+				.slice(entries.indexOf(entry) + 1)
+				.some(
+					(later) =>
+						later.kind === "skillActivation" &&
+						later.activation.runId === undefined &&
+						later.activation.name === activation.name,
+				)
+		)
+			return undefined;
+		const request = entries.find((candidate) => candidate.turnId === activation.turnId);
+		if (request?.kind !== "message" || request.role !== "user") return undefined;
+		const start = entries.indexOf(request);
+		const next = entries.findIndex(
+			(candidate, index) => index > start && candidate.kind === "message" && candidate.role === "user",
+		);
+		const turn = entries.slice(start, next < 0 ? undefined : next);
+		if (!turn.includes(entry)) return undefined;
+		const calls = turn.filter((candidate) => {
+			if (candidate.kind !== "message" || candidate.role !== "tool_call") return false;
+			const payload = payloadObject(candidate.payload);
+			const args = payloadObject(payload?.args);
+			return payload?.name === "context" && args?.scope === "skills" && args.name === activation.name;
+		});
+		if (calls.length !== 1) return undefined;
+		const call = calls[0];
+		if (call?.kind !== "message") return undefined;
+		const callId = payloadObject(call.payload)?.toolCallId;
+		if (typeof callId !== "string" || !callId) return undefined;
+		const assistant = turn.find((candidate) => candidate.turnId === call.parentTurnId);
+		if (
+			assistant?.kind !== "message" ||
+			assistant.role !== "assistant" ||
+			!contentBlocks(assistant.payload).some(
+				(block) =>
+					block.type === "toolCall" &&
+					block.id === callId &&
+					block.name === "context" &&
+					JSON.stringify(block.arguments) === JSON.stringify(payloadObject(call.payload)?.args),
+			)
+		)
+			return undefined;
+		const results = entries.filter(
+			(candidate) =>
+				candidate.kind === "message" &&
+				candidate.role === "tool_result" &&
+				payloadObject(candidate.payload)?.toolCallId === callId,
+		);
+		const resultEntry = results[0];
+		if (
+			results.length !== 1 ||
+			resultEntry?.kind !== "message" ||
+			!turn.includes(resultEntry) ||
+			resultEntry.parentTurnId !== call.turnId ||
+			entry.parentTurnId !== request.turnId
+		)
+			return undefined;
+		const payload = payloadObject(resultEntry.payload);
+		const result = payloadObject(payload?.result);
+		const details = payloadObject(result?.details);
+		const observation = payloadObject(details?.observation);
+		const resultSummary = payloadObject(payload?.resultSummary);
+		const summaryObservation = payloadObject(resultSummary?.observation);
+		const sourceInfo = payloadObject(details?.sourceInfo);
+		if (
+			payload?.toolName !== "context" ||
+			payload.isError !== false ||
+			payload.outcome !== "ok" ||
+			details?.kind !== "ok" ||
+			observation?.truncated !== false ||
+			details.workingSet !== undefined ||
+			details.contextCompaction !== undefined ||
+			resultSummary?.truncated !== false ||
+			summaryObservation?.truncated === true ||
+			details.name !== activation.name ||
+			details.path !== activation.filePath ||
+			details.hash !== activation.hash ||
+			details.source !== activation.source ||
+			details.sourceOrigin !== activation.sourceOrigin ||
+			sourceInfo?.path !== activation.filePath ||
+			sourceInfo.scope !== details.scope ||
+			sourceInfo.source !== activation.sourceOrigin ||
+			(details.drift !== undefined && details.drift !== "match") ||
+			details.drift !== activation.drift ||
+			!Array.isArray(result?.content) ||
+			!result.content.every((block: unknown) => {
+				const obj = payloadObject(block);
+				return obj?.type === "text" && typeof obj.text === "string";
+			})
+		)
+			return undefined;
+		const content = result.content as Array<{ type: "text"; text: string }>;
+		const text = content.map((block) => block.text).join("\n");
+		if (
+			observation.shownBytes !== Buffer.byteLength(text, "utf8") ||
+			observation.totalBytes !== observation.shownBytes ||
+			resultSummary?.bytes !== observation.shownBytes
+		)
+			return undefined;
+		const requestPayload = payloadObject(request.payload);
+		const operatorText = requestPayload?.operatorText;
+		const requestText =
+			typeof operatorText === "string" && operatorText.trim().length > 0 ? operatorText : requestPayload?.text;
+		if (typeof requestText !== "string") return undefined;
+		skills.push({
+			activationRef: ref,
+			requestRef: request.turnId,
+			callRef: call.turnId,
+			resultRef: resultEntry.turnId,
+			activation: structuredClone(activation),
+			requestText,
+			content: structuredClone(content),
+			contentHash: skillContextContentHash(content),
+		});
+	}
+	const checkpoint = { version: 1 as const, skills };
+	return verifiedSkillContextCheckpoint(checkpoint) ? checkpoint : undefined;
 }
 
 function buildPreviousContextPrefix(previousContextText: string): string {
@@ -446,6 +617,12 @@ async function runSummaryStream(
 	let reported: Record<string, unknown> = {};
 	let outcome: CompactionCallObservation["outcome"] = "error";
 	try {
+		if (input.summarize) {
+			const response = await input.summarize({ systemPrompt, userText, maxTokens });
+			usage = response.usage;
+			outcome = "success";
+			return { text: response.text.trim(), usage };
+		}
 		// Summarization requests thinking off, as its resolver does. Bare stream
 		// infers an active level from model.reasoning and would undo that choice.
 		const events = streamSimple(
@@ -508,7 +685,36 @@ export async function compact(input: CompactInput): Promise<CompactResult> {
 	// in compaction.ts:619-628.
 	const prevCompactionIndex = findLatestCompactionIndex(entries);
 	const boundaryStart = prevCompactionIndex + 1;
-	const protectedStart = findLatestSkillActivationProtectionStart(entries, boundaryStart);
+	const selection =
+		input.skillContextState === null ? undefined : (input.skillContextState ?? latestSkillContextState(input.entries));
+	let skillContext = captureSkillContext(input.entries, selection);
+	const priorCheckpoint = entries[prevCompactionIndex];
+	// A typed checkpoint is not regenerated from summary prose. Failure to verify
+	// its original receipts prevents another destructive pass.
+	if (priorCheckpoint?.kind === "compactionSummary" && priorCheckpoint.skillContext !== undefined && !skillContext) {
+		throw new Error("cannot verify preserved skill context; retaining the existing checkpoint");
+	}
+	if (priorCheckpoint?.kind === "compactionSummary" && priorCheckpoint.skillContext !== undefined) {
+		if (!verifiedSkillContextCheckpoint(priorCheckpoint.skillContext))
+			throw new Error("invalid preserved skill checkpoint");
+		for (const previous of priorCheckpoint.skillContext.skills) {
+			const current = skillContext?.skills.find((skill) => skill.activationRef === previous.activationRef);
+			if (current && JSON.stringify(current) !== JSON.stringify(previous)) {
+				throw new Error("preserved skill context no longer matches its captured receipt");
+			}
+		}
+	}
+	if (skillContext && priorCheckpoint?.kind === "compactionSummary" && priorCheckpoint.skillContext) {
+		skillContext = {
+			version: 1,
+			skills: skillContext.skills.map((skill) =>
+				structuredClone(
+					priorCheckpoint.skillContext?.skills.find((previous) => previous.activationRef === skill.activationRef) ?? skill,
+				),
+			),
+		};
+	}
+	const protectedStart = skillContext ? null : findLatestSkillActivationProtectionStart(entries, 0);
 	const usageStart = prevCompactionIndex >= 0 ? prevCompactionIndex : 0;
 	const usageEntries = entries.slice(usageStart);
 	const lastUsage = getLastAssistantUsage(usageEntries);
@@ -571,6 +777,8 @@ export async function compact(input: CompactInput): Promise<CompactResult> {
 
 	// A generated split summary is not a reliable copy of the active request.
 	// Keep it in the canonical checkpoint so live replay and resume agree.
+	let userContext: PreservedUserContext | undefined =
+		priorCheckpoint?.kind === "compactionSummary" ? priorCheckpoint.userContext : undefined;
 	const activeUser = entries
 		.slice(0, cut.firstKeptEntryIndex)
 		.find((entry) => entry.turnId === input.preserveUserTurnId && entry.kind === "message" && entry.role === "user");
@@ -585,7 +793,7 @@ export async function compact(input: CompactInput): Promise<CompactResult> {
 				: "text" in payload && typeof payload.text === "string"
 					? payload.text
 					: null;
-		if (text !== null) summaryParts.push(`Active user instructions (verbatim):\n${text}`);
+		if (text !== null) userContext = { turnId: activeUser.turnId, text };
 	}
 
 	const summary = `${summaryParts.join("\n\n---\n\n").trim()}${formatFileOperations(fileOps)}${formatRecallableRefs(
@@ -602,6 +810,8 @@ export async function compact(input: CompactInput): Promise<CompactResult> {
 		messagesSummarized: pre.length + turnPrefix.length,
 		isSplitTurn: cut.isSplitTurn,
 		...(usage !== undefined ? { usage } : {}),
+		...(skillContext !== undefined ? { skillContext } : {}),
+		...(userContext !== undefined ? { userContext } : {}),
 	};
 }
 

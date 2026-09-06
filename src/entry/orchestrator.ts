@@ -160,7 +160,6 @@ import type { CompactionCallObservation } from "../domains/session/compaction/co
 import { type CompactInput, type CompactResult, compact } from "../domains/session/compaction/compact.js";
 import { collectSessionEntries } from "../domains/session/compaction/session-entries.js";
 import { estimateTokens } from "../domains/session/compaction/tokens.js";
-import { ceilChars } from "../domains/session/context-accounting.js";
 import type { SessionContract, SessionMeta } from "../domains/session/contract.js";
 import { activeDecisionRefs, createDecisionBoardStore } from "../domains/session/decision-board.js";
 import type { CompactionSummaryEntry, CompactionTrigger, SessionEntry } from "../domains/session/entries.js";
@@ -795,7 +794,8 @@ async function runCompactionFlow(
 	instructions?: string,
 	trigger?: CompactionTrigger,
 	observability?: BackgroundMemoryUsageSink,
-	budget?: Pick<CompactInput, "keepRecentTokens" | "preserveUserTurnId">,
+	budget?: Pick<CompactInput, "keepRecentTokens" | "preserveUserTurnId" | "skillContextState">,
+	summarize?: CompactInput["summarize"],
 ): Promise<CompactResult | null> {
 	const meta = session.current();
 	if (!meta) {
@@ -844,6 +844,7 @@ async function runCompactionFlow(
 		result = await compact({
 			entries,
 			...budget,
+			...(summarize ? { summarize } : {}),
 			onCall: (call) => calls.push(call),
 			model: resolved.model,
 			...(systemPrompt !== undefined ? { systemPrompt } : {}),
@@ -879,6 +880,8 @@ async function runCompactionFlow(
 		turnId: randomUUID(),
 		parentTurnId: result.firstKeptTurnId ?? null,
 		summary: result.summary,
+		...(result.skillContext ? { skillContext: result.skillContext } : {}),
+		...(result.userContext ? { userContext: result.userContext } : {}),
 		tokensBefore: result.tokensBefore,
 		firstKeptTurnId: result.firstKeptTurnId ?? "",
 		messagesSummarized: result.messagesSummarized,
@@ -942,21 +945,28 @@ export function createProductionAutoCompact(
 	getSettings: () => ClioSettings,
 	providers: ProvidersContract,
 	observability?: BackgroundMemoryUsageSink,
+	summarize?: CompactInput["summarize"],
 ): (
 	instructions?: string,
 	trigger?: CompactionTrigger,
-	budget?: Pick<CompactInput, "keepRecentTokens" | "preserveUserTurnId">,
+	budget?: Pick<CompactInput, "keepRecentTokens" | "preserveUserTurnId" | "skillContextState">,
 ) => Promise<CompactResult | null> {
 	return (instructions, trigger, budget) =>
-		runCompactionFlow(session, getSettings(), providers, instructions, trigger, observability, budget);
+		runCompactionFlow(session, getSettings(), providers, instructions, trigger, observability, budget, summarize);
 }
 
-function estimateTokensFromSummary(summary: string): number {
-	// Mirrors the rough byte/4 heuristic the rest of the compaction stack
-	// uses for unmeasured payloads. Kept inline because this is the only
-	// caller; pi-mono's token estimator is provider-specific and we do not
-	// have a model handle at the persistence layer.
-	return Math.max(1, ceilChars(summary.length));
+function estimateTokensFromSummary(result: CompactResult): number {
+	return estimateTokens({
+		kind: "compactionSummary",
+		turnId: "estimate",
+		parentTurnId: null,
+		timestamp: "",
+		summary: result.summary,
+		firstKeptTurnId: result.firstKeptTurnId ?? "",
+		tokensBefore: result.tokensBefore,
+		...(result.skillContext ? { skillContext: result.skillContext } : {}),
+		...(result.userContext ? { userContext: result.userContext } : {}),
+	});
 }
 
 /**
@@ -979,7 +989,7 @@ function estimateTokensFromSummary(summary: string): number {
 function estimateTokensAfterCompaction(entries: ReadonlyArray<SessionEntry>, result: CompactResult): number {
 	let droppedTokens = 0;
 	for (const entry of entries.slice(0, result.firstKeptEntryIndex)) droppedTokens += estimateTokens(entry);
-	const summaryTokens = estimateTokensFromSummary(result.summary);
+	const summaryTokens = estimateTokensFromSummary(result);
 	// The summary alone is the floor: a session whose dropped estimate exceeds
 	// the measured anchor must not report a negative or sub-summary context.
 	return Math.max(summaryTokens, result.tokensBefore - droppedTokens + summaryTokens);

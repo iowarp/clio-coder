@@ -1,0 +1,416 @@
+import { deepStrictEqual, doesNotMatch, ok, rejects, strictEqual } from "node:assert/strict";
+import { describe, it } from "node:test";
+import { DEFAULT_SETTINGS } from "../../src/core/defaults.js";
+import { foldWorkingSet } from "../../src/domains/context/working-set/fold.js";
+import { resolveRecall } from "../../src/domains/context/working-set/recall.js";
+import type { ProvidersContract } from "../../src/domains/providers/contract.js";
+import { type CompactResult, captureSkillContext, compact } from "../../src/domains/session/compaction/compact.js";
+import { estimateTokens } from "../../src/domains/session/compaction/tokens.js";
+import {
+	isSessionEntry,
+	mainSkillContextState,
+	type SessionEntry,
+	SKILL_CONTEXT_STATE,
+	type SkillContextState,
+	verifiedSkillContextCheckpoint,
+} from "../../src/domains/session/entries.js";
+import { filterEntriesToActivePath } from "../../src/domains/session/tree/active-path.js";
+import type { EngineModel } from "../../src/engine/types.js";
+import { buildModelReplayAgentMessagesFromTurns } from "../../src/interactive/model-session-replay.js";
+import { createTurnContext } from "../../src/interactive/turn-context.js";
+import type { TurnMiddleware } from "../../src/interactive/turn-middleware.js";
+import { type AgentRuntime, createTurnState } from "../../src/interactive/turn-state.js";
+
+const timestamp = "2026-09-06T00:00:00.000Z";
+const model = {
+	id: "source",
+	name: "source",
+	api: "openai-completions",
+	provider: "source",
+	baseUrl: "https://source.invalid",
+	reasoning: false,
+	input: ["text"],
+	contextWindow: 32768,
+	maxTokens: 8192,
+	cost: { input: 0, output: 0, cacheRead: 0, cacheWrite: 0 },
+} as EngineModel;
+const summarize = async () => ({
+	text: "Progress checkpoint intentionally omitting every skill and task instruction.",
+});
+const selection: SkillContextState = { version: 1, activationRefs: ["activation"] };
+function message(
+	turnId: string,
+	role: "user" | "assistant" | "tool_call" | "tool_result",
+	payload: unknown,
+	parentTurnId: string | null,
+): SessionEntry {
+	return { kind: "message", turnId, parentTurnId, timestamp, role, payload };
+}
+function history(body = `Complete historical skill\r\n${"instruction ".repeat(2400)}END_SKILL`) {
+	const activation = {
+		name: "diagram",
+		filePath: "/historical/SKILL.md",
+		hash: "a".repeat(64),
+		source: "clio-coder",
+		sourceOrigin: "project",
+		triggeredBy: "tool" as const,
+		turnId: "request",
+		drift: "match" as const,
+	};
+	const entries: SessionEntry[] = [
+		message("request", "user", { text: "[Skill request] diagram", operatorText: "" }, null),
+		message(
+			"assistant",
+			"assistant",
+			{ content: [{ type: "toolCall", id: "load", name: "context", arguments: { scope: "skills", name: "diagram" } }] },
+			"request",
+		),
+		message(
+			"call",
+			"tool_call",
+			{ toolCallId: "load", name: "context", args: { scope: "skills", name: "diagram" } },
+			"assistant",
+		),
+		{ kind: "skillActivation", turnId: "activation", parentTurnId: "request", timestamp, activation },
+		message(
+			"result",
+			"tool_result",
+			{
+				toolCallId: "load",
+				toolName: "context",
+				isError: false,
+				outcome: "ok",
+				resultSummary: { bytes: Buffer.byteLength(body), truncated: false },
+				result: {
+					content: [{ type: "text", text: body }],
+					details: {
+						kind: "ok",
+						name: "diagram",
+						path: activation.filePath,
+						hash: activation.hash,
+						source: activation.source,
+						sourceOrigin: "project",
+						scope: "project",
+						sourceInfo: { path: activation.filePath, scope: "project", source: "project" },
+						drift: "match",
+						observation: { truncated: false, shownBytes: Buffer.byteLength(body), totalBytes: Buffer.byteLength(body) },
+					},
+				},
+			},
+			"call",
+		),
+		message(
+			"task",
+			"user",
+			{ text: "transient wrapper", operatorText: "Map the real source.\r\nPreserve this exact task." },
+			"result",
+		),
+		message(
+			"work",
+			"assistant",
+			{ text: "read evidence ".repeat(2400), usage: { input: 32000, output: 100, totalTokens: 32100 } },
+			"task",
+		),
+		message("tail", "assistant", { text: "Recent work" }, "work"),
+	];
+	return { entries, body };
+}
+function checkpoint(result: CompactResult, id: string): SessionEntry {
+	return {
+		kind: "compactionSummary",
+		turnId: id,
+		parentTurnId: result.firstKeptTurnId,
+		timestamp,
+		summary: result.summary,
+		firstKeptTurnId: result.firstKeptTurnId ?? "",
+		tokensBefore: result.tokensBefore,
+		...(result.skillContext ? { skillContext: result.skillContext } : {}),
+		...(result.userContext ? { userContext: result.userContext } : {}),
+	};
+}
+const run = (entries: SessionEntry[], skillContextState?: SkillContextState) =>
+	compact({
+		entries,
+		model,
+		summarize,
+		keepRecentTokens: 100,
+		preserveUserTurnId: "task",
+		...(skillContextState ? { skillContextState } : {}),
+	});
+
+describe("typed historical skill checkpoints (pure source)", () => {
+	it("retains exact instructions through two checkpoints, fresh replay, raw usage and recall", async () => {
+		const { entries, body } = history();
+		const original = JSON.stringify(entries);
+		const result = await run(entries, selection);
+		ok(result.messagesSummarized > 0);
+		strictEqual(result.skillContext?.skills[0]?.content[0]?.text, body);
+		strictEqual(result.userContext?.text, "Map the real source.\r\nPreserve this exact task.");
+		const first = checkpoint(result, "checkpoint1");
+		ok(isSessionEntry(first));
+		const once = [...entries, first];
+		const replay = buildModelReplayAgentMessagesFromTurns(once);
+		ok(JSON.stringify(replay).includes("END_SKILL"), "preserved body bypasses the 20000-character summary cap");
+		deepStrictEqual(buildModelReplayAgentMessagesFromTurns(JSON.parse(JSON.stringify(once))), replay);
+		const grown = [
+			...once,
+			message("more", "assistant", { text: "new evidence ".repeat(3000) }, "tail"),
+			message("more2", "assistant", { text: "later evidence ".repeat(3000) }, "more"),
+			message("end", "assistant", { text: "Newest" }, "more2"),
+		];
+		const second = await run(grown);
+		deepStrictEqual(second.skillContext, result.skillContext, "activation before prior summary boundary remains exact");
+		const twice = [...grown, checkpoint(second, "checkpoint2")];
+		const restarted = buildModelReplayAgentMessagesFromTurns(JSON.parse(JSON.stringify(twice)));
+		strictEqual(JSON.stringify(restarted).split("END_SKILL").length - 1, 1);
+		strictEqual(JSON.stringify(entries), original);
+		ok(estimateTokens(first) > body.length / 4);
+		const recall = resolveRecall(twice, foldWorkingSet(twice), "result");
+		ok(recall.ok);
+		strictEqual(recall.result.body, body);
+	});
+
+	it("accepts old ledgers and strictly rejects malformed new checkpoint/state data", async () => {
+		const { entries } = history();
+		const row = checkpoint(await run(entries, selection), "checkpoint");
+		ok(isSessionEntry(row));
+		const old = { ...row } as Record<string, unknown>;
+		delete old.skillContext;
+		ok(isSessionEntry(old));
+		for (const value of [null, {}, { version: 2, skills: [] }, { version: 1, skills: [null] }])
+			strictEqual(isSessionEntry({ ...row, skillContext: value }), false);
+		const invalid = structuredClone(row);
+		ok(invalid.kind === "compactionSummary" && invalid.skillContext);
+		const firstBlock = invalid.skillContext.skills[0]?.content[0];
+		ok(firstBlock);
+		firstBlock.text += "tampered";
+		strictEqual(isSessionEntry(invalid), true);
+		strictEqual(verifiedSkillContextCheckpoint(invalid.skillContext), false);
+		doesNotMatch(JSON.stringify(buildModelReplayAgentMessagesFromTurns([...entries, invalid])), /END_SKILL/);
+		const state = {
+			kind: "custom",
+			turnId: "off",
+			parentTurnId: "tail",
+			timestamp,
+			customType: SKILL_CONTEXT_STATE,
+			data: { version: 1, activationRefs: [] },
+		};
+		ok(isSessionEntry(state));
+		for (const data of [null, {}, { version: 1, activationRefs: [1] }])
+			strictEqual(isSessionEntry({ ...state, data }), false);
+	});
+
+	it("keeps protection with unknown, incomplete, ambiguous, mismatched or worker evidence", async () => {
+		const mutations: Array<(entries: SessionEntry[]) => void> = [
+			(entries) => {
+				entries.splice(4, 1);
+			},
+			(entries) => {
+				const entry = entries[4];
+				ok(entry);
+				entries.splice(5, 0, { ...structuredClone(entry), turnId: "duplicate-result" });
+			},
+			(entries) => {
+				const entry = entries[3];
+				ok(entry);
+				if (entry.kind === "skillActivation") entry.activation.runId = "worker";
+			},
+			(entries) => {
+				const entry = entries[3];
+				ok(entry);
+				if (entry.kind === "skillActivation") entry.activation.hash = "b".repeat(64);
+			},
+			(entries) => {
+				const entry = entries[3];
+				ok(entry);
+				if (entry.kind === "skillActivation") entry.activation.drift = "mismatch";
+			},
+			(entries) => {
+				const entry = entries[4];
+				ok(entry);
+				if (entry.kind === "message")
+					(
+						entry.payload as { result: { details: { observation: { truncated: boolean } } } }
+					).result.details.observation.truncated = true;
+			},
+			(entries) => {
+				const entry = entries[4];
+				ok(entry);
+				if (entry.kind === "message")
+					(entry.payload as { result: { details: { sourceOrigin: string } } }).result.details.sourceOrigin = "foreign";
+			},
+		];
+		strictEqual((await run(history().entries)).messagesSummarized, 0);
+		for (const mutate of mutations) {
+			const { entries } = history();
+			mutate(entries);
+			strictEqual(captureSkillContext(entries, selection), undefined);
+			strictEqual((await run(entries, selection)).messagesSummarized, 0);
+		}
+	});
+
+	it("does not promote checkpoint instructions after off/replacement or on a sibling branch", async () => {
+		const { entries } = history();
+		const first = checkpoint(await run(entries, selection), "checkpoint");
+		for (const activationRefs of [[], ["replacement"]]) {
+			const state: SessionEntry = {
+				kind: "custom",
+				turnId: "state",
+				parentTurnId: "tail",
+				timestamp,
+				customType: SKILL_CONTEXT_STATE,
+				data: { version: 1, activationRefs },
+			};
+			const replay = buildModelReplayAgentMessagesFromTurns([...entries, first, state]);
+			doesNotMatch(JSON.stringify(replay), /END_SKILL/);
+			deepStrictEqual(
+				buildModelReplayAgentMessagesFromTurns(JSON.parse(JSON.stringify([...entries, first, state]))),
+				replay,
+			);
+		}
+		const fork = [...entries, first, message("sibling", "user", { text: "Independent branch" }, "request")];
+		doesNotMatch(
+			JSON.stringify(buildModelReplayAgentMessagesFromTurns(fork, { activeLeafTurnId: "sibling" })),
+			/END_SKILL/,
+		);
+		strictEqual(captureSkillContext(filterEntriesToActivePath(fork, "sibling"), selection), undefined);
+	});
+
+	it("uses authoritative state, refuses pending replacement, and retires same-name old receipts", async () => {
+		const { entries } = history();
+		strictEqual(mainSkillContextState(entries, undefined), undefined);
+		const policy = {
+			allowedSkillNames: ["diagram"],
+			requests: [{ name: "diagram", args: "", source: "slash-command" as const, installed: true }],
+			loadedSkillNames: new Set(["diagram"]),
+			loadedSkillPolicies: new Map([["diagram", { allowedTools: ["read"] }]]),
+		};
+		deepStrictEqual(mainSkillContextState(entries, policy), selection);
+		strictEqual(mainSkillContextState(entries, { ...policy, loadedSkillNames: new Set() }), null);
+		const replacement: SessionEntry[] = JSON.parse(
+			JSON.stringify(history("REPLACED_WORKFLOW").entries),
+			(key, value: unknown) =>
+				key !== "role" &&
+				typeof value === "string" &&
+				["request", "assistant", "call", "activation", "result", "task", "work", "tail", "load"].includes(value)
+					? `new-${value}`
+					: value,
+		);
+		const first = replacement[0];
+		ok(first);
+		first.parentTurnId = "tail";
+		const combined = [...entries, ...replacement];
+		strictEqual(captureSkillContext(combined, selection), undefined);
+		const next = captureSkillContext(combined, { version: 1, activationRefs: ["new-activation"] });
+		strictEqual(next?.skills[0]?.content[0]?.text, "REPLACED_WORKFLOW");
+	});
+
+	it("rejects masked, partial, byte-mismatched and tampered evidence without bricking replay", async () => {
+		for (const change of ["mask", "partial", "bytes", "observation"] as const) {
+			const { entries } = history();
+			const entry = entries[4];
+			ok(entry?.kind === "message");
+			const payload = entry.payload as {
+				resultSummary: { bytes: number; truncated: boolean };
+				result: { details: { contextCompaction?: unknown; observation: { totalBytes: number } } };
+			};
+			if (change === "mask") payload.result.details.contextCompaction = { masked: true };
+			if (change === "partial") payload.resultSummary.truncated = true;
+			if (change === "bytes") payload.resultSummary.bytes--;
+			if (change === "observation") payload.result.details.observation.totalBytes++;
+			strictEqual(captureSkillContext(entries, selection), undefined);
+			strictEqual((await run(entries, selection)).messagesSummarized, 0);
+		}
+		const { entries } = history();
+		const result = await run(entries, selection);
+		const row = checkpoint(result, "checkpoint");
+		const raw = entries[4];
+		ok(raw?.kind === "message");
+		const content = (raw.payload as { result: { content: Array<{ text: string }> } }).result.content[0];
+		ok(content);
+		content.text = `X${content.text.slice(1)}`;
+		doesNotMatch(JSON.stringify(buildModelReplayAgentMessagesFromTurns([...entries, row])), /END_SKILL/);
+		const grown = [
+			...entries,
+			row,
+			message("one", "assistant", { text: "evidence ".repeat(3000) }, "tail"),
+			message("two", "assistant", { text: "more ".repeat(3000) }, "one"),
+		];
+		await rejects(run(grown), /no longer matches/);
+	});
+
+	it("keeps typed operator instructions after a long summary and out of subsequent summary input", async () => {
+		const { entries } = history();
+		let calls = 0;
+		const result = await compact({
+			entries,
+			model,
+			keepRecentTokens: 100,
+			preserveUserTurnId: "task",
+			skillContextState: selection,
+			summarize: async () => ({ text: ++calls === 1 ? "summary ".repeat(3000) : "Short second summary" }),
+		});
+		const row = checkpoint(result, "long");
+		const replay = JSON.stringify(buildModelReplayAgentMessagesFromTurns([...entries, row]));
+		ok(replay.includes(JSON.stringify("Map the real source.\r\nPreserve this exact task.").slice(1, -1)));
+		const grown = [
+			...entries,
+			row,
+			message("one", "assistant", { text: "evidence ".repeat(3000) }, "tail"),
+			message("two", "assistant", { text: "more ".repeat(3000) }, "one"),
+		];
+		const second = await compact({
+			entries: grown,
+			model,
+			keepRecentTokens: 100,
+			preserveUserTurnId: "task",
+			summarize: async ({ userText }) => {
+				doesNotMatch(userText, /END_SKILL/);
+				return { text: "omits all instructions" };
+			},
+		});
+		deepStrictEqual(second.skillContext, result.skillContext);
+		deepStrictEqual(second.userContext, result.userContext);
+	});
+
+	it("leaves the real continuation guard enforced if exact preservation cannot fit", async () => {
+		const { entries } = history("oversized exact instructions ".repeat(6000));
+		entries.push(message("read-call", "tool_call", { toolCallId: "read", name: "read", args: { path: "x" } }, "tail"));
+		entries.push(
+			message(
+				"read-result",
+				"tool_result",
+				{ toolCallId: "read", toolName: "read", result: { content: [{ type: "text", text: "last observation" }] } },
+				"read-call",
+			),
+		);
+		const state = createTurnState("off");
+		state.activeUserTurnId = "task";
+		state.lastTurnId = "read-result";
+		const runtime = {
+			targetId: "source",
+			runtimeId: "source",
+			wireModelId: "source",
+			runtimeResolution: { contextWindowDetails: { effectiveContextWindow: 32768 } },
+			agent: { state: { systemPrompt: "System", tools: [], messages: [], model, thinkingLevel: "off" } },
+		} as unknown as AgentRuntime;
+		state.runtime = runtime;
+		const settings = structuredClone(DEFAULT_SETTINGS);
+		const context = createTurnContext({
+			state,
+			getSettings: () => settings,
+			providers: {} as ProvidersContract,
+			readSessionEntries: () => entries,
+			middleware: { fireCompactionHook: () => {} } as unknown as TurnMiddleware,
+			emitNotice: () => {},
+			autoCompact: async () => {
+				const result = await run(entries, selection);
+				entries.push(checkpoint(result, "oversized"));
+				return result;
+			},
+		});
+		context.refreshAgentMessagesFromSession(runtime);
+		await rejects(context.postToolContinuationGuard(runtime), /post-tool context guard stopped continuation/);
+		ok(context.liveContextEstimate(runtime).tokens > 32768);
+	});
+});

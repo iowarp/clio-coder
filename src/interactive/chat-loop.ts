@@ -50,9 +50,16 @@ import type { ContextSnapshot, ContextUsageSnapshot } from "../domains/session/c
 import { ceilChars, snapshotInputTokens } from "../domains/session/context-accounting.js";
 import type { ContextLedger } from "../domains/session/context-ledger.js";
 import type { SessionContract } from "../domains/session/contract.js";
-import type { CompactionTrigger, SessionEntry } from "../domains/session/entries.js";
+import {
+	type CompactionTrigger,
+	latestSkillContextState,
+	mainSkillContextState,
+	type SessionEntry,
+	SKILL_CONTEXT_STATE,
+} from "../domains/session/entries.js";
 import { protectedArtifactStateFromSessionEntries } from "../domains/session/protected-artifacts.js";
 import { isRetryableErrorMessage, type RetrySettings } from "../domains/session/retry.js";
+import { filterEntriesToActivePath } from "../domains/session/tree/active-path.js";
 import { createEngineAgent } from "../engine/agent.js";
 import { resolveReservedOutputTokens } from "../engine/apis/output-budget.js";
 import { cwdHash } from "../engine/session.js";
@@ -653,10 +660,33 @@ export function createChatLoop(deps: CreateChatLoopDeps): ChatLoop {
 	 * line back when it lifts; the skill-activation ledger entry already
 	 * records provenance, so this is the notice, not a second UI.
 	 */
-	const armSkillSurface = (policy: PendingSkillToolPolicy | undefined, loadedBefore?: ReadonlySet<string>): void => {
+	const armSkillSurface = (
+		policy: PendingSkillToolPolicy | undefined,
+		loadedBefore?: ReadonlySet<string>,
+		explicitOff = false,
+	): void => {
 		const previous = skillSurfaceNames(state.activeSkillSurface).join(", ");
 		const next = armedSkillSurface(policy);
 		const current = skillSurfaceNames(next).join(", ");
+		if (
+			deps.session?.current() &&
+			(explicitOff ||
+				previous.length > 0 ||
+				(policy?.loadedSkillNames.size ?? 0) > 0 ||
+				(policy?.requests.length ?? 0) > 0)
+		) {
+			const entries = filterEntriesToActivePath(deps.readSessionEntries?.() ?? [], state.lastTurnId ?? undefined);
+			const selection = next
+				? mainSkillContextState(entries, next)
+				: (policy?.loadedSkillNames.size ?? 0) > 0
+					? null
+					: { version: 1 as const, activationRefs: [] };
+			const data = selection ?? { version: 1 as const, activationRefs: [], unknown: true as const };
+			if (JSON.stringify(data) !== JSON.stringify(latestSkillContextState(entries))) {
+				// Persist before changing live state: restart must not resurrect a cleared/replaced skill.
+				deps.session.appendEntry({ kind: "custom", customType: SKILL_CONTEXT_STATE, parentTurnId: state.lastTurnId, data });
+			}
+		}
 		state.activeSkillSurface = next;
 		const activated = skillSurfaceLabels(policy).filter((label) => !loadedBefore?.has(label.split(" ")[0] ?? label));
 		if (activated.length > 0) {
@@ -1011,7 +1041,7 @@ export function createChatLoop(deps: CreateChatLoopDeps): ChatLoop {
 		interruptRefusal: () => (state.streaming ? interruptRefusalReason() : null),
 		clearSkillSurface: () => {
 			const cleared = skillSurfaceNames(state.activeSkillSurface);
-			armSkillSurface(undefined);
+			armSkillSurface(undefined, undefined, true);
 			return cleared;
 		},
 		clearQueuedFollowUps: () => queues.clearQueuedMirror().map((entry) => entry.text),
@@ -1149,7 +1179,7 @@ export function createChatLoop(deps: CreateChatLoopDeps): ChatLoop {
 			const forceNow = process.env.CLIO_CODER_FORCE_COMPACT === "1";
 			try {
 				setTurnPreparation("compacting");
-				await context.runAutoCompact(agentRuntime, forceNow, undefined, undefined, submittedText);
+				await context.runAutoCompact(agentRuntime, forceNow, undefined, undefined, submittedText, pendingSkillPolicy);
 			} catch (err) {
 				emitNotice(`[Clio Coder] auto-compaction failed: ${err instanceof Error ? err.message : String(err)}`);
 			} finally {
@@ -1196,7 +1226,7 @@ export function createChatLoop(deps: CreateChatLoopDeps): ChatLoop {
 				);
 				setTurnPreparation("compacting");
 				const compacted = await context
-					.runAutoCompact(agentRuntime, true, undefined, undefined, submittedText)
+					.runAutoCompact(agentRuntime, true, undefined, undefined, submittedText, pendingSkillPolicy)
 					.finally(endPreparationCompaction);
 				if (!compacted) {
 					emitNotice(

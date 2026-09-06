@@ -14,7 +14,9 @@
  *     evidence builders but has no in-tree producer.
  */
 
-import { isSkillActivation, type SkillActivation } from "../../core/skill-activation.js";
+import { createHash } from "node:crypto";
+
+import { isSkillActivation, type PendingSkillToolPolicy, type SkillActivation } from "../../core/skill-activation.js";
 import type { ClioTurnRecord } from "../../engine/session.js";
 import { AUTONOMY_EXPOSURES, type AutonomyExposure } from "../safety/autonomy.js";
 
@@ -119,8 +121,148 @@ export interface CompactionUsage {
 	apiCalls: number;
 }
 
+/** Exact historical skill context, independent of generated checkpoint prose. */
+export interface PreservedSkillContext {
+	activationRef: string;
+	requestRef: string;
+	callRef: string;
+	resultRef: string;
+	activation: SkillActivation;
+	requestText: string;
+	content: Array<{ type: "text"; text: string }>;
+	/** Hash of the captured rendered text blocks, not the raw SKILL.md hash. */
+	contentHash: string;
+}
+
+export interface SkillContextCheckpoint {
+	version: 1;
+	skills: PreservedSkillContext[];
+}
+
+export const SKILL_CONTEXT_STATE = "skillContextState";
+export interface SkillContextState {
+	version: 1;
+	/** Empty is an explicit off/replacement; absence is unknown legacy state. */
+	activationRefs: string[];
+	unknown?: true;
+}
+
+export function skillContextContentHash(content: PreservedSkillContext["content"]): string {
+	return createHash("sha256").update(JSON.stringify(content)).digest("hex");
+}
+
+export function isSkillContextState(value: unknown): value is SkillContextState {
+	return (
+		isRecord(value) &&
+		value.version === 1 &&
+		(value.unknown === undefined || value.unknown === true) &&
+		Array.isArray(value.activationRefs) &&
+		value.activationRefs.every((ref) => typeof ref === "string")
+	);
+}
+
+/** Ledger validation is structural; bad evidence must not make the session unreadable. */
+export function isSkillContextCheckpoint(value: unknown): value is SkillContextCheckpoint {
+	return (
+		isRecord(value) &&
+		value.version === 1 &&
+		Array.isArray(value.skills) &&
+		value.skills.every(
+			(skill: unknown) =>
+				isRecord(skill) &&
+				[skill.activationRef, skill.requestRef, skill.callRef, skill.resultRef, skill.requestText, skill.contentHash].every(
+					isString,
+				) &&
+				isSkillActivation(skill.activation) &&
+				Array.isArray(skill.content) &&
+				skill.content.every((block: unknown) => isRecord(block) && block.type === "text" && typeof block.text === "string"),
+		)
+	);
+}
+
+export function verifiedSkillContextCheckpoint(value: unknown): value is SkillContextCheckpoint {
+	if (!isSkillContextCheckpoint(value)) return false;
+	const refs = new Set<string>();
+	const names = new Set<string>();
+	return value.skills.every((skill) => {
+		const activation = skill.activation;
+		if (
+			![skill.activationRef, skill.requestRef, skill.callRef, skill.resultRef].every((ref) => ref.length > 0) ||
+			activation.runId !== undefined ||
+			activation.triggeredBy !== "tool" ||
+			activation.turnId !== skill.requestRef ||
+			!activation.name ||
+			!activation.filePath ||
+			!activation.source ||
+			!activation.sourceOrigin ||
+			!/^[a-f0-9]{64}$/.test(activation.hash) ||
+			(activation.drift !== undefined && activation.drift !== "match") ||
+			skill.content.length === 0 ||
+			skill.content.every((block) => block.text.length === 0) ||
+			skill.contentHash !== skillContextContentHash(skill.content) ||
+			refs.has(skill.activationRef) ||
+			names.has(activation.name)
+		)
+			return false;
+		refs.add(skill.activationRef);
+		names.add(activation.name);
+		return true;
+	});
+}
+
+export interface PreservedUserContext {
+	turnId: string;
+	text: string;
+}
+function isPreservedUserContext(value: unknown): value is PreservedUserContext {
+	return isRecord(value) && isString(value.turnId) && isString(value.text);
+}
+
+/** Undefined means no live policy; null explicitly forbids reuse during an uncertain replacement. */
+export function mainSkillContextState(
+	entries: ReadonlyArray<SessionEntry>,
+	policy: PendingSkillToolPolicy | undefined,
+): SkillContextState | null | undefined {
+	if (!policy) return latestSkillContextState(entries);
+	if (policy.requests.some((request) => !policy.loadedSkillNames.has(request.name))) return null;
+	const names = [...policy.loadedSkillNames];
+	if (names.length === 0) return null;
+	const activationRefs: string[] = [];
+	for (const name of names) {
+		const entry = [...entries]
+			.reverse()
+			.find(
+				(candidate) =>
+					candidate.kind === "skillActivation" &&
+					candidate.activation.runId === undefined &&
+					candidate.activation.name === name,
+			);
+		if (!entry) return null;
+		activationRefs.push(entry.turnId);
+	}
+	return { version: 1, activationRefs };
+}
+
+/** Caller supplies an already selected branch. Never infer active skills from audit metadata. */
+export function latestSkillContextState(entries: ReadonlyArray<SessionEntry>): SkillContextState | undefined {
+	for (let index = entries.length - 1; index >= 0; index--) {
+		const entry = entries[index];
+		if (entry?.kind === "custom" && entry.customType === SKILL_CONTEXT_STATE) {
+			return isSkillContextState(entry.data) ? entry.data : undefined;
+		}
+		if (entry?.kind === "compactionSummary" && entry.skillContext !== undefined) {
+			return verifiedSkillContextCheckpoint(entry.skillContext)
+				? { version: 1, activationRefs: entry.skillContext.skills.map((skill) => skill.activationRef) }
+				: undefined;
+		}
+	}
+	return undefined;
+}
+
 export interface CompactionSummaryEntry extends BaseSessionEntry {
 	kind: "compactionSummary";
+	skillContext?: SkillContextCheckpoint;
+	userContext?: PreservedUserContext;
 	summary: string;
 	tokensBefore: number;
 	firstKeptTurnId: string;
@@ -631,7 +773,11 @@ export function isSessionEntry(value: unknown): value is SessionEntry {
 				isOptionalBoolean(v.excludeFromContext)
 			);
 		case "custom":
-			return isString(v.customType) && isOptionalBoolean(v.display);
+			return (
+				isString(v.customType) &&
+				isOptionalBoolean(v.display) &&
+				(v.customType !== SKILL_CONTEXT_STATE || isSkillContextState(v.data))
+			);
 		case "modelChange":
 			return isString(v.provider) && isString(v.modelId) && isOptionalString(v.target);
 		case "thinkingLevelChange":
@@ -651,7 +797,9 @@ export function isSessionEntry(value: unknown): value is SessionEntry {
 				(v.trigger === undefined || isOneOf(v.trigger, COMPACTION_TRIGGERS)) &&
 				isOptionalNumber(v.tokensAfter) &&
 				isOptionalNumber(v.messagesSummarized) &&
-				isOptionalBoolean(v.isSplitTurn)
+				isOptionalBoolean(v.isSplitTurn) &&
+				(v.skillContext === undefined || isSkillContextCheckpoint(v.skillContext)) &&
+				(v.userContext === undefined || isPreservedUserContext(v.userContext))
 			);
 		case "sessionInfo":
 			return isOptionalString(v.name) && isOptionalString(v.targetTurnId) && isOptionalString(v.label);

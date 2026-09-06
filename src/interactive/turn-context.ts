@@ -24,6 +24,7 @@ import {
 import type { ClioSettings } from "../core/config.js";
 import type { SafeEventBus } from "../core/event-bus.js";
 import { residencyTargetKey } from "../core/residency-target-key.js";
+import type { PendingSkillToolPolicy } from "../core/skill-activation.js";
 import type { ToolName } from "../core/tool-names.js";
 import { buildEvictionFields, planEviction } from "../domains/context/working-set/engine.js";
 import { foldWorkingSet } from "../domains/context/working-set/fold.js";
@@ -75,13 +76,14 @@ import {
 	type PromptCacheStats,
 } from "../domains/session/context-ledger.js";
 import type { SessionContract } from "../domains/session/contract.js";
-import type { CompactionTrigger, SessionEntry } from "../domains/session/entries.js";
+import { type CompactionTrigger, mainSkillContextState, type SessionEntry } from "../domains/session/entries.js";
 import {
 	appendPromptCompileRecord,
 	PROMPT_MANIFEST_VERSION,
 	readPromptCompileRecords,
 	type SessionPromptCompileRecord,
 } from "../domains/session/prompt-manifest.js";
+import { filterEntriesToActivePath } from "../domains/session/tree/active-path.js";
 import { resolveReservedOutputTokens } from "../engine/apis/output-budget.js";
 import type { AgentMessage, Usage } from "../engine/types.js";
 import { resolveToolPromptHint, type ToolRegistry } from "../tools/registry.js";
@@ -112,7 +114,7 @@ export interface TurnContextDeps {
 		| ((
 				instructions?: string,
 				trigger?: CompactionTrigger,
-				budget?: Pick<CompactInput, "keepRecentTokens" | "preserveUserTurnId">,
+				budget?: Pick<CompactInput, "keepRecentTokens" | "preserveUserTurnId" | "skillContextState">,
 		  ) => Promise<CompactResult | null>)
 		| undefined;
 	/** Test seam for the eviction planner; production uses `planEviction` from the working-set engine. */
@@ -196,6 +198,7 @@ export interface TurnContext {
 		instructions?: string,
 		triggerOverride?: CompactionTrigger,
 		pendingUserText?: string,
+		pendingSkillPolicy?: PendingSkillToolPolicy,
 	): Promise<boolean>;
 	postToolContinuationGuard(
 		agentRuntime: AgentRuntime,
@@ -687,9 +690,14 @@ export function createTurnContext(deps: TurnContextDeps): TurnContext {
 		instructions?: string,
 		triggerOverride?: CompactionTrigger,
 		pendingUserText?: string,
+		pendingSkillPolicy?: PendingSkillToolPolicy,
 	): Promise<boolean> => {
 		if (!deps.readSessionEntries) return false;
 		const activeAutoTurnId = force ? null : state.activeUserTurnId;
+		const skillContextState = mainSkillContextState(
+			filterEntriesToActivePath(deps.readSessionEntries(), state.lastTurnId ?? undefined),
+			pendingSkillPolicy ?? state.currentPendingSkillPolicy ?? state.activeSkillSurface,
+		);
 		const settings = deps.getSettings();
 		const cfg = settings.context.compaction;
 		const autoEnabled = cfg?.auto !== false;
@@ -719,6 +727,7 @@ export function createTurnContext(deps: TurnContextDeps): TurnContext {
 									thinkingLevel: agentRuntime.agent.state.thinkingLevel,
 								},
 								pendingUserText,
+								skillContextState,
 								estimate: pressureEstimate,
 								compaction: cfg,
 								workingSet: settings.context.workingSet,
@@ -949,7 +958,8 @@ export function createTurnContext(deps: TurnContextDeps): TurnContext {
 			compactionThreshold,
 			snapshotMetadata,
 		);
-		let budget: Pick<CompactInput, "keepRecentTokens" | "preserveUserTurnId"> | undefined;
+		let budget: Pick<CompactInput, "keepRecentTokens" | "preserveUserTurnId" | "skillContextState"> | undefined =
+			skillContextState !== undefined ? { skillContextState } : undefined;
 		if (!force) {
 			const estimate = liveContextEstimate(agentRuntime, pendingUserText);
 			const output = Math.min(
@@ -967,6 +977,7 @@ export function createTurnContext(deps: TurnContextDeps): TurnContext {
 			// structural, so the unchanged continuation guard verifies the result.
 			const historyBudget = inputTarget - staticTokens - estimate.breakdown.pendingUserTokens - calibration;
 			budget = {
+				...budget,
 				keepRecentTokens: Math.min(DEFAULT_KEEP_RECENT_TOKENS, Math.max(1, Math.floor(historyBudget / 2))),
 				...(activeAutoTurnId ? { preserveUserTurnId: activeAutoTurnId } : {}),
 			};

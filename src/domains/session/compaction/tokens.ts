@@ -62,7 +62,15 @@ function estimateCustom(entry: CustomEntry): number {
 }
 
 function estimateSummary(entry: BranchSummaryEntry | CompactionSummaryEntry): number {
-	return ceilChars(entry.summary.length);
+	let tokens = ceilChars(entry.summary.length);
+	if (entry.kind !== "compactionSummary") return tokens;
+	if (entry.userContext) tokens += ceilChars(entry.userContext.text.length + 40) + 4;
+	for (const skill of entry.skillContext?.skills ?? []) {
+		tokens += ceilChars(skill.requestText.length + 40) + 4;
+		tokens += ceilChars(JSON.stringify(skill.activation).length + 32) + 4;
+		for (const block of skill.content) tokens += ceilChars(block.text.length) + 4;
+	}
+	return tokens;
 }
 
 /**

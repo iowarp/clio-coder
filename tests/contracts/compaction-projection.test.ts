@@ -175,7 +175,7 @@ describe("compaction working-set provider boundary", () => {
 			const text = "No edits.\nRun Scout then dependent Documenter.";
 			user.payload = { text, ...(operatorText === undefined ? {} : { operatorText }) };
 			const result = await compact({ entries, model: model(), keepRecentTokens: 100000, preserveUserTurnId: user.turnId });
-			ok(result.summary.includes(`Active user instructions (verbatim):\n${text}`));
+			strictEqual(result.userContext?.text, text);
 		});
 	}
 
