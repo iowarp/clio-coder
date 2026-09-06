@@ -18,7 +18,10 @@ describe("read source-line pagination through the source tool API", () => {
 		scratch.cleanup();
 	});
 
-	async function read(content: string, args: { offset?: number; limit?: number; tail?: number } = {}) {
+	async function read(
+		content: string,
+		args: { offset?: number; limit?: number; tail?: number; line_numbers?: boolean } = {},
+	) {
 		const path = join(scratch.dir, "source.txt");
 		writeFileSync(path, content);
 		const result = await readTool.run({ path, ...args });
@@ -138,5 +141,97 @@ describe("read source-line pagination through the source tool API", () => {
 		ok(Buffer.byteLength(capped.body) <= 1024);
 		ok(!capped.body.includes("�"));
 		deepStrictEqual([capped.observation.shownCount, capped.observation.totalCount], [1, 3]);
+	});
+	it("labels the actual physical citation line after blank lines, with opt-in plain compatibility", async () => {
+		const content = Array.from({ length: 197 }, (_, index) =>
+			index === 170
+				? "text = re.sub(pattern, separator, text)"
+				: index === 173
+					? "text = re.sub(DUPLICATE_DASH_PATTERN, separator, text).strip(separator)"
+					: index % 3 === 0
+						? ""
+						: "source",
+		).join("\n");
+		const numbered = await read(content, { offset: 165, limit: 10, line_numbers: true });
+		match(numbered.body, /^171 \| text = re.sub\(pattern, separator, text\)$/m);
+		match(numbered.body, /^174 \| text = re.sub\(DUPLICATE_DASH_PATTERN/m);
+		strictEqual(numbered.observation.next, "offset=175 line_numbers=true");
+		strictEqual(numbered.observation.shownCount, 10);
+		const plain = await read(content, { offset: 165, limit: 10, line_numbers: false });
+		strictEqual(plain.body, `${content.split("\n").slice(164, 174).join("\n")}\n`);
+	});
+
+	it("numbers blank lines and preserves EOF terminators without a phantom source line", async () => {
+		for (const [content, expected] of [
+			["", ""],
+			["x", "1 | x"],
+			["x\n", "1 | x\n"],
+			["\n", "1 | \n"],
+			["x\n\n", "1 | x\n2 | \n"],
+		]) {
+			ok(content !== undefined && expected !== undefined);
+			for (const args of [{}, { tail: 10 }]) {
+				const result = await read(content, { ...args, line_numbers: true });
+				strictEqual(result.body, expected);
+				strictEqual(result.observation.truncated, false);
+				strictEqual(result.observation.shownBytes, Buffer.byteLength(expected));
+				strictEqual(result.observation.totalBytes, Buffer.byteLength(expected));
+			}
+		}
+	});
+
+	it("caps the numbered rendering and continues after complete physical lines", async () => {
+		const content = "\n".repeat(2002);
+		let offset = 1;
+		const seen: number[] = [];
+		while (offset <= 2002) {
+			const result = await read(content, { offset, line_numbers: true });
+			ok(Buffer.byteLength(result.body) <= 1024);
+			const lines = result.body.split("\n").filter((line) => line !== "");
+			strictEqual(lines.length, result.observation.shownCount);
+			for (const line of lines) seen.push(Number(line.split(" | ")[0]));
+			offset += result.observation.shownCount;
+			strictEqual(result.observation.next, offset <= 2002 ? `offset=${offset} line_numbers=true` : undefined);
+		}
+		deepStrictEqual(
+			seen,
+			Array.from({ length: 2002 }, (_, index) => index + 1),
+		);
+	});
+
+	it("keeps blank lines represented by a truncated raw join and accounts label bytes", async () => {
+		configureGuardrails({ readMaxBytes: 64 * 1024 });
+		const result = await read("\n".repeat(2002), { line_numbers: true });
+		strictEqual(result.observation.shownCount, 2000);
+		match(result.body, /2000 \| $/);
+		strictEqual(result.observation.next, "offset=2001 line_numbers=true");
+		const full = Array.from({ length: 2002 }, (_, index) => `${index + 1} | \n`).join("");
+		strictEqual(result.observation.totalBytes, Math.max(Buffer.byteLength(full), Buffer.byteLength(result.output)));
+	});
+
+	it("does not claim a complete citation when labels make a UTF-8 line exceed the cap", async () => {
+		for (const content of ["€".repeat(341), "€".repeat(400)]) {
+			const result = await read(content, { line_numbers: true });
+			match(result.output, /^1 \| €/u);
+			match(result.output, /\[line truncated\]/);
+			ok(!result.output.includes("�"));
+			strictEqual(result.observation.shownCount, 0);
+			strictEqual(result.observation.next, undefined);
+		}
+	});
+
+	it("numbers the bounded tail using original positions and marks oversized suffixes partial", async () => {
+		const result = await read("head\nx\n\n", { tail: 2, line_numbers: true });
+		strictEqual(result.body, "2 | x\n3 | \n");
+		strictEqual(result.observation.next, "offset=1 limit=2 line_numbers=true");
+		const cap = await read(`head\n${"€".repeat(400)}`, { tail: 1, line_numbers: true });
+		match(cap.body, /^2 \| \[partial line suffix\] €+/u);
+		ok(Buffer.byteLength(cap.body) <= 1024);
+		ok(!cap.body.includes("�"));
+		strictEqual(cap.observation.shownCount, 0);
+		strictEqual(cap.observation.next, undefined);
+		const blank = await read(`head\n${"é".repeat(700)}\n\n`, { tail: 2, line_numbers: true });
+		strictEqual(blank.body, "3 | ");
+		strictEqual(blank.observation.shownCount, 1);
 	});
 });

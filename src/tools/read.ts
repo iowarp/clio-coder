@@ -28,13 +28,35 @@ export function readMaxBytes(): number {
 	return Math.max(MIN_READ_CAP_BYTES, resolveGuardrail("readMaxBytes"));
 }
 
+// Number only an already bounded slice, retaining its explicit physical line
+// count: a truncated slice ending in a blank line can look like a terminator.
+function numberSourceLines(content: string, firstLine: number, lineCount: number): string {
+	return content
+		.split("\n")
+		.map((line, index) => (index < lineCount ? `${firstLine + index} | ${line}` : line))
+		.join("\n");
+}
+
+function numberedPrefixBytes(totalLines: number): number {
+	let bytes = totalLines * 3; // " | " after each decimal source line number.
+	for (let first = 1, digits = 1; first <= totalLines; first *= 10, digits++) {
+		bytes += (Math.min(totalLines + 1, first * 10) - first) * digits;
+	}
+	return bytes;
+}
+
 export const readTool: ToolSpec = {
 	name: ToolNames.Read,
 	description: `Read a UTF-8 text file. Output is capped at ${DEFAULT_MAX_LINES} lines or ${
 		DEFAULT_READ_MAX_BYTES / 1024
-	}KB per call; truncated results say how to continue with offset/limit. Pass tail=N to read the last N lines (jump to EOF) instead of paging from the top.`,
+	}KB per call; truncated results say how to continue with offset/limit. Pass tail=N to read the last N lines (jump to EOF) instead of paging from the top. Set line_numbers=true for citations: each source line is prefixed with its physical 1-based line number and " | "; these labels are not file content.`,
 	parameters: Type.Object({
 		path: Type.String({ description: "File path (relative or absolute)." }),
+		line_numbers: Type.Optional(
+			Type.Boolean({
+				description: "Display physical source line numbers for citations. Default false preserves plain text.",
+			}),
+		),
 		offset: Type.Optional(Type.Number({ description: "1-indexed start line." })),
 		limit: Type.Optional(Type.Number({ description: "Max lines to read." })),
 		tail: Type.Optional(
@@ -47,6 +69,7 @@ export const readTool: ToolSpec = {
 		const pathArg = typeof args.path === "string" ? args.path : null;
 		if (!pathArg) return { kind: "error", message: "read: missing path argument" };
 		const filePath = resolveReadPath(pathArg);
+		const numbered = args.line_numbers === true;
 		const offset = typeof args.offset === "number" && args.offset > 0 ? Math.floor(args.offset) : 1;
 		const limit = typeof args.limit === "number" && args.limit > 0 ? Math.floor(args.limit) : null;
 		const tail = typeof args.tail === "number" && args.tail > 0 ? Math.floor(args.tail) : null;
@@ -82,7 +105,7 @@ export const readTool: ToolSpec = {
 			// a phantom extra line) so continuation notices never over-report by one.
 			const allLines = content.split("\n");
 			const totalLines = splitLinesForCounting(content).length;
-			const totalBytes = Buffer.byteLength(content, "utf8");
+			const totalBytes = Buffer.byteLength(content, "utf8") + (numbered ? numberedPrefixBytes(totalLines) : 0);
 			const startIndex = Math.min(offset - 1, totalLines);
 			if (tail === null && offset > 1 && startIndex >= totalLines) {
 				// The anchor matters for weak models: a bare "beyond end of file"
@@ -104,10 +127,26 @@ export const readTool: ToolSpec = {
 				// the end (reusing truncateTail) so the very tail always survives.
 				const startLine = Math.max(0, totalLines - tail);
 				const tailContent = allLines.slice(startLine).join("\n");
-				const truncation = truncateTail(tailContent, { maxBytes: cap, maxLines: tail });
+				const sourceTruncation = truncateTail(tailContent, { maxBytes: cap, maxLines: tail });
+				let truncation = sourceTruncation;
+				if (numbered) {
+					const numberedContent = numberSourceLines(
+						sourceTruncation.content,
+						totalLines - sourceTruncation.outputLines + 1,
+						sourceTruncation.outputLines,
+					);
+					truncation = truncateTail(numberedContent, { maxBytes: cap, maxLines: tail });
+					if (sourceTruncation.lastLinePartial || truncation.lastLinePartial) {
+						// Never return a tail fragment with a lost or fabricated complete
+						// line label. Keep the suffix within the cap and mark it partial.
+						const label = `${totalLines} | [partial line suffix] `;
+						const suffix = truncateTail(allLines[totalLines - 1] ?? "", { maxBytes: cap - Buffer.byteLength(label) });
+						truncation = { ...truncation, content: label + suffix.content, outputLines: 0, truncated: true };
+					}
+				}
 				const shownLines = truncation.outputLines;
 				const firstShown = Math.max(1, totalLines - shownLines + 1);
-				const truncated = startLine > 0 || truncation.truncated;
+				const truncated = startLine > 0 || sourceTruncation.truncated || truncation.truncated;
 				return finalizeObservation({
 					tool: ToolNames.Read,
 					unit: "lines",
@@ -116,7 +155,11 @@ export const readTool: ToolSpec = {
 					totalCount: totalLines,
 					totalBytes,
 					truncated,
-					...(truncated ? { next: `offset=${Math.max(1, firstShown - shownLines)} limit=${shownLines}` } : {}),
+					...(truncated && shownLines > 0
+						? {
+								next: `offset=${Math.max(1, firstShown - shownLines)} limit=${shownLines}${numbered ? " line_numbers=true" : ""}`,
+							}
+						: {}),
 					reservation,
 					...(options ? { options } : {}),
 				});
@@ -130,11 +173,19 @@ export const readTool: ToolSpec = {
 			// without inventing a line at EOF or changing shared text counting.
 			const selected =
 				allLines.slice(startIndex, endIndex).join("\n") + (endIndex > startIndex && endIndex < allLines.length ? "\n" : "");
-			const truncation: TruncationResult = truncateHead(selected, { maxBytes: cap });
+			const sourceTruncation = truncateHead(selected, { maxBytes: cap });
+			const truncation: TruncationResult =
+				numbered && !sourceTruncation.firstLineExceedsLimit
+					? truncateHead(numberSourceLines(sourceTruncation.content, startIndex + 1, sourceTruncation.outputLines), {
+							maxBytes: cap,
+						})
+					: sourceTruncation;
 			if (truncation.firstLineExceedsLimit) {
-				const firstLineSize = formatSize(Buffer.byteLength(allLines[startIndex] ?? "", "utf8"));
-				const linePrefix = truncateUtf8(allLines[startIndex] ?? "", cap, "\n[line truncated]");
-				const output = `${linePrefix}\n\n[Line ${startIndex + 1} is ${firstLineSize}, exceeding the ${formatSize(cap)} read limit. Showing the UTF-8 prefix only. Use grep with a narrower literal/regex or edit with exact surrounding text; use shell access only when byte-level inspection is required.]`;
+				const label = numbered ? `${startIndex + 1} | ` : "";
+				const firstLineSize = formatSize(Buffer.byteLength(label + (allLines[startIndex] ?? ""), "utf8"));
+				const linePrefix =
+					label + truncateUtf8(allLines[startIndex] ?? "", cap - Buffer.byteLength(label), "\n[line truncated]");
+				const output = `${linePrefix}\n\n[${numbered ? "Numbered line" : "Line"} ${startIndex + 1} is ${firstLineSize}, exceeding the ${formatSize(cap)} read limit. Showing the UTF-8 prefix only. Use grep with a narrower literal/regex or edit with exact surrounding text; use shell access only when byte-level inspection is required.]`;
 				return finalizeObservation({
 					tool: ToolNames.Read,
 					unit: "lines",
@@ -150,7 +201,7 @@ export const readTool: ToolSpec = {
 			}
 			const endDisplay = startIndex + truncation.outputLines;
 			const moreAfter = endDisplay < totalLines;
-			const truncated = truncation.truncated || (limit !== null && moreAfter);
+			const truncated = sourceTruncation.truncated || truncation.truncated || (limit !== null && moreAfter);
 			return finalizeObservation({
 				tool: ToolNames.Read,
 				unit: "lines",
@@ -159,7 +210,7 @@ export const readTool: ToolSpec = {
 				totalCount: totalLines,
 				totalBytes,
 				truncated,
-				...(truncated && moreAfter ? { next: `offset=${endDisplay + 1}` } : {}),
+				...(truncated && moreAfter ? { next: `offset=${endDisplay + 1}${numbered ? " line_numbers=true" : ""}` } : {}),
 				reservation,
 				...(options ? { options } : {}),
 			});
