@@ -5,6 +5,30 @@ All notable changes to Clio Coder are documented in this file. The format follow
 ## Unreleased
 
 ### Fixed
+- Preserve ordinary authored handbooks and bounded exact prefixes in session and opted-in worker context; disclose omitted sources and invalidate captured prompts after explicit context changes.
+- Keep generated handbook proposals separate from publication, preserve authored content during refresh, and retain publication provenance for the handbook actually in use.
+- Project the working set before summary compaction and support discovery and exact recall of persisted tool results hidden behind a summary.
+- Use source-content evidence for codewiki and wiki freshness, reconcile Python imports, and retain truthful wiki page outcomes, retry checkpoints, revised plans, and interrupted-publication recovery.
+- Drain active operator shell commands during shutdown and preserve bounded process-group escalation after the immediate child exits.
+- Keep multiline Workbench session titles readable and show canonical validation quality and interruption evidence in worker displays (#356, #357).
+- Keep `targets use` role flags scoped to the named roles, validate exact listed model IDs, and report only settings that changed.
+- Admit a pipeline member within its own reservation wave without charging its future waves against that member; retain other owners' reservations and active leases.
+- Add focused Windows subprocess CI coverage; cancel external Windows descendant trees with taskkill and forced escalation, retaining direct-child fallback and POSIX process groups (#282, #283).
+- Add caller-explicit Antigravity resume with bounded conversation IDs and first-init identity verification; automatic retry remains disabled (#284).
+- Clarify bounded inline explanations and precise limitations for Documenter and explicitly selected Coder recipes, strengthen Scout citation guidance, and halt pipeline dependents after failed quality (#349, #350, #361).
+- Instruct agents to verify implementation semantics against active decisions before commit and keep attribution distinct from adherence (#351).
+- Clarify source-grounded convention promotion, separate operator approval and fresh-session delivery, and preserve explicit no-edit scope during retention (#352, #364).
+- Make operator-task pickup and durable linkage explicit, distinguish acceptance requirements from results, and complete inbox commands with eligible operator IDs (#354, #366, #370).
+- Preserve proposal-only scope in task-board and continuation guidance independently of skill-install choices (#365).
+- Prefer authored skill triggers over incidental description overlap in marketplace offers and passive headless reminders (#360).
+- Expose compete on a single fleet route while preserving separate candidate and judge evidence; retain terminal summaries when canceled or timed out without reporting a winner (#348, #355).
+- Keep behavioral eval comparisons aligned across declared route variations, preserve compact mismatch identities, and print usable report commands for custom artifacts (#358, #359, #363).
+- Preserve watch-pane host failure details and distinguish local geometry refusals; retain observed worker termination signals beside missing-result failures (#362, #367).
+- Avoid blocking the event loop during retry reservation waits and use fresh capacity and budget observations (#368).
+- Preserve ACP peer token totals, explicit zero usage, and supported cost provenance without double-counting event metering (#369).
+- Validate documented settings paths against the typed settings shape, including optional fields and array/map members (#371).
+- Distinguish Workbench child-restart coverage from direct ACP same-child isolation, with child identities and history, ancestry, and task reset checks (#374).
+- Correct command documentation to describe generic unknown-command errors for retired spellings (#372).
 - The dispatch board retains active work alongside 50 settled runs, keeps newly settled runs visible, and bounds completed retry parents without reviving them when a child attempt starts (#339).
 - Condensed dispatch summaries, worker transcript rows, compact fleet rows, and monitor status show canonical deliverable validation quality separately from execution success. Failed, ungrounded, and unknown quality stay distinct, including in narrow worker displays (#345).
 - Decision revisions preserve their original ledger origin and record whether the agent or operator made the revision. Evidence no longer labels agent revisions as operator corrections; historical revisions with no recorded author remain unknown (#337).

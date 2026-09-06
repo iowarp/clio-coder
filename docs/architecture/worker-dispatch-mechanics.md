@@ -247,3 +247,7 @@ The child process exits with specific status codes to signal run outcomes to the
 * **`2`**: Worker runtime initialization failed (e.g., target runtime not registered, or `WorkerSpec` invalid/mismatched).
 * **`3` (`WORKER_EXIT_PERMISSION_REQUIRED`)**: The run aborted because a tool required permission and `onPermission` was set to `fail` (or timed out to a `fail` fallback).
 * **Other (e.g., `1` or uncaught exceptions)**: Represents an unhandled crash or internal error within the runner.
+
+## Antigravity conversation identity
+
+Antigravity resumes a conversation only when a caller explicitly supplies its conversation ID through the worker runtime. The dispatch tool exposes no resume argument. A nonempty ID must be at most 4096 UTF-8 bytes and contain no Unicode control characters; it is passed as a literal `--conversation` argument. Clio requires the first init conversation ID to match the requested ID and fails the run if agy starts a different conversation. An absent or empty ID starts fresh. Antigravity runs are never retried automatically.

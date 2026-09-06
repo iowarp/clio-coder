@@ -693,7 +693,9 @@ candidate serving: ...
 <hr>
 <h2>Task Outcome Measurement (<code>verify.measure</code>)</h2>
 <p>Task outcome commands declared under <code>verify.measure</code> are the code grader for whether the model solved the workload and record metrics (<code>task.solved</code>, <code>task.exitCode</code>). A non-zero exit fails the final result and is named on its verdict as <code>reason: grader_failed</code>, while <code>machinery</code> remains <code>ok</code> when the runner and machinery verifiers succeeded. This keeps the artifact&#39;s <code>pass</code>, verdict outcome, scenario aggregates, and summary on one pass decision without misreporting a grader failure as broken machinery.</p>
-        </article>
+        <h2>Artifact reporting and comparison</h2>
+<p>Eval runs print a report command for custom output artifacts. <code>clio-coder eval report --artifact &lt;path&gt;</code> reads the original artifact with strict provenance validation and does not import it into the store. Comparison aligns jointly declared target/model variations while preserving both route identities, rejects ambiguous route groups, and retains execution-envelope differences. Compact mismatch and hard-gate identities omit runner attachments; full artifact reports retain them.</p>
+</article>
         <nav class="related-nav" aria-label="Adjacent references">
           <a class="nav-link-card" href="documentation_blueprint.html"><span class="nav-label">Previous</span><span class="nav-title">Documentation Standards and Codebase Alignment</span></a>
           <a class="nav-link-card next" href="evals_internal_blueprint.html"><span class="nav-label">Next</span><span class="nav-title">Internal Eval Suites</span></a>

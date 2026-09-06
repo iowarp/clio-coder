@@ -41,7 +41,7 @@ The `/context` overlay and footer meter read the same ledger categories in displ
 
 Auto-compaction is controlled by `context.compaction.threshold`. Pressure is `budgeted_tokens / context_window`, where the budgeted figure is the reconciled total when the provider has attested one and the chars/4 estimate otherwise. The default threshold is `0.8`.
 
-Crossing that threshold engages three mechanisms in a fixed order. The first two are cheap, reversible, and call no model. Only the third rewrites what the session says about itself.
+Crossing that threshold first applies reversible working-set eviction without a model call. If pressure remains high, an LLM summary replaces older material in model replay. Recall remains available on demand; it is not an automatic compaction stage. Both mechanisms preserve the raw ledger by default.
 
 ### 1. Working-set eviction
 
@@ -53,7 +53,7 @@ If the projection drops pressure below the threshold, Clio sends the request and
 
 ### 2. Recall
 
-An evicted body comes back on demand and only on demand. The marker names the exact call: `context(scope="recall", ref="<turnId>")` returns the original body byte-exact through the observation envelope and appends a `contextRecall` entry. Operators use `/context recall <ref>`, which prints the body to the transcript without putting it into model context.
+An evicted or summarized tool-result body comes back on demand. `context(scope="recall", ref="<turnId>")` returns its persisted body through the observation envelope and appends a `contextRecall` entry. Omit `ref` to discover historical results with `query`, `limit`, and `offset`; discovery does not append a recall record. Operators use `/context recall <ref>`, which prints the body to the transcript without putting it into model context. Content removed by older destructive compaction or masking cannot be recovered.
 
 A recall does not un-evict. The marker stays byte-identical where it was, so the provider prefix cache is untouched, and repeated recalls of the same ref are the churn signal the `/context` overlay reports.
 
@@ -63,7 +63,7 @@ Offline replay does not infer those explicit decisions from a later read of the 
 
 If pressure remains above the threshold after eviction, Clio runs the summary compaction path: it calls the summarization model, appends a `compactionSummary` entry, refreshes projected replay messages from the session, and continues. This is the only mechanism that spends tokens and the only one whose output is a lossy paraphrase, which is why it runs last.
 
-Iterative compaction has one raw-history boundary. The first pass searches from the start of the active path. A later pass searches strictly after the previous `compactionSummary`, while the prior checkpoint and its retained suffix are fed to the summarizer as canonical context for one cumulative replacement. The replay benchmark uses that same boundary. It must not run `findCutPoint` over the visible retained suffix again: doing so re-prices history already captured by the previous checkpoint and overstates repeated summary churn.
+Compaction projects the active-path working set before counting tokens, choosing a cut, or serializing the summary request. Evicted bodies and thinking therefore stay excluded from the summarizer as well as ordinary replay; the raw ledger remains available for exact recall. The first pass searches from the start of the active path. Later passes search strictly after the previous `compactionSummary`, using the prior checkpoint and retained suffix as canonical context for one cumulative replacement. Each summary request budgets the complete prompt and its bounded output against the resolved model window.
 
 Manual `/context compact`, `CLIO_CODER_FORCE_COMPACT=1`, and overflow recovery force the summary path directly and skip every pre-stage. The overflow guard runs before the user turn is committed, so a blocked oversized request does not leave an unanswered user entry in the ledger.
 
@@ -187,17 +187,17 @@ Settings validation is strict: an older file still carrying the removed `compact
 
 Project guidance is resolved from the filesystem root to the working directory. An ordinary `CLIO-CODER.md` adds a layer for its directory and descendants. `CLIO-CODER.override.md` starts a replacement boundary: it wins over `CLIO-CODER.md` in the same directory, discards all handbook layers inherited from ancestors, and remains effective below that directory. Ordinary handbooks in deeper directories may add new layers after the override. A sibling outside the override's subtree keeps its own inherited chain.
 
-For example, a session in `repo/src/parser/` loads `repo/src/CLIO-CODER.override.md` followed by `repo/src/parser/CLIO-CODER.md`; it does not load `repo/CLIO-CODER.md`. A session in `repo/docs/` still loads `repo/CLIO-CODER.md`. Surviving files are rendered in ancestor-to-descendant order as separate `<project-context path="...">` blocks, preserving the source of every instruction. The nearest surviving handbook supplies the project name used by compact reporting, while conventions, hard invariants, imported context, and custom sections layer in order.
+For example, a session in `repo/src/parser/` loads `repo/src/CLIO-CODER.override.md` followed by `repo/src/parser/CLIO-CODER.md`; it does not load `repo/CLIO-CODER.md`. A session in `repo/docs/` still loads `repo/CLIO-CODER.md`. Selected readable, non-whitespace-only handbooks are ordinary authored Markdown: arbitrary headings and a missing project identity are accepted, and source bytes are preserved. A strict structured projection is optional and may be absent; it never fabricates a project name or rules. Surviving source layers render ancestor-to-descendant with explicit paths, subject to the preload budget below.
 
-An unreadable or malformed override fails closed. Clio warns about that file but does not reactivate the inherited or same-directory handbook it replaced. `clio-coder config inspect` lists every effective handbook and its layer number.
+An empty or unreadable override fails closed. Clio reports that file but does not reactivate the inherited or same-directory handbook it replaced. Ordinary Markdown does not have to satisfy the generated-handbook schema. `clio-coder config inspect` lists every effective handbook and its layer number.
 
 Handbook resolution is read-only. `/context init` and its CLI form are the only commands that author or update the exact `CLIO-CODER.md` in the current directory; `/context refresh` touches neither standard nor override handbooks. Neither command rewrites an inherited file or an override. A same-directory override therefore continues to shadow a standard handbook created or updated by init until the operator removes the override. Normal reset preserves both handbook names; `context reset --all` may remove the local standard `CLIO-CODER.md` after its second confirmation but always preserves `CLIO-CODER.override.md` as operator-authored context.
 
 ## Project-context preload class
 
-The compiled session prompt preloads the full rendered project context (the effective handbook fragments plus project-type and codewiki markers) only when at least one selected handbook parses and the rendered text stays within 8000 characters and 220 lines; otherwise it preloads a compact synopsis. The rule lives in `src/domains/prompts/preload.ts` and every reporting surface classifies with it:
+The compiled session prompt uses one bounded selector in `src/domains/prompts/preload.ts`. Small rendered inputs remain exact; oversized authored handbooks retain safe exact prefixes within 8,000 UTF-16 units and 220 rendered lines, including metadata. Allocation favors nearest layers and renders included layers ancestor-first. It no longer replaces oversized guidance with a lossy synopsis. Model-facing omission notices identify source paths and included/omitted physical line ranges with retrieval instructions. Captured-source hashes are retained separately in preload classification and accounting/manifest metadata; they are not printed as per-source hashes in those notices. The conservative prefix scanner preserves line endings, whitespace, Unicode, and complete command lines; an oversized first block may leave no authored excerpt. This is incomplete guidance, not a complete policy. Reporting surfaces share the selection:
 
-- `/context init` and `clio-coder context init` print `preload: full (N.NkB, N lines)` or `preload: synopsis (reason: size|lines)` after the summary, and warn when a full preload is within 10% of either limit.
+- `/context init` and `clio-coder context init` report full or partial preload, included UTF-16 units and rendered lines, and source omission accounting; they warn when a full preload is within 10% of either limit.
 - `clio-coder config inspect` shows the shared preload class and layer position on every effective handbook entry.
 - The `/context` overlay shows a `project preload:` line under the category legend once a session prompt has compiled, followed by the effective handbook path(s): one `handbook:` line for a single file, or a `handbooks (ancestor → nearest):` list when layered handbooks apply. Paths render workspace-relative; a handbook above the workspace keeps a `~`-shortened or absolute path.
 
@@ -209,13 +209,13 @@ flag `--wiki` is the only refresh path that may update the Markdown wiki, and
 it only runs when an existing wiki metadata file is present. Regenerating or
 updating the exact local standard handbook stays with `/context init`.
 
-`clio-coder context init` is model-driven by default. The `--heuristic` flag is the sole deterministic flag for offline handbook generation. The `--propose` flag writes ignored drafts to `.clio-coder/proposals/`, `--apply` updates from the existing handbook, and `--rewrite` generates a fresh handbook.
+`clio-coder context init` is model-driven by default; `--heuristic` selects deterministic offline generation. Plain init preserves an existing authored handbook. When a generator produces a candidate, it writes a review proposal under `.clio-coder/proposals/` with adjacent JSON recording generation telemetry, source hash, and proposal hash. `--propose` never publishes, even when no handbook exists. `--apply` and `--rewrite` explicitly publish generated updates or replacements. Publication provenance changes only when the handbook is published. Generated drafts still pass strict proposal and serialization validation; accepting ordinary authored Markdown does not relax those checks.
 
 When bootstrapping across local runtimes such as `llamacpp` where strict grammar/schema enforcement might be rejected by the endpoint, generator logic retries automatically using a bounded prompt-parser fallback. If `--rewrite` was requested but the model generation fails to produce a valid handbook rewrite, `clio-coder context init` prints a notice and exits with code 1 rather than leaving an inconsistent state.
 
 ## Generated handbook structure and verification expectations
 
-During handbook generation (`context init` and `clio-coder context init`), Clio derives structural sections directly from workspace manifests and toolchains:
+During handbook generation (`context init` and `clio-coder context init`), Clio derives structural sections from workspace manifests and toolchains. Starter project-wide rules come only from scanned project-wide instruction locations and explicitly opted-in global Codex guidance; directory-scoped skills, examples, and nested instructions remain evidence with their original scope. Declared verification commands are suggestions, not evidence that they were executed:
 
 - **Context retrieval**: Derived from the codewiki index, naming primary entry points and directing agents to use `code_nav` for navigation. To prevent staleness across repository mutations, exact volatile file counts are omitted.
 - **Verification expectations**: Synthesized from declared toolchain configuration and manifest files:
@@ -257,22 +257,11 @@ Source coverage spans TypeScript, JavaScript, Python, Rust, Go, C, C++, CUDA
 as `package.json`, `pyproject.toml`, `Cargo.toml`, `go.mod`, `pom.xml`,
 `CMakeLists.txt`, `Gemfile`, and `*.csproj`.
 
-Extraction is async and tree-sitter-first. Clio loads WASM grammars for the ten
-source language grammars above, extracts symbols/imports/exports from the parsed tree,
-and merges regex import extraction for languages with regex extractors. If a
-tree-sitter parse fails for one file, that file falls back to the available
-regex extractor instead of aborting the whole build. C# is covered by the
-tree-sitter C# grammar.
+Extraction is async and tree-sitter-first. Clio loads WASM grammars for the ten source languages above, extracts symbols/imports/exports, and merges available regex import extraction. A failed parse falls back to the available regex extractor for that file. Python edges distinguish relative import levels and absolute package imports, using package initializer evidence; they describe a static source graph and do not execute import hooks or infer arbitrary PYTHONPATH settings. Fingerprint migration also reconciles old edges when source bytes are unchanged.
 
 Ambiguous `.h` files are classified deterministically by `classifyCHeaderLanguage` (`src/core/c-header-language.ts`). The scanner removes comments before checking C++-only standard-library includes, and removes comments and literals before checking C++ syntax markers such as templates, namespaces, class/member declarations, scope resolution, C++ casts, and C++ qualifiers. If any C++ marker is present, the header is indexed as `c++`; otherwise, it defaults to `c`. This guarantees that both full indexing and incremental file syncs assign identical language tags to `.h` files. Declaration-only C/C++ APIs are indexed so header-heavy MPI, CUDA, and scientific libraries remain navigable even when implementations live elsewhere.
 
-Incremental updates are real updates, not a full rebuild hidden behind the
-name. Successful file-mutating tools report changed paths through the
-middleware observer. The context domain coalesces those paths, checks per-file
-content hashes and reparses only changed files (`perf(context)` optimization),
-reads only the changed indexable files for path-based updates, replaces their file and symbol records, removes
-deleted records, and rebuilds edges from the merged import set. Non-indexable
-paths are no-ops.
+Successful file-mutating tools report changed paths through a coalesced, serialized observer queue. Path updates can reuse unchanged parse records and reparse changed files, but publishing a new global fingerprint requires full source-content reconciliation so an unnotified edit cannot be certified as current. The coordinator brackets reconciliation with source-byte fingerprints and retries an unstable scan up to three times; unreadable or persistently changing inputs prevent certification. An unchanged notification retains the previous global baseline instead of certifying unrelated files. Deleted records are removed and import edges are rebuilt from the reconciled records. This reduces reparsing work, not the source reads needed to establish global freshness.
 
 ### Architecture seed
 
@@ -294,13 +283,7 @@ repository-wide payload, including the codewiki digest, appears only in the
 planning prompt. Because a static prompt is re-sent on every round of a run, this
 is what keeps prefill cost from growing quadratically with the size of the wiki.
 
-`_plan.json` is the skeleton and the checkpoint. It is derived deterministically
-from the codewiki index, so a usable plan exists before any model runs; the
-planning dispatch may merge, split, rename, drop, or re-anchor entries by
-rewriting it, and a malformed rewrite falls back to the candidate. The harness
-owns each entry's status and rewrites the file after every page, so a run that
-ends early records exactly which pages are still owed. Staging survives such a
-run and the next one resumes from it.
+`_plan.json` is the skeleton and checkpoint. A deterministic codewiki plan exists before model dispatch; the planner may merge, split, rename, drop, or re-anchor entries, with malformed rewrites falling back to the candidate. The harness owns completion and attempts. Changes to authored title, intent, or source set reset progress; dropped planned pages are checkpointed as retirements and removed during assembly. A resumed checkpoint checks source evidence and conservatively requeues pages when it is missing or changed. Exhausted attempts stay exhausted on an unchanged plan, and remaining pending pages are reported.
 
 Every page opens with repaired front matter. Its metadata model has `title`,
 `summary`, `sources`, `symbols`, `tests`, `invariants`, and `validate`, but the
@@ -310,20 +293,11 @@ directory `index.md`, and the task-routing table are generated from the repaired
 values after each run, so navigation cannot drift or miss a page and no writer
 has to remember to update it.
 
-Assembly repairs rather than rejects. A missing H1, absent or malformed front
-matter, a dangling `sources` entry, a link to a page that was never written, and
-a citation to a path that does not exist are all mechanically fixable, so each is
-fixed or recorded in a `<!-- clio:wiki ... -->` marker and reported; none fails a
-run. An empty page is dropped and its plan entry stays owed. An update run's
-scope is computed, not guessed: a page is rewritten when git reports a change to
-one of the sources its own front matter claims.
+Assembly mechanically repairs missing headings, malformed front matter, dangling citations, and links, reporting repairs or omission markers. Repair alone does not certify completion: a page is complete only after a successful writer dispatch and retention by assembly. Empty pages, failed writers, and unplanned writer-added pages remain pending. Existing readable prose can remain available after a failed update while its page stays pending and stale. Writer-discovered source and test dependencies survive routing repair for later update scoping.
 
-`meta.json` records `updatedAt`, `gitHead`, the indexed source-tree hash, the
-model label, a content hash over the page tree, the page list, and the plan.
-`generation.pagesPlanned` and `generation.pagesWritten` say whether a run
-finished; when they differ, `clio-coder context wiki --update` completes the rest.
+`meta.json` records content publication time and model provenance, source evidence, the page-tree content hash, page list, and plan. `generation.pagesPlanned` and `generation.pagesWritten` describe completeness. A `generated` outcome means content was published; `noop` means Markdown bytes were unchanged. Either can still have pending pages. Unchanged-content attempts persist plan progress and attempts without changing content-publication time or model provenance; successful unchanged-content writers can validate existing prose.
 
-`clio-coder context wiki` creates a wiki when no metadata exists and updates one when metadata is present. During wiki generation, Clio automatically refreshes a stale codewiki index before grounding the model run. The decision to write new pages and update metadata is a no-op if the newly generated content's hash matches the existing content hash. `clio-coder context wiki --update` requests update mode explicitly. `clio-coder context wiki --status` only reads metadata and does not run a model. `clio-coder context refresh --wiki` first rebuilds the structural codewiki and then updates an existing wiki when `.clio-coder/wiki/meta.json` exists; when no wiki metadata exists, it performs no wiki generation.
+`clio-coder context wiki` creates or updates a wiki and first refreshes a stale structural index. `--update` requests update mode explicitly; `--status` reads status without a model call. Metadata is prepared beside staged pages before publication. After process interruption, the next generation validates live and previous content/metadata pairs and restores a valid previous pair when live is absent or incomplete, preserving a damaged live tree separately. The wiki lock serializes generation, but other editors are not locked out and readers can observe the rename gap: this is process-crash recovery, not atomic directory exchange or power-loss durability. `clio-coder context refresh --wiki` rebuilds codewiki and updates only an existing wiki.
 
 ### Lifecycle Matrix
 
@@ -335,19 +309,12 @@ finished; when they differ, `clio-coder context wiki --update` completes the res
 | `/context init` or `clio-coder context init` | Performs a full codewiki rebuild before generating, preserving, proposing, or previewing `CLIO-CODER.md`; writes state with the fingerprint and codewiki version when it writes state. | No wiki generation. |
 | `/context refresh` or `clio-coder context refresh` | Performs a full codewiki rebuild and writes state. Does not touch `CLIO-CODER.md`. | If an existing wiki is stale and `--wiki` was not passed on the CLI, prints a hint to run `clio-coder context refresh --wiki` or `clio-coder context wiki --update`. |
 | `clio-coder context refresh --wiki` | Performs the same full codewiki rebuild and state write. | Updates an existing wiki through the model-backed page dispatches. No wiki metadata means no wiki model call. |
-| `clio-coder context wiki` | Automatically refreshes the codewiki index if stale before composing the wiki prompt. | Plans, then writes each owed page in its own dispatch, assembles and promotes whatever landed (no-op if content hashes match), and records any pages still owed. |
+| `clio-coder context wiki` | Automatically refreshes the codewiki index if stale before composing the wiki prompt. | Plans, dispatches each owed page, validates completion outcomes, and publishes assembled content or records unchanged-content progress; failed pages remain pending. |
 | `clio-coder context wiki --status` | No index rebuild. | Reads metadata and reports page count, update time, recorded git head, git-head drift, and how many planned pages remain unwritten. |
 
 ### Staleness
 
-Codewiki staleness is controlled by one predicate:
-`isStale(prev, curr)` compares only `fingerprint.treeHash`. The fingerprint
-hash is mtime-aware: it walks the repository, excludes generated/local-state
-directories and lock/archive files, and hashes each included relative path,
-file size, and floored `mtimeMs`. The fingerprint also records `gitHead` and
-`loc`; `loc` comes from the codewiki artifact when available, otherwise from a
-line count over source extensions. Those fields are reporting data, not the
-stale predicate.
+Codewiki staleness uses `isStale(prev, curr)`, comparing `fingerprint.treeHash`. The v3 fingerprint hashes each included relative path and its source-byte digest, so whitespace-only edits and same-size edits with restored timestamps invalidate it. It covers the shared visible indexable file set and excludes ignored/generated/local-state paths. Read errors fail certification. Cached status checks may reuse a fingerprint for five seconds; individual reads remain synchronous even in the cooperatively yielding path. `gitHead` and `loc` remain reporting fields. Older fingerprint domains invalidate once and trigger reconciliation; this is not an atomic filesystem snapshot.
 
 `.clio-coder/state.json` stores the fingerprint and optional `codewikiVersion`.
 Legacy v2/v3/v4 codewiki files can still be read as degraded v5 artifacts, but
@@ -355,13 +322,7 @@ their missing or deliberately invalidated per-file hashes make `codewikiNeedsBac
 next session freshness check, `code_nav` demand load, wiki generation, or
 explicit refresh rebuilds them into full v5.
 
-Wiki staleness is separate. New `.clio-coder/wiki/meta.json` files record both the git
-head and the indexed source-tree hash used when the wiki content last changed.
-Clio reports drift at the same git head when tracked or untracked source files
-change, and combines committed and working-tree evidence in its changed-file
-count. Older metadata without a source-tree hash retains the git-head-only
-check. Git-less or unreadable git states degrade to `fresh` with a warning when
-Clio cannot prove drift.
+Wiki staleness uses separate bounded source-byte evidence, including README and configuration files beyond the structural index. Before/after capture and claimed-directory comparisons detect changed, added, or deleted inputs; changes during generation return previously written pages to pending. Capture is limited to 20,000 files and 128 MiB of source bytes. Missing, legacy, unreadable, or over-limit evidence cannot certify freshness, and unavailable Git evidence is conservative rather than treated as a clean diff. These observations do not form an atomic filesystem snapshot or a complete semantic input manifest.
 
 ### Surfacing and Navigation
 

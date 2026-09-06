@@ -168,7 +168,7 @@ reported to `/cost` under a handoffs row and excluded from the turn count.
 
 ### Streaming Turn Settlement During Session Transitions
 
-When an operator issues `/new`, `/resume`, `/tree`, or `/fork` while an assistant turn is actively streaming, `settleChatBeforeSessionSwitch` (`src/interactive/session-switch-settlement.ts`) cancels the in-flight stream and awaits completion. This guarantees that partial assistant records and completed tool executions seal cleanly into the active session ledger before the session writer is replaced, preventing orphaned records in new sessions or unanswered prompts in original sessions (#114). Synchronous session transitions when chat is idle continue to execute immediately.
+When an operator issues `/new`, `/resume`, `/tree`, or `/fork` during streaming, `settleChatBeforeSessionSwitch` cancels and awaits the in-flight turn so partial assistant records and completed tools settle before replacing the writer. Shutdown separately stops shell admission and drains the active operator command. Hooks default to 500 ms each; the operator-shell hook allows six seconds for its existing five-second cancellation escalation, and worker group escalation uses 500 ms. Owned same-process-group descendants are covered by Linux validation, including descendants that close inherited pipes. Arbitrary daemonized or regrouped processes are outside this scope; macOS, Windows, and real SSH behavior remain unverified.
 
 ---
 
@@ -185,7 +185,7 @@ When resuming a session via `/resume` or a headless `clio-coder run --session <i
 
 ### Model-Facing Custom Entry Replay
 
-When resumed or forked session history is replayed to the model, custom session entries (such as compaction summaries, branch summaries, and operator bash executions) are projected into standardized user-role message text via `src/engine/messages.ts` constants (`COMPACTION_SUMMARY_PREFIX`, `BRANCH_SUMMARY_PREFIX`, `bashExecutionToText`) rather than ad-hoc formats, ensuring deterministic prompt construction across sessions.
+When resumed or forked session history is replayed to the model, compaction summaries, branch summaries, and operator bash executions use standardized user-role text through `src/engine/messages.ts`. Working-set projection runs before compaction counting and summary serialization, while raw ledger entries remain intact. Tool results hidden by summaries are discoverable with `context(scope="recall")` and recoverable by exact ref through the normal observation envelope; older destructive logs cannot recover removed bytes.
 
 ---
 
@@ -199,12 +199,12 @@ An explicit path ending in `.md` keeps the plain Markdown form: a heading, UTC e
 
 ## 7. Directory Handbooks and Project Overrides
 
-During session context loading, `loadProjectContextFiles` (`src/domains/context/clio-md.ts`) discovers root `CLIO-CODER.md` handbooks and directory-scoped `CLIO-CODER.override.md` files:
+During session context loading, `loadProjectContextFiles` (`src/domains/context/clio-md.ts`) captures readable authored Markdown from root `CLIO-CODER.md` handbooks and directory-scoped `CLIO-CODER.override.md` files. Optional structured projections do not determine source acceptance. Init, refresh, and reset invalidate captured session inputs; refresh preserves handbook bytes. Preload is bounded to 8,000 UTF-16 units and 220 rendered lines, with exact safe prefixes and capability-aware omission notices naming source paths and line ranges. Captured-source hashes are retained separately in accounting/manifest metadata. Tools-disabled targets cannot retrieve omitted suffixes through session tools; ordinary reads retrieve current content and retain their independent byte and 20 MB file limits:
 - An override handbook replaces inherited project instructions for its directory and all subdirectories, establishing an explicit subtree boundary.
 - Sibling directories remain unaffected.
 - Subdirectories within the subtree may supply narrower instructions with additional override files.
 - Prompt blocks preserve explicit source paths for provenance.
-- Malformed override files fail closed, and context resets never delete override files.
+- Empty or unreadable selected overrides fail closed; ordinary authored Markdown does not require a structured project heading. Context resets never delete override files.
 
 ---
 

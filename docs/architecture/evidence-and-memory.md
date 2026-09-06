@@ -453,3 +453,13 @@ Only the field matching the record scope is present.
 7. Prune stale records periodically.
 
 Memory is meant to reduce repeated mistakes, not to become an unreviewed second instruction system.
+
+## Convention retention and decision adherence
+
+Remembering a convention starts with inspecting and citing its sources. Capture is selective. An existing source-grounded knowledge or procedural bank entry can be proposed by the operator through `/memory` with `p`, or promoted from an actual version-2 handoff export. Promotion persists an unapproved proposal; separate operator approval admits it to scoped, bounded selection. If no matching entry was captured, report that limit. A general request to remember does not approve an unseen record.
+
+Approval, persistence, and fresh-session consumption are separate observations. Claim consumption only when the matching approved record is delivered; approval does not guarantee selection. Transcript recovery and unrelated memory are not evidence of durable convention delivery. Background memory reasoning is currently disabled; this workflow does not add a low reasoning setting.
+
+An explicit no-edit task includes the handbook and every repository file. Do not substitute a handbook edit, note, handoff export, shell write, or delegated edit for reviewed memory. Explain retention steps that require writes outside the authorized scope.
+
+Decision references and commit trailers establish attribution, not behavioral adherence. Before committing, agents are instructed to check the implementation against active decision semantics, including actual scalar types when a policy requires Python integers. A changed agent-owned policy requires an explicit same-key revision before commit; operator decisions remain operator-owned. This guidance does not guarantee model compliance.

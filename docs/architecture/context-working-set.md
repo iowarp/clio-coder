@@ -18,7 +18,7 @@ Source of truth is `src/domains/context/working-set/` (`contract.ts`, `fold.ts`,
 | Ledger | The durable append-only session record (`current.jsonl`). The working-set layer appends to it and never rewrites it. |
 | Evicted | A unit whose body the projection replaces with a marker. The ledger entry that holds the original body is untouched. |
 | Offloaded | A result the observation envelope already wrote to a file because it exceeded the per-call cap. Its marker carries the pointer instead of a preview, and recall returns the pointer rather than inlining the file. |
-| Recall | Readmitting an evicted body by ref, through `context(scope="recall", ref=...)` for the model or `/context recall <ref>` for the operator. |
+| Recall | Readmitting an evicted or summarized tool-result body by ref, through `context(scope="recall", ref=...)` for the model or `/context recall <ref>` for the operator. |
 | Marker | The byte-stable one-line stub the projection renders in place of an evicted body. It names the ref, the reason, the size, and the exact call that brings the body back. |
 | Projection | A pure, in-memory transform from ledger entries to the entries the replay builder hands the model. `projectWorkingSet(entries, view)` is that function. |
 
@@ -118,19 +118,17 @@ The facts the rungs read come from `path-index.ts`, one deterministic pass over 
 
 ## Recall
 
-Recall is explicit and by ref. There is no auto-readmission: the marker tells the model exactly which call brings the body back, and the model decides.
+Exact recall is explicit and by ref for persisted tool results hidden by eviction or summary compaction. There is no automatic readmission. `context(scope="recall", query="...", limit=8, offset=0)` with `ref` omitted discovers eligible results in active-path ledger order. Query matches ref, tool, and path metadata; limit defaults to 8 and caps at 12. Rows include timestamps and evicted/summarized state. `nextOffset` continues the same query against the same active path and ledger state. Discovery does not append `contextRecall`.
 
-`resolveRecall(entries, view, ref, activeLeafTurnId)` resolves a ref against the fold at the live leaf and returns the original body byte-exact, read with the same field precedence the projection would have used. It fails in three typed ways:
+`resolveRecall(entries, view, ref, activeLeafTurnId)` resolves against the active path and compaction cut, returning the persisted tool-result body with the same field precedence as projection. It rejects malformed refs, unknown or other-branch refs, currently visible results, assistant thinking, and legacy destructively compacted bodies. It cannot recover bytes already removed from older logs.
 
-- `invalid_ref` when the ref is empty or carries whitespace.
-- `not_on_active_path` when the session has no such turn on this branch, which includes a ref from a branch `/tree` abandoned.
-- `not_evicted` when the unit is still in context. An assistant turn reports separately that thinking is not recallable.
+Errors distinguish `invalid_ref`, `not_on_active_path`, and `not_evicted`; the last also covers unsupported or still-visible entries with a specific diagnostic.
 
 The `not_on_active_path` and `not_evicted` messages end with the refs that can be recalled on the active path (tool results only, up to eight, then a count). `invalid_ref` reports only the malformed value. Clio deliberately lists valid refs instead of guessing a nearest ref, because similar time-ordered identifiers can name unrelated results.
 
-An LLM summary also preserves recall discovery across its cut. When an evicted tool result falls before `firstKeptTurnId`, the generated checkpoint carries a `<recallable-refs>` block with the same `ref (tool path)` rows used by recall failures, bounded to eight rows plus a remaining count. Results that stay after the cut keep their ordinary markers and are not repeated in the block.
+An LLM summary preserves discovery across its cut. The checkpoint carries a bounded `<recallable-refs>` preview for tool results hidden by compaction, including results that were never explicitly evicted, and points to omitted-ref discovery for the complete paginated inventory. Results after the cut retain their ordinary markers. Exact recall returns historical persisted content; reading the path again returns its current filesystem contents.
 
-**A recall does not un-evict.** The key stays in `view.evicted`, the marker stays byte-identical at its original position, and the recalled body arrives at the tail of the working set inside the recall result. Readmitting it in place would duplicate the bytes and invalidate the provider prefix cache for everything after that point, which costs more than the recall saved.
+**A recall does not un-evict.** For explicitly evicted results, the key stays in `view.evicted` and the marker stays byte-identical. Summarized results remain behind the compaction cut. In both cases the recalled body arrives at the tail inside the recall result. Readmitting it in place would duplicate the bytes and invalidate the provider prefix cache for everything after that point, which costs more than the recall saved.
 
 That also makes recall the churn signal. `churn = recalls / itemsEvicted` over the active path. A high churn number means the policy keeps evicting content the session still needs, which is a reason to change the policy rather than to raise the threshold.
 
@@ -175,7 +173,7 @@ The retired `compaction.excludeLastTurns` key is not accepted by settings v2. Th
 
 - **`/context` overlay.** A working-set section under the category legend: the configured policy with its state (`policy structural-v1 · no events yet` until the first event, `disabled` when `context.workingSet.enabled` is off, and `(last event by <policy>)` when the setting changed after an event), evicted item count, evicted tokens, event count, recall count, and churn. Evicted tokens render as one line after the legend rather than as a meter category, because they are outside the window rather than a slice of it.
 - **Transcript.** An evicted tool row keeps its full body and gains a dim `evicted · <reason>` tag. The transcript shows the ledger, never the projection, so `/resume`, `/tree`, `/fork`, and the HTML export are unaffected by eviction.
-- **`/context recall <ref>`.** Prints the ref, why it was evicted, the token count, and the offload pointer when there is one, followed by the original body. Transcript only.
+- **`/context recall <ref>`.** Prints the ref, its evicted or summarized state, the token count, and any offload pointer, followed by the persisted body. Transcript only.
 - **Prompt cache line.** Every applied event stamps `working_set_evict` on the next assistant entry's `promptCache.expectedColdReasons`. When the last settled run came back cold for that reason, the overlay adds `last cold turn: working-set eviction (expected)` and drops the shell-reused-but-backend-cold warning, because the cold turn is explained rather than surprising.
 - **Notice.** One line per applied event: `[context engine] working set: N items evicted by <policy>; ~X -> ~Y tokens, recall by ref with context(scope="recall")`. The numbers are the plan's, priced over the visible ledger slice, and they are the same numbers the `contextEviction` entry, the `[Compaction] Reclaimed context` toast, and the overlay's `last compaction` line carry. The footer meter is a separate live estimate over the agent message list and can differ from them by the tool schemas and replay text it includes.
 

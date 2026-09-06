@@ -33,7 +33,7 @@ For process exit codes, stdout deliverable guarantees, and machine-readable JSON
 | `clio-coder config [inspect] [--json]` | Print the effective customization graph across settings, context files, rules, skills, prompts, agents, extensions, safety, memory, hooks, and operator profile. |
 | `clio-coder targets [--json] [--probe] [--target <id>]` | List configured targets, health, auth, runtime, model, and capabilities. |
 | `clio-coder targets add` | Add a target interactively or through configure flags. |
-| `clio-coder targets use <id> [--model <id>] [--orchestrator-model <id>] [--background-model <id>] [--fleet-target <id>] [--fleet-model <id>]` | Point the orchestrator at one target. Without `--fleet-target` the fleet default follows it; with `--fleet-target` the fleet runs on a different node. |
+| `clio-coder targets use <id> [--model <id>] [--orchestrator-model <id>] [--background-model <id>] [--fleet-target <id>] [--fleet-model <id>]` | Select the named roles only when any role flag is present. `--background-model` selects memory; `--orchestrator-model` selects chat; `--fleet-model` or `--fleet-target` selects fleet. Other roles and thinking levels are preserved. Without role flags, chat and fleet use the target default (or shared `--model`), while memory is preserved. Confirmation names only roles whose settings changed. Model IDs must match a nonempty discovered or cached inventory exactly; unavailable discovery is reported explicitly. |
 | `clio-coder targets fleet [--json]` | List the configured fleet profiles with their target, runtime, model, and thinking level. `targets workers` is an accepted alias. |
 | `clio-coder targets profile list\|set\|remove\|rename\|bind\|unbind\|bindings` | Manage named fleet profiles and agent bindings. `clio-coder targets profile <name> <id>` is the short form of `profile set`, and `targets worker` is an accepted alias for `targets profile`. |
 | `clio-coder targets convert <id> --runtime <runtimeId>` | Convert older local target definitions to a runtime-specific target. |
@@ -213,11 +213,7 @@ must record a passing validation receipt for every named check or a successful
 completion note alone does not satisfy acceptance. `clio-coder tasks list`,
 `hand <uN>`, `done <uN>`, and `drop <uN>` manage the same inbox as `/tasks`.
 
-Retired spellings fail closed and print their exact replacement. In particular,
-`/targets` points to `/settings targets`, `/scoped-models` points to
-`/settings chat model-picker`, and `/library`, `/prompts`, and `/extensions`
-point to the corresponding `/resources` subcommand. They never fall through to
-the model as prompt text.
+Retired spellings are unrecognized commands and use the standard unknown-command diagnostic; they do not print automatic replacement hints. Use supported spellings such as `/settings targets`, `/settings chat model-picker`, and the corresponding `/resources` subcommand. Unrecognized commands are not sent to the model as prompt text.
 
 `/context` with no arguments opens the context-window ledger overlay, including
 the working-set section (policy, evicted items and tokens, events, recalls, churn).
@@ -443,14 +439,7 @@ one or `d` to decline; the overlay reads the report this process already produce
 at boot and never probes on a keystroke. Accepting applies to the live session,
 because `delegation` hot-reloads.
 
-Boot adds at most one line about interop, in the current source shape
-`clio-coder: codex detected on PATH and not configured. Run /interop to review.`
-The `/interop` name is retained only as a retired-command tombstone and answers
-`Use /agents connect.`, so operators can open `/agents connect` directly. The
-hint names only agents that are installed, unconfigured, and undecided, appears
-at most once per set of facts, and is never emitted in headless or ACP mode.
-Declining an agent silences it until its binary version or path changes, at which
-point it becomes a fresh proposal.
+Boot adds at most one line about interop. The current hint can still say `Run /interop to review.`, but `/interop` is unrecognized and receives the standard unknown-command diagnostic. Open `/agents connect` directly. The hint names only agents that are installed, unconfigured, and undecided, appears at most once per set of facts, and is never emitted in headless or ACP mode. Declining an agent silences it until its binary version or path changes, at which point it becomes a fresh proposal.
 
 `clio-coder doctor` reports interop and never proposes anything. It emits one
 `ok` row per detected agent naming its version, its path, and whether it is
@@ -848,3 +837,11 @@ actual behavior. Redact secrets and private repository content.
 > CLI subcommands (`targets use/remove/rename/profile/convert`, `context refresh`,
 > `fleet list/run/status/drain/resume`, `auth login`), passing `--help` prints
 > usage instructions and exits with code 0.
+
+## Operator-task handoff and continuation
+
+`clio-coder tasks hand <uN>` prints the inbox record as JSON on stdout and an actionable pickup prompt on stderr. Submit that prompt to the intended session. Before task work, the model must pick the intended `uN`, confirm its durable session and board linkage, and use the returned `tN`. Handing a task does not itself pick it. Completion should be checked against the linked board and inbox with the actual IDs; manual CLI completion is an operator action, not evidence of model completion.
+
+Acceptance rows labeled Required declare expected checks and timeout limits; they are not pending executions or passing results. Inspect verification receipts for outcomes. Under high rigor, the finish gate requires the applicable passing checks or explicit limitations.
+
+Task-board guidance and ordinary continuation preserve proposal-only scope. Deferred implementation should be blocked or dropped while awaiting an explicit operator go-ahead. A skill-install decision is separate from implementation authorization, and full-auto capability does not expand the task. These are model instructions, not a guarantee of model adherence.

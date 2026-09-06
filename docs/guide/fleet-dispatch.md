@@ -962,3 +962,13 @@ the contract explicitly with `clio-coder fleet run <name>` and retain its
 receipts. The [fleet demo runbook](../process/fleet-demo-runbook.md) provides a bounded
 end-to-end scenario, including reviewer gates and verification commands. Live
 fleet execution is not hidden inside deterministic CI.
+
+## Bounded result delivery
+
+Documenter and Coder use a structured report. Explicit recipe selections remain in force. For a read-only explanation, its `summary` carries the requested explanation and citations, with `mutatedPaths` empty. The summary has a strict 1000 UTF-8 byte limit. If the requested answer cannot fit or cannot be grounded, the summary must state the specific limitation. A longer artifact requires authorization to write it; a shortened answer or validation log does not satisfy an unmet length requirement.
+
+The Scout recipe instructs the model to return structured findings with source paths and exact lines checked against live reads. A search hit alone does not establish a citation. On repair, unsupported findings should be removed rather than moved to convenient range endpoints. Inline delivery and schema conformance do not establish semantic citation accuracy.
+
+The fleet tool-call cap limits tool use. The `fleet.limits.internalRunTimeoutMs` setting bounds internal CLI dispatch; it does not impose a wall-clock deadline on ordinary TUI dispatch workers.
+
+A pipeline stops before admitting a dependent when a completed step reports failed quality. Execution success, result conformance, and deliverable quality remain separate facts. An independent recovery has its own receipt and does not replace the failed pipeline result. When delivery is missing or incomplete, report the terminal result and limitation; a successful process exit alone does not establish the requested deliverable.

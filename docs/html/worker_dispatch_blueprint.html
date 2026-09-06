@@ -356,7 +356,9 @@ this table.</p>
 <li><strong><code>3</code> (<code>WORKER_EXIT_PERMISSION_REQUIRED</code>)</strong>: The run aborted because a tool required permission and <code>onPermission</code> was set to <code>fail</code> (or timed out to a <code>fail</code> fallback).</li>
 <li><strong>Other (e.g., <code>1</code> or uncaught exceptions)</strong>: Represents an unhandled crash or internal error within the runner.</li>
 </ul>
-        </article>
+        <h2>Antigravity conversation identity</h2>
+<p>Antigravity resumes a conversation only when a caller explicitly supplies its conversation ID through the worker runtime. The dispatch tool exposes no resume argument. A nonempty ID must be at most 4096 UTF-8 bytes and contain no Unicode control characters; it is passed as a literal <code>--conversation</code> argument. Clio requires the first init conversation ID to match the requested ID and fails the run if agy starts a different conversation. An absent or empty ID starts fresh. Antigravity runs are never retried automatically.</p>
+</article>
         <nav class="related-nav" aria-label="Adjacent references">
           <a class="nav-link-card" href="tui_design_blueprint.html"><span class="nav-label">Previous</span><span class="nav-title">Clio TUI Design System</span></a>
           <a class="nav-link-card next" href="development_pipeline_blueprint.html"><span class="nav-label">Next</span><span class="nav-title">Development Pipeline</span></a>

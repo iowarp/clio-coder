@@ -37,6 +37,12 @@ skill pins), one build, the contract/smoke suite, and the trace-viewer suite.
 Use `npm run skills:check` when checking skill pins on their own; it is already
 included in `lint` and `ci`.
 
+The GitHub `ci` job runs the release gate on Ubuntu. The separate
+`windows-subprocess` job uses Node 22 on `windows-latest` and runs typecheck
+plus the Antigravity subprocess, Bash settlement, and Windows process-tree
+contracts. It is a focused Windows lane, not the full suite. Native Windows
+local checks provide local evidence; they do not establish a hosted CI pass.
+
 Release gate (for maintainers before tags or release artifacts):
 
 ```bash

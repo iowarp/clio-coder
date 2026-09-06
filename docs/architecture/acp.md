@@ -347,3 +347,13 @@ The submission procedure follows these steps:
 3. Copy `assets/acp-registry/agent.json` and `assets/acp-registry/icon.svg` into that directory.
 4. Verify that `agent.json` adheres to the registry schema and that `icon.svg` remains monochrome with viewBox `0 0 16 16`.
 5. Submit a pull request to the upstream registry repository. Once merged, clients that consume the ACP registry discover and install Clio Coder automatically.
+
+## Independent lifecycle coverage
+
+Workbench host replacement and direct ACP session isolation are separate checks. For the supported host API lifecycle, open a session and complete a turn, close, then use New and complete another turn. Close retires child A and initializes unbound child B; New binds B without a third launch. Record actual PIDs and host generations: both must change. A reused session ID alone cannot prove child replacement.
+
+For direct ACP isolation, keep one stdio child alive through new, turn, close, new, and turn. Record the same live PID and distinct session IDs. Check that the second request and persisted ledger exclude first-session history and turn ancestry and that the actual tasks list has no board. Explicitly resuming the first session must restore its own history and task state without second-session text. Record bounded teardown and child exit.
+
+The Workbench host contract uses a fixture subprocess; the direct ACP smoke uses built Clio with a loopback provider. Neither establishes browser interaction or live-provider behavior. The GUI has no close control, and the host API retires its child on close. Record host restart and direct same-child isolation independently, with the actions, process identities, evidence mode, and limits.
+
+ACP delegation receipts preserve peer-reported token totals, including explicit zero usage, and supported cost provenance without double-counting event metering. A peer total is used when supplied; otherwise components determine the total. Unknown cost is not evidence of free execution.

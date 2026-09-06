@@ -83,3 +83,9 @@ Two operational notes. A copy dropped into a project-scope `.claude/skills/archi
 ## Publishing a skill
 
 Add a directory under `skills/<category>/<name>/` (or `skills/<name>/`) in the repo containing a `SKILL.md` with `name` and `description` frontmatter. The directory name must match `[A-Za-z0-9][A-Za-z0-9._-]*`. Run `npm run skills:pin` to republish `skills/skill-marketplace.json`, which is the index consumers point `CLIO_CODER_SKILL_MARKETPLACE_INDEX` at or copy to `<configDir>/skill-marketplace.json`. Scientific and niche coding domains are the marketplace's focus; see the existing `skills/` tree for the house format.
+
+## Matching and offers
+
+Authored whole-phrase triggers rank before incidental description or name overlap. Matching remains lexical: interactive offer guidance asks the model to check installed alternatives and relevance before presenting an offer. A match does not guarantee that a model will offer or use the skill.
+
+Interactive offers require a bound operator answer before installation. Headless runs emit a passive installation hint; that reminder opens no interview and performs no installation or activation. Installing a skill makes it discoverable; listing it or supplying an explicit skill path makes it available, while loading its body remains subject to activation policy. At `read-only` and `suggest`, activation requires an operator request; `auto-edit` and `full-auto` may activate installed skills. A suggestion alone continues the task without activation.
