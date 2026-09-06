@@ -26,6 +26,7 @@ import {
 	DISPATCH_PLAN_PREPARATION_ERROR_ARGUMENT,
 	type DispatchPlanView,
 	describeDispatchPlan,
+	dispatchPlanTopology,
 	RESOLVED_DISPATCH_PLAN_ARGUMENT,
 	type ResolvedDispatchPlanArtifact,
 	resolvedDispatchPlanFromArgs,
@@ -741,7 +742,9 @@ export function createDispatchAdmissionController(deps: DispatchToolDeps): Dispa
 				for (const [index, request] of parsed.requests.entries()) tasks.push(resolveTask(request, "task", index + 1));
 			}
 
-			const topology = describeDispatchPlan(args).topology;
+			// Scope has already been resolved on tasks. Rendering the raw call here
+			// would discard its typed intent and run legacy prose inference again.
+			const topology = dispatchPlanTopology(args);
 			const planScale =
 				tasks.length > 1 ||
 				topology === "compete" ||

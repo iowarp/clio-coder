@@ -5,6 +5,7 @@ import { join } from "node:path";
 import { afterEach, beforeEach, describe, it } from "node:test";
 
 import { DEFAULT_SETTINGS } from "../../src/core/defaults.js";
+import type { AgentsContract } from "../../src/domains/agents/contract.js";
 import type { AgentSpec } from "../../src/domains/agents/spec.js";
 import { foregroundEndpointBlock } from "../../src/domains/dispatch/admission.js";
 import {
@@ -30,7 +31,7 @@ import {
 } from "../../src/domains/providers/index.js";
 import claudeCodeRuntime from "../../src/domains/providers/runtimes/claude/claude-code.js";
 import { createDispatchTool } from "../../src/tools/dispatch.js";
-import { describeDispatchPlan } from "../../src/tools/dispatch-plan.js";
+import { DISPATCH_PLAN_PREPARATION_ERROR_ARGUMENT, describeDispatchPlan } from "../../src/tools/dispatch-plan.js";
 import type { WorkerSpec } from "../../src/worker/spec-contract.js";
 import { isolateDispatchState, makeDispatchBundle, restoreDispatchState } from "../harness/dispatch.js";
 import { dispatchStubContext } from "../harness/dispatch-stub-context.js";
@@ -88,6 +89,65 @@ describe("dispatch admission boundary", () => {
 
 	beforeEach(async () => isolateDispatchState());
 	afterEach(() => restoreDispatchState());
+
+	it("preserves declared intent through admission when briefing quotes an absolute workspace", async () => {
+		const context = dispatchStubContext();
+		const agents = context.getContract<AgentsContract>("agents");
+		ok(agents);
+		const bundle = makeDispatchBundle(context, {
+			spawnWorker: () => {
+				throw new Error("preparation must not spawn a worker");
+			},
+		});
+		await bundle.extension.start();
+		try {
+			const tool = createDispatchTool({
+				dispatch: bundle.contract,
+				getAgentSpecs: () => agents.listSpecs(),
+				getAutonomy: () => "full-auto",
+			});
+			ok(tool.prepareAdmissionArguments);
+			for (const workspace of ["/tmp/source-repository.", "C:\\work\\source-repository."]) {
+				for (const count of [1, 2]) {
+					const prepared = tool.prepareAdmissionArguments({
+						agent: "coder",
+						mode: "pipeline",
+						briefing: `The inspected workspace is ${workspace}`,
+						intent: { read_roots: ["slugify/slugify.py", "test.py"], expected_outputs: [] },
+						tasks: Array.from({ length: count }, () => ({
+							task: "Explain smart_truncate from the declared source; do not edit files.",
+						})),
+					});
+					strictEqual(prepared[DISPATCH_PLAN_PREPARATION_ERROR_ARGUMENT], undefined);
+					const plan = tool.describeDispatchPlan?.(prepared);
+					ok(plan);
+					strictEqual(plan.topology, "pipeline");
+					strictEqual(plan.taskCount, count);
+					for (const task of plan.tasks) {
+						deepStrictEqual(task.intent?.readRoots, ["slugify/slugify.py", "test.py"]);
+						deepStrictEqual(task.intent?.writeRoots, []);
+					}
+					ok(!plan.text.includes("scope mode=legacy-inferred"));
+					tool.disposeAdmissionArguments?.(prepared);
+				}
+			}
+			const legacy = tool.prepareAdmissionArguments({
+				task: "Explain the source",
+				briefing: "Workspace /tmp/source-repository.",
+				agent: "coder",
+			});
+			match(String(legacy[DISPATCH_PLAN_PREPARATION_ERROR_ARGUMENT]), /legacy_scope_path_absolute/u);
+			const invalid = tool.prepareAdmissionArguments({
+				task: "Explain the source",
+				agent: "coder",
+				intent: { read_roots: ["../outside"] },
+			});
+			ok(typeof invalid[DISPATCH_PLAN_PREPARATION_ERROR_ARGUMENT] === "string");
+			strictEqual(bundle.contract.listRuns().length, 0);
+		} finally {
+			await bundle.extension.stop?.();
+		}
+	});
 
 	it("refuses a pinned read-only recipe for a mutation and admits sound capability pairings", () => {
 		const specs = [agent("verifier", "verification"), agent("coder", "workspace-edit")];

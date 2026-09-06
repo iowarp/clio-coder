@@ -376,7 +376,8 @@ function canonicalCandidates(value: unknown): DispatchFailoverCandidate[] | null
 	return out.length > 0 ? out : null;
 }
 
-function topologyOf(args: Record<string, unknown>): DispatchPlanTopology {
+/** Select topology without rendering unresolved task scope or consulting provider state. */
+export function dispatchPlanTopology(args: Record<string, unknown>): DispatchPlanTopology {
 	if (isRecord(args.apply_winner)) return "compete";
 	if (args.mode === "compete") return "compete";
 	if (args.mode === "council") return "council";
@@ -901,7 +902,7 @@ export function describeDispatchPlan(rawArgs: Record<string, unknown> | undefine
 	const args = prepareDispatchArguments(rawArgs ?? {});
 	const preparationFailed = typeof args[DISPATCH_PLAN_PREPARATION_ERROR_ARGUMENT] === "string";
 	const resolved = resolvedDispatchPlanFromArgs(args);
-	const topology = resolved?.topology ?? topologyOf(args);
+	const topology = resolved?.topology ?? dispatchPlanTopology(args);
 	const tasks = resolved?.tasks ?? taskViews(args);
 	const costCeilingUsd = resolved?.costCeilingUsd;
 	const deadlineMs = resolved?.deadlineMs ?? null;
