@@ -1,4 +1,4 @@
-import { deepStrictEqual, doesNotMatch, ok, rejects, strictEqual } from "node:assert/strict";
+import { deepStrictEqual, doesNotMatch, match, ok, rejects, strictEqual } from "node:assert/strict";
 import { describe, it } from "node:test";
 import { DEFAULT_SETTINGS } from "../../src/core/defaults.js";
 import { foldWorkingSet } from "../../src/domains/context/working-set/fold.js";
@@ -371,6 +371,86 @@ describe("typed historical skill checkpoints (pure source)", () => {
 		});
 		deepStrictEqual(second.skillContext, result.skillContext);
 		deepStrictEqual(second.userContext, result.userContext);
+	});
+
+	it("compacts after an explicit-off checkpoint when later state is unknown or legacy-blocked", async () => {
+		const { entries } = history();
+		const off: SessionEntry = {
+			kind: "custom",
+			turnId: "off",
+			parentTurnId: "tail",
+			timestamp,
+			customType: SKILL_CONTEXT_STATE,
+			data: { version: 1, activationRefs: [] },
+		};
+		const first = await run([...entries, off]);
+		ok(first.messagesSummarized > 0);
+		deepStrictEqual(first.skillContext, { version: 1, skills: [] });
+		const unknownState: SessionEntry = {
+			kind: "custom",
+			turnId: "unknown",
+			parentTurnId: "two",
+			timestamp,
+			customType: SKILL_CONTEXT_STATE,
+			data: { version: 1, activationRefs: [], unknown: true },
+		};
+		const grown = [
+			...entries,
+			off,
+			checkpoint(first, "checkpoint"),
+			message("one", "assistant", { text: "evidence ".repeat(3000) }, "tail"),
+			message("two", "assistant", { text: "more ".repeat(3000) }, "one"),
+			unknownState,
+		];
+		// Nothing was retained, so unknown state neither throws nor re-protects the switched-off activation.
+		const second = await run(grown);
+		ok(second.messagesSummarized > 0);
+		strictEqual(second.skillContext, undefined);
+		doesNotMatch(
+			JSON.stringify(buildModelReplayAgentMessagesFromTurns([...grown, checkpoint(second, "c2")])),
+			/END_SKILL/,
+		);
+		// A legacy checkpoint with no typed field still fails closed across its boundary.
+		const { skillContext: _typed, ...legacyResult } = first;
+		const legacy = [...entries, checkpoint(legacyResult, "legacy")];
+		legacy.push(message("one", "assistant", { text: "evidence ".repeat(3000) }, "tail"));
+		strictEqual((await run(legacy)).messagesSummarized, 0);
+	});
+
+	it("names a selected skill it cannot re-verify at replay instead of dropping it silently", async () => {
+		const { entries } = history();
+		const row = checkpoint(await run(entries, selection), "checkpoint");
+		const raw = entries[4];
+		ok(raw?.kind === "message");
+		const payload = raw.payload as { result: { content: unknown; details: Record<string, unknown> } };
+		payload.result = {
+			content: [{ type: "text", text: "[Observation masked]" }],
+			details: { ...payload.result.details, contextCompaction: { stage: "mask_observations" } },
+		};
+		const masked = JSON.stringify(buildModelReplayAgentMessagesFromTurns([...entries, row]));
+		doesNotMatch(masked, /END_SKILL/);
+		match(masked, /could not be re-verified/);
+		match(masked, /diagram \(source=clio-coder hash=a{64}/);
+		match(masked, /ref=\\"result\\"/);
+		// A deliberate off or replacement leaves no trace at all.
+		const off: SessionEntry = {
+			kind: "custom",
+			turnId: "off",
+			parentTurnId: "tail",
+			timestamp,
+			customType: SKILL_CONTEXT_STATE,
+			data: { version: 1, activationRefs: [] },
+		};
+		doesNotMatch(JSON.stringify(buildModelReplayAgentMessagesFromTurns([...entries, row, off])), /diagram|re-verified/);
+		// A tampered checkpoint says so once without naming unverified content.
+		const tampered = structuredClone(row);
+		ok(tampered.kind === "compactionSummary" && tampered.skillContext);
+		const tamperedSkill = tampered.skillContext.skills[0];
+		ok(tamperedSkill);
+		tamperedSkill.contentHash = "0".repeat(64);
+		const text = JSON.stringify(buildModelReplayAgentMessagesFromTurns([...history().entries, tampered]));
+		match(text, /failed integrity verification/);
+		doesNotMatch(text, /END_SKILL/);
 	});
 
 	it("leaves the real continuation guard enforced if exact preservation cannot fit", async () => {

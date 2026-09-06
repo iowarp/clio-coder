@@ -689,32 +689,47 @@ export async function compact(input: CompactInput): Promise<CompactResult> {
 		input.skillContextState === null ? undefined : (input.skillContextState ?? latestSkillContextState(input.entries));
 	let skillContext = captureSkillContext(input.entries, selection);
 	const priorCheckpoint = entries[prevCompactionIndex];
+	// An explicit-off checkpoint carries an empty skill list: nothing was
+	// retained, so nothing needs re-verification and later unknown state must
+	// not block compaction forever.
+	const priorSkillContext =
+		priorCheckpoint?.kind === "compactionSummary" &&
+		priorCheckpoint.skillContext !== undefined &&
+		priorCheckpoint.skillContext.skills.length > 0
+			? priorCheckpoint.skillContext
+			: undefined;
 	// A typed checkpoint is not regenerated from summary prose. Failure to verify
 	// its original receipts prevents another destructive pass.
-	if (priorCheckpoint?.kind === "compactionSummary" && priorCheckpoint.skillContext !== undefined && !skillContext) {
+	if (priorSkillContext !== undefined && !skillContext) {
 		throw new Error("cannot verify preserved skill context; retaining the existing checkpoint");
 	}
-	if (priorCheckpoint?.kind === "compactionSummary" && priorCheckpoint.skillContext !== undefined) {
-		if (!verifiedSkillContextCheckpoint(priorCheckpoint.skillContext))
-			throw new Error("invalid preserved skill checkpoint");
-		for (const previous of priorCheckpoint.skillContext.skills) {
+	if (priorSkillContext !== undefined) {
+		if (!verifiedSkillContextCheckpoint(priorSkillContext)) throw new Error("invalid preserved skill checkpoint");
+		for (const previous of priorSkillContext.skills) {
 			const current = skillContext?.skills.find((skill) => skill.activationRef === previous.activationRef);
 			if (current && JSON.stringify(current) !== JSON.stringify(previous)) {
 				throw new Error("preserved skill context no longer matches its captured receipt");
 			}
 		}
 	}
-	if (skillContext && priorCheckpoint?.kind === "compactionSummary" && priorCheckpoint.skillContext) {
+	if (skillContext && priorSkillContext !== undefined) {
 		skillContext = {
 			version: 1,
 			skills: skillContext.skills.map((skill) =>
 				structuredClone(
-					priorCheckpoint.skillContext?.skills.find((previous) => previous.activationRef === skill.activationRef) ?? skill,
+					priorSkillContext.skills.find((previous) => previous.activationRef === skill.activationRef) ?? skill,
 				),
 			),
 		};
 	}
-	const protectedStart = skillContext ? null : findLatestSkillActivationProtectionStart(entries, 0);
+	// A legacy checkpoint (no typed field) never adjudicated older activations,
+	// so the fallback clamp stays fail-closed across its boundary. A typed
+	// checkpoint already retained or explicitly dropped everything before it.
+	const legacyPriorCheckpoint =
+		priorCheckpoint?.kind === "compactionSummary" && priorCheckpoint.skillContext === undefined;
+	const protectedStart = skillContext
+		? null
+		: findLatestSkillActivationProtectionStart(entries, legacyPriorCheckpoint ? 0 : boundaryStart);
 	const usageStart = prevCompactionIndex >= 0 ? prevCompactionIndex : 0;
 	const usageEntries = entries.slice(usageStart);
 	const lastUsage = getLastAssistantUsage(usageEntries);

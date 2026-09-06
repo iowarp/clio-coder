@@ -26,6 +26,7 @@ import type {
 	FileEntryEntry,
 	MessageEntry,
 	ModelChangeEntry,
+	PreservedSkillContext,
 	ProtectedArtifactEntry,
 	SessionEntry,
 	SessionInfoEntry,
@@ -1072,6 +1073,15 @@ function appendContextMessage(
 	out.push(makeTextMessage(role, truncateReplayText(trimmed), timestamp));
 }
 
+const UNVERIFIED_SKILL_CHECKPOINT_TEXT =
+	"Preserved skill instructions on this checkpoint failed integrity verification and were not replayed. If a skill still applies, ask the operator to run /skill <name> again.";
+
+/** Selected but unverifiable: name the skill and the exact ledger ref instead of dropping it. */
+function unverifiedSkillContextText(skill: PreservedSkillContext): string {
+	const activation = skill.activation;
+	return `Preserved skill instructions for ${activation.name} (source=${activation.source} hash=${activation.hash} path=${activation.filePath}) could not be re-verified against this session's ledger and were not replayed. If the skill still applies, recall the original load with context(scope="recall", ref="${skill.resultRef}") or ask the operator to run /skill ${activation.name} again.`;
+}
+
 function skillActivationContextText(entry: Extract<SessionEntry, { kind: "skillActivation" }>): string {
 	const activation = entry.activation;
 	const turn = activation.turnId ? ` turn=${activation.turnId}` : "";
@@ -1132,10 +1142,27 @@ export function buildReplayAgentMessagesFromTurns(
 						makeTextMessage("user", `Active user instructions (verbatim):\n${entry.userContext.text}`, entry.timestamp),
 					);
 				if (entry.skillContext !== undefined) {
-					if (!verifiedSkillContextCheckpoint(entry.skillContext)) break;
+					const retainedSkills = entry.skillContext.skills.length;
+					if (!verifiedSkillContextCheckpoint(entry.skillContext)) {
+						// The raw pairs behind a tampered checkpoint are already outside the
+						// replay window. Say so rather than dropping the skill without a trace.
+						if (retainedSkills > 0) {
+							out.push(makeTextMessage("user", UNVERIFIED_SKILL_CHECKPOINT_TEXT, entry.timestamp));
+						}
+						break;
+					}
 					for (const skill of entry.skillContext.skills) {
+						// An explicit later state that no longer names this activation is a
+						// deliberate off or replacement; it leaves no trace, by design.
+						if (skillState && !skillState.unknown && !skillState.activationRefs.includes(skill.activationRef)) continue;
 						const receipt = verified?.skills.find((candidate) => candidate.activationRef === skill.activationRef);
-						if (!receipt || JSON.stringify(receipt) !== JSON.stringify(skill)) continue;
+						if (!receipt || JSON.stringify(receipt) !== JSON.stringify(skill)) {
+							// Still selected, but its original receipt cannot be re-verified
+							// (masked, rewritten, or unknown state). Never inject unverified
+							// bytes, and never lose the skill silently either.
+							out.push(makeTextMessage("user", unverifiedSkillContextText(skill), entry.timestamp));
+							continue;
+						}
 						// This is historical instruction context, not a generated summary or a tool result.
 						// Keep the exact captured blocks outside summary replay's text cap.
 						out.push(makeTextMessage("user", `Preserved skill request (verbatim):\n${skill.requestText}`, entry.timestamp));
