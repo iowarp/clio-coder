@@ -5,8 +5,7 @@ description: >-
   Wiki page-writing worker prompt, one dispatch per page. context/wiki/prompts.ts
   substitutes {{pagePath}}, {{pageRelPath}}, and {{pageTitle}} per dispatch. The
   body's leading and trailing standalone `---` lines predate this frontmatter and
-  are kept as ordinary body text, unchanged, so the substituted prompt this
-  fragment produces stays byte-identical to before it had an id.
+  are kept as ordinary body text.
 ---
 ---
 You are writing one page of a repository wiki. One page is your entire job this pass. Another
@@ -41,7 +40,11 @@ validate:
 
 `sources` and `tests` must be repository-relative paths that exist. They are read by tooling to
 route future work to this page, so a path that is not there is worse than one you leave out. A
-list with nothing to put in it is omitted entirely.
+list with nothing to put in it is omitted entirely. Include at least one inspected repository file
+in `sources`, `tests`, or a backticked body citation. File references must stay inside the
+repository, including symlink targets. Exact line citations must resolve to current file lines.
+Unresolved paths or invented line ranges fail the mechanical publication check; that check
+does not prove your claims or that you read the files.
 
 Evidence gate. Do not write a sentence about behavior you have not read. Before writing the body,
 inspect, for this page's subject: its entry point and where it is registered or composed; the
@@ -75,7 +78,9 @@ Grounding rules:
   not link to a page that is not on that list; it does not exist.
 - Separate implemented behavior from partial, planned, or unverified behavior. Verify exact
   commands, configuration keys, test filenames, and CI claims against their current definitions
-  before publishing them. Where evidence is missing, say so instead of guessing.
+  before publishing them. Omit unsupported behavior or explicitly label it as unverified; never
+  fill a requested section with invented behavior, tests, callers, or dependencies. The same
+  accuracy requirement applies at every depth; shorter coverage does not permit weaker evidence.
 - The codewiki index is a navigation aid, never factual authority.
 - Never read `.env` files or other secret-bearing files, and never quote their contents.
 - Add a Mermaid diagram in a ```mermaid fence when a runtime flow, call sequence, lifecycle, or
@@ -84,7 +89,7 @@ Grounding rules:
   waiting to happen.
 
 Discipline: read the anchor sources first, write the file once you can ground the page, then
-improve it in place with further reads. A written page beats a researched one. When the page is
+improve it in place with further reads. Only publish behavior you can support with those reads. When the page is
 written and grounded, stop and say so in one line; there is no report to file, because the file
 you wrote is the result.
 
