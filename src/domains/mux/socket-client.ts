@@ -645,9 +645,19 @@ export function createMuxClient(options: MuxClientOptions): MuxClient {
 						// so an empty-id error line on this connection is still ours.
 						if (responseId !== id && !(responseId === "" && error)) return;
 						if (error) {
-							const code = typeof error.code === "string" ? error.code : "unknown";
-							const message = typeof error.message === "string" ? error.message : code;
-							finish(() => reject(new MuxError(muxErrorKind(code), message, { wireCode: code, method })));
+							const code = typeof error.code === "string" ? error.code : undefined;
+							// Absence is different from a host literally saying "unknown".
+							// Keep supplied text verbatim and make missing text explicit here.
+							const message =
+								typeof error.message === "string" ? error.message : "no failure message was supplied by the pane host";
+							finish(() =>
+								reject(
+									new MuxError(muxErrorKind(code ?? "unknown"), message, {
+										...(code === undefined ? {} : { wireCode: code }),
+										method,
+									}),
+								),
+							);
 							return;
 						}
 						finish(() => resolve(line.result));

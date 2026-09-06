@@ -198,7 +198,12 @@ export interface DockController {
 	 */
 	open(
 		slot: DockSlot,
-		options?: { share?: number; cwd?: string; env?: Readonly<Record<string, string>> },
+		options?: {
+			share?: number;
+			cwd?: string;
+			env?: Readonly<Record<string, string>>;
+			onRefused?: (reason: string) => void;
+		},
 	): Promise<MuxPaneRef | null>;
 	/** Record an adopted pane (crash recovery) as this slot's dock. */
 	adopt(slot: DockSlot, ref: MuxPaneRef): void;
@@ -265,11 +270,13 @@ export function createDockController(options: DockControllerOptions): DockContro
 			const geometry = await client.paneLayout(anchorPaneId);
 			const anchorRect = geometry.panes.find((pane) => pane.paneId === anchorPaneId)?.rect;
 			if (!anchorRect) {
+				openOptions.onRefused?.(`no anchor geometry for ${anchorPaneId}; check the pane host layout before trying again`);
 				log("debug", `mux ${slot} dock open found no anchor rect for ${anchorPaneId}`);
 				return null;
 			}
 			const plan = planDockOpen(anchorRect, spec, openOptions.share);
 			if ("refused" in plan) {
+				openOptions.onRefused?.(`${plan.refused}; enlarge the anchor pane before trying again`);
 				log("info", `mux ${slot} dock refused: ${plan.refused}`);
 				return null;
 			}

@@ -21,7 +21,7 @@
 import { mkdirSync, renameSync, writeFileSync } from "node:fs";
 import { dirname, join } from "node:path";
 import { type ClioDirs, clioCacheDir, clioConfigDir, clioDataDir, clioStateDir } from "../core/xdg.js";
-import type { MuxContract, MuxPaneRef } from "../domains/mux/index.js";
+import type { MuxContract, MuxPaneOpenFailure, MuxPaneRef } from "../domains/mux/index.js";
 import type { PanesWatchController, PanesWatchResult } from "../domains/mux/operations.js";
 import { watchViewerCommand } from "../domains/mux/viewer-command.js";
 
@@ -115,8 +115,9 @@ export function createWatchPaneController(deps: WatchPaneDeps): PanesWatchContro
 	 * of Clio's pane at the configured share. On a host without the layout tier
 	 * the dock request degrades inside the contract to a plain right split.
 	 */
-	const openPane = (): Promise<MuxPaneRef | null> =>
+	const openPane = (onFailure?: (failure: MuxPaneOpenFailure) => void): Promise<MuxPaneRef | null> =>
 		deps.mux.openUtilityPane({
+			...(onFailure ? { onFailure } : {}),
 			argv: command(selectionPath, dirs),
 			cwd: deps.getCwd(),
 			label: "watch",
@@ -152,9 +153,22 @@ export function createWatchPaneController(deps: WatchPaneDeps): PanesWatchContro
 			const scanned = await adoptExistingPane();
 			if (!scanned) await adoptExistingPane();
 			if (paneId !== null) return { status: "watching", runId, paneId, opened: false };
-			const opened = await openPane();
+			let reason =
+				"cannot open the watch pane: no failure reason was supplied by the pane host; check /panes before trying again";
+			const opened = await openPane((failure) => {
+				if (failure.source === "local") {
+					reason = `cannot open the watch pane locally: ${failure.message}`;
+				} else {
+					const details = [
+						`kind=${failure.kind}`,
+						...(failure.wireCode === null ? [] : [`code=${failure.wireCode}`]),
+						...(failure.method === null ? [] : [`method=${failure.method}`]),
+					];
+					reason = `cannot open the watch pane (${details.join(", ")}): ${failure.message || "no failure message was supplied by the pane host"}`;
+				}
+			});
 			if (opened === null) {
-				return { status: "unavailable", reason: "the pane host refused to open the watch pane" };
+				return { status: "unavailable", reason };
 			}
 			paneId = opened.paneId;
 			return { status: "watching", runId, paneId, opened: true };
