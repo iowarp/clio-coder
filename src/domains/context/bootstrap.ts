@@ -1,9 +1,10 @@
 import { execFileSync } from "node:child_process";
 import { createHash, randomUUID } from "node:crypto";
 import { existsSync, mkdirSync, readFileSync, writeFileSync } from "node:fs";
-import { dirname, join, parse } from "node:path";
+import { dirname, join, parse, resolve } from "node:path";
 import type { ContextActivityPayload } from "../../core/bus-events.js";
 import { createTomlFileReader, type TomlFileReader, tomlTableAt } from "../../core/toml.js";
+import { INTEROP_AGENT_KINDS } from "../interop/registry.js";
 import { type ProjectPreloadClass, selectProjectPreload } from "../prompts/preload.js";
 import { detectProjectType, type ProjectType } from "../session/workspace/project-type.js";
 import {
@@ -250,6 +251,23 @@ function projectTypeLabel(projectType: ProjectType): string {
 	}
 }
 
+/** Only project-wide instructions may become unconditional handbook rules. */
+function handbookInstructionFiles(input: BootstrapGenerateInput): SiblingContextFile[] {
+	const projectPaths = new Set(
+		INTEROP_AGENT_KINDS.flatMap((kind) => kind.instructionFiles.map((file) => resolve(input.cwd, file))),
+	);
+	const allowed = new Set(
+		input.adoption.sources
+			.filter((source) => {
+				if (source.kind !== "instructions") return false;
+				if (source.scope === "project") return projectPaths.has(source.path);
+				return input.adoption.includeGlobal && source.path === resolve(input.adoption.homeDir, ".codex/AGENTS.md");
+			})
+			.map((source) => source.path),
+	);
+	return input.siblingFiles.filter((file) => allowed.has(file.path));
+}
+
 function allContextText(files: ReadonlyArray<SiblingContextFile>): string {
 	return files.map((file) => file.content).join("\n\n");
 }
@@ -309,7 +327,7 @@ function resolveDefaultIdentity(
  * strictly better than that, and only than that.
  */
 function stabilizedIdentity(input: BootstrapGenerateInput, modelIdentity: unknown, tomlFiles: TomlFileReader): string {
-	const deterministic = resolveDefaultIdentity(input.cwd, input.projectType, input.siblingFiles, tomlFiles);
+	const deterministic = resolveDefaultIdentity(input.cwd, input.projectType, handbookInstructionFiles(input), tomlFiles);
 	const model = typeof modelIdentity === "string" ? modelIdentity.trim() : "";
 	if (deterministic.bare && model.length > 0) return model;
 	return deterministic.text;
@@ -725,12 +743,12 @@ function stabilizeGeneratedOutput(
 	const existing = input.existingClioMd;
 	const conventions: string[] = [];
 	for (const convention of existing?.conventions ?? []) pushUnique(conventions, convention);
-	for (const convention of inferConventions(input.cwd, input.siblingFiles, input.codewiki)) {
+	for (const convention of inferConventions(input.cwd, handbookInstructionFiles(input), input.codewiki)) {
 		pushUnique(conventions, convention);
 	}
 	const invariants: string[] = [];
 	for (const invariant of existing?.invariants ?? []) pushUnique(invariants, invariant);
-	for (const invariant of inferInvariants(input.siblingFiles)) pushUnique(invariants, invariant);
+	for (const invariant of inferInvariants(handbookInstructionFiles(input))) pushUnique(invariants, invariant);
 
 	const verification = verificationSection(input.cwd, tomlFiles);
 	const inferredSections = inferHeuristicSections(input);
@@ -794,7 +812,7 @@ function codewikiSections(codewiki: Codewiki): ClioMdSection[] {
 
 function inferHeuristicSections(input: BootstrapGenerateInput): ClioMdSection[] {
 	const sections: ClioMdSection[] = [...codewikiSections(input.codewiki)];
-	const invariants = inferInvariants(input.siblingFiles);
+	const invariants = inferInvariants(handbookInstructionFiles(input));
 	if (invariants.length > 0) {
 		sections.push({
 			title: "Architecture boundaries",
@@ -828,9 +846,9 @@ function heuristicBootstrapOutputSync(input: BootstrapGenerateInput): BootstrapS
 	const sharedInput = input.tomlFiles ? input : { ...input, tomlFiles };
 	return stabilizeGeneratedOutput(sharedInput, {
 		projectName: projectName(input.cwd, tomlFiles),
-		identity: resolveDefaultIdentity(input.cwd, input.projectType, input.siblingFiles, tomlFiles).text,
-		conventions: inferConventions(input.cwd, input.siblingFiles, input.codewiki),
-		invariants: inferInvariants(input.siblingFiles),
+		identity: resolveDefaultIdentity(input.cwd, input.projectType, handbookInstructionFiles(input), tomlFiles).text,
+		conventions: inferConventions(input.cwd, handbookInstructionFiles(input), input.codewiki),
+		invariants: inferInvariants(handbookInstructionFiles(input)),
 		sections: inferHeuristicSections(input),
 	});
 }

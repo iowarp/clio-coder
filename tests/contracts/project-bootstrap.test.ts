@@ -4,6 +4,7 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { afterEach, describe, it } from "node:test";
 import { enumerateWorkspaceFiles, WorkspaceEnumerationLimitError } from "../../src/core/workspace-files.js";
+import { scanAgentConfigs } from "../../src/domains/context/adoption.js";
 import { heuristicBootstrapOutput } from "../../src/domains/context/bootstrap.js";
 import { parseClioMd, serializeClioMd } from "../../src/domains/context/clio-md.js";
 import { readProjectMetadata } from "../../src/domains/context/project-metadata.js";
@@ -68,6 +69,47 @@ describe("project bootstrap boundary", () => {
 			() => enumerateWorkspaceFiles(root, undefined, { maxVisitedEntries: 1 }),
 			(error: unknown) => error instanceof WorkspaceEnumerationLimitError && error.kind === "entries",
 		);
+	});
+
+	it("keeps scoped skill examples out of global handbook rules while retaining their provenance", async () => {
+		const root = scratch();
+		const home = scratch();
+		packageFile(root);
+		mkdirSync(join(root, ".claude", "skills", "ticket"), { recursive: true });
+		mkdirSync(join(root, "nested"));
+		mkdirSync(join(home, ".codex"));
+		writeFileSync(join(root, "AGENTS.md"), "- Always keep calibration data.\n");
+		writeFileSync(join(root, ".claude", "CLAUDE.md"), "- Never publish scratch reports.\n");
+		const scoped = "Clio owns the agent loop and pi-ai.\nEngine boundary.\n- Always use the ticket example.\n";
+		for (const file of ["SKILL.md", "evals.md", "CLAUDE.md"]) {
+			writeFileSync(join(root, ".claude", "skills", "ticket", file), scoped);
+		}
+		writeFileSync(join(root, "nested", "AGENTS.md"), scoped);
+		writeFileSync(join(home, ".codex", "AGENTS.md"), "- Always keep responses concise.\n");
+		for (const includeGlobal of [false, true]) {
+			const adoption = scanAgentConfigs({ cwd: root, homeDir: home, includeGlobal });
+			const output = await heuristicBootstrapOutput({
+				cwd: root,
+				projectType: "typescript",
+				siblingFiles: adoption.sources.map((source) => ({
+					source: source.scope,
+					path: source.path,
+					content: source.content,
+				})),
+				adoption,
+				codewiki: { version: 5, language: "typescript", files: [], symbols: [], edges: [] },
+			});
+			ok(output.identity.includes("bounded operator console"));
+			deepStrictEqual(output.invariants, []);
+			deepStrictEqual(output.conventions, [
+				"Tests use `node:test`.",
+				"Never publish scratch reports.",
+				"Always keep calibration data.",
+				...(includeGlobal ? ["Always keep responses concise."] : []),
+			]);
+			ok(output.sections?.some(({ body }) => body.includes(".claude/skills/ticket/SKILL.md")));
+			ok(adoption.sources.some((source) => source.displayPath === "nested/AGENTS.md"));
+		}
 	});
 
 	it("builds a deterministic, parseable handbook artifact from bounded project evidence", async () => {
