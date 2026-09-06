@@ -1,6 +1,6 @@
 import assert from "node:assert/strict";
 import { execFileSync } from "node:child_process";
-import { existsSync, mkdirSync, readdirSync, readFileSync, rmSync, writeFileSync } from "node:fs";
+import { existsSync, mkdirSync, readdirSync, readFileSync, rmSync, statSync, utimesSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
 import { afterEach, beforeEach, describe, it } from "node:test";
 import { fileURLToPath } from "node:url";
@@ -97,6 +97,70 @@ describe("wiki generation outcomes", () => {
 		);
 		assert.equal(result.pending, 0);
 	}
+	it("tracks README/config bytes, preserved-mtime edits, and mixed dirty rollback", async () => {
+		writeFileSync(join(cwd, "README.md"), "before\n");
+		writeFileSync(join(cwd, "settings.yaml"), "value: 1\n");
+		writeFileSync(join(cwd, "src/a.ts"), "export const a = 2;\n");
+		await initialize(["src/a.ts", "README.md", "settings.yaml"]);
+		assert.equal(wikiStaleness(cwd).state, "fresh");
+		for (const [path, value] of [
+			["README.md", "after!\n"],
+			["settings.yaml", "value: 2\n"],
+		] as const) {
+			const before = statSync(join(cwd, path));
+			writeFileSync(join(cwd, path), value);
+			utimesSync(join(cwd, path), before.atime, before.mtime);
+			assert.equal(wikiStaleness(cwd).state, "stale");
+			assert.equal((await wikiStalenessAsync(cwd)).state, "stale");
+			const attempted: string[] = [];
+			await run(
+				generator((_spec, output) => {
+					if (output) attempted.push(output);
+				}),
+			);
+			assert.equal(attempted.length, 1);
+			assert.ok(attempted[0]?.endsWith("a.md"));
+			assert.equal(wikiStaleness(cwd).state, "fresh");
+		}
+		git("checkout", "--", "src/a.ts");
+		writeFileSync(join(cwd, "src/b.ts"), "export const b = 2;\n");
+		const attempted: string[] = [];
+		await run(
+			generator((_spec, output) => {
+				if (output) attempted.push(output);
+			}),
+		);
+		assert.equal(attempted.length, 2);
+	});
+	it("requeues source bytes changed during generation and conservatively revalidates legacy evidence", async () => {
+		await initialize();
+		const result = await run(
+			generator((_spec, path) => {
+				if (!path) {
+					const source = join(cwd, "src/a.ts");
+					const before = statSync(source);
+					writeFileSync(source, "export const a = 2;\n");
+					utimesSync(source, before.atime, before.mtime);
+				}
+			}),
+		);
+		assert.equal(result.pending, 1);
+		assert.equal(readWikiMeta(cwd)?.plan?.pages[0]?.status, "pending");
+		assert.equal(wikiStaleness(cwd).state, "stale");
+		await run(generator(() => {}));
+		const meta = readWikiMeta(cwd);
+		assert.ok(meta?.plan);
+		delete meta.plan.sourceContent;
+		writeFileSync(join(cwd, ".clio-coder/wiki/meta.json"), JSON.stringify(meta));
+		assert.equal(wikiStaleness(cwd).state, "stale");
+		const attempted: string[] = [];
+		await run(
+			generator((_spec, path) => {
+				if (path) attempted.push(path);
+			}),
+		);
+		assert.equal(attempted.length, 2);
+	});
 	it("keeps a failed seeded refresh pending while publishing another completed page", async () => {
 		await initialize();
 		for (const name of ["a", "b"]) writeFileSync(join(cwd, "src", `${name}.ts`), `export const ${name} = 2;\n`);

@@ -14,6 +14,7 @@ import { join } from "node:path";
 import { safeResourceWrite } from "../../../core/safe-resource-write.js";
 import { isGeneratedWikiFile, WIKI_PLAN_FILE } from "./layout.js";
 import type { WikiPageStatus, WikiPlan, WikiPlanPage } from "./plan.js";
+import { parseWikiSourceContent } from "./source-content.js";
 
 /** Dispatches one page may receive across all runs before it is left alone. */
 export const MAX_PAGE_ATTEMPTS = 3;
@@ -125,9 +126,12 @@ export function sanitizeWikiPlan(
 		});
 	}
 	if (pages.length === 0) return null;
+	const sourceContent =
+		previous?.sourceContent ?? (options.trustStatus ? parseWikiSourceContent(value.sourceContent) : undefined);
 	const sourceTreeHash = previous?.sourceTreeHash ?? (options.trustStatus ? value.sourceTreeHash : undefined);
 	return {
 		version: 1,
+		...(sourceContent ? { sourceContent } : {}),
 		...(typeof sourceTreeHash === "string" && /^[a-f0-9]{64}$/.test(sourceTreeHash) ? { sourceTreeHash } : {}),
 		overview: usableString(value.overview) ?? previous?.overview ?? "",
 		pages,

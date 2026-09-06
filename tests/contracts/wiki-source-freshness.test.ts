@@ -67,6 +67,13 @@ describe("wiki source freshness without a usable Git comparison", () => {
 		assert.equal(sync.state, state);
 		return sync;
 	}
+	it("does not certify matching source bytes and HEAD when Git diff fails", async () => {
+		await initialize();
+		await assertVerdict("fresh");
+		writeFileSync(join(cwd, ".git/index"), "invalid index");
+		const verdict = await assertVerdict("stale");
+		assert.match(verdict.warning ?? "", /git diff failed/u);
+	});
 	const failures = [
 		{ name: "missing recorded HEAD", apply: () => changeRecordedHead(null), warning: /recorded gitHead is missing/u },
 		{
@@ -174,7 +181,7 @@ describe("wiki source freshness without a usable Git comparison", () => {
 		const result = await run((input) => {
 			assert.deepEqual(
 				input.plan.pages.map((page) => page.status),
-				["pending", "pending"],
+				["pending", "written"],
 			);
 			writeWikiPlanFile(input.outputDir, {
 				...input.plan,
