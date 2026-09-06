@@ -423,7 +423,7 @@ function indexedSourceFileCount(codewiki: Codewiki): number {
 /** Measure how the session compiler will preload the on-disk project context. */
 function measureProjectPreload(cwd: string): ProjectPreloadClass {
 	const promptContext = renderPromptContext(cwd);
-	return classifyProjectPreload({ hasClioMd: promptContext.clioMd !== null, text: promptContext.text });
+	return classifyProjectPreload({ hasClioMd: promptContext.handbookFiles.length > 0, text: promptContext.text });
 }
 
 function packageScripts(cwd: string): Record<string, string> {
@@ -776,7 +776,7 @@ function stabilizeGeneratedOutput(
  * precise number is falsified by any single added file and carries no
  * navigational value the entry-point list does not.
  */
-export function codewikiSections(codewiki: Codewiki): ClioMdSection[] {
+function codewikiSections(codewiki: Codewiki): ClioMdSection[] {
 	const sections: ClioMdSection[] = [];
 	const entryPoints = codewikiEntryPoints(codewiki, 8);
 	if (entryPoints.length > 0) {
@@ -852,7 +852,7 @@ function bootstrapOutputFromParsed(parsed: ParsedClioMd): BootstrapStructuredOut
 
 function existingClioMdBootstrapOutput(cwd: string): BootstrapStructuredOutput | null {
 	const parsed = tryReadClioMd(cwd);
-	if (!parsed?.ok) return null;
+	if (!parsed?.ok || !parsed.value) return null;
 	return bootstrapOutputFromParsed(parsed.value);
 }
 
@@ -1304,7 +1304,7 @@ export async function runBootstrap(input: RunBootstrapInput = {}): Promise<RunBo
 	) {
 		const detail = existingClioMd && !existingClioMd.ok ? ` (${existingClioMd.error})` : "";
 		throw new Error(
-			`cannot refresh Imported agent context because CLIO-CODER.md is malformed${detail}; use --apply or --rewrite after reviewing the handbook`,
+			`cannot refresh Imported agent context because CLIO-CODER.md has no structured projection${detail}; use --apply or --rewrite after reviewing the handbook`,
 		);
 	}
 	// A supplied generator *is* the request to generate: both entry points

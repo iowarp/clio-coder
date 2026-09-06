@@ -28,9 +28,10 @@ export interface ParsedClioMd {
 
 export interface LoadedClioMdFile {
 	path: string;
-	/** Exact UTF-8 source for prompt rendering; value is only a structured projection. */
+	/** Exact UTF-8 authored source for prompt rendering. */
 	source: string;
-	value: ParsedClioMd;
+	/** Optional generator-format projection; never the authority for authored text. */
+	value: ParsedClioMd | null;
 }
 
 export interface ClioMdLoadError {
@@ -41,9 +42,9 @@ export interface ClioMdLoadError {
 export interface LoadedProjectClioMd {
 	/** Effective files in ancestor-to-descendant order. */
 	files: LoadedClioMdFile[];
-	/** Selected files that could not be read or parsed. */
+	/** Selected files that could not be read or were empty. */
 	errors: ClioMdLoadError[];
-	/** The layered effective handbook, or null when no selected file parsed. */
+	/** The layered structured projection, or null when no selected file matches the generator format. */
 	value: ParsedClioMd | null;
 }
 
@@ -357,35 +358,38 @@ function selectedClioMdPath(directory: string): string | null {
 
 function readClioMdPath(
 	filePath: string,
-): { ok: true; source: string; value: ParsedClioMd } | { ok: false; error: string } {
+): { ok: true; source: string; value: ParsedClioMd | null } | { ok: false; error: string } {
 	let content: string;
 	try {
 		content = readFileSync(filePath, "utf8");
 	} catch (err) {
 		return { ok: false, error: err instanceof Error ? err.message : String(err) };
 	}
+	if (content.trim().length === 0) return { ok: false, error: "handbook is empty" };
+	// Authored Markdown needs no generator schema. Preserve it even when a
+	// structured projection cannot be derived; producer validation stays strict.
 	const parsed = parseClioMd(content);
-	if (!parsed.ok) return { ok: false, error: parsed.errors.join("; ") };
-	return { ok: true, source: content, value: parsed.value };
+	return { ok: true, source: content, value: parsed.ok ? parsed.value : null };
 }
 
 function mergeClioMdFiles(files: ReadonlyArray<LoadedClioMdFile>): ParsedClioMd | null {
-	const nearest = files.at(-1)?.value;
+	const values = files.flatMap((file) => (file.value ? [file.value] : []));
+	const nearest = values.at(-1);
 	if (!nearest) return null;
 	return {
 		projectName: nearest.projectName,
-		identity: files.map((file) => file.value.identity).join("\n\n"),
-		conventions: files.flatMap((file) => file.value.conventions),
-		invariants: files.flatMap((file) => file.value.invariants),
-		sections: files.flatMap((file) => file.value.sections),
+		identity: values.map((value) => value.identity).join("\n\n"),
+		conventions: values.flatMap((value) => value.conventions),
+		invariants: values.flatMap((value) => value.invariants),
+		sections: values.flatMap((value) => value.sections),
 		importedAgentContext:
-			files
-				.map((file) => file.value.importedAgentContext)
+			values
+				.map((value) => value.importedAgentContext)
 				.filter((value): value is string => value !== null)
 				.join("\n\n") || null,
 		fingerprint: nearest.fingerprint,
 		firstInit: nearest.firstInit,
-		warnings: files.flatMap((file) => file.value.warnings),
+		warnings: values.flatMap((value) => value.warnings),
 	};
 }
 
@@ -393,7 +397,7 @@ function mergeClioMdFiles(files: ReadonlyArray<LoadedClioMdFile>): ParsedClioMd 
  * Load effective project handbooks from filesystem root through `cwd`.
  * Candidate selection follows pi-coding-agent 0.84's
  * `loadProjectContextFiles`: an override wins over the base file in the same
- * directory. Clio's structured override additionally resets the inherited
+ * directory. Clio's override additionally resets the inherited
  * handbook chain for that subtree, as required by the project-context
  * contract. Handbooks below the override may add new layers.
  */
@@ -429,7 +433,7 @@ export function loadProjectClioMd(cwd: string): LoadedProjectClioMd {
 
 export function tryReadClioMd(
 	cwd: string,
-): { ok: true; source: string; value: ParsedClioMd } | { ok: false; error: string } | null {
+): { ok: true; source: string; value: ParsedClioMd | null } | { ok: false; error: string } | null {
 	const filePath = join(cwd, "CLIO-CODER.md");
 	if (!existsSync(filePath)) return null;
 	return readClioMdPath(filePath);

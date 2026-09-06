@@ -1,13 +1,10 @@
-import { writeFileSync } from "node:fs";
-import { join } from "node:path";
 import type { DecisionLedgerEntry } from "../session/entries.js";
 import { detectProjectType } from "../session/workspace/project-type.js";
-import { type BootstrapIo, type BootstrapProgressSink, codewikiSections } from "./bootstrap.js";
+import type { BootstrapIo, BootstrapProgressSink } from "./bootstrap.js";
 import { tryReadClioMd } from "./clio-md.js";
 import { coordinateCodewikiWrite } from "./codewiki/coordinator.js";
 import type { Codewiki } from "./codewiki/schema.js";
 import type { Fingerprint } from "./fingerprint.js";
-import { curateHandbookSource } from "./handbook-curation.js";
 import { readClioState, writeClioState } from "./state.js";
 import { type RunWikiGenerateResult, runWikiGenerate, type WikiGenerate } from "./wiki/generate.js";
 import { readWikiMeta } from "./wiki/meta.js";
@@ -15,8 +12,8 @@ import { wikiCompleteness, wikiStaleness } from "./wiki/staleness.js";
 
 /**
  * `/context refresh` and `clio-coder context refresh`: rebuild the codewiki index and
- * `.clio-coder` state, then re-derive the handbook sections the index owns. Authoring
- * handbook prose stays with `/context init`.
+ * `.clio-coder` state while preserving authored handbook bytes. Derived navigation
+ * stays in codewiki and the optional Markdown wiki.
  */
 
 export interface RunContextRefreshInput {
@@ -36,11 +33,11 @@ export interface RunContextRefreshInput {
 }
 
 /**
- * What refresh did to CLIO-CODER.md. "absent" covers no handbook and an unparseable
- * one alike: a missing or broken handbook is never an error here, because a
+ * What refresh found at CLIO-CODER.md. "absent" covers missing, empty, and unreadable
+ * files: an unavailable handbook is never an error here, because a
  * repository must stay fully usable without one.
  */
-export type ClioMdCuration = "updated" | "unchanged" | "absent";
+export type ClioMdCuration = "unchanged" | "absent";
 
 export interface RunContextRefreshResult {
 	action: "refreshed";
@@ -49,27 +46,6 @@ export interface RunContextRefreshResult {
 	clioMd: ClioMdCuration;
 	wiki?: RunWikiGenerateResult;
 	hint?: string;
-}
-
-/**
- * Re-derive the index-owned sections of an existing handbook against the codewiki
- * this run just built. Only sections whose title the index authors are replaced,
- * and only when they are already present and unambiguous. The legacy title is
- * still the ownership signal: authored edits inside that section can be replaced,
- * but every byte outside its body is preserved. Best-effort by construction:
- * nothing here may turn a routine refresh into a failure.
- */
-function curateClioMd(cwd: string, codewiki: Codewiki): ClioMdCuration {
-	try {
-		const parsed = tryReadClioMd(cwd);
-		if (!parsed?.ok) return "absent";
-		const curated = curateHandbookSource(parsed.source, codewikiSections(codewiki));
-		if (curated === parsed.source) return "unchanged";
-		writeFileSync(join(cwd, "CLIO-CODER.md"), curated, "utf8");
-		return "updated";
-	} catch {
-		return "absent";
-	}
 }
 
 function indexedSourceFileCount(codewiki: Codewiki): number {
@@ -100,7 +76,7 @@ export async function runContextRefresh(input: RunContextRefreshInput = {}): Pro
 	const coordinated = await coordinateCodewikiWrite(cwd, () => ({ kind: "build", cwd, language: projectType }), {
 		afterCommit: (result, workspace) => {
 			fingerprint = result.fingerprint;
-			clioMd = curateClioMd(workspace, result.codewiki);
+			clioMd = tryReadClioMd(workspace)?.ok ? "unchanged" : "absent";
 			input.onProgress?.({ phase: "state", status: "running", message: "writing state" });
 			const latest = readClioState(workspace);
 			writeClioState(workspace, {
@@ -144,10 +120,7 @@ export async function runContextRefresh(input: RunContextRefreshInput = {}): Pro
 	}
 
 	const committedClioMd = clioMd as ClioMdCuration;
-	const handbookNote = committedClioMd === "updated" ? "; CLIO-CODER.md index sections updated" : "";
-	input.io?.stdout(
-		`clio-coder context refresh: codewiki rebuilt (${entries} source file${entries === 1 ? "" : "s"})${handbookNote}\n`,
-	);
+	input.io?.stdout(`clio-coder context refresh: codewiki rebuilt (${entries} source file${entries === 1 ? "" : "s"})\n`);
 	input.onProgress?.({ phase: "done", status: "completed", message: "context refreshed" });
 	return {
 		action: "refreshed",

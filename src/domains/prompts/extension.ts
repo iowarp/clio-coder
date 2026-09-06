@@ -161,7 +161,7 @@ export function createPromptsBundle(
 					: "";
 				if (projectContext) {
 					projectPreload = classifyProjectPreload({
-						hasClioMd: projectContext.clioMd !== null,
+						hasClioMd: projectContext.handbookFiles.length > 0,
 						text: projectContext.text,
 					});
 					projectHandbookFiles = projectContext.handbookFiles;
@@ -412,8 +412,8 @@ function renderProjectSynopsis(context: ProjectPromptContext, providerSupportsTo
 	const wiki = wikiAvailabilityFromPromptContext(context.text);
 	const lines = ["<project-synopsis>"];
 	if (projectType) lines.push(`Language: ${projectType}`);
-	if (context.clioMd) {
-		lines.push(`Project: ${context.clioMd.projectName}`);
+	if (context.clioMd) lines.push(`Project: ${context.clioMd.projectName}`);
+	if (context.handbookFiles.length > 0) {
 		lines.push(
 			"Project handbook: available; compact synopsis only because the effective layers are too large for automatic preload.",
 		);
@@ -437,7 +437,7 @@ function renderProjectSynopsis(context: ProjectPromptContext, providerSupportsTo
  * with the same rule.
  */
 function selectProjectContext(context: ProjectPromptContext, providerSupportsTools: boolean | null): string {
-	const preload = classifyProjectPreload({ hasClioMd: context.clioMd !== null, text: context.text });
+	const preload = classifyProjectPreload({ hasClioMd: context.handbookFiles.length > 0, text: context.text });
 	if (preload.mode === "none") return "";
 	if (preload.mode === "full") return context.text.trim();
 	return renderProjectSynopsis(context, providerSupportsTools);

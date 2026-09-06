@@ -14,7 +14,7 @@ import { wikiCompleteness, wikiStaleness } from "./wiki/staleness.js";
 
 /**
  * Render the project prompt context for `cwd`: the project-type marker, the
- * effective CLIO-CODER.md fragments when parseable handbooks exist, the codewiki availability
+ * effective CLIO-CODER.md fragments when readable nonempty handbooks exist, the codewiki availability
  * marker, and the Markdown wiki marker when a valid wiki exists. Shared by the
  * prompts extension (session compile),
  * context-init preload reporting, and `clio-coder config inspect`, so every surface
@@ -32,7 +32,7 @@ export function renderPromptContext(cwd: string): ProjectPromptContext {
 	const clioMd: ParsedClioMd | null = loadedClioMd.value;
 	for (const file of loadedClioMd.files) pieces.push(renderProjectContextFragment(file.source, file.path));
 	for (const issue of loadedClioMd.errors) {
-		warnings.push(`clio-coder: malformed ${issue.path} ignored: ${issue.error}`);
+		warnings.push(`clio-coder: unavailable ${issue.path} ignored: ${issue.error}`);
 	}
 	// Said where the handbook would have been: a model that sees no project
 	// context spends its first tool call reading CLIO-CODER.md and gets

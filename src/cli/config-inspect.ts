@@ -120,7 +120,10 @@ function inspectClioMd(cwd: string, graph: CustomizationGraph): void {
 	if (loaded.files.length === 0) return;
 	try {
 		const promptContext = renderPromptContext(cwd);
-		const preload = classifyProjectPreload({ hasClioMd: promptContext.clioMd !== null, text: promptContext.text });
+		const preload = classifyProjectPreload({
+			hasClioMd: promptContext.handbookFiles.length > 0,
+			text: promptContext.text,
+		});
 		for (const [index, file] of loaded.files.entries()) {
 			const text = readFileSync(file.path, "utf8");
 			graph.entries.push({
