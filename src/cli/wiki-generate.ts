@@ -1,5 +1,5 @@
 import { existsSync } from "node:fs";
-import { join } from "node:path";
+import { join, relative } from "node:path";
 import { performance } from "node:perf_hooks";
 import { type LoadResult, loadDomains } from "../core/domain-loader.js";
 import { runWithBudget, writeShutdownNotice } from "../core/termination.js";
@@ -19,6 +19,7 @@ import {
 import { buildWikiPagePrompt, buildWikiPlanPrompt } from "../domains/context/wiki/prompts.js";
 import type { DispatchContract } from "../domains/dispatch/contract.js";
 import { DispatchDomainModule } from "../domains/dispatch/index.js";
+import { declaredScopeIntent } from "../domains/dispatch/intent.js";
 import type { RunReceipt } from "../domains/dispatch/types.js";
 import type { JobSpec, JobThinkingLevel } from "../domains/dispatch/validation.js";
 import { MiddlewareDomainModule } from "../domains/middleware/index.js";
@@ -208,7 +209,15 @@ async function runWikiDispatch(input: {
 	const startedAtClock = performance.now();
 	let handle: Awaited<ReturnType<DispatchContract["dispatch"]>>;
 	try {
+		const stagingRoot = relative(input.cwd, input.outputDir);
+		if (!stagingRoot) throw new Error("wiki staging directory must be below the repository root");
+		// The repository is readable; only this staging tree is writable. Declare
+		// those paths directly so absolute filenames in prompt prose cannot become
+		// legacy scope tokens (including a sentence-ending period).
+		const scope = declaredScopeIntent({ readRoots: ["."], writeRoots: [stagingRoot] });
+		if (!scope.ok) throw new Error(`${scope.reason}: ${scope.message}`);
 		handle = await input.dispatch.dispatch({
+			intent: scope.intent,
 			agentId: WIKI_AGENT_ID,
 			executionRole: "builder",
 			task: input.task,
