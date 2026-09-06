@@ -251,7 +251,10 @@ describe("Claude Code external subprocess contract", () => {
 			};
 			const waitUntil = async (ready: () => boolean): Promise<boolean> => {
 				const deadline = performance.now() + 2_000;
-				while (!ready() && performance.now() < deadline) await new Promise((resolve) => setTimeout(resolve, 5));
+				while (performance.now() < deadline) {
+					if (ready()) return true;
+					await new Promise((resolve) => setTimeout(resolve, 5));
+				}
 				return ready();
 			};
 			try {
