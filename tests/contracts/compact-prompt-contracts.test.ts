@@ -297,6 +297,8 @@ describe("compact prompt contracts", () => {
 		// chars of task-tool guidance already present before #352. #352/#364
 		// add a bounded promotion/approval workflow and no-edit scope rules.
 		// #351 adds 405 chars of shared decision-adherence guidance.
+		// Inspection side effects and tool-aware delegation add 592 measured chars
+		// (148 estimated main tokens), including the shorter Documenter catalog label.
 		const identity = table.byId.get("identity.clio")?.body.trim();
 		ok(identity);
 		const memoryStart = identity.indexOf("When asked to remember");
@@ -304,12 +306,12 @@ describe("compact prompt contracts", () => {
 		const memoryGuidance = identity.slice(memoryStart);
 		strictEqual(memoryGuidance.length, 1_599);
 		ok(memoryGuidance.length <= 1_620, "review memory workflow growth above 405 estimated tokens");
-		strictEqual(normalizedMain.length - memoryGuidance.length - 2, 11_274 + 405);
-		strictEqual(normalizedMain.length, 13_280);
-		strictEqual(Math.ceil(normalizedMain.length / 4), 3_320);
-		ok(normalizedMain.length <= 13_301, `main prompt grew to ${normalizedMain.length} chars`);
+		strictEqual(normalizedMain.length - memoryGuidance.length - 2, 11_274 + 405 + 592);
+		strictEqual(normalizedMain.length, 13_872);
+		strictEqual(Math.ceil(normalizedMain.length / 4), 3_468);
+		ok(normalizedMain.length <= 13_893, `main prompt grew to ${normalizedMain.length} chars`);
 		ok(
-			Math.ceil(normalizedMain.length / 4) <= 3_326,
+			Math.ceil(normalizedMain.length / 4) <= 3_474,
 			`main prompt grew to ${Math.ceil(normalizedMain.length / 4)} estimated tokens`,
 		);
 		strictEqual(Math.ceil(main.systemPrompt.length / 4), main.tokenEstimate);
@@ -327,12 +329,12 @@ describe("compact prompt contracts", () => {
 			},
 			{
 				identity: 698,
-				"operating-contract": 305,
-				delegation: 532,
+				"operating-contract": 369,
+				delegation: 621,
 				skills: 181,
 				safety: 266,
 				"tool-contract": 746,
-				fleet: 514,
+				fleet: 509,
 				"retrieval-hints": 36,
 				runtime: 43,
 			},
@@ -375,16 +377,17 @@ describe("compact prompt contracts", () => {
 		// Task-tool guidance (+406 chars) and #351 adherence guidance (+405) reach workers.
 		// #361 adds explanation/limitation guidance; its configurable allowance
 		// wording is compacted within the same maximum prompt budget.
-		// Memory/no-edit identity guidance remains main-only.
+		// Memory/no-edit identity guidance remains main-only. Shared inspection
+		// side-effect guidance adds 257 chars (64 estimated worker tokens).
 		strictEqual(worker.systemPrompt.includes("When asked to remember"), false);
-		strictEqual(worker.systemPrompt.length, 7_245);
-		strictEqual(worker.tokenEstimate, 1_812);
-		ok(worker.systemPrompt.length <= 7_271);
-		ok(worker.tokenEstimate <= 1_818);
+		strictEqual(worker.systemPrompt.length, 7_502);
+		strictEqual(worker.tokenEstimate, 1_876);
+		ok(worker.systemPrompt.length <= 7_528);
+		ok(worker.tokenEstimate <= 1_882);
 		strictEqual(Math.ceil(worker.systemPrompt.length / 4), worker.tokenEstimate);
 		deepStrictEqual(Object.fromEntries(worker.sections.map((section) => [section.id, section.tokenEstimate])), {
 			identity: 62,
-			"operating-contract": 398,
+			"operating-contract": 463,
 			"tool-contract": 473,
 			safety: 253,
 			persona: 624,

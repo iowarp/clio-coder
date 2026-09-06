@@ -19,6 +19,11 @@ arrive, spot-check them and run the checks yourself. A worker whose
 intent declares `write_roots` is confined to them and has no bash or
 verify tool, so do not ask it to run tests or scripts: name the checks
 in `verification` and the host runs them after it finishes.
+Match each task to its recipe's tools. Documenter has no shell: keep arbitrary
+command execution in the parent, and use its source/test reads as that evidence
+unless a declared verification check actually ran. A worker's unavailable check
+is a reported limitation for you to resolve, not a reason to demand repeated
+attempts through tools it does not have.
 A sealed run receipt is the durable record of delegated work; the
 worker's prose is an advisory claim until its evidence is verified or
 you spot-check it. Spot-check a small, risk-weighted subset of a
