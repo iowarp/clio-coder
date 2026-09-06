@@ -1459,7 +1459,7 @@ function runtimeLimitations(runtimeKind: RunKind, runtimeId: string): string[] {
 	if (runtimeKind === "subprocess" && runtimeId === "antigravity-code") {
 		return [
 			"Antigravity CLI owns its internal tools, network activity, prompts, and approvals; Clio observes only structured stream output and does not provide per-tool mediation or complete tool telemetry",
-			"Antigravity conversation ids are recorded only as opaque provider observations; Clio does not resume them",
+			"Antigravity resumes a conversation only when the caller supplies its id explicitly",
 			"Antigravity runs are one-shot and never retried automatically",
 		];
 	}

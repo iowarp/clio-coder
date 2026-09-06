@@ -117,6 +117,15 @@ export function buildAgyArgs(input: WorkerRunInput, gateEnv: NodeJS.ProcessEnv =
 		"--disable-slash-commands",
 	];
 	if (input.wireModelId.trim().length > 0) args.push("--model", input.wireModelId.trim());
+	if (typeof input.sessionId === "string" && input.sessionId.length > 0) {
+		if (Buffer.byteLength(input.sessionId, "utf8") > MAX_CONVERSATION_ID_BYTES) {
+			throw new Error(`Antigravity sessionId exceeded ${MAX_CONVERSATION_ID_BYTES} bytes`);
+		}
+		if (/\p{Cc}/u.test(input.sessionId)) {
+			throw new Error("Antigravity sessionId must not contain control characters");
+		}
+		args.push("--conversation", input.sessionId);
+	}
 	return args;
 }
 
@@ -245,7 +254,12 @@ function emitTextDelta(emit: WorkerEventEmit, state: StreamState, delta: string)
 	} as AgentEvent);
 }
 
-async function readStream(child: AntigravityChildProcess, emit: WorkerEventEmit, state: StreamState): Promise<void> {
+async function readStream(
+	child: AntigravityChildProcess,
+	emit: WorkerEventEmit,
+	state: StreamState,
+	requestedConversationId: string | undefined,
+): Promise<void> {
 	for await (const bounded of readBoundedLines(child.stdout, {
 		maxLineBytes: ANTIGRAVITY_MAX_STREAM_LINE_BYTES,
 		maxTotalBytes: ANTIGRAVITY_MAX_STREAM_BYTES,
@@ -272,6 +286,9 @@ async function readStream(child: AntigravityChildProcess, emit: WorkerEventEmit,
 					break;
 				}
 				state.initSeen = true;
+				if (requestedConversationId && event.conversationId !== requestedConversationId) {
+					protocolFailure(state, "requested conversation was not resumed");
+				}
 				state.conversationId = boundedConversationId(event.conversationId);
 				if (event.model?.trim()) state.model = event.model.trim();
 				break;
@@ -354,8 +371,7 @@ function buildAssistantMessage(input: {
 		stopReason: input.aborted ? "aborted" : succeeded ? "stop" : "error",
 		timestamp: Date.now(),
 	} as AgentMessage & { role: "assistant" };
-	// Opaque provider observation only. This runtime never accepts it as a
-	// resumable Clio session id.
+	// Opaque provider observation only; callers must explicitly request resume.
 	if (input.conversationId) message.responseId = input.conversationId;
 	if (input.diagnostic) message.errorMessage = boundedExternalDiagnostic(input.diagnostic);
 	return message;
@@ -414,7 +430,7 @@ export function startAntigravityWorkerRun(
 		emit({ type: "agent_start" } as AgentEvent);
 		try {
 			const stderrPromise = readStderr(child);
-			const stdoutPromise = readStream(child, emit, streamState).catch((cause) => {
+			const stdoutPromise = readStream(child, emit, streamState, input.sessionId).catch((cause) => {
 				streamError = boundedExternalDiagnostic(cause instanceof Error ? cause.message : String(cause));
 				terminator.terminate();
 			});
