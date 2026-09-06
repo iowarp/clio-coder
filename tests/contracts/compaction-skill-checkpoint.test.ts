@@ -3,8 +3,14 @@ import { describe, it } from "node:test";
 import { DEFAULT_SETTINGS } from "../../src/core/defaults.js";
 import { foldWorkingSet } from "../../src/domains/context/working-set/fold.js";
 import { resolveRecall } from "../../src/domains/context/working-set/recall.js";
+import type { PromptsContract } from "../../src/domains/prompts/contract.js";
 import type { ProvidersContract } from "../../src/domains/providers/contract.js";
-import { type CompactResult, captureSkillContext, compact } from "../../src/domains/session/compaction/compact.js";
+import {
+	type CompactInput,
+	type CompactResult,
+	captureSkillContext,
+	compact,
+} from "../../src/domains/session/compaction/compact.js";
 import { estimateTokens } from "../../src/domains/session/compaction/tokens.js";
 import {
 	isSessionEntry,
@@ -16,9 +22,12 @@ import {
 } from "../../src/domains/session/entries.js";
 import { filterEntriesToActivePath } from "../../src/domains/session/tree/active-path.js";
 import type { EngineModel } from "../../src/engine/types.js";
+import { type CreateChatLoopDeps, createChatLoop } from "../../src/interactive/chat-loop.js";
 import { buildModelReplayAgentMessagesFromTurns } from "../../src/interactive/model-session-replay.js";
 import { createTurnContext } from "../../src/interactive/turn-context.js";
 import type { TurnMiddleware } from "../../src/interactive/turn-middleware.js";
+import type { TurnPersistence } from "../../src/interactive/turn-persistence.js";
+import { createTurnRecovery } from "../../src/interactive/turn-recovery.js";
 import { type AgentRuntime, createTurnState } from "../../src/interactive/turn-state.js";
 
 const timestamp = "2026-09-06T00:00:00.000Z";
@@ -137,6 +146,290 @@ const run = (entries: SessionEntry[], skillContextState?: SkillContextState) =>
 		preserveUserTurnId: "task",
 		...(skillContextState ? { skillContextState } : {}),
 	});
+
+/** A short skill activation can exhaust request space without crossing the input-only threshold. */
+function overflowFixture(activeTask = false) {
+	const { entries: original, body } = history(`Exact selected skill ${"instruction ".repeat(650)}END_SKILL`);
+	const entries = original
+		.filter((entry) => activeTask || entry.turnId !== "task")
+		.flatMap((entry) => {
+			if (entry.turnId === "tail") return [{ ...entry, parentTurnId: "work-5" }];
+			if (entry.turnId !== "work") return [entry];
+			// Several observations permit a structural cut, as in the saved activation.
+			return Array.from({ length: 6 }, (_, index) =>
+				message(
+					`work-${index}`,
+					"assistant",
+					{ text: "source evidence ".repeat(200) },
+					index > 0 ? `work-${index - 1}` : activeTask ? "task" : "result",
+				),
+			);
+		});
+	entries.push({
+		kind: "custom",
+		turnId: "selected",
+		parentTurnId: "tail",
+		timestamp,
+		customType: SKILL_CONTEXT_STATE,
+		data: selection,
+	});
+	const state = createTurnState("off");
+	state.activeUserTurnId = activeTask ? "task" : null;
+	state.lastTurnId = "selected";
+	const settings = structuredClone(DEFAULT_SETTINGS);
+	settings.chat.maxOutputTokens = 8192;
+	const requests: string[] = [];
+	const runtime = {
+		targetId: "source",
+		runtimeId: "source",
+		wireModelId: "source",
+		runtimeResolution: { capabilityDecisions: { tools: true }, contextWindowDetails: { effectiveContextWindow: 32768 } },
+		agent: {
+			state: { systemPrompt: "", tools: [], messages: [], model, thinkingLevel: "off" },
+			prompt: async (text: string) => {
+				requests.push(text);
+			},
+		},
+	} as unknown as AgentRuntime;
+	state.runtime = runtime;
+	const budgets: Array<{
+		trigger: string | undefined;
+		budget: Pick<CompactInput, "keepRecentTokens" | "preserveUserTurnId" | "skillContextState"> | undefined;
+	}> = [];
+	const results: CompactResult[] = [];
+	let compiledText = "";
+	const context = createTurnContext({
+		state,
+		getSettings: () => settings,
+		providers: {} as ProvidersContract,
+		readSessionEntries: () => entries,
+		prompts: {
+			inputEpoch: () => 0,
+			compileSessionPrompt: async () => ({
+				systemPrompt: compiledText,
+				systemPromptHash: "compiled",
+				tokenEstimate: Math.ceil(compiledText.length / 4),
+				sections: [],
+				fragmentManifest: [],
+			}),
+		} as unknown as PromptsContract,
+		middleware: { fireCompactionHook: () => {} } as unknown as TurnMiddleware,
+		emitNotice: () => {},
+		autoCompact: async (_instructions, trigger, budget) => {
+			budgets.push({ trigger, budget });
+			const result = await compact({ entries, model, summarize, ...budget });
+			results.push(result);
+			if (!result.summary) return null;
+			entries.push(checkpoint(result, `checkpoint-${results.length}`));
+			state.lastTurnId = entries.at(-1)?.turnId ?? null;
+			return result;
+		},
+	});
+	context.refreshAgentMessagesFromSession(runtime);
+	const priceAt = (tokens: number, pending = "") => {
+		runtime.agent.state.systemPrompt = "";
+		const withoutSystem = context.liveContextEstimate(runtime, pending).tokens;
+		ok(tokens > withoutSystem);
+		runtime.agent.state.systemPrompt = "s".repeat((tokens - withoutSystem) * 4);
+	};
+	return {
+		state,
+		context,
+		runtime,
+		settings,
+		entries,
+		body,
+		budgets,
+		results,
+		requests,
+		priceAt,
+		compileNext: (text: string) => {
+			compiledText = text;
+		},
+	};
+}
+
+describe("mandatory request-fit compaction", () => {
+	it("routes actual submit preflight to overflow after prompt compilation grows the request", async () => {
+		const settings = structuredClone(DEFAULT_SETTINGS);
+		settings.chat.target = "source";
+		settings.chat.model = "source";
+		settings.chat.maxOutputTokens = 8192;
+		settings.chat.prewarm = false;
+		const capabilities = {
+			chat: true,
+			tools: true,
+			reasoning: false,
+			vision: false,
+			audio: false,
+			embeddings: false,
+			rerank: false,
+			fim: false,
+			contextWindow: 32768,
+			maxTokens: 8192,
+		};
+		const target = {
+			id: "source",
+			runtime: "source",
+			url: "https://source.invalid",
+			defaultModel: "source",
+			capabilities: { contextWindow: 32768 },
+		};
+		const runtime = {
+			id: "source",
+			displayName: "Offline",
+			kind: "http",
+			tier: "cloud",
+			apiFamily: "openai-completions",
+			auth: "none",
+			defaultCapabilities: capabilities,
+			synthesizeModel: () => structuredClone(model),
+		};
+		const providers = {
+			getTarget: () => target,
+			getRuntime: () => runtime,
+			getDetectedReasoning: () => false,
+			list: () => [
+				{
+					target,
+					runtime,
+					capabilities,
+					available: true,
+					discoveredModels: ["source"],
+					discoveredModelsSource: "probe",
+					probeCapabilities: null,
+				},
+			],
+		} as unknown as ProvidersContract;
+		const entries = [
+			message("old-user", "user", { text: "Earlier task" }, null),
+			message("old-assistant", "assistant", { text: "old ".repeat(1500) }, "old-user"),
+		];
+		const order: string[] = [];
+		let budget: Pick<CompactInput, "keepRecentTokens" | "preserveUserTurnId"> | undefined;
+		const loop = createChatLoop({
+			getSettings: () => settings,
+			providers,
+			knownTargets: () => new Set(["source"]),
+			readSessionEntries: () => entries,
+			createAgent: ((options: Parameters<NonNullable<CreateChatLoopDeps["createAgent"]>>[0]) => ({
+				agent: {
+					state: options?.initialState,
+					subscribe: () => () => {},
+					abort: () => {},
+					prompt: async () => {
+						throw new Error("No provider call is allowed in this caller-boundary contract");
+					},
+				},
+			})) as unknown as NonNullable<CreateChatLoopDeps["createAgent"]>,
+			prompts: {
+				inputEpoch: () => 0,
+				compileSessionPrompt: async () => {
+					order.push("compile");
+					return {
+						systemPrompt: "p".repeat(96000),
+						systemPromptHash: "grown",
+						tokenEstimate: 24000,
+						sections: [],
+						fragmentManifest: [],
+					};
+				},
+			} as unknown as PromptsContract,
+			autoCompact: async (_instructions, trigger, requested) => {
+				order.push(trigger ?? "unspecified");
+				budget = requested;
+				return null;
+			},
+		});
+		try {
+			loop.resetForSession("old-assistant", buildModelReplayAgentMessagesFromTurns(entries));
+			await loop.submit("Create the current architecture map.");
+			deepStrictEqual(order, ["compile", "overflow"]);
+			ok((budget?.keepRecentTokens ?? 20000) < 20000);
+			strictEqual(entries.length, 2, "failed preflight must not append the pending operator turn");
+		} finally {
+			loop.dispose();
+		}
+	});
+
+	it("recovers output overflow below the automatic threshold while manual force keeps its default", async () => {
+		const f = overflowFixture();
+		const pending = "Create the exact source-backed map; keep tracked source unchanged.";
+		f.priceAt(25000, pending);
+		ok(25000 < 32768 * f.settings.context.compaction.threshold);
+		ok(25000 + 8192 > 32768);
+		strictEqual(await f.context.runAutoCompact(f.runtime, false, undefined, undefined, pending), false);
+		strictEqual(f.budgets.length, 0);
+		strictEqual(await f.context.runAutoCompact(f.runtime, true, undefined, "force", pending), false);
+		strictEqual(f.budgets[0]?.budget?.keepRecentTokens, undefined);
+		strictEqual(f.budgets[0]?.budget?.preserveUserTurnId, undefined);
+		strictEqual(f.results[0]?.messagesSummarized, 0);
+		strictEqual(await f.context.runAutoCompact(f.runtime, true, undefined, "overflow", pending), true);
+		ok((f.budgets[1]?.budget?.keepRecentTokens ?? 20000) < 20000);
+		strictEqual(f.results[1]?.skillContext?.skills[0]?.content[0]?.text, f.body);
+		ok(f.context.liveContextEstimate(f.runtime, pending).tokens + 8192 <= 32768);
+		ok(JSON.stringify(f.runtime.agent.state.messages).includes(f.body));
+		strictEqual(
+			f.entries.some(
+				(entry) =>
+					entry.kind === "message" && entry.role === "user" && (entry.payload as { text?: string }).text === pending,
+			),
+			false,
+			"pending operator text stays uncommitted until admission",
+		);
+	});
+
+	it("prices the freshly compiled prompt when the first automatic precheck did not need compaction", async () => {
+		const f = overflowFixture();
+		const pending = "Map the current source with the loaded skill.";
+		f.priceAt(21000, pending);
+		ok(f.context.liveContextEstimate(f.runtime, pending).tokens + 8192 < 32768);
+		strictEqual(await f.context.runAutoCompact(f.runtime, false, undefined, undefined, pending), false);
+		strictEqual(f.budgets.length, 0);
+		f.compileNext(`${f.runtime.agent.state.systemPrompt}${"new context ".repeat(1400)}`);
+		ok(await f.context.ensureSessionPrompt(f.runtime));
+		const before = f.context.liveContextEstimate(f.runtime, pending);
+		ok(before.tokens + 8192 > 32768);
+		strictEqual(await f.context.runAutoCompact(f.runtime, true, undefined, "overflow", pending), true);
+		const expectedKeep = Math.floor(
+			(Math.min(32768 * f.settings.context.compaction.threshold, 32768 - 8192) -
+				before.breakdown.systemPromptTokens -
+				before.breakdown.pendingUserTokens) /
+				2,
+		);
+		strictEqual(f.budgets[0]?.budget?.keepRecentTokens, expectedKeep);
+		ok(f.context.liveContextEstimate(f.runtime, pending).tokens + 8192 <= 32768);
+		strictEqual(f.results[0]?.skillContext?.skills[0]?.content[0]?.text, f.body);
+	});
+
+	it("keeps the provider-overflow caller compatible and preserves its already admitted operator task", async () => {
+		const f = overflowFixture(true);
+		f.priceAt(25000);
+		// Mandatory provider recovery remains available even when automatic compaction is disabled.
+		f.settings.context.compaction.auto = false;
+		const recovery = createTurnRecovery({
+			state: f.state,
+			context: f.context,
+			persistence: {} as TurnPersistence,
+			retrySettings: () => ({ enabled: false, maxRetries: 0, baseDelayMs: 1, maxDelayMs: 1, streamStallMs: 1 }),
+			markPersistedUserEcho: async (_text, prompt) => prompt(),
+			emitRetryStatus: () => {},
+			emitFailureMessage: () => {},
+			emitNotice: () => {},
+		});
+		const task = "Map the real source.\r\nPreserve this exact task.";
+		await recovery.runCompactAndRetry(f.runtime, task, {
+			kind: "context-overflow",
+			message: "context window exceeded",
+		} as Parameters<typeof recovery.runCompactAndRetry>[2]);
+		strictEqual(f.budgets[0]?.trigger, "overflow");
+		strictEqual(f.budgets[0]?.budget?.preserveUserTurnId, "task");
+		ok((f.budgets[0]?.budget?.keepRecentTokens ?? 20000) < 20000);
+		strictEqual(f.results[0]?.userContext?.text, task);
+		strictEqual(f.results[0]?.skillContext?.skills[0]?.content[0]?.text, f.body);
+		deepStrictEqual(f.requests, [task]);
+	});
+});
 
 describe("typed historical skill checkpoints (pure source)", () => {
 	it("retains exact instructions through two checkpoints, fresh replay, raw usage and recall", async () => {

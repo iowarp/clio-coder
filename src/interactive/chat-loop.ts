@@ -1226,7 +1226,7 @@ export function createChatLoop(deps: CreateChatLoopDeps): ChatLoop {
 				);
 				setTurnPreparation("compacting");
 				const compacted = await context
-					.runAutoCompact(agentRuntime, true, undefined, undefined, submittedText, pendingSkillPolicy)
+					.runAutoCompact(agentRuntime, true, undefined, "overflow", submittedText, pendingSkillPolicy)
 					.finally(endPreparationCompaction);
 				if (!compacted) {
 					emitNotice(

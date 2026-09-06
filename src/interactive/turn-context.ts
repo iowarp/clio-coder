@@ -693,7 +693,10 @@ export function createTurnContext(deps: TurnContextDeps): TurnContext {
 		pendingSkillPolicy?: PendingSkillToolPolicy,
 	): Promise<boolean> => {
 		if (!deps.readSessionEntries) return false;
-		const activeAutoTurnId = force ? null : state.activeUserTurnId;
+		// Overflow forces a fit attempt even below the automatic threshold, but
+		// still needs the request budget and active task. Manual force keeps its defaults.
+		const useRequestBudget = !force || triggerOverride === "overflow";
+		const activeAutoTurnId = useRequestBudget ? state.activeUserTurnId : null;
 		const skillContextState = mainSkillContextState(
 			filterEntriesToActivePath(deps.readSessionEntries(), state.lastTurnId ?? undefined),
 			pendingSkillPolicy ?? state.currentPendingSkillPolicy ?? state.activeSkillSurface,
@@ -960,7 +963,7 @@ export function createTurnContext(deps: TurnContextDeps): TurnContext {
 		);
 		let budget: Pick<CompactInput, "keepRecentTokens" | "preserveUserTurnId" | "skillContextState"> | undefined =
 			skillContextState !== undefined ? { skillContextState } : undefined;
-		if (!force) {
+		if (useRequestBudget) {
 			const estimate = liveContextEstimate(agentRuntime, pendingUserText);
 			const output = Math.min(
 				resolveReservedOutputTokens(agentRuntime.agent.state.model?.maxTokens),
