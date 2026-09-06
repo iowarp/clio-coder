@@ -81,7 +81,7 @@ it("admits production wiki planner and page scope without interpreting absolute 
 			assert.equal(spec.autonomy, undefined);
 			assert.equal(spec.noSkills, true);
 			assert.equal(spec.requestOrigin, "internal");
-			assert.ok((spec.assignmentDeadlineAt ?? 0) > Date.now());
+			assert.equal(spec.assignmentDeadlineAt, undefined);
 		}
 		assert.equal(readWikiPlanFile(outputDir)?.pages[0]?.status, "written");
 		const request = requests[1];

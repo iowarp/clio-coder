@@ -31,7 +31,6 @@ import { ResourcesDomainModule } from "../domains/resources/index.js";
 import { SafetyDomainModule } from "../domains/safety/index.js";
 import { SchedulingDomainModule } from "../domains/scheduling/index.js";
 import { SessionDomainModule } from "../domains/session/index.js";
-import { armInternalDispatchDeadline } from "./internal-dispatch.js";
 
 /**
  * Model id recorded on wiki metadata when the documenter target cannot be
@@ -44,25 +43,10 @@ const UNRESOLVED_DOCUMENTER_MODEL = "unresolved-documenter-target";
 /** The agent recipe that plans and writes pages. */
 const WIKI_AGENT_ID = "wiki-writer";
 
-/**
- * Wall-clock ceiling for one page dispatch, clamped against the configured
- * internal-dispatch guardrail. A page is a small job: read a handful of named
- * sources and write one file. Bounding it here is what keeps one degenerate
- * page from consuming the time every other page needed, and losing it costs
- * exactly that page because the plan records it as still owed.
- */
-const PAGE_DEADLINE_MS = 6 * 60 * 1000;
-
-/** Wall-clock ceiling for the single planning dispatch. */
-const PLAN_DEADLINE_MS = 8 * 60 * 1000;
-
-/**
- * Wall-clock budget for a whole generation, checked between page dispatches and
- * never during one. Exceeding it ends the run cleanly with every finished page
- * promoted and the rest recorded as owed, so a repository too large for one
- * sitting is finished by the next run instead of failing forever.
- */
-const RUN_BUDGET_MS = 60 * 60 * 1000;
+/** Planning estimates inform progress, never admission or execution limits. */
+const PAGE_ESTIMATE_MS = 6 * 60 * 1000;
+const PLAN_ESTIMATE_MS = 8 * 60 * 1000;
+const RUN_ESTIMATE_MS = 60 * 60 * 1000;
 
 export interface WikiModelRoute {
 	target?: string;
@@ -73,8 +57,10 @@ export interface WikiModelRoute {
 export interface ModelWikiGenerateOptions {
 	dispatch?: DispatchContract;
 	route?: WikiModelRoute;
-	/** Overrides the whole-run wall-clock budget. Tests use it to force an early stop. */
+	/** Explicit whole-run duration; omission leaves ordinary estimates advisory. */
 	runBudgetMs?: number;
+	/** Explicit absolute deadline, shared unchanged by planning and every page. */
+	deadlineAt?: number;
 }
 
 function isRecord(value: unknown): value is Record<string, unknown> {
@@ -125,13 +111,7 @@ interface DispatchSummary {
 	mix: string;
 }
 
-/**
- * Longest an in-flight phase may go without saying anything. The planner is
- * allowed eight minutes and a page six, and the operator who reported this saw
- * two lines in five minutes, concluded the command had deadlocked, and killed
- * it. Narrating every tool call would scroll the terminal for nothing, so the
- * heartbeat is throttled to this and carries only elapsed time and tool count.
- */
+/** Throttle activity summaries so long-running healthy work remains visible. */
 const HEARTBEAT_MS = 30_000;
 
 /**
@@ -187,6 +167,28 @@ type WikiDispatchOutcome =
 	| { ok: false; phase: "admission"; detail: string }
 	| { ok: boolean; phase: "writer"; detail: string; runId: string };
 
+interface WikiDeadline {
+	at: number;
+	remainingMs(): number;
+}
+
+function explicitWikiDeadline(options: ModelWikiGenerateOptions): WikiDeadline | undefined {
+	if (options.runBudgetMs !== undefined && (!Number.isFinite(options.runBudgetMs) || options.runBudgetMs < 0))
+		throw new Error("wiki runBudgetMs must be a finite non-negative duration");
+	if (options.deadlineAt !== undefined && !Number.isFinite(options.deadlineAt))
+		throw new Error("wiki deadlineAt must be a finite timestamp");
+	if (options.deadlineAt === undefined && options.runBudgetMs === undefined) return undefined;
+	const wallNow = Date.now();
+	const at = Math.min(
+		options.deadlineAt ?? Number.POSITIVE_INFINITY,
+		wallNow + (options.runBudgetMs ?? Number.POSITIVE_INFINITY),
+	);
+	if (!Number.isFinite(new Date(at).getTime())) throw new Error("wiki deadline exceeds the supported timestamp range");
+	const clockNow = performance.now();
+	// Keep the admission timestamp fixed while elapsed enforcement is monotonic.
+	return { at, remainingMs: () => at - wallNow - (performance.now() - clockNow) };
+}
+
 /**
  * Run one wiki dispatch to completion and report how it ended. It never
  * throws: a failed page must not take down the pages around it, and whatever
@@ -198,17 +200,15 @@ async function runWikiDispatch(input: {
 	outputDir: string;
 	task: string;
 	route: WikiModelRoute;
-	deadlineMs: number;
-	label: string;
+	deadline: WikiDeadline | undefined;
 	/** Liveness signal while the dispatch runs, already throttled by the caller. */
 	onHeartbeat?: (info: { elapsedMs: number; tools: number }) => void;
 }): Promise<WikiDispatchOutcome> {
-	// `startedAt` is a wall anchor because the admission deadline below is one
-	// too; every elapsed figure spans the monotonic twin instead.
-	const startedAt = Date.now();
 	const startedAtClock = performance.now();
 	let handle: Awaited<ReturnType<DispatchContract["dispatch"]>>;
 	try {
+		if (input.deadline && input.deadline.remainingMs() <= 0)
+			throw new Error("explicit wiki deadline reached before admission");
 		const stagingRoot = relative(input.cwd, input.outputDir);
 		if (!stagingRoot) throw new Error("wiki staging directory must be below the repository root");
 		// The repository is readable; only this staging tree is writable. Declare
@@ -233,20 +233,28 @@ async function runWikiDispatch(input: {
 			// Containment: the worker safety seam blocks any write-class tool call
 			// whose target escapes the staging dir.
 			writeRoots: [asDirectoryPathBoundary(input.outputDir)],
-			// Admission patience must match execution patience. Without this the
-			// queue applies its 60s default while `deadlineMs` below allows six
-			// minutes to run, so a page waiting behind two in-flight writers was
-			// dropped before it ever started. Observed live: a 33-page plan lost
-			// `core.md` to `dispatch: admission timed_out` at 10/33 while every
-			// page ahead of it was taking 110 to 125 seconds. A page the caller is
-			// willing to wait six minutes for is a page it should be willing to
-			// queue for six minutes.
-			assignmentDeadlineAt: startedAt + input.deadlineMs,
+			// Only an explicit caller deadline constrains admission; recipe estimates
+			// must not become assignment deadlines or restart for each page.
+			...(input.deadline ? { assignmentDeadlineAt: input.deadline.at } : {}),
 		});
 	} catch (err) {
 		return { ok: false, phase: "admission", detail: err instanceof Error ? err.message : String(err) };
 	}
-	const deadline = armInternalDispatchDeadline(input.dispatch, handle.runId, input.label, input.deadlineMs);
+	let timedOut = false;
+	let timer: ReturnType<typeof setTimeout> | undefined;
+	const armDeadline = (): void => {
+		if (!input.deadline) return;
+		const remaining = input.deadline.remainingMs();
+		if (remaining <= 0) {
+			timedOut = true;
+			input.dispatch.abort(handle.runId, { cause: "timeout", detail: "explicit wiki deadline reached" });
+			return;
+		}
+		// Long explicit deadlines must not overflow Node's timer range into 1ms.
+		timer = setTimeout(armDeadline, Math.min(remaining, 2_147_483_647));
+		timer.unref();
+	};
+	armDeadline();
 	let lastHeartbeatAt = startedAtClock;
 	try {
 		const summary = await drainDispatchEvents(handle.events, (tools) => {
@@ -256,7 +264,7 @@ async function runWikiDispatch(input: {
 			input.onHeartbeat({ elapsedMs: Math.round(nowMs - startedAtClock), tools });
 		});
 		const receipt = await handle.finalPromise;
-		if (deadline.timedOut())
+		if (timedOut)
 			return {
 				ok: false,
 				phase: "writer",
@@ -274,9 +282,9 @@ async function runWikiDispatch(input: {
 		}
 		return { ok: true, phase: "writer", runId: handle.runId, detail: summaryDetail(summary, startedAtClock) };
 	} catch (err) {
-		if (!deadline.timedOut()) input.dispatch.abort(handle.runId);
+		if (!timedOut) input.dispatch.abort(handle.runId);
 		await handle.finalPromise.catch(() => undefined);
-		const reason = deadline.timedOut() ? "timed out" : err instanceof Error ? err.message : String(err);
+		const reason = timedOut ? "timed out" : err instanceof Error ? err.message : String(err);
 		return {
 			ok: false,
 			phase: "writer",
@@ -284,7 +292,7 @@ async function runWikiDispatch(input: {
 			detail: `${reason}; ${formatElapsed(performance.now() - startedAtClock)}`,
 		};
 	} finally {
-		deadline.clear();
+		clearTimeout(timer);
 	}
 }
 
@@ -303,6 +311,7 @@ async function runPlanPhase(
 	dispatch: DispatchContract,
 	input: WikiGenerateInput,
 	route: WikiModelRoute,
+	deadline: WikiDeadline | undefined,
 ): Promise<WikiPlan> {
 	input.progress?.({ phase: "generate", status: "running", message: "planning wiki pages" });
 	const outcome = await runWikiDispatch({
@@ -320,14 +329,13 @@ async function runPlanPhase(
 			gitHead: input.gitHead ?? null,
 		}),
 		route,
-		deadlineMs: PLAN_DEADLINE_MS,
-		label: "wiki planner",
+		deadline,
 		onHeartbeat: ({ elapsedMs, tools }) =>
 			input.progress?.({
 				phase: "generate",
 				status: "running",
 				message: `still planning (${formatElapsed(elapsedMs)}, ${tools} tool calls)`,
-				detail: `planner deadline ${Math.round(PLAN_DEADLINE_MS / 60000)}m`,
+				detail: `planner estimate ${Math.round(PLAN_ESTIMATE_MS / 60000)}m; healthy work may continue longer`,
 			}),
 	});
 	const revised = readAuthoredWikiPlan(input.outputDir, input.plan);
@@ -351,6 +359,7 @@ async function runPagePhase(
 	page: WikiPlanPage,
 	route: WikiModelRoute,
 	position: { index: number; total: number },
+	deadline: WikiDeadline | undefined,
 ): Promise<WikiPlan> {
 	const seeded = existsSync(join(input.outputDir, page.path));
 	const outcome = await runWikiDispatch({
@@ -368,14 +377,13 @@ async function runPagePhase(
 			seeded,
 		}),
 		route,
-		deadlineMs: PAGE_DEADLINE_MS,
-		label: `wiki page ${page.path}`,
+		deadline,
 		onHeartbeat: ({ elapsedMs, tools }) =>
 			input.progress?.({
 				phase: "generate",
 				status: "running",
 				message: `still writing ${page.path} (${position.index}/${position.total}, ${formatElapsed(elapsedMs)}, ${tools} tool calls)`,
-				detail: `page deadline ${Math.round(PAGE_DEADLINE_MS / 60000)}m`,
+				detail: `page estimate ${Math.round(PAGE_ESTIMATE_MS / 60000)}m; healthy work may continue longer`,
 			}),
 	});
 	// A seeded page is available even when its refresh fails. Only a successful
@@ -416,7 +424,7 @@ async function generateWikiWithDocumenter(
 	dispatch: DispatchContract,
 	input: WikiGenerateInput,
 	route: WikiModelRoute = {},
-	runBudgetMs: number = RUN_BUDGET_MS,
+	deadline?: WikiDeadline,
 	signal?: AbortSignal,
 ): Promise<void> {
 	signal?.throwIfAborted();
@@ -435,7 +443,7 @@ async function generateWikiWithDocumenter(
 	// re-planning would churn the paths those pages already link to. Every other
 	// run plans, including an update, which is the only thing allowed to change
 	// a wiki's shape as the repository grows.
-	let plan = input.resumed ? input.plan : await runPlanPhase(dispatch, input, route);
+	let plan = input.resumed ? input.plan : await runPlanPhase(dispatch, input, route, deadline);
 	signal?.throwIfAborted();
 	if (!input.resumed) writeWikiPlanFile(input.outputDir, plan);
 
@@ -456,32 +464,40 @@ async function generateWikiWithDocumenter(
 	// runs and can legitimately take most of an hour, which is longer than any
 	// default command timeout an operator is likely to have wrapped around it.
 	{
-		const worstCaseMs = Math.min(runBudgetMs, queue.length * PAGE_DEADLINE_MS);
+		const estimateMs = Math.min(RUN_ESTIMATE_MS, queue.length * PAGE_ESTIMATE_MS);
 		input.progress?.({
 			phase: "generate",
 			status: "running",
 			message: `${queue.length} page${queue.length === 1 ? "" : "s"} to write, one model run each`,
-			detail: `up to ${Math.round(worstCaseMs / 60000)}m; progress is reported at least every ${Math.round(HEARTBEAT_MS / 1000)}s and finished pages are kept if the run stops early`,
+			detail: `estimate ${Math.round(estimateMs / 60000)}m; activity summaries every ${Math.round(HEARTBEAT_MS / 1000)}s; finished pages are kept if the run stops early${deadline ? `; explicit deadline ${new Date(deadline.at).toISOString()}` : "; healthy work may continue beyond estimates"}`,
 		});
 	}
 	for (const [index, page] of queue.entries()) {
 		signal?.throwIfAborted();
-		if (performance.now() - startedAtClock >= runBudgetMs) {
+		if (deadline && deadline.remainingMs() <= 0) {
 			const left = queue.length - index;
 			input.progress?.({
 				phase: "generate",
 				status: "running",
-				message: `run budget reached with ${left} page${left === 1 ? "" : "s"} unwritten`,
+				message: `explicit deadline reached with ${left} page${left === 1 ? "" : "s"} unwritten`,
 				detail: `${formatElapsed(performance.now() - startedAtClock)}; staged pages are kept and promoted`,
 			});
 			return;
 		}
 		const current = plan.pages.find((entry) => entry.path === page.path) ?? page;
 		if (current.status === "written" || (!input.retryPending && current.attempts >= MAX_PAGE_ATTEMPTS)) continue;
-		plan = await runPagePhase(dispatch, input, plan, current, route, {
-			index: index + 1,
-			total: queue.length,
-		});
+		plan = await runPagePhase(
+			dispatch,
+			input,
+			plan,
+			current,
+			route,
+			{
+				index: index + 1,
+				total: queue.length,
+			},
+			deadline,
+		);
 	}
 }
 
@@ -610,13 +626,14 @@ export async function withWikiDispatchLifecycle(
 
 export function modelWikiGenerate(options: ModelWikiGenerateOptions = {}): WikiGenerate {
 	return async (input) => {
+		const deadline = explicitWikiDeadline(options);
 		if (options.dispatch) {
-			await generateWikiWithDocumenter(options.dispatch, input, options.route, options.runBudgetMs);
+			await generateWikiWithDocumenter(options.dispatch, input, options.route, deadline);
 			return;
 		}
 		const { dispatch, loaded } = await loadWikiDispatch();
 		await withWikiDispatchLifecycle({ dispatch, stop: () => loaded.stop() }, (signal) =>
-			generateWikiWithDocumenter(dispatch, input, options.route, options.runBudgetMs, signal),
+			generateWikiWithDocumenter(dispatch, input, options.route, deadline, signal),
 		);
 	};
 }
