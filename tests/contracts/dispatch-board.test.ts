@@ -518,6 +518,80 @@ describe("dispatch board uses the observability projection", () => {
 		strictEqual(board.rows().find((row) => row.runId === IDENTITY.runId)?.status, "aborted");
 	});
 
+	for (const delayedReconcile of [true, false]) {
+		it(`bounds the failed retry parent after ${delayedReconcile ? "delayed reconciliation" : "a relayed child start"}`, () => {
+			// Retained independent probes: verify-peer-339-retry{-root}-probe.json.
+			const live: DispatchSnapshot = {
+				generatedAt: "2026-09-06T00:00:00Z",
+				running: [],
+				retrying: [],
+				totals: { inputTokens: 0, outputTokens: 0, totalTokens: 0, costUsd: 0, runtimeSeconds: 0 },
+			};
+			const { bus, projection, board } = setup({ dispatchSnapshot: () => live });
+			const identity = { ...IDENTITY, runId: "retry-parent" };
+			bus.emit(BusChannels.DispatchStarted, { ...identity, pid: null, assignmentId: identity.runId, attempt: 0 });
+			bus.emit(BusChannels.DispatchFailed, { ...COMPLETED, ...identity, outcome: "failed", reason: "failed" });
+			live.retrying.push({
+				runId: identity.runId,
+				agentId: identity.agentId,
+				attempt: 1,
+				dueAt: live.generatedAt,
+				reason: "transient failure",
+			});
+			bus.emit(BusChannels.DispatchProgress, {
+				...identity,
+				event: { type: "retry_scheduled", attempt: 1, dueAt: live.generatedAt, reason: "transient failure" },
+			});
+			if (delayedReconcile) {
+				// Other runs settle before the UI's reconciliation tick.
+				for (let i = 0; i < MAX_PROJECTION_RUNS + 10; i += 1)
+					bus.emit(BusChannels.DispatchCompleted, { ...COMPLETED, runId: `burst-${i}` });
+				ok(!projection.snapshot().runs.some((run) => run.runId === identity.runId));
+			}
+			board.reconcile();
+			const restored = projection.snapshot().runs.find((run) => run.runId === identity.runId);
+			strictEqual(restored?.status, "retrying");
+			if (delayedReconcile) strictEqual(restored?.finishedAtMs, null, "do not fabricate an evicted finish time");
+			strictEqual(board.activeRows().length, 1);
+
+			live.retrying = [];
+			bus.emit(BusChannels.DispatchStarted, {
+				...IDENTITY,
+				runId: "retry-child",
+				pid: null,
+				assignmentId: identity.runId,
+				attempt: 1,
+			});
+			if (!delayedReconcile) {
+				bus.emit(BusChannels.DispatchProgress, {
+					...identity,
+					event: {
+						type: "attempt_start",
+						attempt: 1,
+						runId: "retry-child",
+						previousRunId: identity.runId,
+						reason: "transient failure",
+					},
+				});
+			}
+			board.reconcile();
+			const parent = projection.snapshot().runs.find((run) => run.runId === identity.runId);
+			strictEqual(parent?.status, "failed");
+			strictEqual(parent?.finishedAtMs, restored?.finishedAtMs, "retain the known or unknown parent finish time");
+			deepStrictEqual(
+				board.activeRows().map((run) => run.runId),
+				["retry-child"],
+			);
+			bus.emit(BusChannels.DispatchCompleted, { ...COMPLETED, runId: "retry-child" });
+			for (let i = 0; i < MAX_PROJECTION_RUNS + 10; i += 1)
+				bus.emit(BusChannels.DispatchCompleted, { ...COMPLETED, runId: `later-${i}` });
+			board.reconcile();
+			strictEqual(board.rows().length, MAX_PROJECTION_RUNS);
+			strictEqual(board.activeRows().length, 0);
+			ok(!projection.snapshot().runs.some((run) => run.runId === identity.runId));
+		});
+	}
+
 	it("keeps every queued dispatch even when active work alone exceeds the history limit", () => {
 		const { bus, projection, board } = setup();
 		for (let i = 0; i <= MAX_PROJECTION_RUNS; i += 1)

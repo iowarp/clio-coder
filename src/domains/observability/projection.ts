@@ -352,9 +352,10 @@ export function createObservabilityProjection(bus: SafeEventBus, deps: Projectio
 
 	function markChanged(): void {
 		for (const [runId, summary] of runs) {
-			// A dead heartbeat is provisional until dispatch finalization. Retry
-			// timers also remain active even though their last attempt has failed.
-			if (isTerminal(summary.status) && summary.finishedAtMs !== null && !summary.retry) {
+			// A dead heartbeat is provisional until dispatch finalization. A failed
+			// retry parent restored from the queue is terminal even when its finish
+			// time was evicted; only its pending retry keeps it outside the cap.
+			if (isTerminal(summary.status) && (summary.status !== "dead" || summary.finishedAtMs !== null) && !summary.retry) {
 				terminalHistory.add(runId);
 			} else {
 				terminalHistory.delete(runId);
@@ -586,6 +587,14 @@ export function createObservabilityProjection(bus: SafeEventBus, deps: Projectio
 			}
 			if (type === "attempt_start") {
 				summary.failoverHops = (summary.failoverHops ?? 0) + 1;
+				const attemptRunId = asRunId(event.runId);
+				if (attemptRunId && attemptRunId !== runId) {
+					// Assignment notifications are relayed on the root run. The child
+					// has its own lifecycle row; starting it cannot revive this parent.
+					delete summary.retry;
+					markChanged();
+					return;
+				}
 				summary.status = "running";
 				summary.finishedAtMs = null;
 				summary.durationMs = null;
