@@ -665,14 +665,16 @@ function positiveWindow(value: number | null | undefined): number | undefined {
  *    (live model hint > knowledge base > catalog > runtime default > 8192).
  *  - `desired`: what Clio wants for coding. Local-native tiers still get a
  *    128k recommendation, but this is advisory only.
- *  - `effective`: what the target actually offers, most live source first:
- *    loaded > probe > target config override > model-specific knowledge >
- *    runtime descriptor default. Clio no longer invents a 128k effective
+ *  - `effective`: the configured target limit, capped by a known loaded window;
+ *    otherwise loaded > probe > model-specific knowledge > runtime descriptor
+ *    default. Clio no longer invents a 128k effective
  *    window for unknown local models; providers must probe it or users must
  *    configure an explicit override.
  *
- * The loaded window outranks everything below it because it is the only figure
- * that describes what the backend will serve this turn. A model whose weights
+ * A loaded window prevents configuration from overstating what the backend can
+ * serve this turn. An operator can also configure a smaller limit, including
+ * when a gateway advertises training capacity instead of serving capacity.
+ * A model whose weights
  * allow 262k but which is open at 100k fails at 100k, so planning against the
  * declared number means autocompact never fires in time.
  *
@@ -718,18 +720,18 @@ export function resolveContextWindowDetails(
 	const overrideWindow = positiveWindow(target.capabilities?.contextWindow);
 	let effective: number;
 	let source: ContextWindowSource;
-	if (loadedWindow !== undefined) {
+	if (loadedWindow !== undefined && (overrideWindow === undefined || loadedWindow <= overrideWindow)) {
 		effective = loadedWindow;
 		source = "loaded";
+	} else if (overrideWindow !== undefined) {
+		effective = overrideWindow;
+		source = "target-override";
 	} else if (probeWindow !== undefined) {
 		effective = probeWindow;
 		// Not "loaded": a probed window is what the target reported for the
 		// model, and only a runtime that names its resident instance's window
 		// has said anything about what is serving right now.
 		source = "probe";
-	} else if (overrideWindow !== undefined) {
-		effective = overrideWindow;
-		source = "target-override";
 	} else if (modelDeclared !== undefined) {
 		effective = modelDeclared;
 		source = modelDeclaredSource;
