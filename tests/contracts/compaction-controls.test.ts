@@ -657,7 +657,9 @@ describe("production compaction controls", () => {
 			const recorded: unknown[][] = [];
 			const bus = createSafeEventBus();
 			const pruned: ContextPrunedPayload[] = [];
-			bus.on(BusChannels.ContextPruned, (event) => pruned.push(event as ContextPrunedPayload));
+			bus.on(BusChannels.ContextPruned, (event) => {
+				pruned.push(event as ContextPrunedPayload);
+			});
 			const state = createTurnState("off");
 			const context = createTurnContext({
 				state,
