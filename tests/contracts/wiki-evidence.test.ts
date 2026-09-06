@@ -49,6 +49,55 @@ describe("wiki mechanical evidence gate", () => {
 		deepStrictEqual(check("See `package.json`.").dependencies, ["package.json"]);
 	});
 
+	it("resolves body shorthand only through uniquely declared source/test files", () => {
+		deepStrictEqual(
+			check(
+				"---\nsources: [src/main.js]\ntests: [tests/main.test.ts]\n---\nSee `main.js:1-3`, `main.ts#L2`, and `main.test.ts:1`.",
+			),
+			{ ok: true, reasons: [], dependencies: ["src/main.ts", "tests/main.test.ts"] },
+		);
+		mkdirSync(join(root, "slugify"));
+		for (const name of ["special.py", "__init__.py", "__version__.py"]) {
+			writeFileSync(join(root, "slugify", name), "source\n");
+		}
+		deepStrictEqual(
+			check(
+				"---\nsources: [slugify/special.py, slugify/__init__.py, slugify/__version__.py]\n---\n" +
+					"The package re-exports `special.py` through `__init__.py`.\n\n## Metadata from `__version__.py`\n",
+			),
+			{ ok: true, reasons: [], dependencies: ["slugify/__init__.py", "slugify/__version__.py", "slugify/special.py"] },
+		);
+	});
+
+	it("keeps shorthand strict for ambiguity, undeclared files, frontmatter, escapes and lines", () => {
+		writeFileSync(join(root, "tests/main.ts"), "different\n");
+		writeFileSync(join(root, "src/undeclared.ts"), "present but not declared\n");
+		writeFileSync(join(sandbox, "outside.ts"), "outside\n");
+		symlinkSync(join(sandbox, "outside.ts"), join(root, "src/escape.ts"));
+		for (const content of [
+			"---\nsources: [src/main.ts, tests/main.ts]\n---\nSee `main.ts`.",
+			"---\nsources: [src/main.ts, main.ts]\n---\nSee `main.ts`.",
+			page("src/main.ts", "See `undeclared.ts` and `unknown.ts`."),
+			page("src/main.ts", "See `main.ts:4`."),
+			page("src/main.ts", "See `main.ts:0` and `main.ts:3-2`."),
+			page("src/main.ts", "See `../main.ts` and `other/main.ts`."),
+			page("src/escape.ts", "See `escape.ts`."),
+		]) {
+			const result = check(content);
+			strictEqual(result.ok, false, content);
+			strictEqual(result.dependencies, undefined);
+		}
+	});
+
+	it("deduplicates declared aliases by their verified canonical file", () => {
+		symlinkSync(join(root, "src/main.ts"), join(root, "src/alias.ts"));
+		deepStrictEqual(check("---\nsources: [src/main.ts, src/alias.ts]\n---\nSee `main.ts:1` and `alias.ts:2`."), {
+			ok: true,
+			reasons: [],
+			dependencies: ["src/main.ts"],
+		});
+	});
+
 	it("rejects empty, metadata-only, headings-only and comments-only bodies", () => {
 		for (const body of ["", "# Heading", "<!-- placeholder -->", "# Heading\n\n<!-- placeholder -->"]) {
 			const result = check(page("src/main.ts", body));

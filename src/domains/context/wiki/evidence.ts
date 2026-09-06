@@ -1,6 +1,6 @@
 /** Mechanical publication checks; these do not prove a claim or that a writer read its source. */
 import { accessSync, constants, readFileSync, realpathSync, statSync } from "node:fs";
-import { isAbsolute, relative, resolve } from "node:path";
+import { basename, isAbsolute, relative, resolve } from "node:path";
 import { parse } from "yaml";
 import { readWikiPage, resolveSourcePath, stripFrontmatter } from "./frontmatter.js";
 
@@ -71,7 +71,8 @@ export function validateWikiPageEvidence(input: WikiPageEvidenceInput): WikiPage
 		fail("Close the YAML frontmatter with a standalone --- line before the page body.");
 	}
 
-	const references = new Set([...metadata.sources, ...metadata.tests]);
+	const declaredReferences = new Set([...metadata.sources, ...metadata.tests]);
+	const references = new Set(declaredReferences);
 	for (const reference of references) {
 		if (/[:#]/.test(reference))
 			fail(
@@ -110,6 +111,7 @@ export function validateWikiPageEvidence(input: WikiPageEvidenceInput): WikiPage
 		return { ok: false, reasons };
 	}
 	const dependencies = new Set<string>();
+	const declaredFilesByName = new Map<string, Set<string>>();
 	const linesByFile = new Map<string, number>();
 	let readBytes = 0;
 	for (const reference of references) {
@@ -121,7 +123,11 @@ export function validateWikiPageEvidence(input: WikiPageEvidenceInput): WikiPage
 		}
 		const cited = match[1] ?? "";
 		try {
-			const source = resolveSourcePath(resolve(input.sourceRoot), cited);
+			let source = resolveSourcePath(resolve(input.sourceRoot), cited);
+			if (source === null && !declaredReferences.has(reference) && !/[\\/]/.test(cited)) {
+				const declared = declaredFilesByName.get(cited);
+				if (declared?.size === 1) source = [...declared][0] ?? null;
+			}
 			if (source === null) {
 				fail(`Replace or remove unresolved repository reference ${label}; inspect the current file path.`);
 				continue;
@@ -135,6 +141,15 @@ export function validateWikiPageEvidence(input: WikiPageEvidenceInput): WikiPage
 				continue;
 			}
 			accessSync(real, constants.R_OK);
+			// Declared references are checked first. Body shorthand can reuse only
+			// their verified files; frontmatter itself remains repository-relative.
+			if (declaredReferences.has(reference) && !/[:#]/.test(reference)) {
+				for (const name of [basename(cited), basename(real)]) {
+					const files = declaredFilesByName.get(name) ?? new Set<string>();
+					files.add(real);
+					declaredFilesByName.set(name, files);
+				}
+			}
 			dependencies.add(relative(root, real).split("\\").join("/"));
 			const startText = match[2] ?? match[4];
 			if (startText !== undefined) {
