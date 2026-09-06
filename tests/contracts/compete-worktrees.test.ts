@@ -111,7 +111,7 @@ for (const agent of ["scout", "coder"] as const) {
 				return {
 					pid: null,
 					promise: Promise.resolve({ exitCode: 0, signal: null }),
-					heartbeatAt: { current: Date.now(), monotonic: 0 },
+					heartbeatAt: { current: Date.now(), monotonic: performance.now() },
 					abort() {},
 					events: (async function* () {
 						if (writer && !judge) {
@@ -366,7 +366,7 @@ for (const phase of ["candidates", "judge"] as const) {
 						promise: blocked
 							? stopped.then(() => ({ exitCode: 1, signal: null }))
 							: Promise.resolve({ exitCode: 0, signal: null }),
-						heartbeatAt: { current: Date.now(), monotonic: 0 },
+						heartbeatAt: { current: Date.now(), monotonic: performance.now() },
 						abort() {
 							abortCount += 1;
 							finish();
