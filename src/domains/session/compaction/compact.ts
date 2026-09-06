@@ -574,14 +574,18 @@ export async function compact(input: CompactInput): Promise<CompactResult> {
 	const activeUser = entries
 		.slice(0, cut.firstKeptEntryIndex)
 		.find((entry) => entry.turnId === input.preserveUserTurnId && entry.kind === "message" && entry.role === "user");
-	if (
-		activeUser?.kind === "message" &&
-		activeUser.payload &&
-		typeof activeUser.payload === "object" &&
-		"text" in activeUser.payload &&
-		typeof activeUser.payload.text === "string"
-	) {
-		summaryParts.push(`Active user instructions (verbatim):\n${activeUser.payload.text}`);
+	if (activeUser?.kind === "message" && activeUser.payload && typeof activeUser.payload === "object") {
+		const payload = activeUser.payload;
+		// Composed text can contain transient reminders. Reassert only the
+		// operator's canonical words when present, without normalizing them.
+		const operatorText = "operatorText" in payload ? payload.operatorText : undefined;
+		const text =
+			typeof operatorText === "string" && operatorText.trim().length > 0
+				? operatorText
+				: "text" in payload && typeof payload.text === "string"
+					? payload.text
+					: null;
+		if (text !== null) summaryParts.push(`Active user instructions (verbatim):\n${text}`);
 	}
 
 	const summary = `${summaryParts.join("\n\n---\n\n").trim()}${formatFileOperations(fileOps)}${formatRecallableRefs(

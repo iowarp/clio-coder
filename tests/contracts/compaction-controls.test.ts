@@ -323,7 +323,15 @@ describe("production compaction controls", () => {
 		deepStrictEqual(request.tools, saved.tools);
 		const active = saved.entries[0];
 		ok(active?.kind === "message");
-		const activeText = (active.payload as { text: string }).text;
+		const activeText = (active.payload as { operatorText: string }).operatorText;
+		match(activeText, /No edits or file creation are authorized/);
+		match(activeText, /Run one two-task public pipeline \(mode pipeline\): Scout first, dependent Documenter second/);
+		const checkpoint = f.entries().find((entry) => entry.kind === "compactionSummary");
+		ok(checkpoint?.kind === "compactionSummary");
+		const verbatim = checkpoint.summary.split("Active user instructions (verbatim):\n")[1];
+		ok(verbatim);
+		ok(verbatim.startsWith(activeText), "canonical operator text is preserved exactly");
+		doesNotMatch(verbatim, /system-reminder|marketplace|Suggested skill/);
 		ok(
 			request.messages.some((message) => JSON.stringify(message).includes(JSON.stringify(activeText).slice(1, -1))),
 			"active user instructions survive even an inadequate summary verbatim",

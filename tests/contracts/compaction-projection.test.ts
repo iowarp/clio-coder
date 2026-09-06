@@ -167,6 +167,18 @@ describe("compaction working-set provider boundary", () => {
 		doesNotMatch(JSON.stringify(replay), /Abandoned/);
 	});
 
+	for (const operatorText of [undefined, "", " \n\t"]) {
+		it(`preserves legacy text when canonical operator text is ${JSON.stringify(operatorText)}`, async () => {
+			const entries = evictedHistory();
+			const user = entries[0];
+			ok(user?.kind === "message");
+			const text = "No edits.\nRun Scout then dependent Documenter.";
+			user.payload = { text, ...(operatorText === undefined ? {} : { operatorText }) };
+			const result = await compact({ entries, model: model(), keepRecentTokens: 100000, preserveUserTurnId: user.turnId });
+			ok(result.summary.includes(`Active user instructions (verbatim):\n${text}`));
+		});
+	}
+
 	it("summarizes projected bytes while retaining raw identities, file evidence and exact recall", async (t) => {
 		const entries = evictedHistory();
 		const original = structuredClone(entries);
