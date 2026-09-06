@@ -421,8 +421,14 @@ export function createSafetyPolicyEngine(options: SafetyPolicyEngineOptions = {}
 				return posture === "confirmed" ? allowDecision(base, input) : askDecision(base, input);
 			}
 
-			if (call.tool === ToolNames.Bash && classification.actionClass === "execute") {
-				const bash = evaluateBashPolicy(command ?? "", callCwd, cwd, posture, projectPolicy);
+			if ((call.tool === ToolNames.Bash || catalogCheck !== null) && classification.actionClass === "execute") {
+				const bash = evaluateBashPolicy(
+					catalogCheck?.command ?? command ?? "",
+					catalogCheck === null ? callCwd : path.resolve(cwd, catalogCheck.cwd),
+					cwd,
+					posture,
+					projectPolicy,
+				);
 				if (bash.kind === "block") return blockDecision(base, bash);
 				if (bash.kind === "ask") return askDecision(base, bash);
 				return allowDecision(base, bash);
@@ -438,22 +444,9 @@ export function createSafetyPolicyEngine(options: SafetyPolicyEngineOptions = {}
 			};
 			if (hit?.match.ruleId !== undefined) allowInput.ruleId = hit.match.ruleId;
 			if (hit?.match !== undefined) allowInput.match = hit.match;
-			// The typed execution tool (verify) sits in the no-prompt set when the
-			// check is a package script or the frontend validator: both are bounded
-			// by the verification-script family and run a fixed argv shape. A
-			// project-catalog check runs whatever argv the workspace file declares,
-			// so it is unrecognized: auto-edit parks it for one confirmation that
-			// shows the argv, full-auto runs it, and the damage-control match and
-			// zero-access scan above have already seen the declared vector.
-			if (classification.actionClass === "execute") {
-				allowInput.execRecognition = catalogCheck === null ? "recognized" : "unrecognized";
-				if (catalogCheck !== null) {
-					allowInput.reasons = [
-						...allowInput.reasons,
-						`project verifier '${catalogCheck.id}' runs declared argv: ${catalogCommand ?? ""}`,
-					];
-				}
-			}
+			// Catalog argv already went through canonical command recognition above.
+			// Package scripts and the frontend validator retain their fixed typed surface.
+			if (classification.actionClass === "execute") allowInput.execRecognition = "recognized";
 			return allowDecision(base, allowInput);
 		},
 		metadata() {
@@ -613,12 +606,27 @@ function pathPolicyTargets(call: ClassifierCall): Array<{ operation: PathPolicyO
  * admission seam decides whether it runs, asks, or is denied.
  */
 function evaluateBashPolicy(
-	command: string,
+	input: string | ReadonlyArray<string>,
 	callCwd: string,
 	workspaceRoot: string,
 	posture: string | undefined,
 	policy: LoadedProjectSafetyPolicy,
 ): Omit<SafetyPolicyDecision, "classification" | "tool" | "actionClass" | "cwd" | "posture" | "command"> {
+	// Catalog commands execute as argv, never as shell source. Only bare words
+	// have an unambiguous representation in the canonical command matcher.
+	// Keep whitespace, empty arguments, and shell syntax out of recognition;
+	// joining them would erase argument boundaries or invent a shell chain.
+	if (typeof input !== "string" && !input.every((arg) => /^[\w=./:-]+$/u.test(arg))) {
+		return {
+			kind: "allow",
+			ruleId: "verify-unrecognized-argv",
+			reasonCode: "verify-unrecognized-argv",
+			reasons: ["project verifier argv is outside the bare-word no-prompt command set"],
+			policySource: "builtin-command-allowlist",
+			execRecognition: "unrecognized",
+		};
+	}
+	const command = typeof input === "string" ? input : input.join(" ");
 	if (command.trim().length === 0) {
 		return {
 			kind: "block",
@@ -1024,9 +1032,9 @@ function damageControlScan(call: ClassifierCall): string {
  * declare. The catalog is an argv vector the operator authored, but the file
  * sits in the workspace, so the engine reads it fresh on every verify call and
  * treats the declared argv exactly like a bash command string: it is what the
- * damage-control rules and the zero-access read guard scan, and it is not in
- * the no-prompt set. An unreadable or invalid catalog resolves to null here and
- * fails closed in the tool itself.
+ * damage-control rules and the zero-access read guard scan. Recognition uses
+ * canonical command policy with argv boundaries preserved. An unreadable or
+ * invalid catalog resolves to null here and fails closed in the tool itself.
  */
 function resolveVerifyCatalogCheck(call: ClassifierCall, workspaceRoot: string): DeclaredCheck | null {
 	if (call.tool !== ToolNames.Verify) return null;
