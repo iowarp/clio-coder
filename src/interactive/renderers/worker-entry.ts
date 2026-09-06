@@ -11,17 +11,20 @@
  *   ◇ coder · node-a/example-coder-model · run 2mkas6s
  *   │ Hello! I'm the coder worker.
  *   │ ⚙ read · artifact
- *   └ ✓ ok · 4.8k tok · 9.6s · contract pass
+ *   └ ✓ execution ok · 4.8k tok · 9.6s · contract pass
+ *   │ quality: grounded
  *
- * Folded (the default for a run the model asked for) is one row shaped like a tool subline,
- * so a fan-out of five scouts costs five rows until the operator opens one:
+ * Folded (the default for a run the model asked for) keeps identity and
+ * execution on a tool-style subline, followed by the settled quality fact:
  *
- *   ◆ scout · node-b/example-scout-model · run 3nc18jo ✓ · 41s (Ctrl+O)
+ *   ◆ scout · node-b/example-scout-model · run 3nc18jo ✓ execution ok · 41s (Ctrl+O)
+ *   │ quality: validation failed
  *
  * Pure: no I/O, no module-level mutable state beyond the shared theme handle.
  */
 
 import { parseJsonObjectPayload } from "../../core/json-payload.js";
+import { trustStateWord } from "../../domains/evidence/trust-projection.js";
 import { truncateToWidth, visibleWidth, wrapTextWithAnsi } from "../../engine/tui.js";
 import { formatFooterTokens } from "../footer-panel.js";
 import { type ClioToken, clioTheme, fitUnits, formatCompactMs, GLYPH } from "../theme/index.js";
@@ -80,14 +83,14 @@ function headerLine(entry: WorkerEntryState, width: number): string {
 }
 
 /**
- * Outcome glyph, with the word on the footer. The folded row uses the glyph
- * alone, as a tool subline does, so a list of cards reads like a list of calls.
+ * Execution outcome, explicitly named on successful folded and expanded rows
+ * so the separate quality line cannot be mistaken for process status.
  * Abandoned names itself rather than falling through to its `stalled`
  * outcome code, so it reads as a ledger-side finding instead of the ordinary
  * heartbeat-timeout `stalled` a sealed receipt reports.
  */
 function outcomeUnit(receipt: WorkerReceiptSummary, word: boolean): string {
-	if (receipt.outcome === "succeeded") return theme.fg("success", word ? `${GLYPH.ok} ok` : GLYPH.ok);
+	if (receipt.outcome === "succeeded") return theme.fg("success", `${GLYPH.ok} execution ok`);
 	if (receipt.outcome === "canceled") return theme.fg("dim", `${GLYPH.cancelled} canceled`);
 	if (receipt.abandonedDetail !== undefined) return theme.fg("error", word ? `${GLYPH.error} abandoned` : GLYPH.error);
 	return theme.fg("error", `${GLYPH.error} ${receipt.outcomeCode ?? receipt.outcome}`);
@@ -397,8 +400,12 @@ function foldedLine(entry: WorkerEntryState, width: number, expandKey: string | 
 		entry.receipt?.durationMs === undefined ? "" : dim(`${SEPARATOR}${formatCompactMs(entry.receipt.durationMs)}`);
 	const hint = expandKey === undefined || expandKey.length === 0 ? "" : dim(` (${expandKey})`);
 	const full = ` ${status}${elapsed}${hint}`;
-	const tail = visibleWidth(identity) + visibleWidth(full) <= width ? full : ` ${status}${hint}`;
-	return `${truncateToWidth(identity, Math.max(1, width - visibleWidth(tail)), GLYPH.ellipsis, false)}${tail}`;
+	let tail = visibleWidth(identity) + visibleWidth(full) <= width ? full : ` ${status}${hint}`;
+	// Reserve one identity cell. The optional hint yields before execution
+	// status when the suffix alone would exhaust the header's width.
+	if (visibleWidth(tail) >= width) tail = ` ${status}`;
+	const header = `${truncateToWidth(identity, Math.max(1, width - visibleWidth(tail)), GLYPH.ellipsis, false)}${tail}`;
+	return truncateToWidth(header, width, GLYPH.ellipsis, false);
 }
 
 export function renderWorkerEntryLines(
@@ -407,7 +414,14 @@ export function renderWorkerEntryLines(
 	options: WorkerEntryRenderOptions,
 ): string[] {
 	const safeWidth = Math.max(1, Math.floor(width));
-	if (options.folded) return [foldedLine(entry, safeWidth, options.expandKey)];
+	const quality = isPending(entry)
+		? []
+		: railLines(
+				`quality: ${trustStateWord("validationGrounding", entry.receipt?.trust?.validationGrounding.state ?? "unknown")}`,
+				"muted",
+				safeWidth,
+			);
+	if (options.folded) return [foldedLine(entry, safeWidth, options.expandKey), ...quality];
 	const tools = toolLine(entry, safeWidth);
 	return [
 		headerLine(entry, safeWidth),
@@ -416,5 +430,6 @@ export function renderWorkerEntryLines(
 		...(tools === null ? [] : [tools]),
 		...failureLines(entry, safeWidth),
 		footerLine(entry, safeWidth),
+		...quality,
 	];
 }

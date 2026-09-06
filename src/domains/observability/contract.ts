@@ -47,7 +47,7 @@ export interface ObservabilityNotice {
 }
 
 /**
- * Compact lifecycle summary for a recent dispatch run. Projected from the
+ * Compact lifecycle summary for an active or recently settled dispatch run. Projected from the
  * dispatch bus channels; raw tool arguments and reasoning are absent. Worker
  * progress is a bounded, redacted presentation of the live stream. `evidence`
  * is populated asynchronously once the forensic bundle for the run finalizes.
@@ -205,7 +205,7 @@ export interface ObservabilityContract extends ObservabilityRunProjection {
 	recordSessionTurn(trace: SessionTurnTrace): void;
 	/**
 	 * Current product-facing projection. Cheap to call: it folds in-memory state
-	 * (bounded run/notice rings, session cost/tokens, aggregated metrics, and the
+	 * (active runs, bounded terminal history/notices, session cost/tokens, aggregated metrics, and the
 	 * cached accountability summary) into a fresh immutable snapshot.
 	 */
 	snapshot(): ObservabilitySnapshot;

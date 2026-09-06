@@ -17,7 +17,7 @@ import {
 	type RunReceipt,
 	type RunReceiptVerification,
 } from "../domains/dispatch/types.js";
-import { summarizeTrustStatus } from "../domains/evidence/trust-projection.js";
+import { summarizeTrustStatus, trustStateWord } from "../domains/evidence/trust-projection.js";
 import {
 	adaptRunReceiptTrustStatus,
 	type CanonicalTrustStatus,
@@ -142,11 +142,18 @@ function runStatus(deps: MonitorToolDeps, runId: string): ToolResult {
 			`live: phase=${live.outcomePhase} heartbeat=${live.heartbeat} elapsed=${Math.round(live.elapsedMs / 1000)}s tokens=${live.tokens.total}`,
 		);
 	}
+	const trust = isTerminalRunEnvelope(run) ? summarizeTrustStatus(durableRunEvidence(run).trustStatus) : null;
+	if (trust)
+		lines.push(
+			`quality: ${trustStateWord("validationGrounding", trust.axes.validationGrounding)}`,
+			`trust: ${trust.text}`,
+		);
 	return {
 		kind: "ok",
 		output: lines.join("\n"),
 		details: {
 			mode: "status",
+			...(trust ? { trust } : {}),
 			...(assignment
 				? {
 						assignmentId: assignment.assignmentId,
