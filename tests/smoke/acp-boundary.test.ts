@@ -375,6 +375,45 @@ describe("smoke/ACP stdio boundary", { concurrency: false }, () => {
 		}
 	});
 
+	it("a cancelled permission response aborts the turn before the tool can resume the model", async () => {
+		const target = home();
+		const fixture = await provider({ reply: "unexpected continuation", tool: true });
+		let client: AcpClient | undefined;
+		try {
+			await initialize(target);
+			seedTarget(target, fixture.url);
+			const project = join(target.root, "project");
+			mkdirSync(project);
+			client = launch(target, project);
+			const sessionId = await openSession(client, project);
+			const prompt = client.request<{ stopReason: string }>("session/prompt", {
+				sessionId,
+				prompt: [{ type: "text", text: "Create note.txt after approval." }],
+			});
+			const permission = await client.waitInbound();
+			strictEqual(permission.method, "session/request_permission");
+			// No session/cancel notification follows this response.
+			client.respond(permission.id, { outcome: { outcome: "cancelled" } });
+			const turn = await prompt;
+			strictEqual(existsSync(join(project, "note.txt")), false);
+			strictEqual(
+				turn.stopReason,
+				"cancelled",
+				JSON.stringify({
+					stopReason: turn.stopReason,
+					streamingRequests: fixture.requests.length,
+				}),
+			);
+			strictEqual(fixture.requests.length, 1);
+			doesNotMatch(JSON.stringify(client.updates), /unexpected continuation/);
+			await client.close(sessionId);
+		} finally {
+			client?.kill();
+			await closeServer(fixture.server);
+			target.cleanup();
+		}
+	});
+
 	it("mediates one write allow and one write reject", async () => {
 		for (const decision of ["allow-once", "reject-once"] as const) {
 			const target = home();

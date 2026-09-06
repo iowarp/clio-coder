@@ -220,6 +220,7 @@ async function seedSettings(
 	cliEntry: string,
 	providerUrl: string,
 	env: Readonly<Record<string, string>>,
+	chatToolCallsPerTurn?: number,
 ): Promise<void> {
 	const doctor = await runOwnedCommand(
 		node,
@@ -262,6 +263,14 @@ async function seedSettings(
 	settings = replaceRequired(settings, /^ {2}target: null$/m, "  target: mock-chat", "chat.target");
 	settings = replaceRequired(settings, /^ {2}model: null$/m, "  model: mock-model", "chat.model");
 	settings = replaceRequired(settings, /^ {2}autonomy:.*$/m, "  autonomy: suggest", "safety.autonomy");
+	if (chatToolCallsPerTurn !== undefined) {
+		settings = replaceRequired(
+			settings,
+			/^ {4}chatToolCallsPerTurn: \d+$/m,
+			`    chatToolCallsPerTurn: ${chatToolCallsPerTurn}`,
+			"safety.limits.chatToolCallsPerTurn",
+		);
+	}
 	await Deno.writeTextFile(settingsPath, settings);
 }
 
@@ -535,7 +544,7 @@ interface ExpandedHarnessOptions {
 	readonly permissionEscalateMs?: number;
 	readonly permissionBudgetMs?: number;
 	readonly promptTimeoutMs?: number;
-	readonly env?: Readonly<Record<string, string>>;
+	readonly chatToolCallsPerTurn?: number;
 	readonly recordWire?: boolean;
 }
 
@@ -558,8 +567,8 @@ async function startExpandedHarness(caseName: CaseName, options: ExpandedHarness
 		const cliEntry = selectedCliEntry();
 		paths = await makeCasePaths(caseName);
 		fixture = startProviderFixture(options.providerMode);
-		const env = { ...isolatedClioEnv(paths.home), ...options.env };
-		await seedSettings(paths, node, cliEntry, fixture.url, env);
+		const env = isolatedClioEnv(paths.home);
+		await seedSettings(paths, node, cliEntry, fixture.url, env, options.chatToolCallsPerTurn);
 		const wireLogPath = options.recordWire === true ? join(paths.root, "host-to-child.jsonl") : null;
 		const prefixArgs = wireLogPath === null
 			? [cliEntry, "--no-context-files", "--no-skills"]
@@ -1078,6 +1087,16 @@ Deno.test({
 				"turn.terminal",
 				(event) => event.context.turnId === context.turnId,
 			);
+			console.info(
+				"unanswered approval settlement",
+				JSON.stringify({
+					streamingRequests: test.fixture.streamingRequestCount,
+					outcome: terminal.payload.outcome,
+					code: terminal.payload.code,
+					stopReason: terminal.payload.stopReason,
+					fileWritten: await pathExists(join(test.paths.project, "note.txt")),
+				}),
+			);
 			equal(terminal.payload.outcome, "canceled");
 			equal(terminal.payload.code, "approval-unanswered");
 			equal(terminal.payload.stopReason, "cancelled");
@@ -1171,7 +1190,8 @@ Deno.test({
 		const test = await startExpandedHarness("max-tools", {
 			providerMode: "max-tools",
 			promptTimeoutMs: 180_000,
-			env: { CLIO_CODER_TURN_TOOL_CALL_BUDGET: "1000" },
+			// Keep the configured execution budget above ACP's independent 128-start ceiling.
+			chatToolCallsPerTurn: 200,
 		});
 		try {
 			await Promise.all(
@@ -1191,6 +1211,16 @@ Deno.test({
 			);
 			const terminal = test.sink.ofType("turn.terminal").find((event) => event.context.turnId === context.turnId);
 			ok(terminal);
+			console.info(
+				"tool ceiling settlement",
+				JSON.stringify({
+					streamingRequests: test.fixture.streamingRequestCount,
+					toolStarts: test.sink.ofType("turn.tool").filter((event) => event.payload.status === "in_progress").length,
+					outcome: terminal.payload.outcome,
+					code: terminal.payload.code,
+					stopReason: terminal.payload.stopReason,
+				}),
+			);
 			equal(terminal.payload.outcome, "failed");
 			equal(terminal.payload.code, "clio-coder-max_turn_requests");
 			equal(terminal.payload.stopReason, "max_turn_requests");

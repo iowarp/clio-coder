@@ -1406,6 +1406,7 @@ function installPermissionBridge(input: {
 	toolCallSnapshot: (wireId: string) => AcpToolCallSnapshot | null;
 	permissionTimeoutMs: number;
 	expireActivePrompt: () => void;
+	cancelActivePrompt: (reason: string) => void;
 }): AcpPermissionBridge {
 	if (!input.toolRegistry) return { unregister: () => {}, cancelPending: () => {} };
 	let pendingCancel: ((reason: string) => void) | null = null;
@@ -1573,6 +1574,17 @@ function installPermissionBridge(input: {
 					// client mint `allow-always` and get a grant this server never
 					// offered as an option.
 					const answer = outcome.response.outcome;
+					if (answer.outcome === "cancelled") {
+						const reason = "ACP client cancelled permission";
+						// Abort before releasing the parked tools so their results cannot
+						// start another model request while session/cancel is in flight.
+						input.cancelActivePrompt(reason);
+						emitResolution({ status: "denied", decidedBy: "cancelled", reason });
+						queuedRequestIds.clear();
+						queuedRequestDetails.clear();
+						input.toolRegistry?.cancelParkedCalls(reason);
+						return;
+					}
 					if (answer.outcome === "selected" && answer.optionId === "allow-once") {
 						emitResolution({ status: "granted", decidedBy: "acp-client" });
 						await input.toolRegistry?.resumeParkedCalls({
@@ -1694,6 +1706,10 @@ export async function serveClioAcpAgent(options: ClioAcpServerOptions): Promise<
 			if (activePromptState === null) return;
 			activePromptState.permissionExpired = true;
 			options.chat.cancel();
+		},
+		cancelActivePrompt: (reason) => {
+			const session = activeSessionId === null ? undefined : sessions.get(activeSessionId);
+			if (session) cancelSession(session, reason);
 		},
 	});
 	/**
