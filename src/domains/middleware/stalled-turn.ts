@@ -9,7 +9,7 @@ export const STALLED_TURN_REQUEST_CONTINUATION_MESSAGE =
 	"You ended your turn after announcing an action without executing it: no tools were called. Continue now and perform the announced action, or state plainly that you are finished and waiting for the user.";
 
 export const SKILL_SUGGESTION_WAIT_CONTINUATION_MESSAGE =
-	"You ended your turn on a skill suggestion without doing the task. The suggestion line has already made the offer and only the operator loads a skill, so nothing is needed from them before you proceed. Continue the task now without the skill.";
+	"You ended your turn on a skill suggestion without doing the task. The suggestion line has already made the offer and only the operator loads a skill, so the skill choice needs nothing from them before you proceed. Continue the already-authorized task now without the skill. This continuation is not an operator answer to any other question: if the remaining work is a proposal awaiting an explicit operator go-ahead, park it on the task board and say so instead of implementing.";
 
 const INTENT_PATTERN = /\b(let me|i['’]ll|i will|i am going to|i['’]m going to|now i|next i|let's|let us)\b/i;
 
@@ -110,12 +110,25 @@ const ACTION_OBJECT_CONNECTOR_PATTERN = /^(?:at|for|in|into|on|through|to)\s+/i;
 const ACTION_OBJECT_DETERMINER_PATTERN = /^(?:a|an|my|our|that|the|their|these|this|those|your)\s+/i;
 const ACTION_OBJECT_PATTERN = /^(?!(?:again|everyone|later|next|now|soon|then|you)\b)[`"'./~]*[\p{L}\p{N}_-]/iu;
 const CONDITIONAL_LEAD_IN_PATTERN = /\b(?:if|once|unless|until|when|whenever)\b/i;
-const CONDITIONAL_INVITATION_PATTERN = /\b(?:ask|give|point|say|send|share|tell)\b[\s\S]*\b(?:and|then)\s*$/i;
+// "say go and", "confirm and", "reply yes and": the sentence hands the operator
+// the decision and promises work only after it.
+const CONDITIONAL_INVITATION_PATTERN =
+	/\b(?:answer|approve|ask|confirm|give|point|reply|respond|say|send|share|tell|type)\b[\s\S]*\b(?:and|then)\s*$/i;
 // "if needed", and any conditional whose condition is about the user: "if you
 // want", "if that is what you need". Conditions about the work ("if the config
 // is valid") stay announcements.
+// Any condition that waits on the operator ("after you approve", "once you
+// confirm", "until you say", "upon your go-ahead") is a proposal awaiting a
+// decision, not an announcement: the operator's answer is the missing input,
+// and an automatic continuation would stand in for it (issue #365).
 const CONDITIONAL_OFFER_SUFFIX_PATTERN =
-	/\b(?:if\s+(?:needed|necessary|requested)\b|if\b[^.!?]*\byou\b|when(?:ever)?\s+you\b)/i;
+	/\b(?:if\s+(?:needed|necessary|requested|approved|confirmed)\b|(?:if|after|once|until|unless|when(?:ever)?|as\s+soon\s+as|provided|assuming)\b[^.!?]*\byou\b|(?:upon|on|after|with|pending|awaiting|following)\s+(?:your\s+|the\s+operator(?:'s)?\s+)?(?:approval|go-?ahead|confirmation|sign-?off|decision|word|green\s+light|okay|ok)\b)/i;
+// A lead-in that is itself a wait ("Awaiting your go-ahead; I'll then write
+// the test") defers whatever the intent clause goes on to name.
+const OPERATOR_WAIT_LEAD_PATTERN = /\b(?:await(?:ing)?|pending|waiting\s+(?:for|on))\b/i;
+// "I will not edit files" announces a refusal, and "next I would create
+// clamp.py" describes a hypothetical; neither promises an action now.
+const NEGATED_OR_HYPOTHETICAL_CLAUSE_PATTERN = /^\s*(?:not|never|would|could|might|may)\b/i;
 const LET_ME_KNOW_PATTERN = /\blet me know\b/i;
 // "I'll wait for your go-ahead before I touch src/cli/index.ts" names a path
 // and promises nothing now. A clause that opens by deferring is a wait
@@ -199,12 +212,14 @@ function announcesConcreteAction(sentence: string): boolean {
 		if (
 			CONDITIONAL_LEAD_IN_PATTERN.test(leadIn) ||
 			CONDITIONAL_INVITATION_PATTERN.test(leadIn) ||
+			OPERATOR_WAIT_LEAD_PATTERN.test(leadIn) ||
 			CONDITIONAL_OFFER_SUFFIX_PATTERN.test(sentence)
 		) {
 			return false;
 		}
 		const clause = sentence.slice(intent.index + intent[0].length);
 		if (DEFERRAL_LEAD_PATTERN.test(clause)) return false;
+		if (NEGATED_OR_HYPOTHETICAL_CLAUSE_PATTERN.test(clause)) return false;
 		if (hasActionWithObject(clause)) return true;
 		// A path or command is evidence of an immediate action only when the
 		// announcement itself is unconditional; "once package.json is updated"
