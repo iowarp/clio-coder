@@ -1636,7 +1636,7 @@ export function resultContractShape(contract: ResultContract): string {
 		case "world-knowledge-report":
 			return '{"discovery":"performed|caller-supplied-only|unavailable","facts":[{"claim":"...","evidence":"...","sources":["URL or document id"]}],"synthesis":["comparison or advisory conclusion"],"uncertainties":["..."],"followUpVerification":["..."]}';
 		case "mutation-report":
-			return '{"mutatedPaths":["src/file.ts"],"validations":[{"name":"npm test","passed":true,"evidence":"exit 0"}],"commitMessage":"optional: the commit message for this change","summary":"optional: one line"}';
+			return `{"mutatedPaths":["src/file.ts"],"validations":[{"name":"npm test","passed":true,"evidence":"exit 0"}],"commitMessage":"optional: the commit message for this change","summary":"the requested explanation or deliverable, or a specific limitation; otherwise optional"}. summary and commitMessage each allow at most ${RESULT_COMMIT_MESSAGE_MAX_BYTES} UTF-8 bytes. Preserve the requested explanation and citations in summary when repairing the report; if they cannot fit or be grounded, state that specific limitation. Report only actual mutations and checks; a read-only task has mutatedPaths:[] and names the source read in validations, never a command that did not run`;
 		case "provenance-report":
 			return '{"confirmedFacts":["..."],"missingEvidence":["..."],"nextInspections":["..."]}';
 		case "delegation-plan":
