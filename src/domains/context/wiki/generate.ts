@@ -480,7 +480,9 @@ export async function runWikiGenerate(
 				`${resolved.plan.pages.length} pages planned; ${owed} to write` +
 				(resolved.resumed ? "; resuming an interrupted run" : ""),
 		});
-		resolved.plan = { ...resolved.plan, sourceTreeHash, sourceGitHead, sourceContent };
+		resolved.plan = { ...resolved.plan, sourceTreeHash, sourceContent };
+		if (sourceGitHead) resolved.plan.sourceGitHead = sourceGitHead;
+		else delete resolved.plan.sourceGitHead;
 		writeWikiPlanFile(staging.dir, resolved.plan);
 
 		const beforeHash = computeWikiContentHash(cwd);
@@ -541,7 +543,6 @@ export async function runWikiGenerate(
 		const workedPlan: WikiPlan = {
 			...checkpoint,
 			sourceTreeHash,
-			sourceGitHead,
 			sourceContent,
 			pages: checkpoint.pages.map((page) => {
 				const dependencies = [...new Set([...(page.dependencies ?? []), ...(citedSources.get(page.path) ?? [])])];
@@ -553,6 +554,8 @@ export async function runWikiGenerate(
 				};
 			}),
 		};
+		if (sourceGitHead) workedPlan.sourceGitHead = sourceGitHead;
+		else delete workedPlan.sourceGitHead;
 		const report = assembleWikiTree({ dir: staging.dir, sourceRoot: cwd, plan: workedPlan });
 		const finalPlan = reconcilePlan(workedPlan, staging.dir);
 		delete finalPlan.retiredPages;
