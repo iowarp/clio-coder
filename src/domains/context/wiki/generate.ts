@@ -530,7 +530,18 @@ export async function runWikiGenerate(
 		}
 		progress(input, { phase: "generate", status: "completed", message: "wiki generator completed" });
 
-		const workedPlan = readWikiPlanFile(staging.dir) ?? resolved.plan;
+		const checkpoint = readWikiPlanFile(staging.dir) ?? resolved.plan;
+		// Capture citation evidence before assembly removes missing paths from
+		// routing metadata. Failed refreshes and no-op runs must retain it.
+		const citedSources = pageSourceIndex(staging.dir, cwd);
+		const workedPlan: WikiPlan = {
+			...checkpoint,
+			sourceTreeHash,
+			pages: checkpoint.pages.map((page) => ({
+				...page,
+				dependencies: [...new Set([...(page.dependencies ?? []), ...(citedSources.get(page.path) ?? [])])],
+			})),
+		};
 		const report = assembleWikiTree({ dir: staging.dir, sourceRoot: cwd, plan: workedPlan });
 		const finalPlan = reconcilePlan(workedPlan, staging.dir);
 		const pendingCount = finalPlan.pages.filter((page) => page.status !== "written").length;

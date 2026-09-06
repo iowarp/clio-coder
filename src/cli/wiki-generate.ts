@@ -398,7 +398,15 @@ async function generateWikiWithDocumenter(
 
 	const queue = pendingPages(plan);
 	if (queue.length === 0) {
-		input.progress?.({ phase: "generate", status: "running", message: "every planned page is already current" });
+		const pending = plan.pages.filter((page) => page.status !== "written").length;
+		input.progress?.({
+			phase: "generate",
+			status: "running",
+			message:
+				pending > 0
+					? `${pending} pending page${pending === 1 ? " has" : "s have"} exhausted writer attempts`
+					: "every planned page is already current",
+		});
 		return;
 	}
 	// Say the shape of the wait before starting it. A 20-page wiki is 20 model

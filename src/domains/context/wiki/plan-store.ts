@@ -111,12 +111,15 @@ export function sanitizeWikiPlan(
 		const prior = priorByPath.get(path);
 		const recorded = options.trustStatus ? parsedStatus(entry.status) : null;
 		const recordedAttempts = options.trustStatus ? parsedAttempts(entry.attempts) : null;
+		const dependencies =
+			prior?.dependencies ?? (options.trustStatus ? stringList(entry.dependencies, Number.POSITIVE_INFINITY) : []);
 		seen.add(path);
 		pages.push({
 			path,
 			title: usableString(entry.title) ?? path.replace(/\.md$/, ""),
 			intent: intent === null ? "" : intent.slice(0, MAX_INTENT_CHARS),
 			sources: stringList(entry.sources, 16),
+			...(dependencies.length > 0 ? { dependencies } : {}),
 			status: prior?.status ?? recorded ?? "pending",
 			attempts: prior?.attempts ?? recordedAttempts ?? 0,
 		});
@@ -180,7 +183,8 @@ export function unclaimedCandidates(
 	const knownPaths = new Set(plan.pages.map((page) => page.path));
 	const claimed = new Set<string>();
 	for (const page of plan.pages) {
-		for (const source of [...page.sources, ...(pageSources.get(page.path) ?? [])]) claimed.add(source);
+		for (const source of [...page.sources, ...(page.dependencies ?? []), ...(pageSources.get(page.path) ?? [])])
+			claimed.add(source);
 	}
 	return candidate.pages.filter(
 		(page) => !knownPaths.has(page.path) && !page.sources.some((source) => claimed.has(source)),
@@ -209,7 +213,7 @@ export function scopePlanForUpdate(input: ScopeUpdateInput): WikiPlan {
 	const pages = input.plan.pages.map((page): WikiPlanPage => {
 		if (page.status !== "written") return page;
 		if (!input.existingPages.has(page.path)) return { ...page, status: "pending", attempts: 0 };
-		const claimed = [...(input.pageSources.get(page.path) ?? []), ...page.sources];
+		const claimed = [...(input.pageSources.get(page.path) ?? []), ...page.sources, ...(page.dependencies ?? [])];
 		const touched = claimed.some((source) =>
 			changedPrefixes.some((changed) => changed === source || changed.startsWith(`${source}/`)),
 		);

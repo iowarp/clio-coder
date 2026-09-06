@@ -289,8 +289,12 @@ export function pageSourceIndex(dir: string, sourceRoot: string): Map<string, st
 	const index = new Map<string, string[]>();
 	for (const relPath of wikiMarkdownFilesInDir(dir)) {
 		if (isGeneratedWikiFile(relPath)) continue;
-		const { metadata } = readWikiPage({ pagePath: relPath, content: readText(join(dir, relPath)), sourceRoot });
-		index.set(relPath, [...metadata.sources, ...metadata.tests]);
+		const { metadata, unresolvedPaths } = readWikiPage({
+			pagePath: relPath,
+			content: readText(join(dir, relPath)),
+			sourceRoot,
+		});
+		index.set(relPath, [...metadata.sources, ...metadata.tests, ...unresolvedPaths]);
 	}
 	return index;
 }

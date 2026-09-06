@@ -1,6 +1,6 @@
 import assert from "node:assert/strict";
 import { execFileSync } from "node:child_process";
-import { existsSync, mkdirSync, readdirSync, readFileSync, writeFileSync } from "node:fs";
+import { existsSync, mkdirSync, readdirSync, readFileSync, rmSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
 import { afterEach, beforeEach, describe, it } from "node:test";
 import { fileURLToPath } from "node:url";
@@ -81,12 +81,18 @@ describe("wiki generation outcomes", () => {
 		}
 		assert.equal(signal, "SIGKILL");
 	}
-	async function initialize() {
+	async function initialize(citedSources = ["src/a.ts"]) {
 		const plan: WikiPlan = { version: 1, overview: "Fixture project", pages: [page("a"), page("b")] };
 		const result = await run(
 			generator((spec, path) => {
 				if (!path) writeWikiPlanFile(spec.writeRoots?.[0] as string, plan);
-				else writeFileSync(path, content(path.endsWith("a.md") ? "a" : "b", 1));
+				else
+					writeFileSync(
+						path,
+						path.endsWith("a.md")
+							? content("a", 1).replace("  - src/a.ts", citedSources.map((source) => `  - ${source}`).join("\n"))
+							: content("b", 1),
+					);
 			}),
 		);
 		assert.equal(result.pending, 0);
@@ -143,6 +149,20 @@ describe("wiki generation outcomes", () => {
 		);
 		assert.equal(nextAttempts.length, 1);
 		assert.equal(readWikiMeta(cwd)?.plan?.pages[2]?.attempts, 2);
+		await run(generator((_spec, path) => (path ? 1 : undefined)));
+		const messages: string[] = [];
+		const exhausted = await runWikiGenerate({
+			cwd,
+			model: "fixture",
+			generate: generator((_spec, path) => {
+				assert.equal(path, undefined, "exhausted pages are not dispatched again");
+			}),
+			onProgress: (event) => {
+				messages.push(event.message);
+			},
+		});
+		assert.equal(exhausted.pending, 1);
+		assert.equal(messages.includes("every planned page is already current"), false);
 	});
 	it("accepts successful unchanged-content validation and reads completed checkpoint progress", async () => {
 		await initialize();
@@ -278,5 +298,34 @@ describe("wiki generation outcomes", () => {
 			writeFileSync(join(cwd, ".clio-coder", dir, "meta.json"), "incomplete metadata");
 		await assert.rejects(runWikiGenerate({ cwd, model: "fixture" }), /wiki recovery requires a valid publication/u);
 		for (const dir of ["wiki", "wiki-prev"]) assert.equal(existsSync(join(cwd, ".clio-coder", dir, "b.md")), true);
+	});
+	it("retains discovered dependencies through no-op updates and failed deletion refreshes", async () => {
+		await initialize(["src/a.ts", "src/extra.ts"]);
+		const unchanged = await run(
+			generator((_spec, path) => {
+				assert.equal(path, undefined);
+			}),
+		);
+		assert.equal(unchanged.status, "noop");
+		assert.deepEqual(readWikiMeta(cwd)?.plan?.pages[0]?.dependencies, ["src/a.ts", "src/extra.ts"]);
+		rmSync(join(cwd, "src/extra.ts"));
+		const attempts: string[] = [];
+		const fail = generator((_spec, path) => {
+			if (path) {
+				attempts.push(path);
+				return 1;
+			}
+		});
+		const changed = await run(fail);
+		assert.equal(changed.pending, 1);
+		assert.equal(attempts.length, 1);
+		assert.ok(attempts[0]?.endsWith("a.md"));
+		// Assembly removes its now-resolved repair marker on the next pass.
+		await run(fail);
+		const noop = await run(fail);
+		assert.equal(noop.status, "noop");
+		assert.equal(noop.pending, 1);
+		assert.deepEqual(readWikiMeta(cwd)?.plan?.pages[0]?.dependencies, ["src/a.ts", "src/extra.ts"]);
+		assert.equal(readWikiMeta(cwd)?.plan?.pages[0]?.attempts, 3);
 	});
 });
