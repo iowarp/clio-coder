@@ -32,18 +32,20 @@ export function setGlobalDefaultMaxOutputTokens(value: number): void {
 
 /**
  * Tokens a preflight context check should hold back for the response: the
- * smaller of the model's advertised output limit and the default output
- * budget. The safety margin is deliberately not added here; at request time
+ * smaller of the model's advertised output limit and the configured output
+ * budget, falling back to the product default when no budget is configured.
+ * The safety margin is deliberately not added here; at request time
  * {@link remainingContextMaxTokens} subtracts it from the window and degrades
  * the output budget gracefully, so a hard preflight reservation of
  * limit + safety would compact earlier than the engine actually needs.
  */
 export function resolveReservedOutputTokens(maxOutputTokens?: number | null): number {
+	const requested = globalDefaultMaxOutputTokens > 0 ? globalDefaultMaxOutputTokens : DEFAULT_MAX_OUTPUT_TOKENS;
 	const limit =
 		typeof maxOutputTokens === "number" && Number.isFinite(maxOutputTokens) && maxOutputTokens > 0
 			? maxOutputTokens
-			: DEFAULT_MAX_OUTPUT_TOKENS;
-	return Math.min(limit, DEFAULT_MAX_OUTPUT_TOKENS);
+			: Number.POSITIVE_INFINITY;
+	return Math.min(limit, requested);
 }
 
 export function estimateInputTokensFromContext(context: Context): number {

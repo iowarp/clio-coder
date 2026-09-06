@@ -1,7 +1,11 @@
 import { deepStrictEqual, ok, strictEqual } from "node:assert/strict";
 import { afterEach, describe, it } from "node:test";
 import { ledgerUsageCalls, type SessionEntry } from "../../src/domains/session/index.js";
-import { remainingContextMaxTokens, setGlobalDefaultMaxOutputTokens } from "../../src/engine/apis/output-budget.js";
+import {
+	remainingContextMaxTokens,
+	resolveReservedOutputTokens,
+	setGlobalDefaultMaxOutputTokens,
+} from "../../src/engine/apis/output-budget.js";
 import type { AgentMessage } from "../../src/engine/types.js";
 import { estimatedUsageForInterruptedTurn } from "../../src/interactive/chat-loop-messages.js";
 import { reseedSessionUsageFromLedger } from "../../src/interactive/session-usage-reseed.js";
@@ -103,6 +107,27 @@ describe("contracts/metering integrity", () => {
 		strictEqual(remainingContextMaxTokens(model, empty, { maxTokens: 4_096 }), 4_096);
 		setGlobalDefaultMaxOutputTokens(32_768);
 		strictEqual(remainingContextMaxTokens(servedWindowModel, loaded, undefined), 10_048);
+	});
+
+	it("reserves the configured response allowance rather than compacting a fitting first request", () => {
+		setGlobalDefaultMaxOutputTokens(1_024);
+		const model = { contextWindow: 32_768, maxTokens: 32_768 };
+		const context = { systemPrompt: "x".repeat(40_736), messages: [], tools: [] };
+		const reserved = resolveReservedOutputTokens(model.maxTokens);
+		strictEqual(reserved, 1_024);
+		strictEqual(remainingContextMaxTokens(model, context, undefined), reserved);
+		ok(10_184 + reserved < model.contextWindow);
+	});
+
+	it("respects configured larger reservations, model caps, and unset fallbacks", () => {
+		setGlobalDefaultMaxOutputTokens(65_536);
+		strictEqual(resolveReservedOutputTokens(131_072), 65_536);
+		strictEqual(resolveReservedOutputTokens(4_096), 4_096);
+		strictEqual(resolveReservedOutputTokens(null), 65_536);
+		setGlobalDefaultMaxOutputTokens(0);
+		strictEqual(resolveReservedOutputTokens(131_072), 32_768);
+		strictEqual(resolveReservedOutputTokens(4_096), 4_096);
+		strictEqual(resolveReservedOutputTokens(null), 32_768);
 	});
 
 	it("resets process totals and reseeds only completed calls from the resumed ledger", () => {
