@@ -296,6 +296,7 @@ describe("compact prompt contracts", () => {
 		// The measured pre-memory fixture is 11,274 chars, including 406
 		// chars of task-tool guidance already present before #352. #352/#364
 		// add a bounded promotion/approval workflow and no-edit scope rules.
+		// #351 adds 405 chars of shared decision-adherence guidance.
 		const identity = table.byId.get("identity.clio")?.body.trim();
 		ok(identity);
 		const memoryStart = identity.indexOf("When asked to remember");
@@ -303,12 +304,12 @@ describe("compact prompt contracts", () => {
 		const memoryGuidance = identity.slice(memoryStart);
 		strictEqual(memoryGuidance.length, 1_599);
 		ok(memoryGuidance.length <= 1_620, "review memory workflow growth above 405 estimated tokens");
-		strictEqual(normalizedMain.length - memoryGuidance.length - 2, 11_274);
-		strictEqual(normalizedMain.length, 12_875);
-		strictEqual(Math.ceil(normalizedMain.length / 4), 3_219);
-		ok(normalizedMain.length <= 12_896, `main prompt grew to ${normalizedMain.length} chars`);
+		strictEqual(normalizedMain.length - memoryGuidance.length - 2, 11_274 + 405);
+		strictEqual(normalizedMain.length, 13_280);
+		strictEqual(Math.ceil(normalizedMain.length / 4), 3_320);
+		ok(normalizedMain.length <= 13_301, `main prompt grew to ${normalizedMain.length} chars`);
 		ok(
-			Math.ceil(normalizedMain.length / 4) <= 3_224,
+			Math.ceil(normalizedMain.length / 4) <= 3_326,
 			`main prompt grew to ${Math.ceil(normalizedMain.length / 4)} estimated tokens`,
 		);
 		strictEqual(Math.ceil(main.systemPrompt.length / 4), main.tokenEstimate);
@@ -326,7 +327,7 @@ describe("compact prompt contracts", () => {
 			},
 			{
 				identity: 698,
-				"operating-contract": 203,
+				"operating-contract": 305,
 				delegation: 532,
 				skills: 181,
 				safety: 266,
@@ -371,17 +372,17 @@ describe("compact prompt contracts", () => {
 				sections: worker.sections,
 			}),
 		);
-		// Existing task-tool guidance also reaches workers (+406 chars).
+		// Task-tool guidance (+406 chars) and #351 adherence guidance (+405) reach workers.
 		// Memory/no-edit identity guidance remains main-only.
 		strictEqual(worker.systemPrompt.includes("When asked to remember"), false);
-		strictEqual(worker.systemPrompt.length, 5_899);
-		strictEqual(worker.tokenEstimate, 1_475);
-		ok(worker.systemPrompt.length <= 5_906);
-		ok(worker.tokenEstimate <= 1_477);
+		strictEqual(worker.systemPrompt.length, 6_304);
+		strictEqual(worker.tokenEstimate, 1_576);
+		ok(worker.systemPrompt.length <= 6_311);
+		ok(worker.tokenEstimate <= 1_578);
 		strictEqual(Math.ceil(worker.systemPrompt.length / 4), worker.tokenEstimate);
 		deepStrictEqual(Object.fromEntries(worker.sections.map((section) => [section.id, section.tokenEstimate])), {
 			identity: 62,
-			"operating-contract": 297,
+			"operating-contract": 398,
 			"tool-contract": 473,
 			safety: 253,
 			persona: 389,
