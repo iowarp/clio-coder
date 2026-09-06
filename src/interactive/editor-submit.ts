@@ -25,6 +25,8 @@ import {
 } from "./transcript-detail.js";
 
 const EDITOR_BASH_TIMEOUT_MS = 300_000;
+/** Existing bash TERM-to-KILL grace (5s), plus settlement and session append. */
+export const EDITOR_BASH_SHUTDOWN_MS = 6000;
 
 /**
  * Command shapes whose text is put back in the editor after the parser rejects
@@ -125,18 +127,22 @@ export interface EditorSubmitController {
 	restoreQueuedFollowUpsToEditor(): void;
 	hasActiveEditorBash(): boolean;
 	cancelActiveEditorBash(): boolean;
+	/** Stop shell admission, cancel the owned command, and await its persisted result. */
+	shutdownEditorBash(): Promise<void>;
 }
 
 type EditorSteerSubmission = "unhandled" | "accepted" | "rejected";
 
 /** Owns editor submission and the one local bash process attached to it. */
 export function createEditorSubmitController(deps: EditorSubmitDeps): EditorSubmitController {
+	let shuttingDown = false;
 	let activeEditorBash: AbortController | null = null;
 	let activeEditorBashSettlement: Promise<void> | null = null;
 
 	const runEditorBash = (text: string): boolean => {
 		const parsed = parseEditorBashCommand(text);
 		if (!parsed) return false;
+		if (shuttingDown) return true;
 		if (deps.chat.isStreaming()) {
 			deps.io.stderr("[bash] response in progress. Press Esc to cancel the active run before running a local command.\n");
 			return true;
@@ -394,12 +400,14 @@ export function createEditorSubmitController(deps: EditorSubmitDeps): EditorSubm
 		const literalText = unguardPastedEditorOperator(text);
 		const trimmed = literalText.trim();
 		if (trimmed.length === 0) return;
+		if (shuttingDown) throw new Error("editor is shutting down");
 		signal?.throwIfAborted();
 		deps.collapseLaunchpadBeforeSubmit?.();
 		if (parseEditorBashCommand(text)) {
 			while (deps.chat.isStreaming()) await awaitWithAbort(deps.chat.whenSettled(), signal);
 			while (activeEditorBashSettlement) await awaitWithAbort(activeEditorBashSettlement, signal);
 			signal?.throwIfAborted();
+			if (shuttingDown) throw new Error("editor is shutting down");
 			deps.editor.addToHistory(literalText);
 			runEditorBash(text);
 			deps.ui.requestRender();
@@ -529,6 +537,11 @@ export function createEditorSubmitController(deps: EditorSubmitDeps): EditorSubm
 		interruptFromEditor,
 		restoreQueuedFollowUpsToEditor,
 		hasActiveEditorBash: () => activeEditorBash !== null,
+		shutdownEditorBash: async () => {
+			shuttingDown = true;
+			activeEditorBash?.abort();
+			await activeEditorBashSettlement;
+		},
 		cancelActiveEditorBash: () => {
 			if (!activeEditorBash) return false;
 			activeEditorBash.abort();

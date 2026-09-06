@@ -23,6 +23,11 @@ import { getSharedBus } from "./shared-bus.js";
 export type TerminationPhase = "idle" | "draining" | "terminating" | "persisting" | "exiting";
 
 type Hook = () => void | Promise<void>;
+interface RegisteredHook {
+	run: Hook;
+	/** Internal allowance for an owned resource with a longer escalation window. */
+	timeoutMs?: number;
+}
 
 /** Wall-clock budget per hook and per domain.stop() call. */
 export const DEFAULT_SHUTDOWN_HOOK_MS = 500;
@@ -113,9 +118,9 @@ export async function runWithBudget(
 
 class TerminationCoordinator {
 	private phase: TerminationPhase = "idle";
-	private readonly drainHooks: Hook[] = [];
-	private readonly terminateHooks: Hook[] = [];
-	private readonly persistHooks: Hook[] = [];
+	private readonly drainHooks: RegisteredHook[] = [];
+	private readonly terminateHooks: RegisteredHook[] = [];
+	private readonly persistHooks: RegisteredHook[] = [];
 	private exitCode = 0;
 	private started = false;
 	private drained = false;
@@ -135,14 +140,20 @@ class TerminationCoordinator {
 		return this.exitCode;
 	}
 
-	onDrain(hook: Hook): void {
-		this.drainHooks.push(hook);
+	onDrain(hook: Hook, options?: { timeoutMs: number }): void {
+		if (
+			options &&
+			(!Number.isSafeInteger(options.timeoutMs) || options.timeoutMs <= 0 || options.timeoutMs > 2 ** 31 - 1)
+		) {
+			throw new RangeError("shutdown hook timeout must be a positive 32-bit timer delay");
+		}
+		this.drainHooks.push({ run: hook, ...options });
 	}
 	onTerminate(hook: Hook): void {
-		this.terminateHooks.push(hook);
+		this.terminateHooks.push({ run: hook });
 	}
 	onPersist(hook: Hook): void {
-		this.persistHooks.push(hook);
+		this.persistHooks.push({ run: hook });
 	}
 
 	async shutdown(code = 0): Promise<void> {
@@ -186,12 +197,18 @@ class TerminationCoordinator {
 		process.exit(this.exitCode);
 	}
 
-	private async runHooks(hooks: Hook[], phase: string, budgetMs: number, log: (msg: string) => void): Promise<void> {
+	private async runHooks(
+		hooks: RegisteredHook[],
+		phase: string,
+		defaultBudgetMs: number,
+		log: (msg: string) => void,
+	): Promise<void> {
 		for (let i = 0; i < hooks.length; i++) {
 			const hook = hooks[i];
 			if (!hook) continue;
+			const budgetMs = hook.timeoutMs ?? defaultBudgetMs;
 			const t0 = process.hrtime.bigint();
-			const completed = await runWithBudget(hook, budgetMs, (err) => {
+			const completed = await runWithBudget(hook.run, budgetMs, (err) => {
 				const message = err instanceof Error ? err.message : String(err);
 				writeShutdownNotice(`[clio-coder:termination] ${phase}[${i}] failed: ${message}`);
 				if (err instanceof Error && err.stack) log(err.stack);

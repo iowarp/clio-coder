@@ -465,27 +465,58 @@ export function spawnWorkerProcess(
 		},
 	};
 
+	let settled = false;
+	let abortStarted = false;
+	let killTimer: ReturnType<typeof setTimeout> | null = null;
+	let pendingClose: (() => void) | null = null;
+
+	// The leader may exit while a same-group descendant has closed all inherited
+	// pipes. Neither exit nor close proves that cancellation reached the group.
+	function hasOwnedProcesses(): boolean {
+		if (pid === null) return false;
+		if (process.platform !== "win32") {
+			try {
+				process.kill(-pid, 0);
+				return true;
+			} catch (error) {
+				if ((error as NodeJS.ErrnoException).code === "EPERM") return true;
+			}
+		}
+		return isAlive();
+	}
+
 	const promise = new Promise<SpawnedWorkerResult>((resolve) => {
 		child.on("close", (code, signal) => {
-			try {
-				child.stdin?.end();
-			} catch {
-				// stdin may already be closed.
-			}
-			end();
-			if (sawSpawnError) {
-				resolve({ exitCode: null, signal: null, ...diagnostics() });
+			const finish = (): void => {
+				if (settled) return;
+				settled = true;
+				try {
+					child.stdin?.end();
+				} catch {
+					// stdin may already be closed.
+				}
+				end();
+				if (sawSpawnError) {
+					resolve({ exitCode: null, signal: null, ...diagnostics() });
+					return;
+				}
+				if (!announceAccepted && !announceFailed) {
+					announceFailed = true;
+					appendStderr("[worker] Missing worker attestation: peer exited before announcing its route identity\n");
+				}
+				if (announceFailed) {
+					resolve({ exitCode: code !== null && code !== 0 ? code : 1, signal: signal ?? null, ...diagnostics() });
+					return;
+				}
+				resolve({ exitCode: code ?? 0, signal: signal ?? null, ...diagnostics() });
+			};
+			if (killTimer !== null && hasOwnedProcesses()) {
+				pendingClose = finish;
 				return;
 			}
-			if (!announceAccepted && !announceFailed) {
-				announceFailed = true;
-				appendStderr("[worker] Missing worker attestation: peer exited before announcing its route identity\n");
-			}
-			if (announceFailed) {
-				resolve({ exitCode: code !== null && code !== 0 ? code : 1, signal: signal ?? null, ...diagnostics() });
-				return;
-			}
-			resolve({ exitCode: code ?? 0, signal: signal ?? null, ...diagnostics() });
+			if (killTimer !== null) clearTimeout(killTimer);
+			killTimer = null;
+			finish();
 		});
 	});
 
@@ -543,15 +574,17 @@ export function spawnWorkerProcess(
 	};
 
 	const abort = (): void => {
-		if (!isAlive()) return;
+		if (settled || abortStarted || !hasOwnedProcesses()) return;
+		abortStarted = true;
 		try {
 			child.stdin?.end();
 		} catch {
 			// process may already be closing
 		}
 		signalProcessGroup(child, "SIGTERM");
-		const killTimer = setTimeout(() => {
-			if (isAlive()) {
+		killTimer = setTimeout(() => {
+			killTimer = null;
+			if (hasOwnedProcesses()) {
 				signalProcessGroup(child, "SIGKILL");
 				try {
 					opts?.onForcedKill?.();
@@ -559,8 +592,12 @@ export function spawnWorkerProcess(
 					// fallback is best-effort; the local channel is already dead
 				}
 			}
+			const finish = pendingClose;
+			pendingClose = null;
+			finish?.();
 		}, shutdownGraceMs);
-		killTimer.unref?.();
+		// Keep this timer referenced: callers await settlement before process exit,
+		// even when the leader and every inherited pipe have already closed.
 	};
 
 	return {
