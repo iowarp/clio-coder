@@ -4,7 +4,7 @@ import { it } from "node:test";
 import { fileURLToPath } from "node:url";
 
 it("reports pending publications as incomplete for wiki and refresh, including no-op updates", () => {
-	for (const command of ["wiki", "refresh"]) {
+	for (const command of ["wiki", "refresh", "retry"]) {
 		for (const status of ["generated", "noop"]) {
 			for (const pending of [0, 1, 3]) {
 				const stdout = execFileSync(
@@ -23,11 +23,13 @@ it("reports pending publications as incomplete for wiki and refresh, including n
 				assert.match(stdout, new RegExp(`3 published pages; ${3 - pending} complete, ${pending} pending`, "u"));
 				if (pending > 0) {
 					assert.match(stdout, /: incomplete \(/u);
-					assert.match(stdout, /clio-coder context wiki --update/u);
+					assert.match(stdout, new RegExp(`${pending} exhausted ordinary writer attempts`, "u"));
+					assert.match(stdout, /writer: fixture fetch failed/u);
+					assert.match(stdout, /clio-coder context wiki --retry-pending/u);
 					assert.doesNotMatch(stdout, /: (?:generated|unchanged) \(/u);
 				} else {
 					assert.match(stdout, new RegExp(`: ${status === "noop" ? "unchanged" : "generated"} \\(`, "u"));
-					assert.doesNotMatch(stdout, /incomplete|--update/u);
+					assert.doesNotMatch(stdout, /incomplete|--retry-pending/u);
 				}
 			}
 		}

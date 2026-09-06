@@ -24,6 +24,12 @@ export type ResolvedWikiDepth = Exclude<WikiDepth, "auto">;
 
 export type WikiPageStatus = "pending" | "written";
 
+export interface WikiPageFailure {
+	phase: "admission" | "writer" | "validation";
+	detail: string;
+	runId?: string;
+}
+
 export interface WikiPlanPage {
 	/** POSIX-relative page path inside the wiki root. */
 	path: string;
@@ -36,8 +42,10 @@ export interface WikiPlanPage {
 	dependencies?: string[];
 	/** Harness-owned: whether this page has been written in a completed dispatch. */
 	status: WikiPageStatus;
-	/** Harness-owned: how many dispatches have tried to write this page. */
+	/** Harness-owned: admitted writer attempts for this page specification, including explicit retries. */
 	attempts: number;
+	/** Last unsuccessful outcome, retained across publication and authored replanning. */
+	lastFailure?: WikiPageFailure;
 }
 
 export interface WikiPlan {

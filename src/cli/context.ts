@@ -3,12 +3,13 @@ import type { BootstrapProgressEvent } from "../domains/context/index.js";
 import type { BootstrapGenerationState } from "../domains/context/state.js";
 import type { RunWikiGenerateResult } from "../domains/context/wiki/generate.js";
 import type { WikiMeta } from "../domains/context/wiki/meta.js";
+import { MAX_PAGE_ATTEMPTS } from "../domains/context/wiki/plan-store.js";
 
 const HELP = `Usage:
   clio-coder context
   clio-coder context init [--yes] [--preview|--heuristic] [--adopt] [--propose|--apply|--rewrite]
   clio-coder context refresh [--wiki]
-  clio-coder context wiki [--update] [--status] [--depth auto|simple|medium|detailed]
+  clio-coder context wiki [--update|--retry-pending] [--status] [--depth auto|simple|medium|detailed]
                     [--target <id>] [--model <id>] [--thinking off|low|medium|high]
   clio-coder context reset [--all] [--yes]
   clio-coder context index [--json]
@@ -34,6 +35,19 @@ function printWikiProgress(event: BootstrapProgressEvent): void {
 	process.stderr.write(`clio-coder context wiki: ${event.message}${detail}\n`);
 }
 
+function wikiRecoveryLines(meta: WikiMeta | null): string[] {
+	const pending = meta?.plan?.pages.filter((page) => page.status !== "written") ?? [];
+	if (pending.length === 0) return [];
+	const exhausted = pending.filter((page) => page.attempts >= MAX_PAGE_ATTEMPTS).length;
+	const failures = pending.filter((page) => page.lastFailure);
+	return [
+		`pending: ${pending.length} page(s)${exhausted > 0 ? `; ${exhausted} exhausted ordinary writer attempts` : ""}`,
+		...failures.slice(0, 8).map((page) => `${page.path}: ${page.lastFailure?.phase}: ${page.lastFailure?.detail}`),
+		...(failures.length > 8 ? [`${failures.length - 8} more page failures retained in wiki metadata`] : []),
+		"Run `clio-coder context wiki --retry-pending` to retry pending pages once, including exhausted pages, without replanning.",
+	];
+}
+
 function printWikiOutcome(prefix: string, result: RunWikiGenerateResult, meta: WikiMeta | null): void {
 	const pending = result.pending ?? meta?.plan?.pages.filter((page) => page.status !== "written").length ?? 0;
 	const complete = meta?.plan
@@ -44,7 +58,10 @@ function printWikiOutcome(prefix: string, result: RunWikiGenerateResult, meta: W
 	const outcome = pending > 0 ? "incomplete" : result.status === "noop" ? "unchanged" : "generated";
 	process.stdout.write(`${prefix}: ${outcome} (${published}; ${progress})\n`);
 	if (pending > 0) {
-		process.stdout.write("Run `clio-coder context wiki --update` to continue pending pages.\n");
+		const recovery = wikiRecoveryLines(meta);
+		process.stdout.write(
+			`${recovery.length > 0 ? recovery.join("\n") : "Run `clio-coder context wiki --update` to continue pending pages."}\n`,
+		);
 	}
 }
 
@@ -198,10 +215,11 @@ async function runWikiStatusCommand(): Promise<number> {
 			`depth: ${depth} (requested ${requestedDepth}; ${sourceFiles} source files; ` +
 				`${pagesWritten}/${pagesPlanned} planned pages written)`,
 		);
-		if (pagesWritten < pagesPlanned) {
+		if (pagesWritten < pagesPlanned && !meta.plan) {
 			lines.push(`pending: ${pagesPlanned - pagesWritten} page(s); run \`clio-coder context wiki --update\` to finish`);
 		}
 	}
+	lines.push(...wikiRecoveryLines(meta));
 	if (currentHead !== meta.gitHead) {
 		lines.push(`staleness: gitHead differs from current HEAD (${currentHead ?? "none"})`);
 	}
@@ -224,6 +242,7 @@ function isThinkingLevel(value: unknown): value is WikiCliThinking {
 
 async function runWikiCommand(args: string[]): Promise<number> {
 	let forceUpdate = false;
+	let retryPending = false;
 	let status = false;
 	let depth: WikiCliDepth = "auto";
 	let target: string | undefined;
@@ -237,6 +256,10 @@ async function runWikiCommand(args: string[]): Promise<number> {
 		}
 		if (arg === "--update") {
 			forceUpdate = true;
+			continue;
+		}
+		if (arg === "--retry-pending") {
+			retryPending = true;
 			continue;
 		}
 		if (arg === "--status") {
@@ -286,6 +309,7 @@ async function runWikiCommand(args: string[]): Promise<number> {
 		const result = await context.runWikiGenerate({
 			cwd: process.cwd(),
 			...(forceUpdate ? { mode: "update" as const } : {}),
+			...(retryPending ? { retryPending: true } : {}),
 			depth,
 			model: await resolveDocumenterModelId(route),
 			generate: modelWikiGenerate({ route }),

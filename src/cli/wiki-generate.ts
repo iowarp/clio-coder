@@ -183,10 +183,9 @@ function summaryDetail(summary: DispatchSummary, startedAtClock: number): string
 	);
 }
 
-interface WikiDispatchOutcome {
-	ok: boolean;
-	detail: string;
-}
+type WikiDispatchOutcome =
+	| { ok: false; phase: "admission"; detail: string }
+	| { ok: boolean; phase: "writer"; detail: string; runId: string };
 
 /**
  * Run one wiki dispatch to completion and report how it ended. It never
@@ -245,7 +244,7 @@ async function runWikiDispatch(input: {
 			assignmentDeadlineAt: startedAt + input.deadlineMs,
 		});
 	} catch (err) {
-		return { ok: false, detail: err instanceof Error ? err.message : String(err) };
+		return { ok: false, phase: "admission", detail: err instanceof Error ? err.message : String(err) };
 	}
 	const deadline = armInternalDispatchDeadline(input.dispatch, handle.runId, input.label, input.deadlineMs);
 	let lastHeartbeatAt = startedAtClock;
@@ -257,17 +256,33 @@ async function runWikiDispatch(input: {
 			input.onHeartbeat({ elapsedMs: Math.round(nowMs - startedAtClock), tools });
 		});
 		const receipt = await handle.finalPromise;
-		if (deadline.timedOut()) return { ok: false, detail: `timed out; ${summaryDetail(summary, startedAtClock)}` };
+		if (deadline.timedOut())
+			return {
+				ok: false,
+				phase: "writer",
+				runId: handle.runId,
+				detail: `timed out; ${summaryDetail(summary, startedAtClock)}`,
+			};
 		if (receipt.exitCode !== 0) {
 			input.dispatch.abort(handle.runId);
-			return { ok: false, detail: `${receiptFailure(receipt)}; ${summaryDetail(summary, startedAtClock)}` };
+			return {
+				ok: false,
+				phase: "writer",
+				runId: handle.runId,
+				detail: `${receiptFailure(receipt)}; ${summaryDetail(summary, startedAtClock)}`,
+			};
 		}
-		return { ok: true, detail: summaryDetail(summary, startedAtClock) };
+		return { ok: true, phase: "writer", runId: handle.runId, detail: summaryDetail(summary, startedAtClock) };
 	} catch (err) {
 		if (!deadline.timedOut()) input.dispatch.abort(handle.runId);
 		await handle.finalPromise.catch(() => undefined);
 		const reason = deadline.timedOut() ? "timed out" : err instanceof Error ? err.message : String(err);
-		return { ok: false, detail: `${reason}; ${formatElapsed(performance.now() - startedAtClock)}` };
+		return {
+			ok: false,
+			phase: "writer",
+			runId: handle.runId,
+			detail: `${reason}; ${formatElapsed(performance.now() - startedAtClock)}`,
+		};
 	} finally {
 		deadline.clear();
 	}
@@ -275,7 +290,8 @@ async function runWikiDispatch(input: {
 
 function receiptFailure(receipt: RunReceipt): string {
 	const code = receipt.outcomeCode ? ` (${receipt.outcomeCode})` : "";
-	return `exit ${receipt.exitCode}${code}`;
+	const detail = receipt.outcomeDetail?.replace(/\s+/gu, " ").slice(0, 350);
+	return `exit ${receipt.exitCode}${code}${detail ? `: ${detail}` : ""}`;
 }
 
 /**
@@ -367,11 +383,24 @@ async function runPagePhase(
 	const written = outcome.ok && existsSync(join(input.outputDir, page.path));
 	const next: WikiPlan = {
 		...plan,
-		pages: plan.pages.map((entry) =>
-			entry.path === page.path
-				? { ...entry, status: written ? ("written" as const) : ("pending" as const), attempts: entry.attempts + 1 }
-				: entry,
-		),
+		pages: plan.pages.map((entry) => {
+			if (entry.path !== page.path) return entry;
+			const nextPage: WikiPlanPage = {
+				...entry,
+				status: written ? "written" : "pending",
+				attempts: entry.attempts + (outcome.phase === "writer" ? 1 : 0),
+			};
+			if (written) delete nextPage.lastFailure;
+			else
+				nextPage.lastFailure = {
+					phase: outcome.ok ? "validation" : outcome.phase,
+					detail: (outcome.ok ? "writer finished without the planned page file" : outcome.detail)
+						.replace(/\s+/gu, " ")
+						.slice(0, 500),
+					...(outcome.phase === "writer" ? { runId: outcome.runId } : {}),
+				};
+			return nextPage;
+		}),
 	};
 	writeWikiPlanFile(input.outputDir, next);
 	input.progress?.({
@@ -410,7 +439,7 @@ async function generateWikiWithDocumenter(
 	signal?.throwIfAborted();
 	if (!input.resumed) writeWikiPlanFile(input.outputDir, plan);
 
-	const queue = pendingPages(plan);
+	const queue = pendingPages(plan, input.retryPending);
 	if (queue.length === 0) {
 		const pending = plan.pages.filter((page) => page.status !== "written").length;
 		input.progress?.({
@@ -448,7 +477,7 @@ async function generateWikiWithDocumenter(
 			return;
 		}
 		const current = plan.pages.find((entry) => entry.path === page.path) ?? page;
-		if (current.status === "written" || current.attempts >= MAX_PAGE_ATTEMPTS) continue;
+		if (current.status === "written" || (!input.retryPending && current.attempts >= MAX_PAGE_ATTEMPTS)) continue;
 		plan = await runPagePhase(dispatch, input, plan, current, route, {
 			index: index + 1,
 			total: queue.length,

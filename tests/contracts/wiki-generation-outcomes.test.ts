@@ -277,6 +277,113 @@ describe("wiki generation outcomes", () => {
 		assert.equal(exhausted.pending, 1);
 		assert.equal(messages.includes("every planned page is already current"), false);
 	});
+	it("retries exhausted partial-publication work once without replanning or erasing attempts", async () => {
+		const initial = await run(
+			generator((spec, path) => {
+				if (!path) {
+					writeWikiPlanFile(spec.writeRoots?.[0] as string, {
+						version: 1,
+						overview: "Fixture",
+						pages: [page("a"), page("b")],
+					});
+					return;
+				}
+				const name = path.endsWith("a.md") ? "a" : "b";
+				writeFileSync(path, content(name, 1));
+				return name === "b" ? 1 : 0;
+			}),
+		);
+		assert.equal(initial.pending, 1);
+		assert.equal(readWikiMeta(cwd)?.gitHead, null, "first partial publication has no whole-wiki certification");
+		for (let attempt = 2; attempt <= 3; attempt++) {
+			const tried: string[] = [];
+			await run(
+				generator((_spec, path) => {
+					if (!path) return;
+					tried.push(path.endsWith("b.md") ? "b" : "a");
+					return 1;
+				}),
+			);
+			assert.deepEqual(tried, ["b"], "completed source-matching A survives partial publication");
+			assert.equal(readWikiMeta(cwd)?.plan?.pages[1]?.attempts, attempt);
+		}
+		const failedPage = readWikiMeta(cwd)?.plan?.pages[1];
+		assert.equal(failedPage?.lastFailure?.phase, "writer");
+		assert.match(failedPage?.lastFailure?.detail ?? "", /exit 1/u);
+		assert.ok(failedPage?.lastFailure?.runId);
+		let calls = 0;
+		const retried = await runWikiGenerate({
+			cwd,
+			model: "fixture",
+			retryPending: true,
+			generate: generator((_spec, path) => {
+				assert.ok(path?.endsWith("b.md"), "explicit retry does not plan or rewrite A");
+				calls++;
+			}),
+		});
+		assert.equal(calls, 1);
+		assert.equal(retried.pending, 0);
+		const plan = readWikiMeta(cwd)?.plan;
+		assert.equal(plan?.pages[0]?.attempts, 1);
+		assert.equal(plan?.pages[1]?.attempts, 4, "explicit retry retains prior failed attempts");
+		assert.equal(plan?.pages[1]?.lastFailure, undefined);
+		assert.equal(wikiStaleness(cwd).state, "fresh");
+	});
+	it("records unadmitted work without spending a writer attempt and keeps it retryable", async () => {
+		await initialize();
+		writeFileSync(join(cwd, "src/b.ts"), "export const b = 2;\n");
+		const result = await run(
+			generator((_spec, path) => {
+				if (path) throw new Error("fixture target cooling down");
+			}),
+		);
+		assert.equal(result.pending, 1);
+		const failedPage = readWikiMeta(cwd)?.plan?.pages[1];
+		assert.equal(failedPage?.attempts, 0);
+		assert.deepEqual(failedPage?.lastFailure, { phase: "admission", detail: "fixture target cooling down" });
+		let calls = 0;
+		const recovered = await runWikiGenerate({
+			cwd,
+			model: "fixture",
+			retryPending: true,
+			generate: generator((_spec, path) => {
+				assert.ok(path?.endsWith("b.md"));
+				calls++;
+			}),
+		});
+		assert.equal(calls, 1);
+		assert.equal(recovered.pending, 0);
+		assert.equal(readWikiMeta(cwd)?.plan?.pages[1]?.attempts, 1);
+	});
+	it("does not invent a plan or call a model for an empty explicit retry", async () => {
+		let calls = 0;
+		const result = await runWikiGenerate({
+			cwd,
+			model: "fixture",
+			retryPending: true,
+			generate: () => {
+				calls++;
+			},
+		});
+		assert.equal(result.status, "failed");
+		assert.match(result.problems?.join(" ") ?? "", /no saved wiki plan/u);
+		assert.equal(calls, 0);
+		assert.equal(readWikiMeta(cwd), null);
+	});
+	it("does not trust authored failure or retry accounting", () => {
+		const prior: WikiPlan = {
+			version: 1,
+			overview: "Fixture",
+			pages: [{ ...page("a"), attempts: 3, lastFailure: { phase: "writer", detail: "fetch failed", runId: "original" } }],
+		};
+		const authored = {
+			...prior,
+			pages: [
+				{ ...prior.pages[0], status: "written", attempts: 0, lastFailure: { phase: "admission", detail: "invented" } },
+			],
+		};
+		assert.deepEqual(sanitizeWikiPlan(authored, prior, { trustStatus: false })?.pages, prior.pages);
+	});
 	it("accepts successful unchanged-content validation and reads completed checkpoint progress", async () => {
 		await initialize();
 		writeFileSync(join(cwd, "src/a.ts"), "export const a = 2;\n");

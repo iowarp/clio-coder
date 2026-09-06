@@ -13,7 +13,7 @@ import { existsSync, readFileSync } from "node:fs";
 import { join } from "node:path";
 import { safeResourceWrite } from "../../../core/safe-resource-write.js";
 import { isGeneratedWikiFile, WIKI_PLAN_FILE } from "./layout.js";
-import type { WikiPageStatus, WikiPlan, WikiPlanPage } from "./plan.js";
+import type { WikiPageFailure, WikiPageStatus, WikiPlan, WikiPlanPage } from "./plan.js";
 import { parseWikiSourceContent } from "./source-content.js";
 
 /** Dispatches one page may receive across all runs before it is left alone. */
@@ -76,6 +76,16 @@ function parsedAttempts(value: unknown): number | null {
 	return typeof value === "number" && Number.isSafeInteger(value) && value >= 0 ? value : null;
 }
 
+function parsedFailure(value: unknown): WikiPageFailure | undefined {
+	if (!isRecord(value)) return undefined;
+	const phase = value.phase;
+	if (phase !== "admission" && phase !== "writer" && phase !== "validation") return undefined;
+	const detail = usableString(value.detail)?.replace(/\s+/gu, " ").slice(0, 500);
+	if (!detail) return undefined;
+	const runId = usableString(value.runId)?.slice(0, 120);
+	return { phase, detail, ...(runId ? { runId } : {}) };
+}
+
 export interface SanitizeWikiPlanOptions {
 	/**
 	 * Whether the recorded progress in this document may be believed.
@@ -119,6 +129,7 @@ export function sanitizeWikiPlan(
 				JSON.stringify([...prior.sources].sort()) !== JSON.stringify([...sources].sort()));
 		const recorded = options.trustStatus ? parsedStatus(entry.status) : null;
 		const recordedAttempts = options.trustStatus ? parsedAttempts(entry.attempts) : null;
+		const lastFailure = prior?.lastFailure ?? (options.trustStatus ? parsedFailure(entry.lastFailure) : undefined);
 		const dependencies =
 			prior?.dependencies ?? (options.trustStatus ? stringList(entry.dependencies, Number.POSITIVE_INFINITY) : []);
 		seen.add(path);
@@ -130,6 +141,7 @@ export function sanitizeWikiPlan(
 			...(dependencies.length > 0 ? { dependencies } : {}),
 			status: changedSpec ? "pending" : (prior?.status ?? recorded ?? "pending"),
 			attempts: changedSpec ? 0 : (prior?.attempts ?? recordedAttempts ?? 0),
+			...(!changedSpec && (prior?.status ?? recorded) !== "written" && lastFailure ? { lastFailure } : {}),
 		});
 	}
 	if (pages.length === 0) return null;
@@ -246,7 +258,7 @@ export function scopePlanForUpdate(input: ScopeUpdateInput): WikiPlan {
 	return { ...input.plan, pages };
 }
 
-/** Pages this run still owes, in plan order, excluding ones already exhausted. */
-export function pendingPages(plan: WikiPlan): WikiPlanPage[] {
-	return plan.pages.filter((page) => page.status !== "written" && page.attempts < MAX_PAGE_ATTEMPTS);
+/** An explicit operator retry includes exhausted pages without erasing their attempt history. */
+export function pendingPages(plan: WikiPlan, retryExhausted = false): WikiPlanPage[] {
+	return plan.pages.filter((page) => page.status !== "written" && (retryExhausted || page.attempts < MAX_PAGE_ATTEMPTS));
 }

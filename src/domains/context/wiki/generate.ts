@@ -74,6 +74,8 @@ export interface WikiGenerateInput {
 	 * paths.
 	 */
 	resumed: boolean;
+	/** Operator-requested retry of pending work, including exhausted writers, once this run. */
+	retryPending?: boolean;
 	/** Indexed areas no existing page covers, offered to a planning pass. */
 	unclaimedAreas: ReadonlyArray<WikiPlanPage>;
 	gitHead?: string | null;
@@ -89,6 +91,8 @@ export interface RunWikiGenerateInput {
 	mode?: WikiGenerateMode;
 	/** Repository-detail policy. Auto scales decomposition from indexed files and lines. */
 	depth?: WikiDepth;
+	/** Resume the existing plan, allowing exhausted pending writers one more attempt. */
+	retryPending?: boolean;
 	model: string;
 	generate?: WikiGenerate;
 	onProgress?: BootstrapProgressSink;
@@ -376,7 +380,13 @@ function resolvePlan(input: {
 	const previous = staged ?? (input.mode === "update" ? input.previousPlan : undefined);
 	if (previous) {
 		const pageSources = pageSourceIndex(input.stagingDir, input.cwd);
-		const gitAvailable = changedPathsSince(input.cwd, staged?.sourceGitHead ?? input.gitHead) !== null;
+		// A partial first publication has no whole-wiki Git certification yet.
+		// Its completed pages still have the harness-captured plan baseline.
+		const partialHead =
+			input.gitHead === null && previous.pages.some((page) => page.status !== "written")
+				? previous.sourceGitHead
+				: undefined;
+		const gitAvailable = changedPathsSince(input.cwd, staged?.sourceGitHead ?? partialHead ?? input.gitHead) !== null;
 		const existing = new Set(wikiMarkdownFilesInDir(input.stagingDir));
 		const plan = {
 			...previous,
@@ -470,6 +480,13 @@ export async function runWikiGenerate(
 			sourceContent,
 			gitHead: existingMeta?.gitHead ?? null,
 		});
+		if (input.retryPending && !resolved.resumed && !existingMeta?.plan) {
+			if (!staging.adopted) removeDir(staging.dir);
+			return failed(
+				["no saved wiki plan to retry; run `clio-coder context wiki` first"],
+				listWikiPagesInDir(wikiDir(cwd)).length,
+			);
+		}
 		const owed = resolved.plan.pages.filter((page) => page.status !== "written").length;
 		progress(input, {
 			phase: "codewiki",
@@ -507,7 +524,8 @@ export async function runWikiGenerate(
 				codewiki,
 				generation,
 				plan: resolved.plan,
-				resumed: resolved.resumed,
+				resumed: resolved.resumed || input.retryPending === true,
+				...(input.retryPending ? { retryPending: true } : {}),
 				unclaimedAreas: resolved.unclaimedAreas,
 				...(input.decisions ? { decisions: input.decisions } : {}),
 				gitHead: existingMeta?.gitHead ?? null,
