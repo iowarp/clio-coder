@@ -324,3 +324,122 @@ for (const trackedState of [false, true]) {
 		}
 	});
 }
+
+for (const phase of ["candidates", "judge"] as const) {
+	for (const stopKind of ["timeout", "cancel"] as const) {
+		it(`compete retains settled receipts after ${phase} ${stopKind}`, { timeout: 15_000 }, async () => {
+			const env = await isolateClioEnv("clio-compete-stop-");
+			const root = join(env.dir, "project");
+			mkdirSync(root);
+			const previousCwd = process.cwd();
+			process.chdir(root);
+			git(root, "init", "-q", "-b", "main");
+			git(root, "config", "user.name", "Compete Contract");
+			git(root, "config", "user.email", "compete@example.invalid");
+			writeFileSync(join(root, "tracked.txt"), "baseline\n");
+			git(root, "add", "-A");
+			git(root, "commit", "-qm", "baseline");
+			const before = snapshot(root);
+			const controller = new AbortController();
+			const settings = structuredClone(DEFAULT_SETTINGS);
+			settings.fleet.retry.maxRetries = 0;
+			const context = dispatchStubContext({ settings });
+			const specs = context.getContract<AgentsContract>("agents")?.listSpecs() ?? [];
+			let blockedCount = 0;
+			let abortCount = 0;
+			const bundle = makeDispatchBundle(context, {
+				spawnWorker: (spec) => {
+					const judge = spec.agentId === "verifier";
+					const blocked = phase === "judge" ? judge : !judge;
+					let finish = () => {};
+					const stopped = new Promise<void>((resolve) => {
+						finish = resolve;
+					});
+					if (blocked) {
+						blockedCount += 1;
+						if (stopKind === "cancel" && blockedCount === (phase === "judge" ? 1 : 2)) {
+							setImmediate(() => controller.abort());
+						}
+					}
+					return {
+						pid: null,
+						promise: blocked
+							? stopped.then(() => ({ exitCode: 1, signal: null }))
+							: Promise.resolve({ exitCode: 0, signal: null }),
+						heartbeatAt: { current: Date.now(), monotonic: 0 },
+						abort() {
+							abortCount += 1;
+							finish();
+						},
+						events: (async function* () {
+							if (blocked) {
+								await stopped;
+								return;
+							}
+							yield {
+								type: "message_end",
+								message: {
+									role: "assistant",
+									stopReason: "stop",
+									content: JSON.stringify({
+										findings: [{ claim: "The fixture contains baseline text.", path: "tracked.txt", line: 1 }],
+										needsSplit: false,
+										proposedSubtasks: [],
+									}),
+								},
+							};
+						})(),
+					};
+				},
+			});
+			await bundle.extension.start();
+			try {
+				const tool = createDispatchTool({
+					dispatch: bundle.contract,
+					getAgentSpecs: () => specs,
+					getAutonomy: () => "full-auto",
+				});
+				const result = await tool.run(
+					{
+						agent: "scout",
+						task: "Explain tracked.txt with a grounded citation.",
+						intent: { read_roots: ["tracked.txt"], write_roots: [], expected_outputs: [] },
+						mode: "compete",
+						candidates: 2,
+						cwd: root,
+						...(stopKind === "timeout" ? { timeout_ms: 1500 } : {}),
+					},
+					{ signal: controller.signal },
+				);
+				strictEqual(result.kind, "error");
+				if (result.kind !== "error") throw new Error("expected stopped compete");
+				match(result.message, stopKind === "timeout" ? /timed out after 1500ms/u : /aborted/u);
+				strictEqual(blockedCount, phase === "judge" ? 1 : 2);
+				strictEqual(abortCount, blockedCount);
+				const runs = bundle.contract.listRuns();
+				strictEqual(runs.length, phase === "judge" ? 3 : 2);
+				for (const run of runs) {
+					ok(run.receiptPath);
+					const receipt = JSON.parse(readFileSync(run.receiptPath, "utf8")) as RunReceipt;
+					const interrupted = phase === "candidates" || receipt.gate?.role === "judge";
+					strictEqual(receipt.outcome, interrupted ? "canceled" : "succeeded");
+					if (interrupted)
+						match(receipt.outcomeDetail ?? "", stopKind === "timeout" ? /timed out after 1500ms/u : /operator abort/u);
+					ok(result.message.includes(run.id), "stopped tool output must retain each terminal run identity");
+					ok(result.message.includes(run.receiptPath), "stopped tool output must locate each receipt");
+				}
+				strictEqual(result.details?.receiptCount, runs.length);
+				deepStrictEqual((result.details?.terminalRunIds as string[]).slice().sort(), runs.map((run) => run.id).sort());
+				strictEqual((result.details?.compete as { winner: unknown }).winner, null);
+				strictEqual(readGateDecisionArtifacts().length, 0, "interruption must not invent a judge verdict");
+				deepStrictEqual(snapshot(root), before);
+				strictEqual(git(root, "worktree", "list", "--porcelain").split("worktree ").length - 1, 1);
+				strictEqual(git(root, "branch", "--list", "clio-coder/compete/*"), "");
+			} finally {
+				await bundle.extension.stop?.();
+				process.chdir(previousCwd);
+				env.restore();
+			}
+		});
+	}
+}
