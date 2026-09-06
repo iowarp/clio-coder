@@ -227,11 +227,28 @@ describe("operator task acceptance", () => {
 		deepStrictEqual(
 			required?.map((item) => [item.command, item.status, item.notes]),
 			[
-				["test:solver", "pending", "timeoutMs=60000"],
-				["lint", "pending", "timeoutMs=1000"],
+				["test:solver", "required", "timeoutMs=60000"],
+				["lint", "required", "timeoutMs=1000"],
 			],
 		);
 		deepStrictEqual(foldTaskBoard(entries)?.tasks[0]?.requiredValidationEvidence, required);
+		const legacy = JSON.parse(JSON.stringify(entries));
+		for (const entry of legacy) {
+			for (const item of entry.requiredValidationEvidence ?? []) {
+				item.status = "pending";
+				item.description = `Operator acceptance: ${item.command}`;
+			}
+		}
+		deepStrictEqual(foldTaskBoard(legacy)?.tasks[0]?.requiredValidationEvidence, required);
+		strictEqual(legacy[0].requiredValidationEvidence[0].status, "pending", "replay must not rewrite historical entries");
+		for (const status of ["failed", "passed", "missing"]) {
+			legacy[0].requiredValidationEvidence[0].status = status;
+			strictEqual(foldTaskBoard(legacy)?.tasks[0]?.requiredValidationEvidence?.[0]?.status, status);
+		}
+		legacy[0].requiredValidationEvidence[0].status = "pending";
+		legacy[0].requiredValidationEvidence[0].observedAt = timestamp;
+		strictEqual(foldTaskBoard(legacy)?.tasks[0]?.requiredValidationEvidence?.[0]?.status, "pending");
+
 		deepStrictEqual(activeUserTaskAcceptance(userTasks.snapshot(), board.snapshot(), "s1", []), acceptance);
 		strictEqual(activeUserTaskAcceptance(userTasks.snapshot(), board.snapshot(), "other", []), undefined);
 		await tool.run({ action: "start", id: "t1" });

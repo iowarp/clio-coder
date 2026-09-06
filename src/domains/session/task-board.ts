@@ -29,6 +29,7 @@ export interface TaskBoardTask {
 	status: TaskLedgerStatus;
 	origin?: "agent" | "user";
 	userTaskId?: string;
+	/** Operator requirements are declarations, not projected verifier execution results. */
 	requiredValidationEvidence?: TaskLedgerValidationEvidence[];
 	/** Block or drop reason; empty for pending/active/completed tasks. */
 	reason?: string;
@@ -286,6 +287,23 @@ export function foldSessionTaskHistory(entries: ReadonlyArray<unknown>): Session
 		.map(({ lastIndex: _lastIndex, tasks, ...board }) => ({ ...board, tasks: [...tasks.values()] }));
 }
 
+function acceptanceRequirementDescription(check: string): string {
+	return `Operator acceptance requirement: ${check} (declaration only; see verification receipts for execution status)`;
+}
+
+/** Old pickup snapshots used pending for declarations; preserve any actual observations. */
+function acceptanceRequirement(item: TaskLedgerValidationEvidence): TaskLedgerValidationEvidence {
+	if (
+		item.status === "pending" &&
+		item.command &&
+		item.description === `Operator acceptance: ${item.command}` &&
+		item.observedAt === undefined
+	) {
+		return { ...item, status: "required", description: acceptanceRequirementDescription(item.command) };
+	}
+	return { ...item };
+}
+
 function toEntryView(entry: {
 	boardId?: string;
 	goals: TaskLedgerGoal[];
@@ -311,7 +329,7 @@ function toEntryView(entry: {
 			};
 			if (goal.userTaskId) task.userTaskId = goal.userTaskId;
 			const required = entry.requiredValidationEvidence.filter((item) => item.id.startsWith(`${goal.id}.acceptance.`));
-			if (required.length > 0) task.requiredValidationEvidence = required.map((item) => ({ ...item }));
+			if (required.length > 0) task.requiredValidationEvidence = required.map(acceptanceRequirement);
 			if (goal.description) task.reason = goal.description;
 			const evidence = evidenceByTask.get(goal.id);
 			if (evidence) task.evidence = evidence;
@@ -397,9 +415,9 @@ function applyMutation(
 		if (mutation.verification && mutation.verification.length > 0) {
 			picked.requiredValidationEvidence = mutation.verification.map((item, index) => ({
 				id: `${picked.id}.acceptance.${index}`,
-				description: `Operator acceptance: ${item.check}`,
+				description: acceptanceRequirementDescription(item.check),
 				command: item.check,
-				status: "pending",
+				status: "required",
 				notes: `timeoutMs=${item.timeoutMs}`,
 			}));
 		}

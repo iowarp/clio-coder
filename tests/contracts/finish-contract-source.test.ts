@@ -1,12 +1,16 @@
-import { deepStrictEqual, ok, strictEqual } from "node:assert/strict";
+import { deepStrictEqual, match, ok, strictEqual } from "node:assert/strict";
 import { mkdirSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
 import { it } from "node:test";
 import { acceptanceFromTaskFlags } from "../../src/cli/tasks.js";
 import { createFinishContractRegistration } from "../../src/domains/safety/finish-contract-registration.js";
+import { createTaskBoardStore, foldTaskBoard } from "../../src/domains/session/task-board.js";
+import { activeUserTaskAcceptance } from "../../src/domains/user-tasks/active-acceptance.js";
+import { createUserTasksStore } from "../../src/domains/user-tasks/store.js";
 import { bashTool } from "../../src/tools/bash.js";
 import { limitationTool } from "../../src/tools/limitation.js";
 import type { ToolSpec } from "../../src/tools/registry.js";
+import { createTasksTool } from "../../src/tools/tasks.js";
 import { verifyTool } from "../../src/tools/verify/index.js";
 import { writeTool } from "../../src/tools/write.js";
 import { isolateClioEnv } from "../harness/scratch-env.js";
@@ -147,3 +151,117 @@ it("accepts a catalog's declared subdirectory and distinguishes another workspac
 		scratch.restore();
 	}
 });
+
+for (const outcome of ["passed", "failed", "absent"] as const) {
+	it(`distinguishes acceptance declarations from ${outcome} receipts through task completion and detail`, async () => {
+		const scratch = await isolateClioEnv("task-detail-");
+		const originalCwd = process.cwd();
+		try {
+			process.chdir(scratch.dir);
+			writeFileSync(
+				"package.json",
+				JSON.stringify({
+					scripts: {
+						"grid-numeric": "node numeric.cjs",
+						"grid-perf": "node perf.cjs",
+					},
+				}),
+			);
+			mkdirSync(".clio-coder", { recursive: true });
+			writeFileSync(
+				".clio-coder/verifiers.yaml",
+				"version: 1\nchecks:\n" +
+					["numeric", "perf"]
+						.map(
+							(name) =>
+								`  - id: grid-${name}\n    description: Grid ${name}\n    command: [node, ${name}.cjs]\n    cwd: .\n    timeoutMs: 30000\n    tags: []\n`,
+						)
+						.join(""),
+			);
+			writeFileSync("numeric.cjs", "process.exitCode = 0;\n");
+			writeFileSync("perf.cjs", `process.exitCode = ${outcome === "failed" ? 1 : 0};\n`);
+			const entries: unknown[] = [];
+			const envelope = () => ({
+				timestamp: new Date().toISOString(),
+				turnId: `entry-${entries.length}`,
+				parentTurnId: null,
+			});
+			const board = createTaskBoardStore({
+				getSessionId: () => "s6",
+				readEntries: () => entries,
+				appendEntry: (entry) => entries.push({ ...envelope(), ...entry }),
+			});
+			const userTasks = createUserTasksStore({ cwd: scratch.dir });
+			const acceptance = acceptanceFromTaskFlags(
+				scratch.dir,
+				["battletest-output/validation.txt"],
+				["grid-numeric", "grid-perf"],
+			);
+			userTasks.add("S6 validation", undefined, acceptance);
+			const tasks = createTasksTool({ board, userTasks, getSessionId: () => "s6" });
+			async function execute(tool: ToolSpec, args: Record<string, unknown>) {
+				const toolCallId = `call-${entries.length}`;
+				entries.push({ ...envelope(), kind: "message", role: "tool_call", payload: { name: tool.name, toolCallId, args } });
+				const result = await tool.run(args);
+				entries.push({
+					...envelope(),
+					kind: "message",
+					role: "tool_result",
+					payload: { toolName: tool.name, toolCallId, result },
+				});
+				return result;
+			}
+			strictEqual((await execute(tasks, { action: "pick", id: "u1" })).kind, "ok");
+			strictEqual((await execute(tasks, { action: "start", id: "t1" })).kind, "ok");
+			strictEqual((await execute(verifyTool, { check: "grid-numeric" })).kind, "ok");
+			if (outcome !== "absent") {
+				const verified = await execute(verifyTool, { check: "grid-perf" });
+				strictEqual(verified.kind, outcome === "passed" ? "ok" : "error");
+				strictEqual(verified.details?.exitCode, outcome === "passed" ? 0 : 1);
+			}
+			strictEqual(
+				(await execute(writeTool, { path: "battletest-output/validation.txt", content: "Both checks passed." })).kind,
+				"ok",
+			);
+			const done = await execute(tasks, { action: "done", id: "t1", note: "Both checks passed." });
+			ok(done.kind === "ok");
+			strictEqual(userTasks.get("u1")?.status, "done");
+			const hook = createFinishContractRegistration({
+				readSessionEntries: () => entries,
+				resolveRigor: () => "high",
+				readActiveAcceptance: (window) => activeUserTaskAcceptance(userTasks.snapshot(), board.snapshot(), "s6", window),
+			});
+			const effects = await hook.evaluate({ hook: "turn_end", text: "Both checks passed. Done." });
+			strictEqual(
+				effects.some((effect) => effect.kind === "request_continuation"),
+				outcome !== "passed",
+			);
+			if (outcome !== "passed")
+				ok(effects.some((effect) => effect.kind === "request_continuation" && effect.message.includes("grid-perf")));
+			for (const detail of [done, await execute(tasks, { action: "list" })]) {
+				ok(detail.kind === "ok");
+				match(detail.output, /acceptance requirement: grid-numeric/);
+				match(detail.output, /execution status.*verification receipts/);
+				const rows = detail.details?.tasks as {
+					status: string;
+					requiredValidationEvidence: { status: string; description: string }[];
+				}[];
+				strictEqual(rows[0]?.status, "completed");
+				deepStrictEqual(
+					rows[0]?.requiredValidationEvidence.map((item) => item.status),
+					["required", "required"],
+				);
+				for (const item of rows[0]?.requiredValidationEvidence ?? []) match(item.description, /declaration only/);
+			}
+			deepStrictEqual(foldTaskBoard(entries)?.tasks, board.snapshot()?.tasks);
+			board.invalidate();
+			deepStrictEqual(
+				board.snapshot()?.tasks[0]?.requiredValidationEvidence?.map((item) => item.status),
+				["required", "required"],
+			);
+		} finally {
+			process.chdir(originalCwd);
+			scratch.restore();
+		}
+	});
+}
