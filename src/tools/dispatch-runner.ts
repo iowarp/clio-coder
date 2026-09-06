@@ -2618,10 +2618,16 @@ async function runPipeline(
 			const { receipt, summary } = await registered.completion;
 			activeRunId = null;
 			runs.push(completeRun(deps, receipt, summary));
-			if (isPipelineStepFailure(receipt)) {
+			// Execution can succeed while a conforming report records a failed
+			// check. Keep that receipt truthful, but do not feed failed quality
+			// into a dependent step. Review/compete use failure to drive their
+			// own repair loops, so this condition belongs only to the pipeline.
+			const failedQuality = receipt.quality.resultContract?.quality === "fail";
+			if (isPipelineStepFailure(receipt) || failedQuality) {
 				const skipped = requests.length - (index + 1);
+				const reason = isPipelineStepFailure(receipt) ? pipelineFailureReason(receipt) : "result quality=fail";
 				throw new PipelineHaltError(
-					`pipeline dispatch halted at step ${index + 1}/${requests.length} (run ${receipt.runId}, ${pipelineFailureReason(receipt)}); skipped ${skipped} later step(s)`,
+					`pipeline dispatch halted at step ${index + 1}/${requests.length} (run ${receipt.runId}, ${reason}); skipped ${skipped} later step(s)`,
 					[...runs],
 				);
 			}

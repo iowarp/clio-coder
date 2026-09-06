@@ -1,4 +1,5 @@
 import { mentionsWorkerToolCallCap } from "../core/guardrails.js";
+import { resultContractAuthorship } from "../domains/agents/result-contract.js";
 import {
 	formatBudgetPolicy,
 	formatBudgetReasons,
@@ -158,6 +159,7 @@ export function receiptEvidenceLabels(
 	return [
 		...canonical,
 		`receipt_integrity=verified/v${receipt.integrity.version}/${receipt.integrity.algorithm}`,
+		...documenterDeliveryLabels(receipt),
 		`evidence_verification=${verification.state}/${verification.basis}`,
 		`host_verification=${receipt.hostVerification?.status ?? "not_requested"}`,
 		...(responseModelIdObservation ? [responseModelIdObservation] : []),
@@ -167,6 +169,22 @@ export function receiptEvidenceLabels(
 		...receiptActivityLabels(receipt, status),
 		briefing,
 		projectContext,
+	];
+}
+
+/** Delivery guidance uses only an authenticated, terminal mutation report. */
+function documenterDeliveryLabels(receipt: RunReceipt): string[] {
+	if (
+		receipt.agentId !== "documenter" ||
+		!receipt.quality.resultContract?.sourceId.startsWith("agent-result-contract:mutation-report:")
+	)
+		return [];
+	const output = receipt.output;
+	const summary =
+		output?.state === "final" ? resultContractAuthorship({ kind: "mutation-report" }, output.text).summary : null;
+	return [
+		`terminal Documenter result: ${summary === null ? "no inline summary is available" : "the inline deliverable or limitation is in output.text JSON field summary"}. Execution success and contract conformance alone do not prove the requested explanation was delivered.`,
+		"Read the summary or the task-authorized artifact once and check it against the requested deliverable. If it is absent, incomplete, or states a limitation, report the specific limitation and the run ID; do not repeatedly read this unchanged terminal receipt or poll it for new output. Keep any separately authorized recovery and its outcome distinct from the original run.",
 	];
 }
 
