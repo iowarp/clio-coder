@@ -97,6 +97,103 @@ describe("wiki generation outcomes", () => {
 		);
 		assert.equal(result.pending, 0);
 	}
+	it("keeps successful writers with invalid evidence pending and makes their next repair actionable", async () => {
+		const onePage: WikiPlan = { version: 1, overview: "Fixture", pages: [page("a")] };
+		for (const [version, invalid] of [
+			`${content("a", 1)}\nSee \`src/a.ts:999\`.\n`,
+			`${content("a", 1)}\nSee \`src/invented.ts\`.\n`,
+			"---\nsources: [src/a.ts]\n---\n# Only a heading\n",
+		].entries()) {
+			const result = await run(
+				generator((spec, path) => {
+					if (!path) writeWikiPlanFile(spec.writeRoots?.[0] as string, onePage);
+					else writeFileSync(path, invalid);
+				}),
+			);
+			assert.equal(result.pending, 1);
+			const failedPage = readWikiMeta(cwd)?.plan?.pages[0];
+			assert.equal(failedPage?.status, "pending");
+			assert.equal(failedPage?.lastFailure?.phase, "validation");
+			assert.match(failedPage?.lastFailure?.detail ?? "", /evidence check failed/u);
+			assert.match(failedPage?.lastFailure?.runId ?? "", /^fixture-/u);
+			const repaired = await runWikiGenerate({
+				cwd,
+				model: "fixture",
+				retryPending: true,
+				generate: generator((_spec, path) => {
+					assert.ok(path, "explicit repair preserves the plan rather than admitting another planner");
+					writeFileSync(path, content("a", 2));
+				}),
+			});
+			assert.equal(repaired.pending, 0);
+			assert.equal(readWikiMeta(cwd)?.plan?.pages[0]?.lastFailure, undefined);
+			assert.equal(readWikiMeta(cwd)?.plan?.pages[0]?.attempts, (failedPage?.attempts ?? 0) + 1);
+			// Requeue this same page for the next deliberately bad writer result.
+			writeFileSync(join(cwd, "src/a.ts"), `export const a = ${version + 2};\n`);
+		}
+	});
+	it("revalidates mechanically invalid saved pages before reusing their successful checkpoint", async () => {
+		await initialize();
+		const dir = join(cwd, ".clio-coder", "wiki-staging-revalidate");
+		mkdirSync(dir);
+		const saved = readWikiMeta(cwd)?.plan;
+		assert.ok(saved);
+		writeWikiPlanFile(dir, saved);
+		writeFileSync(join(dir, "a.md"), `${content("a", 1)}\nSee \`src/a.ts:999\`.\n`);
+		writeFileSync(join(dir, "b.md"), content("b", 1));
+		const attempted: string[] = [];
+		const result = await run(
+			generator((_spec, path) => {
+				assert.ok(path);
+				attempted.push(path);
+				writeFileSync(path, content("a", 2));
+			}),
+		);
+		assert.equal(result.pending, 0);
+		assert.equal(attempted.length, 1);
+		assert.ok(attempted[0]?.endsWith("a.md"));
+	});
+	it("checkpoints authored JS aliases against the actual TypeScript source bytes", async () => {
+		await initialize(["src/a.js"]);
+		assert.equal(wikiStaleness(cwd).state, "fresh");
+		assert.deepEqual(readWikiMeta(cwd)?.plan?.pages[0]?.dependencies, ["src/a.ts"]);
+		writeFileSync(join(cwd, "src/a.ts"), "export const a = 2;\n");
+		const attempted: string[] = [];
+		await run(
+			generator((_spec, path) => {
+				if (path) attempted.push(path);
+			}),
+		);
+		assert.equal(attempted.length, 1);
+		assert.ok(attempted[0]?.endsWith("a.md"));
+		assert.equal(wikiStaleness(cwd).state, "fresh");
+	});
+	it("revalidates body-only source citations and retires removed dependencies after a successful repair", async () => {
+		const onePage: WikiPlan = { version: 1, overview: "Fixture", pages: [page("a")] };
+		const first = await run(
+			generator((spec, path) => {
+				if (!path) writeWikiPlanFile(spec.writeRoots?.[0] as string, onePage);
+				else writeFileSync(path, `${content("a", 1)}\nSee \`src/extra.ts:1\`.\n`);
+			}),
+		);
+		assert.equal(first.pending, 0);
+		assert.ok(readWikiMeta(cwd)?.plan?.pages[0]?.dependencies?.includes("src/extra.ts"));
+		rmSync(join(cwd, "src/extra.ts"));
+		const failed = await run(generator((_spec, path) => (path ? 1 : 0)));
+		assert.equal(failed.pending, 1);
+		assert.ok(readWikiMeta(cwd)?.plan?.pages[0]?.dependencies?.includes("src/extra.ts"));
+		const repaired = await runWikiGenerate({
+			cwd,
+			model: "fixture",
+			retryPending: true,
+			generate: generator((_spec, path) => {
+				if (path) writeFileSync(path, content("a", 2));
+			}),
+		});
+		assert.equal(repaired.pending, 0);
+		assert.deepEqual(readWikiMeta(cwd)?.plan?.pages[0]?.dependencies, ["src/a.ts"]);
+		assert.equal(wikiStaleness(cwd).state, "fresh");
+	});
 	it("revalidates revised page specifications, retires dropped pages, and preserves writer additions", async () => {
 		await initialize();
 		for (const change of ["intent", "sources"] as const) {

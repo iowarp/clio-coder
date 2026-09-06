@@ -15,7 +15,7 @@
  */
 
 import { mkdirSync, readFileSync, rmSync, writeFileSync } from "node:fs";
-import { basename, dirname, join, posix } from "node:path";
+import { basename, dirname, join, posix, relative } from "node:path";
 import { readWikiPage, renderWikiPage, resolveSourcePath, type WikiPageMetadata } from "./frontmatter.js";
 import {
 	isGeneratedWikiFile,
@@ -294,7 +294,14 @@ export function pageSourceIndex(dir: string, sourceRoot: string): Map<string, st
 			content: readText(join(dir, relPath)),
 			sourceRoot,
 		});
-		index.set(relPath, [...metadata.sources, ...metadata.tests, ...unresolvedPaths]);
+		index.set(relPath, [
+			...new Set(
+				[...metadata.sources, ...metadata.tests, ...unresolvedPaths].map((cited) => {
+					const resolved = resolveSourcePath(sourceRoot, cited);
+					return resolved ? relative(sourceRoot, resolved).replace(/\\/g, "/") : cited;
+				}),
+			),
+		]);
 	}
 	return index;
 }

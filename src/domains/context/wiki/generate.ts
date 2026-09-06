@@ -22,6 +22,7 @@ import type { Codewiki } from "../codewiki/schema.js";
 import type { Fingerprint } from "../fingerprint.js";
 import { readClioState, writeClioState } from "../state.js";
 import { assembleWikiTree, pageSourceIndex } from "./assemble.js";
+import { inspectWikiPageEvidence } from "./evidence.js";
 import { isGeneratedWikiFile, listWikiPagesInDir, WIKI_PLAN_FILE, wikiDir, wikiMarkdownFilesInDir } from "./layout.js";
 import {
 	computeWikiContentHash,
@@ -392,12 +393,35 @@ function resolvePlan(input: {
 			...previous,
 			pages: previous.pages.map((page) => {
 				if (page.status !== "written") return page;
-				const sources = [...page.sources, ...(page.dependencies ?? []), ...(pageSources.get(page.path) ?? [])];
+				const evidence = inspectWikiPageEvidence({
+					pagePath: page.path,
+					outputDir: input.stagingDir,
+					sourceRoot: input.cwd,
+				});
+				const sources = [
+					...page.sources,
+					...(page.dependencies ?? []),
+					...(pageSources.get(page.path) ?? []),
+					...(evidence.dependencies ?? []),
+				];
 				return gitAvailable &&
 					existing.has(page.path) &&
+					evidence.ok &&
 					wikiSourcesMatch(previous.sourceContent, input.sourceContent, sources)
-					? page
-					: { ...page, status: "pending" as const, attempts: 0 };
+					? { ...page, dependencies: evidence.dependencies ?? [] }
+					: {
+							...page,
+							status: "pending" as const,
+							attempts: 0,
+							...(!evidence.ok
+								? {
+										lastFailure: {
+											phase: "validation" as const,
+											detail: `saved page evidence check failed: ${evidence.reasons.join("; ")}`.slice(0, 500),
+										},
+									}
+								: {}),
+						};
 			}),
 		};
 		return {

@@ -19,7 +19,7 @@ export interface WikiPageEvidenceResult {
 }
 
 function within(root: string, path: string): boolean {
-	const rel = relative(root, path);
+	const rel = relative(root, path).replace(/\\/g, "/");
 	return rel !== ".." && !rel.startsWith("../") && !isAbsolute(rel);
 }
 
@@ -168,4 +168,27 @@ export function validateWikiPageEvidence(input: WikiPageEvidenceInput): WikiPage
 		}
 	}
 	return reasons.length === 0 ? { ok: true, reasons, dependencies: [...dependencies].sort() } : { ok: false, reasons };
+}
+
+/** Read a planned staging page with bounded IO before validating original evidence. */
+export function inspectWikiPageEvidence(input: {
+	pagePath: string;
+	outputDir: string;
+	sourceRoot: string;
+}): WikiPageEvidenceResult {
+	try {
+		const path = realpathSync(resolve(input.outputDir, input.pagePath));
+		const stat = statSync(path);
+		if (!within(realpathSync(input.outputDir), path) || !stat.isFile())
+			return { ok: false, reasons: ["planned page must be a regular file inside wiki staging"] };
+		if (stat.size > 2 * 1024 * 1024)
+			return { ok: false, reasons: ["page exceeds the 2 MiB evidence-check limit; split or shorten it"] };
+		return validateWikiPageEvidence({
+			pagePath: input.pagePath,
+			content: readFileSync(path, "utf8"),
+			sourceRoot: input.sourceRoot,
+		});
+	} catch {
+		return { ok: false, reasons: ["writer finished without a readable planned page file"] };
+	}
 }

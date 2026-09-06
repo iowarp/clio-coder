@@ -9,6 +9,7 @@ import { AgentsDomainModule } from "../domains/agents/index.js";
 import type { ConfigContract } from "../domains/config/contract.js";
 import { ConfigDomainModule } from "../domains/config/index.js";
 import { ContextDomainModule } from "../domains/context/runtime.js";
+import { inspectWikiPageEvidence } from "../domains/context/wiki/evidence.js";
 import type { WikiGenerate, WikiGenerateInput } from "../domains/context/wiki/generate.js";
 import type { WikiPlan, WikiPlanPage } from "../domains/context/wiki/plan.js";
 import {
@@ -367,6 +368,7 @@ async function runPagePhase(
 		cwd: input.cwd,
 		outputDir: input.outputDir,
 		task: buildWikiPagePrompt({
+			depth: input.generation.depth,
 			cwd: input.cwd,
 			mode: input.mode,
 			codewiki: input.codewiki,
@@ -386,9 +388,17 @@ async function runPagePhase(
 				detail: `page estimate ${Math.round(PAGE_ESTIMATE_MS / 60000)}m; healthy work may continue longer`,
 			}),
 	});
-	// A seeded page is available even when its refresh fails. Only a successful
-	// dispatch can validate it, including an explicitly unchanged page.
-	const written = outcome.ok && existsSync(join(input.outputDir, page.path));
+	// Keep failed refresh prose available, but require both a successful writer
+	// and mechanically valid evidence before crediting a page as completed.
+	const evidence = outcome.ok
+		? inspectWikiPageEvidence({
+				pagePath: page.path,
+				outputDir: input.outputDir,
+				sourceRoot: input.cwd,
+			})
+		: undefined;
+	const written = outcome.ok && evidence?.ok === true;
+	const detail = evidence && !evidence.ok ? `evidence check failed: ${evidence.reasons.join("; ")}` : outcome.detail;
 	const next: WikiPlan = {
 		...plan,
 		pages: plan.pages.map((entry) => {
@@ -396,15 +406,14 @@ async function runPagePhase(
 			const nextPage: WikiPlanPage = {
 				...entry,
 				status: written ? "written" : "pending",
+				...(written ? { dependencies: evidence?.dependencies ?? [] } : {}),
 				attempts: entry.attempts + (outcome.phase === "writer" ? 1 : 0),
 			};
 			if (written) delete nextPage.lastFailure;
 			else
 				nextPage.lastFailure = {
 					phase: outcome.ok ? "validation" : outcome.phase,
-					detail: (outcome.ok ? "writer finished without the planned page file" : outcome.detail)
-						.replace(/\s+/gu, " ")
-						.slice(0, 500),
+					detail: detail.replace(/\s+/gu, " ").slice(0, 500),
 					...(outcome.phase === "writer" ? { runId: outcome.runId } : {}),
 				};
 			return nextPage;
@@ -415,7 +424,7 @@ async function runPagePhase(
 		phase: "generate",
 		status: "running",
 		message: `${written ? "wrote" : "could not write"} ${page.path} (${position.index}/${position.total})`,
-		detail: outcome.detail,
+		detail,
 	});
 	return next;
 }

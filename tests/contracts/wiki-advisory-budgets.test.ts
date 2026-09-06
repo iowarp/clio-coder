@@ -12,6 +12,8 @@ import { isolateClioEnv } from "../harness/scratch-env.js";
 function fixtureInput(cwd: string): WikiGenerateInput {
 	const outputDir = join(cwd, ".clio-coder", "wiki-staging");
 	mkdirSync(outputDir, { recursive: true });
+	mkdirSync(join(cwd, "src"), { recursive: true });
+	for (const name of ["api", "config"]) writeFileSync(join(cwd, "src", `${name}.ts`), `export const ${name} = 1;\n`);
 	const plan = {
 		version: 1 as const,
 		overview: "Fixture",
@@ -59,7 +61,7 @@ it("lets healthy planning and every page finish beyond all ordinary wiki time es
 						clock += 61 * 60 * 1000;
 						t.mock.timers.tick(61 * 60 * 1000);
 						const page = /Write the file `([^`]+)` and nothing else\./u.exec(request.task)?.[1];
-						if (page) writeFileSync(page, "# Completed with current source evidence\n");
+						if (page) writeFileSync(page, "# Completed\n\nSee `src/api.ts:1` and `src/config.ts:1`.\n");
 						yield { type: "clio_coder_tool_finish", payload: { tool: page ? "write" : "read", outcome: "done" } };
 					})(),
 					finalPromise: Promise.resolve({ exitCode: 0 }),

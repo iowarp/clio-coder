@@ -20,6 +20,8 @@ it("admits production wiki planner and page scope without interpreting absolute 
 		const cwd = join(isolated.dir, "repo");
 		const outputDir = join(cwd, ".clio-coder", "wiki-staging-period.");
 		mkdirSync(outputDir, { recursive: true });
+		mkdirSync(join(cwd, "src"));
+		writeFileSync(join(cwd, "src/api.ts"), "export const api = 1;\n");
 		// The real worker runs in the dispatched repository; the safety
 		// classifier uses that process cwd when classifying absolute writes.
 		process.chdir(cwd);
@@ -48,7 +50,8 @@ it("admits production wiki planner and page scope without interpreting absolute 
 			abort() {},
 			async dispatch(spec: DispatchRequest) {
 				requests.push(spec);
-				if (requests.length === 2) writeFileSync(join(outputDir, page.path), "# API\n");
+				if (requests.length === 2)
+					writeFileSync(join(outputDir, page.path), "# API\n\nThe API constant is defined in `src/api.ts:1`.\n");
 				return {
 					runId: `wiki-${requests.length}`,
 					events: (async function* () {})(),
