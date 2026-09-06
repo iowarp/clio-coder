@@ -62,8 +62,15 @@ function renderTaskBoardText(board: TaskBoardSnapshot, userTasks: ReadonlyArray<
 		lines.push(line);
 		const outputs = userTasks.find((item) => item.id === task.userTaskId)?.acceptance?.expectedOutputs;
 		if (outputs?.length) lines.push(`  expected outputs: ${outputs.join(", ")}`);
-		for (const item of task.requiredValidationEvidence ?? [])
-			lines.push(`  acceptance: ${item.command} (${item.status}; ${item.notes})`);
+		for (const item of task.requiredValidationEvidence ?? []) {
+			if (item.status === "required") {
+				lines.push(
+					`  acceptance requirement: ${item.command} (${item.notes}; declaration only; execution status is in verification receipts)`,
+				);
+			} else {
+				lines.push(`  acceptance: ${item.command} (${item.status}; ${item.notes})`);
+			}
+		}
 	}
 	if (counts.open > 0 && counts.active === 0) {
 		lines.push(
