@@ -67,15 +67,15 @@ function collectChangedPaths(cwd: string, gitHead: string): Set<string> {
  * and working-tree alike. This is what scopes an update run: a page is rewritten
  * when one of the sources its front matter claims appears here, which replaces
  * asking a model to guess which pages a diff invalidates. Uncapped, because a
- * capped list would silently mark changed pages current. Empty on any git
- * failure, which leaves the plan's own statuses in charge.
+ * capped list would silently mark changed pages current. Null means comparison
+ * is unavailable; an empty array means Git confirmed no changed paths.
  */
-export function changedPathsSince(cwd: string, gitHead: string | null): string[] {
-	if (!gitHead) return [];
+export function changedPathsSince(cwd: string, gitHead: string | null): string[] | null {
+	if (!gitHead) return null;
 	try {
 		return [...collectChangedPaths(cwd, gitHead)];
 	} catch {
-		return [];
+		return null;
 	}
 }
 
@@ -165,20 +165,25 @@ function pendingRefresh(meta: WikiMeta): WikiStaleness | null {
 const MISSING_RECORDED_HEAD = "wiki staleness unavailable: recorded gitHead is missing";
 const MISSING_CURRENT_HEAD = "wiki staleness unavailable: current git HEAD is missing";
 
+/** Unknown Git evidence cannot certify freshness, even when the narrower source fingerprint matches. */
+function unavailableStaleness(warning: string): WikiStaleness {
+	return { state: "stale", changedFiles: 0, warning };
+}
+
 export function wikiStaleness(cwd: string): WikiStaleness {
 	const meta = readWikiMeta(cwd);
 	if (!meta) return { state: "absent" };
 	const pending = pendingRefresh(meta);
 	if (pending) return pending;
-	if (!meta.gitHead) return { state: "fresh", warning: MISSING_RECORDED_HEAD };
+	if (!meta.gitHead) return unavailableStaleness(MISSING_RECORDED_HEAD);
 	const head = currentGitHead(cwd);
-	if (!head) return { state: "fresh", warning: MISSING_CURRENT_HEAD };
+	if (!head) return unavailableStaleness(MISSING_CURRENT_HEAD);
 	if (meta.sourceTreeHash && computeFingerprint(cwd).treeHash === meta.sourceTreeHash && head === meta.gitHead) {
 		return { state: "fresh" };
 	}
 	if (!meta.sourceTreeHash && head === meta.gitHead) return { state: "fresh" };
 	const diff = changedFileCount(cwd, meta.gitHead);
-	if (!("count" in diff)) return { state: "fresh", warning: diff.warning };
+	if (!("count" in diff)) return unavailableStaleness(diff.warning);
 	return { state: "stale", changedFiles: diff.count, ...(diff.warning ? { warning: diff.warning } : {}) };
 }
 
@@ -194,9 +199,9 @@ export async function wikiStalenessAsync(cwd: string): Promise<WikiStaleness> {
 	if (!meta) return { state: "absent" };
 	const pending = pendingRefresh(meta);
 	if (pending) return pending;
-	if (!meta.gitHead) return { state: "fresh", warning: MISSING_RECORDED_HEAD };
+	if (!meta.gitHead) return unavailableStaleness(MISSING_RECORDED_HEAD);
 	const head = await currentGitHeadAsync(cwd);
-	if (!head) return { state: "fresh", warning: MISSING_CURRENT_HEAD };
+	if (!head) return unavailableStaleness(MISSING_CURRENT_HEAD);
 	if (meta.sourceTreeHash) {
 		const fingerprint = await computeFingerprintAsync(cwd);
 		if (fingerprint.treeHash === meta.sourceTreeHash && head === meta.gitHead) return { state: "fresh" };
@@ -204,6 +209,6 @@ export async function wikiStalenessAsync(cwd: string): Promise<WikiStaleness> {
 		return { state: "fresh" };
 	}
 	const diff = await changedFileCountAsync(cwd, meta.gitHead);
-	if (!("count" in diff)) return { state: "fresh", warning: diff.warning };
+	if (!("count" in diff)) return unavailableStaleness(diff.warning);
 	return { state: "stale", changedFiles: diff.count, ...(diff.warning ? { warning: diff.warning } : {}) };
 }

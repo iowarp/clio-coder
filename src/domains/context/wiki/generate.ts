@@ -368,6 +368,7 @@ function resolvePlan(input: {
 	mode: WikiGenerateMode;
 	candidate: WikiPlan;
 	previousPlan: WikiPlan | undefined;
+	previousSourceTreeHash: string | undefined;
 	gitHead: string | null;
 	sourceTreeHash: string;
 }): { plan: WikiPlan; resumed: boolean; unclaimedAreas: WikiPlanPage[] } {
@@ -384,12 +385,26 @@ function resolvePlan(input: {
 	}
 	if (input.mode === "update" && input.previousPlan !== undefined) {
 		const pageSources = pageSourceIndex(input.stagingDir, input.cwd);
-		const changed = new Set(
-			changedPathsSince(input.cwd, input.gitHead).map((path) => normalizeRepoPath(input.cwd, path)),
-		);
+		const paths = changedPathsSince(input.cwd, input.gitHead);
+		// Git can be unavailable, or report no changes after sources used by a
+		// dirty-tree publication were rolled back. Neither certifies old prose.
+		const revalidate =
+			paths === null ||
+			(paths.length === 0 &&
+				input.previousSourceTreeHash !== undefined &&
+				input.previousSourceTreeHash !== input.sourceTreeHash);
+		const plan = revalidate
+			? {
+					...input.previousPlan,
+					pages: input.previousPlan.pages.map((page) =>
+						page.status === "written" ? { ...page, status: "pending" as const, attempts: 0 } : page,
+					),
+				}
+			: input.previousPlan;
+		const changed = new Set((paths ?? []).map((path) => normalizeRepoPath(input.cwd, path)));
 		return {
 			plan: scopePlanForUpdate({
-				plan: input.previousPlan,
+				plan,
 				changedPaths: changed,
 				existingPages: new Set(wikiMarkdownFilesInDir(input.stagingDir)),
 				pageSources,
@@ -467,6 +482,7 @@ export async function runWikiGenerate(
 			mode,
 			candidate: generation.plan,
 			previousPlan: existingMeta?.plan,
+			previousSourceTreeHash: existingMeta?.sourceTreeHash,
 			gitHead: existingMeta?.gitHead ?? null,
 			sourceTreeHash,
 		});
