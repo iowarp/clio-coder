@@ -46,6 +46,8 @@ export interface WikiPlan {
 	sourceTreeHash?: string;
 	/** Source bytes observed before dispatch, shared across page dependencies. */
 	sourceContent?: WikiSourceContent;
+	/** Harness-owned retirements from authored replanning; explicit reintroduction clears a path. */
+	retiredPages?: string[];
 	/** One paragraph describing what this repository is; opens the generated quickstart. */
 	overview: string;
 	pages: WikiPlanPage[];

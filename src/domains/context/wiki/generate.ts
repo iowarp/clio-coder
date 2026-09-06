@@ -402,9 +402,9 @@ function resolvePlan(input: {
 /**
  * Reconcile the plan against the tree that actually exists. A page whose file
  * the assembly pass dropped, or that was never written, is owed again; a page
- * on disk retains its recorded dispatch outcome. A page that
- * exists without a plan entry is adopted, because a page on disk is a page: the
- * alternative is a plan that keeps re-dispatching a subject already covered.
+ * on disk retains its recorded dispatch outcome. A page
+ * created by a writer without a plan entry remains available and is adopted
+ * pending: its own completed dispatch has not yet been recorded.
  */
 function reconcilePlan(plan: WikiPlan, stagingDir: string): WikiPlan {
 	const contentFiles = wikiMarkdownFilesInDir(stagingDir).filter((relPath) => !isGeneratedWikiFile(relPath));
@@ -417,8 +417,8 @@ function reconcilePlan(plan: WikiPlan, stagingDir: string): WikiPlan {
 			title: relPath.replace(/\.md$/, ""),
 			intent: "",
 			sources: [],
-			status: "written" as const,
-			attempts: 1,
+			status: "pending" as const,
+			attempts: 0,
 		}));
 	return {
 		...plan,
@@ -530,6 +530,9 @@ export async function runWikiGenerate(
 		progress(input, { phase: "generate", status: "completed", message: "wiki generator completed" });
 
 		const checkpoint = readWikiPlanFile(staging.dir) ?? resolved.plan;
+		// Replanning explicitly retires old planned publications. Other writer
+		// additions remain available, including pages linked by completed work.
+		for (const path of checkpoint.retiredPages ?? []) rmSync(join(staging.dir, path), { force: true });
 		// Capture citation evidence before assembly removes missing paths from
 		// routing metadata. Failed refreshes and no-op runs must retain it.
 		const citedSources = pageSourceIndex(staging.dir, cwd);
@@ -550,6 +553,7 @@ export async function runWikiGenerate(
 		};
 		const report = assembleWikiTree({ dir: staging.dir, sourceRoot: cwd, plan: workedPlan });
 		const finalPlan = reconcilePlan(workedPlan, staging.dir);
+		delete finalPlan.retiredPages;
 		const pendingCount = finalPlan.pages.filter((page) => page.status !== "written").length;
 		progress(input, {
 			phase: "state",

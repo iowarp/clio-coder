@@ -97,6 +97,55 @@ describe("wiki generation outcomes", () => {
 		);
 		assert.equal(result.pending, 0);
 	}
+	it("revalidates revised page specifications, retires dropped pages, and preserves writer additions", async () => {
+		await initialize();
+		for (const change of ["intent", "sources"] as const) {
+			const attempted: string[] = [];
+			await run(
+				generator((spec, path) => {
+					if (path) {
+						attempted.push(path);
+						return;
+					}
+					const dir = spec.writeRoots?.[0] as string;
+					const plan = readWikiPlanFile(dir);
+					assert.ok(plan?.pages[0]);
+					if (change === "intent") plan.pages[0].intent = "Document additional guarantees";
+					else plan.pages[0].sources = ["src/extra.ts"];
+					writeWikiPlanFile(dir, plan);
+				}),
+			);
+			assert.equal(attempted.length, 1);
+			assert.ok(attempted[0]?.endsWith("a.md"));
+			assert.equal(readWikiMeta(cwd)?.plan?.pages[0]?.attempts, 1);
+		}
+		const result = await run(
+			generator((spec, path) => {
+				if (path) {
+					writeFileSync(path, `${content("a", 2)}\n[More](extra.md)\n`);
+					writeFileSync(join(spec.writeRoots?.[0] as string, "extra.md"), content("extra", 1));
+					return;
+				}
+				const dir = spec.writeRoots?.[0] as string;
+				const plan = readWikiPlanFile(dir);
+				assert.ok(plan?.pages[0]);
+				plan.pages = [{ ...plan.pages[0], intent: "Explain the linked detail" }];
+				writeWikiPlanFile(dir, plan);
+			}),
+		);
+		assert.equal(result.pending, 1);
+		assert.equal(existsSync(join(cwd, ".clio-coder/wiki/b.md")), false);
+		assert.equal(existsSync(join(cwd, ".clio-coder/wiki/extra.md")), true);
+		assert.equal(readWikiMeta(cwd)?.plan?.pages.find((entry) => entry.path === "extra.md")?.status, "pending");
+		assert.match(readFileSync(join(cwd, ".clio-coder/wiki/a.md"), "utf8"), /\[More\]\(extra.md\)/u);
+		await run(
+			generator((_spec, path) => {
+				if (path) assert.ok(path.endsWith("extra.md"));
+			}),
+		);
+		assert.equal(existsSync(join(cwd, ".clio-coder/wiki/b.md")), false);
+		assert.equal(readWikiMeta(cwd)?.generation?.pagesWritten, 2);
+	});
 	it("tracks README/config bytes, preserved-mtime edits, and mixed dirty rollback", async () => {
 		writeFileSync(join(cwd, "README.md"), "before\n");
 		writeFileSync(join(cwd, "settings.yaml"), "value: 1\n");

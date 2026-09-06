@@ -91,7 +91,7 @@ export interface SanitizeWikiPlanOptions {
 
 /**
  * Parse a plan, preferring harness-owned progress from `previous` for any page
- * whose path survived. Returns null when nothing usable is left, so the caller
+ * whose path and specification survived. Returns null when nothing usable is left, so the caller
  * falls back to the candidate plan.
  */
 export function sanitizeWikiPlan(
@@ -108,8 +108,15 @@ export function sanitizeWikiPlan(
 		if (!isRecord(entry)) continue;
 		const path = sanitizePagePath(entry.path);
 		if (path === null || seen.has(path)) continue;
-		const intent = usableString(entry.intent);
+		const intent = (usableString(entry.intent) ?? "").slice(0, MAX_INTENT_CHARS);
+		const title = usableString(entry.title) ?? path.replace(/\.md$/, "");
+		const sources = stringList(entry.sources, 16);
 		const prior = priorByPath.get(path);
+		const changedSpec =
+			prior !== undefined &&
+			(prior.title !== title ||
+				prior.intent !== intent ||
+				JSON.stringify([...prior.sources].sort()) !== JSON.stringify([...sources].sort()));
 		const recorded = options.trustStatus ? parsedStatus(entry.status) : null;
 		const recordedAttempts = options.trustStatus ? parsedAttempts(entry.attempts) : null;
 		const dependencies =
@@ -117,21 +124,30 @@ export function sanitizeWikiPlan(
 		seen.add(path);
 		pages.push({
 			path,
-			title: usableString(entry.title) ?? path.replace(/\.md$/, ""),
-			intent: intent === null ? "" : intent.slice(0, MAX_INTENT_CHARS),
-			sources: stringList(entry.sources, 16),
+			title,
+			intent,
+			sources,
 			...(dependencies.length > 0 ? { dependencies } : {}),
-			status: prior?.status ?? recorded ?? "pending",
-			attempts: prior?.attempts ?? recordedAttempts ?? 0,
+			status: changedSpec ? "pending" : (prior?.status ?? recorded ?? "pending"),
+			attempts: changedSpec ? 0 : (prior?.attempts ?? recordedAttempts ?? 0),
 		});
 	}
 	if (pages.length === 0) return null;
+	const retiredPages = [
+		...new Set([
+			...(previous?.retiredPages ?? (options.trustStatus ? stringList(value.retiredPages, MAX_PLAN_PAGES) : [])),
+			...(previous?.pages.filter((page) => !seen.has(page.path)).map((page) => page.path) ?? []),
+		]),
+	]
+		.map(sanitizePagePath)
+		.filter((path): path is string => path !== null && !seen.has(path));
 	const sourceContent =
 		previous?.sourceContent ?? (options.trustStatus ? parseWikiSourceContent(value.sourceContent) : undefined);
 	const sourceTreeHash = previous?.sourceTreeHash ?? (options.trustStatus ? value.sourceTreeHash : undefined);
 	return {
 		version: 1,
 		...(sourceContent ? { sourceContent } : {}),
+		...(retiredPages.length ? { retiredPages } : {}),
 		...(typeof sourceTreeHash === "string" && /^[a-f0-9]{64}$/.test(sourceTreeHash) ? { sourceTreeHash } : {}),
 		overview: usableString(value.overview) ?? previous?.overview ?? "",
 		pages,
