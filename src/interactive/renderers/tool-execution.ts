@@ -12,6 +12,7 @@
  * two surfaces stay byte-identical.
  */
 
+import { trustStateWord } from "../../domains/evidence/trust-projection.js";
 import { sanitizeCallTargetText } from "../../domains/safety/call-target.js";
 import { redactSecretString, redactToolArgs } from "../../domains/safety/redaction.js";
 import { formatSize } from "../../engine/truncate.js";
@@ -320,7 +321,22 @@ function outcomeSummary(finished: ToolExecutionFinished): string | null {
 	if (finished.toolName === "dispatch") {
 		const receipts = numberField(details, "receiptCount");
 		const failed = numberField(details, "failedCount") ?? 0;
-		if (receipts !== null) return `${receipts} task${receipts === 1 ? "" : "s"} -> ${receipts - failed} ok`;
+		if (receipts !== null) {
+			const runs = Array.isArray(details?.runs) ? details.runs.slice(0, receipts) : [];
+			const qualityCounts = new Map<string, number>();
+			for (const run of runs) {
+				const trust = isPlainObject(run) && isPlainObject(run.trust) ? run.trust : null;
+				const axes = isPlainObject(trust?.axes) ? trust.axes : null;
+				const word = trustStateWord("validationGrounding", stringField(axes, "validationGrounding") ?? "unknown");
+				qualityCounts.set(word, (qualityCounts.get(word) ?? 0) + 1);
+			}
+			if (runs.length < receipts) {
+				const unknown = trustStateWord("validationGrounding", "unknown");
+				qualityCounts.set(unknown, (qualityCounts.get(unknown) ?? 0) + receipts - runs.length);
+			}
+			const quality = [...qualityCounts].map(([word, count]) => `${count} ${word}`).join(", ");
+			return `${receipts} task${receipts === 1 ? "" : "s"} -> ${receipts - failed} execution ok${failed > 0 ? `, ${failed} execution failed` : ""}${quality ? `; quality: ${quality}` : ""}`;
+		}
 		return null;
 	}
 	if (finished.toolName === "tasks") {

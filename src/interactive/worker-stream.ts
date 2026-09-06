@@ -80,6 +80,13 @@ export type WorkerPresentedResultContract =
  * block that says it spent zero would be claiming something no receipt sealed.
  */
 export interface WorkerReceiptSummary {
+	/**
+	 * The canonical trust status of the persisted receipt, authenticated
+	 * against the persisted ledger row it was sealed from. Present only when
+	 * both could be read back, so a surface that shows it shows an
+	 * authenticated verdict and never the sealing process's own claim.
+	 */
+	trust?: CanonicalTrustStatus;
 	outcome: string;
 	outcomeCode?: string;
 	exitCode?: number;
@@ -103,13 +110,6 @@ export interface WorkerReceiptSummary {
 /** A receipt's projection: the summary plus the answer it sealed. */
 export interface WorkerReceiptFacts extends WorkerReceiptSummary {
 	text?: string;
-	/**
-	 * The canonical trust status of the persisted receipt, authenticated
-	 * against the persisted ledger row it was sealed from. Present only when
-	 * both could be read back, so a surface that shows it shows an
-	 * authenticated verdict and never the sealing process's own claim.
-	 */
-	trust?: CanonicalTrustStatus;
 }
 
 /** Reads `receipts/<runId>.json` and projects it; null when it is absent or unreadable. */

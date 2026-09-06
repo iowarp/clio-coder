@@ -1,10 +1,15 @@
-import { deepStrictEqual, match, ok, strictEqual } from "node:assert/strict";
+import { deepStrictEqual, doesNotMatch, match, ok, strictEqual } from "node:assert/strict";
+import { mkdir, readFile, writeFile } from "node:fs/promises";
+import { join } from "node:path";
 import { afterEach, describe, it } from "node:test";
 import { BusChannels, type DispatchCompletedPayload, type DispatchEnqueuedPayload } from "../../src/core/bus-events.js";
 import { createSafeEventBus } from "../../src/core/event-bus.js";
+import { clioDataDir, clioStateDir } from "../../src/core/xdg.js";
 import { resolveToolBudgetEnvelope } from "../../src/domains/dispatch/budget-envelope.js";
-import type { DispatchSnapshot } from "../../src/domains/dispatch/contract.js";
+import type { DispatchContract, DispatchSnapshot } from "../../src/domains/dispatch/contract.js";
 import { withReceiptIntegrity } from "../../src/domains/dispatch/receipt-integrity.js";
+import { buildEvidence } from "../../src/domains/evidence/index.js";
+import { summarizeTrustStatus } from "../../src/domains/evidence/trust-projection.js";
 import { inspectRunReceiptTrustStatus } from "../../src/domains/evidence/trust-status.js";
 import type { ObservabilityRunReaders, ObservabilityRunSummary } from "../../src/domains/observability/contract.js";
 import { emptyCostAggregate } from "../../src/domains/observability/cost.js";
@@ -13,12 +18,19 @@ import {
 	MAX_PROJECTION_RUNS,
 	type ObservabilityProjection,
 } from "../../src/domains/observability/projection.js";
+import { stripTerminalSequences, visibleWidth } from "../../src/engine/tui.js";
 import {
 	createDispatchBoardStore,
 	createDispatchBoardView,
 	type DispatchBoardRow,
+	formatTaskIslandLines,
 } from "../../src/interactive/dispatch-board.js";
+import { renderToolSubline } from "../../src/interactive/renderers/tool-execution.js";
+import { renderWorkerEntryLines } from "../../src/interactive/renderers/worker-entry.js";
+import { createWorkerStream } from "../../src/interactive/worker-stream.js";
+import { createMonitorTool } from "../../src/tools/monitor.js";
 import { fixtureEnvelope, fixtureReceiptDraft } from "../harness/receipt.js";
+import { isolateClioEnv } from "../harness/scratch-env.js";
 
 const IDENTITY: DispatchEnqueuedPayload = {
 	runId: "board-run",
@@ -514,4 +526,149 @@ describe("dispatch board uses the observability projection", () => {
 		strictEqual(board.activeRows().length, MAX_PROJECTION_RUNS + 1);
 		strictEqual(projection.snapshot().runs.length, MAX_PROJECTION_RUNS + 1);
 	});
+});
+
+describe("dispatch quality presentation", () => {
+	it("counts mixed quality separately and labels missing historical quality unknown", () => {
+		const trusts = (["pass", "fail"] as const).map((quality) => {
+			const envelope = fixtureEnvelope(quality);
+			const draft = fixtureReceiptDraft(envelope);
+			draft.quality.resultContract = {
+				sourceId: "agent-result-contract:mutation-report:fixture",
+				validatorDigest: "a".repeat(64),
+				conformance: "pass",
+				quality,
+			};
+			return summarizeTrustStatus(inspectRunReceiptTrustStatus(withReceiptIntegrity(draft, envelope), envelope).status);
+		});
+		const finished = {
+			toolCallId: "dispatch",
+			toolName: "dispatch",
+			isError: false,
+			result: { details: { receiptCount: 3, failedCount: 0, runs: [{ trust: trusts[0] }, { trust: trusts[1] }, {}] } },
+		};
+		const plain = renderToolSubline(finished, 44).map(stripTerminalSequences).join(" ").replace(/\s+/gu, " ");
+		match(plain, /3 execution ok/u);
+		match(plain, /1 grounded/u);
+		match(plain, /1 validation failed/u);
+		match(plain, /1 validation unknown/u);
+		const historical = renderToolSubline({ ...finished, result: { details: { receiptCount: 3, failedCount: 1 } } }, 76)
+			.map(stripTerminalSequences)
+			.join(" ");
+		match(historical, /2 execution ok, 1 execution failed/u);
+		match(historical, /3 validation unknown/u);
+		doesNotMatch(historical, /validation failed/u);
+	});
+
+	for (const [quality, state, wording] of [
+		["pass", "validated", "grounded"],
+		["fail", "failed", "validation failed"],
+		["unknown", "unknown", "validation unknown"],
+		["ungrounded", "ungrounded", "inferred: validation claimed, none observed"],
+	] as const) {
+		it(`keeps execution success separate from ${quality} quality across summaries`, async () => {
+			const env = await isolateClioEnv("dispatch-quality-");
+			try {
+				const envelope = fixtureEnvelope(IDENTITY.runId);
+				envelope.receiptPath = join(clioStateDir(), "receipts", `${envelope.id}.json`);
+				const draft = fixtureReceiptDraft(envelope);
+				// Exact failed-quality fact from retained S3 receipt 26ekyn85239m:
+				// conformance passes for its honest report that the output write failed.
+				if (quality === "pass" || quality === "fail")
+					draft.quality.resultContract = {
+						sourceId:
+							"agent-result-contract:mutation-report:8399543b0144dd9a56118c9e10a3cd1804faaf9861fe76643996e14ca6975766",
+						validatorDigest: "aaa20077d1d9a8c50a5bfedbcfa690ec7b37609142d270703029759c4ce5abcc",
+						conformance: "pass",
+						quality,
+					};
+				if (quality === "unknown") draft.verification = { state: "unknown", basis: "acp-external-unobserved" };
+				if (quality === "ungrounded")
+					draft.validationGrounding = {
+						claimed: 1,
+						grounded: 0,
+						ungrounded: ["output write"],
+						basis: "no-command-executed",
+					};
+				const receipt = withReceiptIntegrity(draft, envelope);
+				const bytes = JSON.stringify(receipt);
+				await mkdir(join(clioStateDir(), "receipts"), { recursive: true });
+				await writeFile(envelope.receiptPath, bytes);
+				await writeFile(join(clioStateDir(), "runs.json"), JSON.stringify([envelope]));
+				const inspection = inspectRunReceiptTrustStatus(receipt, envelope);
+				strictEqual(inspection.integrity.ok, true);
+				strictEqual(inspection.status.validationGrounding.state, state);
+				const trust = summarizeTrustStatus(inspection.status);
+				const { bus, board, start } = setup({ readReceipt: () => ({ trust: inspection.status }) });
+				start();
+				// This is an ordinary parallel dispatch, with no council grouping.
+				bus.emit(BusChannels.DispatchCompleted, { ...COMPLETED, council: undefined });
+				board.reconcile();
+				const row = { ...(board.rows()[0] as DispatchBoardRow) };
+				delete row.council;
+				strictEqual(row.status, "completed");
+				deepStrictEqual(row.trust, trust);
+				const plain = (lines: string[]) =>
+					lines.map(stripTerminalSequences).join("\n").replace(/│/gu, " ").replace(/\s+/gu, " ");
+				const collapsed = renderToolSubline(
+					{
+						toolCallId: "dispatch",
+						toolName: "dispatch",
+						isError: false,
+						result: { details: { receiptCount: 3, failedCount: 0, runs: [{ trust }, { trust }, { trust }] } },
+					},
+					76,
+				);
+				match(plain(collapsed), /3 execution ok/u);
+				ok(plain(collapsed).includes(wording), plain(collapsed));
+				const island = formatTaskIslandLines([row]);
+				ok(plain(island).replace(/\s+/gu, " ").includes(wording), plain(island));
+				match(plain(island), /done/u);
+				const card = createDispatchBoardView(
+					() => [row],
+					() => undefined,
+				).render(76);
+				ok(plain(card).replace(/\s+/gu, " ").includes(wording), plain(card));
+
+				const stream = createWorkerStream({
+					readReceipt: () => ({ outcome: "succeeded", contract: "pass", trust: inspection.status }),
+				});
+				stream.started({ ...IDENTITY, pid: null, assignmentId: IDENTITY.runId, attempt: 0 });
+				const worker = stream.completed(COMPLETED)?.entry;
+				ok(worker);
+				for (const folded of [true, false]) {
+					const lines = renderWorkerEntryLines(worker, 76, { folded });
+					ok(plain(lines).includes(wording), plain(lines));
+					match(plain(lines), /execution ok/u);
+					ok(lines.every((line) => visibleWidth(line) <= 76));
+				}
+				const monitor = createMonitorTool({
+					dispatch: {
+						getRun: () => envelope,
+						snapshot: () => ({ running: [], retrying: [] }),
+					} as unknown as DispatchContract,
+				});
+				const status = await monitor.run({ mode: "status", run_id: envelope.id });
+				strictEqual(status.kind, "ok");
+				ok(status.output.includes(wording), status.output);
+				match(status.output, /outcome=succeeded/u);
+				deepStrictEqual(status.details?.trust, trust);
+				const collected = await monitor.run({ mode: "collect", run_ids: [envelope.id] });
+				strictEqual(collected.kind, "ok");
+				ok(collected.output.includes(wording), collected.output);
+				match(collected.output, /state=succeeded/u);
+				const built = await buildEvidence({ dataDir: clioDataDir(), stateDir: clioStateDir(), runId: envelope.id });
+				const evidence = built.trustStatus.runs[0]?.status;
+				ok(evidence);
+				deepStrictEqual(summarizeTrustStatus(evidence), trust);
+				const findings = await readFile(join(built.directory, "findings.md"), "utf8");
+				ok(findings.includes(wording), findings);
+				strictEqual(await readFile(envelope.receiptPath, "utf8"), bytes);
+				strictEqual(inspectRunReceiptTrustStatus(receipt, envelope).integrity.ok, true);
+				if (quality === "unknown") doesNotMatch(plain(collapsed), /validation failed/u);
+			} finally {
+				env.restore();
+			}
+		});
+	}
 });

@@ -8,7 +8,11 @@ import {
 } from "../domains/dispatch/budget-envelope.js";
 import { type DispatchRequestOrigin, type RunKind, runKindSupportsLiveSteering } from "../domains/dispatch/types.js";
 import { describeWriteBoundaryAttributionDowngrade } from "../domains/dispatch/write-boundary.js";
-import type { TrustSummaryProjection, TrustVerdict } from "../domains/evidence/trust-projection.js";
+import {
+	type TrustSummaryProjection,
+	type TrustVerdict,
+	trustStateWord,
+} from "../domains/evidence/trust-projection.js";
 import type { ObservabilityContract, ObservabilityRunSummary } from "../domains/observability/contract.js";
 import {
 	COST_NOT_MEASURED,
@@ -774,7 +778,18 @@ function renderTaskIslandRow(row: DispatchBoardRow, width: number): string[] {
 		? `  ${theme.fg("muted", truncateToWidth(row.taskSummary, Math.max(1, width - 2), "…", false))}`
 		: null;
 
-	return [padAnsi(line1, width), ...(task ? [padAnsi(task, width)] : []), padAnsi(telemetry, width)];
+	const quality = isTerminalStatus(row.status)
+		? wrapTextWithAnsi(
+				`  quality: ${trustStateWord("validationGrounding", row.trust?.axes.validationGrounding ?? "unknown")}`,
+				width,
+			)
+		: [];
+	return [
+		padAnsi(line1, width),
+		...quality.map((line) => padAnsi(theme.fg("muted", line), width)),
+		...(task ? [padAnsi(task, width)] : []),
+		padAnsi(telemetry, width),
+	];
 }
 
 /**
