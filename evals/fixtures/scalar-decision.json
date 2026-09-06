@@ -1,0 +1,17 @@
+{
+	"provenance": {
+		"issue": 351,
+		"kind": "retained-live-observation",
+		"candidate": "7819fe4774b48b68e2129d9b54e888cce634c6aa",
+		"commit": "e2eb80649733833194b032f7862f31e33409cdd2",
+		"council": "1exzos2cu032",
+		"judge": "1gfii9n9kaj3",
+		"session": "jz7pk7jg8net",
+		"note": "Functions copied from archived codex/findiff/utils.py. Fixture execution is scripted machinery, not model evidence.",
+		"decisionRef": "agent:24fb149d-199f-4269-920d-70b3e033ebe4/battletest-index-policy"
+	},
+	"key": "battletest-index-policy",
+	"pythonPolicy": "to_index_tuple returns Python int coordinates, explicitly converting each NumPy-array element before constructing the tuple.",
+	"numpyPolicy": "Preserve NumPy integer scalar coordinates.",
+	"source": "import numpy as np\n\n\ndef to_long_index(idx, shape):\n\n    ndims = len(shape)\n    long_idx = 0\n    siz = 1\n    for axis in range(ndims):\n        idx_ = idx[ndims - 1 - axis]\n        long_idx += idx_ * siz\n        siz *= shape[ndims - 1 - axis]\n\n    return long_idx\n\n\ndef to_index_tuple(long_idx, shape):\n    ndims = len(shape)\n    idx = np.zeros(ndims, dtype=int)\n    for k in range(ndims):\n        s = np.prod(shape[k + 1 :])\n        idx[k] = long_idx // s\n        long_idx = long_idx - s * idx[k]\n\n    return tuple(idx)\n"
+}

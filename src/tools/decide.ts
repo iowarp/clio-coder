@@ -58,7 +58,7 @@ export function createDecideTool(deps: DecideToolDeps = {}): ToolSpec {
 	return {
 		name: ToolNames.Decide,
 		description:
-			"Record a design decision you made between two or more viable options, with the alternatives you rejected and why. Call it before implementing the choice; a later call with the same key supersedes the earlier record.",
+			"Record a design decision between viable options, with rejected alternatives and rationale, before implementing. Verify implementation against the active choice before commit; decision trailers do not prove adherence. If policy changes, a call with the same key revises your earlier agent choice; operator choices require operator revision through ask_user. Record the revision before commit.",
 		parameters: Type.Object({
 			key: Type.String({
 				description: `Stable kebab-case name for the decision, e.g. "cache-key-shape" (at most ${DECIDE_CAPS.keyBytes} bytes).`,
