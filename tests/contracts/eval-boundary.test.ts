@@ -1,8 +1,14 @@
 import { deepStrictEqual, match, ok, strictEqual, throws } from "node:assert/strict";
+import { execFileSync } from "node:child_process";
+import { unlinkSync, writeFileSync } from "node:fs";
+import { join } from "node:path";
 import test from "node:test";
+import { writeCodewiki } from "../../src/domains/context/codewiki/artifact.js";
+import { buildCodewiki } from "../../src/domains/context/codewiki/indexer.js";
 import { parseEvalArtifactV4 } from "../../src/domains/eval/artifacts/store.js";
 import { compareEvalArtifactsV4, EvalServingConfigurationDriftError } from "../../src/domains/eval/compare/compare.js";
 import { aggregateEvalVerdicts } from "../../src/domains/eval/metrics/aggregate.js";
+import { collectContextMetrics } from "../../src/domains/eval/metrics/context.js";
 import { renderEvalComparisonReportV1 } from "../../src/domains/eval/reports/comparison.js";
 import { renderEvalJsonReportV4 } from "../../src/domains/eval/reports/json.js";
 import { toolBehaviorMetricEntriesFromJsonl } from "../../src/domains/eval/runners/clio-run.js";
@@ -23,6 +29,41 @@ import {
 	safeParseEvalVerdictEnvelopeV1,
 } from "../../src/domains/eval/schema/verdict.js";
 import { resolveSuiteForRun } from "../../src/domains/eval/suites/resolve.js";
+import { isolateClioEnv } from "../harness/scratch-env.js";
+
+test("context metrics distinguish path coverage from current source content", async () => {
+	const isolated = await isolateClioEnv("clio-context-metrics-");
+	try {
+		const path = join(isolated.dir, "source.ts");
+		writeFileSync(path, "export function before() {}\n");
+		writeCodewiki(isolated.dir, await buildCodewiki({ cwd: isolated.dir, language: "typescript" }));
+		const before = collectContextMetrics(isolated.dir);
+		strictEqual(before["context.staleFiles"], 0);
+		strictEqual(before["context.contentValidFiles"], 1);
+		writeFileSync(path, "export function after_() {}\n");
+		const changed = collectContextMetrics(isolated.dir);
+		strictEqual(changed["context.indexedFiles"], 1);
+		strictEqual(changed["context.coverage"], 1);
+		strictEqual(changed["context.staleFiles"], 1);
+		strictEqual(changed["context.contentValidFiles"], 0);
+		strictEqual(changed["context.missingFiles"], 0);
+		writeFileSync(path, "export function before() {}\n");
+		execFileSync("git", ["init", "--quiet"], { cwd: isolated.dir });
+		writeFileSync(join(isolated.dir, ".gitignore"), "source.ts\n");
+		const ignored = collectContextMetrics(isolated.dir);
+		strictEqual(ignored["context.indexedFiles"], 0);
+		strictEqual(ignored["context.contentValidFiles"], 0);
+		strictEqual(ignored["context.staleFiles"], 1);
+		strictEqual(ignored["context.missingFiles"], 0);
+		unlinkSync(path);
+		const removed = collectContextMetrics(isolated.dir);
+		strictEqual(removed["context.indexedFiles"], 0);
+		strictEqual(removed["context.staleFiles"], 1);
+		strictEqual(removed["context.missingFiles"], 1);
+	} finally {
+		await isolated.restore();
+	}
+});
 
 const DIGEST = "a".repeat(64);
 const ROUTE_DIMENSIONS: EvalExecutionMatrixDimensionV1[] = ["target", "wireModel", "runtime", "thinkingLevel"];
