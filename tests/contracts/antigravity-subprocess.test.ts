@@ -69,7 +69,7 @@ let stdin = "";
 for await (const chunk of process.stdin) stdin += String(chunk);
 const scenario = JSON.parse(readFileSync(join(process.cwd(), "scenario.json"), "utf8"));
 writeFileSync(join(process.cwd(), "observed.json"), JSON.stringify({
-  args: process.argv.slice(2), stdin,
+  pid: process.pid, args: process.argv.slice(2), stdin,
   env: { HOME: process.env.HOME, PATH: process.env.PATH, AI_AGENT: process.env.AI_AGENT,
     FAKE_API_SECRET: process.env.FAKE_API_SECRET,
     CLIO_CODER_ALLOW_EXTERNAL_FULL_ACCESS: process.env.CLIO_CODER_ALLOW_EXTERNAL_FULL_ACCESS }
@@ -471,5 +471,79 @@ describe("Antigravity external subprocess contract", () => {
 			}
 		}
 		throw new Error(`grandchild ${pid} survived process-group cancellation`);
+	});
+
+	it("cancels the real Windows child and grandchild tree", {
+		skip: process.platform !== "win32",
+		timeout: 15_000,
+	}, async (t) => {
+		const { root, binary, home } = scratch();
+		writeScenario(root, { hang: true });
+		const controller = new AbortController();
+		const handle = startAntigravityWorkerRun(workerInput(root, { signal: controller.signal }), () => undefined, {
+			binary,
+			workspaceRoot: root,
+			environment: { PATH: process.env.PATH, HOME: home },
+			killGraceMs: 25,
+		});
+		const ownedPids: number[] = [];
+		let settlementDeadline: ReturnType<typeof setTimeout> | undefined;
+		try {
+			for (let index = 0; index < 200; index += 1) {
+				try {
+					const observed = JSON.parse(readFileSync(join(root, "observed.json"), "utf8"));
+					const grandchild = Number(readFileSync(join(root, "grandchild.pid"), "utf8"));
+					ok(Number.isSafeInteger(observed.pid) && observed.pid > 0);
+					ok(Number.isSafeInteger(grandchild) && grandchild > 0);
+					ownedPids.push(observed.pid, grandchild);
+					break;
+				} catch {
+					await new Promise((resolve) => setTimeout(resolve, 10));
+				}
+			}
+			equal(ownedPids.length, 2, "fixture must publish both process identities before cancellation");
+			for (const pid of ownedPids) process.kill(pid, 0);
+			t.diagnostic(`Windows cancellation fixture owns PIDs ${ownedPids.join(", ")}`);
+			controller.abort();
+			const result = await Promise.race([
+				handle.promise,
+				new Promise<never>((_, reject) => {
+					settlementDeadline = setTimeout(() => reject(new Error("Windows cancellation did not settle")), 5_000);
+				}),
+			]);
+			equal(result.exitCode, 1);
+			equal(assistant(result).stopReason, "aborted");
+			for (const pid of ownedPids) {
+				let running = true;
+				for (let index = 0; index < 200; index += 1) {
+					try {
+						process.kill(pid, 0);
+						await new Promise((resolve) => setTimeout(resolve, 10));
+					} catch {
+						running = false;
+						break;
+					}
+				}
+				equal(running, false, `owned descendant ${pid} survived cancellation`);
+			}
+			t.diagnostic(`Windows tree cancellation reaped owned fixture PIDs ${ownedPids.join(", ")}`);
+		} finally {
+			clearTimeout(settlementDeadline);
+			controller.abort();
+			// A failing regression must not leave the fixture's descendants alive.
+			for (const pid of ownedPids) {
+				try {
+					process.kill(pid, 0);
+					execFileSync("taskkill.exe", ["/PID", String(pid), "/T", "/F"], {
+						stdio: "ignore",
+						windowsHide: true,
+						timeout: 5_000,
+					});
+				} catch {
+					// Already reaped by the production terminator or the preceding tree cleanup.
+				}
+			}
+			await handle.promise;
+		}
 	});
 });

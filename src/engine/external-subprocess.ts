@@ -1,4 +1,4 @@
-import type { ChildProcessByStdio } from "node:child_process";
+import { type ChildProcessByStdio, spawn } from "node:child_process";
 import type { Readable } from "node:stream";
 
 import { boundedExternalDiagnostic } from "../core/external-diagnostic.js";
@@ -81,21 +81,32 @@ export interface ProcessTreeTerminator {
 	cleanup(): void;
 }
 
-/** POSIX process-group termination with a direct-child fallback; Windows is direct-child only. */
+/** POSIX process groups or Windows taskkill trees, with a direct-child fallback. */
 export function createProcessTreeTerminator(
 	child: { pid?: number | undefined; exitCode: number | null; kill(signal?: NodeJS.Signals): boolean },
 	graceMs = 1500,
+	options: { platform?: NodeJS.Platform; spawn?: typeof spawn } = {},
 ): ProcessTreeTerminator {
+	const platform = options.platform ?? process.platform;
+	const spawnKiller = options.spawn ?? spawn;
 	let sent = false;
 	let timer: ReturnType<typeof setTimeout> | null = null;
 	const signal = (name: NodeJS.Signals): void => {
-		if (child.pid && process.platform !== "win32") {
+		if (child.pid && platform !== "win32") {
 			try {
 				process.kill(-child.pid, name);
 				return;
 			} catch {
 				// The child may not have established its group yet.
 			}
+		}
+		if (platform === "win32" && child.pid !== undefined && Number.isSafeInteger(child.pid) && child.pid > 0) {
+			const args = ["/PID", String(child.pid), "/T", ...(name === "SIGKILL" ? ["/F"] : [])];
+			const killer = spawnKiller("taskkill.exe", args, { stdio: "ignore", windowsHide: true });
+			killer.once("error", () => {
+				if (child.exitCode === null) child.kill(name);
+			});
+			return;
 		}
 		if (child.exitCode !== null) return;
 		child.kill(name);

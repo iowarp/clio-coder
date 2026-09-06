@@ -450,7 +450,7 @@ function checkCiScripts(): void {
 					{ run: "npm ci --prefer-offline --no-audit --no-fund" },
 					{ run: "npm run typecheck" },
 					{
-						run: "npm run test:file -- tests/contracts/antigravity-subprocess.test.ts tests/contracts/bash-exec-settlement.test.ts",
+						run: "npm run test:file -- tests/contracts/antigravity-subprocess.test.ts tests/contracts/bash-exec-settlement.test.ts tests/contracts/windows-process-tree.test.ts",
 					},
 				],
 			})
