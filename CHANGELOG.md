@@ -2,7 +2,7 @@
 
 All notable changes to Clio Coder are documented in this file. The format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/) and versions follow Semantic Versioning; pre-1.0 minor releases may include incompatible changes.
 
-## 0.4.4 - Unreleased
+## 0.4.4 - 2026-09-05
 
 Trust spine: typed claims, executable validation, and decision provenance. Answers the NSF "Beyond Code" findings where the harness still trusted prose or sniffed files.
 
