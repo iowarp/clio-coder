@@ -89,8 +89,13 @@ export function compareEvalBehaviorMetricsV1(
 	for (const key of [...keys].sort((left, right) => left.localeCompare(right))) {
 		const baselineGroup = baselineGroups.get(key);
 		const candidateGroup = candidateGroups.get(key);
-		const identity = baselineGroup ?? candidateGroup;
-		if (identity === undefined) continue;
+		const group = baselineGroup ?? candidateGroup;
+		if (group === undefined) continue;
+		const identity = {
+			scenarioId: group.scenarioId,
+			role: group.role,
+			target: { id: group.target.id, model: group.target.model },
+		};
 		const routes = {
 			baselineTargets: baselineGroup?.targets ?? [],
 			candidateTargets: candidateGroup?.targets ?? [],

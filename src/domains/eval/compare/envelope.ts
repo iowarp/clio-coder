@@ -22,10 +22,15 @@ export function compareEvalExecutionEnvelopesV1(
 	baselineDimensions: ReadonlyArray<EvalExecutionMatrixDimensionV1>,
 	candidateDimensions: ReadonlyArray<EvalExecutionMatrixDimensionV1>,
 ): EvalEnvelopeMismatchV1 | null {
+	const mismatchIdentity = {
+		scenarioId: identity.scenarioId,
+		role: identity.role,
+		target: { id: identity.target.id, model: identity.target.model },
+	};
 	const leftDimensions = [...baselineDimensions].sort();
 	const rightDimensions = [...candidateDimensions].sort();
 	if (stableJson(leftDimensions) !== stableJson(rightDimensions)) {
-		return { ...identity, fields: ["matrix.dimensions"] };
+		return { ...mismatchIdentity, fields: ["matrix.dimensions"] };
 	}
 	if (
 		(baseline.some((result) => result.executionEnvelope !== undefined) &&
@@ -33,22 +38,22 @@ export function compareEvalExecutionEnvelopesV1(
 		(candidate.some((result) => result.executionEnvelope !== undefined) &&
 			candidate.some((result) => result.executionEnvelope === undefined))
 	) {
-		return { ...identity, fields: ["executionEnvelope.missingTrial"] };
+		return { ...mismatchIdentity, fields: ["executionEnvelope.missingTrial"] };
 	}
 	const ignored = new Set(leftDimensions);
 	const baselineEnvelopes = uniqueEnvelopes(baseline, ignored);
 	const candidateEnvelopes = uniqueEnvelopes(candidate, ignored);
 	if (baselineEnvelopes.length === 0 && candidateEnvelopes.length === 0) return null;
 	if (baselineEnvelopes.length === 0 || candidateEnvelopes.length === 0) {
-		return { ...identity, fields: ["executionEnvelope"] };
+		return { ...mismatchIdentity, fields: ["executionEnvelope"] };
 	}
 	if (baselineEnvelopes.length > 1 || candidateEnvelopes.length > 1) {
-		return { ...identity, fields: ["executionEnvelope.withinRunVariance"] };
+		return { ...mismatchIdentity, fields: ["executionEnvelope.withinRunVariance"] };
 	}
 	const left = baselineEnvelopes[0];
 	const right = candidateEnvelopes[0];
 	if (left === undefined || right === undefined || stableJson(left) === stableJson(right)) return null;
-	return { ...identity, fields: differingFields(left, right, ignored) };
+	return { ...mismatchIdentity, fields: differingFields(left, right, ignored) };
 }
 
 function uniqueEnvelopes(
