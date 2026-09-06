@@ -41,12 +41,12 @@ Rules:
   to start; they do not have to be exhaustive.
 - Do not target a page count. Depth follows what the repository contains. A substantial service,
   package, domain, or cross-cutting workflow earns its own page; a thin one does not.
-- Judge the plan against one question: after all these pages are written, could an agent that
-  never reads this repository's source still answer how it works and change it safely? Where the
-  answer is no, that gap is the page you should be adding.
+- Judge the plan at the resolved coverage depth below: can a reader understand the core behavior
+  and find the source needed to investigate or change it? Add supported coverage where that
+  navigation or explanation is missing. A wiki does not replace reading current source.
 
 Discipline:
-- You have a small budget and one deliverable. Spend most of it reading: the instruction files
+- You have one deliverable. Read enough to ground its grouping and coverage: the instruction files
   named below, the manifests, the entry points in the digest, and enough of the largest areas to
   judge whether the proposed grouping matches reality.
 - Use `code_nav` to navigate. Do not read files wholesale when an outline answers the question.

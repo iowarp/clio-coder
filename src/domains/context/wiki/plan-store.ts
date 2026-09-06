@@ -157,8 +157,17 @@ export function sanitizeWikiPlan(
 		previous?.sourceContent ?? (options.trustStatus ? parseWikiSourceContent(value.sourceContent) : undefined);
 	const sourceTreeHash = previous?.sourceTreeHash ?? (options.trustStatus ? value.sourceTreeHash : undefined);
 	const sourceGitHead = previous?.sourceGitHead ?? (options.trustStatus ? value.sourceGitHead : undefined);
+	const depth = previous?.depth ?? (options.trustStatus ? value.depth : undefined);
+	const requestedDepth = previous?.requestedDepth ?? (options.trustStatus ? value.requestedDepth : undefined);
 	return {
 		version: 1,
+		...(depth === "simple" || depth === "medium" || depth === "detailed" ? { depth } : {}),
+		...(requestedDepth === "auto" ||
+		requestedDepth === "simple" ||
+		requestedDepth === "medium" ||
+		requestedDepth === "detailed"
+			? { requestedDepth }
+			: {}),
 		...(sourceContent ? { sourceContent } : {}),
 		...(retiredPages.length ? { retiredPages } : {}),
 		...(typeof sourceTreeHash === "string" && /^[a-f0-9]{64}$/.test(sourceTreeHash) ? { sourceTreeHash } : {}),

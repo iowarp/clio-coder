@@ -458,7 +458,6 @@ export async function runWikiGenerate(
 		progress(input, { phase: "codewiki", status: "started", message: "loading codewiki for wiki generation" });
 		const { codewiki, fingerprint } = await loadOrBuildCodewiki(cwd);
 		const sourceTreeHash = fingerprint.treeHash;
-		const generation = planWikiGeneration(codewiki, input.depth ?? "auto");
 		progress(input, {
 			phase: "codewiki",
 			status: "completed",
@@ -468,6 +467,25 @@ export async function runWikiGenerate(
 		});
 
 		const staging = adoptOrCreateStaging(cwd);
+		const stagedPlan = staging.adopted ? readWikiPlanFile(staging.dir) : null;
+		const savedPlan = stagedPlan ?? (mode === "update" ? existingMeta?.plan : undefined);
+		const savedDepth = savedPlan?.depth ?? existingMeta?.generation?.depth;
+		const continuing = Boolean(
+			stagedPlan || input.retryPending || savedPlan?.pages.some((page) => page.status !== "written"),
+		);
+		const requestedDepth = input.depth ?? savedPlan?.requestedDepth ?? existingMeta?.generation?.requestedDepth ?? "auto";
+		const generation = planWikiGeneration(
+			codewiki,
+			continuing && (input.depth === undefined || input.depth === "auto") && savedDepth ? savedDepth : requestedDepth,
+		);
+		// Keep the policy separate from its resolved coverage so a completed auto wiki can grow.
+		generation.requestedDepth =
+			continuing && (input.depth === undefined || input.depth === "auto")
+				? (savedPlan?.requestedDepth ?? existingMeta?.generation?.requestedDepth ?? savedDepth ?? requestedDepth)
+				: requestedDepth;
+		const depthChanged = Boolean(
+			savedPlan && (savedDepth ? savedDepth !== generation.depth : input.depth !== undefined && input.depth !== "auto"),
+		);
 		const sourceGitHead = currentWikiGitHead(cwd) ?? undefined;
 		const sourceContent = captureWikiSourceContent(cwd);
 		const resolved = resolvePlan({
@@ -487,6 +505,15 @@ export async function runWikiGenerate(
 				listWikiPagesInDir(wikiDir(cwd)).length,
 			);
 		}
+		if (depthChanged) {
+			resolved.plan = {
+				...resolved.plan,
+				pages: resolved.plan.pages.map((page) => ({ ...page, status: "pending", attempts: 0 })),
+			};
+			resolved.resumed = false;
+		}
+		resolved.plan.depth = generation.depth;
+		resolved.plan.requestedDepth = generation.requestedDepth;
 		const owed = resolved.plan.pages.filter((page) => page.status !== "written").length;
 		progress(input, {
 			phase: "codewiki",
@@ -495,7 +522,10 @@ export async function runWikiGenerate(
 			detail:
 				`${generation.sourceFiles} source files; ${generation.sourceLines} lines; ` +
 				`${resolved.plan.pages.length} pages planned; ${owed} to write` +
-				(resolved.resumed ? "; resuming an interrupted run" : ""),
+				(resolved.resumed ? "; resuming an interrupted run" : "") +
+				(depthChanged
+					? `; coverage changed from ${savedDepth ?? "legacy unspecified"} to ${generation.depth}; prior pages requeued with prose retained`
+					: ""),
 		});
 		resolved.plan = { ...resolved.plan, sourceTreeHash, sourceContent };
 		if (sourceGitHead) resolved.plan.sourceGitHead = sourceGitHead;
@@ -524,7 +554,7 @@ export async function runWikiGenerate(
 				codewiki,
 				generation,
 				plan: resolved.plan,
-				resumed: resolved.resumed || input.retryPending === true,
+				resumed: resolved.resumed || (input.retryPending === true && !depthChanged),
 				...(input.retryPending ? { retryPending: true } : {}),
 				unclaimedAreas: resolved.unclaimedAreas,
 				...(input.decisions ? { decisions: input.decisions } : {}),

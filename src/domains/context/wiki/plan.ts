@@ -50,6 +50,10 @@ export interface WikiPlanPage {
 
 export interface WikiPlan {
 	version: 1;
+	/** Harness-owned resolved coverage depth; absent in legacy checkpoints. */
+	depth?: ResolvedWikiDepth;
+	/** Harness-owned policy, retained before the first publication on interrupted runs. */
+	requestedDepth?: WikiDepth;
 	/** Source revision observed before dispatch; stale checkpoints must be revalidated. */
 	sourceTreeHash?: string;
 	/** Harness-captured Git baseline for resuming before any wiki has been published. */
@@ -238,6 +242,7 @@ export function buildCandidatePlan(codewiki: Codewiki, depth: ResolvedWikiDepth)
 	});
 	return dedupePagePaths({
 		version: 1,
+		depth,
 		overview: "",
 		pages: [overviewPage(source), ...pages],
 	});
@@ -265,5 +270,11 @@ export function planWikiGeneration(codewiki: Codewiki, requestedDepth: WikiDepth
 	const sourceFiles = source.length;
 	const sourceLines = source.reduce((total, file) => total + Math.max(0, file.loc), 0);
 	const depth = requestedDepth === "auto" ? classifyDepth(sourceFiles, sourceLines) : requestedDepth;
-	return { requestedDepth, depth, sourceFiles, sourceLines, plan: buildCandidatePlan(codewiki, depth) };
+	return {
+		requestedDepth,
+		depth,
+		sourceFiles,
+		sourceLines,
+		plan: { ...buildCandidatePlan(codewiki, depth), requestedDepth },
+	};
 }
