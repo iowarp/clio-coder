@@ -164,9 +164,9 @@ import type {
 	DispatchRequest,
 	DispatchSnapshot,
 } from "./contract.js";
-import { createWorkerOutputCapture, startDispatchEventPump } from "./event-pump.js";
+import { createWorkerOutputCapture, startDispatchEventPump, workerOutputCaptureBytes } from "./event-pump.js";
 import type { ExecutionHandoff } from "./execution-handoff.js";
-import { appliesRecipeResultContract, routeCorrelationFactsForRun, withAttemptRole } from "./execution-role.js";
+import { dispatchResultContract, routeCorrelationFactsForRun, withAttemptRole } from "./execution-role.js";
 import {
 	affectsTargetBreaker,
 	classifyFailure,
@@ -1926,10 +1926,9 @@ function buildDispatchWorkerSpec(input: DispatchWorkerSpecInput, config?: Config
 	// Requiring a recipe contract here meant a caller-supplied override against a
 	// recipe with none was sealed but never sent, so the worker spent no repair
 	// round on a contract it was never told about and the run failed on a shape
-	// nothing had asked it for.
-	const workerResultContract = appliesRecipeResultContract(input.req.gate?.role)
-		? (input.req.resultContractOverride ?? input.recipe?.resultContract)
-		: undefined;
+	// nothing had asked it for. A caller's summary allowance is folded in by
+	// the same resolver the seal uses, so the two never disagree.
+	const workerResultContract = dispatchResultContract(input.req, input.recipe);
 	if (workerResultContract) spec.resultContract = workerResultContract;
 	const product = input.req.product ?? input.recipe?.product;
 	if (product) spec.product = product;
@@ -3512,6 +3511,9 @@ export function createDispatchBundle(
 		if (!recipe) {
 			throw new Error(`dispatch: unknown agent recipe: ${req.agentId}`);
 		}
+		// Resolve the applied contract once here so a caller's summary allowance
+		// on a recipe that carries no summary fails before any model boots.
+		dispatchResultContract(req, recipe);
 		const spec = normalizeAgentSpec(recipe);
 		if (req.requestOrigin === "user" && !isUserVisibleAgent(spec)) {
 			throw new Error(
@@ -3704,6 +3706,9 @@ export function createDispatchBundle(
 					`dispatch: shadow or internal agent '${req.agentId}' cannot run on external ACP agent '${agentId}'`,
 				);
 			}
+			// A summary allowance on a recipe with no summary field fails here,
+			// before the external agent is started.
+			dispatchResultContract(req, spec);
 		}
 		if (!settings) throw new Error("dispatch: effective settings required for ACP delegation");
 		const configured = settings.integrations.externalAgents.entries.find((entry) => entry.id === agentId);
@@ -3883,7 +3888,11 @@ export function createDispatchBundle(
 		let outcomeCode: RunOutcomeCode | null = null;
 		let reportedSpoofedOutcome = false;
 		let runIdForPermissionAudit: string | null = null;
-		const outputCapture = createWorkerOutputCapture();
+		const outputCapture = createWorkerOutputCapture({
+			maxBytes: workerOutputCaptureBytes(
+				dispatchResultContract(req, req.agentId && maybeAgents ? maybeAgents.getSpec(req.agentId) : null),
+			),
+		});
 		const markObservedPhase = (field: "firstModelTokenAt" | "firstToolAt"): void => {
 			if (timing[field] !== undefined) return;
 			timing[field] = new Date(now()).toISOString();
@@ -4885,7 +4894,11 @@ export function createDispatchBundle(
 			lifecycle.runtimeKind === "http" ||
 			(lifecycle.runtimeKind === "sdk" && lifecycle.target.runtime.id === "claude-sdk");
 		let workerPolicyPermissionCounter = 0;
-		const outputCapture = createWorkerOutputCapture();
+		// The bound the receipt can seal follows the contract this run will be
+		// validated against; a conforming result never arrives clipped.
+		const outputCapture = createWorkerOutputCapture({
+			maxBytes: workerOutputCaptureBytes(dispatchResultContract(req, lifecycle.recipe)),
+		});
 		const markObservedPhase = (field: "firstModelTokenAt" | "firstToolAt"): void => {
 			if (timing[field] !== undefined) return;
 			timing[field] = new Date(now()).toISOString();
@@ -5651,13 +5664,12 @@ export function createDispatchBundle(
 				const steering = snapshotSteeringProvenance();
 				const capturedOutput = outputCapture.snapshot();
 				const observedRunEffects = runEffects.snapshot();
-				const appliedResultContract = appliesRecipeResultContract(req.gate?.role)
-					? (req.resultContractOverride ?? lifecycle.recipe?.resultContract ?? null)
-					: null;
+				const appliedResultContract = dispatchResultContract(req, lifecycle.recipe) ?? null;
 				const resultContract = validateRecipeResult({
 					contract: appliedResultContract,
 					reachedTerminalResult: resultContractWasDue(finalOutcome, outcomeCode),
 					output: capturedOutput?.state === "final" ? capturedOutput.text : null,
+					outputTruncated: capturedOutput?.truncated === true,
 					cwd: lifecycle.cwd,
 					networkAllowed:
 						lifecycle.admission.allowedTools.includes(ToolNames.WebFetch) ||
@@ -5707,8 +5719,7 @@ export function createDispatchBundle(
 					finalDetail = [finalDetail, describeUngroundedValidations(validationGrounding)].filter(Boolean).join("; ");
 				}
 				const hasTerminalArtifact =
-					(req.resultContractOverride ?? lifecycle.recipe?.resultContract)?.kind === "architect-plan" &&
-					resultValidation?.conformance === "pass";
+					appliedResultContract?.kind === "architect-plan" && resultValidation?.conformance === "pass";
 				if (finalOutcome === "succeeded" && !hasDurableFinalOutput(capturedOutput) && !hasTerminalArtifact) {
 					finalOutcome = "failed";
 					outcomeCode = "worker_final_output_missing";

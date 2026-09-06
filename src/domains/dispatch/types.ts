@@ -667,9 +667,10 @@ export interface RunReceiptUpstreamResponse {
  * `state: "final"` means the text is a completed assistant message (the last
  * `message_end`); `state: "partial"` means mid-stream text from a message that
  * never completed (abort, stall, kill) and must never be presented as final.
- * `bytes` is the UTF-8 length of the full captured text before the
- * WORKER_OUTPUT_MAX_BYTES bound; `truncated` records that the bound clipped
- * `text`, so truncation is always explicit. Absent when no assistant text was
+ * `bytes` is the UTF-8 length of the full captured text before the run's
+ * capture bound (WORKER_OUTPUT_MAX_BYTES, or the larger bound a mutation-report
+ * contract's summary allowance implies); `truncated` records that the bound
+ * clipped `text`, so truncation is always explicit. Absent when no assistant text was
  * captured. Covered by the receipt integrity digest like every other field.
  */
 export interface RunReceiptOutput {

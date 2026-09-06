@@ -17,8 +17,12 @@ export function assessExplanation(agentId, output, conformance) {
 	const findings = Array.isArray(value.findings) ? value.findings : [];
 	const prose = agentId === "scout" ? findings.map((finding) => finding.claim ?? "").join(" ") : (value.summary ?? "");
 	const words = typeof prose === "string" && prose.trim() ? prose.trim().split(/\s+/u).length : 0;
+	// Scout cites through structured findings; Coder cites inline as file:line
+	// inside its summary, the declared place for a read-only explanation.
 	const cited = Object.keys(fixture.files).every((path) =>
-		findings.some((finding) => finding.path === path && Number.isSafeInteger(finding.line) && finding.line > 0),
+		agentId === "scout"
+			? findings.some((finding) => finding.path === path && Number.isSafeInteger(finding.line) && finding.line > 0)
+			: new RegExp(`${path.replace(/[.*+?^${}()|[\]\\]/gu, "\\$&")}:[1-9]\\d*`, "u").test(prose),
 	);
 	const topics = [
 		/uniform/iu,
@@ -31,8 +35,10 @@ export function assessExplanation(agentId, output, conformance) {
 		/linspace|equidistant/iu,
 		/does not|do not|not .*irregular/iu,
 	].every((pattern) => pattern.test(prose));
-	const suitable = agentId === "scout";
-	const limited = agentId === "coder" && /cannot deliver/iu.test(prose) && /1000/iu.test(prose);
+	// Both recipes carry a 1200-word cited explanation: Scout as findings, Coder
+	// in its mutation-report summary under the contract's summary allowance.
+	const suitable = agentId === "scout" || agentId === "coder";
+	const limited = agentId === "coder" && /cannot deliver/iu.test(prose) && /allowance|UTF-8 bytes/iu.test(prose);
 	return {
 		"explanation.recipeSuitable": suitable,
 		"explanation.conforms": conformance === "pass",
@@ -93,12 +99,12 @@ async function grade(agentId) {
 	assert.equal(receipt.output?.truncated, false, "a truncated report is not complete delivery");
 	assert.equal(metrics["explanation.conforms"], true);
 	assert.notEqual(receipt.quality?.resultContract?.quality, "fail");
-	assert.equal(metrics["explanation.recipeSuitable"], agentId === "scout");
-	assert.equal(metrics["explanation.delivered"], agentId === "scout");
-	assert.equal(metrics["explanation.limited"], agentId === "coder");
+	assert.equal(metrics["explanation.recipeSuitable"], true);
+	assert.equal(metrics["explanation.delivered"], true);
+	assert.equal(metrics["explanation.limited"], false);
 	for (const [path, content] of Object.entries(fixture.files)) assert.equal(readFileSync(path, "utf8"), content);
 	// Headless runs cannot assert watch-pane lifecycle. Root records it separately.
-	assert.ok(metrics["task.solved"], "explicit Coder reported an honest limitation; the requested task remains unsolved");
+	assert.ok(metrics["task.solved"], "the requested explanation was not delivered in the declared result shape");
 }
 
 if (process.argv[1] === fileURLToPath(import.meta.url)) {

@@ -42,6 +42,7 @@ export function routeValidationProjection(
 		decisionRefs,
 		resolvedVerification,
 		resultContractOverride,
+		resultSummary,
 		fleetGateReceipt,
 		taskWorktree,
 		runIdHint,
@@ -68,6 +69,7 @@ export function routeValidationProjection(
 				? { resolvedVerification: resolvedVerification.map((check) => ({ ...check, argv: [...check.argv] })) }
 				: {}),
 			...(resultContractOverride !== undefined ? { resultContractOverride } : {}),
+			...(resultSummary !== undefined ? { resultSummary: { ...resultSummary } } : {}),
 			...(fleetGateReceipt !== undefined ? { fleetGateReceipt: { ...fleetGateReceipt } } : {}),
 			...(taskWorktree !== undefined ? { taskWorktree } : {}),
 			...(runIdHint !== undefined ? { runIdHint } : {}),

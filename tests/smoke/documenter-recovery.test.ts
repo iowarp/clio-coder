@@ -148,7 +148,7 @@ for (const scenario of ["dependent-repair", "independent-recovery", "exhausted"]
 						if (documenterRounds === 1 || scenario === "exhausted") text = "invalid Documenter result";
 						else {
 							match(history, /clio-result-contract-repair-1/u);
-							match(history, /1000 UTF-8 bytes/u);
+							match(history, /16384 UTF-8 bytes/u);
 							match(history, /Preserve the requested explanation/u);
 							text = REPORT;
 						}

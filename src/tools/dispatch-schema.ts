@@ -1,5 +1,6 @@
 import { type Static, Type } from "typebox";
 import type { FleetSettings } from "../core/defaults.js";
+import { RESULT_SUMMARY_MAX_BYTES_CEILING } from "../domains/agents/result-contract.js";
 import { DISPATCH_BRIEFING_MAX_BYTES } from "../domains/dispatch/validation.js";
 import { StringEnum } from "../engine/ai.js";
 import { TOOL_PROFILE_NAMES } from "./profiles.js";
@@ -188,6 +189,13 @@ export function buildDispatchParameters(composition: DispatchSchemaComposition =
 							worktree: Type.Optional(Type.Literal(true, { description: "Run this writer in an isolated git worktree." })),
 							intent: Type.Optional(IntentRef),
 							gate: Type.Optional(Type.String({ description: "One declared check id, shorthand for intent.verification." })),
+							result_summary_max_bytes: Type.Optional(
+								Type.Integer({
+									minimum: 1,
+									maximum: RESULT_SUMMARY_MAX_BYTES_CEILING,
+									description: "This task's inline summary allowance; mutation-report workers (coder, documenter) only.",
+								}),
+							),
 						}),
 					]),
 					{ description: "Batch of assignments; one string or object is wrapped." },
@@ -319,6 +327,13 @@ export function buildDispatchParameters(composition: DispatchSchemaComposition =
 			cwd: Type.Optional(Type.String({ description: "Default worker working directory." })),
 			timeout_ms: Type.Optional(Type.Number({ description: "Abort the dispatch after this many ms." })),
 			max_output_bytes: Type.Optional(Type.Number({ description: "Max summary bytes returned." })),
+			result_summary_max_bytes: Type.Optional(
+				Type.Integer({
+					minimum: 1,
+					maximum: RESULT_SUMMARY_MAX_BYTES_CEILING,
+					description: `UTF-8 byte allowance for a mutation-report worker's inline summary (coder, documenter), default 16384. A batch default applies to mutation-report steps only; other steps ignore it. Storage bound, not the returned preview (max_output_bytes).`,
+				}),
+			),
 		},
 		{ $defs: DISPATCH_DEFS },
 	);

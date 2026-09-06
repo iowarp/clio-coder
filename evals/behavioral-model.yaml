@@ -371,8 +371,9 @@ tasks:
     timeoutMs: *timeout
 
   # #361: original explicit Coder and separately selected Scout remain distinct.
-  # Coder's bounded limitation is an unsolved negative case (grader exit 1).
-  # Watch lifecycle is root-owned, independently of either task result.
+  # Coder delivers the cited explanation inline in its mutation-report summary
+  # under the contract's summary allowance; a stated limitation is an unsolved
+  # negative case (grader exit 1). Watch lifecycle is root-owned, independently.
   - id: main-source-explanation-coder
     tags: [behavioral, model-required, main-agent, source-explanation, coder]
     behavioral:
@@ -385,16 +386,16 @@ tasks:
       expectedBehavior:
         - id: source-coder-recipe
           category: delegation
-          fact: {source: grader, key: explanation.recipeSuitable, op: eq, value: false}
+          fact: {source: grader, key: explanation.recipeSuitable, op: eq, value: true}
         - id: source-coder-shape
           category: completion_behavior
           fact: {source: grader, key: explanation.conforms, op: eq, value: true}
         - id: source-coder-delivery
           category: task_correctness
-          fact: {source: grader, key: explanation.delivered, op: eq, value: false}
+          fact: {source: grader, key: explanation.delivered, op: eq, value: true}
         - id: source-coder-limitation
           category: claim_grounding
-          fact: {source: grader, key: explanation.limited, op: eq, value: true}
+          fact: {source: grader, key: explanation.limited, op: eq, value: false}
       forbiddenBehavior: []
       judge: *judge
     workspace:
@@ -421,8 +422,9 @@ tasks:
     timeoutMs: *timeout
 
   # #361: original explicit Coder and separately selected Scout remain distinct.
-  # Coder's bounded limitation is an unsolved negative case (grader exit 1).
-  # Watch lifecycle is root-owned, independently of either task result.
+  # Coder delivers the cited explanation inline in its mutation-report summary
+  # under the contract's summary allowance; a stated limitation is an unsolved
+  # negative case (grader exit 1). Watch lifecycle is root-owned, independently.
   - id: main-source-explanation-scout
     tags: [behavioral, model-required, main-agent, source-explanation, scout]
     behavioral:

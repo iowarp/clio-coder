@@ -5,7 +5,7 @@ import { mkdirSync, readFileSync, writeFileSync } from "node:fs";
 import { dirname, join } from "node:path";
 import { test } from "node:test";
 import { fileURLToPath } from "node:url";
-import { RESULT_COMMIT_MESSAGE_MAX_BYTES, validateResultContract } from "../../src/domains/agents/result-contract.js";
+import { RESULT_SUMMARY_DEFAULT_MAX_BYTES, validateResultContract } from "../../src/domains/agents/result-contract.js";
 import { nodeResultContractFilesystem } from "../../src/domains/agents/result-contract-filesystem.js";
 import { createWorkerOutputCapture, WORKER_OUTPUT_MAX_BYTES } from "../../src/domains/dispatch/event-pump.js";
 import { loadEvalSuiteFile } from "../../src/domains/eval/suites/load.js";
@@ -24,6 +24,11 @@ const fixture = JSON.parse(
 };
 const scoutReport = (findings = fixture.findings) =>
 	JSON.stringify({ findings, needsSplit: false, proposedSubtasks: [] });
+// The same 1200 cited words as an explicit Coder delivers them: inline in
+// summary, each claim closed by its file:line, under the default allowance.
+const coderExplanation = fixture.findings
+	.map((finding) => `${finding.claim} (${finding.path}:${finding.line})`)
+	.join("\n\n");
 const coderReport = (summary: string, passed = true) =>
 	JSON.stringify({
 		mutatedPaths: [],
@@ -39,24 +44,33 @@ async function grader() {
 	};
 }
 
-test("source explanation: explicit Coder preserves its shape and reports a length limitation without delivery", async () => {
+test("source explanation: explicit Coder delivers 1200 cited words inline and reports a limitation only under a narrower allowance", async () => {
 	const { assessExplanation } = await grader();
-	const validate = (output: string) =>
+	const validate = (output: string, maxSummaryBytes?: number) =>
 		validateResultContract({
-			contract: { kind: "mutation-report" },
+			contract: maxSummaryBytes === undefined ? { kind: "mutation-report" } : { kind: "mutation-report", maxSummaryBytes },
 			output,
 			cwd: process.cwd(),
 			networkAllowed: false,
 			filesystem: { readFile: () => null },
 		});
 	strictEqual(validate(coderReport(fixture.shortExplanation)).conformance, "pass");
+	const delivered = coderReport(coderExplanation);
+	ok(Buffer.byteLength(delivered) > 1000 * 7, "the explanation is far past the old 1000-byte cap");
+	strictEqual(validate(delivered).conformance, "pass");
+	const full = assessExplanation("coder", delivered, "pass");
+	strictEqual(full["explanation.recipeSuitable"], true);
+	strictEqual(full["explanation.delivered"], true);
+	strictEqual(full["explanation.limited"], false);
+	// Under a narrower dispatch allowance the same content cannot fit, and the
+	// honest answer is a stated limitation, not a shortened explanation.
+	strictEqual(validate(delivered, 2048).conformance, "fail");
 	const limitation = coderReport(fixture.coderLimitation);
-	strictEqual(validate(limitation).conformance, "pass");
+	strictEqual(validate(limitation, 2048).conformance, "pass");
 	const assessed = assessExplanation("coder", limitation, "pass");
-	strictEqual(assessed["explanation.recipeSuitable"], false);
 	strictEqual(assessed["explanation.delivered"], false);
 	strictEqual(assessed["explanation.limited"], true);
-	strictEqual(validate(coderReport("x".repeat(RESULT_COMMIT_MESSAGE_MAX_BYTES + 1))).conformance, "fail");
+	strictEqual(validate(coderReport("x".repeat(RESULT_SUMMARY_DEFAULT_MAX_BYTES + 1))).conformance, "fail");
 	strictEqual(validate(coderReport(fixture.coderLimitation, false)).quality, "fail");
 	const invalid = validate(
 		'{"mutatedPaths":[],"validations":[{"name":"source read","passed":true,"evidence":"unfinished',
@@ -153,6 +167,8 @@ test("source explanation grader exits failed for limitation and incomplete conte
 		}
 		for (const [agent, output, expectedExit, quality] of [
 			["coder", coderReport(fixture.coderLimitation), 1, "unmeasured"],
+			["coder", coderReport(coderExplanation), 0, "unmeasured"],
+			["coder", coderReport(fixture.shortExplanation), 1, "unmeasured"],
 			["scout", scoutReport(), 0, "pass"],
 			["scout", scoutReport(fixture.findings.slice(0, 1)), 1, "pass"],
 			["scout", scoutReport(), 1, "fail"],

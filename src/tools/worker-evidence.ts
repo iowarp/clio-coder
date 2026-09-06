@@ -1,5 +1,5 @@
 import { mentionsWorkerToolCallCap } from "../core/guardrails.js";
-import { resultContractAuthorship } from "../domains/agents/result-contract.js";
+import { RESULT_SUMMARY_MAX_BYTES_CEILING, resultContractAuthorship } from "../domains/agents/result-contract.js";
 import {
 	formatBudgetPolicy,
 	formatBudgetReasons,
@@ -180,8 +180,17 @@ function documenterDeliveryLabels(receipt: RunReceipt): string[] {
 	)
 		return [];
 	const output = receipt.output;
+	// Read at the ceiling: the receipt already sealed conformance under the
+	// run's own allowance, which this reader does not know; any conforming
+	// summary is within the ceiling, and a reader that re-applied the default
+	// would report a delivered 20 KB summary as absent.
 	const summary =
-		output?.state === "final" ? resultContractAuthorship({ kind: "mutation-report" }, output.text).summary : null;
+		output?.state === "final"
+			? resultContractAuthorship(
+					{ kind: "mutation-report", maxSummaryBytes: RESULT_SUMMARY_MAX_BYTES_CEILING },
+					output.text,
+				).summary
+			: null;
 	return [
 		`terminal Documenter result: ${summary === null ? "no inline summary is available" : "the inline deliverable or limitation is in output.text JSON field summary"}. Execution success and contract conformance alone do not prove the requested explanation was delivered.`,
 		"Read the summary or the task-authorized artifact once and check it against the requested deliverable. If it is absent, incomplete, or states a limitation, report the specific limitation and the run ID; do not repeatedly read this unchanged terminal receipt or poll it for new output. Keep any separately authorized recovery and its outcome distinct from the original run.",

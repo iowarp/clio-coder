@@ -14,7 +14,7 @@
  * clock, no engine state.
  */
 
-import type { ResultContract } from "../agents/result-contract.js";
+import { type ResultContract, withResultSummaryAllowance } from "../agents/result-contract.js";
 import type { AgentCapabilityClass } from "../agents/spec.js";
 
 /**
@@ -181,8 +181,55 @@ export function gateDeciderAgentId(requested: string | undefined): string {
  * the recipe postcondition on the slot sealed a contract failure on every
  * correct synthesis and burned the configured retries reproducing it.
  */
-export function appliesRecipeResultContract(gateRole: GateTopologyRole | undefined): boolean {
+function appliesRecipeResultContract(gateRole: GateTopologyRole | undefined): boolean {
 	return gateRole !== "reviewer" && gateRole !== "judge" && gateRole !== "synthesis";
+}
+
+/** A caller's summary allowance for one dispatch, with where it was set. */
+export interface DispatchResultSummaryAllowance {
+	maxBytes: number;
+	/**
+	 * `task` is an explicit setting on this one assignment; `batch` is the
+	 * shared default every member of a batch or pipeline inherits. Only the
+	 * explicit form can be a caller error on a recipe with no summary field.
+	 */
+	scope: "task" | "batch";
+}
+
+/** The request fields the applied result contract is resolved from. */
+export interface DispatchResultContractRequest {
+	agentId: string;
+	gate?: { role?: GateTopologyRole } | undefined;
+	resultContractOverride?: ResultContract;
+	resultSummary?: DispatchResultSummaryAllowance;
+}
+
+/**
+ * The one resolution of the contract a run is validated and sealed against.
+ * Every reader (the worker spec, the capture bound, the seal) calls this so
+ * the worker repairs against exactly the contract the receipt will name.
+ *
+ * Precedence: a gate role that answers its topology has no recipe contract at
+ * all; otherwise the coordinator's override, else the seated recipe's. A
+ * caller's summary allowance then applies to a mutation report only. A
+ * topology-owned override (ballot, plan, artifact) and a batch-level default
+ * inherited by a non-mutation step ignore it, because the allowance was never
+ * about that step. An explicit per-task allowance on a recipe with no summary
+ * field is a caller error and fails here, before any model boots.
+ */
+export function dispatchResultContract(
+	req: DispatchResultContractRequest,
+	recipe: { resultContract: ResultContract } | null | undefined,
+): ResultContract | undefined {
+	if (!appliesRecipeResultContract(req.gate?.role)) return undefined;
+	const base = req.resultContractOverride ?? recipe?.resultContract;
+	const allowance = req.resultSummary;
+	if (allowance === undefined) return base;
+	if (base?.kind === "mutation-report") return withResultSummaryAllowance(base, allowance.maxBytes);
+	if (req.resultContractOverride !== undefined || allowance.scope === "batch") return base;
+	throw new Error(
+		`dispatch: result_summary_max_bytes applies only to a mutation-report result contract; agent '${req.agentId}' declares ${base === undefined ? "no result contract" : base.kind}`,
+	);
 }
 
 /** The route dimensions a gate correlation is measured across. */

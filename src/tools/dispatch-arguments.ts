@@ -1,5 +1,6 @@
 /** Pure model-argument parsing; every returned DispatchRequest has a concrete agent id. */
 
+import { parseResultSummaryMaxBytes } from "../domains/agents/result-contract.js";
 import type { AgentAutomationAuthority } from "../domains/agents/spec.js";
 import { type AgentTaskType, classifyAgentTask } from "../domains/dispatch/agent-candidates.js";
 import { cloneDispatchBudgetRequest } from "../domains/dispatch/budget-envelope.js";
@@ -108,6 +109,29 @@ export function maxOutputBytesArg(args: Record<string, unknown>): number {
 	return typeof value === "number" && Number.isFinite(value) && value > 0 ? Math.floor(value) : DEFAULT_MAX_OUTPUT_BYTES;
 }
 
+/**
+ * The caller's inline-summary allowance, range-checked here so a bad value is
+ * a tool error rather than a sealed run failure. The scope records whether
+ * this assignment set it or inherited a batch default (see
+ * `dispatchResultContract`).
+ */
+function resultSummaryArg(
+	args: Record<string, unknown>,
+	scope: "task" | "batch",
+): { ok: true; value: DispatchRequest["resultSummary"] } | { ok: false; message: string } {
+	if (!("result_summary_max_bytes" in args) || args.result_summary_max_bytes === undefined) {
+		return { ok: true, value: undefined };
+	}
+	try {
+		return {
+			ok: true,
+			value: { maxBytes: parseResultSummaryMaxBytes(args.result_summary_max_bytes, "result_summary_max_bytes"), scope },
+		};
+	} catch (error) {
+		return { ok: false, message: error instanceof Error ? error.message : String(error) };
+	}
+}
+
 export function timeoutMsArg(args: Record<string, unknown>): number | undefined {
 	const value = args.timeout_ms;
 	return typeof value === "number" && Number.isFinite(value) && value > 0 ? Math.floor(value) : undefined;
@@ -116,6 +140,7 @@ export function timeoutMsArg(args: Record<string, unknown>): number | undefined 
 function dispatchRequestFromArgs(
 	args: Record<string, unknown>,
 	options: DispatchArgumentParserOptions,
+	resultSummaryScope: "task" | "batch" = "task",
 ): { ok: true; request: DispatchRequest } | { ok: false; message: string } {
 	const task = stringArg(args, "task");
 	if (!task) return { ok: false, message: "missing task (pass list:true to see available agents)" };
@@ -223,6 +248,9 @@ function dispatchRequestFromArgs(
 			}
 		}
 	}
+	const resultSummary = resultSummaryArg(args, resultSummaryScope);
+	if (!resultSummary.ok) return resultSummary;
+	if (resultSummary.value !== undefined) request.resultSummary = resultSummary.value;
 	if ("persona" in args && args.persona !== undefined) {
 		if (typeof args.persona !== "string") return { ok: false, message: "persona must be a string" };
 		const persona = args.persona.trim();
@@ -278,10 +306,19 @@ export function dispatchRequestsFromArgs(
 	for (let index = 0; index < tasks.length; index += 1) {
 		const item = tasks[index];
 		const itemArgs: Record<string, unknown> = isRecord(item) ? { ...shared, ...item } : { ...shared, task: item };
+		// A shared allowance over several members is inherited, not chosen for
+		// each of them; a one-task batch is the single-task form the tool
+		// normalizes every call into, so its shared value is that task's own.
+		const resultSummaryScope =
+			tasks.length > 1 &&
+			Object.hasOwn(shared, "result_summary_max_bytes") &&
+			!(isRecord(item) && Object.hasOwn(item, "result_summary_max_bytes"))
+				? "batch"
+				: "task";
 		const sharedIntent = isRecord(shared.intent) ? shared.intent : null;
 		const itemIntent = isRecord(item) && Object.hasOwn(item, "intent") && isRecord(item.intent) ? item.intent : null;
 		if (sharedIntent !== null && itemIntent !== null) itemArgs.intent = { ...sharedIntent, ...itemIntent };
-		const parsed = dispatchRequestFromArgs(itemArgs, options);
+		const parsed = dispatchRequestFromArgs(itemArgs, options, resultSummaryScope);
 		if (!parsed.ok) return { ok: false, message: `dispatch: task ${index + 1}: ${parsed.message}` };
 		if (sharedIntent !== null && itemIntent !== null) {
 			if (options.resolveIntent === undefined) {

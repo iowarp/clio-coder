@@ -10,7 +10,7 @@ import type { AssignmentId, DispatchAssignment } from "./assignment.js";
 import type { DurableAssignmentRecord } from "./assignment-store.js";
 import type { DetachedBatchRecord, RegisterDetachedBatchInput } from "./batch-store.js";
 import type { RunToolBudgetEnvelope } from "./budget-envelope.js";
-import type { ExecutionRole } from "./execution-role.js";
+import type { DispatchResultSummaryAllowance, ExecutionRole } from "./execution-role.js";
 import type { DispatchReservationRecord, ReservationTopology } from "./reservation-store.js";
 import type { ApprovedAssignmentRoute } from "./route-approval.js";
 import type { RouteDecisionV1 } from "./route-decision.js";
@@ -34,6 +34,12 @@ export interface ResolvedVerificationCheck {
 export interface DispatchRequest extends JobSpec {
 	/** Coordinator-owned result contract override for a fleet plan step. */
 	resultContractOverride?: ResultContract;
+	/**
+	 * Caller's inline-summary allowance for a mutation-report worker, applied
+	 * by `dispatchResultContract`. Parsed and range-checked at the tool
+	 * boundary; never model-authored past that point.
+	 */
+	resultSummary?: DispatchResultSummaryAllowance;
 	/** Gate path whose post-run hash is sealed into this step's receipt. */
 	fleetGateReceipt?: { path: string };
 	/** Orchestrator-prepared task worktree state. Model arguments cannot author it. */

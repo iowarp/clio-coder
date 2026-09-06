@@ -17,6 +17,7 @@
  */
 
 import { truncateUtf8 } from "../../tools/truncate-utf8.js";
+import { type ResultContract, resultContractOutputBytes } from "../agents/result-contract.js";
 import type { RunReceiptOutput } from "./types.js";
 
 /** Bounded replay capacity for the external consumer tee. */
@@ -137,13 +138,31 @@ export function startDispatchEventPump(
  * Byte bound on the assistant output text sealed into a receipt. Large enough
  * for a substantive final answer, small enough that receipts stay cheap to
  * read and render; overflow is recorded explicitly via `truncated`/`bytes`.
+ * A run whose result contract implies a larger conforming result raises its
+ * own bound through `workerOutputCaptureBytes`; this is the floor.
  */
 export const WORKER_OUTPUT_MAX_BYTES = 8192;
 const WORKER_OUTPUT_TRUNCATION_MARKER = "\n[worker output truncated]";
 
+/**
+ * The capture bound for one run. A mutation report with a 16 KB summary
+ * allowance cannot be sealed in 8 KB, and clipping it produced a receipt whose
+ * only readable fact was "result must be valid JSON" for a result that was
+ * valid (#350). The contract's own whole-result bound wins when it is larger;
+ * every other contract keeps the floor.
+ */
+export function workerOutputCaptureBytes(contract: ResultContract | null | undefined): number {
+	return Math.max(WORKER_OUTPUT_MAX_BYTES, resultContractOutputBytes(contract) ?? 0);
+}
+
 export interface WorkerOutputCapture {
 	observe(event: unknown): void;
 	snapshot(): RunReceiptOutput | undefined;
+}
+
+export interface WorkerOutputCaptureOptions {
+	/** Byte bound for the sealed text; defaults to WORKER_OUTPUT_MAX_BYTES. */
+	maxBytes?: number;
 }
 
 function isRecord(value: unknown): value is Record<string, unknown> {
@@ -184,9 +203,9 @@ export function durableAssistantTextFromEvent(event: unknown): string {
 	return assistantTextFromContent(event.message.content);
 }
 
-function boundedOutput(state: RunReceiptOutput["state"], text: string): RunReceiptOutput {
+function boundedOutput(state: RunReceiptOutput["state"], text: string, maxBytes: number): RunReceiptOutput {
 	const bytes = Buffer.byteLength(text, "utf8");
-	const bounded = truncateUtf8(text, WORKER_OUTPUT_MAX_BYTES, WORKER_OUTPUT_TRUNCATION_MARKER);
+	const bounded = truncateUtf8(text, maxBytes, WORKER_OUTPUT_TRUNCATION_MARKER);
 	return { state, text: bounded, bytes, truncated: bounded !== text };
 }
 
@@ -199,9 +218,11 @@ function boundedOutput(state: RunReceiptOutput["state"], text: string): RunRecei
  * partial and are discarded when their message completes. A run that ends
  * with unflushed deltas (abort, stall, kill mid-message) therefore snapshots
  * as `partial`, never as final. Accumulation is bounded in memory by the same
- * byte cap the receipt uses; overflow only marks truncation.
+ * byte cap the receipt uses; overflow only marks truncation. The cap is the
+ * run's own (`workerOutputCaptureBytes`), never below the module floor.
  */
-export function createWorkerOutputCapture(): WorkerOutputCapture {
+export function createWorkerOutputCapture(options: WorkerOutputCaptureOptions = {}): WorkerOutputCapture {
+	const maxBytes = Math.max(WORKER_OUTPUT_MAX_BYTES, Math.floor(options.maxBytes ?? WORKER_OUTPUT_MAX_BYTES));
 	let finalText: string | null = null;
 	let partialText = "";
 	let partialBytes = 0;
@@ -229,14 +250,14 @@ export function createWorkerOutputCapture(): WorkerOutputCapture {
 			const delta = assistantEvent.delta;
 			if (typeof delta !== "string" || delta.length === 0) return;
 			partialBytes += Buffer.byteLength(delta, "utf8");
-			if (partialStored < WORKER_OUTPUT_MAX_BYTES) {
+			if (partialStored < maxBytes) {
 				partialText += delta;
 				partialStored += Buffer.byteLength(delta, "utf8");
 			}
 		},
 		snapshot(): RunReceiptOutput | undefined {
 			if (partialBytes > 0 && partialText.trim().length > 0) {
-				const bounded = truncateUtf8(partialText.trim(), WORKER_OUTPUT_MAX_BYTES, WORKER_OUTPUT_TRUNCATION_MARKER);
+				const bounded = truncateUtf8(partialText.trim(), maxBytes, WORKER_OUTPUT_TRUNCATION_MARKER);
 				return {
 					state: "partial",
 					text: bounded,
@@ -244,7 +265,7 @@ export function createWorkerOutputCapture(): WorkerOutputCapture {
 					truncated: bounded !== partialText.trim() || partialBytes > partialStored,
 				};
 			}
-			if (finalText !== null) return boundedOutput("final", finalText);
+			if (finalText !== null) return boundedOutput("final", finalText, maxBytes);
 			return undefined;
 		},
 	};

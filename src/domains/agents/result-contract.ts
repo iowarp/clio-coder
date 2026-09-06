@@ -32,7 +32,14 @@ export type ResultContract =
 	| { kind: "debugger-report" }
 	| { kind: "research-report" }
 	| { kind: "world-knowledge-report" }
-	| { kind: "mutation-report" }
+	/**
+	 * A work product plus its evidence. `maxSummaryBytes` is the allowance for
+	 * the inline `summary` deliverable, declared by the recipe and overridable
+	 * per dispatch; absent means `RESULT_SUMMARY_DEFAULT_MAX_BYTES`. It is a
+	 * separate bound from the commit message because the two carry different
+	 * things: a commit subject is one line, a requested explanation is not.
+	 */
+	| { kind: "mutation-report"; maxSummaryBytes?: number }
 	| { kind: "provenance-report" }
 	| { kind: "delegation-plan" }
 	/**
@@ -158,6 +165,12 @@ export interface ResultContractValidationInput {
 	 * is what every caller got before grounding existed.
 	 */
 	observedRunEffects?: ObservedRunEffects;
+	/**
+	 * Whether the sealed output was clipped by the run's capture bound. A clipped
+	 * result cannot parse, and "result must be valid JSON" would send the model
+	 * after a formatting problem it does not have; the reason names the bound.
+	 */
+	outputTruncated?: boolean;
 }
 
 /**
@@ -191,6 +204,8 @@ export interface ValidateRecipeResultInput {
 	reachedTerminalResult: boolean;
 	/** What the run's tool calls show it changed and ran, when observed. */
 	observedRunEffects?: ObservedRunEffects;
+	/** Whether the capture bound clipped `output`; see ResultContractValidationInput. */
+	outputTruncated?: boolean;
 }
 
 /**
@@ -1103,9 +1118,83 @@ export function parseCodeReport(output: string | null): CodeReportResult | null 
 
 /**
  * Bytes of authored commit message a terminal result may carry. A commit
- * subject and a short body fit; a pasted diff does not.
+ * subject and a short body fit; a pasted diff does not. This bounds only
+ * `commitMessage`; the inline `summary` deliverable has its own allowance.
  */
 export const RESULT_COMMIT_MESSAGE_MAX_BYTES = 1_000;
+
+/**
+ * Summary allowance a mutation-report contract carries when it declares none.
+ * A 1200-word cited explanation is roughly 8-9 KB of UTF-8; this leaves room
+ * for citations and a limitation paragraph without inviting a pasted file.
+ * The 1000-byte commit bound used to double as this limit, which turned every
+ * ordinary 150-word or 1200-word no-file explanation into a forced
+ * "cannot deliver" (#350, #361).
+ */
+export const RESULT_SUMMARY_DEFAULT_MAX_BYTES = 16_384;
+
+/**
+ * Hard ceiling for any declared or overridden summary allowance. It bounds
+ * what a receipt may have to seal for a conforming result, so a recipe or a
+ * caller cannot turn the inline summary into unbounded storage.
+ */
+export const RESULT_SUMMARY_MAX_BYTES_CEILING = 32_768;
+
+/**
+ * Bytes reserved beside the summary and commit message for the rest of a
+ * mutation report on the wire: mutatedPaths, validations, key names, and
+ * quoting. Practical headroom for an ordinary report, not a guarantee that
+ * every legal JSON spelling of a bounded summary fits.
+ */
+const RESULT_OUTPUT_ENVELOPE_HEADROOM_BYTES = 4_096;
+
+/** The summary allowance this contract validates against. */
+function resultSummaryMaxBytes(contract: ResultContract): number {
+	return contract.kind === "mutation-report" && contract.maxSummaryBytes !== undefined
+		? contract.maxSummaryBytes
+		: RESULT_SUMMARY_DEFAULT_MAX_BYTES;
+}
+
+/**
+ * Parse one summary allowance from a recipe or a dispatch request. The same
+ * rule at both boundaries: a positive integer no larger than the ceiling.
+ */
+export function parseResultSummaryMaxBytes(value: unknown, label: string): number {
+	if (
+		typeof value !== "number" ||
+		!Number.isSafeInteger(value) ||
+		value < 1 ||
+		value > RESULT_SUMMARY_MAX_BYTES_CEILING
+	) {
+		throw new Error(`${label} must be an integer between 1 and ${RESULT_SUMMARY_MAX_BYTES_CEILING}`);
+	}
+	return value;
+}
+
+/**
+ * The contract a dispatch-level summary allowance produces. It only ever
+ * narrows or widens a mutation report; every other kind has no summary field
+ * and is returned untouched, so the caller decides whether that is an error.
+ */
+export function withResultSummaryAllowance(contract: ResultContract, maxSummaryBytes: number): ResultContract {
+	if (contract.kind !== "mutation-report") return contract;
+	return { kind: "mutation-report", maxSummaryBytes: parseResultSummaryMaxBytes(maxSummaryBytes, "maxSummaryBytes") };
+}
+
+/**
+ * Bytes a receipt must be able to seal for a conforming result under this
+ * contract, or null when the contract implies no bound of its own. The summary
+ * and commit message are doubled because their bounds are measured on the
+ * decoded string and the wire carries them JSON-escaped; the headroom covers
+ * the rest of the report. A result larger than this seals truncated and fails
+ * validation with the bound named, never as a silently accepted fragment.
+ */
+export function resultContractOutputBytes(contract: ResultContract | null | undefined): number | null {
+	if (contract === null || contract === undefined || contract.kind !== "mutation-report") return null;
+	return (
+		2 * resultSummaryMaxBytes(contract) + 2 * RESULT_COMMIT_MESSAGE_MAX_BYTES + RESULT_OUTPUT_ENVELOPE_HEADROOM_BYTES
+	);
+}
 
 /** Authored prose a work-product contract may carry beside its evidence. */
 export interface ResultAuthorship {
@@ -1135,8 +1224,9 @@ function normalizeAuthored(value: string): string {
  * agent only supplies the sentence, so the sentence is bounded and free of the
  * control characters that would make a commit log unreadable.
  */
-function validateAuthorship(value: Record<string, unknown>): string | null {
+function validateAuthorship(value: Record<string, unknown>, summaryMaxBytes: number): string | null {
 	for (const field of AUTHORSHIP_FIELDS) {
+		const maxBytes = field === "summary" ? summaryMaxBytes : RESULT_COMMIT_MESSAGE_MAX_BYTES;
 		const raw = value[field];
 		// Absent, null, and blank are three spellings of the same thing: nothing
 		// was authored. `ResultAuthorship` types the field `string | null` and
@@ -1146,9 +1236,8 @@ function validateAuthorship(value: Record<string, unknown>): string | null {
 		if (raw === undefined || raw === null) continue;
 		if (typeof raw !== "string") return `${field} must be a string when present`;
 		if (raw.trim().length === 0) continue;
-		if (Buffer.byteLength(raw, "utf8") > RESULT_COMMIT_MESSAGE_MAX_BYTES) {
-			return `${field} must be at most ${RESULT_COMMIT_MESSAGE_MAX_BYTES} bytes`;
-		}
+		const bytes = Buffer.byteLength(raw, "utf8");
+		if (bytes > maxBytes) return `${field} must be at most ${maxBytes} UTF-8 bytes (${bytes} given)`;
 		// Tab, newline, and carriage return are the only control bytes a message
 		// may carry; anything else would corrupt the log it lands in.
 		if (hasControlCharacters(raw)) return `${field} must not contain control characters`;
@@ -1170,7 +1259,7 @@ export function resultContractAuthorship(contract: ResultContract, output: strin
 	const empty: ResultAuthorship = { commitMessage: null, summary: null };
 	if (contract.kind !== "mutation-report" && contract.kind !== "architect-plan") return empty;
 	const parsed = parseJson(output);
-	if (!parsed.ok || validateAuthorship(parsed.value) !== null) return empty;
+	if (!parsed.ok || validateAuthorship(parsed.value, resultSummaryMaxBytes(contract)) !== null) return empty;
 	const read = (field: keyof ResultAuthorship): string | null => {
 		const raw = parsed.value[field];
 		if (typeof raw !== "string") return null;
@@ -1401,7 +1490,17 @@ function mutationValidationsReason(value: unknown): string {
  */
 function validateMutation(contract: ResultContract, input: ResultContractValidationInput): ResultContractValidation {
 	const parsed = parseJson(input.output);
-	if (!parsed.ok) return failure(contract, "unmeasured", parsed.reason);
+	if (!parsed.ok) {
+		if (input.outputTruncated === true && input.output !== null) {
+			const bound = resultContractOutputBytes(contract) ?? Buffer.byteLength(input.output, "utf8");
+			return failure(
+				contract,
+				"unmeasured",
+				`result exceeded the sealed output bound of ${bound} bytes and was truncated; keep summary within ${resultSummaryMaxBytes(contract)} UTF-8 bytes or state the limitation`,
+			);
+		}
+		return failure(contract, "unmeasured", parsed.reason);
+	}
 	const value = parsed.value;
 	if (
 		!hasOnlyKeys(value, ["mutatedPaths", "validations", "commitMessage", "summary"]) ||
@@ -1410,7 +1509,7 @@ function validateMutation(contract: ResultContract, input: ResultContractValidat
 	) {
 		return failure(contract, "unmeasured", "Mutation result must carry mutatedPaths and validations");
 	}
-	const authorship = validateAuthorship(value);
+	const authorship = validateAuthorship(value, resultSummaryMaxBytes(contract));
 	if (authorship !== null) return failure(contract, "unmeasured", authorship);
 	const validations = parseChecks(value.validations);
 	if (validations === null) return failure(contract, "unmeasured", mutationValidationsReason(value.validations));
@@ -1584,6 +1683,7 @@ export function validateRecipeResult(input: ValidateRecipeResultInput): RecipeRe
 		networkAllowed: input.networkAllowed,
 		filesystem: input.filesystem,
 		...(input.observedRunEffects !== undefined ? { observedRunEffects: input.observedRunEffects } : {}),
+		...(input.outputTruncated !== undefined ? { outputTruncated: input.outputTruncated } : {}),
 	});
 	return {
 		applicable: true,
@@ -1636,7 +1736,7 @@ export function resultContractShape(contract: ResultContract): string {
 		case "world-knowledge-report":
 			return '{"discovery":"performed|caller-supplied-only|unavailable","facts":[{"claim":"...","evidence":"...","sources":["URL or document id"]}],"synthesis":["comparison or advisory conclusion"],"uncertainties":["..."],"followUpVerification":["..."]}';
 		case "mutation-report":
-			return `{"mutatedPaths":["src/file.ts"],"validations":[{"name":"npm test","passed":true,"evidence":"exit 0"}],"commitMessage":"optional: the commit message for this change","summary":"the requested explanation or deliverable, or a specific limitation; otherwise optional"}. summary and commitMessage each allow at most ${RESULT_COMMIT_MESSAGE_MAX_BYTES} UTF-8 bytes. Preserve the requested explanation and citations in summary when repairing the report; if they cannot fit or be grounded, state that specific limitation. Report only actual mutations and checks; a read-only task has mutatedPaths:[] and names the source read in validations, never a command that did not run`;
+			return `{"mutatedPaths":["src/file.ts"],"validations":[{"name":"npm test","passed":true,"evidence":"exit 0"}],"commitMessage":"optional: the commit message for this change","summary":"the requested explanation or deliverable, or a specific limitation; otherwise optional"}. summary allows at most ${resultSummaryMaxBytes(contract)} UTF-8 bytes and commitMessage at most ${RESULT_COMMIT_MESSAGE_MAX_BYTES} UTF-8 bytes. Preserve the requested explanation and citations in summary when repairing the report; if they cannot fit or be grounded, state that specific limitation. Report only actual mutations and checks; a read-only task has mutatedPaths:[] and names the source read in validations, never a command that did not run`;
 		case "provenance-report":
 			return '{"confirmedFacts":["..."],"missingEvidence":["..."],"nextInspections":["..."]}';
 		case "delegation-plan":
@@ -1795,10 +1895,24 @@ function parseContract(value: unknown, sourcePath: string, kinds: ReadonlyArray<
 		}
 		return { kind: "architect-plan", path: record.path };
 	}
+	if (record.kind === "mutation-report") {
+		if (!only("kind", "maxSummaryBytes")) {
+			throw new Error(`agent recipe: ${sourcePath}: mutation-report admits only kind and maxSummaryBytes`);
+		}
+		if (record.maxSummaryBytes === undefined) return { kind: "mutation-report" };
+		try {
+			return {
+				kind: "mutation-report",
+				maxSummaryBytes: parseResultSummaryMaxBytes(record.maxSummaryBytes, "maxSummaryBytes"),
+			};
+		} catch (error) {
+			throw new Error(`agent recipe: ${sourcePath}: ${error instanceof Error ? error.message : String(error)}`);
+		}
+	}
 	if (!kinds.includes(record.kind) || !only("kind")) {
 		throw new Error(`agent recipe: ${sourcePath}: resultContract.kind is unsupported or has unknown keys`);
 	}
-	return { kind: record.kind as Exclude<ResultContract["kind"], "architect-plan"> };
+	return { kind: record.kind as Exclude<ResultContract["kind"], "architect-plan" | "mutation-report"> };
 }
 
 /** Strict frontmatter parser for the one recipe result-contract schema. */

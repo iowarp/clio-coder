@@ -5,6 +5,7 @@ import { DEFAULT_SETTINGS } from "../../src/core/defaults.js";
 import type { AgentsContract } from "../../src/domains/agents/contract.js";
 import {
 	RESULT_COMMIT_MESSAGE_MAX_BYTES,
+	RESULT_SUMMARY_DEFAULT_MAX_BYTES,
 	resultContractRepairMessages,
 	validateResultContract,
 } from "../../src/domains/agents/result-contract.js";
@@ -107,14 +108,14 @@ it("teaches the existing bounded summary field in the compiled recipe and repair
 		const result = await dispatch.run(documenter, {});
 		strictEqual(result.kind, "ok");
 		match(specs[0]?.systemPrompt ?? "", /summary.*(?:explanation|deliverable)/u);
-		match(specs[0]?.systemPrompt ?? "", /1000/u);
+		match(specs[0]?.systemPrompt ?? "", /16384 UTF-8 bytes/u);
 		const messages = resultContractRepairMessages(
 			{ contract: { kind: "mutation-report" }, reason: "missing final result", attempt: 1, anchors: [] },
 			{ provider: "fixture", api: "openai-completions", model: "fixture" },
 		);
 		const repair = messages[1].content[0].text;
 		match(repair, /summary.*(?:explanation|deliverable)/u);
-		match(repair, /1000/u);
+		match(repair, /summary allows at most 16384 UTF-8 bytes and commitMessage at most 1000/u);
 		match(repair, /limitation/u);
 		const validate = (output: string) =>
 			validateResultContract({
@@ -125,7 +126,8 @@ it("teaches the existing bounded summary field in the compiled recipe and repair
 				filesystem: { readFile: () => null },
 			});
 		strictEqual(validate(report(LIMITATION)).conformance, "pass");
-		strictEqual(validate(report("x".repeat(RESULT_COMMIT_MESSAGE_MAX_BYTES + 1))).conformance, "fail");
+		strictEqual(validate(report("x".repeat(RESULT_COMMIT_MESSAGE_MAX_BYTES + 1))).conformance, "pass");
+		strictEqual(validate(report("x".repeat(RESULT_SUMMARY_DEFAULT_MAX_BYTES + 1))).conformance, "fail");
 		strictEqual(validate(report(LIMITATION, false)).quality, "fail");
 	} finally {
 		await bundle.extension.stop?.();
@@ -246,8 +248,11 @@ it("preserves explicit Coder and delivers its bounded explanation through the co
 }, async () => {
 	const fixture = JSON.parse(
 		readFileSync(new URL("../../evals/fixtures/source-explanation.json", import.meta.url), "utf8"),
-	) as { shortExplanation: string; coderLimitation: string; task: string };
-	const { bundle, dispatch, specs } = setup([report(fixture.shortExplanation), report(fixture.coderLimitation)]);
+	) as { shortExplanation: string; task: string; findings: Array<{ claim: string; path: string; line: number }> };
+	const explanation = fixture.findings
+		.map((finding) => `${finding.claim} (${finding.path}:${finding.line})`)
+		.join("\n\n");
+	const { bundle, dispatch, specs } = setup([report(fixture.shortExplanation), report(explanation)]);
 	await bundle.extension.start();
 	try {
 		for (const task of ["Explain the four supplied source excerpts briefly. Do not edit files.", fixture.task]) {
@@ -260,8 +265,9 @@ it("preserves explicit Coder and delivers its bounded explanation through the co
 		);
 		const prompt = specs[0]?.systemPrompt ?? "";
 		match(prompt, /Put the requested explanation and source citations in `summary`/u);
-		match(prompt, /1200-word explanation cannot fit/u);
+		match(prompt, /1200-word cited explanation fits/u);
 		match(prompt, /without claiming delivery/u);
+		match(prompt, /commitMessage.*at most 1000 UTF-8 bytes/u);
 		for (const run of bundle.contract.listRuns()) {
 			ok(run.receiptPath);
 			const receipt = JSON.parse(readFileSync(run.receiptPath, "utf8")) as RunReceipt;
@@ -269,7 +275,7 @@ it("preserves explicit Coder and delivers its bounded explanation through the co
 			strictEqual(receipt.agentId, "coder");
 			strictEqual(receipt.quality.resultContract?.conformance, "pass");
 			strictEqual(receipt.output?.truncated, false);
-			ok([fixture.shortExplanation, fixture.coderLimitation].includes(JSON.parse(receipt.output?.text ?? "{}").summary));
+			ok([fixture.shortExplanation, explanation].includes(JSON.parse(receipt.output?.text ?? "{}").summary));
 		}
 	} finally {
 		await bundle.extension.stop?.();

@@ -594,7 +594,11 @@ function collectRunLine(row: CollectedRunRow): string[] {
 	lines.push(`  ${workerTextLabel(row.evidence.trustStatus)}`);
 	const output = row.evidence.output;
 	if (output) {
-		const capped = truncateUtf8(output.text, COLLECT_TEXT_BYTES, "...");
+		const capped = truncateUtf8(
+			output.text,
+			COLLECT_TEXT_BYTES,
+			`\n[preview clipped at ${COLLECT_TEXT_BYTES} bytes; the complete sealed text is output.text in ${row.run?.receiptPath ?? "the receipt"}]`,
+		);
 		const qualifier = output.state === "partial" ? " (partial; the run did not complete this message)" : "";
 		const truncatedNote = output.truncated ? ` (stored output truncated; full text was ${output.bytes} bytes)` : "";
 		lines.push(`  agent output${qualifier}${truncatedNote}:`, ...capped.split("\n").map((line) => `  ${line}`));

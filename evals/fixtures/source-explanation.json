@@ -70,5 +70,5 @@
 	],
 	"wordRange": [1080, 1320],
 	"shortExplanation": "Uniform boundary stencils reuse offset weights and then scale by spacing**order (findiff/findiff.py:126). Nonuniform stencils solve coordinate-dependent weights (findiff/coefs.py:277). Uniform refinement tests compare operator forms (tests/test_accuracy.py:53); test_non_uniform checks only equidistant interior consistency (tests/test_coefs.py:170), not irregular boundary convergence.",
-	"coderLimitation": "Cannot deliver the requested 1200-word source-cited explanation within the mutation-report summary limit of 1000 UTF-8 bytes. No files were changed. A separately selected Scout report can carry the full cited findings; this limitation is not the requested explanation."
+	"coderLimitation": "Cannot deliver the requested 1200-word source-cited explanation within this run's mutation-report summary allowance of 2048 UTF-8 bytes. No files were changed. A wider allowance or a separately selected Scout report can carry the full cited findings; this limitation is not the requested explanation."
 }
