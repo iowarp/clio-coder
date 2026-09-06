@@ -202,7 +202,16 @@ export function createContextBundle(
 				// mounted; an edge rebuild here is the same cost as one at start.
 				await coordinateCodewikiWrite(
 					workspace,
-					(current) => (current ? { kind: "incremental", cwd: workspace, current, paths: rel } : null),
+					(current) =>
+						current
+							? {
+									kind: "incremental",
+									cwd: workspace,
+									current,
+									paths: rel,
+									previous: readClioState(workspace)?.fingerprint ?? null,
+								}
+							: null,
 					{
 						requireExisting: true,
 						afterCommit: ({ codewiki, fingerprint, changed }, committedWorkspace) => {

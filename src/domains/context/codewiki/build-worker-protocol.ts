@@ -11,7 +11,14 @@ export type CodewikiBuildWorkerRequest =
 			current: Codewiki | null;
 			previous: Fingerprint | null;
 	  }
-	| { kind: "incremental"; cwd: string; current: Codewiki; paths: string[] };
+	| {
+			kind: "incremental";
+			cwd: string;
+			current: Codewiki;
+			paths: string[];
+			/** Retained for no-op batches; absence requires global reconciliation. */
+			previous?: Fingerprint | null;
+	  };
 
 export interface CodewikiBuildWorkerResult {
 	codewiki: Codewiki;
