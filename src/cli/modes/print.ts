@@ -58,6 +58,8 @@ export interface HeadlessMainAgentOptions {
 }
 
 interface HeadlessMainAgentResult {
+	/** Latest assistant stop, superseded by subsequent continuation messages. */
+	outputExhausted: boolean;
 	text: string;
 	error: string | null;
 	/**
@@ -154,6 +156,7 @@ function resultFromEvent(event: ChatLoopEvent, current: HeadlessMainAgentResult)
 	if (event.type !== "message_end") return current;
 	const message = event.message;
 	if (message?.role !== "assistant") return current;
+	current = { ...current, outputExhausted: message.stopReason === "length", sawTerminatingToolResult: false };
 	const error = assistantError(message);
 	if (error) return { ...current, text: "", error };
 	const text = assistantText(message).trimEnd();
@@ -398,6 +401,7 @@ export async function runHeadlessMainAgent(chat: ChatLoop, options: HeadlessMain
 	const jsonEvents = options.jsonEvents ?? "full";
 	const startedAt = new Date().toISOString();
 	let result: HeadlessMainAgentResult = {
+		outputExhausted: false,
 		text: "",
 		error: null,
 		sawTerminatingToolResult: false,
@@ -573,6 +577,15 @@ export async function runHeadlessMainAgent(chat: ChatLoop, options: HeadlessMain
 	} else if (result.error) {
 		terminal = { exitCode: 1, outcome: "failed", status: "failed", failureMessage: result.error };
 		stderrMessage = prefixHeadlessFailure(chat, result.error);
+	} else if (result.outputExhausted && !result.sawTerminatingToolResult) {
+		// The provider returned normally, but generation exhausted its budget.
+		// Earlier chatter and partial prose cannot turn that terminal cause into
+		// success. A later assistant message or terminating tool supersedes it.
+		const failureMessage =
+			"clio-coder run: output token limit reached (stopReason=length); generation incomplete. Consider resuming with a narrower task, lower reasoning effort, or a larger output budget.";
+		terminal = { exitCode: 1, outcome: "failed", status: "failed", failureMessage };
+		stderrMessage = failureMessage;
+		if (mode === "text" && result.text.length > 0) stdoutMessage = result.text;
 	} else if (result.text.length === 0 && !result.sawTerminatingToolResult) {
 		const failureMessage =
 			result.lastNotice !== null
@@ -611,7 +624,8 @@ export async function runHeadlessMainAgent(chat: ChatLoop, options: HeadlessMain
 
 	if (stderrMessage !== null) {
 		process.stderr.write(`${stderrMessage}\n`);
-	} else if (stdoutMessage !== null) {
+	}
+	if (stdoutMessage !== null) {
 		writeRawStdout(`${stdoutMessage}\n`);
 	}
 	await flushRawStdout();

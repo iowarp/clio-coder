@@ -10,7 +10,7 @@ import type { ChatLoop, ChatLoopEvent } from "../../src/interactive/chat-loop.js
 import { isolateClioEnv } from "../harness/scratch-env.js";
 
 function assistant(
-	stopReason: "error" | "toolUse" | "stop",
+	stopReason: "error" | "toolUse" | "stop" | "length",
 	content: Extract<AgentMessage, { role: "assistant" }>["content"] = [],
 ): ChatLoopEvent {
 	return {
@@ -22,12 +22,14 @@ function assistant(
 			model: "fixture-model",
 			timestamp: 1,
 			stopReason,
+			...(stopReason === "length" ? { rawStopReason: "length" } : {}),
 			content,
 			...(stopReason === "error" ? { errorMessage: "fixture provider failure" } : {}),
 			usage: {
-				input: 3,
-				output: 2,
-				totalTokens: 5,
+				input: stopReason === "length" ? 47781 : 3,
+				output: stopReason === "length" ? 8192 : 2,
+				reasoning: stopReason === "length" ? 7926 : 0,
+				totalTokens: stopReason === "length" ? 55973 : 5,
 				cacheRead: 0,
 				cacheWrite: 0,
 				cost: { input: 0.125, output: 0.125, cacheRead: 0, cacheWrite: 0, total: 0.25 },
@@ -61,6 +63,75 @@ const toolMessage: ChatLoopEvent = {
 // Event-fold coverage, not a provider/eval reproduction. Unlike the original
 // local diagnostic, this exercises real receipt persistence and integrity too.
 for (const scenario of [
+	{
+		name: "empty terminal output exhaustion retains its specific cause",
+		events: [assistant("length")],
+		code: 1,
+		outcome: "failed",
+		calls: 1,
+		exhausted: true,
+		emptyText: true,
+	},
+	{
+		name: "later terminal output exhaustion supersedes prior artifact",
+		events: [call, artifact, assistant("length")],
+		code: 1,
+		outcome: "failed",
+		calls: 2,
+		exhausted: true,
+		emptyText: true,
+	},
+	{
+		name: "saved shape: earlier chatter cannot hide empty terminal output exhaustion",
+		events: [assistant("toolUse", [{ type: "text", text: "Let me investigate." }]), assistant("length")],
+		code: 1,
+		outcome: "failed",
+		calls: 2,
+		exhausted: true,
+	},
+	{
+		name: "partial terminal output exhaustion is not completion",
+		events: [assistant("length", [{ type: "text", text: "Partial explanation" }])],
+		code: 1,
+		outcome: "failed",
+		calls: 1,
+		exhausted: true,
+	},
+	{
+		name: "truncated call followed by natural completion succeeds",
+		events: [
+			assistant("length", [{ type: "toolCall", id: "truncated", name: "bash", arguments: {} }]),
+			toolMessage,
+			assistant("stop", [{ type: "text", text: "Complete answer" }]),
+		],
+		code: 0,
+		outcome: "succeeded",
+		calls: 2,
+	},
+	{
+		name: "output exhaustion followed by artifact completion succeeds",
+		events: [assistant("length"), call, artifact, toolMessage],
+		code: 0,
+		outcome: "succeeded",
+		calls: 2,
+	},
+	{
+		name: "cancellation takes precedence over output exhaustion",
+		events: [
+			assistant("length"),
+			{ type: "notice", surface: "transcript", key: "turn.interrupted", text: "fixture canceled" },
+		],
+		code: 1,
+		outcome: "canceled",
+		calls: 1,
+	},
+	{
+		name: "final provider error supersedes output exhaustion",
+		events: [assistant("length"), assistant("error")],
+		code: 1,
+		outcome: "failed",
+		calls: 2,
+	},
 	{ name: "clean tool-only completion", events: [call, artifact, toolMessage], code: 0, outcome: "succeeded", calls: 1 },
 	{
 		name: "recovered tool-only completion retains failed-call spend",
@@ -117,71 +188,125 @@ for (const scenario of [
 		shutdown: true,
 	},
 ] as const) {
-	test(`headless settlement: ${scenario.name}`, async () => {
-		const scratch = await isolateClioEnv("clio-headless-settlement-");
-		try {
-			let listener: ((event: ChatLoopEvent) => void) | undefined;
-			let drain: (() => void | Promise<void>) | undefined;
-			const shuttingDown = "shutdown" in scenario;
-			const shutdown: HeadlessShutdownHooks = {
-				onDrain: (hook) => {
-					drain = hook;
-				},
-				getExitCode: () => (shuttingDown ? 143 : 0),
-				isShuttingDown: () => shuttingDown,
-			};
-			const chat: Pick<ChatLoop, "getSessionId" | "lastRunSnapshot" | "onEvent" | "submit"> = {
-				getSessionId: () => "fixture-session",
-				lastRunSnapshot: () => ({
-					targetId: "fixture",
-					targetUrl: "http://127.0.0.1",
-					runtimeId: "openai-compat",
-					runtimeKind: "http",
-					wireModelId: "fixture-model",
-					autonomy: "full-auto",
-					compiledPromptHash: null,
-					staticCompositionHash: null,
-					promptSignature: null,
-					toolSignature: null,
-					sessionId: "fixture-session",
-					cwd: scratch.dir,
-				}),
-				onEvent(callback: (event: ChatLoopEvent) => void) {
-					listener = callback;
-					return () => {
-						listener = undefined;
-					};
-				},
-				async submit() {
-					for (const event of scenario.events) listener?.(event as ChatLoopEvent);
-					if (shuttingDown) await drain?.();
-				},
-			};
-			const code = await runHeadlessMainAgent(chat as ChatLoop, {
-				prompt: "fixture report",
-				mode: "json",
-				jsonEvents: "terminal",
-				shutdown,
+	for (const mode of ["text", "full", "terminal"] as const) {
+		test(`headless settlement: ${scenario.name} (${mode})`, async (t) => {
+			let stdout = "";
+			let stderr = "";
+			t.mock.method(process.stdout, "write", (chunk: string, callback?: (error?: Error | null) => void) => {
+				stdout += String(chunk);
+				if (typeof callback === "function") callback();
+				return true;
 			});
-			if (shuttingDown) await drain?.();
-			const journal = readRunJournal(join(scratch.dir, "state"));
-			ok(journal);
-			strictEqual(journal.receipts.length, 1);
-			const receipt = journal.receipts[0];
-			ok(receipt);
-			deepStrictEqual(
-				{ code, exitCode: receipt.exitCode, outcome: receipt.outcome },
-				{ code: scenario.code, exitCode: scenario.code, outcome: scenario.outcome },
-			);
-			strictEqual(receipt.tokenCount, scenario.calls * 5);
-			strictEqual(receipt.costUsd, scenario.calls * 0.25);
-			const metrics = receiptInvariantMetrics(journal, code);
-			strictEqual(metrics["receipt.integrityValid"], true);
-			strictEqual(metrics["receipt.outcomeMatchesExit"], true);
-		} finally {
-			scratch.restore();
-		}
-	});
+			t.mock.method(process.stderr, "write", (chunk: string) => {
+				stderr += String(chunk);
+				return true;
+			});
+			const scratch = await isolateClioEnv("clio-headless-settlement-");
+			try {
+				let listener: ((event: ChatLoopEvent) => void) | undefined;
+				let drain: (() => void | Promise<void>) | undefined;
+				const shuttingDown = "shutdown" in scenario;
+				const shutdown: HeadlessShutdownHooks = {
+					onDrain: (hook) => {
+						drain = hook;
+					},
+					getExitCode: () => (shuttingDown ? 143 : 0),
+					isShuttingDown: () => shuttingDown,
+				};
+				const chat: Pick<ChatLoop, "getSessionId" | "lastRunSnapshot" | "onEvent" | "submit"> = {
+					getSessionId: () => "fixture-session",
+					lastRunSnapshot: () => ({
+						targetId: "fixture",
+						targetUrl: "http://127.0.0.1",
+						runtimeId: "openai-compat",
+						runtimeKind: "http",
+						wireModelId: "fixture-model",
+						autonomy: "full-auto",
+						compiledPromptHash: null,
+						staticCompositionHash: null,
+						promptSignature: null,
+						toolSignature: null,
+						sessionId: "fixture-session",
+						cwd: scratch.dir,
+					}),
+					onEvent(callback: (event: ChatLoopEvent) => void) {
+						listener = callback;
+						return () => {
+							listener = undefined;
+						};
+					},
+					async submit() {
+						for (const event of scenario.events) listener?.(event as ChatLoopEvent);
+						if (shuttingDown) await drain?.();
+					},
+				};
+				const code = await runHeadlessMainAgent(chat as ChatLoop, {
+					prompt: "fixture report",
+					mode: mode === "text" ? "text" : "json",
+					jsonEvents: mode === "full" ? "full" : "terminal",
+					shutdown,
+				});
+				if (shuttingDown) await drain?.();
+				const journal = readRunJournal(join(scratch.dir, "state"));
+				ok(journal);
+				strictEqual(journal.receipts.length, 1);
+				const receipt = journal.receipts[0];
+				ok(receipt);
+				const envelope = journal.envelopes.get(receipt.runId);
+				ok(envelope);
+				strictEqual(envelope.exitCode, scenario.code);
+				strictEqual(envelope.outcomeDetail, receipt.outcomeDetail);
+				strictEqual(
+					envelope.status,
+					scenario.outcome === "succeeded" ? "completed" : scenario.outcome === "canceled" ? "interrupted" : "failed",
+				);
+				deepStrictEqual(
+					{ code, exitCode: receipt.exitCode, outcome: receipt.outcome },
+					{ code: scenario.code, exitCode: scenario.code, outcome: scenario.outcome },
+				);
+				if ("exhausted" in scenario) {
+					match(receipt.outcomeDetail ?? "", /output token limit.*stopReason=length/);
+					strictEqual(receipt.failureMessage, receipt.outcomeDetail);
+				}
+				const exhaustedCalls = scenario.events.filter(
+					(event) =>
+						event.type === "message_end" &&
+						"message" in event &&
+						event.message.role === "assistant" &&
+						event.message.stopReason === "length",
+				).length;
+				strictEqual(receipt.tokenCount, scenario.calls * 5 + exhaustedCalls * 55968);
+				strictEqual(receipt.reasoningTokenCount, exhaustedCalls * 7926);
+				if ("exhausted" in scenario) {
+					match(stderr, /output token limit.*stopReason=length/);
+					strictEqual(stderr.trim().split("\n").at(-1), receipt.failureMessage);
+					if (mode === "text") {
+						if ("emptyText" in scenario) strictEqual(stdout, "");
+						else match(stdout, /Let me investigate\.|Partial explanation/);
+					}
+					if (mode === "full") {
+						match(stdout, /"stopReason":"length"/);
+						match(stdout, /"rawStopReason":"length"/);
+					}
+					if (mode === "terminal") {
+						const end = stdout
+							.split("\n")
+							.filter(Boolean)
+							.map((line) => JSON.parse(line))
+							.find((event) => event.type === "turn_end");
+						strictEqual(end.exitCode, 1);
+						strictEqual(end.error, receipt.failureMessage);
+					}
+				}
+				strictEqual(receipt.costUsd, scenario.calls * 0.25);
+				const metrics = receiptInvariantMetrics(journal, code);
+				strictEqual(metrics["receipt.integrityValid"], true);
+				strictEqual(metrics["receipt.outcomeMatchesExit"], true);
+			} finally {
+				scratch.restore();
+			}
+		});
+	}
 }
 
 // The eval runner's exit code is the invariant's process-side witness, so it
