@@ -2,6 +2,7 @@ import { existsSync } from "node:fs";
 import { join, relative } from "node:path";
 import { performance } from "node:perf_hooks";
 import { type LoadResult, loadDomains } from "../core/domain-loader.js";
+import { asDirectoryPathBoundary } from "../core/path-boundary.js";
 import { runWithBudget, writeShutdownNotice } from "../core/termination.js";
 import { ToolNames } from "../core/tool-names.js";
 import { AgentsDomainModule } from "../domains/agents/index.js";
@@ -214,7 +215,7 @@ async function runWikiDispatch(input: {
 		// The repository is readable; only this staging tree is writable. Declare
 		// those paths directly so absolute filenames in prompt prose cannot become
 		// legacy scope tokens (including a sentence-ending period).
-		const scope = declaredScopeIntent({ readRoots: ["."], writeRoots: [stagingRoot] });
+		const scope = declaredScopeIntent({ readRoots: ["."], writeRoots: [asDirectoryPathBoundary(stagingRoot)] });
 		if (!scope.ok) throw new Error(`${scope.reason}: ${scope.message}`);
 		handle = await input.dispatch.dispatch({
 			intent: scope.intent,
@@ -232,7 +233,7 @@ async function runWikiDispatch(input: {
 			denyTools: [ToolNames.Git],
 			// Containment: the worker safety seam blocks any write-class tool call
 			// whose target escapes the staging dir.
-			writeRoots: [input.outputDir],
+			writeRoots: [asDirectoryPathBoundary(input.outputDir)],
 			// Admission patience must match execution patience. Without this the
 			// queue applies its 60s default while `deadlineMs` below allows six
 			// minutes to run, so a page waiting behind two in-flight writers was
