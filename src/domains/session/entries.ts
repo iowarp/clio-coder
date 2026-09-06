@@ -151,7 +151,7 @@ export function skillContextContentHash(content: PreservedSkillContext["content"
 	return createHash("sha256").update(JSON.stringify(content)).digest("hex");
 }
 
-export function isSkillContextState(value: unknown): value is SkillContextState {
+function isSkillContextState(value: unknown): value is SkillContextState {
 	return (
 		isRecord(value) &&
 		value.version === 1 &&
@@ -162,7 +162,7 @@ export function isSkillContextState(value: unknown): value is SkillContextState 
 }
 
 /** Ledger validation is structural; bad evidence must not make the session unreadable. */
-export function isSkillContextCheckpoint(value: unknown): value is SkillContextCheckpoint {
+function isSkillContextCheckpoint(value: unknown): value is SkillContextCheckpoint {
 	return (
 		isRecord(value) &&
 		value.version === 1 &&
