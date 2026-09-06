@@ -116,7 +116,7 @@ for (const scenario of ["first-pass", "repaired", "exhausted"] as const) {
 						["read-interface", "findiff/interface.py"],
 					]) {
 						if (!messages(request).some((message) => message.role === "tool" && message.tool_call_id === id)) {
-							return { name: "read", arguments: { path }, id };
+							return { name: "read", arguments: { path, line_numbers: true }, id };
 						}
 					}
 					return null;
@@ -149,7 +149,7 @@ for (const scenario of ["first-pass", "repaired", "exhausted"] as const) {
 			const scoutRequests = requests.filter(isScout);
 			ok(scoutRequests.length > 0, result.stdout);
 			match(JSON.stringify(scoutRequests[0]?.messages), /Keep this JSON shape even when a pipeline handoff asks/u);
-			match(JSON.stringify(scoutRequests[0]?.messages), /read` returns unnumbered source text/u);
+			match(JSON.stringify(scoutRequests[0]?.messages), /line_numbers: true/u);
 			const finalScoutRequest = scoutRequests.at(-1);
 			ok(finalScoutRequest);
 			const feedback = repairs(finalScoutRequest);
@@ -164,7 +164,7 @@ for (const scenario of ["first-pass", "repaired", "exhausted"] as const) {
 			strictEqual(readResults.length, 2, "repair retains both actual reads");
 			const interfaceRead = readResults.find((message) => message.tool_call_id === "read-interface");
 			ok(interfaceRead);
-			match(String(interfaceRead.content), /grid_axis = make_axis\(axis, grid, periodic\)/u);
+			match(String(interfaceRead.content), /62 \| {8}grid_axis = make_axis\(axis, grid, periodic\)/u);
 			if (feedback.length > 0) {
 				match(
 					String(feedback[1]?.content),
