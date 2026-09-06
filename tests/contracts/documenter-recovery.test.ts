@@ -240,3 +240,65 @@ it("continues passing Scout quality into the intended Documenter and delivers it
 		await bundle.extension.stop?.();
 	}
 });
+
+it("preserves explicit Coder and delivers its bounded explanation through the compiled recipe", {
+	timeout: 15_000,
+}, async () => {
+	const fixture = JSON.parse(
+		readFileSync(new URL("../../evals/fixtures/source-explanation.json", import.meta.url), "utf8"),
+	) as { shortExplanation: string; coderLimitation: string; task: string };
+	const { bundle, dispatch, specs } = setup([report(fixture.shortExplanation), report(fixture.coderLimitation)]);
+	await bundle.extension.start();
+	try {
+		for (const task of ["Explain the four supplied source excerpts briefly. Do not edit files.", fixture.task]) {
+			const result = await dispatch.run({ agent: "coder", task, intent }, {});
+			strictEqual(result.kind, "ok");
+		}
+		deepStrictEqual(
+			specs.map((spec) => spec.agentId),
+			["coder", "coder"],
+		);
+		const prompt = specs[0]?.systemPrompt ?? "";
+		match(prompt, /Put the requested explanation and source citations in `summary`/u);
+		match(prompt, /1200-word explanation cannot fit/u);
+		match(prompt, /without claiming delivery/u);
+		for (const run of bundle.contract.listRuns()) {
+			ok(run.receiptPath);
+			const receipt = JSON.parse(readFileSync(run.receiptPath, "utf8")) as RunReceipt;
+			ok(verifyReceiptIntegrity(receipt, run).ok);
+			strictEqual(receipt.agentId, "coder");
+			strictEqual(receipt.quality.resultContract?.conformance, "pass");
+			strictEqual(receipt.output?.truncated, false);
+			ok([fixture.shortExplanation, fixture.coderLimitation].includes(JSON.parse(receipt.output?.text ?? "{}").summary));
+		}
+	} finally {
+		await bundle.extension.stop?.();
+	}
+});
+
+it("keeps failed Coder JSON sealed failed independently of terminal dispatch lifecycle", {
+	timeout: 15_000,
+}, async () => {
+	const { bundle, dispatch, monitor, specs } = setup(['{"mutatedPaths":[],"validations":[']);
+	await bundle.extension.start();
+	try {
+		const result = await dispatch.run({ agent: "coder", task: TASK, intent }, {});
+		strictEqual(result.kind, "error");
+		strictEqual(specs.length, 1);
+		const run = bundle.contract.listRuns()[0];
+		ok(run?.receiptPath);
+		const original = readFileSync(run.receiptPath, "utf8");
+		const receipt = JSON.parse(original) as RunReceipt;
+		strictEqual(receipt.outcome, "failed");
+		strictEqual(receipt.outcomeCode, "result_contract_exhausted");
+		strictEqual(receipt.quality.resultContract?.conformance, "fail");
+		ok(verifyReceiptIntegrity(receipt, run).ok);
+		await monitor.run({ mode: "collect", run_ids: [run.id] }, {});
+		strictEqual(readFileSync(run.receiptPath, "utf8"), original);
+		deepStrictEqual(bundle.contract.snapshot().running, []);
+		deepStrictEqual(bundle.contract.snapshot().retrying, []);
+		strictEqual(capacityLeaseUsage().global, 0);
+	} finally {
+		await bundle.extension.stop?.();
+	}
+});
