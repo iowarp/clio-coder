@@ -275,6 +275,7 @@ export async function runBashCommand(command: string, options: RunBashCommandOpt
 		let timeoutId: ReturnType<typeof setTimeout> | null = null;
 		let killGraceTimer: ReturnType<typeof setTimeout> | null = null;
 		let killSent = false;
+		let pendingClose: (() => void) | null = null;
 		const output = createBashOutputProgressController(options.onUpdate);
 
 		const child = spawn("/bin/bash", [plan.mode, command], {
@@ -305,12 +306,42 @@ export async function runBashCommand(command: string, options: RunBashCommandOpt
 			child.kill(signalName);
 		};
 
+		const hasOwnedProcesses = (): boolean => {
+			const pid = child.pid;
+			if (pid === undefined) return false;
+			if (process.platform !== "win32") {
+				try {
+					process.kill(-pid, 0);
+					return true;
+				} catch (error) {
+					if ((error as NodeJS.ErrnoException).code === "EPERM") return true;
+				}
+			}
+			return child.exitCode === null && child.signalCode === null;
+		};
+
+		const resolveAfterCancellation = (result: BashCommandResult): void => {
+			// A TERM handler can exit while a same-group child ignores TERM and
+			// holds no pipes. Keep the original result, but do not let close discard
+			// the escalation that still owns that child's cancellation.
+			if (killGraceTimer !== null && hasOwnedProcesses()) {
+				pendingClose = () => resolve(result);
+				return;
+			}
+			clearKillGraceTimer();
+			resolve(result);
+		};
+
 		const killChild = (): void => {
 			if (killSent) return;
 			killSent = true;
 			sendSignal("SIGTERM");
 			killGraceTimer = setTimeout(() => {
-				sendSignal("SIGKILL");
+				killGraceTimer = null;
+				if (hasOwnedProcesses()) sendSignal("SIGKILL");
+				const finish = pendingClose;
+				pendingClose = null;
+				finish?.();
 			}, 5000);
 		};
 
@@ -342,10 +373,9 @@ export async function runBashCommand(command: string, options: RunBashCommandOpt
 			if (settled) return;
 			settled = true;
 			if (timeoutId) clearTimeout(timeoutId);
-			clearKillGraceTimer();
 			const finalOutput = output.settle();
 			options.signal?.removeEventListener("abort", onAbort);
-			resolve({
+			resolveAfterCancellation({
 				error: error as NodeJS.ErrnoException,
 				...finalOutput,
 				exitCode: null,
@@ -358,7 +388,6 @@ export async function runBashCommand(command: string, options: RunBashCommandOpt
 			if (settled) return;
 			settled = true;
 			if (timeoutId) clearTimeout(timeoutId);
-			clearKillGraceTimer();
 			const finalOutput = output.settle();
 			options.signal?.removeEventListener("abort", onAbort);
 			const error =
@@ -370,7 +399,7 @@ export async function runBashCommand(command: string, options: RunBashCommandOpt
 							code: code ?? undefined,
 							signal: signalName ?? undefined,
 						} as NodeJS.ErrnoException);
-			resolve({
+			resolveAfterCancellation({
 				error,
 				...finalOutput,
 				exitCode: code,

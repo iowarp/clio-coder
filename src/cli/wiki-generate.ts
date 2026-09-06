@@ -2,6 +2,7 @@ import { existsSync } from "node:fs";
 import { join } from "node:path";
 import { performance } from "node:perf_hooks";
 import { type LoadResult, loadDomains } from "../core/domain-loader.js";
+import { runWithBudget, writeShutdownNotice } from "../core/termination.js";
 import { ToolNames } from "../core/tool-names.js";
 import { AgentsDomainModule } from "../domains/agents/index.js";
 import type { ConfigContract } from "../domains/config/contract.js";
@@ -377,7 +378,9 @@ async function generateWikiWithDocumenter(
 	input: WikiGenerateInput,
 	route: WikiModelRoute = {},
 	runBudgetMs: number = RUN_BUDGET_MS,
+	signal?: AbortSignal,
 ): Promise<void> {
+	signal?.throwIfAborted();
 	const startedAtClock = performance.now();
 	const routeDetail = [route.target, route.model, route.thinkingLevel ? `thinking=${route.thinkingLevel}` : undefined]
 		.filter((value): value is string => value !== undefined)
@@ -394,6 +397,7 @@ async function generateWikiWithDocumenter(
 	// run plans, including an update, which is the only thing allowed to change
 	// a wiki's shape as the repository grows.
 	let plan = input.resumed ? input.plan : await runPlanPhase(dispatch, input, route);
+	signal?.throwIfAborted();
 	if (!input.resumed) writeWikiPlanFile(input.outputDir, plan);
 
 	const queue = pendingPages(plan);
@@ -422,6 +426,7 @@ async function generateWikiWithDocumenter(
 		});
 	}
 	for (const [index, page] of queue.entries()) {
+		signal?.throwIfAborted();
 		if (performance.now() - startedAtClock >= runBudgetMs) {
 			const left = queue.length - index;
 			input.progress?.({
@@ -501,19 +506,78 @@ export async function resolveDocumenterModelId(route: WikiModelRoute = {}): Prom
 	}
 }
 
+/**
+ * A standalone wiki command owns a dispatch runtime outside the main entry
+ * orchestrator. Hold its signal ownership until workers settle, including
+ * their 500ms forced-kill window, then stop domains before exiting. This is
+ * scoped to the runtime we loaded; injected dispatches keep their caller's
+ * lifecycle. The signal budget fits inside the enclosing editor shell grace.
+ */
+export async function withWikiDispatchLifecycle(
+	runtime: { dispatch: Pick<DispatchContract, "drain">; stop(): Promise<void> },
+	generate: (signal: AbortSignal) => Promise<void>,
+): Promise<void> {
+	const abort = new AbortController();
+	let closing: Promise<void> | null = null;
+	let interrupted: Promise<void> | null = null;
+	const close = (): Promise<void> => {
+		closing ??= (async () => {
+			let failure: { error: unknown } | null = null;
+			try {
+				await runtime.dispatch.drain();
+			} catch (error) {
+				failure = { error };
+			}
+			try {
+				await runtime.stop();
+			} catch (error) {
+				if (failure) writeShutdownNotice(`clio-coder context wiki: domain cleanup failed: ${String(error)}`);
+				else failure = { error };
+			}
+			if (failure) throw failure.error;
+		})();
+		return closing;
+	};
+	const exitCodes = { SIGINT: 130, SIGTERM: 143, SIGHUP: 129 } as const;
+	const onSignal = (signal: keyof typeof exitCodes): void => {
+		if (interrupted) return;
+		abort.abort(new Error(`wiki generation interrupted by ${signal}`));
+		interrupted = (async () => {
+			const completed = await runWithBudget(close, 2000, (error) => {
+				writeShutdownNotice(`clio-coder context wiki: shutdown failed: ${String(error)}`);
+			});
+			if (!completed) writeShutdownNotice("clio-coder context wiki: shutdown exceeded 2000ms budget");
+			process.exit(exitCodes[signal]);
+		})();
+	};
+	for (const signal of Object.keys(exitCodes) as Array<keyof typeof exitCodes>) process.on(signal, onSignal);
+	let failure: { error: unknown } | null = null;
+	try {
+		await generate(abort.signal);
+	} catch (error) {
+		failure = { error };
+	}
+	try {
+		if (interrupted) await interrupted;
+		else await close();
+	} catch (error) {
+		if (failure) writeShutdownNotice(`clio-coder context wiki: cleanup failed: ${String(error)}`);
+		else failure = { error };
+	} finally {
+		for (const signal of Object.keys(exitCodes) as Array<keyof typeof exitCodes>) process.off(signal, onSignal);
+	}
+	if (failure) throw failure.error;
+}
+
 export function modelWikiGenerate(options: ModelWikiGenerateOptions = {}): WikiGenerate {
 	return async (input) => {
-		let loaded: LoadResult | null = null;
-		try {
-			if (options.dispatch) {
-				await generateWikiWithDocumenter(options.dispatch, input, options.route, options.runBudgetMs);
-				return;
-			}
-			const lazy = await loadWikiDispatch();
-			loaded = lazy.loaded;
-			await generateWikiWithDocumenter(lazy.dispatch, input, options.route, options.runBudgetMs);
-		} finally {
-			if (loaded) await loaded.stop();
+		if (options.dispatch) {
+			await generateWikiWithDocumenter(options.dispatch, input, options.route, options.runBudgetMs);
+			return;
 		}
+		const { dispatch, loaded } = await loadWikiDispatch();
+		await withWikiDispatchLifecycle({ dispatch, stop: () => loaded.stop() }, (signal) =>
+			generateWikiWithDocumenter(dispatch, input, options.route, options.runBudgetMs, signal),
+		);
 	};
 }

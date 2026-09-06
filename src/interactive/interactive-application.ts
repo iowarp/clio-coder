@@ -3,6 +3,7 @@ import type { ClioSettings } from "../core/config.js";
 import type { SafeEventBus } from "../core/event-bus.js";
 import { expandInlineFileReferencesAsync } from "../core/file-references.js";
 import type { PendingSkillRequest } from "../core/skill-activation.js";
+import { getTerminationCoordinator } from "../core/termination.js";
 import { clioStateDir } from "../core/xdg.js";
 import type { AgentsContract } from "../domains/agents/contract.js";
 import type { ClioKeybinding } from "../domains/config/keybindings.js";
@@ -33,7 +34,7 @@ import { emitCommandNotice } from "./command-fallbacks.js";
 import { appendNotice } from "./command-output.js";
 import { dispatchCouncilThroughRegistry } from "./council-dispatch.js";
 import { createDispatchSteering } from "./dispatch-steering.js";
-import { createEditorSubmitController } from "./editor-submit.js";
+import { createEditorSubmitController, EDITOR_BASH_SHUTDOWN_MS } from "./editor-submit.js";
 import { createInteractiveDesktopNotifications } from "./footer/notifications.js";
 import { createInteractiveEventProjection } from "./interactive-event-projection.js";
 import { createInteractiveInputRuntime } from "./interactive-input-runtime.js";
@@ -805,6 +806,9 @@ export async function createInteractiveApplication(deps: InteractiveDeps): Promi
 		expandSubmit: (text) => expandInteractiveSubmitAsync(text, deps.resources),
 		notify,
 	});
+	// The lease drains the terminal; operator shell ownership outlives that
+	// surface and must settle before the session domain stops, on every exit.
+	getTerminationCoordinator().onDrain(() => editorSubmit.shutdownEditorBash(), { timeoutMs: EDITOR_BASH_SHUTDOWN_MS });
 	editor.onSubmit = editorSubmit.submitEditorText;
 
 	const interactiveTickers = createInteractiveTickers({
