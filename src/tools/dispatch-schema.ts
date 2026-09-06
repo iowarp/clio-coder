@@ -181,7 +181,12 @@ export function buildDispatchParameters(composition: DispatchSchemaComposition =
 							briefing: Type.Optional(
 								Type.String({ description: `Per-task parent context, max ${DISPATCH_BRIEFING_MAX_BYTES} UTF-8 bytes.` }),
 							),
-							agent: Type.Optional(Type.String({ description: "Recipe id (default coder)." })),
+							agent: Type.Optional(
+								Type.String({
+									description:
+										"Recipe id for this task: set scout/documenter explicitly in a mixed pipeline; names in task text do not select recipes, and omission inherits the batch/default recipe.",
+								}),
+							),
 							budget: Type.Optional(BudgetRef),
 							target: Type.Optional(Type.String()),
 							model: Type.Optional(Type.String()),
@@ -279,8 +284,8 @@ export function buildDispatchParameters(composition: DispatchSchemaComposition =
 			agent: Type.Optional(
 				Type.String({
 					description: composition.council
-						? "Default recipe id for string tasks, or auto (default coder; researcher for council)."
-						: "Default recipe id for string tasks, or auto (default coder).",
+						? "Default recipe id for tasks without their own agent, or auto (default coder; researcher for council)."
+						: "Default recipe id for tasks without their own agent, or auto (default coder).",
 				}),
 			),
 			briefing: Type.Optional(
