@@ -109,6 +109,8 @@ export function scorePromotionEntry(userText: string, entry: MarketplaceSkill): 
 
 /**
  * The uninstalled marketplace entries that match the request, best first.
+ * Authored trigger hits precede token fallbacks, even when incidental
+ * description overlap ties or exceeds the trigger's numeric score.
  * `excludedNames` carries installed skills plus every decline scope the
  * caller tracks; the matcher itself is stateless.
  */
@@ -123,7 +125,12 @@ export function matchMarketplaceSkills(
 		const match = scorePromotionEntry(userText, entry);
 		if (match) matches.push(match);
 	}
-	return matches.sort((a, b) => b.score - a.score || a.entry.name.localeCompare(b.entry.name));
+	return matches.sort(
+		(a, b) =>
+			Number(b.matchedTrigger !== undefined) - Number(a.matchedTrigger !== undefined) ||
+			b.score - a.score ||
+			a.entry.name.localeCompare(b.entry.name),
+	);
 }
 
 /**

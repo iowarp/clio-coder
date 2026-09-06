@@ -1,4 +1,4 @@
-import { deepStrictEqual, ok, strictEqual, throws } from "node:assert/strict";
+import { deepStrictEqual, match, ok, strictEqual, throws } from "node:assert/strict";
 import { mkdtempSync, rmSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
@@ -16,7 +16,7 @@ import {
 	offerBindingTag,
 } from "../../src/domains/middleware/marketplace-offer.js";
 import type { MiddlewareEffect, MiddlewareHookInput } from "../../src/domains/middleware/types.js";
-import type { MarketplaceSkill } from "../../src/domains/resources/skills/marketplace.js";
+import { discoverMarketplaceSkills, type MarketplaceSkill } from "../../src/domains/resources/skills/marketplace.js";
 import {
 	assertPromotionInstallSource,
 	declineKey,
@@ -28,6 +28,15 @@ import {
 } from "../../src/domains/resources/skills/promotion.js";
 
 const roots: string[] = [];
+
+// Exact S9-offer operator text retained at candidate 7819fe4774b48b68e2129d9b54e888cce634c6aa.
+// Its ledger injected context-handoff despite context-prime's authored trigger.
+const ORIENTATION_PROMPT =
+	"Prime this repository for a fresh coding session: review existing handoff, git state and project rules, and give a brief orientation. Do not edit files or start implementation.";
+
+function shippedCatalog(): MarketplaceSkill[] {
+	return discoverMarketplaceSkills({ catalogDir: join(process.cwd(), "skills"), indexPath: null }).skills;
+}
 afterEach(() => {
 	for (const root of roots.splice(0)) rmSync(root, { recursive: true, force: true });
 });
@@ -85,6 +94,33 @@ describe("contracts/marketplace-offer matcher", () => {
 			matchMarketplaceSkills("fix the merge conflict", [conflicts], new Set(["resolve-merge-conflicts"])).length,
 			0,
 		);
+	});
+
+	it("prefers authored triggers over equal or larger fallback scores", () => {
+		const trigger = entry({ name: "z-trigger", triggers: ["merge conflict"] });
+		for (const description of [
+			"resolve merge conflict semantic",
+			"resolve merge conflict semantic verification safely",
+		]) {
+			const fallback = entry({ name: "a-fallback", description, triggers: [] });
+			const matches = matchMarketplaceSkills(
+				"resolve this merge conflict with semantic verification safely",
+				[fallback, trigger],
+				new Set(),
+			);
+			deepStrictEqual(
+				matches.map((result) => result.entry.name),
+				["z-trigger", "a-fallback"],
+			);
+			ok((matches[1]?.score ?? 0) >= (matches[0]?.score ?? 0));
+		}
+	});
+
+	it("routes the retained orientation prompt to the shipped context-prime trigger", () => {
+		const matches = matchMarketplaceSkills(ORIENTATION_PROMPT, shippedCatalog(), new Set());
+		strictEqual(matches[0]?.entry.name, "context-prime");
+		strictEqual(matches[0]?.matchedTrigger, "prime this repository");
+		ok(matches.some((result) => result.entry.name === "context-handoff" && result.matchedTrigger === undefined));
 	});
 });
 
@@ -169,7 +205,7 @@ function askUserAnswer(answerLabel: string, sessionId = "s1", tag: string = TEST
 		toolResultDetails: {
 			answers: [
 				{
-					question: `Install the resolve-merge-conflicts skill? ${offerBindingTag(tag)}`,
+					question: `Install this marketplace skill? ${offerBindingTag(tag)}`,
 					answer: answerLabel,
 					options: [answerLabel],
 				},
@@ -185,6 +221,57 @@ function reminderText(effects: ReadonlyArray<MiddlewareEffect>): string {
 }
 
 describe("contracts/marketplace-offer registration", () => {
+	it("teaches the retained orientation offer and binds acceptance only to that offer", () => {
+		const { deps, installs } = makeDeps({ interactive: true, listMarketplaceEntries: shippedCatalog });
+		const registration = createMarketplaceOfferRegistration(deps);
+		const guidance = reminderText(registration.evaluate(turnStart(ORIENTATION_PROMPT)));
+		match(guidance, /whether to install context-prime/u);
+		match(guidance, /First check the installed side with context\(scope="skills"\)/u);
+		match(guidance, /Then continue the task in the same turn/u);
+		for (const label of [
+			SKILL_INSTALL_OFFER_OPTION_PROJECT,
+			SKILL_INSTALL_OFFER_OPTION_USER,
+			SKILL_INSTALL_OFFER_OPTION_NOT_NOW,
+			SKILL_INSTALL_OFFER_OPTION_NEVER,
+		])
+			ok(guidance.includes(label));
+		// This exercises the harness protocol, not a model-generated question or visible TUI.
+		deepStrictEqual(installs, []);
+		registration.evaluate(askUserAnswer(SKILL_INSTALL_OFFER_OPTION_PROJECT, "s1", "unrelated"));
+		deepStrictEqual(installs, []);
+		const accepted = reminderText(registration.evaluate(askUserAnswer(SKILL_INSTALL_OFFER_OPTION_PROJECT)));
+		deepStrictEqual(installs, [{ name: "context-prime", scope: "project" }]);
+		match(accepted, /installed but not active; the operator activates it with \/skill context-prime/u);
+	});
+
+	it("keeps the retained orientation's headless hint passive", () => {
+		const { deps, installs, nevers } = makeDeps({ interactive: false, listMarketplaceEntries: shippedCatalog });
+		const registration = createMarketplaceOfferRegistration(deps);
+		strictEqual(
+			reminderText(registration.evaluate(turnStart(ORIENTATION_PROMPT))),
+			'[Marketplace] Skill "context-prime" matches this request; install with clio-coder skills install context-prime.',
+		);
+		registration.evaluate(askUserAnswer(SKILL_INSTALL_OFFER_OPTION_PROJECT));
+		registration.evaluate(askUserAnswer(SKILL_INSTALL_OFFER_OPTION_NEVER));
+		deepStrictEqual(installs, []);
+		deepStrictEqual(nevers, []);
+	});
+
+	it("respects decline, installed inventory and pending activation for the orientation match", () => {
+		const prime = shippedCatalog().find((skill) => skill.name === "context-prime");
+		ok(prime);
+		const { deps, installs } = makeDeps({ listMarketplaceEntries: () => [prime] });
+		const registration = createMarketplaceOfferRegistration(deps);
+		registration.evaluate(turnStart(ORIENTATION_PROMPT));
+		registration.evaluate(askUserAnswer(SKILL_INSTALL_OFFER_OPTION_NOT_NOW));
+		deepStrictEqual(registration.evaluate(turnStart(ORIENTATION_PROMPT)), []);
+		deepStrictEqual(installs, []);
+		const installed = createMarketplaceOfferRegistration({ ...deps, listInstalledSkillNames: () => [prime.name] });
+		deepStrictEqual(installed.evaluate(turnStart(ORIENTATION_PROMPT)), []);
+		const pending = createMarketplaceOfferRegistration(deps);
+		deepStrictEqual(pending.evaluate({ ...turnStart(ORIENTATION_PROMPT), metadata: { pendingSkillRequests: 1 } }), []);
+	});
+
 	it("emits one passive reminder in headless sessions without arming an interview or recording a decline", () => {
 		let offerTags = 0;
 		const { deps, installs, nevers } = makeDeps({
