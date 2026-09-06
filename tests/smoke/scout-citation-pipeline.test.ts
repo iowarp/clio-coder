@@ -172,11 +172,13 @@ for (const scenario of ["first-pass", "repaired", "exhausted"] as const) {
 				);
 				match(String(feedback[1]?.content), /path:start-end, inclusive/u);
 				match(String(feedback[1]?.content), /Never shift a rejected citation into range/u);
-				ok(
-					scoutRequests
-						.filter((request) => repairs(request).length > 0)
-						.every((request) => !request.tools || (request.tools as unknown[]).length === 0),
-				);
+				// Advisory planning leaves admitted tools available for a grounded
+				// repair. This fixture answers from its two original reads; the
+				// unchanged range assertions above still reject invented evidence.
+				for (const request of scoutRequests.filter((entry) => repairs(entry).length > 0)) {
+					ok(Array.isArray(request.tools) && request.tools.some((tool) => tool.function?.name === "read"));
+					match(String(repairs(request).at(-1)?.content), /may use the admitted tools to repair/u);
+				}
 			}
 			const journal = readRunJournal(join(scratch.dir, "state"));
 			ok(journal);
