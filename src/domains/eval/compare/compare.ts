@@ -132,7 +132,7 @@ export function compareEvalArtifactsV4(
 export function renderEvalComparisonV4(summary: EvalCompareV4Summary): string {
 	const envelopeFailures = summary.envelopeMismatches.map(
 		(mismatch) =>
-			`  incomparable envelope: ${mismatch.scenarioId} ${mismatch.role} ${mismatch.target.id}/${mismatch.target.model ?? "none"} fields=${mismatch.fields.join(",")}`,
+			`  incomparable envelope: ${mismatch.scenarioId} ${mismatch.role} ${renderEvalComparisonRoutesV1(mismatch)} fields=${mismatch.fields.join(",")}`,
 	);
 	const affected = summary.affectedCorpusResults.map(
 		(result) =>
@@ -142,7 +142,7 @@ export function renderEvalComparisonV4(summary: EvalCompareV4Summary): string {
 	const roleReports = renderRollups("per-role baseline/candidate report", summary.roleReports);
 	const hardFailures = summary.hardGate.failures.map(
 		(failure) =>
-			`  hard failure: ${failure.scenarioId} ${failure.role} ${failure.target.id}/${failure.target.model ?? "none"} ${failure.metric} ${failure.change}`,
+			`  hard failure: ${failure.scenarioId} ${failure.role} ${renderEvalComparisonRoutesV1(failure)} ${failure.metric} ${failure.change}`,
 	);
 	const tracked = summary.trackedMetrics.flatMap((row, index) => [
 		...(index === 0
@@ -172,14 +172,13 @@ export function renderEvalComparisonV4(summary: EvalCompareV4Summary): string {
 		...(index === 0
 			? [
 					"behavioral metrics:",
-					"scenario role target model family metric baseline_mean baseline_variance baseline_coverage candidate_mean candidate_variance candidate_coverage mean_delta variance_delta change variance_change comparability gate source",
+					"scenario role baseline_target/model -> candidate_target/model family metric baseline_mean baseline_variance baseline_coverage candidate_mean candidate_variance candidate_coverage mean_delta variance_delta change variance_change comparability gate source",
 				]
 			: []),
 		[
 			row.scenarioId,
 			row.role,
-			row.target.id,
-			row.target.model ?? "none",
+			renderEvalComparisonRoutesV1(row),
 			row.family,
 			row.metric,
 			formatMetric(row.baseline.mean),
@@ -216,6 +215,16 @@ export function renderEvalComparisonV4(summary: EvalCompareV4Summary): string {
 		...behavioral,
 		"",
 	].join("\n");
+}
+
+export function renderEvalComparisonRoutesV1(identity: {
+	target: { id: string; model: string | null };
+	baselineTargets?: ReadonlyArray<{ id: string; model: string | null }>;
+	candidateTargets?: ReadonlyArray<{ id: string; model: string | null }>;
+}): string {
+	const render = (targets: ReadonlyArray<{ id: string; model: string | null }>) =>
+		targets.map((target) => `${target.id}/${target.model ?? "none"}`).join(",") || "missing";
+	return `${render(identity.baselineTargets ?? [identity.target])} -> ${render(identity.candidateTargets ?? [identity.target])}`;
 }
 
 function behaviorRollups(

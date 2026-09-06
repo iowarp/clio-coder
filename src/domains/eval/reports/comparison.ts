@@ -1,5 +1,5 @@
 import type { EvalCompareV4Summary } from "../compare/compare.js";
-import { renderEvalComparisonV4 } from "../compare/compare.js";
+import { renderEvalComparisonRoutesV1, renderEvalComparisonV4 } from "../compare/compare.js";
 
 export type EvalComparisonReportFormat = "text" | "json" | "md" | "junit";
 
@@ -16,7 +16,7 @@ export function renderEvalComparisonReportV1(
 function renderMarkdown(summary: EvalCompareV4Summary): string {
 	const rows = summary.behavioralMetrics.map(
 		(row) =>
-			`| ${cell(row.scenarioId)} | ${cell(row.role)} | ${cell(`${row.target.id}/${row.target.model ?? "none"}`)} | ${row.family} | ${row.metric} | ${format(row.baseline.mean)} | ${format(row.baseline.variance)} | ${row.baseline.measured}/${row.baseline.observations} | ${format(row.candidate.mean)} | ${format(row.candidate.variance)} | ${row.candidate.measured}/${row.candidate.observations} | ${row.change} | ${row.varianceChange} | ${row.comparability.comparable ? "comparable" : cell(row.comparability.mismatchedFields.join(", "))} | ${row.hardGate ? "hard" : "informational"} |`,
+			`| ${cell(row.scenarioId)} | ${cell(row.role)} | ${cell(renderEvalComparisonRoutesV1(row))} | ${row.family} | ${row.metric} | ${format(row.baseline.mean)} | ${format(row.baseline.variance)} | ${row.baseline.measured}/${row.baseline.observations} | ${format(row.candidate.mean)} | ${format(row.candidate.variance)} | ${row.candidate.measured}/${row.candidate.observations} | ${row.change} | ${row.varianceChange} | ${row.comparability.comparable ? "comparable" : cell(row.comparability.mismatchedFields.join(", "))} | ${row.hardGate ? "hard" : "informational"} |`,
 	);
 	const scenarioRows = summary.scenarioReports.map(
 		(report) => `| ${cell(report.id)} | ${changeCounts(report.metrics)} | ${changeCounts(report.variance)} |`,
@@ -30,11 +30,11 @@ function renderMarkdown(summary: EvalCompareV4Summary): string {
 		`Behavioral hard gate: **${summary.hardGate.pass ? "pass" : "fail"}**`,
 		...summary.hardGate.failures.map(
 			(failure) =>
-				`- Hard failure: ${failure.scenarioId} / ${failure.role} / ${failure.target.id}/${failure.target.model ?? "none"} / ${failure.metric}: ${failure.change}`,
+				`- Hard failure: ${failure.scenarioId} / ${failure.role} / ${renderEvalComparisonRoutesV1(failure)} / ${failure.metric}: ${failure.change}`,
 		),
 		...summary.envelopeMismatches.map(
 			(mismatch) =>
-				`- Incomparable envelope: ${mismatch.scenarioId} / ${mismatch.role} / ${mismatch.target.id}/${mismatch.target.model ?? "none"}: ${mismatch.fields.join(", ")}`,
+				`- Incomparable envelope: ${mismatch.scenarioId} / ${mismatch.role} / ${renderEvalComparisonRoutesV1(mismatch)}: ${mismatch.fields.join(", ")}`,
 		),
 		...summary.affectedCorpusResults.map(
 			(result) => `- Affected corpus result: ${result.scenarioId} / ${result.role}: ${result.changedFields.join(", ")}`,
@@ -43,7 +43,7 @@ function renderMarkdown(summary: EvalCompareV4Summary): string {
 		`Token delta: ${summary.tokenDelta === null ? "unmeasured" : summary.tokenDelta}`,
 		`Wall-time delta ms: ${summary.wallTimeDelta}`,
 		"",
-		"| Scenario | Role | Target/model | Family | Metric | Baseline mean | Baseline variance | Baseline measured | Candidate mean | Candidate variance | Candidate measured | Change | Variance | Comparability | Gate |",
+		"| Scenario | Role | Baseline -> candidate target/model | Family | Metric | Baseline mean | Baseline variance | Baseline measured | Candidate mean | Candidate variance | Candidate measured | Change | Variance | Comparability | Gate |",
 		"|---|---|---|---|---|---:|---:|---:|---:|---:|---:|---|---|---|---|",
 		...rows,
 		"",
@@ -70,7 +70,7 @@ function renderJunit(summary: EvalCompareV4Summary): string {
 	);
 	const represented = new Set<string>();
 	const cases = summary.behavioralMetrics.map((row) => {
-		const name = `${row.scenarioId}[${row.role}:${row.target.id}:${row.target.model ?? "none"}].${row.metric}`;
+		const name = `${row.scenarioId}[${row.role}:${renderEvalComparisonRoutesV1(row)}].${row.metric}`;
 		const key = JSON.stringify([row.scenarioId, row.role, row.target.id, row.target.model, row.metric]);
 		represented.add(key);
 		const detail = `change=${row.change} variance=${row.varianceChange} baseline=${format(row.baseline.mean)} candidate=${format(row.candidate.mean)}`;
@@ -87,13 +87,13 @@ function renderJunit(summary: EvalCompareV4Summary): string {
 			failure.metric,
 		]);
 		if (represented.has(key)) continue;
-		const name = `${failure.scenarioId}[${failure.role}:${failure.target.id}:${failure.target.model ?? "none"}].${failure.metric}`;
+		const name = `${failure.scenarioId}[${failure.role}:${renderEvalComparisonRoutesV1(failure)}].${failure.metric}`;
 		cases.push(
 			`  <testcase classname="eval.behavior.hard" name="${escapeXml(name)}"><failure message="${escapeXml(failure.change)}">hard behavioral gate</failure></testcase>`,
 		);
 	}
 	for (const failure of summary.hardGate.envelopeFailures) {
-		const name = `${failure.scenarioId}[${failure.role}:${failure.target.id}:${failure.target.model ?? "none"}].execution-envelope`;
+		const name = `${failure.scenarioId}[${failure.role}:${renderEvalComparisonRoutesV1(failure)}].execution-envelope`;
 		cases.push(
 			`  <testcase classname="eval.behavior.envelope" name="${escapeXml(name)}"><failure message="incomparable">${escapeXml(failure.fields.join(", "))}</failure></testcase>`,
 		);

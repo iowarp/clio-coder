@@ -1,10 +1,17 @@
-import { deepStrictEqual, match, strictEqual, throws } from "node:assert/strict";
+import { deepStrictEqual, match, ok, strictEqual, throws } from "node:assert/strict";
 import test from "node:test";
 import { parseEvalArtifactV4 } from "../../src/domains/eval/artifacts/store.js";
 import { compareEvalArtifactsV4, EvalServingConfigurationDriftError } from "../../src/domains/eval/compare/compare.js";
 import { aggregateEvalVerdicts } from "../../src/domains/eval/metrics/aggregate.js";
+import { renderEvalComparisonReportV1 } from "../../src/domains/eval/reports/comparison.js";
 import { toolBehaviorMetricEntriesFromJsonl } from "../../src/domains/eval/runners/clio-run.js";
-import type { EvalArtifactV4 } from "../../src/domains/eval/schema/artifact.js";
+import type { EvalArtifactResultV4, EvalArtifactV4 } from "../../src/domains/eval/schema/artifact.js";
+import { buildEvalBehaviorMetricsV1 } from "../../src/domains/eval/schema/behavioral-metrics.js";
+import {
+	EVAL_EXECUTION_ENVELOPE_SCHEMA_V1,
+	type EvalExecutionEnvelopeV1,
+	type EvalExecutionMatrixDimensionV1,
+} from "../../src/domains/eval/schema/execution-envelope.js";
 import type { EvalSuiteV2 } from "../../src/domains/eval/schema/suite.js";
 import { validateEvalSuiteV2 } from "../../src/domains/eval/schema/validate.js";
 import {
@@ -17,6 +24,9 @@ import {
 import { resolveSuiteForRun } from "../../src/domains/eval/suites/resolve.js";
 
 const DIGEST = "a".repeat(64);
+const ROUTE_DIMENSIONS: EvalExecutionMatrixDimensionV1[] = ["target", "wireModel", "runtime", "thinkingLevel"];
+const BASELINE_ROUTE = { id: "baseline-target", model: "baseline-model", thinking: "off" };
+const CANDIDATE_ROUTE = { id: "candidate-target", model: "candidate-model", thinking: "high" };
 
 test("behavioral tool facts distinguish successful dispatch from attempts", () => {
 	const stdout = [
@@ -176,6 +186,249 @@ test("eval artifact readers and comparison preserve null first-call timing", () 
 	strictEqual(comparison?.change, "incomparable");
 });
 
+test("behavioral comparisons align jointly declared route dimensions before checking envelopes", () => {
+	const baseline = behaviorArtifact("eval-baseline", BASELINE_ROUTE, ROUTE_DIMENSIONS);
+	const candidate = behaviorArtifact("eval-candidate", CANDIDATE_ROUTE, [...ROUTE_DIMENSIONS].reverse());
+	const originals = structuredClone({ baseline, candidate });
+	const comparison = compareEvalArtifactsV4(baseline, candidate, { allowConfigDrift: true });
+	deepStrictEqual(comparison.envelopeMismatches, []);
+	strictEqual(comparison.hardGate.pass, true);
+	strictEqual(comparison.behavioralMetrics.length, 10);
+	const toolCalls = comparison.behavioralMetrics.find((row) => row.metric === "efficiency.toolCalls");
+	strictEqual(toolCalls?.baseline.observations, 2);
+	strictEqual(toolCalls?.candidate.observations, 2);
+	strictEqual(toolCalls?.baseline.mean, 2);
+	strictEqual(toolCalls?.candidate.mean, 2);
+	strictEqual(toolCalls?.baseline.variance, 1);
+	strictEqual(toolCalls?.change, "unchanged");
+	deepStrictEqual(toolCalls?.baselineTargets, [{ id: BASELINE_ROUTE.id, model: BASELINE_ROUTE.model }]);
+	deepStrictEqual(toolCalls?.candidateTargets, [{ id: CANDIDATE_ROUTE.id, model: CANDIDATE_ROUTE.model }]);
+	deepStrictEqual(toolCalls?.target, toolCalls?.baselineTargets[0]);
+	deepStrictEqual({ baseline, candidate }, originals);
+});
+
+test("behavioral route alignment requires both declarations and keeps undeclared route keys separate", () => {
+	for (const dimensions of [[], ["target"], ["wireModel"]] satisfies EvalExecutionMatrixDimensionV1[][]) {
+		const baseline = behaviorArtifact("eval-baseline", BASELINE_ROUTE, dimensions);
+		const candidate = behaviorArtifact("eval-candidate", CANDIDATE_ROUTE, dimensions);
+		const comparison = compareEvalArtifactsV4(baseline, candidate);
+		strictEqual(comparison.hardGate.pass, false);
+		deepStrictEqual(
+			comparison.envelopeMismatches.map((row) => row.fields),
+			[["executionEnvelope"], ["executionEnvelope"]],
+		);
+		strictEqual(comparison.behavioralMetrics.length, 20);
+		for (const row of comparison.behavioralMetrics) {
+			strictEqual(row.baselineTargets.length + row.candidateTargets.length, 1);
+			strictEqual(row.comparability.comparable, false);
+		}
+	}
+	for (const missingSide of ["baseline", "candidate"] as const) {
+		const pair = {
+			baseline: behaviorArtifact("eval-baseline", BASELINE_ROUTE, ROUTE_DIMENSIONS),
+			candidate: behaviorArtifact("eval-candidate", CANDIDATE_ROUTE, ROUTE_DIMENSIONS),
+		};
+		delete pair[missingSide].matrix.dimensions;
+		const comparison = compareEvalArtifactsV4(pair.baseline, pair.candidate);
+		strictEqual(comparison.hardGate.pass, false);
+		deepStrictEqual(
+			comparison.envelopeMismatches.map((row) => row.fields),
+			[["matrix.dimensions"], ["matrix.dimensions"]],
+		);
+	}
+});
+
+test("behavioral grouping varies target and model independently without combining scenarios or roles", () => {
+	for (const dimension of ["target", "wireModel"] as const) {
+		const baseline = behaviorArtifact("eval-baseline", BASELINE_ROUTE, [dimension, "runtime"]);
+		const route = { ...BASELINE_ROUTE, [dimension === "target" ? "id" : "model"]: "changed" };
+		const candidate = behaviorArtifact("eval-candidate", route, [dimension, "runtime"]);
+		for (const fixture of [baseline, candidate]) {
+			const result = fixture.results[0];
+			ok(result?.behavioralMetrics);
+			const differentScenario = structuredClone(result);
+			ok(differentScenario.behavioralMetrics);
+			differentScenario.taskId = "second-case";
+			differentScenario.behavioralMetrics.scenarioId = "second-case";
+			const differentRole = structuredClone(result);
+			ok(differentRole.behavioralMetrics);
+			differentRole.behavioralMetrics.role = "worker";
+			fixture.results.push(differentScenario, differentRole);
+		}
+		candidate.results.reverse();
+		const comparison = compareEvalArtifactsV4(baseline, candidate);
+		strictEqual(comparison.hardGate.pass, true);
+		strictEqual(comparison.behavioralMetrics.length, 30);
+		deepStrictEqual(comparison.envelopeMismatches, []);
+	}
+});
+
+test("behavioral comparisons reject missing scenarios, roles, envelopes, and partially missing trials", () => {
+	for (const missing of ["scenario", "role", "envelope", "trial"] as const) {
+		const baseline = behaviorArtifact("eval-baseline", BASELINE_ROUTE, ROUTE_DIMENSIONS);
+		const candidate = behaviorArtifact("eval-candidate", CANDIDATE_ROUTE, ROUTE_DIMENSIONS);
+		if (missing === "scenario") candidate.results = [];
+		else if (missing === "role") {
+			for (const result of candidate.results) {
+				ok(result.behavioralMetrics);
+				result.behavioralMetrics.role = "worker";
+			}
+		} else {
+			for (const result of missing === "trial" ? candidate.results.slice(0, 1) : candidate.results) {
+				delete result.executionEnvelope;
+			}
+		}
+		const comparison = compareEvalArtifactsV4(baseline, candidate);
+		strictEqual(comparison.hardGate.pass, false, missing);
+		const field = missing === "trial" ? "executionEnvelope.missingTrial" : "executionEnvelope";
+		deepStrictEqual(
+			comparison.envelopeMismatches.map((row) => row.fields),
+			missing === "role" ? [[field], [field]] : [[field]],
+		);
+		ok(comparison.behavioralMetrics.every((row) => row.comparability.comparable === false));
+	}
+});
+
+test("behavioral route alignment rejects ambiguous multi-route groups on either side", () => {
+	for (const side of ["baseline", "candidate"] as const) {
+		for (const field of ["id", "model"] as const) {
+			const pair = {
+				baseline: behaviorArtifact("eval-baseline", BASELINE_ROUTE, ROUTE_DIMENSIONS),
+				candidate: behaviorArtifact("eval-candidate", CANDIDATE_ROUTE, ROUTE_DIMENSIONS),
+			};
+			const extra = behaviorArtifact("eval-extra", { ...BASELINE_ROUTE, [field]: "extra-route" }, ROUTE_DIMENSIONS);
+			pair[side].results.push(...extra.results);
+			const comparison = compareEvalArtifactsV4(pair.baseline, pair.candidate);
+			strictEqual(comparison.hardGate.pass, false);
+			deepStrictEqual(
+				comparison.envelopeMismatches.map((row) => row.fields),
+				[["behavioralMetrics.ambiguousRouteGroup"]],
+			);
+			strictEqual(comparison.envelopeMismatches[0]?.[`${side}Targets`]?.length, 2);
+			ok(comparison.behavioralMetrics.every((row) => row.change === "incomparable"));
+			ok(renderEvalComparisonReportV1(comparison, "text").includes("extra-route"));
+		}
+	}
+});
+
+test("declared route alignment preserves non-varying prompt, skill, policy, context, and corpus mismatches", () => {
+	const changes: Array<[string, (envelope: EvalExecutionEnvelopeV1) => void]> = [
+		[
+			"prompt",
+			(envelope) => {
+				envelope.prompt.compositionHash = "b".repeat(64);
+			},
+		],
+		[
+			"recipe",
+			(envelope) => {
+				envelope.recipe = { id: "skill-fixture", version: 1, contentHash: DIGEST };
+			},
+		],
+		[
+			"toolSignature",
+			(envelope) => {
+				envelope.toolSignature = "b".repeat(64);
+			},
+		],
+		[
+			"autonomy",
+			(envelope) => {
+				envelope.autonomy = "auto-edit";
+			},
+		],
+		[
+			"policyHashes",
+			(envelope) => {
+				envelope.policyHashes.project = "b".repeat(64);
+			},
+		],
+		[
+			"projectContext",
+			(envelope) => {
+				envelope.projectContext.contentHash = "b".repeat(64);
+			},
+		],
+		[
+			"corpus",
+			(envelope) => {
+				envelope.corpus.version = "2.0.0";
+			},
+		],
+	];
+	for (const [field, change] of changes) {
+		const baseline = behaviorArtifact("eval-baseline", BASELINE_ROUTE, ROUTE_DIMENSIONS);
+		const candidate = behaviorArtifact("eval-candidate", CANDIDATE_ROUTE, ROUTE_DIMENSIONS);
+		for (const result of candidate.results) {
+			ok(result.executionEnvelope);
+			change(result.executionEnvelope);
+		}
+		const comparison = compareEvalArtifactsV4(baseline, candidate);
+		strictEqual(comparison.hardGate.pass, false, field);
+		deepStrictEqual(
+			comparison.envelopeMismatches.map((row) => row.fields),
+			[[field]],
+		);
+		ok(comparison.behavioralMetrics.every((row) => row.comparability.comparable === false));
+		deepStrictEqual(
+			comparison.affectedCorpusResults,
+			field === "prompt" || field === "recipe" ? [{ scenarioId: "route-case", role: "main", changedFields: [field] }] : [],
+		);
+	}
+	for (const dimension of ["runtime", "thinkingLevel"] as const) {
+		const dimensions = ROUTE_DIMENSIONS.filter((entry) => entry !== dimension);
+		const comparison = compareEvalArtifactsV4(
+			behaviorArtifact("eval-baseline", BASELINE_ROUTE, dimensions),
+			behaviorArtifact("eval-candidate", CANDIDATE_ROUTE, dimensions),
+		);
+		strictEqual(comparison.hardGate.pass, false);
+		deepStrictEqual(
+			comparison.envelopeMismatches.map((row) => row.fields),
+			[[dimension]],
+		);
+	}
+});
+
+test("behavioral comparison retains within-run envelope variance checks and legacy envelope compatibility", () => {
+	const baseline = behaviorArtifact("eval-baseline", BASELINE_ROUTE, ROUTE_DIMENSIONS);
+	const candidate = behaviorArtifact("eval-candidate", CANDIDATE_ROUTE, ROUTE_DIMENSIONS);
+	const result = candidate.results[0];
+	ok(result?.executionEnvelope);
+	result.executionEnvelope.projectContext.chars = 101;
+	const comparison = compareEvalArtifactsV4(baseline, candidate);
+	strictEqual(comparison.hardGate.pass, false);
+	deepStrictEqual(
+		comparison.envelopeMismatches.map((row) => row.fields),
+		[["executionEnvelope.withinRunVariance"]],
+	);
+	const legacy = behaviorArtifact("eval-legacy", BASELINE_ROUTE);
+	for (const entry of legacy.results) delete entry.executionEnvelope;
+	strictEqual(compareEvalArtifactsV4(legacy, structuredClone(legacy)).hardGate.pass, true);
+});
+
+test("behavioral comparison reports retain both routes and hard failures despite metric filtering", () => {
+	const baseline = behaviorArtifact("eval-baseline", BASELINE_ROUTE, ROUTE_DIMENSIONS);
+	const candidate = behaviorArtifact("eval-candidate", CANDIDATE_ROUTE, ROUTE_DIMENSIONS);
+	for (const result of candidate.results) {
+		ok(result.behavioralMetrics);
+		result.behavioralMetrics.metrics["correctness.taskSolved"].value = 0;
+	}
+	for (const metric of ["correctness", "efficiency"]) {
+		const comparison = compareEvalArtifactsV4(baseline, candidate, { metric });
+		strictEqual(comparison.hardGate.pass, false);
+		strictEqual(comparison.hardGate.failures.length, 1);
+		strictEqual(comparison.hardGate.failures[0]?.change, "regressed");
+		for (const format of ["text", "json", "md", "junit"] as const) {
+			const report = renderEvalComparisonReportV1(comparison, format);
+			for (const route of [BASELINE_ROUTE, CANDIDATE_ROUTE]) {
+				ok(report.includes(route.id), format);
+				ok(report.includes(route.model), format);
+			}
+			ok(report.includes("regressed"), format);
+		}
+	}
+});
+
 function validSuite() {
 	return {
 		version: 2,
@@ -254,4 +507,51 @@ function artifact(evalId: string, serverBuild: string): EvalArtifactV4 {
 		},
 		results: [],
 	};
+}
+
+function behaviorArtifact(
+	evalId: string,
+	target: EvalArtifactResultV4["target"],
+	dimensions: EvalExecutionMatrixDimensionV1[] = [],
+): EvalArtifactV4 {
+	const fixture = artifact(evalId, "fixture-server");
+	fixture.matrix = { target: target.id, model: target.model, thinking: target.thinking, dimensions: [...dimensions] };
+	fixture.results = [1, 3].map((toolCalls, repeatIndex) => {
+		const result: EvalArtifactResultV4 = {
+			taskId: "route-case",
+			repeatIndex,
+			target: { ...target },
+			pass: true,
+			failureClass: null,
+			assignmentId: null,
+			terminalReceiptDigest: null,
+			metrics: { "task.solved": true, "tools.totalCalls": toolCalls },
+			artifacts: {},
+			executionEnvelope: {
+				schema: EVAL_EXECUTION_ENVELOPE_SCHEMA_V1,
+				prompt: { fragments: [{ id: "fixture", version: 1, contentHash: DIGEST }], compositionHash: DIGEST },
+				recipe: null,
+				target: target.id,
+				wireModel: target.model,
+				runtime: `runtime-${target.id}`,
+				thinkingLevel: target.thinking,
+				toolSignature: DIGEST,
+				autonomy: "read-only",
+				policyHashes: { rulePack: DIGEST, project: DIGEST },
+				projectContext: {
+					kind: "session",
+					tier: "full",
+					contentHash: DIGEST,
+					chars: 100,
+					sections: ["overview"],
+					rulesApplied: [],
+					operatorProfileApplied: false,
+				},
+				corpus: { id: "route-fixture", version: "1.0.0" },
+			},
+		};
+		result.behavioralMetrics = buildEvalBehaviorMetricsV1(result, "main");
+		return result;
+	});
+	return fixture;
 }
