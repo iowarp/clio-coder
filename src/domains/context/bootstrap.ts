@@ -3,7 +3,7 @@ import { existsSync, mkdirSync, readFileSync, writeFileSync } from "node:fs";
 import { dirname, join, parse } from "node:path";
 import type { ContextActivityPayload } from "../../core/bus-events.js";
 import { createTomlFileReader, type TomlFileReader, tomlTableAt } from "../../core/toml.js";
-import { classifyProjectPreload, type ProjectPreloadClass } from "../prompts/preload.js";
+import { type ProjectPreloadClass, selectProjectPreload } from "../prompts/preload.js";
 import { detectProjectType, type ProjectType } from "../session/workspace/project-type.js";
 import {
 	type AdoptionScanResult,
@@ -139,7 +139,7 @@ export interface RunBootstrapResult {
 	};
 	/**
 	 * How the session compiler will preload the project context that exists
-	 * on disk after this run: full, synopsis (with the limit that forced it),
+	 * on disk after this run with unknown tool capability: full, partial,
 	 * or none. In preview mode this reflects the current on-disk state, since
 	 * preview writes nothing.
 	 */
@@ -423,7 +423,7 @@ function indexedSourceFileCount(codewiki: Codewiki): number {
 /** Measure how the session compiler will preload the on-disk project context. */
 function measureProjectPreload(cwd: string): ProjectPreloadClass {
 	const promptContext = renderPromptContext(cwd);
-	return classifyProjectPreload({ hasClioMd: promptContext.handbookFiles.length > 0, text: promptContext.text });
+	return selectProjectPreload(promptContext, null).classification;
 }
 
 function packageScripts(cwd: string): Record<string, string> {
@@ -1489,7 +1489,7 @@ export async function runBootstrap(input: RunBootstrapInput = {}): Promise<RunBo
 	if (preload.mode === "full" && preload.nearLimit) {
 		warn(
 			input.io,
-			`  warning: project context is within 10% of the preload limit (${preload.chars} chars of 8000, ${preload.lines} lines of 220); the next growth may flip it to a synopsis\n`,
+			`  warning: project context is within 10% of the preload limit (${preload.chars} UTF-16 units of 8000, ${preload.lines} rendered lines of 220); further growth may omit authored suffixes\n`,
 		);
 	}
 	progress(input, {

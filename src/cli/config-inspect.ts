@@ -11,7 +11,7 @@
  * everything reports the same columns.
  */
 
-import { existsSync, readFileSync } from "node:fs";
+import { existsSync } from "node:fs";
 import { basename, join } from "node:path";
 import type { ClioSettings } from "../core/config.js";
 import { resolvePackageRoot } from "../core/package-root.js";
@@ -32,7 +32,7 @@ import {
 	readHookSources,
 	readPersistedHookReceipts,
 } from "../domains/middleware/index.js";
-import { classifyProjectPreload } from "../domains/prompts/preload.js";
+import { selectProjectPreload } from "../domains/prompts/preload.js";
 import { defaultScopedResourceRoots } from "../domains/resources/common-loader.js";
 import { ceilChars } from "../domains/session/context-accounting.js";
 import { capturedHookSourcesFor } from "../entry/extension-hook-sources.js";
@@ -120,12 +120,9 @@ function inspectClioMd(cwd: string, graph: CustomizationGraph): void {
 	if (loaded.files.length === 0) return;
 	try {
 		const promptContext = renderPromptContext(cwd);
-		const preload = classifyProjectPreload({
-			hasClioMd: promptContext.handbookFiles.length > 0,
-			text: promptContext.text,
-		});
-		for (const [index, file] of loaded.files.entries()) {
-			const text = readFileSync(file.path, "utf8");
+		const preload = selectProjectPreload(promptContext, null).classification;
+		for (const [index, file] of promptContext.handbookSources.entries()) {
+			const text = file.source;
 			graph.entries.push({
 				category: "clio-md",
 				id: basename(file.path),
@@ -133,15 +130,19 @@ function inspectClioMd(cwd: string, graph: CustomizationGraph): void {
 				sourcePath: file.path,
 				hash: shortHash(text),
 				trust: "trusted",
-				precedence: loaded.files.length === 1 ? "single" : "layer",
+				precedence: promptContext.handbookSources.length === 1 ? "single" : "layer",
 				reloadClass: "next-turn",
 				contextCostTokens: ceilChars(text.length),
 				detail: {
 					layer: index + 1,
-					layers: loaded.files.length,
+					layers: promptContext.handbookSources.length,
 					preload: preload.label,
 					preloadChars: preload.chars,
 					preloadLines: preload.lines,
+					preloadIncludedChars: preload.includedChars ?? 0,
+					preloadIncludedLines: preload.includedLines ?? 0,
+					preloadSourceIncludedChars: preload.sources?.[index]?.includedChars ?? 0,
+					preloadSourceHash: preload.sources?.[index]?.contentHash ?? "",
 					...(preload.nearLimit ? { preloadNearLimit: true } : {}),
 				},
 			});

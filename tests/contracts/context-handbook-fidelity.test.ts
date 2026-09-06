@@ -11,6 +11,7 @@ import { renderPromptContext } from "../../src/domains/context/prompt-context.js
 import { runContextRefresh } from "../../src/domains/context/refresh.js";
 import { readClioState, writeClioState } from "../../src/domains/context/state.js";
 import { createPromptsBundle } from "../../src/domains/prompts/extension.js";
+import { selectProjectPreload } from "../../src/domains/prompts/preload.js";
 import { type IsolatedClioEnv, isolateClioEnv } from "../harness/scratch-env.js";
 
 const staleNavigation = "OLD_INDEX_ENTRY";
@@ -144,6 +145,48 @@ describe("authored handbook fidelity", { concurrency: false }, () => {
 			deepStrictEqual(readFileSync(path), Buffer.from(source));
 		});
 	}
+
+	it("retains bounded authored guidance through the production compiler for every tool capability", async () => {
+		const source =
+			"EARLY_AUTHORED_SENTINEL: preserve calibration.\n\n" +
+			"A later guidance paragraph.\n\n".repeat(450) +
+			"OMITTED_TAIL_SENTINEL\n";
+		writeFileSync(path, source);
+		const context = createContextBundle({ bus: createSafeEventBus(), getContract: () => undefined });
+		const bundle = createPromptsBundle({
+			bus: createSafeEventBus(),
+			getContract(name) {
+				return name === "context" ? (context.contract as never) : undefined;
+			},
+		});
+		await bundle.extension.start();
+		try {
+			for (const providerSupportsTools of [true, false, null]) {
+				const compiled = await bundle.contract.compileSessionPrompt({
+					sessionId: `bounded-${providerSupportsTools}`,
+					cwd,
+					sessionInputs: { providerSupportsTools },
+				});
+				strictEqual(compiled.systemPrompt.includes("EARLY_AUTHORED_SENTINEL"), true);
+				strictEqual(compiled.systemPrompt.includes("OMITTED_TAIL_SENTINEL"), false);
+				strictEqual(compiled.projectPreload?.mode, "partial");
+				strictEqual(compiled.systemPrompt.includes(JSON.stringify(path)), true);
+				const selected = selectProjectPreload(renderPromptContext(cwd), providerSupportsTools);
+				deepStrictEqual(compiled.projectPreload, selected.classification);
+				strictEqual(compiled.systemPrompt.includes(selected.text), true);
+				writeFileSync(path, "Changed on disk.\n");
+				const cached = await bundle.contract.compileSessionPrompt({
+					sessionId: `bounded-${providerSupportsTools}`,
+					cwd,
+					sessionInputs: { providerSupportsTools },
+				});
+				deepStrictEqual(cached.projectPreload, compiled.projectPreload);
+				writeFileSync(path, source);
+			}
+		} finally {
+			await bundle.extension.stop?.();
+		}
+	});
 
 	it("preserves authored policy under generated-looking section titles during refresh", async () => {
 		const source =
@@ -297,6 +340,14 @@ describe("authored handbook fidelity", { concurrency: false }, () => {
 		strictEqual(inherited.text.includes(authored), true);
 		strictEqual(inherited.text.includes(base), true);
 		strictEqual(inherited.text.indexOf(authored) < inherited.text.indexOf(base), true);
+		writeFileSync(path, authored + "Ancestor guidance.\n\n".repeat(600));
+		const bounded = selectProjectPreload(renderPromptContext(child), true);
+		strictEqual(bounded.classification.mode, "partial");
+		strictEqual(bounded.text.includes(base), true);
+		deepStrictEqual(
+			bounded.classification.sources?.map((source) => source.path),
+			[path, childPath],
+		);
 		const overridePath = join(child, "CLIO-CODER.override.md");
 		const override = "OVERRIDE_HEADINGLESS_GUIDANCE\n\nUse the override-specific command.\n";
 		writeFileSync(overridePath, override);
@@ -306,6 +357,12 @@ describe("authored handbook fidelity", { concurrency: false }, () => {
 		strictEqual(replaced.text.includes(authored), false);
 		strictEqual(replaced.text.includes(base), false);
 		strictEqual(replaced.clioMd, null);
+		const replacement = selectProjectPreload(replaced, true);
+		strictEqual(replacement.classification.mode, "full");
+		deepStrictEqual(
+			replacement.classification.sources?.map((source) => source.path),
+			[overridePath],
+		);
 	});
 
 	it("keeps the model proposal parser strict while authored Markdown loads", () => {

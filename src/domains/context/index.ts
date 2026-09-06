@@ -23,7 +23,13 @@ export {
 	runBootstrap,
 } from "./bootstrap.js";
 export { type RunContextClearInput, type RunContextClearResult, runContextClear } from "./clear.js";
-export { loadProjectClioMd, parseClioMd, serializeClioMd, tryReadClioMd } from "./clio-md.js";
+export {
+	loadProjectClioMd,
+	parseClioMd,
+	renderProjectContextFragment,
+	serializeClioMd,
+	tryReadClioMd,
+} from "./clio-md.js";
 export {
 	codewikiEntries,
 	codewikiNeedsBackfill,

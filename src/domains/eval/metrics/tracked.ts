@@ -1,9 +1,11 @@
 import { readFile } from "node:fs/promises";
 import { dirname, join } from "node:path";
 import type { RunReceipt } from "../../dispatch/types.js";
+import type { ProjectPreloadClass } from "../../prompts/preload.js";
 import { listSessionLedgerRefs, parseSessionEntries } from "../../session/archive-readers.js";
 import { extractReasoningTokens } from "../../session/context-accounting.js";
 import type { SessionEntry } from "../../session/entries.js";
+import { isProjectPreloadClass } from "../../session/prompt-manifest.js";
 import { evalHarnessMetricsFromReceipt } from "../harness-metrics.js";
 import type {
 	EvalMetricSource,
@@ -22,14 +24,7 @@ export interface EvalLedgerSnapshot {
 export interface EvalPromptManifestObservation {
 	systemPromptHash: string;
 	thinkingLevel: string | null;
-	projectPreload: {
-		mode: "full" | "synopsis" | "none";
-		chars: number;
-		lines: number;
-		reason: string | null;
-		nearLimit: boolean;
-		label: string;
-	} | null;
+	projectPreload: ProjectPreloadClass | null;
 	fragments: Array<{ id: string; contentHash: string }>;
 }
 
@@ -408,26 +403,7 @@ function promptManifestObservation(record: Record<string, unknown>): EvalPromptM
 		return contentHash === null ? [] : [{ id: entry.id, contentHash }];
 	});
 	const preload = record.projectPreload;
-	const projectPreload: EvalPromptManifestObservation["projectPreload"] =
-		preload === null
-			? null
-			: isRecord(preload) &&
-					(preload.mode === "full" || preload.mode === "synopsis" || preload.mode === "none") &&
-					typeof preload.chars === "number" &&
-					Number.isInteger(preload.chars) &&
-					typeof preload.lines === "number" &&
-					Number.isInteger(preload.lines) &&
-					typeof preload.nearLimit === "boolean" &&
-					typeof preload.label === "string"
-				? {
-						mode: preload.mode as "full" | "synopsis" | "none",
-						chars: preload.chars,
-						lines: preload.lines,
-						reason: nullableString(preload.reason),
-						nearLimit: preload.nearLimit,
-						label: preload.label,
-					}
-				: null;
+	const projectPreload = isProjectPreloadClass(preload) ? preload : null;
 	return {
 		systemPromptHash,
 		thinkingLevel: nullableString(record.thinkingLevel),

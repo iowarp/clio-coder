@@ -115,15 +115,54 @@ function isPromptManifestFragment(value: unknown): value is PromptManifestFragme
 	);
 }
 
-function isProjectPreloadClass(value: unknown): value is ProjectPreloadClass {
-	if (!isRecord(value)) return false;
+/** Validate additive accounting when present, while accepting historical manifests. */
+export function isProjectPreloadClass(value: unknown): value is ProjectPreloadClass {
+	if (value === null || typeof value !== "object" || Array.isArray(value)) return false;
+	const row = value as Record<string, unknown>;
+	const integer = (item: unknown): item is number => typeof item === "number" && Number.isInteger(item) && item >= 0;
+	const optionalInteger = (item: unknown): boolean => item === undefined || integer(item);
+	const range = (item: unknown): boolean =>
+		item === null ||
+		(Array.isArray(item) &&
+			item.length === 2 &&
+			integer(item[0]) &&
+			item[0] >= 1 &&
+			integer(item[1]) &&
+			item[1] >= item[0]);
 	return (
-		(value.mode === "full" || value.mode === "synopsis" || value.mode === "none") &&
-		isNonNegativeInteger(value.chars) &&
-		isNonNegativeInteger(value.lines) &&
-		(value.reason === null || value.reason === "size" || value.reason === "lines" || value.reason === "no-clio-md") &&
-		typeof value.nearLimit === "boolean" &&
-		typeof value.label === "string"
+		typeof row.mode === "string" &&
+		["full", "partial", "synopsis", "none"].includes(row.mode) &&
+		integer(row.chars) &&
+		integer(row.lines) &&
+		(row.reason === null || (typeof row.reason === "string" && ["size", "lines", "no-clio-md"].includes(row.reason))) &&
+		typeof row.nearLimit === "boolean" &&
+		typeof row.label === "string" &&
+		optionalInteger(row.includedChars) &&
+		optionalInteger(row.includedLines) &&
+		optionalInteger(row.omittedSupportFragments) &&
+		(row.providerSupportsTools === undefined ||
+			row.providerSupportsTools === null ||
+			typeof row.providerSupportsTools === "boolean") &&
+		(row.sources === undefined ||
+			(Array.isArray(row.sources) &&
+				row.sources.every((source: unknown) => {
+					if (source === null || typeof source !== "object" || Array.isArray(source)) return false;
+					const s = source as Record<string, unknown>;
+					return (
+						typeof s.path === "string" &&
+						typeof s.contentHash === "string" &&
+						/^[a-f0-9]{64}$/.test(s.contentHash) &&
+						integer(s.availableChars) &&
+						integer(s.availableLines) &&
+						integer(s.includedChars) &&
+						integer(s.includedLines) &&
+						s.includedChars <= s.availableChars &&
+						s.includedLines <= s.availableLines &&
+						range(s.includedRange) &&
+						range(s.omittedRange) &&
+						(s.omissionReason === null || s.omissionReason === "budget")
+					);
+				})))
 	);
 }
 
