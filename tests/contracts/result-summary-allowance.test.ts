@@ -108,6 +108,17 @@ it("bounds summary by its own allowance and commitMessage by the commit bound", 
 	ok(resultContractSourceId(narrow).startsWith("agent-result-contract:mutation-report:"));
 });
 
+it("keeps architect-plan authorship at the commit bound; the allowance is mutation-report only", () => {
+	const architect = { kind: "architect-plan", path: "docs/plan.md" } as const;
+	const fits = JSON.stringify({ commitMessage: "plan", summary: "y".repeat(RESULT_COMMIT_MESSAGE_MAX_BYTES) });
+	strictEqual(resultContractAuthorship(architect, fits).summary, "y".repeat(RESULT_COMMIT_MESSAGE_MAX_BYTES));
+	const over = JSON.stringify({ commitMessage: "plan", summary: "y".repeat(RESULT_COMMIT_MESSAGE_MAX_BYTES + 1) });
+	deepStrictEqual(resultContractAuthorship(architect, over), { commitMessage: null, summary: null });
+	strictEqual(resultContractOutputBytes(architect), null);
+	strictEqual(workerOutputCaptureBytes(architect), WORKER_OUTPUT_MAX_BYTES);
+	strictEqual(resultContractAuthorship(MUTATION, over).summary, "y".repeat(RESULT_COMMIT_MESSAGE_MAX_BYTES + 1));
+});
+
 it("parses the allowance from recipe frontmatter and the wire, rejecting out-of-range values", () => {
 	deepStrictEqual(parseResultContract({ kind: "mutation-report" }, "r.md"), { kind: "mutation-report" });
 	deepStrictEqual(parseResultContract({ kind: "mutation-report", maxSummaryBytes: 4_096 }, "r.md"), {
@@ -247,6 +258,10 @@ it("seals a conforming report larger than the receipt floor without truncation, 
 	);
 	// The same clipped text without the truncation fact is still just invalid JSON.
 	match(validate(clipped.text, MUTATION).reason ?? "", /valid JSON/u);
+	// A truncated result fails even when its head parses as a complete report.
+	const parsable = validate(report("short"), MUTATION, true);
+	strictEqual(parsable.conformance, "fail");
+	match(parsable.reason ?? "", /exceeded the sealed output bound/u);
 	// Repair rounds quote the effective allowance.
 	const repair = resultContractRepairMessages(
 		{

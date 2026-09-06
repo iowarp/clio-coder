@@ -1148,11 +1148,14 @@ export const RESULT_SUMMARY_MAX_BYTES_CEILING = 32_768;
  */
 const RESULT_OUTPUT_ENVELOPE_HEADROOM_BYTES = 4_096;
 
-/** The summary allowance this contract validates against. */
+/**
+ * The summary allowance this contract validates against. Only a mutation
+ * report carries the inline deliverable; every other kind that reads authored
+ * prose (architect-plan) keeps the commit-message bound it always had.
+ */
 function resultSummaryMaxBytes(contract: ResultContract): number {
-	return contract.kind === "mutation-report" && contract.maxSummaryBytes !== undefined
-		? contract.maxSummaryBytes
-		: RESULT_SUMMARY_DEFAULT_MAX_BYTES;
+	if (contract.kind !== "mutation-report") return RESULT_COMMIT_MESSAGE_MAX_BYTES;
+	return contract.maxSummaryBytes ?? RESULT_SUMMARY_DEFAULT_MAX_BYTES;
 }
 
 /**
@@ -1489,18 +1492,18 @@ function mutationValidationsReason(value: unknown): string {
  * its own interest is the one claim here that needs no corroboration.
  */
 function validateMutation(contract: ResultContract, input: ResultContractValidationInput): ResultContractValidation {
-	const parsed = parseJson(input.output);
-	if (!parsed.ok) {
-		if (input.outputTruncated === true && input.output !== null) {
-			const bound = resultContractOutputBytes(contract) ?? Buffer.byteLength(input.output, "utf8");
-			return failure(
-				contract,
-				"unmeasured",
-				`result exceeded the sealed output bound of ${bound} bytes and was truncated; keep summary within ${resultSummaryMaxBytes(contract)} UTF-8 bytes or state the limitation`,
-			);
-		}
-		return failure(contract, "unmeasured", parsed.reason);
+	// A clipped result is incomplete whatever its head happens to parse as; the
+	// bound is named so the repair is about length, not JSON.
+	if (input.outputTruncated === true && input.output !== null) {
+		const bound = resultContractOutputBytes(contract) ?? Buffer.byteLength(input.output, "utf8");
+		return failure(
+			contract,
+			"unmeasured",
+			`result exceeded the sealed output bound of ${bound} bytes and was truncated; keep summary within ${resultSummaryMaxBytes(contract)} UTF-8 bytes or state the limitation`,
+		);
 	}
+	const parsed = parseJson(input.output);
+	if (!parsed.ok) return failure(contract, "unmeasured", parsed.reason);
 	const value = parsed.value;
 	if (
 		!hasOnlyKeys(value, ["mutatedPaths", "validations", "commitMessage", "summary"]) ||
