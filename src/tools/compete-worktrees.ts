@@ -616,7 +616,13 @@ export async function createCandidateWorktreeMapped(
  * builder changed nothing (an empty candidate is a legitimate ranking fact).
  */
 export function commitCandidateWork(worktree: CandidateWorktree, message: string): boolean {
-	return commitWorktreePath(worktree.path, COMPETE_COMMIT_IDENTITY, message);
+	// Context reads refresh these runtime files even in a read-only worker.
+	// The caller's pending .gitignore update is not part of the candidate base;
+	// exclude the exact files, while keeping operator-owned project assets.
+	return commitWorktreePath(worktree.path, COMPETE_COMMIT_IDENTITY, message, [
+		".clio-coder/codewiki.json",
+		".clio-coder/state.json",
+	]);
 }
 
 /** One-line stat summary of what a candidate branch changed relative to HEAD. */
