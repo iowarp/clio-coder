@@ -46,7 +46,12 @@ export function renderPromptContext(cwd: string): ProjectPromptContext {
 	const codewiki = readCodewiki(cwd);
 	if (codewiki) {
 		const state = readClioState(cwd);
-		const stale = state ? isStale(state.fingerprint, computeFingerprintCached(cwd, codewiki)) : true;
+		let stale = true;
+		try {
+			if (state) stale = isStale(state.fingerprint, computeFingerprintCached(cwd, codewiki));
+		} catch {
+			warnings.push("clio-coder: codewiki freshness unavailable; source could not be read; run /context refresh");
+		}
 		const suffix = stale ? " (stale; run /context refresh)" : "";
 		addSupport(`<codewiki>available${suffix}; use code_nav</codewiki>`);
 	}

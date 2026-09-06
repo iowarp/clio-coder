@@ -1,6 +1,6 @@
 import { execFile, execFileSync } from "node:child_process";
 import { createHash } from "node:crypto";
-import { readFileSync, statSync } from "node:fs";
+import { readFileSync } from "node:fs";
 import { join } from "node:path";
 import { promisify } from "node:util";
 import { enumerateWorkspaceFiles, enumerateWorkspaceFilesAsync } from "../../core/workspace-files.js";
@@ -80,18 +80,13 @@ async function currentGitHeadAsync(cwd: string): Promise<string | null> {
 	}
 }
 
-function countLines(filePath: string): number {
-	try {
-		const text = readFileSync(filePath, "utf8");
-		if (text.length === 0) return 0;
-		let lines = 1;
-		for (const ch of text) {
-			if (ch === "\n") lines += 1;
-		}
-		return lines;
-	} catch {
-		return 0;
+function countLines(text: string): number {
+	if (text.length === 0) return 0;
+	let lines = 1;
+	for (const ch of text) {
+		if (ch === "\n") lines += 1;
 	}
+	return lines;
 }
 
 function locFromCodewiki(codewiki: Codewiki | null): number | null {
@@ -100,10 +95,8 @@ function locFromCodewiki(codewiki: Codewiki | null): number | null {
 }
 
 function createTreeHash(): ReturnType<typeof createHash> {
-	// Invalidate legacy fingerprints that could certify partially updated indexes,
-	// including empty trees. The next ensure reconciles content before certifying
-	// this domain; subsequent checks still use path/size/floored-mtime metadata.
-	return createHash("sha256").update("clio-codewiki-tree:v2\n");
+	// Migrate both unsalted and v2 metadata identities, including empty trees.
+	return createHash("sha256").update("clio-codewiki-tree:v3\n");
 }
 
 /**
@@ -117,15 +110,11 @@ function accumulateFile(
 	hash: ReturnType<typeof createHash>,
 	artifactLoc: number | null,
 ): number {
-	const absPath = join(cwd, relPath);
-	let stat: ReturnType<typeof statSync>;
-	try {
-		stat = statSync(absPath);
-	} catch {
-		return 0;
-	}
-	hash.update(`${relPath}:${stat.size}:${Math.floor(stat.mtimeMs)}\n`);
-	if (artifactLoc === null && LOC_EXTENSIONS.has(extensionOf(relPath))) return countLines(absPath);
+	// Read failures must invalidate the operation, never certify a partial tree.
+	const contents = readFileSync(join(cwd, relPath));
+	const digest = createHash("sha256").update(contents).digest("hex");
+	hash.update(`${JSON.stringify(relPath)}:${digest}\n`);
+	if (artifactLoc === null && LOC_EXTENSIONS.has(extensionOf(relPath))) return countLines(contents.toString("utf8"));
 	return 0;
 }
 
@@ -149,13 +138,9 @@ export interface ComputeFingerprintAsyncOptions {
 }
 
 /**
- * Same fingerprint, sliced. One `statSync` per visible file plus a `git
- * rev-parse` is tens of milliseconds on a large repository, which is a dropped
- * frame if it lands in one turn. Callers on a status-surface poll or on the
- * session-start path should use this; one-shot CLI paths need not bother.
- *
- * The enumeration itself runs through `enumerateWorkspaceFilesAsync` on the
- * same slicer, so the former 34 ms synchronous floor is gone too.
+ * Same content fingerprint, with cooperative yields between file reads and
+ * during enumeration. Individual reads remain synchronous; callers on status
+ * surfaces and session-start paths avoid a single uninterrupted whole-tree scan.
  */
 export async function computeFingerprintAsync(
 	cwd: string,

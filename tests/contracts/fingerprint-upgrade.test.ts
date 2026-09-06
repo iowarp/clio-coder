@@ -1,6 +1,6 @@
-import { deepStrictEqual, notStrictEqual, ok, strictEqual } from "node:assert/strict";
+import { deepStrictEqual, notStrictEqual, ok, rejects, strictEqual, throws } from "node:assert/strict";
 import { createHash } from "node:crypto";
-import { readFileSync, statSync, writeFileSync } from "node:fs";
+import { chmodSync, readFileSync, statSync, utimesSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
 import { afterEach, beforeEach, describe, it } from "node:test";
 import { enumerateWorkspaceFiles } from "../../src/core/workspace-files.js";
@@ -15,14 +15,15 @@ import {
 	computeFingerprintAsync,
 	computeFingerprintCached,
 } from "../../src/domains/context/fingerprint.js";
+import { renderPromptContext } from "../../src/domains/context/prompt-context.js";
 import { readClioState, statePath, writeClioState } from "../../src/domains/context/state.js";
 import { loadCodewikiForTool } from "../../src/tools/codewiki/shared.js";
 import { type IsolatedClioEnv, isolateClioEnv } from "../harness/scratch-env.js";
 
 // Frozen pre-upgrade tree digest from 9214789's fingerprint.ts. This fixture
 // deliberately has no dependency on the current fingerprint's hash domain.
-function legacyTreeHash(cwd: string): string {
-	const hash = createHash("sha256");
+function legacyTreeHash(cwd: string, salt = ""): string {
+	const hash = createHash("sha256").update(salt);
 	for (const relPath of enumerateWorkspaceFiles(cwd, EXCLUDED_DIRS).filter(isIndexablePath)) {
 		let stat: ReturnType<typeof statSync>;
 		try {
@@ -150,6 +151,58 @@ describe("context fingerprint upgrade", () => {
 		);
 		strictEqual(next.codewiki, current);
 		strictEqual(next.changed, false);
+	});
+
+	it("detects equal-size edits with restored metadata and retains the explicit cache lifetime", async (t) => {
+		const cwd = isolated.dir;
+		const path = join(cwd, "a.ts");
+		writeFileSync(path, "export function before() {}\n");
+		// Integer timestamps avoid filesystem timestamp rounding in the oracle.
+		utimesSync(path, 1_700_000_000, 1_700_000_000);
+		const current = await buildCodewiki({ cwd, language: "typescript" });
+		const before = computeFingerprint(cwd, current);
+		const metadata = legacyTreeHash(cwd, "clio-codewiki-tree:v2\n");
+		t.mock.timers.enable({ apis: ["Date"], now: Date.now() });
+		deepStrictEqual(computeFingerprintCached(cwd, current), before);
+		writeFileSync(path, "export function after_() {}\n");
+		utimesSync(path, 1_700_000_000, 1_700_000_000);
+		strictEqual(legacyTreeHash(cwd, "clio-codewiki-tree:v2\n"), metadata);
+		const after = computeFingerprint(cwd, current);
+		notStrictEqual(after.treeHash, before.treeHash);
+		deepStrictEqual(await computeFingerprintAsync(cwd, current), after);
+		deepStrictEqual(computeFingerprintCached(cwd, current), before);
+		t.mock.timers.tick(5_000);
+		deepStrictEqual(computeFingerprintCached(cwd, current), after);
+		const result = await executeCodewikiBuild({ kind: "ensure", cwd, current, previous: before });
+		ok(result.codewiki.symbols.some((symbol) => symbol.name === "after_"));
+		deepStrictEqual(result.fingerprint, computeFingerprint(cwd, result.codewiki));
+	});
+
+	it("migrates v2 metadata fingerprints and rejects unreadable sources", async () => {
+		const cwd = isolated.dir;
+		const path = join(cwd, "a.ts");
+		writeFileSync(path, "export const current = true;\n");
+		const current = await buildCodewiki({ cwd, language: "typescript" });
+		const previous = { ...computeFingerprint(cwd, current), treeHash: legacyTreeHash(cwd, "clio-codewiki-tree:v2\n") };
+		const result = await executeCodewikiBuild({ kind: "ensure", cwd, current, previous });
+		strictEqual(result.changed, true);
+		notStrictEqual(result.fingerprint.treeHash, previous.treeHash);
+		if (process.platform !== "win32" && process.getuid?.() !== 0) {
+			writeCodewiki(cwd, current);
+			writeClioState(cwd, { version: 1, fingerprint: result.fingerprint });
+			writeFileSync(join(cwd, "CLIO-CODER.md"), "# Local\n\nKeep authored guidance.\n");
+			chmodSync(path, 0);
+			try {
+				throws(() => computeFingerprint(cwd, current), { code: "EACCES" });
+				await rejects(computeFingerprintAsync(cwd, current), { code: "EACCES" });
+				const prompt = renderPromptContext(cwd);
+				ok(prompt.text.includes("Keep authored guidance."));
+				ok(prompt.text.includes("available (stale; run /context refresh)"));
+				ok(prompt.warnings.some((warning) => warning.includes("codewiki freshness unavailable")));
+			} finally {
+				chmodSync(path, 0o600);
+			}
+		}
 	});
 
 	for (const hasSource of [false, true]) {
