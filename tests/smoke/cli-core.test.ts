@@ -1,10 +1,10 @@
 import { deepStrictEqual, match, ok, strictEqual, throws } from "node:assert/strict";
-import { spawn } from "node:child_process";
-import { existsSync, mkdtempSync, readdirSync, readFileSync, rmSync } from "node:fs";
+import { execFileSync, spawn } from "node:child_process";
+import { existsSync, mkdtempSync, readdirSync, readFileSync, rmSync, writeFileSync } from "node:fs";
 import { createServer, type IncomingMessage, type Server } from "node:http";
 import type { AddressInfo } from "node:net";
 import { tmpdir } from "node:os";
-import { join } from "node:path";
+import { join, relative } from "node:path";
 import { after, before, describe, it } from "node:test";
 import {
 	loadEvalArtifactV4,
@@ -187,6 +187,53 @@ describe("smoke/built CLI core", { concurrency: false }, () => {
 			strictEqual(unknown.code, 2);
 			strictEqual(unknown.stdout, "");
 			match(unknown.stderr, /unknown subcommand: not-a-command/u);
+		} finally {
+			scratch.cleanup();
+		}
+	});
+
+	it("reports custom eval artifacts using the printed command without importing or changing bytes", async () => {
+		const scratch = home("clio-eval-custom-");
+		try {
+			for (const out of [
+				relative(ROOT, join(scratch.root, "custom output's $literal")),
+				join(scratch.root, "named artifact.json"),
+			]) {
+				const run = await runCli(
+					["eval", "run", "--suite", "evals/behavioral-machinery.yaml", "--out", out, "--clio-coder-entry", CLI],
+					{ env: scratch.env, timeoutMs: 300_000 },
+				);
+				strictEqual(run.code, 0, run.stdout + run.stderr);
+				const evalId = /^eval: (\S+)$/mu.exec(run.stdout)?.[1];
+				const artifactPath = /^artifact: (.+)$/mu.exec(run.stdout)?.[1];
+				ok(evalId, run.stdout);
+				ok(artifactPath, run.stdout);
+				const bytes = readFileSync(artifactPath);
+				const missing = await runCli(["eval", "report", evalId], { env: scratch.env });
+				strictEqual(missing.code, 1, missing.stdout + missing.stderr);
+				match(missing.stderr, /eval artifact not found/u);
+				const command = /^report: (.+)$/mu.exec(run.stdout)?.[1];
+				ok(command, run.stdout);
+				const report = execFileSync("sh", ["-c", `alias clio-coder='"$CLIO_TEST_NODE" "$CLIO_TEST_ENTRY"'\n${command}`], {
+					cwd: scratch.root,
+					env: { ...scratch.env, CLIO_TEST_NODE: process.execPath, CLIO_TEST_ENTRY: CLI },
+					encoding: "utf8",
+					timeout: 20_000,
+				});
+				ok(report.startsWith(`# Eval ${evalId}\n`), report);
+				match(report, /Pass rate: 100\.00%/u);
+				deepStrictEqual(readFileSync(artifactPath), bytes);
+				strictEqual(existsSync(join(scratch.root, "data", "evals", `${evalId}.json`)), false);
+				const corrupted = JSON.parse(bytes.toString("utf8"));
+				corrupted.results[0].executionEnvelope.target = "conflicting-target";
+				const corruptPath = join(scratch.root, "corrupted.json");
+				writeFileSync(corruptPath, JSON.stringify(corrupted));
+				const rejected = await runCli(["eval", "report", "--artifact", corruptPath], { env: scratch.env });
+				strictEqual(rejected.code, 1, rejected.stdout + rejected.stderr);
+				match(rejected.stderr, /executionEnvelope: conflicts with result target or behavioral corpus/u);
+				const ambiguous = await runCli(["eval", "report", evalId, "--artifact", artifactPath], { env: scratch.env });
+				strictEqual(ambiguous.code, 2, ambiguous.stdout + ambiguous.stderr);
+			}
 		} finally {
 			scratch.cleanup();
 		}

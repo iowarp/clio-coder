@@ -1,7 +1,9 @@
+import { readFile } from "node:fs/promises";
 import { resolve } from "node:path";
 import { InvalidIdError } from "../core/safe-id.js";
+import { shellQuote } from "../core/shell-quote.js";
 import { clioDataDir } from "../core/xdg.js";
-import { loadEvalArtifactV4, writeEvalArtifactV4 } from "../domains/eval/artifacts/store.js";
+import { loadEvalArtifactV4, parseEvalArtifactV4, writeEvalArtifactV4 } from "../domains/eval/artifacts/store.js";
 import { compareEvalArtifactsV4 } from "../domains/eval/compare/compare.js";
 import { evaluateGate, renderGateFailure, renderInformationalBudget } from "../domains/eval/compare/gates.js";
 import { loadThresholds } from "../domains/eval/compare/thresholds.js";
@@ -50,6 +52,7 @@ interface ParsedEvalArgs {
 	out?: string;
 	clioEntry?: string;
 	evalId?: string;
+	artifact?: string;
 	format: EvalReportFormat;
 	compareIds: string[];
 	metric?: string;
@@ -133,6 +136,11 @@ function parseEvalArgs(args: ReadonlyArray<string>): ParsedEvalArgs {
 			throw new Error(`unknown eval run argument: ${arg}`);
 		}
 		if (parsed.command === "report") {
+			if (arg === "--artifact") {
+				parsed.artifact = requiredValue(args, index, "--artifact");
+				index += 1;
+				continue;
+			}
 			if (arg === "--format") {
 				parsed.format = reportFormat(requiredValue(args, index, "--format"));
 				index += 1;
@@ -189,7 +197,9 @@ function parseEvalArgs(args: ReadonlyArray<string>): ParsedEvalArgs {
 	if (parsed.command === "run" && (parsed.suite === undefined) === (parsed.taskFile === undefined)) {
 		throw new Error("run requires exactly one of --suite or --task-file");
 	}
-	if (parsed.command === "report" && parsed.evalId === undefined) throw new Error("report requires an eval id");
+	if (parsed.command === "report" && (parsed.evalId === undefined) === (parsed.artifact === undefined)) {
+		throw new Error("report requires exactly one of an eval id or --artifact <path>");
+	}
 	if (parsed.command === "compare" && parsed.compareIds.length !== 2) {
 		throw new Error("compare requires <baselineEvalId> <candidateEvalId>");
 	}
@@ -259,6 +269,7 @@ async function runEvalRun(parsed: ParsedEvalArgs): Promise<number> {
 		);
 		const artifactPath = await writeEvalArtifactV4(clioDataDir(), artifact, parsed.out);
 		process.stdout.write(`${renderEvalTextReportV4(artifact)}artifact: ${artifactPath}\n`);
+		process.stdout.write(`report: clio-coder eval report --artifact ${shellQuote(resolve(artifactPath))} --format md\n`);
 		// A suite that declares thresholds is gated by them here, on the artifact
 		// it just produced. Declaring a gate that only a later `eval gate`
 		// invocation enforces means the run that broke it still exited zero.
@@ -280,7 +291,10 @@ async function runEvalRun(parsed: ParsedEvalArgs): Promise<number> {
 async function runEvalReportCommand(parsed: ParsedEvalArgs): Promise<number> {
 	try {
 		const dataDir = clioDataDir();
-		const artifact = await loadEvalArtifactV4(dataDir, parsed.evalId ?? "");
+		const artifact =
+			parsed.artifact === undefined
+				? await loadEvalArtifactV4(dataDir, parsed.evalId ?? "")
+				: parseEvalArtifactV4(JSON.parse(await readFile(parsed.artifact, "utf8")) as unknown, parsed.artifact);
 		process.stdout.write(renderArtifactReport(artifact, parsed.format, dataDir));
 		return 0;
 	} catch (error) {
