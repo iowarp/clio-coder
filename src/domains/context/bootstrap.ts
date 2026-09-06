@@ -1,4 +1,5 @@
 import { execFileSync } from "node:child_process";
+import { createHash, randomUUID } from "node:crypto";
 import { existsSync, mkdirSync, readFileSync, writeFileSync } from "node:fs";
 import { dirname, join, parse } from "node:path";
 import type { ContextActivityPayload } from "../../core/bus-events.js";
@@ -1048,15 +1049,16 @@ async function ensureGitignore(cwd: string, input: RunBootstrapInput): Promise<v
 }
 
 function serializeBootstrapOutput(output: BootstrapStructuredOutput): string {
-	return serializeClioMd({ ...output, fingerprint: null });
+	const serialized = serializeClioMd({ ...output, fingerprint: null });
+	const parsed = parseClioMd(serialized);
+	if (!parsed.ok) throw new Error(`bootstrap produced invalid CLIO-CODER.md: ${parsed.errors.join("; ")}`);
+	return serialized;
 }
 
 function writeClioMdFile(cwd: string, output: BootstrapStructuredOutput): string {
 	const clioMdPath = join(cwd, "CLIO-CODER.md");
 	mkdirSync(dirname(clioMdPath), { recursive: true });
 	const serialized = serializeBootstrapOutput(output);
-	const parsed = parseClioMd(serialized);
-	if (!parsed.ok) throw new Error(`bootstrap produced invalid CLIO-CODER.md: ${parsed.errors.join("; ")}`);
 	writeFileSync(clioMdPath, serialized, "utf8");
 	return clioMdPath;
 }
@@ -1068,11 +1070,31 @@ function timestampForPath(now: Date): string {
 		.replace(/\.\d{3}Z$/, "Z");
 }
 
-function writeClioMdProposal(cwd: string, now: Date, output: BootstrapStructuredOutput): string {
+function writeClioMdProposal(
+	cwd: string,
+	now: Date,
+	output: BootstrapStructuredOutput,
+	generation: BootstrapGenerationTelemetry,
+	existingSource: string | null,
+): string {
 	const dir = join(cwd, ".clio-coder", "proposals");
 	mkdirSync(dir, { recursive: true });
-	const proposalPath = join(dir, `CLIO-CODER-${timestampForPath(now)}.md`);
-	writeFileSync(proposalPath, serializeBootstrapOutput(output), "utf8");
+	const proposalPath = join(dir, `CLIO-CODER-${timestampForPath(now)}-${randomUUID()}.md`);
+	const serialized = serializeBootstrapOutput(output);
+	writeFileSync(proposalPath, serialized, { encoding: "utf8", flag: "wx" });
+	// Proposal provenance belongs to the candidate, never to the untouched handbook.
+	writeFileSync(
+		`${proposalPath}.json`,
+		`${JSON.stringify({
+			version: 1,
+			createdAt: now.toISOString(),
+			handbookPath: join(cwd, "CLIO-CODER.md"),
+			sourceHash: existingSource === null ? null : createHash("sha256").update(existingSource).digest("hex"),
+			proposalHash: createHash("sha256").update(serialized).digest("hex"),
+			generation: durableGenerationTelemetry(generation),
+		})}\n`,
+		{ encoding: "utf8", flag: "wx" },
+	);
 	return proposalPath;
 }
 
@@ -1130,17 +1152,13 @@ function writeProjectState(
 	codewikiVersion: number,
 	fingerprint: Fingerprint,
 	generation: BootstrapGenerationTelemetry,
-	generated: boolean,
+	published: boolean,
 ): string {
 	const statePath = resolveStatePath(cwd);
 	const prev = readClioState(cwd);
 	// lastBootstrap describes how the CLIO-CODER.md on disk was produced, not what the
-	// most recent run happened to do. A run that generated nothing leaves the
-	// handbook untouched, so overwriting a recorded `model` provenance with
-	// `existing` would claim the handbook has no model authorship behind it.
-	const lastBootstrap = generated
-		? durableGenerationTelemetry(generation)
-		: (prev?.lastBootstrap ?? durableGenerationTelemetry(generation));
+	// most recent run happened to do. Proposals retain their own generation record.
+	const lastBootstrap = published ? durableGenerationTelemetry(generation) : prev?.lastBootstrap;
 	const contextSources = recordAdoption ? adoption.sourceSnapshots : prev?.contextSources;
 	const contextSourceHash = contextSources ? adoptionSnapshotsHash(contextSources) : undefined;
 	writeClioState(cwd, {
@@ -1151,7 +1169,7 @@ function writeProjectState(
 		lastInitAt: now.toISOString(),
 		lastSessionAt: now.toISOString(),
 		lastIndexedAt: indexedAt,
-		lastBootstrap,
+		...(lastBootstrap ? { lastBootstrap } : {}),
 		...(contextSources ? { contextSources } : {}),
 		...(contextSourceHash ? { contextSourceHash } : {}),
 	});
@@ -1309,12 +1327,11 @@ export async function runBootstrap(input: RunBootstrapInput = {}): Promise<RunBo
 	}
 	// A supplied generator *is* the request to generate: both entry points
 	// withhold `generate` for --heuristic and --preview and supply it otherwise.
-	// An existing CLIO-CODER.md used to suppress generation entirely, so a plain
-	// `clio-coder context init` on an initialized repository dispatched nothing, wrote
-	// `lastBootstrap.mode: "existing"`, and looked identical to a run that had no
-	// route at all. The handbook still reaches the generator as source (see
-	// `useExistingClioMdAsSource`), so this refreshes rather than replaces.
+	// For an existing handbook, retain that work as a proposal unless replacement
+	// or adoption was explicitly requested. Generation never implies publication.
 	const shouldGenerate = !hadClioMd || replaceClioMd || input.proposeClioMd === true || input.generate !== undefined;
+	const shouldPropose =
+		input.proposeClioMd === true || (hadClioMd && input.generate !== undefined && !replaceClioMd && input.adopt !== true);
 	let output: BootstrapStructuredOutput;
 	let generation: BootstrapGenerationTelemetry = {
 		mode: shouldGenerate ? "heuristic" : existingParsed ? "existing" : "heuristic",
@@ -1427,7 +1444,10 @@ export async function runBootstrap(input: RunBootstrapInput = {}): Promise<RunBo
 		status: "started",
 		message: hadClioMd ? "preserving CLIO-CODER.md" : "writing CLIO-CODER.md",
 	});
-	if (!hadClioMd) {
+	if (shouldPropose) {
+		proposalPath = writeClioMdProposal(cwd, now, output, generation, existingClioMdText);
+		action = "proposed";
+	} else if (!hadClioMd) {
 		clioMdPath = writeClioMdFile(cwd, output);
 		action = "wrote";
 	} else if (replaceClioMd) {
@@ -1436,9 +1456,6 @@ export async function runBootstrap(input: RunBootstrapInput = {}): Promise<RunBo
 	} else if (input.adopt === true && existingParsed) {
 		clioMdPath = writeClioMdFile(cwd, output);
 		action = "refreshed";
-	} else if (input.proposeClioMd === true) {
-		proposalPath = writeClioMdProposal(cwd, now, output);
-		action = "proposed";
 	}
 	progress(input, {
 		phase: "clio-md",
@@ -1465,7 +1482,7 @@ export async function runBootstrap(input: RunBootstrapInput = {}): Promise<RunBo
 		codewiki.version,
 		codewikiFingerprint,
 		generation,
-		shouldGenerate,
+		action === "wrote" || action === "refreshed",
 	);
 	progress(input, {
 		phase: "state",

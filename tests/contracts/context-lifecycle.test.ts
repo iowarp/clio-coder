@@ -1,7 +1,8 @@
-import { deepStrictEqual, strictEqual } from "node:assert/strict";
-import { mkdirSync, readFileSync, writeFileSync } from "node:fs";
+import { deepStrictEqual, ok, strictEqual } from "node:assert/strict";
+import { existsSync, mkdirSync, readFileSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
 import { afterEach, beforeEach, describe, it } from "node:test";
+import { runBootstrap } from "../../src/domains/context/bootstrap.js";
 import {
 	applyInitImplications,
 	bootstrapInputFromInitOptions,
@@ -102,6 +103,49 @@ describe("contracts/context lifecycle", () => {
 		strictEqual(result.codewikiEntries, 1);
 		deepStrictEqual(readClioState(cwd)?.lastBootstrap, generation);
 		strictEqual(readClioState(cwd)?.lastIndexedAt, "2026-08-31T12:00:00.000Z");
+	});
+
+	it("retains an existing-guide exploration as a proposal without changing published provenance", async () => {
+		const cwd = isolated.dir;
+		const path = join(cwd, "CLIO-CODER.md");
+		const authored = "Keep this authored instruction and its exact formatting.\n";
+		writeFileSync(path, authored);
+		writeFileSync(join(cwd, "index.ts"), "export const calibration = true;\n");
+		writeClioState(cwd, { version: 1, fingerprint, lastBootstrap: generation });
+		const result = await runBootstrap({
+			cwd,
+			generate(input) {
+				strictEqual(input.existingClioMdText, authored);
+				input.reportGeneration?.({
+					mode: "model",
+					parserOutcome: "parsed",
+					run: { runId: "proposal-run", structuredOutputMode: "prompt-parser", promptBytes: 100, outputBytes: 100 },
+				});
+				return {
+					projectName: "Calibration",
+					identity: "A calibration fixture.",
+					conventions: [],
+					invariants: [],
+					sections: [{ title: "Calibration", body: "Read `index.ts` before changing the calibration entry point." }],
+				};
+			},
+		});
+		strictEqual(result.summary.action, "proposed");
+		ok(result.summary.proposalPath);
+		ok(readFileSync(result.summary.proposalPath, "utf8").includes("calibration entry point"));
+		strictEqual(readFileSync(path, "utf8"), authored);
+		deepStrictEqual(readClioState(cwd)?.lastBootstrap, generation);
+		strictEqual(result.telemetry.generation.run?.runId, "proposal-run");
+	});
+
+	it("keeps explicit proposals unpublished when no handbook exists", async () => {
+		const cwd = isolated.dir;
+		writeFileSync(join(cwd, "index.py"), "value = 1\n");
+		const result = await runBootstrap({ cwd, proposeClioMd: true });
+		strictEqual(result.summary.action, "proposed");
+		ok(result.summary.proposalPath && existsSync(result.summary.proposalPath));
+		strictEqual(existsSync(join(cwd, "CLIO-CODER.md")), false);
+		strictEqual(readClioState(cwd)?.lastBootstrap, undefined);
 	});
 
 	it("resumes from the latest persisted snapshot and bounds loaded-window recall to its target", () => {

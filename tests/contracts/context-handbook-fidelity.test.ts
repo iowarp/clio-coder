@@ -141,7 +141,7 @@ describe("authored handbook fidelity", { concurrency: false }, () => {
 				},
 			});
 			strictEqual(calls, 1);
-			strictEqual(generated.summary.action, "preserved");
+			strictEqual(generated.summary.action, "proposed");
 			deepStrictEqual(readFileSync(path), Buffer.from(source));
 		});
 	}
