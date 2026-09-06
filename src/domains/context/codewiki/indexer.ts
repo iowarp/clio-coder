@@ -1020,7 +1020,8 @@ export async function buildCodewiki(input: BuildCodewikiInput, options: Codewiki
 /**
  * Apply an incremental update for a set of changed paths. The changed file
  * records and symbols are replaced in-place, and edges are rebuilt from stored
- * imports across the merged file set.
+ * imports across the merged file set. Unchanged content retains its records;
+ * a batch with no index changes returns the original artifact without parsing.
  */
 export async function updateCodewikiPaths(
 	cwd: string,
@@ -1045,30 +1046,42 @@ export async function updateCodewikiPaths(
 		// Ignore and index metadata can add or remove paths that are not present in
 		// the mutation batch itself. Re-enumerate once so incremental visibility
 		// remains byte-equivalent to a full build.
-		return buildCodewiki({ cwd, language: codewiki.language }, options);
+		return syncCodewiki(cwd, codewiki, options);
 	}
 	const slicer = options.slicer ?? createSlicer();
-	const existingPaths = new Set(codewiki.files.map((file) => file.path));
+	const existingFiles = new Map(codewiki.files.map((file) => [file.path, file]));
 	const visiblePaths = new Set(filterWorkspaceFileCandidates(cwd, normalizedPaths, EXCLUDED_DIRS));
 	const readFile = options.readFile ?? defaultReadFile;
-	const changedPathSet = new Set(normalizedPaths);
+	const currentTexts = new Map<string, string>();
+	const changedPathSet = new Set<string>();
 	const rebuildPaths: string[] = [];
-	let hasIndexChange = false;
 	for (const relPath of normalizedPaths) {
-		const wasIndexed = existingPaths.has(relPath);
+		const existing = existingFiles.get(relPath);
 		const isCurrentIndexableFile = isIndexablePath(relPath) && visiblePaths.has(relPath);
-		if (!wasIndexed && !isCurrentIndexableFile) continue;
-		hasIndexChange = true;
-		if (isCurrentIndexableFile) rebuildPaths.push(relPath);
+		if (!existing && !isCurrentIndexableFile) continue;
+		if (isCurrentIndexableFile) {
+			const text = readFile(join(cwd, relPath));
+			if (text !== null) {
+				if (existing?.hash === contentHash(text)) continue;
+				currentTexts.set(relPath, text);
+				rebuildPaths.push(relPath);
+			}
+		}
+		changedPathSet.add(relPath);
 	}
-	if (!hasIndexChange) return codewiki;
+	if (changedPathSet.size === 0) return codewiki;
 	const rebuiltFiles: BuiltFile[] = [];
 	if (rebuildPaths.length > 0) {
 		const treeSitterExtractor = await loadTreeSitterExtractor();
 		await treeSitterExtractor.ensureGrammarsForPaths(rebuildPaths);
 		for (const relPath of rebuildPaths) {
 			await slicer.tick();
-			const built = buildFile(cwd, relPath, treeSitterExtractor, readFile);
+			const built = buildFile(
+				cwd,
+				relPath,
+				treeSitterExtractor,
+				(path) => currentTexts.get(normalizeRel(cwd, path)) ?? null,
+			);
 			if (built) rebuiltFiles.push(built);
 		}
 	}

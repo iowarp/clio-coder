@@ -83,7 +83,7 @@ async function printContextStatus(): Promise<number> {
 
 	const prompt = context.renderPromptContext(cwd);
 	const preloadClass = preload.classifyProjectPreload({
-		hasClioMd: prompt.clioMd !== null,
+		hasClioMd: prompt.handbookFiles.length > 0,
 		text: prompt.text,
 	});
 

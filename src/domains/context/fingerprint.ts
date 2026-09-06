@@ -99,6 +99,13 @@ function locFromCodewiki(codewiki: Codewiki | null): number | null {
 	return codewiki.files.reduce((sum, file) => (file.lang === "config" ? sum : sum + file.loc), 0);
 }
 
+function createTreeHash(): ReturnType<typeof createHash> {
+	// Invalidate legacy fingerprints that could certify partially updated indexes,
+	// including empty trees. The next ensure reconciles content before certifying
+	// this domain; subsequent checks still use path/size/floored-mtime metadata.
+	return createHash("sha256").update("clio-codewiki-tree:v2\n");
+}
+
 /**
  * Hash one file's identity into the tree hash and accumulate its line count.
  * Shared verbatim by the sync and sliced walks so the two produce identical
@@ -125,7 +132,7 @@ function accumulateFile(
 export function computeFingerprint(cwd: string, codewiki: Codewiki | null = readCodewiki(cwd)): Fingerprint {
 	const files = enumerateWorkspaceFiles(cwd, EXCLUDED_DIRS).filter(isIndexablePath);
 
-	const hash = createHash("sha256");
+	const hash = createTreeHash();
 	const artifactLoc = locFromCodewiki(codewiki);
 	let loc = 0;
 	for (const relPath of files) loc += accumulateFile(cwd, relPath, hash, artifactLoc);
@@ -160,7 +167,7 @@ export async function computeFingerprintAsync(
 	await slicer.tick();
 	const files = (await enumerateWorkspaceFilesAsync(cwd, EXCLUDED_DIRS, undefined, slicer)).filter(isIndexablePath);
 
-	const hash = createHash("sha256");
+	const hash = createTreeHash();
 	const artifactLoc = locFromCodewiki(artifact);
 	let loc = 0;
 	for (const relPath of files) {

@@ -281,7 +281,7 @@ describe("explicit context operations refresh the running prompt", { concurrency
 		}
 	});
 
-	it("refreshes curated handbook content while keeping other workspace snapshots frozen", async () => {
+	it("reloads authored handbook edits on refresh while keeping other workspace snapshots frozen", async () => {
 		const f = await contextPromptFixture();
 		try {
 			writeRefreshHandbook(f.cwd);
@@ -291,8 +291,12 @@ describe("explicit context operations refresh the running prompt", { concurrency
 			writePromptSources(other, "ONE", false);
 			const otherBefore = await f.prompt(other);
 			writePromptSources(other, "TWO", false);
+			const handbookPath = join(f.cwd, "CLIO-CODER.md");
+			const edited = readFileSync(handbookPath, "utf8").replace("OLD_NAVIGATION", "AUTHORED_NAVIGATION_EDIT");
+			writeFileSync(handbookPath, edited);
 			const result = await f.context.runContextRefresh({ cwd: join(f.cwd, "src", "..") });
-			strictEqual(result.clioMd, "updated");
+			strictEqual(result.clioMd, "unchanged");
+			strictEqual(readFileSync(handbookPath, "utf8"), edited);
 			strictEqual(readFileSync(join(f.cwd, "CLIO-CODER.md"), "utf8").includes("OLD_NAVIGATION"), false);
 			strictEqual(
 				await f.prompt(other),
@@ -300,8 +304,9 @@ describe("explicit context operations refresh the running prompt", { concurrency
 				"an explicit refresh in another workspace must preserve this snapshot",
 			);
 			const after = await f.prompt();
-			strictEqual(after.includes("OLD_NAVIGATION"), false, "the current session must load the curated handbook");
+			strictEqual(after.includes("OLD_NAVIGATION"), false, "the current session must load the authored edit");
 			strictEqual(after.includes("LIVE_HANDBOOK"), true);
+			strictEqual(after.includes("AUTHORED_NAVIGATION_EDIT"), true);
 		} finally {
 			await f.close();
 		}
@@ -492,6 +497,9 @@ describe("explicit context operations refresh the running prompt", { concurrency
 					);
 					strictEqual(existsSync(join(f.cwd, "CLIO-CODER.md")), true);
 				} else if (operation === "refresh") {
+					const handbookPath = join(f.cwd, "CLIO-CODER.md");
+					const edited = readFileSync(handbookPath, "utf8").replace("OLD_NAVIGATION", "AUTHORED_BEFORE_FAILED_REFRESH");
+					writeFileSync(handbookPath, edited);
 					await rejects(
 						f.context.runContextRefresh({
 							cwd: f.cwd,
@@ -501,7 +509,7 @@ describe("explicit context operations refresh the running prompt", { concurrency
 						}),
 						/after writes/u,
 					);
-					strictEqual(readFileSync(join(f.cwd, "CLIO-CODER.md"), "utf8").includes("OLD_NAVIGATION"), false);
+					strictEqual(readFileSync(handbookPath, "utf8"), edited);
 				} else {
 					await rejects(
 						f.context.runContextClear({
@@ -518,6 +526,7 @@ describe("explicit context operations refresh the running prompt", { concurrency
 				const after = await f.prompt();
 				strictEqual(after === before, false, "a failure after disk publication must not retain obsolete project context");
 				strictEqual(after.includes("OLD_NAVIGATION"), false);
+				if (operation === "refresh") strictEqual(after.includes("AUTHORED_BEFORE_FAILED_REFRESH"), true);
 				if (operation === "clear") strictEqual(after.includes("LIVE_HANDBOOK"), false);
 				if (operation === "init")
 					strictEqual(after.includes(renderPromptContext(f.cwd).clioMd?.projectName ?? "MISSING_HANDBOOK"), true);

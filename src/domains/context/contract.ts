@@ -12,7 +12,7 @@ export interface ProjectPromptContext {
 	/**
 	 * Absolute paths of the effective project handbooks, ancestor to nearest.
 	 * An override resets the inherited chain, so this names exactly the files
-	 * whose content is in `text`; empty when no selected handbook parsed.
+	 * whose content is in `text`; empty when no selected handbook loaded.
 	 */
 	handbookFiles: string[];
 }
@@ -52,7 +52,7 @@ export interface ContextContract extends DomainContract {
 	renderPromptContext(cwd: string): ProjectPromptContext;
 	/**
 	 * Effective project handbook fields (project name, conventions, invariants)
-	 * or null when no selected handbook parses. Never returns raw handbook
+	 * or null when no selected handbook has a structured projection. Never returns raw handbook
 	 * text; used by dispatch to give workers bounded project context.
 	 */
 	projectStructuredContext(cwd?: string): ProjectStructuredContext | null;
