@@ -14,6 +14,7 @@ import {
 import { loadSkills, parsePendingSkillRequests } from "../../src/domains/resources/skills/loader.js";
 import { createPendingSkillToolPolicy } from "../../src/interactive/chat-loop-messages.js";
 import { createContextTool } from "../../src/tools/context/index.js";
+import { isolateClioEnv } from "../harness/scratch-env.js";
 
 const roots: string[] = [];
 
@@ -211,6 +212,67 @@ describe("skill install and activation boundary", () => {
 		if (activated.kind === "ok") {
 			match(activated.output, /Run the manual review workflow\./u);
 			strictEqual((activated.details as { disableModelInvocation?: unknown } | undefined)?.disableModelInvocation, true);
+		}
+	});
+
+	it("separates context-prime installation, explicit-path availability, suggestion and slash activation", async () => {
+		const isolated = await isolateClioEnv("clio-prime-stages-");
+		try {
+			const project = join(isolated.dir, "project");
+			mkdirSync(project);
+			// A local scratch copy exercises the installer without changing any real skill inventory.
+			const source = join(isolated.dir, "source", "context-prime");
+			cpSync(join(process.cwd(), "skills", "context", "context-prime"), source, { recursive: true });
+			strictEqual(
+				loadSkills({ cwd: project, home: isolated.dir }).items.some((skill) => skill.name === "context-prime"),
+				false,
+			);
+			const installed = installSkillFromSource({ source, scope: "project", cwd: project });
+			ok(existsSync(installed.path));
+			ok(loadSkills({ cwd: project, home: isolated.dir }).items.some((skill) => skill.name === "context-prime"));
+
+			// The --skill entry wiring supplies explicitSkillPaths; that exposes the
+			// skill at cli scope but does not create an operator activation request.
+			const loaderOptions = { disableDiscovery: true, explicitSkillPaths: [installed.path] } as const;
+			const list = loadSkills({ cwd: project, ...loaderOptions });
+			strictEqual(list.items.length, 1);
+			strictEqual(list.items[0]?.scope, "cli");
+			strictEqual(list.items[0]?.source, "path");
+			const context = createContextTool({
+				getCwd: () => project,
+				getSkillLoaderOptions: () => loaderOptions,
+				skillMarketplace: false,
+			});
+			const listing = await context.run({ scope: "skills" });
+			strictEqual(listing.kind, "ok");
+			if (listing.kind === "ok") {
+				match(listing.output, /context-prime \(cli\)/u);
+				match(listing.output, /Suggested skill: \/skill <name>/u);
+				ok(!listing.output.includes("# Context Prime"), "listing must not activate or expose the workflow body");
+			}
+			const denied = await context.run({ scope: "skills", name: "context-prime" });
+			strictEqual(denied.kind, "error");
+			if (denied.kind === "error") match(denied.message, /only the operator can activate a skill/u);
+
+			const pending = parsePendingSkillRequests(
+				"/skill context-prime Give only a brief orientation of this scratch repository; no implementation is requested.",
+				list,
+				{ cwd: project },
+			);
+			const pendingSkillPolicy = createPendingSkillToolPolicy(pending.pendingSkillRequests);
+			ok(pendingSkillPolicy);
+			const activated = await context.run({ scope: "skills", name: "context-prime" }, { pendingSkillPolicy });
+			strictEqual(activated.kind, "ok");
+			if (activated.kind === "ok") {
+				match(activated.output, /# Context Prime/u);
+				match(activated.output, /source: slash-command/u);
+				const activation = skillActivationFromToolDetails(activated.details, "orientation-turn");
+				ok(activation);
+				strictEqual(activation.name, "context-prime");
+				strictEqual(activation.filePath, installed.path);
+			}
+		} finally {
+			isolated.restore();
 		}
 	});
 
