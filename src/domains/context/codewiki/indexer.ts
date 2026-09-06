@@ -850,11 +850,6 @@ function candidatePathsForImport(cwd: string, fromRel: string, specifier: string
 		const stripped = base.replace(/\.js$/, "");
 		for (const ext of [".ts", ".tsx", ".mts", ".cts"]) candidates.push(`${stripped}${ext}`);
 	}
-	if (/^[.]+[A-Za-z_]/.test(cleaned)) {
-		const pythonModule = cleaned.replace(/^\.+/, "").replace(/\./g, "/");
-		const pythonBase = resolve(fromDir, pythonModule);
-		candidates.push(`${pythonBase}.py`, join(pythonBase, "__init__.py"));
-	}
 	return uniqueSorted(
 		candidates.map((candidate) => normalizeRel(cwd, candidate)).filter((candidate) => !candidate.startsWith("..")),
 	);
@@ -878,10 +873,36 @@ function createImportResolver(cwd: string): {
 	const candidatesFor = (fromRel: string, specifier: string): string[] => {
 		// The candidate set is a function of the directory, not the file: every
 		// sibling importing the same specifier resolves through the same list.
-		const key = `${dirname(fromRel)}\0${specifier}`;
+		const python = /\.pyw?$/.test(fromRel);
+		const key = `${python}\0${dirname(fromRel)}\0${specifier}`;
 		let candidates = candidatesByOrigin.get(key);
 		if (!candidates) {
-			candidates = candidatePathsForImport(cwd, fromRel, specifier);
+			if (python) {
+				const fromDir = dirname(fromRel);
+				let packageRoot = fromDir;
+				while (packageRoot !== "." && isFile(join(packageRoot, "__init__.py"))) {
+					packageRoot = dirname(packageRoot);
+				}
+				const dots = /^\.+/.exec(specifier)?.[0].length ?? 0;
+				const modulePath = specifier.slice(dots).replace(/\./g, "/");
+				let bases: string[];
+				if (dots > 0) {
+					const parent = resolve(cwd, fromDir, ...Array<string>(dots - 1).fill(".."));
+					// A relative import must stay inside its package tree. Without
+					// __init__.py evidence, the workspace bounds namespace packages.
+					const root = resolve(cwd, packageRoot === fromDir ? "." : packageRoot);
+					const insidePackage = parent !== root || (root === resolve(cwd) && isFile("__init__.py"));
+					bases = insidePackage && !relative(root, parent).startsWith("..") ? [join(parent, modulePath)] : [];
+				} else {
+					bases = [resolve(cwd, modulePath)];
+					if (packageRoot !== fromDir && packageRoot !== ".") bases.push(resolve(cwd, packageRoot, modulePath));
+				}
+				candidates = [...new Set(bases.flatMap((base) => [join(base, "__init__.py"), `${base}.py`]))].map((candidate) =>
+					normalizeRel(cwd, candidate),
+				);
+			} else {
+				candidates = candidatePathsForImport(cwd, fromRel, specifier);
+			}
 			candidatesByOrigin.set(key, candidates);
 		}
 		return candidates;
@@ -1136,7 +1157,13 @@ export async function syncCodewiki(
 	for (const relPath of indexedFiles.keys()) {
 		if (!currentFiles.has(relPath)) changedPaths.add(relPath);
 	}
-	if (changedPaths.size === 0) return codewiki;
+	if (changedPaths.size === 0) {
+		// A fingerprint-domain upgrade also reconciles resolver changes even
+		// when source hashes still match the old artifact.
+		if (!codewiki.files.some((file) => file.lang === "python")) return codewiki;
+		const edges = await buildEdges(cwd, codewiki.files, slicer);
+		return JSON.stringify(edges) === JSON.stringify(codewiki.edges) ? codewiki : { ...codewiki, edges };
+	}
 	const syncOptions: CodewikiBuildOptions = {
 		...options,
 		slicer,
