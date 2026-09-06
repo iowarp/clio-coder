@@ -17,6 +17,7 @@
  */
 
 import type { Codewiki, CodewikiFile } from "../codewiki/schema.js";
+import type { WikiSourceContent } from "./source-content.js";
 
 export type WikiDepth = "auto" | "simple" | "medium" | "detailed";
 export type ResolvedWikiDepth = Exclude<WikiDepth, "auto">;
@@ -43,6 +44,10 @@ export interface WikiPlan {
 	version: 1;
 	/** Source revision observed before dispatch; stale checkpoints must be revalidated. */
 	sourceTreeHash?: string;
+	/** Source bytes observed before dispatch, shared across page dependencies. */
+	sourceContent?: WikiSourceContent;
+	/** Harness-owned retirements from authored replanning; explicit reintroduction clears a path. */
+	retiredPages?: string[];
 	/** One paragraph describing what this repository is; opens the generated quickstart. */
 	overview: string;
 	pages: WikiPlanPage[];

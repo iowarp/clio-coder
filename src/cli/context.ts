@@ -82,10 +82,7 @@ async function printContextStatus(): Promise<number> {
 					: "ok";
 
 	const prompt = context.renderPromptContext(cwd);
-	const preloadClass = preload.classifyProjectPreload({
-		hasClioMd: prompt.handbookFiles.length > 0,
-		text: prompt.text,
-	});
+	const preloadClass = preload.selectProjectPreload(prompt, null).classification;
 
 	const codewiki = context.readCodewiki(cwd);
 	const codewikiCount = codewiki ? context.codewikiEntries(codewiki).length : 0;

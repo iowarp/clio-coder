@@ -1,9 +1,11 @@
 import { execFileSync } from "node:child_process";
+import { createHash, randomUUID } from "node:crypto";
 import { existsSync, mkdirSync, readFileSync, writeFileSync } from "node:fs";
-import { dirname, join, parse } from "node:path";
+import { dirname, join, parse, resolve } from "node:path";
 import type { ContextActivityPayload } from "../../core/bus-events.js";
 import { createTomlFileReader, type TomlFileReader, tomlTableAt } from "../../core/toml.js";
-import { classifyProjectPreload, type ProjectPreloadClass } from "../prompts/preload.js";
+import { INTEROP_AGENT_KINDS } from "../interop/registry.js";
+import { type ProjectPreloadClass, selectProjectPreload } from "../prompts/preload.js";
 import { detectProjectType, type ProjectType } from "../session/workspace/project-type.js";
 import {
 	type AdoptionScanResult,
@@ -139,7 +141,7 @@ export interface RunBootstrapResult {
 	};
 	/**
 	 * How the session compiler will preload the project context that exists
-	 * on disk after this run: full, synopsis (with the limit that forced it),
+	 * on disk after this run with unknown tool capability: full, partial,
 	 * or none. In preview mode this reflects the current on-disk state, since
 	 * preview writes nothing.
 	 */
@@ -249,6 +251,23 @@ function projectTypeLabel(projectType: ProjectType): string {
 	}
 }
 
+/** Only project-wide instructions may become unconditional handbook rules. */
+function handbookInstructionFiles(input: BootstrapGenerateInput): SiblingContextFile[] {
+	const projectPaths = new Set(
+		INTEROP_AGENT_KINDS.flatMap((kind) => kind.instructionFiles.map((file) => resolve(input.cwd, file))),
+	);
+	const allowed = new Set(
+		input.adoption.sources
+			.filter((source) => {
+				if (source.kind !== "instructions") return false;
+				if (source.scope === "project") return projectPaths.has(source.path);
+				return input.adoption.includeGlobal && source.path === resolve(input.adoption.homeDir, ".codex/AGENTS.md");
+			})
+			.map((source) => source.path),
+	);
+	return input.siblingFiles.filter((file) => allowed.has(file.path));
+}
+
 function allContextText(files: ReadonlyArray<SiblingContextFile>): string {
 	return files.map((file) => file.content).join("\n\n");
 }
@@ -308,7 +327,7 @@ function resolveDefaultIdentity(
  * strictly better than that, and only than that.
  */
 function stabilizedIdentity(input: BootstrapGenerateInput, modelIdentity: unknown, tomlFiles: TomlFileReader): string {
-	const deterministic = resolveDefaultIdentity(input.cwd, input.projectType, input.siblingFiles, tomlFiles);
+	const deterministic = resolveDefaultIdentity(input.cwd, input.projectType, handbookInstructionFiles(input), tomlFiles);
 	const model = typeof modelIdentity === "string" ? modelIdentity.trim() : "";
 	if (deterministic.bare && model.length > 0) return model;
 	return deterministic.text;
@@ -423,7 +442,7 @@ function indexedSourceFileCount(codewiki: Codewiki): number {
 /** Measure how the session compiler will preload the on-disk project context. */
 function measureProjectPreload(cwd: string): ProjectPreloadClass {
 	const promptContext = renderPromptContext(cwd);
-	return classifyProjectPreload({ hasClioMd: promptContext.handbookFiles.length > 0, text: promptContext.text });
+	return selectProjectPreload(promptContext, null).classification;
 }
 
 function packageScripts(cwd: string): Record<string, string> {
@@ -724,12 +743,12 @@ function stabilizeGeneratedOutput(
 	const existing = input.existingClioMd;
 	const conventions: string[] = [];
 	for (const convention of existing?.conventions ?? []) pushUnique(conventions, convention);
-	for (const convention of inferConventions(input.cwd, input.siblingFiles, input.codewiki)) {
+	for (const convention of inferConventions(input.cwd, handbookInstructionFiles(input), input.codewiki)) {
 		pushUnique(conventions, convention);
 	}
 	const invariants: string[] = [];
 	for (const invariant of existing?.invariants ?? []) pushUnique(invariants, invariant);
-	for (const invariant of inferInvariants(input.siblingFiles)) pushUnique(invariants, invariant);
+	for (const invariant of inferInvariants(handbookInstructionFiles(input))) pushUnique(invariants, invariant);
 
 	const verification = verificationSection(input.cwd, tomlFiles);
 	const inferredSections = inferHeuristicSections(input);
@@ -793,7 +812,7 @@ function codewikiSections(codewiki: Codewiki): ClioMdSection[] {
 
 function inferHeuristicSections(input: BootstrapGenerateInput): ClioMdSection[] {
 	const sections: ClioMdSection[] = [...codewikiSections(input.codewiki)];
-	const invariants = inferInvariants(input.siblingFiles);
+	const invariants = inferInvariants(handbookInstructionFiles(input));
 	if (invariants.length > 0) {
 		sections.push({
 			title: "Architecture boundaries",
@@ -827,9 +846,9 @@ function heuristicBootstrapOutputSync(input: BootstrapGenerateInput): BootstrapS
 	const sharedInput = input.tomlFiles ? input : { ...input, tomlFiles };
 	return stabilizeGeneratedOutput(sharedInput, {
 		projectName: projectName(input.cwd, tomlFiles),
-		identity: resolveDefaultIdentity(input.cwd, input.projectType, input.siblingFiles, tomlFiles).text,
-		conventions: inferConventions(input.cwd, input.siblingFiles, input.codewiki),
-		invariants: inferInvariants(input.siblingFiles),
+		identity: resolveDefaultIdentity(input.cwd, input.projectType, handbookInstructionFiles(input), tomlFiles).text,
+		conventions: inferConventions(input.cwd, handbookInstructionFiles(input), input.codewiki),
+		invariants: inferInvariants(handbookInstructionFiles(input)),
 		sections: inferHeuristicSections(input),
 	});
 }
@@ -1048,15 +1067,16 @@ async function ensureGitignore(cwd: string, input: RunBootstrapInput): Promise<v
 }
 
 function serializeBootstrapOutput(output: BootstrapStructuredOutput): string {
-	return serializeClioMd({ ...output, fingerprint: null });
+	const serialized = serializeClioMd({ ...output, fingerprint: null });
+	const parsed = parseClioMd(serialized);
+	if (!parsed.ok) throw new Error(`bootstrap produced invalid CLIO-CODER.md: ${parsed.errors.join("; ")}`);
+	return serialized;
 }
 
 function writeClioMdFile(cwd: string, output: BootstrapStructuredOutput): string {
 	const clioMdPath = join(cwd, "CLIO-CODER.md");
 	mkdirSync(dirname(clioMdPath), { recursive: true });
 	const serialized = serializeBootstrapOutput(output);
-	const parsed = parseClioMd(serialized);
-	if (!parsed.ok) throw new Error(`bootstrap produced invalid CLIO-CODER.md: ${parsed.errors.join("; ")}`);
 	writeFileSync(clioMdPath, serialized, "utf8");
 	return clioMdPath;
 }
@@ -1068,11 +1088,31 @@ function timestampForPath(now: Date): string {
 		.replace(/\.\d{3}Z$/, "Z");
 }
 
-function writeClioMdProposal(cwd: string, now: Date, output: BootstrapStructuredOutput): string {
+function writeClioMdProposal(
+	cwd: string,
+	now: Date,
+	output: BootstrapStructuredOutput,
+	generation: BootstrapGenerationTelemetry,
+	existingSource: string | null,
+): string {
 	const dir = join(cwd, ".clio-coder", "proposals");
 	mkdirSync(dir, { recursive: true });
-	const proposalPath = join(dir, `CLIO-CODER-${timestampForPath(now)}.md`);
-	writeFileSync(proposalPath, serializeBootstrapOutput(output), "utf8");
+	const proposalPath = join(dir, `CLIO-CODER-${timestampForPath(now)}-${randomUUID()}.md`);
+	const serialized = serializeBootstrapOutput(output);
+	writeFileSync(proposalPath, serialized, { encoding: "utf8", flag: "wx" });
+	// Proposal provenance belongs to the candidate, never to the untouched handbook.
+	writeFileSync(
+		`${proposalPath}.json`,
+		`${JSON.stringify({
+			version: 1,
+			createdAt: now.toISOString(),
+			handbookPath: join(cwd, "CLIO-CODER.md"),
+			sourceHash: existingSource === null ? null : createHash("sha256").update(existingSource).digest("hex"),
+			proposalHash: createHash("sha256").update(serialized).digest("hex"),
+			generation: durableGenerationTelemetry(generation),
+		})}\n`,
+		{ encoding: "utf8", flag: "wx" },
+	);
 	return proposalPath;
 }
 
@@ -1130,17 +1170,13 @@ function writeProjectState(
 	codewikiVersion: number,
 	fingerprint: Fingerprint,
 	generation: BootstrapGenerationTelemetry,
-	generated: boolean,
+	published: boolean,
 ): string {
 	const statePath = resolveStatePath(cwd);
 	const prev = readClioState(cwd);
 	// lastBootstrap describes how the CLIO-CODER.md on disk was produced, not what the
-	// most recent run happened to do. A run that generated nothing leaves the
-	// handbook untouched, so overwriting a recorded `model` provenance with
-	// `existing` would claim the handbook has no model authorship behind it.
-	const lastBootstrap = generated
-		? durableGenerationTelemetry(generation)
-		: (prev?.lastBootstrap ?? durableGenerationTelemetry(generation));
+	// most recent run happened to do. Proposals retain their own generation record.
+	const lastBootstrap = published ? durableGenerationTelemetry(generation) : prev?.lastBootstrap;
 	const contextSources = recordAdoption ? adoption.sourceSnapshots : prev?.contextSources;
 	const contextSourceHash = contextSources ? adoptionSnapshotsHash(contextSources) : undefined;
 	writeClioState(cwd, {
@@ -1151,7 +1187,7 @@ function writeProjectState(
 		lastInitAt: now.toISOString(),
 		lastSessionAt: now.toISOString(),
 		lastIndexedAt: indexedAt,
-		lastBootstrap,
+		...(lastBootstrap ? { lastBootstrap } : {}),
 		...(contextSources ? { contextSources } : {}),
 		...(contextSourceHash ? { contextSourceHash } : {}),
 	});
@@ -1309,12 +1345,11 @@ export async function runBootstrap(input: RunBootstrapInput = {}): Promise<RunBo
 	}
 	// A supplied generator *is* the request to generate: both entry points
 	// withhold `generate` for --heuristic and --preview and supply it otherwise.
-	// An existing CLIO-CODER.md used to suppress generation entirely, so a plain
-	// `clio-coder context init` on an initialized repository dispatched nothing, wrote
-	// `lastBootstrap.mode: "existing"`, and looked identical to a run that had no
-	// route at all. The handbook still reaches the generator as source (see
-	// `useExistingClioMdAsSource`), so this refreshes rather than replaces.
+	// For an existing handbook, retain that work as a proposal unless replacement
+	// or adoption was explicitly requested. Generation never implies publication.
 	const shouldGenerate = !hadClioMd || replaceClioMd || input.proposeClioMd === true || input.generate !== undefined;
+	const shouldPropose =
+		input.proposeClioMd === true || (hadClioMd && input.generate !== undefined && !replaceClioMd && input.adopt !== true);
 	let output: BootstrapStructuredOutput;
 	let generation: BootstrapGenerationTelemetry = {
 		mode: shouldGenerate ? "heuristic" : existingParsed ? "existing" : "heuristic",
@@ -1427,7 +1462,10 @@ export async function runBootstrap(input: RunBootstrapInput = {}): Promise<RunBo
 		status: "started",
 		message: hadClioMd ? "preserving CLIO-CODER.md" : "writing CLIO-CODER.md",
 	});
-	if (!hadClioMd) {
+	if (shouldPropose) {
+		proposalPath = writeClioMdProposal(cwd, now, output, generation, existingClioMdText);
+		action = "proposed";
+	} else if (!hadClioMd) {
 		clioMdPath = writeClioMdFile(cwd, output);
 		action = "wrote";
 	} else if (replaceClioMd) {
@@ -1436,9 +1474,6 @@ export async function runBootstrap(input: RunBootstrapInput = {}): Promise<RunBo
 	} else if (input.adopt === true && existingParsed) {
 		clioMdPath = writeClioMdFile(cwd, output);
 		action = "refreshed";
-	} else if (input.proposeClioMd === true) {
-		proposalPath = writeClioMdProposal(cwd, now, output);
-		action = "proposed";
 	}
 	progress(input, {
 		phase: "clio-md",
@@ -1465,7 +1500,7 @@ export async function runBootstrap(input: RunBootstrapInput = {}): Promise<RunBo
 		codewiki.version,
 		codewikiFingerprint,
 		generation,
-		shouldGenerate,
+		action === "wrote" || action === "refreshed",
 	);
 	progress(input, {
 		phase: "state",
@@ -1489,7 +1524,7 @@ export async function runBootstrap(input: RunBootstrapInput = {}): Promise<RunBo
 	if (preload.mode === "full" && preload.nearLimit) {
 		warn(
 			input.io,
-			`  warning: project context is within 10% of the preload limit (${preload.chars} chars of 8000, ${preload.lines} lines of 220); the next growth may flip it to a synopsis\n`,
+			`  warning: project context is within 10% of the preload limit (${preload.chars} UTF-16 units of 8000, ${preload.lines} rendered lines of 220); further growth may omit authored suffixes\n`,
 		);
 	}
 	progress(input, {

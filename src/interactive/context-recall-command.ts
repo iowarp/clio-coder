@@ -65,6 +65,7 @@ function headlineFor(ref: string, tokens: number, state: EvictedState | undefine
 	if (state !== undefined) {
 		parts.push(state.by === undefined ? `evicted: ${state.reason}` : `evicted: ${state.reason} by ${state.by}`);
 	}
+	if (state === undefined) parts.push("summarized");
 	parts.push(`${formatTokens(tokens)} tokens`);
 	if (offloadPath !== undefined) parts.push(`offload: ${offloadPath}`);
 	return `[/context recall] ${parts.join(" · ")}`;
@@ -85,7 +86,7 @@ export function runOperatorRecall(ref: string, deps: OperatorRecallDeps): Operat
 	// A ref that resolves to nothing is usually a typo or a stale marker; the
 	// shared message ends with the refs the operator could have typed instead.
 	if (!resolved.ok)
-		return { ok: false, message: `[/context recall] ${recallErrorMessage(resolved.error, entries, view)}` };
+		return { ok: false, message: `[/context recall] ${recallErrorMessage(resolved.error, entries, view, leaf)}` };
 	const { result } = resolved;
 	const fields = buildRecallFields(result, { trigger: "operator" });
 	try {

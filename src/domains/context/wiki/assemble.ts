@@ -15,7 +15,7 @@
  */
 
 import { mkdirSync, readFileSync, rmSync, writeFileSync } from "node:fs";
-import { basename, dirname, join, normalize, posix, relative } from "node:path";
+import { basename, dirname, join, posix } from "node:path";
 import { readWikiPage, renderWikiPage, resolveSourcePath, type WikiPageMetadata } from "./frontmatter.js";
 import {
 	isGeneratedWikiFile,
@@ -297,11 +297,4 @@ export function pageSourceIndex(dir: string, sourceRoot: string): Map<string, st
 		index.set(relPath, [...metadata.sources, ...metadata.tests, ...unresolvedPaths]);
 	}
 	return index;
-}
-
-/** Normalize a repository path for comparison against recorded page sources. */
-export function normalizeRepoPath(sourceRoot: string, candidate: string): string {
-	const resolved = normalize(join(sourceRoot, candidate));
-	const rel = relative(sourceRoot, resolved);
-	return rel.split("\\").join("/");
 }

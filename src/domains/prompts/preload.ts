@@ -1,82 +1,153 @@
-/**
- * Project-context preload classification. One place owns the preload cliff:
- * the session compiler uses it to choose a full effective-handbook preload versus compact
- * synopsis, and reporting surfaces (context-init output, `clio-coder config
- * inspect`, the context-window overlay) use it to make the cliff visible.
- */
+import type { ProjectPromptContext } from "../context/contract.js";
+import { renderProjectContextFragment } from "../context/index.js";
+import { sha256 } from "./hash.js";
+import { safePrefixOffsets, sourceLineCount } from "./preload-prefix.js";
 
+/** Historical limits, measured in UTF-16 code units and rendered lines. */
 export const FULL_PROJECT_CONTEXT_MAX_CHARS = 8000;
 export const FULL_PROJECT_CONTEXT_MAX_LINES = 220;
-
-/** Fraction of a limit at which a full preload is flagged as near the cliff. */
-const NEAR_LIMIT_FRACTION = 0.9;
-
-export type ProjectPreloadMode = "full" | "synopsis" | "none";
+export type ProjectPreloadMode = "full" | "partial" | "synopsis" | "none";
 export type ProjectPreloadReason = "size" | "lines" | "no-clio-md";
-
+export interface ProjectPreloadSource {
+	path: string;
+	contentHash: string;
+	availableChars: number;
+	availableLines: number;
+	includedChars: number;
+	includedLines: number;
+	includedRange: [number, number] | null;
+	omittedRange: [number, number] | null;
+	omissionReason: "budget" | null;
+}
 export interface ProjectPreloadClass {
 	mode: ProjectPreloadMode;
-	/** Rendered project-context length in characters (untrimmed, as measured by the cliff). */
+	/** Available rendered UTF-16 code units; retained for historical readers. */
 	chars: number;
-	/** Rendered project-context line count. */
+	/** Available rendered lines, including the final split segment. */
 	lines: number;
-	/** Which limit forced the synopsis; null for full or none. */
 	reason: ProjectPreloadReason | null;
-	/** True when a full preload is within 10% of either limit. */
 	nearLimit: boolean;
-	/** Human line, e.g. "full (5.2kB, 130 lines)" or "synopsis (reason: size)". */
 	label: string;
+	/** Additive snapshot accounting; absent in historical full/synopsis records. */
+	includedChars?: number;
+	includedLines?: number;
+	sources?: ProjectPreloadSource[];
+	omittedSupportFragments?: number;
+	providerSupportsTools?: boolean | null;
+}
+const renderedLines = (text: string): number => (text.length === 0 ? 0 : text.split("\n").length);
+const fits = (text: string): boolean =>
+	text.length <= FULL_PROJECT_CONTEXT_MAX_CHARS && renderedLines(text) <= FULL_PROJECT_CONTEXT_MAX_LINES;
+
+function coverage(path: string, source: string, included: string): ProjectPreloadSource {
+	const availableLines = sourceLineCount(source);
+	const includedLines = sourceLineCount(included);
+	return {
+		path,
+		contentHash: sha256(source),
+		availableChars: source.length,
+		availableLines,
+		includedChars: included.length,
+		includedLines,
+		includedRange: includedLines === 0 ? null : [1, includedLines],
+		omittedRange: included.length === source.length ? null : [includedLines + 1, availableLines],
+		omissionReason: included.length === source.length ? null : "budget",
+	};
 }
 
-export interface ClassifyProjectPreloadInput {
-	/** True when at least one selected project handbook contributed to the rendered text. */
-	hasClioMd: boolean;
-	/** The rendered project prompt context (ProjectPromptContext.text). */
-	text: string;
-}
-
-function formatKb(chars: number): string {
-	return `${(chars / 1000).toFixed(1)}kB`;
-}
-
-/**
- * Classify how the session compiler will treat this project context. Must
- * mirror the selection in prompts/extension.ts exactly: full preload only
- * when a selected project handbook parses and the rendered text is within both the
- * char and line limits; empty text preloads nothing.
- */
-export function classifyProjectPreload(input: ClassifyProjectPreloadInput): ProjectPreloadClass {
-	const chars = input.text.length;
-	const lines = input.text.length === 0 ? 0 : input.text.split("\n").length;
-	if (input.text.trim().length === 0) {
-		return { mode: "none", chars, lines, reason: null, nearLimit: false, label: "none (no project context)" };
-	}
-	const reason: ProjectPreloadReason | null = !input.hasClioMd
-		? "no-clio-md"
-		: chars > FULL_PROJECT_CONTEXT_MAX_CHARS
-			? "size"
-			: lines > FULL_PROJECT_CONTEXT_MAX_LINES
-				? "lines"
-				: null;
-	if (reason !== null) {
+/** One selector owns delivered text and reporting; it never re-parses authored markers. */
+export function selectProjectPreload(
+	context: ProjectPromptContext,
+	providerSupportsTools: boolean | null = null,
+): { text: string; classification: ProjectPreloadClass } {
+	const chars = context.text.length;
+	const lines = renderedLines(context.text);
+	const classify = (
+		text: string,
+		mode: ProjectPreloadMode,
+		sources: ProjectPreloadSource[],
+		omittedSupportFragments: number,
+	): ProjectPreloadClass => {
+		const includedChars = text.length;
+		const includedLines = renderedLines(text);
+		const incomplete = sources.filter((source) => source.omissionReason !== null).length;
 		return {
-			mode: "synopsis",
+			mode,
 			chars,
 			lines,
-			reason,
-			nearLimit: false,
-			label: `synopsis (reason: ${reason})`,
+			includedChars,
+			includedLines,
+			sources,
+			omittedSupportFragments,
+			providerSupportsTools,
+			reason: mode !== "partial" ? null : chars > FULL_PROJECT_CONTEXT_MAX_CHARS ? "size" : "lines",
+			nearLimit:
+				mode === "full" && (chars > FULL_PROJECT_CONTEXT_MAX_CHARS * 0.9 || lines > FULL_PROJECT_CONTEXT_MAX_LINES * 0.9),
+			label: `${mode} (included ${includedChars}/${chars} UTF-16 units, ${includedLines}/${lines} rendered lines; ${incomplete} of ${sources.length} handbook sources incomplete${providerSupportsTools === null ? "; tool capability unknown" : ""})`,
+		};
+	};
+	if (fits(context.text)) {
+		const sources = context.handbookSources.map(({ path, source }) => coverage(path, source, source));
+		return {
+			text: context.text,
+			classification: classify(context.text, context.text.length === 0 ? "none" : "full", sources, 0),
 		};
 	}
-	const nearLimit =
-		chars > FULL_PROJECT_CONTEXT_MAX_CHARS * NEAR_LIMIT_FRACTION ||
-		lines > FULL_PROJECT_CONTEXT_MAX_LINES * NEAR_LIMIT_FRACTION;
-	return {
-		mode: "full",
-		chars,
-		lines,
-		reason: null,
-		nearLimit,
-		label: `full (${formatKb(chars)}, ${lines} lines)`,
-	};
+	const retrieval =
+		providerSupportsTools === false
+			? "Remaining source text is unavailable to this target and cannot be recovered with tools in this session. Paths are source references."
+			: `${providerSupportsTools === null ? "If tools are available, read" : "Read"} each omitted suffix with read({path: ABSOLUTE_PATH, offset: FIRST_OMITTED_LINE, limit: 200}); continue as needed. Reads use current disk content, which may differ from the captured source.`;
+	const header = [
+		"<project-preload>",
+		"Incomplete authored prefixes/excerpts: omitted guidance is not known from this preload. Read the selected sources before relying on project guidance.",
+		retrieval,
+	];
+	const totals = context.handbookSources.map(({ source }) => sourceLineCount(source));
+	const sourceRecord = (path: string, included: string, omitted: string): string =>
+		`${JSON.stringify(path)}: included physical lines ${included}; omitted physical lines ${omitted}.`;
+	const reservedRecords = context.handbookSources.map(({ path }, index) =>
+		sourceRecord(path, `none/${totals[index]}-${totals[index]}`, `none/${totals[index]}-${totals[index]} (budget)`),
+	);
+	const notice = (records: string[], omitted: number): string =>
+		[...header, ...records, `Support fragments omitted: ${omitted}.`, "</project-preload>"].join("\n");
+	const reservedNotice = notice(reservedRecords, context.supportFragments.length);
+	if (!fits(reservedNotice))
+		throw new Error(`project preload metadata-budget overflow for ${context.handbookSources.length} handbook sources`);
+	const excerpts = context.handbookSources.map(() => "");
+	const fragments = context.handbookSources.map(() => "");
+	const assemble = (metadata: string, support: readonly string[] = []): string =>
+		[metadata, ...fragments.filter(Boolean), ...support].join("\n\n");
+	// Allocate nearest first, while fragments retain the original ancestor-first order.
+	for (let index = context.handbookSources.length - 1; index >= 0; index--) {
+		const entry = context.handbookSources[index];
+		if (!entry) continue;
+		const { path, source } = entry;
+		for (const offset of safePrefixOffsets(source, FULL_PROJECT_CONTEXT_MAX_CHARS).slice(1)) {
+			const previous = fragments[index] ?? "";
+			fragments[index] = renderProjectContextFragment(source.slice(0, offset), path);
+			if (!fits(assemble(reservedNotice))) {
+				fragments[index] = previous;
+				break;
+			}
+			excerpts[index] = source.slice(0, offset);
+		}
+	}
+	const support: string[] = [];
+	for (const fragment of context.supportFragments) {
+		if (fits(assemble(reservedNotice, [...support, fragment]))) support.push(fragment);
+	}
+	const sources = context.handbookSources.map(({ path, source }, index) =>
+		coverage(path, source, excerpts[index] ?? ""),
+	);
+	const records = sources.map((source) =>
+		sourceRecord(
+			source.path,
+			source.includedRange?.join("-") ?? "none",
+			source.omittedRange ? `${source.omittedRange.join("-")} (budget)` : "none",
+		),
+	);
+	const omitted = context.supportFragments.length - support.length;
+	const text = assemble(notice(records, omitted), support);
+	if (!fits(text)) throw new Error("project preload budget postcondition failed");
+	return { text, classification: classify(text, "partial", sources, omitted) };
 }

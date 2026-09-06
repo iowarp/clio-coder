@@ -1,7 +1,7 @@
 import { execFile, execFileSync } from "node:child_process";
 import { promisify } from "node:util";
-import { computeFingerprint, computeFingerprintAsync } from "../fingerprint.js";
 import { readWikiMeta, type WikiMeta } from "./meta.js";
+import { captureWikiSourceContent, captureWikiSourceContentAsync, wikiSourcesMatch } from "./source-content.js";
 
 const execFileAsync = promisify(execFile);
 
@@ -178,18 +178,17 @@ export function wikiStaleness(cwd: string): WikiStaleness {
 	if (!meta.gitHead) return unavailableStaleness(MISSING_RECORDED_HEAD);
 	const head = currentGitHead(cwd);
 	if (!head) return unavailableStaleness(MISSING_CURRENT_HEAD);
-	if (meta.sourceTreeHash && computeFingerprint(cwd).treeHash === meta.sourceTreeHash && head === meta.gitHead) {
-		return { state: "fresh" };
-	}
-	if (!meta.sourceTreeHash && head === meta.gitHead) return { state: "fresh" };
 	const diff = changedFileCount(cwd, meta.gitHead);
 	if (!("count" in diff)) return unavailableStaleness(diff.warning);
+	if (wikiSourcesMatch(meta.plan?.sourceContent, captureWikiSourceContent(cwd)) && head === meta.gitHead) {
+		return { state: "fresh" };
+	}
 	return { state: "stale", changedFiles: diff.count, ...(diff.warning ? { warning: diff.warning } : {}) };
 }
 
 /**
  * Same verdict, off the event loop. The sync form costs a `git rev-parse`, a
- * full workspace fingerprint, and up to three more `git` subprocesses, which is
+ * bounded workspace content read, and three more `git` subprocesses, which is
  * a fifth of a second on a large repository. That is fine for a one-shot CLI
  * read and unacceptable for a status surface that polls, which is what this
  * variant exists for.
@@ -202,13 +201,9 @@ export async function wikiStalenessAsync(cwd: string): Promise<WikiStaleness> {
 	if (!meta.gitHead) return unavailableStaleness(MISSING_RECORDED_HEAD);
 	const head = await currentGitHeadAsync(cwd);
 	if (!head) return unavailableStaleness(MISSING_CURRENT_HEAD);
-	if (meta.sourceTreeHash) {
-		const fingerprint = await computeFingerprintAsync(cwd);
-		if (fingerprint.treeHash === meta.sourceTreeHash && head === meta.gitHead) return { state: "fresh" };
-	} else if (head === meta.gitHead) {
-		return { state: "fresh" };
-	}
 	const diff = await changedFileCountAsync(cwd, meta.gitHead);
 	if (!("count" in diff)) return unavailableStaleness(diff.warning);
+	if (wikiSourcesMatch(meta.plan?.sourceContent, await captureWikiSourceContentAsync(cwd)) && head === meta.gitHead)
+		return { state: "fresh" };
 	return { state: "stale", changedFiles: diff.count, ...(diff.warning ? { warning: diff.warning } : {}) };
 }

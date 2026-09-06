@@ -125,7 +125,7 @@ export interface CompiledSessionPrompt {
 	sections: ReadonlyArray<PromptSection>;
 	fragmentManifest: ReadonlyArray<FragmentManifestEntry>;
 	/**
-	 * How the project context entered this prompt (full preload, synopsis, or
+	 * How the project context entered this prompt (full preload, partial excerpts, historical synopsis, or
 	 * none). Set by the prompts extension, which owns project-context
 	 * selection; the pure compiler leaves it absent.
 	 */
@@ -133,7 +133,8 @@ export interface CompiledSessionPrompt {
 	/**
 	 * Absolute paths of the effective project handbooks that produced the
 	 * project context, ancestor to nearest. Set by the prompts extension
-	 * alongside `projectPreload`; the pure compiler leaves it absent.
+	 * alongside `projectPreload`; its source accounting describes included coverage.
+	 * The pure compiler leaves this absent.
 	 */
 	projectHandbookFiles?: string[];
 	/**

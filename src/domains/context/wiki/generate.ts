@@ -21,7 +21,7 @@ import { coordinateCodewikiWrite } from "../codewiki/coordinator.js";
 import type { Codewiki } from "../codewiki/schema.js";
 import type { Fingerprint } from "../fingerprint.js";
 import { readClioState, writeClioState } from "../state.js";
-import { assembleWikiTree, normalizeRepoPath, pageSourceIndex } from "./assemble.js";
+import { assembleWikiTree, pageSourceIndex } from "./assemble.js";
 import { isGeneratedWikiFile, listWikiPagesInDir, WIKI_PLAN_FILE, wikiDir, wikiMarkdownFilesInDir } from "./layout.js";
 import {
 	computeWikiContentHash,
@@ -41,8 +41,9 @@ import {
 	type WikiPlan,
 	type WikiPlanPage,
 } from "./plan.js";
-import { readWikiPlanFile, scopePlanForUpdate, unclaimedCandidates, writeWikiPlanFile } from "./plan-store.js";
+import { readWikiPlanFile, unclaimedCandidates, writeWikiPlanFile } from "./plan-store.js";
 import type { WikiGenerateMode } from "./prompts.js";
+import { captureWikiSourceContent, type WikiSourceContent, wikiSourcesMatch } from "./source-content.js";
 import { changedPathsSince } from "./staleness.js";
 
 export type { WikiDepth, WikiGenerateMode };
@@ -357,7 +358,7 @@ function promoteStaging(cwd: string, stagingDir: string): PromoteResult {
  *
  * A resumed plan retains its structure because finished pages link to its
  * paths. Completed dispatches are reusable only when the checkpoint source
- * fingerprint matches; missing or changed evidence requeues the pages. Areas the index has since found that no
+ * content matches; missing or changed evidence requeues the pages. Areas the index has since found that no
  * page covers are carried separately and offered to a planning pass, which is
  * the only thing allowed to change a plan's shape.
  */
@@ -368,49 +369,31 @@ function resolvePlan(input: {
 	mode: WikiGenerateMode;
 	candidate: WikiPlan;
 	previousPlan: WikiPlan | undefined;
-	previousSourceTreeHash: string | undefined;
+	sourceContent: WikiSourceContent;
 	gitHead: string | null;
-	sourceTreeHash: string;
 }): { plan: WikiPlan; resumed: boolean; unclaimedAreas: WikiPlanPage[] } {
 	const staged = input.adopted ? readWikiPlanFile(input.stagingDir) : null;
-	if (staged !== null) {
-		const plan =
-			staged.sourceTreeHash === input.sourceTreeHash
-				? staged
-				: {
-						...staged,
-						pages: staged.pages.map((page) => ({ ...page, status: "pending" as const, attempts: 0 })),
-					};
-		return { plan, resumed: true, unclaimedAreas: [] };
-	}
-	if (input.mode === "update" && input.previousPlan !== undefined) {
+	const previous = staged ?? (input.mode === "update" ? input.previousPlan : undefined);
+	if (previous) {
 		const pageSources = pageSourceIndex(input.stagingDir, input.cwd);
-		const paths = changedPathsSince(input.cwd, input.gitHead);
-		// Git can be unavailable, or report no changes after sources used by a
-		// dirty-tree publication were rolled back. Neither certifies old prose.
-		const revalidate =
-			paths === null ||
-			(paths.length === 0 &&
-				input.previousSourceTreeHash !== undefined &&
-				input.previousSourceTreeHash !== input.sourceTreeHash);
-		const plan = revalidate
-			? {
-					...input.previousPlan,
-					pages: input.previousPlan.pages.map((page) =>
-						page.status === "written" ? { ...page, status: "pending" as const, attempts: 0 } : page,
-					),
-				}
-			: input.previousPlan;
-		const changed = new Set((paths ?? []).map((path) => normalizeRepoPath(input.cwd, path)));
-		return {
-			plan: scopePlanForUpdate({
-				plan,
-				changedPaths: changed,
-				existingPages: new Set(wikiMarkdownFilesInDir(input.stagingDir)),
-				pageSources,
+		const gitAvailable = changedPathsSince(input.cwd, input.gitHead) !== null;
+		const existing = new Set(wikiMarkdownFilesInDir(input.stagingDir));
+		const plan = {
+			...previous,
+			pages: previous.pages.map((page) => {
+				if (page.status !== "written") return page;
+				const sources = [...page.sources, ...(page.dependencies ?? []), ...(pageSources.get(page.path) ?? [])];
+				return gitAvailable &&
+					existing.has(page.path) &&
+					wikiSourcesMatch(previous.sourceContent, input.sourceContent, sources)
+					? page
+					: { ...page, status: "pending" as const, attempts: 0 };
 			}),
-			resumed: false,
-			unclaimedAreas: unclaimedCandidates(input.previousPlan, input.candidate, pageSources),
+		};
+		return {
+			plan,
+			resumed: staged !== null,
+			unclaimedAreas: staged ? [] : unclaimedCandidates(previous, input.candidate, pageSources),
 		};
 	}
 	return { plan: input.candidate, resumed: false, unclaimedAreas: [] };
@@ -419,9 +402,9 @@ function resolvePlan(input: {
 /**
  * Reconcile the plan against the tree that actually exists. A page whose file
  * the assembly pass dropped, or that was never written, is owed again; a page
- * on disk retains its recorded dispatch outcome. A page that
- * exists without a plan entry is adopted, because a page on disk is a page: the
- * alternative is a plan that keeps re-dispatching a subject already covered.
+ * on disk retains its recorded dispatch outcome. A page
+ * created by a writer without a plan entry remains available and is adopted
+ * pending: its own completed dispatch has not yet been recorded.
  */
 function reconcilePlan(plan: WikiPlan, stagingDir: string): WikiPlan {
 	const contentFiles = wikiMarkdownFilesInDir(stagingDir).filter((relPath) => !isGeneratedWikiFile(relPath));
@@ -434,8 +417,8 @@ function reconcilePlan(plan: WikiPlan, stagingDir: string): WikiPlan {
 			title: relPath.replace(/\.md$/, ""),
 			intent: "",
 			sources: [],
-			status: "written" as const,
-			attempts: 1,
+			status: "pending" as const,
+			attempts: 0,
 		}));
 	return {
 		...plan,
@@ -475,6 +458,7 @@ export async function runWikiGenerate(
 		});
 
 		const staging = adoptOrCreateStaging(cwd);
+		const sourceContent = captureWikiSourceContent(cwd);
 		const resolved = resolvePlan({
 			cwd,
 			stagingDir: staging.dir,
@@ -482,9 +466,8 @@ export async function runWikiGenerate(
 			mode,
 			candidate: generation.plan,
 			previousPlan: existingMeta?.plan,
-			previousSourceTreeHash: existingMeta?.sourceTreeHash,
+			sourceContent,
 			gitHead: existingMeta?.gitHead ?? null,
-			sourceTreeHash,
 		});
 		const owed = resolved.plan.pages.filter((page) => page.status !== "written").length;
 		progress(input, {
@@ -496,7 +479,7 @@ export async function runWikiGenerate(
 				`${resolved.plan.pages.length} pages planned; ${owed} to write` +
 				(resolved.resumed ? "; resuming an interrupted run" : ""),
 		});
-		resolved.plan = { ...resolved.plan, sourceTreeHash };
+		resolved.plan = { ...resolved.plan, sourceTreeHash, sourceContent };
 		writeWikiPlanFile(staging.dir, resolved.plan);
 
 		const beforeHash = computeWikiContentHash(cwd);
@@ -547,19 +530,30 @@ export async function runWikiGenerate(
 		progress(input, { phase: "generate", status: "completed", message: "wiki generator completed" });
 
 		const checkpoint = readWikiPlanFile(staging.dir) ?? resolved.plan;
+		// Replanning explicitly retires old planned publications. Other writer
+		// additions remain available, including pages linked by completed work.
+		for (const path of checkpoint.retiredPages ?? []) rmSync(join(staging.dir, path), { force: true });
 		// Capture citation evidence before assembly removes missing paths from
 		// routing metadata. Failed refreshes and no-op runs must retain it.
 		const citedSources = pageSourceIndex(staging.dir, cwd);
+		const currentContent = captureWikiSourceContent(cwd);
 		const workedPlan: WikiPlan = {
 			...checkpoint,
 			sourceTreeHash,
-			pages: checkpoint.pages.map((page) => ({
-				...page,
-				dependencies: [...new Set([...(page.dependencies ?? []), ...(citedSources.get(page.path) ?? [])])],
-			})),
+			sourceContent,
+			pages: checkpoint.pages.map((page) => {
+				const dependencies = [...new Set([...(page.dependencies ?? []), ...(citedSources.get(page.path) ?? [])])];
+				const stable = wikiSourcesMatch(sourceContent, currentContent, [...page.sources, ...dependencies]);
+				return {
+					...page,
+					dependencies,
+					...(page.status === "written" && !stable ? { status: "pending" as const, attempts: 0 } : {}),
+				};
+			}),
 		};
 		const report = assembleWikiTree({ dir: staging.dir, sourceRoot: cwd, plan: workedPlan });
 		const finalPlan = reconcilePlan(workedPlan, staging.dir);
+		delete finalPlan.retiredPages;
 		const pendingCount = finalPlan.pages.filter((page) => page.status !== "written").length;
 		progress(input, {
 			phase: "state",

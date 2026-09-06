@@ -1,5 +1,5 @@
 import { deepStrictEqual, ok, rejects, strictEqual } from "node:assert/strict";
-import { readFileSync, statSync, unlinkSync, writeFileSync } from "node:fs";
+import { mkdirSync, readFileSync, statSync, unlinkSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
 import { afterEach, beforeEach, describe, it } from "node:test";
 import { createSafeEventBus } from "../../src/core/event-bus.js";
@@ -19,6 +19,48 @@ describe("codewiki global freshness", () => {
 		isolated = await isolateClioEnv("clio-codewiki-freshness-");
 	});
 	afterEach(() => isolated.restore());
+
+	it("resolves Python relative depth, package initializers, and local absolute imports", async () => {
+		const cwd = isolated.dir;
+		const sources = {
+			"__init__.py": "from .root_helper import root\n",
+			"root_helper.py": "def root(): pass\n",
+			"pkg/__init__.py": "",
+			"pkg/helpers.py": "def parent(): pass\n",
+			"pkg/core/__init__.py": "from ..helpers import parent\n",
+			"pkg/core/helpers.py": "def sibling(): pass\n",
+			"pkg/core/tool.py":
+				"from ..helpers import parent\nfrom .helpers import sibling\nimport pkg.helpers\nfrom . import helpers\nimport requests\n",
+			"src/nested/__init__.py": "",
+			"src/nested/helpers.py": "def helper(): pass\n",
+			"src/nested/tool.py": "import nested.helpers\nfrom ..pkg import helpers\n",
+			"pkg/core/tool.ts": 'import value from "./helpers.js";\n',
+			"pkg/core/helpers.ts": "export default 1;\n",
+		};
+		for (const [path, content] of Object.entries(sources)) {
+			mkdirSync(join(cwd, path, ".."), { recursive: true });
+			writeFileSync(join(cwd, path), content);
+		}
+		const wiki = await buildCodewiki({ cwd, language: "python" });
+		const paths = new Map(wiki.files.map((file) => [file.id, file.path]));
+		const targets = (path: string) =>
+			wiki.edges
+				.filter((edge) => paths.get(edge.fileId) === path)
+				.map((edge) => ("toFileId" in edge ? paths.get(edge.toFileId) : `external:${edge.externalModule}`))
+				.sort();
+		deepStrictEqual(targets("pkg/core/tool.py"), [
+			"external:requests",
+			"pkg/core/__init__.py",
+			"pkg/core/helpers.py",
+			"pkg/helpers.py",
+		]);
+		deepStrictEqual(targets("__init__.py"), ["root_helper.py"]);
+		deepStrictEqual(targets("pkg/core/__init__.py"), ["pkg/helpers.py"]);
+		deepStrictEqual(targets("src/nested/tool.py"), ["external:..pkg", "src/nested/helpers.py"]);
+		deepStrictEqual(targets("pkg/core/tool.ts"), ["pkg/core/helpers.ts"]);
+		deepStrictEqual(await syncCodewiki(cwd, { ...wiki, edges: [] }), wiki);
+		strictEqual(await syncCodewiki(cwd, wiki), wiki);
+	});
 
 	for (const externalChange of ["edit", "add", "delete"] as const) {
 		it(`reconciles an external ${externalChange} alongside a notified edit and survives reload`, async () => {

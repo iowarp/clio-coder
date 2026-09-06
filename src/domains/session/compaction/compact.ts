@@ -336,9 +336,16 @@ function formatRecallableRefs(
 		[...view.evicted].filter(([ref]) => (entryIndexes.get(ref) ?? Number.POSITIVE_INFINITY) < firstKeptEntryIndex),
 	);
 	const listing = recallableRefListing(entries, { ...view, evicted: evictedBeforeCut });
-	if (listing.refs.length === 0) return "";
+	if (
+		listing.refs.length === 0 &&
+		!entries.slice(0, firstKeptEntryIndex).some((entry) => entry.kind === "message" && entry.role === "tool_result")
+	)
+		return "";
 	const rows = [...listing.refs];
 	if (listing.remaining > 0) rows.push(`and ${listing.remaining} more`);
+	rows.push(
+		'Preview only. Persisted original tool results removed by this summary are also recallable. Discover all active-path results with context(scope="recall", limit=8, offset=0), omitting ref; query filters path/tool/ref terms. Follow nextOffset, then recall the selected ref.',
+	);
 	return `\n\n<recallable-refs>\n${rows.join("\n")}\n</recallable-refs>`;
 }
 

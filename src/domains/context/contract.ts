@@ -15,6 +15,10 @@ export interface ProjectPromptContext {
 	 * whose content is in `text`; empty when no selected handbook loaded.
 	 */
 	handbookFiles: string[];
+	/** Captured authored bytes from the same load as text, ancestor to nearest. */
+	handbookSources: ReadonlyArray<{ path: string; source: string }>;
+	/** Trusted renderer products, kept separate from authored Markdown. */
+	supportFragments: readonly string[];
 }
 
 /**

@@ -26,7 +26,12 @@ export const HANDBOOK_ABSENT_FRAGMENT =
 
 export function renderPromptContext(cwd: string): ProjectPromptContext {
 	const projectType = detectProjectType(cwd);
-	const pieces = [renderProjectTypeFragment(projectType)];
+	const supportFragments = [renderProjectTypeFragment(projectType)];
+	const pieces = [...supportFragments];
+	const addSupport = (fragment: string): void => {
+		pieces.push(fragment);
+		supportFragments.push(fragment);
+	};
 	const warnings: string[] = [];
 	const loadedClioMd = loadProjectClioMd(cwd);
 	const clioMd: ParsedClioMd | null = loadedClioMd.value;
@@ -37,13 +42,18 @@ export function renderPromptContext(cwd: string): ProjectPromptContext {
 	// Said where the handbook would have been: a model that sees no project
 	// context spends its first tool call reading CLIO-CODER.md and gets
 	// ENOENT, while the operator's header already says it is missing (#191).
-	if (loadedClioMd.files.length === 0 && loadedClioMd.errors.length === 0) pieces.push(HANDBOOK_ABSENT_FRAGMENT);
+	if (loadedClioMd.files.length === 0 && loadedClioMd.errors.length === 0) addSupport(HANDBOOK_ABSENT_FRAGMENT);
 	const codewiki = readCodewiki(cwd);
 	if (codewiki) {
 		const state = readClioState(cwd);
-		const stale = state ? isStale(state.fingerprint, computeFingerprintCached(cwd, codewiki)) : true;
+		let stale = true;
+		try {
+			if (state) stale = isStale(state.fingerprint, computeFingerprintCached(cwd, codewiki));
+		} catch {
+			warnings.push("clio-coder: codewiki freshness unavailable; source could not be read; run /context refresh");
+		}
 		const suffix = stale ? " (stale; run /context refresh)" : "";
-		pieces.push(`<codewiki>available${suffix}; use code_nav</codewiki>`);
+		addSupport(`<codewiki>available${suffix}; use code_nav</codewiki>`);
 	}
 	// A wiki is advertised whenever one exists. There is no invalid-layout state
 	// to gate on: every structural defect is repaired by the assembly pass before
@@ -63,7 +73,14 @@ export function renderPromptContext(cwd: string): ProjectPromptContext {
 		}
 		if (staleness.state === "stale") notes.push("stale");
 		const suffix = notes.length > 0 ? ` (${notes.join("; ")}; run clio-coder context wiki --update)` : "";
-		pieces.push(`<wiki>${pages.length} pages at .clio-coder/wiki (start: quickstart.md)${suffix}</wiki>`);
+		addSupport(`<wiki>${pages.length} pages at .clio-coder/wiki (start: quickstart.md)${suffix}</wiki>`);
 	}
-	return { text: pieces.join("\n\n"), clioMd, warnings, handbookFiles: loadedClioMd.files.map((file) => file.path) };
+	return {
+		text: pieces.join("\n\n"),
+		clioMd,
+		warnings,
+		handbookFiles: loadedClioMd.files.map((file) => file.path),
+		handbookSources: loadedClioMd.files.map(({ path, source }) => ({ path, source })),
+		supportFragments,
+	};
 }

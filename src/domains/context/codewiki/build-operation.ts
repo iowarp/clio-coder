@@ -43,8 +43,6 @@ export async function executeCodewikiBuild(
 	for (let attempt = 0; attempt < 3; attempt += 1) {
 		// Both scans bracket all source reads, including sync's cached parse inputs.
 		// Never stamp a post-build tree that changed after an earlier file was read.
-		// This remains a metadata guard: equal path/size/floored-mtime collisions
-		// are outside the fingerprint's detection contract.
 		const before = computeFingerprint(request.cwd, current);
 		unreadable = false;
 		current = current

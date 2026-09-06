@@ -4,6 +4,7 @@ import { resolvePackageRoot } from "../../core/package-root.js";
 import { ToolNames } from "../../core/tool-names.js";
 import { parseCodewikiRaw } from "../../domains/context/codewiki/artifact.js";
 import type { Codewiki, CodewikiFile, CodewikiSymbol } from "../../domains/context/codewiki/schema.js";
+import { readWikiPage } from "../../domains/context/wiki/frontmatter.js";
 import { listWikiPages } from "../../domains/context/wiki/layout.js";
 import { readWikiMeta } from "../../domains/context/wiki/meta.js";
 import { wikiCompletenessFromMeta, wikiStaleness } from "../../domains/context/wiki/staleness.js";
@@ -429,7 +430,6 @@ function runDependents(index: NavIndex, query: string, limit: number): NavPayloa
 }
 
 const WIKI_UPDATE_COMMAND = "clio-coder context wiki --update";
-const WIKI_SUMMARY_MAX_CHARS = 240;
 
 function wikiPageId(path: string): string {
 	return path.replace(/\.md$/i, "");
@@ -442,15 +442,9 @@ function wikiPageSummary(cwd: string, path: string): string {
 	} catch {
 		return "Summary unavailable; read the page for details.";
 	}
-	const paragraphs = text
-		.replace(/^#\s+.*$/m, "")
-		.split(/\r?\n\s*\r?\n/)
-		.map((paragraph) => paragraph.replace(/\s+/g, " ").trim())
-		.filter((paragraph) => paragraph.length > 0 && !paragraph.startsWith("#"));
-	const summary = paragraphs[0] ?? "Read the page for details.";
-	return summary.length <= WIKI_SUMMARY_MAX_CHARS
-		? summary
-		: `${summary.slice(0, WIKI_SUMMARY_MAX_CHARS - 1).trimEnd()}…`;
+	return (
+		readWikiPage({ pagePath: path, content: text, sourceRoot: cwd }).metadata.summary || "Read the page for details."
+	);
 }
 
 function wikiPageCatalog(pages: ReadonlyArray<{ path: string; title: string }>): string {

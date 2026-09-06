@@ -20,7 +20,7 @@ import { compile, compileWorker, type RenderedPromptFragment } from "./compiler.
 import type { CompileSessionPromptInput, CompileWorkerPromptInput, PromptsContract } from "./contract.js";
 import { type FragmentTable, loadFragments } from "./fragment-loader.js";
 import { sha256 } from "./hash.js";
-import { classifyProjectPreload, type ProjectPreloadClass } from "./preload.js";
+import { type ProjectPreloadClass, selectProjectPreload } from "./preload.js";
 
 export interface PromptsBundleOptions {
 	/** When true, the dynamic context.files fragment renders the empty string. */
@@ -156,14 +156,10 @@ export function createPromptsBundle(
 			let projectHandbookFiles: string[] = [];
 			if (!suppressContextFiles) {
 				const projectContext = sources.projectContext;
-				contextFiles = projectContext
-					? selectProjectContext(projectContext, input.sessionInputs.providerSupportsTools ?? null)
-					: "";
 				if (projectContext) {
-					projectPreload = classifyProjectPreload({
-						hasClioMd: projectContext.handbookFiles.length > 0,
-						text: projectContext.text,
-					});
+					const selected = selectProjectPreload(projectContext, input.sessionInputs.providerSupportsTools ?? null);
+					contextFiles = selected.text;
+					projectPreload = selected.classification;
 					projectHandbookFiles = projectContext.handbookFiles;
 				}
 			}
@@ -389,56 +385,4 @@ function clioRepoAwarenessFragments(cwd: string): RenderedPromptFragment[] {
 			dynamic: true,
 		},
 	];
-}
-
-function projectTypeFromPromptContext(text: string): string | null {
-	const match = /<project-type>([^<]+)<\/project-type>/.exec(text);
-	const value = match?.[1]?.trim();
-	return value && value !== "unknown" ? value : null;
-}
-
-function hasCodewiki(text: string): boolean {
-	return text.includes("<codewiki>");
-}
-
-function wikiAvailabilityFromPromptContext(text: string): string | null {
-	const match = /<wiki>([^<]+)<\/wiki>/.exec(text);
-	const value = match?.[1]?.trim();
-	return value && value.length > 0 ? value : null;
-}
-
-function renderProjectSynopsis(context: ProjectPromptContext, providerSupportsTools: boolean | null): string {
-	const projectType = projectTypeFromPromptContext(context.text);
-	const wiki = wikiAvailabilityFromPromptContext(context.text);
-	const lines = ["<project-synopsis>"];
-	if (projectType) lines.push(`Language: ${projectType}`);
-	if (context.clioMd) lines.push(`Project: ${context.clioMd.projectName}`);
-	if (context.handbookFiles.length > 0) {
-		lines.push(
-			"Project handbook: available; compact synopsis only because the effective layers are too large for automatic preload.",
-		);
-	}
-	if (hasCodewiki(context.text)) lines.push("Codewiki: available via code_nav.");
-	if (wiki) lines.push(`Wiki: ${wiki}`);
-	if (providerSupportsTools === false) {
-		lines.push("Tools: unavailable for this target; use this synopsis only as fallback context.");
-	} else {
-		lines.push('Retrieve exact repository facts with context(scope="workspace"), code_nav, grep, and read.');
-	}
-	lines.push("</project-synopsis>");
-	return lines.join("\n");
-}
-
-/**
- * Project context is selected once per session compile: the full effective-handbook
- * preload when it is small enough, a compact synopsis otherwise. No per-turn
- * selection — the session prompt is stable for the session's lifetime. The
- * cliff itself lives in prompts/preload.ts so reporting surfaces classify
- * with the same rule.
- */
-function selectProjectContext(context: ProjectPromptContext, providerSupportsTools: boolean | null): string {
-	const preload = classifyProjectPreload({ hasClioMd: context.handbookFiles.length > 0, text: context.text });
-	if (preload.mode === "none") return "";
-	if (preload.mode === "full") return context.text.trim();
-	return renderProjectSynopsis(context, providerSupportsTools);
 }

@@ -1,7 +1,8 @@
 import { deepStrictEqual, match, ok, strictEqual, throws } from "node:assert/strict";
-import { readFileSync } from "node:fs";
+import { mkdirSync, readFileSync, writeFileSync } from "node:fs";
 import { createServer } from "node:http";
 import type { AddressInfo } from "node:net";
+import { join } from "node:path";
 import { afterEach, beforeEach, describe, it } from "node:test";
 
 import { Type } from "typebox";
@@ -13,6 +14,7 @@ import {
 	pathBoundaryCovers,
 } from "../../src/core/path-boundary.js";
 import { ToolNames } from "../../src/core/tool-names.js";
+import { writeWikiMeta } from "../../src/domains/context/wiki/meta.js";
 import { CONFIRMED_SCOPE, READONLY_SCOPE, WORKSPACE_SCOPE } from "../../src/domains/safety/scope.js";
 import { codeNavTool } from "../../src/tools/codewiki/code-nav.js";
 import { codeNavToolSurface } from "../../src/tools/codewiki/code-nav-surface.js";
@@ -133,6 +135,36 @@ describe("tool boundary contract", () => {
 		ok(overrideSize.offloadPath);
 		strictEqual(readFileSync(overrideSize.offloadPath, "utf8"), fullOutput);
 		if (overrideVerdict.result.kind === "ok") match(overrideVerdict.result.output, /full: .*\.txt/u);
+	});
+
+	it("uses the same wiki summary for the catalog and a page query", async () => {
+		const previousCwd = process.cwd();
+		const wiki = join(scratch.dir, ".clio-coder/wiki");
+		mkdirSync(wiki, { recursive: true });
+		writeFileSync(join(scratch.dir, "a.ts"), "export const a = 1;\n");
+		writeWikiMeta(scratch.dir, {
+			version: 1,
+			updatedAt: new Date().toISOString(),
+			gitHead: null,
+			model: "fixture",
+			contentHash: "a".repeat(64),
+			pages: [{ path: "a.md", title: "A" }],
+		});
+		try {
+			process.chdir(scratch.dir);
+			for (const frontmatter of ["summary: Authored routing summary.\n", ""]) {
+				writeFileSync(join(wiki, "a.md"), `---\ntitle: A\n${frontmatter}---\n# A\n\nBody summary.\n`);
+				const catalog = await codeNavTool.run({ mode: "wiki" });
+				const query = await codeNavTool.run({ mode: "wiki", query: "a" });
+				ok(catalog.kind === "ok" && query.kind === "ok");
+				const pages = JSON.parse(catalog.output).pages;
+				const page = JSON.parse(query.output).page;
+				strictEqual(page.summary, frontmatter ? "Authored routing summary." : "Body summary.");
+				strictEqual(page.summary, pages[0].summary);
+			}
+		} finally {
+			process.chdir(previousCwd);
+		}
 	});
 
 	it("keeps the code_nav source selector closed and defaults its schema to workspace", async () => {
