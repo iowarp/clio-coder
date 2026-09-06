@@ -2,6 +2,16 @@
 
 All notable changes to Clio Coder are documented in this file. The format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/) and versions follow Semantic Versioning; pre-1.0 minor releases may include incompatible changes.
 
+## Unreleased
+
+### Fixed
+- The dispatch board retains active work alongside 50 settled runs, keeps newly settled runs visible, and bounds completed retry parents without reviving them when a child attempt starts (#339).
+- Condensed dispatch summaries, worker transcript rows, compact fleet rows, and monitor status show canonical deliverable validation quality separately from execution success. Failed, ungrounded, and unknown quality stay distinct, including in narrow worker displays (#345).
+- Decision revisions preserve their original ledger origin and record whether the agent or operator made the revision. Evidence no longer labels agent revisions as operator corrections; historical revisions with no recorded author remain unknown (#337).
+- Operator `/run` and approved fleet executions snapshot active decision references before admission and retain them in requests, envelopes, and sealed receipts (#340).
+- Simulated terminal-selection tests own and restore their `TERM` environment, so they pass in headless runners while retaining the production dumb-terminal refusal check (#353).
+- Relative numerical comparisons avoid intermediate subtraction overflow for finite extreme values, while retaining precision for nearby values and independent absolute and ULP checks (#338).
+
 ## 0.4.4 - 2026-09-05
 
 Trust spine: typed claims, executable validation, and decision provenance. Answers the NSF "Beyond Code" findings where the harness still trusted prose or sniffed files.
