@@ -36,6 +36,8 @@ This runs type checking, lint (including boundaries, documentation drift and
 skill pins), one build, the contract/smoke suite, and the trace-viewer suite.
 Use `npm run skills:check` when checking skill pins on their own; it is already
 included in `lint` and `ci`.
+The `windows-subprocess` CI job runs type checking and the deterministic
+Antigravity subprocess and Bash output settlement contracts on `windows-latest`.
 
 Release gate (for maintainers before tags or release artifacts):
 
