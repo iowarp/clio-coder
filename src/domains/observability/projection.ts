@@ -11,8 +11,7 @@
  *   of DispatchProgress events coalesces into one notification.
  * - Worker progress retains only bounded answer text and redacted action
  *   descriptors. Tool arguments and reasoning are never stored.
- * - Run summaries and notices are bounded rings so a long-lived session cannot
- *   grow the projection without limit.
+ * - Terminal history and notices are bounded; active runs remain until settlement.
  */
 
 import { performance } from "node:perf_hooks";
@@ -42,7 +41,7 @@ import type { CostAggregate, UsageBreakdown } from "./cost.js";
 import type { MetricsView } from "./metrics.js";
 import { createWorkerProgressFold, type WorkerProgressFold } from "./worker-progress.js";
 
-/** Recent run summaries retained. Mirrors the dispatch board's window. */
+/** Settled run summaries retained, in addition to all active runs. */
 export const MAX_PROJECTION_RUNS = 50;
 /** Recent notices retained across all kinds. */
 export const MAX_PROJECTION_NOTICES = 100;
@@ -285,6 +284,9 @@ function readRunningSnapshot(snapshot: DispatchSnapshot): Map<
 
 export function createObservabilityProjection(bus: SafeEventBus, deps: ProjectionReadModel): ObservabilityProjection {
 	const runs = new Map<string, RunEntry>();
+	// Settlement order is independent of enqueue order: an old active run
+	// becomes the newest history entry when it finally settles.
+	const terminalHistory = new Set<string>();
 	const fleetPhases = new Map<string, NonNullable<ObservabilityRunSummary["phase"]>>();
 	let runReaders: ObservabilityRunReaders = deps;
 	const notices: ObservabilityNotice[] = [];
@@ -349,18 +351,28 @@ export function createObservabilityProjection(bus: SafeEventBus, deps: Projectio
 	}
 
 	function markChanged(): void {
+		for (const [runId, summary] of runs) {
+			// A dead heartbeat is provisional until dispatch finalization. Retry
+			// timers also remain active even though their last attempt has failed.
+			if (isTerminal(summary.status) && summary.finishedAtMs !== null && !summary.retry) {
+				terminalHistory.add(runId);
+			} else {
+				terminalHistory.delete(runId);
+			}
+		}
+		while (terminalHistory.size > MAX_PROJECTION_RUNS) {
+			const oldest = terminalHistory.values().next().value;
+			if (oldest === undefined) break;
+			terminalHistory.delete(oldest);
+			runs.delete(oldest);
+			fleetPhases.delete(oldest);
+		}
 		revision += 1;
 		scheduleFlush();
 	}
 
 	function putRun(runId: string, summary: RunEntry): void {
 		runs.set(runId, summary);
-		while (runs.size > MAX_PROJECTION_RUNS) {
-			const oldest = runs.keys().next().value;
-			if (oldest === undefined) break;
-			runs.delete(oldest);
-			fleetPhases.delete(oldest);
-		}
 	}
 
 	function emptyRun(runId: string, now: number): RunEntry {

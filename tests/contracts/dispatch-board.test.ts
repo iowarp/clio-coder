@@ -430,22 +430,88 @@ describe("dispatch board uses the observability projection", () => {
 		ok(!board.rows()[0]?.progress?.tailText.includes("untrusted receipt answer"));
 	});
 
-	it("keeps the projection's bounded FIFO run window", () => {
-		const { bus, projection, board } = setup();
-		for (let i = 0; i <= MAX_PROJECTION_RUNS; i += 1)
+	it("retains active dispatches beyond the terminal history limit and preserves their settlement", async () => {
+		const { bus, projection, board, progress, start } = setup();
+		board.setFleetPhase(IDENTITY.runId, { wave: 1, stepId: "long-task" });
+		start();
+		progress({ type: "message_update", assistantMessageEvent: { type: "text_delta", delta: "still working" } });
+		const published = nextRevision(projection, projection.snapshot().revision);
+		for (let i = 0; i < MAX_PROJECTION_RUNS + 10; i += 1) {
 			bus.emit(BusChannels.DispatchEnqueued, { ...IDENTITY, runId: `run-${i}` });
+			bus.emit(BusChannels.DispatchCompleted, { ...COMPLETED, runId: `run-${i}` });
+		}
+		await published;
+		const active = projection.snapshot().runs.find((run) => run.runId === IDENTITY.runId);
+		strictEqual(active?.status, "running");
+		strictEqual(active?.finishedAtMs, null);
+		strictEqual(board.rows().length, MAX_PROJECTION_RUNS + 1);
+		strictEqual(board.activeRows()[0]?.runId, IDENTITY.runId);
+		strictEqual(board.activeRows()[0]?.progress?.tailText, "still working");
+		deepStrictEqual(board.activeRows()[0]?.phase, { wave: 1, stepId: "long-task" });
+		ok(!board.rows().some((row) => row.runId === "run-0"));
+
+		const settled = nextRevision(projection, projection.snapshot().revision);
+		bus.emit(BusChannels.DispatchCompleted, COMPLETED);
+		await settled;
+		strictEqual(board.activeRows().length, 0);
+		strictEqual(board.rows().length, MAX_PROJECTION_RUNS);
+		const terminal = board.rows().find((row) => row.runId === IDENTITY.runId);
+		ok(terminal, "the newest settlement must survive despite its old enqueue position");
+		strictEqual(terminal.status, "completed");
+		strictEqual(terminal.receiptId, IDENTITY.runId);
+		strictEqual(terminal.tokenCount, COMPLETED.tokenCount);
+		strictEqual(terminal.elapsedMs, COMPLETED.durationMs);
+		strictEqual(terminal.outcomeDetail, COMPLETED.outcomeDetail);
+		const canonical = projection.snapshot().runs.find((run) => run.runId === IDENTITY.runId);
+		strictEqual(canonical?.outcome, "succeeded");
+		ok(canonical);
+		ok(canonical.finishedAtMs !== null);
+		deepStrictEqual(commonRow(terminal), commonSummary(canonical));
+
+		for (let i = 0; i < MAX_PROJECTION_RUNS; i += 1)
+			bus.emit(BusChannels.DispatchCompleted, { ...COMPLETED, runId: `later-${i}` });
 		board.reconcile();
 		strictEqual(board.rows().length, MAX_PROJECTION_RUNS);
-		ok(!board.rows().some((row) => row.runId === "run-0"));
-		deepStrictEqual(
-			board
-				.rows()
-				.map((row) => row.runId)
-				.sort(),
-			projection
-				.snapshot()
-				.runs.map((row) => row.runId)
-				.sort(),
-		);
+		ok(!board.rows().some((row) => row.runId === IDENTITY.runId), "settled runs eventually age out");
+	});
+
+	it("retains pending retries beyond history capacity and bounds their canceled settlement", () => {
+		const live: DispatchSnapshot = {
+			generatedAt: "2026-09-05T00:00:00Z",
+			running: [],
+			retrying: [],
+			totals: { inputTokens: 0, outputTokens: 0, totalTokens: 0, costUsd: 0, runtimeSeconds: 0 },
+		};
+		const { bus, projection, board, start } = setup({ dispatchSnapshot: () => live });
+		start();
+		bus.emit(BusChannels.DispatchFailed, { ...COMPLETED, outcome: "failed", reason: "failed" });
+		live.retrying.push({ runId: IDENTITY.runId, agentId: "coder", attempt: 1, dueAt: live.generatedAt, reason: "retry" });
+		board.reconcile();
+		for (let i = 0; i < MAX_PROJECTION_RUNS + 10; i += 1)
+			bus.emit(BusChannels.DispatchFailed, { ...COMPLETED, runId: `failed-${i}`, outcome: "failed", reason: "failed" });
+		board.reconcile();
+		strictEqual(board.rows().length, MAX_PROJECTION_RUNS + 1);
+		strictEqual(board.activeRows()[0]?.status, "retrying");
+		bus.emit(BusChannels.RunAborted, {
+			source: "dispatch_abort",
+			runId: IDENTITY.runId,
+			startedAt: null,
+			elapsedMs: null,
+			reason: "canceled retry",
+		});
+		live.retrying = [];
+		board.reconcile();
+		strictEqual(board.activeRows().length, 0);
+		strictEqual(projection.snapshot().runs.length, MAX_PROJECTION_RUNS);
+		strictEqual(board.rows().find((row) => row.runId === IDENTITY.runId)?.status, "aborted");
+	});
+
+	it("keeps every queued dispatch even when active work alone exceeds the history limit", () => {
+		const { bus, projection, board } = setup();
+		for (let i = 0; i <= MAX_PROJECTION_RUNS; i += 1)
+			bus.emit(BusChannels.DispatchEnqueued, { ...IDENTITY, runId: `queued-${i}` });
+		board.reconcile();
+		strictEqual(board.activeRows().length, MAX_PROJECTION_RUNS + 1);
+		strictEqual(projection.snapshot().runs.length, MAX_PROJECTION_RUNS + 1);
 	});
 });
