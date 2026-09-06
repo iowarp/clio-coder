@@ -1,6 +1,6 @@
 import { deepStrictEqual, doesNotMatch, equal, match, ok, rejects, throws } from "node:assert/strict";
 import { execFileSync } from "node:child_process";
-import { chmodSync, copyFileSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs";
+import { chmodSync, copyFileSync, existsSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { dirname, join } from "node:path";
 import { Readable } from "node:stream";
@@ -391,7 +391,21 @@ describe("Antigravity external subprocess contract", () => {
 
 	it("maps every autonomy exactly and refuses suggest before spawn", () => {
 		const input = workerInput(process.cwd(), { autonomy: "read-only" });
-		deepStrictEqual(buildAgyArgs(input, {}).slice(0, 3), ["--mode", "plan", "--sandbox"]);
+		const freshArgs = [
+			"--mode",
+			"plan",
+			"--sandbox",
+			"--input-format",
+			"stream-json",
+			"--output-format",
+			"stream-json",
+			"--disable-slash-commands",
+			"--model",
+			input.wireModelId,
+		];
+		deepStrictEqual(buildAgyArgs(input, {}), freshArgs);
+		deepStrictEqual(buildAgyArgs({ ...input, sessionId: "" }, {}), freshArgs);
+		deepStrictEqual(buildAgyArgs({ ...input, sessionId: "abc" }, {}), [...freshArgs, "--conversation", "abc"]);
 		deepStrictEqual(buildAgyArgs({ ...input, autonomy: "auto-edit" }, {}).slice(0, 2), ["--mode", "accept-edits"]);
 		deepStrictEqual(buildAgyArgs({ ...input, autonomy: "full-auto" }, {}).slice(0, 2), ["--mode", "accept-edits"]);
 		deepStrictEqual(
@@ -400,6 +414,72 @@ describe("Antigravity external subprocess contract", () => {
 		);
 		throws(() => buildAgyArgs({ ...input, autonomy: "suggest" }, {}), /cannot enforce autonomy 'suggest'/);
 		equal(antigravitySubprocessConfigForAutonomy("full-auto", {}).dangerousBypass, false);
+	});
+
+	it("resumes only when the actual init echoes the caller's id", async () => {
+		const sessionId = "opaque-conversation";
+		const cases: Array<{ name: string; lines: unknown[]; diagnostic?: RegExp }> = [
+			{ name: "matching", lines: [INIT, DELTA, SUCCESS] },
+			{
+				name: "mismatching",
+				lines: [{ ...INIT, conversation_id: "new-conversation" }, SUCCESS],
+				diagnostic: /not resumed/,
+			},
+			{ name: "missing-id", lines: [{ event: "init" }, SUCCESS], diagnostic: /not resumed/ },
+			{ name: "missing-init", lines: [SUCCESS], diagnostic: /result before init/ },
+			{ name: "empty-stream", lines: [], diagnostic: /without a terminal/ },
+			{ name: "duplicate-init", lines: [INIT, INIT, SUCCESS], diagnostic: /duplicate init/ },
+			{
+				name: "later-match",
+				lines: [{ ...INIT, conversation_id: "new-conversation" }, INIT, SUCCESS],
+				diagnostic: /not resumed/,
+			},
+		];
+		for (const testCase of cases) {
+			const { root, binary, home } = scratch();
+			writeScenario(root, { lines: testCase.lines });
+			const result = await startAntigravityWorkerRun(workerInput(root, { sessionId }), () => undefined, {
+				binary,
+				workspaceRoot: root,
+				environment: { PATH: process.env.PATH, HOME: home },
+			}).promise;
+			const message = assistant(result);
+			const observed = JSON.parse(readFileSync(join(root, "observed.json"), "utf8"));
+			deepStrictEqual(observed.args.slice(-2), ["--conversation", sessionId]);
+			equal(result.exitCode, testCase.diagnostic ? 1 : 0, testCase.name);
+			equal(message.stopReason, testCase.diagnostic ? "error" : "stop", testCase.name);
+			if (testCase.diagnostic) match(message.errorMessage ?? "", testCase.diagnostic, testCase.name);
+			else equal(message.responseId, sessionId);
+		}
+	});
+
+	it("rejects oversized and control-character session ids synchronously before spawn", () => {
+		const { root, binary, home } = scratch();
+		writeScenario(root, { lines: [INIT, SUCCESS] });
+		for (const sessionId of [
+			"a".repeat(4097),
+			"é".repeat(2049),
+			"a\0b",
+			"a\nb",
+			"a\rb",
+			"a\tb",
+			"a\u007fb",
+			"a\u0085b",
+		]) {
+			throws(
+				() =>
+					startAntigravityWorkerRun(workerInput(root, { sessionId }), () => undefined, {
+						binary,
+						workspaceRoot: root,
+						environment: { PATH: process.env.PATH, HOME: home },
+					}),
+				/sessionId (exceeded 4096 bytes|must not contain control characters)/,
+			);
+		}
+		equal(existsSync(join(root, "observed.json")), false);
+		for (const sessionId of ["a".repeat(4096), "é".repeat(2048), 'literal "quoted" trailing\\']) {
+			deepStrictEqual(buildAgyArgs(workerInput(root, { sessionId }), {}).slice(-2), ["--conversation", sessionId]);
+		}
 	});
 
 	it("fails provider errors, contradictory exits, missing/duplicate/out-of-order terminals, and malformed output", async () => {
