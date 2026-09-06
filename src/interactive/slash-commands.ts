@@ -34,6 +34,7 @@ import { activeDecisionRefs } from "../domains/session/decision-board.js";
 import type { DecisionLedgerEntry } from "../domains/session/entries.js";
 import type { ShareImportPlan } from "../domains/share/index.js";
 import type { UserTaskAcceptance } from "../domains/user-tasks/acceptance.js";
+import { formatUserTaskHandoff } from "../domains/user-tasks/handoff.js";
 import type { UserTask } from "../domains/user-tasks/store.js";
 import type { ExtensionReloadOutcome } from "../entry/extension-reload.js";
 import { isToolProfileName, TOOL_PROFILE_NAMES, type ToolProfileName } from "../tools/profiles.js";
@@ -796,13 +797,6 @@ function formatReceiptVerificationBlock(runId: string, result: SlashReceiptVerif
 		for (const check of result.checks) lines.push(`  ${check.ok ? "✓" : "✗"} ${check.name}: ${check.evidence}`);
 	}
 	return lines.join("\n");
-}
-
-/** The one operator-authored turn used by slash and overlay handoff paths. */
-export function formatUserTaskHandoff(task: Pick<UserTask, "id" | "title" | "note" | "acceptance">): string {
-	const note = task.note ? ` ${task.note}.` : "";
-	const acceptance = task.acceptance ? ` Acceptance: ${JSON.stringify(task.acceptance)}.` : "";
-	return `Operator task ${task.id}: ${task.title}.${note}${acceptance} Pick it up with tasks action="pick" id="${task.id}" and work it when appropriate.`;
 }
 
 /** The verb a command performs, in the order /help lists the groups. */

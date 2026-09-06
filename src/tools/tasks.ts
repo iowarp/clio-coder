@@ -47,7 +47,8 @@ function waitingTrailer(tasks: ReadonlyArray<UserTask>): string[] {
 		.filter((task) => task.status === "open" || task.status === "handed")
 		.map(
 			(task) =>
-				`operator tasks waiting: ${task.id} ${JSON.stringify(task.title)} — pick up with action="pick" id="${task.id}"`,
+				`operator tasks waiting: ${task.id} ${JSON.stringify(task.title)} — durable status=${task.status}; ` +
+				`not completed; pick only if this is the intended operator task, with action="pick" id="${task.id}" before work`,
 		);
 }
 
@@ -60,7 +61,14 @@ function renderTaskBoardText(board: TaskBoardSnapshot, userTasks: ReadonlyArray<
 		if (task.status === "blocked" && task.reason) line += ` — blocked: ${task.reason}`;
 		if (task.status === "cancelled" && task.reason) line += ` — dropped: ${task.reason}`;
 		lines.push(line);
-		const outputs = userTasks.find((item) => item.id === task.userTaskId)?.acceptance?.expectedOutputs;
+		const operatorTask = userTasks.find((item) => item.id === task.userTaskId);
+		if (task.userTaskId) {
+			lines.push(
+				`  operator task ${task.userTaskId}: durable status=${operatorTask?.status ?? "unavailable"}; ` +
+					`session=${operatorTask?.handedSessionId ?? "unlinked"}; board task=${operatorTask?.boardTaskId ?? "unlinked"}`,
+			);
+		}
+		const outputs = operatorTask?.acceptance?.expectedOutputs;
 		if (outputs?.length) lines.push(`  expected outputs: ${outputs.join(", ")}`);
 		for (const item of task.requiredValidationEvidence ?? []) {
 			if (item.status === "required") {
@@ -155,6 +163,9 @@ export function createTasksTool(deps: TasksToolDeps): ToolSpec {
 			"pick moves one operator task uN onto the board; start marks one task active (the current focus); " +
 			"done completes a task (started or still pending) and requires note as the " +
 			"evidence the work actually finished; block parks it with a required reason; drop cancels it; list shows the board. " +
+			"For an operator handoff, pick the intended uN before work and use its returned linked tN; CLI hand alone does not pick it. " +
+			"Never pick unrelated inbox tasks. Before claiming operator completion, list and confirm the linked board row is completed " +
+			"and the durable operator status is done with the same session/board link; report those IDs and actual states. " +
 			"Work that did not happen is blocked or dropped, never done. A self-created plan is not operator authorization. " +
 			"For proposal-only work, block deferred implementation with note naming the pending operator decision, or drop it; " +
 			"wait for an explicit operator go-ahead before start or implementation. A skill-install choice does not grant that go-ahead.",
@@ -204,7 +215,10 @@ export function createTasksTool(deps: TasksToolDeps): ToolSpec {
 			if (typedAction === "list") {
 				const board = deps.board.snapshot();
 				if (!board) {
-					const output = ['no task board yet; declare one with action="plan"', ...waitingTrailer(userTasks)].join("\n");
+					const output = [
+						'no task board yet; for an operator handoff, pick the intended uN before work; otherwise declare one with action="plan"',
+						...waitingTrailer(userTasks),
+					].join("\n");
 					return {
 						kind: "ok",
 						output,

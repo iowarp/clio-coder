@@ -186,7 +186,11 @@ const TOOL_METADATA: Readonly<Record<string, ToolMetadata>> = {
 		},
 		costLatency: "local_fast",
 		promptHint:
-			'For 3+ authorized steps, tasks(action="plan") before edits. Start work; done needs evidence. ' +
+			"For an operator handoff, pick the intended uN before work and use its linked tN; CLI hand alone does not pick it. " +
+			"Leave unrelated inbox tasks alone. Before claiming completion, list and confirm the linked board row is completed " +
+			"and the durable operator task is done with the same session/board link; report the IDs and actual state. " +
+			'For 3+ authorized steps without a board, tasks(action="plan") before edits; add steps to an existing board to preserve pickup links. ' +
+			"Start work; done needs evidence. " +
 			"Plans/reminders grant no scope: block proposal-only implementation pending explicit operator go-ahead, or drop it. " +
 			"Skill-install choices do not authorize implementation.",
 	},

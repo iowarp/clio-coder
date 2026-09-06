@@ -14,6 +14,8 @@ import {
 } from "../../src/domains/eval/artifacts/store.js";
 import type { EvalCompareV4Summary } from "../../src/domains/eval/compare/compare.js";
 
+import { formatUserTaskHandoff } from "../../src/domains/user-tasks/handoff.js";
+
 const ROOT = new URL("../..", import.meta.url).pathname;
 const CLI = join(ROOT, "dist", "cli", "index.js");
 const VERSION = (JSON.parse(readFileSync(join(ROOT, "package.json"), "utf8")) as { version: string }).version;
@@ -84,6 +86,34 @@ async function runCli(
 		});
 	});
 }
+
+it("CLI tasks hand retains JSON state and emits the explicit headless pickup turn", async () => {
+	const scratch = home("clio-task-handoff-");
+	try {
+		const options = { env: scratch.env, cwd: scratch.root };
+		const added = await runCli(["tasks", "add", "Inspect validation results"], options);
+		strictEqual(added.code, 0, added.stderr);
+		const handed = await runCli(["tasks", "hand", "u1"], options);
+		strictEqual(handed.code, 0, handed.stderr);
+		const task = JSON.parse(handed.stdout);
+		strictEqual(task.id, "u1");
+		strictEqual(task.status, "handed");
+		strictEqual(task.handedSessionId, undefined);
+		strictEqual(task.boardTaskId, undefined);
+		match(handed.stderr, /CLI hand records the inbox state only/);
+		match(handed.stderr, /same project/);
+		ok(handed.stderr.endsWith(`${formatUserTaskHandoff(task)}\n`));
+		const listed = await runCli(["tasks", "list"], options);
+		strictEqual(listed.code, 0, listed.stderr);
+		deepStrictEqual(JSON.parse(listed.stdout), [task]);
+		const missing = await runCli(["tasks", "hand", "u99"], options);
+		strictEqual(missing.code, 1);
+		match(missing.stderr, /not found/);
+		strictEqual(missing.stderr.includes("Before working"), false);
+	} finally {
+		scratch.cleanup();
+	}
+});
 
 async function body(request: IncomingMessage): Promise<Record<string, unknown>> {
 	let text = "";
