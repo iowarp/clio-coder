@@ -777,6 +777,11 @@ function workerDiagnosticsText(result: SpawnedWorkerResult, maxChars: number): s
 	if (malformedStdoutLines > 0) {
 		parts.push(`malformed stdout lines: ${malformedStdoutLines}`);
 	}
+	if (result.signal) {
+		// Keep the observed close signal beside contract failures, and at the
+		// tail so bounded stderr diagnostics cannot truncate it away.
+		parts.push(`worker process signal: ${result.signal}`);
+	}
 	if (parts.length === 0) return null;
 	return truncateDiagnosticText(parts.join("; "), maxChars);
 }
