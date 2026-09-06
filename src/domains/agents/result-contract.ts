@@ -1686,8 +1686,14 @@ function resultContractRepairMessage(input: ResultContractRepairInput): string {
 	if (input.anchors.length > 0) {
 		lines.push(
 			"",
-			"Locations you read successfully in this run (use these exact path:line values):",
+			"Source ranges you read successfully in this run (path:start-end, inclusive):",
 			...input.anchors.slice(-RESULT_CONTRACT_ANCHOR_LIMIT).map((anchor) => `- ${anchor}`),
+		);
+	}
+	if (input.contract.kind === "scout-report") {
+		lines.push(
+			"For each finding, use the exact source line that supports its claim inside a listed read range. Range endpoints are not suggested citations.",
+			"If a finding's supporting line cannot be confirmed from the source already returned, remove that finding and keep the confirmed findings. Never shift a rejected citation into range just to pass validation.",
 		);
 	}
 	return lines.join("\n");

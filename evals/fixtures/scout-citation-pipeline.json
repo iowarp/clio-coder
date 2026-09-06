@@ -1,0 +1,55 @@
+{
+	"issue": 349,
+	"evidence": {
+		"candidate": "7819fe4774b48b68e2129d9b54e888cce634c6aa",
+		"repositoryHead": "6ed90aa8a4433376c3ea7004bc775dd08e0cef70",
+		"originalRunId": "14ro3q992g4c",
+		"originalOutcome": "result_contract_exhausted",
+		"originalRepairs": 2,
+		"originalDependentExecuted": false,
+		"source": "battletest-v044/closeout/scratch-repositories.tar.gz:repos/local/findiff/",
+		"sourceSha256": {
+			"findiff/grids.py": "0e5516f9245df2d69835694b7f0bdb68ec9a411f8ba561d8c9ba6e5ef335f2bb",
+			"findiff/interface.py": "e8a61d50837d1312c1621d95e55deaba0393fa1962ae7d78efaec20c3ef1b90d"
+		},
+		"scope": "Retained representation and interface source; deterministic subset, not a live-model acceptance result.",
+		"sourceLicense": "MIT License\n\nCopyright (c) 2018 maroba\n\nPermission is hereby granted, free of charge, to any person obtaining a copy\nof this software and associated documentation files (the \"Software\"), to deal\nin the Software without restriction, including without limitation the rights\nto use, copy, modify, merge, publish, distribute, sublicense, and/or sell\ncopies of the Software, and to permit persons to whom the Software is\nfurnished to do so, subject to the following conditions:\n\nThe above copyright notice and this permission notice shall be included in all\ncopies or substantial portions of the Software.\n\nTHE SOFTWARE IS PROVIDED \"AS IS\", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR\nIMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY,\nFITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT. IN NO EVENT SHALL THE\nAUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER\nLIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM,\nOUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE\nSOFTWARE.\n"
+	},
+	"prompt": "Use dispatch pipeline mode for two bounded read-only steps. First ask Scout to identify how findiff represents nonuniform grid spacing. Then ask Documenter to turn the first step's evidence into a concise explanation with file citations. Do not edit files. Wait for the pipeline receipt and report its real run IDs and outcomes.",
+	"dispatch": {
+		"mode": "pipeline",
+		"briefing": "Two bounded read-only steps on nonuniform grid spacing. Do not edit files. Scout evidence feeds Documenter.",
+		"tasks": [
+			{
+				"agent": "scout",
+				"task": "Identify how findiff represents nonuniform grid spacing. Inspect only findiff/grids.py and findiff/interface.py. Return cited observations on coordinates, axis construction, and how Diff consumes the grid. Do not edit files."
+			},
+			{
+				"agent": "documenter",
+				"task": "Turn the first step's evidence into a concise explanation with file citations. Use only the evidence provided by the preceding Scout step. Do not edit files."
+			}
+		]
+	},
+	"files": {
+		"findiff/grids.py": "import numbers\n\nimport numpy as np\n\nfrom findiff.backend import is_array\n\n\nclass GridAxis:\n\n    def __init__(self, dim: int, periodic=False):\n        if not isinstance(dim, numbers.Number) or int(dim) != dim:\n            raise ValueError(\"Dimension must be an integer\")\n        if dim < 0:\n            raise ValueError(\"Dimension must be >= 0.\")\n        self.dim = dim\n        self.periodic = periodic\n\n\nclass EquidistantAxis(GridAxis):\n\n    def __init__(self, dim: int, spacing: float, periodic=False):\n        super().__init__(dim, periodic)\n        if spacing <= 0:\n            raise ValueError(\"Spacing must be > 0.\")\n        self.spacing = spacing\n\n\nclass NonEquidistantAxis(GridAxis):\n    def __init__(self, dim: int, coords: np.ndarray, periodic=False):\n        super().__init__(dim, periodic)\n        self.coords = coords\n\n\nclass Grid:\n    def __init__(self, *axes: GridAxis):\n        self.axes = {ax.dim: ax for ax in axes}\n\n    def get_axis(self, dim: int) -> GridAxis:\n        return self.axes.get(dim)\n\n\ndef make_grid(config_or_grid):\n    \"\"\"Makes or returns a grid based on configuration or an actual Grid instance.\n\n    Historically, the API allowed to specify grid using a variety of\n    shortcuts using a single number, dicts or full Grid instances.\n\n    The purpose of this function is to keep other modules closed with\n    respect of addition an modification of GridAxis and Grid types.\n    \"\"\"\n    if isinstance(config_or_grid, Grid):\n        return config_or_grid\n    elif isinstance(config_or_grid, dict):\n        config = config_or_grid\n        axes = []\n        for dim, ax_config in config.items():\n            if isinstance(ax_config, dict):\n                ax = EquidistantAxis(\n                    dim, ax_config[\"h\"], periodic=ax_config.get(\"periodic\", False)\n                )\n            else:\n                ax = EquidistantAxis(dim, ax_config)\n            axes.append(ax)\n        return Grid(*axes)\n    elif config_or_grid is None:\n        return None\n    else:\n        raise TypeError(f\"Unsupported grid type: {type(config_or_grid)}\")\n\n\ndef make_axis(dim, config_or_axis, periodic=False):\n    \"\"\"Makes or returns a grid axis based on configuration or an actual GridAxis instance.\n\n    Historically, the API allowed to specify axes using a variety of\n    shortcuts using a single number, dicts or full GridAxis instances.\n\n    The purpose of this function is to keep other modules closed with\n    respect of addition an modification of GridAxis and Grid types.\n    \"\"\"\n\n    if isinstance(config_or_axis, GridAxis):\n        return config_or_axis\n    if isinstance(config_or_axis, numbers.Number):\n        return EquidistantAxis(dim, spacing=config_or_axis, periodic=periodic)\n    elif is_array(config_or_axis):\n        return NonEquidistantAxis(dim, coords=np.asarray(config_or_axis), periodic=periodic)\n",
+		"findiff/interface.py": "from .compact import CompactScheme\nfrom .grids import make_axis\nfrom .operators import Diff as _Diff\n\n\nclass Diff(_Diff):\n\n    def __init__(\n        self,\n        axis=0,\n        grid=None,\n        periodic=False,\n        acc=_Diff.DEFAULT_ACC,\n        scheme=None,\n        compact=None,\n    ):\n        \"\"\"Represents a partial derivative (along one axis).\n\n        For higher derivatives, exponentiate. For mixed partial derivatives, multiply. See\n        examples below.\n\n        Examples\n        --------\n        Set up grid (equidistant here):\n            >>> import numpy as np\n            >>> x = np.linspace(0, 10, 100)\n\n        The array to differentiate\n            >>> f = np.sin(x) # as an example\n\n        Define the first derivative:\n            >>> from findiff import Diff\n            >>> d_dx = Diff(0)\n            >>> d_dx.set_grid({0: x[1] - x[0]})\n\n        Now apply it:\n            >>> df_dx = d_dx(f)\n\n        The second derivative is constructed by exponentiation:\n            >>> d2_dx2 = d_dx ** 2\n            >>> d2f_dx2 = d2_dx2(f)\n\n        In multiple dimensions with meshed grids, the usage is accordingly:\n            >>> x = y = z = np.linspace(0, 10, 100)\n            >>> dx = dy = dz = x[1] - x[0]\n            >>> X, Y, Z = np.meshgrid(x, y, z, indexing='ij')\n            >>> f = np.sin(X) * np.sin(Y) * np.sin(Z)\n            >>> d_dx = Diff(0)\n            >>> d_dy = Diff(1)\n            >>> d_dz = Diff(2)\n            >>> d3_dxdydz = d_dx * d_dy * d_dz\n            >>> d3_dxdydz.set_grid({0: dx, 1: dy, 2: dz})\n            >>> d3f_dxdydz = d3_dxdydz(f)\n        \"\"\"\n        if compact and scheme:\n            raise ValueError(\"Cannot specify both `compact` and `scheme`\")\n        if compact:\n            if compact % 2 == 0:\n                raise ValueError(\"`compact` must be odd integer\")\n            scheme = CompactScheme.from_accuracy(acc, 1, compact)\n\n        grid_axis = make_axis(axis, grid, periodic)\n        super().__init__(axis, grid_axis, acc, scheme)\n"
+	},
+	"findings": [
+		{
+			"claim": "NonEquidistantAxis stores the supplied coordinates in self.coords.",
+			"path": "findiff/grids.py",
+			"line": 31
+		},
+		{
+			"claim": "make_axis converts array input to a NonEquidistantAxis with np.asarray.",
+			"path": "findiff/grids.py",
+			"line": 86
+		},
+		{
+			"claim": "Diff passes the supplied grid through make_axis.",
+			"path": "findiff/interface.py",
+			"line": 62
+		}
+	],
+	"dependentExplanation": "Nonuniform grids are represented by coordinates stored in NonEquidistantAxis.coords (findiff/grids.py:31). make_axis converts an array input with np.asarray to construct that axis (findiff/grids.py:86). Diff passes its grid argument through make_axis (findiff/interface.py:62)."
+}

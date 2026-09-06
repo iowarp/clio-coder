@@ -1,9 +1,10 @@
 import { strict as assert } from "node:assert";
-import { existsSync } from "node:fs";
+import { existsSync, mkdirSync, readFileSync, writeFileSync } from "node:fs";
 import { readFile } from "node:fs/promises";
 
 async function gradeMain(caseId) {
 	if (caseId === "main-proposal-only-continuation") return gradeProposal();
+	if (caseId === "main-scout-citation-pipeline") return gradeScoutPipeline();
 	const source = await readFile("evals/fixtures/behavioral-main.ts", "utf8");
 	const assistant = await assistantText();
 	let solved = false;
@@ -148,10 +149,79 @@ async function gradeProposal() {
 	);
 }
 
+function scoutPipelineFixture() {
+	return JSON.parse(readFileSync(new URL("./fixtures/scout-citation-pipeline.json", import.meta.url), "utf8"));
+}
+
+function prepareScoutPipeline() {
+	const fixture = scoutPipelineFixture();
+	assert.ok(!existsSync("findiff"), "Scout fixture must not overwrite an existing findiff tree");
+	mkdirSync("findiff");
+	for (const [path, content] of Object.entries(fixture.files)) writeFileSync(path, content);
+}
+
+async function gradeScoutPipeline() {
+	const fixture = scoutPipelineFixture();
+	const events = await runnerEvents();
+	const pipelineIds = new Set(
+		events
+			.filter(
+				(event) =>
+					event.type === "tool_execution_start" && event.toolName === "dispatch" && event.args?.mode === "pipeline",
+			)
+			.map((event) => event.toolCallId),
+	);
+	const pipelines = events.filter(
+		(event) => event.type === "tool_execution_end" && event.toolName === "dispatch" && pipelineIds.has(event.toolCallId),
+	);
+	assert.equal(pipelines.length, 1, "one requested pipeline must complete; standalone recovery is not completion");
+	const pipeline = pipelines[0];
+	// Failed tool results may omit structured run details. That still means
+	// incomplete; absence of details cannot establish how many workers ran.
+	const runs = pipeline.result?.details?.runs;
+	if (!Array.isArray(runs)) {
+		process.stdout.write(
+			`${JSON.stringify({ schema: "clio-coder.eval.measure.v1", metrics: { "pipeline.completed": false } })}\n`,
+		);
+		assert.fail("pipeline did not return structured completion receipts");
+	}
+	const receipts = await Promise.all(runs.map(async (run) => JSON.parse(await readFile(run.receiptPath, "utf8"))));
+	const completed =
+		!pipeline.isError &&
+		receipts.length === 2 &&
+		receipts[0].agentId === "scout" &&
+		receipts[1].agentId === "documenter" &&
+		receipts[0].quality.resultContract.conformance === "pass" &&
+		Boolean(receipts[1].output?.text?.trim()) &&
+		receipts.every((receipt) => receipt.outcome === "succeeded" && receipt.exitCode === 0);
+	const dependentExecutions = receipts.filter((receipt) => receipt.agentId === "documenter").length;
+	process.stdout.write(
+		`${JSON.stringify({
+			schema: "clio-coder.eval.measure.v1",
+			metrics: {
+				"pipeline.completed": completed,
+				"pipeline.dependentExecutions": dependentExecutions,
+			},
+		})}\n`,
+	);
+	assert.ok(completed, "Scout validation and the dependent step must both succeed");
+	assert.deepEqual(
+		receipts.map((receipt) => receipt.agentId),
+		["scout", "documenter"],
+	);
+	assert.equal(receipts[0].quality.resultContract.conformance, "pass");
+	assert.ok(receipts[1].output?.text?.trim(), "dependent must deliver terminal output");
+	for (const [path, content] of Object.entries(fixture.files))
+		assert.equal(await readFile(path, "utf8"), content, "read-only source must remain unchanged");
+	// This grader measures pipeline completion. Root separately reviews source
+	// semantics and live repair counts; a passing receipt alone proves neither.
+}
+
 const [kind, id, phase] = process.argv.slice(2);
 try {
 	if (kind !== "main") throw new Error(`unknown behavioral corpus grader kind ${kind ?? "missing"}`);
 	if (id === "main-proposal-only-continuation" && phase === "--prepare") assertCleanProposalFixture();
+	else if (id === "main-scout-citation-pipeline" && phase === "--prepare") prepareScoutPipeline();
 	else await gradeMain(id);
 	process.stdout.write(`pass ${kind} ${id}\n`);
 } catch (error) {
