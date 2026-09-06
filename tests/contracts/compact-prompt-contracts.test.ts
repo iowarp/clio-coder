@@ -373,19 +373,20 @@ describe("compact prompt contracts", () => {
 			}),
 		);
 		// Task-tool guidance (+406 chars) and #351 adherence guidance (+405) reach workers.
+		// #361 adds 960 chars of Coder explanation/limitation guidance.
 		// Memory/no-edit identity guidance remains main-only.
 		strictEqual(worker.systemPrompt.includes("When asked to remember"), false);
-		strictEqual(worker.systemPrompt.length, 6_304);
-		strictEqual(worker.tokenEstimate, 1_576);
-		ok(worker.systemPrompt.length <= 6_311);
-		ok(worker.tokenEstimate <= 1_578);
+		strictEqual(worker.systemPrompt.length, 7_264);
+		strictEqual(worker.tokenEstimate, 1_816);
+		ok(worker.systemPrompt.length <= 7_271);
+		ok(worker.tokenEstimate <= 1_818);
 		strictEqual(Math.ceil(worker.systemPrompt.length / 4), worker.tokenEstimate);
 		deepStrictEqual(Object.fromEntries(worker.sections.map((section) => [section.id, section.tokenEstimate])), {
 			identity: 62,
 			"operating-contract": 398,
 			"tool-contract": 473,
 			safety: 253,
-			persona: 389,
+			persona: 629,
 		});
 	});
 });
