@@ -122,8 +122,14 @@ export const readTool: ToolSpec = {
 				});
 			}
 
+			const endIndex = limit !== null ? Math.min(startIndex + limit, totalLines) : totalLines;
+			// Preserve the last selected source line's terminator when it exists.
+			// Joining a limited slice alone turns ["x", ""] into "x\n", which
+			// truncateHead counts as one line; [""] even becomes an empty file.
+			// The raw split's final entry tells us whether that newline is real,
+			// without inventing a line at EOF or changing shared text counting.
 			const selected =
-				limit !== null ? allLines.slice(startIndex, startIndex + limit).join("\n") : allLines.slice(startIndex).join("\n");
+				allLines.slice(startIndex, endIndex).join("\n") + (endIndex > startIndex && endIndex < allLines.length ? "\n" : "");
 			const truncation: TruncationResult = truncateHead(selected, { maxBytes: cap });
 			if (truncation.firstLineExceedsLimit) {
 				const firstLineSize = formatSize(Buffer.byteLength(allLines[startIndex] ?? "", "utf8"));
