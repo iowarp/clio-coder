@@ -1,3 +1,4 @@
+import type { CostProvenance } from "../../domains/providers/types/cost-provenance.js";
 import type { AgentMessage } from "../types.js";
 
 /**
@@ -189,6 +190,8 @@ export interface AcpPromptResponse {
 }
 
 export interface AcpDelegationUsage {
+	/** A valid peer token field was present, including an explicit zero. */
+	tokensReported: boolean;
 	inputTokens: number;
 	outputTokens: number;
 	cacheReadTokens: number;
@@ -196,8 +199,10 @@ export interface AcpDelegationUsage {
 	reasoningTokens: number;
 	/** Peer-reported total when present, otherwise input+output+cacheRead+cacheWrite, matching the ACP server side. */
 	totalTokens: number;
-	/** Sum of the peer's `usage.cost.total`; stays 0 when the peer reports no cost. */
+	/** Sum of peer cost.total (legacy) or costUsd (Clio metadata); never re-priced. */
 	costUsd: number;
+	/** Absent until usage is reported; missing or unsupported pricing provenance stays unknown. */
+	costProvenance?: CostProvenance;
 }
 
 export interface AcpDelegationResult {
