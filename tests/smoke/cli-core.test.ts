@@ -6,6 +6,7 @@ import type { AddressInfo } from "node:net";
 import { tmpdir } from "node:os";
 import { join, relative } from "node:path";
 import { after, before, describe, it } from "node:test";
+import { parse as parseYaml } from "yaml";
 import {
 	loadEvalArtifactV4,
 	parseEvalArtifactV4,
@@ -195,14 +196,21 @@ describe("smoke/built CLI core", { concurrency: false }, () => {
 	it("reports custom eval artifacts using the printed command without importing or changing bytes", async () => {
 		const scratch = home("clio-eval-custom-");
 		try {
+			// Artifact location does not require rerunning every recipe. Keep the
+			// full shipped-corpus roundtrip in its dedicated test below.
+			const suite = parseYaml(readFileSync(join(ROOT, "evals/behavioral-machinery.yaml"), "utf8"));
+			suite.tasks = [suite.tasks[0]];
+			suite.tasks[0].workspace = { kind: "local", path: ROOT };
+			const suitePath = join(scratch.root, "custom-report-suite.json");
+			writeFileSync(suitePath, JSON.stringify(suite));
 			for (const out of [
 				relative(ROOT, join(scratch.root, "custom output's $literal")),
 				join(scratch.root, "named artifact.json"),
 			]) {
-				const run = await runCli(
-					["eval", "run", "--suite", "evals/behavioral-machinery.yaml", "--out", out, "--clio-coder-entry", CLI],
-					{ env: scratch.env, timeoutMs: 300_000 },
-				);
+				const run = await runCli(["eval", "run", "--suite", suitePath, "--out", out, "--clio-coder-entry", CLI], {
+					env: scratch.env,
+					timeoutMs: 60_000,
+				});
 				strictEqual(run.code, 0, run.stdout + run.stderr);
 				const evalId = /^eval: (\S+)$/mu.exec(run.stdout)?.[1];
 				const artifactPath = /^artifact: (.+)$/mu.exec(run.stdout)?.[1];
