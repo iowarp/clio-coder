@@ -5,6 +5,7 @@ All notable changes to Clio Coder are documented in this file. The format follow
 ## Unreleased
 
 ### Fixed
+- Declare writable staging subtrees for internal wiki dispatch, report pending pages explicitly in CLI outcomes, and retain the Git baseline needed to reuse completed first-publication checkpoints.
 - Compare summary compaction with full-context estimates on both sides and describe unchanged or increased context without claiming reclamation.
 - Preserve ordinary authored handbooks and bounded exact prefixes in session and opted-in worker context; disclose omitted sources and invalidate captured prompts after explicit context changes.
 - Keep generated handbook proposals separate from publication, preserve authored content during refresh, and retain publication provenance for the handbook actually in use.
