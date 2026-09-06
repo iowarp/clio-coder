@@ -23,6 +23,8 @@ import { resultContractAuthorship } from "../agents/result-contract.js";
 import type { AgentSpec } from "../agents/spec.js";
 import { aggregateCostAmounts, type CostAggregate, renderCostAmount } from "../observability/cost.js";
 import type { CostProvenance } from "../providers/index.js";
+import { activeDecisionRefs } from "../session/decision-board.js";
+import type { DecisionLedgerEntry } from "../session/entries.js";
 import { claimAssignmentVerdict, recordAssignmentAttempt, settleStoredAssignment } from "./assignment-store.js";
 import { runCodeStep } from "./code-step.js";
 import { codeStepDir, writeCodeStepRecord } from "./code-step-store.js";
@@ -186,6 +188,8 @@ export interface ExecuteFleetRunInput {
 	/** Lineage root every step in this run shares. */
 	fleetRootId: string;
 	dispatch: DispatchContract;
+	/** Active session board captured once before fleet admission, shared by every attempt and proposal. */
+	getDecisionBoard?: () => ReadonlyArray<DecisionLedgerEntry>;
 	agents: FleetRunAgentAccess;
 	/** Whether a commit node stamps Clio's attribution trailers. */
 	attributionEnabled: boolean;
@@ -266,6 +270,7 @@ export function fleetPlanWaveIndex(plan: ExecutionPlan, stepId: string): number 
  */
 export async function executeFleetRun(input: ExecuteFleetRunInput): Promise<FleetRunOutcome> {
 	const { dispatch, agents, fleetRootId, workspaceRoot } = input;
+	const decisionRefs = activeDecisionRefs(input.getDecisionBoard?.() ?? []);
 	let livePlan = input.plan;
 	const replayed = input.resume?.replayed ?? new Map<string, ExecutionStepResult>();
 	const notice = (text: string, kind?: "gate" | "write-boundary"): void => input.onNotice?.(text, kind);
@@ -425,6 +430,7 @@ export async function executeFleetRun(input: ExecuteFleetRunInput): Promise<Flee
 					task: step.task,
 					cwd: workspaceRoot,
 					requestOrigin: "user",
+					...(decisionRefs.length > 0 ? { decisionRefs } : {}),
 					lineage: {
 						parentRunId: input.resume?.record.id ?? fleetRootId,
 						rootRunId: fleetRootId,
@@ -453,6 +459,7 @@ export async function executeFleetRun(input: ExecuteFleetRunInput): Promise<Flee
 							agentId: admission.step.agentId,
 							executionRole: admission.step.executionRole,
 							task: admission.step.task,
+							...(decisionRefs.length > 0 ? { decisionRefs } : {}),
 							...(admission.step.target !== undefined ? { target: admission.step.target } : {}),
 							...(admission.step.profile !== undefined ? { workerProfile: admission.step.profile } : {}),
 						}) as NonNullable<ReturnType<NonNullable<DispatchContract["preview"]>>>,
@@ -492,6 +499,7 @@ export async function executeFleetRun(input: ExecuteFleetRunInput): Promise<Flee
 					...(stepIntent === null ? {} : { intent: stepIntent }),
 					predecessorHandoffs: handoffs,
 					requestOrigin: "user",
+					...(decisionRefs.length > 0 ? { decisionRefs } : {}),
 					lineage: {
 						parentRunId: parentReceipt?.runId ?? input.resume?.record.id ?? fleetRootId,
 						rootRunId: fleetRootId,
@@ -532,6 +540,7 @@ export async function executeFleetRun(input: ExecuteFleetRunInput): Promise<Flee
 							task: step.task,
 							cwd: workspaceRoot,
 							requestOrigin: "user",
+							...(decisionRefs.length > 0 ? { decisionRefs } : {}),
 							autonomy: "read-only",
 							lineage: { parentRunId: fleetRootId, rootRunId: fleetRootId, attempt: 0, depth: 1 },
 							resultContractOverride: { kind: "artifact-report" },

@@ -75,6 +75,7 @@ export interface InteractiveSlashRuntimeDeps {
 	io: RunIo;
 	bus: SafeEventBus;
 	dispatch: DispatchContract;
+	getDecisionBoard?: SlashCommandContext["getDecisionBoard"];
 	providers: ProvidersContract;
 	chat: SlashChat;
 	chatPanel: SlashChatPanel;
@@ -380,6 +381,7 @@ export function createInteractiveSlashRuntime(deps: InteractiveSlashRuntimeDeps)
 			});
 		},
 		dispatch: deps.dispatch,
+		...(deps.getDecisionBoard ? { getDecisionBoard: deps.getDecisionBoard } : {}),
 		bus: deps.bus,
 		...(deps.agents
 			? { getAgentRoleFacts: agentRoleFactsResolver((agentId: string) => deps.agents?.getSpec(agentId) ?? null) }

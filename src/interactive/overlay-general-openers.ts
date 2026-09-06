@@ -487,6 +487,7 @@ export function createOverlayGeneralOpeners(deps: OverlayGeneralOpenersDeps): Ov
 			fleetRootId,
 			dispatch: deps.dispatch,
 			agents: { getSpec: (agentId) => agents.getSpec(agentId) },
+			...(deps.getDecisionBoard ? { getDecisionBoard: deps.getDecisionBoard } : {}),
 			attributionEnabled: deps.getSettings?.().integrations.git.commitAttribution ?? true,
 			vars: preview.vars,
 			onStepDispatched: (event) => {

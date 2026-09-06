@@ -1,7 +1,7 @@
 import { randomUUID } from "node:crypto";
 import type { AskUserToolPolicy } from "../../tools/registry.js";
 import type { AutonomyExposure } from "../safety/autonomy.js";
-import { type DecisionLedgerEntry, type DecisionRecord, decisionRef } from "./entries.js";
+import { type DecisionLedgerEntry, type DecisionRecord, type DecisionSource, decisionRef } from "./entries.js";
 
 export interface DecisionLedgerEntryFields {
 	kind: "decisionLedger";
@@ -187,6 +187,46 @@ export function createDecisionBoardStore(deps: DecisionBoardStoreDeps = {}): Dec
 		dirty = true;
 	};
 
+	const revise = (
+		interviewId: string,
+		key: string,
+		revisionSource: DecisionSource,
+		correction?: string,
+	): DecisionLedgerEntryFields => {
+		syncToSession();
+		const interview = interviews.find((candidate) => candidate.interviewId === interviewId);
+		if (!interview) throw new Error(`decision board: interview ${interviewId} was not found on the active branch`);
+		const selected = interview.decisions.find((decision) => decision.key === key);
+		if (!selected) throw new Error(`decision board: decision ${key} was not found in interview ${interviewId}`);
+		const revisedAt = (deps.now?.() ?? new Date()).toISOString();
+		const normalizedCorrection = correction?.trim();
+		const entries = deps.readEntries?.() ?? [];
+		const parentTurnId = deps.getActiveLeafTurnId?.() ?? activeLeafFromEntries(entries);
+		if (!parentTurnId) throw new Error("decision board: no active branch leaf is available for the revision");
+		const revision: DecisionLedgerEntryFields = {
+			kind: "decisionLedger",
+			parentTurnId,
+			...(interview.origin !== undefined ? { origin: interview.origin } : {}),
+			interviewId: interview.interviewId,
+			interviewStatus: interview.interviewStatus,
+			startedAt: interview.startedAt,
+			endedAt: interview.endedAt,
+			roundCount: interview.roundCount,
+			...(interview.summary ? { summary: interview.summary } : {}),
+			...(interview.transcriptPath ? { transcriptPath: interview.transcriptPath } : {}),
+			...(interview.exposure ? { exposure: interview.exposure } : {}),
+			decisions: interview.decisions.map((decision) => {
+				if (decision.key !== selected.key) return { ...decision };
+				const next: DecisionRecord = { ...decision, status: "superseded", revisedAt, revisionSource };
+				if (normalizedCorrection) next.correction = normalizedCorrection;
+				else delete next.correction;
+				return next;
+			}),
+		};
+		append(revision);
+		return revision;
+	};
+
 	const store: DecisionBoardStore = {
 		snapshot(): ReadonlyArray<DecisionLedgerEntry> {
 			syncToSession();
@@ -212,7 +252,7 @@ export function createDecisionBoardStore(deps: DecisionBoardStoreDeps = {}): Dec
 				superseded = { interviewId: interview.interviewId, key: prior.key };
 				break;
 			}
-			if (superseded !== null) store.supersede(superseded.interviewId, superseded.key, input.rationale);
+			if (superseded !== null) revise(superseded.interviewId, superseded.key, "agent", input.rationale);
 			const now = (deps.now?.() ?? new Date()).toISOString();
 			const entries = deps.readEntries?.() ?? [];
 			const parentTurnId = deps.getActiveLeafTurnId?.() ?? activeLeafFromEntries(entries);
@@ -244,37 +284,7 @@ export function createDecisionBoardStore(deps: DecisionBoardStoreDeps = {}): Dec
 			return { entry, superseded };
 		},
 		supersede(interviewId: string, key: string, correction?: string): DecisionLedgerEntryFields {
-			syncToSession();
-			const interview = interviews.find((candidate) => candidate.interviewId === interviewId);
-			if (!interview) throw new Error(`decision board: interview ${interviewId} was not found on the active branch`);
-			const selected = interview.decisions.find((decision) => decision.key === key);
-			if (!selected) throw new Error(`decision board: decision ${key} was not found in interview ${interviewId}`);
-			const revisedAt = (deps.now?.() ?? new Date()).toISOString();
-			const normalizedCorrection = correction?.trim();
-			const entries = deps.readEntries?.() ?? [];
-			const parentTurnId = deps.getActiveLeafTurnId?.() ?? activeLeafFromEntries(entries);
-			if (!parentTurnId) throw new Error("decision board: no active branch leaf is available for the revision");
-			const revision: DecisionLedgerEntryFields = {
-				kind: "decisionLedger",
-				parentTurnId,
-				interviewId: interview.interviewId,
-				interviewStatus: interview.interviewStatus,
-				startedAt: interview.startedAt,
-				endedAt: interview.endedAt,
-				roundCount: interview.roundCount,
-				...(interview.summary ? { summary: interview.summary } : {}),
-				...(interview.transcriptPath ? { transcriptPath: interview.transcriptPath } : {}),
-				...(interview.exposure ? { exposure: interview.exposure } : {}),
-				decisions: interview.decisions.map((decision) => {
-					if (decision.key !== selected.key) return { ...decision };
-					const next: DecisionRecord = { ...decision, status: "superseded", revisedAt };
-					if (normalizedCorrection) next.correction = normalizedCorrection;
-					else delete next.correction;
-					return next;
-				}),
-			};
-			append(revision);
-			return revision;
+			return revise(interviewId, key, "operator", correction);
 		},
 		invalidate(): void {
 			dirty = true;
