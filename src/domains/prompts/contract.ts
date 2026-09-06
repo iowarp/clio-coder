@@ -30,16 +30,19 @@ export interface PromptsContract {
 	 * session-source invalidation components advance independently and are
 	 * combined without loss. Project handbooks, rules, operator profile, and
 	 * repo awareness are frozen in a real per-session snapshot until a config
-	 * invalidation or a new session.
+	 * invalidation, an explicit context operation in that workspace or an ancestor,
+	 * or a new session. Previews, cancellations, and failures leave snapshots
+	 * stable when published project context is unchanged; an unreadable source
+	 * comparison conservatively invalidates.
 	 */
 	inputEpoch(): string;
 
 	/**
 	 * Compile the session system prompt. Called once per session (and again
 	 * only on explicit, logged events: model/target change, autonomy-level
-	 * change, fragment reload, session switch). Compiler-owned disk inputs are
-	 * selected from the session snapshot even when another identity input causes
-	 * a recompile.
+	 * change, fragment reload, explicit context operation, session switch).
+	 * Compiler-owned disk inputs are selected from the session snapshot even when
+	 * another identity input causes a recompile.
 	 */
 	compileSessionPrompt(input: CompileSessionPromptInput): Promise<CompiledSessionPrompt>;
 

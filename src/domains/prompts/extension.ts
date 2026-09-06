@@ -1,4 +1,4 @@
-import { isAbsolute, relative } from "node:path";
+import { isAbsolute, relative, resolve, sep } from "node:path";
 import { BusChannels } from "../../core/bus-events.js";
 import { detectClioCoderRepo } from "../../core/clio-repo.js";
 import type { ClioSettings } from "../../core/config.js";
@@ -36,6 +36,7 @@ interface CustomizationSourceSnapshot {
 }
 
 interface SessionPromptSourceSnapshot {
+	cwd: string;
 	projectContext: ProjectPromptContext | null;
 	customization: CustomizationSourceSnapshot;
 	workspaceRoot: RenderedPromptFragment[];
@@ -102,6 +103,7 @@ export function createPromptsBundle(
 			for (const warning of projectContext?.warnings ?? []) process.stderr.write(`${warning}\n`);
 		}
 		return {
+			cwd,
 			projectContext,
 			customization: captureCustomizationSources(cwd),
 			workspaceRoot: workspaceRootFragment(cwd),
@@ -118,8 +120,20 @@ export function createPromptsBundle(
 		return captured;
 	}
 
-	function invalidateSessionSources(): void {
-		sessionSourceSnapshots.clear();
+	function invalidateSessionSources(cwd?: string): void {
+		if (cwd === undefined) {
+			sessionSourceSnapshots.clear();
+		} else {
+			const workspace = resolve(cwd);
+			for (const [key, snapshot] of sessionSourceSnapshots) {
+				// Ancestor handbooks are layered into descendant sessions, including
+				// sessions captured before that ancestor had a handbook at all.
+				const descendant = relative(workspace, snapshot.cwd);
+				if (descendant !== ".." && !descendant.startsWith(`..${sep}`) && !isAbsolute(descendant)) {
+					sessionSourceSnapshots.delete(key);
+				}
+			}
+		}
 		sessionSourceEpoch += 1;
 	}
 
@@ -135,7 +149,7 @@ export function createPromptsBundle(
 			const configContract = config();
 			const settings: Readonly<ClioSettings> | undefined = configContract?.get();
 			const safety = input.autonomy ?? settings?.safety.autonomy ?? "auto-edit";
-			const cwd = input.cwd ?? process.cwd();
+			const cwd = resolve(input.cwd ?? process.cwd());
 			const sources = sessionSourceSnapshot(input.sessionId, cwd);
 			let contextFiles = "";
 			let projectPreload: ProjectPreloadClass | null = null;
@@ -193,6 +207,7 @@ export function createPromptsBundle(
 		reload,
 	};
 
+	let unsubscribeContextSources: (() => void) | null = null;
 	let unsubscribeHotReload: (() => void) | null = null;
 	let unsubscribeExtensionsReload: (() => void) | null = null;
 	const extension: DomainExtension = {
@@ -205,6 +220,9 @@ export function createPromptsBundle(
 				process.stderr.write(`[clio-coder:prompts] initial load failed: ${msg}\n`);
 				table = { byId: new Map(), rootDir: "" };
 			}
+			unsubscribeContextSources = context.bus.on(BusChannels.ContextSourcesChanged, ({ cwd }) => {
+				invalidateSessionSources(cwd);
+			});
 			unsubscribeHotReload = context.bus.on(BusChannels.ConfigHotReload, (payload: unknown) => {
 				invalidateSessionSources();
 				const diff = (payload as { diff?: { hotReload?: string[] } } | undefined)?.diff;
@@ -221,6 +239,8 @@ export function createPromptsBundle(
 			});
 		},
 		async stop() {
+			unsubscribeContextSources?.();
+			unsubscribeContextSources = null;
 			unsubscribeHotReload?.();
 			unsubscribeHotReload = null;
 			unsubscribeExtensionsReload?.();
