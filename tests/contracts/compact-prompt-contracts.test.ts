@@ -267,7 +267,7 @@ describe("compact prompt contracts", () => {
 		}
 	});
 
-	it("holds fixed compact main and worker token budgets", () => {
+	it("holds fixed compact main and worker token budgets", (t) => {
 		strictEqual(builtinRecipes.length, 14, "the fixed Fleet fixture requires the 14 shipped recipes");
 		const mainToolNames = ALL_TOOL_NAMES.filter((name) => name !== ToolNames.Ledger);
 		strictEqual(mainToolNames.length, 23);
@@ -282,11 +282,33 @@ describe("compact prompt contracts", () => {
 			.join("{SETTINGS}")
 			.split(dirs.state)
 			.join("{STATE}");
-		strictEqual(normalizedMain.length, 10_868);
-		strictEqual(Math.ceil(normalizedMain.length / 4), 2_717);
-		ok(normalizedMain.length <= 10_900, `main prompt grew to ${normalizedMain.length} chars`);
+		t.diagnostic(
+			JSON.stringify({
+				normalizedMainChars: normalizedMain.length,
+				normalizedMainEstimatedTokens: Math.ceil(normalizedMain.length / 4),
+				sections: main.sections,
+				normalizedIdentityEstimatedTokens: Math.ceil(
+					normalizedMain.slice(0, normalizedMain.indexOf(`\n\n${table.byId.get("operating.contract")?.body.trim()}`))
+						.length / 4,
+				),
+			}),
+		);
+		// The measured pre-memory fixture is 11,274 chars, including 406
+		// chars of task-tool guidance already present before #352. #352/#364
+		// add a bounded promotion/approval workflow and no-edit scope rules.
+		const identity = table.byId.get("identity.clio")?.body.trim();
+		ok(identity);
+		const memoryStart = identity.indexOf("When asked to remember");
+		ok(memoryStart > 0);
+		const memoryGuidance = identity.slice(memoryStart);
+		strictEqual(memoryGuidance.length, 1_599);
+		ok(memoryGuidance.length <= 1_620, "review memory workflow growth above 405 estimated tokens");
+		strictEqual(normalizedMain.length - memoryGuidance.length - 2, 11_274);
+		strictEqual(normalizedMain.length, 12_875);
+		strictEqual(Math.ceil(normalizedMain.length / 4), 3_219);
+		ok(normalizedMain.length <= 12_896, `main prompt grew to ${normalizedMain.length} chars`);
 		ok(
-			Math.ceil(normalizedMain.length / 4) <= 2_725,
+			Math.ceil(normalizedMain.length / 4) <= 3_224,
 			`main prompt grew to ${Math.ceil(normalizedMain.length / 4)} estimated tokens`,
 		);
 		strictEqual(Math.ceil(main.systemPrompt.length / 4), main.tokenEstimate);
@@ -303,12 +325,12 @@ describe("compact prompt contracts", () => {
 				),
 			},
 			{
-				identity: 298,
+				identity: 698,
 				"operating-contract": 203,
 				delegation: 532,
 				skills: 181,
 				safety: 266,
-				"tool-contract": 644,
+				"tool-contract": 746,
 				fleet: 514,
 				"retrieval-hints": 36,
 				runtime: 43,
@@ -342,15 +364,25 @@ describe("compact prompt contracts", () => {
 			onPermission: "fail",
 			persona: persona(coder.body, "coder"),
 		});
-		strictEqual(worker.systemPrompt.length, 5_493);
-		strictEqual(worker.tokenEstimate, 1_374);
-		ok(worker.systemPrompt.length <= 5_500);
-		ok(worker.tokenEstimate <= 1_375);
+		t.diagnostic(
+			JSON.stringify({
+				workerChars: worker.systemPrompt.length,
+				workerEstimatedTokens: worker.tokenEstimate,
+				sections: worker.sections,
+			}),
+		);
+		// Existing task-tool guidance also reaches workers (+406 chars).
+		// Memory/no-edit identity guidance remains main-only.
+		strictEqual(worker.systemPrompt.includes("When asked to remember"), false);
+		strictEqual(worker.systemPrompt.length, 5_899);
+		strictEqual(worker.tokenEstimate, 1_475);
+		ok(worker.systemPrompt.length <= 5_906);
+		ok(worker.tokenEstimate <= 1_477);
 		strictEqual(Math.ceil(worker.systemPrompt.length / 4), worker.tokenEstimate);
 		deepStrictEqual(Object.fromEntries(worker.sections.map((section) => [section.id, section.tokenEstimate])), {
 			identity: 62,
 			"operating-contract": 297,
-			"tool-contract": 372,
+			"tool-contract": 473,
 			safety: 253,
 			persona: 389,
 		});

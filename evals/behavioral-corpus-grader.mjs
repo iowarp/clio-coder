@@ -1,8 +1,13 @@
 import { strict as assert } from "node:assert";
 import { existsSync, mkdirSync, readFileSync, writeFileSync } from "node:fs";
 import { readFile } from "node:fs/promises";
+import { gradeNoEditMemory, prepareNoEditMemory } from "./no-edit-memory-grader.mjs";
 
 async function gradeMain(caseId) {
+	if (caseId === "main-no-edit-memory") {
+		const events = await runnerEvents();
+		return gradeNoEditMemory(events, await assistantText(events));
+	}
 	if (caseId === "main-proposal-only-continuation") return gradeProposal();
 	if (caseId === "main-scout-citation-pipeline") return gradeScoutPipeline();
 	const source = await readFile("evals/fixtures/behavioral-main.ts", "utf8");
@@ -220,7 +225,8 @@ async function gradeScoutPipeline() {
 const [kind, id, phase] = process.argv.slice(2);
 try {
 	if (kind !== "main") throw new Error(`unknown behavioral corpus grader kind ${kind ?? "missing"}`);
-	if (id === "main-proposal-only-continuation" && phase === "--prepare") assertCleanProposalFixture();
+	if (id === "main-no-edit-memory" && phase === "--prepare") await prepareNoEditMemory();
+	else if (id === "main-proposal-only-continuation" && phase === "--prepare") assertCleanProposalFixture();
 	else if (id === "main-scout-citation-pipeline" && phase === "--prepare") prepareScoutPipeline();
 	else await gradeMain(id);
 	process.stdout.write(`pass ${kind} ${id}\n`);
