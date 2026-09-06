@@ -251,9 +251,10 @@ export function createInteractiveEventProjection(deps: InteractiveEventProjectio
 				typeof event.tokensBefore === "number" &&
 				typeof event.tokensAfter === "number"
 			) {
+				const outcome = event.tokensAfter < event.tokensBefore ? "Reclaimed context" : "Context updated";
 				deps.notify(
 					"info",
-					`[Compaction] Reclaimed context: ${event.tokensBefore} -> ${event.tokensAfter} tokens (${event.stage})`,
+					`[Compaction] ${outcome}: ${event.tokensBefore} -> ${event.tokensAfter} tokens (${event.stage})`,
 					"compaction-notice",
 				);
 			}

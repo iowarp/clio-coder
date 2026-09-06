@@ -1,11 +1,13 @@
 import { deepStrictEqual, doesNotMatch, match, ok, rejects, strictEqual } from "node:assert/strict";
 import { spawnSync } from "node:child_process";
 import { appendFileSync, mkdirSync, readFileSync, writeFileSync } from "node:fs";
-import { join } from "node:path";
+import { dirname, join } from "node:path";
 import { afterEach, beforeEach, describe, it } from "node:test";
 import { createAssistantMessageEventStream } from "@earendil-works/pi-ai";
 import type { FauxResponseFactory } from "@earendil-works/pi-ai/providers/faux";
+import { BusChannels, type ContextPrunedPayload } from "../../src/core/bus-events.js";
 import { DEFAULT_SETTINGS } from "../../src/core/defaults.js";
+import { createSafeEventBus } from "../../src/core/event-bus.js";
 import { clioStateDir } from "../../src/core/xdg.js";
 import { summarizeFailedCompactionUsage } from "../../src/domains/observability/compaction-usage.js";
 import type { ObservabilityContract } from "../../src/domains/observability/contract.js";
@@ -19,6 +21,7 @@ import { canonicalEndpointKey, foregroundStreamUsage } from "../../src/domains/p
 import type { RuntimeDescriptor } from "../../src/domains/providers/types/runtime-descriptor.js";
 import { COMPACTION_SYSTEM_PROMPT } from "../../src/domains/session/compaction/compact.js";
 import { collectSessionEntries } from "../../src/domains/session/compaction/session-entries.js";
+import { type ContextSnapshot, snapshotInputTokens } from "../../src/domains/session/context-accounting.js";
 import type { SessionContract } from "../../src/domains/session/contract.js";
 import { appendEntry, appendTurn, startSession } from "../../src/domains/session/manager.js";
 import { ledgerUsageCalls } from "../../src/domains/session/usage.js";
@@ -652,8 +655,14 @@ describe("production compaction controls", () => {
 			const f = fixture(true);
 			if (!legacy) f.settings.context.compaction.model = "summary-target/summary";
 			const recorded: unknown[][] = [];
+			const bus = createSafeEventBus();
+			const pruned: ContextPrunedPayload[] = [];
+			bus.on(BusChannels.ContextPruned, (event) => pruned.push(event as ContextPrunedPayload));
+			const state = createTurnState("off");
 			const context = createTurnContext({
-				state: createTurnState("off"),
+				state,
+				bus,
+				session: f.session,
 				getSettings: () => f.settings,
 				providers: f.providers,
 				readSessionEntries: f.entries,
@@ -681,9 +690,48 @@ describe("production compaction controls", () => {
 						contextWindowSource: "configured",
 					},
 				},
-				agent: { state: { systemPrompt: "fixture", thinkingLevel: "off", messages: [], tools: [] } },
+				agent: {
+					state: {
+						systemPrompt: "fixture ".repeat(40000),
+						thinkingLevel: "off",
+						messages: [],
+						tools: [{ name: "fixture", description: "Tool schema", parameters: { type: "object" } }],
+					},
+				},
 			} as unknown as AgentRuntime;
+			state.runtime = runtime;
+			context.refreshAgentMessagesFromSession(runtime);
+			const before = context.captureRuntimeContextSnapshot(runtime, "before", 0.8);
+			context.setCurrentSnapshot(before);
+			context.reconcileUsage({ input: 9810, output: 0, cacheRead: 0, cacheWrite: 0 } as Usage);
+			strictEqual(context.promptSideTokens(), 9810);
 			strictEqual(await context.runAutoCompact(runtime, true), true);
+			strictEqual(pruned.length, 1);
+			const event = pruned[0];
+			ok(event);
+			strictEqual(event.tokensBefore, snapshotInputTokens(before));
+			strictEqual(event.tokensAfter, context.promptSideTokens());
+			ok(event.tokensAfter < event.tokensBefore);
+			ok(event.tokensAfter > 9810, "provider usage and fresh full-context estimates are deliberately different");
+			const snapshots = readFileSync(join(dirname(sessionPaths(f.state.meta).current), "context-snapshots.jsonl"), "utf8")
+				.trim()
+				.split("\n")
+				.map((line) => JSON.parse(line) as ContextSnapshot);
+			strictEqual(snapshots.length, 2);
+			strictEqual(snapshots[0]?.snapshotId, event.snapshotIdBefore);
+			strictEqual(snapshots[1]?.snapshotId, event.snapshotIdAfter);
+			for (const [index, tokens] of [event.tokensBefore, event.tokensAfter].entries()) {
+				const snapshot = snapshots[index];
+				ok(snapshot);
+				strictEqual(snapshot.sources.total, "estimated");
+				strictEqual(snapshotInputTokens(snapshot), tokens);
+			}
+			const checkpoint = f.entries().find((entry) => entry.kind === "compactionSummary");
+			ok(checkpoint?.kind === "compactionSummary");
+			ok(
+				checkpoint.tokensBefore < event.tokensAfter,
+				"ledger history accounting remains separate from full-runtime estimates",
+			);
 			strictEqual(recorded.length, 1);
 			deepStrictEqual(recorded[0]?.slice(0, 2), legacy ? ["chat-target", "chat"] : ["summary-target", "summary"]);
 			strictEqual(recorded[0]?.[5], legacy ? "known_free" : "unknown");

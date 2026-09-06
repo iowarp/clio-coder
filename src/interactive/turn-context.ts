@@ -898,7 +898,18 @@ export function createTurnContext(deps: TurnContextDeps): TurnContext {
 		// useful ahead of it.
 		if (evictionSkipNotice) deps.emitNotice(evictionSkipNotice);
 		let result: CompactResult | null = null;
-		const beforeSnapshotId = currentContextSnapshot?.snapshotId ?? null;
+		// Compare full runtime estimates on both sides. The current snapshot and
+		// result.tokensBefore may instead carry provider-calibrated history usage.
+		const snapshotMetadata =
+			currentContextSnapshot && currentContextSnapshot.systemPrompt === agentRuntime.agent.state.systemPrompt
+				? { promptSegments: currentContextSnapshot.promptSegments, promptHash: currentContextSnapshot.promptHash }
+				: {};
+		const preCompactSnapshot = captureRuntimeContextSnapshot(
+			agentRuntime,
+			state.activeUserTurnId || "compaction",
+			compactionThreshold,
+			snapshotMetadata,
+		);
 		try {
 			result = await compactionTrigger.fire(() => (deps.autoCompact ?? (async () => null))(instructions, trigger));
 		} catch (error) {
@@ -934,33 +945,36 @@ export function createTurnContext(deps: TurnContextDeps): TurnContext {
 			agentRuntime,
 			state.activeUserTurnId || "compaction",
 			compactionThreshold,
+			snapshotMetadata,
 		);
 		currentContextSnapshot = postCompactSnapshot;
+		persistContextSnapshot(preCompactSnapshot);
 		persistContextSnapshot(postCompactSnapshot);
 
+		const tokensBefore = snapshotInputTokens(preCompactSnapshot);
 		const tokensAfter = snapshotInputTokens(postCompactSnapshot);
 		lastCompactionEvent = {
 			stage: "llm_summary",
-			tokensBefore: result.tokensBefore,
+			tokensBefore,
 			tokensAfter,
 			trigger,
 		};
 		deps.bus?.emit(BusChannels.ContextPruned, {
 			stage: "llm_summary",
-			tokensBefore: result.tokensBefore,
+			tokensBefore,
 			tokensAfter,
 			trigger,
-			snapshotIdBefore: beforeSnapshotId,
+			snapshotIdBefore: preCompactSnapshot.snapshotId,
 			snapshotIdAfter: postCompactSnapshot.snapshotId,
 			at: Date.now(),
 		} satisfies ContextPrunedPayload);
-		emitCompactionActivity("completed", `compacted ~${result.tokensBefore} -> ~${tokensAfter} tokens`);
+		emitCompactionActivity("completed", `compacted ~${tokensBefore} -> ~${tokensAfter} tokens`);
 
 		deps.emitNotice(
 			renderCompactionSummaryLine({
 				messagesSummarized: result.messagesSummarized,
 				summaryChars: result.summary.length,
-				tokensBefore: result.tokensBefore,
+				tokensBefore,
 				isSplitTurn: result.isSplitTurn,
 			}),
 		);
