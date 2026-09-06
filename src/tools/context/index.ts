@@ -12,6 +12,7 @@ import { ToolNames } from "../../core/tool-names.js";
 import { foldWorkingSet } from "../../domains/context/working-set/fold.js";
 import {
 	buildRecallFields,
+	recallableRefListing,
 	recallErrorMessage,
 	recallParentTurnId,
 	resolveRecall,
@@ -579,17 +580,40 @@ function runRecallScope(
 		return { kind: "error", message: "context: recall scope requires a bound session; none is active here" };
 	}
 	const ref = typeof args.ref === "string" ? args.ref.trim() : "";
-	if (ref.length === 0) {
-		return {
-			kind: "error",
-			message: "context: recall scope requires ref=<turnId>, the ref named in the [evicted ...] marker",
-		};
-	}
 	const entries = session.readEntries();
 	const leaf = session.activeLeafTurnId();
 	const view = foldWorkingSet(entries, leaf);
+	if (args.ref === undefined) {
+		const listing = recallableRefListing(entries, view, {
+			...(leaf === undefined ? {} : { activeLeafTurnId: leaf }),
+			...(typeof args.query === "string" ? { query: args.query } : {}),
+			...(typeof args.limit === "number" ? { limit: args.limit } : {}),
+			...(typeof args.offset === "number" ? { offset: args.offset } : {}),
+		});
+		const output = [
+			...listing.refs,
+			listing.nextOffset === undefined
+				? "End of matching recallable refs."
+				: `More matches: repeat this query with offset=${listing.nextOffset}.`,
+			'Recall an exact persisted body with context(scope="recall", ref="<turnId>").',
+		].join("\n");
+		const truncation = truncateHead(output, { maxBytes: reservation.callCapBytes, maxLines: Number.MAX_SAFE_INTEGER });
+		return finalizeObservation({
+			tool: ToolNames.Context,
+			unit: "results",
+			output: truncation.content,
+			...(truncation.truncated ? { fullOutput: output } : {}),
+			shownCount: listing.refs.length,
+			totalCount: listing.total,
+			truncated: truncation.truncated || listing.remaining > 0,
+			details: { recallDiscovery: listing },
+			reservation,
+			...(options ? { options } : {}),
+		});
+	}
 	const resolved = resolveRecall(entries, view, ref, leaf);
-	if (!resolved.ok) return { kind: "error", message: `context: ${recallErrorMessage(resolved.error, entries, view)}` };
+	if (!resolved.ok)
+		return { kind: "error", message: `context: ${recallErrorMessage(resolved.error, entries, view, leaf)}` };
 	const { result } = resolved;
 	const fields = buildRecallFields(result, {
 		trigger: "tool",
@@ -624,6 +648,7 @@ function runRecallScope(
 		details: {
 			recall: {
 				ref: result.ref.entry,
+				state: result.state,
 				tokensReadmitted: result.tokens,
 				recallTurnId: recorded.turnId,
 				...(evictedState ? { reason: evictedState.reason, evictedAtTurnId: evictedState.evictedAtTurnId } : {}),

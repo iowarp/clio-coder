@@ -143,14 +143,17 @@ export interface EvictionPlan {
 export type ContextEvictionFields = Omit<ContextEvictionEntry, "turnId" | "parentTurnId" | "timestamp">;
 export type ContextRecallFields = Omit<ContextRecallEntry, "turnId" | "parentTurnId" | "timestamp">;
 
-/** Typed failure for recall by ref. `recallErrorMessage` lists the refs that are evicted beside it. */
+/** Typed failure for recall by ref. `recallErrorMessage` lists recoverable refs beside it. */
 export type RecallError =
 	| { kind: "not_on_active_path"; ref: string }
-	| { kind: "not_evicted"; ref: string }
+	| { kind: "visible"; ref: string }
+	| { kind: "unavailable"; ref: string }
 	| { kind: "invalid_ref"; ref: string };
 
 export interface RecallResult {
 	ref: WorkingSetRef;
+	/** Why the original body is absent from the working set. */
+	state: "evicted" | "summarized";
 	/** The ledger entry whose body is readmitted. */
 	entry: SessionEntry;
 	/** Exact original body as the projection would have rendered it before eviction. */

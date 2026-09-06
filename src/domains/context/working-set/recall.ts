@@ -1,19 +1,6 @@
-/**
- * Exact recall by ref.
- *
- * A `contextEviction` entry removes a tool-result body from the projection
- * and leaves a marker naming the ref. Recall is the reverse move: given a ref
- * on the active path whose key the fold still lists as evicted, hand back the
- * original body byte-exact and describe the `contextRecall` entry the caller
- * appends. The ref stays evicted in the fold: the body rides the recall tool
- * result at the tail of the working set, so the marker and the prefix cache
- * are untouched and a repeat recall is the churn signal. Pure over entries:
- * nothing here reads the session, writes the ledger, or calls a model.
- *
- * The body is read through the same `payload.ts` readers the projection and
- * the marker use, so what recall returns is exactly what the model saw before
- * eviction. No truncation happens here; the observation envelope applies the
- * per-turn caps.
+/** Exact persisted tool-result recall and bounded discovery on the active path.
+ * Bodies return at the tail through the caller's observation envelope; the raw
+ * ledger, summary cut, and existing eviction markers remain unchanged.
  */
 
 import { ceilChars } from "../../session/context-accounting.js";
@@ -29,7 +16,14 @@ import {
 } from "./contract.js";
 import { parseRefKey, refKey } from "./fold.js";
 import { callPathsByToolCallId } from "./path-index.js";
-import { offloadPathOf, primaryPathOf, toolResultPayload, toolResultText } from "./payload.js";
+import {
+	hasLegacyCompactionMarker,
+	offloadPathOf,
+	primaryPathOf,
+	toolResultPayload,
+	toolResultText,
+} from "./payload.js";
+import { compactionCut } from "./visible.js";
 
 export type RecallOutcome = { ok: true; result: RecallResult } | { ok: false; error: RecallError };
 
@@ -55,11 +49,15 @@ export function resolveRecall(
 	if (entry === undefined) {
 		return { ok: false, error: { kind: "not_on_active_path", ref: key } };
 	}
-	// Thinking leaves the working set without a marker and is not recallable
-	// in this slice; `recallErrorMessage` names that case from the entry.
-	if (isThinkingEntry(entry) || !view.evicted.has(key) || !isToolResultEntry(entry)) {
-		return { ok: false, error: { kind: "not_evicted", ref: key } };
+	if (!isToolResultEntry(entry) || hasLegacyCompactionMarker(entry.payload)) {
+		return { ok: false, error: { kind: "unavailable", ref: key } };
 	}
+	const state = view.evicted.has(key)
+		? "evicted"
+		: compactionCut(active).visible.some((candidate) => candidate.turnId === key)
+			? "visible"
+			: "summarized";
+	if (state === "visible") return { ok: false, error: { kind: "visible", ref: key } };
 	const payload = toolResultPayload(entry.payload);
 	const body = toolResultText(payload.result);
 	const offloadPath = offloadPathOf(payload);
@@ -67,6 +65,7 @@ export function resolveRecall(
 		ok: true,
 		result: {
 			ref: parsed,
+			state,
 			entry,
 			body,
 			tokens: ceilChars(body.length),
@@ -103,50 +102,72 @@ export function buildRecallFields(
 	};
 }
 
-/** Refs listed in a recall failure before the list is cut with an ellipsis. */
-const MAX_LISTED_REFS = 8;
-
-export interface RecallableRefListing {
-	/** Already-rendered `ref (tool path)` rows, bounded for prompt use. */
-	refs: string[];
-	/** Recallable refs omitted after the bounded prefix. */
-	remaining: number;
+export interface RecallDiscoveryOptions {
+	/** Case-insensitive terms matched against ref, tool name, and path. */
+	query?: string;
+	/** Default 8, maximum 12. */
+	limit?: number;
+	/** Zero-based position in matching active-path ledger order. */
+	offset?: number;
+	activeLeafTurnId?: string;
 }
 
-/**
- * The refs a recall can actually bring back, so the next call can name one of
- * them. Thinking refs are evicted too but are not recallable, so listing them
- * would hand the caller a ref that fails for a different reason. A guessed
- * "nearest" ref was tried first and dropped: over time-ordered ids a prefix
- * match names an unrelated result, and the listing is what helps.
- */
-export function recallableRefListing(entries: ReadonlyArray<SessionEntry>, view: WorkingSetView): RecallableRefListing {
-	const byTurnId = new Map<string, SessionEntry>();
-	for (const entry of entries) byTurnId.set(entry.turnId, entry);
-	const callPaths = callPathsByToolCallId(entries);
+export interface RecallableRefListing {
+	/** Bounded metadata rows; never result bodies or assistant thinking. */
+	refs: string[];
+	remaining: number;
+	total: number;
+	offset: number;
+	nextOffset?: number;
+}
+
+/** Stable ledger-order pages for the same active path and query. */
+export function recallableRefListing(
+	entries: ReadonlyArray<SessionEntry>,
+	view: WorkingSetView,
+	options: RecallDiscoveryOptions = {},
+): RecallableRefListing {
+	const active = filterEntriesToActivePath(entries, options.activeLeafTurnId);
+	const visible = new Set(compactionCut(active).visible.map((entry) => entry.turnId));
+	const callPaths = callPathsByToolCallId(active);
+	const terms = (options.query ?? "").toLowerCase().split(/\s+/).filter(Boolean);
+	const limit =
+		typeof options.limit === "number" && Number.isFinite(options.limit)
+			? Math.max(1, Math.min(12, Math.floor(options.limit)))
+			: 8;
+	const offset =
+		typeof options.offset === "number" && Number.isSafeInteger(options.offset) ? Math.max(0, options.offset) : 0;
 	const refs: string[] = [];
-	for (const key of view.evicted.keys()) {
-		const entry = byTurnId.get(key);
-		if (entry === undefined || !isToolResultEntry(entry)) continue;
-		// After a summary compaction the markers before the cut are gone from
-		// the working set, so the listing is the only place the caller learns
-		// what a ref was. Tool and path are what it needs to pick one.
+	let total = 0;
+	for (const entry of active) {
+		if (!isToolResultEntry(entry) || hasLegacyCompactionMarker(entry.payload)) continue;
+		const state = view.evicted.has(entry.turnId) ? "evicted" : visible.has(entry.turnId) ? "visible" : "summarized";
+		if (state === "visible") continue;
 		const payload = toolResultPayload(entry.payload);
 		const toolCallId = typeof payload.obj.toolCallId === "string" ? payload.obj.toolCallId : undefined;
 		const path = primaryPathOf(payload) ?? (toolCallId === undefined ? undefined : callPaths.get(toolCallId));
-		refs.push(`${key} (${payload.toolName}${path === undefined ? "" : ` ${path}`})`);
+		const metadata = `${entry.turnId} ${payload.toolName} ${path ?? ""}`.toLowerCase();
+		if (!terms.every((term) => metadata.includes(term))) continue;
+		if (total >= offset && refs.length < limit) {
+			// Keep each row bounded even for unusual tool/path metadata.
+			const label = `${payload.toolName}${path === undefined ? "" : ` ${path}`}`.replace(/\s+/g, " ").slice(0, 240);
+			refs.push(`${entry.turnId} (${label}) [${state}; ${entry.timestamp}]`);
+		}
+		total += 1;
 	}
-	return {
-		refs: refs.slice(0, MAX_LISTED_REFS),
-		remaining: Math.max(0, refs.length - MAX_LISTED_REFS),
-	};
+	const remaining = Math.max(0, total - offset - refs.length);
+	return { refs, remaining, total, offset, ...(remaining > 0 ? { nextOffset: offset + refs.length } : {}) };
 }
 
-function recallableRefMessage(entries: ReadonlyArray<SessionEntry>, view: WorkingSetView): string {
-	const listing = recallableRefListing(entries, view);
+function recallableRefMessage(
+	entries: ReadonlyArray<SessionEntry>,
+	view: WorkingSetView,
+	activeLeafTurnId?: string,
+): string {
+	const listing = recallableRefListing(entries, view, activeLeafTurnId === undefined ? {} : { activeLeafTurnId });
 	if (listing.refs.length === 0) return "No recallable refs on the active path.";
 	const more = listing.remaining > 0 ? `, and ${listing.remaining} more` : "";
-	return `Recallable refs on the active path: ${listing.refs.join(", ")}${more}.`;
+	return `Recallable refs on the active path: ${listing.refs.join(", ")}${more}. Discover all matches with context(scope="recall", limit=8, offset=0), omitting ref; query filters path/tool/ref terms. Follow nextOffset.`;
 }
 
 /**
@@ -159,19 +180,23 @@ export function recallErrorMessage(
 	error: RecallError,
 	entries: ReadonlyArray<SessionEntry> = [],
 	view: WorkingSetView = EMPTY_WORKING_SET_VIEW,
+	activeLeafTurnId?: string,
 ): string {
-	const listing = ` ${recallableRefMessage(entries, view)}`;
+	const active = filterEntriesToActivePath(entries, activeLeafTurnId);
+	const listing = ` ${recallableRefMessage(active, view, activeLeafTurnId)}`;
 	switch (error.kind) {
 		case "invalid_ref":
 			return `recall ref must be a single turnId without whitespace; got '${error.ref}'.`;
 		case "not_on_active_path":
 			return `ref ${error.ref} is not on the active path of this session (unknown or on an abandoned branch).${listing}`;
-		case "not_evicted": {
-			const entry = entries.find((candidate) => candidate.turnId === error.ref);
+		case "visible":
+			return `ref ${error.ref} is visible; its content is already in context.${listing}`;
+		case "unavailable": {
+			const entry = active.find((candidate) => candidate.turnId === error.ref);
 			if (entry !== undefined && isThinkingEntry(entry)) {
 				return `ref ${error.ref} is an assistant turn; thinking is not recallable.${listing}`;
 			}
-			return `ref ${error.ref} is not evicted; its content is already in context.${listing}`;
+			return `ref ${error.ref} has no recallable original tool result (unsupported entry or legacy destructive compaction).${listing}`;
 		}
 	}
 }

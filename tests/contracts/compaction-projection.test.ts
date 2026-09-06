@@ -131,6 +131,7 @@ describe("compaction working-set provider boundary", () => {
 		ok(result.tokensBefore < 1000, "pre-eviction provider usage must not override the projected estimate");
 		match(result.summary, /<read-files>\nsrc\/evidence.ts\n<\/read-files>/);
 		match(result.summary, /<recallable-refs>[\s\S]*r1/);
+		match(result.summary, /Preview only[\s\S]*scope="recall"[\s\S]*nextOffset/);
 		strictEqual(observations.length, 1);
 		strictEqual(result.usage?.apiCalls, 1);
 		deepStrictEqual(entries, original);
