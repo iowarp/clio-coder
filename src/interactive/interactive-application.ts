@@ -701,6 +701,7 @@ export async function createInteractiveApplication(deps: InteractiveDeps): Promi
 		io,
 		bus: deps.bus,
 		dispatch: deps.dispatch,
+		...(deps.getDecisionBoard ? { getDecisionBoard: deps.getDecisionBoard } : {}),
 		...(deps.session ? { session: deps.session } : {}),
 		providers: deps.providers,
 		chat: deps.chat,

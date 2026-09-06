@@ -30,6 +30,8 @@ import type {
 	ResourceList,
 } from "../domains/resources/index.js";
 import { parseSkillCommand, SKILL_SURFACE_CLEAR_ARG } from "../domains/resources/index.js";
+import { activeDecisionRefs } from "../domains/session/decision-board.js";
+import type { DecisionLedgerEntry } from "../domains/session/entries.js";
 import type { ShareImportPlan } from "../domains/share/index.js";
 import type { UserTaskAcceptance } from "../domains/user-tasks/acceptance.js";
 import type { UserTask } from "../domains/user-tasks/store.js";
@@ -246,6 +248,8 @@ export interface RunCommandOptions {
 
 export interface HandleRunDeps {
 	dispatch: DispatchContract;
+	/** Live session board, snapshotted before operator run admission. */
+	getDecisionBoard?: () => ReadonlyArray<DecisionLedgerEntry>;
 	/** Strict recipe facts the run's execution role is derived from. */
 	getAgentRoleFacts?: AgentRoleFactsResolver;
 	io: RunIo;
@@ -341,6 +345,7 @@ export async function handleRun(
 	deps: HandleRunDeps,
 	options: RunCommandOptions = {},
 ): Promise<void> {
+	const decisionRefs = activeDecisionRefs(deps.getDecisionBoard?.() ?? []);
 	if (options.target && options.workerProfile) {
 		deps.notice(
 			"warn",
@@ -363,6 +368,7 @@ export async function handleRun(
 				...(deps.getAgentRoleFacts ? { resolveFacts: deps.getAgentRoleFacts } : {}),
 			}),
 			requestOrigin: "user",
+			...(decisionRefs.length > 0 ? { decisionRefs } : {}),
 			...(options.workerProfile ? { workerProfile: options.workerProfile } : {}),
 			...(options.workerRuntime ? { workerRuntime: options.workerRuntime } : {}),
 			...(options.target ? { target: options.target } : {}),
@@ -562,6 +568,7 @@ export interface SlashCommandContext {
 	io: RunIo;
 	notice: (level: NoticeLevel, text: string) => void;
 	dispatch: DispatchContract;
+	getDecisionBoard?: HandleRunDeps["getDecisionBoard"];
 	bus: SafeEventBus;
 	/** Strict recipe facts used to keep interactive /run role-equivalent with the CLI. */
 	getAgentRoleFacts?: AgentRoleFactsResolver;
@@ -1183,6 +1190,7 @@ export const BUILTIN_SLASH_COMMANDS: ReadonlyArray<BuiltinSlashCommand> = [
 					task,
 					{
 						dispatch: ctx.dispatch,
+						...(ctx.getDecisionBoard ? { getDecisionBoard: ctx.getDecisionBoard } : {}),
 						...(ctx.getAgentRoleFacts ? { getAgentRoleFacts: ctx.getAgentRoleFacts } : {}),
 						io: ctx.io,
 						notice: ctx.notice,
