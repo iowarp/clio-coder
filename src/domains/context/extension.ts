@@ -251,6 +251,43 @@ export function createContextBundle(
 		},
 	};
 
+	function promptSourceState(cwd: string): string | null {
+		try {
+			return JSON.stringify(renderPromptContext(cwd));
+		} catch {
+			// Enumeration can fail on unreadable or oversized trees. Bookkeeping
+			// must not prevent clear/recovery or replace the operation's own error.
+			return null;
+		}
+	}
+
+	/**
+	 * Explicit operations are snapshot boundaries. A rejected operation can still
+	 * have published an index or handbook before failing; compare the actual
+	 * project context so that failure refreshes when visible sources changed
+	 * or could not be inspected.
+	 * These disk reads happen at the command boundary, never on ordinary turns.
+	 */
+	async function withPromptSourceBoundary<T>(
+		cwd: string,
+		operation: () => Promise<T>,
+		committed: (result: T) => boolean,
+	): Promise<T> {
+		const workspace = resolve(cwd);
+		const before = promptSourceState(workspace);
+		let refreshSources = false;
+		try {
+			const result = await operation();
+			refreshSources = committed(result);
+			return result;
+		} finally {
+			if (refreshSources || before === null || promptSourceState(workspace) !== before) {
+				contextState.invalidate(workspace);
+				_context.bus.emit(BusChannels.ContextSourcesChanged, { cwd: workspace });
+			}
+		}
+	}
+
 	const contract: ContextContract = {
 		async runBootstrap(input) {
 			const emitProgress = (event: Omit<ContextActivityPayload, "kind" | "at">): void => {
@@ -258,7 +295,11 @@ export function createContextBundle(
 				input?.onProgress?.(event);
 			};
 			try {
-				const result = await runBootstrap(input ? { ...input, onProgress: emitProgress } : { onProgress: emitProgress });
+				const result = await withPromptSourceBoundary(
+					input?.cwd ?? process.cwd(),
+					() => runBootstrap({ ...input, onProgress: emitProgress }),
+					(result) => result.summary.action !== "previewed",
+				);
 				const cwd = input?.cwd ?? process.cwd();
 				contextState.invalidate(cwd);
 				if (cwd === lastCwd) startupHints = collectStartupHints(cwd, options);
@@ -279,7 +320,11 @@ export function createContextBundle(
 			};
 			emitProgress({ phase: "done", status: "started", message: "clearing context" });
 			try {
-				const result = await runContextClear(input);
+				const result = await withPromptSourceBoundary(
+					input?.cwd ?? process.cwd(),
+					() => runContextClear(input),
+					(result) => result.action === "cleared",
+				);
 				const cwd = input?.cwd ?? process.cwd();
 				contextState.invalidate(cwd);
 				if (cwd === lastCwd) startupHints = collectStartupHints(cwd, options);
@@ -301,11 +346,16 @@ export function createContextBundle(
 				input?.onProgress?.(event);
 			};
 			try {
-				const result = await runContextRefresh({
-					...input,
-					...(input?.wiki ? { decisions: input.decisions ?? (await currentDecisions(_context)) } : {}),
-					onProgress: emitProgress,
-				});
+				const result = await withPromptSourceBoundary(
+					input?.cwd ?? process.cwd(),
+					async () =>
+						runContextRefresh({
+							...input,
+							...(input?.wiki ? { decisions: input.decisions ?? (await currentDecisions(_context)) } : {}),
+							onProgress: emitProgress,
+						}),
+					() => true,
+				);
 				const cwd = input?.cwd ?? process.cwd();
 				contextState.invalidate(cwd);
 				if (cwd === lastCwd) startupHints = collectStartupHints(cwd, options);

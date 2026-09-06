@@ -65,6 +65,7 @@ export const BusChannels = {
 	MiddlewareHookFailed: "middleware.hookFailed",
 	ExtensionsReloaded: "extensions.reloaded",
 	ContextActivity: "context.activity",
+	ContextSourcesChanged: "context.sourcesChanged",
 	ContextWarning: "context.warning",
 	ContextPruned: "context.pruned",
 	ContextRecalled: "context.recalled",
@@ -158,6 +159,12 @@ export type DispatchScopeNoticePayload =
 			}>;
 			message: string;
 	  };
+
+/** Explicit context boundary: published prompt sources changed or could not be inspected. */
+export interface ContextSourcesChangedPayload {
+	/** Absolute workspace root; its sessions and descendant sessions must recapture disk sources. */
+	cwd: string;
+}
 
 export type ContextActivityKind = "context-init" | "context-clear" | "context-refresh" | "context-wiki" | "compaction";
 export type ContextActivityPhase = "scan" | "codewiki" | "generate" | "clio-md" | "state" | "compact" | "done";
@@ -847,6 +854,7 @@ export type BusPayloadMap = {
 	[BusChannels.MiddlewareHookFailed]: MiddlewareHookFailedPayload;
 	[BusChannels.ExtensionsReloaded]: ExtensionsReloadedPayload;
 	[BusChannels.ContextActivity]: ContextActivityPayload;
+	[BusChannels.ContextSourcesChanged]: ContextSourcesChangedPayload;
 	[BusChannels.ContextWarning]: ContextWarningPayload;
 	[BusChannels.ContextPruned]: ContextPrunedPayload;
 	[BusChannels.ContextRecalled]: ContextRecalledPayload;
