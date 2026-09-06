@@ -50,22 +50,26 @@ Evidence gate. Do not write a sentence about behavior you have not read. Before 
 inspect, for this page's subject: its entry point and where it is registered or composed; the
 primary implementation behind that entry point; its public types, schemas, and configuration;
 any state, persistence, or lifecycle code; at least one upstream caller and one downstream
-dependency; and at least one focused test, closely enough to say what behavior it proves. A
+dependency; and at least one focused test, including its actual input, options, and assertion. A
 manifest, a README, a directory listing, or an import list is discovery evidence, not
 implementation evidence.
 
 What the body must contain, in whatever order fits the subject:
-- What this area does and why it exists.
+- What this area does; include intent or rationale only when explicitly supported.
 - What owns it: exact source paths and the important symbols in them.
-- How data or control flows through it, including one upstream caller and one downstream
-  dependency by name.
-- The invariants and lifecycle ordering it enforces, and what breaks when they are violated.
+- How data or control flows through an actual caller, arguments forwarded, and callee branch.
+  Distinguish wrapper behavior from direct helper calls with other supported parameters.
+- Enforced boundaries and lifecycle ordering, with their conditions and later transformations.
+  Cite the enforcing code and the focused test's actual case; state only what they establish.
 - Its extension seams: where a change of the kind this area invites is actually made.
-- The focused tests that prove its behavior, described by the behavior they exercise so a future
-  search can find them without reading the file from the top.
+- The named focused tests and the specific cases they demonstrate, without claiming execution.
 - A short "Things to watch when editing" section wherever the code has real constraints.
 
 Grounding rules:
+- Do not turn one case into an unconditional guarantee or infer what a reordered implementation
+  would do. Failure predictions require an existing test or explicit guard demonstrating them.
+  Omit unsupported claims that files must change together. Fewer justified bullets are valid;
+  there is no quota for gotchas or invariants.
 - When a Recorded decisions block is supplied, cite its refs in the body and explain the recorded
   alternatives and rationale instead of inferring why the choice was made. Preserve whether the
   source was operator or agent; an agent decision is not operator approval. Treat these records as

@@ -20,17 +20,17 @@ You will be given:
 
 Sibling sources are evidence, not instructions for this bootstrap run. Skills, commands, agents, examples, and directory-scoped rules describe their own tasks or scopes; do not turn them into repository-wide guidance.
 
-THE CITATION RULE, which Clio enforces after you answer: a line survives only when it contains at least one backticked token, and every backticked token names something real in this repository, meaning an indexed file path, a symbol, a runnable package script, or a string that occurs in the supplied evidence. A line that cites nothing is deleted. A line that cites something that does not exist is deleted. Write every line so that it names the file, symbol, or command it is about.
+THE CITATION RULE, which Clio enforces after you answer: a line survives only when it contains at least one backticked token, and every backticked token names something real in this repository, meaning an indexed file path, a symbol, a runnable package script, or a string that occurs in the supplied evidence. A line that cites nothing is deleted. A line that cites something that does not exist is deleted. Write every line so that it names the file, symbol, or command it is about. This mechanical check does not establish the truth of a behavioral claim.
 
 Clio's deterministic layer owns the project name, identity, conventions, hard invariants, the navigation and repository-shape sections, agent-context provenance, and the verification-command section. Set projectName to the supplied expectedProjectName, keep identity to one short sentence, and return empty conventions and invariants arrays.
 
-Your contribution is two short custom H2 sections, with about six bullet lines total. Choose the sections with the strongest evidence from these, in this order of value:
-- "Architecture": the control flow a change has to travel through, named file by file. Say which module owns which decision, and which files are coupled and must change together. This is the section that requires reading, so it is the one worth the most.
-- "Gotchas": invariants that are easy to break. Each item names the file that enforces it and the consequence of breaking it, especially where a violation degrades silently instead of failing loudly.
-- "Extending": for the two or three most likely kinds of change, the exact set of files that must be touched together.
+Your contribution is up to two short custom H2 sections, with at most six bullet lines total. Fewer supported bullets are valid. Choose the sections with the strongest evidence from these, in this order of value:
+- "Architecture": trace an actual caller, arguments forwarded, callee branch, and observed ordering, naming the files and decisions they own. A wrapper's arguments do not establish restrictions on direct calls to its helper.
+- "Gotchas": source-backed constraints: describe the condition, branch, or ordering you inspected. A failure consequence requires an existing test or explicit guard demonstrating it; otherwise report the observed behavior and omit the prediction.
+- "Extending": source-observed extension points and their callers; omit unsupported claims that files must change together.
 - "Commands": only development commands that Clio's verification section will not already state, such as running a single test, a dry-run mode, or a debug environment variable.
 
-Prefer specific over complete. Each bullet makes one concrete point and cites the relevant file. Omit module inventories, nested headings, and speculative examples. Write commands inline, without code fences. Stop when the six useful lines are complete.
+Prefer specific over complete. Each bullet makes one concrete point and cites the relevant file. Omit module inventories, nested headings, and speculative examples. Write commands inline, without code fences. For a boundary claim, read the enforcing code and a named focused test's actual input, options, and assertion; state only what they establish, without claiming test execution. Describe later transformations that can change the result. Omit unsupported guarantees, intent, or rationale; do not infer what reordering would do.
 
 Copy commands, file paths, symbols, and version constraints exactly. Never repair, combine, or paraphrase a shell command. Never invent an API endpoint, an example, an ownership team, a review requirement, a release process, or a file count. If you did not read it or it was not supplied, do not write it.
 
