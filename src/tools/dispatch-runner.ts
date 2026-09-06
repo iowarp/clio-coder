@@ -51,6 +51,7 @@ import { summarizeTrustStatus } from "../domains/evidence/trust-projection.js";
 import { adaptRunReceiptTrustStatus } from "../domains/evidence/trust-status.js";
 import type { AutonomyLevel } from "../domains/safety/autonomy.js";
 import { activeDecisionRefs } from "../domains/session/decision-board.js";
+import { renderCompeteJudgeTask } from "./compete-judge-task.js";
 import {
 	type CandidateWorktree,
 	type CompeteGroupOwnership,
@@ -866,20 +867,6 @@ async function runReviewGated(
 	}
 }
 
-function judgeTask(originalTask: string, candidates: ReadonlyArray<CandidateWorktree>, stats: string[]): string {
-	const lines = [
-		`Rank ${candidates.length} candidate implementations of this task and pick the best one.`,
-		"Original task:",
-		originalTask,
-		"Candidates:",
-		...candidates.map(
-			(candidate, index) =>
-				`  ${candidate.index}. branch=${candidate.branch} worktree=${candidate.path} (${stats[index] ?? "?"})`,
-		),
-	];
-	return lines.join("\n\n");
-}
-
 function readVerifiedGateReceipt(deps: DispatchToolDeps, runId: string): RunReceipt | null {
 	const envelope = deps.dispatch.getRun(runId);
 	if (envelope === null) return null;
@@ -1365,7 +1352,20 @@ async function runCompete(
 				agentId: gateDeciderAgentId(compete.judge?.agent),
 				...(base.budget === undefined ? {} : { budget: base.budget }),
 				executionRole: "judge",
-				task: judgeTask(base.task, worktrees, stats),
+				task: renderCompeteJudgeTask(base.task, worktrees, stats, candidateRuns),
+				// Candidate prose and receipt locators are evidence, not inferred authority.
+				// Read-only execution is enforced by the role/autonomy, not empty write roots.
+				intent: narrowDispatchIntentToReadOnly(
+					base.intent ?? {
+						version: 2,
+						readRoots: [],
+						writeRoots: [],
+						relevantPaths: [],
+						pathProvenance: [],
+						expectedOutputs: [],
+						verification: [],
+					},
+				),
 				systemPrompt: JUDGE_GATE_PROMPT,
 				autonomy: "read-only",
 				cwd: root,

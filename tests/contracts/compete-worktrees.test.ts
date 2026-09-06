@@ -5,9 +5,12 @@ import { join } from "node:path";
 import { it } from "node:test";
 import { Value } from "typebox/value";
 import { DEFAULT_SETTINGS } from "../../src/core/defaults.js";
+import { ToolNames } from "../../src/core/tool-names.js";
 import type { AgentsContract } from "../../src/domains/agents/contract.js";
 import { readGateDecisionArtifacts } from "../../src/domains/dispatch/gate-decisions.js";
 import type { RunReceipt } from "../../src/domains/dispatch/types.js";
+import { mapAutonomy } from "../../src/domains/safety/autonomy.js";
+import { createWorkerSafety } from "../../src/engine/worker-tools.js";
 import {
 	candidateDiffStat,
 	claimCompeteGroup,
@@ -19,6 +22,7 @@ import {
 } from "../../src/tools/compete-worktrees.js";
 import { createDispatchTool } from "../../src/tools/dispatch.js";
 import { dispatchSchemaCompositionFor } from "../../src/tools/dispatch-schema.js";
+import { readTool } from "../../src/tools/read.js";
 import { makeDispatchBundle } from "../harness/dispatch.js";
 import { dispatchStubContext } from "../harness/dispatch-stub-context.js";
 import { isolateClioEnv } from "../harness/scratch-env.js";
@@ -122,6 +126,30 @@ for (const agent of ["scout", "coder"] as const) {
 					heartbeatAt: { current: Date.now(), monotonic: performance.now() },
 					abort() {},
 					events: (async function* () {
+						if (judge) {
+							// This is the admitted production spec, with a source-only worker seam.
+							ok(spec.autonomy === "read-only");
+							ok(spec.allowedTools.includes(ToolNames.Read));
+							const policy = createWorkerSafety({
+								cwd,
+								...(spec.writeRoots === undefined ? {} : { writeRoots: spec.writeRoots }),
+								...(spec.protectedArtifactState === undefined ? {} : { protectedArtifactState: spec.protectedArtifactState }),
+							});
+							for (const line of spec.task.split("\n\n").filter((entry) => entry.startsWith('{"candidate":'))) {
+								const evidence = JSON.parse(line);
+								const call = { tool: ToolNames.Read, args: { path: evidence.receiptPath } };
+								const decision = policy.evaluate(call);
+								strictEqual(decision.kind, "allow");
+								strictEqual(mapAutonomy(spec.autonomy, policy.classify(call).actionClass), "allow");
+								const read = await readTool.run(call.args);
+								strictEqual(read.kind, "ok");
+								if (read.kind === "ok") {
+									const receipt = JSON.parse(read.output);
+									strictEqual(receipt.runId, evidence.runId);
+									strictEqual(receipt.output.text, evidence.output.text);
+								}
+							}
+						}
 						if (writer && !judge) {
 							// Model-free worker events carry the same ordinary tool facts as
 							// the file operations above, including the deleted path.
@@ -154,7 +182,9 @@ for (const agent of ["scout", "coder"] as const) {
 													validations: [{ name: "git diff --check", passed: true, evidence: "git diff --check exited 0" }],
 												}
 											: {
-													findings: [{ claim: "The fixture contains baseline text.", path: "tracked.txt", line: 1 }],
+													findings: [
+														{ claim: `The fixture contains baseline text; inspected ${cwd}.`, path: "tracked.txt", line: 1 },
+													],
 													needsSplit: false,
 													proposedSubtasks: [],
 												},
@@ -203,6 +233,23 @@ for (const agent of ["scout", "coder"] as const) {
 					return JSON.parse(readFileSync(run.receiptPath, "utf8")) as RunReceipt;
 				});
 			strictEqual(receipts.length, 2);
+			const candidateEvidence = judgeTask
+				.split("\n\n")
+				.filter((line) => line.startsWith('{"candidate":'))
+				.map((line) => JSON.parse(line));
+			strictEqual(candidateEvidence.length, 2);
+			for (const evidence of candidateEvidence) {
+				const receipt = receipts.find((entry) => entry.runId === evidence.runId);
+				ok(receipt);
+				strictEqual(evidence.output.text, receipt.output?.text);
+				strictEqual(evidence.digest, receipt.integrity?.digest);
+				strictEqual(evidence.receiptIntegrity, true);
+				strictEqual(evidence.worktree, receipt.gate?.worktree?.path);
+				strictEqual(evidence.branch, receipt.gate?.worktree?.branch);
+				strictEqual(evidence.candidate, candidatePaths.indexOf(evidence.worktree) + 1);
+				strictEqual(JSON.parse(readFileSync(evidence.receiptPath, "utf8")).runId, receipt.runId);
+			}
+
 			strictEqual(new Set(receipts.map((receipt) => receipt.runId)).size, 2);
 			strictEqual(new Set(candidatePaths).size, 2);
 			const allRuns = bundle.contract.listRuns();
@@ -263,8 +310,10 @@ for (const agent of ["scout", "coder"] as const) {
 				strictEqual(after.diff, before.diff);
 			} else {
 				deepStrictEqual(after, before);
-				match(judgeTask, /candidate-1 \(no changes\)/u);
-				match(judgeTask, /candidate-2 \(no changes\)/u);
+				deepStrictEqual(
+					candidateEvidence.map((evidence) => evidence.diffStat),
+					["no changes", "no changes"],
+				);
 			}
 			for (const candidate of judged) {
 				if (!writer) strictEqual(candidate.head, before.head);
