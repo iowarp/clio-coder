@@ -19,6 +19,8 @@ function run(index: number, text: string) {
 		receipt: {
 			runId: `run-${index}`,
 			exitCode: 0,
+			outcome: "succeeded" as const,
+			integrity: { version: 20 as const, algorithm: "sha256" as const, digest: `fixture-digest-${index}` },
 			output: { state: "final", text, bytes: Buffer.byteLength(text), truncated: false } as RunReceiptOutput,
 		},
 		receiptPath: `/receipts/run-${index}.json`,
@@ -109,7 +111,11 @@ it("bounds UTF-8 previews and retains the locator and capture-loss distinction",
 });
 
 it("reports absent receipts, absent outputs, and partial answers truthfully", () => {
-	const absent = { ...run(1, ""), receipt: { runId: "run-1", exitCode: 0 }, receiptPath: null };
+	const absent = {
+		...run(1, ""),
+		receipt: { runId: "run-1", exitCode: 0, outcome: "succeeded" as const, integrity: run(1, "").receipt.integrity },
+		receiptPath: null,
+	};
 	const partial = {
 		...run(2, "unfinished"),
 		receipt: {

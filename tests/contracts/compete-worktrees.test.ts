@@ -133,7 +133,9 @@ for (const agent of ["scout", "coder"] as const) {
 							const policy = createWorkerSafety({
 								cwd,
 								...(spec.writeRoots === undefined ? {} : { writeRoots: spec.writeRoots }),
-								...(spec.protectedArtifactState === undefined ? {} : { protectedArtifactState: spec.protectedArtifactState }),
+								...(spec.protectedArtifactState === undefined
+									? {}
+									: { protectedArtifactState: { artifacts: [...spec.protectedArtifactState.artifacts] } }),
 							});
 							for (const line of spec.task.split("\n\n").filter((entry) => entry.startsWith('{"candidate":'))) {
 								const evidence = JSON.parse(line);
