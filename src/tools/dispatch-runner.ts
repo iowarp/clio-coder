@@ -1173,6 +1173,11 @@ async function runCompete(
 	const throwIfStopped = (): void => {
 		if (stop !== null) throw new Error(stop.message);
 	};
+	// A stopped phase still has terminal receipts worth reporting. Keep the
+	// ordinary error result and no winner, without discarding those identities
+	// through the generic exception path after the settlement barrier.
+	const stoppedOutcome = (): CompeteOutcome | null =>
+		stop === null ? null : { runs, decisions, group, winner: null, needsDecision: stop.message };
 	const settleRun = async (
 		handle: Awaited<ReturnType<DispatchContract["dispatch"]>>,
 		request: DispatchRequest,
@@ -1331,7 +1336,8 @@ async function runCompete(
 			});
 			const candidateRuns = await settledCompletedRuns(candidateOwned, "candidate settlement");
 			runs.push(...candidateRuns);
-			throwIfStopped();
+			const stoppedCandidates = stoppedOutcome();
+			if (stoppedCandidates !== null) return stoppedCandidates;
 			const stats = worktrees.map((worktree, index) => {
 				const receipt = candidateRuns[index]?.receipt;
 				const failed = receipt !== undefined && isPipelineStepFailure(receipt);
@@ -1390,7 +1396,8 @@ async function runCompete(
 			const judgeRun = (await settledCompletedRuns([judgeOwned], "judge settlement"))[0];
 			if (judgeRun === undefined) throw new Error("judge produced no completed run");
 			runs.push(judgeRun);
-			throwIfStopped();
+			const stoppedJudge = stoppedOutcome();
+			if (stoppedJudge !== null) return stoppedJudge;
 			const judgeReceipt = judgeRun.receipt;
 			const judgeSummary = judgeRun.summary;
 			// Every judged outcome names the same subjects, decider, and correlation;
