@@ -6,7 +6,11 @@ import type { AddressInfo } from "node:net";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { after, before, describe, it } from "node:test";
-import { loadEvalArtifactV4, parseEvalArtifactV4 } from "../../src/domains/eval/artifacts/store.js";
+import {
+	loadEvalArtifactV4,
+	parseEvalArtifactV4,
+	writeEvalArtifactV4,
+} from "../../src/domains/eval/artifacts/store.js";
 import type { EvalCompareV4Summary } from "../../src/domains/eval/compare/compare.js";
 
 const ROOT = new URL("../..", import.meta.url).pathname;
@@ -249,6 +253,42 @@ describe("smoke/built CLI core", { concurrency: false }, () => {
 			strictEqual(comparison.configDrift, false);
 			strictEqual(comparison.passRateDelta, 0);
 			deepStrictEqual(comparison.envelopeMismatches, []);
+
+			const routeBaseline = structuredClone(artifact);
+			routeBaseline.evalId = `${evalId}-route-baseline`;
+			routeBaseline.matrix.dimensions = ["target", "wireModel", "runtime", "thinkingLevel"];
+			const routeCandidate = structuredClone(routeBaseline);
+			routeCandidate.evalId = `${evalId}-route-candidate`;
+			routeCandidate.matrix.target = "fixture-candidate";
+			routeCandidate.matrix.model = "fixture-model";
+			routeCandidate.matrix.thinking = "high";
+			for (const result of routeCandidate.results) {
+				ok(result.executionEnvelope);
+				ok(result.behavioralMetrics);
+				result.target = { id: "fixture-candidate", model: "fixture-model", thinking: "high" };
+				result.behavioralMetrics.target = { id: "fixture-candidate", model: "fixture-model" };
+				result.executionEnvelope.target = "fixture-candidate";
+				result.executionEnvelope.wireModel = "fixture-model";
+				result.executionEnvelope.runtime = "fixture-runtime";
+				result.executionEnvelope.thinkingLevel = "high";
+			}
+			await writeEvalArtifactV4(join(scratch.root, "data"), routeBaseline);
+			await writeEvalArtifactV4(join(scratch.root, "data"), routeCandidate);
+			const routesCompared = await runCli(
+				["eval", "compare", routeBaseline.evalId, routeCandidate.evalId, "--allow-config-drift", "--format", "json"],
+				{ env: scratch.env },
+			);
+			strictEqual(routesCompared.code, 0, routesCompared.stdout + routesCompared.stderr);
+			const routesComparison = JSON.parse(routesCompared.stdout) as EvalCompareV4Summary;
+			strictEqual(routesComparison.hardGate.pass, true);
+			strictEqual(routesComparison.behavioralMetrics.length, comparison.behavioralMetrics.length);
+			deepStrictEqual(routesComparison.envelopeMismatches, []);
+			ok(routesComparison.behavioralMetrics.every((row) => row.comparability.comparable));
+			for (const row of routesComparison.behavioralMetrics) {
+				deepStrictEqual(row.baselineTargets, [row.target]);
+				deepStrictEqual(row.candidateTargets, [{ id: "fixture-candidate", model: "fixture-model" }]);
+			}
+			deepStrictEqual(await loadEvalArtifactV4(join(scratch.root, "data"), evalId), artifact);
 
 			for (const field of ["target", "corpus.id", "corpus.version"] as const) {
 				const inconsistent = structuredClone(artifact);

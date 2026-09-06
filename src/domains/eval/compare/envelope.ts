@@ -5,6 +5,8 @@ export interface EvalEnvelopeMismatchV1 {
 	scenarioId: string;
 	role: string;
 	target: { id: string; model: string | null };
+	baselineTargets?: Array<{ id: string; model: string | null }>;
+	candidateTargets?: Array<{ id: string; model: string | null }>;
 	fields: string[];
 }
 

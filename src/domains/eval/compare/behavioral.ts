@@ -31,7 +31,10 @@ export interface EvalBehaviorMetricDistributionV1 {
 export interface EvalBehaviorMetricComparisonV1 {
 	scenarioId: string;
 	role: string;
+	/** Representative route retained for existing consumers; both sides are recorded below. */
 	target: { id: string; model: string | null };
+	baselineTargets: Array<{ id: string; model: string | null }>;
+	candidateTargets: Array<{ id: string; model: string | null }>;
 	metric: EvalBehaviorMetricNameV1;
 	family: EvalBehaviorMetricFamilyV1;
 	direction: "higher" | "lower";
@@ -52,6 +55,8 @@ export interface EvalBehaviorHardGateV1 {
 		scenarioId: string;
 		role: string;
 		target: { id: string; model: string | null };
+		baselineTargets: Array<{ id: string; model: string | null }>;
+		candidateTargets: Array<{ id: string; model: string | null }>;
 		metric: EvalBehaviorMetricNameV1;
 		change: "regressed" | "incomparable";
 	}>;
@@ -61,6 +66,7 @@ interface BehaviorGroup {
 	scenarioId: string;
 	role: string;
 	target: { id: string; model: string | null };
+	targets: Array<{ id: string; model: string | null }>;
 	results: EvalArtifactResultV4[];
 }
 
@@ -72,26 +78,42 @@ export function compareEvalBehaviorMetricsV1(
 	hardGate: EvalBehaviorHardGateV1;
 	envelopeMismatches: EvalEnvelopeMismatchV1[];
 } {
-	const baselineGroups = behaviorGroups(baseline);
-	const candidateGroups = behaviorGroups(candidate);
+	const baselineDimensions = baseline.matrix.dimensions ?? ([] as EvalExecutionMatrixDimensionV1[]);
+	const candidateDimensions = candidate.matrix.dimensions ?? ([] as EvalExecutionMatrixDimensionV1[]);
+	const varying = new Set(baselineDimensions.filter((dimension) => candidateDimensions.includes(dimension)));
+	const baselineGroups = behaviorGroups(baseline, varying);
+	const candidateGroups = behaviorGroups(candidate, varying);
 	const keys = new Set([...baselineGroups.keys(), ...candidateGroups.keys()]);
 	const comparisons: EvalBehaviorMetricComparisonV1[] = [];
 	const envelopeMismatches: EvalEnvelopeMismatchV1[] = [];
-	const baselineDimensions = baseline.matrix.dimensions ?? ([] as EvalExecutionMatrixDimensionV1[]);
-	const candidateDimensions = candidate.matrix.dimensions ?? ([] as EvalExecutionMatrixDimensionV1[]);
 	for (const key of [...keys].sort((left, right) => left.localeCompare(right))) {
 		const baselineGroup = baselineGroups.get(key);
 		const candidateGroup = candidateGroups.get(key);
 		const identity = baselineGroup ?? candidateGroup;
 		if (identity === undefined) continue;
-		const envelopeMismatch = compareEvalExecutionEnvelopesV1(
+		const routes = {
+			baselineTargets: baselineGroup?.targets ?? [],
+			candidateTargets: candidateGroup?.targets ?? [],
+		};
+		let envelopeMismatch = compareEvalExecutionEnvelopesV1(
 			identity,
 			baselineGroup?.results ?? [],
 			candidateGroup?.results ?? [],
 			baselineDimensions,
 			candidateDimensions,
 		);
-		if (envelopeMismatch !== null) envelopeMismatches.push(envelopeMismatch);
+		// Ignoring a dimension may align one route per side, but cannot choose between
+		// multiple routes or pool their trials into an apparently comparable distribution.
+		if (routes.baselineTargets.length > 1 || routes.candidateTargets.length > 1) {
+			envelopeMismatch = {
+				...identity,
+				fields: ["behavioralMetrics.ambiguousRouteGroup", ...(envelopeMismatch?.fields ?? [])],
+			};
+		}
+		if (envelopeMismatch !== null) {
+			envelopeMismatch = { ...envelopeMismatch, ...routes };
+			envelopeMismatches.push(envelopeMismatch);
+		}
 		const comparability: EvalEnvelopeComparabilityV1 = {
 			comparable: envelopeMismatch === null,
 			mismatchedFields: envelopeMismatch?.fields ?? [],
@@ -103,6 +125,7 @@ export function compareEvalBehaviorMetricsV1(
 				scenarioId: identity.scenarioId,
 				role: identity.role,
 				target: identity.target,
+				...routes,
 				metric: definition.name,
 				family: definition.family,
 				direction: definition.direction,
@@ -132,6 +155,8 @@ export function compareEvalBehaviorMetricsV1(
 						scenarioId: comparison.scenarioId,
 						role: comparison.role,
 						target: comparison.target,
+						baselineTargets: comparison.baselineTargets,
+						candidateTargets: comparison.candidateTargets,
 						metric: comparison.metric,
 						change: comparison.change,
 					},
@@ -160,18 +185,25 @@ export function classifyChange(
 	return candidate < baseline ? "improved" : "regressed";
 }
 
-function behaviorGroups(artifact: EvalArtifactV4): Map<string, BehaviorGroup> {
+function behaviorGroups(
+	artifact: EvalArtifactV4,
+	varying: ReadonlySet<EvalExecutionMatrixDimensionV1>,
+): Map<string, BehaviorGroup> {
 	const groups = new Map<string, BehaviorGroup>();
 	for (const result of artifact.results) {
 		const behavioral = result.behavioralMetrics;
 		if (behavioral === undefined) continue;
-		const key = groupKey(behavioral.scenarioId, behavioral.role, behavioral.target);
+		const key = groupKey(behavioral.scenarioId, behavioral.role, behavioral.target, varying);
 		const group = groups.get(key) ?? {
 			scenarioId: behavioral.scenarioId,
 			role: behavioral.role,
 			target: behavioral.target,
+			targets: [],
 			results: [],
 		};
+		if (!group.targets.some((target) => target.id === behavioral.target.id && target.model === behavioral.target.model)) {
+			group.targets.push(behavioral.target);
+		}
 		group.results.push(result);
 		groups.set(key, group);
 	}
@@ -215,8 +247,18 @@ function behaviorDistribution(
 	};
 }
 
-function groupKey(scenarioId: string, role: string, target: { id: string; model: string | null }): string {
-	return JSON.stringify([scenarioId, role, target.id, target.model]);
+function groupKey(
+	scenarioId: string,
+	role: string,
+	target: { id: string; model: string | null },
+	varying: ReadonlySet<EvalExecutionMatrixDimensionV1>,
+): string {
+	return JSON.stringify([
+		scenarioId,
+		role,
+		varying.has("target") ? null : target.id,
+		varying.has("wireModel") ? null : target.model,
+	]);
 }
 
 function subtractNullable(left: number | null, right: number | null): number | null {
