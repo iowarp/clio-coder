@@ -30,6 +30,7 @@ Trust spine: typed claims, executable validation, and decision provenance. Answe
 
 ### Fixed
 - ACP permission cancellation now aborts the active turn before releasing parked tools, preventing an extra provider request while Workbench settles an unanswered approval (#341).
+- The deterministic behavioral machinery suite declares the `default` target used by its dispatch fixture, so all 26 cases produce an artifact that `eval report` and self-comparison can load with strict execution provenance validation (#342).
 - Host verification memoization and batch deduplication now include the check identity, kind, execution timeout, numerical tolerances, performance bounds, and reference or baseline contents. Different judgments cannot inherit an earlier pass, while identical valid checks retain evidence reuse and provenance (#333).
 - Host numerical verification now judges bounded command stdout, matching ordinary verify. JSON diagnostics on stderr cannot supply a missing measurement or invalidate valid stdout; stderr remains available in the command artifact (#334).
 - High-rigor task acceptance now requires validation evidence from the owning workspace. Verifier receipts retain declaration source and execution details, so a passing same-named examples check cannot satisfy a root check. Intended package and catalog checks, exact root package commands, and scoped limitation receipts remain supported (#335).
