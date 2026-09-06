@@ -27,14 +27,17 @@ function modeEnum(schema: unknown): string[] {
 }
 
 describe("dispatch schema composition", () => {
-	it("advertises nothing optional for a one-route fleet with no roster and no adaptive routing", () => {
+	it("advertises compete for a one-route fleet without a roster or adaptive routing", () => {
 		const composition = dispatchSchemaCompositionFor(
 			fleetWith({ default: { target: "mini", model: "ornith", thinkingLevel: "off" } }),
 		);
-		assert.deepEqual(composition, { council: false, compete: false, adaptiveRouting: false });
+		assert.deepEqual(composition, { council: false, compete: true, adaptiveRouting: false });
+		const schema = buildDispatchParameters(composition);
+		assert.deepEqual(modeEnum(schema), ["parallel", "sequential", "pipeline", "compete"]);
+		for (const field of ["candidates", "judge", "apply_winner"]) assert.ok(propertyNames(schema).includes(field));
 	});
 
-	it("turns each block on with the fleet fact that makes it usable", () => {
+	it("keeps compete available across fleet routes while composing council and routing", () => {
 		const roster = {
 			rosters: {
 				panel: {
@@ -55,7 +58,7 @@ describe("dispatch schema composition", () => {
 			default: { target: "mini", model: "ornith", thinkingLevel: "off" },
 			profiles: { code: { target: "mini", model: "ornith", thinkingLevel: "off" } },
 		});
-		assert.equal(dispatchSchemaCompositionFor(sameRouteTwice).compete, false);
+		assert.equal(dispatchSchemaCompositionFor(sameRouteTwice).compete, true);
 		const adaptive = fleetWith({ adaptiveRouting: { roles: ["verifier"], postures: ["balanced"], agentRoles: [] } });
 		assert.equal(dispatchSchemaCompositionFor(adaptive).adaptiveRouting, true);
 	});

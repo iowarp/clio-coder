@@ -18,7 +18,7 @@ import { TOOL_PROFILE_NAMES } from "./profiles.js";
 export interface DispatchSchemaComposition {
 	/** `roster`, `members`, `synthesis`, `rounds`: a council needs a configured roster to name. */
 	council: boolean;
-	/** `candidates`, `judge`, `apply_winner`: a compete needs more than one fleet route to compare. */
+	/** `candidates`, `judge`, `apply_winner`: distinct executions may share one fleet route. */
 	compete: boolean;
 	/** `routing.posture`, `minimumQuality`, `locality`, `failover`: they act only once adaptive routing is activated. */
 	adaptiveRouting: boolean;
@@ -30,28 +30,15 @@ export const FULL_DISPATCH_SCHEMA_COMPOSITION: DispatchSchemaComposition = Objec
 	adaptiveRouting: true,
 });
 
-type FleetShape = Pick<FleetSettings, "default" | "profiles" | "rosters" | "adaptiveRouting">;
-
-/** Distinct target/model routes the fleet can dispatch to: the default plus every profile and roster member. */
-function distinctFleetRoutes(fleet: FleetShape): number {
-	const routes = new Set<string>();
-	const add = (target: string | null | undefined, model: string | null | undefined): void => {
-		if (!target) return;
-		routes.add(`${target}${model ?? ""}`);
-	};
-	add(fleet.default.target, fleet.default.model);
-	for (const profile of Object.values(fleet.profiles)) add(profile.target, profile.model);
-	for (const roster of Object.values(fleet.rosters)) {
-		for (const member of roster.members) add(member.target, member.model);
-	}
-	return routes.size;
-}
+type FleetShape = Pick<FleetSettings, "rosters" | "adaptiveRouting">;
 
 export function dispatchSchemaCompositionFor(fleet: FleetShape): DispatchSchemaComposition {
 	const routing = fleet.adaptiveRouting;
 	return {
 		council: Object.keys(fleet.rosters).length > 0,
-		compete: distinctFleetRoutes(fleet) > 1,
+		// The runner isolates candidate executions and dispatches a separate judge;
+		// route diversity is not required. Normal admission still validates routes.
+		compete: true,
 		adaptiveRouting: routing.roles.length > 0 || routing.postures.length > 0 || routing.agentRoles.length > 0,
 	};
 }

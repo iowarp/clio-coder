@@ -3,8 +3,11 @@ import { execFileSync } from "node:child_process";
 import { mkdirSync, readFileSync, rmSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
 import { it } from "node:test";
+import { Value } from "typebox/value";
 import { DEFAULT_SETTINGS } from "../../src/core/defaults.js";
 import type { AgentsContract } from "../../src/domains/agents/contract.js";
+import { readGateDecisionArtifacts } from "../../src/domains/dispatch/gate-decisions.js";
+import type { RunReceipt } from "../../src/domains/dispatch/types.js";
 import {
 	candidateDiffStat,
 	claimCompeteGroup,
@@ -15,6 +18,7 @@ import {
 	mergeWinnerBranch,
 } from "../../src/tools/compete-worktrees.js";
 import { createDispatchTool } from "../../src/tools/dispatch.js";
+import { dispatchSchemaCompositionFor } from "../../src/tools/dispatch-schema.js";
 import { makeDispatchBundle } from "../harness/dispatch.js";
 import { dispatchStubContext } from "../harness/dispatch-stub-context.js";
 import { isolateClioEnv } from "../harness/scratch-env.js";
@@ -34,7 +38,9 @@ function snapshot(root: string) {
 }
 
 for (const agent of ["scout", "coder"] as const) {
-	it(`${agent} compete excludes generated state and preserves caller work`, async (t) => {
+	it(`${agent} one-route compete executes two candidates and a judge while preserving caller work`, {
+		timeout: 30_000,
+	}, async (t) => {
 		const writer = agent === "coder";
 		const authoredPaths = [".clio-coder/profile.yaml", "new.txt", "removed.txt", "tracked.txt"];
 		const env = await isolateClioEnv("clio-compete-state-");
@@ -66,6 +72,12 @@ for (const agent of ["scout", "coder"] as const) {
 		let judgeTask = "";
 		const settings = structuredClone(DEFAULT_SETTINGS);
 		settings.fleet.retry.maxRetries = 0;
+		settings.targets = [{ id: "only-route", runtime: "openai", defaultModel: "fixture-model" }];
+		settings.fleet.default = { target: "only-route", model: "fixture-model", thinkingLevel: "off" };
+		settings.fleet.profiles = {};
+		settings.fleet.rosters = {
+			panel: { members: ["a", "b", "judge"].map((label) => ({ label, target: "only-route", model: "fixture-model" })) },
+		};
 		const context = dispatchStubContext({ settings });
 		const specs = context.getContract<AgentsContract>("agents")?.listSpecs() ?? [];
 		strictEqual(specs.find((spec) => spec.id === "scout")?.capabilityClass, "read-only");
@@ -151,15 +163,24 @@ for (const agent of ["scout", "coder"] as const) {
 				dispatch: bundle.contract,
 				getAgentSpecs: () => specs,
 				getAutonomy: () => "full-auto",
+				getSchemaComposition: () => dispatchSchemaCompositionFor(settings.fleet),
 			});
-			const result = await tool.run({
+			const args = {
 				agent,
 				task: writer ? "Update the fixture files and project profile." : "Inspect tracked.txt and explain its contents.",
 				...(writer ? {} : { intent: { read_roots: ["tracked.txt"], write_roots: [], expected_outputs: [] } }),
 				mode: "compete",
 				candidates: 2,
 				cwd: root,
-			});
+			};
+			strictEqual(Value.Check(tool.parameters as never, args), true, "one-route schema must admit actual compete");
+			for (const candidates of [1, 5, 2.5]) {
+				const rejected = await tool.run({ ...args, candidates });
+				strictEqual(rejected.kind, "error");
+				if (rejected.kind === "error") match(rejected.message, /candidates must be an integer 2\.\.4/u);
+				strictEqual(bundle.contract.listRuns().length, 0);
+			}
+			const result = await tool.run(args);
 			const after = snapshot(root);
 			t.diagnostic(
 				JSON.stringify({ before, candidateBefore, judged, changedPaths, judgeTask, after, resultKind: result.kind }),
@@ -170,13 +191,55 @@ for (const agent of ["scout", "coder"] as const) {
 				.filter((run) => run.agentId === agent)
 				.map((run) => {
 					ok(run.receiptPath);
-					return JSON.parse(readFileSync(run.receiptPath, "utf8"));
+					return JSON.parse(readFileSync(run.receiptPath, "utf8")) as RunReceipt;
 				});
 			strictEqual(receipts.length, 2);
+			strictEqual(new Set(receipts.map((receipt) => receipt.runId)).size, 2);
+			strictEqual(new Set(candidatePaths).size, 2);
+			const allRuns = bundle.contract.listRuns();
+			strictEqual(allRuns.length, 3, "exactly two candidate executions plus one judge; no council substitution");
+			const judgeRun = allRuns.find((run) => run.gate?.role === "judge");
+			ok(judgeRun?.receiptPath);
+			const judgeReceipt = JSON.parse(readFileSync(judgeRun.receiptPath, "utf8")) as RunReceipt;
+			strictEqual(judgeReceipt.outcome, "succeeded");
+			strictEqual(judgeReceipt.autonomyEnforcement?.autonomy, "read-only");
+			deepStrictEqual(
+				judgeReceipt.gate?.subjects?.map((subject) => subject.runId).sort(),
+				receipts.map((receipt) => receipt.runId).sort(),
+			);
+			for (const receipt of [...receipts, judgeReceipt]) {
+				strictEqual(receipt.targetId, "only-route");
+				strictEqual(receipt.wireModelId, "fixture-model");
+			}
+			strictEqual(result.details?.mode, "compete");
+			strictEqual(result.details?.receiptCount, 3);
+			deepStrictEqual((result.details?.terminalRunIds as string[]).slice().sort(), allRuns.map((run) => run.id).sort());
+			const winner = readGateDecisionArtifacts().find(({ artifact }) => artifact.outcome === "winner")?.artifact;
+			ok(winner);
+			strictEqual(winner.topology, "compete");
+			strictEqual(winner.decider?.runId, judgeReceipt.runId);
+			strictEqual(winner.subjects.length, 2);
+			strictEqual(winner.winner?.index, 1);
+			strictEqual(winner.correlation?.independent, false, "same-route judging must retain its correlation");
+			deepStrictEqual(
+				winner.subjects.map((subject) => subject.runId).sort(),
+				receipts.map((receipt) => receipt.runId).sort(),
+			);
+			strictEqual(winner.winner?.subject.runId, receipts.find((receipt) => receipt.gate?.cycle === 1)?.runId);
+			t.diagnostic(
+				JSON.stringify({
+					mode: result.details?.mode,
+					candidateIds: receipts.map((receipt) => receipt.runId),
+					judgeId: judgeReceipt.runId,
+					receiptCount: result.details?.receiptCount,
+					winner,
+				}),
+			);
 			for (const receipt of receipts) {
+				strictEqual(receipt.gate?.role, "candidate");
 				strictEqual(receipt.outcome, "succeeded");
-				strictEqual(receipt.autonomyEnforcement.autonomy, writer ? "auto-edit" : "read-only");
-				if (!writer) deepStrictEqual(receipt.intent.writeRoots, []);
+				strictEqual(receipt.autonomyEnforcement?.autonomy, writer ? "auto-edit" : "read-only");
+				if (!writer) deepStrictEqual(receipt.intent?.writeRoots, []);
 			}
 			strictEqual(candidateBefore.length, 2);
 			strictEqual(judged.length, 2);
