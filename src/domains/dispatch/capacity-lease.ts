@@ -187,7 +187,10 @@ const MEMBER_STATUSES = new Set(["held", "consumed", "released"]);
  * rejected here as well: silently skipping an unreadable record would under-count
  * capacity and admit past the cap.
  */
-function heldReservationUsage(values: ReadonlyArray<unknown>): {
+function heldReservationUsage(
+	values: ReadonlyArray<unknown>,
+	transferring?: { ownerId: string; memberId: string },
+): {
 	global: number;
 	nodes: Record<string, number>;
 	endpoints: Record<string, number>;
@@ -198,13 +201,24 @@ function heldReservationUsage(values: ReadonlyArray<unknown>): {
 	for (const value of values) {
 		if (typeof value !== "object" || value === null)
 			throw new Error("dispatch capacity store has invalid reservation records");
-		const record = value as { status?: unknown; members?: unknown };
+		const record = value as { ownerId?: unknown; status?: unknown; members?: unknown };
 		if (typeof record.status !== "string" || !RESERVATION_STATUSES.has(record.status) || !Array.isArray(record.members))
 			throw new Error("dispatch capacity store has invalid reservation records");
 		if (record.status !== "active") continue;
 		const byWave = new Map<number, number>();
 		const byNodeWave = new Map<string, Map<number, number>>();
 		const byEndpointWave = new Map<string, Map<number, number>>();
+		let transferringWave: number | undefined;
+		if (transferring !== undefined && record.ownerId === transferring.ownerId) {
+			const member = record.members.find(
+				(raw) => typeof raw === "object" && raw !== null && raw.memberId === transferring.memberId,
+			);
+			// Transfer validates and consumes the member under this same lock.
+			// A retry's existing lease also carries that validated identity.
+			if (member?.status !== "consumed" || !Number.isInteger(member.wave))
+				throw new Error("dispatch: capacity transfer requires a consumed reservation member");
+			transferringWave = member.wave;
+		}
 		for (const raw of record.members) {
 			if (typeof raw !== "object" || raw === null)
 				throw new Error("dispatch capacity store has invalid reservation records");
@@ -218,12 +232,16 @@ function heldReservationUsage(values: ReadonlyArray<unknown>): {
 				throw new Error("dispatch capacity store has invalid reservation records");
 			if (member.status !== "held") continue;
 			const wave = member.wave as number;
+			if (member.endpointKey !== undefined && typeof member.endpointKey !== "string")
+				throw new Error("dispatch capacity store has invalid reservation records");
+			// Waves reuse the owner's reserved slots. Only its same-wave peers
+			// compete with this lease; other waves stay held in durable state and
+			// still count at their full peak against every other owner.
+			if (transferringWave !== undefined && wave !== transferringWave) continue;
 			byWave.set(wave, (byWave.get(wave) ?? 0) + 1);
 			const nodeWaves = byNodeWave.get(member.nodeId) ?? new Map<number, number>();
 			nodeWaves.set(wave, (nodeWaves.get(wave) ?? 0) + 1);
 			byNodeWave.set(member.nodeId, nodeWaves);
-			if (member.endpointKey !== undefined && typeof member.endpointKey !== "string")
-				throw new Error("dispatch capacity store has invalid reservation records");
 			if (typeof member.endpointKey === "string") {
 				const endpointWaves = byEndpointWave.get(member.endpointKey) ?? new Map<number, number>();
 				endpointWaves.set(wave, (endpointWaves.get(wave) ?? 0) + 1);
@@ -288,8 +306,9 @@ function assertCapacity(
 	nodeId: string,
 	endpointKey: string | undefined,
 	limits: CapacityLimits,
+	transferring?: { ownerId: string; memberId: string },
 ): void {
-	const held = heldReservationUsage(file.reservations);
+	const held = heldReservationUsage(file.reservations, transferring);
 	const globalUsed = file.leases.length + held.global;
 	// The denial names the compliant next move, not just the gate. A model told
 	// only that it is full re-dispatches with a different agent; the work it is
@@ -350,7 +369,15 @@ export function acquireCapacityLease(input: {
 		if (existing) {
 			if (existing.nodeId !== input.nodeId || existing.endpointKey !== input.endpointKey) {
 				const without = { ...file, leases: file.leases.filter((lease) => lease !== existing) };
-				assertCapacity(without, input.nodeId, input.endpointKey, input.limits);
+				assertCapacity(
+					without,
+					input.nodeId,
+					input.endpointKey,
+					input.limits,
+					existing.reservationOwnerId !== null && existing.reservationMemberId !== null
+						? { ownerId: existing.reservationOwnerId, memberId: existing.reservationMemberId }
+						: undefined,
+				);
 				existing.nodeId = input.nodeId;
 				if (input.endpointKey === undefined) delete existing.endpointKey;
 				else existing.endpointKey = input.endpointKey;
@@ -361,7 +388,7 @@ export function acquireCapacityLease(input: {
 			return clone(existing);
 		}
 		input.onAcquiredUnderLock?.(file);
-		assertCapacity(file, input.nodeId, input.endpointKey, input.limits);
+		assertCapacity(file, input.nodeId, input.endpointKey, input.limits, input.reservation);
 		const token = input.processBirthToken ?? processBirthToken(input.ownerPid ?? process.pid);
 		if (!token) throw new Error("dispatch: cannot establish process birth token");
 		const at = new Date(nowMs).toISOString();
