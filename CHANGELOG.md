@@ -29,6 +29,7 @@ Trust spine: typed claims, executable validation, and decision provenance. Answe
 - The dispatch board reads observability's run projection. One fold owns lifecycle events, worker progress, receipt trust, retries, cancellation, fleet positions, and evidence readiness; the board keeps ordering, selection, and rendering. Terminal status and accounting come from the same projection the observability contract publishes.
 
 ### Fixed
+- ACP permission cancellation now aborts the active turn before releasing parked tools, preventing an extra provider request while Workbench settles an unanswered approval (#341).
 - Host verification memoization and batch deduplication now include the check identity, kind, execution timeout, numerical tolerances, performance bounds, and reference or baseline contents. Different judgments cannot inherit an earlier pass, while identical valid checks retain evidence reuse and provenance (#333).
 - Host numerical verification now judges bounded command stdout, matching ordinary verify. JSON diagnostics on stderr cannot supply a missing measurement or invalidate valid stdout; stderr remains available in the command artifact (#334).
 - High-rigor task acceptance now requires validation evidence from the owning workspace. Verifier receipts retain declaration source and execution details, so a passing same-named examples check cannot satisfy a root check. Intended package and catalog checks, exact root package commands, and scoped limitation receipts remain supported (#335).
