@@ -3,7 +3,7 @@ import { existsSync, readFileSync } from "node:fs";
 import { hostname } from "node:os";
 import { join } from "node:path";
 import { BIRTH_TOKEN_SOURCE_AVAILABLE, processAlive, processBirthToken } from "../../core/process-identity.js";
-import { FILE_LOCK_ACQUIRE_TIMEOUT_MS, withStateFileLockSync } from "../../core/state-file-lock.js";
+import { FILE_LOCK_ACQUIRE_TIMEOUT_MS, withStateFileLock, withStateFileLockSync } from "../../core/state-file-lock.js";
 import { clioStateDir } from "../../core/xdg.js";
 import { atomicWrite } from "../../engine/session.js";
 import { endpointLabel, foregroundStreamUsage } from "../providers/endpoint-capacity.js";
@@ -454,13 +454,34 @@ export function capacityDrain(nowMs = Date.now()): CapacityDrain | null {
 		return drain;
 	});
 }
+/** Synchronous usage read for admission planners whose host API cannot yield. */
 export function capacityLeaseUsage(options?: { nowMs?: number; probe?: LeaseOwnerProbe }): {
 	global: number;
 	nodes: Readonly<Record<string, number>>;
 	endpoints: Readonly<Record<string, number>>;
 	endpointHolders: Readonly<Record<string, EndpointCapacityHolders>>;
 } {
-	const leases = listCapacityLeases(options);
+	return withStateFileLockSync(capacityStateLockPath(), () => capacityLeaseUsageUnsafe(options));
+}
+
+/** Fresh usage for async admission: wait for the same lock without blocking callbacks. */
+export function capacityLeaseUsageAsync(options?: {
+	nowMs?: number;
+	probe?: LeaseOwnerProbe;
+}): Promise<ReturnType<typeof capacityLeaseUsage>> {
+	return withStateFileLock(capacityStateLockPath(), () => capacityLeaseUsageUnsafe(options));
+}
+
+/** The caller holds the capacity state lock for this read and any reclamation write. */
+function capacityLeaseUsageUnsafe(options?: {
+	nowMs?: number;
+	probe?: LeaseOwnerProbe;
+}): ReturnType<typeof capacityLeaseUsage> {
+	const file = readCapacityStateUnsafe();
+	const before = file.leases.length;
+	reclaim(file, options?.nowMs ?? Date.now(), options?.probe ?? defaultProbe);
+	if (before !== file.leases.length) writeCapacityStateUnsafe(file);
+	const leases = file.leases;
 	const nodes: Record<string, number> = {};
 	const foreground = foregroundStreamUsage();
 	const endpoints: Record<string, number> = { ...foreground };
@@ -523,14 +544,4 @@ export function createNodeLeaseUsageReader(options: {
 		}
 		return cache.nodes[nodeId] ?? 0;
 	};
-}
-
-function listCapacityLeases(options?: { nowMs?: number; probe?: LeaseOwnerProbe }): ReadonlyArray<CapacityLease> {
-	return withStateFileLockSync(capacityStateLockPath(), () => {
-		const file = readCapacityStateUnsafe();
-		const before = file.leases.length;
-		reclaim(file, options?.nowMs ?? Date.now(), options?.probe ?? defaultProbe);
-		if (before !== file.leases.length) writeCapacityStateUnsafe(file);
-		return file.leases.map(clone);
-	});
 }

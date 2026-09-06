@@ -153,7 +153,7 @@ import {
 import { type BatchState, createBatch, onRunComplete, snapshotBatch } from "./batch-tracker.js";
 import { type RunToolBudgetEnvelope, resolveToolBudgetEnvelope } from "./budget-envelope.js";
 import { assessCapabilityMismatch, type CapabilityMismatch } from "./capability-match.js";
-import { capacityLeaseUsage, createNodeLeaseUsageReader } from "./capacity-lease.js";
+import { capacityLeaseUsage, capacityLeaseUsageAsync, createNodeLeaseUsageReader } from "./capacity-lease.js";
 import { acquireCheckoutWriterLease, type CheckoutWriterLease } from "./checkout-writer-lease.js";
 import type {
 	DispatchAdmissionObserver,
@@ -2586,10 +2586,17 @@ export function createDispatchBundle(
 		return configuredEndpointCapacities()[endpoint.key] ?? endpoint;
 	}
 
-	function reservationCapacitySnapshot(settings: EffectiveSettings): ReservationCapacitySnapshot {
+	/** Initial plan preparation has a synchronous host contract. */
+	function reservationCapacitySnapshotSync(settings: EffectiveSettings): ReservationCapacitySnapshot {
+		return reservationCapacitySnapshot(settings, capacityLeaseUsage());
+	}
+
+	function reservationCapacitySnapshot(
+		settings: EffectiveSettings,
+		usage: ReturnType<typeof capacityLeaseUsage>,
+	): ReservationCapacitySnapshot {
+		// Read budget after the capacity lock wait too; concurrent callbacks may spend.
 		const preflight = scheduling.preflight();
-		// Reservation planning compares against a fresh read, never the display cache.
-		const usage = capacityLeaseUsage();
 		const nodes: Record<string, { active: number; limit: number }> = {
 			local: { active: usage.nodes.local ?? 0, limit: configuredGlobalCapacity(settings) },
 		};
@@ -2624,7 +2631,7 @@ export function createDispatchBundle(
 				...(task.resolution.endpoint !== undefined ? { endpointKey: task.resolution.endpoint.key } : {}),
 				costUpperBoundUsd: task.resolution.routeApproval?.totalCostUpperBoundUsd ?? task.resolution.costUpperBoundUsd,
 			})),
-			capacity: reservationCapacitySnapshot(getEffectiveSettings()),
+			capacity: reservationCapacitySnapshotSync(getEffectiveSettings()),
 			nowMs: now(),
 		});
 		ownedReservations.add(record.ownerId);
@@ -2767,7 +2774,8 @@ export function createDispatchBundle(
 		settings: EffectiveSettings,
 	): Promise<void> {
 		if (req.reservation === undefined || req.lineage === undefined) return;
-		const capacity = reservationCapacitySnapshot(settings);
+		// Retries can await fresh capacity; the advisory display cache is never admission data.
+		const capacity = reservationCapacitySnapshot(settings, await capacityLeaseUsageAsync());
 		const rebind = {
 			...req.reservation,
 			nodeId,
