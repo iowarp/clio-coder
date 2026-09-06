@@ -105,7 +105,7 @@ export interface OpenAICompatFixture {
  * recording every chat request for assertions. Listens on an ephemeral port.
  */
 export async function startOpenAICompatFixture(
-	reply: string,
+	reply: string | ((request: Record<string, unknown>) => string),
 	options: OpenAICompatFixtureOptions = {},
 ): Promise<OpenAICompatFixture> {
 	const models = options.models ?? [{ id: "mock-model", object: "model" }];
@@ -125,6 +125,7 @@ export async function startOpenAICompatFixture(
 		const raw = await readRequestBody(req);
 		const request = JSON.parse(raw) as Record<string, unknown>;
 		requests.push(request);
+		const responseText = typeof reply === "function" ? reply(request) : reply;
 		if (request.stream === false) {
 			res.writeHead(200, { "content-type": "application/json" });
 			res.end(
@@ -132,7 +133,7 @@ export async function startOpenAICompatFixture(
 					id: "chatcmpl-clio-probe",
 					object: "chat.completion",
 					model: request.model ?? "mock-model",
-					choices: [{ index: 0, message: { role: "assistant", content: reply }, finish_reason: "stop" }],
+					choices: [{ index: 0, message: { role: "assistant", content: responseText }, finish_reason: "stop" }],
 				}),
 			);
 			return;
@@ -205,7 +206,7 @@ export async function startOpenAICompatFixture(
 				})}\n\n`,
 			);
 		}
-		const replyChunks = options.replyChunks ?? [reply];
+		const replyChunks = options.replyChunks ?? [responseText];
 		for (let index = 0; index < replyChunks.length; index += 1) {
 			const chunk = replyChunks[index] ?? "";
 			res.write(

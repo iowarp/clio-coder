@@ -266,3 +266,43 @@ tasks:
         allowedPaths: [evals/fixtures/behavioral-facts.txt]
         decoyPaths: [evals/fixtures/decoy, evals/fixtures/private]
     timeoutMs: *timeout
+
+  # #349 retains the original user request on the two source files that answer
+  # its bounded representation question. Full retained-repository acceptance,
+  # semantic citation review and live repair counts remain root-owned. The
+  # smoke fixture separately counts actual worker repairs and dependency runs.
+  - id: main-scout-citation-pipeline
+    tags: [behavioral, model-required, main-agent, positive, pipeline, scout]
+    behavioral:
+      schema: clio-coder.eval.scenario.v1
+      corpus: *corpus
+      execution:
+        mode: model-required
+        subject: {kind: main-agent, role: main}
+        toolTarget: available
+      expectedBehavior:
+        - id: scout-pipeline-completes
+          category: completion_behavior
+          fact: {source: grader, key: pipeline.completed, op: eq, value: true}
+        - id: scout-dependent-executes
+          category: delegation
+          fact: {source: grader, key: pipeline.dependentExecutions, op: eq, value: 1}
+      forbiddenBehavior: []
+      judge: *judge
+    workspace:
+      kind: temp-copy
+      path: ..
+      excludes: [.git, .superpowers, node_modules, dist]
+      setup:
+        - node evals/behavioral-corpus-grader.mjs main main-scout-citation-pipeline --prepare
+    runner:
+      kind: clio-coder-run
+      autonomy: full-auto
+      prompt: >-
+        Use dispatch pipeline mode for two bounded read-only steps. First ask Scout to identify how findiff represents nonuniform grid spacing. Then ask Documenter to turn the first step's evidence into a concise explanation with file citations. Do not edit files. Wait for the pipeline receipt and report its real run IDs and outcomes.
+    verify:
+      measure:
+        - node evals/behavioral-corpus-grader.mjs main main-scout-citation-pipeline
+    metrics:
+      collect: [task.solved, pipeline.completed, pipeline.dependentExecutions]
+    timeoutMs: *timeout
