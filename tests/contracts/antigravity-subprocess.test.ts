@@ -124,6 +124,62 @@ function writeScenario(root: string, scenario: unknown): void {
 	writeFileSync(join(root, "scenario.json"), JSON.stringify(scenario));
 }
 
+// Shared only by the native regression and its simulated startup-failure check.
+async function withWindowsFixturePids(
+	root: string,
+	worker: { abort: () => void; promise: Promise<unknown> },
+	cleanup: (pid: number) => void,
+	check: (pids: number[]) => Promise<void>,
+	{ readinessAttempts = 200, settlementMs = 1_000 } = {},
+): Promise<void> {
+	const owned = new Map<string, number>();
+	// Observe rejection immediately, including while waiting for PID publication.
+	const settled = worker.promise.catch(() => undefined);
+	try {
+		for (let index = 0; index < readinessAttempts; index += 1) {
+			for (const name of ["observed.json", "grandchild.pid"]) {
+				if (owned.has(name)) continue;
+				try {
+					const contents = readFileSync(join(root, name), "utf8");
+					const pid = name === "observed.json" ? JSON.parse(contents).pid : Number(contents);
+					if (Number.isSafeInteger(pid) && pid > 0) owned.set(name, pid);
+				} catch {
+					// Each fixture file can be missing or partially written independently.
+				}
+			}
+			if (owned.size === 2) break;
+			await new Promise((resolve) => setTimeout(resolve, 10));
+		}
+		equal(owned.size, 2, "fixture must publish both process identities before cancellation");
+		await check([...owned.values()]);
+	} finally {
+		worker.abort();
+		for (const pid of new Set(owned.values())) {
+			try {
+				cleanup(pid);
+			} catch {
+				// Try every known descendant even if an earlier cleanup fails.
+			}
+		}
+		// Cleanup rejection or timeout must never replace the original test failure.
+		await windowsSettlement(settled, settlementMs).catch(() => undefined);
+	}
+}
+
+async function windowsSettlement<T>(promise: Promise<T>, timeoutMs = 5_000): Promise<T> {
+	let deadline: ReturnType<typeof setTimeout> | undefined;
+	try {
+		return await Promise.race([
+			promise,
+			new Promise<never>((_, reject) => {
+				deadline = setTimeout(() => reject(new Error("Windows cancellation did not settle")), timeoutMs);
+			}),
+		]);
+	} finally {
+		clearTimeout(deadline);
+	}
+}
+
 function assistant(result: { messages: AgentMessage[] }): AgentMessage & { role: "assistant" } {
 	const message = result.messages[0];
 	if (message?.role !== "assistant") throw new Error("expected assistant result");
@@ -473,9 +529,53 @@ describe("Antigravity external subprocess contract", () => {
 		throw new Error(`grandchild ${pid} survived process-group cancellation`);
 	});
 
+	it("cleans independently published Windows fixture PIDs when startup fails", { timeout: 2_000 }, async () => {
+		for (const publication of ["child", "grandchild", "rejected worker"] as const) {
+			const { root } = scratch();
+			if (publication === "grandchild") {
+				writeFileSync(join(root, "observed.json"), JSON.stringify({ pid: -1 }));
+				writeFileSync(join(root, "grandchild.pid"), "23456");
+			} else {
+				writeFileSync(join(root, "observed.json"), JSON.stringify({ pid: 12345 }));
+			}
+			const cleaned: number[] = [];
+			let aborts = 0;
+			let checks = 0;
+			await rejects(
+				withWindowsFixturePids(
+					root,
+					{
+						abort: () => {
+							aborts += 1;
+						},
+						promise:
+							publication === "rejected worker"
+								? Promise.reject(new Error("secondary worker failure"))
+								: new Promise(() => {}),
+					},
+					(pid) => {
+						cleaned.push(pid);
+						throw new Error("secondary cleanup failure");
+					},
+					async () => {
+						checks += 1;
+					},
+					{ readinessAttempts: 2, settlementMs: 10 },
+				),
+				{
+					code: "ERR_ASSERTION",
+					message: /fixture must publish both process identities before cancellation/,
+				},
+			);
+			deepStrictEqual(cleaned, [publication === "grandchild" ? 23456 : 12345]);
+			equal(aborts, 1);
+			equal(checks, 0);
+		}
+	});
+
 	it("cancels the real Windows child and grandchild tree", {
 		skip: process.platform !== "win32",
-		timeout: 15_000,
+		timeout: 20_000,
 	}, async (t) => {
 		const { root, binary, home } = scratch();
 		writeScenario(root, { hang: true });
@@ -486,64 +586,39 @@ describe("Antigravity external subprocess contract", () => {
 			environment: { PATH: process.env.PATH, HOME: home },
 			killGraceMs: 25,
 		});
-		const ownedPids: number[] = [];
-		let settlementDeadline: ReturnType<typeof setTimeout> | undefined;
-		try {
-			for (let index = 0; index < 200; index += 1) {
-				try {
-					const observed = JSON.parse(readFileSync(join(root, "observed.json"), "utf8"));
-					const grandchild = Number(readFileSync(join(root, "grandchild.pid"), "utf8"));
-					ok(Number.isSafeInteger(observed.pid) && observed.pid > 0);
-					ok(Number.isSafeInteger(grandchild) && grandchild > 0);
-					ownedPids.push(observed.pid, grandchild);
-					break;
-				} catch {
-					await new Promise((resolve) => setTimeout(resolve, 10));
-				}
-			}
-			equal(ownedPids.length, 2, "fixture must publish both process identities before cancellation");
-			for (const pid of ownedPids) process.kill(pid, 0);
-			t.diagnostic(`Windows cancellation fixture owns PIDs ${ownedPids.join(", ")}`);
-			controller.abort();
-			const result = await Promise.race([
-				handle.promise,
-				new Promise<never>((_, reject) => {
-					settlementDeadline = setTimeout(() => reject(new Error("Windows cancellation did not settle")), 5_000);
-				}),
-			]);
-			equal(result.exitCode, 1);
-			equal(assistant(result).stopReason, "aborted");
-			for (const pid of ownedPids) {
-				let running = true;
-				for (let index = 0; index < 200; index += 1) {
-					try {
-						process.kill(pid, 0);
-						await new Promise((resolve) => setTimeout(resolve, 10));
-					} catch {
-						running = false;
-						break;
+		await withWindowsFixturePids(
+			root,
+			{ abort: () => controller.abort(), promise: handle.promise },
+			(pid) => {
+				process.kill(pid, 0);
+				execFileSync("taskkill.exe", ["/PID", String(pid), "/T", "/F"], {
+					stdio: "ignore",
+					windowsHide: true,
+					timeout: 2_000,
+				});
+			},
+			async (ownedPids) => {
+				for (const pid of ownedPids) process.kill(pid, 0);
+				t.diagnostic(`Windows cancellation fixture owns PIDs ${ownedPids.join(", ")}`);
+				controller.abort();
+				const result = await windowsSettlement(handle.promise);
+				equal(result.exitCode, 1);
+				equal(assistant(result).stopReason, "aborted");
+				for (const pid of ownedPids) {
+					let running = true;
+					for (let index = 0; index < 200; index += 1) {
+						try {
+							process.kill(pid, 0);
+							await new Promise((resolve) => setTimeout(resolve, 10));
+						} catch {
+							running = false;
+							break;
+						}
 					}
+					equal(running, false, `owned descendant ${pid} survived cancellation`);
 				}
-				equal(running, false, `owned descendant ${pid} survived cancellation`);
-			}
-			t.diagnostic(`Windows tree cancellation reaped owned fixture PIDs ${ownedPids.join(", ")}`);
-		} finally {
-			clearTimeout(settlementDeadline);
-			controller.abort();
-			// A failing regression must not leave the fixture's descendants alive.
-			for (const pid of ownedPids) {
-				try {
-					process.kill(pid, 0);
-					execFileSync("taskkill.exe", ["/PID", String(pid), "/T", "/F"], {
-						stdio: "ignore",
-						windowsHide: true,
-						timeout: 5_000,
-					});
-				} catch {
-					// Already reaped by the production terminator or the preceding tree cleanup.
-				}
-			}
-			await handle.promise;
-		}
+				t.diagnostic(`Windows tree cancellation reaped owned fixture PIDs ${ownedPids.join(", ")}`);
+			},
+		);
 	});
 });
