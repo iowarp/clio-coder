@@ -35,8 +35,8 @@ describe("bounded authored preload", () => {
 		const selected = selectProjectPreload(input);
 		strictEqual(selected.text, input.text);
 		strictEqual(selected.classification.mode, "full");
-		strictEqual(selected.classification.sources?.[0].contentHash, sha256(source));
-		strictEqual(selected.classification.sources?.[0].availableLines, 5);
+			strictEqual(selected.classification.sources?.[0]?.contentHash, sha256(source));
+			strictEqual(selected.classification.sources?.[0]?.availableLines, 5);
 		for (const size of [8000, 8001]) {
 			const padded = context(["EARLY\n\n" + "x".repeat(size - context(["EARLY\n\n"]).text.length)]);
 			strictEqual(padded.text.length, size);
@@ -69,11 +69,11 @@ describe("bounded authored preload", () => {
 		]) {
 			const selected = selectProjectPreload(context([prefix + block]));
 			assertBudget(selected);
-			strictEqual(selected.classification.sources?.[0].includedChars, prefix.length);
+				strictEqual(selected.classification.sources?.[0]?.includedChars, prefix.length);
 			strictEqual(selected.text.includes(prefix), true);
 			const zero = selectProjectPreload(context([block]));
 			assertBudget(zero);
-			strictEqual(zero.classification.sources?.[0].includedChars, 0);
+				strictEqual(zero.classification.sources?.[0]?.includedChars, 0);
 			strictEqual(zero.classification.mode, "partial");
 		}
 	});
