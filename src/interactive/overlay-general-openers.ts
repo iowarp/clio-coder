@@ -19,6 +19,7 @@ import type { SessionMeta } from "../domains/session/index.js";
 import { foldSessionArtifacts } from "../domains/session/session-artifacts.js";
 import { foldSessionTaskHistory } from "../domains/session/task-board.js";
 import { filterEntriesToActivePath } from "../domains/session/tree/active-path.js";
+import { formatUserTaskHandoff } from "../domains/user-tasks/handoff.js";
 import type { UserTasksStore } from "../domains/user-tasks/store.js";
 import type { TUI } from "../engine/tui.js";
 import { type OpenContextOverlayOptions, openContextOverlay } from "./context-overlay.js";
@@ -40,7 +41,7 @@ import {
 import { formatDecisionCorrectionTurn, openDecisionsOverlay } from "./overlays/decisions.js";
 import { openFleetRunApprovalOverlay } from "./overlays/fleet-run-approval.js";
 import { openSideQuestionOverlay } from "./overlays/side-question.js";
-import { type ContextClearCommandOptions, formatUserTaskHandoff } from "./slash-commands.js";
+import type { ContextClearCommandOptions } from "./slash-commands.js";
 import { openTasksOverlay } from "./tasks-overlay.js";
 import { type ArtifactProviderDeps, createDefaultArtifactProviders } from "./view/artifacts.js";
 import { openViewOverlay } from "./view/view-overlay.js";

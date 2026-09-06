@@ -1,5 +1,6 @@
 import { normalizeIntentExpectedOutputs, normalizeIntentVerification } from "../domains/dispatch/intent.js";
 import type { UserTaskAcceptance } from "../domains/user-tasks/acceptance.js";
+import { formatUserTaskHandoff } from "../domains/user-tasks/handoff.js";
 import { createUserTasksStore } from "../domains/user-tasks/store.js";
 import { packageDeclaredCheck } from "../tools/verify/catalog.js";
 import { discoverDeclaredChecksAtRoot, discoverDeclaredProjectEntriesAtRoot } from "../tools/verify/scripts.js";
@@ -74,7 +75,15 @@ export function runTasksCommand(args: string[]): number {
 		} else if (action === "list" && rest.length === 0) {
 			console.log(JSON.stringify(store.snapshot(), null, 2));
 		} else if ((action === "hand" || action === "done" || action === "drop") && rest.length === 1) {
-			console.log(JSON.stringify(store[action](rest[0] ?? ""), null, 2));
+			const task = store[action](rest[0] ?? "");
+			console.log(JSON.stringify(task, null, 2));
+			if (action === "hand") {
+				console.error(
+					"CLI hand records the inbox state only; it does not start a session or submit the interactive /tasks hand turn. " +
+						"Pass this pickup prompt to clio-coder run in the same project:\n" +
+						formatUserTaskHandoff(task),
+				);
+			}
 		} else throw new Error(HELP);
 		return 0;
 	} catch (error) {
