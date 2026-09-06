@@ -605,6 +605,7 @@ export function createDispatchAdmissionController(deps: DispatchToolDeps): Dispa
 						resolveTask(
 							{
 								agentId: gateDeciderAgentId(reviewResult.review.reviewer),
+								...(base.budget === undefined ? {} : { budget: base.budget }),
 								executionRole: "reviewer",
 								task: renderDispatchReviewerTask(base.task, subject.runId, cycle, base.intent),
 								systemPrompt: REVIEWER_GATE_PROMPT,
@@ -640,6 +641,7 @@ export function createDispatchAdmissionController(deps: DispatchToolDeps): Dispa
 					resolveTask(
 						{
 							agentId: gateDeciderAgentId(compete.judge?.agent),
+							...(base.budget === undefined ? {} : { budget: base.budget }),
 							executionRole: "judge",
 							task: `Plan-time capability check for the ${compete.candidates}-candidate judge.`,
 							systemPrompt: JUDGE_GATE_PROMPT,
@@ -712,6 +714,7 @@ export function createDispatchAdmissionController(deps: DispatchToolDeps): Dispa
 				if (council.synthesis === "judge") {
 					const judgeRequest: DispatchRequest = {
 						agentId: council.judge?.agent ?? base.agentId,
+						...(base.budget === undefined ? {} : { budget: base.budget }),
 						executionRole: "judge",
 						task: "Plan-time capability check for council synthesis.",
 						systemPrompt: COUNCIL_JUDGE_PROMPT,

@@ -400,8 +400,8 @@ function renderPlanText(
 ): string {
 	const lines = [
 		`dispatch plan: topology=${topology} tasks=${tasks.length}`,
-		`cost ceiling: ${costCeilingUsd === undefined ? "unavailable" : `$${costCeilingUsd.toFixed(4)}`}`,
-		`deadline: ${deadlineMs === null ? "per-assignment" : `${deadlineMs}ms whole-plan`}`,
+		`advisory session cost baseline: ${costCeilingUsd === undefined ? "unavailable" : `$${costCeilingUsd.toFixed(4)}`}`,
+		`deadline: ${deadlineMs === null ? "none (advisory planning)" : `${deadlineMs}ms whole-plan`}`,
 	];
 	if (confirmation !== undefined) {
 		lines.push(
@@ -450,7 +450,7 @@ function renderPlanText(
 			const approval = task.routeApproval;
 			const selected = approval.decision.selected;
 			lines.push(
-				`    active policy=${safeField(approval.decision.policyVersion)} decision=${approval.decision.decisionHash} runtime=${safeField(selected.runtimeId)} thinking=${safeField(selected.thinkingLevel ?? "default")} totalCostUpperBoundUsd=${approval.totalCostUpperBoundUsd.toFixed(6)} deadlineMs=${approval.deadlineMs} maxAttempts=${approval.maxAttempts}`,
+				`    active policy=${safeField(approval.decision.policyVersion)} decision=${approval.decision.decisionHash} runtime=${safeField(selected.runtimeId)} thinking=${safeField(selected.thinkingLevel ?? "default")} totalCostUpperBoundUsd=${approval.totalCostUpperBoundUsd.toFixed(6)} deadlineMs=${approval.deadlineMs ?? "none"} maxAttempts=${approval.maxAttempts}`,
 			);
 		}
 		if (task.agentSelection !== null) {
@@ -778,8 +778,7 @@ export function resolvedDispatchPlanFromArgs(args: Record<string, unknown>): Res
 			!Number.isInteger(value.maxWorkers) ||
 			Number(value.maxWorkers) < 1 ||
 			(value.onFailure !== "stop" && value.onFailure !== "continue") ||
-			!Number.isInteger(value.deadlineMs) ||
-			Number(value.deadlineMs) < 1
+			(value.deadlineMs !== null && (!Number.isInteger(value.deadlineMs) || Number(value.deadlineMs) < 1))
 		)
 			return null;
 		if (

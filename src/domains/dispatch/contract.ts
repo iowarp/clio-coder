@@ -84,7 +84,7 @@ export interface DispatchRequest extends JobSpec {
 	 * strips the ledger tool from this run's admitted surface.
 	 */
 	ledger?: { id: string; sequence: number };
-	/** Absolute root-assignment deadline derived once from the approved duration. */
+	/** Explicit absolute root-assignment deadline, preserved through retries; absent for advisory estimates. */
 	assignmentDeadlineAt?: number;
 	/**
 	 * Tool call the caller was executing when it built this request. Stamped by

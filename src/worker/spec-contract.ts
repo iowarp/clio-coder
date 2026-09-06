@@ -47,20 +47,22 @@ export interface WorkerProtectedArtifactState {
 	artifacts: ReadonlyArray<ProtectedArtifact>;
 }
 
-/** Concrete dispatch-time budget after recipe policy and operator clamping. */
+/** Concrete dispatch-time planning estimates, or a legacy enforced budget. */
 export interface WorkerBudgetPhase {
 	toolCalls: number;
 	readReserve: number;
 }
 
 export interface WorkerBudget {
-	/** Agent phase boundary before synthesis or bounded termination. */
+	/** New dispatches are advisory; omitted mode preserves legacy enforcement. */
+	mode?: "advisory" | "enforced";
+	/** Estimated tool calls; a phase boundary only in enforced mode. */
 	toolCalls: number;
-	/** Tail of toolCalls reserved for canonical read calls. */
+	/** Suggested read allowance; reserved calls only in enforced mode. */
 	readReserve: number;
-	/** True enters text-only synthesis; false ends at the phase boundary. */
+	/** Legacy enforced-mode phase behavior; advisory mode never forces synthesis. */
 	synthesis: boolean;
-	/** Independent operator-owned attempt ceiling; recipes cannot widen it. */
+	/** Legacy enforced-mode attempt ceiling; advisory-mode planning baseline. */
 	hardCap: number;
 	/** Optional ceiling that a bounded result-contract revision may activate. */
 	revision?: WorkerBudgetPhase;
@@ -429,7 +431,7 @@ function validateAllowedTools(value: unknown): void {
 
 function validateWorkerBudget(value: unknown): void {
 	const budget = readRecord(value, "WorkerSpec.budget");
-	const expected = ["hardCap", "readReserve", "revision", "synthesis", "toolCalls"];
+	const expected = ["mode", "hardCap", "readReserve", "revision", "synthesis", "toolCalls"];
 	const actual = Object.keys(budget).sort();
 	if (
 		actual.some((key) => !expected.includes(key)) ||
@@ -437,6 +439,8 @@ function validateWorkerBudget(value: unknown): void {
 	) {
 		throw new Error(`WorkerSpec.budget may contain only: ${expected.join(", ")}`);
 	}
+	if (budget.mode !== undefined && budget.mode !== "advisory" && budget.mode !== "enforced")
+		throw new Error("WorkerSpec.budget.mode must be advisory or enforced");
 	for (const required of ["hardCap", "readReserve", "synthesis", "toolCalls"] as const) {
 		if (!Object.hasOwn(budget, required)) throw new Error(`WorkerSpec.budget.${required} is required`);
 	}
@@ -448,7 +452,7 @@ function validateWorkerBudget(value: unknown): void {
 	}
 	if ((budget.toolCalls as number) <= 0) throw new Error("WorkerSpec.budget.toolCalls must be greater than zero");
 	if ((budget.hardCap as number) <= 0) throw new Error("WorkerSpec.budget.hardCap must be greater than zero");
-	if ((budget.toolCalls as number) > (budget.hardCap as number)) {
+	if (budget.mode !== "advisory" && (budget.toolCalls as number) > (budget.hardCap as number)) {
 		throw new Error("WorkerSpec.budget.toolCalls must not exceed WorkerSpec.budget.hardCap");
 	}
 	if ((budget.readReserve as number) < 0 || (budget.readReserve as number) >= (budget.toolCalls as number)) {
@@ -475,7 +479,7 @@ function validateWorkerBudget(value: unknown): void {
 		) {
 			throw new Error("WorkerSpec.budget.revision must increase toolCalls or readReserve");
 		}
-		if ((revision.toolCalls as number) > (budget.hardCap as number)) {
+		if (budget.mode !== "advisory" && (revision.toolCalls as number) > (budget.hardCap as number)) {
 			throw new Error("WorkerSpec.budget.revision.toolCalls must not exceed WorkerSpec.budget.hardCap");
 		}
 		if ((revision.readReserve as number) < 0 || (revision.readReserve as number) >= (revision.toolCalls as number)) {

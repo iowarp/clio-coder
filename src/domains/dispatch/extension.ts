@@ -232,7 +232,6 @@ import {
 	rebindDispatchReservationMember,
 	releaseDispatchReservation,
 	releaseDispatchReservationMember,
-	reservedBudgetUsd,
 	reservedPlanPeakSlots,
 	rollbackDispatchReservation,
 	rollbackUnconsumedDispatchReservation,
@@ -1650,22 +1649,6 @@ function workerToolCallHardCap(settings: EffectiveSettings): number {
 	return settings?.fleet.limits.toolCallsPerRun ?? GUARDRAIL_DEFAULTS.workerToolCallCap;
 }
 
-/**
- * Only a runtime that declares its external agent loop may accept a declared
- * per-tool budget: Clio records that budget as unobserved rather than enforced.
- * Any other subprocess runtime cannot mediate tool calls, so a declared budget
- * would be a claim nobody enforces.
- */
-export function assertWorkerBudgetEnforceable(
-	runtime: Pick<RuntimeDescriptor, "id" | "kind" | "externalAgentLoop">,
-	hasDeclaredBudget: boolean,
-): void {
-	if (!hasDeclaredBudget || runtime.kind !== "subprocess" || runtime.externalAgentLoop !== undefined) return;
-	throw new Error(
-		`dispatch: runtime '${runtime.id}' cannot enforce an explicit dispatch budget because subprocess workers do not expose per-tool mediation; choose a native or claude-sdk worker`,
-	);
-}
-
 /** Per-tool budget enforcement is real only where Clio observes each tool call. */
 export function budgetEnforcementForRuntime(
 	runtime: Pick<RuntimeDescriptor, "kind">,
@@ -1681,7 +1664,6 @@ function resolveEffectiveWorkerBudget(input: {
 	settings: EffectiveSettings;
 	runtime: RuntimeDescriptor;
 }): RunToolBudgetEnvelope {
-	assertWorkerBudgetEnforceable(input.runtime, input.declared !== null || input.req.budget !== undefined);
 	const hardCap = workerToolCallHardCap(input.settings);
 	const declared = input.declared ?? {
 		toolCalls: hardCap,
@@ -1758,15 +1740,6 @@ function assertPlannedNodeIdentity(req: DispatchRequest, actual: RunNodeIdentity
 		return;
 	throw new Error(
 		`dispatch: approved node identity drifted: planned ${planned.id}/${planned.kind}/${planned.host ?? "-"}, resolved ${actual.id}/${actual.kind}/${actual.host ?? "-"}`,
-	);
-}
-
-function assertApprovedCostCeiling(req: DispatchRequest, liveCeilingUsd: number): void {
-	const approved = req.plan?.costCeilingUsd;
-	if (approved === undefined) return;
-	if (Object.is(approved, liveCeilingUsd)) return;
-	throw new Error(
-		`dispatch: scheduling cost ceiling drifted after plan approval (approved $${approved.toFixed(4)}, current $${liveCeilingUsd.toFixed(4)}); re-plan before launch`,
 	);
 }
 
@@ -2686,20 +2659,10 @@ export function createDispatchBundle(
 	}
 
 	function assertBudgetAdmitsRoute(req: DispatchRequest, pricing: EffectivePricing, settings: EffectiveSettings): void {
-		const preflight = scheduling.preflight();
-		assertApprovedCostCeiling(req, preflight.ceilingUsd);
-		if (preflight.verdict === "over" || preflight.verdict === "at") {
-			denyDispatchForBudget(preflight, req.agentId);
-		}
 		const estimateUsd = conservativeRouteAdmissionEstimateUsd(pricing, admissionMaxOutputTokens(settings));
 		const intentCeiling = req.routingIntent?.maxCostUsd;
 		if (intentCeiling !== null && intentCeiling !== undefined && estimateUsd > intentCeiling)
 			denyDispatchForBudget({ currentUsd: estimateUsd, ceilingUsd: intentCeiling }, req.agentId, estimateUsd);
-		const heldUsd = reservedBudgetUsd();
-		const projectedUsd = preflight.currentUsd + heldUsd + (req.reservation === undefined ? estimateUsd : 0);
-		if (scheduling.checkCeiling(projectedUsd) !== "under") {
-			denyDispatchForBudget({ currentUsd: projectedUsd, ceilingUsd: preflight.ceilingUsd }, req.agentId, estimateUsd);
-		}
 	}
 
 	function configuredGlobalCapacity(settings: EffectiveSettings): number {
@@ -2747,7 +2710,12 @@ export function createDispatchBundle(
 		const assignmentId =
 			req.lineage?.rootRunId ?? req.runIdHint ?? `pending-${queuedAt.toString(36)}-${randomBytes(6).toString("hex")}`;
 		const requestedAt = Date.parse(timing.requestedAt ?? timing.queuedAt);
-		const deadlineAt = req.assignmentDeadlineAt ?? requestedAt + (req.routingIntent?.deadlineMs ?? 60_000);
+		const deadlineAt =
+			req.assignmentDeadlineAt ??
+			(req.routingIntent?.deadlineMs === undefined || req.routingIntent.deadlineMs === null
+				? undefined
+				: requestedAt + req.routingIntent.deadlineMs);
+		if (deadlineAt !== undefined) req.assignmentDeadlineAt = deadlineAt;
 		if (req.lineage === undefined) await registerAssignment(assignmentId);
 		// A plan's queued members keep their wave order and their reserved peak.
 		const plan =
@@ -2766,7 +2734,7 @@ export function createDispatchBundle(
 				assignmentId,
 				nodeId,
 				...(endpoint !== null && endpoint !== undefined ? { endpointKey: endpoint.key } : {}),
-				deadlineAt,
+				...(deadlineAt === undefined ? {} : { deadlineAt }),
 				...plan,
 				// A fleet's first attempt carries lineage and still owns the held
 				// reservation member that admission must transfer into its lease.
@@ -3362,6 +3330,27 @@ export function createDispatchBundle(
 		}
 	}
 
+	/** Explicit deadlines outlive queue admission and use the ordinary truthful abort path. */
+	function watchAssignmentDeadline(run: ActiveRun, callerDeadlineAt?: number): void {
+		const deadlineAt = run.req.assignmentDeadlineAt;
+		if (deadlineAt === undefined || (callerDeadlineAt !== undefined && deadlineAt >= callerDeadlineAt)) return;
+		let timer: ReturnType<typeof setTimeout> | undefined;
+		let settled = false;
+		const check = (): void => {
+			if (settled || run.aborted || run.stallKilled) return;
+			const remaining = deadlineAt - now();
+			if (remaining <= 0) {
+				contract.abort(run.runId, { cause: "timeout", detail: "timed out: explicit assignment deadline reached" });
+			} else timer = setTimeout(check, Math.min(2_147_483_647, remaining));
+		};
+		const close = (): void => {
+			settled = true;
+			clearTimeout(timer);
+		};
+		void run.promise.then(close, close);
+		check();
+	}
+
 	function startHeartbeatWatchdog(): void {
 		if (heartbeatTimer || heartbeatIntervalMs <= 0) return;
 		heartbeatTimer = setInterval(checkActiveHeartbeats, heartbeatIntervalMs);
@@ -3795,12 +3784,24 @@ export function createDispatchBundle(
 		timing: RunPhaseMarks,
 		routeDecision: RouteDecisionV1,
 		observer?: DispatchAdmissionObserver,
+		callerDeadlineAt?: number,
 	): Promise<{
 		runId: string;
 		events: AsyncIterableIterator<unknown>;
 		finalPromise: Promise<RunReceipt>;
 	}> {
 		const lifecycle = resolveAcpDelegationLifecycle(req, settings);
+		const estimate = workerToolCallHardCap(settings);
+		const budgetEnvelope = resolveToolBudgetEnvelope({
+			recipeId: req.agentId,
+			policy: { toolCalls: estimate, readReserve: 0, synthesis: true },
+			...(req.budget === undefined ? {} : { request: req.budget }),
+			hardCap: estimate,
+			hasReadTool: false,
+			retry: (req.lineage?.attempt ?? 0) > 0,
+			revision: false,
+			enforcement: "external-one-shot",
+		});
 		publishDispatchPathScope(req, lifecycle.pathScope);
 		timing.decisionCompletedAt = new Date(now()).toISOString();
 		const targetId = `delegation:${lifecycle.agentConfig.id}`;
@@ -4050,6 +4051,7 @@ export function createDispatchBundle(
 			}
 			identity = detectRunIdentity();
 			ledgerRef.update(envelope.id, {
+				budget: budgetEnvelope,
 				status: "running",
 				pid: acp.pid,
 				heartbeatAt: heartbeatIso(acp.heartbeatAt),
@@ -4085,6 +4087,7 @@ export function createDispatchBundle(
 				});
 			}
 			context.bus.emit(BusChannels.DispatchStarted, {
+				budget: budgetEnvelope,
 				runId: envelope.id,
 				agentId: req.agentId,
 				task: req.task,
@@ -4142,6 +4145,7 @@ export function createDispatchBundle(
 			rejectFinal = rej;
 		});
 		const activeRun: ActiveRun = {
+			budget: budgetEnvelope,
 			runId: envelope.id,
 			req,
 			abort: acp.abort,
@@ -4231,6 +4235,7 @@ export function createDispatchBundle(
 				...(req.plan !== undefined ? { plan: req.plan } : {}),
 				...(lifecycle.personaOverride ? { personaOverride: lifecycle.personaOverride } : {}),
 				...(lifecycle.decisionRefs ? { decisionRefs: lifecycle.decisionRefs } : {}),
+				budget: budgetEnvelope,
 				projectContext: lifecycle.projectContext,
 				rulesApplied: lifecycle.rulesApplied,
 				operatorProfileApplied: lifecycle.operatorProfileApplied,
@@ -4514,6 +4519,7 @@ export function createDispatchBundle(
 			}
 		})().then(resolveFinal, rejectFinal);
 		active.set(envelope.id, activeRun);
+		watchAssignmentDeadline(activeRun, callerDeadlineAt);
 
 		return {
 			runId: envelope.id,
@@ -4600,11 +4606,6 @@ export function createDispatchBundle(
 			return handle;
 		};
 		if (req.delegationAgentId) {
-			if (req.budget !== undefined) {
-				throw new Error(
-					"dispatch: budget envelopes cannot be enforced on an ACP delegation target; dispatch to a native or claude-sdk worker",
-				);
-			}
 			assertPlannedNodeIdentity(req, { id: "local", kind: "local" });
 			assertProtectedArtifactsEnforceable("acp-delegation", false, protectedArtifactState);
 			if (req.responseSchema !== undefined) {
@@ -4622,7 +4623,14 @@ export function createDispatchBundle(
 			}
 			await rebindReservationSlot(req, "local", null, UNKNOWN_PRICING_ADMISSION_ESTIMATE_USD, settings);
 			routeObservation = observeShadowRoute(req, undefined, settings);
-			const delegated = await dispatchAcpDelegation(req, settings, timing, routeObservation.decision, observer);
+			const delegated = await dispatchAcpDelegation(
+				req,
+				settings,
+				timing,
+				routeObservation.decision,
+				observer,
+				preparation?.deadlineAt,
+			);
 			// An ACP member never runs host verification, so it can only ever leave
 			// the barrier. It still edits the checkout, so the barrier has to wait
 			// for it; dispatch() releases it when its finalPromise settles.
@@ -5901,6 +5909,7 @@ export function createDispatchBundle(
 		})().then(resolveFinal, rejectFinal);
 
 		active.set(envelope.id, activeRun);
+		watchAssignmentDeadline(activeRun, preparation?.deadlineAt);
 
 		return attachRouteObservation({
 			runId: envelope.id,
@@ -6027,11 +6036,6 @@ export function createDispatchBundle(
 		req = validation.restore(validated.spec);
 
 		if (req.delegationAgentId) {
-			if (req.budget !== undefined) {
-				throw new Error(
-					"dispatch: budget envelopes cannot be enforced on an ACP delegation target; dispatch to a native or claude-sdk worker",
-				);
-			}
 			const protectedArtifactState = getProtectedArtifactState();
 			assertProtectedArtifactsEnforceable("acp-delegation", false, protectedArtifactState);
 			if (req.responseSchema !== undefined) {

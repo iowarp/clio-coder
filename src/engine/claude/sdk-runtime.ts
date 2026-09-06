@@ -314,7 +314,7 @@ export interface ClaudeWorkerBudgetGate {
 }
 
 /** Canonical call counter shared by the SDK's PreToolUse/canUseTool mediation seam. */
-function createClaudeWorkerBudgetGate(
+export function createClaudeWorkerBudgetGate(
 	budget: WorkerBudget,
 	onBoundary: () => void,
 	onHardCap: () => void,
@@ -330,6 +330,7 @@ function createClaudeWorkerBudgetGate(
 	let admitted = 0;
 	let locked = false;
 	const phaseDecision = (canonicalToolName: string): { kind: "allow" } | { kind: "deny"; reason: string } => {
+		if (budget.mode === "advisory") return { kind: "allow" };
 		const reserveAdmits = isReserveAdmittedTool(canonicalToolName, deliveryTools);
 		if (locked || admitted >= budget.toolCalls) {
 			// Same rule the native guard applies: the soft budget ends discovery,
@@ -365,7 +366,7 @@ function createClaudeWorkerBudgetGate(
 	return {
 		attempt(canonicalToolName) {
 			attempts += 1;
-			if (attempts > budget.hardCap) {
+			if (budget.mode !== "advisory" && attempts > budget.hardCap) {
 				onHardCap();
 				return { kind: "deny", reason: `workerToolCallCap reached (${budget.hardCap}); abort run` };
 			}
@@ -381,7 +382,7 @@ function createClaudeWorkerBudgetGate(
 			// Locking here is what ends the work phase. A delivery-capable agent is
 			// not locked at its soft budget: it still owes the files it was
 			// dispatched to write, and hardCap in attempt() is its bound.
-			if (admitted >= budget.toolCalls && deliveryTools.length === 0) {
+			if (budget.mode !== "advisory" && admitted >= budget.toolCalls && deliveryTools.length === 0) {
 				locked = true;
 				onBoundary();
 			}

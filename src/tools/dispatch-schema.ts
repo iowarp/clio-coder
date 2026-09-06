@@ -72,7 +72,7 @@ const DispatchBudgetSchema = Type.Object(
 	{
 		additionalProperties: false,
 		description:
-			"Tool-call budget within the recipe's range; retryRevision preauthorizes one ceiling for a retry or revision phase.",
+			"Advisory tool-call estimate; choose appropriate counts even above recipe recommendations. retryRevision sets a retry/revision estimate. Crossing estimates does not stop work.",
 	},
 );
 

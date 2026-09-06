@@ -199,12 +199,6 @@ function outstandingTasks(record: DispatchReservationRecord): ReservationPlanTas
 		.map(({ status: _status, consumedAt: _consumedAt, releasedAt: _releasedAt, ...task }) => task);
 }
 
-function outstandingBudget(record: DispatchReservationRecord): number {
-	return record.members
-		.filter((member) => member.status === "held" || member.status === "consumed")
-		.reduce((sum, member) => sum + member.costUpperBoundUsd, 0);
-}
-
 function allocateReservation(
 	tasks: ReadonlyArray<ReservationPlanTask>,
 	existing: ReadonlyArray<DispatchReservationRecord>,
@@ -254,14 +248,7 @@ function allocateReservation(
 			};
 		}
 	}
-	const existingBudget = activeRecords.reduce((sum, record) => sum + outstandingBudget(record), 0);
-	const projected = capacity.budget.currentUsd + existingBudget + requested.budgetUsd;
-	if (projected >= capacity.budget.ceilingUsd) {
-		return {
-			ok: false,
-			reason: `aggregate budget exceeded ($${projected.toFixed(4)} / $${capacity.budget.ceilingUsd.toFixed(4)}; batch upper bound $${requested.budgetUsd.toFixed(4)})`,
-		};
-	}
+	// Cost estimates remain recorded in the allocation, but do not deny useful work.
 	return { ok: true, allocation: requested };
 }
 
@@ -430,18 +417,6 @@ export function rebindDispatchReservationMember(input: {
 			}
 		}
 
-		const otherBudget = others.reduce((sum, entry) => sum + outstandingBudget(entry), 0);
-		const siblingBudget = record.members
-			.filter((entry) => entry !== member && (entry.status === "held" || entry.status === "consumed"))
-			.reduce((sum, entry) => sum + entry.costUpperBoundUsd, 0);
-		const projected =
-			input.capacity.budget.currentUsd + otherBudget + siblingBudget + Math.max(0, input.costUpperBoundUsd);
-		if (projected >= input.capacity.budget.ceilingUsd) {
-			throw new Error(
-				`dispatch: reservation rebind denied: aggregate budget exceeded ($${projected.toFixed(4)} / $${input.capacity.budget.ceilingUsd.toFixed(4)})`,
-			);
-		}
-
 		member.nodeId = input.nodeId;
 		if (input.endpointKey === undefined) delete member.endpointKey;
 		else member.endpointKey = input.endpointKey;
@@ -524,7 +499,7 @@ export function rollbackUnconsumedDispatchReservation(
 }
 
 function reservationOwnerAlive(ownerPid: number | undefined): boolean {
-	if (ownerPid === undefined || ownerPid === process.pid) return false;
+	if (ownerPid === undefined) return false;
 	try {
 		process.kill(ownerPid, 0);
 		return true;
@@ -541,7 +516,12 @@ function expireRecords(
 	const settledAt = new Date(nowMs).toISOString();
 	for (const record of records) {
 		if (record.status !== "active") continue;
-		if (startup ? reservationOwnerAlive(record.ownerPid) : Date.parse(record.expiresAt) > nowMs) continue;
+		// A healthy collective may outlive its planning estimate. Reclaim only orphaned owners.
+		if (
+			(reservationOwnerAlive(record.ownerPid) && !(startup && record.ownerPid === process.pid)) ||
+			(!startup && Date.parse(record.expiresAt) > nowMs)
+		)
+			continue;
 		for (const member of record.members) {
 			if (member.status === "released") continue;
 			member.status = "released";
@@ -599,10 +579,4 @@ export function planQueueSlot(
 export function getDispatchReservation(ownerId: string): DispatchReservationRecord | null {
 	const record = readStore().find((entry) => entry.ownerId === ownerId);
 	return record ? copyRecord(record) : null;
-}
-
-export function reservedBudgetUsd(): number {
-	return readStore()
-		.filter((record) => record.status === "active")
-		.reduce((sum, record) => sum + outstandingBudget(record), 0);
 }

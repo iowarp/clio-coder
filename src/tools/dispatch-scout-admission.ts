@@ -11,13 +11,10 @@ import type {
 } from "../domains/dispatch/contract.js";
 import { type ExecutionPlan, requireAgentSteps } from "../domains/dispatch/execution-plan.js";
 import { verifyReceiptIntegrity } from "../domains/dispatch/receipt-integrity.js";
-import { sameRouteIdentity } from "../domains/dispatch/route-decision.js";
 import type { RoutingIntent } from "../domains/dispatch/routing-intent.js";
 import { compileScoutTransition, type ScoutAgentBinding } from "../domains/dispatch/scout-transition.js";
 import type { RunEnvelope, RunReceipt } from "../domains/dispatch/types.js";
 import type { ResolvedDispatchPlanArtifact } from "./dispatch-plan.js";
-
-const MAX_SCOUT_PLAN_DEADLINE_MS = 3_600_000;
 
 export interface ScoutContinuationRef {
 	runId: string;
@@ -132,8 +129,8 @@ export function prepareScoutContinuation(input: {
 				: {
 						...sourceIntent,
 						posture: sourceIntent.posture === "manual" ? "balanced" : sourceIntent.posture,
-						maxCostUsd: input.costCeilingUsd,
-						deadlineMs: null,
+						maxCostUsd: sourceIntent.maxCostUsd,
+						deadlineMs: sourceIntent.deadlineMs,
 						requiredCapabilities: [...sourceIntent.requiredCapabilities],
 						failover: "approved",
 					};
@@ -164,11 +161,7 @@ export function prepareScoutContinuation(input: {
 			routingIntent,
 		});
 	}
-	const priorCostCeiling = input.source.receipt.routingIntent.maxCostUsd;
-	const effectiveCostCeiling =
-		input.authorization === "full-auto-policy" && priorCostCeiling !== null
-			? Math.min(input.costCeilingUsd, priorCostCeiling)
-			: input.costCeilingUsd;
+	const explicitCostCeiling = input.source.receipt.routingIntent.maxCostUsd;
 	const bindings: ScoutAgentBinding[] = proposals.map(({ subtask, agentSpec }) => ({
 		subtaskId: subtask.id,
 		spec: agentSpec,
@@ -192,35 +185,8 @@ export function prepareScoutContinuation(input: {
 		throw new Error("dispatch: full-auto policy does not grant every requested Scout authority");
 	}
 	const plan = transition.plan;
-	const p95ByStep = new Map(
-		proposals.map((proposal) => {
-			const selected = proposal.decision.candidateEvaluations.find((entry) =>
-				sameRouteIdentity(entry.candidate, proposal.decision.selected),
-			);
-			if (selected === undefined || selected.rejection !== null) {
-				throw new Error(`dispatch: Scout step '${proposal.subtask.id}' has no admissible latency estimate`);
-			}
-			return [proposal.subtask.id, selected.estimate.p95EndToEndMs] as const;
-		}),
-	);
-	const predictedDeadlineMs = Math.ceil(
-		plan.waves.reduce(
-			(total, wave) => total + Math.max(...wave.map((stepId) => p95ByStep.get(stepId) ?? Number.POSITIVE_INFINITY)),
-			0,
-		),
-	);
-	if (
-		!Number.isFinite(predictedDeadlineMs) ||
-		predictedDeadlineMs < 1 ||
-		predictedDeadlineMs > MAX_SCOUT_PLAN_DEADLINE_MS
-	) {
-		throw new Error("dispatch: Scout continuation exceeds the finite whole-plan deadline ceiling");
-	}
-	const priorDeadlineMs = input.source.receipt.routingIntent.deadlineMs;
-	if (input.authorization === "full-auto-policy" && priorDeadlineMs !== null && predictedDeadlineMs > priorDeadlineMs) {
-		throw new Error("dispatch: full-auto Scout continuation exceeds the previously granted deadline");
-	}
-	const deadlineMs = Math.max(priorDeadlineMs ?? 0, predictedDeadlineMs);
+	// Route estimates are advisory. Only a caller-supplied deadline grants stop authority.
+	const deadlineMs = input.source.receipt.routingIntent.deadlineMs;
 	const requests: DispatchRequest[] = [];
 	const resolutions: DispatchPlanTaskResolution[] = [];
 	const tasks = requireAgentSteps(plan.steps).map((step, index): ResolvedDispatchPlanArtifact["tasks"][number] => {
@@ -241,7 +207,7 @@ export function prepareScoutContinuation(input: {
 			cwd: input.source.envelope.cwd,
 			requestOrigin: "user",
 			agentSelection: selection,
-			routingIntent: { ...proposal.routingIntent, maxCostUsd: effectiveCostCeiling, deadlineMs, failover: "none" },
+			routingIntent: { ...proposal.routingIntent, maxCostUsd: explicitCostCeiling, deadlineMs, failover: "none" },
 			failover: "none",
 		});
 		resolutions.push(proposal.resolution);
@@ -253,7 +219,7 @@ export function prepareScoutContinuation(input: {
 			node: proposal.resolution.node.id,
 			nodeKind: proposal.resolution.node.kind,
 			...(proposal.resolution.node.host === undefined ? {} : { nodeHost: proposal.resolution.node.host }),
-			routingIntent: { ...proposal.routingIntent, maxCostUsd: effectiveCostCeiling, deadlineMs, failover: "none" },
+			routingIntent: { ...proposal.routingIntent, maxCostUsd: explicitCostCeiling, deadlineMs, failover: "none" },
 			failover: "none",
 			routeApproval: null,
 			agentSelection: selection,
@@ -269,8 +235,8 @@ export function prepareScoutContinuation(input: {
 		};
 	});
 	const aggregateCost = resolutions.reduce((sum, resolution) => sum + resolution.costUpperBoundUsd, 0);
-	if (!Number.isFinite(aggregateCost) || aggregateCost > effectiveCostCeiling) {
-		throw new Error("dispatch: Scout continuation exceeds the scheduling cost ceiling");
+	if (!Number.isFinite(aggregateCost) || (explicitCostCeiling !== null && aggregateCost > explicitCostCeiling)) {
+		throw new Error("dispatch: Scout continuation exceeds the explicit routing cost ceiling");
 	}
 	return {
 		artifact: {
@@ -285,7 +251,7 @@ export function prepareScoutContinuation(input: {
 			maxWorkers: plan.maxWorkers,
 			onFailure: plan.onFailure,
 			tasks,
-			costCeilingUsd: effectiveCostCeiling,
+			costCeilingUsd: input.costCeilingUsd,
 			deadlineMs,
 		},
 		requests,

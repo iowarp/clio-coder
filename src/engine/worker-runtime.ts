@@ -442,6 +442,7 @@ export function startWorkerRun(input: WorkerRunInput, emit: WorkerEventEmit): Wo
 	const loopGuardRegistration = createLoopGuardRegistration({
 		safety,
 		toolCallCap: workerBudget.hardCap,
+		toolBudgetAdvisory: workerBudget.mode === "advisory",
 		toolCallSoftLimit: workerBudget.toolCalls,
 		// A worker's blocks all land in one run-long bucket, so the bound on
 		// them is a statement about this run's length, not about a turn.
@@ -724,8 +725,9 @@ export function startWorkerRun(input: WorkerRunInput, emit: WorkerEventEmit): Wo
 							stopAfterToolResultCallId = null;
 						}
 					}
-					const revisionToolsAvailable = resultContractRevisionActive && !synthesisToolLock;
-					// A repair without preauthorized growth remains terminal and text-only.
+					const revisionToolsAvailable =
+						(workerBudget.mode === "advisory" || resultContractRevisionActive) && !synthesisToolLock;
+					// Legacy enforced budgets need preauthorized growth to retain repair tools.
 					if (!revisionToolsAvailable) synthesisToolLock = true;
 					// Delivered as a paired tool exchange, never a user turn. Templates
 					// that key history rendering off the last `user` message re-render

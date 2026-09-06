@@ -227,9 +227,9 @@ function errorEvents(messageText: string): AgentEvent[] {
 }
 
 export function startAcpDelegationRun(input: AcpDelegationRunInput): AcpDelegationRunHandle {
-	// Validated settings always populate these values. Keep the public runtime
-	// boundary safe for direct callers too: omission must not turn a silent ACP
-	// peer into an unbounded request.
+	// Connection faults stay bounded. Elapsed turn time is not a progress signal;
+	// only an explicit positive timeout stops a healthy turn. Dispatch owns its
+	// event-inactivity watchdog and cancellation/process cleanup.
 	const connectTimeoutMs = input.agent.connectTimeoutMs ?? DEFAULT_DELEGATION_CONNECT_TIMEOUT_MS;
 	const turnTimeoutMs = input.agent.turnTimeoutMs ?? DEFAULT_DELEGATION_TURN_TIMEOUT_MS;
 	const now = input.now ?? Date.now;
@@ -354,7 +354,7 @@ export function startAcpDelegationRun(input: AcpDelegationRunInput): AcpDelegati
 					sessionId,
 					prompt: [{ type: "text", text: flattenPrompt(input) }],
 				},
-				turnTimeoutMs,
+				turnTimeoutMs === 0 ? undefined : turnTimeoutMs,
 			);
 			// ACP v1 has no usage field on PromptResponse. Clio servers report it in
 			// _meta; other agents (Copilot/Codex/OpenCode) report nothing here, so usage

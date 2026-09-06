@@ -46,7 +46,7 @@ export interface CapacityAdmissionController {
 		assignmentId: string;
 		nodeId: string;
 		endpointKey?: string;
-		deadlineAt: number;
+		deadlineAt?: number;
 		priority?: number;
 		planId?: string;
 		planOrder?: number;
@@ -283,7 +283,7 @@ export function createCapacityAdmissionController(options: {
 					assignmentId: input.assignmentId,
 					priority: input.priority ?? 0,
 					queuedAt,
-					deadlineAt: input.deadlineAt,
+					...(input.deadlineAt === undefined ? {} : { deadlineAt: input.deadlineAt }),
 					planId: input.planId ?? null,
 					planOrder: input.planOrder ?? null,
 					value: () =>
@@ -313,7 +313,7 @@ export function createCapacityAdmissionController(options: {
 						nodeId: input.nodeId,
 						...(input.endpointKey !== undefined ? { endpointKey: input.endpointKey } : {}),
 						waitedMs: now() - queuedAt,
-						overdueAtQueueMs: queuedAt - input.deadlineAt,
+						overdueAtQueueMs: input.deadlineAt === undefined ? 0 : queuedAt - input.deadlineAt,
 						queueDepth: queue.size(),
 						limits: options.limits(),
 						usage: options.usage?.() ?? capacityLeaseUsage({ nowMs: now() }),

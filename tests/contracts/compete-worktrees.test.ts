@@ -78,12 +78,20 @@ for (const agent of ["scout", "coder"] as const) {
 		settings.fleet.rosters = {
 			panel: { members: ["a", "b", "judge"].map((label) => ({ label, target: "only-route", model: "fixture-model" })) },
 		};
-		const context = dispatchStubContext({ settings });
+		const context = dispatchStubContext({
+			settings,
+			scheduling: {
+				preflight: () => ({ verdict: "over", currentUsd: 100, ceilingUsd: 0.01 }),
+				checkCeiling: () => "over",
+			},
+		});
 		const specs = context.getContract<AgentsContract>("agents")?.listSpecs() ?? [];
 		strictEqual(specs.find((spec) => spec.id === "scout")?.capabilityClass, "read-only");
 		strictEqual(specs.find((spec) => spec.id === "coder")?.capabilityClass, "workspace-edit");
 		const bundle = makeDispatchBundle(context, {
 			spawnWorker: (spec, options) => {
+				strictEqual(spec.budget.mode, "advisory");
+				strictEqual(spec.budget.toolCalls, 1000);
 				const cwd = options?.cwd;
 				ok(cwd);
 				const judge = spec.agentId === "verifier";
@@ -170,6 +178,7 @@ for (const agent of ["scout", "coder"] as const) {
 				task: writer ? "Update the fixture files and project profile." : "Inspect tracked.txt and explain its contents.",
 				...(writer ? {} : { intent: { read_roots: ["tracked.txt"], write_roots: [], expected_outputs: [] } }),
 				mode: "compete",
+				budget: { toolCalls: 1000, readReserve: 10 },
 				candidates: 2,
 				cwd: root,
 			};

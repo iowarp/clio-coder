@@ -7,7 +7,7 @@ export interface DispatchBudgetPhase {
 	readReserve: number;
 }
 
-/** Typed invocation request. The ceiling preauthorizes growth on a later phase. */
+/** Typed advisory invocation estimate. A later phase may use a different estimate. */
 export interface DispatchBudgetRequest extends DispatchBudgetPhase {
 	retryRevision?: DispatchBudgetPhase;
 }
@@ -31,8 +31,10 @@ export interface RunToolBudgetEnvelope {
 	enforcement:
 		| {
 				classification: "native-per-tool";
-				perTool: "enforced";
-				clioControls: ReadonlyArray<"tool-calls" | "read-reserve" | "synthesis" | "attempt-cap">;
+				perTool: "enforced" | "advisory";
+				clioControls: ReadonlyArray<
+					"tool-calls" | "read-reserve" | "synthesis" | "attempt-cap" | "tool-observation" | "cancellation"
+				>;
 		  }
 		| {
 				classification: "external-one-shot";
@@ -50,6 +52,7 @@ export interface RunToolBudgetEnvelope {
 	reasons: ReadonlyArray<BudgetEnvelopeReason>;
 }
 
+const ADVISORY_CLIO_CONTROLS = ["tool-observation", "cancellation"] as const;
 const NATIVE_CLIO_CONTROLS = ["tool-calls", "read-reserve", "synthesis", "attempt-cap"] as const;
 const EXTERNAL_CLIO_CONTROLS = [
 	"single-launch",
@@ -129,61 +132,8 @@ function freezeEnvelope(envelope: RunToolBudgetEnvelope): RunToolBudgetEnvelope 
 	return Object.freeze(envelope);
 }
 
-function phaseWithin(candidate: DispatchBudgetPhase, maximum: AgentBudgetPhase): boolean {
-	return candidate.toolCalls <= maximum.toolCalls && candidate.readReserve <= maximum.readReserve;
-}
-
 function samePhase(left: DispatchBudgetPhase, right: AgentBudgetPhase): boolean {
 	return left.toolCalls === right.toolCalls && left.readReserve === right.readReserve;
-}
-
-function assertRequestAdmitted(input: { request: DispatchBudgetRequest; policy: AgentBudget; hardCap: number }): void {
-	const { request, policy, hardCap } = input;
-	const authoredMaximum = policy.maximum ?? policy;
-	if (policy.maximum === undefined && !samePhase(request, policy)) {
-		throw new BudgetAdmissionError(
-			"exact-recipe-policy",
-			`the recipe pins ${policy.toolCalls} tool calls with a read reserve of ${policy.readReserve}`,
-		);
-	}
-	if (!phaseWithin(request, authoredMaximum)) {
-		throw new BudgetAdmissionError(
-			"recipe-maximum",
-			`the requested phase ${request.toolCalls}/${request.readReserve} exceeds recipe maximum ${authoredMaximum.toolCalls}/${authoredMaximum.readReserve}`,
-		);
-	}
-	if (request.toolCalls > hardCap) {
-		throw new BudgetAdmissionError(
-			"global-cap",
-			`the requested ${request.toolCalls} tool calls exceed the operator cap of ${hardCap}`,
-		);
-	}
-	const ceiling = request.retryRevision;
-	if (ceiling === undefined) return;
-	if (ceiling.toolCalls < request.toolCalls || ceiling.readReserve < request.readReserve) {
-		throw new BudgetAdmissionError(
-			"ceiling-below-request",
-			`retryRevision ${ceiling.toolCalls}/${ceiling.readReserve} must not be smaller than the requested phase ${request.toolCalls}/${request.readReserve}`,
-		);
-	}
-	if (policy.maximum === undefined && !samePhase(ceiling, policy)) {
-		throw new BudgetAdmissionError(
-			"exact-recipe-policy",
-			`the recipe pins ${policy.toolCalls} tool calls with a read reserve of ${policy.readReserve}`,
-		);
-	}
-	if (!phaseWithin(ceiling, authoredMaximum)) {
-		throw new BudgetAdmissionError(
-			"recipe-maximum",
-			`retryRevision ${ceiling.toolCalls}/${ceiling.readReserve} exceeds recipe maximum ${authoredMaximum.toolCalls}/${authoredMaximum.readReserve}`,
-		);
-	}
-	if (ceiling.toolCalls > hardCap) {
-		throw new BudgetAdmissionError(
-			"global-cap",
-			`retryRevision ${ceiling.toolCalls} exceeds the operator cap of ${hardCap}`,
-		);
-	}
 }
 
 export interface ResolveToolBudgetEnvelopeInput {
@@ -202,10 +152,14 @@ export function resolveToolBudgetEnvelope(input: ResolveToolBudgetEnvelopeInput)
 	if (!Number.isSafeInteger(input.hardCap) || input.hardCap <= 0) {
 		throw new Error("dispatch: worker tool-call cap must be a positive safe integer");
 	}
-	if (input.request !== undefined)
-		assertRequestAdmitted({ request: input.request, policy: input.policy, hardCap: input.hardCap });
 
 	const request = input.request === undefined ? null : cloneDispatchBudgetRequest(input.request);
+	if (
+		request?.retryRevision &&
+		(request.retryRevision.toolCalls < request.toolCalls || request.retryRevision.readReserve < request.readReserve)
+	) {
+		throw new BudgetAdmissionError("ceiling-below-request", "retryRevision must not be smaller than the requested phase");
+	}
 	const base = request ?? input.policy;
 	const reasons: BudgetEnvelopeReason[] = [];
 	let selected: DispatchBudgetPhase = base;
@@ -216,15 +170,7 @@ export function resolveToolBudgetEnvelope(input: ResolveToolBudgetEnvelopeInput)
 			selected = ceiling;
 			reasons.push({
 				code: phaseKind === "retry" ? "retry-growth-authorized" : "revision-growth-authorized",
-				detail: `${phaseKind} phase grew from ${base.toolCalls}/${base.readReserve} to the preauthorized ceiling ${ceiling.toolCalls}/${ceiling.readReserve}`,
-			});
-		} else {
-			reasons.push({
-				code: phaseKind === "retry" ? "retry-growth-denied" : "revision-growth-denied",
-				detail:
-					ceiling === undefined
-						? `${phaseKind} phase retained ${base.toolCalls}/${base.readReserve} because the original request declared no ceiling`
-						: `${phaseKind} phase retained ${base.toolCalls}/${base.readReserve} because the declared ceiling did not authorize growth`,
+				detail: `${phaseKind} phase grew from ${base.toolCalls}/${base.readReserve} to the advisory estimate ${ceiling.toolCalls}/${ceiling.readReserve}`,
 			});
 		}
 	}
@@ -232,18 +178,11 @@ export function resolveToolBudgetEnvelope(input: ResolveToolBudgetEnvelopeInput)
 	if (revisionCeiling !== undefined && !samePhase(revisionCeiling, selected)) {
 		reasons.push({
 			code: "revision-growth-authorized",
-			detail: `a result-contract revision may grow from ${selected.toolCalls}/${selected.readReserve} to the preauthorized ceiling ${revisionCeiling.toolCalls}/${revisionCeiling.readReserve}`,
+			detail: `a result-contract revision may grow from ${selected.toolCalls}/${selected.readReserve} to the advisory estimate ${revisionCeiling.toolCalls}/${revisionCeiling.readReserve}`,
 		});
 	}
 
-	let toolCalls = selected.toolCalls;
-	if (toolCalls > input.hardCap) {
-		reasons.push({
-			code: "global-cap-clamp",
-			detail: `tool calls were clamped from ${toolCalls} to the operator cap of ${input.hardCap}`,
-		});
-		toolCalls = input.hardCap;
-	}
+	const toolCalls = selected.toolCalls;
 	let readReserve = selected.readReserve;
 	if (!input.hasReadTool && readReserve > 0) {
 		reasons.push({
@@ -285,8 +224,8 @@ export function resolveToolBudgetEnvelope(input: ResolveToolBudgetEnvelopeInput)
 					}
 				: {
 						classification: "native-per-tool",
-						perTool: "enforced",
-						clioControls: [...NATIVE_CLIO_CONTROLS],
+						perTool: "advisory",
+						clioControls: [...ADVISORY_CLIO_CONTROLS],
 					},
 		policy: {
 			recipeId: input.recipeId,
@@ -300,6 +239,7 @@ export function resolveToolBudgetEnvelope(input: ResolveToolBudgetEnvelopeInput)
 		},
 		request,
 		effective: {
+			mode: "advisory",
 			toolCalls,
 			readReserve,
 			synthesis: input.policy.synthesis,
@@ -312,6 +252,8 @@ export function resolveToolBudgetEnvelope(input: ResolveToolBudgetEnvelopeInput)
 
 export function formatBudgetPolicy(envelope: RunToolBudgetEnvelope): string {
 	const policy = envelope.policy;
+	if (envelope.effective.mode === "advisory")
+		return `${policy.recipeId} advisory default ${policy.default.toolCalls}/${policy.default.readReserve}, recommended max ${policy.maximum.toolCalls}/${policy.maximum.readReserve}`;
 	const range = policy.exact
 		? `exact ${policy.default.toolCalls}/${policy.default.readReserve}`
 		: `default ${policy.default.toolCalls}/${policy.default.readReserve}, max ${policy.maximum.toolCalls}/${policy.maximum.readReserve}`;
@@ -322,6 +264,8 @@ export function formatBudgetRequest(envelope: RunToolBudgetEnvelope): string {
 	const request = envelope.request;
 	if (request === null) return "recipe default";
 	const ceiling = request.retryRevision;
+	if (envelope.effective.mode === "advisory")
+		return `${request.toolCalls}/${request.readReserve} advisory${ceiling ? `, retry/revision estimate ${ceiling.toolCalls}/${ceiling.readReserve}` : ""}`;
 	return ceiling === undefined
 		? `${request.toolCalls}/${request.readReserve}, no retry/revision growth`
 		: `${request.toolCalls}/${request.readReserve}, retry/revision ceiling ${ceiling.toolCalls}/${ceiling.readReserve}`;
@@ -335,8 +279,10 @@ export function formatEffectiveBudget(envelope: RunToolBudgetEnvelope): string {
 	const enforcement =
 		envelope.enforcement.classification === "external-one-shot"
 			? "external one-shot; per-tool unobserved/not enforced"
-			: "native per-tool enforced";
-	return `${budget.toolCalls}/${budget.readReserve}${revision}, lifetime cap ${budget.hardCap}, synthesis=${budget.synthesis ? "on" : "off"}; ${enforcement}`;
+			: envelope.enforcement.perTool === "advisory"
+				? "native per-tool observed/advisory"
+				: "native per-tool enforced";
+	return `${budget.toolCalls}/${budget.readReserve}${revision}, ${budget.mode === "advisory" ? "advisory baseline" : "lifetime cap"} ${budget.hardCap}, synthesis=${budget.synthesis ? "on" : "off"}; ${enforcement}`;
 }
 
 export function formatBudgetReasons(envelope: RunToolBudgetEnvelope): string {
@@ -391,15 +337,17 @@ export function cloneRunToolBudgetEnvelope(value: unknown): RunToolBudgetEnvelop
 		) {
 			return undefined;
 		}
+		if (value.effective.mode !== undefined && value.effective.mode !== "advisory" && value.effective.mode !== "enforced")
+			return undefined;
 		if (
 			maximum.toolCalls < defaultPhase.toolCalls ||
 			maximum.readReserve < defaultPhase.readReserve ||
 			(value.policy.exact && !samePhase(maximum, defaultPhase)) ||
-			effectivePhase.toolCalls > value.effective.hardCap ||
+			(value.effective.mode !== "advisory" && effectivePhase.toolCalls > value.effective.hardCap) ||
 			value.effective.synthesis !== value.policy.default.synthesis ||
 			(revision !== undefined &&
 				(revision.toolCalls < effectivePhase.toolCalls ||
-					revision.toolCalls > value.effective.hardCap ||
+					(value.effective.mode !== "advisory" && revision.toolCalls > value.effective.hardCap) ||
 					(revision.toolCalls === effectivePhase.toolCalls && revision.readReserve <= effectivePhase.readReserve)))
 		) {
 			return undefined;
@@ -445,6 +393,17 @@ export function cloneRunToolBudgetEnvelope(value: unknown): RunToolBudgetEnvelop
 			}
 			if (
 				value.enforcement.classification === "native-per-tool" &&
+				value.enforcement.perTool === "advisory" &&
+				value.effective.mode === "advisory" &&
+				isExactStringArray(value.enforcement.clioControls, ADVISORY_CLIO_CONTROLS)
+			)
+				return {
+					classification: "native-per-tool" as const,
+					perTool: "advisory" as const,
+					clioControls: [...ADVISORY_CLIO_CONTROLS],
+				};
+			if (
+				value.enforcement.classification === "native-per-tool" &&
 				value.enforcement.perTool === "enforced" &&
 				isExactStringArray(value.enforcement.clioControls, NATIVE_CLIO_CONTROLS)
 			) {
@@ -457,6 +416,11 @@ export function cloneRunToolBudgetEnvelope(value: unknown): RunToolBudgetEnvelop
 			return null;
 		})();
 		if (enforcement === null) return undefined;
+		if (
+			enforcement.classification === "native-per-tool" &&
+			(enforcement.perTool === "advisory") !== (value.effective.mode === "advisory")
+		)
+			return undefined;
 		return freezeEnvelope({
 			version: 1,
 			enforcement,
@@ -468,6 +432,7 @@ export function cloneRunToolBudgetEnvelope(value: unknown): RunToolBudgetEnvelop
 			},
 			request,
 			effective: {
+				...(value.effective.mode === undefined ? {} : { mode: value.effective.mode as "advisory" | "enforced" }),
 				...effectivePhase,
 				synthesis: value.effective.synthesis,
 				hardCap: value.effective.hardCap,

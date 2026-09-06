@@ -441,6 +441,8 @@ export interface CreateLoopGuardRegistrationOptions {
 	 * operator who can intervene; workers do not).
 	 */
 	toolCallCap?: number;
+	/** Observe estimated work without disabling tools; fault-loop detection remains active. */
+	toolBudgetAdvisory?: boolean;
 	/**
 	 * Worker only: successful exploration attempts allowed before a graceful,
 	 * text-only synthesis phase. Unlike {@link toolCallCap}, crossing this soft
@@ -523,8 +525,10 @@ export interface LoopGuardRegistration extends MiddlewareHookRegistration {
 
 export function createLoopGuardRegistration(options: CreateLoopGuardRegistrationOptions): LoopGuardRegistration {
 	const budget = options.turnBlockBudget ?? INTERACTIVE_LOOP_BLOCK_BUDGET;
-	const cap = options.toolCallCap;
+	const cap = options.toolBudgetAdvisory ? undefined : options.toolCallCap;
+	let advisoryEmitted = false;
 	let softLimit =
+		!options.toolBudgetAdvisory &&
 		options.toolCallSoftLimit !== undefined &&
 		Number.isSafeInteger(options.toolCallSoftLimit) &&
 		options.toolCallSoftLimit > 0 &&
@@ -561,7 +565,8 @@ export function createLoopGuardRegistration(options: CreateLoopGuardRegistration
 	 * has no cap and no bound here; it has an operator instead.
 	 */
 	let deniedAttempts = 0;
-	const denialBudget = cap === undefined ? undefined : Math.max(cap, WIDE_BATCH_DENIAL_FLOOR);
+	const denialBudget =
+		options.toolCallCap === undefined ? undefined : Math.max(options.toolCallCap, WIDE_BATCH_DENIAL_FLOOR);
 	const boundRunDenials = (
 		effects: ReadonlyArray<MiddlewareEffect>,
 		input: MiddlewareHookInput,
@@ -948,6 +953,18 @@ export function createLoopGuardRegistration(options: CreateLoopGuardRegistration
 				recordSuccessfulResult(input);
 				recordResultForStagnation(input);
 				const effects = [...crossArgumentResultEffects(input)];
+				if (
+					options.toolBudgetAdvisory &&
+					!advisoryEmitted &&
+					count >= (options.toolCallSoftLimit ?? options.toolCallCap ?? Infinity)
+				) {
+					advisoryEmitted = true;
+					effects.push({
+						kind: "annotate_tool_result",
+						message: `Advisory tool estimate reached (${count} calls). Reassess remaining work and finish the assignment; tools remain available. Explicit task requirements still apply.`,
+						severity: "warn",
+					});
+				}
 				if (
 					softReadReserveEntered &&
 					softLockout === null &&

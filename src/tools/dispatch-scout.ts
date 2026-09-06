@@ -186,8 +186,7 @@ export async function runScoutContinuationPlan<T, S>(input: {
 	): Promise<{ receipt: RunReceipt; summary: S }>;
 	complete(receipt: RunReceipt, summary: S): { value: T; integrityValid: boolean };
 }): Promise<{ runs: T[]; skipped: ReadonlyArray<string> }> {
-	if (input.artifact.deadlineMs === null) throw new Error("Scout dependency plan has no whole-plan deadline");
-	const assignmentDeadlineAt = Date.now() + input.artifact.deadlineMs;
+	const assignmentDeadlineAt = input.artifact.deadlineMs === null ? undefined : Date.now() + input.artifact.deadlineMs;
 	const completedByStep = new Map<string, T>();
 	const byStep = new Map(
 		input.artifact.tasks.map((task, index) => [task.stepId, { task, request: input.requests[index] }]),
@@ -234,7 +233,7 @@ export async function runScoutContinuationPlan<T, S>(input: {
 					...bound.request,
 					predecessorHandoffs: handoffs,
 					reservation,
-					assignmentDeadlineAt,
+					...(assignmentDeadlineAt === undefined ? {} : { assignmentDeadlineAt }),
 					...(ledger !== undefined ? { ledger } : {}),
 				};
 				const handle = await input.dispatch.dispatch(request);

@@ -225,7 +225,7 @@ it("native retry admission reads occupancy changed under the held lock and prese
 	}
 });
 
-it("retry rebind includes spending that occurred while waiting without changing the reserved budget", {
+it("retry rebind records its new estimate despite advisory session spend", {
 	timeout: 30_000,
 }, async () => {
 	const fixture = await retryFixture();
@@ -238,9 +238,13 @@ it("retry rebind includes spending that occurred while waiting without changing 
 		await lock.finished;
 		const outcome = await pending;
 		ok(outcome instanceof Error);
-		match(outcome.message, /reservation rebind denied: aggregate budget exceeded \(\$5\.2000 \/ \$5\.0000\)/u);
-		strictEqual(fixture.starts(), 0);
-		deepStrictEqual(fixture.reservations.get(fixture.before.ownerId), fixture.before);
+		match(outcome.message, /fixture reached worker launch/u);
+		strictEqual(fixture.starts(), 1);
+		strictEqual(
+			fixture.reservations.get(fixture.before.ownerId)?.members.find((member) => member.memberId === "retry")
+				?.costUpperBoundUsd,
+			1,
+		);
 	} finally {
 		lock.release();
 		await lock.finished;

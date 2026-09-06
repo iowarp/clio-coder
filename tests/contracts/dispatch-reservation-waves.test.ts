@@ -10,6 +10,7 @@ import {
 	releaseCapacityLease,
 } from "../../src/domains/dispatch/capacity-lease.js";
 import {
+	cleanupDispatchReservations,
 	createDispatchReservation,
 	getDispatchReservation,
 	releaseDispatchReservation,
@@ -292,4 +293,13 @@ it("an unreserved lease cannot borrow another owner's consumed member when chang
 	);
 	deepStrictEqual(durableBytes(), before);
 	releaseCapacityLease(outsider.leaseId);
+});
+
+it("keeps healthy collective reservations beyond their advisory lifetime", () => {
+	const reservation = reserve();
+	strictEqual(cleanupDispatchReservations({ nowMs: Date.parse(reservation.expiresAt) + 1 }), 0);
+	strictEqual(getDispatchReservation(reservation.ownerId)?.status, "active");
+	const first = transfer(reservation.ownerId, "task-1");
+	releaseCapacityLease(first.leaseId);
+	releaseDispatchReservation(reservation.ownerId);
 });

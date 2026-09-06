@@ -787,6 +787,7 @@ async function runReviewGated(
 			}
 			const reviewerRequest: DispatchRequest = {
 				agentId: gateDeciderAgentId(review.reviewer),
+				...(base.budget === undefined ? {} : { budget: base.budget }),
 				executionRole: "reviewer",
 				task: renderDispatchReviewerTask(base.task, builder.receipt.runId, cycle, base.intent),
 				systemPrompt: REVIEWER_GATE_PROMPT,
@@ -1362,6 +1363,7 @@ async function runCompete(
 			}
 			const judgeRequest: DispatchRequest = {
 				agentId: gateDeciderAgentId(compete.judge?.agent),
+				...(base.budget === undefined ? {} : { budget: base.budget }),
 				executionRole: "judge",
 				task: judgeTask(base.task, worktrees, stats),
 				systemPrompt: JUDGE_GATE_PROMPT,
@@ -2005,6 +2007,7 @@ async function runCouncil(
 		const finalRuns = [...prior.values()];
 		const judgeRequest: DispatchRequest = {
 			agentId: council.judge?.agent ?? base.agentId,
+			...(base.budget === undefined ? {} : { budget: base.budget }),
 			executionRole: "judge",
 			task: `Synthesize the council answers for this task:\n\n${base.task}`,
 			briefing: boundedCouncilBriefing(
@@ -2312,12 +2315,7 @@ export async function runDispatchTool(
 	try {
 		if (resolvedPlan?.topology === "fleet") {
 			const executionPlan = admissionState.trustedExecutionPlans.get(args);
-			if (
-				executionPlan === undefined ||
-				resolvedPlan.source === null ||
-				resolvedPlan.deadlineMs === null ||
-				reservationOwnerId === undefined
-			) {
+			if (executionPlan === undefined || resolvedPlan.source === null || reservationOwnerId === undefined) {
 				return { kind: "error", message: "dispatch: trusted Scout dependency plan is unavailable" };
 			}
 			if (executionPlan.hash !== resolvedPlan.source.executionPlanHash) {

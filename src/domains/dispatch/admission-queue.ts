@@ -5,7 +5,8 @@ export interface AdmissionQueueRequest<T> {
 	assignmentId: string;
 	priority: number;
 	queuedAt: number;
-	deadlineAt: number;
+	/** Explicit caller deadline; absent means wait until capacity, cancellation, or a fault. */
+	deadlineAt?: number;
 	planId: string | null;
 	planOrder: number | null;
 	value: T;
@@ -47,6 +48,7 @@ export interface AdmissionQueue<T> {
 }
 export function createAdmissionQueue<T>(options: {
 	maxSize: number;
+	/** Legacy planning estimate; never shortens an explicit deadline or stops a healthy wait. */
 	finiteCeilingMs: number;
 	/** Reserved concurrent peak for a plan, resolved when the plan is seen. */
 	reservedPlanPeak?: (planId: string) => number | undefined;
@@ -67,7 +69,7 @@ export function createAdmissionQueue<T>(options: {
 			request: AdmissionQueueRequest<T>;
 			resolve: (outcome: AdmissionQueueOutcome<T>) => void;
 			reject: (error: Error) => void;
-			timer: ReturnType<typeof setTimeout>;
+			timer: ReturnType<typeof setTimeout> | undefined;
 		}
 	>();
 	const remove = (requestId: string, state: "canceled" | "timed_out"): boolean => {
@@ -85,12 +87,22 @@ export function createAdmissionQueue<T>(options: {
 				return Promise.reject(new Error(`dispatch: admission queue full (${entries.size}/${options.maxSize})`));
 			if (entries.has(request.requestId))
 				return Promise.reject(new Error(`dispatch: duplicate queued request '${request.requestId}'`));
-			const effectiveDeadline = Math.min(request.deadlineAt, request.queuedAt + options.finiteCeilingMs);
-			if (!Number.isFinite(effectiveDeadline))
+			const effectiveDeadline = request.deadlineAt;
+			if (effectiveDeadline !== undefined && !Number.isFinite(effectiveDeadline))
 				return Promise.reject(new Error("dispatch: queued request requires a finite deadline"));
 			return new Promise((resolve, reject) => {
-				const bounded = { ...request, deadlineAt: effectiveDeadline };
-				const timer = setTimeout(() => remove(request.requestId, "timed_out"), Math.max(0, effectiveDeadline - now()));
+				const bounded = { ...request };
+				const expire = (): void => {
+					const entry = entries.get(request.requestId);
+					if (!entry || effectiveDeadline === undefined) return;
+					const remaining = effectiveDeadline - now();
+					if (remaining <= 0) remove(request.requestId, "timed_out");
+					else entry.timer = setTimeout(expire, Math.min(2_147_483_647, remaining));
+				};
+				const timer =
+					effectiveDeadline === undefined
+						? undefined
+						: setTimeout(expire, Math.min(2_147_483_647, Math.max(0, effectiveDeadline - now())));
 				entries.set(request.requestId, { request: bounded, resolve, reject, timer });
 			});
 		},
@@ -107,7 +119,7 @@ export function createAdmissionQueue<T>(options: {
 		},
 		admitNext(nowMs = now(), canAdmit = () => true) {
 			for (const request of orderAdmissionRequests([...entries.values()].map((entry) => entry.request))) {
-				if (request.deadlineAt <= nowMs) {
+				if (request.deadlineAt !== undefined && request.deadlineAt <= nowMs) {
 					remove(request.requestId, "timed_out");
 					continue;
 				}

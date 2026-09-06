@@ -133,6 +133,7 @@ for (const scenario of [
 		try {
 			const run = await bundle.contract.dispatch({
 				agentId: "usage-fixture",
+				budget: { toolCalls: 1000, readReserve: 10 },
 				task: "Inspect the fixture input.",
 				executionRole: "researcher",
 				requestOrigin: "internal",
@@ -140,6 +141,9 @@ for (const scenario of [
 			const receipt = await run.finalPromise;
 			const envelope = bundle.contract.getRun(run.runId);
 			ok(envelope?.receiptPath);
+			strictEqual(envelope.budget?.effective.mode, "advisory");
+			strictEqual(receipt.budget?.enforcement.perTool, "unobserved-not-enforced");
+			strictEqual(receipt.budget?.effective.toolCalls, 1000);
 			const persisted = JSON.parse(readFileSync(envelope.receiptPath, "utf8")) as RunReceipt;
 			deepStrictEqual(persisted, receipt);
 			const stateDir = process.env.CLIO_CODER_STATE_DIR;

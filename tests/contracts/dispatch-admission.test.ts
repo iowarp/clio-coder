@@ -577,8 +577,11 @@ describe("dispatch admission boundary", () => {
 		const undeclared = spawn(undeclaredRuntime);
 		await undeclared.bundle.extension.start();
 		try {
-			await rejects(undeclared.bundle.contract.dispatch(request), /cannot enforce an explicit dispatch budget/u);
-			strictEqual(undeclared.spawned(), 0);
+			const run = await undeclared.bundle.contract.dispatch({ ...request, budget: { toolCalls: 1000, readReserve: 10 } });
+			await run.finalPromise;
+			strictEqual(undeclared.spawned(), 1);
+			strictEqual(undeclared.specs[0]?.budget.mode, "advisory");
+			strictEqual(undeclared.specs[0]?.budget.toolCalls, 1000);
 		} finally {
 			await undeclared.bundle.extension.stop?.();
 		}

@@ -282,11 +282,11 @@ export type DelegationToolGovernance = "clio-coder-policy" | "agent-managed" | "
 
 /**
  * Application-level ACP request bounds. Unlike the separate stall watchdog,
- * these values never use zero as a disable sentinel: connect, turn, and
- * permission requests must always settle within a finite window.
+ * connect and permission requests remain finite. A turn has no elapsed deadline
+ * unless the operator supplies a positive timeout; event-inactivity cleanup is separate.
  */
 export const DEFAULT_DELEGATION_CONNECT_TIMEOUT_MS = 30_000;
-export const DEFAULT_DELEGATION_TURN_TIMEOUT_MS = 300_000;
+export const DEFAULT_DELEGATION_TURN_TIMEOUT_MS = 0;
 export const DEFAULT_DELEGATION_PERMISSION_TIMEOUT_MS = 120_000;
 
 export interface DelegationAgentConfig {
@@ -298,6 +298,7 @@ export interface DelegationAgentConfig {
 	cwd?: string;
 	env?: Record<string, string>;
 	connectTimeoutMs?: number;
+	/** Explicit elapsed turn deadline; 0 (default) leaves work to completion/stall/cancel. */
 	turnTimeoutMs?: number;
 	permissionTimeoutMs?: number;
 	/**
@@ -685,7 +686,7 @@ integrations:
     entries: []
     defaults:
       connectTimeoutMs: 30000
-      turnTimeoutMs: 300000
+      turnTimeoutMs: 0
       permissionTimeoutMs: 120000
       toolGovernance: clio-coder-policy
   runtimePlugins: []

@@ -997,7 +997,10 @@ function validateExternalAgent(
 	}
 	for (const key of ["connectTimeoutMs", "turnTimeoutMs", "permissionTimeoutMs"] as const) {
 		if (!(key in value)) continue;
-		const parsed = expectInteger(issues, `${path}.${key}`, value[key], { min: 1, max: MAX_TIMER_DELAY_MS });
+		const parsed = expectInteger(issues, `${path}.${key}`, value[key], {
+			min: key === "turnTimeoutMs" ? 0 : 1,
+			max: MAX_TIMER_DELAY_MS,
+		});
 		if (parsed !== undefined) agent[key] = parsed;
 	}
 	if ("stallTimeoutMs" in value) {
@@ -1900,7 +1903,7 @@ export function validateSettings(raw: unknown): SettingsValidationResult {
 							for (const key of ["connectTimeoutMs", "turnTimeoutMs", "permissionTimeoutMs"] as const) {
 								if (!(key in defaults)) continue;
 								const parsed = expectInteger(issues, `integrations.externalAgents.defaults.${key}`, defaults[key], {
-									min: 1,
+									min: key === "turnTimeoutMs" ? 0 : 1,
 									max: MAX_TIMER_DELAY_MS,
 								});
 								if (parsed !== undefined) settings.integrations.externalAgents.defaults[key] = parsed;

@@ -132,7 +132,7 @@ export function planActiveRoute(
 		version: 1,
 		decision,
 		totalCostUpperBoundUsd: perAttemptUpperBoundUsd * input.maxAttempts,
-		deadlineMs: input.request.routingIntent?.deadlineMs ?? 60_000,
+		deadlineMs: input.request.routingIntent?.deadlineMs ?? null,
 		maxAttempts: input.maxAttempts,
 	};
 	assertApprovedAssignmentRoute(approval);
@@ -163,8 +163,9 @@ export function consumeActiveRouteApproval<T>(
 		throw new Error("dispatch: active recovery requires a resolver-authenticated attempt decision");
 	}
 	const request = applyActiveRouteSelection(input.request, decision);
-	if (input.request.lineage === undefined) {
-		request.assignmentDeadlineAt = Date.parse(input.requestedAt) + approval.deadlineMs;
+	if (input.request.lineage === undefined && approval.deadlineMs !== null) {
+		const deadline = Date.parse(input.requestedAt) + approval.deadlineMs;
+		request.assignmentDeadlineAt = Math.min(request.assignmentDeadlineAt ?? deadline, deadline);
 	}
 	return { request, observation: input.observe(request, decision) };
 }

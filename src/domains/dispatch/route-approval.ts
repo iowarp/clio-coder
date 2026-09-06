@@ -13,8 +13,8 @@ export interface ApprovedAssignmentRoute {
 	decision: RouteDecisionV1;
 	/** Aggregate ceiling for the root attempt and every permitted retry. */
 	totalCostUpperBoundUsd: number;
-	/** One assignment-wide duration measured from root admission request. */
-	deadlineMs: number;
+	/** Explicit assignment-wide duration; null means no elapsed deadline. */
+	deadlineMs: number | null;
 	/** Root attempt included. */
 	maxAttempts: number;
 }
@@ -127,7 +127,7 @@ export function assertApprovedAssignmentRoute(value: ApprovedAssignmentRoute): v
 	if (!Number.isFinite(value.totalCostUpperBoundUsd) || value.totalCostUpperBoundUsd < 0) {
 		throw new Error("dispatch: active route approval total cost bound is invalid");
 	}
-	if (!Number.isInteger(value.deadlineMs) || value.deadlineMs <= 0) {
+	if (value.deadlineMs !== null && (!Number.isInteger(value.deadlineMs) || value.deadlineMs <= 0)) {
 		throw new Error("dispatch: active route approval deadline is invalid");
 	}
 	if (!Number.isInteger(value.maxAttempts) || value.maxAttempts < 1) {
