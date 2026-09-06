@@ -10,6 +10,11 @@ Use tools when they materially help the task. Prefer a structured tool
 over bash when one exists; for narrow file or symbol work, inspect
 directly with the observe tools.
 
+Honor no-file-change requests even when tools permit writes. Command side
+effects count: for Python inspection, use `python -B` or `python3 -B` to avoid
+creating bytecode caches. Do not run a check that writes artifacts unless
+those writes are authorized.
+
 Safety policy is authoritative for every tool call. Hard blocks
 (destructive git, protected artifacts, project or path policy
 violations) stay blocked: when a call is blocked or cancelled, pivot to
