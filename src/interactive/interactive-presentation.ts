@@ -16,6 +16,7 @@ import { type ProvidersContract, resolveModelRuntimeCapabilitiesForProviders } f
 import type { ResourcesContract } from "../domains/resources/index.js";
 import { ceilChars, contentChars } from "../domains/session/context-accounting.js";
 import type { SessionContract, TaskBoardSnapshot } from "../domains/session/index.js";
+import type { UserTasksStore } from "../domains/user-tasks/store.js";
 import type { Component, TUI } from "../engine/tui.js";
 import type { ChatLoop, ChatLoopEvent } from "./chat-loop.js";
 import { type ChatPanel, createChatPanel } from "./chat-panel.js";
@@ -93,6 +94,7 @@ export interface InteractivePresentationDeps {
 	session?: Pick<SessionContract, "current">;
 	getSessionId?: () => string | null;
 	getTaskBoard?: () => TaskBoardSnapshot | null;
+	userTasks?: Pick<UserTasksStore, "snapshot">;
 	getTaskMemoryStatus?: () => TaskMemoryOperatorStatus;
 	getTaskMemorySeedOffer?: () => { source: string; count: number } | null;
 	getContextState?: (cwd?: string) => ContextState;
@@ -471,13 +473,19 @@ export function createInteractivePresentation(deps: InteractivePresentationDeps)
 					label: skill.name,
 					description: skill.description,
 				})),
-			tasks: async () =>
-				(deps.getTaskBoard?.()?.tasks ?? []).map((task) => ({
-					id: task.id,
-					value: task.id,
-					label: task.title,
-					description: task.status,
-				})),
+			tasks: async ({ subcommand }) =>
+				(deps.userTasks?.snapshot() ?? [])
+					.filter((task) =>
+						subcommand === "hand"
+							? task.status === "open"
+							: task.status === "open" || task.status === "handed" || task.status === "picked",
+					)
+					.map((task) => ({
+						id: task.id,
+						value: task.id,
+						label: task.title,
+						description: task.status,
+					})),
 			// Other slots remain empty when this presentation has no read-only catalog for them.
 		},
 	});

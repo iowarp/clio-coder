@@ -587,6 +587,7 @@ export async function createInteractiveApplication(deps: InteractiveDeps): Promi
 		...(deps.session ? { session: deps.session } : {}),
 		...(deps.getSessionId ? { getSessionId: deps.getSessionId } : {}),
 		...(deps.getTaskBoard ? { getTaskBoard: deps.getTaskBoard } : {}),
+		...(deps.userTasks ? { userTasks: deps.userTasks } : {}),
 		...(deps.getTaskMemoryStatus ? { getTaskMemoryStatus: deps.getTaskMemoryStatus } : {}),
 		...(deps.getTaskMemorySeedOffer ? { getTaskMemorySeedOffer: deps.getTaskMemorySeedOffer } : {}),
 		...(deps.getContextState ? { getContextState: deps.getContextState } : {}),
