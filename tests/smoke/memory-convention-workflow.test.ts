@@ -1,6 +1,6 @@
 import { deepStrictEqual, match, ok, strictEqual } from "node:assert/strict";
 import { execFile } from "node:child_process";
-import { mkdirSync, readFileSync, writeFileSync } from "node:fs";
+import { mkdirSync, readdirSync, readFileSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
 import { test } from "node:test";
 import { fileURLToPath } from "node:url";
@@ -57,11 +57,23 @@ test("operator promotion persists a convention and only approval admits it into 
 			["findiff/coefs.py", "def local_offsets(coords, center):\n    return [x - coords[center] for x in coords]\n"],
 		] as const;
 		for (const [path, content] of sources) writeFileSync(join(workspace, path), content);
+		writeFileSync(join(workspace, "CLIO-CODER.md"), "# Fixture handbook\n\nRun focused numerical tests.\n");
+		const repositoryFiles = () =>
+			Object.fromEntries(
+				readdirSync(workspace, { recursive: true, withFileTypes: true })
+					.filter((entry) => entry.isFile())
+					.map((entry) => [join(entry.parentPath, entry.name), readFileSync(join(entry.parentPath, entry.name), "utf8")]),
+			);
+		const beforeFiles = repositoryFiles();
 		const sourceText = sources.map(([path]) => `${path}:1-2\n${readFileSync(join(workspace, path), "utf8")}`).join("\n");
 		const lesson = `${MARKER}: New numerical regressions include a polynomial exactness control and a nonuniform-grid example. Sources: tests/test_coefs.py:1-2; findiff/coefs.py:1-2.`;
 		const { contract: session } = createSessionBundle({ bus: createSafeEventBus(), getContract: () => undefined });
 		const origin = session.create({ cwd: workspace });
-		const request = session.append({ parentId: null, kind: "user", payload: `Remember this convention: ${lesson}` });
+		const request = session.append({
+			parentId: null,
+			kind: "user",
+			payload: `Remember this convention: ${lesson} Do not edit files.`,
+		});
 		session.append({ parentId: request.id, kind: "assistant", payload: `${sourceText}\n${TRANSCRIPT_ONLY}` });
 		await session.checkpoint("convention fixture source");
 
@@ -140,7 +152,7 @@ test("operator promotion persists a convention and only approval admits it into 
 					"--model",
 					"mock-model",
 					"--autonomy",
-					"read-only",
+					"full-auto",
 					"What approved numerical regression convention applies here?",
 				],
 				cwd,
@@ -162,6 +174,13 @@ test("operator promotion persists a convention and only approval admits it into 
 				false,
 			);
 			const prompt = JSON.stringify(messages);
+			ok(prompt.includes("Full-auto capability does not expand task scope"));
+			ok(prompt.includes("Autonomy: full-auto"));
+			deepStrictEqual(
+				repositoryFiles(),
+				beforeFiles,
+				"full-auto memory consumption leaves every repository file unchanged",
+			);
 			strictEqual(prompt.includes(TRANSCRIPT_ONLY), false, "transcript recovery is not memory consumption");
 			return prompt;
 		};
@@ -209,10 +228,16 @@ test("operator promotion persists a convention and only approval admits it into 
 		strictEqual((await consume(otherRepository)).includes(MARKER), false);
 		await command(["reject", convention.id]);
 		strictEqual((await consume(workspace)).includes(MARKER), false);
-		for (const [path, content] of sources) strictEqual(readFileSync(join(workspace, path), "utf8"), content);
+		deepStrictEqual(
+			repositoryFiles(),
+			beforeFiles,
+			"capture, external handoff, promotion, approval and consumption preserve the handbook and all repo files",
+		);
 		t.diagnostic(
 			JSON.stringify({
 				capture: "scripted policy output; uncited reminder gated",
+				fileScope: "all repository file paths and contents unchanged, including handbook",
+				autonomy: "full-auto consumer; constant loopback response, no tool attempts",
 				sourceSession: origin.id,
 				consumerSessions,
 				proposal: convention.id,
