@@ -5,6 +5,7 @@ All notable changes to Clio Coder are documented in this file. The format follow
 ## Unreleased
 
 ### Fixed
+- Compare summary compaction with full-context estimates on both sides and describe unchanged or increased context without claiming reclamation.
 - Preserve ordinary authored handbooks and bounded exact prefixes in session and opted-in worker context; disclose omitted sources and invalidate captured prompts after explicit context changes.
 - Keep generated handbook proposals separate from publication, preserve authored content during refresh, and retain publication provenance for the handbook actually in use.
 - Project the working set before summary compaction and support discovery and exact recall of persisted tool results hidden behind a summary.
