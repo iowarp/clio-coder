@@ -13,13 +13,14 @@
  * below the payload is ever mutated, so a deep clone of the body about to be
  * replaced would only cost the pricing loop the body's size.
  *
- * Callers may pass raw ledger entries: only entries whose `turnId` is a key in
- * `view.evicted` change, and the view was already narrowed to the active path
- * by the fold, so an eviction recorded on an abandoned branch cannot reach a
- * live one (issue #94).
+ * Callers may pass raw ledger entries. Eviction bodies follow the active-path
+ * view; usage anchors preceding an eviction or selected compaction checkpoint
+ * are invalidated in projection. Live callers pass their selected leaf so an
+ * abandoned branch checkpoint cannot invalidate the current prompt's usage.
  */
 
 import type { MessageEntry, SessionEntry } from "../../session/entries.js";
+import { filterEntriesToActivePath } from "../../session/tree/active-path.js";
 import type { EvictedState, WorkingSetView } from "./contract.js";
 import { hasThinking, isRecord, toolResultPayload, withoutThinkingBlocks } from "./payload.js";
 
@@ -110,9 +111,19 @@ function eventIndex(entries: ReadonlyArray<SessionEntry>, lastEvictionTurnId: st
 	return index < 0 ? entries.length : index;
 }
 
-export function projectWorkingSet(entries: ReadonlyArray<SessionEntry>, view: WorkingSetView): SessionEntry[] {
-	if (view.evicted.size === 0 && view.evictionEvents === 0) return [...entries];
-	const cutoff = view.evictionEvents > 0 ? eventIndex(entries, view.lastEvictionTurnId) : -1;
+export function projectWorkingSet(
+	entries: ReadonlyArray<SessionEntry>,
+	view: WorkingSetView,
+	activeLeafTurnId?: string,
+): SessionEntry[] {
+	// A checkpoint also replaces the prompt described by retained assistant
+	// usage. Invalidate that anchor only in projection; ledger cost stays exact.
+	const checkpoint = filterEntriesToActivePath(entries, activeLeafTurnId)
+		.reverse()
+		.find((entry) => entry.kind === "compactionSummary");
+	const compactionIndex = checkpoint ? entries.indexOf(checkpoint) : -1;
+	if (view.evicted.size === 0 && view.evictionEvents === 0 && compactionIndex < 0) return [...entries];
+	const cutoff = Math.max(compactionIndex, view.evictionEvents > 0 ? eventIndex(entries, view.lastEvictionTurnId) : -1);
 	const out: SessionEntry[] = [];
 	for (let index = 0; index < entries.length; index += 1) {
 		const entry = entries[index];

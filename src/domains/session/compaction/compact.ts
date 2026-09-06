@@ -116,6 +116,8 @@ export interface CompactInput {
 	reserveTokens?: number;
 	/** Override the built-in keep-recent default (DEFAULT_KEEP_RECENT_TOKENS). */
 	keepRecentTokens?: number;
+	/** Automatic compaction carries this active user message verbatim if the cut removes it. */
+	preserveUserTurnId?: string;
 	/** Accounting observer; called once per invoked stream, including failures. */
 	onCall?: (call: CompactionCallObservation) => void;
 }
@@ -565,6 +567,21 @@ export async function compact(input: CompactInput): Promise<CompactResult> {
 		usage = addCompactionUsage(usage, prefixSummary.usage);
 		if (prefixSummary.text.length === 0) throw new Error("compaction returned an empty split-turn summary");
 		summaryParts.push(`**Turn Context (split turn):**\n\n${prefixSummary.text}`);
+	}
+
+	// A generated split summary is not a reliable copy of the active request.
+	// Keep it in the canonical checkpoint so live replay and resume agree.
+	const activeUser = entries
+		.slice(0, cut.firstKeptEntryIndex)
+		.find((entry) => entry.turnId === input.preserveUserTurnId && entry.kind === "message" && entry.role === "user");
+	if (
+		activeUser?.kind === "message" &&
+		activeUser.payload &&
+		typeof activeUser.payload === "object" &&
+		"text" in activeUser.payload &&
+		typeof activeUser.payload.text === "string"
+	) {
+		summaryParts.push(`Active user instructions (verbatim):\n${activeUser.payload.text}`);
 	}
 
 	const summary = `${summaryParts.join("\n\n---\n\n").trim()}${formatFileOperations(fileOps)}${formatRecallableRefs(

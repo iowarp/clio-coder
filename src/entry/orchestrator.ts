@@ -157,7 +157,7 @@ import {
 import type { SchedulingContract } from "../domains/scheduling/contract.js";
 import { SchedulingDomainModule } from "../domains/scheduling/index.js";
 import type { CompactionCallObservation } from "../domains/session/compaction/compact.js";
-import { type CompactResult, compact } from "../domains/session/compaction/compact.js";
+import { type CompactInput, type CompactResult, compact } from "../domains/session/compaction/compact.js";
 import { collectSessionEntries } from "../domains/session/compaction/session-entries.js";
 import { estimateTokens } from "../domains/session/compaction/tokens.js";
 import { ceilChars } from "../domains/session/context-accounting.js";
@@ -795,6 +795,7 @@ async function runCompactionFlow(
 	instructions?: string,
 	trigger?: CompactionTrigger,
 	observability?: BackgroundMemoryUsageSink,
+	budget?: Pick<CompactInput, "keepRecentTokens" | "preserveUserTurnId">,
 ): Promise<CompactResult | null> {
 	const meta = session.current();
 	if (!meta) {
@@ -842,6 +843,7 @@ async function runCompactionFlow(
 	try {
 		result = await compact({
 			entries,
+			...budget,
 			onCall: (call) => calls.push(call),
 			model: resolved.model,
 			...(systemPrompt !== undefined ? { systemPrompt } : {}),
@@ -940,9 +942,13 @@ export function createProductionAutoCompact(
 	getSettings: () => ClioSettings,
 	providers: ProvidersContract,
 	observability?: BackgroundMemoryUsageSink,
-): (instructions?: string, trigger?: CompactionTrigger) => Promise<CompactResult | null> {
-	return (instructions, trigger) =>
-		runCompactionFlow(session, getSettings(), providers, instructions, trigger, observability);
+): (
+	instructions?: string,
+	trigger?: CompactionTrigger,
+	budget?: Pick<CompactInput, "keepRecentTokens" | "preserveUserTurnId">,
+) => Promise<CompactResult | null> {
+	return (instructions, trigger, budget) =>
+		runCompactionFlow(session, getSettings(), providers, instructions, trigger, observability, budget);
 }
 
 function estimateTokensFromSummary(summary: string): number {

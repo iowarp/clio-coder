@@ -8,6 +8,7 @@ import { calculateContextTokens } from "../../src/domains/session/compaction/tok
 import { estimateAgentContextTokens } from "../../src/domains/session/context-accounting.js";
 import type { MessageEntry, SessionEntry } from "../../src/domains/session/entries.js";
 import { registerEngineFauxProvider } from "../../src/engine/api-registry.js";
+import { buildModelReplayAgentMessagesFromTurns } from "../../src/interactive/model-session-replay.js";
 
 const timestamp = "2026-09-06T00:00:00.000Z";
 function message(turnId: string, role: MessageEntry["role"], payload: unknown): MessageEntry {
@@ -97,6 +98,74 @@ describe("compaction working-set provider boundary", () => {
 		ok(resolved);
 		return { ...resolved, contextWindow, maxTokens };
 	}
+
+	it("invalidates pre-checkpoint usage with eviction while fresh provider usage anchors replay again", () => {
+		const entries = chain([
+			...evictedHistory(),
+			message("retained", "assistant", {
+				text: "Retained answer",
+				usage: { input: 60000, output: 100, cacheRead: 0, cacheWrite: 0, totalTokens: 60100 },
+			}),
+			{
+				kind: "compactionSummary",
+				turnId: "checkpoint",
+				parentTurnId: null,
+				timestamp,
+				summary: "Canonical state",
+				firstKeptTurnId: "u2",
+				tokensBefore: 60100,
+				messagesSummarized: 3,
+			},
+		]);
+		const original = structuredClone(entries);
+		const projected = projectWorkingSet(entries, foldWorkingSet(entries));
+		const retained = projected.find((entry) => entry.turnId === "retained");
+		ok(retained?.kind === "message");
+		strictEqual((retained.payload as { contextUsageInvalidated: boolean }).contextUsageInvalidated, true);
+		deepStrictEqual(projectWorkingSet(projected, foldWorkingSet(projected)), projected);
+		const replay = buildModelReplayAgentMessagesFromTurns(entries);
+		ok(estimateAgentContextTokens({ messages: replay }) < 1000);
+		deepStrictEqual(entries, original, "projection preserves sealed provider usage and raw observations");
+		entries.push({
+			...message("fresh", "assistant", {
+				text: "Fresh measured response",
+				usage: { input: 40000, output: 100, cacheRead: 0, cacheWrite: 0, totalTokens: 40100 },
+			}),
+			parentTurnId: "retained",
+		});
+		const freshReplay = buildModelReplayAgentMessagesFromTurns(entries);
+		ok(
+			estimateAgentContextTokens({ messages: freshReplay }) >= 40100,
+			"a genuinely post-checkpoint provider count becomes authoritative again",
+		);
+	});
+
+	it("does not invalidate the selected branch with an abandoned sibling checkpoint", () => {
+		const entries: SessionEntry[] = [
+			message("root", "user", { text: "Task" }),
+			{
+				...message("active", "assistant", {
+					text: "Active measured response",
+					usage: { input: 40000, output: 100, cacheRead: 0, cacheWrite: 0, totalTokens: 40100 },
+				}),
+				parentTurnId: "root",
+			},
+			{ ...message("sibling", "user", { text: "Abandoned" }), parentTurnId: "root" },
+			{
+				kind: "compactionSummary",
+				turnId: "abandoned-checkpoint",
+				parentTurnId: "sibling",
+				timestamp,
+				summary: "Abandoned checkpoint",
+				firstKeptTurnId: "sibling",
+				tokensBefore: 50000,
+				messagesSummarized: 1,
+			},
+		];
+		const replay = buildModelReplayAgentMessagesFromTurns(entries, { activeLeafTurnId: "active" });
+		ok(estimateAgentContextTokens({ messages: replay }) >= 40100);
+		doesNotMatch(JSON.stringify(replay), /Abandoned/);
+	});
 
 	it("summarizes projected bytes while retaining raw identities, file evidence and exact recall", async (t) => {
 		const entries = evictedHistory();

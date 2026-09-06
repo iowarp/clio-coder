@@ -45,7 +45,7 @@ import {
 } from "../domains/providers/index.js";
 import { type AutonomyLevel, modelMayActivateSkills } from "../domains/safety/autonomy.js";
 import type { ProtectedArtifactState } from "../domains/safety/protected-artifacts.js";
-import type { CompactResult } from "../domains/session/compaction/compact.js";
+import type { CompactInput, CompactResult } from "../domains/session/compaction/compact.js";
 import type { ContextSnapshot, ContextUsageSnapshot } from "../domains/session/context-accounting.js";
 import { ceilChars, snapshotInputTokens } from "../domains/session/context-accounting.js";
 import type { ContextLedger } from "../domains/session/context-ledger.js";
@@ -443,7 +443,11 @@ export interface CreateChatLoopDeps {
 	 * Both sites share an AutoCompactionTrigger so two fires in the same tick
 	 * coalesce onto one summarization call.
 	 */
-	autoCompact?: (instructions?: string, trigger?: CompactionTrigger) => Promise<CompactResult | null>;
+	autoCompact?: (
+		instructions?: string,
+		trigger?: CompactionTrigger,
+		budget?: Pick<CompactInput, "keepRecentTokens" | "preserveUserTurnId">,
+	) => Promise<CompactResult | null>;
 	/** Optional observability sink for orchestrator chat token usage. */
 	observability?: ObservabilityContract;
 	/**

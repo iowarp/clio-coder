@@ -16,6 +16,6 @@ export function buildModelReplayAgentMessagesFromTurns(
 	options: RehydrateChatPanelOptions = {},
 ): AgentMessage[] {
 	const activeLeafTurnId = options.activeLeafTurnId ?? options.uptoTurnId;
-	const projected = projectWorkingSet(entries, foldWorkingSet(entries, activeLeafTurnId));
+	const projected = projectWorkingSet(entries, foldWorkingSet(entries, activeLeafTurnId), activeLeafTurnId);
 	return buildReplayAgentMessagesFromTurns(projected, options);
 }

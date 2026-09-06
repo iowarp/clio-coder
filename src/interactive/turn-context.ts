@@ -6,6 +6,7 @@
  * all flow through it.
  */
 
+import { createHash } from "node:crypto";
 import {
 	BusChannels,
 	type ContextActivityStatus,
@@ -45,7 +46,8 @@ import {
 	DEFAULT_COMPACTION_THRESHOLD,
 	shouldCompact,
 } from "../domains/session/compaction/auto.js";
-import type { CompactResult } from "../domains/session/compaction/compact.js";
+import type { CompactInput, CompactResult } from "../domains/session/compaction/compact.js";
+import { DEFAULT_KEEP_RECENT_TOKENS } from "../domains/session/compaction/defaults.js";
 import { maskStaleObservations } from "../domains/session/compaction/mask-observations.js";
 import { estimateTokens } from "../domains/session/compaction/tokens.js";
 import {
@@ -80,6 +82,7 @@ import {
 	readPromptCompileRecords,
 	type SessionPromptCompileRecord,
 } from "../domains/session/prompt-manifest.js";
+import { resolveReservedOutputTokens } from "../engine/apis/output-budget.js";
 import type { AgentMessage, Usage } from "../engine/types.js";
 import { resolveToolPromptHint, type ToolRegistry } from "../tools/registry.js";
 import {
@@ -105,7 +108,13 @@ export interface TurnContextDeps {
 	observability?: ObservabilityContract | undefined;
 	bus?: SafeEventBus | undefined;
 	readSessionEntries?: (() => ReadonlyArray<SessionEntry>) | undefined;
-	autoCompact?: ((instructions?: string, trigger?: CompactionTrigger) => Promise<CompactResult | null>) | undefined;
+	autoCompact?:
+		| ((
+				instructions?: string,
+				trigger?: CompactionTrigger,
+				budget?: Pick<CompactInput, "keepRecentTokens" | "preserveUserTurnId">,
+		  ) => Promise<CompactResult | null>)
+		| undefined;
 	/** Test seam for the eviction planner; production uses `planEviction` from the working-set engine. */
 	planEviction?: typeof planEviction;
 	getMemorySection?: (() => string) | undefined;
@@ -292,11 +301,10 @@ export function createTurnContext(deps: TurnContextDeps): TurnContext {
 	let resumedPromptHash: string | null = null;
 	const sessionWorkingContextPaths = new Set<string>();
 	let pendingPromptLogEntry: SessionPromptCompileRecord | null = null;
-	// A post-tool guard can run after every tool result in one model turn. Once
-	// both automatic stages report that they have nothing to do, remember that
-	// stable user-turn id so the remaining results do not repeat the same plan
-	// and summary probes. A new submitted user turn gets a new id naturally.
-	let emptyAutoCompactTurnId: string | null = null;
+	// Reuse an empty automatic attempt only for identical ledger and provider
+	// context. Same-turn tool growth or same-length content replacement must
+	// get a fresh cut; ordinary below-threshold checks never fingerprint it.
+	let emptyAutoCompactContextKey: string | null = null;
 
 	// Cache-disturbance honesty (T3.3). Accumulate every known local-runtime
 	// disturbance and prefix-byte change since the last settled run. The next
@@ -682,11 +690,44 @@ export function createTurnContext(deps: TurnContextDeps): TurnContext {
 	): Promise<boolean> => {
 		if (!deps.readSessionEntries) return false;
 		const activeAutoTurnId = force ? null : state.activeUserTurnId;
-		if (activeAutoTurnId && emptyAutoCompactTurnId === activeAutoTurnId) return false;
 		const settings = deps.getSettings();
 		const cfg = settings.context.compaction;
 		const autoEnabled = cfg?.auto !== false;
 		if (!force && !autoEnabled) return false;
+		const compactionThreshold = cfg?.threshold ?? DEFAULT_COMPACTION_THRESHOLD;
+		const pressureEstimate = force ? null : liveContextEstimate(agentRuntime, pendingUserText);
+		if (
+			pressureEstimate &&
+			!shouldCompact(pressureEstimate.tokens, compactionThreshold, pressureEstimate.contextWindow).shouldCompact
+		)
+			return false;
+		// Empty cuts are reusable only while their source and provider context
+		// remain unchanged. Tools can grow the same user turn into a useful cut.
+		const attemptKey =
+			!force && activeAutoTurnId
+				? createHash("sha256")
+						.update(
+							JSON.stringify({
+								turn: activeAutoTurnId,
+								leaf: state.lastTurnId,
+								entries: deps.readSessionEntries(),
+								context: {
+									systemPrompt: agentRuntime.agent.state.systemPrompt,
+									messages: agentRuntime.agent.state.messages,
+									tools: agentRuntime.agent.state.tools,
+									model: agentRuntime.agent.state.model,
+									thinkingLevel: agentRuntime.agent.state.thinkingLevel,
+								},
+								pendingUserText,
+								estimate: pressureEstimate,
+								compaction: cfg,
+								workingSet: settings.context.workingSet,
+								output: settings.chat.maxOutputTokens,
+							}),
+						)
+						.digest("hex")
+				: null;
+		if (attemptKey && emptyAutoCompactContextKey === attemptKey) return false;
 		let preSummaryStageActed = false;
 		// G1 from smoke pass 2: a short session generates all its pressure inside
 		// the protection window, the non-destructive layer finds nothing, and the
@@ -695,16 +736,14 @@ export function createTurnContext(deps: TurnContextDeps): TurnContext {
 		// actually follows.
 		let evictionSkipNotice: string | null = null;
 		const rememberEmptyAutomaticAttempt = (): void => {
-			if (!force && !preSummaryStageActed && activeAutoTurnId) emptyAutoCompactTurnId = activeAutoTurnId;
+			if (!force && !preSummaryStageActed && attemptKey) emptyAutoCompactContextKey = attemptKey;
 		};
 
-		const compactionThreshold = cfg?.threshold ?? DEFAULT_COMPACTION_THRESHOLD;
 		const trigger: CompactionTrigger = triggerOverride ?? (force ? "force" : "auto");
 
-		if (!force) {
-			const estimate = liveContextEstimate(agentRuntime, pendingUserText);
+		if (pressureEstimate) {
+			const estimate = pressureEstimate;
 			const verdict = shouldCompact(estimate.tokens, compactionThreshold, estimate.contextWindow);
-			if (!verdict.shouldCompact) return false;
 
 			// One-release compatibility escape hatch. This is the destructive
 			// pre-stage that working-set eviction replaces; keep it byte-for-byte
@@ -910,8 +949,30 @@ export function createTurnContext(deps: TurnContextDeps): TurnContext {
 			compactionThreshold,
 			snapshotMetadata,
 		);
+		let budget: Pick<CompactInput, "keepRecentTokens" | "preserveUserTurnId"> | undefined;
+		if (!force) {
+			const estimate = liveContextEstimate(agentRuntime, pendingUserText);
+			const output = Math.min(
+				resolveReservedOutputTokens(agentRuntime.agent.state.model?.maxTokens),
+				settings.chat.maxOutputTokens > 0 ? settings.chat.maxOutputTokens : Number.POSITIVE_INFINITY,
+			);
+			const inputTarget = Math.min(estimate.contextWindow * compactionThreshold, estimate.contextWindow - output);
+			const staticTokens = estimate.breakdown.systemPromptTokens + estimate.breakdown.toolSchemaTokens;
+			const calibration = Math.max(
+				0,
+				estimate.tokens - staticTokens - estimate.breakdown.messageTokens - estimate.breakdown.pendingUserTokens,
+			);
+			// Split available history space between the recent suffix and the
+			// checkpoint (including verbatim active instructions). The cut remains
+			// structural, so the unchanged continuation guard verifies the result.
+			const historyBudget = inputTarget - staticTokens - estimate.breakdown.pendingUserTokens - calibration;
+			budget = {
+				keepRecentTokens: Math.min(DEFAULT_KEEP_RECENT_TOKENS, Math.max(1, Math.floor(historyBudget / 2))),
+				...(activeAutoTurnId ? { preserveUserTurnId: activeAutoTurnId } : {}),
+			};
+		}
 		try {
-			result = await compactionTrigger.fire(() => (deps.autoCompact ?? (async () => null))(instructions, trigger));
+			result = await compactionTrigger.fire(() => (deps.autoCompact ?? (async () => null))(instructions, trigger, budget));
 		} catch (error) {
 			if (!summaryLifecycleStarted) startSummaryLifecycle();
 			emitCompactionActivity("failed", compactionFailureMessage(error));
@@ -1411,7 +1472,7 @@ export function createTurnContext(deps: TurnContextDeps): TurnContext {
 			resumedPromptHash = null;
 			sessionWorkingContextPaths.clear();
 			pendingPromptLogEntry = null;
-			emptyAutoCompactTurnId = null;
+			emptyAutoCompactContextKey = null;
 			reconciledAnchor = null;
 			const session = deps.session?.current();
 			currentContextSnapshot = session ? getLatestContextSnapshot(session) : null;

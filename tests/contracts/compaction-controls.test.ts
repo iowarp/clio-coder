@@ -9,6 +9,8 @@ import { BusChannels, type ContextPrunedPayload } from "../../src/core/bus-event
 import { DEFAULT_SETTINGS } from "../../src/core/defaults.js";
 import { createSafeEventBus } from "../../src/core/event-bus.js";
 import { clioStateDir } from "../../src/core/xdg.js";
+import { foldWorkingSet } from "../../src/domains/context/working-set/fold.js";
+import { resolveRecall } from "../../src/domains/context/working-set/recall.js";
 import { summarizeFailedCompactionUsage } from "../../src/domains/observability/compaction-usage.js";
 import type { ObservabilityContract } from "../../src/domains/observability/contract.js";
 import {
@@ -20,15 +22,19 @@ import type { ProvidersContract, TargetStatus } from "../../src/domains/provider
 import { canonicalEndpointKey, foregroundStreamUsage } from "../../src/domains/providers/index.js";
 import type { RuntimeDescriptor } from "../../src/domains/providers/types/runtime-descriptor.js";
 import { COMPACTION_SYSTEM_PROMPT } from "../../src/domains/session/compaction/compact.js";
+import { findCutPoint } from "../../src/domains/session/compaction/cut-point.js";
 import { collectSessionEntries } from "../../src/domains/session/compaction/session-entries.js";
 import { type ContextSnapshot, snapshotInputTokens } from "../../src/domains/session/context-accounting.js";
 import type { SessionContract } from "../../src/domains/session/contract.js";
+import type { SessionEntry } from "../../src/domains/session/entries.js";
 import { appendEntry, appendTurn, startSession } from "../../src/domains/session/manager.js";
 import { ledgerUsageCalls } from "../../src/domains/session/usage.js";
 import { registerEngineApiProvider, registerEngineFauxProvider } from "../../src/engine/api-registry.js";
+import { estimateInputTokensFromContext, remainingContextMaxTokens } from "../../src/engine/apis/output-budget.js";
 import { openSession, sessionPaths } from "../../src/engine/session.js";
 import type { Usage } from "../../src/engine/types.js";
 import { createProductionAutoCompact } from "../../src/entry/orchestrator.js";
+import { buildModelReplayAgentMessagesFromTurns } from "../../src/interactive/model-session-replay.js";
 import { createTurnContext } from "../../src/interactive/turn-context.js";
 import type { TurnMiddleware } from "../../src/interactive/turn-middleware.js";
 import { type AgentRuntime, createTurnState } from "../../src/interactive/turn-state.js";
@@ -225,6 +231,131 @@ describe("production compaction controls", () => {
 			}),
 		};
 	}
+
+	it("continues the saved Mini32K pipeline after an empty read-stage attempt and later grep growth", async (t) => {
+		const saved = JSON.parse(
+			readFileSync(new URL("../fixtures/context-pressure-pipeline.json", import.meta.url), "utf8"),
+		) as {
+			entries: SessionEntry[];
+			systemPrompt: string;
+			tools: AgentRuntime["agent"]["state"]["tools"];
+		};
+		const f = fixture();
+		const install = (count: number) => {
+			const entries = saved.entries.slice(0, count);
+			f.state.writer.replaceEntries(entries);
+			f.pinLeaf(entries.at(-1)?.turnId ?? null);
+			state.lastTurnId = entries.at(-1)?.turnId ?? null;
+			context.refreshAgentMessagesFromSession(runtime);
+		};
+		const state = createTurnState("off");
+		state.activeUserTurnId = saved.entries[0]?.turnId ?? null;
+		const runtime = {
+			targetId: "chat-target",
+			runtimeId: "fixture",
+			wireModelId: "chat",
+			runtimeResolution: {
+				costProvenance: "known_free",
+				contextWindowDetails: {
+					desiredContextWindow: 32768,
+					effectiveContextWindow: 32768,
+					contextWindowSource: "configured",
+				},
+			},
+			agent: {
+				state: {
+					systemPrompt: saved.systemPrompt,
+					tools: saved.tools,
+					messages: [],
+					thinkingLevel: "off",
+					model: { ...faux.getModel("chat"), contextWindow: 32768, maxTokens: 8192 },
+				},
+			},
+		} as unknown as AgentRuntime;
+		state.runtime = runtime;
+		let attempts = 0;
+		const context = createTurnContext({
+			state,
+			session: f.session,
+			getSettings: () => f.settings,
+			providers: f.providers,
+			readSessionEntries: f.entries,
+			autoCompact: (...args) => {
+				attempts++;
+				return f.run(...args);
+			},
+			middleware: { fireCompactionHook: () => {} } as unknown as TurnMiddleware,
+			emitNotice: () => {},
+		});
+		install(12);
+		strictEqual(findCutPoint(f.entries(), 20000).firstKeptEntryIndex, 0);
+		// Exact read-stage shape has no useful cut at the automatic budget either.
+		strictEqual(await context.runAutoCompact(runtime, false), false);
+		strictEqual(attempts, 1);
+		strictEqual(await context.runAutoCompact(runtime, false), false);
+		strictEqual(attempts, 1, "unchanged context does not repeat an empty attempt");
+		const changed = structuredClone(saved.entries.slice(0, 12));
+		const changedUser = changed[0];
+		ok(changedUser?.kind === "message");
+		const payload = changedUser.payload as { text: string };
+		payload.text = `X${payload.text.slice(1)}`;
+		f.state.writer.replaceEntries(changed);
+		context.refreshAgentMessagesFromSession(runtime);
+		strictEqual(await context.runAutoCompact(runtime, false), false);
+		strictEqual(attempts, 2, "same-length changed content invalidates the empty memo");
+		install(17);
+		const before = context.liveContextEstimate(runtime);
+		ok(before.tokens > 32768);
+		ok(findCutPoint(f.entries(), 20000).firstKeptEntryIndex > 0);
+		f.response.text = "Suggested skill: /skill clio-coder-test";
+		const update = await context.postToolContinuationGuard(runtime);
+		ok(update, "grown same-turn history must retry and produce the next provider context");
+		strictEqual(attempts, 3);
+		const after = context.liveContextEstimate(runtime);
+		ok(after.tokens < 32768);
+		const request = update.context;
+		ok(request);
+		deepStrictEqual(
+			request.messages,
+			buildModelReplayAgentMessagesFromTurns(f.entries(), state.lastTurnId ? { activeLeafTurnId: state.lastTurnId } : {}),
+		);
+		strictEqual(request.systemPrompt, saved.systemPrompt);
+		deepStrictEqual(request.tools, saved.tools);
+		const active = saved.entries[0];
+		ok(active?.kind === "message");
+		const activeText = (active.payload as { text: string }).text;
+		ok(
+			request.messages.some((message) => JSON.stringify(message).includes(JSON.stringify(activeText).slice(1, -1))),
+			"active user instructions survive even an inadequate summary verbatim",
+		);
+		const callIds = new Set<string>();
+		for (const message of request.messages) {
+			if (message.role === "assistant")
+				for (const block of message.content) if (block.type === "toolCall") callIds.add(block.id);
+			if (message.role === "toolResult") ok(callIds.has(message.toolCallId), "every retained result follows its call");
+		}
+		const recalledEntry = saved.entries[10];
+		ok(recalledEntry);
+		const recalled = resolveRecall(
+			f.entries(),
+			foldWorkingSet(f.entries()),
+			recalledEntry.turnId,
+			state.lastTurnId ?? undefined,
+		);
+		ok(recalled.ok);
+		deepStrictEqual(recalled.result.entry, recalledEntry);
+		const wireContext = request as Parameters<typeof remainingContextMaxTokens>[1];
+		const output = remainingContextMaxTokens({ contextWindow: 32768, maxTokens: 8192 }, wireContext, undefined);
+		ok(output >= 4096);
+		ok(estimateInputTokensFromContext(wireContext) + output <= 32768);
+		t.diagnostic(JSON.stringify({ before: before.tokens, after: after.tokens, output, attempts }));
+		// Disabling auto still enforces the original local guard before a provider call.
+		install(17);
+		f.settings.context.compaction.auto = false;
+		await rejects(context.postToolContinuationGuard(runtime), /stopped continuation before provider call/);
+		strictEqual(attempts, 3);
+	});
+
 	it("routes a configured dedicated summary model through the production callback", async () => {
 		const f = fixture();
 		f.settings.context.compaction.model = "summary-target/summary";
