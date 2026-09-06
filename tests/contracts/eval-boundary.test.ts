@@ -4,6 +4,7 @@ import { parseEvalArtifactV4 } from "../../src/domains/eval/artifacts/store.js";
 import { compareEvalArtifactsV4, EvalServingConfigurationDriftError } from "../../src/domains/eval/compare/compare.js";
 import { aggregateEvalVerdicts } from "../../src/domains/eval/metrics/aggregate.js";
 import { renderEvalComparisonReportV1 } from "../../src/domains/eval/reports/comparison.js";
+import { renderEvalJsonReportV4 } from "../../src/domains/eval/reports/json.js";
 import { toolBehaviorMetricEntriesFromJsonl } from "../../src/domains/eval/runners/clio-run.js";
 import type { EvalArtifactResultV4, EvalArtifactV4 } from "../../src/domains/eval/schema/artifact.js";
 import { buildEvalBehaviorMetricsV1 } from "../../src/domains/eval/schema/behavioral-metrics.js";
@@ -308,6 +309,53 @@ test("behavioral route alignment rejects ambiguous multi-route groups on either 
 			ok(comparison.behavioralMetrics.every((row) => row.change === "incomparable"));
 			ok(renderEvalComparisonReportV1(comparison, "text").includes("extra-route"));
 		}
+	}
+});
+
+test("compact mismatch identities exclude attachments across envelope rejection paths", () => {
+	for (const reason of ["matrix", "trial", "missing", "variance", "prompt", "ambiguous"] as const) {
+		const baseline = behaviorArtifact("eval-baseline", BASELINE_ROUTE, ROUTE_DIMENSIONS);
+		const candidate = behaviorArtifact("eval-candidate", CANDIDATE_ROUTE, ROUTE_DIMENSIONS);
+		if (reason === "matrix") candidate.matrix.dimensions = [];
+		if (reason === "ambiguous") {
+			baseline.results.push(...behaviorArtifact("extra", { ...BASELINE_ROUTE, id: "extra" }, ROUTE_DIMENSIONS).results);
+		}
+		for (const [index, result] of candidate.results.entries()) {
+			ok(result.executionEnvelope);
+			if (reason === "prompt" || (reason === "variance" && index === 0)) {
+				result.executionEnvelope.prompt.compositionHash = "b".repeat(64);
+			}
+			if (reason === "missing" || (reason === "trial" && index === 0)) delete result.executionEnvelope;
+		}
+		for (const result of [...baseline.results, ...candidate.results]) {
+			result.artifacts = { stdout: "RUNNER_ATTACHMENT_SENTINEL", stderr: "STDERR_SENTINEL", files: ["FILE_SENTINEL"] };
+		}
+		const originalBytes = JSON.stringify({ baseline, candidate });
+		const comparison = compareEvalArtifactsV4(baseline, candidate);
+		strictEqual(comparison.hardGate.pass, false, reason);
+		ok(comparison.envelopeMismatches.length > 0, reason);
+		for (const row of [...comparison.envelopeMismatches, ...comparison.hardGate.envelopeFailures]) {
+			deepStrictEqual(Object.keys(row).sort(), [
+				"baselineTargets",
+				"candidateTargets",
+				"fields",
+				"role",
+				"scenarioId",
+				"target",
+			]);
+			deepStrictEqual(Object.keys(row.target).sort(), ["id", "model"]);
+		}
+		deepStrictEqual(comparison.hardGate.envelopeFailures, comparison.envelopeMismatches);
+		ok(comparison.behavioralMetrics.every((row) => row.change === "incomparable"));
+		const compact = renderEvalComparisonReportV1(comparison, "json");
+		for (const sentinel of ["RUNNER_ATTACHMENT_SENTINEL", "STDERR_SENTINEL", "FILE_SENTINEL"]) {
+			strictEqual(compact.includes(sentinel), false, reason);
+			ok(renderEvalJsonReportV4(baseline).includes(sentinel));
+			ok(renderEvalJsonReportV4(candidate).includes(sentinel));
+		}
+		deepStrictEqual(JSON.parse(renderEvalJsonReportV4(baseline)), baseline);
+		deepStrictEqual(JSON.parse(renderEvalJsonReportV4(candidate)), candidate);
+		strictEqual(JSON.stringify({ baseline, candidate }), originalBytes);
 	}
 });
 
