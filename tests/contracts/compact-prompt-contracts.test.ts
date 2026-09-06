@@ -282,8 +282,8 @@ describe("compact prompt contracts", () => {
 			.join("{SETTINGS}")
 			.split(dirs.state)
 			.join("{STATE}");
-		strictEqual(normalizedMain.length, 10_869);
-		strictEqual(Math.ceil(normalizedMain.length / 4), 2_718);
+		strictEqual(normalizedMain.length, 10_868);
+		strictEqual(Math.ceil(normalizedMain.length / 4), 2_717);
 		ok(normalizedMain.length <= 10_900, `main prompt grew to ${normalizedMain.length} chars`);
 		ok(
 			Math.ceil(normalizedMain.length / 4) <= 2_725,
@@ -342,7 +342,7 @@ describe("compact prompt contracts", () => {
 			onPermission: "fail",
 			persona: persona(coder.body, "coder"),
 		});
-		strictEqual(worker.systemPrompt.length, 5_494);
+		strictEqual(worker.systemPrompt.length, 5_493);
 		strictEqual(worker.tokenEstimate, 1_374);
 		ok(worker.systemPrompt.length <= 5_500);
 		ok(worker.tokenEstimate <= 1_375);

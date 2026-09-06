@@ -66,7 +66,10 @@ function renderTaskBoardText(board: TaskBoardSnapshot, userTasks: ReadonlyArray<
 			lines.push(`  acceptance: ${item.command} (${item.status}; ${item.notes})`);
 	}
 	if (counts.open > 0 && counts.active === 0) {
-		lines.push(`next: start a task with action="start" before working it`);
+		lines.push(
+			`next: start only an authorized task with action="start" before working it; ` +
+				`block proposed implementation with a note naming the pending operator decision, or drop it, and wait`,
+		);
 	}
 	lines.push(...waitingTrailer(userTasks));
 	return lines.join("\n");
@@ -145,7 +148,9 @@ export function createTasksTool(deps: TasksToolDeps): ToolSpec {
 			"pick moves one operator task uN onto the board; start marks one task active (the current focus); " +
 			"done completes a task (started or still pending) and requires note as the " +
 			"evidence the work actually finished; block parks it with a required reason; drop cancels it; list shows the board. " +
-			"Work that did not happen is blocked or dropped, never done.",
+			"Work that did not happen is blocked or dropped, never done. A self-created plan is not operator authorization. " +
+			"For proposal-only work, block deferred implementation with note naming the pending operator decision, or drop it; " +
+			"wait for an explicit operator go-ahead before start or implementation. A skill-install choice does not grant that go-ahead.",
 		parameters: Type.Object({
 			action: StringEnum(TASKS_ACTIONS, { description: "Board action." }),
 			title: Type.Optional(Type.String({ description: "Board title (plan)." })),

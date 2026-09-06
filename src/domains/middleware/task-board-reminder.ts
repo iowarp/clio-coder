@@ -17,8 +17,10 @@ export const TASK_BOARD_REMINDER_REGISTRATION_ID = "observer.task-board-reminder
 export function taskBoardReminderMessage(steps: number): string {
 	return (
 		`[Tasks] This request enumerates ${steps} steps. Before the first edit, declare the task board: ` +
-		'tasks action="plan" with a title and one task per step, then work them one at a time ' +
-		'("start", then "done" with an evidence note).'
+		'tasks action="plan" with a title and one task per authorized step, then work them one at a time ' +
+		'("start", then "done" with an evidence note). A plan does not authorize implementation: ' +
+		'for proposed work awaiting an operator go-ahead, use action="block" with a note naming the pending operator decision, ' +
+		'or action="drop", and wait.'
 	);
 }
 
