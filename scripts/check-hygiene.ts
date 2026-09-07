@@ -36,6 +36,7 @@ import { OPTIONAL_RECIPE_KEYS, RECIPE_KEYS } from "../src/domains/agents/recipe-
 import { loadFragments } from "../src/domains/prompts/fragment-loader.js";
 import { listDocsCorpus } from "../src/tools/context/docs-engine.js";
 import { runBoundaryCheck } from "../tests/boundaries/check-boundaries.js";
+import { readmeInstallVersion } from "./release-version-policy.mjs";
 
 const root = resolvePackageRoot(import.meta.url);
 const errors: string[] = [];
@@ -922,10 +923,13 @@ async function checkReadmeInstallBlock(): Promise<void> {
 	// following the README installed whatever was on main that day rather than
 	// the release the rest of the page documents.
 	const clone = block.find((line) => line.includes("git clone"));
+	const installVersion = readmeInstallVersion({ version: pkg.version, changelog: readRoot("CHANGELOG.md") });
 	if (!clone) {
 		fail("readme-install-block", "the block no longer clones the repository");
-	} else if (!clone.includes(`--branch v${pkg.version}`)) {
-		fail("readme-install-block", `the clone must pin v${pkg.version}, the version package.json declares: ${clone}`);
+	} else if (
+		!clone.split(/\s+/).some((part, index, parts) => part === "--branch" && parts[index + 1] === `v${installVersion}`)
+	) {
+		fail("readme-install-block", `the clone must pin installable version v${installVersion}: ${clone}`);
 	}
 
 	// A bare `clio-coder` resolves through PATH and can answer for an older

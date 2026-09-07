@@ -1,8 +1,28 @@
 import assert from "node:assert/strict";
 import { describe, it } from "node:test";
-import { releaseVersionErrors } from "../../scripts/release-version-policy.mjs";
+import { readmeInstallVersion, releaseVersionErrors } from "../../scripts/release-version-policy.mjs";
 
 describe("release version boundary", () => {
+	it("keeps local development installs pinned to the latest dated stable release", () => {
+		const changelog =
+			"# Changelog\n\n## Unreleased\n\n## 0.4.5-beta.1 - 2026-09-07\n\n## 0.4.4 - 2026-09-05\n\n## 0.4.3 - 2026-09-01\n";
+		assert.equal(readmeInstallVersion({ version: "0.4.5-dev.0", changelog }), "0.4.4");
+		assert.equal(readmeInstallVersion({ version: "0.4.5", changelog }), "0.4.5");
+		assert.equal(readmeInstallVersion({ version: "0.4.5-beta.1", changelog }), "0.4.5-beta.1");
+	});
+
+	it("does not excuse a missing release or a development version with named release notes", () => {
+		assert.throws(
+			() => readmeInstallVersion({ version: "0.4.5-dev.0", changelog: "## Unreleased\n" }),
+			/dated stable release/,
+		);
+		assert.equal(readmeInstallVersion({ version: "0.4.5-dev.0", changelog: "## 0.4.4 - 2026-09-05\n" }), "0.4.5-dev.0");
+		assert.notDeepEqual(
+			releaseVersionErrors({ version: "0.4.5-dev.0", changelog: "## Unreleased\n", releaseContext: true }),
+			[],
+		);
+	});
+
 	it("allows an Unreleased section during development", () => {
 		assert.deepEqual(
 			releaseVersionErrors({
