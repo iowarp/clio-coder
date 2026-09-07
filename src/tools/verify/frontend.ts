@@ -550,38 +550,56 @@ async function validateBrowserLoad(
 		});
 		return;
 	}
-	const result = await runCommandVector(
-		browser,
-		[
-			"--headless=new",
-			"--disable-gpu",
-			"--no-sandbox",
-			"--disable-dev-shm-usage",
-			"--dump-dom",
-			pathToFileURL(artifactPath).href,
-		],
-		{
-			timeoutMs: options.timeoutMs,
-			maxOutputBytes: options.maxOutputBytes,
-			...(options.signal !== undefined ? { signal: options.signal } : {}),
-		},
-	);
-	if (result.exitCode === 0 && !result.timedOut && !result.aborted && !result.outputCapped) {
+	// A DOM dump duplicates the complete artifact on stdout. Large, otherwise
+	// valid pages then trip the diagnostic output cap. A private screenshot
+	// proves that the browser rendered without charging page bytes to that cap.
+	const dir = mkdtempSync(path.join(tmpdir(), "clio-coder-browser-check-"));
+	const screenshot = path.join(dir, "loaded.png");
+	try {
+		const result = await runCommandVector(
+			browser,
+			[
+				"--headless=new",
+				"--disable-gpu",
+				"--no-sandbox",
+				"--disable-dev-shm-usage",
+				`--user-data-dir=${path.join(dir, "profile")}`,
+				`--screenshot=${screenshot}`,
+				pathToFileURL(artifactPath).href,
+			],
+			{
+				timeoutMs: options.timeoutMs,
+				maxOutputBytes: options.maxOutputBytes,
+				...(options.signal !== undefined ? { signal: options.signal } : {}),
+			},
+		);
+		let failure: string;
+		if (result.aborted) failure = "headless browser aborted";
+		else if (result.timedOut) failure = `headless browser timed out after ${options.timeoutMs}ms`;
+		else if (result.outputCapped) failure = `headless browser output exceeded ${options.maxOutputBytes} bytes`;
+		else if (result.exitCode !== 0) {
+			failure = `headless browser exited with ${result.exitCode ?? result.signal ?? "unknown"}`;
+		} else if (!existsSync(screenshot) || !statSync(screenshot).isFile() || statSync(screenshot).size === 0) {
+			failure = "headless browser exited without a rendered screenshot";
+		} else {
+			checks.push({
+				name: "browser load",
+				status: "pass",
+				message: `loaded and rendered with ${path.basename(browser)}`,
+				path: artifactPath,
+			});
+			return;
+		}
+		const output = truncateUtf8(combineSafeOutput(result).trim(), 800, " [truncated]");
 		checks.push({
 			name: "browser load",
-			status: "pass",
-			message: `loaded with ${path.basename(browser)}`,
+			status: "fail",
+			message: `${failure}${output ? `: ${output}` : ""}`,
 			path: artifactPath,
 		});
-		return;
+	} finally {
+		rmSync(dir, { recursive: true, force: true });
 	}
-	const output = truncateUtf8(combineSafeOutput(result).trim(), 800, " [truncated]");
-	checks.push({
-		name: "browser load",
-		status: "fail",
-		message: `headless browser exited with ${result.exitCode ?? result.signal ?? "unknown"}${output ? `: ${output}` : ""}`,
-		path: artifactPath,
-	});
 }
 
 function parseAttributes(source: string): Record<string, string> {
