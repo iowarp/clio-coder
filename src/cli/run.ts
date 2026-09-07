@@ -164,9 +164,9 @@ function explicitSkillPathErrors(skillPaths: ReadonlyArray<string>): string[] {
 }
 
 /**
- * The TUI's verdict for a command-shaped token the registry does not own,
- * applied to a headless task. Returns the refusal message, or null when the
- * task is not an unknown command.
+ * Refuse commands the headless prompt path cannot execute. Skill invocations
+ * and prompt templates have production expansion paths; interactive commands
+ * do not, so accepting them would send their literal text to the model.
  *
  * `parseSlashCommand` is the canonical shape test and the canonical registry
  * walk, so a token that is one word of letters, digits, hyphens, or colons and
@@ -191,11 +191,14 @@ function explicitSkillPathErrors(skillPaths: ReadonlyArray<string>): string[] {
  * closure sits on. Boundaries rule6 in `tests/boundaries/check-boundaries.ts`
  * holds both halves of that.
  */
-async function unknownSlashCommandRefusal(task: string): Promise<string | null> {
+async function headlessSlashCommandRefusal(task: string): Promise<string | null> {
 	if (!task.trim().startsWith("/")) return null;
 	const { parseSlashCommand } = await import("../interactive/slash-commands.js");
 	const command = parseSlashCommand(task);
-	if (command.kind !== "unknown-command") return null;
+	if (command.kind === "skill-invocation" || command.kind === "unknown" || command.kind === "empty") return null;
+	if (command.kind !== "unknown-command") {
+		return "interactive commands are not supported by clio-coder run; use interactive chat or the corresponding CLI command";
+	}
 	const { loadPromptTemplates } = await import("../domains/resources/index.js");
 	const templates = loadPromptTemplates({ cwd: process.cwd() });
 	if (templates.items.some((template) => template.name === command.token)) return null;
@@ -261,11 +264,9 @@ export async function runClioRun(
 			if (!assembled) return 2;
 
 			if (parsed.agentId === undefined) {
-				// A mistyped slash command is a usage error, not a task. Refusing it
-				// here keeps it from booting a session and spending a model turn on a
-				// command that was never run, which is what the TUI has always done
-				// and what docs/guide/extensions-and-sharing.md documents for both surfaces.
-				const slashRefusal = await unknownSlashCommandRefusal(assembled.prompt);
+				// Reject unknown and unsupported interactive commands before boot;
+				// neither has a headless handler that could honor the request.
+				const slashRefusal = await headlessSlashCommandRefusal(assembled.prompt);
 				if (slashRefusal !== null) {
 					process.stderr.write(`clio-coder run: ${slashRefusal}\n`);
 					return 2;
