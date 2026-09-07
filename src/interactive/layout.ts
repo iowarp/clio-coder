@@ -33,7 +33,8 @@ function buildFullscreenLayout(
 		primary: true,
 		overscroll: "chain",
 		scrollbar: options.fullscreenScrollbar ?? "auto",
-		scrollbarStyle: () => theme.fg("frameStrong", GLYPH.barFull),
+		scrollbarTrackStyle: (text) => theme.fg("frame", text),
+		scrollbarThumbStyle: () => theme.fg("frameStrong", GLYPH.barFull),
 	});
 	const dock = new VStack();
 	if (parts.pending) dock.addChild(parts.pending, { shrink: 1, minSize: 0 });

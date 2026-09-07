@@ -82,6 +82,7 @@ const openrouterRuntime: RuntimeDescriptor = {
 	displayName: "OpenRouter",
 	kind: "http",
 	tier: "cloud",
+	// Runtime fallback and explicit-URL contract; dispatch uses each synthesized model.api.
 	apiFamily: "openai-completions",
 	auth: "api-key",
 	credentialsEnvVar: "OPENROUTER_API_KEY",
@@ -101,6 +102,7 @@ const openrouterRuntime: RuntimeDescriptor = {
 			defaultCapabilities,
 			runtimeId: "openrouter",
 			api: "openai-completions",
+			preferCatalogTransport: true,
 			provider: "openrouter",
 			defaultBaseUrl: OPENROUTER_BASE_URL,
 			defaultHeaders: OPENROUTER_HEADERS,

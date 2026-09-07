@@ -3,7 +3,7 @@
 > **Visual blueprint:** The source checkout includes the complete
 > [Pi SDK Boundary visual reference](https://github.com/iowarp/clio-coder/blob/main/docs/html/pi_boundary_blueprint.html).
 
-Clio Coder uses Pi 0.84.4 as its provider, agent-loop, and terminal SDK. This
+Clio Coder pins Pi 0.85.1 as its provider, agent-loop, and terminal SDK. This
 page records where Pi owns a reusable primitive and where Clio deliberately
 keeps product behavior. Review this table on every Pi upgrade. An action marked
 `Keep` is an explicit boundary decision, not an invitation to replace the
@@ -49,19 +49,39 @@ Clio-owned surface during a dependency bump.
 | pi-agent-core `streamProxy()` namespace metadata (0.84.2) and `ToolCall.namespace` | None | Decline. | Clio does not proxy assistant streams and does not use OpenAI Responses namespaced or deferred tools. |
 | pi-ai `SimpleStreamOptions.toolChoice` (0.84.3, `auto` / `none`) | `src/engine/provider-payload.ts` and the `onPayload` hook in `src/interactive/turn-runtime.ts` and `src/engine/worker-runtime.ts` | Keep the Clio payload patch. | Clio needs both `none` and a named required tool across every dialect it serves, including generic OpenAI-compatible servers that reject object `tool_choice`. Splitting `none` onto the neutral option would leave two mechanisms for one concern. |
 | pi-ai strict tool-schema conversion and null normalization (0.84.2) | `src/engine/ai.ts` `validateEngineToolArguments` | Inherit. | No Clio tool sets `constrainedSampling`, so strict conversion is inert. `null` for an optional non-nullable argument is now dropped instead of rejected; locked by the engine lifecycle contract. |
-| pi-ai OpenAI-compatible reasoning replay and signature serialization fixes (0.84.3, 0.84.4) | `src/engine/apis/openai-completions.ts` | Inherit. | The wrapper delegates `stream` and `streamSimple` to Pi's adapter, so replay fixes apply to in-run turns. Clio's ledger does not persist `thinkingSignature`, so resumed sessions still replay without signatures (pre-existing). |
+| pi-ai OpenAI-compatible reasoning replay and signature serialization fixes (0.84.3, 0.84.4) | `src/engine/apis/openai-completions.ts` | Inherit. | The wrapper delegates `stream` and `streamSimple` to Pi's adapter. Clio persists raw assistant content blocks, including `thinkingSignature`, and restores them through rich replay; Pi decides whether signatures remain usable for the selected model and transport. |
 | pi-ai Anthropic server-side refusal fallback with returned-model pricing (0.84.3) | `src/interactive/turn-context.ts` `reconcileUsage` and `src/domains/observability/trace-store.ts` | Inherit. | Usage and cost arrive already priced for the returned model; Clio records `message.model` as reported. `fallbacks` is only sent for catalog models that declare `allowedFallbackModels`. |
 | pi-tui capability overrides (`PI_HYPERLINKS`, `PI_IMAGE_PROTOCOL`, `PI_TRUE_COLOR`, `setCapabilityOverrides`) and `PI_TUI_ESC_TIMEOUT` (0.84.2, 0.84.4) | `src/interactive/theme/tokens.ts` truecolor detection | Decline. | These govern pi-tui's own image, hyperlink, and escape-sequence handling. Clio's theme detects truecolor from `COLORTERM` and `TERM` independently and does not consume pi-tui capability detection. |
 | pi-tui `TuiAltScreenOptions.copyOnSelect` / `copySelection` and transcript search (`tui.altScreen.search*`, 0.84.2, 0.84.4) | `src/interactive/interactive-shell.ts` alt-screen construction and `src/domains/config/keybindings.ts` | Inherit defaults. | Selection copy stays on by default. Search is pi-tui's viewport listener and runs before Clio's router; `ctrl+g` advances a match only while the search overlay is focused, so the Clio leader chord is unavailable during a search and nowhere else. Locked by the engine lifecycle contract. |
 | pi-tui alternate-screen direct-row painting (0.84.2) | `src/engine/instrumented-tui.ts` | Inherit. | `compositeOverlays`, `extractCursorPosition`, and `applyLineResets` still run inside one `doRender`, so Clio's frame and phase measurements are unchanged. Locked by the engine lifecycle contract. |
+
+## 0.85.1 integration
+
+The three SDK packages stay on the same exact version. The older Anthropic
+client override is removed so Pi can use its declared `@anthropic-ai/sdk`
+0.123.0 dependency. The repository's esbuild override remains in the pnpm
+workspace configuration.
+
+| Pi change | Clio adaptation or behavior |
+| --- | --- |
+| OpenRouter's catalog can select Anthropic Messages | With no explicit target URL, synthesis keeps Pi's catalog API, URL, compatibility flags, and effort map together. Explicit URLs retain the runtime's OpenAI-completions contract; if the catalog uses another API, synthesis omits its transport-specific compatibility and effort metadata. Unknown models use the OpenAI fallback. The engine already dispatches by the synthesized model's API. |
+| `AssistantMessage.providerThinkingLevel` and Anthropic `supportsMidConvoEffort` | Persist and restore historical provider effort alongside raw content in `assistantSessionPayload` and rich replay. A regression constructs a native Anthropic request after JSON persistence and confirms that earlier high/medium turns retain their effort before the active high-effort marker. Pi owns request assembly and signed-thinking recovery. |
+| `ScrollView` track/thumb style callbacks and `OverlayHandle.getBounds()` | Use the public track and thumb styling callbacks. Overlay wrappers delegate bounds to the currently mounted frame. Regressions exercise rendered bounds, resize, visibility, replacement, ordinary/Alt wheel scrolling, and following the transcript end. |
+| Component mouse handling, optional editor/input hooks, and alt-screen controls | Inherit compatible Pi component behavior. Custom Clio components still need their own mouse wiring where they do not compose a mouse-aware Pi component. `clearOnShrink` remains false by default; removal of its environment lookup does not invert that default. |
+| `AgentTool.replay` | Leave the optional policy unset. Clio uses `Agent`; the new durable harness owns recovery replay and defaults omitted policies to `never`. |
+| OpenAI-compatible `vllmPriority` | Available through Pi's optional compatibility setting. This upgrade does not add a Clio scheduler-priority setting. |
+
+The environment-key parity helper also gains the existing Pi convention
+`qwen-token-plan-individual` → `QWEN_TOKEN_PLAN_API_KEY`. This corrects a
+Clio parity gap; it does not add a built-in Qwen runtime.
 
 ## Thin-wrapper watch list
 
 Review these files first when Pi changes. They intentionally contain little
 behavior and should not grow another implementation of an SDK primitive.
 
-- `src/engine/api-registry.ts` owns Clio's ordered dispatcher using Pi's public lazy API factories and full built-in provider catalog. Its dynamic `/compat` bridge exists only for configured out-of-tree runtime plugins that require Pi's process-global registry identity.
-- `src/engine/env-api-keys.ts` pins Pi 0.84's synchronous environment-key and ambient-credential discovery behind a parity contract; revisit it on every Pi upgrade until Pi exports that helper directly.
+- `src/engine/api-registry.ts` owns Clio's ordered dispatcher using Pi's public lazy API factories and the provider catalogs selected in `src/engine/models.ts` for Clio's built-in runtimes. Its dynamic `/compat` bridge exists only for configured out-of-tree runtime plugins that require Pi's process-global registry identity.
+- `src/engine/env-api-keys.ts` pins Pi 0.85's synchronous environment-key and ambient-credential discovery behind a parity contract; revisit it on every Pi upgrade until Pi exports that helper directly.
 - `src/engine/apis/openai-completions.ts` maps compatibility flags, sampling parameters, and thinking budgets. Its Clio deltas are the local-runtime guards and sentinel, Harmony, and Gemma filters.
 - `src/engine/provider-payload.ts` retains only the OpenAI Responses reasoning-summary patch.
 - `src/engine/types.ts` and `src/engine/ai.ts` expose erased Pi types and `StringEnum` behind the engine boundary.
@@ -75,7 +95,9 @@ Run these contracts first on a Pi bump, before the full gate:
 
 - `tests/contracts/engine-lifecycle.test.ts` (agent-loop ordering, reset, tool-argument normalization, keybinding table, alt-screen render seams)
 - `tests/contracts/provider-transport.test.ts`
+- `tests/contracts/openrouter-transport.test.ts`
 - `tests/contracts/provider-context-boundary.test.ts`
+- `tests/contracts/rendering-invariants.test.ts`
 - `tests/contracts/gemma-channel-filter.test.ts`
 - `tests/contracts/tool-boundaries.test.ts`
 - `tests/contracts/session-durability.test.ts`

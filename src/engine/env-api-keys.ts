@@ -12,6 +12,7 @@ const ENV_KEYS: Readonly<Record<string, string>> = {
 	"ant-ling": "ANT_LING_API_KEY",
 	"qwen-token-plan": "QWEN_TOKEN_PLAN_API_KEY",
 	"qwen-token-plan-cn": "QWEN_TOKEN_PLAN_CN_API_KEY",
+	"qwen-token-plan-individual": "QWEN_TOKEN_PLAN_API_KEY",
 	openai: "OPENAI_API_KEY",
 	"azure-openai-responses": "AZURE_OPENAI_API_KEY",
 	nvidia: "NVIDIA_API_KEY",
@@ -59,7 +60,7 @@ function apiKeyEnvVars(provider: string): readonly string[] | undefined {
 	return name ? [name] : undefined;
 }
 
-/** Synchronous provider-key discovery pinned to pi-ai 0.84's public behavior. */
+/** Synchronous provider-key discovery pinned to pi-ai 0.85's public behavior. */
 export function findEngineEnvKeys(provider: string, env?: ProviderEnv): string[] | undefined {
 	const names = apiKeyEnvVars(provider);
 	if (!names) return undefined;

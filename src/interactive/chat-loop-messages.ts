@@ -497,6 +497,7 @@ export function assistantSessionPayload(
 		"model",
 		"responseModel",
 		"responseId",
+		"providerThinkingLevel",
 		"gatewayRouting",
 		"diagnostics",
 	]) {

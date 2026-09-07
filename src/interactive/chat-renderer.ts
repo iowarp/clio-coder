@@ -456,6 +456,7 @@ function richMessageFromEntry(entry: MessageEntry, maxTextChars?: number): Agent
 			"responseModelIdObservation",
 			"responseModel",
 			"responseId",
+			"providerThinkingLevel",
 			"gatewayRouting",
 			"diagnostics",
 			"contextUsageInvalidated",

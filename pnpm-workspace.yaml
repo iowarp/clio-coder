@@ -4,7 +4,6 @@ packages:
 
 # Keep dependency overrides effective across every workspace importer.
 overrides:
-  "@anthropic-ai/sdk": "0.105.0"
   esbuild: "0.28.1"
 
 # Preserve the existing build fallback before `pnpm test`.

@@ -8,9 +8,21 @@ import {
 	WORKER_TOOL_NAME_LIMIT,
 } from "../../src/domains/observability/worker-progress.js";
 import type { WorkerRunEntry } from "../../src/domains/session/index.js";
-import { stripTerminalSequences, visibleWidth } from "../../src/engine/tui.js";
+import {
+	ScrollView,
+	stripTerminalSequences,
+	type Terminal,
+	Text,
+	TuiAltScreen,
+	VStack,
+	visibleWidth,
+} from "../../src/engine/tui.js";
 import { type ChatPanel, createChatPanel } from "../../src/interactive/chat-panel.js";
+import { buildLayout } from "../../src/interactive/layout.js";
+import { showClioOverlayFrame } from "../../src/interactive/overlay-frame.js";
+import { openAskUserOverlay } from "../../src/interactive/overlays/ask-user.js";
 import { renderWorkerEntryLines } from "../../src/interactive/renderers/worker-entry.js";
+import { clioTheme, GLYPH } from "../../src/interactive/theme/index.js";
 import { workerEntriesFromRunEntries } from "../../src/interactive/worker-replay.js";
 import {
 	createWorkerStream,
@@ -330,5 +342,136 @@ describe("worker rendering invariants", () => {
 			renderWorkerEntryLines(completed.entry, 120, { folded: false }),
 			renderWorkerEntryLines(replayed, 120, { folded: false }),
 		);
+	});
+});
+
+// Exercise the public renderer and input path without a PTY or private engine fields.
+class RenderingTerminal implements Terminal {
+	columns = 80;
+	rows = 24;
+	kittyProtocolActive = false;
+	writes: string[] = [];
+	input: (data: string) => void = () => {};
+	start(onInput: (data: string) => void): void {
+		this.input = onInput;
+	}
+	stop(): void {}
+	async drainInput(): Promise<void> {}
+	write(data: string): void {
+		this.writes.push(data);
+	}
+	moveBy(): void {}
+	hideCursor(): void {}
+	showCursor(): void {}
+	clearLine(): void {}
+	clearFromCursor(): void {}
+	clearScreen(): void {}
+	setTitle(): void {}
+	setProgress(): void {}
+}
+
+describe("Pi TUI compatibility", () => {
+	it("keeps framed bounds live through visibility, resize, and removal", () => {
+		const terminal = new RenderingTerminal();
+		const tui = new TuiAltScreen(terminal);
+		let visible = true;
+		const handle = showClioOverlayFrame(tui, new Text("body", 0, 0), {
+			title: "Frame",
+			markerId: "test",
+			width: 40,
+			visible: () => visible,
+		});
+		strictEqual(handle.getBounds(), undefined);
+		tui.start();
+		try {
+			tui.renderNow(true);
+			const bounds = handle.getBounds();
+			ok(bounds);
+			strictEqual(bounds.width, 80, "frame owns the full row around the box");
+			handle.setHidden(true);
+			strictEqual(handle.getBounds(), undefined);
+			handle.setHidden(false);
+			terminal.columns = 60;
+			tui.renderNow(true);
+			strictEqual(handle.getBounds()?.width, 60);
+			visible = false;
+			strictEqual(handle.getBounds(), undefined);
+			visible = true;
+			tui.renderNow(true);
+			ok(handle.getBounds());
+			handle.hide();
+			strictEqual(handle.getBounds(), undefined);
+		} finally {
+			tui.stop();
+		}
+	});
+
+	it("reports the current ask-user frame after replacement and no bounds after close", async () => {
+		const terminal = new RenderingTerminal();
+		const tui = new TuiAltScreen(terminal);
+		const session = openAskUserOverlay(tui, { onCancel() {} });
+		tui.start();
+		try {
+			tui.renderNow(true);
+			const initial = session.getBounds();
+			ok(initial);
+			const answer = session.ask([{ question: "Continue?", options: [{ label: "Yes" }, { label: "No" }] }]);
+			strictEqual(session.getBounds(), undefined, "replacement has not rendered yet");
+			tui.renderNow(true);
+			const compact = session.getBounds();
+			ok(compact);
+			strictEqual(compact.width, terminal.columns - 4);
+			session.setHidden(true);
+			strictEqual(session.getBounds(), undefined);
+			session.setHidden(false);
+			tui.renderNow(true);
+			deepStrictEqual(session.getBounds(), compact);
+			session.close();
+			strictEqual(session.getBounds(), undefined);
+			await answer;
+		} finally {
+			session.close();
+			tui.stop();
+		}
+	});
+
+	it("preserves themed scrollbars, wheel scrolling, follow-end, and the fixed dock", () => {
+		const terminal = new RenderingTerminal();
+		const tui = new TuiAltScreen(terminal);
+		const root = buildLayout(
+			{
+				banner: new Text("banner", 0, 0),
+				chat: new Text(Array.from({ length: 100 }, (_, i) => `line ${i}`).join("\n"), 0, 0),
+				editor: new Text("editor", 0, 0),
+				footer: new Text("footer", 0, 0),
+			},
+			{ mode: "fullscreen", fullscreenScrollbar: "always" },
+		);
+		ok(root instanceof VStack);
+		const scroll = root.children[0];
+		ok(scroll instanceof ScrollView);
+		tui.setLayoutRoot(root);
+		tui.start();
+		try {
+			tui.renderNow(true);
+			const end = scroll.scrollTop;
+			ok(end > 0);
+			strictEqual(scroll.isFollowingEnd, true);
+			const output = terminal.writes.join("");
+			ok(output.includes(clioTheme().fg("frameStrong", GLYPH.barFull)));
+			ok(output.includes(clioTheme().fg("frame", "│")));
+			match(output, /editor/u);
+			match(output, /footer/u);
+			terminal.input("\x1b[<64;2;2M");
+			strictEqual(scroll.scrollTop, end - 1);
+			strictEqual(scroll.isFollowingEnd, false);
+			terminal.input("\x1b[<72;2;2M");
+			strictEqual(scroll.scrollTop, end - 6, "Alt-wheel uses Pi's five-line step");
+			scroll.scrollToEnd();
+			strictEqual(scroll.isFollowingEnd, true);
+			strictEqual(scroll.scrollTop, end);
+		} finally {
+			tui.stop();
+		}
 	});
 });

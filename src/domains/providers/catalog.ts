@@ -122,6 +122,8 @@ export interface CatalogBackedSynthesisInput {
 	runtimeId: string;
 	provider: string;
 	api: Api;
+	/** Use the catalog transport and its endpoint when no explicit target URL is configured. */
+	preferCatalogTransport?: boolean;
 	defaultBaseUrl: string;
 	defaultHeaders?: Record<string, string>;
 }
@@ -134,15 +136,28 @@ export function synthesizeCatalogBackedModel(input: CatalogBackedSynthesisInput)
 		null,
 		input.target.capabilities ?? null,
 	);
+	const api = input.preferCatalogTransport && input.target.url === undefined ? (builtin?.api ?? input.api) : input.api;
+	// A catalog endpoint, compatibility flags, and effort map describe one API.
+	// Explicit endpoints keep the runtime's API contract, even when a catalog
+	// model has moved to another transport (for example OpenRouter Claude).
+	const sameTransport = builtin?.api === api;
+	const catalogFields = { ...builtin };
+	if (input.preferCatalogTransport && !sameTransport) {
+		delete catalogFields.compat;
+		delete catalogFields.thinkingLevelMap;
+	}
 	const pricing = input.target.pricing;
 	const targetHeaders = input.target.auth?.headers;
 	const model: Model<Api> = {
-		...(builtin ?? {}),
+		...catalogFields,
 		id: input.wireModelId,
 		name: `${input.wireModelId} (${input.target.id})`,
-		api: input.api,
+		api,
 		provider: input.provider,
-		baseUrl: input.target.url ?? builtin?.baseUrl ?? input.defaultBaseUrl,
+		baseUrl:
+			input.target.url ??
+			(input.preferCatalogTransport && !sameTransport ? undefined : builtin?.baseUrl) ??
+			input.defaultBaseUrl,
 		reasoning: caps.reasoning,
 		input: caps.vision ? (builtin?.input.includes("image") ? builtin.input : ["text", "image"]) : ["text"],
 		cost: {

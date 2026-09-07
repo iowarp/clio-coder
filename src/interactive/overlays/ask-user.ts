@@ -1270,6 +1270,7 @@ export function openAskUserOverlay(tui: TUI, deps: OpenAskUserOverlayDeps): AskU
 		focus: () => handle?.focus(),
 		unfocus: (options) => (options ? handle?.unfocus(options) : handle?.unfocus()),
 		isFocused: () => handle?.isFocused() ?? false,
+		getBounds: () => handle?.getBounds(),
 		ask: (questions, presentation) => view.begin(questions, presentation),
 		cancel: () => view.cancel(),
 		close,

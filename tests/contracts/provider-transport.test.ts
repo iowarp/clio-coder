@@ -70,6 +70,7 @@ function inertOverlayHandle(onHide?: () => void): OverlayHandle {
 		focus: () => undefined,
 		unfocus: () => undefined,
 		isFocused: () => true,
+		getBounds: () => undefined,
 	};
 }
 

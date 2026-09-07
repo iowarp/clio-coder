@@ -527,6 +527,7 @@ export function showClioOverlayFrame(
 		unfocus: (unfocusOptions?: OverlayUnfocusOptions): void =>
 			unfocusOptions ? handle.unfocus(unfocusOptions) : handle.unfocus(),
 		isFocused: (): boolean => handle.isFocused(),
+		getBounds: () => handle.getBounds(),
 	};
 }
 

@@ -170,6 +170,7 @@ describe("active decisions on actual operator dispatch paths", () => {
 									focus: noop,
 									unfocus: noop,
 									isFocused: () => true,
+									getBounds: () => undefined,
 								};
 							},
 						};
