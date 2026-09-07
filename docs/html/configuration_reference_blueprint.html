@@ -3727,6 +3727,11 @@
 <td>One of twelve recipe-declarable report kinds (<code>scout-report</code>, <code>mutation-report</code>, <code>delegation-plan</code>, ...) or <code>architect-plan</code>; <code>council-ballot</code> may only arrive as a coordinator override.</td>
 </tr>
 <tr>
+<td><code>resultContract.maxSummaryBytes</code></td>
+<td>16384</td>
+<td>Optional integer between 1 and 32768 allowed only for <code>mutation-report</code>; sets the inline summary byte allowance before model dispatch.</td>
+</tr>
+<tr>
 <td><code>resultContract.path</code></td>
 <td></td>
 <td>Workspace-relative plan file path required only by <code>architect-plan</code> and refused for any other kind; absolute or <code>..</code> paths are rejected.</td>
@@ -4090,6 +4095,11 @@
 <td>Default persona for the batch, max 8000 chars.</td>
 </tr>
 <tr>
+<td><code>dispatch.result_summary_max_bytes</code></td>
+<td>policy</td>
+<td>Sets the inline summary byte allowance for <code>mutation-report</code> contracts (1 to 32768, default 16384). Inherited by mutating tasks; ignored by non-mutation steps.</td>
+</tr>
+<tr>
 <td><code>dispatch.review</code></td>
 <td>policy</td>
 <td>Reviewer gate for one task: a read-only reviewer verdicts pass, revise, or fail, and revise re-runs the builder with the findings.</td>
@@ -4223,6 +4233,11 @@
 <td><code>dispatch.tasks[].node</code></td>
 <td>policy</td>
 <td>Fleet node pin: local or a fleet.nodes id.</td>
+</tr>
+<tr>
+<td><code>dispatch.tasks[].result_summary_max_bytes</code></td>
+<td>policy</td>
+<td>Per-task summary allowance override for <code>mutation-report</code> contracts (1 to 32768). Fails validation on non-mutation steps.</td>
 </tr>
 <tr>
 <td><code>dispatch.tasks[].target</code></td>

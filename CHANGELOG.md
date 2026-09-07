@@ -37,6 +37,9 @@ All notable changes to Clio Coder are documented in this file. The format follow
 - Operator `/run` and approved fleet executions snapshot active decision references before admission and retain them in requests, envelopes, and sealed receipts (#340).
 - Simulated terminal-selection tests own and restore their `TERM` environment, so they pass in headless runners while retaining the production dumb-terminal refusal check (#353).
 - Relative numerical comparisons avoid intermediate subtraction overflow for finite extreme values, while retaining precision for nearby values and independent absolute and ULP checks (#338).
+- Support deterministic architecture seed generation with `clio-coder context map`, retry pending wiki pages with `clio-coder context wiki --retry-pending`, and resolve `--target` from layered project settings.
+- Support configurable inline summary allowances for `mutation-report` contracts up to 32,768 bytes via recipe `maxSummaryBytes` and dispatch `result_summary_max_bytes`, while bounding commit and architect-plan messages to 1,000 bytes.
+- Document the Archify architecture mapping honesty boundary across seed generation, model refinement, deliverable validation, and visual review.
 
 ## 0.4.4 - 2026-09-05
 

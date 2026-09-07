@@ -929,6 +929,7 @@ Keys the recipe loader reads from `.clio-coder/agents/<id>.md` and the builtin r
 | `projectContextTier` |  | Enum `none \| bounded`; `bounded` injects the capped project name/conventions/invariants projection as a dynamic message and `none` skips the CLIO-CODER.md read. |
 | `resultContract` |  | Required object naming the typed result shape the worker must return; the terminal output is validated and repaired against it. |
 | `resultContract.kind` |  | One of twelve recipe-declarable report kinds (`scout-report`, `mutation-report`, `delegation-plan`, ...) or `architect-plan`; `council-ballot` may only arrive as a coordinator override. |
+| `resultContract.maxSummaryBytes` | 16384 | Optional integer between 1 and 32768 allowed only for `mutation-report`; sets the inline summary byte allowance before model dispatch. |
 | `resultContract.path` |  | Workspace-relative plan file path required only by `architect-plan` and refused for any other kind; absolute or `..` paths are rejected. |
 | `skills` |  | Array of unique skill names bound to files at registry load; they inject knowledge into the prompt, require the `context` tool, and never widen tool authority. |
 | `tags` |  | Array of unique lowercase routing hints shown in the catalog and matched against task signals when ranking candidate agents. |
@@ -1021,6 +1022,7 @@ Arguments the model can send on `dispatch`, `bash`, `context`, and `verify`, gro
 | `dispatch.model` | policy | Default model override. |
 | `dispatch.node` | policy | Default fleet node pin (omit for automatic placement). |
 | `dispatch.persona` | task | Default persona for the batch, max 8000 chars. |
+| `dispatch.result_summary_max_bytes` | policy | Sets the inline summary byte allowance for `mutation-report` contracts (1 to 32768, default 16384). Inherited by mutating tasks; ignored by non-mutation steps. |
 | `dispatch.review` | policy | Reviewer gate for one task: a read-only reviewer verdicts pass, revise, or fail, and revise re-runs the builder with the findings. |
 | `dispatch.review.max_cycles` | policy | Review/revise cycles before an operator decision (default 2, max 4). |
 | `dispatch.review.model` | policy | Model for the reviewer. |
@@ -1048,6 +1050,7 @@ Arguments the model can send on `dispatch`, `bash`, `context`, and `verify`, gro
 | `dispatch.tasks[].intent` | policy | Per-task intent (`$defs.intent`); it must fit inside the batch `intent`. |
 | `dispatch.tasks[].model` | policy | Per-task model override. |
 | `dispatch.tasks[].node` | policy | Fleet node pin: local or a fleet.nodes id. |
+| `dispatch.tasks[].result_summary_max_bytes` | policy | Per-task summary allowance override for `mutation-report` contracts (1 to 32768). Fails validation on non-mutation steps. |
 | `dispatch.tasks[].target` | policy | Per-task target id override. |
 | `dispatch.tasks[].task` | task | The assignment, with expected output and constraints. |
 | `dispatch.tasks[].worktree` | policy | Run this writer in an isolated git worktree. |

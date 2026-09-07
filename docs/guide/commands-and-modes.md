@@ -86,9 +86,10 @@ For process exit codes, stdout deliverable guarantees, and machine-readable JSON
 | `clio-coder context` | Show project context status, preload class, codewiki freshness, and the codewiki digest when present. |
 | `clio-coder context init [--preview] [--heuristic] [--yes] [--json] [--adopt] [--global] [--propose\|--apply\|--rewrite] [--target <id> [--model <id>] [--thinking <level>]]` | Explore the repo and bootstrap or update project context: `CLIO-CODER.md`, `.clio-coder/codewiki.json`, and `.clio-coder/state.json`. |
 | `clio-coder context refresh [--wiki]` | Rebuild the codewiki and state without touching `CLIO-CODER.md`; with `--wiki`, update an existing Markdown wiki. |
-| `clio-coder context wiki [--update] [--status] [--depth auto\|simple\|medium\|detailed] [--target <id>] [--model <id>] [--thinking off\|low\|medium\|high]` | Generate, update, or inspect the agent-authored Markdown wiki under `.clio-coder/wiki/`. |
+| `clio-coder context wiki [--update\|--retry-pending] [--status] [--depth auto\|simple\|medium\|detailed] [--target <id>] [--model <id>] [--thinking off\|low\|medium\|high]` | Generate, update, or inspect the agent-authored Markdown wiki under `.clio-coder/wiki/`. |
 | `clio-coder context reset [--all] [--yes]` | Clear accumulated project context artifacts; `--all` also removes `CLIO-CODER.md`. `--yes` (or `-y`) answers every confirmation and is required when stdin is not a terminal. |
 | `clio-coder context index [--json]` | Build the structural codewiki index without model calls; writes `.clio-coder/codewiki.json` and `.clio-coder/state.json` and prints coverage plus a structural hash. |
+| `clio-coder context map [--out <path>] [--json]` | Write an archify architecture seed from the structural index without model calls. |
 | `clio-coder context replay (--sessions <path>... \| --synthetic <ids>) [--policies <ids>] [--budgets <tokens>] [--threshold <ratio>] [--target <ratio>] [--protect-last-turns <n>] [--min-evictable-tokens <n>] [--seed <n>] [--no-filter] [--json <out>] [--md <out>]` | Replay working-set policies over Clio session ledgers or the seeded procedural corpora and report retention, precision, token savings, recall cost, cold-prefix cost, saturation, and summary headroom. |
 | `clio-coder context working-set --session <id\|path>` | Inspect one session's durable working-set fold and path-index summary without modifying the ledger. |
 
@@ -137,6 +138,7 @@ A headless turn (`clio-coder run`) starts a fresh session unless `--session <id>
 - `--session` and `--continue` are mutually exclusive. Specifying both causes the invocation to fail with exit code 2 before execution.
 - Session continuity options apply strictly to main-agent execution. They are non-applicable to `--agent` fleet dispatches because dispatched agents execute in isolated worker processes with independent transcripts; specifying session flags alongside `--agent` exits with code 2.
 - A named session that cannot be resumed (such as an unknown session ID or unreadable history) fails the run with exit code 2 before any model call is initiated.
+- An explicit `--target <id>` resolves targets from layered project settings (`.clio-coder/settings.yaml`, `.clio-coder/settings.local.yaml`) as well as user settings before applying target-not-found validation.
 - The session ID is discoverable via the `session` event when running under `--json` mode and on stderr via the `clio-coder run: session <id>` line in text mode. Standard output remains reserved for the assistant answer alone.
 
 ### JSON Event Streaming and Wire Projection Promise
@@ -640,6 +642,8 @@ structural hash. The same builder is used by `clio-coder context init`, `clio-co
 refresh`, session freshness checks, tool-demand backfill, and in-session
 incremental updates.
 
+`clio-coder context map` derives an archify architecture specification from the structural index without model calls and writes it to `.clio-coder/artifacts/maps/<repo>.architecture.json` (or `--out <path>`). Map generation reconciles the existing structural index before mapping; missing index refuses, naming `clio-coder context index`. Pinned source citations require that the workspace is clean at repository root and indexed file bytes match current files and Git blobs under a GitHub origin and full `HEAD` revision. Unknown or dirty source states fall back cleanly to usable uncited seeds; `--json` reports path, counts, repository metadata, reconciled index status, and source state (`clean`, `dirty`, or `unknown`). Clio produces the deterministic seed while Archify validates and delivers it; custom model-authored maps can remain layout-invalid until refined, and visual acceptance requires human and browser review.
+
 ### Working-set replay
 
 `clio-coder context replay --sessions <path>...` accepts individual session directories,
@@ -691,19 +695,28 @@ matter after the run, so no dispatch writes them. `.clio-coder/wiki/meta.json` r
 the page list, model label, content hash, git head, indexed source-tree hash,
 and the plan.
 
-Each page dispatch is bounded on its own wall clock, and the run is bounded
-between pages. Neither bound loses work: a page that fails or times out is
-recorded as still owed and the run continues to the next one, and every finished
-page is assembled and promoted. When `generation.pagesWritten` is below
-`generation.pagesPlanned`, run `clio-coder context wiki --update` to finish the rest;
-it resumes from the plan rather than starting over.
+Ordinary planner, page, and whole-run time and tool estimates are advisory across
+generation, not automatic aborts. An explicit caller deadline (`timeout_ms`) or
+operator cancellation remains authoritative. Failed writers remain pending; admission
+rejection does not consume a writer attempt. When `generation.pagesWritten` is below
+`generation.pagesPlanned`, run `clio-coder context wiki --update` to continue pending pages
+and refresh stale pages based on changed source dependencies, or run `clio-coder context wiki --retry-pending`
+to retry each pending page once, including exhausted pages, without erasing cumulative attempts
+or replanning at the same depth.
+
+Coverage depth is controlled by `--depth auto|simple|medium|detailed` and is harness-owned;
+explicit upgrades and downgrades requeue coverage while retaining existing prose, and
+default retries retain saved depth. Both original writer output and saved pages pass nonmutating
+mechanical validation (missing/escaping paths, invalid line ranges, malformed source/test
+metadata, or empty bodies keep pages pending); mechanical checks do not establish semantic
+accuracy or that the model read the source.
 
 `clio-coder context wiki --update` requests update mode explicitly. It rewrites the
 pages whose front-matter `sources` git reports as changed since the recorded
-wiki `gitHead`, and leaves the rest alone.
+wiki `gitHead`, and leaves the rest alone; it is not a promise to overcome exhausted attempts.
 `clio-coder context wiki --status` is read-only: it prints whether wiki metadata is
 present, page count, `updatedAt`, recorded `gitHead`, whether that head differs
-from current `HEAD`, and how many planned pages remain unwritten. It dispatches
+from current `HEAD`, and retained failure diagnostics for unwritten planned pages. It dispatches
 nothing and spends no model tokens.
 
 `clio-coder context refresh` rebuilds only the structural codewiki and state. It does
