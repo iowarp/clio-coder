@@ -751,8 +751,21 @@ export async function compact(input: CompactInput): Promise<CompactResult> {
 		...input.entries.slice(boundaryStart, cut.firstKeptEntryIndex),
 	]);
 	const firstKept = input.entries[cut.firstKeptEntryIndex] ?? null;
+	// The newest complete exchange can begin immediately after the checkpoint.
+	// Its earlier retained suffix is still live context, even though it sits
+	// before boundaryStart in the append-only ledger. Summarize that suffix
+	// with the canonical prior summary instead of declaring nothing to compact.
+	// Never use this path to cross a protected cut or to re-summarize a bare
+	// checkpoint with no retained work; the caller still enforces request fit.
+	const priorSuffix = previousContextEntries.slice(1);
+	const summarizePriorSuffix =
+		pre.length === 0 &&
+		turnPrefix.length === 0 &&
+		firstKept !== null &&
+		cut.firstKeptEntryIndex >= boundaryStart &&
+		priorSuffix.some((entry) => entry.kind === "message" || entry.kind === "bashExecution");
 
-	if (pre.length === 0 && turnPrefix.length === 0) {
+	if (pre.length === 0 && turnPrefix.length === 0 && !summarizePriorSuffix) {
 		return {
 			summary: "",
 			firstKeptEntryIndex: cut.firstKeptEntryIndex,
@@ -773,9 +786,12 @@ export async function compact(input: CompactInput): Promise<CompactResult> {
 	const maxTokens = Math.min(Math.floor(input.model.maxTokens), Math.max(1024, Math.floor(reserveTokens * 0.8)));
 	const summaryParts: string[] = [];
 	let usage: CompactionUsage | undefined;
-	if (pre.length > 0) {
-		const conversationText = serializeConversation(pre);
-		const userText = buildUserText(conversationText, input.instructions, previousContextText);
+	if (pre.length > 0 || summarizePriorSuffix) {
+		const conversationText = serializeConversation(summarizePriorSuffix ? priorSuffix : pre);
+		const previousText = summarizePriorSuffix
+			? serializeConversation(previousContextEntries.slice(0, 1))
+			: previousContextText;
+		const userText = buildUserText(conversationText, input.instructions, previousText);
 		const historySummary = await runSummaryStream(input, userText, systemPrompt, maxTokens);
 		usage = addCompactionUsage(usage, historySummary.usage);
 		if (historySummary.text.length === 0) throw new Error("compaction returned an empty history summary");
@@ -822,7 +838,7 @@ export async function compact(input: CompactInput): Promise<CompactResult> {
 		firstKeptEntryIndex: cut.firstKeptEntryIndex,
 		firstKeptTurnId: firstKept?.turnId ?? null,
 		tokensBefore,
-		messagesSummarized: pre.length + turnPrefix.length,
+		messagesSummarized: pre.length + turnPrefix.length + (summarizePriorSuffix ? priorSuffix.length : 0),
 		isSplitTurn: cut.isSplitTurn,
 		...(usage !== undefined ? { usage } : {}),
 		...(skillContext !== undefined ? { skillContext } : {}),
