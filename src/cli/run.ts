@@ -2,6 +2,7 @@ import { type ClioSettings, readSettings } from "../core/config.js";
 import { loadDomains } from "../core/domain-loader.js";
 import { readFileArgsAsync } from "../core/file-references.js";
 import { withRunOverrides } from "../core/run-overrides.js";
+import { readStrictLayeredSettings } from "../core/settings-layers.js";
 import { clioDataDir } from "../core/xdg.js";
 import type { AgentsContract } from "../domains/agents/contract.js";
 import { AgentsDomainModule } from "../domains/agents/index.js";
@@ -101,15 +102,15 @@ function hasDispatchOnlyOptions(parsed: RunCliArgs): boolean {
 
 /**
  * True when an explicit --target override names a target that is not in
- * settings.targets. `readSettings().targets` is the same source the runtime
- * resolver checks (providers.getTarget), so this mirrors its `target-not-found`
+ * effective settings.targets. Include project overlays just as the runtime
+ * resolver does (providers.getTarget), so this mirrors its `target-not-found`
  * verdict without booting the providers domain. Unreadable/invalid settings
  * fall through (returns false) so the normal boot path surfaces that error
  * instead of a misleading "target not found".
  */
-function explicitTargetMissing(targetId: string): boolean {
+export function explicitTargetMissing(targetId: string): boolean {
 	try {
-		return !readSettings().targets.some((target) => target.id === targetId);
+		return !readStrictLayeredSettings(process.cwd()).settings.targets.some((target) => target.id === targetId);
 	} catch {
 		return false;
 	}
