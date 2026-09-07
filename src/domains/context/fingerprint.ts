@@ -118,11 +118,24 @@ function accumulateFile(
 	return 0;
 }
 
-export function computeFingerprint(cwd: string, codewiki: Codewiki | null = readCodewiki(cwd)): Fingerprint {
+export interface ComputeFingerprintOptions {
+	/**
+	 * Line total recorded by an artifact the caller chose not to parse. The
+	 * tree hash never depends on it; it only keeps `loc` byte-identical to the
+	 * fingerprint the artifact's own build stamped.
+	 */
+	artifactLoc?: number;
+}
+
+export function computeFingerprint(
+	cwd: string,
+	codewiki: Codewiki | null = readCodewiki(cwd),
+	options: ComputeFingerprintOptions = {},
+): Fingerprint {
 	const files = enumerateWorkspaceFiles(cwd, EXCLUDED_DIRS).filter(isIndexablePath);
 
 	const hash = createTreeHash();
-	const artifactLoc = locFromCodewiki(codewiki);
+	const artifactLoc = options.artifactLoc ?? locFromCodewiki(codewiki);
 	let loc = 0;
 	for (const relPath of files) loc += accumulateFile(cwd, relPath, hash, artifactLoc);
 
@@ -170,13 +183,13 @@ export async function computeFingerprintAsync(
 export function computeFingerprintCached(
 	cwd: string,
 	codewiki: Codewiki | null = readCodewiki(cwd),
-	options: FingerprintCacheOptions = {},
+	options: FingerprintCacheOptions & ComputeFingerprintOptions = {},
 ): Fingerprint {
 	const now = Date.now();
 	const cached = cachedFingerprints.get(cwd);
 	if (cached && cached.expiresAtMs > now) return cached.fingerprint;
 
-	const fingerprint = computeFingerprint(cwd, codewiki);
+	const fingerprint = computeFingerprint(cwd, codewiki, options);
 	const ttlMs = options.ttlMs ?? DEFAULT_FINGERPRINT_CACHE_TTL_MS;
 	cachedFingerprints.set(cwd, {
 		fingerprint,

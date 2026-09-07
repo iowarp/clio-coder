@@ -614,6 +614,7 @@ function agentRoleToolWarnings(providers: ProvidersContract, settings: Readonly<
 async function resolveCompactionModel(
 	settings: ClioSettings,
 	providers: ProvidersContract,
+	signal?: AbortSignal,
 ): Promise<CompactionResolution | null> {
 	const override = settings.context.compaction.model;
 	let targetId = settings.chat.target;
@@ -634,7 +635,7 @@ async function resolveCompactionModel(
 		wireModelId = selected.ref.model;
 	}
 	if (!targetId || !wireModelId) return null;
-	await prepareBackgroundModelMetadata(providers, targetId);
+	await prepareBackgroundModelMetadata(providers, targetId, signal);
 	const status = providers.list().find((entry) => entry.target.id === targetId);
 	if (!status?.available) {
 		throw new Error("context.compaction.model target is unavailable; check the selected target with clio-coder targets");
@@ -673,7 +674,7 @@ async function resolveCompactionModel(
 	applyModelCapabilityPatch(model, refined.capabilities);
 	let apiKey: string | undefined = LOCAL_API_KEY_FALLBACK;
 	if (targetRequiresAuth(route.target, route.runtime)) {
-		const auth = await providers.auth.resolveForTarget(route.target, route.runtime);
+		const auth = await providers.auth.resolveForTarget(route.target, route.runtime, signal ? { signal } : undefined);
 		if (!auth.available || !auth.apiKey) {
 			throw new Error(
 				"context.compaction.model authentication is unavailable; authenticate the selected target with clio-coder auth",
@@ -794,7 +795,7 @@ async function runCompactionFlow(
 	instructions?: string,
 	trigger?: CompactionTrigger,
 	observability?: BackgroundMemoryUsageSink,
-	budget?: Pick<CompactInput, "keepRecentTokens" | "preserveUserTurnId" | "skillContextState">,
+	budget?: Pick<CompactInput, "keepRecentTokens" | "preserveUserTurnId" | "skillContextState" | "signal">,
 	summarize?: CompactInput["summarize"],
 ): Promise<CompactResult | null> {
 	const meta = session.current();
@@ -807,8 +808,11 @@ async function runCompactionFlow(
 		session.current()?.id === meta.id && (session.tree(meta.id).leafId ?? undefined) === activeLeafTurnId;
 	const entries = filterEntriesToActivePath(readSessionEntriesForCompact(meta.id), activeLeafTurnId);
 	if (entries.length === 0) return null;
+	budget?.signal?.throwIfAborted();
 	const systemPrompt = await readCompactionSystemPrompt(settings.context.compaction.systemPrompt, meta.cwd);
-	const resolved = await resolveCompactionModel(settings, providers);
+	budget?.signal?.throwIfAborted();
+	const resolved = await resolveCompactionModel(settings, providers, budget?.signal);
+	budget?.signal?.throwIfAborted();
 	if (!resolved) {
 		throw new Error("no model configured; set chat.target + chat.model");
 	}
@@ -861,6 +865,10 @@ async function runCompactionFlow(
 		throw error;
 	} finally {
 		releaseEndpointSlot();
+	}
+	if (budget?.signal?.aborted) {
+		preserveCalls();
+		budget.signal.throwIfAborted();
 	}
 	if (!isOriginCurrent()) {
 		preserveCalls();
@@ -949,7 +957,7 @@ export function createProductionAutoCompact(
 ): (
 	instructions?: string,
 	trigger?: CompactionTrigger,
-	budget?: Pick<CompactInput, "keepRecentTokens" | "preserveUserTurnId" | "skillContextState">,
+	budget?: Pick<CompactInput, "keepRecentTokens" | "preserveUserTurnId" | "skillContextState" | "signal">,
 ) => Promise<CompactResult | null> {
 	return (instructions, trigger, budget) =>
 		runCompactionFlow(session, getSettings(), providers, instructions, trigger, observability, budget, summarize);

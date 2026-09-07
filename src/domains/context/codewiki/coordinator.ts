@@ -4,9 +4,11 @@ import { resolve } from "node:path";
 import { pathToFileURL } from "node:url";
 import { Worker } from "node:worker_threads";
 import { withStateFileLock } from "../../../core/state-file-lock.js";
-import { codewikiPath, readCodewiki, writeCodewiki } from "./artifact.js";
+import { codewikiNeedsBackfill, codewikiPath, readCodewiki, writeCodewiki } from "./artifact.js";
 import type {
+	CodewikiArtifactRef,
 	CodewikiBuildWorkerMessage,
+	CodewikiBuildWorkerOutcome,
 	CodewikiBuildWorkerRequest,
 	CodewikiBuildWorkerResult,
 } from "./build-worker-protocol.js";
@@ -30,7 +32,30 @@ function buildWorkerUrl(): URL {
 	);
 }
 
-async function executeInWorker(request: CodewikiBuildWorkerRequest): Promise<CodewikiBuildWorkerResult> {
+function artifactRef(current: Codewiki): CodewikiArtifactRef {
+	return {
+		source: "artifact",
+		needsBackfill: codewikiNeedsBackfill(current),
+		loc: current.files.reduce((sum, file) => (file.lang === "config" ? sum : sum + file.loc), 0),
+	};
+}
+
+/**
+ * Hand the worker a reference to the committed artifact instead of the parsed
+ * object. Cloning the object serializes it on this thread, deserializes it on
+ * the worker, and repeats both on the way back, so the cost grows with index
+ * size and lands on the thread that renders the TUI. The substitution is made
+ * only when the selector returned the very object this transaction read under
+ * the lease (`held`), which is the committed file by construction; any other
+ * object is shipped as it was given.
+ */
+function byReference(request: CodewikiBuildWorkerRequest, held: Codewiki | null): CodewikiBuildWorkerRequest {
+	if (request.kind === "build" || request.current === null || "source" in request.current) return request;
+	if (held === null || request.current !== held) return request;
+	return { ...request, current: artifactRef(held) };
+}
+
+async function executeInWorker(request: CodewikiBuildWorkerRequest): Promise<CodewikiBuildWorkerOutcome> {
 	// Do not inherit test-runner/application `--import` hooks. In particular,
 	// `--import tsx` would be re-resolved from a hermetic fixture cwd before the
 	// source bootstrap can install its absolute loader.
@@ -44,7 +69,7 @@ async function executeInWorker(request: CodewikiBuildWorkerRequest): Promise<Cod
 	});
 	let timer: NodeJS.Timeout | undefined;
 	try {
-		return await new Promise<CodewikiBuildWorkerResult>((resolve, reject) => {
+		return await new Promise<CodewikiBuildWorkerOutcome>((resolve, reject) => {
 			let settled = false;
 			const finish = (callback: () => void): void => {
 				if (settled) return;
@@ -154,7 +179,10 @@ export function coordinateCodewikiWrite(
 			const current = options.readCurrent?.(workspace) ?? readCodewiki(workspace);
 			const request = await select(current, workspace);
 			if (!request) return null;
-			const worker = await executeInWorker({ ...request, cwd: workspace });
+			const outcome = await executeInWorker(byReference({ ...request, cwd: workspace }, current));
+			const codewiki = outcome.codewiki ?? current;
+			if (!codewiki) throw new Error("codewiki reconciliation returned no artifact");
+			const worker: CodewikiBuildWorkerResult = { codewiki, fingerprint: outcome.fingerprint, changed: outcome.changed };
 			await options.beforeCommit?.(worker, workspace);
 			const wrote = worker.changed || !existsSync(codewikiPath(workspace));
 			if (wrote) writeCodewiki(workspace, worker.codewiki);
@@ -171,11 +199,13 @@ export function coordinateCodewikiExclusive<T>(cwd: string, task: (workspace: st
 }
 
 /** Build a preview candidate in the worker without acquiring a writer lease or touching disk. */
-export function buildCodewikiCandidate(
+export async function buildCodewikiCandidate(
 	cwd: string,
 	language: Codewiki["language"],
 ): Promise<CodewikiBuildWorkerResult> {
-	return executeInWorker({ kind: "build", cwd: resolve(cwd), language });
+	const outcome = await executeInWorker({ kind: "build", cwd: resolve(cwd), language });
+	if (!outcome.codewiki) throw new Error("codewiki build returned no artifact");
+	return { codewiki: outcome.codewiki, fingerprint: outcome.fingerprint, changed: outcome.changed };
 }
 
 /** Await every writer already admitted for one workspace, including idle refresh. */

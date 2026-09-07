@@ -1,15 +1,21 @@
 import { deepStrictEqual, ok, rejects, strictEqual } from "node:assert/strict";
-import { mkdirSync, readFileSync, statSync, unlinkSync, writeFileSync } from "node:fs";
+import { existsSync, mkdirSync, readFileSync, statSync, unlinkSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
 import { afterEach, beforeEach, describe, it } from "node:test";
+import { BusChannels } from "../../src/core/bus-events.js";
 import { createSafeEventBus } from "../../src/core/event-bus.js";
+import { runContextClear } from "../../src/domains/context/clear.js";
 import { codewikiPath, readCodewiki } from "../../src/domains/context/codewiki/artifact.js";
-import { executeCodewikiBuild } from "../../src/domains/context/codewiki/build-operation.js";
+import {
+	executeCodewikiBuild,
+	executeCodewikiBuildOutcome,
+} from "../../src/domains/context/codewiki/build-operation.js";
 import { coordinateCodewikiWrite } from "../../src/domains/context/codewiki/coordinator.js";
 import { buildCodewiki, syncCodewiki, updateCodewikiPaths } from "../../src/domains/context/codewiki/indexer.js";
 import { createContextBundle } from "../../src/domains/context/extension.js";
 import { computeFingerprint } from "../../src/domains/context/fingerprint.js";
-import { readClioState } from "../../src/domains/context/state.js";
+import { renderPromptContext } from "../../src/domains/context/prompt-context.js";
+import { readClioState, statePath, writeClioState } from "../../src/domains/context/state.js";
 import { loadCodewikiForTool } from "../../src/tools/codewiki/shared.js";
 import { type IsolatedClioEnv, isolateClioEnv } from "../harness/scratch-env.js";
 
@@ -190,6 +196,156 @@ describe("codewiki global freshness", () => {
 		);
 		strictEqual(ensured.codewiki, current);
 		strictEqual(ensured.changed, false);
+	});
+
+	it("reconciles an artifact handed by reference without parsing or returning it", async () => {
+		// The coordinator names the committed artifact instead of cloning it into
+		// the worker. Unchanged, the worker answers with the fingerprint alone and
+		// the same `loc` the artifact's own build stamped; stale, it reads the
+		// file itself and returns the reconciled index.
+		const cwd = isolated.dir;
+		const path = join(cwd, "a.ts");
+		writeFileSync(path, "export const one = 1;\n");
+		const committed = await coordinateCodewikiWrite(cwd, () => ({ kind: "build", cwd, language: "typescript" }));
+		ok(committed);
+		const previous = committed.worker.fingerprint;
+		const ref = { source: "artifact", needsBackfill: false, loc: previous.loc } as const;
+		const unchanged = await executeCodewikiBuildOutcome(
+			{ kind: "ensure", cwd, current: ref, previous },
+			{
+				readFile: () => {
+					throw new Error("unchanged ensure read source");
+				},
+			},
+		);
+		strictEqual(unchanged.codewiki, null);
+		strictEqual(unchanged.changed, false);
+		deepStrictEqual(unchanged.fingerprint, previous);
+		// The coordinator substitutes the object it already holds.
+		const ensured = await coordinateCodewikiWrite(cwd, (current) => ({ kind: "ensure", cwd, current, previous }));
+		ok(ensured);
+		strictEqual(ensured.worker.changed, false);
+		strictEqual(ensured.wrote, false);
+		deepStrictEqual(ensured.worker.fingerprint, previous);
+		strictEqual(ensured.codewiki.files.length, 1);
+
+		writeFileSync(path, "export const one = 1;\nexport const two = 2;\n");
+		const stale = await executeCodewikiBuildOutcome({ kind: "ensure", cwd, current: ref, previous });
+		ok(stale.codewiki);
+		strictEqual(stale.changed, true);
+		strictEqual(
+			stale.codewiki.symbols.some((symbol) => symbol.name === "two"),
+			true,
+		);
+		const incremental = await executeCodewikiBuildOutcome({
+			kind: "incremental",
+			cwd,
+			current: ref,
+			paths: ["a.ts"],
+			previous,
+		});
+		ok(incremental.codewiki);
+		strictEqual(
+			incremental.codewiki.symbols.some((symbol) => symbol.name === "two"),
+			true,
+		);
+	});
+
+	it("renders the prompt markers from state and the artifact's presence, not its contents", async () => {
+		const cwd = isolated.dir;
+		writeFileSync(join(cwd, "a.ts"), "export const one = 1;\n");
+		const committed = await coordinateCodewikiWrite(cwd, () => ({ kind: "build", cwd, language: "typescript" }));
+		ok(committed);
+		const fingerprint = committed.worker.fingerprint;
+		writeClioState(cwd, { version: 1, projectType: "rust", fingerprint, codewikiVersion: committed.codewiki.version });
+		// The artifact file is unparseable, yet its presence plus a fingerprint
+		// that matches the tree is what the marker reports; nothing here parses
+		// the JSON, which on a large repository is the cost this path shed.
+		writeFileSync(codewikiPath(cwd), "{ not json");
+		const fresh = renderPromptContext(cwd);
+		strictEqual(fresh.supportFragments.includes("<project-type>rust</project-type>"), true);
+		strictEqual(fresh.supportFragments.includes("<codewiki>available; use code_nav</codewiki>"), true);
+		deepStrictEqual(fresh.warnings, []);
+		writeClioState(cwd, { version: 1, projectType: "rust", fingerprint: { ...fingerprint, treeHash: "0".repeat(64) } });
+		const stale = renderPromptContext(cwd);
+		strictEqual(
+			stale.supportFragments.includes("<codewiki>available (stale; run /context refresh); use code_nav</codewiki>"),
+			true,
+		);
+		// What makes "available" truthful for an unparseable file: the tool path
+		// reads null for it and rebuilds from source under the lease before
+		// answering, and the rebuilt artifact is what later calls read.
+		strictEqual(readCodewiki(cwd), null);
+		const repaired = await loadCodewikiForTool(cwd);
+		ok(repaired.ok);
+		strictEqual(
+			repaired.codewiki.files.some((file) => file.path === "a.ts"),
+			true,
+		);
+		strictEqual(readCodewiki(cwd)?.files.length, 1);
+		deepStrictEqual(readClioState(cwd)?.fingerprint, fingerprint);
+	});
+
+	it("rebuilds when a referenced artifact vanished and refuses an incremental over it", async () => {
+		const cwd = isolated.dir;
+		writeFileSync(join(cwd, "a.ts"), "export const one = 1;\n");
+		const committed = await coordinateCodewikiWrite(cwd, () => ({ kind: "build", cwd, language: "typescript" }));
+		ok(committed);
+		const previous = committed.worker.fingerprint;
+		const ref = { source: "artifact", needsBackfill: false, loc: previous.loc } as const;
+		for (const damage of ["delete", "corrupt"] as const) {
+			if (damage === "delete") unlinkSync(codewikiPath(cwd));
+			else writeFileSync(codewikiPath(cwd), "{ not json");
+			// Same tree, so the unchanged fast path answers first and never needs
+			// the artifact: it is exactly as fresh as the fingerprint says.
+			const unchanged = await executeCodewikiBuildOutcome({ kind: "ensure", cwd, current: ref, previous });
+			strictEqual(unchanged.codewiki, null);
+			strictEqual(unchanged.changed, false);
+			// A drifted fingerprint needs the contents, and a reference the disk no
+			// longer honors becomes a full rebuild from source rather than an error.
+			const drifted = { ...previous, treeHash: "0".repeat(64) };
+			const rebuilt = await executeCodewikiBuildOutcome({ kind: "ensure", cwd, current: ref, previous: drifted });
+			ok(rebuilt.codewiki);
+			strictEqual(rebuilt.changed, true);
+			strictEqual(
+				rebuilt.codewiki.symbols.some((symbol) => symbol.name === "one"),
+				true,
+			);
+			deepStrictEqual(rebuilt.fingerprint, previous);
+			await rejects(
+				executeCodewikiBuildOutcome({ kind: "incremental", cwd, current: ref, paths: ["a.ts"], previous }),
+				/unreadable; rebuild it/,
+			);
+		}
+	});
+
+	it("fences reset behind in-flight writers and lets nothing resurrect the artifact afterwards", async () => {
+		const cwd = isolated.dir;
+		writeFileSync(join(cwd, "a.ts"), "export const one = 1;\n");
+		const bundle = createContextBundle({ bus: createSafeEventBus(), getContract: () => undefined });
+		// A build admitted before the reset commits first, under the same lease
+		// and queue; the reset then removes what it wrote, and an incremental
+		// queued after the reset is a no-op because there is no artifact to update.
+		const building = coordinateCodewikiWrite(cwd, () => ({ kind: "build", cwd, language: "typescript" }));
+		const cleared = runContextClear({ cwd, confirmContext: () => true });
+		bundle.contract.noteFileChanges(["a.ts"], cwd);
+		const [built, reset] = await Promise.all([building, cleared]);
+		ok(built);
+		strictEqual(built.wrote, true);
+		strictEqual(reset.action, "cleared");
+		deepStrictEqual(reset.removed, [".clio-coder/codewiki.json"]);
+		await bundle.extension.stop?.();
+		strictEqual(existsSync(codewikiPath(cwd)), false);
+		strictEqual(existsSync(statePath(cwd)), false);
+		// Session start on a never-indexed directory stays that way too.
+		const bus = createSafeEventBus();
+		const started = createContextBundle({ bus, getContract: () => undefined });
+		await started.extension.start?.();
+		bus.emit(BusChannels.SessionStart, {} as never);
+		await new Promise((resolve) => setTimeout(resolve, 50));
+		await started.extension.stop?.();
+		strictEqual(existsSync(codewikiPath(cwd)), false);
+		strictEqual(existsSync(statePath(cwd)), false);
 	});
 
 	for (const kind of ["build", "ensure", "incremental"] as const) {

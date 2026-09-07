@@ -1,11 +1,11 @@
 import { parentPort, workerData } from "node:worker_threads";
-import { executeCodewikiBuild } from "./build-operation.js";
+import { executeCodewikiBuildOutcome } from "./build-operation.js";
 import type { CodewikiBuildWorkerMessage, CodewikiBuildWorkerRequest } from "./build-worker-protocol.js";
 
 const port = parentPort;
 if (!port) throw new Error("codewiki build worker requires a worker_threads parent");
 
-executeCodewikiBuild(workerData as CodewikiBuildWorkerRequest).then(
+executeCodewikiBuildOutcome(workerData as CodewikiBuildWorkerRequest).then(
 	(result) => {
 		port.postMessage({ ok: true, result } satisfies CodewikiBuildWorkerMessage);
 		port.close();

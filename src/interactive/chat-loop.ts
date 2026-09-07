@@ -453,7 +453,7 @@ export interface CreateChatLoopDeps {
 	autoCompact?: (
 		instructions?: string,
 		trigger?: CompactionTrigger,
-		budget?: Pick<CompactInput, "keepRecentTokens" | "preserveUserTurnId">,
+		budget?: Pick<CompactInput, "keepRecentTokens" | "preserveUserTurnId" | "skillContextState" | "signal">,
 	) => Promise<CompactResult | null>;
 	/** Optional observability sink for orchestrator chat token usage. */
 	observability?: ObservabilityContract;
@@ -1182,6 +1182,7 @@ export function createChatLoop(deps: CreateChatLoopDeps): ChatLoop {
 				await context.runAutoCompact(agentRuntime, forceNow, undefined, undefined, submittedText, pendingSkillPolicy);
 			} catch (err) {
 				emitNotice(`[Clio Coder] auto-compaction failed: ${err instanceof Error ? err.message : String(err)}`);
+				if (err instanceof Error && err.name === "AbortError") return;
 			} finally {
 				endPreparationCompaction();
 			}
@@ -1434,6 +1435,7 @@ export function createChatLoop(deps: CreateChatLoopDeps): ChatLoop {
 
 		cancel(options?: ChatCancelOptions): void {
 			const wasStreaming = state.streaming;
+			context.cancelCompaction();
 			recovery.cancelRetryCountdown();
 			// Clear both queues before the abort settles the in-flight prompt:
 			// a cancelled run must not deliver queued steers or follow-ups, and
@@ -1644,11 +1646,16 @@ export function createChatLoop(deps: CreateChatLoopDeps): ChatLoop {
 				return;
 			}
 			let compacted = false;
+			enterPreparation();
+			setTurnPreparation("compacting");
 			try {
 				compacted = await context.runAutoCompact(agentRuntime, true, instructions, "force");
 			} catch (err) {
 				emitNotice(`[/context compact] ${err instanceof Error ? err.message : String(err)}`);
 				return;
+			} finally {
+				leavePreparation();
+				endPreparationCompaction();
 			}
 			if (!compacted) {
 				emitNotice("[/context compact] nothing to compact; session is empty or no cut crossed");

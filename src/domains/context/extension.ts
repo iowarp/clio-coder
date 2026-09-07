@@ -135,9 +135,13 @@ export interface ContextBundleOptions {
 
 function collectStartupHints(cwd: string, options: ContextBundleOptions = {}): string[] {
 	const hints: string[] = [];
+	// Runs at session start with the TUI mounting. Detection walks the tree and
+	// reads every header, so an indexed project answers from the type its state
+	// already records; only a never-indexed directory pays for detection.
+	const state = readClioState(cwd);
 	let projectType: ReturnType<typeof detectProjectType>;
 	try {
-		projectType = detectProjectType(cwd);
+		projectType = state?.projectType ?? detectProjectType(cwd);
 	} catch {
 		projectType = "unknown";
 	}
@@ -159,7 +163,6 @@ function collectStartupHints(cwd: string, options: ContextBundleOptions = {}): s
 	if (!contract.ok) {
 		hints.push(`clio-coder: validation contract ignored, rigor stays normal: ${describeValidationContract(contract)}`);
 	}
-	const state = readClioState(cwd);
 	if (!state) return hints;
 	if (state.contextSources !== undefined && adoptionSourcesChanged(state.contextSources, { cwd })) {
 		hints.push("clio-coder: Imported agent context changed. Run /context init --adopt to refresh.");

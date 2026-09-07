@@ -1117,7 +1117,7 @@ export async function createInteractiveApplication(deps: InteractiveDeps): Promi
 		steerSelectedDispatch,
 		cancelSelectedDispatch,
 		cancelActiveEditorBash: () => editorSubmit.cancelActiveEditorBash(),
-		isStreaming: () => deps.chat.isStreaming(),
+		isStreaming: () => deps.chat.isStreaming() || deps.chat.turnPreparation().phase === "compacting",
 		cancelActiveRun,
 		editor,
 		editorSubmit,

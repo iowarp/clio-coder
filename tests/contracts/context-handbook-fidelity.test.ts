@@ -86,14 +86,25 @@ describe("authored handbook fidelity", { concurrency: false }, () => {
 
 	afterEach(() => isolated.restore());
 
-	for (const [name, source] of [
-		["headingless prose", "Run npm test before editing calibration.\n\nPreserve café and 🧪.\n"],
+	for (const [name, source, projection] of [
+		["headingless prose", "Run npm test before editing calibration.\n\nPreserve café and 🧪.\n", null],
 		[
 			"arbitrary titles without identity",
 			"# Working agreements\n\n## Commands\n\nRun npm test.\n\n# Local constraints\n\nPreserve measurements.\n",
+			null,
 		],
-		["H1 inside fenced code", "# Guide\n\nRepository guidance.\n\n```markdown\n# An example heading\n```\n"],
-		["malformed optional footer", "# Guide\n\nKeep this instruction.\n\n<!-- clio:fingerprint v1\n{bad json}\n-->\n"],
+		[
+			"H1 inside fenced code",
+			"# Guide\n\nRepository guidance.\n\n```markdown\n# An example heading\n```\n",
+			// A fenced heading is not a heading, so this document projects; the
+			// projection reads the real structure and invents nothing.
+			{ projectName: "Guide", identity: "Repository guidance.", conventions: [], invariants: [], sections: [] },
+		],
+		[
+			"malformed optional footer",
+			"# Guide\n\nKeep this instruction.\n\n<!-- clio:fingerprint v1\n{bad json}\n-->\n",
+			null,
+		],
 	] as const) {
 		it(`loads ${name} verbatim through context state and the session compiler`, async () => {
 			writeFileSync(path, source);
@@ -102,7 +113,12 @@ describe("authored handbook fidelity", { concurrency: false }, () => {
 			const prompt = renderPromptContext(cwd);
 			deepStrictEqual(prompt.handbookFiles, [path]);
 			deepStrictEqual(prompt.warnings, []);
-			strictEqual(prompt.clioMd, null, "authored text needs no invented structured metadata");
+			if (projection === null) {
+				strictEqual(prompt.clioMd, null, "authored text needs no invented structured metadata");
+			} else {
+				const { projectName, identity, conventions, invariants, sections } = prompt.clioMd ?? {};
+				deepStrictEqual({ projectName, identity, conventions, invariants, sections }, projection);
+			}
 			strictEqual(prompt.text.includes(source), true);
 			const bundle = createPromptsBundle({
 				bus: createSafeEventBus(),
@@ -363,6 +379,46 @@ describe("authored handbook fidelity", { concurrency: false }, () => {
 			replacement.classification.sources?.map((source) => source.path),
 			[overridePath],
 		);
+	});
+
+	it("keeps authored rules through --apply when a fenced example carries a shell comment", async () => {
+		// A `# comment` at column 0 inside a fenced block used to read as a second
+		// H1: the parser rejected the handbook, the structured projection went
+		// null, and a generated replacement started from nothing rather than from
+		// the authored conventions and invariants.
+		const fenced = "```sh\n# configure once, then build\ncmake --preset default\n## not a heading either\n```";
+		const source = `# Fenced handbook\n\nA C++ project with a fenced example.\n\n## Conventions\n\n- Run ctest before handoff.\n\n## Hard invariants\n\n1. Never edit generated files under build/.\n\n## Commands\n\n${fenced}\n`;
+		writeFileSync(path, source);
+		const parsed = parseClioMd(source);
+		strictEqual(parsed.ok, true);
+		if (!parsed.ok) return;
+		deepStrictEqual(parsed.value.conventions, ["Run ctest before handoff."]);
+		deepStrictEqual(parsed.value.invariants, ["Never edit generated files under build/."]);
+		deepStrictEqual(parsed.value.sections, [{ title: "Commands", body: fenced }]);
+		strictEqual(renderPromptContext(cwd).clioMd?.projectName, "Fenced handbook");
+		// Serialization keeps the fence bytes: no demoted headings, no inserted
+		// blank lines inside the block.
+		const { importedAgentContext: _imported, ...serializable } = parsed.value;
+		strictEqual(serializeClioMd({ ...serializable, fingerprint: null }).includes(fenced), true);
+		const applied = await runBootstrap({ cwd, applyClioMd: true });
+		strictEqual(applied.summary.action, "refreshed");
+		deepStrictEqual(applied.output.conventions.slice(0, 1), ["Run ctest before handoff."]);
+		deepStrictEqual(applied.output.invariants, ["Never edit generated files under build/."]);
+		const rewritten = readFileSync(path, "utf8");
+		strictEqual(rewritten.includes(fenced), true, "the fenced example survives the generated rewrite byte for byte");
+		const reparsed = parseClioMd(rewritten);
+		strictEqual(reparsed.ok, true);
+	});
+
+	it("keeps comment-wrapped headings out of the projection and the serializer", () => {
+		const comment = "<!--\n# Not a title\n## Not a section\n-->";
+		const source = `# Guide\n\nAuthored.\n\n## Notes\n\nKeep this.\n\n${comment}\n`;
+		const parsed = parseClioMd(source);
+		strictEqual(parsed.ok, true);
+		if (!parsed.ok) return;
+		deepStrictEqual(parsed.value.sections, [{ title: "Notes", body: `Keep this.\n\n${comment}` }]);
+		const { importedAgentContext: _imported, ...serializable } = parsed.value;
+		strictEqual(serializeClioMd({ ...serializable, fingerprint: null }).includes(comment), true);
 	});
 
 	it("keeps the model proposal parser strict while authored Markdown loads", () => {

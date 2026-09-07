@@ -52,11 +52,11 @@ function findTurnStartIndex(entries: ReadonlyArray<SessionEntry>, entryIndex: nu
 	return -1;
 }
 
-/** Entries we can cut at. `tool_result` is the only role we must NOT cut at. */
+/** Entries we can cut at. Tool rows must stay with their assistant declaration. */
 function isValidCutPoint(entry: SessionEntry): boolean {
 	switch (entry.kind) {
 		case "message":
-			return entry.role !== "tool_result";
+			return entry.role !== "tool_result" && entry.role !== "tool_call";
 		case "bashExecution":
 		case "custom":
 		case "skillActivation":
@@ -165,7 +165,7 @@ export function findCutPoint(
 			// its assistant, not the whole user turn or an individual call row.
 			// The suffix may exceed the target; the continuation guard still
 			// checks whether summarizing older work actually made the request fit.
-			if (cutIndex === -1 && entry.kind === "message" && entry.role === "tool_result") {
+			if (cutIndex === -1 && entry.kind === "message" && (entry.role === "tool_result" || entry.role === "tool_call")) {
 				cutIndex = findToolBatchStart(entries, i, startIndex, endIndex);
 			}
 			break;

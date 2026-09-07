@@ -80,10 +80,60 @@ function normalizeInline(value: string): string {
 		.trim();
 }
 
+/**
+ * The same text with every character inside a fenced code block or an HTML
+ * comment replaced by a filler, newlines kept, so offsets into the mask are
+ * offsets into the original. Heading scans run on the mask and slice from the
+ * source: a `# comment` line in a fenced shell example used to read as a
+ * second H1 and reject the whole handbook, and a `## not a heading` inside a
+ * fence split into a section whose serialization then rewrote the fence.
+ */
+function maskNonHeadingRegions(text: string): string {
+	const lines = text.split("\n");
+	const out: string[] = [];
+	let fence: { char: string; length: number } | null = null;
+	let inComment = false;
+	for (const line of lines) {
+		let masked = false;
+		if (fence) {
+			masked = true;
+			const close = /^\s{0,3}(`{3,}|~{3,})\s*$/.exec(line);
+			if (close?.[1] && close[1][0] === fence.char && close[1].length >= fence.length) fence = null;
+		} else if (inComment) {
+			masked = true;
+			if (line.includes("-->")) inComment = false;
+		} else {
+			const open = /^\s{0,3}(`{3,}|~{3,})/.exec(line);
+			if (open?.[1]) {
+				fence = { char: open[1][0] ?? "`", length: open[1].length };
+				masked = true;
+			} else if (/^\s*<!--/.test(line)) {
+				masked = true;
+				if (!line.includes("-->")) inComment = true;
+			}
+		}
+		// A non-whitespace filler: the heading regexes end in `\s*$`, which would
+		// otherwise run through a blank-masked block and swallow it into the
+		// heading match.
+		out.push(masked ? "_".repeat(line.length) : line);
+	}
+	return out.join("\n");
+}
+
 function normalizeNestedMarkdown(value: string): string {
-	return normalizeSource(value)
-		.trim()
-		.replace(/^(#{1,2})(\s+)/gm, "###$2");
+	const body = normalizeSource(value).trim();
+	// Demote authored H1/H2 inside a section body so it cannot outrank the
+	// section, but only where a heading scan would see one: a fence or comment
+	// keeps its bytes.
+	const mask = maskNonHeadingRegions(body);
+	let out = "";
+	let cursor = 0;
+	for (const match of mask.matchAll(/^(#{1,2})(\s+)/gm)) {
+		if (match.index === undefined) continue;
+		out += body.slice(cursor, match.index) + "###" + (match[2] ?? "");
+		cursor = match.index + match[0].length;
+	}
+	return out + body.slice(cursor);
 }
 
 function charLen(value: string): number {
@@ -165,7 +215,7 @@ function validateFooter(value: unknown): ClioMdFingerprintFooter | null {
 }
 
 function readSections(body: string): ClioMdSection[] {
-	const headings = [...body.matchAll(H2_RE)];
+	const headings = [...maskNonHeadingRegions(body).matchAll(H2_RE)];
 	const sections: ClioMdSection[] = [];
 	for (let i = 0; i < headings.length; i += 1) {
 		const heading = headings[i];
@@ -190,7 +240,8 @@ function extraSections(sections: ReadonlyArray<ClioMdSection>): ClioMdSection[] 
 }
 
 function identityParagraph(afterH1: string): string {
-	const beforeFirstSection = afterH1.split(/^##\s+/m)[0] ?? "";
+	const firstSection = /^##\s+/m.exec(maskNonHeadingRegions(afterH1));
+	const beforeFirstSection = firstSection ? afterH1.slice(0, firstSection.index) : afterH1;
 	const paragraphs = beforeFirstSection
 		.trim()
 		.split(/\n\s*\n/)
@@ -222,7 +273,7 @@ export function parseClioMd(source: string): ClioMdParseResult {
 	warnings.push(...footerResult.warnings);
 	if (footerResult.errors.length > 0) return { ok: false, errors: footerResult.errors, warnings };
 
-	const h1Matches = [...footerResult.body.matchAll(H1_RE)];
+	const h1Matches = [...maskNonHeadingRegions(footerResult.body).matchAll(H1_RE)];
 	if (h1Matches.length === 0) return { ok: false, errors: ["missing H1 heading"], warnings };
 	if (h1Matches.length > 1) return { ok: false, errors: ["more than one H1 heading"], warnings };
 

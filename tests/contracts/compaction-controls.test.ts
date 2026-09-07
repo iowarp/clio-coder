@@ -18,6 +18,7 @@ import {
 	outOfTurnUsagePath,
 	readOutOfTurnUsageRows,
 } from "../../src/domains/observability/out-of-turn-usage.js";
+import type { PromptsContract } from "../../src/domains/prompts/contract.js";
 import type { ProvidersContract, TargetStatus } from "../../src/domains/providers/contract.js";
 import { canonicalEndpointKey, foregroundStreamUsage } from "../../src/domains/providers/index.js";
 import type { RuntimeDescriptor } from "../../src/domains/providers/types/runtime-descriptor.js";
@@ -29,11 +30,18 @@ import type { SessionContract } from "../../src/domains/session/contract.js";
 import type { SessionEntry } from "../../src/domains/session/entries.js";
 import { appendEntry, appendTurn, startSession } from "../../src/domains/session/manager.js";
 import { ledgerUsageCalls } from "../../src/domains/session/usage.js";
+import { serveClioAcpAgent } from "../../src/engine/acp/server.js";
+import type { AcpJsonRpcPeerTransport } from "../../src/engine/acp/transport.js";
 import { registerEngineApiProvider, registerEngineFauxProvider } from "../../src/engine/api-registry.js";
 import { estimateInputTokensFromContext, remainingContextMaxTokens } from "../../src/engine/apis/output-budget.js";
 import { openSession, sessionPaths } from "../../src/engine/session.js";
 import type { Usage } from "../../src/engine/types.js";
 import { createProductionAutoCompact } from "../../src/entry/orchestrator.js";
+import {
+	type ApplicationControllerDeps,
+	createApplicationController,
+} from "../../src/interactive/application-controller.js";
+import { type CreateChatLoopDeps, createChatLoop } from "../../src/interactive/chat-loop.js";
 import { buildModelReplayAgentMessagesFromTurns } from "../../src/interactive/model-session-replay.js";
 import { createTurnContext } from "../../src/interactive/turn-context.js";
 import type { TurnMiddleware } from "../../src/interactive/turn-middleware.js";
@@ -115,6 +123,7 @@ describe("production compaction controls", () => {
 			usage?: Usage;
 			partialUsage?: Usage;
 			abort?: boolean;
+			truncated?: boolean;
 			beforeReturn?: () => void;
 		} = {
 			fail: false,
@@ -157,6 +166,7 @@ describe("production compaction controls", () => {
 			apiKey: string | undefined;
 			headers: unknown;
 			capacity: Readonly<Record<string, number>>;
+			signal: AbortSignal | undefined;
 		}> = [];
 		const respond: FauxResponseFactory = (context, options, _state, model) => {
 			calls.push({
@@ -167,6 +177,7 @@ describe("production compaction controls", () => {
 				apiKey: options?.apiKey,
 				headers: options?.headers,
 				capacity: foregroundStreamUsage(),
+				signal: options?.signal,
 			});
 			response.beforeReturn?.();
 			return {
@@ -175,7 +186,13 @@ describe("production compaction controls", () => {
 				api: model.api,
 				provider: model.provider,
 				model: model.id,
-				stopReason: response.abort ? "aborted" : response.fail || response.failAt === calls.length ? "error" : "stop",
+				stopReason: response.abort
+					? "aborted"
+					: response.fail || response.failAt === calls.length
+						? "error"
+						: response.truncated
+							? "length"
+							: "stop",
 				...(response.fail || response.failAt === calls.length ? { errorMessage: "fixture stream error" } : {}),
 				timestamp: Date.now(),
 				usage: response.usage ?? {
@@ -198,7 +215,7 @@ describe("production compaction controls", () => {
 					if (response.partialUsage) events.push({ type: "start", partial: { ...message, usage: response.partialUsage } });
 					if (message.stopReason === "error" || message.stopReason === "aborted")
 						events.push({ type: "error", reason: message.stopReason, error: message });
-					else events.push({ type: "done", reason: "stop", message });
+					else events.push({ type: "done", reason: response.truncated ? "length" : "stop", message });
 					events.end(message);
 				});
 				return events;
@@ -230,6 +247,146 @@ describe("production compaction controls", () => {
 				recordTokens: (...args) => liveUsage.push(args),
 			}),
 		};
+	}
+
+	for (const mode of ["manual", "auto", "overflow", "acp", "reset", "dispose"] as const) {
+		it(`production ${mode} cancellation prevents checkpoint publication and chat submission`, async () => {
+			const f = fixture(true);
+			f.settings.chat.prewarm = false;
+			f.providers.getDetectedReasoning = () => false;
+			f.settings.context.compaction.threshold = mode === "auto" || mode === "acp" ? 0.01 : 1;
+			f.settings.context.workingSet.enabled = false;
+			const submitted: string[] = [];
+			const notices: string[] = [];
+			const loop = createChatLoop({
+				getSettings: () => f.settings,
+				providers: f.providers,
+				knownTargets: () => new Set(["chat-target", "summary-target"]),
+				session: f.session,
+				readSessionEntries: f.entries,
+				autoCompact: f.run,
+				createAgent: ((options: Parameters<NonNullable<CreateChatLoopDeps["createAgent"]>>[0]) => ({
+					agent: {
+						state: options?.initialState,
+						subscribe: () => () => {},
+						abort: () => {},
+						clearAllQueues: () => {},
+						prompt: async (text: string) => {
+							submitted.push(text);
+						},
+					},
+				})) as unknown as NonNullable<CreateChatLoopDeps["createAgent"]>,
+				prompts: {
+					inputEpoch: () => 0,
+					compileSessionPrompt: async () => ({
+						systemPrompt: mode === "overflow" ? "p".repeat(600000) : "Continue the task.",
+						systemPromptHash: "fixture",
+						tokenEstimate: 5,
+						sections: [],
+						fragmentManifest: [],
+					}),
+				} as unknown as PromptsContract,
+			});
+			loop.onEvent((event) => {
+				if (event.type === "notice") notices.push(event.text);
+			});
+			const controller = createApplicationController({
+				clock: { now: () => 1000 },
+				intervals: { setInterval: () => ({}), clearInterval: () => {} },
+				signals: { takeInterruptOwnership: () => () => {}, on: () => {} },
+				leaderKeys: { isPending: () => false, route: () => false },
+				getOverlayState: () => "closed",
+				routeOverlayKey: () => false,
+				cancelActiveEditorBash: () => false,
+				isStreaming: () => loop.isStreaming() || loop.turnPreparation().phase === "compacting",
+				cancelActiveRun: () => loop.cancel(),
+			} as unknown as ApplicationControllerDeps);
+			let cancelFromAcp: (() => void) | undefined;
+			let closeAcp: (() => void) | undefined;
+			let served: Promise<number> | undefined;
+			let promptFromAcp: (() => Promise<unknown>) | undefined;
+			if (mode === "acp") {
+				const handlers = new Map<string, (params: unknown) => unknown>();
+				const closeHandlers: Array<() => void> = [];
+				const transport: AcpJsonRpcPeerTransport = {
+					closed: false,
+					request: async () => {
+						throw new Error("no client requests expected");
+					},
+					notify: () => {},
+					onNotification: () => () => {},
+					onRequest: (method, handler) => {
+						handlers.set(method, handler);
+						return () => {};
+					},
+					onClose: (handler) => {
+						closeHandlers.push(handler);
+						return () => {};
+					},
+					close: () => {
+						for (const handler of closeHandlers) handler();
+					},
+				};
+				served = serveClioAcpAgent({ transport, chat: loop, cwd: scratch.dir });
+				await handlers.get("initialize")?.({ protocolVersion: 1 });
+				const acpSession = (await handlers.get("session/new")?.({ cwd: scratch.dir, mcpServers: [] })) as {
+					sessionId: string;
+				};
+				cancelFromAcp = () => {
+					deepStrictEqual(handlers.get("session/cancel")?.({ sessionId: acpSession.sessionId }), {});
+				};
+				promptFromAcp = async () =>
+					handlers.get("session/prompt")?.({
+						sessionId: acpSession.sessionId,
+						prompt: [{ type: "text", text: "Keep numerical tolerances unchanged." }],
+					});
+				closeAcp = () => transport.close();
+			}
+			let cancellationObserved = false;
+			const before = f.entries();
+			f.response.beforeReturn = () => {
+				strictEqual(loop.isStreaming(), false, "the chat stream has not started");
+				strictEqual(loop.turnPreparation().phase, "compacting");
+				if (cancelFromAcp) cancelFromAcp();
+				else if (mode === "reset") loop.resetForSession(null);
+				else if (mode === "dispose") loop.dispose();
+				else deepStrictEqual(controller.handleInput("\u001b"), { consume: true });
+				ok(f.calls.at(-1)?.signal?.aborted, "cancellation reaches the actual summary provider signal");
+				cancellationObserved = true;
+			};
+			try {
+				loop.resetForSession(before.at(-1)?.turnId ?? null, buildModelReplayAgentMessagesFromTurns(before));
+				if (promptFromAcp) strictEqual(((await promptFromAcp()) as { stopReason: string }).stopReason, "cancelled");
+				else if (mode === "manual" || mode === "reset" || mode === "dispose") await loop.compact();
+				else await loop.submit("Keep the numerical tolerances unchanged.");
+				strictEqual(cancellationObserved, true, notices.join("\n"));
+				strictEqual(f.calls.length, 1, notices.join("\n"));
+				deepStrictEqual(submitted, []);
+				deepStrictEqual(f.entries(), before, "canceled compaction does not append a summary or pending user turn");
+				strictEqual(loop.turnPreparation().phase, "idle");
+				const rows = readOutOfTurnUsageRows(clioStateDir()).rows;
+				strictEqual(rows.length, 1);
+				strictEqual(rows[0]?.callOutcome, "aborted");
+				strictEqual(
+					rows[0]?.usage.totalTokens,
+					15,
+					"reported late-response spending remains attributable after cancellation",
+				);
+				deepStrictEqual(foregroundStreamUsage(), {});
+				delete f.response.beforeReturn;
+				if (mode === "dispose") return;
+				await loop.compact();
+				strictEqual(
+					f.entries().filter((entry) => entry.kind === "compactionSummary").length,
+					1,
+					"a fresh manual retry does not inherit the canceled signal",
+				);
+			} finally {
+				closeAcp?.();
+				if (served) await served;
+				loop.dispose();
+			}
+		});
 	}
 
 	it("retries changed empty history and compacts the saved Mini32K read stage and later grep growth", async (t) => {
@@ -318,9 +475,16 @@ describe("production compaction controls", () => {
 		ok(before.tokens > 32768);
 		ok(findCutPoint(f.entries(), 20000).firstKeptEntryIndex > 0);
 		f.response.text = "Suggested skill: /skill clio-coder-test";
+		const abort = new AbortController();
+		const beforeCanceledGuard = f.entries();
+		f.response.beforeReturn = () => abort.abort();
+		await rejects(context.postToolContinuationGuard(runtime, abort.signal), /abort/i);
+		ok(f.calls.at(-1)?.signal?.aborted, "the engine continuation signal reaches the summarizer");
+		deepStrictEqual(f.entries(), beforeCanceledGuard);
+		delete f.response.beforeReturn;
 		const update = await context.postToolContinuationGuard(runtime);
 		ok(update, "grown same-turn history must retry and produce the next provider context");
-		strictEqual(attempts, 4);
+		strictEqual(attempts, 5);
 		const after = context.liveContextEstimate(runtime);
 		ok(after.tokens < 32768);
 		const request = update.context;
@@ -371,7 +535,7 @@ describe("production compaction controls", () => {
 		install(17);
 		f.settings.context.compaction.auto = false;
 		await rejects(context.postToolContinuationGuard(runtime), /stopped continuation before provider call/);
-		strictEqual(attempts, 4);
+		strictEqual(attempts, 5);
 	});
 
 	it("routes a configured dedicated summary model through the production callback", async () => {
@@ -666,6 +830,23 @@ describe("production compaction controls", () => {
 		strictEqual(row.usage.costUsd, 0.1);
 		strictEqual(row.usage.output, null);
 	});
+	it("refuses a truncated dedicated summary and preserves the failed call's spending", async () => {
+		const f = fixture(true);
+		f.settings.context.compaction.model = "summary-target/summary";
+		f.response.truncated = true;
+		f.response.text = "## Goal\nRepair MPI exchange\n## Constraints\n- Never";
+		const before = f.entries();
+		await rejects(f.run(), /output limit|truncated/);
+		deepStrictEqual(f.entries(), before);
+		strictEqual(f.calls.length, 1);
+		strictEqual(f.calls[0]?.model, "summary");
+		const rows = readOutOfTurnUsageRows(clioStateDir()).rows;
+		strictEqual(rows.length, 1);
+		strictEqual(rows[0]?.callOutcome, "error");
+		strictEqual(rows[0]?.usage.totalTokens, 15);
+		deepStrictEqual(foregroundStreamUsage(), {});
+	});
+
 	it("keeps aborted-call usage distinct from the errored share", async () => {
 		const f = fixture(true);
 		f.response.abort = true;

@@ -14,6 +14,7 @@ import {
 } from "../../src/domains/session/compaction/compact.js";
 import { findCutPoint } from "../../src/domains/session/compaction/cut-point.js";
 import { estimateTokens } from "../../src/domains/session/compaction/tokens.js";
+import { estimateAgentContextTokens } from "../../src/domains/session/context-accounting.js";
 import {
 	isSessionEntry,
 	mainSkillContextState,
@@ -476,6 +477,136 @@ describe("mandatory request-fit compaction", () => {
 });
 
 describe("typed historical skill checkpoints (pure source)", () => {
+	it("keeps canonical state through repeated small-window batches and failed, canceled, empty, then successful summaries", async () => {
+		const f = history("Verified skill body: inspect both ranks before changing MPI exchange.");
+		const work = f.entries.find((entry) => entry.turnId === "work");
+		ok(work?.kind === "message");
+		work.payload = { text: "evidence ".repeat(500) };
+		const smallModel = { ...model, contextWindow: 8192, maxTokens: 1024 };
+		const first = await compact({
+			entries: f.entries,
+			model: smallModel,
+			reserveTokens: 1280,
+			keepRecentTokens: 100,
+			preserveUserTurnId: "task",
+			skillContextState: selection,
+			summarize: async () => ({
+				text: "Canonical decision: retain rank ordering. Unfinished task: validate both layouts.",
+			}),
+		});
+		const entries = [...f.entries, checkpoint(first, "initial-checkpoint")];
+		let prior = first;
+		for (let round = 0; round < 4; round++) {
+			const taskId = `task-${round}`;
+			const intent = `Continue validation round ${round}. Do not change numerical tolerances or source files.`;
+			entries.push(
+				message(taskId, "user", { text: "transient wrapper", operatorText: intent }, entries.at(-1)?.turnId ?? null),
+			);
+			entries.push(message(`work-${round}`, "assistant", { text: "new evidence ".repeat(200) }, taskId));
+			const ids = [`left-${round}`, `right-${round}`];
+			const batchId = `batch-${round}`;
+			entries.push(
+				message(
+					batchId,
+					"assistant",
+					{
+						content: [
+							{ type: "text", text: "Compare both observations before deciding." },
+							...ids.map((id) => ({ type: "toolCall", id, name: "read", arguments: { path: `${id}.c` } })),
+						],
+					},
+					entries.at(-1)?.turnId ?? null,
+				),
+			);
+			for (const id of ids)
+				entries.push(
+					message(
+						`call-${id}`,
+						"tool_call",
+						{ toolCallId: id, name: "read", args: { path: `${id}.c` } },
+						entries.at(-1)?.turnId ?? null,
+					),
+				);
+			const resultOrder = round % 2 ? [...ids].reverse() : ids;
+			for (const id of resultOrder)
+				entries.push(
+					message(
+						`result-${id}`,
+						"tool_result",
+						{ toolCallId: id, toolName: "read", result: { content: [{ type: "text", text: `${id} observed evidence` }] } },
+						entries.at(-1)?.turnId ?? null,
+					),
+				);
+			const before = structuredClone(entries);
+			const beforeReplay = buildModelReplayAgentMessagesFromTurns(entries);
+			const keepRecentTokens = entries.slice(-2).reduce((total, entry) => total + estimateTokens(entry), 0) + 1;
+			for (const outcome of ["error", "cancel", "empty", "success"] as const) {
+				const controller = new AbortController();
+				const attempt = compact({
+					entries,
+					model: smallModel,
+					reserveTokens: 1280,
+					keepRecentTokens,
+					preserveUserTurnId: taskId,
+					skillContextState: selection,
+					signal: controller.signal,
+					summarize: async ({ systemPrompt, userText, maxTokens }) => {
+						ok(userText.includes(prior.summary), "the entire prior canonical checkpoint is input to its replacement");
+						ok(
+							estimateAgentContextTokens({ systemPrompt, messages: [{ role: "user", content: userText, timestamp: 0 }] }) +
+								maxTokens <=
+								smallModel.contextWindow,
+						);
+						if (outcome === "error") throw new Error("deterministic summary failure");
+						if (outcome === "cancel") controller.abort();
+						return {
+							text: outcome === "empty" ? "" : `Checkpoint ${round}: retain rank ordering; validation remains unfinished.`,
+						};
+					},
+				});
+				if (outcome !== "success") {
+					await rejects(attempt, /deterministic summary failure|abort|empty.*summary/i);
+					deepStrictEqual(entries, before);
+					deepStrictEqual(buildModelReplayAgentMessagesFromTurns(entries), beforeReplay);
+					continue;
+				}
+				prior = await attempt;
+				strictEqual(prior.firstKeptTurnId, batchId);
+				strictEqual(prior.userContext?.text, intent);
+				deepStrictEqual(prior.skillContext, first.skillContext);
+				entries.push(checkpoint(prior, `checkpoint-${round}`));
+			}
+			const replay = buildModelReplayAgentMessagesFromTurns(entries);
+			const declarations = replay.flatMap((entry) =>
+				entry.role === "assistant"
+					? entry.content.flatMap((block) => (block.type === "toolCall" && ids.includes(block.id) ? [block.id] : []))
+					: [],
+			);
+			const results = replay.flatMap((entry) =>
+				entry.role === "toolResult" && ids.includes(entry.toolCallId) ? [entry.toolCallId] : [],
+			);
+			deepStrictEqual(declarations, ids);
+			const originalResults = beforeReplay.flatMap((entry) =>
+				entry.role === "toolResult" && ids.includes(entry.toolCallId) ? [entry.toolCallId] : [],
+			);
+			deepStrictEqual(results, originalResults, "compaction preserves the original model replay order");
+			deepStrictEqual(entries.slice(0, before.length), before, "raw completion order remains untouched in the ledger");
+			ok(JSON.stringify(replay).includes(intent));
+			ok(estimateAgentContextTokens({ messages: replay }) + smallModel.maxTokens < smallModel.contextWindow);
+			const immediate = await compact({
+				entries,
+				model: smallModel,
+				reserveTokens: 1280,
+				keepRecentTokens,
+				skillContextState: selection,
+				summarize: async () => {
+					throw new Error("no new work must not invoke a summarizer");
+				},
+			});
+			strictEqual(immediate.messagesSummarized, 0);
+		}
+	});
+
 	for (const priorSuffix of [false, true]) {
 		it(`summarizes ${priorSuffix ? "the prior retained suffix" : "new older work"} while retaining the newest parallel batch`, async () => {
 			const f = overflowFixture();

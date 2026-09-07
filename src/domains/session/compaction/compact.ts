@@ -134,7 +134,7 @@ export interface CompactInput {
 	reserveTokens?: number;
 	/** Override the built-in keep-recent default (DEFAULT_KEEP_RECENT_TOKENS). */
 	keepRecentTokens?: number;
-	/** Automatic compaction carries this active user message verbatim if the cut removes it. */
+	/** Carry this user message verbatim if removed; defaults to the latest operator turn for manual compaction. */
 	preserveUserTurnId?: string;
 	/** Accounting observer; called once per invoked stream, including failures. */
 	onCall?: (call: CompactionCallObservation) => void;
@@ -611,6 +611,7 @@ async function runSummaryStream(
 		);
 	}
 
+	input.signal?.throwIfAborted();
 	const timestamp = new Date().toISOString();
 	const started = performance.now();
 	let usage: unknown;
@@ -620,6 +621,8 @@ async function runSummaryStream(
 		if (input.summarize) {
 			const response = await input.summarize({ systemPrompt, userText, maxTokens });
 			usage = response.usage;
+			reported = retainReportedUsage(reported, usage);
+			input.signal?.throwIfAborted();
 			outcome = "success";
 			return { text: response.text.trim(), usage };
 		}
@@ -639,6 +642,11 @@ async function runSummaryStream(
 			}
 			if (event.type === "done") {
 				usage = event.message.usage ?? usage;
+				reported = retainReportedUsage(reported, usage);
+				input.signal?.throwIfAborted();
+				if (event.reason === "length" || event.message.stopReason === "length") {
+					throw new Error("compaction summary reached the model output limit; incomplete checkpoint was not saved");
+				}
 				outcome = "success";
 				return { text: textFromAssistant(event.message).trim(), usage };
 			}
@@ -810,9 +818,22 @@ export async function compact(input: CompactInput): Promise<CompactResult> {
 	// Keep it in the canonical checkpoint so live replay and resume agree.
 	let userContext: PreservedUserContext | undefined =
 		priorCheckpoint?.kind === "compactionSummary" ? priorCheckpoint.userContext : undefined;
-	const activeUser = entries
-		.slice(0, cut.firstKeptEntryIndex)
-		.find((entry) => entry.turnId === input.preserveUserTurnId && entry.kind === "message" && entry.role === "user");
+	// Manual compaction has no live active-turn hint after a turn settles.
+	// Preserve the latest operator request if the split removes it as well.
+	let activeUserIndex = -1;
+	for (let index = entries.length - 1; index >= 0; index--) {
+		const entry = entries[index];
+		if (
+			entry?.kind === "message" &&
+			entry.role === "user" &&
+			(input.preserveUserTurnId === undefined || entry.turnId === input.preserveUserTurnId)
+		) {
+			activeUserIndex = index;
+			break;
+		}
+	}
+	const activeUser =
+		activeUserIndex >= 0 && activeUserIndex < cut.firstKeptEntryIndex ? entries[activeUserIndex] : undefined;
 	if (activeUser?.kind === "message" && activeUser.payload && typeof activeUser.payload === "object") {
 		const payload = activeUser.payload;
 		// Composed text can contain transient reminders. Reassert only the

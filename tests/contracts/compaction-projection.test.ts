@@ -4,7 +4,7 @@ import { foldWorkingSet } from "../../src/domains/context/working-set/fold.js";
 import { projectWorkingSet } from "../../src/domains/context/working-set/project.js";
 import { resolveRecall } from "../../src/domains/context/working-set/recall.js";
 import { type CompactionCallObservation, compact } from "../../src/domains/session/compaction/compact.js";
-import { calculateContextTokens } from "../../src/domains/session/compaction/tokens.js";
+import { calculateContextTokens, estimateTokens } from "../../src/domains/session/compaction/tokens.js";
 import { estimateAgentContextTokens } from "../../src/domains/session/context-accounting.js";
 import type { MessageEntry, SessionEntry } from "../../src/domains/session/entries.js";
 import { registerEngineFauxProvider } from "../../src/engine/api-registry.js";
@@ -97,6 +97,96 @@ describe("compaction working-set provider boundary", () => {
 		const resolved = faux.getModel("summary");
 		ok(resolved);
 		return { ...resolved, contextWindow, maxTokens };
+	}
+
+	it("retains the entire parallel declaration when the budget crosses a call row", async () => {
+		const entries = chain([
+			message("task", "user", { text: "Continue the MPI repair; do not change numerical tolerances." }),
+			message("earlier", "assistant", { text: "Earlier evidence ".repeat(1000) }),
+			message("batch", "assistant", {
+				content: [
+					{ type: "text", text: "Compare both rank layouts before modifying the exchange." },
+					{ type: "toolCall", id: "one", name: "read", arguments: { path: "one.c" } },
+					{ type: "toolCall", id: "two", name: "read", arguments: { path: "two.c" } },
+				],
+			}),
+			message("call-one", "tool_call", { toolCallId: "one", name: "read", args: { path: "one.c" } }),
+			message("call-two", "tool_call", { toolCallId: "two", name: "read", args: { path: "two.c" } }),
+			message("result-one", "tool_result", {
+				toolCallId: "one",
+				toolName: "read",
+				result: { content: [{ type: "text", text: "FIRST_EVIDENCE" }] },
+			}),
+			message("result-two", "tool_result", {
+				toolCallId: "two",
+				toolName: "read",
+				result: { content: [{ type: "text", text: "SECOND_EVIDENCE" }] },
+			}),
+		]);
+		const result = await compact({
+			entries,
+			model: model(),
+			keepRecentTokens: entries.slice(-2).reduce((sum, entry) => sum + estimateTokens(entry), 0) + 1,
+		});
+		const replay = buildModelReplayAgentMessagesFromTurns([
+			...entries,
+			{
+				kind: "compactionSummary",
+				turnId: "summary",
+				parentTurnId: "result-two",
+				timestamp,
+				summary: result.summary,
+				firstKeptTurnId: result.firstKeptTurnId ?? "",
+				tokensBefore: result.tokensBefore,
+				messagesSummarized: result.messagesSummarized,
+				...(result.userContext ? { userContext: result.userContext } : {}),
+			},
+		]);
+		const serialized = JSON.stringify(replay);
+		match(serialized, /Compare both rank layouts before modifying the exchange/);
+		match(serialized, /FIRST_EVIDENCE/);
+		match(serialized, /SECOND_EVIDENCE/);
+		const declarations = replay.flatMap((entry) =>
+			entry.role === "assistant"
+				? entry.content.filter((block) => block.type === "toolCall").map((block) => block.id)
+				: [],
+		);
+		deepStrictEqual(declarations, ["one", "two"]);
+		strictEqual(result.firstKeptTurnId, "batch");
+		strictEqual(
+			result.userContext?.text,
+			"Continue the MPI repair; do not change numerical tolerances.",
+			"manual compaction preserves the latest operator intent without an explicit active-turn hint",
+		);
+	});
+
+	for (const cancelBeforeCall of [true, false]) {
+		it(`rejects cancellation ${cancelBeforeCall ? "before invocation" : "before accepting a late summary"}`, async () => {
+			const controller = new AbortController();
+			const observations: CompactionCallObservation[] = [];
+			let invoked = 0;
+			if (cancelBeforeCall) controller.abort();
+			await rejects(
+				compact({
+					entries: evictedHistory(),
+					model: model(),
+					signal: controller.signal,
+					onCall: (call) => observations.push(call),
+					summarize: async () => {
+						invoked++;
+						controller.abort();
+						return { text: "Late checkpoint", usage: { input: 10, output: 5, totalTokens: 15 } };
+					},
+				}),
+				/abort/i,
+			);
+			strictEqual(invoked, cancelBeforeCall ? 0 : 1);
+			strictEqual(observations.length, invoked);
+			if (!cancelBeforeCall) {
+				strictEqual(observations[0]?.outcome, "aborted");
+				strictEqual((observations[0]?.usage as { totalTokens: number }).totalTokens, 15);
+			}
+		});
 	}
 
 	it("invalidates pre-checkpoint usage with eviction while fresh provider usage anchors replay again", () => {

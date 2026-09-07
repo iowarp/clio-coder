@@ -114,7 +114,7 @@ export interface TurnContextDeps {
 		| ((
 				instructions?: string,
 				trigger?: CompactionTrigger,
-				budget?: Pick<CompactInput, "keepRecentTokens" | "preserveUserTurnId" | "skillContextState">,
+				budget?: Pick<CompactInput, "keepRecentTokens" | "preserveUserTurnId" | "skillContextState" | "signal">,
 		  ) => Promise<CompactResult | null>)
 		| undefined;
 	/** Test seam for the eviction planner; production uses `planEviction` from the working-set engine. */
@@ -199,7 +199,9 @@ export interface TurnContext {
 		triggerOverride?: CompactionTrigger,
 		pendingUserText?: string,
 		pendingSkillPolicy?: PendingSkillToolPolicy,
+		signal?: AbortSignal,
 	): Promise<boolean>;
+	cancelCompaction(): void;
 	postToolContinuationGuard(
 		agentRuntime: AgentRuntime,
 		signal?: AbortSignal,
@@ -256,6 +258,7 @@ function evictionSkipMessage(
 export function createTurnContext(deps: TurnContextDeps): TurnContext {
 	const { state, middleware } = deps;
 	const compactionTrigger = new AutoCompactionTrigger<CompactResult | null>();
+	let compactionController: AbortController | null = null;
 
 	let currentContextSnapshot: ContextSnapshot | null = null;
 	/**
@@ -732,6 +735,7 @@ export function createTurnContext(deps: TurnContextDeps): TurnContext {
 		triggerOverride?: CompactionTrigger,
 		pendingUserText?: string,
 		pendingSkillPolicy?: PendingSkillToolPolicy,
+		signal?: AbortSignal,
 	): Promise<boolean> => {
 		if (!deps.readSessionEntries) return false;
 		// Overflow forces a fit attempt even below the automatic threshold, but
@@ -1003,8 +1007,9 @@ export function createTurnContext(deps: TurnContextDeps): TurnContext {
 			compactionThreshold,
 			snapshotMetadata,
 		);
-		let budget: Pick<CompactInput, "keepRecentTokens" | "preserveUserTurnId" | "skillContextState"> | undefined =
-			skillContextState !== undefined ? { skillContextState } : undefined;
+		let budget:
+			| Pick<CompactInput, "keepRecentTokens" | "preserveUserTurnId" | "skillContextState" | "signal">
+			| undefined = skillContextState !== undefined ? { skillContextState } : undefined;
 		if (useRequestBudget) {
 			const estimate = liveContextEstimate(agentRuntime, pendingUserText);
 			const output = Math.min(
@@ -1031,12 +1036,28 @@ export function createTurnContext(deps: TurnContextDeps): TurnContext {
 				...(activeAutoTurnId ? { preserveUserTurnId: activeAutoTurnId } : {}),
 			};
 		}
+		let summarySignal = compactionController?.signal;
 		try {
-			result = await compactionTrigger.fire(() => (deps.autoCompact ?? (async () => null))(instructions, trigger, budget));
+			result = await compactionTrigger.fire(async () => {
+				const controller = new AbortController();
+				compactionController = controller;
+				summarySignal = signal ? AbortSignal.any([signal, controller.signal]) : controller.signal;
+				try {
+					return (
+						(await deps.autoCompact?.(instructions, trigger, {
+							...budget,
+							signal: summarySignal,
+						})) ?? null
+					);
+				} finally {
+					if (compactionController === controller) compactionController = null;
+				}
+			});
 		} catch (error) {
 			if (!summaryLifecycleStarted) startSummaryLifecycle();
 			emitCompactionActivity("failed", compactionFailureMessage(error));
 			deps.bus?.emit(BusChannels.CompactionEnd, { trigger, at: Date.now() });
+			summarySignal?.throwIfAborted();
 			throw error;
 		}
 		if (!result || result.summary.length === 0) {
@@ -1125,6 +1146,7 @@ export function createTurnContext(deps: TurnContextDeps): TurnContext {
 		rememberedLoadedContextWindow,
 		refreshAgentMessagesFromSession,
 		runAutoCompact,
+		cancelCompaction: () => compactionController?.abort(),
 
 		setCurrentSnapshot(snapshot: ContextSnapshot): void {
 			currentContextSnapshot = snapshot;
@@ -1343,7 +1365,7 @@ export function createTurnContext(deps: TurnContextDeps): TurnContext {
 			let compacted = false;
 			if (verdict.shouldCompact) {
 				try {
-					compacted = await runAutoCompact(agentRuntime, false, undefined, "auto");
+					compacted = await runAutoCompact(agentRuntime, false, undefined, "auto", undefined, undefined, signal);
 				} catch (err) {
 					throw new Error(
 						`[Clio Coder] post-tool context guard could not compact before continuation: ${err instanceof Error ? err.message : String(err)}`,
@@ -1523,6 +1545,7 @@ export function createTurnContext(deps: TurnContextDeps): TurnContext {
 		},
 
 		resetForSession(): void {
+			compactionController?.abort();
 			// An in-process switch replaces the whole prefix: the backend's slot
 			// still holds the outgoing session's prompt and history, so the first
 			// turn on the incoming one is expected-cold on every tier, exactly as
@@ -1548,6 +1571,7 @@ export function createTurnContext(deps: TurnContextDeps): TurnContext {
 		},
 
 		dispose(): void {
+			compactionController?.abort();
 			for (const unsubscribe of unsubscribeColdReasonSources) unsubscribe?.();
 		},
 	};

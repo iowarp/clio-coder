@@ -5,6 +5,9 @@ All notable changes to Clio Coder are documented in this file. The format follow
 ## Unreleased
 
 ### Fixed
+- Keep parallel tool declarations and the latest operator request intact across compaction; reject truncated or canceled checkpoints, wire TUI and ACP cancellation through production summaries, and stop canceled pre-submit requests before chat admission.
+- Parse authored handbooks with fenced code blocks and HTML comments correctly: a `# comment` inside a fenced example no longer rejects `CLIO-CODER.md` or drops its conventions and invariants from `--apply` and `--adopt`, and fenced `##` lines are no longer split into sections or rewritten on serialization.
+- Keep whole-index work off the prompt and tool hot paths: the codewiki worker receives a reference to the committed artifact instead of a structured clone of the parsed index, an unchanged `code_nav` reconciliation returns only the fingerprint, and the compiled prompt's project-type and codewiki markers read recorded state and artifact presence instead of parsing the artifact and re-walking the tree.
 - Declare writable staging subtrees for internal wiki dispatch, report pending pages explicitly in CLI outcomes, and retain the Git baseline needed to reuse completed first-publication checkpoints.
 - Compare summary compaction with full-context estimates on both sides and describe unchanged or increased context without claiming reclamation.
 - Preserve ordinary authored handbooks and bounded exact prefixes in session and opted-in worker context; disclose omitted sources and invalidate captured prompts after explicit context changes.

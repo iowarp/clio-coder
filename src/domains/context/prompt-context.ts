@@ -1,3 +1,4 @@
+import { statSync } from "node:fs";
 import { detectProjectType } from "../session/workspace/project-type.js";
 import {
 	loadProjectClioMd,
@@ -5,7 +6,7 @@ import {
 	renderProjectContextFragment,
 	renderProjectTypeFragment,
 } from "./clio-md.js";
-import { readCodewiki } from "./codewiki/artifact.js";
+import { codewikiPath } from "./codewiki/artifact.js";
 import type { ProjectPromptContext } from "./contract.js";
 import { computeFingerprintCached, isStale } from "./fingerprint.js";
 import { readClioState } from "./state.js";
@@ -24,8 +25,22 @@ import { wikiCompleteness, wikiStaleness } from "./wiki/staleness.js";
 export const HANDBOOK_ABSENT_FRAGMENT =
 	"<handbook>none: this workspace has no CLIO-CODER.md, so do not read one; learn the repository from its files, and the operator can run /context init to write a handbook</handbook>";
 
+function codewikiArtifactPresent(cwd: string): boolean {
+	try {
+		return statSync(codewikiPath(cwd)).isFile();
+	} catch {
+		return false;
+	}
+}
+
 export function renderPromptContext(cwd: string): ProjectPromptContext {
-	const projectType = detectProjectType(cwd);
+	// Detection enumerates the tree and reads every `.h` header to classify it,
+	// and this renders on session compile and on every bounded dispatch. An
+	// indexed project already recorded its type when init, refresh, or the
+	// session-start check stamped state; the marker reads that and detects only
+	// where nothing has been recorded yet.
+	const state = readClioState(cwd);
+	const projectType = state?.projectType ?? detectProjectType(cwd);
 	const supportFragments = [renderProjectTypeFragment(projectType)];
 	const pieces = [...supportFragments];
 	const addSupport = (fragment: string): void => {
@@ -43,12 +58,21 @@ export function renderPromptContext(cwd: string): ProjectPromptContext {
 	// context spends its first tool call reading CLIO-CODER.md and gets
 	// ENOENT, while the operator's header already says it is missing (#191).
 	if (loadedClioMd.files.length === 0 && loadedClioMd.errors.length === 0) addSupport(HANDBOOK_ABSENT_FRAGMENT);
-	const codewiki = readCodewiki(cwd);
-	if (codewiki) {
-		const state = readClioState(cwd);
+	// The marker states that an artifact is present and whether the recorded
+	// source fingerprint still matches the tree. It does not validate the
+	// artifact's contents: parsing the JSON here is main-thread work that grows
+	// with the index, on session compile and on every bounded dispatch, for a
+	// boolean. An unparseable artifact is still "available" in the sense the
+	// marker promises, because `code_nav` reads null for it and rebuilds from
+	// source under the lease before answering, and the session-start check does
+	// the same. The recorded fingerprint carries the line total the freshness
+	// check would otherwise have read off the artifact.
+	if (codewikiArtifactPresent(cwd)) {
 		let stale = true;
 		try {
-			if (state) stale = isStale(state.fingerprint, computeFingerprintCached(cwd, codewiki));
+			if (state) {
+				stale = isStale(state.fingerprint, computeFingerprintCached(cwd, null, { artifactLoc: state.fingerprint.loc }));
+			}
 		} catch {
 			warnings.push("clio-coder: codewiki freshness unavailable; source could not be read; run /context refresh");
 		}
