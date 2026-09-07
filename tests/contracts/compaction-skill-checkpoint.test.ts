@@ -1,6 +1,7 @@
 import { deepStrictEqual, doesNotMatch, match, ok, rejects, strictEqual } from "node:assert/strict";
 import { describe, it } from "node:test";
 import { DEFAULT_SETTINGS } from "../../src/core/defaults.js";
+import { withModelSkillActivation } from "../../src/core/skill-activation.js";
 import { foldWorkingSet } from "../../src/domains/context/working-set/fold.js";
 import { resolveRecall } from "../../src/domains/context/working-set/recall.js";
 import type { PromptsContract } from "../../src/domains/prompts/contract.js";
@@ -250,107 +251,149 @@ function overflowFixture(activeTask = false) {
 }
 
 describe("mandatory request-fit compaction", () => {
-	it("routes actual submit preflight to overflow after prompt compilation grows the request", async () => {
-		const settings = structuredClone(DEFAULT_SETTINGS);
-		settings.chat.target = "source";
-		settings.chat.model = "source";
-		settings.chat.maxOutputTokens = 8192;
-		settings.chat.prewarm = false;
-		const capabilities = {
-			chat: true,
-			tools: true,
-			reasoning: false,
-			vision: false,
-			audio: false,
-			embeddings: false,
-			rerank: false,
-			fim: false,
-			contextWindow: 32768,
-			maxTokens: 8192,
-		};
-		const target = {
-			id: "source",
-			runtime: "source",
-			url: "https://source.invalid",
-			defaultModel: "source",
-			capabilities: { contextWindow: 32768 },
-		};
-		const runtime = {
-			id: "source",
-			displayName: "Offline",
-			kind: "http",
-			tier: "cloud",
-			apiFamily: "openai-completions",
-			auth: "none",
-			defaultCapabilities: capabilities,
-			synthesizeModel: () => structuredClone(model),
-		};
-		const providers = {
-			getTarget: () => target,
-			getRuntime: () => runtime,
-			getDetectedReasoning: () => false,
-			list: () => [
-				{
-					target,
-					runtime,
-					capabilities,
-					available: true,
-					discoveredModels: ["source"],
-					discoveredModelsSource: "probe",
-					probeCapabilities: null,
-				},
-			],
-		} as unknown as ProvidersContract;
-		const entries = [
-			message("old-user", "user", { text: "Earlier task" }, null),
-			message("old-assistant", "assistant", { text: "old ".repeat(1500) }, "old-user"),
-		];
-		const order: string[] = [];
-		let budget: Pick<CompactInput, "keepRecentTokens" | "preserveUserTurnId"> | undefined;
-		const loop = createChatLoop({
-			getSettings: () => settings,
-			providers,
-			knownTargets: () => new Set(["source"]),
-			readSessionEntries: () => entries,
-			createAgent: ((options: Parameters<NonNullable<CreateChatLoopDeps["createAgent"]>>[0]) => ({
-				agent: {
-					state: options?.initialState,
-					subscribe: () => () => {},
-					abort: () => {},
-					prompt: async () => {
-						throw new Error("No provider call is allowed in this caller-boundary contract");
-					},
-				},
-			})) as unknown as NonNullable<CreateChatLoopDeps["createAgent"]>,
-			prompts: {
-				inputEpoch: () => 0,
-				compileSessionPrompt: async () => {
-					order.push("compile");
-					return {
-						systemPrompt: "p".repeat(96000),
-						systemPromptHash: "grown",
-						tokenEstimate: 24000,
-						sections: [],
-						fragmentManifest: [],
-					};
-				},
-			} as unknown as PromptsContract,
-			autoCompact: async (_instructions, trigger, requested) => {
-				order.push(trigger ?? "unspecified");
-				budget = requested;
-				return null;
-			},
-		});
-		try {
-			loop.resetForSession("old-assistant", buildModelReplayAgentMessagesFromTurns(entries));
-			await loop.submit("Create the current architecture map.");
-			deepStrictEqual(order, ["compile", "overflow"]);
-			ok((budget?.keepRecentTokens ?? 20000) < 20000);
-			strictEqual(entries.length, 2, "failed preflight must not append the pending operator turn");
-		} finally {
-			loop.dispose();
-		}
+	it("recovers a resumed selected skill when the next turn only grants optional model activation", async () => {
+		const f = overflowFixture();
+		const pending = "Create the exact source-backed map; keep tracked source unchanged.";
+		f.priceAt(25000, pending);
+		// This is the policy submit creates on auto-edit/full-auto after a cold resume.
+		const policy = withModelSkillActivation(undefined, true);
+		strictEqual(await f.context.runAutoCompact(f.runtime, true, undefined, "overflow", pending, policy), true);
+		strictEqual(f.results[0]?.skillContext?.skills[0]?.content[0]?.text, f.body);
+		ok(f.context.liveContextEstimate(f.runtime, pending).tokens + 8192 <= 32768);
+		strictEqual(policy?.loadedSkillNames.size, 0, "historical content does not reconstruct live tool authority");
 	});
+
+	it("keeps explicit off, unknown selection and pending replacement authoritative with an empty model grant", () => {
+		const f = overflowFixture();
+		const grant = withModelSkillActivation(undefined, true);
+		deepStrictEqual(mainSkillContextState(f.entries, grant), selection);
+		for (const data of [
+			{ version: 1 as const, activationRefs: [] },
+			{ version: 1 as const, activationRefs: [], unknown: true },
+		]) {
+			const state: SessionEntry = {
+				kind: "custom",
+				turnId: "changed",
+				parentTurnId: "selected",
+				timestamp,
+				customType: SKILL_CONTEXT_STATE,
+				data,
+			};
+			deepStrictEqual(mainSkillContextState([...f.entries, state], grant), data);
+		}
+		ok(grant);
+		strictEqual(
+			mainSkillContextState(f.entries, {
+				...grant,
+				requests: [{ name: "replacement", args: "", source: "slash-command", installed: true }],
+			}),
+			null,
+		);
+	});
+
+	for (const autonomy of ["read-only", "auto-edit", "full-auto"] as const) {
+		it(`routes resumed ${autonomy} submit through overflow with the recorded skill selection`, async () => {
+			const settings = structuredClone(DEFAULT_SETTINGS);
+			settings.safety.autonomy = autonomy;
+			settings.chat.target = "source";
+			settings.chat.model = "source";
+			settings.chat.maxOutputTokens = 8192;
+			settings.chat.prewarm = false;
+			const capabilities = {
+				chat: true,
+				tools: true,
+				reasoning: false,
+				vision: false,
+				audio: false,
+				embeddings: false,
+				rerank: false,
+				fim: false,
+				contextWindow: 32768,
+				maxTokens: 8192,
+			};
+			const target = {
+				id: "source",
+				runtime: "source",
+				url: "https://source.invalid",
+				defaultModel: "source",
+				capabilities: { contextWindow: 32768 },
+			};
+			const runtime = {
+				id: "source",
+				displayName: "Offline",
+				kind: "http",
+				tier: "cloud",
+				apiFamily: "openai-completions",
+				auth: "none",
+				defaultCapabilities: capabilities,
+				synthesizeModel: () => structuredClone(model),
+			};
+			const providers = {
+				getTarget: () => target,
+				getRuntime: () => runtime,
+				getDetectedReasoning: () => false,
+				list: () => [
+					{
+						target,
+						runtime,
+						capabilities,
+						available: true,
+						discoveredModels: ["source"],
+						discoveredModelsSource: "probe",
+						probeCapabilities: null,
+					},
+				],
+			} as unknown as ProvidersContract;
+			const { entries } = overflowFixture();
+			const entryCount = entries.length;
+			const order: string[] = [];
+			let budget: Pick<CompactInput, "keepRecentTokens" | "preserveUserTurnId" | "skillContextState"> | undefined;
+			const loop = createChatLoop({
+				getSettings: () => settings,
+				providers,
+				knownTargets: () => new Set(["source"]),
+				readSessionEntries: () => entries,
+				createAgent: ((options: Parameters<NonNullable<CreateChatLoopDeps["createAgent"]>>[0]) => ({
+					agent: {
+						state: options?.initialState,
+						subscribe: () => () => {},
+						abort: () => {},
+						prompt: async () => {
+							throw new Error("No provider call is allowed in this caller-boundary contract");
+						},
+					},
+				})) as unknown as NonNullable<CreateChatLoopDeps["createAgent"]>,
+				prompts: {
+					inputEpoch: () => 0,
+					compileSessionPrompt: async () => {
+						order.push("compile");
+						return {
+							systemPrompt: "p".repeat(96000),
+							systemPromptHash: "grown",
+							tokenEstimate: 24000,
+							sections: [],
+							fragmentManifest: [],
+						};
+					},
+				} as unknown as PromptsContract,
+				autoCompact: async (_instructions, trigger, requested) => {
+					order.push(trigger ?? "unspecified");
+					budget = requested;
+					return null;
+				},
+			});
+			try {
+				loop.resetForSession("selected", buildModelReplayAgentMessagesFromTurns(entries));
+				await loop.submit("Create the current architecture map.");
+				deepStrictEqual(order, ["compile", "overflow"]);
+				ok((budget?.keepRecentTokens ?? 20000) < 20000);
+				deepStrictEqual(budget?.skillContextState, selection);
+				strictEqual(entries.length, entryCount, "failed preflight must not append the pending operator turn");
+			} finally {
+				loop.dispose();
+			}
+		});
+	}
 
 	it("recovers output overflow below the automatic threshold while manual force keeps its default", async () => {
 		const f = overflowFixture();

@@ -224,6 +224,17 @@ export function mainSkillContextState(
 	policy: PendingSkillToolPolicy | undefined,
 ): SkillContextState | null | undefined {
 	if (!policy) return latestSkillContextState(entries);
+	// A cold turn may grant optional model activation without selecting or
+	// replacing any skill. Keep the recorded selection, including explicit off.
+	// This preserves historical content; it does not reconstruct tool authority.
+	if (
+		policy.modelActivation === true &&
+		policy.carriedSurface !== true &&
+		policy.requests.length === 0 &&
+		policy.loadedSkillNames.size === 0 &&
+		policy.loadedSkillPolicies.size === 0
+	)
+		return latestSkillContextState(entries);
 	if (policy.requests.some((request) => !policy.loadedSkillNames.has(request.name))) return null;
 	const names = [...policy.loadedSkillNames];
 	if (names.length === 0) return null;
