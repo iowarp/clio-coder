@@ -12,8 +12,8 @@ After linking, the script runs the installed CLI's structure repair
 (node dist/cli/index.js doctor --fix) so a fresh install passes plain clio-coder doctor.
 
 Options:
-  --skip-deps    Do not run npm ci, even if node_modules looks stale or missing.
-  --no-build     Do not run npm run build; require an existing dist/cli/index.js.
+  --skip-deps    Skip the frozen pnpm dependency sync.
+  --no-build     Do not run pnpm run build; require an existing dist/cli/index.js.
   --dry-run      Print planned actions without changing files.
   --force        Replace an existing clio-coder symlink even if it points outside this repo.
   -h, --help     Show this help.
@@ -136,10 +136,6 @@ console.log(`[install-local] ok: Node ${process.version} satisfies ${range}`);
 NODE
 }
 
-deps_are_acceptable() {
-	[[ -d node_modules && -f package-lock.json && -f node_modules/.package-lock.json ]] || return 1
-	npm ls --depth=0 --silent >/dev/null 2>&1
-}
 
 # The verification line names the launcher this run installed, by path. A bare
 # `clio-coder` resolves through PATH and can answer for an older install earlier on it,
@@ -181,6 +177,7 @@ cd "$repo_root"
 
 need_cmd node
 need_cmd npm
+need_cmd pnpm
 verify_node_engine
 
 bin_dir="$(expand_tilde "${CLIO_CODER_BIN_DIR:-$HOME/.local/bin}")"
@@ -196,16 +193,16 @@ if [[ $dry_run -eq 1 ]]; then
 	log "dry run: no files will be changed"
 fi
 
+# pnpm validates every workspace manifest against pnpm-lock.yaml and reuses its
+# content-addressed store; a hand-rolled node_modules freshness test can miss drift.
 if [[ $skip_deps -eq 1 ]]; then
 	log "skipping dependency install (--skip-deps)"
-elif deps_are_acceptable; then
-	ok "node_modules satisfies package-lock according to npm ls"
 else
 	if [[ $dry_run -eq 1 ]]; then
-		log "would run: npm ci"
+		log "would run: pnpm install --frozen-lockfile"
 	else
-		log "running: npm ci"
-		npm ci
+		log "running: pnpm install --frozen-lockfile"
+		pnpm install --frozen-lockfile
 	fi
 fi
 
@@ -213,15 +210,15 @@ if [[ $no_build -eq 1 ]]; then
 	log "skipping build (--no-build)"
 else
 	if [[ $dry_run -eq 1 ]]; then
-		log "would run: npm run build"
+		log "would run: pnpm run build"
 	else
-		log "running: npm run build"
-		npm run build
+		log "running: pnpm run build"
+		pnpm run build
 	fi
 fi
 
 if [[ $dry_run -eq 0 ]]; then
-	[[ -f "$cli_target" ]] || fail "missing built CLI: $cli_target (run npm run build or omit --no-build)"
+	[[ -f "$cli_target" ]] || fail "missing built CLI: $cli_target (run pnpm run build or omit --no-build)"
 	chmod +x "$cli_target"
 	[[ -x "$cli_target" ]] || fail "built CLI is not executable: $cli_target"
 	mkdir -p "$bin_dir"

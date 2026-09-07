@@ -79,9 +79,9 @@ the first version header to match the version in <code>package.json</code>.</p>
 <p>Run deterministic local checks on the candidate commit before requesting authorization.</p>
 <ol>
 <li><p>Execute the release gate:</p>
-<pre><code class="language-bash">npm run ci:release
+<pre><code class="language-bash">pnpm run ci:release
 </code></pre>
-<p>This gate runs <code>npm run ci</code> followed by <code>node scripts/check-release.mjs</code>. It verifies
+<p>This gate runs <code>pnpm run ci</code> followed by <code>node scripts/check-release.mjs</code>. It verifies
 type checking, Biome formatting, hygiene rules, architecture boundary invariants,
 the build, the contract and smoke test suites, trace-viewer tests, and dist integrity.
 The packaging audit checks executable entry shebangs, ensures forbidden files like
@@ -93,7 +93,7 @@ and enforces size limits (10 MB packed, 50 MB unpacked).</p>
 </code></pre>
 </li>
 <li><p>Run the real-home smoke test against the operator configuration:</p>
-<pre><code class="language-bash">npm run smoke:real-home -- --target &lt;id&gt; --strict
+<pre><code class="language-bash">pnpm run smoke:real-home --target &lt;id&gt; --strict
 </code></pre>
 <p>This runs <code>scripts/smoke-real-home.sh</code> using a copy of operator settings in a scratch
 <code>CLIO_CODER_HOME</code>. The <code>--strict</code> flag ensures any failing rows from <code>clio-coder doctor</code>
@@ -117,7 +117,7 @@ clio-coder uninstall --dry-run
 <p>Before touching any remote ref, summarize the candidate for maintainer review:</p>
 <ul>
 <li>Candidate commit SHA</li>
-<li>Results of <code>npm run ci:release</code></li>
+<li>Results of <code>pnpm run ci:release</code></li>
 <li>Verification output from real-home smoke and installed package testing</li>
 <li>Changelog contents and target npm version</li>
 </ul>
@@ -159,7 +159,7 @@ git merge --ff-only v044
 <li><p>Pushing the tag triggers <code>.github/workflows/release.yml</code>. The workflow:</p>
 <ul>
 <li>Verifies the tag matches <code>package.json</code>.</li>
-<li>Runs <code>npm run ci:release</code> on the tagged commit.</li>
+<li>Runs <code>pnpm run ci:release</code> on the tagged commit.</li>
 <li>Packs the release tarball with <code>npm pack</code>.</li>
 <li>Extracts the version changelog section from <code>CHANGELOG.md</code>.</li>
 <li>Creates the GitHub Release with the tarball attached using <code>gh release create</code>.</li>
@@ -183,7 +183,7 @@ git merge --ff-only v044
 <pre><code class="language-bash">npm publish
 </code></pre>
 <p>The <code>prepublishOnly</code> lifecycle script sets <code>CLIO_CODER_RELEASE_CONTEXT=publish</code> and
-re-executes <code>npm run ci:release</code> as a mandatory release-mode verification gate before
+re-executes <code>pnpm run ci:release</code> as a mandatory release-mode verification gate before
 files are uploaded. When publishing a pre-release channel, append <code>--tag &lt;channel&gt;</code>.</p>
 </li>
 </ol>

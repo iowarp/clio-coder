@@ -38,7 +38,7 @@ while [ $# -gt 0 ]; do
 done
 
 if [ ! -f "$cli" ]; then
-	echo "smoke-real-home: $cli is missing; run npm run build first" >&2
+	echo "smoke-real-home: $cli is missing; run pnpm run build first" >&2
 	exit 2
 fi
 if [ ! -f "$settings" ]; then

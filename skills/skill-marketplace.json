@@ -1,5 +1,5 @@
 {
-	"generatedBy": "npm run skills:pin",
+	"generatedBy": "pnpm run skills:pin",
 	"skills": [
 		{
 			"name": "ast-grep",

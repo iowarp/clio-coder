@@ -31,11 +31,12 @@ jobs:
       - uses: actions/checkout@v6
         with:
           persist-credentials: false
+      - uses: pnpm/action-setup@v4
       - uses: actions/setup-node@v6
         with:
           node-version: 22
-          cache: npm
-      - run: npm ci --prefer-offline --no-audit --no-fund
+          cache: pnpm
+      - run: pnpm install --frozen-lockfile
       - name: Verify tag matches package.json version
         run: |
           pkg="$(node -p "require('./package.json').version")"
@@ -49,7 +50,7 @@ jobs:
       # trace-viewer suite, and the packaging audit. This also leaves dist/ in
       # place for npm pack below.
       - name: Release gate
-        run: npm run ci:release
+        run: pnpm run ci:release
       - name: Pack tarball for the GitHub release
         run: npm pack
       # The release body is the CHANGELOG.md section for this version, not

@@ -144,23 +144,24 @@ is retained as release engineering history.
 ```bash
 git clone https://github.com/iowarp/clio-coder.git
 cd clio-coder
-npm ci
-npm run build
+corepack enable pnpm
+pnpm install --frozen-lockfile
+pnpm run build
 node dist/cli/index.js --help
 ```
 
 For a persistent local command:
 
 ```bash
-npm run install:local
+pnpm run install:local
 export PATH="$HOME/.local/bin:$PATH"
 hash -r
 clio-coder --version
 ```
 
-Use `npm run dev` for a watch build. Before handing back a change, run the
-focused test while iterating and `npm run ci` for the deterministic repository
-gate. Maintainers use `npm run ci:release` to add the distribution and package
+Use `pnpm run dev` for a watch build. Before handing back a change, run the
+focused test while iterating and `pnpm run ci` for the deterministic repository
+gate. Maintainers use `pnpm run ci:release` to add the distribution and package
 audit.
 
 ## Project context in a source checkout

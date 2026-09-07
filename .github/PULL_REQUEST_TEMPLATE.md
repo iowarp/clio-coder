@@ -10,7 +10,7 @@
 
 ## Verification
 
-- [ ] `npm run ci` is green locally.
+- [ ] `pnpm run ci` is green locally.
 - [ ] Touched core release surfaces are covered by smoke/contracts when practical.
 - [ ] No exploratory probes left under `scripts/` or `tests/`. One-off probes go to `/tmp/` and get deleted.
 - [ ] No `// biome-ignore`, `ts-ignore`, or `any` added without a linked tracking issue.

@@ -129,10 +129,10 @@ replace Clio copies without crossing the product boundary:</p>
 <ol>
 <li>Read the release notes or package changelogs for <code>pi-ai</code>, <code>pi-agent-core</code>,
 and <code>pi-tui</code>.</li>
-<li>Run <code>npm run pi:surface-diff</code>. A changed or removed symbol that Clio imports
+<li>Run <code>pnpm run pi:surface-diff</code>. A changed or removed symbol that Clio imports
 is an error; a new export is review input.</li>
 <li>Run the focused contracts in the
-<a href="pi_boundary_blueprint.html#pi-regression-net">Pi regression net</a>, then run <code>npm run ci</code>.</li>
+<a href="pi_boundary_blueprint.html#pi-regression-net">Pi regression net</a>, then run <code>pnpm run ci</code>.</li>
 <li>Walk Pi&#39;s fixed-issue list against the
 <a href="pi_boundary_blueprint.html">Pi SDK boundary table</a>. For every fix in a surface Clio
 still owns, either delete Clio&#39;s copy in favor of Pi or add a dated reason
@@ -141,22 +141,22 @@ for keeping the delta.</li>
 worth a Clio ticket.</li>
 </ol>
 <p>After review, regenerate <code>docs/pi-surface.json</code> with
-<code>npm run pi:surface-snapshot</code>, inspect the symbol and signature changes, and
+<code>pnpm run pi:surface-snapshot</code>, inspect the symbol and signature changes, and
 commit the dependency pins, snapshot, boundary notes, and proving contracts
-together. <code>npm run lint</code> invokes the surface check automatically when the
+together. <code>pnpm run lint</code> invokes the surface check automatically when the
 installed Pi versions differ from the checked-in snapshot.</p>
 <h2>Test lanes</h2>
-<p><code>npm test</code> uses Node&#39;s test runner over every <code>tests/contracts/*.test.ts</code> and
+<p><code>pnpm test</code> uses Node&#39;s test runner over every <code>tests/contracts/*.test.ts</code> and
 <code>tests/smoke/*.test.ts</code> file, with <code>tests/harness/tmp-root.ts</code> preloaded to
 isolate test state. Its <code>pretest</code> hook builds <code>dist/</code> when the CLI bundle is
 absent. Run one focused file while iterating with:</p>
-<pre><code class="language-bash">npm run test:file -- tests/contracts/&lt;name&gt;.test.ts
+<pre><code class="language-bash">pnpm run test:file tests/contracts/&lt;name&gt;.test.ts
 </code></pre>
 <p>There is no committed weighted-shard or special serial-lane runner. Keep timing
-claims within the focused contract that owns them, and use the full <code>npm run ci</code>
+claims within the focused contract that owns them, and use the full <code>pnpm run ci</code>
 gate before handoff.</p>
 <p>The release smoke script <code>scripts/smoke-real-home.sh</code> (invoked via
-<code>npm run smoke:real-home</code>) tests booting the built CLI binary against a copy of
+<code>pnpm run smoke:real-home</code>) tests booting the built CLI binary against a copy of
 the operator settings in a scratch home. An optional <code>--strict</code> flag makes doctor
 exit 1 fail the smoke run on failing rows instead of tolerating fleet state.</p>
 <h2>Issue conventions</h2>
@@ -207,13 +207,13 @@ A release cut requires every issue in its milestone to be closed
 or bumped; the milestone closes when the tag is published.</p>
 <h2>Dogfooding setup</h2>
 <p>The marketplace copy under <code>skills/git/</code> is the committed source of truth,
-pinned in <code>skills/registry.yaml</code> by <code>npm run skills:pin</code>. Runtime roots are
+pinned in <code>skills/registry.yaml</code> by <code>pnpm run skills:pin</code>. Runtime roots are
 gitignored, so each developer installs locally:</p>
 <pre><code class="language-bash">cp -r skills/git/file-ticket .clio-coder/skills/   # Clio Coder
 cp -r skills/git/file-ticket .claude/skills/       # Claude Code
 </code></pre>
 <p>The other pipeline skills are model-invoked from the marketplace catalog the
-same way. When a skill changes, re-run <code>npm run skills:pin</code> and re-copy;
+same way. When a skill changes, re-run <code>pnpm run skills:pin</code> and re-copy;
 drift between an installed copy and the pinned hash surfaces a warning at
 activation.</p>
         </article>

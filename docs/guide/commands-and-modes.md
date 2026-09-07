@@ -597,14 +597,14 @@ to execute through the existing engine worker path, the sanctioned Claude Code w
 
 | Command | Purpose |
 | --- | --- |
-| `npm run ci` | Local and GitHub PR gate: typecheck, lint, skills pin check, build, the deterministic test suite, and the trace-viewer suite. |
-| `npm run ci:release` | Maintainer release gate: `npm run ci`, then the `check-release` dist and packaging audit. |
-| `npm run typecheck` | Strict TypeScript pass. |
-| `npm run lint` | Biome checks plus `scripts/check-hygiene.ts`, which runs the boundary invariants, the skills pin check, and the README and docs drift rules. |
-| `npm test` | Focused contract and smoke files through plain `node --test`. |
-| `npm run build` | Production bundle through `tsup`. |
-| `npm run dev` | `tsup --watch`. |
-| `npm run clean` | Remove `dist/`. |
+| `pnpm run ci` | Local and GitHub PR gate: typecheck, lint, skills pin check, build, the deterministic test suite, and the trace-viewer suite. |
+| `pnpm run ci:release` | Maintainer release gate: `pnpm run ci`, then the `check-release` dist and packaging audit. |
+| `pnpm run typecheck` | Strict TypeScript pass. |
+| `pnpm run lint` | Biome checks plus `scripts/check-hygiene.ts`, which runs the boundary invariants, the skills pin check, and the README and docs drift rules. |
+| `pnpm test` | Focused contract and smoke files through plain `node --test`. |
+| `pnpm run build` | Production bundle through `tsup`. |
+| `pnpm run dev` | `tsup --watch`. |
+| `pnpm run clean` | Remove `dist/`. |
 
 Live provider checks cost tokens or local GPU time and are deliberately not
 part of deterministic CI. Maintainers perform them explicitly against an
@@ -830,11 +830,11 @@ All TUI overlays fluidly adapt to narrow terminals down to 40 columns:
 
 | Problem | Try this |
 | --- | --- |
-| `clio-coder: command not found` | Run `npm run install:local`, then `hash -r`; confirm `${CLIO_CODER_BIN_DIR:-$HOME/.local/bin}` is on `PATH`. |
+| `clio-coder: command not found` | Run `pnpm run install:local`, then `hash -r`; confirm `${CLIO_CODER_BIN_DIR:-$HOME/.local/bin}` is on `PATH`. |
 | No model target is available | Run `clio-coder configure`, then `clio-coder targets --probe`. |
 | Local model does not respond | Confirm the runtime is running and the target URL is correct. |
 | Cloud model auth fails | Check `clio-coder auth status <target>` and verify the relevant API key or login flow. |
-| Source changes do not appear | Re-run `npm run build`; linked CLI points at `dist/`. |
+| Source changes do not appear | Re-run `pnpm run build`; linked CLI points at `dist/`. |
 | Session replay looks incomplete | Confirm durable session entries exist for the relevant tool, bash, or display activity. |
 | Doctor reports stale state metadata | Run `clio-coder doctor --fix`; upgrades also refresh install metadata after reinstalling. |
 | You need a clean start | Use `clio-coder reset --state`, `--data`, `--cache`, `--auth`, `--config`, or `--all`. |

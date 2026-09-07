@@ -334,15 +334,15 @@ catalog only as a marketplace, through <code>clio-coder skills install &lt;name&
 <p>Use the local source installer from the cloned repository:</p>
 <pre><code class="language-bash">git clone https://github.com/iowarp/clio-coder.git
 cd clio-coder
-npm run install:local
+pnpm run install:local
 hash -r
 clio-coder --version
 </code></pre>
 <p><code>scripts/install-local.sh</code> is idempotent and auditable:</p>
 <ul>
 <li>verifies <code>node</code> satisfies <code>package.json</code> <code>engines.node</code>;</li>
-<li>runs <code>npm ci</code> unless <code>node_modules</code> satisfies the lockfile or <code>--skip-deps</code> is passed;</li>
-<li>runs <code>npm run build</code> unless <code>--no-build</code> is passed;</li>
+<li>runs <code>pnpm install --frozen-lockfile</code> to sync dependencies with the workspace lockfile unless <code>--skip-deps</code> is passed;</li>
+<li>runs <code>pnpm run build</code> unless <code>--no-build</code> is passed;</li>
 <li>verifies <code>dist/cli/index.js</code> exists and is executable;</li>
 <li>creates <code>${CLIO_CODER_BIN_DIR:-$HOME/.local/bin}</code> and links <code>clio-coder</code> there;</li>
 <li>warns if that bin dir is not on <code>PATH</code>, and warns when another <code>clio-coder</code>
@@ -402,7 +402,7 @@ its command cache with <code>hash -r</code> in Bash or <code>rehash</code> in Zs
 <p>The command detects the install method from the running binary. On a source
 checkout it never runs <code>npm install -g</code>: it performs its safe local duties
 (migration check, <code>install.json</code> refresh) and prints the real update steps,
-<code>git pull</code>, <code>npm run install:local</code>, <code>hash -r</code>. The npm reinstall path applies
+<code>git pull</code>, <code>pnpm run install:local</code>, <code>hash -r</code>. The npm reinstall path applies
 only to a genuinely npm-installed binary.</p>
 <h4>Current migration contract</h4>
 <p>The v0.4.2 source tree registers five migrations in execution order:</p>

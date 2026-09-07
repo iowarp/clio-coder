@@ -48,7 +48,7 @@
 <a href="environment_blueprint.html">Environment Variables visual reference</a>.</p>
 </blockquote>
 <p>This page inventories Clio-specific runtime variables and the ambient variables that materially change documented operator behavior. <code>settings.yaml</code> is the durable home for operator policy; environment variables support per-process overrides, directory layout, debugging, credentials, terminal integration, and internal plumbing. When prose and source disagree, prefer the cited read site.</p>
-<p>The <code>environment-variable-inventory</code> check in <code>scripts/check-hygiene.ts</code>, run by <code>npm run lint</code>, enforces coverage for Clio&#39;s <code>CLIO_*</code> variables and <code>NO_COLOR</code>. It intentionally does not treat every operating-system or provider convention as a Clio knob. Examples outside that enforced family include <code>PATH</code>, <code>HOME</code>, terminal capability variables, and provider API-key names selected dynamically by <code>src/engine/env-api-keys.ts</code>.</p>
+<p>The <code>environment-variable-inventory</code> check in <code>scripts/check-hygiene.ts</code>, run by <code>pnpm run lint</code>, enforces coverage for Clio&#39;s <code>CLIO_*</code> variables and <code>NO_COLOR</code>. It intentionally does not treat every operating-system or provider convention as a Clio knob. Examples outside that enforced family include <code>PATH</code>, <code>HOME</code>, terminal capability variables, and provider API-key names selected dynamically by <code>src/engine/env-api-keys.ts</code>.</p>
 <h2>Behavior knobs without a settings key</h2>
 <table>
 <thead>

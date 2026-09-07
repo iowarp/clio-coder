@@ -1175,35 +1175,35 @@ to execute through the existing engine worker path, the sanctioned Claude Code w
 </tr>
 </thead>
 <tbody><tr>
-<td><code>npm run ci</code></td>
+<td><code>pnpm run ci</code></td>
 <td>Local and GitHub PR gate: typecheck, lint, skills pin check, build, the deterministic test suite, and the trace-viewer suite.</td>
 </tr>
 <tr>
-<td><code>npm run ci:release</code></td>
-<td>Maintainer release gate: <code>npm run ci</code>, then the <code>check-release</code> dist and packaging audit.</td>
+<td><code>pnpm run ci:release</code></td>
+<td>Maintainer release gate: <code>pnpm run ci</code>, then the <code>check-release</code> dist and packaging audit.</td>
 </tr>
 <tr>
-<td><code>npm run typecheck</code></td>
+<td><code>pnpm run typecheck</code></td>
 <td>Strict TypeScript pass.</td>
 </tr>
 <tr>
-<td><code>npm run lint</code></td>
+<td><code>pnpm run lint</code></td>
 <td>Biome checks plus <code>scripts/check-hygiene.ts</code>, which runs the boundary invariants, the skills pin check, and the README and docs drift rules.</td>
 </tr>
 <tr>
-<td><code>npm test</code></td>
+<td><code>pnpm test</code></td>
 <td>Focused contract and smoke files through plain <code>node --test</code>.</td>
 </tr>
 <tr>
-<td><code>npm run build</code></td>
+<td><code>pnpm run build</code></td>
 <td>Production bundle through <code>tsup</code>.</td>
 </tr>
 <tr>
-<td><code>npm run dev</code></td>
+<td><code>pnpm run dev</code></td>
 <td><code>tsup --watch</code>.</td>
 </tr>
 <tr>
-<td><code>npm run clean</code></td>
+<td><code>pnpm run clean</code></td>
 <td>Remove <code>dist/</code>.</td>
 </tr>
 </tbody></table>
@@ -1460,7 +1460,7 @@ drill-down layout below 72 columns.</li>
 </thead>
 <tbody><tr>
 <td><code>clio-coder: command not found</code></td>
-<td>Run <code>npm run install:local</code>, then <code>hash -r</code>; confirm <code>${CLIO_CODER_BIN_DIR:-$HOME/.local/bin}</code> is on <code>PATH</code>.</td>
+<td>Run <code>pnpm run install:local</code>, then <code>hash -r</code>; confirm <code>${CLIO_CODER_BIN_DIR:-$HOME/.local/bin}</code> is on <code>PATH</code>.</td>
 </tr>
 <tr>
 <td>No model target is available</td>
@@ -1476,7 +1476,7 @@ drill-down layout below 72 columns.</li>
 </tr>
 <tr>
 <td>Source changes do not appear</td>
-<td>Re-run <code>npm run build</code>; linked CLI points at <code>dist/</code>.</td>
+<td>Re-run <code>pnpm run build</code>; linked CLI points at <code>dist/</code>.</td>
 </tr>
 <tr>
 <td>Session replay looks incomplete</td>

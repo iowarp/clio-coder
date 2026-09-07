@@ -193,7 +193,7 @@ clio-coder skills install find-skills --project  # strongest discovered project 
 
 ## Publishing: the marketplace index
 
-`npm run skills:pin` writes two files. `registry.yaml` pins content hashes and
+`pnpm run skills:pin` writes two files. `registry.yaml` pins content hashes and
 is what drift is measured against. `skill-marketplace.json` is the published
 index: one entry per skill with `name`, `description`, optional `triggers`,
 `sourceUrl` (the skill's own `clio-coder.source-url`), `version`, `audit`, and
@@ -213,7 +213,7 @@ Install then clones the repository named in that entry's `sourceUrl` and copies
 the skill out of it, so the index is only as live as the branch its URLs name.
 The catalog's `source-url` values all point at `main`; until a release branch
 lands there, an install through the index fails naming the repository, the
-branch, and the missing path. `npm run skills:check` fails if a skill's
+branch, and the missing path. `pnpm run skills:check` fails if a skill's
 `source-url` stops ending with its catalog path, which is how a skill moved
 between categories cannot ship a stale pointer.
 
@@ -292,7 +292,7 @@ dependency warnings, and other harnesses ignore it like any unknown key.
 
 The deprecated nested `clio:` mapping and legacy flat keys (`registry-id`,
 `source-url`, `audit` at the top level) are still read as fallbacks for older
-installed copies. The catalog itself must use `clio-coder:`, and `npm run
+installed copies. The catalog itself must use `clio-coder:`, and `pnpm run
 skills:check` enforces that.
 
 ### Versioning policy
@@ -350,7 +350,7 @@ names rather than mapping them. Translating `bash` to `Bash` for
 Claude-compatibility would not restrict anything; it would silently add `Bash`
 to the always-allow rules of every session that loaded the skill. The same goes
 for a `clio-coder skills export --for claude` lane, so there is no such lane. To keep
-a well-meaning edit from introducing that, `npm run skills:check` fails on any
+a well-meaning edit from introducing that, `pnpm run skills:check` fails on any
 `allowed-tools` entry that is not a Clio tool name in canonical lowercase.
 
 The rest of the surface, read from the same build:
@@ -401,10 +401,10 @@ observed writing outside its workspace. Eval numbers are evidence about a
 cooperative model, not an isolation guarantee. Run campaigns with `CLIO_CODER_*`
 pointed at throwaway directories.
 
-`npm run skills:pin` enforces this contract structurally: it refuses to pin a
+`pnpm run skills:pin` enforces this contract structurally: it refuses to pin a
 catalog where any skill is missing the required frontmatter, `audit: pass`, or
 its `evals.md`, declares a tool name Clio does not have, or carries a
-`source-url` that no longer ends with its catalog path. `npm run skills:check`
+`source-url` that no longer ends with its catalog path. `pnpm run skills:check`
 (run in CI) fails on any drift between the catalog and either generated file,
 `registry.yaml` or `skill-marketplace.json`. Each pin covers the normalized
 `SKILL.md`, not the whole skill directory. Install-lifecycle stamps such as

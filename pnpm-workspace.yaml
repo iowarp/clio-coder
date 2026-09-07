@@ -1,0 +1,19 @@
+packages:
+  - "."
+  - "apps/*"
+
+# Keep dependency overrides effective across every workspace importer.
+overrides:
+  "@anthropic-ai/sdk": "0.105.0"
+  esbuild: "0.28.1"
+
+# Preserve the existing build fallback before `pnpm test`.
+enablePrePostScripts: true
+
+# Native binaries and existing dependency setup hooks used by this repository.
+onlyBuiltDependencies:
+  - "@google/genai"
+  - esbuild
+  - fsevents
+  - node-pty
+  - protobufjs

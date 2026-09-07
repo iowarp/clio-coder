@@ -98,7 +98,9 @@ function coveredFiles(directory: string): Set<string> {
 }
 
 describe("smoke/installed package", { concurrency: false }, () => {
-	it("packs once, installs once, and loads a lazy codewiki chunk from a foreign cwd", { timeout: 30_000 }, async () => {
+	// pnpm's store does not warm npm's cache. Allow a cold consumer install;
+	// the CLI subprocesses below retain their separate 20-second timeout.
+	it("packs once, installs once, and loads a lazy codewiki chunk from a foreign cwd", { timeout: 120_000 }, async () => {
 		const work = mkdtempSync(join(tmpdir(), "clio-installed-package-"));
 		const prefix = join(work, "prefix");
 		const foreign = join(work, "foreign-project");
@@ -133,7 +135,7 @@ describe("smoke/installed package", { concurrency: false }, () => {
 					"--loglevel=error",
 					join(work, filename),
 				],
-				{ cwd: prefix, stdio: "pipe" },
+				{ cwd: prefix, stdio: "pipe", timeout: 90_000 },
 			);
 
 			const packageRoot = join(prefix, "node_modules", "@iowarp", "clio-coder");

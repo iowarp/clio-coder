@@ -4,6 +4,9 @@ All notable changes to Clio Coder are documented in this file. The format follow
 
 ## Unreleased
 
+### Changed
+- Use pinned pnpm for repository dependencies, application workspaces, contributor scripts, and CI. Keep npm registry packaging and npm consumer installation compatibility checks.
+
 ### Fixed
 - Keep parallel tool declarations and the latest operator request intact across compaction; reject truncated or canceled checkpoints, wire TUI and ACP cancellation through production summaries, and stop canceled pre-submit requests before chat admission.
 - Parse authored handbooks with fenced code blocks and HTML comments correctly: a `# comment` inside a fenced example no longer rejects `CLIO-CODER.md` or drops its conventions and invariants from `--apply` and `--adopt`, and fenced `##` lines are no longer split into sections or rewritten on serialization.

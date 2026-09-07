@@ -52,8 +52,9 @@ From a source checkout:
 ```bash
 git clone https://github.com/iowarp/clio-coder.git
 cd clio-coder
-npm ci
-npm run install:local
+corepack enable pnpm
+pnpm install --frozen-lockfile
+pnpm run install:local
 hash -r
 clio-coder --version
 ```

@@ -1,6 +1,42 @@
 import assert from "node:assert/strict";
 import { describe, it } from "node:test";
+import { shippedAdvisoryFindings } from "../../scripts/release-audit.mjs";
 import { readmeInstallVersion, releaseVersionErrors } from "../../scripts/release-version-policy.mjs";
+
+describe("published dependency advisory boundary", () => {
+	const clean = () => ({
+		advisories: {},
+		metadata: { vulnerabilities: { info: 0, low: 0, moderate: 0, high: 0, critical: 0 } },
+	});
+	it("accepts a complete clean pnpm report and refuses an unknown advisory state", () => {
+		assert.deepEqual(shippedAdvisoryFindings(clean()), { notes: [], errors: [] });
+		for (const report of [null, {}, { error: { code: "ERR_PNPM_AUDIT_BAD_RESPONSE" } }, { advisories: {} }]) {
+			assert.throws(() => shippedAdvisoryFindings(report), /unknown/);
+		}
+		const missing = clean();
+		missing.metadata.vulnerabilities.high = 1;
+		assert.throws(() => shippedAdvisoryFindings(missing), /without advisory details/);
+	});
+	it("blocks high and critical advisories while keeping lesser findings visible", () => {
+		const report = clean();
+		report.advisories = Object.fromEntries(
+			["moderate", "high", "critical"].map((severity) => [
+				severity,
+				{
+					module_name: `dependency-${severity}`,
+					severity,
+					vulnerable_versions: "<2.0.0",
+					recommendation: "Upgrade to 2.0.0",
+				},
+			]),
+		);
+		const result = shippedAdvisoryFindings(report);
+		assert.equal(result.notes.length, 1);
+		assert.match(result.notes[0] ?? "", /moderate.*dependency-moderate/);
+		assert.equal(result.errors.length, 2);
+		assert.match(result.errors.join("\n"), /Upgrade to 2.0.0/);
+	});
+});
 
 describe("release version boundary", () => {
 	it("keeps local development installs pinned to the latest dated stable release", () => {

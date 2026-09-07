@@ -26,6 +26,7 @@
 		"@types/react-dom": "19.2.4",
 		"@vitejs/plugin-react": "6.0.5",
 		"playwright-core": "1.62.1",
-		"vite": "8.2.1"
+		"vite": "8.2.1",
+		"@types/node": "24.12.2"
 	}
 }

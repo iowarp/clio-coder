@@ -9,7 +9,7 @@ From a source checkout:
 ```sh
 clio-coder trace ui --db /path/to/trace.sqlite
 # or
-npm run trace:ui -- --db /path/to/trace.sqlite --port 4600
+pnpm run trace:ui --db /path/to/trace.sqlite --port 4600
 ```
 
 The server binds only to `127.0.0.1`. It accepts GET/HEAD, opens the database

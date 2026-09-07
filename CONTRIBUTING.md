@@ -13,28 +13,32 @@ Keep changes small, explicit, and easy to verify from git history.
 Requirements:
 
 - Node.js `>=22.19.0`
-- npm
+- pnpm 10.34.5 (pinned in `packageManager`) and npm for package compatibility checks
 - Linux or macOS for full parity. Windows is best effort until a stable release.
+
+Enable pnpm through Corepack (`corepack enable pnpm`), or install the pinned version locally.
+The root workspace includes both applications. pnpm owns dependency installation;
+Workbench still uses Deno for its host and tests.
 
 Bootstrap:
 
 ```bash
-npm ci
-npm run typecheck
-npm run lint
-npm run test
-npm run build
+pnpm install --frozen-lockfile
+pnpm run typecheck
+pnpm run lint
+pnpm run test
+pnpm run build
 ```
 
 Local and GitHub PR gate (fast, deterministic):
 
 ```bash
-npm run ci
+pnpm run ci
 ```
 
 This runs type checking, lint (including boundaries, documentation drift and
 skill pins), one build, the contract/smoke suite, and the trace-viewer suite.
-Use `npm run skills:check` when checking skill pins on their own; it is already
+Use `pnpm run skills:check` when checking skill pins on their own; it is already
 included in `lint` and `ci`.
 
 The GitHub `ci` job runs the release gate on Ubuntu. The separate
@@ -46,14 +50,14 @@ local checks provide local evidence; they do not establish a hosted CI pass.
 Release gate (for maintainers before tags or release artifacts):
 
 ```bash
-npm run ci:release
+pnpm run ci:release
 ```
 
 The release gate includes `ci` and adds the package audit. Running `ci` again
 on the same unchanged tree is unnecessary. Run a focused regression while
 developing a repair, then the full gate for the candidate being reviewed.
 
-Live provider validation (manual/opt-in, after `npm run build`):
+Live provider validation (manual/opt-in, after `pnpm run build`):
 
 ```bash
 node dist/cli/index.js run \
@@ -94,7 +98,7 @@ historical record, not a reusable current checklist.
    branch (`v043` for `v0.4.3`) and bumps `version` there. Never push this
    candidate branch to the canonical repository. Before the cut, retitle the
    changelog section `## <version> - YYYY-MM-DD`.
-2. Run `npm run ci:release` on the exact candidate. It runs the full `ci` gate,
+2. Run `pnpm run ci:release` on the exact candidate. It runs the full `ci` gate,
    then `scripts/check-release.mjs`, which verifies the built `dist/` and
    audits the exact npm package contents.
 3. Fetch `origin`, require the fetched `origin/main` to be the candidate's
@@ -109,7 +113,7 @@ historical record, not a reusable current checklist.
    `git push origin refs/tags/v0.4.3`. The tag must match `package.json`; the
    release workflow refuses mismatches.
 6. `.github/workflows/release.yml` verifies the tag against `package.json`,
-   runs `npm run ci:release` on the tagged tree, and creates the GitHub release
+   runs `pnpm run ci:release` on the tagged tree, and creates the GitHub release
    with the tarball attached and the version's `CHANGELOG.md` section as the
    body. It does not publish to npm.
 7. A maintainer publishes from the tagged commit with `npm publish`;
@@ -161,7 +165,7 @@ that needs them runs.
 4. Keep every PR focused. Split unrelated docs, runtime, CLI, and TUI work.
 5. Update `CHANGELOG.md` for user-visible behavior, developer workflow, or
    release status changes.
-6. Run `npm run ci` before requesting review.
+6. Run `pnpm run ci` before requesting review.
 7. Do not commit secrets, local config, generated `dist/`, or scratch plans.
 8. Push release tags as fully qualified `refs/tags/vX.Y.Z`; never push a
    similarly named branch.
@@ -184,7 +188,7 @@ The boundary checker enforces these six rules:
   graph only through declared seams, and those seams may not create an
   undeclared edge back into the closure.
 
-The checker runs as part of `npm run lint` (`scripts/check-hygiene.ts` imports
+The checker runs as part of `pnpm run lint` (`scripts/check-hygiene.ts` imports
 `tests/boundaries/check-boundaries.ts`), so a boundary violation fails the
 same lint every PR runs. The full definitions and exceptions live in
 [Architecture](docs/architecture/architecture.md#boundary-invariants).
@@ -315,6 +319,6 @@ To propose a skill:
    `clio-coder skills list`.
 5. Open a PR. A maintainer reviews against the rubric, sets `audit: pass`,
    approves the catalog version, then regenerates and checks the catalog with
-   `npm run skills:pin` and `npm run skills:check`.
+   `pnpm run skills:pin` and `pnpm run skills:check`.
 
 Full catalog conventions and install options: [skills/README.md](skills/README.md).

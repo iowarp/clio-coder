@@ -560,7 +560,7 @@ The source-level harness remains available to a runner adapter, and the eval
 platform remains active. Its former dedicated contract test was retired, and
 the current test tree has no direct reference to `runProactiveMemoryEval`.
 There is therefore no maintained direct test coverage or standalone
-`npm run test:file` invocation for this harness. Treat a live comparison as an
+`pnpm run test:file` invocation for this harness. Treat a live comparison as an
 explicit measurement campaign.
 
 For a live local comparison, an adapter should route only the `llm` variant

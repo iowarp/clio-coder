@@ -9,7 +9,9 @@ is always **Clio Coder**.
 
 ## Requirements
 
-- Deno 2.9.5 or later. The `deno.json` tasks pin every other tool.
+- Deno 2.9.5 or later, and the pnpm version pinned in the root `package.json`.
+- Run `pnpm install --frozen-lockfile` from the repository root. pnpm manages the workspace dependencies; Deno uses that
+  installed tree in manual `nodeModulesDir` mode.
 - The `clio-coder` executable on `PATH` for real conversations. The unit tests and the browser smoke use a deterministic
   fixture child instead and do not need it.
 - Linux, including WSL2, is the tested platform. Native Windows launch is explicitly unavailable (`defaultClioLauncher`

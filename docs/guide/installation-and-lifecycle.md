@@ -119,7 +119,7 @@ Use the local source installer from the cloned repository:
 ```bash
 git clone https://github.com/iowarp/clio-coder.git
 cd clio-coder
-npm run install:local
+pnpm run install:local
 hash -r
 clio-coder --version
 ```
@@ -127,8 +127,8 @@ clio-coder --version
 `scripts/install-local.sh` is idempotent and auditable:
 
 - verifies `node` satisfies `package.json` `engines.node`;
-- runs `npm ci` unless `node_modules` satisfies the lockfile or `--skip-deps` is passed;
-- runs `npm run build` unless `--no-build` is passed;
+- runs `pnpm install --frozen-lockfile` to sync dependencies with the workspace lockfile unless `--skip-deps` is passed;
+- runs `pnpm run build` unless `--no-build` is passed;
 - verifies `dist/cli/index.js` exists and is executable;
 - creates `${CLIO_CODER_BIN_DIR:-$HOME/.local/bin}` and links `clio-coder` there;
 - warns if that bin dir is not on `PATH`, and warns when another `clio-coder`
@@ -198,7 +198,7 @@ clio-coder upgrade [--dry-run] [--channel=<latest|beta|dev>] [--skip-migrations]
 The command detects the install method from the running binary. On a source
 checkout it never runs `npm install -g`: it performs its safe local duties
 (migration check, `install.json` refresh) and prints the real update steps,
-`git pull`, `npm run install:local`, `hash -r`. The npm reinstall path applies
+`git pull`, `pnpm run install:local`, `hash -r`. The npm reinstall path applies
 only to a genuinely npm-installed binary.
 
 #### Current migration contract

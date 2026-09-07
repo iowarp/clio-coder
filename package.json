@@ -76,15 +76,15 @@
 		"pi:surface-diff": "node --import tsx scripts/pi-surface-diff.ts",
 		"pi:surface-snapshot": "node --import tsx scripts/pi-surface-diff.ts --write",
 		"test:file": "node --import tsx --import ./tests/harness/tmp-root.ts --test",
-		"pretest": "test -f dist/cli/index.js || npm run build",
+		"pretest": "test -f dist/cli/index.js || pnpm run build",
 		"test": "node --import tsx --import ./tests/harness/tmp-root.ts --test tests/contracts/*.test.ts tests/smoke/*.test.ts",
-		"test:trace-viewer": "npm --prefix apps/trace-viewer test",
+		"test:trace-viewer": "pnpm --filter @iowarp/clio-trace-viewer test",
 		"trace:ui": "node apps/trace-viewer/server.mjs",
-		"ci": "npm run typecheck && npm run lint && npm run build && npm run test && npm run test:trace-viewer",
-		"ci:release": "npm run ci && node scripts/check-release.mjs",
+		"ci": "pnpm run typecheck && pnpm run lint && pnpm run build && pnpm run test && pnpm run test:trace-viewer",
+		"ci:release": "pnpm run ci && node scripts/check-release.mjs",
 		"install:local": "bash scripts/install-local.sh",
 		"smoke:real-home": "bash scripts/smoke-real-home.sh",
-		"prepublishOnly": "CLIO_CODER_RELEASE_CONTEXT=publish npm run ci:release",
+		"prepublishOnly": "CLIO_CODER_RELEASE_CONTEXT=publish pnpm run ci:release",
 		"skills:pin": "node --import tsx scripts/pin-skills.ts",
 		"skills:check": "node --import tsx scripts/pin-skills.ts --check"
 	},
@@ -99,10 +99,6 @@
 		"grok-mermaid": "0.2.2",
 		"ollama": "0.6.3",
 		"smol-toml": "1.8.0"
-	},
-	"overrides": {
-		"@anthropic-ai/sdk": "0.105.0",
-		"esbuild": "0.28.1"
 	},
 	"devDependencies": {
 		"@biomejs/biome": "2.5.1",
@@ -119,5 +115,9 @@
 		"typescript": "6.0.3",
 		"uuid": "14.0.1",
 		"yaml": "2.9.0"
-	}
+	},
+	"packageManager": "pnpm@10.34.5",
+	"workspaces": [
+		"apps/*"
+	]
 }

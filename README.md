@@ -385,14 +385,15 @@ From source, pinned to this version:
 ```bash
 git clone --branch v0.4.4 https://github.com/iowarp/clio-coder.git
 cd clio-coder
-npm ci
-npm run install:local
+corepack enable pnpm
+pnpm install --frozen-lockfile
+pnpm run install:local
 export PATH="$HOME/.local/bin:$PATH"
 hash -r
 "$HOME/.local/bin/clio-coder" --version
 ```
 
-`npm run install:local` builds and links the launcher at
+`pnpm run install:local` builds and links the launcher at
 `${CLIO_CODER_BIN_DIR:-$HOME/.local/bin}/clio-coder`. Run
 `command -v clio-coder` to see which installation the bare command reaches;
 your shell may otherwise keep resolving an older launcher earlier on `PATH`.
@@ -483,18 +484,19 @@ architecture boundaries, commit conventions, and review expectations. Report
 security issues through [SECURITY.md](SECURITY.md), not a public issue.
 
 ```bash
-npm ci
-npm run dev          # rebuild on source changes
-npm run ci           # types, hygiene, build, deterministic tests
-npm run ci:release   # CI plus distribution and package audit
+corepack enable pnpm
+pnpm install --frozen-lockfile
+pnpm run dev          # rebuild on source changes
+pnpm run ci           # types, hygiene, build, deterministic tests
+pnpm run ci:release   # CI plus distribution and package audit
 ```
 
 | Check | Command |
 | --- | --- |
-| Types | `npm run typecheck` |
-| Formatting, lint, and architecture hygiene | `npm run lint` |
-| One contract file | `npm run test:file -- tests/contracts/<name>.test.ts` |
-| Deterministic suite | `npm test` |
+| Types | `pnpm run typecheck` |
+| Formatting, lint, and architecture hygiene | `pnpm run lint` |
+| One contract file | `pnpm run test:file tests/contracts/<name>.test.ts` |
+| Deterministic suite | `pnpm test` |
 | Distribution package | `node scripts/check-release.mjs` |
 
 Local imports end in `.js`, tests use `node:test`, and compile-time domain

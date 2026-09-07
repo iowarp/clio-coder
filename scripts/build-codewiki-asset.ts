@@ -10,7 +10,7 @@
  * file the installed package actually contains. It never reads or writes
  * `.clio-coder/`: a found, cached, or checked-in index would describe some
  * other tree, and `state.json` carries timestamps and mtimeMs fingerprints
- * that must never enter the tarball. Wired into `npm run build` after tsup so
+ * that must never enter the tarball. Wired into `pnpm run build` after tsup so
  * the grammars it loads are the vendored ones.
  */
 import { execFileSync } from "node:child_process";

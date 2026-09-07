@@ -18,7 +18,7 @@ This is a tool-admission boundary, not an operating-system sandbox. Shell inspec
 There is one source, `discoverMarketplaceSkills()` in `src/domains/resources/skills/marketplace.ts`, and it reads two kinds of real local data:
 
 1. **A catalog directory** of actual `SKILL.md` packages. Resolution order: `CLIO_CODER_SKILL_CATALOG_DIR`, then a `skills/` directory in the working tree when it holds packages, then the `skills/` catalog the installed clio-coder package carries. Metadata comes from the packages themselves through the skill loader, so a row's version, category, and audit state are the package's own.
-2. **A JSON index** whose entries name a `sourceUrl` that `clio-coder skills install` accepts. Resolution order: `CLIO_CODER_SKILL_MARKETPLACE_INDEX`, then `<configDir>/skill-marketplace.json`, then the package's own `skills/skill-marketplace.json`. `npm run skills:pin` publishes that file's `version`, `audit`, and `category` fields.
+2. **A JSON index** whose entries name a `sourceUrl` that `clio-coder skills install` accepts. Resolution order: `CLIO_CODER_SKILL_MARKETPLACE_INDEX`, then `<configDir>/skill-marketplace.json`, then the package's own `skills/skill-marketplace.json`. `pnpm run skills:pin` publishes that file's `version`, `audit`, and `category` fields.
 
 The package fallbacks mean a fresh npm install has a marketplace with no configuration: `clio-coder skills search grill` lists `grill-me` from the shipped catalog, `clio-coder skills install grill-me` copies it out of the package into `.clio-coder/skills/`, and `/skill grill-me` offers that install before running. The shipped catalog is a marketplace source only, never a discovery root: nothing from it is loadable until the operator installs it, which keeps the install-then-activate contract and the per-skill scope choice in the operator's hands.
 
@@ -72,7 +72,7 @@ Hub and marketplace behavior.
 
 ## Remote entries and overlays
 
-Some skills are worth carrying in the catalog without vendoring their content. `skills/remote.yaml` lists them: each entry names a skill, its category, a `sourceUrl` that must be a GitHub tree URL at a pinned tag, an `overlay` package inside the catalog, and an optional `exclude` list of upstream top-level members. `npm run skills:pin` publishes such an entry into `skills/skill-marketplace.json` with `origin: "remote"`, the upstream URL as its `sourceUrl`, and the `overlay` and `exclude` fields attached. The overlay's `SKILL.md` is pinned in `skills/registry.yaml` like every other catalog skill, so `npm run skills:check` fails when it drifts.
+Some skills are worth carrying in the catalog without vendoring their content. `skills/remote.yaml` lists them: each entry names a skill, its category, a `sourceUrl` that must be a GitHub tree URL at a pinned tag, an `overlay` package inside the catalog, and an optional `exclude` list of upstream top-level members. `pnpm run skills:pin` publishes such an entry into `skills/skill-marketplace.json` with `origin: "remote"`, the upstream URL as its `sourceUrl`, and the `overlay` and `exclude` fields attached. The overlay's `SKILL.md` is pinned in `skills/registry.yaml` like every other catalog skill, so `pnpm run skills:check` fails when it drifts.
 
 `archify` is the worked example. Its entry points at `https://github.com/tt-a1i/archify/tree/v2.16.0/archify`, overlays `skills/planning/archify`, and excludes `test` and `package-lock.json`. Running `clio-coder skills install archify --project` clones that tag, drops the excluded members, copies the overlay over the clone so Clio's wrapper `SKILL.md` replaces the upstream one, validates the shaped tree, and swaps it into `.clio-coder/skills/archify/` with the usual provenance stamps. The renderer, its schemas, and its brand-mark notices come from upstream at install time and never enter the npm tarball. The wrapper omits upstream's update-awareness step on purpose: that step performs a network request during a chat turn, and no Clio chat turn depends on the network.
 
@@ -84,7 +84,7 @@ Architecture mapping through Archify follows a structured pipeline across distin
 
 ## Publishing a skill
 
-Add a directory under `skills/<category>/<name>/` (or `skills/<name>/`) in the repo containing a `SKILL.md` with `name` and `description` frontmatter. The directory name must match `[A-Za-z0-9][A-Za-z0-9._-]*`. Run `npm run skills:pin` to republish `skills/skill-marketplace.json`, which is the index consumers point `CLIO_CODER_SKILL_MARKETPLACE_INDEX` at or copy to `<configDir>/skill-marketplace.json`. Scientific and niche coding domains are the marketplace's focus; see the existing `skills/` tree for the house format.
+Add a directory under `skills/<category>/<name>/` (or `skills/<name>/`) in the repo containing a `SKILL.md` with `name` and `description` frontmatter. The directory name must match `[A-Za-z0-9][A-Za-z0-9._-]*`. Run `pnpm run skills:pin` to republish `skills/skill-marketplace.json`, which is the index consumers point `CLIO_CODER_SKILL_MARKETPLACE_INDEX` at or copy to `<configDir>/skill-marketplace.json`. Scientific and niche coding domains are the marketplace's focus; see the existing `skills/` tree for the house format.
 
 ## Matching and offers
 

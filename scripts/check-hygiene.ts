@@ -1,6 +1,6 @@
 #!/usr/bin/env node
 /**
- * Source and doc drift checks, run from `npm run lint`.
+ * Source and doc drift checks, run from `pnpm run lint`.
  *
  * Every check here used to be a `tests/contracts/*.test.ts` file that read
  * source text, docs, README, config, or workflow YAML off disk and asserted
@@ -411,10 +411,13 @@ function checkCiScripts(): void {
 			fail("ci-scripts", `package.json scripts.${name} must be "${expected}", got "${scripts[name]}"`);
 		}
 	};
-	expectScript("ci", "npm run typecheck && npm run lint && npm run build && npm run test && npm run test:trace-viewer");
+	expectScript(
+		"ci",
+		"pnpm run typecheck && pnpm run lint && pnpm run build && pnpm run test && pnpm run test:trace-viewer",
+	);
 	expectScript("skills:check", "node --import tsx scripts/pin-skills.ts --check");
-	expectScript("ci:release", "npm run ci && node scripts/check-release.mjs");
-	expectScript("prepublishOnly", "CLIO_CODER_RELEASE_CONTEXT=publish npm run ci:release");
+	expectScript("ci:release", "pnpm run ci && node scripts/check-release.mjs");
+	expectScript("prepublishOnly", "CLIO_CODER_RELEASE_CONTEXT=publish pnpm run ci:release");
 
 	// Hosted CI stays deliberately small: the Node 22 release gate plus a
 	// deterministic Windows subprocess subset, with superseded runs cancelled.
@@ -437,8 +440,8 @@ function checkCiScripts(): void {
 				fail("ci-scripts", `ci.yml setup-node must use Node 22, got ${setupNode?.with?.["node-version"]}`);
 			}
 			const ciCommands = ciJob.steps.flatMap((step) => (step.run ? [step.run] : []));
-			if (!ciCommands.includes("npm run ci:release")) {
-				fail("ci-scripts", "ci.yml must run npm run ci:release");
+			if (!ciCommands.includes("pnpm run ci:release")) {
+				fail("ci-scripts", "ci.yml must run pnpm run ci:release");
 			}
 		}
 		if (
@@ -447,11 +450,12 @@ function checkCiScripts(): void {
 				"timeout-minutes": 10,
 				steps: [
 					{ uses: "actions/checkout@v6", with: { "persist-credentials": false } },
-					{ uses: "actions/setup-node@v6", with: { "node-version": 22, cache: "npm" } },
-					{ run: "npm ci --prefer-offline --no-audit --no-fund" },
-					{ run: "npm run typecheck" },
+					{ uses: "pnpm/action-setup@v4" },
+					{ uses: "actions/setup-node@v6", with: { "node-version": 22, cache: "pnpm" } },
+					{ run: "pnpm install --frozen-lockfile" },
+					{ run: "pnpm run typecheck" },
 					{
-						run: "npm run test:file -- tests/contracts/antigravity-subprocess.test.ts tests/contracts/bash-exec-settlement.test.ts tests/contracts/windows-process-tree.test.ts",
+						run: "pnpm run test:file tests/contracts/antigravity-subprocess.test.ts tests/contracts/bash-exec-settlement.test.ts tests/contracts/windows-process-tree.test.ts",
 					},
 				],
 			})
@@ -493,9 +497,9 @@ function checkCiScripts(): void {
 
 // ---------------------------------------------------------------------------
 // skills-pin: skills/registry.yaml must match the catalog content hashes.
-// be2b5ccb rewrote a skill's instructions and never repinned; `npm run
+// be2b5ccb rewrote a skill's instructions and never repinned; `pnpm run
 // skills:check` (`pin-skills.ts --check`) only ran inside the full `ci`
-// chain, and `npm run lint` never called it, so nothing caught the drift
+// chain, and `pnpm run lint` never called it, so nothing caught the drift
 // until the full gate ran. This delegates to the same `--check` mode `lint`
 // now runs, rather than reimplementing the hash comparison, so there is one
 // definition of "stale".

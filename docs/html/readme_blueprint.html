@@ -344,19 +344,20 @@ is retained as release engineering history.</p>
 <h2>Developer quick start</h2>
 <pre><code class="language-bash">git clone https://github.com/iowarp/clio-coder.git
 cd clio-coder
-npm ci
-npm run build
+corepack enable pnpm
+pnpm install --frozen-lockfile
+pnpm run build
 node dist/cli/index.js --help
 </code></pre>
 <p>For a persistent local command:</p>
-<pre><code class="language-bash">npm run install:local
+<pre><code class="language-bash">pnpm run install:local
 export PATH=&quot;$HOME/.local/bin:$PATH&quot;
 hash -r
 clio-coder --version
 </code></pre>
-<p>Use <code>npm run dev</code> for a watch build. Before handing back a change, run the
-focused test while iterating and <code>npm run ci</code> for the deterministic repository
-gate. Maintainers use <code>npm run ci:release</code> to add the distribution and package
+<p>Use <code>pnpm run dev</code> for a watch build. Before handing back a change, run the
+focused test while iterating and <code>pnpm run ci</code> for the deterministic repository
+gate. Maintainers use <code>pnpm run ci:release</code> to add the distribution and package
 audit.</p>
 <h2>Project context in a source checkout</h2>
 <p>Projects can keep human-owned guidance in <code>CLIO-CODER.md</code>, generated with
