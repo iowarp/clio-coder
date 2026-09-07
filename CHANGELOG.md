@@ -39,7 +39,7 @@ All notable changes to Clio Coder are documented in this file. The format follow
 - Relative numerical comparisons avoid intermediate subtraction overflow for finite extreme values, while retaining precision for nearby values and independent absolute and ULP checks (#338).
 - Support deterministic architecture seed generation with `clio-coder context map`, retry pending wiki pages with `clio-coder context wiki --retry-pending`, and resolve `--target` from layered project settings.
 - Support configurable inline summary allowances for `mutation-report` contracts up to 32,768 bytes via recipe `maxSummaryBytes` and dispatch `result_summary_max_bytes`, while bounding commit and architect-plan messages to 1,000 bytes.
-- Document the Archify architecture mapping honesty boundary across seed generation, model refinement, deliverable validation, and visual review.
+- Document the Archify architecture mapping pipeline across seed generation, model refinement, deliverable validation, source review, and visual review.
 
 ## 0.4.4 - 2026-09-05
 

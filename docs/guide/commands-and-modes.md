@@ -642,7 +642,7 @@ structural hash. The same builder is used by `clio-coder context init`, `clio-co
 refresh`, session freshness checks, tool-demand backfill, and in-session
 incremental updates.
 
-`clio-coder context map` derives an archify architecture specification from the structural index without model calls and writes it to `.clio-coder/artifacts/maps/<repo>.architecture.json` (or `--out <path>`). Map generation reconciles the existing structural index before mapping; missing index refuses, naming `clio-coder context index`. Pinned source citations require that the workspace is clean at repository root and indexed file bytes match current files and Git blobs under a GitHub origin and full `HEAD` revision. Unknown or dirty source states fall back cleanly to usable uncited seeds; `--json` reports path, counts, repository metadata, reconciled index status, and source state (`clean`, `dirty`, or `unknown`). Clio produces the deterministic seed while Archify validates and delivers it; custom model-authored maps can remain layout-invalid until refined, and visual acceptance requires human and browser review.
+`clio-coder context map` derives an archify architecture specification from the structural index without model calls and writes it to `.clio-coder/artifacts/maps/<repo>.architecture.json` (or `--out <path>`). Map generation reconciles the existing structural index before mapping; missing index refuses, naming `clio-coder context index`. Pinned source citations require that the workspace is clean at repository root and indexed file bytes match current files and Git blobs under a GitHub origin and full `HEAD` revision. Unknown or dirty source states fall back cleanly to usable uncited seeds; `--json` reports path, counts, repository metadata, reconciled index status, and source state (`clean`, `dirty`, or `unknown`). Clio produces the deterministic seed while Archify validates and delivers it. Standard validation checks schema conformance and layout composition, while source review assesses semantic claims and visual review in a browser assesses layout presentation. Custom model-authored maps can remain layout-invalid until refined.
 
 ### Working-set replay
 
@@ -711,9 +711,12 @@ mechanical validation (missing/escaping paths, invalid line ranges, malformed so
 metadata, or empty bodies keep pages pending); mechanical checks do not establish semantic
 accuracy or that the model read the source.
 
-`clio-coder context wiki --update` requests update mode explicitly. It rewrites the
-pages whose front-matter `sources` git reports as changed since the recorded
-wiki `gitHead`, and leaves the rest alone; it is not a promise to overcome exhausted attempts.
+`clio-coder context wiki --update` requests update mode explicitly. It revalidates
+pages against bounded source-byte evidence and recorded source and test dependencies
+rather than assuming unmentioned pages remain fresh. Pages with changed inputs or
+dependencies, as well as pages whose Git evidence is missing, unreadable, or changed,
+are re-queued for generation, while verified up-to-date pages are preserved; it is not a
+promise to overcome exhausted attempts.
 `clio-coder context wiki --status` is read-only: it prints whether wiki metadata is
 present, page count, `updatedAt`, recorded `gitHead`, whether that head differs
 from current `HEAD`, and retained failure diagnostics for unwritten planned pages. It dispatches

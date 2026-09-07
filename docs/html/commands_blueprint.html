@@ -1231,7 +1231,7 @@ writes <code>.clio-coder/codewiki.json</code> plus
 <code>.clio-coder/state.json</code>, records <code>codewikiVersion</code>, and prints coverage plus a
 structural hash. The same builder is used by <code>clio-coder context init</code>, <code>clio-coder context refresh</code>, session freshness checks, tool-demand backfill, and in-session
 incremental updates.</p>
-<p><code>clio-coder context map</code> derives an archify architecture specification from the structural index without model calls and writes it to <code>.clio-coder/artifacts/maps/&lt;repo&gt;.architecture.json</code> (or <code>--out &lt;path&gt;</code>). Map generation reconciles the existing structural index before mapping; missing index refuses, naming <code>clio-coder context index</code>. Pinned source citations require that the workspace is clean at repository root and indexed file bytes match current files and Git blobs under a GitHub origin and full <code>HEAD</code> revision. Unknown or dirty source states fall back cleanly to usable uncited seeds; <code>--json</code> reports path, counts, repository metadata, reconciled index status, and source state (<code>clean</code>, <code>dirty</code>, or <code>unknown</code>). Clio produces the deterministic seed while Archify validates and delivers it; custom model-authored maps can remain layout-invalid until refined, and visual acceptance requires human and browser review.</p>
+<p><code>clio-coder context map</code> derives an archify architecture specification from the structural index without model calls and writes it to <code>.clio-coder/artifacts/maps/&lt;repo&gt;.architecture.json</code> (or <code>--out &lt;path&gt;</code>). Map generation reconciles the existing structural index before mapping; missing index refuses, naming <code>clio-coder context index</code>. Pinned source citations require that the workspace is clean at repository root and indexed file bytes match current files and Git blobs under a GitHub origin and full <code>HEAD</code> revision. Unknown or dirty source states fall back cleanly to usable uncited seeds; <code>--json</code> reports path, counts, repository metadata, reconciled index status, and source state (<code>clean</code>, <code>dirty</code>, or <code>unknown</code>). Clio produces the deterministic seed while Archify validates and delivers it. Standard validation checks schema conformance and layout composition, while source review assesses semantic claims and visual review in a browser assesses layout presentation. Custom model-authored maps can remain layout-invalid until refined.</p>
 <h3>Working-set replay</h3>
 <p><code>clio-coder context replay --sessions &lt;path&gt;...</code> accepts individual session directories,
 Clio sessions roots, and ledger JSONL files; <code>--synthetic &lt;ids&gt;</code> adds one or more procedural
@@ -1291,9 +1291,12 @@ default retries retain saved depth. Both original writer output and saved pages 
 mechanical validation (missing/escaping paths, invalid line ranges, malformed source/test
 metadata, or empty bodies keep pages pending); mechanical checks do not establish semantic
 accuracy or that the model read the source.</p>
-<p><code>clio-coder context wiki --update</code> requests update mode explicitly. It rewrites the
-pages whose front-matter <code>sources</code> git reports as changed since the recorded
-wiki <code>gitHead</code>, and leaves the rest alone; it is not a promise to overcome exhausted attempts.
+<p><code>clio-coder context wiki --update</code> requests update mode explicitly. It revalidates
+pages against bounded source-byte evidence and recorded source and test dependencies
+rather than assuming unmentioned pages remain fresh. Pages with changed inputs or
+dependencies, as well as pages whose Git evidence is missing, unreadable, or changed,
+are re-queued for generation, while verified up-to-date pages are preserved; it is not a
+promise to overcome exhausted attempts.</p>
 <code>clio-coder context wiki --status</code> is read-only: it prints whether wiki metadata is
 present, page count, <code>updatedAt</code>, recorded <code>gitHead</code>, whether that head differs
 from current <code>HEAD</code>, and retained failure diagnostics for unwritten planned pages. It dispatches
