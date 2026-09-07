@@ -232,7 +232,7 @@ describe("production compaction controls", () => {
 		};
 	}
 
-	it("continues the saved Mini32K pipeline after an empty read-stage attempt and later grep growth", async (t) => {
+	it("retries changed empty history and compacts the saved Mini32K read stage and later grep growth", async (t) => {
 		const saved = JSON.parse(
 			readFileSync(new URL("../fixtures/context-pressure-pipeline.json", import.meta.url), "utf8"),
 		) as {
@@ -287,14 +287,18 @@ describe("production compaction controls", () => {
 			middleware: { fireCompactionHook: () => {} } as unknown as TurnMiddleware,
 			emitNotice: () => {},
 		});
-		install(12);
+		// A lone active user instruction has nothing older to summarize even
+		// with a low configured trigger. Keep the empty-attempt memo contract
+		// separate from the saved read batch, which now has a useful safe cut.
+		install(1);
+		const threshold = f.settings.context.compaction.threshold;
+		f.settings.context.compaction.threshold = 0.1;
 		strictEqual(findCutPoint(f.entries(), 20000).firstKeptEntryIndex, 0);
-		// Exact read-stage shape has no useful cut at the automatic budget either.
 		strictEqual(await context.runAutoCompact(runtime, false), false);
 		strictEqual(attempts, 1);
 		strictEqual(await context.runAutoCompact(runtime, false), false);
 		strictEqual(attempts, 1, "unchanged context does not repeat an empty attempt");
-		const changed = structuredClone(saved.entries.slice(0, 12));
+		const changed = structuredClone(saved.entries.slice(0, 1));
 		const changedUser = changed[0];
 		ok(changedUser?.kind === "message");
 		const payload = changedUser.payload as { text: string };
@@ -303,6 +307,12 @@ describe("production compaction controls", () => {
 		context.refreshAgentMessagesFromSession(runtime);
 		strictEqual(await context.runAutoCompact(runtime, false), false);
 		strictEqual(attempts, 2, "same-length changed content invalidates the empty memo");
+		f.settings.context.compaction.threshold = threshold;
+		install(12);
+		strictEqual(findCutPoint(f.entries(), 20000).firstKeptEntryIndex, 0);
+		strictEqual(await context.runAutoCompact(runtime, false), true, "request-budget cut retains the final read batch");
+		strictEqual(attempts, 3);
+		ok(f.entries().some((entry) => entry.kind === "compactionSummary"));
 		install(17);
 		const before = context.liveContextEstimate(runtime);
 		ok(before.tokens > 32768);
@@ -310,7 +320,7 @@ describe("production compaction controls", () => {
 		f.response.text = "Suggested skill: /skill clio-coder-test";
 		const update = await context.postToolContinuationGuard(runtime);
 		ok(update, "grown same-turn history must retry and produce the next provider context");
-		strictEqual(attempts, 3);
+		strictEqual(attempts, 4);
 		const after = context.liveContextEstimate(runtime);
 		ok(after.tokens < 32768);
 		const request = update.context;
@@ -361,7 +371,7 @@ describe("production compaction controls", () => {
 		install(17);
 		f.settings.context.compaction.auto = false;
 		await rejects(context.postToolContinuationGuard(runtime), /stopped continuation before provider call/);
-		strictEqual(attempts, 3);
+		strictEqual(attempts, 4);
 	});
 
 	it("routes a configured dedicated summary model through the production callback", async () => {
