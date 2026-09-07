@@ -98,7 +98,8 @@ function coveredFiles(directory: string): Set<string> {
 }
 
 describe("smoke/installed package", { concurrency: false }, () => {
-	// pnpm's store does not warm npm's cache. Allow a cold consumer install;
+	// pnpm's store does not warm npm's cache. Allow a cold consumer install
+	// with normal registry freshness checks after dependency upgrades;
 	// the CLI subprocesses below retain their separate 20-second timeout.
 	it("packs once, installs once, and loads a lazy codewiki chunk from a foreign cwd", { timeout: 120_000 }, async () => {
 		const work = mkdtempSync(join(tmpdir(), "clio-installed-package-"));
@@ -127,7 +128,6 @@ describe("smoke/installed package", { concurrency: false }, () => {
 					"--prefix",
 					prefix,
 					"--omit=optional",
-					"--prefer-offline",
 					"--ignore-scripts",
 					"--package-lock=false",
 					"--no-audit",
