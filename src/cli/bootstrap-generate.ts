@@ -22,6 +22,7 @@ import {
 } from "../domains/context/index.js";
 import type { DispatchContract } from "../domains/dispatch/contract.js";
 import { DispatchDomainModule } from "../domains/dispatch/index.js";
+import { declaredScopeIntent } from "../domains/dispatch/intent.js";
 import type { RunReceipt } from "../domains/dispatch/types.js";
 import { MiddlewareDomainModule } from "../domains/middleware/index.js";
 import { createObservabilityDomainModule } from "../domains/observability/index.js";
@@ -384,6 +385,10 @@ async function generateBootstrapWithModel(
 	route?: BootstrapRoute,
 ): Promise<BootstrapStructuredOutput> {
 	const prompt = buildBootstrapPrompt(input);
+	// The internal researcher reads this repository and returns JSON. Authored
+	// handbook text is evidence, not a source of inferred filesystem authority.
+	const scope = declaredScopeIntent({ readRoots: ["."] });
+	if (!scope.ok) throw new Error(`${scope.reason}: ${scope.message}`);
 	const startedAtClock = performance.now();
 	input.progress?.({
 		phase: "generate",
@@ -393,6 +398,7 @@ async function generateBootstrapWithModel(
 	});
 	const dispatchBootstrap = (nativeSchema: boolean) =>
 		dispatch.dispatch({
+			intent: scope.intent,
 			agentId: CONTEXT_BOOTSTRAP_AGENT_ID,
 			executionRole: "researcher",
 			task: prompt,
