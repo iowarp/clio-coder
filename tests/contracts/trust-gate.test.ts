@@ -4,7 +4,6 @@ import { existsSync, mkdirSync, readdirSync, readFileSync, rmSync, symlinkSync, 
 import { join } from "node:path";
 import { test } from "node:test";
 import { fileURLToPath } from "node:url";
-import { runConfigTrustCommand } from "../../src/cli/config-trust.js";
 import { readLayeredSettings } from "../../src/core/settings-layers.js";
 import {
 	captureProjectSurface,
@@ -165,30 +164,39 @@ test("S3-01: local-file addition invalidates the entire surface and revocation s
 	}
 });
 
-test("S3-01: CLI review is read-only and approval refuses a stale digest", async (t) => {
+test("S3-01: CLI review is read-only and approval refuses a stale digest", async () => {
 	const home = await isolateClioEnv("clio-trust-cli-");
 	try {
 		const workspace = join(home.dir, "workspace");
 		mkdirSync(join(workspace, ".clio-coder"), { recursive: true });
 		const file = join(workspace, ".clio-coder", "settings.yaml");
 		writeFileSync(file, "safety:\n  autonomy: full-auto\n");
-		const output: string[] = [];
-		t.mock.method(process.stdout, "write", (text: string) => {
-			output.push(text);
-			return true;
-		});
-		t.mock.method(process.stderr, "write", () => true);
-		strictEqual(runConfigTrustCommand(["settings", "--json"], workspace), 0);
-		const reviewed = JSON.parse(output.join("")) as { contentHash: string };
+		const command = (args: string[]) =>
+			spawnSync(
+				process.execPath,
+				[
+					"--import",
+					import.meta.resolve("tsx"),
+					"--input-type=module",
+					"-e",
+					`import { runConfigTrustCommand } from ${JSON.stringify(new URL("../../src/cli/config-trust.ts", import.meta.url).href)};
+			process.exitCode = runConfigTrustCommand(JSON.parse(process.argv[1]), process.cwd());`,
+					JSON.stringify(args),
+				],
+				{ cwd: workspace, env: process.env, encoding: "utf8", timeout: 10_000 },
+			);
+		const review = command(["settings", "--json"]);
+		strictEqual(review.status, 0, review.stderr);
+		const reviewed = JSON.parse(review.stdout) as { contentHash: string };
 		strictEqual(existsSync(workspaceTrustDirectory()), false);
 		writeFileSync(file, "safety:\n  autonomy: suggest\n");
-		strictEqual(runConfigTrustCommand(["settings", "--hash", reviewed.contentHash], workspace), 1);
+		strictEqual(command(["settings", "--hash", reviewed.contentHash]).status, 1);
 		strictEqual(captureProjectSurface(workspace, "settings").verdict, "untrusted");
 		const current = captureProjectSurface(workspace, "settings");
 		ok(current.contentHash);
-		strictEqual(runConfigTrustCommand(["settings", "--hash", current.contentHash], workspace), 0);
+		strictEqual(command(["settings", "--hash", current.contentHash]).status, 0);
 		strictEqual(readLayeredSettings(workspace).settings.safety.autonomy, "suggest");
-		strictEqual(runConfigTrustCommand(["settings", "--revoke"], workspace), 0);
+		strictEqual(command(["settings", "--revoke"]).status, 0);
 		strictEqual(readLayeredSettings(workspace).settings.safety.autonomy, "auto-edit");
 	} finally {
 		home.restore();

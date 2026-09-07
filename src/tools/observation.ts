@@ -482,16 +482,21 @@ export function finalizeObservation(input: ObservationInput): ToolResult {
 }
 
 /** Producers pass structured paths before rendering or offloading any content. */
-export function createObservationPathFilter(cwd = process.cwd()): {
+export function createObservationPathFilter(
+	cwd = process.cwd(),
+	allowsPath?: (path: string) => boolean,
+): {
 	allows(path: string): boolean;
 	readonly withheldPaths: number;
 } {
-	const policy = createSafetyPolicyEngine({ cwd });
+	const policy = allowsPath ? undefined : createSafetyPolicyEngine({ cwd });
+	const allows =
+		allowsPath ??
+		((path: string) => policy?.evaluate({ tool: "read", args: { path } }).reasonCode !== "path-policy:zeroAccessPaths");
 	const withheld = new Set<string>();
 	return {
 		allows(path) {
-			const verdict = policy.evaluate({ tool: "read", args: { path } });
-			if (verdict.reasonCode !== "path-policy:zeroAccessPaths") return true;
+			if (allows(path)) return true;
 			withheld.add(path);
 			return false;
 		},

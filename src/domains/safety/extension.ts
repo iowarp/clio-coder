@@ -118,6 +118,11 @@ export function createSafetyBundle(context: DomainContext): DomainBundle<SafetyC
 	let unsubscribeDispatchFailed: (() => void) | null = null;
 	const recordedRequestedPermissionIds = new Set<string>();
 
+	function activePolicyEngine(): SafetyPolicyEngine {
+		policyEngine ??= createSafetyPolicyEngine();
+		return policyEngine;
+	}
+
 	function writeAudit(rec: AuditRecord): void {
 		if (writer === null) return;
 		writer.write(rec);
@@ -274,7 +279,7 @@ export function createSafetyBundle(context: DomainContext): DomainBundle<SafetyC
 			return classifyCall(call);
 		},
 		evaluate(call, posture) {
-			const policy = (policyEngine ?? createSafetyPolicyEngine()).evaluate(call, posture);
+			const policy = activePolicyEngine().evaluate(call, posture);
 			const classification = policy.classification;
 
 			context.bus.emit(BusChannels.SafetyClassified, {
@@ -363,7 +368,11 @@ export function createSafetyBundle(context: DomainContext): DomainBundle<SafetyC
 		},
 		scopes: { readonly: READONLY_SCOPE, workspace: WORKSPACE_SCOPE, confirmed: CONFIRMED_SCOPE },
 		isSubset,
-		policy: { metadata: (posture) => (policyEngine ?? createSafetyPolicyEngine()).metadata(posture) },
+		policy: {
+			metadata: (posture) => activePolicyEngine().metadata(posture),
+			allowsObservationPath: (path) =>
+				activePolicyEngine().evaluate({ tool: "read", args: { path } }).reasonCode !== "path-policy:zeroAccessPaths",
+		},
 		audit: {
 			recordCount: () => recordCount,
 			recordToolCall: recordToolCallAudit,

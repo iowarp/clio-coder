@@ -49,7 +49,11 @@ export interface SafetyContract {
 	isSubset(worker: ScopeSpec, orchestrator: ScopeSpec): boolean;
 
 	/** Immutable safety policy metadata for receipts, audit, and replay. */
-	readonly policy?: { metadata(posture?: string): SafetyPolicyMetadata };
+	readonly policy?: {
+		metadata(posture?: string): SafetyPolicyMetadata;
+		/** Pure search-result filter using the same compiled policy as admission. */
+		allowsObservationPath?(path: string): boolean;
+	};
 
 	/**
 	 * Shared audit sink. `recordCount` is for diagnostics; `recordToolCall` is

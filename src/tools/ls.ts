@@ -54,7 +54,7 @@ export const lsTool: ToolSpec = {
 		}
 
 		try {
-			const pathFilter = createObservationPathFilter();
+			const pathFilter = createObservationPathFilter(process.cwd(), options?.allowsObservationPath);
 			const entries = readdirSync(root)
 				.filter((entry) => pathFilter.allows(path.join(root, entry)))
 				.sort((a, b) => a.toLowerCase().localeCompare(b.toLowerCase()));

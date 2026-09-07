@@ -218,6 +218,8 @@ export interface RegistryDeps {
 }
 
 export interface ToolInvokeOptions {
+	/** Registry-owned filter bound to the active compiled safety policy. */
+	allowsObservationPath?: (path: string) => boolean;
 	/** Trusted submitting host identity for nested dispatch; never model arguments. */
 	hostRun?: import("../domains/dispatch/contract.js").DispatchPreparationOptions["hostRun"];
 	/** Trusted resolved model capability; never read from tool arguments. */
@@ -472,7 +474,12 @@ export function createRegistry(deps: RegistryDeps): ToolRegistry {
 			try {
 				const preparedArgs = prepareToolArgs(spec, call.args ?? {});
 				resultDisposition = resolveToolResultDisposition(spec, preparedArgs);
-				const result = await spec.run(preparedArgs, options);
+				const { allowsObservationPath: _callerPathFilter, ...callerOptions } = options ?? {};
+				const allowsObservationPath = deps.safety.policy?.allowsObservationPath;
+				const result = await spec.run(preparedArgs, {
+					...callerOptions,
+					...(allowsObservationPath ? { allowsObservationPath } : {}),
+				});
 				const digest = toolResultDigestFor(spec, result, resultDisposition, options);
 				const afterEffects = runToolHook("after_tool", spec, call, decision, options, result, digest);
 				const finalResult = shapeToolResult(spec, applyToolResultEffects(result, afterEffects), options, resultDisposition);

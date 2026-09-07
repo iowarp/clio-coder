@@ -474,7 +474,7 @@ export const grepTool: ToolSpec = {
 			});
 		}
 		const shared = {
-			pathFilter: createObservationPathFilter(),
+			pathFilter: createObservationPathFilter(process.cwd(), options?.allowsObservationPath),
 			mode,
 			pattern,
 			searchPath,

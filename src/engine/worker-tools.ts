@@ -114,7 +114,11 @@ export function createWorkerSafety(options: WorkerSafetyOptions = {}): SafetyCon
 		},
 		scopes: { readonly: READONLY_SCOPE, workspace: WORKSPACE_SCOPE, confirmed: CONFIRMED_SCOPE },
 		isSubset,
-		policy: { metadata: (posture) => policyEngine.metadata(posture) },
+		policy: {
+			metadata: (posture) => policyEngine.metadata(posture),
+			allowsObservationPath: (path) =>
+				policyEngine.evaluate({ tool: "read", args: { path } }).reasonCode !== "path-policy:zeroAccessPaths",
+		},
 		audit: { recordCount: () => 0 },
 	};
 }

@@ -275,7 +275,7 @@ export const findTool: ToolSpec = {
 			}
 
 			const collectedCount = collectedPaths.length;
-			const pathFilter = createObservationPathFilter();
+			const pathFilter = createObservationPathFilter(process.cwd(), options?.allowsObservationPath);
 			collectedPaths = collectedPaths.filter((entry) => pathFilter.allows(join(searchPath, entry)));
 			const ordered: OrderedPaths =
 				order === "mtime"

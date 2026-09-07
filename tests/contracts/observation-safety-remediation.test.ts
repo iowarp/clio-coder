@@ -1,5 +1,5 @@
 import assert from "node:assert/strict";
-import { mkdtempSync, readFileSync, writeFileSync } from "node:fs";
+import { mkdirSync, mkdtempSync, readFileSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { test } from "node:test";
@@ -222,5 +222,62 @@ test("S4-03 warning survives tail and metadata-only model projections within byt
 			assert.ok(Buffer.byteLength(result.modelContext ?? "") <= 1024);
 			assert.ok(Buffer.byteLength(result.output) <= 1024);
 		}
+	}
+});
+
+test("S4-01 registry search retains compiled protections after policy mutation and revocation", async () => {
+	const { isolateClioEnv } = await import("../harness/scratch-env.js");
+	const { captureProjectSurface, recordProjectSurfaceTrust, revokeProjectSurfaceTrust } = await import(
+		"../../src/core/workspace-trust.js"
+	);
+	const { createWorkerSafety } = await import("../../src/engine/worker-tools.js");
+	const { createRegistry } = await import("../../src/tools/registry.js");
+	const { readTool } = await import("../../src/tools/read.js");
+	const home = await isolateClioEnv("s4-live-policy-");
+	const previous = process.cwd();
+	try {
+		const workspace = join(home.dir, "workspace");
+		mkdirSync(join(workspace, ".clio-coder"), { recursive: true });
+		process.chdir(workspace);
+		const policyPath = join(workspace, ".clio-coder", "safety.yaml");
+		const policy = "version: 1\nzeroAccessPaths: [private.txt]\n";
+		writeFileSync(policyPath, policy);
+		writeFileSync("private.txt", "REVIEW_SECRET_MUST_NOT_ESCAPE\n");
+		writeFileSync("public.txt", `REVIEW_PUBLIC ${"safe ".repeat(100)}\n`.repeat(100));
+		const reviewed = captureProjectSurface(workspace, "safety");
+		assert.ok(reviewed.contentHash);
+		recordProjectSurfaceTrust(workspace, "safety", reviewed.contentHash);
+		const registry = createRegistry({ safety: createWorkerSafety({ cwd: workspace }) });
+		for (const tool of [readTool, grepTool, findTool, lsTool]) registry.register(tool);
+		let checkedOffload = false;
+		for (const state of ["approved", "changed", "revoked"] as const) {
+			if (state === "changed") writeFileSync(policyPath, `${policy}# unrelated comment\n`);
+			if (state === "revoked") revokeProjectSurfaceTrust(workspace, "safety");
+			const read = await registry.invoke({ tool: "read", args: { path: "private.txt" } });
+			assert.equal(read.kind, "blocked", state);
+			for (const call of [
+				...(["content", "files", "count"] as const).map((mode) => ({
+					tool: "grep",
+					args: { path: workspace, pattern: "REVIEW_", mode },
+				})),
+				{ tool: "find", args: { path: workspace, pattern: "*.txt" } },
+				{ tool: "ls", args: { path: workspace } },
+			]) {
+				const result = await registry.invoke(call, { allowsObservationPath: () => true });
+				assert.ok(result.kind === "ok" && result.result.kind === "ok", `${state}: ${call.tool}`);
+				if (result.kind !== "ok" || result.result.kind !== "ok") continue;
+				assert.doesNotMatch(result.result.output, /private\.txt|REVIEW_SECRET_MUST_NOT_ESCAPE/, state);
+				assert.match(result.result.output, /1 protected path.*withheld/);
+				const observation = result.result.details?.observation as { offloadPath?: string } | undefined;
+				if (observation?.offloadPath) {
+					checkedOffload = true;
+					assert.doesNotMatch(readFileSync(observation.offloadPath, "utf8"), /private\.txt|REVIEW_SECRET_MUST_NOT_ESCAPE/);
+				}
+			}
+		}
+		assert.ok(checkedOffload, "exercise offloaded search output as well as inline output");
+	} finally {
+		process.chdir(previous);
+		home.restore();
 	}
 });
