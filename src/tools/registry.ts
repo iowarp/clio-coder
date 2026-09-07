@@ -9,9 +9,10 @@ import {
 	type SkillToolSurfaceViolation,
 } from "../core/skill-activation.js";
 import { type ToolName, ToolNames } from "../core/tool-names.js";
+import { containsInstructionMarkers, INSTRUCTION_SHAPED_WARNING } from "../core/untrusted-content.js";
 import type { MiddlewareContract } from "../domains/middleware/contract.js";
 import type { MiddlewareEffect, MiddlewareHookInput, MiddlewareMetadataValue } from "../domains/middleware/types.js";
-import type { ActionClass, ClassifierCall } from "../domains/safety/action-classifier.js";
+import { type ActionClass, type ClassifierCall, webFetchIsOutward } from "../domains/safety/action-classifier.js";
 import { approvalAxisId } from "../domains/safety/approval-axis.js";
 import {
 	type AutonomyExposure,
@@ -26,6 +27,7 @@ import type { SafetyContract, SafetyDecision } from "../domains/safety/contract.
 import type { DecisionPresentation } from "../domains/safety/decision-presentation.js";
 import { hashToolCall } from "../domains/safety/loop-detector.js";
 import { detectValidationCommand } from "../domains/safety/protected-artifacts.js";
+import type { ImageContent } from "../engine/types.js";
 import { askUserExposure } from "./ask-user.js";
 import { type DispatchPlanView, describeDispatchPlan } from "./dispatch-plan.js";
 import type { ToolPresentationPolicy } from "./presentation.js";
@@ -171,6 +173,8 @@ export type ToolResult =
 	| {
 			kind: "ok";
 			output: string;
+			/** Bounded visual evidence accompanying the mandatory text result. */
+			images?: ImageContent[];
 			details?: ToolResultDetails;
 			/** Internal registry projection consumed only by the agent-tool adapter. */
 			modelContext?: string;
@@ -214,6 +218,10 @@ export interface RegistryDeps {
 }
 
 export interface ToolInvokeOptions {
+	/** Trusted submitting host identity for nested dispatch; never model arguments. */
+	hostRun?: import("../domains/dispatch/contract.js").DispatchPreparationOptions["hostRun"];
+	/** Trusted resolved model capability; never read from tool arguments. */
+	supportsImages?: boolean;
 	signal?: AbortSignal;
 	runId?: string;
 	sessionId?: string;
@@ -583,10 +591,13 @@ export function createRegistry(deps: RegistryDeps): ToolRegistry {
 				? (spec.describeDispatchPlan?.(call.args ?? {}) ?? describeDispatchPlan(call.args))
 				: null;
 		const planScale = dispatchPlan?.planScale === true;
-		// The exposure tier rides on the args of the gate that raised it, so the
-		// workflow author, not the classifier, decides what counts as outward.
-		// ask_user is the only tool that declares one today.
-		const exposure = call.tool === ToolNames.AskUser ? askUserExposure(call.args) : DEFAULT_AUTONOMY_EXPOSURE;
+		// Gates declare their tier; write-shaped HTTP requests send data outward.
+		const exposure =
+			call.tool === ToolNames.AskUser
+				? askUserExposure(call.args)
+				: call.tool === ToolNames.WebFetch && webFetchIsOutward(call.args)
+					? "outward"
+					: DEFAULT_AUTONOMY_EXPOSURE;
 		const disposition = mapAutonomy(level, actionClass, {
 			executeRecognized: decision.policy?.execRecognition !== "unrecognized",
 			...(planScale ? { dispatchPlanScale: true } : {}),
@@ -1030,10 +1041,8 @@ const HEADLESS_GUIDANCE_MAX_CHARS = 240;
  * model that hits an unrecognized-bash rail retries the same shape until the run
  * ends. An unrecognized execution decision carries the working form in its
  * reasons, and those reasons reach the audit record and the interactive approval
- * overlay but not the model. The first reason states the axis the denial already
- * implies, so only the reasons after it are candidates, and only the first of
- * those, bounded: this is a nudge toward the recognized spelling, not a dump of
- * the policy's reason list.
+ * overlay but not the model. Preserve one bounded recovery hint separately
+ * from the actual policy cause carried by the terminal denial below.
  */
 function headlessDenialGuidance(decision: SafetyDecision, reason: string): string | null {
 	// Interactive denials are left exactly as they were: the operator saw the
@@ -1059,9 +1068,9 @@ function headlessDenialGuidance(decision: SafetyDecision, reason: string): strin
  * it with the standing pivot instruction.
  *
  * A headless answer is the exception: nobody will ever approve it, so the detail
- * carries one line of recovery guidance after the denial sentence. The sentence
- * stays the detail's prefix, which the skill-eval permission-wall recognizer
- * depends on.
+ * carries the policy cause and rule, a terminal settlement statement, and any
+ * recovery guidance. The denial sentence stays the detail's prefix, which the
+ * skill-eval permission-wall recognizer depends on.
  */
 function parkAnsweredBlockedVerdict(
 	decision: SafetyDecision,
@@ -1069,12 +1078,25 @@ function parkAnsweredBlockedVerdict(
 	reason: string,
 ): Extract<RegistryVerdict, { kind: "blocked" }> {
 	const guidance = headlessDenialGuidance(decision, reason);
+	const detail = [reason];
+	if (reason.startsWith(HEADLESS_PERMISSION_DENIED_MARKER)) {
+		if (decision.policy?.ruleId) detail.push(`rule: ${decision.policy.ruleId}`);
+		const cause =
+			decision.policy?.kind === "ask"
+				? decision.policy.reasons[0]
+				: decision.kind === "allow"
+					? undefined
+					: decision.rejection.short;
+		if (cause) detail.push(cause);
+		detail.push("This call was denied; no approval is pending.");
+		if (guidance !== null) detail.push(guidance);
+	}
 	const blocked: SafetyDecision = {
 		kind: "block",
 		classification: decision.classification,
 		rejection: {
 			short: `${tool} blocked: ${decision.classification.actionClass} was not approved`,
-			detail: guidance === null ? reason : `${reason}\n${guidance}`,
+			detail: detail.join("\n"),
 			hints: [],
 		},
 		...(decision.policy !== undefined ? { policy: decision.policy } : {}),
@@ -1206,6 +1228,10 @@ function buildToolHookInput(
 	}
 	if (call.tool !== spec.name) metadata.requestedToolName = call.tool;
 	if (result !== undefined) {
+		if (hook === "after_tool" && ["web_fetch", "read", "bash", "dispatch", "monitor"].includes(spec.name))
+			metadata.untrustedInstructionMarkers = containsInstructionMarkers(
+				result.kind === "ok" ? result.output : result.kind === "error" ? result.message : "",
+			);
 		metadata.resultKind = result.kind;
 		if (result.kind === "error") metadata.errorMessage = result.message;
 		if (result.kind === "ok" && result.terminate === true) metadata.terminate = true;
@@ -1259,14 +1285,18 @@ function firstBlockToolEffect(
 function applyToolResultEffects(result: ToolResult, effects: ReadonlyArray<MiddlewareEffect>): ToolResult {
 	const annotations = annotationMessages(effects);
 	if (annotations.length === 0) return result;
-	const suffix = `\n\n${annotations.join("\n")}`;
+	const warning = `[middleware:warn] ${INSTRUCTION_SHAPED_WARNING}`;
+	const prefix = annotations.includes(warning) ? `${warning}\n\n` : "";
+	const remaining = annotations.filter((annotation) => annotation !== warning);
+	const suffix = remaining.length > 0 ? `\n\n${remaining.join("\n")}` : "";
 	if (result.kind === "ok") {
-		const annotated: ToolResult = { kind: "ok", output: `${result.output}${suffix}` };
+		const annotated: ToolResult = { kind: "ok", output: `${prefix}${result.output}${suffix}` };
 		if (result.details !== undefined) annotated.details = result.details;
 		if (result.terminate === true) annotated.terminate = true;
+		if (result.images !== undefined) annotated.images = result.images;
 		return annotated;
 	}
-	const annotated: ToolResult = { kind: "error", message: `${result.message}${suffix}` };
+	const annotated: ToolResult = { kind: "error", message: `${prefix}${result.message}${suffix}` };
 	if (result.details !== undefined) annotated.details = result.details;
 	return annotated;
 }

@@ -11,6 +11,8 @@ import {
 } from "./execution-plan.js";
 
 export interface ExecutionStepResult extends ExecutionHandoff {
+	/** Coordinator-owned immutable recovery reference captured before loop repair. */
+	workspaceCheckpoint?: string;
 	succeeded: boolean;
 	integrityValid: boolean;
 	/** Decision refs the step's sealed receipt was made under; absent for code steps and decision-free runs. */

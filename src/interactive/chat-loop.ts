@@ -13,6 +13,7 @@
  * machine, and the shared ChatTurnState the modules coordinate through.
  */
 
+import { AsyncLocalStorage } from "node:async_hooks";
 import { BusChannels, type RunAbortSource } from "../core/bus-events.js";
 import type { ClioSettings } from "../core/config.js";
 import type { SafeEventBus } from "../core/event-bus.js";
@@ -72,6 +73,7 @@ import {
 	createPendingSkillToolPolicy,
 	detectOverflowFromState,
 	detectTerminalFailureFromState,
+	explainInterruptedAssistant,
 	notConfiguredNotice,
 	noticeMessage,
 	pendingSkillRequestPreamble,
@@ -196,6 +198,8 @@ export type ChatLoopEvent =
 	| ToolApprovalStateEvent;
 
 export interface ChatSubmitOptions {
+	/** Host-owned run identity, scoped to this submit and its internal continuations. */
+	hostRun?: ToolInvokeOptions["hostRun"];
 	images?: ReadonlyArray<ImageContent>;
 	/** Files already expanded into this session's working context. */
 	workingContextPaths?: ReadonlyArray<string>;
@@ -726,10 +730,13 @@ export function createChatLoop(deps: CreateChatLoopDeps): ChatLoop {
 
 	const retrySettings = (): RetrySettings => normalizeRetrySettings(deps.getSettings().chat.retry);
 
+	const hostRunContext = new AsyncLocalStorage<ToolInvokeOptions["hostRun"]>();
 	const currentToolInvokeOptions = (): Partial<ToolInvokeOptions> => {
 		const options: Partial<ToolInvokeOptions> = {
 			toolResultMaxBytes: deps.getSettings().context.toolResultMaxBytes,
 		};
+		const hostRun = hostRunContext.getStore();
+		if (hostRun !== undefined) options.hostRun = hostRun;
 		const sessionId = deps.session?.current()?.id ?? null;
 		if (sessionId) options.sessionId = sessionId;
 		const turnId = state.activeUserTurnId ?? state.lastTurnId;
@@ -808,7 +815,10 @@ export function createChatLoop(deps: CreateChatLoopDeps): ChatLoop {
 		emitNotice,
 	});
 	const emitRuntimeEvent = (event: AgentEvent | AssistantDeltaEvent): void => {
-		if (event.type === "message_end") rewriteStallAbortMessage(state, event.message);
+		if (event.type === "message_end") {
+			rewriteStallAbortMessage(state, event.message);
+			explainInterruptedAssistant(event.message, state.activeInterruptReason);
+		}
 		emit(event as ChatLoopEvent);
 	};
 
@@ -1314,6 +1324,7 @@ export function createChatLoop(deps: CreateChatLoopDeps): ChatLoop {
 			state.toolProseAbortReason = null;
 			state.toolProseAssessedChars = 0;
 			state.activeInterruptReason = null;
+			state.interruptedAssistantMessage = null;
 			state.interruptedUsage = null;
 
 			// 6. Cache-disturbance honesty (T3.3)
@@ -1405,19 +1416,21 @@ export function createChatLoop(deps: CreateChatLoopDeps): ChatLoop {
 				}
 				state.streaming = false;
 				if (state.activeInterruptReason !== null) {
-					// The loop-guard cancel showed its closing message live; persist
-					// the durable closing turn only now, after the aborted run's
-					// in-flight tool results have all landed, so the ledger replays
-					// as tool_calls → tool_results → closing text.
-					// A thinking-only abort never reaches the ledger, so its estimated
-					// spend rides on the closing turn; persistence computes nothing
-					// further for a message that already reports positive usage.
-					const closing = noticeMessage(state.activeInterruptReason);
-					if (state.interruptedUsage !== null) {
-						(closing as { usage?: unknown }).usage = state.interruptedUsage;
-					}
-					persistence.appendAssistantTurn(closing);
+					const reason = state.activeInterruptReason;
 					state.activeInterruptReason = null;
+					// A partial response already closed with the cancellation reason.
+					// Only a hollow abort needs a synthetic assistant, after all tool
+					// results have landed. Publish its notice after settlement too, so
+					// it cannot split the entry the provider's message_end finalizes.
+					if (state.interruptedAssistantMessage === null) {
+						const closing = noticeMessage(reason);
+						if (state.interruptedUsage !== null) {
+							(closing as { usage?: unknown }).usage = state.interruptedUsage;
+						}
+						persistence.appendAssistantTurn(closing);
+						emitNotice(reason, "warning", "turn.interrupted");
+					}
+					state.interruptedAssistantMessage = null;
 					state.interruptedUsage = null;
 				}
 				state.currentPendingSkillPolicy = priorPendingSkillPolicy;
@@ -1443,19 +1456,13 @@ export function createChatLoop(deps: CreateChatLoopDeps): ChatLoop {
 			queues.clearQueuedMirror();
 			const requestedReason = options?.reason?.trim();
 			if (wasStreaming) {
-				// Show the stop reason immediately, but persist the durable closing
-				// turn only when the run settles (submit's finally). The abort below
-				// still lets the in-flight tool results land; persisting here would
-				// interleave an assistant turn between a tool-call message and its
-				// results, which strict chat templates reject on replay.
-				// `activeInterruptReason` meanwhile suppresses the empty aborted
-				// messages the abort leaves behind, in both the ledger and the live
-				// transcript. Operator cancels take the same path with the default
-				// text, so they no longer render a redundant "[aborted] Request was
-				// aborted" turn on top of the cancellation notice.
+				// Keep immediate feedback in the footer. A transcript notice here
+				// would split the streamed entry before message_end can finalize it.
+				// The reason is carried by the provider's aborted assistant, or by
+				// one synthetic closing record after an empty abort settles.
 				state.activeInterruptReason =
 					requestedReason && requestedReason.length > 0 ? requestedReason : "[Clio Coder] active response cancelled.";
-				emitNotice(state.activeInterruptReason, "warning", "turn.interrupted");
+				emitFooterNotice("warning", state.activeInterruptReason, "turn.interrupted");
 			}
 			state.runtime?.agent.abort();
 			if (wasStreaming && deps.bus) {
@@ -1689,6 +1696,9 @@ export function createChatLoop(deps: CreateChatLoopDeps): ChatLoop {
 	// released at admission, not settlement, so steering stays immediate.
 	let admissionTail: Promise<void> | null = null;
 	api.submit = (text, options = {}) => {
+		// Capture before admission can await. Internal resubmits inherit the
+		// async scope; every independent public submit explicitly starts its own.
+		const hostRun = options.hostRun === undefined ? undefined : structuredClone(options.hostRun);
 		// The operator owns the slot from the keystroke, not from admission. The
 		// prefix the pre-warm already pushed through stays in it either way, so
 		// aborting here costs nothing and stops the real turn from queueing behind
@@ -1725,14 +1735,18 @@ export function createChatLoop(deps: CreateChatLoopDeps): ChatLoop {
 				// A presentation observer cannot refuse a turn after the editor has
 				// consumed it. The ordinary render path can recover on its next tick.
 			}
-			return submitTracked(text, {
-				...submitOptions,
-				onAdmitted: () => {
-					releaseTicket();
-					leaveOnce();
-					options.onAdmitted?.();
-				},
-			}).finally(releaseTicket);
+			return hostRunContext
+				.run(hostRun, () =>
+					submitTracked(text, {
+						...submitOptions,
+						onAdmitted: () => {
+							releaseTicket();
+							leaveOnce();
+							options.onAdmitted?.();
+						},
+					}),
+				)
+				.finally(releaseTicket);
 		};
 		const run = previous ? previous.then(start) : start();
 		return run.finally(leaveOnce);

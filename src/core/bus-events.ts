@@ -64,6 +64,7 @@ export const BusChannels = {
 	CompactionEnd: "compaction.end",
 	MiddlewareHookFailed: "middleware.hookFailed",
 	ExtensionsReloaded: "extensions.reloaded",
+	ExtensionsLoadIssue: "extensions.loadIssue",
 	ContextActivity: "context.activity",
 	ContextSourcesChanged: "context.sourcesChanged",
 	ContextWarning: "context.warning",
@@ -725,6 +726,11 @@ export interface ExtensionsReloadedPayload {
 	digest: string;
 }
 
+/** Operator diagnostics for skipped extension or project-hook configuration. */
+export interface ExtensionsLoadIssuePayload {
+	message: string;
+}
+
 // ---------------------------------------------------------------------------
 // Middleware
 // ---------------------------------------------------------------------------
@@ -853,6 +859,7 @@ export type BusPayloadMap = {
 	[BusChannels.CompactionEnd]: CompactionPayload;
 	[BusChannels.MiddlewareHookFailed]: MiddlewareHookFailedPayload;
 	[BusChannels.ExtensionsReloaded]: ExtensionsReloadedPayload;
+	[BusChannels.ExtensionsLoadIssue]: ExtensionsLoadIssuePayload;
 	[BusChannels.ContextActivity]: ContextActivityPayload;
 	[BusChannels.ContextSourcesChanged]: ContextSourcesChangedPayload;
 	[BusChannels.ContextWarning]: ContextWarningPayload;

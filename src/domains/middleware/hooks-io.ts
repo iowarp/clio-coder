@@ -19,13 +19,18 @@
  */
 
 import { spawnSync } from "node:child_process";
-import { readFileSync } from "node:fs";
-import { join } from "node:path";
 import { parse as parseYaml } from "yaml";
 import {
+	gitCommitAttributionEnabled,
 	reportCommitAttributionDiagnostic,
 	withManagedGitCommitAttributionEnvironment,
 } from "../../core/git-commit-attribution.js";
+import { buildSafeToolEnv } from "../../core/safe-exec.js";
+import {
+	captureProjectSurface,
+	type ProjectSurfaceSnapshot,
+	projectSurfaceTrustNotice,
+} from "../../core/workspace-trust.js";
 import {
 	type HookReceiptSink,
 	loadUserHooks,
@@ -49,6 +54,7 @@ export interface HookFileIssue {
 export interface ReadHookSourcesResult {
 	batches: UserHookDeclarationBatch[];
 	fileIssues: HookFileIssue[];
+	projectSurface: ProjectSurfaceSnapshot;
 }
 
 /** One package's hook declarations, captured by the supplier from verified bytes. */
@@ -77,15 +83,9 @@ export interface ReadHookSourcesOptions {
 function readBatch(
 	source: UserHookSource,
 	filePath: string,
+	text: string,
 	fileIssues: HookFileIssue[],
 ): UserHookDeclarationBatch | null {
-	let text: string;
-	try {
-		text = readFileSync(filePath, "utf8");
-	} catch {
-		// Missing file: not an error, the source is simply absent.
-		return null;
-	}
 	try {
 		const parsed = parseYaml(text) as unknown;
 		return { source, declarations: parsed ?? [] };
@@ -125,21 +125,22 @@ export function readHookSources(options: ReadHookSourcesOptions): ReadHookSource
 		batches.push({ source, declarations: entry.declarations });
 	}
 
-	const projectBatch = readBatch(
-		{ origin: "project", sourcePath: ".clio-coder/hooks.yaml" },
-		join(options.cwd, ".clio-coder", "hooks.yaml"),
-		fileIssues,
-	);
-	if (projectBatch) batches.push(projectBatch);
-
-	const localBatch = readBatch(
-		{ origin: "project.local", sourcePath: ".clio-coder/hooks.local.yaml" },
-		join(options.cwd, ".clio-coder", "hooks.local.yaml"),
-		fileIssues,
-	);
-	if (localBatch) batches.push(localBatch);
-
-	return { batches, fileIssues };
+	const projectSurface = captureProjectSurface(options.cwd, "hooks");
+	for (const [index, file] of projectSurface.files.entries()) {
+		const source: UserHookSource = {
+			origin: index === 0 ? "project" : "project.local",
+			sourcePath: index === 0 ? ".clio-coder/hooks.yaml" : ".clio-coder/hooks.local.yaml",
+		};
+		if (file.error !== undefined) fileIssues.push({ source, message: file.error });
+		if (file.text === null) continue;
+		if (projectSurface.verdict !== "trusted") {
+			fileIssues.push({ source, message: projectSurfaceTrustNotice(projectSurface, file.path) });
+			continue;
+		}
+		const batch = readBatch(source, file.path, file.text, fileIssues);
+		if (batch) batches.push(batch);
+	}
+	return { batches, fileIssues, projectSurface };
 }
 
 export interface BuildUserHookRegistrationsOptions {
@@ -151,6 +152,8 @@ export interface BuildUserHookRegistrationsOptions {
 	/** Injected for tests; defaults to the spawnSync runner. */
 	runCommand?: UserHookCommandRunner;
 	now?: () => number;
+	/** Operator notice when an already published project's trust changes. */
+	report?: (line: string) => void;
 }
 
 export interface BuildUserHookRegistrationsResult extends UserHookLoadResult {
@@ -173,13 +176,28 @@ export function buildUserHookRegistrations(
 	const workspaceRoot = options.workspaceRoot ?? options.cwd;
 	const readOptions: ReadHookSourcesOptions = { cwd: options.cwd };
 	if (options.capturedSources !== undefined) readOptions.capturedSources = options.capturedSources;
-	const { batches, fileIssues } = readHookSources(readOptions);
+	const { batches, fileIssues, projectSurface } = readHookSources(readOptions);
 	const loaded = loadUserHooks(batches, { workspaceRoot });
 	const runCommand = options.runCommand ?? spawnSyncCommandRunner();
+	let reportedUntrusted = false;
+	const projectStillTrusted = (): boolean => {
+		const current = captureProjectSurface(options.cwd, "hooks");
+		if (current.verdict === "trusted" && current.contentHash === projectSurface.contentHash) return true;
+		if (!reportedUntrusted) {
+			reportedUntrusted = true;
+			options.report?.(
+				`[clio-coder:hooks] project hooks changed or trust was revoked; hooks skipped. Review with clio-coder config trust hooks, then reload extensions.`,
+			);
+		}
+		return false;
+	};
 	const registrations = loaded.hooks.map((hook) =>
 		userHookToRegistration(hook, {
 			recordReceipt: options.recordReceipt,
 			runCommand,
+			...(hook.source.origin === "project" || hook.source.origin === "project.local"
+				? { isTrusted: projectStillTrusted }
+				: {}),
 			...(options.now !== undefined ? { now: options.now } : {}),
 		}),
 	);
@@ -195,8 +213,9 @@ export function spawnSyncCommandRunner(): UserHookCommandRunner {
 		const [command, ...args] = argv;
 		// A user hook is operator automation, not Clio work: the environment is
 		// normalized so a nested seam sees consistent state, but no role is claimed.
-		const attribution = withManagedGitCommitAttributionEnvironment(process.env, {
+		const attribution = withManagedGitCommitAttributionEnvironment(buildSafeToolEnv(), {
 			cwd: options.cwd ?? process.cwd(),
+			enabled: gitCommitAttributionEnabled(process.env),
 			evidence: {},
 		});
 		reportCommitAttributionDiagnostic(attribution.diagnostic);

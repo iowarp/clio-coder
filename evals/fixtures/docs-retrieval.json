@@ -1,0 +1,102 @@
+[
+	{
+		"query": "How do I resume a session in a different working directory?",
+		"file": "docs/architecture/session-lifecycle.md",
+		"heading": "5. Session Resumption (`/resume`) & Working Directory Fallback"
+	},
+	{
+		"query": "How can I export a session?",
+		"file": "docs/architecture/session-lifecycle.md",
+		"heading": "6. Session Export"
+	},
+	{
+		"query": "Where does Clio store prompt history and recover input?",
+		"file": "docs/architecture/session-lifecycle.md",
+		"heading": "8. Prompt History and Input Recovery"
+	},
+	{
+		"query": "How does the append-only context ledger current.jsonl work?",
+		"file": "docs/architecture/session-lifecycle.md",
+		"heading": "3. Append-Only Context Ledger (`current.jsonl`)"
+	},
+	{
+		"query": "How do local catalog overlays work?",
+		"file": "docs/architecture/model-catalog.md",
+		"heading": "Local catalog overlays"
+	},
+	{
+		"query": "What are the runtime refresh controls?",
+		"file": "docs/architecture/model-catalog.md",
+		"heading": "Runtime refresh controls"
+	},
+	{
+		"query": "How are evidence tags and failure causes classified?",
+		"file": "docs/architecture/evidence-and-memory.md",
+		"heading": "Evidence Tag Taxonomy and Failure Causes"
+	},
+	{
+		"query": "What is the memory record lifecycle?",
+		"file": "docs/architecture/evidence-and-memory.md",
+		"heading": "Memory record lifecycle"
+	},
+	{
+		"query": "How does convention retention and decision adherence work?",
+		"file": "docs/architecture/evidence-and-memory.md",
+		"heading": "Convention retention and decision adherence"
+	},
+	{
+		"query": "Who owns installed skills?",
+		"file": "docs/guide/skills-marketplace.md",
+		"heading": "Operator ownership of installed skills"
+	},
+	{
+		"query": "How do I publish a skill?",
+		"file": "docs/guide/skills-marketplace.md",
+		"heading": "Publishing a skill"
+	},
+	{
+		"query": "How does live routing differ from saved defaults?",
+		"file": "docs/guide/configuration-and-targets.md",
+		"heading": "Live routing vs saved defaults"
+	},
+	{
+		"query": "How do I page through read output with offset limit and tail?",
+		"file": "docs/guide/tool-usage.md",
+		"heading": "read: page through a file with offset, limit, and tail"
+	},
+	{
+		"query": "How does edit perform exact text replacements in one file?",
+		"file": "docs/guide/tool-usage.md",
+		"heading": "edit: exact text replacements in one file"
+	},
+	{
+		"query": "How do I check a credential key without reading its value using credential_present?",
+		"file": "docs/guide/tool-usage.md",
+		"heading": "credential_present: check environment or file for a credential key"
+	},
+	{
+		"query": "How do I search file contents with ripgrep?",
+		"file": "docs/guide/tool-usage.md",
+		"heading": "grep: search file contents with ripgrep"
+	},
+	{
+		"query": "How can I locate files and directories by glob pattern?",
+		"file": "docs/guide/tool-usage.md",
+		"heading": "find: locate files and directories by glob pattern"
+	},
+	{
+		"query": "How does web_fetch convert HTML to markdown?",
+		"file": "docs/guide/tool-usage.md",
+		"heading": "web_fetch: fetch http(s) URLs and convert HTML to markdown"
+	},
+	{
+		"query": "How can steer guide or cancel a running worker?",
+		"file": "docs/guide/tool-usage.md",
+		"heading": "steer: guide or cancel a running worker"
+	},
+	{
+		"query": "How do I run headless declared verifier commands?",
+		"file": "docs/guide/tool-usage.md",
+		"heading": "Headless declared verifier commands"
+	}
+]

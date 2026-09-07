@@ -1,9 +1,9 @@
-import { chmodSync, closeSync, existsSync, mkdirSync, openSync, readFileSync } from "node:fs";
+import { chmodSync, existsSync, mkdirSync, readFileSync } from "node:fs";
 import { readFile } from "node:fs/promises";
 import { dirname, join } from "node:path";
 import { safeResourceWrite } from "../../../core/safe-resource-write.js";
 import { withStateFileLock, withStateFileLockSync } from "../../../core/state-file-lock.js";
-import { clioConfigDir } from "../../../core/xdg.js";
+import { resolveClioDirs } from "../../../core/xdg.js";
 import type { AuthOperationOptions } from "../../../engine/types.js";
 
 import type { AuthStorageBackend, LockResult } from "./storage.js";
@@ -20,7 +20,7 @@ function atomicWriteSecret(absPath: string, contents: string): void {
 }
 
 export function authStoragePath(): string {
-	return join(clioConfigDir(), "credentials.yaml");
+	return join(resolveClioDirs().config, "credentials.yaml");
 }
 
 export class FileAuthStorageBackend implements AuthStorageBackend {
@@ -34,18 +34,23 @@ export class FileAuthStorageBackend implements AuthStorageBackend {
 		mkdirSync(dirname(this.path), { recursive: true, mode: 0o700 });
 	}
 
-	private ensureFileExists(): void {
-		if (existsSync(this.path)) return;
-		const fd = openSync(this.path, "a", 0o600);
-		closeSync(fd);
-		chmodSync(this.path, 0o600);
+	// Writers publish complete files with an atomic rename, so a reader sees
+	// either the prior or next committed snapshot without creating a lockfile or
+	// initializing a missing home. Read-modify-write operations still take the
+	// exclusive lock below and read again inside it before merging changes.
+	read(): string | undefined {
+		try {
+			return readFileSync(this.path, "utf8");
+		} catch (error) {
+			if ((error as NodeJS.ErrnoException).code === "ENOENT") return undefined;
+			throw error;
+		}
 	}
 
 	withLock<T>(fn: (current: string | undefined) => LockResult<T>): T {
 		this.ensureParentDir();
-		this.ensureFileExists();
 		return withStateFileLockSync(this.path, () => {
-			const current = existsSync(this.path) ? readFileSync(this.path, "utf8") : undefined;
+			const current = this.read();
 			const { result, next } = fn(current);
 			if (next !== undefined) {
 				atomicWriteSecret(this.path, next);
@@ -60,7 +65,6 @@ export class FileAuthStorageBackend implements AuthStorageBackend {
 	): Promise<T> {
 		options?.signal?.throwIfAborted();
 		this.ensureParentDir();
-		this.ensureFileExists();
 		return withStateFileLock(
 			this.path,
 			async () => {

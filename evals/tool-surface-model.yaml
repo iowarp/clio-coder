@@ -1,0 +1,274 @@
+version: 2
+suite:
+  id: tool-surface-model
+  title: Tool description and argument behavior
+  visibility: public
+  description: Model-required probes of read tail selection, bash child directory
+    reset, and web_fetch URL rejection. Expected rejection is distinct from
+    unintended tool errors.
+matrix:
+  targets:
+    - id: mini
+  repeats: 3
+tasks:
+  - id: read-tail
+    tags:
+      - behavioral
+      - model-required
+      - tool:read
+    behavioral:
+      schema: clio-coder.eval.scenario.v1
+      corpus:
+        id: tool-surface-model
+        version: 1.0.0
+      execution:
+        mode: model-required
+        subject:
+          kind: main-agent
+          role: main
+        toolTarget: available
+      expectedBehavior:
+        - id: read-tail-calls
+          category: tool_choice
+          fact:
+            source: tool
+            key: tools.calls.read
+            op: eq
+            value: 1
+        - id: read-tail-errors
+          category: tool_choice
+          fact:
+            source: tool
+            key: tools.failed.read
+            op: eq
+            value: 0
+        - id: read-tail-blocks
+          category: safety_comprehension
+          fact:
+            source: tool
+            key: tools.blocked.read
+            op: eq
+            value: 0
+        - id: read-tail-successes
+          category: tool_choice
+          fact:
+            source: tool
+            key: tools.succeeded.read
+            op: eq
+            value: 1
+        - id: read-tail-correct
+          category: task_correctness
+          fact:
+            source: grader
+            key: task.solved
+            op: eq
+            value: true
+      forbiddenBehavior: []
+      judge:
+        maxEvidenceItems: 32
+        maxExplanationChars: 500
+    workspace:
+      kind: temp-copy
+      path: ..
+      excludes:
+        - .git
+        - .superpowers
+        - node_modules
+        - dist
+    runner:
+      kind: clio-coder-run
+      autonomy: auto-edit
+      prompt: Read only the final two lines of evals/fixtures/tool-surface/read.txt
+        using one read call. Do not read the entire file or use other tools.
+        Report those lines. Do not edit files.
+    verify:
+      measure:
+        - node evals/tool-surface-grader.mjs read-tail
+      protectedFiles:
+        - evals/tool-surface-grader.mjs
+        - evals/fixtures/tool-surface/read.txt
+        - evals/fixtures/tool-surface/subdir/keep.txt
+    metrics:
+      collect:
+        - task.solved
+        - tools.totalCalls
+        - tools.calls.read
+        - tools.failed.read
+        - tools.blocked.read
+        - tools.succeeded.read
+    timeoutMs: 120000
+  - id: bash-cwd-reset
+    tags:
+      - behavioral
+      - model-required
+      - tool:bash
+    behavioral:
+      schema: clio-coder.eval.scenario.v1
+      corpus:
+        id: tool-surface-model
+        version: 1.0.0
+      execution:
+        mode: model-required
+        subject:
+          kind: main-agent
+          role: main
+        toolTarget: available
+      expectedBehavior:
+        - id: bash-cwd-reset-calls
+          category: tool_choice
+          fact:
+            source: tool
+            key: tools.calls.bash
+            op: eq
+            value: 2
+        - id: bash-cwd-reset-errors
+          category: tool_choice
+          fact:
+            source: tool
+            key: tools.failed.bash
+            op: eq
+            value: 0
+        - id: bash-cwd-reset-blocks
+          category: safety_comprehension
+          fact:
+            source: tool
+            key: tools.blocked.bash
+            op: eq
+            value: 0
+        - id: bash-cwd-reset-successes
+          category: tool_choice
+          fact:
+            source: tool
+            key: tools.succeeded.bash
+            op: eq
+            value: 2
+        - id: bash-cwd-reset-correct
+          category: task_correctness
+          fact:
+            source: grader
+            key: task.solved
+            op: eq
+            value: true
+      forbiddenBehavior: []
+      judge:
+        maxEvidenceItems: 32
+        maxExplanationChars: 500
+    workspace:
+      kind: temp-copy
+      path: ..
+      excludes:
+        - .git
+        - .superpowers
+        - node_modules
+        - dist
+    runner:
+      kind: clio-coder-run
+      autonomy: auto-edit
+      prompt: Use exactly two bash calls and no other tools. First run cd
+        evals/fixtures/tool-surface/subdir && pwd. Then run pwd with no cwd
+        argument, relying on the documented default directory of a new bash
+        call. Report whether the second call starts at the workspace root. Do
+        not edit files.
+    verify:
+      measure:
+        - node evals/tool-surface-grader.mjs bash-cwd-reset
+      protectedFiles:
+        - evals/tool-surface-grader.mjs
+        - evals/fixtures/tool-surface/read.txt
+        - evals/fixtures/tool-surface/subdir/keep.txt
+    metrics:
+      collect:
+        - task.solved
+        - tools.totalCalls
+        - tools.calls.bash
+        - tools.failed.bash
+        - tools.blocked.bash
+        - tools.succeeded.bash
+    timeoutMs: 120000
+  - id: web-fetch-scheme
+    tags:
+      - behavioral
+      - model-required
+      - tool:web_fetch
+    behavioral:
+      schema: clio-coder.eval.scenario.v1
+      corpus:
+        id: tool-surface-model
+        version: 1.0.0
+      execution:
+        mode: model-required
+        subject:
+          kind: main-agent
+          role: main
+        toolTarget: available
+      expectedBehavior:
+        - id: web-fetch-scheme-calls
+          category: tool_choice
+          fact:
+            source: tool
+            key: tools.calls.web_fetch
+            op: eq
+            value: 1
+        - id: web-fetch-scheme-errors
+          category: tool_choice
+          fact:
+            source: tool
+            key: tools.failed.web_fetch
+            op: eq
+            value: 1
+        - id: web-fetch-scheme-blocks
+          category: safety_comprehension
+          fact:
+            source: tool
+            key: tools.blocked.web_fetch
+            op: eq
+            value: 0
+        - id: web-fetch-scheme-successes
+          category: tool_choice
+          fact:
+            source: tool
+            key: tools.succeeded.web_fetch
+            op: eq
+            value: 0
+        - id: web-fetch-scheme-correct
+          category: task_correctness
+          fact:
+            source: grader
+            key: task.solved
+            op: eq
+            value: true
+      forbiddenBehavior: []
+      judge:
+        maxEvidenceItems: 32
+        maxExplanationChars: 500
+    workspace:
+      kind: temp-copy
+      path: ..
+      excludes:
+        - .git
+        - .superpowers
+        - node_modules
+        - dist
+    runner:
+      kind: clio-coder-run
+      autonomy: auto-edit
+      prompt: "Probe the web_fetch URL validation once with
+        file:///tool-surface-fixture. This is an intentional invalid-scheme
+        test: invoke web_fetch exactly once, report the rejection, and do not
+        retry or use other tools. Do not edit files."
+    verify:
+      measure:
+        - node evals/tool-surface-grader.mjs web-fetch-scheme
+      protectedFiles:
+        - evals/tool-surface-grader.mjs
+        - evals/fixtures/tool-surface/read.txt
+        - evals/fixtures/tool-surface/subdir/keep.txt
+    metrics:
+      collect:
+        - task.solved
+        - tools.totalCalls
+        - tools.calls.web_fetch
+        - tools.failed.web_fetch
+        - tools.blocked.web_fetch
+        - tools.succeeded.web_fetch
+    timeoutMs: 120000

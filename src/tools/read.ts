@@ -1,8 +1,15 @@
 import { readFileSync, statSync } from "node:fs";
 import { Type } from "typebox";
+import { detectSupportedImageMimeType, prepareBoundedImage } from "../core/file-references.js";
 import { GUARDRAIL_DEFAULTS, resolveGuardrail } from "../core/guardrails.js";
 import { ToolNames } from "../core/tool-names.js";
-import { finalizeObservation, observationBudgetExhausted, reserveObservation } from "./observation.js";
+import {
+	commitObservationReservation,
+	finalizeObservation,
+	observationBudgetExhausted,
+	releaseObservation,
+	reserveObservation,
+} from "./observation.js";
 import { resolveReadPath } from "./path-utils.js";
 import type { ToolResult, ToolSpec } from "./registry.js";
 import { isSessionOffloadPath } from "./result-shaping.js";
@@ -47,7 +54,7 @@ function numberedPrefixBytes(totalLines: number): number {
 
 export const readTool: ToolSpec = {
 	name: ToolNames.Read,
-	description: `Read a UTF-8 text file. Output is capped at ${DEFAULT_MAX_LINES} lines or ${
+	description: `Read a UTF-8 text file or a PNG, JPEG, GIF, or WebP image when the routed model supports vision. Output is capped at ${DEFAULT_MAX_LINES} lines or ${
 		DEFAULT_READ_MAX_BYTES / 1024
 	}KB per call; truncated results say how to continue with offset/limit. Pass tail=N to read the last N lines (jump to EOF) instead of paging from the top. Set line_numbers=true for citations: each source line is prefixed with its physical 1-based line number and " | "; these labels are not file content.`,
 	parameters: Type.Object({
@@ -99,7 +106,38 @@ export const readTool: ToolSpec = {
 					hint: "Use offset/limit in a follow-up turn or grep/find for a narrower section.",
 				});
 			}
-			const content = readFileSync(filePath, "utf8");
+			const bytes = readFileSync(filePath);
+			if (detectSupportedImageMimeType(bytes) !== null) {
+				if (options?.supportsImages !== true)
+					return {
+						kind: "error",
+						message:
+							"IMAGE_INPUT_UNSUPPORTED: the routed model does not support image input. Choose a vision-capable model to inspect this file.",
+					};
+				const output = `Image: ${pathArg}`;
+				commitObservationReservation(reservation);
+				const image = await prepareBoundedImage(
+					bytes,
+					Math.min(reservation.callCapBytes, options.toolResultMaxBytes ?? readMaxBytes()) - Buffer.byteLength(output) - 512,
+				);
+				if (image === null)
+					return {
+						kind: "error",
+						message: "IMAGE_RESULT_TOO_LARGE: image could not be encoded within the tool result byte cap.",
+					};
+				return finalizeObservation({
+					tool: ToolNames.Read,
+					unit: "results",
+					output,
+					images: [image],
+					shownCount: 1,
+					totalCount: 1,
+					truncated: false,
+					reservation,
+					...(options ? { options } : {}),
+				});
+			}
+			const content = bytes.toString("utf8");
 			// Slice from the raw split (keeps the trailing newline on selections that
 			// reach EOF); count lines honestly (a trailing "\n" is a terminator, not
 			// a phantom extra line) so continuation notices never over-report by one.
@@ -224,6 +262,8 @@ export const readTool: ToolSpec = {
 				};
 			}
 			return { kind: "error", message: `read: ${msg}` };
+		} finally {
+			releaseObservation(reservation);
 		}
 	},
 };

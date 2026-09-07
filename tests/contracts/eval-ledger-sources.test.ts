@@ -1,5 +1,5 @@
 import assert from "node:assert/strict";
-import { mkdirSync, writeFileSync } from "node:fs";
+import { mkdirSync, readFileSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
 import test from "node:test";
 import { shellQuote } from "../../src/core/shell-quote.js";
@@ -57,7 +57,15 @@ const metadata: SessionEntry[] = [
 ];
 const event = { type: "message_end", message: { role: "assistant", timestamp: 1, usage: USAGE } };
 
-for (const mode of ["both", "ledger-only", "stream-only", "metadata-only", "partial", "multiple-sessions"] as const) {
+for (const mode of [
+	"both",
+	"ledger-only",
+	"stream-only",
+	"metadata-only",
+	"partial",
+	"multiple-sessions",
+	"failed-run",
+] as const) {
 	test(`eval ledger sources: ${mode}`, async () => {
 		const env = await isolateClioEnv("clio-eval-sources-");
 		try {
@@ -87,6 +95,7 @@ for (const [index, entries] of ledgers.entries()) {
 if (${mode !== "ledger-only"}) {
   process.stdout.write(${JSON.stringify(`${JSON.stringify(event)}\n${JSON.stringify(event)}\n`)});
 }
+if (${mode === "failed-run"}) process.exit(1);
 `,
 			);
 			const artifact = await runEvalSuiteV2(
@@ -115,7 +124,23 @@ if (${mode !== "ledger-only"}) {
 			);
 			const result = artifact.results[0];
 			assert.ok(result);
-			assert.equal(result.pass, true, JSON.stringify(result));
+			assert.equal(result.pass, mode !== "failed-run", JSON.stringify(result));
+			assert.equal(
+				result.metrics["patch.filesChanged"],
+				undefined,
+				"a local workspace without a Git or hash baseline is unmeasured",
+			);
+			const retained = result.artifacts.sessionLedgers;
+			if (durable.length > 0) {
+				assert.ok(Array.isArray(retained));
+				const retainedEntries = retained.flatMap((path) =>
+					readFileSync(path, "utf8")
+						.trim()
+						.split("\n")
+						.map((line) => JSON.parse(line)),
+				);
+				assert.deepEqual(retainedEntries, ledgers.flat());
+			} else assert.equal(retained, undefined);
 			const tracked = result.verdict?.trackedMetrics;
 			assert.ok(tracked);
 			const count = mode === "partial" ? 1 : 2;

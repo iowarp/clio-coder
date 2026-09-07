@@ -74,6 +74,16 @@
 <td><code>1</code> lets full-auto pass through to external CLI runtimes with their own full access (<code>src/engine/claude/subprocess-runtime.ts</code>, <code>src/engine/antigravity/subprocess-runtime.ts</code>).</td>
 </tr>
 <tr>
+<td><code>CLIO_CODER_ANTHROPIC_CACHE_RETENTION</code></td>
+<td>unset</td>
+<td>Native engine requests using <code>anthropic-messages</code> accept <code>none</code>, <code>short</code>, or <code>long</code>. Long requests ask for a one-hour cache TTL when the model's compatibility metadata supports it. An explicit per-call preference wins; unset preserves SDK defaults, and other APIs are unchanged (<code>src/engine/provider-diagnostics.ts</code>).</td>
+</tr>
+<tr>
+<td><code>CLIO_CODER_PROVIDER_DUMP_PATH</code></td>
+<td>unset</td>
+<td>Absolute path for opt-in native-provider JSONL diagnostics. One record per completed call contains payloads after caller callbacks and the terminal response. The parent directory must exist; the file must be operator-owned, regular, mode <code>0600</code>, and not a symlink. New files use that mode. Auth options and headers are omitted, known provider credentials are redacted, and prompt/message/tool content is retained. Keep this diagnostic private and delete it when finished. Ledger events are unchanged; external CLI transports are not captured (<code>src/engine/provider-diagnostics.ts</code>).</td>
+</tr>
+<tr>
 <td><code>CLIO_CODER_FORCE_COMPACT</code></td>
 <td>off</td>
 <td><code>1</code> forces compaction before every interactive turn for as long as it is set (<code>src/interactive/chat-loop.ts</code>).</td>
@@ -144,9 +154,19 @@
 <td>How long a persisted endpoint slot count answers for an endpoint nothing has probed in this process. A record past the bound is ignored and pruned rather than allowed to over-admit (<code>src/domains/providers/endpoint-slots-store.ts</code>).</td>
 </tr>
 <tr>
+<td><code>CLIO_CODER_DISABLE_RETRIEVE_TOOLS</code></td>
+<td>off</td>
+<td><code>1</code> strips RETRIEVE tools from registries. Bash, hooks, external CLIs, and provider networking remain available; hermetic runs require OS isolation. Legacy <code>CLIO_CODER_NO_NETWORK_TOOLS=1</code> is accepted; <code>skills-eval --allow-network</code> clears both spellings.</td>
+</tr>
+<tr>
 <td><code>CLIO_CODER_NO_NETWORK_TOOLS</code></td>
 <td>off</td>
-<td><code>1</code> strips network tools from every registry in the process; the skills-eval harness sets it for hermetic arms; <code>--allow-network</code> clears it (<code>src/tools/network-policy.ts</code>).</td>
+<td>Legacy alias of <code>CLIO_CODER_DISABLE_RETRIEVE_TOOLS</code>; disables retrieval tools only, with no shell network isolation.</td>
+</tr>
+<tr>
+<td><code>CLIO_CODER_WEB_FETCH_ALLOW_PRIVATE_NETWORK</code></td>
+<td>off</td>
+<td><code>1</code> permits web_fetch to reach private and local services; operator process setting only, never a tool argument or project setting (<code>src/tools/network-policy.ts</code>).</td>
 </tr>
 <tr>
 <td><code>CLIO_CODER_REDUCE_MOTION</code></td>

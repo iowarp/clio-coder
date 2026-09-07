@@ -19,7 +19,7 @@ export const INTEROP_AGENT_KINDS: ReadonlyArray<InteropAgentKind> = [
 		instructionFiles: ["CLAUDE.md", ".claude/CLAUDE.md"],
 		acp: {
 			command: "npx",
-			args: ["-y", "@zed-industries/claude-code-acp"],
+			args: ["-y", "@zed-industries/claude-code-acp@0.16.2"],
 			npmPackage: "@zed-industries/claude-code-acp",
 			npmPackageBin: "claude-code-acp",
 		},
@@ -39,7 +39,7 @@ export const INTEROP_AGENT_KINDS: ReadonlyArray<InteropAgentKind> = [
 		instructionFiles: ["AGENTS.md", "CODEX.md", ".codex/AGENTS.md"],
 		acp: {
 			command: "npx",
-			args: ["-y", "@agentclientprotocol/codex-acp"],
+			args: ["-y", "@agentclientprotocol/codex-acp@1.10.0"],
 			npmPackage: "@agentclientprotocol/codex-acp",
 			npmPackageBin: "codex-acp",
 		},

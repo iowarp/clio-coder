@@ -41,7 +41,7 @@ export function resolveRecall(
 	ref: string,
 	activeLeafTurnId?: string,
 ): RecallOutcome {
-	const parsed = parseRefKey(ref);
+	const parsed = parseRefKey(ref, view);
 	if (parsed === null) return { ok: false, error: { kind: "invalid_ref", ref } };
 	const key = refKey(parsed);
 	const active = filterEntriesToActivePath(entries, activeLeafTurnId);
@@ -146,12 +146,13 @@ export function recallableRefListing(
 		const payload = toolResultPayload(entry.payload);
 		const toolCallId = typeof payload.obj.toolCallId === "string" ? payload.obj.toolCallId : undefined;
 		const path = primaryPathOf(payload) ?? (toolCallId === undefined ? undefined : callPaths.get(toolCallId));
-		const metadata = `${entry.turnId} ${payload.toolName} ${path ?? ""}`.toLowerCase();
+		const alias = view.evicted.get(entry.turnId)?.alias;
+		const metadata = `${alias ?? ""} ${entry.turnId} ${payload.toolName} ${path ?? ""}`.toLowerCase();
 		if (!terms.every((term) => metadata.includes(term))) continue;
 		if (total >= offset && refs.length < limit) {
 			// Keep each row bounded even for unusual tool/path metadata.
 			const label = `${payload.toolName}${path === undefined ? "" : ` ${path}`}`.replace(/\s+/g, " ").slice(0, 240);
-			refs.push(`${entry.turnId} (${label}) [${state}; ${entry.timestamp}]`);
+			refs.push(`${alias ?? entry.turnId} (${label}) [${state}; ${entry.timestamp}]`);
 		}
 		total += 1;
 	}
@@ -186,7 +187,7 @@ export function recallErrorMessage(
 	const listing = ` ${recallableRefMessage(active, view, activeLeafTurnId)}`;
 	switch (error.kind) {
 		case "invalid_ref":
-			return `recall ref must be a single turnId without whitespace; got '${error.ref}'.`;
+			return `recall ref must be a single recall alias or turnId without whitespace; got '${error.ref}'.`;
 		case "not_on_active_path":
 			return `ref ${error.ref} is not on the active path of this session (unknown or on an abandoned branch).${listing}`;
 		case "visible":

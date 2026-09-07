@@ -1,7 +1,9 @@
 import { buildCustomizationGraph, type CustomizationEntry } from "./config-inspect.js";
+import { runConfigTrustCommand } from "./config-trust.js";
 import { printError } from "./shared.js";
 
 const HELP = `clio-coder config inspect [--json]
+clio-coder config trust safety|hooks|settings [--json | --hash SHA256 | --revoke]
 
 Print the effective-customization graph: what settings, context files, rules,
 skills, prompts, agents, fleets, extensions, safety, memory, hooks, and the operator
@@ -10,6 +12,10 @@ context cost. Read-only; nothing is created.
 
 This is the "why is Clio behaving this way" surface. Parse the --json form in
 scripts instead of the table.
+
+Trust previews show the captured project files and their digest. Approve only
+the reviewed digest with --hash, or remove a surface's approval with --revoke.
+Settings and safety reload on restart; project hooks also check trust before execution.
 `;
 
 function renderText(cwd: string): string {
@@ -37,6 +43,7 @@ function renderText(cwd: string): string {
 			const precedence = entry.precedence ? `, ${entry.precedence}` : "";
 			out.push(`  ${entry.id}  [${entry.scope}${precedence}, reload:${entry.reloadClass}${hash}${cost}]`);
 			if (entry.sourcePath) out.push(`    from ${entry.sourcePath}`);
+			if (entry.id === "safety.policy" && entry.detail !== undefined) out.push(`    ${JSON.stringify(entry.detail)}`);
 		}
 		out.push("");
 	}
@@ -56,6 +63,7 @@ export function runConfigCommand(args: ReadonlyArray<string> = []): number {
 	}
 	const positional = args.filter((arg) => !arg.startsWith("-"));
 	const sub = positional[0] ?? "inspect";
+	if (sub === "trust") return runConfigTrustCommand(args.slice(1));
 	if (sub !== "inspect") {
 		printError(`unknown config subcommand: ${sub}`);
 		process.stderr.write(HELP);

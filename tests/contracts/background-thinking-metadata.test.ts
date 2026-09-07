@@ -17,13 +17,14 @@ import {
 	createBackgroundMemoryRouting,
 	createProductionAutoCompact,
 } from "../../src/entry/orchestrator.js";
+import { syntheticCompactionSummary } from "../harness/compaction-summary.js";
 import { dispatchStubContext } from "../harness/dispatch-stub-context.js";
 import { startGatewayThinkingFixture } from "../harness/gateway-thinking-fixture.js";
 import { isolateClioEnv } from "../harness/scratch-env.js";
 
-async function setup(runtime = "lm-studio", beforeMetadata?: () => Promise<void>) {
+async function setup(runtime = "lm-studio", beforeMetadata?: () => Promise<void>, responseText = "323") {
 	const env = await isolateClioEnv("clio-background-thinking-");
-	const fixture = await startGatewayThinkingFixture(runtime, "zbook/ornith-1.5-35b-a3b", beforeMetadata);
+	const fixture = await startGatewayThinkingFixture(runtime, "zbook/ornith-1.5-35b-a3b", beforeMetadata, responseText);
 	const settings = structuredClone(DEFAULT_SETTINGS);
 	settings.targets = [
 		{ id: "memory", runtime: "litellm", url: fixture.url, defaultModel: fixture.modelId },
@@ -52,7 +53,7 @@ async function setup(runtime = "lm-studio", beforeMetadata?: () => Promise<void>
 
 for (const role of ["memory", "compaction"] as const) {
 	test(`cold dedicated ${role} discovers its own gateway controls before actual completion`, async () => {
-		const f = await setup();
+		const f = await setup(undefined, undefined, role === "compaction" ? syntheticCompactionSummary("323") : "323");
 		try {
 			strictEqual(f.providers.list()[0]?.health.lastCheckAt, null);
 			strictEqual(f.fixture.requests.length, 0);

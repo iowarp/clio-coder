@@ -31,6 +31,7 @@ import {
 	updateSavedSettingsDocument,
 	validateSettings,
 } from "./config.js";
+import { captureProjectSurface, type ProjectSurfaceFile, projectSurfaceTrustNotice } from "./workspace-trust.js";
 
 export type SettingsOrigin = "built-in" | "user" | "project" | "project.local" | "cli";
 
@@ -85,11 +86,16 @@ interface RawLayer {
 	blob: Record<string, unknown> | undefined;
 }
 
-function readRawLayer(origin: SettingsOrigin, path: string, issues: SettingsLayerIssue[]): RawLayer {
-	if (!existsSync(path)) return { origin, path, blob: undefined };
+function readRawLayer(
+	origin: SettingsOrigin,
+	path: string,
+	issues: SettingsLayerIssue[],
+	capturedText?: string,
+): RawLayer {
+	if (capturedText === undefined && !existsSync(path)) return { origin, path, blob: undefined };
 	let text: string;
 	try {
-		text = readFileSync(path, "utf8");
+		text = capturedText ?? readFileSync(path, "utf8");
 	} catch (err) {
 		issues.push({
 			origin,
@@ -200,8 +206,18 @@ interface PreparedLayers {
 function prepareProjectLayers(cwd: string, issues: SettingsLayerIssue[]): PreparedLayers {
 	const projectFile = join(cwd, ".clio-coder", "settings.yaml");
 	const localFile = join(cwd, ".clio-coder", "settings.local.yaml");
-	const projectRaw = readRawLayer("project", projectFile, issues);
-	const localRaw = readRawLayer("project.local", localFile, issues);
+	const snapshot = captureProjectSurface(cwd, "settings");
+	const readProjectLayer = (origin: SettingsOrigin, path: string, file: ProjectSurfaceFile | undefined): RawLayer => {
+		if (file?.error !== undefined) issues.push({ origin, path, message: file.error, kind: "unreadable" });
+		if (file?.text === null || file === undefined) return { origin, path, blob: undefined };
+		if (snapshot.verdict !== "trusted") {
+			issues.push({ origin, path, message: projectSurfaceTrustNotice(snapshot, file.path) });
+			return { origin, path, blob: undefined };
+		}
+		return readRawLayer(origin, path, issues, file.text);
+	};
+	const projectRaw = readProjectLayer("project", projectFile, snapshot.files[0]);
+	const localRaw = readProjectLayer("project.local", localFile, snapshot.files[1]);
 	const project: RawLayer = {
 		...projectRaw,
 		blob:

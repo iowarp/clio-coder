@@ -172,7 +172,7 @@ export function renderEvalComparisonV4(summary: EvalCompareV4Summary): string {
 		...(index === 0
 			? [
 					"behavioral metrics:",
-					"scenario role baseline_target/model -> candidate_target/model family metric baseline_mean baseline_variance baseline_coverage candidate_mean candidate_variance candidate_coverage mean_delta variance_delta change variance_change comparability gate source",
+					"scenario role baseline_target/model -> candidate_target/model family metric baseline_mean baseline_variance baseline_coverage candidate_mean candidate_variance candidate_coverage mean_delta variance_delta noise_band change variance_change comparability gate source",
 				]
 			: []),
 		[
@@ -189,6 +189,7 @@ export function renderEvalComparisonV4(summary: EvalCompareV4Summary): string {
 			`${row.candidate.measured}/${row.candidate.observations}`,
 			formatSignedMetric(row.meanDelta),
 			formatSignedMetric(row.varianceDelta),
+			formatMetric(row.noiseBand),
 			row.change,
 			row.varianceChange,
 			row.comparability.comparable ? "comparable" : `incomparable:${row.comparability.mismatchedFields.join(",")}`,

@@ -4,7 +4,8 @@ import type { ToolSurface } from "./lazy-tool.js";
 
 export const webFetchToolSurface = {
 	name: ToolNames.WebFetch,
-	description: "Fetch an http(s) URL; HTML is cleaned and converted to Markdown. Non-2xx responses are errors.",
+	description:
+		"Fetch an http(s) URL; HTML is cleaned and converted to Markdown. Non-2xx responses are errors. Non-GET/HEAD methods or any body require outward-action approval; private networks require operator opt-in.",
 	parameters: Type.Object({
 		url: Type.String({ description: "Fully-qualified http(s) URL." }),
 		method: Type.Optional(Type.String({ description: "HTTP method (default GET)." })),

@@ -100,13 +100,19 @@ function listRuns(deps: MonitorToolDeps, options: ToolInvokeOptions | undefined)
 
 function runStatus(deps: MonitorToolDeps, runId: string): ToolResult {
 	const requestedRun = deps.dispatch.getRun(runId);
-	const rootRunId = requestedRun?.lineage?.rootRunId ?? runId;
-	const assignment = deps.dispatch.assignments?.getStored(rootRunId) ?? null;
+	const assignment = deps.dispatch.assignments?.getStored(runId) ?? null;
+	const rootRunId = assignment?.assignmentId ?? requestedRun?.lineage?.rootRunId ?? runId;
 	const resolvedRunId = assignment?.terminalRunId ?? runId;
 	const run = deps.dispatch.getRun(resolvedRunId) ?? requestedRun;
 	if (!run && !assignment) return { kind: "error", message: `monitor: unknown run or assignment '${runId}'` };
 	if (!run) return { kind: "error", message: `monitor: assignment '${runId}' has no available attempt` };
-	const live = deps.dispatch.snapshot().running.find((entry) => entry.lineage.rootRunId === rootRunId) ?? null;
+	const live =
+		deps.dispatch
+			.snapshot()
+			.running.find(
+				(entry) =>
+					(deps.dispatch.assignments?.getStored(entry.runId)?.assignmentId ?? entry.lineage.rootRunId) === rootRunId,
+			) ?? null;
 	const reroutes =
 		run.reroutes !== undefined && run.reroutes.length > 0
 			? ` reroutes=${run.reroutes.map((hop) => `${hop.fromNode}>${hop.toNode}`).join(",")}`
@@ -296,8 +302,7 @@ function receiptToolLines(receipt: RunReceipt): string[] {
  */
 function runTools(deps: MonitorToolDeps, runId: string): ToolResult {
 	const requestedRun = deps.dispatch.getRun(runId);
-	const rootRunId = requestedRun?.lineage?.rootRunId ?? runId;
-	const assignment = deps.dispatch.assignments?.getStored(rootRunId) ?? null;
+	const assignment = deps.dispatch.assignments?.getStored(runId) ?? null;
 	const resolvedRunId = assignment?.terminalRunId ?? runId;
 	const run = deps.dispatch.getRun(resolvedRunId) ?? requestedRun ?? null;
 	if (run === null && assignment === null) return { kind: "error", message: `monitor: unknown run '${runId}'` };
@@ -511,8 +516,8 @@ async function runWait(
 	const startedAt = performance.now();
 	let run = deps.dispatch.getRun(runId);
 	if (!run) return { kind: "error", message: `monitor: unknown run '${runId}'` };
-	const rootRunId = run.lineage?.rootRunId ?? runId;
-	let assignment = deps.dispatch.assignments?.getStored(rootRunId) ?? null;
+	let assignment = deps.dispatch.assignments?.getStored(runId) ?? null;
+	const rootRunId = assignment?.assignmentId ?? runId;
 	while (assignment?.status === "running" || (assignment === null && !isTerminalRunEnvelope(run))) {
 		if (signal?.aborted) return { kind: "error", message: "monitor: wait aborted" };
 		const elapsed = Math.round(performance.now() - startedAt);
@@ -617,11 +622,10 @@ function collectRunLine(row: CollectedRunRow): string[] {
 
 function resolveCollectRow(deps: MonitorToolDeps, originalRunId: string, agentId: string): CollectRow {
 	const original = deps.dispatch.getRun(originalRunId);
-	const rootRunId = original?.lineage?.rootRunId ?? originalRunId;
 	// The durable assignment record is written asynchronously at admission, so a
 	// collect issued in that window sees none yet and reads the attempt directly.
 	// terminalRunId is null while the assignment is still running.
-	const assignment = deps.dispatch.assignments?.getStored(rootRunId) ?? null;
+	const assignment = deps.dispatch.assignments?.getStored(originalRunId) ?? null;
 	const runId = assignment?.terminalRunId ?? originalRunId;
 	const run = deps.dispatch.getRun(runId) ?? original;
 	return {

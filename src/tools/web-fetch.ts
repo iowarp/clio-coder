@@ -1,5 +1,7 @@
+import { UNTRUSTED_CONTENT_BANNER } from "../core/untrusted-content.js";
 import type { ToolResult, ToolSpec } from "./registry.js";
 import { truncateUtf8 } from "./truncate-utf8.js";
+import { fetchWebUrl } from "./web-fetch-network.js";
 import { webFetchToolSurface } from "./web-fetch-surface.js";
 
 const DEFAULT_TIMEOUT_MS = 30_000;
@@ -374,7 +376,7 @@ async function fetchArxivPaperSummary(
 	maxBytes: number,
 ): Promise<ToolResult | null> {
 	const metadataUrl = `https://export.arxiv.org/api/query?id_list=${encodeURIComponent(paperId)}`;
-	const response = await fetch(metadataUrl, init);
+	const response = await fetchWebUrl(metadataUrl, init);
 	if (response.status < 200 || response.status >= 300) return null;
 	const read = await readResponseText(response, Math.min(120_000, maxBytes));
 	const entry = /<entry\b[^>]*>([\s\S]*?)<\/entry>/i.exec(read.text)?.[1];
@@ -384,7 +386,7 @@ async function fetchArxivPaperSummary(
 	let alphaxivRead: ReadResult | null = null;
 	const alphaUrl = `https://alphaxiv.org/overview/${encodeURIComponent(paperId)}.md`;
 	try {
-		const alpha = await fetch(alphaUrl, init);
+		const alpha = await fetchWebUrl(alphaUrl, init);
 		if (alpha.status >= 200 && alpha.status < 300) {
 			alphaxivRead = await readResponseText(alpha, Math.min(80_000, Math.max(0, maxBytes - read.bytesRead)));
 			if (alphaxivRead.text.trim().length > 0) paper.alphaxivOverview = alphaxivRead.text.trim();
@@ -416,7 +418,7 @@ async function fetchArxivPaperSummary(
 	const bytesRead = read.bytesRead + (alphaxivRead?.bytesRead ?? 0);
 	return {
 		kind: "ok",
-		output: truncate(lines.join("\n"), maxBytes),
+		output: truncate(`${UNTRUSTED_CONTENT_BANNER}\n${lines.join("\n")}`, maxBytes),
 		details: {
 			url: `https://arxiv.org/abs/${paper.id}`,
 			status: 200,
@@ -437,7 +439,7 @@ async function fetchArxivApiSummary(
 	init: Parameters<typeof fetch>[1],
 	maxBytes: number,
 ): Promise<ToolResult | null> {
-	const response = await fetch(url, init);
+	const response = await fetchWebUrl(url, init);
 	if (response.status < 200 || response.status >= 300) return null;
 	const read = await readResponseText(response, Math.min(240_000, maxBytes));
 	const entries = Array.from(read.text.matchAll(/<entry\b[^>]*>([\s\S]*?)<\/entry>/gi))
@@ -469,7 +471,7 @@ async function fetchArxivApiSummary(
 	}
 	return {
 		kind: "ok",
-		output: truncate(lines.join("\n"), maxBytes),
+		output: truncate(`${UNTRUSTED_CONTENT_BANNER}\n${lines.join("\n")}`, maxBytes),
 		details: {
 			url: url.toString(),
 			status: 200,
@@ -553,7 +555,7 @@ async function fetchRepoTreeSummary(
 	init: Parameters<typeof fetch>[1],
 	maxBytes: number,
 ): Promise<ToolResult | null> {
-	const apiResponse = await fetch(target.apiUrl, init);
+	const apiResponse = await fetchWebUrl(target.apiUrl, init);
 	if (apiResponse.status < 200 || apiResponse.status >= 300) return null;
 	const apiRead = await readResponseText(apiResponse, Math.min(200_000, maxBytes));
 	let entries: unknown[];
@@ -581,7 +583,7 @@ async function fetchRepoTreeSummary(
 	for (const file of files) {
 		if (remaining <= 2000) break;
 		const rawUrl = `${target.rawBaseUrl}/${file}`;
-		const rawResponse = await fetch(rawUrl, init);
+		const rawResponse = await fetchWebUrl(rawUrl, init);
 		if (rawResponse.status < 200 || rawResponse.status >= 300) continue;
 		const rawRead = await readResponseText(rawResponse, Math.min(80_000, remaining));
 		sections.push("", `--- ${file} ---`, rawRead.text.trim());
@@ -589,7 +591,7 @@ async function fetchRepoTreeSummary(
 	}
 	return {
 		kind: "ok",
-		output: truncate(sections.join("\n"), maxBytes),
+		output: truncate(`${UNTRUSTED_CONTENT_BANNER}\n${sections.join("\n")}`, maxBytes),
 		details: {
 			url: target.apiUrl,
 			status: 200,
@@ -621,7 +623,7 @@ function formatOutput(args: {
 	if (args.extracted.description) lines.push(`Description: ${args.extracted.description}`);
 	if (args.extracted.canonical) lines.push(`Canonical: ${args.extracted.canonical}`);
 	lines.push("", "Content:", args.extracted.content || "[empty]");
-	return truncate(lines.join("\n"), args.maxBytes);
+	return truncate(`${UNTRUSTED_CONTENT_BANNER}\n${lines.join("\n")}`, args.maxBytes);
 }
 
 export const webFetchTool: ToolSpec = {
@@ -683,10 +685,10 @@ export const webFetchTool: ToolSpec = {
 				method,
 				headers,
 				signal: controller.signal,
-				redirect: "follow",
+				redirect: "manual",
 			};
 			if (body !== undefined) init.body = body;
-			if (method === "GET" && body === undefined && format !== "raw") {
+			if (method === "GET" && body === undefined && format !== "raw" && Object.keys(userHeaders).length === 0) {
 				if (arxivApiUrl(parsed)) {
 					const arxivApiSummary = await fetchArxivApiSummary(parsed, init, maxBytes);
 					if (arxivApiSummary) return arxivApiSummary;
@@ -702,7 +704,7 @@ export const webFetchTool: ToolSpec = {
 					if (repoSummary) return repoSummary;
 				}
 			}
-			const response = await fetch(parsed, init);
+			const response = await fetchWebUrl(parsed, init);
 			const contentType = headerValue(response, "content-type");
 			const readLimit =
 				response.status >= 200 && response.status < 300 ? maxBytes : Math.min(ERROR_PREVIEW_BYTES, maxBytes);
@@ -711,7 +713,7 @@ export const webFetchTool: ToolSpec = {
 				const preview = extractWebFetchContent(read.text, contentType, response.url || parsed.toString(), "auto").content;
 				return {
 					kind: "error",
-					message: `web_fetch: HTTP ${response.status}: ${response.statusText}${preview ? `\nPreview:\n${truncate(preview, ERROR_PREVIEW_BYTES)}` : ""}`,
+					message: `web_fetch: HTTP ${response.status}: ${response.statusText}${preview ? `\n${UNTRUSTED_CONTENT_BANNER}\nPreview:\n${truncate(preview, ERROR_PREVIEW_BYTES)}` : ""}`,
 				};
 			}
 			if (isProbablyBinary(contentType, read.text)) {

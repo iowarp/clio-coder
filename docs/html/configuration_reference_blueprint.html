@@ -1039,6 +1039,12 @@
 <td></td>
 </tr>
 <tr>
+<td><code>CLIO_CODER_ANTHROPIC_CACHE_RETENTION</code></td>
+<td><code>unset</code></td>
+<td>Read per native Anthropic provider call: <code>none</code>, <code>short</code>, or <code>long</code> cache retention. Long TTL requires model compatibility; unset preserves SDK defaults.</td>
+<td>explicit call option &gt; env &gt; SDK default</td>
+</tr>
+<tr>
 <td><code>CLIO_CODER_ALLOW_EXTERNAL_FULL_ACCESS</code></td>
 <td><code>unset (disabled)</code></td>
 <td>Exactly <code>1</code> lets a <code>full-auto</code> dispatch to the claude-code or antigravity-code subprocess runtime pass their dangerous skip-permissions flag; any other value keeps the bypass closed.</td>
@@ -1219,10 +1225,28 @@
 <td></td>
 </tr>
 <tr>
+<td><code>CLIO_CODER_DISABLE_RETRIEVE_TOOLS</code></td>
+<td>off</td>
+<td>Exactly <code>1</code> removes RETRIEVE tools from registries; <code>clio-coder skills-eval</code> sets it for child arms. Bash, hooks, external CLIs, and provider networking remain available; OS isolation is required for hermetic runs. Legacy <code>CLIO_CODER_NO_NETWORK_TOOLS=1</code> remains accepted.</td>
+<td><code>skills-eval --allow-network</code> clears both spellings for child arms</td>
+</tr>
+<tr>
 <td><code>CLIO_CODER_NO_NETWORK_TOOLS</code></td>
-<td><code>unset (disabled)</code></td>
-<td>Exactly <code>1</code> removes the network (RETRIEVE) tools from every registry built in the process; <code>clio-coder skills-eval</code> sets it for hermetic arms and <code>--allow-network</code> deletes it.</td>
-<td><code>skills-eval --allow-network</code> clears it for child arms; otherwise env only</td>
+<td>off</td>
+<td>Legacy alias of <code>CLIO_CODER_DISABLE_RETRIEVE_TOOLS</code>; disables retrieval tools only, with no shell network isolation.</td>
+<td>env only</td>
+</tr>
+<tr>
+<td><code>CLIO_CODER_PROVIDER_DUMP_PATH</code></td>
+<td><code>unset</code></td>
+<td>Read per native provider call: absolute path for private JSONL request-body and terminal-response diagnostics. Parent must exist; the file must be operator-owned, regular, mode <code>0600</code>, and not a symlink. Known credentials are redacted; prompt and tool content remain.</td>
+<td>env only</td>
+</tr>
+<tr>
+<td><code>CLIO_CODER_WEB_FETCH_ALLOW_PRIVATE_NETWORK</code></td>
+<td>off</td>
+<td>Exactly <code>1</code> allows web_fetch to reach private and local services. This operator process opt-in is not accepted from model arguments or project settings.</td>
+<td>env only</td>
 </tr>
 <tr>
 <td><code>CLIO_CODER_PACKAGE_ROOT</code></td>
@@ -1758,12 +1782,20 @@
 </tr>
 </thead>
 <tbody><tr>
+<td><code>--hash</code></td>
+<td>For <code>config trust safety|hooks|settings</code>, approve the exact full SHA-256 digest returned by a prior review; a changed review is refused.</td>
+</tr>
+<tr>
 <td><code>--help</code></td>
 <td>Print the command&#39;s usage and exit.</td>
 </tr>
 <tr>
 <td><code>--json</code></td>
-<td>For <code>config inspect</code>, emit the customization graph as JSON.</td>
+<td>For <code>config inspect</code>, emit the customization graph; for <code>config trust safety|hooks|settings</code>, emit a read-only source and trust preview.</td>
+</tr>
+<tr>
+<td><code>--revoke</code></td>
+<td>For <code>config trust safety|hooks|settings</code>, withdraw this workspace&#39;s approval for that configuration surface.</td>
 </tr>
 <tr>
 <td><code>-h</code></td>
@@ -3176,6 +3208,7 @@
 </tbody></table>
 <h2>Project files</h2>
 <p>Keys read from files under <code>.clio-coder/</code> in the repository.</p>
+<p>Project safety, hooks, and settings are ignored until the operator reviews them with <code>clio-coder config trust safety|hooks|settings</code> and approves the printed digest with <code>--hash</code>. Consent binds one canonical workspace and one surface&#39;s content and source location. Changes, local override additions, and safety-policy relocation require a new review. Startup names skipped files; <code>config inspect</code> shows effective safety provenance and trust. Settings and safety apply on restart; new hooks apply after extension reload, while changed or revoked published hooks stop before their next execution. <code>CLIO-CODER.md</code> remains project text and does not grant configuration authority.</p>
 <h3><code>.clio-coder/agents</code></h3>
 <table>
 <thead>
@@ -3462,7 +3495,7 @@
 </tr>
 <tr>
 <td><code>disableDefaultPathPolicy</code></td>
-<td><code>true</code> drops the built-in path policy (protected dotfiles, secrets, build outputs) so only the file&#39;s own path lists apply.</td>
+<td>In an approved safety policy, <code>true</code> drops project-default path rules. Operator credentials, settings, skills, trust records, and host authority paths remain protected.</td>
 <td></td>
 </tr>
 <tr>

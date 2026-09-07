@@ -118,7 +118,7 @@ function projectToolResult(result: ToolResult): WorkerAgentToolResult {
 		return { content: [{ type: "text", text: toolResultContextText(result) }], details };
 	}
 	return {
-		content: [{ type: "text", text: toolResultContextText(result) }],
+		content: [{ type: "text", text: toolResultContextText(result) }, ...(result.images ?? [])],
 		details,
 		...(result.terminate === true ? { terminate: true } : {}),
 	};
@@ -220,7 +220,7 @@ async function runValidatedToolCall(input: RunValidatedToolCallInput): Promise<W
 	const skillActivation =
 		spec.name === ToolNames.Context ? skillActivationFromToolDetails(toolDetails, input.invokeOptions?.turnId) : null;
 	const result: AgentToolResult<WorkerToolOkDetails> = {
-		content: [{ type: "text", text: toolResultContextText(verdict.result) }],
+		content: [{ type: "text", text: toolResultContextText(verdict.result) }, ...(verdict.result.images ?? [])],
 		details: { ...toolDetails, kind: "ok" },
 	};
 	if (verdict.result.terminate === true) {
@@ -457,7 +457,10 @@ export function resolveSessionTools(
 ): AgentTool[] {
 	if (!toolRegistry || runtime.runtimeResolution.capabilityDecisions.tools !== true) return [];
 	const input: ResolveAgentToolsInput = { registry: toolRegistry };
-	if (invokeOptions) input.invokeOptions = invokeOptions;
+	input.invokeOptions = () => ({
+		...invokeOptions?.(),
+		supportsImages: runtime.runtimeResolution.capabilityDecisions.vision === true,
+	});
 	if (telemetry) input.telemetry = telemetry;
 	return resolveAgentTools(input);
 }

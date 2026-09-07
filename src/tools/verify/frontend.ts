@@ -3,10 +3,12 @@ import { tmpdir } from "node:os";
 import path from "node:path";
 import { pathToFileURL } from "node:url";
 import { Script } from "node:vm";
+import { prepareBoundedImage } from "../../core/file-references.js";
 import { combineSafeOutput, runCommandVector } from "../../core/safe-exec.js";
+import type { ImageContent } from "../../engine/types.js";
 import { escapeRegExp } from "../ignore-policy.js";
 import { resolveReadPath } from "../path-utils.js";
-import type { ToolResult, ToolResultDetails } from "../registry.js";
+import type { ToolInvokeOptions, ToolResult, ToolResultDetails } from "../registry.js";
 import { maxOutputArg, timeoutArg } from "../safe-exec.js";
 import { truncateUtf8 } from "../truncate-utf8.js";
 import { BROWSER_MODES } from "./surface.js";
@@ -25,6 +27,9 @@ interface FrontendCheck {
 }
 
 interface ValidationOptions {
+	supportsImages?: boolean;
+	imageMaxBytes?: number;
+	images?: ImageContent[];
 	timeoutMs: number;
 	maxOutputBytes: number;
 	signal?: AbortSignal;
@@ -84,7 +89,7 @@ const JAVASCRIPT_TYPES = new Set([
  */
 export async function runFrontendCheck(
 	args: Record<string, unknown>,
-	options?: { signal?: AbortSignal },
+	options?: ToolInvokeOptions,
 ): Promise<ToolResult> {
 	const pathArg = typeof args.path === "string" ? args.path.trim() : "";
 	if (pathArg.length === 0) return { kind: "error", message: "verify: check=frontend requires a path argument" };
@@ -106,6 +111,9 @@ export async function runFrontendCheck(
 	const validateOptions: ValidationOptions = {
 		timeoutMs: timeoutArg(args),
 		maxOutputBytes: maxOutputArg(args),
+		supportsImages: options?.supportsImages === true,
+		imageMaxBytes: Math.min(maxOutputArg(args), options?.toolResultMaxBytes ?? 50_000) - 4096,
+		images: [],
 	};
 	if (options?.signal !== undefined) validateOptions.signal = options.signal;
 
@@ -131,7 +139,7 @@ export async function runFrontendCheck(
 			details,
 		};
 	}
-	return { kind: "ok", output, details };
+	return { kind: "ok", output, details, ...(validateOptions.images?.length ? { images: validateOptions.images } : {}) };
 }
 
 async function validateArtifact(
@@ -553,6 +561,7 @@ async function validateBrowserLoad(
 	// A DOM dump duplicates the complete artifact on stdout. Large, otherwise
 	// valid pages then trip the diagnostic output cap. A private screenshot
 	// proves that the browser rendered without charging page bytes to that cap.
+	// Vision-capable routes retain bounded pixels before the scratch cleanup.
 	const dir = mkdtempSync(path.join(tmpdir(), "clio-coder-browser-check-"));
 	const screenshot = path.join(dir, "loaded.png");
 	try {
@@ -582,6 +591,16 @@ async function validateBrowserLoad(
 		} else if (!existsSync(screenshot) || !statSync(screenshot).isFile() || statSync(screenshot).size === 0) {
 			failure = "headless browser exited without a rendered screenshot";
 		} else {
+			if (options.supportsImages) {
+				const image = await prepareBoundedImage(readFileSync(screenshot), options.imageMaxBytes ?? 0);
+				if (image) options.images?.push(image);
+				else
+					checks.push({
+						name: "browser image",
+						status: "warn",
+						message: "Screenshot omitted: could not encode within the tool result byte cap.",
+					});
+			}
 			checks.push({
 				name: "browser load",
 				status: "pass",

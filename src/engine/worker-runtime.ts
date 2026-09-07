@@ -609,6 +609,7 @@ export function startWorkerRun(input: WorkerRunInput, emit: WorkerEventEmit): Wo
 		invokeOptions: () => ({
 			correlationId: `worker-model-round-${workerModelRound}`,
 			toolResultMaxBytes: workerSettings.context.toolResultMaxBytes,
+			supportsImages: model.input.includes("image"),
 			...(agentSkillPolicy ? { pendingSkillPolicy: agentSkillPolicy } : {}),
 		}),
 	});

@@ -1,3 +1,4 @@
+import { INJECTION_SCREEN_RULE } from "./injection-screen.js";
 import type { MiddlewareRuleDefinition } from "./runtime.js";
 import { STALLED_TURN_RULE_DEFINITION } from "./stalled-turn.js";
 import type { MiddlewareRule } from "./types.js";
@@ -8,7 +9,10 @@ import type { MiddlewareRule } from "./types.js";
  * channel delivers the declarative half to workers, which resolve payloads
  * from this table by rule id.
  */
-const BUILTIN_MIDDLEWARE_RULE_DEFINITIONS: ReadonlyArray<MiddlewareRuleDefinition> = [STALLED_TURN_RULE_DEFINITION];
+const BUILTIN_MIDDLEWARE_RULE_DEFINITIONS: ReadonlyArray<MiddlewareRuleDefinition> = [
+	STALLED_TURN_RULE_DEFINITION,
+	INJECTION_SCREEN_RULE,
+];
 
 export const BUILTIN_MIDDLEWARE_RULE_IDS = BUILTIN_MIDDLEWARE_RULE_DEFINITIONS.map((definition) => definition.rule.id);
 

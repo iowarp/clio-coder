@@ -272,10 +272,10 @@ export async function runSkillsEvalCommand(nameOrPath: string, options: SkillsEv
 	return anyUnmeasured || evidenceErrors.length > 0 ? 3 : 0;
 }
 
-export type NetworkPolicyLabel = "hermetic" | "allowed";
+export type NetworkPolicyLabel = "retrieve-disabled" | "allowed";
 
 function networkPolicyLabel(allowNetwork: boolean): NetworkPolicyLabel {
-	return allowNetwork ? "allowed" : "hermetic";
+	return allowNetwork ? "allowed" : "retrieve-disabled";
 }
 
 /**
@@ -287,7 +287,7 @@ function networkPolicyLabel(allowNetwork: boolean): NetworkPolicyLabel {
 function describeArmPolicy(allowNetwork: boolean): string {
 	const network = allowNetwork
 		? "network allowed (--allow-network), so arm runs keep the web tools"
-		: "network hermetic, so the web tools are stripped from every arm run (pass --allow-network to keep them)";
+		: "retrieval tools disabled in every arm run; bash networking requires OS isolation (pass --allow-network to keep web tools)";
 	return `policy: autonomy ${ARM_AUTONOMY} for the baseline and treatment arms in per-run disposable workspaces; ${network}`;
 }
 
@@ -295,7 +295,7 @@ function describeArmPolicy(allowNetwork: boolean): string {
 function describeArmPolicyOutcome(allowNetwork: boolean): string {
 	const network = allowNetwork
 		? "network: allowed (--allow-network); arm runs kept the web tools"
-		: "network: hermetic; the web tools were stripped from every arm run";
+		: "retrieval: disabled; bash networking was not constrained";
 	return `policy: the baseline and treatment arms ran at autonomy ${ARM_AUTONOMY}; ${network}`;
 }
 
@@ -353,17 +353,19 @@ function unmeasuredBullets(scenario: SkillEvalScenario, reason: string): ScoredB
 
 /**
  * The environment each arm's child `clio-coder run` inherits. Absent
- * `--allow-network` the hermetic switch is set, which strips the RETRIEVE
+ * `--allow-network` the retrieval registration switch is set, which strips the RETRIEVE
  * plane from every registry the child and its descendants build. With the flag
  * the variable is removed rather than left alone, so an ambient setting in the
  * operator's shell cannot make `--allow-network` a claim the run does not keep.
  *
  * @internal Exported for contract tests.
  */
-function evalChildEnv(allowNetwork: boolean, env: NodeJS.ProcessEnv = process.env): NodeJS.ProcessEnv {
+export function evalChildEnv(allowNetwork: boolean, env: NodeJS.ProcessEnv = process.env): NodeJS.ProcessEnv {
 	const childEnv: NodeJS.ProcessEnv = { ...env };
-	if (allowNetwork) Reflect.deleteProperty(childEnv, NO_NETWORK_TOOLS_ENV);
-	else childEnv[NO_NETWORK_TOOLS_ENV] = "1";
+	if (allowNetwork) {
+		Reflect.deleteProperty(childEnv, NO_NETWORK_TOOLS_ENV);
+		Reflect.deleteProperty(childEnv, "CLIO_CODER_NO_NETWORK_TOOLS");
+	} else childEnv[NO_NETWORK_TOOLS_ENV] = "1";
 	return childEnv;
 }
 

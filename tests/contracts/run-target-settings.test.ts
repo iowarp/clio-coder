@@ -4,6 +4,7 @@ import { join } from "node:path";
 import { test } from "node:test";
 import { explicitTargetMissing } from "../../src/cli/run.js";
 import { settingsPath } from "../../src/core/config.js";
+import { captureProjectSurface, recordProjectSurfaceTrust } from "../../src/core/workspace-trust.js";
 import { isolateClioEnv } from "../harness/scratch-env.js";
 
 test("explicit run target uses project layers and leaves malformed user settings to the strict boot gate", async () => {
@@ -20,6 +21,8 @@ test("explicit run target uses project layers and leaves malformed user settings
 			join(repo, ".clio-coder", "settings.local.yaml"),
 			"version: 2\ntargets:\n  - id: project-route\n    runtime: openai-compat\n    url: http://127.0.0.1:1/v1\n    defaultModel: fixture\n",
 		);
+		const trustedSettings = captureProjectSurface(repo, "settings");
+		recordProjectSurfaceTrust(repo, "settings", trustedSettings.contentHash as string);
 		strictEqual(explicitTargetMissing("project-route"), false);
 		strictEqual(explicitTargetMissing("typo-route"), true);
 		writeFileSync(settingsPath(), "version: [unterminated\n");

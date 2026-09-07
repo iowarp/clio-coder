@@ -1,7 +1,9 @@
-import { mkdtemp, rm, writeFile } from "node:fs/promises";
+import { constants } from "node:fs";
+import { lstat, mkdir, mkdtemp, open, readdir, realpath, rm, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
-import { resolve } from "node:path";
+import { isAbsolute, relative, resolve, sep } from "node:path";
 import { namingCompatibilityEnvironment } from "../../../core/naming-compat.js";
+import { clioDataDir } from "../../../core/xdg.js";
 import { resolveMetricAssertion } from "../compare/thresholds.js";
 import { buildEvalExecutionEnvelopeV1, type EvalExecutionObservationV1 } from "../execution-provenance.js";
 import { aggregateEvalVerdicts } from "../metrics/aggregate.js";
@@ -44,7 +46,8 @@ import type { EvalMetricAssertion, EvalSuiteTargetV2, LoadedEvalSuiteV2 } from "
 import { createEvalId } from "../store.js";
 import { runCommandVerifiers } from "../verifiers/command.js";
 import { forbiddenPathHits } from "../verifiers/file-exists.js";
-import { collectPatchMetrics } from "../verifiers/patch.js";
+import { EvalGraderIntegrityError, protectGraderFiles } from "../verifiers/integrity.js";
+import { collectPatchMetrics, forgetPatchBaseline, recordPatchBaseline } from "../verifiers/patch.js";
 import { prepareGitWorkspace } from "../workspaces/git.js";
 import { type PreparedEvalWorkspace, prepareLocalWorkspace } from "../workspaces/local.js";
 import { type PrepareTempCopyWorkspaceOptions, prepareTempCopyWorkspace } from "../workspaces/temp-copy.js";
@@ -99,6 +102,7 @@ export async function runEvalSuiteV2(
 			options.clioEntry,
 			options.freshWorkspaces === true,
 			options.tempCopy,
+			resolve(clioDataDir(), "evals", evalId, "transcripts", String(results.length)),
 		);
 		spentUsd += resultCostUsd(completed.result);
 		results.push(completed.result);
@@ -154,10 +158,13 @@ async function runMatrixItem(
 	clioEntry: string,
 	freshWorkspace: boolean,
 	tempCopy: PrepareTempCopyWorkspaceOptions | undefined,
+	transcriptDir: string,
 ): Promise<CompletedMatrixItem> {
 	let workspace: PreparedEvalWorkspace | null = null;
 	let receipt: EvalRunnerOutput["receipt"] = null;
 	let runnerWallTimeMs = 0;
+	let runnerEvidence: EvalRunnerOutput | null = null;
+	let retention: Promise<RetainedSessionLedgers> | undefined;
 	let executionObservation: EvalExecutionObservationV1 | undefined;
 	// One matrix item, one Clio journal. An item measures Clio, and a shared
 	// state directory would mix sibling processes' runs and yesterday's sessions
@@ -170,20 +177,24 @@ async function runMatrixItem(
 		// A fixture that never came up measured nothing, so the item fails as a
 		// harness failure rather than reporting an invariant it never observed.
 		if (!setup.pass) throw new EvalWorkspaceSetupError(setup.exitCode, setup.stderr);
+		if (task.workspace.kind !== "local" || freshWorkspace) recordPatchBaseline(workspace.dir);
+		const checkGraderIntegrity = await protectGraderFiles(workspace.dir, task.verify.protectedFiles ?? []);
 		const runner = await runTaskRunner(task, target, workspace.dir, clioEntry, {
 			CLIO_CODER_STATE_DIR: stateDir,
 			CLIO_CODER_ENTRY: clioEntry,
 		});
-		const runnerStdoutFile = resolve(stateDir, "eval-runner-output.jsonl");
-		await writeFile(runnerStdoutFile, runner.stdout, "utf8");
+		runnerEvidence = runner;
 		receipt = runner.receipt ?? null;
 		runnerWallTimeMs = runner.wallTimeMs;
+		const runnerStdoutFile = resolve(stateDir, "eval-runner-output.jsonl");
+		await writeFile(runnerStdoutFile, runner.stdout, { encoding: "utf8", mode: 0o600, flag: "wx" });
 		const patch = collectPatchMetrics(workspace.dir);
 		const receiptExitCode = runner.exitCode;
 		// Read after the runner returned and before the journal is removed: what
 		// Clio sealed for this item, judged against its own ledger, and whether
 		// the workers it attested are still running.
 		const journalMetrics = invariantMetrics(stateDir, receiptExitCode);
+		await checkGraderIntegrity();
 		const measurement = await measureTaskOutcome(task, workspace.dir, {
 			...namingCompatibilityEnvironment(
 				"CLIO_CODER_EVAL_RUNNER_STDOUT_FILE",
@@ -202,14 +213,20 @@ async function runMatrixItem(
 			// The one reading that needs both sides: what the loop reported it
 			// spent, and what the journal shows it sealed.
 			...fleetLoopReceiptAgreement(runner.metrics as Record<string, number | boolean>, journalMetrics),
-			"patch.bytes": patch.bytes,
-			"patch.filesChanged": patch.filesChanged,
-			"patch.testFilesModified": patch.testFilesModified,
+			...(patch === null
+				? {}
+				: {
+						"patch.bytes": patch.bytes,
+						"patch.filesChanged": patch.filesChanged,
+						"patch.testFilesModified": patch.testFilesModified,
+					}),
 			"result.pass": runner.exitCode === 0,
 			"result.failureClass": runner.exitCode === 0 ? null : "runner_failed",
 			...measurement.metrics,
 		};
+		await checkGraderIntegrity();
 		const verifier = await runVerifiers(task, workspace.dir, metrics);
+		await checkGraderIntegrity();
 		const graderFailed = metrics["task.solved"] === false;
 		const pass = runner.exitCode === 0 && verifier.pass && !graderFailed;
 		const failureClass = pass
@@ -238,7 +255,10 @@ async function runMatrixItem(
 				...(verifier.stderr.length > 0 ? { verifierStderr: verifier.stderr } : {}),
 			},
 		};
-		const snapshot = await readEvalLedgerSnapshot(stateDir);
+		retention ??= retainSessionLedgers(stateDir, transcriptDir, runnerEvidence?.stdout);
+		const retained = await retention;
+		applyRetainedSessionLedgers(result, retained);
+		const snapshot = retained.errors.length > 0 ? emptyLedgerSnapshot() : await readEvalLedgerSnapshot(stateDir);
 		const selected = selectEvalLedgerEntries(snapshot.entries, runner.ledgerEntries ?? []);
 		result.artifacts.trackedMetricSources = JSON.stringify({
 			assistantCalls: selected.source,
@@ -271,10 +291,15 @@ async function runMatrixItem(
 			serving: evalServingObservationFrom(target, receipt ?? null, snapshot.compiledPromptHashes),
 		};
 	} catch (error) {
-		const failureClass = error instanceof EvalWorkspaceSetupError ? "setup_failed" : "command_error";
+		const failureClass =
+			error instanceof EvalGraderIntegrityError
+				? "grader_integrity"
+				: error instanceof EvalWorkspaceSetupError
+					? "setup_failed"
+					: "command_error";
 		const result: EvalArtifactResultV4 = {
-			assignmentId: null,
-			terminalReceiptDigest: null,
+			assignmentId: runnerEvidence?.assignmentId ?? null,
+			terminalReceiptDigest: runnerEvidence?.terminalReceiptDigest ?? null,
 			taskId: task.id,
 			repeatIndex,
 			target: { id: target.id, model: target.model ?? null, thinking: target.thinking ?? null },
@@ -287,11 +312,15 @@ async function runMatrixItem(
 				"latency.wallMs": 0,
 			},
 			artifacts: {
+				...runnerEvidence?.artifacts,
 				error: error instanceof Error ? error.message : String(error),
 				...(workspace === null ? {} : { workspace: workspace.dir }),
 			},
 		};
-		const snapshot = await readEvalLedgerSnapshot(stateDir);
+		retention ??= retainSessionLedgers(stateDir, transcriptDir, runnerEvidence?.stdout);
+		const retained = await retention;
+		applyRetainedSessionLedgers(result, retained);
+		const snapshot = retained.errors.length > 0 ? emptyLedgerSnapshot() : await readEvalLedgerSnapshot(stateDir);
 		result.verdict = adaptSuiteV2ResultToVerdictV1(
 			result,
 			buildEvalTrackedMetrics({
@@ -316,6 +345,7 @@ async function runMatrixItem(
 		};
 	} finally {
 		try {
+			if (workspace !== null) forgetPatchBaseline(workspace.dir);
 			await workspace?.cleanup();
 		} finally {
 			// A workspace cleanup error must not strand the suite-owned journal.
@@ -574,4 +604,150 @@ function nullableNonNegativeInteger(value: unknown): number | null {
 
 function stringArray(value: unknown): string[] {
 	return Array.isArray(value) ? value.filter((entry): entry is string => typeof entry === "string") : [];
+}
+
+interface RetainedSessionLedgers {
+	runnerStdoutPath?: string;
+	paths: string[];
+	errors: string[];
+}
+
+function applyRetainedSessionLedgers(result: EvalArtifactResultV4, retained: RetainedSessionLedgers): void {
+	if (retained.runnerStdoutPath !== undefined) result.artifacts.runnerStdoutFile = retained.runnerStdoutPath;
+	if (retained.paths.length > 0 || retained.errors.length > 0) result.artifacts.sessionLedgers = retained.paths;
+	if (retained.errors.length === 0) return;
+	result.artifacts.sessionLedgerErrors = retained.errors;
+	result.metrics["evidence.retentionComplete"] = false;
+	// Keep a runner/integrity failure as the primary cause; an otherwise healthy
+	// task outcome cannot claim successful grading with unsafe or missing evidence.
+	if (result.pass || result.failureClass === "grader_failed") {
+		result.artifacts.outcomeBeforeEvidenceFailure = result.failureClass ?? "pass";
+		result.pass = false;
+		result.failureClass = "evidence_integrity";
+		result.metrics["result.pass"] = false;
+		result.metrics["result.failureClass"] = "evidence_integrity";
+	}
+}
+
+/** Reject symlinks at every component inside the owned source directory. */
+async function plainLedgerPath(root: string, path: string): Promise<void> {
+	const rel = relative(root, path);
+	if (isAbsolute(rel) || rel === ".." || rel.startsWith(`..${sep}`)) throw new Error("unsafe ledger path");
+	let current = root;
+	for (const part of ["", ...rel.split(sep)]) {
+		current = resolve(current, part);
+		if ((await lstat(current)).isSymbolicLink()) throw new Error("unsafe ledger symlink");
+	}
+}
+
+async function readOwnedLedger(root: string, path: string): Promise<Buffer> {
+	await plainLedgerPath(root, path);
+	const before = await lstat(path);
+	if (!before.isFile()) throw new Error("ledger is not a regular file");
+	const file = await open(path, constants.O_RDONLY | constants.O_NOFOLLOW);
+	try {
+		const opened = await file.stat();
+		await plainLedgerPath(root, path);
+		if (opened.dev !== before.dev || opened.ino !== before.ino) throw new Error("ledger changed while opening");
+		return await file.readFile();
+	} finally {
+		await file.close();
+	}
+}
+
+/** Create a private, unique capture below the operator's artifact root. */
+async function transcriptCaptureDirectory(destination: string): Promise<string> {
+	const base = clioDataDir();
+	await mkdir(base, { recursive: true, mode: 0o700 });
+	let current = await realpath(base);
+	const rel = relative(base, destination);
+	if (isAbsolute(rel) || rel === ".." || rel.startsWith(`..${sep}`)) throw new Error("unsafe transcript destination");
+	for (const part of rel.split(sep)) {
+		current = resolve(current, part);
+		try {
+			await mkdir(current, { mode: 0o700 });
+		} catch (error) {
+			if ((error as NodeJS.ErrnoException).code !== "EEXIST") throw error;
+		}
+		const info = await lstat(current);
+		if (info.isSymbolicLink() || !info.isDirectory()) throw new Error("unsafe transcript destination");
+	}
+	return mkdtemp(resolve(current, "capture-"));
+}
+
+/** Enumerate only ordinary directories; never traverse a runner-created alias. */
+async function discoverOwnedLedgers(stateDir: string, errors: string[]): Promise<string[]> {
+	const root = resolve(stateDir, "sessions");
+	try {
+		await plainLedgerPath(stateDir, root);
+	} catch (error) {
+		if ((error as NodeJS.ErrnoException).code === "ENOENT") return [];
+		throw error;
+	}
+	const paths: string[] = [];
+	for (const cwd of await readdir(root, { withFileTypes: true })) {
+		if (cwd.isSymbolicLink()) {
+			errors.push("session directory rejected: symlink");
+			continue;
+		}
+		if (!cwd.isDirectory()) continue;
+		const cwdPath = resolve(root, cwd.name);
+		try {
+			await plainLedgerPath(stateDir, cwdPath);
+			for (const session of await readdir(cwdPath, { withFileTypes: true })) {
+				if (session.isSymbolicLink()) {
+					errors.push("session directory rejected: symlink");
+					continue;
+				}
+				if (session.isDirectory()) paths.push(resolve(cwdPath, session.name, "current.jsonl"));
+			}
+		} catch {
+			errors.push("session directory unreadable or unsafe");
+		}
+	}
+	return paths.sort();
+}
+
+/** Best-effort evidence collection never throws into (or retries) the failure path. */
+async function retainSessionLedgers(
+	stateDir: string,
+	destination: string,
+	runnerStdout?: string,
+): Promise<RetainedSessionLedgers> {
+	const retained: RetainedSessionLedgers = { paths: [], errors: [] };
+	try {
+		const refs = await discoverOwnedLedgers(stateDir, retained.errors);
+		if (refs.length === 0 && !runnerStdout) return retained;
+		const directory = await transcriptCaptureDirectory(destination);
+		if (runnerStdout) {
+			const path = resolve(directory, "runner-stdout.jsonl");
+			await writeFile(path, runnerStdout, { mode: 0o600, flag: "wx" });
+			retained.runnerStdoutPath = path;
+		}
+		for (const [index, pathToLedger] of refs.entries()) {
+			try {
+				let content: Buffer;
+				try {
+					content = await readOwnedLedger(stateDir, pathToLedger);
+				} catch (error) {
+					if ((error as NodeJS.ErrnoException).code !== "ENOENT") throw error;
+					content = await readOwnedLedger(stateDir, `${pathToLedger}.tmp`);
+					retained.errors.push(`ledger ${index}: incomplete current ledger; temporary evidence retained`);
+				}
+				const path = resolve(directory, `${index}.jsonl`);
+				await writeFile(path, content, { mode: 0o600, flag: "wx" });
+				retained.paths.push(path);
+			} catch (error) {
+				// Error codes describe missing/unreadable/unsafe evidence without echoing
+				// runner-controlled paths or external file contents into the artifact.
+				const code = (error as NodeJS.ErrnoException).code;
+				retained.errors.push(
+					`ledger ${index}: retention failed (${code === "ENOENT" ? "missing" : "unsafe or unreadable"})`,
+				);
+			}
+		}
+	} catch {
+		retained.errors.push("session ledger retention failed: artifact storage unavailable or unsafe");
+	}
+	return retained;
 }

@@ -32,6 +32,8 @@ export interface RouteQualityReduction {
 }
 
 export interface RouteQualityReceiptSource {
+	/** Logical assignment from trusted lifecycle/history; older callers fall back to receipt ancestry. */
+	assignmentId?: string;
 	receipt: RunReceipt;
 	envelope: RunEnvelope;
 }
@@ -210,7 +212,10 @@ export function reduceRouteQuality(input: ReduceRouteQualityInput): RouteQuality
 	for (const source of input.evalArtifacts ?? []) {
 		if (source.artifact.version !== 4 || !/^[0-9a-f]{64}$/u.test(source.digest)) continue;
 		for (const result of source.artifact.results) {
-			if (result.assignmentId !== evalAssignmentId(subject) || result.terminalReceiptDigest !== subject.integrity.digest)
+			if (
+				result.assignmentId !== (input.subject.assignmentId ?? evalAssignmentId(subject)) ||
+				result.terminalReceiptDigest !== subject.integrity.digest
+			)
 				continue;
 			sourceDigests.add(source.digest);
 			checks.push({ kind: "evaluation", sourceDigest: source.digest, passed: result.pass });

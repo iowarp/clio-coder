@@ -34,6 +34,7 @@ import {
 } from "../domains/middleware/index.js";
 import { selectProjectPreload } from "../domains/prompts/preload.js";
 import { defaultScopedResourceRoots } from "../domains/resources/common-loader.js";
+import { createSafetyPolicyEngine } from "../domains/safety/policy-engine.js";
 import { ceilChars } from "../domains/session/context-accounting.js";
 import { capturedHookSourcesFor } from "../entry/extension-hook-sources.js";
 
@@ -371,6 +372,18 @@ function inspectResourceRoots(cwd: string, graph: CustomizationGraph): void {
 function inspectSafetyAndMemory(cwd: string, graph: CustomizationGraph): void {
 	try {
 		const layered = readLayeredSettings(cwd);
+		const metadata = createSafetyPolicyEngine({ cwd }).metadata();
+		graph.entries.push({
+			category: "safety",
+			id: "safety.policy",
+			scope: "effective",
+			reloadClass: "next-turn",
+			trust: metadata.workspaceTrustVerdict === "trusted" ? "trusted" : "untrusted",
+			precedence: "single",
+			...(metadata.projectPolicyPath === null ? {} : { sourcePath: metadata.projectPolicyPath }),
+			detail: { ...metadata },
+		});
+
 		graph.entries.push({
 			category: "safety",
 			id: "safety.autonomy",

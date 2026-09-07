@@ -6,6 +6,7 @@ import {
 	reportCommitAttributionDiagnostic,
 	withManagedGitCommitAttributionEnvironment,
 } from "../../core/git-commit-attribution.js";
+import { buildSafeToolEnv } from "../../core/safe-exec.js";
 import { MAX_TIMER_DELAY_MS } from "../../core/timers.js";
 import {
 	ACP_INTERNAL_ERROR_MESSAGE,
@@ -207,7 +208,7 @@ class StdioJsonRpcTransport implements AcpJsonRpcTransport {
 		this.childClosePromise = new Promise((resolve) => {
 			this.resolveChildClose = resolve;
 		});
-		const childEnvironment = options.env ? { ...process.env, ...options.env } : process.env;
+		const childEnvironment = buildSafeToolEnv(options.env);
 		// A delegated external harness authors its own commits. Clio only
 		// assisted by delegating, so no Co-authored-by is claimed for it.
 		const attribution = withManagedGitCommitAttributionEnvironment(childEnvironment, {

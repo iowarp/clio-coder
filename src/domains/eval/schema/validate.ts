@@ -247,6 +247,7 @@ function readVerify(
 	return {
 		commands: readOptionalStringArray(value, "commands", `${path}.commands`, issues),
 		measure: readOptionalStringArray(value, "measure", `${path}.measure`, issues),
+		protectedFiles: readOptionalStringArray(value, "protectedFiles", `${path}.protectedFiles`, issues),
 		assertions: readAssertions(value.assertions, `${path}.assertions`, issues),
 		forbidPaths: readOptionalStringArray(value, "forbidPaths", `${path}.forbidPaths`, issues),
 	};

@@ -2,6 +2,7 @@ import { join } from "node:path";
 import { resolvePackageRoot } from "../../core/package-root.js";
 import { normalizePromptHint } from "../../core/prompt-hint.js";
 import type { ToolName } from "../../core/tool-names.js";
+import { TOOL_RESULT_TRUST_CONTRACT } from "../../core/untrusted-content.js";
 import { resolveClioDirs } from "../../core/xdg.js";
 import type { AutonomyLevel } from "../safety/autonomy.js";
 import { ceilChars } from "../session/context-accounting.js";
@@ -284,6 +285,7 @@ function renderToolContractBlock(inputs: SessionPromptInputs): string {
 	if (inputs.providerSupportsTools === false) {
 		return [
 			"# Tool Contract",
+			TOOL_RESULT_TRUST_CONTRACT,
 			"Provider tool calls: unavailable.",
 			"This target cannot call tools; answer from the visible user request and compact context only.",
 		].join("\n");
@@ -315,6 +317,7 @@ function renderToolContractBlock(inputs: SessionPromptInputs): string {
 	const validationTools = ["verify", "git"].filter((name) => admitted.has(name));
 	const lines = [
 		"# Tool Contract",
+		TOOL_RESULT_TRUST_CONTRACT,
 		"The attached schemas are the session's complete direct-tool surface; follow each schema exactly.",
 		...(names.length > 0 ? [`Direct tools: ${names.map((name) => `\`${name}\``).join(", ")}.`] : []),
 		`Harness model: ${capabilityKinds.join("; ")}. Keep these capability sets distinct.`,
@@ -379,6 +382,7 @@ function renderWorkerToolContractBlock(inputs: WorkerPromptInputs): string {
 	if (inputs.providerSupportsTools === false) {
 		return [
 			"# Tool Contract",
+			TOOL_RESULT_TRUST_CONTRACT,
 			"Canonical Clio tool calls are unavailable on this target.",
 			"Answer from the assigned task and dynamic messages only; do not claim that inspection or changes were performed.",
 		].join("\n");
@@ -386,6 +390,7 @@ function renderWorkerToolContractBlock(inputs: WorkerPromptInputs): string {
 	if (inputs.providerSupportsTools === null) {
 		return [
 			"# Tool Contract",
+			TOOL_RESULT_TRUST_CONTRACT,
 			"This delegated target's tool inventory is unknown to the Clio harness.",
 			"Use only tools the target actually exposes and only when the assigned task requires them; do not infer a complete tool surface from this prompt.",
 		].join("\n");
@@ -395,6 +400,7 @@ function renderWorkerToolContractBlock(inputs: WorkerPromptInputs): string {
 	if (names.length === 0) {
 		return [
 			"# Tool Contract",
+			TOOL_RESULT_TRUST_CONTRACT,
 			"No canonical tools are admitted for this worker.",
 			"Answer the assigned task directly without tool calls.",
 		].join("\n");
@@ -402,6 +408,7 @@ function renderWorkerToolContractBlock(inputs: WorkerPromptInputs): string {
 
 	const lines = [
 		"# Tool Contract",
+		TOOL_RESULT_TRUST_CONTRACT,
 		"The attached schemas are this worker's complete canonical tool surface; follow each schema exactly.",
 		`Admitted canonical tools: ${names.map((name) => `\`${name}\``).join(", ")}.`,
 		"This worker surface is distinct from the parent session's tools, fleet agents, and operator-activated skills.",

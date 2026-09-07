@@ -44,6 +44,7 @@ export type {
  * by the entry turnId (`ref.entry`); `fold.ts` owns `refKey` / `parseRefKey`.
  */
 export interface EvictedState {
+	alias?: string;
 	reason: EvictionReason;
 	marker: string;
 	by?: string;
@@ -61,6 +62,8 @@ export interface EvictedState {
  * one ref are the churn signal.
  */
 export interface WorkingSetView {
+	/** Highest allocated alias across all branches, preventing reuse after a tree switch. */
+	recallAliasSequence?: number;
 	evicted: ReadonlyMap<string, EvictedState>;
 	/** Applied eviction events on the active path. */
 	evictionEvents: number;

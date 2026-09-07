@@ -1,6 +1,7 @@
 import { createHash } from "node:crypto";
 import { mkdirSync, readdirSync, rmdirSync, rmSync, statSync, writeFileSync } from "node:fs";
 import { isAbsolute, join, relative, resolve } from "node:path";
+import { INSTRUCTION_SHAPED_WARNING } from "../core/untrusted-content.js";
 import { clioStateDir } from "../core/xdg.js";
 import type { ToolInvokeOptions, ToolResult, ToolResultDetails, ToolSpec } from "./registry.js";
 import {
@@ -24,7 +25,10 @@ const RESULT_OFFLOAD_MAX_BYTES = 10 * 1024 * 1024;
 const TAIL_NOTICE_RESERVE_BYTES = 512;
 export const TOOL_OFFLOAD_MAX_AGE_MS = 14 * 24 * 60 * 60 * 1000;
 
-type ToolResultShapeContext = Pick<ToolInvokeOptions, "sessionId" | "toolCallId" | "toolResultMaxBytes">;
+type ToolResultShapeContext = Pick<
+	ToolInvokeOptions,
+	"sessionId" | "toolCallId" | "toolResultMaxBytes" | "supportsImages"
+>;
 
 function mergeDetails(details: ToolResultDetails | undefined, resultSize: Record<string, unknown>): ToolResultDetails {
 	return { ...(details ?? {}), resultSize };
@@ -419,7 +423,7 @@ function withOffloadMetadata(
  * Apply legacy shaping or one declared canonical disposition. Registry calls
  * this once, after middleware annotations have produced the terminal result.
  */
-export function shapeToolResult(
+function shapeTextToolResultBody(
 	spec: ToolSpec,
 	result: ToolResult,
 	context?: ToolResultShapeContext,
@@ -517,5 +521,109 @@ export function shapeToolResult(
 		...displayed,
 		details: { ...(displayed.details ?? {}), resultDisposition: metadata },
 		modelContext: projection.text,
+	};
+}
+
+/** Keep the harness warning visible even when the chosen projection omits the source body. */
+function shapeTextToolResult(
+	spec: ToolSpec,
+	result: ToolResult,
+	context?: ToolResultShapeContext,
+	requestedDisposition?: ToolResultDisposition,
+): ToolResult {
+	const shaped = shapeTextToolResultBody(spec, result, context, requestedDisposition);
+	const warning = `[middleware:warn] ${INSTRUCTION_SHAPED_WARNING}`;
+	if (!resultText(result).includes(warning)) return shaped;
+	const hardMaxBytes = maxBytesFor(spec, context);
+	const disposition = normalizeToolResultDisposition(spec, hardMaxBytes, requestedDisposition);
+	const preserve = (text: string, cap: number, tail: boolean): string => {
+		if (text.startsWith(warning) && byteLength(text) <= cap) return text;
+		const prefix = `${warning}\n\n`;
+		const remainder = text.split(warning).join("").trimStart();
+		const allowance = Math.max(0, cap - byteLength(prefix));
+		if (allowance === 0) return truncateUtf8(warning, cap, "");
+		const body = tail
+			? truncateTail(remainder, { maxBytes: allowance, maxLines: Number.MAX_SAFE_INTEGER }).content
+			: truncateUtf8(remainder, allowance, "");
+		return prefix + body;
+	};
+	const output = preserve(
+		resultText(shaped),
+		Math.min(hardMaxBytes, disposition?.presentation.maxBytes ?? hardMaxBytes),
+		disposition?.presentation.overflow === "tail",
+	);
+	const modelContext =
+		shaped.modelContext === undefined
+			? undefined
+			: preserve(
+					shaped.modelContext,
+					Math.min(hardMaxBytes, disposition?.context.maxBytes ?? hardMaxBytes),
+					disposition?.context.mode === "bounded" && disposition.context.excerpt === "tail",
+				);
+	const previous = existingDisposition(shaped.details);
+	const details = { ...shaped.details };
+	if (previous !== null)
+		details.resultDisposition = {
+			...previous,
+			presentation: { ...previous.presentation, content: output },
+			displayedBytes: byteLength(output),
+			contextBytes: byteLength(modelContext ?? output),
+			presentationTruncated: previous.presentationTruncated || byteLength(resultText(shaped)) > byteLength(output),
+			contextTruncated:
+				previous.contextTruncated || byteLength(shaped.modelContext ?? "") > byteLength(modelContext ?? ""),
+		};
+	const size = detailsRecord(shaped.details, "resultSize");
+	if (size !== null) details.resultSize = { ...size, shownBytes: byteLength(output) };
+	return {
+		...shaped,
+		...(shaped.kind === "ok" ? { output } : { message: output }),
+		...(modelContext === undefined ? {} : { modelContext }),
+		details,
+	};
+}
+
+/** Image bytes share the same payload cap as text, including after annotation. */
+export function shapeToolResult(
+	spec: ToolSpec,
+	result: ToolResult,
+	context?: ToolResultShapeContext,
+	requestedDisposition?: ToolResultDisposition,
+): ToolResult {
+	if (result.kind !== "ok" || !result.images?.length)
+		return shapeTextToolResult(spec, result, context, requestedDisposition);
+	const hardMaxBytes = maxBytesFor(spec, context);
+	const disposition = normalizeToolResultDisposition(spec, hardMaxBytes, requestedDisposition);
+	const maxBytes = Math.min(hardMaxBytes, disposition?.context.maxBytes ?? hardMaxBytes);
+	const images: NonNullable<typeof result.images> = [];
+	let imageBytes = 0;
+	for (const image of result.images) {
+		const bytes = byteLength(image.data);
+		if (
+			context?.supportsImages === true &&
+			disposition?.context.mode !== "metadata-only" &&
+			bytes + imageBytes < maxBytes - 512
+		) {
+			images.push(image);
+			imageBytes += bytes;
+		}
+	}
+	const omitted = result.images.length - images.length;
+	const notice =
+		omitted > 0 ? `[${omitted} image(s) omitted: model capability, context policy, or tool result byte cap.]\n` : "";
+	const remaining = Math.max(1, maxBytes - imageBytes);
+	const shaped = shapeTextToolResult(
+		spec,
+		{ ...result, output: notice + result.output, images },
+		{ ...context, toolResultMaxBytes: remaining },
+		requestedDisposition,
+	);
+	if (shaped.kind !== "ok") return shaped;
+	// Legacy truncation notices may extend beyond their text allowance; the image
+	// envelope has a strict combined cap, so bound the final projections too.
+	return {
+		...shaped,
+		images,
+		output: truncateUtf8(shaped.output, remaining, ""),
+		...(shaped.modelContext === undefined ? {} : { modelContext: truncateUtf8(shaped.modelContext, remaining, "") }),
 	};
 }

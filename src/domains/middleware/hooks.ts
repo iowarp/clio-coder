@@ -397,6 +397,8 @@ export interface UserHookRegistrationDeps {
 	/** Synchronous command runner. Injected so tests need no real subprocess. */
 	runCommand: UserHookCommandRunner;
 	now?: () => number;
+	/** Published project hooks stop executing after their approved surface changes or is revoked. */
+	isTrusted?: () => boolean;
 }
 
 function reminderEffect(message: string, severity: MiddlewareReminderSeverity): MiddlewareEffect {
@@ -441,6 +443,10 @@ export function userHookToRegistration(
 		evaluate: (input) => {
 			if (!hook.enabled) return [];
 			try {
+				if (deps.isTrusted?.() === false) {
+					deps.recordReceipt({ ...baseReceipt(input), outcome: "skipped" });
+					return [];
+				}
 				return evaluateHook(hook, deps, baseReceipt(input));
 			} catch {
 				// A hook must never throw into a turn; report a skipped receipt.

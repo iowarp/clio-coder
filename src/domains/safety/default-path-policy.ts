@@ -125,3 +125,14 @@ export function mergePathPolicyInputs(base: PathPolicyInput, override: PathPolic
 		noDeletePaths: [...(base.noDeletePaths ?? []), ...(override.noDeletePaths ?? [])],
 	};
 }
+
+/** Operator and host authority survives every project-local exemption. */
+export const OPERATOR_PATH_POLICY: PathPolicyInput = {
+	zeroAccessPaths: DEFAULT_DAMAGE_CONTROL_PATH_POLICY.zeroAccessPaths?.filter((entry) => entry.startsWith("~/")) ?? [],
+	readOnlyPaths:
+		DEFAULT_DAMAGE_CONTROL_PATH_POLICY.readOnlyPaths?.filter(
+			(entry) => entry.startsWith("~/") || entry.startsWith("/") || entry.startsWith(".clio-coder/"),
+		) ?? [],
+	noWritePaths: DEFAULT_DAMAGE_CONTROL_PATH_POLICY.noWritePaths ?? [],
+	noDeletePaths: DEFAULT_DAMAGE_CONTROL_PATH_POLICY.noDeletePaths?.filter((entry) => entry.startsWith("~/")) ?? [],
+};

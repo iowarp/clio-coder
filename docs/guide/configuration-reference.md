@@ -191,6 +191,7 @@ Read from the process environment at boot unless the row says otherwise.
 | `APPDATA` | `~\AppData\Roaming` | Windows-only base directory for the config and data roots (`%APPDATA%\clio-coder\config`, `%APPDATA%\clio-coder\data`); ignored on other platforms. |  |
 | `CI` | `unset` | Any non-empty value marks a CI run and makes smooth-streaming `auto` fall back to the immediate coalescer instead of paced animation; explicit `on` is unaffected. |  |
 | `CLIO_CODER_ALLOW_EXTERNAL_FULL_ACCESS` | `unset (disabled)` | Exactly `1` lets a `full-auto` dispatch to the claude-code or antigravity-code subprocess runtime pass their dangerous skip-permissions flag; any other value keeps the bypass closed. |  |
+| `CLIO_CODER_ANTHROPIC_CACHE_RETENTION` | `unset` | Read per native Anthropic provider call: `none`, `short`, or `long` cache retention. Long TTL requires model compatibility; unset preserves SDK defaults. | explicit call option > env > SDK default |
 | `CLIO_CODER_BIN_DIR` | `~/.local/bin` | Directory holding the `clio-coder` launcher symlink that uninstall removes and the install script creates; a path, defaulting to `~/.local/bin`. |  |
 | `CLIO_CODER_BUS_TRACE` | `unset (disabled)` | Exactly `1` subscribes a tracer to the shutdown, session-end, and domain lifecycle bus channels and writes one `[clio-coder:bus]` line per event to stderr. |  |
 | `CLIO_CODER_CACHE_DIR` | `platform default (`$XDG_CACHE_HOME/clio-coder`, else `~/.cache/clio-coder`)` | Absolute path for the cache root; beats `CLIO_CODER_HOME/cache` and the platform default, and the fleet-view pane child re-pins it from argv. | env > `CLIO_CODER_HOME/cache` > `XDG_CACHE_HOME` or platform default |
@@ -220,7 +221,10 @@ Read from the process environment at boot unless the row says otherwise.
 | `CLIO_CODER_LMSTUDIO_CORESIDENT_CONTEXT` | `131072` | Positive integer ceiling on the context length requested when loading an LM Studio model next to another resident model; `off`, `0`, or `false` disables the clamp. |  |
 | `CLIO_CODER_MEMORY_TRACE` | `unset (disabled)` | File path for a JSONL trace of proactive task-memory step envelopes including up to 8000 chars of model text per step; off when unset or empty. |  |
 | `CLIO_CODER_MODEL_CATALOG_DIRS` | `unset` | PATH-delimited list of extra model-catalog overlay directories, applied after the user and project overlays with the highest precedence. |  |
-| `CLIO_CODER_NO_NETWORK_TOOLS` | `unset (disabled)` | Exactly `1` removes the network (RETRIEVE) tools from every registry built in the process; `clio-coder skills-eval` sets it for hermetic arms and `--allow-network` deletes it. | `skills-eval --allow-network` clears it for child arms; otherwise env only |
+| `CLIO_CODER_DISABLE_RETRIEVE_TOOLS` | off | Exactly `1` removes RETRIEVE tools from registries; `clio-coder skills-eval` sets it for child arms. Bash, hooks, external CLIs, and provider networking remain available; OS isolation is required for hermetic runs. Legacy `CLIO_CODER_NO_NETWORK_TOOLS=1` remains accepted. | `skills-eval --allow-network` clears both spellings for child arms |
+| `CLIO_CODER_NO_NETWORK_TOOLS` | off | Legacy alias of `CLIO_CODER_DISABLE_RETRIEVE_TOOLS`; disables retrieval tools only, with no shell network isolation. | env only |
+| `CLIO_CODER_PROVIDER_DUMP_PATH` | `unset` | Read per native provider call: absolute path for private JSONL request-body and terminal-response diagnostics. Parent must exist; the file must be operator-owned, regular, mode `0600`, and not a symlink. Known credentials are redacted; prompt and tool content remain. | env only |
+| `CLIO_CODER_WEB_FETCH_ALLOW_PRIVATE_NETWORK` | off | Exactly `1` allows web_fetch to reach private and local services. This operator process opt-in is not accepted from model arguments or project settings. | env only |
 | `CLIO_CODER_PACKAGE_ROOT` | `auto-detected` | Path used as the package root for bundled assets and docs instead of walking up to package.json; the docs engine re-reads it live, other callers cache the first answer. |  |
 | `CLIO_CODER_REDUCE_MOTION` | `unset (disabled)` | Exactly `1` makes smooth-streaming `auto` use the immediate coalescer; explicit `on` is unaffected. |  |
 | `CLIO_CODER_RENDER_TRACE` | `unset (disabled)` | File path for the versioned JSONL render-pipeline trace (timing only, no conversation text), truncated on open; off when unset or empty. |  |
@@ -338,8 +342,10 @@ Grouped by command. Global flags appear under `global`.
 
 | Flag | Controls |
 |---|---|
+| `--hash` | For `config trust safety\|hooks\|settings`, approve the exact full SHA-256 digest returned by a prior review; a changed review is refused. |
 | `--help` | Print the command's usage and exit. |
-| `--json` | For `config inspect`, emit the customization graph as JSON. |
+| `--json` | For `config inspect`, emit the customization graph; for `config trust safety\|hooks\|settings`, emit a read-only source and trust preview. |
+| `--revoke` | For `config trust safety\|hooks\|settings`, withdraw this workspace's approval for that configuration surface. |
 | `-h` | Short form of --help. |
 
 ### `configure`
@@ -774,6 +780,7 @@ Grouped by command. Global flags appear under `global`.
 
 Keys read from files under `.clio-coder/` in the repository.
 
+Project safety, hooks, and settings are ignored until the operator reviews them with `clio-coder config trust safety|hooks|settings` and approves the printed digest with `--hash`. Consent binds one canonical workspace and one surface's content and source location. Changes, local override additions, and safety-policy relocation require a new review. Startup names skipped files; `config inspect` shows effective safety provenance and trust. Settings and safety apply on restart; new hooks apply after extension reload, while changed or revoked published hooks stop before their next execution. `CLIO-CODER.md` remains project text and does not grant configuration authority.
 
 ### `.clio-coder/agents`
 
@@ -855,7 +862,7 @@ Keys read from files under `.clio-coder/` in the repository.
 | `commands[].requireConfirmation` | `true` parks the command for operator approval even at an autonomy level that would otherwise run it. |  |
 | `commands[].shellOperators` | `allow` admits pipes, redirects, and chaining in the command line; `deny` refuses them. |  |
 | `commands[].timeoutMs` | Wall-clock cap for the command; overrides the bash call's own `timeout_ms`. |  |
-| `disableDefaultPathPolicy` | `true` drops the built-in path policy (protected dotfiles, secrets, build outputs) so only the file's own path lists apply. |  |
+| `disableDefaultPathPolicy` | In an approved safety policy, `true` drops project-default path rules. Operator credentials, settings, skills, trust records, and host authority paths remain protected. |  |
 | `noDeletePaths` | Globs tools may read and write but never delete. |  |
 | `noWritePaths` | Globs tools may read and delete but never write. |  |
 | `readOnlyPaths` | Globs tools may read but never write or delete. |  |

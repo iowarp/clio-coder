@@ -32,6 +32,7 @@ import type { TurnMiddleware } from "../../src/interactive/turn-middleware.js";
 import type { TurnPersistence } from "../../src/interactive/turn-persistence.js";
 import { createTurnRecovery } from "../../src/interactive/turn-recovery.js";
 import { type AgentRuntime, createTurnState } from "../../src/interactive/turn-state.js";
+import { syntheticCompactionSummary } from "../harness/compaction-summary.js";
 
 const timestamp = "2026-09-06T00:00:00.000Z";
 const model = {
@@ -47,7 +48,7 @@ const model = {
 	cost: { input: 0, output: 0, cacheRead: 0, cacheWrite: 0 },
 } as EngineModel;
 const summarize = async () => ({
-	text: "Progress checkpoint intentionally omitting every skill and task instruction.",
+	text: syntheticCompactionSummary("Progress checkpoint intentionally omitting every skill and task instruction."),
 });
 const selection: SkillContextState = { version: 1, activationRefs: ["activation"] };
 function message(
@@ -491,7 +492,9 @@ describe("typed historical skill checkpoints (pure source)", () => {
 			preserveUserTurnId: "task",
 			skillContextState: selection,
 			summarize: async () => ({
-				text: "Canonical decision: retain rank ordering. Unfinished task: validate both layouts.",
+				text: syntheticCompactionSummary(
+					"Canonical decision: retain rank ordering. Unfinished task: validate both layouts.",
+				),
 			}),
 		});
 		const entries = [...f.entries, checkpoint(first, "initial-checkpoint")];
@@ -560,7 +563,10 @@ describe("typed historical skill checkpoints (pure source)", () => {
 						if (outcome === "error") throw new Error("deterministic summary failure");
 						if (outcome === "cancel") controller.abort();
 						return {
-							text: outcome === "empty" ? "" : `Checkpoint ${round}: retain rank ordering; validation remains unfinished.`,
+							text:
+								outcome === "empty"
+									? ""
+									: syntheticCompactionSummary(`Checkpoint ${round}: retain rank ordering; validation remains unfinished.`),
 						};
 					},
 				});
@@ -681,7 +687,7 @@ describe("typed historical skill checkpoints (pure source)", () => {
 				summarize: async ({ userText }) => {
 					match(userText, /earlier source evidence/);
 					summaryCalls++;
-					return { text: "Checkpoint of earlier work." };
+					return { text: syntheticCompactionSummary("Checkpoint of earlier work.") };
 				},
 			});
 			strictEqual(summaryCalls, 1);
@@ -948,7 +954,9 @@ describe("typed historical skill checkpoints (pure source)", () => {
 			keepRecentTokens: 100,
 			preserveUserTurnId: "task",
 			skillContextState: selection,
-			summarize: async () => ({ text: ++calls === 1 ? "summary ".repeat(3000) : "Short second summary" }),
+			summarize: async () => ({
+				text: syntheticCompactionSummary(++calls === 1 ? "summary ".repeat(3000) : "Short second summary"),
+			}),
 		});
 		const row = checkpoint(result, "long");
 		const replay = JSON.stringify(buildModelReplayAgentMessagesFromTurns([...entries, row]));
@@ -966,7 +974,7 @@ describe("typed historical skill checkpoints (pure source)", () => {
 			preserveUserTurnId: "task",
 			summarize: async ({ userText }) => {
 				doesNotMatch(userText, /END_SKILL/);
-				return { text: "omits all instructions" };
+				return { text: syntheticCompactionSummary("omits all instructions") };
 			},
 		});
 		deepStrictEqual(second.skillContext, result.skillContext);

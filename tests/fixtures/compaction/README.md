@@ -1,0 +1,7 @@
+# Compaction checkpoint fixtures
+
+`recorded-checkpoint.json` copies the checkpoint and preceding message rows from the archived v0.3.0 fix6 session named in its provenance. The source SHA-256, checkpoint ID and timestamp identify the snapshot. The ledger has a persisted checkpoint, not a raw provider reply, and does not establish which model produced it. The contract replays these bytes through the current production summarization stream and prompt, then asserts the recorded tool constraint, unfinished work and exact reply identifier survive. It does not invoke a model or certify the historical summary's accuracy.
+
+`synthetic-facts.json` is an explicitly authored ledger and response pair with three named facts: an architectural decision, an unresolved bug, and an exact source identifier. The contract checks that the actual compaction prompt contains those facts and that the checkpoint and fresh model replay retain each one. This tests the compaction boundary deterministically; it is not measured model summarization quality. No recorded coding-session response with this planted fact set was available in the checked-in corpus.
+
+The working-set replay runner still uses a size-only summary stand-in to compare eviction policies. Its retention metrics must not be presented as semantic summary fidelity. These contracts cover checkpoint format and deterministic fact preservation separately. Measuring local-model fidelity requires new recorded model calls over named-fact inputs; neither fixture pretends to supply that evidence.

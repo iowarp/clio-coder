@@ -9,6 +9,7 @@ import { estimateAgentContextTokens } from "../../src/domains/session/context-ac
 import type { MessageEntry, SessionEntry } from "../../src/domains/session/entries.js";
 import { registerEngineFauxProvider } from "../../src/engine/api-registry.js";
 import { buildModelReplayAgentMessagesFromTurns } from "../../src/interactive/model-session-replay.js";
+import { syntheticCompactionSummary } from "../harness/compaction-summary.js";
 
 const timestamp = "2026-09-06T00:00:00.000Z";
 function message(turnId: string, role: MessageEntry["role"], payload: unknown): MessageEntry {
@@ -74,7 +75,7 @@ describe("compaction working-set provider boundary", () => {
 				});
 				return {
 					role: "assistant",
-					content: [{ type: "text", text: "Canonical checkpoint" }],
+					content: [{ type: "text", text: syntheticCompactionSummary("Canonical checkpoint") }],
 					api: resolved.api,
 					provider: resolved.provider,
 					model: resolved.id,
@@ -175,7 +176,7 @@ describe("compaction working-set provider boundary", () => {
 					summarize: async () => {
 						invoked++;
 						controller.abort();
-						return { text: "Late checkpoint", usage: { input: 10, output: 5, totalTokens: 15 } };
+						return { text: syntheticCompactionSummary("Late checkpoint"), usage: { input: 10, output: 5, totalTokens: 15 } };
 					},
 				}),
 				/abort/i,

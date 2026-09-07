@@ -199,6 +199,8 @@ describe("tool boundary contract", () => {
 			server.once("error", reject);
 			server.listen(0, "127.0.0.1", resolve);
 		});
+		const previousPrivateNetwork = process.env.CLIO_CODER_WEB_FETCH_ALLOW_PRIVATE_NETWORK;
+		process.env.CLIO_CODER_WEB_FETCH_ALLOW_PRIVATE_NETWORK = "1";
 		try {
 			const address = server.address() as AddressInfo;
 			const result = await webFetchTool.run({
@@ -215,6 +217,8 @@ describe("tool boundary contract", () => {
 			strictEqual(readReceived()?.body, "snowman=☃");
 			if (result.kind === "ok") ok(result.output.includes("transport-ok"));
 		} finally {
+			if (previousPrivateNetwork === undefined) delete process.env.CLIO_CODER_WEB_FETCH_ALLOW_PRIVATE_NETWORK;
+			else process.env.CLIO_CODER_WEB_FETCH_ALLOW_PRIVATE_NETWORK = previousPrivateNetwork;
 			await new Promise<void>((resolve, reject) => server.close((error) => (error ? reject(error) : resolve())));
 		}
 	});

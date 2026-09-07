@@ -43,6 +43,8 @@ export interface EvalBehaviorMetricComparisonV1 {
 	candidate: EvalBehaviorMetricDistributionV1;
 	change: EvalMetricChangeV1;
 	meanDelta: number | null;
+	/** Two standard errors of the difference; unresolved is not proof of equivalence. Safety stays exact. */
+	noiseBand: number;
 	varianceChange: EvalMetricChangeV1;
 	varianceDelta: number | null;
 	comparability: EvalEnvelopeComparabilityV1;
@@ -126,6 +128,8 @@ export function compareEvalBehaviorMetricsV1(
 		for (const definition of EVAL_BEHAVIOR_METRIC_DEFINITIONS_V1) {
 			const baselineDistribution = behaviorDistribution(baselineGroup?.results ?? [], definition);
 			const candidateDistribution = behaviorDistribution(candidateGroup?.results ?? [], definition);
+			const noiseBand =
+				definition.family === "safety" ? 0 : distributionNoiseBand(baselineDistribution, candidateDistribution);
 			comparisons.push({
 				scenarioId: identity.scenarioId,
 				role: identity.role,
@@ -139,9 +143,10 @@ export function compareEvalBehaviorMetricsV1(
 				candidate: candidateDistribution,
 				change:
 					envelopeMismatch === null
-						? classifyChange(baselineDistribution.mean, candidateDistribution.mean, definition.direction)
+						? classifyChange(baselineDistribution.mean, candidateDistribution.mean, definition.direction, noiseBand)
 						: "incomparable",
 				meanDelta: subtractNullable(candidateDistribution.mean, baselineDistribution.mean),
+				noiseBand,
 				varianceChange:
 					envelopeMismatch === null
 						? classifyChange(baselineDistribution.variance, candidateDistribution.variance, "lower")
@@ -183,9 +188,10 @@ export function classifyChange(
 	baseline: number | null,
 	candidate: number | null,
 	direction: "higher" | "lower",
+	noiseBand = 0,
 ): EvalMetricChangeV1 {
 	if (baseline === null || candidate === null) return "incomparable";
-	if (baseline === candidate) return "unchanged";
+	if (Math.abs(candidate - baseline) <= noiseBand) return "unchanged";
 	if (direction === "higher") return candidate > baseline ? "improved" : "regressed";
 	return candidate < baseline ? "improved" : "regressed";
 }
@@ -268,4 +274,18 @@ function groupKey(
 
 function subtractNullable(left: number | null, right: number | null): number | null {
 	return left === null || right === null ? null : left - right;
+}
+
+function distributionNoiseBand(
+	baseline: EvalBehaviorMetricDistributionV1,
+	candidate: EvalBehaviorMetricDistributionV1,
+): number {
+	// Missing coverage and single trials cannot establish empirical variation.
+	if (baseline.measured < 2 || candidate.measured < 2 || baseline.unmeasured > 0 || candidate.unmeasured > 0) return 0;
+	// Stored variance is population variance. Divide by n-1 to obtain the
+	// unbiased estimate of variance of each sample mean.
+	return (
+		2 *
+		Math.sqrt((baseline.variance ?? 0) / (baseline.measured - 1) + (candidate.variance ?? 0) / (candidate.measured - 1))
+	);
 }

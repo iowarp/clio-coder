@@ -45,7 +45,12 @@ const PENDING_EVENT_TURN_ID = "";
  * evict. Thinking eviction renders no marker at all: the reasoning simply
  * stops being replayed.
  */
-function markerFor(entry: SessionEntry, candidate: EvictionCandidate, callPaths: CallPaths): string | null {
+function markerFor(
+	entry: SessionEntry,
+	candidate: EvictionCandidate,
+	callPaths: CallPaths,
+	alias?: string,
+): string | null {
 	if (entry.kind !== "message") return null;
 	if (entry.role === "assistant") return hasThinking(entry.payload) ? "" : null;
 	if (entry.role !== "tool_result") return null;
@@ -53,6 +58,7 @@ function markerFor(entry: SessionEntry, candidate: EvictionCandidate, callPaths:
 	const toolCallId = typeof payload.obj.toolCallId === "string" ? payload.obj.toolCallId : undefined;
 	return renderMarker({
 		ref: candidate.ref,
+		...(alias === undefined ? {} : { alias }),
 		reason: candidate.reason,
 		by: candidate.by,
 		toolName: payload.toolName,
@@ -131,8 +137,9 @@ export function tokensFreedByEviction(
 	entry: SessionEntry,
 	candidate: EvictionCandidate,
 	callPaths: CallPaths = NO_CALL_PATHS,
+	alias?: string,
 ): number {
-	const marker = markerFor(entry, candidate, callPaths);
+	const marker = markerFor(entry, candidate, callPaths, alias);
 	if (marker === null) return 0;
 	const key = refKey(candidate.ref);
 	const projected = projectWorkingSet([entry], soloView(key, pendingState(candidate, marker, "")))[0] ?? entry;
@@ -149,6 +156,9 @@ export function planEviction(policy: WorkingSetPolicy, input: PolicyInput): Evic
 
 	const items: EvictedItem[] = [];
 	const claimed = new Set<string>();
+	let aliasSequence =
+		input.view.recallAliasSequence ??
+		[...input.view.evicted.values()].reduce((max, state) => Math.max(max, Number(state.alias?.slice(1)) || 0), 0);
 	for (const candidate of candidates) {
 		const key = refKey(candidate.ref);
 		// A policy is contractually forbidden from returning a unit that is
@@ -157,15 +167,18 @@ export function planEviction(policy: WorkingSetPolicy, input: PolicyInput): Evic
 		if (input.view.evicted.has(key) || claimed.has(key)) continue;
 		const entry = byTurnId.get(key);
 		if (entry === undefined) continue;
-		const marker = markerFor(entry, candidate, callPaths);
+		const alias = entry.kind === "message" && entry.role === "tool_result" ? `r${aliasSequence + 1}` : undefined;
+		const marker = markerFor(entry, candidate, callPaths, alias);
 		if (marker === null) continue;
 		// A marker at least as long as the body it replaces is a cold turn bought
 		// for nothing, whatever the policy's reason. Refused here so no policy can
 		// record an eviction that freed nothing.
-		const tokensFreed = tokensFreedByEviction(input.estimateTokens, entry, candidate, callPaths);
+		const tokensFreed = tokensFreedByEviction(input.estimateTokens, entry, candidate, callPaths, alias);
 		if (tokensFreed <= 0) continue;
 		claimed.add(key);
+		if (alias !== undefined) aliasSequence += 1;
 		items.push({
+			...(alias === undefined ? {} : { alias }),
 			ref: candidate.ref,
 			reason: candidate.reason,
 			tokensFreed,

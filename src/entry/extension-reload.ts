@@ -125,6 +125,7 @@ export function createExtensionReloadCoordinator(deps: ExtensionReloadCoordinato
 			workspaceRoot: workspace,
 			...(captured !== null ? { capturedSources: captured } : {}),
 			recordReceipt: deps.recordReceipt,
+			report: deps.report,
 			...(deps.runCommand !== undefined ? { runCommand: deps.runCommand } : {}),
 			...(deps.now !== undefined ? { now: deps.now } : {}),
 		});

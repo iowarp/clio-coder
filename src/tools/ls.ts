@@ -3,6 +3,7 @@ import path from "node:path";
 import { Type } from "typebox";
 import { ToolNames } from "../core/tool-names.js";
 import {
+	createObservationPathFilter,
 	finalizeObservation,
 	OBSERVE_SELF_CAPS,
 	observationBudgetExhausted,
@@ -53,7 +54,10 @@ export const lsTool: ToolSpec = {
 		}
 
 		try {
-			const entries = readdirSync(root).sort((a, b) => a.toLowerCase().localeCompare(b.toLowerCase()));
+			const pathFilter = createObservationPathFilter();
+			const entries = readdirSync(root)
+				.filter((entry) => pathFilter.allows(path.join(root, entry)))
+				.sort((a, b) => a.toLowerCase().localeCompare(b.toLowerCase()));
 			const outputEntries: string[] = [];
 			let entryLimitReached = false;
 			for (const entry of entries) {
@@ -72,6 +76,7 @@ export const lsTool: ToolSpec = {
 			if (outputEntries.length === 0) {
 				return finalizeObservation({
 					tool: ToolNames.Ls,
+					withheldPaths: pathFilter.withheldPaths,
 					unit: "entries",
 					output: "(empty directory)",
 					shownCount: 0,
@@ -90,6 +95,7 @@ export const lsTool: ToolSpec = {
 			const truncated = entryLimitReached || truncation.truncated;
 			return finalizeObservation({
 				tool: ToolNames.Ls,
+				withheldPaths: pathFilter.withheldPaths,
 				unit: "entries",
 				output: truncation.content,
 				// Offload only when the byte cap cut collected entries; a bare

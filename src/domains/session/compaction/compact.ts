@@ -98,6 +98,43 @@ In addition to that carried-forward context, summarize ONLY the active-turn deta
 
 Do NOT answer the user. Do NOT summarize unrelated older history.`;
 
+/** Validate the history checkpoint, never the intentionally different split-turn prompt. */
+function validateHistorySummary(text: string): void {
+	const required = [
+		"## Goal",
+		"## Constraints & Preferences",
+		"## Progress",
+		"### Done",
+		"### In Progress",
+		"### Blocked",
+		"## Key Decisions",
+		"## Next Steps",
+		"## Critical Context",
+	];
+	const headings: string[] = [];
+	let fence: { character: string; length: number } | undefined;
+	for (const line of text.split(/\r?\n/)) {
+		const fenceMatch = /^ {0,3}(`{3,}|~{3,})(.*)$/.exec(line);
+		if (fenceMatch) {
+			const marker = fenceMatch[1] ?? "";
+			if (!fence) fence = { character: marker[0] ?? "", length: marker.length };
+			else if (marker[0] === fence.character && marker.length >= fence.length && !fenceMatch[2]?.trim()) fence = undefined;
+			continue;
+		}
+		if (fence) continue;
+		const heading = /^ {0,3}(#{2,3})[ \t]+(.+?)(?:[ \t]+#+)?[ \t]*$/.exec(line);
+		if (heading) {
+			const normalized = `${heading[1]} ${heading[2]}`;
+			if (required.includes(normalized)) headings.push(normalized);
+		}
+	}
+	if (fence || headings.length !== required.length || headings.some((heading, index) => heading !== required[index])) {
+		throw new Error(
+			"compaction returned an incomplete history checkpoint: required headings must appear in order outside code fences; checkpoint was not saved",
+		);
+	}
+}
+
 /** One invoked summary stream, including failed calls that produce no checkpoint. */
 export interface CompactionCallObservation {
 	outcome: "success" | "error" | "aborted";
@@ -803,6 +840,7 @@ export async function compact(input: CompactInput): Promise<CompactResult> {
 		const historySummary = await runSummaryStream(input, userText, systemPrompt, maxTokens);
 		usage = addCompactionUsage(usage, historySummary.usage);
 		if (historySummary.text.length === 0) throw new Error("compaction returned an empty history summary");
+		validateHistorySummary(historySummary.text);
 		summaryParts.push(historySummary.text);
 	}
 	if (turnPrefix.length > 0) {

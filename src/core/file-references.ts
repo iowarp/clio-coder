@@ -106,7 +106,7 @@ function result(
 	return { text, diagnostics, images, referencedPaths };
 }
 
-function detectSupportedImageMimeType(bytes: Buffer): string | null {
+export function detectSupportedImageMimeType(bytes: Buffer): string | null {
 	if (bytes.length >= 8 && bytes.subarray(0, 8).equals(Buffer.from([0x89, 0x50, 0x4e, 0x47, 0x0d, 0x0a, 0x1a, 0x0a]))) {
 		return "image/png";
 	}
@@ -123,6 +123,16 @@ function detectSupportedImageMimeType(bytes: Buffer): string | null {
 		return "image/webp";
 	}
 	return null;
+}
+
+/** Shared tool image encoding; the cap counts base64 bytes actually sent. */
+export async function prepareBoundedImage(bytes: Buffer, maxBytes: number): Promise<ImageContent | null> {
+	const mimeType = detectSupportedImageMimeType(bytes);
+	if (mimeType === null || maxBytes <= 0) return null;
+	const original: ImageContent = { type: "image", mimeType, data: bytes.toString("base64") };
+	const resized = await resizeImage(original, { maxBytes });
+	if (resized) return { type: "image", mimeType: resized.mimeType, data: resized.data };
+	return Buffer.byteLength(original.data) <= maxBytes ? original : null;
 }
 
 async function readFileReferenceAsync(fileArg: string, options: FileReferenceOptions): Promise<FileReferenceResult> {

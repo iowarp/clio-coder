@@ -1,18 +1,44 @@
 import * as fs from "node:fs";
+import { Socket } from "node:net";
 import * as readline from "node:readline";
 
 export function setupSteerChannel(filePath: string, onLine: (line: string) => void): () => void {
 	let closed = false;
 	let watcher: fs.FSWatcher | null = null;
-	let stream: fs.ReadStream | null = null;
+	let stream: Socket | null = null;
 	let rl: readline.Interface | null = null;
+	const cleanup = () => {
+		if (closed) return;
+		closed = true;
+		watcher?.close();
+		rl?.close();
+		stream?.destroy();
+	};
+	const reportError = (err: unknown) => {
+		if (closed) return;
+		process.stderr.write(
+			`clio-coder run: failed to setup steer channel: ${err instanceof Error ? err.message : String(err)}\n`,
+		);
+		cleanup();
+	};
 
 	try {
 		const stats = fs.statSync(filePath);
 		if (stats.isFIFO()) {
-			// Named pipe: we can just read from the stream
-			stream = fs.createReadStream(filePath);
+			// A blocking fs read cannot be cancelled while a FIFO writer stays
+			// open. Socket uses readiness-driven pipe reads that destroy() closes.
+			// Keep read-only access and the existing first-writer-EOF behavior.
+			const fd = fs.openSync(filePath, fs.constants.O_RDONLY | fs.constants.O_NONBLOCK);
+			try {
+				stream = new Socket({ fd, readable: true, writable: false });
+			} catch (err) {
+				// Ownership transfers to Socket only after successful construction.
+				fs.closeSync(fd);
+				throw err;
+			}
+			stream.on("error", reportError);
 			rl = readline.createInterface({ input: stream, crlfDelay: Infinity });
+			rl.on("error", reportError);
 			rl.on("line", (line) => {
 				if (closed) return;
 				const trimmed = line.trim();
@@ -66,21 +92,8 @@ export function setupSteerChannel(filePath: string, onLine: (line: string) => vo
 			});
 		}
 	} catch (err) {
-		process.stderr.write(
-			`clio-coder run: failed to setup steer channel: ${err instanceof Error ? err.message : String(err)}\n`,
-		);
+		reportError(err);
 	}
 
-	return () => {
-		closed = true;
-		if (watcher) {
-			watcher.close();
-		}
-		if (rl) {
-			rl.close();
-		}
-		if (stream) {
-			stream.destroy();
-		}
-	};
+	return cleanup;
 }

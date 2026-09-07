@@ -150,7 +150,7 @@ export function openMessagePickerOverlay(tui: TUI, deps: OpenMessagePickerOverla
 		anchor: "center",
 		width: MESSAGE_PICKER_OVERLAY_WIDTH,
 		markerId: "message-picker",
-		title: "Fork",
+		title: "Fork conversation; workspace files stay unchanged",
 		footerHint: rows.length > 0 ? buildHint([{ key: "Enter", verb: "select" }]) : buildHint([]),
 	});
 }

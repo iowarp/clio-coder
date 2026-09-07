@@ -505,6 +505,8 @@ export interface WorkingSetRef {
 }
 
 export interface EvictedItem {
+	/** Stable session-local recall alias; absent on legacy ledger records. */
+	alias?: string;
 	ref: WorkingSetRef;
 	reason: EvictionReason;
 	/** Estimated tokens the projection removes for this item (marker cost already subtracted). */
@@ -761,6 +763,7 @@ function isEvictedItem(value: unknown): value is EvictedItem {
 		isOneOf(value.reason, EVICTION_REASONS) &&
 		isNumber(value.tokensFreed) &&
 		isString(value.marker) &&
+		(value.alias === undefined || (typeof value.alias === "string" && /^r[1-9]\d*$/.test(value.alias))) &&
 		isOptionalString(value.by)
 	);
 }

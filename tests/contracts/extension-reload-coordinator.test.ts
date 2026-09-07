@@ -5,6 +5,7 @@ import path from "node:path";
 import { afterEach, describe, it } from "node:test";
 import type { ExtensionsReloadedPayload } from "../../src/core/bus-events.js";
 import type { DomainContext } from "../../src/core/domain-loader.js";
+import { captureProjectSurface, recordProjectSurfaceTrust } from "../../src/core/workspace-trust.js";
 import { createExtensionsBundle } from "../../src/domains/extensions/extension.js";
 import type {
 	ExtensionReloadCandidate,
@@ -72,6 +73,9 @@ function writeProjectHooks(project: string, hookId: string, message: string): vo
 		path.join(project, ".clio-coder", "hooks.yaml"),
 		`- id: ${hookId}\n  on: turn_start\n  kind: prompt\n  message: ${message}\n`,
 	);
+	const snapshot = captureProjectSurface(project, "hooks");
+	ok(snapshot.contentHash);
+	recordProjectSurfaceTrust(project, "hooks", snapshot.contentHash);
 }
 
 function hostHook(id: string, message = id): MiddlewareHookRegistration {

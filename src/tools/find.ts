@@ -8,6 +8,7 @@ import { resolveFdBinary } from "./executables.js";
 import { compileGlobRegex, fallbackIgnoredDirs, fdIgnoreArgs, normalizeGlobInput } from "./ignore-policy.js";
 import {
 	commitObservationReservation,
+	createObservationPathFilter,
 	finalizeObservation,
 	OBSERVE_SELF_CAPS,
 	type ObservationReservation,
@@ -148,6 +149,7 @@ function orderByMtime(paths: string[], searchPath: string, limit: number, candid
 }
 
 function renderFindResult(input: {
+	withheldPaths: number;
 	ordered: OrderedPaths;
 	collected: number;
 	collectLimit: number;
@@ -160,11 +162,13 @@ function renderFindResult(input: {
 	if (ordered.paths.length === 0) {
 		return finalizeObservation({
 			tool: ToolNames.Find,
+			withheldPaths: input.withheldPaths,
 			unit: "paths",
-			output: "No files found matching pattern",
+			output: "No visible files found matching pattern",
 			shownCount: 0,
-			totalCount: 0,
-			truncated: false,
+			totalCount: collected >= collectLimit ? null : 0,
+			truncated: collected >= collectLimit,
+			...(collected >= collectLimit ? { next: `limit=${limit * 2}` } : {}),
 			reservation,
 			...(options ? { options } : {}),
 		});
@@ -191,6 +195,7 @@ function renderFindResult(input: {
 	}
 	return finalizeObservation({
 		tool: ToolNames.Find,
+		withheldPaths: input.withheldPaths,
 		unit: "paths",
 		output: truncation.content,
 		// Offload only when the byte cap cut collected paths; a bare result
@@ -269,13 +274,17 @@ export const findTool: ToolSpec = {
 				}
 			}
 
+			const collectedCount = collectedPaths.length;
+			const pathFilter = createObservationPathFilter();
+			collectedPaths = collectedPaths.filter((entry) => pathFilter.allows(join(searchPath, entry)));
 			const ordered: OrderedPaths =
 				order === "mtime"
 					? orderByMtime(collectedPaths, searchPath, limit, collectLimit)
 					: { paths: collectedPaths.slice(0, limit), candidateCapHit: false, candidateCap: null };
 			return renderFindResult({
+				withheldPaths: pathFilter.withheldPaths,
 				ordered,
-				collected: collectedPaths.length,
+				collected: collectedCount,
 				collectLimit,
 				limit,
 				order,

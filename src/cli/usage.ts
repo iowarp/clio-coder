@@ -354,6 +354,9 @@ export async function runUsageCommand(argv: ReadonlyArray<string>): Promise<numb
 	diagnostics.malformedAuditRows = auditRows.errors.length;
 	const auditInWindow = auditRows.rows.filter((row) => row.ts !== null && inWindow(row.ts, windowStart, now));
 	const auditToolCalls = auditInWindow.filter((row) => row.auditKind === "tool_call");
+	const permissions = summarizePermissionDecisions(
+		auditInWindow.filter((row) => row.auditKind === "permission").map((row) => row.row),
+	);
 	const auditBlocked = auditToolCalls.filter((row) => {
 		const decision = typeof row.row.decision === "string" ? row.row.decision : "";
 		return decision === "blocked" || decision === "denied";
@@ -564,6 +567,7 @@ export async function runUsageCommand(argv: ReadonlyArray<string>): Promise<numb
 		emit({ kind: "fact", fact: "unverified-successes", value: accountability.unverifiedSuccesses });
 		emit({ kind: "fact", fact: "ungrounded-claims", value: accountability.ungroundedClaims });
 		emit({ kind: "fact", fact: "audit-tool-calls", value: auditToolCalls.length, blocked: auditBlocked.length });
+		emit({ kind: "fact", fact: "permission-approval", ...permissions });
 		if (usageMeasurable) {
 			// The origin split is emitted only when something out of turn was
 			// recorded, so a report over an archive with no `/btw`, `/handoff`, or
@@ -656,6 +660,9 @@ export async function runUsageCommand(argv: ReadonlyArray<string>): Promise<numb
 	} else {
 		out(`  receipt store missing at ${presence.receiptsPath}`);
 	}
+	out(
+		`  permission decisions: ${permissions.requested} requested, ${permissions.granted} granted, ${permissions.denied} denied, ${permissions.expired} expired; approval rate ${permissions.approvalRate === null ? "n/a" : `${(permissions.approvalRate * 100).toFixed(1)}%`}`,
+	);
 	out(`  audited tool calls in window: ${auditToolCalls.length} (${auditBlocked.length} blocked/denied)`);
 	if (usageMeasurable) {
 		out(
@@ -1127,4 +1134,21 @@ function numberOr0(value: unknown): number {
 
 function isRecord(value: unknown): value is Record<string, unknown> {
 	return typeof value === "object" && value !== null && !Array.isArray(value);
+}
+
+/** Event-window approval rate. Resolutions can belong to requests outside the window. */
+export function summarizePermissionDecisions(rows: ReadonlyArray<Record<string, unknown>>): {
+	requested: number;
+	granted: number;
+	denied: number;
+	expired: number;
+	approvalRate: number | null;
+} {
+	const counts = { requested: 0, granted: 0, denied: 0, expired: 0 };
+	for (const row of rows) {
+		const status = row.status;
+		if (status === "requested" || status === "granted" || status === "denied" || status === "expired")
+			counts[status] += 1;
+	}
+	return { ...counts, approvalRate: counts.requested === 0 ? null : counts.granted / counts.requested };
 }

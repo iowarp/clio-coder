@@ -7,6 +7,7 @@ import { resolveRgBinary } from "./executables.js";
 import { compileGlobRegex, fallbackIgnoredDirs, normalizeGlobInput, rgIgnoreArgs } from "./ignore-policy.js";
 import {
 	commitObservationReservation,
+	createObservationPathFilter,
 	finalizeObservation,
 	OBSERVE_SELF_CAPS,
 	type ObservationReservation,
@@ -67,6 +68,7 @@ interface RenderedLine {
 }
 
 interface GrepRenderInput {
+	withheldPaths: number;
 	mode: GrepMode;
 	lines: RenderedLine[];
 	matchCount: number;
@@ -90,6 +92,7 @@ function renderGrepResult(input: GrepRenderInput): ToolResult {
 	if (lines.length === 0) {
 		return finalizeObservation({
 			tool: ToolNames.Grep,
+			withheldPaths: input.withheldPaths,
 			unit: MODE_UNITS[mode],
 			output: NO_MATCH_OUTPUT,
 			shownCount: 0,
@@ -120,6 +123,7 @@ function renderGrepResult(input: GrepRenderInput): ToolResult {
 	}
 	return finalizeObservation({
 		tool: ToolNames.Grep,
+		withheldPaths: input.withheldPaths,
 		unit: MODE_UNITS[mode],
 		output,
 		// Offload only when the byte cap cut collected content; a bare match
@@ -139,6 +143,7 @@ function sanitizeMatchText(text: string): string {
 }
 
 interface RgSearchInput {
+	pathFilter: ReturnType<typeof createObservationPathFilter>;
 	rgPath: string;
 	mode: GrepMode;
 	pattern: string;
@@ -195,6 +200,7 @@ async function runRipgrep(input: RgSearchInput): Promise<ToolResult> {
 		const lineNumber = data?.line_number;
 		const lineText = (data?.lines as { text?: unknown } | undefined)?.text;
 		if (typeof filePath !== "string" || typeof lineNumber !== "number" || typeof lineText !== "string") return;
+		if (!input.pathFilter.allows(filePath)) return;
 		const { text, wasTruncated } = truncateLine(sanitizeMatchText(lineText));
 		if (wasTruncated) linesTruncated = true;
 		const isMatch = type === "match";
@@ -214,6 +220,8 @@ async function runRipgrep(input: RgSearchInput): Promise<ToolResult> {
 	const onListLine = (line: string, stop: () => void): void => {
 		const trimmed = line.replace(/\r$/, "");
 		if (trimmed.length === 0) return;
+		const filePath = input.mode === "count" ? trimmed.slice(0, trimmed.lastIndexOf(":")) : trimmed;
+		if (!input.pathFilter.allows(filePath)) return;
 		let text: string;
 		if (input.mode === "count") {
 			const sep = trimmed.lastIndexOf(":");
@@ -245,6 +253,7 @@ async function runRipgrep(input: RgSearchInput): Promise<ToolResult> {
 		return { kind: "error", message: `grep: ${result.stderr.trim() || `ripgrep exited with code ${result.exitCode}`}` };
 	}
 	return renderGrepResult({
+		withheldPaths: input.pathFilter.withheldPaths,
 		mode: input.mode,
 		lines: rendered,
 		matchCount,
@@ -279,6 +288,7 @@ function looksBinary(buffer: Buffer): boolean {
 }
 
 interface FallbackSearchInput {
+	pathFilter: ReturnType<typeof createObservationPathFilter>;
 	mode: GrepMode;
 	pattern: string;
 	searchPath: string;
@@ -328,7 +338,7 @@ function fallbackGrep(input: FallbackSearchInput): ToolResult {
 	};
 
 	const searchFile = (filePath: string): void => {
-		if (limitHit) return;
+		if (limitHit || !input.pathFilter.allows(filePath)) return;
 		let buffer: Buffer;
 		try {
 			const stat = statSync(filePath);
@@ -403,6 +413,7 @@ function fallbackGrep(input: FallbackSearchInput): ToolResult {
 	else searchFile(input.searchPath);
 	if (signal?.aborted) return { kind: "error", message: "grep: operation aborted" };
 	return renderGrepResult({
+		withheldPaths: input.pathFilter.withheldPaths,
 		mode: input.mode,
 		lines: rendered,
 		matchCount,
@@ -463,6 +474,7 @@ export const grepTool: ToolSpec = {
 			});
 		}
 		const shared = {
+			pathFilter: createObservationPathFilter(),
 			mode,
 			pattern,
 			searchPath,

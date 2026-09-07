@@ -46,6 +46,7 @@ import { buildModelReplayAgentMessagesFromTurns } from "../../src/interactive/mo
 import { createTurnContext } from "../../src/interactive/turn-context.js";
 import type { TurnMiddleware } from "../../src/interactive/turn-middleware.js";
 import { type AgentRuntime, createTurnState } from "../../src/interactive/turn-state.js";
+import { syntheticCompactionSummary } from "../harness/compaction-summary.js";
 import { type IsolatedClioEnv, isolateClioEnv } from "../harness/scratch-env.js";
 
 describe("production compaction controls", () => {
@@ -128,7 +129,7 @@ describe("production compaction controls", () => {
 		} = {
 			fail: false,
 			failAt: 0,
-			text: "fixture checkpoint",
+			text: syntheticCompactionSummary("fixture checkpoint"),
 		};
 		const providers = {
 			list: () => statuses,
@@ -474,7 +475,7 @@ describe("production compaction controls", () => {
 		const before = context.liveContextEstimate(runtime);
 		ok(before.tokens > 32768);
 		ok(findCutPoint(f.entries(), 20000).firstKeptEntryIndex > 0);
-		f.response.text = "Suggested skill: /skill clio-coder-test";
+		f.response.text = syntheticCompactionSummary("Suggested skill: /skill clio-coder-test");
 		const abort = new AbortController();
 		const beforeCanceledGuard = f.entries();
 		f.response.beforeReturn = () => abort.abort();
@@ -830,6 +831,25 @@ describe("production compaction controls", () => {
 		strictEqual(row.usage.costUsd, 0.1);
 		strictEqual(row.usage.output, null);
 	});
+	for (const text of [
+		"## Goal\nRepair MPI exchange\n## Constraints & Preferences\nKeep rank order.",
+		syntheticCompactionSummary("Repair MPI exchange").replace("### Blocked", "### Risks"),
+		`\`\`\`markdown\n${syntheticCompactionSummary("Repair MPI exchange")}\n\`\`\``,
+	]) {
+		it("refuses normally stopped malformed history without publishing a checkpoint", async () => {
+			const f = fixture(true);
+			f.response.text = text;
+			const before = f.entries();
+			await rejects(f.run(), /incomplete history checkpoint/);
+			deepStrictEqual(f.entries(), before);
+			strictEqual(f.calls.length, 1);
+			const rows = readOutOfTurnUsageRows(clioStateDir()).rows;
+			strictEqual(rows.length, 1, "completed model spending remains recorded after checkpoint rejection");
+			strictEqual(rows[0]?.usage.totalTokens, 15);
+			deepStrictEqual(foregroundStreamUsage(), {});
+		});
+	}
+
 	it("refuses a truncated dedicated summary and preserves the failed call's spending", async () => {
 		const f = fixture(true);
 		f.settings.context.compaction.model = "summary-target/summary";

@@ -35,6 +35,7 @@ import {
 import { hostname } from "node:os";
 import { join, relative, resolve } from "node:path";
 import type { RunGateWorktreeProvenance, RunKind } from "../domains/dispatch/types.js";
+import { captureWorkspaceCheckpoint, workspaceCheckpointRef } from "../domains/dispatch/workspace-checkpoint.js";
 import {
 	commitWorktreePath,
 	isCanonicalWorktreePathInside,
@@ -686,6 +687,27 @@ function removeRegisteredWorktree(root: string, path: string): void {
 	}
 }
 
+/** Archive the worktree state before native or mux cleanup can erase it. */
+function preserveCandidateWorktree(ownership: CompeteGroupOwnership, path: string, index: number): void {
+	if (
+		resolve(path) !== resolve(join(ownership.directory, `candidate-${index}`)) ||
+		!isCanonicalPathInside(ownership.directory, path)
+	)
+		throw new Error("candidate checkpoint path is outside its proven group");
+	const ref = workspaceCheckpointRef("compete", `${ownership.group}:${index}`);
+	if (existsSync(path)) captureWorkspaceCheckpoint(path, ref, `Compete ${ownership.group} candidate ${index}`);
+	else {
+		const branch = competeBranchForCandidate(ownership.root, ownership.group, index);
+		if (exactGroupBranches(ownership.root, ownership.group).includes(branch)) {
+			try {
+				git(ownership.root, ["rev-parse", "--verify", ref]);
+			} catch {
+				git(ownership.root, ["update-ref", ref, branch, ""]);
+			}
+		}
+	}
+}
+
 function removeCandidateWorktree(
 	ownership: CompeteGroupOwnership,
 	worktree: CandidateWorktree,
@@ -700,6 +722,7 @@ function removeCandidateWorktree(
 	) {
 		throw new Error(`candidate ${worktree.index} does not belong to compete group ${ownership.group}`);
 	}
+	preserveCandidateWorktree(ownership, worktree.path, worktree.index);
 	removeRegisteredWorktree(ownership.root, worktree.path);
 	if (deleteBranch && exactGroupBranches(ownership.root, ownership.group).includes(worktree.branch)) {
 		git(ownership.root, ["branch", "-D", worktree.branch]);
@@ -720,6 +743,8 @@ export async function removeCandidateWorktreeMapped(
 	deleteBranch: boolean,
 	mux?: CompeteMuxWorktrees,
 ): Promise<void> {
+	assertOwnership(ownership);
+	preserveCandidateWorktree(ownership, worktree.path, worktree.index);
 	const workspaceId = worktree.provenance?.backend === "herdr" ? worktree.provenance.workspaceId : undefined;
 	if (workspaceId && mux?.available()) {
 		await mux.worktreeRemove(workspaceId, { force: true }).catch(() => false);
@@ -751,6 +776,8 @@ function cleanupWorktreeGroup(ownership: CompeteGroupOwnership): void {
 	assertOwnership(ownership);
 	for (const path of registeredWorktreePaths(ownership.root)) {
 		if (!isCanonicalPathInside(ownership.directory, path)) continue;
+		const index = Number.parseInt(path.split(/[\\/]/).at(-1)?.replace("candidate-", "") ?? "", 10);
+		if (Number.isInteger(index)) preserveCandidateWorktree(ownership, path, index);
 		removeRegisteredWorktree(ownership.root, path);
 	}
 	git(ownership.root, ["worktree", "prune"]);
@@ -765,6 +792,13 @@ function cleanupWorktreeGroup(ownership: CompeteGroupOwnership): void {
 	}
 
 	for (const branch of exactGroupBranches(ownership.root, ownership.group)) {
+		const index = Number.parseInt(branch.split("/").at(-1) ?? "", 10);
+		const ref = workspaceCheckpointRef("compete", `${ownership.group}:${index}`);
+		try {
+			git(ownership.root, ["rev-parse", "--verify", ref]);
+		} catch {
+			git(ownership.root, ["update-ref", ref, branch, ""]);
+		}
 		git(ownership.root, ["branch", "-D", branch]);
 	}
 	const branchesRemain = exactGroupBranches(ownership.root, ownership.group);

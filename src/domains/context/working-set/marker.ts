@@ -30,6 +30,7 @@ import type { EvictionReason, WorkingSetRef } from "./contract.js";
 const PREVIEW_LIMIT = 120;
 
 export interface MarkerInput {
+	alias?: string;
 	ref: WorkingSetRef;
 	reason: EvictionReason;
 	/** Ref key of the entry that superseded or resolved this one, when the reason names one. */
@@ -84,7 +85,7 @@ function firstLine(text: string): string {
 }
 
 export function renderMarker(input: MarkerInput): string {
-	const ref = input.ref.entry;
+	const ref = input.alias ?? input.ref.entry;
 	const fields: string[] = [`ref=${ref}`, `reason=${input.reason}`];
 	if (input.by !== undefined) fields.push(`by=${input.by}`);
 	fields.push(`tool=${input.toolName}`);

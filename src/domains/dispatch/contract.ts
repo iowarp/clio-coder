@@ -118,6 +118,8 @@ export interface DispatchAdmissionObserver {
 
 /** Invocation-owned admission bounds; never serialized into model-authored requests. */
 export interface DispatchPreparationOptions {
+	/** Host ancestry for publication; kept separate from logical assignment/retry identity. */
+	hostRun?: { readonly runId: string; readonly lineage: Readonly<RunLineage> };
 	signal?: AbortSignal;
 	deadlineAt?: number;
 }

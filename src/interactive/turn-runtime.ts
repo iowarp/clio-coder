@@ -32,7 +32,7 @@ import {
 	patchToolChoiceNonePayload,
 } from "../engine/provider-payload.js";
 import type { AgentEvent, AgentMessage, EngineModel, Usage } from "../engine/types.js";
-import type { resolveAgentTools, ToolOutcome, ToolTelemetry } from "../tools/agent-tools.js";
+import type { resolveAgentTools, ToolFinishEvent, ToolTelemetry } from "../tools/agent-tools.js";
 import {
 	type AssistantCallTiming,
 	type BackendCacheVerdict,
@@ -162,7 +162,10 @@ export function createTurnRuntime(deps: TurnRuntimeDeps): TurnRuntime {
 	 * a call whose end event never arrives leaves at most one stale entry, which
 	 * the next run with the same id would overwrite.
 	 */
-	const toolOutcomes = new Map<string, { outcome: ToolOutcome; reason?: string; durationMs: number }>();
+	const toolOutcomes = new Map<
+		string,
+		Pick<ToolFinishEvent, "outcome" | "reason" | "durationMs" | "ruleId" | "reasonCode" | "policySource">
+	>();
 	const toolTelemetry: ToolTelemetry = {
 		onFinish(event) {
 			if (event.toolCallId === undefined) return;
@@ -170,6 +173,9 @@ export function createTurnRuntime(deps: TurnRuntimeDeps): TurnRuntime {
 				outcome: event.outcome,
 				...(event.reason === undefined ? {} : { reason: event.reason }),
 				durationMs: event.durationMs,
+				...(event.ruleId === undefined ? {} : { ruleId: event.ruleId }),
+				...(event.reasonCode === undefined ? {} : { reasonCode: event.reasonCode }),
+				...(event.policySource === undefined ? {} : { policySource: event.policySource }),
 			});
 		},
 	};
@@ -651,6 +657,9 @@ export function createTurnRuntime(deps: TurnRuntimeDeps): TurnRuntime {
 						? {}
 						: {
 								outcome: admission.outcome,
+								...(admission.ruleId === undefined ? {} : { ruleId: admission.ruleId }),
+								...(admission.reasonCode === undefined ? {} : { reasonCode: admission.reasonCode }),
+								...(admission.policySource === undefined ? {} : { policySource: admission.policySource }),
 								...(admission.reason === undefined ? {} : { blockReason: admission.reason }),
 							}),
 				} as typeof event;

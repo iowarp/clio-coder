@@ -16,7 +16,7 @@ export function renderEvalComparisonReportV1(
 function renderMarkdown(summary: EvalCompareV4Summary): string {
 	const rows = summary.behavioralMetrics.map(
 		(row) =>
-			`| ${cell(row.scenarioId)} | ${cell(row.role)} | ${cell(renderEvalComparisonRoutesV1(row))} | ${row.family} | ${row.metric} | ${format(row.baseline.mean)} | ${format(row.baseline.variance)} | ${row.baseline.measured}/${row.baseline.observations} | ${format(row.candidate.mean)} | ${format(row.candidate.variance)} | ${row.candidate.measured}/${row.candidate.observations} | ${row.change} | ${row.varianceChange} | ${row.comparability.comparable ? "comparable" : cell(row.comparability.mismatchedFields.join(", "))} | ${row.hardGate ? "hard" : "informational"} |`,
+			`| ${cell(row.scenarioId)} | ${cell(row.role)} | ${cell(renderEvalComparisonRoutesV1(row))} | ${row.family} | ${row.metric} | ${format(row.baseline.mean)} | ${format(row.baseline.variance)} | ${row.baseline.measured}/${row.baseline.observations} | ${format(row.candidate.mean)} | ${format(row.candidate.variance)} | ${row.candidate.measured}/${row.candidate.observations} | ${format(row.noiseBand)} | ${row.change} | ${row.varianceChange} | ${row.comparability.comparable ? "comparable" : cell(row.comparability.mismatchedFields.join(", "))} | ${row.hardGate ? "hard" : "informational"} |`,
 	);
 	const scenarioRows = summary.scenarioReports.map(
 		(report) => `| ${cell(report.id)} | ${changeCounts(report.metrics)} | ${changeCounts(report.variance)} |`,
@@ -43,8 +43,8 @@ function renderMarkdown(summary: EvalCompareV4Summary): string {
 		`Token delta: ${summary.tokenDelta === null ? "unmeasured" : summary.tokenDelta}`,
 		`Wall-time delta ms: ${summary.wallTimeDelta}`,
 		"",
-		"| Scenario | Role | Baseline -> candidate target/model | Family | Metric | Baseline mean | Baseline variance | Baseline measured | Candidate mean | Candidate variance | Candidate measured | Change | Variance | Comparability | Gate |",
-		"|---|---|---|---|---|---:|---:|---:|---:|---:|---:|---|---|---|---|",
+		"| Scenario | Role | Baseline -> candidate target/model | Family | Metric | Baseline mean | Baseline variance | Baseline measured | Candidate mean | Candidate variance | Candidate measured | Noise band | Change | Variance | Comparability | Gate |",
+		"|---|---|---|---|---|---:|---:|---:|---:|---:|---:|---:|---|---|---|---|",
 		...rows,
 		"",
 		"## Per-scenario baseline/candidate report",

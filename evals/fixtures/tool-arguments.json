@@ -1,0 +1,18 @@
+[
+	{ "tool": "read", "arguments": {}, "valid": false },
+	{ "tool": "read", "arguments": { "path": 42 }, "valid": false },
+	{ "tool": "read", "arguments": { "path": "fixture.txt", "line_numbers": "yes" }, "valid": false },
+	{ "tool": "read", "arguments": { "path": "fixture.txt", "line_numbers": true }, "valid": true },
+	{ "tool": "bash", "arguments": {}, "valid": false },
+	{ "tool": "bash", "arguments": { "command": "pwd", "output_policy": "unbounded" }, "valid": false },
+	{ "tool": "bash", "arguments": { "command": "pwd", "timeout_ms": "forever" }, "valid": false },
+	{ "tool": "bash", "arguments": { "command": "pwd", "output_policy": "bounded" }, "valid": true },
+	{ "tool": "web_fetch", "arguments": {}, "valid": false },
+	{ "tool": "web_fetch", "arguments": { "url": false }, "valid": false },
+	{ "tool": "web_fetch", "arguments": { "url": "https://example.org", "headers": { "X-Test": 10 } }, "valid": false },
+	{
+		"tool": "web_fetch",
+		"arguments": { "url": "https://example.org", "method": "POST", "body": "example" },
+		"valid": true
+	}
+]

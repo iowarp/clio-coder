@@ -304,6 +304,12 @@ export function createOverlaySessionLifecycle(deps: OverlaySessionLifecycleDeps)
 					}
 					deps.resetTranscript();
 					replayFork(forkedSessionId, parentTurnId, session);
+					emitCommandNotice(
+						deps.getSlashNotice(),
+						"info",
+						"fork",
+						"Conversation forked. Workspace files were not rewound; existing edits remain.",
+					);
 				} catch (error) {
 					deps.stderr(`[/fork] fork failed: ${error instanceof Error ? error.message : String(error)}\n`);
 				}

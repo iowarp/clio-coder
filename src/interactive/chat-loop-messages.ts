@@ -162,10 +162,9 @@ export function isLengthStopAssistantMessage(message: AgentMessage | undefined):
 }
 
 /**
- * An aborted assistant message with no rendered content: empty text and no
- * structured tool call. This is what `agent.abort()` leaves behind when the
- * model is interrupted between deltas. The chat loop suppresses it after a
- * loop-guard interrupt has already written a durable closing turn.
+ * An aborted assistant message with no text, thinking, or structured tool
+ * call. Only a hollow abort needs a synthetic closing record; streamed
+ * thinking belongs to the same durable assistant as any partial answer.
  */
 export function isEmptyAbortedAssistantMessage(message: AgentMessage | undefined): boolean {
 	if (
@@ -179,7 +178,15 @@ export function isEmptyAbortedAssistantMessage(message: AgentMessage | undefined
 	}
 	if ((message as { stopReason?: unknown }).stopReason !== "aborted") return false;
 	if (extractText(message).trim().length > 0) return false;
+	if (extractThinking(message).trim().length > 0) return false;
 	return !hasStructuredToolCall(message);
+}
+
+/** Apply host cancellation provenance only to a structurally aborted message. */
+export function explainInterruptedAssistant(message: AgentMessage, reason: string | null): boolean {
+	if (reason === null || message.role !== "assistant" || message.stopReason !== "aborted") return false;
+	message.errorMessage = reason;
+	return true;
 }
 
 function lengthStopMetadata(message: AgentMessage): Record<string, unknown> {

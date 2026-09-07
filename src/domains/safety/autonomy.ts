@@ -139,7 +139,16 @@ export function autonomyDenyRejection(level: AutonomyLevel, tool: string, action
 		detail:
 			`Clio is at autonomy ${level}: ${actionClass} actions are denied without prompting. ` +
 			"Describe the change you would make instead, so the operator can apply it or raise the autonomy level.",
-		hints: ["Propose the exact edit or command as text.", "The operator can change the level in /settings."],
+		hints: [
+			...(level === "read-only" && actionClass === "execute"
+				? [
+						"For independent permitted inspection, use the native read, grep, find, or ls tools when available. " +
+							"Do not use them to reproduce the denied execution or write; each call still follows its safety policy.",
+					]
+				: []),
+			"Propose the exact edit or command as text.",
+			"The operator can change the level in interactive /settings or start a new headless run with clio-coder run --autonomy <level>.",
+		],
 	};
 }
 

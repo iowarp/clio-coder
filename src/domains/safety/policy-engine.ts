@@ -1,4 +1,5 @@
 import { createHash } from "node:crypto";
+import { readFileSync } from "node:fs";
 import path from "node:path";
 import { artifactDefaultPath } from "../../core/artifact-paths.js";
 import { pathBoundaryCovers, resolvePathBoundary } from "../../core/path-boundary.js";
@@ -8,7 +9,11 @@ import { clioConfigDir } from "../../core/xdg.js";
 import { type DeclaredCheck, loadProjectVerifierCatalog } from "../../tools/verify/catalog.js";
 import { type ActionClass, type Classification, type ClassifierCall, classify } from "./action-classifier.js";
 import type { DamageControlMatch, DamageControlRule } from "./damage-control.js";
-import { DEFAULT_DAMAGE_CONTROL_PATH_POLICY, mergePathPolicyInputs } from "./default-path-policy.js";
+import {
+	DEFAULT_DAMAGE_CONTROL_PATH_POLICY,
+	mergePathPolicyInputs,
+	OPERATOR_PATH_POLICY,
+} from "./default-path-policy.js";
 import {
 	type CompiledPathPolicy,
 	compilePathPolicy,
@@ -31,6 +36,8 @@ import {
 import { formatRejection, type RejectionMessage } from "./rejection-feedback.js";
 import { getCachedDefaultRulePacks, type PackId, type RulePacks } from "./rule-pack-loader.js";
 import { activeClioSkillRoots, skillMutationReason } from "./skill-authority.js";
+
+import { gateProjectSafetyPolicy, workspaceTrustDirectory } from "./workspace-trust.js";
 
 export type SafetyPolicySource =
 	| "damage-control:base"
@@ -79,6 +86,8 @@ export interface SafetyPolicyMetadata {
 	projectPolicyHash: string | null;
 	projectPolicyValid: boolean;
 	projectPolicyErrors: ReadonlyArray<string>;
+	disableDefaultPathPolicy?: boolean;
+	workspaceTrustVerdict?: "trusted" | "untrusted" | "changed";
 	cwd: string;
 }
 
@@ -113,6 +122,9 @@ const BUILTIN_ALLOWLIST: ReadonlyArray<{ id: string; re: RegExp }> = [
 	{ id: "builtin:git-status", re: /^git\s+status(?:\s+--short|\s+--branch|\s+-sb)*$/ },
 	{ id: "builtin:git-diff", re: /^git\s+diff(?:\s+--cached|\s+--stat|\s+--name-only|\s+--\s+[\w./-]+)*$/ },
 	{ id: "builtin:git-log", re: /^git\s+log\s+--oneline(?:\s+-n\s+[1-9]\d{0,2})?(?:\s+--\s+[\w./-]+)?$/ },
+];
+
+const PROJECT_SCRIPT_COMMANDS: ReadonlyArray<{ id: string; re: RegExp }> = [
 	{ id: "builtin:npm-test", re: /^npm\s+(?:test|run\s+test)(?:\s+--\s+[\w=./:-]+(?:\s+[\w=./:-]+)*)?$/ },
 	{ id: "builtin:npm-lint", re: /^npm\s+run\s+lint(?:\s+--\s+[\w=./:-]+(?:\s+[\w=./:-]+)*)?$/ },
 	{ id: "builtin:npm-build", re: /^npm\s+run\s+build(?:\s+--\s+[\w=./:-]+(?:\s+[\w=./:-]+)*)?$/ },
@@ -198,21 +210,19 @@ export function createSafetyPolicyEngine(options: SafetyPolicyEngineOptions = {}
 	const writeRoots = (options.writeRoots ?? []).map((root) => resolvePathBoundary(writeRootCwd, root));
 	const skillRoots = activeClioSkillRoots(cwd);
 	const packs = options.rulePacks ?? getCachedDefaultRulePacks();
-	const projectPolicy = options.projectPolicy ?? loadProjectSafetyPolicy(cwd);
+	const projectPolicy = options.projectPolicy ?? gateProjectSafetyPolicy(cwd, loadProjectSafetyPolicy(cwd));
 	const projectPolicyRoot =
-		projectPolicy.path === null ? cwd : path.dirname(path.dirname(canonicalizeExistingPath(projectPolicy.path)));
+		projectPolicy.path === null ? cwd : path.dirname(path.dirname(path.resolve(projectPolicy.path)));
 	const pathPolicyInput = projectPolicy.disableDefaultPathPolicy
 		? projectPolicy.pathPolicy
 		: mergePathPolicyInputs(DEFAULT_DAMAGE_CONTROL_PATH_POLICY, projectPolicy.pathPolicy);
 	// Clio's own secret store and user skills, by absolute path.
 	// Config directory expansion has to happen here because
 	// the list cannot call config helpers at module scope.
-	const expandedDefaults = projectPolicy.disableDefaultPathPolicy
-		? pathPolicyInput
-		: mergePathPolicyInputs(pathPolicyInput, {
-				zeroAccessPaths: clioCredentialStorePaths(),
-				readOnlyPaths: clioSkillsRootPaths(),
-			});
+	const expandedDefaults = mergePathPolicyInputs(mergePathPolicyInputs(pathPolicyInput, OPERATOR_PATH_POLICY), {
+		zeroAccessPaths: clioCredentialStorePaths(),
+		readOnlyPaths: [...clioSkillsRootPaths(), path.join(clioConfigDir(), "settings.yaml"), workspaceTrustDirectory()],
+	});
 	const pathPolicy = compilePathPolicy(expandedDefaults, projectPolicyRoot);
 	// Bash-read scanning tests argument tokens against zero-access entries only:
 	// read-only paths stay readable from bash by design, secrets do not.
@@ -317,6 +327,31 @@ export function createSafetyPolicyEngine(options: SafetyPolicyEngineOptions = {}
 			// Editing active instructions is an operator privilege at every autonomy
 			// level, in both the coordinator and the shared worker safety contract.
 			const mutationCommand = call.tool === ToolNames.Bash ? command : catalogCommand;
+			if (mutationCommand !== null && invokesTrustMutation(mutationCommand)) {
+				return blockDecision(base, {
+					reasonCode: "trust-authority",
+					ruleId: "trust-authority",
+					reasons: ["workspace trust grants require the operator CLI"],
+					policySource: "builtin-classifier",
+				});
+			}
+			// Reuse the canonical authority boundary scan for parent deletions,
+			// shell cwd changes and aliases that a literal path-policy lookup misses.
+			if (
+				skillMutationReason(
+					[path.join(clioConfigDir(), "settings.yaml"), workspaceTrustDirectory()],
+					pathPolicyTargets(catalogCommand === null ? call : { tool: ToolNames.Bash, args: { command: catalogCommand } }),
+					callCwd,
+					mutationCommand,
+				) !== null
+			) {
+				return blockDecision(base, {
+					reasonCode: "path-policy:readOnlyPaths",
+					ruleId: "path-policy:readOnlyPaths",
+					reasons: ["Clio settings and workspace trust records are operator-owned and cannot be mutated by tools"],
+					policySource: "builtin-classifier",
+				});
+			}
 			const skillReason =
 				mutationCommand !== null && invokesClioSkillMutation(mutationCommand)
 					? "skill installation and updates require the operator CLI or an explicit operator install choice; draft outside active skill roots"
@@ -421,14 +456,39 @@ export function createSafetyPolicyEngine(options: SafetyPolicyEngineOptions = {}
 				return posture === "confirmed" ? allowDecision(base, input) : askDecision(base, input);
 			}
 
-			if ((call.tool === ToolNames.Bash || catalogCheck !== null) && classification.actionClass === "execute") {
+			const packageCommand =
+				call.tool === ToolNames.Verify &&
+				catalogCheck === null &&
+				typeof call.args?.check === "string" &&
+				call.args.check !== "frontend"
+					? `npm run ${call.args.check}`
+					: null;
+			if (
+				(call.tool === ToolNames.Bash || catalogCheck !== null || packageCommand !== null) &&
+				classification.actionClass === "execute"
+			) {
 				const bash = evaluateBashPolicy(
-					catalogCheck?.command ?? command ?? "",
+					catalogCheck?.command ?? packageCommand ?? command ?? "",
 					catalogCheck === null ? callCwd : path.resolve(cwd, catalogCheck.cwd),
 					cwd,
 					posture,
 					projectPolicy,
 				);
+				if (
+					(catalogCheck !== null || packageCommand !== null) &&
+					bash.kind === "allow" &&
+					bash.execRecognition !== "recognized" &&
+					posture !== "confirmed"
+				) {
+					return askDecision(base, {
+						...bash,
+						reasonCode: "project-verifier-confirm",
+						reasons: [
+							...bash.reasons,
+							`Repository verifier requires confirmation or an approved safety declaration: ${catalogCommand ?? packageCommand}`,
+						],
+					});
+				}
 				if (bash.kind === "block") return blockDecision(base, bash);
 				if (bash.kind === "ask") return askDecision(base, bash);
 				return allowDecision(base, bash);
@@ -459,6 +519,8 @@ export function createSafetyPolicyEngine(options: SafetyPolicyEngineOptions = {}
 				projectPolicyHash: projectPolicy.hash,
 				projectPolicyValid: projectPolicy.valid,
 				projectPolicyErrors: [...projectPolicy.errors, ...pathPolicy.diagnostics],
+				disableDefaultPathPolicy: projectPolicy.disableDefaultPathPolicy,
+				workspaceTrustVerdict: projectPolicy.trustVerdict ?? "trusted",
 				cwd,
 			};
 		},
@@ -618,7 +680,7 @@ function evaluateBashPolicy(
 	// joining them would erase argument boundaries or invent a shell chain.
 	if (typeof input !== "string" && !input.every((arg) => /^[\w=./:-]+$/u.test(arg))) {
 		return {
-			kind: "allow",
+			kind: posture === "confirmed" ? "allow" : "ask",
 			ruleId: "verify-unrecognized-argv",
 			reasonCode: "verify-unrecognized-argv",
 			reasons: ["project verifier argv is outside the bare-word no-prompt command set"],
@@ -634,6 +696,21 @@ function evaluateBashPolicy(
 			reasonCode: "bash-empty-command",
 			reasons: ["bash command must not be empty"],
 			policySource: "builtin-command-allowlist",
+		};
+	}
+	if (
+		typeof input === "string" &&
+		(/\$(?:[A-Za-z_{0-9@*#?!-])/.test(command) ||
+			/(?:^|[\s;&|])(?:python[\d.]*|node|ruby|perl|php|lua)\s+(?:[^\n]*?\s)?-[ce]\b/.test(command)) &&
+		posture !== "confirmed"
+	) {
+		return {
+			kind: "ask",
+			reasonCode: "bash-hidden-content",
+			ruleId: "bash-hidden-content",
+			reasons: ["shell variables or interpreter source hide paths from the safety scan and require one-shot confirmation"],
+			policySource: "builtin-command-allowlist",
+			execRecognition: "unrecognized",
 		};
 	}
 	const projectMatch = matchingProjectCommand(policy, command, callCwd);
@@ -688,15 +765,34 @@ function evaluateBashPolicy(
 			execRecognition: "unrecognized",
 		};
 	}
+	if (PROJECT_SCRIPT_COMMANDS.some((entry) => entry.re.test(recognitionCommand))) {
+		return {
+			kind: posture === "confirmed" ? "allow" : "ask",
+			reasonCode: "project-script-confirm",
+			ruleId: "project-script-confirm",
+			reasons: [
+				"Repository-authored code requires one-shot confirmation or an operator-approved safety command declaration.",
+				projectScriptPreview(recognitionCommand, callCwd),
+			],
+			policySource: "builtin-command-allowlist",
+			execRecognition: "unrecognized",
+		};
+	}
 	const chain = recognizeCommandChain(recognitionCommand, callCwd, workspaceRoot, policy);
 	if (chain !== null) {
 		const chainReasons = [`every step of the && chain is recognized: ${chain.ruleIds.join(", ")}`];
+		if (chain.requiresConfirmation) {
+			for (const segment of recognitionCommand.split("&&").map((part) => part.trim())) {
+				if (PROJECT_SCRIPT_COMMANDS.some((entry) => entry.re.test(segment)))
+					chainReasons.push(projectScriptPreview(segment, callCwd));
+			}
+		}
 		if (chain.requiresConfirmation && posture !== "confirmed") {
 			return {
 				kind: "ask",
 				ruleId: "bash-recognized-chain",
 				reasonCode: "bash-recognized-chain",
-				reasons: [...chainReasons, "project policy requires confirmation for one step"],
+				reasons: [...chainReasons, "repository code or project policy requires confirmation for one step"],
 				policySource: "builtin-command-allowlist",
 				execRecognition: "recognized",
 			};
@@ -717,6 +813,23 @@ function evaluateBashPolicy(
 	// the full string, so a destructive verb behind an operator was caught before
 	// this point.
 	if (hasSequencingOperators(command)) {
+		const scriptSegments = recognitionCommand
+			.split(/&&|\|\||[;|\n]/)
+			.map((part) => part.trim())
+			.filter((part) => PROJECT_SCRIPT_COMMANDS.some((entry) => entry.re.test(part)));
+		if (scriptSegments.length > 0 && posture !== "confirmed") {
+			return {
+				kind: "ask",
+				ruleId: "project-script-confirm",
+				reasonCode: "project-script-confirm",
+				reasons: [
+					"Repository scripts in compound commands require one-shot confirmation",
+					...scriptSegments.map((part) => projectScriptPreview(part, callCwd)),
+				],
+				policySource: "builtin-command-allowlist",
+				execRecognition: "unrecognized",
+			};
+		}
 		return {
 			kind: "allow",
 			ruleId: "bash-shell-operators",
@@ -933,6 +1046,11 @@ function recognizeCommandChain(
 			if (projectMatch.requireConfirmation) requiresConfirmation = true;
 			continue;
 		}
+		if (PROJECT_SCRIPT_COMMANDS.some((entry) => entry.re.test(rendered))) {
+			ruleIds.push("project-script-confirm");
+			requiresConfirmation = true;
+			continue;
+		}
 		const builtin = BUILTIN_ALLOWLIST.find((entry) => entry.re.test(rendered));
 		if (builtin === undefined) return null;
 		ruleIds.push(builtin.id);
@@ -1084,4 +1202,35 @@ function packPayload(rules: ReadonlyArray<DamageControlRule>): Array<Record<stri
 		block: rule.block,
 		...(rule.ask !== undefined ? { ask: rule.ask } : {}),
 	}));
+}
+
+function invokesTrustMutation(command: string): boolean {
+	// Wrappers, package launchers, quoted argv and source-tree CLI invocations
+	// must not turn an operator-only grant into model authority.
+	const words = scanShellLike(command)
+		.filter((token) => !token.operator)
+		.map((token) => token.value);
+	return (
+		words.some((word, index) => word === "config" && words[index + 1] === "trust") ||
+		/\bconfig\s+trust\b/.test(inlineShellScript(command) ?? "")
+	);
+}
+
+function projectScriptPreview(command: string, cwd: string): string {
+	const match = /^npm\s+(?:run\s+)?([\w:-]+)/.exec(command);
+	if (match) {
+		try {
+			const manifest = JSON.parse(readFileSync(path.join(cwd, "package.json"), "utf8")) as {
+				scripts?: Record<string, unknown>;
+			};
+			const name = match[1] ?? "test";
+			const scripts = [`pre${name}`, name, `post${name}`].flatMap((key) =>
+				typeof manifest.scripts?.[key] === "string" ? [`${key}: ${manifest.scripts[key]}`] : [],
+			);
+			return `package.json scripts (repository data): ${scripts.join("; ") || "no script resolved"}`;
+		} catch {
+			return "package.json script body could not be resolved; repository code will execute.";
+		}
+	}
+	return `Repository command: ${command}. Its test/build files and dependencies execute with the child process permissions.`;
 }

@@ -7,6 +7,7 @@ export async function startGatewayThinkingFixture(
 	runtime: string | undefined = "lm-studio",
 	modelId = "dynamo/qwen3.8-27b",
 	beforeMetadata?: () => Promise<void>,
+	responseText = "323",
 ) {
 	const requests: Array<Record<string, unknown>> = [];
 	const paths: string[] = [];
@@ -65,7 +66,11 @@ export async function startGatewayThinkingFixture(
 					choices: [
 						{
 							index: 0,
-							message: { role: "assistant", content: "323", ...(thinking ? { reasoning_content: "Fixture reasoning." } : {}) },
+							message: {
+								role: "assistant",
+								content: responseText,
+								...(thinking ? { reasoning_content: "Fixture reasoning." } : {}),
+							},
 							finish_reason: "stop",
 						},
 					],
@@ -76,7 +81,7 @@ export async function startGatewayThinkingFixture(
 		res.setHeader("content-type", "text/event-stream");
 		const chunks = [
 			...(thinking ? [{ choices: [{ index: 0, delta: { reasoning_content: "Fixture reasoning." } }] }] : []),
-			{ choices: [{ index: 0, delta: { content: "323" } }] },
+			{ choices: [{ index: 0, delta: { content: responseText } }] },
 			{ choices: [{ index: 0, delta: {}, finish_reason: "stop" }], usage },
 		];
 		for (const chunk of chunks) res.write(`data: ${JSON.stringify({ id: "fixture", model: modelId, ...chunk })}\n\n`);

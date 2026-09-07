@@ -4,6 +4,7 @@ import { tmpdir } from "node:os";
 import { relative, resolve } from "node:path";
 import { promisify } from "node:util";
 import type { EvalWorkspaceV2 } from "../schema/suite.js";
+import { forgetPatchBaseline, recordPatchBaseline } from "../verifiers/patch.js";
 import type { PreparedEvalWorkspace } from "./local.js";
 
 const execFileAsync = promisify(execFile);
@@ -42,9 +43,11 @@ export async function prepareTempCopyWorkspace(
 			recursive: true,
 			filter: (path) => shouldCopy(relative(source, path), excludes, selection),
 		});
+		recordPatchBaseline(dest);
 		return {
 			dir: dest,
 			cleanup: async () => {
+				forgetPatchBaseline(dest);
 				await rm(dest, { recursive: true, force: true });
 			},
 		};

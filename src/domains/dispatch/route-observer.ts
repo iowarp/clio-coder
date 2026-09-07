@@ -167,6 +167,8 @@ export interface RouteObservationHandle {
 }
 
 export interface RouteObservedOutcome extends RouteRealizedOutcome {
+	/** Host lifecycle assignment identity, separate from the published ancestry root. */
+	assignmentId?: string;
 	receipt: RunReceipt;
 	envelope: RunEnvelope;
 	quality: RouteQualityReduction;
@@ -301,7 +303,7 @@ export function createRouteObserver(options: CreateRouteObserverOptions): RouteO
 			const subject = byDigest.get(record.receiptDigest);
 			if (subject === undefined) continue;
 			const quality = reduceRouteQuality({
-				subject,
+				subject: { ...subject, assignmentId: record.assignmentId },
 				receipts: sources.receipts,
 				gateArtifacts: sources.gates,
 				evalArtifacts: sources.evals,
@@ -440,7 +442,7 @@ export function createRouteObserver(options: CreateRouteObserverOptions): RouteO
 				history.upsert({
 					version: 3,
 					receiptDigest: outcome.receipt.integrity.digest,
-					assignmentId: outcome.receipt.lineage?.rootRunId ?? outcome.receipt.runId,
+					assignmentId: outcome.assignmentId ?? outcome.receipt.lineage?.rootRunId ?? outcome.receipt.runId,
 					route: realized.route,
 					executionRole: realized.route.executionRole,
 					qualityLabel: outcome.quality.label,

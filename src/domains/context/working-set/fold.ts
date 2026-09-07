@@ -18,13 +18,25 @@ export function refKey(ref: WorkingSetRef): string {
 	return ref.entry;
 }
 
-export function parseRefKey(key: string): WorkingSetRef | null {
+export function parseRefKey(key: string, view?: WorkingSetView): WorkingSetRef | null {
 	const trimmed = key.trim();
 	if (trimmed.length === 0 || /\s/.test(trimmed)) return null;
+	if (/^r[1-9]\d*$/.test(trimmed) && view !== undefined) {
+		const matches = [...view.evicted].filter(([, state]) => state.alias === trimmed);
+		return matches.length === 1 ? { entry: matches[0]?.[0] ?? "" } : matches.length === 0 ? { entry: trimmed } : null;
+	}
 	return { entry: trimmed };
 }
 
 export function foldWorkingSet(entries: ReadonlyArray<SessionEntry>, activeLeafTurnId?: string): WorkingSetView {
+	let recallAliasSequence = 0;
+	for (const entry of entries)
+		if (entry.kind === "contextEviction") {
+			for (const item of entry.evicted) {
+				const ordinal = Number(item.alias?.slice(1));
+				if (Number.isSafeInteger(ordinal)) recallAliasSequence = Math.max(recallAliasSequence, ordinal);
+			}
+		}
 	const active = filterEntriesToActivePath(entries, activeLeafTurnId);
 	const evicted = new Map<string, EvictedState>();
 	let evictionEvents = 0;
@@ -41,6 +53,7 @@ export function foldWorkingSet(entries: ReadonlyArray<SessionEntry>, activeLeafT
 				itemsEvicted += 1;
 				evicted.set(refKey(item.ref), {
 					reason: item.reason,
+					...(item.alias === undefined ? {} : { alias: item.alias }),
 					marker: item.marker,
 					...(item.by === undefined ? {} : { by: item.by }),
 					tokensFreed: item.tokensFreed,
@@ -58,5 +71,5 @@ export function foldWorkingSet(entries: ReadonlyArray<SessionEntry>, activeLeafT
 		// recall of the same ref is the churn signal.
 		if (entry.kind === "contextRecall") recalls += 1;
 	}
-	return { evicted, evictionEvents, itemsEvicted, recalls, lastPolicyId, lastEvictionTurnId };
+	return { recallAliasSequence, evicted, evictionEvents, itemsEvicted, recalls, lastPolicyId, lastEvictionTurnId };
 }

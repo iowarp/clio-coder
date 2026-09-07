@@ -561,7 +561,12 @@ function dispatchDetails(
 	}
 	return {
 		mode,
-		assignmentIds: runs.map((run) => run.receipt.lineage?.rootRunId ?? run.receipt.runId),
+		assignmentIds: runs.map(
+			(run) =>
+				deps.dispatch.assignments?.getStored(run.receipt.runId)?.assignmentId ??
+				run.receipt.lineage?.rootRunId ??
+				run.receipt.runId,
+		),
 		terminalRunIds: runs.map((run) => run.receipt.runId),
 		receiptCount: runs.length,
 		failedCount: failed.length,
@@ -1541,7 +1546,7 @@ async function runCompete(
 
 	// Losers are always cleaned; the winner's worktree and branch survive
 	// only while an operator decision is pending (supervised pick or a
-	// failed merge). The durable state transition happens after the worker
+	// failed merge). Every removed candidate is archived under a durable recovery ref. The durable state transition happens after the worker
 	// barrier and before deletion, defining the safe restart boundary.
 	const winnerAtFinalization = currentWinner();
 	if (ownership !== null) {
@@ -1597,8 +1602,7 @@ async function runCompete(
 /**
  * Apply a preserved compete winner. Plan-scale by definition, so supervised
  * autonomy levels park this call for operator confirmation; the approval IS
- * the winner confirmation. After a successful merge the whole compete group
- * is cleaned up.
+ * the winner confirmation. After a successful merge scratch worktrees are cleaned up; candidate recovery refs remain.
  */
 function runApplyWinner(
 	input: { branch: string; cwd: string },
@@ -1745,7 +1749,7 @@ function runApplyWinner(
 	}
 	return {
 		kind: "ok",
-		output: `winner ${branch} merged into the current branch; compete group ${group} cleaned up`,
+		output: `winner ${branch} merged into the current branch; compete group ${group} scratch cleaned up; candidate states remain under refs/clio-coder/compete/ (list with git for-each-ref)`,
 		details: {
 			mode: "apply_winner",
 			branch,
@@ -1810,14 +1814,14 @@ function competeResult(
 	if (outcome.winner?.applied === true) {
 		return {
 			kind: "ok",
-			output: `compete winner candidate ${outcome.winner.index} applied (branch ${outcome.winner.branch} merged)\n\n${body}`,
+			output: `compete winner candidate ${outcome.winner.index} applied (branch ${outcome.winner.branch} merged); candidate states remain under refs/clio-coder/compete/ (list with git for-each-ref)\n\n${body}`,
 			details,
 		};
 	}
 	if (outcome.winner !== null && outcome.needsDecision === undefined) {
 		const lines = [
 			`compete winner: candidate ${outcome.winner.index} (branch ${outcome.winner.branch}), preserved for confirmation at autonomy ${autonomy}`,
-			`Apply it with dispatch apply_winner={branch: "${outcome.winner.branch}"}; the approval prompt is the winner confirmation. Losing candidates were cleaned up.`,
+			`Apply it with dispatch apply_winner={branch: "${outcome.winner.branch}"}; the approval prompt is the winner confirmation. Losing candidate states remain under refs/clio-coder/compete/; list them with git for-each-ref.`,
 		];
 		return { kind: "ok", output: `${lines.join("\n")}\n\n${body}`, details };
 	}
@@ -2175,6 +2179,7 @@ export async function runDispatchTool(
 	// admission bounds. Keep these off the serializable approved request.
 	const dispatch = deps.dispatch;
 	const preparation = {
+		...(options?.hostRun === undefined ? {} : { hostRun: structuredClone(options.hostRun) }),
 		...(options?.signal === undefined ? {} : { signal: options.signal }),
 		...(timeoutMs === undefined ? {} : { deadlineAt: Date.now() + timeoutMs }),
 	};

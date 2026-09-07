@@ -12,7 +12,7 @@ import {
 import { getTerminationCoordinator } from "../../core/termination.js";
 import { ToolNames } from "../../core/tool-names.js";
 import { createRunReceiptQuality } from "../../domains/dispatch/receipt-findings.js";
-import { openLedger } from "../../domains/dispatch/state.js";
+import { newRunId, openLedger } from "../../domains/dispatch/state.js";
 import type { RunKind, RunOutcome, RunReceiptDraft, RunStatus, ToolCallStat } from "../../domains/dispatch/types.js";
 import type { AgentMessage, ImageContent } from "../../engine/types.js";
 import type { ChatLoop, ChatLoopEvent } from "../../interactive/chat-loop.js";
@@ -183,8 +183,15 @@ function recordToolEnd(stats: HeadlessMainAgentReceiptStats, event: ChatLoopEven
 	stat.count += 1;
 	const durationMs = durationMsFromEvent(event);
 	if (durationMs !== undefined) stat.totalDurationMs += durationMs;
-	if (event.isError) stat.errors += 1;
-	else stat.ok += 1;
+	// Registry settlement is authoritative; legacy producers only expose isError.
+	const outcome = (event as { outcome?: unknown }).outcome;
+	if (outcome === "blocked") stat.blocked += 1;
+	else if (outcome === "error") stat.errors += 1;
+	else if (outcome === "ok") stat.ok += 1;
+	else if (outcome === undefined) {
+		if (event.isError) stat.errors += 1;
+		else stat.ok += 1;
+	}
 	stats.toolStats.set(tool, stat);
 	if (tool === ToolNames.Context) {
 		const rawTurnId = (event as { turnId?: unknown }).turnId;
@@ -270,6 +277,7 @@ interface HeadlessTerminalOutcome {
 }
 
 async function recordHeadlessMainAgentReceipt(input: {
+	runId: string;
 	chat: ChatLoop;
 	task: string;
 	startedAt: string;
@@ -292,6 +300,7 @@ async function recordHeadlessMainAgentReceipt(input: {
 	const outcomeDetail = input.terminal.failureMessage;
 	const ledger = openLedger();
 	const envelope = ledger.create({
+		id: input.runId,
 		agentId: "main-agent",
 		executionRole: "builder",
 		requestOrigin: "user",
@@ -397,6 +406,9 @@ function defaultShutdownHooks(): HeadlessShutdownHooks {
 }
 
 export async function runHeadlessMainAgent(chat: ChatLoop, options: HeadlessMainAgentOptions): Promise<number> {
+	// Children need the authoritative parent before submit can invoke dispatch.
+	// The terminal writer reuses this identity whichever settlement path wins.
+	const runId = newRunId();
 	const mode = options.mode ?? "text";
 	const jsonEvents = options.jsonEvents ?? "full";
 	const startedAt = new Date().toISOString();
@@ -426,6 +438,7 @@ export async function runHeadlessMainAgent(chat: ChatLoop, options: HeadlessMain
 		if (sealed !== null) return sealed;
 		const endedAt = new Date().toISOString();
 		sealed = recordHeadlessMainAgentReceipt({
+			runId,
 			chat,
 			task: options.prompt,
 			startedAt,
@@ -530,6 +543,7 @@ export async function runHeadlessMainAgent(chat: ChatLoop, options: HeadlessMain
 	try {
 		if (mode === "json" && jsonEvents === "terminal") writeTerminalTurnStart();
 		const submitOptions = {
+			hostRun: { runId, lineage: { parentRunId: null, rootRunId: runId, depth: 0, attempt: 0 } },
 			...(options.images && options.images.length > 0 ? { images: options.images } : {}),
 			...(options.workingContextPaths && options.workingContextPaths.length > 0
 				? { workingContextPaths: options.workingContextPaths }

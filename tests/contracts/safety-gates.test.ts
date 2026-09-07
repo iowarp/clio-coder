@@ -62,7 +62,11 @@ describe("safety gate boundary", () => {
 	it("recognizes only safe complete command chains inside the workspace", () => {
 		const policy = engine();
 		const admitted = policy.evaluate({ tool: ToolNames.Bash, args: { command: "cd pkg && npm test && git status" } });
-		strictEqual(admitted.kind, "allow");
+		strictEqual(admitted.kind, "ask");
+		strictEqual(
+			policy.evaluate({ tool: ToolNames.Bash, args: { command: "cd pkg && npm test && git status" } }, "confirmed").kind,
+			"allow",
+		);
 		strictEqual(admitted.execRecognition, "recognized");
 
 		for (const command of [

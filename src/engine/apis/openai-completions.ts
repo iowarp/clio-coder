@@ -297,13 +297,14 @@ function withLiteLLMRouteFailureAdvice(
 	(async () => {
 		try {
 			for await (const event of source) {
-				if (event.type === "error") {
+				if (event.type === "error" && event.reason !== "aborted" && event.error.stopReason !== "aborted") {
 					event.error.errorMessage = liteLLMRouteFailureMessage(event.error.errorMessage, metadata.targetId, model.id);
 				}
 				advised.push(event as AssistantMessageEvent);
 			}
 			advised.end();
 		} catch (err) {
+			if (err instanceof Error && err.name === "AbortError") throw err;
 			const message = err instanceof Error ? err.message : String(err);
 			throw new Error(liteLLMRouteFailureMessage(message, metadata.targetId, model.id));
 		}

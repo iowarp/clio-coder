@@ -389,6 +389,11 @@ export function createInteractiveEventProjection(deps: InteractiveEventProjectio
 
 	const seenMiddlewareBudgetWarnings = new Set<string>();
 	remainingUnsubscribers.push(
+		deps.bus.on(BusChannels.ExtensionsLoadIssue, (payload) => {
+			if (typeof payload?.message !== "string" || payload.message.trim().length === 0) return;
+			deps.appendTranscriptNotice("warn", payload.message);
+			deps.requestRender();
+		}),
 		deps.bus.on(BusChannels.MiddlewareHookFailed, (payload) => {
 			const notice = middlewareHookFailedSessionNotice(payload, seenMiddlewareBudgetWarnings);
 			if (notice === null) return;

@@ -150,7 +150,9 @@ export function patchToolChoiceNamedPayload(
 			if (Object.keys(outputConfig).length > 0) patched.output_config = outputConfig;
 			else delete patched.output_config;
 		}
-		return { ...patched, tools, tool_choice: { type: "tool", name: toolName } };
+		// Keep the cacheable schema prefix intact. The request-level choice
+		// already identifies the required tool; narrowing changes it twice.
+		return { ...patched, tool_choice: { type: "tool", name: toolName } };
 	}
 	if (model.api === "google-generative-ai" || model.api === "google-vertex") {
 		if (!isRecord(payload.config) || payload.config.tools === undefined || payload.config.tools === null)

@@ -210,7 +210,16 @@ function extractWritePath(tool: string, args: Record<string, unknown> | undefine
 	return tool === ToolNames.Artifact ? artifactDefaultPath(args?.kind) : null;
 }
 
+/** Shared by classification and registry exposure; an empty body still sends data. */
+export function webFetchIsOutward(args: Record<string, unknown> | undefined): boolean {
+	const method = typeof args?.method === "string" && args.method.length > 0 ? args.method.toUpperCase() : "GET";
+	return (method !== "GET" && method !== "HEAD") || args?.body !== undefined;
+}
+
 export function classify(call: ClassifierCall): Classification {
+	if (call.tool === ToolNames.WebFetch && webFetchIsOutward(call.args)) {
+		return { actionClass: "write", reasons: ["web-fetch:outward"] };
+	}
 	const base = baseClassify(call.tool);
 	if (base === null) {
 		return { actionClass: "unknown", reasons: [`unknown tool: ${call.tool}`] };

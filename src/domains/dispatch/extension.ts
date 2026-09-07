@@ -364,7 +364,9 @@ interface ActiveRun {
 	stallKilled: boolean;
 	/** ACP event-inactivity window; null for native runs (heartbeat spec governs those). */
 	stallTimeoutMs: number | null;
+	/** Internal logical assignment/retry lineage, independent of published host ancestry. */
 	lineage: RunLineage;
+	hostRun?: DispatchPreparationOptions["hostRun"];
 	heartbeatAt: HeartbeatStamp | null;
 	heartbeatStatus: HeartbeatStatus;
 	meter: RunTokenMeter;
@@ -2794,6 +2796,7 @@ export function createDispatchBundle(
 	const retryQueue = new Map<string, RetryQueueEntry>();
 	const retryBackoff = new Map<string, BackoffState>();
 	const retryReasons = new Map<string, string>();
+	const assignmentRootsByAttempt = new Map<string, string>();
 	const assignments = new AssignmentRegistry({
 		onStreamError: (error) => reportDispatchDiagnostic("assignment event stream", error),
 	});
@@ -2823,8 +2826,19 @@ export function createDispatchBundle(
 	}
 
 	function lineageFor(req: DispatchRequest, runId: string): RunLineage {
-		if (req.lineage) return { ...req.lineage };
-		return { parentRunId: null, rootRunId: runId, attempt: 0, depth: 0 };
+		const lineage = req.lineage ? { ...req.lineage } : { parentRunId: null, rootRunId: runId, attempt: 0, depth: 0 };
+		assignmentRootsByAttempt.set(runId, lineage.rootRunId);
+		return lineage;
+	}
+
+	function publishedLineage(lineage: RunLineage, hostRun: DispatchPreparationOptions["hostRun"]): RunLineage {
+		if (hostRun === undefined) return { ...lineage };
+		return {
+			parentRunId: lineage.attempt === 0 ? hostRun.runId : lineage.parentRunId,
+			rootRunId: hostRun.lineage.rootRunId,
+			depth: hostRun.lineage.depth + 1,
+			attempt: lineage.attempt,
+		};
 	}
 
 	function accumulateFinalizedTotals(receipt: RunReceipt): void {
@@ -3143,7 +3157,7 @@ export function createDispatchBundle(
 				if (decision.excludedRouteParts.includes("model")) delete retryReq.model;
 				if (decision.excludedRouteParts.includes("runtime")) delete retryReq.workerRuntime;
 			}
-			const handle = await dispatch(retryReq);
+			const handle = await dispatch(retryReq, undefined, run.hostRun === undefined ? undefined : { hostRun: run.hostRun });
 			// The assignment folds every attempt into one stream with a reset marker.
 			const marker: AssignmentAttemptStartEvent = {
 				type: "attempt_start",
@@ -3790,6 +3804,7 @@ export function createDispatchBundle(
 		routeDecision: RouteDecisionV1,
 		observer?: DispatchAdmissionObserver,
 		callerDeadlineAt?: number,
+		hostRun?: DispatchPreparationOptions["hostRun"],
 	): Promise<{
 		runId: string;
 		events: AsyncIterableIterator<unknown>;
@@ -4064,7 +4079,7 @@ export function createDispatchBundle(
 				status: "running",
 				pid: acp.pid,
 				heartbeatAt: heartbeatIso(acp.heartbeatAt),
-				lineage,
+				lineage: publishedLineage(lineage, hostRun),
 				identity,
 				node: LOCAL_RUN_NODE,
 				...(lifecycle.pipeline ? { pipeline: lifecycle.pipeline } : {}),
@@ -4180,6 +4195,7 @@ export function createDispatchBundle(
 			stallKilled: false,
 			stallTimeoutMs: lifecycle.agentConfig.stallTimeoutMs ?? DEFAULT_ACP_STALL_TIMEOUT_MS,
 			lineage,
+			...(hostRun === undefined ? {} : { hostRun }),
 			heartbeatAt: acp.heartbeatAt,
 			heartbeatStatus: "alive",
 			meter: tokenMeter,
@@ -4233,7 +4249,7 @@ export function createDispatchBundle(
 				outcome,
 				outcomeCode,
 				outcomeDetail,
-				lineage,
+				lineage: publishedLineage(lineage, hostRun),
 				identity,
 				// An ACP peer is spawned by this process, so the run's node is this host.
 				node: LOCAL_RUN_NODE,
@@ -4340,7 +4356,7 @@ export function createDispatchBundle(
 				outcome,
 				outcomeCode: receipt.outcomeCode ?? null,
 				outcomeDetail: receipt.outcomeDetail ?? null,
-				lineage,
+				lineage: publishedLineage(lineage, hostRun),
 				tokenCount: receipt.tokenCount,
 				inputTokenCount: receipt.inputTokenCount ?? 0,
 				outputTokenCount: receipt.outputTokenCount ?? 0,
@@ -4519,7 +4535,7 @@ export function createDispatchBundle(
 					outcome: "failed" satisfies RunOutcome,
 					outcomeDetail: detail,
 					reason: "failed",
-					lineage,
+					lineage: publishedLineage(lineage, hostRun),
 					exitCode: 1,
 				});
 				throw error;
@@ -4548,6 +4564,7 @@ export function createDispatchBundle(
 		finalPromise: Promise<RunReceipt>;
 		effectiveRequest: DispatchRequest;
 	}> {
+		const hostRun = preparation?.hostRun;
 		const requestedAt = new Date(now()).toISOString();
 		const timing: RunPhaseMarks = { requestedAt, decisionStartedAt: requestedAt };
 		const settings = getEffectiveSettings();
@@ -4593,11 +4610,13 @@ export function createDispatchBundle(
 					const phases = envelope ? deriveEnvelopePhaseDurations(envelope) : undefined;
 					if (envelope === null || envelope === undefined) return;
 					const outcome = receipt.outcome ?? (receipt.exitCode === 0 ? "succeeded" : "failed");
+					const assignmentId = assignmentRootFor(receipt.runId);
 					const quality = reduceRouteQuality({
-						subject: { receipt, envelope },
+						subject: { receipt, envelope, assignmentId },
 						receipts: [{ receipt, envelope }],
 					});
 					routeObserver.recordOutcome(observation.id, {
+						assignmentId,
 						route: observation.decision.executedRoute,
 						outcome,
 						qualityLabel: quality.label,
@@ -4639,6 +4658,7 @@ export function createDispatchBundle(
 				routeObservation.decision,
 				observer,
 				preparation?.deadlineAt,
+				hostRun,
 			);
 			// An ACP member never runs host verification, so it can only ever leave
 			// the barrier. It still edits the checkout, so the barrier has to wait
@@ -5177,7 +5197,7 @@ export function createDispatchBundle(
 			ledgerRef.update(envelope.id, {
 				status: "running",
 				pid,
-				lineage,
+				lineage: publishedLineage(lineage, hostRun),
 				identity,
 				node: placement?.node ?? LOCAL_RUN_NODE,
 				...(placement?.reroutes !== undefined && placement.reroutes.length > 0
@@ -5330,6 +5350,7 @@ export function createDispatchBundle(
 			stallKilled: false,
 			stallTimeoutMs: null,
 			lineage,
+			...(hostRun === undefined ? {} : { hostRun }),
 			heartbeatAt,
 			heartbeatStatus: "alive",
 			meter: tokenMeter,
@@ -5413,7 +5434,7 @@ export function createDispatchBundle(
 				runtimeKind: lifecycle.runtimeKind,
 				outcome,
 				outcomeCode,
-				lineage,
+				lineage: publishedLineage(lineage, hostRun),
 				...(req.intent !== undefined ? { intent: structuredClone(req.intent) } : {}),
 				pathScope: structuredClone(lifecycle.pathScope.provenance),
 				identity,
@@ -5544,7 +5565,7 @@ export function createDispatchBundle(
 				outcome,
 				outcomeCode: receipt.outcomeCode ?? null,
 				outcomeDetail: receipt.outcomeDetail ?? null,
-				lineage,
+				lineage: publishedLineage(lineage, hostRun),
 				tokenCount: receipt.tokenCount,
 				inputTokenCount: receipt.inputTokenCount ?? 0,
 				outputTokenCount: receipt.outputTokenCount ?? 0,
@@ -5909,7 +5930,7 @@ export function createDispatchBundle(
 					outcome: "failed" satisfies RunOutcome,
 					outcomeDetail: detail,
 					reason: "failed",
-					lineage,
+					lineage: publishedLineage(lineage, hostRun),
 					exitCode: 1,
 				});
 				throw error;
@@ -6462,6 +6483,7 @@ export function createDispatchBundle(
 			exitCode: 0,
 			gate,
 			council,
+			...(input.template.lineage !== undefined ? { lineage: { ...input.template.lineage } } : {}),
 			...(input.template.plan !== undefined ? { plan: input.template.plan } : {}),
 		});
 		const receipt = l.recordReceipt(runId, {
@@ -6503,6 +6525,7 @@ export function createDispatchBundle(
 			sessionId: input.template.sessionId,
 			gate,
 			council,
+			...(input.template.lineage !== undefined ? { lineage: { ...input.template.lineage } } : {}),
 			...(input.template.plan !== undefined ? { plan: input.template.plan } : {}),
 		});
 		await l.persist();
@@ -6708,7 +6731,7 @@ export function createDispatchBundle(
 				runtimeKind: run.runtimeKind,
 				outcomePhase: run.stallKilled ? "terminating" : run.aborted ? "aborting" : "running",
 				heartbeat,
-				lineage: { ...run.lineage },
+				lineage: publishedLineage(run.lineage, run.hostRun),
 				startedAt: run.startedAt,
 				elapsedMs,
 				timing,
@@ -6796,7 +6819,12 @@ export function createDispatchBundle(
 		if (assignments.get(id) !== null) return id;
 		const live = active.get(id);
 		if (live) return live.lineage.rootRunId;
-		return ledger?.get(id)?.lineage?.rootRunId ?? id;
+		const local = assignmentRootsByAttempt.get(id);
+		if (local !== undefined) return local;
+		// After restart the immutable attempt history identifies the logical
+		// assignment; a receipt's root may instead name its main host run.
+		const stored = listStoredAssignments().find((record) => record.assignmentId === id || record.attempts.includes(id));
+		return stored?.assignmentId ?? ledger?.get(id)?.lineage?.rootRunId ?? id;
 	}
 
 	function currentAssignmentRun(id: string): ActiveRun | null {
@@ -6851,8 +6879,8 @@ export function createDispatchBundle(
 			};
 		},
 		assignments: {
-			get: (id) => assignments.get(id),
-			getStored: (id) => getStoredAssignment(id),
+			get: (id) => assignments.get(assignmentRootFor(id)),
+			getStored: (id) => getStoredAssignment(assignmentRootFor(id)),
 			flushWrites: async () => {
 				await Promise.allSettled([...assignmentWrites]);
 			},

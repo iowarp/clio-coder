@@ -51,6 +51,7 @@ import { type DispatchIntent, declaredScopeIntent } from "./intent.js";
 import { verifyReceiptIntegrity } from "./receipt-integrity.js";
 import { type FleetRunRecord, writeFleetRun } from "./state.js";
 import type { RunReceipt } from "./types.js";
+import { captureWorkspaceCheckpoint, workspaceCheckpointRef } from "./workspace-checkpoint.js";
 import type { WriteBoundaryAttribution } from "./write-boundary.js";
 import { createWriteBoundaryEnforcer } from "./write-boundary-enforcer.js";
 
@@ -795,6 +796,16 @@ export async function executeFleetRun(input: ExecuteFleetRunInput): Promise<Flee
 				dispatch.reservations?.rollbackUnconsumed(ownerId);
 			},
 			onStepSettled: async (step, stepResult) => {
+				if (step.loop?.role === "check") {
+					const ref = workspaceCheckpointRef("loop", `${fleetRootId}:${step.loop.loopId}:${step.loop.attempt}`);
+					captureWorkspaceCheckpoint(
+						workspaceRoot,
+						ref,
+						`Fleet ${fleetRootId} loop ${step.loop.loopId} cycle ${step.loop.attempt}`,
+					);
+					stepResult.workspaceCheckpoint = ref;
+					notice(`loop ${step.loop.loopId} cycle ${step.loop.attempt} checkpoint=${ref}`, "gate");
+				}
 				fleetRunRecord.steps.push({ stepId: step.id, result: stepResult });
 				await writeFleetRun(fleetRunRecord);
 				// The scheduler settles both kinds of step here, so this is where a

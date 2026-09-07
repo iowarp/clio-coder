@@ -1,5 +1,6 @@
 import { BASH_HARD_CAP_BYTES } from "../core/bash-exec.js";
 import { type ToolName, ToolNames } from "../core/tool-names.js";
+import { UNTRUSTED_CONTENT_BANNER } from "../core/untrusted-content.js";
 import { BASH_DEFAULT_RESULT_DISPOSITION } from "./bash.js";
 import { OBSERVATION_POLICY_SLACK_BYTES, OBSERVE_SELF_CAPS } from "./observation.js";
 import { toolPresentationPolicy } from "./presentation.js";
@@ -278,6 +279,7 @@ const TOOL_METADATA: Readonly<Record<string, ToolMetadata>> = {
 	},
 	// RETRIEVE: network-class.
 	[ToolNames.WebFetch]: {
+		promptHint: UNTRUSTED_CONTENT_BANNER,
 		objective: "Fetch HTTP(S) text for explicit external research.",
 		uiLabel: "Fetch",
 		retrySafety: "retry_safe",

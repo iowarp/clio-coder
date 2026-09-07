@@ -27,6 +27,7 @@ import "@earendil-works/pi-ai/providers/images/register-builtins";
 
 import { getEngineEnvApiKey } from "./env-api-keys.js";
 import { engineModels } from "./models.js";
+import { instrumentProviderCall } from "./provider-diagnostics.js";
 
 export interface EngineRegisteredApiProvider extends ProviderStreams {
 	api: Api;
@@ -134,7 +135,7 @@ function hasCloudflareAuth(options?: StreamOptions): boolean {
 	);
 }
 
-export function engineStream(
+function dispatchEngineStream(
 	model: Model<Api>,
 	context: Context,
 	options?: StreamOptions,
@@ -151,7 +152,7 @@ export function engineStream(
 	return resolved(model.api).stream(model, context, withEnvApiKey(model, options));
 }
 
-export function engineStreamSimple(
+function dispatchEngineStreamSimple(
 	model: Model<Api>,
 	context: Context,
 	options?: SimpleStreamOptions,
@@ -166,6 +167,22 @@ export function engineStreamSimple(
 		return provider.streamSimple(model, context, withEnvApiKey(model, options));
 	}
 	return resolved(model.api).streamSimple(model, context, withEnvApiKey(model, options));
+}
+
+export function engineStream(
+	model: Model<Api>,
+	context: Context,
+	options?: StreamOptions,
+): AssistantMessageEventStream {
+	return instrumentProviderCall(model, options, (effective) => dispatchEngineStream(model, context, effective));
+}
+
+export function engineStreamSimple(
+	model: Model<Api>,
+	context: Context,
+	options?: SimpleStreamOptions,
+): AssistantMessageEventStream {
+	return instrumentProviderCall(model, options, (effective) => dispatchEngineStreamSimple(model, context, effective));
 }
 
 export async function completeEngineSimple(

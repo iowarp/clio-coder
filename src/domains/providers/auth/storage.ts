@@ -38,6 +38,8 @@ export interface LockResult<T> {
 }
 
 export interface AuthStorageBackend {
+	/** A committed snapshot without creating storage or acquiring a write lock. */
+	read?(): string | undefined;
 	withLock<T>(fn: (current: string | undefined) => LockResult<T>): T;
 	withLockAsync<T>(
 		fn: (current: string | undefined) => Promise<LockResult<T>>,
@@ -305,11 +307,7 @@ export class AuthStorage {
 
 	reload(): void {
 		try {
-			let content: string | undefined;
-			this.backend.withLock((current) => {
-				content = current;
-				return { result: undefined };
-			});
+			const content = this.backend.read ? this.backend.read() : this.backend.withLock((current) => ({ result: current }));
 			const read = readStorageData(content);
 			this.data = read.data;
 			this.damage = read.damage;

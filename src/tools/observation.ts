@@ -1,4 +1,6 @@
 import { GUARDRAIL_DEFAULTS, resolveGuardrail } from "../core/guardrails.js";
+import { createSafetyPolicyEngine } from "../domains/safety/policy-engine.js";
+import type { ImageContent } from "../engine/types.js";
 import type { ToolInvokeOptions, ToolResult } from "./registry.js";
 import { offloadPointer, writeToolOffload } from "./result-shaping.js";
 import { formatSize } from "./truncate.js";
@@ -337,6 +339,8 @@ export function observationBudgetExhausted(input: {
 }
 
 export interface ObservationInput {
+	images?: ImageContent[];
+	withheldPaths?: number;
 	tool: string;
 	unit: ObservationUnit;
 	format?: ObservationFormat;
@@ -446,7 +450,10 @@ export function finalizeObservation(input: ObservationInput): ToolResult {
 		}
 	}
 
-	const shownBytes = byteLength(output);
+	if ((input.withheldPaths ?? 0) > 0 && format === "text")
+		output += `\n\n[${input.withheldPaths} protected paths withheld by zero-access policy]`;
+	const shownBytes =
+		byteLength(output) + (input.images ?? []).reduce((bytes, image) => bytes + byteLength(image.data), 0);
 	recordSpentBytes(input.reservation, shownBytes);
 	const budget = budgetDetails(input.reservation);
 	const observation: Observation = {
@@ -466,5 +473,30 @@ export function finalizeObservation(input: ObservationInput): ToolResult {
 		...(offloadPath !== null ? { offloadPath } : {}),
 		...(budget !== null ? { budget } : {}),
 	};
-	return { kind: "ok", output, details: { ...(input.details ?? {}), observation } };
+	return {
+		kind: "ok",
+		output,
+		...(input.images?.length ? { images: input.images } : {}),
+		details: { ...(input.details ?? {}), observation },
+	};
+}
+
+/** Producers pass structured paths before rendering or offloading any content. */
+export function createObservationPathFilter(cwd = process.cwd()): {
+	allows(path: string): boolean;
+	readonly withheldPaths: number;
+} {
+	const policy = createSafetyPolicyEngine({ cwd });
+	const withheld = new Set<string>();
+	return {
+		allows(path) {
+			const verdict = policy.evaluate({ tool: "read", args: { path } });
+			if (verdict.reasonCode !== "path-policy:zeroAccessPaths") return true;
+			withheld.add(path);
+			return false;
+		},
+		get withheldPaths() {
+			return withheld.size;
+		},
+	};
 }

@@ -37,6 +37,7 @@ import { getSharedBus } from "../core/shared-bus.js";
 import { isSkillActivation } from "../core/skill-activation.js";
 import { StartupTimer } from "../core/startup-timer.js";
 import { getTerminationCoordinator } from "../core/termination.js";
+import { captureProjectSurface, projectSurfaceTrustNotice } from "../core/workspace-trust.js";
 import { clioDataDir, clioStateDir } from "../core/xdg.js";
 import { renderAgentCatalogSectionsFromSpecs } from "../domains/agents/catalog.js";
 import type { AgentsContract } from "../domains/agents/contract.js";
@@ -1066,6 +1067,15 @@ export async function bootOrchestrator(options: BootOptions = {}): Promise<BootR
 	termination.installSignalHandlers();
 
 	ensureClioState();
+	for (const surface of ["safety", "settings"] as const) {
+		const snapshot = captureProjectSurface(process.cwd(), surface);
+		if (snapshot.verdict === "trusted") continue;
+		for (const file of snapshot.files) {
+			if (file.text !== null || file.error !== undefined) {
+				bootStderr(`[clio-coder:trust] ${projectSurfaceTrustNotice(snapshot, file.path)}\n`);
+			}
+		}
+	}
 	sweepExpiredToolOffloads();
 	timer.mark("install check");
 
@@ -1524,6 +1534,7 @@ export async function bootOrchestrator(options: BootOptions = {}): Promise<BootR
 	// different generation. The owner slot is anchored here, so user hooks
 	// keep evaluating after the guards and before the assessors below.
 	const hookReceiptLog = createHookReceiptLog({ persistPath: join(clioStateDir(), "hook-receipts.json") });
+	let bootHookNotices = true;
 	const extensionReload = createExtensionReloadCoordinator({
 		extensions,
 		middleware,
@@ -1531,10 +1542,13 @@ export async function bootOrchestrator(options: BootOptions = {}): Promise<BootR
 		recordReceipt: (receipt) => hookReceiptLog.record(receipt),
 		report: (line) => {
 			if (!interactive) process.stderr.write(`${line}\n`);
+			else if (bootHookNotices) initialNotices.push(line);
+			else bus.emit(BusChannels.ExtensionsLoadIssue, { message: line });
 		},
 		onCommitted: (event) => bus.emit(BusChannels.ExtensionsReloaded, event),
 	});
 	extensionReload.applyBoot();
+	bootHookNotices = false;
 	termination.onDrain(() => hookReceiptLog.flush());
 	// Autonomy is hot-reloaded for interactive and headless admissions. ACP
 	// server prompts use the snapshot captured at session/new.

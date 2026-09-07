@@ -1,5 +1,6 @@
 import { spawn } from "node:child_process";
 import { StringDecoder } from "node:string_decoder";
+import { isSecretArgKey } from "../domains/safety/redaction.js";
 import { AI_AGENT_NAME } from "./agent-environment.js";
 import {
 	gitCommitAttributionEnabled,
@@ -18,7 +19,7 @@ export { clampTimerDelayMs as clampTimeoutMs } from "./timers.js";
 // (failing assertion, compiler error, exit summary) must survive.
 export const BASH_HARD_CAP_BYTES = 16 * 1024 * 1024;
 
-const CLIO_CONTROL_ENV_KEYS = ["CLIO_CODER_INTERACTIVE"] as const;
+const CLIO_CONTROL_ENV_KEYS = ["CLIO_CODER_INTERACTIVE", "BASH_ENV", "ENV"] as const;
 
 export interface BashCommandResult {
 	error: NodeJS.ErrnoException | null;
@@ -175,8 +176,10 @@ export function createBashOutputProgressController(
 	};
 }
 
-function buildToolEnv(): NodeJS.ProcessEnv {
-	const env = { ...process.env };
+function buildToolEnv(source: NodeJS.ProcessEnv = process.env): NodeJS.ProcessEnv {
+	const env = { ...source };
+	for (const key of Object.keys(env))
+		if (isSecretArgKey(key) || key.startsWith("BASH_FUNC_")) Reflect.deleteProperty(env, key);
 	env.AI_AGENT = AI_AGENT_NAME;
 	for (const key of CLIO_CONTROL_ENV_KEYS) {
 		Reflect.deleteProperty(env, key);
@@ -192,7 +195,7 @@ function buildToolEnv(): NodeJS.ProcessEnv {
 // call still gets a fresh shell — only the env composition is cached, so
 // there is no state bleed and cancellation semantics are untouched. When the
 // capture fails (profile error, timeout, no PATH), every call falls back to
-// the historical per-call `-lc`.
+// the filtered non-login environment; failed capture must not source secrets again.
 const LOGIN_ENV_CAPTURE_TIMEOUT_MS = 10_000;
 
 let loginEnvCapture: Promise<NodeJS.ProcessEnv | null> | null = null;
@@ -243,15 +246,11 @@ interface BashSpawnPlan {
 async function bashSpawnPlan(): Promise<BashSpawnPlan> {
 	loginEnvCapture ??= captureLoginEnv();
 	const captured = await loginEnvCapture;
-	if (captured === null) return { mode: "-lc", env: buildToolEnv() };
+	if (captured === null) return { mode: "-c", env: buildToolEnv() };
 	// Captured (login-transformed) values win; keys added to process.env after
 	// the capture still flow through; the CLIO control keys are re-stripped
 	// last so they never reach the child from either source.
-	const env: NodeJS.ProcessEnv = { ...process.env, ...captured };
-	env.AI_AGENT = AI_AGENT_NAME;
-	for (const key of CLIO_CONTROL_ENV_KEYS) {
-		Reflect.deleteProperty(env, key);
-	}
+	const env = buildToolEnv({ ...process.env, ...captured });
 	return { mode: "-c", env };
 }
 

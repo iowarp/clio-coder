@@ -1,5 +1,5 @@
 import { createHash } from "node:crypto";
-import { existsSync, readFileSync } from "node:fs";
+import { existsSync, readFileSync, realpathSync } from "node:fs";
 import path from "node:path";
 import { parse as parseYaml } from "yaml";
 import type { ActionClass } from "./action-classifier.js";
@@ -29,6 +29,7 @@ export interface ProjectCommandPolicy {
 }
 
 export interface LoadedProjectSafetyPolicy {
+	trustVerdict?: "trusted" | "untrusted" | "changed";
 	path: string | null;
 	hash: string | null;
 	valid: boolean;
@@ -80,7 +81,7 @@ function projectSafetyPolicyPath(cwd: string = process.cwd()): string | null {
 }
 
 export function loadProjectSafetyPolicy(cwd: string = process.cwd()): LoadedProjectSafetyPolicy {
-	const policyPath = projectSafetyPolicyPath(cwd);
+	let policyPath = projectSafetyPolicyPath(cwd);
 	if (policyPath === null) {
 		return {
 			path: null,
@@ -94,6 +95,10 @@ export function loadProjectSafetyPolicy(cwd: string = process.cwd()): LoadedProj
 	}
 	let raw: string;
 	try {
+		// Relative entries are interpreted against this source directory. Pin its
+		// canonical identity before reading; downstream trust and compilation use
+		// the captured path, not a symlink that may move after admission.
+		policyPath = realpathSync(policyPath);
 		raw = readFileSync(policyPath, "utf8");
 	} catch (err) {
 		return {

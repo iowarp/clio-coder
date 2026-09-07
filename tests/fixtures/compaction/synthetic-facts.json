@@ -1,0 +1,43 @@
+{
+	"provenance": {
+		"kind": "synthetic-authored-fixture",
+		"limitation": "Deterministic preservation contract, not a recorded model reply or semantic model-quality score."
+	},
+	"mustSurvive": [
+		{
+			"name": "architectural decision",
+			"text": "Keep the append-only event ledger as the source of truth."
+		},
+		{
+			"name": "unresolved bug",
+			"text": "BUG-271: out-of-order rank acknowledgments can deadlock; unresolved."
+		},
+		{
+			"name": "exact identifier",
+			"text": "src/transport/exchange.ts::commitRankEpoch"
+		}
+	],
+	"entries": [
+		{
+			"kind": "message",
+			"turnId": "user-0",
+			"parentTurnId": null,
+			"timestamp": "2026-09-07T00:00:00Z",
+			"role": "user",
+			"payload": {
+				"text": "Keep the append-only event ledger as the source of truth.\nBUG-271: out-of-order rank acknowledgments can deadlock; unresolved.\nsrc/transport/exchange.ts::commitRankEpoch"
+			}
+		},
+		{
+			"kind": "message",
+			"turnId": "user-1",
+			"parentTurnId": "user-0",
+			"timestamp": "2026-09-07T00:00:00Z",
+			"role": "user",
+			"payload": {
+				"text": "Continue"
+			}
+		}
+	],
+	"response": "## Goal\nRepair rank exchange.\n\n## Constraints & Preferences\nPreserve rank ordering.\n\n## Progress\n### Done\nCaptured the failure.\n### In Progress\nRepair and validate both layouts.\n### Blocked\nBUG-271: out-of-order rank acknowledgments can deadlock; unresolved.\n\n## Key Decisions\nKeep the append-only event ledger as the source of truth.\n\n## Next Steps\nReproduce before editing; rerun both rank layouts.\n\n## Critical Context\nsrc/transport/exchange.ts::commitRankEpoch"
+}

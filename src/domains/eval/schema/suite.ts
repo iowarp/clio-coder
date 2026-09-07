@@ -230,6 +230,8 @@ export interface EvalRunnerV2 {
 }
 
 export interface EvalVerifyV2 {
+	/** Workspace-relative grader code and dependencies that the runner must not change. */
+	protectedFiles?: string[];
 	commands?: string[];
 	/**
 	 * Commands that grade the task outcome. They run in the workspace before the

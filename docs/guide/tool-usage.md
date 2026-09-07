@@ -309,6 +309,8 @@ Arguments:
 
 ### Project verifier catalog
 
+Repository script checks require one-shot operator confirmation or an approved safety command declaration. Committing a verifier catalog defines the available checks; it does not grant execution authority.
+
 Projects may commit a versioned executable catalog at `.clio-coder/verifiers.yaml`:
 
 ```yaml

@@ -644,3 +644,55 @@ function behaviorArtifact(
 	});
 	return fixture;
 }
+
+test("behavioral noise bands retain unresolved changes without tolerating safety violations", () => {
+	const baseline = behaviorArtifact("noise-base", BASELINE_ROUTE);
+	const template = baseline.results[0];
+	ok(template);
+	baseline.results = Array.from({ length: 100 }, (_, repeatIndex) => ({ ...structuredClone(template), repeatIndex }));
+	const candidate = structuredClone(baseline);
+	for (const [index, result] of baseline.results.entries()) {
+		ok(result.behavioralMetrics);
+		result.behavioralMetrics.metrics["correctness.taskSolved"].value = index < 50 ? 1 : 0;
+	}
+	for (const [index, result] of candidate.results.entries()) {
+		ok(result.behavioralMetrics);
+		result.behavioralMetrics.metrics["correctness.taskSolved"].value = index < 49 ? 1 : 0;
+	}
+	const comparison = compareEvalArtifactsV4(baseline, candidate);
+	const row = comparison.behavioralMetrics.find((row) => row.metric === "correctness.taskSolved");
+	ok(row);
+	strictEqual(row.change, "unchanged");
+	strictEqual(comparison.hardGate.pass, true);
+	ok(row.noiseBand > 0.05);
+	for (const format of ["text", "md", "json"] as const)
+		ok(/noise.?band/iu.test(renderEvalComparisonReportV1(comparison, format)));
+	for (const result of baseline.results) {
+		ok(result.behavioralMetrics);
+		result.behavioralMetrics.metrics["correctness.taskSolved"].value = 1;
+	}
+	for (const result of candidate.results) {
+		ok(result.behavioralMetrics);
+		result.behavioralMetrics.metrics["correctness.taskSolved"].value = 0;
+	}
+	strictEqual(compareEvalArtifactsV4(baseline, candidate).hardGate.pass, false);
+});
+
+test("safety violations cannot be hidden by a variable distribution", () => {
+	const baseline = behaviorArtifact("safety-base", BASELINE_ROUTE);
+	const candidate = structuredClone(baseline);
+	for (const result of baseline.results) {
+		ok(result.behavioralMetrics);
+		result.behavioralMetrics.metrics["safety.violations"].value = 0;
+	}
+	for (const [index, result] of candidate.results.entries()) {
+		ok(result.behavioralMetrics);
+		result.behavioralMetrics.metrics["safety.violations"].value = index;
+	}
+	const comparison = compareEvalArtifactsV4(baseline, candidate);
+	strictEqual(comparison.hardGate.pass, false);
+	const row = comparison.behavioralMetrics.find((row) => row.metric === "safety.violations");
+	ok(row);
+	strictEqual(row.noiseBand, 0);
+	strictEqual(row.change, "regressed");
+});

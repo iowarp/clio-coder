@@ -88,19 +88,19 @@ export interface ChatTurnState {
 	/** The user turn id of the in-flight submit; null between turns. */
 	activeUserTurnId: string | null;
 	/**
-	 * Set by a loop-guard interrupt (cancel with a reason). While set, the empty
-	 * aborted assistant messages the abort produces are suppressed in both the
-	 * ledger and the live transcript; the durable closing turn carrying the
-	 * reason is persisted when the run settles (submit's finally), after the
-	 * in-flight tool results have landed. Cleared there, and defensively at the
-	 * start of each submit.
+	 * Set by an operator or explained interrupt. A nonempty aborted assistant
+	 * carries this reason; hollow abort messages are suppressed and replaced
+	 * by one durable closing turn after in-flight tool results have landed.
+	 * Cleared at settlement and defensively at the start of each submit.
 	 */
 	activeInterruptReason: string | null;
+	/** The provider's nonempty aborted message closes this interrupt without a synthetic second assistant. */
+	interruptedAssistantMessage: AgentMessage | null;
 	/**
 	 * Estimated spend of the cancelled call whose hollow aborted message the
-	 * interrupt suppressed (thinking streamed, no text). The message never reaches
-	 * the ledger, so the closing turn persisted in submit's finally carries this
-	 * instead of an estimate derived from its own notice text. Cleared with
+	 * interrupt suppressed. The message never reaches the ledger, so the closing
+	 * turn persisted in submit's finally carries this instead of an estimate
+	 * derived from its own notice text. Cleared with
 	 * `activeInterruptReason`.
 	 */
 	interruptedUsage: Record<string, unknown> | null;
@@ -148,6 +148,7 @@ export function createTurnState(initialThinkingLevel: ThinkingLevel): ChatTurnSt
 		replayedContextMessages: [],
 		activeUserTurnId: null,
 		activeInterruptReason: null,
+		interruptedAssistantMessage: null,
 		interruptedUsage: null,
 		synthesisToolLock: false,
 		toolProseAbortReason: null,

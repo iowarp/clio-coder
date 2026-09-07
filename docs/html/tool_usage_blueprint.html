@@ -274,6 +274,7 @@ dispatch(
 </ul>
 <p><code>verify()</code> lists checks grouped as <code>package.json</code> and <code>.clio-coder/verifiers.yaml</code>. Both providers project through the same canonical metadata: <code>{id, description, command, cwd, timeoutMs, tags, source}</code>. Package scripts must match the verification family <code>test*/lint*/build*/typecheck*/check*/format*/ci*</code> (a family prefix, optionally followed by <code>:</code>, <code>.</code>, or <code>-</code> and a suffix, e.g. <code>test:unit</code>). <code>verify(check=&quot;typecheck&quot;)</code> runs <code>npm run typecheck</code> through the safe-exec spine with no shell. A package script name outside the family is rejected with a pointer to run it through bash.</p>
 <h3>Project verifier catalog</h3>
+<p>Repository script checks require one-shot operator confirmation or an approved safety command declaration. Committing a verifier catalog defines the available checks; it does not grant execution authority.</p>
 <p>Projects may commit a versioned executable catalog at <code>.clio-coder/verifiers.yaml</code>:</p>
 <pre><code class="language-yaml">version: 1
 checks:

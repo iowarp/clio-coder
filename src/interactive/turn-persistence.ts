@@ -17,6 +17,7 @@ import {
 	type AssistantCallTiming,
 	assistantSessionPayload,
 	estimatedUsageForInterruptedTurn,
+	explainInterruptedAssistant,
 	extractUserText,
 	hasPersistableAssistantContent,
 	hasStructuredToolCall,
@@ -220,10 +221,12 @@ export function createTurnPersistence(deps: TurnPersistenceDeps): TurnPersistenc
 
 	const appendAssistantTurn = (message: AgentMessage, timing?: AssistantCallTiming | null): void => {
 		if (message?.role !== "assistant") return;
+		if (persistedAssistantMessages.has(message)) return;
 		// A loop-guard interrupt already persisted a durable closing turn with the
 		// stop reason; drop the empty aborted message the abort leaves behind so
 		// the operator does not see a hollow "request aborted" turn after it.
 		if (state.activeInterruptReason !== null && isEmptyAbortedAssistantMessage(message)) return;
+		if (explainInterruptedAssistant(message, state.activeInterruptReason)) state.interruptedAssistantMessage = message;
 		const failure = terminalFailureFromAssistantMessage(message);
 		const payload = assistantSessionPayload(message, failure);
 		if (timing) payload.timing = timing;
