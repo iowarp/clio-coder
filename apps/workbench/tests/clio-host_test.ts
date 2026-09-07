@@ -10,7 +10,7 @@
 import { deepStrictEqual, equal, match, ok, rejects } from "node:assert/strict";
 import { join } from "node:path";
 import { fileURLToPath } from "node:url";
-import type { AcpClientTiming, AcpLaunchSpec } from "../acp-client.ts";
+import { AcpClient, type AcpClientTiming, type AcpLaunchSpec } from "../acp-client.ts";
 import { applyTurnEvent, emptyTurnProjection, type TurnEventInput, type TurnProjection } from "../src/timeline.ts";
 import {
 	ACP_CLIENT_NAME,
@@ -94,13 +94,15 @@ function fixtureLaunch(
 	permissionLogPath?: string,
 	pidPath?: string,
 ): AcpLaunchSpec {
-	const writable = [callLogPath, permissionLogPath, pidPath].filter((path): path is string => path !== undefined);
+	const writable = [callLogPath, permissionLogPath, pidPath, ...(scenario === "permission-probe-held" ? [root] : [])]
+		.filter((path): path is string => path !== undefined);
 	return {
 		command: Deno.execPath(),
 		args: [
 			"run",
 			"--quiet",
 			"--no-config",
+			...(scenario === "permission-probe-held" ? [`--allow-read=${root}`] : []),
 			...(writable.length === 0 ? [] : [`--allow-write=${writable.join(",")}`]),
 			...(scenario === "leader-exits-descendant" ? ["--allow-run=/usr/bin/sleep"] : []),
 			fixturePath,
@@ -886,7 +888,7 @@ Deno.test("a chained permission remains awaiting approval after the preceding de
 });
 
 for (const operation of ["resolvePermission", "cancelTurn", "abandon"] as const) {
-	Deno.test(`${operation} is serialized behind an earlier close`, async () => {
+	Deno.test(`${operation} cannot overtake an earlier close`, async () => {
 		const test = await harness("permission");
 		try {
 			const context = await test.host.startTurn("Keep this permission behind the host queue.");
@@ -2182,3 +2184,207 @@ Deno.test("a tool call that spawned a worker is attributed to it, and the rest t
 		await test.dispose();
 	}
 });
+
+for (const control of ["cancel", "allow_once", "reject_once"] as const) {
+	Deno.test(`pending probe cannot delay host ${control} or accept a stale decision`, async () => {
+		const test = await harness("permission-probe-held", { callLog: true, permissionLog: true });
+		let probe: Promise<void> | undefined;
+		try {
+			const context = await test.host.startTurn("Wait for my decision.");
+			const permission = await waitForEvent(test.sink, "turn.permission.requested");
+			probe = test.host.probeTarget("lmstudio");
+			await waitFor(() => {
+				try {
+					return Deno.statSync(join(test.root, ".fixture-probe-started")).isFile;
+				} catch {
+					return false;
+				}
+			}, "unresolved ACP probe");
+			await rejects(
+				test.host.resolvePermission("stale-turn", permission.payload.permissionId, "allow_once"),
+				assertHostError("not-found"),
+			);
+			await rejects(
+				test.host.resolvePermission(context.turnId, "stale-permission", "allow_once"),
+				assertHostError("not-found"),
+			);
+			const delivered = control === "cancel"
+				? test.host.cancelTurn(context.turnId)
+				: test.host.resolvePermission(context.turnId, permission.payload.permissionId, control);
+			const terminal = await waitForEvent(test.sink, "turn.terminal", () => true, 2_000);
+			await delivered;
+			equal(terminal.payload.outcome, control === "cancel" ? "canceled" : "completed");
+			equal(test.sink.ofType("targets.probed").length, 0, "control reaches ACP before probe release");
+			await rejects(
+				test.host.resolvePermission(context.turnId, permission.payload.permissionId, "allow_once"),
+				assertHostError("not-found"),
+			);
+			await Deno.writeTextFile(join(test.root, ".fixture-probe-release"), "release");
+			await probe;
+			await test.host.close();
+			await waitForCallLog(test.permissionLogPath);
+			const answers = JSON.parse(await Deno.readTextFile(test.permissionLogPath)) as unknown[];
+			equal(answers.length, 1, "exactly one permission response crosses ACP");
+			equal(test.sink.ofType("turn.terminal").length, 1);
+		} finally {
+			await Deno.writeTextFile(join(test.root, ".fixture-probe-release"), "release");
+			await probe?.catch(() => undefined);
+			await test.dispose();
+		}
+	});
+}
+
+for (const control of ["cancel", "allow_once"] as const) {
+	Deno.test(`pending probe and host close drain an accepted ${control} exactly once`, async () => {
+		const test = await harness("permission-probe-held", { callLog: true, permissionLog: true });
+		let probe: Promise<void> | undefined;
+		let closing: Promise<void> | undefined;
+		const held = holdFirstWriterFrame('"id":"fixture-permission-1","result"');
+		try {
+			const context = await test.host.startTurn("Race control delivery with close.");
+			const permission = await waitForEvent(test.sink, "turn.permission.requested");
+			probe = test.host.probeTarget("lmstudio");
+			await waitFor(() => {
+				try {
+					return Deno.statSync(join(test.root, ".fixture-probe-started")).isFile;
+				} catch {
+					return false;
+				}
+			}, "unresolved ACP probe");
+			const delivered = control === "cancel"
+				? test.host.cancelTurn(context.turnId)
+				: test.host.resolvePermission(context.turnId, permission.payload.permissionId, "allow_once");
+			await waitFor(held.held, "accepted control write");
+			let closed = false;
+			closing = test.host.close().then(() => {
+				closed = true;
+			});
+			const late = rejects(
+				test.host.resolvePermission(context.turnId, permission.payload.permissionId, "allow_once"),
+				assertHostError("not-found"),
+			);
+			await Deno.writeTextFile(join(test.root, ".fixture-probe-release"), "release");
+			await probe;
+			await delay(20);
+			equal(closed, false, "retirement waits for the accepted control even after the ordinary lane drains");
+			held.release();
+			await Promise.all([delivered, late, closing]);
+			equal(test.host.phase, "closed");
+			equal(test.host.generation, null);
+			equal(test.sink.ofType("turn.terminal").length, 1);
+			equal(test.sink.ofType("turn.permission.resolved").length, 1);
+			await waitForCallLog(test.permissionLogPath);
+			equal((JSON.parse(await Deno.readTextFile(test.permissionLogPath)) as unknown[]).length, 1);
+			const methods = await callMethods(test.callLogPath);
+			equal(methods.filter((method) => method === "session/close").length, 1);
+			if (control === "cancel") ok(methods.indexOf("session/cancel") < methods.indexOf("session/close"));
+		} finally {
+			held.restore();
+			await Deno.writeTextFile(join(test.root, ".fixture-probe-release"), "release");
+			await probe?.catch(() => undefined);
+			await closing;
+			await test.dispose();
+		}
+	});
+}
+
+Deno.test("pending probe and earlier host close refuse both controls before retirement", async () => {
+	const test = await harness("permission-probe-held", { permissionLog: true });
+	let probe: Promise<void> | undefined;
+	let closing: Promise<void> | undefined;
+	try {
+		const context = await test.host.startTurn("Close owns this pending approval.");
+		const permission = await waitForEvent(test.sink, "turn.permission.requested");
+		probe = test.host.probeTarget("lmstudio");
+		await waitFor(() => {
+			try {
+				return Deno.statSync(join(test.root, ".fixture-probe-started")).isFile;
+			} catch {
+				return false;
+			}
+		}, "unresolved ACP probe");
+		closing = test.host.close();
+		await rejects(test.host.cancelTurn(context.turnId), assertHostError("not-found"));
+		await rejects(
+			test.host.resolvePermission(context.turnId, permission.payload.permissionId, "allow_once"),
+			assertHostError("not-found"),
+		);
+		equal(test.sink.ofType("turn.permission.resolved").length, 0);
+		await Deno.writeTextFile(join(test.root, ".fixture-probe-release"), "release");
+		await Promise.all([probe, closing]);
+		equal(test.sink.ofType("turn.terminal").length, 1);
+		equal(test.sink.ofType("turn.terminal")[0]?.payload.code, "host-shutdown");
+		equal(test.sink.ofType("turn.permission.resolved").length, 1);
+		await waitForCallLog(test.permissionLogPath);
+		equal((JSON.parse(await Deno.readTextFile(test.permissionLogPath)) as unknown[]).length, 1);
+	} finally {
+		await Deno.writeTextFile(join(test.root, ".fixture-probe-release"), "release");
+		await probe?.catch(() => undefined);
+		await closing;
+		await test.dispose();
+	}
+});
+
+for (const operation of ["newSession", "closeSession"] as const) {
+	Deno.test(`pending probe and ${operation} preserve control delivery before generation retirement`, async () => {
+		const test = await harness("permission-probe-held");
+		let probe: Promise<void> | undefined;
+		let replacing: Promise<void> | undefined;
+		const retiredGenerations: string[] = [];
+		const originalRetire = AcpClient.prototype.retire;
+		AcpClient.prototype.retire = function (options) {
+			retiredGenerations.push(this.generation);
+			return originalRetire.call(this, options);
+		};
+		const held = holdFirstWriterFrame('"id":"fixture-permission-1","result"');
+		try {
+			const context = await test.host.startTurn("Finish while the permission write is still held.");
+			const permission = await waitForEvent(test.sink, "turn.permission.requested");
+			probe = test.host.probeTarget("lmstudio");
+			await waitFor(() => {
+				try {
+					return Deno.statSync(join(test.root, ".fixture-probe-started")).isFile;
+				} catch {
+					return false;
+				}
+			}, "unresolved ACP probe");
+			const delivered = test.host.resolvePermission(context.turnId, permission.payload.permissionId, "allow_once");
+			await waitFor(held.held, "held permission write");
+			await waitForEvent(test.sink, "turn.terminal");
+			replacing = test.host[operation]();
+			await Deno.writeTextFile(join(test.root, ".fixture-probe-release"), "release");
+			await probe;
+			await delay(20);
+			equal(test.host.generation, context.generation);
+			equal(retiredGenerations.length, 0, "retirement has not even started while control delivery is held");
+			// Even after the old prompt has completed, replacement cannot retire
+			// the child until its permission delivery and public settlement finish.
+			equal(test.sink.ofType("turn.permission.resolved").length, 0);
+			held.release();
+			await Promise.all([delivered, replacing]);
+			ok(test.host.generation !== context.generation);
+			deepStrictEqual(retiredGenerations, [context.generation]);
+			equal(test.sink.ofType("turn.permission.resolved").length, 1);
+			if (operation === "closeSession") await test.host.newSession();
+			const next = await test.host.startTurn("Reject the old generation capability.");
+			const nextPermission = await waitForEvent(
+				test.sink,
+				"turn.permission.requested",
+				(event) => event.context.generation === next.generation,
+			);
+			await rejects(
+				test.host.resolvePermission(next.turnId, permission.payload.permissionId, "allow_once"),
+				assertHostError("not-found"),
+			);
+			await test.host.resolvePermission(next.turnId, nextPermission.payload.permissionId, "reject_once");
+			await waitForEvent(test.sink, "turn.terminal", (event) => event.context.generation === next.generation);
+		} finally {
+			AcpClient.prototype.retire = originalRetire;
+			held.restore();
+			await Deno.writeTextFile(join(test.root, ".fixture-probe-release"), "release");
+			await probe?.catch(() => undefined);
+			await replacing;
+			await test.dispose();
+		}
+	});
+}

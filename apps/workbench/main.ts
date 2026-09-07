@@ -441,6 +441,7 @@ class WorkbenchRuntime implements HostSink {
 	#origin = "";
 	#commandQueue: Promise<void> = Promise.resolve();
 	#readCommandQueue: Promise<void> = Promise.resolve();
+	readonly #controlCommands = new Set<Promise<void>>();
 	#graceTimer: ReturnType<typeof setTimeout> | null = null;
 	#closed = false;
 
@@ -660,6 +661,7 @@ class WorkbenchRuntime implements HostSink {
 		await Promise.all([
 			this.#commandQueue.catch(() => undefined),
 			this.#readCommandQueue.catch(() => undefined),
+			...this.#controlCommands,
 		]);
 		const open = this.#open;
 		this.#open = null;
@@ -768,6 +770,17 @@ class WorkbenchRuntime implements HostSink {
 	// ---------------------------------------------------------------- commands
 
 	handleCommand(session: SocketSession, command: ClientCommand): Promise<void> {
+		if (command.kind === "turn.cancel" || command.kind === "permission.resolve") {
+			// Resolve the current project/host immediately, before any awaited ordinary
+			// command can replace it. The host owns turn/challenge checks and ordering.
+			const control = this.#dispatchCommand(session, command);
+			this.#controlCommands.add(control);
+			const settled = () => {
+				this.#controlCommands.delete(control);
+			};
+			void control.then(settled, settled);
+			return control;
+		}
 		// Fixed inspection adapters have their own serialized lane. They may run
 		// alongside the owned ACP child, but can never delay Stop, permission,
 		// project, or session controls on the primary lane. Recovery diagnostics

@@ -801,6 +801,7 @@ export class ClioProjectHost {
 	#targets: readonly WireTarget[] | null = null;
 	#targetsTruncated = false;
 	#serial: Promise<void> = Promise.resolve();
+	#controlSerial: Promise<void> = Promise.resolve();
 
 	constructor(options: ClioHostOptions) {
 		validateProject(options.project);
@@ -1188,13 +1189,16 @@ export class ClioProjectHost {
 	}
 
 	resolvePermission(turnId: string, permissionId: string, decision: "allow_once" | "reject_once"): Promise<void> {
-		return this.#serialize(async () => {
+		return this.#serializeControl(async () => {
 			const process = this.#process;
 			const turn = process?.turn ?? null;
 			if (process === null || turn === null || turn.context.turnId !== turnId) {
 				throw new HostError("not-found", "That permission does not belong to the active turn.");
 			}
-			if (turn.permission === null || turn.permission.publicId !== permissionId) {
+			if (
+				turn.settling || turn.cancelReason !== null || turn.permission === null ||
+				turn.permission.publicId !== permissionId
+			) {
 				throw new HostError("not-found", "That permission is no longer waiting.");
 			}
 			try {
@@ -1211,7 +1215,7 @@ export class ClioProjectHost {
 	}
 
 	cancelTurn(turnId: string, reason: CancelReason = "operator"): Promise<void> {
-		return this.#serialize(async () => {
+		return this.#serializeControl(async () => {
 			const process = this.#process;
 			const turn = process?.turn ?? null;
 			if (process === null || turn === null || turn.context.turnId !== turnId) {
@@ -1234,8 +1238,29 @@ export class ClioProjectHost {
 	// ---------------------------------------------------------------- internals
 
 	#serialize<T>(operation: () => Promise<T>): Promise<T> {
-		const queued = this.#serial.then(operation, operation);
+		const run = async () => {
+			// A new ordinary command (including close/session replacement) must not
+			// retire the process while an accepted control is still being delivered.
+			await this.#controlSerial;
+			return await operation();
+		};
+		const queued = this.#serial.then(run, run);
 		this.#serial = queued.then(() => undefined, () => undefined);
+		return queued;
+	}
+
+	#serializeControl<T>(operation: () => Promise<T>): Promise<T> {
+		// Controls bypass ordinary ACP requests, but preserve permission/cancel write
+		// ordering and never migrate to a replacement process while queued.
+		const process = this.#closed ? null : this.#process;
+		const run = () => {
+			if (process === null || this.#process !== process || process.retiring) {
+				throw new HostError("not-found", "That turn is not active.");
+			}
+			return operation();
+		};
+		const queued = this.#controlSerial.then(run, run);
+		this.#controlSerial = queued.then(() => undefined, () => undefined);
 		return queued;
 	}
 

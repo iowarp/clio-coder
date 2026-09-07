@@ -104,7 +104,14 @@ function fixtureLauncher(scenario: string, pidPath?: string): ClioLauncher {
 					"run",
 					"--quiet",
 					"--no-config",
-					...(pidPath === undefined ? [] : [`--allow-write=${pidPath}`]),
+					...(scenario === "permission-probe-held"
+						? [
+							`--allow-read=${trustedRoot}`,
+							`--allow-write=${trustedRoot}${pidPath === undefined ? "" : `,${pidPath}`}`,
+						]
+						: pidPath === undefined
+						? []
+						: [`--allow-write=${pidPath}`]),
 					ACP_CHILD_FIXTURE,
 					`--scenario=${scenario}`,
 					...(pidPath === undefined ? [] : [`--pid-file=${pidPath}`]),
@@ -1939,3 +1946,161 @@ Deno.test("a receipt may be re-authenticated only for a run the host served in i
 		await fixture.close();
 	}
 });
+
+for (const control of ["cancel", "allow-once", "reject"] as const) {
+	Deno.test(`pending probe cannot delay WebSocket ${control} or accept a stale decision`, async () => {
+		const fixture = await startFixture({ scenario: "permission-probe-held" });
+		let socket: RawWebSocket | undefined;
+		try {
+			socket = await RawWebSocket.connect(eventsEndpoint(fixture.running), fixture.running.url);
+			equal((await socket.readEvent()).kind, "connection.ready");
+			await sendCommand(socket, "open", "project.open", { path: fixture.projectRoot });
+			const opened = (await collectThrough(socket, "project.opened")).at(-1);
+			ok(opened?.kind === "project.opened");
+			const projectId = opened.payload.workspace.project.id;
+			await sendCommand(socket, "turn", "turn.start", { projectId, prompt: "Wait for my decision." });
+			const permission = (await collectThrough(socket, "turn.permission.requested")).at(-1);
+			ok(permission?.kind === "turn.permission.requested" && permission.turnId !== undefined);
+			await sendCommand(socket, "probe", "targets.probe", { projectId, targetId: "lmstudio" });
+			const deadline = Date.now() + 2_000;
+			for (;;) {
+				try {
+					await Deno.stat(join(fixture.projectRoot, ".fixture-probe-started"));
+					break;
+				} catch (error) {
+					if (!(error instanceof Deno.errors.NotFound)) throw error;
+				}
+				ok(Date.now() < deadline, "probe reached ACP");
+				await new Promise((resolve) => setTimeout(resolve, 5));
+			}
+			const decision = {
+				projectId,
+				turnId: permission.turnId,
+				permissionId: permission.payload.permissionId,
+				decision: "allow-once",
+			};
+			for (
+				const stale of [{ projectId: "stale-project" }, { turnId: "stale-turn" }, { permissionId: "stale-permission" }]
+			) {
+				await sendCommand(socket, "stale", "permission.resolve", { ...decision, ...stale });
+				const error = (await collectThrough(socket, "command.error")).at(-1);
+				ok(error?.kind === "command.error");
+				equal(error.payload.requestId, "stale");
+				equal(error.payload.code, "not-found");
+			}
+			await sendCommand(
+				socket,
+				"control",
+				control === "cancel" ? "turn.cancel" : "permission.resolve",
+				control === "cancel" ? { projectId, turnId: permission.turnId } : { ...decision, decision: control },
+			);
+			const events = await collectThrough(socket, "turn.terminal");
+			const terminal = events.at(-1);
+			ok(terminal?.kind === "turn.terminal");
+			equal(terminal.payload.outcome, control === "cancel" ? "canceled" : "completed");
+			ok(events.every((event) => event.kind !== "targets.probed"));
+			await sendCommand(socket, "late", "permission.resolve", decision);
+			const error = (await collectThrough(socket, "command.error")).at(-1);
+			ok(error?.kind === "command.error");
+			equal(error.payload.requestId, "late");
+			equal(error.payload.code, "not-found");
+			await Deno.writeTextFile(join(fixture.projectRoot, ".fixture-probe-release"), "release");
+			await collectThrough(socket, "targets.probed");
+		} finally {
+			await Deno.writeTextFile(join(fixture.projectRoot, ".fixture-probe-release"), "release");
+			await socket?.closeGracefully().catch(() => socket?.closeAbruptly());
+			await fixture.close();
+		}
+	});
+}
+
+for (const control of ["cancel", "allow-once"] as const) {
+	Deno.test(`pending probe and WebSocket shutdown drain an accepted ${control}`, async () => {
+		const fixture = await startFixture({ scenario: "permission-probe-held" });
+		let socket: RawWebSocket | undefined;
+		let closing: Promise<void> | undefined;
+		const originalWrite = WritableStreamDefaultWriter.prototype.write;
+		const gate = Promise.withResolvers<void>();
+		let held = false;
+		WritableStreamDefaultWriter.prototype.write = function (chunk?: unknown): Promise<void> {
+			const written = originalWrite.call(this, chunk);
+			if (
+				!held && chunk instanceof Uint8Array && decoder.decode(chunk).includes('"id":"fixture-permission-1","result"')
+			) {
+				held = true;
+				return written.then(() => gate.promise);
+			}
+			return written;
+		};
+		try {
+			socket = await RawWebSocket.connect(eventsEndpoint(fixture.running), fixture.running.url);
+			equal((await socket.readEvent()).kind, "connection.ready");
+			await sendCommand(socket, "open", "project.open", { path: fixture.projectRoot });
+			const opened = (await collectThrough(socket, "project.opened")).at(-1);
+			ok(opened?.kind === "project.opened");
+			const projectId = opened.payload.workspace.project.id;
+			await sendCommand(socket, "turn", "turn.start", { projectId, prompt: "Close while my control is in flight." });
+			const permission = (await collectThrough(socket, "turn.permission.requested")).at(-1);
+			ok(permission?.kind === "turn.permission.requested" && permission.turnId !== undefined);
+			await sendCommand(socket, "probe", "targets.probe", { projectId, targetId: "lmstudio" });
+			let deadline = Date.now() + 2_000;
+			for (;;) {
+				try {
+					await Deno.stat(join(fixture.projectRoot, ".fixture-probe-started"));
+					break;
+				} catch (error) {
+					if (!(error instanceof Deno.errors.NotFound)) throw error;
+				}
+				ok(Date.now() < deadline, "probe reached ACP");
+				await new Promise((resolve) => setTimeout(resolve, 5));
+			}
+			const decision = {
+				projectId,
+				turnId: permission.turnId,
+				permissionId: permission.payload.permissionId,
+				decision: "allow-once",
+			};
+			await sendCommand(
+				socket,
+				"control",
+				control === "cancel" ? "turn.cancel" : "permission.resolve",
+				control === "cancel" ? { projectId, turnId: permission.turnId } : decision,
+			);
+			deadline = Date.now() + 2_000;
+			while (!held) {
+				ok(Date.now() < deadline, "control reached ACP before probe release");
+				await new Promise((resolve) => setTimeout(resolve, 5));
+			}
+			let closed = false;
+			closing = fixture.running.close().then(() => {
+				closed = true;
+			});
+			await sendCommand(socket, "late", "permission.resolve", decision);
+			const beforeClose = await collectThrough(socket, "command.error");
+			const error = beforeClose.at(-1);
+			ok(error?.kind === "command.error");
+			equal(error.payload.requestId, "late");
+			equal(error.payload.code, "not-ready");
+			await Deno.writeTextFile(join(fixture.projectRoot, ".fixture-probe-release"), "release");
+			const throughProbe = await collectThrough(socket, "targets.probed");
+			await new Promise((resolve) => setTimeout(resolve, 20));
+			equal(closed, false, "shutdown drains the accepted control after the ordinary lane finishes");
+			gate.resolve();
+			const rest: ServerEvent[] = [];
+			while (![...beforeClose, ...throughProbe, ...rest].some((event) => event.kind === "turn.terminal")) {
+				rest.push(await socket.readEvent());
+			}
+			equal([...beforeClose, ...throughProbe, ...rest].filter((event) => event.kind === "turn.terminal").length, 1);
+			equal((await socket.readClose()).code, 1001);
+			socket.closeAbruptly();
+			await closing;
+		} finally {
+			WritableStreamDefaultWriter.prototype.write = originalWrite;
+			gate.resolve();
+			await Deno.writeTextFile(join(fixture.projectRoot, ".fixture-probe-release"), "release");
+			socket?.closeAbruptly();
+			await closing;
+			await fixture.close();
+		}
+	});
+}

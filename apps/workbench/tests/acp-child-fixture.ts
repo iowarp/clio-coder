@@ -61,6 +61,7 @@ interface PendingPermission {
 const SCENARIOS = [
 	"happy",
 	"permission",
+	"permission-probe-held",
 	"permission-chain",
 	"permission-late-after-cancel",
 	"stdout-partial",
@@ -201,6 +202,7 @@ const CONVERSATION_SCENARIOS = new Set<string>([
 ]);
 /** Scenarios that additionally advertise and serve the settings and targets methods. */
 const SETTINGS_SCENARIOS = new Set<string>([
+	"permission-probe-held",
 	"settings",
 	"settings-truncated",
 	"settings-invalid-thinking",
@@ -2202,6 +2204,25 @@ async function run(): Promise<void> {
 			const targetId = isRecord(params) && typeof params.targetId === "string" ? params.targetId : "";
 			if (!FIXTURE_TARGETS.some((target) => target.id === targetId)) {
 				await emitError(id, -32_602, "Unknown target.", "invalid_params", "target-unknown");
+				return;
+			}
+			if (scenario === "permission-probe-held") {
+				// Park only this response; ACP must still read cancel and permission frames.
+				await Deno.writeTextFile(join(sessionCwd, ".fixture-probe-started"), "started");
+				const pending = (async () => {
+					for (;;) {
+						try {
+							await Deno.stat(join(sessionCwd, ".fixture-probe-release"));
+							break;
+						} catch (error) {
+							if (!(error instanceof Deno.errors.NotFound)) throw error;
+						}
+						await delay(5);
+					}
+					await emitResult(id, { targetId, healthy: true, latencyMs: 12, reason: null });
+				})();
+				turnTasks.add(pending);
+				void pending.finally(() => turnTasks.delete(pending));
 				return;
 			}
 			// One healthy target and one whose credentials were never configured, so
