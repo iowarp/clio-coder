@@ -469,11 +469,22 @@ see [Lifecycle operations](#lifecycle-operations) and
 
 ### Install from source
 
-For a new checkout of the public repository:
+From source, install the published **v0.4.4** tag with that release's npm workflow:
 
 ```bash
-git clone https://github.com/iowarp/clio-coder.git
+git clone --branch v0.4.4 https://github.com/iowarp/clio-coder.git
 cd clio-coder
+npm ci
+npm run install:local
+export PATH="$HOME/.local/bin:$PATH"
+hash -r
+"$HOME/.local/bin/clio-coder" --version
+```
+
+For the existing local **v045** checkout, use the new pnpm workflow:
+
+```bash
+cd /path/to/clio-coder
 corepack enable pnpm
 pnpm install --frozen-lockfile
 pnpm run install:local
@@ -482,10 +493,9 @@ hash -r
 "$HOME/.local/bin/clio-coder" --version
 ```
 
-For an existing checkout, run the installation steps from its root without
-cloning again. This local candidate is on `v045`; that branch is unpublished,
-so cloning remote `main` does not retrieve it. Follow the dependency requirements
-of the revision you have checked out.
+This local candidate is on `v045`; that branch is unpublished, so cloning the
+public repository does not retrieve it. Run these steps from the existing
+checkout without cloning again.
 If Corepack is unavailable, install the pinned package manager with
 `npm install -g pnpm@10.34.5` instead of `corepack enable pnpm`.
 
