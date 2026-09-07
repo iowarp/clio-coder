@@ -7,8 +7,9 @@ describe("release version boundary", () => {
 		const changelog =
 			"# Changelog\n\n## Unreleased\n\n## 0.4.5-beta.1 - 2026-09-07\n\n## 0.4.4 - 2026-09-05\n\n## 0.4.3 - 2026-09-01\n";
 		assert.equal(readmeInstallVersion({ version: "0.4.5-dev.0", changelog }), "0.4.4");
-		assert.equal(readmeInstallVersion({ version: "0.4.5", changelog }), "0.4.5");
-		assert.equal(readmeInstallVersion({ version: "0.4.5-beta.1", changelog }), "0.4.5-beta.1");
+		assert.equal(readmeInstallVersion({ version: "0.4.5", changelog }), "0.4.4");
+		assert.equal(readmeInstallVersion({ version: "0.4.5-beta.1", changelog }), "0.4.4");
+		assert.equal(readmeInstallVersion({ version: "0.4.5", changelog: "## 0.4.5 - 2026-09-07\n" }), "0.4.5");
 	});
 
 	it("does not excuse a missing release or a development version with named release notes", () => {

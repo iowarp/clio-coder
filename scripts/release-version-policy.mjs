@@ -38,18 +38,18 @@ export function releaseVersionErrors({ version, changelog, releaseContext }) {
 }
 
 /**
- * Local -dev.N builds have no published tag. Their installation instructions
- * continue to name the most recent dated stable release under Unreleased.
- * Other versions, including distributable prereleases, must pin themselves.
+ * A development tree with Unreleased notes may advance its package version
+ * before a tag exists. Its installation instructions still name the latest
+ * dated stable release. Once the release is named, instructions pin that version.
  * @param {{ version: string, changelog: string }} input
  * @returns {string}
  */
 export function readmeInstallVersion({ version, changelog }) {
 	const headings = changelog.split(/\r?\n/).filter((line) => line.startsWith("## "));
-	if (!/^\d+\.\d+\.\d+-dev\.\d+$/.test(version) || headings[0]?.trim() !== "## Unreleased") return version;
+	if (headings[0]?.trim() !== "## Unreleased") return version;
 	for (const heading of headings.slice(1)) {
 		const released = /^## (\d+\.\d+\.\d+) - \d{4}-\d{2}-\d{2}$/.exec(heading.trim());
-		if (released) return released[1];
+		if (released?.[1] !== undefined) return released[1];
 	}
 	throw new Error("local development install instructions need a dated stable release in CHANGELOG.md");
 }
