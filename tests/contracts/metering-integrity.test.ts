@@ -119,6 +119,42 @@ describe("contracts/metering integrity", () => {
 		ok(10_184 + reserved < model.contextWindow);
 	});
 
+	it("bounds a full-window output ceiling exactly like the local wire adapters", () => {
+		setGlobalDefaultMaxOutputTokens(131_072);
+		const context = { systemPrompt: "x".repeat(11_890 * 4), messages: [], tools: [] };
+		const model = { contextWindow: 131_072, maxTokens: 131_072 };
+		for (const api of ["openai-completions", "ollama-native"]) {
+			const reserved = resolveReservedOutputTokens(model.maxTokens, {
+				api,
+				contextWindow: model.contextWindow,
+				inputTokens: 11_890,
+			});
+			strictEqual(reserved, 118_158);
+			strictEqual(reserved, remainingContextMaxTokens(model, context, undefined));
+			ok(11_890 + reserved < model.contextWindow);
+			strictEqual(
+				resolveReservedOutputTokens(4096, { api, contextWindow: model.contextWindow, inputTokens: 11_890 }),
+				4096,
+			);
+			strictEqual(
+				resolveReservedOutputTokens(model.maxTokens, {
+					api,
+					contextWindow: model.contextWindow,
+					inputTokens: model.contextWindow + 1,
+				}),
+				1,
+			);
+		}
+		strictEqual(
+			resolveReservedOutputTokens(model.maxTokens, {
+				api: "anthropic-messages",
+				contextWindow: model.contextWindow,
+				inputTokens: 11_890,
+			}),
+			131_072,
+		);
+	});
+
 	it("respects configured larger reservations, model caps, and unset fallbacks", () => {
 		setGlobalDefaultMaxOutputTokens(65_536);
 		strictEqual(resolveReservedOutputTokens(131_072), 65_536);

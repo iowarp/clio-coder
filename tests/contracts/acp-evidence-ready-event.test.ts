@@ -1,7 +1,8 @@
-import { deepStrictEqual, ok, strictEqual } from "node:assert/strict";
+import { deepStrictEqual, ok, rejects, strictEqual } from "node:assert/strict";
 import { describe, it } from "node:test";
 import { BusChannels } from "../../src/core/bus-events.js";
 import { createSafeEventBus } from "../../src/core/event-bus.js";
+import { AcpRequestError } from "../../src/engine/acp/errors.js";
 import { type AcpServerChat, serveClioAcpAgent } from "../../src/engine/acp/server.js";
 import type { AcpJsonRpcPeerTransport } from "../../src/engine/acp/transport.js";
 
@@ -132,4 +133,39 @@ describe("contracts/acp forwards accountability.evidenceReady only to a client t
 		peer.transport.close();
 		strictEqual(await served, 0);
 	});
+});
+
+it("ACP returns a typed context admission refusal without exposing dropped notice prose", async () => {
+	const peer = fakeTransport();
+	let emit: (event: unknown) => void = () => {};
+	const refusedChat: AcpServerChat = {
+		...chat,
+		onEvent: (handler) => {
+			emit = handler;
+			return () => {
+				emit = () => {};
+			};
+		},
+		submit: async () => {
+			emit({ type: "notice", text: "private/path must not cross ACP", admission: { reason: "context-window-exceeded" } });
+		},
+	};
+	const served = serveClioAcpAgent({ transport: peer.transport, chat: refusedChat, cwd: process.cwd() });
+	try {
+		await peer.call("initialize", { protocolVersion: 1 });
+		const session = (await peer.call("session/new", { cwd: process.cwd(), mcpServers: [] })) as { sessionId: string };
+		await rejects(
+			peer.call("session/prompt", { sessionId: session.sessionId, prompt: [{ type: "text", text: "hi" }] }),
+			(error: unknown) => {
+				ok(error instanceof AcpRequestError);
+				deepStrictEqual(error.detail, { code: "prompt_not_admitted", reason: "context-window-exceeded" });
+				ok(!error.message.includes("private/path"));
+				return true;
+			},
+		);
+		strictEqual(peer.notifications.length, 0);
+	} finally {
+		peer.transport.close();
+		strictEqual(await served, 0);
+	}
 });

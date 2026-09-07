@@ -579,6 +579,11 @@ const CLIO_ADMISSION_FAILURES: Readonly<Record<string, PublicClioFailure>> = {
 		summary: "The configured Clio Coder target does not support streaming turns.",
 	},
 	"admission-failed": { code: "clio-coder-admission-failed", summary: "Clio Coder could not admit this turn." },
+	"context-window-exceeded": {
+		code: "clio-coder-admission-context-window-exceeded",
+		summary:
+			"Clio Coder could not fit this request in the model's context window. Reduce the input or active context, or choose a larger context window.",
+	},
 };
 
 function protocolVersionFailure(supported: readonly number[] | undefined): PublicClioFailure {

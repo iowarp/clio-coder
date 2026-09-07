@@ -369,9 +369,9 @@ describe("mandatory request-fit compaction", () => {
 					compileSessionPrompt: async () => {
 						order.push("compile");
 						return {
-							systemPrompt: "p".repeat(96000),
+							systemPrompt: "p".repeat(140000),
 							systemPromptHash: "grown",
-							tokenEstimate: 24000,
+							tokenEstimate: 35000,
 							sections: [],
 							fragmentManifest: [],
 						};
@@ -436,7 +436,7 @@ describe("mandatory request-fit compaction", () => {
 		ok(before.tokens + 8192 > 32768);
 		strictEqual(await f.context.runAutoCompact(f.runtime, true, undefined, "overflow", pending), true);
 		const expectedKeep = Math.floor(
-			(Math.min(32768 * f.settings.context.compaction.threshold, 32768 - 8192) -
+			(Math.min(32768 * f.settings.context.compaction.threshold, before.tokens + 1024) -
 				before.breakdown.systemPromptTokens -
 				before.breakdown.pendingUserTokens) /
 				2,

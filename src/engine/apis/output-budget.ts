@@ -39,13 +39,31 @@ export function setGlobalDefaultMaxOutputTokens(value: number): void {
  * the output budget gracefully, so a hard preflight reservation of
  * limit + safety would compact earlier than the engine actually needs.
  */
-export function resolveReservedOutputTokens(maxOutputTokens?: number | null): number {
+export function resolveReservedOutputTokens(
+	maxOutputTokens?: number | null,
+	request?: { api: string; contextWindow: number; inputTokens: number },
+): number {
 	const requested = globalDefaultMaxOutputTokens > 0 ? globalDefaultMaxOutputTokens : DEFAULT_MAX_OUTPUT_TOKENS;
 	const limit =
 		typeof maxOutputTokens === "number" && Number.isFinite(maxOutputTokens) && maxOutputTokens > 0
 			? maxOutputTokens
 			: Number.POSITIVE_INFINITY;
-	return Math.min(limit, requested);
+	const ceiling = Math.min(limit, requested);
+	// These Clio transports already reduce the wire ceiling to remaining room.
+	// Preflight must use that same allocation, rather than demanding room for
+	// the entire configured maximum (which may equal the context window).
+	// Other transports retain their existing reservation contract.
+	return request && (request.api === "openai-completions" || request.api === "ollama-native")
+		? clampOutputToRemainingContext(ceiling, request.contextWindow, request.inputTokens)
+		: ceiling;
+}
+
+function clampOutputToRemainingContext(ceiling: number, contextWindow: number, inputTokens: number): number {
+	const available =
+		contextWindow > 0 && Number.isFinite(contextWindow)
+			? Math.max(1, contextWindow - inputTokens - CONTEXT_BUDGET_SAFETY_TOKENS)
+			: Number.POSITIVE_INFINITY;
+	return Math.min(ceiling, available);
 }
 
 export function estimateInputTokensFromContext(context: Context): number {
@@ -61,15 +79,11 @@ export function remainingContextMaxTokens(
 	options: Pick<StreamOptions, "maxTokens"> | undefined,
 	limits?: { contextWindow?: number; maxOutputTokens?: number },
 ): number {
-	const safety = CONTEXT_BUDGET_SAFETY_TOKENS;
 	const inputTokens = estimateInputTokensFromContext(context);
 	const configuredContextWindow = model.contextWindow > 0 ? model.contextWindow : Number.POSITIVE_INFINITY;
 	const loadedContextWindow =
 		limits?.contextWindow !== undefined && limits.contextWindow > 0 ? limits.contextWindow : Number.POSITIVE_INFINITY;
 	const contextWindow = Math.min(configuredContextWindow, loadedContextWindow);
-	const budget = Number.isFinite(contextWindow)
-		? Math.max(1, contextWindow - inputTokens - safety)
-		: Number.POSITIVE_INFINITY;
 	const modelLimit = model.maxTokens > 0 ? model.maxTokens : Number.POSITIVE_INFINITY;
 	// Precedence for the requested ceiling when the caller gave no explicit
 	// maxTokens: a more-specific tool-turn limit, then the global default, then
@@ -86,6 +100,6 @@ export function remainingContextMaxTokens(
 					? modelLimit
 					: DEFAULT_MAX_OUTPUT_TOKENS;
 	const requested = options?.maxTokens ?? defaultLimit;
-	const resolved = Math.min(requested, modelLimit, budget);
+	const resolved = clampOutputToRemainingContext(Math.min(requested, modelLimit), contextWindow, inputTokens);
 	return Number.isFinite(resolved) ? resolved : DEFAULT_MAX_OUTPUT_TOKENS;
 }

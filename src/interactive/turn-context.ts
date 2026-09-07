@@ -1008,7 +1008,11 @@ export function createTurnContext(deps: TurnContextDeps): TurnContext {
 		if (useRequestBudget) {
 			const estimate = liveContextEstimate(agentRuntime, pendingUserText);
 			const output = Math.min(
-				resolveReservedOutputTokens(agentRuntime.agent.state.model?.maxTokens),
+				resolveReservedOutputTokens(agentRuntime.agent.state.model?.maxTokens, {
+					api: agentRuntime.agent.state.model?.api ?? "",
+					contextWindow: estimate.contextWindow,
+					inputTokens: estimate.tokens,
+				}),
 				settings.chat.maxOutputTokens > 0 ? settings.chat.maxOutputTokens : Number.POSITIVE_INFINITY,
 			);
 			const inputTarget = Math.min(estimate.contextWindow * compactionThreshold, estimate.contextWindow - output);

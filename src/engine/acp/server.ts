@@ -268,6 +268,7 @@ const ACP_ADMISSION_REASONS = new Set([
 	"model-not-configured",
 	"chat-unsupported",
 	"streaming-unsupported",
+	"context-window-exceeded",
 	"admission-failed",
 ]);
 

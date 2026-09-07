@@ -1204,8 +1204,13 @@ export function createChatLoop(deps: CreateChatLoopDeps): ChatLoop {
 					toolSignature,
 				});
 
-			const reservedOutput = resolveReservedOutputTokens(agentRuntime.runtimeResolution.capabilityDecisions.maxTokens);
 			const effectiveWindow = agentRuntime.runtimeResolution.contextWindowDetails.effectiveContextWindow;
+			const outputForInput = (inputTokens: number): number =>
+				resolveReservedOutputTokens(agentRuntime.runtimeResolution.capabilityDecisions.maxTokens, {
+					api: agentRuntime.agent.state.model?.api ?? "",
+					contextWindow: effectiveWindow,
+					inputTokens,
+				});
 			const pendingInputTokens = ceilChars(submittedText.length);
 			let turnSnapshot = captureTurnSnapshot("pending");
 			// The snapshot prices the prompt at chars/4. When the provider has
@@ -1218,28 +1223,38 @@ export function createChatLoop(deps: CreateChatLoopDeps): ChatLoop {
 					snapshotInputTokens(snapshot) + pendingInputTokens,
 					context.liveContextEstimate(agentRuntime, submittedText).tokens,
 				);
-			const totalEstimate = budgetedPromptTokens(turnSnapshot) + reservedOutput;
+			const inputEstimate = budgetedPromptTokens(turnSnapshot);
+			const reservedOutput = outputForInput(inputEstimate);
+			const totalEstimate = inputEstimate + reservedOutput;
 
 			if (effectiveWindow > 0 && totalEstimate > effectiveWindow) {
 				emitNotice(
 					`[Clio Coder] Estimated request size ${totalEstimate} tokens (input ${totalEstimate - reservedOutput} + output budget ${reservedOutput}) exceeds the effective context window of ${effectiveWindow} tokens. Running compaction before sending...`,
 				);
 				setTurnPreparation("compacting");
+				let compactionFailure: string | undefined;
 				const compacted = await context
 					.runAutoCompact(agentRuntime, true, undefined, "overflow", submittedText, pendingSkillPolicy)
+					.catch((error: unknown) => {
+						compactionFailure = error instanceof Error ? error.message : String(error);
+						return false;
+					})
 					.finally(endPreparationCompaction);
 				if (!compacted) {
-					emitNotice(
-						"[Clio Coder] Compaction could not reclaim enough space. Request blocked; trim the prompt, reduce active tools, or start a fresh session.",
+					emitAdmissionNotice(
+						`[Clio Coder] Request exceeds the context window and compaction could not reclaim enough space.${compactionFailure ? ` ${compactionFailure}.` : ""} Trim the prompt or reduce active tools.`,
+						"context-window-exceeded",
 					);
 					return;
 				}
 				context.refreshAgentMessagesFromSession(agentRuntime);
 				turnSnapshot = captureTurnSnapshot("pending");
-				const postTotalEstimate = budgetedPromptTokens(turnSnapshot) + reservedOutput;
+				const postInputEstimate = budgetedPromptTokens(turnSnapshot);
+				const postTotalEstimate = postInputEstimate + outputForInput(postInputEstimate);
 				if (postTotalEstimate > effectiveWindow) {
-					emitNotice(
+					emitAdmissionNotice(
 						`[Clio Coder] Request still exceeds the effective window after compaction (${postTotalEstimate} > ${effectiveWindow}). Request blocked.`,
+						"context-window-exceeded",
 					);
 					return;
 				}
