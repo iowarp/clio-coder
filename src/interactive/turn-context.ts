@@ -132,7 +132,7 @@ export interface LiveContextEstimate {
 	 * did not see.
 	 */
 	tokens: number;
-	/** Pure chars/4 projection, with the pre-existing provider-usage anchor. */
+	/** Structural projection; includes the legacy usage floor when no live anchor is trusted. */
 	estimatedTokens: number;
 	/**
 	 * Provider-attested prompt tokens for the messages up to the last reconciled
@@ -264,14 +264,25 @@ export function createTurnContext(deps: TurnContextDeps): TurnContext {
 	 *
 	 * `tokens` is the provider's own prompt count for that call plus the output
 	 * it produced, which together are what the next call's prompt carries for
-	 * the same messages. `anchoredMessageCount` is the length of the live
-	 * message list at that moment, so anything appended since is priced by
-	 * estimate and added on top. Unlike the per-message usage anchor inside
+	 * the same messages. The anchored message prefix identifies that history,
+	 * so anything appended since is priced by estimate and added on top.
+	 * Unlike the per-message usage anchor inside
 	 * `estimateAgentContextTokens`, this survives `contextUsageInvalidated`:
 	 * a working-set projection subtracts the tokens it removed rather than
 	 * throwing the attestation away.
 	 */
-	let reconciledAnchor: { tokens: number; anchoredMessageCount: number } | null = null;
+	let reconciledAnchor: {
+		tokens: number;
+		anchoredMessages: ReadonlyArray<AgentMessage>;
+		runtime: AgentRuntime;
+		model: AgentRuntime["agent"]["state"]["model"];
+		modelKey: string;
+		targetId: string;
+		runtimeId: string;
+		wireModelId: string;
+		systemPromptTokens: number;
+		toolSchemaTokens: number;
+	} | null = null;
 	let lastCompactionEvent: { stage: string; tokensBefore: number; tokensAfter: number; trigger: string } | null = null;
 	// Last settled run's provider cache usage plus whether the compiled system
 	// prompt was reused. Shown together in /context so "prompt reused" can
@@ -560,27 +571,36 @@ export function createTurnContext(deps: TurnContextDeps): TurnContext {
 		return { contextWindow: 0, contextWindowSource: null, contextWindowSlots: null };
 	};
 
-	/**
-	 * Carry the reconciled anchor onto the current message list: the attested
-	 * prompt for the messages it covered, plus a chars/4 estimate of everything
-	 * appended since, plus text that has not been submitted yet. The tool
-	 * schemas and the system prompt are inside the attested figure already, so
-	 * they are not added again. Null when there is no attestation, or when the
-	 * list is shorter than the anchor covered, which means the history it
-	 * described was rewritten beneath it.
-	 */
-	const reconciledAnchoredTokens = (agentRuntime: AgentRuntime, pendingUserTokens: number): number | null => {
+	const anchorModelKey = (agentRuntime: AgentRuntime): string => {
+		const model = agentRuntime.agent.state.model;
+		return JSON.stringify([model?.id, model?.provider, model?.api, model?.baseUrl]);
+	};
+
+	/** Price appended history separately so eviction can retain it without folding in static growth twice. */
+	const reconciledHistoryTokens = (agentRuntime: AgentRuntime): number | null => {
 		const anchor = reconciledAnchor;
 		if (!anchor) return null;
 		const messages = agentRuntime.agent.state.messages;
-		if (anchor.anchoredMessageCount > messages.length) return null;
+		if (
+			anchor.runtime !== agentRuntime ||
+			anchor.model !== agentRuntime.agent.state.model ||
+			anchor.modelKey !== anchorModelKey(agentRuntime) ||
+			anchor.targetId !== agentRuntime.targetId ||
+			anchor.runtimeId !== agentRuntime.runtimeId ||
+			anchor.wireModelId !== agentRuntime.wireModelId ||
+			anchor.anchoredMessages.length > messages.length ||
+			anchor.anchoredMessages.some((message, index) => message !== messages[index])
+		) {
+			reconciledAnchor = null;
+			return null;
+		}
 		let tail = 0;
-		for (let i = anchor.anchoredMessageCount; i < messages.length; i += 1) {
+		for (let i = anchor.anchoredMessages.length; i < messages.length; i += 1) {
 			const message = messages[i];
 			if (message === undefined) continue;
 			tail += estimateAgentMessageTokens(message);
 		}
-		return anchor.tokens + tail + pendingUserTokens;
+		return anchor.tokens + tail;
 	};
 
 	const liveContextEstimate = (agentRuntime: AgentRuntime, pendingUserText?: string): LiveContextEstimate => {
@@ -592,8 +612,22 @@ export function createTurnContext(deps: TurnContextDeps): TurnContext {
 			...(pendingUserText !== undefined ? { pendingUserText } : {}),
 		};
 		const breakdown = estimateAgentContextBreakdown(estimateInput);
-		const estimatedTokens = estimateAgentContextTokens(estimateInput);
-		const reconciledTokens = reconciledAnchoredTokens(agentRuntime, breakdown.pendingUserTokens);
+		const historyTokens = reconciledHistoryTokens(agentRuntime);
+		const anchor = reconciledAnchor;
+		// Provider usage already includes the old system prompt and schemas.
+		// Price only positive growth, separately: shrinking one must not hide
+		// growth in the other when the measured prompt exceeds chars/4.
+		const reconciledTokens =
+			historyTokens !== null && anchor
+				? historyTokens +
+					breakdown.pendingUserTokens +
+					Math.max(0, breakdown.systemPromptTokens - anchor.systemPromptTokens) +
+					Math.max(0, breakdown.toolSchemaTokens - anchor.toolSchemaTokens)
+				: null;
+		const estimatedTokens =
+			reconciledTokens === null
+				? estimateAgentContextTokens(estimateInput)
+				: breakdown.systemPromptTokens + breakdown.messageTokens + breakdown.pendingUserTokens + breakdown.toolSchemaTokens;
 		return {
 			// The estimate is a floor, not a competing verdict: it prices material
 			// the attested call never saw, so a provider count below it would be
@@ -612,13 +646,20 @@ export function createTurnContext(deps: TurnContextDeps): TurnContext {
 	 * what the planner priced out against the same projection and re-anchor on
 	 * the refreshed list, instead of discarding the figure and falling back to
 	 * pure chars/4 exactly when the accounting matters most (issue #227).
-	 * Call after the message list has been rebuilt.
+	 * Materialize history before rebuilding the list; otherwise advancing the
+	 * anchor would lose tool results appended since the last measured call.
+	 * Static baselines stay tied to that call until the next reconciliation.
 	 */
-	const carryReconciledAnchorThroughProjection = (agentRuntime: AgentRuntime, tokensRemoved: number): void => {
-		if (!reconciledAnchor) return;
+	const carryReconciledAnchorThroughProjection = (
+		agentRuntime: AgentRuntime,
+		historyTokens: number | null,
+		tokensRemoved: number,
+	): void => {
+		if (!reconciledAnchor || historyTokens === null) return;
 		reconciledAnchor = {
-			tokens: Math.max(0, reconciledAnchor.tokens - Math.max(0, tokensRemoved)),
-			anchoredMessageCount: agentRuntime.agent.state.messages.length,
+			...reconciledAnchor,
+			tokens: Math.max(0, historyTokens - Math.max(0, tokensRemoved)),
+			anchoredMessages: [...agentRuntime.agent.state.messages],
 		};
 	};
 
@@ -859,6 +900,7 @@ export function createTurnContext(deps: TurnContextDeps): TurnContext {
 						middleware.fireCompactionHook("working_set_evict", "pressure", estimate.tokens);
 						emitCompactionActivity("started", "compacting context (working-set eviction)");
 						try {
+							const historyTokens = reconciledHistoryTokens(agentRuntime);
 							deps.session.appendEntry({
 								...buildEvictionFields(planned, {
 									trigger: "pressure",
@@ -871,7 +913,7 @@ export function createTurnContext(deps: TurnContextDeps): TurnContext {
 							});
 							noteColdReason("working_set_evict");
 							refreshAgentMessagesFromSession(agentRuntime);
-							carryReconciledAnchorThroughProjection(agentRuntime, planned.tokensBefore - planned.tokensAfter);
+							carryReconciledAnchorThroughProjection(agentRuntime, historyTokens, planned.tokensBefore - planned.tokensAfter);
 
 							const postEvictionSnapshot = captureRuntimeContextSnapshot(
 								agentRuntime,
@@ -1093,13 +1135,22 @@ export function createTurnContext(deps: TurnContextDeps): TurnContext {
 			// Cached prompt tokens still occupy the window; providers report them
 			// outside `input`, so the attested prompt is the three summed.
 			const promptTokens = (usage.input || 0) + (usage.cacheRead || 0) + (usage.cacheWrite || 0);
-			const messages = state.runtime?.agent.state.messages;
-			if (promptTokens > 0 && messages) {
+			const runtime = state.runtime;
+			if (promptTokens > 0 && runtime) {
+				const breakdown = estimateAgentContextBreakdown({ ...runtime.agent.state, messages: [] });
 				// The output of this call is part of the next call's prompt for the
 				// same messages, which is why it is folded in here.
 				reconciledAnchor = {
 					tokens: promptTokens + (usage.output || 0),
-					anchoredMessageCount: messages.length,
+					anchoredMessages: [...runtime.agent.state.messages],
+					runtime,
+					model: runtime.agent.state.model,
+					modelKey: anchorModelKey(runtime),
+					targetId: runtime.targetId,
+					runtimeId: runtime.runtimeId,
+					wireModelId: runtime.wireModelId,
+					systemPromptTokens: breakdown.systemPromptTokens,
+					toolSchemaTokens: breakdown.toolSchemaTokens,
 				};
 			}
 			if (!currentContextSnapshot) return;
