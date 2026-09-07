@@ -347,6 +347,7 @@ stderr. `--json` emits JSONL events for scripts, and `acp` serves Clio over
 stdio to Agent Client Protocol hosts.
 
 In headless runs (`clio-coder run`):
+
 - Interactive confirmation prompts cannot be answered, so any tool call parking
   for operator confirmation is automatically denied. Interactive session commands
   (such as `/settings`, `/help`, or `/context compact`) are refused upfront with
@@ -405,9 +406,9 @@ Requirements:
 - Optional: Deno `>=2.9.5` for compiling or running the canonical Workbench GUI
 
 > [!NOTE]
-> The current source checkout branch is **v0.4.5** (built against `pnpm@10.34.5` and
-> Pi Agent Framework `@earendil-works/pi-*` at `0.85.1`). The latest release on the
-> public npm registry may be **v0.4.4**.
+> This README describes source version **0.4.5**, currently on the local **`v045`**
+> branch, with pnpm **10.34.5** and Pi **0.85.1**. This local candidate has not been
+> published; installing from npm retrieves the published release, not this checkout.
 
 ### Install from npm
 
@@ -417,18 +418,27 @@ clio-coder configure
 clio-coder --version
 ```
 
+To try the published CLI without a permanent global installation, use npm exec:
+
+```bash
+npm exec --package=@iowarp/clio-coder -- clio-coder --help
+npm exec --package=@iowarp/clio-coder -- clio-coder
+```
+
+This downloads into npm's cache. Clio still uses its normal configuration and
+session directories; it is not an isolated configuration profile.
+
 #### Optional dependency: the Claude Agent SDK
 
-`@anthropic-ai/claude-agent-sdk` is an optional dependency carrying a ~224 MB platform
-binary. Skip it with `--omit=optional` (saves ~244 MB, reducing the install tree
-from 387 MB to 143 MB across 109 packages):
+`@anthropic-ai/claude-agent-sdk` includes a large platform-specific binary.
+Skip optional dependencies when you do not need the `claude-sdk` worker runtime:
 
 ```bash
 npm install -g @iowarp/clio-coder --omit=optional
 ```
 
-Only the `claude-sdk` worker runtime needs it; everything else works without it.
-Install it later if needed with `npm install @anthropic-ai/claude-agent-sdk@0.3.186`.
+Other runtimes do not need that SDK. To include it later in a global installation,
+rerun `npm install -g @iowarp/clio-coder --include=optional`.
 See [Optional dependencies](docs/guide/installation-and-lifecycle.md#optional-dependency-the-claude-agent-sdk).
 
 #### Updating npm releases
@@ -459,11 +469,11 @@ see [Lifecycle operations](#lifecycle-operations) and
 
 ### Install from source
 
-For local development checkouts on the unpublished `v045` prerelease:
+For a new checkout of the public repository:
 
 ```bash
-cd /path/to/clio-coder
-git switch v045
+git clone https://github.com/iowarp/clio-coder.git
+cd clio-coder
 corepack enable pnpm
 pnpm install --frozen-lockfile
 pnpm run install:local
@@ -472,13 +482,25 @@ hash -r
 "$HOME/.local/bin/clio-coder" --version
 ```
 
-Branch `v045` is local and unpublished; users cloning from remote `main` should
-follow the README instructions for their checked-out revision.
+For an existing checkout, run the installation steps from its root without
+cloning again. This local candidate is on `v045`; that branch is unpublished,
+so cloning remote `main` does not retrieve it. Follow the dependency requirements
+of the revision you have checked out.
+If Corepack is unavailable, install the pinned package manager with
+`npm install -g pnpm@10.34.5` instead of `corepack enable pnpm`.
 
 `pnpm run install:local` builds and links the launcher at
 `${CLIO_CODER_BIN_DIR:-$HOME/.local/bin}/clio-coder`. Run
 `command -v clio-coder` to see which installation the bare command reaches;
 your shell may otherwise keep resolving an older launcher earlier on `PATH`.
+
+To use the source build without installing a launcher:
+
+```bash
+pnpm run build
+node dist/cli/index.js --help
+node dist/cli/index.js
+```
 
 Rebuild automatically on source changes:
 
@@ -494,21 +516,23 @@ clio-coder doctor
 clio-coder doctor --fix
 ```
 
-Updating a source checkout: run `git pull`, `pnpm run install:local`, `hash -r`,
-and `clio-coder upgrade`.
+After updating your chosen source revision, rerun `pnpm run install:local`,
+`hash -r`, and `clio-coder upgrade`. `pnpm run dev` rebuilds the CLI bundles on
+source changes; restart a running Clio process to load the new build.
 
-To remove it, preview first:
+To remove the launcher and deliberately purge Clio's user configuration, data,
+sessions, and caches, preview the removal before confirming it:
 
 ```bash
 clio-coder uninstall --dry-run
-clio-coder uninstall --remove-binary --force
+clio-coder uninstall --remove-binary
 ```
 
 `clio-coder uninstall` purges the four home roots (`config`, `data`, `state`,
 `cache`); `--remove-binary` unlinks the local launcher. Per-project `.clio-coder/`
 state directories and authored `CLIO-CODER.md` handbooks are not deleted by
-uninstall; in repositories where you deliberately wish to remove all generated
-context artifacts, run `clio-coder context reset --all`.
+uninstall. Project reset options and selective preservation are described in the
+lifecycle guide below.
 
 ### Lifecycle operations
 
@@ -517,7 +541,7 @@ context artifacts, run `clio-coder context reset --all`.
 | Health check | `clio-coder doctor` | Read-only audit of settings schema, credentials permissions (`0o600`), and state freshness. |
 | Structure repair | `clio-coder doctor --fix` | Creates missing directory skeletons and restores credential permissions (does not migrate schemas). |
 | Lifecycle upgrade | `clio-coder upgrade [--dry-run]` | Applies pending registered migrations (`migrations.json`) and refreshes install metadata. |
-| Selective reset | `clio-coder reset [--state\|--data\|--cache\|--auth\|--config\|--all]` | Selectively wipes specific roots (`--force` required). |
+| Selective reset | `clio-coder reset --help` | Lists destructive reset options and their scopes; use `--dry-run` to preview. |
 | Full uninstall | `clio-coder uninstall [--remove-binary] [--force]` | Removes user config, data, state, and cache roots; `--remove-binary` unlinks launcher. |
 
 The full directory, permission, reset, migration, and uninstall behavior is in
@@ -532,11 +556,21 @@ process per open project.
 
 The standalone GUI executable is `clio-coder-gui`, or the interface can be run
 directly using Deno tasks. The product shown to users is named **Clio Coder**;
-the internal directory and state identifier is `workbench`.
+the source directory retains the name `workbench`.
+
+The Runs view filters the currently loaded run window by search, outcome,
+agent, node, fleet lineage, and receipt state. The conversation's worker strip
+has an optional running-only filter. **How this app works** opens searchable
+help and keyboard shortcuts, and **Settings → About** identifies the GUI and
+connected Clio versions and capabilities.
 
 ### State and settings
 
-The GUI persists recent projects in `projects.json`. The state root is resolved in order:
+The GUI launches `clio-coder` from `PATH` and uses the same Clio settings and
+authentication as the TUI. Choose targets and models through Clio's settings;
+no separate testing profile is needed.
+
+The GUI persists only its recent-project list in `projects.json`. Its state root is resolved in order:
 `$CLIO_CODER_GUI_STATE_DIR`, then deprecated `$CLIO_WORKBENCH_STATE_DIR`, then
 `$XDG_STATE_HOME/clio-coder-gui`, and finally `~/.local/state/clio-coder-gui`.
 On first start after upgrade, legacy `clio-workbench` directories are migrated atomically.
@@ -581,13 +615,15 @@ deno task gui:uninstall  # removes recorded files and empty directories created 
 Pass `--purge-state` to `gui:uninstall` to also remove the GUI state directory.
 
 An installation places exactly three files plus an install manifest:
+
 - Binary: `~/.local/bin/clio-coder-gui` (or `DIR/bin/clio-coder-gui` with `--prefix=DIR`)
 - Desktop entry: `$XDG_DATA_HOME/applications/clio-coder-gui.desktop`
 - Application icon: `$XDG_DATA_HOME/clio-coder-gui/clio-coder-gui.png`
 - Manifest: `$XDG_DATA_HOME/clio-coder-gui/install.json`
 
 The compiled binary (~105 MB on x86_64 Linux) has `dist/` embedded and runs
-without the source checkout.
+without the source checkout. Start it with `clio-coder-gui --open`, or use the
+desktop launcher. The Clio CLI must still be on `PATH` for conversations.
 
 ### Desktop limitations
 
@@ -619,7 +655,7 @@ launch defaults to port 4600:
 clio-coder trace ui --port 4600
 
 # Or start directly with pnpm:
-pnpm run trace:ui --port 4600
+pnpm run trace:ui --db /path/to/trace.sqlite --port 4600
 ```
 
 The server binds strictly to `127.0.0.1`, opens SQLite with read-only flags,

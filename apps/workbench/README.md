@@ -4,8 +4,8 @@ The desktop and browser GUI for Clio Coder. It is one Deno process that serves a
 interface and runs one real `clio-coder acp` child per open project. Clio Coder stays authoritative for sessions, tools,
 routing, permissions, and outcomes; the GUI renders only the facts that cross its typed protocol.
 
-The source directory and the persisted-state directory keep the internal name `workbench`. The product shown to people
-is always **Clio Coder**.
+The source directory retains the name `workbench`; normal GUI state lives under `clio-coder-gui`. The product shown to
+people is always **Clio Coder**.
 
 ## Requirements
 

@@ -4,11 +4,16 @@ All notable changes to Clio Coder are documented in this file. The format follow
 
 ## Unreleased
 
+### Added
+- Workbench run-window search and filters, an optional running-only worker strip, searchable application help and keyboard shortcuts, and an About record showing GUI and connected Clio versions and capabilities.
+
 ### Changed
 - Pin the Pi provider, agent, and terminal SDKs to 0.85.1; preserve historical Anthropic thinking effort across session persistence and adapt overlay bounds and scrollbar styling to the public terminal APIs.
 - Use pinned pnpm for repository dependencies, application workspaces, contributor scripts, and CI. Keep npm registry packaging and npm consumer installation compatibility checks.
 
 ### Fixed
+- Refuse interactive slash commands in headless `run` before session startup instead of sending their text to the model; preserve named skill invocations, prompt templates, and ordinary task text.
+- Declare the internal bootstrap researcher's repository scope so JSON-escaped handbook text cannot trigger a malformed-path refusal before generation, including the structured-output fallback path.
 - Keep parallel tool declarations and the latest operator request intact across compaction; reject truncated or canceled checkpoints, wire TUI and ACP cancellation through production summaries, and stop canceled pre-submit requests before chat admission.
 - Parse authored handbooks with fenced code blocks and HTML comments correctly: a `# comment` inside a fenced example no longer rejects `CLIO-CODER.md` or drops its conventions and invariants from `--apply` and `--adopt`, and fenced `##` lines are no longer split into sections or rewritten on serialization.
 - Keep whole-index work off the prompt and tool hot paths: the codewiki worker receives a reference to the committed artifact instead of a structured clone of the parsed index, an unchanged `code_nav` reconciliation returns only the fingerprint, and the compiled prompt's project-type and codewiki markers read recorded state and artifact presence instead of parsing the artifact and re-walking the tree.
