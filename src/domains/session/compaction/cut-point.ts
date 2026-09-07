@@ -88,6 +88,36 @@ function findValidCutPoints(entries: ReadonlyArray<SessionEntry>, startIndex: nu
 	return cuts;
 }
 
+/** Retain the assistant declaration and its entire tool batch when the tail alone exceeds the budget. */
+function findToolBatchStart(
+	entries: ReadonlyArray<SessionEntry>,
+	resultIndex: number,
+	startIndex: number,
+	endIndex: number,
+): number {
+	for (let index = resultIndex - 1; index >= startIndex; index--) {
+		const entry = entries[index];
+		if (entry?.kind !== "message") continue;
+		if (entry.role === "user") break;
+		if (entry.role !== "assistant") continue;
+		const payload = entry.payload as { content?: unknown } | null;
+		if (!Array.isArray(payload?.content)) break;
+		const callIds = new Set<string>();
+		for (const block of payload.content) {
+			if (block?.type === "toolCall" && typeof block.id === "string") callIds.add(block.id);
+		}
+		if (callIds.size === 0) break;
+		for (let tail = index + 1; tail < endIndex; tail++) {
+			const result = entries[tail];
+			if (result?.kind !== "message" || result.role !== "tool_result") continue;
+			const id = (result.payload as { toolCallId?: unknown } | null)?.toolCallId;
+			if (typeof id !== "string" || !callIds.has(id)) return -1;
+		}
+		return index;
+	}
+	return -1;
+}
+
 /**
  * Find the cut point that keeps at least `keepRecentTokens` tokens in the
  * retained suffix. Never cuts at a `tool_result`. When walking forward from
@@ -131,14 +161,21 @@ export function findCutPoint(
 					break;
 				}
 			}
+			// No newer cut exists inside a final tool-result batch. Snap back to
+			// its assistant, not the whole user turn or an individual call row.
+			// The suffix may exceed the target; the continuation guard still
+			// checks whether summarizing older work actually made the request fit.
+			if (cutIndex === -1 && entry.kind === "message" && entry.role === "tool_result") {
+				cutIndex = findToolBatchStart(entries, i, startIndex, endIndex);
+			}
 			break;
 		}
 	}
 
 	if (cutIndex === -1) {
-		// Walker never crossed keepRecentTokens, or crossed but found no valid
-		// cut at/after the stop index (all valid cuts precede the tool_result
-		// tail). Prefer the newest turn start so older turns still feed the
+		// Walker never crossed keepRecentTokens, or found neither a newer cut
+		// nor a verifiable assistant declaration for the final result batch.
+		// Prefer the newest turn start so older turns still feed the
 		// summary prompt. Absent any turn start, fall back to the oldest valid
 		// cut. That matches the pre-fix behavior, so pre stays empty and the
 		// orchestrator reports nothing to compact.

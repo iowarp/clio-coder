@@ -12,6 +12,7 @@ import {
 	captureSkillContext,
 	compact,
 } from "../../src/domains/session/compaction/compact.js";
+import { findCutPoint } from "../../src/domains/session/compaction/cut-point.js";
 import { estimateTokens } from "../../src/domains/session/compaction/tokens.js";
 import {
 	isSessionEntry,
@@ -475,6 +476,102 @@ describe("mandatory request-fit compaction", () => {
 });
 
 describe("typed historical skill checkpoints (pure source)", () => {
+	it("summarizes older work after a checkpoint when the newest parallel tool batch exceeds the keep budget", async () => {
+		const f = overflowFixture();
+		const first = await compact({
+			entries: f.entries,
+			model,
+			summarize,
+			keepRecentTokens: 500,
+			skillContextState: selection,
+		});
+		const entries = [...f.entries, checkpoint(first, "prior")];
+		const startIndex = entries.length;
+		const task = "Build the map; keep source unchanged.";
+		entries.push(message("new-task", "user", { text: task, operatorText: task }, "tail"));
+		entries.push(message("old-work", "assistant", { text: "earlier source evidence ".repeat(800) }, "new-task"));
+		const latestIndex = entries.length;
+		entries.push(
+			message(
+				"parallel",
+				"assistant",
+				{
+					content: [
+						{ type: "toolCall", id: "schema", name: "read", arguments: { path: "schema.json" } },
+						{ type: "toolCall", id: "example", name: "read", arguments: { path: "example.json" } },
+					],
+				},
+				"old-work",
+			),
+		);
+		for (const [id, parent] of [
+			["schema", "parallel"],
+			["example", "schema-call"],
+		] as const) {
+			entries.push(
+				message(`${id}-call`, "tool_call", { toolCallId: id, name: "read", args: { path: `${id}.json` } }, parent),
+			);
+		}
+		for (const [id, parent] of [
+			["schema", "example-call"],
+			["example", "schema-result"],
+		] as const) {
+			entries.push(
+				message(
+					`${id}-result`,
+					"tool_result",
+					{
+						toolCallId: id,
+						toolName: "read",
+						result: { content: [{ type: "text", text: `${id} evidence `.repeat(1500) }] },
+					},
+					parent,
+				),
+			);
+		}
+		const original = JSON.stringify(entries);
+		strictEqual(findCutPoint(entries, 1000, { startIndex }).firstKeptEntryIndex, latestIndex);
+		let summaryCalls = 0;
+		const result = await compact({
+			entries,
+			model,
+			keepRecentTokens: 1000,
+			preserveUserTurnId: "new-task",
+			summarize: async () => {
+				summaryCalls++;
+				return { text: "Checkpoint of earlier work." };
+			},
+		});
+		strictEqual(summaryCalls, 1);
+		strictEqual(result.userContext?.text, task);
+		strictEqual(result.skillContext?.skills[0]?.content[0]?.text, f.body);
+		const replay = buildModelReplayAgentMessagesFromTurns([...entries, checkpoint(result, "second")]);
+		const calls = replay.flatMap((entry) =>
+			entry.role === "assistant"
+				? entry.content.filter((block) => block.type === "toolCall").map((block) => block.id)
+				: [],
+		);
+		const results = replay.flatMap((entry) => (entry.role === "toolResult" ? [entry.toolCallId] : []));
+		for (const id of ["schema", "example"]) {
+			strictEqual(calls.filter((call) => call === id).length, 1);
+			strictEqual(results.filter((call) => call === id).length, 1);
+		}
+		strictEqual(JSON.stringify(entries), original);
+		const orphaned = structuredClone(entries);
+		const lastResult = orphaned.at(-1);
+		ok(lastResult?.kind === "message");
+		lastResult.payload = { ...(lastResult.payload as object), toolCallId: "unknown-call" };
+		strictEqual(
+			findCutPoint(orphaned, 1000, { startIndex }).firstKeptEntryIndex,
+			startIndex,
+			"an unowned result must not introduce a cut that drops its unknown call",
+		);
+		ok(
+			findCutPoint(entries, 1000, { startIndex: latestIndex + 1 }).firstKeptEntryIndex > latestIndex,
+			"do not reach through the caller's prior-checkpoint boundary",
+		);
+	});
+
 	it("retains exact instructions through two checkpoints, fresh replay, raw usage and recall", async () => {
 		const { entries, body } = history();
 		const original = JSON.stringify(entries);
