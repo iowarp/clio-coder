@@ -31,9 +31,9 @@ Clio-owned surface during a dependency bump.
 | pi-ai `CredentialStore` and `Models.getAuth` | `src/domains/providers/auth/storage.ts` | Keep Clio ownership. | Clio's locked YAML store, damage control, target-first registry, and runtime overrides are product boundaries. |
 | pi-ai `createModels`, `createProvider`, and `ModelsStore` | `src/domains/providers/**` | Keep Clio ownership. | Targets, nodes, probing, residency, ALCF, and fleet placement are Clio concepts rather than provider-keyed SDK state. |
 | pi-ai `Provider.auth.oauth` | `src/engine/oauth.ts` | Route built-in OAuth through Pi and keep ALCF. | Pi owns provider OAuth implementations. Clio adds the ALCF science-provider flow. |
-| pi-agent-core application cut-point helpers | `src/domains/session/compaction/cut-point.ts` | Keep Clio ownership. | The published SDK does not export these helpers, and Clio operates on its larger `SessionEntry` union with a tested small-session fallback. |
-| pi-agent-core `estimateTokens` and `estimateContextTokens` | `src/domains/session/compaction/tokens.ts` and `src/domains/session/context-accounting.ts` | Keep Clio ownership. | Clio accounts for message overhead, images, tool-schema splits, and provider-usage reconciliation beyond Pi's character estimate. |
-| pi-agent-core `SUMMARIZATION_SYSTEM_PROMPT`, `generateSummary`, and `serializeConversation` | `src/domains/session/compaction/compact.ts` and `src/domains/session/compaction/branch-summary.ts` | Keep Clio ownership. | Pi's functions require Pi v4 entries and `Models`; Clio compacts its ledger with cumulative checkpoints and turn-prefix summaries. |
+| pi-agent-core `findCutPoint` and `findTurnStartIndex` | `src/domains/session/compaction/cut-point.ts` | Keep the current implementation pending a tested adapter. | These helpers are public root exports in 0.85.1. They accept Pi v4 `Entry[]`; Clio uses its own `SessionEntry` union, ledger indexes, tool-batch boundaries, and small-session fallback. Reuse requires preserving those contracts through an entry/index projection, not a direct import substitution. |
+| pi-agent-core `estimateTokens` and `estimateContextTokens` | `src/domains/session/compaction/tokens.ts` and `src/domains/session/context-accounting.ts` | Keep Clio's outer accounting. | Pi also anchors estimates to provider usage. Clio additionally accounts for framing, system prompts, tool schemas, pending input, usage invalidation, and the greater of projected and anchored totals. Both use heuristics for unmeasured content; neither character estimate guarantees an upper bound for every tokenizer. |
+| pi-agent-core `generateSummary`, `generateSummaryWithUsage`, and `serializeConversation` | `src/domains/session/compaction/compact.ts` and `src/domains/session/compaction/branch-summary.ts` | Keep the current summary boundary pending a tested adapter. | The public summary generators accept `AgentMessage[]`, `Models`, and Pi harness context; `serializeConversation` accepts provider messages. Clio additionally owns bounded cumulative checkpoints, turn-prefix summaries, cancellation, usage settlement, and publication checks. The internal `SUMMARIZATION_SYSTEM_PROMPT` constant is not a public root export. |
 | pi-agent-core `JsonlSessionRepo`, v4 `Session`, and `AgentHarness` | `src/engine/session.ts` and `src/domains/session/**` | Keep Clio ownership. | The on-disk ledger, active tree, fork behavior, receipts, and evidence are Clio's durable spine. |
 | pi-agent-core `loadSkills`, `loadPromptTemplates`, `parseCommandArgs`, `substituteArgs`, and `formatSkillsForSystemPrompt` | `src/domains/resources/skills/loader.ts` and `src/domains/resources/prompts/loader.ts` | Keep Clio loaders and reuse leaf primitives when compatible. | Clio owns marketplace pinning, trust, evals, activation records, and prompt-source policy. Argument substitution can use Pi without replacing the loader. |
 | pi-agent-core harness tools, `executeShellWithCapture`, and `sanitizeBinaryOutput` | `src/tools/**` | Keep Clio ownership. | Tool admission, observation budgets, safety rails, and result shaping apply across interactive, headless, ACP, and worker runs. |
@@ -74,6 +74,14 @@ workspace configuration.
 The environment-key parity helper also gains the existing Pi convention
 `qwen-token-plan-individual` → `QWEN_TOKEN_PLAN_API_KEY`. This corrects a
 Clio parity gap; it does not add a built-in Qwen runtime.
+
+Pi's assistant frame encoder/reducer is a public optional API, not a persistence
+feature Clio gains simply by updating its streaming adapter. Clio already strips
+cumulative snapshots from worker deltas in `src/worker/event-projection.ts`;
+adopting frames needs a measured benefit and must preserve terminal messages
+separately. Pi's internal compaction file-list helpers are not exported through
+the package's public root or an allowed subpath, so they are not currently a
+supported way to remove Clio's small file-list formatter.
 
 ## Thin-wrapper watch list
 
