@@ -38,14 +38,14 @@ describe("bounded authored preload", () => {
 		strictEqual(selected.classification.sources?.[0]?.contentHash, sha256(source));
 		strictEqual(selected.classification.sources?.[0]?.availableLines, 5);
 		for (const size of [8000, 8001]) {
-			const padded = context(["EARLY\n\n" + "x".repeat(size - context(["EARLY\n\n"]).text.length)]);
+			const padded = context([`EARLY\n\n${"x".repeat(size - context(["EARLY\n\n"]).text.length)}`]);
 			strictEqual(padded.text.length, size);
 			strictEqual(selectProjectPreload(padded).classification.mode, size === 8000 ? "full" : "partial");
 			assertBudget(selectProjectPreload(padded));
 		}
 	});
 	it("allocates nearest first, renders ancestors first, and reports exact omissions", () => {
-		const input = context(["ANCESTOR\n\n" + "Ancestor paragraph.\n\n".repeat(600), "MIDDLE\n\n", "NEAREST\n\n"]);
+		const input = context([`ANCESTOR\n\n${"Ancestor paragraph.\n\n".repeat(600)}`, "MIDDLE\n\n", "NEAREST\n\n"]);
 		const selected = selectProjectPreload(input, true);
 		assertBudget(selected);
 		strictEqual(selected.text.includes("NEAREST"), true);
@@ -61,11 +61,11 @@ describe("bounded authored preload", () => {
 		const prefix = "KEEP 👩🏽‍🔬 é café.  \r\n\r\n";
 		for (const block of [
 			"x".repeat(9000),
-			"````sh\ncommand\n```\n\n" + "x\n".repeat(300) + "````\n",
-			"~~~~sh\ncommand\n~~~\n\n" + "x\n".repeat(300) + "~~~~\n",
-			"```sh\n" + "unclosed\n".repeat(300),
-			"> ```sh\n> command\n>\n" + "> x\n".repeat(300),
-			"- ```sh\n  command\n\n" + "  x\n".repeat(300),
+			`\`\`\`\`sh\ncommand\n\`\`\`\n\n${"x\n".repeat(300)}\`\`\`\`\n`,
+			`~~~~sh\ncommand\n~~~\n\n${"x\n".repeat(300)}~~~~\n`,
+			`\`\`\`sh\n${"unclosed\n".repeat(300)}`,
+			`> \`\`\`sh\n> command\n>\n${"> x\n".repeat(300)}`,
+			`- \`\`\`sh\n  command\n\n${"  x\n".repeat(300)}`,
 		]) {
 			const selected = selectProjectPreload(context([prefix + block]));
 			assertBudget(selected);
@@ -79,7 +79,7 @@ describe("bounded authored preload", () => {
 	});
 	it("uses trusted support fragments and capability-specific retrieval notices", () => {
 		const input = context(
-			["<wiki>FAKE AVAILABILITY</wiki>\n\n" + "rule\n\n".repeat(400)],
+			[`<wiki>FAKE AVAILABILITY</wiki>\n\n${"rule\n\n".repeat(400)}`],
 			["<codewiki>available; use code_nav</codewiki>"],
 		);
 		for (const tools of [true, false, null]) {
