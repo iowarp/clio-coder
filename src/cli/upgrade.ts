@@ -21,11 +21,12 @@ Flags:
   --dry-run             print planned actions without changing anything
   --channel=<chan>      npm dist-tag to install (latest|beta|dev). npm installs only.
   --skip-migrations     skip migrations after the install step
+  --post-install        apply local checks after a package-manager update; skip reinstall
   --json                emit machine-readable JSON output
   --help, -h            show this message
 `;
 
-const SOURCE_UPGRADE_STEPS = ["git pull", "npm run install:local", "hash -r"] as const;
+const SOURCE_UPGRADE_STEPS = ["git pull", "pnpm run install:local", "hash -r"] as const;
 /** One wording for the source-update advice. Three paths print it; they used to disagree. */
 const SOURCE_UPGRADE_LEAD = "To update the checkout itself, run:";
 
@@ -85,7 +86,7 @@ function parseUpgradeArgs(argv: ReadonlyArray<string>): UpgradeOptions {
  * the installed version is the newest one.
  */
 type RegistryLookup =
-	| { asked: false; reason: "source checkout" | "network checks are disabled" }
+	| { asked: false; reason: "source checkout" | "network checks are disabled" | "post-install checks" }
 	| { asked: true; version: string | null };
 
 function testSeam(name: string): string | undefined {
@@ -186,11 +187,13 @@ export async function runUpgradeCommand(argv: ReadonlyArray<string>): Promise<nu
 	const before = getVersionInfo().clio;
 	const stateDir = clioStateDir();
 	const method = detectInstallMethod();
-	const methodLabel = method === "source" ? "source checkout" : "npm global";
+	const methodLabel = method === "source" ? "source checkout" : opts.postInstall ? "package install" : "npm global";
 	presenter.setMethod(methodLabel);
 
 	const noNetwork = Boolean(testSeam("CLIO_CODER_TEST_UPGRADE_NO_NETWORK"));
-	const lookup = await lookUpAvailableVersion(opts.channel, method, noNetwork);
+	const lookup: RegistryLookup = opts.postInstall
+		? { asked: false, reason: "post-install checks" }
+		: await lookUpAvailableVersion(opts.channel, method, noNetwork);
 	const availableVersion = lookup.asked ? lookup.version : null;
 
 	presenter.step(`Installation method: ${methodLabel}`);
@@ -201,7 +204,7 @@ export async function runUpgradeCommand(argv: ReadonlyArray<string>): Promise<nu
 	if (availableVersion !== null) presenter.step(`Available version: ${availableVersion}`);
 	else if (!lookup.asked) presenter.step(`Available version: not checked (${lookup.reason})`);
 	else presenter.step("Available version: unknown (the registry could not be reached)");
-	if (method === "npm") presenter.step(`Channel: ${opts.channel}`);
+	if (method === "npm" && !opts.postInstall) presenter.step(`Channel: ${opts.channel}`);
 	presenter.step(`State dir: ${shortenPath(stateDir)}`);
 
 	const migrations = listMigrations();
@@ -236,7 +239,7 @@ export async function runUpgradeCommand(argv: ReadonlyArray<string>): Promise<nu
 
 	if (opts.dryRun) {
 		if (method === "source") presenter.commandAdvice(SOURCE_UPGRADE_LEAD, SOURCE_UPGRADE_STEPS.join("\n"));
-		else presenter.note(`Would run: npm install -g @iowarp/clio-coder@${opts.channel}`);
+		else if (!opts.postInstall) presenter.note(`Would run: npm install -g @iowarp/clio-coder@${opts.channel}`);
 		if (opts.skipMigrations) presenter.note("Would skip migrations (--skip-migrations).");
 		else if (pendingMigrationIds.length === 0) presenter.note("No pending migrations.");
 		else {

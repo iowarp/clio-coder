@@ -3,7 +3,17 @@
 > **Visual blueprint:** The source checkout includes the complete
 > [Installation and Lifecycle Operations visual reference](https://github.com/iowarp/clio-coder/blob/main/docs/html/lifecycle_blueprint.html).
 
-Clio Coder is designed to be self-contained and platform-compliant. This document outlines the default directory paths, file purposes, permission levels, and lifecycle commands (`install`, `reset`, `upgrade`, and `uninstall`). Clio Coder installs from npm as `@iowarp/clio-coder` (`npm install -g @iowarp/clio-coder`, published since v0.3.0) or from a source checkout with a deterministic local symlink; the CLI classifies both install kinds and `clio-coder upgrade` handles each.
+Clio Coder installs from the npm registry as `@iowarp/clio-coder` using npm,
+pnpm, or Bun, or from a source checkout using the pinned pnpm workflow. The
+[README installation guide](../../README.md#install) covers global installs,
+cached runners (npm exec/npx, pnpm dlx, bunx, and Yarn dlx), release tarballs,
+and manager-specific update and removal commands. All routes require Node.js
+`>=22.19.0`, including installations managed by Bun.
+
+Repository development uses pnpm 10.34.5 and `pnpm-lock.yaml`. Registry
+consumers install the built package and do not need the repository toolchain.
+This guide describes the default directories, file purposes, permissions, and
+lifecycle operations.
 
 ### Optional dependency: the Claude Agent SDK
 
@@ -11,6 +21,8 @@ Clio Coder is designed to be self-contained and platform-compliant. This documen
 
 ```bash
 npm install -g @iowarp/clio-coder --omit=optional
+# Or: pnpm add -g @iowarp/clio-coder --no-optional
+# Or: bun add -g @iowarp/clio-coder --omit=optional
 ```
 
 Measured on Linux x64 with a production install (`--omit=dev`): 387MB across 118 packages with the SDK, 143MB across 109 packages without it. That is 244MB and nine packages saved, a 63% smaller tree, and what remains is fully open-licensed.
@@ -195,11 +207,25 @@ Refreshes state metadata and applies pending lifecycle migrations, which may upd
 ```bash
 clio-coder upgrade [--dry-run] [--channel=<latest|beta|dev>] [--skip-migrations] [--json]
 ```
-The command detects the install method from the running binary. On a source
-checkout it never runs `npm install -g`: it performs its safe local duties
-(migration check, `install.json` refresh) and prints the real update steps,
-`git pull`, `pnpm run install:local`, `hash -r`. The npm reinstall path applies
-only to a genuinely npm-installed binary.
+On a source checkout, the command applies pending migrations, refreshes
+`install.json`, and prints the source update steps (`git pull`,
+`pnpm run install:local`, `hash -r`). An npm global installation can be
+reinstalled through npm when a newer version or pending work requires it.
+
+For pnpm, Bun, Yarn, repository-local, and cached installations, first update
+with the package manager that owns that installation, then run:
+
+```bash
+clio-coder upgrade --post-install
+clio-coder doctor
+```
+
+`--post-install` applies local migration and metadata checks without querying
+the registry or reinstalling a package. Its `--dry-run` previews only those
+local operations. Automatic package replacement without this flag currently
+assumes npm for packaged installations; use the owning manager's removal
+command as well. Package removal preserves Clio's user configuration and
+sessions; the uninstall operation below deliberately removes those roots.
 
 #### Current migration contract
 

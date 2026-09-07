@@ -51,6 +51,8 @@
 <h3>Optional dependency: the Claude Agent SDK</h3>
 <p><code>@anthropic-ai/claude-agent-sdk</code> is an <code>optionalDependencies</code> entry, not a hard dependency. Its platform package carries a proprietary binary of roughly 224MB per platform, and only the <code>claude-sdk</code> runtime uses it. Skip it with:</p>
 <pre><code class="language-bash">npm install -g @iowarp/clio-coder --omit=optional
+# Or: pnpm add -g @iowarp/clio-coder --no-optional
+# Or: bun add -g @iowarp/clio-coder --omit=optional
 </code></pre>
 <p>Measured on Linux x64 with a production install (<code>--omit=dev</code>): 387MB across 118 packages with the SDK, 143MB across 109 packages without it. That is 244MB and nine packages saved, a 63% smaller tree, and what remains is fully open-licensed.</p>
 <p>Everything except the <code>claude-sdk</code> runtime works on the smaller install: boot, <code>clio-coder doctor</code>, every other target and worker runtime. Dispatching a <code>claude-sdk</code> target on an install that omitted the package fails that run with a diagnostic naming the package and the command that fixes it (<code>npm install @anthropic-ai/claude-agent-sdk@0.3.186</code>); nothing else degrades, and nothing fails at startup.</p>
@@ -399,11 +401,18 @@ its command cache with <code>hash -r</code> in Bash or <code>rehash</code> in Zs
 <p>Refreshes state metadata and applies pending lifecycle migrations, which may update settings, state, or extension data.</p>
 <pre><code class="language-bash">clio-coder upgrade [--dry-run] [--channel=&lt;latest|beta|dev&gt;] [--skip-migrations]
 </code></pre>
-<p>The command detects the install method from the running binary. On a source
-checkout it never runs <code>npm install -g</code>: it performs its safe local duties
-(migration check, <code>install.json</code> refresh) and prints the real update steps,
-<code>git pull</code>, <code>pnpm run install:local</code>, <code>hash -r</code>. The npm reinstall path applies
-only to a genuinely npm-installed binary.</p>
+<p>Source checkouts apply migrations, refresh <code>install.json</code>, and print
+<code>git pull</code>, <code>pnpm run install:local</code>, and <code>hash -r</code>.
+An npm global installation can be reinstalled through npm.</p>
+<p>For pnpm, Bun, Yarn, repository-local, and cached installations, update with
+the owning package manager, then run <code>clio-coder upgrade --post-install</code>
+and <code>clio-coder doctor</code>. The flag runs local migration and metadata
+checks without a registry query or package reinstall; <code>--dry-run</code>
+previews only those operations. Automatic package replacement without the flag
+currently assumes npm. Use the owning manager to remove its package and executable.</p>
+<p>The <a href="https://github.com/iowarp/clio-coder#install">README installation guide</a>
+covers npm, pnpm, Bun, cached runners, release tarballs, and the pinned source
+workflow. All routes require Node.js, including Bun-managed installations.</p>
 <h4>Current migration contract</h4>
 <p>The v0.4.2 source tree registers five migrations in execution order:</p>
 <ol>

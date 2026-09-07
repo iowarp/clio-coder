@@ -12,6 +12,7 @@ All notable changes to Clio Coder are documented in this file. The format follow
 - Workbench run-window search and filters, an optional running-only worker strip, searchable application help and keyboard shortcuts, and an About record showing GUI and connected Clio versions and capabilities.
 
 ### Changed
+- Document npm, pnpm, Bun, Yarn, cached runners, release tarballs, and the pinned pnpm source workflow. Expose `upgrade --post-install` for local migration checks after updates by another package manager, without a registry lookup or reinstall. Source upgrade and recovery guidance now names pnpm, and the source installer requires package managers only for dependency/build work.
 - Clarify that committed verifier catalogs define checks but do not approve repository script execution. The reported automatic-execution defect was refuted by the existing confirmation and approved-safety policy, with the exact Node verifier case pinned by a regression contract (DOG-010).
 - Document shell tool state, cwd, timeout and actual host networking; distinguish `CLIO_CODER_DISABLE_RETRIEVE_TOOLS` from an OS network sandbox while retaining `CLIO_CODER_NO_NETWORK_TOOLS` as a compatibility alias. Tool-data trust guidance and image capability descriptions deliberately update stable prompt bytes without reordering prompt sections (S2-04, S4-02, S4-05, S7-02).
 - Allow an operator process to choose native Anthropic cache retention with `CLIO_CODER_ANTHROPIC_CACHE_RETENTION=none|short|long` across both central streaming paths. Explicit call options take precedence, unsupported long retention remains governed by provider compatibility, and unset preserves SDK behavior (S9-02).
@@ -23,6 +24,7 @@ All notable changes to Clio Coder are documented in this file. The format follow
 - Use pinned pnpm for repository dependencies, application workspaces, contributor scripts, and CI. Keep npm registry packaging and npm consumer installation compatibility checks.
 
 ### Fixed
+- Keep grep, find, and ls bound to the active compiled safety policy after project policy edits or trust revocation, so search output and offloaded results retain the same zero-access protections as direct reads until restart.
 - Keep `clio-coder doctor` diagnosis from creating a credentials file when none exists; explicit `doctor --fix` still creates or repairs it (DOG-001).
 - Give read-only execution denials guidance for independent native inspection and operator-controlled autonomy changes, while preserving execution, write, and protected-read restrictions (DOG-002).
 - Link workers dispatched by headless runs to their parent run, preserving distinct assignment identities across retries, monitoring, and recorded route outcomes (DOG-004).

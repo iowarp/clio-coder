@@ -176,8 +176,9 @@ repo_root="$(cd "$script_dir/.." && pwd -P)"
 cd "$repo_root"
 
 need_cmd node
-need_cmd npm
-need_cmd pnpm
+if [[ $skip_deps -eq 0 || $no_build -eq 0 ]]; then
+	command -v pnpm >/dev/null 2>&1 || fail "pnpm is required; run corepack enable pnpm or npm install -g pnpm@10.34.5"
+fi
 verify_node_engine
 
 bin_dir="$(expand_tilde "${CLIO_CODER_BIN_DIR:-$HOME/.local/bin}")"

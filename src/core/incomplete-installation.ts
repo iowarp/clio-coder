@@ -40,6 +40,8 @@ export function incompleteInstallationAdvice(err: unknown): string | null {
 		`${outputDir}`,
 		"Reinstall to restore it, using the line that matches how you installed:",
 		"  npm install -g @iowarp/clio-coder    # npm install",
-		"  npm run install:local                # source checkout",
+		"  pnpm add -g @iowarp/clio-coder       # pnpm install",
+		"  bun add -g @iowarp/clio-coder        # Bun install",
+		"  pnpm run install:local              # source checkout",
 	].join("\n");
 }

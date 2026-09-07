@@ -400,113 +400,163 @@ cache on the current machine. See the complete
 
 Requirements:
 
-- Node.js `>=22.19.0` and npm
+- Node.js `>=22.19.0` on `PATH`, including when installing with Bun
 - Linux or macOS; Windows support is currently best effort
+- A package manager for registry installation, or Git and pnpm for source builds
 - At least one local, institutional, subscription, or cloud model target
 - Optional: Deno `>=2.9.5` for compiling or running the canonical Workbench GUI
 
-> [!NOTE]
-> This README describes source version **0.4.5**, currently on the local **`v045`**
-> branch, with pnpm **10.34.5** and Pi **0.85.1**. This local candidate has not been
-> published; installing from npm retrieves the published release, not this checkout.
+Registry commands below install the version published under `latest`. This
+checkout prepares **0.4.5**; until that release is published, `latest` remains
+**0.4.4**. The v0.4.5 source workflow uses pnpm **10.34.5**, pinned in
+`package.json`, and Pi **0.85.1**.
 
-### Install from npm
+### Install with npm, pnpm, or Bun
+
+Choose one global installation command:
+
+| Package manager | Install | Global executable directory |
+| --- | --- | --- |
+| npm | `npm install -g @iowarp/clio-coder` | `$(npm prefix -g)/bin` on Unix; the prefix itself on Windows |
+| pnpm | `pnpm add -g @iowarp/clio-coder` | `pnpm bin -g`; run `pnpm setup` and restart your shell if no global bin directory is configured |
+| Bun | `bun add -g @iowarp/clio-coder` | `bun pm bin -g`, usually `~/.bun/bin` |
+
+These managers install the same package from the npm registry. Bun manages the
+installation; the CLI's executable uses Node.js. Keep the selected manager's
+global executable directory on `PATH`, then verify and configure:
 
 ```bash
-npm install -g @iowarp/clio-coder
-clio-coder configure
 clio-coder --version
+clio-coder configure
+clio-coder doctor
 ```
 
-To try the published CLI without a permanent global installation, use npm exec:
+To select a particular published version, append `@<version>` to the package
+name. For example, `npm install -g @iowarp/clio-coder@0.4.4` installs v0.4.4.
 
-```bash
-npm exec --package=@iowarp/clio-coder -- clio-coder --help
-npm exec --package=@iowarp/clio-coder -- clio-coder
-```
+### Run without a global installation
 
-This downloads into npm's cache. Clio still uses its normal configuration and
-session directories; it is not an isolated configuration profile.
+| Package manager | Command |
+| --- | --- |
+| npm exec | `npm exec --package=@iowarp/clio-coder@latest -- clio-coder --help` |
+| npx | `npx --yes @iowarp/clio-coder@latest --help` |
+| pnpm dlx | `pnpm dlx @iowarp/clio-coder@latest --help` |
+| bunx | `bunx @iowarp/clio-coder@latest --help` |
+| Yarn 2+ | `yarn dlx -p @iowarp/clio-coder@latest clio-coder --help` |
+
+Replace `--help` with `configure`, another CLI command, or nothing to start an
+interactive session. These commands download packages into the manager's cache;
+Clio still uses its normal configuration and session directories. Node.js is
+required for every route; do not pass Bun's `--bun` runtime override.
+
+Yarn Classic users can install with `yarn global add @iowarp/clio-coder` and
+put `yarn global bin` on `PATH`. Modern Yarn uses the `dlx` route above.
+For a repository-local CLI dependency, use `npm install --save-dev`,
+`pnpm add -D`, or `bun add -d` with `@iowarp/clio-coder`, then invoke the local
+binary through that manager's exec/run command. Source development in this
+repository uses the pinned pnpm workflow below.
 
 #### Optional dependency: the Claude Agent SDK
 
 `@anthropic-ai/claude-agent-sdk` includes a large platform-specific binary.
 Skip optional dependencies when you do not need the `claude-sdk` worker runtime:
 
-```bash
-npm install -g @iowarp/clio-coder --omit=optional
-```
+| Package manager | Install without optional dependencies |
+| --- | --- |
+| npm | `npm install -g @iowarp/clio-coder --omit=optional` |
+| pnpm | `pnpm add -g @iowarp/clio-coder --no-optional` |
+| Bun | `bun add -g @iowarp/clio-coder --omit=optional` |
 
-Other runtimes do not need that SDK. To include it later in a global installation,
-rerun `npm install -g @iowarp/clio-coder --include=optional`.
+Other runtimes do not need that SDK. To include it later, reinstall with your
+chosen manager and its optional dependencies enabled; for npm, use
+`npm install -g @iowarp/clio-coder --include=optional`.
 See [Optional dependencies](docs/guide/installation-and-lifecycle.md#optional-dependency-the-claude-agent-sdk).
 
-#### Updating npm releases
+#### Update or remove a registry installation
 
-To update the installed package:
+Use the manager that owns the installation:
 
-```bash
-npm install -g @iowarp/clio-coder@latest
-clio-coder upgrade
-```
+| Package manager | Update | Remove package and executable |
+| --- | --- | --- |
+| npm | `npm install -g @iowarp/clio-coder@latest` | `npm uninstall -g @iowarp/clio-coder` |
+| pnpm | `pnpm add -g @iowarp/clio-coder@latest` | `pnpm remove -g @iowarp/clio-coder` |
+| Bun | `bun add -g @iowarp/clio-coder@latest` | `bun remove -g @iowarp/clio-coder` |
+| Yarn Classic | `yarn global add @iowarp/clio-coder@latest` | `yarn global remove @iowarp/clio-coder` |
 
-`clio-coder upgrade` checks and applies pending state and configuration
-migrations recorded in `migrations.json`, updates metadata, and refreshes
-`install.json`. It does not fetch npm packages itself.
-
-#### Uninstalling npm releases
-
-Primary removal uses npm:
+After a package-manager update, run the installed v0.4.5 CLI's local migration
+and metadata checks without another package installation:
 
 ```bash
-npm uninstall -g @iowarp/clio-coder
-hash -r
+clio-coder upgrade --post-install
+clio-coder doctor
 ```
 
-For complete removal of user-level configuration, data, state, and cache roots,
+Plain `clio-coder upgrade` can reinstall npm packages. For pnpm, Bun, Yarn,
+repository-local, or cached executions, use the owning manager to update and
+pass `--post-install`; automatic package replacement currently assumes npm.
+For a cached execution, rerun the same runner with `@latest` to select the
+latest release. Package-manager removal preserves Clio's configuration and
+sessions. Clear your shell's command cache with `hash -r` (Bash) or `rehash`
+(Zsh) after changing installations.
+
+For deliberate removal of user-level configuration, data, state, and cache,
 see [Lifecycle operations](#lifecycle-operations) and
 [Installation and Lifecycle](docs/guide/installation-and-lifecycle.md).
 
-### Install from source
+### Install from a release tarball
 
-From source, install the published **v0.4.4** tag with that release's npm workflow:
+Download `iowarp-clio-coder-<version>.tgz` from the matching
+[GitHub release](https://github.com/iowarp/clio-coder/releases), then install the
+local artifact with your chosen manager:
 
 ```bash
-git clone --branch v0.4.4 https://github.com/iowarp/clio-coder.git
-cd clio-coder
-npm ci
-npm run install:local
-export PATH="$HOME/.local/bin:$PATH"
-hash -r
-"$HOME/.local/bin/clio-coder" --version
+npm install -g ./iowarp-clio-coder-<version>.tgz
+# Or: pnpm add -g ./iowarp-clio-coder-<version>.tgz
+# Or: bun add -g ./iowarp-clio-coder-<version>.tgz
+clio-coder --version
 ```
 
-For the existing local **v045** checkout, use the new pnpm workflow:
+The archive includes the built CLI and runtime resources. Installation still
+resolves dependencies from the registry unless your package-manager cache
+already contains them. GitHub's automatically generated source archives need
+the source build steps below.
+
+### Install from source
+
+From source, the v0.4.5 release uses this pinned pnpm workflow. The tag becomes
+available when the release is cut; before then, use an existing local `v045`
+checkout with the steps following `cd clio-coder`:
 
 ```bash
-cd /path/to/clio-coder
+git clone --branch v0.4.5 https://github.com/iowarp/clio-coder.git
+cd clio-coder
 corepack enable pnpm
-pnpm install --frozen-lockfile
 pnpm run install:local
 export PATH="$HOME/.local/bin:$PATH"
 hash -r
 "$HOME/.local/bin/clio-coder" --version
 ```
 
-This local candidate is on `v045`; that branch is unpublished, so cloning the
-public repository does not retrieve it. Run these steps from the existing
-checkout without cloning again.
-If Corepack is unavailable, install the pinned package manager with
-`npm install -g pnpm@10.34.5` instead of `corepack enable pnpm`.
+If Corepack is unavailable, install pnpm with `npm install -g pnpm@10.34.5`
+instead of `corepack enable pnpm`. The `packageManager` field selects the
+repository version when using Corepack. Published v0.4.4 and older source tags
+use their own npm workflow (`npm ci` and `npm run install:local`); follow the
+README at the tag you check out.
 
-`pnpm run install:local` builds and links the launcher at
-`${CLIO_CODER_BIN_DIR:-$HOME/.local/bin}/clio-coder`. Run
-`command -v clio-coder` to see which installation the bare command reaches;
+`pnpm run install:local` performs `pnpm install --frozen-lockfile`, builds, and
+links the launcher at `${CLIO_CODER_BIN_DIR:-$HOME/.local/bin}/clio-coder`.
+There is no need to install dependencies separately first. If you already
+synced them, use `pnpm run install:local --skip-deps`. For an existing build,
+`bash scripts/install-local.sh --skip-deps --no-build` only links and runs
+local setup checks. Use `--dry-run` to inspect the planned actions.
+
+Run `command -v clio-coder` to see which installation the bare command reaches;
 your shell may otherwise keep resolving an older launcher earlier on `PATH`.
 
 To use the source build without installing a launcher:
 
 ```bash
+pnpm install --frozen-lockfile
 pnpm run build
 node dist/cli/index.js --help
 node dist/cli/index.js
@@ -691,7 +741,7 @@ model-dependent results as measurements rather than promises.
 
 | Problem | First check |
 | --- | --- |
-| `clio-coder: command not found` | Run `command -v clio-coder`; make sure the npm global bin or `${CLIO_CODER_BIN_DIR:-$HOME/.local/bin}` is on `PATH`, then run `hash -r` (Bash) or `rehash` (Zsh). |
+| `clio-coder: command not found` | Run `command -v clio-coder`; make sure your package manager's global bin or `${CLIO_CODER_BIN_DIR:-$HOME/.local/bin}` is on `PATH`, then run `hash -r` (Bash) or `rehash` (Zsh). |
 | GUI launcher not found | Run `clio-coder-gui` (or `cd apps/workbench && deno task browser`). There is no `clio-coder workbench` subcommand. |
 | Trace viewer unavailable | The trace viewer is source-only. Run `clio-coder trace ui` or `pnpm run trace:ui` from a source checkout. |
 | No usable model target | Run `clio-coder configure`, then `clio-coder targets --probe`. |
