@@ -58,11 +58,16 @@ looks wrong, `clio-coder doctor` performs a read-only health check.
 > [!NOTE]
 > Add `--omit=optional` to the npm install to skip the Claude Agent SDK's large
 > optional binary. Only the `claude-sdk` worker runtime needs it. See
-> [Optional dependencies](docs/guide/installation-and-lifecycle.md#optional-dependency-the-claude-agent-sdk).
+> [Optional dependencies](#optional-dependency-the-claude-agent-sdk).
 
 | If you are… | Continue with… |
 | --- | --- |
 | Trying Clio on a project | [A first session](#a-first-session) and [Choose where models run](#choose-where-models-run) |
+| Running automation, scripts, or editor hosts | [Headless and editor use](#headless-and-editor-use) |
+| Exploring CLI commands and diagnostics | [CLI discovery and diagnostics](#cli-discovery-and-diagnostics) |
+| Managing installation, upgrades, or uninstall | [Install](#install) |
+| Using the desktop or browser GUI | [Canonical Workbench (Clio Coder GUI)](#canonical-workbench-clio-coder-gui) |
+| Inspecting execution trace mirrors | [Trace viewer (source-only)](#trace-viewer-source-only) |
 | Responsible for sensitive or expensive work | [Safety and evidence](#safety-and-evidence) |
 | Bringing Clio to a workstation or cluster | [Project context](#project-context-that-stays-with-the-project) and [Delegation](#delegate-with-bounds) |
 | An agent entering this repository | [For agents working on Clio Coder](#for-agents-working-on-clio-coder) |
@@ -122,6 +127,7 @@ and activity visible without taking over the terminal.
 | Branch or resume a conversation | `/tree`, `/fork`, `/resume`, `/new` |
 | Carry current state into a fresh session | `/handoff <goal>` |
 | Browse agents, prompts, fleets, extensions, and skills | `/resources` |
+| Load a specialized skill | `/skill <name>` |
 | Save a self-contained transcript | `/export` |
 
 Pressing Enter while Clio is working steers the active turn; `Alt+Enter` queues
@@ -306,6 +312,7 @@ clio-coder evidence list
 clio-coder evidence inspect <evidence-id>
 clio-coder trace phases <run-id>
 clio-coder trace tail <run-id>
+clio-coder trace inspect --json
 ```
 
 `clio-coder usage report` preserves known failed-compaction spending and labels
@@ -335,11 +342,37 @@ clio-coder run "<task>" --agent coder
 clio-coder acp
 ```
 
-Text mode reserves stdout for the final answer. `--json` emits JSONL events for
-scripts, and `acp` serves Clio over stdio to Agent Client Protocol hosts. Exit
-codes and output guarantees are documented in
+Text mode reserves stdout for the final answer. Diagnostics and progress go to
+stderr. `--json` emits JSONL events for scripts, and `acp` serves Clio over
+stdio to Agent Client Protocol hosts.
+
+In headless runs (`clio-coder run`):
+- Interactive confirmation prompts cannot be answered, so any tool call parking
+  for operator confirmation is automatically denied. Interactive session commands
+  (such as `/settings`, `/help`, or `/context compact`) are refused upfront with
+  an error. Skill invocations that include a task (such as
+  `/skill <name> <task>`) and declared prompt templates expand normally; a bare
+  `/skill` invocation without arguments is rejected.
+- Dispatched workers follow `fleet.permissions.mode`: default `deny` records a
+  structured tool denial and continues execution, while `fail` aborts the worker.
+
+Exit codes and output guarantees are documented in
 [Exit Codes and Output](docs/guide/exit-codes-and-output.md) and
 [ACP](docs/architecture/acp.md).
+
+## CLI discovery and diagnostics
+
+Discover commands and inspect local health without guessing syntax:
+
+| You want to… | Command | Description |
+| --- | --- | --- |
+| View standard operator commands | `clio-coder --help` | Day-to-day commands for chat, config, context, and fleets. |
+| View complete command listing | `clio-coder --help --all` | Standard commands plus harness developer tools under `clio-coder dev`. |
+| Run developer instruments | `clio-coder dev <command>` | Harness tools: `components`, `evolve`, and `share`. |
+| Health check state and credentials | `clio-coder doctor` | Read-only scan of settings schema, credentials mode (`0o600`), and directories. |
+| Repair missing skeletons | `clio-coder doctor --fix` | Non-destructively creates missing directories and repairs credential permissions. |
+| Show resolved paths | `clio-coder paths [--json]` | Displays resolved configuration, data, state, and cache directories. |
+| Inspect active settings | `clio-coder config inspect` | Displays layered configuration and provenance. |
 
 ## Settings and local state
 
@@ -369,6 +402,12 @@ Requirements:
 - Node.js `>=22.19.0` and npm
 - Linux or macOS; Windows support is currently best effort
 - At least one local, institutional, subscription, or cloud model target
+- Optional: Deno `>=2.9.5` for compiling or running the canonical Workbench GUI
+
+> [!NOTE]
+> The current source checkout branch is **v0.4.5** (built against `pnpm@10.34.5` and
+> Pi Agent Framework `@earendil-works/pi-*` at `0.85.1`). The latest release on the
+> public npm registry may be **v0.4.4**.
 
 ### Install from npm
 
@@ -378,13 +417,53 @@ clio-coder configure
 clio-coder --version
 ```
 
-### Install from source
+#### Optional dependency: the Claude Agent SDK
 
-From source, pinned to this version:
+`@anthropic-ai/claude-agent-sdk` is an optional dependency carrying a ~224 MB platform
+binary. Skip it with `--omit=optional` (saves ~244 MB, reducing the install tree
+from 387 MB to 143 MB across 109 packages):
 
 ```bash
-git clone --branch v0.4.4 https://github.com/iowarp/clio-coder.git
-cd clio-coder
+npm install -g @iowarp/clio-coder --omit=optional
+```
+
+Only the `claude-sdk` worker runtime needs it; everything else works without it.
+Install it later if needed with `npm install @anthropic-ai/claude-agent-sdk@0.3.186`.
+See [Optional dependencies](docs/guide/installation-and-lifecycle.md#optional-dependency-the-claude-agent-sdk).
+
+#### Updating npm releases
+
+To update the installed package:
+
+```bash
+npm install -g @iowarp/clio-coder@latest
+clio-coder upgrade
+```
+
+`clio-coder upgrade` checks and applies pending state and configuration
+migrations recorded in `migrations.json`, updates metadata, and refreshes
+`install.json`. It does not fetch npm packages itself.
+
+#### Uninstalling npm releases
+
+Primary removal uses npm:
+
+```bash
+npm uninstall -g @iowarp/clio-coder
+hash -r
+```
+
+For complete removal of user-level configuration, data, state, and cache roots,
+see [Lifecycle operations](#lifecycle-operations) and
+[Installation and Lifecycle](docs/guide/installation-and-lifecycle.md).
+
+### Install from source
+
+For local development checkouts on the unpublished `v045` prerelease:
+
+```bash
+cd /path/to/clio-coder
+git switch v045
 corepack enable pnpm
 pnpm install --frozen-lockfile
 pnpm run install:local
@@ -393,12 +472,19 @@ hash -r
 "$HOME/.local/bin/clio-coder" --version
 ```
 
+Branch `v045` is local and unpublished; users cloning from remote `main` should
+follow the README instructions for their checked-out revision.
+
 `pnpm run install:local` builds and links the launcher at
 `${CLIO_CODER_BIN_DIR:-$HOME/.local/bin}/clio-coder`. Run
 `command -v clio-coder` to see which installation the bare command reaches;
 your shell may otherwise keep resolving an older launcher earlier on `PATH`.
-Clone the default branch instead only when you deliberately want the current
-development tree.
+
+Rebuild automatically on source changes:
+
+```bash
+pnpm run dev
+```
 
 Upgrade and diagnose without deleting state:
 
@@ -408,6 +494,9 @@ clio-coder doctor
 clio-coder doctor --fix
 ```
 
+Updating a source checkout: run `git pull`, `pnpm run install:local`, `hash -r`,
+and `clio-coder upgrade`.
+
 To remove it, preview first:
 
 ```bash
@@ -415,8 +504,130 @@ clio-coder uninstall --dry-run
 clio-coder uninstall --remove-binary --force
 ```
 
+`clio-coder uninstall` purges the four home roots (`config`, `data`, `state`,
+`cache`); `--remove-binary` unlinks the local launcher. Per-project `.clio-coder/`
+state directories and authored `CLIO-CODER.md` handbooks are not deleted by
+uninstall; in repositories where you deliberately wish to remove all generated
+context artifacts, run `clio-coder context reset --all`.
+
+### Lifecycle operations
+
+| Operation | Command | Scope and effect |
+| --- | --- | --- |
+| Health check | `clio-coder doctor` | Read-only audit of settings schema, credentials permissions (`0o600`), and state freshness. |
+| Structure repair | `clio-coder doctor --fix` | Creates missing directory skeletons and restores credential permissions (does not migrate schemas). |
+| Lifecycle upgrade | `clio-coder upgrade [--dry-run]` | Applies pending registered migrations (`migrations.json`) and refreshes install metadata. |
+| Selective reset | `clio-coder reset [--state\|--data\|--cache\|--auth\|--config\|--all]` | Selectively wipes specific roots (`--force` required). |
+| Full uninstall | `clio-coder uninstall [--remove-binary] [--force]` | Removes user config, data, state, and cache roots; `--remove-binary` unlinks launcher. |
+
 The full directory, permission, reset, migration, and uninstall behavior is in
 [Installation and Lifecycle](docs/guide/installation-and-lifecycle.md).
+
+## Canonical Workbench (Clio Coder GUI)
+
+The canonical desktop and browser GUI for Clio Coder lives in `apps/workbench/`.
+It is a single Deno process that serves a built React/Vite web interface over
+the loopback interface (`127.0.0.1`) and manages one child `clio-coder acp`
+process per open project.
+
+The standalone GUI executable is `clio-coder-gui`, or the interface can be run
+directly using Deno tasks. The product shown to users is named **Clio Coder**;
+the internal directory and state identifier is `workbench`.
+
+### State and settings
+
+The GUI persists recent projects in `projects.json`. The state root is resolved in order:
+`$CLIO_CODER_GUI_STATE_DIR`, then deprecated `$CLIO_WORKBENCH_STATE_DIR`, then
+`$XDG_STATE_HOME/clio-coder-gui`, and finally `~/.local/state/clio-coder-gui`.
+On first start after upgrade, legacy `clio-workbench` directories are migrated atomically.
+
+### Running Workbench from source
+
+Requirements: Deno `>=2.9.5`, workspace dependencies installed from the root
+(`pnpm install --frozen-lockfile`), and `clio-coder` on `PATH`.
+
+The supported full GUI runs through the Deno host on port 4173:
+
+```bash
+cd apps/workbench
+
+# Build dist/ and serve on http://127.0.0.1:4173:
+deno task browser
+
+# Serve an existing dist/ build directly:
+deno task start
+
+# Use any free port and open the default browser:
+deno task start --port=0 --open
+```
+
+`deno task browser` builds `dist/` once with Vite and starts the host. The Vite
+configuration (`vite.config.ts`) has no backend proxy; restarting `deno task browser`
+rebuilds and serves updated assets after edits. See the contributor notes in
+[apps/workbench/README.md](apps/workbench/README.md).
+
+### GUI application lifecycle
+
+Lifecycle tasks in `apps/workbench/` are managed via `scripts/gui-lifecycle.ts`:
+
+```bash
+cd apps/workbench
+deno task gui:install    # builds dist/, compiles standalone binary, places application files
+deno task gui:status     # verifies version, per-file sha256 checksums, state dir, and PATH
+deno task gui:upgrade    # replaces recorded files in place and rewrites manifest
+deno task gui:uninstall  # removes recorded files and empty directories created at install
+```
+
+Pass `--purge-state` to `gui:uninstall` to also remove the GUI state directory.
+
+An installation places exactly three files plus an install manifest:
+- Binary: `~/.local/bin/clio-coder-gui` (or `DIR/bin/clio-coder-gui` with `--prefix=DIR`)
+- Desktop entry: `$XDG_DATA_HOME/applications/clio-coder-gui.desktop`
+- Application icon: `$XDG_DATA_HOME/clio-coder-gui/clio-coder-gui.png`
+- Manifest: `$XDG_DATA_HOME/clio-coder-gui/install.json`
+
+The compiled binary (~105 MB on x86_64 Linux) has `dist/` embedded and runs
+without the source checkout.
+
+### Desktop limitations
+
+- **Platform support:** Linux (including WSL2) is tested. Native Windows launch is
+  unavailable (`defaultClioLauncher` in `main.ts` refuses it); `desktop:windows` is an
+  unverified experimental webview build.
+- **Network change resilience:** Transient `net::ERR_NETWORK_CHANGED` errors when
+  WSL2 or VPN interfaces cycle are recovered automatically via 3-stage bootstrap retries.
+- **Release distribution:** Pre-packaged GUI binaries are not distributed as GitHub
+  release downloads; compile locally using `deno task gui:install`.
+
+See [apps/workbench/README.md](apps/workbench/README.md) and
+[apps/workbench/DESIGN_SYSTEM.md](apps/workbench/DESIGN_SYSTEM.md).
+
+## Trace viewer (source-only)
+
+A small, local-only, read-only web view over Clio's durable dispatch trace
+mirror (`trace.sqlite`) and provenance sidecars (`receipts/<runId>.json`,
+`evidence-index.json`).
+
+`apps/` is intentionally absent from the published npm package, so the trace
+viewer is available **only from a source checkout**.
+
+The CLI command defaults to an ephemeral free port (port 0), while direct server
+launch defaults to port 4600:
+
+```bash
+# Start viewer on port 4600 via the CLI:
+clio-coder trace ui --port 4600
+
+# Or start directly with pnpm:
+pnpm run trace:ui --port 4600
+```
+
+The server binds strictly to `127.0.0.1`, opens SQLite with read-only flags,
+and polls active runs every 500 ms. Pass `--db <path>` to inspect an alternate
+trace database location.
+
+See [apps/trace-viewer/README.md](apps/trace-viewer/README.md) and
+[Trace Store Architecture](docs/architecture/trace-store.md).
 
 ## Project status
 
@@ -434,7 +645,9 @@ model-dependent results as measurements rather than promises.
 
 | Problem | First check |
 | --- | --- |
-| `clio-coder: command not found` | Run `command -v clio-coder`; make sure the npm global bin or `${CLIO_CODER_BIN_DIR:-$HOME/.local/bin}` is on `PATH`, then run `hash -r`. |
+| `clio-coder: command not found` | Run `command -v clio-coder`; make sure the npm global bin or `${CLIO_CODER_BIN_DIR:-$HOME/.local/bin}` is on `PATH`, then run `hash -r` (Bash) or `rehash` (Zsh). |
+| GUI launcher not found | Run `clio-coder-gui` (or `cd apps/workbench && deno task browser`). There is no `clio-coder workbench` subcommand. |
+| Trace viewer unavailable | The trace viewer is source-only. Run `clio-coder trace ui` or `pnpm run trace:ui` from a source checkout. |
 | No usable model target | Run `clio-coder configure`, then `clio-coder targets --probe`. |
 | A local server does not answer | Verify the server process, URL, advertised model id, and `clio-coder targets` health row. |
 | Cloud or subscription authentication fails | Run `clio-coder auth status <target-or-runtime>` and repeat the appropriate login flow. |
@@ -520,6 +733,8 @@ the interactive blueprints locally. Frequently used pages:
 | Fleet and multi-node execution | [Fleet Dispatch](docs/guide/fleet-dispatch.md) |
 | Receipts, traces, and evidence | [Observability](docs/architecture/observability.md) |
 | Exact CLI output contracts | [Exit Codes and Output](docs/guide/exit-codes-and-output.md) |
+| Canonical Workbench (Desktop & Browser GUI) | [apps/workbench/README.md](apps/workbench/README.md) |
+| Trace Viewer (Read-only mirror UI) | [apps/trace-viewer/README.md](apps/trace-viewer/README.md) |
 
 ## Heritage
 
