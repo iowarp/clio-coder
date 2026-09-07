@@ -79,6 +79,34 @@ Deno.test("bootstrap validation accepts only an exact, internally consistent v4 
 	throws(() => parseBootstrapPayload(relativeHome), /homePath must be absolute/u);
 });
 
+Deno.test("the GUI version is additive: absent, null, or a bounded string, and lands in app state", () => {
+	const withVersion = parseBootstrapPayload(structuredClone(bootstrapFixture({ appVersion: "0.4.5" })) as unknown);
+	equal(withVersion.appVersion, "0.4.5");
+	equal(appReducer(initialAppState, { type: "bootstrap.loaded", payload: withVersion }).appVersion, "0.4.5");
+
+	const explicitNull = parseBootstrapPayload(structuredClone(bootstrapFixture({ appVersion: null })) as unknown);
+	equal(explicitNull.appVersion, null);
+
+	// A host built before the field still produces a valid v4 bootstrap.
+	const older = structuredClone(bootstrapFixture()) as unknown as Record<string, unknown>;
+	delete older.appVersion;
+	equal(parseBootstrapPayload(older).appVersion, null);
+	equal(
+		appReducer(initialAppState, { type: "bootstrap.loaded", payload: parseBootstrapPayload(older) }).appVersion,
+		null,
+	);
+
+	const padded = structuredClone(bootstrapFixture()) as unknown as Record<string, unknown>;
+	padded.appVersion = " 0.4.5";
+	throws(() => parseBootstrapPayload(padded), /appVersion must not have surrounding whitespace/u);
+	const long = structuredClone(bootstrapFixture()) as unknown as Record<string, unknown>;
+	long.appVersion = "9".repeat(65);
+	throws(() => parseBootstrapPayload(long), /appVersion is too long/u);
+	const wrongType = structuredClone(bootstrapFixture()) as unknown as Record<string, unknown>;
+	wrongType.appVersion = 45;
+	throws(() => parseBootstrapPayload(wrongType), /appVersion must be a non-empty string/u);
+});
+
 Deno.test("a bootstrap with no open project is valid and leaves the app waiting for a folder", () => {
 	const bootstrap = bootstrapFixture({ openProjectId: null, workspace: null, recent: [] });
 	const parsed = parseBootstrapPayload(structuredClone(bootstrap) as unknown);

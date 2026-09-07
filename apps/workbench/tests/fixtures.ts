@@ -689,6 +689,59 @@ export function evidenceInspectionFixture(): WireEvidenceInspection {
 	};
 }
 
+/**
+ * The same window with two more runs, so a filter has something to narrow:
+ * a failed debugger run on another node with no journal, and a debugger run
+ * still in flight. Neither belongs to the fleet root, so lineage has a
+ * standalone bucket, and the extra ids collide with no gate, council, or
+ * evidence reference in the sibling fixtures.
+ */
+export function fleetInspectionFilterFixture(): WireFleetInspection {
+	const base = fleetInspectionFixture();
+	return {
+		...base,
+		runs: [
+			...base.runs,
+			{
+				runId: "run-gamma",
+				agentId: "debugger",
+				model: "glm-4.6",
+				target: "blade-gateway",
+				node: "blade",
+				phase: "failed",
+				startedAt: "2026-08-31T13:58:00.000Z",
+				elapsedMs: 12_000,
+				task: "Reproduce the flaky convergence check",
+				journal: "missing",
+				events: [],
+				eventsTruncated: false,
+				evidence: { state: "failed", summary: "trust v1: receipt no longer authenticates" },
+				outcome: "failed",
+				outcomeDetail: "worker exited before sealing",
+				terminal: true,
+			},
+			{
+				runId: "run-delta",
+				agentId: "debugger",
+				model: "glm-4.6",
+				target: "blade-gateway",
+				node: "blade",
+				phase: "running",
+				startedAt: "2026-08-31T13:57:00.000Z",
+				elapsedMs: 240_000,
+				task: null,
+				journal: "available",
+				events: [{ at: "2026-08-31T13:57:00.000Z", label: "run opened (debugger)", detail: null }],
+				eventsTruncated: false,
+				evidence: { state: "pending", summary: "trust v1: receipt not yet sealed" },
+				outcome: null,
+				outcomeDetail: null,
+				terminal: false,
+			},
+		],
+	};
+}
+
 export function recoveryInspectionFixture(): WireRecoveryInspection {
 	return {
 		scope: "installation",
@@ -1202,6 +1255,7 @@ export function bootstrapFixture(
 		workspaceInstanceId: "workspace-fixture-0001",
 		localToken: "token-fixture-0000000000000001",
 		mode: "browser" as const,
+		appVersion: "0.0.1",
 		openProjectId: FIXTURE_PROJECT_ID,
 		workspace: workspaceFixture(),
 		recent: [{

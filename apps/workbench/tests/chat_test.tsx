@@ -1,8 +1,8 @@
 import { deepEqual, equal, match, ok } from "node:assert/strict";
 import { renderToStaticMarkup } from "react-dom/server";
 import { groupTurns, liveStatus, summarizeActivity } from "../src/chat.ts";
-import { ChatTranscript } from "../src/Chat.tsx";
-import type { WirePendingPermission, WireTimelineItem } from "../src/protocol.ts";
+import { ChatTranscript, FleetStrip } from "../src/Chat.tsx";
+import type { WireFleetRun, WirePendingPermission, WireTimelineItem } from "../src/protocol.ts";
 import { applyTurnEvent, emptyTurnProjection } from "../src/timeline.ts";
 
 function item(overrides: Partial<WireTimelineItem> & Pick<WireTimelineItem, "id" | "kind">): WireTimelineItem {
@@ -280,4 +280,36 @@ Deno.test("an active turn shows the current tool and a pending approval with its
 	match(html, /· 10s/u);
 	ok(!html.includes("permission-internal-0001"), "wire identifiers never render");
 	ok(!html.includes("tool-internal-0001"));
+});
+
+Deno.test("the fleet strip offers a running-only toggle that starts off and hides nothing until pressed", () => {
+	const run = (runId: string, state: WireFleetRun["state"], taskPreview: string): WireFleetRun => ({
+		runId,
+		agentId: "explorer",
+		state,
+		taskPreview,
+		node: "blade",
+		attempt: 1,
+		progressCount: 0,
+		progressTruncated: false,
+		outcome: state === "done" ? "succeeded" : null,
+		durationMs: null,
+		tokenCount: null,
+		updatedAt: "2026-08-31T14:00:00.000Z",
+	});
+	const html = renderToStaticMarkup(
+		<FleetStrip
+			runs={[run("r1", "done", "Settled work"), run("r2", "running", "Live work"), run("r3", "queued", "Queued work")]}
+		/>,
+	);
+	match(html, /Fleet · 2 running of 3/u);
+	// The control is a pressed/unpressed toggle with its count, off by default.
+	match(html, /aria-pressed="false"/u);
+	match(html, /Running only/u);
+	match(html, /All 3 reported runs shown/u);
+	// Off means every reported row is on screen, including the settled one.
+	match(html, /Settled work/u);
+	match(html, /Live work/u);
+	match(html, /Queued work/u);
+	ok(!html.includes("No run is running right now"));
 });

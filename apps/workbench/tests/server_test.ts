@@ -17,6 +17,7 @@ import type { ClioRecoveryInspector } from "../clio-recovery-inspector.ts";
 import type { ClioUsageInspector } from "../clio-usage-inspector.ts";
 import type { ClioRoutingInspector } from "../clio-routing-inspector.ts";
 import {
+	APP_VERSION,
 	defaultClioLauncher,
 	MAX_WEBSOCKET_OUTBOUND_BYTES,
 	type RunningWorkbenchServer,
@@ -572,6 +573,9 @@ Deno.test("startWorkbenchServer serves a v3 bootstrap and static assets with bou
 		equal(bootstrap.homePath, await Deno.realPath(fixture.homePath));
 		match(String(bootstrap.stateDirNote), /recent-project list/u);
 		match(String(bootstrap.securityNote), /Deno's file grants are broad/u);
+		// The GUI's own version rides along, additively, so the About record can
+		// name both sides without a second request.
+		equal(bootstrap.appVersion, APP_VERSION);
 		for (
 			const removed of ["projects", "selectedProjectId", "fakeEngine", "sandboxLabel", "registerableSandboxFolders"]
 		) {

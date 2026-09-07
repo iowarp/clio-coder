@@ -89,6 +89,8 @@ export interface WireBootstrap {
 	readonly workspaceInstanceId: string;
 	readonly localToken: string;
 	readonly mode: "browser" | "desktop";
+	/** The GUI's own version, from the host's `deno.json`; null when the host predates the field. */
+	readonly appVersion: string | null;
 	readonly openProjectId: string | null;
 	readonly workspace: WireProjectWorkspace | null;
 	readonly recent: readonly WireProjectSummary[];
@@ -116,6 +118,7 @@ export interface AppState {
 	readonly workspaceInstanceId: string | null;
 	readonly localToken: string | null;
 	readonly mode: "browser" | "desktop";
+	readonly appVersion: string | null;
 	readonly connection: ConnectionState;
 	readonly open: OpenWorkspaceState | null;
 	readonly recent: readonly WireProjectSummary[];
@@ -275,6 +278,7 @@ export const initialAppState: AppState = {
 	workspaceInstanceId: null,
 	localToken: null,
 	mode: "browser",
+	appVersion: null,
 	connection: "connecting",
 	open: null,
 	recent: [],
@@ -341,7 +345,14 @@ const BOOTSTRAP_KEYS = [
 	"interopInspection",
 	"evalInventory",
 	"evidenceInspection",
+	"appVersion",
 ] as const;
+/**
+ * Keys a host may omit. `appVersion` is additive: a host built before it
+ * still produces a valid v4 bootstrap, and the About record says the version
+ * was not reported rather than failing the boot.
+ */
+const OPTIONAL_BOOTSTRAP_KEYS: ReadonlySet<string> = new Set(["appVersion"]);
 
 function invalidBootstrap(detail: string): never {
 	throw new Error(
@@ -365,6 +376,7 @@ function expectExactBootstrapRecord(value: unknown): Record<string, unknown> {
 		}
 	}
 	for (const key of BOOTSTRAP_KEYS) {
+		if (OPTIONAL_BOOTSTRAP_KEYS.has(key)) continue;
 		if (!Object.hasOwn(record, key)) {
 			invalidBootstrap(`the payload is missing field ${JSON.stringify(key)}`);
 		}
@@ -561,6 +573,9 @@ export function parseBootstrapPayload(value: unknown): WireBootstrap {
 		workspaceInstanceId,
 		localToken,
 		mode: record.mode,
+		appVersion: record.appVersion === undefined || record.appVersion === null
+			? null
+			: expectBootstrapString(record.appVersion, "appVersion", { maxBytes: 64, trim: true }),
 		openProjectId,
 		workspace,
 		recent: validateRecent(record.recent, workspaceInstanceId),
@@ -764,6 +779,7 @@ export function appReducer(state: AppState, action: AppAction): AppState {
 				workspaceInstanceId: action.payload.workspaceInstanceId,
 				localToken: action.payload.localToken,
 				mode: action.payload.mode,
+				appVersion: action.payload.appVersion,
 				open,
 				recent: action.payload.recent,
 				homePath: action.payload.homePath,

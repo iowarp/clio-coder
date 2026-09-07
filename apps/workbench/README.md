@@ -37,6 +37,10 @@ for two minor releases and emits one warning. On first start after an upgrade, t
 `clio-workbench` state root. If legacy and canonical roots both exist, it backs up both `projects.json` inputs and
 merges valid recent projects by canonical path and newest `lastOpenedAt`.
 
+The bootstrap payload carries the GUI's own version as an optional `appVersion` field, read from `deno.json`. The
+renderer treats a missing field as "not reported", so an older host still boots, and the Settings dialog opens with an
+About record that shows this version beside the one Clio Coder reported in its ACP handshake.
+
 The local host/renderer bridge emits `clio-coder.state`, `clio-coder-*` error codes, and
 `clioCoder`/`clioCoderVersion`/`clioCoderCommit` provenance fields. Its bounded readers accept and normalize the
 released `clio.state`, `clio-*`, `clio`, `clioVersion`, and `clioCommit` spellings for two minor releases.
@@ -93,6 +97,8 @@ lifecycle (`tests/gui_lifecycle_test.ts`) against a stand-in binary.
 ```sh
 deno task verify         # format check, lint, type check, unit tests, production build
 deno task smoke:browser  # builds, then drives six fixture-backed hosts through headless Chrome with Axe checks
+pnpm --filter @iowarp/clio-coder-workbench verify   # the same Deno tasks through the pnpm workspace
+                                                    # (also: format, lint, check, test, smoke:browser)
 deno run -A scripts/perf-workload.ts --label=NAME   # the rendering workload behind PERFORMANCE.md
 deno run -A scripts/visual-probe.ts                  # one PNG per surface and width into .artifacts/visual/
 ```

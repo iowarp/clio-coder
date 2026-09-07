@@ -34,7 +34,7 @@ import {
 	evalInventoryFixture,
 	evidenceDetailFixture,
 	evidenceInspectionFixture,
-	fleetInspectionFixture,
+	fleetInspectionFilterFixture,
 	fleetVerificationFixture,
 	gateDecisionsFixture,
 	interopInspectionFixture,
@@ -117,7 +117,16 @@ const running = await startWorkbenchServer({
 		inspect: () => Promise.resolve(dispatchInspectionFixture()),
 	} satisfies ClioDispatchInspector,
 	fleetInspector: {
-		inspect: () => Promise.resolve(fleetInspectionFixture()),
+		// Three runs so the filter has something to narrow. The in-flight row is
+		// settled here so the journal's automatic refresh stays quiet during the
+		// assertions below; the running facet is covered by the unit tests.
+		inspect: () =>
+			Promise.resolve({
+				...fleetInspectionFilterFixture(),
+				runs: fleetInspectionFilterFixture().runs.map((run) =>
+					run.runId === "run-delta" ? { ...run, phase: "succeeded", outcome: "succeeded", terminal: true } : run
+				),
+			}),
 		verify: (_cwd, runId) => Promise.resolve({ ...fleetVerificationFixture(), runId }),
 	} satisfies ClioFleetInspector,
 	traceInspector: {
@@ -619,6 +628,56 @@ try {
 	await stepIndex.getByRole("button", { disabled: false }).first().click();
 	await fleetJournal.getByRole("heading", { name: "builder · run-alpha" }).waitFor();
 
+	// Narrowing the window is a local projection over the rows on screen. The
+	// facets come from those rows, the sentence counts what is shown against
+	// the bound, and the selected run never points at a hidden row.
+	const filterBar = fleetJournal.getByRole("region", { name: "Narrow this window" });
+	const runList = fleetJournal.getByRole("list", { name: "Recent Clio Coder runs" });
+	await filterBar.getByText(/Showing all 3 most recent runs Clio Coder reports/u).waitFor();
+	equal(await runList.getByRole("button").count(), 3);
+	const failedChip = filterBar.getByRole("group", { name: "Outcome" }).getByRole("button", { name: /^Failed/u });
+	equal(await failedChip.getAttribute("aria-pressed"), "false");
+	await failedChip.click();
+	equal(await failedChip.getAttribute("aria-pressed"), "true");
+	await filterBar.getByText(
+		"Showing 1 of the 3 most recent runs Clio Coder reports. Older runs are not in this window.",
+		{
+			exact: true,
+		},
+	).waitFor();
+	equal(await runList.getByRole("button").count(), 1);
+	await fleetJournal.getByRole("heading", { name: "debugger · run-gamma" }).waitFor();
+	await page.screenshot({ path: new URL("runs-filtered.png", artifactDirectory).pathname, fullPage: true });
+	// A chip is a toggle button, so Space on a focused chip releases it.
+	await failedChip.focus();
+	await page.keyboard.press("Space");
+	equal(await failedChip.getAttribute("aria-pressed"), "false");
+	await filterBar.getByText(/Showing all 3 most recent runs Clio Coder reports/u).waitFor();
+	// Two facets combine, and the count sentence follows.
+	await filterBar.getByRole("group", { name: "Agent" }).getByRole("button", { name: /^debugger/u }).click();
+	await filterBar.getByRole("group", { name: "Node" }).getByRole("button", { name: /^blade/u }).click();
+	await filterBar.getByText(/Showing 2 of the 3 most recent runs/u).waitFor();
+	equal(await runList.getByRole("button").count(), 2);
+	// An explicit selection from the step index wins over a filter that would
+	// hide it: the filter yields and the chosen run is shown.
+	await stepIndex.getByRole("button", { disabled: false }).first().click();
+	await fleetJournal.getByRole("heading", { name: "builder · run-alpha" }).waitFor();
+	await filterBar.getByText(/Showing all 3 most recent runs/u).waitFor();
+	equal(await filterBar.getByRole("button", { pressed: true }).count(), 0);
+	// Free text that matches nothing says so and offers one way back.
+	const runSearch = filterBar.getByRole("searchbox", { name: "Narrow this window" });
+	await runSearch.fill("nothing-in-this-window");
+	await filterBar.getByText("No runs in this window match. Clear the filter to see all 3.", { exact: true }).waitFor();
+	equal(await runList.getByRole("button").count(), 0);
+	equal(await fleetJournal.getByRole("heading", { name: /run-/u }).count(), 0);
+	await filterBar.getByRole("button", { name: "Clear the filter", exact: true }).click();
+	await filterBar.getByText(/Showing all 3 most recent runs/u).waitFor();
+	equal(await runList.getByRole("button").count(), 3);
+	await fleetJournal.getByRole("heading", { name: "builder · run-alpha" }).waitFor();
+	// The filter never reaches the host: the argv note is unchanged and the
+	// bar carries no control that would send anything.
+	await fleetJournal.getByText(/The browser never supplies a run id, path,\s+filter/u).waitFor();
+
 	// A sealed gate verdict says what the coordinator concluded about these runs
 	// and how far its grader was from the route it was grading.
 	const gates = fleetJournal.getByRole("region", { name: "Verdicts reached about these runs" });
@@ -770,6 +829,55 @@ try {
 		true,
 	);
 	equal(await conversationWidth(), initialConversationWidth);
+
+	// The help reference is the desktop app's own document. It opens from the
+	// Observatory header, contains focus, filters to the key an operator is
+	// looking for, closes on Escape, and hands focus back to its opener.
+	const helpOpener = page.getByRole("complementary", { name: "Run and evidence overview" })
+		.getByRole("button", { name: "How this app works" });
+	await helpOpener.click();
+	const helpDialog = page.getByRole("dialog", { name: "How this app works" });
+	await helpDialog.waitFor();
+	equal(await page.locator(".conversation").evaluate((element) => element.hasAttribute("inert")), true);
+	await helpDialog.getByText("The whole reference", { exact: true }).waitFor();
+	for (
+		const view of ["Conversation", "Session Timeline", "Effective Clio Coder", "Catalog", "Usage", "Dispatch", "Runs"]
+	) {
+		await helpDialog.getByRole("term").filter({ hasText: new RegExp(`^${view}$`, "u") }).first().waitFor();
+	}
+	await helpDialog.getByText("NOT IN THIS BUILD").first().waitFor();
+	const helpFilter = helpDialog.getByRole("searchbox", { name: "Filter this reference" });
+	await helpFilter.fill("allow");
+	await helpDialog.getByText("Alt + A", { exact: true }).waitFor();
+	equal(await helpDialog.getByText("Esc", { exact: true }).count(), 0);
+	await helpFilter.fill("zzz-not-in-the-reference");
+	await helpDialog.getByText("Nothing in the reference matches.", { exact: true }).first().waitFor();
+	await helpFilter.fill("");
+	await helpDialog.getByText("The whole reference", { exact: true }).waitFor();
+	const helpAccessibility = await new AxeBuilder({ page })
+		.withTags(["wcag2a", "wcag2aa", "wcag21a", "wcag21aa"])
+		.analyze();
+	const helpBlockingViolations = helpAccessibility.violations.filter((violation) =>
+		violation.impact === "critical" || violation.impact === "serious"
+	);
+	deepEqual(
+		helpBlockingViolations.map((violation) => ({
+			id: violation.id,
+			impact: violation.impact,
+			nodes: violation.nodes.map((node) => node.target),
+		})),
+		[],
+	);
+	await page.screenshot({ path: new URL("help-reference.png", artifactDirectory).pathname });
+	await page.keyboard.press("Escape");
+	await helpDialog.waitFor({ state: "detached" });
+	equal(await helpOpener.evaluate((element) => element === document.activeElement), true);
+	// The status bar reaches the same dialog and names the handshake version.
+	await page.locator(".status-bar").getByText("Clio Coder 0.0.0", { exact: true }).waitFor();
+	await page.locator(".status-bar").getByRole("button", { name: "How this app works" }).click();
+	await helpDialog.waitFor();
+	await page.keyboard.press("Escape");
+	await helpDialog.waitFor({ state: "detached" });
 
 	// One real conversation: prompt, mediated approval, completed turn.
 	const composer = page.getByRole("textbox", { name: "Prompt for Clio Coder" });
@@ -1195,6 +1303,17 @@ try {
 		await settingsPage.getByRole("button", { name: "Settings", exact: true }).click();
 		const settingsDialog = settingsPage.getByRole("dialog", { name: "Clio Coder settings" });
 		await settingsDialog.waitFor();
+		// The About record heads the diagnostics: the handshake version, the
+		// GUI's own version, and what this Clio Coder advertised, in words.
+		const aboutRecord = settingsDialog.getByRole("region", { name: "What is running" });
+		await aboutRecord.getByText("0.0.0", { exact: true }).waitFor();
+		await aboutRecord.getByText("over ACP", { exact: true }).waitFor();
+		await aboutRecord.getByText("0.0.1", { exact: true }).waitFor();
+		await aboutRecord.getByText(/browser host on this machine/u).waitFor();
+		await aboutRecord.getByText("Read and patch safe settings", { exact: true }).waitFor();
+		ok(await aboutRecord.getByText("advertised", { exact: true }).count() >= 1);
+		equal(await aboutRecord.getByText(/^(true|false)$/u).count(), 0);
+		await aboutRecord.getByText("Run the recovery check", { exact: true }).waitFor();
 		await settingsPage.screenshot({ path: new URL("settings-options.png", artifactDirectory).pathname });
 		await settingsDialog.getByRole("button", { name: "Inspect toolchain", exact: true }).click();
 		const toolchainInventory = settingsDialog.locator(".settings__toolchain");
@@ -1249,6 +1368,11 @@ try {
 		for (const forbidden of ["/home/", "http://", "model-secret", "herdr.sock", "below the floor", "10.0.0"]) {
 			equal(await recoveryRecord.getByText(forbidden, { exact: false }).count(), 0);
 		}
+		// The same diagnostics feed the About record, which shows doctor's version
+		// beside the handshake's and says they differ rather than picking one.
+		await aboutRecord.getByText("0.3.9", { exact: true }).waitFor();
+		await aboutRecord.getByText("from doctor", { exact: true }).waitFor();
+		await aboutRecord.getByText(/the app does not decide which is right/u).waitFor();
 		await settingsPage.screenshot({ path: new URL("settings-recovery.png", artifactDirectory).pathname });
 		await settingsDialog.locator(".recovery-boundary").scrollIntoViewIfNeeded();
 
@@ -1670,6 +1794,9 @@ try {
 			dispatchUsesInstallationWideBoundedAdapter: true,
 			fleetRunsUseDurableBoundedAdapter: true,
 			fleetRootIndexLinksOnlyRunsInThisWindow: true,
+			fleetFiltersNarrowLocallyAndNeverHideTheSelection: true,
+			helpReferenceOpensWithoutBackendAndRestoresFocus: true,
+			aboutRecordNamesBothVersionsAndCapabilities: true,
 			gateVerdictsCrossWithoutTheirReasoning: true,
 			councilTopologyCrossesItsShapeAndNotItsDeliberation: true,
 			traceAccountingCarriesNoRequestTextOrPath: true,
@@ -1698,6 +1825,7 @@ try {
 				usageBlockingViolations.length +
 				dispatchBlockingViolations.length +
 				fleetBlockingViolations.length +
+				helpBlockingViolations.length +
 				compactBlockingViolations.length +
 				resumeBlockingViolations.length + recoveryBlockingViolations.length + settingsBlockingViolations.length +
 				loopBlockingViolations.length,
@@ -1723,7 +1851,9 @@ try {
 				"dispatch.png",
 				"dispatch-compact.png",
 				"runs.png",
+				"runs-filtered.png",
 				"runs-compact.png",
+				"help-reference.png",
 				"permission.png",
 				"complete.png",
 				"timeline.png",

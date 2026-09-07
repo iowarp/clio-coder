@@ -73,6 +73,18 @@ import type {
 } from "./protocol.ts";
 import { groupTurns, SOURCE_LABELS } from "./chat.ts";
 import { ChatTranscript, FleetStrip, JumpToLatest, type ScrollPosition, useFollowLatest } from "./Chat.tsx";
+import { AboutRecord } from "./AboutRecord.tsx";
+import { FleetFilterBar } from "./FleetFilterBar.tsx";
+import { HelpReferenceBody } from "./HelpReference.tsx";
+import { KEYBINDINGS, matchesKeybinding } from "./help-reference.ts";
+import {
+	applyFleetFilter,
+	deriveFleetFacets,
+	EMPTY_FLEET_FILTER,
+	type FleetFilter,
+	fleetFilterSummary,
+	isFleetFilterActive,
+} from "./fleet-filters.ts";
 import { formatDuration, formatTimestamp } from "./format.ts";
 import { type AppAction, type AppState, formatProjectPath, isPromptBlocked, type OpenWorkspaceState } from "./state.ts";
 
@@ -147,7 +159,7 @@ interface WorkbenchViewProps {
 }
 
 type FileDialog = "create-file" | "create-folder" | "move" | "delete" | null;
-type WorkspaceView =
+export type WorkspaceView =
 	| "conversation"
 	| "timeline"
 	| "effective-clio-coder"
@@ -1401,6 +1413,7 @@ interface EvidenceRailProps {
 	onOpenUsage(): void;
 	onOpenDispatch(): void;
 	onOpenTimeline(): void;
+	onOpenHelp(): void;
 	obscured: boolean;
 }
 
@@ -1418,6 +1431,7 @@ const EvidenceRail = memo(function EvidenceRail({
 	onOpenUsage,
 	onOpenDispatch,
 	onOpenTimeline,
+	onOpenHelp,
 	obscured,
 }: EvidenceRailProps) {
 	const open = state.open;
@@ -1467,6 +1481,15 @@ const EvidenceRail = memo(function EvidenceRail({
 					<div className="eyebrow">OBSERVATORY</div>
 					<h2>Run record</h2>
 				</div>
+				<button
+					type="button"
+					className="icon-button evidence-rail__help"
+					onClick={onOpenHelp}
+					title="How this app works"
+				>
+					<Glyph>?</Glyph>
+					<span className="sr-only">How this app works</span>
+				</button>
 				<button
 					type="button"
 					className="icon-button evidence-rail__close"
@@ -2019,6 +2042,7 @@ function sameEvidenceRailProps(
 		previous.onClose === next.onClose &&
 		previous.desktopCollapsed === next.desktopCollapsed &&
 		previous.onDesktopCollapse === next.onDesktopCollapse &&
+		previous.onOpenHelp === next.onOpenHelp &&
 		previous.workspaceView === next.workspaceView &&
 		previous.onOpenConfigMap === next.onOpenConfigMap &&
 		previous.onOpenCatalog === next.onOpenCatalog &&
@@ -3124,21 +3148,16 @@ export const ClioCatalog = memo(function ClioCatalog({
 		index: number,
 	): void {
 		let nextIndex: number;
-		switch (event.key) {
-			case "ArrowLeft":
-				nextIndex = (index - 1 + CATALOG_TABS.length) % CATALOG_TABS.length;
-				break;
-			case "ArrowRight":
-				nextIndex = (index + 1) % CATALOG_TABS.length;
-				break;
-			case "Home":
-				nextIndex = 0;
-				break;
-			case "End":
-				nextIndex = CATALOG_TABS.length - 1;
-				break;
-			default:
-				return;
+		if (matchesKeybinding(KEYBINDINGS.catalogPreviousTab, event)) {
+			nextIndex = (index - 1 + CATALOG_TABS.length) % CATALOG_TABS.length;
+		} else if (matchesKeybinding(KEYBINDINGS.catalogNextTab, event)) {
+			nextIndex = (index + 1) % CATALOG_TABS.length;
+		} else if (matchesKeybinding(KEYBINDINGS.catalogFirstTab, event)) {
+			nextIndex = 0;
+		} else if (matchesKeybinding(KEYBINDINGS.catalogLastTab, event)) {
+			nextIndex = CATALOG_TABS.length - 1;
+		} else {
+			return;
 		}
 		event.preventDefault();
 		const nextTab = CATALOG_TABS[nextIndex];
@@ -5040,15 +5059,31 @@ export const FleetJournal = memo(function FleetJournal({
 	onVerifyRun(runId: string): void;
 }) {
 	const [selectedRunId, setSelectedRunId] = useState<string | null>(null);
-	const firstRunId = inspection?.runs[0]?.runId ?? null;
-	const selected = inspection?.runs.find((run) => run.runId === selectedRunId) ?? inspection?.runs[0] ?? null;
+	// The filter is a projection over the window on screen. It never reaches the
+	// host, and the selected run always points at a visible row.
+	const [filter, setFilter] = useState<FleetFilter>(EMPTY_FLEET_FILTER);
+	const visibleRuns = useMemo(
+		() => inspection === null ? [] : applyFleetFilter(inspection, filter),
+		[filter, inspection],
+	);
+	const facets = useMemo(() => inspection === null ? null : deriveFleetFacets(inspection), [inspection]);
+	const firstRunId = visibleRuns[0]?.runId ?? null;
+	const selected = visibleRuns.find((run) => run.runId === selectedRunId) ?? visibleRuns[0] ?? null;
 	useEffect(() => {
-		if (inspection === null || inspection.runs.length === 0) {
+		if (visibleRuns.length === 0) {
 			setSelectedRunId(null);
-		} else if (!inspection.runs.some((run) => run.runId === selectedRunId)) {
+		} else if (!visibleRuns.some((run) => run.runId === selectedRunId)) {
 			setSelectedRunId(firstRunId);
 		}
-	}, [firstRunId, inspection, selectedRunId]);
+	}, [firstRunId, visibleRuns, selectedRunId]);
+	// A selection made from a step index, a gate verdict, or a council chip is
+	// the operator's explicit choice; a filter that would hide it yields.
+	const selectRun = useCallback((runId: string) => {
+		if (inspection !== null && !applyFleetFilter(inspection, filter).some((run) => run.runId === runId)) {
+			setFilter(EMPTY_FLEET_FILTER);
+		}
+		setSelectedRunId(runId);
+	}, [filter, inspection]);
 
 	if (inspection === null) {
 		return (
@@ -5208,7 +5243,7 @@ export const FleetJournal = memo(function FleetJournal({
 														disabled={!inWindow}
 														aria-current={inWindow && selected?.runId === step.runId ? "true" : undefined}
 														onClick={() => {
-															if (step.runId !== null) setSelectedRunId(step.runId);
+															if (step.runId !== null) selectRun(step.runId);
 														}}
 													>
 														<span className="fleet-step-index__id">{step.stepId}</span>
@@ -5246,7 +5281,7 @@ export const FleetJournal = memo(function FleetJournal({
 				decisions={decisions}
 				knownRunIds={inspection.runs.map((run) => run.runId)}
 				selectedRunId={selected?.runId ?? null}
-				onSelectRun={setSelectedRunId}
+				onSelectRun={selectRun}
 			/>
 
 			<CouncilTopology
@@ -5254,7 +5289,7 @@ export const FleetJournal = memo(function FleetJournal({
 				truncated={inspection.councilsTruncated}
 				knownRunIds={inspection.runs.map((run) => run.runId)}
 				selectedRunId={selected?.runId ?? null}
-				onSelectRun={setSelectedRunId}
+				onSelectRun={selectRun}
 			/>
 
 			<EvidenceInventory
@@ -5262,7 +5297,7 @@ export const FleetJournal = memo(function FleetJournal({
 				detail={evidenceDetail}
 				pendingReadId={pendingEvidenceRead}
 				knownRunIds={inspection.runs.map((run) => run.runId)}
-				onSelectRun={setSelectedRunId}
+				onSelectRun={selectRun}
 				onReadBundle={onReadEvidence}
 			/>
 
@@ -5283,8 +5318,21 @@ export const FleetJournal = memo(function FleetJournal({
 				)
 				: (
 					<div className="fleet-journal__grid">
+						{facets !== null && (
+							<FleetFilterBar
+								filter={filter}
+								facets={facets}
+								summary={fleetFilterSummary(
+									visibleRuns.length,
+									inspection.runs.length,
+									inspection.truncated,
+									isFleetFilterActive(filter),
+								)}
+								onChange={setFilter}
+							/>
+						)}
 						<ol className="fleet-run-list" aria-label="Recent Clio Coder runs">
-							{inspection.runs.map((run) => (
+							{visibleRuns.map((run) => (
 								<li key={run.runId}>
 									<button
 										type="button"
@@ -5726,7 +5774,7 @@ const PromptEditor = memo(
 		}
 
 		function onKeyDown(event: KeyboardEvent<HTMLTextAreaElement>): void {
-			if (event.key !== "Enter" || (!event.metaKey && !event.ctrlKey)) return;
+			if (!matchesKeybinding(KEYBINDINGS.send, event)) return;
 			event.preventDefault();
 			event.currentTarget.form?.requestSubmit();
 		}
@@ -6299,7 +6347,7 @@ function Modal(
 		const previouslyFocused = document.activeElement instanceof HTMLElement ? document.activeElement : null;
 		container.current?.querySelector<HTMLElement>(FOCUSABLE_SELECTOR)?.focus();
 		function constrainKeyboardFocus(event: globalThis.KeyboardEvent) {
-			if (event.key === "Escape") {
+			if (matchesKeybinding(KEYBINDINGS.escape, event)) {
 				event.preventDefault();
 				closeRef.current();
 				return;
@@ -7421,6 +7469,15 @@ function SettingsModal({ state, actions, dispatch, onClose }: {
 						session from the next turn or a newly created session.
 					</p>
 				</div>
+				<AboutRecord
+					snapshot={open?.clioCoder ?? null}
+					recovery={state.recoveryInspection}
+					recoveryPending={state.pendingRecoveryInspect !== null}
+					mode={state.mode}
+					workspaceInstanceId={state.workspaceInstanceId}
+					appVersion={state.appVersion}
+					onInspectRecovery={actions.inspectRecovery}
+				/>
 				{open === null && <p>Open a project before reading Clio Coder's settings.</p>}
 				{open !== null && open.clioCoder.capabilities?.settings !== true && (
 					<p className="settings__unavailable">
@@ -7792,11 +7849,12 @@ interface BottomStatusProps {
 	nowMs: number;
 	obscured: boolean;
 	approvalEscalated: boolean;
+	onOpenHelp(): void;
 }
 
 const BottomStatus = memo(
 	function BottomStatus(
-		{ state, actions, nowMs, obscured, approvalEscalated }: BottomStatusProps,
+		{ state, actions, nowMs, obscured, approvalEscalated, onOpenHelp }: BottomStatusProps,
 	) {
 		const open = state.open;
 		const session = open?.clioCoder.session ?? null;
@@ -7851,6 +7909,11 @@ const BottomStatus = memo(
 						label={state.connection}
 					/>
 					<span>{state.mode} host · 127.0.0.1 · token bound</span>
+					{open?.clioCoder.agent != null && (
+						<span className="status-bar__version" title="Reported by Clio Coder in the connection handshake">
+							Clio Coder {open.clioCoder.agent.version}
+						</span>
+					)}
 				</div>
 				<div className="status-bar__project">
 					<span>Project</span>
@@ -7917,6 +7980,12 @@ const BottomStatus = memo(
 						{approvalEscalated ? `${operation} · escalated` : operation}
 					</strong>
 				</div>
+				<div className="status-bar__help">
+					<button type="button" className="status-bar__help-button" onClick={onOpenHelp}>
+						<Glyph>?</Glyph>
+						<span className="sr-only">How this app works</span>
+					</button>
+				</div>
 			</footer>
 		);
 	},
@@ -7942,7 +8011,8 @@ function sameBottomStatusProps(
 		previous.actions === next.actions &&
 		previous.nowMs === next.nowMs &&
 		previous.obscured === next.obscured &&
-		previous.approvalEscalated === next.approvalEscalated;
+		previous.approvalEscalated === next.approvalEscalated &&
+		previous.onOpenHelp === next.onOpenHelp;
 }
 
 export function WorkbenchView(
@@ -7959,6 +8029,9 @@ export function WorkbenchView(
 	const [evidenceDrawerOpen, setEvidenceDrawerOpen] = useState(false);
 	const [projectRailCollapsed, setProjectRailCollapsed] = useState(false);
 	const [evidenceRailCollapsed, setEvidenceRailCollapsed] = useState(false);
+	const [helpOpen, setHelpOpen] = useState(false);
+	const openHelp = useCallback((): void => setHelpOpen(true), []);
+	const closeHelp = useCallback((): void => setHelpOpen(false), []);
 	const [workspaceView, setWorkspaceView] = useState<WorkspaceView>(
 		initialView,
 	);
@@ -7981,7 +8054,7 @@ export function WorkbenchView(
 	);
 	const modalIsOpen = fileDialog !== null || Boolean(open?.deleteChallenge) ||
 		state.browse !== null ||
-		state.settingsOpen || sessionToDelete !== null;
+		state.settingsOpen || sessionToDelete !== null || helpOpen;
 	const leftDrawerObscures = leftRailIsDrawer && state.leftDrawerOpen;
 	const evidenceDrawerObscures = evidenceRailIsDrawer && evidenceDrawerOpen;
 	const backgroundObscured = modalIsOpen || leftDrawerObscures ||
@@ -8229,7 +8302,7 @@ export function WorkbenchView(
 	useEffect(() => {
 		if (modalIsOpen || !leftDrawerObscures) return;
 		const constrainDrawerFocus = (event: globalThis.KeyboardEvent) => {
-			if (event.key === "Escape") {
+			if (matchesKeybinding(KEYBINDINGS.escape, event)) {
 				dispatch({ type: "drawer.left", open: false });
 				return;
 			}
@@ -8243,7 +8316,7 @@ export function WorkbenchView(
 	useEffect(() => {
 		if (modalIsOpen || !evidenceDrawerObscures) return;
 		const constrainDrawerFocus = (event: globalThis.KeyboardEvent) => {
-			if (event.key === "Escape") {
+			if (matchesKeybinding(KEYBINDINGS.escape, event)) {
 				setEvidenceDrawerOpen(false);
 				return;
 			}
@@ -8271,15 +8344,14 @@ export function WorkbenchView(
 			modalIsOpen
 		) return;
 		const answer = (event: globalThis.KeyboardEvent) => {
-			if (!event.altKey || event.ctrlKey || event.metaKey) return;
-			const key = event.key.toLowerCase();
-			if (key !== "a" && key !== "r") return;
+			const allow = matchesKeybinding(KEYBINDINGS.allowOnce, event);
+			if (!allow && !matchesKeybinding(KEYBINDINGS.reject, event)) return;
 			event.preventDefault();
 			actions.resolvePermission(
 				open.project.id,
 				activeTurn.turnId,
 				pendingPermission.permissionId,
-				key === "a" ? "allow-once" : "reject",
+				allow ? "allow-once" : "reject",
 			);
 		};
 		document.addEventListener("keydown", answer);
@@ -8390,6 +8462,7 @@ export function WorkbenchView(
 				onOpenUsage={openUsage}
 				onOpenDispatch={openDispatch}
 				onOpenTimeline={openTimeline}
+				onOpenHelp={openHelp}
 				obscured={modalIsOpen || leftDrawerObscures}
 			/>
 			<BottomStatus
@@ -8398,6 +8471,7 @@ export function WorkbenchView(
 				nowMs={nowMs}
 				obscured={backgroundObscured}
 				approvalEscalated={approvalEscalated}
+				onOpenHelp={openHelp}
 			/>
 			{state.notice && (
 				<div
@@ -8422,6 +8496,11 @@ export function WorkbenchView(
 					actions={actions}
 					onClose={() => dispatch({ type: "browse.dismissed" })}
 				/>
+			)}
+			{helpOpen && (
+				<Modal title="How this app works" eyebrow="DESKTOP APP REFERENCE" onClose={closeHelp} size="wide">
+					<HelpReferenceBody />
+				</Modal>
 			)}
 			{state.settingsOpen && (
 				<SettingsModal

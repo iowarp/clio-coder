@@ -19,6 +19,7 @@ import {
 } from "./chat.ts";
 import { elapsedSeconds, formatClock, formatDuration } from "./format.ts";
 import { MarkdownContent } from "./Markdown.tsx";
+import { runningFleetRuns } from "./fleet-filters.ts";
 import type {
 	WireAgentAttribution,
 	WireClioPhase,
@@ -82,8 +83,13 @@ function AgentTag({ agents }: { agents: readonly WireAgentAttribution[] | undefi
  * and nothing is shown for a run that was never reported.
  */
 export function FleetStrip({ runs }: { runs: readonly WireFleetRun[] }) {
+	// Off by default: the strip shows every run Clio Coder reported until the
+	// operator narrows it, so a settled row never disappears unannounced.
+	const [runningOnly, setRunningOnly] = useState(false);
 	if (runs.length === 0) return null;
-	const live = runs.filter((run) => run.state !== "done" && run.state !== "failed").length;
+	const running = runningFleetRuns(runs);
+	const live = running.length;
+	const shown = runningOnly ? running : runs;
 	return (
 		<details className="activity" open={live > 0}>
 			<summary className="activity__summary">
@@ -93,8 +99,27 @@ export function FleetStrip({ runs }: { runs: readonly WireFleetRun[] }) {
 				</span>
 				<span className="activity__count" aria-hidden="true">{runs.length}</span>
 			</summary>
+			<div className="activity__filter">
+				<button
+					type="button"
+					className="fleet-filter__chip"
+					aria-pressed={runningOnly}
+					onClick={() => setRunningOnly((current) => !current)}
+				>
+					<span>Running only</span>
+					<small aria-label={`${live} ${live === 1 ? "run" : "runs"}`}>{live}</small>
+				</button>
+				<span role="status">
+					{runningOnly
+						? `${shown.length} of ${runs.length} reported ${runs.length === 1 ? "run" : "runs"} shown`
+						: `All ${runs.length} reported ${runs.length === 1 ? "run" : "runs"} shown`}
+				</span>
+			</div>
+			{shown.length === 0 && (
+				<p className="activity__empty">No run is running right now. Every reported run has settled.</p>
+			)}
 			<ul className="activity__rows">
-				{runs.map((run) => (
+				{shown.map((run) => (
 					<li
 						className={`activity-row activity-row--tool is-${run.state === "queued" ? "queued" : "active"}`}
 						key={run.runId}

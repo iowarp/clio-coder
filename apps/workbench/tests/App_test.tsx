@@ -22,6 +22,7 @@ import {
 	evidenceDetailFixture,
 	evidenceInspectionFixture,
 	FIXTURE_PROJECT_ID,
+	fleetInspectionFilterFixture,
 	fleetInspectionFixture,
 	fleetVerificationFixture,
 	gateDecisionsFixture,
@@ -35,6 +36,8 @@ import {
 	workspaceFixture,
 } from "./fixtures.ts";
 import type { WireProjectWorkspace } from "../src/protocol.ts";
+import { HelpReferenceBody } from "../src/HelpReference.tsx";
+import { PROTOCOL_VERSION } from "../src/protocol.ts";
 
 const inertActions: WorkbenchActions = {
 	browseProjects() {},
@@ -1433,4 +1436,158 @@ Deno.test("settings renders redacted Clio Coder recovery diagnostics without raw
 	) {
 		ok(!html.includes(forbidden), `recovery UI leaked ${forbidden}`);
 	}
+});
+
+Deno.test("settings opens with an About record that names both versions, the protocol, and every capability", () => {
+	const html = render({
+		...stateWith(workspaceFixture(FIXTURE_PROJECT_ID, "Alpha", { clioCoder: clioSnapshotFixture("idle") })),
+		settingsOpen: true,
+		recoveryInspection: recoveryInspectionFixture(),
+	});
+	match(html, /What is running/u);
+	// The ACP handshake version and the GUI's own version are both present and
+	// labelled by source.
+	match(html, /<strong>0\.3\.2<\/strong><small>over ACP<\/small>/u);
+	match(html, /<dt>Desktop app<\/dt><dd><strong>0\.0\.1<\/strong>/u);
+	match(html, /Connected and idle/u);
+	match(html, /browser host on this machine/u);
+	// Doctor saw a different version. Both stay on screen; neither wins.
+	match(html, /<code>0\.3\.9<\/code><small>from doctor<\/small>/u);
+	match(html, /the app does not decide which is right/u);
+	// Ten capability rows, all advertised for this fixture, and never a raw boolean.
+	equal((html.match(/<small>advertised<\/small>/gu) ?? []).length, 10);
+	equal((html.match(/not advertised/gu) ?? []).length, 0);
+	ok(!html.includes(">true<") && !html.includes(">false<"));
+	match(html, /Name the agent behind each tool call/u);
+	match(html, /Report a blocked repeated command/u);
+	// Protocol and instance stay in the expandable diagnostic details.
+	match(html, new RegExp(`<dt>GUI protocol</dt><dd><code>${PROTOCOL_VERSION}</code>`, "u"));
+	match(html, /<code>workspace-fixture-0001<\/code>/u);
+	match(html, /Clio Coder 0\.3\.2/u, "the status bar names the handshake version");
+});
+
+Deno.test("the About record tells a pending handshake, a failed connection, and an old host apart", () => {
+	const pending = render({
+		...stateWith(
+			workspaceFixture(FIXTURE_PROJECT_ID, "Alpha", {
+				clioCoder: clioSnapshotFixture("starting", { agent: null, capabilities: null }),
+			}),
+		),
+		settingsOpen: true,
+		appVersion: null,
+	});
+	match(pending, /Version appears once Clio Coder answers the connection handshake/u);
+	match(pending, /Not reported by this host build/u);
+	match(pending, /Capabilities appear with the handshake/u);
+	match(pending, /Run the recovery check/u);
+	ok(!pending.includes("Clio Coder 0.3.2"), "the status bar shows no version before the handshake");
+
+	const failed = render({
+		...stateWith(workspaceFixture(FIXTURE_PROJECT_ID, "Alpha", {
+			clioCoder: clioSnapshotFixture("failed", {
+				agent: null,
+				lastFailure: { code: "spawn", summary: "clio-coder exited before the handshake" },
+			}),
+		})),
+		settingsOpen: true,
+	});
+	match(failed, /Version unknown/u);
+	match(failed, /clio-coder exited before the handshake/u);
+	match(failed, /Connection failed/u);
+
+	// Advertised and not advertised are both said in words.
+	const partial = render({
+		...stateWith(workspaceFixture(FIXTURE_PROJECT_ID, "Alpha", {
+			clioCoder: clioSnapshotFixture("idle", {
+				capabilities: { ...clioSnapshotFixture().capabilities!, dispatchEvents: false, agentAttribution: false },
+			}),
+		})),
+		settingsOpen: true,
+	});
+	equal((partial.match(/<small>not advertised<\/small>/gu) ?? []).length, 2);
+	equal((partial.match(/<small>advertised<\/small>/gu) ?? []).length, 8);
+
+	// No project at all: the record still renders and says what it is waiting on.
+	const closed = render({ ...stateWith(null), settingsOpen: true });
+	match(closed, /Open a project to start Clio Coder/u);
+	match(closed, /No project open/u);
+});
+
+Deno.test("the help reference renders every view and keybinding with no project and no connection", () => {
+	const html = renderToStaticMarkup(<HelpReferenceBody />);
+	match(html, /Filter this reference/u);
+	match(html, /The whole reference/u);
+	for (
+		const view of ["Conversation", "Session Timeline", "Effective Clio Coder", "Catalog", "Usage", "Dispatch", "Runs"]
+	) {
+		match(html, new RegExp(`<dt>${view}</dt>`, "u"));
+	}
+	match(html, /<kbd>Ctrl or Cmd \+ Enter<\/kbd>/u);
+	match(html, /<kbd>Alt \+ A<\/kbd>/u);
+	match(html, /<kbd>Alt \+ R<\/kbd>/u);
+	match(html, /<kbd>Esc<\/kbd>/u);
+	match(html, /NOT IN THIS BUILD/u);
+	match(html, /Tasks and decisions/u);
+	match(html, /never Alt\+A or Alt\+R/u);
+	match(html, /\/help lists Clio Coder&#x27;s own commands/u);
+	// The working-freedom section says what each level does, in words.
+	match(html, /<dt>read only<\/dt>/u);
+	match(html, /waits for your approval/u);
+});
+
+Deno.test("the run journal offers a filter bar whose facets and summary come from the window on screen", () => {
+	const html = renderToStaticMarkup(
+		<FleetJournal
+			inspection={fleetInspectionFilterFixture()}
+			trace={traceInspectionFixture()}
+			evidence={evidenceInspectionFixture()}
+			decisions={gateDecisionsFixture()}
+			evalInventory={evalInventoryFixture()}
+			evidenceDetail={null}
+			pendingEvidenceRead={null}
+			verification={null}
+			pendingVerifyRunId={null}
+			onReadEvidence={() => undefined}
+			onVerifyRun={() => undefined}
+			pending={false}
+			onRefresh={() => undefined}
+			onBack={() => undefined}
+		/>,
+	);
+	match(html, /aria-label="Narrow this window"/u);
+	match(html, /Showing all 3 most recent runs Clio Coder reports\. Older runs are not in this window\./u);
+	// Facets with two or more values appear as unpressed chips with counts.
+	for (const chip of ["Still running", "Settled", "Failed", "builder", "debugger", "blade", "local", "build-review"]) {
+		match(html, new RegExp(`aria-pressed="false"><span>${chip}</span>`, "u"), chip);
+	}
+	match(html, /No fleet in this window/u);
+	match(html, /aria-pressed="false"><span>verified<\/span>/u);
+	ok(!html.includes("Clear the filter"), "no clear action while nothing is narrowed");
+	// Every run in the window is listed, and the first one is the selection.
+	match(html, /run-alpha/u);
+	match(html, /run-gamma/u);
+	match(html, /run-delta/u);
+	match(html, /<h3 id="fleet-run-record-title">builder · run-alpha<\/h3>/u);
+
+	// A single-run window has nothing to narrow, so it shows the sentence and no chips.
+	const single = renderToStaticMarkup(
+		<FleetJournal
+			inspection={fleetInspectionFixture()}
+			trace={null}
+			evidence={null}
+			decisions={null}
+			evalInventory={null}
+			evidenceDetail={null}
+			pendingEvidenceRead={null}
+			verification={null}
+			pendingVerifyRunId={null}
+			onReadEvidence={() => undefined}
+			onVerifyRun={() => undefined}
+			pending={false}
+			onRefresh={() => undefined}
+			onBack={() => undefined}
+		/>,
+	);
+	match(single, /Showing all 1 most recent run Clio Coder reports/u);
+	ok(!single.includes('aria-pressed="false"'));
 });

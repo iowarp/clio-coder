@@ -560,6 +560,7 @@ class WorkbenchRuntime implements HostSink {
 			workspaceInstanceId: this.workspaceInstanceId,
 			localToken: this.token,
 			mode: this.#mode,
+			appVersion: APP_VERSION,
 			openProjectId: open?.project.id ?? null,
 			workspace: open === null ? null : this.#workspaceDto(open),
 			recent: await this.#recentDtos(),
