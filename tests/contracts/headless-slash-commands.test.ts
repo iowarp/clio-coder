@@ -4,8 +4,9 @@ import { existsSync, mkdirSync, mkdtempSync, rmSync, writeFileSync } from "node:
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { it } from "node:test";
+import { fileURLToPath } from "node:url";
 
-const CLI = new URL("../../src/cli/index.ts", import.meta.url).pathname;
+const CLI = fileURLToPath(new URL("../../src/cli/index.ts", import.meta.url));
 const TSX = import.meta.resolve("tsx");
 
 it("headless commands refuse interactive actions before boot while preserving skills, templates, and prose", () => {
