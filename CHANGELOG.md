@@ -2,7 +2,7 @@
 
 All notable changes to Clio Coder are documented in this file. The format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/) and versions follow Semantic Versioning; pre-1.0 minor releases may include incompatible changes.
 
-## Unreleased
+## 0.4.5 - 2026-09-07
 
 ### Added
 - Add operator-reviewed, per-workspace consent for project safety, hooks, and settings. `config trust safety|hooks|settings` previews exact source bytes and a full SHA-256 digest; `--hash` approves that reviewed version and `--revoke` withdraws consent. Canonical workspace identity and separate surface records prevent approval from silently extending to another repository or configuration kind (S3-01).
