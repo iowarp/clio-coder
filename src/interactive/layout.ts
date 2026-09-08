@@ -13,6 +13,7 @@ export interface LayoutParts {
 export interface LayoutOptions {
 	mode?: TuiMode;
 	fullscreenScrollbar?: ScrollViewScrollbar;
+	onTranscript?: (view: ScrollView) => void;
 }
 
 export interface FullscreenLayout {
@@ -20,10 +21,7 @@ export interface FullscreenLayout {
 	transcript: ScrollView;
 }
 
-function buildFullscreenLayout(
-	parts: LayoutParts,
-	options: Pick<LayoutOptions, "fullscreenScrollbar"> = {},
-): FullscreenLayout {
+function buildFullscreenLayout(parts: LayoutParts, options: LayoutOptions = {}): FullscreenLayout {
 	const document = new Container();
 	document.addChild(parts.banner);
 	document.addChild(parts.chat);
@@ -36,6 +34,7 @@ function buildFullscreenLayout(
 		scrollbarTrackStyle: (text) => theme.fg("frame", text),
 		scrollbarThumbStyle: () => theme.fg("frameStrong", GLYPH.barFull),
 	});
+	options.onTranscript?.(transcript);
 	const dock = new VStack();
 	if (parts.pending) dock.addChild(parts.pending, { shrink: 1, minSize: 0 });
 	dock.addChild(parts.editor, { shrink: 1, minSize: 3 });
@@ -55,4 +54,30 @@ export function buildLayout(parts: LayoutParts, options: LayoutOptions = {}): Co
 	root.addChild(parts.editor);
 	root.addChild(parts.footer);
 	return root;
+}
+
+/** Keep the nearest surviving text at the viewport when a preset changes row counts. */
+export function preserveTranscriptScroll(view: ScrollView | undefined, width: number, mutation: () => void): void {
+	if (!view || view.isFollowingEnd) {
+		mutation();
+		return;
+	}
+	const top = view.scrollTop;
+	const before = view.render(width);
+	mutation();
+	const after = view.render(width);
+	for (let row = top; row < Math.min(before.length, top + view.viewportHeight); row++) {
+		const anchor = before[row];
+		if (!anchor?.trim()) continue;
+		let match = -1;
+		for (let index = 0; index < after.length; index++) {
+			if (after[index] === anchor && (match < 0 || Math.abs(index - row) < Math.abs(match - row))) match = index;
+		}
+		if (match >= 0) {
+			view.updateLayout(after.length, view.viewportHeight, () => {});
+			view.scrollTo(Math.max(0, match - (row - top)), { disableFollow: true });
+			return;
+		}
+	}
+	view.scrollTo(top, { disableFollow: true });
 }

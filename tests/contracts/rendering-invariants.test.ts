@@ -1,5 +1,6 @@
 import { deepStrictEqual, doesNotMatch, match, ok, strictEqual } from "node:assert/strict";
 import { describe, it } from "node:test";
+import type { OutputStyle } from "../../src/core/defaults.js";
 import { withReceiptIntegrity } from "../../src/domains/dispatch/receipt-integrity.js";
 import { inspectRunReceiptTrustStatus } from "../../src/domains/evidence/trust-status.js";
 import {
@@ -94,10 +95,10 @@ describe("Clio rendering invariants", () => {
 		panel.applyEvent({ type: "agent_end", messages: [] } as never);
 
 		const rendered = plainRender(panel);
-		const firstReasoning = rendered.indexOf("Thinking…");
+		const firstReasoning = rendered.indexOf("reason one");
 		const before = rendered.indexOf("before tool");
 		const tool = rendered.indexOf("tool-command");
-		const secondReasoning = rendered.indexOf("Thinking…", firstReasoning + 1);
+		const secondReasoning = rendered.indexOf("reason two", firstReasoning + 1);
 		const after = rendered.indexOf("after tool");
 		ok(firstReasoning >= 0, "first reasoning marker should render");
 		ok(firstReasoning < before && before < tool && tool < secondReasoning && secondReasoning < after, rendered);
@@ -127,8 +128,9 @@ describe("Clio rendering invariants", () => {
 		strictEqual(rendered.split("Suggested skill:").length, 2, rendered);
 	});
 
-	it("toggles the latest reasoning stretch while a tool remains live", () => {
-		const panel = createChatPanel({ now: () => 1_000 });
+	it("changes the preset while a tool remains live", () => {
+		let style: OutputStyle = "standard";
+		const panel = createChatPanel({ getOutputStyle: () => style, now: () => 1_000 });
 		panel.applyEvent({
 			type: "thinking_delta",
 			contentIndex: 0,
@@ -137,20 +139,21 @@ describe("Clio rendering invariants", () => {
 		});
 		startTool(panel);
 
-		strictEqual(panel.toggleLastThinking(), true);
+		style = "detailed";
 		const expanded = plainRender(panel);
 		match(expanded, /private reasoning body/u);
 		match(expanded, /tool-command/u);
 
-		strictEqual(panel.toggleLastThinking(), true);
+		style = "compact";
 		const folded = plainRender(panel);
 		doesNotMatch(folded, /private reasoning body/u);
-		match(folded, /Thinking…/u);
+		match(folded, /Thinking · \/view/u);
 		match(folded, /tool-command/u);
 	});
 
 	it("replaces cumulative partials and re-expands at the latest state", () => {
-		const panel = createChatPanel({ getOutputVerbosity: () => "verbose", now: () => 1_000 });
+		let style: OutputStyle = "detailed";
+		const panel = createChatPanel({ getOutputStyle: () => style, now: () => 1_000 });
 		startTool(panel);
 		updateTool(panel, "obsolete snapshot");
 		match(plainRender(panel), /obsolete snapshot/u);
@@ -160,36 +163,36 @@ describe("Clio rendering invariants", () => {
 		doesNotMatch(replaced, /obsolete snapshot/u);
 		match(replaced, /replacement snapshot/u);
 
-		strictEqual(panel.toggleLastToolExpanded(), true);
+		style = "compact";
 		updateTool(panel, "latest while folded");
 		const folded = plainRender(panel);
 		doesNotMatch(folded, /replacement snapshot|latest while folded/u);
 
-		strictEqual(panel.toggleLastToolExpanded(), true);
+		style = "detailed";
 		const reExpanded = plainRender(panel);
 		doesNotMatch(reExpanded, /replacement snapshot/u);
 		match(reExpanded, /latest while folded/u);
 	});
 
-	it("treats live-output pause as presentation-only", () => {
-		const panel = createChatPanel({ getOutputVerbosity: () => "verbose", now: () => 1_000 });
+	it("keeps captured live output across preset changes", () => {
+		let style: OutputStyle = "detailed";
+		const panel = createChatPanel({ getOutputStyle: () => style, now: () => 1_000 });
 		startTool(panel);
 		updateTool(panel, "visible before pause");
 
-		strictEqual(panel.toggleLiveToolOutput(), false);
+		style = "standard";
 		updateTool(panel, "accepted while paused");
 		const paused = plainRender(panel);
-		match(paused, /live output paused/u);
 		doesNotMatch(paused, /visible before pause|accepted while paused/u);
 
-		strictEqual(panel.toggleLiveToolOutput(), true);
+		style = "detailed";
 		const resumed = plainRender(panel);
 		match(resumed, /accepted while paused/u);
 		doesNotMatch(resumed, /visible before pause/u);
 	});
 
 	it("clears partial state at terminal settlement and ignores late updates", () => {
-		const panel = createChatPanel({ getOutputVerbosity: () => "verbose", now: () => 1_000 });
+		const panel = createChatPanel({ getOutputStyle: () => "detailed", now: () => 1_000 });
 		startTool(panel);
 		updateTool(panel, "partial-only text");
 		endTool(panel, "sealed final text");
@@ -247,7 +250,7 @@ describe("worker rendering invariants", () => {
 		doesNotMatch(JSON.stringify(snapshot), /raw-secret/u);
 	});
 
-	it("fits folded execution and quality at narrow widths with an expand hint", () => {
+	it("fits execution and validation failures at narrow widths", () => {
 		const envelope = fixtureEnvelope("width-run");
 		const draft = fixtureReceiptDraft(envelope);
 		draft.quality.resultContract = {
@@ -271,7 +274,7 @@ describe("worker rendering invariants", () => {
 			receipt: { outcome: "succeeded", durationMs: 21000, trust: inspectRunReceiptTrustStatus(receipt, envelope).status },
 		};
 		for (const width of [24, 44, 76]) {
-			const lines = renderWorkerEntryLines(entry, width, { folded: true, expandKey: "Ctrl+O" });
+			const lines = renderWorkerEntryLines(entry, width, {});
 			ok(
 				lines.every((line) => visibleWidth(line) <= width),
 				`width ${width}: ${lines.map(visibleWidth)}`,
@@ -279,7 +282,7 @@ describe("worker rendering invariants", () => {
 			const plain = lines.map(stripTerminalSequences).join(" ").replace(/│/gu, " ").replace(/\s+/gu, " ");
 			match(plain, /execution ok/u);
 			match(plain, /quality: validation failed/u);
-			if (width >= 44) match(plain, /Ctrl\+O/u);
+			doesNotMatch(plain, /Ctrl\+O/u);
 		}
 	});
 
@@ -338,10 +341,7 @@ describe("worker rendering invariants", () => {
 		strictEqual(completed.entry.text, replayed.text);
 		strictEqual(completed.entry.pending, false);
 		strictEqual(replayed.pending, false);
-		deepStrictEqual(
-			renderWorkerEntryLines(completed.entry, 120, { folded: false }),
-			renderWorkerEntryLines(replayed, 120, { folded: false }),
-		);
+		deepStrictEqual(renderWorkerEntryLines(completed.entry, 120, {}), renderWorkerEntryLines(replayed, 120, {}));
 	});
 });
 

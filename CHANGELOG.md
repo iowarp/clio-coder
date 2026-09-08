@@ -8,6 +8,9 @@ All notable changes to Clio Coder are documented in this file. The format follow
 - Make Quick Connect the first launcher option, with Settings and Diagnostics alongside it. Connect an endpoint, supply a key when needed, filter the live model list, review, and Connect. A single model skips selection; reconnecting preserves existing preferences and fleet assignments. Add `--quick` and `--settings` shortcuts.
 
 ### Changed
+- Simplify rendering to Compact, Standard (default), and Detailed output styles. Alt+O cycles the session; Settings saves a default. Accept legacy output preferences and retire `/output` with migration guidance.
+- Bound reasoning, shell output, diffs, and worker previews after terminal wrapping. Inspect full available content through `/view transcript`; keep failures and validation outcomes visible in every style.
+- Give the footer sole ownership of live activity, with accurate concurrent-tool state and background worker counts. Remove separate reasoning, tool expansion, and live-output toggles.
 - Simplify the README around installation, the first session, scientific software, and HPC. Keep advanced configuration and multi-agent workflows in collapsible sections, and expand dependency and integration acknowledgements.
 - Use one worker, no prompt prewarm, and automatic TTY streaming as shipped defaults. Preserve explicitly saved values and document the full recommended default policy.
 

@@ -30,7 +30,7 @@
       </div>
       <div class="header-right">
         <a class="back-btn" href="index.html">← Index</a>
-        <span class="version-badge">v0.4.2</span>
+        <span class="version-badge">v0.4.6</span>
       </div>
     </header>
     <div class="page-layout-grid reference-layout">
@@ -618,11 +618,6 @@ when Clio is already inside a reachable herdr session.</p>
 <td>Set the chat thinking level, or open Settings → Orchestrator</td>
 </tr>
 <tr>
-<td><code>/output</code></td>
-<td><code>/output [verbosity]</code></td>
-<td>Set transcript detail (minimal, default, verbose), or open Settings → Terminal</td>
-</tr>
-<tr>
 <td><code>/model</code></td>
 <td><code>/model [pattern]</code></td>
 <td>Open model selector or set a model</td>
@@ -669,13 +664,13 @@ or <code>/tasks add Fix the solver --expect src/solver.ts --verify test:solver:6
 Both <code>--expect &lt;path&gt;</code> and <code>--verify &lt;checkId&gt;[:timeoutMs]</code> are repeatable. Expected
 outputs use repository-relative paths; verification ids must exist in the project
 verifier catalog or package scripts when added. An omitted timeout uses the
-check&#x27;s declared timeout, and requested timeouts are bounded as in dispatch
+check&#39;s declared timeout, and requested timeouts are bounded as in dispatch
 intent. If a complete value matches a declared id containing colons, it names
 that check; otherwise the final numeric suffix is the timeout. Acceptance travels
-with the task when handed and picked, and seeds the board&#x27;s required validation
+with the task when handed and picked, and seeds the board&#39;s required validation
 evidence. Under high rigor, a turn that changes files while this task is active
 must record a passing validation receipt for every named check or a successful
-<code>limitation</code> receipt whose <code>paths</code> array includes the exact check id. A task&#x27;s
+<code>limitation</code> receipt whose <code>paths</code> array includes the exact check id. A task&#39;s
 completion note alone does not satisfy acceptance. <code>clio-coder tasks list</code>,
 <code>hand &lt;uN&gt;</code>, <code>done &lt;uN&gt;</code>, and <code>drop &lt;uN&gt;</code> manage the same inbox as <code>/tasks</code>.</p>
 <p>Retired spellings are unrecognized commands and use the standard unknown-command diagnostic; they do not print automatic replacement hints. Use supported spellings such as <code>/settings targets</code>, <code>/settings chat model-picker</code>, and the corresponding <code>/resources</code> subcommand. Unrecognized commands are not sent to the model as prompt text.</p>
@@ -789,7 +784,7 @@ the help overlay.</p>
 <p>A rejected command stays in the input line. The error names the spelling and the
 text is still there to correct, rather than having to be retyped. Retired spellings (such as <code>/status</code>, <code>/receipts</code>, <code>/context-init</code>, <code>/context-clear</code>, <code>/context-view</code>, and <code>/skill:&lt;name&gt;</code>) are not recognized and fail closed with <code>/&lt;token&gt; is not a command. Type /help for the list.</code></p>
 <p>The accepted spelling of every command is the table under <a href="#interactive-slash-commands">Interactive Slash Commands</a>; there is exactly one per operation, and nothing else is parsed as a command.</p>
-<p>Configuration lives in one place: the <code>/settings</code> overlay. <code>/settings &lt;section&gt;</code> reaches every section directly. <code>/thinking &lt;level&gt;</code>, <code>/output &lt;verbosity&gt;</code>, and <code>/model &lt;pattern&gt;</code> stay as quick setters that apply without opening anything.</p>
+<p>Configuration lives in one place: the <code>/settings</code> overlay. <code>/settings &lt;section&gt;</code> reaches every section directly. <code>/thinking &lt;level&gt;</code> and <code>/model &lt;pattern&gt;</code> stay as quick setters that apply without opening anything.</p>
 <p>Settings → Targets presents an operational console table (<code>HEALTH</code>, <code>ID</code>, <code>ROLES</code>, <code>RUNTIME</code>, <code>LATENCY</code>) with an in-place action/detail drawer for URL, default model, last probe error, and reachability. <code>Enter</code> opens actions for <code>Use</code> (switches active chat target and rebases model), <code>Connect</code> (runs the API-key or OAuth flow then probes), <code>Probe</code>, and <code>Remove</code> (with preflight analysis of affected routes/profiles). Probing runs live when the overlay opens or when explicitly requested. Target creation is initiated via <code>clio-coder targets add</code>.</p>
 <p>Settings → Fleet is an entity workbench organized with dim group headers (<code>Defaults</code>, <code>Profiles</code>, <code>Agent routes</code>, <code>Placement</code>). Dispatched worker defaults and profile rows render as compact summaries (<code>fast-local node-a/example-coder-model  high  auto</code>), drilling into fields (<code>target</code>, <code>model</code>, <code>thinkingLevel</code>, <code>node</code>) on <code>Enter</code>. Profile removal is a named destructive action with affected-route preflight. Running and retrying dispatches live in the <code>Alt+W</code> Fleet Runs board, which also steers and cancels them. <code>Enter</code> opens the selected run&#39;s worker detail: the phase, the running call with its redacted action descriptor, and the bounded tail of the worker&#39;s own prose.</p>
 <p><code>/run</code> and <code>/delegate</code> put the worker&#39;s answer on screen. Both echo the typed
@@ -799,13 +794,7 @@ or <code>◇ codex (acp) · run 7hq2ab</code> for ACP peers), the worker&#39;s p
 one coalesced line of tool names, and a one-line footer carrying the outcome glyph,
 token count, duration, and contract status (such as <code>└ ✓ ok · 8.4k tok · 18s · contract unmeasured</code>),
 with the failure reason printed on the rail above the footer when a run fails.
-Runs the model itself asked for through the dispatch tool render as folded <code>◆</code>
-cards under the spawning tool segment; operator-typed runs are <code>◇</code> and open.
-The footer chip in the status line splits them (such as <code>◇1 ◆3</code>). <code>Alt+O</code> toggles
-the newest foldable item (tool call or worker block), while <code>Ctrl+Alt+O</code> or
-<code>Alt+Shift+O</code> toggles every one. Memory workers on the background target never
-appear as transcript blocks. A run that fails over keeps one block and gains an
-<code>↻ failed over → attempt 2 on node-b/example-coder-model</code> line inside it.</p>
+Model-launched workers use <code>◆</code> and operator-launched workers use <code>◇</code>; both follow the same Output style. Standard shows a short reported summary, Detailed adds bounded activity, and Compact keeps identity and outcome. The footer shows the active worker count alongside the main agent&#39;s phase. Use <code>/view transcript</code> or <code>/view dispatch:&lt;runId&gt;</code> for full available details. Memory workers do not appear as transcript blocks. A failover keeps one block with an attempt annotation.</p>
 <p>That block is the only place a <code>/run</code> answer goes. The main agent is not told
 about it, which is what makes a side run a side run; asked about the answer, it
 will say it has not seen one. <code>--share</code> on either command hands the result over
@@ -966,23 +955,7 @@ editor reserves and can be rebound through <code>settings.yaml.keybindings</code
 </tr>
 <tr>
 <td><code>Alt+O</code></td>
-<td>Toggle the newest tool call or worker block between collapsed subline and full body.</td>
-</tr>
-<tr>
-<td><code>Ctrl+Alt+O</code> / <code>Alt+Shift+O</code></td>
-<td>Toggle all tool calls and worker blocks between collapsed sublines and full bodies.</td>
-</tr>
-<tr>
-<td><code>Alt+P</code></td>
-<td>Toggle streaming partial tool output in expanded tool bodies.</td>
-</tr>
-<tr>
-<td><code>Alt+R</code></td>
-<td>Toggle the latest thinking block between hidden marker and full body.</td>
-</tr>
-<tr>
-<td><code>Ctrl+Alt+R</code> / <code>Alt+Shift+R</code></td>
-<td>Toggle all thinking blocks between hidden markers and full bodies.</td>
+<td>Cycle Output style: Compact, Standard, Detailed. Session only; save a default in <code>/settings interface</code>.</td>
 </tr>
 <tr>
 <td><code>Alt+G</code></td>
@@ -1296,7 +1269,7 @@ pages against bounded source-byte evidence and recorded source and test dependen
 rather than assuming unmentioned pages remain fresh. Pages with changed inputs or
 dependencies, as well as pages whose Git evidence is missing, unreadable, or changed,
 are re-queued for generation, while verified up-to-date pages are preserved; it is not a
-promise to overcome exhausted attempts.</p>
+promise to overcome exhausted attempts.
 <code>clio-coder context wiki --status</code> is read-only: it prints whether wiki metadata is
 present, page count, <code>updatedAt</code>, recorded <code>gitHead</code>, whether that head differs
 from current <code>HEAD</code>, and retained failure diagnostics for unwritten planned pages. It dispatches
@@ -1363,23 +1336,82 @@ model-free.</p>
 <code>/pattern/flags</code> regex, a glob using <code>*</code>, <code>?</code>, or <code>[...]</code>, or a plain substring.
 <code>outline</code>, <code>deps</code>, and <code>dependents</code> resolve an exact indexed path or a unique
 substring match.</p>
-<h2>Reasoning and Live Thinking Controls</h2>
-<p>Clio Coder features direct, interactive controls for model reasoning and thinking streams:</p>
-<ul>
-<li><strong>Thinking Level (<code>Shift+Tab</code>):</strong> Allows operators to cycle through available thinking configurations. This is useful for dialing model reasoning budgets up or down in real time.</li>
-<li><strong>Thinking Blocks Toggle (<code>Alt+R</code>):</strong> Toggles the latest assistant thinking block between a compact, single-line folded marker and an expanded, full-body view.</li>
-<li><strong>All Thinking (<code>Ctrl+Alt+R</code> / <code>Alt+Shift+R</code>):</strong> Toggles every thinking block in the transcript.</li>
-<li><strong>Tool Body Toggle (<code>Alt+O</code>) / All Tools (<code>Ctrl+Alt+O</code> / <code>Alt+Shift+O</code>):</strong> Expand the latest tool or every tool body. The single-target key takes the newest foldable thing of either kind, so a worker card that just landed opens before the tool call above it; exactly one surface advertises the chord at a time.</li>
-<li><strong>Live Tool Output (<code>Alt+P</code>):</strong> Pause or resume cumulative partial tool output in expanded live tool bodies; the tool still executes.</li>
-<li><strong>Live Streaming:</strong> During active assistant turns, thinking increments stream live into the chat panel down a rail-prefixed segment. Reasoning totals marked <code>≈</code> are approximations from visible text; provider-reported totals are shown without that marker. Neither implies complete or cryptographically verified hidden reasoning.</li>
-<li><strong>Thinking Replay:</strong> When continuing a conversation, prior thinking is preserved and replayed in the history according to target-specific rules.</li>
-</ul>
+<h2>Output styles</h2>
+<p><strong>Alt+O</strong> cycles <strong>Compact → Standard → Detailed → Compact</strong>. Standard is the default, so the first press reveals Detailed. The current style appears in the footer. Cycling applies immediately to the current session, including streaming output and history. Save a preferred startup style through <strong>/settings interface → Output style → Apply and save globally</strong>, or <code>clio-coder configure --section panes</code>.</p>
+<table>
+<thead>
+<tr>
+<th>Content</th>
+<th>Compact</th>
+<th>Standard</th>
+<th>Detailed</th>
+</tr>
+</thead>
+<tbody><tr>
+<td>Answers and user messages</td>
+<td>Complete</td>
+<td>Complete</td>
+<td>Complete</td>
+</tr>
+<tr>
+<td>Supplied reasoning</td>
+<td>Marker</td>
+<td>3 rows</td>
+<td>12 rows</td>
+</tr>
+<tr>
+<td>Reads and searches</td>
+<td>Consecutive successful observations grouped</td>
+<td>Action and outcome</td>
+<td>8 result rows</td>
+</tr>
+<tr>
+<td>File changes</td>
+<td>Paths and change facts</td>
+<td>8 diff rows</td>
+<td>20 diff rows</td>
+</tr>
+<tr>
+<td>Agent shell commands</td>
+<td>Command and outcome</td>
+<td>Command and outcome</td>
+<td>12 output rows</td>
+</tr>
+<tr>
+<td>Your <code>!</code> / <code>!!</code> shell commands</td>
+<td>3 output rows</td>
+<td>6 output rows</td>
+<td>12 output rows</td>
+</tr>
+<tr>
+<td>Workers</td>
+<td>Identity, execution and validation outcome</td>
+<td>3 summary rows</td>
+<td>8 summary rows and bounded tool activity</td>
+</tr>
+<tr>
+<td>Failures and refusals</td>
+<td>Actionable reason, up to 4 rows</td>
+<td>Actionable reason, up to 4 rows</td>
+<td>Up to 12 rows</td>
+</tr>
+<tr>
+<td>Turn receipt</td>
+<td>None</td>
+<td>Completion and available duration</td>
+<td>Usage and model-call facts</td>
+</tr>
+</tbody></table>
+<p>Preview budgets count terminal rows <strong>after wrapping</strong>, including the <code>/view</code> overflow hint, and shrink on short terminals. Reasoning previews retain the newest text when streaming stops. Detailed remains bounded: a successful <code>cat</code> or file read cannot fill the transcript with the entire file.</p>
+<p>Use <strong>/view transcript</strong> to select full available reasoning, tool arguments/results, local shell output, or worker details. Search the list, press Enter to inspect, and Escape to return. Offloaded tool and dispatch output remains available in the other <code>/view</code> categories; missing or truncated captured content is identified. Inspection applies secret redaction, and <code>!!</code> output remains excluded from model context.</p>
+<p>Output style changes presentation only. <strong>Shift+Tab</strong> still changes the model&#39;s thinking effort. It does not reveal unavailable reasoning; Clio shows only reasoning supplied by the provider. The previous Alt+R, Alt+P, and expand-all rendering shortcuts are retired. <code>/output</code> now explains how to reach Alt+O and Settings. Existing <code>minimal</code>, <code>default</code>, and <code>verbose</code> preferences map to <code>compact</code>, <code>standard</code>, and <code>detailed</code> without rewriting other preferences.</p>
+<p>The footer owns live activity. Transcript actions have static running or outcome markers and update in place. Background workers add a count without replacing the main agent&#39;s current phase; a completed worker cannot clear a sibling&#39;s active state. Approval and user-input waits do not spin. Failed and cancelled turns retain their actual outcome, and an elapsed wait is described as silence rather than proof that a process is stuck. A worker&#39;s successful execution remains separate from its validation result.</p>
 <h2>TUI Surface Refinements</h2>
 <p>The Clio TUI has been enhanced to maximize readability, operational focus, and command discovery:</p>
 <ul>
 <li><strong>Adaptive Welcome Launchpad:</strong> Before the first prompt, renders a compact launchpad with bold CAPS section tags (<code>WORKSPACE</code>, <code>ROUTE</code>, <code>NEXT</code>), honest readiness indicators, and context-sensitive next actions. Upon first prompt submission, it deliberately collapses into a single-line session header (<code>&gt;C_ Clio Coder vX.Y.Z · &lt;workspace · git branch&gt; · &lt;target·model · ready&gt; · ctx ready · type a task</code>) so the conversation transcript owns the viewport.</li>
 <li><strong>Unmistakable Clio Composer:</strong> The input editor features an explicit left section tag reflecting current prompt semantics (<code>MESSAGE</code> while idle, <code>FOLLOW-UP</code> while Clio runs, and orange <code>STEER</code> when Enter steers in-flight execution). Includes the dim placeholder <code>Ask Clio…  / for commands</code> and lower-rail hint <code>Enter send · Shift+Enter newline</code> at wider widths.</li>
-<li><strong>Progressively Disclosed Footer:</strong> The compact footer uses a quiet two-zone status layout that suppresses idle decoration (<code>tools none</code>, <code>◌ idle</code>, and default-output tags). Line 1 displays workspace location, git branch/dirty state, and active phase only when meaningful; Line 2 displays the context window gauge and best current/last-turn receipt. <code>Alt+U</code> toggles the expanded dashboard, which orders information by operational urgency (Activity, Context, Session, Workspace).</li>
+<li><strong>Progressively Disclosed Footer:</strong> The compact footer uses a quiet two-zone status layout that suppresses idle decoration (<code>tools none</code>, <code>◌ idle</code>, and duplicate turn receipts). Line 1 displays workspace location, git branch/dirty state, and active phase only when meaningful; Line 2 displays the context window gauge, current Output style, and session cost. <code>Alt+U</code> toggles the expanded dashboard, which orders information by operational urgency (Activity, Context, Session, Workspace).</li>
 <li><strong>Footer Notification Degradation Ladder:</strong> The footer notification badge reserves the severity head (<code>glyph count noun</code>) and <code>[Alt+X] dismiss</code> tail first, allocating remaining width to an ellipsized message body. Under narrow terminal constraints, it degrades cleanly down the ladder without clipping action keys.</li>
 <li><strong>Grouped Slash Command Palette:</strong> Typing <code>/</code> opens an autocomplete command palette grouped by operational category (<code>Run</code>, <code>Inspect</code>, <code>Configure</code>, <code>Sessions</code>) with compact argument hints. Every suggestion is the command&#39;s one canonical spelling.</li>
 <li><strong>Voice-First Transcript &amp; Receipts:</strong> User (<code>› </code>) and assistant (<code>✦ </code>) prose are formatted with a two-cell hanging indent, ensuring wrapped continuation lines remain visually tied to their voice prefix. Tool ledgers maintain full terminal width. Completed turn receipts honor output verbosity (<code>minimal</code> none, <code>default</code> compact dim <code>turn · in N · out M</code>, <code>verbose</code> full receipt with call counts, cache reads/writes, reasoning provenance, and verification caveats).</li>
@@ -1446,7 +1478,7 @@ drill-down layout below 72 columns.</li>
 <h3>Responsive Width Adaptation</h3>
 <p>All TUI overlays fluidly adapt to narrow terminals down to 40 columns:</p>
 <ul>
-<li>Split overlays such as <code>/view</code> gracefully fall back to a single-pane presentation with <code>[Tab]</code> switching between list and content panes.</li>
+<li><code>/view</code> falls back to one pane on narrow terminals. Type to filter, use Enter to read, Escape to return to the list, and Escape again to close. Ctrl+U clears the filter; long text wraps and scrolls. Tab also switches panes.</li>
 <li>Settings provides a drill-down navigation stack below 72 columns (sections → rows → details) with breadcrumbs and <code>Esc</code> backtracking.</li>
 <li>Text content and detail descriptions wrap cleanly without line truncation.</li>
 </ul>
@@ -1506,7 +1538,7 @@ CLI subcommands (<code>targets use/remove/rename/profile/convert</code>, <code>c
 <code>fleet list/run/status/drain/resume</code>, <code>auth login</code>), passing <code>--help</code> prints
 usage instructions and exits with code 0.</p>
 </blockquote>
-        <h2>Operator-task handoff and continuation</h2>
+<h2>Operator-task handoff and continuation</h2>
 <p><code>clio-coder tasks hand &lt;uN&gt;</code> prints the inbox record as JSON on stdout and an actionable pickup prompt on stderr. Submit that prompt to the intended session. Before task work, the model must pick the intended <code>uN</code>, confirm its durable session and board linkage, and use the returned <code>tN</code>. Handing a task does not itself pick it. Completion should be checked against the linked board and inbox with the actual IDs; manual CLI completion is an operator action, not evidence of model completion.</p>
 <p>Acceptance rows labeled Required declare expected checks and timeout limits; they are not pending executions or passing results. Inspect verification receipts for outcomes. Under high rigor, the finish gate requires the applicable passing checks or explicit limitations.</p>
 <p>Task-board guidance and ordinary continuation preserve proposal-only scope. Deferred implementation should be blocked or dropped while awaiting an explicit operator go-ahead. A skill-install decision is separate from implementation authorization, and full-auto capability does not expand the task. These are model instructions, not a guarantee of model adherence.</p>

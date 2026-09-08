@@ -44,30 +44,31 @@ function coreVerb(status: AgentStatus): { text: string; toneHint: VerbRender["to
 		case "idle":
 			return null;
 		case "preparing":
-			return { text: tier >= 2 ? "still preparing harness" : "preparing harness", toneHint: "normal" };
+			return { text: "Preparing", toneHint: "normal" };
 		case "waiting_model":
 			return {
-				text: tier >= 2 ? "still waiting on model" : status.localRuntime ? "waiting on local model" : "waiting on model",
+				text: tier >= 2 ? "Waiting for model" : status.localRuntime ? "Waiting for local model" : "Waiting for model",
 				toneHint: "normal",
 			};
 		case "thinking":
-			return { text: tier >= 2 ? "still receiving thinking" : "receiving thinking", toneHint: "normal" };
+			return { text: "Thinking", toneHint: "normal" };
 		case "writing":
-			return { text: "streaming response", toneHint: "normal" };
+			return { text: "Writing", toneHint: "normal" };
 		case "tool_running": {
 			const name = status.tool?.toolName ?? "tool";
-			if (name === ToolNames.AskUser) return { text: "waiting for user input", toneHint: "normal" };
-			return { text: tier >= 2 ? `still running tool: ${name}` : `running tool: ${name}`, toneHint: "normal" };
+			if (name === ToolNames.Dispatch) return { text: "Waiting for worker", toneHint: "normal" };
+			if (name === ToolNames.AskUser) return { text: "Needs input", toneHint: "normal" };
+			return { text: `Running ${name}`, toneHint: "normal" };
 		}
 		case "tool_blocked":
-			return { text: "awaiting confirmation", toneHint: "warn" };
+			return { text: "Needs approval", toneHint: "warn" };
 		case "retrying": {
 			const retry = status.retry;
 			const wait = retry && retry.waitMs > 0 ? ` · ${formatStatusElapsed(retry.waitMs)}` : "";
 			return { text: `retrying ${retry?.attempt ?? 0}/${retry?.maxAttempts ?? 0}${wait}`, toneHint: "warn" };
 		}
 		case "compacting":
-			return { text: "compacting context", toneHint: "normal" };
+			return { text: "Compacting context", toneHint: "normal" };
 		case "dispatching": {
 			const agent = status.dispatch?.agentName;
 			if (tier >= 2)
@@ -75,7 +76,7 @@ function coreVerb(status: AgentStatus): { text: string; toneHint: VerbRender["to
 			return { text: agent ? `dispatching agent: ${agent}` : "dispatching agent", toneHint: "normal" };
 		}
 		case "stuck":
-			return { text: "stuck", toneHint: "error" };
+			return { text: "No output", toneHint: "error" };
 		case "ended": {
 			const stop = status.summary?.stopReason ?? "stop";
 			const elapsed = status.summary ? ` · ${formatStatusElapsed(status.summary.elapsedMs)}` : "";
@@ -97,7 +98,7 @@ export function resolveFooterVerb(status: AgentStatus, now: number, terminalCols
 	if (status.phase === "stuck") {
 		const elapsed = elapsedSince(status, now);
 		return {
-			text: terminalCols < 60 ? "stuck" : `stuck · ${elapsed} · Esc to cancel`,
+			text: terminalCols < 60 ? "No output" : `No output · ${elapsed} · Esc to cancel`,
 			toneHint: "error",
 		};
 	}
@@ -117,12 +118,12 @@ function inlineParts(
 	terminalCols: number,
 ): { text: string; hint: string | null; toneHint: VerbRender["toneHint"] } | null {
 	if (status.phase === "stuck")
-		return { text: `Stuck for ${elapsedSince(status, now)}.`, hint: "Press Esc to cancel.", toneHint: "error" };
+		return { text: `No output for ${noProgressSince(status, now)}.`, hint: "Press Esc to cancel.", toneHint: "error" };
 	const core = coreVerb(status);
 	if (!core) return null;
 	const text = core.text.replace(/^[a-z]/, (c) => c.toUpperCase());
 	if (status.watchdogTier >= 3) {
-		const hint = terminalCols < 50 ? null : `(no progress for ${noProgressSince(status, now)}; press Esc to cancel)`;
+		const hint = terminalCols < 50 ? null : `(no output for ${noProgressSince(status, now)}; press Esc to cancel)`;
 		return { text, hint, toneHint: core.toneHint };
 	}
 	if (terminalCols < 50 || status.phase === "tool_blocked") return { text, hint: null, toneHint: core.toneHint };

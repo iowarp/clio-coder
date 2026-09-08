@@ -11,7 +11,6 @@ import {
 import type { ClioSettings } from "../core/config.js";
 import type { SafeEventBus } from "../core/event-bus.js";
 import { routingChangeNotices } from "../core/session-routing.js";
-import { visibleWidth } from "../engine/tui.js";
 import {
 	budgetAlertNotice,
 	middlewareHookFailedSessionNotice,
@@ -26,26 +25,10 @@ import {
 	toolBudgetAuditReason,
 	toolBudgetStopReason,
 } from "./loop-guard-interrupt.js";
-import {
-	type AgentStatus,
-	INLINE_STATUS_INDENT_COLS,
-	type ReasoningUsageView,
-	reasoningFromTally,
-	resolveInlineVerb,
-	type StatusPhase,
-	spinnerFrame,
-	type TurnSummary,
-	type VerbRender,
-} from "./status/index.js";
+import type { AgentStatus, TurnSummary } from "./status/index.js";
 
 export type InteractiveProjectionNoticeLevel = "info" | "success" | "warning" | "error";
 export type InteractiveTranscriptNoticeLevel = "info" | "success" | "warn" | "error";
-
-export interface InteractiveStatusLine {
-	phase: StatusPhase;
-	verb: string;
-	toneHint: VerbRender["toneHint"];
-}
 
 export interface InteractiveEventProjectionDeps {
 	bus: SafeEventBus;
@@ -69,12 +52,10 @@ export interface InteractiveEventProjectionDeps {
 	resetAskUserCancellation: () => void;
 	recordToolStart: (toolName: string, toolCallId: string) => void;
 	recordToolEnd: (toolName: string, toolCallId: string, isError: boolean, truncated: boolean) => void;
-	setStatusLine: (line: InteractiveStatusLine | null) => void;
 	/**
 	 * Publish the live turn's reasoning projection to the transcript. Optional so
 	 * a host without a chat panel still gets every other projection.
 	 */
-	setLiveReasoning?: (view: ReasoningUsageView | null) => void;
 	setLastTurnSummary: (summary: TurnSummary) => void;
 	startTerminalProgress: () => void;
 	stopTerminalProgress: () => void;
@@ -126,8 +107,6 @@ function askUserInterviewClosedByToolResult(event: {
  * subscriptions.
  */
 export function createInteractiveEventProjection(deps: InteractiveEventProjectionDeps): InteractiveEventProjection {
-	const now = deps.now ?? Date.now;
-
 	for (const notice of deps.initialNotices ?? []) {
 		const text = notice.trim();
 		if (text.length === 0) continue;
@@ -187,30 +166,9 @@ export function createInteractiveEventProjection(deps: InteractiveEventProjectio
 		}),
 	);
 
-	let statusInlineFrame = 0;
 	primaryUnsubscribers.push(
 		deps.status.subscribe((status) => {
-			// One projection of the run tally reaches the transcript, so the live
-			// line, the turn receipt, and the footer state the same number.
-			deps.setLiveReasoning?.(
-				status.phase === "idle" || status.phase === "ended" ? null : reasoningFromTally(status.runTally),
-			);
-			if (status.phase === "idle") {
-				deps.setStatusLine(null);
-			} else if (status.phase === "ended") {
-				deps.setStatusLine(null);
-				if (status.summary) deps.setLastTurnSummary(status.summary);
-			} else {
-				const cols = deps.getTerminalColumns();
-				const frame = cols < 30 ? "" : `${spinnerFrame(statusInlineFrame)} `;
-				const verb = resolveInlineVerb(status, now(), cols, INLINE_STATUS_INDENT_COLS + visibleWidth(frame));
-				if (verb) {
-					deps.setStatusLine({ phase: status.phase, verb: `${frame}${verb.text}`, toneHint: verb.toneHint });
-					statusInlineFrame = (statusInlineFrame + 1) % 10;
-				} else {
-					deps.setStatusLine(null);
-				}
-			}
+			if (status.phase === "ended" && status.summary) deps.setLastTurnSummary(status.summary);
 			deps.refreshFooter();
 			deps.requestRender();
 		}),

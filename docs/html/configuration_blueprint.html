@@ -30,7 +30,7 @@
       </div>
       <div class="header-right">
         <a class="back-btn" href="index.html">← Index</a>
-        <span class="version-badge">v0.4.2</span>
+        <span class="version-badge">v0.4.6</span>
       </div>
     </header>
     <div class="page-layout-grid reference-layout">
@@ -144,8 +144,7 @@ These aim to make one coding session useful on a laptop or a shared endpoint:</p
 <th>Default and purpose</th>
 </tr>
 </thead>
-<tbody>
-<tr>
+<tbody><tr>
 <td>Connection</td>
 <td>One endpoint and model for chat and the fleet default on first setup. No separate model assignments to learn.</td>
 </tr>
@@ -171,7 +170,7 @@ These aim to make one coding session useful on a laptop or a shared endpoint:</p
 </tr>
 <tr>
 <td>Model limits</td>
-<td>Runtime/model discovery supplies limits where available. <code>chat.maxOutputTokens: 0</code> uses the resolved model limit. Unknown models still use Clio's fallback limits; set a capability override in Settings if the server cannot advertise its actual capacity.</td>
+<td>Runtime/model discovery supplies limits where available. <code>chat.maxOutputTokens: 0</code> uses the resolved model limit. Unknown models still use Clio&#39;s fallback limits; set a capability override in Settings if the server cannot advertise its actual capacity.</td>
 </tr>
 <tr>
 <td>Long sessions</td>
@@ -193,8 +192,7 @@ These aim to make one coding session useful on a laptop or a shared endpoint:</p
 <td>Extensions and trust</td>
 <td>No configured external peers or runtime plugins; project resource imports are untrusted by default.</td>
 </tr>
-</tbody>
-</table>
+</tbody></table>
 <p>Newly initialized settings contain these values. Existing explicit values are
 preserved; omitted keys inherit the current shipped defaults. For this release,
 the changed defaults are worker concurrency <code>1</code>, prewarm <code>false</code>, and smooth
@@ -287,6 +285,11 @@ not change the primary chat, background, or fleet-default pointers.</p>
 <td>SGLang</td>
 <td><code>sglang</code></td>
 <td><code>http://127.0.0.1:30000</code></td>
+</tr>
+<tr>
+<td>LiteLLM gateway</td>
+<td><code>litellm</code></td>
+<td><code>http://127.0.0.1:4000</code></td>
 </tr>
 </tbody></table>
 <p>Example registration:</p>
@@ -415,7 +418,7 @@ safety:
     enabled: false
 
 interface:
-  outputDetail: default
+  outputDetail: standard
   smoothStreaming: auto
   mode: regular
   fullscreenScrollbar: auto
@@ -439,7 +442,10 @@ integrations:
 </code></pre>
 <p>Target capability overrides may include <code>chat</code>, <code>tools</code>, <code>toolCallFormat</code>, <code>reasoning</code>, <code>thinkingFormat</code>, <code>structuredOutputs</code>, <code>vision</code>, <code>audio</code>, <code>embeddings</code>, <code>rerank</code>, <code>fim</code>, <code>contextWindow</code>, and <code>maxTokens</code>.</p>
 <h3>LiteLLM gateways</h3>
-<p>Register LiteLLM with its first-class runtime so discovery reads <code>/v1/model/info</code> rather than treating routed names as bare OpenAI models. For a gateway where placement matters, publish one deterministic <code>node/model</code> name per deployment instead of task categories such as <code>chat</code> or <code>code</code>:</p>
+<p>Register LiteLLM with its first-class runtime so discovery reads
+<code>/v1/model/info</code> rather than treating routed names as bare OpenAI models. For a
+gateway where placement matters, publish one deterministic <code>node/model</code> name
+per deployment instead of task categories such as <code>chat</code> or <code>code</code>:</p>
 <pre><code class="language-yaml">targets:
   - id: ai-gateway
     runtime: litellm
@@ -454,9 +460,29 @@ integrations:
         # Optional proxy overrides. Keep retries at zero for physical routes.
         timeoutSeconds: 300
         streamTimeoutSeconds: 180
-        numRetries: 0</code></pre>
-<p>Clio adds the <code>clio-coder</code> request tag and forwards its stable session id by default. Explicit <code>x-litellm-*</code> headers on the target or request take precedence. Set <code>sendSessionId: false</code> when the gateway must not correlate calls. The timeout values and <code>numRetries</code> become LiteLLM request headers and override the proxy&#39;s defaults only for this target. Clio disables the OpenAI SDK&#39;s client-side retry layer on LiteLLM requests. A failed interactive LiteLLM call also bypasses Clio&#39;s transient retry ladder even when <code>chat.retry</code> is enabled: the provider error names the selected route and tells the operator to choose a different one with <code>/model</code>. Configure <code>numRetries: 0</code> and no server fallback maps when <code>node/model</code> is a placement guarantee. Context-overflow compaction is still a local correction, not a route substitution.</p>
-<p>When the gateway reports these fields, Clio records LiteLLM&#39;s selected model group, physical model, sanitized upstream host, fallback/retry counts, and proxy timing in the session and worker receipt. A nonzero fallback or retry is also announced in the live transcript, making server-policy drift visible. Self-describing physical routes are summarized in probe diagnostics instead of expanding into a giant list of tautological mappings. If a genuine alias has multiple deployments, discovered capabilities are the conservative intersection and numerical limits are the smallest limits published by every deployment, so routing cannot select a weaker backend than Clio planned for. If <code>/v1/model/info</code> omits a capability, Clio does not invent it; that includes structured-output support.</p>
+        numRetries: 0
+</code></pre>
+<p>Clio adds the <code>clio-coder</code> request tag and forwards its stable session id by
+default. Explicit <code>x-litellm-*</code> headers on the target or request take
+precedence. Set <code>sendSessionId: false</code> when the gateway must not correlate calls.
+The timeout values and <code>numRetries</code> become LiteLLM request headers and override
+the proxy&#39;s defaults only for this target. Clio disables the OpenAI SDK&#39;s
+client-side retry layer on LiteLLM requests. A failed interactive LiteLLM call
+also bypasses Clio&#39;s transient retry ladder even when <code>chat.retry</code> is enabled:
+the provider error names the selected route and tells the operator to choose a
+different one with <code>/model</code>. Configure <code>numRetries: 0</code> and no server fallback
+maps when <code>node/model</code> is a placement guarantee. Context-overflow compaction is
+still a local correction, not a route substitution.</p>
+<p>When the gateway reports these fields, Clio records LiteLLM&#39;s selected model group, physical model,
+sanitized upstream host, fallback/retry counts, and proxy timing in the session
+and worker receipt. A nonzero fallback or retry is also announced in the live
+transcript, making server-policy drift visible. Self-describing physical routes
+are summarized in probe diagnostics instead of expanding into a giant list of
+tautological mappings. If a genuine alias has multiple deployments, discovered
+capabilities are the conservative intersection and numerical limits are the
+smallest limits published by every deployment, so routing cannot select a
+weaker backend than Clio planned for. If <code>/v1/model/info</code> omits a capability,
+Clio does not invent it; that includes structured-output support.</p>
 <p>Upstream <code>model_info.runtime</code> declarations may identify the thinking-control dialect of a routed model. Clio accepts only recognized declarations shared by every deployment of that alias; unknown or mixed declarations remain unguessed. A resolved LM Studio dialect uses its explicit off effort, while llama.cpp uses template controls. This metadata does not turn the target into a native management endpoint: LiteLLM continues to own authentication, routing, loading and eviction. Thinking off is a request to the selected runtime/model, not evidence that the server complied or that every route has been live-validated.</p>
 <h3><code>maxConcurrentRequests</code></h3>
 <p><code>maxConcurrentRequests</code> is a per-target integer of at least 1, validated with the rest of the target block, and it is the operator&#39;s override for how many requests the inference endpoint behind that target can serve at once. It is not a settings-file default and has no shipped value, so it does not appear in the settings inventory below.</p>
@@ -785,7 +811,7 @@ each as a stable deep link:</p>
 </tr>
 <tr>
 <td><code>interface</code></td>
-<td>Output detail, terminal behavior, notifications, keybindings, and experimental pane settings</td>
+<td>Output style, terminal behavior, notifications, keybindings, and experimental pane settings</td>
 </tr>
 <tr>
 <td><code>integrations</code></td>
@@ -1054,6 +1080,12 @@ this guide remain the canonical version-2 paths in the inventory below.</p>
 </tr>
 </thead>
 <tbody><tr>
+<td><code>context.toolResultMaxBytes</code></td>
+<td><code>65536</code></td>
+<td>integer ≥ 4096; complete overflow spills to the session scratch file; three full-size results consume the default 196,608-byte turn pool, so a fourth finds it filled</td>
+<td>next turn; a live session change applies to the next tool result</td>
+</tr>
+<tr>
 <td><code>context.workingSet.enabled</code></td>
 <td><code>true</code></td>
 <td>boolean</td>
@@ -1106,12 +1138,6 @@ this guide remain the canonical version-2 paths in the inventory below.</p>
 <td>unset</td>
 <td>non-empty path string when present</td>
 <td>next turn</td>
-</tr>
-<tr>
-<td><code>context.toolResultMaxBytes</code></td>
-<td><code>65536</code></td>
-<td>integer ≥ 4096; complete overflow spills to the session scratch file; three full-size results consume the default 196,608-byte turn pool, so a fourth finds it filled</td>
-<td>next turn; a live session change applies to the next tool result</td>
 </tr>
 <tr>
 <td><code>context.memory.enabled</code></td>
@@ -1235,9 +1261,9 @@ this guide remain the canonical version-2 paths in the inventory below.</p>
 </tr>
 <tr>
 <td><code>interface.outputDetail</code></td>
-<td><code>default</code></td>
-<td><code>minimal</code>, <code>default</code>, <code>verbose</code></td>
-<td>next turn</td>
+<td><code>standard</code></td>
+<td><code>compact</code>, <code>standard</code>, <code>detailed</code></td>
+<td>immediately</td>
 </tr>
 <tr>
 <td><code>interface.mode</code></td>
@@ -1533,12 +1559,28 @@ clio-coder configure --id claude-code-worker --runtime claude-code --model sonne
 <p>Clio sends one literal prompt as a <code>stream-json</code> stdin record, closes stdin, and validates agy&#39;s init, delta, and single terminal-result sequence, including the opaque conversation identifier and provider-reported token counts. Prompt text never appears in argv and slash-command expansion is disabled. <code>clio-coder targets --probe --target &lt;id&gt;</code> runs the non-generating <code>agy --output-format json models</code> command and distinguishes missing CLI, sign-in required, CLI update required, unavailable live catalog, and configured-model disappearance. A successful account catalog is authoritative. The five built-in slugs are cold-start hints only; live <code>{id,label}</code> rows and last-good cached labels are displayed without replacing the stable model slug, and cached fallback is marked stale.</p>
 <p>Antigravity remains an external agent loop: Clio cannot intercept each tool call. Every launch disables slash-command expansion and sets an explicit posture rather than inheriting mutable CLI defaults:</p>
 <table>
-<thead><tr><th>Clio autonomy</th><th>Antigravity launch posture</th></tr></thead>
-<tbody>
-<tr><td><code>read-only</code></td><td><code>--mode plan --sandbox</code></td></tr>
-<tr><td><code>auto-edit</code></td><td><code>--mode accept-edits</code></td></tr>
-<tr><td><code>suggest</code></td><td>Refused because a headless subprocess cannot pause for Clio approval</td></tr>
-<tr><td><code>full-auto</code></td><td>Capped at <code>accept-edits</code> unless the external full-access gate is explicitly enabled</td></tr>
+<thead>
+<tr>
+<th>Clio autonomy</th>
+<th>Antigravity launch posture</th>
+</tr>
+</thead>
+<tbody><tr>
+<td><code>read-only</code></td>
+<td><code>--mode plan --sandbox</code></td>
+</tr>
+<tr>
+<td><code>auto-edit</code></td>
+<td><code>--mode accept-edits</code></td>
+</tr>
+<tr>
+<td><code>suggest</code></td>
+<td>Refused because a headless subprocess cannot pause for Clio approval</td>
+</tr>
+<tr>
+<td><code>full-auto</code></td>
+<td>Capped at <code>accept-edits</code> unless the external full-access gate is explicitly enabled</td>
+</tr>
 </tbody></table>
 <p>Launch flags are a request to agy rather than a guarantee. Headless agy reports <code>permission_mode: always-proceed</code> even under <code>--mode plan --sandbox</code>, and Clio grades autonomy enforcement as <code>approximated</code> in execution receipts. The only Clio-enforced read-only boundary is the receipt grade.</p>
 <p>Only <code>full-auto</code> together with <code>CLIO_CODER_ALLOW_EXTERNAL_FULL_ACCESS=1</code> passes <code>--dangerously-skip-permissions</code>. Treat that as an external safety bypass: agy, not Clio&#39;s tool registry, controls the resulting filesystem, shell, network, prompts, and approvals. The gate is never enabled by onboarding. A <code>world-knowledge</code> dispatch remains read-only even if the caller requests a stronger posture; use another agent for mutation work.</p>
@@ -1858,7 +1900,7 @@ clio-coder models --target &lt;id&gt;
 clio-coder auth status &lt;target-or-runtime&gt;
 </code></pre>
 <p>When opening issues, include the Clio version, Node version, target id/runtime, model id, whether the live model listing succeeds (or the target probe result), and a redacted receipt or command transcript.</p>
-        <h2>Explicit Antigravity continuity</h2>
+<h2>Explicit Antigravity continuity</h2>
 <p>Antigravity resumes a conversation only when a caller explicitly supplies its conversation ID through the worker runtime. The dispatch tool exposes no resume argument. A nonempty ID must be at most 4096 UTF-8 bytes and contain no Unicode control characters; it is passed as a literal <code>--conversation</code> argument. Clio requires the first init conversation ID to match the requested ID and fails the run if agy starts a different conversation. An absent or empty ID starts fresh. Antigravity runs are never retried automatically.</p>
 </article>
         <nav class="related-nav" aria-label="Adjacent references">

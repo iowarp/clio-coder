@@ -30,7 +30,7 @@
       </div>
       <div class="header-right">
         <a class="back-btn" href="index.html">← Index</a>
-        <span class="version-badge">v0.4.2</span>
+        <span class="version-badge">v0.4.6</span>
       </div>
     </header>
     <div class="page-layout-grid reference-layout">
@@ -47,8 +47,79 @@
 <p><strong>Visual blueprint:</strong> The source checkout includes the complete
 <a href="tui_design_blueprint.html">Clio TUI Design System visual reference</a>.</p>
 </blockquote>
-<p>This document is the reference specification for the Clio Coder TUI visual layout, styling, and behavior. It describes color semantics, the glyph vocabulary, structural recipes, and state choreography for all surfaces under <a href="https://github.com/iowarp/clio-coder/tree/main/src/interactive/">src/interactive/</a>.</p>
+<p>This document is the reference specification for the Clio Coder TUI visual layout, styling, and behavior. It describes color semantics, the glyph vocabulary, structural recipes, and state choreography for all surfaces under <a href="https://github.com/iowarp/clio-coder/blob/main/src/interactive">src/interactive/</a>.</p>
 <p>The governing principle: <strong>the user reads state from color, structure from frames, and identity from brand marks.</strong> Everything that is not state or structure remains visually quiet.</p>
+<hr>
+<h2>Output styles</h2>
+<p><strong>Alt+O</strong> cycles <strong>Compact → Standard → Detailed → Compact</strong>. Standard is the default, so the first press reveals Detailed. The current style appears in the footer. Cycling applies immediately to the current session, including streaming output and history. Save a preferred startup style through <strong>/settings interface → Output style → Apply and save globally</strong>, or <code>clio-coder configure --section panes</code>.</p>
+<table>
+<thead>
+<tr>
+<th>Content</th>
+<th>Compact</th>
+<th>Standard</th>
+<th>Detailed</th>
+</tr>
+</thead>
+<tbody><tr>
+<td>Answers and user messages</td>
+<td>Complete</td>
+<td>Complete</td>
+<td>Complete</td>
+</tr>
+<tr>
+<td>Supplied reasoning</td>
+<td>Marker</td>
+<td>3 rows</td>
+<td>12 rows</td>
+</tr>
+<tr>
+<td>Reads and searches</td>
+<td>Consecutive successful observations grouped</td>
+<td>Action and outcome</td>
+<td>8 result rows</td>
+</tr>
+<tr>
+<td>File changes</td>
+<td>Paths and change facts</td>
+<td>8 diff rows</td>
+<td>20 diff rows</td>
+</tr>
+<tr>
+<td>Agent shell commands</td>
+<td>Command and outcome</td>
+<td>Command and outcome</td>
+<td>12 output rows</td>
+</tr>
+<tr>
+<td>Your <code>!</code> / <code>!!</code> shell commands</td>
+<td>3 output rows</td>
+<td>6 output rows</td>
+<td>12 output rows</td>
+</tr>
+<tr>
+<td>Workers</td>
+<td>Identity, execution and validation outcome</td>
+<td>3 summary rows</td>
+<td>8 summary rows and bounded tool activity</td>
+</tr>
+<tr>
+<td>Failures and refusals</td>
+<td>Actionable reason, up to 4 rows</td>
+<td>Actionable reason, up to 4 rows</td>
+<td>Up to 12 rows</td>
+</tr>
+<tr>
+<td>Turn receipt</td>
+<td>None</td>
+<td>Completion and available duration</td>
+<td>Usage and model-call facts</td>
+</tr>
+</tbody></table>
+<p>Preview budgets count terminal rows <strong>after wrapping</strong>, including the <code>/view</code> overflow hint, and shrink on short terminals. Reasoning previews retain the newest text when streaming stops. Detailed remains bounded: a successful <code>cat</code> or file read cannot fill the transcript with the entire file.</p>
+<p>Use <strong>/view transcript</strong> to select full available reasoning, tool arguments/results, local shell output, or worker details. Search the list, press Enter to inspect, and Escape to return. Offloaded tool and dispatch output remains available in the other <code>/view</code> categories; missing or truncated captured content is identified. Inspection applies secret redaction, and <code>!!</code> output remains excluded from model context.</p>
+<p>Output style changes presentation only. <strong>Shift+Tab</strong> still changes the model&#39;s thinking effort. It does not reveal unavailable reasoning; Clio shows only reasoning supplied by the provider. The previous Alt+R, Alt+P, and expand-all rendering shortcuts are retired. <code>/output</code> now explains how to reach Alt+O and Settings. Existing <code>minimal</code>, <code>default</code>, and <code>verbose</code> preferences map to <code>compact</code>, <code>standard</code>, and <code>detailed</code> without rewriting other preferences.</p>
+<p>The footer owns live activity. Transcript actions have static running or outcome markers and update in place. Background workers add a count without replacing the main agent&#39;s current phase; a completed worker cannot clear a sibling&#39;s active state. Approval and user-input waits do not spin. Failed and cancelled turns retain their actual outcome, and an elapsed wait is described as silence rather than proof that a process is stuck. A worker&#39;s successful execution remains separate from its validation result.</p>
 <hr>
 <h2>1. Color System</h2>
 <p>All color styling is defined in <a href="https://github.com/iowarp/clio-coder/blob/main/src/interactive/theme/tokens.ts">src/interactive/theme/tokens.ts</a>. No raw SGR sequences, <code>38;2;</code>/<code>38;5;</code> ANSI escape fragments, or hardcoded hex colors are allowed outside this theme module.</p>
@@ -89,7 +160,7 @@
 <tr>
 <td><code>error</code></td>
 <td><code>rgb(255, 92, 102)</code> (Red)</td>
-<td>Failures: error indicators (<code>✗</code>), error rails, stuck states, and error message text.</td>
+<td>Failures: error indicators (<code>✗</code>), error rails, failed outcomes, and error message text.</td>
 </tr>
 <tr>
 <td><code>info</code></td>
@@ -455,9 +526,9 @@
 </ul>
 <h3>5.3 Progressively Disclosed Footer</h3>
 <ul>
-<li><strong>Compact Mode (Quiet Idle)</strong>: Two always-on lines that eliminate idle telemetry noise (suppresses <code>tools none</code>, <code>◌ idle</code>, and default-output tags):<ul>
+<li><strong>Compact Mode (Quiet Idle)</strong>: Two always-on lines that eliminate idle telemetry noise (suppresses <code>tools none</code>, <code>◌ idle</code>, and duplicate turn receipts):<ul>
 <li><strong>Line 1 (Workspace &amp; Readiness)</strong>: CWD path, git branch/dirty state, and active phase pill only when meaningful.</li>
-<li><strong>Line 2 (Context &amp; Receipt)</strong>: Context window meter and the best current/last-turn receipt.</li>
+<li><strong>Line 2 (Context &amp; Style)</strong>: Context window meter, Output style, and session cost.</li>
 </ul>
 </li>
 <li><strong>Expanded Mode (<code>Alt+U</code>)</strong>: Four responsive sections ordered by operational urgency rather than a static telemetry grid:<ol>
@@ -496,7 +567,7 @@ Empty rows collapse rather than occupying blank grid space.</li>
 <tr>
 <td>thinking</td>
 <td>spinner + <code>thinking</code> (reason)</td>
-<td>Dim <code>Thinking (N tokens)…</code> marker</td>
+<td>Bounded supplied reasoning</td>
 <td>No</td>
 </tr>
 <tr>
@@ -507,7 +578,7 @@ Empty rows collapse rather than occupying blank grid space.</li>
 </tr>
 <tr>
 <td>tool running</td>
-<td>spinner + <code>tool &lt;name&gt;</code> (accent)</td>
+<td>spinner + <code>Running &lt;name&gt;</code> (accent)</td>
 <td><code>▸</code> tool execution ledger line</td>
 <td>No</td>
 </tr>
@@ -531,19 +602,19 @@ Empty rows collapse rather than occupying blank grid space.</li>
 </tr>
 <tr>
 <td>dispatching / fleet live</td>
-<td>spinner + <code>dispatch</code> (action)</td>
+<td>Main phase plus worker count</td>
 <td>Task island status updates</td>
 <td>Yes</td>
 </tr>
 <tr>
-<td>stuck</td>
-<td><code>⚠ stuck 12s</code> (error)</td>
-<td>Inline watchdog warning</td>
+<td>prolonged silence</td>
+<td><code>⚠ No output · 12s</code> (warning)</td>
+<td>No duplicate status</td>
 <td>No</td>
 </tr>
 <tr>
-<td>done</td>
-<td><code>✓ done</code> (success), then quiet telemetry</td>
+<td>ended</td>
+<td>Ready, Failed, Cancelled, or Output limit</td>
 <td>Settled transcript blocks</td>
 <td>No</td>
 </tr>
@@ -557,37 +628,18 @@ Empty rows collapse rather than occupying blank grid space.</li>
 <li><strong>Two-Cell Hanging Indent</strong>: User and assistant prose are rendered with a fixed two-cell gutter. The first line begins with the turn prefix (<code>› </code> or <code>✦ </code>), while all wrapped continuation lines indent by two spaces (<code>PROSE_GUTTER = &quot;  &quot;</code>), keeping multiline text visibly attached to its voice glyph.</li>
 </ul>
 <h3>6.2 Thinking Blocks</h3>
-<p>Drawn as a folded dim marker (<code>Thinking (N tokens)…</code> or <code>Thinking…</code>), which expands into a body using the <code>reason</code> color vertical <code>│</code> rail. Cap of 12 lines.</p>
+<p>Supplied reasoning stays in stream order on the <code>reason</code> color rail. Compact shows a historical marker; Standard and Detailed show the bounded tail defined in <a href="#output-styles">Output styles</a>. The footer alone reports current activity.</p>
 <h3>6.3 Tool Ledger</h3>
-<p>Every tool call owns one stable transcript block for its complete lifecycle. Streamed
-<code>toolcall_*</code> message updates first expose the call as <code>forming call</code>, the completed argument block
-becomes <code>ready</code>, <code>tool_execution_start</code> changes the same row to <code>running</code>, and cumulative
-<code>tool_execution_update</code> results replace the live body until <code>tool_execution_end</code> settles it. Rapid
-tool updates are coalesced to terminal frame rate; settlement always renders immediately.</p>
-<p>The collapsed form is one composed ledger line:</p>
-<pre><code>▸ verb(object) · resource · facts · size ✓ · 230ms · full: path (Alt+O)
+<p>Each call owns one stable action row. Argument fragments stay hidden until the call is formed. A formed call becomes ready, then running, then settles with its actual outcome. Cumulative output replaces the live preview; late partials cannot overwrite a settled result. The same policy applies during replay.</p>
+<pre><code class="language-text">▸ bash(cat README.md) · exit 0 ✓ · 230ms
 </code></pre>
-<ul>
-<li>Verb is bold <code>accent</code>, tail details are <code>dim</code>, status glyph is semantic (<code>✓</code>/<code>✗</code>), and the keyboard shortcut hint is appended at the end. Tool ledgers maintain full terminal width and bypass the prose hanging indent.</li>
-<li>Expanded calls show the primary argument in the signature and every secondary argument as a typed field list. Multiline argument bodies become line and byte facts, nested objects retain structured rendering, and safety-sensitive values remain redacted.</li>
-<li>Running calls label <code>live output</code> and replace the cumulative partial result in place. Settled calls label <code>output</code> and show available exit status, result or observation counts, line count, displayed and total byte sizes, truncation, timeout, tool-token usage, dynamically added tools, context exclusion, and the full-output path. A blocked or aborted admission instead labels its <code>decision</code> and does not claim that the tool ran.</li>
-<li>A call parked for one-shot approval replaces its running timer with <code>awaiting approval</code> and shows the already-sanitized action class, asking safety axis, and target below the row. These facts are transient UI state: approval, denial, abort, or settlement clears them, and they are never reconstructed from the session ledger.</li>
-<li>The live permission frame derives its consequence tier from those typed facts and the authenticated origin. It anchors at bottom center with five rows reserved for the composer and footer, and it recomputes that anchor on resize. Each queued frame retains its own tier and requester.</li>
-<li>Text and image tool results keep their text while rendering images as MIME and byte-size placeholders; base64 image data is never written to the terminal.</li>
-<li>Successful <code>edit</code> and <code>write</code> calls render the bounded diff produced by the tool result. Live regular-screen and fullscreen rows color removed and added lines with the <code>error</code> and <code>success</code> tokens and emphasize changed words; <code>/resume</code> replay and <code>/export</code> keep the same numbered diff as plain text.</li>
-<li>Operator <code>!</code> and <code>!!</code> bash commands use the same running and settled block as model-initiated bash. The block appears before the process starts, streams the throttled cumulative stdout/stderr tail, and settles in place while the existing <code>bashExecution</code> session entry remains the durable record. <code>!!</code> continues to exclude that record from model context and says so in the block.</li>
-</ul>
+<p>Successful reads and shell commands keep raw content out of Standard. Mutations show bounded diffs, and failures keep actionable context in every preset. <code>/view transcript</code> exposes full available arguments and results. Approval rows show the sanitized action and target, with no running spinner. Truncation, context exclusion, offload paths, refusal, cancellation, and missing results remain visible.</p>
 <h3>6.4 Editor Rail</h3>
 <p>The right-hand label shows <code>model · thinking</code>. Thinking level colors map as: <code>off</code> (dim), <code>minimal</code>/<code>low</code> (muted), <code>medium</code>/<code>high</code> (<code>reason</code> purple), and <code>xhigh</code>/<code>max</code>/<code>on</code> (bold <code>reason</code> purple).</p>
 <h3>6.5 Transcript Notices</h3>
 <p>Replay and system tags (e.g. <code>[retry]</code>, <code>[model]</code>) are wrapped in <code>dim</code> brackets with a <code>muted</code> message. Retry tags use <code>warning</code> amber.</p>
-<h3>6.6 Output Verbosity Receipts</h3>
-<p>Turn usage receipts rendered at the bottom of completed turns respect the output verbosity configuration:</p>
-<ul>
-<li><code>minimal</code>: Omits the turn usage receipt entirely.</li>
-<li><code>default</code>: Renders one compact dim receipt: <code>turn · in &lt;N&gt; · out &lt;M&gt;</code>.</li>
-<li><code>verbose</code>: Renders the full receipt with model call counts (<code>over N calls</code>), cache reads/writes (<code>cache R/W</code>), reasoning tokens with provenance (<code>reasoning N provider</code> or <code>reasoning ≈N estimated</code>), and the verification caveat (<code>· reasoning text is a UI excerpt, not a verification</code>).</li>
-</ul>
+<h3>6.6 Output Style Receipts</h3>
+<p>Compact omits the separate turn receipt. Standard shows a small completion line with available duration. Detailed includes model calls, input/output tokens, cache usage, and supplied reasoning usage with provenance. Reasoning text is an excerpt, not verification. The quiet footer keeps the style and session cost visible; detailed telemetry is available through Detailed or the expanded dashboard.</p>
 <h3>6.7 Code Ink (Syntax Highlighting)</h3>
 <p>Syntax highlighting within code blocks is handled by <a href="https://github.com/iowarp/clio-coder/blob/main/src/interactive/renderers/code-ink.ts">src/interactive/renderers/code-ink.ts</a>. It maps a restricted set of four tokens to stay quiet:</p>
 <ul>
@@ -713,7 +765,7 @@ Global scope requires a second <code>g</code> press on the same entry after the 
 line appears. Status rows are labeled private and neither action can promote
 them. Both actions create unapproved durable proposals, show the resulting
 memory ID, and leave approval to the separate reviewed memory lifecycle.</p>
-        </article>
+</article>
         <nav class="related-nav" aria-label="Adjacent references">
           <a class="nav-link-card" href="trace_blueprint.html"><span class="nav-label">Previous</span><span class="nav-title">Trace store contract</span></a>
           <a class="nav-link-card next" href="worker_dispatch_blueprint.html"><span class="nav-label">Next</span><span class="nav-title">Worker Dispatch Mechanics</span></a>

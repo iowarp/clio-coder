@@ -229,7 +229,7 @@ export const SETTINGS_LABELS_BY_ID = {
 	"retry.maxDelayMs": "Max delay (ms)",
 	"retry.streamStallMs": "Stream stall timeout (ms)",
 	"terminal.showTerminalProgress": "Terminal progress badges",
-	"terminal.outputVerbosity": "Output detail",
+	"terminal.outputVerbosity": "Output style",
 	"terminal.tuiMode": "TUI mode",
 	"terminal.fullscreenScrollbar": "Fullscreen scrollbar",
 	"terminal.smoothStreaming": "Smooth streaming",
@@ -551,7 +551,7 @@ const SETTINGS_HELP_BY_ID: Partial<Record<EditableSettingId, string>> = {
 	"watchdog.cadenceToolCalls":
 		"Mid-turn firing is how scope drift becomes visible before the turn ends. Leave blank and the watchdog fires at turn end only.",
 	keybindings:
-		"Renderer controls: Alt+O newest tool or worker details, Ctrl+Alt+O or Alt+Shift+O all of them, Alt+P live tool output, Alt+R latest reasoning, Ctrl+Alt+R or Alt+Shift+R all reasoning. Override these in settings.yaml or use /help.",
+		"Alt+O cycles Output style: Compact, Standard, Detailed. Use /view for full reasoning and action details. Shift+Tab changes model thinking effort.",
 };
 
 /** Per-value meaning, surfaced for the current value of an enum knob. */
@@ -624,9 +624,9 @@ const SETTINGS_VALUE_HELP_BY_ID: Partial<Record<EditableSettingId, Record<string
 		false: "no terminal progress badges",
 	},
 	"terminal.outputVerbosity": {
-		minimal: "quiet transcript; tools stay to one-line outcomes and reasoning stays folded",
-		default: "balanced transcript; unfold the latest tool, worker, or reasoning block on demand",
-		verbose: "transparent transcript; reasoning, arguments, and live tool output stay visible",
+		compact: "quiet action summaries, answers, and visible failures",
+		standard: "short reasoning and change previews, clear action outcomes",
+		detailed: "larger bounded previews; full content is available in /view",
 	},
 	"terminal.tuiMode": {
 		regular: "preserve terminal scrollback and render the composer below the transcript",
@@ -1924,7 +1924,7 @@ function buildSettingItems(settings: Readonly<ClioSettings>, options?: BuildSett
 			values: ["false", "true"],
 		}),
 		settingItem("terminal.outputVerbosity", terminal.outputDetail, {
-			values: ["minimal", "default", "verbose"],
+			values: ["compact", "standard", "detailed"],
 		}),
 		settingItem("terminal.tuiMode", terminal.mode, {
 			values: ["regular", "fullscreen"],
@@ -2556,7 +2556,7 @@ function applySettingChange(settings: ClioSettings, id: string, value: string): 
 			if (value === "true" || value === "false") settings.interface.terminalProgress = value === "true";
 			return;
 		case "terminal.outputVerbosity":
-			if (value === "minimal" || value === "default" || value === "verbose") settings.interface.outputDetail = value;
+			if (value === "compact" || value === "standard" || value === "detailed") settings.interface.outputDetail = value;
 			return;
 		case "terminal.tuiMode":
 			if (value === "regular" || value === "fullscreen") settings.interface.mode = value;

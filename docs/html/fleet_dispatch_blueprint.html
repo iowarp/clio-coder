@@ -30,7 +30,7 @@
       </div>
       <div class="header-right">
         <a class="back-btn" href="index.html">← Index</a>
-        <span class="version-badge">v0.4.2</span>
+        <span class="version-badge">v0.4.6</span>
       </div>
     </header>
     <div class="page-layout-grid reference-layout">
@@ -98,7 +98,7 @@ the cross-process lease state is the final capacity authority. Route quality
 can be activated only for named roles/postures after exact-tuple readiness,
 and hard constraints always eliminate before any score.</li>
 <li>Environment whitelist. The SSH command carries an explicit environment
-(<code>CLIO_CODER_WORKER_PGID=$$</code> and any configured <code>CLIO_CODER_WORKER_LABELS</code>);
+(<code>CLIO_CODER_WORKER_PGID=$</code> and any configured <code>CLIO_CODER_WORKER_LABELS</code>);
 the orchestrator&#39;s <code>process.env</code> never crosses the wire. Node residency is
 projected into the target lifecycle carried by the WorkerSpec.
 <code>CLIO_CODER_WORKER_PGID</code> names the remote process group so an abort escalates
@@ -818,12 +818,7 @@ body renders the worker prose down a rail, one coalesced line of tool names,
 and a one-line receipt footer showing the outcome glyph, token count, duration,
 and contract status (such as <code>└ ✓ ok · 8.4k tok · 18s · contract unmeasured</code>),
 with the failure reason printed on the rail above the footer when a run fails.</li>
-<li>Runs the model itself asked for through the dispatch tool (identified by
-parentToolCallId) render as folded <code>◆</code> cards under the spawning tool segment;
-operator-typed runs are <code>◇</code> and open. The fold chord uses the <code>clio-coder.tool.expand</code>
-keybinding (<code>Alt+O</code>), which toggles the newest foldable item of either kind
-(tool call or worker block). <code>Ctrl+Alt+O</code> or <code>Alt+Shift+O</code> toggles every tool
-call and worker block at once.</li>
+<li>Model-launched workers use <code>◆</code>; operator-launched workers use <code>◇</code>. Both follow the current Output style: Compact identity/outcome, Standard short summary, Detailed bounded activity and a larger summary. <code>Alt+O</code> cycles styles for the session. <code>/view transcript</code> and <code>/view dispatch:&lt;runId&gt;</code> expose full available details. Execution success and validation quality remain separate facts.</li>
 <li>Sharing: nothing a worker produced enters the main model&#39;s context unless
 <code>--share</code> was passed or the operator runs <code>/share [runId]</code>. What enters is a
 bounded note of the shape <code>[worker result] &lt;agent&gt; · run &lt;id&gt; · &lt;outcome&gt; · shared by the operator</code>
@@ -932,7 +927,7 @@ the contract explicitly with <code>clio-coder fleet run &lt;name&gt;</code> and 
 receipts. The <a href="fleet_demo_blueprint.html">fleet demo runbook</a> provides a bounded
 end-to-end scenario, including reviewer gates and verification commands. Live
 fleet execution is not hidden inside deterministic CI.</p>
-        <h2>Bounded result delivery</h2>
+<h2>Bounded result delivery</h2>
 <p>Documenter and Coder use a structured report (<code>mutation-report</code>). Explicit recipe selections remain in force. For a read-only explanation, its <code>summary</code> carries the requested explanation and citations, with <code>mutatedPaths</code> empty. The inline <code>summary</code> allows up to 16,384 UTF-8 bytes by default, configurable up to a ceiling of 32,768 UTF-8 bytes via recipe <code>maxSummaryBytes</code> or dispatch <code>result_summary_max_bytes</code>. In batch dispatches, a top-level <code>result_summary_max_bytes</code> default is inherited by mutating tasks and safely ignored by non-mutation steps; setting an explicit per-task <code>result_summary_max_bytes</code> on a non-mutation step fails validation before model dispatch. Authored <code>commitMessage</code> and <code>architect-plan</code> authorship remain bounded at 1,000 UTF-8 bytes. Coder and Documenter explanations have no global 15-line limit. If worker output exceeds the sealed output bound, capture fails explicitly naming the bound rather than reporting an ambiguous JSON syntax error. If the requested answer cannot fit within the summary allowance or cannot be grounded, the summary must state the specific limitation. A longer artifact requires authorization to write it; a shortened answer or validation log does not satisfy an unmet length requirement.</p>
 <p>Documenter exposes no arbitrary shell commands; it relies on declared verifier checks or grounded source reads. In validation reporting, unexecuted checks must never be recorded as failures (<code>passed: false</code> applies only to checks that actually ran and failed). Unexecuted checks or execution limitations belong in the <code>summary</code> deliverable as stated limitations.</p>
 <p>The Scout recipe instructs the model to return structured findings with source paths and exact lines checked against live reads. A search hit alone does not establish a citation. On repair, unsupported findings should be removed rather than moved to convenient range endpoints. Inline delivery and schema conformance do not establish semantic citation accuracy.</p>

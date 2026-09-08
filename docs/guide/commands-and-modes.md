@@ -189,7 +189,6 @@ The registry table below lists the available interactive slash commands. On a ba
 | `/panes` | `/panes show <run-or-agent> \| /panes open <preset-or-argv> \| /panes zoom [target] \| /panes close [target]` | Inspect the pane layer, watch a live run in a pane, or open a utility pane (`files`, `logs`, `shell`, `files --once`, or a command); a second open focuses the pane already there |
 | `/files` | `/files [open\|close\|pick]` | Toggle the files pane docked below the session; picks land in the composer as `@` mentions. See [Panes and the Files Pane](panes-and-files.md) |
 | `/thinking` | `/thinking [level]` | Set the chat thinking level, or open Settings → Orchestrator |
-| `/output` | `/output [verbosity]` | Set transcript detail (minimal, default, verbose), or open Settings → Terminal |
 | `/model` | `/model [pattern]` | Open model selector or set a model |
 | `/settings` | `/settings [chat\|fleet\|targets\|context\|safety\|interface\|integrations] [group]` | Open interactive settings, optionally at a durable area and UI group |
 | `/resume` | `/resume` | Resume a past session |
@@ -344,7 +343,7 @@ text is still there to correct, rather than having to be retyped. Retired spelli
 
 The accepted spelling of every command is the table under [Interactive Slash Commands](#interactive-slash-commands); there is exactly one per operation, and nothing else is parsed as a command.
 
-Configuration lives in one place: the `/settings` overlay. `/settings <section>` reaches every section directly. `/thinking <level>`, `/output <verbosity>`, and `/model <pattern>` stay as quick setters that apply without opening anything.
+Configuration lives in one place: the `/settings` overlay. `/settings <section>` reaches every section directly. `/thinking <level>` and `/model <pattern>` stay as quick setters that apply without opening anything.
 
 Settings → Targets presents an operational console table (`HEALTH`, `ID`, `ROLES`, `RUNTIME`, `LATENCY`) with an in-place action/detail drawer for URL, default model, last probe error, and reachability. `Enter` opens actions for `Use` (switches active chat target and rebases model), `Connect` (runs the API-key or OAuth flow then probes), `Probe`, and `Remove` (with preflight analysis of affected routes/profiles). Probing runs live when the overlay opens or when explicitly requested. Target creation is initiated via `clio-coder targets add`.
 
@@ -357,13 +356,7 @@ or `◇ codex (acp) · run 7hq2ab` for ACP peers), the worker's prose down a rai
 one coalesced line of tool names, and a one-line footer carrying the outcome glyph,
 token count, duration, and contract status (such as `└ ✓ ok · 8.4k tok · 18s · contract unmeasured`),
 with the failure reason printed on the rail above the footer when a run fails.
-Runs the model itself asked for through the dispatch tool render as folded `◆`
-cards under the spawning tool segment; operator-typed runs are `◇` and open.
-The footer chip in the status line splits them (such as `◇1 ◆3`). `Alt+O` toggles
-the newest foldable item (tool call or worker block), while `Ctrl+Alt+O` or
-`Alt+Shift+O` toggles every one. Memory workers on the background target never
-appear as transcript blocks. A run that fails over keeps one block and gains an
-`↻ failed over → attempt 2 on node-b/example-coder-model` line inside it.
+Model-launched workers use `◆` and operator-launched workers use `◇`; both follow the same Output style. Standard shows a short reported summary, Detailed adds bounded activity, and Compact keeps identity and outcome. The footer shows the active worker count alongside the main agent's phase. Use `/view transcript` or `/view dispatch:<runId>` for full available details. Memory workers do not appear as transcript blocks. A failover keeps one block with an attempt annotation.
 
 That block is the only place a `/run` answer goes. The main agent is not told
 about it, which is what makes a side run a side run; asked about the answer, it
@@ -483,11 +476,7 @@ editor reserves and can be rebound through `settings.yaml.keybindings`.
 | `Alt+B` | Open the composite session and operator task board (`/tasks`). Approved application-boundary override of editor word-back. |
 | `Alt+D` | Open the settled interview decision board (`/decisions`). Approved application-boundary override of editor word-delete. |
 | `Alt+S` / `Ctrl+Alt+B` | Convert an active attached dispatch to a detached background batch. |
-| `Alt+O` | Toggle the newest tool call or worker block between collapsed subline and full body. |
-| `Ctrl+Alt+O` / `Alt+Shift+O` | Toggle all tool calls and worker blocks between collapsed sublines and full bodies. |
-| `Alt+P` | Toggle streaming partial tool output in expanded tool bodies. |
-| `Alt+R` | Toggle the latest thinking block between hidden marker and full body. |
-| `Ctrl+Alt+R` / `Alt+Shift+R` | Toggle all thinking blocks between hidden markers and full bodies. |
+| `Alt+O` | Cycle Output style: Compact, Standard, Detailed. Session only; save a default in `/settings interface`. |
 | `Alt+G` | Open the current input in an external editor. |
 | `Alt+X` | Dismiss footer notifications. |
 | `Ctrl+G`, then a letter | Portable leader fallback for Alt-letter actions. |
@@ -757,17 +746,29 @@ model-free.
 `outline`, `deps`, and `dependents` resolve an exact indexed path or a unique
 substring match.
 
-## Reasoning and Live Thinking Controls
+## Output styles
 
-Clio Coder features direct, interactive controls for model reasoning and thinking streams:
+**Alt+O** cycles **Compact → Standard → Detailed → Compact**. Standard is the default, so the first press reveals Detailed. The current style appears in the footer. Cycling applies immediately to the current session, including streaming output and history. Save a preferred startup style through **/settings interface → Output style → Apply and save globally**, or `clio-coder configure --section panes`.
 
-- **Thinking Level (`Shift+Tab`):** Allows operators to cycle through available thinking configurations. This is useful for dialing model reasoning budgets up or down in real time.
-- **Thinking Blocks Toggle (`Alt+R`):** Toggles the latest assistant thinking block between a compact, single-line folded marker and an expanded, full-body view.
-- **All Thinking (`Ctrl+Alt+R` / `Alt+Shift+R`):** Toggles every thinking block in the transcript.
-- **Tool Body Toggle (`Alt+O`) / All Tools (`Ctrl+Alt+O` / `Alt+Shift+O`):** Expand the latest tool or every tool body. The single-target key takes the newest foldable thing of either kind, so a worker card that just landed opens before the tool call above it; exactly one surface advertises the chord at a time.
-- **Live Tool Output (`Alt+P`):** Pause or resume cumulative partial tool output in expanded live tool bodies; the tool still executes.
-- **Live Streaming:** During active assistant turns, thinking increments stream live into the chat panel down a rail-prefixed segment. Reasoning totals marked `≈` are approximations from visible text; provider-reported totals are shown without that marker. Neither implies complete or cryptographically verified hidden reasoning.
-- **Thinking Replay:** When continuing a conversation, prior thinking is preserved and replayed in the history according to target-specific rules.
+| Content | Compact | Standard | Detailed |
+| --- | --- | --- | --- |
+| Answers and user messages | Complete | Complete | Complete |
+| Supplied reasoning | Marker | 3 rows | 12 rows |
+| Reads and searches | Consecutive successful observations grouped | Action and outcome | 8 result rows |
+| File changes | Paths and change facts | 8 diff rows | 20 diff rows |
+| Agent shell commands | Command and outcome | Command and outcome | 12 output rows |
+| Your `!` / `!!` shell commands | 3 output rows | 6 output rows | 12 output rows |
+| Workers | Identity, execution and validation outcome | 3 summary rows | 8 summary rows and bounded tool activity |
+| Failures and refusals | Actionable reason, up to 4 rows | Actionable reason, up to 4 rows | Up to 12 rows |
+| Turn receipt | None | Completion and available duration | Usage and model-call facts |
+
+Preview budgets count terminal rows **after wrapping**, including the `/view` overflow hint, and shrink on short terminals. Reasoning previews retain the newest text when streaming stops. Detailed remains bounded: a successful `cat` or file read cannot fill the transcript with the entire file.
+
+Use **/view transcript** to select full available reasoning, tool arguments/results, local shell output, or worker details. Search the list, press Enter to inspect, and Escape to return. Offloaded tool and dispatch output remains available in the other `/view` categories; missing or truncated captured content is identified. Inspection applies secret redaction, and `!!` output remains excluded from model context.
+
+Output style changes presentation only. **Shift+Tab** still changes the model's thinking effort. It does not reveal unavailable reasoning; Clio shows only reasoning supplied by the provider. The previous Alt+R, Alt+P, and expand-all rendering shortcuts are retired. `/output` now explains how to reach Alt+O and Settings. Existing `minimal`, `default`, and `verbose` preferences map to `compact`, `standard`, and `detailed` without rewriting other preferences.
+
+The footer owns live activity. Transcript actions have static running or outcome markers and update in place. Background workers add a count without replacing the main agent's current phase; a completed worker cannot clear a sibling's active state. Approval and user-input waits do not spin. Failed and cancelled turns retain their actual outcome, and an elapsed wait is described as silence rather than proof that a process is stuck. A worker's successful execution remains separate from its validation result.
 
 ## TUI Surface Refinements
 
@@ -775,7 +776,7 @@ The Clio TUI has been enhanced to maximize readability, operational focus, and c
 
 - **Adaptive Welcome Launchpad:** Before the first prompt, renders a compact launchpad with bold CAPS section tags (`WORKSPACE`, `ROUTE`, `NEXT`), honest readiness indicators, and context-sensitive next actions. Upon first prompt submission, it deliberately collapses into a single-line session header (`>C_ Clio Coder vX.Y.Z · <workspace · git branch> · <target·model · ready> · ctx ready · type a task`) so the conversation transcript owns the viewport.
 - **Unmistakable Clio Composer:** The input editor features an explicit left section tag reflecting current prompt semantics (`MESSAGE` while idle, `FOLLOW-UP` while Clio runs, and orange `STEER` when Enter steers in-flight execution). Includes the dim placeholder `Ask Clio…  / for commands` and lower-rail hint `Enter send · Shift+Enter newline` at wider widths.
-- **Progressively Disclosed Footer:** The compact footer uses a quiet two-zone status layout that suppresses idle decoration (`tools none`, `◌ idle`, and default-output tags). Line 1 displays workspace location, git branch/dirty state, and active phase only when meaningful; Line 2 displays the context window gauge and best current/last-turn receipt. `Alt+U` toggles the expanded dashboard, which orders information by operational urgency (Activity, Context, Session, Workspace).
+- **Progressively Disclosed Footer:** The compact footer uses a quiet two-zone status layout that suppresses idle decoration (`tools none`, `◌ idle`, and duplicate turn receipts). Line 1 displays workspace location, git branch/dirty state, and active phase only when meaningful; Line 2 displays the context window gauge, current Output style, and session cost. `Alt+U` toggles the expanded dashboard, which orders information by operational urgency (Activity, Context, Session, Workspace).
 - **Footer Notification Degradation Ladder:** The footer notification badge reserves the severity head (`glyph count noun`) and `[Alt+X] dismiss` tail first, allocating remaining width to an ellipsized message body. Under narrow terminal constraints, it degrades cleanly down the ladder without clipping action keys.
 - **Grouped Slash Command Palette:** Typing `/` opens an autocomplete command palette grouped by operational category (`Run`, `Inspect`, `Configure`, `Sessions`) with compact argument hints. Every suggestion is the command's one canonical spelling.
 - **Voice-First Transcript & Receipts:** User (`› `) and assistant (`✦ `) prose are formatted with a two-cell hanging indent, ensuring wrapped continuation lines remain visually tied to their voice prefix. Tool ledgers maintain full terminal width. Completed turn receipts honor output verbosity (`minimal` none, `default` compact dim `turn · in N · out M`, `verbose` full receipt with call counts, cache reads/writes, reasoning provenance, and verification caveats).
@@ -822,7 +823,7 @@ The detail pane displays structured descriptions, usage, or state metadata using
 ### Responsive Width Adaptation
 
 All TUI overlays fluidly adapt to narrow terminals down to 40 columns:
-- Split overlays such as `/view` gracefully fall back to a single-pane presentation with `[Tab]` switching between list and content panes.
+- `/view` falls back to one pane on narrow terminals. Type to filter, use Enter to read, Escape to return to the list, and Escape again to close. Ctrl+U clears the filter; long text wraps and scrolls. Tab also switches panes.
 - Settings provides a drill-down navigation stack below 72 columns (sections → rows → details) with breadcrumbs and `Esc` backtracking.
 - Text content and detail descriptions wrap cleanly without line truncation.
 

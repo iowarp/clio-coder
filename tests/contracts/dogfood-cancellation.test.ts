@@ -233,7 +233,7 @@ function fixture(initialMode: WireMode) {
 	context.bus.on(BusChannels.RunAborted, (event) => {
 		audit.push(event);
 	});
-	const panel = createChatPanel({ getOutputVerbosity: () => "verbose" });
+	const panel = createChatPanel({ getOutputStyle: () => "detailed" });
 	const loop = createChatLoop({
 		getSettings: () => settings,
 		providers: context.getContract<ProvidersContract>("providers") as ProvidersContract,
@@ -326,7 +326,7 @@ for (const mode of ["partial", "thinking", "empty"] as const) {
 			match(live, /cancelled/iu);
 			doesNotMatch(live, /LiteLLM route|\/model/u);
 
-			const replay = createChatPanel({ getOutputVerbosity: () => "verbose" });
+			const replay = createChatPanel({ getOutputStyle: () => "detailed" });
 			rehydrateChatPanelFromTurns(replay, f.entries());
 			const resumedLines = replay.render(120);
 			const resumed = resumedLines.map(stripTerminalSequences).join("\n");

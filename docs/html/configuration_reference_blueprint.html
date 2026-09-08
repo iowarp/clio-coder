@@ -30,7 +30,7 @@
       </div>
       <div class="header-right">
         <a class="back-btn" href="index.html">← Index</a>
-        <span class="version-badge">v0.4.2</span>
+        <span class="version-badge">v0.4.6</span>
       </div>
     </header>
     <div class="page-layout-grid reference-layout">
@@ -62,8 +62,8 @@
 </thead>
 <tbody><tr>
 <td><code>chat.maxOutputTokens</code></td>
-<td><code>32768</code></td>
-<td>Global output-token budget requested on every chat turn (integer &gt;= 0, <code>0</code> means per-model caps only); clamped to the model&#39;s max-output cap and remaining context window; applies next turn.</td>
+<td><code>0</code></td>
+<td>Global output-token budget requested on every chat turn (integer &gt;= 0, <code>0</code> means per-model caps only); clamped to the model&#39;s max-output cap and remaining context window, with the product&#39;s 32,768-token ceiling used when the model cap is unknown; applies next turn.</td>
 <td>session override (<code>/settings</code> apply-this-session) &gt; <code>.clio-coder/settings.local.yaml</code> &gt; <code>.clio-coder/settings.yaml</code> &gt; user settings.yaml &gt; default</td>
 </tr>
 <tr>
@@ -160,6 +160,12 @@
 <td><code>context.compaction.threshold</code></td>
 <td><code>0.8</code></td>
 <td>Context pressure (estimated tokens over the context window, 0 through 1) at which eviction and then LLM summary compaction run; applies next turn.</td>
+<td>session override (<code>/settings</code> apply-this-session) &gt; <code>.clio-coder/settings.local.yaml</code> &gt; <code>.clio-coder/settings.yaml</code> &gt; user settings.yaml &gt; default</td>
+</tr>
+<tr>
+<td><code>context.toolResultMaxBytes</code></td>
+<td><code>65536</code></td>
+<td>Maximum bytes returned from one tool result before the complete text spills to the session scratch file (integer &gt;= 4096); applies to the next tool result. The unchanged <code>safety.limits.observationBytesPerTurn</code> default is 196608 bytes, so three full-size results consume the shared pool and a fourth finds it filled.</td>
 <td>session override (<code>/settings</code> apply-this-session) &gt; <code>.clio-coder/settings.local.yaml</code> &gt; <code>.clio-coder/settings.yaml</code> &gt; user settings.yaml &gt; default</td>
 </tr>
 <tr>
@@ -656,9 +662,9 @@
 </tr>
 <tr>
 <td><code>interface.outputDetail</code></td>
-<td><code>default</code></td>
-<td>Transcript detail level: <code>minimal</code>, <code>default</code>, <code>verbose</code>; applies next turn.</td>
-<td>session override (<code>/output</code>, <code>/settings</code> apply-this-session) &gt; <code>.clio-coder/settings.local.yaml</code> &gt; <code>.clio-coder/settings.yaml</code> &gt; user settings.yaml &gt; default</td>
+<td><code>standard</code></td>
+<td>Output style: <code>compact</code>, <code>standard</code>, <code>detailed</code>; applies immediately. Legacy <code>minimal</code>/<code>default</code>/<code>verbose</code> values are accepted.</td>
+<td>session override (Alt+O, <code>/settings</code> apply-this-session) &gt; <code>.clio-coder/settings.local.yaml</code> &gt; <code>.clio-coder/settings.yaml</code> &gt; user settings.yaml &gt; default</td>
 </tr>
 <tr>
 <td><code>interface.panes.enabled</code></td>
@@ -955,6 +961,36 @@
 <td></td>
 </tr>
 <tr>
+<td><code>targets[].litellm.request.numRetries</code></td>
+<td></td>
+<td>Optional LiteLLM router retry override sent as <code>x-litellm-num-retries</code> (integer &gt;= 0); use <code>0</code> for deterministic physical routes. The OpenAI SDK and Clio interactive transient-retry layers remain disabled for LiteLLM failures.</td>
+<td></td>
+</tr>
+<tr>
+<td><code>targets[].litellm.request.sendSessionId</code></td>
+<td><code>true</code></td>
+<td>Whether Clio forwards its stable session id as <code>x-litellm-session-id</code> (boolean); applies when the next LiteLLM agent runtime is created.</td>
+<td></td>
+</tr>
+<tr>
+<td><code>targets[].litellm.request.streamTimeoutSeconds</code></td>
+<td></td>
+<td>Optional LiteLLM streaming timeout override sent as <code>x-litellm-stream-timeout</code> (number from 0.001 through 86400); omit it to keep gateway policy.</td>
+<td></td>
+</tr>
+<tr>
+<td><code>targets[].litellm.request.tags</code></td>
+<td><code>[clio-coder]</code></td>
+<td>Additional LiteLLM request tags (list of non-empty strings without commas); Clio always adds <code>clio-coder</code>.</td>
+<td></td>
+</tr>
+<tr>
+<td><code>targets[].litellm.request.timeoutSeconds</code></td>
+<td></td>
+<td>Optional LiteLLM request/upstream timeout override sent as <code>x-litellm-timeout</code> (number from 0.001 through 86400); omit it to keep gateway policy.</td>
+<td></td>
+</tr>
+<tr>
 <td><code>targets[].maxConcurrentRequests</code></td>
 <td></td>
 <td>Explicit request-slot limit for this inference endpoint (integer &gt;= 1); overrides live slot discovery and is shared by every target on the same normalized URL; applies next turn.</td>
@@ -1039,16 +1075,16 @@
 <td></td>
 </tr>
 <tr>
-<td><code>CLIO_CODER_ANTHROPIC_CACHE_RETENTION</code></td>
-<td><code>unset</code></td>
-<td>Read per native Anthropic provider call: <code>none</code>, <code>short</code>, or <code>long</code> cache retention. Long TTL requires model compatibility; unset preserves SDK defaults.</td>
-<td>explicit call option &gt; env &gt; SDK default</td>
-</tr>
-<tr>
 <td><code>CLIO_CODER_ALLOW_EXTERNAL_FULL_ACCESS</code></td>
 <td><code>unset (disabled)</code></td>
 <td>Exactly <code>1</code> lets a <code>full-auto</code> dispatch to the claude-code or antigravity-code subprocess runtime pass their dangerous skip-permissions flag; any other value keeps the bypass closed.</td>
 <td></td>
+</tr>
+<tr>
+<td><code>CLIO_CODER_ANTHROPIC_CACHE_RETENTION</code></td>
+<td><code>unset</code></td>
+<td>Read per native Anthropic provider call: <code>none</code>, <code>short</code>, or <code>long</code> cache retention. Long TTL requires model compatibility; unset preserves SDK defaults.</td>
+<td>explicit call option &gt; env &gt; SDK default</td>
 </tr>
 <tr>
 <td><code>CLIO_CODER_BIN_DIR</code></td>
@@ -1401,7 +1437,7 @@
 <tr>
 <td><code>CLIO_CODER_WORKER_PGID</code></td>
 <td><code>worker&#39;s own pid (null on Windows)</code></td>
-<td>Set by the SSH transport to the login shell&#39;s pid (<code>$$</code>); the worker entry announces it as the process group an abort must signal, else its own pid.</td>
+<td>Set by the SSH transport to the login shell&#39;s pid (<code>$</code>); the worker entry announces it as the process group an abort must signal, else its own pid.</td>
 <td></td>
 </tr>
 <tr>
@@ -1502,7 +1538,7 @@
 </tr>
 <tr>
 <td><code>NODE_COMPILE_CACHE</code></td>
-<td><code>unset (Clio uses </code>&lt;cache&gt;/v8-compile-cache<code> once the cache root exists)</code></td>
+<td><code>unset (Clio uses </code><cache>/v8-compile-cache<code> once the cache root exists)</code></td>
 <td>Presence (even empty) means the operator owns the V8 compile cache: Clio calls <code>enableCompileCache()</code> with no directory and never injects its own cache into workers.</td>
 <td></td>
 </tr>
@@ -1810,8 +1846,7 @@
 <th>Controls</th>
 </tr>
 </thead>
-<tbody>
-<tr>
+<tbody><tr>
 <td><code>--agent-profile</code></td>
 <td>Save the target as a named <code>fleet.profiles</code> entry under this name (non-interactive; mutually exclusive with <code>--fleet-model</code>); <code>targets add</code> forwards the same flags.</td>
 </tr>
@@ -1829,7 +1864,7 @@
 </tr>
 <tr>
 <td><code>--api-key-env</code></td>
-<td>Name of the environment variable read for the target's API key at call time, instead of storing a literal.</td>
+<td>Name of the environment variable read for the target&#39;s API key at call time, instead of storing a literal.</td>
 </tr>
 <tr>
 <td><code>--background-model</code></td>
@@ -1873,7 +1908,7 @@
 </tr>
 <tr>
 <td><code>--help</code></td>
-<td>Print the command's usage and exit.</td>
+<td>Print the command&#39;s usage and exit.</td>
 </tr>
 <tr>
 <td><code>--id</code></td>
@@ -1905,7 +1940,7 @@
 </tr>
 <tr>
 <td><code>--reasoning</code></td>
-<td>Capability override: <code>true</code> or <code>false</code> for whether the target's model supports reasoning.</td>
+<td>Capability override: <code>true</code> or <code>false</code> for whether the target&#39;s model supports reasoning.</td>
 </tr>
 <tr>
 <td><code>--remove</code></td>
@@ -1939,8 +1974,7 @@
 <td><code>-h</code></td>
 <td>Short form of --help.</td>
 </tr>
-</tbody>
-</table>
+</tbody></table>
 <h3><code>context</code></h3>
 <table>
 <thead>
@@ -4012,7 +4046,7 @@
 <tr>
 <td><code>dispatch.apply_winner.branch</code></td>
 <td>task</td>
-<td>Preserved winner branch: clio-coder/compete/&lt;group&gt;/&lt;n&gt;.</td>
+<td>Preserved winner branch: clio-coder/compete/<group>/<n>.</td>
 </tr>
 <tr>
 <td><code>dispatch.apply_winner.cwd</code></td>
@@ -4823,7 +4857,7 @@
 </tbody></table>
 <h2>Bounding constants</h2>
 <p>Compiled-in limits (context budgets, retry counts, cache sizes, timeouts) are code-owned invariants, not configuration. They live beside the code that enforces them and change only through a source change with a changelog line.</p>
-        </article>
+</article>
         <nav class="related-nav" aria-label="Adjacent references">
           <a class="nav-link-card" href="configuration_blueprint.html"><span class="nav-label">Previous</span><span class="nav-title">Configuration, Targets, Runtimes, and Auth</span></a>
           <a class="nav-link-card next" href="environment_blueprint.html"><span class="nav-label">Next</span><span class="nav-title">Environment Variables</span></a>

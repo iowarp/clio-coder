@@ -139,7 +139,12 @@ function statusText(status: AgentStatus | undefined, now: number, width: number,
 	if (!status || status.phase === "idle") return null;
 	const verb = resolveFooterVerb(status, now, width);
 	if (!verb) return status.phase.replace(/_/g, " ");
-	return status.phase === "ended" ? verb.text : `${spinnerFrame(frame)} ${verb.text}`;
+	return status.phase === "ended" ||
+		status.phase === "tool_blocked" ||
+		status.phase === "stuck" ||
+		status.tool?.toolName === "ask_user"
+		? verb.text
+		: `${spinnerFrame(frame)} ${verb.text}`;
 }
 
 /** Null before anything has been priced, so the footer shows no cost field at all. */
@@ -172,7 +177,7 @@ function renderFooterCompactLines(state: FooterDashboardRenderState, width: numb
 			state.throughput,
 			state.sessionTokens,
 			state.sessionCost,
-			state.session.outputVerbosity,
+			state.session.outputStyle,
 			state.session.leaderArmed ?? false,
 			state.session.shutdownArmed ?? false,
 		),
@@ -434,7 +439,7 @@ export function buildFooterDashboard(deps: FooterDashboardDeps): FooterDashboard
 				capabilities,
 				safety,
 				toolProfile,
-				outputVerbosity: settings?.interface.outputDetail ?? "default",
+				outputStyle: settings?.interface.outputDetail ?? "standard",
 				leaderArmed: deps.getLeaderArmed?.() ?? false,
 				shutdownArmed: deps.getShutdownArmed?.() ?? false,
 				memoryIntervention: taskMemory

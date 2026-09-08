@@ -30,7 +30,7 @@
       </div>
       <div class="header-right">
         <a class="back-btn" href="index.html">← Index</a>
-        <span class="version-badge">v0.4.2</span>
+        <span class="version-badge">v0.4.6</span>
       </div>
     </header>
     <div class="page-layout-grid reference-layout">
@@ -152,7 +152,7 @@
 </ul>
 <h3>21. Fold</h3>
 <ul>
-<li><strong>Definition</strong>: Collapsing an expanded tool call or worker block down to a single-line summary row. Toggled for the newest foldable item with <code>Alt+O</code> or for all items with <code>Ctrl+Alt+O</code> / <code>Alt+Shift+O</code>.</li>
+<li><strong>Definition</strong>: Presenting an action as a short summary in the current Output style. <code>Alt+O</code> cycles Compact, Standard, and Detailed. Use <code>/view transcript</code> for full available details.</li>
 <li><strong>Owning Type</strong>: <code>WorkerEntryRenderOptions</code> in <code>src/interactive/renderers/worker-entry.ts</code>.</li>
 </ul>
 <h3>22. Interop</h3>
@@ -300,7 +300,7 @@
 <li><strong>Definition</strong>: <code>sealed</code> is not <code>grounded</code>: a receipt can authenticate perfectly and describe a run that validated nothing. <code>grounded</code> is not <code>independently reviewed</code>: a host check is Clio observing the run&#39;s own declared command, not a second agent judging the result. A <code>host checks verified</code> unit on the board is folded into validation grounding and is never independent review. <code>mediated</code> and <code>enforced</code> are one state under two names, the receipt grade and the canonical id. <code>not_requested</code> is not a trust state at all; a run with no host check reads <code>no validation observed</code>. <code>completion unevidenced</code> (a mutation finished with no validation at the completion boundary) is distinct from <code>no validation observed</code> (no validation was linked anywhere in the run): the first is the finish contract&#39;s observation, the second the evidence linker&#39;s.</li>
 <li><strong>Owning Type</strong>: <code>TRUST_STATE_WORDS</code> and <code>trustVerdict</code> in <code>src/domains/evidence/trust-projection.ts</code>; the axis states in <code>TRUST_STATUS_STATES</code> in <code>src/domains/evidence/trust-status.ts</code>.</li>
 </ul>
-        </article>
+</article>
         <nav class="related-nav" aria-label="Adjacent references">
           <a class="nav-link-card" href="fleet_dispatch_blueprint.html"><span class="nav-label">Previous</span><span class="nav-title">Fleet Dispatch</span></a>
           <a class="nav-link-card next" href="lifecycle_blueprint.html"><span class="nav-label">Next</span><span class="nav-title">Installation and Lifecycle Operations</span></a>

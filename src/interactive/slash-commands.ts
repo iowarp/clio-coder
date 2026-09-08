@@ -174,8 +174,6 @@ type SlashCommandVariant =
 	| { kind: "files-usage"; reason: string }
 	| { kind: "thinking-set"; level: string }
 	| { kind: "thinking-picker" }
-	| { kind: "output-set"; verbosity: string }
-	| { kind: "output-picker" }
 	| { kind: "model" }
 	| { kind: "model-set"; pattern: string }
 	| { kind: "settings"; area?: SettingsAreaId; group?: string }
@@ -205,11 +203,6 @@ export interface RunIo {
 export type SetThinkingLevelResult =
 	| { status: "applied"; level: string; display: string }
 	| { status: "unsupported"; level: string; supported: ReadonlyArray<string> }
-	| { status: "unavailable" };
-
-export type SetOutputVerbosityResult =
-	| { status: "applied"; verbosity: string }
-	| { status: "unsupported"; verbosity: string; supported: ReadonlyArray<string> }
 	| { status: "unavailable" };
 
 /**
@@ -728,8 +721,6 @@ export interface SlashCommandContext {
 	thinkingLevelChoices?: () => ReadonlyArray<{ value: string; label: string }>;
 	openThinkingPicker?: () => void;
 	/** Apply a transcript verbosity named on the command line; refused values are reported by the caller. */
-	setOutputVerbosity?: (verbosity: string) => SetOutputVerbosityResult;
-	openOutputPicker?: () => void;
 	openModel: () => void;
 	/** Live providers contract used by `/model <pattern>` to resolve directly. */
 	providers: ProvidersContract;
@@ -1918,35 +1909,6 @@ export const BUILTIN_SLASH_COMMANDS: ReadonlyArray<BuiltinSlashCommand> = [
 		},
 	},
 	{
-		name: "output",
-		description: "Set transcript detail to minimal, default, or verbose",
-		group: "Configure",
-		kinds: ["output-set", "output-picker"],
-		args: { positionals: [{ name: "verbosity", required: false }] },
-		fromArgs(parsed) {
-			if (parsed.error) return { kind: "usage-error", command: "output", reason: parsed.error };
-			const verbosity = parsed.positionals[0];
-			return verbosity ? { kind: "output-set", verbosity } : { kind: "output-picker" };
-		},
-		handle(command, ctx) {
-			if (command.kind === "output-picker") {
-				if (ctx.openOutputPicker) ctx.openOutputPicker();
-				else ctx.notice("error", "output picker is not wired in this session");
-				return;
-			}
-			if (command.kind !== "output-set") return;
-			const result = ctx.setOutputVerbosity?.(command.verbosity) ?? { status: "unavailable" as const };
-			if (result.status === "applied") {
-				ctx.notice("success", `output detail: ${result.verbosity}`);
-			} else if (result.status === "unsupported") {
-				ctx.notice("error", `output detail "${result.verbosity}" is not one of ${result.supported.join(", ")}`);
-			} else {
-				ctx.notice("error", "output detail cannot be set right now");
-			}
-			ctx.render();
-		},
-	},
-	{
 		name: "model",
 		description: "Open model selector or set a model",
 		group: "Configure",
@@ -2199,6 +2161,13 @@ function reloadExtensionsCommand(ctx: SlashCommandContext): void {
 export function parseSlashCommand(input: string): SlashCommand {
 	const trimmed = input.trim();
 	if (trimmed.length === 0) return { kind: "empty" };
+	if (/^\/output(?:\s|$)/u.test(trimmed)) {
+		return {
+			kind: "usage-error",
+			command: "output",
+			reason: "Use Alt+O to cycle Output style, or /settings interface to save a default. Use /view for full details",
+		};
+	}
 	if (trimmed.startsWith(COMMAND_ESCAPE)) return { kind: "unknown", text: trimmed.slice(1) };
 	for (const entry of BUILTIN_SLASH_COMMANDS) {
 		const match = entry.match ? entry.match(trimmed) : matchFromSpec(entry, trimmed);
@@ -2286,7 +2255,6 @@ const COMMAND_ORDER = [
 	"help",
 	"model",
 	"thinking",
-	"output",
 	"settings",
 	"new",
 	"resume",

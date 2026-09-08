@@ -219,15 +219,37 @@ export interface RetrySettings {
 	streamStallMs: number;
 }
 
-export type OutputVerbosity = "minimal" | "default" | "verbose";
+export const OUTPUT_STYLES = ["compact", "standard", "detailed"] as const;
+export type OutputStyle = (typeof OUTPUT_STYLES)[number];
+
+/** Read older preferences without rewriting a user's settings on startup. */
+export function normalizeOutputStyle(value: unknown): OutputStyle | undefined {
+	switch (value) {
+		case "minimal":
+		case "compact":
+			return "compact";
+		case "default":
+		case "standard":
+			return "standard";
+		case "verbose":
+		case "detailed":
+			return "detailed";
+		default:
+			return undefined;
+	}
+}
+
+export function nextOutputStyle(style: OutputStyle): OutputStyle {
+	return OUTPUT_STYLES[(OUTPUT_STYLES.indexOf(style) + 1) % OUTPUT_STYLES.length] ?? "standard";
+}
 export type TuiMode = "regular" | "fullscreen";
 export type FullscreenScrollbar = "hidden" | "auto" | "always";
 export type SmoothStreaming = "off" | "auto" | "on";
 
 export interface InterfaceSettings {
 	terminalProgress: boolean;
-	/** Transcript detail: collapsed, balanced, or fully transparent. */
-	outputDetail: OutputVerbosity;
+	/** Output style: Compact, Standard, or Detailed bounded previews. */
+	outputDetail: OutputStyle;
 	/** Regular scrollback-preserving renderer or alternate-screen sticky layout. */
 	mode: TuiMode;
 	/** Fullscreen transcript scrollbar visibility. */
@@ -521,7 +543,7 @@ export const DEFAULT_SETTINGS = {
 	} as SafetySettings,
 	interface: {
 		terminalProgress: false,
-		outputDetail: "default",
+		outputDetail: "standard",
 		mode: "regular",
 		fullscreenScrollbar: "auto",
 		smoothStreaming: "auto",
@@ -659,7 +681,7 @@ safety:
     enabled: false
 
 interface:
-  outputDetail: default
+  outputDetail: standard
   smoothStreaming: auto
   mode: regular
   fullscreenScrollbar: auto

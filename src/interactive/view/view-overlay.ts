@@ -102,6 +102,8 @@ function artifactKey(artifact: ViewArtifact): string {
 
 function categoryLabel(category: ViewArtifactCategory): string {
 	switch (category) {
+		case "transcript":
+			return "Transcript details";
 		case "accountability":
 			return "Accountability";
 		case "evidence":
@@ -129,6 +131,7 @@ function categoryLabel(category: ViewArtifactCategory): string {
 
 const VIEW_ARTIFACT_CATEGORY_SET = new Set<ViewArtifactCategory>(VIEW_ARTIFACT_CATEGORIES);
 const BARE_CATEGORY_FILTERS = new Set<ViewArtifactCategory>([
+	"transcript",
 	"task-ledger",
 	"workspace",
 	"protected-artifact",
@@ -275,11 +278,8 @@ function groupedViewRows(artifacts: ReadonlyArray<ViewArtifact>): RenderedViewRo
 	const rows: RenderedViewRow[] = [];
 	for (const category of VIEW_ARTIFACT_CATEGORIES) {
 		const items = artifacts.filter((artifact) => artifact.category === category);
+		if (items.length === 0) continue;
 		rows.push({ type: "group", category });
-		if (items.length === 0) {
-			rows.push({ type: "empty", category });
-			continue;
-		}
 		for (const item of items) {
 			rows.push({ type: "item", category, item, itemIndex: artifacts.indexOf(item) });
 		}
@@ -393,11 +393,11 @@ function viewFooterHint(focus: ViewPaneFocus, canVerify: boolean, innerWidth?: n
 		const tiers =
 			focus === "list"
 				? [
-						"[↑↓] select · [type] filter · [Tab] detail · [Esc] close",
-						"[↑↓] select · [Tab] detail · [Esc] close",
-						"[↑↓] select · [Tab] detail",
+						"[↑↓] select · [type] filter · [Enter] detail · [Esc] close",
+						"[↑↓] select · [Enter] detail · [Esc] close",
+						"[↑↓] select · [Enter] detail",
 					]
-				: ["[↑↓] scroll · [Tab] list · [Esc] close", "[↑↓] scroll · [Tab] list"];
+				: ["[↑↓] scroll · [Esc] back", "[↑↓] scroll · [Tab] list"];
 		return tiers.find((tier) => visibleWidth(tier) <= budget) ?? (tiers.at(-1) as string);
 	}
 	if (focus === "list") {
@@ -405,20 +405,21 @@ function viewFooterHint(focus: ViewPaneFocus, canVerify: boolean, innerWidth?: n
 			{ key: "↑↓", verb: "select" },
 			{ key: "←→", verb: "category" },
 			{ key: "type", verb: "filter" },
-			{ key: "Tab", verb: "content" },
-			...(canVerify ? [{ key: "v", verb: "verify" }] : []),
-			{ key: "o", verb: "path" },
+			{ key: "Enter", verb: "content" },
+			{ key: "Ctrl+U", verb: "clear filter" },
 		]);
 	}
-	return buildHint([
-		{ key: "↑↓", verb: "scroll" },
-		{ key: "←→", verb: "category" },
-		{ key: "PgUp/PgDn", verb: "page" },
-		{ key: "g/G", verb: "top/bottom" },
-		{ key: "Tab", verb: "list" },
-		...(canVerify ? [{ key: "v", verb: "verify" }] : []),
-		{ key: "o", verb: "path" },
-	]);
+	return buildHint(
+		[
+			{ key: "↑↓", verb: "scroll" },
+			{ key: "←→", verb: "category" },
+			{ key: "PgUp/PgDn", verb: "page" },
+			{ key: "g/G", verb: "top/bottom" },
+			...(canVerify ? [{ key: "v", verb: "verify" }] : []),
+			{ key: "o", verb: "path" },
+		],
+		"back",
+	);
 }
 
 export class ViewOverlayView implements Component {
@@ -528,10 +529,11 @@ export class ViewOverlayView implements Component {
 		const content = this.content;
 		if (!content) return [];
 		if (content.status === "error") return content.lines.flatMap((line) => wrapTextWithAnsi(line, Math.max(1, width)));
-		if (content.format !== "markdown") return content.lines;
 		if (content.renderedLines && content.renderWidth === width) return content.renderedLines;
-		const md = new Markdown(content.lines.join("\n"), 0, 0, markdownTheme(clioTheme()));
-		const rendered = md.render(width);
+		const rendered =
+			content.format === "markdown"
+				? new Markdown(content.lines.join("\n"), 0, 0, markdownTheme(clioTheme())).render(width)
+				: content.lines.flatMap((line) => wrapTextWithAnsi(line, Math.max(1, width)));
 		content.renderWidth = width;
 		content.renderedLines = rendered;
 		return rendered;
@@ -556,6 +558,7 @@ export class ViewOverlayView implements Component {
 		}
 
 		const filtered = this.filteredArtifacts();
+		if (filtered.length === 0) return this.fixedLines([...lines, theme.fg("dim", "No matching details.")], width, height);
 		const rows = groupedViewRows(filtered);
 		const selectedRow = rows.findIndex((row) => row.type === "item" && row.itemIndex === this.selectedIndex);
 		const rowHeight = Math.max(1, height - 1);
@@ -634,7 +637,11 @@ export class ViewOverlayView implements Component {
 	}
 
 	handleInput(data: string): void {
-		if (matchesKey(data, "tab") || matchesKey(data, "shift+tab")) {
+		if (
+			matchesKey(data, "tab") ||
+			matchesKey(data, "shift+tab") ||
+			(this.focus === "list" && matchesKey(data, "enter"))
+		) {
 			this.focus = this.focus === "list" ? "content" : "list";
 			this.options.requestRender?.();
 			return;
@@ -647,21 +654,19 @@ export class ViewOverlayView implements Component {
 			this.selectCategory(1);
 			return;
 		}
-		if (data === "v") {
+		if (this.focus === "content" && data === "v") {
 			this.verifySelected();
 			return;
 		}
-		if (data === "o") {
+		if (this.focus === "content" && data === "o") {
 			this.openPathNotice();
 			return;
 		}
 		if (matchesKey(data, "esc")) {
-			if (this.focus === "list" && this.filterText.length > 0) {
-				this.filterText = "";
-				this.selectInitialFilterMatch();
-				return;
-			}
-			this.options.onClose();
+			if (this.focus === "content") {
+				this.focus = "list";
+				this.options.requestRender?.();
+			} else this.options.onClose();
 			return;
 		}
 		if (this.focus === "content") {
@@ -675,12 +680,17 @@ export class ViewOverlayView implements Component {
 
 	private handleListInput(data: string): boolean {
 		const filtered = this.filteredArtifacts();
-		if (matchesKey(data, "up") || data === "k") {
+		if (matchesKey(data, "up")) {
 			if (filtered.length > 0) this.selectIndex(this.selectedIndex - 1);
 			return true;
 		}
-		if (matchesKey(data, "down") || data === "j") {
+		if (matchesKey(data, "down")) {
 			if (filtered.length > 0) this.selectIndex(this.selectedIndex + 1);
+			return true;
+		}
+		if (matchesKey(data, "ctrl+u")) {
+			this.filterText = "";
+			this.selectInitialFilterMatch();
 			return true;
 		}
 		if (matchesKey(data, "backspace")) {

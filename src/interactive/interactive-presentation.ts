@@ -17,7 +17,7 @@ import type { ResourcesContract } from "../domains/resources/index.js";
 import { ceilChars, contentChars } from "../domains/session/context-accounting.js";
 import type { SessionContract, TaskBoardSnapshot } from "../domains/session/index.js";
 import type { UserTasksStore } from "../domains/user-tasks/store.js";
-import type { Component, TUI } from "../engine/tui.js";
+import type { Component, ScrollView, TUI } from "../engine/tui.js";
 import type { ChatLoop, ChatLoopEvent } from "./chat-loop.js";
 import { type ChatPanel, createChatPanel } from "./chat-panel.js";
 import { type CoalescingChatRenderer, createCoalescingChatRenderer } from "./chat-renderer.js";
@@ -33,7 +33,7 @@ import { createNotificationCenter, type NotificationCenter } from "./footer/noti
 import { getActiveRenderTrace } from "./interactive-shell.js";
 import type { InteractiveNoticeLevel } from "./interactive-subscriptions.js";
 import { type ClioKeybindingManager, createKeybindingManager } from "./keybinding-manager.js";
-import { buildLayout } from "./layout.js";
+import { buildLayout, preserveTranscriptScroll } from "./layout.js";
 import type { SessionTranscript } from "./session-transcript.js";
 import { createSlashCommandAutocompleteProvider } from "./slash-autocomplete.js";
 import { parseSlashCommand, type RunIo } from "./slash-commands.js";
@@ -146,6 +146,8 @@ export interface InteractivePresentation {
 	chatRenderer: CoalescingChatRenderer;
 	io: RunIo;
 	root: Component;
+	changeOutputStyle(mutation: () => void): void;
+	setLocalBashRunning(running: boolean): void;
 	getObservabilitySnapshot(): ObservabilitySnapshot;
 	/** Fold one raw chat event into the ephemeral throughput shown only while this turn is active. */
 	recordChatEvent(event: ChatLoopEvent): void;
@@ -233,11 +235,8 @@ export function createInteractivePresentation(deps: InteractivePresentationDeps)
 	});
 	const renderTrace = getActiveRenderTrace();
 	const chatPanel = factories.createChatPanel({
-		getToolExpandKey: () => {
-			const first = keybindings.getKeys("clio-coder.tool.expand")[0];
-			return typeof first === "string" && first.length > 0 ? first : undefined;
-		},
-		getOutputVerbosity: () => deps.getSettings?.().interface.outputDetail ?? "default",
+		getOutputStyle: () => deps.getSettings?.().interface.outputDetail ?? "standard",
+		getTerminalRows: () => process.stdout.rows ?? 40,
 		...(renderTrace ? { onRenderMetrics: (metrics) => renderTrace.recordPanelRender(metrics) } : {}),
 	});
 	const followUpQueuePanel = factories.createFollowUpQueuePanel({
@@ -359,10 +358,21 @@ export function createInteractivePresentation(deps: InteractivePresentationDeps)
 		);
 	};
 
+	let localBashStartedAt: number | null = null;
 	const footerDeps: FooterDashboardDeps = {
 		providers: deps.providers,
 		...(deps.getSettings ? { getSettings: deps.getSettings } : {}),
-		getAgentStatus: () => statusController.current(),
+		getAgentStatus: () => {
+			const status = statusController.current();
+			if (localBashStartedAt === null || (status.phase !== "idle" && status.phase !== "ended")) return status;
+			return {
+				...status,
+				phase: "tool_running",
+				since: localBashStartedAt,
+				toolStartedAt: localBashStartedAt,
+				tool: { toolName: "bash", toolPreview: "local shell" },
+			};
+		},
 		getTerminalColumns: () => deps.terminal.columns,
 		getSessionTokens: () => observabilitySnapshot.session.tokens,
 		getTokenThroughput: () =>
@@ -533,6 +543,7 @@ export function createInteractivePresentation(deps: InteractivePresentationDeps)
 				},
 			}
 		: followUpQueuePanel;
+	let transcriptView: ScrollView | undefined;
 	const root = factories.buildLayout(
 		{
 			banner,
@@ -544,6 +555,9 @@ export function createInteractivePresentation(deps: InteractivePresentationDeps)
 		{
 			mode: settings.interface?.mode ?? "regular",
 			fullscreenScrollbar: settings.interface?.fullscreenScrollbar ?? "auto",
+			onTranscript: (view) => {
+				transcriptView = view;
+			},
 		},
 	);
 	deps.mount?.(root, editor);
@@ -553,7 +567,7 @@ export function createInteractivePresentation(deps: InteractivePresentationDeps)
 		deps.clearScheduledInterval ??
 		((handle: PresentationTickerHandle): void => clearInterval(handle as ReturnType<typeof setInterval>));
 	const footerTicker = scheduleInterval(() => {
-		const statusActive = statusController.current().phase !== "idle";
+		const statusActive = statusController.current().phase !== "idle" || localBashStartedAt !== null;
 		if (!deps.chat.isStreaming() && !statusActive && !footer.isExpanded()) return;
 		footer.refresh();
 		requestRender();
@@ -618,6 +632,13 @@ export function createInteractivePresentation(deps: InteractivePresentationDeps)
 		chatRenderer,
 		io,
 		root,
+		setLocalBashRunning(running) {
+			localBashStartedAt = running ? Date.now() : null;
+			footer.refresh();
+			requestRender();
+		},
+		changeOutputStyle: (mutation) =>
+			chatRenderer.mutate(() => preserveTranscriptScroll(transcriptView, deps.terminal.columns, mutation), "output-style"),
 		getObservabilitySnapshot: () => observabilitySnapshot,
 		recordChatEvent,
 		recordToolStart: (toolCallId, toolName) => {

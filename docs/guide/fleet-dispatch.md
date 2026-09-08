@@ -841,12 +841,7 @@ hard block.
   and a one-line receipt footer showing the outcome glyph, token count, duration,
   and contract status (such as `└ ✓ ok · 8.4k tok · 18s · contract unmeasured`),
   with the failure reason printed on the rail above the footer when a run fails.
-- Runs the model itself asked for through the dispatch tool (identified by
-  parentToolCallId) render as folded `◆` cards under the spawning tool segment;
-  operator-typed runs are `◇` and open. The fold chord uses the `clio-coder.tool.expand`
-  keybinding (`Alt+O`), which toggles the newest foldable item of either kind
-  (tool call or worker block). `Ctrl+Alt+O` or `Alt+Shift+O` toggles every tool
-  call and worker block at once.
+- Model-launched workers use `◆`; operator-launched workers use `◇`. Both follow the current Output style: Compact identity/outcome, Standard short summary, Detailed bounded activity and a larger summary. `Alt+O` cycles styles for the session. `/view transcript` and `/view dispatch:<runId>` expose full available details. Execution success and validation quality remain separate facts.
 - Sharing: nothing a worker produced enters the main model's context unless
   `--share` was passed or the operator runs `/share [runId]`. What enters is a
   bounded note of the shape `[worker result] <agent> · run <id> · <outcome> · shared by the operator`

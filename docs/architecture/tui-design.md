@@ -9,6 +9,32 @@ The governing principle: **the user reads state from color, structure from frame
 
 ---
 
+## Output styles
+
+**Alt+O** cycles **Compact → Standard → Detailed → Compact**. Standard is the default, so the first press reveals Detailed. The current style appears in the footer. Cycling applies immediately to the current session, including streaming output and history. Save a preferred startup style through **/settings interface → Output style → Apply and save globally**, or `clio-coder configure --section panes`.
+
+| Content | Compact | Standard | Detailed |
+| --- | --- | --- | --- |
+| Answers and user messages | Complete | Complete | Complete |
+| Supplied reasoning | Marker | 3 rows | 12 rows |
+| Reads and searches | Consecutive successful observations grouped | Action and outcome | 8 result rows |
+| File changes | Paths and change facts | 8 diff rows | 20 diff rows |
+| Agent shell commands | Command and outcome | Command and outcome | 12 output rows |
+| Your `!` / `!!` shell commands | 3 output rows | 6 output rows | 12 output rows |
+| Workers | Identity, execution and validation outcome | 3 summary rows | 8 summary rows and bounded tool activity |
+| Failures and refusals | Actionable reason, up to 4 rows | Actionable reason, up to 4 rows | Up to 12 rows |
+| Turn receipt | None | Completion and available duration | Usage and model-call facts |
+
+Preview budgets count terminal rows **after wrapping**, including the `/view` overflow hint, and shrink on short terminals. Reasoning previews retain the newest text when streaming stops. Detailed remains bounded: a successful `cat` or file read cannot fill the transcript with the entire file.
+
+Use **/view transcript** to select full available reasoning, tool arguments/results, local shell output, or worker details. Search the list, press Enter to inspect, and Escape to return. Offloaded tool and dispatch output remains available in the other `/view` categories; missing or truncated captured content is identified. Inspection applies secret redaction, and `!!` output remains excluded from model context.
+
+Output style changes presentation only. **Shift+Tab** still changes the model's thinking effort. It does not reveal unavailable reasoning; Clio shows only reasoning supplied by the provider. The previous Alt+R, Alt+P, and expand-all rendering shortcuts are retired. `/output` now explains how to reach Alt+O and Settings. Existing `minimal`, `default`, and `verbose` preferences map to `compact`, `standard`, and `detailed` without rewriting other preferences.
+
+The footer owns live activity. Transcript actions have static running or outcome markers and update in place. Background workers add a count without replacing the main agent's current phase; a completed worker cannot clear a sibling's active state. Approval and user-input waits do not spin. Failed and cancelled turns retain their actual outcome, and an elapsed wait is described as silence rather than proof that a process is stuck. A worker's successful execution remains separate from its validation result.
+
+---
+
 ## 1. Color System
 
 All color styling is defined in [src/interactive/theme/tokens.ts](../../src/interactive/theme/tokens.ts). No raw SGR sequences, `38;2;`/`38;5;` ANSI escape fragments, or hardcoded hex colors are allowed outside this theme module.
@@ -22,7 +48,7 @@ All color styling is defined in [src/interactive/theme/tokens.ts](../../src/inte
 | `action` | `rgb(255, 126, 41)` (Orange) | Active autonomous operations: dispatching phase pills, active fleet badges, running fleet indicators, running connect/probe indicators, and user-steering queues. |
 | `success` | `rgb(87, 227, 137)` (Green) | Positive outcomes: success indicators (`✓`), ok health status, clean git trees, and output-token count updates. |
 | `warning` | `rgb(255, 180, 84)` (Amber) | Real warnings only: stale data, dirty trees, retry status, blocked tools, and truncation. |
-| `error` | `rgb(255, 92, 102)` (Red) | Failures: error indicators (`✗`), error rails, stuck states, and error message text. |
+| `error` | `rgb(255, 92, 102)` (Red) | Failures: error indicators (`✗`), error rails, failed outcomes, and error message text. |
 | `info` | `rgb(91, 168, 255)` (Blue) | Informational messages, notices, and system-prompt meters. |
 | `reason` | `rgb(157, 140, 255)` (Purple) | Reasoning-related status: thinking phases, thinking rails, reasoning-token metrics, and context compacting. |
 | `dim` | `rgb(106, 122, 133)` | Scaffolding elements: separators, key names, keyboard shortcut hints, durations, and timestamps. |
@@ -191,9 +217,9 @@ Interactive startup uses one terminal lease across both boot stages. Stage 0 own
 
 ### 5.3 Progressively Disclosed Footer
 
-- **Compact Mode (Quiet Idle)**: Two always-on lines that eliminate idle telemetry noise (suppresses `tools none`, `◌ idle`, and default-output tags):
+- **Compact Mode (Quiet Idle)**: Two always-on lines that eliminate idle telemetry noise (suppresses `tools none`, `◌ idle`, and duplicate turn receipts):
   - **Line 1 (Workspace & Readiness)**: CWD path, git branch/dirty state, and active phase pill only when meaningful.
-  - **Line 2 (Context & Receipt)**: Context window meter and the best current/last-turn receipt.
+  - **Line 2 (Context & Style)**: Context window meter, Output style, and session cost.
 - **Expanded Mode (`Alt+U`)**: Four responsive sections ordered by operational urgency rather than a static telemetry grid:
   1. `Activity`: Live agent phase, active workers, running tool calls.
   2. `Context`: Context window gauge, breakdown, token headroom.
@@ -210,15 +236,15 @@ State is signaled through the status pill in the footer and matches the followin
 |---|---|---|---|
 | idle | Quiet (phase omitted; line 1 shows workspace, line 2 shows context/receipt) | None; last-turn telemetry on line 2 | No |
 | preparing / waiting | spinner + `waiting` (info) | None | No |
-| thinking | spinner + `thinking` (reason) | Dim `Thinking (N tokens)…` marker | No |
+| thinking | spinner + `thinking` (reason) | Bounded supplied reasoning | No |
 | writing | spinner + `writing` (accent) | Streaming markdown text | No |
-| tool running | spinner + `tool <name>` (accent) | `▸` tool execution ledger line | No |
+| tool running | spinner + `Running <name>` (accent) | `▸` tool execution ledger line | No |
 | blocked | `⏸ blocked` (warning) | Permission prompt surface | No |
 | retrying | `↻ retry 2/5` (warning) | Dim retry details line | No |
 | compacting | spinner + `compacting` (reason) | None | No |
-| dispatching / fleet live | spinner + `dispatch` (action) | Task island status updates | Yes |
-| stuck | `⚠ stuck 12s` (error) | Inline watchdog warning | No |
-| done | `✓ done` (success), then quiet telemetry | Settled transcript blocks | No |
+| dispatching / fleet live | Main phase plus worker count | Task island status updates | Yes |
+| prolonged silence | `⚠ No output · 12s` (warning) | No duplicate status | No |
+| ended | Ready, Failed, Cancelled, or Output limit | Settled transcript blocks | No |
 
 ---
 
@@ -230,27 +256,18 @@ State is signaled through the status pill in the footer and matches the followin
 - **Two-Cell Hanging Indent**: User and assistant prose are rendered with a fixed two-cell gutter. The first line begins with the turn prefix (`› ` or `✦ `), while all wrapped continuation lines indent by two spaces (`PROSE_GUTTER = "  "`), keeping multiline text visibly attached to its voice glyph.
 
 ### 6.2 Thinking Blocks
-Drawn as a folded dim marker (`Thinking (N tokens)…` or `Thinking…`), which expands into a body using the `reason` color vertical `│` rail. Cap of 12 lines.
+
+Supplied reasoning stays in stream order on the `reason` color rail. Compact shows a historical marker; Standard and Detailed show the bounded tail defined in [Output styles](#output-styles). The footer alone reports current activity.
 
 ### 6.3 Tool Ledger
-Every tool call owns one stable transcript block for its complete lifecycle. Streamed
-`toolcall_*` message updates first expose the call as `forming call`, the completed argument block
-becomes `ready`, `tool_execution_start` changes the same row to `running`, and cumulative
-`tool_execution_update` results replace the live body until `tool_execution_end` settles it. Rapid
-tool updates are coalesced to terminal frame rate; settlement always renders immediately.
 
-The collapsed form is one composed ledger line:
+Each call owns one stable action row. Argument fragments stay hidden until the call is formed. A formed call becomes ready, then running, then settles with its actual outcome. Cumulative output replaces the live preview; late partials cannot overwrite a settled result. The same policy applies during replay.
+
+```text
+▸ bash(cat README.md) · exit 0 ✓ · 230ms
 ```
-▸ verb(object) · resource · facts · size ✓ · 230ms · full: path (Alt+O)
-```
-- Verb is bold `accent`, tail details are `dim`, status glyph is semantic (`✓`/`✗`), and the keyboard shortcut hint is appended at the end. Tool ledgers maintain full terminal width and bypass the prose hanging indent.
-- Expanded calls show the primary argument in the signature and every secondary argument as a typed field list. Multiline argument bodies become line and byte facts, nested objects retain structured rendering, and safety-sensitive values remain redacted.
-- Running calls label `live output` and replace the cumulative partial result in place. Settled calls label `output` and show available exit status, result or observation counts, line count, displayed and total byte sizes, truncation, timeout, tool-token usage, dynamically added tools, context exclusion, and the full-output path. A blocked or aborted admission instead labels its `decision` and does not claim that the tool ran.
-- A call parked for one-shot approval replaces its running timer with `awaiting approval` and shows the already-sanitized action class, asking safety axis, and target below the row. These facts are transient UI state: approval, denial, abort, or settlement clears them, and they are never reconstructed from the session ledger.
-- The live permission frame derives its consequence tier from those typed facts and the authenticated origin. It anchors at bottom center with five rows reserved for the composer and footer, and it recomputes that anchor on resize. Each queued frame retains its own tier and requester.
-- Text and image tool results keep their text while rendering images as MIME and byte-size placeholders; base64 image data is never written to the terminal.
-- Successful `edit` and `write` calls render the bounded diff produced by the tool result. Live regular-screen and fullscreen rows color removed and added lines with the `error` and `success` tokens and emphasize changed words; `/resume` replay and `/export` keep the same numbered diff as plain text.
-- Operator `!` and `!!` bash commands use the same running and settled block as model-initiated bash. The block appears before the process starts, streams the throttled cumulative stdout/stderr tail, and settles in place while the existing `bashExecution` session entry remains the durable record. `!!` continues to exclude that record from model context and says so in the block.
+
+Successful reads and shell commands keep raw content out of Standard. Mutations show bounded diffs, and failures keep actionable context in every preset. `/view transcript` exposes full available arguments and results. Approval rows show the sanitized action and target, with no running spinner. Truncation, context exclusion, offload paths, refusal, cancellation, and missing results remain visible.
 
 ### 6.4 Editor Rail
 The right-hand label shows `model · thinking`. Thinking level colors map as: `off` (dim), `minimal`/`low` (muted), `medium`/`high` (`reason` purple), and `xhigh`/`max`/`on` (bold `reason` purple).
@@ -258,11 +275,9 @@ The right-hand label shows `model · thinking`. Thinking level colors map as: `o
 ### 6.5 Transcript Notices
 Replay and system tags (e.g. `[retry]`, `[model]`) are wrapped in `dim` brackets with a `muted` message. Retry tags use `warning` amber.
 
-### 6.6 Output Verbosity Receipts
-Turn usage receipts rendered at the bottom of completed turns respect the output verbosity configuration:
-- `minimal`: Omits the turn usage receipt entirely.
-- `default`: Renders one compact dim receipt: `turn · in <N> · out <M>`.
-- `verbose`: Renders the full receipt with model call counts (`over N calls`), cache reads/writes (`cache R/W`), reasoning tokens with provenance (`reasoning N provider` or `reasoning ≈N estimated`), and the verification caveat (`· reasoning text is a UI excerpt, not a verification`).
+### 6.6 Output Style Receipts
+
+Compact omits the separate turn receipt. Standard shows a small completion line with available duration. Detailed includes model calls, input/output tokens, cache usage, and supplied reasoning usage with provenance. Reasoning text is an excerpt, not verification. The quiet footer keeps the style and session cost visible; detailed telemetry is available through Detailed or the expanded dashboard.
 
 ### 6.7 Code Ink (Syntax Highlighting)
 

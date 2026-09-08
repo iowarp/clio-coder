@@ -30,7 +30,7 @@
       </div>
       <div class="header-right">
         <a class="back-btn" href="index.html">← Index</a>
-        <span class="version-badge">v0.4.2</span>
+        <span class="version-badge">v0.4.6</span>
       </div>
     </header>
     <div class="page-layout-grid reference-layout">
@@ -243,7 +243,7 @@ preserves that audit-time state.</p>
 <td><code>guide/fleet-dispatch.md</code></td>
 <td><code>src/domains/dispatch/**</code>; <code>src/domains/scheduling/**</code>; dispatch tools</td>
 <td><code>html/fleet_dispatch_blueprint.html</code></td>
-<td>Current receipts use v20, not v19. Older receipts are retired and never read as evidence. Tool expansion provenance uses <code>clio-coder.tool.expand</code>, not <code>clio.tool.expand</code>. Agent-ledger citations point into the former dispatch monolith rather than <code>dispatch-runner.ts</code>.</td>
+<td>Current receipts use v20, not v19. Older receipts are retired and never read as evidence. Output styles use <code>clio-coder.output.cycle</code>; worker previews follow the same preset regardless of origin. Agent-ledger citations point into the former dispatch monolith rather than <code>dispatch-runner.ts</code>.</td>
 </tr>
 <tr>
 <td><code>process/git-commit-provenance.md</code></td>
@@ -398,7 +398,7 @@ HTML index.</p>
 Markdown pages. The table preserves what the audit found at <code>ff56ea3e</code>; it does
 not describe outstanding Markdown debt. Every HTML blueprint now renders the
 complete corrected counterpart and identifies its Markdown source explicitly.</p>
-        </article>
+</article>
         <nav class="related-nav" aria-label="Adjacent references">
           <a class="nav-link-card" href="development_pipeline_blueprint.html"><span class="nav-label">Previous</span><span class="nav-title">Development Pipeline</span></a>
           <a class="nav-link-card next" href="documentation_blueprint.html"><span class="nav-label">Next</span><span class="nav-title">Documentation Standards and Codebase Alignment</span></a>

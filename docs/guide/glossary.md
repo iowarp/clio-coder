@@ -90,7 +90,7 @@ This document defines the 50 core architectural concepts and terminology used th
 - **Owning Type**: `WorkerShareFacts` in `src/interactive/worker-share.ts`.
 
 ### 21. Fold
-- **Definition**: Collapsing an expanded tool call or worker block down to a single-line summary row. Toggled for the newest foldable item with `Alt+O` or for all items with `Ctrl+Alt+O` / `Alt+Shift+O`.
+- **Definition**: Presenting an action as a short summary in the current Output style. `Alt+O` cycles Compact, Standard, and Detailed. Use `/view transcript` for full available details.
 - **Owning Type**: `WorkerEntryRenderOptions` in `src/interactive/renderers/worker-entry.ts`.
 
 ### 22. Interop

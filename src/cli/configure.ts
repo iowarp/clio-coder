@@ -11,7 +11,7 @@ import {
 } from "../core/config.js";
 import {
 	type AutonomyLevel,
-	type OutputVerbosity,
+	type OutputStyle,
 	type PanesSettings,
 	type SmoothStreaming,
 	THINKING_LEVELS,
@@ -1738,7 +1738,7 @@ const SECTIONS: ReadonlyArray<SectionSpec> = [
 				["Panes capability", settings.interface.panes.enabled],
 				["Startup layout", settings.interface.panes.layout],
 				["TUI mode", settings.interface.mode],
-				["Output detail", settings.interface.outputDetail],
+				["Output style", settings.interface.outputDetail],
 				["Desktop notifications", onOff(settings.interface.desktopNotifications)],
 				["Git commit attribution", onOff(settings.integrations.git.commitAttribution)],
 			];
@@ -1790,17 +1790,17 @@ const SECTIONS: ReadonlyArray<SectionSpec> = [
 				},
 			},
 			{
-				label: "Output detail",
-				hint: "minimal | default | verbose",
+				label: "Output style",
+				hint: "compact | standard | detailed",
 				run: async (io) => {
 					await askChoice(
 						io,
-						"Output detail",
-						["minimal", "default", "verbose"],
+						"Output style",
+						["compact", "standard", "detailed"],
 						readSettings().interface.outputDetail,
 						(value) => {
 							updateSettings((draft) => {
-								draft.interface.outputDetail = value as OutputVerbosity;
+								draft.interface.outputDetail = value as OutputStyle;
 							});
 						},
 					);

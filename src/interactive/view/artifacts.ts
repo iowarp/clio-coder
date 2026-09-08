@@ -44,6 +44,7 @@ import { clockLocal } from "../format-time.js";
 import { abbreviateModelId } from "../theme/index.js";
 
 export type ViewArtifactCategory =
+	| "transcript"
 	| "accountability"
 	| "evidence"
 	| "receipt"
@@ -86,6 +87,7 @@ export interface ArtifactProvider {
 }
 
 export interface ArtifactProviderDeps {
+	readTranscript?: (() => ViewArtifact[]) | undefined;
 	stateDir: string;
 	dataDir?: string | undefined;
 	dispatch?: Pick<DispatchContract, "listRuns" | "getRun"> | undefined;
@@ -94,6 +96,7 @@ export interface ArtifactProviderDeps {
 }
 
 export const VIEW_ARTIFACT_CATEGORIES: readonly ViewArtifactCategory[] = [
+	"transcript",
 	"accountability",
 	"evidence",
 	"receipt",
@@ -1560,6 +1563,7 @@ export class SafetyAuditArtifactProvider implements ArtifactProvider {
 
 export function createDefaultArtifactProviders(deps: ArtifactProviderDeps): ArtifactProvider[] {
 	return [
+		{ category: "transcript", list: async () => deps.readTranscript?.() ?? [] },
 		new AccountabilityArtifactProvider(deps),
 		new EvidenceArtifactProvider(deps),
 		new ReceiptArtifactProvider(deps),

@@ -27,6 +27,7 @@ import {
 } from "../../src/interactive/dispatch-board.js";
 import { renderToolSubline } from "../../src/interactive/renderers/tool-execution.js";
 import { renderWorkerEntryLines } from "../../src/interactive/renderers/worker-entry.js";
+import { transcriptDetail } from "../../src/interactive/transcript-detail.js";
 import { createWorkerStream } from "../../src/interactive/worker-stream.js";
 import { createMonitorTool } from "../../src/tools/monitor.js";
 import { fixtureEnvelope, fixtureReceiptDraft } from "../harness/receipt.js";
@@ -710,8 +711,8 @@ describe("dispatch quality presentation", () => {
 				stream.started({ ...IDENTITY, pid: null, assignmentId: IDENTITY.runId, attempt: 0 });
 				const worker = stream.completed(COMPLETED)?.entry;
 				ok(worker);
-				for (const folded of [true, false]) {
-					const lines = renderWorkerEntryLines(worker, 76, { folded });
+				for (const style of ["compact", "standard", "detailed"] as const) {
+					const lines = renderWorkerEntryLines(worker, 76, { detail: transcriptDetail(style) });
 					ok(plain(lines).includes(wording), plain(lines));
 					match(plain(lines), /execution ok/u);
 					ok(lines.every((line) => visibleWidth(line) <= 76));

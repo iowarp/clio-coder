@@ -1,4 +1,4 @@
-import type { OutputVerbosity } from "../../core/defaults.js";
+import type { OutputStyle } from "../../core/defaults.js";
 import { ToolNames } from "../../core/tool-names.js";
 import {
 	type CostAggregate,
@@ -14,7 +14,6 @@ import { CONTEXT_CATEGORY_TOKEN, contextCategorySwatch, renderContextMeterBar } 
 import {
 	agentDisplayLabel,
 	type DispatchBoardRow,
-	dispatchOriginPresentation,
 	dispatchRowPrefix,
 	dispatchStatusPresentation,
 } from "../dispatch-board.js";
@@ -70,7 +69,7 @@ export interface SessionFacts {
 	safety: string | null;
 	toolProfile: string | null;
 	/** Active transcript detail mode, shown in the dashboard so visibility is never implicit. */
-	outputVerbosity?: OutputVerbosity | null;
+	outputStyle?: OutputStyle | null;
 	/**
 	 * Ctrl+G armed the portable leader and is waiting for the next key. Shown
 	 * because the frame between the two keystrokes was otherwise identical to
@@ -391,7 +390,7 @@ export function compactSecondaryLine(
 	throughput: TokenThroughputSnapshot | null = null,
 	sessionTokens: UsageBreakdown | null = null,
 	sessionCost: CostAggregate | null = null,
-	outputVerbosity?: OutputVerbosity | null,
+	outputStyle?: OutputStyle | null,
 	leaderArmed = false,
 	shutdownArmed = false,
 ): string {
@@ -427,15 +426,15 @@ export function compactSecondaryLine(
 		context.used ?? undefined,
 		maxRightWidth,
 		compactMetricChipLimit(safeWidth),
-		outputVerbosity,
+		outputStyle,
 		leaderArmed,
 		shutdownArmed,
 	);
 	// At the smallest widths the context meter consumes the entire secondary
 	// row, so keep a compact mode marker on the left instead of silently hiding
 	// the active transcript setting.
-	if (outputVerbosity && outputVerbosity !== "default" && visibleWidth(right) === 0) {
-		const marker = outputVerbosity === "minimal" ? "m" : outputVerbosity === "verbose" ? "v" : "d";
+	if (outputStyle && outputStyle !== "standard" && visibleWidth(right) === 0) {
+		const marker = outputStyle === "compact" ? "C" : outputStyle === "detailed" ? "D" : "S";
 		left = `${left}${theme.fg("dim", ` out:${marker}`)}`;
 	}
 	return joinColumns(left, right, safeWidth);
@@ -541,8 +540,8 @@ export function sessionQuadrant(facts: SessionFacts, options: ExpandedQuadrantOp
 		kv("profile", facts.toolProfile),
 		kv(
 			"output",
-			facts.outputVerbosity && facts.outputVerbosity !== "default" ? facts.outputVerbosity : null,
-			facts.outputVerbosity === "verbose" ? "accent" : "muted",
+			facts.outputStyle && facts.outputStyle !== "standard" ? facts.outputStyle : null,
+			facts.outputStyle === "detailed" ? "accent" : "muted",
 		),
 		styledKv("memory", memoryValue),
 	]);
@@ -965,35 +964,41 @@ type HarnessPhasePresentation = {
 
 function shortToolLabel(status: AgentStatus, width: number): string {
 	const name = status.tool?.toolName?.trim();
-	if (name === ToolNames.AskUser) return width < 72 ? "ask" : "waiting for user";
-	if (!name || width < 72) return "tool";
+	if (name === ToolNames.AskUser) return "Needs input";
+	if (name === ToolNames.Dispatch) return "Waiting for worker";
+	if (!name || width < 72) return "Running tool";
 	const nameWidth = width >= 100 ? 18 : 12;
 	// The pill label is never padded; truncate without pad so the tool name is
 	// followed by a single space before the badge, not a column of blanks.
-	return `tool ${truncateToWidth(name, nameWidth, "…", false)}`;
+	return `Running ${truncateToWidth(name, nameWidth, "…", false)}`;
 }
 
 function harnessPhasePresentation(status: AgentStatus, width: number, now: number): HarnessPhasePresentation {
 	const ultraNarrow = width < 48;
 	switch (status.phase) {
 		case "idle":
-			return { glyph: GLYPH.queued, label: "idle", token: "muted", live: false };
+			return { glyph: GLYPH.queued, label: "Ready", token: "muted", live: false };
 		case "preparing":
-			return { glyph: GLYPH.phaseWaiting, label: "prep", token: "info", live: true };
+			return { glyph: GLYPH.phaseWaiting, label: "Preparing", token: "info", live: true };
 		case "waiting_model":
-			return { glyph: GLYPH.phaseWaiting, label: "waiting", token: "info", live: true };
+			return { glyph: GLYPH.phaseWaiting, label: "Waiting for model", token: "info", live: true };
 		case "thinking":
-			return { glyph: GLYPH.phaseThinking, label: "thinking", token: "reason", live: true };
+			return { glyph: GLYPH.phaseThinking, label: "Thinking", token: "reason", live: true };
 		case "writing":
-			return { glyph: GLYPH.phaseWriting, label: "writing", token: "accent", live: true };
+			return { glyph: GLYPH.phaseWriting, label: "Writing", token: "accent", live: true };
 		case "tool_running":
-			return { glyph: GLYPH.phaseTool, label: shortToolLabel(status, width), token: "accent", live: true };
+			return {
+				glyph: GLYPH.phaseTool,
+				label: shortToolLabel(status, width),
+				token: "accent",
+				live: status.tool?.toolName !== ToolNames.AskUser,
+			};
 		case "tool_blocked":
 			// Attention states hold a static glyph rather than spinning: the work
 			// has paused for a human, so the pill should not read as live progress.
 			// The phase fires only on PermissionRequested, so the pill names the
 			// wait for confirmation; "blocked" would contradict the ask overlay.
-			return { glyph: GLYPH.phaseBlocked, label: "confirm", token: "warning", live: false };
+			return { glyph: GLYPH.phaseBlocked, label: "Needs approval", token: "warning", live: false };
 		case "retrying": {
 			const attempt = status.retry?.attempt ?? 0;
 			const maxAttempts = status.retry?.maxAttempts ?? 0;
@@ -1005,15 +1010,26 @@ function harnessPhasePresentation(status: AgentStatus, width: number, now: numbe
 			};
 		}
 		case "compacting":
-			return { glyph: GLYPH.phaseCompact, label: "compacting", token: "reason", live: true };
+			return { glyph: GLYPH.phaseCompact, label: "Compacting context", token: "reason", live: true };
 		case "dispatching":
-			return { glyph: GLYPH.phaseDispatch, label: "dispatch", token: "action", live: true };
+			return { glyph: GLYPH.phaseDispatch, label: "Waiting for worker", token: "action", live: true };
 		case "stuck": {
-			const seconds = Math.max(0, Math.floor((now - status.since) / 1000));
-			return { glyph: GLYPH.warn, label: ultraNarrow ? "stuck" : `stuck ${seconds}s`, token: "error", live: false };
+			const seconds = Math.max(0, Math.floor((now - status.lastMeaningfulAt) / 1000));
+			return {
+				glyph: GLYPH.warn,
+				label: ultraNarrow ? "No output" : `No output · ${seconds}s`,
+				token: "warning",
+				live: false,
+			};
 		}
-		case "ended":
-			return { glyph: GLYPH.ok, label: "done", token: "success", live: false };
+		case "ended": {
+			const stop = status.summary?.stopReason;
+			if (stop === "error") return { glyph: GLYPH.error, label: "Failed", token: "error", live: false };
+			if (stop === "aborted" || stop === "cancelled")
+				return { glyph: GLYPH.cancelled, label: "Cancelled", token: "muted", live: false };
+			if (stop === "length") return { glyph: GLYPH.warn, label: "Output limit", token: "warning", live: false };
+			return { glyph: GLYPH.ok, label: "Ready", token: "success", live: false };
+		}
 	}
 }
 
@@ -1021,31 +1037,10 @@ function activeWorkerRows(rows: ReadonlyArray<DispatchBoardRow>): ReadonlyArray<
 	return rows.filter((row) => row.status === "running" || row.status === "stale" || row.status === "enqueued");
 }
 
-/**
- * The live worker count, split by who asked once more than one kind is running:
- * `◇1 ◆3` says the operator has one run of their own alongside three the model
- * started, which `fleet 4` cannot. A single kind keeps the plain count, and so
- * does a set holding a run whose origin never reached the projection, because a
- * split that cannot name every active run would report a total that is short.
- *
- * The chip keeps one color. Its token says the fleet is busy; origin is carried
- * by glyph shape, which is the same pair the board rows and the transcript
- * blocks use.
- */
+/** Background work stays a count beside the main phase. */
 function activeWorkerChip(rows: ReadonlyArray<DispatchBoardRow>): string {
-	const active = activeWorkerRows(rows);
-	const counts = new Map<string, number>();
-	for (const row of active) {
-		const glyph = dispatchOriginPresentation(row)?.glyph;
-		if (glyph === undefined) return `fleet ${active.length}`;
-		counts.set(glyph, (counts.get(glyph) ?? 0) + 1);
-	}
-	if (counts.size < 2) return `fleet ${active.length}`;
-	const order = [GLYPH.workerHuman, GLYPH.workerAgent, GLYPH.workerInternal];
-	return order
-		.filter((glyph) => counts.has(glyph))
-		.map((glyph) => `${glyph}${counts.get(glyph)}`)
-		.join(" ");
+	const count = activeWorkerRows(rows).length;
+	return `${count} worker${count === 1 ? "" : "s"}`;
 }
 
 function harnessBadge(
@@ -1066,8 +1061,8 @@ function harnessBadge(
 	return badgeText ? theme.fg("muted", badgeText) : "";
 }
 
-function outputVerbosityLabel(verbosity: OutputVerbosity): string {
-	return verbosity === "minimal" ? "min" : verbosity === "verbose" ? "verbose" : "default";
+function outputStyleLabel(verbosity: OutputStyle): string {
+	return verbosity.charAt(0).toUpperCase() + verbosity.slice(1);
 }
 
 function buildHarnessStatePill(
@@ -1112,7 +1107,6 @@ const CHIP_RANK_SHUTDOWN = -2;
 const CHIP_RANK_LEADER = -1;
 const CHIP_RANK_TOTALS = 0;
 const CHIP_RANK_DETAIL = 1;
-const CHIP_RANK_DEFERRED = 2;
 
 interface RankedChip {
 	text: string;
@@ -1156,20 +1150,17 @@ function buildMetricStrip(
 	liveInputTokens: number | null | undefined,
 	maxWidth: number,
 	maxChipsCount = 6,
-	outputVerbosity?: OutputVerbosity | null,
+	outputStyle?: OutputStyle | null,
 	leaderArmed = false,
 	shutdownArmed = false,
 ): string {
 	const safeMaxWidth = Math.max(0, Math.floor(maxWidth));
 	if (safeMaxWidth <= 0) return "";
 	const isStreaming = status.phase !== "idle" && status.phase !== "ended";
-	const meaningfulVerbosity = outputVerbosity && outputVerbosity !== "default" ? outputVerbosity : null;
-	if (!isStreaming && !lastTurn && !meaningfulVerbosity && !leaderArmed && !shutdownArmed) return "";
+	const style = outputStyle ?? "standard";
 
 	const candidates: Array<string | null> = [];
-	/** Per-turn detail that ranks below the session totals when the strip is cut. */
-	const deferred: Array<string | null> = [];
-	if (isStreaming) {
+	if (isStreaming && outputStyle === "detailed") {
 		const tps = finiteNonNegative(throughput?.tokensPerSecond);
 		const rounded = tps > 0 ? (tps >= 10 ? Math.round(tps) : Math.round(tps * 10) / 10) : null;
 		candidates.push(rounded !== null ? theme.fg("success", `${GLYPH.speed}${rounded}/s`) : null);
@@ -1186,39 +1177,7 @@ function buildMetricStrip(
 			finiteNonNegative(lastTurn?.inputTokens) ||
 			finiteNonNegative(sessionTokens?.input);
 		candidates.push(inputTokens > 0 ? theme.fg("muted", `${GLYPH.up}${formatFooterTokens(inputTokens)}`) : null);
-	} else if (lastTurn) {
-		const stop = stopReasonStyle(lastTurn.stopReason);
-		candidates.push(theme.fg(stop.token, `${stop.glyph} ${formatCompactMs(lastTurn.elapsedMs)}`));
-		candidates.push(
-			theme.fg(
-				"muted",
-				`${GLYPH.up}${formatFooterTokens(lastTurn.inputTokens)} ${GLYPH.down}${formatFooterTokens(lastTurn.outputTokens)}`,
-			),
-		);
-		candidates.push(reasoningChip(theme, lastTurn));
-		// Held back so the session totals below outrank them. The chip list is cut
-		// to `maxChipsCount` before it is measured, and with cache and tools ahead
-		// of the totals an 80-column terminal spent the whole budget on per-turn
-		// detail: the cost field disappeared from the footer at the exact moment
-		// it acquired a value, while `/cost` on the same session read `cost
-		// unknown`. Two surfaces, two answers, because of a slice.
-		deferred.push(
-			lastTurn.cacheReadTokens > 0 || lastTurn.cacheWriteTokens > 0
-				? theme.fg(
-						"dim",
-						`cache ${formatFooterTokens(lastTurn.cacheReadTokens)}/${formatFooterTokens(lastTurn.cacheWriteTokens)}`,
-					)
-				: null,
-		);
-		if (lastTurn.toolCount > 0) {
-			const label = `${lastTurn.toolCount} tool${lastTurn.toolCount === 1 ? "" : "s"}`;
-			const errors = lastTurn.toolErrorCount > 0 ? theme.fg("error", ` ${lastTurn.toolErrorCount}${GLYPH.error}`) : "";
-			deferred.push(`${theme.fg("muted", label)}${errors}`);
-		} else {
-			deferred.push(null);
-		}
 	}
-	if (meaningfulVerbosity) deferred.push(theme.fg("muted", `out ${outputVerbosityLabel(meaningfulVerbosity)}`));
 
 	const fallbackTotal = finiteNonNegative(sessionTokens?.input) + finiteNonNegative(sessionTokens?.output);
 	const cumulativeTotal = finiteNonNegative(sessionTokens?.totalTokens) || fallbackTotal;
@@ -1232,6 +1191,7 @@ function buildMetricStrip(
 
 	const chipLimit = Math.max(0, Math.floor(maxChipsCount));
 	const chips: RankedChip[] = [];
+	pushChip(chips, theme.fg("muted", outputStyleLabel(style)), CHIP_RANK_LEADER);
 	// Ranked above every measurement: the strip is cut by dropping the
 	// lowest-ranked chip, and these two are the answer to "did that key
 	// register". The quit hint outranks the leader because its window is
@@ -1245,6 +1205,5 @@ function buildMetricStrip(
 	for (const chip of candidates) pushChip(chips, chip, CHIP_RANK_DETAIL);
 	pushChip(chips, totalChip, CHIP_RANK_TOTALS);
 	pushChip(chips, costChip, CHIP_RANK_DETAIL);
-	for (const chip of deferred) pushChip(chips, chip, CHIP_RANK_DEFERRED);
 	return joinChips(theme, selectChips(theme, chips, chipLimit, safeMaxWidth));
 }

@@ -21,7 +21,7 @@ test("S3-01: live hook trust diagnostics reach the interactive transcript and un
 		resetAskUserCancellation: noop,
 		recordToolStart: noop,
 		recordToolEnd: noop,
-		setStatusLine: noop,
+
 		setLastTurnSummary: noop,
 		startTerminalProgress: noop,
 		stopTerminalProgress: noop,

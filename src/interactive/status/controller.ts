@@ -206,9 +206,6 @@ export function createStatusController(deps: StatusControllerDeps): StatusContro
 			deps.bus.on(BusChannels.PermissionResolved, () => apply({ type: "overlay_pop", overlay: "tool_blocked" }, true)),
 			deps.bus.on(BusChannels.CompactionBegin, () => apply({ type: "overlay_push", overlay: "compacting" }, true)),
 			deps.bus.on(BusChannels.CompactionEnd, () => apply({ type: "overlay_pop", overlay: "compacting" }, true)),
-			deps.bus.on(BusChannels.DispatchStarted, (payload) =>
-				apply({ type: "overlay_push", overlay: "dispatching", data: payload }, true),
-			),
 			deps.bus.on(BusChannels.DispatchProgress, (payload) => {
 				if (!isWorkerStreamEvidence(payload)) return;
 				const at = now();
@@ -216,8 +213,6 @@ export function createStatusController(deps: StatusControllerDeps): StatusContro
 				lastDispatchProgressAt = at;
 				apply({ type: "dispatch_progress" });
 			}),
-			deps.bus.on(BusChannels.DispatchCompleted, () => apply({ type: "overlay_pop", overlay: "dispatching" }, true)),
-			deps.bus.on(BusChannels.DispatchFailed, () => apply({ type: "overlay_pop", overlay: "dispatching" }, true)),
 			deps.bus.on(BusChannels.RunAborted, (payload) => {
 				scheduleAbortCeiling();
 				// Carry abort provenance into the summary; a dispatch drain and a

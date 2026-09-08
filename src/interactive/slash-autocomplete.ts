@@ -154,12 +154,7 @@ function completionGrammar(command: string, args: CommandArgsSpec): CommandArgsS
 			? {
 					positionals: spec.positionals.map((pos) => {
 						const completionSlot = COMPLETION_SLOT_MANIFEST[`${path}:pos:${pos.name}`];
-						const values =
-							command === "output" && pos.name === "verbosity"
-								? (["minimal", "default", "verbose"] as const)
-								: command === "settings" && pos.name === "area"
-									? SETTINGS_AREA_IDS
-									: undefined;
+						const values = command === "settings" && pos.name === "area" ? SETTINGS_AREA_IDS : undefined;
 						return { ...pos, ...(completionSlot ? { completionSlot } : {}), ...(values ? { values } : {}) };
 					}),
 				}

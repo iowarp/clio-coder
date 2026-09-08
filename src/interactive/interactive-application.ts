@@ -1,5 +1,6 @@
 import type { PermissionRequestedPayload } from "../core/bus-events.js";
 import type { ClioSettings } from "../core/config.js";
+import { nextOutputStyle } from "../core/defaults.js";
 import type { SafeEventBus } from "../core/event-bus.js";
 import { expandInlineFileReferencesAsync } from "../core/file-references.js";
 import type { PendingSkillRequest } from "../core/skill-activation.js";
@@ -326,11 +327,7 @@ export interface KeyBindingDeps {
 	cycleScopedModelForward: () => void;
 	cycleScopedModelBackward: () => void;
 	dismissNotifications: () => void;
-	toggleToolExpansion: () => void;
-	toggleAllToolExpansion: () => void;
-	toggleLiveToolOutput: () => void;
-	toggleThinkingExpansion: () => void;
-	toggleAllThinkingExpansion: () => void;
+	cycleOutputStyle: () => void;
 	openExternalEditor: () => void;
 	queueFollowUp: () => void;
 	interruptWithMessage: () => void;
@@ -361,17 +358,11 @@ export function resolveCtrlCAction(deps: CtrlCActionDeps): CtrlCAction {
 
 function dispatchInteractiveAction(id: ClioKeybinding, deps: KeyBindingDeps): boolean {
 	switch (id) {
+		case "clio-coder.output.cycle":
+			deps.cycleOutputStyle();
+			return true;
 		case "clio-coder.notifications.dismiss":
 			deps.dismissNotifications();
-			return true;
-		case "clio-coder.tool.expand":
-			deps.toggleToolExpansion();
-			return true;
-		case "clio-coder.tool.expandAll":
-			deps.toggleAllToolExpansion();
-			return true;
-		case "clio-coder.tool.liveOutput":
-			deps.toggleLiveToolOutput();
 			return true;
 		case "clio-coder.editor.external":
 			deps.openExternalEditor();
@@ -384,12 +375,6 @@ function dispatchInteractiveAction(id: ClioKeybinding, deps: KeyBindingDeps): bo
 			return true;
 		case "clio-coder.message.dequeue":
 			deps.restoreQueuedFollowUps();
-			return true;
-		case "clio-coder.thinking.expand":
-			deps.toggleThinkingExpansion();
-			return true;
-		case "clio-coder.thinking.expandAll":
-			deps.toggleAllThinkingExpansion();
 			return true;
 		case "clio-coder.status.toggle":
 			deps.toggleStatus();
@@ -671,8 +656,6 @@ export async function createInteractiveApplication(deps: InteractiveDeps): Promi
 		recordToolStart: (toolName, toolCallId) => presentation.recordToolStart(toolCallId, toolName),
 		recordToolEnd: (_toolName, toolCallId, isError, truncated) =>
 			presentation.recordToolEnd({ toolCallId, isError, truncated }),
-		setStatusLine: (line) => chatPanel.setStatusLine(line),
-		setLiveReasoning: (view) => chatPanel.setLiveReasoning(view),
 		setLastTurnSummary: (summary) => presentation.setLastTurnSummary(summary),
 		startTerminalProgress: () => agentProgress.start(),
 		stopTerminalProgress: () => agentProgress.stop(),
@@ -710,7 +693,6 @@ export async function createInteractiveApplication(deps: InteractiveDeps): Promi
 		chatPanel: {
 			appendReplayBlock: (...args) => chatRenderer.mutate(() => chatPanel.appendReplayBlock(...args), "slash-output"),
 			appendUser: (text, status) => chatRenderer.mutate(() => chatPanel.appendUser(text, status), "user-submit"),
-			clearFoldOverrides: () => chatRenderer.mutate(() => chatPanel.clearFoldOverrides(), "output-detail"),
 		},
 		beforeSemanticSubmit: () => chatRenderer.flush(),
 		settleVisibleFrame: (reason) => chatRenderer.flushAndCommit(reason),
@@ -788,6 +770,7 @@ export async function createInteractiveApplication(deps: InteractiveDeps): Promi
 	});
 
 	const editorSubmit = createEditorSubmitController({
+		onLocalBashRunning: presentation.setLocalBashRunning,
 		editor,
 		ui: tui,
 		io,
@@ -1065,6 +1048,16 @@ export async function createInteractiveApplication(deps: InteractiveDeps): Promi
 		dispatchAction: dispatchInteractiveAction,
 		actions: {
 			canExit: () => editor.getText().length === 0,
+			cycleOutputStyle: () => {
+				const settings = deps.getSettings?.();
+				if (!settings || !deps.commitSetting) return;
+				presentation.changeOutputStyle(() => {
+					const next = structuredClone(settings) as ClioSettings;
+					next.interface.outputDetail = nextOutputStyle(next.interface.outputDetail);
+					deps.commitSetting?.("interface.outputDetail", next, "session");
+				});
+				footer.refresh();
+			},
 			availableThinkingLevels: () => availableInteractiveThinkingLevels(deps),
 			onCycleThinking: () => deps.onCycleThinking?.(),
 			cycleScopedModelForward: () => {
@@ -1123,25 +1116,6 @@ export async function createInteractiveApplication(deps: InteractiveDeps): Promi
 		editorSubmit,
 		requestRender: () => tui.requestRender(),
 		notifications,
-		chatPanel: {
-			toggleLastToolExpanded: () => chatPanel.toggleLastToolExpanded(),
-			toggleAllToolsExpanded: () => chatPanel.toggleAllToolsExpanded(),
-			toggleLiveToolOutput: () => chatPanel.toggleLiveToolOutput(),
-			toggleLastThinking: () => {
-				let changed = false;
-				chatRenderer.mutate(() => {
-					changed = chatPanel.toggleLastThinking();
-				}, "thinking-visibility");
-				return changed;
-			},
-			toggleAllThinking: () => {
-				let changed = false;
-				chatRenderer.mutate(() => {
-					changed = chatPanel.toggleAllThinking();
-				}, "thinking-visibility");
-				return changed;
-			},
-		},
 		shutdown: {
 			stopTickers: presentation.stopTickers,
 			disposeInteractiveTickers: interactiveTickers.dispose,

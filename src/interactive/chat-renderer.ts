@@ -14,7 +14,6 @@
  */
 
 import { existsSync } from "node:fs";
-import { ToolNames } from "../core/tool-names.js";
 import { foldWorkingSet } from "../domains/context/working-set/fold.js";
 import { compactionCut } from "../domains/context/working-set/visible.js";
 import { captureSkillContext } from "../domains/session/compaction/compact.js";
@@ -52,7 +51,6 @@ import {
 } from "../engine/messages.js";
 import { wrapTextWithAnsi } from "../engine/tui.js";
 import type { AgentMessage } from "../engine/types.js";
-import { toolPresentationPolicy } from "../tools/presentation.js";
 import { toolResultPresentationText } from "../tools/result-disposition.js";
 import type { ChatLoopEvent, RetryStatusPayload } from "./chat-loop.js";
 import { isSelfExplainingAbort, toolResultSummary } from "./chat-loop-messages.js";
@@ -69,7 +67,7 @@ import {
 	type StreamPacer,
 	type StreamPacerSlice,
 } from "./stream-pacer.js";
-import { type FoldOverride, policyToolFold, resolveFold, type TranscriptDetailPolicy } from "./transcript-detail.js";
+import type { TranscriptDetailPolicy } from "./transcript-detail.js";
 import { readWorkerReceiptFactsForReplay } from "./worker-receipts.js";
 import { workerEntriesFromRunEntries } from "./worker-replay.js";
 import type { WorkerReceiptReader } from "./worker-stream.js";
@@ -804,25 +802,24 @@ function appendReplayLine(chatPanel: ChatPanel, text: string): void {
 function renderBashExecutionEntry(
 	entry: BashExecutionEntry,
 	width: number,
-	folded: boolean,
+	detail: TranscriptDetailPolicy,
 	unbounded: boolean,
 ): string[] {
 	const normalizedOutput = entry.output.replace(/\r\n/g, "\n").replace(/\r/g, "\n").replace(/\s+$/g, "");
 	return renderBashTranscriptExecution(
 		{
 			command: entry.command,
-			output: unbounded ? normalizedOutput : truncateReplayText(normalizedOutput),
+			output: normalizedOutput,
 			running: false,
 			exitCode: entry.exitCode,
 			cancelled: entry.cancelled,
 			truncated: entry.truncated,
 			fullOutputPath: entry.fullOutputPath,
 			excludeFromContext: entry.excludeFromContext,
-			folded,
 		},
 		width,
 		undefined,
-		{ unbounded, diffStyle: "plain" },
+		{ unbounded, diffStyle: "plain", detail },
 	);
 }
 
@@ -1259,16 +1256,16 @@ export function rehydrateChatPanelFromTurns(
 			case "message": {
 				if (entry.role === "user") {
 					runAssistantMessages = [];
-					const text = truncateReplayText(replayedUserText(entry));
+					const text = replayedUserText(entry);
 					if (text.length > 0) chatPanel.appendUser(text);
 					break;
 				}
 				if (entry.role === "assistant") {
 					const text = chatMessageText(entry);
 					const failure = messageFailure(entry);
-					const richMessage = richMessageFromEntry(entry, MAX_REPLAY_TEXT_CHARS);
+					const richMessage = richMessageFromEntry(entry, Number.POSITIVE_INFINITY);
 					if (richMessage || text.length > 0 || failure) {
-						const message = richMessage ?? makeTextMessage("assistant", truncateReplayText(text), entry.timestamp);
+						const message = richMessage ?? makeTextMessage("assistant", text, entry.timestamp);
 						if (failure) {
 							(message as { stopReason?: string; errorMessage?: string }).stopReason = failure.stopReason;
 							(message as { stopReason?: string; errorMessage?: string }).errorMessage = failure.errorMessage;
@@ -1303,7 +1300,7 @@ export function rehydrateChatPanelFromTurns(
 							type: "tool_execution_end",
 							toolCallId: fallbackId,
 							toolName: result.name,
-							result: displayReplayToolResult(result.result, options.unboundedToolBodies === true),
+							result: displayReplayToolResult(result.result, true),
 							isError: result.isError,
 							...(result.durationMs !== undefined ? { durationMs: result.durationMs } : {}),
 							...(resultSummary !== undefined ? { resultSummary } : {}),
@@ -1312,12 +1309,12 @@ export function rehydrateChatPanelFromTurns(
 							...(evictedReason !== undefined ? { evictedReason } : {}),
 						} as ChatLoopEvent);
 					} else {
-						chatPanel.appendReplayBlock((width) =>
+						chatPanel.appendReplayBlock((width, detail, unbounded) =>
 							renderToolResultOnly(
 								{
 									toolCallId: result.id ?? "",
 									toolName: result.name,
-									result: displayReplayToolResult(result.result, options.unboundedToolBodies === true),
+									result: displayReplayToolResult(result.result, true),
 									isError: result.isError,
 									...(result.durationMs !== undefined ? { durationMs: result.durationMs } : {}),
 									...(resultSummary !== undefined ? { resultSummary } : {}),
@@ -1326,7 +1323,7 @@ export function rehydrateChatPanelFromTurns(
 									...(evictedReason !== undefined ? { evictedReason } : {}),
 								},
 								width,
-								{ unbounded: options.unboundedToolBodies === true },
+								{ unbounded: unbounded || options.unboundedToolBodies === true, detail },
 							),
 						);
 					}
@@ -1345,21 +1342,8 @@ export function rehydrateChatPanelFromTurns(
 				break;
 			}
 			case "bashExecution": {
-				let fold: FoldOverride;
-				const presentation = toolPresentationPolicy(ToolNames.Bash, undefined);
-				const policyFold = (detail: TranscriptDetailPolicy) => policyToolFold(detail, presentation);
-				const unbounded = options.unboundedToolBodies === true;
-				chatPanel.appendReplayBlock(
-					(width, detail) =>
-						renderBashExecutionEntry(entry, width, resolveFold(fold, policyFold(detail)) === "folded", unbounded),
-					undefined,
-					{
-						policyFold,
-						fold: () => fold,
-						setFold: (next: FoldOverride) => {
-							fold = next;
-						},
-					},
+				chatPanel.appendReplayBlock((width, detail, unbounded) =>
+					renderBashExecutionEntry(entry, width, detail, unbounded || options.unboundedToolBodies === true),
 				);
 				break;
 			}
@@ -1427,5 +1411,4 @@ export function rehydrateChatPanelFromTurns(
 	// whatever the operator had opened or folded before the switch belonged to
 	// the transcript they left. /export reaches the same policy with a verbose
 	// panel, so nothing here is terminal-only.
-	chatPanel.clearFoldOverrides();
 }

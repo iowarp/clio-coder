@@ -1,3 +1,6 @@
+import type { TranscriptDetailPolicy } from "../transcript-detail.js";
+import { transcriptDetail } from "../transcript-detail.js";
+import { previewBudget, previewRows } from "./preview.js";
 /**
  * Structured renderer for tool-execution chat segments (Slice A of the
  * pi-coding-agent parity work). pi-coding-agent renders every tool call as
@@ -48,10 +51,7 @@ const ARG_PREVIEW_LIMIT = 60;
 const WEB_FETCH_ARG_PREVIEW_LIMIT = 140;
 const FULL_RESULT_PREVIEW_LIMIT = 60_000;
 const FULL_RESULT_ROW_LIMIT = 120;
-const STREAMING_RESULT_ROW_LIMIT = 20;
 const ARGS_BODY_LINE_LIMIT = 24;
-/** Rows of mutation diff a folded edit/write row keeps visible before it defers to the body. */
-const FOLDED_DIFF_ROW_LIMIT = 24;
 const STATUS_OK_GLYPH = GLYPH.ok;
 const STATUS_ERROR_GLYPH = GLYPH.error;
 
@@ -111,6 +111,8 @@ export interface ToolBodyRenderOptions {
 	unbounded?: boolean;
 	/** Live rows color mutation diffs; replay and export deliberately use plain text. */
 	diffStyle?: "color" | "plain";
+	detail?: TranscriptDetailPolicy;
+	terminalRows?: number;
 }
 
 /** Row cap for a tool body: unbounded lifts both the row and char limits. */
@@ -1110,30 +1112,6 @@ function renderResultBlock(
 	return renderOutputRows(resultText(unwrapped, resultCharLimit(opts)), width, isError, resultRowLimit(opts));
 }
 
-/**
- * Header-only render for a tool call that has not yet finished. Used by the
- * live chat panel from streamed argument formation through execution. The
- * lifecycle tail distinguishes a forming call, a ready call, and a running
- * call without inventing execution time before Pi starts the tool.
- */
-export function renderToolCallHeader(call: ToolExecutionStart, width: number): string[] {
-	return wrap(
-		headerLine(call.toolName, call.args, call.phase ?? "running", {
-			elapsedMs: call.elapsedMs,
-		}),
-		width,
-	);
-}
-
-/** Running-only footer used when an operator pauses live output; execution continues. */
-export function renderToolRunningStatus(call: ToolExecutionStart, width: number): string[] {
-	const elapsed = optionalCompactMs(call.elapsedMs);
-	return [
-		...renderToolCallHeader(call, width),
-		...indentAndWrap(dim(elapsed ? `live output paused · ${elapsed}` : "live output paused"), width, false),
-	];
-}
-
 function sublineStatus(call: ToolExecutionStart | ToolExecutionFinished): HeaderStatus {
 	// Discriminate on `result` rather than `isError`: only `ToolExecutionFinished`
 	// carries a `result` field, so a `ToolExecutionStart` with a stray
@@ -1143,59 +1121,8 @@ function sublineStatus(call: ToolExecutionStart | ToolExecutionFinished): Header
 	return call.isError ? "error" : "ok";
 }
 
-/**
- * One-line subline form of a tool call. Format:
- *   ▸ <body><status>
- * `status` is "" for in-flight, " ✓" green for success, " ✗" red for error.
- * Output is width-wrapped via wrapTextWithAnsi.
- *
- * When `expandKey` is supplied AND the call has finished, a dim ` (<key>)`
- * discoverability hint rides at the very end of the atomic status tail so users
- * see how to expand the collapsed block. Composing the full line (facts, status
- * glyph, duration, offload, and hint) before wrapping keeps the status glyph
- * and duration together on one row. The hint is suppressed for in-flight calls
- * (still running, no useful body to expand yet) and when `expandKey` is
- * empty/undefined (no key bound, hint would be misleading). The renderer never
- * imports the keybindings manager directly; the caller resolves the key string
- * and passes it in to keep this module pure.
- */
-export interface ToolSublineRenderOptions {
-	/** Live rows color the folded mutation diff; replay and export request plain rows. */
-	diffStyle?: "color" | "plain";
-	/**
-	 * Whether the folded row carries the extras its tool's presentation asks
-	 * for (today the bounded mutation diff). The bare subline level drops them;
-	 * the failure excerpt is not one of them and always rides the row.
-	 */
-	foldedExtras?: "per-tool" | "none";
-}
-
-/**
- * The bounded diff a folded mutation row keeps under itself, when the tool's
- * presentation asks for one and the result carries one. A folded `edit` that
- * hid its change told the operator nothing they could act on.
- */
-function foldedDiffRows(finished: ToolExecutionFinished, width: number, opts: ToolSublineRenderOptions): string[] {
-	if (opts.foldedExtras === "none") return [];
-	if (finished.isError || isNonExecutedOutcome(finished.outcome)) return [];
-	const presentation =
-		toolResultPresentationPolicy(finished.result) ?? toolPresentationPolicy(finished.toolName, finished.args);
-	if (!presentation.showDiffWhenFolded) return [];
-	const diff = resultDiff(finished.result);
-	if (diff === null) return [];
-	return truncateRowsMiddle(
-		renderMutationDiffBlock(diff, width, opts.diffStyle !== "plain"),
-		FOLDED_DIFF_ROW_LIMIT,
-		false,
-	);
-}
-
-export function renderToolSubline(
-	call: ToolExecutionStart | ToolExecutionFinished,
-	width: number,
-	expandKey?: string,
-	opts: ToolSublineRenderOptions = {},
-): string[] {
+/** Stable action identity, outcome, and captured-result metadata. */
+export function renderToolSubline(call: ToolExecutionStart | ToolExecutionFinished, width: number): string[] {
 	const status = sublineStatus(call);
 	const meta: StatusMeta =
 		"result" in call
@@ -1208,11 +1135,7 @@ export function renderToolSubline(
 			: { elapsedMs: call.elapsedMs };
 	const parts = sublineParts(call, status, meta);
 	const excerpt = "result" in call ? failureExcerpt(call, width) : "";
-	const showHint = "result" in call && expandKey !== undefined && expandKey.length > 0;
-	const tail = showHint ? `${parts.tail}${dim(` (${expandKey})`)}` : parts.tail;
-	const lines = wrapSublineWithTail(`${parts.lead}${excerpt}`, tail, width);
-	if ("result" in call) lines.push(...foldedDiffRows(call, width, opts));
-	return lines;
+	return wrapSublineWithTail(`${parts.lead}${excerpt}`, parts.tail, width);
 }
 
 /**
@@ -1300,6 +1223,7 @@ export function renderToolResultOnly(
 	width: number,
 	opts: ToolBodyRenderOptions = {},
 ): string[] {
+	if (!opts.unbounded && opts.detail) return renderToolPreview(finished, width, opts.detail, opts);
 	const status: HeaderStatus = finished.isError ? "error" : "ok";
 	const statusMeta: StatusMeta = {
 		durationMs: finished.durationMs,
@@ -1312,50 +1236,6 @@ export function renderToolResultOnly(
 	out.push(...renderOutputMeta(finished, width, finished.isError));
 	out.push(...renderResultBlock(finished.result, finished.isError, width, opts));
 	out.push(...renderOutputFooter(finished, width, finished.isError));
-	return out;
-}
-
-/**
- * Streaming render for an in-flight tool call whose expanded block should
- * surface the latest partial output. Used by the chat panel between
- * `tool_execution_start` and `tool_execution_end` when the user has expanded
- * the tool segment. The header carries the running lifecycle tail, secondary
- * arguments remain visible, and the latest cumulative Pi result renders under
- * a labeled live-output rail capped at the streaming row limit. An empty result renders
- * `(no output yet)` so the user can distinguish a slow start from a stalled
- * call.
- */
-export function renderToolStreamingExecution(
-	call: ToolExecutionStart,
-	width: number,
-	partialResult: unknown,
-): string[] {
-	const out: string[] = [];
-	out.push(...renderToolCallHeader({ ...call, phase: "running" }, width));
-	out.push(...renderArgsBody(call.toolName, call.args, width, false));
-	const partial: ToolExecutionFinished = {
-		toolCallId: call.toolCallId,
-		toolName: call.toolName,
-		args: call.args,
-		result: partialResult,
-		isError: false,
-	};
-	out.push(...renderOutputMeta(partial, width, false, "live output"));
-	const partialOutput = unwrapResultEnvelope(partialResult);
-	if (isEmptyResult(partialOutput)) {
-		out.push(...indentAndWrap(dim("(no output yet)"), width, false));
-	} else {
-		if (call.toolName === "bash") {
-			const bashArgs = asBashArgs(redactToolArgs(call.args));
-			if (bashArgs !== null) {
-				const commandLine = `${cyanBold("$")} ${highlightBashCommand(stripShellWrapperForDisplay(bashArgs.command))}`;
-				out.push(...indentAndWrap(commandLine, width, false));
-			}
-		}
-		out.push(
-			...renderOutputRows(resultText(partialOutput, FULL_RESULT_PREVIEW_LIMIT), width, false, STREAMING_RESULT_ROW_LIMIT),
-		);
-	}
 	return out;
 }
 
@@ -1372,13 +1252,6 @@ export interface BashTranscriptExecution {
 	fullOutputPath?: string | undefined;
 	excludeFromContext?: boolean | undefined;
 	error?: string | undefined;
-	/**
-	 * Whether the block draws its one-line row instead of the full body. The
-	 * caller resolves this from the transcript detail policy and the operator's
-	 * override, the same way the panel resolves a model bash call. Omitted means
-	 * folded.
-	 */
-	folded?: boolean | undefined;
 }
 
 /**
@@ -1389,7 +1262,7 @@ export interface BashTranscriptExecution {
 export function renderBashTranscriptExecution(
 	execution: BashTranscriptExecution,
 	width: number,
-	expandKey?: string,
+	_expandKey?: string,
 	bodyOptions: ToolBodyRenderOptions = {},
 ): string[] {
 	const shownBytes = Buffer.byteLength(execution.output, "utf8");
@@ -1409,30 +1282,12 @@ export function renderBashTranscriptExecution(
 		content: [{ type: "text", text: execution.output }],
 		details,
 	};
-	const folded = execution.folded !== false;
 	if (execution.running) {
-		if (folded) {
-			return renderToolSubline(
-				{
-					toolCallId: "local-bash",
-					toolName: "bash",
-					args,
-					elapsedMs: execution.elapsedMs,
-					phase: "running",
-				},
-				width,
-			);
-		}
-		return renderToolStreamingExecution(
-			{
-				toolCallId: "local-bash",
-				toolName: "bash",
-				args,
-				elapsedMs: execution.elapsedMs,
-				phase: "running",
-			},
+		return renderToolPreview(
+			{ toolCallId: "local-bash", toolName: "bash", args, phase: "running", elapsedMs: execution.elapsedMs },
 			width,
-			result,
+			bodyOptions.detail ?? transcriptDetail(),
+			{ ...bodyOptions, operator: true, partialResult: result },
 		);
 	}
 	const message = execution.error?.trim();
@@ -1454,5 +1309,57 @@ export function renderBashTranscriptExecution(
 			...(execution.fullOutputPath !== undefined ? { offloadPath: execution.fullOutputPath } : {}),
 		},
 	};
-	return folded ? renderToolSubline(finished, width, expandKey) : renderToolExecution(finished, width, bodyOptions);
+	return bodyOptions.unbounded
+		? renderToolExecution(finished, width, bodyOptions)
+		: renderToolPreview(finished, width, bodyOptions.detail ?? transcriptDetail(), { ...bodyOptions, operator: true });
+}
+
+/** One action identity plus a bounded result; arguments and full output belong in /view. */
+export function renderToolPreview(
+	call: ToolExecutionStart | ToolExecutionFinished,
+	width: number,
+	detail: TranscriptDetailPolicy,
+	options: ToolBodyRenderOptions & { terminalRows?: number; partialResult?: unknown; operator?: boolean } = {},
+): string[] {
+	const finished = "result" in call ? call : undefined;
+	const failure = finished?.isError === true || finished?.outcome !== undefined;
+	const limit = previewBudget(
+		failure
+			? detail.errorRows
+			: options.operator
+				? detail.operatorBashRows
+				: call.toolName === "bash"
+					? detail.bashRows
+					: detail.resultRows,
+		options.terminalRows,
+	);
+	const rows = renderToolSubline(call, width);
+	const result = finished?.result ?? options.partialResult;
+	const diff = finished && !failure ? resultDiff(result) : null;
+	if (diff !== null && detail.diffRows > 0) {
+		rows.push(
+			...previewRows(
+				renderMutationDiffBlock(redactSecretString(diff), width, options.diffStyle !== "plain"),
+				previewBudget(detail.diffRows, options.terminalRows),
+				width,
+			),
+		);
+	} else if (limit > 0 && result !== undefined) {
+		const text = resultText(unwrapResultEnvelope(result), Number.POSITIVE_INFINITY);
+		const body = indentAndWrap(redactSecretString(text), width, failure);
+		rows.push(...previewRows(body, limit, width, call.toolName === "bash" || !finished));
+	}
+	return rows;
+}
+
+/** Only ordinary successful observations can lose their individual metadata rows. */
+export function canGroupObservation(call: ToolExecutionFinished): boolean {
+	return (
+		["read", "grep", "find", "ls"].includes(call.toolName) &&
+		!call.isError &&
+		!call.outcome &&
+		!call.evictedReason &&
+		!isTruncatedResult(call) &&
+		offloadPathOf(call) === null
+	);
 }

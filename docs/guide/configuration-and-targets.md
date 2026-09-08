@@ -310,7 +310,7 @@ safety:
     enabled: false
 
 interface:
-  outputDetail: default
+  outputDetail: standard
   smoothStreaming: auto
   mode: regular
   fullscreenScrollbar: auto
@@ -678,7 +678,7 @@ each as a stable deep link:
 | `targets` | Runtime connections, advertised models, auth metadata, and capability overrides |
 | `context` | Working set, compaction, and proactive memory |
 | `safety` | Autonomy, cost/tool/read limits, and the optional review watchdog |
-| `interface` | Output detail, terminal behavior, notifications, keybindings, and experimental pane settings |
+| `interface` | Output style, terminal behavior, notifications, keybindings, and experimental pane settings |
 | `integrations` | Project-resource trust, external agents, runtime plugins, resource library, and Git attribution |
 
 The Center groups rows with task-oriented labels such as Orchestrator, Targets,
@@ -789,7 +789,7 @@ The safety-limit leaves have no one-process `CLIO_CODER_*` overrides in the curr
 | Key | Default | Validation | When it applies |
 | --- | --- | --- | --- |
 | `interface.terminalProgress` | `false` | boolean | next turn |
-| `interface.outputDetail` | `default` | `minimal`, `default`, `verbose` | next turn |
+| `interface.outputDetail` | `standard` | `compact`, `standard`, `detailed` | immediately |
 | `interface.mode` | `regular` | `regular` or `fullscreen` | restart |
 | `interface.fullscreenScrollbar` | `auto` | `hidden`, `auto`, `always` | restart |
 | `interface.smoothStreaming` | `auto` | `off`, `auto`, `on` | immediately |

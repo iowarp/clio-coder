@@ -1,6 +1,6 @@
 /**
  * Typed tool presentation policy. Answers, per tool, what the transcript's
- * balanced (`/output default`) view needs to know: does the block open folded
+ * Standard view needs to know: does the block open folded
  * or expanded, does the folded row keep a mutation diff visible, and does a
  * failed folded row carry an output excerpt.
  *

@@ -21,6 +21,7 @@ import {
 	ACTIVE_ROUTING_ROLES,
 	COUNCIL_MEMBER_LABEL_PATTERN,
 	DEFAULT_SETTINGS,
+	normalizeOutputStyle,
 	THEME_NAMED_COLORS,
 	THINKING_LEVELS,
 	type ThinkingLevel,
@@ -1745,8 +1746,12 @@ export function validateSettings(raw: unknown): SettingsValidationResult {
 				const parsed = expectBoolean(issues, `interface.${key}`, ui[key]);
 				if (parsed !== undefined) (settings.interface as unknown as Record<string, unknown>)[key] = parsed;
 			}
+			if ("outputDetail" in ui) {
+				const style = normalizeOutputStyle(ui.outputDetail);
+				if (style) settings.interface.outputDetail = style;
+				else issues.add("interface.outputDetail", "expected compact, standard, or detailed");
+			}
 			for (const [key, allowed] of [
-				["outputDetail", ["minimal", "default", "verbose"]],
 				["smoothStreaming", ["off", "auto", "on"]],
 				["mode", ["regular", "fullscreen"]],
 				["fullscreenScrollbar", ["hidden", "auto", "always"]],

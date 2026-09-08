@@ -578,7 +578,7 @@ function checkSettingsInventory(): void {
 		["fleet.concurrency", "`auto`"],
 		["safety.autonomy", "`auto-edit`"],
 		["chat.target", "`null`"],
-		["interface.outputDetail", "`default`"],
+		["interface.outputDetail", "`standard`"],
 	];
 	const rowFor = (path: string): string => section.split("\n").find((line) => line.startsWith(`| \`${path}\` |`)) ?? "";
 	for (const [path, expected] of expectations) {

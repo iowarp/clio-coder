@@ -64,7 +64,7 @@ export interface InteractiveSlashSubmitExpansion {
 }
 
 type SlashChat = Pick<ChatLoop, "clearSkillSurface" | "getSessionId" | "isStreaming" | "submit">;
-type SlashChatPanel = Pick<ChatPanel, "appendReplayBlock" | "appendUser" | "clearFoldOverrides">;
+type SlashChatPanel = Pick<ChatPanel, "appendReplayBlock" | "appendUser">;
 type UserTurnStatus = import("./chat-panel.js").UserTurnStatus;
 type SlashResources = Pick<ResourcesContract, "prompts" | "expandPromptTemplate" | "reload">;
 type SlashExtensions = Pick<ExtensionsContract, "list">;
@@ -178,7 +178,6 @@ export interface InteractiveSlashRuntime {
 }
 
 /** Owns slash-command context construction and its asynchronous command state. */
-const OUTPUT_VERBOSITIES: ReadonlyArray<ClioSettings["interface"]["outputDetail"]> = ["minimal", "default", "verbose"];
 
 /** Thinking capability of the active orchestrator target and model, or null when unresolved. */
 export function resolveThinkingCapability(
@@ -466,7 +465,7 @@ export function createInteractiveSlashRuntime(deps: InteractiveSlashRuntimeDeps)
 			if (!match) {
 				return { status: "unsupported", level, supported: supported.map(labelFor) };
 			}
-			// Session scope, like /output: onSetThinkingLevel writes the level
+			// Session scope, like Alt+O: onSetThinkingLevel writes the level
 			// through to settings.yaml as the new default, which a slash command
 			// has no mandate to do.
 			if (deps.commitSetting) {
@@ -506,42 +505,6 @@ export function createInteractiveSlashRuntime(deps: InteractiveSlashRuntimeDeps)
 					const answer = result.cancelled ? undefined : result.answers[0]?.answer;
 					const selected = choices.find(({ label }) => label === answer);
 					if (selected) dispatchSlashCommand({ kind: "thinking-set", level: selected.value }, context);
-				});
-		},
-		setOutputVerbosity: (verbosity) => {
-			if (!deps.getSettings || !(deps.commitSetting || deps.writeSettings)) return { status: "unavailable" };
-			const requested = verbosity.trim().toLowerCase();
-			const match = OUTPUT_VERBOSITIES.find((candidate) => candidate === requested);
-			if (!match) return { status: "unsupported", verbosity, supported: OUTPUT_VERBOSITIES };
-			const next = structuredClone(deps.getSettings()) as ClioSettings;
-			next.interface.outputDetail = match;
-			// Session scope: /output changes this session and leaves settings.yaml
-			// alone. Saving it as the default is what Settings → Terminal is for.
-			if (deps.commitSetting) deps.commitSetting("interface.outputDetail", next, "session");
-			else deps.writeSettings?.(next);
-			// `/output` is also the explicit reset action for transcript folds. Do
-			// this even when the requested level already matches the current one;
-			// the render-time change detector cannot observe a same-value command.
-			deps.chatPanel.clearFoldOverrides();
-			deps.refreshFooter();
-			return { status: "applied", verbosity: match };
-		},
-		openOutputPicker: () => {
-			void deps
-				.openAskUser([
-					{
-						question: "Choose transcript detail for this session.",
-						header: "Output",
-						options: OUTPUT_VERBOSITIES.map((value) => ({
-							label: `${value[0]?.toUpperCase()}${value.slice(1)}`,
-						})),
-					},
-				])
-				.then((result) => {
-					if (result.cancelled) return;
-					const answer = result.answers[0]?.answer.toLowerCase();
-					const selected = OUTPUT_VERBOSITIES.find((value) => value === answer);
-					if (selected) dispatchSlashCommand({ kind: "output-set", verbosity: selected }, context);
 				});
 		},
 		openModel: deps.openModel,
@@ -595,7 +558,7 @@ export function createInteractiveSlashRuntime(deps: InteractiveSlashRuntimeDeps)
 				// operator overrides, and rendered at a stable width. HTML converts
 				// the resulting ANSI presentation to inline styles; Markdown keeps the
 				// prior plain-text fenced transcript.
-				const exportPanel = createChatPanel({ unboundedToolBodies: true, getOutputVerbosity: () => "verbose" });
+				const exportPanel = createChatPanel({ unboundedToolBodies: true, getOutputStyle: () => "detailed" });
 				// Scoped to the leaf the session is on, the same way /resume replays
 				// (issue #107): with a /tree pin persisted and not yet extended, the
 				// file still holds the abandoned branch after the pin, and an unscoped

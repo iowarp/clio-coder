@@ -6,16 +6,12 @@ import { isEscapeKey, type OverlayState, overlayOwnsInput } from "./overlay-life
 export const APPLICATION_DOUBLE_TAP_MS = 500;
 
 const CLOSED_ACTION_ORDER = [
+	"clio-coder.output.cycle",
 	"clio-coder.notifications.dismiss",
-	"clio-coder.tool.expand",
-	"clio-coder.tool.expandAll",
-	"clio-coder.tool.liveOutput",
 	"clio-coder.editor.external",
 	"clio-coder.message.followUp",
 	"clio-coder.message.interrupt",
 	"clio-coder.message.dequeue",
-	"clio-coder.thinking.expand",
-	"clio-coder.thinking.expandAll",
 ] as const satisfies ReadonlyArray<ClioKeybinding>;
 
 export const GLOBAL_ACTION_ORDER = [
@@ -108,10 +104,6 @@ export interface ApplicationControllerDeps {
 	listNotifications: () => ReadonlyArray<{ id: string }>;
 	dismissNotification: (id: string) => void;
 	dismissAllNotifications: () => void;
-	toggleLastToolExpanded: () => boolean;
-	toggleAllToolsExpanded: () => boolean;
-	toggleLastThinking: () => boolean;
-	toggleAllThinking: () => boolean;
 	shutdownDisposers: ReadonlyArray<() => void>;
 	/** Settle the last presentation mutation into an accepted/drained frame. */
 	beforeStopUi?: () => Promise<void>;
@@ -145,8 +137,6 @@ export interface ApplicationController {
 	handleInput(data: string): ApplicationInputResult;
 	handleCtrlC(): void;
 	dismissNotifications(): void;
-	toggleToolExpansion(): void;
-	toggleThinkingExpansion(): void;
 	shutdown(): Promise<void>;
 }
 
@@ -163,8 +153,6 @@ export function createApplicationController(deps: ApplicationControllerDeps): Ap
 	let shuttingDown = false;
 	let lastCtrlCAt = 0;
 	let lastNotificationDismissAt = 0;
-	let lastToolExpandAt = 0;
-	let lastThinkingExpandAt = 0;
 
 	const isDoubleTap = (lastAt: number, now: number): boolean => lastAt > 0 && now - lastAt <= APPLICATION_DOUBLE_TAP_MS;
 
@@ -346,22 +334,6 @@ export function createApplicationController(deps: ApplicationControllerDeps): Ap
 		if (first) deps.dismissNotification(first.id);
 	};
 
-	const toggleToolExpansion = (): void => {
-		const now = deps.clock.now();
-		const doubleTap = isDoubleTap(lastToolExpandAt, now);
-		lastToolExpandAt = now;
-		const changed = doubleTap ? deps.toggleAllToolsExpanded() : deps.toggleLastToolExpanded();
-		if (changed) deps.requestRender();
-	};
-
-	const toggleThinkingExpansion = (): void => {
-		const now = deps.clock.now();
-		const doubleTap = isDoubleTap(lastThinkingExpandAt, now);
-		lastThinkingExpandAt = now;
-		const changed = doubleTap ? deps.toggleAllThinking() : deps.toggleLastThinking();
-		if (changed) deps.requestRender();
-	};
-
 	const handleInput = (data: string): ApplicationInputResult => {
 		const initialOverlayState = deps.getOverlayState();
 		if (overlayOwnsInput(initialOverlayState) && deps.leaderKeys.isPending()) deps.leaderKeys.reset();
@@ -427,8 +399,6 @@ export function createApplicationController(deps: ApplicationControllerDeps): Ap
 		handleInput,
 		handleCtrlC,
 		dismissNotifications,
-		toggleToolExpansion,
-		toggleThinkingExpansion,
 		shutdown,
 	};
 }

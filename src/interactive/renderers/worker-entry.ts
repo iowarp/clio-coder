@@ -1,27 +1,8 @@
-/**
- * Renderer for a worker's transcript block: the attributed stream a `/run`,
- * `/delegate`, or model-driven dispatch produces.
- *
- * One shape serves every runtime. A local Clio worker, a Claude subprocess, and
- * a delegated ACP peer differ only in what the header can name about their
- * route, so the body, the tool line, and the receipt footer are identical and
- * an operator learns one grammar. The origin glyph is the only thing that says
- * who asked, which is the same rule the board and the footer chip follow.
- *
- *   ◇ coder · node-a/example-coder-model · run 2mkas6s
- *   │ Hello! I'm the coder worker.
- *   │ ⚙ read · artifact
- *   └ ✓ execution ok · 4.8k tok · 9.6s · contract pass
- *   │ quality: grounded
- *
- * Folded (the default for a run the model asked for) keeps identity and
- * execution on a tool-style subline, followed by the settled quality fact:
- *
- *   ◆ scout · node-b/example-scout-model · run 3nc18jo ✓ execution ok · 41s (Ctrl+O)
- *   │ quality: validation failed
- *
- * Pure: no I/O, no module-level mutable state beyond the shared theme handle.
- */
+import { redactSecretString } from "../../domains/safety/redaction.js";
+import type { TranscriptDetailPolicy } from "../transcript-detail.js";
+import { transcriptDetail } from "../transcript-detail.js";
+import { previewBudget, previewRows } from "./preview.js";
+/** Bounded worker summaries share the main transcript's output style. */
 
 import { parseJsonObjectPayload } from "../../core/json-payload.js";
 import { trustStateWord } from "../../domains/evidence/trust-projection.js";
@@ -48,10 +29,8 @@ const SEPARATOR = " · ";
 const BODY_LINE_LIMIT = 80;
 
 export interface WorkerEntryRenderOptions {
-	/** Collapsed to the header line plus outcome. Default for a run the model asked for. */
-	folded: boolean;
-	/** Key hint appended to a folded header, e.g. "Ctrl+O". Omitted when unknown. */
-	expandKey?: string | undefined;
+	detail?: TranscriptDetailPolicy;
+	terminalRows?: number;
 	/** Render the full body without the line cap; `/export` sets this. */
 	unbounded?: boolean;
 }
@@ -392,15 +371,14 @@ function footerLine(entry: WorkerEntryState, width: number): string {
  * renders only when the caller resolved a key binding for it, so a rebound or
  * unbound key never advertises a wrong chord.
  */
-function foldedLine(entry: WorkerEntryState, width: number, expandKey: string | undefined): string {
+function actionLine(entry: WorkerEntryState, width: number): string {
 	const identity = `${originGlyph(entry)} ${identityUnits(entry).join(dim(SEPARATOR))}`;
 	const status =
 		isPending(entry) || entry.receipt === undefined ? pendingUnit(entry) : outcomeUnit(entry.receipt, false);
 	const elapsed =
 		entry.receipt?.durationMs === undefined ? "" : dim(`${SEPARATOR}${formatCompactMs(entry.receipt.durationMs)}`);
-	const hint = expandKey === undefined || expandKey.length === 0 ? "" : dim(` (${expandKey})`);
-	const full = ` ${status}${elapsed}${hint}`;
-	let tail = visibleWidth(identity) + visibleWidth(full) <= width ? full : ` ${status}${hint}`;
+	const full = ` ${status}${elapsed}`;
+	let tail = visibleWidth(identity) + visibleWidth(full) <= width ? full : ` ${status}`;
 	// Reserve one identity cell. The optional hint yields before execution
 	// status when the suffix alone would exhaust the header's width.
 	if (visibleWidth(tail) >= width) tail = ` ${status}`;
@@ -421,15 +399,53 @@ export function renderWorkerEntryLines(
 				"muted",
 				safeWidth,
 			);
-	if (options.folded) return [foldedLine(entry, safeWidth, options.expandKey), ...quality];
-	const tools = toolLine(entry, safeWidth);
+	const detail = options.detail ?? transcriptDetail();
+	if (options.unbounded) {
+		const tools = toolLine(entry, safeWidth);
+		return [
+			headerLine(entry, safeWidth),
+			...bodyLines(entry, safeWidth, true),
+			...attemptLines(entry, safeWidth),
+			...(tools ? [tools] : []),
+			...failureLines(entry, safeWidth),
+			footerLine(entry, safeWidth),
+			...quality,
+		].map(redactSecretString);
+	}
+	const budget = (limit: number) => previewBudget(limit, options.terminalRows);
+	const summary = bodySourceLines(entry).flatMap((line) => railLines(redactSecretString(line), "muted", safeWidth));
+	const actions = entry.progress
+		? [...entry.progress.recentActions]
+				.reverse()
+				.concat(entry.progress.currentAction ? [entry.progress.currentAction] : [])
+		: [];
+	const trail = actions.flatMap((action) =>
+		railLines(
+			`${GLYPH.phaseTool} ${action.descriptor ? `${action.descriptor.verb} ${action.descriptor.object}` : action.tool}`,
+			"muted",
+			safeWidth,
+		),
+	);
+	const tools = detail.workerActivity && trail.length === 0 ? toolLine(entry, safeWidth) : null;
+	const failure = previewRows(failureLines(entry, safeWidth), budget(detail.errorRows), safeWidth);
+	const presented = presentedContractAnswer(entry)?.footer;
 	return [
-		headerLine(entry, safeWidth),
-		...bodyLines(entry, safeWidth, options.unbounded === true),
-		...attemptLines(entry, safeWidth),
-		...(tools === null ? [] : [tools]),
-		...failureLines(entry, safeWidth),
-		footerLine(entry, safeWidth),
+		actionLine(entry, safeWidth),
+		...(detail.workerRows > 0 ? previewRows(summary, budget(detail.workerRows), safeWidth, entry.pending) : []),
+		...previewRows(attemptLines(entry, safeWidth), budget(detail.errorRows), safeWidth, true),
+		...(tools ? [tools] : []),
+		...(detail.workerActivity ? previewRows(trail, budget(4), safeWidth, true) : []),
+		...failure,
+		...(presented ? railLines(presented, "muted", safeWidth) : []),
+		...(entry.receipt?.abandonedDetail ? railLines(entry.receipt.abandonedDetail, "warning", safeWidth) : []),
+		...(entry.receipt?.receiptUnavailable ? railLines("receipt unavailable", "warning", safeWidth) : []),
+		...(entry.droppedLines
+			? railLines(
+					`… ${entry.droppedLines} earlier lines unavailable here · /view dispatch:${entry.runId}`,
+					"muted",
+					safeWidth,
+				)
+			: []),
 		...quality,
-	];
+	].map(redactSecretString);
 }

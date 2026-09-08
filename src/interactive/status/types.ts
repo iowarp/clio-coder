@@ -19,6 +19,8 @@ export interface RetryOverlay {
 }
 
 export interface ToolOverlay {
+	toolCallId?: string;
+	startedAt?: number;
 	toolName: string;
 	toolPreview: string;
 }
@@ -104,6 +106,7 @@ export interface AgentStatus {
 	 * phase leaves `tool_running`.
 	 */
 	toolStartedAt?: number | undefined;
+	activeTools?: readonly ToolOverlay[];
 	retry?: RetryOverlay | undefined;
 	dispatch?: DispatchOverlay | undefined;
 	/**

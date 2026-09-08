@@ -246,9 +246,7 @@ export interface DispatchOriginPresentation {
  * surface; a board row sits under the fleet summary, which already owns the
  * quadrant's single orange, so here the filled glyph carries origin by shape.
  */
-export function dispatchOriginPresentation(
-	row: Pick<DispatchBoardRow, "requestOrigin">,
-): DispatchOriginPresentation | null {
+function dispatchOriginPresentation(row: Pick<DispatchBoardRow, "requestOrigin">): DispatchOriginPresentation | null {
 	if (row.requestOrigin === "user") return { glyph: GLYPH.workerHuman, token: "accent" };
 	if (row.requestOrigin === "agent") return { glyph: GLYPH.workerAgent, token: "muted" };
 	if (row.requestOrigin === "internal") return { glyph: GLYPH.workerInternal, token: "dim" };

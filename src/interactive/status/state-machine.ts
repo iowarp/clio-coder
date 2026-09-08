@@ -245,6 +245,7 @@ function activePhaseAfterStuck(prev: AgentStatus): StatusPhase {
 }
 
 function isAwaitingDispatch(prev: AgentStatus): boolean {
+	if (activePhaseAfterStuck(prev) === "tool_running" && prev.tool?.toolName === ToolNames.Dispatch) return true;
 	if (prev.phase === "dispatching") return true;
 	if (prev.activePhases?.has("dispatching")) return true;
 	return (prev.overlayStack ?? []).some((frame) => frame.phase === "dispatching");
@@ -360,26 +361,9 @@ export function reduceStatus(prev: AgentStatus, event: StatusInputEvent, ctx: Re
 			if (base === "preparing") return { ...next, phase: "waiting_model", resumePhase: undefined };
 			return next;
 		}
-		case "message_start": {
-			const next = refreshMeaningful(prev, ctx);
-			const role = (event.message as { role?: unknown }).role;
-			if (role === "assistant" && prev.phase === "tool_running") return { ...next, phase: "writing" };
-			if (
-				role === "assistant" &&
-				(prev.phase === "preparing" || prev.phase === "waiting_model" || prev.phase === "thinking")
-			)
-				return { ...next, phase: "writing", resumePhase: undefined };
-			return next;
-		}
-		case "message_update": {
-			const base = activePhaseAfterStuck(prev);
-			const next = refreshMeaningful({ ...prev, phase: base }, ctx);
-			if (base === "preparing" || base === "waiting_model" || base === "thinking") {
-				return { ...next, phase: "writing", resumePhase: undefined };
-			}
-			if (CORE_ACTIVE_PHASES.has(base)) return { ...next, resumePhase: undefined };
-			return next;
-		}
+		case "message_start":
+		case "message_update":
+			return refreshMeaningful(prev, ctx);
 		case "tool_execution_update":
 			return refreshMeaningful(prev, ctx);
 		case "message_end":
@@ -390,10 +374,22 @@ export function reduceStatus(prev: AgentStatus, event: StatusInputEvent, ctx: Re
 				runTally: foldMessageIntoRunTally(prev.runTally ?? emptyRunTally(), event.message),
 			};
 		case "tool_execution_end": {
-			const next = refreshMeaningful(prev, ctx);
-			if (prev.phase === "tool_running") return { ...next, phase: "preparing", tool: undefined, toolStartedAt: undefined };
+			const activeTools = (prev.activeTools ?? []).filter((tool) => tool.toolCallId !== event.toolCallId);
+			const next = { ...refreshMeaningful(prev, ctx), activeTools };
+			const remaining = activeTools.at(-1);
+			if (remaining && prev.phase === "tool_running")
+				return { ...next, tool: remaining, toolStartedAt: remaining.startedAt };
+			if (prev.phase === "tool_running")
+				return { ...next, phase: "preparing", tool: undefined, toolStartedAt: undefined, activeTools: [] };
 			if (prev.phase === "stuck" && prev.resumePhase === "tool_running") {
-				return { ...next, phase: "preparing", resumePhase: undefined, tool: undefined, toolStartedAt: undefined };
+				return {
+					...next,
+					phase: "preparing",
+					resumePhase: undefined,
+					tool: undefined,
+					toolStartedAt: undefined,
+					activeTools: [],
+				};
 			}
 			// A blocked call's end can land while an overlay is still visible
 			// (permission prompt not yet resolved, retry or dispatch in front).
@@ -422,7 +418,14 @@ export function reduceStatus(prev: AgentStatus, event: StatusInputEvent, ctx: Re
 			// tool is done (its end never landed or was an admission block): the
 			// model is generating, nothing is executing, so drop the tool display.
 			if (base === "preparing" || base === "waiting_model" || base === "writing" || base === "tool_running") {
-				return { ...next, phase: "thinking", resumePhase: undefined, tool: undefined, toolStartedAt: undefined };
+				return {
+					...next,
+					phase: "thinking",
+					resumePhase: undefined,
+					tool: undefined,
+					toolStartedAt: undefined,
+					activeTools: [],
+				};
 			}
 			if (CORE_ACTIVE_PHASES.has(base)) return { ...next, resumePhase: undefined };
 			return next;
@@ -433,19 +436,34 @@ export function reduceStatus(prev: AgentStatus, event: StatusInputEvent, ctx: Re
 			// Streamed answer text while a tool still shows as running: same as
 			// above, the model is writing, so the running-tool spinner must clear.
 			if (base === "preparing" || base === "waiting_model" || base === "thinking" || base === "tool_running") {
-				return { ...next, phase: "writing", resumePhase: undefined, tool: undefined, toolStartedAt: undefined };
+				return {
+					...next,
+					phase: "writing",
+					resumePhase: undefined,
+					tool: undefined,
+					toolStartedAt: undefined,
+					activeTools: [],
+				};
 			}
 			if (CORE_ACTIVE_PHASES.has(base)) return { ...next, resumePhase: undefined };
 			return next;
 		}
 		case "tool_execution_start": {
 			const tool: ToolOverlay = {
+				toolCallId: event.toolCallId,
+				startedAt: ctx.now,
 				toolName: event.toolName,
 				toolPreview: compactPreview(event.args),
 			};
 			// Stamp this call's own start so the footer's running-tool timer counts
 			// from here, not from turn start.
-			return { ...refreshMeaningful(prev, ctx), phase: "tool_running", tool, toolStartedAt: ctx.now };
+			return {
+				...refreshMeaningful(prev, ctx),
+				phase: "tool_running",
+				tool,
+				toolStartedAt: ctx.now,
+				activeTools: [...(prev.activeTools ?? []).filter((active) => active.toolCallId !== event.toolCallId), tool],
+			};
 		}
 		case "retry_status": {
 			const phase = event.status.phase;

@@ -107,7 +107,7 @@ export interface ToolMetadata {
 	 */
 	promptHint?: ToolPromptHintMetadata;
 	/**
-	 * How transcript surfaces present this tool's block under `/output default`.
+	 * How transcript surfaces present this tool's block under Standard output style.
 	 * Optional: tools that declare nothing fold like every other tool.
 	 */
 	presentation?: ToolPresentationPolicy;

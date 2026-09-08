@@ -19,6 +19,7 @@ import { TUI_KEYBINDINGS } from "../../engine/tui.js";
  * live in `resolveCtrlCAction` and are not a simple keybinding.
  */
 export interface ClioAppKeybindings {
+	"clio-coder.output.cycle": true;
 	"clio-coder.thinking.cycle": true;
 	"clio-coder.exit": true;
 	"clio-coder.status.toggle": true;
@@ -31,11 +32,6 @@ export interface ClioAppKeybindings {
 	"clio-coder.model.select": true;
 	"clio-coder.model.cycleForward": true;
 	"clio-coder.model.cycleBackward": true;
-	"clio-coder.tool.expand": true;
-	"clio-coder.tool.expandAll": true;
-	"clio-coder.tool.liveOutput": true;
-	"clio-coder.thinking.expand": true;
-	"clio-coder.thinking.expandAll": true;
 	"clio-coder.editor.external": true;
 	"clio-coder.message.followUp": true;
 	"clio-coder.message.interrupt": true;
@@ -128,33 +124,9 @@ export const CLIO_APP_KEYBINDINGS = {
 		defaultKeys: "alt+k",
 		description: "Cycle to previous scoped model",
 	},
-	"clio-coder.tool.expand": {
+	"clio-coder.output.cycle": {
 		defaultKeys: "alt+o",
-		description:
-			"Fold or unfold the newest tool call or worker block between its one-line summary and full details, overriding the /output level for that block",
-	},
-	"clio-coder.tool.expandAll": {
-		// Alt+Shift+letter is commonly consumed by OS keyboard-layout switching.
-		// Keep it discoverable, but pair it with the legacy-safe Ctrl+Alt form.
-		defaultKeys: ["ctrl+alt+o", "alt+shift+o"],
-		description:
-			"Fold or unfold every tool call and worker block at once, overriding the /output level; changing /output clears the overrides",
-	},
-	"clio-coder.tool.liveOutput": {
-		defaultKeys: "alt+p",
-		description: "Toggle streaming partial tool output in expanded tool bodies",
-	},
-	"clio-coder.thinking.expand": {
-		defaultKeys: "alt+r",
-		description:
-			"Toggle the latest thinking block between hidden marker and full body (no effect while /output verbose pins it open)",
-	},
-	"clio-coder.thinking.expandAll": {
-		// Ctrl+Alt+R is the fallback for terminals/OSes that do not forward
-		// Alt+Shift+R as a distinct key event.
-		defaultKeys: ["ctrl+alt+r", "alt+shift+r"],
-		description:
-			"Toggle all thinking blocks between hidden markers and full bodies, overriding the /output level; changing /output clears the overrides",
+		description: "Cycle output style: Compact, Standard, Detailed",
 	},
 	"clio-coder.editor.external": {
 		defaultKeys: "alt+g",

@@ -1,25 +1,23 @@
 import { performance } from "node:perf_hooks";
-import type { OutputVerbosity } from "../core/defaults.js";
+import type { OutputStyle } from "../core/defaults.js";
 import { SKILL_SUGGESTION_PREFIX } from "../core/skill-activation.js";
 import { rawDurationMs } from "../core/timers.js";
+import { redactSecretString } from "../domains/safety/redaction.js";
 import { type Component, Markdown, truncateToWidth, visibleWidth, wrapTextWithAnsi } from "../engine/tui.js";
 import type { AgentMessage } from "../engine/types.js";
-import { toolPresentationPolicy } from "../tools/presentation.js";
-import { toolResultPresentationPolicy } from "../tools/result-disposition.js";
 import type { ChatLoopEvent, RetryStatusPayload } from "./chat-loop.js";
 import { extractText, isSelfExplainingAbort } from "./chat-loop-messages.js";
 import type { ApprovalRequestView } from "./permission-overlay.js";
 import { codeInk } from "./renderers/code-ink.js";
 import { createMermaidMarkdownTransform } from "./renderers/mermaid.js";
 import { styleTaggedNotice } from "./renderers/notice.js";
+import { previewBudget, previewRows } from "./renderers/preview.js";
 import { formatRetryStatus } from "./renderers/retry-status.js";
 import {
+	canGroupObservation,
 	renderToolAwaitingApproval,
-	renderToolCallHeader,
 	renderToolExecution,
-	renderToolRunningStatus,
-	renderToolStreamingExecution,
-	renderToolSubline,
+	renderToolPreview,
 } from "./renderers/tool-execution.js";
 import { renderWorkerEntryLines } from "./renderers/worker-entry.js";
 import {
@@ -28,28 +26,15 @@ import {
 	foldMessageIntoRunTally,
 	formatReasoningChip,
 	formatReasoningLabel,
-	INLINE_STATUS_INDENT_COLS,
 	type ReasoningTokenProvenance,
 	type ReasoningUsageView,
 	reasoningFromTally,
-	type StatusPhase,
 	UNMEASURED_REASONING,
-	type VerbRender,
 } from "./status/index.js";
 import { clioTheme, fgSequence, GLYPH, markdownTheme, SGR_DIM, SGR_RESET } from "./theme/index.js";
-import {
-	type Fold,
-	type FoldOverride,
-	policyRunningToolFold,
-	policyThinkingFold,
-	policyToolFold,
-	policyWorkerFold,
-	resolveFold,
-	type TranscriptDetailPolicy,
-	toggledFold,
-	transcriptDetail,
-} from "./transcript-detail.js";
-import { type WorkerEntryState, workerAskedByModel } from "./worker-stream.js";
+import { type TranscriptDetailPolicy, transcriptDetail } from "./transcript-detail.js";
+import type { ViewArtifact } from "./view/artifacts.js";
+import type { WorkerEntryState } from "./worker-stream.js";
 
 // Fenced code reaches the screen through pi-tui's Markdown component, which
 // exposes the MarkdownTheme.highlightCode hook: it hands over the raw fence
@@ -73,8 +58,6 @@ const RESET = SGR_RESET;
 const DIM = SGR_DIM;
 const TEAL = fgSequence("accent");
 const BLUE_REASON = fgSequence("reason");
-const GREEN_OK = fgSequence("success");
-const AMBER = fgSequence("warning");
 const RED_CRIT = fgSequence("error");
 const AGENT_GLYPH = GLYPH.agent;
 const USER_GLYPH = GLYPH.user;
@@ -97,6 +80,8 @@ const USER_GLYPH = GLYPH.user;
 export type { ReasoningTokenProvenance } from "./status/index.js";
 
 export interface ChatPanelTurnUsage {
+	elapsedMs?: number;
+	outcome?: string;
 	inputTokens: number;
 	outputTokens: number;
 	cacheReadTokens: number;
@@ -164,13 +149,6 @@ type ToolSegment = {
 	settledWithoutResult?: boolean | undefined;
 	/** True when the finished result was an error. Meaningful only after `finished`. */
 	isError: boolean;
-	/**
-	 * The operator's explicit fold for this block, or none. The effective state
-	 * is this override when set, else what the transcript detail policy gives
-	 * the call (through the tool's presentation once it has finished). Cleared
-	 * when `/output` changes and when a session is switched in.
-	 */
-	fold?: FoldOverride;
 	/** Wall-clock start time captured by the chat panel for live duration display. */
 	startedAtMs?: number;
 	/** Completed call duration in milliseconds (event-supplied or measured locally). */
@@ -239,17 +217,13 @@ type ThinkingSegment = {
 	finalized: boolean;
 	/** Panel clock when the first delta of this stretch arrived. */
 	startedAtMs?: number;
-	/** The operator's explicit fold for this stretch, or none. */
-	fold?: FoldOverride;
 };
 type AssistantSegment = TextSegment | ToolSegment | ErrorSegment | ThinkingSegment;
 /**
  * A caller-rendered block receives the frame's transcript detail policy so a
- * block that owns fold state (the operator's `!` bash row) resolves it the same
- * way the panel resolves a model call. Blocks that ignore it are unaffected.
+ * block such as the operator's `!` bash row follows the same preset as the panel. Blocks that ignore it are unaffected.
  */
-type ReplayBlockRenderer = (width: number, detail: TranscriptDetailPolicy) => string[];
-type AssistantStatusLine = { phase: StatusPhase; verb: string; toneHint: VerbRender["toneHint"] };
+type ReplayBlockRenderer = (width: number, detail: TranscriptDetailPolicy, unbounded?: boolean) => string[];
 
 type TranscriptEntry =
 	| { role: "user"; text: string; status?: () => UserTurnStatus }
@@ -266,17 +240,15 @@ type TranscriptEntry =
 			 */
 			messageStartSegmentIndex?: number | undefined;
 			pending: boolean;
-			statusLine?: AssistantStatusLine | null | undefined;
 			isError: boolean;
 			turnUsage?: ChatPanelTurnUsage;
 	  }
 	/**
-	 * A dispatched worker's attributed block. The panel owns only the fold
-	 * override; `state` is the live object the worker-stream reducer mutates, so
+	 * A dispatched worker's attributed block. `state` is the live object the worker-stream reducer mutates, so
 	 * a streaming delta reaches the screen without copying the entry per frame.
 	 * The panel is told when that happened through `applyWorkerState`.
 	 */
-	| { role: "worker"; state: WorkerEntryState; fold?: FoldOverride }
+	| { role: "worker"; state: WorkerEntryState }
 	/**
 	 * A block the caller renders itself. Most are settled the moment they are
 	 * appended, but a few (the operator's `!` bash row) keep mutating the state
@@ -288,25 +260,9 @@ type TranscriptEntry =
 			role: "replayBlock";
 			renderBlock: ReplayBlockRenderer;
 			isLive?: (() => boolean) | undefined;
-			fold?: ReplayBlockFoldControl | undefined;
 	  };
 
 type WorkerTranscriptEntry = Extract<TranscriptEntry, { role: "worker" }>;
-
-/**
- * Fold state a caller-rendered block owns. The panel never stores it: the
- * block's closure reads it when rendering, so the panel only needs to resolve
- * and flip it when the operator uses an expand/collapse key, and to clear it
- * when `/output` changes. Same tri-state as a tool segment: an override, or
- * none, over the fold the policy gives the block.
- */
-export interface ReplayBlockFoldControl {
-	/** The fold the policy gives this block when no override is set. */
-	policyFold(detail: TranscriptDetailPolicy): Fold;
-	/** The operator's override, or none. */
-	fold(): FoldOverride;
-	setFold(fold: FoldOverride): void;
-}
 
 /**
  * Whether a painted operator turn exists in the ledger yet. `pending` is the
@@ -327,7 +283,7 @@ export interface ChatPanel extends Component {
 	 * that keeps changing after the append, so the panel keeps re-rendering it
 	 * instead of treating the first frame as final.
 	 */
-	appendReplayBlock(renderBlock: ReplayBlockRenderer, isLive?: () => boolean, fold?: ReplayBlockFoldControl): void;
+	appendReplayBlock(renderBlock: ReplayBlockRenderer, isLive?: () => boolean): void;
 	applyEvent(event: ChatLoopEvent): void;
 	/** Mark a just-rehydrated tool segment so its mutation diff remains plain. */
 	markToolReplayed?(toolCallId: string): void;
@@ -344,57 +300,17 @@ export interface ChatPanel extends Component {
 	 * so what the operator can share is exactly what the operator can see.
 	 */
 	workerStates(): ReadonlyArray<WorkerEntryState>;
-	setStatusLine(line: AssistantStatusLine | null): void;
-	/**
-	 * Publish the live run tally's reasoning projection. The pending entry's
-	 * tail line reads this; passing null returns it to unmeasured, which is what
-	 * an idle or just-started turn is.
-	 */
-	setLiveReasoning(view: ReasoningUsageView | null): void;
-	/**
-	 * Flip the newest foldable block (tool call, worker card, or fold-owning
-	 * replay block) away from its effective state. The flip is an override
-	 * over the transcript detail policy: under `/output verbose` it folds an
-	 * open block, under `/output minimal` it opens a folded one.
-	 */
-	toggleLastToolExpanded(): boolean;
-	/** Set an explicit override on every tool, worker, and fold-owning block at once. */
-	toggleAllToolsExpanded(): boolean;
-	/**
-	 * Drop every operator override so each block returns to what the transcript
-	 * detail policy gives it. `/output` changes and session switches do this:
-	 * the operator asked for a new baseline, and what they had opened belonged
-	 * to the transcript they left. Idempotent.
-	 */
-	clearFoldOverrides(): void;
-	/**
-	 * Flip the newest thinking stretch between the one-line dim marker
-	 * and the full rail-prefixed body, as an override over the policy. A turn
-	 * with no thinking yet is left alone; a new stretch inherits the policy.
-	 */
-	toggleLastThinking(): boolean;
-	toggleAllThinking(): boolean;
-	/** Whether live thinking would render open this frame, which presentation pacing consults. */
+	inspectionArtifacts(): ViewArtifact[];
+	/** Whether the current preset shows supplied reasoning, for stream pacing. */
 	isThinkingExpanded(): boolean;
-	/** Toggle whether expanded live tool bodies include cumulative partial output. */
-	toggleLiveToolOutput(): boolean;
 	/** Clears the visible transcript. /new uses this after rotating the session. */
 	reset(): void;
 }
 
 export interface ChatPanelOptions {
-	/**
-	 * Resolves the user-visible key string for the `clio-coder.tool.expand`
-	 * action, which folds and unfolds the newest tool call or worker block.
-	 * Returning a non-empty string surfaces a dim ` (<key>)` hint on the one
-	 * surface the key would act on: the latest finished collapsed tool subline,
-	 * or the newest folded worker card. Returning undefined or an empty string
-	 * suppresses the hint. Called per render so live keybinding changes flow
-	 * through.
-	 */
-	getToolExpandKey?: () => string | undefined;
+	getTerminalRows?: () => number;
 	/** Live transcript detail mode. Settings changes take effect on the next frame. */
-	getOutputVerbosity?: () => OutputVerbosity;
+	getOutputStyle?: () => OutputStyle;
 	/** Receives measured panel render cost; no FPS claim is made by the panel. */
 	onRenderMetrics?: (metrics: ChatPanelRenderMetrics) => void;
 	/** Clock injection for deterministic duration tests. Defaults to Date.now. */
@@ -556,10 +472,6 @@ function scopeTerminalErrorAfterSuccessfulTool(
 	return `[error] ${modelFailure}${detachedDispatchSucceeded ? "; detached runs continue" : ""}`;
 }
 
-function hasThinking(entry: Extract<TranscriptEntry, { role: "assistant" }>): boolean {
-	return entry.segments.some((seg) => seg.kind === "thinking" && seg.text.length > 0);
-}
-
 /** The thinking segment still receiving deltas, which is always the tail. */
 function openThinkingSegment(entry: Extract<TranscriptEntry, { role: "assistant" }>): ThinkingSegment | null {
 	const tail = entry.segments[entry.segments.length - 1];
@@ -595,11 +507,6 @@ function lastAssistantIndex(
 		return index;
 	}
 	return null;
-}
-
-function hasStreamingText(entry: Extract<TranscriptEntry, { role: "assistant" }>): boolean {
-	const tail = entry.segments[entry.segments.length - 1];
-	return tail?.kind === "text" && !tail.finalized && tail.text.trim().length > 0;
 }
 
 /**
@@ -765,9 +672,7 @@ function appendUserRowTail(rendered: string[], tail: string, width: number): voi
  * Static marker used when thinking is folded. This matches pi-coding-agent's
  * hidden-thinking presentation and avoids previewing reasoning content.
  */
-const THINKING_HIDDEN_LABEL = `Thinking${GLYPH.ellipsis}`;
-const THINKING_LINE_LIMIT = 12;
-
+const THINKING_HIDDEN_LABEL = "Thinking · /view";
 function dimLine(text: string, width: number): string {
 	return `${DIM}${truncateToWidth(text, Math.max(1, width), GLYPH.ellipsis, false)}${RESET}`;
 }
@@ -786,62 +691,12 @@ function renderSettledThinkingMarker(view: ReasoningUsageView, width: number): s
 	);
 }
 
-/**
- * The live turn's one reasoning line, rendered where the open thinking segment
- * sits, which is the tail of the entry by construction: the first text, tool,
- * or message_end closes it. Anchoring reasoning at the head put it above every
- * streamed segment, so on a long turn the only progress indicator scrolled off
- * the top; pinning one line at the tail put it below prose that streamed in
- * after the model had already moved on, so the transcript read out of order.
- *
- * The count is whatever the run tally has folded so far, so between model calls
- * the line states elapsed and nothing else. Visible thinking text is never
- * counted: that number moved with how much reasoning the provider chose to
- * display, not with what the turn spent.
- */
-function renderLiveReasoningLine(view: ReasoningUsageView, elapsedMs: number | undefined, width: number): string {
-	const chip = formatReasoningChip(view, compactReasoningTokens);
-	const head = chip === null ? THINKING_HIDDEN_LABEL : `Thinking · ${chip} ${formatReasoningLabel(view)}`;
-	const seconds = elapsedMs === undefined ? 0 : Math.floor(Math.max(0, elapsedMs) / 1000);
-	return dimLine(seconds > 0 ? `${head} · ${seconds}s` : head, width);
-}
-
-/**
- * Render the expanded thinking body: the text dimmed behind a dim `│ ` rail,
- * capped at `THINKING_LINE_LIMIT` lines. A streaming turn keeps the tail (the
- * reasoning still arriving); a settled one keeps the head with a
- * `... N more lines hidden` overflow message. Mirrors the tool toggle's
- * lab-notebook minimalism: no colored glyphs, no boxes.
- */
-function renderThinkingRail(thinking: string, width: number, streaming: boolean, unbounded = false): string[] {
-	if (thinking.length === 0) return [];
-	const splitLines = thinking.split("\n");
-	let visible: string[];
-	if (unbounded) {
-		// /export reproduces the whole transcript; the live cap is a screen budget.
-		visible = splitLines;
-	} else if (streaming) {
-		if (splitLines.length > THINKING_LINE_LIMIT) {
-			const hiddenCount = splitLines.length - THINKING_LINE_LIMIT;
-			visible = [`… ${hiddenCount} earlier lines hidden`, ...splitLines.slice(-THINKING_LINE_LIMIT)];
-		} else {
-			visible = splitLines;
-		}
-	} else {
-		visible =
-			splitLines.length > THINKING_LINE_LIMIT
-				? [...splitLines.slice(0, THINKING_LINE_LIMIT), `... ${splitLines.length - THINKING_LINE_LIMIT} more lines hidden`]
-				: splitLines;
-	}
-	const out: string[] = [];
-	const bodyWidth = Math.max(1, width - 2);
-	for (const raw of visible) {
-		const wrappedLines = raw.length === 0 ? [""] : wrapTextWithAnsi(raw, bodyWidth);
-		for (const wrapped of wrappedLines) {
-			out.push(`${BLUE_REASON}│ ${RESET}${DIM}${wrapped}${RESET}`);
-		}
-	}
-	return out;
+/** Wrap first, then keep the same tail both while streaming and after settlement. */
+function renderThinkingRail(thinking: string, width: number, limit: number, unbounded = false): string[] {
+	const rows = wrapTextWithAnsi(redactSecretString(thinking), Math.max(1, width - 2)).map(
+		(row) => `${BLUE_REASON}│ ${RESET}${DIM}${row}${RESET}`,
+	);
+	return unbounded ? rows : previewRows(rows, limit, width, true);
 }
 
 /**
@@ -860,7 +715,7 @@ function renderTurnUsageLine(
 	if (receipt === "none") return [];
 	if (receipt === "compact") {
 		const receipt = truncateToWidth(
-			`  turn · in ${usage.inputTokens} · out ${usage.outputTokens}`,
+			`  ${usage.outcome ?? "Done"}${usage.elapsedMs === undefined ? "" : ` · ${Math.round(usage.elapsedMs / 1000)}s`}`,
 			width,
 			GLYPH.ellipsis,
 			false,
@@ -897,138 +752,65 @@ function renderTurnUsageLine(
 	);
 }
 
-/** The indent resolveInlineVerb budgets against when it fits the verb to the terminal. */
-const STATUS_INDENT = " ".repeat(INLINE_STATUS_INDENT_COLS);
-
-function styleStatusVerb(text: string, toneHint: VerbRender["toneHint"]): string {
-	if (toneHint === "error") return `${RED_CRIT}${text}${RESET}`;
-	if (toneHint === "warn") return `${AMBER}${text}${RESET}`;
-	if (toneHint === "ok") return `${GREEN_OK}${text}${RESET}`;
-	return `${DIM}${text}${RESET}`;
-}
-
-/**
- * The fold the policy gives a tool segment this frame: the running-tool rule
- * while in flight, the tool body rule (through the tool's own presentation)
- * once finished, and the error rule for a finished failure.
- */
-function policySegmentFold(seg: ToolSegment, detail: TranscriptDetailPolicy): Fold {
-	if (!seg.finished) return policyRunningToolFold(detail);
-	if (seg.isError && detail.errors === "body") return "expanded";
-	return policyToolFold(detail, toolResultPresentationPolicy(seg.result) ?? toolPresentationPolicy(seg.name, seg.args));
-}
-
-/** Effective state of a tool segment: the operator's override, else the policy. */
-function toolSegmentExpanded(seg: ToolSegment, detail: TranscriptDetailPolicy): boolean {
-	return resolveFold(seg.fold, policySegmentFold(seg, detail)) === "expanded";
-}
-
 function renderToolSegmentLines(
 	seg: ToolSegment,
 	width: number,
-	expandKey: string | undefined,
-	latestHintToolId: string | null,
 	nowMs: number,
-	unboundedToolBodies: boolean,
+	unbounded: boolean,
 	detail: TranscriptDetailPolicy,
-	liveToolOutput: boolean,
+	terminalRows: number,
 ): string[] {
-	const hintKey = seg.id === latestHintToolId ? expandKey : undefined;
-	const expanded = toolSegmentExpanded(seg, detail);
-	const elapsedMs = seg.startedAtMs !== undefined ? Math.max(0, rawDurationMs(seg.startedAtMs, nowMs)) : undefined;
-	const phase: "forming" | "ready" | "running" = seg.executionStarted
-		? "running"
-		: seg.argsComplete
-			? "ready"
-			: "forming";
-	// A parked call is not executing: the awaiting-approval line replaces the
-	// counting elapsed spinner in both collapsed and expanded form (there is no
-	// body or partial output to expand while the call sits at the gate).
-	if (!seg.finished && seg.awaitingApproval === true) {
-		return renderToolAwaitingApproval(
-			{ toolCallId: seg.id, toolName: seg.name, args: seg.args },
-			width,
-			seg.approvalView,
-		);
-	}
-	if (!expanded) {
-		return renderToolSubline(
-			seg.finished
-				? {
-						toolCallId: seg.id,
-						toolName: seg.name,
-						args: seg.args,
-						result: seg.result,
-						isError: seg.isError,
-						durationMs: seg.durationMs,
-						resultSummary: seg.resultSummary,
-						outcome: seg.settlement,
-						blockReason: seg.blockReason,
-						evictedReason: seg.evictedReason,
-					}
-				: { toolCallId: seg.id, toolName: seg.name, args: seg.args, elapsedMs, phase },
-			width,
-			hintKey,
-			{
-				diffStyle: seg.replayed === true ? "plain" : "color",
-				foldedExtras: detail.toolBody === "folded" ? "none" : "per-tool",
-			},
-		);
-	}
-	if (!seg.finished) {
-		if (liveToolOutput && seg.partialResult !== undefined) {
-			return renderToolStreamingExecution(
-				{ toolCallId: seg.id, toolName: seg.name, args: seg.args, elapsedMs, phase },
-				width,
-				seg.partialResult,
-			);
-		}
-		const call = { toolCallId: seg.id, toolName: seg.name, args: seg.args, elapsedMs, phase };
-		return liveToolOutput ? renderToolCallHeader(call, width) : renderToolRunningStatus(call, width);
-	}
-	return renderToolExecution(
-		{
-			toolCallId: seg.id,
-			toolName: seg.name,
-			args: seg.args,
-			result: seg.result,
-			isError: seg.isError,
-			durationMs: seg.durationMs,
-			resultSummary: seg.resultSummary,
-			outcome: seg.settlement,
-			blockReason: seg.blockReason,
-			evictedReason: seg.evictedReason,
-		},
-		width,
-		{ unbounded: unboundedToolBodies, diffStyle: seg.replayed === true ? "plain" : "color" },
-	);
+	const call = {
+		toolCallId: seg.id,
+		toolName: seg.name,
+		args: seg.args,
+		elapsedMs: seg.startedAtMs === undefined ? undefined : Math.max(0, rawDurationMs(seg.startedAtMs, nowMs)),
+		phase: seg.executionStarted ? ("running" as const) : seg.argsComplete ? ("ready" as const) : ("forming" as const),
+	};
+	if (!seg.finished && seg.awaitingApproval) return renderToolAwaitingApproval(call, width, seg.approvalView);
+	// Argument fragments are not separate actions. Reveal the row once the call is formed.
+	if (!seg.finished && !seg.argsComplete && !seg.executionStarted) return [];
+	const finished = {
+		...call,
+		result: seg.result,
+		isError: seg.isError,
+		durationMs: seg.durationMs,
+		resultSummary: seg.resultSummary,
+		outcome: seg.settlement,
+		blockReason: seg.blockReason,
+		evictedReason: seg.evictedReason,
+	};
+	const options = { unbounded, diffStyle: seg.replayed ? ("plain" as const) : ("color" as const) };
+	if (unbounded && seg.finished) return renderToolExecution(finished, width, options);
+	return renderToolPreview(seg.finished ? finished : call, width, detail, {
+		...options,
+		terminalRows,
+		partialResult: seg.partialResult,
+	});
 }
 
-/**
- * Whether a worker block draws its one-line card this frame: the operator's
- * override when set, else the policy's worker rule, which under the balanced
- * level is the origin default (a run the model asked for folds).
- */
-function workerEntryFolded(entry: WorkerTranscriptEntry, detail: TranscriptDetailPolicy): boolean {
-	return resolveFold(entry.fold, policyWorkerFold(detail, workerAskedByModel(entry.state))) === "folded";
-}
-
-/** Effective state of one thinking stretch: the operator's override, else the policy. */
-function thinkingExpanded(segment: ThinkingSegment, detail: TranscriptDetailPolicy): boolean {
-	return resolveFold(segment.fold, policyThinkingFold(detail)) === "expanded";
+function observation(seg: AssistantSegment | undefined): string | null {
+	if (seg?.kind !== "tool" || !seg.finished) return null;
+	return canGroupObservation({
+		toolCallId: seg.id,
+		toolName: seg.name,
+		result: seg.result,
+		isError: seg.isError,
+		outcome: seg.settlement,
+		evictedReason: seg.evictedReason,
+		resultSummary: seg.resultSummary,
+	})
+		? seg.name
+		: null;
 }
 
 function renderEntryLines(
 	entry: TranscriptEntry,
 	width: number,
-	expandKey: string | undefined,
-	latestHintToolId: string | null,
-	latestFoldedWorkerId: string | null,
 	nowMs: number,
 	unboundedToolBodies: boolean,
 	detail: TranscriptDetailPolicy,
-	liveToolOutput: boolean,
-	liveReasoning: ReasoningUsageView,
+	terminalRows: number,
 ): string[] {
 	if (entry.role === "replayBlock") {
 		return entry.renderBlock(width, detail);
@@ -1048,11 +830,7 @@ function renderEntryLines(
 		return wrapTextWithAnsi(formatRetryStatus(entry.status), width);
 	}
 	if (entry.role === "worker") {
-		return renderWorkerEntryLines(entry.state, width, {
-			folded: workerEntryFolded(entry, detail),
-			...(expandKey !== undefined && entry.state.assignmentId === latestFoldedWorkerId ? { expandKey } : {}),
-			unbounded: unboundedToolBodies,
-		});
+		return renderWorkerEntryLines(entry.state, width, { detail, terminalRows, unbounded: unboundedToolBodies });
 	}
 	// A settled assistant entry that rendered nothing at all contributes nothing.
 	// A mid-turn notice splits the transcript, so the events after it open a
@@ -1062,59 +840,36 @@ function renderEntryLines(
 		return [];
 	}
 	const lines: string[] = [];
-	// Reasoning renders in stream order, between the text and tool segments it
-	// came between. A closed stretch is a folded marker (or a head-anchored rail
-	// when expanded); the stretch still open while the turn is pending is the
-	// live indicator, with the tally's count and its own elapsed. The turn's
-	// settled count chip rides on the last marker once the turn has settled.
+	// Reasoning stays between the prose and actions that surround it.
 	const chipIndex = entry.pending ? -1 : lastThinkingIndex(entry);
 	const clioPrefix = entry.isError ? CLIO_PREFIX_ERROR : CLIO_PREFIX;
 	const proseWidth = Math.max(1, width - PROSE_GUTTER_WIDTH);
 	let labeled = false;
-	let liveIndicatorShown = false;
-	let latestThinkingExpanded = policyThinkingFold(detail) === "expanded";
 	for (let segIndex = 0; segIndex < entry.segments.length; segIndex += 1) {
 		const seg = entry.segments[segIndex];
 		if (seg === undefined) continue;
 		if (seg.kind === "thinking") {
 			if (seg.text.length === 0) continue;
-			const thinkingExpandedNow = thinkingExpanded(seg, detail);
-			latestThinkingExpanded = thinkingExpandedNow;
-			const live = entry.pending && !seg.finalized;
-			if (thinkingExpandedNow) lines.push(...renderThinkingRail(seg.text, width, live, unboundedToolBodies));
-			if (live) {
-				liveIndicatorShown = true;
-				// The bare marker level states that the model is thinking and
-				// nothing else: no count, no elapsed. An operator who opened the
-				// stretch anyway gets the progress line under the rail.
+			if (detail.reasoningRows > 0 || unboundedToolBodies) {
 				lines.push(
-					detail.thinking === "marker" && !thinkingExpandedNow
-						? dimLine(THINKING_HIDDEN_LABEL, width)
-						: renderLiveReasoningLine(
-								liveReasoning,
-								seg.startedAtMs === undefined ? undefined : Math.max(0, nowMs - seg.startedAtMs),
-								width,
-							),
+					...renderThinkingRail(seg.text, width, previewBudget(detail.reasoningRows, terminalRows), unboundedToolBodies),
 				);
-			} else if (!thinkingExpandedNow) {
+			} else {
 				const view = segIndex === chipIndex ? reasoningFromTurnUsage(entry.turnUsage) : UNMEASURED_REASONING;
 				lines.push(renderSettledThinkingMarker(view, width));
 			}
 			continue;
 		}
 		if (seg.kind === "tool") {
-			lines.push(
-				...renderToolSegmentLines(
-					seg,
-					width,
-					expandKey,
-					latestHintToolId,
-					nowMs,
-					unboundedToolBodies,
-					detail,
-					liveToolOutput,
-				),
-			);
+			const kind = detail.style === "compact" && !unboundedToolBodies ? observation(seg) : null;
+			let count = 1;
+			if (kind) {
+				while (entry.segments[segIndex + count] && observation(entry.segments[segIndex + count]) === kind) count++;
+			}
+			if (count > 1) {
+				lines.push(dimLine(`✓ ${kind === "read" ? `Read ${count} files` : `${count} ${kind} actions`} · /view`, width));
+				segIndex += count - 1;
+			} else lines.push(...renderToolSegmentLines(seg, width, nowMs, unboundedToolBodies, detail, terminalRows));
 			continue;
 		}
 		// Text and error segments share the reply-prefix bookkeeping: the first
@@ -1144,32 +899,7 @@ function renderEntryLines(
 			lines.push(...hangProseLines(rendered));
 		}
 	}
-	// A thinking stretch closes when text or a tool follows it so the historical
-	// marker stays in stream order. The turn-level reasoning projection is still
-	// live, though, and must remain beside the current tail instead of scrolling
-	// away with that marker. An open tail stretch already rendered this line.
-	if (entry.pending && hasThinking(entry) && !liveIndicatorShown) {
-		lines.push(
-			detail.thinking === "marker" && !latestThinkingExpanded
-				? dimLine(THINKING_HIDDEN_LABEL, width)
-				: renderLiveReasoningLine(liveReasoning, undefined, width),
-		);
-		liveIndicatorShown = true;
-	}
 	if (entry.turnUsage && !entry.pending) lines.push(...renderTurnUsageLine(entry.turnUsage, width, detail.receipt));
-	// The open thinking segment's line is the one that speaks for reasoning while
-	// the turn runs. The generic thinking verb is suppressed while it shows so
-	// the entry never carries two indicators for the same thing.
-	const shouldRenderStatus =
-		entry.pending &&
-		entry.statusLine !== null &&
-		entry.statusLine !== undefined &&
-		!(entry.statusLine.phase === "writing" && hasStreamingText(entry)) &&
-		!(entry.statusLine.phase === "thinking" && liveIndicatorShown);
-	if (!labeled && !hasVisibleOutput(entry)) lines.push(clioPrefix.trimEnd());
-	if (shouldRenderStatus) {
-		lines.push(`${STATUS_INDENT}${styleStatusVerb(entry.statusLine?.verb ?? "", entry.statusLine?.toneHint ?? "muted")}`);
-	}
 	return lines;
 }
 
@@ -1178,18 +908,12 @@ export function createChatPanel(options: ChatPanelOptions = {}): ChatPanel {
 	/** Assignment to its placed block, in placement order, so a streaming delta is O(1) to route. */
 	const workerEntries = new Map<string, WorkerTranscriptEntry>();
 	let dirty = true;
+	let runStartedAt: number | undefined;
 	let cachedWidth: number | undefined;
 	let cachedLines: string[] = [];
-	let cachedExpandKey: string | undefined;
 	let cachedDetail: TranscriptDetailPolicy | undefined;
-	let cachedLiveToolOutput: boolean | undefined;
-	/**
-	 * The verbosity the last frame rendered under, or null before any frame.
-	 * A change between frames is the operator asking for a new baseline
-	 * (`/output`, or Settings → Terminal), and every override goes with it.
-	 */
-	let lastVerbosity: OutputVerbosity | undefined | null = null;
 	let cachedTick = 0;
+	let cachedTerminalRows = 0;
 	/**
 	 * Did the last executed render put a counting elapsed line on screen? It is
 	 * what decides whether the render key carries a time tick at all, so a
@@ -1202,7 +926,7 @@ export function createChatPanel(options: ChatPanelOptions = {}): ChatPanel {
 	 * entries, which re-rendered everything past the cap on every dirty frame
 	 * (10 ms/frame at 800 entries). The ceiling bounds worst-case memory at
 	 * roughly 4096 rendered entries; past it, the excess only re-renders on
-	 * full-rebuild events (width change, expand-all), which the frozen prefix
+	 * full-rebuild events (width or style change), which the frozen prefix
 	 * below makes rare rather than per-frame.
 	 */
 	const MIN_ENTRY_RENDER_CACHE = 256;
@@ -1220,13 +944,6 @@ export function createChatPanel(options: ChatPanelOptions = {}): ChatPanel {
 	 * the render key changes.
 	 */
 	let frozen: { lines: string[]; through: number; key: string } | null = null;
-	let liveToolOutput = true;
-	/**
-	 * The run tally's reasoning, projected. It is panel-level rather than
-	 * per-entry because only the pending tail entry ever renders it, and that
-	 * entry is by definition unfrozen and uncached.
-	 */
-	let liveReasoning: ReasoningUsageView = UNMEASURED_REASONING;
 	const unboundedToolBodies = options.unboundedToolBodies === true;
 
 	const markDirty = (): void => {
@@ -1250,39 +967,8 @@ export function createChatPanel(options: ChatPanelOptions = {}): ChatPanel {
 		if (frozen !== null && frozen.through >= transcript.length) frozen = null;
 	};
 
-	const resolveExpandKey = (): string | undefined => {
-		const key = options.getToolExpandKey?.();
-		if (typeof key !== "string" || key.length === 0) return undefined;
-		return key;
-	};
-
 	const now = (): number => options.now?.() ?? Date.now();
-
-	/** The policy for a frame or a keypress, from whatever the settings say right now. */
-	const currentDetail = (): TranscriptDetailPolicy => transcriptDetail(options.getOutputVerbosity?.());
-
-	/**
-	 * Drop every operator override. Shared by the panel method and the
-	 * verbosity-change path in render, so both leave the same state behind.
-	 */
-	const dropFoldOverrides = (): void => {
-		for (const entry of transcript) {
-			if (entry.role === "replayBlock") {
-				entry.fold?.setFold(undefined);
-				continue;
-			}
-			if (entry.role === "worker") {
-				entry.fold = undefined;
-				continue;
-			}
-			if (entry.role !== "assistant") continue;
-			for (const seg of entry.segments) {
-				if (seg.kind === "tool" || seg.kind === "thinking") seg.fold = undefined;
-			}
-		}
-		clearRenderCaches();
-		markDirty();
-	};
+	const currentDetail = (): TranscriptDetailPolicy => transcriptDetail(options.getOutputStyle?.());
 
 	/**
 	 * Force an in-flight tool segment to a settled error line. A call blocked at
@@ -1461,37 +1147,6 @@ export function createChatPanel(options: ChatPanelOptions = {}): ChatPanel {
 	};
 
 	/**
-	 * Who advertises the fold key this frame: the newest worker card whose
-	 * effective state is folded, or the newest finished tool subline whose
-	 * effective state is folded with no worker card behind it. Effective means
-	 * override-or-policy, so the hint follows the block whatever the verbosity.
-	 * One surface at most, because the key reaches the newest foldable thing of
-	 * either kind, and a chord shown anywhere else would open something the
-	 * operator was not looking at. An already-open newest card advertises
-	 * nothing, since folding it again needs no invitation.
-	 */
-	const expandHintOwner = (detail: TranscriptDetailPolicy): { toolId: string | null; workerId: string | null } => {
-		let workerMayOwn = true;
-		for (let entryIndex = transcript.length - 1; entryIndex >= 0; entryIndex -= 1) {
-			const entry = transcript[entryIndex];
-			if (entry?.role === "worker") {
-				return {
-					toolId: null,
-					workerId: workerMayOwn && workerEntryFolded(entry, detail) ? entry.state.assignmentId : null,
-				};
-			}
-			if (entry?.role !== "assistant") continue;
-			for (let segIndex = entry.segments.length - 1; segIndex >= 0; segIndex -= 1) {
-				const seg = entry.segments[segIndex];
-				if (seg?.kind !== "tool") continue;
-				if (seg.finished && !toolSegmentExpanded(seg, detail)) return { toolId: seg.id, workerId: null };
-				workerMayOwn = false;
-			}
-		}
-		return { toolId: null, workerId: null };
-	};
-
-	/**
 	 * Where a newly seen worker block belongs. An agent-origin run nests under
 	 * the assistant entry holding the tool call that spawned it, behind any
 	 * sibling blocks the same call already placed, so a fan-out reads top to
@@ -1510,12 +1165,6 @@ export function createChatPanel(options: ChatPanelOptions = {}): ChatPanel {
 		while (transcript[index]?.role === "worker") index += 1;
 		return index >= transcript.length ? null : index;
 	};
-
-	/** True when the entry owns the tool the expand hint currently points at. */
-	const entryContainsHint = (entry: TranscriptEntry, latestHintToolId: string | null): boolean =>
-		latestHintToolId !== null &&
-		entry.role === "assistant" &&
-		entry.segments.some((segment) => segment.kind === "tool" && segment.id === latestHintToolId);
 
 	/** True when the entry renders at least one counting elapsed line this frame. */
 	const entryHasRunningTool = (entry: TranscriptEntry): boolean =>
@@ -1546,13 +1195,8 @@ export function createChatPanel(options: ChatPanelOptions = {}): ChatPanel {
 
 	const render = (width: number): string[] => {
 		const startedAt = performance.now();
-		const expandKey = resolveExpandKey();
-		const verbosity = options.getOutputVerbosity?.();
-		// A new verbosity is a new baseline: the operator's per-block overrides
-		// were answers to the old one, so they go before the frame is built.
-		if (lastVerbosity !== null && verbosity !== lastVerbosity) dropFoldOverrides();
-		lastVerbosity = verbosity;
-		const detail = transcriptDetail(verbosity);
+		const detail = currentDetail();
+		const terminalRows = options.getTerminalRows?.() ?? 40;
 		const nowMs = now();
 		// `dirty` is set on mutation and never on a tick, so without time in the
 		// key a running tool's elapsed counter advanced only when something
@@ -1562,36 +1206,23 @@ export function createChatPanel(options: ChatPanelOptions = {}): ChatPanel {
 		// pinned to 0 whenever nothing is counting so a settled transcript
 		// re-renders no more often than it did before.
 		const tick = renderedRunningTool ? Math.floor(nowMs / 100) : 0;
-		// The hit guard runs before any transcript scan. expandHintOwner
-		// walks the whole transcript when the newest tool is expanded or absent, and
-		// it is not part of the panel-level key, so computing it above the guard cost
-		// a full scan per frame for a value the early return discards.
 		if (
 			!dirty &&
 			cachedWidth === width &&
-			cachedExpandKey === expandKey &&
+			cachedTerminalRows === terminalRows &&
 			cachedDetail === detail &&
-			cachedLiveToolOutput === liveToolOutput &&
 			cachedTick === tick
 		) {
 			options.onRenderMetrics?.({ durationMs: performance.now() - startedAt, cacheHit: true, entriesRendered: 0 });
 			return cachedLines;
 		}
-		const { toolId: latestHintToolId, workerId: latestFoldedWorkerId } = expandHintOwner(detail);
-		// The hint id is deliberately NOT part of the shared key: it changes on
-		// every finished collapsed tool, and keying every entry on it re-rendered
-		// the entire transcript per tool completion. Only the entry that contains
-		// the hint tool renders differently, so only that entry's key carries it.
-		// The tick stays out of the entry key: a settled entry renders the same
-		// bytes at every tick, and keying it on time would drop the entry cache
-		// and the frozen prefix ten times a second. Only the panel-level guard
-		// above is time-keyed, so a tick re-renders the live tail and nothing else.
-		const baseKey = `${width}|${expandKey ?? ""}|${detail.toolBody}:${detail.runningTool}:${detail.thinking}:${detail.worker}:${detail.receipt}:${detail.errors}|${liveToolOutput}`;
+		// Stable entries cache by width, height budget, and preset.
+		const baseKey = `${width}|${terminalRows}|${detail.style}`;
 		const capacity = entryCacheCapacity();
 		if (frozen !== null && frozen.key !== baseKey) frozen = null;
 		const out: string[] = frozen === null ? [] : frozen.lines.slice();
 		const startIndex = frozen === null ? 0 : frozen.through;
-		// The freeze extends over the contiguous run of stable, hint-free leading
+		// The freeze extends over the contiguous run of stable leading
 		// entries; it is captured after the loop from what this frame rendered.
 		let freezeThrough = startIndex;
 		let freezeLineCount = out.length;
@@ -1609,16 +1240,9 @@ export function createChatPanel(options: ChatPanelOptions = {}): ChatPanel {
 			// five scouts costs five rows, which is what makes the folded default
 			// worth having. Anything else keeps the blank line between entries.
 			const previous = i > 0 ? transcript[i - 1] : undefined;
-			const stacksOnPrevious =
-				entry.role === "worker" &&
-				previous?.role === "worker" &&
-				workerEntryFolded(entry, detail) &&
-				workerEntryFolded(previous, detail);
+			const stacksOnPrevious = entry.role === "worker" && previous?.role === "worker" && detail.style === "compact";
 			if (i > 0 && !stacksOnPrevious) out.push("");
-			const containsHint =
-				entryContainsHint(entry, latestHintToolId) ||
-				(entry.role === "worker" && entry.state.assignmentId === latestFoldedWorkerId);
-			const entryKey = containsHint ? `${baseKey}|hint:${latestHintToolId}|${latestFoldedWorkerId}` : baseKey;
+			const entryKey = baseKey;
 			const cached = entryRenderCache.get(entry);
 			const cacheable = i >= transcript.length - capacity && entry.role !== "replayBlock" && entryIsStable(entry);
 			if (cacheable && cached?.key === entryKey) {
@@ -1627,18 +1251,7 @@ export function createChatPanel(options: ChatPanelOptions = {}): ChatPanel {
 				for (const line of cached.lines) out.push(line);
 			} else {
 				entriesRendered += 1;
-				const renderedEntry = renderEntryLines(
-					entry,
-					width,
-					expandKey,
-					latestHintToolId,
-					latestFoldedWorkerId,
-					nowMs,
-					unboundedToolBodies,
-					detail,
-					liveToolOutput,
-					liveReasoning,
-				);
+				const renderedEntry = renderEntryLines(entry, width, nowMs, unboundedToolBodies, detail, terminalRows);
 				for (const line of renderedEntry) out.push(line);
 				if (cacheable) {
 					entryRenderCache.set(entry, { key: entryKey, lines: renderedEntry });
@@ -1649,7 +1262,7 @@ export function createChatPanel(options: ChatPanelOptions = {}): ChatPanel {
 					}
 				}
 			}
-			if (freezeOpen && i === freezeThrough && entryIsStable(entry) && !containsHint) {
+			if (freezeOpen && i === freezeThrough && entryIsStable(entry)) {
 				freezeThrough = i + 1;
 				freezeLineCount = out.length;
 			} else {
@@ -1659,9 +1272,8 @@ export function createChatPanel(options: ChatPanelOptions = {}): ChatPanel {
 		frozen = freezeThrough > 0 ? { lines: out.slice(0, freezeLineCount), through: freezeThrough, key: baseKey } : null;
 		cachedLines = out;
 		cachedWidth = width;
-		cachedExpandKey = expandKey;
 		cachedDetail = detail;
-		cachedLiveToolOutput = liveToolOutput;
+		cachedTerminalRows = terminalRows;
 		cachedTick = tick;
 		renderedRunningTool = sawRunningTool;
 		dirty = false;
@@ -1674,8 +1286,8 @@ export function createChatPanel(options: ChatPanelOptions = {}): ChatPanel {
 			transcript.push({ role: "user", text, ...(status ? { status } : {}) });
 			markDirty();
 		},
-		appendReplayBlock(renderBlock: ReplayBlockRenderer, isLive?: () => boolean, fold?: ReplayBlockFoldControl): void {
-			transcript.push({ role: "replayBlock", renderBlock, isLive, fold });
+		appendReplayBlock(renderBlock: ReplayBlockRenderer, isLive?: () => boolean): void {
+			transcript.push({ role: "replayBlock", renderBlock, isLive });
 			markDirty();
 		},
 		applyWorkerState(state: WorkerEntryState): void {
@@ -1703,135 +1315,58 @@ export function createChatPanel(options: ChatPanelOptions = {}): ChatPanel {
 		workerStates(): ReadonlyArray<WorkerEntryState> {
 			return [...workerEntries.values()].map((entry) => entry.state);
 		},
-		toggleLastToolExpanded(): boolean {
-			// The key owns the newest foldable thing, whichever kind it is. A worker
-			// block the operator just watched land is what they mean by "expand
-			// that", not the tool call two screens up that spawned it. Every flip
-			// is an override away from the block's effective state, so the same
-			// key opens a folded block under minimal and folds an open one under
-			// verbose.
-			const detail = currentDetail();
-			for (let entryIndex = transcript.length - 1; entryIndex >= 0; entryIndex -= 1) {
-				const entry = transcript[entryIndex];
-				// A caller-rendered block that owns fold state (the operator's own
-				// `!` bash row) is foldable too, and it is usually the newest thing
-				// on screen when the key is pressed.
-				if (entry?.role === "replayBlock" && entry.fold !== undefined) {
-					entry.fold.setFold(toggledFold(resolveFold(entry.fold.fold(), entry.fold.policyFold(detail))));
-					clearRenderCaches();
-					markDirty();
-					return true;
-				}
-				if (entry?.role === "worker") {
-					entry.fold = workerEntryFolded(entry, detail) ? "expanded" : "folded";
-					clearRenderCaches();
-					markDirty();
-					return true;
-				}
-				if (entry?.role !== "assistant") continue;
-				for (let segIndex = entry.segments.length - 1; segIndex >= 0; segIndex -= 1) {
-					const seg = entry.segments[segIndex];
-					if (seg?.kind !== "tool") continue;
-					seg.fold = toolSegmentExpanded(seg, detail) ? "folded" : "expanded";
-					clearRenderCaches();
-					markDirty();
-					return true;
-				}
-			}
-			return false;
-		},
-		toggleAllToolsExpanded(): boolean {
-			const detail = currentDetail();
-			const tools: ToolSegment[] = [];
-			const workers: WorkerTranscriptEntry[] = [];
-			const blocks: ReplayBlockFoldControl[] = [];
+		inspectionArtifacts(): ViewArtifact[] {
+			const artifacts: ViewArtifact[] = [];
+			const add = (title: string, render: () => string[]) => {
+				const index = artifacts.length;
+				artifacts.push({
+					id: `transcript:${index + 1}`,
+					category: "transcript",
+					title,
+					timestamp: now() + index,
+					searchText: [title],
+					load: async () => ({ format: "text", lines: render().map(redactSecretString) }),
+				});
+			};
 			for (const entry of transcript) {
-				if (entry.role === "replayBlock") {
-					if (entry.fold !== undefined) blocks.push(entry.fold);
-					continue;
-				}
-				if (entry.role === "worker") {
-					workers.push(entry);
-					continue;
-				}
-				if (entry.role !== "assistant") continue;
-				for (const seg of entry.segments) {
-					if (seg.kind === "tool") tools.push(seg);
-				}
-			}
-			if (tools.length === 0 && workers.length === 0 && blocks.length === 0) return false;
-			// One folded block anywhere means "open everything"; otherwise fold
-			// everything. Either way every block gets an explicit override.
-			const expand =
-				tools.some((seg) => !toolSegmentExpanded(seg, detail)) ||
-				workers.some((entry) => workerEntryFolded(entry, detail)) ||
-				blocks.some((fold) => resolveFold(fold.fold(), fold.policyFold(detail)) === "folded");
-			const next: Fold = expand ? "expanded" : "folded";
-			for (const seg of tools) seg.fold = next;
-			for (const entry of workers) entry.fold = next;
-			for (const fold of blocks) fold.setFold(next);
-			clearRenderCaches();
-			markDirty();
-			return true;
-		},
-		clearFoldOverrides(): void {
-			dropFoldOverrides();
-		},
-		toggleLastThinking(): boolean {
-			const detail = currentDetail();
-			for (let entryIndex = transcript.length - 1; entryIndex >= 0; entryIndex -= 1) {
-				const entry = transcript[entryIndex];
-				if (entry?.role !== "assistant") continue;
-				for (let segIndex = entry.segments.length - 1; segIndex >= 0; segIndex -= 1) {
-					const segment = entry.segments[segIndex];
-					if (segment?.kind !== "thinking" || segment.text.length === 0) continue;
-					segment.fold = thinkingExpanded(segment, detail) ? "folded" : "expanded";
-					clearRenderCaches();
-					markDirty();
-					return true;
+				if (entry.role === "assistant") {
+					for (const seg of entry.segments) {
+						if (seg.kind === "thinking" && seg.text) add("Thinking · supplied reasoning", () => seg.text.split("\n"));
+						if (seg.kind === "tool")
+							add(`${seg.name} · ${seg.id}`, () =>
+								renderToolExecution(
+									{
+										toolCallId: seg.id,
+										toolName: seg.name,
+										args: seg.args,
+										result: seg.result ?? seg.partialResult,
+										isError: seg.isError,
+										outcome: seg.settlement,
+										blockReason: seg.blockReason,
+										resultSummary: seg.resultSummary,
+									},
+									120,
+									{ unbounded: true, diffStyle: "plain" },
+								),
+							);
+					}
+				} else if (entry.role === "worker") {
+					add(`${entry.state.agentId} · worker ${entry.state.runId}`, () =>
+						renderWorkerEntryLines(entry.state, 120, { unbounded: true }),
+					);
+				} else if (entry.role === "replayBlock") {
+					add("Session action", () => entry.renderBlock(120, transcriptDetail("detailed"), true));
 				}
 			}
-			return false;
-		},
-		toggleAllThinking(): boolean {
-			const detail = currentDetail();
-			const segments: ThinkingSegment[] = [];
-			for (const entry of transcript) {
-				if (entry.role !== "assistant") continue;
-				for (const segment of entry.segments) {
-					if (segment.kind === "thinking" && segment.text.length > 0) segments.push(segment);
-				}
-			}
-			if (segments.length === 0) return false;
-			const expand = segments.some((segment) => !thinkingExpanded(segment, detail));
-			for (const segment of segments) segment.fold = expand ? "expanded" : "folded";
-			clearRenderCaches();
-			markDirty();
-			return true;
+			return artifacts;
 		},
 		isThinkingExpanded(): boolean {
-			// The live stretch lives on the newest assistant entry; its own override,
-			// if any, is the one that applies. Before a stretch arrives, the policy answers.
-			const detail = currentDetail();
-			const index = lastAssistantIndex(transcript);
-			const entry = index === null ? undefined : transcript[index];
-			if (entry?.role === "assistant") {
-				for (let segIndex = entry.segments.length - 1; segIndex >= 0; segIndex -= 1) {
-					const segment = entry.segments[segIndex];
-					if (segment?.kind === "thinking" && segment.text.length > 0) return thinkingExpanded(segment, detail);
-				}
-			}
-			return policyThinkingFold(detail) === "expanded";
-		},
-		toggleLiveToolOutput(): boolean {
-			liveToolOutput = !liveToolOutput;
-			markDirty();
-			return liveToolOutput;
+			return currentDetail().reasoningRows > 0;
 		},
 		reset(): void {
 			transcript.length = 0;
+			runStartedAt = undefined;
 			workerEntries.clear();
-			liveReasoning = UNMEASURED_REASONING;
 			clearRenderCaches();
 			markDirty();
 		},
@@ -1843,6 +1378,10 @@ export function createChatPanel(options: ChatPanelOptions = {}): ChatPanel {
 			markDirty();
 		},
 		applyEvent(event: ChatLoopEvent): void {
+			if (event.type === "agent_start") {
+				runStartedAt = now();
+				return;
+			}
 			if (event.type === "agent_status") {
 				return;
 			}
@@ -2149,7 +1688,21 @@ export function createChatPanel(options: ChatPanelOptions = {}): ChatPanel {
 					const target = index === null ? undefined : transcript[index];
 					if (target?.role === "assistant") {
 						invalidateEntryCache(target);
-						target.turnUsage = runUsage;
+						const stop = event.messages.filter((message) => message.role === "assistant").at(-1) as
+							| { stopReason?: string }
+							| undefined;
+						target.turnUsage = {
+							...runUsage,
+							...(runStartedAt === undefined ? {} : { elapsedMs: Math.max(0, now() - runStartedAt) }),
+							outcome:
+								stop?.stopReason === "error"
+									? "Failed"
+									: stop?.stopReason === "aborted"
+										? "Cancelled"
+										: stop?.stopReason === "length"
+											? "Output limit"
+											: "Done",
+						};
 					}
 					for (let after = (index ?? -1) + 1; after < transcript.length; after += 1) {
 						const later = transcript[after];
@@ -2183,36 +1736,9 @@ export function createChatPanel(options: ChatPanelOptions = {}): ChatPanel {
 						invalidateEntryCache(entry);
 						closeOpenThinking(entry);
 						entry.pending = false;
-						entry.statusLine = null;
 						entry.messageStartSegmentIndex = undefined;
 					}
 				}
-				markDirty();
-			}
-		},
-		setLiveReasoning(view: ReasoningUsageView | null): void {
-			const next = view ?? UNMEASURED_REASONING;
-			if (next.tokens === liveReasoning.tokens && next.provenance === liveReasoning.provenance) return;
-			liveReasoning = next;
-			// The line lives on the pending tail entry, which the freeze may already
-			// cover if nothing has mutated since the last settle.
-			unfreezeTail();
-			const last = transcript[transcript.length - 1];
-			if (last !== undefined) invalidateEntryCache(last);
-			markDirty();
-		},
-		setStatusLine(line): void {
-			if (line) {
-				const assistant = ensureAssistant();
-				assistant.pending = true;
-				assistant.statusLine = line;
-				markDirty();
-				return;
-			}
-			const last = transcript[transcript.length - 1];
-			if (last && last.role === "assistant") {
-				unfreezeTail();
-				last.statusLine = null;
 				markDirty();
 			}
 		},

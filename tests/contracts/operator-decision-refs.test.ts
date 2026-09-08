@@ -182,7 +182,7 @@ describe("active decisions on actual operator dispatch paths", () => {
 							agents,
 							getDecisionBoard,
 							io: { stdout: noop, stderr: noop },
-							chatPanel: { appendReplayBlock: noop, appendUser: noop, clearFoldOverrides: noop },
+							chatPanel: { appendReplayBlock: noop, appendUser: noop },
 							requestRender: () => {
 								if (receipts.length > 0 && path === "run") resolveSettled();
 							},

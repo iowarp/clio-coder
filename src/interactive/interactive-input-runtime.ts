@@ -30,11 +30,7 @@ export interface InteractiveInputKeyActionDeps {
 	cycleScopedModelForward: () => void;
 	cycleScopedModelBackward: () => void;
 	dismissNotifications: () => void;
-	toggleToolExpansion: () => void;
-	toggleAllToolExpansion: () => void;
-	toggleLiveToolOutput: () => void;
-	toggleThinkingExpansion: () => void;
-	toggleAllThinkingExpansion: () => void;
+	cycleOutputStyle: () => void;
 	openExternalEditor: () => void;
 	queueFollowUp: () => void;
 	interruptWithMessage: () => void;
@@ -49,6 +45,7 @@ export interface InteractiveInputRuntimeDeps {
 	dispatchAction: (id: ClioKeybinding, deps: InteractiveInputKeyActionDeps) => boolean;
 	actions: {
 		canExit(): boolean;
+		cycleOutputStyle(): void;
 		availableThinkingLevels(): ReadonlyArray<string>;
 		onCycleThinking(): void;
 		cycleScopedModelForward(): void;
@@ -104,13 +101,6 @@ export interface InteractiveInputRuntimeDeps {
 		list(): ReadonlyArray<{ id: string }>;
 		dismiss(id: string): void;
 		dismissAll(): void;
-	};
-	chatPanel: {
-		toggleLastToolExpanded(): boolean;
-		toggleAllToolsExpanded(): boolean;
-		toggleLiveToolOutput(): void;
-		toggleLastThinking(): boolean;
-		toggleAllThinking(): boolean;
 	};
 	shutdown: {
 		stopTickers(): void;
@@ -171,18 +161,7 @@ export function createInteractiveInputRuntime(deps: InteractiveInputRuntimeDeps)
 			deps.requestRender();
 		},
 		dismissNotifications: () => controller.dismissNotifications(),
-		toggleToolExpansion: () => controller.toggleToolExpansion(),
-		toggleAllToolExpansion: () => {
-			if (deps.chatPanel.toggleAllToolsExpanded()) deps.requestRender();
-		},
-		toggleLiveToolOutput: () => {
-			deps.chatPanel.toggleLiveToolOutput();
-			deps.requestRender();
-		},
-		toggleThinkingExpansion: () => controller.toggleThinkingExpansion(),
-		toggleAllThinkingExpansion: () => {
-			if (deps.chatPanel.toggleAllThinking()) deps.requestRender();
-		},
+		cycleOutputStyle: deps.actions.cycleOutputStyle,
 		openExternalEditor: deps.editorSubmit.openExternalEditorForInput,
 		queueFollowUp: deps.editorSubmit.queueFollowUpFromEditor,
 		interruptWithMessage: deps.editorSubmit.interruptFromEditor,
@@ -277,10 +256,6 @@ export function createInteractiveInputRuntime(deps: InteractiveInputRuntimeDeps)
 		listNotifications: () => deps.notifications.list(),
 		dismissNotification: (id) => deps.notifications.dismiss(id),
 		dismissAllNotifications: () => deps.notifications.dismissAll(),
-		toggleLastToolExpanded: () => deps.chatPanel.toggleLastToolExpanded(),
-		toggleAllToolsExpanded: () => deps.chatPanel.toggleAllToolsExpanded(),
-		toggleLastThinking: () => deps.chatPanel.toggleLastThinking(),
-		toggleAllThinking: () => deps.chatPanel.toggleAllThinking(),
 		shutdownDisposers: [
 			() => deps.shutdown.stopTickers(),
 			() => leaderKeys.dispose(),
