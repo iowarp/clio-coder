@@ -30,6 +30,7 @@ function terminal(home: ReturnType<typeof makeScratchHome>, args: string[] = [],
 		rows: 45,
 	});
 	let output = "";
+	let expectedOffset = 0;
 	let exited = false;
 	child.onData((data) => {
 		output += data;
@@ -53,12 +54,15 @@ function terminal(home: ReturnType<typeof makeScratchHome>, args: string[] = [],
 		screen: () => stripVTControlCharacters(output),
 		async expect(cue: string) {
 			const deadline = Date.now() + 15_000;
-			while (!stripVTControlCharacters(output).includes(cue) && !exited && Date.now() < deadline)
+			while (stripVTControlCharacters(output).indexOf(cue, expectedOffset) < 0 && !exited && Date.now() < deadline)
 				await new Promise((resolve) => setTimeout(resolve, 20));
-			ok(stripVTControlCharacters(output).includes(cue), `Expected ${JSON.stringify(cue)}; exited=${exited}\n${output}`);
+			const index = stripVTControlCharacters(output).indexOf(cue, expectedOffset);
+			ok(index >= 0, `Expected ${JSON.stringify(cue)}; exited=${exited}\n${output}`);
+			expectedOffset = index + cue.length;
 		},
 		send(keys: string) {
 			output = "";
+			expectedOffset = 0;
 			child.write(keys);
 		},
 		async quit() {
@@ -117,6 +121,7 @@ describe("smoke/configure on a real terminal", { skip: process.platform === "win
 			tty.send(`http://127.0.0.1:1${ENTER}`);
 			await tty.expect("Could not connect:");
 			strictEqual(existsSync(join(home.dir, "config/settings.yaml")), false);
+			await tty.expect("Endpoint URL");
 			tty.send(CLEAR + url + ENTER);
 			await tty.expect("Ready to connect");
 			ok(!tty.screen().includes("API key"));
@@ -203,6 +208,7 @@ describe("smoke/configure on a real terminal", { skip: process.platform === "win
 			await tty.expect("API key (saved locally");
 			tty.send(`wrong-key${ENTER}`);
 			await tty.expect("The endpoint rejected that key");
+			await tty.expect("API key (saved locally");
 			tty.send(`quick-key${ENTER}`);
 			await tty.expect("Choose the model for Clio");
 			ok(!tty.screen().includes("embeddings"));
@@ -332,10 +338,12 @@ describe("smoke/configure on a real terminal", { skip: process.platform === "win
 			await tty.expect("❯ low");
 			tty.send(DOWN + DOWN + ENTER);
 			await tty.expect("Chat thinking level set to high");
+			await tty.expect("esc back");
 			tty.send(DOWN + DOWN + ENTER);
 			await tty.expect("enter accept");
 			tty.send(CLEAR + ENTER);
 			await tty.expect("Chat default model cleared");
+			await tty.expect("esc back");
 			tty.send(BACK);
 			await tty.expect("❯ Models & Thinking");
 			tty.send(DOWN.repeat(3) + ENTER);
@@ -406,6 +414,7 @@ describe("smoke/configure on a real terminal", { skip: process.platform === "win
 			await tty.expect("Target id");
 			tty.send(`${CLEAR}existing${ENTER}`);
 			await tty.expect("already exists");
+			await tty.expect("enter accept");
 			tty.send(`${CLEAR}second${ENTER}`);
 			await tty.expect("How should Clio get the API key?");
 			tty.send(`\x1b[A${ENTER}`);
