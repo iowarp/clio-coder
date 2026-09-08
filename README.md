@@ -418,8 +418,8 @@ Requirements:
 - Optional: Deno `>=2.9.5` for compiling or running the canonical Workbench GUI
 
 Registry commands below install the version published under `latest`. This
-checkout prepares **0.4.5**; until that release is published, `latest` remains
-**0.4.4**. The v0.4.5 source workflow uses pnpm **10.34.5**, pinned in
+checkout prepares **0.4.6**. The latest released version is **0.4.5**.
+The source workflow uses pnpm **10.34.5**, pinned in
 `package.json`, and Pi **0.85.1**.
 
 ### Install with npm, pnpm, or Bun
@@ -443,7 +443,7 @@ clio-coder doctor
 ```
 
 To select a particular published version, append `@<version>` to the package
-name. For example, `npm install -g @iowarp/clio-coder@0.4.4` installs v0.4.4.
+name. For example, `npm install -g @iowarp/clio-coder@0.4.5` installs v0.4.5.
 
 ### Run without a global installation
 
@@ -494,7 +494,7 @@ Use the manager that owns the installation:
 | Bun | `bun add -g @iowarp/clio-coder@latest` | `bun remove -g @iowarp/clio-coder` |
 | Yarn Classic | `yarn global add @iowarp/clio-coder@latest` | `yarn global remove @iowarp/clio-coder` |
 
-After a package-manager update, run the installed v0.4.5 CLI's local migration
+After a package-manager update, run the installed CLI's local migration
 and metadata checks without another package installation:
 
 ```bash
@@ -534,9 +534,9 @@ the source build steps below.
 
 ### Install from source
 
-From source, the v0.4.5 release uses this pinned pnpm workflow. The tag becomes
-available when the release is cut; before then, use an existing local `v045`
-checkout with the steps following `cd clio-coder`:
+From source, the latest stable v0.4.5 release uses this pinned pnpm workflow.
+For upcoming 0.4.6 changes, use your local `v046` checkout with the steps
+following `cd clio-coder`:
 
 ```bash
 git clone --branch v0.4.5 https://github.com/iowarp/clio-coder.git
