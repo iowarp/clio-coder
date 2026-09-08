@@ -116,7 +116,7 @@ and canonical remote heads. The expected canonical head set is exactly
 <code>refs/heads/main</code>; every survivor needs an owner and purpose.</li>
 </ol>
 <p>Maintainer release candidates are local-only and use a compact branch name
-that cannot collide with their tag: branch <code>v043</code>, tag <code>v0.4.3</code>. Gate the exact
+that cannot collide with their tag: branch <code>v046</code>, tag <code>v0.4.6</code>. Gate the exact
 candidate, require fetched <code>origin/main</code> to be its ancestor, fast-forward local
 <code>main</code>, fetch again, and push only <code>refs/heads/main:refs/heads/main</code> with
 explicit authorization. After CI passes, push only the fully qualified

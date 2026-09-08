@@ -2,7 +2,9 @@
 
 All notable changes to Clio Coder are documented in this file. The format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/) and versions follow Semantic Versioning; pre-1.0 minor releases may include incompatible changes.
 
-## Unreleased
+## 0.4.6 - 2026-09-08
+
+This release restores reliable setup with Quick Connect and simplifies the terminal transcript with three consistent output styles. New users can connect a model and start working, while existing users retain their saved settings and can inspect more detail when needed.
 
 ### Added
 - Make Quick Connect the first launcher option, with Settings and Diagnostics alongside it. Connect an endpoint, supply a key when needed, filter the live model list, review, and Connect. A single model skips selection; reconnecting preserves existing preferences and fleet assignments. Add `--quick` and `--settings` shortcuts.
@@ -13,6 +15,7 @@ All notable changes to Clio Coder are documented in this file. The format follow
 - Give the footer sole ownership of live activity, with accurate concurrent-tool state and background worker counts. Remove separate reasoning, tool expansion, and live-output toggles.
 - Simplify the README around installation, the first session, scientific software, and HPC. Keep advanced configuration and multi-agent workflows in collapsible sections, and expand dependency and integration acknowledgements.
 - Use one worker, no prompt prewarm, and automatic TTY streaming as shipped defaults. Preserve explicitly saved values and document the full recommended default policy.
+- Check the ACP registry version against package metadata during release audits, and make version alignment and issue reconciliation explicit release-cut steps.
 
 ### Fixed
 - Fix `configure` exiting successfully at the first question after an arrow-key menu. Scope readline to active questions, use arrow selectors and editable text fields for settings, and preserve menu position on Back.

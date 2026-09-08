@@ -115,6 +115,14 @@ function checkVersionCoherence() {
 	}
 	let changelog;
 	try {
+		const registry = JSON.parse(readFileSync(join(root, "assets/acp-registry/agent.json"), "utf8"));
+		if (registry.version !== version) {
+			errors.push(`ACP registry version ${registry.version} does not match package.json version ${version}`);
+		}
+	} catch (error) {
+		errors.push(`unable to read ACP registry manifest: ${error instanceof Error ? error.message : String(error)}`);
+	}
+	try {
 		changelog = readFileSync(join(root, "CHANGELOG.md"), "utf8");
 	} catch (error) {
 		errors.push(`unable to read CHANGELOG.md: ${error instanceof Error ? error.message : String(error)}`);

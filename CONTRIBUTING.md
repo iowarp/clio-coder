@@ -95,22 +95,23 @@ historical record, not a reusable current checklist.
 
 1. During development, keep the top changelog section at `## Unreleased`. A
    maintainer collects release work on a **local-only** compact candidate
-   branch (`v043` for `v0.4.3`) and bumps `version` there. Never push this
+   branch (`v046` for `v0.4.6`) and bumps `version` there. Never push this
    candidate branch to the canonical repository. Before the cut, retitle the
-   changelog section `## <version> - YYYY-MM-DD`.
+   changelog section `## <version> - YYYY-MM-DD`, align the ACP registry manifest
+   version, and update the README's install tag and release notices.
 2. Run `pnpm run ci:release` on the exact candidate. It runs the full `ci` gate,
    then `scripts/check-release.mjs`, which verifies the built `dist/` and
    audits the exact npm package contents.
 3. Fetch `origin`, require the fetched `origin/main` to be the candidate's
-   ancestor, then fast-forward local `main` with `git merge --ff-only v043`.
+   ancestor, then fast-forward local `main` with `git merge --ff-only v046`.
    Re-run the release gate if the candidate changed and verify local `main`
    equals the reviewed candidate SHA.
 4. Fetch once more and stop on unexpected movement. With explicit maintainer
    authorization, push only `refs/heads/main:refs/heads/main`; no topic or
    release-candidate branch is pushed to canonical `origin`.
 5. Require CI for that exact `main` SHA to pass. Create the annotated tag on
-   that commit and push only it: `git tag -a v0.4.3` followed by
-   `git push origin refs/tags/v0.4.3`. The tag must match `package.json`; the
+   that commit and push only it: `git tag -a v0.4.6` followed by
+   `git push origin refs/tags/v0.4.6`. The tag must match `package.json`; the
    release workflow refuses mismatches.
 6. `.github/workflows/release.yml` verifies the tag against `package.json`,
    runs `pnpm run ci:release` on the tagged tree, and creates the GitHub release
@@ -118,7 +119,11 @@ historical record, not a reusable current checklist.
    body. It does not publish to npm.
 7. A maintainer publishes from the tagged commit with `npm publish`;
    `prepublishOnly` runs the same `ci:release` gate in release mode first.
-8. Verify the release and tag, then delete the local compact candidate branch.
+8. Verify the release and tag. Reconcile milestone tickets against tagged
+   implementation and acceptance evidence; plain issue references and release
+   tags do not close tickets. Verify automatic closures, explicitly close
+   completed tickets that remain open, and carry incomplete work forward before
+   closing the milestone. Then delete the local compact candidate branch.
    The canonical remote returns to its steady state: `main` plus immutable
    release tags and GitHub releases, with no release branch.
 
@@ -210,8 +215,8 @@ Examples:
 - `docs/github-governance`
 
 Maintainer branches are local-only. A temporary release candidate uses the
-compact version spelling with no dots: `v043` for release tag `v0.4.3`. Never
-create or push a branch named `v0.4.3`; dotted `vX.Y.Z` names belong exclusively
+compact version spelling with no dots: `v046` for release tag `v0.4.6`. Never
+create or push a branch named `v0.4.6`; dotted `vX.Y.Z` names belong exclusively
 to immutable release tags. The compact branch is local scaffolding and is
 deleted after its reviewed commit reaches `main` and the release succeeds.
 
@@ -244,7 +249,7 @@ verification and teardown safely. After a PR is merged or a release is tagged:
    `refs/heads/main`; every additional head is a cleanup failure.
 
 For a release, first verify `refs/tags/vX.Y.Z^{commit}` equals the reviewed
-commit on `main`, then close the compact candidate branch such as `v043`.
+commit on `main`, then close the compact candidate branch such as `v046`.
 Published tags are never deleted, moved, or recreated during cleanup.
 
 ## Commits

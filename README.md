@@ -65,8 +65,7 @@ workspace edits with command approval, one worker at a time, a $5 tracked sessio
 budget, and a regular terminal interface. Other settings can wait. Escape goes
 back during setup; `clio-coder configure --settings` opens the full menu.
 
-This checkout is preparing **0.4.6**. Registry installation uses the published
-release; Quick Connect is part of the upcoming update. See
+**New in 0.4.6:** Quick Connect and simpler output styles. See
 [Install](#install) for source builds and other package managers.
 
 ## Built for scientific software
@@ -310,7 +309,7 @@ can also be installed with your package manager. See
 From source, the latest stable release uses the pinned pnpm workflow:
 
 ```bash
-git clone --branch v0.4.5 https://github.com/iowarp/clio-coder.git
+git clone --branch v0.4.6 https://github.com/iowarp/clio-coder.git
 cd clio-coder
 corepack enable pnpm
 pnpm run install:local
@@ -318,10 +317,6 @@ export PATH="$HOME/.local/bin:$PATH"
 hash -r
 "$HOME/.local/bin/clio-coder" --version
 ```
-
-For the upcoming 0.4.6 changes, use your development checkout on `v046` and run
-the steps after `cd clio-coder`. That branch must be available locally; the
-stable clone command above installs the released version.
 
 The installer resolves dependencies, builds, and links the CLI into
 `${CLIO_CODER_BIN_DIR:-$HOME/.local/bin}`. If Corepack is unavailable, install

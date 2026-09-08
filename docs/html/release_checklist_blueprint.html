@@ -55,16 +55,19 @@ repeatable, and reversible. Every step following the authorization boundary affe
 canonical remote state or publishes immutable packages.</p>
 <h2>Part 1: Candidate Preparation on a Local Compact Branch</h2>
 <p>Maintainers prepare release candidates on a local-only compact branch named after
-the version without punctuation, such as <code>v044</code> for version <code>0.4.4</code>. Dotted branch
-names like <code>v0.4.4</code> are forbidden because dotted names belong exclusively to immutable
+the version without punctuation, such as <code>v046</code> for version <code>0.4.6</code>. Dotted branch
+names like <code>v0.4.6</code> are forbidden because dotted names belong exclusively to immutable
 tags. The canonical repository hosts only <code>main</code>, and no release candidate branch is
 ever pushed to canonical origin.</p>
 <ol>
 <li><p>Ensure the working tree is clean and updated from canonical origin:</p>
-<pre><code class="language-bash">git checkout -b v044 origin/main
+<pre><code class="language-bash">git checkout -b v046 origin/main
 </code></pre>
 </li>
-<li><p>Update <code>version</code> in <code>package.json</code> to the release version.</p>
+<li><p>Update <code>version</code> in <code>package.json</code> and <code>assets/acp-registry/agent.json</code> to the
+release version. Update the README's source-install tag and remove any
+development-only notices. Keep historical release records, protocol schema
+versions, dependency versions, and migration fixtures unchanged.</p>
 </li>
 <li><p>Retitle the active changelog section in <code>CHANGELOG.md</code> from <code>## Unreleased</code> to
 <code>## &lt;version&gt; - YYYY-MM-DD</code>. The release gate in <code>scripts/check-release.mjs</code> requires
@@ -133,7 +136,7 @@ an immutable package. Do not execute any of them without explicit maintainer aut
 </li>
 <li><p>Fast-forward local <code>main</code> to the candidate commit:</p>
 <pre><code class="language-bash">git checkout main
-git merge --ff-only v044
+git merge --ff-only v046
 </code></pre>
 </li>
 <li><p>Verify that local <code>main</code> matches the reviewed candidate SHA exactly.</p>
@@ -168,6 +171,14 @@ git merge --ff-only v044
 <li><p>Inspect the GitHub Actions workflow run and confirm the GitHub release is published.</p>
 </li>
 </ol>
+<p>Reconcile the release milestone against the tagged commits and each ticket's
+acceptance evidence. <code>Fixes #123</code> or <code>Resolves #123</code> in a commit closes that
+ticket when the commit reaches default-branch <code>main</code>; a bare <code>#123</code>, changelog
+mention, tag, or GitHub release does not. Verify the resulting issue state.
+Explicitly close completed tickets missed by automatic closure and retain
+their implementing commit and validation references. Carry incomplete work
+forward with its remaining criteria, then close the reconciled milestone.
+Never infer completion from a release-note mention alone.</p>
 <h2>Part 6: Package Publication to npm</h2>
 <p>Publishing to npm is a manual maintainer step performed from the tagged commit.</p>
 <ol>
@@ -200,7 +211,7 @@ clio-coder doctor
 </code></pre>
 </li>
 <li><p>Remove the local compact candidate branch:</p>
-<pre><code class="language-bash">git branch -d v044
+<pre><code class="language-bash">git branch -d v046
 </code></pre>
 <p>The canonical repository remains in its steady state containing only <code>main</code> and immutable tags.</p>
 </li>
