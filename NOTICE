@@ -9,6 +9,22 @@ Licensed under the Apache License, Version 2.0. See the LICENSE file
 distributed with this work for the full license text.
 
 --------------------------------------------------------------------
+Technology acknowledgements
+
+Clio Coder builds on Earendil Works' Pi framework and, for optional Claude
+workers, Anthropic's Claude Agent SDK. Its runtime and development tools
+include Node.js, TypeScript, node-pty, Tree-sitter, Ollama's JavaScript
+client, esbuild, tsup, and Biome. The source GUI uses React, Deno, Vite,
+and community libraries for Markdown, diagrams, syntax highlighting,
+sanitization, images, and fonts.
+
+We thank these projects and their maintainers. Exact dependencies and
+versions are recorded in the package manifests and pnpm-lock.yaml;
+third-party components retain their upstream copyrights and licenses.
+README.md also acknowledges the optional inference and tool integrations
+that operators can connect to Clio.
+
+--------------------------------------------------------------------
 Pinned external tools
 
 Clio Coder does not bundle the programs below. `clio-coder tools install

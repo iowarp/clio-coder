@@ -8,6 +8,7 @@ All notable changes to Clio Coder are documented in this file. The format follow
 - Make Quick Connect the first launcher option, with Settings and Diagnostics alongside it. Connect an endpoint, supply a key when needed, filter the live model list, review, and Connect. A single model skips selection; reconnecting preserves existing preferences and fleet assignments. Add `--quick` and `--settings` shortcuts.
 
 ### Changed
+- Simplify the README around installation, the first session, scientific software, and HPC. Keep advanced configuration and multi-agent workflows in collapsible sections, and expand dependency and integration acknowledgements.
 - Use one worker, no prompt prewarm, and automatic TTY streaming as shipped defaults. Preserve explicitly saved values and document the full recommended default policy.
 
 ### Fixed
