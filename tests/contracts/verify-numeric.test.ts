@@ -230,6 +230,22 @@ describe("numeric-compare tolerance math", () => {
 		deepStrictEqual(normalizeNumericTolerance({ relative: 1e-6, ulp: 2 }), { relative: 1e-6, ulp: 2 });
 		strictEqual(extractNumericPayloadText('loading...\n{"a": 1}\n'), '{"a": 1}');
 	});
+
+	it("preserves inherited property names as measured scalar and array fields", () => {
+		for (const expected of [1, [1, 2]]) {
+			const reference = parseNumericPayload(JSON.stringify({ ["__proto__"]: expected, constructor: 2 }), "reference");
+			const actual = parseNumericPayload(JSON.stringify({ ["__proto__"]: 999, constructor: 2 }), "actual");
+			ok(!(reference instanceof Error));
+			ok(!(actual instanceof Error));
+			deepStrictEqual(Object.keys(reference), ["__proto__", "constructor"]);
+			strictEqual(Object.hasOwn(reference, "__proto__"), true);
+			deepStrictEqual(Object.getOwnPropertyDescriptor(reference, "__proto__")?.value, expected);
+			strictEqual(compareNumeric(reference, reference, { absolute: 0 }).passed, true);
+			const report = compareNumeric(actual, reference, { absolute: 0 });
+			strictEqual(report.passed, false);
+			deepStrictEqual(report.failedKeys, ["__proto__"]);
+		}
+	});
 });
 
 describe("verifier catalog kinds", () => {
@@ -407,6 +423,56 @@ describe("numeric-compare through the verify runner", () => {
 });
 
 describe("numeric-compare under host verification", () => {
+	it("judges every parsed field through both ordinary and host verification", async () => {
+		for (const measurement of [1, 999]) {
+			const output = JSON.stringify({ ["__proto__"]: measurement });
+			const argv = [process.execPath, "-e", `process.stdout.write(${JSON.stringify(output)})`];
+			const root = workspace({
+				"ref.json": JSON.stringify({ ["__proto__"]: 1 }),
+				".clio-coder/verifiers.yaml": catalog({
+					id: "measurement",
+					description: "Preserve every measurement",
+					kind: "numeric-compare",
+					command: argv,
+					reference: "ref.json",
+					tolerance: { absolute: 0 },
+					cwd: ".",
+					timeoutMs: 30_000,
+					tags: [],
+				}),
+			});
+			process.chdir(root);
+			const loaded = loadProjectVerifierCatalog(root);
+			ok(loaded.ok && loaded.source !== null);
+			const check = loaded.source.checks[0];
+			ok(check);
+			const ordinary = await runProjectCheck(check);
+			strictEqual(ordinary.kind, measurement === 1 ? "ok" : "error");
+			const host = await runHostVerification({
+				runId: `measurement-${measurement}`,
+				request: {
+					resolvedVerification: [
+						{
+							check: "measurement",
+							argv,
+							cwd: root,
+							timeoutMs: 30_000,
+							kind: "numeric-compare",
+							numeric: { reference: join(root, "ref.json"), tolerance: { absolute: 0 } },
+						},
+					],
+				},
+				workerSuccessful: true,
+				stateDir: join(root, "state"),
+			});
+			strictEqual(host?.status, measurement === 1 ? "verified" : "rejected");
+			const report = host?.checks[0]?.report;
+			ok(report?.kind === "numeric-compare");
+			strictEqual(report.keys.length, 1);
+			deepStrictEqual(report, ordinary.details?.report);
+		}
+	});
+
 	for (const stdout of ["", '{"value":1}\n']) {
 		it(`agrees with ordinary verify when stdout is ${stdout === "" ? "empty" : "valid"} and stderr contains diagnostic JSON`, async () => {
 			const diagnostic = '{"value":1}\n';

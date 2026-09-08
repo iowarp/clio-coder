@@ -133,15 +133,15 @@ export function parseNumericPayload(text: string, label: string): NumericPayload
 	const keys = Object.keys(record);
 	if (keys.length > NUMERIC_PAYLOAD_CAPS.keys)
 		return new Error(`${label} exceeds the ${NUMERIC_PAYLOAD_CAPS.keys}-key cap`);
-	const payload: NumericPayload = {};
+	const entries: Array<[string, number | number[]]> = [];
 	let elements = 0;
 	for (const key of keys) {
 		const value = record[key];
 		if (typeof value === "number") {
-			payload[key] = value;
+			entries.push([key, value]);
 			elements += 1;
 		} else if (Array.isArray(value) && value.every((entry) => typeof entry === "number")) {
-			payload[key] = [...(value as number[])];
+			entries.push([key, [...(value as number[])]]);
 			elements += value.length;
 		} else {
 			return new Error(`${label}.${key} must be a number or an array of numbers`);
@@ -150,7 +150,7 @@ export function parseNumericPayload(text: string, label: string): NumericPayload
 			return new Error(`${label} exceeds the ${NUMERIC_PAYLOAD_CAPS.elements}-element cap`);
 		}
 	}
-	return payload;
+	return Object.fromEntries(entries);
 }
 
 function deviation(actual: number, expected: number, index?: number): NumericDeviation {

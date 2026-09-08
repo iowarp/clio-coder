@@ -18,6 +18,7 @@ This release restores reliable setup with Quick Connect and simplifies the termi
 - Check the ACP registry version against package metadata during release audits, and make version alignment and issue reconciliation explicit release-cut steps.
 
 ### Fixed
+- Preserve every own JSON measurement field in numerical verification, including names inherited by ordinary JavaScript objects. Mismatched measurements can no longer disappear during parsing and produce a false pass in ordinary or host verification (#332).
 - Fix `configure` exiting successfully at the first question after an arrow-key menu. Scope readline to active questions, use arrow selectors and editable text fields for settings, and preserve menu position on Back.
 - Use the canonical autonomy levels in the configuration menu, so saved choices match the settings schema and existing `full-auto` configurations open on the correct selection.
 - Share the target wizard across first setup, Add, and Edit, with a review and explicit Save. Preserve existing role defaults, credential references, and capability overrides; reject duplicate target ids and allow clearing model overrides. Save pasted keys per target and review optional delegation peers after the primary setup is saved.
