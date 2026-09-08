@@ -1,6 +1,6 @@
 import { spawn } from "node:child_process";
 import { initializeClioHome } from "../core/init.js";
-import { clioStateDir } from "../core/xdg.js";
+import { resolveClioDirs } from "../core/xdg.js";
 import { detectInstallMethod } from "../domains/lifecycle/install-method.js";
 import { listMigrations, readMigrationManifest, runPending } from "../domains/lifecycle/migrations/index.js";
 import { readStateInfo } from "../domains/lifecycle/state.js";
@@ -185,7 +185,7 @@ export async function runUpgradeCommand(argv: ReadonlyArray<string>): Promise<nu
 	presenter.header("Upgrade", "upgrade");
 
 	const before = getVersionInfo().clio;
-	const stateDir = clioStateDir();
+	const stateDir = resolveClioDirs().state;
 	const method = detectInstallMethod();
 	const methodLabel = method === "source" ? "source checkout" : opts.postInstall ? "package install" : "npm global";
 	presenter.setMethod(methodLabel);

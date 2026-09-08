@@ -15,6 +15,29 @@ consumers install the built package and do not need the repository toolchain.
 This guide describes the default directories, file purposes, permissions, and
 lifecycle operations.
 
+### Start, change settings, or recover
+
+| Task | Command | Result |
+| --- | --- | --- |
+| Set up a new installation | `clio-coder configure` | Quick Connect: endpoint, key if needed, model, Connect; then start `clio-coder`. |
+| Change a connection | `clio-coder configure --section targets` | Add or edit endpoints, credentials, and models; choose role defaults. |
+| Change any setting or repair YAML | `clio-coder configure --edit` | Edit a draft, validate, and save with a backup. |
+| Diagnose the installation | `clio-coder doctor` | Read-only diagnosis. `clio-coder doctor --fix` repairs structure and permissions. |
+| Finish a package-manager update | `clio-coder upgrade --post-install` | Apply local migrations and installation checks. |
+| Start configuration over | `clio-coder reset --config` | Reset settings, preserve credentials and history, then run `clio-coder configure`. |
+| Emulate a fresh user | `clio-coder reset --all` | Remove all four user roots, recreate defaults, then run `clio-coder configure`. |
+| Remove user state | `clio-coder uninstall` | Remove the selected user roots; remove the package with the manager that installed it. |
+
+Reset and uninstall preview their scope and ask for confirmation. Use
+`--dry-run` to inspect without changing anything. A bare `reset` clears session
+state, so use `--config` when your intent is to start model setup over. Project
+`.clio-coder/` directories survive these user-level operations.
+
+The source installer prepares the launcher and directory structure, then points
+you to `clio-coder configure`. It does not ask you to configure delegation peers
+before your primary model is set up. Upgrading preserves settings and
+credentials; reinstalling the package alone does not reset them.
+
 ### Optional dependency: the Claude Agent SDK
 
 `@anthropic-ai/claude-agent-sdk` is an `optionalDependencies` entry, not a hard dependency. Its platform package carries a proprietary binary of roughly 224MB per platform, and only the `claude-sdk` runtime uses it. Skip it with:
@@ -296,7 +319,7 @@ Key lifecycle and operational updates in v0.3.7:
 - Fullscreen TUI mode (`interface.mode`, `interface.fullscreenScrollbar`) is
   available through `/settings interface` and requires a restart. Adaptive
   presentation pacing is the live `interface.smoothStreaming` setting; it
-  defaults to `off`, with conservative `auto` and explicit `on` available from
+  defaults to conservative `auto`, with `off` and explicit `on` available from
   the same area.
 - Interactive launch paints a measured Stage 0 shell on the same terminal and editor that Stage 1 hydrates. Typing, queued submits, resize, and Ctrl+C remain live during hydration; set `CLIO_CODER_INSTANT_SHELL=0` for the legacy fully hydrated first-frame path.
 - Turn settlement is enforced on `/new`, `/resume`, `/tree`, and `/fork` to cleanly commit in-flight streams before session writer replacement (#114).
@@ -408,18 +431,20 @@ or release the handle, then run the identical command again and it resumes from
 whatever is left. A partial delete never reports global success.
 
 ### E. Interactive Configuration (`clio-coder configure`)
-`clio-coder configure` provides a structured, multi-section configuration wizard
-for model targets, runtime defaults, fleet limits, permissions, panes, and
-integrations:
+
+The interactive launcher starts with **Quick Connect**, followed by **Settings**
+and **Diagnostics**. Quick Connect asks for an endpoint URL, a key when needed,
+and a model when several are available. Review and **Connect**; the recommended
+defaults handle the rest. An unconfigured interactive `clio-coder` opens this
+same launcher and continues into chat after a successful setup.
 
 ```bash
-clio-coder configure [--section <name>] [--json] [--interop] [--list] [--all]
+clio-coder configure
+clio-coder configure --quick
+clio-coder configure --settings
 ```
 
-When run against an unconfigured home (or when launched interactively with no
-model target), it routes immediately to the target category selection menu. Once
-targets are configured, launching `clio-coder configure` presents the 8 top-level
-runtime sections:
+**Settings** contains the nine advanced sections:
 
 1. **Targets & Auth**: manage providers, endpoints, credentials, and models.
 2. **Models & Thinking**: default models, thinking levels, model favorites, cycle set.
@@ -429,14 +454,22 @@ runtime sections:
 6. **Panes & Layout**: terminal panes capability, dock layout, TUI display mode, notifications.
 7. **Skills & Extensions**: trust project imports, external ACP agents, plugins, library sync.
 8. **Diagnostics**: version information, resolved directories, doctor check, raw settings inspection.
+9. **All Settings**: validated file editor for the complete settings schema.
 
 Every section header indicates the exact settings file path being modified
 (`Source: ~/.config/clio-coder/settings.yaml`), prints the current active values,
-and provides a safe back/exit option (`b` or `q`).
+and provides arrow-key navigation with Escape to go back and `q` to quit. The
+parent menu remembers your selected row. Dumb terminals use numbered menus
+with `b` for Back and `q` to quit.
 
 The `--section <name>` flag jumps directly into any section (e.g.,
 `clio-coder configure --section models` or `clio-coder configure --section fleet`).
-The `--json` flag emits the active settings in formatted JSON for scripting.
+The `--json` flag emits user settings with defaults in formatted JSON for scripting.
+`--edit` opens a temporary settings draft in `VISUAL`/`EDITOR`, validates it before
+saving, and keeps the previous file as `settings.yaml.bak`. It can repair a file
+that is too malformed to open the regular menu. See the
+[configuration guide](configuration-and-targets.md#first-run-flow) for the complete
+new-user, add-target, edit-target, and cancellation paths.
 
 ---
 

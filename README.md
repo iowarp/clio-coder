@@ -161,12 +161,23 @@ uses active chat. An invalid explicit compaction model fails visibly.
 | Subscriptions | ChatGPT Plus/Pro through `openai-codex`; Claude Pro/Max through `anthropic-max` |
 | Worker integrations | Claude SDK, Claude Code, experimental Google Antigravity delegation, and configured ACP agents |
 
-The interactive wizard is the easiest path:
+Start with **Quick Connect**, the first option in the launcher:
 
 ```bash
 clio-coder configure
-clio-coder targets --probe
+clio-coder
 ```
+
+Enter the endpoint URL, supply a key if needed, and choose a model if there are
+several. Review and **Connect**. Clio starts with [recommended defaults](docs/guide/configuration-and-targets.md#recommended-defaults):
+workspace edits with command approval, one worker, a $5 tracked session budget,
+and no extra panes or background model setup. Escape goes back; typing filters
+the model list.
+
+Use `clio-coder configure --quick` to connect directly, or `--settings` for the
+full settings menu and target wizard, including browser sign-in and manual
+model setup. `--edit` opens all settings in a validated editor and can repair
+malformed YAML. Reconnecting preserves existing preferences and fleet routes.
 
 The same setup can be scripted. The model id must match what the server
 advertises unless you deliberately pass `--force`:

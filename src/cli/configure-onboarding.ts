@@ -12,8 +12,8 @@
  * it once answered, and leaves one row on the rail saying what was chosen, so
  * the screen is the answers so far plus the question at hand. Escape moves the
  * cursor back one step and rewinds the rail to that step's row, which is what
- * makes going back cheap: nothing is written to disk until the last step, so
- * there is never a half-configured home to undo.
+ * keeps target edits in a draft until Save. Browser sign-in stores credentials
+ * when it succeeds; optional peer review has its own save after target setup.
  *
  * Steps that do not apply are stepped over in whichever direction the cursor is
  * moving, so a runtime with no URL and no credential is three questions and a
@@ -27,10 +27,13 @@ import {
 	bindAgentProfileInSettings,
 	type ClioSettings,
 	readSettings,
+	SettingsValidationError,
 	settingsPath,
 	updateSettings,
+	validateSettings,
 } from "../core/config.js";
 import { THINKING_LEVELS, type ThinkingLevel } from "../core/defaults.js";
+import { initializeClioHome } from "../core/init.js";
 import { resolveOnPath } from "../domains/interop/detect.js";
 import { authStoragePath, openAuthStorage, targetRequiresAuth } from "../domains/providers/auth/index.js";
 import {
@@ -69,6 +72,7 @@ import {
 	setOrchestratorPointer,
 	setWorkerDefaultPointer,
 	setWorkerProfilePointer,
+	targetApiKeyRef,
 	type WireModelInventory,
 } from "./configure-target.js";
 import { createLifecyclePresenter, type LifecyclePresenter, shortenPath } from "./lifecycle-presenter.js";
@@ -99,6 +103,10 @@ type CredentialSource = "env" | "stored" | "keep" | "skip" | "oauth-connect" | "
 // with exactOptionalPropertyTypes, and going back a step clears the answers
 // that depended on the one being changed by assigning undefined to them.
 interface Answers {
+	mode: "first" | "add" | "edit";
+	fixedRuntime?: boolean;
+	existing?: TargetDescriptor | undefined;
+	contextWindow?: number | undefined;
 	category?: ConfigureCategory | undefined;
 	runtime?: RuntimeDescriptor | undefined;
 	targetId?: string | undefined;
@@ -115,10 +123,9 @@ interface Answers {
 	thinking?: ThinkingLevel | undefined;
 	probe?: ProbeResult | null | undefined;
 	antigravity?: { targetId: string; model: string } | undefined;
-	wiredPeers?: string[] | undefined;
 }
 
-type StepOutcome = "next" | "back" | "quit";
+type StepOutcome = "next" | "back" | "quit" | "cancel";
 
 interface Wizard {
 	streams: OnboardingStreams;
@@ -181,19 +188,37 @@ function allEntries(): ProviderSupportEntry[] {
 
 /** The descriptor as it stands mid-wizard, for a probe or a model read. */
 function draftDescriptor(answers: Answers, runtime: RuntimeDescriptor, withModel: boolean): TargetDescriptor {
-	const apiKeyRef = answers.credential === "stored" || answers.credential === "keep" ? runtime.id : undefined;
-	return buildDescriptor(runtime, answers.targetId ?? runtime.id, {
+	const apiKeyRef =
+		answers.credential === "stored"
+			? targetApiKeyRef(answers.targetId ?? runtime.id, readSettings().targets)
+			: answers.credential === "keep"
+				? (answers.existing?.auth?.apiKeyRef ?? runtime.id)
+				: undefined;
+	const configured = buildDescriptor(runtime, answers.targetId ?? runtime.id, {
 		...(answers.url !== undefined ? { url: answers.url } : {}),
 		...(withModel && answers.model !== undefined ? { model: answers.model } : {}),
 		...(answers.apiKeyEnv !== undefined ? { apiKeyEnv: answers.apiKeyEnv } : {}),
 		...(apiKeyRef !== undefined ? { apiKeyRef } : {}),
-		...(runtime.auth === "oauth" ? { oauthProfile: runtime.oauthProviderId ?? runtime.id } : {}),
+		...(runtime.auth === "oauth"
+			? { oauthProfile: answers.existing?.auth?.oauthProfile ?? runtime.oauthProviderId ?? runtime.id }
+			: {}),
 	});
+	const descriptor = { ...answers.existing, ...configured };
+	if (!withModel) delete descriptor.defaultModel;
+	if (answers.existing?.auth || configured.auth) {
+		descriptor.auth = { ...answers.existing?.auth, ...configured.auth };
+		if (runtime.auth === "api-key") {
+			if (answers.credential !== "env") delete descriptor.auth.apiKeyEnvVar;
+			if (answers.credential !== "stored" && answers.credential !== "keep") delete descriptor.auth.apiKeyRef;
+		}
+		if (Object.keys(descriptor.auth).length === 0) delete descriptor.auth;
+	}
+	return descriptor;
 }
 
 const CATEGORY_STEP: Step = {
 	id: "category",
-	applies: () => true,
+	applies: (answers) => answers.mode !== "edit" && !answers.fixedRuntime,
 	run: async (wizard, answers) => {
 		const current = CONFIGURE_CATEGORY_CHOICES.findIndex((choice) => choice.category === answers.category);
 		const result = await promptSelect<ConfigureCategory>({
@@ -225,12 +250,12 @@ const CATEGORY_STEP: Step = {
 
 const RUNTIME_STEP: Step = {
 	id: "runtime",
-	applies: () => true,
+	applies: (answers) => answers.mode !== "edit" && !answers.fixedRuntime,
 	run: async (wizard, answers) => {
 		const registry = getRuntimeRegistry();
 		const chatEntries = allEntries().filter((entry) => {
 			const runtime = registry.get(entry.runtimeId);
-			return runtime !== null && isOrchestratorEligibleRuntime(runtime);
+			return runtime !== null && (answers.mode !== "first" || isOrchestratorEligibleRuntime(runtime));
 		});
 		const entries = answers.category ? runtimesForCategory(chatEntries, answers.category) : chatEntries;
 		const usable = entries.length > 0 ? entries : chatEntries;
@@ -258,6 +283,9 @@ const RUNTIME_STEP: Step = {
 			answers.apiKeyEnv = undefined;
 			answers.apiKeyLiteral = undefined;
 			answers.model = undefined;
+			answers.thinking = undefined;
+			answers.contextWindow = undefined;
+			answers.probe = undefined;
 			answers.inventory = undefined;
 			answers.inventoryKey = undefined;
 		}
@@ -269,7 +297,7 @@ const RUNTIME_STEP: Step = {
 
 const TARGET_ID_STEP: Step = {
 	id: "target-id",
-	applies: () => true,
+	applies: (answers) => answers.mode !== "edit",
 	run: async (wizard, answers) => {
 		const runtime = answers.runtime;
 		if (!runtime) return "back";
@@ -283,6 +311,8 @@ const TARGET_ID_STEP: Step = {
 			validate: (value) => {
 				if (value.length === 0) return "a target id is required";
 				if (/\s/u.test(value)) return "a target id cannot contain spaces";
+				if (readSettings().targets.some((target) => target.id === value))
+					return "that target id already exists; choose another or use Edit a target";
 				return null;
 			},
 			input: wizard.input,
@@ -373,7 +403,7 @@ async function reportReachability(
 
 const DETECTED_RUNTIME_STEP: Step = {
 	id: "detected-runtime",
-	applies: (answers) => answers.detected !== undefined && answers.runtime !== undefined,
+	applies: (answers) => answers.mode !== "edit" && answers.detected !== undefined && answers.runtime !== undefined,
 	run: async (wizard, answers) => {
 		const detected = answers.detected;
 		const runtime = answers.runtime;
@@ -443,10 +473,15 @@ const CREDENTIAL_STEP: Step = {
 	run: async (wizard, answers) => {
 		const runtime = answers.runtime;
 		if (!runtime) return "back";
-		const stored = describeAuthStatus(runtime);
+		const stored = describeAuthStatus(runtime, answers.existing);
 		if (runtime.auth === "oauth") {
 			const result = await promptSelect<CredentialSource>({
-				heading: ["", chalk.bold(`Sign in to ${runtime.displayName}`), chalk.dim(`credential: ${stored}`)],
+				heading: [
+					"",
+					chalk.bold(`Sign in to ${runtime.displayName}`),
+					chalk.dim(`credential: ${stored}`),
+					"Sign-in stores credentials immediately; target settings wait for Save.",
+				],
 				choices: [
 					{ value: "oauth-connect", label: "Connect now", hint: "opens your browser and waits for the callback" },
 					{
@@ -479,7 +514,7 @@ const CREDENTIAL_STEP: Step = {
 			return "next";
 		}
 
-		const hasStored = stored !== "none stored";
+		const hasStored = answers.existing?.auth?.apiKeyRef !== undefined || stored !== "none stored";
 		const choices = [
 			{
 				value: "env" as CredentialSource,
@@ -513,6 +548,7 @@ const CREDENTIAL_STEP: Step = {
 		if (result.kind === "back") return "back";
 		answers.credential = result.value;
 		if (result.value !== "env") answers.apiKeyEnv = undefined;
+		answers.inventoryKey = undefined;
 		if (result.value !== "stored") answers.apiKeyLiteral = undefined;
 		if (result.value === "keep") wizard.answer("Credential", stored);
 		if (result.value === "skip") wizard.answer("Credential", "none");
@@ -534,6 +570,10 @@ const CREDENTIAL_VALUE_STEP: Step = {
 				? "Clio reads it every time it calls the provider, so the key never lands on disk"
 				: `stored at ${shortenPath(authStoragePath())}`,
 			...(wantsEnv ? {} : { mask: true }),
+			validate: (value) =>
+				value.length > 0
+					? null
+					: `Enter ${wantsEnv ? "an environment variable" : "a key"}, or press Escape to choose No key.`,
 			railPrefix: wizard.rail,
 			backLabel: "back",
 			clearOnExit: true,
@@ -670,7 +710,7 @@ const MODEL_STEP: Step = {
  */
 async function readModelCapabilities(answers: Answers, runtime: RuntimeDescriptor): Promise<void> {
 	const descriptor = draftDescriptor(answers, runtime, true);
-	const probe = await runtimeProbe(runtime, descriptor);
+	const probe = await runtimeProbe(runtime, descriptor, answers.apiKeyLiteral);
 	answers.probe = probe;
 	if (probe?.ok && probe.models) {
 		recordTargetModelSnapshot(descriptor, probe.models, probe.modelLabels ? { modelLabels: probe.modelLabels } : {});
@@ -690,6 +730,7 @@ const THINKING_HINTS: Readonly<Record<ThinkingLevel, string>> = {
 const THINKING_STEP: Step = {
 	id: "thinking",
 	applies: (answers) => {
+		if (answers.mode !== "first" && !PROTOCOL_COMPAT_RUNTIME_IDS.has(answers.runtime?.id ?? "")) return false;
 		const runtime = answers.runtime;
 		if (!runtime || answers.model === undefined) return false;
 		// A generic OpenAI/Anthropic-compatible endpoint reports nothing about
@@ -701,7 +742,15 @@ const THINKING_STEP: Step = {
 	run: async (wizard, answers) => {
 		const current = THINKING_LEVELS.indexOf(answers.thinking ?? "low");
 		const result = await promptSelect<ThinkingLevel>({
-			heading: ["", chalk.bold("How hard should it think?"), chalk.dim("changeable any time in `clio-coder configure`")],
+			heading: [
+				"",
+				chalk.bold("How hard should it think?"),
+				chalk.dim(
+					answers.mode === "first"
+						? "changeable any time in `clio-coder configure`"
+						: "off disables reasoning for this target; chat and fleet thinking defaults stay unchanged",
+				),
+			],
 			choices: THINKING_LEVELS.map((level) => ({ value: level, label: level, hint: THINKING_HINTS[level] })),
 			initialIndex: current >= 0 ? current : 0,
 			railPrefix: wizard.rail,
@@ -721,6 +770,7 @@ const THINKING_STEP: Step = {
 const ANTIGRAVITY_COLLEAGUE_STEP: Step = {
 	id: "antigravity-colleague",
 	applies: (answers) =>
+		answers.mode === "first" &&
 		answers.runtime !== undefined &&
 		isOrchestratorEligibleRuntime(answers.runtime) &&
 		resolveOnPath(["agy"]).presence === "present" &&
@@ -785,22 +835,58 @@ const ANTIGRAVITY_COLLEAGUE_STEP: Step = {
 	},
 };
 
-const PEERS_STEP: Step = {
-	id: "peers",
+const CONTEXT_STEP: Step = {
+	id: "context-window",
+	applies: (answers) => PROTOCOL_COMPAT_RUNTIME_IDS.has(answers.runtime?.id ?? "") || answers.mode === "edit",
+	run: async (wizard, answers) => {
+		const result = await promptText({
+			heading: ["", chalk.bold("Context window in tokens")],
+			initial: answers.contextWindow === undefined ? "" : String(answers.contextWindow),
+			hint: "optional override; blank uses detected capabilities or the runtime default",
+			validate: (value) =>
+				value === "" || (Number.isSafeInteger(Number(value)) && Number(value) > 0)
+					? null
+					: "enter a positive whole number, or leave blank",
+			railPrefix: wizard.rail,
+			backLabel: "back",
+			clearOnExit: true,
+			input: wizard.input,
+			output: wizard.output,
+		});
+		if (result.kind !== "value") return result.kind;
+		answers.contextWindow = result.value ? Number(result.value) : undefined;
+		wizard.answer("Context", result.value || "detected / runtime default");
+		return "next";
+	},
+};
+
+const REVIEW_STEP: Step = {
+	id: "review",
 	applies: () => true,
 	run: async (wizard, answers) => {
-		// No readline: the multi-select reads keys directly, and an interface left
-		// open would echo them over the frame it is drawing.
-		const outcome = await reviewInteropAgents({
-			rl: null,
-			streams: wizard.streams,
-			presenter: wizard.presenter,
-			rail: wizard.rail,
-			quiet: true,
+		const result = await promptSelect({
+			heading: [
+				"",
+				chalk.bold("Review target"),
+				`${answers.targetId} · ${answers.runtime?.id} · ${answers.model}`,
+				answers.mode === "first"
+					? "Use for chat and fleet."
+					: "Existing chat, fleet, memory, and profile defaults stay in place.",
+				"Escape returns to the previous step; settings are saved only when you choose Save.",
+			],
+			choices: [
+				{ value: "save", label: "Save target" },
+				{ value: "back", label: "Back" },
+				{ value: "cancel", label: "Cancel setup" },
+			],
+			railPrefix: wizard.rail,
+			backLabel: "back",
+			clearOnExit: true,
+			input: wizard.input,
+			output: wizard.output,
 		});
-		if (outcome.back) return "back";
-		answers.wiredPeers = outcome.wired;
-		return "next";
+		if (result.kind !== "selected") return result.kind;
+		return result.value === "save" ? "next" : result.value === "back" ? "back" : "cancel";
 	},
 };
 
@@ -820,37 +906,51 @@ const STEPS: ReadonlyArray<Step> = [
 	DETECTED_RUNTIME_STEP,
 	MODEL_STEP,
 	THINKING_STEP,
+	CONTEXT_STEP,
 	ANTIGRAVITY_COLLEAGUE_STEP,
-	PEERS_STEP,
+	REVIEW_STEP,
 ];
 
 /** Write everything the wizard collected, in one settings update. */
-function persist(answers: Answers, descriptor: TargetDescriptor, chatEligible: boolean): void {
-	updateSettings((settings: ClioSettings): void => {
-		applyTarget(settings, descriptor);
-		// The first target is the one everything points at. A second target is a
-		// choice, and that is what the settings menu is for; asking a new user
-		// which of their one target should answer chat is not a question.
-		if (chatEligible) setOrchestratorPointer(settings, descriptor, answers.model ?? null);
-		setWorkerDefaultPointer(settings, descriptor, answers.model ?? null);
-		if (answers.thinking !== undefined) {
-			settings.chat.thinkingLevel = answers.thinking;
-			settings.fleet.default.thinkingLevel = answers.thinking;
-		}
-		if (answers.antigravity !== undefined) {
-			const antigravityRuntime = getRuntimeRegistry().get("antigravity-code");
-			if (!antigravityRuntime) throw new Error("Antigravity runtime disappeared before settings were written");
-			const external = buildDescriptor(antigravityRuntime, answers.antigravity.targetId, {
-				model: answers.antigravity.model,
-			});
-			applyTarget(settings, external);
-			setWorkerProfilePointer(settings, "world-knowledge-external", external, answers.antigravity.model);
-			bindAgentProfileInSettings(settings, "world-knowledge", "world-knowledge-external");
-		}
-	});
+function applyAnswers(
+	settings: ClioSettings,
+	answers: Answers,
+	descriptor: TargetDescriptor,
+	chatEligible: boolean,
+): void {
+	const current = settings.targets.find((target) => target.id === descriptor.id);
+	if (answers.mode === "edit") {
+		if (JSON.stringify(current) !== JSON.stringify(answers.existing))
+			throw new Error("This target changed during setup; reopen Edit to keep those changes.");
+	} else if (current) throw new Error(`Target '${descriptor.id}' already exists; use Edit a target.`);
+	applyTarget(settings, descriptor);
+	// The first target is the one everything points at. A second target is a
+	// choice, and that is what the settings menu is for; asking a new user
+	// which of their one target should answer chat is not a question.
+	if (answers.mode === "first" && chatEligible) setOrchestratorPointer(settings, descriptor, answers.model ?? null);
+	if (answers.mode === "first") setWorkerDefaultPointer(settings, descriptor, answers.model ?? null);
+	if (answers.mode === "first" && answers.thinking !== undefined) {
+		settings.chat.thinkingLevel = answers.thinking;
+		settings.fleet.default.thinkingLevel = answers.thinking;
+	}
+	if (answers.antigravity !== undefined) {
+		const antigravityRuntime = getRuntimeRegistry().get("antigravity-code");
+		if (!antigravityRuntime) throw new Error("Antigravity runtime disappeared before settings were written");
+		const external = buildDescriptor(antigravityRuntime, answers.antigravity.targetId, {
+			model: answers.antigravity.model,
+		});
+		applyTarget(settings, external);
+		setWorkerProfilePointer(settings, "world-knowledge-external", external, answers.antigravity.model);
+		bindAgentProfileInSettings(settings, "world-knowledge", "world-knowledge-external");
+	}
 }
 
-export async function runOnboardingWizard(streams: OnboardingStreams): Promise<number> {
+export async function runOnboardingWizard(
+	streams: OnboardingStreams,
+	options: { mode: "first" | "add"; runtime?: RuntimeDescriptor } | { mode: "edit"; target: TargetDescriptor } = {
+		mode: "first",
+	},
+): Promise<number> {
 	const writer = railWriter(streams.out);
 	const presenter = createLifecyclePresenter({ stream: writer.stream });
 	const rail = railPrefix(presenter.isPlain());
@@ -866,11 +966,39 @@ export async function runOnboardingWizard(streams: OnboardingStreams): Promise<n
 		},
 	};
 
-	presenter.header("Welcome to Clio Coder", "configure");
-	presenter.note("Pick the model you want Clio to talk to; escape goes back a step and changes nothing.");
+	presenter.header(
+		options.mode === "edit"
+			? `Edit target: ${options.target.id}`
+			: options.mode === "first"
+				? "Welcome to Clio Coder"
+				: "Add a target",
+		"configure",
+	);
+	presenter.note("Pick a model; escape goes back. Review and save when ready.");
 	presenter.note(`Result: ${shortenPath(settingsPath())}`);
 
-	const answers: Answers = {};
+	const existing = options.mode === "edit" ? options.target : undefined;
+	const answers: Answers = {
+		mode: options.mode,
+		existing,
+		runtime: existing
+			? (getRuntimeRegistry().get(existing.runtime) ?? undefined)
+			: options.mode !== "edit"
+				? options.runtime
+				: undefined,
+		fixedRuntime: options.mode !== "edit" && options.runtime !== undefined,
+		targetId: existing?.id,
+		url: existing?.url,
+		model: existing?.defaultModel,
+		credential: existing?.auth?.apiKeyEnvVar ? "env" : existing?.auth?.apiKeyRef ? "keep" : undefined,
+		apiKeyEnv: existing?.auth?.apiKeyEnvVar,
+		contextWindow: existing?.capabilities?.contextWindow,
+		thinking: existing?.capabilities?.reasoning === false ? "off" : undefined,
+	};
+	if (existing && !answers.runtime) {
+		presenter.fail(`Unknown runtime: ${existing.runtime}`);
+		return 2;
+	}
 	const marks = new Array<number>(STEPS.length).fill(writer.mark());
 	let cursor = 0;
 	let direction = 1;
@@ -880,19 +1008,19 @@ export async function runOnboardingWizard(streams: OnboardingStreams): Promise<n
 		if (step === undefined) break;
 		if (!step.applies(answers)) {
 			cursor += direction;
-			if (cursor < 0) return cancel(presenter);
+			if (cursor < 0) return cancel(presenter, answers);
 			continue;
 		}
 		marks[cursor] = writer.mark();
 		const outcome = await step.run(wizard, answers);
-		if (outcome === "quit") return cancel(presenter);
+		if (outcome === "quit" || outcome === "cancel") return cancel(presenter, answers, outcome === "quit");
 		if (outcome === "back") {
 			direction = -1;
 			cursor -= 1;
 			// Rewind past the row the step we are returning to left behind, so it
 			// can ask again in the same place rather than under its own answer.
 			while (cursor >= 0 && !(STEPS[cursor]?.applies(answers) ?? false)) cursor -= 1;
-			if (cursor < 0) return cancel(presenter);
+			if (cursor < 0) return cancel(presenter, answers);
 			writer.rewindTo(marks[cursor] ?? writer.mark());
 			continue;
 		}
@@ -900,66 +1028,74 @@ export async function runOnboardingWizard(streams: OnboardingStreams): Promise<n
 		cursor += 1;
 	}
 
-	return finish(wizard, answers);
+	const code = finish(wizard, answers);
+	if (code === 0 && answers.mode === "first") {
+		await reviewInteropAgents({ rl: null, streams, presenter, rail, quiet: true });
+	}
+	return code;
 }
 
-function cancel(presenter: LifecyclePresenter): number {
+function cancel(presenter: LifecyclePresenter, answers: Answers, quit = false): number {
 	// A first-run cancel really does leave Clio unconfigured, which is why this
 	// exits 130 where leaving the settings menu exits 0.
-	presenter.done("Cancelled, nothing written");
-	printError("configuration cancelled");
-	return 130;
+	presenter.done("Cancelled; target settings not saved");
+	if (answers.mode === "first") printError("configuration cancelled");
+	return answers.mode === "first" || quit ? 130 : 0;
 }
 
 function finish(wizard: Wizard, answers: Answers): number {
 	const runtime = answers.runtime;
 	const targetId = answers.targetId;
-	if (!runtime || targetId === undefined) return cancel(wizard.presenter);
+	if (!runtime || targetId === undefined) return cancel(wizard.presenter, answers);
 	const presenter = wizard.presenter;
-
-	if (answers.apiKeyLiteral !== undefined) {
-		const auth = openAuthStorage();
-		auth.setApiKey(runtime.id, answers.apiKeyLiteral);
-		// The settings write is still ahead of us, so refusing here leaves the
-		// whole run without an effect rather than half of one.
-		if (credentialWriteFailed(auth, `credential for ${runtime.id} was not stored; target '${targetId}' not saved`)) {
-			presenter.done("Nothing written");
-			return 1;
-		}
-		printPlaintextCredentialWarning();
-	}
 
 	const reasoning =
 		PROTOCOL_COMPAT_RUNTIME_IDS.has(runtime.id) && answers.thinking !== undefined
 			? answers.thinking !== "off"
 			: undefined;
-	const descriptor = buildDescriptor(runtime, targetId, {
-		...(answers.url !== undefined ? { url: answers.url } : {}),
-		...(answers.model !== undefined ? { model: answers.model } : {}),
-		...(answers.apiKeyEnv !== undefined ? { apiKeyEnv: answers.apiKeyEnv } : {}),
-		...(answers.credential === "stored" || answers.credential === "keep" ? { apiKeyRef: runtime.id } : {}),
-		...(runtime.auth === "oauth" ? { oauthProfile: runtime.oauthProviderId ?? runtime.id } : {}),
-		...(reasoning === undefined ? {} : { reasoning }),
-	});
+	const descriptor = draftDescriptor(answers, runtime, true);
+	descriptor.capabilities = { ...descriptor.capabilities };
+	if (reasoning !== undefined) descriptor.capabilities.reasoning = reasoning;
+	// Clearing the field removes only that capability override.
+	if (answers.contextWindow === undefined) delete descriptor.capabilities.contextWindow;
+	else descriptor.capabilities.contextWindow = answers.contextWindow;
 	const chatEligible = isOrchestratorEligibleRuntime(runtime);
 
 	try {
-		persist(answers, descriptor, chatEligible);
+		const preview = readSettings();
+		applyAnswers(preview, answers, descriptor, chatEligible);
+		const validated = validateSettings(preview);
+		if (validated.issues.length) throw new SettingsValidationError(validated.issues);
+		initializeClioHome();
+
+		if (answers.apiKeyLiteral !== undefined && descriptor.auth?.apiKeyRef) {
+			const auth = openAuthStorage();
+			auth.setApiKey(descriptor.auth.apiKeyRef, answers.apiKeyLiteral);
+			// The settings write is still ahead of us, so refusing here leaves the
+			// whole run without an effect rather than half of one.
+			if (credentialWriteFailed(auth, `credential for ${runtime.id} was not stored; target '${targetId}' not saved`)) {
+				presenter.done("Nothing written");
+				return 1;
+			}
+			printPlaintextCredentialWarning();
+		}
+
+		updateSettings((settings) => applyAnswers(settings, answers, descriptor, chatEligible));
 	} catch (error) {
 		presenter.fail("settings were not written", error instanceof Error ? error.message : String(error));
-		presenter.done("Nothing written");
+		presenter.done("Target settings not saved");
 		return 1;
 	}
 
 	presenter.completedStep(`target ${targetId} saved, runtime ${runtime.id}`);
-	if (chatEligible)
+	if (answers.mode === "first" && chatEligible)
 		presenter.completedStep(`chat runs on ${targetId}${answers.model ? `, model ${answers.model}` : ""}`);
-	else presenter.completedStep(`${runtime.id} cannot answer chat; ${targetId} is registered for dispatch only`);
-	presenter.completedStep(`fleet default is ${targetId}`);
-	if (answers.thinking !== undefined) presenter.completedStep(`thinking level ${answers.thinking}`);
-	for (const peer of answers.wiredPeers ?? []) {
-		presenter.completedStep(`delegation agent ${peer} added; use \`/delegate ${peer} <task>\``);
-	}
+	else if (!chatEligible)
+		presenter.completedStep(`${runtime.id} cannot answer chat; ${targetId} is registered for dispatch only`);
+	if (answers.mode === "first") presenter.completedStep(`fleet default is ${targetId}`);
+	else presenter.note("Use Targets & Auth to change chat, fleet, or background defaults.");
+	if (answers.mode === "first" && answers.thinking !== undefined)
+		presenter.completedStep(`thinking level ${answers.thinking}`);
 	if (answers.antigravity !== undefined) {
 		presenter.completedStep(
 			`world-knowledge bound read-only to ${answers.antigravity.targetId}/${answers.antigravity.model}`,

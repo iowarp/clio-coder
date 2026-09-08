@@ -49,6 +49,11 @@ function synthesizeAnthropicCompatModel(input: AnthropicCompatSynthesisInput): M
 export function makeAnthropicCompatRuntime(spec: AnthropicCompatSpec): RuntimeDescriptor {
 	const messagesPath = spec.messagesPath ?? "/v1/messages";
 	const modelsPath = spec.modelsPath ?? "/v1/models";
+	const headers = (target: TargetDescriptor, ctx: ProbeContext): Record<string, string> => ({
+		"anthropic-version": "2023-06-01",
+		...(ctx.authToken ? { "x-api-key": ctx.authToken } : {}),
+		...target.auth?.headers,
+	});
 	return {
 		id: spec.id,
 		displayName: spec.displayName,
@@ -61,12 +66,12 @@ export function makeAnthropicCompatRuntime(spec: AnthropicCompatSpec): RuntimeDe
 		async probe(target: TargetDescriptor, ctx: ProbeContext): Promise<ProbeResult> {
 			const base = targetBaseUrl(target);
 			if (!base) return { ok: false, error: "target has no url" };
-			return probeUrl(`${base}${messagesPath}`, ctx, "HEAD");
+			return probeUrl(`${base}${messagesPath}`, ctx, "HEAD", headers(target, ctx));
 		},
 		async probeModels(target: TargetDescriptor, ctx: ProbeContext): Promise<string[]> {
 			const base = targetBaseUrl(target);
 			if (!base) return [];
-			return probeOpenAIModels(base, ctx, modelsPath);
+			return probeOpenAIModels(base, ctx, modelsPath, headers(target, ctx));
 		},
 		synthesizeModel(target: TargetDescriptor, wireModelId: string, kb: KnowledgeBaseHit | null): Model<Api> {
 			return synthesizeAnthropicCompatModel({

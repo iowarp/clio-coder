@@ -89,6 +89,15 @@ export function deriveTargetId(runtimeId: string, existing: ReadonlyArray<Target
 	return `${base}-${Date.now()}`;
 }
 
+/** A renamed target can still own the credential under its previous name. */
+export function targetApiKeyRef(targetId: string, targets: ReadonlyArray<TargetDescriptor>): string {
+	const taken = new Set(targets.filter((target) => target.id !== targetId).map((target) => target.auth?.apiKeyRef));
+	const base = `target:${targetId}`;
+	let ref = base;
+	for (let suffix = 2; taken.has(ref); suffix += 1) ref = `${base}-${suffix}`;
+	return ref;
+}
+
 async function buildProbeContext(runtime?: RuntimeDescriptor, target?: TargetDescriptor): Promise<ProbeContext> {
 	const probeCtx: ProbeContext = {
 		credentialsPresent: credentialsPresent(),
@@ -434,8 +443,11 @@ export function buildDescriptor(runtime: RuntimeDescriptor, id: string, parts: D
 	return descriptor;
 }
 
-export function describeAuthStatus(runtime: RuntimeDescriptor): string {
-	const status = openAuthStorage().statusForTarget(resolveRuntimeAuthTarget(runtime), { includeFallback: false });
+export function describeAuthStatus(runtime: RuntimeDescriptor, target?: TargetDescriptor): string {
+	const status = openAuthStorage().statusForTarget(
+		target ? resolveAuthTarget(target, runtime) : resolveRuntimeAuthTarget(runtime),
+		{ includeFallback: false },
+	);
 	// This describes a credential, not a network state. It is printed before the
 	// wizard has asked for a URL, so `not connected` read as a connection that
 	// had already been tried and failed.

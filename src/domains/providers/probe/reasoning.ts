@@ -19,6 +19,7 @@ export interface ProbeReasoningOptions {
 	modelId: string;
 	timeoutMs: number;
 	apiKey?: string;
+	headers?: Record<string, string>;
 	signal?: AbortSignal;
 }
 
@@ -72,6 +73,7 @@ export async function probeOpenAICompatReasoning(opts: ProbeReasoningOptions): P
 
 	const headers: Record<string, string> = { "content-type": "application/json" };
 	if (opts.apiKey && opts.apiKey.length > 0) headers.authorization = `Bearer ${opts.apiKey}`;
+	Object.assign(headers, opts.headers);
 
 	const body = JSON.stringify({
 		model: opts.modelId,

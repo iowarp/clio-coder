@@ -61,6 +61,10 @@ export function makeOpenAICompatRuntime(spec: OpenAICompatSpec): RuntimeDescript
 	// root and a target naming the `/v1` mount point has to be reduced to it. An
 	// `asIs` spec sends the URL verbatim, so it keeps whatever the user typed.
 	const probeBase = asIs ? targetBaseUrl : targetRootUrl;
+	const headers = (target: TargetDescriptor, ctx: ProbeContext): Record<string, string> => ({
+		...(ctx.authToken ? { Authorization: `Bearer ${ctx.authToken}` } : {}),
+		...target.auth?.headers,
+	});
 	return {
 		id: spec.id,
 		displayName: spec.displayName,
@@ -72,9 +76,9 @@ export function makeOpenAICompatRuntime(spec: OpenAICompatSpec): RuntimeDescript
 		async probe(target: TargetDescriptor, ctx: ProbeContext): Promise<ProbeResult> {
 			const base = probeBase(target);
 			if (!base) return { ok: false, error: "target has no url" };
-			const health = await probeUrl(`${base}${healthPath}`, ctx);
+			const health = await probeUrl(`${base}${healthPath}`, ctx, "GET", headers(target, ctx));
 			if (!health.ok) return health;
-			const catalog = await probeOpenAIModelCatalog(base, ctx, modelsPath);
+			const catalog = await probeOpenAIModelCatalog(base, ctx, modelsPath, headers(target, ctx));
 			const result: ProbeResult = { ...health };
 			if (catalog.models.length > 0) result.models = catalog.models;
 			if (Object.keys(catalog.modelStates).length > 0) result.modelStates = catalog.modelStates;
@@ -92,19 +96,21 @@ export function makeOpenAICompatRuntime(spec: OpenAICompatSpec): RuntimeDescript
 		async probeModels(target: TargetDescriptor, ctx: ProbeContext): Promise<string[]> {
 			const base = probeBase(target);
 			if (!base) return [];
-			return probeOpenAIModels(base, ctx, modelsPath);
+			return probeOpenAIModels(base, ctx, modelsPath, headers(target, ctx));
 		},
 		async probeReasoning(target: TargetDescriptor, modelId: string, ctx: ProbeContext): Promise<ReasoningProbeResult> {
 			const base = probeBase(target);
 			if (!base) return { reasoning: false, latencyMs: 0, error: "target has no url" };
 			const apiKeyEnv = target.auth?.apiKeyEnvVar;
-			const apiKey = apiKeyEnv && ctx.credentialsPresent.has(apiKeyEnv) ? process.env[apiKeyEnv] : undefined;
+			const apiKey =
+				ctx.authToken ?? (apiKeyEnv && ctx.credentialsPresent.has(apiKeyEnv) ? process.env[apiKeyEnv] : undefined);
 			const probeOpts: Parameters<typeof probeOpenAICompatReasoning>[0] = {
 				baseUrl: base,
 				modelId,
 				timeoutMs: Math.max(ctx.httpTimeoutMs, 8000),
 			};
 			if (apiKey) probeOpts.apiKey = apiKey;
+			if (target.auth?.headers) probeOpts.headers = target.auth.headers;
 			if (ctx.signal) probeOpts.signal = ctx.signal;
 			return probeOpenAICompatReasoning(probeOpts);
 		},

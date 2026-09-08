@@ -1,3 +1,4 @@
+import { editTextExternally, resolveExternalEditor } from "../core/external-editor.js";
 import { resolveSessionCwd } from "../domains/session/cwd-fallback.js";
 import type { DecisionLedgerEntry } from "../domains/session/entries.js";
 import {
@@ -18,7 +19,6 @@ import type { ChatLoop } from "./chat-loop.js";
 import type { ChatPanel } from "./chat-panel.js";
 import { rehydrateChatPanelFromTurns } from "./chat-renderer.js";
 import { emitCommandNotice } from "./command-fallbacks.js";
-import { editTextExternally, resolveExternalEditor } from "./external-editor.js";
 import type { InteractiveNoticeLevel } from "./interactive-subscriptions.js";
 import { buildModelReplayAgentMessagesFromTurns } from "./model-session-replay.js";
 import type { OverlayTransitions } from "./overlay-transitions.js";

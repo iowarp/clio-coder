@@ -48,6 +48,65 @@
 <a href="lifecycle_blueprint.html">Installation and Lifecycle Operations visual reference</a>.</p>
 </blockquote>
 <p>Clio Coder is designed to be self-contained and platform-compliant. This document outlines the default directory paths, file purposes, permission levels, and lifecycle commands (<code>install</code>, <code>reset</code>, <code>upgrade</code>, and <code>uninstall</code>). Clio Coder installs from npm as <code>@iowarp/clio-coder</code> (<code>npm install -g @iowarp/clio-coder</code>, published since v0.3.0) or from a source checkout with a deterministic local symlink; the CLI classifies both install kinds and <code>clio-coder upgrade</code> handles each.</p>
+<h3>Start, change settings, or recover</h3>
+<table>
+<thead>
+<tr>
+<th>Task</th>
+<th>Command</th>
+<th>Result</th>
+</tr>
+</thead>
+<tbody><tr>
+<td>Set up a new installation</td>
+<td><code>clio-coder configure</code></td>
+<td>Quick Connect: endpoint, key if needed, model, Connect; then start <code>clio-coder</code>.</td>
+</tr>
+<tr>
+<td>Change a connection</td>
+<td><code>clio-coder configure --section targets</code></td>
+<td>Add or edit endpoints, credentials, and models; choose role defaults.</td>
+</tr>
+<tr>
+<td>Change any setting or repair YAML</td>
+<td><code>clio-coder configure --edit</code></td>
+<td>Edit a draft, validate, and save with a backup.</td>
+</tr>
+<tr>
+<td>Diagnose the installation</td>
+<td><code>clio-coder doctor</code></td>
+<td>Read-only diagnosis. <code>clio-coder doctor --fix</code> repairs structure and permissions.</td>
+</tr>
+<tr>
+<td>Finish a package-manager update</td>
+<td><code>clio-coder upgrade --post-install</code></td>
+<td>Apply local migrations and installation checks.</td>
+</tr>
+<tr>
+<td>Start configuration over</td>
+<td><code>clio-coder reset --config</code></td>
+<td>Reset settings, preserve credentials and history, then run <code>clio-coder configure</code>.</td>
+</tr>
+<tr>
+<td>Emulate a fresh user</td>
+<td><code>clio-coder reset --all</code></td>
+<td>Remove all four user roots, recreate defaults, then run <code>clio-coder configure</code>.</td>
+</tr>
+<tr>
+<td>Remove user state</td>
+<td><code>clio-coder uninstall</code></td>
+<td>Remove the selected user roots; remove the package with the manager that installed it.</td>
+</tr>
+</tbody>
+</table>
+<p>Reset and uninstall preview their scope and ask for confirmation. Use
+<code>--dry-run</code> to inspect without changing anything. A bare <code>reset</code> clears session
+state, so use <code>--config</code> when your intent is to start model setup over. Project
+<code>.clio-coder/</code> directories survive these user-level operations.</p>
+<p>The source installer prepares the launcher and directory structure, then points
+you to <code>clio-coder configure</code>. It does not ask you to configure delegation peers
+before your primary model is set up. Upgrading preserves settings and
+credentials; reinstalling the package alone does not reset them.</p>
 <h3>Optional dependency: the Claude Agent SDK</h3>
 <p><code>@anthropic-ai/claude-agent-sdk</code> is an <code>optionalDependencies</code> entry, not a hard dependency. Its platform package carries a proprietary binary of roughly 224MB per platform, and only the <code>claude-sdk</code> runtime uses it. Skip it with:</p>
 <pre><code class="language-bash">npm install -g @iowarp/clio-coder --omit=optional
@@ -470,7 +529,7 @@ changes. Upgrading from 0.3.1 to 0.3.3 was automated:</p>
 <li>Fullscreen TUI mode (<code>interface.mode</code>, <code>interface.fullscreenScrollbar</code>) is
 available through <code>/settings interface</code> and requires a restart. Adaptive
 presentation pacing is the live <code>interface.smoothStreaming</code> setting; it
-defaults to <code>off</code>, with conservative <code>auto</code> and explicit <code>on</code> available from
+defaults to conservative <code>auto</code>, with <code>off</code> and explicit <code>on</code> available from
 the same area.</li>
 <li>Interactive launch paints a measured Stage 0 shell on the same terminal and editor that Stage 1 hydrates. Typing, queued submits, resize, and Ctrl+C remain live during hydration; set <code>CLIO_CODER_INSTANT_SHELL=0</code> for the legacy fully hydrated first-frame path.</li>
 <li>Turn settlement is enforced on <code>/new</code>, <code>/resume</code>, <code>/tree</code>, and <code>/fork</code> to cleanly commit in-flight streams before session writer replacement (#114).</li>
@@ -582,6 +641,42 @@ resisted, and the command exits 1 with the exact invocation to rerun. Both
 commands are idempotent, so the recovery is always the same: fix the permission
 or release the handle, then run the identical command again and it resumes from
 whatever is left. A partial delete never reports global success.</p>
+<hr>
+<h3>E. Interactive Configuration (<code>clio-coder configure</code>)</h3>
+<p>The interactive launcher starts with <strong>Quick Connect</strong>, followed by <strong>Settings</strong>
+and <strong>Diagnostics</strong>. Quick Connect asks for an endpoint URL, a key when needed,
+and a model when several are available. Review and <strong>Connect</strong>; the recommended
+defaults handle the rest. An unconfigured interactive <code>clio-coder</code> opens this
+same launcher and continues into chat after a successful setup.</p>
+<pre><code class="language-bash">clio-coder configure
+clio-coder configure --quick
+clio-coder configure --settings
+</code></pre>
+<p><strong>Settings</strong> contains the nine advanced sections:</p>
+<ol>
+<li><strong>Targets &amp; Auth</strong>: manage providers, endpoints, credentials, and models.</li>
+<li><strong>Models &amp; Thinking</strong>: default models, thinking levels, model favorites, cycle set.</li>
+<li><strong>Chat Defaults</strong>: smooth streaming, terminal progress, token limits, compaction.</li>
+<li><strong>Fleet</strong>: concurrency, retries, tool call caps, worker timeouts, profiles.</li>
+<li><strong>Permissions &amp; Autonomy</strong>: autonomy level, worker permissions, cost limits, review watchdog.</li>
+<li><strong>Panes &amp; Layout</strong>: terminal panes capability, dock layout, TUI display mode, notifications.</li>
+<li><strong>Skills &amp; Extensions</strong>: trust project imports, external ACP agents, plugins, library sync.</li>
+<li><strong>Diagnostics</strong>: version information, resolved directories, doctor check, raw settings inspection.</li>
+<li><strong>All Settings</strong>: validated file editor for the complete settings schema.</li>
+</ol>
+<p>Every section header indicates the exact settings file path being modified
+(<code>Source: ~/.config/clio-coder/settings.yaml</code>), prints the current active values,
+and provides arrow-key navigation with Escape to go back and <code>q</code> to quit. The
+parent menu remembers your selected row. Dumb terminals use numbered menus
+with <code>b</code> for Back and <code>q</code> to quit.</p>
+<p>The <code>--section &lt;name&gt;</code> flag jumps directly into any section (e.g.,
+<code>clio-coder configure --section models</code> or <code>clio-coder configure --section fleet</code>).
+The <code>--json</code> flag emits user settings with defaults in formatted JSON for scripting.
+<code>--edit</code> opens a temporary settings draft in <code>VISUAL</code>/<code>EDITOR</code>, validates it before
+saving, and keeps the previous file as <code>settings.yaml.bak</code>. It can repair a file
+that is too malformed to open the regular menu. See the
+<a href="configuration_blueprint.html#first-run-flow">configuration guide</a> for the complete
+new-user, add-target, edit-target, and cancellation paths.</p>
 <hr>
 <h2>6. Residues Checklist for Manual Purging</h2>
 <p>If you are removing Clio Coder completely from your system, verify that all categories of residues are removed:</p>

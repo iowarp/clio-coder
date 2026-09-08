@@ -8,13 +8,27 @@ export interface OpenAIModelsResponse {
 	data?: Array<Record<string, unknown> & { id?: unknown; status?: unknown }>;
 }
 
-export async function probeUrl(url: string, ctx: ProbeContext, method: "GET" | "HEAD" = "GET"): Promise<ProbeResult> {
-	const base = { url, timeoutMs: ctx.httpTimeoutMs, method } as const;
+function bearerHeaders(ctx: ProbeContext): Record<string, string> {
+	return ctx.authToken ? { Authorization: `Bearer ${ctx.authToken}` } : {};
+}
+
+export async function probeUrl(
+	url: string,
+	ctx: ProbeContext,
+	method: "GET" | "HEAD" = "GET",
+	headers: Record<string, string> = bearerHeaders(ctx),
+): Promise<ProbeResult> {
+	const base = { url, timeoutMs: ctx.httpTimeoutMs, method, headers } as const;
 	return ctx.signal ? probeHttp({ ...base, signal: ctx.signal }) : probeHttp(base);
 }
 
-export async function probeOpenAIModels(base: string, ctx: ProbeContext, modelsPath = "/v1/models"): Promise<string[]> {
-	return (await probeOpenAIModelCatalog(base, ctx, modelsPath)).models;
+export async function probeOpenAIModels(
+	base: string,
+	ctx: ProbeContext,
+	modelsPath = "/v1/models",
+	headers: Record<string, string> = bearerHeaders(ctx),
+): Promise<string[]> {
+	return (await probeOpenAIModelCatalog(base, ctx, modelsPath, headers)).models;
 }
 
 export interface OpenAIModelCatalogProbe {
@@ -38,11 +52,12 @@ async function probeModelDetailRows(
 	base: string,
 	ctx: ProbeContext,
 	modelsPath: string,
+	headers: Record<string, string>,
 ): Promise<Map<string, Record<string, unknown>>> {
 	const rows = new Map<string, Record<string, unknown>>();
 	for (const detailPath of OPENAI_COMPAT_DETAIL_PATHS) {
 		if (detailPath === modelsPath) continue;
-		const opts = { url: `${base}${detailPath}`, timeoutMs: ctx.httpTimeoutMs } as const;
+		const opts = { url: `${base}${detailPath}`, timeoutMs: ctx.httpTimeoutMs, headers } as const;
 		const result = await (ctx.signal
 			? probeJson<OpenAIModelsResponse>({ ...opts, signal: ctx.signal })
 			: probeJson<OpenAIModelsResponse>(opts));
@@ -60,13 +75,14 @@ export async function probeOpenAIModelCatalog(
 	base: string,
 	ctx: ProbeContext,
 	modelsPath = "/v1/models",
+	headers: Record<string, string> = bearerHeaders(ctx),
 ): Promise<OpenAIModelCatalogProbe> {
-	const opts = { url: `${base}${modelsPath}`, timeoutMs: ctx.httpTimeoutMs } as const;
+	const opts = { url: `${base}${modelsPath}`, timeoutMs: ctx.httpTimeoutMs, headers } as const;
 	const result = await (ctx.signal
 		? probeJson<OpenAIModelsResponse>({ ...opts, signal: ctx.signal })
 		: probeJson<OpenAIModelsResponse>(opts));
 	if (!result.ok || !result.data?.data) return { models: [], modelCapabilities: {}, modelStates: {} };
-	const detail = await probeModelDetailRows(base, ctx, modelsPath);
+	const detail = await probeModelDetailRows(base, ctx, modelsPath, headers);
 	const models: string[] = [];
 	const modelCapabilities: Record<string, Partial<CapabilityFlags>> = {};
 	const modelStates: Record<string, ProbeModelStatus> = {};

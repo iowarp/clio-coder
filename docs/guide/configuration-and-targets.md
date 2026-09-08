@@ -47,25 +47,119 @@ configured remote before synchronization can run. See
 
 ## First-run flow
 
-From a source checkout:
+After [installing Clio](installation-and-lifecycle.md), run `clio-coder configure`
+from the repository you want to work on. The launcher has three choices:
 
-```bash
-git clone https://github.com/iowarp/clio-coder.git
-cd clio-coder
-corepack enable pnpm
-pnpm install --frozen-lockfile
-pnpm run install:local
-hash -r
-clio-coder --version
+```text
+❯ Quick Connect    endpoint → model → ready
+  Settings         all configuration options
+  Diagnostics      check an existing installation
 ```
 
-Then start from the repository you want Clio to work on:
+Choose **Quick Connect**:
+
+1. Enter your endpoint URL. Examples: `localhost:1234` for LM Studio,
+   `localhost:11434` for Ollama, or the URL supplied by your API provider.
+2. Enter an API key if requested. Native local servers that work without a key
+   skip this step. Other APIs offer a key field even when their model list is
+   public, because chat may still require authentication; leave it blank only
+   for a keyless server.
+3. Choose a model if the endpoint offers several. Type to filter the list,
+   use arrows to move, and Enter to select. A single model is selected for you.
+4. Review the endpoint and model, then choose **Connect**. Run `clio-coder` to
+   start coding. Starting `clio-coder` itself without a target opens this same
+   launcher and continues into chat after setup succeeds.
+
+Quick Connect detects LM Studio, Ollama, and LiteLLM where their discovery APIs
+are available; other servers use the OpenAI- or Anthropic-compatible protocol.
+It checks live model discovery, without sending a generation request. An
+unreachable endpoint or empty model list stays in setup with a useful error.
+Use **Settings → Targets & Auth → Add a target** for browser sign-in,
+subscriptions, AWS credentials, explicit runtime selection, or a server that
+needs a manually entered model id.
+
+A first connection powers both chat and dispatched workers. Connecting again
+changes chat; existing fleet and background assignments, target capabilities,
+and preferences remain in place. A saved matching endpoint reuses its credential.
+New endpoints never inherit an unrelated provider key. Pasted keys are masked
+and saved locally only when you choose **Connect**.
+
+Escape goes back one step, including from the review screen. Ctrl+U clears a
+text field or model filter; Ctrl+C quits. In ordinary menus, `q` also quits;
+in the model filter it is text. Cancelling leaves the connection draft unsaved.
+Leaving first setup without a chat target exits 130. Use
+`clio-coder configure --quick` to open this path directly.
+
+## Recommended defaults
+
+Quick Connect uses the shipped defaults, with no separate preset to maintain.
+These aim to make one coding session useful on a laptop or a shared endpoint:
+
+| Area | Default and purpose |
+| --- | --- |
+| Connection | One endpoint and model for chat and the fleet default on first setup. No separate model assignments to learn. |
+| Autonomy | `auto-edit`: workspace edits are allowed; unrecognized commands need approval. The safety policy still applies. |
+| Parallel work | One worker at a time, so a single local model or shared endpoint is not flooded by default. Explicit `auto` still allows four workers. |
+| Worker permissions | Deny worker tool requests that need approval (`deny`), returning a structured denial so the worker can continue. This works across native and external runtimes. Interactive operator escalation is available for mediated runtimes in Settings. |
+| Cost | $5 tracked session budget. This depends on reported usage and known pricing; it is not a provider billing cap. |
+| Thinking | Low for chat, off for workers; actual support depends on the chosen model. |
+| Model limits | Runtime/model discovery supplies limits where available. `chat.maxOutputTokens: 0` uses the resolved model limit. Unknown models still use Clio's fallback limits; set a capability override in Settings if the server cannot advertise its actual capacity. |
+| Long sessions | Automatic compaction at 80% context pressure, with working-set management enabled. Compaction uses the chat model. |
+| Bounded work | Up to 3 chat retries, 2 worker retries, 60 chat tool calls per turn, 150 tool calls per worker run, and a 15-minute internal worker timeout. |
+| Background activity | Prompt prewarm is off. Memory stays rules-only without a separate memory route. No automatic peer setup or library sync. |
+| Terminal | Regular terminal mode, smooth streaming on automatic TTY detection, no panes or desktop notifications. |
+| Extensions and trust | No configured external peers or runtime plugins; project resource imports are untrusted by default. |
+
+Newly initialized settings contain these values. Existing explicit values are
+preserved; omitted keys inherit the current shipped defaults. For this release,
+the changed defaults are worker concurrency `1`, prewarm `false`, and smooth
+streaming `auto`. See the
+[full settings reference](configuration-reference.md) for every key.
+
+## Advanced settings
+
+Choose **Settings**, or run `clio-coder configure --settings`, to open the full
+configuration menu:
+
+- **Targets & Auth**: add, edit, rename, or remove a target; choose chat, fleet,
+  and background-memory defaults. Add and Edit share the full target wizard.
+  Adding a target preserves existing defaults. Editing preserves its other
+  capabilities, gateway settings, and role-specific model overrides. Rename
+  updates the target name and its references together.
+- **Models & Thinking**, **Chat Defaults**, **Fleet**, **Permissions & Autonomy**,
+  **Panes & Layout**, and **Skills & Extensions** cover common settings.
+- **Diagnostics** shows paths, runs the read-only doctor, and displays saved YAML.
+- **All Settings** opens a validated editor for every settings key, including
+  fleet profiles, routing, memory, compaction, plugins, hooks, and keybindings.
+
+Escape returns to the parent menu, which remembers the selected row. Each
+accepted setting is saved immediately; leaving another field does not undo
+previously accepted settings. Clear a model override or list by deleting its
+prefilled text before accepting it. The full target wizard instead saves at
+**Save target** after review. Pasted keys wait for Save; browser sign-in stores
+credentials when sign-in succeeds. Optional delegation review follows Save.
+
+Open a section directly, or open the full editor:
 
 ```bash
-cd /path/to/your/repo
-clio-coder doctor --fix
-clio-coder configure --list
+clio-coder configure --section targets
+clio-coder configure --section models
+clio-coder configure --edit
 ```
+
+The editor uses `VISUAL`, then `EDITOR`, then an available `nano` or `vi`. It edits
+a temporary draft, validates it against the same schema Clio uses at startup,
+and asks you to save, return to the editor, or discard. Invalid YAML or settings
+never replace the saved file. A save keeps the previous file at
+`settings.yaml.bak` and refuses to overwrite concurrent changes. `--edit` also
+works when malformed settings prevent the regular menu from loading.
+
+These commands edit user settings. Approved project settings and session
+choices can override them; use `clio-coder config inspect` to see the active
+sources. Without a terminal, `--section` prints its values and exits; `--json`
+and `--list` inspect settings and runtimes without initializing an installation.
+Dumb terminals retain the numbered prompt fallback; Quick Connect requires a
+regular interactive terminal. Use explicit flags for unattended target setup.
 
 Start one local runtime and register exactly one target first. Clio integrates with popular local inference engines:
 - **[LM Studio](https://lmstudio.ai):** A desktop application to run LLMs locally. Target runtime ID: `lmstudio`.
@@ -75,8 +169,8 @@ Start one local runtime and register exactly one target first. Clio integrates w
 - **[SGLang](https://github.com/sgl-project/sglang):** A fast serving framework for large language models. Target runtime ID: `sglang`.
 - **[LiteLLM](https://docs.litellm.ai):** An OpenAI-compatible gateway that publishes routed models across multiple inference endpoints. Target runtime ID: `litellm`.
 
-First-run onboarding always completes a valid orchestrator before it offers any
-worker-only colleague. If `agy` is already on `PATH`, the final optional step is
+The full target wizard completes a valid orchestrator before it offers any
+worker-only colleague. Quick Connect skips this optional review. If `agy` is already on `PATH`, the final optional step is
 named **Antigravity CLI — experimental local delegation**. It runs only the
 non-generating model-catalog probe, explains that Clio uses the operator's
 existing local session without inspecting credentials, and can create and bind a
@@ -177,7 +271,7 @@ chat:
     favorites: []
     recentLimit: 12
   maxOutputTokens: 0
-  prewarm: true
+  prewarm: false
 
 fleet:
   default:
@@ -188,7 +282,7 @@ fleet:
   rosters: {}
   agentProfiles: {}
   nodes: []
-  concurrency: auto
+  concurrency: 1
 
 context:
   workingSet:
@@ -217,7 +311,7 @@ safety:
 
 interface:
   outputDetail: default
-  smoothStreaming: off
+  smoothStreaming: auto
   mode: regular
   fullscreenScrollbar: auto
   terminalProgress: false
@@ -617,7 +711,7 @@ This is the version-2 durable schema shipped in `DEFAULT_SETTINGS`. Validation i
 | `chat.modelPicker.favorites` | `[]` | list of target/model references | immediately |
 | `chat.modelPicker.recentLimit` | `12` | integer ≥ 1 | immediately |
 | `chat.maxOutputTokens` | `0` | integer ≥ 0; `0` uses the model cap or the 32,768-token fallback when unknown | next turn |
-| `chat.prewarm` | `true` | boolean | next turn |
+| `chat.prewarm` | `false` | boolean | next turn |
 | `chat.retry.enabled` | `true` | boolean | next turn |
 | `chat.retry.maxRetries` | `3` | integer ≥ 0 | next turn |
 | `chat.retry.baseDelayMs` | `2000` | integer ≥ 0 | next turn |
@@ -643,7 +737,7 @@ This is the version-2 durable schema shipped in `DEFAULT_SETTINGS`. Validation i
 | `fleet.permissions.mode` | `deny` | `deny`, `fail`, `escalate` | next dispatch |
 | `fleet.permissions.escalation.timeoutMs` | `120000` | integer ≥ 1 | next dispatch |
 | `fleet.permissions.escalation.fallback` | `deny` | `deny` or `fail` | next dispatch |
-| `fleet.concurrency` | `auto` | `auto` or integer ≥ 1 | restart |
+| `fleet.concurrency` | `1` | `auto` or integer ≥ 1 | restart |
 | `fleet.retry.maxRetries` | `2` | integer ≥ 0 | next dispatch |
 | `fleet.retry.routeCooldownMs` | `15000` | integer ≥ 0 | next dispatch |
 | `fleet.limits.toolCallsPerRun` | `150` | integer ≥ 1 | next dispatch |
@@ -698,7 +792,7 @@ The safety-limit leaves have no one-process `CLIO_CODER_*` overrides in the curr
 | `interface.outputDetail` | `default` | `minimal`, `default`, `verbose` | next turn |
 | `interface.mode` | `regular` | `regular` or `fullscreen` | restart |
 | `interface.fullscreenScrollbar` | `auto` | `hidden`, `auto`, `always` | restart |
-| `interface.smoothStreaming` | `off` | `off`, `auto`, `on` | immediately |
+| `interface.smoothStreaming` | `auto` | `off`, `auto`, `on` | immediately |
 | `interface.desktopNotifications` | `false` | boolean | next turn |
 | `interface.panes.enabled` | `off` | `auto`, `embedded`, `off` | restart |
 | `interface.panes.notifications` | `failures` | `failures`, `all`, `off` | immediately |
@@ -779,10 +873,11 @@ Review and connect detected agents with:
 clio-coder configure --interop
 ```
 
-On a terminal this walks the pending proposals one at a time, showing the exact
-YAML entry before it asks, and writes only what you answer yes to. Without a
+On a terminal this shows one list of pending proposals with their launch
+commands. Space selects peers and Enter confirms the selection. Without a
 TTY it prints the proposals and exits 0 with `settings.yaml` byte-identical.
-The interactive `clio-coder configure` wizard ends with the same review, and
+The full target wizard in Settings offers the same review after saving
+the first primary target; Quick Connect skips it. Also,
 `/agents connect` in the TUI opens the same flow.
 
 No code path writes `integrations.externalAgents.entries` without an operator

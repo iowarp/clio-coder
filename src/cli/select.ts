@@ -48,6 +48,8 @@ export interface SelectOptions<T> {
 	backLabel?: string;
 	/** Rows to show at once. Defaults to what the terminal has room for. */
 	maxVisible?: number;
+	/** Filter a long list by typing; q/j/k are text in this mode. */
+	searchable?: boolean;
 	/**
 	 * Erase the menu once it is answered, leaving the caller's transcript to say
 	 * what was chosen. A wizard that redraws its own answer rows needs this; a
@@ -243,7 +245,7 @@ function viewportFor(output: NodeJS.WriteStream, overhead: number, total: number
 export async function promptSelect<T>(options: SelectOptions<T>): Promise<SelectResult<T>> {
 	const input = options.input ?? process.stdin;
 	const output = options.output ?? process.stdout;
-	const choices = options.choices;
+	let choices = options.choices;
 	if (choices.length === 0) return { kind: "back" };
 
 	const rail = options.railPrefix ?? "";
@@ -255,15 +257,25 @@ export async function promptSelect<T>(options: SelectOptions<T>): Promise<Select
 
 	let index = Math.min(Math.max(options.initialIndex ?? 0, 0), choices.length - 1);
 	let windowStart = 0;
+	let query = "";
+	const filter = () => {
+		choices = options.choices.filter((choice) => choice.label.toLowerCase().includes(query.toLowerCase()));
+		index = 0;
+		windowStart = 0;
+		render();
+	};
 
 	const render = (): void => {
-		const viewport = viewportFor(output, head.length + 5, choices.length, options.maxVisible);
+		const viewport = viewportFor(output, head.length + (options.searchable ? 6 : 5), choices.length, options.maxVisible);
 		if (index < windowStart) windowStart = index;
 		else if (index >= windowStart + viewport) windowStart = index - viewport + 1;
 		windowStart = Math.max(0, Math.min(windowStart, choices.length - viewport));
 		const lines: string[] = [];
 		for (const line of head) lines.push(`${rail}${line}`.trimEnd());
 		if (head.length > 0) lines.push(rail.trimEnd());
+		if (options.searchable)
+			lines.push(`${rail}${truncate(`Filter: ${query || "(type to search)"}`, terminalColumns(output) - railWidth)}`);
+		if (choices.length === 0) lines.push(`${rail}No matching models`);
 		lines.push(
 			...choiceRows(
 				{
@@ -284,7 +296,8 @@ export async function promptSelect<T>(options: SelectOptions<T>): Promise<Select
 		// "quit" reads as two different exits.
 		const legend = ["↑/↓ move", "enter select"];
 		if (options.backLabel !== undefined && options.backLabel !== "quit") legend.push(`esc ${options.backLabel}`);
-		legend.push(options.backLabel === "quit" ? "esc or q quit" : "q quit");
+		if (options.searchable) legend.push("type to filter", "ctrl-u clear", "ctrl-c quit");
+		else legend.push(options.backLabel === "quit" ? "esc or q quit" : "q quit");
 		lines.push(`${rail}${chalk.dim(legend.join(" · "))}`);
 		frame.draw(lines);
 	};
@@ -294,10 +307,28 @@ export async function promptSelect<T>(options: SelectOptions<T>): Promise<Select
 		output,
 		true,
 		render,
-		(_str, key, finish) => {
+		(str, key, finish) => {
 			if (key.ctrl && (key.name === "c" || key.name === "d")) {
 				finish({ kind: "quit" });
 				return;
+			}
+			if (options.searchable) {
+				if (key.ctrl && key.name === "u") {
+					query = "";
+					filter();
+					return;
+				}
+				if (key.name === "backspace") {
+					query = query.slice(0, -1);
+					filter();
+					return;
+				}
+				if (!key.ctrl && !key.meta && str?.length === 1 && str >= " " && str !== "\x7f") {
+					query += str;
+					filter();
+					return;
+				}
+				if (choices.length === 0 && !["escape", "left"].includes(key.name ?? "")) return;
 			}
 			switch (key.name) {
 				case "up":

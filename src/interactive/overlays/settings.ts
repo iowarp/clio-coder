@@ -514,7 +514,8 @@ const SETTINGS_HELP_BY_ID: Partial<Record<EditableSettingId, string>> = {
 		"Written by the confirm flow, not by hand, because confirming a remote here would be the record confirming itself. Sync refuses with library_remote_unconfirmed until this equals library.remote. Default: blank.",
 	"library.sync":
 		"Off means `clio-coder library sync` and `push` refuse before touching the network, whatever the remote says. Legal values: true, false · default: false.",
-	"budget.concurrency": "auto sizes to your machine. A fixed number caps how many workers run at once.",
+	"budget.concurrency":
+		"auto allows four local workers. A fixed number caps how many workers run at once; the default is one.",
 	"skills.trustProjectCompatRoots":
 		"Project roots like .claude/skills and .codex/skills are untrusted by default; enabling exposes them to the model.",
 	"attribution.gitCommits":

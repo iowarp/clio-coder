@@ -6,7 +6,7 @@ export interface DelayedManualCodeInput {
 }
 
 export function createDelayedManualCodeInput(
-	rl: ReadlineInterface,
+	rl: Pick<ReadlineInterface, "question">,
 	prompt: string,
 	options?: { delayMs?: number },
 ): DelayedManualCodeInput {

@@ -153,7 +153,7 @@ The public settings use one compaction threshold plus a non-destructive working-
 
 ```yaml
 chat:
-  prewarm: true
+  prewarm: false
 
 context:
   workingSet:

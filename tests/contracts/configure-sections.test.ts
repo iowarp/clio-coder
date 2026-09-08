@@ -8,6 +8,7 @@ import { PassThrough } from "node:stream";
 import { describe, it } from "node:test";
 
 import { runConfigureCommand } from "../../src/cli/configure.js";
+import { runOnboardingWizard } from "../../src/cli/configure-onboarding.js";
 import { runtimesForCategory } from "../../src/cli/configure-target.js";
 import { resetXdgCache } from "../../src/core/xdg.js";
 import { listProviderSupportEntries } from "../../src/domains/providers/index.js";
@@ -345,7 +346,8 @@ async function runWizard(
 	}) as typeof process.stderr.write;
 
 	const tty = fakeTty();
-	const pending = runConfigureCommand([], tty.input, tty.output);
+	registerBuiltinRuntimes(getRuntimeRegistry());
+	const pending = runOnboardingWizard({ in: tty.input, out: tty.output });
 	let settled = false;
 	void pending.then(() => {
 		settled = true;
@@ -445,6 +447,8 @@ describe("contracts/configure-onboarding", () => {
 				{ waitFor: "Where is the server?", keys: [CLEAR_LINE, ...server.url.split(""), ENTER] },
 				{ waitFor: "Which model?", keys: [DOWN, ENTER] },
 				{ waitFor: "How hard should it think?", keys: [DOWN, ENTER] },
+				{ waitFor: "Context window in tokens", keys: [ENTER] },
+				{ waitFor: "Review target", keys: [ENTER] },
 				{ waitFor: "Delegate to any of these?", keys: [ENTER], optional: true },
 			]);
 			strictEqual(result.code, 0, `${result.stderr}\n${plainText(result.transcript())}`);
@@ -499,7 +503,9 @@ describe("contracts/configure-onboarding", () => {
 				{ waitFor: "Where is the server?", keys: [CLEAR_LINE, ...server.url.split(""), ENTER] },
 				{ waitFor: "Which model?", keys: [ENTER] },
 				{ waitFor: "How hard should it think?", keys: [ENTER] },
+				{ waitFor: "Context window in tokens", keys: [ENTER] },
 				// Space ticks the row, enter confirms the whole list at once.
+				{ waitFor: "Review target", keys: [ENTER] },
 				{ waitFor: "Delegate to any of these?", keys: [" ", ENTER] },
 			]);
 			strictEqual(result.code, 0, `${result.stderr}\n${plainText(result.transcript())}`);
@@ -515,7 +521,7 @@ describe("contracts/configure-onboarding", () => {
 				!screen.includes("is installed and not configured as a delegation agent"),
 				`the per-agent paragraph survived:\n${screen}`,
 			);
-			ok(screen.includes("delegation agent opencode added"), `the wired peer is not in the results:\n${screen}`);
+			ok(screen.includes("opencode"), `the wired peer is not in the results:\n${screen}`);
 
 			const settings = readFileSync(testEnv.settingsFile, "utf8");
 			match(settings, /id: opencode/u);
@@ -539,8 +545,10 @@ describe("contracts/configure-onboarding", () => {
 				{ waitFor: "Where is the server?", keys: [CLEAR_LINE, ...server.url.split(""), ENTER] },
 				{ waitFor: "Which model?", keys: [ENTER] },
 				{ waitFor: "How hard should it think?", keys: [ENTER] },
+				{ waitFor: "Context window in tokens", keys: [ENTER] },
 				{ waitFor: "Add your local Antigravity research colleague?", keys: [DOWN, ENTER] },
 				{ waitFor: "Antigravity research model", keys: [ENTER] },
+				{ waitFor: "Review target", keys: [ENTER] },
 				{ waitFor: "Delegate to any of these?", keys: [ENTER], optional: true },
 			]);
 			strictEqual(result.code, 0, `${result.stderr}\n${plainText(result.transcript())}`);
@@ -593,8 +601,8 @@ describe("contracts/configure-onboarding", () => {
 			// behind when it was abandoned.
 			ok(screen.slice(0, reopened).includes("Local HTTP server"), `step 1's answer was lost:\n${screen}`);
 			ok(!/Target id\s{4,}\S/u.test(screen), "the abandoned step must not leave an answer row behind");
-			ok(screen.includes("Cancelled, nothing written"), `no closing line:\n${screen}`);
-			match(readFileSync(testEnv.settingsFile, "utf8"), /targets: \[\]/u, "a cancelled wizard registers no target");
+			ok(screen.includes("Cancelled; target settings not saved"), `no closing line:\n${screen}`);
+			strictEqual(existsSync(testEnv.settingsFile), false, "a cancelled wizard creates no settings file");
 		} finally {
 			testEnv.cleanup();
 		}
@@ -606,9 +614,7 @@ describe("contracts/configure-onboarding", () => {
 			const result = await runWizard(testEnv.env, [{ waitFor: "How will you connect Clio to a model?", keys: [ESCAPE] }]);
 			strictEqual(result.code, 130);
 			match(result.stderr, /configuration cancelled/u);
-			// The home is initialized before the wizard opens, so the file exists; a
-			// cancel is the difference between a template and a configured target.
-			match(readFileSync(testEnv.settingsFile, "utf8"), /targets: \[\]/u);
+			strictEqual(existsSync(testEnv.settingsFile), false);
 		} finally {
 			testEnv.cleanup();
 		}
@@ -654,6 +660,7 @@ describe("contracts/configure-onboarding: credential before reachability", () =>
 				{ waitFor: "Which environment variable?", keys: [CLEAR_LINE, ...envVar.split(""), ENTER] },
 				{ waitFor: "Where is the server?", keys: [CLEAR_LINE, ...server.url.split(""), ENTER] },
 				{ waitFor: "Which model?", keys: [ENTER] },
+				{ waitFor: "Review target", keys: [ENTER] },
 				{ waitFor: "Delegate to any of these?", keys: [ENTER], optional: true },
 			]);
 			strictEqual(result.code, 0, `${result.stderr}\n${plainText(result.transcript())}`);
@@ -690,6 +697,7 @@ describe("contracts/configure-onboarding: credential before reachability", () =>
 				{ waitFor: "How should Clio get the API key?", keys: [ENTER] },
 				{ waitFor: "Where is the server?", keys: [CLEAR_LINE, ...server.url.split(""), ENTER] },
 				{ waitFor: "Which model?", keys: [CLEAR_LINE, ...`manual-model`.split(""), ENTER] },
+				{ waitFor: "Review target", keys: [ENTER] },
 				{ waitFor: "Delegate to any of these?", keys: [ENTER], optional: true },
 			]);
 			strictEqual(result.code, 0, `${result.stderr}\n${plainText(result.transcript())}`);

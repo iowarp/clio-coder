@@ -92,7 +92,7 @@
 </tr>
 <tr>
 <td><code>chat.prewarm</code></td>
-<td><code>true</code></td>
+<td><code>false</code></td>
 <td>Whether the known prompt prefix is sent to a <code>local-native</code> server at session start, after resume, and after compaction to fill its prefix cache (boolean; no effect on other tiers, workers, headless); applies next turn.</td>
 <td>session override (<code>/settings</code> apply-this-session) &gt; <code>.clio-coder/settings.local.yaml</code> &gt; <code>.clio-coder/settings.yaml</code> &gt; user settings.yaml &gt; default</td>
 </tr>
@@ -278,7 +278,7 @@
 </tr>
 <tr>
 <td><code>fleet.concurrency</code></td>
-<td><code>auto</code></td>
+<td><code>1</code></td>
 <td>Maximum concurrently running local workers: <code>auto</code> currently resolves to the compiled default of 4, or set an integer &gt;= 1; applies at restart.</td>
 <td></td>
 </tr>
@@ -716,7 +716,7 @@
 </tr>
 <tr>
 <td><code>interface.smoothStreaming</code></td>
-<td><code>off</code></td>
+<td><code>auto</code></td>
 <td>Presentation-only pacing of streamed assistant text and thinking: <code>off</code>, <code>auto</code> (TTY heuristics), <code>on</code>; applies immediately.</td>
 <td>session override (<code>/settings</code> apply-this-session) &gt; <code>.clio-coder/settings.local.yaml</code> &gt; <code>.clio-coder/settings.yaml</code> &gt; user settings.yaml &gt; default</td>
 </tr>
@@ -1810,7 +1810,8 @@
 <th>Controls</th>
 </tr>
 </thead>
-<tbody><tr>
+<tbody>
+<tr>
 <td><code>--agent-profile</code></td>
 <td>Save the target as a named <code>fleet.profiles</code> entry under this name (non-interactive; mutually exclusive with <code>--fleet-model</code>); <code>targets add</code> forwards the same flags.</td>
 </tr>
@@ -1828,7 +1829,7 @@
 </tr>
 <tr>
 <td><code>--api-key-env</code></td>
-<td>Name of the environment variable read for the target&#39;s API key at call time, instead of storing a literal.</td>
+<td>Name of the environment variable read for the target's API key at call time, instead of storing a literal.</td>
 </tr>
 <tr>
 <td><code>--background-model</code></td>
@@ -1837,6 +1838,26 @@
 <tr>
 <td><code>--context-window</code></td>
 <td>Capability override: positive integer context window in tokens recorded on the target instead of the probed or catalog value.</td>
+</tr>
+<tr>
+<td><code>--quick</code></td>
+<td>Open Quick Connect directly: endpoint, key if needed, model, and Connect. Requires a terminal.</td>
+</tr>
+<tr>
+<td><code>--settings</code></td>
+<td>Open the full settings menu directly.</td>
+</tr>
+<tr>
+<td><code>--edit</code></td>
+<td>Open all user settings in VISUAL/EDITOR as a draft; validate and confirm before saving, retain settings.yaml.bak, and allow repair of malformed YAML. Requires a terminal.</td>
+</tr>
+<tr>
+<td><code>--json</code></td>
+<td>Print effective user settings as JSON without initializing the installation.</td>
+</tr>
+<tr>
+<td><code>--section</code></td>
+<td>Open targets, models, chat, fleet, permissions, panes, skills, diagnostics, or advanced (All Settings); without a terminal, print the section values and exit.</td>
 </tr>
 <tr>
 <td><code>--fleet-model</code></td>
@@ -1852,7 +1873,7 @@
 </tr>
 <tr>
 <td><code>--help</code></td>
-<td>Print the command&#39;s usage and exit.</td>
+<td>Print the command's usage and exit.</td>
 </tr>
 <tr>
 <td><code>--id</code></td>
@@ -1884,7 +1905,7 @@
 </tr>
 <tr>
 <td><code>--reasoning</code></td>
-<td>Capability override: <code>true</code> or <code>false</code> for whether the target&#39;s model supports reasoning.</td>
+<td>Capability override: <code>true</code> or <code>false</code> for whether the target's model supports reasoning.</td>
 </tr>
 <tr>
 <td><code>--remove</code></td>
@@ -1918,7 +1939,8 @@
 <td><code>-h</code></td>
 <td>Short form of --help.</td>
 </tr>
-</tbody></table>
+</tbody>
+</table>
 <h3><code>context</code></h3>
 <table>
 <thead>

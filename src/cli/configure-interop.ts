@@ -48,7 +48,7 @@ export interface InteropReviewStreams {
 
 export interface InteropReviewIo {
 	/** Readline interface for the numbered fallback. Null means nothing can answer. */
-	rl: ReturnType<typeof createInterface> | null;
+	rl: Pick<ReturnType<typeof createInterface>, "question"> | null;
 	streams?: InteropReviewStreams;
 	/** Rail to draw on when the caller already owns one. */
 	presenter?: LifecyclePresenter;

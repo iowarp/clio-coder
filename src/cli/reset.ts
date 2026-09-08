@@ -372,6 +372,8 @@ export async function runResetCommand(argv: ReadonlyArray<string>): Promise<numb
 		presenter.finish();
 		return 1;
 	}
+	if (args.config || args.all) presenter.commandAdvice("Set up a model again:", "clio-coder configure");
+	else if (args.auth) presenter.commandAdvice("Reconnect your providers:", "clio-coder configure --section targets");
 
 	presenter.done("Done");
 	return 0;

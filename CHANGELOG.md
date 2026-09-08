@@ -2,6 +2,22 @@
 
 All notable changes to Clio Coder are documented in this file. The format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/) and versions follow Semantic Versioning; pre-1.0 minor releases may include incompatible changes.
 
+## Unreleased
+
+### Added
+- Make Quick Connect the first launcher option, with Settings and Diagnostics alongside it. Connect an endpoint, supply a key when needed, filter the live model list, review, and Connect. A single model skips selection; reconnecting preserves existing preferences and fleet assignments. Add `--quick` and `--settings` shortcuts.
+
+### Changed
+- Use one worker, no prompt prewarm, and automatic TTY streaming as shipped defaults. Preserve explicitly saved values and document the full recommended default policy.
+
+### Fixed
+- Fix `configure` exiting successfully at the first question after an arrow-key menu. Scope readline to active questions, use arrow selectors and editable text fields for settings, and preserve menu position on Back.
+- Use the canonical autonomy levels in the configuration menu, so saved choices match the settings schema and existing `full-auto` configurations open on the correct selection.
+- Share the target wizard across first setup, Add, and Edit, with a review and explicit Save. Preserve existing role defaults, credential references, and capability overrides; reject duplicate target ids and allow clearing model overrides. Save pasted keys per target and review optional delegation peers after the primary setup is saved.
+- Authenticate generic OpenAI- and Anthropic-compatible discovery probes with the resolved target credential, including a pasted key before the target is saved.
+- Add `configure --edit` and All Settings for validated editing of the complete user settings schema, including repair of malformed YAML, a previous-file backup, and protection against overwriting concurrent changes.
+- Keep configuration inspection and upgrade dry runs from initializing user state. Give reset explicit setup/reconnection guidance and simplify the source installer's next step to `clio-coder configure`.
+
 ## 0.4.5 - 2026-09-07
 
 ### Added

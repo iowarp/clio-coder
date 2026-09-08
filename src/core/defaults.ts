@@ -456,7 +456,7 @@ export const DEFAULT_SETTINGS = {
 			recentLimit: 12,
 		} as ModelSelectorSettings,
 		maxOutputTokens: 0,
-		prewarm: true,
+		prewarm: false,
 		retry: {
 			enabled: true,
 			maxRetries: 3,
@@ -484,7 +484,7 @@ export const DEFAULT_SETTINGS = {
 			mode: "deny" as WorkerPermissionMode,
 			escalation: { timeoutMs: 120000, fallback: "deny" } as WorkerEscalationSettings,
 		},
-		concurrency: "auto" as "auto" | number,
+		concurrency: 1 as "auto" | number,
 		retry: { maxRetries: 2, routeCooldownMs: 15000 },
 		limits: {
 			toolCallsPerRun: GUARDRAIL_DEFAULTS.workerToolCallCap,
@@ -524,7 +524,7 @@ export const DEFAULT_SETTINGS = {
 		outputDetail: "default",
 		mode: "regular",
 		fullscreenScrollbar: "auto",
-		smoothStreaming: "off",
+		smoothStreaming: "auto",
 		desktopNotifications: false,
 		panes: {
 			enabled: "off",
@@ -591,7 +591,7 @@ chat:
     favorites: []
     recentLimit: 12
   maxOutputTokens: 0
-  prewarm: true
+  prewarm: false
   retry:
     enabled: true
     maxRetries: 3
@@ -617,7 +617,7 @@ fleet:
     escalation:
       timeoutMs: 120000
       fallback: deny
-  concurrency: auto
+  concurrency: 1
   retry:
     maxRetries: 2
     routeCooldownMs: 15000
@@ -660,7 +660,7 @@ safety:
 
 interface:
   outputDetail: default
-  smoothStreaming: off
+  smoothStreaming: auto
   mode: regular
   fullscreenScrollbar: auto
   terminalProgress: false

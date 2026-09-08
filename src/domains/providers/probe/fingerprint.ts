@@ -3,11 +3,15 @@ export interface NativeRuntimeFingerprint {
 	displayName: string;
 }
 
-async function fetchWithTimeout(url: string, timeoutMs: number): Promise<Response | null> {
+async function fetchWithTimeout(
+	url: string,
+	timeoutMs: number,
+	headers: Record<string, string>,
+): Promise<Response | null> {
 	const controller = new AbortController();
 	const timer = setTimeout(() => controller.abort(), timeoutMs);
 	try {
-		return await fetch(url, { signal: controller.signal });
+		return await fetch(url, { signal: controller.signal, headers });
 	} catch {
 		return null;
 	} finally {
@@ -22,10 +26,13 @@ async function fetchWithTimeout(url: string, timeoutMs: number): Promise<Respons
  * by doctor + configure wizard to steer users onto native runtimes for
  * resident-model lifecycle.
  */
-export async function fingerprintNativeRuntime(baseUrl: string): Promise<NativeRuntimeFingerprint | null> {
+export async function fingerprintNativeRuntime(
+	baseUrl: string,
+	headers: Record<string, string> = {},
+): Promise<NativeRuntimeFingerprint | null> {
 	const normalized = baseUrl.replace(/^ws:/u, "http:").replace(/^wss:/u, "https:");
 	const trimmed = normalized.endsWith("/") ? normalized.slice(0, -1) : normalized;
-	const greeting = await fetchWithTimeout(`${trimmed}/lmstudio-greeting`, 750);
+	const greeting = await fetchWithTimeout(`${trimmed}/lmstudio-greeting`, 750, headers);
 	if (greeting?.ok) {
 		try {
 			const data = (await greeting.json()) as { lmstudio?: unknown };
@@ -34,7 +41,7 @@ export async function fingerprintNativeRuntime(baseUrl: string): Promise<NativeR
 			// The exact JSON body is the fingerprint.
 		}
 	}
-	const lmStudioV0 = await fetchWithTimeout(`${trimmed}/api/v0/models`, 750);
+	const lmStudioV0 = await fetchWithTimeout(`${trimmed}/api/v0/models`, 750, headers);
 	if (lmStudioV0?.ok) {
 		try {
 			const data = (await lmStudioV0.json()) as { data?: unknown };
@@ -48,7 +55,7 @@ export async function fingerprintNativeRuntime(baseUrl: string): Promise<NativeR
 			// A malformed v0 body is not an LM Studio fingerprint.
 		}
 	}
-	const ollama = await fetchWithTimeout(`${trimmed}/api/version`, 750);
+	const ollama = await fetchWithTimeout(`${trimmed}/api/version`, 750, headers);
 	if (ollama?.ok) {
 		try {
 			const data = (await ollama.json()) as { version?: unknown };

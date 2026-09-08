@@ -3,7 +3,7 @@ import { randomUUID } from "node:crypto";
 import { readFileSync, unlinkSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
-import { shellQuote } from "../core/shell-quote.js";
+import { shellQuote } from "./shell-quote.js";
 
 export type ExternalEditorProbe = (candidates: ReadonlyArray<string>) => string | null;
 
@@ -48,11 +48,11 @@ export function resolveExternalEditor(
 	return probe(["nano", "vi"]);
 }
 
-export function editTextExternally(initialText: string, command: string | null): ExternalEditResult {
+export function editTextExternally(initialText: string, command: string | null, extension = ".md"): ExternalEditResult {
 	if (!command) return { ok: false, error: "no external editor configured; set VISUAL or EDITOR" };
-	const tmpFile = join(tmpdir(), `clio-coder-editor-${process.pid}-${randomUUID()}.md`);
+	const tmpFile = join(tmpdir(), `clio-coder-editor-${process.pid}-${randomUUID()}${extension}`);
 	try {
-		writeFileSync(tmpFile, initialText, "utf8");
+		writeFileSync(tmpFile, initialText, { encoding: "utf8", mode: 0o600, flag: "wx" });
 		const result = runEditor(command, tmpFile);
 		if (result.error) return { ok: false, error: result.error.message };
 		if (result.status !== 0) return { ok: false, error: `external editor exited with code ${result.status ?? "?"}` };

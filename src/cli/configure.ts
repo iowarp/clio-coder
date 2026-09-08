@@ -1,12 +1,12 @@
 import { existsSync, readFileSync } from "node:fs";
 import { stdin as input, stdout as output } from "node:process";
-import { createInterface } from "node:readline/promises";
 import {
 	bindAgentProfileInSettings,
 	type ClioSettings,
 	readSettings,
 	removeTargetFromSettings,
 	settingsPath,
+	updateSavedSettingsDocument,
 	updateSettings,
 } from "../core/config.js";
 import {
@@ -32,6 +32,7 @@ import {
 	listProviderSupportEntries,
 	type ProviderSupportEntry,
 	recordTargetModelSnapshot,
+	resolveAuthTarget,
 	resolveRuntimeAuthTarget,
 	supportGroupLabel,
 } from "../domains/providers/index.js";
@@ -41,8 +42,10 @@ import { registerBuiltinRuntimes } from "../domains/providers/runtimes/builtins.
 import { greetLmStudio } from "../domains/providers/runtimes/common/lmstudio-http.js";
 import type { ProbeResult, RuntimeDescriptor } from "../domains/providers/types/runtime-descriptor.js";
 import type { TargetDescriptor } from "../domains/providers/types/target-descriptor.js";
+import { AUTONOMY_LEVELS } from "../domains/safety/index.js";
 import { registerClioOAuthProviders } from "../engine/oauth.js";
 import { ask, askYesNo } from "./ask.js";
+import { editSettings } from "./configure-editor.js";
 import { runInteropReview } from "./configure-interop.js";
 import {
 	type ConfigureCategory,
@@ -54,6 +57,8 @@ import {
 } from "./configure-layout.js";
 import { loginOAuthRuntime } from "./configure-oauth.js";
 import { canRunOnboarding, runOnboardingWizard } from "./configure-onboarding.js";
+import { ConfigureNavigation, ConfigurePrompts } from "./configure-prompts.js";
+import { runQuickConnect } from "./configure-quick.js";
 import {
 	applyTarget,
 	assertOrchestratorReplacementEligible,
@@ -72,6 +77,7 @@ import {
 	setOrchestratorPointer,
 	setWorkerDefaultPointer,
 	setWorkerProfilePointer,
+	targetApiKeyRef,
 	validateContextWindowOverride,
 	validateResolvedModel,
 	type WireModelInventory,
@@ -87,13 +93,17 @@ const HELP = `clio-coder configure
 Configure model targets and runtime settings for chat and fleet dispatch.
 
 Usage:
-  clio-coder configure                   interactive configuration wizard
+  clio-coder configure                   Quick Connect, Settings, or Diagnostics
+  clio-coder configure --quick           connect an endpoint with recommended defaults
+  clio-coder configure --settings        open the complete settings menu
   clio-coder configure --section <name>  open one section directly:
                                          targets, models, chat, fleet,
-                                         permissions, panes, skills, diagnostics
+                                         permissions, panes, skills, diagnostics, advanced
                                          Without a terminal this prints the
                                          section's values and exits.
   clio-coder configure --json            emit the effective settings as JSON
+  clio-coder configure --edit            edit all user settings in VISUAL/EDITOR;
+                                         validate and review before saving
   clio-coder configure --interop         review detected coding agents as delegation peers
   clio-coder configure --list            list target runtimes (user-facing only)
   clio-coder configure --list --all      list every registered runtime including aliases
@@ -138,6 +148,9 @@ interface ParsedArgs {
 	all: boolean;
 	interop: boolean;
 	json: boolean;
+	edit: boolean;
+	quick: boolean;
+	settings: boolean;
 	section?: string;
 	remove?: string;
 	renameOld?: string;
@@ -173,6 +186,9 @@ function parseSetupArgs(argv: ReadonlyArray<string>): ParsedArgs {
 		all: false,
 		interop: false,
 		json: false,
+		edit: false,
+		quick: false,
+		settings: false,
 		force: false,
 		gateway: false,
 		setOrchestrator: false,
@@ -194,6 +210,15 @@ function parseSetupArgs(argv: ReadonlyArray<string>): ParsedArgs {
 				break;
 			case "--json":
 				out.json = true;
+				break;
+			case "--edit":
+				out.edit = true;
+				break;
+			case "--quick":
+				out.quick = true;
+				break;
+			case "--settings":
+				out.settings = true;
 				break;
 			case "--section":
 				out.section = need();
@@ -316,7 +341,9 @@ function printRuntimeList(includeHidden: boolean): void {
 		const runtime = getRuntimeRegistry().get(entry.runtimeId);
 		const status =
 			runtime && entry.connectable
-				? auth.statusForTarget(resolveRuntimeAuthTarget(runtime), { includeFallback: false })
+				? auth.statusForTarget(resolveRuntimeAuthTarget(runtime), {
+						includeFallback: false,
+					})
 				: null;
 		const authLabel =
 			runtime?.auth === "oauth"
@@ -386,7 +413,7 @@ function resolveModelChoice(
 }
 
 async function askModelChoice(
-	rl: ReturnType<typeof createInterface>,
+	rl: ConfigurePrompts,
 	label: string,
 	wireModels: ReadonlyArray<string>,
 	defaultValue: string | undefined,
@@ -433,6 +460,7 @@ async function runNonInteractive(runtime: RuntimeDescriptor, args: ParsedArgs): 
 		);
 		return 2;
 	}
+	initializeClioHome();
 	const settings = readSettings();
 	const auth = openAuthStorage();
 	const support = buildProviderSupportEntry(runtime);
@@ -463,38 +491,48 @@ async function runNonInteractive(runtime: RuntimeDescriptor, args: ParsedArgs): 
 			);
 		}
 	}
-	const authStatus = auth.statusForTarget(resolveRuntimeAuthTarget(runtime), { includeFallback: false });
+	const authStatus = auth.statusForTarget(
+		existing ? resolveAuthTarget(existing, runtime) : resolveRuntimeAuthTarget(runtime),
+		{ includeFallback: false },
+	);
 	const apiKeyEnv = args.apiKeyEnv ?? existing?.auth?.apiKeyEnvVar;
 	const apiKeyRef =
 		runtime.auth === "api-key" && (args.apiKey || existing?.auth?.apiKeyRef || authStatus.source === "stored-api-key")
-			? runtime.id
+			? args.apiKey
+				? targetApiKeyRef(args.id, settings.targets)
+				: (existing?.auth?.apiKeyRef ?? runtime.id)
 			: undefined;
 	const oauthProfile =
 		runtime.auth === "oauth" ? (existing?.auth?.oauthProfile ?? runtime.oauthProviderId ?? runtime.id) : undefined;
-	const seed = buildDescriptor(runtime, args.id, {
-		...(url !== undefined ? { url } : {}),
-		...(args.model !== undefined
-			? { model: args.model }
-			: existing?.defaultModel
-				? { model: existing.defaultModel }
-				: support.defaultModel
-					? { model: support.defaultModel }
+	const seed: TargetDescriptor = {
+		...existing,
+		...buildDescriptor(runtime, args.id, {
+			...(url !== undefined ? { url } : {}),
+			...(args.model !== undefined
+				? { model: args.model }
+				: existing?.defaultModel
+					? { model: existing.defaultModel }
+					: support.defaultModel
+						? { model: support.defaultModel }
+						: {}),
+			...(apiKeyEnv !== undefined ? { apiKeyEnv } : {}),
+			...(apiKeyRef !== undefined ? { apiKeyRef } : {}),
+			...(oauthProfile !== undefined ? { oauthProfile } : {}),
+			gateway: args.gateway || existing?.gateway === true,
+			...(args.lifecycle !== undefined
+				? { lifecycle: args.lifecycle }
+				: existing?.lifecycle !== undefined
+					? { lifecycle: existing.lifecycle }
 					: {}),
-		...(apiKeyEnv !== undefined ? { apiKeyEnv } : {}),
-		...(apiKeyRef !== undefined ? { apiKeyRef } : {}),
-		...(oauthProfile !== undefined ? { oauthProfile } : {}),
-		gateway: args.gateway || existing?.gateway === true,
-		...(args.lifecycle !== undefined
-			? { lifecycle: args.lifecycle }
-			: existing?.lifecycle !== undefined
-				? { lifecycle: existing.lifecycle }
-				: {}),
-		...(args.contextWindow !== undefined ? { contextWindow: args.contextWindow } : {}),
-		...(args.maxTokens !== undefined ? { maxTokens: args.maxTokens } : {}),
-		...(args.reasoning !== undefined ? { reasoning: args.reasoning } : {}),
-		...(existing?.lmstudio ? { lmstudio: existing.lmstudio } : {}),
-		...(existing?.litellm ? { litellm: existing.litellm } : {}),
-	});
+			...(args.contextWindow !== undefined ? { contextWindow: args.contextWindow } : {}),
+			...(args.maxTokens !== undefined ? { maxTokens: args.maxTokens } : {}),
+			...(args.reasoning !== undefined ? { reasoning: args.reasoning } : {}),
+			...(existing?.lmstudio ? { lmstudio: existing.lmstudio } : {}),
+			...(existing?.litellm ? { litellm: existing.litellm } : {}),
+		}),
+	};
+	seed.capabilities = { ...existing?.capabilities, ...seed.capabilities };
+	if (seed.auth) seed.auth = { ...existing?.auth, ...seed.auth };
 	const inventory = await resolveSupportedWireModels(runtime, seed, existing, args.apiKey);
 	const wireModels = inventory.models;
 	const model =
@@ -508,24 +546,29 @@ async function runNonInteractive(runtime: RuntimeDescriptor, args: ParsedArgs): 
 	}
 	if (!validateResolvedModel(runtime, seed, model, args.force, inventory)) return 2;
 	if (!validateContextWindowOverride(runtime, model, args.contextWindow, args.force)) return 2;
-	const descriptor = buildDescriptor(runtime, args.id, {
-		...(url !== undefined ? { url } : {}),
-		...(model ? { model } : {}),
-		...(apiKeyEnv !== undefined ? { apiKeyEnv } : {}),
-		...(apiKeyRef !== undefined ? { apiKeyRef } : {}),
-		...(oauthProfile !== undefined ? { oauthProfile } : {}),
-		gateway: args.gateway || existing?.gateway === true,
-		...(args.lifecycle !== undefined
-			? { lifecycle: args.lifecycle }
-			: existing?.lifecycle !== undefined
-				? { lifecycle: existing.lifecycle }
-				: {}),
-		...(args.contextWindow !== undefined ? { contextWindow: args.contextWindow } : {}),
-		...(args.maxTokens !== undefined ? { maxTokens: args.maxTokens } : {}),
-		...(args.reasoning !== undefined ? { reasoning: args.reasoning } : {}),
-		...(existing?.lmstudio ? { lmstudio: existing.lmstudio } : {}),
-		...(existing?.litellm ? { litellm: existing.litellm } : {}),
-	});
+	const descriptor: TargetDescriptor = {
+		...existing,
+		...buildDescriptor(runtime, args.id, {
+			...(url !== undefined ? { url } : {}),
+			...(model ? { model } : {}),
+			...(apiKeyEnv !== undefined ? { apiKeyEnv } : {}),
+			...(apiKeyRef !== undefined ? { apiKeyRef } : {}),
+			...(oauthProfile !== undefined ? { oauthProfile } : {}),
+			gateway: args.gateway || existing?.gateway === true,
+			...(args.lifecycle !== undefined
+				? { lifecycle: args.lifecycle }
+				: existing?.lifecycle !== undefined
+					? { lifecycle: existing.lifecycle }
+					: {}),
+			...(args.contextWindow !== undefined ? { contextWindow: args.contextWindow } : {}),
+			...(args.maxTokens !== undefined ? { maxTokens: args.maxTokens } : {}),
+			...(args.reasoning !== undefined ? { reasoning: args.reasoning } : {}),
+			...(existing?.lmstudio ? { lmstudio: existing.lmstudio } : {}),
+			...(existing?.litellm ? { litellm: existing.litellm } : {}),
+		}),
+	};
+	descriptor.capabilities = { ...existing?.capabilities, ...descriptor.capabilities };
+	if (descriptor.auth) descriptor.auth = { ...existing?.auth, ...descriptor.auth };
 	const setOrchestrator = args.setOrchestrator || args.orchestratorModel !== undefined;
 	const setBackground = args.setBackground || args.backgroundModel !== undefined;
 	if ((setOrchestrator || setBackground) && !isOrchestratorEligibleRuntime(runtime)) {
@@ -540,8 +583,8 @@ async function runNonInteractive(runtime: RuntimeDescriptor, args: ParsedArgs): 
 		printError(error instanceof Error ? error.message : String(error));
 		return 1;
 	}
-	if (args.apiKey) {
-		auth.setApiKey(runtime.id, args.apiKey);
+	if (args.apiKey && apiKeyRef) {
+		auth.setApiKey(apiKeyRef, args.apiKey);
 		// Bailing here leaves nothing half-done: settings are not touched until
 		// applyConfiguration below, so a refused credential write means the whole
 		// command changed nothing, which is what the non-zero exit now claims.
@@ -572,14 +615,16 @@ async function runNonInteractive(runtime: RuntimeDescriptor, args: ParsedArgs): 
 	// concurrent session's field-level write-through is never lost.
 	applyConfiguration(settings);
 	updateSettings(applyConfiguration);
-	const probe = await runtimeProbe(runtime, descriptor);
+	const probe = await runtimeProbe(runtime, descriptor, args.apiKey);
 	if (probe?.ok && probe.models) {
 		recordTargetModelSnapshot(descriptor, probe.models, probe.modelLabels ? { modelLabels: probe.modelLabels } : {});
 	}
 	printSummary(settings, descriptor, probe);
 	if (
 		runtime.auth === "oauth" &&
-		!auth.statusForTarget(resolveRuntimeAuthTarget(runtime), { includeFallback: false }).available
+		!auth.statusForTarget(existing ? resolveAuthTarget(existing, runtime) : resolveRuntimeAuthTarget(runtime), {
+			includeFallback: false,
+		}).available
 	) {
 		process.stdout.write(
 			`note: authenticate ${runtime.id} with \`clio-coder auth login ${runtime.id}\` before using this target\n`,
@@ -589,14 +634,14 @@ async function runNonInteractive(runtime: RuntimeDescriptor, args: ParsedArgs): 
 	return 0;
 }
 
-async function pickRuntime(rl: ReturnType<typeof createInterface>): Promise<RuntimeDescriptor | null> {
+async function pickRuntime(rl: ConfigurePrompts): Promise<RuntimeDescriptor | null> {
 	const registry = getRuntimeRegistry();
 	const entries = listProviderSupportEntries(registry.list());
 	return pickRuntimeFromEntries(rl, entries, "\nSupported runtimes:");
 }
 
 async function pickRuntimeFromEntries(
-	rl: ReturnType<typeof createInterface>,
+	rl: ConfigurePrompts,
 	entries: ReadonlyArray<ProviderSupportEntry>,
 	heading: string,
 ): Promise<RuntimeDescriptor | null> {
@@ -646,7 +691,7 @@ async function pickRuntimeFromEntries(
 	}
 }
 
-async function pickCategory(rl: ReturnType<typeof createInterface>): Promise<ConfigureCategory | null> {
+async function pickCategory(rl: ConfigurePrompts): Promise<ConfigureCategory | null> {
 	process.stdout.write("\nHow will you connect Clio to a model?\n\n");
 	for (const line of formatCategoryMenu(terminalColumns())) process.stdout.write(`${line}\n`);
 	for (;;) {
@@ -659,7 +704,7 @@ async function pickCategory(rl: ReturnType<typeof createInterface>): Promise<Con
 	}
 }
 
-async function pickRuntimeViaCategory(rl: ReturnType<typeof createInterface>): Promise<RuntimeDescriptor | null> {
+async function pickRuntimeViaCategory(rl: ConfigurePrompts): Promise<RuntimeDescriptor | null> {
 	const registry = getRuntimeRegistry();
 	const allEntries = listProviderSupportEntries(registry.list());
 	const category = await pickCategory(rl);
@@ -697,7 +742,7 @@ async function pickRuntimeViaCategory(rl: ReturnType<typeof createInterface>): P
 }
 
 async function maybeSteerToNativeRuntime(
-	rl: ReturnType<typeof createInterface>,
+	rl: ConfigurePrompts,
 	currentRuntime: RuntimeDescriptor,
 	url: string,
 ): Promise<RuntimeDescriptor> {
@@ -714,7 +759,7 @@ async function maybeSteerToNativeRuntime(
 }
 
 async function runTargetSetupInteractive(
-	rl: ReturnType<typeof createInterface>,
+	rl: ConfigurePrompts,
 	runtime: RuntimeDescriptor,
 	defaults: ParsedArgs,
 ): Promise<number> {
@@ -723,12 +768,9 @@ async function runTargetSetupInteractive(
 	let support = buildProviderSupportEntry(runtime);
 	const initialRuntimeId = runtime.id;
 	const existingForRuntime = configuredTargetsForRuntime(settings, initialRuntimeId);
-	const existing =
-		(defaults.id
-			? settings.targets.find((entry) => entry.id === defaults.id && entry.runtime === initialRuntimeId)
-			: null) ??
-		existingForRuntime[0] ??
-		null;
+	const existing = defaults.id
+		? (settings.targets.find((entry) => entry.id === defaults.id && entry.runtime === initialRuntimeId) ?? null)
+		: null;
 	if (existingForRuntime.length > 0) {
 		process.stdout.write(`\nExisting targets for ${runtime.id}:\n`);
 		for (const target of existingForRuntime) {
@@ -736,7 +778,7 @@ async function runTargetSetupInteractive(
 		}
 	}
 	process.stdout.write(`\nSelected runtime: ${runtime.id} (${support.summary})\n`);
-	process.stdout.write(`Credentials: ${describeAuthStatus(runtime)}\n`);
+	process.stdout.write(`Credentials: ${describeAuthStatus(runtime, existing ?? undefined)}\n`);
 	if (support.modelHints.length > 0) {
 		process.stdout.write(`Known models: ${describeRuntimeModels(support, 4)}\n`);
 	}
@@ -785,7 +827,10 @@ async function runTargetSetupInteractive(
 	let apiKeyRef: string | undefined = existing?.auth?.apiKeyRef;
 	let oauthProfile: string | undefined =
 		runtime.auth === "oauth" ? (existing?.auth?.oauthProfile ?? runtime.oauthProviderId ?? runtime.id) : undefined;
-	const authStatus = auth.statusForTarget(resolveRuntimeAuthTarget(runtime), { includeFallback: false });
+	const authStatus = auth.statusForTarget(
+		existing ? resolveAuthTarget(existing, runtime) : resolveRuntimeAuthTarget(runtime),
+		{ includeFallback: false },
+	);
 	if (runtime.auth === "api-key") {
 		// Default to the env-var path, which keeps the key off disk. A target that
 		// needs no key at all defaults to skip instead: a local llama.cpp server
@@ -793,7 +838,7 @@ async function runTargetSetupInteractive(
 		// `Env var name:` with nothing correct to type into it.
 		const needsCredential = targetRequiresAuth({ id: targetId, runtime: runtime.id }, runtime);
 		const defaultSource =
-			authStatus.source === "stored-api-key"
+			existing?.auth?.apiKeyRef || authStatus.source === "stored-api-key"
 				? "keep"
 				: authStatus.source === "environment" || existing?.auth?.apiKeyEnvVar || needsCredential
 					? "env"
@@ -806,10 +851,10 @@ async function runTargetSetupInteractive(
 		if (choice === null) return 0;
 		const normalized = choice.trim().toLowerCase();
 		if (normalized === "stored") {
-			const literal = await ask(rl, "API key literal (stored in credentials.yaml, mode 0600)");
+			const literal = await rl.text("API key literal (stored in credentials.yaml, mode 0600)", "", true);
 			if (literal !== null && literal.length > 0) {
 				apiKeyLiteral = literal;
-				apiKeyRef = runtime.id;
+				apiKeyRef = targetApiKeyRef(targetId, settings.targets);
 			}
 		} else if (normalized === "env") {
 			const envDefault = defaults.apiKeyEnv ?? existing?.auth?.apiKeyEnvVar ?? runtime.credentialsEnvVar ?? "";
@@ -834,7 +879,7 @@ async function runTargetSetupInteractive(
 			const connected = await loginOAuthRuntime(rl, runtime);
 			if (!connected) return 1;
 		}
-		oauthProfile = runtime.oauthProviderId ?? runtime.id;
+		oauthProfile = existing?.auth?.oauthProfile ?? runtime.oauthProviderId ?? runtime.id;
 	}
 
 	let model: string | undefined = defaults.model;
@@ -857,8 +902,9 @@ async function runTargetSetupInteractive(
 		...(existing?.litellm ? { litellm: existing.litellm } : {}),
 	});
 
+	if (existing?.auth?.headers) tentative.auth = { ...tentative.auth, headers: existing.auth.headers };
 	if (runtime.kind === "http" || runtime.externalAgentLoop?.modelCatalog === "live-authoritative") {
-		inventory = await resolveSupportedWireModels(runtime, tentative, existing ?? undefined);
+		inventory = await resolveSupportedWireModels(runtime, tentative, existing ?? undefined, apiKeyLiteral);
 	}
 	const wireModels = inventory.models;
 	// The wizard shows the whole list, so a catalog-ordered runtime does not need
@@ -934,7 +980,7 @@ async function runTargetSetupInteractive(
 	const gatewayDefault = defaults.gateway || existing?.gateway === true;
 	const gatewayAnswer = gatewayDefault ? true : await askYesNo(rl, "Mark as gateway?", false);
 
-	const descriptor = buildDescriptor(runtime, targetId, {
+	const configured = buildDescriptor(runtime, targetId, {
 		...(url !== undefined ? { url } : {}),
 		...(model !== undefined ? { model } : {}),
 		...(apiKeyEnv !== undefined ? { apiKeyEnv } : {}),
@@ -952,22 +998,20 @@ async function runTargetSetupInteractive(
 		...(existing?.lmstudio ? { lmstudio: existing.lmstudio } : {}),
 		...(existing?.litellm ? { litellm: existing.litellm } : {}),
 	});
+	const descriptor: TargetDescriptor = {
+		...existing,
+		...configured,
+		capabilities: { ...existing?.capabilities, ...configured.capabilities },
+	};
+	if (existing?.auth?.headers) descriptor.auth = { ...configured.auth, headers: existing.auth.headers };
+	else if (!configured.auth) delete descriptor.auth;
 	try {
 		assertOrchestratorReplacementEligible(settings, descriptor);
 	} catch (error) {
 		printError(error instanceof Error ? error.message : String(error));
 		return 1;
 	}
-	if (apiKeyLiteral) {
-		auth.setApiKey(runtime.id, apiKeyLiteral);
-		// As in the non-interactive path: the settings write is still ahead of us,
-		// so refusing here leaves the whole wizard run without an effect.
-		if (credentialWriteFailed(auth, `credential for ${runtime.id} was not stored; target '${descriptor.id}' not saved`))
-			return 1;
-		printPlaintextCredentialWarning();
-	}
-
-	const probe = await runtimeProbe(runtime, descriptor);
+	const probe = await runtimeProbe(runtime, descriptor, apiKeyLiteral);
 	if (probe?.ok && probe.models) recordTargetModelSnapshot(descriptor, probe.models);
 	if (probe) {
 		process.stdout.write("\n");
@@ -1025,6 +1069,15 @@ async function runTargetSetupInteractive(
 		: undefined;
 	if (backgroundModel === null) return 0;
 
+	if (apiKeyLiteral && apiKeyRef) {
+		auth.setApiKey(apiKeyRef, apiKeyLiteral);
+		// As in the non-interactive path: the settings write is still ahead of us,
+		// so refusing here leaves the whole wizard run without an effect.
+		if (credentialWriteFailed(auth, `credential for ${runtime.id} was not stored; target '${descriptor.id}' not saved`))
+			return 1;
+		printPlaintextCredentialWarning();
+	}
+
 	const applyWizardChoice = (target: ClioSettings): void => {
 		applyTarget(target, descriptor);
 		if (setOrchestrator) setOrchestratorPointer(target, descriptor, orchestratorModel);
@@ -1076,11 +1129,16 @@ export function runTargetRename(oldId: string, newId: string): number {
 		for (const profile of Object.values(settings.fleet.profiles)) {
 			if (profile.target === oldId) profile.target = newId;
 		}
-		settings.chat.modelPicker.cycleSet = settings.chat.modelPicker.cycleSet.map((entry) => {
+		for (const roster of Object.values(settings.fleet.rosters)) {
+			for (const member of roster.members) if (member.target === oldId) member.target = newId;
+		}
+		const renameRef = (entry: string): string => {
 			const [head, ...rest] = entry.split("/");
 			if (head !== oldId) return entry;
 			return rest.length === 0 ? newId : `${newId}/${rest.join("/")}`;
-		});
+		};
+		settings.chat.modelPicker.cycleSet = settings.chat.modelPicker.cycleSet.map(renameRef);
+		settings.chat.modelPicker.favorites = settings.chat.modelPicker.favorites.map(renameRef);
 	});
 	printOk(`renamed ${oldId} to ${newId}`);
 	return 0;
@@ -1099,12 +1157,13 @@ export function runTargetRename(oldId: string, newId: string): number {
  */
 
 interface SectionIo {
-	rl: ReturnType<typeof createInterface>;
+	rl: ConfigurePrompts;
 	out: NodeJS.WritableStream;
 	/** Both ends of this run, for an action that opens a picker of its own. */
 	streams: ConfigureStreams;
 	/** Confirm one change on the transcript, in the presenter's voice. */
 	ok: (text: string) => void;
+	warn: (text: string) => void;
 }
 
 interface SectionAction {
@@ -1141,11 +1200,11 @@ async function askInteger(
 	const answer = await ask(io.rl, label, String(current));
 	if (answer === null) return;
 	const parsed = Number(answer);
-	if (!Number.isFinite(parsed) || parsed < min) {
-		io.out.write(`  ${label} must be a number of at least ${min}; left at ${current}\n`);
+	if (!Number.isSafeInteger(parsed) || parsed < min) {
+		io.warn(`${label} must be a whole number of at least ${min}; left at ${current}\n`);
 		return;
 	}
-	const value = Math.floor(parsed);
+	const value = parsed;
 	apply(value);
 	io.ok(`${label} set to ${value}`);
 }
@@ -1158,15 +1217,32 @@ async function askChoice(
 	current: string,
 	apply: (value: string) => void,
 ): Promise<void> {
-	const answer = await ask(io.rl, `${label} [${allowed.join("|")}]`, current);
+	const answer = await io.rl.choose(label, allowed, current);
 	if (answer === null) return;
 	const value = answer.trim().toLowerCase();
 	if (!allowed.includes(value)) {
-		io.out.write(`  ${label} must be one of ${allowed.join(", ")}; left at ${current}\n`);
+		io.warn(`${label} must be one of ${allowed.join(", ")}; left at ${current}\n`);
 		return;
 	}
 	apply(value);
 	io.ok(`${label} set to ${value}`);
+}
+
+async function runTargetWizard(io: SectionIo, options: Parameters<typeof runOnboardingWizard>[1]): Promise<void> {
+	const before = readSettings().targets;
+	io.rl.clearScreen();
+	const code = await runOnboardingWizard(io.streams, options);
+	if (code === 130) throw new ConfigureNavigation("quit");
+	if (code !== 0) {
+		// Keep the actual save error visible until the user has read it.
+		await io.rl.text("Press Enter to return");
+		io.warn("Target settings were not saved.");
+		return;
+	}
+	const changed = readSettings().targets.find(
+		(target) => JSON.stringify(target) !== JSON.stringify(before.find((entry) => entry.id === target.id)),
+	);
+	if (changed) io.ok(`Target ${changed.id} saved`);
 }
 
 const SECTIONS: ReadonlyArray<SectionSpec> = [
@@ -1201,6 +1277,10 @@ const SECTIONS: ReadonlyArray<SectionSpec> = [
 				label: "Add a target",
 				hint: "register a provider endpoint",
 				run: async (io) => {
+					if (canRunOnboarding(io.streams)) {
+						await runTargetWizard(io, { mode: readSettings().targets.length === 0 ? "first" : "add" });
+						return;
+					}
 					const runtime = await pickRuntimeViaCategory(io.rl);
 					if (runtime) await runTargetSetupInteractive(io.rl, runtime, emptyArgs());
 				},
@@ -1225,16 +1305,58 @@ const SECTIONS: ReadonlyArray<SectionSpec> = [
 					const settings = readSettings();
 					const ids = settings.targets.map((target) => target.id);
 					if (ids.length === 0) {
-						io.out.write("  No targets to remove.\n");
+						io.warn("No targets to remove.");
 						return;
 					}
 					io.out.write(`  Registered: ${ids.join(", ")}\n`);
-					const chosen = await ask(io.rl, "Target id to remove");
+					const chosen = await io.rl.choose("Target to remove", ids, ids[0] ?? "");
 					if (chosen === null || !ids.includes(chosen)) return;
 					if (await askYesNo(io.rl, `Remove target '${chosen}'?`, false)) {
-						runTargetRemove(chosen);
+						if (runTargetRemove(chosen) === 0) io.ok(`Removed target ${chosen}`);
+						else io.warn(`Could not remove target ${chosen}`);
 					}
 				},
+			},
+			{
+				label: "Edit a target",
+				hint: "endpoint, credentials, model, capabilities",
+				run: async (io) => {
+					const targets = readSettings().targets;
+					if (targets.length === 0) return;
+					const id = await io.rl.choose(
+						"Target to edit",
+						targets.map((target) => target.id),
+						targets[0]?.id ?? "",
+					);
+					const target = targets.find((entry) => entry.id === id);
+					if (!target) return;
+					if (canRunOnboarding(io.streams)) {
+						await runTargetWizard(io, { mode: "edit", target });
+					} else {
+						const runtime = getRuntimeRegistry().get(target.runtime);
+						if (runtime) await runTargetSetupInteractive(io.rl, runtime, { ...emptyArgs(), id });
+					}
+				},
+			},
+			{
+				label: "Rename a target",
+				run: async (io) => {
+					const ids = readSettings().targets.map((target) => target.id);
+					if (ids.length === 0) return;
+					const id = await io.rl.choose("Target to rename", ids, ids[0] ?? "");
+					const name = await ask(io.rl, "New target id", id);
+					if (!name || name === id) return;
+					if (ids.includes(name)) {
+						io.warn(`Target id already exists: ${name}`);
+						return;
+					}
+					if (runTargetRename(id, name) === 0) io.ok(`Renamed ${id} to ${name}`);
+					else io.warn(`Could not rename target ${id}`);
+				},
+			},
+			{
+				label: "Set the background memory target",
+				run: async (io) => assignTarget(io, "memory"),
 			},
 		],
 	},
@@ -1292,8 +1414,12 @@ const SECTIONS: ReadonlyArray<SectionSpec> = [
 						readSettings().chat.model ?? "",
 					);
 					if (model === null) return;
-					updateSettings((draft) => {
-						draft.chat.model = model.length > 0 ? model : null;
+					// Keep null in the saved document. The effective reader resolves it
+					// to the target model, so writing that normalized result would pin it again.
+					updateSavedSettingsDocument((saved) => {
+						const document = saved as { chat?: Record<string, unknown> };
+						document.chat = { ...document.chat, model: model.length > 0 ? model : null };
+						return document;
 					});
 					io.ok(model.length > 0 ? `Chat default model set to ${model}` : "Chat default model cleared");
 				},
@@ -1451,7 +1577,7 @@ const SECTIONS: ReadonlyArray<SectionSpec> = [
 					}
 					const parsed = Number(answer);
 					if (!Number.isFinite(parsed) || parsed < 1) {
-						io.out.write(`  Concurrency limit must be auto or at least 1; left at ${current}\n`);
+						io.warn(`Concurrency limit must be auto or at least 1; left at ${current}\n`);
 						return;
 					}
 					updateSettings((draft) => {
@@ -1495,7 +1621,7 @@ const SECTIONS: ReadonlyArray<SectionSpec> = [
 					if (answer === null) return;
 					const parsed = Number(answer);
 					if (!Number.isFinite(parsed) || parsed < 1) {
-						io.out.write(`  Run timeout must be at least 1 second; left at ${current}s\n`);
+						io.warn(`Run timeout must be at least 1 second; left at ${current}s\n`);
 						return;
 					}
 					updateSettings((draft) => {
@@ -1524,22 +1650,16 @@ const SECTIONS: ReadonlyArray<SectionSpec> = [
 		actions: [
 			{
 				label: "Autonomy level",
-				hint: "interactive | assisted | auto-edit | full",
+				hint: AUTONOMY_LEVELS.join(" | "),
 				run: async (io) => {
 					io.out.write(
-						"  interactive prompts for everything, assisted auto-reads and confirms writes,\n  auto-edit confirms only bash, full runs unattended.\n",
+						"  read-only inspects; suggest asks before changes; auto-edit permits workspace\n  edits; full-auto skips autonomy prompts. Safety rules still apply at every level.\n",
 					);
-					await askChoice(
-						io,
-						"Autonomy level",
-						["interactive", "assisted", "auto-edit", "full"],
-						readSettings().safety.autonomy,
-						(value) => {
-							updateSettings((draft) => {
-								draft.safety.autonomy = value as AutonomyLevel;
-							});
-						},
-					);
+					await askChoice(io, "Autonomy level", AUTONOMY_LEVELS, readSettings().safety.autonomy, (value) => {
+						updateSettings((draft) => {
+							draft.safety.autonomy = value as AutonomyLevel;
+						});
+					});
 				},
 			},
 			{
@@ -1568,7 +1688,7 @@ const SECTIONS: ReadonlyArray<SectionSpec> = [
 					if (answer === null) return;
 					const parsed = Number(answer);
 					if (!Number.isFinite(parsed) || parsed <= 0) {
-						io.out.write(`  Session cost limit must be greater than 0; left at $${current}\n`);
+						io.warn(`Session cost limit must be greater than 0; left at $${current}\n`);
 						return;
 					}
 					updateSettings((draft) => {
@@ -1789,9 +1909,10 @@ const SECTIONS: ReadonlyArray<SectionSpec> = [
 			{
 				label: "Run doctor",
 				hint: "read-only health check",
-				run: async () => {
+				run: async (io) => {
 					const { runDoctorCommand } = await import("./doctor.js");
 					await runDoctorCommand([]);
+					await io.rl.text("Press Enter to return");
 				},
 			},
 			{
@@ -1803,6 +1924,26 @@ const SECTIONS: ReadonlyArray<SectionSpec> = [
 						return;
 					}
 					io.out.write(`\n--- ${shortenPath(file)} ---\n${readFileSync(file, "utf8")}--- end ---\n`);
+					await io.rl.text("Press Enter to return");
+				},
+			},
+		],
+	},
+	{
+		id: "advanced",
+		title: "All Settings",
+		summary: "validated editor for every setting",
+		aliases: ["all", "settings"],
+		fields: () => [
+			["Settings file", shortenPath(settingsPath())],
+			["Reference", "clio-coder docs configuration-reference"],
+		],
+		actions: [
+			{
+				label: "Edit all settings",
+				hint: "VISUAL / EDITOR; validate before saving",
+				run: async (io) => {
+					if (await editSettings(io.rl)) io.ok("Settings saved; previous file kept at settings.yaml.bak");
 				},
 			},
 		],
@@ -1818,6 +1959,9 @@ function emptyArgs(): ParsedArgs {
 		all: false,
 		interop: false,
 		json: false,
+		edit: false,
+		quick: false,
+		settings: false,
 		force: false,
 		gateway: false,
 		setOrchestrator: false,
@@ -1842,34 +1986,48 @@ async function askList(
 	io.ok(values.length === 0 ? `${label} cleared` : `${label} set to ${values.join(", ")}`);
 }
 
-async function assignTarget(io: SectionIo, role: "chat" | "fleet"): Promise<void> {
+async function assignTarget(io: SectionIo, role: "chat" | "fleet" | "memory"): Promise<void> {
 	const settings = readSettings();
-	const ids = settings.targets.map((target) => target.id);
+	const ids = settings.targets
+		.filter((target) => {
+			const runtime = getRuntimeRegistry().get(target.runtime);
+			return role === "fleet" || (runtime !== null && isOrchestratorEligibleRuntime(runtime));
+		})
+		.map((target) => target.id);
 	if (ids.length === 0) {
-		io.out.write("  No targets registered yet. Add one first.\n");
+		io.warn("No eligible targets registered yet. Add one first.");
 		return;
 	}
 	io.out.write(`  Registered: ${ids.join(", ")}\n`);
-	const currentTarget = role === "chat" ? settings.chat.target : settings.fleet.default.target;
-	const chosen = await ask(io.rl, `${role === "chat" ? "Chat" : "Fleet"} target id`, currentTarget ?? ids[0] ?? "");
+	const currentTarget =
+		role === "chat"
+			? settings.chat.target
+			: role === "fleet"
+				? settings.fleet.default.target
+				: settings.context.memory.target;
+	const label = role === "chat" ? "Chat" : role === "fleet" ? "Fleet" : "Background memory";
+	const chosen = await io.rl.choose(`${label} target`, ids, currentTarget ?? ids[0] ?? "");
 	if (chosen === null) return;
 	if (!ids.includes(chosen)) {
-		io.out.write(`  ${chosen} is not a registered target; nothing changed.\n`);
+		io.warn(`${chosen} is not a registered target; nothing changed.`);
 		return;
 	}
 	const target = settings.targets.find((entry) => entry.id === chosen);
-	const model = await ask(io.rl, "Model (blank for the target default)", target?.defaultModel ?? "");
+	const model = await ask(io.rl, `Model override (blank uses ${target?.defaultModel ?? "the target default"})`, "");
 	if (model === null) return;
 	updateSettings((draft) => {
 		if (role === "chat") {
 			draft.chat.target = chosen;
 			draft.chat.model = model.length > 0 ? model : null;
-		} else {
+		} else if (role === "fleet") {
 			draft.fleet.default.target = chosen;
 			draft.fleet.default.model = model.length > 0 ? model : null;
+		} else {
+			draft.context.memory.target = chosen;
+			draft.context.memory.model = model.length > 0 ? model : null;
 		}
 	});
-	io.ok(`${role === "chat" ? "Chat" : "Fleet"} target set to ${chosen}`);
+	io.ok(`${label} target set to ${chosen}`);
 }
 
 interface MenuEntry {
@@ -1886,15 +2044,18 @@ type MenuChoice = { kind: "index"; index: number } | { kind: "back" } | { kind: 
  * of this CLI uses.
  */
 async function pickEntry(
-	rl: ReturnType<typeof createInterface>,
+	rl: ConfigurePrompts,
 	io: ConfigureStreams,
 	entries: ReadonlyArray<MenuEntry>,
 	backLabel: string,
 	plain: boolean,
+	initialIndex = 0,
 ): Promise<MenuChoice> {
 	const out = io.out;
 	if (canSelect(io.in as NodeJS.ReadStream, out as NodeJS.WriteStream)) {
 		const result = await promptSelect({
+			initialIndex,
+			clearOnExit: true,
 			choices: entries.map((entry, index) => ({
 				value: index,
 				label: entry.label,
@@ -1936,55 +2097,110 @@ function renderSection(spec: SectionSpec, out: NodeJS.WritableStream): Lifecycle
 
 /** Show one screen and stay on it until the operator leaves or quits. */
 async function runSection(
-	rl: ReturnType<typeof createInterface>,
+	rl: ConfigurePrompts,
 	streams: ConfigureStreams,
 	spec: SectionSpec,
 	backLabel: string,
 ): Promise<"back" | "quit"> {
+	let selected = 0;
+	let notice: { text: string; warning: boolean } | undefined;
 	for (;;) {
+		rl.clearScreen();
 		const presenter = renderSection(spec, streams.out);
+		if (notice) {
+			if (notice.warning) presenter.warn(notice.text);
+			else presenter.completedStep(notice.text);
+			notice = undefined;
+		}
 		const io: SectionIo = {
 			rl,
 			out: streams.out,
 			streams,
 			ok: (text) => {
-				presenter.completedStep(text);
+				notice = { text, warning: false };
+			},
+			warn: (text) => {
+				notice = { text: text.trim(), warning: true };
 			},
 		};
 		presenter.blank();
-		const choice = await pickEntry(rl, streams, spec.actions, backLabel, presenter.isPlain());
+		const choice = await pickEntry(rl, streams, spec.actions, backLabel, presenter.isPlain(), selected);
 		if (choice.kind !== "index") return choice.kind;
-		const action = spec.actions[choice.index];
-		if (action !== undefined) await action.run(io);
+		selected = choice.index;
+		const action = spec.actions[selected];
+		try {
+			if (action !== undefined) await action.run(io);
+		} catch (error) {
+			if (error instanceof ConfigureNavigation) {
+				if (error.kind === "quit") return "quit";
+			} else
+				notice = { text: `Change not saved: ${error instanceof Error ? error.message : String(error)}`, warning: true };
+		}
 	}
 }
 
-/** The top-level screen. Leaving it is an ordinary exit, not a cancellation. */
+/** Full settings, opened directly or one level below the launcher. */
 async function runConfigSectionsMenu(
-	rl: ReturnType<typeof createInterface>,
+	rl: ConfigurePrompts,
 	streams: ConfigureStreams,
-): Promise<number> {
+	backLabel: "back" | "quit" = "quit",
+): Promise<"back" | "quit"> {
+	let selected = 0;
 	for (;;) {
+		rl.clearScreen();
 		const presenter = createLifecyclePresenter({ stream: streams.out });
-		presenter.header("Clio Coder Configuration", "configure");
+		presenter.header("Clio Coder Settings", "configure");
 		presenter.note(`Source: ${shortenPath(settingsPath())}`);
 		presenter.blank();
 		const choice = await pickEntry(
 			rl,
 			streams,
 			SECTIONS.map((section) => ({ label: section.title, hint: section.summary })),
+			backLabel,
+			presenter.isPlain(),
+			selected,
+		);
+		if (choice.kind !== "index") return choice.kind;
+		selected = choice.index;
+		const spec = SECTIONS[selected];
+		if (spec === undefined) continue;
+		if ((await runSection(rl, streams, spec, "back")) === "quit") return "quit";
+	}
+}
+
+async function runConfigLauncher(rl: ConfigurePrompts, streams: ConfigureStreams): Promise<number> {
+	let selected = 0;
+	const exitCode = () => (readSettings().chat.target ? 0 : 130);
+	for (;;) {
+		rl.clearScreen();
+		const presenter = createLifecyclePresenter({ stream: streams.out });
+		presenter.header("Clio Coder", "configure");
+		presenter.note("Connect a model and start coding. Everything else is optional.");
+		presenter.blank();
+		const choice = await pickEntry(
+			rl,
+			streams,
+			[
+				{ label: "Quick Connect", hint: "endpoint → model → ready" },
+				{ label: "Settings", hint: "all configuration options" },
+				{ label: "Diagnostics", hint: "check an existing installation" },
+			],
 			"quit",
 			presenter.isPlain(),
+			selected,
 		);
-		// Escape and q both leave the top screen, and leaving a settings menu you
-		// only looked at is not a failure: this used to exit 130 and print
-		// "error: configuration cancelled" over a run that did exactly what was
-		// asked. The first-run wizard still exits 130, because there a cancel
-		// really does leave Clio unconfigured.
-		if (choice.kind !== "index") return 0;
-		const spec = SECTIONS[choice.index];
-		if (spec === undefined) continue;
-		if ((await runSection(rl, streams, spec, "back")) === "quit") return 0;
+		if (choice.kind !== "index") return exitCode();
+		selected = choice.index;
+		if (selected === 0) {
+			const result = await runQuickConnect(rl);
+			if (result === "connected") return 0;
+			if (result === "quit") return exitCode();
+		} else if (selected === 1) {
+			if ((await runConfigSectionsMenu(rl, streams, "back")) === "quit") return exitCode();
+		} else {
+			const section = findSection("diagnostics");
+			if (section && (await runSection(rl, streams, section, "back")) === "quit") return exitCode();
+		}
 	}
 }
 
@@ -2003,12 +2219,28 @@ interface ConfigureStreams {
 }
 
 async function runInteractive(
-	rl: ReturnType<typeof createInterface>,
+	rl: ConfigurePrompts,
 	preselectedRuntime: RuntimeDescriptor | null,
 	defaults: ParsedArgs,
 	streams: ConfigureStreams,
 ): Promise<number> {
+	if (defaults.quick) {
+		if (!canRunOnboarding(streams)) {
+			printError("--quick needs a terminal; use --id and --runtime for unattended setup");
+			return 2;
+		}
+		return (await runQuickConnect(rl)) === "connected" ? 0 : 130;
+	}
+	if (defaults.settings) {
+		await runConfigSectionsMenu(rl, streams);
+		return 0;
+	}
 	if (preselectedRuntime) {
+		if (canRunOnboarding(streams))
+			return runOnboardingWizard(streams, {
+				mode: readSettings().targets.length === 0 ? "first" : "add",
+				runtime: preselectedRuntime,
+			});
 		return await runTargetSetupInteractive(rl, preselectedRuntime, defaults);
 	}
 
@@ -2029,21 +2261,10 @@ async function runInteractive(
 		await runSection(rl, streams, spec, "quit");
 		return 0;
 	}
+	if (canRunOnboarding(streams)) return runConfigLauncher(rl, streams);
 
 	if (readSettings().targets.length === 0) {
-		// The first run is its own screen flow. It only exists where a keypress can
-		// be read; a pipe, a recorded session, and a dumb terminal keep the
-		// numbered readline path below, which is still the only way to answer them.
-		//
-		// The readline interface is closed first. Left open it stays subscribed to
-		// stdin's keypresses and echoes each one, which puts a stray line under
-		// every menu the wizard draws and breaks the erase that replaces the menu
-		// with its answer. The wizard opens its own where a browser sign-in needs
-		// one.
-		if (canRunOnboarding(streams)) {
-			rl.close();
-			return await runOnboardingWizard(streams);
-		}
+		// Dumb terminals retain the numbered setup path.
 		const runtime = await pickRuntimeViaCategory(rl);
 		if (!runtime) {
 			printError("configuration cancelled");
@@ -2052,7 +2273,8 @@ async function runInteractive(
 		return await runTargetSetupInteractive(rl, runtime, defaults);
 	}
 
-	return await runConfigSectionsMenu(rl, streams);
+	await runConfigSectionsMenu(rl, streams);
+	return 0;
 }
 
 export async function runConfigureCommand(
@@ -2072,8 +2294,21 @@ export async function runConfigureCommand(
 		process.stdout.write(HELP);
 		return 0;
 	}
-	initializeClioHome();
 	ensureRegistryPopulated();
+	if (args.edit) {
+		if (!(inStream as { isTTY?: boolean }).isTTY || !(outStream as { isTTY?: boolean }).isTTY) {
+			printError("--edit needs a terminal; use configure --json to inspect settings without one");
+			return 2;
+		}
+		try {
+			await editSettings(new ConfigurePrompts(inStream, outStream));
+			return 0;
+		} catch (error) {
+			if (error instanceof ConfigureNavigation) return 0;
+			printError(error instanceof Error ? error.message : String(error));
+			return 1;
+		}
+	}
 
 	if (args.json) {
 		const settings = readSettings();
@@ -2086,13 +2321,9 @@ export async function runConfigureCommand(
 		return 0;
 	}
 	if (args.interop) {
-		if (!input.isTTY) return runInteropReview({ rl: null });
-		const rl = createInterface({ input, output });
-		try {
-			return await runInteropReview({ rl, streams: { in: input, out: output } });
-		} finally {
-			rl.close();
-		}
+		if (!(inStream as { isTTY?: boolean }).isTTY) return runInteropReview({ rl: null });
+		const rl = new ConfigurePrompts(inStream, outStream);
+		return runInteropReview({ rl, streams: { in: inStream, out: outStream } });
 	}
 	if (args.remove) return runTargetRemove(args.remove);
 	if (args.renameOld && args.renameNew) return runTargetRename(args.renameOld, args.renameNew);
@@ -2128,6 +2359,11 @@ export async function runConfigureCommand(
 		args.gateway ||
 		args.lifecycle !== undefined ||
 		args.setOrchestrator ||
+		args.setBackground ||
+		args.backgroundModel !== undefined ||
+		args.orchestratorModel !== undefined ||
+		args.workerModel !== undefined ||
+		args.bindAgent !== undefined ||
 		args.setWorkerDefault ||
 		args.contextWindow !== undefined ||
 		args.maxTokens !== undefined ||
@@ -2141,7 +2377,7 @@ export async function runConfigureCommand(
 	// non-interactive stdin the wizard below would read EOF, take the default
 	// answers, write the initial settings template, and exit 0 without
 	// configuring the requested target. Reject with the missing half instead.
-	if ((runtimeId !== undefined || hasTargetSetupFlag) && !input.isTTY) {
+	if ((runtimeId !== undefined || hasTargetSetupFlag) && !(inStream as { isTTY?: boolean }).isTTY) {
 		printError(
 			runtime === null
 				? "--runtime is required when configuring a target non-interactively"
@@ -2150,13 +2386,16 @@ export async function runConfigureCommand(
 		return 2;
 	}
 
-	const rl = createInterface({ input: inStream, output: outStream });
+	const rl = new ConfigurePrompts(inStream, outStream);
 	try {
 		return await runInteractive(rl, runtime, args, { in: inStream, out: outStream });
 	} catch (err) {
+		if (err instanceof ConfigureNavigation) {
+			if (readSettings().targets.length > 0) return 0;
+			printError("configuration cancelled");
+			return 130;
+		}
 		printError(err instanceof Error ? err.message : String(err));
 		return 1;
-	} finally {
-		rl.close();
 	}
 }

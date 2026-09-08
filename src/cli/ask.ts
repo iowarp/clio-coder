@@ -1,10 +1,13 @@
 import type { createInterface } from "node:readline/promises";
 
-export async function ask(
-	rl: ReturnType<typeof createInterface>,
-	label: string,
-	defaultValue?: string,
-): Promise<string | null> {
+type QuestionReader = Pick<ReturnType<typeof createInterface>, "question"> & {
+	interactive?: boolean;
+	text?: (label: string, initial?: string) => Promise<string>;
+	choose?: (label: string, choices: ReadonlyArray<string>, current: string) => Promise<string>;
+};
+
+export async function ask(rl: QuestionReader, label: string, defaultValue?: string): Promise<string | null> {
+	if (rl.text) return rl.text(label, defaultValue);
 	const suffix = defaultValue && defaultValue.length > 0 ? ` [${defaultValue}]` : "";
 	try {
 		const answer = (await rl.question(`${label}${suffix}: `)).trim();
@@ -16,11 +19,8 @@ export async function ask(
 	}
 }
 
-export async function askYesNo(
-	rl: ReturnType<typeof createInterface>,
-	label: string,
-	defaultValue: boolean,
-): Promise<boolean> {
+export async function askYesNo(rl: QuestionReader, label: string, defaultValue: boolean): Promise<boolean> {
+	if (rl.choose && rl.interactive) return (await rl.choose(label, ["yes", "no"], defaultValue ? "yes" : "no")) === "yes";
 	const marker = defaultValue ? "Y/n" : "y/N";
 	for (;;) {
 		const answer = await ask(rl, `${label} [${marker}]`);

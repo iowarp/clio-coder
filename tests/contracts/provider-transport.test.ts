@@ -17,6 +17,7 @@ import antigravityCodeRuntime, {
 } from "../../src/domains/providers/runtimes/antigravity/antigravity-code.js";
 import { registerBuiltinRuntimes } from "../../src/domains/providers/runtimes/builtins.js";
 import claudeCodeRuntime from "../../src/domains/providers/runtimes/claude/claude-code.js";
+import anthropicCompatRuntime from "../../src/domains/providers/runtimes/protocol/anthropic-compat.js";
 import litellmRuntime, {
 	aggregateLiteLLMCapabilities,
 	capabilitiesFromLiteLLMModelInfo,
@@ -474,6 +475,20 @@ describe("provider transport boundary", () => {
 		strictEqual(result?.ok, false);
 		ok((result?.error?.length ?? 0) > 0);
 		strictEqual(result?.models, undefined);
+	});
+
+	it("authenticates Anthropic-compatible setup probes with the resolved target key", async (t) => {
+		t.mock.method(globalThis, "fetch", async (_url: string, init: RequestInit) => {
+			const headers = new Headers(init.headers);
+			strictEqual(headers.get("x-api-key"), "target-test-key");
+			strictEqual(headers.get("anthropic-version"), "2023-06-01");
+			strictEqual(headers.get("authorization"), null);
+			return new Response(JSON.stringify({ data: [{ id: "claude-model" }] }));
+		});
+		const target = { id: "keyed", runtime: "anthropic-compat", url: "http://localhost:8080" };
+		const ctx = { credentialsPresent: new Set<string>(), httpTimeoutMs: 100, authToken: "target-test-key" };
+		strictEqual((await anthropicCompatRuntime.probe?.(target, ctx))?.ok, true);
+		deepStrictEqual(await anthropicCompatRuntime.probeModels?.(target, ctx), ["claude-model"]);
 	});
 
 	it("loads a valid runtime plugin from a directory", async () => {

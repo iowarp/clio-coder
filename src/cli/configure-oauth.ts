@@ -15,7 +15,7 @@ import { promptOAuthSelection } from "./oauth-select.js";
 import { credentialWriteFailed, printError, printOk } from "./shared.js";
 
 export async function loginOAuthRuntime(
-	rl: ReturnType<typeof createInterface>,
+	rl: Pick<ReturnType<typeof createInterface>, "question">,
 	runtime: RuntimeDescriptor,
 ): Promise<boolean> {
 	const auth = openAuthStorage();

@@ -1,4 +1,5 @@
 import { combineBashOutput, runBashCommand } from "../core/bash-exec.js";
+import { type ExternalEditResult, editTextExternally, resolveExternalEditor } from "../core/external-editor.js";
 import type { PendingSkillRequest } from "../core/skill-activation.js";
 import { ToolNames } from "../core/tool-names.js";
 import type { DispatchContract } from "../domains/dispatch/contract.js";
@@ -13,7 +14,6 @@ import {
 	type RunningDispatchRef,
 	resolveSteerTarget,
 } from "./editor-steer.js";
-import { type ExternalEditResult, editTextExternally, resolveExternalEditor } from "./external-editor.js";
 import { type BashTranscriptExecution, renderBashTranscriptExecution } from "./renderers/tool-execution.js";
 import { parseSlashCommand, type RunIo, type SlashCommand, type SlashCommandDispatchResult } from "./slash-commands.js";
 import {
