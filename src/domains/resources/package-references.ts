@@ -4,15 +4,19 @@ import { readPluginManifest } from "../plugins/index.js";
 
 export interface PackageReferenceContext {
 	rootPath?: string;
-	/** Only plugin-owned content interprets component references. */
+	/** Only plugin-owned content interprets package references. */
 	plugin?: boolean;
 }
+
+/** Prose markers with a portable, space-free slash suffix. */
+const REFERENCE_PATTERN = /\$\{(pluginRoot|component:([^}]+))\}(\/[A-Za-z0-9._~%+@/-]*)?/g;
+/** The same reference occupying an entire argv/data value, spaces and Unicode included. */
+const COMPLETE_REFERENCE = /^\$\{(pluginRoot|component:([^}]+))\}(\/[\s\S]*)?$/u;
 
 function referenceResolver(context: PackageReferenceContext & { rootPath: string }) {
 	const root = realpathSync(context.rootPath);
 	let components: Map<string, string> | undefined;
-	return (reference: string, token: string, ref: string | undefined, suffix: string | undefined): string => {
-		if (token !== "extensionRoot" && !context.plugin) return reference;
+	return (reference: string, _token: string, ref: string | undefined, suffix: string | undefined): string => {
 		if (suffix && /[\\\0\r\n]/u.test(suffix)) throw new Error(`unsupported package path syntax: ${reference}`);
 		let relative = "";
 		if (ref !== undefined) {
@@ -48,17 +52,14 @@ function referenceResolver(context: PackageReferenceContext & { rootPath: string
  * prose is not a filesystem path; data arguments use the complete-path parser.
  */
 export function resolvePackageReferences(body: string, context: PackageReferenceContext): string {
-	if (!context.rootPath || !body.includes("${")) return body;
-	const pattern = /\$\{(extensionRoot|pluginRoot|component:([^}]+))\}(\/[A-Za-z0-9._~%+@/-]*)?/g;
-	return body.replace(pattern, referenceResolver({ ...context, rootPath: context.rootPath }));
+	if (!context.rootPath || !context.plugin || !body.includes("${")) return body;
+	return body.replace(REFERENCE_PATTERN, referenceResolver({ ...context, rootPath: context.rootPath }));
 }
 
 /** Resolve an entire argv/data path, including spaces and Unicode, before use. */
 export function resolvePackagePathReference(value: string, context: PackageReferenceContext): string {
-	if (!context.rootPath) return value;
-	const active = context.plugin ? /\$\{(?:extensionRoot|pluginRoot|component:)/u : /\$\{extensionRoot/u;
-	if (!active.test(value)) return value;
-	const match = /^\$\{(extensionRoot|pluginRoot|component:([^}]+))\}(\/[\s\S]*)?$/u.exec(value);
+	if (!context.rootPath || !context.plugin || !/\$\{(?:pluginRoot|component:)/u.test(value)) return value;
+	const match = COMPLETE_REFERENCE.exec(value);
 	if (!match || match[3]?.includes("${"))
 		throw new Error("package path references must occupy one complete argument with no embedded expressions");
 	return referenceResolver({ ...context, rootPath: context.rootPath })(value, match[1] ?? "", match[2], match[3]);

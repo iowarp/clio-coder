@@ -36,7 +36,11 @@ it("validates complete package argument paths instead of a prefix before spaces 
 			}),
 		);
 		strictEqual(resolvePackagePathReference("${component:resource:evidence}", context), file);
-		strictEqual(resolvePackagePathReference("${extensionRoot}/safe dir/α 'quoted'.txt", { rootPath: root }), file);
+		strictEqual(
+			resolvePackagePathReference("${pluginRoot}/safe dir/α 'quoted'.txt", { rootPath: root }),
+			"${pluginRoot}/safe dir/α 'quoted'.txt",
+			"a root without the plugin flag interprets no package reference",
+		);
 		for (const value of ["--file=${pluginRoot}/safe", "${pluginRoot}suffix", "${pluginRoot}/safe/${pluginRoot}"])
 			throws(() => resolvePackagePathReference(value, context), /complete argument/);
 		for (const value of ["${pluginRoot}/safe\\..\\outside.txt", "${pluginRoot}/safe\0.txt", "${pluginRoot}/safe\n.txt"])

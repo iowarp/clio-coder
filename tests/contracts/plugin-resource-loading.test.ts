@@ -1,5 +1,5 @@
 // biome-ignore-all lint/suspicious/noTemplateCurlyInString: fixtures exercise literal package reference syntax.
-import { deepStrictEqual, match, ok, strictEqual, throws } from "node:assert/strict";
+import { deepStrictEqual, ok, strictEqual, throws } from "node:assert/strict";
 import { mkdirSync, readFileSync, symlinkSync, writeFileSync } from "node:fs";
 import { dirname, join, resolve } from "node:path";
 import { it } from "node:test";
@@ -202,7 +202,11 @@ it("rejects missing and escaping package references without changing non-package
 		symlinkSync(join(env.dir, "outside"), join(root, "assets/escape"));
 		throws(() => resolvePackageReferences("${pluginRoot}/assets/escape", context), /escaping/);
 		strictEqual(resolvePackageReferences("${pluginRoot}/assets/reference.txt", {}), "${pluginRoot}/assets/reference.txt");
-		match(resolvePackageReferences("${extensionRoot}/assets/reference.txt", context), /reference.txt$/);
+		strictEqual(
+			resolvePackageReferences("${pluginRoot}/assets/reference.txt", { rootPath: root }),
+			"${pluginRoot}/assets/reference.txt",
+			"a root without the plugin flag interprets no package reference",
+		);
 	} finally {
 		env.restore();
 	}

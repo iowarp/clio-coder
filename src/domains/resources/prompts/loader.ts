@@ -178,8 +178,8 @@ function resolvePackageRootReferences(body: string, root: PromptTemplateRoot): B
  * A template that exists and cannot run.
  *
  * Dropping it made the operator's namespaced command answer "not a command",
- * so an extension author's single bad `${extensionRoot}` path read to their
- * users as "the prompt was never installed" (issue #245). The template is
+ * so a plugin author's single bad `${pluginRoot}` path read to their users as
+ * "the prompt was never installed" (issue #245). The template is
  * loaded with an empty body and the reason attached instead, which is the same
  * shape an untrusted project template already had, so the existing refusal
  * path carries it to the operator with no new machinery.
