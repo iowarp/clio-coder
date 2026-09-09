@@ -1,0 +1,527 @@
+{
+	"$schema": "https://agent-plugins.org/schemas/1.0.0/plugin.schema.json",
+	"name": "materials-characterization",
+	"version": "0.1.0",
+	"description": "Materials research interviews, supplied-corpus synthesis, lab feasibility, task execution and verified paper handoff.",
+	"author": {
+		"name": "IOWarp; domain workflow adapted from Daisy Quach"
+	},
+	"repository": "https://github.com/iowarp/clio-coder",
+	"keywords": ["materials-science", "research", "characterization", "scientific-workflows"],
+	"extensions": {
+		"ai.iowarp.clio": {
+			"manifestVersion": 1,
+			"compatibility": {
+				"clio": ">=0.4.7"
+			},
+			"resources": {
+				"skills": "skills",
+				"prompts": "ai.iowarp.clio/prompts",
+				"agents": "ai.iowarp.clio/agents",
+				"fleets": "ai.iowarp.clio/fleets"
+			},
+			"components": [
+				{
+					"kind": "resource",
+					"id": "research-domains",
+					"path": "assets/references/research-domains.md",
+					"requires": []
+				},
+				{
+					"kind": "resource",
+					"id": "traditional-workflows",
+					"path": "assets/references/traditional-workflows.md",
+					"requires": []
+				},
+				{
+					"kind": "resource",
+					"id": "research-policy",
+					"path": "assets/references/research-policy.md",
+					"requires": ["script:research-state", "script:check-physics", "script:check-scripts", "script:verify-citations"]
+				},
+				{
+					"kind": "resource",
+					"id": "clio-execution",
+					"path": "ai.iowarp.clio/references/execution.md",
+					"requires": ["resource:research-policy", "script:research-state"]
+				},
+				{
+					"kind": "resource",
+					"id": "research-template",
+					"path": "assets/templates/RESEARCH.md",
+					"requires": []
+				},
+				{
+					"kind": "resource",
+					"id": "virtual-lab-template",
+					"path": "assets/templates/VIRTUAL-LAB.md",
+					"requires": []
+				},
+				{
+					"kind": "resource",
+					"id": "workflow-template",
+					"path": "assets/templates/WORKFLOW.md",
+					"requires": []
+				},
+				{
+					"kind": "resource",
+					"id": "config-template",
+					"path": "assets/templates/config.json",
+					"requires": []
+				},
+				{
+					"kind": "script",
+					"id": "check-physics",
+					"path": "assets/scripts/check_physics.py",
+					"requires": []
+				},
+				{
+					"kind": "script",
+					"id": "check-scripts",
+					"path": "assets/scripts/check_scripts.py",
+					"requires": []
+				},
+				{
+					"kind": "script",
+					"id": "research-state",
+					"path": "assets/scripts/research_state.py",
+					"requires": []
+				},
+				{
+					"kind": "script",
+					"id": "verify-citations",
+					"path": "assets/scripts/verify_citations.py",
+					"requires": []
+				},
+				{
+					"kind": "resource",
+					"id": "action-add-task",
+					"path": "assets/actions/add-task.md",
+					"requires": ["resource:research-policy", "script:research-state"]
+				},
+				{
+					"kind": "resource",
+					"id": "action-archive-task",
+					"path": "assets/actions/archive-task.md",
+					"requires": ["resource:research-policy", "script:research-state"]
+				},
+				{
+					"kind": "resource",
+					"id": "action-checkpoint",
+					"path": "assets/actions/checkpoint.md",
+					"requires": ["resource:research-policy", "script:research-state"]
+				},
+				{
+					"kind": "resource",
+					"id": "action-define-research-tasks",
+					"path": "assets/actions/define-research-tasks.md",
+					"requires": [
+						"resource:research-policy",
+						"resource:traditional-workflows",
+						"resource:workflow-template",
+						"script:research-state"
+					]
+				},
+				{
+					"kind": "resource",
+					"id": "action-define-virtual-lab",
+					"path": "assets/actions/define-virtual-lab.md",
+					"requires": [
+						"resource:research-domains",
+						"resource:research-policy",
+						"resource:virtual-lab-template",
+						"script:research-state"
+					]
+				},
+				{
+					"kind": "resource",
+					"id": "action-execute-task",
+					"path": "assets/actions/execute-task.md",
+					"requires": [
+						"resource:research-policy",
+						"script:check-physics",
+						"script:check-scripts",
+						"script:research-state",
+						"script:verify-citations"
+					]
+				},
+				{
+					"kind": "resource",
+					"id": "action-help",
+					"path": "assets/actions/help.md",
+					"requires": ["resource:research-policy"]
+				},
+				{
+					"kind": "resource",
+					"id": "action-identify-research",
+					"path": "assets/actions/identify-research.md",
+					"requires": [
+						"resource:config-template",
+						"resource:research-domains",
+						"resource:research-policy",
+						"resource:research-template",
+						"script:research-state"
+					]
+				},
+				{
+					"kind": "resource",
+					"id": "action-literature-review",
+					"path": "assets/actions/literature-review.md",
+					"requires": ["resource:research-policy", "script:research-state", "script:verify-citations"]
+				},
+				{
+					"kind": "resource",
+					"id": "action-pause-research",
+					"path": "assets/actions/pause-research.md",
+					"requires": ["resource:research-policy", "script:research-state"]
+				},
+				{
+					"kind": "resource",
+					"id": "action-progress",
+					"path": "assets/actions/progress.md",
+					"requires": ["resource:research-policy"]
+				},
+				{
+					"kind": "resource",
+					"id": "action-remove-task",
+					"path": "assets/actions/remove-task.md",
+					"requires": ["resource:research-policy", "script:research-state"]
+				},
+				{
+					"kind": "resource",
+					"id": "action-resume-research",
+					"path": "assets/actions/resume-research.md",
+					"requires": ["resource:research-policy", "script:research-state"]
+				},
+				{
+					"kind": "resource",
+					"id": "action-settings",
+					"path": "assets/actions/settings.md",
+					"requires": ["resource:research-policy", "script:research-state"]
+				},
+				{
+					"kind": "resource",
+					"id": "action-status",
+					"path": "assets/actions/status.md",
+					"requires": ["resource:research-policy"]
+				},
+				{
+					"kind": "resource",
+					"id": "action-upload-data",
+					"path": "assets/actions/upload-data.md",
+					"requires": ["resource:research-policy", "script:research-state"]
+				},
+				{
+					"kind": "resource",
+					"id": "action-wtfp",
+					"path": "assets/actions/wtfp.md",
+					"requires": ["resource:research-policy"]
+				},
+				{
+					"kind": "skill",
+					"id": "lab-definer",
+					"path": "skills/materials-characterization-lab-definer/SKILL.md",
+					"requires": [
+						"resource:action-define-virtual-lab",
+						"resource:research-domains",
+						"resource:research-policy",
+						"resource:virtual-lab-template"
+					]
+				},
+				{
+					"kind": "skill",
+					"id": "literature-reviewer",
+					"path": "skills/materials-characterization-literature-reviewer/SKILL.md",
+					"requires": [
+						"resource:action-literature-review",
+						"resource:research-domains",
+						"resource:research-policy",
+						"resource:research-template"
+					]
+				},
+				{
+					"kind": "skill",
+					"id": "research-explorer",
+					"path": "skills/materials-characterization-research-explorer/SKILL.md",
+					"requires": [
+						"resource:action-add-task",
+						"resource:action-archive-task",
+						"resource:action-checkpoint",
+						"resource:action-help",
+						"resource:action-identify-research",
+						"resource:action-pause-research",
+						"resource:action-progress",
+						"resource:action-remove-task",
+						"resource:action-resume-research",
+						"resource:action-settings",
+						"resource:action-status",
+						"resource:action-upload-data",
+						"resource:action-wtfp",
+						"resource:config-template",
+						"resource:research-domains",
+						"resource:research-policy",
+						"resource:research-template"
+					]
+				},
+				{
+					"kind": "skill",
+					"id": "task-executor",
+					"path": "skills/materials-characterization-task-executor/SKILL.md",
+					"requires": [
+						"resource:action-execute-task",
+						"resource:research-domains",
+						"resource:research-policy",
+						"resource:traditional-workflows",
+						"resource:virtual-lab-template",
+						"resource:workflow-template"
+					]
+				},
+				{
+					"kind": "skill",
+					"id": "task-verifier",
+					"path": "skills/materials-characterization-task-verifier/SKILL.md",
+					"requires": [
+						"resource:action-execute-task",
+						"resource:research-policy",
+						"resource:research-template",
+						"resource:workflow-template"
+					]
+				},
+				{
+					"kind": "skill",
+					"id": "workflow-planner",
+					"path": "skills/materials-characterization-workflow-planner/SKILL.md",
+					"requires": [
+						"resource:action-define-research-tasks",
+						"resource:research-policy",
+						"resource:research-template",
+						"resource:traditional-workflows",
+						"resource:virtual-lab-template",
+						"resource:workflow-template"
+					]
+				},
+				{
+					"kind": "agent",
+					"id": "lab-definer",
+					"path": "ai.iowarp.clio/agents/materials-characterization-lab-definer.md",
+					"requires": ["skill:lab-definer"]
+				},
+				{
+					"kind": "agent",
+					"id": "literature-reviewer",
+					"path": "ai.iowarp.clio/agents/materials-characterization-literature-reviewer.md",
+					"requires": ["skill:literature-reviewer"]
+				},
+				{
+					"kind": "agent",
+					"id": "research-explorer",
+					"path": "ai.iowarp.clio/agents/materials-characterization-research-explorer.md",
+					"requires": ["skill:research-explorer"]
+				},
+				{
+					"kind": "agent",
+					"id": "task-executor",
+					"path": "ai.iowarp.clio/agents/materials-characterization-task-executor.md",
+					"requires": ["skill:task-executor"]
+				},
+				{
+					"kind": "agent",
+					"id": "task-verifier",
+					"path": "ai.iowarp.clio/agents/materials-characterization-task-verifier.md",
+					"requires": ["skill:task-verifier"]
+				},
+				{
+					"kind": "agent",
+					"id": "workflow-planner",
+					"path": "ai.iowarp.clio/agents/materials-characterization-workflow-planner.md",
+					"requires": ["skill:workflow-planner"]
+				},
+				{
+					"kind": "prompt",
+					"id": "add-task",
+					"path": "ai.iowarp.clio/prompts/materials-characterization/add-task.md",
+					"requires": ["resource:clio-execution", "script:research-state"]
+				},
+				{
+					"kind": "prompt",
+					"id": "archive-task",
+					"path": "ai.iowarp.clio/prompts/materials-characterization/archive-task.md",
+					"requires": ["resource:clio-execution", "script:research-state"]
+				},
+				{
+					"kind": "prompt",
+					"id": "checkpoint",
+					"path": "ai.iowarp.clio/prompts/materials-characterization/checkpoint.md",
+					"requires": ["resource:clio-execution", "resource:research-policy", "script:research-state"]
+				},
+				{
+					"kind": "prompt",
+					"id": "define-research-tasks",
+					"path": "ai.iowarp.clio/prompts/materials-characterization/define-research-tasks.md",
+					"requires": [
+						"agent:workflow-planner",
+						"resource:clio-execution",
+						"resource:traditional-workflows",
+						"resource:workflow-template",
+						"script:research-state"
+					]
+				},
+				{
+					"kind": "prompt",
+					"id": "define-virtual-lab",
+					"path": "ai.iowarp.clio/prompts/materials-characterization/define-virtual-lab.md",
+					"requires": [
+						"agent:lab-definer",
+						"resource:clio-execution",
+						"resource:research-domains",
+						"resource:virtual-lab-template",
+						"script:research-state"
+					]
+				},
+				{
+					"kind": "prompt",
+					"id": "execute-task",
+					"path": "ai.iowarp.clio/prompts/materials-characterization/execute-task.md",
+					"requires": [
+						"agent:task-executor",
+						"agent:task-verifier",
+						"resource:clio-execution",
+						"script:check-physics",
+						"script:check-scripts",
+						"script:research-state",
+						"script:verify-citations"
+					]
+				},
+				{
+					"kind": "prompt",
+					"id": "help",
+					"path": "ai.iowarp.clio/prompts/materials-characterization/help.md",
+					"requires": ["resource:clio-execution"]
+				},
+				{
+					"kind": "prompt",
+					"id": "identify-research",
+					"path": "ai.iowarp.clio/prompts/materials-characterization/identify-research.md",
+					"requires": [
+						"agent:research-explorer",
+						"resource:clio-execution",
+						"resource:config-template",
+						"resource:research-domains",
+						"resource:research-template",
+						"script:research-state"
+					]
+				},
+				{
+					"kind": "prompt",
+					"id": "literature-review",
+					"path": "ai.iowarp.clio/prompts/materials-characterization/literature-review.md",
+					"requires": [
+						"agent:literature-reviewer",
+						"resource:clio-execution",
+						"script:research-state",
+						"script:verify-citations"
+					]
+				},
+				{
+					"kind": "prompt",
+					"id": "pause-research",
+					"path": "ai.iowarp.clio/prompts/materials-characterization/pause-research.md",
+					"requires": ["resource:clio-execution", "script:research-state"]
+				},
+				{
+					"kind": "prompt",
+					"id": "progress",
+					"path": "ai.iowarp.clio/prompts/materials-characterization/progress.md",
+					"requires": ["resource:clio-execution"]
+				},
+				{
+					"kind": "prompt",
+					"id": "remove-task",
+					"path": "ai.iowarp.clio/prompts/materials-characterization/remove-task.md",
+					"requires": ["resource:clio-execution", "script:research-state"]
+				},
+				{
+					"kind": "prompt",
+					"id": "resume-research",
+					"path": "ai.iowarp.clio/prompts/materials-characterization/resume-research.md",
+					"requires": ["resource:clio-execution", "script:research-state"]
+				},
+				{
+					"kind": "prompt",
+					"id": "settings",
+					"path": "ai.iowarp.clio/prompts/materials-characterization/settings.md",
+					"requires": ["resource:clio-execution", "script:research-state"]
+				},
+				{
+					"kind": "prompt",
+					"id": "status",
+					"path": "ai.iowarp.clio/prompts/materials-characterization/status.md",
+					"requires": ["resource:clio-execution"]
+				},
+				{
+					"kind": "prompt",
+					"id": "upload-data",
+					"path": "ai.iowarp.clio/prompts/materials-characterization/upload-data.md",
+					"requires": ["resource:clio-execution", "script:research-state"]
+				},
+				{
+					"kind": "prompt",
+					"id": "wtfp",
+					"path": "ai.iowarp.clio/prompts/materials-characterization/wtfp.md",
+					"requires": ["resource:clio-execution", "resource:research-policy"]
+				},
+				{
+					"kind": "fleet",
+					"id": "execute-task",
+					"path": "ai.iowarp.clio/fleets/materials-characterization-execute-task.md",
+					"requires": ["agent:task-executor", "agent:task-verifier"]
+				},
+				{
+					"kind": "script",
+					"id": "project-plugin",
+					"path": "assets/scripts/project_plugin.py",
+					"requires": []
+				}
+			]
+		},
+		"ai.iowarp.portability": {
+			"version": 1,
+			"core": "Agent Plugins 1.0.0",
+			"skills": {
+				"count": 6,
+				"mode": "host-neutral instructions with shared local assets and complete action guides"
+			},
+			"clio": {
+				"prompts": 17,
+				"agents": 6,
+				"fleets": 1,
+				"mode": "native resource graph"
+			},
+			"codex": {
+				"mode": "standard portable skills; host conversation and available delegation",
+				"nativeFleet": false
+			},
+			"claude": {
+				"mode": "generated native skills, command guides and agents",
+				"nativeFleet": false
+			},
+			"gemini": {
+				"mode": "generated skills and TOML command guides; roles execute through available host capabilities",
+				"nativeFleet": false
+			},
+			"scripts": {
+				"runtime": "Python >=3.10; bash for shell syntax checks",
+				"network": "optional Crossref only when configured",
+				"mcp": false
+			},
+			"externalIntegrations": [
+				{
+					"name": "wtfp",
+					"actions": ["new-paper", "progress", "map-project", "create-outline"],
+					"required": false,
+					"writes": "handoff text only; receiver owns paper state"
+				}
+			]
+		}
+	}
+}
