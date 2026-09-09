@@ -66,6 +66,13 @@ function parseSemVer(value: string): SemVer | null {
 	return { major, minor, patch, prerelease: parsedPrerelease };
 }
 
+/** Exact, bounded manifest version; range conveniences such as a v prefix are excluded. */
+export function isSemanticVersion(value: unknown): value is string {
+	return (
+		typeof value === "string" && value.length <= MAX_RANGE_CHARS && /^[0-9]/.test(value) && parseSemVer(value) !== null
+	);
+}
+
 function parsePart(value: string | undefined): number | null {
 	if (value === undefined || value === "x" || value === "X" || value === "*") return null;
 	const parsed = Number(value);

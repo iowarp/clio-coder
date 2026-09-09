@@ -175,3 +175,32 @@ test("manifest kind and explicit version cannot be substituted or changed with f
 		env.restore();
 	}
 });
+
+test("package versions share strict prerelease validation and single kinds cannot hide extra public files", async () => {
+	const env = await isolateClioEnv("library-semver-");
+	try {
+		const root = join(env.dir, "source");
+		for (const version of ["0.0.0", "1.0.0-0", "1.2.3-alpha.0", "1.0.0-01a", "1.2.3+001"]) {
+			fixture(root, "plugin", version);
+			ok(readPluginManifest(root).valid, version);
+		}
+		for (const version of [
+			"1.0.0-01",
+			"1.0.0-alpha.01",
+			"v1.2.3",
+			"01.2.3",
+			"1.2",
+			"1.2.3-",
+			"1.2.3+",
+			"9007199254740992.0.0",
+		]) {
+			fixture(root, "plugin", version);
+			equal(readPluginManifest(root).valid, false, version);
+		}
+		fixture(root, "prompt");
+		write(root, "prompts/undeclared.md", "Unexpected public prompt");
+		equal(readPluginManifest(root).valid, false);
+	} finally {
+		env.restore();
+	}
+});

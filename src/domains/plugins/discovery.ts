@@ -1,7 +1,7 @@
 import { createHash } from "node:crypto";
 import { existsSync, lstatSync, readdirSync, realpathSync, statSync } from "node:fs";
 import path from "node:path";
-import { evaluateClioCompatibility } from "../extensions/compatibility.js";
+import { evaluateClioCompatibility, isSemanticVersion } from "../extensions/compatibility.js";
 import { isLibraryKind, type LibraryRequirementRef } from "../resources/library-types.js";
 import { pluginContentDigestWithCapture } from "./integrity.js";
 import type {
@@ -200,6 +200,27 @@ function clioConfiguration(value: unknown, root: string): ClioPluginConfiguratio
 			throw new Error(`a ${kind} package must declare exactly one public ${kind} component`);
 		if (Object.keys(resources).some((resource) => resource !== `${kind}s`))
 			throw new Error(`a ${kind} package may only declare its ${kind}s resource root`);
+		const resource = resources[`${kind}s` as PluginResourceKind];
+		if (!resource) throw new Error(`a ${kind} package must declare its resource root`);
+		const discovered: string[] = [];
+		const scan = (directory: string, ancestors: Set<string>): void => {
+			const canonical = realpathSync(directory);
+			if (ancestors.has(canonical)) throw new Error("cyclic package resource directory");
+			const visited = new Set([...ancestors, canonical]);
+			for (const item of readdirSync(directory)) {
+				const file = path.join(directory, item);
+				if (statSync(file).isDirectory()) scan(file, visited);
+				else if (kind === "skill" ? item === "SKILL.md" : item.endsWith(".md")) discovered.push(file);
+			}
+		};
+		scan(pluginResourcePath(root, resource, kind === "skill" && resource === "."), new Set());
+		const declared = publicItems[0];
+		if (
+			discovered.length !== 1 ||
+			!declared ||
+			path.resolve(discovered[0] as string) !== pluginResourcePath(root, declared.path)
+		)
+			throw new Error(`a ${kind} package must expose only its declared ${kind} file`);
 	}
 	return {
 		manifestVersion: 1,
@@ -222,12 +243,7 @@ export function parsePluginManifest(raw: string, root: string): PluginManifest {
 	for (const field of ["version", "description", "homepage", "repository", "license"]) {
 		if (value[field] !== undefined && typeof value[field] !== "string") throw new Error(`${field} must be a string`);
 	}
-	if (
-		typeof value.version !== "string" ||
-		!/^(0|[1-9]\d*)\.(0|[1-9]\d*)\.(0|[1-9]\d*)(?:-[0-9A-Za-z-]+(?:\.[0-9A-Za-z-]+)*)?(?:\+[0-9A-Za-z-]+(?:\.[0-9A-Za-z-]+)*)?$/.test(
-			value.version,
-		)
-	)
+	if (!isSemanticVersion(value.version))
 		throw new Error("package version must be an explicit Semantic Version (for example 1.0.0)");
 	if (value.author !== undefined) {
 		if (!record(value.author)) throw new Error("author must be an object");
