@@ -39,11 +39,12 @@ export function buildPluginSnapshot(cwd = process.cwd(), snapshotGeneration = 0)
 			resourceRoots[kind].push({
 				id: item.id,
 				scope: item.scope,
-				path: pluginResourcePath(item.rootPath, relative),
+				path: pluginResourcePath(item.rootPath, relative, item.kind === "skill" && relative === "."),
 				rootPath: item.rootPath,
 				source: `plugin:${item.scope}:${item.id}`,
 				provenance: item.provenance,
 				generation: snapshotGeneration,
+				trust: item.trust ?? "trusted",
 			});
 		}
 	}

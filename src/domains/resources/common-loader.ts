@@ -52,6 +52,7 @@ export function defaultScopedResourceRoots(kind: PluginResourceKind, cwd: string
 			scope: "package" as const,
 			source: root.source,
 			precedence: COMPAT_RESOURCE_PRECEDENCE.package,
+			trusted: root.trust !== "foreign",
 		})),
 		{
 			path: path.join(clioConfigDir(), kind),

@@ -18,6 +18,11 @@ export interface PluginComponent {
 
 export interface ClioPluginConfiguration {
 	manifestVersion: 1;
+	/** Absent in portable bundles means plugin. All kinds share the package lifecycle. */
+	kind?: LibraryEntryKind;
+	requires?: LibraryRequirementRef[];
+	/** Contained Suite v2 files, selected explicitly by `clio-coder eval`. */
+	evals?: Record<string, string>;
 	compatibility?: { clio?: string };
 	resources: PluginResources;
 	components: PluginComponent[];
@@ -48,7 +53,11 @@ export interface PluginCandidate {
 	manifestDigest?: string;
 }
 
-export type PluginOrigin = string | { kind: "local" | "catalog" | "github"; source: string };
+export type PluginOrigin =
+	| string
+	| { kind: "local" | "catalog" | "github"; source: string }
+	| { kind: "interop"; host: string; source: string };
+export type PackageTrust = "trusted" | "foreign";
 
 export interface PluginProvenance {
 	id: string;
@@ -61,6 +70,8 @@ export interface PluginProvenance {
 
 export interface InstalledPlugin {
 	id: string;
+	kind?: LibraryEntryKind;
+	trust?: PackageTrust;
 	name: string;
 	version: string;
 	description: string;
@@ -88,6 +99,7 @@ export interface PluginResourceRoot {
 	source: string;
 	provenance: PluginProvenance;
 	generation: number;
+	trust?: PackageTrust;
 }
 
 export interface PluginListOptions {
@@ -102,6 +114,17 @@ export interface PluginInstallOptions extends PluginListOptions {
 	expectedId?: string;
 	expectedVersion?: string;
 	origin?: PluginOrigin;
+	trust?: PackageTrust;
+	expectedKind?: LibraryEntryKind;
+}
+
+/** One kind-aware publication seam for library and interop adapters. */
+export interface LibraryPackageInstallInput extends Omit<PluginInstallOptions, "expectedKind"> {
+	kind: LibraryEntryKind;
+	sourcePath: string;
+	scope: PluginScope;
+	origin: PluginOrigin;
+	trust: PackageTrust;
 }
 
 export interface PluginMutationResult {
@@ -114,10 +137,12 @@ export interface PluginMutationResult {
 export type PluginInstallResult = PluginMutationResult;
 
 export interface PluginInstallRecord {
+	kind?: LibraryEntryKind;
 	installedAt: string;
 	source: string;
 	origin?: PluginOrigin;
 	contentDigest: string;
+	trust?: PackageTrust;
 }
 
 export interface PluginState {
@@ -134,3 +159,5 @@ export interface PluginSnapshot {
 	packages: ReadonlyArray<InstalledPlugin>;
 	resourceRoots: Readonly<Record<PluginResourceKind, ReadonlyArray<PluginResourceRoot>>>;
 }
+
+import type { LibraryEntryKind, LibraryRequirementRef } from "../resources/library-types.js";

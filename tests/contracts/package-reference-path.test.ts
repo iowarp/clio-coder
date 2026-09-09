@@ -27,6 +27,7 @@ it("validates complete package argument paths instead of a prefix before spaces 
 			JSON.stringify({
 				$schema: "https://agent-plugins.org/schemas/1.0.0/plugin.schema.json",
 				name: "path-fixture",
+				version: "1.0.0",
 				extensions: {
 					"ai.iowarp.clio": {
 						manifestVersion: 1,

@@ -252,7 +252,7 @@ export function defaultSkillRoots(input: LoadSkillsInput = {}): SkillRoot[] {
 			containment: root.rootPath,
 			origin: root.source,
 			precedence: SKILL_PRECEDENCE.package,
-			trusted: true,
+			trusted: root.trust !== "foreign" || trustProject,
 		});
 	}
 

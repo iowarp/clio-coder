@@ -2,6 +2,7 @@ import { createHash } from "node:crypto";
 import { existsSync, lstatSync, readdirSync, realpathSync, statSync } from "node:fs";
 import path from "node:path";
 import { evaluateClioCompatibility } from "../extensions/compatibility.js";
+import { isLibraryKind, type LibraryRequirementRef } from "../resources/library-types.js";
 import { pluginContentDigestWithCapture } from "./integrity.js";
 import type {
 	ClioPluginConfiguration,
@@ -43,16 +44,16 @@ export function pluginPathContained(root: string, target: string): boolean {
 }
 
 /** Resolve a declared file or directory against the canonical installed root. */
-export function pluginResourcePath(root: string, value: string): string {
+export function pluginResourcePath(root: string, value: string, allowRoot = false): string {
 	if (!value || value.includes("\\") || path.isAbsolute(value))
 		throw new Error(`plugin path must be relative: ${value}`);
 	const lexicalRoot = path.resolve(root);
 	const lexical = path.resolve(lexicalRoot, value);
-	if (lexical === lexicalRoot || !pluginPathContained(lexicalRoot, lexical))
+	if ((!allowRoot && lexical === lexicalRoot) || !pluginPathContained(lexicalRoot, lexical))
 		throw new Error(`plugin path escapes root: ${value}`);
 	const canonicalRoot = realpathSync(lexicalRoot);
 	const canonical = realpathSync(lexical);
-	if (!pluginPathContained(canonicalRoot, canonical) || canonical === canonicalRoot)
+	if (!pluginPathContained(canonicalRoot, canonical) || (!allowRoot && canonical === canonicalRoot))
 		throw new Error(`plugin path escapes through a symbolic link: ${value}`);
 	return canonical;
 }
@@ -115,8 +116,31 @@ function components(value: unknown, root: string): PluginComponent[] {
 function clioConfiguration(value: unknown, root: string): ClioPluginConfiguration {
 	if (value !== undefined && !record(value)) throw new Error(`${PLUGIN_EXTENSION_KEY} must be an object`);
 	const raw = value ?? {};
-	requireKeys(raw, new Set(["manifestVersion", "compatibility", "resources", "components"]), PLUGIN_EXTENSION_KEY);
+	requireKeys(
+		raw,
+		new Set(["manifestVersion", "kind", "requires", "evals", "compatibility", "resources", "components"]),
+		PLUGIN_EXTENSION_KEY,
+	);
 	if (value !== undefined && raw.manifestVersion !== 1) throw new Error("Clio plugin manifestVersion must be 1");
+	const kind = raw.kind ?? "plugin";
+	if (!isLibraryKind(kind)) throw new Error("package kind must be plugin, skill, agent, prompt, or fleet");
+	if (
+		raw.requires !== undefined &&
+		(!Array.isArray(raw.requires) ||
+			raw.requires.some(
+				(ref) => typeof ref !== "string" || !/^(plugin|skill|agent|prompt|fleet):[a-z0-9][a-z0-9.-]*$/.test(ref),
+			))
+	)
+		throw new Error("package requires must contain kind:name references");
+	const evals: Record<string, string> = {};
+	if (raw.evals !== undefined) {
+		if (!record(raw.evals)) throw new Error("package evals must map names to Suite v2 files");
+		for (const [id, file] of Object.entries(raw.evals)) {
+			if (!isPluginId(id) || typeof file !== "string" || !statSync(pluginResourcePath(root, file)).isFile())
+				throw new Error(`invalid package eval: ${id}`);
+			evals[id] = file;
+		}
+	}
 	let compatibility: ClioPluginConfiguration["compatibility"];
 	if (raw.compatibility !== undefined) {
 		if (!record(raw.compatibility)) throw new Error("compatibility must be an object");
@@ -140,10 +164,14 @@ function clioConfiguration(value: unknown, root: string): ClioPluginConfiguratio
 			resources[kind] = resource;
 		}
 	}
-	for (const [kind, relative] of Object.entries(resources)) {
-		const full = pluginResourcePath(root, relative);
-		if (!statSync(full).isDirectory()) throw new Error(`resources.${kind} must be a directory`);
-		if (kind === "skills" && path.resolve(root, relative) !== path.join(path.resolve(root), "skills"))
+	for (const [resourceKind, relative] of Object.entries(resources)) {
+		const full = pluginResourcePath(root, relative, kind === "skill" && relative === ".");
+		if (!statSync(full).isDirectory()) throw new Error(`resources.${resourceKind} must be a directory`);
+		if (
+			resourceKind === "skills" &&
+			relative !== "." &&
+			path.resolve(root, relative) !== path.join(path.resolve(root), "skills")
+		)
 			throw new Error("portable skills must use the root skills directory");
 	}
 	const inventory = components(raw.components, root);
@@ -157,10 +185,31 @@ function clioConfiguration(value: unknown, root: string): ClioPluginConfiguratio
 		const resourceKind = componentRoots[item.kind];
 		if (!resourceKind) continue;
 		const resource = resources[resourceKind];
-		if (!resource || !pluginPathContained(pluginResourcePath(root, resource), pluginResourcePath(root, item.path)))
+		if (
+			!resource ||
+			!pluginPathContained(
+				pluginResourcePath(root, resource, kind === "skill" && resource === "."),
+				pluginResourcePath(root, item.path),
+			)
+		)
 			throw new Error(`component ${item.kind}:${item.id} is outside its declared resource root`);
 	}
-	return { manifestVersion: 1, resources, components: inventory, ...(compatibility ? { compatibility } : {}) };
+	if (kind !== "plugin") {
+		const publicItems = inventory.filter((item) => ["prompt", "agent", "skill", "fleet"].includes(item.kind));
+		if (publicItems.length !== 1 || publicItems[0]?.kind !== kind)
+			throw new Error(`a ${kind} package must declare exactly one public ${kind} component`);
+		if (Object.keys(resources).some((resource) => resource !== `${kind}s`))
+			throw new Error(`a ${kind} package may only declare its ${kind}s resource root`);
+	}
+	return {
+		manifestVersion: 1,
+		kind,
+		resources,
+		components: inventory,
+		...(raw.requires ? { requires: raw.requires as LibraryRequirementRef[] } : {}),
+		...(raw.evals ? { evals } : {}),
+		...(compatibility ? { compatibility } : {}),
+	};
 }
 
 export function parsePluginManifest(raw: string, root: string): PluginManifest {
@@ -173,6 +222,13 @@ export function parsePluginManifest(raw: string, root: string): PluginManifest {
 	for (const field of ["version", "description", "homepage", "repository", "license"]) {
 		if (value[field] !== undefined && typeof value[field] !== "string") throw new Error(`${field} must be a string`);
 	}
+	if (
+		typeof value.version !== "string" ||
+		!/^(0|[1-9]\d*)\.(0|[1-9]\d*)\.(0|[1-9]\d*)(?:-[0-9A-Za-z-]+(?:\.[0-9A-Za-z-]+)*)?(?:\+[0-9A-Za-z-]+(?:\.[0-9A-Za-z-]+)*)?$/.test(
+			value.version,
+		)
+	)
+		throw new Error("package version must be an explicit Semantic Version (for example 1.0.0)");
 	if (value.author !== undefined) {
 		if (!record(value.author)) throw new Error("author must be an object");
 		requireKeys(value.author, new Set(["name", "email", "url"]), "author");

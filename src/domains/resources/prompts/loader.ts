@@ -132,7 +132,13 @@ function defaultPromptTemplateRoots(input: LoadPromptTemplatesInput = {}): Promp
 			});
 		}
 	}
-	return [...defaultScopedResourceRoots("prompts", cwd), ...compat];
+	return [
+		...defaultScopedResourceRoots("prompts", cwd).map((root) => ({
+			...root,
+			trusted: root.trusted !== false || trustProject,
+		})),
+		...compat,
+	];
 }
 
 function splitOptionalFrontmatter(
@@ -229,8 +235,6 @@ function booleanField(frontmatter: Record<string, unknown>, key: string): boolea
 	return typeof value === "boolean" ? value : null;
 }
 
-const FENCED_BLOCK = /(?:^|\n)(`{3,}|~{3,})[^\n]*\n([\s\S]*?)\n\1[ \t]*(?=\n|$)/u;
-
 /**
  * What a display-only template shows: the first fenced code block when the
  * body has one, otherwise the whole body. Authors write these as "display this
@@ -238,8 +242,23 @@ const FENCED_BLOCK = /(?:^|\n)(`{3,}|~{3,})[^\n]*\n([\s\S]*?)\n\1[ \t]*(?=\n|$)/
  * around it was instructions for a model that is no longer in the loop.
  */
 export function promptTemplateDisplayText(template: Pick<PromptTemplate, "content">): string {
-	const match = FENCED_BLOCK.exec(template.content);
-	return (match?.[2] ?? template.content).replace(/\r/g, "").trimEnd();
+	const content = template.content.replace(/\r\n?/g, "\n");
+	const lines = content.split("\n");
+	for (let start = 0; start < lines.length; start++) {
+		const opening = /^ {0,3}(`{3,}|~{3,})(.*)$/.exec(lines[start] ?? "");
+		const fence = opening?.[1];
+		if (!fence || (fence[0] === "`" && opening?.[2]?.includes("`"))) continue;
+		for (let end = start + 1; end < lines.length; end++) {
+			const closing = /^ {0,3}(`{3,}|~{3,})[ \t]*$/.exec(lines[end] ?? "")?.[1];
+			if (closing && closing[0] === fence[0] && closing.length >= fence.length)
+				return lines
+					.slice(start + 1, end)
+					.join("\n")
+					.trimEnd();
+		}
+		break;
+	}
+	return content.trimEnd();
 }
 
 function loadPromptFile(

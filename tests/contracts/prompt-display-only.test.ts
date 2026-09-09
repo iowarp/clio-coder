@@ -248,3 +248,20 @@ test("autocomplete marks a display-only template as a reference", async () => {
 	ok(!status.description?.includes(REFERENCE_TEMPLATE_MARKER));
 	strictEqual(help.disabledReason, undefined, "a reference is enabled: it runs, just not on the model");
 });
+
+for (const newline of ["\n", "\r\n"]) {
+	test(`display-only extracts ordinary indented and longer fences with ${JSON.stringify(newline)}`, () => {
+		for (const [opening, closing] of [
+			["```text", "```"],
+			["  ~~~text", "   ~~~~~"],
+			["   ````", "``````"],
+		]) {
+			const content = ["Instructions", opening, "REFERENCE", closing, "After"].join(newline);
+			strictEqual(promptTemplateDisplayText({ content }), "REFERENCE");
+		}
+		strictEqual(
+			promptTemplateDisplayText({ content: ["Before", "```", "body", "~~~", "after"].join(newline) }),
+			"Before\n```\nbody\n~~~\nafter",
+		);
+	});
+}

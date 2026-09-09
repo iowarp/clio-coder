@@ -17,10 +17,12 @@ import { canonicalizeExistingPath } from "../../core/path-canonical.js";
 import { safeResourceWrite } from "../../core/safe-resource-write.js";
 import { clioConfigDir } from "../../core/xdg.js";
 import { evaluateClioCompatibility } from "../extensions/compatibility.js";
+import { isLibraryKind } from "../resources/library-types.js";
 import { isPluginId, pluginPathContained, readPluginManifest } from "./discovery.js";
 import { pluginContentDigest } from "./integrity.js";
 import type {
 	InstalledPlugin,
+	LibraryPackageInstallInput,
 	PluginInstallOptions,
 	PluginInstallRecord,
 	PluginListOptions,
@@ -28,6 +30,12 @@ import type {
 	PluginScope,
 	PluginState,
 } from "./types.js";
+
+/** sourcePath is a prepared package root containing plugin.json for the declared kind. */
+export function installLibraryPackage(input: LibraryPackageInstallInput): PluginMutationResult {
+	const { kind, sourcePath, ...options } = input;
+	return installPlugin(sourcePath, { ...options, expectedKind: kind });
+}
 
 export function pluginBaseDir(scope: PluginScope, cwd = process.cwd()): string {
 	return scope === "user"
@@ -81,10 +89,15 @@ function readState(scope: PluginScope, cwd: string): { state: PluginState; bytes
 			entry.origin !== undefined &&
 			typeof entry.origin !== "string" &&
 			(!record(entry.origin) ||
-				!["local", "catalog", "github"].includes(String(entry.origin.kind)) ||
-				typeof entry.origin.source !== "string")
+				!["local", "catalog", "github", "interop"].includes(String(entry.origin.kind)) ||
+				typeof entry.origin.source !== "string" ||
+				(entry.origin.kind === "interop" &&
+					(typeof entry.origin.host !== "string" || !path.isAbsolute(entry.origin.source))))
 		)
 			throw new Error(`invalid plugin origin: ${id}`);
+		if (entry.kind !== undefined && !isLibraryKind(entry.kind)) throw new Error(`invalid package kind: ${id}`);
+		if (entry.trust !== undefined && entry.trust !== "trusted" && entry.trust !== "foreign")
+			throw new Error(`invalid package trust: ${id}`);
 	}
 	return { state: raw as unknown as PluginState, bytes };
 }
@@ -239,6 +252,9 @@ function scopeEntries(scope: PluginScope, cwd: string): InstalledPlugin[] {
 			manifest?.name === id;
 		entries.push({
 			id,
+			kind: saved?.kind ?? manifest?.clio.kind ?? "plugin",
+			trust:
+				saved?.trust ?? (typeof saved?.origin === "object" && saved.origin.kind === "interop" ? "foreign" : "trusted"),
 			name: manifest?.name ?? id,
 			version: manifest?.version ?? "0.0.0",
 			description: manifest?.description ?? "",
@@ -331,6 +347,7 @@ export function installPlugin(sourcePath: string, options: PluginInstallOptions 
 	if (range && !evaluateClioCompatibility(range).satisfied)
 		return { diagnostics: [{ type: "error", message: `plugin requires Clio ${range}` }] };
 	if (
+		(options.expectedKind !== undefined && options.expectedKind !== (manifest.clio.kind ?? "plugin")) ||
 		(options.expectedDigest !== undefined && options.expectedDigest !== digest) ||
 		(options.expectedId !== undefined && options.expectedId !== manifest.name) ||
 		(options.expectedVersion !== undefined && options.expectedVersion !== manifest.version)
@@ -351,6 +368,12 @@ export function installPlugin(sourcePath: string, options: PluginInstallOptions 
 		const { state, bytes } = readState(scope, cwd);
 		const previouslyInstalled = Object.hasOwn(state.installed, manifest.name);
 		const previousDigest = state.installed[manifest.name]?.contentDigest;
+		const previousOrigin = state.installed[manifest.name]?.origin;
+		if (typeof previousOrigin === "object" && previousOrigin.kind === "interop")
+			throw new Error("interop packages require a new reviewed adoption; remove the installed copy and adopt it again");
+		const previousKind = state.installed[manifest.name]?.kind ?? readPluginManifest(target).manifest?.clio.kind;
+		if (previousKind && previousKind !== (manifest.clio.kind ?? "plugin"))
+			throw new Error("package kind cannot change during replacement; remove it explicitly first");
 		if (existsSync(target) && !options.force)
 			throw new Error(`plugin ${manifest.name} is already installed; use --force to replace it`);
 		if (existsSync(target) && lstatSync(target).isSymbolicLink())
@@ -382,11 +405,17 @@ export function installPlugin(sourcePath: string, options: PluginInstallOptions 
 			published = true;
 			if (pluginContentDigest(target) !== digest) throw new Error("plugin changed during publication");
 			const origin = options.origin ?? { kind: "local" as const, source };
+			const trust =
+				typeof origin === "object" && origin.kind === "interop"
+					? "foreign"
+					: (options.trust ?? state.installed[manifest.name]?.trust ?? "trusted");
 			state.installed[manifest.name] = {
+				kind: manifest.clio.kind ?? "plugin",
 				installedAt: new Date().toISOString(),
 				source: typeof origin === "string" ? origin : origin.source,
 				origin,
 				contentDigest: digest,
+				trust,
 			};
 			if (!previouslyInstalled) state.disabled = state.disabled.filter((id) => id !== manifest.name);
 			writeState(scope, cwd, state, bytes);
@@ -432,6 +461,8 @@ export function updatePlugin(id: string, options: PluginInstallOptions = {}): Pl
 		const scope = selectedScope(id, options);
 		const installed = readPluginInstallRecord(id, { ...options, scope });
 		if (!installed) throw new Error(`plugin ${id} is not installed`);
+		if (typeof installed.origin === "object" && installed.origin.kind === "interop")
+			throw new Error("interop packages require a new reviewed adoption; remove the installed copy and adopt it again");
 		const current = listInstalledPlugins(options.cwd ?? process.cwd(), { scope, all: true }).find(
 			(entry) => entry.id === id,
 		);

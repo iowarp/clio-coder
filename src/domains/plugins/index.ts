@@ -30,6 +30,7 @@ export {
 export {
 	disablePlugin,
 	enablePlugin,
+	installLibraryPackage,
 	installPlugin,
 	listInstalledPlugins,
 	pluginBaseDir,
@@ -41,6 +42,8 @@ export {
 export type {
 	ClioPluginConfiguration,
 	InstalledPlugin,
+	LibraryPackageInstallInput,
+	PackageTrust,
 	PluginCandidate,
 	PluginComponent,
 	PluginComponentKind,
