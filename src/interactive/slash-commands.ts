@@ -1388,6 +1388,20 @@ export const BUILTIN_SLASH_COMMANDS: ReadonlyArray<BuiltinSlashCommand> = [
 		},
 	},
 	{
+		name: "interop",
+		description: "Inspect coding agents and adopt safe resources",
+		group: "Inspect",
+		kinds: [],
+		args: {},
+		fromArgs(parsed) {
+			if (parsed.error) return { kind: "usage-error", command: "interop", reason: parsed.error };
+			return { kind: "agents", connect: true };
+		},
+		handle(_command, ctx) {
+			ctx.openInterop?.();
+		},
+	},
+	{
 		name: "agents",
 		description: "List agents or connect a detected external agent",
 		group: "Inspect",
@@ -2308,6 +2322,7 @@ const COMMAND_ORDER = [
 	"share",
 	"skill",
 	"agents",
+	"interop",
 	"tasks",
 	"context",
 	"memory",

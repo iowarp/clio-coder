@@ -27,6 +27,7 @@ export interface InteropAcpRecipe {
  * and instruction files in the tree is a projection of this table.
  */
 export interface InteropAgentKind {
+	inventory?: InteropInventoryLayout;
 	id: InteropAgentId;
 	label: string;
 	/** Executables whose presence means the agent is installed. Empty for conventions with no CLI. */
@@ -54,6 +55,7 @@ export interface InteropAgentKind {
 export type InteropPresence = "present" | "absent" | "unknown";
 
 export interface InteropAgentFacts {
+	inventory?: InteropInventory;
 	kind: InteropAgentId;
 	presence: InteropPresence;
 	binary?: string;
@@ -102,6 +104,8 @@ export interface InteropDecisionResult {
 }
 
 export interface InteropDetectInput {
+	/** Explicit inventory sweep; bootstrap remains lightweight. */
+	inventory?: boolean;
 	cwd?: string;
 	home?: string;
 	/** Run a bounded `<bin> --version` for kinds whose binary already resolved. */
@@ -110,4 +114,51 @@ export interface InteropDetectInput {
 	skillSources?: ReadonlyArray<SkillSource>;
 	/** Foreign artifact providers already scanned by the context domain. */
 	artifactProviders?: ReadonlyArray<AdoptionProvider>;
+}
+
+export type InteropResourceKind =
+	| "skill"
+	| "agent"
+	| "prompt"
+	| "plugin"
+	| "output-style"
+	| "hook"
+	| "mcp"
+	| "executable";
+export interface InteropInventoryItem {
+	kind: InteropResourceKind;
+	name: string;
+	path: string;
+	scope: "user" | "project";
+	plugin?: string;
+	version?: string;
+	marketplace?: string;
+	installation?: "installed" | "unknown";
+	enabled?: boolean;
+}
+export interface InteropInventory {
+	status: "known" | "unknown";
+	items: InteropInventoryItem[];
+	diagnostics: string[];
+	listing: "unknown";
+}
+export interface InteropInventoryLayout {
+	userRoot: string;
+	additionalUserRoots?: string[];
+	xdgConfigSubdir?: string;
+	homeEnv?: string;
+	projectRoots: string[];
+	roots: Array<{ path: string; kind: InteropResourceKind; extensions: string[] }>;
+	declarations: Array<{ path: string; kind: "hook" | "mcp"; key?: string }>;
+	userDeclarations?: Array<{ path: string; kind: "hook" | "mcp"; key?: string }>;
+	projectDeclarations?: Array<{ path: string; kind: "hook" | "mcp"; key?: string }>;
+	projectModuleConfig?: string;
+	pluginDirs: string[];
+	pluginManifests: string[];
+	installedRegistry?: string;
+	/** Evidence command, never an agent work command. */
+	listCommand: string[];
+	cacheMarketplace?: boolean;
+	settingsRegistry?: "copilot" | "codex" | "antigravity";
+	moduleConfig?: string;
 }

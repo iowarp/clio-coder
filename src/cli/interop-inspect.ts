@@ -1,23 +1,3 @@
-/**
- * Fixed machine-readable projection of detected external coding agents.
- *
- * `configure --interop` is an interactive review that writes delegation peers
- * into settings, so it is not a transport a GUI host can invoke. This command
- * takes no identifier or flag beyond `--json`, decides nothing, and writes
- * nothing.
- *
- * It also runs no foreign executable. Detection can probe `<bin> --version`,
- * and this read deliberately does not: a GUI refresh must not become "execute
- * every coding agent installed on this machine". The version still crosses,
- * because a non-probing detection keeps the last version the harness observed
- * for the same binary, so what the operator sees is a recorded fact rather than
- * a fresh execution.
- *
- * Resolved binary paths and the agent's home directory are native filesystem
- * facts and stay on the host. Whether a directory exists crosses; where it is
- * does not.
- */
-
 import { readSettings } from "../core/config.js";
 import {
 	detectInteropAgents,
@@ -30,10 +10,26 @@ import {
 export type InteropDecisionState = "accepted" | "declined";
 
 export interface InteropInspectAgent {
+	readonly inventory: {
+		status: string;
+		diagnosticCount: number;
+		listing: "unknown";
+		counts: Record<string, number>;
+		items: ReadonlyArray<{
+			kind: string;
+			name: string;
+			scope: string;
+			version?: string;
+			marketplace?: string;
+			installation?: string;
+			enabled?: boolean;
+			adoption: string;
+		}>;
+	} | null;
 	readonly id: InteropAgentId;
 	readonly label: string;
 	readonly presence: InteropPresence;
-	/** The last version the harness observed for this binary, never probed here. */
+	/** The bounded version probe result, or last observed version. */
 	readonly version: string | null;
 	/** Whether the agent owns a directory under the operator's home. The path stays host-side. */
 	readonly hasUserDirectory: boolean;
@@ -65,22 +61,15 @@ export interface InteropInspectSnapshot {
 	readonly detectedAt: string;
 	/**
 	 * How many agent kinds the registry knows, so an empty list reads as "none
-	 * detected" rather than "nothing to detect". Detection drops a kind with no
-	 * binary, no directory, and no artifacts, so the list is never padded.
+	 * detected" rather than "nothing to detect". Explicit inspection includes all five inventory-enabled hosts, including absent
+	 * binaries; lightweight bootstrap detection still drops empty kinds.
 	 */
 	readonly knownKinds: number;
 	readonly agents: readonly InteropInspectAgent[];
 }
 
-/**
- * Skill and artifact counts are deliberately absent.
- *
- * Detection populates them only from sources the resources and context domains
- * have already loaded, and this command loads neither. Reporting the structural
- * zero that would result would state a fact this read did not establish.
- */
 async function interopInspectSnapshot(now: () => number = Date.now): Promise<InteropInspectSnapshot> {
-	const report = await detectInteropAgents({ cwd: process.cwd(), probeVersion: false });
+	const report = await detectInteropAgents({ cwd: process.cwd(), probeVersion: true, inventory: true });
 	const settings = readSettings();
 	const configured = new Set(settings.integrations.externalAgents.entries.map((agent) => agent.id));
 	const agents: InteropInspectAgent[] = [];
@@ -92,6 +81,27 @@ async function interopInspectSnapshot(now: () => number = Date.now): Promise<Int
 		const decisionStale = decision !== null && record.decidedFingerprint !== record.fingerprint;
 		const isConfigured = configured.has(kind.id);
 		agents.push({
+			inventory: record.inventory
+				? {
+						status: record.inventory.status,
+						diagnosticCount: record.inventory.diagnostics.length,
+						listing: record.inventory.listing,
+						counts: record.inventory.items.reduce<Record<string, number>>((counts, item) => {
+							counts[item.kind] = (counts[item.kind] ?? 0) + 1;
+							return counts;
+						}, {}),
+						items: record.inventory.items.map(({ kind, name, scope, version, marketplace, installation, enabled }) => ({
+							kind,
+							name,
+							scope,
+							...(version ? { version } : {}),
+							...(marketplace ? { marketplace } : {}),
+							...(installation ? { installation } : {}),
+							...(enabled !== undefined ? { enabled } : {}),
+							adoption: ["hook", "mcp", "executable", "output-style"].includes(kind) ? "not adoptable" : "review required",
+						})),
+					}
+				: null,
 			id: kind.id,
 			label: kind.label,
 			presence: record.presence,
@@ -119,10 +129,28 @@ async function interopInspectSnapshot(now: () => number = Date.now): Promise<Int
 }
 
 export async function runInteropInspect(args: ReadonlyArray<string>): Promise<number> {
-	if (args.length !== 1 || args[0] !== "--json") {
+	if (args.length > 1 || (args.length === 1 && args[0] !== "--json")) {
 		process.stderr.write("clio-coder interop inspect: usage: clio-coder interop inspect --json\n");
 		return 2;
 	}
-	process.stdout.write(`${JSON.stringify(await interopInspectSnapshot(), null, 2)}\n`);
+	const snapshot = await interopInspectSnapshot();
+	if (args[0] === "--json") process.stdout.write(`${JSON.stringify(snapshot, null, 2)}\n`);
+	else
+		for (const agent of snapshot.agents) {
+			process.stdout.write(
+				`${agent.label}: ${agent.presence}; version ${agent.version ?? "unknown"}; ${agent.configured ? "connected" : "not connected"}; adapter ${agent.adapter ?? "unsupported"}\n`,
+			);
+			process.stdout.write(
+				`  Inventory ${agent.inventory?.status ?? "unknown"}: ${
+					Object.entries(agent.inventory?.counts ?? {})
+						.map(([kind, count]) => `${count} ${kind}`)
+						.join(", ") || "none found"
+				}\n`,
+			);
+			for (const item of agent.inventory?.items ?? [])
+				process.stdout.write(
+					`  ${item.scope} ${item.kind} ${item.name}${item.version ? ` @ ${item.version}` : ""}${item.marketplace ? ` (${item.marketplace})` : ""}; ${item.adoption}\n`,
+				);
+		}
 	return 0;
 }

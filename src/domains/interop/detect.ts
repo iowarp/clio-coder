@@ -1,8 +1,9 @@
 import { createHash } from "node:crypto";
-import { accessSync, constants, existsSync } from "node:fs";
+import { accessSync, constants, existsSync, statSync } from "node:fs";
 import { homedir } from "node:os";
 import path from "node:path";
 import { runCommandVector } from "../../core/safe-exec.js";
+import { discoverInteropInventory } from "./inventory.js";
 import { INTEROP_AGENT_KINDS } from "./registry.js";
 import { readInteropReport } from "./state.js";
 import type {
@@ -22,6 +23,7 @@ export function resolveOnPath(binaryNames: ReadonlyArray<string>): { presence: I
 	if (binaryNames.length === 0) return { presence: "absent" };
 	const rawPath = process.env.PATH;
 	if (rawPath === undefined || rawPath.length === 0) return { presence: "unknown" };
+	let unreadable = false;
 	try {
 		for (const dir of rawPath.split(path.delimiter)) {
 			if (dir.length === 0) continue;
@@ -29,8 +31,9 @@ export function resolveOnPath(binaryNames: ReadonlyArray<string>): { presence: I
 				const candidate = path.join(dir, name);
 				try {
 					accessSync(candidate, constants.X_OK);
-					return { presence: "present", binary: candidate };
-				} catch {
+					if (statSync(candidate).isFile()) return { presence: "present", binary: candidate };
+				} catch (error) {
+					if (["EACCES", "EPERM"].includes((error as NodeJS.ErrnoException).code ?? "")) unreadable = true;
 					// Not this entry. A directory Clio cannot traverse is not evidence of absence,
 					// but it is also not evidence of presence, so the sweep simply continues.
 				}
@@ -39,7 +42,7 @@ export function resolveOnPath(binaryNames: ReadonlyArray<string>): { presence: I
 	} catch {
 		return { presence: "unknown" };
 	}
-	return { presence: "absent" };
+	return { presence: unreadable ? "unknown" : "absent" };
 }
 
 /**
@@ -137,7 +140,12 @@ export async function detectInteropAgents(
 	for (const kind of INTEROP_AGENT_KINDS) {
 		const resolved = resolveOnPath(kind.binaryNames);
 		const prior = priorByKind.get(kind.id);
-		const installDir = installDirOf(kind, home);
+		const inventoryRoot =
+			input.inventory && kind.inventory
+				? ((input.home === undefined ? process.env[kind.inventory.homeEnv ?? ""] : undefined) ??
+					path.join(home, kind.inventory.userRoot))
+				: undefined;
+		const installDir = inventoryRoot && existsSync(inventoryRoot) ? inventoryRoot : installDirOf(kind, home);
 		const facts: InteropAgentFacts = {
 			kind: kind.id,
 			presence: resolved.presence,
@@ -158,7 +166,12 @@ export async function detectInteropAgents(
 						: undefined;
 			if (version !== undefined) facts.version = version;
 		}
-		if (!detected(facts)) continue;
+		if (input.inventory === true && kind.inventory) {
+			facts.inventory = discoverInteropInventory(kind, home, cwd, input.home === undefined ? process.env : {});
+			facts.skillCount = facts.inventory.items.filter((item) => item.kind === "skill").length;
+			facts.projectArtifacts = facts.inventory.items.filter((item) => item.scope === "project").length;
+		}
+		if (!detected(facts) && !(input.inventory && kind.inventory)) continue;
 		agents.push({
 			...facts,
 			fingerprint: interopFingerprint(kind, facts),
