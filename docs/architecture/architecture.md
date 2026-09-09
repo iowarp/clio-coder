@@ -26,14 +26,14 @@ src/
 
 Feature-domain directories include the following. Not every row is a loaded
 `DomainModule`: the orchestrator currently loads config, extensions, interop,
-resources, share, context, providers, toolchain, safety, prompts, agents,
-middleware, session, observability, scheduling, dispatch, and lifecycle, plus
-mux when the pane tier is active. The other rows are libraries or CLI-owned
-feature areas.
+plugins, resources, share, context, providers, toolchain, safety, prompts,
+agents, middleware, session, observability, scheduling, dispatch, and
+lifecycle, plus mux when the pane tier is active. The other rows are libraries
+or CLI-owned feature areas.
 
 | Domain | Primary source | Public surface |
 | --- | --- | --- |
-| agents | `src/domains/agents/**` | Built-in, user, and project agent recipes. |
+| agents | `src/domains/agents/**` | Built-in, plugin, user, and project agent recipes. |
 | components | `src/domains/components/**` | Component snapshots, diffs, and classification. |
 | config | `src/domains/config/**`, `src/core/config.ts` | `settings.yaml`, keybindings, hot reload. |
 | context | `src/domains/context/**` | Layered `CLIO-CODER.md` and subtree `CLIO-CODER.override.md` guidance, codewiki indexer, repository context. |
@@ -47,9 +47,10 @@ feature areas.
 | memory | `src/domains/memory/**` | Approved long-term memory, proactive task intervention. |
 | middleware | `src/domains/middleware/**` | Declarative and programmatic lifecycle hooks and budgets. |
 | observability | `src/domains/observability/**` | SQLite trace store, metrics projections, live telemetry. |
+| plugins | `src/domains/plugins/**` | Plugin discovery, catalog, and lifecycle. |
 | prompts | `src/domains/prompts/**` | Prompt fragments, system prompt envelope, template hashing. |
 | providers | `src/domains/providers/**` | Target-first runtime registry, model probing, credentials. |
-| resources | `src/domains/resources/**` | Skills loader, marketplace synchronization, prompts loader. |
+| resources | `src/domains/resources/**` | Package library, skills loader, prompts loader. |
 | safety | `src/domains/safety/**` | 10-step policy engine, path policy, zero-access rails, audit. |
 | scheduling | `src/domains/scheduling/**` | Budget ceilings, node cluster states, batch capacity checks. |
 | session | `src/domains/session/**` | Append-only JSONL transcripts, tree navigation, compaction. |

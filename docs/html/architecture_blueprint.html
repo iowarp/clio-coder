@@ -4,8 +4,8 @@
   <meta charset="utf-8">
   <meta name="viewport" content="width=device-width, initial-scale=1">
   <meta name="clio-markdown-source" content="docs/architecture/architecture.md">
-  <meta name="clio-docs-version" content="0.4.2">
-  <title>Clio Coder Architecture and Boundaries · Clio Coder 0.4.2</title>
+  <meta name="clio-docs-version" content="0.4.7">
+  <title>Clio Coder Architecture and Boundaries · Clio Coder 0.4.7</title>
   <link rel="icon" href="data:,">
   <link rel="stylesheet" href="shared.css">
 </head>
@@ -30,7 +30,7 @@
       </div>
       <div class="header-right">
         <a class="back-btn" href="index.html">← Index</a>
-        <span class="version-badge">v0.4.2</span>
+        <span class="version-badge">v0.4.7</span>
       </div>
     </header>
     <div class="page-layout-grid reference-layout">
@@ -64,7 +64,7 @@
 </code></pre>
 <p>Feature-domain directories include the following. Not every row is a loaded
 <code>DomainModule</code>: the orchestrator currently loads config, extensions, interop,
-resources, share, context, providers, toolchain, safety, prompts, agents,
+plugins, resources, share, context, providers, toolchain, safety, prompts, agents,
 middleware, session, observability, scheduling, dispatch, and lifecycle, plus
 mux when the pane tier is active. The other rows are libraries or CLI-owned
 feature areas.</p>
@@ -79,7 +79,7 @@ feature areas.</p>
 <tbody><tr>
 <td>agents</td>
 <td><code>src/domains/agents/**</code></td>
-<td>Built-in, user, and project agent recipes.</td>
+<td>Built-in, plugin, user, and project agent recipes.</td>
 </tr>
 <tr>
 <td>components</td>
@@ -147,6 +147,11 @@ feature areas.</p>
 <td>SQLite trace store, metrics projections, live telemetry.</td>
 </tr>
 <tr>
+<td>plugins</td>
+<td><code>src/domains/plugins/**</code></td>
+<td>Plugin discovery, catalog, and lifecycle.</td>
+</tr>
+<tr>
 <td>prompts</td>
 <td><code>src/domains/prompts/**</code></td>
 <td>Prompt fragments, system prompt envelope, template hashing.</td>
@@ -159,7 +164,7 @@ feature areas.</p>
 <tr>
 <td>resources</td>
 <td><code>src/domains/resources/**</code></td>
-<td>Skills loader, marketplace synchronization, prompts loader.</td>
+<td>Package library, skills loader, prompts loader.</td>
 </tr>
 <tr>
 <td>safety</td>

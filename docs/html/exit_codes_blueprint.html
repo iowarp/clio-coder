@@ -4,8 +4,8 @@
   <meta charset="utf-8">
   <meta name="viewport" content="width=device-width, initial-scale=1">
   <meta name="clio-markdown-source" content="docs/guide/exit-codes-and-output.md">
-  <meta name="clio-docs-version" content="0.4.2">
-  <title>Exit Codes &amp; Machine-Readable Output Contracts · Clio Coder 0.4.2</title>
+  <meta name="clio-docs-version" content="0.4.7">
+  <title>Exit Codes &amp; Machine-Readable Output Contracts · Clio Coder 0.4.7</title>
   <link rel="icon" href="data:,">
   <link rel="stylesheet" href="shared.css">
 </head>
@@ -30,7 +30,7 @@
       </div>
       <div class="header-right">
         <a class="back-btn" href="index.html">← Index</a>
-        <span class="version-badge">v0.4.2</span>
+        <span class="version-badge">v0.4.7</span>
       </div>
     </header>
     <div class="page-layout-grid reference-layout">
@@ -78,7 +78,7 @@
 <tr>
 <td align="left"><strong><code>3</code></strong></td>
 <td align="left"><strong>Unmeasured / Harness State</strong></td>
-<td align="left">Specific to <code>clio-coder skills eval</code>: rubric could not be evaluated due to unparseable judge output, timeout, or evidence archive write failure (distinct from a failure/regression).</td>
+<td align="left">Specific to <code>clio-coder eval skill</code> (formerly <code>clio-coder skills eval</code>): rubric could not be evaluated due to unparseable judge output, timeout, or evidence archive write failure (distinct from a failure/regression). Package eval commands (<code>clio-coder eval run --package</code>) and suite evaluations return 1 on failure.</td>
 </tr>
 </tbody></table>
 <hr>

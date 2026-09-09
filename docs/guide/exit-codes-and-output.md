@@ -18,7 +18,7 @@ Clio Coder follows a deterministic exit code taxonomy across all commands:
 | **`0`** | **Success** | Successful command execution, clean run settlement, `--version`, `--help` invocation, or missing trace database notice without an explicit `--db` flag. |
 | **`1`** | **Operational Failure** | Execution error, model target unreachable, doctor diagnosis with unresolved issues, explicit `--db` path not found, or evaluation rubric failure (`fail` or `error` verdict). |
 | **`2`** | **Syntax / Usage Error** | Unknown subcommand, invalid flag, missing required positional arguments, global flag placed after subcommand, or data mutation SQL keyword passed to `clio-coder trace sql`. |
-| **`3`** | **Unmeasured / Harness State** | Specific to `clio-coder skills eval`: rubric could not be evaluated due to unparseable judge output, timeout, or evidence archive write failure (distinct from a failure/regression). |
+| **`3`** | **Unmeasured / Harness State** | Specific to `clio-coder eval skill` (formerly `clio-coder skills eval`): rubric could not be evaluated due to unparseable judge output, timeout, or evidence archive write failure (distinct from a failure/regression). Package eval commands (`clio-coder eval run --package`) and suite evaluations return 1 on failure. |
 
 ---
 

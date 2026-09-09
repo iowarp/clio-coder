@@ -58,7 +58,7 @@ These names follow an upstream or operating-system convention. They are not subs
 | --- | --- |
 | Provider credential variables | `src/engine/env-api-keys.ts` maps the selected provider to its conventional key, including `OPENAI_API_KEY`, `ANTHROPIC_API_KEY`, `OPENROUTER_API_KEY`, `GEMINI_API_KEY`, `AWS_*` Bedrock credentials, and Google Vertex application credentials. `clio-coder auth` remains the preferred managed credential path. |
 | `OLLAMA_NUM_PARALLEL` | Fallback concurrency advertised for an Ollama Native target when the runtime does not provide a stronger slot fact (`src/domains/providers/runtimes/local-native/ollama-native.ts`). |
-| `VISUAL`, `EDITOR` | External editor command, with `VISUAL` taking precedence (`src/interactive/external-editor.ts`). |
+| `VISUAL`, `EDITOR` | External editor command, with `VISUAL` taking precedence (`src/core/external-editor.ts`). |
 | `TERM`, `COLORTERM`, `TERM_PROGRAM`, `WT_SESSION` | Terminal capability, color-depth, keybinding, and desktop-notification adaptation. These variables describe the terminal rather than Clio policy. |
 | `SSH_CONNECTION`, `SSH_TTY`, `TMUX`, `STY` | Remote-session and terminal-multiplexer detection used by the adaptive stream-pacing policy (`src/interactive/stream-pacing-policy.ts`). |
 | `COLUMNS` | Fallback text width for non-TTY CLI output (`src/cli/text-layout.ts`). |

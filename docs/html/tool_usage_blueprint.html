@@ -4,8 +4,8 @@
   <meta charset="utf-8">
   <meta name="viewport" content="width=device-width, initial-scale=1">
   <meta name="clio-markdown-source" content="docs/guide/tool-usage.md">
-  <meta name="clio-docs-version" content="0.4.2">
-  <title>Tool Usage Reference · Clio Coder 0.4.2</title>
+  <meta name="clio-docs-version" content="0.4.7">
+  <title>Tool Usage Reference · Clio Coder 0.4.7</title>
   <link rel="icon" href="data:,">
   <link rel="stylesheet" href="shared.css">
 </head>
@@ -30,7 +30,7 @@
       </div>
       <div class="header-right">
         <a class="back-btn" href="index.html">← Index</a>
-        <span class="version-badge">v0.4.2</span>
+        <span class="version-badge">v0.4.7</span>
       </div>
     </header>
     <div class="page-layout-grid reference-layout">
@@ -585,6 +585,7 @@ evidence(mode=&quot;run&quot;, runId=&quot;r-42&quot;)
 <li><code>exposure</code> (optional). <code>local</code> (default) or <code>outward</code>. <code>outward</code> marks a gate whose answer publishes or sends something outside the workspace (filing an issue or PR, posting a comment, pushing, releasing). At autonomy <code>auto-edit</code> an outward gate parks for the operator instead of being answered automatically; <code>full-auto</code> answers it. See <a href="safety_blueprint.html">safety-model.md</a>.</li>
 </ul>
 <p>The tool manages a stateful operator interview. The UI presents choices (with an implicit &quot;Other&quot; option for custom text input). Once completed, the final decisions are persisted as standard configurations in the session ledger, allowing the agent to proceed with operators&#39; inputs or defaults.</p>
+<p>What the operator sees is one box above the composer, sized to the round: the question header, the question with bold spans and hanging numbered lists, then every option with its whole description. A round of several questions names them all in a strip at the top. A question longer than the box scrolls with PgUp/PgDn while its options stay on screen. Enter records the focused option; <code>t</code> records it and opens a multi-line answer field (Shift+Enter for a newline, Esc back to the options); an option whose label says the operator will type, such as &quot;Provided details&quot; or &quot;Other&quot;, opens the field on Enter. Space toggles a multi-select option, Left/Right move between the questions of a round, <code>a</code> opens the answers recorded so far, and <code>?</code> shows the decision&#39;s tier, effect, and reversibility. Each answered round is recorded in the transcript as the question headers and the answers.</p>
 <p>Ask only when blocked on a decision the request does not answer. Never ask about anything the operator already stated: a request that names its own scope (&quot;all tools&quot;, &quot;read only&quot;) has answered the interview before it starts.</p>
 <pre><code class="language-text">ask_user(action=&quot;ask&quot;, questions=[{question: &quot;Which database should we use?&quot;, options: [{label: &quot;SQLite&quot;, description: &quot;Local database&quot;}, {label: &quot;PostgreSQL&quot;}]}])
 ask_user(action=&quot;complete&quot;, summary=&quot;Operator selected SQLite.&quot;, decisions=[{key: &quot;db_choice&quot;, value: &quot;SQLite&quot;}])

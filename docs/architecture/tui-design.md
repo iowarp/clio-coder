@@ -174,7 +174,7 @@ All TUI overlays and cards support compact widths down to 40 columns:
 
 ### 4.7 Decision Consequence Frames
 
-Permission confirmation and `ask_user` use one pure consequence presentation classifier while keeping separate input and execution protocols. The classifier supplies the tier title, semantic frame token, consequence and reversibility copy, requester attribution, and display actions. Permission keeps allow-once, deny, and stop behavior. `ask_user` keeps selection, free-text, cancellation, and its compact, panel, or interview layout chosen from question shape.
+Permission confirmation and `ask_user` use one pure consequence presentation classifier while keeping separate input and execution protocols. The classifier supplies the tier title, semantic frame token, consequence and reversibility copy, requester attribution, and display actions. Permission keeps allow-once, deny, and stop behavior. `ask_user` keeps selection, free-text, cancellation, and a single bottom-anchored, content-sized interview frame sized directly to the round.
 
 | Tier | Title | Token | Plain-text identity |
 | --- | --- | --- | --- |

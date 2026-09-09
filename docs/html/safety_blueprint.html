@@ -4,8 +4,8 @@
   <meta charset="utf-8">
   <meta name="viewport" content="width=device-width, initial-scale=1">
   <meta name="clio-markdown-source" content="docs/architecture/safety-model.md">
-  <meta name="clio-docs-version" content="0.4.2">
-  <title>Clio Coder Safety Model · Clio Coder 0.4.2</title>
+  <meta name="clio-docs-version" content="0.4.7">
+  <title>Clio Coder Safety Model · Clio Coder 0.4.7</title>
   <link rel="icon" href="data:,">
   <link rel="stylesheet" href="shared.css">
 </head>
@@ -30,7 +30,7 @@
       </div>
       <div class="header-right">
         <a class="back-btn" href="index.html">← Index</a>
-        <span class="version-badge">v0.4.2</span>
+        <span class="version-badge">v0.4.7</span>
       </div>
     </header>
     <div class="page-layout-grid reference-layout">
@@ -464,7 +464,7 @@ generating agent loop.</p>
 <p>In interactive mode, a permission request opens a queued overlay prompt immediately in the TUI, and the composer rail switches to <code>CONFIRM</code> with the same keys for as long as the prompt owns the keyboard.</p>
 <ul>
 <li><strong>Queued Overlays:</strong> If multiple tools or worker dispatches require permission during a single turn, the TUI queues the requests. Closing one overlay automatically pops the next permission overlay in the queue. Each queued request retains its consequence tier and authenticated requester. A request that arrives while a different overlay (a picker, <code>/context</code>, the fleet board) holds the screen is announced with an <code>[approval]</code> notice and re-presented the moment that overlay closes.</li>
-<li><strong>Operator Options:</strong> <code>Enter</code> grants permission once, which resumes only the parked tool call without changing the overall operating posture; the one-shot grant is scoped to the presented request&#39;s <code>requestId</code>. <code>Esc</code> denies only the presented request and advances the queue; the next parked call re-presents. <code>s</code> denies it and ends the turn. Cancel-all is reserved for shutdown, an aborted turn, headless runs, and transport failure, where no operator can answer.</li>
+<li><strong>Operator Options:</strong> <code>Enter</code> grants permission once, which resumes only the parked tool call without changing the overall operating posture; the one-shot grant is scoped to the presented request&#39;s <code>requestId</code>. <code>Esc</code> denies only the presented request and advances the queue; the next parked call re-presents. <code>s</code> denies it and ends the turn. <code>?</code> unfolds the standing terms (approval scope, consequence, reversibility, what deny and stop do) that the card otherwise states in one row, and <code>v</code> opens a parked write or edit for reading. Cancel-all is reserved for shutdown, an aborted turn, headless runs, and transport failure, where no operator can answer.</li>
 <li><strong>Enter never doubles as send:</strong> <code>Enter</code> allows only from an empty composer. While the composer holds a draft, <code>Enter</code> does nothing, both surfaces say <code>[Backspace] clear draft</code> in its place, and only deletion keys reach the editor. An operator who typed a message and pressed the habitual send key cannot approve a parked call by accident; on a safety rail the ambiguous key resolves away from allow.</li>
 </ul>
 <h3>Deterministic Headless Behavior</h3>

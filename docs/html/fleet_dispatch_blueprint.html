@@ -4,8 +4,8 @@
   <meta charset="utf-8">
   <meta name="viewport" content="width=device-width, initial-scale=1">
   <meta name="clio-markdown-source" content="docs/guide/fleet-dispatch.md">
-  <meta name="clio-docs-version" content="0.4.2">
-  <title>Fleet Dispatch · Clio Coder 0.4.2</title>
+  <meta name="clio-docs-version" content="0.4.7">
+  <title>Fleet Dispatch · Clio Coder 0.4.7</title>
   <link rel="icon" href="data:,">
   <link rel="stylesheet" href="shared.css">
 </head>
@@ -30,7 +30,7 @@
       </div>
       <div class="header-right">
         <a class="back-btn" href="index.html">← Index</a>
-        <span class="version-badge">v0.4.6</span>
+        <span class="version-badge">v0.4.7</span>
       </div>
     </header>
     <div class="page-layout-grid reference-layout">
@@ -864,7 +864,7 @@ the running call with a redacted action descriptor (<code>bash running npm test<
 stays compact, so a fan-out of scouts costs one card each until an operator
 opens one. Detail follows the cursor rather than pinning to a run.</li>
 <li>The board and the transcript worker block read one projection
-(<code>src/interactive/worker-progress.ts</code>), so they cannot disagree about what a
+(<code>src/domains/observability/worker-progress.ts</code>), so they cannot disagree about what a
 worker is saying or touching. It keeps 40 lines and 4096 bytes of tail, 8
 distinct tool names, 4 recent actions, and accepts 16 KB of delta bytes per
 250 ms; what the bounds refuse is counted and named on the card beside the

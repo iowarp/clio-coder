@@ -4,8 +4,8 @@
   <meta charset="utf-8">
   <meta name="viewport" content="width=device-width, initial-scale=1">
   <meta name="clio-markdown-source" content="docs/architecture/prompt-envelope-and-tools.md">
-  <meta name="clio-docs-version" content="0.4.2">
-  <title>Prompt Envelope and Tools · Clio Coder 0.4.2</title>
+  <meta name="clio-docs-version" content="0.4.7">
+  <title>Prompt Envelope and Tools · Clio Coder 0.4.7</title>
   <link rel="icon" href="data:,">
   <link rel="stylesheet" href="shared.css">
 </head>
@@ -30,7 +30,7 @@
       </div>
       <div class="header-right">
         <a class="back-btn" href="index.html">← Index</a>
-        <span class="version-badge">v0.4.2</span>
+        <span class="version-badge">v0.4.7</span>
       </div>
     </header>
     <div class="page-layout-grid reference-layout">
@@ -69,7 +69,7 @@ attached tool-schema bytes. <code>mainPromptCacheIdentity</code> in
 <p>The disk fragments under <code>src/domains/prompts/fragments/</code> are layered by who reads them. <code>identity.clio</code> and <code>operating.contract</code> are constitutional: they render for every reader, name no tool, and state what is always true about Clio and her harness. <code>operating.delegation</code> (the delegation threshold as a count taken before the first edit, with the dispatch call shape beside it; receipts, spot-checks, shared <code>[worker result]</code> notes) renders only when <code>dispatch</code> is on the session&#39;s tool surface, and <code>operating.skills</code> (skill-shaped tasks, <code>/skill &lt;name&gt;</code> suggestions) only when <code>context</code> is; a fragment that teaches a tool is absent when the tool is, the same rule the Fleet block follows. <code>identity.docs-routing</code>, the directive to call <code>context(scope=&quot;docs&quot;)</code> before answering a question about Clio herself, follows the <code>context</code> gate too, while <code>identity.self-awareness</code> (installed paths, code outranks docs, configuration locations) names no tool and is unconditional. <code>operating.worker</code> (the assigned-task contract) renders only for dispatched workers, which never see the coordinator fragments. <code>safety.&lt;level&gt;</code> states what runs, what is approval-required, and what is blocked at the effective autonomy, in the safety net&#39;s action-class vocabulary (read, write, command, <code>system_modify</code>, <code>git_destructive</code>) and never by tool name, so the same body is true on every surface; the session and every worker read that one body, and what &quot;approval-required&quot; resolves to is the only role text (one operator confirmation for the session, the worker&#39;s <code>onPermission</code> routing for a worker).</p>
 <p>Prompt extensions can add dynamic fragments for project rules, the operator profile, and Clio source-tree awareness. Pending skill requests and middleware reminders are visible text in the user message, not hidden prompt machinery.</p>
 <h2>Prompt template expansion</h2>
-<p>Prompt templates expand into the operator&#39;s user message before submission. They do not alter the compiled system prompt or bypass the trust check on project-scope compatibility roots. The prompt-root locations, frontmatter fields, and trust rules are documented in <a href="extensions_blueprint.html#prompt-templates">extensions-and-sharing.md</a>.</p>
+<p>Ordinary prompt templates expand into the operator&#39;s user message before submission. They do not alter the compiled system prompt or bypass the trust check on project-scope compatibility roots. As an explicit exception, display-only templates (<code>display-only: true</code>) render directly to the transcript as local operator cards without consuming tokens or being sent to the model. The prompt-root locations, frontmatter fields, and trust rules are documented in <a href="extensions_blueprint.html#prompt-templates">extensions-and-sharing.md</a>.</p>
 <p>The first whitespace character after <code>/template-name</code> is the command delimiter; CRLF counts as one delimiter. Leading whitespace before the slash is also command framing. Every byte after that delimiter is the argument payload, including leading or trailing whitespace, repeated spaces, tabs, quotes, and line breaks.</p>
 <p>The template body may use <code>$ARGUMENTS</code> to insert that raw payload byte-for-byte. Raw insertion is not recursively substituted, so placeholder-like text such as <code>$1</code> remains data. <code>$1</code> through <code>$9</code>, <code>$@</code>, <code>${@:N}</code>, and <code>${@:N:L}</code> retain shell-style parsing: single or double quotes group spaces within one argument, <code>$@</code> joins all parsed arguments with single spaces, <code>${@:N}</code> selects parsed arguments from one-based position <code>N</code>, and <code>${@:N:L}</code> selects <code>L</code> arguments beginning there. A positional placeholder with no matching argument expands to an empty string. Template names that collide with built-in slash commands fail closed with a diagnostic and are excluded from <code>/resources prompts</code>.</p>
 <h2>Directory-scoped handbook overrides</h2>

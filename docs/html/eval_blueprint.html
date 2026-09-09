@@ -4,8 +4,8 @@
   <meta charset="utf-8">
   <meta name="viewport" content="width=device-width, initial-scale=1">
   <meta name="clio-markdown-source" content="docs/process/eval-runner.md">
-  <meta name="clio-docs-version" content="0.4.2">
-  <title>Clio Coder Local Evaluation Runner · Clio Coder 0.4.2</title>
+  <meta name="clio-docs-version" content="0.4.7">
+  <title>Clio Coder Local Evaluation Runner · Clio Coder 0.4.7</title>
   <link rel="icon" href="data:,">
   <link rel="stylesheet" href="shared.css">
 </head>
@@ -30,7 +30,7 @@
       </div>
       <div class="header-right">
         <a class="back-btn" href="index.html">← Index</a>
-        <span class="version-badge">v0.4.2</span>
+        <span class="version-badge">v0.4.7</span>
       </div>
     </header>
     <div class="page-layout-grid reference-layout">
@@ -52,7 +52,10 @@
 <hr>
 <h2>CLI Commands</h2>
 <p>The CLI commands under <code>clio-coder eval</code> support running, validating, reporting, comparing, and gating evaluation suites.</p>
-<pre><code class="language-bash">clio-coder eval validate --suite &lt;suite.yaml&gt;
+<pre><code class="language-bash">clio-coder eval validate --package &lt;path|kind:name&gt; [--eval &lt;name&gt;] [--user|--project]
+clio-coder eval run --package &lt;path|kind:name&gt; [--eval &lt;name&gt;] [--user|--project] [--out &lt;path&gt;]
+clio-coder eval skill &lt;name|path&gt; [--scenario &lt;id&gt;] [--json]
+clio-coder eval validate --suite &lt;suite.yaml&gt;
 clio-coder eval run --suite &lt;suite.yaml&gt; [--trials &lt;n&gt;] [--target &lt;id&gt;] [--model &lt;id&gt;] [--out &lt;path&gt;] [--clio-coder-entry &lt;path&gt;]
 clio-coder eval run --task-file &lt;tasks.yaml&gt; [--repeat &lt;n&gt;] [--out &lt;path&gt;] [--clio-coder-entry &lt;path&gt;]
 clio-coder eval report &lt;evalId&gt; --format text|json|md|swe-jsonl|junit
@@ -62,8 +65,9 @@ clio-coder eval inventory --json
 </code></pre>
 <h3>Command Roles</h3>
 <ul>
-<li><strong><code>validate</code></strong>: Validates the structure and constraints of a Suite v2 YAML file without executing it.</li>
-<li><strong><code>run</code></strong>: Runs a Suite v2 (via <code>--suite</code>) or a compatibility v1 task file (via <code>--task-file</code>). Outputs a text summary and writes an eval artifact under <code>&lt;dataDir&gt;/evals/</code> and evidence under <code>&lt;dataDir&gt;/evidence/eval-&lt;evalId&gt;/</code>.</li>
+<li><strong><code>validate</code></strong>: Validates the structure and constraints of a Suite v2 YAML file (via <code>--suite</code>) or package evaluations (via <code>--package &lt;path|kind:name&gt; [--eval &lt;name&gt;]</code>) without executing them.</li>
+<li><strong><code>run</code></strong>: Runs a Suite v2 (via <code>--suite</code>), a compatibility v1 task file (via <code>--task-file</code>), or a packaged evaluation (via <code>--package &lt;path|kind:name&gt; [--eval &lt;name&gt;]</code>). Outputs a text summary and writes an eval artifact under <code>&lt;dataDir&gt;/evals/</code> and evidence under <code>&lt;dataDir&gt;/evidence/eval-&lt;evalId&gt;/</code>.</li>
+<li><strong><code>skill</code></strong>: Evaluates an individual skill directory or catalog entry against its baseline scenarios declared in <code>evals.md</code>.</li>
 <li><strong><code>report</code></strong>: Formats and prints a report from a saved <code>evalId</code>. Supports multiple <code>--format</code> outputs:<ul>
 <li><code>text</code> (default): Human-readable stdout summary.</li>
 <li><code>json</code>: Raw JSON structure of the artifact.</li>
@@ -93,7 +97,12 @@ clio-coder eval inventory --json
 <tr>
 <td><code>eval run</code></td>
 <td><code>0</code> when all task repetitions pass</td>
-<td><code>1</code> when any task fails, <code>2</code> for invalid configs</td>
+<td><code>1</code> when any task/gate fails (including package evals), <code>2</code> for invalid configs or load errors</td>
+</tr>
+<tr>
+<td><code>eval skill</code></td>
+<td><code>0</code> when all scenarios pass</td>
+<td><code>1</code> for failures/regressions, <code>3</code> for unmeasured harness state or evidence errors, <code>2</code> for invalid arguments</td>
 </tr>
 <tr>
 <td><code>eval report</code></td>

@@ -4,8 +4,8 @@
   <meta charset="utf-8">
   <meta name="viewport" content="width=device-width, initial-scale=1">
   <meta name="clio-markdown-source" content="docs/architecture/artifact-versions.md">
-  <meta name="clio-docs-version" content="0.4.2">
-  <title>Artifact Versions &amp; Serialization Contracts · Clio Coder 0.4.2</title>
+  <meta name="clio-docs-version" content="0.4.7">
+  <title>Artifact Versions &amp; Serialization Contracts · Clio Coder 0.4.7</title>
   <link rel="icon" href="data:,">
   <link rel="stylesheet" href="shared.css">
 </head>
@@ -30,7 +30,7 @@
       </div>
       <div class="header-right">
         <a class="back-btn" href="index.html">← Index</a>
-        <span class="version-badge">v0.4.2</span>
+        <span class="version-badge">v0.4.7</span>
       </div>
     </header>
     <div class="page-layout-grid reference-layout">
@@ -140,7 +140,7 @@ normalization.</p>
 <td align="left"><strong>Fleet Contract</strong></td>
 <td align="left"><code>1 | 2 | 3 | 4 | 5</code> (Current: <code>5</code>)</td>
 <td align="left"><code>FleetContractVersion = 1 | 2 | 3 | 4 | 5</code><br><code>FLEET_WRITE_BOUNDARY_VERSION = 4</code><br><code>FLEET_DYNAMIC_STEP_VERSION = 5</code><br><code>src/domains/agents/fleet-contract.ts</code></td>
-<td align="left">Markdown recipes with YAML front matter, including <code>.clio-coder/fleets/&lt;name&gt;.md</code> plus built-in, enabled-extension, and user tiers</td>
+<td align="left">Markdown recipes with YAML front matter, including <code>.clio-coder/fleets/&lt;name&gt;.md</code> plus built-in, plugin, and user tiers</td>
 <td align="left">Multi-agent workflow contract. v1 is agent-only; v2 adds deterministic code steps; v3 adds bounded loops and commit steps; v4 adds declared per-step write boundaries; v5 adds plan steps, gate steps, per-step target or profile routing, and the single-writer declaration.</td>
 <td align="left">Reader refuses contracts whose version features it does not support.</td>
 </tr>
@@ -277,7 +277,7 @@ normalization.</p>
 <td align="left">unversioned YAML map</td>
 <td align="left"><code>readLibraryPins</code><br><code>src/domains/resources/library.ts</code></td>
 <td align="left"><code>&lt;configDir&gt;/library-pins.yaml</code></td>
-<td align="left">Typed ref (<code>skill:x</code>, <code>agent:y</code>, <code>prompt:p</code>, <code>fleet:z</code>) to <code>{sha256, sourceUrl}</code> for every resource <code>library add</code> or the Skills Hub installed.</td>
+<td align="left">Typed ref (<code>skill:x</code>, <code>agent:y</code>, <code>prompt:p</code>, <code>fleet:z</code>) to <code>{sha256, sourceUrl}</code> for every resource <code>library install</code> or the Library installed.</td>
 <td align="left">Malformed YAML throws; a successfully parsed non-map reads as empty. Either a kind-qualified pin or the destination file makes an entry report installed, so a surviving pin still counts when its installed file is missing.</td>
 </tr>
 </tbody></table>

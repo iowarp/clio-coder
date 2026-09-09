@@ -4,8 +4,8 @@
   <meta charset="utf-8">
   <meta name="viewport" content="width=device-width, initial-scale=1">
   <meta name="clio-markdown-source" content="docs/guide/built-in-agents.md">
-  <meta name="clio-docs-version" content="0.4.2">
-  <title>Clio Coder Agent Fleet · Clio Coder 0.4.2</title>
+  <meta name="clio-docs-version" content="0.4.7">
+  <title>Clio Coder Agent Fleet · Clio Coder 0.4.7</title>
   <link rel="icon" href="data:,">
   <link rel="stylesheet" href="shared.css">
 </head>
@@ -30,7 +30,7 @@
       </div>
       <div class="header-right">
         <a class="back-btn" href="index.html">← Index</a>
-        <span class="version-badge">v0.4.2</span>
+        <span class="version-badge">v0.4.7</span>
       </div>
     </header>
     <div class="page-layout-grid reference-layout">
@@ -56,7 +56,7 @@
 <li><strong>Recipe</strong>: An authored Markdown file containing frontmatter configuration and an instruction body.</li>
 <li><strong>AgentSpec</strong>: The normalized runtime and catalog policy object derived from a recipe.</li>
 <li><strong>audience</strong>: Determines visibility and routing (<code>base</code> | <code>shadow</code> | <code>custom</code> | <code>internal</code>).</li>
-<li><strong>source</strong>: Origin of the recipe (<code>builtin</code> | <code>extension</code> | <code>user</code> | <code>project</code>).</li>
+<li><strong>source</strong>: Origin of the recipe (<code>builtin</code> | <code>plugin</code> | <code>user</code> | <code>project</code>).</li>
 </ul>
 <h3>Discovery, Overrides, and Precedence</h3>
 <p>At startup, Clio loads recipes in four precedence tiers:</p>
@@ -74,9 +74,9 @@
 <td>Shipped defaults.</td>
 </tr>
 <tr>
-<td><strong>Extension</strong></td>
-<td>Each enabled extension&#39;s <code>agents</code> resource root</td>
-<td>Loaded in stable extension-source order. An extension recipe may bind only skills from the same extension.</td>
+<td><strong>Plugin</strong></td>
+<td>Each enabled plugin&#39;s <code>agents</code> resource root</td>
+<td>Loaded in stable plugin-source order. A plugin recipe may bind only skills from the same plugin.</td>
 </tr>
 <tr>
 <td><strong>User</strong></td>
@@ -92,12 +92,12 @@
 <p>Recipe IDs are derived from filenames (e.g., <code>architect.md</code> -&gt; <code>architect</code>). Recipes must live directly under their respective directories.</p>
 <ul>
 <li><strong>Customization</strong>: User-level agents can override/customize shipped base agents.</li>
-<li><strong>Extension Protection</strong>: Extension recipes cannot override any shipped builtin.</li>
+<li><strong>Plugin Protection</strong>: Plugin recipes cannot override any shipped builtin.</li>
 <li><strong>Shadow Protection</strong>: User or project agents can <strong>never</strong> override shadow or internal agents.</li>
 <li><strong>Built-in Protection</strong>: Project agents cannot override any shipped built-ins; they are strictly treated as custom/domain agents.</li>
 <li><strong>Reserved IDs</strong>: The IDs <code>worker</code>, <code>delegate</code>, and <code>auto</code> cannot be registered outside the builtin tier.</li>
 <li><strong>Local Ignored Custom Examples</strong>: Local examples (e.g., <code>benchmark-runner</code>, <code>clio-dev</code>, <code>implementer</code>, <code>scientific-validator</code>) may exist under <code>.clio-coder/agents</code> for documentation or test purposes, but are ignored if they collide with reserved/built-in rules.</li>
-<li><strong>Fleet Contracts</strong>: Shipped builtin fleet contracts (<code>build-test</code>, <code>build-review</code>, <code>sdlc</code>) live under <code>src/domains/agents/fleets/*.md</code>. Enabled-extension contracts load next, user contracts at <code>&lt;configDir&gt;/fleets/&lt;name&gt;.md</code> load after them, and project contracts at <code>.clio-coder/fleets/&lt;name&gt;.md</code> take highest precedence. The parser accepts contract versions 1 through 5. Version 4 introduces enforced per-step <code>writes</code> boundaries; version 5 adds plan and gate steps, per-step target or profile routes, and the <code>writers: 1</code> single-writer declaration. Deterministic code steps reference commands declared in <code>.clio-coder/fleets/commands.yaml</code>.</li>
+<li><strong>Fleet Contracts</strong>: Shipped builtin fleet contracts (<code>build-test</code>, <code>build-review</code>, <code>sdlc</code>) live under <code>src/domains/agents/fleets/*.md</code>. Enabled-plugin contracts load next, user contracts at <code>&lt;configDir&gt;/fleets/&lt;name&gt;.md</code> load after them, and project contracts at <code>.clio-coder/fleets/&lt;name&gt;.md</code> take highest precedence. The parser accepts contract versions 1 through 5. Version 4 introduces enforced per-step <code>writes</code> boundaries; version 5 adds plan and gate steps, per-step target or profile routes, and the <code>writers: 1</code> single-writer declaration. Deterministic code steps reference commands declared in <code>.clio-coder/fleets/commands.yaml</code>.</li>
 </ul>
 <hr>
 <h2>Built-in catalog</h2>
@@ -292,7 +292,7 @@ optional <code>product</code> key also exists for product-scoped recipes. There 
 <code>model</code>, <code>target</code>, <code>thinkingLevel</code>, or <code>output</code> frontmatter keys — target and
 model selection belong to dispatch, not the recipe.</p>
 <p>Every recipe must declare <code>name</code>, <code>description</code>, <code>budget</code>, and every other key in the required set; no display defaults are synthesized. <code>budget</code> must be a non-null YAML object containing <code>toolCalls</code>, <code>readReserve</code>, and <code>synthesis</code>, plus an optional <code>maximum</code> ceiling object such as architect&#39;s <code>maximum: {toolCalls: 150, readReserve: 16}</code>. The numeric fields must be safe integers, <code>toolCalls &gt; 0</code>, and <code>0 &lt;= readReserve &lt; toolCalls</code>; <code>synthesis</code> must be a boolean. Unknown, missing, quoted-numeric, floating-point, null, and relationally invalid values reject the recipe with its source path and property. Scout declares <code>18/4/true</code>; Coder declares <code>50/5/true</code>. The model-visible catalog shows the declared policy, never a mutable effective cap.</p>
-<p>Only shipped recipes may declare the <code>base</code>, <code>shadow</code>, or <code>internal</code> audience. Extension, user, and project recipes must declare <code>audience: custom</code>; the discovery root determines that provenance and the parser refuses a conflicting claim.</p>
+<p>Only shipped recipes may declare the <code>base</code>, <code>shadow</code>, or <code>internal</code> audience. Plugin, user, and project recipes must declare <code>audience: custom</code>; the discovery root determines that provenance and the parser refuses a conflicting claim.</p>
 <p>The operator cap is independent and cannot be widened by a recipe. Dispatch clamps <code>toolCalls</code> to that cap and clamps <code>readReserve</code> to zero when canonical <code>read</code> is absent after tool admission. Reserve slots admit only <code>read</code>, not every read-class tool. Blocked non-read attempts do not consume admitted reserve slots, but they still count toward the operator attempt ceiling.</p>
 <h3>Skills</h3>
 <p>Skills are knowledge attachments declared under <code>skills: [...]</code> in the YAML frontmatter.</p>

@@ -548,12 +548,16 @@ Grouped by command. Global flags appear under `global`.
 
 | Flag | Controls |
 |---|---|
-| `--from` | For `library add`, a catalog directory or path to install from; the literal `catalog` selects the default catalog. |
+| `--all` | For `library skills`, list all discovered runtime skills including unmanaged local files. |
+| `--dry-run` | For `library install`, print the execution plan without writing changes. |
+| `--force` | For `library install`, `register`, and `update`, overwrite existing destination files or force operation. |
+| `--from` | For `library` commands, alternate index or catalog file/URL to read from. |
 | `--help` | Print the command's usage and exit. |
-| `--json` | Emit JSON for `library list`, `search`, and `add`. |
-| `--kind` | For `library list` and `library search`, restrict to one entry kind: `skill`, `agent`, `prompt`, or `fleet`. |
-| `--with-requirements` | For `library add`, also install the entry's unsatisfied requirements instead of refusing. |
-| `--yes` | For `library add`, confirm the install writes; without it the plan is printed and nothing is written. |
+| `--json` | Emit machine-readable JSON output. |
+| `--kind` | For `library list` and `library search`, restrict to one entry kind: `plugin`, `skill`, `agent`, `prompt`, or `fleet`. |
+| `--project` | Target project scope (`.clio-coder/`). |
+| `--user` | Target user scope (`<configDir>/`). |
+| `--with-requirements` | For `library install`, also install the entry's unsatisfied requirements instead of refusing. |
 | `-h` | Short form of --help. |
 
 ### `memory`
@@ -791,7 +795,7 @@ Project safety, hooks, and settings are ignored until the operator reviews them 
 
 | Key | Controls | Precedence |
 |---|---|---|
-| `(recipe files)` | Project agent recipes (`<id>.md` with the recipe frontmatter schema); a project recipe must declare `audience: custom` and cannot override a shipped builtin. | For non-builtin ids: project `.clio-coder/agents/` > user agents > enabled-extension agents. Builtins remain protected; user recipes alone may customize a shipped base agent, never a shadow or internal agent. |
+| `(recipe files)` | Project agent recipes (`<id>.md` with the recipe frontmatter schema); a project recipe must declare `audience: custom` and cannot override a shipped builtin. | For non-builtin ids: project `.clio-coder/agents/` > user agents > enabled-plugin agents. Builtins remain protected; user recipes alone may customize a shipped base agent, never a shadow or internal agent. |
 
 ### `.clio-coder/fleets`
 

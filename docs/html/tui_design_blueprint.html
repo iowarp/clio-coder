@@ -4,8 +4,8 @@
   <meta charset="utf-8">
   <meta name="viewport" content="width=device-width, initial-scale=1">
   <meta name="clio-markdown-source" content="docs/architecture/tui-design.md">
-  <meta name="clio-docs-version" content="0.4.2">
-  <title>Clio TUI Design System · Clio Coder 0.4.2</title>
+  <meta name="clio-docs-version" content="0.4.7">
+  <title>Clio TUI Design System · Clio Coder 0.4.7</title>
   <link rel="icon" href="data:,">
   <link rel="stylesheet" href="shared.css">
 </head>
@@ -30,7 +30,7 @@
       </div>
       <div class="header-right">
         <a class="back-btn" href="index.html">← Index</a>
-        <span class="version-badge">v0.4.6</span>
+        <span class="version-badge">v0.4.7</span>
       </div>
     </header>
     <div class="page-layout-grid reference-layout">
@@ -452,7 +452,7 @@
 <li>Settings provides a dedicated drill-down stack below 72 columns.</li>
 </ul>
 <h3>4.7 Decision Consequence Frames</h3>
-<p>Permission confirmation and <code>ask_user</code> use one pure consequence presentation classifier while keeping separate input and execution protocols. The classifier supplies the tier title, semantic frame token, consequence and reversibility copy, requester attribution, and display actions. Permission keeps allow-once, deny, and stop behavior. <code>ask_user</code> keeps selection, free-text, cancellation, and its compact, panel, or interview layout chosen from question shape.</p>
+<p>Permission confirmation and <code>ask_user</code> use one pure consequence presentation classifier while keeping separate input and execution protocols. The classifier supplies the tier title, semantic frame token, consequence and reversibility copy, requester attribution, and display actions. Permission keeps allow-once, deny, and stop behavior. <code>ask_user</code> keeps selection, free-text, cancellation, and a single bottom-anchored, content-sized interview frame sized directly to the round.</p>
 <table>
 <thead>
 <tr>

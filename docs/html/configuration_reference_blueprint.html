@@ -4,8 +4,8 @@
   <meta charset="utf-8">
   <meta name="viewport" content="width=device-width, initial-scale=1">
   <meta name="clio-markdown-source" content="docs/guide/configuration-reference.md">
-  <meta name="clio-docs-version" content="0.4.2">
-  <title>Configuration reference · Clio Coder 0.4.2</title>
+  <meta name="clio-docs-version" content="0.4.7">
+  <title>Configuration reference · Clio Coder 0.4.7</title>
   <link rel="icon" href="data:,">
   <link rel="stylesheet" href="shared.css">
 </head>
@@ -30,7 +30,7 @@
       </div>
       <div class="header-right">
         <a class="back-btn" href="index.html">← Index</a>
-        <span class="version-badge">v0.4.6</span>
+        <span class="version-badge">v0.4.7</span>
       </div>
     </header>
     <div class="page-layout-grid reference-layout">
@@ -2499,8 +2499,20 @@
 </tr>
 </thead>
 <tbody><tr>
+<td><code>--all</code></td>
+<td>For <code>library skills</code>, list all discovered runtime skills including unmanaged local files.</td>
+</tr>
+<tr>
+<td><code>--dry-run</code></td>
+<td>For <code>library install</code>, print the execution plan without writing changes.</td>
+</tr>
+<tr>
+<td><code>--force</code></td>
+<td>For <code>library install</code>, <code>register</code>, and <code>update</code>, overwrite existing destination files or force operation.</td>
+</tr>
+<tr>
 <td><code>--from</code></td>
-<td>For <code>library add</code>, a catalog directory or path to install from; the literal <code>catalog</code> selects the default catalog.</td>
+<td>For <code>library</code> commands, alternate index or catalog file/URL to read from.</td>
 </tr>
 <tr>
 <td><code>--help</code></td>
@@ -2508,19 +2520,23 @@
 </tr>
 <tr>
 <td><code>--json</code></td>
-<td>Emit JSON for <code>library list</code>, <code>search</code>, and <code>add</code>.</td>
+<td>Emit machine-readable JSON output.</td>
 </tr>
 <tr>
 <td><code>--kind</code></td>
-<td>For <code>library list</code> and <code>library search</code>, restrict to one entry kind: <code>skill</code>, <code>agent</code>, <code>prompt</code>, or <code>fleet</code>.</td>
+<td>For <code>library list</code> and <code>library search</code>, restrict to one entry kind: <code>plugin</code>, <code>skill</code>, <code>agent</code>, <code>prompt</code>, or <code>fleet</code>.</td>
+</tr>
+<tr>
+<td><code>--project</code></td>
+<td>Target project scope (<code>.clio-coder/</code>).</td>
+</tr>
+<tr>
+<td><code>--user</code></td>
+<td>Target user scope (<code>&lt;configDir&gt;/</code>).</td>
 </tr>
 <tr>
 <td><code>--with-requirements</code></td>
-<td>For <code>library add</code>, also install the entry&#39;s unsatisfied requirements instead of refusing.</td>
-</tr>
-<tr>
-<td><code>--yes</code></td>
-<td>For <code>library add</code>, confirm the install writes; without it the plan is printed and nothing is written.</td>
+<td>For <code>library install</code>, also install the entry&#39;s unsatisfied requirements instead of refusing.</td>
 </tr>
 <tr>
 <td><code>-h</code></td>
@@ -3277,7 +3293,7 @@
 <tbody><tr>
 <td><code>(recipe files)</code></td>
 <td>Project agent recipes (<code>&lt;id&gt;.md</code> with the recipe frontmatter schema); a project recipe must declare <code>audience: custom</code> and cannot override a shipped builtin.</td>
-<td>For non-builtin ids: project <code>.clio-coder/agents/</code> &gt; user agents &gt; enabled-extension agents. Builtins remain protected; user recipes alone may customize a shipped base agent, never a shadow or internal agent.</td>
+<td>For non-builtin ids: project <code>.clio-coder/agents/</code> &gt; user agents &gt; enabled-plugin agents. Builtins remain protected; user recipes alone may customize a shipped base agent, never a shadow or internal agent.</td>
 </tr>
 </tbody></table>
 <h3><code>.clio-coder/fleets</code></h3>

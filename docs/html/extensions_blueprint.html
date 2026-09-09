@@ -4,8 +4,8 @@
   <meta charset="utf-8">
   <meta name="viewport" content="width=device-width, initial-scale=1">
   <meta name="clio-markdown-source" content="docs/guide/extensions-and-sharing.md">
-  <meta name="clio-docs-version" content="0.4.2">
-  <title>Extensions, Resources, and Share Archives · Clio Coder 0.4.2</title>
+  <meta name="clio-docs-version" content="0.4.7">
+  <title>Extensions, Resources, and Share Archives · Clio Coder 0.4.7</title>
   <link rel="icon" href="data:,">
   <link rel="stylesheet" href="shared.css">
 </head>
@@ -30,7 +30,7 @@
       </div>
       <div class="header-right">
         <a class="back-btn" href="index.html">← Index</a>
-        <span class="version-badge">v0.4.2</span>
+        <span class="version-badge">v0.4.7</span>
       </div>
     </header>
     <div class="page-layout-grid reference-layout">
@@ -47,7 +47,7 @@
 <p><strong>Visual blueprint:</strong> The source checkout includes the complete
 <a href="extensions_blueprint.html">Extensions, Resources, and Share Archives visual reference</a>.</p>
 </blockquote>
-<p>Clio Coder has two package kinds. A plugin is a domain bundle: prompts, skills, agent recipes, fleet contracts, scripts, and reference files, installed with <code>clio-coder plugins install &lt;path&gt;</code>. A harness extension is executable runtime capability: command tools and hook declarations, installed with <code>clio-coder extensions install &lt;path&gt;</code>. Only plugins contribute resources; see <a href="plugins_blueprint.html">plugins.md</a> and <a href="harness_extensions_blueprint.html">harness-extensions.md</a> for each contract.</p>
+<p>Clio Coder has two package kinds. A plugin is a domain bundle: prompts, skills, agent recipes, fleet contracts, scripts, and reference files, installed with <code>clio-coder library install &lt;path&gt;</code>. A harness extension is executable runtime capability: command tools and hook declarations, installed with <code>clio-coder extensions install &lt;path&gt;</code>. Only plugins contribute resources; see <a href="plugins_blueprint.html">plugins.md</a> and <a href="harness_extensions_blueprint.html">harness-extensions.md</a> for each contract.</p>
 <p>Share archives are portable JSON files for moving project and user Clio resources between machines or collaborators.</p>
 <p>Source of truth: <code>src/domains/extensions/**</code>, <code>src/domains/plugins/**</code>, <code>src/domains/resources/**</code>, <code>src/domains/share/**</code>, <code>src/cli/extensions.ts</code>, and <code>src/cli/share.ts</code>.</p>
 <hr>
@@ -163,6 +163,21 @@ Return:
 /bugfix src/parser.ts empty input crashes
 </code></pre>
 <p>Templates without frontmatter are accepted; Clio derives a fallback description from the first non-empty line. Invalid frontmatter degrades to a warning for prompt templates rather than failing the whole load.</p>
+<h3>Display-only templates</h3>
+<p>A template whose body is written for the operator rather than the model, such as a package&#39;s <code>help</code> reference, declares <code>display-only: true</code> in its frontmatter:</p>
+<pre><code class="language-md">---
+description: Overview of the package commands
+display-only: true
+---
+
+Display the following:
+
+```text
+ /pkg:help      This reference
+ /pkg:status    Project dashboard
+```
+</code></pre>
+<p>Submitting <code>/pkg:help</code> renders the template locally as an operator card in the transcript, headed by the command name and its source package. Nothing is sent to the model, nothing is recorded in the model-facing session context, and no tokens are spent. The card shows the first fenced code block when the body has one, otherwise the whole body, wrapped to the terminal width with no truncation and scrollable like any other transcript output. Arguments after the command name are ignored. The composer&#39;s autocomplete lists such a template with a <code>reference</code> marker, and <code>/resources prompts</code> marks it the same way. Headless <code>clio-coder run /pkg:help</code> prints the same text to stdout and exits 0 without booting a provider or a session.</p>
 <h3>Foreign prompt roots</h3>
 <p>A Claude Code slash command in <code>.claude/commands</code>, a Codex prompt in <code>.codex/prompts</code>, and an OpenCode command in <code>.opencode/command</code> are prompt templates Clio reads directly, at both user and project scope. A foreign prompt is text substituted into a message the operator typed, so it keeps the untrusted-by-project default that skills have and never gains an execution grant of its own.</p>
 <p>User-scope foreign prompts are trusted because they came from the operator&#39;s
@@ -260,9 +275,9 @@ capabilities:
         additionalProperties: false
 </code></pre>
 <p>Required fields are <code>id</code>, <code>version</code>, and <code>description</code>. <code>name</code> defaults to <code>id</code> when absent. <code>capabilities</code> is optional, so a package whose only contribution is a root <code>hooks.yaml</code> is valid. The command-tool contract lives in <a href="harness_extensions_blueprint.html">harness-extensions.md</a>.</p>
-<p>A manifest that declares <code>resources</code>, <code>prompts</code>, <code>skills</code>, <code>agents</code>, <code>fleets</code>, or <code>themes</code> is invalid. Those are plugin content, and the diagnostic says so: install the bundle with <code>clio-coder plugins install &lt;path&gt;</code> instead.</p>
+<p>A manifest that declares <code>resources</code>, <code>prompts</code>, <code>skills</code>, <code>agents</code>, <code>fleets</code>, or <code>themes</code> is invalid. Those are plugin content, and the diagnostic says so: install the bundle with <code>clio-coder library install &lt;path&gt;</code> instead.</p>
 <p>IDs must be lowercase and may include numbers, dots, underscores, and hyphens; they must start/end alphanumeric.</p>
-<p><code>compatibility.clio</code> is optional. When present, it must be a valid SemVer range such as <code>&gt;=0.3.8</code>, <code>^0.3.8</code>, or <code>0.3.x</code>. Installation refuses a package whose range excludes the running Clio version and names the extension, its declared range, and that running version. Clio repeats the check whenever it loads installed extensions, so a package that becomes incompatible after a Clio version change stays visible in <code>extensions list</code> with its diagnostic but contributes no resources. An incompatible project package does not hide a compatible user package with the same ID. A manifest without <code>compatibility.clio</code> keeps the existing unrestricted behavior.</p>
+<p><code>compatibility.clio</code> is optional. When present, it must be a valid SemVer range such as <code>&gt;=0.3.8</code>, <code>^0.3.8</code>, or <code>0.3.x</code>. Installation refuses a package whose range excludes the running Clio version and names the extension, its declared range, and that running version. Clio repeats the check whenever it loads installed extensions, so a package that becomes incompatible after a Clio version change stays visible in <code>extensions list</code> with its diagnostic but contributes no command tools or hooks. An incompatible project package does not hide a compatible user package with the same ID. A manifest without <code>compatibility.clio</code> keeps the existing unrestricted behavior.</p>
 <h3>Callers that dispatch</h3>
 <p>A caller that builds a <code>DispatchRequest</code> against the <code>DispatchContract</code> is a
 dispatch producer and is bound by the typed-intent compatibility rules like any
@@ -316,7 +331,7 @@ clio-coder extensions remove &lt;id&gt; [--user|--project] [--json]
 <p>Reloading an unchanged tree still publishes a new generation with the same content digest; content identity is the digest, not the generation number. Installs, enables, disables, and removes performed by <code>clio-coder extensions</code> in another process are invisible to a running session until the operator reloads or restarts. There is no filesystem watcher, so a CLI mutation never becomes an implicit mid-turn hook change. Command-tool schemas are frozen when a session registry is created, so a reload never changes a live model&#39;s tool surface; restart the session for that. Plugin resources have their own generation and their own <code>/resources plugins reload</code>.</p>
 <p>If extension state is corrupt, loading remains fail-closed. A normal reinstall refuses it; <code>extensions install &lt;valid-source&gt; --force</code> backs up the corrupt state and parks the previous package bytes before installing and recording the verified replacement. <code>extensions remove &lt;id&gt;</code> can also remove an unverifiable package from the load path while preserving both its bytes and any corrupt state in the paths printed by the command. These recovery backups are deliberately not treated as installed packages.</p>
 <h3>Skill pack distribution</h3>
-<p>Clio Coder should not grow built-in skills in the harness. Distribute reusable Clio skills as plugins instead. A <code>iowarp/clio-kit</code> bundle carries a root <code>plugin.json</code> plus a <code>skills/</code> directory, and users install it with <code>clio-coder plugins install &lt;path&gt; --project</code> or without the flag for user scope.</p>
+<p>Clio Coder should not grow built-in skills in the harness. Distribute reusable Clio skills as plugins instead. A <code>iowarp/clio-kit</code> bundle carries a root <code>plugin.json</code> plus a <code>skills/</code> directory, and users install it with <code>clio-coder library install &lt;path&gt; --project</code> or without the flag for user scope.</p>
 <p>Recommended layout:</p>
 <pre><code class="language-text">clio-kit/
   plugin.json
