@@ -221,7 +221,7 @@ describe("safety gate boundary", () => {
 			"clio-coder skills install ./draft-skills/example",
 			"clio-coder --no-skills skills install example",
 			"env CLIO_CODER_CONFIG_DIR=/tmp/elsewhere clio-coder skills update --all --force",
-			"command clio-coder library add skill:example --yes",
+			"command clio-coder library install skill:example --yes",
 			"sh -lc 'clio-coder skills install example --user'",
 			"node /opt/clio/dist/cli/index.js skills install example",
 			"npx @iowarp/clio-coder skills install example",
@@ -253,6 +253,52 @@ describe("safety gate boundary", () => {
 			"node script.js skills install example",
 		])
 			strictEqual(policy.evaluate({ tool: ToolNames.Bash, args: { command } }).kind, "allow", command);
+	});
+
+	it("guards canonical library mutations and approved interop adoption through wrappers", () => {
+		for (const policy of [engine(), createWorkerSafety({ cwd: scratch })]) {
+			for (const wrapper of [
+				"clio-coder",
+				"env X=1 clio-coder",
+				"command clio-coder",
+				"node /opt/clio/dist/cli/index.js",
+				"npx --yes @iowarp/clio-coder",
+				"npm exec -- clio-coder",
+			]) {
+				for (const args of [
+					"library install plugin:example",
+					"library --kind skill install example --force",
+					"library enable example",
+					"library disable example --dry-run",
+					"library update example",
+					"library register ./package",
+					"interop adopt claude-code --yes",
+					"interop adopt claude-code --kind prompt --yes",
+				]) {
+					strictEqual(
+						policy.evaluate({ tool: ToolNames.Bash, args: { command: `${wrapper} ${args}` } }).kind,
+						"block",
+						`${wrapper} ${args}`,
+					);
+				}
+				for (const args of [
+					"library install example --dry-run",
+					"library update example --dry-run",
+					"library inspect example",
+					"library drift example",
+					"library install --help",
+					"interop inspect claude-code",
+					"interop adopt claude-code",
+					"interop adopt claude-code --yes --dry-run",
+				]) {
+					strictEqual(
+						policy.evaluate({ tool: ToolNames.Bash, args: { command: `${wrapper} ${args}` } }).kind,
+						"allow",
+						`${wrapper} ${args}`,
+					);
+				}
+			}
+		}
 	});
 
 	it("protects installed plugin and harness-extension content in main and worker tools", () => {
@@ -299,22 +345,22 @@ describe("safety gate boundary", () => {
 		}
 	});
 
-	it("reserves confirmed library additions and their skill dependencies for operators", () => {
+	it("reserves confirmed library installs and their skill dependencies for operators", () => {
 		for (const policy of [engine(), createWorkerSafety({ cwd: scratch })]) {
 			for (const command of [
-				"clio-coder library add skill:example --yes",
-				"clio-coder library --yes add skill:example",
-				"clio-coder library --from ./catalog.json --yes add example",
-				"clio-coder library add agent:example --with-requirements --yes",
-				"clio-coder library --with-requirements add fleet:example --yes",
-				"clio-coder library add prompt:example --yes --with-requirements",
-				"clio-coder library add skill:example --from --help --yes",
-				"env CLIO_CODER_CONFIG_DIR=/tmp/elsewhere clio-coder library add skill:example --yes",
-				"command clio-coder library add skill:example --yes",
-				"sh -lc 'clio-coder library add skill:example --yes'",
-				"node /opt/clio/dist/cli/index.js library add skill:example --yes",
-				"npx --yes @iowarp/clio-coder library add skill:example --yes",
-				"npm exec -- clio-coder library add skill:example --yes",
+				"clio-coder library install skill:example --yes",
+				"clio-coder library --yes install skill:example",
+				"clio-coder library --from ./catalog.json --yes install example",
+				"clio-coder library install agent:example --with-requirements --yes",
+				"clio-coder library --with-requirements install fleet:example --yes",
+				"clio-coder library install prompt:example --yes --with-requirements",
+				"clio-coder library install skill:example --from --help --yes",
+				"env CLIO_CODER_CONFIG_DIR=/tmp/elsewhere clio-coder library install skill:example --yes",
+				"command clio-coder library install skill:example --yes",
+				"sh -lc 'clio-coder library install skill:example --yes'",
+				"node /opt/clio/dist/cli/index.js library install skill:example --yes",
+				"npx --yes @iowarp/clio-coder library install skill:example --yes",
+				"npm exec -- clio-coder library install skill:example --yes",
 			]) {
 				const call = { tool: ToolNames.Bash, args: { command } };
 				const decision = policy.evaluate(call);
@@ -329,7 +375,7 @@ describe("safety gate boundary", () => {
 		}
 	});
 
-	it("preserves library discovery and unconfirmed plans through the same CLI wrappers", () => {
+	it("preserves library discovery and dry-run plans through the same CLI wrappers", () => {
 		const policy = engine();
 		for (const command of [
 			"clio-coder --help skills sync --force",
@@ -339,16 +385,16 @@ describe("safety gate boundary", () => {
 			"clio-coder skills --json inventory",
 			"clio-coder library search example --kind skill --json",
 			"clio-coder library use skill example",
-			"clio-coder library add skill:example --json",
-			"clio-coder library --from ./catalog.json add skill:example --with-requirements",
-			"clio-coder library add agent:example --with-requirements",
-			"clio-coder library add skill:example --from --yes",
-			"clio-coder library add skill:example --yes --help",
+			"clio-coder library install --dry-run skill:example --json",
+			"clio-coder library --from ./catalog.json install --dry-run skill:example --with-requirements",
+			"clio-coder library install --dry-run agent:example --with-requirements",
+			"clio-coder library install --dry-run skill:example --from --yes",
+			"clio-coder library install --dry-run skill:example --yes --help",
 			"env CLIO_CODER_CONFIG_DIR=/tmp/elsewhere clio-coder library list",
-			"command clio-coder library add skill:example",
-			"sh -lc 'clio-coder library add skill:example --with-requirements'",
-			"node /opt/clio/dist/cli/index.js library add skill:example --json",
-			"npx --yes @iowarp/clio-coder library add skill:example",
+			"command clio-coder library install --dry-run skill:example",
+			"sh -lc 'clio-coder library install --dry-run skill:example --with-requirements'",
+			"node /opt/clio/dist/cli/index.js library install --dry-run skill:example --json",
+			"npx --yes @iowarp/clio-coder library install --dry-run skill:example",
 			"npm exec -- clio-coder library search example",
 		])
 			strictEqual(policy.evaluate({ tool: ToolNames.Bash, args: { command } }).kind, "allow", command);
@@ -376,13 +422,13 @@ describe("safety gate boundary", () => {
 		for (const [command, argv] of [
 			["clio-coder skills sync --force # --help", ["skills", "sync", "--force"]],
 			["clio-coder skills sync --force # -v", ["skills", "sync", "--force"]],
-			["clio-coder library add skill:example --yes # --help", ["library", "add", "skill:example", "--yes"]],
-			["clio-coder library add skill:example --yes # --version", ["library", "add", "skill:example", "--yes"]],
+			["clio-coder library install skill:example --yes # --help", ["library", "install", "skill:example", "--yes"]],
+			["clio-coder library install skill:example --yes # --version", ["library", "install", "skill:example", "--yes"]],
 			["# --help\nclio-coder skills sync --force # -v", ["skills", "sync", "--force"]],
 			["clio-coder skills --help # comment\nclio-coder skills sync", ["skills", "--help", "skills", "sync"]],
 			[
-				"clio-coder library add 'skill:example#suffix' --yes # --help",
-				["library", "add", "skill:example#suffix", "--yes"],
+				"clio-coder library install 'skill:example#suffix' --yes # --help",
+				["library", "install", "skill:example#suffix", "--yes"],
 			],
 		] as const) {
 			deepStrictEqual(shellArgv(command), argv, command);
@@ -405,7 +451,7 @@ describe("safety gate boundary", () => {
 		const worker = createWorkerSafety({ cwd: scratch });
 		for (const [command, argv] of [
 			["clio-coder skills sync --force > --help", ["skills", "sync", "--force"]],
-			["clio-coder library > --version add skill:example --yes", ["library", "add", "skill:example", "--yes"]],
+			["clio-coder library > --version install skill:example --yes", ["library", "install", "skill:example", "--yes"]],
 			["2> --help clio-coder skills sync --force", ["skills", "sync", "--force"]],
 			["clio-coder skills sy\\\nnc --force", ["skills", "sync", "--force"]],
 			["clio-coder skills sync & clio-coder --help; wait", null],

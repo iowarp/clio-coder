@@ -416,7 +416,14 @@ export function invokesClioSkillMutation(command: string): boolean {
 			args = args.slice(flag === "--skill" || flag === "--api-key" ? 2 : 1);
 		}
 		if (rootHelp) continue;
-		if (args[0] !== "skills" && args[0] !== "library" && args[0] !== "plugins" && args[0] !== "extensions") continue;
+		if (
+			args[0] !== "skills" &&
+			args[0] !== "library" &&
+			args[0] !== "plugins" &&
+			args[0] !== "extensions" &&
+			args[0] !== "interop"
+		)
+			continue;
 		if (resourceCliMutatesSkills(args[0], args.slice(1))) return true;
 	}
 	return false;
@@ -441,7 +448,7 @@ function shellCommandArguments(segment: ReadonlyArray<ShellToken>): string[] {
 }
 
 function resourceCliMutatesSkills(
-	resource: "skills" | "library" | "plugins" | "extensions",
+	resource: "skills" | "library" | "plugins" | "extensions" | "interop",
 	args: ReadonlyArray<string>,
 ): boolean {
 	// Both resource parsers accept flags before the verb. Consume their value
@@ -452,6 +459,7 @@ function resourceCliMutatesSkills(
 			: ["--kind", "--from"];
 	let verb: string | undefined;
 	let confirmed = false;
+	let dryRun = false;
 	for (let index = 0; index < args.length; index += 1) {
 		const arg = args[index];
 		if (arg === undefined) continue;
@@ -461,14 +469,17 @@ function resourceCliMutatesSkills(
 		}
 		if (arg === "--help" || arg === "-h") return false;
 		if (arg === "--yes") confirmed = true;
+		if (arg === "--dry-run") dryRun = true;
 		if (!arg.startsWith("-")) verb ??= arg;
 	}
 	if (resource === "skills") return verb === "install" || verb === "update" || verb === "sync";
 	if (resource === "plugins" || resource === "extensions")
 		return ["install", "update", "remove", "enable", "disable", "pin"].includes(verb ?? "");
-	// Unconfirmed library add only prints a plan. A confirmed add can install
-	// skill dependencies of any resource kind, or resolve an untyped skill ref.
-	return (verb === "add" && confirmed) || ["update", "remove", "pin"].includes(verb ?? "");
+	if (resource === "interop") return verb === "adopt" && confirmed && !dryRun;
+	// A package of any kind may carry skills or require a skill dependency.
+	// Only install/update implement a dry-run; other mutations cannot spend it.
+	if ((verb === "install" || verb === "update") && dryRun) return false;
+	return ["install", "update", "remove", "enable", "disable", "pin", "register", "sync"].includes(verb ?? "");
 }
 
 const STANDARD_DEV_TARGETS = new Set(["/dev/null", "/dev/stdout", "/dev/stderr", "/dev/tty", "/dev/zero"]);

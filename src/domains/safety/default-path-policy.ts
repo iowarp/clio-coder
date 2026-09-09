@@ -67,7 +67,7 @@ export const DEFAULT_DAMAGE_CONTROL_PATH_POLICY: PathPolicyInput = {
 		// widen its own permissions in two tool calls. Both are authored by the
 		// operator through the CLI (`clio-coder verifiers author` lands nothing
 		// before `--yes`), so model-side writes and deletes are refused.
-		// Skills also refuse model-side writes and deletes; installs go through `clio-coder skills install`.
+		// Skills also refuse model-side writes and deletes; installs go through `clio-coder library install`.
 		".clio-coder/safety.yaml",
 		".clio-coder/verifiers.yaml",
 		".clio-coder/skills/",
