@@ -8,12 +8,17 @@ All notable changes to Clio Coder are documented in this file. The format follow
 - Add a distinct agent plugin engine using the portable Agent Plugins 1.0.0 manifest, explicit component references, native Clio resource projections, isolated install state, full-tree integrity, staged replacement and recovery of changed files.
 - Add plugin catalog listing, installation previews, pinned local and GitHub bundle installation, updates, removal, enable/disable, drift inspection and pin verification through the CLI and terminal library.
 - Ship the Materio (`materio`) materials research plugin with researcher interviews, supplied-paper literature review, lab feasibility, task planning and verified execution, archive checkpoints, conservative scientific checks, and a text handoff into WTF-P's public actions. Include peer package export for Codex, Claude Code and Gemini.
-- Add version 2 harness extensions for contained Node.js and Python command tools with JSON contracts, mediated execution, collision protection, provenance and lifecycle revocation. Preserve version 1 resource extensions and existing WTF-P registration.
+- Add harness extensions for contained Node.js and Python command tools with JSON contracts, mediated execution, collision protection, provenance and lifecycle revocation.
 
 ### Changed
+- Collapse the harness extension manifest to one shape: `id`, `name`, `version`, `description`, optional `capabilities.tools[]` and `compatibility.clio`. There is no version discriminator. A manifest declaring `resources`, `prompts`, `skills`, `agents`, `fleets` or `themes` is refused with a diagnostic naming `clio-coder plugins install`. A package whose only contribution is a root `hooks.yaml` stays valid.
 - Resolve contained package paths and explicit component references consistently in prompts, skills and agent recipes. Reload plugin resources independently from harness tool schemas.
 - Allow declared arguments on registered fleet code steps and retain them in previews, plans and execution.
 - Protect installed plugin and harness-extension trees and lifecycle commands as operator-owned resources. Include complete plugin pins in lint and shipped package verification.
+
+### Removed
+- Remove extension-owned prompt, skill, agent, fleet and theme roots. Plugins are the only source of packaged resources, and `/resources plugins reload` is the only resource reload path. Extensions keep command tools, `hooks.yaml`, install integrity, enable/disable, compatibility ranges and worker attestation.
+- Remove the `2026-09-01-extension-install-digests` lifecycle migration and the `clio-coder upgrade` blessing of pre-digest extension install records. An install record without a content digest now fails closed with reinstall guidance.
 
 ## 0.4.6 - 2026-09-08
 

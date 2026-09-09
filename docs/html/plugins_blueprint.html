@@ -88,7 +88,7 @@ pnpm plugins:check
 </code></pre>
 <p>The pin command reads each bundle&#39;s actual portable manifest and hashes the complete bundle. <code>plugins:check</code> fails on stale catalog metadata or content digests and is part of release hygiene.</p>
 <h2>Plugins and extensions</h2>
-<p>Plugins carry portable resources. Clio harness extensions configure executable command tools and belong in the extension lifecycle. Existing version 1 resource extensions remain supported for compatibility. Use <code>clio-coder extensions list</code> and <code>/resources extensions</code> to inspect legacy and harness extensions; command-tool schema changes require a new session.</p>
+<p>Plugins carry portable resources. Harness extensions carry executable command tools and hook declarations, and have their own manifest, install root, and lifecycle. The two never overlap: a manifest that declares domain resources is refused and points at <code>clio-coder plugins install &lt;path&gt;</code>. Use <code>clio-coder extensions list</code> and <code>/resources extensions</code> to inspect installed extensions; command-tool schema changes require a new session.</p>
         </article>
         <nav class="related-nav" aria-label="Adjacent references">
           <a class="nav-link-card" href="resource_library_blueprint.html"><span class="nav-label">Previous</span><span class="nav-title">Resource Library</span></a>

@@ -49,13 +49,7 @@ describe("middleware hook boundary", () => {
 		mkdirSync(path.join(outside, "payload"));
 		writeFileSync(
 			path.join(extensionRoot, "clio-coder-extension.yaml"),
-			[
-				"id: invalid-hooks",
-				"name: Invalid Hooks",
-				"version: 1.0.0",
-				"description: Invalid hook fixture.",
-				"",
-			].join("\n"),
+			["id: invalid-hooks", "name: Invalid Hooks", "version: 1.0.0", "description: Invalid hook fixture.", ""].join("\n"),
 		);
 		symlinkSync(path.join(outside, "payload"), path.join(extensionRoot, "payload"), "dir");
 		writeFileSync(
@@ -74,9 +68,13 @@ describe("middleware hook boundary", () => {
 		const source = scratch();
 		writeFileSync(
 			path.join(source, "clio-coder-extension.yaml"),
-			["id: receipt-hooks", "name: Receipt Hooks", "version: 1.0.0", "description: Hook receipt provenance fixture.", ""].join(
-				"\n",
-			),
+			[
+				"id: receipt-hooks",
+				"name: Receipt Hooks",
+				"version: 1.0.0",
+				"description: Hook receipt provenance fixture.",
+				"",
+			].join("\n"),
 		);
 		writeFileSync(
 			path.join(source, "hooks.yaml"),

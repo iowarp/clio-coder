@@ -68,4 +68,4 @@ The pin command reads each bundle's actual portable manifest and hashes the comp
 
 ## Plugins and extensions
 
-Plugins carry portable resources. Clio harness extensions configure executable command tools and belong in the extension lifecycle. Existing version 1 resource extensions remain supported for compatibility. Use `clio-coder extensions list` and `/resources extensions` to inspect legacy and harness extensions; command-tool schema changes require a new session.
+Plugins carry portable resources. Harness extensions carry executable command tools and hook declarations, and have their own manifest, install root, and lifecycle. The two never overlap: a manifest that declares domain resources is refused and points at `clio-coder plugins install <path>`. Use `clio-coder extensions list` and `/resources extensions` to inspect installed extensions; command-tool schema changes require a new session.

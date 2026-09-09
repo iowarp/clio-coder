@@ -1,5 +1,5 @@
-// Both package engines use the same exact-tree framing. Keeping the existing
-// implementation preserves the pins of already installed legacy extensions.
+// Both package engines use the same exact-tree framing, so a digest computed
+// for one is directly comparable to a digest computed for the other.
 export {
 	extensionContentDigest as pluginContentDigest,
 	extensionContentDigestWithCapture as pluginContentDigestWithCapture,

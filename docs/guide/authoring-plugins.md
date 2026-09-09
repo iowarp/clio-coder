@@ -101,4 +101,4 @@ Agent Plugins 1.0.0 standardizes skills and MCP declarations. Clio currently con
 
 The bundled `materio` plugin includes a tested Python exporter for Codex, Claude Code and Gemini. See its package README for commands and capability reports. It also provides a complete worked example of explicit component relationships and shared domain references.
 
-Harness extensions register runtime tools through the [harness extension contract](harness-extensions.md). They use a separate extension manifest and installation state. Legacy version 1 resource extensions remain readable, preserving existing WTF-P installations while new packages adopt the plugin engine. See [plugin library usage](plugins.md) for catalogs, updates, pins and terminal UI operations.
+Harness extensions register runtime tools through the [harness extension contract](harness-extensions.md). They use a separate extension manifest and installation state, and they cannot declare domain resources: prompts, agents, skills, fleets and reference files ship in a plugin. See [plugin library usage](plugins.md) for catalogs, updates, pins and terminal UI operations.

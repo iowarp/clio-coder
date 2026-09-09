@@ -91,7 +91,7 @@ describe("contracts/upgrade-lifecycle", () => {
 		try {
 			const { code, stdout } = await upgrade(temp, ["--dry-run"], NO_NETWORK);
 			strictEqual(code, 0);
-			match(stdout, /Would apply 5 pending migrations:/u);
+			match(stdout, /Would apply 4 pending migrations:/u);
 			for (const id of MIGRATION_IDS) match(stdout, new RegExp(id.replace(/\./gu, "\\."), "u"));
 			match(stdout, /Would refresh state metadata/u);
 			match(stdout, /Dry run: no changes made/u);

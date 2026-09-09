@@ -252,13 +252,12 @@ sessions; the uninstall operation below deliberately removes those roots.
 
 #### Current migration contract
 
-The v0.4.2 source tree registers five migrations in execution order:
+The source tree registers four migrations in execution order:
 
 1. `2026-09-01-settings-v2`
-2. `2026-09-01-extension-install-digests`
-3. `2026-09-01-clio-coder-naming`
-4. `2026-09-01-retire-panes-knobs`
-5. `2026-08-18-lmstudio-runtime-id`
+2. `2026-09-01-clio-coder-naming`
+3. `2026-09-01-retire-panes-knobs`
+4. `2026-08-18-lmstudio-runtime-id`
 
 Applied IDs are recorded in `<stateDir>/migrations.json`. An ID already in that
 manifest is skipped, and each successful migration is recorded immediately so a

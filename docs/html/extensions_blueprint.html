@@ -47,8 +47,9 @@
 <p><strong>Visual blueprint:</strong> The source checkout includes the complete
 <a href="extensions_blueprint.html">Extensions, Resources, and Share Archives visual reference</a>.</p>
 </blockquote>
-<p>Clio Coder has lightweight community-oriented resource packaging. Extensions are filesystem bundles that can contribute prompts, skills, agent recipes, and fleet contracts. Manifests may also reserve a theme root, but the runtime does not apply extension themes. Share archives are portable JSON files for moving project and user Clio resources between machines or collaborators.</p>
-<p>Source of truth: <code>src/domains/extensions/**</code>, <code>src/domains/resources/**</code>, <code>src/domains/share/**</code>, <code>src/cli/extensions.ts</code>, and <code>src/cli/share.ts</code>.</p>
+<p>Clio Coder has two package kinds. A plugin is a domain bundle: prompts, skills, agent recipes, fleet contracts, scripts, and reference files, installed with <code>clio-coder plugins install &lt;path&gt;</code>. A harness extension is executable runtime capability: command tools and hook declarations, installed with <code>clio-coder extensions install &lt;path&gt;</code>. Only plugins contribute resources; see <a href="plugins_blueprint.html">plugins.md</a> and <a href="harness_extensions_blueprint.html">harness-extensions.md</a> for each contract.</p>
+<p>Share archives are portable JSON files for moving project and user Clio resources between machines or collaborators.</p>
+<p>Source of truth: <code>src/domains/extensions/**</code>, <code>src/domains/plugins/**</code>, <code>src/domains/resources/**</code>, <code>src/domains/share/**</code>, <code>src/cli/extensions.ts</code>, and <code>src/cli/share.ts</code>.</p>
 <hr>
 <h2>Resource roots and precedence</h2>
 <p>Prompts and skills are loaded from package, user, and project roots. Higher-ranked roots override lower-ranked resources with the same name.</p>
@@ -66,7 +67,7 @@
 <td>10</td>
 <td>package</td>
 <td>extension</td>
-<td>enabled extension resource roots</td>
+<td>enabled plugin resource roots</td>
 </tr>
 <tr>
 <td>20</td>
@@ -107,7 +108,7 @@
 <td>10</td>
 <td>package</td>
 <td>extension</td>
-<td>enabled extension resource roots</td>
+<td>enabled plugin resource roots</td>
 </tr>
 <tr>
 <td>20</td>
@@ -239,41 +240,47 @@ verifies. Fixture commands in an <code>evals.md</code> are real shell and only r
 <hr>
 <h2>Extension package manifest</h2>
 <p>An extension root contains <code>clio-coder-extension.yaml</code>, <code>clio-coder-extension.yml</code>, or <code>clio-coder-extension.json</code>.</p>
-<pre><code class="language-yaml">manifestVersion: 1
-id: lab-pack
-name: Lab Pack
+<pre><code class="language-yaml">id: lab-tools
+name: Lab Tools
 version: 1.0.0
-description: Prompts and skills for this lab
-resources:
-  prompts: prompts
-  skills: skills
-  agents: agents
-  fleets: fleets
-  themes: themes
+description: Executable capabilities for this lab
 compatibility:
-  clio: &quot;&gt;=0.2.0&quot;
+  clio: &quot;&gt;=0.4.7&quot;
+capabilities:
+  tools:
+    - name: summarize
+      description: Return the count and sum of supplied measurements.
+      runtime: node
+      entrypoint: tools/summarize.cjs
+      inputSchema:
+        type: object
+        properties:
+          values: { type: array, items: { type: number } }
+        required: [values]
+        additionalProperties: false
 </code></pre>
-<p>Required fields are <code>manifestVersion: 1</code>, <code>id</code>, <code>version</code>, and <code>description</code>. <code>name</code> defaults to <code>id</code> when absent, and <code>resources</code> is optional. When <code>resources</code> is present it must be an object containing only <code>prompts</code>, <code>skills</code>, <code>agents</code>, <code>fleets</code>, and <code>themes</code>, each with a non-empty relative directory path. Clio consumes prompt, skill, agent, and fleet roots. A manifest may reserve a <code>themes</code> path for forward compatibility, but Clio does not apply theme resources.</p>
+<p>Required fields are <code>id</code>, <code>version</code>, and <code>description</code>. <code>name</code> defaults to <code>id</code> when absent. <code>capabilities</code> is optional, so a package whose only contribution is a root <code>hooks.yaml</code> is valid. The command-tool contract lives in <a href="harness_extensions_blueprint.html">harness-extensions.md</a>.</p>
+<p>A manifest that declares <code>resources</code>, <code>prompts</code>, <code>skills</code>, <code>agents</code>, <code>fleets</code>, or <code>themes</code> is invalid. Those are plugin content, and the diagnostic says so: install the bundle with <code>clio-coder plugins install &lt;path&gt;</code> instead.</p>
 <p>IDs must be lowercase and may include numbers, dots, underscores, and hyphens; they must start/end alphanumeric.</p>
 <p><code>compatibility.clio</code> is optional. When present, it must be a valid SemVer range such as <code>&gt;=0.3.8</code>, <code>^0.3.8</code>, or <code>0.3.x</code>. Installation refuses a package whose range excludes the running Clio version and names the extension, its declared range, and that running version. Clio repeats the check whenever it loads installed extensions, so a package that becomes incompatible after a Clio version change stays visible in <code>extensions list</code> with its diagnostic but contributes no resources. An incompatible project package does not hide a compatible user package with the same ID. A manifest without <code>compatibility.clio</code> keeps the existing unrestricted behavior.</p>
-<h3>Extensions that dispatch</h3>
-<p>An extension that builds a <code>DispatchRequest</code> against the <code>DispatchContract</code> is a
+<h3>Callers that dispatch</h3>
+<p>A caller that builds a <code>DispatchRequest</code> against the <code>DispatchContract</code> is a
 dispatch producer and is bound by the typed-intent compatibility rules like any
 other. Build the declaration with <code>declaredScopeIntent()</code> from the dispatch
 domain rather than assembling the normalized object by hand: it runs the same
 path grammar, caps, deduplication, and provenance construction the dispatch tool
-uses, so an extension cannot mint an intent shape the tool could not.</p>
+uses, so a caller cannot mint an intent shape the tool could not.</p>
 <pre><code class="language-ts">import { declaredScopeIntent } from &quot;../domains/dispatch/index.js&quot;;
 
 const built = declaredScopeIntent({ readRoots: [&quot;src/&quot;], writeRoots: [&quot;src/generated/&quot;] });
 if (!built.ok) throw new Error(`${built.reason}: ${built.message}`);
 await dispatch.dispatch({ agentId: &quot;coder&quot;, executionRole: &quot;builder&quot;, task, intent: built.intent });
 </code></pre>
-<p>An extension that declares nothing keeps working: scope falls back to legacy
-inference over its task and briefing text, and the request is refused only when
-it states a contradiction, such as a legacy <code>writeRoots</code> disagreeing with a
-declared <code>write_roots</code>. Declaring is what stops an applicable project rule from
-being missed because the task text happened not to spell a path. See
+<p>A caller that declares nothing keeps working: scope falls back to inference over
+its task and briefing text, and the request is refused only when it states a
+contradiction, such as an inferred <code>writeRoots</code> disagreeing with a declared
+<code>write_roots</code>. Declaring is what stops an applicable project rule from being
+missed because the task text happened not to spell a path. See
 <a href="dispatch_typed_intent_blueprint.html">dispatch-typed-intent.md</a>.</p>
 <hr>
 <h2>Extension CLI</h2>
@@ -302,17 +309,17 @@ clio-coder extensions remove &lt;id&gt; [--user|--project] [--json]
 </tr>
 </tbody></table>
 <p>Project extensions shadow user extensions with the same ID. Use <code>--all</code> to list shadowed/disabled entries.</p>
-<p>Installed packages are admitted only when their current tree matches the SHA-256 digest in <code>extensions/state.json</code>. <code>clio-coder upgrade</code> adds digests to pre-digest v1 install records after validating and hashing each installed tree, preserves <code>disabled</code>, <code>source</code>, and <code>installedAt</code>, and backs up the original state before the atomic rewrite. Invalid or changing trees are not blessed: they stay visible and inactive with reinstall guidance. Listing extensions, booting Clio, inspection, and plain doctor runs never perform this migration.</p>
+<p>Installed packages are admitted only when their current tree matches the SHA-256 digest in <code>extensions/state.json</code>. An install record without a digest, a drifted tree, and a corrupt state file all fail closed: the package stays visible and inactive, and its diagnostic says to reinstall with <code>--force</code>. Listing extensions, booting Clio, inspection, and plain doctor runs never rewrite install state.</p>
 <h3>Generations and reload</h3>
-<p>A running session does not read installed packages on every resource load. While domains start, the extensions domain publishes nothing: readers use an ephemeral generation-0 projection. The composition root then asks the extensions domain to build an immutable candidate for the session&#39;s working directory and builds the matching user-hook registration table from it. After validating that both candidates are still current, the composition root publishes the snapshot and hooks with two adjacent reference assignments. That paired boot snapshot is generation 1. It contains package identity and provenance, the resolved skill, prompt, agent, fleet, and theme roots of each loadable package, and the parsed <code>hooks.yaml</code> declarations captured from the exact bytes the install digest covered. Every consumer in the process then reads the committed generation, so consecutive loads within one turn agree on the package set.</p>
-<p><code>/resources extensions reload</code> is the only in-session way to publish a later generation. It rebuilds the snapshot from disk, re-verifies every installed tree against <code>state.json</code>, builds the user-hook registrations for the candidate, validates both candidates, and then performs the same two adjacent assignment-only publications. No callback, event, log, or refusal sits between them; conflict diagnostics and the <code>extensions.reloaded</code> event run only after both references are live. Observers therefore see the previous resources with the previous hooks or the new ones with the new ones, never an intermediate pairing. The command reports the new generation, which packages were added, removed, or modified, and how many hooks were registered, dropped, or rejected. A tree that no longer verifies is listed as inactive and contributes nothing until it is reinstalled. A build failure or stale candidate publishes neither side and reports why.</p>
-<p>Reloading an unchanged tree still publishes a new generation with the same content digest; content identity is the digest, not the generation number. Installs, enables, disables, and removes performed by <code>clio-coder extensions</code> in another process are invisible to a running session until the operator reloads or restarts. There is no filesystem watcher, so a CLI mutation never becomes an implicit mid-turn hook change. Resource files themselves (skill and prompt bodies, agent and fleet recipes) are still read at use time; a package mutated on disk after its generation was built can serve changed files until the next reload detects the drift and deactivates it.</p>
+<p>A running session does not read installed packages on every load. While domains start, the extensions domain publishes nothing: readers use an ephemeral generation-0 projection. The composition root then asks the extensions domain to build an immutable candidate for the session&#39;s working directory and builds the matching user-hook registration table from it. After validating that both candidates are still current, the composition root publishes the snapshot and hooks with two adjacent reference assignments. That paired boot snapshot is generation 1. It contains package identity and provenance, the command-tool declarations of each loadable package, and the parsed <code>hooks.yaml</code> declarations captured from the exact bytes the install digest covered. Every consumer in the process then reads the committed generation, so consecutive loads within one turn agree on the package set.</p>
+<p><code>/resources extensions reload</code> is the only in-session way to publish a later generation. It rebuilds the snapshot from disk, re-verifies every installed tree against <code>state.json</code>, builds the user-hook registrations for the candidate, validates both candidates, and then performs the same two adjacent assignment-only publications. No callback, event, log, or refusal sits between them; conflict diagnostics and the <code>extensions.reloaded</code> event run only after both references are live. Observers therefore see the previous hooks or the new ones, never an intermediate pairing. The command reports the new generation, which packages were added, removed, or modified, and how many hooks were registered, dropped, or rejected. A tree that no longer verifies is listed as inactive and contributes nothing until it is reinstalled. A build failure or stale candidate publishes neither side and reports why.</p>
+<p>Reloading an unchanged tree still publishes a new generation with the same content digest; content identity is the digest, not the generation number. Installs, enables, disables, and removes performed by <code>clio-coder extensions</code> in another process are invisible to a running session until the operator reloads or restarts. There is no filesystem watcher, so a CLI mutation never becomes an implicit mid-turn hook change. Command-tool schemas are frozen when a session registry is created, so a reload never changes a live model&#39;s tool surface; restart the session for that. Plugin resources have their own generation and their own <code>/resources plugins reload</code>.</p>
 <p>If extension state is corrupt, loading remains fail-closed. A normal reinstall refuses it; <code>extensions install &lt;valid-source&gt; --force</code> backs up the corrupt state and parks the previous package bytes before installing and recording the verified replacement. <code>extensions remove &lt;id&gt;</code> can also remove an unverifiable package from the load path while preserving both its bytes and any corrupt state in the paths printed by the command. These recovery backups are deliberately not treated as installed packages.</p>
 <h3>Skill pack distribution</h3>
-<p>Clio Coder should not grow built-in skills in the harness. Distribute reusable Clio skills as extension packages instead. A future <code>iowarp/clio-kit</code> bundle can carry <code>clio-coder-extension.yaml</code> plus a <code>skills/</code> directory, and users can install it with <code>clio-coder extensions install &lt;path&gt; --user</code> or <code>--project</code>.</p>
+<p>Clio Coder should not grow built-in skills in the harness. Distribute reusable Clio skills as plugins instead. A <code>iowarp/clio-kit</code> bundle carries a root <code>plugin.json</code> plus a <code>skills/</code> directory, and users install it with <code>clio-coder plugins install &lt;path&gt; --project</code> or without the flag for user scope.</p>
 <p>Recommended layout:</p>
 <pre><code class="language-text">clio-kit/
-  clio-coder-extension.yaml
+  plugin.json
   skills/
     hpc-review/
       SKILL.md
@@ -321,7 +328,7 @@ clio-coder extensions remove &lt;id&gt; [--user|--project] [--json]
     release-check/
       SKILL.md
 </code></pre>
-<p>This keeps the runtime local-first and small. Clio Coder discovers enabled extension skill roots, records provenance as <code>source: extension</code>, and still requires normal tool safety gates for any script a skill asks the agent to run.</p>
+<p>This keeps the runtime local-first and small. Clio Coder discovers enabled plugin skill roots, records provenance as <code>source: plugin</code>, and still requires normal tool safety gates for any script a skill asks the agent to run.</p>
 <hr>
 <h2>Share archives</h2>
 <p>Share archives are single JSON files:</p>
@@ -383,7 +390,7 @@ clio-coder share export --out all.clio-coder-share.json --both --all
 </tr>
 <tr>
 <td><code>--extensions</code></td>
-<td>Include extension bundle files, excluding extension <code>state.json</code>.</td>
+<td>Include harness extension bundle files, excluding extension <code>state.json</code>.</td>
 </tr>
 <tr>
 <td><code>--agents</code></td>
@@ -418,9 +425,9 @@ clio-coder import project.clio-coder-share.json --dry-run
 <hr>
 <h2>Community packaging guidance</h2>
 <ul>
-<li>Keep extension packages small and reviewable.</li>
+<li>Keep plugin and extension packages small and reviewable.</li>
 <li>Treat prompts and skills as source code: document assumptions, expected evidence, and validation commands.</li>
-<li>Do not put secrets in extension packages or share archives.</li>
+<li>Do not put secrets in packages or share archives.</li>
 <li>Prefer project-scoped resources for repository-specific instructions and user-scoped resources for personal workflow helpers.</li>
 </ul>
         </article>

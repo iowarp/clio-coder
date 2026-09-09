@@ -2,16 +2,15 @@
 
 > **Visual blueprint:** See the [visual reference](../html/harness_extensions_blueprint.html) in the source checkout.
 
-Harness extensions add executable capabilities to Clio. A domain workflow that combines prompts, agents, skills, fleets, and reference files belongs in a plugin. Existing `manifestVersion: 1` resource extensions remain supported, including existing WTF-P installations and their install-state digests.
+Harness extensions add executable capabilities to Clio. They are the only Clio package kind that runs code. A domain workflow that combines prompts, agents, skills, fleets, and reference files is a plugin instead, installed with `clio-coder plugins install <path>`.
 
-Version 2 extensions declare command tools in `clio-coder-extension.yaml`, `.yml`, or `.json`. Clio discovers and validates declarations without importing or executing package code. Tools become available in a new session after installation. Native workers can use a tool when their admitted recipe includes its qualified name; narrower profiles such as `minimal-local` exclude extension commands.
+An extension declares command tools in `clio-coder-extension.yaml`, `.yml`, or `.json`. Clio discovers and validates declarations without importing or executing package code. Tools become available in a new session after installation. Native workers can use a tool when their admitted recipe includes its qualified name; narrower profiles such as `minimal-local` exclude extension commands.
 
 ## Create a command tool
 
 Create a directory containing this `clio-coder-extension.yaml`:
 
 ```yaml
-manifestVersion: 2
 id: local-analysis
 name: Local Analysis
 version: 1.0.0
@@ -68,7 +67,9 @@ Input is limited to 64 KiB. `timeoutMs` defaults to 120000 and is bounded at 300
 
 Schemas support `type`, `description`, `properties`, `required`, `additionalProperties`, `items`, scalar `enum`, `minimum`, `maximum`, `minLength`, `maxLength`, `minItems`, and `maxItems`. The root must be an object. Each object declares its properties and `additionalProperties: false`; array schemas declare `items`. References and executable schema keywords are refused. Clio validates each invocation against the schema before starting the child.
 
-Qualified names use `extension_<id>__<name>` and must fit 64 characters. Version 2 package IDs use provider-safe lowercase letters, numbers, single underscores, and hyphens; local tool names start with a letter and use lowercase letters, numbers, and single underscores. Duplicate and colliding tool registrations are refused. Version 2 manifests cannot declare legacy `resources`, `tools`, or `settings` fields.
+Qualified names use `extension_<id>__<name>` and must fit 64 characters. Package IDs use provider-safe lowercase letters, numbers, single underscores, and hyphens; local tool names start with a letter and use lowercase letters, numbers, and single underscores. Duplicate and colliding tool registrations are refused.
+
+The manifest keys are `id`, `name`, `version`, `description`, `capabilities`, and `compatibility`. A manifest naming `resources`, `prompts`, `skills`, `agents`, `fleets`, or `themes` is invalid, and the diagnostic points at `clio-coder plugins install <path>`. `capabilities` is optional: a package whose only contribution is a root `hooks.yaml` is a valid harness extension with no command tools.
 
 ## Admission and lifecycle
 
