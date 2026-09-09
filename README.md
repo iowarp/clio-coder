@@ -222,9 +222,9 @@ control of assumptions and scientific decisions.
 The library verifies complete bundle pins and supports previews, updates,
 removal and drift checks. [Plugin usage](docs/guide/plugins.md),
 [package authoring](docs/guide/authoring-plugins.md), and
-[harness extensions](docs/guide/harness-extensions.md) describe the separate
-resource and executable-capability contracts. Existing WTF-P extension installs
-continue to work.
+[harness extensions](docs/guide/harness-extensions.md) describe the plugin and
+harness-extension contracts. WTF-P installs as a plugin with `clio-coder plugins
+install`; remove an older extension copy with `clio-coder extensions remove wtfp`.
 
 </details>
 

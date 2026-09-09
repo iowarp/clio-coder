@@ -66,9 +66,9 @@ The Skills tab is unchanged. The other three list the entries of their kind from
 `i` installs, through the same plan-then-write pair `clio-coder library add` runs. A framed confirmation states every destination path and SHA-256 hash before anything is written, which is the TUI spelling of the CLI's `--yes` gate; `Esc` there leaves every destination untouched. An entry whose requirements are not all installed is refused by name on the first `i`, and a second `i` opens the install-with-requirements confirmation, which names every entry it would write in dependency order.
 
 The CLI `clio-coder skills` commands manage local skill discovery, validation, and
-creation. Extension resource roots and share archives are documented in
-[extensions-and-sharing.md](extensions-and-sharing.md); this page owns the TUI
-Hub and marketplace behavior.
+creation. Plugin resource roots, harness extensions, and share archives are
+documented in [extensions-and-sharing.md](extensions-and-sharing.md); this page
+owns the TUI Hub and marketplace behavior.
 
 ## Remote entries and overlays
 

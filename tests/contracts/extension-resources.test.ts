@@ -340,18 +340,31 @@ describe("harness extension package boundary", () => {
 
 	it("keeps a package whose tree escapes its root visible but inactive", () => {
 		const project = scratch();
+		const source = scratch();
 		const outside = scratch();
-		const installed = join(project, ".clio-coder", "extensions", "escaping-tree");
-		writeManifest(installed, "escaping-tree");
-		mkdirSync(join(outside, "payload"));
-		symlinkSync(join(outside, "payload"), join(installed, "payload"), "dir");
+		writeManifest(source, "escaping-tree");
+		strictEqual(installExtension(source, { cwd: project, scope: "project" }).extension?.loadable, true);
 
-		strictEqual(loadManifestFromRoot(installed).valid, true, "the manifest itself is well formed");
+		const installedRoot = join(project, ".clio-coder", "extensions", "escaping-tree");
+		mkdirSync(join(outside, "payload"));
+		symlinkSync(join(outside, "payload"), join(installedRoot, "payload"), "dir");
+		throws(() => extensionContentDigest(installedRoot), /symbolic link escapes the extension root/u);
+
+		strictEqual(loadManifestFromRoot(installedRoot).valid, true, "the manifest itself is well formed");
 		const [entry] = listInstalledExtensions(project);
 		strictEqual(entry?.valid, false);
 		strictEqual(entry?.effective, false);
 		strictEqual(entry?.loadable, false);
-		ok(entry?.diagnostics.some((diagnostic) => diagnostic.message.includes("install state is absent")));
+		strictEqual(entry?.provenance, undefined, "an escaping tree never earns provenance");
+		ok(
+			entry?.diagnostics.some(
+				(diagnostic) =>
+					diagnostic.type === "error" &&
+					diagnostic.message.includes("could not be verified") &&
+					diagnostic.message.includes("symbolic link escapes the extension root"),
+			),
+			JSON.stringify(entry?.diagnostics),
+		);
 	});
 
 	it("revalidates the staged copy and preserves the previous install on failure", () => {
