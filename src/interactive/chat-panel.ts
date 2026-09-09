@@ -1401,7 +1401,11 @@ export function createChatPanel(options: ChatPanelOptions = {}): ChatPanel {
 				// A queued steer or follow-up the engine just injected. Rendering it
 				// here, at injection time, keeps the transcript in the order the
 				// model saw: enqueue time shows the text only in the queue panel.
-				transcript.push({ role: "user", text: event.text });
+				transcript.push({ role: "user", text: event.display?.text ?? event.text });
+				if (event.display) {
+					const note = event.display.note;
+					transcript.push({ role: "replayBlock", renderBlock: (width) => wrapTextWithAnsi(`  ${note}`, width) });
+				}
 				markDirty();
 				return;
 			}

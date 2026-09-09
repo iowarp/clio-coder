@@ -4,7 +4,7 @@ export {
 	findExtensionManifestPath,
 	parseExtensionManifest,
 } from "./discovery.js";
-export { extensionSnapshotFor } from "./resources.js";
+export { extensionSnapshotFor } from "./snapshot-access.js";
 export type { InstalledExtensionRecord } from "./state.js";
 export {
 	disableExtension,

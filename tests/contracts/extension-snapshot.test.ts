@@ -5,8 +5,8 @@ import path from "node:path";
 import { afterEach, describe, it } from "node:test";
 import type { DomainContext } from "../../src/core/domain-loader.js";
 import { createExtensionsBundle } from "../../src/domains/extensions/extension.js";
-import { extensionSnapshotFor } from "../../src/domains/extensions/resources.js";
 import { buildExtensionSnapshot, diffExtensionSnapshots } from "../../src/domains/extensions/snapshot.js";
+import { extensionSnapshotFor } from "../../src/domains/extensions/snapshot-access.js";
 import {
 	bindExtensionSnapshotStore,
 	createExtensionSnapshotStore,

@@ -25,6 +25,7 @@ export type SteeringMode = "interrupt" | "next-slot" | "end-of-turn";
 export const DEFAULT_STEERING_MODE: SteeringMode = "next-slot";
 
 export interface QueuedChatMessage {
+	display?: { text: string; note: string };
 	text: string;
 	kind: QueuedMessageKind;
 }
@@ -50,8 +51,8 @@ export interface TurnQueuesDeps {
 }
 
 export interface TurnQueues {
-	steer(text: string): boolean;
-	queueFollowUp(text: string): boolean;
+	steer(text: string, display?: QueuedChatMessage["display"]): boolean;
+	queueFollowUp(text: string, display?: QueuedChatMessage["display"]): boolean;
 	queuedMessages(): QueuedMessagesSnapshot;
 	/** Drain the mirror and both engine queues; returns the drained entries. */
 	clearQueuedMirror(): QueuedChatMessage[];
@@ -82,7 +83,7 @@ export function createTurnQueues(deps: TurnQueuesDeps): TurnQueues {
 	// that a message is pending, exactly as pi-coding-agent's pending container
 	// works. The former per-steer transcript notice duplicated the panel and
 	// left a permanent line for a transient state.
-	const enqueue = (text: string, kind: QueuedMessageKind): boolean => {
+	const enqueue = (text: string, kind: QueuedMessageKind, display?: QueuedChatMessage["display"]): boolean => {
 		// The payload crosses to the model exactly as it was submitted; only the
 		// emptiness test reads a trimmed copy. A queued turn that shortened its own
 		// text here would land in the ledger disagreeing with the expansion that
@@ -93,7 +94,7 @@ export function createTurnQueues(deps: TurnQueuesDeps): TurnQueues {
 			content: text,
 			timestamp: Date.now(),
 		} as AgentMessage;
-		queuedMirror.push({ text, kind });
+		queuedMirror.push({ text, kind, ...(display ? { display } : {}) });
 		if (kind === "steer") {
 			state.runtime.agent.steer(message);
 		} else {
@@ -104,8 +105,8 @@ export function createTurnQueues(deps: TurnQueuesDeps): TurnQueues {
 	};
 
 	return {
-		steer: (text) => enqueue(text, "steer"),
-		queueFollowUp: (text) => enqueue(text, "follow-up"),
+		steer: (text, display) => enqueue(text, "steer", display),
+		queueFollowUp: (text, display) => enqueue(text, "follow-up", display),
 		queuedMessages(): QueuedMessagesSnapshot {
 			return {
 				steer: queuedMirror.filter((entry) => entry.kind === "steer").map((entry) => entry.text),

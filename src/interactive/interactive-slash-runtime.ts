@@ -278,6 +278,7 @@ export function createInteractiveSlashRuntime(deps: InteractiveSlashRuntimeDeps)
 				acknowledgeAdmission = resolve;
 			});
 			const turn = deps.chat.submit(sub.text, {
+				...(sub.display ? { display: sub.display } : {}),
 				...(sub.images.length > 0 ? { images: sub.images } : {}),
 				...(sub.workingContextPaths.length > 0 ? { workingContextPaths: sub.workingContextPaths } : {}),
 				...(sub.pendingSkillRequests.length > 0 ? { pendingSkillRequests: sub.pendingSkillRequests } : {}),

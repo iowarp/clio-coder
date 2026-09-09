@@ -327,3 +327,58 @@ test("multi-select toggles with Space and records every chosen label", async () 
 	const result = await pending;
 	deepStrictEqual(result.answers[0]?.options, ["Synthesis route", "Instrument time"]);
 });
+
+test("discarding a revised answer preserves committed option facts", async () => {
+	const view = createAskUserViewForTesting({ rows: 30 });
+	const pending = view.ask([
+		{ question: "First?", options: [{ label: "A" }, { label: "B" }] },
+		{ question: "Second?", options: [{ label: "Done" }] },
+	]);
+	for (const key of [ENTER, "\u001b[D", DOWN, "t", "\u001b", "\u001b[C", ENTER]) view.handleInput(key);
+	deepStrictEqual((await pending).answers, [
+		{ question: "First?", answer: "A", options: ["A"] },
+		{ question: "Second?", answer: "Done", options: ["Done"] },
+	]);
+});
+
+test("Other replaces a discarded single-choice text draft", async () => {
+	const view = createAskUserViewForTesting({ rows: 30 });
+	const pending = view.ask([{ question: "First?", options: [{ label: "Provided details" }] }]);
+	view.handleInput(ENTER);
+	for (const key of "draft") view.handleInput(key);
+	view.handleInput("\u001b");
+	view.handleInput(DOWN);
+	view.handleInput(ENTER);
+	for (const key of "Alternative") view.handleInput(key);
+	view.handleInput(ENTER);
+	deepStrictEqual((await pending).answers, [{ question: "First?", answer: "Alternative", value: "Alternative" }]);
+});
+
+for (const columns of [80, 120, 160])
+	test(`oversized option details remain readable at ${columns} columns`, async () => {
+		const view = createAskUserViewForTesting({ rows: 24 });
+		const pending = view.ask([
+			{
+				question: "Proceed?",
+				options: [
+					{ label: "Proceed", description: `${"Important scope ".repeat(180)}CRITICAL_END_MARKER` },
+					{ label: "Cancel" },
+				],
+			},
+		]);
+		const seen: string[] = [];
+		for (let page = 0; page < 40; page++) {
+			const rows = view.render(columns - 8);
+			assertWithinWidth(rows, columns - 8);
+			ok(rows.length <= 20);
+			seen.push(...plain(rows));
+			if (seen.some((row) => row.includes("CRITICAL_END_MARKER"))) break;
+			view.handleInput(PAGE_DOWN);
+		}
+		ok(
+			seen.some((row) => row.includes("CRITICAL_END_MARKER")),
+			"the entire focused description can be reviewed",
+		);
+		view.cancel();
+		await pending;
+	});

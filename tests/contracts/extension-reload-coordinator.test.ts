@@ -12,8 +12,8 @@ import type {
 	ExtensionReloadPrepareResult,
 	ExtensionsContract,
 } from "../../src/domains/extensions/index.js";
-import { extensionSnapshotFor } from "../../src/domains/extensions/resources.js";
 import { buildExtensionSnapshot } from "../../src/domains/extensions/snapshot.js";
+import { extensionSnapshotFor } from "../../src/domains/extensions/snapshot-access.js";
 import { bindExtensionSnapshotStore } from "../../src/domains/extensions/snapshot-store.js";
 import { installExtension } from "../../src/domains/extensions/state.js";
 import { createMiddlewareBundle } from "../../src/domains/middleware/extension.js";

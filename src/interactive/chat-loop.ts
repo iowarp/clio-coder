@@ -131,6 +131,7 @@ export interface QueueUpdateEvent {
  * same beat. Enqueue time shows the text only in the steering-queue panel.
  */
 export interface QueuedUserTurnEvent {
+	display?: { text: string; note: string };
 	type: "queued_user_turn";
 	text: string;
 	/** `interrupt` marks a message that cancelled the run and was submitted as a fresh prompt. */
@@ -200,6 +201,8 @@ export type ChatLoopEvent =
 	| ToolApprovalStateEvent;
 
 export interface ChatSubmitOptions {
+	/** Presentation only; never part of the model message or persisted text. */
+	display?: { text: string; note: string };
 	/** Host-owned run identity, scoped to this submit and its internal continuations. */
 	hostRun?: ToolInvokeOptions["hostRun"];
 	images?: ReadonlyArray<ImageContent>;
@@ -754,7 +757,7 @@ export function createChatLoop(deps: CreateChatLoopDeps): ChatLoop {
 	const queues = createTurnQueues({
 		state,
 		emitQueueUpdateEvent: (messages) => emit({ type: "queue_update", messages }),
-		emitQueuedUserTurn: (entry) => emit({ type: "queued_user_turn", text: entry.text, kind: entry.kind }),
+		emitQueuedUserTurn: (entry) => emit({ type: "queued_user_turn", ...entry }),
 		emitNotice,
 		// The loop's own resubmits (stranded steers, continuation requests) run
 		// from submit's finally and bypass the admission gate: an interrupt that
@@ -1110,8 +1113,8 @@ export function createChatLoop(deps: CreateChatLoopDeps): ChatLoop {
 						// The queue carries the submitted bytes, not the trimmed copy the
 						// guard above reads: a steer is a model-facing turn and the
 						// payload contract applies to it too (issue #244).
-						if (mode === "end-of-turn") queues.queueFollowUp(text);
-						else queues.steer(text);
+						if (mode === "end-of-turn") queues.queueFollowUp(text, options.display);
+						else queues.steer(text, options.display);
 						return;
 					}
 					emitNotice("[Clio Coder] response already in progress. Press Esc to cancel the active run.");
@@ -1295,7 +1298,13 @@ export function createChatLoop(deps: CreateChatLoopDeps): ChatLoop {
 			// An interrupt was submitted while a run was active, so no caller drew
 			// it in the transcript; render it here, after the cancel notice and the
 			// cancelled run's leftovers, which is the order the ledger has.
-			if (interrupted) emit({ type: "queued_user_turn", text, kind: "interrupt" });
+			if (interrupted)
+				emit({
+					type: "queued_user_turn",
+					text,
+					kind: "interrupt",
+					...(options.display ? { display: options.display } : {}),
+				});
 			context.logPromptCompileIfPending();
 			const previousThinkingLevel = previousRunSnapshot?.runtimeResolution?.effectiveThinkingLevel;
 			if (

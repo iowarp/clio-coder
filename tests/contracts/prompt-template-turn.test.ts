@@ -62,3 +62,46 @@ test("the aside under an operator turn is one dim row in the prose gutter", () =
 	appendOperatorAside("   ", out.sink);
 	strictEqual(out.blocks.length, 1, "an empty note adds nothing");
 });
+
+test("streaming prompt injection and stranded resubmission retain presentation and full model text", async () => {
+	const { createTurnQueues } = await import("../../src/interactive/turn-queues.js");
+	const expansion = await expandInteractiveSubmitAsync("/interview:daisy", fakeResources(), "/tmp");
+	const model: unknown[] = [];
+	const injected: unknown[] = [];
+	const resubmitted: string[] = [];
+	const state = {
+		streaming: true,
+		pendingRequestContinuation: false,
+		runtime: {
+			agent: {
+				steer: (message: unknown) => model.push(message),
+				followUp: (message: unknown) => model.push(message),
+				clearSteeringQueue: () => {},
+			},
+		},
+	};
+	const queues = createTurnQueues({
+		state: state as unknown as import("../../src/interactive/turn-state.js").ChatTurnState,
+		emitQueueUpdateEvent: () => {},
+		emitQueuedUserTurn: (entry) => injected.push(entry),
+		emitNotice: () => {},
+		submit: async (text) => {
+			resubmitted.push(text);
+		},
+	});
+	for (const kind of ["steer", "follow-up"] as const) {
+		strictEqual(
+			kind === "steer"
+				? queues.steer(expansion.text, expansion.display)
+				: queues.queueFollowUp(expansion.text, expansion.display),
+			true,
+		);
+		queues.removeQueuedMirrorEntry(expansion.text);
+		deepStrictEqual(injected.at(-1), { kind, text: TEMPLATE_BODY, display: expansion.display });
+	}
+	for (const message of model) strictEqual((message as { content: string }).content, TEMPLATE_BODY);
+	queues.steer(expansion.text, expansion.display);
+	strictEqual(await queues.resubmitStrandedSteers(), true);
+	deepStrictEqual(injected.at(-1), { kind: "steer", text: TEMPLATE_BODY, display: expansion.display });
+	deepStrictEqual(resubmitted, [TEMPLATE_BODY]);
+});

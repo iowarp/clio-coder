@@ -88,6 +88,7 @@ type InterviewPhase = "waiting" | "asking" | "closed";
 interface QuestionState {
 	mode: Mode;
 	selected: Set<number>;
+	committedSelected: Set<number>;
 	customAnswer: string;
 	inputValue: string;
 	answer: string;
@@ -121,6 +122,7 @@ function createQuestionState(question: AskUserQuestion): QuestionState {
 	return {
 		mode: initialMode(question),
 		selected: new Set<number>(),
+		committedSelected: new Set<number>(),
 		customAnswer: "",
 		inputValue: "",
 		answer: "",
@@ -354,30 +356,6 @@ class InputTextControl implements TextControl {
 	}
 }
 
-class EditorTextControl implements TextControl {
-	constructor(private readonly editor: AnswerEditor) {}
-
-	render(width: number): string[] {
-		return this.editor.render(width);
-	}
-
-	handleInput(data: string): void {
-		this.editor.handleInput(data);
-	}
-
-	getText(): string {
-		return this.editor.getText();
-	}
-
-	setText(text: string): void {
-		this.editor.setText(text);
-	}
-
-	invalidate(): void {
-		this.editor.invalidate();
-	}
-}
-
 interface OptionRowLayout {
 	/** Rows per item, in item order. */
 	rows: string[][];
@@ -491,6 +469,7 @@ class AskUserOverlayView implements Component {
 	private list: SelectList | null = null;
 	private text: TextControl | null = null;
 	private resolveCurrent: ((result: AskUserResult) => void) | null = null;
+	private optionDetailRows: string[] = [];
 	/** Rows of the question region already scrolled past. */
 	private questionScroll = 0;
 	private questionOverflows = false;
@@ -642,7 +621,9 @@ class AskUserOverlayView implements Component {
 			4,
 			maxRows - fixedTop.length - 1 - status.length - Math.min(body.length, MIN_QUESTION_ROWS) - 1,
 		);
+		this.optionDetailRows = [];
 		const control = this.renderControlLines(safeWidth, controlBudget);
+		body.push(...this.optionDetailRows);
 		const ledgerBudget = Math.max(
 			1,
 			maxRows - fixedTop.length - 1 - control.length - status.length - Math.min(body.length, MIN_QUESTION_ROWS),
@@ -849,6 +830,7 @@ class AskUserOverlayView implements Component {
 		const current = this.list?.getSelectedItem();
 		const optionIndex = current && current.value !== "other" ? optionIndexFromValue(current.value) : null;
 		let label: string | undefined;
+		if (optionIndex === null && !question.multi_select) state.selected = new Set();
 		if (optionIndex !== null) {
 			if (question.multi_select === true) state.selected.add(optionIndex);
 			else state.selected = new Set<number>([optionIndex]);
@@ -962,7 +944,19 @@ class AskUserOverlayView implements Component {
 			0,
 			items.findIndex((item) => item.value === selectedItem.value),
 		);
-		return windowOptionRows(layoutOptionRows(items, focusedIndex, width), focusedIndex, rowBudget, width);
+		const layout = layoutOptionRows(items, focusedIndex, width);
+		if ((layout.rows[focusedIndex]?.length ?? 0) >= rowBudget) {
+			this.optionDetailRows = [
+				"",
+				...wrapTextWithAnsi(`Option details: ${selectedItem.label}`, width),
+				...wrapTextWithAnsi(selectedItem.description ?? "", width),
+			];
+			layout.rows[focusedIndex] = wrapTextWithAnsi(
+				`${GLYPH.cursor} ${selectedItem.label} (details above; PgUp/PgDn)`,
+				width,
+			);
+		}
+		return windowOptionRows(layout, focusedIndex, rowBudget, width);
 	}
 
 	private ensureControl(): void {
@@ -1018,7 +1012,7 @@ class AskUserOverlayView implements Component {
 			editor.caption = caption;
 			editor.setText(initial);
 			editor.onSubmit = (value) => this.submitText(question, state, value);
-			this.text = new EditorTextControl(editor);
+			this.text = editor;
 		} else {
 			const input = new Input();
 			input.setValue(initial);
@@ -1036,6 +1030,7 @@ class AskUserOverlayView implements Component {
 		});
 		activeList.onSelect = (item) => {
 			if (item.value === "other") {
+				if (!question.multi_select) state.selected = new Set();
 				this.openTextInput("Your answer");
 				return;
 			}
@@ -1114,6 +1109,7 @@ class AskUserOverlayView implements Component {
 			return;
 		}
 		state.inputValue = "";
+		state.selected = new Set(state.committedSelected);
 		state.mode = "select";
 		this.status = "";
 		this.rebuildSelectList(question, state);
@@ -1203,6 +1199,8 @@ class AskUserOverlayView implements Component {
 
 	private finishIfCompleteOrAdvance(): void {
 		this.syncActiveControl();
+		const current = this.currentState();
+		if (current) current.committedSelected = new Set(current.selected);
 		if (this.allAnswered()) {
 			this.finish({ answers: this.answers() });
 			return;
@@ -1244,7 +1242,7 @@ class AskUserOverlayView implements Component {
 			const state = this.states[index];
 			const answer = state?.answer.trim();
 			if (!question || !state || !answer || answer.length === 0) continue;
-			const options = selectedOptionLabels(question, state.selected);
+			const options = selectedOptionLabels(question, state.committedSelected);
 			answers.push({
 				question: question.question,
 				answer,
