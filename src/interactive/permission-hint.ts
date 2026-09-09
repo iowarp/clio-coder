@@ -14,6 +14,12 @@ export const MUTATION_PREVIEW_KEY = "v";
  */
 export type PermissionInspectionHint = "none" | "closed" | "open";
 
+/** The key that folds and unfolds the standing approval terms on the card. */
+export const PERMISSION_TERMS_KEY = "?";
+
+/** Whether the terms are open. The composer rail never shows this key, so it defaults closed there. */
+export type PermissionTermsHint = "closed" | "open";
+
 /**
  * The keys that answer a parked call, as data, so the dialog footer and the
  * composer rail render the same policy at any width.
@@ -46,11 +52,18 @@ export type PermissionInspectionHint = "none" | "closed" | "open";
 export function permissionHintEntries(
 	composerHasDraft = false,
 	inspection: PermissionInspectionHint = "none",
+	terms?: PermissionTermsHint,
 ): HintEntry[] {
 	return [
 		composerHasDraft
 			? { key: "Backspace", verb: "clear the draft to allow", short: "clear draft", critical: true }
 			: { key: "Enter", verb: "allow once", short: "allow", critical: true },
+		// The terms key is the card's own and the most droppable entry: the folded
+		// card already states what the keys do in one row. It sits before the
+		// inspect key so the narrowing drops it first.
+		...(terms === undefined
+			? []
+			: [{ key: PERMISSION_TERMS_KEY, verb: terms === "open" ? "hide terms" : "terms", short: "terms", critical: false }]),
 		...(inspection === "none"
 			? []
 			: inspection === "open"

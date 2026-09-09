@@ -64,6 +64,7 @@ export interface InteractiveInputRuntimeDeps {
 		isInspectingMutation(): boolean;
 		toggleMutationInspection(): void;
 		scrollMutationInspection(delta: number): void;
+		togglePermissionTerms(): void;
 		cancelAskUser(): void;
 		toggleFooterDashboardState(): void;
 		toggleDispatchBoardOverlay(): void;
@@ -206,6 +207,7 @@ export function createInteractiveInputRuntime(deps: InteractiveInputRuntimeDeps)
 					isInspectingMutation: () => deps.overlay.isInspectingMutation(),
 					toggleMutationInspection: () => deps.overlay.toggleMutationInspection(),
 					scrollMutationInspection: (delta) => deps.overlay.scrollMutationInspection(delta),
+					togglePermissionTerms: () => deps.overlay.togglePermissionTerms(),
 					editDraft: (data) => {
 						deps.editor.handleInput?.(data);
 						deps.requestRender();

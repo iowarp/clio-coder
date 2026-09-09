@@ -15,12 +15,24 @@ import {
 	mutationPreviewWindow,
 } from "./mutation-preview.js";
 import { fitHintEntries } from "./overlay-frame.js";
-import { MUTATION_PREVIEW_KEY, type PermissionInspectionHint, permissionHintEntries } from "./permission-hint.js";
+import {
+	MUTATION_PREVIEW_KEY,
+	PERMISSION_TERMS_KEY,
+	type PermissionInspectionHint,
+	type PermissionTermsHint,
+	permissionHintEntries,
+} from "./permission-hint.js";
 import type { ClioToken } from "./theme/index.js";
 
 export { type AskAxis, askAxis } from "../domains/safety/approval-axis.js";
 export { describeCallTarget, sanitizeCallTargetText } from "../domains/safety/call-target.js";
-export { MUTATION_PREVIEW_KEY, type PermissionInspectionHint, permissionHintEntries } from "./permission-hint.js";
+export {
+	MUTATION_PREVIEW_KEY,
+	PERMISSION_TERMS_KEY,
+	type PermissionInspectionHint,
+	type PermissionTermsHint,
+	permissionHintEntries,
+} from "./permission-hint.js";
 
 export interface ApprovalRequestView {
 	requestId: string;
@@ -106,12 +118,16 @@ export interface PermissionOverlayBodyHandle extends Component {
 	isInspecting(): boolean;
 	toggleInspect(): void;
 	scrollInspect(delta: number): void;
+	/** The standing approval terms, folded behind `?` (see `permissionOverlayLines`). */
+	isShowingTerms(): boolean;
+	toggleTerms(): void;
 }
 
 class PermissionOverlayBody implements PermissionOverlayBodyHandle {
 	private preview: MutationPreview | null = null;
 	private scroll = 0;
 	private lastLineCount = 0;
+	private terms = false;
 
 	constructor(
 		private readonly view: ApprovalRequestView,
@@ -143,8 +159,16 @@ class PermissionOverlayBody implements PermissionOverlayBodyHandle {
 		this.scroll = Math.max(0, Math.min(this.scroll + delta, maxScroll));
 	}
 
+	isShowingTerms(): boolean {
+		return this.terms;
+	}
+
+	toggleTerms(): void {
+		this.terms = !this.terms;
+	}
+
 	render(width: number): string[] {
-		if (this.preview === null) return permissionOverlayLines(this.view, width);
+		if (this.preview === null) return permissionOverlayLines(this.view, width, this.terms);
 		const rendered = permissionInspectionLines(this.view, this.preview, width, this.scroll);
 		this.lastLineCount = rendered.wrappedLineCount;
 		return rendered.lines;
@@ -153,13 +177,18 @@ class PermissionOverlayBody implements PermissionOverlayBodyHandle {
 	invalidate(): void {}
 }
 
-function truncate(value: string, max: number): string {
-	return value.length <= max ? value : `${value.slice(0, Math.max(0, max - 1))}…`;
-}
-
-/** `label: value`, with the value ellipsized to what the box actually has. */
-function field(label: string, value: string, width: number): string {
-	return `${label}${truncate(value, Math.max(1, width - label.length))}`;
+/**
+ * `label: value`, folded under the label rather than ellipsized.
+ *
+ * The target used to end in an ellipsis at the box edge, so a deep path lost
+ * its file name, which is the one token that says what the write touches. The
+ * value now wraps at spaces and hard-folds a token longer than the row, and a
+ * continuation row hangs under the value's first column.
+ */
+function field(label: string, value: string, width: number): string[] {
+	const indent = " ".repeat(label.length);
+	const rows = wrapSentence(value, Math.max(1, width - label.length));
+	return rows.map((row, index) => `${index === 0 ? label : indent}${row}`);
 }
 
 /**
@@ -235,8 +264,9 @@ export function permissionOverlayHint(
 	innerWidth: number,
 	composerHasDraft = false,
 	inspection: PermissionInspectionHint = "none",
+	terms: PermissionTermsHint = "closed",
 ): string {
-	return fitHintEntries(permissionHintEntries(composerHasDraft, inspection), innerWidth - 3);
+	return fitHintEntries(permissionHintEntries(composerHasDraft, inspection, terms), innerWidth - 3);
 }
 
 /** The tools whose parked call mutates a file, so a card without a preview owes the operator a reason. */
@@ -287,8 +317,8 @@ function permissionInspectionLines(
 	if (preview.neutralized) notes.push("control characters shown as ·");
 	if (preview.tabsExpanded) notes.push("tabs shown as spaces");
 	const lines = [
-		field("Tool: ", `${view.tool} · Action: ${view.actionClass}`, content),
-		...(view.target !== undefined && view.target.length > 0 ? [field("Target: ", view.target, content)] : []),
+		...field("Tool: ", `${view.tool} · Action: ${view.actionClass}`, content),
+		...(view.target !== undefined && view.target.length > 0 ? field("Target: ", view.target, content) : []),
 		...wrapSentence(`Mutation: ${mutationFactsLine(preview.facts)}`, content),
 		"",
 		...wrapSentence(preview.heading, content),
@@ -300,14 +330,30 @@ function permissionInspectionLines(
 }
 
 /**
+ * The one-row statement of what the three keys do, in the presentation's own
+ * words, so the folded card still says what allow, deny, and stop mean.
+ */
+function termsSummary(presentation: DecisionPresentation, actionClass: string): string {
+	const stop = presentation.requiredActions.find((action) => action.id === "stop");
+	const stopWords = stop?.consequence.includes("main-agent turn") ? "ends the main-agent turn" : "ends the turn";
+	return `Allow runs this one ${actionClass} call and leaves the autonomy level alone. Deny skips it. Stop ${stopWords}. Press ${PERMISSION_TERMS_KEY} for the full terms.`;
+}
+
+/**
  * The overlay's body, laid out for the width the frame gives it.
  *
  * Every line used to be sized for a 78-column box and the frame hard-cut the
  * rest, so a 40-column terminal saw the safety sentences end mid-word and an
  * 80-column one saw the command being authorized end mid-argument, both with
  * nothing marking the cut.
+ *
+ * Seven of the card's thirteen rows were then the same on every call: the
+ * approval, consequence, reversibility, deny, stop, and hard-block sentences.
+ * They are the terms of the decision, not the decision, so they fold behind
+ * `?` and the card leads with what changes per call: the tool, the target in
+ * full, the mutation facts, and who asked.
  */
-function permissionOverlayLines(view: ApprovalRequestView, width: number): string[] {
+function permissionOverlayLines(view: ApprovalRequestView, width: number, terms = false): string[] {
 	const content = Math.max(8, Math.floor(width));
 	const presentation = permissionDecisionPresentation(view);
 	// The parked call is awaiting a decision, not blocked: the raw rejection
@@ -315,19 +361,18 @@ function permissionOverlayLines(view: ApprovalRequestView, width: number): strin
 	// wording contradicts the ask. Tool, Target, Action, and the asking axis
 	// carry everything the operator needs to decide.
 	const lines = [
-		field("Tool: ", `${view.tool} · Action: ${view.actionClass}`, content),
-		...(view.target !== undefined && view.target.length > 0 ? [field("Target: ", view.target, content)] : []),
+		...field("Tool: ", `${view.tool} · Action: ${view.actionClass}`, content),
+		...(view.target !== undefined && view.target.length > 0 ? field("Target: ", view.target, content) : []),
 		// Size and digest stay on the collapsed card whether or not the operator
 		// opens the mutation, so the decision always carries the identity of the
-		// bytes it applies to.
-		// Wrapped, never ellipsized: at 40 columns the digest is the tail of the
-		// line, and ellipsizing it would drop the one fact that ties the decision
-		// to the bytes it applies to.
+		// bytes it applies to. Wrapped, never ellipsized: at 40 columns the digest
+		// is the tail of the line, and ellipsizing it would drop the one fact that
+		// ties the decision to the bytes it applies to.
 		...(view.mutation !== undefined
-			? [
-					...wrapSentence(`Mutation: ${mutationFactsLine(view.mutation)}`, content),
-					...wrapSentence(`Press ${MUTATION_PREVIEW_KEY} to read it before deciding.`, content),
-				]
+			? wrapSentence(
+					`Mutation: ${mutationFactsLine(view.mutation)} · press ${MUTATION_PREVIEW_KEY} to read it before deciding`,
+					content,
+				)
 			: []),
 		...(view.mutation === undefined && view.origin.kind === "worker" && isFileMutationTool(view.tool)
 			? wrapSentence(
@@ -336,6 +381,7 @@ function permissionOverlayLines(view: ApprovalRequestView, width: number): strin
 				)
 			: []),
 		...wrapSentence(`Requested by: ${presentation.requestedByCopy}`, content),
+		...(view.queueDepth !== undefined && view.queueDepth > 1 ? [`1 of ${view.queueDepth} parked`] : []),
 		...(view.artifact !== undefined
 			? [
 					"",
@@ -344,16 +390,19 @@ function permissionOverlayLines(view: ApprovalRequestView, width: number): strin
 				]
 			: []),
 		"",
+	];
+	if (!terms) {
+		lines.push(...wrapSentence(termsSummary(presentation, view.actionClass), content));
+		return lines;
+	}
+	lines.push(
 		...wrapSentence(`Approval: ${presentation.authorizationCopy}`, content),
 		...wrapSentence(`Consequence: ${presentation.consequenceCopy}`, content),
 		...wrapSentence(presentation.reversibilityCopy, content),
 		...wrapSentence(`Deny: ${actionConsequence(presentation, "deny")}`, content),
 		...wrapSentence(`Stop: ${actionConsequence(presentation, "stop")}`, content),
 		...wrapSentence("Hard-blocked actions remain blocked.", content),
-	];
-	if (view.queueDepth !== undefined && view.queueDepth > 1) {
-		lines.splice(lines.indexOf(""), 0, `1 of ${view.queueDepth} parked`);
-	}
+	);
 	return lines;
 }
 

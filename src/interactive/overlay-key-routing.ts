@@ -1,6 +1,6 @@
 import type { ClioKeybinding } from "../domains/config/keybindings.js";
 import { isKeyRelease, matchesKey } from "../engine/tui.js";
-import { MUTATION_PREVIEW_KEY } from "./permission-hint.js";
+import { MUTATION_PREVIEW_KEY, PERMISSION_TERMS_KEY } from "./permission-hint.js";
 
 export type OverlayState =
 	| "closed"
@@ -54,6 +54,8 @@ export interface PermissionOverlayKeyDeps {
 	isInspectingMutation?: () => boolean;
 	toggleMutationInspection?: () => void;
 	scrollMutationInspection?: (delta: number) => void;
+	/** Fold or unfold the standing approval terms on the card. */
+	togglePermissionTerms?: () => void;
 }
 
 export interface DispatchBoardOverlayKeyDeps {
@@ -134,6 +136,10 @@ function routePermissionOverlayKey(data: string, deps: PermissionOverlayKeyDeps)
 		deps.toggleMutationInspection
 	) {
 		deps.toggleMutationInspection();
+		return true;
+	}
+	if (data === PERMISSION_TERMS_KEY && deps.togglePermissionTerms && !(deps.isInspectingMutation?.() ?? false)) {
+		deps.togglePermissionTerms();
 		return true;
 	}
 	if ((deps.isInspectingMutation?.() ?? false) && deps.scrollMutationInspection && !isKeyRelease(data)) {

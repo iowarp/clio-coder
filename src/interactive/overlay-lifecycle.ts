@@ -175,6 +175,8 @@ export interface OverlayLifecycleController {
 	isInspectingMutation(): boolean;
 	toggleMutationInspection(): void;
 	scrollMutationInspection(delta: number): void;
+	/** Fold or unfold the standing approval terms on the live permission card. */
+	togglePermissionTerms(): void;
 	cancelAskUser(): void;
 	dispose(): void;
 }
@@ -289,7 +291,13 @@ export function createOverlayLifecycle(deps: OverlayLifecycleRuntimeDeps): Overl
 				// Read per frame: the footer names what Enter does right now, and
 				// that depends on whether the composer holds a draft and on whether
 				// the mutation is open.
-				footerHint: (innerWidth) => permissionOverlayHint(innerWidth, editor.getText().length > 0, inspectionHint()),
+				footerHint: (innerWidth) =>
+					permissionOverlayHint(
+						innerWidth,
+						editor.getText().length > 0,
+						inspectionHint(),
+						body.isShowingTerms() ? "open" : "closed",
+					),
 			});
 			if (!overlayTransitions.showPermission(handle)) {
 				handle.hide();
@@ -512,6 +520,10 @@ export function createOverlayLifecycle(deps: OverlayLifecycleRuntimeDeps): Overl
 		},
 		scrollMutationInspection: (delta) => {
 			permissionBody?.scrollInspect(delta);
+			tui.requestRender();
+		},
+		togglePermissionTerms: () => {
+			permissionBody?.toggleTerms();
 			tui.requestRender();
 		},
 		cancelAskUser: overlayAskUser.cancel,
