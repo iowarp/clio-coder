@@ -1,5 +1,5 @@
 import type { LibraryEntryKind } from "../domains/resources/index.js";
-import { appendNotice } from "./command-output.js";
+import { appendInterviewRecord, appendNotice } from "./command-output.js";
 import { createOverlayAskUserLifecycle, type OverlayAskUserLifecycle } from "./overlay-ask-user-lifecycle.js";
 import { createOverlayAuthLifecycle } from "./overlay-auth-lifecycle.js";
 import { showClioOverlayFrame } from "./overlay-frame.js";
@@ -338,6 +338,17 @@ export function createOverlayLifecycle(deps: OverlayLifecycleRuntimeDeps): Overl
 		...(deps.app.registerAskUserHandler ? { registerHandler: deps.app.registerAskUserHandler } : {}),
 		...(openAskUserOverlayFactory ? { openAskUserOverlay: openAskUserOverlayFactory } : {}),
 		...(deps.onOperatorParked ? { onOperatorParked: deps.onOperatorParked } : {}),
+		onRoundAnswered: (questions, answers) =>
+			appendInterviewRecord(
+				answers.map((answer) => ({
+					label:
+						questions.find((question) => question.question === answer.question)?.header ??
+						answer.question.split("\n").find((line) => line.trim().length > 0) ??
+						answer.question,
+					answer: answer.answer,
+				})),
+				busNoticeSink,
+			),
 	});
 
 	const overlayModelSelectors = createOverlayModelSelectors({
