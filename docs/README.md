@@ -95,6 +95,7 @@ validation, reference data, or human scientific judgment.
 | An executable multi-node walkthrough with a reviewer gate | [Fleet Demo Runbook](process/fleet-demo-runbook.md) |
 | Capacity leases, heartbeats, locks, and node drain control | [Capacity and Scheduling](architecture/capacity-and-scheduling.md) |
 | Worker process protocol, watchdogs, steering, and exit mapping | [Worker Dispatch Mechanics](architecture/worker-dispatch-mechanics.md) |
+| Worker context inheritance, fork, and splice modes | [Worker Context](architecture/worker-context.md) |
 | Typed dispatch intent and compatibility boundaries | [Dispatch Typed Intent](architecture/dispatch-typed-intent.md) |
 | Why dispatch remains one domain and where its seams actually are | [Dispatch Architecture Rationale](architecture/dispatch-architecture-rationale.md) |
 
@@ -106,6 +107,7 @@ validation, reference data, or human scientific judgment.
 | Prompt-envelope reuse, provider tool delivery, and bounded results | [Prompt Envelope and Tools](architecture/prompt-envelope-and-tools.md) |
 | All built-in worker tools, arguments, outputs, and error examples | [Tool Usage](guide/tool-usage.md) |
 | Implementing a runtime or inference-server adapter | [Provider Adapter Cookbook](architecture/provider-adapter-cookbook.md) |
+| External coding agent discovery, inspection, and safe resource adoption | [Coding Agent Interoperability](guide/interop.md) |
 | Middleware hooks, effects, budgets, and component snapshots | [Middleware and Components](architecture/middleware-and-components.md) |
 | Process exit codes, stdout/stderr rules, JSONL, and `--help` contracts | [Exit Codes and Output](guide/exit-codes-and-output.md) |
 | Environment overrides, directory controls, and debug toggles | [Environment Variables](guide/environment-variables.md) |

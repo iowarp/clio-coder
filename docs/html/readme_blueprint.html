@@ -4,8 +4,8 @@
   <meta charset="utf-8">
   <meta name="viewport" content="width=device-width, initial-scale=1">
   <meta name="clio-markdown-source" content="docs/README.md">
-  <meta name="clio-docs-version" content="0.4.2">
-  <title>Clio Coder documentation · Clio Coder 0.4.2</title>
+  <meta name="clio-docs-version" content="0.4.7">
+  <title>Clio Coder documentation · Clio Coder 0.4.7</title>
   <link rel="icon" href="data:,">
   <link rel="stylesheet" href="shared.css">
 </head>
@@ -30,7 +30,7 @@
       </div>
       <div class="header-right">
         <a class="back-btn" href="index.html">← Index</a>
-        <span class="version-badge">v0.4.2</span>
+        <span class="version-badge">v0.4.7</span>
       </div>
     </header>
     <div class="page-layout-grid reference-layout">
@@ -44,7 +44,7 @@
       <main class="reference-main" id="reference-content">
         <article class="reference-prose glass-card">
 <p align="center">
-  <img src="../assets/clio-coder-logo-128.webp" alt="Clio Coder logo" width="96" height="96" />
+  <img src="../../assets/clio-coder-logo-128.webp" alt="Clio Coder logo" width="96" height="96" />
 </p>
 <blockquote>
 <p><strong>Visual blueprint:</strong> The source checkout includes the complete
@@ -54,7 +54,7 @@
 what you are trying to do; the deeper references are here when you need exact
 schemas, wire contracts, or architectural invariants.</p>
 <p>The guides track the current source tree. Released behavior is fixed by the
-corresponding Git tag and <a href="../CHANGELOG.md">changelog</a>. If prose and the checked
+corresponding Git tag and <a href="../../CHANGELOG.md">changelog</a>. If prose and the checked
 source disagree, treat source, schema validation, and contract tests as
 authoritative—and please fix or report the documentation drift.</p>
 <p>The reference is organized by purpose:</p>
@@ -251,6 +251,10 @@ validation, reference data, or human scientific judgment.</p>
 <td><a href="worker_dispatch_blueprint.html">Worker Dispatch Mechanics</a></td>
 </tr>
 <tr>
+<td>Worker context inheritance, fork, and splice modes</td>
+<td><a href="worker_context_blueprint.html">Worker Context</a></td>
+</tr>
+<tr>
 <td>Typed dispatch intent and compatibility boundaries</td>
 <td><a href="dispatch_typed_intent_blueprint.html">Dispatch Typed Intent</a></td>
 </tr>
@@ -284,6 +288,10 @@ validation, reference data, or human scientific judgment.</p>
 <tr>
 <td>Implementing a runtime or inference-server adapter</td>
 <td><a href="provider_adapter_blueprint.html">Provider Adapter Cookbook</a></td>
+</tr>
+<tr>
+<td>External coding agent discovery, inspection, and safe resource adoption</td>
+<td><a href="interop_blueprint.html">Coding Agent Interoperability</a></td>
 </tr>
 <tr>
 <td>Middleware hooks, effects, budgets, and component snapshots</td>
@@ -326,7 +334,7 @@ validation, reference data, or human scientific judgment.</p>
 </tr>
 </tbody>
 </table>
-<p>Reviewable reference suites ship under <a href="../evals/"><code>evals/</code></a>. They are explicit
+<p>Reviewable reference suites ship under <a href="../../evals/"><code>evals/</code></a>. They are explicit
 operator measurements, not hidden CI steps. Private prompts, credentials,
 endpoints, raw campaign artifacts, and proprietary datasets belong outside the
 repository.</p>
@@ -415,7 +423,7 @@ The HTML blueprints are development aids and are not required for the runtime.</
 <li>Use current, canonical settings paths; describe legacy names only in a
 clearly marked migration or historical section.</li>
 <li>Separate deterministic contracts from model-dependent observations.</li>
-<li>Put release chronology in the <a href="../CHANGELOG.md">CHANGELOG</a>, not in the
+<li>Put release chronology in the <a href="../../CHANGELOG.md">CHANGELOG</a>, not in the
 product README or an evergreen task guide.</li>
 <li>Link to the detailed contract instead of duplicating a large schema in
 several places.</li>
@@ -428,7 +436,7 @@ several places.</li>
         <p class="reference-footer-note">Canonical content lives in the mapped Markdown page. This visual counterpart adds navigation without changing the contract.</p>
       </main>
     </div>
-    <footer>Clio Coder documentation · source-aligned at v0.4.2</footer>
+    <footer>Clio Coder documentation · source-aligned at v0.4.7</footer>
   </div>
   <script src="shared.js"></script>
 </body>

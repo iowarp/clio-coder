@@ -4,7 +4,7 @@
   <meta charset="utf-8">
   <meta name="viewport" content="width=device-width, initial-scale=1">
   <meta name="description" content="Clio Coder documentation blueprints">
-  <title>Documentation blueprints · Clio Coder 0.4.2</title>
+  <title>Documentation blueprints · Clio Coder 0.4.7</title>
   <link rel="icon" href="data:,">
   <link rel="stylesheet" href="shared.css">
 </head>
@@ -12,12 +12,12 @@
   <a class="skip-link" href="#blueprint-tree">Skip to documentation tree</a>
   <div class="container">
     <header class="hub-masthead">
-      <p class="hub-eyebrow">Source-aligned field manual / v0.4.2</p>
+      <p class="hub-eyebrow">Source-aligned field manual / v0.4.7</p>
       <h1 class="hub-title">Clio Coder documentation blueprints</h1>
       <p class="hub-subtitle">A human-readable mirror of the complete Markdown reference, arranged by the same operator, architecture, process, and history boundaries.</p>
       <div class="hub-stats" aria-label="Documentation coverage">
-        <span class="hub-stat">51 Markdown sources</span>
-        <span class="hub-stat">51 visual counterparts</span>
+        <span class="hub-stat">58 Markdown sources</span>
+        <span class="hub-stat">58 visual counterparts</span>
         <span class="hub-stat">0 parity gaps</span>
       </div>
     </header>
@@ -35,7 +35,7 @@
           <button class="index-filter" type="button" data-doc-filter="history">History</button>
       </div>
     </div>
-    <p class="index-result-line" data-doc-result aria-live="polite">51 of 51 blueprints visible</p>
+    <p class="index-result-line" data-doc-result aria-live="polite">58 of 58 blueprints visible</p>
     <main id="blueprint-tree">
     <section class="doc-group" data-doc-group data-category="root">
       <div class="doc-group-header">
@@ -56,7 +56,7 @@
       <div class="doc-group-header">
         <span class="doc-group-index">02</span>
         <h2 class="doc-group-title">Guide</h2>
-        <span class="doc-group-count">15 pages</span>
+        <span class="doc-group-count">20 pages</span>
       </div>
       <div class="doc-grid">
         <a class="blueprint-card" style="--order: 1" href="agents_blueprint.html" data-blueprint-card data-category="guide" data-search="clio coder agent fleet docs/guide/built-in-agents.md agent architecture semantics built-in catalog frontmatter schema dispatching agents fleet management and fault tolerance adding a project agent">
@@ -155,13 +155,37 @@
           <p>Error Catalog &amp; Remediation Matrix · Reading a cold cache</p>
           <span class="blueprint-card-path">docs/guide/troubleshooting.md</span>
         </a>
+        <a class="blueprint-card" style="--order: 15" href="plugins_blueprint.html" data-blueprint-card data-category="guide" data-search="portable plugins and the library docs/guide/plugins.md private catalogs plugins and extensions library packages">
+          <span class="blueprint-card-kind">2 sections · 696 words</span>
+          <h3>Portable Plugins and the Library</h3>
+          <p>Private Catalogs · Plugins and Extensions</p>
+          <span class="blueprint-card-path">docs/guide/plugins.md</span>
+        </a>
+        <a class="blueprint-card" style="--order: 15" href="authoring_plugins_blueprint.html" data-blueprint-card data-category="guide" data-search="authoring portable plugins docs/guide/authoring-plugins.md native clio components validation and lifecycle agent plugins 1.0.0">
+          <span class="blueprint-card-kind">3 sections · 928 words</span>
+          <h3>Authoring Portable Plugins</h3>
+          <p>Native Clio Components · Validation and Lifecycle</p>
+          <span class="blueprint-card-path">docs/guide/authoring-plugins.md</span>
+        </a>
+        <a class="blueprint-card" style="--order: 15" href="harness_extensions_blueprint.html" data-blueprint-card data-category="guide" data-search="harness extensions docs/guide/harness-extensions.md create a command tool command contract admission and execution">
+          <span class="blueprint-card-kind">3 sections · 803 words</span>
+          <h3>Harness Extensions</h3>
+          <p>Create a Command Tool · Command Contract</p>
+          <span class="blueprint-card-path">docs/guide/harness-extensions.md</span>
+        </a>
+        <a class="blueprint-card" style="--order: 15" href="interop_blueprint.html" data-blueprint-card data-category="guide" data-search="coding agent interoperability docs/guide/interop.md inspect installed hosts review and adopt terminal coding agents adoption approval">
+          <span class="blueprint-card-kind">3 sections · 1,029 words</span>
+          <h3>Coding Agent Interoperability</h3>
+          <p>Inspect Installed Hosts · Review and Adopt</p>
+          <span class="blueprint-card-path">docs/guide/interop.md</span>
+        </a>
       </div>
     </section>
     <section class="doc-group" data-doc-group data-category="architecture">
       <div class="doc-group-header">
         <span class="doc-group-index">03</span>
         <h2 class="doc-group-title">Architecture</h2>
-        <span class="doc-group-count">23 pages</span>
+        <span class="doc-group-count">24 pages</span>
       </div>
       <div class="doc-grid">
         <a class="blueprint-card" style="--order: 16" href="acp_blueprint.html" data-blueprint-card data-category="architecture" data-search="agent client protocol (acp) server docs/architecture/acp.md 1. overview &amp; protocol specification 2. server command &amp; transport wiring 3. supported acp methods 4. initial safe profile 5. tool presentation and outbound delegation governance 6. security &amp; boundary guarantees 7. delegation peers in the transcript 8. error taxonomy">
@@ -301,6 +325,12 @@
           <h3>Worker Dispatch Mechanics</h3>
           <p>1. Spawning Sequence &amp; Environment Isolation · 2. Standard Input/Output NDJSON Protocol</p>
           <span class="blueprint-card-path">docs/architecture/worker-dispatch-mechanics.md</span>
+        </a>
+        <a class="blueprint-card" style="--order: 38" href="worker_context_blueprint.html" data-blueprint-card data-category="architecture" data-search="worker context inheritance docs/architecture/worker-context.md dispatch api capture ownership and reproducibility isolated fork splice context modes">
+          <span class="blueprint-card-kind">5 sections · 1,474 words</span>
+          <h3>Worker Context Inheritance</h3>
+          <p>Dispatch API · Capture, Ownership, and Reproducibility</p>
+          <span class="blueprint-card-path">docs/architecture/worker-context.md</span>
         </a>
       </div>
     </section>

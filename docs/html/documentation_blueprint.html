@@ -4,8 +4,8 @@
   <meta charset="utf-8">
   <meta name="viewport" content="width=device-width, initial-scale=1">
   <meta name="clio-markdown-source" content="docs/process/documentation-guide.md">
-  <meta name="clio-docs-version" content="0.4.2">
-  <title>Documentation Standards and Codebase Alignment · Clio Coder 0.4.2</title>
+  <meta name="clio-docs-version" content="0.4.7">
+  <title>Documentation Standards and Codebase Alignment · Clio Coder 0.4.7</title>
   <link rel="icon" href="data:,">
   <link rel="stylesheet" href="shared.css">
 </head>
@@ -30,7 +30,7 @@
       </div>
       <div class="header-right">
         <a class="back-btn" href="index.html">← Index</a>
-        <span class="version-badge">v0.4.2</span>
+        <span class="version-badge">v0.4.7</span>
       </div>
     </header>
     <div class="page-layout-grid reference-layout">
@@ -170,7 +170,7 @@
 <tr>
 <td><a href="tool_usage_blueprint.html">tool-usage.md</a></td>
 <td><code>src/tools/agent-tools.ts</code>, <code>src/tools/registry.ts</code>, <code>src/tools/observation.ts</code></td>
-<td>In-depth reference for all 21 canonical tools, including conditional registration, parameters, typical payloads, normalizers, and error examples.</td>
+<td>In-depth reference for all 24 canonical tools, including conditional registration, parameters, typical payloads, normalizers, and error examples.</td>
 </tr>
 <tr>
 <td><a href="panes_files_blueprint.html">panes-and-files.md</a></td>
@@ -216,6 +216,11 @@
 <td><a href="worker_dispatch_blueprint.html">worker-dispatch-mechanics.md</a></td>
 <td><code>src/worker/**</code></td>
 <td>NDJSON parent-child socket protocols, control/bulk lane demuxing, watchdog timers, worker attestation (13 protocol fields), permission parking, exit codes.</td>
+</tr>
+<tr>
+<td><a href="worker_context_blueprint.html">worker-context.md</a></td>
+<td><code>src/worker/spec-contract.ts</code>, <code>src/domains/dispatch/**</code>, <code>src/worker/**</code></td>
+<td>Worker context inheritance: isolated, fork, and splice context modes for native workers, historical message selection, and token limits.</td>
 </tr>
 <tr>
 <td><a href="fleet_demo_blueprint.html">fleet-demo-runbook.md</a></td>
@@ -268,7 +273,12 @@
 <td>Installation, upgrade, reset, uninstallation, launcher ownership and what <code>--remove-binary</code> will and will not remove, partial-failure behavior, configuration folders (<code>credentials.yaml</code> <code>0o600</code>), and permissions.</td>
 </tr>
 <tr>
-<td><a href="release_cut_checklist_blueprint.html">release-cut-checklist.md</a></td>
+<td><a href="release_checklist_blueprint.html">release-cut-checklist.md</a></td>
+<td><code>scripts/check-release.mjs</code>, <code>tests/smoke/installed-package.test.ts</code>, <code>.github/workflows/</code>, <code>package.json</code></td>
+<td>Standard release procedure: local candidate preparation, release gate verification, fast-forward landing on main, annotated tag publication, and npm publish.</td>
+</tr>
+<tr>
+<td><a href="release_cut_checklist_blueprint.html">release-cut-checklist.md (v0.4.1)</a></td>
 <td><code>scripts/check-release.mjs</code>, <code>tests/smoke/installed-package.test.ts</code>, <code>.github/workflows/</code>, <code>package.json</code></td>
 <td>Historical v0.4.1 release procedure retained as evidence; future releases must draft and verify their own checklist.</td>
 </tr>
@@ -305,7 +315,7 @@
 <tr>
 <td><a href="trace_blueprint.html">trace-store.md</a></td>
 <td><code>src/cli/trace.ts</code>, <code>src/domains/observability/trace-store.ts</code></td>
-<td>WAL SQLite trace mirror database schema, rowid cursor queries, rebuildability, and eight <code>clio-coder trace</code> subcommands: <code>runs</code>, <code>phases</code>, <code>tail</code>, <code>procs</code>, <code>inspect</code>, <code>prune</code>, read-only <code>sql</code>, and <code>ui</code>.</td>
+<td>WAL SQLite trace mirror database schema, rowid cursor queries, rebuildability, and nine <code>clio-coder trace</code> subcommands: <code>runs</code>, <code>phases</code>, <code>tail</code>, <code>procs</code>, <code>code-steps</code>, <code>inspect</code>, <code>prune</code>, read-only <code>sql</code>, and <code>ui</code>.</td>
 </tr>
 <tr>
 <td><a href="eval_blueprint.html">eval-runner.md</a></td>
@@ -329,8 +339,28 @@
 </tr>
 <tr>
 <td><a href="skills_blueprint.html">skills-marketplace.md</a></td>
-<td><code>src/interactive/overlays/skills-hub.ts</code>, <code>src/domains/resources/skills/marketplace.ts</code></td>
-<td>Skills Hub marketplace discovery through the install resolver, empty state, install actions, publishing flow.</td>
+<td><code>src/interactive/overlays/library.ts</code>, <code>src/interactive/overlays/library-tabs.ts</code>, <code>src/domains/resources/skills/marketplace.ts</code></td>
+<td>Skills marketplace discovery through library overlays, catalog inspection, install actions, publishing flow.</td>
+</tr>
+<tr>
+<td><a href="plugins_blueprint.html">plugins.md</a></td>
+<td><code>src/domains/plugins/**</code>, <code>src/domains/resources/library.ts</code>, <code>src/cli/library.ts</code></td>
+<td>Portable domain bundles, library installation, enable/disable states, drift detection, pins, and package lifecycle.</td>
+</tr>
+<tr>
+<td><a href="authoring_plugins_blueprint.html">authoring-plugins.md</a></td>
+<td><code>plugins/**</code>, <code>src/domains/plugins/**</code>, <code>src/domains/resources/library.ts</code></td>
+<td>Plugin and package structure, root plugin.json manifests, resource mapping, validation, and authoring guidelines.</td>
+</tr>
+<tr>
+<td><a href="harness_extensions_blueprint.html">harness-extensions.md</a></td>
+<td><code>src/domains/extensions/**</code>, <code>src/domains/plugins/**</code>, <code>src/interactive/**</code></td>
+<td>Harness extension lifecycle, command handlers, dynamic reload, and interaction with the Clio execution environment.</td>
+</tr>
+<tr>
+<td><a href="interop_blueprint.html">interop.md</a></td>
+<td><code>src/cli/interop.ts</code>, <code>src/domains/interop/**</code>, <code>src/interactive/overlays/interop.ts</code></td>
+<td>External coding agent interoperability: host discovery, resource inspection, safe adoption of prompts and skills into the library.</td>
 </tr>
 <tr>
 <td><a href="models_blueprint.html">model-catalog.md</a></td>
@@ -401,8 +431,9 @@ Safety, data loss, or security-sensitive constraints.</p>
 <h3>Blueprint Creation Policy</h3>
 <p>Blueprint coverage is explicit rather than inferred from document style. The
 page-level audit lives in
-<a href="documentation_coverage_blueprint.html"><code>documentation-coverage.md</code></a>. All 51 Markdown pages
-have a dedicated blueprint. <code>docs/html/index.html</code> groups those counterparts by
+<a href="documentation_coverage_blueprint.html"><code>documentation-coverage.md</code></a>. All 58 canonical Markdown pages
+have a dedicated blueprint. More library pages may arrive as development proceeds,
+requiring an inventory refresh during release cuts. <code>docs/html/index.html</code> groups those counterparts by
 the same Guide, Architecture, Process, and History tree, while a source meta tag
 provides the one-to-one machine-readable mapping. Every mapping must remain
 unique, complete, and free of orphaned Markdown or HTML pages.
@@ -454,7 +485,7 @@ PY
         <p class="reference-footer-note">Canonical content lives in the mapped Markdown page. This visual counterpart adds navigation without changing the contract.</p>
       </main>
     </div>
-    <footer>Clio Coder documentation · source-aligned at v0.4.2</footer>
+    <footer>Clio Coder documentation · source-aligned at v0.4.7</footer>
   </div>
   <script src="shared.js"></script>
 </body>
