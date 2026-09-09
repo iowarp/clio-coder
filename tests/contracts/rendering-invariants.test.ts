@@ -406,7 +406,7 @@ describe("Pi TUI compatibility", () => {
 		}
 	});
 
-	it("reports the current ask-user frame after replacement and no bounds after close", async () => {
+	it("reports the ask-user frame while shown and no bounds after close", async () => {
 		const terminal = new RenderingTerminal();
 		const tui = new TuiAltScreen(terminal);
 		const session = openAskUserOverlay(tui, { onCancel() {} });
@@ -416,7 +416,7 @@ describe("Pi TUI compatibility", () => {
 			const initial = session.getBounds();
 			ok(initial);
 			const answer = session.ask([{ question: "Continue?", options: [{ label: "Yes" }, { label: "No" }] }]);
-			strictEqual(session.getBounds(), undefined, "replacement has not rendered yet");
+			deepStrictEqual(session.getBounds(), initial, "one frame serves every round; nothing is remounted");
 			tui.renderNow(true);
 			const compact = session.getBounds();
 			ok(compact);
