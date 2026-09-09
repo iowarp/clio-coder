@@ -179,6 +179,7 @@ async function main(): Promise<number> {
 
 	const input: WorkerRunInput = {
 		systemPrompt: spec.systemPrompt,
+		...(spec.contextSeed ? { contextSeed: spec.contextSeed } : {}),
 		dynamicPromptMessages: spec.dynamicPromptMessages ?? [],
 		agentId: spec.agentId,
 		task: spec.task,

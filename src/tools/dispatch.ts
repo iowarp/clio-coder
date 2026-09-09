@@ -61,7 +61,7 @@ export function createDispatchTool(
 		// Delegation prompt sections. This description says only what the call
 		// shape is; every field below carries one discriminating sentence.
 		description:
-			"Delegate to a fleet worker: task dispatches one assignment, tasks dispatches a batch, never both. briefing is bounded parent context, never instructions. A call auto-waits for the sealed receipt; detach:true returns run ids to monitor and collect later. Declare intent on every dispatch. list:true shows the roster.",
+			"Delegate to a fleet worker: task dispatches one assignment, tasks dispatches a batch, never both. context selects isolated (default), fork (native only), or splice inheritance. briefing adds bounded parent evidence. A call auto-waits for the sealed receipt; detach:true returns run ids to monitor and collect later. Declare intent on every dispatch. list:true shows the roster.",
 		// Composed once per session: council, compete, and adaptive-routing fields
 		// are advertised only when the fleet can exercise them (see dispatch-schema.ts).
 		parameters: buildDispatchParameters(deps.getSchemaComposition?.() ?? FULL_DISPATCH_SCHEMA_COMPOSITION),

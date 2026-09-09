@@ -1,3 +1,4 @@
+import { parseWorkerContextProvenance } from "../../worker/context-seed.js";
 import type { GateDecisionArtifact, GateDecisionVerification } from "../dispatch/gate-decisions.js";
 import { RUN_RECEIPT_INTEGRITY_VERSION, verifyReceiptIntegrity } from "../dispatch/receipt-integrity.js";
 import type {
@@ -72,6 +73,7 @@ export type TrustArtifactKind =
 	| "gate_decision"
 	| "briefing"
 	| "project_context"
+	| "worker_context"
 	| "autonomy_policy"
 	| "finish_contract_evidence"
 	| "evidence_bundle"
@@ -206,6 +208,7 @@ const ARTIFACT_KINDS: ReadonlySet<string> = new Set([
 	"gate_decision",
 	"briefing",
 	"project_context",
+	"worker_context",
 	"autonomy_policy",
 	"finish_contract_evidence",
 	"evidence_bundle",
@@ -423,6 +426,7 @@ export type PersistedRunReceiptTrustFacts = Pick<RunReceipt, "runId"> &
 			| "validationGrounding"
 			| "briefing"
 			| "projectContext"
+			| "workerContext"
 			| "autonomyEnforcement"
 		>
 	>;
@@ -693,8 +697,21 @@ function recordedProjectContextHash(context: RunProjectContextProvenance | undef
 	return validNoneTierProjectContext(context) ? context.contentHash : undefined;
 }
 
+function validWorkerContext(value: unknown): boolean {
+	try {
+		parseWorkerContextProvenance(value);
+		return true;
+	} catch {
+		return false;
+	}
+}
+
 function contextArtifacts(receipt: PersistedRunReceiptTrustFacts): TrustArtifactReference[] {
 	const artifacts = [receiptReference(receipt)];
+	if (receipt.workerContext !== undefined && validWorkerContext(receipt.workerContext))
+		artifacts.push(
+			sha256Reference("worker_context", `${receipt.runId}:worker-context`, receipt.workerContext.contentHash),
+		);
 	if (receipt.briefing !== undefined && validBriefing(receipt.briefing)) {
 		artifacts.push(sha256Reference("briefing", `${receipt.runId}:briefing`, receipt.briefing.contentHash));
 	}
@@ -713,10 +730,12 @@ export function adaptRunReceiptContextStatus(
 	const artifacts = contextArtifacts(receipt);
 	const source = receiptSource(receipt);
 	const briefingInvalid = receipt.briefing !== undefined && !validBriefing(receipt.briefing);
-	if (briefingInvalid) return attributed("invalid", source, DISPATCH_AUTHORITY, artifacts);
+	if (briefingInvalid || (receipt.workerContext !== undefined && !validWorkerContext(receipt.workerContext)))
+		return attributed("invalid", source, DISPATCH_AUTHORITY, artifacts);
 	const context = receipt.projectContext;
 	if (context === undefined) {
-		if (receipt.briefing !== undefined) return attributed("recorded", source, DISPATCH_AUTHORITY, artifacts);
+		if (receipt.briefing !== undefined || receipt.workerContext !== undefined)
+			return attributed("recorded", source, DISPATCH_AUTHORITY, artifacts);
 		return attributed("unknown", compatibilitySource(receipt, "projectContext"), COMPATIBILITY_AUTHORITY, artifacts);
 	}
 	if (context.tier === "none") {
@@ -724,7 +743,7 @@ export function adaptRunReceiptContextStatus(
 		if (bare) {
 			// Nothing structured was sent: the axis does not apply unless a
 			// briefing was recorded, which is context of its own.
-			return receipt.briefing === undefined
+			return receipt.briefing === undefined && receipt.workerContext === undefined
 				? attributed("not_applicable", source, DISPATCH_AUTHORITY, artifacts)
 				: attributed("recorded", source, DISPATCH_AUTHORITY, artifacts);
 		}

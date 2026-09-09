@@ -18,6 +18,7 @@ export interface EvidenceFailureFacts {
  * model, harness, or environment by guesswork.
  */
 export function attributeEvidenceFailure(facts: EvidenceFailureFacts): EvidenceTag {
+	if (facts.outcomeCode === "worker_context_exhausted") return "context-overflow";
 	if (
 		facts.outcomeCode === "worker_tool_call_cap_exhausted" ||
 		facts.outcomeCode === "loop_guard_tools_disabled_exhausted"

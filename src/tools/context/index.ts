@@ -9,6 +9,7 @@ import {
 	SKILL_SUGGESTION_ANCHOR,
 } from "../../core/skill-activation.js";
 import { ToolNames } from "../../core/tool-names.js";
+import type { WorkerRecall } from "../../domains/context/worker/recall.js";
 import { foldWorkingSet } from "../../domains/context/working-set/fold.js";
 import {
 	buildRecallFields,
@@ -72,6 +73,8 @@ export interface ContextSessionDeps {
 }
 
 export interface ContextToolDeps {
+	/** Run-scoped evidence port; never reads or appends the parent session. */
+	workerRecall?: WorkerRecall;
 	getCwd?: () => string;
 	getSkillLoaderOptions?: () => Pick<
 		LoadSkillsInput,
@@ -575,6 +578,26 @@ function runRecallScope(
 	reservation: ObservationReservation,
 	options: ToolInvokeOptions | undefined,
 ): ToolResult {
+	if (deps.workerRecall) {
+		const result = deps.workerRecall(args);
+		if ("error" in result) return { kind: "error", message: `context: ${result.error}` };
+		const truncated = truncateHead(result.body, {
+			maxBytes: reservation.callCapBytes,
+			maxLines: Number.MAX_SAFE_INTEGER,
+		});
+		return finalizeObservation({
+			tool: ToolNames.Context,
+			unit: "results",
+			output: truncated.content,
+			...(truncated.truncated ? { fullOutput: result.body } : {}),
+			shownCount: result.shown,
+			totalCount: result.total,
+			truncated: truncated.truncated || result.nextOffset !== undefined,
+			details: { workerRecall: { ref: args.ref ?? null, nextOffset: result.nextOffset ?? null } },
+			reservation,
+			...(options ? { options } : {}),
+		});
+	}
 	const session = deps.session;
 	if (!session?.hasSession()) {
 		return { kind: "error", message: "context: recall scope requires a bound session; none is active here" };

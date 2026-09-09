@@ -1,3 +1,9 @@
+import type { WorkerContextSeed } from "../domains/context/worker/contract.js";
+import { createWorkerContextGuard, WorkerContextExhaustedError } from "../domains/context/worker/pressure.js";
+import { createWorkerObservationStore } from "../domains/context/worker/recall.js";
+import { seededWorkerMessages } from "../worker/context-seed.js";
+import { engineStreamSimple } from "./api-registry.js";
+import { estimateInputTokensFromContext, resolveReservedOutputTokens } from "./apis/output-budget.js";
 /**
  * Worker-subprocess engine boundary.
  *
@@ -89,6 +95,7 @@ import { createWorkerSafety, createWorkerToolRegistry } from "./worker-tools.js"
 export interface WorkerRunInput {
 	sessionId?: string;
 	systemPrompt: string;
+	contextSeed?: WorkerContextSeed;
 	dynamicPromptMessages?: ReadonlyArray<WorkerPromptMessage>;
 	agentId: string;
 	task: string;
@@ -360,6 +367,8 @@ function resolveWorkerRuntimeBudget(input: Pick<WorkerRunInput, "budget">): Work
  */
 export function startWorkerRun(input: WorkerRunInput, emit: WorkerEventEmit): WorkerRunHandle {
 	assertResponseSchemaRuntime(input);
+	if (input.contextSeed && input.runtime.kind !== "http")
+		throw new Error("worker context: history seeds require a native Pi runtime");
 	// The wire carries the contract as data; the one strict parser owns its
 	// shape. The worker subprocess may not import it (it stays slim), so the
 	// check lands here, before any model call. The wire parser, not the recipe
@@ -484,6 +493,7 @@ export function startWorkerRun(input: WorkerRunInput, emit: WorkerEventEmit): Wo
 				}
 			: {}),
 	});
+	const observations = createWorkerObservationStore();
 	const registry = createWorkerToolRegistry(
 		input.middlewareSnapshot,
 		safety,
@@ -512,6 +522,7 @@ export function startWorkerRun(input: WorkerRunInput, emit: WorkerEventEmit): Wo
 		input.autonomy,
 		(effects) => middlewareToolChoice.apply(effects),
 		input.agentLedger,
+		observations.recall,
 	);
 	const contractCwd = input.cwd ?? process.cwd();
 	let resultContractRepairsQueued = 0;
@@ -621,13 +632,46 @@ export function startWorkerRun(input: WorkerRunInput, emit: WorkerEventEmit): Wo
 		input.runtimeResolution?.effectiveThinkingLevel ?? input.thinkingLevel,
 	);
 
+	const inheritedMessages = seededWorkerMessages(input.contextSeed);
+	const inheritedCount = inheritedMessages.length;
+	const contextGuard = createWorkerContextGuard(observations.archive);
 	const options: EngineAgentOptions = {
+		streamFn: (currentModel, currentContext, streamOptions) => {
+			const window = input.runtimeResolution?.capabilities.contextWindow ?? currentModel.contextWindow;
+			let messages: AgentMessage[];
+			try {
+				messages = contextGuard({
+					messages: currentContext.messages,
+					systemPrompt: currentContext.systemPrompt ?? "",
+					tools: currentContext.tools ?? [],
+					contextWindow: window,
+					threshold: workerSettings.context.compaction.threshold,
+					autoEvict: workerSettings.context.compaction.auto && workerSettings.context.workingSet.enabled,
+					outputReserve: resolveReservedOutputTokens(currentModel.maxTokens, {
+						api: currentModel.api,
+						contextWindow: window,
+						inputTokens: estimateInputTokensFromContext(currentContext),
+					}),
+				});
+			} catch (error) {
+				if (error instanceof WorkerContextExhaustedError) {
+					workerBoundFailure = error.message;
+					emit({ type: "clio_coder_run_outcome", payload: { outcomeCode: "worker_context_exhausted" } });
+				}
+				throw error;
+			}
+			return engineStreamSimple(
+				currentModel,
+				{ ...currentContext, messages: messages as typeof currentContext.messages },
+				streamOptions,
+			);
+		},
 		initialState: {
 			systemPrompt: input.systemPrompt,
 			model,
 			thinkingLevel: effectiveThinkingLevel,
 			tools,
-			messages: [],
+			messages: inheritedMessages,
 		},
 		onPayload: async (payload, currentModel) => {
 			const middlewareChoice = middlewareToolChoice.current();
@@ -1003,12 +1047,12 @@ export function startWorkerRun(input: WorkerRunInput, emit: WorkerEventEmit): Wo
 			await agent.waitForIdle();
 			unsubscribe();
 			if (workerBoundFailure !== null) {
-				return { messages: agent.state.messages, exitCode: 1 };
+				return { messages: agent.state.messages.slice(inheritedCount), exitCode: 1 };
 			}
 			if (permissionFailure) {
-				return { messages: agent.state.messages, exitCode: WORKER_EXIT_PERMISSION_REQUIRED };
+				return { messages: agent.state.messages.slice(inheritedCount), exitCode: WORKER_EXIT_PERMISSION_REQUIRED };
 			}
-			const messages = agent.state.messages;
+			const messages = agent.state.messages.slice(inheritedCount);
 			const errorMessage = getTerminalAgentError(messages);
 			if (errorMessage !== null) {
 				if (errorMessage.length > 0) {
@@ -1020,15 +1064,15 @@ export function startWorkerRun(input: WorkerRunInput, emit: WorkerEventEmit): Wo
 		} catch (err) {
 			unsubscribe();
 			if (workerBoundFailure !== null) {
-				return { messages: agent.state.messages, exitCode: 1 };
+				return { messages: agent.state.messages.slice(inheritedCount), exitCode: 1 };
 			}
 			if (permissionFailure) {
-				return { messages: agent.state.messages, exitCode: WORKER_EXIT_PERMISSION_REQUIRED };
+				return { messages: agent.state.messages.slice(inheritedCount), exitCode: WORKER_EXIT_PERMISSION_REQUIRED };
 			}
 			const msg = err instanceof Error ? err.message : String(err);
-			emit({ type: "agent_end", messages: agent.state.messages });
+			emit({ type: "agent_end", messages: agent.state.messages.slice(inheritedCount) });
 			process.stderr.write(`[worker] agent error: ${msg}\n`);
-			return { messages: agent.state.messages, exitCode: 1 };
+			return { messages: agent.state.messages.slice(inheritedCount), exitCode: 1 };
 		} finally {
 			clearActiveEscalation();
 			unsubscribePermission();

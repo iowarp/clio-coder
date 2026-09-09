@@ -1,3 +1,4 @@
+import { parseWorkerContextPolicy } from "../domains/context/worker/contract.js";
 /** Pure model-argument parsing; every returned DispatchRequest has a concrete agent id. */
 
 import { parseResultSummaryMaxBytes } from "../domains/agents/result-contract.js";
@@ -168,6 +169,13 @@ function dispatchRequestFromArgs(
 				}
 			: {}),
 	};
+	if (args.context !== undefined) {
+		try {
+			request.context = parseWorkerContextPolicy(args.context);
+		} catch (error) {
+			return { ok: false, message: error instanceof Error ? error.message : String(error) };
+		}
+	}
 	if ("briefing" in args && args.briefing !== undefined) {
 		if (typeof args.briefing !== "string") return { ok: false, message: "briefing must be a string" };
 		const briefing = args.briefing.trim();

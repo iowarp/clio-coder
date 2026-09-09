@@ -4,6 +4,7 @@ import { assertValidResponseSchema, runtimeSpeaksResponseSchemaDialect } from ".
 import type { ToolName } from "../core/tool-names.js";
 import type { ResultContract } from "../domains/agents/result-contract.js";
 import type { AgentProduct } from "../domains/agents/spec.js";
+import type { WorkerContextSeed } from "../domains/context/worker/contract.js";
 import type { MiddlewareSnapshot } from "../domains/middleware/index.js";
 import type {
 	CapabilityFlags,
@@ -18,9 +19,10 @@ import type {
 import type { AutonomyLevel } from "../domains/safety/autonomy.js";
 import type { ProtectedArtifact } from "../domains/safety/protected-artifacts.js";
 import type { ToolProfileName } from "../tools/profiles.js";
+import { parseWorkerContextSeed } from "./context-seed.js";
 
 /** Current attested, budget-bearing dispatch document emitted by this release. */
-export const WORKER_SPEC_VERSION = 3;
+export const WORKER_SPEC_VERSION = 4;
 export const WORKER_RUNTIME_DESCRIPTOR_VERSION = 2;
 export const WORKER_PROTECTED_ARTIFACT_STATE_VERSION = 1;
 
@@ -77,6 +79,7 @@ interface WorkerSpecFields {
 	 */
 	settingsFingerprint: string;
 	systemPrompt: string;
+	contextSeed?: WorkerContextSeed;
 	dynamicPromptMessages?: ReadonlyArray<WorkerPromptMessage>;
 	promptSignature?: string;
 	toolSignature?: string;
@@ -618,6 +621,10 @@ export function parseWorkerSpec(value: unknown): WorkerSpec {
 	readEnum(runtime.auth, "WorkerSpec.runtime.auth", RUNTIME_AUTHS);
 	readString(spec.systemPrompt, "WorkerSpec.systemPrompt", { allowEmpty: true });
 	readWorkerPromptMessages(spec.dynamicPromptMessages, "WorkerSpec.dynamicPromptMessages");
+	if (spec.contextSeed !== undefined) {
+		parseWorkerContextSeed(spec.contextSeed);
+		if (runtimeKind !== "http") throw new Error("worker context: native history seeds require an HTTP/Pi runtime");
+	}
 	readOptionalString(spec, "promptSignature", "WorkerSpec");
 	readOptionalString(spec, "toolSignature", "WorkerSpec");
 	readOptionalString(spec, "dynamicHash", "WorkerSpec");

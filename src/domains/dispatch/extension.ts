@@ -1,3 +1,7 @@
+import { parseWorkerContextSeed } from "../../worker/context-seed.js";
+import { WORKER_STDIN_FRAME_MAX_BYTES } from "../../worker/protocol.js";
+import { WORKER_CONTEXT_PREAMBLE } from "../context/worker/select.js";
+import { persistWorkerContextSeed } from "../context/worker/store.js";
 /**
  * Dispatch domain wire-up (post-W5).
  *
@@ -707,6 +711,7 @@ function reportDispatchDiagnostic(scope: string, error: unknown): void {
 }
 
 const OUTCOME_CODE_SPECIFICITY: ReadonlyArray<RunOutcomeCode> = [
+	"worker_context_exhausted",
 	"result_contract_exhausted",
 	"loop_guard_tools_disabled_exhausted",
 	"worker_tool_call_cap_exhausted",
@@ -1182,6 +1187,24 @@ export function buildDynamicPromptMessages(
 	dynamicContext: WorkerDynamicContext = {},
 ): WorkerPromptMessage[] {
 	const messages: WorkerPromptMessage[] = [];
+	if (req.contextSeed) {
+		const seed = parseWorkerContextSeed(req.contextSeed);
+		const body =
+			seed.provenance.mode === "fork"
+				? WORKER_CONTEXT_PREAMBLE
+				: seed.messages
+						.map((message) => {
+							if (message.role !== "user") throw new Error("worker context: invalid portable packet");
+							return typeof message.content === "string"
+								? message.content
+								: message.content
+										.filter((block) => block.type === "text")
+										.map((block) => block.text)
+										.join("\n");
+						})
+						.join("\n\n");
+		messages.push({ id: "dispatch-worker-context", body, contentHash: sha256(body) });
+	}
 	if (dynamicContext.workspace) {
 		const body = renderWorkerWorkspaceContext(dynamicContext.workspace);
 		messages.push({ id: "dispatch-workspace", body, contentHash: sha256(body) });
@@ -1258,6 +1281,19 @@ export function buildDynamicPromptMessages(
 		messages.push(renderPipelineInput(req.pipelineInput).message);
 	}
 	return messages;
+}
+
+function assertWorkerContextRequest(req: DispatchRequest, native: boolean): void {
+	const mode = req.context?.mode ?? "isolated";
+	if (mode === "isolated") {
+		if (req.contextSeed !== undefined) throw new Error("worker context: isolated request cannot inherit a seed");
+		return;
+	}
+	if (!req.contextSeed) throw new Error("worker context: inheritance requires a host-captured seed");
+	const seed = parseWorkerContextSeed(req.contextSeed);
+	if (seed.provenance.mode !== mode) throw new Error("worker context: seed mode differs from admitted request");
+	if (mode === "fork" && !native)
+		throw new Error("worker context: fork requires a native Pi runtime; use splice for external agents");
 }
 
 interface ResolvedTarget {
@@ -2001,6 +2037,10 @@ function buildDispatchWorkerSpec(input: DispatchWorkerSpecInput, config?: Config
 	// autonomy can only narrow (reviewer/judge runs pin read-only); a worker
 	// never exceeds the orchestrator's authority.
 	spec.autonomy = input.effectiveAutonomy;
+	if (input.req.contextSeed && input.target.runtime.kind === "http")
+		spec.contextSeed = parseWorkerContextSeed(input.req.contextSeed);
+	if (Buffer.byteLength(JSON.stringify(spec), "utf8") + 1 > WORKER_STDIN_FRAME_MAX_BYTES)
+		throw new Error("worker context: complete WorkerSpec exceeds the stdin frame budget; use a smaller splice");
 	return spec;
 }
 
@@ -3578,6 +3618,7 @@ export function createDispatchBundle(
 				providers,
 			);
 		let target = resolveTarget();
+		assertWorkerContextRequest(req, target.runtime.kind === "http");
 		const identity = (resolved: ResolvedTarget): string =>
 			JSON.stringify([
 				resolved.target.id,
@@ -3664,7 +3705,11 @@ export function createDispatchBundle(
 		});
 		const projectContextProvenance = projectContextProvenanceFor(tier, dynamicPromptMessages);
 		const dynamicText = dynamicPromptMessages.map((message) => message.body).join("\n\n");
-		const compiledPromptHash = promptCompositionHash([systemPrompt, dynamicText]);
+		const compiledPromptHash = promptCompositionHash([
+			systemPrompt,
+			dynamicText,
+			...(req.contextSeed ? [req.contextSeed.provenance.contentHash] : []),
+		]);
 		const staticCompositionHash = promptHash(systemPrompt);
 		const sessionShellHash = staticCompositionHash;
 		const dynamicHash = dynamicPromptMessages.length > 0 ? sha256(dynamicText) : sha256("");
@@ -3736,6 +3781,7 @@ export function createDispatchBundle(
 			// before the external agent is started.
 			dispatchResultContract(req, spec);
 		}
+		assertWorkerContextRequest(req, false);
 		if (!settings) throw new Error("dispatch: effective settings required for ACP delegation");
 		const configured = settings.integrations.externalAgents.entries.find((entry) => entry.id === agentId);
 		if (!configured) throw new Error(`dispatch: ACP delegation agent '${agentId}' not configured`);
@@ -3777,7 +3823,11 @@ export function createDispatchBundle(
 		});
 		const projectContextProvenance = projectContextProvenanceFor(tier, dynamicPromptMessages);
 		const dynamicText = dynamicPromptMessages.map((message) => message.body).join("\n\n");
-		const compiledPromptHash = promptCompositionHash([systemPrompt, dynamicText]);
+		const compiledPromptHash = promptCompositionHash([
+			systemPrompt,
+			dynamicText,
+			...(req.contextSeed ? [req.contextSeed.provenance.contentHash] : []),
+		]);
 		const staticCompositionHash = promptHash(systemPrompt);
 		const sessionShellHash = staticCompositionHash;
 		const dynamicHash = dynamicPromptMessages.length > 0 ? sha256(dynamicText) : sha256("");
@@ -3841,6 +3891,7 @@ export function createDispatchBundle(
 		const wireModelId = lifecycle.agentConfig.id;
 		assertTargetNotCoolingDown(req, targetId, runtimeId, wireModelId);
 
+		if (req.contextSeed) persistWorkerContextSeed(req.contextSeed);
 		assertBudgetAdmitsRoute(req, { rates: null, provenance: "unknown" }, settings);
 
 		const queuedIdentity =
@@ -4096,6 +4147,7 @@ export function createDispatchBundle(
 				node: LOCAL_RUN_NODE,
 				...(lifecycle.pipeline ? { pipeline: lifecycle.pipeline } : {}),
 				...(lifecycle.briefing ? { briefing: lifecycle.briefing } : {}),
+				...(req.contextSeed ? { workerContext: structuredClone(req.contextSeed.provenance) } : {}),
 				...(req.gate !== undefined ? { gate: req.gate } : {}),
 				...(req.council !== undefined ? { council: req.council } : {}),
 				...(req.plan !== undefined ? { plan: req.plan } : {}),
@@ -4267,6 +4319,7 @@ export function createDispatchBundle(
 				node: LOCAL_RUN_NODE,
 				...(lifecycle.pipeline ? { pipeline: lifecycle.pipeline } : {}),
 				...(lifecycle.briefing ? { briefing: lifecycle.briefing } : {}),
+				...(req.contextSeed ? { workerContext: structuredClone(req.contextSeed.provenance) } : {}),
 				...(req.gate !== undefined ? { gate: req.gate } : {}),
 				...(req.council !== undefined ? { council: req.council } : {}),
 				...(req.plan !== undefined ? { plan: req.plan } : {}),
@@ -4732,6 +4785,7 @@ export function createDispatchBundle(
 			shadow: () => observeShadowRoute(req, placed, settings),
 		});
 
+		if (req.contextSeed) persistWorkerContextSeed(req.contextSeed);
 		const queuedIdentity =
 			req.lineage === undefined && req.runIdHint !== undefined
 				? {
@@ -4788,27 +4842,34 @@ export function createDispatchBundle(
 		const safetyDecisionCounts = { allowed: 0, blocked: 0, permissionRequested: 0 };
 		const escalationCounts = { requested: 0, approved: 0, denied: 0, timedOut: 0 };
 		const blockedAttempts: SafetyBlockedAttempt[] = [];
-		const spec = buildDispatchWorkerSpec(
-			{
-				req,
-				pathScope: lifecycle.pathScope,
-				target: lifecycle.target,
-				admission: lifecycle.admission,
-				recipe: lifecycle.recipe,
-				systemPrompt: lifecycle.systemPrompt,
-				dynamicPromptMessages: lifecycle.dynamicPromptMessages,
-				promptSignature: lifecycle.promptSignature,
-				toolSignature: lifecycle.toolSignature,
-				dynamicHash: lifecycle.dynamicHash,
-				middlewareSnapshot: middleware.snapshot(),
-				protectedArtifactState,
-				apiKey: lifecycle.apiKey,
-				effectiveAutonomy: lifecycle.effectiveAutonomy,
-				budget: lifecycle.budget,
-				...(lifecycle.settings ? { settings: lifecycle.settings } : {}),
-			},
-			config ?? undefined,
-		);
+		let spec: WorkerSpec;
+		try {
+			spec = buildDispatchWorkerSpec(
+				{
+					req,
+					pathScope: lifecycle.pathScope,
+					target: lifecycle.target,
+					admission: lifecycle.admission,
+					recipe: lifecycle.recipe,
+					systemPrompt: lifecycle.systemPrompt,
+					dynamicPromptMessages: lifecycle.dynamicPromptMessages,
+					promptSignature: lifecycle.promptSignature,
+					toolSignature: lifecycle.toolSignature,
+					dynamicHash: lifecycle.dynamicHash,
+					middlewareSnapshot: middleware.snapshot(),
+					protectedArtifactState,
+					apiKey: lifecycle.apiKey,
+					effectiveAutonomy: lifecycle.effectiveAutonomy,
+					budget: lifecycle.budget,
+					...(lifecycle.settings ? { settings: lifecycle.settings } : {}),
+				},
+				config ?? undefined,
+			);
+		} catch (error) {
+			leaseSlot.release();
+			if (req.lineage === undefined) await failQueuedAssignment(capacityLease.assignmentId);
+			throw error;
+		}
 		// The agent ledger is orchestrator-owned. The worker sends a body and
 		// nothing else; every attribution field below is stamped from this
 		// process's own admission record, so no worker-supplied value can reach
@@ -5217,6 +5278,7 @@ export function createDispatchBundle(
 					: {}),
 				...(lifecycle.pipeline ? { pipeline: lifecycle.pipeline } : {}),
 				...(lifecycle.briefing ? { briefing: lifecycle.briefing } : {}),
+				...(req.contextSeed ? { workerContext: structuredClone(req.contextSeed.provenance) } : {}),
 				...(req.gate !== undefined ? { gate: req.gate } : {}),
 				...(req.council !== undefined ? { council: req.council } : {}),
 				...(req.plan !== undefined ? { plan: req.plan } : {}),
@@ -5457,6 +5519,7 @@ export function createDispatchBundle(
 					: {}),
 				...(lifecycle.pipeline ? { pipeline: lifecycle.pipeline } : {}),
 				...(lifecycle.briefing ? { briefing: lifecycle.briefing } : {}),
+				...(req.contextSeed ? { workerContext: structuredClone(req.contextSeed.provenance) } : {}),
 				...(steering.length > 0 ? { steering: steering.map((entry) => ({ ...entry })) } : {}),
 				...(req.gate !== undefined ? { gate: req.gate } : {}),
 				...(req.council !== undefined ? { council: req.council } : {}),
@@ -6137,6 +6200,7 @@ export function createDispatchBundle(
 			targets.targetOrder,
 			providers,
 		);
+		assertWorkerContextRequest(req, target.runtime.kind === "http");
 		enforceCapabilityGate(target.target.id, target.modelCapabilities, req.requiredCapabilities);
 		const effectiveTools = withLedgerToolNarrowing(
 			effectiveToolNames(

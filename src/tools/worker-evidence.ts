@@ -168,6 +168,11 @@ export function receiptEvidenceLabels(
 		...receiptAdmissionLabels(receipt),
 		...receiptActivityLabels(receipt, status),
 		briefing,
+		...(receipt.workerContext
+			? [
+					`context=${receipt.workerContext.mode} tokens:${receipt.workerContext.estimatedTokens} omitted:${receipt.workerContext.omittedMessages} sha256:${receipt.workerContext.contentHash}`,
+				]
+			: []),
 		projectContext,
 	];
 }

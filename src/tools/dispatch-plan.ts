@@ -1,3 +1,9 @@
+import {
+	parseWorkerContextPolicy,
+	type WorkerContextPolicy,
+	type WorkerContextProvenance,
+} from "../domains/context/worker/contract.js";
+import { parseWorkerContextProvenance } from "../worker/context-seed.js";
 /**
  * Plan-scale dispatch detection and the operator-facing plan artifact.
  *
@@ -61,6 +67,8 @@ export interface DispatchPlanTaskView {
 	task: string;
 	/** Exact canonical bounded briefing approved for this task. */
 	briefing?: string;
+	context?: WorkerContextPolicy;
+	workerContext?: WorkerContextProvenance;
 	worktree?: true;
 	apply?: "merge" | "preserve";
 	worktreeDestination?: string;
@@ -138,6 +146,8 @@ export interface ResolvedDispatchPlanArtifact {
 			Pick<
 				DispatchPlanTaskView,
 				| "briefing"
+				| "context"
+				| "workerContext"
 				| "worktree"
 				| "apply"
 				| "worktreeDestination"
@@ -175,8 +185,12 @@ export function withResolvedPlanTaskPin(
 	options: { pinTask?: boolean; pinBriefing?: boolean } = {},
 ): DispatchRequest {
 	if (task === undefined) return request;
+	if (task.workerContext !== undefined && request.contextSeed?.provenance.contentHash !== task.workerContext.contentHash)
+		throw new Error("worker context: admitted seed no longer matches the plan");
 	const {
 		briefing: _briefing,
+		context: _context,
+		contextSeed: _contextSeed,
 		failover: _failover,
 		allowedCandidates: _candidates,
 		agentSelection: _agentSelection,
@@ -188,6 +202,8 @@ export function withResolvedPlanTaskPin(
 	return {
 		...base,
 		agentId: task.agent,
+		...(task.context ? { context: structuredClone(task.context) } : {}),
+		...(task.workerContext && request.contextSeed ? { contextSeed: structuredClone(request.contextSeed) } : {}),
 		executionRole: task.executionRole,
 		...(request.reservation !== undefined &&
 		(task.stepId !== null || (task.role !== undefined && task.position !== undefined))
@@ -476,6 +492,10 @@ function renderPlanText(
 			if (agentReasons !== undefined && agentReasons.length > 0)
 				lines.push(`    agent-exclusions=${agentReasons.join(";")}`);
 		}
+		if (task.context !== undefined)
+			lines.push(
+				`    context=${task.context.mode}${task.workerContext ? ` tokens=${task.workerContext.estimatedTokens} omitted=${task.workerContext.omittedMessages} sha256=${task.workerContext.contentHash}` : ""}`,
+			);
 		if (task.briefing !== undefined) {
 			lines.push(
 				`    briefing_bytes=${Buffer.byteLength(task.briefing, "utf8")} briefing_sha256=${createHash("sha256").update(task.briefing, "utf8").digest("hex")} briefing_preview=${JSON.stringify(safeField(task.briefing, false))}`,
@@ -497,10 +517,20 @@ function renderPlanText(
 
 function isResolvedTask(value: unknown): value is ResolvedDispatchPlanArtifact["tasks"][number] {
 	if (!isRecord(value)) return false;
+	try {
+		const context = value.context === undefined ? undefined : parseWorkerContextPolicy(value.context);
+		const provenance = value.workerContext === undefined ? undefined : parseWorkerContextProvenance(value.workerContext);
+		if (provenance && provenance.mode !== context?.mode) return false;
+		if (context && context.mode !== "isolated" && !provenance) return false;
+	} catch {
+		return false;
+	}
 	const allowedKeys = new Set([
 		"agent",
 		"task",
 		"briefing",
+		"context",
+		"workerContext",
 		"worktree",
 		"apply",
 		"worktreeDestination",
@@ -821,6 +851,8 @@ export function resolvedDispatchPlanFromArgs(args: Record<string, unknown>): Res
 			agent: task.agent.trim(),
 			task: task.task.trim(),
 			...(task.briefing !== undefined ? { briefing: task.briefing.trim() } : {}),
+			...(task.context !== undefined ? { context: parseWorkerContextPolicy(task.context) } : {}),
+			...(task.workerContext !== undefined ? { workerContext: structuredClone(task.workerContext) } : {}),
 			...(task.worktree === true
 				? {
 						worktree: true as const,

@@ -1,5 +1,6 @@
 import type { SafeEventBus } from "../core/event-bus.js";
 import type { AgentSpec } from "../domains/agents/spec.js";
+import type { WorkerContextSnapshot } from "../domains/context/worker/contract.js";
 import type { DispatchContract, DispatchRequest } from "../domains/dispatch/contract.js";
 import type { AgentRoleFactsResolver } from "../domains/dispatch/execution-role.js";
 import type { AutonomyLevel } from "../domains/safety/autonomy.js";
@@ -83,6 +84,8 @@ export type DispatchExecutionSnapshot =
 	| DispatchListExecutionSnapshot;
 
 export interface DispatchToolDeps {
+	/** Synchronous read of the active model-visible history, before admission can park. */
+	captureWorkerContext?: () => WorkerContextSnapshot | null;
 	dispatch: DispatchContract;
 	bus?: SafeEventBus;
 	/** Instance-scoped owner for ordinary tool-owned run streams and monitor tails. */
