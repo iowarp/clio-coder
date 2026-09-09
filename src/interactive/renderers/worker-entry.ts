@@ -75,6 +75,26 @@ function outcomeUnit(receipt: WorkerReceiptSummary, word: boolean): string {
 	return theme.fg("error", `${GLYPH.error} ${receipt.outcomeCode ?? receipt.outcome}`);
 }
 
+/**
+ * A settled worker whose answer is a question for the operator.
+ *
+ * Materio and WTF-P workers return `needs_input: checkpoint:decision` (or
+ * `task_blocked`, or a `## CHECKPOINT REACHED` heading) followed by the
+ * questions the orchestrator has to relay. That is a prose convention, not a
+ * receipt field, so the transcript reads the first line of the answer.
+ */
+const CHECKPOINT_PREFIX = /^\s*(?:needs_input\b|task_blocked\b|##\s*CHECKPOINT REACHED\b|##\s*BLOCKED\b)/iu;
+/** Rows a checkpoint's body keeps on the folded row: the questions are the point of the entry. */
+const CHECKPOINT_PREVIEW_ROWS = 16;
+
+export function workerNeedsInput(entry: Pick<WorkerEntryState, "text" | "receipt">): boolean {
+	return entry.receipt !== undefined && entry.receipt.stillRunning !== true && CHECKPOINT_PREFIX.test(entry.text);
+}
+
+function needsInputUnit(): string {
+	return theme.fg("warning", `${GLYPH.phaseBlocked} needs input`);
+}
+
 /** A block with no settled receipt yet: a spinner-free, honest "running". */
 function pendingUnit(entry: WorkerEntryState): string {
 	return theme.fg(
@@ -100,6 +120,7 @@ function isPending(entry: WorkerEntryState): boolean {
  */
 function footerUnits(entry: WorkerEntryState, receipt: WorkerReceiptSummary): string[] {
 	const units = [outcomeUnit(receipt, true)];
+	if (workerNeedsInput(entry)) units.push(needsInputUnit());
 	if (receipt.exitCode !== undefined && receipt.exitCode !== 0) {
 		units.push(theme.fg("error", `exit=${receipt.exitCode}`));
 	}
@@ -374,7 +395,11 @@ function footerLine(entry: WorkerEntryState, width: number): string {
 function actionLine(entry: WorkerEntryState, width: number): string {
 	const identity = `${originGlyph(entry)} ${identityUnits(entry).join(dim(SEPARATOR))}`;
 	const status =
-		isPending(entry) || entry.receipt === undefined ? pendingUnit(entry) : outcomeUnit(entry.receipt, false);
+		isPending(entry) || entry.receipt === undefined
+			? pendingUnit(entry)
+			: workerNeedsInput(entry)
+				? needsInputUnit()
+				: outcomeUnit(entry.receipt, false);
 	const elapsed =
 		entry.receipt?.durationMs === undefined ? "" : dim(`${SEPARATOR}${formatCompactMs(entry.receipt.durationMs)}`);
 	const full = ` ${status}${elapsed}`;
@@ -413,7 +438,14 @@ export function renderWorkerEntryLines(
 		].map(redactSecretString);
 	}
 	const budget = (limit: number) => previewBudget(limit, options.terminalRows);
-	const summary = bodySourceLines(entry).flatMap((line) => railLines(redactSecretString(line), "muted", safeWidth));
+	// A checkpoint's body is the question the operator answers next, so it keeps
+	// its rows whatever the transcript preset hides of an ordinary answer, and
+	// it renders in the warning token rather than as folded prose.
+	const needsInput = workerNeedsInput(entry);
+	const summaryRows = needsInput ? CHECKPOINT_PREVIEW_ROWS : budget(detail.workerRows);
+	const summary = bodySourceLines(entry).flatMap((line) =>
+		railLines(redactSecretString(line), needsInput ? "warning" : "muted", safeWidth),
+	);
 	const actions = entry.progress
 		? [...entry.progress.recentActions]
 				.reverse()
@@ -431,7 +463,7 @@ export function renderWorkerEntryLines(
 	const presented = presentedContractAnswer(entry)?.footer;
 	return [
 		actionLine(entry, safeWidth),
-		...(detail.workerRows > 0 ? previewRows(summary, budget(detail.workerRows), safeWidth, entry.pending) : []),
+		...(detail.workerRows > 0 || needsInput ? previewRows(summary, summaryRows, safeWidth, entry.pending) : []),
 		...previewRows(attemptLines(entry, safeWidth), budget(detail.errorRows), safeWidth, true),
 		...(tools ? [tools] : []),
 		...(detail.workerActivity ? previewRows(trail, budget(4), safeWidth, true) : []),
