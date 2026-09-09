@@ -8,7 +8,6 @@ import { createSafeEventBus } from "../../src/core/event-bus.js";
 import { createAgentsBundle } from "../../src/domains/agents/extension.js";
 import { listFleetContracts, loadFleetContract } from "../../src/domains/agents/fleet-contract.js";
 import { discoverAgentRecipes } from "../../src/domains/agents/registry.js";
-import { installExtension } from "../../src/domains/extensions/state.js";
 import { disablePlugin, installPlugin, reloadPluginResources } from "../../src/domains/plugins/index.js";
 import { resolvePackageReferences } from "../../src/domains/resources/package-references.js";
 import { loadPromptTemplates } from "../../src/domains/resources/prompts/loader.js";
@@ -93,6 +92,28 @@ Verify supplied evidence.
 	);
 }
 
+/** A second, deliberately minimal plugin so namespace precedence has a real peer. */
+function promptPlugin(root: string, namespace: string, body: string): void {
+	write(root, `prompts/${namespace}/help.md`, `---\ndescription: ${body}\n---\n${body}\n`);
+	write(
+		root,
+		"plugin.json",
+		JSON.stringify({
+			$schema: "https://agent-plugins.org/schemas/1.0.0/plugin.schema.json",
+			name: `${namespace}-peer`,
+			version: "1.0.0",
+			description: "Peer namespace fixture",
+			extensions: {
+				"ai.iowarp.clio": {
+					manifestVersion: 1,
+					resources: { prompts: "prompts" },
+					components: [{ kind: "prompt", id: "help", path: `prompts/${namespace}/help.md` }],
+				},
+			},
+		}),
+	);
+}
+
 it("loads installed plugin prompts, bound skills, recipes and fleets with contained references and stable names", async () => {
 	const env = await isolateClioEnv("clio-plugin-quote'-load-");
 	try {
@@ -136,7 +157,7 @@ it("loads installed plugin prompts, bound skills, recipes and fleets with contai
 	}
 });
 
-it("keeps legacy namespaces and user overrides; disabled project plugin suppresses its user copy", async () => {
+it("keeps peer plugin namespaces and user overrides; disabled project plugin suppresses its user copy", async () => {
 	const env = await isolateClioEnv("clio-plugin-precedence-");
 	try {
 		const cwd = join(env.dir, "workspace");
@@ -144,18 +165,10 @@ it("keeps legacy namespaces and user overrides; disabled project plugin suppress
 		const source = join(env.dir, "source");
 		fixture(source);
 		ok(installPlugin(source, { cwd, scope: "user" }).plugin?.loadable);
-		write(
-			join(env.dir, "legacy"),
-			"clio-coder-extension.yaml",
-			"manifestVersion: 1\nid: wtfp\nname: WTF-P fixture\nversion: 1.0.0\ndescription: Legacy fixture\nresources: {prompts: prompts}\n",
-		);
-		write(join(env.dir, "legacy"), "prompts/wtfp/help.md", "---\ndescription: Legacy help\n---\nLegacy help\n");
-		ok(installExtension(join(env.dir, "legacy"), { cwd, scope: "user" }).extension?.loadable);
-		write(
-			join(env.dir, "config"),
-			"prompts/materio/help.md",
-			"---\ndescription: User help\n---\nUser override\n",
-		);
+		const peer = join(env.dir, "peer");
+		promptPlugin(peer, "wtfp", "Peer help");
+		ok(installPlugin(peer, { cwd, scope: "user" }).plugin?.loadable);
+		write(join(env.dir, "config"), "prompts/materio/help.md", "---\ndescription: User help\n---\nUser override\n");
 		strictEqual(
 			loadPromptTemplates({ cwd })
 				.items.find((item) => item.name === "materio:help")
@@ -167,7 +180,10 @@ it("keeps legacy namespaces and user overrides; disabled project plugin suppress
 		disablePlugin("resource-fixture", { cwd, scope: "project" });
 		reloadPluginResources(cwd);
 		ok(!discoverAgentRecipes(cwd).some((item) => item.id === "materio-researcher"));
-		ok(loadPromptTemplates({ cwd }).items.some((item) => item.name === "wtfp:help"));
+		ok(
+			loadPromptTemplates({ cwd }).items.some((item) => item.name === "wtfp:help"),
+			"a peer plugin keeps its namespace when another plugin is suppressed",
+		);
 	} finally {
 		env.restore();
 	}
@@ -186,7 +202,7 @@ it("rejects missing and escaping package references without changing non-package
 		symlinkSync(join(env.dir, "outside"), join(root, "assets/escape"));
 		throws(() => resolvePackageReferences("${pluginRoot}/assets/escape", context), /escaping/);
 		strictEqual(resolvePackageReferences("${pluginRoot}/assets/reference.txt", {}), "${pluginRoot}/assets/reference.txt");
-		match(resolvePackageReferences("${extensionRoot}/assets/reference.txt", { rootPath: root }), /reference.txt$/);
+		match(resolvePackageReferences("${extensionRoot}/assets/reference.txt", context), /reference.txt$/);
 	} finally {
 		env.restore();
 	}

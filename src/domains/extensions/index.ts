@@ -27,13 +27,9 @@ export {
 	type ExtensionReloadRejection,
 	type ExtensionReloadRejectionReason,
 	type ExtensionReloadResult,
-	type ExtensionResourceKind,
-	type ExtensionResourceRoot,
 	type ExtensionScope,
 	type ExtensionSnapshot,
 	type ExtensionSnapshotDiagnostics,
-	type ExtensionStateUpgradeReport,
-	enabledExtensionResourceRoots,
 	enableExtension,
 	extensionManifestYaml,
 	extensionSnapshotFor,
@@ -46,7 +42,6 @@ export {
 	listInstalledExtensions,
 	parseExtensionManifest,
 	removeExtension,
-	upgradeLegacyExtensionInstallState,
 } from "./manager.js";
 export { ExtensionsManifest } from "./manifest.js";
 export {

@@ -1,4 +1,4 @@
-import { lstatSync, readdirSync, readFileSync, realpathSync } from "node:fs";
+import { lstatSync, readdirSync, readFileSync } from "node:fs";
 import { homedir } from "node:os";
 import path from "node:path";
 import { parseCommandArgs, substituteArgs } from "../../../engine/prompt-templates.js";
@@ -42,7 +42,7 @@ export interface PromptTemplate {
 export interface PromptTemplateRoot {
 	plugin?: boolean;
 	path: string;
-	/** Present only for an installed extension resource root. */
+	/** Present only for an installed plugin resource root. */
 	rootPath?: string;
 	scope: ResourceScope;
 	source?: string;
@@ -150,20 +150,6 @@ function fallbackDescription(body: string): string {
 	return normalized.length > 60 ? `${normalized.slice(0, 57)}...` : normalized;
 }
 
-// Keep the suffix deliberately conservative. Prompt prose commonly places a
-// comma, parenthesis, or full stop immediately after an @path; treating that
-// punctuation as part of the filesystem reference makes a valid template look
-// unresolved. Extension bundles use portable path components, so these are the
-// only characters needed in a reference while still allowing `..` to be
-// detected and rejected by the containment check below.
-const EXTENSION_ROOT_REFERENCE = /\$\{extensionRoot\}(\/[A-Za-z0-9._~%+@/-]*)?/g;
-const EXTENSION_ROOT_TOKEN = "$" + "{extensionRoot}";
-
-function contained(root: string, candidate: string): boolean {
-	const relative = path.relative(root, candidate);
-	return relative === "" || (!relative.startsWith(`..${path.sep}`) && relative !== ".." && !path.isAbsolute(relative));
-}
-
 /**
  * The outcome of a step that may leave the template with no usable body.
  * `reason` is the one sentence that becomes both the diagnostic the `/prompts`
@@ -173,42 +159,19 @@ function contained(root: string, candidate: string): boolean {
 type BodyResolution = { body: string } | { reason: string };
 
 /**
- * Resolve only existing paths contained by the declaring extension package.
+ * Resolve only existing paths contained by the declaring plugin package.
  *
  * The safety half is unchanged: a missing or escaping reference never expands
  * and never reads outside the package. What changed is what the caller does
  * with the failure, which used to be dropping the template entirely.
  */
-function resolveExtensionReferences(body: string, root: PromptTemplateRoot): BodyResolution {
-	if (root.plugin) {
-		try {
-			return { body: resolvePackageReferences(body, root) };
-		} catch (error) {
-			return { reason: `prompt template: ${error instanceof Error ? error.message : String(error)}` };
-		}
-	}
-	if (root.rootPath === undefined || !body.includes(EXTENSION_ROOT_TOKEN)) return { body };
-	let canonicalRoot: string;
+function resolvePackageRootReferences(body: string, root: PromptTemplateRoot): BodyResolution {
+	if (!root.plugin) return { body };
 	try {
-		canonicalRoot = realpathSync(root.rootPath);
+		return { body: resolvePackageReferences(body, root) };
 	} catch (error) {
-		return { reason: `extension root could not be resolved: ${error instanceof Error ? error.message : String(error)}` };
+		return { reason: `prompt template: ${error instanceof Error ? error.message : String(error)}` };
 	}
-	let invalid: string | null = null;
-	const resolved = body.replace(EXTENSION_ROOT_REFERENCE, (reference, suffix: string | undefined) => {
-		const candidate = path.resolve(canonicalRoot, `.${suffix ?? ""}`);
-		try {
-			const canonicalCandidate = realpathSync(candidate);
-			if (!contained(canonicalRoot, canonicalCandidate)) invalid = reference;
-		} catch {
-			invalid = reference;
-		}
-		return candidate;
-	});
-	if (invalid !== null) {
-		return { reason: `prompt template has an unresolved or escaping extension reference: ${invalid}` };
-	}
-	return { body: resolved };
 }
 
 /**
@@ -281,7 +244,7 @@ function loadPromptFile(
 
 	const { frontmatter, body } = splitOptionalFrontmatter(raw, filePath, diagnostics);
 	const declaredDescription = stringField(frontmatter, "description");
-	const resolution = resolveExtensionReferences(body, root);
+	const resolution = resolvePackageRootReferences(body, root);
 	if ("reason" in resolution) {
 		return unavailableTemplate(name, filePath, root, resolution.reason, diagnostics, declaredDescription ?? undefined);
 	}

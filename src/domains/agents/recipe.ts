@@ -131,7 +131,7 @@ export interface AgentRecipe {
 	resultContract: ResultContract;
 	product?: AgentProduct;
 	tags: ReadonlyArray<string>;
-	source: "builtin" | "extension" | "plugin" | "user" | "project";
+	source: "builtin" | "plugin" | "user" | "project";
 	filepath: string;
 	/** Persona prompt body. */
 	body: string;

@@ -1,30 +1,19 @@
-import { type Dirent, existsSync, lstatSync, readdirSync, readFileSync, realpathSync, statSync } from "node:fs";
+import { type Dirent, existsSync, readdirSync, readFileSync, realpathSync, statSync } from "node:fs";
 import path from "node:path";
 import { parse as parseYaml, stringify as stringifyYaml } from "yaml";
 import { parseExtensionCapabilities, resolveExtensionEntrypoint } from "./command-schema.js";
 import { evaluateClioCompatibility } from "./compatibility.js";
-import type {
-	ClioExtensionManifest,
-	ExtensionCandidate,
-	ExtensionDiagnostic,
-	ExtensionManifestResources,
-} from "./types.js";
+import type { ClioExtensionManifest, ExtensionCandidate, ExtensionDiagnostic } from "./types.js";
 
 const MANIFEST_NAMES = ["clio-coder-extension.yaml", "clio-coder-extension.yml", "clio-coder-extension.json"] as const;
-const MANIFEST_KEYS = new Set([
-	"manifestVersion",
-	"id",
-	"name",
-	"version",
-	"description",
-	"resources",
-	"tools",
-	"settings",
-	"compatibility",
-	"capabilities",
-]);
-const RESOURCE_KEYS = new Set(["skills", "prompts", "agents", "fleets", "themes"]);
+const MANIFEST_KEYS = new Set(["id", "name", "version", "description", "compatibility", "capabilities"]);
 const COMPATIBILITY_KEYS = new Set(["clio"]);
+/**
+ * Keys a domain package used to declare here. They are named so the refusal
+ * points at the plugin installer instead of reading as a typo.
+ */
+const PLUGIN_OWNED_KEYS = new Set(["resources", "skills", "prompts", "agents", "fleets", "themes"]);
+const PLUGIN_GUIDANCE = "domain resources belong in a plugin: clio-coder plugins install <path>";
 
 function compareNames(a: { name: string }, b: { name: string }): number {
 	return a.name < b.name ? -1 : a.name > b.name ? 1 : 0;
@@ -68,181 +57,21 @@ function rejectUnknownKeys(
 	}
 }
 
-function normalizeResources(
-	value: unknown,
+function rejectManifestKeys(
+	value: Record<string, unknown>,
 	manifestPath: string,
 	diagnostics: ExtensionDiagnostic[],
-): ExtensionManifestResources {
-	if (value === undefined) return {};
-	if (!isRecord(value)) {
-		diagnostics.push({ type: "error", message: "resources must be an object", path: manifestPath });
-		return {};
-	}
-	rejectUnknownKeys(value, RESOURCE_KEYS, "resources", manifestPath, diagnostics);
-	const out: ExtensionManifestResources = {};
-	for (const kind of RESOURCE_KEYS) {
-		if (value[kind] === undefined) continue;
-		const resourcePath = trimString(value[kind]);
-		if (!resourcePath) {
-			diagnostics.push({
-				type: "error",
-				message: `resources.${kind} must be a non-empty string`,
-				path: manifestPath,
-			});
-			continue;
-		}
-		out[kind as keyof ExtensionManifestResources] = resourcePath;
-	}
-	return out;
-}
-
-function contained(root: string, candidate: string): boolean {
-	const relative = path.relative(root, candidate);
-	return relative === "" || (!relative.startsWith(`..${path.sep}`) && relative !== ".." && !path.isAbsolute(relative));
-}
-
-function validateResourceTree(
-	root: string,
-	resourcePath: string,
-	kind: string,
-	diagnostics: ExtensionDiagnostic[],
 ): void {
-	if (path.isAbsolute(resourcePath)) {
-		diagnostics.push({ type: "error", message: `resources.${kind} must be relative`, path: resourcePath });
-		return;
-	}
-	const resolvedRoot = path.resolve(root);
-	const resolved = path.resolve(resolvedRoot, resourcePath);
-	if (!contained(resolvedRoot, resolved) || resolved === resolvedRoot) {
-		diagnostics.push({ type: "error", message: `resources.${kind} escapes the extension root`, path: resourcePath });
-		return;
-	}
-	let canonicalRoot: string;
-	let canonicalResource: string;
-	try {
-		canonicalRoot = realpathSync(resolvedRoot);
-		canonicalResource = realpathSync(resolved);
-		if (!statSync(resolved).isDirectory()) {
-			diagnostics.push({ type: "error", message: `resources.${kind} is not a directory`, path: resolved });
-			return;
-		}
-	} catch (error) {
+	for (const key of Object.keys(value).sort()) {
+		if (MANIFEST_KEYS.has(key)) continue;
 		diagnostics.push({
 			type: "error",
-			message: `resources.${kind} cannot be resolved: ${error instanceof Error ? error.message : String(error)}`,
-			path: resolved,
+			message: PLUGIN_OWNED_KEYS.has(key)
+				? `harness extensions cannot declare '${key}'; ${PLUGIN_GUIDANCE}`
+				: `unknown manifest key '${key}'`,
+			path: manifestPath,
 		});
-		return;
 	}
-	if (!contained(canonicalRoot, canonicalResource)) {
-		diagnostics.push({ type: "error", message: `resources.${kind} escapes through a symbolic link`, path: resolved });
-		return;
-	}
-
-	const pending = [resolved];
-	while (pending.length > 0) {
-		const directory = pending.pop();
-		if (!directory) continue;
-		for (const entry of readdirSync(directory, { withFileTypes: true }).sort(compareNames)) {
-			const candidate = path.join(directory, entry.name);
-			if (entry.isSymbolicLink()) {
-				try {
-					const canonicalTarget = realpathSync(candidate);
-					if (!contained(canonicalRoot, canonicalTarget)) {
-						diagnostics.push({
-							type: "error",
-							message: `resources.${kind} contains an escaping symbolic link`,
-							path: candidate,
-						});
-						continue;
-					}
-					const targetStat = statSync(candidate);
-					if (!targetStat.isDirectory() && !targetStat.isFile()) {
-						diagnostics.push({
-							type: "error",
-							message: `resources.${kind} contains a symbolic link to an unsupported filesystem entry`,
-							path: candidate,
-						});
-					} else if (targetStat.isFile() && targetStat.nlink !== 1) {
-						diagnostics.push({
-							type: "error",
-							message: `resources.${kind} contains a symbolic link to a hard-linked file`,
-							path: candidate,
-						});
-					}
-				} catch (error) {
-					diagnostics.push({
-						type: "error",
-						message: `resources.${kind} contains an unresolved symbolic link: ${error instanceof Error ? error.message : String(error)}`,
-						path: candidate,
-					});
-				}
-			} else if (entry.isDirectory()) {
-				pending.push(candidate);
-			} else if (entry.isFile()) {
-				try {
-					if (lstatSync(candidate).nlink !== 1) {
-						diagnostics.push({
-							type: "error",
-							message: `resources.${kind} contains a hard-linked file`,
-							path: candidate,
-						});
-					}
-				} catch (error) {
-					diagnostics.push({
-						type: "error",
-						message: `resources.${kind} entry could not be inspected: ${error instanceof Error ? error.message : String(error)}`,
-						path: candidate,
-					});
-				}
-			} else {
-				diagnostics.push({
-					type: "error",
-					message: `resources.${kind} contains an unsupported filesystem entry`,
-					path: candidate,
-				});
-			}
-		}
-	}
-}
-
-function validateResourceRoots(
-	root: string,
-	resources: ExtensionManifestResources,
-	diagnostics: ExtensionDiagnostic[],
-): void {
-	for (const [kind, resourcePath] of Object.entries(resources)) {
-		if (resourcePath) validateResourceTree(root, resourcePath, kind, diagnostics);
-	}
-}
-
-function stringArray(
-	value: unknown,
-	field: "tools" | "settings",
-	manifestPath: string,
-	diagnostics: ExtensionDiagnostic[],
-): string[] | undefined {
-	if (value === undefined) return undefined;
-	if (!Array.isArray(value)) {
-		diagnostics.push({ type: "error", message: `${field} must be an array of non-empty strings`, path: manifestPath });
-		return undefined;
-	}
-	const out: string[] = [];
-	const seen = new Set<string>();
-	for (const entry of value) {
-		const parsed = trimString(entry);
-		if (!parsed) {
-			diagnostics.push({ type: "error", message: `${field} must contain only non-empty strings`, path: manifestPath });
-			continue;
-		}
-		if (seen.has(parsed)) {
-			diagnostics.push({ type: "error", message: `${field} contains duplicate entry '${parsed}'`, path: manifestPath });
-			continue;
-		}
-		seen.add(parsed);
-		out.push(parsed);
-	}
-	return out.length > 0 ? out : undefined;
 }
 
 export function parseExtensionManifest(
@@ -256,10 +85,7 @@ export function parseExtensionManifest(
 	if (!isRecord(value)) {
 		return { diagnostics: [{ type: "error", message: "extension manifest must be an object", path: manifestPath }] };
 	}
-	rejectUnknownKeys(value, MANIFEST_KEYS, "manifest", manifestPath, diagnostics);
-	if (value.manifestVersion !== 1 && value.manifestVersion !== 2) {
-		diagnostics.push({ type: "error", message: "manifestVersion must be 1 or 2", path: manifestPath });
-	}
+	rejectManifestKeys(value, manifestPath, diagnostics);
 	const id = trimString(value.id);
 	const name = trimString(value.name) ?? id;
 	const version = trimString(value.version);
@@ -271,19 +97,8 @@ export function parseExtensionManifest(
 	}
 	if (!version) diagnostics.push({ type: "error", message: "version is required", path: manifestPath });
 	if (!description) diagnostics.push({ type: "error", message: "description is required", path: manifestPath });
-	const resources = normalizeResources(value.resources, manifestPath, diagnostics);
-	const tools = stringArray(value.tools, "tools", manifestPath, diagnostics);
-	const settings = stringArray(value.settings, "settings", manifestPath, diagnostics);
 	let capabilities: ClioExtensionManifest["capabilities"];
-	if (value.manifestVersion === 2) {
-		for (const field of ["resources", "tools", "settings"]) {
-			if (value[field] !== undefined)
-				diagnostics.push({
-					type: "error",
-					message: `v2 harness extensions cannot declare ${field}; domain resources belong in plugins`,
-					path: manifestPath,
-				});
-		}
+	if (value.capabilities !== undefined) {
 		try {
 			capabilities = parseExtensionCapabilities(value.capabilities, id ?? "");
 		} catch (error) {
@@ -293,12 +108,6 @@ export function parseExtensionManifest(
 				path: manifestPath,
 			});
 		}
-	} else if (value.capabilities !== undefined) {
-		diagnostics.push({
-			type: "error",
-			message: "executable capabilities require manifestVersion: 2",
-			path: manifestPath,
-		});
 	}
 	let compatibility: ClioExtensionManifest["compatibility"];
 	if (value.compatibility !== undefined) {
@@ -334,16 +143,7 @@ export function parseExtensionManifest(
 	if (!id || !name || !version || !description || diagnostics.some((diag) => diag.type === "error")) {
 		return { diagnostics };
 	}
-	const manifest: ClioExtensionManifest = {
-		manifestVersion: value.manifestVersion === 2 ? 2 : 1,
-		id,
-		name,
-		version,
-		description,
-		resources,
-	};
-	if (tools) manifest.tools = tools;
-	if (settings) manifest.settings = settings;
+	const manifest: ClioExtensionManifest = { id, name, version, description };
 	if (capabilities) manifest.capabilities = capabilities;
 	if (compatibility && Object.keys(compatibility).length > 0) manifest.compatibility = compatibility;
 	const clioRange = manifest.compatibility?.clio;
@@ -383,7 +183,6 @@ export function loadManifestFromRoot(root: string): ExtensionCandidate {
 	}
 	try {
 		const parsed = parseExtensionManifest(readJsonOrYaml(manifestPath), manifestPath);
-		if (parsed.manifest) validateResourceRoots(root, parsed.manifest.resources, parsed.diagnostics);
 		for (const tool of parsed.manifest?.capabilities?.tools ?? []) {
 			try {
 				resolveExtensionEntrypoint(root, tool.entrypoint);
@@ -548,9 +347,5 @@ export function discoverExtensionPackages(root: string): ExtensionCandidate[] {
 }
 
 export function extensionManifestYaml(manifest: ClioExtensionManifest): string {
-	if (manifest.manifestVersion === 2) {
-		const { resources: _resources, ...harness } = manifest;
-		return stringifyYaml(harness);
-	}
 	return stringifyYaml(manifest);
 }

@@ -2,13 +2,10 @@ import { createHash } from "node:crypto";
 import { realpathSync } from "node:fs";
 import path from "node:path";
 import { parse as parseYaml } from "yaml";
-import { extensionResourcePath } from "./resource-path.js";
 import { type InstalledExtensionRecord, listInstalledExtensionRecords } from "./state.js";
 import {
 	type ExtensionDiagnostic,
 	type ExtensionHookSource,
-	type ExtensionResourceKind,
-	type ExtensionResourceRoot,
 	type ExtensionSnapshot,
 	type ExtensionSnapshotDiagnostics,
 	isLoadableExtension,
@@ -17,8 +14,6 @@ import {
 export const EXTENSION_SNAPSHOT_DIAGNOSTIC_CAP = 200;
 export const EXTENSION_SNAPSHOT_DIAGNOSTIC_PER_PACKAGE_CAP = 20;
 export const EXTENSION_SNAPSHOT_DIAGNOSTIC_MESSAGE_CAP = 512;
-
-const RESOURCE_KINDS: ReadonlyArray<ExtensionResourceKind> = ["skills", "prompts", "agents", "fleets", "themes"];
 
 export interface BuildExtensionSnapshotInput {
 	cwd: string;
@@ -74,37 +69,15 @@ function boundedDiagnostics(records: ReadonlyArray<InstalledExtensionRecord>): E
 export function buildExtensionSnapshot(input: BuildExtensionSnapshotInput): ExtensionSnapshot {
 	const cwd = realpathSync(path.resolve(input.cwd));
 	const records = (input.listRecords ?? listInstalledExtensionRecords)(cwd, { all: true });
-	const resourceRoots: Record<ExtensionResourceKind, ExtensionResourceRoot[]> = {
-		skills: [],
-		prompts: [],
-		agents: [],
-		fleets: [],
-		themes: [],
-	};
 	const hookSources: ExtensionHookSource[] = [];
 	const digestPackages: unknown[] = [];
 
 	for (const record of records) {
 		const { entry } = record;
-		const packageRoots: Array<{ kind: ExtensionResourceKind; path: string }> = [];
+		const commandTools: string[] = [];
 		let hooksDigest: string | undefined;
 		if (isLoadableExtension(entry)) {
-			for (const kind of RESOURCE_KINDS) {
-				const relative = entry.resources[kind];
-				if (!relative) continue;
-				const resolved = extensionResourcePath(entry.rootPath, relative);
-				if (!resolved) continue;
-				resourceRoots[kind].push({
-					id: entry.id,
-					scope: entry.scope,
-					path: resolved,
-					rootPath: entry.rootPath,
-					source: `extension:${entry.scope}:${entry.id}`,
-					provenance: entry.provenance,
-					generation: input.generation,
-				});
-				packageRoots.push({ kind, path: resolved });
-			}
+			for (const tool of entry.capabilities?.tools ?? []) commandTools.push(tool.name);
 			const hookBytes = record.captured?.get("hooks.yaml");
 			if (hookBytes !== undefined) {
 				hooksDigest = createHash("sha256").update(hookBytes).digest("hex");
@@ -128,7 +101,7 @@ export function buildExtensionSnapshot(input: BuildExtensionSnapshotInput): Exte
 			scope: entry.scope,
 			loadable: entry.loadable,
 			...(entry.provenance ? { provenance: entry.provenance } : {}),
-			resourceRoots: packageRoots,
+			commandTools,
 			...(hooksDigest ? { hooksDigest } : {}),
 		});
 	}
@@ -140,7 +113,6 @@ export function buildExtensionSnapshot(input: BuildExtensionSnapshotInput): Exte
 		builtAt: (input.now ?? (() => new Date()))().toISOString(),
 		digest: createHash("sha256").update(canonicalJson(digestPackages)).digest("hex"),
 		packages: records.map((record) => record.entry),
-		resourceRoots,
 		hookSources,
 		diagnostics: boundedDiagnostics(records),
 	};
@@ -155,7 +127,7 @@ function packageFingerprints(snapshot: ExtensionSnapshot): Map<string, string> {
 			scope: entry.scope,
 			loadable: entry.loadable,
 			provenance: entry.provenance ?? null,
-			resources: entry.resources,
+			capabilities: entry.capabilities ?? null,
 		});
 		grouped.set(entry.id, list);
 	}

@@ -41,26 +41,23 @@ describe("middleware hook boundary", () => {
 		for (const root of roots.splice(0)) rmSync(root, { recursive: true, force: true });
 	});
 
-	it("does not admit hooks from an invalid installed extension", () => {
+	it("does not admit hooks from an unverifiable installed extension", () => {
 		const project = scratch();
 		const outside = scratch();
 		const extensionRoot = path.join(project, ".clio-coder", "extensions", "invalid-hooks");
 		mkdirSync(extensionRoot, { recursive: true });
-		mkdirSync(path.join(outside, "agents"));
+		mkdirSync(path.join(outside, "payload"));
 		writeFileSync(
 			path.join(extensionRoot, "clio-coder-extension.yaml"),
 			[
-				"manifestVersion: 1",
 				"id: invalid-hooks",
 				"name: Invalid Hooks",
 				"version: 1.0.0",
 				"description: Invalid hook fixture.",
-				"resources:",
-				"  agents: agents",
 				"",
 			].join("\n"),
 		);
-		symlinkSync(path.join(outside, "agents"), path.join(extensionRoot, "agents"), "dir");
+		symlinkSync(path.join(outside, "payload"), path.join(extensionRoot, "payload"), "dir");
 		writeFileSync(
 			path.join(extensionRoot, "hooks.yaml"),
 			"- id: must-not-load\n  on: before_tool\n  kind: prompt\n  message: unsafe\n",
@@ -77,15 +74,9 @@ describe("middleware hook boundary", () => {
 		const source = scratch();
 		writeFileSync(
 			path.join(source, "clio-coder-extension.yaml"),
-			[
-				"manifestVersion: 1",
-				"id: receipt-hooks",
-				"name: Receipt Hooks",
-				"version: 1.0.0",
-				"description: Hook receipt provenance fixture.",
-				"resources: {}",
-				"",
-			].join("\n"),
+			["id: receipt-hooks", "name: Receipt Hooks", "version: 1.0.0", "description: Hook receipt provenance fixture.", ""].join(
+				"\n",
+			),
 		);
 		writeFileSync(
 			path.join(source, "hooks.yaml"),

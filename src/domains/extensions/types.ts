@@ -1,13 +1,4 @@
 export type ExtensionScope = "user" | "project";
-export type ExtensionResourceKind = "skills" | "prompts" | "agents" | "fleets" | "themes";
-
-export interface ExtensionManifestResources {
-	skills?: string;
-	prompts?: string;
-	agents?: string;
-	fleets?: string;
-	themes?: string;
-}
 
 export interface ExtensionCommandTool {
 	name: string;
@@ -23,16 +14,18 @@ export interface ExtensionCapabilities {
 	tools: ExtensionCommandTool[];
 }
 
+/**
+ * The harness extension contract. An extension contributes executable runtime
+ * capability to Clio: command tools declared here and hook declarations
+ * captured from `hooks.yaml` at the package root. Prompts, skills, agents,
+ * fleets, and reference files are plugin content and have no manifest key.
+ */
 export interface ClioExtensionManifest {
-	manifestVersion: 1 | 2;
 	id: string;
 	name: string;
 	version: string;
 	description: string;
-	resources: ExtensionManifestResources;
-	tools?: string[];
-	settings?: string[];
-	/** Version 2 capabilities are executable harness tools, never resource bundles. */
+	/** Absent for a package whose only capability is its `hooks.yaml`. */
 	capabilities?: ExtensionCapabilities;
 	compatibility?: { clio?: string };
 }
@@ -61,24 +54,22 @@ export interface InstalledExtension {
 	name: string;
 	version: string;
 	description: string;
-	manifestVersion?: 1 | 2;
 	capabilities?: ExtensionCapabilities;
 	scope: ExtensionScope;
 	rootPath: string;
 	manifestPath: string;
 	enabled: boolean;
-	/** Whether the complete manifest and declared resource tree are valid. */
+	/** Whether the complete manifest and the installed tree are valid. */
 	valid: boolean;
 	/** Whether this package admits the running Clio version. */
 	compatible: boolean;
 	effective: boolean;
-	/** The single admission decision for extension-owned resources and hooks. */
+	/** The single admission decision for extension-owned tools and hooks. */
 	loadable: boolean;
 	/** Present exactly when the installed tree and manifest bytes were reverified. */
 	provenance?: ExtensionProvenance;
 	/** Digest observed while checking installed content on this load. */
 	observedContentDigest?: string;
-	resources: ExtensionManifestResources;
 	overriddenBy?: ExtensionScope;
 	diagnostics: ExtensionDiagnostic[];
 }
@@ -95,17 +86,6 @@ export interface ExtensionCandidate {
 	manifest?: ClioExtensionManifest;
 	valid: boolean;
 	diagnostics: ExtensionDiagnostic[];
-}
-
-export interface ExtensionResourceRoot {
-	id: string;
-	scope: ExtensionScope;
-	path: string;
-	rootPath: string;
-	source: string;
-	provenance: ExtensionProvenance;
-	/** Zero denotes an ephemeral, uncommitted projection. */
-	generation: number;
 }
 
 export interface ExtensionHookSource {
@@ -130,7 +110,6 @@ export interface ExtensionSnapshot {
 	/** Content identity; generation, timestamp, and diagnostic text are excluded. */
 	digest: string;
 	packages: ReadonlyArray<InstalledExtension>;
-	resourceRoots: Readonly<Record<ExtensionResourceKind, ReadonlyArray<ExtensionResourceRoot>>>;
 	hookSources: ReadonlyArray<ExtensionHookSource>;
 	diagnostics: ExtensionSnapshotDiagnostics;
 }
@@ -206,14 +185,6 @@ export interface ExtensionMutationResult {
 	removed?: { id: string; scope: ExtensionScope; path: string };
 	recovery?: { stateBackup?: string; packageBackup?: string };
 	diagnostics: ExtensionDiagnostic[];
-}
-
-export interface ExtensionStateUpgradeReport {
-	scope: ExtensionScope;
-	statePath: string;
-	backupPath?: string;
-	upgraded: string[];
-	refused: Array<{ id: string; reason: string }>;
 }
 
 export interface ExtensionState {

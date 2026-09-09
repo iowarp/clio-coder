@@ -5,7 +5,7 @@ import path from "node:path";
 import { afterEach, describe, it } from "node:test";
 import type { DomainContext } from "../../src/core/domain-loader.js";
 import { createExtensionsBundle } from "../../src/domains/extensions/extension.js";
-import { enabledExtensionResourceRoots } from "../../src/domains/extensions/resources.js";
+import { extensionSnapshotFor } from "../../src/domains/extensions/resources.js";
 import { buildExtensionSnapshot, diffExtensionSnapshots } from "../../src/domains/extensions/snapshot.js";
 import {
 	bindExtensionSnapshotStore,
@@ -26,19 +26,10 @@ function scratch(): string {
 }
 
 function writePackage(root: string, id: string, hookMessage = "generation one"): void {
-	mkdirSync(path.join(root, "skills"), { recursive: true });
+	mkdirSync(root, { recursive: true });
 	writeFileSync(
 		path.join(root, "clio-coder-extension.yaml"),
-		[
-			"manifestVersion: 1",
-			`id: ${id}`,
-			`name: ${id}`,
-			"version: 1.0.0",
-			"description: Snapshot fixture.",
-			"resources:",
-			"  skills: skills",
-			"",
-		].join("\n"),
+		[`id: ${id}`, `name: ${id}`, "version: 1.0.0", "description: Snapshot fixture.", ""].join("\n"),
 	);
 	writeFileSync(
 		path.join(root, "hooks.yaml"),
@@ -75,7 +66,7 @@ describe("extension snapshot contract", () => {
 		const snapshot = buildExtensionSnapshot({ cwd: project, generation: 1 });
 		walkFrozen(snapshot);
 		throws(() => (snapshot.packages as unknown[]).push({}), TypeError);
-		throws(() => (snapshot.resourceRoots.skills as unknown[]).push({}), TypeError);
+		throws(() => (snapshot.hookSources as unknown[]).push({}), TypeError);
 		throws(() => {
 			(snapshot.packages[0]?.provenance as { id: string }).id = "mutated";
 		}, TypeError);
@@ -150,12 +141,15 @@ describe("extension snapshot contract", () => {
 		const committed = buildExtensionSnapshot({ cwd: firstProject, generation: 7 });
 		store.publish(committed);
 		bindExtensionSnapshotStore(store);
+		const bound = extensionSnapshotFor(firstProject);
+		strictEqual(bound, committed);
 		deepStrictEqual(
-			enabledExtensionResourceRoots("skills", firstProject).map((root) => [root.id, root.generation]),
+			bound.packages.map((entry) => [entry.id, bound.generation]),
 			[["bound-one", 7]],
 		);
+		const ephemeral = extensionSnapshotFor(secondProject);
 		deepStrictEqual(
-			enabledExtensionResourceRoots("skills", secondProject).map((root) => [root.id, root.generation]),
+			ephemeral.packages.map((entry) => [entry.id, ephemeral.generation]),
 			[["ephemeral-two", 0]],
 		);
 		strictEqual(store.current(), committed);
@@ -220,7 +214,7 @@ describe("extension reload generations", () => {
 		bundle.extension.start();
 		strictEqual(bundle.contract.snapshot(), null, "start binds an empty store and publishes nothing");
 		strictEqual(bundle.contract.generation(), 0);
-		strictEqual(enabledExtensionResourceRoots("skills", project)[0]?.generation, 0, "readers take the ephemeral path");
+		strictEqual(extensionSnapshotFor(project).generation, 0, "readers take the ephemeral path");
 		const boot = publish(bundle);
 		strictEqual(boot.generation, 1);
 		strictEqual(boot.previousGeneration, 0);
@@ -294,9 +288,9 @@ describe("extension reload generations", () => {
 		const bundle = createExtensionsBundle(domainContext, { cwd: () => project });
 		bundle.extension.start();
 		const boot = publish(bundle);
-		const readerBefore = bundle.contract.resourceRoots("skills");
+		const readerBefore = extensionSnapshotFor(project);
 		deepStrictEqual(
-			readerBefore.map((root) => [root.id, root.generation]),
+			readerBefore.packages.map((entry) => [entry.id, readerBefore.generation]),
 			[["alpha", 1]],
 		);
 		installFixture(project, "beta");
@@ -306,35 +300,34 @@ describe("extension reload generations", () => {
 		strictEqual(prepared.candidate.changed, true);
 		deepStrictEqual(prepared.candidate.added, ["beta"]);
 		strictEqual(bundle.contract.snapshot(), boot.snapshot, "prepare publishes nothing");
+		const during = extensionSnapshotFor(project);
 		deepStrictEqual(
-			bundle.contract.resourceRoots("skills").map((root) => [root.id, root.generation]),
+			during.packages.map((entry) => [entry.id, during.generation]),
 			[["alpha", 1]],
 		);
 		ok(prepared.candidate.current());
 		prepared.candidate.publish();
-		const readerAfter = bundle.contract.resourceRoots("skills");
+		const readerAfter = extensionSnapshotFor(project);
 		deepStrictEqual(
-			readerAfter.map((root) => [root.id, root.generation]),
+			readerAfter.packages.map((entry) => [entry.id, readerAfter.generation]),
 			[
 				["alpha", 2],
 				["beta", 2],
 			],
 		);
 		deepStrictEqual(
-			readerBefore.map((root) => [root.id, root.generation]),
+			readerBefore.packages.map((entry) => [entry.id, readerBefore.generation]),
 			[["alpha", 1]],
 			"a projection captured before the publish is untouched",
 		);
-		for (const roots of [readerBefore, readerAfter]) {
-			strictEqual(new Set(roots.map((root) => root.generation)).size, 1, "no reader mixes generations");
-		}
+		const elsewhere = extensionSnapshotFor(other);
 		deepStrictEqual(
-			bundle.contract.resourceRoots("skills", other).map((root) => [root.id, root.generation]),
+			elsewhere.packages.map((entry) => [entry.id, elsewhere.generation]),
 			[["elsewhere", 0]],
 			"another cwd gets an ephemeral generation-0 projection",
 		);
 		strictEqual(bundle.contract.generation(), 2);
 		bundle.extension.stop?.();
-		strictEqual(enabledExtensionResourceRoots("skills", project)[0]?.generation, 0, "stop unbinds the store");
+		strictEqual(extensionSnapshotFor(project).generation, 0, "stop unbinds the store");
 	});
 });

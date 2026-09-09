@@ -6,8 +6,6 @@ import type {
 	ExtensionListOptions,
 	ExtensionMutationResult,
 	ExtensionReloadPrepareResult,
-	ExtensionResourceKind,
-	ExtensionResourceRoot,
 	ExtensionSnapshot,
 	InstalledExtension,
 } from "./manager.js";
@@ -19,8 +17,6 @@ export interface ExtensionsContract extends DomainContract {
 	enable(id: string, options?: ExtensionListOptions): ExtensionMutationResult;
 	disable(id: string, options?: ExtensionListOptions): ExtensionMutationResult;
 	remove(id: string, options?: ExtensionListOptions): ExtensionMutationResult;
-	/** Committed projection for the bundle's cwd; ephemeral generation-0 build for any other cwd. */
-	resourceRoots(kind: ExtensionResourceKind, cwd?: string): ExtensionResourceRoot[];
 	snapshot(): ExtensionSnapshot | null;
 	generation(): number;
 	/**

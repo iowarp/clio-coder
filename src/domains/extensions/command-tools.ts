@@ -9,9 +9,7 @@ export function enabledHarnessExtensionToolNames(cwd = process.cwd()): ReadonlyS
 		listInstalledExtensions(cwd)
 			.filter(isLoadableExtension)
 			.flatMap((entry) =>
-				entry.manifestVersion === 2
-					? (entry.capabilities?.tools ?? []).map((tool) => extensionToolName(entry.id, tool.name) as DynamicToolName)
-					: [],
+				(entry.capabilities?.tools ?? []).map((tool) => extensionToolName(entry.id, tool.name) as DynamicToolName),
 			),
 	);
 }

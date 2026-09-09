@@ -35,12 +35,11 @@ export function openExtensionsOverlay(tui: TUI, ctx: SlashCommandContext, onClos
 			id: ext.id,
 			label,
 			meta,
-			group: ext.manifestVersion === 2 ? "Harness extensions" : "Legacy resource extensions",
+			group: "Harness extensions",
 			detail: () => {
 				const lines = [
 					`# Extension: ${ext.id}`,
 					`**Version:** ${ext.version}`,
-					`**Kind:** ${ext.manifestVersion === 2 ? "Harness extension" : "Legacy resource extension"}`,
 					`**Scope:** ${ext.scope}`,
 					`**Description:** ${ext.description}`,
 					`**State:** ${state}`,

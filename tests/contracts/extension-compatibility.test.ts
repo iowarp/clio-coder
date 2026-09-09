@@ -9,12 +9,7 @@ import {
 	satisfiesSemVerRange,
 } from "../../src/domains/extensions/compatibility.js";
 import { loadManifestFromRoot, parseExtensionManifest } from "../../src/domains/extensions/discovery.js";
-import {
-	enabledExtensionResourceRoots,
-	enableExtension,
-	installExtension,
-	listInstalledExtensions,
-} from "../../src/domains/extensions/index.js";
+import { enableExtension, installExtension, listInstalledExtensions } from "../../src/domains/extensions/index.js";
 import { getVersionInfo } from "../../src/domains/lifecycle/version.js";
 
 const roots: string[] = [];
@@ -25,23 +20,21 @@ function scratch(name: string): string {
 	return root;
 }
 
-function manifest(id: string, range: string, resources = "resources: {}\n"): string {
+function manifest(id: string, range: string): string {
 	return [
-		"manifestVersion: 1",
 		`id: ${id}`,
 		`name: ${id}`,
 		"version: 1.0.0",
 		"description: Compatibility contract fixture.",
-		resources.trimEnd(),
 		"compatibility:",
 		`  clio: "${range}"`,
 		"",
 	].join("\n");
 }
 
-function writeManifest(root: string, id: string, range: string, resources?: string): void {
+function writeManifest(root: string, id: string, range: string): void {
 	mkdirSync(root, { recursive: true });
-	writeFileSync(path.join(root, "clio-coder-extension.yaml"), manifest(id, range, resources), "utf8");
+	writeFileSync(path.join(root, "clio-coder-extension.yaml"), manifest(id, range), "utf8");
 }
 
 describe("contracts/extension Clio compatibility", () => {
@@ -73,12 +66,10 @@ describe("contracts/extension Clio compatibility", () => {
 		const running = getVersionInfo().clio;
 		const accepted = parseExtensionManifest(
 			{
-				manifestVersion: 1,
 				id: "compatible",
 				name: "Compatible",
 				version: "1.0.0",
 				description: "Compatible extension.",
-				resources: {},
 				compatibility: { clio: ">=0.0.0" },
 			},
 			"/fixture/clio-coder-extension.yaml",
@@ -90,12 +81,10 @@ describe("contracts/extension Clio compatibility", () => {
 		for (const clio of ["not-a-range", 42, ""]) {
 			const refused = parseExtensionManifest(
 				{
-					manifestVersion: 1,
 					id: "malformed",
 					name: "Malformed",
 					version: "1.0.0",
 					description: "Malformed compatibility fixture.",
-					resources: {},
 					compatibility: { clio },
 				},
 				"/fixture/clio-coder-extension.yaml",
@@ -136,9 +125,7 @@ describe("contracts/extension Clio compatibility", () => {
 	it("refuses an incompatible package at load while keeping its diagnostic visible", () => {
 		const project = scratch("load-project");
 		const installedRoot = path.join(project, ".clio-coder", "extensions", "future-load");
-		writeManifest(installedRoot, "future-load", ">999999.0.0", "resources:\n  agents: agents\n");
-		mkdirSync(path.join(installedRoot, "agents"), { recursive: true });
-		writeFileSync(path.join(installedRoot, "agents", "future.md"), "# unavailable\n", "utf8");
+		writeManifest(installedRoot, "future-load", ">999999.0.0");
 
 		const candidate = loadManifestFromRoot(installedRoot);
 		strictEqual(candidate.valid, false);
@@ -148,7 +135,7 @@ describe("contracts/extension Clio compatibility", () => {
 		strictEqual(loaded[0]?.compatible, false);
 		strictEqual(loaded[0]?.effective, false);
 		match(loaded[0]?.diagnostics[0]?.message ?? "", /future-load.*>999999\.0\.0.*running Clio version/u);
-		deepStrictEqual(enabledExtensionResourceRoots("agents", project), []);
+		strictEqual(loaded[0]?.loadable, false);
 	});
 
 	it("selects the effective package only from valid and compatible candidates", () => {
@@ -156,18 +143,15 @@ describe("contracts/extension Clio compatibility", () => {
 		const userSource = scratch("valid-winner-user");
 		const projectSource = scratch("valid-winner-project-source");
 		const outside = scratch("valid-winner-outside");
-		writeManifest(userSource, "winner-contract", ">=0.0.0", "resources:\n  agents: agents\n");
-		mkdirSync(path.join(userSource, "agents"));
-		writeFileSync(path.join(userSource, "agents", "stable.md"), "# stable\n", "utf8");
+		writeManifest(userSource, "winner-contract", ">=0.0.0");
+		writeFileSync(path.join(userSource, "hooks.yaml"), "[]\n", "utf8");
 		ok(installExtension(userSource, { cwd: project, scope: "user" }).extension);
 
-		writeManifest(projectSource, "winner-contract", ">=0.0.0", "resources:\n  agents: agents\n");
-		mkdirSync(path.join(projectSource, "agents"));
+		writeManifest(projectSource, "winner-contract", ">=0.0.0");
 		ok(installExtension(projectSource, { cwd: project, scope: "project" }).extension);
 		const projectRoot = path.join(project, ".clio-coder", "extensions", "winner-contract");
-		rmSync(path.join(projectRoot, "agents"), { recursive: true });
-		mkdirSync(path.join(outside, "agents"));
-		symlinkSync(path.join(outside, "agents"), path.join(projectRoot, "agents"), "dir");
+		mkdirSync(path.join(outside, "payload"));
+		symlinkSync(path.join(outside, "payload"), path.join(projectRoot, "payload"), "dir");
 
 		const loaded = listInstalledExtensions(project);
 		strictEqual(loaded.length, 2, "the invalid higher-precedence package remains visible");
@@ -180,10 +164,6 @@ describe("contracts/extension Clio compatibility", () => {
 		strictEqual(projectEntry?.effective, false);
 		strictEqual(projectEntry?.loadable, false);
 		ok(projectEntry?.diagnostics.some((diagnostic) => diagnostic.message.includes("symbolic link")));
-		deepStrictEqual(
-			enabledExtensionResourceRoots("agents", project).map((root) => root.scope),
-			["user"],
-		);
 
 		const enabled = enableExtension("winner-contract", { cwd: project, scope: "project" });
 		strictEqual(enabled.extension?.enabled, true);

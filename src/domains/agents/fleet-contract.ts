@@ -18,7 +18,6 @@ import { Type } from "typebox";
 import { Value } from "typebox/value";
 import { resolvePackageRoot } from "../../core/package-root.js";
 import { clioConfigDir } from "../../core/xdg.js";
-import { enabledExtensionResourceRoots } from "../extensions/index.js";
 import {
 	type FleetCommandRegistry,
 	loadFleetCommands,
@@ -213,7 +212,7 @@ export interface FleetContract {
 	path: string;
 }
 
-export type FleetContractSource = "builtin" | "extension" | "plugin" | "user" | "project";
+export type FleetContractSource = "builtin" | "plugin" | "user" | "project";
 
 export interface FleetContractListing {
 	name: string;
@@ -1036,9 +1035,6 @@ function resolveFleetReferences(
 function fleetSources(cwd: string): ReadonlyArray<{ dir: string; source: FleetContractSource; rootPath?: string }> {
 	return [
 		{ dir: builtinFleetsDir(), source: "builtin" },
-		...enabledExtensionResourceRoots("fleets", cwd)
-			.sort((left, right) => left.source.localeCompare(right.source))
-			.map((root) => ({ dir: root.path, rootPath: root.rootPath, source: "extension" as const })),
 		...enabledPluginResourceRoots("fleets", cwd)
 			.sort((left, right) => left.source.localeCompare(right.source))
 			.map((root) => ({ dir: root.path, rootPath: root.rootPath, source: "plugin" as const })),

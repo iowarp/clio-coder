@@ -33,8 +33,8 @@ export function createAgentsBundle(_context: DomainContext): DomainBundle<Agents
 	const extension: DomainExtension = {
 		async start() {
 			discover();
-			// Recipes are cached at start; extension agent roots come from the
-			// committed extension generation, so a changed generation rediscovers.
+			// Recipes are cached at start; plugin agent roots come from the
+			// committed plugin generation, so a changed generation rediscovers.
 			const onResourceReload = (payload: unknown) => {
 				if (!rediscoveryPending && (payload as { changed?: unknown } | undefined)?.changed !== true) return;
 				try {
@@ -53,9 +53,7 @@ export function createAgentsBundle(_context: DomainContext): DomainBundle<Agents
 						// cached recipe has a trustworthy namespace admission decision.
 						recipes = recipes.filter((recipe) => recipe.source === "builtin");
 					}
-					recipes = recipes.filter(
-						(recipe) => recipe.source !== "plugin" && recipe.source !== "extension" && !conflictingIds.has(recipe.id),
-					);
+					recipes = recipes.filter((recipe) => recipe.source !== "plugin" && !conflictingIds.has(recipe.id));
 					specs = recipes.map(normalizeAgentSpec);
 					diagnostics = [
 						...diagnostics,

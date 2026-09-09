@@ -3,7 +3,6 @@ import type { ExtensionsContract } from "./contract.js";
 import {
 	disableExtension,
 	discoverExtensionPackages,
-	enabledExtensionResourceRoots,
 	enableExtension,
 	installExtension,
 	listInstalledExtensions,
@@ -99,9 +98,6 @@ export function createExtensionsBundle(
 		},
 		remove(id, options = {}) {
 			return removeExtension(id, options);
-		},
-		resourceRoots(kind, requestedCwd) {
-			return enabledExtensionResourceRoots(kind, requestedCwd ?? cwd());
 		},
 		snapshot() {
 			return store.current();

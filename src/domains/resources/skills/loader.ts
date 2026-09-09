@@ -6,7 +6,6 @@ import { warnLegacyNaming } from "../../../core/naming-compat.js";
 import type { PendingSkillRequest } from "../../../core/skill-activation.js";
 import { type ToolName, ToolNames } from "../../../core/tool-names.js";
 import { clioConfigDir } from "../../../core/xdg.js";
-import { enabledExtensionResourceRoots } from "../../extensions/index.js";
 import { INTEROP_AGENT_KINDS, interopSourceRank } from "../../interop/registry.js";
 import { enabledPluginResourceRoots, pluginBaseDir } from "../../plugins/index.js";
 import type { ResourceDiagnostic, ResourceScope, ResourceSourceInfo } from "../collision.js";
@@ -56,7 +55,6 @@ export type SkillSource =
 	| "codex"
 	| "copilot"
 	| "opencode"
-	| "extension"
 	| "plugin"
 	| "path"
 	| "cli";
@@ -83,7 +81,7 @@ export interface Skill {
 	content: string;
 	sourceInfo: ResourceSourceInfo;
 	disableModelInvocation: boolean;
-	/** Semantic source root (clio, agents, codex, extension, ...). */
+	/** Semantic source root (clio, agents, codex, plugin, ...). */
 	source: SkillSource;
 	/** Mirror of sourceInfo.scope for convenient access. */
 	scope: ResourceScope;
@@ -124,7 +122,7 @@ export interface SkillRoot {
 	path: string;
 	scope: ResourceScope;
 	source?: SkillSource;
-	/** sourceInfo.source string, e.g. "config", "agents-user", "extension:user:id". */
+	/** sourceInfo.source string, e.g. "config", "agents-user", "plugin:user:id". */
 	origin?: string;
 	/** Collision precedence override; defaults are derived from scope. */
 	precedence?: number;
@@ -191,7 +189,7 @@ export type SkillExpansion =
 
 /** Collision precedence tiers; higher wins. */
 const SKILL_PRECEDENCE = {
-	extension: 10,
+	package: 10,
 	userCompat: 20,
 	user: 30,
 	projectCompat: 40,
@@ -206,7 +204,7 @@ function sha256(value: string): string {
 function defaultPrecedenceForScope(scope: ResourceScope): number {
 	switch (scope) {
 		case "package":
-			return SKILL_PRECEDENCE.extension;
+			return SKILL_PRECEDENCE.package;
 		case "user":
 			return SKILL_PRECEDENCE.user;
 		case "project":
@@ -227,7 +225,7 @@ export function projectCompatTrusted(explicit?: boolean): boolean {
 
 /**
  * Discovery roots, lowest to highest precedence:
- *  1. package/extension skills
+ *  1. plugin skills
  *  2. shared user compat roots, one per interop agent kind that owns a skills directory
  *  3. Clio user root (<config>/skills)
  *  4. the same agents' project roots, trusted only on opt-in
@@ -244,16 +242,16 @@ export function defaultSkillRoots(input: LoadSkillsInput = {}): SkillRoot[] {
 	const trustProject = projectCompatTrusted(input.trustProjectCompatRoots);
 	const roots: SkillRoot[] = [];
 
-	for (const root of [...enabledExtensionResourceRoots("skills", cwd), ...enabledPluginResourceRoots("skills", cwd)]) {
+	for (const root of enabledPluginResourceRoots("skills", cwd)) {
 		roots.push({
 			path: root.path,
 			scope: "package",
-			source: root.source.startsWith("plugin:") ? "plugin" : "extension",
+			source: "plugin",
 			rootPath: root.rootPath,
-			plugin: root.source.startsWith("plugin:"),
+			plugin: true,
 			containment: root.rootPath,
 			origin: root.source,
-			precedence: SKILL_PRECEDENCE.extension,
+			precedence: SKILL_PRECEDENCE.package,
 			trusted: true,
 		});
 	}

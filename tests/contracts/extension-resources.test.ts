@@ -25,13 +25,11 @@ import {
 	parseExtensionManifest,
 } from "../../src/domains/extensions/discovery.js";
 import { extensionContentDigest, extensionContentDigestWithCapture } from "../../src/domains/extensions/integrity.js";
-import { enabledExtensionResourceRoots, extensionResourcePath } from "../../src/domains/extensions/resources.js";
 import {
 	installExtension,
 	listInstalledExtensionRecords,
 	listInstalledExtensions,
 	removeExtension,
-	upgradeLegacyExtensionInstallState,
 } from "../../src/domains/extensions/state.js";
 import { expandPromptTemplateInput, loadPromptTemplates } from "../../src/domains/resources/prompts/loader.js";
 import { createShareArchive, importShareArchive, planShareImport } from "../../src/domains/share/archive.js";
@@ -44,70 +42,66 @@ function scratch(): string {
 	return root;
 }
 
-function writeManifest(root: string, id: string, resources = "resources: {}\n"): void {
+function writeManifest(root: string, id: string, extra = ""): void {
 	mkdirSync(root, { recursive: true });
 	writeFileSync(
 		join(root, "clio-coder-extension.yaml"),
 		[
-			"manifestVersion: 1",
 			`id: ${id}`,
 			`name: ${id}`,
 			"version: 1.0.0",
 			"description: Extension integrity fixture.",
-			resources.trimEnd(),
+			...(extra ? [extra.trimEnd()] : []),
 			"",
 		].join("\n"),
 	);
 }
 
-describe("extension resource boundary", () => {
+describe("harness extension package boundary", () => {
 	afterEach(() => {
 		for (const root of roots.splice(0)) rmSync(root, { recursive: true, force: true });
 	});
 
-	it("accepts an omitted resources map and strictly validates a present value", () => {
+	it("refuses a domain resource declaration and names the plugin installer", () => {
 		const base = {
-			manifestVersion: 1,
-			id: "optional-resources",
-			name: "Optional Resources",
+			id: "lab-pack",
+			name: "Lab Pack",
 			version: "1.0.0",
-			description: "Optional resources fixture.",
+			description: "Domain workflow that belongs in a plugin.",
 		};
-		const omitted = parseExtensionManifest(base, "/fixture/clio-coder-extension.yaml");
-		deepStrictEqual(omitted.diagnostics, []);
-		deepStrictEqual(omitted.manifest?.resources, {});
-
-		for (const [resources, expected] of [
-			[null, "resources must be an object"],
-			[[], "resources must be an object"],
-			[{ prompts: "" }, "resources.prompts must be a non-empty string"],
-			[{ executable: "bin" }, "unknown resources key 'executable'"],
-		] as const) {
-			const parsed = parseExtensionManifest({ ...base, resources }, "/fixture/clio-coder-extension.yaml");
+		for (const key of ["resources", "prompts", "skills", "agents", "fleets", "themes"] as const) {
+			const parsed = parseExtensionManifest({ ...base, [key]: "prompts" }, "/fixture/clio-coder-extension.yaml");
 			strictEqual(parsed.manifest, undefined);
-			ok(parsed.diagnostics.some((diagnostic) => diagnostic.message === expected));
+			ok(
+				parsed.diagnostics.some(
+					(diagnostic) =>
+						diagnostic.type === "error" &&
+						diagnostic.message ===
+							`harness extensions cannot declare '${key}'; domain resources belong in a plugin: clio-coder plugins install <path>`,
+				),
+				`missing plugin guidance for ${key}`,
+			);
 		}
 	});
 
-	it("accepts a strict compatible manifest and retains declared resource roots", () => {
+	it("accepts a strict compatible manifest with no capabilities", () => {
 		const parsed = parseExtensionManifest(
 			{
-				manifestVersion: 1,
 				id: "research-kit",
 				name: "Research Kit",
 				version: "2.0.0",
-				description: "Portable research resources.",
+				description: "Hook-only harness package.",
 				compatibility: { clio: ">=0.4.0 <0.5.0" },
-				resources: { prompts: "prompts", skills: "skills", agents: "agents", fleets: "fleets" },
 			},
 			"clio-coder-extension.yaml",
 		);
 		deepStrictEqual(parsed.diagnostics, []);
-		deepStrictEqual(parsed.manifest?.resources, {
-			prompts: "prompts",
-			skills: "skills",
-			agents: "agents",
-			fleets: "fleets",
+		deepStrictEqual(parsed.manifest, {
+			id: "research-kit",
+			name: "Research Kit",
+			version: "2.0.0",
+			description: "Hook-only harness package.",
+			compatibility: { clio: ">=0.4.0 <0.5.0" },
 		});
 		deepStrictEqual(evaluateClioCompatibility(">=0.4.0 <0.5.0", "0.4.1"), {
 			rangeValid: true,
@@ -116,40 +110,18 @@ describe("extension resource boundary", () => {
 		});
 	});
 
-	it("rejects unknown manifest, resource, and compatibility keys", () => {
+	it("rejects unknown manifest and compatibility keys", () => {
 		const base = {
-			manifestVersion: 1,
 			id: "strict-keys",
 			name: "Strict Keys",
 			version: "1.0.0",
 			description: "Strict key fixture.",
-			resources: {},
 		};
 		for (const [value, expected] of [
 			[{ ...base, executable: "index.ts" }, "unknown manifest key 'executable'"],
-			[{ ...base, resources: { prompts: "prompts", executable: "bin" } }, "unknown resources key 'executable'"],
+			[{ ...base, tools: ["read"] }, "unknown manifest key 'tools'"],
+			[{ ...base, settings: ["theme"] }, "unknown manifest key 'settings'"],
 			[{ ...base, compatibility: { clio: ">=0.0.0", runtime: "node" } }, "unknown compatibility key 'runtime'"],
-		] as const) {
-			const parsed = parseExtensionManifest(value, "/fixture/clio-coder-extension.yaml");
-			strictEqual(parsed.manifest, undefined);
-			ok(parsed.diagnostics.some((diagnostic) => diagnostic.message === expected));
-		}
-	});
-
-	it("rejects mixed and duplicate tools or settings arrays", () => {
-		const base = {
-			manifestVersion: 1,
-			id: "strict-arrays",
-			name: "Strict Arrays",
-			version: "1.0.0",
-			description: "Strict array fixture.",
-			resources: {},
-		};
-		for (const [value, expected] of [
-			[{ ...base, tools: ["read", 42] }, "tools must contain only non-empty strings"],
-			[{ ...base, settings: ["theme", null] }, "settings must contain only non-empty strings"],
-			[{ ...base, tools: ["read", "read"] }, "tools contains duplicate entry 'read'"],
-			[{ ...base, settings: ["theme", "theme"] }, "settings contains duplicate entry 'theme'"],
 		] as const) {
 			const parsed = parseExtensionManifest(value, "/fixture/clio-coder-extension.yaml");
 			strictEqual(parsed.manifest, undefined);
@@ -207,33 +179,21 @@ describe("extension resource boundary", () => {
 		);
 	});
 
-	it("resolves only directories contained by the extension root", () => {
-		const root = scratch();
+	it("rejects hard-linked files from content identity and deactivates the package", () => {
+		const project = scratch();
+		const source = scratch();
 		const outside = scratch();
-		mkdirSync(join(root, "prompts"));
-		mkdirSync(join(root, "internal-prompts"));
-		mkdirSync(join(outside, "external"));
-		strictEqual(extensionResourcePath(root, "prompts"), join(root, "prompts"));
-		symlinkSync("internal-prompts", join(root, "internal-link"), "dir");
-		strictEqual(extensionResourcePath(root, "internal-link"), realpathSync(join(root, "internal-prompts")));
-		strictEqual(extensionResourcePath(root, "../outside"), null);
-		symlinkSync(join(outside, "external"), join(root, "linked"), "dir");
-		strictEqual(extensionResourcePath(root, "linked"), null);
-		strictEqual(extensionResourcePath(root, "."), null);
-	});
+		writeManifest(source, "hardlink-package");
+		strictEqual(installExtension(source, { cwd: project, scope: "project" }).extension?.loadable, true);
 
-	it("rejects hard-linked files from package validity and content identity", () => {
-		const root = scratch();
-		const outside = scratch();
-		writeManifest(root, "hardlink-package", "resources:\n  prompts: prompts\n");
-		mkdirSync(join(root, "prompts"));
+		const installedRoot = join(project, ".clio-coder", "extensions", "hardlink-package");
 		writeFileSync(join(outside, "shared.md"), "shared bytes\n");
-		linkSync(join(outside, "shared.md"), join(root, "prompts", "shared.md"));
+		linkSync(join(outside, "shared.md"), join(installedRoot, "shared.md"));
+		throws(() => extensionContentDigest(installedRoot), /hard-linked file/u);
 
-		const candidate = loadManifestFromRoot(root);
-		strictEqual(candidate.valid, false);
-		ok(candidate.diagnostics.some((diagnostic) => diagnostic.message.includes("hard-linked file")));
-		throws(() => extensionContentDigest(root), /hard-linked file/u);
+		const [entry] = listInstalledExtensions(project, { scope: "project" });
+		strictEqual(entry?.loadable, false);
+		ok(entry?.diagnostics.some((diagnostic) => diagnostic.message.includes("hard-linked file")));
 	});
 
 	it("frames file names, payloads, and symbolic-link targets without ambiguity", () => {
@@ -360,50 +320,38 @@ describe("extension resource boundary", () => {
 		}
 	});
 
-	it("rejects special filesystem entries from declared resource trees", { skip: process.platform === "win32" }, () => {
-		const root = scratch();
-		writeManifest(root, "special-entry", "resources:\n  prompts: prompts\n");
-		mkdirSync(join(root, "prompts"));
-		const fifoPath = join(root, "prompts", "resource.fifo");
+	it("rejects special filesystem entries from the package tree", { skip: process.platform === "win32" }, () => {
+		const project = scratch();
+		const source = scratch();
+		writeManifest(source, "special-entry");
+		strictEqual(installExtension(source, { cwd: project, scope: "project" }).extension?.loadable, true);
+
+		const installedRoot = join(project, ".clio-coder", "extensions", "special-entry");
+		const fifoPath = join(installedRoot, "resource.fifo");
 		const created = spawnSync("mkfifo", [fifoPath]);
 		strictEqual(created.status, 0, created.error?.message);
 		strictEqual(lstatSync(fifoPath).isFIFO(), true);
+		throws(() => extensionContentDigest(installedRoot), /unsupported filesystem entry/u);
 
-		const candidate = loadManifestFromRoot(root);
-		strictEqual(candidate.valid, false);
-		ok(candidate.diagnostics.some((diagnostic) => diagnostic.message.includes("unsupported filesystem entry")));
-		throws(() => extensionContentDigest(root), /unsupported filesystem entry/u);
+		const [entry] = listInstalledExtensions(project, { scope: "project" });
+		strictEqual(entry?.loadable, false);
+		ok(entry?.diagnostics.some((diagnostic) => diagnostic.message.includes("unsupported filesystem entry")));
 	});
 
-	it("keeps a package with an invalid resource tree visible but inactive", () => {
+	it("keeps a package whose tree escapes its root visible but inactive", () => {
 		const project = scratch();
 		const outside = scratch();
-		const installed = join(project, ".clio-coder", "extensions", "invalid-tree");
-		mkdirSync(installed, { recursive: true });
-		mkdirSync(join(outside, "agents"));
-		writeFileSync(
-			join(installed, "clio-coder-extension.yaml"),
-			[
-				"manifestVersion: 1",
-				"id: invalid-tree",
-				"name: Invalid Tree",
-				"version: 1.0.0",
-				"description: Invalid resource fixture.",
-				"resources:",
-				"  agents: agents",
-				"",
-			].join("\n"),
-		);
-		symlinkSync(join(outside, "agents"), join(installed, "agents"), "dir");
+		const installed = join(project, ".clio-coder", "extensions", "escaping-tree");
+		writeManifest(installed, "escaping-tree");
+		mkdirSync(join(outside, "payload"));
+		symlinkSync(join(outside, "payload"), join(installed, "payload"), "dir");
 
-		const candidate = loadManifestFromRoot(installed);
-		strictEqual(candidate.valid, false);
+		strictEqual(loadManifestFromRoot(installed).valid, true, "the manifest itself is well formed");
 		const [entry] = listInstalledExtensions(project);
 		strictEqual(entry?.valid, false);
 		strictEqual(entry?.effective, false);
 		strictEqual(entry?.loadable, false);
-		ok(entry?.diagnostics.some((diagnostic) => diagnostic.message.includes("symbolic link")));
-		deepStrictEqual(enabledExtensionResourceRoots("agents", project), []);
+		ok(entry?.diagnostics.some((diagnostic) => diagnostic.message.includes("install state is absent")));
 	});
 
 	it("revalidates the staged copy and preserves the previous install on failure", () => {
@@ -416,17 +364,18 @@ describe("extension resource boundary", () => {
 		ok(first.extension?.loadable);
 		const originalDigest = first.extension.provenance?.contentDigest;
 
-		writeManifest(replacement, "staged-rollback", "resources:\n  agents: agents\n");
-		mkdirSync(join(replacement, "real-agents"));
-		writeFileSync(join(replacement, "real-agents", "replacement.md"), "# replacement\n");
+		writeManifest(replacement, "staged-rollback");
+		mkdirSync(join(replacement, "real-payload"));
+		writeFileSync(join(replacement, "real-payload", "replacement.md"), "# replacement\n");
 		// Valid at the source location, but copying preserves this absolute link.
 		// At staging it points outside the staged package and must be rejected.
-		symlinkSync(join(replacement, "real-agents"), join(replacement, "agents"), "dir");
+		symlinkSync(join(replacement, "real-payload"), join(replacement, "payload"), "dir");
 		strictEqual(loadManifestFromRoot(replacement).valid, true);
+		ok(extensionContentDigest(replacement).length > 0, "the link is contained at its source location");
 
 		const forced = installExtension(replacement, { cwd: project, scope: "project", force: true });
 		strictEqual(forced.extension, undefined);
-		ok(forced.diagnostics.some((diagnostic) => diagnostic.message.includes("staged extension content is invalid")));
+		ok(forced.diagnostics.some((diagnostic) => diagnostic.message.includes("escapes the extension root")));
 		const installedRoot = join(project, ".clio-coder", "extensions", "staged-rollback");
 		strictEqual(readFileSync(join(installedRoot, "marker.txt"), "utf8"), "original\n");
 		const [preserved] = listInstalledExtensions(project, { scope: "project" });
@@ -542,86 +491,6 @@ describe("extension resource boundary", () => {
 		ok(corrupt?.diagnostics.some((diagnostic) => diagnostic.message.includes("install state is corrupt")));
 	});
 
-	it("keeps legacy inspection read-only, then upgrades digests once with a backup", () => {
-		const project = scratch();
-		const base = join(project, ".clio-coder", "extensions");
-		const installed = join(base, "legacy-digest");
-		writeManifest(installed, "legacy-digest");
-		writeFileSync(join(installed, "marker.txt"), "legacy bytes\n", "utf8");
-		const originalState = `${JSON.stringify(
-			{
-				version: 1,
-				disabled: ["legacy-digest"],
-				installed: {
-					"legacy-digest": {
-						installedAt: "2026-08-31T12:34:56.000Z",
-						source: "/original/source",
-					},
-				},
-			},
-			null,
-			2,
-		)}\n`;
-		const statePath = join(base, "state.json");
-		writeFileSync(statePath, originalState, "utf8");
-
-		const [before] = listInstalledExtensions(project, { scope: "project" });
-		strictEqual(before?.loadable, false);
-		ok(before?.diagnostics.some((diagnostic) => diagnostic.message.includes("run clio-coder upgrade")));
-		strictEqual(readFileSync(statePath, "utf8"), originalState, "plain list must not migrate state");
-
-		const [first] = upgradeLegacyExtensionInstallState(project, ["project"]);
-		deepStrictEqual(first?.upgraded, ["legacy-digest"]);
-		deepStrictEqual(first?.refused, []);
-		strictEqual(first?.backupPath, `${statePath}.pre-digest.bak`);
-		strictEqual(readFileSync(`${statePath}.pre-digest.bak`, "utf8"), originalState);
-		const migratedBytes = readFileSync(statePath, "utf8");
-		const migrated = JSON.parse(migratedBytes) as {
-			disabled: string[];
-			installed: Record<string, { installedAt: string; source?: string; contentDigest?: string }>;
-		};
-		deepStrictEqual(migrated.disabled, ["legacy-digest"]);
-		strictEqual(migrated.installed["legacy-digest"]?.installedAt, "2026-08-31T12:34:56.000Z");
-		strictEqual(migrated.installed["legacy-digest"]?.source, "/original/source");
-		ok(/^[a-f0-9]{64}$/u.test(migrated.installed["legacy-digest"]?.contentDigest ?? ""));
-		const [after] = listInstalledExtensions(project, { scope: "project" });
-		strictEqual(after?.valid, true);
-		strictEqual(after?.enabled, false, "migration preserves disabled state");
-
-		const [second] = upgradeLegacyExtensionInstallState(project, ["project"]);
-		deepStrictEqual(second?.upgraded, []);
-		deepStrictEqual(second?.refused, []);
-		strictEqual(readFileSync(statePath, "utf8"), migratedBytes);
-		strictEqual(readFileSync(`${statePath}.pre-digest.bak`, "utf8"), originalState);
-	});
-
-	it("refuses to bless an invalid legacy tree and leaves it visible but non-loadable", () => {
-		const project = scratch();
-		const outside = scratch();
-		const base = join(project, ".clio-coder", "extensions");
-		const installed = join(base, "invalid-legacy");
-		writeManifest(installed, "invalid-legacy", "resources:\n  prompts: prompts\n");
-		mkdirSync(join(outside, "prompts"));
-		symlinkSync(join(outside, "prompts"), join(installed, "prompts"), "dir");
-		const statePath = join(base, "state.json");
-		const original = `${JSON.stringify({
-			version: 1,
-			disabled: [],
-			installed: { "invalid-legacy": { installedAt: "2026-08-31T00:00:00.000Z" } },
-		})}\n`;
-		writeFileSync(statePath, original, "utf8");
-
-		const [report] = upgradeLegacyExtensionInstallState(project, ["project"]);
-		deepStrictEqual(report?.upgraded, []);
-		strictEqual(report?.refused[0]?.id, "invalid-legacy");
-		ok(report?.refused[0]?.reason.includes("symbolic link"));
-		strictEqual(readFileSync(statePath, "utf8"), original);
-		strictEqual(existsSync(`${statePath}.pre-digest.bak`), false);
-		const [entry] = listInstalledExtensions(project, { scope: "project" });
-		strictEqual(entry?.id, "invalid-legacy");
-		strictEqual(entry?.loadable, false);
-	});
-
 	it("backs up corrupt state and unverifiable bytes during remove and forced reinstall recovery", () => {
 		const removeProject = scratch();
 		const removeBase = join(removeProject, ".clio-coder", "extensions");
@@ -670,12 +539,11 @@ describe("extension resource boundary", () => {
 		strictEqual(readFileSync(join(oldRoot, "marker.txt"), "utf8"), "verified replacement\n");
 	});
 
-	it("routes share-imported extension trees through verified installation and activates their resources", () => {
+	it("routes share-imported extension trees through verified installation", () => {
 		const exporter = scratch();
 		const source = scratch();
-		writeManifest(source, "shared-extension", "resources:\n  prompts: prompts\n");
-		mkdirSync(join(source, "prompts"));
-		writeFileSync(join(source, "prompts", "shared.md"), "# Shared prompt\n", "utf8");
+		writeManifest(source, "shared-extension");
+		writeFileSync(join(source, "hooks.yaml"), "[]\n", "utf8");
 		const exportedInstall = installExtension(source, { cwd: exporter, scope: "project" });
 		strictEqual(exportedInstall.extension?.loadable, true);
 		const archive = createShareArchive({ cwd: exporter, scope: "project", includeExtensions: true });
@@ -703,16 +571,12 @@ describe("extension resource boundary", () => {
 		strictEqual(installed?.loadable, true);
 		ok(installed?.provenance?.contentDigest);
 		strictEqual(installed?.observedContentDigest, installed?.provenance?.contentDigest);
-		deepStrictEqual(
-			enabledExtensionResourceRoots("prompts", destination).map((root) => root.id),
-			["shared-extension"],
-		);
 	});
 
 	it("refuses invalid shared packages and force-recovers an unverified destination transactionally", () => {
 		const invalidExporter = scratch();
 		const invalidRoot = join(invalidExporter, ".clio-coder", "extensions", "invalid-shared");
-		writeManifest(invalidRoot, "invalid-shared", "resources:\n  prompts: missing-prompts\n");
+		writeManifest(invalidRoot, "invalid-shared", "resources:\n  prompts: prompts\n");
 		const invalidArchive = createShareArchive({
 			cwd: invalidExporter,
 			scope: "project",
@@ -772,7 +636,7 @@ describe("extension resource boundary", () => {
 			["<invocation_arguments>", "$ARGUMENTS", "</invocation_arguments>", ""].join("\n"),
 		);
 		const templates = loadPromptTemplates({
-			roots: [{ path: promptRoot, scope: "project", source: "extension:research-kit", trusted: true }],
+			roots: [{ path: promptRoot, scope: "project", source: "plugin:project:research-kit", trusted: true }],
 		});
 		const payload = ["", "  Exact  spacing.", "", "\t- Keep tabs.", "Trailing spaces.  ", ""].join("\n");
 		const expanded = expandPromptTemplateInput(`/research:draft\n${payload}`, templates);

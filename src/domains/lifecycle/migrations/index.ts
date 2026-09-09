@@ -34,7 +34,6 @@ import { join } from "node:path";
 
 import lmStudioRuntimeId from "./2026-08-18-lmstudio-runtime-id.js";
 import clioCoderNaming from "./2026-09-01-clio-coder-naming.js";
-import extensionInstallDigests from "./2026-09-01-extension-install-digests.js";
 import retirePanesKnobs from "./2026-09-01-retire-panes-knobs.js";
 import settingsV2 from "./2026-09-01-settings-v2.js";
 
@@ -62,7 +61,6 @@ export interface MigrationRunResult {
 // migration independently and for manifest continuity; it is a no-op on v2.
 const REGISTRY: ReadonlyArray<Migration> = Object.freeze([
 	settingsV2,
-	extensionInstallDigests,
 	clioCoderNaming,
 	retirePanesKnobs,
 	lmStudioRuntimeId,

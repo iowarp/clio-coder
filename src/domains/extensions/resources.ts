@@ -2,9 +2,7 @@ import { realpathSync } from "node:fs";
 import path from "node:path";
 import { buildExtensionSnapshot } from "./snapshot.js";
 import { committedExtensionSnapshot } from "./snapshot-store.js";
-import type { ExtensionResourceKind, ExtensionResourceRoot, ExtensionSnapshot } from "./types.js";
-
-export { extensionResourcePath } from "./resource-path.js";
+import type { ExtensionSnapshot } from "./types.js";
 
 /**
  * The committed snapshot when a store is bound for this cwd; otherwise an
@@ -20,18 +18,4 @@ export function extensionSnapshotFor(cwd = process.cwd()): ExtensionSnapshot {
 		// Fall through to an ephemeral build, which retains the original error semantics.
 	}
 	return buildExtensionSnapshot({ cwd, generation: 0 });
-}
-
-/**
- * The canonical accessor for the enabled roots of one extension resource
- * kind. The agent registry, fleet contract, skill and common resource
- * loaders, and the extensions contract all read through it, so each of them
- * sees the committed snapshot for the booted cwd or the ephemeral
- * generation-0 build otherwise. Returns a fresh array the caller may mutate.
- */
-export function enabledExtensionResourceRoots(
-	kind: ExtensionResourceKind,
-	cwd = process.cwd(),
-): ExtensionResourceRoot[] {
-	return [...extensionSnapshotFor(cwd).resourceRoots[kind]];
 }

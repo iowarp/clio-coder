@@ -46,7 +46,6 @@ function fixture(
 	resetXdgCache();
 	process.env.TEST_HARNESS_SECRET = "private-test-value";
 	const manifest = {
-		manifestVersion: 2,
 		id: "fixture",
 		name: "Fixture",
 		version: "1.0.0",
@@ -95,14 +94,17 @@ describe("harness extension executable capabilities", () => {
 		resetXdgCache();
 		for (const root of roots.splice(0)) rmSync(root, { recursive: true, force: true });
 	});
-	it("discovers declarative tools without executing package code and round-trips v2", () => {
+	it("discovers declarative tools without executing package code", () => {
 		const data = fixture('require("node:fs").writeFileSync("DISCOVERY_EXECUTED", "bad")');
 		const candidate = loadManifestFromRoot(data.source);
 		ok(candidate.valid);
 		ok(candidate.manifest);
 		ok(!existsSync(path.join(data.cwd, "DISCOVERY_EXECUTED")));
 		ok(!extensionManifestYaml(candidate.manifest).includes("resources:"));
-		equal(parseExtensionManifest(data.manifest, "fixture.json").manifest?.manifestVersion, 2);
+		deepStrictEqual(
+			parseExtensionManifest(data.manifest, "fixture.json").manifest?.capabilities?.tools.map((tool) => tool.name),
+			["inspect"],
+		);
 	});
 	it("rejects resources, claimed read-only effects, traversal, symlinks, unknown schema keywords, and duplicate tool names", () => {
 		const data = fixture();
@@ -291,24 +293,23 @@ describe("harness extension executable capabilities", () => {
 			equal(result?.kind, "error");
 		}
 	});
-	it("preserves resource-only v1 package loading and does not activate its advisory tool names", () => {
+	it("loads a hook-only package and registers no command tools for it", () => {
 		const data = fixture();
+		rmSync(path.join(data.source, "command.cjs"));
 		writeFileSync(
 			path.join(data.source, "clio-coder-extension.json"),
 			JSON.stringify({
-				manifestVersion: 1,
-				id: "legacy",
-				name: "Legacy",
+				id: "hooks-only",
+				name: "Hooks Only",
 				version: "1.0.0",
-				description: "Existing resource bundle",
-				resources: {},
-				tools: ["advisory"],
+				description: "Hook declarations with no command tools",
 			}),
 		);
+		writeFileSync(path.join(data.source, "hooks.yaml"), "[]\n");
 		ok(installExtension(data.source, { cwd: data.cwd, scope: "project" }).extension?.loadable);
 		const registry = createRegistry({ safety: createWorkerSafety({ cwd: data.cwd }) });
 		registerHarnessExtensionTools(registry, data.cwd);
 		equal(registry.listRegistered().length, 0);
-		ok(listInstalledExtensions(data.cwd).find((entry) => entry.id === "legacy")?.loadable);
+		ok(listInstalledExtensions(data.cwd).find((entry) => entry.id === "hooks-only")?.loadable);
 	});
 });

@@ -1,15 +1,5 @@
 import { createHash } from "node:crypto";
-import {
-	cpSync,
-	existsSync,
-	lstatSync,
-	mkdirSync,
-	readdirSync,
-	readFileSync,
-	realpathSync,
-	renameSync,
-	rmSync,
-} from "node:fs";
+import { cpSync, existsSync, mkdirSync, readdirSync, readFileSync, realpathSync, renameSync, rmSync } from "node:fs";
 import path from "node:path";
 import { safeResourceWrite } from "../../core/safe-resource-write.js";
 import { clioConfigDir } from "../../core/xdg.js";
@@ -24,7 +14,6 @@ import type {
 	ExtensionMutationResult,
 	ExtensionScope,
 	ExtensionState,
-	ExtensionStateUpgradeReport,
 	InstalledExtension,
 } from "./types.js";
 
@@ -151,7 +140,7 @@ function installedFromRoot(
 	} else if (!expectedDigest) {
 		diagnostics.push({
 			type: "error",
-			message: `extension ${id} install provenance has no content digest; run clio-coder upgrade, then reinstall with --force if it remains unverifiable`,
+			message: `extension ${id} install provenance has no content digest; reinstall with --force`,
 			path: statePath(scope, cwd),
 		});
 	} else {
@@ -198,7 +187,6 @@ function installedFromRoot(
 		name: manifest?.name ?? id,
 		version: manifest?.version ?? "unknown",
 		description: manifest?.description ?? "Installed extension has an invalid manifest.",
-		...(manifest ? { manifestVersion: manifest.manifestVersion } : {}),
 		...(manifest?.capabilities ? { capabilities: manifest.capabilities } : {}),
 		scope,
 		rootPath: root,
@@ -210,7 +198,6 @@ function installedFromRoot(
 		loadable: false,
 		...(extensionProvenance ? { provenance: extensionProvenance } : {}),
 		...(observedDigest ? { observedContentDigest: observedDigest } : {}),
-		resources: manifest?.resources ?? {},
 		diagnostics,
 	};
 	return { entry, ...(extensionProvenance && captured ? { captured } : {}) };
@@ -228,74 +215,6 @@ function listScope(scope: ExtensionScope, cwd = process.cwd()): InstalledExtensi
 		if (installed) out.push(installed);
 	}
 	return out;
-}
-
-/**
- * Add integrity digests to released v1 install records only after the installed
- * tree validates and remains byte-identical through the atomic state rewrite.
- * Refused records remain unchanged and therefore fail closed at load time.
- */
-export function upgradeLegacyExtensionInstallState(
-	cwd = process.cwd(),
-	scopes: ReadonlyArray<ExtensionScope> = ["user", "project"],
-): ExtensionStateUpgradeReport[] {
-	const reports: ExtensionStateUpgradeReport[] = [];
-	for (const scope of scopes) {
-		const filePath = statePath(scope, cwd);
-		const report: ExtensionStateUpgradeReport = { scope, statePath: filePath, upgraded: [], refused: [] };
-		const stateResult = readState(scope, cwd);
-		if (stateResult.status === "absent") {
-			reports.push(report);
-			continue;
-		}
-		if (stateResult.status === "corrupt") {
-			report.refused.push({ id: "<state>", reason: `install state is corrupt: ${stateResult.message}` });
-			reports.push(report);
-			continue;
-		}
-		const next = structuredClone(stateResult.state);
-		const verified = new Map<string, { root: string; digest: string }>();
-		for (const [id, record] of Object.entries(next.installed)) {
-			if (record.contentDigest) continue;
-			const root = path.join(extensionBaseDir(scope, cwd), id);
-			try {
-				if (!lstatSync(root).isDirectory()) throw new Error("installed path is not a directory");
-				const candidate = loadManifestFromRoot(root);
-				if (!candidate.valid || !candidate.manifest) {
-					throw new Error(candidate.diagnostics.map((diagnostic) => diagnostic.message).join("; ") || "manifest is invalid");
-				}
-				if (candidate.manifest.id !== id) {
-					throw new Error(`manifest id ${candidate.manifest.id} does not match install record ${id}`);
-				}
-				const digest = extensionContentDigest(root);
-				record.contentDigest = digest;
-				verified.set(id, { root, digest });
-				report.upgraded.push(id);
-			} catch (error) {
-				report.refused.push({ id, reason: error instanceof Error ? error.message : String(error) });
-			}
-		}
-		if (report.upgraded.length > 0) {
-			const backupPath = `${filePath}.pre-digest.bak`;
-			safeResourceWrite(filePath, `${JSON.stringify(next, null, 2)}\n`, {
-				encoding: "utf8",
-				backup: { path: backupPath },
-				beforeRename: () => {
-					for (const [id, expected] of verified) {
-						const candidate = loadManifestFromRoot(expected.root);
-						if (!candidate.valid || candidate.manifest?.id !== id) {
-							throw new Error(`extension ${id} became invalid during digest migration`);
-						}
-						const observed = extensionContentDigest(expected.root);
-						if (observed !== expected.digest) throw new Error(`extension ${id} changed during digest migration`);
-					}
-				},
-			});
-			report.backupPath = backupPath;
-		}
-		reports.push(report);
-	}
-	return reports;
 }
 
 export function listInstalledExtensions(cwd = process.cwd(), options: ExtensionListOptions = {}): InstalledExtension[] {
@@ -328,7 +247,7 @@ export function listInstalledExtensionRecords(
 		}
 	}
 	// Invalid and incompatible packages remain visible by default so the load
-	// refusal and its diagnostic cannot disappear with the resources it suppresses.
+	// refusal and its diagnostic cannot disappear with the capabilities it suppresses.
 	const all =
 		options.all === true ? records : records.filter(({ entry }) => entry.effective || !entry.valid || !entry.compatible);
 	return all.sort((a, b) => {

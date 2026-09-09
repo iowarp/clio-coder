@@ -2,13 +2,12 @@ import { type Dirent, existsSync, readdirSync, statSync } from "node:fs";
 import path from "node:path";
 import { parse as parseYaml } from "yaml";
 import { clioConfigDir } from "../../core/xdg.js";
-import { type ExtensionResourceKind, enabledExtensionResourceRoots } from "../extensions/index.js";
-import { enabledPluginResourceRoots } from "../plugins/index.js";
+import { enabledPluginResourceRoots, type PluginResourceKind } from "../plugins/index.js";
 import type { ResourceDiagnostic, ResourceScope, ResourceSourceInfo } from "./collision.js";
 
 export interface ResourceRoot {
 	path: string;
-	/** Package root for safely resolving extension-relative prompt references. */
+	/** Package root for safely resolving package-relative prompt references. */
 	rootPath?: string;
 	plugin?: boolean;
 	scope: ResourceScope;
@@ -25,7 +24,7 @@ export interface ResourceRoot {
  * roots exactly the way a foreign skill root does.
  */
 export const COMPAT_RESOURCE_PRECEDENCE = {
-	extension: 10,
+	package: 10,
 	userCompat: 20,
 	user: 30,
 	projectCompat: 40,
@@ -44,22 +43,15 @@ export type FrontmatterSplitResult =
 			body: string;
 	  };
 
-export function defaultScopedResourceRoots(kind: ExtensionResourceKind, cwd: string): ResourceRoot[] {
+export function defaultScopedResourceRoots(kind: PluginResourceKind, cwd: string): ResourceRoot[] {
 	return [
-		...enabledExtensionResourceRoots(kind, cwd).map((root) => ({
-			path: root.path,
-			rootPath: root.rootPath,
-			scope: "package" as const,
-			source: root.source,
-			precedence: COMPAT_RESOURCE_PRECEDENCE.extension,
-		})),
 		...enabledPluginResourceRoots(kind, cwd).map((root) => ({
 			path: root.path,
 			rootPath: root.rootPath,
 			plugin: true,
 			scope: "package" as const,
 			source: root.source,
-			precedence: COMPAT_RESOURCE_PRECEDENCE.extension,
+			precedence: COMPAT_RESOURCE_PRECEDENCE.package,
 		})),
 		{
 			path: path.join(clioConfigDir(), kind),

@@ -85,9 +85,9 @@ function printDiagnostics(diagnostics: ReadonlyArray<ExtensionDiagnostic>): void
 	}
 }
 
-function resourceSummary(extension: InstalledExtension): string {
-	const resources = Object.entries(extension.resources).map(([key, value]) => `${key}:${value}`);
-	return resources.length > 0 ? resources.join(",") : "-";
+function toolSummary(extension: InstalledExtension): string {
+	const tools = extension.capabilities?.tools.map((tool) => tool.name) ?? [];
+	return tools.length > 0 ? tools.join(",") : "-";
 }
 
 function stateLabel(extension: InstalledExtension): string {
@@ -105,13 +105,13 @@ function printList(items: ReadonlyArray<InstalledExtension>): void {
 	}
 	process.stdout.write(
 		`${formatColumns([
-			["id", "scope", "state", "version", "resources", "description"],
+			["id", "scope", "state", "version", "tools", "description"],
 			...items.map((extension) => [
 				extension.id,
 				extension.scope,
 				stateLabel(extension),
 				extension.version,
-				resourceSummary(extension),
+				toolSummary(extension),
 				extension.description,
 			]),
 		])}\n`,

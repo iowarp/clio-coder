@@ -4,7 +4,7 @@ export {
 	findExtensionManifestPath,
 	parseExtensionManifest,
 } from "./discovery.js";
-export { enabledExtensionResourceRoots, extensionResourcePath, extensionSnapshotFor } from "./resources.js";
+export { extensionSnapshotFor } from "./resources.js";
 export type { InstalledExtensionRecord } from "./state.js";
 export {
 	disableExtension,
@@ -14,7 +14,6 @@ export {
 	listInstalledExtensionRecords,
 	listInstalledExtensions,
 	removeExtension,
-	upgradeLegacyExtensionInstallState,
 } from "./state.js";
 export type {
 	ClioExtensionManifest,
@@ -24,7 +23,6 @@ export type {
 	ExtensionInstallOptions,
 	ExtensionInstallResult,
 	ExtensionListOptions,
-	ExtensionManifestResources,
 	ExtensionMutationResult,
 	ExtensionProvenance,
 	ExtensionReloadCandidate,
@@ -33,13 +31,10 @@ export type {
 	ExtensionReloadRejection,
 	ExtensionReloadRejectionReason,
 	ExtensionReloadResult,
-	ExtensionResourceKind,
-	ExtensionResourceRoot,
 	ExtensionScope,
 	ExtensionSnapshot,
 	ExtensionSnapshotDiagnostics,
 	ExtensionState,
-	ExtensionStateUpgradeReport,
 	InstalledExtension,
 	LoadableExtension,
 } from "./types.js";

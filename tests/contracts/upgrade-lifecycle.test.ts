@@ -10,7 +10,6 @@ import { createLifecycleHome, type LifecycleHome, runInHome } from "../harness/l
 
 const MIGRATION_IDS = [
 	"2026-09-01-settings-v2",
-	"2026-09-01-extension-install-digests",
 	"2026-09-01-clio-coder-naming",
 	"2026-09-01-retire-panes-knobs",
 	"2026-08-18-lmstudio-runtime-id",
@@ -132,7 +131,7 @@ describe("contracts/upgrade-lifecycle", () => {
 			const { code, stdout } = await upgrade(temp, [], NO_NETWORK);
 			strictEqual(code, 0);
 			for (const id of MIGRATION_IDS) match(stdout, new RegExp(`✓ Applied migration ${id}`, "u"));
-			match(stdout, /5 migrations applied/u);
+			match(stdout, /4 migrations applied/u);
 		} finally {
 			temp.cleanup();
 		}
@@ -201,7 +200,7 @@ describe("contracts/upgrade-lifecycle", () => {
 			ok(!/mock migration failure/u.test(stdout), "mock migration failure was ignored");
 			ok(!/CLIO_CODER_TEST_UPGRADE_NO_NETWORK is set/u.test(stdout), "no-network seam was ignored");
 			match(stdout, /Available version: not checked \(source checkout\)/u);
-			match(stdout, /5 migrations applied/u);
+			match(stdout, /4 migrations applied/u);
 		} finally {
 			process.argv[1] = savedArgv1;
 			temp.cleanup();

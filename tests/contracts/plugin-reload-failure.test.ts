@@ -7,7 +7,6 @@ import { BusChannels, type PluginsReloadedPayload } from "../../src/core/bus-eve
 import type { DomainContext } from "../../src/core/domain-loader.js";
 import { createSafeEventBus } from "../../src/core/event-bus.js";
 import { createAgentsBundle } from "../../src/domains/agents/extension.js";
-import { disableExtension, installExtension } from "../../src/domains/extensions/state.js";
 import { disablePlugin, installPlugin, removePlugin } from "../../src/domains/plugins/index.js";
 import { reloadPluginResourcesAndNotify } from "../../src/entry/plugin-reload.js";
 import { isolateClioEnv } from "../harness/scratch-env.js";
@@ -16,25 +15,19 @@ const recipe = readFileSync(
 	fileURLToPath(new URL("../../src/domains/agents/builtins/researcher.md", import.meta.url)),
 	"utf8",
 ).replace("audience: shadow", "audience: custom");
-function packageFixture(root: string, name: string, agent: string, legacy = false): void {
+function packageFixture(root: string, name: string, agent: string): void {
 	mkdirSync(join(root, "agents"), { recursive: true });
 	writeFileSync(join(root, "agents", `${agent}.md`), recipe);
-	if (legacy)
-		writeFileSync(
-			join(root, "clio-coder-extension.yaml"),
-			`manifestVersion: 1\nid: ${name}\nname: ${name}\nversion: 1.0.0\ndescription: Reload fixture\nresources: {agents: agents}\n`,
-		);
-	else
-		writeFileSync(
-			join(root, "plugin.json"),
-			JSON.stringify({
-				$schema: "https://agent-plugins.org/schemas/1.0.0/plugin.schema.json",
-				name,
-				version: "1.0.0",
-				description: "Reload fixture",
-				extensions: { "ai.iowarp.clio": { manifestVersion: 1, resources: { agents: "agents" }, components: [] } },
-			}),
-		);
+	writeFileSync(
+		join(root, "plugin.json"),
+		JSON.stringify({
+			$schema: "https://agent-plugins.org/schemas/1.0.0/plugin.schema.json",
+			name,
+			version: "1.0.0",
+			description: "Reload fixture",
+			extensions: { "ai.iowarp.clio": { manifestVersion: 1, resources: { agents: "agents" }, components: [] } },
+		}),
+	);
 }
 
 for (const mutation of ["disable", "remove"] as const) {
@@ -58,18 +51,18 @@ for (const mutation of ["disable", "remove"] as const) {
 			packageFixture(first, "reload-first", "reload-active-agent");
 			const second = join(env.dir, "second");
 			packageFixture(second, "reload-second", "reload-clash");
-			const legacy = join(env.dir, "legacy");
-			packageFixture(legacy, "reload-legacy", "reload-legacy-agent", true);
+			const peer = join(env.dir, "peer");
+			packageFixture(peer, "reload-peer", "reload-peer-agent");
 			ok(installPlugin(first, { cwd, scope: "user" }).plugin?.loadable);
-			ok(installExtension(legacy, { cwd, scope: "user" }).extension?.loadable);
+			ok(installPlugin(peer, { cwd, scope: "user" }).plugin?.loadable);
 			mkdirSync(join(env.dir, "config/agents"), { recursive: true });
 			writeFileSync(join(env.dir, "config/agents/user-survivor.md"), recipe);
 			await agents.extension.start();
 			ok(agents.contract.get("reload-active-agent"));
-			ok(agents.contract.get("reload-legacy-agent"));
+			ok(agents.contract.get("reload-peer-agent"));
 			if (mutation === "disable") disablePlugin("reload-first", { cwd, scope: "user" });
 			else removePlugin("reload-first", { cwd, scope: "user" });
-			disableExtension("reload-legacy", { cwd, scope: "user" });
+			disablePlugin("reload-peer", { cwd, scope: "user" });
 			ok(installPlugin(second, { cwd, scope: "user" }).plugin?.loadable);
 			const events: PluginsReloadedPayload[] = [];
 			const reload = () =>
@@ -79,7 +72,7 @@ for (const mutation of ["disable", "remove"] as const) {
 				});
 			reload();
 			strictEqual(agents.contract.get("reload-active-agent"), null);
-			strictEqual(agents.contract.get("reload-legacy-agent"), null);
+			strictEqual(agents.contract.get("reload-peer-agent"), null);
 			ok(!agents.contract.listSpecs().some((spec) => spec.id === "reload-active-agent"));
 			ok(agents.contract.get("coder"));
 			ok(agents.contract.get("user-survivor"));

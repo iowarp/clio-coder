@@ -52,7 +52,7 @@ function verifiedCommands(extension: LoadableExtension): ExtensionCommandTool[] 
 		throw new Error("verified extension manifest is invalid");
 	if (parsed.manifest.id !== extension.id || parsed.manifest.version !== extension.version)
 		throw new Error("verified extension identity changed while loading tools");
-	return parsed.manifest.manifestVersion === 2 ? (parsed.manifest.capabilities?.tools ?? []) : [];
+	return parsed.manifest.capabilities?.tools ?? [];
 }
 
 function createCommandTool(extension: LoadableExtension, tool: ExtensionCommandTool, cwd: string): ToolSpec {
@@ -152,7 +152,7 @@ function createCommandTool(extension: LoadableExtension, tool: ExtensionCommandT
 export function registerHarnessExtensionTools(registry: ToolRegistry, cwd = process.cwd()): ExtensionDiagnostic[] {
 	const diagnostics: ExtensionDiagnostic[] = [];
 	for (const extension of listInstalledExtensions(cwd)) {
-		if (!isLoadableExtension(extension) || extension.manifestVersion !== 2) continue;
+		if (!isLoadableExtension(extension) || !extension.capabilities) continue;
 		try {
 			const tools = verifiedCommands(extension).map((tool) => createCommandTool(extension, tool, path.resolve(cwd)));
 			for (const tool of tools) if (registry.get(tool.name)) throw new Error(`tool collision: ${tool.name}`);

@@ -12,7 +12,7 @@ import type {
 	ExtensionReloadPrepareResult,
 	ExtensionsContract,
 } from "../../src/domains/extensions/index.js";
-import { enabledExtensionResourceRoots } from "../../src/domains/extensions/resources.js";
+import { extensionSnapshotFor } from "../../src/domains/extensions/resources.js";
 import { buildExtensionSnapshot } from "../../src/domains/extensions/snapshot.js";
 import { bindExtensionSnapshotStore } from "../../src/domains/extensions/snapshot-store.js";
 import { installExtension } from "../../src/domains/extensions/state.js";
@@ -40,19 +40,10 @@ function scratch(): string {
 }
 
 function writePackage(root: string, id: string, hookId: string, message: string): void {
-	mkdirSync(path.join(root, "skills"), { recursive: true });
+	mkdirSync(root, { recursive: true });
 	writeFileSync(
 		path.join(root, "clio-coder-extension.yaml"),
-		[
-			"manifestVersion: 1",
-			`id: ${id}`,
-			`name: ${id}`,
-			"version: 1.0.0",
-			"description: Reload fixture.",
-			"resources:",
-			"  skills: skills",
-			"",
-		].join("\n"),
+		[`id: ${id}`, `name: ${id}`, "version: 1.0.0", "description: Reload fixture.", ""].join("\n"),
 	);
 	writeFileSync(
 		path.join(root, "hooks.yaml"),
@@ -183,10 +174,11 @@ describe("extension reload coordinator publication", () => {
 		strictEqual(harness.extensions.snapshot(), null, "the extensions domain start publishes nothing");
 		strictEqual(harness.extensions.generation(), 0);
 		strictEqual(harness.middleware.ownedGeneration("user-hooks"), 0);
+		const ephemeral = extensionSnapshotFor(project);
 		deepStrictEqual(
-			enabledExtensionResourceRoots("skills", project).map((root) => [root.id, root.generation]),
+			ephemeral.packages.map((entry) => [entry.id, ephemeral.generation]),
 			[["ext-a", 0]],
-			"resource readers take the ephemeral path before paired boot publication",
+			"snapshot readers take the ephemeral path before paired boot publication",
 		);
 		deepStrictEqual(harness.middleware.runHook({ hook: "turn_start" }).ruleIds, []);
 		strictEqual(harness.receipts.length, 0);
@@ -198,8 +190,9 @@ describe("extension reload coordinator publication", () => {
 		deepStrictEqual(log, ["ext-publish:1", "mw-publish:1", "committed:1"]);
 		strictEqual(harness.extensions.generation(), 1);
 		strictEqual(harness.middleware.ownedGeneration("user-hooks"), 1);
+		const booted = harness.extensions.snapshot();
 		deepStrictEqual(
-			harness.extensions.resourceRoots("skills").map((root) => [root.id, root.generation]),
+			booted?.packages.map((entry) => [entry.id, booted.generation]),
 			[["ext-a", 1]],
 		);
 		deepStrictEqual(harness.middleware.runHook({ hook: "turn_start" }).ruleIds, ["ext-a.hook"]);
@@ -255,7 +248,7 @@ describe("extension reload coordinator publication", () => {
 			at: string;
 			extension: number;
 			middleware: number;
-			roots: number[];
+			snapshot: number | undefined;
 			ruleIds: string[];
 			receiptGenerations: number[];
 		}> = [];
@@ -266,7 +259,7 @@ describe("extension reload coordinator publication", () => {
 				at,
 				extension: harness.extensions.generation(),
 				middleware: harness.middleware.ownedGeneration("user-hooks"),
-				roots: harness.extensions.resourceRoots("skills").map((root) => root.generation),
+				snapshot: harness.extensions.snapshot()?.generation,
 				ruleIds: [...result.ruleIds],
 				receiptGenerations: harness.receipts
 					.slice(before)
@@ -340,7 +333,7 @@ describe("extension reload coordinator publication", () => {
 		for (const observed of samples) {
 			strictEqual(observed.extension, 1, observed.at);
 			strictEqual(observed.middleware, 1, observed.at);
-			deepStrictEqual(new Set(observed.roots), new Set([1]), observed.at);
+			strictEqual(observed.snapshot, 1, observed.at);
 			strictEqual(new Set(observed.ruleIds).size, observed.ruleIds.length, observed.at);
 			deepStrictEqual(new Set(observed.receiptGenerations), new Set(observed.receiptGenerations.length > 0 ? [1] : []));
 		}
@@ -384,10 +377,7 @@ describe("extension reload coordinator publication", () => {
 		deepStrictEqual(middlewarePreparations, [1], "workspace mismatch is refused before middleware preparation");
 		strictEqual(harness.extensions.generation(), 1);
 		strictEqual(harness.middleware.ownedGeneration("user-hooks"), 1);
-		deepStrictEqual(
-			harness.extensions.resourceRoots("skills").map((root) => root.generation),
-			[1],
-		);
+		strictEqual(harness.extensions.snapshot()?.generation, 1);
 
 		requestedCwd = projectAlias;
 		const recovered = coordinator.reload();
@@ -690,10 +680,7 @@ describe("extension reload coordinator refusal paths", () => {
 		if (outcome.status !== "committed") return;
 		strictEqual(harness.extensions.generation(), 1);
 		strictEqual(harness.middleware.ownedGeneration("user-hooks"), 1);
-		deepStrictEqual(
-			harness.extensions.resourceRoots("skills").map((root) => root.generation),
-			[1],
-		);
+		strictEqual(harness.extensions.snapshot()?.generation, 1);
 		deepStrictEqual(harness.middleware.runHook({ hook: "turn_start" }).ruleIds, ["ext-a.hook"]);
 		ok(outcome.lines.some((line) => line.includes("committed generation observer failed: observer exploded")));
 		harness.stop();
