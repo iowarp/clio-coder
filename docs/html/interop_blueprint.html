@@ -1,0 +1,198 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <meta name="clio-markdown-source" content="docs/guide/interop.md">
+  <meta name="clio-docs-version" content="0.4.7">
+  <title>Coding agent interoperability · Clio Coder 0.4.7</title>
+  <link rel="icon" href="data:,">
+  <link rel="stylesheet" href="shared.css">
+</head>
+<body data-doc-category="guide">
+  <div class="reading-progress" aria-hidden="true"></div>
+  <a class="skip-link" href="#reference-content">Skip to reference</a>
+  <div class="container">
+    <header class="document-header" data-category="Guide">
+      <div class="header-left">
+        <a class="header-logo" href="index.html" aria-label="Documentation index">
+          <svg viewBox="0 0 24 24" fill="none" aria-hidden="true">
+            <path d="M12 2 2 7l10 5 10-5-10-5Z" stroke="url(#clio-logo)" stroke-width="2" stroke-linejoin="round"/>
+            <path d="m2 12 10 5 10-5M2 17l10 5 10-5" stroke="url(#clio-logo)" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"/>
+            <defs><linearGradient id="clio-logo" x1="2" y1="2" x2="22" y2="22"><stop stop-color="#00d4db"/><stop offset="1" stop-color="#ff7e29"/></linearGradient></defs>
+          </svg>
+        </a>
+        <div class="header-title-wrapper">
+          <p class="document-kicker">Guide / canonical reference</p>
+          <h1>Coding agent interoperability</h1>
+          <p class="document-path">docs/guide/interop.md</p>
+        </div>
+      </div>
+      <div class="header-right">
+        <a class="back-btn" href="index.html">← Index</a>
+        <span class="version-badge">v0.4.7</span>
+      </div>
+    </header>
+    <div class="page-layout-grid reference-layout">
+      <aside class="sidebar reference-sidebar" aria-label="On this page">
+        <nav class="toc-container">
+          <p class="toc-title">On this page</p>
+          <a class="sidebar-source" href="https://github.com/iowarp/clio-coder/blob/main/docs/guide/interop.md">Canonical Markdown<br>docs/guide/interop.md</a>
+          <ul class="toc-list"></ul>
+        </nav>
+      </aside>
+      <main class="reference-main" id="reference-content">
+        <article class="reference-prose glass-card">
+<h1>Coding agent interoperability</h1>
+<blockquote>
+<p><strong>Visual blueprint:</strong> See the <a href="../html/interop_blueprint.html">visual reference</a> in the source checkout.</p>
+</blockquote>
+<p>Clio can discover resources held by Claude Code, Codex, Antigravity CLI,
+GitHub Copilot CLI, and OpenCode, then adopt safe text resources into the
+library after approval. Inspection and adoption use zero model tokens.
+Gemini, Cursor, and the shared Agent Skills convention retain their existing
+presence detection; this inventory does not extend their capabilities.</p>
+<h2>Inspect installed hosts</h2>
+<pre><code class="language-bash">clio-coder interop inspect
+clio-coder interop inspect --json
+</code></pre>
+<p>Inspection reports binary presence, a bounded version probe (or unknown),
+connection and ACP adapter state, and resource counts derived from the disk
+inventory. User and current-project resources are distinguished. JSON omits
+native source paths and declaration values, including MCP credentials.
+A cache directory establishes available content; installation and activation
+remain unknown unless a host&#39;s installation registry establishes them.
+Malformed, unreadable, symbolic-link, oversized, or unsupported configurations
+produce an unknown inventory diagnostic instead of an invented zero.</p>
+<p>The scanner reads these configuration layouts, honoring the named host home
+variable when present. An explicit fixture home ignores process host overrides.
+It never traverses session history or starts a conversational agent.</p>
+<table>
+<thead>
+<tr>
+<th>Host</th>
+<th>User root</th>
+<th>Project roots</th>
+<th>Inventory and evidence commands</th>
+</tr>
+</thead>
+<tbody><tr>
+<td>Claude Code</td>
+<td><code>~/.claude</code> (<code>CLAUDE_CONFIG_DIR</code>)</td>
+<td><code>.claude</code></td>
+<td>Skills, agents, commands, output styles, hooks, MCP (including <code>~/.claude.json</code> and project-root <code>.mcp.json</code>); installed plugin paths, versions and marketplace from <code>plugins/installed_plugins.json</code>. Evidence: <code>claude --version</code>, <code>claude plugin list --json</code>.</td>
+</tr>
+<tr>
+<td>Codex</td>
+<td><code>~/.codex</code> (<code>CODEX_HOME</code>), shared <code>~/.agents</code></td>
+<td><code>.codex</code>, <code>.agents</code></td>
+<td>Skills, TOML agents, legacy prompts, hooks, MCP, plugin cache and plugin configuration. Evidence: <code>codex --version</code>, <code>codex plugin list --json</code>.</td>
+</tr>
+<tr>
+<td>Antigravity CLI</td>
+<td><code>~/.gemini/config</code> (<code>ANTIGRAVITY_HOME</code>)</td>
+<td><code>.agents</code></td>
+<td>Skills, agents, commands, plugins, import manifest, hooks, MCP. Evidence: <code>agy --version</code>, <code>agy plugin list</code>. Imported commands may already be converted into skills.</td>
+</tr>
+<tr>
+<td>GitHub Copilot CLI</td>
+<td><code>~/.copilot</code> (<code>COPILOT_HOME</code>)</td>
+<td><code>.github</code>, <code>.copilot</code></td>
+<td>Skills, agents, commands, hooks, MCP, plugin directories and local directory marketplaces in <code>settings.json</code>. Remote marketplace source paths remain unknown when no local installation is found. Evidence: <code>copilot --help</code>, <code>copilot plugin --help</code>, <code>copilot plugin list</code>.</td>
+</tr>
+<tr>
+<td>OpenCode</td>
+<td><code>~/.config/opencode</code> (<code>OPENCODE_CONFIG_DIR</code>, or <code>XDG_CONFIG_HOME/opencode</code>)</td>
+<td><code>.opencode</code></td>
+<td>Skills, singular/plural agent and command directories, MCP declarations and <code>opencode.json</code> at the project root, JavaScript/TypeScript plugins and tools. Evidence: <code>opencode --version</code>, <code>opencode agent list</code>. JSONC that cannot be parsed as JSON is reported unknown.</td>
+</tr>
+</tbody></table>
+<p>The listing commands above were checked in disposable profiles; runtime inspection
+uses the disk inventory and bounded version probes. Listing status itself remains
+unknown. In particular, Clio does not invoke OpenCode&#39;s agent listing against an
+operator profile because host startup can import executable modules.</p>
+<h2>Review and adopt</h2>
+<pre><code class="language-bash">clio-coder interop adopt claude-code --dry-run
+clio-coder interop adopt codex --kind skill --project
+clio-coder interop adopt claude-code --kind plugin --user --yes
+clio-coder interop adopt copilot --kind prompt --user
+</code></pre>
+<p>The host names are <code>claude-code</code>, <code>codex</code>, <code>antigravity</code>, <code>copilot</code>, and
+<code>opencode</code>; <code>claude</code> and <code>agy</code> are accepted aliases. <code>--kind</code> selects <code>skill</code>,
+<code>agent</code>, <code>prompt</code>, or <code>plugin</code>. The destination defaults to user scope;
+<code>--project</code> chooses the current project&#39;s library. Destination scope does not
+filter source scope: every matching discovered user and project resource is
+reviewed in the plan.</p>
+<p>The plan lists each source, destination, digest, and reason for installing or
+skipping it. Its SHA-256 identifies the reviewed projection; the library engine
+also records its standard full-tree integrity pin when publishing the package. <code>--dry-run</code> prints the plan and writes nothing. Otherwise Clio asks
+for approval in a terminal. Without a terminal, the plan remains unexecuted
+unless <code>--yes</code> was supplied. Declining installs nothing. Installation rechecks
+the source against the reviewed content; a changed source requires a new plan.
+Each package publishes atomically through the library engine; a multi-package
+plan may report successful packages alongside failures.</p>
+<table>
+<thead>
+<tr>
+<th>Resource</th>
+<th>Adoption behavior</th>
+</tr>
+</thead>
+<tbody><tr>
+<td>Skill</td>
+<td>Text-only skill directory, with required name and description, packaged through the library engine. Executable, non-text, or symbolic-link companions cause a skip. Foreign audit stamps are not retained.</td>
+</tr>
+<tr>
+<td>Prompt or command</td>
+<td>Markdown body becomes a Clio prompt. Host execution settings and frontmatter are omitted; the description is retained.</td>
+</tr>
+<tr>
+<td>Agent or subagent</td>
+<td>Markdown persona or TOML <code>developer_instructions</code> becomes a Clio recipe limited to read, grep, find, and ls. Host tools, model, permissions, hooks, and skill bindings are omitted and the plan says so.</td>
+</tr>
+<tr>
+<td>Plugin</td>
+<td>Requires a valid portable root <code>plugin.json</code>. Clio adopts a data-only projection of its skills, prompts, agents, and text references. Host extension metadata, hooks, MCP, scripts, tools, fleets, and non-text files are omitted. Dependencies on removed components cause a skip.</td>
+</tr>
+<tr>
+<td>Hook, MCP server, executable module, output style</td>
+<td>Listed as not adoptable, with a reason. Nothing is registered or executed.</td>
+</tr>
+</tbody></table>
+<p>A Claude plugin carrying only <code>.claude-plugin/plugin.json</code> is not adoptable as a
+whole plugin. The generated WTF-P Claude bundle now carries a portable root
+manifest naming <code>wtfp</code> and its native Clio resources, so an installed
+<code>wtfp@wtfp</code> can be adopted as the <code>wtfp</code> library plugin. Its executable host
+integration is excluded. Instructions that reference omitted scripts do not
+make those scripts available; adoption does not promise full workflow parity.</p>
+<p>Installed packages retain <code>{kind: &quot;interop&quot;, host, source}</code> provenance and
+<code>trust: &quot;foreign&quot;</code>, with the original absolute source path. Skill and prompt
+loading keeps the existing <code>integrations.projectResources.trustProjectImports</code>
+opt-in, including when a project resource is adopted to user scope. Approval to
+copy a resource does not grant that trust. Same plugin id/version or matching
+installed package content is skipped; identifier collisions are not replaced.
+Library integrity checks, drift detection, disable, and removal apply normally.
+To refresh a foreign source, remove the old library package and review a new adoption plan; no host files are ever
+moved, removed, or modified.</p>
+<h2>Terminal flow</h2>
+<p>Open <code>/interop</code> to inspect inventory or connect an external delegation peer.
+Inventory detail folds behind Enter and wraps in the scrolling detail pane.
+Select a host, press <code>p</code> for a project destination or <code>u</code> for user, and press <code>k</code>
+to cycle the kind filter. Press <code>i</code> to review the full adoption plan, then <code>y</code>
+to approve it or <code>b</code> to return without installing. Escape closes the overlay.
+Connection remains a separate action: <code>a</code> connects a proposed peer and <code>d</code>
+declines it. <code>/agents connect</code> opens the same review surface.</p>
+
+</article>
+        <nav class="related-nav" aria-label="Adjacent references">
+          <a class="nav-link-card" href="proactive_memory_blueprint.html"><span class="nav-label">Previous</span><span class="nav-title">Proactive task memory</span></a>
+          <a class="nav-link-card next" href="skills_blueprint.html"><span class="nav-label">Next</span><span class="nav-title">Skills Marketplace</span></a>
+        </nav>
+        <p class="reference-footer-note">Canonical content lives in the mapped Markdown page. This visual counterpart adds navigation without changing the contract.</p>
+      </main>
+    </div>
+    <footer>Clio Coder documentation · source-aligned at v0.4.7</footer>
+  </div>
+  <script src="shared.js"></script>
+</body>
+</html>

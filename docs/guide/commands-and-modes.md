@@ -424,17 +424,19 @@ After `/resume`, Clio offers `/memory seed` when the newest handoff contains a
 structured snapshot. Seeding is explicit, deduplicated, and unavailable while
 `context.memory.enabled` is false.
 
-The `/agents connect` overlay lists the other coding agents Clio found on this machine,
-grouped `Detected`, `Configured`, and `Declined`. A detected row's detail pane
+The `/interop` and `/agents connect` overlay lists the other coding agents Clio found on this machine,
+grouped `Detected`, `Configured`, `Declined`, and `Inventory`. A detected row's detail pane
 shows the exact `integrations.externalAgents.entries` entry that connecting it would append, plus
 the two facts a new peer inherits: `projectContext: none`, so the peer receives
 the task text and never the project projection, and `toolGovernance:
 clio-coder-policy`, so its tool calls are gated by Clio safety. Press `a` to connect
-one or `d` to decline; the overlay reads the report this process already produced
-at boot and never probes on a keystroke. Accepting applies to the live session,
+one or `d` to decline. Opening the overlay refreshes the disk inventory and runs
+bounded version probes; navigation and plan approval start no agent session. Accepting applies to the live session,
 because `delegation` hot-reloads.
 
-Boot adds at most one line about interop. The current hint can still say `Run /interop to review.`, but `/interop` is unrecognized and receives the standard unknown-command diagnostic. Open `/agents connect` directly. The hint names only agents that are installed, unconfigured, and undecided, appears at most once per set of facts, and is never emitted in headless or ACP mode. Declining an agent silences it until its binary version or path changes, at which point it becomes a fresh proposal.
+Boot adds at most one line about interop. `/interop` and `/agents connect` open the inventory and connection review. The hint names installed, unconfigured, undecided agents and stays silent in headless or ACP mode. Declining an agent silences its connection proposal until its binary version or path changes.
+
+`clio-coder interop inspect [--json]` reports host resources and wiring. `clio-coder interop adopt <host> [--kind skill|agent|prompt|plugin] [--project|--user] [--yes] [--dry-run]` shows a plan and requires approval before installing safe resources through the library. `/interop` offers the same adoption plan with source and destination scope, kind selection, and explicit approval. See [Coding agent interoperability](interop.md) for layouts, limits, and trust semantics.
 
 `clio-coder doctor` reports interop and never proposes anything. It emits one
 `ok` row per detected agent naming its version, its path, and whether it is

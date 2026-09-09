@@ -94,7 +94,7 @@ This document defines the 50 core architectural concepts and terminology used th
 - **Owning Type**: `WorkerEntryRenderOptions` in `src/interactive/renderers/worker-entry.ts`.
 
 ### 22. Interop
-- **Definition**: The domain governing discovery, compatibility roots, and delegation wiring for other coding agents installed on the local machine and in the repository.
+- **Definition**: Read-only discovery of coding agents, their user and project resources, and connection state. The operator can approve adoption of safe text resources into the library; foreign provenance and the project-import trust gate persist. See [Coding agent interoperability](interop.md).
 - **Owning Type**: `InteropContract` in `src/domains/interop/contract.ts`.
 
 ### 23. Consent Record
