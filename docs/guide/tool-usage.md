@@ -725,6 +725,8 @@ Arguments:
 
 The tool manages a stateful operator interview. The UI presents choices (with an implicit "Other" option for custom text input). Once completed, the final decisions are persisted as standard configurations in the session ledger, allowing the agent to proceed with operators' inputs or defaults.
 
+What the operator sees is one box above the composer, sized to the round: the question header, the question with bold spans and hanging numbered lists, then every option with its whole description. A round of several questions names them all in a strip at the top. A question longer than the box scrolls with PgUp/PgDn while its options stay on screen. Enter records the focused option; `t` records it and opens a multi-line answer field (Shift+Enter for a newline, Esc back to the options); an option whose label says the operator will type, such as "Provided details" or "Other", opens the field on Enter. Space toggles a multi-select option, Left/Right move between the questions of a round, `a` opens the answers recorded so far, and `?` shows the decision's tier, effect, and reversibility. Each answered round is recorded in the transcript as the question headers and the answers.
+
 Ask only when blocked on a decision the request does not answer. Never ask about anything the operator already stated: a request that names its own scope ("all tools", "read only") has answered the interview before it starts.
 
 ```text
