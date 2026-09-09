@@ -24,7 +24,7 @@ Subcommands:
                                 review and adopt safe resources
 
 Notes:
-  inspect writes nothing and starts no agent session. Wiring a detected agent
+  inspect changes no host or project files and starts no agent session. Wiring a detected agent
   as a delegation peer is an explicit review: run \`clio-coder configure --interop\`.
 `;
 

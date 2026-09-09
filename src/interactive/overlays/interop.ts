@@ -178,8 +178,10 @@ export function openInteropOverlay(tui: TUI, ctx: SlashCommandContext, onClose: 
 				detail: () => [
 					`# ${entry.action} ${entry.item.name}`,
 					`Source: ${entry.item.path}`,
+					`Source scope: ${entry.item.scope}`,
 					...(entry.destination ? [`Destination: ${entry.destination}`, `SHA-256: ${entry.digest}`] : []),
 					entry.reason,
+					...(entry.requirements?.length ? [`Requires installed packages: ${entry.requirements.join(", ")}`] : []),
 					...(entry.omitted ?? []).map((file) => `Skip ${file}: executable, host-specific, or non-text data.`),
 				],
 			})),

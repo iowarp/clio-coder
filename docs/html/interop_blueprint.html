@@ -108,7 +108,8 @@ It never traverses session history or starts a conversational agent.</p>
 </tr>
 </tbody></table>
 <p>The listing commands above were checked in disposable profiles; runtime inspection
-uses the disk inventory and bounded version probes. Listing status itself remains
+uses the disk inventory and bounded version probes in disposable profiles, so
+CLI alias or log side effects cannot change the operator&#39;s home or project. Listing status itself remains
 unknown. In particular, Clio does not invoke OpenCode&#39;s agent listing against an
 operator profile because host startup can import executable modules.</p>
 <h2>Review and adopt</h2>
@@ -152,7 +153,7 @@ plan may report successful packages alongside failures.</p>
 </tr>
 <tr>
 <td>Plugin</td>
-<td>Requires a valid portable root <code>plugin.json</code>. Clio adopts a data-only projection of its skills, prompts, agents, and text references. Host extension metadata, hooks, MCP, scripts, tools, fleets, and non-text files are omitted. Dependencies on removed components cause a skip.</td>
+<td>Requires a valid portable root <code>plugin.json</code>. Clio adopts a data-only projection of its skills, prompts, agents, and text references. Host extension metadata, hooks, MCP, scripts, tools, fleets, and non-text files are omitted. Dependencies on removed components cause a skip. Package <code>requires</code> declarations are preserved; required packages must already be installed, active, and valid in the destination scope. Missing requirements are named in the plan, checked again after approval, and never imported automatically.</td>
 </tr>
 <tr>
 <td>Hook, MCP server, executable module, output style</td>

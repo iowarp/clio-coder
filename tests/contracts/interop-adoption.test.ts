@@ -4,11 +4,15 @@ import { chmodSync, existsSync, mkdirSync, readFileSync, symlinkSync, writeFileS
 import path from "node:path";
 import { afterEach, beforeEach, describe, it } from "node:test";
 import { applyInteropAdoption, planInteropAdoption } from "../../src/domains/interop/adopt.js";
+import { detectInteropAgents } from "../../src/domains/interop/detect.js";
 import { discoverInteropInventory } from "../../src/domains/interop/inventory.js";
 import { interopAgentKind } from "../../src/domains/interop/registry.js";
 import type { InteropAgentId, InteropInventory } from "../../src/domains/interop/types.js";
 import {
 	clearPluginSnapshots,
+	disablePlugin,
+	enablePlugin,
+	installLibraryPackage,
 	listInstalledPlugins,
 	PLUGIN_SCHEMA,
 	readPluginInstallRecord,
@@ -68,6 +72,22 @@ describe("interop discovery and adoption", () => {
 		});
 	}
 
+	it("isolates version-probe side effects from foreign homes and projects", async () => {
+		const bin = path.join(home, "bin");
+		mkdirSync(bin);
+		const claude = path.join(bin, "claude");
+		writeFileSync(
+			claude,
+			'#!/bin/sh\nprintf touched > "$HOME/probe-marker"\nprintf touched > "$PWD/project-marker"\nprintf "fixture 1.2.3\\n"\n',
+		);
+		chmodSync(claude, 0o755);
+		process.env.PATH = bin;
+		process.env.HOME = home;
+		const report = await detectInteropAgents({ cwd, home, inventory: true, probeVersion: true }, []);
+		strictEqual(report.agents.find((agent) => agent.kind === "claude-code")?.version, "1.2.3");
+		ok(!existsSync(path.join(home, "probe-marker")));
+		ok(!existsSync(path.join(cwd, "project-marker")));
+	});
 	it("reads Codex cache marketplace and activation evidence", () => {
 		file(
 			".codex/plugins/cache/market/example/1.2.3/plugin.json",
@@ -291,6 +311,72 @@ describe("interop discovery and adoption", () => {
 		strictEqual(adopted.trusted, false);
 	});
 
+	it("preserves plugin package requirements, refuses missing dependencies, and rechecks after approval", () => {
+		const source = path.join(home, "requires-package");
+		file(
+			"requires-package/plugin.json",
+			JSON.stringify({
+				$schema: PLUGIN_SCHEMA,
+				name: "requires-package",
+				version: "1.0.0",
+				extensions: { "ai.iowarp.clio": { manifestVersion: 1, requires: ["skill:required-skill"] } },
+			}),
+		);
+		const found: InteropInventory = {
+			status: "known",
+			listing: "unknown",
+			diagnostics: [],
+			items: [{ kind: "plugin", name: "requires-package", scope: "user", path: source }],
+		};
+		const missing = planInteropAdoption({ host: "claude-code", inventory: found, cwd, kind: "plugin" });
+		strictEqual(missing.entries[0]?.action, "skip");
+		ok(missing.entries[0]?.reason.includes("skill:required-skill"));
+		deepStrictEqual(applyInteropAdoption(missing, true).installed, []);
+		strictEqual(listInstalledPlugins(cwd, { all: true }).length, 0, "adoption never imports an undeclared extra package");
+		const dependency = path.join(home, "dependency");
+		file("dependency/skills/required-skill/SKILL.md", skill.replace("name: example", "name: required-skill"));
+		file(
+			"dependency/plugin.json",
+			JSON.stringify({
+				$schema: PLUGIN_SCHEMA,
+				name: "required-skill",
+				version: "1.0.0",
+				extensions: {
+					"ai.iowarp.clio": {
+						manifestVersion: 1,
+						kind: "skill",
+						resources: { skills: "skills" },
+						components: [{ kind: "skill", id: "required-skill", path: "skills/required-skill/SKILL.md" }],
+					},
+				},
+			}),
+		);
+		const added = installLibraryPackage({
+			kind: "skill",
+			sourcePath: dependency,
+			scope: "user",
+			origin: { kind: "local", source: dependency },
+			trust: "trusted",
+			cwd,
+		});
+		ok(added.plugin, JSON.stringify(added.diagnostics));
+		const ready = planInteropAdoption({ host: "claude-code", inventory: found, cwd, kind: "plugin" });
+		strictEqual(ready.entries[0]?.action, "install", ready.entries[0]?.reason);
+		const projection = JSON.parse(ready.entries[0]?.files?.["plugin.json"] ?? "{}");
+		deepStrictEqual(projection.extensions["ai.iowarp.clio"].requires, ["skill:required-skill"]);
+		disablePlugin("required-skill", { cwd, scope: "user" });
+		const revoked = applyInteropAdoption(ready, true);
+		deepStrictEqual(revoked.installed, []);
+		ok(revoked.diagnostics[0]?.includes("skill:required-skill"));
+		enablePlugin("required-skill", { cwd, scope: "user" });
+		const approved = planInteropAdoption({ host: "claude-code", inventory: found, cwd, kind: "plugin" });
+		deepStrictEqual(applyInteropAdoption(approved, true).installed, ["requires-package"]);
+		const installed = listInstalledPlugins(cwd, { all: true });
+		strictEqual(installed.length, 2);
+		deepStrictEqual(installed.find((pkg) => pkg.id === "requires-package")?.manifest?.clio.requires, [
+			"skill:required-skill",
+		]);
+	});
 	it("projects a portable plugin and skips its already-provided child resources", () => {
 		const source = path.join(home, "portable");
 		file("portable/plugin.json", JSON.stringify({ $schema: PLUGIN_SCHEMA, name: "portable", version: "1.0.0" }));

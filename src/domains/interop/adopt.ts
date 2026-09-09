@@ -29,6 +29,7 @@ export interface InteropAdoptionEntry {
 	destination?: string;
 	digest?: string;
 	omitted?: string[];
+	requirements?: string[];
 	/** Immutable bytes reviewed by the operator. Never serialized by the CLI. */
 	files?: Readonly<Record<string, string>>;
 }
@@ -117,8 +118,16 @@ function safeData(file: string): boolean {
 function prepared(
 	item: InteropInventoryItem,
 	host: InteropAgentId,
-): { id: string; version: string; files: Record<string, string>; note: string; omitted: string[] } {
+): {
+	id: string;
+	version: string;
+	files: Record<string, string>;
+	note: string;
+	omitted: string[];
+	requirements: string[];
+} {
 	const omitted: string[] = [];
+	let requirements: string[] = [];
 	let files: Record<string, string>;
 	let id: string;
 	let version = "0.0.0";
@@ -128,6 +137,7 @@ function prepared(
 		if (!candidate.valid || !candidate.manifest)
 			throw new Error("Not adoptable: a valid portable root plugin.json is required.");
 		const manifest = candidate.manifest;
+		requirements = [...(manifest.clio.requires ?? [])];
 		id = manifest.name;
 		version = manifest.version ?? "0.0.0";
 		// Do not silently change the meaning of portable packages by removing dependencies.
@@ -146,6 +156,7 @@ function prepared(
 		raw.extensions = {
 			[PLUGIN_EXTENSION_KEY]: {
 				manifestVersion: 1,
+				...(manifest.clio.requires ? { requires: manifest.clio.requires } : {}),
 				resources,
 				components,
 				...(manifest.clio.compatibility ? { compatibility: manifest.clio.compatibility } : {}),
@@ -258,8 +269,39 @@ function prepared(
 		"ai.iowarp.clio.interop": { host, source: item.path, sourceScope: item.scope, untrusted: true },
 	};
 	files["plugin.json"] = `${JSON.stringify(manifest, null, 2)}\n`;
-	return { id, version, files, note, omitted };
+	return { id, version, files, note, omitted, requirements };
 }
+/** Requirements must already be usable; adoption never expands the reviewed import set. */
+function unmetRequirements(requirements: ReadonlyArray<string>, cwd: string, scope: "user" | "project"): string[] {
+	if (requirements.length === 0) return [];
+	const available = new Map(
+		listInstalledPlugins(cwd, { all: true, ...(scope === "user" ? { scope } : {}) })
+			.filter((pkg) => pkg.loadable)
+			.map((pkg) => [`${pkg.kind ?? "plugin"}:${pkg.id}`, pkg]),
+	);
+	const problems = new Set<string>();
+	const visiting = new Set<string>();
+	const checked = new Set<string>();
+	const visit = (ref: string): void => {
+		if (visiting.has(ref)) {
+			problems.add(`${ref} (dependency cycle)`);
+			return;
+		}
+		if (checked.has(ref)) return;
+		const dependency = available.get(ref);
+		if (!dependency) {
+			problems.add(`${ref} (missing, inactive, or unavailable in ${scope} scope)`);
+			return;
+		}
+		visiting.add(ref);
+		for (const nested of dependency.manifest?.clio.requires ?? []) visit(nested);
+		visiting.delete(ref);
+		checked.add(ref);
+	};
+	for (const ref of requirements) visit(ref);
+	return [...problems];
+}
+
 export function planInteropAdoption(input: {
 	host: InteropAgentId;
 	inventory: InteropInventory;
@@ -345,6 +387,13 @@ export function planInteropAdoption(input: {
 				continue;
 			}
 			const value = prepared(item, input.host);
+			const missing = unmetRequirements(value.requirements, cwd, scope);
+			if (missing.length) {
+				skip(
+					`Unsatisfied package requirements: ${missing.join(", ")}. Install dependencies through the library and review a new plan; no extra resources are imported.`,
+				);
+				continue;
+			}
 			const hash = digest(value.files);
 			if (item.kind === "plugin" && installed.some((pkg) => pkg.id === value.id && pkg.version === value.version)) {
 				planned.add(item.path);
@@ -373,6 +422,7 @@ export function planInteropAdoption(input: {
 				digest: hash,
 				reason: value.note,
 				omitted: value.omitted,
+				requirements: value.requirements,
 			});
 		} catch (error) {
 			skip(error instanceof Error ? error.message : String(error));
@@ -388,6 +438,7 @@ export function renderInteropAdoptionPlan(plan: InteropAdoptionPlan): string {
 			`  Source: ${entry.item.path}`,
 			...(entry.destination ? [`  Destination: ${entry.destination}`, `  SHA-256: ${entry.digest}`] : []),
 			`  ${entry.reason}`,
+			...(entry.requirements?.length ? [`  Requires installed packages: ${entry.requirements.join(", ")}`] : []),
 			...(entry.omitted ?? []).map((file) => `  SKIP ${file}: executable, host-specific, or non-text data.`),
 		]),
 		"Foreign resources remain untrusted until the project-import trust setting is enabled.",
@@ -407,8 +458,14 @@ export function applyInteropAdoption(
 		if (entry.action !== "install" || !entry.files || !entry.id) continue;
 		let staging: string | undefined;
 		try {
-			if (digest(entry.files) !== entry.digest || digest(prepared(entry.item, plan.host).files) !== entry.digest)
+			const current = prepared(entry.item, plan.host);
+			if (digest(entry.files) !== entry.digest || digest(current.files) !== entry.digest)
 				throw new Error("Source or plan changed after review; inspect a new plan.");
+			const missing = unmetRequirements(current.requirements, plan.cwd, plan.scope);
+			if (missing.length)
+				throw new Error(
+					`Unsatisfied package requirements after review: ${missing.join(", ")}. No extra resources are imported.`,
+				);
 			staging = mkdtempSync(path.join(tmpdir(), "clio-interop-adopt-"));
 			for (const [file, text] of Object.entries(entry.files)) {
 				const target = path.join(staging, file);

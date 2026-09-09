@@ -37,7 +37,8 @@ It never traverses session history or starts a conversational agent.
 | OpenCode | `~/.config/opencode` (`OPENCODE_CONFIG_DIR`, or `XDG_CONFIG_HOME/opencode`) | `.opencode` | Skills, singular/plural agent and command directories, MCP declarations and `opencode.json` at the project root, JavaScript/TypeScript plugins and tools. Evidence: `opencode --version`, `opencode agent list`. JSONC that cannot be parsed as JSON is reported unknown. |
 
 The listing commands above were checked in disposable profiles; runtime inspection
-uses the disk inventory and bounded version probes. Listing status itself remains
+uses the disk inventory and bounded version probes in disposable profiles, so
+CLI alias or log side effects cannot change the operator's home or project. Listing status itself remains
 unknown. In particular, Clio does not invoke OpenCode's agent listing against an
 operator profile because host startup can import executable modules.
 
@@ -71,7 +72,7 @@ plan may report successful packages alongside failures.
 | Skill | Text-only skill directory, with required name and description, packaged through the library engine. Executable, non-text, or symbolic-link companions cause a skip. Foreign audit stamps are not retained. |
 | Prompt or command | Markdown body becomes a Clio prompt. Host execution settings and frontmatter are omitted; the description is retained. |
 | Agent or subagent | Markdown persona or TOML `developer_instructions` becomes a Clio recipe limited to read, grep, find, and ls. Host tools, model, permissions, hooks, and skill bindings are omitted and the plan says so. |
-| Plugin | Requires a valid portable root `plugin.json`. Clio adopts a data-only projection of its skills, prompts, agents, and text references. Host extension metadata, hooks, MCP, scripts, tools, fleets, and non-text files are omitted. Dependencies on removed components cause a skip. |
+| Plugin | Requires a valid portable root `plugin.json`. Clio adopts a data-only projection of its skills, prompts, agents, and text references. Host extension metadata, hooks, MCP, scripts, tools, fleets, and non-text files are omitted. Dependencies on removed components cause a skip. Package `requires` declarations are preserved; required packages must already be installed, active, and valid in the destination scope. Missing requirements are named in the plan, checked again after approval, and never imported automatically. |
 | Hook, MCP server, executable module, output style | Listed as not adoptable, with a reason. Nothing is registered or executed. |
 
 A Claude plugin carrying only `.claude-plugin/plugin.json` is not adoptable as a

@@ -1,6 +1,6 @@
 import { createHash } from "node:crypto";
-import { accessSync, constants, existsSync, statSync } from "node:fs";
-import { homedir } from "node:os";
+import { accessSync, constants, existsSync, mkdirSync, mkdtempSync, rmSync, statSync } from "node:fs";
+import { homedir, tmpdir } from "node:os";
 import path from "node:path";
 import { runCommandVector } from "../../core/safe-exec.js";
 import { discoverInteropInventory } from "./inventory.js";
@@ -77,18 +77,43 @@ function parseVersion(output: string): string | undefined {
 	return /\b\d+\.\d+(?:\.\d+)?(?:[-+][0-9A-Za-z.-]+)?\b/.exec(output)?.[0];
 }
 
-async function probeVersion(binary: string, cwd: string): Promise<string | undefined> {
+async function probeVersion(binary: string): Promise<string | undefined> {
+	let scratch: string | undefined;
 	try {
+		// Even --version may create aliases or logs. Keep host and project profiles read-only.
+		scratch = mkdtempSync(path.join(tmpdir(), "clio-interop-version-"));
+		const env: Record<string, string> = { HOME: scratch, USERPROFILE: scratch };
+		for (const key of [
+			"XDG_CONFIG_HOME",
+			"XDG_CACHE_HOME",
+			"XDG_STATE_HOME",
+			"XDG_DATA_HOME",
+			"APPDATA",
+			"LOCALAPPDATA",
+			"CLAUDE_CONFIG_DIR",
+			"CODEX_HOME",
+			"ANTIGRAVITY_HOME",
+			"OPENCODE_CONFIG_DIR",
+			"COPILOT_HOME",
+			"GEMINI_CLI_HOME",
+		]) {
+			const directory = path.join(scratch, key.toLowerCase());
+			mkdirSync(directory);
+			env[key] = directory;
+		}
 		const result = await runCommandVector(binary, ["--version"], {
-			cwd,
-			workspaceRoot: cwd,
+			cwd: scratch,
+			workspaceRoot: scratch,
+			env,
 			timeoutMs: VERSION_PROBE_TIMEOUT_MS,
 			maxOutputBytes: VERSION_PROBE_MAX_OUTPUT_BYTES,
 		});
-		if (result.timedOut || result.exitCode !== 0) return undefined;
+		if (result.timedOut || result.outputCapped || result.exitCode !== 0) return undefined;
 		return parseVersion(`${result.stdout}\n${result.stderr}`);
 	} catch {
 		return undefined;
+	} finally {
+		if (scratch) rmSync(scratch, { recursive: true, force: true });
 	}
 }
 
@@ -158,7 +183,7 @@ export async function detectInteropAgents(
 		if (resolved.binary !== undefined) {
 			const version =
 				input.probeVersion === true
-					? await probeVersion(resolved.binary, cwd)
+					? await probeVersion(resolved.binary)
 					: // A run that did not probe keeps the last version seen for the same
 						// binary, so the fingerprint does not flip between probing callers.
 						prior?.binary === resolved.binary
