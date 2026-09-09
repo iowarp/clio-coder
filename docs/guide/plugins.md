@@ -10,8 +10,8 @@ Browse the bundled catalog, preview a complete installation, then install it:
 ```bash
 clio-coder plugins search
 clio-coder library list --kind plugin
-clio-coder library add plugin:materials-characterization --json
-clio-coder library add plugin:materials-characterization --yes
+clio-coder library add plugin:materio --json
+clio-coder library add plugin:materio --yes
 ```
 
 The catalog is shipped with Clio; it does not install content automatically. A preview reports the destination and full-tree SHA-256. The pin covers the manifest, skills, prompts, scripts, references, names, and directory structure. The installer checks the staged bundle again before committing it. If a source changes after the preview, make a new plan. `--force` never overrides a catalog pin mismatch.
@@ -29,12 +29,12 @@ Manage installed content through the same lifecycle functions used by the termin
 
 ```bash
 clio-coder plugins list --all --json
-clio-coder plugins disable materials-characterization
-clio-coder plugins enable materials-characterization
-clio-coder plugins drift materials-characterization
-clio-coder plugins pin materials-characterization
-clio-coder plugins update materials-characterization
-clio-coder plugins remove materials-characterization
+clio-coder plugins disable materio
+clio-coder plugins enable materio
+clio-coder plugins drift materio
+clio-coder plugins pin materio
+clio-coder plugins update materio
+clio-coder plugins remove materio
 ```
 
 Every successful installation records a verified pin. `pin` reports and verifies it; it does not approve edited files. Drifted content is blocked from loading. Update refuses to replace local edits unless `--force` is supplied; the install result reports any recovery copies of edited content. Updating a catalog package uses the current catalog version and pin. Updating a local package uses its recorded source directory, even when the catalog contains the same plugin name. Updates and replacements preserve an existing disabled state; enable the plugin explicitly when ready. Removal preserves edited content and reports its recovery path.

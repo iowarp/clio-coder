@@ -227,7 +227,7 @@ describe("safety gate boundary", () => {
 			"npx @iowarp/clio-coder skills install example",
 			"npm exec -- clio-coder skills update example",
 			"clio-coder plugins install ./draft-plugin --project",
-			"clio-coder plugins update materials-characterization --force",
+			"clio-coder plugins update materio --force",
 			"clio-coder plugins enable example",
 			"clio-coder plugins pin example",
 			"clio-coder extensions install ./draft-extension --user",

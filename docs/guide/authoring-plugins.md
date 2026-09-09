@@ -99,6 +99,6 @@ An active session observes additions and replacements after `/resources plugins 
 
 Agent Plugins 1.0.0 standardizes skills and MCP declarations. Clio currently consumes portable skills and its native manifest extension; it preserves MCP files but does not execute MCP servers. Claude Code and Gemini have their own native manifests and component formats. A package exporter must translate those formats and report which features are native, adapted as instructions, or unavailable. An exported skill workflow does not establish that a peer host executes Clio fleets.
 
-The bundled `materials-characterization` plugin includes a tested Python exporter for Codex, Claude Code and Gemini. See its package README for commands and capability reports. It also provides a complete worked example of explicit component relationships and shared domain references.
+The bundled `materio` plugin includes a tested Python exporter for Codex, Claude Code and Gemini. See its package README for commands and capability reports. It also provides a complete worked example of explicit component relationships and shared domain references.
 
 Harness extensions register runtime tools through the [harness extension contract](harness-extensions.md). They use a separate extension manifest and installation state. Legacy version 1 resource extensions remain readable, preserving existing WTF-P installations while new packages adopt the plugin engine. See [plugin library usage](plugins.md) for catalogs, updates, pins and terminal UI operations.

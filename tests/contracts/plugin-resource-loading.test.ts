@@ -31,7 +31,7 @@ function fixture(root: string): void {
 	);
 	write(
 		root,
-		"ai.iowarp.clio/prompts/materials-characterization/help.md",
+		"ai.iowarp.clio/prompts/materio/help.md",
 		"---\ndescription: Fixture help\n---\nRead ${component:resource:reference}\n",
 	);
 	const recipe = readFileSync(resolve("src/domains/agents/builtins/researcher.md"), "utf8")
@@ -41,20 +41,20 @@ function fixture(root: string): void {
 		.replace("skills: []", "skills: [fixture-research]");
 	write(
 		root,
-		"ai.iowarp.clio/agents/materials-characterization-researcher.md",
+		"ai.iowarp.clio/agents/materio-researcher.md",
 		`${recipe}\nRead ${"${pluginRoot}"}/assets/reference.txt\n`,
 	);
 	write(
 		root,
-		"ai.iowarp.clio/fleets/materials-characterization-review.md",
-		"---\nversion: 1\nname: materials-characterization-review\ndescription: Fixture review\nsteps:\n  - id: research\n    agent: materials-characterization-researcher\n    scope: readonly\n    dependencies: []\nmaxWorkers: 1\nonFailure: stop\n---\nRead ${component:resource:reference}\n",
+		"ai.iowarp.clio/fleets/materio-review.md",
+		"---\nversion: 1\nname: materio-review\ndescription: Fixture review\nsteps:\n  - id: research\n    agent: materio-researcher\n    scope: readonly\n    dependencies: []\nmaxWorkers: 1\nonFailure: stop\n---\nRead ${component:resource:reference}\n",
 	);
 	write(
 		root,
-		"ai.iowarp.clio/fleets/materials-characterization-code.md",
+		"ai.iowarp.clio/fleets/materio-code.md",
 		`---
 version: 2
-name: materials-characterization-code
+name: materio-code
 description: Package script arguments
 steps:
   - kind: code
@@ -104,7 +104,7 @@ it("loads installed plugin prompts, bound skills, recipes and fleets with contai
 		ok(installed.plugin?.loadable, JSON.stringify(installed.diagnostics));
 		const root = installed.plugin.rootPath;
 		const prompts = loadPromptTemplates({ cwd });
-		const prompt = prompts.items.find((item) => item.name === "materials-characterization:help");
+		const prompt = prompts.items.find((item) => item.name === "materio:help");
 		ok(prompt);
 		strictEqual(prompt.content.trim(), `Read ${join(root, "assets/reference.txt")}`);
 		strictEqual(prompt.sourceInfo.source, "plugin:user:resource-fixture");
@@ -113,7 +113,7 @@ it("loads installed plugin prompts, bound skills, recipes and fleets with contai
 		ok(skill);
 		strictEqual(skill.source, "plugin");
 		ok(!skill.content.includes("${"));
-		const recipe = discoverAgentRecipes(cwd).find((item) => item.id === "materials-characterization-researcher");
+		const recipe = discoverAgentRecipes(cwd).find((item) => item.id === "materio-researcher");
 		ok(recipe);
 		strictEqual(recipe.source, "plugin");
 		ok(recipe.body.includes(join(root, "assets/reference.txt")));
@@ -121,7 +121,7 @@ it("loads installed plugin prompts, bound skills, recipes and fleets with contai
 		const bound = loadSkills({ cwd, disableDiscovery: true, explicitSkillPaths: recipe.boundSkillPaths });
 		ok(bound.items[0]);
 		ok(!bound.items[0].content.includes("${"));
-		const fleet = loadFleetContract(cwd, "materials-characterization-review");
+		const fleet = loadFleetContract(cwd, "materio-review");
 		ok(fleet.body.includes(join(root, "assets/reference.txt")));
 		strictEqual(listFleetContracts(cwd).find((item) => item.name === fleet.name)?.source, "plugin");
 		write(
@@ -129,7 +129,7 @@ it("loads installed plugin prompts, bound skills, recipes and fleets with contai
 			".clio-coder/fleets/commands.yaml",
 			"version: 1\ncommands: {verify: {argv: [echo], argumentSlots: [{name: evidencePath, maxLength: 4096}]}}\n",
 		);
-		const code = loadFleetContract(cwd, "materials-characterization-code").steps[0];
+		const code = loadFleetContract(cwd, "materio-code").steps[0];
 		deepStrictEqual(code?.kind === "code" ? code.args : undefined, [join(root, "assets/reference.txt")]);
 	} finally {
 		env.restore();
@@ -153,12 +153,12 @@ it("keeps legacy namespaces and user overrides; disabled project plugin suppress
 		ok(installExtension(join(env.dir, "legacy"), { cwd, scope: "user" }).extension?.loadable);
 		write(
 			join(env.dir, "config"),
-			"prompts/materials-characterization/help.md",
+			"prompts/materio/help.md",
 			"---\ndescription: User help\n---\nUser override\n",
 		);
 		strictEqual(
 			loadPromptTemplates({ cwd })
-				.items.find((item) => item.name === "materials-characterization:help")
+				.items.find((item) => item.name === "materio:help")
 				?.content.trim(),
 			"User override",
 		);
@@ -166,7 +166,7 @@ it("keeps legacy namespaces and user overrides; disabled project plugin suppress
 		ok(installPlugin(source, { cwd, scope: "project" }).plugin?.loadable);
 		disablePlugin("resource-fixture", { cwd, scope: "project" });
 		reloadPluginResources(cwd);
-		ok(!discoverAgentRecipes(cwd).some((item) => item.id === "materials-characterization-researcher"));
+		ok(!discoverAgentRecipes(cwd).some((item) => item.id === "materio-researcher"));
 		ok(loadPromptTemplates({ cwd }).items.some((item) => item.name === "wtfp:help"));
 	} finally {
 		env.restore();
@@ -199,7 +199,7 @@ it("refreshes admitted plugin resources after drift and does not bind another ow
 		mkdirSync(cwd);
 		const source = join(env.dir, "source");
 		fixture(source);
-		const recipePath = "ai.iowarp.clio/agents/materials-characterization-researcher.md";
+		const recipePath = "ai.iowarp.clio/agents/materio-researcher.md";
 		write(
 			source,
 			recipePath,
@@ -213,10 +213,10 @@ it("refreshes admitted plugin resources after drift and does not bind another ow
 		const installed = installPlugin(source, { cwd, scope: "user" });
 		ok(installed.plugin?.loadable);
 		const diagnostics: import("../../src/domains/agents/registry.js").AgentRecipeDiagnostic[] = [];
-		ok(!discoverAgentRecipes(cwd, diagnostics).some((item) => item.id === "materials-characterization-researcher"));
+		ok(!discoverAgentRecipes(cwd, diagnostics).some((item) => item.id === "materio-researcher"));
 		ok(diagnostics.some((item) => item.message.includes("bound skill(s) unavailable")));
 		reloadPluginResources(cwd);
-		ok(loadPromptTemplates({ cwd }).items.some((item) => item.name === "materials-characterization:help"));
+		ok(loadPromptTemplates({ cwd }).items.some((item) => item.name === "materio:help"));
 		write(installed.plugin.rootPath, "assets/reference.txt", "changed bytes");
 		const explicit = loadSkills({
 			cwd,
@@ -226,7 +226,7 @@ it("refreshes admitted plugin resources after drift and does not bind another ow
 		strictEqual(explicit.items.length, 0);
 		ok(explicit.diagnostics.some((item) => item.message.includes("inactive")));
 		reloadPluginResources(cwd);
-		ok(!loadPromptTemplates({ cwd }).items.some((item) => item.name === "materials-characterization:help"));
+		ok(!loadPromptTemplates({ cwd }).items.some((item) => item.name === "materio:help"));
 	} finally {
 		env.restore();
 	}
@@ -249,7 +249,7 @@ it("publishes plugin generations before refreshing cached recipes and unsubscrib
 		fixture(source);
 		process.chdir(cwd);
 		ok(installPlugin(source, { cwd, scope: "user" }).plugin?.loadable);
-		strictEqual(agents.contract.get("materials-characterization-researcher"), null);
+		strictEqual(agents.contract.get("materio-researcher"), null);
 		const events: PluginsReloadedPayload[] = [];
 		const reload = () =>
 			reloadPluginResourcesAndNotify(cwd, (event) => {
@@ -257,7 +257,7 @@ it("publishes plugin generations before refreshing cached recipes and unsubscrib
 				bus.emit(BusChannels.PluginsReloaded, event);
 			});
 		const first = reload();
-		ok(agents.contract.get("materials-characterization-researcher"));
+		ok(agents.contract.get("materio-researcher"));
 		strictEqual(events[0]?.generation, first.generation);
 		strictEqual(events[0]?.changed, true);
 		const revision = agents.contract.revision();
@@ -266,7 +266,7 @@ it("publishes plugin generations before refreshing cached recipes and unsubscrib
 		strictEqual(agents.contract.revision(), revision);
 		disablePlugin("resource-fixture", { cwd, scope: "user" });
 		reload();
-		strictEqual(agents.contract.get("materials-characterization-researcher"), null);
+		strictEqual(agents.contract.get("materio-researcher"), null);
 		await agents.extension.stop?.();
 		const stoppedRevision = agents.contract.revision();
 		bus.emit(BusChannels.PluginsReloaded, {

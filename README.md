@@ -210,11 +210,11 @@ Install a complete workflow with its prompts, agents, skills, scripts and refere
 
 ```bash
 clio-coder plugins search
-clio-coder plugins install materials-characterization --user
+clio-coder plugins install materio --user
 ```
 
-In a new session, start with `/materials-characterization:help` or
-`/materials-characterization:identify-research`. The workflow progresses through
+In a new session, start with `/materio:help` or
+`/materio:identify-research`. The workflow progresses through
 supplied-paper literature review, lab feasibility, research tasks, verified
 execution, and a text handoff to WTF-P for paper planning. Researchers retain
 control of assumptions and scientific decisions.

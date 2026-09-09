@@ -7,7 +7,7 @@ All notable changes to Clio Coder are documented in this file. The format follow
 ### Added
 - Add a distinct agent plugin engine using the portable Agent Plugins 1.0.0 manifest, explicit component references, native Clio resource projections, isolated install state, full-tree integrity, staged replacement and recovery of changed files.
 - Add plugin catalog listing, installation previews, pinned local and GitHub bundle installation, updates, removal, enable/disable, drift inspection and pin verification through the CLI and terminal library.
-- Ship the materials-characterization research plugin with researcher interviews, supplied-paper literature review, lab feasibility, task planning and verified execution, archive checkpoints, conservative scientific checks, and a text handoff into WTF-P's public actions. Include peer package export for Codex, Claude Code and Gemini.
+- Ship the Materio (`materio`) materials research plugin with researcher interviews, supplied-paper literature review, lab feasibility, task planning and verified execution, archive checkpoints, conservative scientific checks, and a text handoff into WTF-P's public actions. Include peer package export for Codex, Claude Code and Gemini.
 - Add version 2 harness extensions for contained Node.js and Python command tools with JSON contracts, mediated execution, collision protection, provenance and lifecycle revocation. Preserve version 1 resource extensions and existing WTF-P registration.
 
 ### Changed
