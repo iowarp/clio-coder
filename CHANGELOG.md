@@ -27,6 +27,9 @@ All notable changes to Clio Coder are documented in this file. The format follow
 - Allow declared arguments on registered fleet code steps and retain them in previews, plans and execution.
 - Protect installed plugin and harness-extension trees and lifecycle commands as operator-owned resources. Include complete plugin pins in lint and shipped package verification.
 
+### Fixed
+- Handle `/skill off` before skill expansion on direct interactive chat admission, so it clears the active tool surface without looking up or installing a skill named `off`.
+
 ### Removed
 - Remove extension-owned prompt, skill, agent, fleet and theme roots. Plugins are the only source of packaged resources, and `/library reload` is the only resource reload path. Extensions keep command tools, `hooks.yaml`, install integrity, enable/disable, compatibility ranges and worker attestation.
 - Remove the `2026-09-01-extension-install-digests` lifecycle migration and the `clio-coder upgrade` blessing of pre-digest extension install records. An install record without a content digest now fails closed with reinstall guidance.

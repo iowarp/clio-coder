@@ -21,10 +21,10 @@ import { assessFinishContract } from "../../src/domains/safety/finish-contract.j
 import { CONFIRMED_SCOPE, READONLY_SCOPE, WORKSPACE_SCOPE } from "../../src/domains/safety/scope.js";
 import { createPendingSkillToolPolicy } from "../../src/interactive/chat-loop-messages.js";
 import {
-	dispatchSlashCommand,
-	parseSlashCommand,
-	type SlashCommandContext,
-} from "../../src/interactive/slash-commands.js";
+	createInteractiveSlashRuntime,
+	type InteractiveSlashRuntimeDeps,
+} from "../../src/interactive/interactive-slash-runtime.js";
+import { parseSlashCommand } from "../../src/interactive/slash-commands.js";
 import { bashTool } from "../../src/tools/bash.js";
 import { createContextTool } from "../../src/tools/context/index.js";
 import { limitationTool } from "../../src/tools/limitation.js";
@@ -268,48 +268,154 @@ describe("skill tool surface lifetime", () => {
 		}
 	});
 
-	it("lifts the narrowing when the operator clears it with /skill off", async () => {
-		const root = scratchRoot();
-		explicitPaths = [writeNarrowingSkill(root, "interview", ["allowed-tools: read, grep"])];
-		const context = contextToolFor(root);
-		const turnOne = turnPolicy("/skill interview start", root, undefined);
-		await context.run({ scope: "skills", name: "interview" }, invokeOptions(turnOne));
-		const armed = armedSkillSurface(turnOne);
-		ok(armed !== undefined);
+	for (const route of ["dispatch", "admit", "submitChat"] as const) {
+		it(`lifts the narrowing through runtime ${route} before expanding /skill off`, async () => {
+			const root = scratchRoot();
+			explicitPaths = [writeNarrowingSkill(root, "interview", ["allowed-tools: read, grep"])];
+			const context = contextToolFor(root);
+			const turnOne = turnPolicy("/skill interview start", root, undefined);
+			await context.run({ scope: "skills", name: "interview" }, invokeOptions(turnOne));
+			const armed = armedSkillSurface(turnOne);
+			ok(armed !== undefined);
 
-		// `/skill off` is its own command: it clears the surface instead of
-		// submitting a turn that tries to load a skill named "off".
-		deepStrictEqual(parseSlashCommand("/skill off"), { kind: "skill-surface-clear" });
-		const notices: Array<[string, string]> = [];
-		let submitted = 0;
-		let held: PendingSkillToolPolicy | undefined = armed;
-		const ctx = {
-			notice: (level: string, text: string) => {
-				notices.push([level, text]);
-			},
-			submitChat: () => {
-				submitted += 1;
-			},
-			clearSkillSurface: () => {
-				const cleared = skillSurfaceNames(held);
-				held = undefined;
-				return cleared;
-			},
-		} as unknown as SlashCommandContext;
-		dispatchSlashCommand(parseSlashCommand("/skill off"), ctx);
-		strictEqual(submitted, 0);
-		strictEqual(held, undefined);
-		match(notices.at(-1)?.[1] ?? "", /Skill tool surface cleared: interview\./u);
+			// `/skill off` is its own command: it clears the surface instead of
+			// submitting a turn that tries to load a skill named "off".
+			deepStrictEqual(parseSlashCommand("/skill off"), { kind: "skill-surface-clear" });
+			const notices: Array<[string, string]> = [];
+			let submitted = 0;
+			let held: PendingSkillToolPolicy | undefined = armed;
+			let expanded = 0;
+			let asked = 0;
+			const errors: string[] = [];
+			const runtime = createInteractiveSlashRuntime({
+				io: { stdout() {}, stderr: (text: string) => errors.push(text) },
+				chatPanel: { appendReplayBlock() {}, appendUser() {} },
+				requestRender() {},
+				refreshFooter() {},
+				recordSubmittedTurn() {},
+				chat: {
+					isStreaming: () => false,
+					submit: async () => {
+						submitted += 1;
+					},
+					clearSkillSurface: () => {
+						const cleared = skillSurfaceNames(held);
+						held = undefined;
+						return cleared;
+					},
+				},
+				expandSubmit: async (text: string) => {
+					expanded += 1;
+					const skills = loadSkills({ cwd: root, disableDiscovery: true, explicitSkillPaths: explicitPaths });
+					return { ...parsePendingSkillRequests(text, skills, { cwd: root }), images: [], workingContextPaths: [] };
+				},
+				openAskUser: async () => {
+					asked += 1;
+					return { cancelled: true, answers: [] };
+				},
+			} as unknown as InteractiveSlashRuntimeDeps);
+			runtime.context.notice = (level, text) => notices.push([level, text]);
+			if (route === "dispatch") strictEqual(runtime.dispatchCommand("/skill off"), "accepted");
+			else if (route === "admit") await runtime.admitCommand("/skill off");
+			else runtime.context.submitChat("/skill off");
+			await new Promise<void>((resolve) => setImmediate(resolve));
+			deepStrictEqual(errors, []);
+			strictEqual(expanded, 0, "clearing must precede skill lookup and expansion");
+			strictEqual(asked, 0);
+			strictEqual(submitted, 0);
+			strictEqual(held, undefined);
+			match(notices.at(-1)?.[1] ?? "", /Skill tool surface cleared: interview\./u);
 
-		// The next turn runs with the full surface back.
-		const turnTwo = turnPolicy("keep going", root, held);
-		strictEqual(turnTwo, undefined);
-		strictEqual(evaluateSkillToolSurface(turnTwo, ToolNames.Bash), null);
-		const registry = createRegistry({ safety: allowAllSafety([]) });
-		registry.register(bashSpec());
-		const verdict = await registry.invoke({ tool: ToolNames.Bash, args: {} }, invokeOptions(turnTwo));
-		strictEqual(verdict.kind, "ok");
-	});
+			// The next turn runs with the full surface back.
+			const turnTwo = turnPolicy("keep going", root, held);
+			strictEqual(turnTwo, undefined);
+			strictEqual(evaluateSkillToolSurface(turnTwo, ToolNames.Bash), null);
+			const registry = createRegistry({ safety: allowAllSafety([]) });
+			registry.register(bashSpec());
+			const verdict = await registry.invoke({ tool: ToolNames.Bash, args: {} }, invokeOptions(turnTwo));
+			strictEqual(verdict.kind, "ok");
+		});
+	}
+
+	for (const installed of [true, false]) {
+		it(`preserves runtime skill activation when ${installed ? "installed" : "installation is approved"}`, async () => {
+			const root = scratchRoot();
+			const directory = writeNarrowingSkill(root, "interview", ["allowed-tools: read, grep"]);
+			explicitPaths = [directory];
+			let available = installed;
+			let asked = 0;
+			let installs = 0;
+			let reloads = 0;
+			let submitted = 0;
+			let expanded = 0;
+			let held: PendingSkillToolPolicy | undefined;
+			const errors: string[] = [];
+			const runtime = createInteractiveSlashRuntime({
+				io: { stdout() {}, stderr: (text: string) => errors.push(text) },
+				getCwd: () => root,
+				getConfigDir: () => root,
+				chatPanel: { appendReplayBlock() {}, appendUser() {} },
+				requestRender() {},
+				refreshFooter() {},
+				recordSubmittedTurn() {},
+				chat: {
+					isStreaming: () => false,
+					submit: async (...[text, options]: Parameters<InteractiveSlashRuntimeDeps["chat"]["submit"]>) => {
+						submitted += 1;
+						strictEqual(text, "start");
+						const policy = createPendingSkillToolPolicy(options?.pendingSkillRequests ?? []);
+						ok(policy);
+						strictEqual(
+							(await contextToolFor(root).run({ scope: "skills", name: "interview" }, invokeOptions(policy))).kind,
+							"ok",
+						);
+						held = armedSkillSurface(policy);
+					},
+					clearSkillSurface: () => {
+						throw new Error("named invocation must not clear the surface");
+					},
+				},
+				expandSubmit: async (text: string) => {
+					expanded += 1;
+					const skills = loadSkills({ cwd: root, disableDiscovery: true, explicitSkillPaths: explicitPaths });
+					const parsed = parsePendingSkillRequests(text, skills, { cwd: root });
+					return {
+						...parsed,
+						pendingSkillRequests: available
+							? parsed.pendingSkillRequests
+							: [{ name: "interview", args: "start", source: "marketplace", installed: false, marketplaceRef: directory }],
+						images: [],
+						workingContextPaths: [],
+					};
+				},
+				openAskUser: async () => {
+					asked += 1;
+					return { cancelled: false, answers: [{ answer: "Install and run" }] };
+				},
+				installSkill: (input: Parameters<NonNullable<InteractiveSlashRuntimeDeps["installSkill"]>>[0]) => {
+					strictEqual(input.source, "interview");
+					strictEqual(input.cwd, root);
+					installs += 1;
+					available = true;
+				},
+				resources: {
+					reload: async () => {
+						reloads += 1;
+					},
+				},
+			} as unknown as InteractiveSlashRuntimeDeps);
+			await runtime.admitCommand("/skill interview start");
+			await new Promise<void>((resolve) => setImmediate(resolve));
+			deepStrictEqual(errors, []);
+			strictEqual(submitted, 1);
+			strictEqual(asked, installed ? 0 : 1);
+			strictEqual(installs, installed ? 0 : 1);
+			strictEqual(reloads, installed ? 0 : 1);
+			strictEqual(expanded, installed ? 1 : 2);
+			deepStrictEqual(skillSurfaceNames(held), ["interview"]);
+			ok(evaluateSkillToolSurface(held, ToolNames.Bash));
+		});
+	}
 
 	it("replaces rather than merges when the operator activates a different skill", async () => {
 		const root = scratchRoot();

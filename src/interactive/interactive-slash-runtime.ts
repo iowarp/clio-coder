@@ -322,6 +322,13 @@ export function createInteractiveSlashRuntime(deps: InteractiveSlashRuntimeDeps)
 	const admitChat = async (text: string, signal?: AbortSignal): Promise<void> => {
 		try {
 			signal?.throwIfAborted();
+			// submitChat can be called directly, bypassing command dispatch. Keep
+			// the reserved clear command ahead of skill lookup and installation.
+			const command = parseSlashCommand(text);
+			if (command.kind === "skill-surface-clear") {
+				dispatchSlashCommand(command, context);
+				return;
+			}
 			const submitted = await deps.expandSubmit(text);
 			signal?.throwIfAborted();
 			const uninstalled = submitted.pendingSkillRequests.find((request) => !request.installed);
