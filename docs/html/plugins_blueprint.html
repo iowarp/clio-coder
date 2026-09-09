@@ -45,32 +45,32 @@
         <article class="reference-prose glass-card">
 <blockquote>
 <p><strong>Visual blueprint:</strong> The source checkout includes the complete
-<a href="plugins_blueprint.html">Plugins visual reference</a>.</p>
+<a href="https://github.com/iowarp/clio-coder/blob/main/docs/html/plugins_blueprint.html">Plugins visual reference</a>.</p>
 </blockquote>
 <p>A plugin is a complete, versioned bundle of skills and supporting files. The portable root <code>plugin.json</code> follows <a href="https://agent-plugins.org/">Agent Plugins 1.0.0</a>. Clio reads native prompts, agent recipes, and fleets from its namespaced manifest extension. Installing a bundle keeps those resources and their references together.</p>
 <p>Browse the bundled catalog, preview a complete installation, then install it:</p>
-<pre><code class="language-bash">clio-coder plugins search
+<pre><code class="language-bash">clio-coder library search
 clio-coder library list --kind plugin
-clio-coder library add plugin:materio --json
-clio-coder library add plugin:materio --yes
+clio-coder library install plugin:materio --dry-run --json
+clio-coder library install plugin:materio
 </code></pre>
 <p>The catalog is shipped with Clio; it does not install content automatically. A preview reports the destination and full-tree SHA-256. The pin covers the manifest, skills, prompts, scripts, references, names, and directory structure. The installer checks the staged bundle again before committing it. If a source changes after the preview, make a new plan. <code>--force</code> never overrides a catalog pin mismatch.</p>
 <p>For a bundle you authored locally, install its directory directly:</p>
-<pre><code class="language-bash">clio-coder plugins install ./my-plugin --project
-clio-coder plugins inspect my-plugin --project --json
+<pre><code class="language-bash">clio-coder library install ./my-plugin --project
+clio-coder library inspect my-plugin --project --json
 </code></pre>
-<p>An existing local directory always wins over a catalog ID with the same spelling. <code>--project</code> installs into <code>.clio-coder/plugins/</code>; the default user scope installs into Clio&#39;s configuration directory. Valid, compatible project installations take precedence, including a disabled project installation that suppresses the user copy. The Plugins tab identifies every installed scope and the copy its actions select.</p>
+<p>An existing local directory always wins over a catalog ID with the same spelling. <code>--project</code> installs into <code>.clio-coder/plugins/</code>; the default user scope installs into Clio's configuration directory. Valid, compatible project installations take precedence, including a disabled project installation that suppresses the user copy. The Plugins tab identifies every installed scope and the copy its actions select.</p>
 <p>Manage installed content through the same lifecycle functions used by the terminal UI:</p>
-<pre><code class="language-bash">clio-coder plugins list --all --json
-clio-coder plugins disable materio
-clio-coder plugins enable materio
-clio-coder plugins drift materio
-clio-coder plugins pin materio
-clio-coder plugins update materio
-clio-coder plugins remove materio
+<pre><code class="language-bash">clio-coder library list --all --json
+clio-coder library disable materio
+clio-coder library enable materio
+clio-coder library drift materio
+clio-coder library pin materio
+clio-coder library update materio
+clio-coder library remove materio
 </code></pre>
 <p>Every successful installation records a verified pin. <code>pin</code> reports and verifies it; it does not approve edited files. Drifted content is blocked from loading. Update refuses to replace local edits unless <code>--force</code> is supplied; the install result reports any recovery copies of edited content. Updating a catalog package uses the current catalog version and pin. Updating a local package uses its recorded source directory, even when the catalog contains the same plugin name. Updates and replacements preserve an existing disabled state; enable the plugin explicitly when ready. Removal preserves edited content and reports its recovery path.</p>
-<p>In an active session, open <code>/resources plugins</code> or <code>/resources library plugin</code>. The Plugins tab shows catalog entries and local installations, their scope, state, resources, and diagnostics. Press <code>i</code> to review an installation, <code>u</code> to review an update, <code>e</code> to enable or disable, <code>r</code> to review removal, <code>p</code> to inspect the verified pin, or <code>d</code> to check drift. Run <code>/resources plugins reload</code> to refresh resources in that session after changes. The headless <code>plugins reload</code> command refreshes only its own process.</p>
+<p>In an active session, open <code>/library plugin</code> or <code>/library plugin</code>. The Plugins tab shows catalog entries and local installations, their scope, state, resources, and diagnostics. Press <code>i</code> to review an installation, <code>u</code> to review an update, <code>e</code> to enable or disable, <code>r</code> to review removal, <code>p</code> to inspect the verified pin, or <code>d</code> to check drift. Run <code>/library reload</code> to refresh resources in that session after changes. The headless <code>library reload</code> command refreshes only its own process.</p>
 <h2>Private catalogs</h2>
 <p>The ordinary library catalog supports an <code>entries</code> list and plugin entries with explicit versions and pins:</p>
 <pre><code class="language-yaml">entries:
@@ -81,15 +81,19 @@ clio-coder plugins remove materio
     sourceUrl: ./lab-workflow
     sha256: &lt;64 lowercase hexadecimal characters&gt;
 </code></pre>
-<p>Relative paths resolve against the catalog&#39;s directory. Remote bundles use an explicit GitHub tree URL such as <code>https://github.com/owner/repository/tree/v1.0.0/plugins/lab-workflow</code>, together with the full-tree digest and version. The bounded Git transport fetches the selected branch or tag; the installer verifies every bundle file against the catalog pin. Other URL formats are rejected as unsupported. Plugin entries never enter the skill-only marketplace or skill installer. Catalog <code>requires</code> references use the same typed dependency graph as other library entries. Installed plugin dependencies must also be loadable; disabled or damaged dependencies require explicit enabling or repair before installation continues.</p>
+<p>Relative paths resolve against the catalog's directory. Remote bundles use an explicit GitHub tree URL such as <code>https://github.com/owner/repository/tree/v1.0.0/plugins/lab-workflow</code>, together with the full-tree digest and version. The bounded Git transport fetches the selected branch or tag; the installer verifies every bundle file against the catalog pin. Other URL formats are rejected as unsupported. Automatic skill offers select only kind <code>skill</code>; they use the same package engine. Catalog <code>requires</code> references use the same typed dependency graph as other library entries. Installed plugin dependencies must also be loadable; disabled or damaged dependencies require explicit enabling or repair before installation continues.</p>
 <p>Maintainers regenerate the shipped catalog after changing a bundled package:</p>
-<pre><code class="language-bash">pnpm plugins:pin
-pnpm plugins:check
+<pre><code class="language-bash">pnpm library:pin
+pnpm library:check
 </code></pre>
-<p>The pin command reads each bundle&#39;s actual portable manifest and hashes the complete bundle. <code>plugins:check</code> fails on stale catalog metadata or content digests and is part of release hygiene.</p>
+<p>The pin command reads each bundle's actual portable manifest and hashes the complete bundle. <code>library:check</code> fails on stale catalog metadata or content digests and is part of release hygiene.</p>
 <h2>Plugins and extensions</h2>
-<p>Plugins carry portable resources. Harness extensions carry executable command tools and hook declarations, and have their own manifest, install root, and lifecycle. The two never overlap: a manifest that declares domain resources is refused and points at <code>clio-coder plugins install &lt;path&gt;</code>. Use <code>clio-coder extensions list</code> and <code>/resources extensions</code> to inspect installed extensions; command-tool schema changes require a new session.</p>
-        </article>
+<p>Plugins carry portable resources. Harness extensions carry executable command tools and hook declarations, and have their own manifest, install root, and lifecycle. The two never overlap: a manifest that declares domain resources is refused and points at <code>clio-coder library install &lt;path&gt;</code>. Use <code>clio-coder extensions list</code> and <code>/library extensions</code> to inspect installed extensions; command-tool schema changes require a new session.</p>
+<h2>Other package kinds and evals</h2>
+<p>The same library supports single-resource skill, agent, prompt and fleet packages. See <a href="resource_library_blueprint.html">library usage</a> for registration and JSON state, and <a href="library_blueprint.html">architecture</a> for the shared invariants. <code>/library</code> has all five kinds and <code>s</code> switches the selected scope.</p>
+<p>Materio declares <code>extensions[&quot;ai.iowarp.clio&quot;].evals.scripts: &quot;evals/scripts.yaml&quot;</code>. After installation, run <code>clio-coder eval validate --package plugin:materio --eval scripts</code> and <code>clio-coder eval run --package plugin:materio --eval scripts</code>. This offline suite copies the package to a temporary workspace and runs its Python script contracts. It does not evaluate model research quality.</p>
+
+</article>
         <nav class="related-nav" aria-label="Adjacent references">
           <a class="nav-link-card" href="resource_library_blueprint.html"><span class="nav-label">Previous</span><span class="nav-title">Resource Library</span></a>
           <a class="nav-link-card next" href="authoring_plugins_blueprint.html"><span class="nav-label">Next</span><span class="nav-title">Authoring Plugins</span></a>

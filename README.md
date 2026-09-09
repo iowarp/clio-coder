@@ -209,8 +209,8 @@ Read about [project context](docs/architecture/context-engine.md),
 Install a complete workflow with its prompts, agents, skills, scripts and references:
 
 ```bash
-clio-coder plugins search
-clio-coder plugins install materio --user
+clio-coder library search
+clio-coder library install materio --user
 ```
 
 In a new session, start with `/materio:help` or
@@ -223,7 +223,7 @@ The library verifies complete bundle pins and supports previews, updates,
 removal and drift checks. [Plugin usage](docs/guide/plugins.md),
 [package authoring](docs/guide/authoring-plugins.md), and
 [harness extensions](docs/guide/harness-extensions.md) describe the plugin and
-harness-extension contracts. WTF-P installs as a plugin with `clio-coder plugins
+harness-extension contracts. WTF-P installs as a plugin with `clio-coder library
 install`; remove an older extension copy with `clio-coder extensions remove wtfp`.
 
 </details>

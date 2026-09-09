@@ -23,7 +23,7 @@ lab-research/
 }
 ```
 
-Portable identity and publisher metadata remain at the root. The root schema permits `$schema`, `name`, `version`, `description`, `author`, `homepage`, `repository`, `license`, `keywords`, and `extensions`. Names have 1 to 64 lowercase letters, digits, hyphens or periods, begin and end with an alphanumeric character, and contain neither `--` nor `..`. Clio reserves `state.json` as an installation bookkeeping name. Supply a version when publishing to the pinned library.
+Portable identity and publisher metadata remain at the root. The root schema permits `$schema`, `name`, `version`, `description`, `author`, `homepage`, `repository`, `license`, `keywords`, and `extensions`. Names have 1 to 64 lowercase letters, digits, hyphens or periods, begin and end with an alphanumeric character, and contain neither `--` nor `..`. Clio reserves `state.json` as an installation bookkeeping name. Every package, including a local authoring install, requires an explicit Semantic Version. Numeric prerelease identifiers cannot contain leading zeros.
 
 ## Native Clio components
 
@@ -83,10 +83,10 @@ Prompt names follow their path beneath the prompts root. The example exposes `/l
 ## Validation and lifecycle
 
 ```bash
-clio-coder plugins inspect ./lab-research --json
-clio-coder plugins install ./lab-research --project
-clio-coder plugins list --all --json
-clio-coder plugins drift lab-research --project
+clio-coder library inspect ./lab-research --json
+clio-coder library install ./lab-research --project
+clio-coder library list --all --json
+clio-coder library drift lab-research --project
 ```
 
 Installation validates the exact manifest bytes included in the tree digest, copies into private staging, verifies that source and staging still match, and publishes the package and installation record with rollback on failure. Pins bind filenames, entry kinds, bytes, symlink targets and empty directories. Escaping links, hard links, unsupported filesystem entries and a root `state.json` are rejected. A catalog's expected identity, version and digest cannot be bypassed with `--force`.
@@ -102,3 +102,15 @@ Agent Plugins 1.0.0 standardizes skills and MCP declarations. Clio currently con
 The bundled `materio` plugin includes a tested Python exporter for Codex, Claude Code and Gemini. See its package README for commands and capability reports. It also provides a complete worked example of explicit component relationships and shared domain references.
 
 Harness extensions register runtime tools through the [harness extension contract](harness-extensions.md). They use a separate extension manifest and installation state, and they cannot declare domain resources: prompts, agents, skills, fleets and reference files ship in a plugin. See [plugin library usage](plugins.md) for catalogs, updates, pins and terminal UI operations.
+
+## Publish one package of any kind
+
+Choose a package name and explicit Semantic Version, put all required files below its root, and validate with `clio-coder library validate ./lab-research`. `kind` inside `extensions["ai.iowarp.clio"]` defaults to `plugin`; use `skill`, `agent`, `prompt` or `fleet` for a package exposing exactly one public component of that kind. Declare that component and only its corresponding resource root. Supporting scripts and references stay in the same package. A standalone skill can set `resources.skills` to `"."` and declare `SKILL.md`; a portable bundle uses the root `skills/` directory.
+
+Register a reviewed local package with `clio-coder library register ./lab-research --project`. Registration writes its exact version, source and full-tree SHA-256 into the scoped `library.yaml`. Preview and install with `library install plugin:lab-research --project --dry-run`, then `library install plugin:lab-research --project`. To publish a remote row, use the same `entries` schema with an explicit GitHub tree URL, exact version and digest of the complete package tree. Bump the version for changed release contents, review the bytes, and regenerate the index pin. `--force` cannot bypass a remote pin mismatch.
+
+Package dependencies live in `extensions["ai.iowarp.clio"].requires`, such as `["skill:ship"]`; copy the same requirements into the index. They name packages, while component `requires` names files within one package. Neither declares an execution hook.
+
+Declare runnable eval suites using `"evals": {"scripts": "evals/scripts.yaml"}` in the Clio extension. Paths must identify contained files. Validate with `clio-coder eval validate --package ./lab-research --eval scripts` and run with `clio-coder eval run --package ./lab-research --eval scripts`. Use the standard version-2 eval suite schema. Materio's [worked suite](../../plugins/materio/evals/scripts.yaml) runs Python contracts in a temporary package copy; package installation never runs evals.
+
+See [Library packages](resource-library.md) for every lifecycle command and [Library architecture](../architecture/library.md) for identity, trust, pin and namespace invariants.

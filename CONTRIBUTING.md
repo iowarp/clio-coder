@@ -37,9 +37,9 @@ pnpm run ci
 ```
 
 This runs type checking, lint (including boundaries, documentation drift and
-skill and plugin pins), one build, the contract/smoke suite, and the trace-viewer suite.
-Use `pnpm run skills:check` when checking skill pins on their own; it is already
-included in `lint` and `ci`.
+skill audit records and full-tree library pins), one build, the contract/smoke
+suite, and the trace-viewer suite. Use `pnpm run library:check` for package pins
+and `pnpm run skills:check` for skill authoring records; both run in `lint` and `ci`.
 
 The GitHub `ci` job runs the release gate on Ubuntu. The separate
 `windows-subprocess` job uses Node 22 on `windows-latest` and runs typecheck
@@ -303,10 +303,10 @@ Agents should:
 
 ## Skills
 
-`skills/` is the curated skills marketplace: maintainer-approved `SKILL.md`
+`skills/` contains the library's curated skill packages: maintainer-approved `SKILL.md`
 guides, distinct from the runtime skills any user can drop into a discovery
 root. It is not itself a discovery root, so nothing here auto-loads; skills
-activate after `clio-coder skills install <name>` or from an explicit
+activate after `clio-coder library install skill:<name>` or from an explicit
 `clio-coder --skill skills/<category>/<name>/SKILL.md` development path.
 
 To propose a skill:
@@ -317,14 +317,18 @@ To propose a skill:
    and move conditional detail into `references/`.
 2. Include the core `name`, `description`, `version`, and `license` fields plus
    a nested `clio-coder:` block with `registry-id`, `source-url`, `provenance`,
-   and `eval-status`. Ship an `evals.md` with the baseline scenarios.
+   and `eval-status`. Ship an `evals.md` with the baseline scenarios and a portable
+   root `plugin.json` declaring kind `skill`, one public skill component, and
+   an explicit Semantic Version.
 3. Verify locally with
-   `clio-coder skills validate skills/<category>/<name>/SKILL.md`.
-4. Install the candidate by name and confirm it appears with
-   `clio-coder skills list`.
+   `clio-coder library validate skills/<category>/<name>/SKILL.md` and
+   `clio-coder library validate skills/<category>/<name>`.
+4. Install the candidate directory and confirm it appears with
+   `clio-coder library skills`.
 5. Open a PR. A maintainer reviews against the rubric, sets `audit: pass`,
    approves the catalog version, then regenerates and checks the catalog with
-   `pnpm run skills:pin` and `pnpm run skills:check`.
+   `pnpm run skills:pin` and `pnpm run skills:check`, then regenerates full-tree
+   distribution pins with `pnpm run library:pin` and `pnpm run library:check`.
 
 Full catalog conventions and install options: [skills/README.md](skills/README.md).
 
@@ -336,8 +340,8 @@ for native prompts, recipes, and fleets. Follow the
 [plugin authoring guide](docs/guide/authoring-plugins.md) and keep harness command
 implementations in the separate [extension lifecycle](docs/guide/harness-extensions.md).
 
-After changing any bundled file, run `pnpm plugins:pin` and review the updated
-full-tree digest in `plugins/registry.yaml`. Run `pnpm plugins:check` to verify
+After changing any bundled file, run `pnpm library:pin` and review the updated
+full-tree digest in `library/registry.yaml`. Run `pnpm library:check` to verify
 the exact candidate; lint and the release gate include this check. Add behavior
 tests for lifecycle changes and validate an installed package's actual resources,
 including package-local references and bound skills. Peer projections must state

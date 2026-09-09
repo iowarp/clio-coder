@@ -76,7 +76,7 @@ For process exit codes, stdout deliverable guarantees, and machine-readable JSON
 | `clio-coder trace ui [--db PATH] [--port N]` | Serve the localhost-only waterfall viewer. The viewer is not part of the published package. |
 | `clio-coder dev evolve manifest init\|validate\|summarize` | Create and check typed harness change manifests. |
 | `clio-coder extensions list\|discover\|install\|enable\|disable\|remove` | Manage installed extension packages and resource roots. `clio-coder ext` is an accepted alias. |
-| `clio-coder skills list\|search\|inspect\|validate\|install\|update\|sync\|eval` | Manage discovered skills, Clio-native skills, and local marketplace installs. |
+| `clio-coder library list\|search\|register\|inspect\|validate\|install\|update\|enable\|disable\|drift\|pin\|remove` | Manage packages of kind plugin, skill, agent, prompt or fleet at user/project scope; `install/update --dry-run` preview. `library skills` lists runtime skills; `library inventory --json` is the fixed GUI read. |
 | `clio-coder docs [topic] [--no-open]` | Serve the interactive HTML docs of a source checkout on 127.0.0.1; the npm package ships the Markdown guides only. |
 | `clio-coder usage report [--repo <path>] [--days <n>] [--json]` | Cross-session usage facts from session/run ledgers and retained out-of-turn calls, including known failed-compaction spending and missing coverage. The window defaults to 30 days and the JSON schema is marked experimental. |
 | `clio-coder dev share export --out <path> [--project\|--user\|--both] [--context] [--prompts] [--skills] [--settings] [--extensions]` | Export project context, prompts, skills, settings fragments, and extension bundles. |
@@ -170,7 +170,7 @@ The registry table below lists the available interactive slash commands. On a ba
 | `/quit` | `/quit` | Exit Clio Coder |
 | `/help` | `/help [query]` | Open the interactive help center showing commands and keys |
 | `/skill` | `/skill [name] [task]` | Open the Skills Hub or invoke a skill |
-| `/resources` | `/resources [skills\|prompts\|library [kind]\|extensions [reload]]` | Browse installed resources and private library entries; `extensions reload` commits a new extension generation |
+| `/library` | `/library [plugin\|skill\|agent\|prompt\|fleet\|reload\|prompts\|extensions [reload]]` | Browse packages in all five kind tabs; refresh package resources, inspect runtime prompts or manage executable harness extensions. |
 | `/share` | `/share [runId]` | Share a worker result with the main agent |
 | `/archive` | `/archive export <path> \| /archive import [--dry-run] [--force] <path>` | Export or import a full Clio archive |
 | `/run` | `/run [--agent-profile <profile>] [--runtime <runtimeId>] [--target <id>] [--model <id>] [--thinking <level>] [--tool-profile <minimal-local\|science-local\|full-agent>] [--require <cap>] [--share] <agent> <task>` | Run a fleet agent |
@@ -214,7 +214,7 @@ must record a passing validation receipt for every named check or a successful
 completion note alone does not satisfy acceptance. `clio-coder tasks list`,
 `hand <uN>`, `done <uN>`, and `drop <uN>` manage the same inbox as `/tasks`.
 
-Retired spellings are unrecognized commands and use the standard unknown-command diagnostic; they do not print automatic replacement hints. Use supported spellings such as `/settings targets`, `/settings chat model-picker`, and the corresponding `/resources` subcommand. Unrecognized commands are not sent to the model as prompt text.
+Retired spellings are unrecognized commands and use the standard unknown-command diagnostic; they do not print automatic replacement hints. Use supported spellings such as `/settings targets`, `/settings chat model-picker`, and the corresponding `/library` subcommand. Unrecognized commands are not sent to the model as prompt text.
 
 `/context` with no arguments opens the context-window ledger overlay, including
 the working-set section (policy, evicted items and tokens, events, recalls, churn).
@@ -314,7 +314,7 @@ The `/resume` picker accepts Page Up and Page Down to move by its 12 visible row
 Only active commands run. Typing anything command-shaped that the registry does
 not own checks the loaded prompt templates across native and foreign prompt roots.
 Built-in command names are reserved across interactive and headless modes; a
-template with the same basename is omitted from `/resources prompts` with a collision
+template with the same basename is omitted from `/library prompts` with a collision
 diagnostic instead of shadowing a command on one surface and expanding on another.
 If a matching template is found in an untrusted project root, Clio prints that the
 prompt template comes from an untrusted project root and directs the operator to set
@@ -588,10 +588,10 @@ to execute through the existing engine worker path, the sanctioned Claude Code w
 
 | Command | Purpose |
 | --- | --- |
-| `pnpm run ci` | Local and GitHub PR gate: typecheck, lint, skills pin check, build, the deterministic test suite, and the trace-viewer suite. |
+| `pnpm run ci` | Local and GitHub PR gate: typecheck, lint, library package pin and skill audit checks, build, the deterministic test suite, and the trace-viewer suite. |
 | `pnpm run ci:release` | Maintainer release gate: `pnpm run ci`, then the `check-release` dist and packaging audit. |
 | `pnpm run typecheck` | Strict TypeScript pass. |
-| `pnpm run lint` | Biome checks plus `scripts/check-hygiene.ts`, which runs the boundary invariants, the skills pin check, and the README and docs drift rules. |
+| `pnpm run lint` | Biome checks plus `scripts/check-hygiene.ts`, which runs the boundary invariants, the library package pin and skill audit checks, and the README and docs drift rules. |
 | `pnpm test` | Focused contract and smoke files through plain `node --test`. |
 | `pnpm run build` | Production bundle through `tsup`. |
 | `pnpm run dev` | `tsup --watch`. |
@@ -864,3 +864,9 @@ actual behavior. Redact secrets and private repository content.
 Acceptance rows labeled Required declare expected checks and timeout limits; they are not pending executions or passing results. Inspect verification receipts for outcomes. Under high rigor, the finish gate requires the applicable passing checks or explicit limitations.
 
 Task-board guidance and ordinary continuation preserve proposal-only scope. Deferred implementation should be blocked or dropped while awaiting an explicit operator go-ahead. A skill-install decision is separate from implementation authorization, and full-auto capability does not expand the task. These are model instructions, not a guarantee of model adherence.
+
+## Package evals
+
+`clio-coder eval validate --package <path|kind:name> --eval <name>` validates a named package suite. `clio-coder eval run` with the same package flags runs it; `--user` or `--project` selects the installed copy. Materio declares `scripts` for its offline Python contracts. The experimental skill-scenario lane is `clio-coder eval skill <name|path> [--scenario <id>]`. See [Library packages](resource-library.md).
+
+The retired top-level `skills` and `plugins` groups and `/resources` slash spelling are unrecognized in this version. `/skill` remains the skill activation surface; `/interop` remains discovery and reviewed adoption.

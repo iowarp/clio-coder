@@ -5,7 +5,7 @@
   <meta name="viewport" content="width=device-width, initial-scale=1">
   <meta name="clio-markdown-source" content="docs/guide/authoring-plugins.md">
   <meta name="clio-docs-version" content="0.4.7">
-  <title>Authoring portable plugins · Clio Coder 0.4.7</title>
+  <title>Authoring a portable agent plugin · Clio Coder 0.4.7</title>
   <link rel="icon" href="data:,">
   <link rel="stylesheet" href="shared.css">
 </head>
@@ -24,7 +24,7 @@
         </a>
         <div class="header-title-wrapper">
           <p class="document-kicker">Guide / canonical reference</p>
-          <h1>Authoring portable plugins</h1>
+          <h1>Authoring a portable agent plugin</h1>
           <p class="document-path">docs/guide/authoring-plugins.md</p>
         </div>
       </div>
@@ -43,9 +43,8 @@
       </aside>
       <main class="reference-main" id="reference-content">
         <article class="reference-prose glass-card">
-<h1>Authoring a portable agent plugin</h1>
 <blockquote>
-<p><strong>Visual blueprint:</strong> See the <a href="../html/authoring_plugins_blueprint.html">visual reference</a> in the source checkout.</p>
+<p><strong>Visual blueprint:</strong> See the <a href="authoring_plugins_blueprint.html">visual reference</a> in the source checkout.</p>
 </blockquote>
 <p>An agent plugin packages a workflow and its supporting resources as one versioned installation. Its canonical identity is the <a href="https://agent-plugins.org/schemas/1.0.0/plugin.schema.json">Agent Plugins 1.0.0 manifest</a>. Clio keeps the complete package together, verifies its full-tree digest, and discovers the resources supported by the current runtime.</p>
 <p>The minimal package has a root <code>plugin.json</code> and an immediate child skill directory:</p>
@@ -62,7 +61,7 @@
   &quot;description&quot;: &quot;Research from supplied lab evidence&quot;
 }
 </code></pre>
-<p>Portable identity and publisher metadata remain at the root. The root schema permits <code>$schema</code>, <code>name</code>, <code>version</code>, <code>description</code>, <code>author</code>, <code>homepage</code>, <code>repository</code>, <code>license</code>, <code>keywords</code>, and <code>extensions</code>. Names have 1 to 64 lowercase letters, digits, hyphens or periods, begin and end with an alphanumeric character, and contain neither <code>--</code> nor <code>..</code>. Clio reserves <code>state.json</code> as an installation bookkeeping name. Supply a version when publishing to the pinned library.</p>
+<p>Portable identity and publisher metadata remain at the root. The root schema permits <code>$schema</code>, <code>name</code>, <code>version</code>, <code>description</code>, <code>author</code>, <code>homepage</code>, <code>repository</code>, <code>license</code>, <code>keywords</code>, and <code>extensions</code>. Names have 1 to 64 lowercase letters, digits, hyphens or periods, begin and end with an alphanumeric character, and contain neither <code>--</code> nor <code>..</code>. Clio reserves <code>state.json</code> as an installation bookkeeping name. Every package, including a local authoring install, requires an explicit Semantic Version. Numeric prerelease identifiers cannot contain leading zeros.</p>
 <h2>Native Clio components</h2>
 <p>Use <code>extensions[&quot;ai.iowarp.clio&quot;]</code> to declare Clio prompts, strict agent recipes and fleets. Keep native files in <code>ai.iowarp.clio/</code>, portable skills in <code>skills/</code>, and shared supporting content in <code>assets/</code> or skill-local reference directories.</p>
 <pre><code class="language-json">{
@@ -112,10 +111,10 @@
 <p>Clio text can refer to <code>${pluginRoot}/assets/methods.md</code> or <code>${component:resource:methods}</code>. Prompts, agent bodies, and skills recognize prose markers with portable, space-free slash suffixes. For a filename containing spaces or Unicode, declare a component and refer to its <code>kind:id</code>. The referenced target must exist within the declaring package. Fleet argument paths use a separate complete-path parser: the reference must occupy the whole argument, and containment is checked after expanding the entire suffix, including spaces and Unicode. A reference embedded in an option such as <code>--file=${pluginRoot}/data.csv</code> is rejected; pass the path as its own argument. These are Clio reference forms; peer exports translate instructions and paths for their native host. Portable skill text should use relative file references where practical.</p>
 <p>Prompt names follow their path beneath the prompts root. The example exposes <code>/lab-research:start</code>. Give agent and fleet filenames a package prefix to keep their registered identities unambiguous. Agent recipes retain the strict version 1 contract, including required and optional tool lists, custom audience, budget, and result contract. Recipes bind skills from their own package. Interviews belong to the orchestrator; a worker returns its need for input and is redispatched after the researcher answers.</p>
 <h2>Validation and lifecycle</h2>
-<pre><code class="language-bash">clio-coder plugins inspect ./lab-research --json
-clio-coder plugins install ./lab-research --project
-clio-coder plugins list --all --json
-clio-coder plugins drift lab-research --project
+<pre><code class="language-bash">clio-coder library inspect ./lab-research --json
+clio-coder library install ./lab-research --project
+clio-coder library list --all --json
+clio-coder library drift lab-research --project
 </code></pre>
 <p>Installation validates the exact manifest bytes included in the tree digest, copies into private staging, verifies that source and staging still match, and publishes the package and installation record with rollback on failure. Pins bind filenames, entry kinds, bytes, symlink targets and empty directories. Escaping links, hard links, unsupported filesystem entries and a root <code>state.json</code> are rejected. A catalog's expected identity, version and digest cannot be bypassed with <code>--force</code>.</p>
 <p>User installations live in the Clio configuration directory's <code>plugins/</code>; project installations live in <code>.clio-coder/plugins/</code>. State is outside the bundle, in the parent <code>state.json</code>. Installations also retain their source origin for updates. A valid project copy takes precedence over the user copy; disabling that project copy suppresses both. Changed or unverifiable content cannot load or be enabled. Update refuses local drift unless explicitly forced, and replacement or removal preserves changed files in a reported recovery copy.</p>
@@ -123,7 +122,14 @@ clio-coder plugins drift lab-research --project
 <h2>Host projections and runtime capabilities</h2>
 <p>Agent Plugins 1.0.0 standardizes skills and MCP declarations. Clio currently consumes portable skills and its native manifest extension; it preserves MCP files but does not execute MCP servers. Claude Code and Gemini have their own native manifests and component formats. A package exporter must translate those formats and report which features are native, adapted as instructions, or unavailable. An exported skill workflow does not establish that a peer host executes Clio fleets.</p>
 <p>The bundled <code>materio</code> plugin includes a tested Python exporter for Codex, Claude Code and Gemini. See its package README for commands and capability reports. It also provides a complete worked example of explicit component relationships and shared domain references.</p>
-<p>Harness extensions register runtime tools through the <a href="harness_extensions_blueprint.html">harness extension contract</a>. They use a separate extension manifest and installation state, and they cannot declare domain resources: prompts, agents, skills, fleets and reference files ship in a plugin. See <a href="plugins_blueprint.html">plugin library usage</a> for catalogs, updates, pins and terminal UI operations.</p>
+<p>Harness extensions register runtime tools through the <a href="https://github.com/iowarp/clio-coder/blob/main/docs/guide/harness-extensions.md">harness extension contract</a>. They use a separate extension manifest and installation state, and they cannot declare domain resources: prompts, agents, skills, fleets and reference files ship in a plugin. See <a href="plugins_blueprint.html">plugin library usage</a> for catalogs, updates, pins and terminal UI operations.</p>
+<h2>Publish one package of any kind</h2>
+<p>Choose a package name and explicit Semantic Version, put all required files below its root, and validate with <code>clio-coder library validate ./lab-research</code>. <code>kind</code> inside <code>extensions[&quot;ai.iowarp.clio&quot;]</code> defaults to <code>plugin</code>; use <code>skill</code>, <code>agent</code>, <code>prompt</code> or <code>fleet</code> for a package exposing exactly one public component of that kind. Declare that component and only its corresponding resource root. Supporting scripts and references stay in the same package. A standalone skill can set <code>resources.skills</code> to <code>&quot;.&quot;</code> and declare <code>SKILL.md</code>; a portable bundle uses the root <code>skills/</code> directory.</p>
+<p>Register a reviewed local package with <code>clio-coder library register ./lab-research --project</code>. Registration writes its exact version, source and full-tree SHA-256 into the scoped <code>library.yaml</code>. Preview and install with <code>library install plugin:lab-research --project --dry-run</code>, then <code>library install plugin:lab-research --project</code>. To publish a remote row, use the same <code>entries</code> schema with an explicit GitHub tree URL, exact version and digest of the complete package tree. Bump the version for changed release contents, review the bytes, and regenerate the index pin. <code>--force</code> cannot bypass a remote pin mismatch.</p>
+<p>Package dependencies live in <code>extensions[&quot;ai.iowarp.clio&quot;].requires</code>, such as <code>[&quot;skill:ship&quot;]</code>; copy the same requirements into the index. They name packages, while component <code>requires</code> names files within one package. Neither declares an execution hook.</p>
+<p>Declare runnable eval suites using <code>&quot;evals&quot;: {&quot;scripts&quot;: &quot;evals/scripts.yaml&quot;}</code> in the Clio extension. Paths must identify contained files. Validate with <code>clio-coder eval validate --package ./lab-research --eval scripts</code> and run with <code>clio-coder eval run --package ./lab-research --eval scripts</code>. Use the standard version-2 eval suite schema. Materio's <a href="https://github.com/iowarp/clio-coder/blob/main/plugins/materio/evals/scripts.yaml">worked suite</a> runs Python contracts in a temporary package copy; package installation never runs evals.</p>
+<p>See <a href="resource_library_blueprint.html">Library packages</a> for every lifecycle command and <a href="library_blueprint.html">Library architecture</a> for identity, trust, pin and namespace invariants.</p>
+
 </article>
         <nav class="related-nav" aria-label="Adjacent references">
           <a class="nav-link-card" href="proactive_memory_blueprint.html"><span class="nav-label">Previous</span><span class="nav-title">Proactive task memory</span></a>

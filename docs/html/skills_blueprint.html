@@ -4,8 +4,8 @@
   <meta charset="utf-8">
   <meta name="viewport" content="width=device-width, initial-scale=1">
   <meta name="clio-markdown-source" content="docs/guide/skills-marketplace.md">
-  <meta name="clio-docs-version" content="0.4.2">
-  <title>Skills Marketplace · Clio Coder 0.4.2</title>
+  <meta name="clio-docs-version" content="0.4.7">
+  <title>Skills in the library · Clio Coder 0.4.7</title>
   <link rel="icon" href="data:,">
   <link rel="stylesheet" href="shared.css">
 </head>
@@ -24,7 +24,7 @@
         </a>
         <div class="header-title-wrapper">
           <p class="document-kicker">Guide / canonical reference</p>
-          <h1>Skills Marketplace</h1>
+          <h1>Skills in the library</h1>
           <p class="document-path">docs/guide/skills-marketplace.md</p>
         </div>
       </div>
@@ -44,31 +44,19 @@
       <main class="reference-main" id="reference-content">
         <article class="reference-prose glass-card">
 <blockquote>
-<p><strong>Visual blueprint:</strong> The source checkout includes the complete
-<a href="skills_blueprint.html">Skills Marketplace visual reference</a>.</p>
+<p><strong>Visual blueprint:</strong> See the <a href="skills_blueprint.html">Skills visual reference</a> in the source checkout.</p>
 </blockquote>
-<p>The Skills Hub (<code>/skill</code>) shows project skills, user skills, and the marketplace. Every marketplace row comes from the same local lookup that <code>clio-coder skills install &lt;name&gt;</code> and <code>/skill &lt;name&gt;</code> resolve through, so the hub lists nothing it cannot install.</p>
-<h2>Operator ownership of installed skills</h2>
-<p>The active project <code>.clio-coder/skills/</code> tree and the resolved user <code>&lt;configDir&gt;/skills/</code> tree are operator-owned. Main-agent and worker tool admissions refuse writes, edits, artifacts and recognized shell mutations to either tree, including ancestor deletion and current symlink aliases. This boundary stays active at every autonomy level, even when the general default path policy is disabled. Reads and loading already installed skills retain their existing rules.</p>
-<p>Draft a proposed skill outside these active trees, for example in <code>draft-skills/</code>. The operator installs or updates it through <code>clio-coder skills install</code>, <code>skills update</code>, <code>skills sync</code>, <code>library add --yes</code>, the Skills Hub, <code>/skill &lt;name&gt;</code>, or an explicitly accepted marketplace offer. Even <code>full-auto</code> must wait for that offer's bound operator answer; a task match alone no longer installs a skill. Model shell calls to recognizable Clio skill installation, update and sync commands are refused. Confirmed <code>library add --yes</code> commands are also reserved for operators, including additions of other resource kinds that may install skill dependencies. An unconfirmed <code>library add</code> only prints a plan and remains available, as do inventory, search, inspection and validation commands.</p>
-<p>This is a tool-admission boundary, not an operating-system sandbox. Shell inspection covers literal paths and recognized command forms, respecting comments, quoted words and redirection operands when identifying Clio commands. Quoted search patterns remain read-only, and literal operator filenames do not hide later mutation operands. It cannot prove the effects of arbitrary scripts, dynamically constructed paths, aliases, or concurrent filesystem changes. Keep shell execution supervised when stronger confinement is required.</p>
-<h2>Where marketplace rows come from</h2>
-<p>There is one source, <code>discoverMarketplaceSkills()</code> in <code>src/domains/resources/skills/marketplace.ts</code>, and it reads two kinds of real local data:</p>
-<ol>
-<li><strong>A catalog directory</strong> of actual <code>SKILL.md</code> packages. Resolution order: <code>CLIO_CODER_SKILL_CATALOG_DIR</code>, then a <code>skills/</code> directory in the working tree when it holds packages, then the <code>skills/</code> catalog the installed clio-coder package carries. Metadata comes from the packages themselves through the skill loader, so a row&#39;s version, category, and audit state are the package&#39;s own.</li>
-<li><strong>A JSON index</strong> whose entries name a <code>sourceUrl</code> that <code>clio-coder skills install</code> accepts. Resolution order: <code>CLIO_CODER_SKILL_MARKETPLACE_INDEX</code>, then <code>&lt;configDir&gt;/skill-marketplace.json</code>, then the package&#39;s own <code>skills/skill-marketplace.json</code>. <code>pnpm run skills:pin</code> publishes that file&#39;s <code>version</code>, <code>audit</code>, and <code>category</code> fields.</li>
-</ol>
-<p>The package fallbacks mean a fresh npm install has a marketplace with no configuration: <code>clio-coder skills search grill</code> lists <code>grill-me</code> from the shipped catalog, <code>clio-coder skills install grill-me</code> copies it out of the package into <code>.clio-coder/skills/</code>, and <code>/skill grill-me</code> offers that install before running. The shipped catalog is a marketplace source only, never a discovery root: nothing from it is loadable until the operator installs it, which keeps the install-then-activate contract and the per-skill scope choice in the operator&#39;s hands.</p>
-<p>Catalog packages win over index entries on a name collision, because the local files are the thing that installs. Neither source reaches the network; the hub opens on local data and never blocks. Only an index entry whose <code>sourceUrl</code> is a GitHub URL, and that no catalog also carries, needs the network at install time.</p>
-<p>The model sees the same lookup: <code>context(scope=&quot;skills&quot;)</code> lists installed skills and, under a <code>Marketplace (not installed)</code> heading, the entries this lookup would install. Loading a marketplace-only skill by name answers &quot;not installed&quot; and points at <code>/skill &lt;name&gt;</code>, never <code>unknown skill</code>.</p>
-<p>When both sources are absent (a source checkout with no <code>skills/</code> folder, or an incomplete package) the hub has nothing to list and says so, naming the remedy:</p>
-<pre><code>no skills installed and no local marketplace configured. install one with
-`clio-coder skills install &lt;path|github-url&gt;`, or point CLIO_CODER_SKILL_CATALOG_DIR at a
-skills/ catalog.
+<p>Skills are one kind of <a href="resource_library_blueprint.html">library package</a>. <code>/library skill</code> and bare <code>/skill</code> open the Library overlay's skill tab. The other four tabs are plugins, agents, prompts and fleets. Skill packages use the same manifest, version, full-tree digest, origins, scope and lifecycle as every other package.</p>
+<pre><code class="language-bash">clio-coder library search grill --kind skill
+clio-coder library install skill:grill-me --project --dry-run
+clio-coder library install skill:grill-me --project
+clio-coder library skills --all --json
 </code></pre>
-<p>The CLI reports the same state as <code>no local skill marketplace catalog or index configured</code>. A marketplace source that exists but fails (an unreadable index, a broken catalog package) is a diagnostic row in the hub, not a silent omission.</p>
-<p>The same index machinery can also describe agent recipes, prompt templates, and fleet contracts through typed entries and requirements. See <a href="resource_library_blueprint.html">resource-library.md</a> for the schema, private catalog, installation roots, and <code>clio-coder library</code> commands. Those kinds render on their own tabs in the hub, described below.</p>
-<h2>Using the hub</h2>
+<p>The bundled index makes complete packages available without installing them. An ordinary packaged skill copies from Clio's shipped files without network access. Local user and project registrations can add packages. Automatic offers and <code>/skill &lt;name&gt;</code> use the same library entries and package installer. An unmanaged <code>SKILL.md</code> remains a valid runtime resource; preparing a distributable requires a package manifest as described in <a href="authoring_plugins_blueprint.html">authoring</a>.</p>
+<h2>Operator ownership</h2>
+<p>Active <code>.clio-coder/skills/</code>, <code>&lt;configDir&gt;/skills/</code>, and managed package trees are operator-owned. Main and worker tool admission refuses recognized model writes, edits, deletes and shell mutations to those trees at every autonomy level. Library install, update, registration, enable/disable, removal and pin actions are reserved for the operator; install/update <code>--dry-run</code>, search, inspection and draft validation remain available. This is a tool-admission boundary, not an operating-system sandbox for arbitrary scripts or dynamically constructed shell commands.</p>
+<p>Draft outside active roots, for example <code>draft-skills/example/</code>. The operator can review <code>library validate draft-skills/example/SKILL.md</code>, then register and install a complete package. Explicitly accepted skill offers install through the library. A lexical match alone never grants installation authority, including at <code>full-auto</code>.</p>
+<h2>Library keys and runtime use</h2>
 <table>
 <thead>
 <tr>
@@ -76,56 +64,60 @@ skills/ catalog.
 <th>Action</th>
 </tr>
 </thead>
-<tbody><tr>
-<td>type</td>
-<td>Filter all groups</td>
+<tbody>
+<tr>
+<td>Type</td>
+<td>Filter rows</td>
 </tr>
 <tr>
-<td><code>←</code>/<code>→</code></td>
-<td>Switch tabs</td>
+<td>Left / Right</td>
+<td>Change kind tab</td>
+</tr>
+<tr>
+<td><code>s</code></td>
+<td>Switch user/project action scope</td>
 </tr>
 <tr>
 <td><code>Enter</code></td>
-<td>Use the selected row: insert <code>/skill &lt;name&gt; </code> into the editor for the task text, or the invocation the row&#39;s kind is called by</td>
-</tr>
-<tr>
-<td><code>Tab</code></td>
-<td>Toggle the detail pane (split layout on wide terminals)</td>
+<td>Use a selected runtime resource or inspect a plugin</td>
 </tr>
 <tr>
 <td><code>i</code></td>
-<td>Install the selected row through the resolver its kind installs by</td>
+<td>Review installation; a second request can include missing requirements</td>
 </tr>
 <tr>
-<td><code>PgUp</code>/<code>PgDn</code></td>
-<td>Scroll the detail pane</td>
+<td><code>u</code></td>
+<td>Review update</td>
 </tr>
-</tbody></table>
-<p>Invoking an uninstalled marketplace skill with <code>/skill &lt;name&gt;</code> prompts before installing it. <code>i</code> runs the same install path eagerly from the hub.</p>
-<h2>Tabs</h2>
-<p>The hub carries one tab per resource-library kind: Skills, Agents, Prompts, and
-Fleets. <code>←</code> and <code>→</code> move between them. The frame title names the active tab and
-the footer states its row count, so the numbers on screen always describe the
-tab being read. <code>/skill</code> opens Skills; <code>/resources library &lt;kind&gt;</code> opens the
-requested library tab.</p>
-<p>The Skills tab is unchanged. The other three list the entries of their kind from <code>discoverLibrary()</code>, which is the same discovery <code>clio-coder library list --kind &lt;kind&gt;</code> reads, so the hub and the CLI never disagree about what exists. Each row carries the entry&#39;s origin and version, whether it is installed or available, the short form of its recorded pin hash, and, in the warning token, the names of any requirements it still needs. An entry the catalog refuses outright, because a requirement is missing, malformed, or cyclic, appears as a diagnostic row rather than being omitted.</p>
-<p><code>Enter</code> uses the selected row. An agent inserts <code>/run &lt;agent&gt; </code> into the composer, a prompt inserts its <code>/&lt;id&gt; </code> invocation, a skill does what the Skills tab does, and a fleet closes the hub and opens the <code>/fleet run</code> approval preview for that contract. A row that is not installed says so instead and points at <code>i</code>.</p>
-<p><code>i</code> installs, through the same plan-then-write pair <code>clio-coder library add</code> runs. A framed confirmation states every destination path and SHA-256 hash before anything is written, which is the TUI spelling of the CLI&#39;s <code>--yes</code> gate; <code>Esc</code> there leaves every destination untouched. An entry whose requirements are not all installed is refused by name on the first <code>i</code>, and a second <code>i</code> opens the install-with-requirements confirmation, which names every entry it would write in dependency order.</p>
-<p>The CLI <code>clio-coder skills</code> commands manage local skill discovery, validation, and
-creation. Extension resource roots and share archives are documented in
-<a href="extensions_blueprint.html">extensions-and-sharing.md</a>; this page owns the TUI
-Hub and marketplace behavior.</p>
-<h2>Remote entries and overlays</h2>
-<p>Some skills are worth carrying in the catalog without vendoring their content. <code>skills/remote.yaml</code> lists them: each entry names a skill, its category, a <code>sourceUrl</code> that must be a GitHub tree URL at a pinned tag, an <code>overlay</code> package inside the catalog, and an optional <code>exclude</code> list of upstream top-level members. <code>pnpm run skills:pin</code> publishes such an entry into <code>skills/skill-marketplace.json</code> with <code>origin: &quot;remote&quot;</code>, the upstream URL as its <code>sourceUrl</code>, and the <code>overlay</code> and <code>exclude</code> fields attached. The overlay&#39;s <code>SKILL.md</code> is pinned in <code>skills/registry.yaml</code> like every other catalog skill, so <code>pnpm run skills:check</code> fails when it drifts.</p>
-<p><code>archify</code> is the worked example. Its entry points at <code>https://github.com/tt-a1i/archify/tree/v2.16.0/archify</code>, overlays <code>skills/planning/archify</code>, and excludes <code>test</code> and <code>package-lock.json</code>. Running <code>clio-coder skills install archify --project</code> clones that tag, drops the excluded members, copies the overlay over the clone so Clio&#39;s wrapper <code>SKILL.md</code> replaces the upstream one, validates the shaped tree, and swaps it into <code>.clio-coder/skills/archify/</code> with the usual provenance stamps. The renderer, its schemas, and its brand-mark notices come from upstream at install time and never enter the npm tarball. The wrapper omits upstream&#39;s update-awareness step on purpose: that step performs a network request during a chat turn, and no Clio chat turn depends on the network.</p>
-<p>Discovery treats the overlay folder as part of the remote entry rather than as a skill of its own, so a bare-name install never lands the wrapper without the renderer it wraps. <code>clio-coder skills update</code> recovers the same overlay and exclude list from the marketplace, so an update refetches the pinned upstream and re-applies the wrapper instead of replacing it.</p>
-<p>Two operational notes. A copy dropped into a project-scope <code>.claude/skills/archify</code> is a compat import and stays untrusted until <code>integrations.projectResources.trustProjectImports</code> is on; install through Clio to get a trusted, provenance-stamped copy. And since the skill&#39;s authoring loop is several <code>bash</code> calls (validate, deliver, verify), <code>auto-edit</code> is the sensible permission posture for a mapping session; full manual approval works but prompts on every command.</p>
-<p>Architecture mapping through Archify follows a structured pipeline across distinct stages: deterministic structural seed generation (<code>clio-coder context map</code>), model-authored refinement, deliverable validation (<code>validate</code>, <code>deliver</code>, profile checks, and Clio verifiers), and review. Clio derives the deterministic architecture seed from the structural codewiki without model calls; Archify validates and renders the model&#39;s semantic refinements. Standard validation checks schema conformance and layout composition, while verification commands check path and symbol citations against the workspace. Mechanical validation passes do not establish semantic claims or visual layout quality: source review assesses semantic claims, while visual review in a browser assesses layout presentation. Custom model-authored maps can remain layout-invalid until iteratively refined.</p>
-<h2>Publishing a skill</h2>
-<p>Add a directory under <code>skills/&lt;category&gt;/&lt;name&gt;/</code> (or <code>skills/&lt;name&gt;/</code>) in the repo containing a <code>SKILL.md</code> with <code>name</code> and <code>description</code> frontmatter. The directory name must match <code>[A-Za-z0-9][A-Za-z0-9._-]*</code>. Run <code>pnpm run skills:pin</code> to republish <code>skills/skill-marketplace.json</code>, which is the index consumers point <code>CLIO_CODER_SKILL_MARKETPLACE_INDEX</code> at or copy to <code>&lt;configDir&gt;/skill-marketplace.json</code>. Scientific and niche coding domains are the marketplace&#39;s focus; see the existing <code>skills/</code> tree for the house format.</p>
-        <h2>Matching and offers</h2>
-<p>Authored whole-phrase triggers rank before incidental description or name overlap. Matching remains lexical: interactive offer guidance asks the model to check installed alternatives and relevance before presenting an offer. A match does not guarantee that a model will offer or use the skill.</p>
-<p>Interactive offers require a bound operator answer before installation. Headless runs emit a passive installation hint; that reminder opens no interview and performs no installation or activation. Installing a skill makes it discoverable; listing it or supplying an explicit skill path makes it available, while loading its body remains subject to activation policy. At <code>read-only</code> and <code>suggest</code>, activation requires an operator request; <code>auto-edit</code> and <code>full-auto</code> may activate installed skills. A suggestion alone continues the task without activation.</p>
+<tr>
+<td><code>e</code></td>
+<td>Enable or disable the selected installed copy</td>
+</tr>
+<tr>
+<td><code>r</code></td>
+<td>Review removal</td>
+</tr>
+<tr>
+<td><code>p</code></td>
+<td>Verify and show the recorded package pin</td>
+</tr>
+<tr>
+<td><code>d</code></td>
+<td>Check installed drift</td>
+</tr>
+<tr>
+<td><code>Esc</code></td>
+<td>Close or cancel</td>
+</tr>
+</tbody>
+</table>
+<p><code>/skill &lt;name&gt; [task]</code> activates a skill; <code>/skill off</code> clears the session's tool-surface narrowing. Loading can narrow allowed tools but cannot grant tools the host disallows. At <code>read-only</code> and <code>suggest</code>, activation requires an operator request; <code>auto-edit</code> and <code>full-auto</code> may activate installed skills. Listing available skills does not load their bodies.</p>
+<p>Model-visible skills must be trusted and permit model invocation. Foreign project resources and all interop-adopted foreign skills require <code>integrations.projectResources.trustProjectImports</code>. A project resource adopted into user scope retains foreign trust. Disabled, incompatible or drifted package resources do not load. <code>/library reload</code> refreshes an active session after a lifecycle change.</p>
+<h2>Matching, authoring and evals</h2>
+<p>Authored whole-phrase triggers rank before incidental name or description overlap. Matches are lexical suggestions, not evidence that a model will offer or successfully use a skill. Headless sessions emit passive library-install guidance and do not open an interview. Interactive offers require a bound operator answer.</p>
+<p>House skills live in <code>skills/&lt;category&gt;/&lt;name&gt;/</code>, with <code>SKILL.md</code>, a package <code>plugin.json</code>, and authored <code>evals.md</code> scenarios. <code>skills:check</code> checks authoring metadata and normalized audit evidence; <code>library:check</code> verifies the distributable's complete tree. Only the latter is an installation pin. Explicit catalog-directory and old skill-index probes remain available to authoring utilities for unmanaged source audits; automatic library installation does not use those as a separate installer.</p>
+<p>Named suite evals use <code>clio-coder eval run --package skill:&lt;name&gt; --eval &lt;suite&gt;</code>. The experimental <code>clio-coder eval skill &lt;name|path&gt;</code> runs <code>evals.md</code> baseline, treatment and model-judge scenarios. Fixture commands require <code>--trust-fixtures</code>; network tools remain off unless <code>--allow-network</code> is requested. Those measurements are separate from deterministic package validation.</p>
+
 </article>
         <nav class="related-nav" aria-label="Adjacent references">
           <a class="nav-link-card" href="resource_library_blueprint.html"><span class="nav-label">Previous</span><span class="nav-title">Resource Library</span></a>
