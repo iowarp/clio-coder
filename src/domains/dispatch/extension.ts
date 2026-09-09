@@ -29,7 +29,7 @@ import {
 } from "../../core/response-schema.js";
 import { isSkillActivation, type SkillActivation } from "../../core/skill-activation.js";
 import { rawDurationMs } from "../../core/timers.js";
-import { isBuiltinToolName, type ToolName, ToolNames } from "../../core/tool-names.js";
+import { isBuiltinToolName, isHarnessExtensionToolName, type ToolName, ToolNames } from "../../core/tool-names.js";
 import {
 	type AcpDelegationRunHandle,
 	type AcpDelegationRunInput,
@@ -72,6 +72,7 @@ import {
 } from "../agents/spec.js";
 import type { ConfigContract } from "../config/contract.js";
 import type { ContextContract, ProjectPromptContext, ProjectStructuredContext } from "../context/contract.js";
+import { enabledHarnessExtensionToolNames } from "../extensions/command-tools.js";
 import type { MiddlewareContract } from "../middleware/contract.js";
 import { workerSafetyOneLiner } from "../prompts/compiler.js";
 import type { PromptsContract } from "../prompts/contract.js";
@@ -1601,6 +1602,7 @@ function effectiveToolNames(
 	 * here rather than leaving the model to spend budget finding that out.
 	 */
 	denied: ReadonlySet<string> = new Set(),
+	cwd = process.cwd(),
 ): ReadonlyArray<ToolName> {
 	if (!targetToolCapability(target)) return [];
 	// A hermetic process registers no network plane, so the worker's registry
@@ -1609,9 +1611,13 @@ function effectiveToolNames(
 	// attests; otherwise the run is refused for a mismatch instead of simply
 	// running without network.
 	const networkStripped = networkToolsDisabled();
+	const harnessTools =
+		target.runtime.kind === "http" && !writeConfined && allowedTools.some(isHarnessExtensionToolName)
+			? enabledHarnessExtensionToolNames(cwd)
+			: new Set<string>();
 	const names = allowedTools.filter(
 		(tool): tool is ToolName =>
-			isBuiltinToolName(tool) &&
+			(isBuiltinToolName(tool) || harnessTools.has(tool)) &&
 			tool !== ToolNames.AskUser &&
 			!(networkStripped && tool === ToolNames.WebFetch) &&
 			!denied.has(tool) &&
@@ -3591,7 +3597,13 @@ export function createDispatchBundle(
 		const sessionAutonomy = settings?.safety.autonomy ?? "auto-edit";
 		const effectiveAutonomy = effectiveWorkerAutonomy(sessionAutonomy, req.autonomy, spec.capabilityClass);
 		const effectiveTools = withLedgerToolNarrowing(
-			effectiveToolNames(admission.allowedTools, target, pathScope.writeBoundaries.length > 0, deniedToolNames(req)),
+			effectiveToolNames(
+				admission.allowedTools,
+				target,
+				pathScope.writeBoundaries.length > 0,
+				deniedToolNames(req),
+				req.cwd ?? process.cwd(),
+			),
 			req,
 		);
 		assertPostRuntimeToolCompatibility(req.agentId, spec, effectiveTools, target);
@@ -6127,7 +6139,13 @@ export function createDispatchBundle(
 		);
 		enforceCapabilityGate(target.target.id, target.modelCapabilities, req.requiredCapabilities);
 		const effectiveTools = withLedgerToolNarrowing(
-			effectiveToolNames(admission.allowedTools, target, pathScope.writeBoundaries.length > 0, deniedToolNames(req)),
+			effectiveToolNames(
+				admission.allowedTools,
+				target,
+				pathScope.writeBoundaries.length > 0,
+				deniedToolNames(req),
+				req.cwd ?? process.cwd(),
+			),
 			req,
 		);
 		assertPostRuntimeToolCompatibility(req.agentId, agentSpec, effectiveTools, target);

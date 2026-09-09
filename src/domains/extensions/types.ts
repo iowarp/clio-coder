@@ -9,8 +9,22 @@ export interface ExtensionManifestResources {
 	themes?: string;
 }
 
+export interface ExtensionCommandTool {
+	name: string;
+	description: string;
+	runtime: "node" | "python3";
+	entrypoint: string;
+	inputSchema: Record<string, unknown>;
+	timeoutMs?: number;
+	maxOutputBytes?: number;
+}
+
+export interface ExtensionCapabilities {
+	tools: ExtensionCommandTool[];
+}
+
 export interface ClioExtensionManifest {
-	manifestVersion: 1;
+	manifestVersion: 1 | 2;
 	id: string;
 	name: string;
 	version: string;
@@ -18,6 +32,8 @@ export interface ClioExtensionManifest {
 	resources: ExtensionManifestResources;
 	tools?: string[];
 	settings?: string[];
+	/** Version 2 capabilities are executable harness tools, never resource bundles. */
+	capabilities?: ExtensionCapabilities;
 	compatibility?: { clio?: string };
 }
 
@@ -45,6 +61,8 @@ export interface InstalledExtension {
 	name: string;
 	version: string;
 	description: string;
+	manifestVersion?: 1 | 2;
+	capabilities?: ExtensionCapabilities;
 	scope: ExtensionScope;
 	rootPath: string;
 	manifestPath: string;

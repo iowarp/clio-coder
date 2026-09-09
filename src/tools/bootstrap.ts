@@ -1,3 +1,4 @@
+import { BusChannels } from "../core/bus-events.js";
 import type { WorkerRosters } from "../core/defaults.js";
 import type { SafeEventBus } from "../core/event-bus.js";
 import type { AgentSpec } from "../domains/agents/spec.js";
@@ -12,6 +13,7 @@ import { assertRegisteredBuiltinTools, type CoreToolBootstrapDeps, registerCoreT
 import { createDispatchRunEventRegistry, createDispatchTool } from "./dispatch.js";
 import type { DispatchBackgroundRegistry } from "./dispatch-background.js";
 import type { DispatchSchemaComposition } from "./dispatch-schema.js";
+import { registerHarnessExtensionTools } from "./harness-extensions.js";
 import { lazyTool } from "./lazy-tool.js";
 import { monitorToolSurface } from "./monitor-surface.js";
 import { panesToolSurface } from "./panes-surface.js";
@@ -109,4 +111,7 @@ export function registerAllTools(registry: ToolRegistry, deps: ToolBootstrapDeps
 		});
 	}
 	assertRegisteredBuiltinTools(registry, registration, Boolean(deps.dispatch), Boolean(deps.panes));
+	for (const diagnostic of registerHarnessExtensionTools(registry, deps.session?.current()?.cwd ?? process.cwd())) {
+		deps.bus?.emit(BusChannels.ExtensionsLoadIssue, { message: diagnostic.message });
+	}
 }

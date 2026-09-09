@@ -29,6 +29,7 @@ import {
 import { CONFIRMED_SCOPE, isSubset, READONLY_SCOPE, WORKSPACE_SCOPE } from "../domains/safety/scope.js";
 import { effectiveToolNames } from "../tools/agent-tools.js";
 import { assertRegisteredBuiltinTools, registerCoreTools } from "../tools/core-bootstrap.js";
+import { registerHarnessExtensionTools } from "../tools/harness-extensions.js";
 import type { ToolProfileName } from "../tools/profiles.js";
 import { createRegistry, type RegistryDeps, type ToolRegistry } from "../tools/registry.js";
 import { type AgentLedgerPort, toolSignatureOf } from "../worker/protocol.js";
@@ -177,6 +178,7 @@ export function createWorkerToolRegistry(
 		}),
 	});
 	assertRegisteredBuiltinTools(registry, registration, false);
+	registerHarnessExtensionTools(registry);
 	return registry;
 }
 

@@ -67,3 +67,8 @@ export const ALL_TOOL_NAMES: ReadonlyArray<BuiltinToolName> = Object.values(Tool
 export function isBuiltinToolName(name: ToolName): name is BuiltinToolName {
 	return (ALL_TOOL_NAMES as ReadonlyArray<string>).includes(name);
 }
+
+/** Reserved command-capability namespace. Syntax conveys execution class, never availability. */
+export function isHarnessExtensionToolName(name: string): name is DynamicToolName {
+	return name.length <= 64 && /^extension_[a-z0-9][a-z0-9_-]*__[a-z][a-z0-9_]*$/.test(name);
+}

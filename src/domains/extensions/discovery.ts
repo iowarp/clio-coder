@@ -1,6 +1,7 @@
 import { type Dirent, existsSync, lstatSync, readdirSync, readFileSync, realpathSync, statSync } from "node:fs";
 import path from "node:path";
 import { parse as parseYaml, stringify as stringifyYaml } from "yaml";
+import { parseExtensionCapabilities, resolveExtensionEntrypoint } from "./command-schema.js";
 import { evaluateClioCompatibility } from "./compatibility.js";
 import type {
 	ClioExtensionManifest,
@@ -20,6 +21,7 @@ const MANIFEST_KEYS = new Set([
 	"tools",
 	"settings",
 	"compatibility",
+	"capabilities",
 ]);
 const RESOURCE_KEYS = new Set(["skills", "prompts", "agents", "fleets", "themes"]);
 const COMPATIBILITY_KEYS = new Set(["clio"]);
@@ -255,8 +257,8 @@ export function parseExtensionManifest(
 		return { diagnostics: [{ type: "error", message: "extension manifest must be an object", path: manifestPath }] };
 	}
 	rejectUnknownKeys(value, MANIFEST_KEYS, "manifest", manifestPath, diagnostics);
-	if (value.manifestVersion !== 1) {
-		diagnostics.push({ type: "error", message: "manifestVersion must be 1", path: manifestPath });
+	if (value.manifestVersion !== 1 && value.manifestVersion !== 2) {
+		diagnostics.push({ type: "error", message: "manifestVersion must be 1 or 2", path: manifestPath });
 	}
 	const id = trimString(value.id);
 	const name = trimString(value.name) ?? id;
@@ -272,6 +274,32 @@ export function parseExtensionManifest(
 	const resources = normalizeResources(value.resources, manifestPath, diagnostics);
 	const tools = stringArray(value.tools, "tools", manifestPath, diagnostics);
 	const settings = stringArray(value.settings, "settings", manifestPath, diagnostics);
+	let capabilities: ClioExtensionManifest["capabilities"];
+	if (value.manifestVersion === 2) {
+		for (const field of ["resources", "tools", "settings"]) {
+			if (value[field] !== undefined)
+				diagnostics.push({
+					type: "error",
+					message: `v2 harness extensions cannot declare ${field}; domain resources belong in plugins`,
+					path: manifestPath,
+				});
+		}
+		try {
+			capabilities = parseExtensionCapabilities(value.capabilities, id ?? "");
+		} catch (error) {
+			diagnostics.push({
+				type: "error",
+				message: error instanceof Error ? error.message : String(error),
+				path: manifestPath,
+			});
+		}
+	} else if (value.capabilities !== undefined) {
+		diagnostics.push({
+			type: "error",
+			message: "executable capabilities require manifestVersion: 2",
+			path: manifestPath,
+		});
+	}
 	let compatibility: ClioExtensionManifest["compatibility"];
 	if (value.compatibility !== undefined) {
 		if (!isRecord(value.compatibility)) {
@@ -307,7 +335,7 @@ export function parseExtensionManifest(
 		return { diagnostics };
 	}
 	const manifest: ClioExtensionManifest = {
-		manifestVersion: 1,
+		manifestVersion: value.manifestVersion === 2 ? 2 : 1,
 		id,
 		name,
 		version,
@@ -316,6 +344,7 @@ export function parseExtensionManifest(
 	};
 	if (tools) manifest.tools = tools;
 	if (settings) manifest.settings = settings;
+	if (capabilities) manifest.capabilities = capabilities;
 	if (compatibility && Object.keys(compatibility).length > 0) manifest.compatibility = compatibility;
 	const clioRange = manifest.compatibility?.clio;
 	if (clioRange !== undefined) {
@@ -355,6 +384,17 @@ export function loadManifestFromRoot(root: string): ExtensionCandidate {
 	try {
 		const parsed = parseExtensionManifest(readJsonOrYaml(manifestPath), manifestPath);
 		if (parsed.manifest) validateResourceRoots(root, parsed.manifest.resources, parsed.diagnostics);
+		for (const tool of parsed.manifest?.capabilities?.tools ?? []) {
+			try {
+				resolveExtensionEntrypoint(root, tool.entrypoint);
+			} catch (error) {
+				parsed.diagnostics.push({
+					type: "error",
+					message: `command tool ${tool.name}: ${error instanceof Error ? error.message : String(error)}`,
+					path: manifestPath,
+				});
+			}
+		}
 		return {
 			path: root,
 			manifestPath,
@@ -508,5 +548,9 @@ export function discoverExtensionPackages(root: string): ExtensionCandidate[] {
 }
 
 export function extensionManifestYaml(manifest: ClioExtensionManifest): string {
+	if (manifest.manifestVersion === 2) {
+		const { resources: _resources, ...harness } = manifest;
+		return stringifyYaml(harness);
+	}
 	return stringifyYaml(manifest);
 }

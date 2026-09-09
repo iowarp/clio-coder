@@ -1,0 +1,121 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <meta name="clio-markdown-source" content="docs/guide/harness-extensions.md">
+  <meta name="clio-docs-version" content="0.4.7">
+  <title>Harness extensions · Clio Coder 0.4.7</title>
+  <link rel="icon" href="data:,">
+  <link rel="stylesheet" href="shared.css">
+</head>
+<body data-doc-category="guide">
+  <div class="reading-progress" aria-hidden="true"></div>
+  <a class="skip-link" href="#reference-content">Skip to reference</a>
+  <div class="container">
+    <header class="document-header" data-category="Guide">
+      <div class="header-left">
+        <a class="header-logo" href="index.html" aria-label="Documentation index">
+          <svg viewBox="0 0 24 24" fill="none" aria-hidden="true">
+            <path d="M12 2 2 7l10 5 10-5-10-5Z" stroke="url(#clio-logo)" stroke-width="2" stroke-linejoin="round"/>
+            <path d="m2 12 10 5 10-5M2 17l10 5 10-5" stroke="url(#clio-logo)" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"/>
+            <defs><linearGradient id="clio-logo" x1="2" y1="2" x2="22" y2="22"><stop stop-color="#00d4db"/><stop offset="1" stop-color="#ff7e29"/></linearGradient></defs>
+          </svg>
+        </a>
+        <div class="header-title-wrapper">
+          <p class="document-kicker">Guide / canonical reference</p>
+          <h1>Harness extensions</h1>
+          <p class="document-path">docs/guide/harness-extensions.md</p>
+        </div>
+      </div>
+      <div class="header-right">
+        <a class="back-btn" href="index.html">← Index</a>
+        <span class="version-badge">v0.4.7</span>
+      </div>
+    </header>
+    <div class="page-layout-grid reference-layout">
+      <aside class="sidebar reference-sidebar" aria-label="On this page">
+        <nav class="toc-container">
+          <p class="toc-title">On this page</p>
+          <a class="sidebar-source" href="https://github.com/iowarp/clio-coder/blob/main/docs/guide/harness-extensions.md">Canonical Markdown<br>docs/guide/harness-extensions.md</a>
+          <ul class="toc-list"></ul>
+        </nav>
+      </aside>
+      <main class="reference-main" id="reference-content">
+        <article class="reference-prose glass-card">
+<blockquote>
+<p><strong>Visual blueprint:</strong> See the <a href="harness_extensions_blueprint.html">visual reference</a> in the source checkout.</p>
+</blockquote>
+<p>Harness extensions add executable capabilities to Clio. A domain workflow that combines prompts, agents, skills, fleets, and reference files belongs in a plugin. Existing <code>manifestVersion: 1</code> resource extensions remain supported, including existing WTF-P installations and their install-state digests.</p>
+<p>Version 2 extensions declare command tools in <code>clio-coder-extension.yaml</code>, <code>.yml</code>, or <code>.json</code>. Clio discovers and validates declarations without importing or executing package code. Tools become available in a new session after installation. Native workers can use a tool when their admitted recipe includes its qualified name; narrower profiles such as <code>minimal-local</code> exclude extension commands.</p>
+<h2>Create a command tool</h2>
+<p>Create a directory containing this <code>clio-coder-extension.yaml</code>:</p>
+<pre><code class="language-yaml">manifestVersion: 2
+id: local-analysis
+name: Local Analysis
+version: 1.0.0
+description: Local analysis capabilities for Clio.
+compatibility:
+  clio: &quot;&gt;=0.4.7&quot;
+capabilities:
+  tools:
+    - name: summarize
+      description: Return the count and sum of supplied measurements.
+      runtime: node
+      entrypoint: tools/summarize.cjs
+      timeoutMs: 10000
+      maxOutputBytes: 16384
+      inputSchema:
+        type: object
+        properties:
+          values:
+            type: array
+            items:
+              type: number
+            maxItems: 1000
+        required: [values]
+        additionalProperties: false
+</code></pre>
+<p>Add <code>tools/summarize.cjs</code>:</p>
+<pre><code class="language-javascript">const { values } = JSON.parse(process.argv[2]);
+console.log(JSON.stringify({
+  count: values.length,
+  sum: values.reduce((sum, value) =&gt; sum + value, 0),
+}));
+</code></pre>
+<p>Install the directory and start a new Clio session:</p>
+<pre><code class="language-bash">clio-coder extensions install /path/to/local-analysis --user
+clio-coder extensions list --all --json
+clio-coder
+</code></pre>
+<p>The model can call <code>extension_local-analysis__summarize</code> with <code>{&quot;values&quot;:[1,2,3]}</code>. A recipe requests that same qualified name in <code>tools.required</code> or <code>tools.optional</code>. Python tools use <code>runtime: python3</code> and read <code>json.loads(sys.argv[1])</code>; Clio launches Python with <code>-I</code> to isolate interpreter configuration.</p>
+<h2>Command contract</h2>
+<p>Each tool declares <code>name</code>, <code>description</code>, <code>runtime</code>, <code>entrypoint</code>, and <code>inputSchema</code>. Supported runtimes are <code>node</code> and <code>python3</code>. Clio uses its current Node executable and resolves <code>python3</code> from the normal tool environment. Entrypoints are ordinary files inside the installed package; symlinks, hard links, absolute paths, and parent traversal are refused. Helper files remain covered by the full package digest.</p>
+<p>Clio passes the validated JSON object as one argument and runs a fixed argument vector with no shell. The child runs in the workspace directory. Standard output must contain exactly one JSON value. Use standard error for diagnostics. Nonzero exits, invalid JSON, cancellation, timeout, and exceeded output limits return tool errors with execution metadata and package provenance.</p>
+<p>Input is limited to 64 KiB. <code>timeoutMs</code> defaults to 120000 and is bounded at 300000. <code>maxOutputBytes</code> defaults to 600000 and is bounded at 1048576. Output limits include standard output and standard error together.</p>
+<p>Schemas support <code>type</code>, <code>description</code>, <code>properties</code>, <code>required</code>, <code>additionalProperties</code>, <code>items</code>, scalar <code>enum</code>, <code>minimum</code>, <code>maximum</code>, <code>minLength</code>, <code>maxLength</code>, <code>minItems</code>, and <code>maxItems</code>. The root must be an object. Each object declares its properties and <code>additionalProperties: false</code>; array schemas declare <code>items</code>. References and executable schema keywords are refused. Clio validates each invocation against the schema before starting the child.</p>
+<p>Qualified names use <code>extension_&lt;id&gt;__&lt;name&gt;</code> and must fit 64 characters. Version 2 package IDs use provider-safe lowercase letters, numbers, single underscores, and hyphens; local tool names start with a letter and use lowercase letters, numbers, and single underscores. Duplicate and colliding tool registrations are refused. Version 2 manifests cannot declare legacy <code>resources</code>, <code>tools</code>, or <code>settings</code> fields.</p>
+<h2>Admission and lifecycle</h2>
+<p>Every extension command is an execution action and runs sequentially. Packages cannot declare themselves read-only. The registry evaluates both the qualified capability call and its fixed executable command through Clio's existing safety policy, autonomy, approval, and middleware rules. Read-only autonomy blocks commands; workers with explicit write confinement cannot execute an unconfined extension command. Installation does not bypass command approval. The child receives Clio's normal allowlisted tool environment, which excludes provider credentials and interpreter injection variables.</p>
+<p>Command tools are installed programs with the filesystem and network access of the invoking process. Entry containment and environment filtering do not create an operating-system sandbox. Install code you trust, as you would a local executable script.</p>
+<p>The existing extension lifecycle applies:</p>
+<pre><code class="language-bash">clio-coder extensions disable local-analysis --user
+clio-coder extensions enable local-analysis --user
+clio-coder extensions install /path/to/new-local-analysis --user --force
+clio-coder extensions remove local-analysis --user
+</code></pre>
+<p>Installation records and verifies the entire package tree. Each invocation rechecks the effective installed package, enabled state, canonical root, and digest. Disabling, removing, replacing, or modifying a package revokes existing tool calls. A disabled project installation also suppresses the user installation with the same ID.</p>
+<p>Tool schemas are frozen when a session or worker registry is created. Restart the session after installing, enabling, or updating capabilities; <code>/resources extensions reload</code> refreshes resource and hook generations and does not change a live model's tool schemas. A new native worker constructs its own verified registry, and the ordinary allowed-tool surface and worker attestation apply. External command-line worker runtimes do not gain Clio command tools.</p>
+</article>
+        <nav class="related-nav" aria-label="Adjacent references">
+          <a class="nav-link-card" href="proactive_memory_blueprint.html"><span class="nav-label">Previous</span><span class="nav-title">Proactive task memory</span></a>
+          <a class="nav-link-card next" href="skills_blueprint.html"><span class="nav-label">Next</span><span class="nav-title">Skills Marketplace</span></a>
+        </nav>
+        <p class="reference-footer-note">Canonical content lives in the mapped Markdown page. This visual counterpart adds navigation without changing the contract.</p>
+      </main>
+    </div>
+    <footer>Clio Coder documentation · source-aligned at v0.4.7</footer>
+  </div>
+  <script src="shared.js"></script>
+</body>
+</html>

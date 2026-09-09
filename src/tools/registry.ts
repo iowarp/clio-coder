@@ -77,6 +77,8 @@ export function resolveToolPromptHint(
 export interface ToolSourceInfo {
 	path: string;
 	scope: ToolSourceScope;
+	/** Verified installed capability identity, when this is a harness extension tool. */
+	extension?: import("../domains/extensions/types.js").ExtensionProvenance;
 }
 
 export interface ToolResultSizePolicy {
@@ -127,6 +129,8 @@ export interface ToolSpec {
 	parameters: TSchema;
 	/** Base action class for this tool when arguments are trivial. */
 	baseActionClass: ActionClass;
+	/** Harness-owned projection of executable effects for the safety engine. Never package-supplied code. */
+	safetyCall?(args: Record<string, unknown>): ClassifierCall;
 	/**
 	 * Per-tool execution mode. Read-only tools set `"parallel"` so the model
 	 * can batch scans; mutating or filesystem-racing tools set `"sequential"`
@@ -532,7 +536,21 @@ export function createRegistry(deps: RegistryDeps): ToolRegistry {
 			return { kind: "terminal", verdict: { kind: "not_visible", reason: `tool not registered: ${call.tool}` } };
 		}
 		const level = deps.autonomy?.() ?? DEFAULT_AUTONOMY_LEVEL;
-		const decision = applyRegisteredToolClassification(deps.safety.evaluate(call, grant ? "confirmed" : undefined), spec);
+		const directDecision = applyRegisteredToolClassification(
+			deps.safety.evaluate(call, grant ? "confirmed" : undefined),
+			spec,
+		);
+		const projectedCall = spec.safetyCall?.(call.args ?? {});
+		const projectedDecision =
+			projectedCall && directDecision.kind !== "block"
+				? applyRegisteredToolClassification(deps.safety.evaluate(projectedCall, grant ? "confirmed" : undefined), spec)
+				: undefined;
+		// Both the public capability and its underlying effects must pass. A trusted
+		// projection cannot bypass a rule targeting the capability's own name.
+		const decision =
+			directDecision.kind === "block" || (directDecision.kind === "ask" && projectedDecision?.kind !== "block")
+				? directDecision
+				: (projectedDecision ?? directDecision);
 		// Stage 1, the safety net (level-independent): engine blocks are final;
 		// engine asks are confirm rails that park at every level. read-only is
 		// the exception by definition: approvals are never invoked there, so a

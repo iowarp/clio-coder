@@ -35,15 +35,22 @@ export function openExtensionsOverlay(tui: TUI, ctx: SlashCommandContext, onClos
 			id: ext.id,
 			label,
 			meta,
-			group: "Extensions",
+			group: ext.manifestVersion === 2 ? "Harness extensions" : "Legacy resource extensions",
 			detail: () => {
 				const lines = [
 					`# Extension: ${ext.id}`,
 					`**Version:** ${ext.version}`,
+					`**Kind:** ${ext.manifestVersion === 2 ? "Harness extension" : "Legacy resource extension"}`,
 					`**Scope:** ${ext.scope}`,
 					`**Description:** ${ext.description}`,
 					`**State:** ${state}`,
 				];
+				if (ext.capabilities?.tools.length)
+					lines.push(
+						`**Command tools:** ${ext.capabilities.tools.map((tool) => tool.name).join(", ")}`,
+						"Restart the session after changes to refresh tool schemas.",
+					);
+				for (const diagnostic of ext.diagnostics) lines.push(`**${diagnostic.type}:** ${diagnostic.message}`);
 				if (ext.overriddenBy) {
 					lines.push(`**Overridden By:** ${ext.overriddenBy}`);
 				}

@@ -1,7 +1,7 @@
 import path from "node:path";
 import { artifactDefaultPath } from "../../core/artifact-paths.js";
 import { canonicalizeExistingPath } from "../../core/path-canonical.js";
-import { ToolNames } from "../../core/tool-names.js";
+import { isHarnessExtensionToolName, ToolNames } from "../../core/tool-names.js";
 import { extractCommandCdTargets, extractCommandWriteTargets } from "./protected-artifacts.js";
 
 /**
@@ -129,7 +129,7 @@ function baseClassify(tool: string): ActionClass | null {
 		case ToolNames.Steer:
 			return "dispatch";
 		default:
-			return null;
+			return isHarnessExtensionToolName(tool) ? "execute" : null;
 	}
 }
 
