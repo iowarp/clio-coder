@@ -14,6 +14,7 @@ import {
 	withModelSkillActivation,
 } from "../../src/core/skill-activation.js";
 import { ToolNames } from "../../src/core/tool-names.js";
+import { registerLibraryPackage } from "../../src/domains/resources/library.js";
 import { loadSkills, parsePendingSkillRequests } from "../../src/domains/resources/skills/loader.js";
 import { type AutonomyLevel, modelMayActivateSkills } from "../../src/domains/safety/autonomy.js";
 import { assessFinishContract } from "../../src/domains/safety/finish-contract.js";
@@ -336,12 +337,8 @@ describe("skill tool surface lifetime", () => {
 });
 
 describe("model skill activation by autonomy level", () => {
-	const priorCatalogDir = process.env.CLIO_CODER_SKILL_CATALOG_DIR;
-
 	afterEach(() => {
 		explicitPaths = [];
-		if (priorCatalogDir === undefined) delete process.env.CLIO_CODER_SKILL_CATALOG_DIR;
-		else process.env.CLIO_CODER_SKILL_CATALOG_DIR = priorCatalogDir;
 		for (const root of roots.splice(0)) rmSync(root, { recursive: true, force: true });
 	});
 
@@ -390,8 +387,24 @@ describe("model skill activation by autonomy level", () => {
 		// A catalog the operator could install from, holding a skill that is not installed here.
 		const catalog = join(root, "catalog");
 		mkdirSync(catalog, { recursive: true });
-		writeNarrowingSkill(catalog, "marketplace-only", []);
-		process.env.CLIO_CODER_SKILL_CATALOG_DIR = catalog;
+		const source = writeNarrowingSkill(catalog, "marketplace-only", []);
+		writeFileSync(
+			join(source, "plugin.json"),
+			JSON.stringify({
+				$schema: "https://agent-plugins.org/schemas/1.0.0/plugin.schema.json",
+				name: "marketplace-only",
+				version: "1.0.0",
+				extensions: {
+					"ai.iowarp.clio": {
+						manifestVersion: 1,
+						kind: "skill",
+						resources: { skills: "." },
+						components: [{ kind: "skill", id: "marketplace-only", path: "SKILL.md" }],
+					},
+				},
+			}),
+		);
+		registerLibraryPackage(source, { cwd: root, scope: "project" });
 
 		// Marketplace rows only appear when discovery is on, which is what makes
 		// this the real not-installed path rather than an unknown-name miss.

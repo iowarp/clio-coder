@@ -13,7 +13,7 @@ clio-coder library skills --all --json
 
 The bundled index makes complete packages available without installing them. An ordinary packaged skill copies from Clio's shipped files without network access. Local user and project registrations can add packages. Automatic offers and `/skill <name>` use the same library entries and package installer. An unmanaged `SKILL.md` remains a valid runtime resource; preparing a distributable requires a package manifest as described in [authoring](authoring-plugins.md).
 
-## Operator ownership
+## Operator ownership of installed skills
 
 Active `.clio-coder/skills/`, `<configDir>/skills/`, and managed package trees are operator-owned. Main and worker tool admission refuses recognized model writes, edits, deletes and shell mutations to those trees at every autonomy level. Library install, update, registration, enable/disable, removal and pin actions are reserved for the operator; install/update `--dry-run`, search, inspection and draft validation remain available. This is a tool-admission boundary, not an operating-system sandbox for arbitrary scripts or dynamically constructed shell commands.
 
@@ -46,3 +46,9 @@ Authored whole-phrase triggers rank before incidental name or description overla
 House skills live in `skills/<category>/<name>/`, with `SKILL.md`, a package `plugin.json`, and authored `evals.md` scenarios. `skills:check` checks authoring metadata and normalized audit evidence; `library:check` verifies the distributable's complete tree. Only the latter is an installation pin. Explicit catalog-directory and old skill-index probes remain available to authoring utilities for unmanaged source audits; automatic library installation does not use those as a separate installer.
 
 Named suite evals use `clio-coder eval run --package skill:<name> --eval <suite>`. The experimental `clio-coder eval skill <name|path>` runs `evals.md` baseline, treatment and model-judge scenarios. Fixture commands require `--trust-fixtures`; network tools remain off unless `--allow-network` is requested. Those measurements are separate from deterministic package validation.
+
+## Publishing a skill
+
+To publish a skill, prepare a complete skill package with `SKILL.md` and a portable root `plugin.json`. Declare kind `skill`, an explicit Semantic Version, the skill resource root and one public skill component. Validate the package with `clio-coder library validate ./my-skill`, then register its local source with `clio-coder library register ./my-skill --project`. Registration records its full-tree digest without installing it. Install the candidate with `clio-coder library install skill:<name> --project` and verify its behavior before sharing.
+
+For a curated contribution, add the reviewed package beneath `skills/<category>/<name>/`, include authored eval scenarios, and regenerate both the skill authoring records (`pnpm skills:pin`) and complete library package pins (`pnpm library:pin`). A shared remote index must name an explicit supported GitHub tree source, version and full-tree SHA-256. The [package authoring guide](authoring-plugins.md) defines the manifest and index fields; publishing does not itself install or activate the skill for another operator.

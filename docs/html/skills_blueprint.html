@@ -43,6 +43,7 @@
       </aside>
       <main class="reference-main" id="reference-content">
         <article class="reference-prose glass-card">
+<h1>Skills in the library</h1>
 <blockquote>
 <p><strong>Visual blueprint:</strong> See the <a href="skills_blueprint.html">Skills visual reference</a> in the source checkout.</p>
 </blockquote>
@@ -53,7 +54,7 @@ clio-coder library install skill:grill-me --project
 clio-coder library skills --all --json
 </code></pre>
 <p>The bundled index makes complete packages available without installing them. An ordinary packaged skill copies from Clio's shipped files without network access. Local user and project registrations can add packages. Automatic offers and <code>/skill &lt;name&gt;</code> use the same library entries and package installer. An unmanaged <code>SKILL.md</code> remains a valid runtime resource; preparing a distributable requires a package manifest as described in <a href="authoring_plugins_blueprint.html">authoring</a>.</p>
-<h2>Operator ownership</h2>
+<h2>Operator ownership of installed skills</h2>
 <p>Active <code>.clio-coder/skills/</code>, <code>&lt;configDir&gt;/skills/</code>, and managed package trees are operator-owned. Main and worker tool admission refuses recognized model writes, edits, deletes and shell mutations to those trees at every autonomy level. Library install, update, registration, enable/disable, removal and pin actions are reserved for the operator; install/update <code>--dry-run</code>, search, inspection and draft validation remain available. This is a tool-admission boundary, not an operating-system sandbox for arbitrary scripts or dynamically constructed shell commands.</p>
 <p>Draft outside active roots, for example <code>draft-skills/example/</code>. The operator can review <code>library validate draft-skills/example/SKILL.md</code>, then register and install a complete package. Explicitly accepted skill offers install through the library. A lexical match alone never grants installation authority, including at <code>full-auto</code>.</p>
 <h2>Library keys and runtime use</h2>
@@ -117,7 +118,9 @@ clio-coder library skills --all --json
 <p>Authored whole-phrase triggers rank before incidental name or description overlap. Matches are lexical suggestions, not evidence that a model will offer or successfully use a skill. Headless sessions emit passive library-install guidance and do not open an interview. Interactive offers require a bound operator answer.</p>
 <p>House skills live in <code>skills/&lt;category&gt;/&lt;name&gt;/</code>, with <code>SKILL.md</code>, a package <code>plugin.json</code>, and authored <code>evals.md</code> scenarios. <code>skills:check</code> checks authoring metadata and normalized audit evidence; <code>library:check</code> verifies the distributable's complete tree. Only the latter is an installation pin. Explicit catalog-directory and old skill-index probes remain available to authoring utilities for unmanaged source audits; automatic library installation does not use those as a separate installer.</p>
 <p>Named suite evals use <code>clio-coder eval run --package skill:&lt;name&gt; --eval &lt;suite&gt;</code>. The experimental <code>clio-coder eval skill &lt;name|path&gt;</code> runs <code>evals.md</code> baseline, treatment and model-judge scenarios. Fixture commands require <code>--trust-fixtures</code>; network tools remain off unless <code>--allow-network</code> is requested. Those measurements are separate from deterministic package validation.</p>
-
+<h2>Publishing a skill</h2>
+<p>To publish a skill, prepare a complete skill package with <code>SKILL.md</code> and a portable root <code>plugin.json</code>. Declare kind <code>skill</code>, an explicit Semantic Version, the skill resource root and one public skill component. Validate the package with <code>clio-coder library validate ./my-skill</code>, then register its local source with <code>clio-coder library register ./my-skill --project</code>. Registration records its full-tree digest without installing it. Install the candidate with <code>clio-coder library install skill:&lt;name&gt; --project</code> and verify its behavior before sharing.</p>
+<p>For a curated contribution, add the reviewed package beneath <code>skills/&lt;category&gt;/&lt;name&gt;/</code>, include authored eval scenarios, and regenerate both the skill authoring records (<code>pnpm skills:pin</code>) and complete library package pins (<code>pnpm library:pin</code>). A shared remote index must name an explicit supported GitHub tree source, version and full-tree SHA-256. The <a href="authoring_plugins_blueprint.html">package authoring guide</a> defines the manifest and index fields; publishing does not itself install or activate the skill for another operator.</p>
 </article>
         <nav class="related-nav" aria-label="Adjacent references">
           <a class="nav-link-card" href="resource_library_blueprint.html"><span class="nav-label">Previous</span><span class="nav-title">Resource Library</span></a>
