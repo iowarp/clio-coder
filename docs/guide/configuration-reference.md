@@ -221,7 +221,7 @@ Read from the process environment at boot unless the row says otherwise.
 | `CLIO_CODER_LMSTUDIO_CORESIDENT_CONTEXT` | `131072` | Positive integer ceiling on the context length requested when loading an LM Studio model next to another resident model; `off`, `0`, or `false` disables the clamp. |  |
 | `CLIO_CODER_MEMORY_TRACE` | `unset (disabled)` | File path for a JSONL trace of proactive task-memory step envelopes including up to 8000 chars of model text per step; off when unset or empty. |  |
 | `CLIO_CODER_MODEL_CATALOG_DIRS` | `unset` | PATH-delimited list of extra model-catalog overlay directories, applied after the user and project overlays with the highest precedence. |  |
-| `CLIO_CODER_DISABLE_RETRIEVE_TOOLS` | off | Exactly `1` removes RETRIEVE tools from registries; `clio-coder skills-eval` sets it for child arms. Bash, hooks, external CLIs, and provider networking remain available; OS isolation is required for hermetic runs. Legacy `CLIO_CODER_NO_NETWORK_TOOLS=1` remains accepted. | `skills-eval --allow-network` clears both spellings for child arms |
+| `CLIO_CODER_DISABLE_RETRIEVE_TOOLS` | off | Exactly `1` removes RETRIEVE tools from registries; `clio-coder eval skill` sets it for child arms. Bash, hooks, external CLIs, and provider networking remain available; OS isolation is required for hermetic runs. Legacy `CLIO_CODER_NO_NETWORK_TOOLS=1` remains accepted. | `eval skill --allow-network` clears both spellings for child arms |
 | `CLIO_CODER_NO_NETWORK_TOOLS` | off | Legacy alias of `CLIO_CODER_DISABLE_RETRIEVE_TOOLS`; disables retrieval tools only, with no shell network isolation. | env only |
 | `CLIO_CODER_PROVIDER_DUMP_PATH` | `unset` | Read per native provider call: absolute path for private JSONL request-body and terminal-response diagnostics. Parent must exist; the file must be operator-owned, regular, mode `0600`, and not a symlink. Known credentials are redacted; prompt and tool content remain. | env only |
 | `CLIO_CODER_WEB_FETCH_ALLOW_PRIVATE_NETWORK` | off | Exactly `1` allows web_fetch to reach private and local services. This operator process opt-in is not accepted from model arguments or project settings. | env only |
@@ -436,20 +436,29 @@ Grouped by command. Global flags appear under `global`.
 | Flag | Controls |
 |---|---|
 | `--allow-config-drift` | For `eval compare`, proceed when the two artifacts' configs differ and label the comparison as config drift allowed. |
+| `--allow-network` | For `eval skill`, keep the network tool plane available to the child runs instead of stripping it. |
 | `--baseline` | For `eval gate`, the baseline eval id the candidate is gated against (required). |
 | `--clio-coder-entry` | For `eval run`, path to the clio-coder CLI entry the runner executes; a relative path is pinned to the invoking directory. |
+| `--eval` | For `eval validate --package` and `eval run --package`, the named evaluation to run. |
 | `--format` | For `eval report`: `text`, `json`, `md`, `swe-jsonl`, or `junit`; for `eval compare`: `text`, `json`, `md`, or `junit`. |
 | `--help` | Print the command's usage and exit. |
-| `--json` | For `eval inventory`, the only accepted argument; emits the bounded machine-readable inventory. |
+| `--json` | Emit machine-readable JSON output for `eval inventory` or `eval skill`. |
 | `--metric` | For `eval compare`, the behavioral metric or metric family the comparison is scored on. |
 | `--model` | For `eval run`, wire model id that overrides the suite's model. |
 | `--out` | For `eval run`, path where the eval artifact is written. |
+| `--package` | For `eval validate` and `eval run`, package reference or path (`<path|kind:name>`). |
+| `--project` | For `eval validate --package` and `eval run --package`, target project scope. |
 | `--repeat` | For `eval run --task-file`, positive integer repetitions per v1 task. |
+| `--scenario` | For `eval skill`, the evals.md scenario id (or bare number) to run instead of every scenario. |
 | `--suite` | For `eval validate` and `eval run`, path to the Suite v2 YAML; run takes exactly one of `--suite` or `--task-file`. |
-| `--target` | For `eval run`, target id that overrides the suite's target. |
+| `--target` | For `eval run` and `eval skill`, target id overriding the default target. |
 | `--task-file` | For `eval run`, path to a compatibility v1 task file loaded as a suite. |
 | `--thresholds` | For `eval gate`, path to a thresholds file replacing the built-in gate thresholds. |
+| `--timeout` | For `eval skill`, positive integer seconds allowed per child run. |
 | `--trials` | For `eval run`, positive integer overriding the suite's `matrix.repeats` and requesting a fresh workspace per matrix item. |
+| `--trust-fixtures` | For `eval skill`, allow the fixture shell commands declared in evals.md to execute in the seed workspace. |
+| `--user` | For `eval validate --package` and `eval run --package`, target user scope. |
+| `--workspace` | For `eval skill`, existing checkout copied into the throwaway seed workspace; the source is never mutated. |
 | `-h` | Short form of --help. |
 
 ### `evidence`
@@ -669,26 +678,6 @@ Grouped by command. Global flags appear under `global`.
 | `--skills` | For `dev share export`, include skills in the archive. |
 | `--user` | Limit `dev share export`/`import` to the user scope; mutually exclusive with `--project` and `--both`. |
 | `-f` | Short form of --force for `dev share import`. |
-| `-h` | Short form of --help. |
-
-### `skills`
-
-| Flag | Controls |
-|---|---|
-| `--all` | For `skills list`, include skills the model cannot load; for `skills update`, update every installed skill. |
-| `--allow-network` | For `skills eval`, keep the network tool plane available to the child runs instead of stripping it. |
-| `--category` | For `skills install`, install every marketplace skill in this catalog category instead of naming sources. |
-| `--force` | For `skills install`, `update`, and `sync`, overwrite an existing installed skill. |
-| `--help` | Print the command's usage and exit. |
-| `--json` | Emit JSON for `skills list`, `search`, `inspect`, `validate`, and `eval` (JSONL rows); the only accepted argument for `skills inventory`. |
-| `--name` | For `skills install`, install the single source under this skill name. |
-| `--project` | For `skills install`, choose the project skill root; mutually exclusive with `--user`. |
-| `--scenario` | For `skills eval`, the evals.md scenario id (or bare number) to run instead of every scenario. |
-| `--target` | For `skills eval`, target id used by the baseline, treatment, and judge runs instead of the default target. |
-| `--timeout` | For `skills eval`, positive integer seconds allowed per child run. |
-| `--trust-fixtures` | For `skills eval`, allow the fixture shell commands declared in evals.md to execute in the seed workspace. |
-| `--user` | For `skills install`, choose the user skill root; mutually exclusive with `--project`. |
-| `--workspace` | For `skills eval`, existing checkout copied into the throwaway seed workspace; the source is never mutated. |
 | `-h` | Short form of --help. |
 
 ### `targets`

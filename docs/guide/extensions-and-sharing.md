@@ -63,7 +63,7 @@ Return:
 Use in the TUI:
 
 ```text
-/resources prompts
+/library prompts
 /bugfix src/parser.ts empty input crashes
 ```
 
@@ -87,14 +87,14 @@ Display the following:
 ```
 ```
 
-Submitting `/pkg:help` renders the template locally as an operator card in the transcript, headed by the command name and its source package. Nothing is sent to the model, nothing is recorded in the model-facing session context, and no tokens are spent. The card shows the first fenced code block when the body has one, otherwise the whole body, wrapped to the terminal width with no truncation and scrollable like any other transcript output. Arguments after the command name are ignored. The composer's autocomplete lists such a template with a `reference` marker, and `/resources prompts` marks it the same way. Headless `clio-coder run /pkg:help` prints the same text to stdout and exits 0 without booting a provider or a session.
+Submitting `/pkg:help` renders the template locally as an operator card in the transcript, headed by the command name and its source package. Nothing is sent to the model, nothing is recorded in the model-facing session context, and no tokens are spent. The card shows the first fenced code block when the body has one, otherwise the whole body, wrapped to the terminal width with no truncation and scrollable like any other transcript output. Arguments after the command name are ignored. The composer's autocomplete lists such a template with a `reference` marker, and `/library prompts` marks it the same way. Headless `clio-coder run /pkg:help` prints the same text to stdout and exits 0 without booting a provider or a session.
 
 ### Foreign prompt roots
 
 A Claude Code slash command in `.claude/commands`, a Codex prompt in `.codex/prompts`, and an OpenCode command in `.opencode/command` are prompt templates Clio reads directly, at both user and project scope. A foreign prompt is text substituted into a message the operator typed, so it keeps the untrusted-by-project default that skills have and never gains an execution grant of its own.
 
 User-scope foreign prompts are trusted because they came from the operator's
-machine. A project-scope prompt lists in `/resources prompts` with an
+machine. A project-scope prompt lists in `/library prompts` with an
 `untrusted` marker and refuses substitution until
 `integrations.projectResources.trustProjectImports: true` opts in. An untrusted
 template sends nothing to the model. A token naming neither a command nor a
@@ -132,7 +132,7 @@ Use in the TUI:
 /skill hdf5-review review the output validation path
 ```
 
-`/skill` opens the Skills Hub with discovered project skills, user skills, and marketplace entries. `/skill <name> [args]` submits `args` with a pending skill request; the model must call `context` (scope="skills") for that skill before following the workflow. The same pending-request path runs in headless mode, so `clio-coder run "/skill hdf5-review inspect the writer"` matches the interactive behavior.
+`/skill` opens the library overlay (`/library skill`) with discovered project skills, user skills, and marketplace entries. `/skill <name> [args]` submits `args` with a pending skill request; the model must call `context` (scope="skills") for that skill before following the workflow. The same pending-request path runs in headless mode, so `clio-coder run "/skill hdf5-review inspect the writer"` matches the interactive behavior.
 
 Every activation records a session ledger entry with the skill name, file path, hash, source, trigger (`slash-command` or `tool`), and turn id when one is available. The same ledger is mirrored into session metadata, prompt diagnostics, and run receipts. Compaction keeps the newest active skill turn in the retained suffix so a loaded skill is not silently summarized away.
 
@@ -154,26 +154,27 @@ Shared user roots are model-visible by default, like the Clio user root. Project
 
 Opt in to model-visible project compatibility roots by setting `integrations.projectResources.trustProjectImports: true` in `settings.yaml`. `.clio-coder/skills` is always trusted as the Clio-native project root.
 
-### Loading with context, writing directly
+### Loading with context and skill authoring
 
 `context(scope="skills")` lists model-visible skills when called with no `name`, or loads a pending skill body by `name`. It returns structured metadata (`name`, `description`, `path`, `base_dir`, `hash`, `source`, `scope`, `disable_model_invocation`, parsed tool policy fields, diagnostics, and frontmatter metadata) plus the body. Pass `include_tree: true` to list sibling files under the skill base directory, capped internally at 50 entries. The skills scope never executes bundled scripts and only resolves skills the model is allowed to see.
 
-Creating a skill is writing a `SKILL.md` file with the ordinary write tool: `.clio-coder/skills/<name>/SKILL.md` for project scope, or the Clio config skills directory for user scope. The loader validates frontmatter on load (`clio-coder skills validate` reports diagnostics), and the `skill-craft` shipped skill documents the frontmatter contract and craft rules.
+Creation under protected roots is operator authority: the ordinary model `write` and `edit` tools cannot write protected active skill roots (`.clio-coder/skills/<name>/` or the user `<configDir>/skills/`). Model-authored skills must be created outside protected roots (for example in a staging workspace or package directory) and then installed by the operator with `clio-coder library install <path> [--user|--project]`, or copied directly into an active root by the operator. The loader validates frontmatter on demand (`clio-coder library validate <package-path|SKILL.md>` reports diagnostics), and the `skill-craft` shipped skill documents the frontmatter contract and craft rules.
 
-### Skills CLI
+### Library and skill commands
 
 ```bash
-clio-coder skills list [--json] [--all]
-clio-coder skills search <query> [--json]
-clio-coder skills inspect <name> [--json]
-clio-coder skills validate [path] [--json]
-clio-coder skills install <name|path|github-url> [--user|--project] [--name <name>] [--force]
-clio-coder skills update <name> | --all [--force]
-clio-coder skills sync [--force]
-clio-coder skills eval <name|path> [--scenario <id>] [--target <id>] [--workspace <path>] [--timeout <seconds>] [--trust-fixtures] [--allow-network] [--json]
+clio-coder library list [--kind skill] [--user|--project] [--json]
+clio-coder library search [query] [--kind skill] [--json]
+clio-coder library inspect <path|kind:name|name> [--user|--project] [--json]
+clio-coder library validate <package-path|SKILL.md> [--json]
+clio-coder library install <path|kind:name|name> [--user|--project] [--force] [--with-requirements] [--dry-run] [--json]
+clio-coder library update <kind:name|name> [--user|--project] [--force] [--json]
+clio-coder library sync
+clio-coder library skills [--all] [--json]
+clio-coder eval skill <name|path> [--scenario <id>] [--target <id>] [--workspace <path>] [--timeout <seconds>] [--trust-fixtures] [--allow-network] [--json]
 ```
 
-`eval` (experimental) executes a skill's `evals.md` RED-GREEN scenarios with
+`eval skill` (experimental) executes a skill's `evals.md` RED-GREEN scenarios with
 baseline, treatment, and judge runs; see
 [skills-marketplace.md](skills-marketplace.md) for the catalog contract it
 verifies. Fixture commands in an `evals.md` are real shell and only run with
@@ -194,7 +195,7 @@ Clio is local-first. Skills run from disk and no chat turn depends on network ac
 npx skills add <skill> -a codex   # installs into ~/.codex/skills
 ```
 
-Clio does not call Skills.sh during startup or prompt assembly, and does not emit its own telemetry. If you run `npx skills`, its telemetry follows that CLI and can be disabled with `DISABLE_TELEMETRY=1`. Skills.sh remote search and audit are not enabled in this release. Clio does support local marketplace search plus `clio-coder skills install <name|path|github-url>`: bare names resolve through the local marketplace, and explicit local paths or GitHub URLs install directly.
+Clio does not call Skills.sh during startup or prompt assembly, and does not emit its own telemetry. If you run `npx skills`, its telemetry follows that CLI and can be disabled with `DISABLE_TELEMETRY=1`. Skills.sh remote search and audit are not enabled in this release. Clio supports library package discovery and installation via `clio-coder library install <path|kind:name|name> [--user|--project]`: bare names and `kind:name` references resolve through the library catalog, and local paths require a valid package containing a root `plugin.json`. Raw or unindexed GitHub URLs cannot be installed directly; remote package installation requires a catalog entry with version and full-tree SHA-256 pin.
 
 ### Prompt envelope and safety
 
@@ -287,9 +288,9 @@ Installed packages are admitted only when their current tree matches the SHA-256
 
 A running session does not read installed packages on every load. While domains start, the extensions domain publishes nothing: readers use an ephemeral generation-0 projection. The composition root then asks the extensions domain to build an immutable candidate for the session's working directory and builds the matching user-hook registration table from it. After validating that both candidates are still current, the composition root publishes the snapshot and hooks with two adjacent reference assignments. That paired boot snapshot is generation 1. It contains package identity and provenance, the command-tool declarations of each loadable package, and the parsed `hooks.yaml` declarations captured from the exact bytes the install digest covered. Every consumer in the process then reads the committed generation, so consecutive loads within one turn agree on the package set.
 
-`/resources extensions reload` is the only in-session way to publish a later generation. It rebuilds the snapshot from disk, re-verifies every installed tree against `state.json`, builds the user-hook registrations for the candidate, validates both candidates, and then performs the same two adjacent assignment-only publications. No callback, event, log, or refusal sits between them; conflict diagnostics and the `extensions.reloaded` event run only after both references are live. Observers therefore see the previous hooks or the new ones, never an intermediate pairing. The command reports the new generation, which packages were added, removed, or modified, and how many hooks were registered, dropped, or rejected. A tree that no longer verifies is listed as inactive and contributes nothing until it is reinstalled. A build failure or stale candidate publishes neither side and reports why.
+`/library extensions reload` is the only in-session way to publish a later generation. It rebuilds the snapshot from disk, re-verifies every installed tree against `state.json`, builds the user-hook registrations for the candidate, validates both candidates, and then performs the same two adjacent assignment-only publications. No callback, event, log, or refusal sits between them; conflict diagnostics and the `extensions.reloaded` event run only after both references are live. Observers therefore see the previous hooks or the new ones, never an intermediate pairing. The command reports the new generation, which packages were added, removed, or modified, and how many hooks were registered, dropped, or rejected. A tree that no longer verifies is listed as inactive and contributes nothing until it is reinstalled. A build failure or stale candidate publishes neither side and reports why.
 
-Reloading an unchanged tree still publishes a new generation with the same content digest; content identity is the digest, not the generation number. Installs, enables, disables, and removes performed by `clio-coder extensions` in another process are invisible to a running session until the operator reloads or restarts. There is no filesystem watcher, so a CLI mutation never becomes an implicit mid-turn hook change. Command-tool schemas are frozen when a session registry is created, so a reload never changes a live model's tool surface; restart the session for that. Plugin resources have their own generation and their own `/resources plugins reload`.
+Reloading an unchanged tree still publishes a new generation with the same content digest; content identity is the digest, not the generation number. Installs, enables, disables, and removes performed by `clio-coder extensions` in another process are invisible to a running session until the operator reloads or restarts. There is no filesystem watcher, so a CLI mutation never becomes an implicit mid-turn hook change. Command-tool schemas are frozen when a session registry is created, so a reload never changes a live model's tool surface; restart the session for that. Plugin resources have their own generation and their own `/library reload`.
 
 If extension state is corrupt, loading remains fail-closed. A normal reinstall refuses it; `extensions install <valid-source> --force` backs up the corrupt state and parks the previous package bytes before installing and recording the verified replacement. `extensions remove <id>` can also remove an unverifiable package from the load path while preserving both its bytes and any corrupt state in the paths printed by the command. These recovery backups are deliberately not treated as installed packages.
 
