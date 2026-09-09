@@ -2,7 +2,7 @@
 
 All notable changes to Clio Coder are documented in this file. The format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/) and versions follow Semantic Versioning; pre-1.0 minor releases may include incompatible changes.
 
-## Unreleased
+## 0.4.7 - 2026-09-09
 
 ### Added
 - Unify installable plugins, skills, agents, prompts and fleets as library packages with one manifest, exact version, full-tree pin, structured origin and scoped lifecycle. Add registration, a five-kind Library overlay and named package eval suites; Materio declares an offline Python contract suite.

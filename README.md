@@ -334,7 +334,7 @@ can also be installed with your package manager. See
 From source, the latest stable release uses the pinned pnpm workflow:
 
 ```bash
-git clone --branch v0.4.6 https://github.com/iowarp/clio-coder.git
+git clone --branch v0.4.7 https://github.com/iowarp/clio-coder.git
 cd clio-coder
 corepack enable pnpm
 pnpm run install:local
