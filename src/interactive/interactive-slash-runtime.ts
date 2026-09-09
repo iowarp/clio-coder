@@ -33,7 +33,7 @@ import type { ChatLoop } from "./chat-loop.js";
 import { type ChatPanel, createChatPanel } from "./chat-panel.js";
 import { rehydrateChatPanelFromTurns } from "./chat-renderer.js";
 import { runCompactWithNotice } from "./command-fallbacks.js";
-import { appendNotice, appendOperatorCommand } from "./command-output.js";
+import { appendNotice, appendOperatorCommand, appendReferenceCard } from "./command-output.js";
 import { runOperatorRecall } from "./context-recall-command.js";
 import { renderSessionHtml } from "./export-html/index.js";
 import { dateLocal } from "./format-time.js";
@@ -376,6 +376,12 @@ export function createInteractiveSlashRuntime(deps: InteractiveSlashRuntimeDeps)
 		notice: appendCommandNotice,
 		echoOperatorCommand: (text) => {
 			appendOperatorCommand(text, {
+				appendReplayBlock: (renderBlock) => deps.chatPanel.appendReplayBlock(renderBlock),
+				requestRender: deps.requestRender,
+			});
+		},
+		showReference: (card) => {
+			appendReferenceCard(card, {
 				appendReplayBlock: (renderBlock) => deps.chatPanel.appendReplayBlock(renderBlock),
 				requestRender: deps.requestRender,
 			});

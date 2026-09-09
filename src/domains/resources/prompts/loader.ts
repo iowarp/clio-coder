@@ -37,6 +37,12 @@ export interface PromptTemplate {
 	 */
 	unavailable?: string;
 	argumentHint?: string;
+	/**
+	 * Frontmatter `display-only: true`. The body is written for the operator,
+	 * not the model: invoking the command renders it locally and sends nothing,
+	 * records nothing in model-facing session context, and spends no tokens.
+	 */
+	displayOnly: boolean;
 }
 
 export interface PromptTemplateRoot {
@@ -79,6 +85,13 @@ export type PromptTemplateExpansion =
 			 * slash, so sending the literal `/name` to the model answers nothing.
 			 */
 			refusal?: { template: PromptTemplate; message: string };
+			/**
+			 * Set when the input named a display-only template. `text` is what the
+			 * operator reads; it is never model text, which is why this rides the
+			 * not-expanded shape: a caller that only checks `expanded` cannot send
+			 * it anywhere by accident.
+			 */
+			display?: { template: PromptTemplate; text: string };
 	  }
 	| {
 			expanded: true;
@@ -204,9 +217,29 @@ function unavailableTemplate(
 			sourceInfo,
 			trusted: root.trusted !== false,
 			unavailable: `${reason} (${filePath})`,
+			displayOnly: false,
 		},
 		source: sourceInfo,
 	};
+}
+
+/** A frontmatter flag is only ever the YAML boolean; any other value reads as unset. */
+function booleanField(frontmatter: Record<string, unknown>, key: string): boolean | null {
+	const value = frontmatter[key];
+	return typeof value === "boolean" ? value : null;
+}
+
+const FENCED_BLOCK = /(?:^|\n)(`{3,}|~{3,})[^\n]*\n([\s\S]*?)\n\1[ \t]*(?=\n|$)/u;
+
+/**
+ * What a display-only template shows: the first fenced code block when the
+ * body has one, otherwise the whole body. Authors write these as "display this
+ * block" with the block fenced, so the fence is the reference and the prose
+ * around it was instructions for a model that is no longer in the loop.
+ */
+export function promptTemplateDisplayText(template: Pick<PromptTemplate, "content">): string {
+	const match = FENCED_BLOCK.exec(template.content);
+	return (match?.[2] ?? template.content).replace(/\r/g, "").trimEnd();
 }
 
 function loadPromptFile(
@@ -258,6 +291,7 @@ function loadPromptFile(
 		filePath,
 		sourceInfo,
 		trusted: root.trusted !== false,
+		displayOnly: booleanField(frontmatter, "display-only") ?? booleanField(frontmatter, "displayOnly") ?? false,
 	};
 	if (argumentHint) template.argumentHint = argumentHint;
 	return { name, value: template, source: sourceInfo };
@@ -375,6 +409,15 @@ export function expandPromptTemplateInput(input: string, templates: PromptTempla
 		};
 	}
 	const args = parseCommandArgs(command.rest);
+	if (template.displayOnly) {
+		return {
+			expanded: false,
+			text: input,
+			args,
+			diagnostics: templates.diagnostics,
+			display: { template, text: promptTemplateDisplayText(template) },
+		};
+	}
 	return {
 		expanded: true,
 		text: substituteArgs(template.content, args, command.rest),

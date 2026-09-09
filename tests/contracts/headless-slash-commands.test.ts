@@ -75,3 +75,38 @@ it("headless commands refuse interactive actions before boot while preserving sk
 		rmSync(root, { recursive: true, force: true });
 	}
 });
+
+it("headless run prints a display-only template to stdout and exits without booting", () => {
+	const root = mkdtempSync(join(tmpdir(), "clio-headless-display-"));
+	const config = join(root, "config");
+	mkdirSync(join(config, "prompts", "pkg"), { recursive: true });
+	writeFileSync(
+		join(config, "prompts", "pkg", "help.md"),
+		"---\ndescription: Reference\ndisplay-only: true\n---\nDisplay the following:\n\n```\n━━━ pkg ━━━\n /pkg:help   This help\n```\n",
+	);
+	const env = {
+		...process.env,
+		CLIO_CODER_HOME: root,
+		CLIO_CODER_CONFIG_DIR: config,
+		CLIO_CODER_DATA_DIR: join(root, "data"),
+		CLIO_CODER_STATE_DIR: join(root, "state"),
+		CLIO_CODER_CACHE_DIR: join(root, "cache"),
+		NO_COLOR: "1",
+	};
+	try {
+		for (const task of ["/pkg:help", "/pkg:help with arguments"]) {
+			const result = spawnSync(
+				process.execPath,
+				["--import", TSX, CLI, "run", "--target", "headless-slash-missing-target", task],
+				{ cwd: root, env, encoding: "utf8", timeout: 15_000 },
+			);
+			strictEqual(result.error, undefined, task);
+			strictEqual(result.status, 0, `${task}: ${result.stderr}`);
+			strictEqual(result.stdout, "━━━ pkg ━━━\n /pkg:help   This help\n", task);
+			doesNotMatch(result.stderr, /not found|is not a command/, task);
+			strictEqual(existsSync(join(root, "state", "sessions")), false, `${task}: no session was created`);
+		}
+	} finally {
+		rmSync(root, { recursive: true, force: true });
+	}
+});

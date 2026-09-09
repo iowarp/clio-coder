@@ -179,7 +179,8 @@ function explicitSkillPathErrors(skillPaths: ReadonlyArray<string>): string[] {
  * is checked, not expansion: a template that exists but refuses (an untrusted
  * project root, an unreadable body) has its own message, which the headless
  * boot path already prints from the expansion itself. Deciding that here would
- * duplicate the trust rules and put two refusals on one token.
+ * duplicate the trust rules and put two refusals on one token. A display-only
+ * template is the one expansion decided here, because it needs no boot at all.
  *
  * Both modules are imported lazily, so a task that does not start with a slash
  * pays for neither. The laziness is a startup-cost choice and nothing more: for
@@ -191,18 +192,30 @@ function explicitSkillPathErrors(skillPaths: ReadonlyArray<string>): string[] {
  * closure sits on. Boundaries rule6 in `tests/boundaries/check-boundaries.ts`
  * holds both halves of that.
  */
-async function headlessSlashCommandRefusal(task: string): Promise<string | null> {
+type HeadlessSlashPreflight = { refusal: string } | { display: string } | null;
+
+async function headlessSlashPreflight(task: string): Promise<HeadlessSlashPreflight> {
 	if (!task.trim().startsWith("/")) return null;
 	const { parseSlashCommand } = await import("../interactive/slash-commands.js");
 	const command = parseSlashCommand(task);
 	if (command.kind === "skill-invocation" || command.kind === "unknown" || command.kind === "empty") return null;
 	if (command.kind !== "unknown-command") {
-		return "interactive commands are not supported by clio-coder run; use interactive chat or the corresponding CLI command";
+		return {
+			refusal:
+				"interactive commands are not supported by clio-coder run; use interactive chat or the corresponding CLI command",
+		};
 	}
-	const { loadPromptTemplates } = await import("../domains/resources/index.js");
+	const { expandPromptTemplateInput, loadPromptTemplates } = await import("../domains/resources/index.js");
 	const templates = loadPromptTemplates({ cwd: process.cwd() });
-	if (templates.items.some((template) => template.name === command.token)) return null;
-	return `/${command.token} is not a command. Type /help for the list.`;
+	if (!templates.items.some((template) => template.name === command.token)) {
+		return { refusal: `/${command.token} is not a command. Type /help for the list.` };
+	}
+	// A display-only template is for the operator, so it is answered here and
+	// costs no boot: no provider, no session, no model. Everything else, the
+	// refusals included, stays with the boot path as described above.
+	const expansion = expandPromptTemplateInput(task, templates);
+	if (expansion.expanded === false && expansion.display) return { display: expansion.display.text };
+	return null;
 }
 
 export async function runClioRun(
@@ -266,10 +279,14 @@ export async function runClioRun(
 			if (parsed.agentId === undefined) {
 				// Reject unknown and unsupported interactive commands before boot;
 				// neither has a headless handler that could honor the request.
-				const slashRefusal = await headlessSlashCommandRefusal(assembled.prompt);
-				if (slashRefusal !== null) {
-					process.stderr.write(`clio-coder run: ${slashRefusal}\n`);
+				const preflight = await headlessSlashPreflight(assembled.prompt);
+				if (preflight !== null && "refusal" in preflight) {
+					process.stderr.write(`clio-coder run: ${preflight.refusal}\n`);
 					return 2;
+				}
+				if (preflight !== null) {
+					process.stdout.write(`${preflight.display}\n`);
+					return 0;
 				}
 				// An explicit --target override is a one-run target; a missing id is an
 				// operator config error, not an assistant response. Reject it before the

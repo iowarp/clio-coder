@@ -1,5 +1,6 @@
 import { wrapTextWithAnsi } from "../engine/tui.js";
-import type { RunIo } from "./slash-commands.js";
+import { renderReferenceCard } from "./renderers/reference-card.js";
+import type { PromptReferenceCard, RunIo } from "./slash-commands.js";
 import { type ClioToken, clioTheme, GLYPH } from "./theme/index.js";
 
 export type NoticeLevel = "info" | "success" | "warn" | "error";
@@ -51,6 +52,16 @@ export function appendOperatorCommand(text: string, sink: CommandOutputSink): vo
 		const theme = clioTheme();
 		return wrapTextWithAnsi(theme.fg("dim", `${GLYPH.user} ${normalized}`), width);
 	});
+	sink.requestRender();
+}
+
+/**
+ * Render a display-only prompt template for the operator. A replay block like
+ * the command echo above: it is never persisted as a session entry and never
+ * reaches the model, which is what "display only" promises the author.
+ */
+export function appendReferenceCard(card: PromptReferenceCard, sink: CommandOutputSink): void {
+	sink.appendReplayBlock((width) => renderReferenceCard(card, width));
 	sink.requestRender();
 }
 

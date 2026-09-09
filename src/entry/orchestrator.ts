@@ -2331,6 +2331,14 @@ export async function bootOrchestrator(options: BootOptions = {}): Promise<BootR
 				await termination.shutdown(1);
 				return { exitCode: 1, bootTimeMs: timer.snapshot().totalMs };
 			}
+			// A display-only template that reached boot (the CLI preflight answers
+			// most of them earlier) is printed for the operator and the run ends;
+			// its body was never model text.
+			if (promptExpansion?.expanded === false && promptExpansion.display) {
+				process.stdout.write(`${promptExpansion.display.text}\n`);
+				await termination.shutdown(0);
+				return { exitCode: 0, bootTimeMs: timer.snapshot().totalMs };
+			}
 			const fileExpansion = await expandInlineFileReferencesAsync(
 				promptExpansion?.expanded ? promptExpansion.text : parsedSkillRequest.text,
 				{

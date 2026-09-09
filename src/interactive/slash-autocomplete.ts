@@ -73,7 +73,12 @@ export interface PromptCommandTemplate {
 	description: string;
 	argumentHint?: string;
 	unavailable?: string;
+	/** Rendered for the operator on submit; the model never sees it. */
+	displayOnly?: boolean;
 }
+
+/** The marker a display-only template carries in the menu, beside its description. */
+export const REFERENCE_TEMPLATE_MARKER = "reference";
 
 export interface SlashAutocompleteOptions {
 	basePath?: string;
@@ -349,7 +354,11 @@ class ClioAutocompleteProvider implements AutocompleteProvider {
 			if (!name.toLowerCase().startsWith(lowered) || name === prefix) continue;
 			seen.add(name);
 			const hint = template.argumentHint?.trim();
-			const summary = template.unavailable ? `unavailable: ${template.unavailable}` : template.description;
+			const summary = template.unavailable
+				? `unavailable: ${template.unavailable}`
+				: template.displayOnly
+					? `${REFERENCE_TEMPLATE_MARKER} · ${template.description}`
+					: template.description;
 			const description = compactDescription(`${hint ? `${hint} — ` : ""}${summary}`);
 			const item: SlashCompletionItem = {
 				id: `prompt:${name}`,
@@ -358,7 +367,9 @@ class ClioAutocompleteProvider implements AutocompleteProvider {
 				label: name,
 				effectDescription: template.unavailable
 					? `Prompt template unavailable: ${template.unavailable}`
-					: `Prompt template: ${summary}`,
+					: template.displayOnly
+						? `Reference card shown to you; nothing is sent to the model: ${template.description}`
+						: `Prompt template: ${summary}`,
 				replacement: range,
 				appendSpace: Boolean(hint),
 			};

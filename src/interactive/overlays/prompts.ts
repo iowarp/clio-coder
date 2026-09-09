@@ -27,6 +27,9 @@ export function openPromptsOverlay(tui: TUI, ctx: SlashCommandContext, onClose: 
 					lines.push(`**Argument Hint:** \`${template.argumentHint}\``);
 				}
 				lines.push(`**Source:** ${template.sourceInfo.source ?? template.sourceInfo.scope}`);
+				if (template.displayOnly) {
+					lines.push("**Display only:** rendered in the transcript for you; nothing is sent to the model.");
+				}
 				if (template.unavailable !== undefined) {
 					lines.push(`**Unavailable:** ${template.unavailable}`);
 				}
@@ -43,9 +46,11 @@ export function openPromptsOverlay(tui: TUI, ctx: SlashCommandContext, onClose: 
 		const marker =
 			template.unavailable !== undefined
 				? clioTheme().fg("error", "unavailable")
-				: template.trusted
-					? undefined
-					: clioTheme().fg("warning", "untrusted");
+				: !template.trusted
+					? clioTheme().fg("warning", "untrusted")
+					: template.displayOnly
+						? clioTheme().fg("info", "reference")
+						: undefined;
 		if (marker) item.meta = marker;
 		return item;
 	});

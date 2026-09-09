@@ -57,6 +57,7 @@ import {
 	packOracleDigest,
 } from "./oracle.js";
 import { isLibraryTab, LIBRARY_TABS } from "./overlays/library-tabs.js";
+import { promptSourceLabel } from "./prompt-source-label.js";
 import type { CommandArgsSpec, CommandPositionalSpec, ParsedArgs } from "./slash-spec.js";
 import { matchFromSpec, usageLine } from "./slash-spec.js";
 import {
@@ -558,6 +559,16 @@ function shareWorkerRun(runId: string | undefined, ctx: SlashCommandContext): vo
 	ctx.submitOperatorNote(note);
 }
 
+/** What the transcript shows for a display-only prompt template. */
+export interface PromptReferenceCard {
+	/** Command name as typed, without the slash: `materio:help`. */
+	command: string;
+	/** Where the template came from, in operator words: `plugin materio`. */
+	source: string;
+	/** The body to show, already reduced to its reference block. */
+	text: string;
+}
+
 /**
  * Runtime dependencies every slash-command handler may need. Every field is
  * injected at startInteractive construction time; handlers never reach into
@@ -577,6 +588,12 @@ export interface SlashCommandContext {
 	 * the request above it. Transcript-only; the line never enters model context.
 	 */
 	echoOperatorCommand?: (text: string) => void;
+	/**
+	 * Render a display-only prompt template as an operator card in the
+	 * transcript. Transcript-only, like the echo: the host that has no chat
+	 * panel leaves it unset and the card falls back to `io.stdout`.
+	 */
+	showReference?: (card: PromptReferenceCard) => void;
 	/**
 	 * Put operator-authored text into the session the way typed text enters it:
 	 * a user turn, persisted in the ledger, visible in the transcript. Used only
@@ -2234,6 +2251,20 @@ export function dispatchSlashCommand(command: SlashCommand, ctx: SlashCommandCon
 		const expansion = ctx.expandPromptTemplate?.(command.text);
 		if (expansion?.expanded === true) {
 			ctx.submitChat(command.text);
+			return "accepted";
+		}
+		// A display-only template is answered here, for the operator, and the
+		// model is never told it was asked: no turn, no session entry, no tokens.
+		if (expansion?.expanded === false && expansion.display) {
+			const { template, text } = expansion.display;
+			const card: PromptReferenceCard = {
+				command: template.name,
+				source: promptSourceLabel(template.sourceInfo),
+				text,
+			};
+			if (ctx.showReference) ctx.showReference(card);
+			else ctx.io.stdout(`/${card.command} (${card.source})\n${card.text}\n`);
+			ctx.render();
 			return "accepted";
 		}
 		// A template that exists and refused is not a typo. Its reason reaches the

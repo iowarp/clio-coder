@@ -69,6 +69,26 @@ Use in the TUI:
 
 Templates without frontmatter are accepted; Clio derives a fallback description from the first non-empty line. Invalid frontmatter degrades to a warning for prompt templates rather than failing the whole load.
 
+### Display-only templates
+
+A template whose body is written for the operator rather than the model, such as a package's `help` reference, declares `display-only: true` in its frontmatter:
+
+```md
+---
+description: Overview of the package commands
+display-only: true
+---
+
+Display the following:
+
+```text
+ /pkg:help      This reference
+ /pkg:status    Project dashboard
+```
+```
+
+Submitting `/pkg:help` renders the template locally as an operator card in the transcript, headed by the command name and its source package. Nothing is sent to the model, nothing is recorded in the model-facing session context, and no tokens are spent. The card shows the first fenced code block when the body has one, otherwise the whole body, wrapped to the terminal width with no truncation and scrollable like any other transcript output. Arguments after the command name are ignored. The composer's autocomplete lists such a template with a `reference` marker, and `/resources prompts` marks it the same way. Headless `clio-coder run /pkg:help` prints the same text to stdout and exits 0 without booting a provider or a session.
+
 ### Foreign prompt roots
 
 A Claude Code slash command in `.claude/commands`, a Codex prompt in `.codex/prompts`, and an OpenCode command in `.opencode/command` are prompt templates Clio reads directly, at both user and project scope. A foreign prompt is text substituted into a message the operator typed, so it keeps the untrusted-by-project default that skills have and never gains an execution grant of its own.
