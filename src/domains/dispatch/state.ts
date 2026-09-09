@@ -262,6 +262,7 @@ export function openLedger(opts?: LedgerOptions): Ledger {
 				task: input.task,
 				...(input.budget !== undefined ? { budget: structuredClone(input.budget) } : {}),
 				...(input.briefing !== undefined ? { briefing: structuredClone(input.briefing) } : {}),
+				...(input.workerContext !== undefined ? { workerContext: structuredClone(input.workerContext) } : {}),
 				...(input.steering !== undefined ? { steering: structuredClone(input.steering) } : {}),
 				targetId: input.targetId,
 				wireModelId: input.wireModelId,

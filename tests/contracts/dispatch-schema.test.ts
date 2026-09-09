@@ -100,7 +100,7 @@ describe("dispatch schema composition", () => {
 		const schema = buildDispatchParameters({ council: false, compete: false, adaptiveRouting: false }) as unknown as {
 			$defs: Record<string, unknown>;
 		};
-		assert.deepEqual(Object.keys(schema.$defs).sort(), ["budget", "intent"]);
+		assert.deepEqual(Object.keys(schema.$defs).sort(), ["budget", "intent", "workerContext"]);
 	});
 
 	it("does not refuse a hidden field a caller sends anyway", () => {

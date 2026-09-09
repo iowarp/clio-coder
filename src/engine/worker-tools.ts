@@ -1,3 +1,4 @@
+import type { WorkerRecall } from "../domains/context/worker/recall.js";
 /**
  * Worker-subprocess tool construction.
  *
@@ -140,6 +141,7 @@ export function createWorkerToolRegistry(
 	autonomy?: AutonomyLevel,
 	onMiddlewareEffects?: RegistryDeps["onMiddlewareEffects"],
 	agentLedger?: AgentLedgerPort,
+	workerRecall?: WorkerRecall,
 ): ToolRegistry {
 	// A worker always gets a middleware contract, even without a snapshot from
 	// the orchestrator, because the loop guard rides on it as a before_tool
@@ -164,6 +166,7 @@ export function createWorkerToolRegistry(
 	// is what keeps that true now that the session registry omits the tool.
 	const registration = registerCoreTools(registry, {
 		includeLedgerTools: true,
+		...(workerRecall ? { workerRecall } : {}),
 		...(agentLedger ? { agentLedger } : {}),
 		// A worker cannot install a skill or reach the operator who could, so
 		// its skill listing carries installed (or bound) skills only; the

@@ -4,6 +4,7 @@ import type { NumericTolerance } from "../../tools/verify/numeric.js";
 import type { PerfBudgetSpec } from "../../tools/verify/perf.js";
 import type { ResultContract } from "../agents/result-contract.js";
 import type { AgentAutomationAuthority, AgentSpec } from "../agents/spec.js";
+import type { WorkerContextSeed } from "../context/worker/contract.js";
 import type { CostProvenance } from "../providers/index.js";
 import type { ProtectedArtifactState } from "../safety/protected-artifacts.js";
 import type { AssignmentId, DispatchAssignment } from "./assignment.js";
@@ -32,6 +33,8 @@ export interface ResolvedVerificationCheck {
 }
 
 export interface DispatchRequest extends JobSpec {
+	/** Host-captured conversation seed; never accepted from model arguments. */
+	contextSeed?: WorkerContextSeed;
 	/** Coordinator-owned result contract override for a fleet plan step. */
 	resultContractOverride?: ResultContract;
 	/**

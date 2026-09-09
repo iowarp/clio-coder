@@ -1,3 +1,4 @@
+import type { WorkerContextProvenance } from "../context/worker/contract.js";
 /**
  * Shared run + receipt types for the dispatch domain (Phase 6 slice 2).
  *
@@ -43,6 +44,7 @@ export type RunOutcome =
 export type RunOutcomeCode =
 	| "vram_capacity_fit_failure"
 	| "worker_tool_call_cap_exhausted"
+	| "worker_context_exhausted"
 	| "loop_guard_tools_disabled_exhausted"
 	| "result_contract_exhausted"
 	| "worker_final_output_missing"
@@ -52,6 +54,7 @@ export function isRunOutcomeCode(value: unknown): value is RunOutcomeCode {
 	return (
 		value === "vram_capacity_fit_failure" ||
 		value === "worker_tool_call_cap_exhausted" ||
+		value === "worker_context_exhausted" ||
 		value === "loop_guard_tools_disabled_exhausted" ||
 		value === "result_contract_exhausted" ||
 		value === "worker_final_output_missing" ||
@@ -455,6 +458,7 @@ export interface RunEnvelope {
 	budget?: RunToolBudgetEnvelope;
 	/** Present only when a bounded parent briefing was sent as dynamic task data. */
 	briefing?: RunBriefingProvenance;
+	workerContext?: WorkerContextProvenance;
 	/** Sent steering provenance in stable per-run sequence order; prose is never persisted. */
 	steering?: ReadonlyArray<RunSteeringProvenance>;
 	targetId: string;
@@ -801,6 +805,7 @@ export interface RunReceipt {
 	budget?: RunToolBudgetEnvelope;
 	/** Proof of briefing content without copying its prose into the receipt. */
 	briefing?: RunBriefingProvenance;
+	workerContext?: WorkerContextProvenance;
 	/** Sent steering provenance in stable per-run sequence order; prose is never persisted. */
 	steering?: ReadonlyArray<RunSteeringProvenance>;
 	targetId: string;

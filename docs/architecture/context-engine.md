@@ -7,7 +7,7 @@ Clio Coder tracks context pressure, records per-turn snapshots, and protects the
 
 Source of truth lives in `src/domains/session/context-accounting.ts`, `src/domains/session/context-ledger.ts`, `src/domains/session/compaction/`, `src/domains/context/working-set/`, `src/domains/session/migrations/index.ts`, and the chat-loop integration in `src/interactive/chat-loop.ts`.
 
-The non-destructive eviction layer has its own guide: [context-working-set.md](context-working-set.md).
+The non-destructive eviction layer has its own guide: [context-working-set.md](context-working-set.md). Dispatch inheritance, native worker pressure, and scoped recall are covered in [worker-context.md](worker-context.md).
 
 ## Context window resolution
 

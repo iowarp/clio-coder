@@ -1,3 +1,5 @@
+import type { WorkerContextSnapshot } from "../domains/context/worker/contract.js";
+import { captureWorkerContext } from "../domains/context/worker/snapshot.js";
 /**
  * The chat loop: one turn's state machine.
  *
@@ -315,6 +317,7 @@ export interface ChatLoop {
 	cancel(options?: ChatCancelOptions): void;
 	onEvent(handler: (event: ChatLoopEvent) => void): () => void;
 	getSessionId(): string | null;
+	captureWorkerContext?(): WorkerContextSnapshot | null;
 	lastRunSnapshot?(): ChatLoopRunSnapshot | null;
 	isStreaming(): boolean;
 	/**
@@ -1487,6 +1490,15 @@ export function createChatLoop(deps: CreateChatLoopDeps): ChatLoop {
 			return () => {
 				listeners.delete(handler);
 			};
+		},
+
+		captureWorkerContext(): WorkerContextSnapshot | null {
+			const meta = deps.session?.current();
+			if (!meta) return null;
+			return captureWorkerContext(
+				{ sessionId: meta.id, leafTurnId: state.lastTurnId, cwd: meta.cwd },
+				state.runtime?.agent.state.messages ?? state.replayedContextMessages,
+			);
 		},
 
 		getSessionId(): string | null {

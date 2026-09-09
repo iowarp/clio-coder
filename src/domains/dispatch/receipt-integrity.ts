@@ -155,6 +155,7 @@ export const RECEIPT_INTEGRITY_FIELD_COVERAGE = {
 	ledgerContribution: true,
 	sessionId: true,
 	briefing: true,
+	workerContext: true,
 	outcomeCode: true,
 	steering: true,
 	routeDecision: true,
@@ -232,6 +233,7 @@ function ledgerDigestFields(envelope: RunEnvelope): Record<string, unknown> {
 		promptSignature: envelope.promptSignature ?? null,
 		toolSignature: envelope.toolSignature ?? null,
 		briefing: envelope.briefing ?? null,
+		...(envelope.workerContext !== undefined ? { workerContext: envelope.workerContext } : {}),
 		outcomeCode: envelope.outcomeCode ?? null,
 		steering: envelope.steering ?? null,
 	};
@@ -379,6 +381,8 @@ function firstLedgerMismatch(receipt: RunReceipt, envelope: RunEnvelope): string
 		if (!Object.is(receiptValue, ledgerValue)) return field;
 	}
 	if (canonicalJson(receipt.briefing ?? null) !== canonicalJson(envelope.briefing ?? null)) return "briefing";
+	if (canonicalJson(receipt.workerContext ?? null) !== canonicalJson(envelope.workerContext ?? null))
+		return "workerContext";
 	if (canonicalJson(receipt.budget ?? null) !== canonicalJson(envelope.budget ?? null)) return "budget";
 	if (canonicalJson(receipt.steering ?? null) !== canonicalJson(envelope.steering ?? null)) return "steering";
 	return null;

@@ -1,4 +1,5 @@
 import type { ContextRecalledPayload } from "../core/bus-events.js";
+import type { WorkerRecall } from "../domains/context/worker/recall.js";
 import type { LoadSkillsInput } from "../domains/resources/index.js";
 import type { SessionContract } from "../domains/session/contract.js";
 import type { DecisionBoardStore } from "../domains/session/decision-board.js";
@@ -33,6 +34,7 @@ import { webFetchToolSurface } from "./web-fetch-surface.js";
 import { writeTool } from "./write.js";
 
 export interface CoreToolBootstrapDeps {
+	workerRecall?: WorkerRecall;
 	session?: SessionContract;
 	/** Full ledger of the current session; context(scope=recall) folds it. Absent in worker registries. */
 	readSessionEntries?: () => ReadonlyArray<SessionEntry>;
@@ -117,6 +119,7 @@ export function registerCoreTools(registry: ToolRegistry, deps: CoreToolBootstra
 		),
 	});
 	const skillToolDeps = {
+		...(deps.workerRecall ? { workerRecall: deps.workerRecall } : {}),
 		getCwd: () => deps.session?.current()?.cwd ?? process.cwd(),
 		...(deps.getSkillLoaderOptions ? { getSkillLoaderOptions: deps.getSkillLoaderOptions } : {}),
 		...(deps.skillMarketplace !== undefined ? { skillMarketplace: deps.skillMarketplace } : {}),

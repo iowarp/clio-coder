@@ -1,6 +1,7 @@
 import { type Static, Type } from "typebox";
 import type { FleetSettings } from "../core/defaults.js";
 import { RESULT_SUMMARY_MAX_BYTES_CEILING } from "../domains/agents/result-contract.js";
+import { WORKER_CONTEXT_SPLICE_TOKENS } from "../domains/context/worker/contract.js";
 import { DISPATCH_BRIEFING_MAX_BYTES } from "../domains/dispatch/validation.js";
 import { StringEnum } from "../engine/ai.js";
 import { TOOL_PROFILE_NAMES } from "./profiles.js";
@@ -116,7 +117,6 @@ const DispatchIntentSchema = Type.Object(
 	},
 );
 
-const DISPATCH_DEFS = { intent: DispatchIntentSchema, budget: DispatchBudgetSchema };
 const IntentRef = Type.Unsafe<Static<typeof DispatchIntentSchema>>({ $ref: "#/$defs/intent" });
 const BudgetRef = Type.Unsafe<Static<typeof DispatchBudgetSchema>>({ $ref: "#/$defs/budget" });
 
@@ -136,6 +136,34 @@ const MODE_DESCRIPTION: Record<"full" | "noCouncil" | "noCompete" | "neither", s
  * Optional blocks come and go with `composition`, and the `mode` enum only
  * names the modes whose fields are advertised.
  */
+const WorkerContextSchema = Type.Union(
+	[
+		Type.Object({ mode: Type.Literal("isolated") }, { additionalProperties: false }),
+		Type.Object(
+			{ mode: Type.Literal("fork"), max_tokens: Type.Optional(Type.Integer({ minimum: 256, maximum: 262144 })) },
+			{ additionalProperties: false },
+		),
+		Type.Object(
+			{
+				mode: Type.Literal("splice"),
+				max_tokens: Type.Optional(Type.Integer({ minimum: 256, maximum: 262144 })),
+				paths: Type.Optional(Type.Array(Type.String({ minLength: 1, maxLength: 4096 }), { minItems: 1, maxItems: 64 })),
+				refs: Type.Optional(Type.Array(Type.String({ minLength: 1, maxLength: 4096 }), { minItems: 1, maxItems: 64 })),
+			},
+			{ additionalProperties: false },
+		),
+	],
+	{
+		description: `Parent conversation: isolated (default), fork (native history; never silently truncated), or splice (selected text evidence, default ${WORKER_CONTEXT_SPLICE_TOKENS} tokens). refs: tool:<call-id> or message:<index> in the current snapshot. Batch defaults may be overridden per task.`,
+	},
+);
+const ContextRef = Type.Unsafe<Static<typeof WorkerContextSchema>>({ $ref: "#/$defs/workerContext" });
+const DISPATCH_DEFS = {
+	intent: DispatchIntentSchema,
+	budget: DispatchBudgetSchema,
+	workerContext: WorkerContextSchema,
+};
+
 export function buildDispatchParameters(composition: DispatchSchemaComposition = FULL_DISPATCH_SCHEMA_COMPOSITION) {
 	const modes = [
 		"parallel",
@@ -178,6 +206,7 @@ export function buildDispatchParameters(composition: DispatchSchemaComposition =
 						// tokens advertising them twice).
 						Type.Object({
 							task: Type.String({ description: "The assignment, with expected output and constraints." }),
+							context: Type.Optional(ContextRef),
 							briefing: Type.Optional(
 								Type.String({ description: `Per-task parent context, max ${DISPATCH_BRIEFING_MAX_BYTES} UTF-8 bytes.` }),
 							),
@@ -288,6 +317,7 @@ export function buildDispatchParameters(composition: DispatchSchemaComposition =
 						: "Default recipe id for tasks without their own agent, or auto (default coder).",
 				}),
 			),
+			context: Type.Optional(ContextRef),
 			briefing: Type.Optional(
 				Type.String({
 					description: `Parent context for task, or the shared default for tasks; never instructions. Max ${DISPATCH_BRIEFING_MAX_BYTES} UTF-8 bytes.`,

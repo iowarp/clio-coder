@@ -1,4 +1,5 @@
 import { isAbsolute, relative, resolve } from "node:path";
+import { selectWorkerContext } from "../domains/context/worker/select.js";
 import type { DispatchPlanTaskResolution, DispatchRequest } from "../domains/dispatch/contract.js";
 import type { ExecutionPlan } from "../domains/dispatch/execution-plan.js";
 import { gateDeciderAgentId } from "../domains/dispatch/execution-role.js";
@@ -344,6 +345,8 @@ export function createDispatchAdmissionController(deps: DispatchToolDeps): Dispa
 			agent: resolution.agentId,
 			task: request.task,
 			...(request.briefing !== undefined ? { briefing: request.briefing } : {}),
+			...(request.context ? { context: structuredClone(request.context) } : {}),
+			...(request.contextSeed ? { workerContext: structuredClone(request.contextSeed.provenance) } : {}),
 			...(request.worktree === true
 				? {
 						worktree: true as const,
@@ -510,6 +513,26 @@ export function createDispatchAdmissionController(deps: DispatchToolDeps): Dispa
 		}
 		const parsed = parseRequests(args);
 		if (!parsed.ok) return shapeRejection(args, parsed.message);
+		try {
+			const inheriting = parsed.requests.filter((request) => request.context && request.context.mode !== "isolated");
+			if (inheriting.length > 0) {
+				const source = deps.captureWorkerContext?.();
+				if (!source) throw new Error("worker context: no active parent conversation is available");
+				for (const request of inheriting) {
+					const policy = request.context;
+					if (!policy || policy.mode === "isolated") continue;
+					request.contextSeed = selectWorkerContext(
+						source,
+						policy,
+						request.intent
+							? [...request.intent.readRoots, ...request.intent.relevantPaths, ...request.intent.writeRoots]
+							: [],
+					);
+				}
+			}
+		} catch (error) {
+			return preparationFailure(args, error);
+		}
 		if (
 			args.mode !== undefined &&
 			!["parallel", "sequential", "pipeline", "compete", "council"].includes(String(args.mode))
@@ -755,7 +778,7 @@ export function createDispatchAdmissionController(deps: DispatchToolDeps): Dispa
 				topology === "compete" ||
 				tasks.some((task) => task.node !== "local" || task.failover === "approved");
 			if (!planScale) {
-				const marked = parsed.requests.some((request) => request.intent !== undefined)
+				const marked = parsed.requests.some((request) => request.intent !== undefined || request.contextSeed !== undefined)
 					? markPrepared(
 							withResolvedDispatchPlan(args, {
 								version: 3,

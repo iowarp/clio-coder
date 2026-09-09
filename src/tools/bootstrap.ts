@@ -2,6 +2,7 @@ import { BusChannels } from "../core/bus-events.js";
 import type { WorkerRosters } from "../core/defaults.js";
 import type { SafeEventBus } from "../core/event-bus.js";
 import type { AgentSpec } from "../domains/agents/spec.js";
+import type { WorkerContextSnapshot } from "../domains/context/worker/contract.js";
 import type { DispatchContract } from "../domains/dispatch/contract.js";
 import type { AgentRoleFactsResolver } from "../domains/dispatch/execution-role.js";
 import type { PanesOperations } from "../domains/mux/operations.js";
@@ -23,6 +24,7 @@ import { steerToolSurface } from "./steer-surface.js";
 export { toolPromptHintsForNames };
 
 export interface ToolBootstrapDeps extends CoreToolBootstrapDeps {
+	captureWorkerContext?: () => WorkerContextSnapshot | null;
 	dispatch?: DispatchContract;
 	bus?: SafeEventBus;
 	getAgentCatalog?: () => string;
@@ -61,6 +63,7 @@ export function registerAllTools(registry: ToolRegistry, deps: ToolBootstrapDeps
 		const dispatchRunEvents = createDispatchRunEventRegistry({ journal: null });
 		const dispatchToolDeps = {
 			dispatch,
+			...(deps.captureWorkerContext ? { captureWorkerContext: deps.captureWorkerContext } : {}),
 			runEvents: dispatchRunEvents,
 			getAgentSpecs: deps.getAgentSpecs ?? (() => []),
 			...(deps.bus ? { bus: deps.bus } : {}),

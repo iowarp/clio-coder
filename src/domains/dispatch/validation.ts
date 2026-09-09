@@ -1,3 +1,4 @@
+import { parseWorkerContextPolicy, type WorkerContextPolicy } from "../context/worker/contract.js";
 /**
  * Validate a dispatch job spec before it enters the queue. Pure function, no
  * I/O. Accepts unknown input so callers can hand it raw JSON or CLI args
@@ -74,6 +75,7 @@ export interface JobSpec {
 	task: string;
 	/** Bounded parent-composed context delivered as untrusted dynamic task data. */
 	briefing?: string;
+	context?: WorkerContextPolicy;
 	workerProfile?: string;
 	workerRuntime?: string;
 	delegationAgentId?: string;
@@ -188,6 +190,7 @@ const KNOWN_KEYS = new Set([
 	"executionRole",
 	"task",
 	"briefing",
+	"context",
 	"workerProfile",
 	"workerRuntime",
 	"delegationAgentId",
@@ -264,6 +267,14 @@ export function validateJobSpec(spec: unknown): Validated {
 		errors.push("executionRole must be a known execution role");
 	}
 
+	let context: WorkerContextPolicy | undefined;
+	if (spec.context !== undefined) {
+		try {
+			context = parseWorkerContextPolicy(spec.context);
+		} catch (error) {
+			errors.push(error instanceof Error ? error.message : String(error));
+		}
+	}
 	let briefing: string | undefined;
 	if ("briefing" in spec && spec.briefing !== undefined) {
 		if (typeof spec.briefing !== "string") {
@@ -560,6 +571,7 @@ export function validateJobSpec(spec: unknown): Validated {
 		task: task as string,
 	};
 	if (briefing !== undefined) out.briefing = briefing;
+	if (context !== undefined) out.context = context;
 	if (typeof spec.workerProfile === "string") out.workerProfile = spec.workerProfile;
 	if (typeof spec.workerRuntime === "string") out.workerRuntime = spec.workerRuntime;
 	if (typeof spec.delegationAgentId === "string") out.delegationAgentId = spec.delegationAgentId;
