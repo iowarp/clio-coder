@@ -3,11 +3,11 @@
 > **Visual blueprint:** The source checkout includes the complete
 > [Resource Library visual reference](https://github.com/iowarp/clio-coder/blob/main/docs/html/resource_library_blueprint.html).
 
-The resource library extends the existing local skills marketplace catalog to carry agent recipes, prompt templates, and fleet contracts. It does not change the Agent Skills format, discovery roots, trust gating, or existing skill installation sources.
+The resource library extends the existing local skills marketplace catalog to carry agent recipes, prompt templates, fleet contracts, and complete portable plugin bundles. It does not change the Agent Skills format, discovery roots, trust gating, or existing skill installation sources.
 
 ## Catalog schema
 
-A catalog is a JSON or YAML list, or an object whose `skills` property contains the list. The historical property name remains accepted so every existing skill marketplace index works unchanged.
+A catalog is a JSON or YAML list, or an object whose `entries` or historical `skills` property contains the list. The historical property name remains accepted so every existing skill marketplace index works unchanged.
 
 ```yaml
 skills:
@@ -20,7 +20,7 @@ skills:
       - skill:ship
 ```
 
-`kind` accepts `skill`, `agent`, `prompt`, or `fleet` and defaults to `skill`. `requires` accepts typed references with those same four prefixes. Clio resolves requirements recursively across the selected catalog and the private catalog. Missing, malformed, and cyclic requirements are refused with stable `library_requirement_*` diagnostics. A requirement is satisfied when its typed reference exists in `<configDir>/library-pins.yaml` or its kind-specific destination exists. Add output lists satisfied and unsatisfied requirements separately. Requirements are reported without installation unless `library add` receives `--with-requirements`. That flag installs only the unsatisfied dependencies in dependency order before the requested entry.
+`kind` accepts `skill`, `agent`, `prompt`, `fleet`, or `plugin` and defaults to `skill`. `requires` accepts typed references with those same five prefixes. Clio resolves requirements recursively across the selected catalog and the private catalog. Missing, malformed, and cyclic requirements are refused with stable `library_requirement_*` diagnostics. A requirement is satisfied when its kind-specific destination exists; plugin dependencies must also be loadable. Disabled or damaged plugin dependencies require explicit enabling or repair. Stale pins do not count as installed content. Add output lists satisfied and unsatisfied requirements separately. Requirements are reported without installation unless `library add` receives `--with-requirements`. That flag installs only the unsatisfied dependencies in dependency order before the requested entry.
 
 ## Private catalog and remote gating
 
@@ -36,6 +36,10 @@ When `integrations.library.sync` is false, both `library sync` and `library push
 clio-coder library list [--kind k] [--json]
 clio-coder library search <query> [--kind k] [--json]
 clio-coder library add <ref> [--from <catalog|path>] [--with-requirements] [--yes] [--json]
+clio-coder library update <ref> [--force] [--json]
+clio-coder library remove <ref> [--json]
+clio-coder library pin <ref> [--json]
+clio-coder library drift <ref> [--json]
 clio-coder library use <kind> <name>
 clio-coder library push
 clio-coder library sync
@@ -62,7 +66,10 @@ on an installed row leads to its invocation surface. See
 | agent | `<configDir>/agents/<name>.md` | Agent recipe schema and policy |
 | prompt | `<configDir>/prompts/<name>.md` | Prompt template loader |
 | fleet | `<configDir>/fleets/<name>.md` | Fleet contract parser |
+| plugin | `<configDir>/plugins/<name>/` | Portable manifest, component graph, containment, and full-tree pin |
 
-Every installed item records a kind-qualified hash in `<configDir>/library-pins.yaml`. Agent recipes become visible through `clio-coder agents`. User fleet contracts participate between built-in and project fleet precedence, so a project contract still wins. Prompts use the existing user prompt root.
+Individual resources record a kind-qualified hash in `<configDir>/library-pins.yaml`. Plugins record their full-tree pin atomically in the selected scope’s `plugins/state.json`. Agent recipes become visible through `clio-coder agents`. User fleet contracts participate between built-in and project fleet precedence, so a project contract still wins. Prompts use the existing user prompt root.
 
 Share archives may carry agent and fleet entries. Import always validates these formats before writing, and fleet entries land in the user fleet root.
+
+Portable bundles are available as `plugin:<name>` entries alongside the existing resource kinds. Use `clio-coder library list --kind plugin`, or the Plugins tab in `/resources library plugin`. Bundle installation verifies the entire package against its catalog SHA-256; installation, updates, removal, pin inspection, and drift checks share the plugin lifecycle. See [Portable plugins and the library](plugins.md) for commands, scope rules, and private catalog examples.

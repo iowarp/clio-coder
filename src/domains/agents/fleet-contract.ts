@@ -1,3 +1,5 @@
+import { enabledPluginResourceRoots } from "../plugins/index.js";
+import { resolvePackagePathReference, resolvePackageReferences } from "../resources/package-references.js";
 /**
  * Repo-owned fleet contracts (Symphony P5: work policy lives in the repo,
  * versioned and strictly validated).
@@ -17,7 +19,12 @@ import { Value } from "typebox/value";
 import { resolvePackageRoot } from "../../core/package-root.js";
 import { clioConfigDir } from "../../core/xdg.js";
 import { enabledExtensionResourceRoots } from "../extensions/index.js";
-import { type FleetCommandRegistry, loadFleetCommands } from "./fleet-commands.js";
+import {
+	type FleetCommandRegistry,
+	loadFleetCommands,
+	resolveFleetCommandArgs,
+	validateFleetCommandArgs,
+} from "./fleet-commands.js";
 import { parseFrontmatter } from "./frontmatter.js";
 import { normalizeWriteBoundary, WRITE_BOUNDARY_MAX_ENTRIES } from "./write-boundary.js";
 
@@ -111,6 +118,7 @@ export interface FleetContractCodeStep {
 	kind: "code";
 	id: string;
 	command: string;
+	args?: ReadonlyArray<string>;
 	scope: FleetStepScope;
 	dependencies: ReadonlyArray<string>;
 	commitFrom?: ReadonlyArray<string>;
@@ -119,7 +127,13 @@ export interface FleetContractCodeStep {
 
 /** The verification half of a loop: the question that decides continuation. */
 export type FleetContractLoopCheck =
-	| { kind: "code"; command: string; scope: FleetStepScope; writes?: ReadonlyArray<string> }
+	| {
+			kind: "code";
+			command: string;
+			args?: ReadonlyArray<string>;
+			scope: FleetStepScope;
+			writes?: ReadonlyArray<string>;
+	  }
 	| {
 			kind: "agent";
 			agent: string;
@@ -199,7 +213,7 @@ export interface FleetContract {
 	path: string;
 }
 
-export type FleetContractSource = "builtin" | "extension" | "user" | "project";
+export type FleetContractSource = "builtin" | "extension" | "plugin" | "user" | "project";
 
 export interface FleetContractListing {
 	name: string;
@@ -291,6 +305,7 @@ function codeStepSchema(version: FleetContractVersion) {
 			kind: Type.Literal("code"),
 			id: Type.String({ minLength: 1 }),
 			command: Type.String({ minLength: 1 }),
+			args: Type.Optional(Type.Array(Type.String({ maxLength: 8192, pattern: "^[^\\u0000]*$" }), { maxItems: 64 })),
 			scope: FleetScopeSchema,
 			dependencies: Type.Array(Type.String({ minLength: 1 })),
 			...(version >= 3 ? { commitFrom: Type.Optional(Type.Array(Type.String({ minLength: 1 }), { minItems: 1 })) } : {}),
@@ -313,6 +328,7 @@ function loopStepSchema(version: FleetContractVersion) {
 					{
 						kind: Type.Literal("code"),
 						command: Type.String({ minLength: 1 }),
+						args: Type.Optional(Type.Array(Type.String({ maxLength: 8192, pattern: "^[^\\u0000]*$" }), { maxItems: 64 })),
 						scope: FleetScopeSchema,
 						...writesSchema(version),
 					},
@@ -412,12 +428,14 @@ type RawStep = {
 	id: string;
 	agent?: string;
 	command?: string;
+	args?: string[];
 	commitFrom?: string[];
 	writes?: string[];
 	maxAttempts?: number;
 	check?: {
 		kind: "code" | "agent" | "gate";
 		command?: string;
+		args?: string[];
 		agent?: string;
 		gate?: string;
 		scope: FleetStepScope;
@@ -488,7 +506,13 @@ function normalizeStep(step: RawStep): FleetContractStep {
 			dependencies: [...step.dependencies],
 			check:
 				check.kind === "code"
-					? { kind: "code", command: check.command ?? "", scope: check.scope, ...normalizedWrites(check.writes) }
+					? {
+							kind: "code",
+							command: check.command ?? "",
+							...(check.args ? { args: [...check.args] } : {}),
+							scope: check.scope,
+							...normalizedWrites(check.writes),
+						}
 					: check.kind === "gate"
 						? { kind: "gate", gate: check.gate ?? "" }
 						: {
@@ -512,6 +536,7 @@ function normalizeStep(step: RawStep): FleetContractStep {
 			kind: "code",
 			id: step.id,
 			command: step.command ?? "",
+			...(step.args ? { args: [...step.args] } : {}),
 			scope: step.scope,
 			dependencies: [...step.dependencies],
 			...(step.commitFrom !== undefined ? { commitFrom: [...step.commitFrom] } : {}),
@@ -901,13 +926,20 @@ export function fleetLoopSteps(contract: FleetContract): FleetContractLoopStep[]
  * check is a code step in every way that matters to the registry, so it is
  * bound to a real command by the same validation.
  */
-export function fleetCodeSteps(contract: FleetContract): Array<{ id: string; command: string }> {
-	const steps: Array<{ id: string; command: string }> = [];
+export function fleetCodeSteps(
+	contract: FleetContract,
+): Array<{ id: string; command: string; args?: ReadonlyArray<string> }> {
+	const steps: Array<{ id: string; command: string; args?: ReadonlyArray<string> }> = [];
 	for (const step of contract.steps) {
-		if (step.kind === "code") steps.push({ id: step.id, command: step.command });
+		if (step.kind === "code")
+			steps.push({ id: step.id, command: step.command, ...(step.args ? { args: step.args } : {}) });
 		else if (step.kind === "gate") steps.push({ id: step.id, command: step.run });
 		else if (step.kind === "loop" && step.check.kind === "code") {
-			steps.push({ id: fleetLoopCheckStepId(step.id, 1), command: step.check.command });
+			steps.push({
+				id: fleetLoopCheckStepId(step.id, 1),
+				command: step.check.command,
+				...(step.check.args ? { args: step.check.args } : {}),
+			});
 		}
 	}
 	return steps;
@@ -945,19 +977,26 @@ export class FleetCommandRegistryMissingError extends Error {
  * failure mode this whole mechanism exists to prevent: a green test phase that
  * never ran a test.
  */
-export function validateFleetCommands(contract: FleetContract, registry: FleetCommandRegistry | null): void {
+export function validateFleetCommands(
+	contract: FleetContract,
+	registry: FleetCommandRegistry | null,
+	vars?: Readonly<Record<string, string>>,
+): void {
 	const codeSteps = fleetCodeSteps(contract);
 	if (codeSteps.length === 0) return;
 	if (registry === null) {
 		throw new FleetCommandRegistryMissingError(contract.path, [...new Set(codeSteps.map((step) => step.command))].sort());
 	}
 	for (const step of codeSteps) {
-		if (!registry.commands.has(step.command)) {
+		const command = registry.commands.get(step.command);
+		if (!command) {
 			const known = [...registry.commands.keys()].sort().join(", ");
 			throw new Error(
 				`fleet contract ${contract.path}: step '${step.id}' names unknown command '${step.command}' (registered: ${known || "none"})`,
 			);
 		}
+		const args = vars === undefined ? (step.args ?? []) : resolveFleetCommandArgs(step.args ?? [], vars);
+		validateFleetCommandArgs(command, args, { allowTemplates: vars === undefined });
 	}
 }
 
@@ -971,21 +1010,51 @@ function builtinFleetsDir(): string {
 	return join(resolvePackageRoot(), "src", "domains", "agents", "fleets");
 }
 
-function fleetSources(cwd: string): ReadonlyArray<{ dir: string; source: FleetContractSource }> {
+function resolveFleetReferences(
+	contract: FleetContract,
+	source: { source: FleetContractSource; rootPath?: string },
+): FleetContract {
+	if (!source.rootPath) return contract;
+	const context = { rootPath: source.rootPath, plugin: source.source === "plugin" };
+	// Authored text is resolved after schema parsing; paths cannot inject YAML keys.
+	return {
+		...contract,
+		body: resolvePackageReferences(contract.body, context),
+		steps: contract.steps.map((step) => {
+			if (step.kind === "code" && step.args)
+				return { ...step, args: step.args.map((arg) => resolvePackagePathReference(arg, context)) };
+			if (step.kind === "loop" && step.check.kind === "code" && step.check.args)
+				return {
+					...step,
+					check: { ...step.check, args: step.check.args.map((arg) => resolvePackagePathReference(arg, context)) },
+				};
+			return step;
+		}),
+	};
+}
+
+function fleetSources(cwd: string): ReadonlyArray<{ dir: string; source: FleetContractSource; rootPath?: string }> {
 	return [
 		{ dir: builtinFleetsDir(), source: "builtin" },
 		...enabledExtensionResourceRoots("fleets", cwd)
 			.sort((left, right) => left.source.localeCompare(right.source))
-			.map((root) => ({ dir: root.path, source: "extension" as const })),
+			.map((root) => ({ dir: root.path, rootPath: root.rootPath, source: "extension" as const })),
+		...enabledPluginResourceRoots("fleets", cwd)
+			.sort((left, right) => left.source.localeCompare(right.source))
+			.map((root) => ({ dir: root.path, rootPath: root.rootPath, source: "plugin" as const })),
 		{ dir: join(clioConfigDir(), "fleets"), source: "user" },
 		{ dir: fleetsDir(cwd), source: "project" },
 	];
 }
 
-function fleetContractPath(cwd: string, name: string): { path: string; source: FleetContractSource } | null {
+function fleetContractPath(
+	cwd: string,
+	name: string,
+): { path: string; source: FleetContractSource; rootPath?: string } | null {
 	for (const source of [...fleetSources(cwd)].reverse()) {
 		const candidate = join(source.dir, `${name}.md`);
-		if (existsSync(candidate)) return { path: candidate, source: source.source };
+		if (existsSync(candidate))
+			return { path: candidate, source: source.source, ...(source.rootPath ? { rootPath: source.rootPath } : {}) };
 	}
 	return null;
 }
@@ -995,7 +1064,7 @@ export function loadFleetContract(cwd: string, name: string): FleetContract {
 	if (located === null) {
 		throw new Error(`fleet contract not found: ${join(fleetsDir(cwd), `${name}.md`)} (and no builtin named '${name}')`);
 	}
-	const contract = parseFleetContract(readFileSync(located.path, "utf8"), located.path);
+	const contract = resolveFleetReferences(parseFleetContract(readFileSync(located.path, "utf8"), located.path), located);
 	validateFleetCommands(contract, loadFleetCommands(cwd));
 	return contract;
 }
@@ -1027,12 +1096,15 @@ export function listFleetContracts(cwd: string): FleetContractListing[] {
 	}
 	const listings = new Map<string, FleetContractListing>();
 	const sources = fleetSources(cwd);
-	for (const { dir, source } of sources) {
+	for (const { dir, source, rootPath } of sources) {
 		for (const file of listDirectory(dir)) {
 			const path = join(dir, file);
 			const name = basename(file, ".md");
 			try {
-				const contract = parseFleetContract(readFileSync(path, "utf8"), path);
+				const contract = resolveFleetReferences(parseFleetContract(readFileSync(path, "utf8"), path), {
+					source,
+					...(rootPath ? { rootPath } : {}),
+				});
 				if (registryError !== null && fleetCodeSteps(contract).length > 0) throw new Error(registryError);
 				validateFleetCommands(contract, registry);
 				listings.set(name, { name, path, source, contract, error: null, needsCommands: null });

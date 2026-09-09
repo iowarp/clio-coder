@@ -68,9 +68,10 @@ Usage:
   clio-coder memory               list, propose, promote, approve, reject, or prune memory
   clio-coder usage report         cross-session usage facts and opportunities (experimental)
   clio-coder trace                query or view the durable dispatch trace mirror
+  clio-coder plugins              install, update, inspect, pin, and manage portable plugin bundles
   clio-coder extensions           install, list, enable, disable, or remove extension packages
   clio-coder skills               list, inspect, validate, or install skills
-  clio-coder library              list, search, add, or sync agents, prompts, fleets, and skills from catalogs
+  clio-coder library              list, search, add, or sync plugins, agents, prompts, fleets, and skills from catalogs
   clio-coder tasks                list, add, hand, finish, or drop project operator tasks
   clio-coder verifiers            discover, inspect, author, validate, edit, or dry-run project checks
   clio-coder tools list|status|install|remove <id>  pinned external programs Clio can drive
@@ -255,6 +256,7 @@ const COMMAND_HANDLERS = new Map<string, CommandHandler>([
 			return dispatch(devSubcommand, subArgs.slice(1), bootOptions);
 		},
 	],
+	["plugins", async (subArgs) => (await import("./plugins.js")).runPluginsCommand(subArgs)],
 	["extensions", extensionsCommand],
 	["ext", extensionsCommand],
 	["fleet", async (subArgs) => (await import("./fleet.js")).runFleetCommand(subArgs)],

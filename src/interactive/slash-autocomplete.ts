@@ -12,6 +12,7 @@ import {
 	createFileReferenceCompletionSource,
 	type FileReferenceCompletionSource,
 } from "./file-reference-completion.js";
+import { LIBRARY_TABS } from "./overlays/library-tabs.js";
 import { commandReference, SETTINGS_AREA_IDS, SLASH_COMMAND_GROUPS } from "./slash-commands.js";
 import {
 	type ArgCompletion,
@@ -79,6 +80,13 @@ export interface SlashAutocompleteOptions {
 function emptyCompletionSources(): Record<CompletionSlotName, CompletionSource> {
 	const sources = {} as Record<CompletionSlotName, CompletionSource>;
 	for (const slot of COMPLETION_SLOT_NAMES) sources[slot] = async () => [];
+	sources["library-tabs"] = async () =>
+		LIBRARY_TABS.map((tab) => ({
+			id: tab.id,
+			value: tab.id,
+			label: tab.label,
+			description: `Browse ${tab.label.toLowerCase()}`,
+		}));
 	return sources;
 }
 

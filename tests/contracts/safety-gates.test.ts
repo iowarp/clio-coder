@@ -226,6 +226,14 @@ describe("safety gate boundary", () => {
 			"node /opt/clio/dist/cli/index.js skills install example",
 			"npx @iowarp/clio-coder skills install example",
 			"npm exec -- clio-coder skills update example",
+			"clio-coder plugins install ./draft-plugin --project",
+			"clio-coder plugins update materials-characterization --force",
+			"clio-coder plugins enable example",
+			"clio-coder plugins pin example",
+			"clio-coder extensions install ./draft-extension --user",
+			"clio-coder library update plugin:example",
+			"clio-coder library remove plugin:example",
+			"clio-coder library pin plugin:example",
 		]) {
 			const decision = policy.evaluate({ tool: ToolNames.Bash, args: { command } });
 			strictEqual(decision.kind, "block", command);
@@ -237,10 +245,29 @@ describe("safety gate boundary", () => {
 			"clio-coder skills inspect example",
 			"clio-coder skills validate draft-skills/example/SKILL.md",
 			"clio-coder library list",
+			"clio-coder plugins list --json",
+			"clio-coder plugins inspect ./draft-plugin",
+			"clio-coder plugins drift example",
+			"clio-coder plugins install --help",
 			"printf 'clio-coder skills install example'",
 			"node script.js skills install example",
 		])
 			strictEqual(policy.evaluate({ tool: ToolNames.Bash, args: { command } }).kind, "allow", command);
+	});
+
+	it("protects installed plugin and harness-extension content in main and worker tools", () => {
+		for (const policy of [engine(), createWorkerSafety({ cwd: scratch })]) {
+			for (const kind of ["plugins", "extensions"]) {
+				for (const root of [join(scratch, ".clio-coder", kind), join(clioConfigDir(), kind)]) {
+					strictEqual(
+						policy.evaluate({ tool: ToolNames.Write, args: { path: join(root, "example", "tool.py"), content: "changed" } })
+							.kind,
+						"block",
+					);
+					strictEqual(policy.evaluate({ tool: ToolNames.Bash, args: { command: `rm -rf '${root}'` } }).kind, "block");
+				}
+			}
+		}
 	});
 
 	it("blocks every installed-skill update spelling with subcommand flags in main and worker admissions", () => {

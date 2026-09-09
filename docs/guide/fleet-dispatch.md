@@ -614,12 +614,39 @@ commands:
 
 Each command entry supports:
 - `argv` (required): Array of command arguments starting with the binary name (no shell strings).
+- `argumentSlots` (optional): Operator-declared positional data slots, each with a unique `name` and required `maxLength` (1 to 8192). At most 64 slots. Omission forbids appended fleet arguments; declared slots are all required.
 - `cwd` (optional): Repository-relative working directory (defaults to repository root).
 - `timeoutMs` (optional): Per-step execution timeout in milliseconds (defaults to 600,000 ms; bounds: 1,000 to 3,600,000 ms).
 - `env` (optional): Array of extra environment variable names to pass through on top of `FLEET_COMMAND_BASE_ENV` (`PATH`, `HOME`, `LANG`, `LC_ALL`, `TZ`, `TMPDIR`).
 - `description` (optional): Human-readable description.
 
 The whole-token `{{commitMessage}}` substitution is available to commit steps. The whole-token `{{path}}` substitution is available to version 5 gate commands. Each substitution becomes exactly one argv element and never passes through a shell.
+
+
+A fleet may supply per-task data only when the operator explicitly declares slots in the repository registry. Keep the executable, script path, and fixed flags in `argv`; the fleet cannot replace them. Use a fixed `--` separator where the registered program supports it. For example:
+
+```yaml
+# .clio-coder/fleets/commands.yaml, owned by the operator
+version: 1
+commands:
+  check-materials-task:
+    argv: ["python3", "scripts/check_materials_task.py"]
+    argumentSlots:
+      - name: taskDirectory
+        maxLength: 256
+```
+
+```yaml
+# One code step in a version 2 or newer fleet
+kind: code
+id: check-task
+command: check-materials-task
+args: ["{{taskDir}}"]
+scope: readonly
+dependencies: []
+```
+
+Run with `--var taskDir=.research/tasks/task-01`. A slot receives exactly one literal argument. Values must be nonempty, fit the slot's length limit, contain no NUL, and not start with `-`; fixed flags belong in the operator's registry. A whole-token `{{variable}}` binds before admission and participates in the plan hash. Missing variables, undeclared or excess slots, embedded placeholders, and flag-like values fail before execution. The code runner repeats slot validation for direct or in-memory plans. Spaces and shell metacharacters remain data without another expansion pass. Existing fixed commands accept no extra args.
 
 
 ## Measured route selection and agent automation

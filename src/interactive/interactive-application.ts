@@ -127,6 +127,7 @@ export interface InteractiveDeps {
 	extensions?: ExtensionsContract;
 	/** `/resources extensions reload` seam; the composition root supplies the coordinator. */
 	reloadExtensions?: SlashCommandContext["reloadExtensions"];
+	reloadPlugins?: SlashCommandContext["reloadPlugins"];
 	interop?: InteropContract;
 	share?: ShareContract;
 	/**
@@ -699,6 +700,7 @@ export async function createInteractiveApplication(deps: InteractiveDeps): Promi
 		...(deps.resources ? { resources: deps.resources } : {}),
 		...(deps.extensions ? { extensions: deps.extensions } : {}),
 		...(deps.reloadExtensions ? { reloadExtensions: deps.reloadExtensions } : {}),
+		...(deps.reloadPlugins ? { reloadPlugins: deps.reloadPlugins } : {}),
 		...(interopSurface ? { interop: interopSurface } : {}),
 		...(deps.agents ? { agents: deps.agents } : {}),
 		...(deps.share ? { share: deps.share } : {}),

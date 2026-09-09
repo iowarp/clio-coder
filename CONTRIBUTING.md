@@ -37,7 +37,7 @@ pnpm run ci
 ```
 
 This runs type checking, lint (including boundaries, documentation drift and
-skill pins), one build, the contract/smoke suite, and the trace-viewer suite.
+skill and plugin pins), one build, the contract/smoke suite, and the trace-viewer suite.
 Use `pnpm run skills:check` when checking skill pins on their own; it is already
 included in `lint` and `ci`.
 
@@ -327,3 +327,18 @@ To propose a skill:
    `pnpm run skills:pin` and `pnpm run skills:check`.
 
 Full catalog conventions and install options: [skills/README.md](skills/README.md).
+
+## Plugins
+
+`plugins/` is the publishing shelf for complete domain bundles. Packages use a
+portable root `plugin.json`, conventional `skills/`, and namespaced Clio metadata
+for native prompts, recipes, and fleets. Follow the
+[plugin authoring guide](docs/guide/authoring-plugins.md) and keep harness command
+implementations in the separate [extension lifecycle](docs/guide/harness-extensions.md).
+
+After changing any bundled file, run `pnpm plugins:pin` and review the updated
+full-tree digest in `plugins/registry.yaml`. Run `pnpm plugins:check` to verify
+the exact candidate; lint and the release gate include this check. Add behavior
+tests for lifecycle changes and validate an installed package's actual resources,
+including package-local references and bound skills. Peer projections must state
+which host capabilities they translate and which they omit.

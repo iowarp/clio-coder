@@ -1,6 +1,6 @@
 {
 	"name": "@iowarp/clio-coder",
-	"version": "0.4.6",
+	"version": "0.4.7",
 	"description": "The terminal coding agent for people who maintain the code that science runs on, with user-chosen models and inspectable evidence.",
 	"keywords": [
 		"ai",
@@ -51,6 +51,7 @@
 		"assets/clio-coder-logo-128.webp",
 		"src/**",
 		"skills/**",
+		"plugins/**",
 		"evals/**",
 		"docs/**/*.md",
 		"!docs/html/**",
@@ -86,7 +87,9 @@
 		"smoke:real-home": "bash scripts/smoke-real-home.sh",
 		"prepublishOnly": "CLIO_CODER_RELEASE_CONTEXT=publish pnpm run ci:release",
 		"skills:pin": "node --import tsx scripts/pin-skills.ts",
-		"skills:check": "node --import tsx scripts/pin-skills.ts --check"
+		"skills:check": "node --import tsx scripts/pin-skills.ts --check",
+		"plugins:pin": "node --import tsx scripts/pin-plugins.ts",
+		"plugins:check": "node --import tsx scripts/pin-plugins.ts --check"
 	},
 	"optionalDependencies": {
 		"@anthropic-ai/claude-agent-sdk": "0.3.186"

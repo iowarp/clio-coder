@@ -1,3 +1,4 @@
+import { listInstalledPlugins } from "../../domains/plugins/index.js";
 import type {
 	LibraryDiscoveryResult,
 	LibraryEntry,
@@ -20,6 +21,7 @@ import {
 	libraryInstallPath,
 	MARKETPLACE_UNCONFIGURED,
 	planLibraryInstall,
+	releaseLibraryPlan,
 } from "../../domains/resources/index.js";
 import type { OverlayHandle, TUI } from "../../engine/tui.js";
 import type { NoticeLevel } from "../command-output.js";
@@ -28,6 +30,7 @@ import type { LibraryInstallConfirmSubject } from "./library-install-confirm.js"
 import { openLibraryInstallConfirmOverlay } from "./library-install-confirm.js";
 import { isLibraryTab, LIBRARY_TABS } from "./library-tabs.js";
 import { type ListOverlayItem, type ListOverlayTab, openListOverlay } from "./list-overlay.js";
+import { type PluginLibraryAction, runPluginLibraryAction } from "./plugin-actions.js";
 
 /**
  * The Skills Hub: one multipane surface for every resource Clio can reach.
@@ -114,6 +117,7 @@ interface LibraryTabContext {
  * it there.
  */
 function libraryUseInvocation(entry: Pick<LibraryEntry, "kind" | "name">): string | null {
+	if (entry.kind === "plugin") return "/resources plugins ";
 	if (entry.kind === "fleet") return null;
 	if (entry.kind === "agent") return `/run ${entry.name} `;
 	if (entry.kind === "prompt") return `/${entry.name} `;
@@ -276,8 +280,19 @@ function buildLibraryItems(kind: LibraryEntryKind, context: LibraryTabContext): 
 			const pin = context.pin(entry);
 			const unresolved = context.unresolved(entry).map(libraryEntryRef);
 			const metaParts: string[] = [entry.origin];
+			const pluginCopies =
+				entry.kind === "plugin"
+					? listInstalledPlugins(process.cwd(), { all: true }).filter((item) => item.id === entry.name)
+					: [];
+			const plugin = pluginCopies[0];
 			if (entry.version) metaParts.push(`v${entry.version}`);
-			metaParts.push(installed ? "installed" : "available");
+			metaParts.push(
+				plugin
+					? `${plugin.scope} · ${plugin.loadable ? "active" : !plugin.enabled ? "disabled" : "unloadable"}`
+					: installed
+						? "installed"
+						: "available",
+			);
 			metaParts.push(pin ? `pin ${pin.sha256.slice(0, 8)}` : "unpinned");
 			if (unresolved.length > 0) metaParts.push(theme.fg("warning", `requires ${unresolved.join(", ")}`));
 			return {
@@ -296,6 +311,22 @@ function buildLibraryItems(kind: LibraryEntryKind, context: LibraryTabContext): 
 						`**Source:** \`${entry.sourceUrl}\``,
 						`**Origin:** ${entry.origin}`,
 					];
+					if (plugin) {
+						lines.push(
+							`**Installed copies:** ${pluginCopies.map((copy) => `${copy.scope} (${copy.loadable ? "active" : !copy.enabled ? "disabled" : "unloadable"})`).join(", ")}. Actions below select the ${plugin.scope} copy.`,
+						);
+						lines.push(
+							`**Resources:** ${
+								Object.entries(plugin.resources)
+									.map(([kind, root]) => `${kind}: ${root}`)
+									.join(", ") || "none"
+							}`,
+							...plugin.diagnostics.map((diagnostic) => `**${diagnostic.type}:** ${diagnostic.message}`),
+							"",
+							"**Actions:** u update · e enable/disable · r remove · p show verified pin · d check drift",
+							"Changes refresh with `/resources plugins reload`.",
+						);
+					}
 					if ((entry.requires ?? []).length > 0) {
 						lines.push(`**Requires:** ${(entry.requires ?? []).join(", ")}`);
 					}
@@ -367,33 +398,50 @@ async function runLibraryInstall(
 ): Promise<LibraryInstallOutcome> {
 	if (runner.installed(entry)) return { status: "already-installed" };
 	let requirements: LibraryRequirementStatus;
-	let plans: LibraryInstallPlan[];
+	const plans: LibraryInstallPlan[] = [];
 	try {
 		requirements = runner.classify(entry, runner.discovery.entries);
+		if (requirements.inactive?.length)
+			throw new Error(
+				`library_requirement_inactive: ${requirements.inactive.map(libraryEntryRef).join(", ")}; enable or repair these plugins explicitly`,
+			);
 		if (requirements.unsatisfied.length > 0 && !options.withRequirements) {
 			return { status: "refused", unresolved: requirements.unsatisfied.map(libraryEntryRef) };
 		}
-		plans = [...(options.withRequirements ? requirements.unsatisfied : []), entry].map(runner.plan);
+		for (const item of [...(options.withRequirements ? requirements.unsatisfied : []), entry])
+			plans.push(runner.plan(item));
 	} catch (error) {
+		for (const plan of plans) releaseLibraryPlan(plan);
 		return { status: "failed", message: error instanceof Error ? error.message : String(error) };
 	}
-	const accepted = await runner.confirm({
-		entryRef: libraryEntryRef(entry),
-		writes: plans.map((plan) => ({ ref: libraryEntryRef(plan.entry), path: plan.path, sha256: plan.sha256 })),
-		requirements: options.withRequirements ? requirements.unsatisfied.map(libraryEntryRef) : [],
-		satisfied: requirements.satisfied.map(libraryEntryRef),
-	});
-	if (!accepted) return { status: "cancelled" };
-	const written: string[] = [];
 	try {
-		for (const plan of plans) {
-			runner.write(plan);
-			written.push(libraryEntryRef(plan.entry));
+		const accepted = await runner.confirm({
+			entryRef: libraryEntryRef(entry),
+			writes: plans.map((plan) => ({
+				ref: libraryEntryRef(plan.entry),
+				path: plan.path,
+				sha256: plan.sha256,
+				sourceUrl: plan.entry.sourceUrl,
+			})),
+			requirements: options.withRequirements ? requirements.unsatisfied.map(libraryEntryRef) : [],
+			satisfied: requirements.satisfied.map(libraryEntryRef),
+		});
+		if (!accepted) return { status: "cancelled" };
+		const written: string[] = [];
+		try {
+			for (const plan of plans) {
+				runner.write(plan);
+				written.push(libraryEntryRef(plan.entry));
+			}
+		} catch (error) {
+			return { status: "failed", message: error instanceof Error ? error.message : String(error) };
 		}
+		return { status: "installed", refs: written };
 	} catch (error) {
 		return { status: "failed", message: error instanceof Error ? error.message : String(error) };
+	} finally {
+		for (const plan of plans) releaseLibraryPlan(plan);
 	}
-	return { status: "installed", refs: written };
 }
 
 export function openSkillsHub(tui: TUI, deps: SkillsHubDeps): OverlayHandle {
@@ -547,6 +595,22 @@ export function openSkillsHub(tui: TUI, deps: SkillsHubDeps): OverlayHandle {
 		})();
 	};
 
+	const pluginAction = (item: ListOverlayItem, action: PluginLibraryAction): void => {
+		const entry = entryForRow(item);
+		if (entry?.kind !== "plugin" || installInFlight) return;
+		installInFlight = true;
+		void runPluginLibraryAction(entry, action, confirmInstall)
+			.then((message) => deps.notice("info", message))
+			.catch((error) => deps.notice("error", error instanceof Error ? error.message : String(error)))
+			.finally(() => {
+				installInFlight = false;
+				if (!closed) {
+					invalidateLibrary();
+					handle.refreshTabs();
+				}
+			});
+	};
+
 	handle = openListOverlay(tui, {
 		markerId: "skills-hub",
 		title: SKILLS_HUB_TITLE,
@@ -575,6 +639,11 @@ export function openSkillsHub(tui: TUI, deps: SkillsHubDeps): OverlayHandle {
 			deps.onClose();
 		},
 		actions: {
+			u: (item) => pluginAction(item, "update"),
+			e: (item) => pluginAction(item, "toggle"),
+			r: (item) => pluginAction(item, "remove"),
+			p: (item) => pluginAction(item, "pin"),
+			d: (item) => pluginAction(item, "drift"),
 			i: (item) => {
 				if (installInFlight) return;
 				const entry = entryForRow(item);

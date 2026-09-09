@@ -64,6 +64,7 @@ export const BusChannels = {
 	CompactionEnd: "compaction.end",
 	MiddlewareHookFailed: "middleware.hookFailed",
 	ExtensionsReloaded: "extensions.reloaded",
+	PluginsReloaded: "plugins.reloaded",
 	ExtensionsLoadIssue: "extensions.loadIssue",
 	ContextActivity: "context.activity",
 	ContextSourcesChanged: "context.sourcesChanged",
@@ -726,6 +727,9 @@ export interface ExtensionsReloadedPayload {
 	digest: string;
 }
 
+/** Data-only plugin generation publication, independent of extension hook generations. */
+export type PluginsReloadedPayload = ExtensionsReloadedPayload;
+
 /** Operator diagnostics for skipped extension or project-hook configuration. */
 export interface ExtensionsLoadIssuePayload {
 	message: string;
@@ -859,6 +863,7 @@ export type BusPayloadMap = {
 	[BusChannels.CompactionEnd]: CompactionPayload;
 	[BusChannels.MiddlewareHookFailed]: MiddlewareHookFailedPayload;
 	[BusChannels.ExtensionsReloaded]: ExtensionsReloadedPayload;
+	[BusChannels.PluginsReloaded]: PluginsReloadedPayload;
 	[BusChannels.ExtensionsLoadIssue]: ExtensionsLoadIssuePayload;
 	[BusChannels.ContextActivity]: ContextActivityPayload;
 	[BusChannels.ContextSourcesChanged]: ContextSourcesChangedPayload;

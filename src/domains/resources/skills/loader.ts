@@ -8,8 +8,10 @@ import { type ToolName, ToolNames } from "../../../core/tool-names.js";
 import { clioConfigDir } from "../../../core/xdg.js";
 import { enabledExtensionResourceRoots } from "../../extensions/index.js";
 import { INTEROP_AGENT_KINDS, interopSourceRank } from "../../interop/registry.js";
+import { enabledPluginResourceRoots, pluginBaseDir } from "../../plugins/index.js";
 import type { ResourceDiagnostic, ResourceScope, ResourceSourceInfo } from "../collision.js";
 import { readRootEntries, splitYamlFrontmatter, stringField } from "../common-loader.js";
+import { resolvePackageReferences } from "../package-references.js";
 import { normalizedSkillHash } from "./content-hash.js";
 import { getMarketplaceSkills } from "./marketplace.js";
 
@@ -55,6 +57,7 @@ export type SkillSource =
 	| "copilot"
 	| "opencode"
 	| "extension"
+	| "plugin"
 	| "path"
 	| "cli";
 
@@ -116,6 +119,8 @@ export interface Skill {
 }
 
 export interface SkillRoot {
+	rootPath?: string;
+	plugin?: boolean;
 	path: string;
 	scope: ResourceScope;
 	source?: SkillSource;
@@ -137,9 +142,8 @@ export interface SkillRoot {
 	 * share one skills tree across checkouts, but nothing may reach outside the
 	 * tree the operator is working in.
 	 *
-	 * Undefined disables the check. An extension root is laid out by a package
-	 * manager that symlinks by design, and an explicit skill path names its own
-	 * target, so neither has a containing scope to be measured against.
+	 * Undefined disables the check for standalone explicit paths. Installed
+	 * package roots use the package directory as their containment boundary.
 	 */
 	containment?: string;
 }
@@ -240,11 +244,14 @@ export function defaultSkillRoots(input: LoadSkillsInput = {}): SkillRoot[] {
 	const trustProject = projectCompatTrusted(input.trustProjectCompatRoots);
 	const roots: SkillRoot[] = [];
 
-	for (const root of enabledExtensionResourceRoots("skills", cwd)) {
+	for (const root of [...enabledExtensionResourceRoots("skills", cwd), ...enabledPluginResourceRoots("skills", cwd)]) {
 		roots.push({
 			path: root.path,
 			scope: "package",
-			source: "extension",
+			source: root.source.startsWith("plugin:") ? "plugin" : "extension",
+			rootPath: root.rootPath,
+			plugin: root.source.startsWith("plugin:"),
+			containment: root.rootPath,
 			origin: root.source,
 			precedence: SKILL_PRECEDENCE.extension,
 			trusted: true,
@@ -671,12 +678,19 @@ function loadSkillFile(
 	const provenance = extractProvenance(parsed.frontmatter, filePath);
 	const allowedTools = declaredToolSurface(parsed.frontmatter, "allowed-tools", filePath, diagnostics);
 	const disallowedTools = declaredToolSurface(parsed.frontmatter, "disallowed-tools", filePath, diagnostics);
+	let content: string;
+	try {
+		content = resolvePackageReferences(parsed.body.trim(), root);
+	} catch (error) {
+		diagnostics.push({ type: "warning", message: String(error), path: filePath });
+		return { candidate: null, diagnostics };
+	}
 	const skill: Skill = {
 		name,
 		description,
 		filePath,
 		baseDir,
-		content: parsed.body.trim(),
+		content,
 		sourceInfo,
 		disableModelInvocation: booleanField(parsed.frontmatter, "disable-model-invocation"),
 		...(allowedTools ? { allowedTools } : {}),
@@ -760,9 +774,41 @@ function explicitSkillRoot(filePath: string): SkillRoot {
 	};
 }
 
-function loadExplicitSkillPath(inputPath: string, diagnostics: ResourceDiagnostic[]): SkillCandidate[] {
+function loadExplicitSkillPath(
+	inputPath: string,
+	diagnostics: ResourceDiagnostic[],
+	packageRoots: ReadonlyArray<SkillRoot>,
+	cwd: string,
+): SkillCandidate[] {
 	const resolved = path.resolve(inputPath);
-	const root = explicitSkillRoot(resolved);
+	const identity = canonicalizePath(resolved);
+	const owner = packageRoots.find((candidate) => {
+		const relative = path.relative(canonicalizePath(candidate.path), identity);
+		return relative !== ".." && !relative.startsWith(`..${path.sep}`) && !path.isAbsolute(relative);
+	});
+	if (
+		!owner &&
+		(["user", "project"] as const).some((scope) => {
+			const relative = path.relative(canonicalizePath(pluginBaseDir(scope, cwd)), identity);
+			return relative !== ".." && !relative.startsWith(`..${path.sep}`) && !path.isAbsolute(relative);
+		})
+	) {
+		diagnostics.push({
+			type: "warning",
+			message: "explicit skill belongs to an inactive or undeclared plugin resource",
+			path: resolved,
+		});
+		return [];
+	}
+	const root = {
+		...explicitSkillRoot(resolved),
+		...(owner
+			? {
+					...(owner.rootPath ? { rootPath: owner.rootPath, containment: owner.rootPath } : {}),
+					...(owner.plugin !== undefined ? { plugin: owner.plugin } : {}),
+				}
+			: {}),
+	};
 	if (!existsSync(resolved)) {
 		diagnostics.push({ type: "warning", message: `explicit skill path does not exist: ${resolved}`, path: resolved });
 		return [];
@@ -898,9 +944,15 @@ function requiresDiagnostics(winners: ReadonlyArray<Skill>): ResourceDiagnostic[
 export function loadSkills(input: LoadSkillsInput = {}): SkillList {
 	const roots = input.roots ?? (input.disableDiscovery === true ? [] : defaultSkillRoots(input));
 	const diagnostics: ResourceDiagnostic[] = [];
+	const packageRoots =
+		(input.explicitSkillPaths?.length ?? 0) > 0
+			? defaultSkillRoots(input).filter((root) => root.scope === "package")
+			: [];
 	const candidates = [
 		...roots.flatMap((root) => loadSkillRoot(root, diagnostics)),
-		...(input.explicitSkillPaths ?? []).flatMap((skillPath) => loadExplicitSkillPath(skillPath, diagnostics)),
+		...(input.explicitSkillPaths ?? []).flatMap((skillPath) =>
+			loadExplicitSkillPath(skillPath, diagnostics, packageRoots, input.cwd ?? process.cwd()),
+		),
 	];
 	const deduped = dedupeCanonicalSkillPaths(candidates, diagnostics);
 	const resolved = resolveSkillCollisions(deduped);

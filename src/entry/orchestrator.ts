@@ -108,6 +108,7 @@ import type { BackgroundMemoryUsageSink } from "../domains/observability/backgro
 import { recordFailedCompactionCalls } from "../domains/observability/compaction-usage.js";
 import type { ObservabilityContract } from "../domains/observability/index.js";
 import { ObservabilityDomainModule } from "../domains/observability/index.js";
+import { PluginsDomainModule } from "../domains/plugins/index.js";
 import type { PromptsContract } from "../domains/prompts/contract.js";
 import { createPromptsDomainModule } from "../domains/prompts/index.js";
 import type { ProvidersContract, TargetDescriptor, ThinkingLevel } from "../domains/providers/index.js";
@@ -199,6 +200,7 @@ import type { BootOptions } from "./boot-options.js";
 import { readCompactionSystemPrompt } from "./compaction-prompt.js";
 import { createExtensionReloadCoordinator } from "./extension-reload.js";
 import { resolvePanesEnablement } from "./panes-activation.js";
+import { reloadPluginResourcesAndNotify } from "./plugin-reload.js";
 import { bindTaskMemoryLifecycle, captureTaskMemoryUsage } from "./task-memory-lifecycle.js";
 
 export type { BootOptions, HeadlessSamplingOverrides } from "./boot-options.js";
@@ -1140,6 +1142,7 @@ export async function bootOrchestrator(options: BootOptions = {}): Promise<BootR
 		[
 			options.startupSettings ? createConfigDomainModule(options.startupSettings) : ConfigDomainModule,
 			ExtensionsDomainModule,
+			PluginsDomainModule,
 			InteropDomainModule,
 			createResourcesDomainModule({
 				reservedPromptNames: new Set(BUILTIN_SLASH_COMMANDS.map((entry) => entry.name)),
@@ -1535,6 +1538,8 @@ export async function bootOrchestrator(options: BootOptions = {}): Promise<BootR
 	// keep evaluating after the guards and before the assessors below.
 	const hookReceiptLog = createHookReceiptLog({ persistPath: join(clioStateDir(), "hook-receipts.json") });
 	let bootHookNotices = true;
+	const reloadPlugins = () =>
+		reloadPluginResourcesAndNotify(process.cwd(), (event) => bus.emit(BusChannels.PluginsReloaded, event));
 	const extensionReload = createExtensionReloadCoordinator({
 		extensions,
 		middleware,
@@ -1545,7 +1550,10 @@ export async function bootOrchestrator(options: BootOptions = {}): Promise<BootR
 			else if (bootHookNotices) initialNotices.push(line);
 			else bus.emit(BusChannels.ExtensionsLoadIssue, { message: line });
 		},
-		onCommitted: (event) => bus.emit(BusChannels.ExtensionsReloaded, event),
+		onCommitted: (event) => {
+			reloadPlugins();
+			bus.emit(BusChannels.ExtensionsReloaded, event);
+		},
 	});
 	extensionReload.applyBoot();
 	bootHookNotices = false;
@@ -2382,6 +2390,7 @@ export async function bootOrchestrator(options: BootOptions = {}): Promise<BootR
 		...(resources ? { resources } : {}),
 		...(extensions ? { extensions } : {}),
 		reloadExtensions: () => extensionReload.reload(),
+		reloadPlugins,
 		...(interop ? { interop } : {}),
 		...(share ? { share } : {}),
 		...(mux ? { mux } : {}),

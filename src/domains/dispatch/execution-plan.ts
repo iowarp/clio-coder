@@ -80,6 +80,8 @@ export interface ExecutionPlanAgentStep {
  * route history or the routing quality reducer.
  */
 export interface ExecutionPlanCodeStep {
+	/** Fully resolved literal argv appended to the registered command. */
+	args?: ReadonlyArray<string>;
 	kind: "code";
 	id: string;
 	commandId: string;

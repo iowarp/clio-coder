@@ -17,6 +17,7 @@ import {
 	splitYamlFrontmatter,
 	stringField,
 } from "../common-loader.js";
+import { resolvePackageReferences } from "../package-references.js";
 import { projectCompatTrusted } from "../skills/loader.js";
 
 export interface PromptTemplate {
@@ -39,6 +40,7 @@ export interface PromptTemplate {
 }
 
 export interface PromptTemplateRoot {
+	plugin?: boolean;
 	path: string;
 	/** Present only for an installed extension resource root. */
 	rootPath?: string;
@@ -178,6 +180,13 @@ type BodyResolution = { body: string } | { reason: string };
  * with the failure, which used to be dropping the template entirely.
  */
 function resolveExtensionReferences(body: string, root: PromptTemplateRoot): BodyResolution {
+	if (root.plugin) {
+		try {
+			return { body: resolvePackageReferences(body, root) };
+		} catch (error) {
+			return { reason: `prompt template: ${error instanceof Error ? error.message : String(error)}` };
+		}
+	}
 	if (root.rootPath === undefined || !body.includes(EXTENSION_ROOT_TOKEN)) return { body };
 	let canonicalRoot: string;
 	try {

@@ -2,6 +2,19 @@
 
 All notable changes to Clio Coder are documented in this file. The format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/) and versions follow Semantic Versioning; pre-1.0 minor releases may include incompatible changes.
 
+## Unreleased
+
+### Added
+- Add a distinct agent plugin engine using the portable Agent Plugins 1.0.0 manifest, explicit component references, native Clio resource projections, isolated install state, full-tree integrity, staged replacement and recovery of changed files.
+- Add plugin catalog listing, installation previews, pinned local and GitHub bundle installation, updates, removal, enable/disable, drift inspection and pin verification through the CLI and terminal library.
+- Ship the materials-characterization research plugin with researcher interviews, supplied-paper literature review, lab feasibility, task planning and verified execution, archive checkpoints, conservative scientific checks, and a text handoff into WTF-P's public actions. Include peer package export for Codex, Claude Code and Gemini.
+- Add version 2 harness extensions for contained Node.js and Python command tools with JSON contracts, mediated execution, collision protection, provenance and lifecycle revocation. Preserve version 1 resource extensions and existing WTF-P registration.
+
+### Changed
+- Resolve contained package paths and explicit component references consistently in prompts, skills and agent recipes. Reload plugin resources independently from harness tool schemas.
+- Allow declared arguments on registered fleet code steps and retain them in previews, plans and execution.
+- Protect installed plugin and harness-extension trees and lifecycle commands as operator-owned resources. Include complete plugin pins in lint and shipped package verification.
+
 ## 0.4.6 - 2026-09-08
 
 This release restores reliable setup with Quick Connect and simplifies the terminal transcript with three consistent output styles. New users can connect a model and start working, while existing users retain their saved settings and can inspect more detail when needed.

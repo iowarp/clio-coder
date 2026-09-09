@@ -1,0 +1,104 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <meta name="clio-markdown-source" content="docs/guide/plugins.md">
+  <meta name="clio-docs-version" content="0.4.7">
+  <title>Portable plugins and the library · Clio Coder 0.4.7</title>
+  <link rel="icon" href="data:,">
+  <link rel="stylesheet" href="shared.css">
+</head>
+<body data-doc-category="guide">
+  <div class="reading-progress" aria-hidden="true"></div>
+  <a class="skip-link" href="#reference-content">Skip to reference</a>
+  <div class="container">
+    <header class="document-header" data-category="Guide">
+      <div class="header-left">
+        <a class="header-logo" href="index.html" aria-label="Documentation index">
+          <svg viewBox="0 0 24 24" fill="none" aria-hidden="true">
+            <path d="M12 2 2 7l10 5 10-5-10-5Z" stroke="url(#clio-logo)" stroke-width="2" stroke-linejoin="round"/>
+            <path d="m2 12 10 5 10-5M2 17l10 5 10-5" stroke="url(#clio-logo)" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"/>
+            <defs><linearGradient id="clio-logo" x1="2" y1="2" x2="22" y2="22"><stop stop-color="#00d4db"/><stop offset="1" stop-color="#ff7e29"/></linearGradient></defs>
+          </svg>
+        </a>
+        <div class="header-title-wrapper">
+          <p class="document-kicker">Guide / canonical reference</p>
+          <h1>Portable plugins and the library</h1>
+          <p class="document-path">docs/guide/plugins.md</p>
+        </div>
+      </div>
+      <div class="header-right">
+        <a class="back-btn" href="index.html">← Index</a>
+        <span class="version-badge">v0.4.7</span>
+      </div>
+    </header>
+    <div class="page-layout-grid reference-layout">
+      <aside class="sidebar reference-sidebar" aria-label="On this page">
+        <nav class="toc-container">
+          <p class="toc-title">On this page</p>
+          <a class="sidebar-source" href="https://github.com/iowarp/clio-coder/blob/main/docs/guide/plugins.md">Canonical Markdown<br>docs/guide/plugins.md</a>
+          <ul class="toc-list"></ul>
+        </nav>
+      </aside>
+      <main class="reference-main" id="reference-content">
+        <article class="reference-prose glass-card">
+<blockquote>
+<p><strong>Visual blueprint:</strong> The source checkout includes the complete
+<a href="plugins_blueprint.html">Plugins visual reference</a>.</p>
+</blockquote>
+<p>A plugin is a complete, versioned bundle of skills and supporting files. The portable root <code>plugin.json</code> follows <a href="https://agent-plugins.org/">Agent Plugins 1.0.0</a>. Clio reads native prompts, agent recipes, and fleets from its namespaced manifest extension. Installing a bundle keeps those resources and their references together.</p>
+<p>Browse the bundled catalog, preview a complete installation, then install it:</p>
+<pre><code class="language-bash">clio-coder plugins search
+clio-coder library list --kind plugin
+clio-coder library add plugin:materials-characterization --json
+clio-coder library add plugin:materials-characterization --yes
+</code></pre>
+<p>The catalog is shipped with Clio; it does not install content automatically. A preview reports the destination and full-tree SHA-256. The pin covers the manifest, skills, prompts, scripts, references, names, and directory structure. The installer checks the staged bundle again before committing it. If a source changes after the preview, make a new plan. <code>--force</code> never overrides a catalog pin mismatch.</p>
+<p>For a bundle you authored locally, install its directory directly:</p>
+<pre><code class="language-bash">clio-coder plugins install ./my-plugin --project
+clio-coder plugins inspect my-plugin --project --json
+</code></pre>
+<p>An existing local directory always wins over a catalog ID with the same spelling. <code>--project</code> installs into <code>.clio-coder/plugins/</code>; the default user scope installs into Clio&#39;s configuration directory. Valid, compatible project installations take precedence, including a disabled project installation that suppresses the user copy. The Plugins tab identifies every installed scope and the copy its actions select.</p>
+<p>Manage installed content through the same lifecycle functions used by the terminal UI:</p>
+<pre><code class="language-bash">clio-coder plugins list --all --json
+clio-coder plugins disable materials-characterization
+clio-coder plugins enable materials-characterization
+clio-coder plugins drift materials-characterization
+clio-coder plugins pin materials-characterization
+clio-coder plugins update materials-characterization
+clio-coder plugins remove materials-characterization
+</code></pre>
+<p>Every successful installation records a verified pin. <code>pin</code> reports and verifies it; it does not approve edited files. Drifted content is blocked from loading. Update refuses to replace local edits unless <code>--force</code> is supplied; the install result reports any recovery copies of edited content. Updating a catalog package uses the current catalog version and pin. Updating a local package uses its recorded source directory, even when the catalog contains the same plugin name. Updates and replacements preserve an existing disabled state; enable the plugin explicitly when ready. Removal preserves edited content and reports its recovery path.</p>
+<p>In an active session, open <code>/resources plugins</code> or <code>/resources library plugin</code>. The Plugins tab shows catalog entries and local installations, their scope, state, resources, and diagnostics. Press <code>i</code> to review an installation, <code>u</code> to review an update, <code>e</code> to enable or disable, <code>r</code> to review removal, <code>p</code> to inspect the verified pin, or <code>d</code> to check drift. Run <code>/resources plugins reload</code> to refresh resources in that session after changes. The headless <code>plugins reload</code> command refreshes only its own process.</p>
+<h2>Private catalogs</h2>
+<p>The ordinary library catalog supports an <code>entries</code> list and plugin entries with explicit versions and pins:</p>
+<pre><code class="language-yaml">entries:
+  - kind: plugin
+    name: lab-workflow
+    description: Lab analysis workflow and references.
+    version: 1.0.0
+    sourceUrl: ./lab-workflow
+    sha256: &lt;64 lowercase hexadecimal characters&gt;
+</code></pre>
+<p>Relative paths resolve against the catalog&#39;s directory. Remote bundles use an explicit GitHub tree URL such as <code>https://github.com/owner/repository/tree/v1.0.0/plugins/lab-workflow</code>, together with the full-tree digest and version. The bounded Git transport fetches the selected branch or tag; the installer verifies every bundle file against the catalog pin. Other URL formats are rejected as unsupported. Plugin entries never enter the skill-only marketplace or skill installer. Catalog <code>requires</code> references use the same typed dependency graph as other library entries. Installed plugin dependencies must also be loadable; disabled or damaged dependencies require explicit enabling or repair before installation continues.</p>
+<p>Maintainers regenerate the shipped catalog after changing a bundled package:</p>
+<pre><code class="language-bash">pnpm plugins:pin
+pnpm plugins:check
+</code></pre>
+<p>The pin command reads each bundle&#39;s actual portable manifest and hashes the complete bundle. <code>plugins:check</code> fails on stale catalog metadata or content digests and is part of release hygiene.</p>
+<h2>Plugins and extensions</h2>
+<p>Plugins carry portable resources. Clio harness extensions configure executable command tools and belong in the extension lifecycle. Existing version 1 resource extensions remain supported for compatibility. Use <code>clio-coder extensions list</code> and <code>/resources extensions</code> to inspect legacy and harness extensions; command-tool schema changes require a new session.</p>
+        </article>
+        <nav class="related-nav" aria-label="Adjacent references">
+          <a class="nav-link-card" href="resource_library_blueprint.html"><span class="nav-label">Previous</span><span class="nav-title">Resource Library</span></a>
+          <a class="nav-link-card next" href="authoring_plugins_blueprint.html"><span class="nav-label">Next</span><span class="nav-title">Authoring Plugins</span></a>
+        </nav>
+        <p class="reference-footer-note">Canonical content lives in the mapped Markdown page. This visual counterpart adds navigation without changing the contract.</p>
+      </main>
+    </div>
+    <footer>Clio Coder documentation · source-aligned at v0.4.7</footer>
+  </div>
+  <script src="shared.js"></script>
+</body>
+</html>

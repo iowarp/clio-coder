@@ -37,8 +37,10 @@ import { loadSkills, type Skill } from "./loader.js";
  */
 
 export type MarketplaceSkillOrigin = "catalog" | "index";
-export type LibraryEntryKind = "skill" | "agent" | "prompt" | "fleet";
-export type LibraryRequirementRef = `${LibraryEntryKind}:${string}`;
+
+import type { LibraryEntryKind, LibraryRequirementRef } from "../library-types.js";
+
+export type { LibraryEntryKind, LibraryRequirementRef } from "../library-types.js";
 
 /**
  * The diagnostic that means "nothing is wrong, nothing is configured". Callers
@@ -48,7 +50,7 @@ export type LibraryRequirementRef = `${LibraryEntryKind}:${string}`;
 export const MARKETPLACE_UNCONFIGURED = "no local skill marketplace catalog or index configured";
 
 export interface MarketplaceSkill {
-	kind: LibraryEntryKind;
+	kind: Exclude<LibraryEntryKind, "plugin">;
 	name: string;
 	description: string;
 	/** Local path or URL accepted by `clio-coder skills install`. */

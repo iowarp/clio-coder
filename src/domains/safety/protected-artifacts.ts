@@ -416,7 +416,7 @@ export function invokesClioSkillMutation(command: string): boolean {
 			args = args.slice(flag === "--skill" || flag === "--api-key" ? 2 : 1);
 		}
 		if (rootHelp) continue;
-		if (args[0] !== "skills" && args[0] !== "library") continue;
+		if (args[0] !== "skills" && args[0] !== "library" && args[0] !== "plugins" && args[0] !== "extensions") continue;
 		if (resourceCliMutatesSkills(args[0], args.slice(1))) return true;
 	}
 	return false;
@@ -440,7 +440,10 @@ function shellCommandArguments(segment: ReadonlyArray<ShellToken>): string[] {
 	return args.map((token) => token.value);
 }
 
-function resourceCliMutatesSkills(resource: "skills" | "library", args: ReadonlyArray<string>): boolean {
+function resourceCliMutatesSkills(
+	resource: "skills" | "library" | "plugins" | "extensions",
+	args: ReadonlyArray<string>,
+): boolean {
 	// Both resource parsers accept flags before the verb. Consume their value
 	// options so a catalog path called --yes or --help is not treated as a flag.
 	const valueOptions =
@@ -461,9 +464,11 @@ function resourceCliMutatesSkills(resource: "skills" | "library", args: Readonly
 		if (!arg.startsWith("-")) verb ??= arg;
 	}
 	if (resource === "skills") return verb === "install" || verb === "update" || verb === "sync";
+	if (resource === "plugins" || resource === "extensions")
+		return ["install", "update", "remove", "enable", "disable", "pin"].includes(verb ?? "");
 	// Unconfirmed library add only prints a plan. A confirmed add can install
 	// skill dependencies of any resource kind, or resolve an untyped skill ref.
-	return verb === "add" && confirmed;
+	return (verb === "add" && confirmed) || ["update", "remove", "pin"].includes(verb ?? "");
 }
 
 const STANDARD_DEV_TARGETS = new Set(["/dev/null", "/dev/stdout", "/dev/stderr", "/dev/tty", "/dev/zero"]);

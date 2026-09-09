@@ -863,6 +863,11 @@ export function createChatLoop(deps: CreateChatLoopDeps): ChatLoop {
 			if (payload.changed) context.invalidateSessionPromptCache();
 		}) ?? null;
 
+	const unsubscribePluginsReload =
+		deps.bus?.on(BusChannels.PluginsReloaded, () => {
+			context.invalidateSessionPromptCache();
+		}) ?? null;
+
 	const unsubscribeSynthesisLock =
 		deps.bus?.on(BusChannels.LoopBlocked, (payload) => {
 			const disposition = (payload as { disposition?: unknown } | null)?.disposition;
@@ -1547,6 +1552,7 @@ export function createChatLoop(deps: CreateChatLoopDeps): ChatLoop {
 		dispose(): void {
 			unsubscribeConfigReload?.();
 			unsubscribeExtensionsReload?.();
+			unsubscribePluginsReload?.();
 			unsubscribeSynthesisLock?.();
 			unsubscribePrewarmCompaction();
 			prewarm.dispose();

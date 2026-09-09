@@ -131,20 +131,21 @@ export interface AgentRecipe {
 	resultContract: ResultContract;
 	product?: AgentProduct;
 	tags: ReadonlyArray<string>;
-	source: "builtin" | "extension" | "user" | "project";
+	source: "builtin" | "extension" | "plugin" | "user" | "project";
 	filepath: string;
 	/** Persona prompt body. */
 	body: string;
 }
 
 export interface RecipeSource {
+	rootPath?: string;
 	dir: string;
 	source: AgentRecipe["source"];
-	/** Project root whose extension and skill resources are being discovered. */
+	/** Project root whose package and skill resources are being discovered. */
 	cwd?: string;
-	/** Stable provenance used to correlate resources from one extension. */
+	/** Stable provenance used to correlate resources from one package. */
 	origin?: string;
-	/** The declaring extension's skill root; extension agents may bind only here. */
+	/** The declaring package's skill root; package agents may bind only here. */
 	skillRoot?: string;
 }
 

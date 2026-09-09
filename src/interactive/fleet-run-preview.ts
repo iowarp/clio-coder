@@ -177,6 +177,8 @@ export function compileFleetRunPreview(input: FleetRunPreviewInput): FleetRunPre
 	let plan: ExecutionPlan;
 	try {
 		plan = compileFleetExecutionPlan({
+			commands,
+			vars: input.vars,
 			contract,
 			task,
 			resolveAgent(context) {

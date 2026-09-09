@@ -10,7 +10,10 @@ import { extractCommandCdTargets } from "./protected-artifacts.js";
  * may install or replace a symlink after the session starts. Reads stay allowed.
  */
 export function activeClioSkillRoots(cwd: string): string[] {
-	return [path.join(cwd, ".clio-coder", "skills"), path.join(clioConfigDir(), "skills")];
+	return ["skills", "plugins", "extensions"].flatMap((kind) => [
+		path.join(cwd, ".clio-coder", kind),
+		path.join(clioConfigDir(), kind),
+	]);
 }
 
 export function skillMutationReason(
@@ -40,7 +43,7 @@ export function skillMutationReason(
 							isSameOrDescendant(candidate, boundary) ||
 							(target.operation === "delete" && isSameOrDescendant(boundary, candidate))
 						) {
-							return `active skill tree ${root} is operator-owned; draft changes outside active skill roots and ask the operator to install or update them`;
+							return `active resource tree ${root} is operator-owned; draft changes outside installed resource roots and use the operator install or update interface`;
 						}
 					}
 				}

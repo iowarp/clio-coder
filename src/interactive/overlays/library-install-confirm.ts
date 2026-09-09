@@ -34,11 +34,13 @@ export interface LibraryInstallWrite {
 	ref: string;
 	path: string;
 	sha256: string;
+	sourceUrl?: string;
 }
 
 export interface LibraryInstallConfirmSubject {
 	/** The typed reference the operator asked for, e.g. `fleet:release`. */
 	entryRef: string;
+	action?: "install" | "update" | "remove";
 	/** Every write, in dependency order, the requested entry last. */
 	writes: ReadonlyArray<LibraryInstallWrite>;
 	/** Requirements this confirmation would install alongside the entry. */
@@ -69,12 +71,14 @@ function formatLibraryInstallConfirmBody(subject: LibraryInstallConfirmSubject, 
 
 	const headline =
 		subject.requirements.length > 0
-			? `install ${subject.entryRef} with its requirements: ${subject.requirements.join(", ")}`
-			: `install ${subject.entryRef}`;
+			? `${subject.action ?? "install"} ${subject.entryRef} with its requirements: ${subject.requirements.join(", ")}`
+			: `${subject.action ?? "install"} ${subject.entryRef}`;
 	for (const line of wrapTextWithAnsi(theme.fg("accent", headline), contentWidth)) rows.push(line);
 	rows.push(rule(theme, contentWidth));
 
 	for (const write of subject.writes) {
+		if (write.sourceUrl)
+			rows.push(theme.fg("dim", truncateToWidth(`source: ${write.sourceUrl}`, contentWidth, "…", false)));
 		rows.push(theme.fg("muted", truncateToWidth(`${write.ref} → ${write.path}`, contentWidth, "…", false)));
 		rows.push(theme.fg("dim", truncateToWidth(`    sha256 ${write.sha256}`, contentWidth, "…", false)));
 	}
@@ -85,7 +89,10 @@ function formatLibraryInstallConfirmBody(subject: LibraryInstallConfirmSubject, 
 		rows.push(line);
 	}
 	for (const line of wrapTextWithAnsi(
-		theme.fg("dim", `${subject.writes.length} file or files are written only after Enter; Esc writes nothing`),
+		theme.fg(
+			"dim",
+			`${subject.writes.length} resource destination(s) are ${subject.action === "remove" ? "removed" : "written"} only after Enter; Esc changes nothing`,
+		),
 		contentWidth,
 	)) {
 		rows.push(line);
@@ -138,8 +145,11 @@ export function openLibraryInstallConfirmOverlay(
 		anchor: "center",
 		width: confirmOverlayWidth(options.columns),
 		markerId: "library-install",
-		title: LIBRARY_INSTALL_CONFIRM_TITLE,
-		footerHint: buildResponsiveHint([{ key: "Enter", verb: "install" }], { key: "Esc", verb: "cancel" }),
+		title: options.subject.action ? `Library ${options.subject.action}` : LIBRARY_INSTALL_CONFIRM_TITLE,
+		footerHint: buildResponsiveHint([{ key: "Enter", verb: options.subject.action ?? "install" }], {
+			key: "Esc",
+			verb: "cancel",
+		}),
 	});
 
 	return {

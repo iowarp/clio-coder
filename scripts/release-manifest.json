@@ -14,13 +14,16 @@
 		"README.md",
 		"LICENSE",
 		"NOTICE",
-		"CHANGELOG.md"
+		"CHANGELOG.md",
+		"plugins/registry.yaml",
+		"plugins/materials-characterization/plugin.json"
 	],
 	"requiredPrefixes": [
 		"dist/assets/grammars/",
 		"src/domains/prompts/fragments/",
 		"src/domains/agents/builtins/",
 		"skills/",
-		"src/domains/providers/models/"
+		"src/domains/providers/models/",
+		"plugins/"
 	]
 }

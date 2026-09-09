@@ -204,6 +204,31 @@ Read about [project context](docs/architecture/context-engine.md),
 </details>
 
 <details>
+<summary><strong>Domain plugins and materials research</strong></summary>
+
+Install a complete workflow with its prompts, agents, skills, scripts and references:
+
+```bash
+clio-coder plugins search
+clio-coder plugins install materials-characterization --user
+```
+
+In a new session, start with `/materials-characterization:help` or
+`/materials-characterization:identify-research`. The workflow progresses through
+supplied-paper literature review, lab feasibility, research tasks, verified
+execution, and a text handoff to WTF-P for paper planning. Researchers retain
+control of assumptions and scientific decisions.
+
+The library verifies complete bundle pins and supports previews, updates,
+removal and drift checks. [Plugin usage](docs/guide/plugins.md),
+[package authoring](docs/guide/authoring-plugins.md), and
+[harness extensions](docs/guide/harness-extensions.md) describe the separate
+resource and executable-capability contracts. Existing WTF-P extension installs
+continue to work.
+
+</details>
+
+<details>
 <summary><strong>Multi-agent workflows and workers over SSH</strong></summary>
 
 Give workers focused assignments with defined tools, file scopes, and budgets.

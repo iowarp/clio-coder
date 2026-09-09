@@ -38,7 +38,14 @@ export const FLEET_COMMAND_DEFAULT_TIMEOUT_MS = 600_000;
  */
 export const FLEET_COMMAND_BASE_ENV: ReadonlyArray<string> = ["PATH", "HOME", "LANG", "LC_ALL", "TZ", "TMPDIR"];
 
+export interface FleetCommandArgumentSlot {
+	name: string;
+	maxLength: number;
+}
+
 export interface FleetCommand {
+	/** Operator-owned required positional data slots; omission forbids appended args. */
+	argumentSlots?: ReadonlyArray<FleetCommandArgumentSlot>;
 	id: string;
 	/** argv list, never a shell string: no quoting bugs and no shell injection. */
 	argv: ReadonlyArray<string>;
@@ -59,6 +66,18 @@ export interface FleetCommandRegistry {
 const CommandSchema = Type.Object(
 	{
 		argv: Type.Array(Type.String({ minLength: 1 }), { minItems: 1 }),
+		argumentSlots: Type.Optional(
+			Type.Array(
+				Type.Object(
+					{
+						name: Type.String({ pattern: "^[A-Za-z][A-Za-z0-9_-]{0,63}$" }),
+						maxLength: Type.Integer({ minimum: 1, maximum: 8192 }),
+					},
+					{ additionalProperties: false },
+				),
+				{ minItems: 1, maxItems: 64 },
+			),
+		),
 		cwd: Type.Optional(Type.String({ minLength: 1 })),
 		timeoutMs: Type.Optional(
 			Type.Integer({ minimum: FLEET_COMMAND_MIN_TIMEOUT_MS, maximum: FLEET_COMMAND_MAX_TIMEOUT_MS }),
@@ -114,7 +133,17 @@ export function parseFleetCommands(raw: string, sourcePath: string): FleetComman
 	if (schemaError !== null) throw new Error(`fleet commands ${sourcePath}: ${schemaError}`);
 	const registry = parsed as {
 		version: 1;
-		commands: Record<string, { argv: string[]; cwd?: string; timeoutMs?: number; env?: string[]; description?: string }>;
+		commands: Record<
+			string,
+			{
+				argv: string[];
+				argumentSlots?: FleetCommandArgumentSlot[];
+				cwd?: string;
+				timeoutMs?: number;
+				env?: string[];
+				description?: string;
+			}
+		>;
 	};
 	const commands = new Map<string, FleetCommand>();
 	for (const [id, entry] of Object.entries(registry.commands)) {
@@ -130,9 +159,16 @@ export function parseFleetCommands(raw: string, sourcePath: string): FleetComman
 				throw new Error(`fleet commands ${sourcePath}: command '${id}' env name '${name}' is not a variable name`);
 			}
 		}
+		if (entry.argumentSlots)
+			validateFleetCommandArgs(
+				{ id, argv: entry.argv, cwd: "", timeoutMs: 1000, env: [], description: "", argumentSlots: entry.argumentSlots },
+				entry.argumentSlots.map(() => "{{slot}}"),
+				{ allowTemplates: true },
+			);
 		commands.set(id, {
 			id,
 			argv: [...entry.argv],
+			...(entry.argumentSlots ? { argumentSlots: entry.argumentSlots.map((slot) => ({ ...slot })) } : {}),
 			cwd: entry.cwd === undefined ? "" : checkCwd(id, entry.cwd, sourcePath),
 			timeoutMs: entry.timeoutMs ?? FLEET_COMMAND_DEFAULT_TIMEOUT_MS,
 			env: [...(entry.env ?? [])],
@@ -151,4 +187,59 @@ export function loadFleetCommands(cwd: string): FleetCommandRegistry | null {
 	const path = fleetCommandsPath(cwd);
 	if (!existsSync(path)) return null;
 	return parseFleetCommands(readFileSync(path, "utf8"), path);
+}
+
+/** Bind authored code-step arguments before plan admission; each stays one argv token. */
+export function resolveFleetCommandArgs(
+	args: ReadonlyArray<string>,
+	vars: Readonly<Record<string, string>> = {},
+): string[] {
+	if (args.length > 64) throw new Error("fleet code args: at most 64 arguments are allowed");
+	return args.map((token) => {
+		const match = /^\{\{\s*([A-Za-z_][A-Za-z0-9_-]*)\s*\}\}$/u.exec(token);
+		if (!match && token.includes("{{")) throw new Error("fleet code args: placeholders must occupy a whole argument");
+		const value = match ? vars[match[1] ?? ""] : token;
+		if (value === undefined) throw new Error(`fleet code args: missing variable ${match?.[1]} (pass --var name=value)`);
+		if (value.includes("\0") || value.length > 8192)
+			throw new Error("fleet code args: invalid NUL or oversized argument");
+		return value;
+	});
+}
+
+/** Enforce operator-declared data slots; contracts cannot append flags or executable code. */
+export function validateFleetCommandArgs(
+	command: FleetCommand,
+	args: ReadonlyArray<string>,
+	options: { allowTemplates?: boolean } = {},
+): void {
+	const slots = command.argumentSlots ?? [];
+	if (
+		slots.length > 64 ||
+		new Set(slots.map((slot) => slot.name)).size !== slots.length ||
+		slots.some(
+			(slot) =>
+				!/^[A-Za-z][A-Za-z0-9_-]{0,63}$/u.test(slot.name) ||
+				!Number.isInteger(slot.maxLength) ||
+				slot.maxLength < 1 ||
+				slot.maxLength > 8192,
+		)
+	) {
+		throw new Error(`fleet command '${command.id}': invalid argumentSlots declaration`);
+	}
+	if (args.length !== slots.length) {
+		throw new Error(
+			`fleet command '${command.id}': expected ${slots.length} declared argument slots, got ${args.length}; the operator must declare argumentSlots in commands.yaml`,
+		);
+	}
+	for (let index = 0; index < slots.length; index++) {
+		const slot = slots[index];
+		const value = args[index];
+		if (!slot || typeof value !== "string") throw new Error(`fleet command '${command.id}': invalid argument`);
+		if (options.allowTemplates && /^\{\{\s*([A-Za-z_][A-Za-z0-9_-]*)\s*\}\}$/u.test(value)) continue;
+		if (value.length === 0 || value.length > slot.maxLength || value.includes("\0") || value.startsWith("-")) {
+			throw new Error(
+				`fleet command '${command.id}': argument '${slot.name}' must be nonempty data of at most ${slot.maxLength} characters, without NUL or a leading dash; fixed flags belong in argv`,
+			);
+		}
+	}
 }

@@ -82,6 +82,7 @@ export interface InteractiveSlashRuntimeDeps {
 	resources?: SlashResources;
 	extensions?: SlashExtensions;
 	reloadExtensions?: SlashCommandContext["reloadExtensions"];
+	reloadPlugins?: SlashCommandContext["reloadPlugins"];
 	interop?: SlashCommandContext["interop"];
 	agents?: SlashAgents;
 	share?: SlashShare;
@@ -535,6 +536,7 @@ export function createInteractiveSlashRuntime(deps: InteractiveSlashRuntimeDeps)
 		openPrompts: deps.openPrompts,
 		openExtensions: deps.openExtensions,
 		...(deps.reloadExtensions ? { reloadExtensions: deps.reloadExtensions } : {}),
+		...(deps.reloadPlugins ? { reloadPlugins: deps.reloadPlugins } : {}),
 		...(deps.openInterop ? { openInterop: deps.openInterop } : {}),
 		...(deps.interop ? { interop: deps.interop } : {}),
 		setEditorText: (text) => {

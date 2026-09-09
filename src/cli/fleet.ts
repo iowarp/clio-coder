@@ -393,6 +393,8 @@ async function runFleet(args: ReadonlyArray<string>): Promise<number> {
 	let plan: ExecutionPlan;
 	try {
 		plan = compileFleetExecutionPlan({
+			commands,
+			...(vars ? { vars } : {}),
 			contract,
 			task: prompt,
 			resolveAgent(context) {

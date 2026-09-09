@@ -4,8 +4,8 @@
   <meta charset="utf-8">
   <meta name="viewport" content="width=device-width, initial-scale=1">
   <meta name="clio-markdown-source" content="docs/guide/resource-library.md">
-  <meta name="clio-docs-version" content="0.4.2">
-  <title>Resource Library · Clio Coder 0.4.2</title>
+  <meta name="clio-docs-version" content="0.4.7">
+  <title>Resource Library · Clio Coder 0.4.7</title>
   <link rel="icon" href="data:,">
   <link rel="stylesheet" href="shared.css">
 </head>
@@ -30,7 +30,7 @@
       </div>
       <div class="header-right">
         <a class="back-btn" href="index.html">← Index</a>
-        <span class="version-badge">v0.4.2</span>
+        <span class="version-badge">v0.4.7</span>
       </div>
     </header>
     <div class="page-layout-grid reference-layout">
@@ -47,9 +47,9 @@
 <p><strong>Visual blueprint:</strong> The source checkout includes the complete
 <a href="resource_library_blueprint.html">Resource Library visual reference</a>.</p>
 </blockquote>
-<p>The resource library extends the existing local skills marketplace catalog to carry agent recipes, prompt templates, and fleet contracts. It does not change the Agent Skills format, discovery roots, trust gating, or existing skill installation sources.</p>
+<p>The resource library extends the existing local skills marketplace catalog to carry agent recipes, prompt templates, fleet contracts, and complete portable plugin bundles. It does not change the Agent Skills format, discovery roots, trust gating, or existing skill installation sources.</p>
 <h2>Catalog schema</h2>
-<p>A catalog is a JSON or YAML list, or an object whose <code>skills</code> property contains the list. The historical property name remains accepted so every existing skill marketplace index works unchanged.</p>
+<p>A catalog is a JSON or YAML list, or an object whose <code>entries</code> or historical <code>skills</code> property contains the list. The historical property name remains accepted so every existing skill marketplace index works unchanged.</p>
 <pre><code class="language-yaml">skills:
   - kind: fleet
     name: release
@@ -59,7 +59,7 @@
       - agent:release-builder
       - skill:ship
 </code></pre>
-<p><code>kind</code> accepts <code>skill</code>, <code>agent</code>, <code>prompt</code>, or <code>fleet</code> and defaults to <code>skill</code>. <code>requires</code> accepts typed references with those same four prefixes. Clio resolves requirements recursively across the selected catalog and the private catalog. Missing, malformed, and cyclic requirements are refused with stable <code>library_requirement_*</code> diagnostics. A requirement is satisfied when its typed reference exists in <code>&lt;configDir&gt;/library-pins.yaml</code> or its kind-specific destination exists. Add output lists satisfied and unsatisfied requirements separately. Requirements are reported without installation unless <code>library add</code> receives <code>--with-requirements</code>. That flag installs only the unsatisfied dependencies in dependency order before the requested entry.</p>
+<p><code>kind</code> accepts <code>skill</code>, <code>agent</code>, <code>prompt</code>, <code>fleet</code>, or <code>plugin</code> and defaults to <code>skill</code>. <code>requires</code> accepts typed references with those same five prefixes. Clio resolves requirements recursively across the selected catalog and the private catalog. Missing, malformed, and cyclic requirements are refused with stable <code>library_requirement_*</code> diagnostics. A requirement is satisfied when its kind-specific destination exists; plugin dependencies must also be loadable. Disabled or damaged plugin dependencies require explicit enabling or repair. Stale pins do not count as installed content. Add output lists satisfied and unsatisfied requirements separately. Requirements are reported without installation unless <code>library add</code> receives <code>--with-requirements</code>. That flag installs only the unsatisfied dependencies in dependency order before the requested entry.</p>
 <h2>Private catalog and remote gating</h2>
 <p><code>integrations.library.catalog</code> selects a private catalog and defaults to <code>&lt;configDir&gt;/library.yaml</code>. Relative sources in that file resolve beside the catalog. <code>integrations.library.remote</code> records an optional git remote URL. <code>integrations.library.sync</code> defaults to false, and no git process is started while it remains false.</p>
 <p>The private catalog repository must name its git remote <code>library</code>. Clio checks it with <code>git remote get-url library</code>. Run <code>clio-coder library remote confirm &lt;url&gt;</code> once after reviewing the configured URL. When <code>integrations.library.remote</code> is unset, confirmation records the URL as both the configured and confirmed remote. A confirmation that differs from an existing <code>integrations.library.remote</code> refuses with <code>library_remote_mismatch</code>. A missing confirmation or a later settings change refuses synchronization and publishing with <code>library_remote_unconfirmed</code>.</p>
@@ -68,6 +68,10 @@
 <pre><code class="language-text">clio-coder library list [--kind k] [--json]
 clio-coder library search &lt;query&gt; [--kind k] [--json]
 clio-coder library add &lt;ref&gt; [--from &lt;catalog|path&gt;] [--with-requirements] [--yes] [--json]
+clio-coder library update &lt;ref&gt; [--force] [--json]
+clio-coder library remove &lt;ref&gt; [--json]
+clio-coder library pin &lt;ref&gt; [--json]
+clio-coder library drift &lt;ref&gt; [--json]
 clio-coder library use &lt;kind&gt; &lt;name&gt;
 clio-coder library push
 clio-coder library sync
@@ -111,9 +115,15 @@ on an installed row leads to its invocation surface. See
 <td><code>&lt;configDir&gt;/fleets/&lt;name&gt;.md</code></td>
 <td>Fleet contract parser</td>
 </tr>
+<tr>
+<td>plugin</td>
+<td><code>&lt;configDir&gt;/plugins/&lt;name&gt;/</code></td>
+<td>Portable manifest, component graph, containment, and full-tree pin</td>
+</tr>
 </tbody></table>
-<p>Every installed item records a kind-qualified hash in <code>&lt;configDir&gt;/library-pins.yaml</code>. Agent recipes become visible through <code>clio-coder agents</code>. User fleet contracts participate between built-in and project fleet precedence, so a project contract still wins. Prompts use the existing user prompt root.</p>
+<p>Individual resources record a kind-qualified hash in <code>&lt;configDir&gt;/library-pins.yaml</code>. Plugins record their full-tree pin atomically in the selected scope’s <code>plugins/state.json</code>. Agent recipes become visible through <code>clio-coder agents</code>. User fleet contracts participate between built-in and project fleet precedence, so a project contract still wins. Prompts use the existing user prompt root.</p>
 <p>Share archives may carry agent and fleet entries. Import always validates these formats before writing, and fleet entries land in the user fleet root.</p>
+<p>Portable bundles are available as <code>plugin:&lt;name&gt;</code> entries alongside the existing resource kinds. Use <code>clio-coder library list --kind plugin</code>, or the Plugins tab in <code>/resources library plugin</code>. Bundle installation verifies the entire package against its catalog SHA-256; installation, updates, removal, pin inspection, and drift checks share the plugin lifecycle. See <a href="plugins_blueprint.html">Portable plugins and the library</a> for commands, scope rules, and private catalog examples.</p>
         </article>
         <nav class="related-nav" aria-label="Adjacent references">
           <a class="nav-link-card" href="proactive_memory_blueprint.html"><span class="nav-label">Previous</span><span class="nav-title">Proactive task memory</span></a>
@@ -122,7 +132,7 @@ on an installed row leads to its invocation surface. See
         <p class="reference-footer-note">Canonical content lives in the mapped Markdown page. This visual counterpart adds navigation without changing the contract.</p>
       </main>
     </div>
-    <footer>Clio Coder documentation · source-aligned at v0.4.2</footer>
+    <footer>Clio Coder documentation · source-aligned at v0.4.7</footer>
   </div>
   <script src="shared.js"></script>
 </body>

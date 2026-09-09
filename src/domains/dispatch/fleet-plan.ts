@@ -1,3 +1,4 @@
+import { type FleetCommandRegistry, resolveFleetCommandArgs } from "../agents/fleet-commands.js";
 /**
  * Fleet contract to execution plan.
  *
@@ -19,9 +20,11 @@ import {
 	type FleetContract,
 	type FleetContractStep,
 	type FleetStepScope,
+	fleetCodeSteps,
 	fleetLoopCheckStepId,
 	fleetLoopRepairStepId,
 	fleetStepWriteBoundary,
+	validateFleetCommands,
 } from "../agents/fleet-contract.js";
 import type { ResultContract } from "../agents/result-contract.js";
 import type { AgentAutomationAuthority } from "../agents/spec.js";
@@ -58,6 +61,8 @@ export interface FleetPlanAgentResolution {
 }
 
 export interface CompileFleetPlanInput {
+	commands?: FleetCommandRegistry | null;
+	vars?: Readonly<Record<string, string>>;
 	contract: FleetContract;
 	/**
 	 * Rendered prompt body. It describes the whole chain, so every agent node
@@ -117,6 +122,9 @@ function declaredLoops(steps: ReadonlyArray<FleetContractStep>): Map<string, Exe
 
 export function compileFleetExecutionPlan(input: CompileFleetPlanInput): ExecutionPlan {
 	const { contract, task, resolveAgent } = input;
+	if (input.commands !== undefined) validateFleetCommands(contract, input.commands, input.vars ?? {});
+	else if (fleetCodeSteps(contract).some((step) => (step.args?.length ?? 0) > 0))
+		throw new Error("fleet code args: admission requires the operator command registry");
 	const loops = declaredLoops(contract.steps);
 	const steps: ExecutionPlanStepInput[] = [];
 
@@ -206,6 +214,7 @@ export function compileFleetExecutionPlan(input: CompileFleetPlanInput): Executi
 				kind: "code",
 				id: step.id,
 				commandId: step.command,
+				...(step.args ? { args: resolveFleetCommandArgs(step.args, input.vars) } : {}),
 				scope: step.scope,
 				dependencies,
 				...boundary(step.scope, step.writes),
@@ -225,6 +234,7 @@ export function compileFleetExecutionPlan(input: CompileFleetPlanInput): Executi
 					kind: "code",
 					id: checkId,
 					commandId: step.check.command,
+					...(step.check.args ? { args: resolveFleetCommandArgs(step.check.args, input.vars) } : {}),
 					scope: step.check.scope,
 					dependencies: checkDependencies,
 					...boundary(step.check.scope, step.check.writes),

@@ -54,6 +54,8 @@ export function inspectFleet(name: string, vars?: Readonly<Record<string, string
 		}
 	}
 	const plan = compileFleetExecutionPlan({
+		commands,
+		...(vars ? { vars } : {}),
 		contract,
 		task: prompt,
 		resolveAgent(context) {

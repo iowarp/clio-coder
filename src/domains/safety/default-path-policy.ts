@@ -71,6 +71,8 @@ export const DEFAULT_DAMAGE_CONTROL_PATH_POLICY: PathPolicyInput = {
 		".clio-coder/safety.yaml",
 		".clio-coder/verifiers.yaml",
 		".clio-coder/skills/",
+		".clio-coder/plugins/",
+		".clio-coder/extensions/",
 		"/etc/",
 		"/usr/",
 		"/bin/",

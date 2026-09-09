@@ -229,10 +229,17 @@ export function createPromptsBundle(
 			// Extension prompt and skill roots feed fragments through the
 			// resources domain; a committed generation with new content means
 			// the table must be rebuilt from the new roots.
-			unsubscribeExtensionsReload = context.bus.on(BusChannels.ExtensionsReloaded, (payload: unknown) => {
+			const onResourceReload = (payload: unknown) => {
 				if ((payload as { changed?: unknown } | undefined)?.changed !== true) return;
 				reload();
-			});
+			};
+			const unsubscribe = [
+				context.bus.on(BusChannels.ExtensionsReloaded, onResourceReload),
+				context.bus.on(BusChannels.PluginsReloaded, () => reload()),
+			];
+			unsubscribeExtensionsReload = () => {
+				for (const stop of unsubscribe) stop();
+			};
 		},
 		async stop() {
 			unsubscribeContextSources?.();

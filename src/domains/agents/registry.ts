@@ -3,6 +3,8 @@ import path from "node:path";
 import { resolvePackageRoot } from "../../core/package-root.js";
 import { clioConfigDir } from "../../core/xdg.js";
 import { enabledExtensionResourceRoots } from "../extensions/index.js";
+import { enabledPluginResourceRoots } from "../plugins/index.js";
+import { resolvePackageReferences } from "../resources/package-references.js";
 import { loadSkills } from "../resources/skills/loader.js";
 import { parseFrontmatter } from "./frontmatter.js";
 import { type AgentRecipe, type RecipeSource, recipeIdFromPath } from "./recipe.js";
@@ -23,11 +25,13 @@ function resolveBoundSkills(recipe: AgentRecipe, source: RecipeSource): AgentRec
 	// only the operator's discovered skill roots; a recipe cannot smuggle an
 	// arbitrary filesystem path into worker context through a skill name.
 	const packageSkills = path.resolve(source.dir, "..", "..", "..", "..", "skills");
-	if (source.source === "extension" && source.skillRoot === undefined) {
-		throw new Error(`agent recipe: ${recipe.filepath}: extension declares bound skills but no skills resource root`);
+	if ((source.source === "extension" || source.source === "plugin") && source.skillRoot === undefined) {
+		throw new Error(
+			`agent recipe: ${recipe.filepath}: ${source.source} declares bound skills but no skills resource root`,
+		);
 	}
 	const skills =
-		source.source === "extension"
+		source.source === "extension" || source.source === "plugin"
 			? loadSkills({
 					cwd: source.cwd ?? process.cwd(),
 					disableDiscovery: true,
@@ -37,12 +41,12 @@ function resolveBoundSkills(recipe: AgentRecipe, source: RecipeSource): AgentRec
 					cwd: source.cwd ?? process.cwd(),
 					...(source.source === "builtin" && existsSync(packageSkills) ? { explicitSkillPaths: [packageSkills] } : {}),
 				});
-	if (source.source === "extension" && source.skillRoot !== undefined) {
+	if ((source.source === "extension" || source.source === "plugin") && source.skillRoot !== undefined) {
 		const canonicalRoot = realpathSync(source.skillRoot);
 		for (const skill of skills.items) {
 			const relative = path.relative(canonicalRoot, realpathSync(skill.filePath));
 			if (relative === ".." || relative.startsWith(`..${path.sep}`) || path.isAbsolute(relative)) {
-				throw new Error(`agent recipe: ${recipe.filepath}: bound skill escapes its extension: ${skill.filePath}`);
+				throw new Error(`agent recipe: ${recipe.filepath}: bound skill escapes its ${source.source}: ${skill.filePath}`);
 			}
 		}
 	}
@@ -83,7 +87,11 @@ export function loadRecipesFromDir(
 		try {
 			const id = recipeIdFromPath(filepath, source.dir);
 			const raw = readFileSync(filepath, "utf8");
-			const { frontmatter, body } = parseFrontmatter(raw, filepath);
+			const { frontmatter, body: rawBody } = parseFrontmatter(raw, filepath);
+			const body = resolvePackageReferences(rawBody, {
+				...(source.rootPath ? { rootPath: source.rootPath } : {}),
+				plugin: source.source === "plugin",
+			});
 			const parsedRecipe = parseAgentRecipeSchema({ id, source: source.source, filepath, body, frontmatter });
 			const recipe = resolveBoundSkills(parsedRecipe, source);
 			// Policy validation runs before a recipe enters any catalog, prompt, or
@@ -117,8 +125,10 @@ function mergeRecipes(...sources: ReadonlyArray<ReadonlyArray<AgentRecipe>>): Re
 				continue;
 			}
 			const builtin = builtinById.get(recipe.id);
-			if (recipe.source === "extension" && builtin) {
-				process.stderr.write(`[clio-coder:agents] ignore override id=${recipe.id} by=extension reason=reserved-builtin\n`);
+			if ((recipe.source === "extension" || recipe.source === "plugin") && builtin) {
+				process.stderr.write(
+					`[clio-coder:agents] ignore override id=${recipe.id} by=${recipe.source} reason=reserved-builtin\n`,
+				);
 				continue;
 			}
 			if (recipe.source === "user" && builtin && isShadowAgent(normalizeAgentSpec(builtin))) {
@@ -154,15 +164,24 @@ export function discoverAgentRecipes(
 		},
 		diagnostics,
 	);
-	const skillRoots = new Map(enabledExtensionResourceRoots("skills", cwd).map((root) => [root.source, root.path]));
-	const extensionRecipes = enabledExtensionResourceRoots("agents", cwd)
+	const skillRoots = new Map(
+		[...enabledExtensionResourceRoots("skills", cwd), ...enabledPluginResourceRoots("skills", cwd)].map((root) => [
+			root.source,
+			root.path,
+		]),
+	);
+	const extensionRecipes = [
+		...enabledExtensionResourceRoots("agents", cwd),
+		...enabledPluginResourceRoots("agents", cwd),
+	]
 		.sort((left, right) => left.source.localeCompare(right.source))
 		.map((root) => {
 			const skillRoot = skillRoots.get(root.source);
 			return loadRecipesFromDir(
 				{
 					dir: root.path,
-					source: "extension",
+					source: root.source.startsWith("plugin:") ? "plugin" : "extension",
+					rootPath: root.rootPath,
 					cwd,
 					origin: root.source,
 					...(skillRoot === undefined ? {} : { skillRoot }),

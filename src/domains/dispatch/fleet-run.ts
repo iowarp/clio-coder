@@ -689,6 +689,7 @@ export async function executeFleetRun(input: ExecuteFleetRunInput): Promise<Flee
 				}
 				const originalMessage = isCommit ? commitMessageFor(step, priorResults) : null;
 				const outcome = await runCodeStep({
+					...(step.args ? { args: step.args } : {}),
 					stepId: step.id,
 					command,
 					workspaceRoot,

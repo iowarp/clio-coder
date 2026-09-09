@@ -615,12 +615,32 @@ commands:
 <p>Each command entry supports:</p>
 <ul>
 <li><code>argv</code> (required): Array of command arguments starting with the binary name (no shell strings).</li>
+<li><code>argumentSlots</code> (optional): Operator-declared positional data slots, each with a unique <code>name</code> and required <code>maxLength</code> (1 to 8192). At most 64 slots. Omission forbids appended fleet arguments; declared slots are all required.</li>
 <li><code>cwd</code> (optional): Repository-relative working directory (defaults to repository root).</li>
 <li><code>timeoutMs</code> (optional): Per-step execution timeout in milliseconds (defaults to 600,000 ms; bounds: 1,000 to 3,600,000 ms).</li>
 <li><code>env</code> (optional): Array of extra environment variable names to pass through on top of <code>FLEET_COMMAND_BASE_ENV</code> (<code>PATH</code>, <code>HOME</code>, <code>LANG</code>, <code>LC_ALL</code>, <code>TZ</code>, <code>TMPDIR</code>).</li>
 <li><code>description</code> (optional): Human-readable description.</li>
 </ul>
 <p>The whole-token <code>{{commitMessage}}</code> substitution is available to commit steps. The whole-token <code>{{path}}</code> substitution is available to version 5 gate commands. Each substitution becomes exactly one argv element and never passes through a shell.</p>
+<p>A fleet may supply per-task data only when the operator explicitly declares slots in the repository registry. Keep the executable, script path, and fixed flags in <code>argv</code>; the fleet cannot replace them. Use a fixed <code>--</code> separator where the registered program supports it. For example:</p>
+<pre><code class="language-yaml"># .clio-coder/fleets/commands.yaml, owned by the operator
+version: 1
+commands:
+  check-materials-task:
+    argv: [&quot;python3&quot;, &quot;scripts/check_materials_task.py&quot;]
+    argumentSlots:
+      - name: taskDirectory
+        maxLength: 256
+</code></pre>
+<pre><code class="language-yaml"># One code step in a version 2 or newer fleet
+kind: code
+id: check-task
+command: check-materials-task
+args: [&quot;{{taskDir}}&quot;]
+scope: readonly
+dependencies: []
+</code></pre>
+<p>Run with <code>--var taskDir=.research/tasks/task-01</code>. A slot receives exactly one literal argument. Values must be nonempty, fit the slot's length limit, contain no NUL, and not start with <code>-</code>; fixed flags belong in the operator's registry. A whole-token <code>{{variable}}</code> binds before admission and participates in the plan hash. Missing variables, undeclared or excess slots, embedded placeholders, and flag-like values fail before execution. The code runner repeats slot validation for direct or in-memory plans. Spaces and shell metacharacters remain data without another expansion pass. Existing fixed commands accept no extra args.</p>
 <h2>Measured route selection and agent automation</h2>
 <p>The joint resolver treats agent, target, model, runtime, and node as one
 bounded tuple. Manual pins, the approved plan envelope, authority, audience,

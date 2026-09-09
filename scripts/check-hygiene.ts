@@ -504,6 +504,11 @@ function checkCiScripts(): void {
 // now runs, rather than reimplementing the hash comparison, so there is one
 // definition of "stale".
 // ---------------------------------------------------------------------------
+async function checkPluginsPin(): Promise<void> {
+	const result = await runProcess("node", ["--import", "tsx", "scripts/pin-plugins.ts", "--check"], {});
+	if (result.status !== 0) fail("plugins-pin", result.output.trim());
+}
+
 async function checkSkillsPin(): Promise<void> {
 	const result = await runProcess("node", ["--import", "tsx", "scripts/pin-skills.ts", "--check"], {});
 	if (result.status !== 0) fail("skills-pin", result.output.trim());
@@ -1715,6 +1720,7 @@ const checks: ReadonlyArray<[string, () => void | Promise<void>]> = [
 	["boundaries", checkBoundaries],
 	["ci-scripts", checkCiScripts],
 	["skills-pin", checkSkillsPin],
+	["plugins-pin", checkPluginsPin],
 	["defaults-yaml", checkDefaultsYaml],
 	["settings-inventory", checkSettingsInventory],
 	["environment-variable-inventory", checkEnvironmentVariableInventory],

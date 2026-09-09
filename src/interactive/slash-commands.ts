@@ -121,7 +121,12 @@ type SlashCommandVariant =
 	/** `ref` is the turnId an `[evicted ...]` marker names. */
 	| { kind: "context-recall"; ref: string }
 	| { kind: "skill-selector" }
-	| { kind: "resources"; family?: "skills" | "prompts" | "extensions"; tab?: LibraryEntryKind; action?: "reload" }
+	| {
+			kind: "resources";
+			family?: "skills" | "prompts" | "extensions" | "plugins";
+			tab?: LibraryEntryKind;
+			action?: "reload";
+	  }
 	| { kind: "skill-invocation"; text: string }
 	/** `/skill off`: drop the tool surface an activated skill armed for the session. */
 	| { kind: "skill-surface-clear" }
@@ -621,6 +626,7 @@ export interface SlashCommandContext {
 	 * the command says so instead of pretending.
 	 */
 	reloadExtensions?: () => ExtensionReloadOutcome;
+	reloadPlugins?: () => { generation: number };
 	/** Detection report, pending proposals, and the two consent actions `/interop` drives. */
 	interop?: {
 		report: () => InteropReport | null;
@@ -954,13 +960,14 @@ export const BUILTIN_SLASH_COMMANDS: ReadonlyArray<BuiltinSlashCommand> = [
 	},
 	{
 		name: "resources",
-		description: "Browse skills, prompts, libraries, and extensions",
+		description: "Browse skills, prompts, libraries, plugins, and extensions",
 		group: "Inspect",
 		kinds: ["resources"],
 		subcommandDescriptions: {
 			skills: "Browse installed skills",
 			prompts: "Browse prompt templates",
 			library: "Browse resource libraries",
+			plugins: "Browse portable plugins; reload refreshes installed resources",
 			extensions: "Browse installed extensions; `reload` commits a new extension generation",
 		},
 		args: {
@@ -968,6 +975,7 @@ export const BUILTIN_SLASH_COMMANDS: ReadonlyArray<BuiltinSlashCommand> = [
 				skills: {},
 				prompts: {},
 				library: { positionals: [{ name: "kind", required: false }] },
+				plugins: { positionals: [{ name: "action", required: false, values: ["reload"] }] },
 				extensions: { positionals: [{ name: "action", required: false, values: ["reload"] }] },
 			},
 		},
@@ -976,6 +984,19 @@ export const BUILTIN_SLASH_COMMANDS: ReadonlyArray<BuiltinSlashCommand> = [
 			if (parsed.subcommand === undefined || parsed.subcommand === "skills")
 				return { kind: "resources", family: "skills" };
 			if (parsed.subcommand === "prompts") return { kind: "resources", family: "prompts" };
+			if (parsed.subcommand === "plugins") {
+				if (parsed.positionals[0] !== undefined && parsed.positionals[0] !== "reload")
+					return {
+						kind: "usage-error",
+						command: "resources",
+						reason: `Unknown action: ${parsed.positionals[0]} (one of reload)`,
+					};
+				return {
+					kind: "resources",
+					family: "plugins",
+					...(parsed.positionals[0] === "reload" ? { action: "reload" as const } : {}),
+				};
+			}
 			if (parsed.subcommand === "extensions") {
 				const action = parsed.positionals[0];
 				if (action === undefined) return { kind: "resources", family: "extensions" };
@@ -992,7 +1013,19 @@ export const BUILTIN_SLASH_COMMANDS: ReadonlyArray<BuiltinSlashCommand> = [
 		},
 		handle(command, ctx) {
 			if (command.kind !== "resources") return;
-			if (command.family === "prompts") ctx.openPrompts();
+			if (command.family === "plugins") {
+				if (command.action !== "reload") ctx.openSkillsHub?.("plugin");
+				else if (!ctx.reloadPlugins)
+					ctx.notice("warn", "plugins: reload is unavailable in this session; restart to refresh resources");
+				else {
+					try {
+						const snapshot = ctx.reloadPlugins();
+						ctx.notice("success", `plugins: generation ${snapshot.generation} committed`);
+					} catch (error) {
+						ctx.notice("error", `plugins: reload failed: ${error instanceof Error ? error.message : String(error)}`);
+					}
+				}
+			} else if (command.family === "prompts") ctx.openPrompts();
 			else if (command.family === "extensions") {
 				if (command.action === "reload") reloadExtensionsCommand(ctx);
 				else ctx.openExtensions();

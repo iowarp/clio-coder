@@ -64,6 +64,9 @@ interactive session. `clio-coder doctor` is a read-only installation check;
 | Skills discovery, marketplace safety, installation, and publishing | [Skills Marketplace](guide/skills-marketplace.md) |
 | Agents, prompts, extensions, and portable share archives | [Extensions and Sharing](guide/extensions-and-sharing.md) |
 | Private resource catalogs and synchronization | [Resource Library](guide/resource-library.md) |
+| Portable domain bundles, library pins, and lifecycle | [Plugins](guide/plugins.md) |
+| Package manifests and component references | [Authoring Plugins](guide/authoring-plugins.md) |
+| Executable harness capabilities | [Harness Extensions](guide/harness-extensions.md) |
 | TUI layout, responsive behavior, colors, and interaction rules | [TUI Design](architecture/tui-design.md) |
 | Terminal panes beside a session and the files pane: install, keys, settings, doctor, troubleshooting | [Panes and the Files Pane](guide/panes-and-files.md) |
 

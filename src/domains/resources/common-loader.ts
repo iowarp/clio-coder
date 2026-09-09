@@ -3,12 +3,14 @@ import path from "node:path";
 import { parse as parseYaml } from "yaml";
 import { clioConfigDir } from "../../core/xdg.js";
 import { type ExtensionResourceKind, enabledExtensionResourceRoots } from "../extensions/index.js";
+import { enabledPluginResourceRoots } from "../plugins/index.js";
 import type { ResourceDiagnostic, ResourceScope, ResourceSourceInfo } from "./collision.js";
 
 export interface ResourceRoot {
 	path: string;
 	/** Package root for safely resolving extension-relative prompt references. */
 	rootPath?: string;
+	plugin?: boolean;
 	scope: ResourceScope;
 	source?: string;
 	/** Collision rank, higher wins. See {@link ResourceSourceInfo.precedence}. */
@@ -47,6 +49,14 @@ export function defaultScopedResourceRoots(kind: ExtensionResourceKind, cwd: str
 		...enabledExtensionResourceRoots(kind, cwd).map((root) => ({
 			path: root.path,
 			rootPath: root.rootPath,
+			scope: "package" as const,
+			source: root.source,
+			precedence: COMPAT_RESOURCE_PRECEDENCE.extension,
+		})),
+		...enabledPluginResourceRoots(kind, cwd).map((root) => ({
+			path: root.path,
+			rootPath: root.rootPath,
+			plugin: true,
 			scope: "package" as const,
 			source: root.source,
 			precedence: COMPAT_RESOURCE_PRECEDENCE.extension,

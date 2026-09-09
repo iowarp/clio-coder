@@ -12,16 +12,21 @@ export function createAgentsBundle(_context: DomainContext): DomainBundle<Agents
 	let specs: ReadonlyArray<AgentSpec> = [];
 	let diagnostics: ReadonlyArray<AgentRecipeDiagnostic> = [];
 	let revision = 0;
+	let rediscoveryPending = false;
+	let attemptedRecipes: ReadonlyArray<AgentRecipe> | null = null;
 
 	function discover(): void {
+		attemptedRecipes = null;
 		const nextDiagnostics: AgentRecipeDiagnostic[] = [];
 		const merged = discoverAgentRecipes(process.cwd(), nextDiagnostics);
+		attemptedRecipes = merged;
 		const config = _context.getContract<ConfigContract>("config");
 		assertAgentIdNamespace(merged, config?.get()?.integrations.externalAgents?.entries ?? []);
 		recipes = merged;
 		specs = recipes.map(normalizeAgentSpec);
 		diagnostics = nextDiagnostics;
 		revision += 1;
+		rediscoveryPending = false;
 	}
 
 	let unsubscribeExtensionsReload: (() => void) | null = null;
@@ -30,16 +35,49 @@ export function createAgentsBundle(_context: DomainContext): DomainBundle<Agents
 			discover();
 			// Recipes are cached at start; extension agent roots come from the
 			// committed extension generation, so a changed generation rediscovers.
-			unsubscribeExtensionsReload = _context.bus.on(BusChannels.ExtensionsReloaded, (payload: unknown) => {
-				if ((payload as { changed?: unknown } | undefined)?.changed !== true) return;
+			const onResourceReload = (payload: unknown) => {
+				if (!rediscoveryPending && (payload as { changed?: unknown } | undefined)?.changed !== true) return;
 				try {
 					discover();
 				} catch (error) {
+					// Snapshot admission may already have revoked packages. Never retain
+					// their cached authority when namespace or filesystem discovery fails.
+					rediscoveryPending = true;
+					recipes = attemptedRecipes ?? recipes.filter((recipe) => recipe.source === "builtin");
+					let conflictingIds = new Set<string>();
+					try {
+						const config = _context.getContract<ConfigContract>("config");
+						conflictingIds = new Set((config?.get()?.integrations.externalAgents?.entries ?? []).map((agent) => agent.id));
+					} catch {
+						// If even current operator configuration is unreadable, no custom
+						// cached recipe has a trustworthy namespace admission decision.
+						recipes = recipes.filter((recipe) => recipe.source === "builtin");
+					}
+					recipes = recipes.filter(
+						(recipe) => recipe.source !== "plugin" && recipe.source !== "extension" && !conflictingIds.has(recipe.id),
+					);
+					specs = recipes.map(normalizeAgentSpec);
+					diagnostics = [
+						...diagnostics,
+						{
+							source: "project" as const,
+							filepath: process.cwd(),
+							message: `recipe reload failed; package recipes withdrawn until retry: ${error instanceof Error ? error.message : String(error)}`,
+						},
+					].slice(-100);
+					revision += 1;
 					process.stderr.write(
-						`[clio-coder:agents] rediscovery after extension reload failed: ${error instanceof Error ? error.message : String(error)}\n`,
+						`[clio-coder:agents] rediscovery after resource reload failed: ${error instanceof Error ? error.message : String(error)}\n`,
 					);
 				}
-			});
+			};
+			const unsubscribe = [
+				_context.bus.on(BusChannels.ExtensionsReloaded, onResourceReload),
+				_context.bus.on(BusChannels.PluginsReloaded, onResourceReload),
+			];
+			unsubscribeExtensionsReload = () => {
+				for (const stop of unsubscribe) stop();
+			};
 		},
 		async stop() {
 			unsubscribeExtensionsReload?.();

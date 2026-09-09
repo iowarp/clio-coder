@@ -354,7 +354,7 @@ export function createSafetyPolicyEngine(options: SafetyPolicyEngineOptions = {}
 			}
 			const skillReason =
 				mutationCommand !== null && invokesClioSkillMutation(mutationCommand)
-					? "skill installation and updates require the operator CLI or an explicit operator install choice; draft outside active skill roots"
+					? "resource installation and lifecycle changes require the operator CLI or an explicit operator install choice; draft outside installed resource roots"
 					: skillMutationReason(
 							skillRoots,
 							pathPolicyTargets(catalogCommand === null ? call : { tool: ToolNames.Bash, args: { command: catalogCommand } }),

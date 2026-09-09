@@ -24,7 +24,7 @@ import {
 	reportCommitAttributionDiagnostic,
 	withManagedGitCommitAttributionEnvironment,
 } from "../../core/git-commit-attribution.js";
-import { FLEET_COMMAND_BASE_ENV, type FleetCommand } from "../agents/fleet-commands.js";
+import { FLEET_COMMAND_BASE_ENV, type FleetCommand, validateFleetCommandArgs } from "../agents/fleet-commands.js";
 import type { CodeReportResult } from "../agents/result-contract.js";
 
 /** Bytes of command output retained for the artifact log. */
@@ -45,6 +45,8 @@ export const CODE_STEP_EMPTY_DIFF_MESSAGE = "nothing to commit: the workspace ha
 export const CODE_STEP_TRUNCATION_MARKER = "\n[... output truncated, see artifact ...]\n";
 
 export interface CodeStepRunInput {
+	/** Already resolved literal arguments; never interpolated a second time. */
+	args?: ReadonlyArray<string>;
 	stepId: string;
 	command: FleetCommand;
 	/** Absolute workspace root the command's relative cwd resolves against. */
@@ -312,7 +314,15 @@ export async function runCodeStep(input: CodeStepRunInput): Promise<CodeStepOutc
 	}
 	const cwd = resolveCwd(command, input.workspaceRoot);
 	const runId = newCodeRunId();
-	const argv = resolveCommandArgv(command, input.substitutions);
+	const extraArgs = input.args ?? [];
+	if (
+		extraArgs.length > 64 ||
+		extraArgs.some((arg) => typeof arg !== "string" || arg.includes("\0") || arg.length > 8192)
+	) {
+		throw new Error("code step: invalid additional arguments");
+	}
+	validateFleetCommandArgs(command, extraArgs);
+	const argv = [...resolveCommandArgv(command, input.substitutions), ...extraArgs];
 	const startedAtMs = Date.now();
 	const clock = process.hrtime.bigint();
 	const startedAt = new Date(startedAtMs).toISOString();
