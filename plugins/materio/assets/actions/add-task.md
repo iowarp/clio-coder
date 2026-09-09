@@ -44,7 +44,7 @@ No arguments.
 ## 1. Read Current Workflow
 
 ```bash
-[ ! -f .research/WORKFLOW.md ] && echo "ERROR: No WORKFLOW.md. Run Run define-research-tasks using the materio-workflow-planner skill first." && exit 1
+test -f .research/WORKFLOW.md || echo "ERROR: No WORKFLOW.md. Run define-research-tasks using the materio-workflow-planner skill first."
 cat .research/WORKFLOW.md
 ```
 

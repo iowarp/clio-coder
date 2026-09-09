@@ -44,7 +44,7 @@ Task number: $ARGUMENTS
 ## 1. Validate
 
 ```bash
-[ ! -f .research/WORKFLOW.md ] && echo "ERROR: No WORKFLOW.md." && exit 1
+test -f .research/WORKFLOW.md || echo "ERROR: No WORKFLOW.md."
 [ -z "$ARGUMENTS" ] && echo "ERROR: Provide task number. Usage: Run remove-task using the materio-research-explorer skill 3" && exit 1
 cat .research/WORKFLOW.md
 ```

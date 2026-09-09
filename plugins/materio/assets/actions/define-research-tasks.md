@@ -57,7 +57,7 @@ Worker write scope: .research/WORKFLOW.md.
 ## 1. Validate Environment
 
 ```bash
-[ ! -f .research/RESEARCH.md ] && echo "ERROR: No RESEARCH.md. Run Run identify-research using the materio-research-explorer skill first." && exit 1
+test -f .research/RESEARCH.md || echo "ERROR: No RESEARCH.md. Run identify-research using the materio-research-explorer skill first."
 [ -f .research/WORKFLOW.md ] && echo "WARN: WORKFLOW.md exists; running again will replace it."
 cat .research/RESEARCH.md
 [ -f .research/LITERATURE.md ] && cat .research/LITERATURE.md | head -60
@@ -66,7 +66,7 @@ cat .research/RESEARCH.md
 Check for VIRTUAL-LAB.md and warn if missing:
 ```bash
 if [ ! -f .research/VIRTUAL-LAB.md ]; then
-  echo "NOTE: No VIRTUAL-LAB.md found. Run Run define-virtual-lab using the materio-lab-definer skill to map your resources first."
+  echo "NOTE: No VIRTUAL-LAB.md found. Run define-virtual-lab using the materio-lab-definer skill to map your resources first."
   echo "Proceeding without resource constraints; tasks may be planned that require unavailable equipment."
 fi
 [ -f .research/VIRTUAL-LAB.md ] && cat .research/VIRTUAL-LAB.md

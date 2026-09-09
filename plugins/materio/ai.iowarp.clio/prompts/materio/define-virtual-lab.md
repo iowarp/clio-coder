@@ -58,7 +58,7 @@ Worker write scope: .research/VIRTUAL-LAB.md.
 ## 1. Validate Environment
 
 ```bash
-[ ! -f .research/RESEARCH.md ] && echo "ERROR: No RESEARCH.md. Run /materio:identify-research first." && exit 1
+test -f .research/RESEARCH.md || echo "ERROR: No RESEARCH.md. Run /materio:identify-research first."
 [ -f .research/VIRTUAL-LAB.md ] && echo "WARN: VIRTUAL-LAB.md already exists; running again will update it."
 cat .research/RESEARCH.md
 grep -A 12 "Methodological Landscape" .research/LITERATURE.md 2>/dev/null

@@ -59,7 +59,7 @@ Worker write scope: .research/WORKFLOW.md.
 ## 1. Validate Environment
 
 ```bash
-[ ! -f .research/RESEARCH.md ] && echo "ERROR: No RESEARCH.md. Run /materio:identify-research first." && exit 1
+test -f .research/RESEARCH.md || echo "ERROR: No RESEARCH.md. Run /materio:identify-research first."
 [ -f .research/WORKFLOW.md ] && echo "WARN: WORKFLOW.md exists; running again will replace it."
 cat .research/RESEARCH.md
 [ -f .research/LITERATURE.md ] && cat .research/LITERATURE.md | head -60

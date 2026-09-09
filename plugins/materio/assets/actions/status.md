@@ -36,7 +36,7 @@ Display a concise dashboard of the current materio research project. No subagent
 ## 1. Check Initialization
 
 ```bash
-[ ! -f .research/RESEARCH.md ] && echo "No research project initialized. Run Run identify-research using the materio-research-explorer skill to start." && exit 0
+[ ! -f .research/RESEARCH.md ] && echo "No research project initialized. Run identify-research using the materio-research-explorer skill to start." && exit 0
 ```
 
 ## 2. Read All State Files

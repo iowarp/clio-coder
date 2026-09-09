@@ -42,7 +42,7 @@ Display a rich progress report with statusline, recent task completions, current
 ## 1. Validate
 
 ```bash
-[ ! -f .research/RESEARCH.md ] && echo "No research project. Run Run identify-research using the materio-research-explorer skill." && exit 0
+[ ! -f .research/RESEARCH.md ] && echo "No research project. Run identify-research using the materio-research-explorer skill." && exit 0
 cat .research/STATE.md 2>/dev/null
 cat .research/WORKFLOW.md 2>/dev/null
 cat .research/RESEARCH.md 2>/dev/null | head -20

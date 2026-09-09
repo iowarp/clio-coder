@@ -63,7 +63,7 @@ validate the research identity and config below.
 ### Validate Environment
 
 ```bash
-[ ! -f .research/RESEARCH.md ] && echo "ERROR: No RESEARCH.md. Run /materio:identify-research first." && exit 1
+test -f .research/RESEARCH.md || echo "ERROR: No RESEARCH.md. Run /materio:identify-research first."
 [ -f .research/LITERATURE.md ] && echo "WARN: LITERATURE.md exists. Running again will update it."
 cat .research/RESEARCH.md
 python3 "${component:script:research-state}" config
