@@ -5,6 +5,7 @@ All notable changes to Clio Coder are documented in this file. The format follow
 ## Unreleased
 
 ### Added
+- Prompt templates from user, project, and installed plugin roots now appear in the composer's slash autocomplete as namespaced commands such as `/materio:help` and `/wtfp:new-paper`, with their description and `argument-hint`, listed after the built-in commands so no template can shadow one. The list is read live, so `/resources plugins reload` or a new installation shows up without restarting (`tests/contracts/slash-autocomplete.test.ts`).
 - Add a distinct agent plugin engine using the portable Agent Plugins 1.0.0 manifest, explicit component references, native Clio resource projections, isolated install state, full-tree integrity, staged replacement and recovery of changed files.
 - Add plugin catalog listing, installation previews, pinned local and GitHub bundle installation, updates, removal, enable/disable, drift inspection and pin verification through the CLI and terminal library.
 - Ship the Materio (`materio`) materials research plugin with researcher interviews, supplied-paper literature review, lab feasibility, task planning and verified execution, archive checkpoints, conservative scientific checks, and a text handoff into WTF-P's public actions. Include peer package export for Codex, Claude Code and Gemini.

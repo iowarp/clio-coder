@@ -42,7 +42,7 @@ Clio-native roots intentionally outrank shared compatibility roots at the same s
 
 ## Prompt templates
 
-Prompt templates are Markdown files under a prompt root. Filename is the command name.
+Prompt templates are Markdown files under a prompt root. Filename is the command name. Every loaded template, including a plugin's namespaced `/<plugin>:<name>` prompts, is offered in the composer's slash autocomplete after the built-in commands, with its `description` and `argument-hint`; an unavailable template is listed disabled with its reason.
 
 Example `.clio-coder/prompts/bugfix.md`:
 

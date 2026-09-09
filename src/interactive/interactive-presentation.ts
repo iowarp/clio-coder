@@ -89,7 +89,7 @@ export interface InteractivePresentationDeps {
 	/** Pending boot submissions remain visible until serial admission removes them. */
 	bootPending?: Component;
 	getSettings?: () => Readonly<ClioSettings>;
-	resources?: Pick<ResourcesContract, "skills">;
+	resources?: Pick<ResourcesContract, "skills" | "prompts">;
 	agents?: Pick<AgentsContract, "listSpecs">;
 	session?: Pick<SessionContract, "current">;
 	getSessionId?: () => string | null;
@@ -446,6 +446,7 @@ export function createInteractivePresentation(deps: InteractivePresentationDeps)
 	const editor = deps.editor ?? factories.createEditor(deps.tui, editorChrome);
 	editor.focused = true;
 	const autocomplete: AutocompleteProvider = factories.createAutocomplete({
+		promptTemplates: () => deps.resources?.prompts(getCwd()).items ?? [],
 		completionSources: {
 			agents: async () =>
 				(deps.agents?.listSpecs() ?? []).filter(isUserVisibleAgent).map((agent) => ({

@@ -8,6 +8,7 @@ import {
 import {
 	createSlashCommandAutocompleteProvider,
 	type SlashAutocompleteOptions,
+	type SlashCompletionItem,
 } from "../../src/interactive/slash-autocomplete.js";
 import {
 	dispatchSlashCommand,
@@ -168,4 +169,47 @@ test("presentation offers no operator task IDs without an inbox owner", async ()
 	const provider = presentationProvider();
 	const line = "/tasks done ";
 	deepStrictEqual(await provider.getSuggestions([line], 0, line.length, { signal: new AbortController().signal }), null);
+});
+
+test("prompt templates from every resource root complete as namespaced slash commands", async () => {
+	const templates: Array<{ name: string; description: string; argumentHint?: string; unavailable?: string }> = [
+		{ name: "materio:help", description: "Overview of Materio commands" },
+		{ name: "materio:execute-task", description: "Execute one approved task", argumentHint: "[N | all]" },
+		{ name: "wtfp:new-paper", description: "Initialize a paper project" },
+		{ name: "broken:prompt", description: "Broken", unavailable: "unresolved package reference" },
+		{ name: "help", description: "A template must never shadow the built-in /help" },
+	];
+	const provider = createSlashCommandAutocompleteProvider({ fdPath: null, promptTemplates: () => templates });
+	const complete = async (line: string) =>
+		((await provider.getSuggestions([line], 0, line.length, { signal: new AbortController().signal }))?.items ??
+			[]) as SlashCompletionItem[];
+
+	const materio = await complete("/mat");
+	deepStrictEqual(
+		materio.map((item) => item.value),
+		["materio:execute-task", "materio:help"],
+	);
+	const execute = materio.find((item) => item.value === "materio:execute-task");
+	ok(execute);
+	strictEqual(execute.kind, "command");
+	strictEqual(execute.appendSpace, true);
+	strictEqual(execute.remainingGrammar, "[N | all]");
+	ok(execute.description?.includes("Execute one approved task"));
+	strictEqual(execute.replacement.start, 1);
+	strictEqual(execute.replacement.end, 4);
+
+	const help = await complete("/hel");
+	strictEqual(help.filter((item) => item.value === "help").length, 1, "built-in /help listed exactly once");
+	ok(help.every((item) => !item.id.startsWith("prompt:help")));
+
+	const broken = (await complete("/bro")).find((item) => item.value === "broken:prompt");
+	ok(broken);
+	strictEqual(broken.disabledReason, "unresolved package reference");
+
+	templates.push({ name: "wtfp:map-project", description: "Map an existing project" });
+	deepStrictEqual(
+		(await complete("/wtfp:")).map((item) => item.value),
+		["wtfp:map-project", "wtfp:new-paper"],
+		"reloaded templates appear without rebuilding the provider",
+	);
 });

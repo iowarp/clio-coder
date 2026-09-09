@@ -67,9 +67,23 @@ export interface SlashCompletionItem extends AutocompleteItem {
 	cursorOffset?: number;
 }
 
+/** The slice of a loaded prompt template that the composer needs to offer it as a slash command. */
+export interface PromptCommandTemplate {
+	name: string;
+	description: string;
+	argumentHint?: string;
+	unavailable?: string;
+}
+
 export interface SlashAutocompleteOptions {
 	basePath?: string;
 	fdPath?: string | null;
+	/**
+	 * Live view of the prompt templates discovered for the current workspace
+	 * (user, project, and installed plugin roots). Read on every completion so a
+	 * plugin reload or install shows up without rebuilding the provider.
+	 */
+	promptTemplates?: () => ReadonlyArray<PromptCommandTemplate>;
 	/** Read-only runtime values for the named grammar slots. */
 	completionSources?: CompletionSources;
 	/** Replace the default workspace-aware `@` source without adding a second composer provider. */
@@ -299,6 +313,7 @@ class ClioAutocompleteProvider implements AutocompleteProvider {
 	private readonly files: CombinedAutocompleteProvider;
 	private readonly fileReferences: FileReferenceCompletionSource;
 	private readonly sourceBySlot: Record<CompletionSlotName, CompletionSource>;
+	private readonly promptTemplates: () => ReadonlyArray<PromptCommandTemplate>;
 	private generation = 0;
 
 	constructor(
@@ -306,10 +321,53 @@ class ClioAutocompleteProvider implements AutocompleteProvider {
 		fdPath: string | null,
 		sources: CompletionSources,
 		fileReferenceSource?: FileReferenceCompletionSource,
+		promptTemplates?: () => ReadonlyArray<PromptCommandTemplate>,
 	) {
 		this.files = new CombinedAutocompleteProvider([], basePath, fdPath);
 		this.fileReferences = fileReferenceSource ?? createFileReferenceCompletionSource({ basePath });
 		this.sourceBySlot = { ...emptyCompletionSources(), ...sources };
+		this.promptTemplates = promptTemplates ?? (() => []);
+	}
+
+	/**
+	 * Prompt templates as slash commands, after the built-in reference so a
+	 * template can never shadow a built-in spelling in the menu. Namespaced
+	 * plugin prompts (`wtfp:help`, `materio:status`) sort with their package.
+	 */
+	private promptCommandItems(
+		prefix: string,
+		builtinNames: ReadonlySet<string>,
+		range: { start: number; end: number },
+	): SlashCompletionItem[] {
+		const lowered = prefix.toLowerCase();
+		const seen = new Set<string>();
+		const items: SlashCompletionItem[] = [];
+		const templates = [...this.promptTemplates()].sort((a, b) => a.name.localeCompare(b.name));
+		for (const template of templates) {
+			const name = template.name;
+			if (!name || builtinNames.has(name.toLowerCase()) || seen.has(name)) continue;
+			if (!name.toLowerCase().startsWith(lowered) || name === prefix) continue;
+			seen.add(name);
+			const hint = template.argumentHint?.trim();
+			const summary = template.unavailable ? `unavailable: ${template.unavailable}` : template.description;
+			const description = compactDescription(`${hint ? `${hint} — ` : ""}${summary}`);
+			const item: SlashCompletionItem = {
+				id: `prompt:${name}`,
+				kind: "command",
+				value: name,
+				label: name,
+				effectDescription: template.unavailable
+					? `Prompt template unavailable: ${template.unavailable}`
+					: `Prompt template: ${summary}`,
+				replacement: range,
+				appendSpace: Boolean(hint),
+			};
+			if (description) item.description = description;
+			if (hint) item.remainingGrammar = truncateToWidth(hint, ARGUMENT_HINT_BUDGET);
+			if (template.unavailable) item.disabledReason = template.unavailable;
+			items.push(item);
+		}
+		return items;
 	}
 
 	async getSuggestions(
@@ -409,6 +467,12 @@ class ClioAutocompleteProvider implements AutocompleteProvider {
 					if (remainingGrammar) item.remainingGrammar = remainingGrammar;
 					return item;
 				});
+			items.push(
+				...this.promptCommandItems(prefix, new Set(refs.map((ref) => ref.name.toLowerCase())), {
+					start: context.commandStart,
+					end: context.commandEnd,
+				}),
+			);
 			return items.length ? { items, prefix } : null;
 		}
 
@@ -542,5 +606,6 @@ export function createSlashCommandAutocompleteProvider(options: SlashAutocomplet
 		options.fdPath === undefined ? resolveFdBinary() : options.fdPath,
 		options.completionSources ?? {},
 		options.fileReferenceSource,
+		options.promptTemplates,
 	);
 }
