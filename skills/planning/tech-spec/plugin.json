@@ -1,0 +1,23 @@
+{
+	"$schema": "https://agent-plugins.org/schemas/1.0.0/plugin.schema.json",
+	"name": "tech-spec",
+	"version": "0.3.1",
+	"description": "Writes a typed call-stack architecture handoff: code-shaped contracts plus execution flows, implementation-ready for another engineer. User-invoked only. Not for weighing approaches or deciding the design; use architecture first.",
+	"license": "Apache-2.0",
+	"extensions": {
+		"ai.iowarp.clio": {
+			"manifestVersion": 1,
+			"kind": "skill",
+			"resources": {
+				"skills": "."
+			},
+			"components": [
+				{
+					"kind": "skill",
+					"id": "tech-spec",
+					"path": "SKILL.md"
+				}
+			]
+		}
+	}
+}

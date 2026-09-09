@@ -1,0 +1,23 @@
+{
+	"$schema": "https://agent-plugins.org/schemas/1.0.0/plugin.schema.json",
+	"name": "herdr",
+	"version": "0.2.0",
+	"description": "Launches, drives, or inspects another agent or command in a Herdr pane, tab, or workspace, including a second Clio Coder instance; requires HERDR_ENV=1. Not for background work a plain shell or dispatch already covers.",
+	"license": "Apache-2.0",
+	"extensions": {
+		"ai.iowarp.clio": {
+			"manifestVersion": 1,
+			"kind": "skill",
+			"resources": {
+				"skills": "."
+			},
+			"components": [
+				{
+					"kind": "skill",
+					"id": "herdr",
+					"path": "SKILL.md"
+				}
+			]
+		}
+	}
+}

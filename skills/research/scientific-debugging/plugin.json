@@ -1,0 +1,23 @@
+{
+	"$schema": "https://agent-plugins.org/schemas/1.0.0/plugin.schema.json",
+	"name": "scientific-debugging",
+	"version": "0.3.1",
+	"description": "Diagnoses stalled or cross-system failures and wrong, NaN, nondeterministic, or unexpectedly slow scientific results through falsifiable hypotheses across distinct fault classes, with evidence-cited verdicts before any fix. Not for designing benchmarks or pre-registered experiments; use experiment-protocol.",
+	"license": "Apache-2.0",
+	"extensions": {
+		"ai.iowarp.clio": {
+			"manifestVersion": 1,
+			"kind": "skill",
+			"resources": {
+				"skills": "."
+			},
+			"components": [
+				{
+					"kind": "skill",
+					"id": "scientific-debugging",
+					"path": "SKILL.md"
+				}
+			]
+		}
+	}
+}

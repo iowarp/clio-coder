@@ -17,7 +17,6 @@ import {
 	matchesKey,
 	type OverlayHandle,
 	type TUI,
-	truncateToWidth,
 	wrapTextWithAnsi,
 } from "../../engine/tui.js";
 import type { FleetRunPreview, FleetRunPreviewStep } from "../fleet-run-preview.js";
@@ -96,7 +95,7 @@ export function formatBudgetLine(preview: FleetRunPreview): string {
  * Render the body. Waves in order, each step with its facts, then the argv a
  * code step will actually run, and last the budget the run is admitted under.
  */
-function formatFleetRunApprovalBody(subject: FleetRunApprovalSubject, width: number, scroll: number): string[] {
+export function formatFleetRunApprovalBody(subject: FleetRunApprovalSubject, width: number, scroll: number): string[] {
 	const theme = clioTheme();
 	const contentWidth = Math.max(1, Math.floor(width));
 	const rows: string[] = [];
@@ -120,7 +119,12 @@ function formatFleetRunApprovalBody(subject: FleetRunApprovalSubject, width: num
 					rows.push(line);
 				}
 				if (step.argv !== undefined) {
-					rows.push(theme.fg("dim", truncateToWidth(`    argv ${step.argv.join(" ")}`, contentWidth, "…", false)));
+					rows.push(
+						...wrapTextWithAnsi(
+							theme.fg("dim", `    argv ${step.argv.map((arg) => JSON.stringify(arg)).join(" ")}`),
+							contentWidth,
+						),
+					);
 				}
 			}
 		}

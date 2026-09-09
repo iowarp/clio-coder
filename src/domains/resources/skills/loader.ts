@@ -804,6 +804,7 @@ function loadExplicitSkillPath(
 			? {
 					...(owner.rootPath ? { rootPath: owner.rootPath, containment: owner.rootPath } : {}),
 					...(owner.plugin !== undefined ? { plugin: owner.plugin } : {}),
+					trusted: owner.trusted,
 				}
 			: {}),
 	};
@@ -975,7 +976,7 @@ export interface SkillCatalogValidity {
 }
 
 /**
- * The rule `clio-coder skills validate` applies, in one place.
+ * The rule `clio-coder library validate` applies, in one place.
  *
  * A scanned file that produced no loaded skill is malformed, and a collision
  * drops a skill: both make the catalog invalid, as does any hard error. Benign

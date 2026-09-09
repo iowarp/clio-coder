@@ -100,5 +100,5 @@ protocol works under the current damage-control net.
 
 ## Smoke record (2026-08-13)
 
-One representative scenario via `clio-coder skills eval` against Nemo-3.5-Lightning
+One representative scenario via `clio-coder eval skill` against Nemo-3.5-Lightning
 (30B local, llamacpp on mini), full-auto sandbox. PASS (smoke) with mixed rubric: presence flow ran without exposing values (b2/b4/b5 pass), b1/b3 failed; flagged for a full eval pass later.

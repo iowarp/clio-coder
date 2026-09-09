@@ -314,7 +314,7 @@ export function createMarketplaceOfferRegistration(deps: MarketplaceOfferDeps): 
 					{
 						kind: "inject_reminder",
 						severity: "info",
-						message: `[Marketplace] Skill "${match.entry.name}" matches this request; install with clio-coder skills install ${match.entry.name}.`,
+						message: `[Marketplace] Skill "${match.entry.name}" matches this request; install with clio-coder library install ${match.entry.name}.`,
 					},
 				];
 			}

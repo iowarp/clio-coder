@@ -40,19 +40,19 @@ clio-coder:
 # Archify
 
 Create a self-contained interactive HTML diagram from a small typed JSON
-specification. The renderer is the upstream archify package installed
-beside this file; the skill base directory is the directory that holds
-`bin/`. Every command below runs as
-`node .clio-coder/skills/archify/bin/archify.mjs ...` for a project-scope
-install, or `node <clio config dir>/skills/archify/bin/archify.mjs ...` for a
-user-scope install. No install step, no network, and no dependencies beyond
-Node 18 or later.
+specification. This library package contains Clio instructions; the renderer is
+an independently installed upstream Archify v2.16.0 package. Before authoring,
+locate its directory containing `bin/archify.mjs`, `schemas/` and `examples/`.
+If unavailable, ask the operator to prepare that upstream renderer; do not claim
+that installing this instruction package installed it. Below, `<renderer>` is
+that verified directory, and renderer-relative schema/example paths refer to it.
+The renderer needs Node 18 or later; ordinary rendering then needs no network.
 
 ## Fast authoring path
 
 1. Choose `architecture`, `workflow`, `sequence`, `dataflow`, or `lifecycle`
    from the question. When ambiguous, run
-   `node <skill>/bin/archify.mjs guide "<scenario>" --json`.
+   `node <renderer>/bin/archify.mjs guide "<scenario>" --json`.
 2. Read one matching schema in `schemas/`, `schemas/common.schema.json`, and
    one matching example in `examples/`. Read only those files. The example
    supplies field shape, never facts: author new stable ids, domain wording,
@@ -66,7 +66,7 @@ Node 18 or later.
 4. Validate after every edit and immediately before delivery:
 
    ```bash
-   node <skill>/bin/archify.mjs validate <type> <candidate.json> --quality showcase --json
+   node <renderer>/bin/archify.mjs validate <type> <candidate.json> --quality showcase --json
    ```
 
    A showcase pass reports all artifact checks with 0 composition errors
@@ -77,7 +77,7 @@ Node 18 or later.
 5. Deliver once, as the final acceptance command:
 
    ```bash
-   node <skill>/bin/archify.mjs deliver <type> <candidate.json> <output.html> --quality showcase --json
+   node <renderer>/bin/archify.mjs deliver <type> <candidate.json> <output.html> --quality showcase --json
    ```
 
    A non-zero exit is never success. A failed delivery preserves any previous
@@ -120,7 +120,7 @@ component map), `sequenceDiagram` becomes `sequence`, `stateDiagram` becomes
   say that the viewer chrome falls back to English.
 - Brand identity is explicit. Put a canonical built-in id in `brand` only
   when the node names that real product; query
-  `node <skill>/bin/archify.mjs brands "<name>" --json`. Never infer a brand
+  `node <renderer>/bin/archify.mjs brands "<name>" --json`. Never infer a brand
   from a role such as "database".
 - Never accept an edge crossing an unrelated opaque node, an ambiguous shared
   corridor, or a label masking another route.
@@ -180,7 +180,7 @@ verify(check="frontend", path="<output.html>")
 
 That validates structure, local references, and syntax, and loads the page
 in a headless browser when one is on PATH. Archify's own
-`node <skill>/bin/archify.mjs visual-check <output.html> --json` is optional:
+`node <renderer>/bin/archify.mjs visual-check <output.html> --json` is optional:
 it needs a system Chrome and fails with `viewer/chrome-unavailable` on
 headless nodes. Report that outcome as what it is, never as a pass.
 

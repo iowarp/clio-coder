@@ -1,3 +1,4 @@
+import { readSettings } from "../core/config.js";
 /**
  * Fixed machine-readable projection of this installation's installed skills.
  *
@@ -158,7 +159,10 @@ function projectSkill(skill: Skill): SkillsInventorySkill {
 }
 
 function skillsInventorySnapshot(now: () => number = Date.now, cwd: string = process.cwd()): SkillsInventorySnapshot {
-	const list = loadSkills({ cwd });
+	const list = loadSkills({
+		cwd,
+		trustProjectCompatRoots: readSettings().integrations.projectResources.trustProjectImports,
+	});
 	const validity = skillCatalogValidity(list);
 	const projected = list.items.map(projectSkill);
 	const skills = projected.slice(0, MAX_SKILLS_INVENTORY_SKILLS);
@@ -177,7 +181,7 @@ function skillsInventorySnapshot(now: () => number = Date.now, cwd: string = pro
 
 export function runSkillsInventory(args: ReadonlyArray<string>): number {
 	if (args.length !== 1 || args[0] !== "--json") {
-		process.stderr.write("clio-coder skills inventory: usage: clio-coder skills inventory --json\n");
+		process.stderr.write("clio-coder library inventory: usage: clio-coder library inventory --json\n");
 		return 2;
 	}
 	process.stdout.write(`${JSON.stringify(skillsInventorySnapshot(), null, 2)}\n`);

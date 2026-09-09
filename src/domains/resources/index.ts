@@ -35,10 +35,10 @@ export {
 	libraryInstallPath,
 	pinLibraryEntry,
 	planLibraryInstall,
-	planPluginUpdate,
+	planLibraryUpdate,
 	releaseLibraryPlan,
 	removeLibraryEntry,
-	resolveLibraryPlugin,
+	resolveLibraryPackage,
 	resolveLibraryRequirements,
 	syncLibrary,
 } from "./library.js";

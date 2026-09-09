@@ -1,0 +1,23 @@
+{
+	"$schema": "https://agent-plugins.org/schemas/1.0.0/plugin.schema.json",
+	"name": "clio-coder-dev",
+	"version": "0.4.0",
+	"description": "Governs changes to Clio Coder's own source and harness (TUI, skills, agents, tools, prompts, domains): what may change freely, what needs explicit user intent, and how to change it without breaking the architecture. Not for verifying a change against the harness; use clio-coder-test.",
+	"license": "Apache-2.0",
+	"extensions": {
+		"ai.iowarp.clio": {
+			"manifestVersion": 1,
+			"kind": "skill",
+			"resources": {
+				"skills": "."
+			},
+			"components": [
+				{
+					"kind": "skill",
+					"id": "clio-coder-dev",
+					"path": "SKILL.md"
+				}
+			]
+		}
+	}
+}

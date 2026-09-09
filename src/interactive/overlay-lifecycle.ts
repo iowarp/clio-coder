@@ -125,7 +125,7 @@ export interface OverlayLifecycleRuntimeDeps {
 	openViewOverlay?: typeof import("./view/view-overlay.js").openViewOverlay;
 	openHelpOverlay?: typeof import("./overlays/help-reference.js").openHelpOverlay;
 	openAgentsOverlay?: typeof import("./overlays/agents.js").openAgentsOverlay;
-	openSkillsHub?: typeof import("./overlays/skills-hub.js").openSkillsHub;
+	openSkillsHub?: typeof import("./overlays/library.js").openLibraryOverlay;
 	openPromptsOverlay?: typeof import("./overlays/prompts.js").openPromptsOverlay;
 	openExtensionsOverlay?: typeof import("./overlays/extensions.js").openExtensionsOverlay;
 	openInteropOverlay?: typeof import("./overlays/interop.js").openInteropOverlay;

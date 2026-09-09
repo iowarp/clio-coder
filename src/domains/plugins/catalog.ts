@@ -5,19 +5,11 @@ import path from "node:path";
 import { parse as parseYaml } from "yaml";
 import { resolvePackageRoot } from "../../core/package-root.js";
 import { buildSafeToolEnv } from "../../core/safe-exec.js";
-import type { LibraryRequirementRef } from "../resources/library-types.js";
+import { isSemanticVersion } from "../extensions/compatibility.js";
+import { isLibraryKind, type LibraryPackageEntry, type LibraryRequirementRef } from "../resources/library-types.js";
 import { isPluginId } from "./discovery.js";
 
-export interface PluginCatalogEntry {
-	kind: "plugin";
-	name: string;
-	description: string;
-	sourceUrl: string;
-	version?: string;
-	sha256?: string;
-	origin: "catalog" | "index" | "installed";
-	requires?: LibraryRequirementRef[];
-}
+export type PluginCatalogEntry = LibraryPackageEntry;
 
 export interface PluginSource {
 	root: string;
@@ -76,33 +68,35 @@ export function fetchPluginSource(source: string, cwd = process.cwd()): PluginSo
 	}
 }
 
-export function readPluginCatalog(file: string, diagnostics: string[]): PluginCatalogEntry[] {
+export function readPluginCatalog(file: string, diagnostics: string[]): LibraryPackageEntry[] {
 	if (!existsSync(file)) return [];
 	try {
 		const parsed: unknown = parseYaml(readFileSync(file, "utf8"));
-		const rows: unknown[] = Array.isArray(parsed)
+		const rows: unknown[] | undefined = Array.isArray(parsed)
 			? parsed
-			: parsed && typeof parsed === "object" && Array.isArray((parsed as { plugins?: unknown }).plugins)
-				? (parsed as { plugins: unknown[] }).plugins
-				: [];
-		return rows.flatMap((row): PluginCatalogEntry[] => {
+			: parsed && typeof parsed === "object" && Array.isArray((parsed as { entries?: unknown }).entries)
+				? (parsed as { entries: unknown[] }).entries
+				: undefined;
+		if (!rows) throw new Error("library index must be a list or contain an entries list");
+		return rows.flatMap((row): LibraryPackageEntry[] => {
 			if (!row || typeof row !== "object") {
-				diagnostics.push(`plugin catalog entry malformed: ${file}`);
+				diagnostics.push(`library index entry malformed: ${file}`);
 				return [];
 			}
 			const item = row as Record<string, unknown>;
 			if (
+				!isLibraryKind(item.kind) ||
 				typeof item.name !== "string" ||
 				!isPluginId(item.name) ||
 				typeof item.description !== "string" ||
 				typeof item.sourceUrl !== "string" ||
 				item.sourceUrl.trim().length === 0 ||
-				typeof item.version !== "string" ||
+				!isSemanticVersion(item.version) ||
 				typeof item.sha256 !== "string" ||
 				!/^[a-f0-9]{64}$/.test(item.sha256)
 			) {
 				diagnostics.push(
-					`plugin catalog entry requires name, description, sourceUrl, version, and full-tree sha256: ${String(item.name ?? file)}`,
+					`library index entry requires name, description, sourceUrl, version, and full-tree sha256: ${String(item.name ?? file)}`,
 				);
 				return [];
 			}
@@ -115,33 +109,40 @@ export function readPluginCatalog(file: string, diagnostics: string[]): PluginCa
 			}
 			const remote = /^(?:[a-z][a-z0-9+.-]*:\/\/|git@)/i.test(item.sourceUrl);
 			if (remote && !parsePluginGithubSource(item.sourceUrl)) {
-				diagnostics.push(`unsupported plugin catalog source: ${item.sourceUrl}`);
+				diagnostics.push(`unsupported library index source: ${item.sourceUrl}`);
 				return [];
 			}
 			return [
 				{
-					kind: "plugin",
+					kind: item.kind,
 					name: item.name,
 					description: item.description,
 					sourceUrl: remote ? item.sourceUrl : path.resolve(path.dirname(file), item.sourceUrl),
 					version: item.version,
 					sha256: item.sha256,
 					origin: "catalog",
+					...(typeof item.category === "string" ? { category: item.category } : {}),
+					...(["pass", "warn", "fail", "unknown"].includes(String(item.audit))
+						? { audit: item.audit as NonNullable<LibraryPackageEntry["audit"]> }
+						: {}),
+					...(Array.isArray(item.triggers)
+						? { triggers: item.triggers.filter((value): value is string => typeof value === "string") }
+						: {}),
 					...(Array.isArray(item.requires) ? { requires: item.requires as LibraryRequirementRef[] } : {}),
 				},
 			];
 		});
 	} catch (error) {
-		diagnostics.push(`plugin catalog unreadable: ${error instanceof Error ? error.message : String(error)}`);
+		diagnostics.push(`library index unreadable: ${error instanceof Error ? error.message : String(error)}`);
 		return [];
 	}
 }
 
-export function bundledPluginCatalog(diagnostics: string[]): PluginCatalogEntry[] {
+export function bundledPluginCatalog(diagnostics: string[]): LibraryPackageEntry[] {
 	try {
-		return readPluginCatalog(path.join(resolvePackageRoot(), "plugins", "registry.yaml"), diagnostics);
+		return readPluginCatalog(path.join(resolvePackageRoot(), "library", "registry.yaml"), diagnostics);
 	} catch (error) {
-		diagnostics.push(`plugin catalog unavailable: ${error instanceof Error ? error.message : String(error)}`);
+		diagnostics.push(`library index unavailable: ${error instanceof Error ? error.message : String(error)}`);
 		return [];
 	}
 }

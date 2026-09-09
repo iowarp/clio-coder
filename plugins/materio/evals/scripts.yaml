@@ -1,0 +1,29 @@
+version: 2
+suite:
+  id: materio-script-contracts
+  title: Materio offline script contracts
+  visibility: public
+  description: Deterministic tests of research state, physics checks, Python parsing, and offline citation handling. No model quality claim.
+matrix:
+  dimensions: []
+  targets:
+    - id: default
+  repeats: 1
+tasks:
+  - id: offline-scripts
+    tags: [materio, deterministic, offline]
+    workspace:
+      kind: temp-copy
+      path: ..
+      excludes: [__pycache__]
+    runner:
+      kind: external-command
+      command: python3 -m unittest discover -s tests -p 'test_*.py'
+    verify:
+      assertions:
+        - metric: result.pass
+          op: eq
+          value: true
+    metrics:
+      collect: [result.pass, verifier.exitCode]
+    timeoutMs: 60000

@@ -74,7 +74,7 @@ skills:
   - name: find-skills
     path: meta/find-skills
     version: 0.2.0
-    sha256: a2f8469b3a15059f8547e7566dcd27894c6e2a2126b3ed83acb470df051cd11d
+    sha256: 2ea62ceb4c04e8bfae017da1a8ccceb7cf1637abbd0a953fa41c410ac7b4052d
   - name: herdr
     path: meta/herdr
     version: 0.2.0
@@ -82,12 +82,12 @@ skills:
   - name: skill-craft
     path: meta/skill-craft
     version: 0.3.0
-    sha256: ba81e09412f26647a9384b07359201efb08949865c50934778a4ab3173d43096
+    sha256: bc8bd91753e1df4ea0b1e2919ac467ca005993000cda867882838974b10e5e0d
   # ── planning ──
   - name: archify
     path: planning/archify
     version: 0.1.0
-    sha256: d9e891eb5f3c27678de14165a0eb35d1eb2289be480e55009f9a57bcfe55be2d
+    sha256: a43f96828207ec63ff11bfbb0602f853c0de58c68f3c669d3c5ac687917cfd74
   - name: architecture
     path: planning/architecture
     version: 0.4.1
@@ -141,4 +141,4 @@ skills:
   - name: workflow-distiller
     path: workflow/workflow-distiller
     version: 0.4.1
-    sha256: 067b097299b0b630729a4a6ddde629dec5c798d5b4634f90f7feab380b8575e1
+    sha256: 81e92b6e93e5c4b9ebbc0e98fdfcc65d5165cd7799459fae6dc94d752fc530d8

@@ -630,7 +630,7 @@ export class ClioCliCatalogInspector implements ClioCatalogInspector {
 
 	async #skills(root: string): Promise<WireCatalogSkillCollection> {
 		try {
-			return projectSkillCatalog(await this.#runner.runJson(root, ["skills", "inventory", "--json"]));
+			return projectSkillCatalog(await this.#runner.runJson(root, ["library", "inventory", "--json"]));
 		} catch (error) {
 			this.#log(`Clio Coder skill inventory inspection failed (${failureCode(error)}).`);
 			return failedSkillCollection();

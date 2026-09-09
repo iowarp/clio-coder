@@ -1,57 +1,39 @@
-import { createHash } from "node:crypto";
-import { existsSync, readFileSync, rmSync, statSync } from "node:fs";
+import { existsSync, readFileSync } from "node:fs";
 import path from "node:path";
-import { parse as parseYaml, stringify as stringifyYaml } from "yaml";
+import { stringify as stringifyYaml } from "yaml";
 import { readSettings, updateSettings } from "../../core/config.js";
 import { runCommandVector, type SafeCommandResult } from "../../core/safe-exec.js";
 import { safeResourceWrite } from "../../core/safe-resource-write.js";
+import { withStateFileLockSync } from "../../core/state-file-lock.js";
 import { clioConfigDir } from "../../core/xdg.js";
-import { parseFrontmatter } from "../agents/frontmatter.js";
-import {
-	assertAgentSpecPolicy,
-	normalizeAgentSpec,
-	parseAgentRecipeSchema,
-	parseFleetContract,
-} from "../agents/index.js";
 import {
 	bundledPluginCatalog,
 	fetchPluginSource,
 	type PluginCatalogEntry,
 	parsePluginGithubSource,
 	pluginLocalPath,
+	readPluginCatalog,
 } from "../plugins/catalog.js";
 import {
 	installPlugin,
-	isPluginId,
 	listInstalledPlugins,
 	type PluginScope,
 	pluginBaseDir,
 	pluginContentDigest,
+	pluginResourcePath,
 	readPluginInstallRecord,
 	readPluginManifest,
 	removePlugin,
 } from "../plugins/index.js";
-import { loadPromptTemplates } from "./prompts/loader.js";
-import { normalizedSkillHash } from "./skills/install.js";
-import {
-	type DiscoverMarketplaceOptions,
-	discoverMarketplaceSkills,
-	installSkill,
-	type LibraryEntryKind,
-	type LibraryRequirementRef,
-	type MarketplaceSkill,
-} from "./skills/marketplace.js";
+import { splitYamlFrontmatter } from "./common-loader.js";
+import type { LibraryPackageEntry, LibraryRequirementRef } from "./library-types.js";
 
-export type LibraryEntry = MarketplaceSkill | PluginCatalogEntry;
+export type LibraryEntry = LibraryPackageEntry;
 
 export interface LibraryDiscoveryResult {
 	entries: LibraryEntry[];
 	diagnostics: string[];
 	refusals: Readonly<Record<string, string>>;
-}
-
-function isRecord(value: unknown): value is Record<string, unknown> {
-	return typeof value === "object" && value !== null && !Array.isArray(value);
 }
 
 function catalogPath(): string {
@@ -60,80 +42,17 @@ function catalogPath(): string {
 }
 
 function parseCatalog(filePath: string, diagnostics: string[]): LibraryEntry[] {
-	if (!existsSync(filePath)) return [];
+	return readPluginCatalog(filePath, diagnostics).map((entry) => ({ ...entry, origin: "index" }));
+}
+
+/** Discovery retains damaged copies even when their provenance record cannot be read. */
+function displayInstallRecord(id: string, options: LibraryScopeOptions, diagnostics: string[]) {
 	try {
-		const raw = readFileSync(filePath, "utf8");
-		const parsed = filePath.endsWith(".json") ? JSON.parse(raw) : parseYaml(raw);
-		const rows = Array.isArray(parsed)
-			? parsed
-			: isRecord(parsed) && Array.isArray(parsed.entries)
-				? parsed.entries
-				: isRecord(parsed) && Array.isArray(parsed.skills)
-					? parsed.skills
-					: [];
-		return rows.flatMap((value): LibraryEntry[] => {
-			if (
-				!isRecord(value) ||
-				typeof value.name !== "string" ||
-				typeof value.description !== "string" ||
-				typeof value.sourceUrl !== "string"
-			) {
-				diagnostics.push(`library catalog entry malformed: ${filePath}`);
-				return [];
-			}
-			const kind: LibraryEntryKind =
-				value.kind === undefined || value.kind === "skill"
-					? "skill"
-					: value.kind === "agent" || value.kind === "prompt" || value.kind === "fleet" || value.kind === "plugin"
-						? value.kind
-						: "skill";
-			if (value.kind !== undefined && !["skill", "agent", "prompt", "fleet", "plugin"].includes(String(value.kind))) {
-				diagnostics.push(`library catalog entry has unsupported kind: ${value.name}`);
-				return [];
-			}
-			if (
-				value.requires !== undefined &&
-				(!Array.isArray(value.requires) || value.requires.some((item) => typeof item !== "string"))
-			) {
-				diagnostics.push(`library_requirement_malformed: ${value.name}`);
-				return [];
-			}
-			const sourceUrl = /^(?:https?:\/\/|git@)/.test(value.sourceUrl)
-				? value.sourceUrl
-				: path.resolve(path.dirname(filePath), value.sourceUrl);
-			if (kind === "plugin") {
-				if (!isPluginId(value.name.trim()) || !value.sourceUrl.trim()) {
-					diagnostics.push(`plugin catalog entry malformed: ${value.name}`);
-					return [];
-				}
-				if (typeof value.sha256 !== "string" || !/^[a-f0-9]{64}$/.test(value.sha256) || typeof value.version !== "string") {
-					diagnostics.push(`plugin catalog entry requires version and full-tree sha256: ${value.name}`);
-					return [];
-				}
-				if (/^(?:https?:\/\/|git@)/.test(sourceUrl) && !parsePluginGithubSource(sourceUrl)) {
-					diagnostics.push(`unsupported plugin catalog source: ${sourceUrl}`);
-					return [];
-				}
-			}
-			const requires = Array.isArray(value.requires)
-				? value.requires.filter((item): item is LibraryRequirementRef => typeof item === "string")
-				: undefined;
-			return [
-				{
-					kind,
-					name: value.name.trim(),
-					description: value.description.trim(),
-					sourceUrl,
-					origin: "index",
-					...(typeof value.version === "string" ? { version: value.version } : {}),
-					...(kind === "plugin" && typeof value.sha256 === "string" ? { sha256: value.sha256 } : {}),
-					...(requires ? { requires } : {}),
-				},
-			];
-		});
+		return readPluginInstallRecord(id, options);
 	} catch (error) {
-		diagnostics.push(`library catalog unreadable: ${error instanceof Error ? error.message : String(error)}`);
-		return [];
+		const message = `package state unavailable (${options.scope}:${id}): ${error instanceof Error ? error.message : String(error)}`;
+		if (!diagnostics.includes(message)) diagnostics.push(message);
+		return undefined;
 	}
 }
 
@@ -141,30 +60,30 @@ export function libraryEntryRef(entry: Pick<LibraryEntry, "kind" | "name">): Lib
 	return `${entry.kind}:${entry.name}`;
 }
 
-export function discoverLibrary(
-	options: { catalog?: string; cwd?: string; marketplace?: DiscoverMarketplaceOptions } = {},
-): LibraryDiscoveryResult {
-	const marketplace = discoverMarketplaceSkills({
-		...(options.marketplace ?? {}),
-		...(options.cwd ? { cwd: options.cwd } : {}),
-	});
-	const diagnostics = [...marketplace.diagnostics.filter((item) => !item.includes("no local skill marketplace"))];
+export function discoverLibrary(options: { catalog?: string; cwd?: string } = {}): LibraryDiscoveryResult {
+	const diagnostics: string[] = [];
 	const bundledPlugins = bundledPluginCatalog(diagnostics);
 	const privatePath = catalogPath();
 	const primary = options.catalog ? parseCatalog(path.resolve(options.catalog), diagnostics) : [];
 	const privateEntries = parseCatalog(privatePath, diagnostics);
 	const byRef = new Map<string, LibraryEntry>();
-	for (const entry of [...marketplace.skills, ...bundledPlugins, ...primary, ...privateEntries])
+	for (const entry of [
+		...bundledPlugins,
+		...privateEntries,
+		...parseCatalog(path.join(options.cwd ?? process.cwd(), ".clio-coder", "library.yaml"), diagnostics),
+		...primary,
+	])
 		byRef.set(libraryEntryRef(entry), entry);
-	for (const plugin of listInstalledPlugins(options.cwd ?? process.cwd())) {
-		const ref = `plugin:${plugin.id}`;
+	for (const plugin of listInstalledPlugins(options.cwd ?? process.cwd(), { all: true })) {
+		const ref = `${plugin.kind ?? "plugin"}:${plugin.id}`;
 		if (byRef.has(ref)) continue;
-		const record = readPluginInstallRecord(plugin.id, {
-			...(options.cwd ? { cwd: options.cwd } : {}),
-			scope: plugin.scope,
-		});
+		const record = displayInstallRecord(
+			plugin.id,
+			{ ...(options.cwd ? { cwd: options.cwd } : {}), scope: plugin.scope },
+			diagnostics,
+		);
 		byRef.set(ref, {
-			kind: "plugin",
+			kind: plugin.kind ?? "plugin",
 			name: plugin.id,
 			version: plugin.version,
 			description: plugin.description,
@@ -173,17 +92,16 @@ export function discoverLibrary(
 		});
 	}
 	const refusals: Record<string, string> = {};
-	const entries = [...byRef.values()].filter((entry) => {
+	const entries = [...byRef.values()];
+	for (const entry of entries) {
 		try {
 			resolveLibraryRequirements(entry, [...byRef.values()]);
-			return true;
 		} catch (error) {
 			const message = error instanceof Error ? error.message : String(error);
 			refusals[libraryEntryRef(entry)] = message;
 			if (!diagnostics.includes(message)) diagnostics.push(message);
-			return false;
 		}
-	});
+	}
 	return {
 		entries: entries.sort((a, b) => libraryEntryRef(a).localeCompare(libraryEntryRef(b))),
 		diagnostics,
@@ -219,31 +137,6 @@ export function resolveLibraryRequirements(entry: LibraryEntry, catalog: Readonl
 	return ordered;
 }
 
-function sourceFile(entry: LibraryEntry): string {
-	const source = path.resolve(entry.sourceUrl);
-	if (entry.kind === "skill") return source;
-	if (!existsSync(source)) throw new Error(`library source path does not exist: ${source}`);
-	return source;
-}
-
-function validateEntry(entry: LibraryEntry, raw: string, filePath: string): void {
-	if (entry.kind === "fleet") {
-		parseFleetContract(raw, filePath);
-		return;
-	}
-	if (entry.kind === "agent") {
-		const parsed = parseFrontmatter(raw, filePath);
-		const recipe = parseAgentRecipeSchema({ id: entry.name, source: "user", filepath: filePath, ...parsed });
-		assertAgentSpecPolicy(normalizeAgentSpec(recipe));
-		return;
-	}
-	if (entry.kind === "prompt") {
-		const loaded = loadPromptTemplates({ roots: [{ path: path.dirname(filePath), scope: "user", source: "library" }] });
-		if (!loaded.items.some((item) => item.filePath === filePath))
-			throw new Error(`prompt template is malformed: ${filePath}`);
-	}
-}
-
 export interface LibraryInstallPlan {
 	entry: LibraryEntry;
 	path: string;
@@ -262,12 +155,119 @@ export interface LibraryScopeOptions {
 	scope?: PluginScope;
 }
 
+/** Installed state remains addressable after its index entry is removed. */
+export function resolveInstalledLibraryEntry(
+	ref: string,
+	options: LibraryScopeOptions = {},
+): LibraryEntry & { scope: PluginScope } {
+	const copies = listInstalledPlugins(options.cwd ?? process.cwd(), { ...options, all: true })
+		.filter((item) => (ref.includes(":") ? `${item.kind ?? "plugin"}:${item.id}` === ref : item.id === ref))
+		.sort((a, b) => Number(b.scope === "project") - Number(a.scope === "project"));
+	const item = copies[0];
+	if (!item) throw new Error(`package not installed: ${ref}`);
+	const saved = readPluginInstallRecord(item.id, { ...options, scope: item.scope });
+	return {
+		scope: item.scope,
+		kind: item.kind ?? "plugin",
+		name: item.id,
+		description: item.description,
+		version: item.version,
+		sourceUrl: saved?.source ?? item.rootPath,
+		origin: "installed",
+		...(item.manifest?.clio.requires ? { requires: item.manifest.clio.requires } : {}),
+	};
+}
+
+/** Register verified bytes in one scoped index without installing or enabling them. */
+export function registerLibraryPackage(
+	source: string,
+	options: LibraryScopeOptions & { force?: boolean } = {},
+): LibraryEntry {
+	const local = pluginLocalPath(source, options.cwd);
+	const candidate = readPluginManifest(local);
+	if (!candidate.valid || !candidate.manifest || !candidate.contentDigest)
+		throw new Error(candidate.diagnostics.map((item) => item.message).join("; "));
+	const manifest = candidate.manifest;
+	const entry: LibraryEntry = {
+		kind: manifest.clio.kind ?? "plugin",
+		name: manifest.name,
+		description: manifest.description ?? "",
+		...(manifest.version ? { version: manifest.version } : {}),
+		sha256: candidate.contentDigest,
+		sourceUrl: local,
+		origin: "index",
+		...(manifest.clio.requires ? { requires: manifest.clio.requires } : {}),
+	};
+	const file =
+		options.scope === "project" ? path.join(options.cwd ?? process.cwd(), ".clio-coder", "library.yaml") : catalogPath();
+	withStateFileLockSync(file, () => {
+		const diagnostics: string[] = [];
+		const before = existsSync(file) ? readFileSync(file, "utf8") : undefined;
+		const entries = readPluginCatalog(file, diagnostics);
+		if (diagnostics.length) throw new Error(diagnostics.join("; "));
+		const previous = entries.find((item) => item.name === entry.name);
+		if (previous && !options.force)
+			throw new Error(`package already registered: ${entry.name}; use --force to replace its pin`);
+		const next = [...entries.filter((item) => item.name !== entry.name), entry].sort((a, b) =>
+			a.name.localeCompare(b.name),
+		);
+		if ((existsSync(file) ? readFileSync(file, "utf8") : undefined) !== before)
+			throw new Error("library index changed during registration");
+		safeResourceWrite(file, stringifyYaml({ entries: next.map(({ origin: _origin, ...item }) => item) }), {
+			encoding: "utf8",
+		});
+	});
+	return entry;
+}
+
+/** One workspace view includes available packages and every installed scope. */
+export function libraryWorkspace(options: LibraryScopeOptions & { catalog?: string } = {}) {
+	const discovery = discoverLibrary(options);
+	const installed = listInstalledPlugins(options.cwd ?? process.cwd(), { ...options, all: true });
+	return {
+		...discovery,
+		entries: discovery.entries.map((entry) => ({
+			...entry,
+			installed: installed
+				.filter((item) => item.id === entry.name && (item.kind ?? "plugin") === entry.kind)
+				.map((item) => ({
+					...item,
+					origin: displayInstallRecord(item.id, { ...options, scope: item.scope }, discovery.diagnostics)?.origin,
+				})),
+		})),
+	};
+}
+
+/** Resolve the authored invocation identity; package names do not rewrite resource IDs. */
+export function libraryRuntimeName(
+	entry: Pick<LibraryEntry, "kind" | "name">,
+	options: LibraryScopeOptions = {},
+): string | undefined {
+	const installed = installedPlugin(entry, options);
+	if (!installed?.loadable || entry.kind === "plugin") return undefined;
+	const manifest = installed.manifest;
+	const component = manifest?.clio.components.find((item) => item.kind === entry.kind);
+	if (!manifest || !component) return undefined;
+	const file = pluginResourcePath(installed.rootPath, component.path);
+	if (entry.kind === "agent") return path.basename(file, ".md");
+	if (entry.kind === "prompt")
+		return path
+			.relative(pluginResourcePath(installed.rootPath, manifest.clio.resources.prompts as string), file)
+			.replace(/\.md$/, "")
+			.split(path.sep)
+			.join(":");
+	const parsed = splitYamlFrontmatter(readFileSync(file, "utf8"));
+	if (!parsed.ok) return undefined;
+	const metadata = parsed.frontmatter;
+	return typeof metadata.name === "string" ? metadata.name : undefined;
+}
+
 function installedPlugin(entry: Pick<LibraryEntry, "kind" | "name">, options: LibraryScopeOptions = {}) {
 	return listInstalledPlugins(options.cwd ?? process.cwd(), {
 		all: true,
 		...(options.scope ? { scope: options.scope } : {}),
 	})
-		.filter((plugin) => plugin.id === entry.name)
+		.filter((plugin) => plugin.id === entry.name && (plugin.kind ?? "plugin") === entry.kind)
 		.sort((left, right) => Number(right.scope === "project") - Number(left.scope === "project"))[0];
 }
 
@@ -276,21 +276,10 @@ export function libraryInstallPath(
 	options: LibraryScopeOptions = {},
 ): string {
 	if (!/^[A-Za-z0-9][A-Za-z0-9._-]*$/.test(entry.name)) throw new Error(`invalid library entry name: ${entry.name}`);
-	if (entry.kind === "plugin")
-		return (
-			installedPlugin(entry, options)?.rootPath ??
-			path.join(pluginBaseDir(options.scope ?? "user", options.cwd ?? process.cwd()), entry.name)
-		);
-	if (entry.kind === "skill") return path.join(clioConfigDir(), "skills", entry.name, "SKILL.md");
-	const root = entry.kind === "agent" ? "agents" : entry.kind === "fleet" ? "fleets" : "prompts";
-	return path.join(clioConfigDir(), root, `${entry.name}.md`);
-}
-
-function readLibraryPins(): Record<string, { sha256: string; sourceUrl: string }> {
-	const pinPath = path.join(clioConfigDir(), "library-pins.yaml");
-	if (!existsSync(pinPath)) return {};
-	const parsed = parseYaml(readFileSync(pinPath, "utf8"));
-	return isRecord(parsed) ? (parsed as Record<string, { sha256: string; sourceUrl: string }>) : {};
+	return (
+		installedPlugin(entry, options)?.rootPath ??
+		path.join(pluginBaseDir(options.scope ?? "user", options.cwd ?? process.cwd()), entry.name)
+	);
 }
 
 export interface LibraryRequirementStatus {
@@ -302,17 +291,14 @@ export interface LibraryRequirementStatus {
 }
 
 /**
- * Whether this entry is already on disk for this operator. A kind-qualified pin
- * and a kind-specific destination are each sufficient, which is the same rule
- * the requirement classifier applies, so a surface that draws an installed or
- * available column never disagrees with the gate that refuses an install.
+ * Whether this entry has an installed copy, including disabled or damaged copies.
+ * Requirement checks separately require a verified, loadable copy.
  */
 export function libraryEntryInstalled(
 	entry: Pick<LibraryEntry, "kind" | "name">,
 	options: LibraryScopeOptions = {},
 ): boolean {
-	if (entry.kind === "plugin") return installedPlugin(entry, options) !== undefined;
-	return existsSync(libraryInstallPath(entry));
+	return installedPlugin(entry, options) !== undefined;
 }
 
 /**
@@ -324,13 +310,10 @@ export function libraryEntryPin(
 	entry: Pick<LibraryEntry, "kind" | "name">,
 	options: LibraryScopeOptions = {},
 ): { sha256: string; sourceUrl: string } | undefined {
-	if (entry.kind === "plugin") {
-		const plugin = installedPlugin(entry, options);
-		if (!plugin) return undefined;
-		const record = readPluginInstallRecord(entry.name, { ...options, scope: plugin.scope });
-		return record ? { sha256: record.contentDigest, sourceUrl: record.source } : undefined;
-	}
-	return readLibraryPins()[libraryEntryRef(entry)];
+	const plugin = installedPlugin(entry, options);
+	if (!plugin) return undefined;
+	const record = displayInstallRecord(entry.name, { ...options, scope: plugin.scope }, []);
+	return record ? { sha256: record.contentDigest, sourceUrl: record.source } : undefined;
 }
 
 export function classifyLibraryRequirements(
@@ -341,10 +324,9 @@ export function classifyLibraryRequirements(
 	const ordered = resolveLibraryRequirements(entry, catalog).slice(0, -1);
 	const inactive = ordered.filter(
 		(requirement) =>
-			requirement.kind === "plugin" &&
 			libraryEntryInstalled(requirement, options) &&
-			!listInstalledPlugins(options.cwd ?? process.cwd()).some(
-				(plugin) => plugin.id === requirement.name && plugin.loadable,
+			!listInstalledPlugins(options.cwd ?? process.cwd(), options).some(
+				(plugin) => plugin.id === requirement.name && (plugin.kind ?? "plugin") === requirement.kind && plugin.loadable,
 			),
 	);
 	const inactiveRefs = new Set(inactive.map(libraryEntryRef));
@@ -364,57 +346,36 @@ export function planLibraryInstall(
 	entry: LibraryEntry,
 	options: { cwd?: string; scope?: PluginScope; force?: boolean } = {},
 ): LibraryInstallPlan {
-	if (entry.kind === "plugin") {
-		const fetched = fetchPluginSource(entry.sourceUrl, options.cwd);
-		try {
-			const candidate = readPluginManifest(fetched.root);
-			if (!candidate.valid || !candidate.manifest)
-				throw new Error(`invalid plugin: ${candidate.diagnostics.map((item) => item.message).join("; ")}`);
-			if (candidate.manifest.name !== entry.name)
-				throw new Error(`plugin identity mismatch: expected ${entry.name}, found ${candidate.manifest.name}`);
-			if (entry.version && candidate.manifest.version !== entry.version)
-				throw new Error(`plugin version mismatch: expected ${entry.version}, found ${candidate.manifest.version}`);
-			const sha256 = pluginContentDigest(fetched.root);
-			if (entry.sha256 && sha256 !== entry.sha256) throw new Error(`plugin_pin_mismatch: ${entry.name}`);
-			return {
-				entry: { ...entry, ...(candidate.manifest.version ? { version: candidate.manifest.version } : {}) },
-				path: path.join(pluginBaseDir(options.scope ?? "user", options.cwd ?? process.cwd()), entry.name),
-				sha256,
-				sourceRoot: fetched.root,
-				cleanup: fetched.cleanup,
-				...options,
-			};
-		} catch (error) {
-			fetched.cleanup();
-			throw error;
-		}
-	}
-	if (entry.kind === "skill") {
-		const source = sourceFile(entry);
-		const file = statSync(source).isDirectory() ? path.join(source, "SKILL.md") : source;
-		const raw = readFileSync(file);
+	const fetched = fetchPluginSource(entry.sourceUrl, options.cwd);
+	try {
+		const candidate = readPluginManifest(fetched.root);
+		if (!candidate.valid || !candidate.manifest)
+			throw new Error(`invalid plugin: ${candidate.diagnostics.map((item) => item.message).join("; ")}`);
+		if ((candidate.manifest.clio.kind ?? "plugin") !== entry.kind)
+			throw new Error(`package kind mismatch: expected ${entry.kind}`);
+		if (candidate.manifest.name !== entry.name)
+			throw new Error(`plugin identity mismatch: expected ${entry.name}, found ${candidate.manifest.name}`);
+		if (entry.version && candidate.manifest.version !== entry.version)
+			throw new Error(`plugin version mismatch: expected ${entry.version}, found ${candidate.manifest.version}`);
+		const declaredRequirements = candidate.manifest.clio.requires ?? [];
+		if (JSON.stringify([...declaredRequirements].sort()) !== JSON.stringify([...(entry.requires ?? [])].sort()))
+			throw new Error(
+				`library_requirement_mismatch: ${entry.name}; index and manifest must declare the same requirements`,
+			);
+		const sha256 = pluginContentDigest(fetched.root);
+		if (entry.sha256 && sha256 !== entry.sha256) throw new Error(`plugin_pin_mismatch: ${entry.name}`);
 		return {
-			entry,
-			path: libraryInstallPath(entry),
-			sha256: normalizedSkillHash(raw.toString("utf8")),
+			entry: { ...entry, ...(candidate.manifest.version ? { version: candidate.manifest.version } : {}) },
+			path: path.join(pluginBaseDir(options.scope ?? "user", options.cwd ?? process.cwd()), entry.name),
+			sha256,
+			sourceRoot: fetched.root,
+			cleanup: fetched.cleanup,
+			...options,
 		};
+	} catch (error) {
+		fetched.cleanup();
+		throw error;
 	}
-	const source = sourceFile(entry);
-	const raw = readFileSync(source, "utf8");
-	validateEntry(entry, raw, source);
-	return {
-		entry,
-		path: libraryInstallPath(entry),
-		sha256: createHash("sha256").update(raw).digest("hex"),
-	};
-}
-
-function recordPin(plan: LibraryInstallPlan): void {
-	if (plan.entry.kind === "plugin") return; // The atomic plugin state is its authoritative pin, per scope.
-	const pinPath = path.join(clioConfigDir(), "library-pins.yaml");
-	const pins = readLibraryPins();
-	pins[libraryEntryRef(plan.entry)] = { sha256: plan.sha256, sourceUrl: plan.entry.sourceUrl };
-	safeResourceWrite(pinPath, stringifyYaml(Object.fromEntries(Object.entries(pins).sort())), { encoding: "utf8" });
 }
 
 export function releaseLibraryPlan(plan: LibraryInstallPlan): void {
@@ -430,40 +391,32 @@ export function installLibraryPlan(plan: LibraryInstallPlan): LibraryInstallResu
 	let recovery: LibraryInstallResult["recovery"];
 	try {
 		if (existsSync(plan.path) && !plan.force) throw new Error(`library destination already exists: ${plan.path}`);
-		if (plan.entry.kind === "plugin") {
-			if (!plan.sourceRoot) throw new Error("plugin install plan has no staged source");
-			if (plan.expectedInstalledDigest && pluginContentDigest(plan.path) !== plan.expectedInstalledDigest)
-				throw new Error(`plugin_destination_changed: ${plan.entry.name}`);
-			const result = installPlugin(plan.sourceRoot, {
-				...(plan.cwd ? { cwd: plan.cwd } : {}),
-				scope: plan.scope ?? "user",
-				force: plan.force ?? false,
-				expectedDigest: plan.sha256,
-				expectedId: plan.entry.name,
-				...(plan.entry.version ? { expectedVersion: plan.entry.version } : {}),
-				origin: {
-					kind:
-						plan.entry.origin === "catalog" || plan.entry.origin === "index"
-							? "catalog"
-							: parsePluginGithubSource(plan.entry.sourceUrl)
-								? "github"
-								: "local",
-					source: plan.entry.sourceUrl,
-				},
-			});
-			if (!result.plugin || result.diagnostics.some((item) => item.type === "error"))
-				throw new Error(
-					`${result.diagnostics.map((item) => item.message).join("; ") || "plugin install failed"}${result.recovery ? `; recovery: ${JSON.stringify(result.recovery)}` : ""}`,
-				);
-			recovery = result.recovery;
-		} else {
-			const current = planLibraryInstall(plan.entry);
-			if (current.sha256 !== plan.sha256) throw new Error(`library_source_changed: ${libraryEntryRef(plan.entry)}`);
-			if (plan.entry.kind === "skill")
-				installSkill({ source: plan.entry.sourceUrl, scope: "user", name: plan.entry.name, force: plan.force ?? false });
-			else safeResourceWrite(plan.path, readFileSync(sourceFile(plan.entry)));
-		}
-		recordPin(plan);
+		if (!plan.sourceRoot) throw new Error("plugin install plan has no staged source");
+		if (plan.expectedInstalledDigest && pluginContentDigest(plan.path) !== plan.expectedInstalledDigest)
+			throw new Error(`plugin_destination_changed: ${plan.entry.name}`);
+		const result = installPlugin(plan.sourceRoot, {
+			...(plan.cwd ? { cwd: plan.cwd } : {}),
+			scope: plan.scope ?? "user",
+			force: plan.force ?? false,
+			expectedDigest: plan.sha256,
+			expectedId: plan.entry.name,
+			expectedKind: plan.entry.kind,
+			...(plan.entry.version ? { expectedVersion: plan.entry.version } : {}),
+			origin: {
+				kind:
+					plan.entry.origin === "catalog" || plan.entry.origin === "index"
+						? "catalog"
+						: parsePluginGithubSource(plan.entry.sourceUrl)
+							? "github"
+							: "local",
+				source: plan.entry.sourceUrl,
+			},
+		});
+		if (!result.plugin || result.diagnostics.some((item) => item.type === "error"))
+			throw new Error(
+				`${result.diagnostics.map((item) => item.message).join("; ") || "plugin install failed"}${result.recovery ? `; recovery: ${JSON.stringify(result.recovery)}` : ""}`,
+			);
+		recovery = result.recovery;
 		return recovery ? { recovery } : {};
 	} finally {
 		releaseLibraryPlan(plan);
@@ -471,7 +424,7 @@ export function installLibraryPlan(plan: LibraryInstallPlan): LibraryInstallResu
 }
 
 /** Existing paths beat catalog IDs, including a directory named like a curated plugin. */
-export function resolveLibraryPlugin(
+export function resolveLibraryPackage(
 	source: string,
 	options: { cwd?: string; catalog?: string } = {},
 ): PluginCatalogEntry {
@@ -481,45 +434,54 @@ export function resolveLibraryPlugin(
 		if (!candidate.valid || !candidate.manifest)
 			throw new Error(`invalid plugin: ${candidate.diagnostics.map((item) => item.message).join("; ")}`);
 		return {
-			kind: "plugin",
+			kind: candidate.manifest.clio.kind ?? "plugin",
 			name: candidate.manifest.name,
+			...(candidate.manifest.clio.requires ? { requires: candidate.manifest.clio.requires } : {}),
 			description: candidate.manifest.description ?? "",
 			...(candidate.manifest.version ? { version: candidate.manifest.version } : {}),
 			sourceUrl: local,
 			origin: "installed",
 		};
 	}
-	const entry = discoverLibrary(options).entries.find(
-		(item) => item.kind === "plugin" && item.name === source.replace(/^plugin:/, ""),
+	const matches = discoverLibrary(options).entries.filter((item) =>
+		source.includes(":") ? libraryEntryRef(item) === source : item.name === source,
 	);
-	if (entry?.kind === "plugin") return entry;
+	if (matches.length > 1) throw new Error(`ambiguous package: ${source}; use kind:name`);
+	const entry = matches[0];
+	if (entry) return entry;
 	if (parsePluginGithubSource(source))
 		throw new Error("remote plugin installation requires a catalog entry with version and full-tree sha256 pin");
 	throw new Error(`plugin source is neither an existing local directory nor a catalog entry: ${source}`);
 }
 
-export function planPluginUpdate(
+export function planLibraryUpdate(
 	id: string,
 	options: { cwd?: string; scope?: PluginScope; force?: boolean; catalog?: string } = {},
 ): LibraryInstallPlan {
-	const plugin = installedPlugin({ kind: "plugin", name: id }, options);
+	const identity = resolveInstalledLibraryEntry(id, options);
+	const plugin = installedPlugin(identity, options);
 	if (!plugin) throw new Error(`plugin not installed: ${id}`);
-	const pin = libraryEntryPin({ kind: "plugin", name: id }, { ...options, scope: plugin.scope });
+	const pin = libraryEntryPin(identity, { ...options, scope: plugin.scope });
 	if (!options.force && pin && pluginContentDigest(plugin.rootPath) !== pin.sha256)
 		throw new Error(`plugin_local_changes: ${id}; use --force to replace local changes`);
-	const record = readPluginInstallRecord(id, { ...options, scope: plugin.scope });
+	const record = readPluginInstallRecord(identity.name, { ...options, scope: plugin.scope });
+	if (typeof record?.origin === "object" && record.origin.kind === "interop")
+		throw new Error("interop packages require a new reviewed adoption; remove the installed copy and adopt it again");
 	const catalogOrigin = record?.origin && typeof record.origin === "object" && record.origin.kind === "catalog";
 	const discovery = discoverLibrary(options);
 	const catalog = catalogOrigin
-		? discovery.entries.find((entry) => entry.kind === "plugin" && entry.name === id && entry.origin !== "installed")
+		? discovery.entries.find(
+				(entry) => entry.kind === identity.kind && entry.name === identity.name && entry.origin !== "installed",
+			)
 		: undefined;
 	if (catalogOrigin && !catalog)
 		throw new Error(
 			`plugin catalog source unavailable: ${id}; restore its pinned catalog entry or explicitly install a new source`,
 		);
-	const entry = catalog?.kind === "plugin" ? catalog : pin ? resolveLibraryPlugin(pin.sourceUrl, options) : undefined;
+	const entry = catalog ?? (pin ? resolveLibraryPackage(pin.sourceUrl, options) : undefined);
 	if (!entry) throw new Error(`plugin has no update source: ${id}`);
-	if (entry.name !== id) throw new Error(`plugin identity mismatch: expected ${id}, found ${entry.name}`);
+	if (entry.name !== identity.name || entry.kind !== identity.kind)
+		throw new Error(`package identity mismatch: expected ${id}, found ${libraryEntryRef(entry)}`);
 	const requirements = classifyLibraryRequirements(entry, discovery.entries, options);
 	if (requirements.inactive?.length)
 		throw new Error(
@@ -538,23 +500,14 @@ export function removeLibraryEntry(
 	entry: Pick<LibraryEntry, "kind" | "name">,
 	options: { cwd?: string; scope?: PluginScope } = {},
 ): LibraryInstallResult {
-	libraryInstallPath(entry, options); // Validate identity before any deletion.
-	if (entry.kind === "plugin") {
-		const result = removePlugin(entry.name, options);
-		if (result.diagnostics.some((item) => item.type === "error"))
-			throw new Error(
-				`${result.diagnostics.map((item) => item.message).join("; ")}${result.recovery ? `; recovery: ${JSON.stringify(result.recovery)}` : ""}`,
-			);
-		return result.recovery ? { recovery: result.recovery } : {};
-	} else
-		rmSync(entry.kind === "skill" ? path.dirname(libraryInstallPath(entry)) : libraryInstallPath(entry), {
-			recursive: true,
-			force: true,
-		});
-	const pins = readLibraryPins();
-	delete pins[libraryEntryRef(entry)];
-	safeResourceWrite(path.join(clioConfigDir(), "library-pins.yaml"), stringifyYaml(pins), { encoding: "utf8" });
-	return {};
+	const installed = installedPlugin(entry, options);
+	if (!installed) throw new Error(`package not installed: ${libraryEntryRef(entry)}`);
+	const result = removePlugin(entry.name, { ...options, scope: installed.scope });
+	if (result.diagnostics.some((item) => item.type === "error"))
+		throw new Error(
+			`${result.diagnostics.map((item) => item.message).join("; ")}${result.recovery ? `; recovery: ${JSON.stringify(result.recovery)}` : ""}`,
+		);
+	return result.recovery ? { recovery: result.recovery } : {};
 }
 
 export function pinLibraryEntry(
@@ -562,20 +515,11 @@ export function pinLibraryEntry(
 	options: LibraryScopeOptions = {},
 ): { sha256: string; sourceUrl: string } {
 	const installed = libraryInstallPath(entry, options);
-	if (entry.kind === "plugin") {
-		const pin = libraryEntryPin(entry, options);
-		if (!pin) throw new Error(`plugin is not installed with a verified pin: ${entry.name}`);
-		if (pluginContentDigest(installed) !== pin.sha256)
-			throw new Error(`plugin_local_changes: ${entry.name}; reinstall explicitly to accept changed content`);
-		return pin;
-	}
-	if (!existsSync(installed)) throw new Error(`library entry is not installed: ${libraryEntryRef(entry)}`);
-	const sha256 =
-		entry.kind === "skill"
-			? normalizedSkillHash(readFileSync(installed, "utf8"))
-			: createHash("sha256").update(readFileSync(installed)).digest("hex");
-	recordPin({ entry, path: installed, sha256 });
-	return { sha256, sourceUrl: entry.sourceUrl };
+	const pin = libraryEntryPin(entry, options);
+	if (!pin) throw new Error(`plugin is not installed with a verified pin: ${entry.name}`);
+	if (pluginContentDigest(installed) !== pin.sha256)
+		throw new Error(`plugin_local_changes: ${entry.name}; reinstall explicitly to accept changed content`);
+	return pin;
 }
 
 export function libraryEntryDrift(
@@ -586,12 +530,7 @@ export function libraryEntryDrift(
 	if (!existsSync(installed)) return { status: "missing" };
 	const pin = libraryEntryPin(entry, options);
 	if (!pin) return { status: "unpinned" };
-	const observed =
-		entry.kind === "plugin"
-			? pluginContentDigest(installed)
-			: entry.kind === "skill"
-				? normalizedSkillHash(readFileSync(installed, "utf8"))
-				: createHash("sha256").update(readFileSync(installed)).digest("hex");
+	const observed = pluginContentDigest(installed);
 	return { status: observed === pin.sha256 ? "clean" : "changed", expected: pin.sha256, observed };
 }
 

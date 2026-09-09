@@ -26,7 +26,7 @@ clio-coder:
 A skill exists to wrangle predictability out of a stochastic system: the same
 process every run, not the same output. Every rule below is a lever on that
 one virtue. A disputed line is settled by running the skill, not by debate;
-in Clio that means `clio-coder skills eval`, and a shipped skill's `evals.md`
+in Clio that means `clio-coder eval skill`, and a shipped skill's `evals.md`
 Expected bullets are its completion criteria.
 
 ## Format and Location
@@ -34,7 +34,7 @@ Expected bullets are its completion criteria.
 A skill is a folder holding a `SKILL.md`, written with the ordinary write
 tool. Project skills live in `.clio-coder/skills/<name>/`; user skills in the Clio
 config dir under `skills/<name>/`. The loader validates on load; check work
-with `clio-coder skills validate`. Frontmatter contract (Agent Skills compatible):
+with `clio-coder library validate`. Frontmatter contract (Agent Skills compatible):
 
 - `name`: lowercase-hyphen, ≤64 chars. Catalog convention requires it to match
   the folder; the runtime loader warns on a mismatch and uses the frontmatter

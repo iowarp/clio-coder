@@ -15,7 +15,7 @@
 		"LICENSE",
 		"NOTICE",
 		"CHANGELOG.md",
-		"plugins/registry.yaml",
+		"library/registry.yaml",
 		"plugins/materio/plugin.json"
 	],
 	"requiredPrefixes": [
@@ -24,6 +24,7 @@
 		"src/domains/agents/builtins/",
 		"skills/",
 		"src/domains/providers/models/",
-		"plugins/"
+		"plugins/",
+		"library/"
 	]
 }

@@ -415,6 +415,7 @@ function checkCiScripts(): void {
 		"ci",
 		"pnpm run typecheck && pnpm run lint && pnpm run build && pnpm run test && pnpm run test:trace-viewer",
 	);
+	expectScript("library:check", "node --import tsx scripts/pin-library.ts --check");
 	expectScript("skills:check", "node --import tsx scripts/pin-skills.ts --check");
 	expectScript("ci:release", "pnpm run ci && node scripts/check-release.mjs");
 	expectScript("prepublishOnly", "CLIO_CODER_RELEASE_CONTEXT=publish pnpm run ci:release");
@@ -504,9 +505,9 @@ function checkCiScripts(): void {
 // now runs, rather than reimplementing the hash comparison, so there is one
 // definition of "stale".
 // ---------------------------------------------------------------------------
-async function checkPluginsPin(): Promise<void> {
-	const result = await runProcess("node", ["--import", "tsx", "scripts/pin-plugins.ts", "--check"], {});
-	if (result.status !== 0) fail("plugins-pin", result.output.trim());
+async function checkLibraryPin(): Promise<void> {
+	const result = await runProcess("node", ["--import", "tsx", "scripts/pin-library.ts", "--check"], {});
+	if (result.status !== 0) fail("library-pin", result.output.trim());
 }
 
 async function checkSkillsPin(): Promise<void> {
@@ -1720,7 +1721,7 @@ const checks: ReadonlyArray<[string, () => void | Promise<void>]> = [
 	["boundaries", checkBoundaries],
 	["ci-scripts", checkCiScripts],
 	["skills-pin", checkSkillsPin],
-	["plugins-pin", checkPluginsPin],
+	["library-pin", checkLibraryPin],
 	["defaults-yaml", checkDefaultsYaml],
 	["settings-inventory", checkSettingsInventory],
 	["environment-variable-inventory", checkEnvironmentVariableInventory],

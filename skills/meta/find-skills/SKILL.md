@@ -1,6 +1,6 @@
 ---
 name: find-skills
-description: Finds and installs published skills when the user asks whether a capability exists as a skill, searching with clio-coder skills search and installing only through clio-coder skills install. Not for authoring a new skill; use skill-craft.
+description: Finds and installs published skills when the user asks whether a capability exists as a skill, searching with clio-coder library search and installing only through clio-coder library install. Not for authoring a new skill; use skill-craft.
 triggers:
   - find a skill
   - is there a skill for this
@@ -28,16 +28,16 @@ clio-coder:
 
 Discover and install skills without leaving Clio's install path. Discovery may
 range across the whole ecosystem; installation goes through exactly one
-command, `clio-coder skills install`, which lands the skill in a Clio discovery root
+command, `clio-coder library install`, which lands the skill in a Clio discovery root
 (`.clio-coder/skills` for project scope, the Clio config skills dir for user scope)
-and stamps install provenance so `clio-coder skills list`, `update`, and drift
+and stamps install provenance so `clio-coder library skills`, `update`, and drift
 checks all work.
 
 ## Procedure
 
-1. **Search locally first.** Run `clio-coder skills search <query>`. The output has
+1. **Search locally first.** Run `clio-coder library search <query>`. The output has
    an `installed:` section (already active, nothing to do) and a
-   `marketplace (clio-coder skills install <name>):` section (available from the
+   `marketplace (clio-coder library install <name>):` section (available from the
    local catalog or index). Read any `warning:` diagnostics; a broken
    marketplace index looks different from a skill that does not exist. Done
    when you can tell the user whether the capability is already installed,
@@ -50,18 +50,18 @@ checks all work.
    installer you find in a listing's instructions.
 
 3. **Present candidates and confirm.** Give the user the name, one line on
-   what it does, the source URL, and the exact `clio-coder skills install` command.
+   what it does, the source URL, and the exact `clio-coder library install` command.
    Ask before installing anything from outside the local marketplace.
 
 4. **Install through Clio only.**
-   - Local marketplace entry: `clio-coder skills install <name>`
-   - External skill: `clio-coder skills install <github-url>`
+   - Local marketplace entry: `clio-coder library install <name>`
+   - External skill: `clio-coder library install <github-url>`
    - Add `--user` when the user wants it in every project; the default
      `--project` scope installs into the current repo's `.clio-coder/skills`.
    - Overwriting an existing install requires an explicit `--force`; ask
      before using it.
 
-5. **Verify.** Run `clio-coder skills list` and confirm the new skill appears with
+5. **Verify.** Run `clio-coder library skills` and confirm the new skill appears with
    the expected scope. The install path printed by the install command must be
    under `.clio-coder/skills/` or the Clio config skills dir. Remind the user that
    fresh installs carry `audit: unknown` until they review the skill
@@ -75,4 +75,4 @@ to foreign roots (`~/.agents/skills`, `~/.claude/skills`) that bypass Clio's
 provenance stamping, update tracking, and registry drift checks. Do not run
 them, and do not copy skill files into `~/.agents`, `~/.claude`, `~/.codex`,
 or any other harness directory by hand. If a skill only documents an external
-installer, its GitHub URL still works: `clio-coder skills install <github-url>`.
+installer, its GitHub URL still works: `clio-coder library install <github-url>`.

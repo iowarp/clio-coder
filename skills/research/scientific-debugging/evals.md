@@ -134,7 +134,7 @@ accumulation loop; regression check fails by 1.474e-4).
 
 ## Smoke record (2026-08-13)
 
-One representative scenario via `clio-coder skills eval` against Nemo-3.5-Lightning
+One representative scenario via `clio-coder eval skill` against Nemo-3.5-Lightning
 (30B local, llamacpp on mini), full-auto sandbox. PASS. Judge 6/6 on the seeded numerical fixture; cleanest research run.
 
 ## Battletest record (2026-09-03)

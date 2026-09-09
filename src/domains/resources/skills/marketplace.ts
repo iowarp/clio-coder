@@ -3,37 +3,15 @@ import path from "node:path";
 import { warnLegacyNaming } from "../../../core/naming-compat.js";
 import { resolvePackageRoot } from "../../../core/package-root.js";
 import { clioConfigDir } from "../../../core/xdg.js";
-import {
-	type InstallSkillInput,
-	type InstallSkillResult,
-	installSkillFromSource,
-	isSkillName,
-	parseSkillSourceSpec,
-	type SkillInstallShaping,
-} from "./install.js";
+import { pluginResourcePath, readPluginManifest } from "../../plugins/index.js";
+import { discoverLibrary, installLibraryPlan, planLibraryInstall, resolveLibraryPackage } from "../library.js";
+import type { InstallSkillInput, InstallSkillResult, SkillInstallShaping } from "./install.js";
 import { loadSkills, type Skill } from "./loader.js";
 
 /**
- * Local skill marketplace. Entries come from two real sources only:
- *
- *  1. A catalog directory of actual SKILL.md packages: CLIO_CODER_SKILL_CATALOG_DIR,
- *     else a repo-level skills/ folder in the working tree, else the skills/
- *     catalog the installed clio-coder package carries. Metadata is read from
- *     the packages themselves via the normal skill loader.
- *  2. A JSON index file: CLIO_CODER_SKILL_MARKETPLACE_INDEX, else
- *     <config>/skill-marketplace.json, else the skill-marketplace.json the
- *     package carries. Entries point at installable sources.
- *
- * The package fallbacks are what make a fresh npm install a marketplace at
- * all: before them, an operator outside this repository with no env var set
- * had no catalog and no index, so every bare-name install and every
- * `/skill <name>` for a catalog skill failed. The package catalog is a
- * marketplace source only, never a discovery root; catalog skills stay
- * uninstalled until the operator asks, and install copies them out of the
- * package into a Clio root without touching the network.
- *
- * There is no synthetic or hardcoded marketplace data; an empty result means
- * no marketplace is configured.
+ * Skill-facing adapter for the canonical library, plus explicit authoring probes
+ * of unmanaged source trees. Runtime offers and activation use the library;
+ * only an explicit catalogDir/indexPath request invokes a raw source audit.
  */
 
 export type MarketplaceSkillOrigin = "catalog" | "index";
@@ -53,7 +31,7 @@ export interface MarketplaceSkill {
 	kind: Exclude<LibraryEntryKind, "plugin">;
 	name: string;
 	description: string;
-	/** Local path or URL accepted by `clio-coder skills install`. */
+	/** Local path or URL accepted by `clio-coder library install`. */
 	sourceUrl: string;
 	version?: string;
 	audit?: "pass" | "warn" | "fail" | "unknown";
@@ -299,6 +277,15 @@ function catalogSkills(dir: string, diagnostics: string[]): MarketplaceSkill[] {
 }
 
 export function discoverMarketplaceSkills(options: DiscoverMarketplaceOptions = {}): MarketplaceDiscoveryResult {
+	// Automatic promotion and /skill consume the same pinned library as the CLI.
+	// Explicit source probes below support authoring audits of unmanaged skill trees.
+	if (options.indexPath === undefined && options.catalogDir === undefined) {
+		const library = discoverLibrary(options.cwd ? { cwd: options.cwd } : {});
+		const skills: MarketplaceSkill[] = library.entries
+			.filter((entry) => entry.kind === "skill" && entry.origin !== "installed")
+			.map((entry) => ({ ...entry, kind: "skill", origin: entry.origin === "index" ? "index" : "catalog" }));
+		return { status: skills.length ? "installable" : "unavailable", skills, diagnostics: library.diagnostics };
+	}
 	const diagnostics: string[] = [];
 	const skills: MarketplaceSkill[] = [];
 	const seen = new Set<string>();
@@ -369,31 +356,31 @@ export function resolveMarketplaceShaping(options: DiscoverMarketplaceOptions = 
 	};
 }
 
-/**
- * The single install entry point for every frontend (headless CLI, TUI
- * pending-skill prompt, skills hub). Source resolution, in precedence order:
- *
- *  1. A GitHub URL installs directly.
- *  2. An existing local path installs directly; paths always beat same-named
- *     marketplace entries.
- *  3. A bare skill name resolves through the local marketplace.
- *
- * Anything else is an error naming both failed interpretations. Overwriting
- * an existing install always requires an explicit `force: true`.
- */
+/** Skill-offer adapter: resolve a package and commit through the shared library engine. */
 export function installSkill(input: InstallSkillInput): InstallSkillResult {
 	const requested = input.source.trim();
 	const source = requested === "clio-dev" ? "clio-coder-dev" : requested === "clio-test" ? "clio-coder-test" : requested;
 	if (source !== requested) warnLegacyNaming(requested, source);
-	const spec = parseSkillSourceSpec(source);
-	if (spec?.kind === "local" && isSkillName(source) && !existsSync(spec.path)) {
-		const skill = getMarketplaceSkills({ ...(input.cwd ? { cwd: input.cwd } : {}) }).find(
-			(entry) => entry.name === source,
-		);
-		if (!skill) {
-			throw new Error(`"${source}" is neither an existing local path nor available in the local marketplace`);
-		}
-		return installSkillFromSource({ ...input, ...marketplaceInstallShaping(skill), source: skill.sourceUrl });
-	}
-	return installSkillFromSource({ ...input, source });
+	if (input.overlay || input.exclude?.length || input.configDir)
+		throw new Error("package installs use the prepared manifest tree and the active Clio profile");
+	const entry = resolveLibraryPackage(source, input.cwd ? { cwd: input.cwd } : {});
+	if (entry.kind !== "skill") throw new Error(`expected a skill package, found ${entry.kind}:${entry.name}`);
+	if (input.name && input.name !== entry.name) throw new Error("package identities cannot be renamed at install");
+	const plan = planLibraryInstall(entry, {
+		...(input.cwd ? { cwd: input.cwd } : {}),
+		scope: input.scope ?? "user",
+		force: input.force ?? false,
+	});
+	installLibraryPlan(plan);
+	const candidate = readPluginManifest(plan.path);
+	const component = candidate.manifest?.clio.components.find((item) => item.kind === "skill");
+	if (!component) throw new Error("installed skill package has no skill component");
+	return {
+		name: entry.name,
+		scope: input.scope ?? "user",
+		path: pluginResourcePath(plan.path, component.path),
+		sourceUrl: entry.sourceUrl,
+		installedHash: plan.sha256,
+		warnings: [],
+	};
 }

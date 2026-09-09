@@ -5,15 +5,12 @@ import type {
 	LibraryEntryKind,
 	LibraryInstallPlan,
 	LibraryRequirementStatus,
-	MarketplaceDiscoveryResult,
-	MarketplaceSkill,
 	ResourceList,
 	Skill,
 } from "../../domains/resources/index.js";
 import {
 	classifyLibraryRequirements,
 	discoverLibrary,
-	discoverMarketplaceSkills,
 	installLibraryPlan,
 	libraryEntryInstalled,
 	libraryEntryPin,
@@ -23,69 +20,48 @@ import {
 	planLibraryInstall,
 	releaseLibraryPlan,
 } from "../../domains/resources/index.js";
+import { libraryRuntimeName } from "../../domains/resources/library.js";
 import type { OverlayHandle, TUI } from "../../engine/tui.js";
 import type { NoticeLevel } from "../command-output.js";
 import { clioTheme, GLYPH } from "../theme/index.js";
+import { type LibraryAction, runLibraryAction } from "./library-actions.js";
 import type { LibraryInstallConfirmSubject } from "./library-install-confirm.js";
 import { openLibraryInstallConfirmOverlay } from "./library-install-confirm.js";
 import { isLibraryTab, LIBRARY_TABS } from "./library-tabs.js";
 import { type ListOverlayItem, type ListOverlayTab, openListOverlay } from "./list-overlay.js";
-import { type PluginLibraryAction, runPluginLibraryAction } from "./plugin-actions.js";
 
-/**
- * The Skills Hub: one multipane surface for every resource Clio can reach.
- *
- * The Skills tab is the original view. Installed skills group by scope,
- * marketplace rows come from the same local marketplace lookup the installer
- * and `/skill <name>` resolve through, Enter inserts the invocation into the
- * editor, and `i` installs in place. The hub lists nothing the resolver cannot
- * resolve; when the lookup is empty the hub says so and names the remedy
- * instead of drawing an inventory.
- *
- * The Agents, Prompts, and Fleets tabs are the interactive half of the resource
- * library. Their rows come from the same `discoverLibrary()` the CLI's
- * `library list --kind` reads, their install runs the same plan-then-write pair
- * `library add` runs behind the same confirmation the `--yes` gate expresses,
- * and their requirement gate is the same classifier. Nothing here reaches
- * around the library domain into a private path.
- */
+/** One library view, with the same scoped package lifecycle as the CLI. */
 
 const GROUP_PROJECT = "Project";
 const GROUP_USER = "User";
-const GROUP_MARKETPLACE = "Marketplace";
 const GROUP_DIAGNOSTICS = "Diagnostics";
 const GROUP_INSTALLED = "Installed";
 const GROUP_AVAILABLE = "Available";
 
 export { isLibraryTab, LIBRARY_TABS };
 
-export const SKILLS_HUB_TITLE = "Skills Hub";
+export const LIBRARY_TITLE = "Library";
 
 /** Row id prefix for a library row, which is how an action tells the tabs apart. */
 export const LIBRARY_ROW_PREFIX = "library:";
 
 /** @internal exported for contract tests */
-export const SKILLS_HUB_EMPTY =
-	"no skills installed and no local marketplace configured. install one with `clio-coder skills install <path|github-url>`, or point CLIO_CODER_SKILL_CATALOG_DIR at a skills/ catalog.";
+export const LIBRARY_EMPTY = "No library packages. Register one with clio-coder library register <path>.";
 
-export interface SkillsHubDeps {
+export interface LibraryOverlayDeps {
 	listSkills: () => ResourceList<Skill>;
 	setEditorText: (text: string) => void;
 	notice: (level: NoticeLevel, text: string) => void;
-	/** Installs a marketplace skill by name; rejection text reaches the user. */
-	installSkill: (name: string) => Promise<{ name: string; path: string; warnings: string[] }>;
 	onClose: () => void;
-	/** Injectable for tests; defaults to the local marketplace the installer uses. */
-	discoverMarketplace?: () => MarketplaceDiscoveryResult;
-	/** Tab the hub opens on. `/skills` opens on Skills, `/library <kind>` on that kind. */
+	/** Tab the library opens on. `/skill` opens on Skills, `/library <kind>` on that kind. */
 	initialTab?: LibraryEntryKind;
 	/** Injectable for tests; defaults to the discovery `library list` reads. */
 	discoverLibrary?: () => LibraryDiscoveryResult;
-	/** Injectable for tests; defaults to the classifier `library add` gates on. */
+	/** Injectable for tests; defaults to the classifier `library install` gates on. */
 	classifyRequirements?: (entry: LibraryEntry, catalog: ReadonlyArray<LibraryEntry>) => LibraryRequirementStatus;
-	/** Injectable for tests; defaults to the planner `library add` prints from. */
+	/** Injectable for tests; defaults to the planner `library install` prints from. */
 	planInstall?: (entry: LibraryEntry) => LibraryInstallPlan;
-	/** Injectable for tests; defaults to the writer `library add --yes` runs. */
+	/** Injectable for tests; defaults to the writer `library install` runs. */
 	installPlan?: (plan: LibraryInstallPlan) => void;
 	/** Injectable for tests; defaults to the pin-and-destination check the domain owns. */
 	entryInstalled?: (entry: LibraryEntry) => boolean;
@@ -94,7 +70,7 @@ export interface SkillsHubDeps {
 	/**
 	 * The confirmation gate. Resolves true only when the operator accepted, and
 	 * nothing is written before it does. Defaults to the framed confirmation
-	 * overlay, which is the TUI spelling of `library add`'s `--yes`.
+	 * overlay, which asks the operator to accept the reviewed plan.
 	 */
 	confirmInstall?: (subject: LibraryInstallConfirmSubject) => Promise<boolean>;
 	/** Opens the `/fleet run` approval preview for an installed fleet. */
@@ -103,6 +79,7 @@ export interface SkillsHubDeps {
 
 /** Row and action context for one library tab, resolved once per rebuild. */
 interface LibraryTabContext {
+	scope: "user" | "project";
 	discovery: LibraryDiscoveryResult;
 	installed: (entry: LibraryEntry) => boolean;
 	pin: (entry: LibraryEntry) => { sha256: string; sourceUrl: string } | undefined;
@@ -116,12 +93,13 @@ interface LibraryTabContext {
  * approval preview instead, so this returns null for one and the caller routes
  * it there.
  */
-function libraryUseInvocation(entry: Pick<LibraryEntry, "kind" | "name">): string | null {
-	if (entry.kind === "plugin") return "/resources plugins ";
-	if (entry.kind === "fleet") return null;
-	if (entry.kind === "agent") return `/run ${entry.name} `;
-	if (entry.kind === "prompt") return `/${entry.name} `;
-	return `/skill ${entry.name} `;
+function libraryUseInvocation(entry: Pick<LibraryEntry, "kind" | "name">, scope?: "user" | "project"): string | null {
+	if (entry.kind === "plugin") return "/library plugin";
+	const name = libraryRuntimeName(entry, scope ? { scope } : {});
+	if (!name || entry.kind === "fleet") return null;
+	if (entry.kind === "skill") return `/skill ${name} `;
+	if (entry.kind === "agent") return `/run ${name} `;
+	return `/${name} `;
 }
 
 function groupForScope(scope: string): string {
@@ -186,76 +164,6 @@ function buildInstalledItems(list: ResourceList<Skill>): ListOverlayItem[] {
 }
 
 /** @internal exported for contract tests */
-function buildMarketplaceItems(
-	skills: ReadonlyArray<MarketplaceSkill>,
-	installed: ReadonlySet<string>,
-): ListOverlayItem[] {
-	const items: ListOverlayItem[] = [];
-	const seen = new Set<string>();
-	for (const skill of skills) {
-		if (installed.has(skill.name) || seen.has(skill.name)) continue;
-		seen.add(skill.name);
-		const metaParts: string[] = [skill.origin];
-		if (skill.version) metaParts.push(`v${skill.version}`);
-		items.push({
-			id: `marketplace:${skill.name}`,
-			label: skill.name,
-			meta: metaParts.join(" · "),
-			group: GROUP_MARKETPLACE,
-			detail: () => [
-				`# ${skill.name}`,
-				`**Invoke:** \`/skill ${skill.name} [task]\` (prompts to install first)`,
-				"**Install now:** press `i`",
-				`**Source:** \`${skill.sourceUrl}\``,
-				`**Origin:** ${skill.origin}${skill.category ? ` (${skill.category})` : ""}${skill.audit ? ` · audit ${skill.audit}` : ""}`,
-				"",
-				"---",
-				"",
-				skill.description,
-			],
-		});
-	}
-	return items;
-}
-
-/** @internal exported for contract tests */
-function buildDiagnosticItems(
-	list: ResourceList<Skill>,
-	marketplaceDiagnostics: ReadonlyArray<string> = [],
-): ListOverlayItem[] {
-	const theme = clioTheme();
-	const items = list.diagnostics.map((diag, index) => {
-		const marker = diag.type === "error" ? theme.fg("error", GLYPH.error) : theme.fg("warning", GLYPH.warnInline);
-		return {
-			id: `diagnostic-${index}`,
-			label: `${marker} ${diag.message}`,
-			...(diag.path ? { meta: diag.path } : {}),
-			group: GROUP_DIAGNOSTICS,
-			detail: () => [
-				"# Skill diagnostic",
-				`**Severity:** ${diag.type}`,
-				`**Message:** ${diag.message}`,
-				`**File:** ${diag.path ?? "(unknown)"}`,
-			],
-		};
-	});
-	// An unconfigured marketplace is the empty state, not a diagnostic; anything
-	// else the lookup reports (an unreadable index, a broken catalog package) is
-	// a real failure and gets its own row.
-	for (const message of marketplaceDiagnostics) {
-		if (message === MARKETPLACE_UNCONFIGURED) continue;
-		items.push({
-			id: `marketplace-diagnostic-${items.length}`,
-			label: `${theme.fg("warning", GLYPH.warnInline)} ${message}`,
-			meta: "marketplace",
-			group: GROUP_DIAGNOSTICS,
-			detail: () => ["# Marketplace diagnostic", `**Message:** ${message}`],
-		});
-	}
-	return items;
-}
-
-/** @internal exported for contract tests */
 function libraryRowId(entry: Pick<LibraryEntry, "kind" | "name">): string {
 	return `${LIBRARY_ROW_PREFIX}${libraryEntryRef(entry)}`;
 }
@@ -280,11 +188,8 @@ function buildLibraryItems(kind: LibraryEntryKind, context: LibraryTabContext): 
 			const pin = context.pin(entry);
 			const unresolved = context.unresolved(entry).map(libraryEntryRef);
 			const metaParts: string[] = [entry.origin];
-			const pluginCopies =
-				entry.kind === "plugin"
-					? listInstalledPlugins(process.cwd(), { all: true }).filter((item) => item.id === entry.name)
-					: [];
-			const plugin = pluginCopies[0];
+			const pluginCopies = listInstalledPlugins(process.cwd(), { all: true }).filter((item) => item.id === entry.name);
+			const plugin = pluginCopies.find((item) => item.scope === context.scope);
 			if (entry.version) metaParts.push(`v${entry.version}`);
 			metaParts.push(
 				plugin
@@ -301,13 +206,13 @@ function buildLibraryItems(kind: LibraryEntryKind, context: LibraryTabContext): 
 				meta: metaParts.join(" · "),
 				group: installed ? GROUP_INSTALLED : GROUP_AVAILABLE,
 				detail: () => {
-					const use = libraryUseInvocation(entry);
+					const use = libraryUseInvocation(entry, context.scope);
 					const lines = [
 						`# ${entry.name}`,
 						`**Kind:** ${entry.kind}`,
-						`**Use:** ${use === null ? "`Enter` opens the /fleet run approval preview" : `\`${use.trim()}\``}`,
+						`**Use:** ${use === null ? (entry.kind === "fleet" && plugin?.loadable ? "`Enter` opens the /fleet run approval preview" : "Install and enable a verified copy to activate its resource") : `\`${use.trim()}\``}`,
 						`**State:** ${installed ? "installed" : "available"}${pin ? ` · pinned ${pin.sha256.slice(0, 12)}` : " · unpinned"}`,
-						`**Destination:** \`${libraryInstallPath(entry)}\``,
+						`**Destination:** \`${libraryInstallPath(entry, { scope: context.scope })}\``,
 						`**Source:** \`${entry.sourceUrl}\``,
 						`**Origin:** ${entry.origin}`,
 					];
@@ -324,7 +229,7 @@ function buildLibraryItems(kind: LibraryEntryKind, context: LibraryTabContext): 
 							...plugin.diagnostics.map((diagnostic) => `**${diagnostic.type}:** ${diagnostic.message}`),
 							"",
 							"**Actions:** u update · e enable/disable · r remove · p show verified pin · d check drift",
-							"Changes refresh with `/resources plugins reload`.",
+							"Changes refresh with `/library reload`.",
 						);
 					}
 					if ((entry.requires ?? []).length > 0) {
@@ -381,7 +286,7 @@ export interface LibraryInstallRunner {
 }
 
 /**
- * Install one library entry through the same sequence `library add` runs.
+ * Install one library entry through the same sequence `library install` runs.
  *
  * The order is the CLI's order and the refusals are the CLI's refusals: an
  * entry with an unmet requirement is refused by name and nothing is planned, a
@@ -444,37 +349,23 @@ async function runLibraryInstall(
 	}
 }
 
-export function openSkillsHub(tui: TUI, deps: SkillsHubDeps): OverlayHandle {
-	const discoverMarketplace = deps.discoverMarketplace ?? (() => discoverMarketplaceSkills());
+export function openLibraryOverlay(tui: TUI, deps: LibraryOverlayDeps): OverlayHandle {
 	const readLibrary = deps.discoverLibrary ?? (() => discoverLibrary());
-	const classify = deps.classifyRequirements ?? classifyLibraryRequirements;
-	const plan = deps.planInstall ?? planLibraryInstall;
+	let scope: "user" | "project" = "user";
+	const classify =
+		deps.classifyRequirements ?? ((entry, catalog) => classifyLibraryRequirements(entry, catalog, { scope }));
+	const plan = deps.planInstall ?? ((entry) => planLibraryInstall(entry, { scope }));
 	const write = deps.installPlan ?? installLibraryPlan;
-	const installed = deps.entryInstalled ?? libraryEntryInstalled;
-	const pin = deps.entryPin ?? libraryEntryPin;
+	const installed = deps.entryInstalled ?? ((entry) => libraryEntryInstalled(entry, { scope }));
+	const pin = deps.entryPin ?? ((entry) => libraryEntryPin(entry, { scope }));
 
-	// Rebuilt rather than mutated in place: the view memoizes its frame on the row
-	// set, so a spliced array leaves an installed skill drawn as installable.
-	const buildRows = (): ListOverlayItem[] => {
-		const list = deps.listSkills();
-		const discovery = discoverMarketplace();
-		const installedNames = new Set(list.items.map((skill) => skill.name));
-		return [
-			...buildInstalledItems(list),
-			...buildMarketplaceItems(discovery.skills, installedNames),
-			...buildDiagnosticItems(list, discovery.diagnostics),
-		];
-	};
-
-	// One discovery pass feeds all three library tabs. The tab bar asks every tab
-	// for its rows on each rebuild, and four independent catalog reads per
-	// keystroke would be four answers to the same question.
 	let libraryCache: LibraryTabContext | null = null;
 	const libraryContext = (): LibraryTabContext => {
 		if (libraryCache) return libraryCache;
 		const discovery = readLibrary();
 		libraryCache = {
 			discovery,
+			scope,
 			installed,
 			pin,
 			unresolved: (entry) => {
@@ -496,7 +387,15 @@ export function openSkillsHub(tui: TUI, deps: SkillsHubDeps): OverlayHandle {
 
 	const buildLibraryRows = (kind: LibraryEntryKind): ListOverlayItem[] => {
 		const context = libraryContext();
-		return [...buildLibraryItems(kind, context), ...buildLibraryDiagnosticItems(context.discovery)];
+		const runtime = kind === "skill" ? deps.listSkills() : { items: [], diagnostics: [] };
+		const loose = runtime.items.filter(
+			(skill) => !context.discovery.entries.some((entry) => entry.kind === "skill" && entry.name === skill.name),
+		);
+		return [
+			...buildLibraryItems(kind, context),
+			...buildInstalledItems({ ...runtime, items: loose }),
+			...buildLibraryDiagnosticItems(context.discovery),
+		];
 	};
 
 	const entryForRow = (item: ListOverlayItem): LibraryEntry | undefined => {
@@ -508,7 +407,7 @@ export function openSkillsHub(tui: TUI, deps: SkillsHubDeps): OverlayHandle {
 	const tabs: ListOverlayTab[] = LIBRARY_TABS.map((tab) => ({
 		id: tab.id,
 		label: tab.label,
-		items: tab.id === "skill" ? buildRows : () => buildLibraryRows(tab.id),
+		items: () => buildLibraryRows(tab.id),
 	}));
 
 	let closed = false;
@@ -557,10 +456,11 @@ export function openSkillsHub(tui: TUI, deps: SkillsHubDeps): OverlayHandle {
 			return;
 		}
 		if (entry.kind === "fleet") {
-			deps.openFleetRun?.(entry.name);
+			const name = libraryRuntimeName(entry, { scope });
+			if (name) deps.openFleetRun?.(name);
 			return;
 		}
-		const invocation = libraryUseInvocation(entry);
+		const invocation = libraryUseInvocation(entry, scope);
 		if (invocation === null) return;
 		deps.setEditorText(invocation);
 		deps.onClose();
@@ -595,11 +495,11 @@ export function openSkillsHub(tui: TUI, deps: SkillsHubDeps): OverlayHandle {
 		})();
 	};
 
-	const pluginAction = (item: ListOverlayItem, action: PluginLibraryAction): void => {
+	const pluginAction = (item: ListOverlayItem, action: LibraryAction): void => {
 		const entry = entryForRow(item);
-		if (entry?.kind !== "plugin" || installInFlight) return;
+		if (!entry || installInFlight) return;
 		installInFlight = true;
-		void runPluginLibraryAction(entry, action, confirmInstall)
+		void runLibraryAction(entry, action, confirmInstall, { scope })
 			.then((message) => deps.notice("info", message))
 			.catch((error) => deps.notice("error", error instanceof Error ? error.message : String(error)))
 			.finally(() => {
@@ -612,8 +512,8 @@ export function openSkillsHub(tui: TUI, deps: SkillsHubDeps): OverlayHandle {
 	};
 
 	handle = openListOverlay(tui, {
-		markerId: "skills-hub",
-		title: SKILLS_HUB_TITLE,
+		markerId: "library",
+		title: LIBRARY_TITLE,
 		items: [],
 		tabs,
 		...(deps.initialTab ? { activeTabId: deps.initialTab } : {}),
@@ -622,10 +522,11 @@ export function openSkillsHub(tui: TUI, deps: SkillsHubDeps): OverlayHandle {
 		},
 		filterable: true,
 		layout: "split",
-		emptyMessage: SKILLS_HUB_EMPTY,
+		emptyMessage: LIBRARY_EMPTY,
 		hints: [
 			{ key: "Enter", verb: "use" },
 			{ key: "i", verb: "install" },
+			{ key: "s", verb: "scope" },
 		],
 		onSelect: (item) => {
 			if (item.group === GROUP_DIAGNOSTICS) return;
@@ -634,11 +535,17 @@ export function openSkillsHub(tui: TUI, deps: SkillsHubDeps): OverlayHandle {
 				useEntry(entry);
 				return;
 			}
-			const name = item.id.startsWith("marketplace:") ? item.id.slice("marketplace:".length) : item.id;
+			const name = item.id;
 			deps.setEditorText(`/skill ${name} `);
 			deps.onClose();
 		},
 		actions: {
+			s: () => {
+				scope = scope === "user" ? "project" : "user";
+				invalidateLibrary();
+				deps.notice("info", `Library actions now select ${scope} scope`);
+				handle.refreshTabs();
+			},
 			u: (item) => pluginAction(item, "update"),
 			e: (item) => pluginAction(item, "toggle"),
 			r: (item) => pluginAction(item, "remove"),
@@ -651,24 +558,6 @@ export function openSkillsHub(tui: TUI, deps: SkillsHubDeps): OverlayHandle {
 					installEntry(entry);
 					return;
 				}
-				if (!item.id.startsWith("marketplace:")) return;
-				const name = item.id.slice("marketplace:".length);
-				installInFlight = true;
-				void (async () => {
-					try {
-						const result = await deps.installSkill(name);
-						for (const warning of result.warnings) deps.notice("warn", `skill ${name}: ${warning}`);
-						deps.notice("success", `installed skill ${name} at ${result.path}`);
-					} catch (err) {
-						deps.notice("error", `skill install failed: ${err instanceof Error ? err.message : String(err)}`);
-					} finally {
-						installInFlight = false;
-						if (!closed) {
-							invalidateLibrary();
-							handle.refreshTabs();
-						}
-					}
-				})();
 			},
 		},
 		onClose: deps.onClose,

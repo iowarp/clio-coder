@@ -1,5 +1,4 @@
 import type { LibraryEntryKind, ResourcesContract } from "../domains/resources/index.js";
-import { installSkill as installMarketplaceSkill } from "../domains/resources/skills/marketplace.js";
 import type { TUI } from "../engine/tui.js";
 import type { ClioEditor } from "./clio-editor.js";
 import type { ClioKeybindingManager } from "./keybinding-manager.js";
@@ -8,8 +7,8 @@ import { openAgentsOverlay } from "./overlays/agents.js";
 import { openExtensionsOverlay } from "./overlays/extensions.js";
 import { openHelpOverlay } from "./overlays/help-reference.js";
 import { openInteropOverlay } from "./overlays/interop.js";
+import { openLibraryOverlay } from "./overlays/library.js";
 import { openPromptsOverlay } from "./overlays/prompts.js";
-import { openSkillsHub } from "./overlays/skills-hub.js";
 import type { SlashCommandContext } from "./slash-commands.js";
 
 export interface OverlayResourceOpenersDeps {
@@ -22,11 +21,10 @@ export interface OverlayResourceOpenersDeps {
 	closeOverlay: () => void;
 	openHelpOverlay?: typeof openHelpOverlay;
 	openAgentsOverlay?: typeof openAgentsOverlay;
-	openSkillsHub?: typeof openSkillsHub;
+	openSkillsHub?: typeof openLibraryOverlay;
 	openPromptsOverlay?: typeof openPromptsOverlay;
 	openExtensionsOverlay?: typeof openExtensionsOverlay;
 	openInteropOverlay?: typeof openInteropOverlay;
-	installSkill?: typeof installMarketplaceSkill;
 }
 
 export interface OverlayResourceOpeners {
@@ -41,11 +39,10 @@ export interface OverlayResourceOpeners {
 export function createOverlayResourceOpeners(deps: OverlayResourceOpenersDeps): OverlayResourceOpeners {
 	const openHelp = deps.openHelpOverlay ?? openHelpOverlay;
 	const openAgents = deps.openAgentsOverlay ?? openAgentsOverlay;
-	const openSkills = deps.openSkillsHub ?? openSkillsHub;
+	const openSkills = deps.openSkillsHub ?? openLibraryOverlay;
 	const openPrompts = deps.openPromptsOverlay ?? openPromptsOverlay;
 	const openExtensions = deps.openExtensionsOverlay ?? openExtensionsOverlay;
 	const openInterop = deps.openInteropOverlay ?? openInteropOverlay;
-	const installSkill = deps.installSkill ?? installMarketplaceSkill;
 
 	const openHelpOverlayState = (query?: string): void => {
 		if (deps.transitions.state !== "closed") return;
@@ -79,10 +76,7 @@ export function createOverlayResourceOpeners(deps: OverlayResourceOpenersDeps): 
 				deps.tui.requestRender();
 			},
 			notice: (level, text) => deps.getSlashContext().notice(level, text),
-			installSkill: async (name) => {
-				const result = installSkill({ source: name, scope: "project" });
-				return { name: result.name, path: result.path, warnings: result.warnings };
-			},
+
 			onClose: deps.closeOverlay,
 		});
 		deps.tui.requestRender();

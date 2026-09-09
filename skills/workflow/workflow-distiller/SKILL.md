@@ -158,7 +158,7 @@ skills validate` needs `bash`, which is outside this skill's tool surface -
 never attempt it; instead `read` the file back and confirm the frontmatter
 contract from Phase 5 by eye (required keys present, `allowed-tools` entries
 canonical lowercase, under the line budget), and say plainly that a real
-`clio-coder skills validate` pass is still owed once bash is available.
+`clio-coder library validate` pass is still owed once bash is available.
 Otherwise record the scenario in the skill body's example section as the
 standing validation obligation. This skill has no `bash`/`git`, so it never
 commits or pushes the file it writes; say so and let the user commit it.
@@ -180,7 +180,7 @@ script, and verified row counts against the source, three sessions in a row.
 4. Gate: summary presented; user approves after tightening the description.
 5. Create: write `.clio-coder/skills/csv-ingest/SKILL.md`, placeholders for the
    export URL and column map; frontmatter contract confirmed by reading the
-   file back (no `bash`, so no `clio-coder skills validate` this turn).
+   file back (no `bash`, so no `clio-coder library validate` this turn).
 6. Validate: scenario "ingest this month's export" must show fetch,
    normalize, count-verify, spot-check in that order; recorded in the body.
 
@@ -196,6 +196,6 @@ script, and verified row counts against the source, three sessions in a row.
 - Session-specific paths or values surviving into the generated skill.
 - Batching interview questions or ignoring a stop signal.
 - Distilling a one-off without asking about recurrence.
-- Calling `bash` for `clio-coder skills validate`, or `context` with a
+- Calling `bash` for `clio-coder library validate`, or `context` with a
   second skill's name to consult it mid-run: both are outside this skill's
   tool surface and refused.

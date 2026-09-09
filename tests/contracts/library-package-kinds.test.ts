@@ -120,6 +120,16 @@ for (const kind of ["skill", "prompt"] as const)
 							trustProjectCompatRoots: readSettings().integrations.projectResources.trustProjectImports,
 						}).items.find((e) => e.name === "example")?.trusted;
 			equal(loaded(), false);
+			if (kind === "skill") {
+				const file = join(installed.plugin.rootPath, "skills/example/SKILL.md");
+				equal(loadSkills({ cwd, disableDiscovery: true, explicitSkillPaths: [file] }).items[0]?.trusted, false);
+				equal(
+					loadSkills({ cwd, disableDiscovery: true, explicitSkillPaths: [file], trustProjectCompatRoots: true }).items[0]
+						?.trusted,
+					true,
+				);
+			}
+
 			updateSettings((settings) => {
 				settings.integrations.projectResources.trustProjectImports = true;
 			});

@@ -51,30 +51,30 @@ function context(overrides: Partial<SlashCommandContext>): {
 	return { ctx, notices, opened: () => opened };
 }
 
-describe("/resources extensions reload", () => {
+describe("/library extensions reload", () => {
 	it("parses through the existing resources grammar and refuses unknown actions", () => {
-		deepStrictEqual(parseSlashCommand("/resources extensions reload"), {
+		deepStrictEqual(parseSlashCommand("/library extensions reload"), {
 			kind: "resources",
 			family: "extensions",
 			action: "reload",
 		});
-		deepStrictEqual(parseSlashCommand("/resources extensions"), { kind: "resources", family: "extensions" });
-		const unknown = parseSlashCommand("/resources extensions frobnicate");
+		deepStrictEqual(parseSlashCommand("/library extensions"), { kind: "resources", family: "extensions" });
+		const unknown = parseSlashCommand("/library extensions frobnicate");
 		strictEqual(unknown.kind, "usage-error");
-		const spec = BUILTIN_SLASH_COMMANDS.find((entry) => entry.name === "resources");
-		deepStrictEqual(spec?.args?.subcommands?.extensions?.positionals?.[0]?.values, ["reload"]);
+		const spec = BUILTIN_SLASH_COMMANDS.find((entry) => entry.name === "library");
+		deepStrictEqual(spec?.args?.positionals?.[1]?.values, ["reload"]);
 	});
 
 	it("runs the coordinator, reports the outcome, and reopens the overlay only on commit", () => {
 		const success = context({ reloadExtensions: () => committed });
-		dispatchSlashCommand(parseSlashCommand("/resources extensions reload"), success.ctx);
+		dispatchSlashCommand(parseSlashCommand("/library extensions reload"), success.ctx);
 		deepStrictEqual(success.notices, [
 			["success", "extensions: generation 3 committed (changed: +1 -0 ~1); hooks: 2 registered"],
 		]);
 		strictEqual(success.opened(), 1);
 
 		const failure = context({ reloadExtensions: () => rejected });
-		dispatchSlashCommand(parseSlashCommand("/resources extensions reload"), failure.ctx);
+		dispatchSlashCommand(parseSlashCommand("/library extensions reload"), failure.ctx);
 		deepStrictEqual(failure.notices, [
 			["error", "extensions: reload rejected (build-failed); generation 2 stays active"],
 			["warn", "[clio-coder:extensions] listing failed"],
@@ -82,12 +82,12 @@ describe("/resources extensions reload", () => {
 		strictEqual(failure.opened(), 0);
 
 		const absent = context({});
-		dispatchSlashCommand(parseSlashCommand("/resources extensions reload"), absent.ctx);
+		dispatchSlashCommand(parseSlashCommand("/library extensions reload"), absent.ctx);
 		strictEqual(absent.notices[0]?.[0], "warn");
 		strictEqual(absent.opened(), 0);
 
 		const browse = context({ reloadExtensions: () => committed });
-		dispatchSlashCommand(parseSlashCommand("/resources extensions"), browse.ctx);
+		dispatchSlashCommand(parseSlashCommand("/library extensions"), browse.ctx);
 		deepStrictEqual(browse.notices, []);
 		strictEqual(browse.opened(), 1);
 	});

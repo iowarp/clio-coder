@@ -1,5 +1,6 @@
 import { existsSync, readdirSync, readFileSync, realpathSync } from "node:fs";
 import path from "node:path";
+import { readSettings } from "../../core/config.js";
 import { resolvePackageRoot } from "../../core/package-root.js";
 import { clioConfigDir } from "../../core/xdg.js";
 import { enabledPluginResourceRoots } from "../plugins/index.js";
@@ -33,11 +34,13 @@ function resolveBoundSkills(recipe: AgentRecipe, source: RecipeSource): AgentRec
 		source.source === "plugin"
 			? loadSkills({
 					cwd: source.cwd ?? process.cwd(),
+					trustProjectCompatRoots: readSettings().integrations.projectResources.trustProjectImports,
 					disableDiscovery: true,
 					explicitSkillPaths: source.skillRoot === undefined ? [] : [source.skillRoot],
 				})
 			: loadSkills({
 					cwd: source.cwd ?? process.cwd(),
+					trustProjectCompatRoots: readSettings().integrations.projectResources.trustProjectImports,
 					...(source.source === "builtin" && existsSync(packageSkills) ? { explicitSkillPaths: [packageSkills] } : {}),
 				});
 	if (source.source === "plugin" && source.skillRoot !== undefined) {
@@ -49,7 +52,7 @@ function resolveBoundSkills(recipe: AgentRecipe, source: RecipeSource): AgentRec
 			}
 		}
 	}
-	const byName = new Map(skills.items.map((skill) => [skill.name, skill.filePath]));
+	const byName = new Map(skills.items.filter((skill) => skill.trusted).map((skill) => [skill.name, skill.filePath]));
 	const missing = recipe.skills.filter((skill) => !byName.has(skill));
 	if (missing.length > 0) {
 		throw new Error(`agent recipe: ${recipe.filepath}: bound skill(s) unavailable: ${missing.join(", ")}`);

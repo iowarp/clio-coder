@@ -77,7 +77,7 @@ describe("harness extension package boundary", () => {
 					(diagnostic) =>
 						diagnostic.type === "error" &&
 						diagnostic.message ===
-							`harness extensions cannot declare '${key}'; domain resources belong in a plugin: clio-coder plugins install <path>`,
+							`harness extensions cannot declare '${key}'; domain resources belong in a plugin: clio-coder library install <path>`,
 				),
 				`missing plugin guidance for ${key}`,
 			);

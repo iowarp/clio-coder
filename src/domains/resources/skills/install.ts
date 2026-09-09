@@ -23,7 +23,7 @@ const SKILL_NAME_PATTERN = /^[a-z0-9]+(?:-[a-z0-9]+)*$/;
 const CLONE_TIMEOUT_MS = 60_000;
 
 /** True when the value has the bare skill-name shape (lowercase, hyphenated). */
-export function isSkillName(value: string): boolean {
+function isSkillName(value: string): boolean {
 	return value.length > 0 && value.length <= 64 && SKILL_NAME_PATTERN.test(value);
 }
 
@@ -141,7 +141,7 @@ export function parseSkillSourceSpec(source: string): SkillSourceSpec | null {
  * Whether this process is running inside a dispatched worker rather than the
  * operator's own interactive session. `worker/entry.ts` sets this on itself at
  * launch, so it rides the environment into every bash-tool child a worker
- * spawns, including a `clio-coder skills install` a worker runs directly.
+ * spawns, including a `clio-coder library install` a worker runs directly.
  */
 function installingAsWorker(): boolean {
 	return process.env.CLIO_CODER_WORKER_RUN === "1";

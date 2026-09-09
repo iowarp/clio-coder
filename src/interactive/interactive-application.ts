@@ -125,7 +125,7 @@ export interface InteractiveDeps {
 	initialNotices?: ReadonlyArray<string>;
 	resources?: ResourcesContract;
 	extensions?: ExtensionsContract;
-	/** `/resources extensions reload` seam; the composition root supplies the coordinator. */
+	/** `/library extensions reload` seam; the composition root supplies the coordinator. */
 	reloadExtensions?: SlashCommandContext["reloadExtensions"];
 	reloadPlugins?: SlashCommandContext["reloadPlugins"];
 	interop?: InteropContract;

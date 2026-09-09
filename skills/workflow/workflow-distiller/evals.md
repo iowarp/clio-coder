@@ -103,7 +103,7 @@ prompt; the phases still had to run in order.
 
 ## Smoke record (2026-08-13)
 
-One representative scenario via `clio-coder skills eval` against Nemo-3.5-Lightning
+One representative scenario via `clio-coder eval skill` against Nemo-3.5-Lightning
 (30B local, llamacpp on mini), full-auto sandbox. PASS. Inline session-trace setup engaged; judge 5/6.
 
 ## Battletest record (2026-09-03)
@@ -131,7 +131,7 @@ surfaced in Phase 5/6: (1) "load skill-craft" is dead - `context(scope=
 "skills", name="skill-craft")` while workflow-distiller is itself the
 active pending skill is refused ("pending skill request(s)"); only one
 skill can be active at a time. (2) Phase 6's "confirm it loads with
-`clio-coder skills validate`" is dead - `bash` is outside this skill's
+`clio-coder library validate`" is dead - `bash` is outside this skill's
 `allowed-tools`, so that command can never run. The model self-recovered
 both times (read its own installed SKILL.md as a frontmatter mirror; did a
 by-eye read-back instead of the blocked validate command) and reported the
@@ -175,7 +175,7 @@ I'll hold off writing until you approve" and, when a later `ask_user`
 round had already closed, correctly fell back to a plain-text approval
 request rather than stalling - explicitly restating, unprompted, every
 constraint this session's hardening pass had just added (no commit, no
-`clio-coder skills validate`, `tasks` out of surface). Phase 5 went
+`clio-coder library validate`, `tasks` out of surface). Phase 5 went
 straight to `read`-ing its own installed SKILL.md to mirror the frontmatter
 contract, with zero attempt to load skill-craft - bug #1 confirmed fixed.
 The generated `.clio-coder/skills/add-signature-scanner/SKILL.md` (97
@@ -212,7 +212,7 @@ agree. Ran the full assumed-confirm monologue through Phase 2 and Phase 4
 (explicitly marked), wrote `.clio-coder/skills/signature-scanner/SKILL.md`
 (92 lines, valid frontmatter, canonical-lowercase tools, real placeholders,
 a concrete failure-behavior section, a validation scenario naming the still
--owed real `clio-coder skills validate` pass). Zero safety blocks.
+-owed real `clio-coder library validate` pass). Zero safety blocks.
 
 **Still weak**: the skill-craft mid-run-load and dead-`bash`-validate bugs
 are confirmed fixed by re-test, but only against this one fixture shape.

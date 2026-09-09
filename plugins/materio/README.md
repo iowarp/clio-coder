@@ -13,7 +13,7 @@ templates, and Python helpers live under `assets/`.
 
 ## Clio workflow
 
-Install the whole package with `clio-coder plugins install ./plugins/materio --project`
+Install the whole package with `clio-coder library install ./plugins/materio --project`
 from the repository, then reload plugin resources or restart the session. An
 installed copy is a pinned tree; editing this source does not update that copy.
 

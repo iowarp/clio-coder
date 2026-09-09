@@ -1,10 +1,8 @@
 /**
  * The resource library's install confirmation, as an overlay.
  *
- * `clio-coder library add` prints every destination and SHA-256 hash and writes
- * nothing until `--yes` is present. This overlay is that same gate for the
- * Skills Hub: it states every path the install would write and the hash it
- * would write there, and nothing reaches disk until the operator presses Enter.
+ * `clio-coder library install --dry-run` reports the same destinations and
+ * SHA-256 hashes. This overlay writes only after the operator presses Enter.
  * Esc leaves the plan unexecuted, so a cancelled confirmation is a run in which
  * no file changed.
  *
@@ -18,7 +16,6 @@ import {
 	matchesKey,
 	type OverlayHandle,
 	type TUI,
-	truncateToWidth,
 	wrapTextWithAnsi,
 } from "../../engine/tui.js";
 import { buildResponsiveHint, FocusBox, showClioOverlayFrame } from "../overlay-frame.js";
@@ -29,7 +26,7 @@ export const LIBRARY_INSTALL_CONFIRM_TITLE = "Library install";
 const MIN_WIDTH = 48;
 const MAX_WIDTH = 110;
 
-/** One planned write, in the terms `library add` reports it. */
+/** One planned write, in the terms `library install --dry-run` reports it. */
 export interface LibraryInstallWrite {
 	ref: string;
 	path: string;
@@ -64,7 +61,7 @@ function confirmOverlayWidth(columns: number): number {
 }
 
 /** Render the plan: what is being installed, alongside what, and to where. */
-function formatLibraryInstallConfirmBody(subject: LibraryInstallConfirmSubject, width: number): string[] {
+export function formatLibraryInstallConfirmBody(subject: LibraryInstallConfirmSubject, width: number): string[] {
 	const theme = clioTheme();
 	const contentWidth = Math.max(1, Math.floor(width));
 	const rows: string[] = [];
@@ -77,10 +74,9 @@ function formatLibraryInstallConfirmBody(subject: LibraryInstallConfirmSubject, 
 	rows.push(rule(theme, contentWidth));
 
 	for (const write of subject.writes) {
-		if (write.sourceUrl)
-			rows.push(theme.fg("dim", truncateToWidth(`source: ${write.sourceUrl}`, contentWidth, "…", false)));
-		rows.push(theme.fg("muted", truncateToWidth(`${write.ref} → ${write.path}`, contentWidth, "…", false)));
-		rows.push(theme.fg("dim", truncateToWidth(`    sha256 ${write.sha256}`, contentWidth, "…", false)));
+		if (write.sourceUrl) rows.push(...wrapTextWithAnsi(theme.fg("dim", `source: ${write.sourceUrl}`), contentWidth));
+		rows.push(...wrapTextWithAnsi(theme.fg("muted", `${write.ref} → ${write.path}`), contentWidth));
+		rows.push(...wrapTextWithAnsi(theme.fg("dim", `    sha256 ${write.sha256}`), contentWidth));
 	}
 
 	rows.push(rule(theme, contentWidth));
@@ -101,10 +97,24 @@ function formatLibraryInstallConfirmBody(subject: LibraryInstallConfirmSubject, 
 }
 
 class LibraryInstallConfirmBody implements Component {
+	private scroll = 0;
+	private maxScroll = 0;
+	private rows = 12;
+	handleInput(data: string): void {
+		const down = matchesKey(data, "pageDown") || matchesKey(data, "down");
+		const up = matchesKey(data, "pageUp") || matchesKey(data, "up");
+		if (down || up) this.scroll = Math.max(0, Math.min(this.maxScroll, this.scroll + (down ? this.rows : -this.rows)));
+	}
 	constructor(private readonly subject: LibraryInstallConfirmSubject) {}
 
 	render(width: number): string[] {
-		return formatLibraryInstallConfirmBody(this.subject, width);
+		const body = formatLibraryInstallConfirmBody(this.subject, width);
+		this.rows = Math.max(4, (process.stdout.rows || 30) - 10);
+		this.maxScroll = Math.max(0, body.length - this.rows);
+		this.scroll = Math.min(this.scroll, this.maxScroll);
+		const shown = body.slice(this.scroll, this.scroll + this.rows);
+		if (this.maxScroll) shown.push(`(${this.scroll + 1}-${this.scroll + shown.length}/${body.length}) PgUp/PgDn`);
+		return shown;
 	}
 
 	invalidate(): void {}
@@ -127,7 +137,8 @@ export function openLibraryInstallConfirmOverlay(
 		options.onCancel();
 	};
 
-	const focus = new FocusBox(new LibraryInstallConfirmBody(options.subject), {
+	const body = new LibraryInstallConfirmBody(options.subject);
+	const focus = new FocusBox(body, {
 		// Keys are matched by name, never by raw bytes: under the kitty keyboard
 		// protocol Esc arrives as CSI 27 u, and a byte comparison against "\x1b"
 		// left the overlay unanswerable. Everything unmatched is swallowed.
@@ -138,6 +149,10 @@ export function openLibraryInstallConfirmOverlay(
 				return;
 			}
 			if (matchesKey(data, "escape")) cancel();
+			else {
+				body.handleInput(data);
+				tui.requestRender();
+			}
 		},
 	});
 

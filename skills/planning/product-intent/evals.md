@@ -32,7 +32,7 @@ Expected:
 
 ## Smoke record (2026-08-13)
 
-One representative scenario via `clio-coder skills eval` against Nemo-3.5-Lightning
+One representative scenario via `clio-coder eval skill` against Nemo-3.5-Lightning
 (30B local, llamacpp on mini), full-auto sandbox. PASS. Interview degraded gracefully headless; PRD written to docs/, judge 5/5.
 
 ## Battletest record (2026-09-03)

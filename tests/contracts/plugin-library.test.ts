@@ -1,18 +1,18 @@
 import { deepStrictEqual, equal, match, ok, throws } from "node:assert/strict";
+import { spawnSync } from "node:child_process";
 import { existsSync, mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import path from "node:path";
 import { afterEach, beforeEach, describe, it } from "node:test";
 import { stringify } from "yaml";
-import { runLibraryCommand } from "../../src/cli/library.js";
-import { runPluginsCommand } from "../../src/cli/plugins.js";
+
 import { resetXdgCache } from "../../src/core/xdg.js";
 import {
 	type PluginCatalogEntry,
 	parsePluginGithubSource,
 	readPluginCatalog,
 } from "../../src/domains/plugins/catalog.js";
-import { listInstalledPlugins, pluginContentDigest } from "../../src/domains/plugins/index.js";
+import { installLibraryPackage, listInstalledPlugins, pluginContentDigest } from "../../src/domains/plugins/index.js";
 import {
 	classifyLibraryRequirements,
 	discoverLibrary,
@@ -22,17 +22,21 @@ import {
 	libraryEntryInstalled,
 	libraryEntryPin,
 	libraryInstallPath,
+	libraryRuntimeName,
+	libraryWorkspace,
 	pinLibraryEntry,
 	planLibraryInstall,
-	planPluginUpdate,
+	planLibraryUpdate,
+	registerLibraryPackage,
 	releaseLibraryPlan,
 	removeLibraryEntry,
-	resolveLibraryPlugin,
+	resolveLibraryPackage,
 	resolveLibraryRequirements,
 } from "../../src/domains/resources/library.js";
+import { resolveLibraryEval } from "../../src/domains/resources/library-evals.js";
 import { discoverMarketplaceSkills } from "../../src/domains/resources/skills/marketplace.js";
+import { runLibraryAction } from "../../src/interactive/overlays/library-actions.js";
 import { LIBRARY_TABS } from "../../src/interactive/overlays/library-tabs.js";
-import { runPluginLibraryAction } from "../../src/interactive/overlays/plugin-actions.js";
 import { createSlashCommandAutocompleteProvider } from "../../src/interactive/slash-autocomplete.js";
 import { parseSlashCommand } from "../../src/interactive/slash-commands.js";
 
@@ -72,18 +76,20 @@ function catalog(items: LibraryEntry[]): string {
 	writeFileSync(file, stringify({ entries: items }));
 	return file;
 }
-async function captureCli(args: string[], command = runPluginsCommand): Promise<{ code: number; output: string }> {
-	let output = "";
-	const original = process.stdout.write;
-	process.stdout.write = ((chunk: string | Uint8Array) => {
-		output += String(chunk);
-		return true;
-	}) as typeof original;
-	try {
-		return { code: await command([...args, "--json"]), output };
-	} finally {
-		process.stdout.write = original;
-	}
+async function captureCli(args: string[]): Promise<{ code: number; output: string }> {
+	const result = spawnSync(
+		process.execPath,
+		[
+			"--import",
+			import.meta.resolve("tsx"),
+			new URL("../../src/cli/index.ts", import.meta.url).pathname,
+			"library",
+			...args,
+			"--json",
+		],
+		{ cwd: root, env: process.env, encoding: "utf8" },
+	);
+	return { code: result.status ?? 1, output: result.stdout || result.stderr };
 }
 
 describe("plugin library lifecycle", () => {
@@ -132,8 +138,8 @@ describe("plugin library lifecycle", () => {
 				version: "1.0.0",
 			}),
 		);
-		equal(resolveLibraryPlugin("fixture").name, "local-choice");
-		equal(resolveLibraryPlugin("plugin:fixture").name, "fixture");
+		equal(resolveLibraryPackage("fixture").name, "local-choice");
+		equal(resolveLibraryPackage("plugin:fixture").name, "fixture");
 	});
 
 	it("keeps plugin entries out of the skill marketplace", () => {
@@ -144,11 +150,7 @@ describe("plugin library lifecycle", () => {
 		equal(result.skills.length, 0);
 		ok(result.diagnostics.some((diagnostic) => diagnostic.includes("unsupported kind")));
 		catalog([entry(source)]);
-		ok(
-			discoverLibrary({ marketplace: { indexPath: null, catalogDir: null } }).entries.some(
-				(item) => item.kind === "plugin" && item.name === "fixture",
-			),
-		);
+		ok(discoverLibrary().entries.some((item) => item.kind === "plugin" && item.name === "fixture"));
 	});
 
 	it("does not mistake a stale pin for an installed resource", () => {
@@ -182,13 +184,13 @@ describe("plugin library lifecycle", () => {
 
 	it("updates a local origin to a new version and refuses destination changes after review", () => {
 		const source = bundle();
-		installLibraryPlan(planLibraryInstall(resolveLibraryPlugin(source)));
+		installLibraryPlan(planLibraryInstall(resolveLibraryPackage(source)));
 		bundle("fixture", "2.0.0");
-		const plan = planPluginUpdate("fixture");
+		const plan = planLibraryUpdate("fixture");
 		installLibraryPlan(plan);
 		equal(listInstalledPlugins(root)[0]?.version, "2.0.0");
 		bundle("fixture", "3.0.0");
-		const changed = planPluginUpdate("fixture");
+		const changed = planLibraryUpdate("fixture");
 		writeFileSync(path.join(changed.path, "assets", "evidence.txt"), "edit during review");
 		throws(() => installLibraryPlan(changed), /plugin_destination_changed/);
 		equal(listInstalledPlugins(root)[0]?.version, "2.0.0");
@@ -197,13 +199,13 @@ describe("plugin library lifecycle", () => {
 	it("updates from the latest catalog pin and refuses a changed upstream even with force", () => {
 		const source = bundle();
 		catalog([entry(source)]);
-		installLibraryPlan(planLibraryInstall(resolveLibraryPlugin("fixture")));
+		installLibraryPlan(planLibraryInstall(resolveLibraryPackage("fixture")));
 		bundle("fixture", "2.0.0");
 		catalog([entry(source)]);
-		installLibraryPlan(planPluginUpdate("fixture"));
+		installLibraryPlan(planLibraryUpdate("fixture"));
 		equal(listInstalledPlugins(root)[0]?.version, "2.0.0");
 		writeFileSync(path.join(source, "assets", "evidence.txt"), "unpinned upstream");
-		throws(() => planPluginUpdate("fixture", { force: true }), /plugin_pin_mismatch/);
+		throws(() => planLibraryUpdate("fixture", { force: true }), /plugin_pin_mismatch/);
 	});
 
 	it("CLI and interactive actions share install, toggle, pin, drift, cancellation and removal behavior", async () => {
@@ -211,15 +213,15 @@ describe("plugin library lifecycle", () => {
 		const installed = await captureCli(["install", source]);
 		equal(installed.code, 0, installed.output);
 		const item = entry(source);
-		match(await runPluginLibraryAction(item, "toggle", async () => true), /disabled/);
+		match(await runLibraryAction(item, "toggle", async () => true), /disabled/);
 		equal(listInstalledPlugins(root)[0]?.enabled, false);
 		equal((await captureCli(["enable", "fixture"])).code, 0);
-		match(await runPluginLibraryAction(item, "pin", async () => true), /pinned [a-f0-9]{64}/);
-		match(await runPluginLibraryAction(item, "drift", async () => true), /clean/);
-		match(await runPluginLibraryAction(item, "remove", async () => false), /cancelled/);
+		match(await runLibraryAction(item, "pin", async () => true), /pinned [a-f0-9]{64}/);
+		match(await runLibraryAction(item, "drift", async () => true), /clean/);
+		match(await runLibraryAction(item, "remove", async () => false), /cancelled/);
 		equal(libraryEntryInstalled(item), true);
 		match(
-			await runPluginLibraryAction(item, "remove", async (subject) => {
+			await runLibraryAction(item, "remove", async (subject) => {
 				equal(subject.action, "remove");
 				equal(subject.writes[0]?.path, libraryInstallPath(item));
 				return true;
@@ -236,7 +238,7 @@ describe("plugin library lifecycle", () => {
 		writeFileSync(
 			file,
 			stringify({
-				plugins: [
+				entries: [
 					item,
 					{ ...item, name: "unsupported", sourceUrl: "https://other.example/plugin.zip" },
 					{ ...item, name: "unpinned", sha256: undefined },
@@ -249,17 +251,17 @@ describe("plugin library lifecycle", () => {
 		equal(diagnostics.length, 2);
 		ok(parsePluginGithubSource(item.sourceUrl));
 		equal(parsePluginGithubSource("https://github.com/example/repo/tree/main/../../outside"), undefined);
-		throws(() => resolveLibraryPlugin(item.sourceUrl), /requires a catalog entry/);
+		throws(() => resolveLibraryPackage(item.sourceUrl), /requires a catalog entry/);
 	});
 
-	it("previews catalog installs in the CLI and commits only after the explicit yes flag", async () => {
+	it("previews with dry-run and commits an explicit install", async () => {
 		const item = entry(bundle());
 		catalog([item]);
-		const preview = await captureCli(["add", "plugin:fixture"], runLibraryCommand);
+		const preview = await captureCli(["install", "plugin:fixture", "--dry-run"]);
 		equal(preview.code, 0, preview.output);
 		equal(JSON.parse(preview.output).confirmed, false);
 		equal(libraryEntryInstalled(item), false);
-		const applied = await captureCli(["add", "plugin:fixture", "--yes"], runLibraryCommand);
+		const applied = await captureCli(["install", "plugin:fixture"]);
 		equal(applied.code, 0, applied.output);
 		equal(libraryEntryInstalled(item), true);
 	});
@@ -317,23 +319,23 @@ describe("plugin library lifecycle", () => {
 		equal(readFileSync(path.join(backup, "assets", "evidence.txt"), "utf8"), "preserve this edit");
 	});
 
-	it("routes the plugin tab and reload command through the resources slash surface", () => {
-		deepStrictEqual(parseSlashCommand("/resources plugins"), { kind: "resources", family: "plugins" });
-		deepStrictEqual(parseSlashCommand("/resources library plugin"), { kind: "resources", tab: "plugin" });
-		deepStrictEqual(parseSlashCommand("/resources plugins reload"), {
+	it("routes the plugin tab and reload command through the library slash surface", () => {
+		deepStrictEqual(parseSlashCommand("/library"), { kind: "resources", tab: "plugin" });
+		deepStrictEqual(parseSlashCommand("/library plugin"), { kind: "resources", tab: "plugin" });
+		deepStrictEqual(parseSlashCommand("/library reload"), {
 			kind: "resources",
 			family: "plugins",
 			action: "reload",
 		});
-		equal(parseSlashCommand("/resources plugins unsupported").kind, "usage-error");
+		equal(parseSlashCommand("/library plugin unsupported").kind, "usage-error");
 	});
 
 	it("completes plugin browsing and reload through the ordinary slash grammar", async () => {
 		const provider = createSlashCommandAutocompleteProvider({ fdPath: null });
 		for (const [line, expected] of [
-			["/resources library pl", "plugin"],
-			["/resources pl", "plugins"],
-			["/resources plugins re", "reload"],
+			["/library pl", "plugin"],
+			["/library re", "reload"],
+			["/library extensions re", "reload"],
 		]) {
 			ok(line);
 			ok(expected);
@@ -360,7 +362,7 @@ describe("plugin library lifecycle", () => {
 		);
 		catalog([entry(upstream)]);
 		bundle("fixture", "2.0.0");
-		const plan = planPluginUpdate("fixture");
+		const plan = planLibraryUpdate("fixture");
 		equal(plan.entry.sourceUrl, local);
 		installLibraryPlan(plan);
 		const installed = listInstalledPlugins(root)[0];
@@ -371,7 +373,7 @@ describe("plugin library lifecycle", () => {
 	it("retains dedicated plugin catalog requirements and checks their dependency graph", () => {
 		const item = entry(bundle(), { requires: ["plugin:missing"] });
 		const file = path.join(root, "plugins.yaml");
-		writeFileSync(file, stringify({ plugins: [item] }));
+		writeFileSync(file, stringify({ entries: [item] }));
 		const diagnostics: string[] = [];
 		const rows = readPluginCatalog(file, diagnostics);
 		deepStrictEqual(rows[0]?.requires, ["plugin:missing"]);
@@ -395,7 +397,7 @@ describe("plugin library lifecycle", () => {
 			status.inactive?.map((item) => item.name),
 			["fixture"],
 		);
-		const add = await captureCli(["add", "plugin:consumer", "--with-requirements", "--yes"], runLibraryCommand);
+		const add = await captureCli(["install", "plugin:consumer", "--with-requirements"]);
 		equal(add.code, 1);
 		match(add.output, /library_requirement_inactive/);
 		equal((await captureCli(["install", "consumer"])).code, 1);
@@ -419,6 +421,52 @@ describe("plugin library lifecycle", () => {
 		equal(libraryEntryInstalled(item), false);
 	});
 
+	it("registers scoped pins, preserves all copies after index removal, and resolves only declared evals", async () => {
+		const source = bundle();
+		mkdirSync(path.join(source, "evals"));
+		writeFileSync(path.join(source, "evals/check.yaml"), "version: 2\n");
+		const file = path.join(source, "plugin.json");
+		const manifest = JSON.parse(readFileSync(file, "utf8"));
+		manifest.extensions = { "ai.iowarp.clio": { manifestVersion: 1, evals: { check: "evals/check.yaml" } } };
+		writeFileSync(file, JSON.stringify(manifest));
+		const registered = registerLibraryPackage(source, { scope: "project" });
+		equal(registered.sha256, pluginContentDigest(source));
+		throws(() => registerLibraryPackage(source, { scope: "project" }), /already registered/);
+		equal((await captureCli(["install", "plugin:fixture", "--project"])).code, 0);
+		equal((await captureCli(["install", source, "--user"])).code, 0);
+		const evaluated = resolveLibraryEval("plugin:fixture", "check", { scope: "project" });
+		match(evaluated.path, /evals[/\\]check.yaml$/);
+		equal(evaluated.provenance.sha256, registered.sha256);
+		throws(() => resolveLibraryEval("plugin:fixture", "unknown"), /declared package eval/);
+		rmSync(path.join(root, ".clio-coder/library.yaml"));
+		equal(libraryWorkspace().entries.find((e) => e.name === "fixture")?.installed.length, 2);
+		equal((await captureCli(["disable", "plugin:fixture", "--project"])).code, 0);
+		throws(() => resolveLibraryEval("plugin:fixture", "check", { scope: "project" }), /not active and verified/);
+		equal((await captureCli(["enable", "plugin:fixture", "--project"])).code, 0);
+		writeFileSync(evaluated.path, "changed eval");
+		throws(() => resolveLibraryEval("plugin:fixture", "check", { scope: "project" }), /not active and verified/);
+		equal((await captureCli(["remove", "plugin:fixture", "--project"])).code, 0);
+		equal(libraryWorkspace().entries.find((e) => e.name === "fixture")?.installed.length, 1);
+	});
+	it("refuses library update and forced install of an adopted host tree without re-adoption", async () => {
+		const source = bundle();
+		const result = installLibraryPackage({
+			kind: "plugin",
+			sourcePath: source,
+			scope: "user",
+			origin: { kind: "interop", host: "claude-code", source },
+			trust: "foreign",
+		});
+		ok(result.plugin?.valid);
+		writeFileSync(path.join(source, "executable.sh"), "host executable");
+		throws(() => planLibraryUpdate("plugin:fixture", { force: true }), /reviewed adoption/);
+		const forced = await captureCli(["install", source, "--force"]);
+		equal(forced.code, 1);
+		match(forced.output, /reviewed adoption/);
+		equal(existsSync(path.join(result.plugin.rootPath, "executable.sh")), false);
+		equal(listInstalledPlugins()[0]?.trust, "foreign");
+	});
+
 	it("releases cancelled staging plans without modifying installation state", () => {
 		const item = entry(bundle());
 		const plan = planLibraryInstall(item);
@@ -429,5 +477,128 @@ describe("plugin library lifecycle", () => {
 		releaseLibraryPlan(plan);
 		equal(released, true);
 		equal(libraryEntryInstalled(item), false);
+	});
+
+	it("rejects retired index schemas without overwriting their contents", () => {
+		const source = bundle();
+		const file = path.join(root, "config", "library.yaml");
+		const before = stringify({ plugins: [entry(source)] });
+		writeFileSync(file, before);
+		const diagnostics: string[] = [];
+		deepStrictEqual(readPluginCatalog(file, diagnostics), []);
+		match(diagnostics.join("; "), /entries list/);
+		throws(() => registerLibraryPackage(source, { force: true }), /entries list/);
+		equal(readFileSync(file, "utf8"), before);
+	});
+
+	it("rejects unsupported dry-run flags without changing installed state", async () => {
+		installLibraryPlan(planLibraryInstall(entry(bundle())));
+		const result = await captureCli(["disable", "fixture", "--dry-run"]);
+		equal(result.code, 1);
+		match(result.output, /supported only/);
+		equal(listInstalledPlugins(root)[0]?.enabled, true);
+	});
+
+	it("uses the authored prompt path even when package and component names differ", () => {
+		const source = bundle();
+		mkdirSync(path.join(source, "prompts", "nested"), { recursive: true });
+		writeFileSync(path.join(source, "prompts", "nested", "start.md"), "Explain the workspace.");
+		const file = path.join(source, "plugin.json");
+		const manifest = JSON.parse(readFileSync(file, "utf8"));
+		manifest.extensions = {
+			"ai.iowarp.clio": {
+				manifestVersion: 1,
+				kind: "prompt",
+				resources: { prompts: "prompts" },
+				components: [{ kind: "prompt", id: "authored-component", path: "prompts/nested/start.md" }],
+			},
+		};
+		writeFileSync(file, JSON.stringify(manifest));
+		const item = entry(source, { kind: "prompt" });
+		equal(libraryRuntimeName(item), undefined);
+		installLibraryPlan(planLibraryInstall(item));
+		equal(libraryRuntimeName(item), "nested:start");
+	});
+
+	it("keeps kind-qualified lifecycle actions on the matching scope when another kind shadows its name", async () => {
+		const pluginSource = bundle();
+		installLibraryPlan(planLibraryInstall(entry(pluginSource), { scope: "project" }));
+		const skillSource = bundle("skill-source");
+		const manifestFile = path.join(skillSource, "plugin.json");
+		const manifest = JSON.parse(readFileSync(manifestFile, "utf8"));
+		manifest.name = "fixture";
+		manifest.extensions = {
+			"ai.iowarp.clio": {
+				manifestVersion: 1,
+				kind: "skill",
+				resources: { skills: "." },
+				components: [{ kind: "skill", id: "fixture", path: "SKILL.md" }],
+			},
+		};
+		writeFileSync(manifestFile, JSON.stringify(manifest));
+		writeFileSync(
+			path.join(skillSource, "SKILL.md"),
+			"---\nname: fixture\ndescription: Scope selection fixture\n---\nReview content.\n",
+		);
+		const skillEntry = entry(skillSource, { kind: "skill", origin: "installed" });
+		installLibraryPlan(planLibraryInstall(skillEntry, { scope: "user" }));
+		const consumer = entry(bundle("consumer"), { requires: ["skill:fixture"] });
+		const required = classifyLibraryRequirements(consumer, [skillEntry, consumer]);
+		deepStrictEqual(required.satisfied, []);
+		deepStrictEqual(
+			required.inactive?.map((item) => `${item.kind}:${item.name}`),
+			["skill:fixture"],
+		);
+		const copy = (scope: "user" | "project") => listInstalledPlugins(root, { all: true, scope })[0];
+		const projectBefore = copy("project");
+		ok(projectBefore);
+		const projectDigest = pluginContentDigest(projectBefore.rootPath);
+		equal((await captureCli(["disable", "skill:fixture"])).code, 0);
+		equal(copy("user")?.enabled, false);
+		equal(copy("project")?.enabled, true);
+		equal((await captureCli(["enable", "skill:fixture"])).code, 0);
+		equal(copy("user")?.enabled, true);
+		const pinned = await captureCli(["pin", "skill:fixture"]);
+		equal(pinned.code, 0, pinned.output);
+		equal(JSON.parse(pinned.output).sha256, pluginContentDigest(skillSource));
+		const userCopy = copy("user");
+		ok(userCopy);
+		writeFileSync(path.join(userCopy.rootPath, "assets/evidence.txt"), "user drift");
+		equal((await captureCli(["drift", "skill:fixture"])).code, 1);
+		equal((await captureCli(["drift", "plugin:fixture"])).code, 0);
+		manifest.version = "1.1.0";
+		writeFileSync(manifestFile, JSON.stringify(manifest));
+		const updated = await captureCli(["update", "skill:fixture", "--force"]);
+		equal(updated.code, 0, updated.output);
+		equal(copy("user")?.version, "1.1.0");
+		equal(copy("project")?.version, "1.0.0");
+		equal((await captureCli(["remove", "skill:fixture", "--project"])).code, 1);
+		ok(copy("user"));
+		equal((await captureCli(["remove", "skill:fixture"])).code, 0);
+		equal(copy("user"), undefined);
+		equal(pluginContentDigest(projectBefore.rootPath), projectDigest);
+		equal(copy("project")?.enabled, true);
+		installLibraryPlan(planLibraryInstall(entry(skillSource, { kind: "skill" }), { scope: "user" }));
+		removeLibraryEntry(skillEntry);
+		equal(copy("user"), undefined);
+		equal(pluginContentDigest(projectBefore.rootPath), projectDigest);
+	});
+
+	it("keeps damaged installed copies and diagnostics visible when state cannot be parsed", async () => {
+		const item = entry(bundle());
+		installLibraryPlan(planLibraryInstall(item));
+		const state = path.join(root, "config", "plugins", "state.json");
+		writeFileSync(state, "{broken");
+		const workspace = libraryWorkspace();
+		const installed = workspace.entries.find((e) => e.name === item.name)?.installed[0];
+		ok(installed);
+		equal(installed.valid, false);
+		ok(installed.diagnostics.length > 0);
+		ok(workspace.diagnostics.some((message) => message.includes("package state unavailable")));
+		equal(libraryEntryPin(item), undefined);
+		const listed = await captureCli(["list"]);
+		equal(listed.code, 0, listed.output);
+		ok(JSON.parse(listed.output).entries.find((e: LibraryEntry) => e.name === item.name));
+		equal(readFileSync(state, "utf8"), "{broken");
 	});
 });

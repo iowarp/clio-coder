@@ -249,7 +249,7 @@ describe("contracts/marketplace-offer registration", () => {
 		const registration = createMarketplaceOfferRegistration(deps);
 		strictEqual(
 			reminderText(registration.evaluate(turnStart(ORIENTATION_PROMPT))),
-			'[Marketplace] Skill "context-prime" matches this request; install with clio-coder skills install context-prime.',
+			'[Marketplace] Skill "context-prime" matches this request; install with clio-coder library install context-prime.',
 		);
 		registration.evaluate(askUserAnswer(SKILL_INSTALL_OFFER_OPTION_PROJECT));
 		registration.evaluate(askUserAnswer(SKILL_INSTALL_OFFER_OPTION_NEVER));
@@ -289,7 +289,7 @@ describe("contracts/marketplace-offer registration", () => {
 				kind: "inject_reminder",
 				severity: "info",
 				message:
-					'[Marketplace] Skill "resolve-merge-conflicts" matches this request; install with clio-coder skills install resolve-merge-conflicts.',
+					'[Marketplace] Skill "resolve-merge-conflicts" matches this request; install with clio-coder library install resolve-merge-conflicts.',
 			},
 		]);
 		strictEqual(registration.evaluate(turnStart("another merge conflict please")).length, 0);

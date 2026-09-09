@@ -82,4 +82,4 @@ Expected:
 - Running generic abort when resolution is achievable.
 
 ## Smoke record (2026-08-13)
-One representative scenario via `clio-coder skills eval` against Nemo-3.5-Lightning (30B local, llamacpp on mini), full-auto sandbox. PASS. Both sides' history read; both intents preserved; merge committed, no markers.
+One representative scenario via `clio-coder eval skill` against Nemo-3.5-Lightning (30B local, llamacpp on mini), full-auto sandbox. PASS. Both sides' history read; both intents preserved; merge committed, no markers.

@@ -133,7 +133,7 @@ interface ScenarioOutcome {
 	usage: ScenarioUsage;
 }
 
-export async function runSkillsEvalCommand(nameOrPath: string, options: SkillsEvalOptions): Promise<number> {
+async function runSkillsEvalCommand(nameOrPath: string, options: SkillsEvalOptions): Promise<number> {
 	const resolved = resolveSkillBaseDir(nameOrPath, process.cwd());
 	if (resolved.baseDir === null) {
 		printError(resolved.error ?? `unknown skill: ${nameOrPath}`);
@@ -149,7 +149,7 @@ export async function runSkillsEvalCommand(nameOrPath: string, options: SkillsEv
 	// attribute to a source is not evidence about a skill, and several roots may
 	// carry this name.
 	process.stderr.write(
-		`clio-coder skills eval: ${skill.name} from ${resolved.origin ?? "unknown"} at ${resolved.baseDir} (sha256 ${skill.normalizedHash.slice(0, 12)}…)\n`,
+		`clio-coder eval skill: ${skill.name} from ${resolved.origin ?? "unknown"} at ${resolved.baseDir} (sha256 ${skill.normalizedHash.slice(0, 12)}…)\n`,
 	);
 	const evalsPath = join(resolved.baseDir, "evals.md");
 	let evalsRaw: string;
@@ -161,7 +161,7 @@ export async function runSkillsEvalCommand(nameOrPath: string, options: SkillsEv
 	}
 	const parsed = parseSkillEvals(evalsRaw);
 	for (const diagnostic of parsed.diagnostics) {
-		process.stderr.write(`clio-coder skills eval: ${diagnostic}\n`);
+		process.stderr.write(`clio-coder eval skill: ${diagnostic}\n`);
 	}
 	const matcher = options.scenario === undefined ? null : scenarioMatcher(options.scenario);
 	if (options.scenario !== undefined && matcher === null) {
@@ -178,7 +178,7 @@ export async function runSkillsEvalCommand(nameOrPath: string, options: SkillsEv
 		return 2;
 	}
 
-	process.stderr.write(`clio-coder skills eval: ${describeArmPolicy(options.allowNetwork)}\n`);
+	process.stderr.write(`clio-coder eval skill: ${describeArmPolicy(options.allowNetwork)}\n`);
 	const childEnv = evalChildEnv(options.allowNetwork);
 	const timeoutMs = options.timeoutSeconds !== undefined ? options.timeoutSeconds * 1000 : DEFAULT_RUN_TIMEOUT_MS;
 	const workspaceOverride = await resolveWorkspaceOverride(options.workspace);
@@ -189,7 +189,7 @@ export async function runSkillsEvalCommand(nameOrPath: string, options: SkillsEv
 	const startedAt = new Date().toISOString();
 	const outcomes: ScenarioOutcome[] = [];
 	for (const scenario of scenarios) {
-		process.stderr.write(`clio-coder skills eval: ${skill.name} ${scenario.id} baseline/treatment/judge...\n`);
+		process.stderr.write(`clio-coder eval skill: ${skill.name} ${scenario.id} baseline/treatment/judge...\n`);
 		outcomes.push(
 			await runScenario(
 				skill.name,
@@ -228,7 +228,7 @@ export async function runSkillsEvalCommand(nameOrPath: string, options: SkillsEv
 		evidenceErrors.push(error instanceof Error ? error.message : String(error));
 	}
 	for (const message of evidenceErrors) {
-		process.stderr.write(`clio-coder skills eval: evidence build failed: ${message}\n`);
+		process.stderr.write(`clio-coder eval skill: evidence build failed: ${message}\n`);
 	}
 
 	if (options.json) {
@@ -1239,4 +1239,41 @@ function readNumber(value: unknown): number {
 
 function isRecord(value: unknown): value is Record<string, unknown> {
 	return typeof value === "object" && value !== null && !Array.isArray(value);
+}
+
+/** The experimental evals.md lane stays under eval, alongside package suite evals. */
+export async function runSkillEvalCli(args: ReadonlyArray<string>): Promise<number> {
+	const options: SkillsEvalOptions = { json: false, trustFixtures: false, allowNetwork: false };
+	let source: string | undefined;
+	try {
+		for (let i = 0; i < args.length; i++) {
+			const arg = args[i];
+			if (!arg) continue;
+			if (arg === "--json") options.json = true;
+			else if (arg === "--trust-fixtures") options.trustFixtures = true;
+			else if (arg === "--allow-network") options.allowNetwork = true;
+			else if (["--scenario", "--target", "--workspace", "--timeout"].includes(arg)) {
+				const value = args[++i];
+				if (!value || value.startsWith("-")) throw new Error(`${arg} requires a value`);
+				if (arg === "--timeout") {
+					const seconds = Number(value);
+					if (!Number.isInteger(seconds) || seconds <= 0) throw new Error("--timeout requires a positive integer");
+					options.timeoutSeconds = seconds;
+				} else if (arg === "--scenario") options.scenario = value;
+				else if (arg === "--target") options.target = value;
+				else options.workspace = value;
+			} else if (arg === "--help" || arg === "-h") {
+				process.stdout.write(
+					"clio-coder eval skill <name|path> [--scenario <id>] [--target <id>] [--workspace <path>] [--timeout <seconds>] [--trust-fixtures] [--allow-network] [--json]\n",
+				);
+				return 0;
+			} else if (arg.startsWith("-") || source) throw new Error(`unexpected skill eval argument: ${arg}`);
+			else source = arg;
+		}
+		if (!source) throw new Error("eval skill requires a skill name or path");
+		return await runSkillsEvalCommand(source, options);
+	} catch (error) {
+		printError(error instanceof Error ? error.message : String(error));
+		return 2;
+	}
 }

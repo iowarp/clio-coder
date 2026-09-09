@@ -143,7 +143,7 @@ export function matchMarketplaceSkills(
  * is not the enforcement mechanism.
  *
  * This gates the promotion flow only. Operator-driven installs through
- * `clio-coder skills install <url>` keep their existing behavior.
+ * `clio-coder library install <url>` keep their existing behavior.
  */
 export const OWN_MARKETPLACE_URL_PREFIX = "https://github.com/iowarp/clio-coder/";
 
@@ -160,7 +160,7 @@ export function assertPromotionInstallSource(entry: MarketplaceSkill): void {
 	throw new Error(
 		`skill promotion: refusing to install "${entry.name}" from ${entry.sourceUrl}; ` +
 			"promotion installs only from Clio's own marketplace (local catalog or " +
-			`${OWN_MARKETPLACE_URL_PREFIX}). Install manually with clio-coder skills install if intended.`,
+			`${OWN_MARKETPLACE_URL_PREFIX}). Install manually with clio-coder library install if intended.`,
 	);
 }
 

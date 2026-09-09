@@ -51,6 +51,7 @@
 		"assets/clio-coder-logo-128.webp",
 		"src/**",
 		"skills/**",
+		"library/**",
 		"plugins/**",
 		"evals/**",
 		"docs/**/*.md",
@@ -88,8 +89,8 @@
 		"prepublishOnly": "CLIO_CODER_RELEASE_CONTEXT=publish pnpm run ci:release",
 		"skills:pin": "node --import tsx scripts/pin-skills.ts",
 		"skills:check": "node --import tsx scripts/pin-skills.ts --check",
-		"plugins:pin": "node --import tsx scripts/pin-plugins.ts",
-		"plugins:check": "node --import tsx scripts/pin-plugins.ts --check"
+		"library:pin": "node --import tsx scripts/pin-library.ts",
+		"library:check": "node --import tsx scripts/pin-library.ts --check"
 	},
 	"optionalDependencies": {
 		"@anthropic-ai/claude-agent-sdk": "0.3.186"

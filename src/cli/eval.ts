@@ -18,11 +18,15 @@ import { EvalSuiteFileError, loadEvalSuiteFile, loadV1TaskFileAsSuite } from "..
 import { resolveSuiteForRun } from "../domains/eval/suites/resolve.js";
 import { runEvalSuiteV2 } from "../domains/eval/suites/run.js";
 import { EvalTaskFileError } from "../domains/eval/task-file.js";
+import { resolveLibraryEval } from "../domains/resources/library-evals.js";
 import { printError } from "./shared.js";
 
 const HELP = `clio-coder eval <command>
 
 Commands:
+  clio-coder eval skill <name|path> [--scenario <id>] [--json]
+  clio-coder eval validate --package <path|kind:name> [--eval <name>] [--user|--project]
+  clio-coder eval run --package <path|kind:name> [--eval <name>] [--user|--project] [--out <path>]
   clio-coder eval validate --suite <suite.yaml>
 	  clio-coder eval run --suite <suite.yaml> [--trials <n>] [--target <id>] [--model <id>] [--out <path>] [--clio-coder-entry <path>]
 	  clio-coder eval run --task-file <tasks.yaml> [--repeat <n>] [--out <path>] [--clio-coder-entry <path>]
@@ -60,6 +64,9 @@ interface ParsedEvalArgs {
 	baseline?: string;
 	thresholds?: string;
 	help: boolean;
+	package?: string;
+	packageEval?: string;
+	packageScope?: "user" | "project";
 }
 
 function parseEvalArgs(args: ReadonlyArray<string>): ParsedEvalArgs {
@@ -83,6 +90,21 @@ function parseEvalArgs(args: ReadonlyArray<string>): ParsedEvalArgs {
 				continue;
 			}
 			throw new Error(`unknown eval command: ${arg}`);
+		}
+		if (parsed.command === "validate" || parsed.command === "run") {
+			if (arg === "--package" || arg === "--eval") {
+				const value = requiredValue(args, index++, arg);
+				if (arg === "--package") parsed.package = value;
+				else parsed.packageEval = value;
+				continue;
+			}
+			if (arg === "--user" || arg === "--project") {
+				const scope = arg === "--user" ? "user" : "project";
+				if (parsed.packageScope && parsed.packageScope !== scope)
+					throw new Error("--user and --project are mutually exclusive");
+				parsed.packageScope = scope;
+				continue;
+			}
 		}
 		if (parsed.command === "validate") {
 			if (arg === "--suite") {
@@ -193,9 +215,12 @@ function parseEvalArgs(args: ReadonlyArray<string>): ParsedEvalArgs {
 	}
 	if (parsed.help) return parsed;
 	if (parsed.command === undefined) throw new Error("eval requires a command");
-	if (parsed.command === "validate" && parsed.suite === undefined) throw new Error("validate requires --suite <path>");
-	if (parsed.command === "run" && (parsed.suite === undefined) === (parsed.taskFile === undefined)) {
-		throw new Error("run requires exactly one of --suite or --task-file");
+	if (!parsed.package && (parsed.packageEval || parsed.packageScope))
+		throw new Error("--eval and scope flags require --package");
+	if (parsed.command === "validate" && [parsed.suite, parsed.package].filter(Boolean).length !== 1)
+		throw new Error("validate requires exactly one of --suite or --package");
+	if (parsed.command === "run" && [parsed.suite, parsed.taskFile, parsed.package].filter(Boolean).length !== 1) {
+		throw new Error("run requires exactly one of --suite, --task-file, or --package");
 	}
 	if (parsed.command === "report" && (parsed.evalId === undefined) === (parsed.artifact === undefined)) {
 		throw new Error("report requires exactly one of an eval id or --artifact <path>");
@@ -210,6 +235,7 @@ function parseEvalArgs(args: ReadonlyArray<string>): ParsedEvalArgs {
 }
 
 export async function runEvalCommand(args: ReadonlyArray<string>): Promise<number> {
+	if (args[0] === "skill") return (await import("./skills-eval.js")).runSkillEvalCli(args.slice(1));
 	// Routed before the shared parser so the fixed read stays exactly fixed: no
 	// eval flag can reach it, and no flag it does not name can be spent on it.
 	if (args[0] === "inventory") {
@@ -239,7 +265,10 @@ export async function runEvalCommand(args: ReadonlyArray<string>): Promise<numbe
 
 async function runEvalValidate(parsed: ParsedEvalArgs): Promise<number> {
 	try {
-		const loaded = await loadEvalSuiteFile(parsed.suite ?? "");
+		const declared = parsed.package
+			? resolveLibraryEval(parsed.package, parsed.packageEval, parsed.packageScope ? { scope: parsed.packageScope } : {})
+			: undefined;
+		const loaded = await loadEvalSuiteFile(declared?.path ?? parsed.suite ?? "");
 		process.stdout.write(`valid suite: ${loaded.suite.suite.id}\n`);
 		return 0;
 	} catch (error) {
@@ -249,10 +278,15 @@ async function runEvalValidate(parsed: ParsedEvalArgs): Promise<number> {
 
 async function runEvalRun(parsed: ParsedEvalArgs): Promise<number> {
 	try {
+		const declared = parsed.package
+			? resolveLibraryEval(parsed.package, parsed.packageEval, parsed.packageScope ? { scope: parsed.packageScope } : {})
+			: undefined;
+		const suitePath = declared?.path ?? parsed.suite;
 		const loaded =
-			parsed.suite !== undefined
-				? await loadEvalSuiteFile(parsed.suite)
+			suitePath !== undefined
+				? await loadEvalSuiteFile(suitePath)
 				: await loadV1TaskFileAsSuite(parsed.taskFile ?? "", parsed.trials ?? parsed.repeat);
+		if (declared) loaded.suite.suite.provenance = { ...loaded.suite.suite.provenance, library: declared.provenance };
 		const resolveOptions: { target?: string; model?: string } = {};
 		if (parsed.target !== undefined) resolveOptions.target = parsed.target;
 		if (parsed.model !== undefined) resolveOptions.model = parsed.model;

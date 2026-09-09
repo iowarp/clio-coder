@@ -637,7 +637,7 @@ export interface SlashCommandContext {
 	expandPromptTemplate?: (text: string) => PromptTemplateExpansion;
 	listExtensions?: () => ReadonlyArray<InstalledExtension>;
 	/**
-	 * `/resources extensions reload`: build, validate, and commit the next
+	 * `/library extensions reload`: build, validate, and commit the next
 	 * extension generation together with its user hooks, or report why it was
 	 * refused. Absent on a host without the reload coordinator, in which case
 	 * the command says so instead of pretending.
@@ -938,7 +938,7 @@ export const BUILTIN_SLASH_COMMANDS: ReadonlyArray<BuiltinSlashCommand> = [
 	},
 	{
 		name: "skill",
-		description: "Open the Skills Hub, invoke a skill, or `off` to drop an active skill's tool surface",
+		description: "Invoke a skill, browse library skills, or `off` to clear its tool surface",
 		group: "Work",
 		kinds: ["skill-selector", "skill-invocation", "skill-surface-clear"],
 		args: {
@@ -976,70 +976,51 @@ export const BUILTIN_SLASH_COMMANDS: ReadonlyArray<BuiltinSlashCommand> = [
 		},
 	},
 	{
-		name: "resources",
-		description: "Browse skills, prompts, libraries, plugins, and extensions",
+		name: "library",
+		description: "Browse installed and available packages; reload library resources",
 		group: "Inspect",
 		kinds: ["resources"],
-		subcommandDescriptions: {
-			skills: "Browse installed skills",
-			prompts: "Browse prompt templates",
-			library: "Browse resource libraries",
-			plugins: "Browse portable plugins; reload refreshes installed resources",
-			extensions: "Browse installed extensions; `reload` commits a new extension generation",
-		},
 		args: {
-			subcommands: {
-				skills: {},
-				prompts: {},
-				library: { positionals: [{ name: "kind", required: false }] },
-				plugins: { positionals: [{ name: "action", required: false, values: ["reload"] }] },
-				extensions: { positionals: [{ name: "action", required: false, values: ["reload"] }] },
-			},
+			positionals: [
+				{
+					name: "kind|reload|prompts|extensions",
+					required: false,
+					values: ["plugin", "skill", "agent", "prompt", "fleet", "reload", "prompts", "extensions"],
+				},
+				{ name: "action", required: false, values: ["reload"] },
+			],
 		},
 		fromArgs(parsed) {
-			if (parsed.error) return { kind: "usage-error", command: "resources", reason: parsed.error };
-			if (parsed.subcommand === undefined || parsed.subcommand === "skills")
-				return { kind: "resources", family: "skills" };
-			if (parsed.subcommand === "prompts") return { kind: "resources", family: "prompts" };
-			if (parsed.subcommand === "plugins") {
-				if (parsed.positionals[0] !== undefined && parsed.positionals[0] !== "reload")
-					return {
-						kind: "usage-error",
-						command: "resources",
-						reason: `Unknown action: ${parsed.positionals[0]} (one of reload)`,
-					};
+			if (parsed.error) return { kind: "usage-error", command: "library", reason: parsed.error };
+			const [selection, action] = parsed.positionals;
+			if (selection === "extensions") {
+				if (action && action !== "reload")
+					return { kind: "usage-error", command: "library", reason: "extensions accepts only reload" };
+				return { kind: "resources", family: "extensions", ...(action ? { action: "reload" as const } : {}) };
+			}
+			if (action) return { kind: "usage-error", command: "library", reason: "expected one package kind or reload" };
+			if (selection === "reload") return { kind: "resources", family: "plugins", action: "reload" };
+			if (selection === "prompts") return { kind: "resources", family: "prompts" };
+			if (!selection) return { kind: "resources", tab: "plugin" };
+			if (!isLibraryTab(selection))
 				return {
-					kind: "resources",
-					family: "plugins",
-					...(parsed.positionals[0] === "reload" ? { action: "reload" as const } : {}),
+					kind: "usage-error",
+					command: "library",
+					reason: `Unknown kind: ${selection} (one of ${LIBRARY_TABS.map((item) => item.id).join(", ")})`,
 				};
-			}
-			if (parsed.subcommand === "extensions") {
-				const action = parsed.positionals[0];
-				if (action === undefined) return { kind: "resources", family: "extensions" };
-				if (action === "reload") return { kind: "resources", family: "extensions", action: "reload" };
-				return { kind: "usage-error", command: "resources", reason: `Unknown action: ${action} (one of reload)` };
-			}
-			const tab = parsed.positionals[0];
-			if (tab === undefined) return { kind: "resources" };
-			if (!isLibraryTab(tab)) {
-				const known = LIBRARY_TABS.map((entry) => entry.id).join(", ");
-				return { kind: "usage-error", command: "resources", reason: `Unknown kind: ${tab} (one of ${known})` };
-			}
-			return { kind: "resources", tab };
+			return { kind: "resources", tab: selection };
 		},
 		handle(command, ctx) {
 			if (command.kind !== "resources") return;
 			if (command.family === "plugins") {
-				if (command.action !== "reload") ctx.openSkillsHub?.("plugin");
-				else if (!ctx.reloadPlugins)
-					ctx.notice("warn", "plugins: reload is unavailable in this session; restart to refresh resources");
+				if (!ctx.reloadPlugins)
+					ctx.notice("warn", "library: reload is unavailable in this session; restart to refresh resources");
 				else {
 					try {
 						const snapshot = ctx.reloadPlugins();
-						ctx.notice("success", `plugins: generation ${snapshot.generation} committed`);
+						ctx.notice("success", `library: generation ${snapshot.generation} committed`);
 					} catch (error) {
-						ctx.notice("error", `plugins: reload failed: ${error instanceof Error ? error.message : String(error)}`);
+						ctx.notice("error", `library: reload failed: ${error instanceof Error ? error.message : String(error)}`);
 					}
 				}
 			} else if (command.family === "prompts") ctx.openPrompts();
@@ -2330,7 +2311,7 @@ const COMMAND_ORDER = [
 	"panes",
 	"cost",
 	"decisions",
-	"resources",
+	"library",
 	"help",
 	"model",
 	"thinking",

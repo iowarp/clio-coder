@@ -242,7 +242,7 @@
 		},
 		{
 			"name": "find-skills",
-			"description": "Finds and installs published skills when the user asks whether a capability exists as a skill, searching with clio-coder skills search and installing only through clio-coder skills install. Not for authoring a new skill; use skill-craft.",
+			"description": "Finds and installs published skills when the user asks whether a capability exists as a skill, searching with clio-coder library search and installing only through clio-coder library install. Not for authoring a new skill; use skill-craft.",
 			"triggers": [
 				"find a skill",
 				"is there a skill for this",
