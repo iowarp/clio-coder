@@ -131,6 +131,7 @@ repository.
 | Topic | Guide |
 | --- | --- |
 | Source layout, compile-time boundaries, domain loading, and runtime flow | [Architecture](architecture/architecture.md) |
+| Package kinds, catalog resolution, integrity, and trust | [Library Architecture](architecture/library.md) |
 | Pi framework boundary and Clio-owned policy | [Pi Boundary](architecture/pi-boundary.md) |
 | Documentation style and source-alignment workflow | [Documentation Guide](process/documentation-guide.md) |
 | Source-to-guide ownership map | [Documentation Coverage](process/documentation-coverage.md) |

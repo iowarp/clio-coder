@@ -333,6 +333,11 @@
 <td>Prompt, skill, agent, fleet, and reserved theme resources; extension manifests; portable share archives.</td>
 </tr>
 <tr>
+<td><a href="library_blueprint.html">library.md</a></td>
+<td><code>src/domains/plugins/**</code>, <code>src/domains/resources/library.ts</code>, <code>src/cli/library.ts</code></td>
+<td>Package kinds, catalog resolution, integrity, scope selection, and trust.</td>
+</tr>
+<tr>
 <td><a href="resource_library_blueprint.html">resource-library.md</a></td>
 <td><code>src/domains/resources/library.ts</code>, <code>src/cli/library.ts</code></td>
 <td>Catalog schemas, private and remote source policy, checksum pins, resource installation, and update checks.</td>
@@ -431,9 +436,8 @@ Safety, data loss, or security-sensitive constraints.</p>
 <h3>Blueprint Creation Policy</h3>
 <p>Blueprint coverage is explicit rather than inferred from document style. The
 page-level audit lives in
-<a href="documentation_coverage_blueprint.html"><code>documentation-coverage.md</code></a>. All 58 canonical Markdown pages
-have a dedicated blueprint. More library pages may arrive as development proceeds,
-requiring an inventory refresh during release cuts. <code>docs/html/index.html</code> groups those counterparts by
+<a href="documentation_coverage_blueprint.html"><code>documentation-coverage.md</code></a>. Every canonical Markdown page
+has a dedicated blueprint. Recheck the complete inventory during each release cut. <code>docs/html/index.html</code> groups those counterparts by
 the same Guide, Architecture, Process, and History tree, while a source meta tag
 provides the one-to-one machine-readable mapping. Every mapping must remain
 unique, complete, and free of orphaned Markdown or HTML pages.
