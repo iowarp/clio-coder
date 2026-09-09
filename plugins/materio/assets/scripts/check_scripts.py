@@ -227,10 +227,19 @@ def main():
                 print(f"  {loc}  [{r}]  {m}")
         emit(fnd.errors, "WILL NOT RUN (errors)")
         emit(fnd.warnings, "SUSPECT (warnings)")
+        for item in unreadable:
+            print(f"  UNREAD  {item['file']}  {item['reason']}")
         n = len(fnd.errors) + len(fnd.warnings)
+        verdict = ""
+        if unreadable:
+            verdict = (f" {len(unreadable)} path(s) could not be read as script files"
+                       " (pass .py/.sh files, not directories); coverage is incomplete.")
+        elif not readable:
+            verdict = " No files were checked."
+        elif not n:
+            verdict = " Checked scripts parse cleanly."
         print(f"\ncheck-scripts: {len(fnd.errors)} error(s), "
-              f"{len(fnd.warnings)} warning(s)."
-              + ("" if n else " Generated scripts parse cleanly."))
+              f"{len(fnd.warnings)} warning(s)." + verdict)
 
     return 2 if unreadable else 1 if fnd.errors else 0
 

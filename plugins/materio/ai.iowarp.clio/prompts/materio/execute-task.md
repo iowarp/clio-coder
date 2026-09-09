@@ -77,7 +77,7 @@ and any LITERATURE.md update.
 ### Validate Environment
 
 ```bash
-[ ! -f .research/WORKFLOW.md ] && echo "ERROR: No WORKFLOW.md. Run /materio:define-research-tasks first." && exit 1
+test -f .research/WORKFLOW.md || echo "ERROR: No WORKFLOW.md. Run /materio:define-research-tasks first."
 cat .research/WORKFLOW.md
 cat .research/STATE.md 2>/dev/null
 cat .research/DATA-INDEX.md 2>/dev/null
