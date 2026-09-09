@@ -234,7 +234,7 @@ overlay column below says how.</li>
 <tr>
 <td align="left"><code>.clio-coder/skills/**</code></td>
 <td align="left">Overlay</td>
-<td align="left">Project skills, trusted as repository-local. This is where <code>clio-coder skills install &lt;name&gt;</code> lands a catalog skill; the shipped catalog under the package&#39;s <code>skills/</code> is a marketplace to install from, not a discovery root, so nothing appears here until the operator installs it.</td>
+<td align="left">Project skills, trusted as repository-local. This is where <code>clio-coder library install skill:&lt;name&gt; --project</code> lands a catalog skill; the shipped catalog under the package&#39;s <code>skills/</code> is a marketplace to install from, not a discovery root, so nothing appears here until the operator installs it.</td>
 <td align="left">Yes; the shipped catalog remains installable.</td>
 <td align="left">Kept, and named</td>
 </tr>
@@ -303,7 +303,7 @@ with its <code>registry.yaml</code> and <code>skill-marketplace.json</code>, <co
 <code>src/domains/providers/models/</code>) are read from the installed package root; the <code>.clio-coder/</code>
 entries above compose with them and never replace them on disk. Builtin agent recipes bind
 skills straight out of the package catalog; the operator&#39;s own session reaches the same
-catalog only as a marketplace, through <code>clio-coder skills install &lt;name&gt;</code> or <code>/skill &lt;name&gt;</code>.</p>
+catalog only as a marketplace, through <code>clio-coder library install skill:&lt;name&gt;</code> or <code>/skill &lt;name&gt;</code>.</p>
 <hr>
 <h2>2. File &amp; Permissions Matrix</h2>
 <p>The core files are created automatically during the first run. <code>credentials.yaml</code> is the secret-bearing file and is forced to owner-only read-write permissions. Other initialized files and directories use either the explicit mode shown below or the platform default produced by the writer and process umask.</p>

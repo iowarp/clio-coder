@@ -2,7 +2,7 @@
 
 > **Visual blueprint:** See the [visual reference](../html/harness_extensions_blueprint.html) in the source checkout.
 
-Harness extensions add executable capabilities to Clio. They are the only Clio package kind that runs code. A domain workflow that combines prompts, agents, skills, fleets, and reference files is a plugin instead, installed with `clio-coder plugins install <path>`.
+Harness extensions add executable capabilities to Clio. They are the only Clio package kind that runs code. A domain workflow that combines prompts, agents, skills, fleets, and reference files is a plugin instead, installed with `clio-coder library install <path>`.
 
 An extension declares command tools in `clio-coder-extension.yaml`, `.yml`, or `.json`. Clio discovers and validates declarations without importing or executing package code. Tools become available in a new session after installation. Native workers can use a tool when their admitted recipe includes its qualified name; narrower profiles such as `minimal-local` exclude extension commands.
 
@@ -69,7 +69,7 @@ Schemas support `type`, `description`, `properties`, `required`, `additionalProp
 
 Qualified names use `extension_<id>__<name>` and must fit 64 characters. Package IDs use provider-safe lowercase letters, numbers, single underscores, and hyphens; local tool names start with a letter and use lowercase letters, numbers, and single underscores. Duplicate and colliding tool registrations are refused.
 
-The manifest keys are `id`, `name`, `version`, `description`, `capabilities`, and `compatibility`. A manifest naming `resources`, `prompts`, `skills`, `agents`, `fleets`, or `themes` is invalid, and the diagnostic points at `clio-coder plugins install <path>`. `capabilities` is optional: a package whose only contribution is a root `hooks.yaml` is a valid harness extension with no command tools.
+The manifest keys are `id`, `name`, `version`, `description`, `capabilities`, and `compatibility`. A manifest naming `resources`, `prompts`, `skills`, `agents`, `fleets`, or `themes` is invalid, and the diagnostic points at `clio-coder library install <path>`. `capabilities` is optional: a package whose only contribution is a root `hooks.yaml` is a valid harness extension with no command tools.
 
 ## Admission and lifecycle
 
@@ -88,4 +88,4 @@ clio-coder extensions remove local-analysis --user
 
 Installation records and verifies the entire package tree. Each invocation rechecks the effective installed package, enabled state, canonical root, and digest. Disabling, removing, replacing, or modifying a package revokes existing tool calls. A disabled project installation also suppresses the user installation with the same ID.
 
-Tool schemas are frozen when a session or worker registry is created. Restart the session after installing, enabling, or updating capabilities; `/resources extensions reload` refreshes resource and hook generations and does not change a live model's tool schemas. A new native worker constructs its own verified registry, and the ordinary allowed-tool surface and worker attestation apply. External command-line worker runtimes do not gain Clio command tools.
+Tool schemas are frozen when a session or worker registry is created. Restart the session after installing, enabling, or updating capabilities; `/library extensions reload` refreshes resource and hook generations and does not change a live model's tool schemas. A new native worker constructs its own verified registry, and the ordinary allowed-tool surface and worker attestation apply. External command-line worker runtimes do not gain Clio command tools.
