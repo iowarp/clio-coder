@@ -1,5 +1,6 @@
 ---
 description: "Overview of Materio commands, workflow, and philosophy"
+display-only: true
 ---
 
 <objective>
