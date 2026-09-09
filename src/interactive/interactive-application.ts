@@ -274,9 +274,17 @@ export interface InteractiveSubmitExpansion {
 	images: ImageContent[];
 	workingContextPaths: string[];
 	pendingSkillRequests: PendingSkillRequest[];
+	/**
+	 * What the transcript paints as the operator's turn when `text` is a prompt
+	 * template's body: the line they typed, and a note naming the template. The
+	 * model still receives `text`; a `/wtfp:new-paper` body is several hundred
+	 * lines the operator never wrote, and painting it as their message buried
+	 * the command under it.
+	 */
+	display?: { text: string; note: string };
 }
 
-async function expandInteractiveSubmitAsync(
+export async function expandInteractiveSubmitAsync(
 	text: string,
 	resources: ResourcesContract | undefined,
 	cwd = process.cwd(),
@@ -292,11 +300,18 @@ async function expandInteractiveSubmitAsync(
 		includeImages: true,
 		missing: "leave",
 	});
+	const display = promptExpansion?.expanded
+		? {
+				text: parsed.text.trim(),
+				note: `expanded prompt template ${promptExpansion.template.name} (${promptExpansion.text.split("\n").length} lines)`,
+			}
+		: undefined;
 	return {
 		text: fileExpansion.text,
 		images: fileExpansion.images,
 		workingContextPaths: fileExpansion.referencedPaths,
 		pendingSkillRequests: parsed.pendingSkillRequests,
+		...(display ? { display } : {}),
 	};
 }
 

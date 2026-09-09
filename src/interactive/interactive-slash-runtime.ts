@@ -33,7 +33,7 @@ import type { ChatLoop } from "./chat-loop.js";
 import { type ChatPanel, createChatPanel } from "./chat-panel.js";
 import { rehydrateChatPanelFromTurns } from "./chat-renderer.js";
 import { runCompactWithNotice } from "./command-fallbacks.js";
-import { appendNotice, appendOperatorCommand, appendReferenceCard } from "./command-output.js";
+import { appendNotice, appendOperatorAside, appendOperatorCommand, appendReferenceCard } from "./command-output.js";
 import { runOperatorRecall } from "./context-recall-command.js";
 import { renderSessionHtml } from "./export-html/index.js";
 import { dateLocal } from "./format-time.js";
@@ -61,6 +61,8 @@ export interface InteractiveSlashSubmitExpansion {
 	images: ImageContent[];
 	workingContextPaths: string[];
 	pendingSkillRequests: PendingSkillRequest[];
+	/** The typed line and a template note to paint instead of `text`; see `InteractiveSubmitExpansion`. */
+	display?: { text: string; note: string };
 }
 
 type SlashChat = Pick<ChatLoop, "clearSkillSurface" | "getSessionId" | "isStreaming" | "submit">;
@@ -261,7 +263,15 @@ export function createInteractiveSlashRuntime(deps: InteractiveSlashRuntimeDeps)
 			// is in the ledger yet, and a refused preflight must not leave a row
 			// that reads like a committed turn (issue #251).
 			let rowStatus: UserTurnStatus = "pending";
-			if (!willQueue) deps.chatPanel.appendUser(sub.text, () => rowStatus);
+			if (!willQueue) {
+				deps.chatPanel.appendUser(sub.display?.text ?? sub.text, () => rowStatus);
+				if (sub.display) {
+					appendOperatorAside(sub.display.note, {
+						appendReplayBlock: (renderBlock) => deps.chatPanel.appendReplayBlock(renderBlock),
+						requestRender: deps.requestRender,
+					});
+				}
+			}
 			deps.requestRender();
 			let acknowledgeAdmission = (): void => {};
 			const admitted = new Promise<void>((resolve) => {

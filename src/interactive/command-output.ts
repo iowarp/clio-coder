@@ -65,6 +65,50 @@ export function appendReferenceCard(card: PromptReferenceCard, sink: CommandOutp
 	sink.requestRender();
 }
 
+/**
+ * A dim line under an operator turn, in the prose gutter, saying something
+ * about the turn that the operator did not type: which template expanded, how
+ * long it was. Transcript-only, like the echo above.
+ */
+export function appendOperatorAside(text: string, sink: CommandOutputSink): void {
+	const normalized = text.replace(/\r/g, "").replace(/\n+/gu, " ").trim();
+	if (normalized.length === 0) return;
+	sink.appendReplayBlock((width) => {
+		const theme = clioTheme();
+		return wrapTextWithAnsi(theme.fg("dim", normalized), Math.max(1, width - 2)).map((line) => `  ${line}`);
+	});
+	sink.requestRender();
+}
+
+export interface InterviewRecordEntry {
+	/** The question's header, or its first line when it has none. */
+	label: string;
+	answer: string;
+}
+
+/**
+ * What a round of an interview asked and what the operator answered, kept in
+ * the transcript once the overlay has moved on. Without it the round left
+ * only a tool row reading `▸ tool action {"action":"ask",…`, and the answers
+ * lived on `/decisions` alone.
+ */
+export function appendInterviewRecord(entries: ReadonlyArray<InterviewRecordEntry>, sink: CommandOutputSink): void {
+	const kept = entries.filter((entry) => entry.answer.trim().length > 0);
+	if (kept.length === 0) return;
+	sink.appendReplayBlock((width) => {
+		const theme = clioTheme();
+		const lines: string[] = [];
+		const inner = Math.max(1, width - 2);
+		for (const entry of kept) {
+			const label = entry.label.replace(/\s+/gu, " ").trim();
+			lines.push(...wrapTextWithAnsi(`${theme.fg("accent", GLYPH.cursor)} ${theme.fg("dim", label)}`, width));
+			lines.push(...wrapTextWithAnsi(theme.fg("muted", entry.answer.trim()), inner).map((line) => `  ${line}`));
+		}
+		return lines;
+	});
+	sink.requestRender();
+}
+
 export type CommandOutputReplayBlock = (width: number) => string[];
 
 export interface CommandOutputSink {
