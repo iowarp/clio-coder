@@ -250,9 +250,18 @@ fi
 ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
 
 Task:    [NN]; [name]
-Outputs: .research/tasks/task-[NN]/ ([N] files, verified)
-Guardrails: [N] findings resolved, [N] warnings noted
 Status:  [N]/[total] tasks complete
+
+Evidence ladder (report each rung with its actual value; never promote a rung):
+  Artifacts inspected:     [N] files under .research/tasks/task-[NN]/ read back; verifier
+                           receipt [task_complete | task_blocked | checkpoint] (read/ls only)
+  Prepared, not executed:  [list scripts, input decks, submission files, proposed experiments]
+  Executed computation:    [none | the exact commands the researcher or orchestrator actually
+                           ran in this session, with exit status and output paths]
+  Advisory checks:         physics [exit N | skipped], citations [exit N | skipped, offline?],
+                           scripts [exit N | skipped]; [N] findings resolved, [N] warnings noted
+  Scientific validation:   not performed by this workflow; the researcher owns physical,
+                           statistical and experimental validation of these outputs
 
 ───────────────────────────────────────────
 
@@ -275,7 +284,8 @@ Status:  [N]/[total] tasks complete
 - [ ] Dependency check completed
 - [ ] Gate confirmation always shown with assumptions listed
 - [ ] Task type correctly routed; web availability passed explicitly
-- [ ] Outputs verified on disk with ls and test -s before marking complete
+- [ ] Outputs read back on disk with ls and test -s before marking complete
+- [ ] Completion output states the evidence ladder honestly: inspected, prepared, executed, advisory, validation not performed
 - [ ] Guardrail findings surfaced to the researcher; nothing auto-removed
 - [ ] WORKFLOW.md and STATE.md updated
 - [ ] Checkpoint saved if auto_checkpoint; commit only if commit_research is true

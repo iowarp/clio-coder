@@ -16,7 +16,7 @@
 		"NOTICE",
 		"CHANGELOG.md",
 		"plugins/registry.yaml",
-		"plugins/materials-characterization/plugin.json"
+		"plugins/materio/plugin.json"
 	],
 	"requiredPrefixes": [
 		"dist/assets/grammars/",
