@@ -1165,6 +1165,7 @@ export async function createInteractiveApplication(deps: InteractiveDeps): Promi
 				if (
 					deps.chat.isStreaming() ||
 					deps.chat.turnPreparation().phase !== "idle" ||
+					deps.dispatch.snapshot().running.length > 0 ||
 					editorSubmit.hasActiveEditorBash() ||
 					operatorExtensions?.busy ||
 					queue.steer.length + queue.followUp.length > 0

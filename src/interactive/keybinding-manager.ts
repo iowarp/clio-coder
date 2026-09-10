@@ -484,7 +484,10 @@ function effectiveConflicts(inner: KeybindingsManager): KeybindingConflict[] {
 			([, ids]) =>
 				ids.length > 1 && ids.some((id, index) => ids.slice(index + 1).some((other) => scopesOverlap(id, other))),
 		)
-		.map(([key, keybindings]) => ({ key: key as KeyId, keybindings }));
+		.map(([key, keybindings]) => ({
+			key: key as KeyId,
+			keybindings: keybindings.filter((id) => keybindings.some((other) => other !== id && scopesOverlap(id, other))),
+		}));
 }
 
 function buildManager(

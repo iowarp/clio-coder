@@ -340,11 +340,7 @@ export class ClioEditor extends Editor {
 		);
 		if (openedPaste) this.bracketedPasteActive = true;
 		if (closedPaste) this.bracketedPasteActive = false;
-		if (
-			pasteMutation &&
-			this.getExpandedText().trimStart().startsWith("!") &&
-			!textAfterInput.trimStart().startsWith("!")
-		) {
+		if (pasteMutation && textAfterInput !== this.getExpandedText()) {
 			// A large paste is represented by an opaque visible token. Remember the
 			// inserted token through edits and undo, without depending on its format.
 			let start = 0;
@@ -361,7 +357,7 @@ export class ClioEditor extends Editor {
 				end--;
 			}
 			const token = textAfterInput.slice(start, end).trimStart();
-			if (token) this.pastedOperatorTokens.add(token);
+			if (token && !token.startsWith("!")) this.pastedOperatorTokens.add(token);
 		}
 	}
 

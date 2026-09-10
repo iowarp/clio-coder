@@ -229,3 +229,13 @@ it("undo restores a large pasted bang token as literal while a typed prefix rema
 	f.editor.handleInput("!typed ");
 	assert.ok(parseEditorBashCommand(f.editor.getTextForSubmit()));
 });
+it("keeps a large paste literal when deleting preceding typed text exposes its bang", () => {
+	const f = fixture();
+	f.editor.handleInput("x");
+	const pasted = `!echo ${"literal ".repeat(2000)}`;
+	f.editor.handleInput(`\x1b[200~${pasted}\x1b[201~`);
+	f.editor.handleInput("\x1b[H");
+	f.editor.applyEdit("deleteCharForward");
+	assert.equal(f.editor.getExpandedText(), pasted);
+	assert.equal(parseEditorBashCommand(f.editor.getTextForSubmit()), null);
+});

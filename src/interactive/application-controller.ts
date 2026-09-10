@@ -5,7 +5,7 @@ import { isEscapeKey, type OverlayState, overlayOwnsInput } from "./overlay-life
 
 export const APPLICATION_DOUBLE_TAP_MS = 500;
 
-const CLOSED_ACTION_ORDER = [
+export const CLOSED_ACTION_ORDER = [
 	"clio-coder.output.cycle",
 	"clio-coder.notifications.dismiss",
 	"clio-coder.editor.external",

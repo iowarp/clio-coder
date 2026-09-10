@@ -1,5 +1,6 @@
 import type { ExtensionCommandRow } from "../../domains/extensions/operator-commands.js";
 import type { OverlayHandle, TUI } from "../../engine/tui.js";
+import { CLOSED_ACTION_ORDER, GLOBAL_ACTION_ORDER } from "../application-controller.js";
 import type { ClioKeybindingManager } from "../keybinding-manager.js";
 import { commandReference, SLASH_COMMAND_GROUPS } from "../slash-commands.js";
 import { formatKeybindingDetailBodyLines } from "./keybinding-detail.js";
@@ -78,10 +79,14 @@ export function openHelpOverlay(
 						.platformWarnings()
 						.filter((w) => w.id === row.id)
 						.map((w) => `${w.keys.map(formatKey).join(" / ")} may not fire: ${w.reason}`);
-					for (const conflict of conflicts.filter((entry) => entry.keybindings.includes(row.id)))
-						warnings.push(
-							`${conflict.key}: ${conflict.keybindings.join(", ")}. Focus owner wins; composer history precedes application actions, then editing. For two app actions, use distinct keys.`,
+					for (const conflict of conflicts.filter((entry) => entry.keybindings.includes(row.id))) {
+						const appOrder = ["clio-coder.leader", ...CLOSED_ACTION_ORDER, ...GLOBAL_ACTION_ORDER].filter((id) =>
+							conflict.keybindings.includes(id),
 						);
+						warnings.push(
+							`${conflict.key}: ${conflict.keybindings.join(", ")}. Cancellation and the menu trigger take priority; outside the menu, the focused dialog owns input. Composer history precedes other application actions, then editing.${appOrder.length > 1 ? ` Composer app precedence: ${appOrder.join(" before ")}.` : ""}`,
+						);
+					}
 					const detailEntry = {
 						id: row.id,
 						keys: formattedKeys,
@@ -111,6 +116,18 @@ export function openHelpOverlay(
 	// from a registry; keep each detail consistent with the enforced behavior
 	// and with the live footer hints on the surface it documents.
 	const topics: ListOverlayItem[] = [
+		{
+			id: "topic-keyboard-migration",
+			label: "keyboard migration             Defaults, action menu, editing and explicit overrides",
+			group: "Topics",
+			detail: () => [
+				"# Keyboard migration",
+				"Default keys: Alt+L Library, Alt+M model, Shift+Tab effort, Ctrl+Q follow-up, Alt+Q recovery. Alt+B/D and Home/End now edit the composer.",
+				`The persistent action menu is ${manager.actionLabel("clio-coder.leader")}. Fixed suffixes work independently of direct key overrides; arrows and Enter reach every available entry.`,
+				"Existing configured action IDs are preserved. Explicit [] disables an action's direct and menu routes. This help lists your effective keys; settings are never rewritten.",
+				"Pasted slash and bang text remains literal until a deliberate submit. Ctrl+R searches the fullscreen transcript; Ctrl+C closes focused search or a dialog before cancelling other work.",
+			],
+		},
 		{
 			id: "topic-fleet-runs",
 			label: `${"fleet runs & steering".padEnd(30)}Inspect, guide, and cancel delegated workers`,

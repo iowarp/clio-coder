@@ -370,6 +370,9 @@ export function createInteractiveInputRuntime(deps: InteractiveInputRuntimeDeps)
 					owner().keyboardScope === "edit" ||
 					deps.overlay.getState() === "permission-confirm") &&
 				[
+					"undo",
+					"yank",
+					"yankPop",
 					"cursorLeft",
 					"cursorRight",
 					"cursorWordLeft",
